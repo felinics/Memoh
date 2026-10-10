@@ -78,7 +78,8 @@ func TestInstallationFromRow(t *testing.T) {
 		InstalledVersion: "0.151.0",
 		LatestVersion:    "0.152.0",
 		LastCheckedAt:    pgtype.Timestamptz{Time: checked, Valid: true},
-		LastError:        "boom",
+		LastError:        "legacy sentence",
+		LastErrorCode:    "workspace_dependency.busy",
 		ManifestDigest:   "sha256:abc",
 		CreatedAt:        pgtype.Timestamptz{Time: created, Valid: true},
 		UpdatedAt:        pgtype.Timestamptz{Time: updated, Valid: true},
@@ -95,7 +96,7 @@ func TestInstallationFromRow(t *testing.T) {
 	if got.Source != InstallationSourceManaged || got.Status != StatusInstalled {
 		t.Fatalf("source/status = %q/%q", got.Source, got.Status)
 	}
-	if got.InstalledVersion != "0.151.0" || got.LatestVersion != "0.152.0" || got.LastError != "boom" || got.ManifestDigest != "sha256:abc" {
+	if got.InstalledVersion != "0.151.0" || got.LatestVersion != "0.152.0" || got.LastError != "legacy sentence" || got.LastErrorCode != "workspace_dependency.busy" || got.ManifestDigest != "sha256:abc" {
 		t.Fatalf("scalar columns mismatch: %+v", got)
 	}
 	if got.LastCheckedAt == nil || !got.LastCheckedAt.Equal(checked) {
@@ -116,7 +117,7 @@ func TestObservedParamsNilLeavesColumnsUntouched(t *testing.T) {
 	params := observedParams(botID, testKey(), ObservedUpdate{})
 
 	if params.Source.Valid || params.InstalledVersion.Valid || params.LatestVersion.Valid ||
-		params.LastCheckedAt.Valid || params.LastError.Valid || params.ManifestDigest.Valid {
+		params.LastCheckedAt.Valid || params.LastError.Valid || params.LastErrorCode.Valid || params.ManifestDigest.Valid {
 		t.Fatalf("nil fields must become NULL parameters: %+v", params)
 	}
 	if params.BotID != botID || params.DependencyID != "codex" {
@@ -172,7 +173,7 @@ func TestPostgresStoreDistinguishesReadMissFromUnmatchedWrite(t *testing.T) {
 	if _, err := store.Get(ctx, testKey()); !errors.Is(err, ErrInstallationNotFound) {
 		t.Fatalf("Get error = %v, want ErrInstallationNotFound", err)
 	}
-	if _, err := store.SetStatus(ctx, testKey(), StatusFailed, "x"); !errors.Is(err, ErrBusy) {
+	if _, err := store.SetStatus(ctx, testKey(), StatusFailed, "workspace_dependency.busy"); !errors.Is(err, ErrBusy) {
 		t.Fatalf("SetStatus error = %v, want ErrBusy", err)
 	}
 	if _, err := store.UpdateObserved(ctx, testKey(), ObservedUpdate{}); !errors.Is(err, ErrBusy) {

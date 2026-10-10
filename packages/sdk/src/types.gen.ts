@@ -2743,7 +2743,15 @@ export type HandlersWorkspaceDependencyItem = {
      */
     installed_version?: string;
     last_checked_at?: string;
+    /**
+     * LastError is text recorded by earlier servers, including the script
+     * output they used to keep. A failure recorded now carries LastErrorCode.
+     */
     last_error?: string;
+    /**
+     * LastErrorCode is the catalog code of a recorded failure, which clients
+     * render as errors.<code>.
+     */
     last_error_code?: string;
     /**
      * LatestVersion is the last upstream check result, omitted until a check

@@ -18,6 +18,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
@@ -211,7 +212,7 @@ func (f *fakeStore) ClaimOperation(_ context.Context, in UpsertInstallation, ope
 		f.nextID++
 		rec = Installation{ID: "rec-" + strconv.Itoa(f.nextID), BotID: in.BotID, DependencyID: in.DependencyID, Source: in.Source, SourceURL: in.SourceURL, RegistryID: in.RegistryID, DefinitionRevision: in.DefinitionRevision, CreatedAt: f.now()}
 	}
-	rec.Status, rec.LastError, rec.OperationID = in.Status, "", operationID
+	rec.Status, rec.LastError, rec.LastErrorCode, rec.OperationID = in.Status, "", "", operationID
 	rec.UpdatedAt = f.now()
 	f.records[in.InstallationKey] = rec
 	f.writes++
@@ -262,7 +263,7 @@ func (f *fakeStore) Upsert(_ context.Context, in UpsertInstallation) (Installati
 	return rec, nil
 }
 
-func (f *fakeStore) SetStatus(_ context.Context, key InstallationKey, status Status, lastError string) (Installation, error) {
+func (f *fakeStore) SetStatus(_ context.Context, key InstallationKey, status Status, lastErrorCode string) (Installation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	rec, ok := f.records[key]
@@ -274,7 +275,7 @@ func (f *fakeStore) SetStatus(_ context.Context, key InstallationKey, status Sta
 	}
 	f.writes++
 	rec.Status = status
-	rec.LastError = lastError
+	rec.LastError, rec.LastErrorCode = "", lastErrorCode
 	rec.UpdatedAt = f.now()
 	f.records[key] = rec
 	f.history[key] = append(f.history[key], status)
@@ -307,6 +308,9 @@ func (f *fakeStore) UpdateObserved(_ context.Context, key InstallationKey, upd O
 	}
 	if upd.LastError != nil {
 		rec.LastError = *upd.LastError
+	}
+	if upd.LastErrorCode != nil {
+		rec.LastErrorCode = *upd.LastErrorCode
 	}
 	if upd.ManifestDigest != nil {
 		rec.ManifestDigest = *upd.ManifestDigest
@@ -1007,8 +1011,8 @@ func TestInstallFailureRecordsError(t *testing.T) {
 		t.Errorf("status history = %v", got)
 	}
 	rec, _ := f.store.get(f.key("tool-y"))
-	if !strings.Contains(rec.LastError, "boom") || len(rec.LastError) > lastErrorLimit {
-		t.Errorf("last_error = %d bytes %q", len(rec.LastError), rec.LastError[:40])
+	if rec.LastError != "" || rec.LastErrorCode != string(apperror.CodeWorkspaceDependencyOperationFailed) {
+		t.Errorf("failure record = %q/%q, want the operation-failed code and no text", rec.LastErrorCode, rec.LastError)
 	}
 	if _, err := os.Stat(StatePath(f.home("tool-y"))); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("state.json must not be written on failure (stat err = %v)", err)
@@ -1183,8 +1187,10 @@ func TestCancelledOperationRecordsFailure(t *testing.T) {
 	if !ok || rec.Status != StatusFailed {
 		t.Fatalf("record after cancelled install = %+v (found %v), want failed", rec, ok)
 	}
-	if !strings.HasPrefix(rec.LastError, cancelledMessagePrefix) || !strings.Contains(rec.LastError, "context canceled") {
-		t.Errorf("last_error = %q, want %q followed by the cause", rec.LastError, cancelledMessagePrefix)
+	// The row outlives the request that started it: what it records is that
+	// the operation was cut short, not that some caller went away.
+	if rec.LastError != "" || rec.LastErrorCode != string(apperror.CodeWorkspaceDependencyOperationInterrupted) {
+		t.Errorf("record = %q/%q, want the interrupted code and no text", rec.LastErrorCode, rec.LastError)
 	}
 	if got := f.store.statuses(f.key("tool-y")); !statusesEqual(got, StatusInstalling, StatusFailed) {
 		t.Errorf("status history = %v", got)
@@ -1291,7 +1297,7 @@ func TestListReclaimsInterruptedOperations(t *testing.T) {
 				t.Fatalf("entry status = %s, record status = %s, want %s", entry.Status, rec.Status, tc.want)
 			}
 			if tc.want == StatusFailed {
-				if rec.LastError != interruptedMessage || actionsOf(entry) != "install,remove" {
+				if rec.LastErrorCode != string(apperror.CodeWorkspaceDependencyOperationInterrupted) || actionsOf(entry) != "install,remove" {
 					t.Errorf("reclaimed record = %+v, actions = %s", rec, actionsOf(entry))
 				}
 				return
@@ -1329,7 +1335,7 @@ func TestListReclaimOnlyTrustsSnapshotsTakenAfterTheOperation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
-	if entry := f.entry(t, result, "tool-y"); entry.Status != StatusFailed || entry.Installation.LastError != interruptedMessage {
+	if entry := f.entry(t, result, "tool-y"); entry.Status != StatusFailed || entry.Installation.LastErrorCode != string(apperror.CodeWorkspaceDependencyOperationInterrupted) {
 		t.Errorf("entry after a fresh discovery = %+v, want interrupted → failed", entry)
 	}
 }
@@ -1770,7 +1776,7 @@ func TestCheckUpdates(t *testing.T) {
 		t.Fatalf("CheckUpdates: %v", err)
 	}
 	tool = f.entry(t, result, "tool-y")
-	if tool.Status != StatusInstalled || tool.LatestVersion != "1.2.0" || !strings.Contains(tool.Installation.LastError, "registry unreachable") || !tool.Installation.LastCheckedAt.Equal(f.now) {
+	if tool.Status != StatusInstalled || tool.LatestVersion != "1.2.0" || tool.Installation.LastErrorCode != string(apperror.CodeWorkspaceDependencyOperationFailed) || !tool.Installation.LastCheckedAt.Equal(f.now) {
 		t.Errorf("tool-y entry after failed check = %+v / %+v", tool, tool.Installation)
 	}
 

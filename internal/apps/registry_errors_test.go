@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"testing"
 
+	connectsdk "github.com/felinics/connect-it/sdk/go"
+
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/connectors"
 	"github.com/felinics/memoh/internal/supermarket"
 	"github.com/felinics/memoh/internal/workspacedeps"
 )
@@ -57,6 +61,10 @@ func TestPublicCodeClassifiesCausesWithoutTheirText(t *testing.T) {
 		{"dependencies service missing", ErrDependenciesUnavailable, apperror.CodeAppDependenciesUnavailable},
 		{"canceled", fmt.Errorf("step: %w", context.Canceled), apperror.CodeCanceled},
 		{"unknown", errors.New("bridge dial 10.0.0.8 password=secret"), apperror.CodeAppOperationFailed},
+		{"upstream rejected the request", &connectsdk.APIError{StatusCode: http.StatusBadRequest, Message: "payload rejected"}, apperror.CodeConnectorRequestRejected},
+		{"upstream missing object", &connectsdk.APIError{StatusCode: http.StatusNotFound, Message: "no such connection"}, apperror.CodeConnectorNotFound},
+		{"upstream failure", &connectsdk.APIError{StatusCode: http.StatusInternalServerError, Message: "500"}, apperror.CodeConnectorUpstreamUnavailable},
+		{"transport failure", fmt.Errorf("call connect-it: %w", connectors.ErrUpstreamUnavailable), apperror.CodeConnectorUpstreamUnavailable},
 	} {
 		if got := publicCode(tc.err); got != tc.want {
 			t.Errorf("%s: publicCode = %s, want %s", tc.name, got, tc.want)

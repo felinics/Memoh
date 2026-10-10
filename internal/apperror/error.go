@@ -56,6 +56,7 @@ const (
 	CodeWorkspaceDependencyWorkspaceMissing      Code = "workspace_dependency.workspace_missing"
 	CodeWorkspaceDependencyRollbackUnavailable   Code = "workspace_dependency.rollback_unavailable"
 	CodeWorkspaceDependencyOperationFailed       Code = "workspace_dependency.operation_failed"
+	CodeWorkspaceDependencyOperationInterrupted  Code = "workspace_dependency.operation_interrupted"
 	CodeProviderTemplateNotFound                 Code = "provider_template.not_found"
 	CodeProviderTemplateDomainInvalid            Code = "provider_template.domain_invalid"
 	CodeProviderTemplateDomainMismatch           Code = "provider_template.domain_mismatch"
@@ -610,6 +611,13 @@ var catalog = map[Code]Definition{
 	CodeWorkspaceDependencyOperationFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The dependency operation failed.",
+	},
+	// A Server that stopped, or a workspace that went away, cut the
+	// operation short: its outcome is unknown and the log is gone, so the
+	// user retries rather than reading a diagnosis that no longer exists.
+	CodeWorkspaceDependencyOperationInterrupted: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The operation was interrupted before it finished. Try it again.",
 	},
 	CodeProviderTemplateNotFound: {
 		HTTPStatus: http.StatusNotFound,

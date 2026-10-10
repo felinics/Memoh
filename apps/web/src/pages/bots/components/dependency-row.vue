@@ -31,6 +31,7 @@ import {
 import type { DependencyItem, DependencyWorkspaceState } from '@/composables/api/useWorkspaceDependencies'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import {
+  dependencyLastError,
   dependencyMenuActions,
   dependencyPlatformUnsupported,
   dependencyPrimaryAction,
@@ -72,7 +73,7 @@ const iconUrl = computed(() => dependencyIconUrl(props.item))
 const badge = computed(() => dependencyStatusBadge(props.item))
 const unsupported = computed(() => dependencyPlatformUnsupported(props.item))
 const failed = computed(() => props.item.status === 'failed')
-const lastError = computed(() => props.item.last_error?.trim() || (props.item.last_error_code ? t(`errors.${props.item.last_error_code}`) : ''))
+const lastError = computed(() => dependencyLastError(props.item, key => t(key)))
 const errorOpen = ref(false)
 
 const primary = computed(() => dependencyPrimaryAction(props.item, props.workspaceState, { ownsStream: props.ownsStream }))

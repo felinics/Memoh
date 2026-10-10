@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 
-	connectsdk "github.com/felinics/connect-it/sdk/go"
-
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/connectors"
 	"github.com/felinics/memoh/internal/workspacedeps"
@@ -47,9 +45,6 @@ var sentinelCodes = []struct {
 	{ErrDependenciesUnavailable, apperror.CodeAppDependenciesUnavailable},
 	{ErrNotInstalled, apperror.CodeAppNotFound},
 	{errDiscoveryFailed, apperror.CodeWorkspaceDependencyDiscoveryFailed},
-	{connectors.ErrInvalidInput, apperror.CodeConnectorRequestInvalid},
-	{connectors.ErrNotConfigured, apperror.CodeConnectorNotConfigured},
-	{connectors.ErrUpstreamUnavailable, apperror.CodeConnectorUpstreamUnavailable},
 	{workspacedeps.ErrDependencyNotFound, apperror.CodeWorkspaceDependencyNotFound},
 	{workspacedeps.ErrPlatformUnsupported, apperror.CodeWorkspaceDependencyPlatformUnsupported},
 	{workspacedeps.ErrBusy, apperror.CodeWorkspaceDependencyBusy},
@@ -75,10 +70,10 @@ func publicCode(err error) apperror.Code {
 			return s.code
 		}
 	}
-	var apiErr *connectsdk.APIError
+	if code := connectors.CodeOf(err); code != "" {
+		return code
+	}
 	switch {
-	case errors.As(err, &apiErr):
-		return apperror.CodeConnectorUpstreamUnavailable
 	case errors.Is(err, context.Canceled):
 		return apperror.CodeCanceled
 	case errors.Is(err, context.DeadlineExceeded):

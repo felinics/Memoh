@@ -53,10 +53,14 @@ type Installation struct {
 	InstalledVersion string
 	LatestVersion    string
 	LastCheckedAt    *time.Time
-	LastError        string
-	ManifestDigest   string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	// LastError is text written by earlier servers, and upstream output the
+	// scripts used to be recorded with. A failure recorded now carries
+	// LastErrorCode, the catalog code clients render as errors.<code>.
+	LastError      string
+	LastErrorCode  string
+	ManifestDigest string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // InstallationKey identifies a record; the pair is unique per team.
@@ -89,6 +93,7 @@ type ObservedUpdate struct {
 	LatestVersion      *string
 	LastCheckedAt      *time.Time
 	LastError          *string
+	LastErrorCode      *string
 	ManifestDigest     *string
 }
 
@@ -114,7 +119,9 @@ type Store interface {
 	// least olderThan, so the reaper can mark them failed.
 	ListStaleOperations(ctx context.Context, olderThan time.Duration) ([]Installation, error)
 	Upsert(ctx context.Context, in UpsertInstallation) (Installation, error)
-	SetStatus(ctx context.Context, key InstallationKey, status Status, lastError string) (Installation, error)
+	// SetStatus writes the failure's catalog code; the column that used to
+	// hold text is left empty.
+	SetStatus(ctx context.Context, key InstallationKey, status Status, lastErrorCode string) (Installation, error)
 	UpdateObserved(ctx context.Context, key InstallationKey, upd ObservedUpdate) (Installation, error)
 	Delete(ctx context.Context, key InstallationKey) error
 }

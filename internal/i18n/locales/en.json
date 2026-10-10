@@ -852,6 +852,7 @@
       "discovery_failed": "Workspace dependencies could not be inspected. Please try again.",
       "not_found": "This dependency doesn't exist.",
       "operation_failed": "The dependency operation failed. Check the log and try again.",
+      "operation_interrupted": "The operation was interrupted before it finished. Try it again.",
       "platform_unsupported": "Not available on this workspace platform.",
       "prerequisites_changed": "The dependencies this one needs changed after you confirmed. Review the operation again.",
       "request_invalid": "The dependency request is invalid. Check it and try again.",

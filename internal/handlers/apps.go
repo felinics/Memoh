@@ -654,8 +654,7 @@ func (*AppsHandler) httpError(err error) error {
 		errors.Is(err, workspacedeps.ErrDefinitionInvalid), errors.Is(err, workspacedeps.ErrDefinitionUnavailable):
 		return workspaceDependencyError(err)
 	default:
-		var apiErr *connectsdk.APIError
-		if errors.As(err, &apiErr) {
+		if connectors.CodeOf(err) != "" {
 			return connectorHTTPError(err)
 		}
 		return apperror.Wrap(apperror.CodeAppOperationFailed, err, nil)

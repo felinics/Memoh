@@ -479,7 +479,7 @@ func TestListWorkspaceDependenciesReportsDiscoveryError(t *testing.T) {
 			DiscoveryError: "workspacedeps: discovery script exited 137 before finishing",
 			Entries: []workspacedeps.Entry{{
 				Dependency:        deps["codex"],
-				Installation:      &workspacedeps.Installation{Status: workspacedeps.StatusFailed, LastError: "operation interrupted"},
+				Installation:      &workspacedeps.Installation{Status: workspacedeps.StatusFailed, LastErrorCode: string(apperror.CodeWorkspaceDependencyOperationInterrupted)},
 				Status:            workspacedeps.StatusFailed,
 				PlatformSupported: true,
 			}},
@@ -505,7 +505,7 @@ func TestListWorkspaceDependenciesReportsDiscoveryError(t *testing.T) {
 		t.Fatalf("items = %v", raw["items"])
 	}
 	codex := items[0].(map[string]any)
-	if codex["status"] != "failed" || codex["last_error_code"] != string(apperror.CodeWorkspaceDependencyOperationFailed) {
+	if codex["status"] != "failed" || codex["last_error_code"] != string(apperror.CodeWorkspaceDependencyOperationInterrupted) {
 		t.Errorf("codex = %v", codex)
 	}
 	if actions, _ := codex["actions"].([]any); actions == nil || len(actions) != 0 {
@@ -998,13 +998,25 @@ func TestWorkspaceDependencyMutationRejectsMalformedRevision(t *testing.T) {
 	}
 }
 
-func TestWorkspaceDependencyItemIncludesSanitizedErrorDetail(t *testing.T) {
+// TestWorkspaceDependencyItemReportsRecordedFailure covers both shapes of a
+// failed record: one written since failures store a catalog code carries the
+// code and no text, one written by an earlier server carries the text it
+// wrote, redacted, and no code.
+func TestWorkspaceDependencyItemReportsRecordedFailure(t *testing.T) {
 	item := workspaceDependencyItem(workspacedeps.Entry{
+		Dependency:   catalog.Dependency{ID: "codex"},
+		Installation: &workspacedeps.Installation{Status: workspacedeps.StatusFailed, LastError: "download failed: should not be sent", LastErrorCode: string(apperror.CodeWorkspaceDependencyBusy)},
+	}, "/data")
+	if item.LastErrorCode != string(apperror.CodeWorkspaceDependencyBusy) || item.LastError != "" {
+		t.Fatalf("recorded code = %+v, want the code alone", item)
+	}
+
+	legacy := workspaceDependencyItem(workspacedeps.Entry{
 		Dependency:   catalog.Dependency{ID: "codex"},
 		Installation: &workspacedeps.Installation{Status: workspacedeps.StatusFailed, LastError: "download failed: https://user:pass@mirror.test/release?token=private"},
 	}, "/data")
-	if item.LastErrorCode == "" || !strings.Contains(item.LastError, "download failed") || strings.Contains(item.LastError, "user:pass") || strings.Contains(item.LastError, "private") {
-		t.Fatalf("error detail=%+v", item)
+	if legacy.LastErrorCode != "" || !strings.Contains(legacy.LastError, "download failed") || strings.Contains(legacy.LastError, "user:pass") || strings.Contains(legacy.LastError, "private") {
+		t.Fatalf("legacy detail=%+v", legacy)
 	}
 }
 

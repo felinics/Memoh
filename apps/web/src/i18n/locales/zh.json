@@ -481,6 +481,7 @@
       "discovery_failed": "暂时无法检查工作区依赖，请重试。",
       "not_found": "该依赖不存在。",
       "operation_failed": "依赖操作失败，请查看日志后重试。",
+      "operation_interrupted": "操作未完成就被中断了，请重新执行。",
       "platform_unsupported": "当前工作区平台不支持该依赖。",
       "prerequisites_changed": "确认后，它所需的前置依赖发生了变化，请重新确认此操作。",
       "request_invalid": "依赖请求无效，请检查后重试。",

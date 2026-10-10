@@ -270,6 +270,7 @@ workspace_dependency.definition_unavailable	503
 workspace_dependency.discovery_failed	503
 workspace_dependency.not_found	404
 workspace_dependency.operation_failed	500
+workspace_dependency.operation_interrupted	500
 workspace_dependency.platform_unsupported	422
 workspace_dependency.prerequisites_changed	409
 workspace_dependency.request_invalid	400

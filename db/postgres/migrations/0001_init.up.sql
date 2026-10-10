@@ -2848,6 +2848,7 @@ CREATE TABLE IF NOT EXISTS public.bot_dependency_installations (
     latest_version      TEXT        NOT NULL DEFAULT '',
     last_checked_at     TIMESTAMPTZ,
     last_error          TEXT        NOT NULL DEFAULT '',
+    last_error_code     TEXT        NOT NULL DEFAULT '',
     manifest_digest     TEXT        NOT NULL DEFAULT '',
     source_url          TEXT        NOT NULL DEFAULT '',
     registry_id         TEXT        NOT NULL DEFAULT '',

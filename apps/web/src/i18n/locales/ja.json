@@ -478,6 +478,7 @@
       "discovery_failed": "Workspace の依存関係を確認できませんでした。再試行してください。",
       "not_found": "この依存関係は存在しません。",
       "operation_failed": "依存関係の操作に失敗しました。ログを確認して、もう一度お試しください。",
+      "operation_interrupted": "操作は完了前に中断されました。もう一度実行してください。",
       "platform_unsupported": "この Workspace のプラットフォームでは利用できません。",
       "prerequisites_changed": "確認後に、この依存関係が必要とする前提依存関係が変更されました。操作をもう一度確認してください。",
       "request_invalid": "依存関係のリクエストが無効です。内容を確認して、もう一度お試しください。",
