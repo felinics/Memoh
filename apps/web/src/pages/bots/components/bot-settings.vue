@@ -625,6 +625,9 @@ function handleBackupImported(botId: string) {
 async function handleDeleteBot() {
   try {
     await deleteBot()
+    // Move the chat selection off the deleted bot before leaving; otherwise
+    // the persistent chat pane keeps talking to it and "back to chat" lands on it.
+    void chatStore.refreshBots().catch(() => {})
     await router.push({ name: 'bots' })
     toast.success(t('bots.deleteSuccess'))
   } catch (error) {
