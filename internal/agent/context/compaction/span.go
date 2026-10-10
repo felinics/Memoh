@@ -300,10 +300,10 @@ func retrySpan(span []CompactionCandidate, floor int) []CompactionCandidate {
 
 // closeRun extends the claimable prefix items[:n] — what the recent tail
 // leaves — over the rest of its run when a barrier or a gap closes that rest
-// below floor: left raw, it would stay alone between this claim and the
-// barrier for good once the tail moves past it. A rest that reaches the end
-// of the window may still grow and stays; rows held with the current task are
-// never claimed either way.
+// below floor of rows not already proved ineffective: left raw, it would stay
+// alone between this claim and the barrier for good once the tail moves past
+// it. A rest that reaches the end of the window may still grow and stays;
+// rows held with the current task are never claimed either way.
 func closeRun(items []CompactionCandidate, n, floor int) int {
 	if n == 0 || n >= len(items) || items[n].GapBefore {
 		return n
@@ -318,7 +318,10 @@ func closeRun(items []CompactionCandidate, n, floor int) int {
 		if kind != groupMarkable {
 			return n + group[0]
 		}
-		if cost += c; cost >= floor {
+		if !provedIneffective(rest, group) {
+			cost += c
+		}
+		if cost >= floor {
 			return n
 		}
 	}

@@ -1055,3 +1055,33 @@ func TestCompactionRetryNeverStrandsARemainderBelowTheFloor(t *testing.T) {
 		t.Fatal("the retry left a row below the floor behind; it can never be claimed alone")
 	}
 }
+
+func TestCompactionStaleIneffectiveSummaryDoesNotArmTheCooldown(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore(prose(t, "user", "VERBOSE question", 300, 100), prose(t, "assistant", "VERBOSE answer", 300, 100), reasoningOnlyRow(t), prose(t, "user", "FIRST", 10, 10))
+	stub := &stubModel{summary: summaryOfTokens(t, 100), verbose: "VERBOSE"}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	cfg := machineryConfig(stub, 50)
+	cfg.HardPressure = true
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); !errors.Is(err, ErrIneffectiveSummary) {
+		t.Fatalf("first pass = %v, want a summary that does not shrink", err)
+	}
+	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusNoop {
+		t.Fatalf("second pass = %+v, %v; want nothing else to claim", res, err)
+	}
+	// Hours later, one refusal must not count as the second failure in a row.
+	clock = clock.Add(3 * time.Hour)
+	q.append(prose(t, "user", "REFUSED question", 300, 100), prose(t, "assistant", "REFUSED answer", 300, 100), reasoningOnlyRow(t),
+		prose(t, "user", "LATER question", 300, 100), prose(t, "assistant", "LATER answer", 300, 100), prose(t, "user", "CURRENT", 10, 10))
+	stub.refuse = "REFUSED"
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); !errors.Is(err, ErrIneffectiveSummary) {
+		t.Fatalf("refused pass = %v, want the refusal recorded", err)
+	}
+	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
+		t.Fatalf("next pass = %+v, %v; want the later span committed without a cooldown", res, err)
+	}
+}

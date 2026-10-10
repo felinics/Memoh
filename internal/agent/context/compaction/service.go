@@ -87,9 +87,9 @@ type Service struct {
 	inflightMu sync.Mutex
 	inflight   map[string]*inflightRun
 	failedAt   map[string]compactionFailure
-	// ineffective marks sessions whose last pass ended in an ineffective
-	// summary; a second one in a row arms the cooldown.
-	ineffective map[string]bool
+	// ineffective records when a session's last pass ended in an ineffective
+	// summary; a second one in a row, within the cooldown, arms it.
+	ineffective map[string]time.Time
 }
 
 // compactionFailure tracks one session's most recent failure and how many
@@ -107,7 +107,7 @@ func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 		nowFn:       time.Now,
 		inflight:    make(map[string]*inflightRun),
 		failedAt:    make(map[string]compactionFailure),
-		ineffective: make(map[string]bool),
+		ineffective: make(map[string]time.Time),
 	}
 }
 
@@ -204,13 +204,14 @@ func (s *Service) clearCompactionFailure(sessionID string, committed bool) {
 }
 
 // recordIneffective reports whether the session's previous pass also ended
-// in an ineffective summary.
+// in an ineffective summary, recently enough that the two make a run.
 func (s *Service) recordIneffective(sessionID string) bool {
 	s.inflightMu.Lock()
 	defer s.inflightMu.Unlock()
-	repeated := s.ineffective[sessionID]
-	s.ineffective[sessionID] = true
-	return repeated
+	now := s.nowFn()
+	last, repeated := s.ineffective[sessionID]
+	s.ineffective[sessionID] = now
+	return repeated && now.Sub(last) < compactionFailureCooldown
 }
 
 func (s *Service) SetHookService(h *hooks.Service) {

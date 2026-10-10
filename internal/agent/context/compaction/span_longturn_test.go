@@ -700,3 +700,70 @@ func TestCompactionTruncatedWindowKeepsTheTaskBehindAScreenshot(t *testing.T) {
 	}
 	assertClaimsContiguous(t, q)
 }
+
+func TestCloseRunClaimsARestItsBoundLeavesBelowTheFloor(t *testing.T) {
+	t.Parallel()
+
+	head := prose(t, "user", "HEAD", 400, 100)
+	rest := prose(t, "assistant", "REST", 300, 100)
+	for name, tc := range map[string]struct {
+		next  sqlc.ListUncompactedMessagesBySessionRow
+		gap   bool
+		proof bool
+	}{
+		"barrier":         {next: reasoningOnlyRow(t)},
+		"gap":             {next: prose(t, "user", "AFTER", 300, 100), gap: true},
+		"proved, barrier": {next: reasoningOnlyRow(t), proof: true},
+	} {
+		items, _ := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{head, rest, tc.next})
+		items[2].GapBefore = tc.gap
+		items[1].IneffectiveClaim = tc.proof
+		floor := minCompactionSpanTokens
+		if !tc.proof {
+			floor = 400
+		}
+		if end := closeRun(items, 1, floor); end != 2 {
+			t.Errorf("%s: claim ends at %d, want the rest below the floor claimed along", name, end)
+		}
+	}
+}
+
+func TestCompactionTurnStartingTheHistoryKeepsItsJoint(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore()
+	task, steps := longTurn(t, q, 40)
+	stub := &stubModel{summary: "steps condensed"}
+	res, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 2000))
+	if err != nil || res.Status != StatusOK {
+		t.Fatalf("result = %+v, %v; want the turn's older steps committed", res, err)
+	}
+	marked := markedSet(q)
+	if marked[task.ID] || marked[steps[0].ID] || marked[steps[1].ID] {
+		t.Fatalf("claimed task=%v first steps=%v,%v: the current task and its joint stay raw", marked[task.ID], marked[steps[0].ID], marked[steps[1].ID])
+	}
+	assertClaimsContiguous(t, q)
+}
+
+func TestCompactionTurnStartingTheHistoryLeavesNoStepAloneBeforeABarrier(t *testing.T) {
+	t.Parallel()
+
+	// The recent tail starts at a small step that a reasoning-only row closes
+	// below the floor: left behind, it would stay raw between this claim and
+	// the barrier for good.
+	q := newSessionStore()
+	_, steps := longTurn(t, q, 10)
+	steps[len(steps)-1].Usage = []byte(`{"outputTokens":1000}`)
+	q.history[len(q.history)-1] = steps[len(steps)-1]
+	small := prose(t, "assistant", "SMALL", 30, 30)
+	q.append(small, reasoningOnlyRow(t), prose(t, "assistant", "DONE", 30, 1500))
+	stub := &stubModel{summary: "steps condensed"}
+	res, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 2000))
+	if err != nil || res.Status != StatusOK {
+		t.Fatalf("result = %+v, %v; want the turn's older steps committed", res, err)
+	}
+	if !markedSet(q)[small.ID] {
+		t.Fatal("the small step in front of the barrier was left alone behind the claim")
+	}
+	assertClaimsContiguous(t, q)
+}
