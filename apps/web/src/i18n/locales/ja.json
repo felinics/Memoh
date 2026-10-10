@@ -1732,7 +1732,17 @@
   },
   "chatExamples": {
     "noBot": "試すには、まず Bot を作成してください。",
-    "createBot": "Bot を作成"
+    "createBot": "Bot を作成",
+    "needs": "{capability}が必要",
+    "capability": {
+      "web_search": "Web 検索",
+      "memory": "長期記憶",
+      "email": "メール",
+      "workspace": "Workspace",
+      "browser": "ブラウザ",
+      "schedule": "スケジュール",
+      "channel": "チャンネル"
+    }
   },
   "models": {
     "title": "モデル",
@@ -4019,23 +4029,10 @@
       "title": "準備完了です",
       "subtitle": "Memohを開いて最初の会話を始めてください",
       "action": "Memohを開く",
-      "cards": {
-        "im": {
-          "title": "IMチャンネル",
-          "desc": "Botを Telegram などに展開します"
-        },
-        "voice": {
-          "title": "ボイスチャット",
-          "desc": "TTSとSTTでBotに音声機能を追加します"
-        },
-        "search": {
-          "title": "ウェブ検索",
-          "desc": "検索エンジンを接続してリアルタイム情報を入手"
-        }
-      },
       "saveFailed": "保存できませんでした。もう一度お試しください。",
       "navigationFailed": "Bot を開けませんでした。もう一度お試しください。",
-      "noModelWarning": "Bot のモデルが選択されていないため、まだ応答できません。後で Bot の設定から構成できます。"
+      "noModelWarning": "Bot のモデルが選択されていないため、まだ応答できません。後で Bot の設定から構成できます。",
+      "examplesHint": "例から始めることもできます"
     }
   },
   "deviceCode": {

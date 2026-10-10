@@ -1763,7 +1763,17 @@
   },
   "chatExamples": {
     "noBot": "Create a bot first to try this.",
-    "createBot": "Create bot"
+    "createBot": "Create bot",
+    "needs": "Needs {capability}",
+    "capability": {
+      "web_search": "web search",
+      "memory": "memory",
+      "email": "email",
+      "workspace": "a workspace",
+      "browser": "the browser",
+      "schedule": "schedules",
+      "channel": "a channel"
+    }
   },
   "models": {
     "title": "Models",
@@ -4025,23 +4035,10 @@
       "title": "You're All Set",
       "subtitle": "Open Memoh and start your first conversation",
       "action": "Open Memoh",
-      "cards": {
-        "im": {
-          "title": "IM channels",
-          "desc": "Deploy your bot to Telegram and beyond"
-        },
-        "voice": {
-          "title": "Voice chat",
-          "desc": "TTS and STT give your bot a voice"
-        },
-        "search": {
-          "title": "Web search",
-          "desc": "Plug in search engines for real-time info"
-        }
-      },
       "saveFailed": "Failed to save, please try again",
       "navigationFailed": "Couldn't open your bot. Please try again.",
-      "noModelWarning": "No model is selected for this bot, so it cannot reply yet. You can configure one later in Bot Settings."
+      "noModelWarning": "No model is selected for this bot, so it cannot reply yet. You can configure one later in Bot Settings.",
+      "examplesHint": "Or start with one of these"
     }
   },
   "deviceCode": {

@@ -1763,7 +1763,17 @@
   },
   "chatExamples": {
     "noBot": "请先创建一个 Bot 再试试。",
-    "createBot": "创建 Bot"
+    "createBot": "创建 Bot",
+    "needs": "需要{capability}",
+    "capability": {
+      "web_search": "网页搜索",
+      "memory": "长期记忆",
+      "email": "邮件",
+      "workspace": "工作区",
+      "browser": "浏览器",
+      "schedule": "定时任务",
+      "channel": "渠道"
+    }
   },
   "models": {
     "title": "模型",
@@ -4025,23 +4035,10 @@
       "title": "一切就绪",
       "subtitle": "进入 Memoh，开始你的第一段对话",
       "action": "打开 Memoh",
-      "cards": {
-        "im": {
-          "title": "IM 接入",
-          "desc": "把 Bot 部署到 Telegram 等渠道"
-        },
-        "voice": {
-          "title": "语音对话",
-          "desc": "语音合成与转写让 Bot 开口"
-        },
-        "search": {
-          "title": "网络搜索",
-          "desc": "接入搜索引擎，让 Bot 获取实时信息"
-        }
-      },
       "saveFailed": "保存失败，请重试",
       "navigationFailed": "无法打开 Bot，请重试。",
-      "noModelWarning": "尚未为 Bot 选择模型，Bot 将无法回复消息。你可以稍后在 Bot 设置中配置。"
+      "noModelWarning": "尚未为 Bot 选择模型，Bot 将无法回复消息。你可以稍后在 Bot 设置中配置。",
+      "examplesHint": "也可以从一个示例开始"
     }
   },
   "deviceCode": {
