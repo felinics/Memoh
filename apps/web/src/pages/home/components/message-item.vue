@@ -254,6 +254,7 @@
                   :mermaid-props="{ showTooltips: false }"
                   :code-block-dark-theme="codeBlockTheme.dark"
                   :code-block-light-theme="codeBlockTheme.light"
+                  :custom-markdown-it="withoutFuzzyLinks"
                   custom-id="chat-msg"
                 />
               </div>
@@ -363,7 +364,7 @@
 <script lang="ts">
 import { setCustomComponents } from 'markstream-vue'
 import ChatCodeBlock from './chat-code-block.vue'
-import { registerSharedMarkdownComponents } from '@/components/markdown'
+import { registerSharedMarkdownComponents, withoutFuzzyLinks } from '@/components/markdown'
 import ThemedMermaidBlock from '@/components/themed-mermaid-block/index.vue'
 
 // Scope the chat renderer ("chat-msg"): replace markstream's heavy Monaco code
