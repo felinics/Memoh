@@ -299,6 +299,7 @@ import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { resolveBotWorkspaceBackend } from '@/utils/bot-workspace'
 import { formatMetricBytes, formatMetricPercent } from '@/utils/format-bytes'
 import { formatDateTime } from '@/utils/date-time'
+import { buildDayMap, cacheHitRate, formatCacheHitRate } from '@/pages/usage/cache-usage'
 
 use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent])
 
@@ -629,14 +630,6 @@ const { data: tokenUsage, isLoading: usageLoading } = useQuery({
   enabled: () => !!botId.value,
 })
 
-function buildDayMap(rows: HandlersDailyTokenUsage[] | undefined) {
-  const map = new Map<string, HandlersDailyTokenUsage>()
-  for (const r of rows ?? []) {
-    if (r.day) map.set(r.day, r)
-  }
-  return map
-}
-
 const dayMaps = computed(() => ({
   chat: buildDayMap(tokenUsage.value?.chat),
   schedule: buildDayMap(tokenUsage.value?.schedule),
@@ -646,17 +639,17 @@ const usageTotals = computed(() => {
   const maps = dayMaps.value
   let input = 0
   let output = 0
-  let cacheRead = 0
+  const rows: HandlersDailyTokenUsage[] = []
   for (const day of usageDays.value) {
     for (const tp of ['chat', 'schedule'] as const) {
       const r = maps[tp].get(day)
       if (!r) continue
+      rows.push(r)
       input += r.input_tokens ?? 0
       output += r.output_tokens ?? 0
-      cacheRead += r.cache_read_tokens ?? 0
     }
   }
-  return { input, output, total: input + output, cacheRead }
+  return { input, output, total: input + output, cacheHitRate: cacheHitRate(rows) }
 })
 
 const hasUsage = computed(() => usageTotals.value.total > 0)
@@ -669,7 +662,7 @@ function formatNumber(n: number): string {
 
 const usageStats = computed(() => {
   const u = usageTotals.value
-  const rate = u.input > 0 ? `${Math.round((u.cacheRead / u.input) * 100)}%` : '—'
+  const rate = formatCacheHitRate(u.cacheHitRate)
   return [
     { key: 'total', label: t('bots.overview.usageTotal'), value: formatNumber(u.total) },
     { key: 'input', label: t('bots.overview.usageInput'), value: formatNumber(u.input) },

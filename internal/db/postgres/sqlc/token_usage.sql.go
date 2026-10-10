@@ -90,6 +90,7 @@ SELECT
   COALESCE(SUM((mu.usage->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
   COALESCE(SUM((mu.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens,
   COALESCE(SUM((mu.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens,
+  COALESCE(BOOL_AND(COALESCE(mu.usage->'cacheReadTokensReported' = 'true'::jsonb, false)), false)::boolean AS cache_read_tokens_reported,
   COALESCE(SUM((mu.usage->'outputTokenDetails'->>'reasoningTokens')::bigint), 0)::bigint AS reasoning_tokens
 FROM bot_memory_usage mu
 WHERE mu.team_id = public.memoh_current_team_id() AND mu.bot_id = $1
@@ -108,11 +109,12 @@ type GetMemoryTokenUsageByDayParams struct {
 }
 
 type GetMemoryTokenUsageByDayRow struct {
-	Day             pgtype.Date `json:"day"`
-	InputTokens     int64       `json:"input_tokens"`
-	OutputTokens    int64       `json:"output_tokens"`
-	CacheReadTokens int64       `json:"cache_read_tokens"`
-	ReasoningTokens int64       `json:"reasoning_tokens"`
+	Day                     pgtype.Date `json:"day"`
+	InputTokens             int64       `json:"input_tokens"`
+	OutputTokens            int64       `json:"output_tokens"`
+	CacheReadTokens         int64       `json:"cache_read_tokens"`
+	CacheReadTokensReported bool        `json:"cache_read_tokens_reported"`
+	ReasoningTokens         int64       `json:"reasoning_tokens"`
 }
 
 func (q *Queries) GetMemoryTokenUsageByDay(ctx context.Context, arg GetMemoryTokenUsageByDayParams) ([]GetMemoryTokenUsageByDayRow, error) {
@@ -134,6 +136,7 @@ func (q *Queries) GetMemoryTokenUsageByDay(ctx context.Context, arg GetMemoryTok
 			&i.InputTokens,
 			&i.OutputTokens,
 			&i.CacheReadTokens,
+			&i.CacheReadTokensReported,
 			&i.ReasoningTokens,
 		); err != nil {
 			return nil, err
@@ -232,6 +235,7 @@ SELECT
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
   COALESCE(SUM((m.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens,
   COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens,
+  COALESCE(BOOL_AND(COALESCE(m.usage->'cacheReadTokensReported' = 'true'::jsonb, false)), false)::boolean AS cache_read_tokens_reported,
   COALESCE(SUM((m.usage->'outputTokenDetails'->>'reasoningTokens')::bigint), 0)::bigint AS reasoning_tokens
 FROM bot_history_messages m
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
@@ -282,12 +286,13 @@ type GetTokenUsageByDayAndTypeParams struct {
 }
 
 type GetTokenUsageByDayAndTypeRow struct {
-	SessionType     string      `json:"session_type"`
-	Day             pgtype.Date `json:"day"`
-	InputTokens     int64       `json:"input_tokens"`
-	OutputTokens    int64       `json:"output_tokens"`
-	CacheReadTokens int64       `json:"cache_read_tokens"`
-	ReasoningTokens int64       `json:"reasoning_tokens"`
+	SessionType             string      `json:"session_type"`
+	Day                     pgtype.Date `json:"day"`
+	InputTokens             int64       `json:"input_tokens"`
+	OutputTokens            int64       `json:"output_tokens"`
+	CacheReadTokens         int64       `json:"cache_read_tokens"`
+	CacheReadTokensReported bool        `json:"cache_read_tokens_reported"`
+	ReasoningTokens         int64       `json:"reasoning_tokens"`
 }
 
 func (q *Queries) GetTokenUsageByDayAndType(ctx context.Context, arg GetTokenUsageByDayAndTypeParams) ([]GetTokenUsageByDayAndTypeRow, error) {
@@ -311,6 +316,7 @@ func (q *Queries) GetTokenUsageByDayAndType(ctx context.Context, arg GetTokenUsa
 			&i.InputTokens,
 			&i.OutputTokens,
 			&i.CacheReadTokens,
+			&i.CacheReadTokensReported,
 			&i.ReasoningTokens,
 		); err != nil {
 			return nil, err
@@ -421,7 +427,7 @@ func (q *Queries) GetTokenUsageByModel(ctx context.Context, arg GetTokenUsageByM
 }
 
 const listTokenUsageRecords = `-- name: ListTokenUsageRecords :many
-SELECT id, created_at, session_id, harness, session_type, model_id, model_slug, model_name, provider_name, input_tokens, output_tokens, cache_read_tokens, reasoning_tokens FROM (
+SELECT id, created_at, session_id, harness, session_type, model_id, model_slug, model_name, provider_name, input_tokens, output_tokens, cache_read_tokens, cache_read_tokens_reported, reasoning_tokens FROM (
   SELECT
     m.id,
     m.created_at,
@@ -454,6 +460,7 @@ SELECT id, created_at, session_id, harness, session_type, model_id, model_slug, 
     COALESCE((m.usage->>'inputTokens')::bigint, 0)::bigint AS input_tokens,
     COALESCE((m.usage->>'outputTokens')::bigint, 0)::bigint AS output_tokens,
     COALESCE((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint, 0)::bigint AS cache_read_tokens,
+    COALESCE(m.usage->'cacheReadTokensReported' = 'true'::jsonb, false)::boolean AS cache_read_tokens_reported,
     COALESCE((m.usage->'outputTokenDetails'->>'reasoningTokens')::bigint, 0)::bigint AS reasoning_tokens
   FROM bot_history_messages m
   LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
@@ -507,6 +514,7 @@ SELECT id, created_at, session_id, harness, session_type, model_id, model_slug, 
     COALESCE((mu.usage->>'inputTokens')::bigint, 0)::bigint AS input_tokens,
     COALESCE((mu.usage->>'outputTokens')::bigint, 0)::bigint AS output_tokens,
     COALESCE((mu.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint, 0)::bigint AS cache_read_tokens,
+    COALESCE(mu.usage->'cacheReadTokensReported' = 'true'::jsonb, false)::boolean AS cache_read_tokens_reported,
     COALESCE((mu.usage->'outputTokenDetails'->>'reasoningTokens')::bigint, 0)::bigint AS reasoning_tokens
   FROM bot_memory_usage mu
   LEFT JOIN models mo ON mo.id = mu.model_id AND mo.team_id = public.memoh_current_team_id()
@@ -533,19 +541,20 @@ type ListTokenUsageRecordsParams struct {
 }
 
 type ListTokenUsageRecordsRow struct {
-	ID              pgtype.UUID        `json:"id"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	SessionID       pgtype.UUID        `json:"session_id"`
-	Harness         string             `json:"harness"`
-	SessionType     string             `json:"session_type"`
-	ModelID         pgtype.UUID        `json:"model_id"`
-	ModelSlug       string             `json:"model_slug"`
-	ModelName       string             `json:"model_name"`
-	ProviderName    string             `json:"provider_name"`
-	InputTokens     int64              `json:"input_tokens"`
-	OutputTokens    int64              `json:"output_tokens"`
-	CacheReadTokens int64              `json:"cache_read_tokens"`
-	ReasoningTokens int64              `json:"reasoning_tokens"`
+	ID                      pgtype.UUID        `json:"id"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	Harness                 string             `json:"harness"`
+	SessionType             string             `json:"session_type"`
+	ModelID                 pgtype.UUID        `json:"model_id"`
+	ModelSlug               string             `json:"model_slug"`
+	ModelName               string             `json:"model_name"`
+	ProviderName            string             `json:"provider_name"`
+	InputTokens             int64              `json:"input_tokens"`
+	OutputTokens            int64              `json:"output_tokens"`
+	CacheReadTokens         int64              `json:"cache_read_tokens"`
+	CacheReadTokensReported bool               `json:"cache_read_tokens_reported"`
+	ReasoningTokens         int64              `json:"reasoning_tokens"`
 }
 
 // Memory LLM calls (bot_memory_usage) are not chat messages; they join the
@@ -580,6 +589,7 @@ func (q *Queries) ListTokenUsageRecords(ctx context.Context, arg ListTokenUsageR
 			&i.InputTokens,
 			&i.OutputTokens,
 			&i.CacheReadTokens,
+			&i.CacheReadTokensReported,
 			&i.ReasoningTokens,
 		); err != nil {
 			return nil, err

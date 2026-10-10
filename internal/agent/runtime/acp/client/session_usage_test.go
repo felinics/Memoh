@@ -61,6 +61,37 @@ func TestAttachUsageToLastAssistant(t *testing.T) {
 	}
 }
 
+func TestPromptUsageFromACPPreservesCacheReporting(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		read *int
+	}{
+		{name: "absent"},
+		{name: "zero", read: acp.Ptr(0)},
+		{name: "positive", read: acp.Ptr(3)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			usage := promptUsageFromACP(&acp.Usage{InputTokens: 10, OutputTokens: 7, TotalTokens: 17, CachedReadTokens: tt.read})
+			output := attachUsageToLastAssistant([]sdk.Message{{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.TextPart{Text: "ok"}}}}, usage)
+			stored := messageconv.SDKMessagesToModelMessages(output)
+			var got sdk.Usage
+			if err := json.Unmarshal(stored[0].Usage, &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.CacheReadTokensReported != (tt.read != nil) {
+				t.Fatalf("cache reporting lost: %s", stored[0].Usage)
+			}
+			wantRead := 0
+			if tt.read != nil {
+				wantRead = *tt.read
+			}
+			if got.InputTokens != 10 || got.OutputTokens != 7 || got.TotalTokens != 17 || got.InputTokenDetails.CacheReadTokens != wantRead {
+				t.Fatalf("usage lost: %+v", got)
+			}
+		})
+	}
+}
+
 // claude-agent-acp reports inputTokens without the cache counters and counts
 // them in totalTokens. The #1374 sample must reach history as total input.
 func TestPromptStoresACPCacheInsideInput(t *testing.T) {
@@ -99,7 +130,7 @@ func TestPromptStoresACPCacheInsideInput(t *testing.T) {
 	if err := json.Unmarshal(stored[0], &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.InputTokens != 1239125 || got.OutputTokens != 500 || got.TotalTokens != 1239625 ||
+	if got.InputTokens != 1239125 || got.OutputTokens != 500 || got.TotalTokens != 1239625 || !got.CacheReadTokensReported ||
 		got.InputTokenDetails.NoCacheTokens != 109845 || got.InputTokenDetails.CacheReadTokens != 1129280 || got.CachedInputTokens != 1129280 {
 		t.Fatalf("stored usage = %s", stored[0])
 	}
@@ -112,22 +143,31 @@ func TestPromptUsageFromACPKeepsCacheWithinInput(t *testing.T) {
 	for _, tt := range []struct {
 		name                 string
 		input, output, total int
-		read, write          int
+		read, write, thought int
 		wantInput            int
 		wantNoCache          int
+		wantTotal            int
+		wantReported         bool
 	}{
-		{name: "cache beside input", input: 10, output: 7, total: 317, read: 200, write: 100, wantInput: 310, wantNoCache: 10},
-		{name: "cache beside larger input", input: 1000, output: 100, total: 1400, read: 300, wantInput: 1300, wantNoCache: 1000},
-		{name: "cache within input", input: 310, output: 7, total: 317, read: 200, write: 100, wantInput: 310, wantNoCache: 10},
-		{name: "cache larger than input", input: 10, output: 7, total: 17, read: 200, wantInput: 210, wantNoCache: 10},
+		{name: "cache beside input", input: 10, output: 7, total: 317, read: 200, write: 100, wantInput: 310, wantNoCache: 10, wantReported: true},
+		{name: "cache beside larger input", input: 1000, output: 100, total: 1400, read: 300, wantInput: 1300, wantNoCache: 1000, wantReported: true},
+		{name: "codex-acp cached read", input: 1500, output: 450, total: 2450, read: 500, wantInput: 2000, wantNoCache: 1500, wantReported: true},
+		{name: "opencode thought in total", input: 1000, output: 7, thought: 33, total: 1240, read: 200, wantInput: 1200, wantNoCache: 1000, wantReported: true},
+		{name: "cache within input", input: 310, output: 7, total: 317, read: 200, write: 100, wantInput: 310, wantNoCache: 10, wantReported: true},
+		{name: "cache larger than input", input: 10, output: 7, total: 17, read: 200, wantInput: 210, wantNoCache: 10, wantTotal: 217, wantReported: true},
+		{name: "cache larger than input, total fits neither", input: 10, output: 7, total: 50, read: 200, wantInput: 210, wantNoCache: 10, wantTotal: 217, wantReported: true},
 		{name: "total fits neither accounting", input: 310, output: 7, total: 400, read: 200, wantInput: 310, wantNoCache: 110},
-		{name: "no cache", input: 10, output: 7, total: 17, wantInput: 10, wantNoCache: 10},
+		{name: "no cache", input: 10, output: 7, total: 17, wantInput: 10, wantNoCache: 10, wantReported: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got := promptUsageFromACP(&acp.Usage{InputTokens: tt.input, OutputTokens: tt.output, TotalTokens: tt.total, CachedReadTokens: acp.Ptr(tt.read), CachedWriteTokens: acp.Ptr(tt.write)})
+			got := promptUsageFromACP(&acp.Usage{InputTokens: tt.input, OutputTokens: tt.output, TotalTokens: tt.total, CachedReadTokens: acp.Ptr(tt.read), CachedWriteTokens: acp.Ptr(tt.write), ThoughtTokens: acp.Ptr(tt.thought)})
 			detail := got.InputTokenDetails
-			if got.InputTokens != tt.wantInput || detail.NoCacheTokens != tt.wantNoCache || detail.CacheReadTokens != tt.read || detail.CacheWriteTokens != tt.write ||
-				detail.NoCacheTokens+detail.CacheReadTokens+detail.CacheWriteTokens != got.InputTokens || got.CachedInputTokens != tt.read {
+			wantTotal := tt.total
+			if tt.wantTotal != 0 {
+				wantTotal = tt.wantTotal
+			}
+			if got.InputTokens != tt.wantInput || got.TotalTokens != wantTotal || detail.NoCacheTokens != tt.wantNoCache || detail.CacheReadTokens != tt.read || detail.CacheWriteTokens != tt.write ||
+				detail.NoCacheTokens+detail.CacheReadTokens+detail.CacheWriteTokens != got.InputTokens || got.CachedInputTokens != tt.read || got.CacheReadTokensReported != tt.wantReported {
 				t.Fatalf("usage = %+v", got)
 			}
 		})

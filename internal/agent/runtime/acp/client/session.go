@@ -731,24 +731,33 @@ func promptUsageFromACP(usage *acp.Usage) *sdk.Usage {
 		OutputTokens: usage.OutputTokens,
 		TotalTokens:  usage.TotalTokens,
 	}
-	read, write := 0, 0
+	read, write, thought := 0, 0, 0
 	if usage.CachedReadTokens != nil {
 		read = *usage.CachedReadTokens
 	}
 	if usage.CachedWriteTokens != nil {
 		write = *usage.CachedWriteTokens
 	}
-	// ACP leaves open whether inputTokens includes the cache counters;
-	// claude-agent-acp reports them beside it and counts them in totalTokens.
-	if cached := read + write; cached > 0 && (usage.TotalTokens == usage.InputTokens+usage.OutputTokens+cached || usage.InputTokens < cached) {
-		out.InputTokens += cached
+	if usage.ThoughtTokens != nil {
+		thought = *usage.ThoughtTokens
+		out.ReasoningTokens = thought
+		out.OutputTokenDetails.ReasoningTokens = thought
 	}
+	// ACP leaves open whether inputTokens includes the cache counters;
+	// claude-agent-acp reports them beside it and counts them in totalTokens,
+	// and opencode also counts thought tokens there.
+	// Cache reads count as reported only when the counters prove the
+	// accounting; otherwise inputTokens is merely assumed to include them.
+	cached := read + write
+	beside := cached > 0 && (usage.TotalTokens == usage.InputTokens+usage.OutputTokens+cached ||
+		usage.TotalTokens == usage.InputTokens+usage.OutputTokens+thought+cached || usage.InputTokens < cached)
+	if beside {
+		out.InputTokens += cached
+		out.TotalTokens = max(out.TotalTokens, out.InputTokens+out.OutputTokens)
+	}
+	out.CacheReadTokensReported = usage.CachedReadTokens != nil && (cached == 0 || beside || usage.TotalTokens == usage.InputTokens+usage.OutputTokens)
 	out.CachedInputTokens = read
 	out.InputTokenDetails = sdk.InputTokenDetail{NoCacheTokens: out.InputTokens - read - write, CacheReadTokens: read, CacheWriteTokens: write}
-	if usage.ThoughtTokens != nil {
-		out.ReasoningTokens = *usage.ThoughtTokens
-		out.OutputTokenDetails.ReasoningTokens = *usage.ThoughtTokens
-	}
 	return out
 }
 

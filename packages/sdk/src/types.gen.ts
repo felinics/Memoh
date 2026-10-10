@@ -2063,6 +2063,7 @@ export type HandlersCreateSnapshotResponse = {
 
 export type HandlersDailyTokenUsage = {
     cache_read_tokens?: number;
+    cache_read_tokens_reported?: boolean;
     day?: string;
     input_tokens?: number;
     output_tokens?: number;
@@ -2589,6 +2590,7 @@ export type HandlersSupermarketSkillSource = {
 
 export type HandlersTokenUsageRecord = {
     cache_read_tokens?: number;
+    cache_read_tokens_reported?: boolean;
     created_at?: string;
     harness?: string;
     id?: string;

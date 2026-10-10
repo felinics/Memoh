@@ -26,18 +26,19 @@ import (
 // input = no cache + cache read + cache write, total = input + output.
 type usageTokens struct {
 	input, output, total, noCache, cacheRead, cacheWrite int
+	reported                                             bool
 }
 
 func usageTokensOf(u sdk.Usage) usageTokens {
 	return usageTokens{
 		input: u.InputTokens, output: u.OutputTokens, total: u.TotalTokens,
 		noCache: u.InputTokenDetails.NoCacheTokens, cacheRead: u.InputTokenDetails.CacheReadTokens,
-		cacheWrite: u.InputTokenDetails.CacheWriteTokens,
+		cacheWrite: u.InputTokenDetails.CacheWriteTokens, reported: u.CacheReadTokensReported,
 	}
 }
 
 func sumUsageTokens(all []usageTokens) usageTokens {
-	var sum usageTokens
+	sum := usageTokens{reported: len(all) > 0}
 	for _, u := range all {
 		sum.input += u.input
 		sum.output += u.output
@@ -45,6 +46,7 @@ func sumUsageTokens(all []usageTokens) usageTokens {
 		sum.noCache += u.noCache
 		sum.cacheRead += u.cacheRead
 		sum.cacheWrite += u.cacheWrite
+		sum.reported = sum.reported && u.reported
 	}
 	return sum
 }
@@ -189,24 +191,35 @@ func assertProviderUsageQueries(t *testing.T, ctx context.Context, queries *dbsq
 		t.Fatalf("records = %+v, err = %v", records, err)
 	}
 	var recordInput, recordRead int64
+	var recordReported, storedReported int
 	for _, r := range records {
 		recordInput += r.InputTokens
 		recordRead += r.CacheReadTokens
+		if r.CacheReadTokensReported {
+			recordReported++
+		}
 	}
-	if recordInput != int64(want.input) || recordRead != int64(want.cacheRead) {
-		t.Fatalf("records input %d read %d, want %d %d", recordInput, recordRead, want.input, want.cacheRead)
+	for _, u := range stored {
+		if u.reported {
+			storedReported++
+		}
+	}
+	if recordInput != int64(want.input) || recordRead != int64(want.cacheRead) || recordReported != storedReported {
+		t.Fatalf("records input %d read %d reported %d, want %d %d %d", recordInput, recordRead, recordReported, want.input, want.cacheRead, storedReported)
 	}
 	days, err := queries.GetTokenUsageByDayAndType(ctx, dbsqlc.GetTokenUsageByDayAndTypeParams{BotID: botID, FromTime: from, ToTime: to})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var dayInput, dayRead int64
+	dayReported := len(days) > 0
 	for _, d := range days {
 		dayInput += d.InputTokens
 		dayRead += d.CacheReadTokens
+		dayReported = dayReported && d.CacheReadTokensReported
 	}
-	if dayInput != int64(want.input) || dayRead != int64(want.cacheRead) {
-		t.Fatalf("daily usage = %+v, want input %d read %d", days, want.input, want.cacheRead)
+	if dayInput != int64(want.input) || dayRead != int64(want.cacheRead) || dayReported != want.reported {
+		t.Fatalf("daily usage = %+v, want input %d read %d reported %t", days, want.input, want.cacheRead, want.reported)
 	}
 	byModel, err := queries.GetTokenUsageByModel(ctx, dbsqlc.GetTokenUsageByModelParams{BotID: botID, FromTime: from, ToTime: to})
 	if err != nil {
@@ -234,7 +247,7 @@ func TestPostgresProviderUsageSurvivesPersistence(t *testing.T) {
 			respond: func(stream bool, _ int) string {
 				return anthropicUsageResponse(stream, `"input_tokens":10,"cache_read_input_tokens":200,"cache_creation_input_tokens":100`, 5, false)
 			},
-			messages: []usageTokens{{input: 310, output: 5, total: 315, noCache: 10, cacheRead: 200, cacheWrite: 100}},
+			messages: []usageTokens{{input: 310, output: 5, total: 315, noCache: 10, cacheRead: 200, cacheWrite: 100, reported: true}},
 		},
 		{
 			name:       "anthropic tool round",
@@ -246,15 +259,15 @@ func TestPostgresProviderUsageSurvivesPersistence(t *testing.T) {
 				return anthropicUsageResponse(stream, `"input_tokens":20,"cache_read_input_tokens":310,"cache_creation_input_tokens":0`, 7, false)
 			},
 			messages: []usageTokens{
-				{input: 310, output: 5, total: 315, noCache: 10, cacheRead: 200, cacheWrite: 100},
-				{input: 330, output: 7, total: 337, noCache: 20, cacheRead: 310},
+				{input: 310, output: 5, total: 315, noCache: 10, cacheRead: 200, cacheWrite: 100, reported: true},
+				{input: 330, output: 7, total: 337, noCache: 20, cacheRead: 310, reported: true},
 			},
 		},
 		{
 			name:       "openai responses",
 			clientType: models.ClientTypeOpenAIResponses,
 			respond:    func(stream bool, _ int) string { return openAIResponsesUsageResponse(stream) },
-			messages:   []usageTokens{{input: 310, output: 5, total: 315, noCache: 110, cacheRead: 200}},
+			messages:   []usageTokens{{input: 310, output: 5, total: 315, noCache: 110, cacheRead: 200, reported: true}},
 		},
 	}
 	for _, tc := range cases {
@@ -294,9 +307,9 @@ func TestPostgresProviderUsageMixesProvidersInOneSession(t *testing.T) {
 		stored = append(stored, turn.run(t, ctx, messages, botID, sessionID)...)
 	}
 	want := []usageTokens{
-		{input: 247825, output: 42, total: 247867, noCache: 21969, cacheRead: 225856},
-		{input: 310, output: 5, total: 315, noCache: 110, cacheRead: 200},
-		{input: 310, output: 5, total: 315, noCache: 10, cacheRead: 200, cacheWrite: 100},
+		{input: 247825, output: 42, total: 247867, noCache: 21969, cacheRead: 225856, reported: true},
+		{input: 310, output: 5, total: 315, noCache: 110, cacheRead: 200, reported: true},
+		{input: 310, output: 5, total: 315, noCache: 10, cacheRead: 200, cacheWrite: 100, reported: true},
 	}
 	if fmt.Sprint(stored) != fmt.Sprint(want) {
 		t.Fatalf("stored assistant usage = %+v, want %+v", stored, want)

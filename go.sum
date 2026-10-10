@@ -64,6 +64,8 @@ github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03
 github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=
 github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
+github.com/ChrAlpha/memoh-twilight-ai v0.0.0-20261003084625-52888cd01416 h1:kNsJvzkbXBTvNQRlnP5zhCJ4/DPfmiiVKdVRufURMg8=
+github.com/ChrAlpha/memoh-twilight-ai v0.0.0-20261003084625-52888cd01416/go.mod h1:8U7YKU0im7BTJxlatQgSAilEiGuyAJCTr83Cz/gjdk8=
 github.com/DataDog/datadog-go v3.2.0+incompatible/go.mod h1:LButxg5PwREeZtORoXG3tL4fMGNddJ+vMq1mwgfaqoQ=
 github.com/JohannesKaufmann/dom v0.2.0 h1:1bragmEb19K8lHAqgFgqCpiPCFEZMTXzOIEjuxkUfLQ=
 github.com/JohannesKaufmann/dom v0.2.0/go.mod h1:57iSUl5RKric4bUkgos4zu6Xt5LMHUnw3TF1l5CbGZo=
@@ -229,8 +231,6 @@ github.com/felinics/connect-it/sdk/go v0.1.1-0.20260829153217-0dcd18de667d h1:4x
 github.com/felinics/connect-it/sdk/go v0.1.1-0.20260829153217-0dcd18de667d/go.mod h1:efQBEl/nBI7s7ptKhxpMIQWXMFwJA/mQlG8Y5Gx7y1k=
 github.com/felinics/dingtalk-stream-sdk-go v0.0.0-20260829152622-ce4b7ea674a5 h1:f70CJWZc4i4csjDQ50PpDVVqyc3wBFgRyGzKc/G101Q=
 github.com/felinics/dingtalk-stream-sdk-go v0.0.0-20260829152622-ce4b7ea674a5/go.mod h1:6lA5cvlc9Grmj5AgIMI0tCKB3o3M49qHzeA3rxmHZ1o=
-github.com/felinics/twilight v0.7.2-0.20261002230120-f6d0ce1a0e8c h1:KxleB2R+Bq5ZTcxAjXnYxWs7q0fDVKmVkpjx7kiQ2SY=
-github.com/felinics/twilight v0.7.2-0.20261002230120-f6d0ce1a0e8c/go.mod h1:8U7YKU0im7BTJxlatQgSAilEiGuyAJCTr83Cz/gjdk8=
 github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeORc=
 github.com/felixge/httpsnoop v1.1.0/go.mod h1:Zqxgdd+1Rkcz8euOqdr7lqgCRJztwr5hp9vDSi5UZCE=
 github.com/frankban/quicktest v1.14.3/go.mod h1:mgiwOwqx65TmIk1wJ6Q7wvnVMocbUorkibMOrVTHZps=
