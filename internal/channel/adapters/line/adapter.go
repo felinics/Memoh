@@ -18,6 +18,8 @@ import (
 	"github.com/line/line-bot-sdk-go/v8/linebot/messaging_api"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const (
@@ -220,10 +222,20 @@ func (*Adapter) httpError(status int, message string) *echo.HTTPError {
 	return echo.NewHTTPError(status, message)
 }
 
-func (a *Adapter) logWarn(message string, attrs ...any) {
-	if a != nil && a.logger != nil {
-		a.logger.Warn(message, attrs...) //nolint:sloglint // message is a constant string supplied by internal callers
+// logWarn records a handled failure as an event. err is the cause when there
+// is one; a nil err records the condition itself.
+func (a *Adapter) logWarn(ctx context.Context, message string, err error, attrs ...slog.Attr) {
+	if a == nil || a.logger == nil {
+		return
 	}
+	var cause error
+	if err == nil {
+		cause = errs.NewWithDepth(1, message, attrs...)
+	} else {
+		cause = errs.WrapWithDepth(1, err, message, attrs...)
+	}
+	result := errlog.Event(ctx, "channel.line", cause, errlog.Options{})
+	a.logger.LogAttrs(ctx, result.Level, message, result.Attrs()...) //nolint:sloglint // message is a constant string supplied by internal callers
 }
 
 func (a *Adapter) logDebug(message string, attrs ...any) {

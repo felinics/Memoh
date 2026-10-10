@@ -49,8 +49,7 @@ func (s *dingtalkOutboundStream) Push(ctx context.Context, event channel.Prepare
 		channel.StreamEventAgentStart,
 		channel.StreamEventAgentEnd,
 		channel.StreamEventProcessingStarted,
-		channel.StreamEventProcessingCompleted,
-		channel.StreamEventProcessingFailed:
+		channel.StreamEventProcessingCompleted:
 		// Non-content events: no-op.
 		return nil
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -19,9 +20,8 @@ const (
 	codexDefaultBaseURL = "https://chatgpt.com/backend-api"
 	// The catalog endpoint uses the client version for model-availability gates.
 	// Use the stable protocol target instead of coupling discovery to Memoh's release version.
-	codexModelsClientVersion  = "1.0.0"
-	codexModelsResponseLimit  = 8 << 20
-	codexModelsErrorBodyLimit = 16 << 10
+	codexModelsClientVersion = "1.0.0"
+	codexModelsResponseLimit = 8 << 20
 )
 
 type codexModelsResponse struct {
@@ -85,12 +85,7 @@ func (s *Service) listCodexRemoteModels(ctx context.Context, baseURL string, cre
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, codexModelsErrorBodyLimit))
-		detail := strings.TrimSpace(string(body))
-		if detail == "" {
-			detail = http.StatusText(resp.StatusCode)
-		}
-		return nil, errs.NewDependency(fmt.Sprintf("codex models request failed (%d): %s", resp.StatusCode, detail))
+		return nil, errs.NewDependency("codex models request failed", slog.Int("status", resp.StatusCode))
 	}
 
 	var catalog codexModelsResponse

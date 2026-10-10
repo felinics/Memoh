@@ -20,6 +20,7 @@ import (
 
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/models"
 )
 
@@ -539,9 +540,7 @@ func TestOpenAICodexACPDeviceAuthorizationSanitizesNon404FailureBody(t *testing.
 	if strings.Contains(err.Error(), "sensitive-body") {
 		t.Fatalf("error should not expose upstream body: %v", err)
 	}
-	if !strings.Contains(err.Error(), "status 401") {
-		t.Fatalf("error should keep status code context: %v", err)
-	}
+	requireStatusAttr(t, err, http.StatusUnauthorized)
 }
 
 func TestOpenAICodexACPDevicePollPendingAndSuccess(t *testing.T) {
@@ -659,9 +658,7 @@ func TestOpenAICodexACPDevicePollSanitizesHardFailureBody(t *testing.T) {
 	if strings.Contains(err.Error(), "sensitive-body") {
 		t.Fatalf("error should not expose upstream body: %v", err)
 	}
-	if !strings.Contains(err.Error(), "status 401") {
-		t.Fatalf("error should keep status code context: %v", err)
-	}
+	requireStatusAttr(t, err, http.StatusUnauthorized)
 }
 
 func TestCodexAccountIDFromTokensPrefersIDToken(t *testing.T) {
@@ -1369,4 +1366,19 @@ func TestTestUnreachableStaysHardError(t *testing.T) {
 	if !errors.As(resp.Cause, &urlErr) {
 		t.Fatalf("cause = %v, want a *url.Error in the chain", resp.Cause)
 	}
+}
+
+// requireStatusAttr checks that the status code travels as an attribute of
+// the error rather than as part of its text.
+func requireStatusAttr(t *testing.T, err error, want int) {
+	t.Helper()
+	for _, attr := range errs.Analyze(context.Background(), err).Attrs {
+		if attr.Key == "status" {
+			if got := int(attr.Value.Int64()); got != want {
+				t.Fatalf("status attr = %d, want %d", got, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("error has no status attr: %v", err)
 }

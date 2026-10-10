@@ -122,24 +122,27 @@ type AppItem struct {
 	Reason string `json:"reason,omitempty" enums:"user,required"`
 	// AvailableRevision and AvailableVersion name the registry's newer
 	// release after a check found one.
-	AvailableRevision string                                      `json:"available_revision,omitempty"`
-	AvailableVersion  string                                      `json:"available_version,omitempty"`
-	LastCheckedAt     *time.Time                                  `json:"last_checked_at,omitempty"`
-	LastError         string                                      `json:"last_error,omitempty"`
-	Icon              *supermarketclient.SkillIcon                `json:"icon,omitempty"`
-	Category          string                                      `json:"category,omitempty"`
-	CategoryName      string                                      `json:"category_name,omitempty"`
-	Author            *supermarketclient.Author                   `json:"author,omitempty"`
-	Homepage          string                                      `json:"homepage,omitempty"`
-	Repository        string                                      `json:"repository,omitempty"`
-	License           string                                      `json:"license,omitempty"`
-	Tags              []string                                    `json:"tags"`
-	Translations      map[string]supermarketclient.AppTranslation `json:"translations,omitempty"`
-	Skills            []AppSkillItem                              `json:"skills"`
-	Dependencies      []AppDependencyItem                         `json:"dependencies"`
-	Connectors        []AppConnectorItem                          `json:"connectors"`
-	InstalledAt       *time.Time                                  `json:"installed_at,omitempty"`
-	UpdatedAt         *time.Time                                  `json:"updated_at,omitempty"`
+	AvailableRevision string     `json:"available_revision,omitempty"`
+	AvailableVersion  string     `json:"available_version,omitempty"`
+	LastCheckedAt     *time.Time `json:"last_checked_at,omitempty"`
+	// LastError is text recorded by earlier servers. A failure recorded now
+	// carries LastErrorCode, which clients render as errors.<code>.
+	LastError     string                                      `json:"last_error,omitempty"`
+	LastErrorCode string                                      `json:"last_error_code,omitempty"`
+	Icon          *supermarketclient.SkillIcon                `json:"icon,omitempty"`
+	Category      string                                      `json:"category,omitempty"`
+	CategoryName  string                                      `json:"category_name,omitempty"`
+	Author        *supermarketclient.Author                   `json:"author,omitempty"`
+	Homepage      string                                      `json:"homepage,omitempty"`
+	Repository    string                                      `json:"repository,omitempty"`
+	License       string                                      `json:"license,omitempty"`
+	Tags          []string                                    `json:"tags"`
+	Translations  map[string]supermarketclient.AppTranslation `json:"translations,omitempty"`
+	Skills        []AppSkillItem                              `json:"skills"`
+	Dependencies  []AppDependencyItem                         `json:"dependencies"`
+	Connectors    []AppConnectorItem                          `json:"connectors"`
+	InstalledAt   *time.Time                                  `json:"installed_at,omitempty"`
+	UpdatedAt     *time.Time                                  `json:"updated_at,omitempty"`
 }
 
 // AppListResponse is the App view of one bot workspace.
@@ -215,8 +218,9 @@ type AppConnectorCredentialRequest struct {
 
 // AppStreamEvent documents the SSE frames of install, resume, update and
 // remove. Type selects which fields are present: started and done carry the
-// app id and status; step and step_done carry kind and id; log carries
-// stream and data; error carries the Problem fields.
+// app id and status; step and step_done carry kind and id, and a failed
+// step_done carries the catalog code of the failure; log carries stream and
+// data; error carries the Problem fields.
 //
 // codesync(app-stream): keep in sync with
 // apps/web/src/composables/api/useAppStream.ts.
@@ -611,7 +615,7 @@ func (h *AppsHandler) stream(c echo.Context, action string, run appOperation) er
 	sink := apps.EventFunc(func(event apps.Event) {
 		stream.send(AppStreamEvent{
 			Type: event.Type, Kind: event.Kind, ID: event.ID, Stream: event.Stream, Data: event.Data,
-			Status: event.Status, Version: event.Version, Message: event.Message,
+			Status: event.Status, Version: event.Version, Message: event.Message, Code: event.Code,
 		})
 	})
 	if _, err := run(ctx, sink); err != nil {
@@ -625,7 +629,6 @@ func (h *AppsHandler) stream(c echo.Context, action string, run appOperation) er
 func (*AppsHandler) httpError(err error) error {
 	err = apps.RegistryError(err)
 	var targetErr *supermarketclient.WorkspaceTargetError
-	var statusErr *supermarketclient.StatusError
 	switch {
 	case err == nil:
 		return nil
@@ -633,8 +636,12 @@ func (*AppsHandler) httpError(err error) error {
 		return err
 	case errors.As(err, &targetErr):
 		return workspaceTargetHTTPError(targetErr.Err)
-	case errors.As(err, &statusErr):
-		return echo.NewHTTPError(statusErr.Status, statusErr.Error())
+	case errors.Is(err, supermarketclient.ErrRevisionInvalid):
+		return apperror.FieldInvalid("revision", err)
+	case errors.Is(err, supermarketclient.ErrRegistryIDInvalid):
+		return apperror.FieldInvalid("registry_id", err)
+	case errors.Is(err, supermarketclient.ErrAppIDInvalid):
+		return apperror.FieldInvalid("app_id", err)
 	case errors.Is(err, apps.ErrNotInstalled):
 		return apperror.Wrap(apperror.CodeAppNotFound, err, nil)
 	case errors.Is(err, apps.ErrInvalidRequest), errors.Is(err, apps.ErrConnectorNotReferenced):
@@ -647,8 +654,7 @@ func (*AppsHandler) httpError(err error) error {
 		errors.Is(err, workspacedeps.ErrDefinitionInvalid), errors.Is(err, workspacedeps.ErrDefinitionUnavailable):
 		return workspaceDependencyError(err)
 	default:
-		var apiErr *connectsdk.APIError
-		if errors.As(err, &apiErr) {
+		if connectors.CodeOf(err) != "" {
 			return connectorHTTPError(err)
 		}
 		return apperror.Wrap(apperror.CodeAppOperationFailed, err, nil)
@@ -683,6 +689,7 @@ func appItem(item apps.Item, dataRoot string) AppItem {
 		out.AvailableVersion = inst.AvailableVersion
 		out.LastCheckedAt = inst.LastCheckedAt
 		out.LastError = inst.LastError
+		out.LastErrorCode = inst.LastErrorCode
 		installedAt, updatedAt := inst.InstalledAt, inst.UpdatedAt
 		if !installedAt.IsZero() {
 			out.InstalledAt = &installedAt

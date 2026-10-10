@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/schedule"
 	"github.com/felinics/memoh/internal/workdir"
 )
@@ -22,7 +23,7 @@ func TestScheduleServiceErrorNamesTheField(t *testing.T) {
 		field string
 	}{
 		{"required", schedule.ErrTargetSessionRequired, apperror.CodeRequestFieldRequired, "target_session_id"},
-		{"required model", fmt.Errorf("create: %w", schedule.ErrModelRequired), apperror.CodeRequestFieldRequired, "model_id"},
+		{"required model", fmt.Errorf("create: %w", schedule.ErrModelRequired), apperror.CodeScheduleModelRequired, "model_id"},
 		{"invalid", schedule.ErrTargetSessionNotFound, apperror.CodeRequestFieldInvalid, "target_session_id"},
 		{"workdir not found", workdir.ErrWorkdirNotFound, apperror.CodeRequestFieldInvalid, "workdir_id"},
 		{"workdir archived", fmt.Errorf("bind: %w", workdir.ErrWorkdirArchived), apperror.CodeRequestFieldInvalid, "workdir_id"},
@@ -40,11 +41,34 @@ func TestScheduleServiceErrorNamesTheField(t *testing.T) {
 	}
 }
 
+func TestScheduleRulesMapToTheirOwnCodes(t *testing.T) {
+	for rule, code := range scheduleRuleCodes {
+		if _, ok := apperror.Lookup(code); !ok {
+			t.Errorf("rule %s maps to %s, which is not in the catalog", rule, code)
+		}
+	}
+	for _, rule := range []schedule.Rule{
+		schedule.RuleRunTargetConflict, schedule.RuleModelConflict, schedule.RuleModelUnusable,
+		schedule.RuleModelRequired, schedule.RuleSessionModeUnsupported,
+	} {
+		if _, ok := scheduleRuleCodes[rule]; !ok {
+			t.Errorf("rule %s has no public code", rule)
+		}
+	}
+}
+
 func TestScheduleServiceErrorKeepsInternalErrorsInternal(t *testing.T) {
 	err := scheduleServiceError(errors.New("db down"))
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusInternalServerError {
-		t.Fatalf("error = %v, want a 500", err)
+	answer, _ := errs.Answer(t.Context(), err)
+	if apperror.CodeOf(answer) != apperror.CodeInternal {
+		t.Fatalf("code = %s, want %s", apperror.CodeOf(answer), apperror.CodeInternal)
+	}
+}
+
+func TestScheduleLookupErrorAnswersAnUnknownScheduleWith404(t *testing.T) {
+	err := scheduleLookupError(fmt.Errorf("get: %w", schedule.ErrScheduleNotFound))
+	if apperror.CodeOf(err) != apperror.CodeHTTPNotFound || !errors.Is(apperror.CauseOf(err), schedule.ErrScheduleNotFound) {
+		t.Fatalf("error = %v, want http.not_found caused by ErrScheduleNotFound", err)
 	}
 }
 

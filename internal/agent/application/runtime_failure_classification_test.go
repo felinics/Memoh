@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -30,10 +31,17 @@ func TestPersistRuntimeRoundFailureCode(t *testing.T) {
 		name     string
 		cause    error
 		wantCode string
+		wantArgs map[string]any
 	}{
 		{name: "catalogued code", cause: apperror.Wrap(apperror.CodeAgentResponseTimeout, errors.New("SECRET"), nil), wantCode: "agent.response_timeout"},
 		{name: "external agent code", cause: fmt.Errorf("prompt: %w", apperror.New(apperror.CodeACPRuntimeBusy, nil)), wantCode: "acp_runtime_busy"},
 		{name: "plain error", cause: errors.New("SECRET driver exit"), wantCode: "runtime_prompt_failed"},
+		{
+			name:     "missing dependency",
+			cause:    &external.DependencyMissingError{DependencyID: "codex", TaskID: "task-1"},
+			wantCode: "agent_dependency_missing",
+			wantArgs: map[string]any{"dep_id": "codex", "install_task_id": "task-1", "operation_in_progress": "false"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -59,6 +67,12 @@ func TestPersistRuntimeRoundFailureCode(t *testing.T) {
 			meta := messages.persisted[1].Metadata
 			if got, _ := meta["error_code"].(string); got != tc.wantCode {
 				t.Fatalf("error_code = %q, want %q", got, tc.wantCode)
+			}
+			stored, _ := json.Marshal(meta[messagepkg.HistoryErrorArgsMetadataKey])
+			var gotArgs map[string]any
+			_ = json.Unmarshal(stored, &gotArgs)
+			if !reflect.DeepEqual(gotArgs, tc.wantArgs) {
+				t.Fatalf("error_args = %s, want %v", stored, tc.wantArgs)
 			}
 			for _, key := range []string{"error_reason", "i18n_key"} {
 				if got, found := meta[key]; found {

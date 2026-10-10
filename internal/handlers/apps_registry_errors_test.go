@@ -33,3 +33,19 @@ func TestAppsHandlerAnswersAnInstallerErrorWithItsRegistryCode(t *testing.T) {
 		}
 	}
 }
+
+func TestAppsHandlerNamesTheMalformedIdentifier(t *testing.T) {
+	for _, tc := range []struct {
+		err   error
+		field string
+	}{
+		{fmt.Errorf("install App: %w", supermarketclient.ErrRevisionInvalid), "revision"},
+		{supermarketclient.ErrRegistryIDInvalid, "registry_id"},
+		{supermarketclient.ErrAppIDInvalid, "app_id"},
+	} {
+		got := (&AppsHandler{}).httpError(tc.err)
+		if apperror.CodeOf(got) != apperror.CodeRequestFieldInvalid || apperror.ArgsOf(got)["field"] != tc.field {
+			t.Fatalf("httpError(%v) = %s %v, want request.field_invalid on %s", tc.err, apperror.CodeOf(got), apperror.ArgsOf(got), tc.field)
+		}
+	}
+}

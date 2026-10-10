@@ -196,6 +196,7 @@ type BotAppInstallation struct {
 	AvailableVersion  string             `json:"available_version"`
 	LastCheckedAt     pgtype.Timestamptz `json:"last_checked_at"`
 	LastError         string             `json:"last_error"`
+	LastErrorCode     string             `json:"last_error_code"`
 	Release           []byte             `json:"release"`
 	InstalledAt       pgtype.Timestamptz `json:"installed_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
@@ -255,6 +256,7 @@ type BotDependencyInstallation struct {
 	LatestVersion      string             `json:"latest_version"`
 	LastCheckedAt      pgtype.Timestamptz `json:"last_checked_at"`
 	LastError          string             `json:"last_error"`
+	LastErrorCode      string             `json:"last_error_code"`
 	ManifestDigest     string             `json:"manifest_digest"`
 	SourceUrl          string             `json:"source_url"`
 	RegistryID         string             `json:"registry_id"`

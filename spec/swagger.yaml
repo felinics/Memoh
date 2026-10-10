@@ -381,6 +381,14 @@ definitions:
           $ref: '#/definitions/adapters.MemoryItem'
         type: array
     type: object
+  adapters.CompactUnavailableReason:
+    enum:
+    - unsupported
+    - not_configured
+    type: string
+    x-enum-varnames:
+    - CompactUnsupported
+    - CompactNotConfigured
   adapters.DeleteResponse:
     properties:
       message:
@@ -411,7 +419,9 @@ definitions:
       archive:
         type: boolean
       reason:
-        type: string
+        allOf:
+        - $ref: '#/definitions/adapters.CompactUnavailableReason'
+        description: Reason says why Semantic is false.
       rebuild_index:
         type: boolean
       semantic:
@@ -2471,9 +2481,10 @@ definitions:
         additionalProperties:
           type: string
         description: |-
-          Args are the machine-readable parameters of a notice block: the string
-          values of the runtime_notice event metadata (dep_id and install_task_id
-          for a workspace dependency notice, for instance). The client renders
+          Args are the machine-readable parameters of a notice or error block: the
+          string values of the runtime_notice event metadata (dep_id and
+          install_task_id for a workspace dependency notice, for instance), or the
+          catalog args stored with a failure's code. The client renders text and
           actions from them instead of parsing Content.
         type: object
       attachments:
@@ -3064,6 +3075,11 @@ definitions:
       last_checked_at:
         type: string
       last_error:
+        description: |-
+          LastError is text recorded by earlier servers. A failure recorded now
+          carries LastErrorCode, which clients render as errors.<code>.
+        type: string
+      last_error_code:
         type: string
       license:
         type: string
@@ -4871,8 +4887,14 @@ definitions:
       last_checked_at:
         type: string
       last_error:
+        description: |-
+          LastError is text recorded by earlier servers, including the script
+          output they used to keep. A failure recorded now carries LastErrorCode.
         type: string
       last_error_code:
+        description: |-
+          LastErrorCode is the catalog code of a recorded failure, which clients
+          render as errors.<code>.
         type: string
       latest_version:
         description: |-

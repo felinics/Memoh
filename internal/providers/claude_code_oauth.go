@@ -5,8 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -82,7 +82,7 @@ func (s *Service) ExchangeClaudeCodeAuthorization(ctx context.Context, input, st
 		return "", ErrClaudeCodeAuthorizationCodeInvalid
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return "", errs.NewDependency(fmt.Sprintf("claude code token exchange: status %d", resp.StatusCode))
+		return "", errs.NewDependency("claude code token exchange failed", slog.Int("status", resp.StatusCode))
 	}
 	var token struct {
 		AccessToken string `json:"access_token"` //nolint:gosec // Provider response is stored encrypted by the authorization service.

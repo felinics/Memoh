@@ -84,7 +84,7 @@ func (h *VideoHandler) GetProvider(c echo.Context) error {
 	}
 	item, err := h.service.GetProvider(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
 	}
 	return c.JSON(http.StatusOK, item)
 }
@@ -188,7 +188,7 @@ func (h *VideoHandler) GetModel(c echo.Context) error {
 	}
 	resp, err := h.service.GetModel(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }

@@ -197,13 +197,6 @@ func (a *WeChatOAAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 		)
 	}
 	if err := client.sendPreparedMessage(ctx, openID, msg.Message); err != nil {
-		if a.logger != nil {
-			a.logger.ErrorContext(ctx, "wechatoa send failed",
-				slog.String("config_id", cfg.ID),
-				slog.String("target", openID),
-				slog.Any("error", err),
-			)
-		}
 		return err
 	}
 	if a.logger != nil {

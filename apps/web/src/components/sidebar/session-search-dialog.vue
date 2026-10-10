@@ -100,15 +100,18 @@ const inputRef = ref<HTMLInputElement | null>(null)
 
 const results = computed<SessionSummary[]>(() => {
   const q = query.value.trim().toLowerCase()
+  // A first send's session is left out until the server confirms the send,
+  // as in the sidebar lists (see isSessionTentative).
+  const confirmed = sessions.value.filter(session => !chatStore.isSessionTentative(session.id))
   const list = q
-    ? sessions.value.filter(session =>
+    ? confirmed.filter(session =>
       (session.title ?? '').toLowerCase().includes(q)
       || (session.id ?? '').toLowerCase().includes(q)
       // Untitled channel sessions show as their conversation name — make that
       // the searchable form of their identity too.
       || routeConversationLabel(session).toLowerCase().includes(q),
     )
-    : sessions.value
+    : confirmed
   return sortByRecency(list).slice(0, 50)
 })
 

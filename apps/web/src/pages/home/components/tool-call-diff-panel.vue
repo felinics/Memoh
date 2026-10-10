@@ -13,23 +13,45 @@
   <div
     v-else-if="shiki.diffRows.value.length > 0"
     class="shiki shiki-diff-grid overflow-auto max-h-96 text-xs font-mono leading-6"
-    :class="{ 'diff-no-edge': !edgeBar }"
   >
     <div class="diff-content">
+      <!-- The panel sits flush in a rounded-sm card, and the indicator bar is
+           flush with its left edge, so a changed row at the very top or bottom
+           gets its bar clipped into a sliver by the corner arc (an edit at the
+           start or end of a file). A spacer row of dashes there keeps every
+           changed row off the corners. -->
+      <div
+        v-if="capTop"
+        class="diff-row diff-cap"
+        aria-hidden="true"
+      >
+        <span class="diff-ln">-</span>
+        <span class="diff-mk" />
+        <span class="diff-code text-muted-foreground">---</span>
+      </div>
       <div
         v-for="(row, i) in shiki.diffRows.value"
         :key="i"
         class="diff-row"
-        :data-kind="row.kind"
+        :data-kind="additionsOnly ? 'context' : row.kind"
       >
         <span class="diff-ln">{{ row.lineNumber }}</span>
-        <span class="diff-mk">{{ row.kind === 'remove' ? '−' : row.kind === 'add' ? '+' : '' }}</span>
+        <span class="diff-mk">{{ additionsOnly ? '' : row.kind === 'remove' ? '−' : row.kind === 'add' ? '+' : '' }}</span>
         <!-- eslint-disable vue/no-v-html -->
         <span
           class="diff-code"
           v-html="row.html"
         />
         <!-- eslint-enable vue/no-v-html -->
+      </div>
+      <div
+        v-if="capBottom"
+        class="diff-row diff-cap"
+        aria-hidden="true"
+      >
+        <span class="diff-ln">-</span>
+        <span class="diff-mk" />
+        <span class="diff-code text-muted-foreground">---</span>
       </div>
     </div>
   </div>
@@ -43,19 +65,34 @@
 </template>
 
 <script setup lang="ts">
-import { watch } from 'vue'
+import { computed, watch } from 'vue'
 import { Spinner } from '@felinic/ui'
 import { useShikiHighlighter } from '@/composables/useShikiHighlighter'
 
-// Read-only diff panel shared by the edit and write tool details. The server
-// attaches a unified diff as UI-only metadata; rows render with gutter line
-// numbers (old for removals, new for additions/context), −/+ markers,
-// whole-row red/green bands with a solid indicator bar at the left edge, and
-// an inline emphasis block on the exact replaced fragments. edgeBar=false
-// drops the indicator bar (write details opt out — a new file is one solid
-// green wall where the bar reads as noise).
-const props = withDefaults(defineProps<{ diff: string, filename: string, edgeBar?: boolean }>(), { edgeBar: true })
+// Read-only diff panel shared by the edit, write, and apply_patch tool
+// details. The server attaches a unified diff as UI-only metadata; rows
+// render with gutter line numbers (old for removals, new for
+// additions/context), −/+ markers, whole-row red/green bands with a solid
+// indicator bar at the left edge, and an inline emphasis block on the exact
+// replaced fragments.
+const props = defineProps<{ diff: string, filename: string }>()
 const shiki = useShikiHighlighter()
+
+// A diff of additions only (a new file, or content written into an empty
+// one) has nothing to compare against: every row would be green, so the
+// colour, bar and + say nothing the title's +N does not. Those rows render as
+// plain code instead.
+const additionsOnly = computed(() => shiki.diffRows.value.every(row => row.kind === 'add'))
+
+// Spacer rows only where a changed row's bar would otherwise touch a corner.
+const capTop = computed(() => {
+  const first = shiki.diffRows.value[0]
+  return !additionsOnly.value && first !== undefined && first.kind !== 'context'
+})
+const capBottom = computed(() => {
+  const last = shiki.diffRows.value.at(-1)
+  return !additionsOnly.value && last !== undefined && last.kind !== 'context'
+})
 
 // Re-highlight whenever the diff arrives. Input now streams in after the tool
 // block first renders (tool_call_input_start), so an onMounted-only highlight
@@ -115,9 +152,6 @@ watch(
 }
 .shiki-diff-grid .diff-row[data-kind='add'] .diff-ln::before {
   background: var(--diff-add-border);
-}
-.shiki-diff-grid.diff-no-edge .diff-ln::before {
-  display: none;
 }
 .shiki-diff-grid .diff-ln,
 .shiki-diff-grid .diff-mk {

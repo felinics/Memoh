@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/slash"
 )
 
@@ -121,7 +122,7 @@ func groupEntriesByName(entries []Entry) map[string][]Entry {
 	return groups
 }
 
-func resolveTextCandidate(group []Entry) (Entry, string) {
+func resolveTextCandidate(group []Entry) (Entry, apperror.Code) {
 	if len(group) == 0 {
 		return Entry{}, slash.CodeRequestedSkillNotFound
 	}
@@ -152,7 +153,7 @@ func resolveTextCandidate(group []Entry) (Entry, string) {
 	return entry, ""
 }
 
-func runtimeRejectCode(entry Entry, group []Entry) string {
+func runtimeRejectCode(entry Entry, group []Entry) apperror.Code {
 	if entry.State == StateShadowed {
 		return slash.CodeRequestedSkillAmbiguous
 	}

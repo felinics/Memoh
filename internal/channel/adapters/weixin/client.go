@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/version"
 )
 
@@ -158,7 +159,7 @@ func (c *Client) apiPost(ctx context.Context, baseURL, endpoint string, body []b
 		return nil, fmt.Errorf("weixin api read: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("weixin api %s %d: %s", endpoint, resp.StatusCode, string(raw))
+		return nil, errs.NewDependency("weixin api request failed", slog.String("endpoint", endpoint), slog.Int("status", resp.StatusCode))
 	}
 	return raw, nil
 }
@@ -210,7 +211,7 @@ func (c *Client) SendMessage(ctx context.Context, cfg adapterConfig, msg SendMes
 		}
 	}
 	if resp.Ret != 0 {
-		return fmt.Errorf("weixin sendmessage ret=%d: %s", resp.Ret, resp.ErrMsg)
+		return errs.NewDependency("weixin sendmessage failed", slog.Int("ret", resp.Ret))
 	}
 	return nil
 }
@@ -297,7 +298,7 @@ func (c *Client) notifyLifecycle(ctx context.Context, cfg adapterConfig, endpoin
 		}
 	}
 	if resp.Ret != 0 {
-		return fmt.Errorf("weixin %s ret=%d: %s", endpoint, resp.Ret, resp.ErrMsg)
+		return errs.NewDependency("weixin lifecycle notification failed", slog.String("endpoint", endpoint), slog.Int("ret", resp.Ret))
 	}
 	return nil
 }
@@ -362,7 +363,7 @@ func (c *Client) PollQRStatus(ctx context.Context, apiBaseURL, qrcode, verifyCod
 		return &QRStatusResponse{Status: "wait"}, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("weixin qrstatus %d: %s", resp.StatusCode, string(raw))
+		return nil, errs.NewDependency("weixin qrstatus request failed", slog.Int("status", resp.StatusCode))
 	}
 	var status QRStatusResponse
 	if err := json.Unmarshal(raw, &status); err != nil {

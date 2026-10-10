@@ -764,9 +764,6 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 				actions = msg.Message.Actions
 			}
 			if err := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", to, parseMode, actions); err != nil {
-				if s.adapter.logger != nil {
-					s.adapter.logger.ErrorContext(ctx, "stream final attachment failed", slog.String("config_id", s.cfg.ID), slog.Any("error", err))
-				}
 				return err
 			}
 		}

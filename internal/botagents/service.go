@@ -31,8 +31,18 @@ var (
 	ErrUnavailable     = errors.New("bot agent is unavailable")
 	// ErrProviderDirectRuntime rejects new ACP agents for providers that now
 	// run as direct runtimes (migration 0144 retired the old built-in rows).
-	ErrProviderDirectRuntime = errors.New("this provider runs as a direct runtime; create the agent with runtime codex or claude-code")
+	ErrProviderDirectRuntime = errors.New("this provider runs as a direct runtime")
 )
+
+// ProviderDirectRuntimeError carries the direct runtime a rejected ACP
+// provider now runs as. It matches ErrProviderDirectRuntime.
+type ProviderDirectRuntimeError struct{ Runtime string }
+
+func (e *ProviderDirectRuntimeError) Error() string {
+	return ErrProviderDirectRuntime.Error() + ": " + e.Runtime
+}
+
+func (*ProviderDirectRuntimeError) Unwrap() error { return ErrProviderDirectRuntime }
 
 // directRuntimeForProvider maps former ACP providers to their direct runtime.
 func directRuntimeForProvider(provider string) (string, bool) {
@@ -544,8 +554,8 @@ func normalizeDescriptor(runtime string, metadata map[string]any) (string, map[s
 			return "", nil, ErrInvalidMetadata
 		}
 		provider = acpprofile.NormalizeAgentID(provider)
-		if _, direct := directRuntimeForProvider(provider); direct {
-			return "", nil, ErrProviderDirectRuntime
+		if runtime, direct := directRuntimeForProvider(provider); direct {
+			return "", nil, &ProviderDirectRuntimeError{Runtime: runtime}
 		}
 		if _, ok := acpprofile.Lookup(provider); !ok {
 			return "", nil, ErrInvalidMetadata

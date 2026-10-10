@@ -3,7 +3,6 @@ package supermarket
 import (
 	"context"
 	"log/slog"
-	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -43,24 +42,6 @@ type Installer struct {
 func NewInstaller(client *Client, workspaces WorkspaceResolver, logger *slog.Logger) *Installer {
 	return &Installer{client: client, workspaces: workspaces, logger: logger}
 }
-
-type StatusError struct {
-	Status  int
-	Message string
-	Err     error
-}
-
-func (e *StatusError) Error() string {
-	if e.Message != "" {
-		return e.Message
-	}
-	if e.Err != nil {
-		return e.Err.Error()
-	}
-	return http.StatusText(e.Status)
-}
-
-func (e *StatusError) Unwrap() error { return e.Err }
 
 type WorkspaceTargetError struct{ Err error }
 

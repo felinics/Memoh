@@ -49,3 +49,28 @@ func TestCreateNamesTheMissingField(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeExecutionNamesTheBrokenRule(t *testing.T) {
+	svc := newExecutionService(t, &executionQueries{}, nil)
+	for _, tc := range []struct {
+		name  string
+		exec  ExecutionConfig
+		rule  Rule
+		field string
+	}{
+		{"both model columns", ExecutionConfig{ModelID: execTestModelID, ACPModelID: "m"}, RuleModelConflict, "acp_model_id"},
+		{"session id with a new session", ExecutionConfig{TargetSessionID: execTestSessionID}, RuleRunTargetConflict, "target_session_id"},
+		{"existing session with runtime", ExecutionConfig{RunTarget: RunTargetExistingSession, TargetSessionID: execTestSessionID, RuntimeType: RuntimeModel}, RuleRunTargetConflict, "run_target"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.normalizeExecution(context.Background(), execTestBotID, tc.exec)
+			var got InvalidRequestError
+			if !errors.As(err, &got) || got.Rule() != tc.rule || got.Field() != tc.field {
+				t.Fatalf("error = %v, want rule %s on %s", err, tc.rule, tc.field)
+			}
+		})
+	}
+	if got := ErrModelRequired.(InvalidRequestError); got.Rule() != RuleModelRequired || got.Field() != "model_id" { //nolint:errorlint // sentinel built by ruleViolation
+		t.Fatalf("ErrModelRequired = %+v", got)
+	}
+}

@@ -60,7 +60,7 @@ func (a *Adapter) HandleWebhook(ctx context.Context, cfg channel.ChannelConfig, 
 
 	var cb webhook.CallbackRequest
 	if err := json.Unmarshal(body, &cb); err != nil {
-		a.logWarn("line webhook parse failed",
+		a.logWarn(ctx, "line webhook parse failed", err,
 			slog.String("config_id", cfg.ID),
 			slog.String("bot_id", cfg.BotID),
 			slog.String("reason", "parse_failed"),
@@ -72,7 +72,7 @@ func (a *Adapter) HandleWebhook(ctx context.Context, cfg channel.ChannelConfig, 
 	selfID := lineSelfUserID(cfg)
 	if len(cb.Events) == 0 {
 		if selfID == "" {
-			a.logWarn("line webhook empty events without self identity",
+			a.logWarn(ctx, "line webhook empty events without self identity", nil,
 				slog.String("config_id", cfg.ID),
 				slog.String("bot_id", cfg.BotID),
 				slog.String("reason", "missing_self_identity"),
@@ -87,7 +87,7 @@ func (a *Adapter) HandleWebhook(ctx context.Context, cfg channel.ChannelConfig, 
 	destination := strings.TrimSpace(cb.Destination)
 	if destination == "" {
 		total := a.incrementCounter("line_destination_mismatch_total")
-		a.logWarn("line webhook missing destination",
+		a.logWarn(ctx, "line webhook missing destination", nil,
 			slog.String("config_id", cfg.ID),
 			slog.String("bot_id", cfg.BotID),
 			slog.String("self_id_hash", hashValue(selfID)),
@@ -99,7 +99,7 @@ func (a *Adapter) HandleWebhook(ctx context.Context, cfg channel.ChannelConfig, 
 	}
 	if destination != selfID {
 		total := a.incrementCounter("line_destination_mismatch_total")
-		a.logWarn("line webhook destination mismatch",
+		a.logWarn(ctx, "line webhook destination mismatch", nil,
 			slog.String("config_id", cfg.ID),
 			slog.String("bot_id", cfg.BotID),
 			slog.String("destination_hash", hashValue(destination)),
@@ -148,7 +148,7 @@ func (a *Adapter) handleCallbackEvent(ctx context.Context, cfg channel.ChannelCo
 	isRedelivery := ev.DeliveryContext != nil && ev.DeliveryContext.IsRedelivery
 	dedupeKey := ""
 	if eventID == "" {
-		a.logWarn("line webhook event missing id",
+		a.logWarn(ctx, "line webhook event missing id", nil,
 			slog.String("config_id", cfg.ID),
 			slog.String("bot_id", cfg.BotID),
 			slog.String("reason", "missing_event_id"),
@@ -194,7 +194,7 @@ func (a *Adapter) handleCallbackEvent(ctx context.Context, cfg channel.ChannelCo
 	userID := strings.TrimSpace(source.UserId)
 	if userID == "" {
 		total := a.incrementCounter("line_webhook_missing_user_id_total")
-		a.logWarn("line webhook user source missing user id",
+		a.logWarn(ctx, "line webhook user source missing user id", nil,
 			slog.String("config_id", cfg.ID),
 			slog.String("bot_id", cfg.BotID),
 			slog.Bool("event_id_present", eventIDPresent),
@@ -227,7 +227,7 @@ func (a *Adapter) handleCallbackEvent(ctx context.Context, cfg channel.ChannelCo
 		if channel.IsInboundQueueFull(err) {
 			a.forgetEvent(dedupeKey)
 			total := a.incrementCounter("line_inbound_dropped_queue_full_total")
-			a.logWarn("line inbound dropped queue full",
+			a.logWarn(ctx, "line inbound dropped queue full", nil,
 				slog.String("config_id", cfg.ID),
 				slog.String("bot_id", cfg.BotID),
 				slog.Bool("event_id_present", eventIDPresent),
@@ -239,7 +239,7 @@ func (a *Adapter) handleCallbackEvent(ctx context.Context, cfg channel.ChannelCo
 			return eventResultQueueFull
 		}
 		a.forgetEvent(dedupeKey)
-		a.logWarn("line inbound enqueue failed",
+		a.logWarn(ctx, "line inbound enqueue failed", err,
 			slog.String("config_id", cfg.ID),
 			slog.String("bot_id", cfg.BotID),
 			slog.Bool("event_id_present", eventIDPresent),

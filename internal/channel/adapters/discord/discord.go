@@ -167,7 +167,6 @@ func (a *DiscordAdapter) getOrCreateSession(token, configID string) (*discordgo.
 
 	session, err := discordgo.New("Bot " + token)
 	if err != nil {
-		a.logger.Error("create session failed", slog.String("config_id", configID), slog.Any("error", err))
 		return nil, err
 	}
 

@@ -49,8 +49,7 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		channel.StreamEventAgentStart,
 		channel.StreamEventAgentEnd,
 		channel.StreamEventProcessingStarted,
-		channel.StreamEventProcessingCompleted,
-		channel.StreamEventProcessingFailed:
+		channel.StreamEventProcessingCompleted:
 		return nil
 	case channel.StreamEventPhaseEnd:
 		if event.Phase != channel.StreamPhaseText {

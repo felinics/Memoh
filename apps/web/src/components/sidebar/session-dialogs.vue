@@ -67,7 +67,6 @@ import {
 } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
 import type { SessionSummary } from '@/composables/api/useChat'
-import type { SidebarSessionMode } from '@/store/chat-list.utils'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const { t } = useI18n()
@@ -81,7 +80,6 @@ const pendingRename = ref<SessionSummary | null>(null)
 const deleteOpen = ref(false)
 const deleteLoading = ref(false)
 const pendingDelete = ref<SessionSummary | null>(null)
-const deleteFallbackMode = ref<SidebarSessionMode>('recent')
 
 function openRename(session: SessionSummary) {
   pendingRename.value = session
@@ -89,9 +87,8 @@ function openRename(session: SessionSummary) {
   renameOpen.value = true
 }
 
-function openDelete(session: SessionSummary, opts?: { fallbackMode?: SidebarSessionMode }) {
+function openDelete(session: SessionSummary) {
   pendingDelete.value = session
-  deleteFallbackMode.value = opts?.fallbackMode ?? 'recent'
   deleteOpen.value = true
 }
 
@@ -116,7 +113,7 @@ async function handleDelete() {
   if (!target || deleteLoading.value) return
   deleteLoading.value = true
   try {
-    await chatStore.removeSession(target.id, { fallbackMode: deleteFallbackMode.value })
+    await chatStore.removeSession(target.id)
     deleteOpen.value = false
     pendingDelete.value = null
   } finally {
