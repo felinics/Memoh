@@ -484,6 +484,7 @@ type BotWorkspace struct {
 	ObservedGeneration int64              `json:"observed_generation"`
 	EverReady          bool               `json:"ever_ready"`
 	LastError          string             `json:"last_error"`
+	LastErrorCode      string             `json:"last_error_code"`
 	LastErrorPhase     string             `json:"last_error_phase"`
 	Attempts           int32              `json:"attempts"`
 	NextAttemptAt      pgtype.Timestamptz `json:"next_attempt_at"`
@@ -786,6 +787,7 @@ type ScheduleLog struct {
 	Status       string             `json:"status"`
 	ResultText   string             `json:"result_text"`
 	ErrorMessage string             `json:"error_message"`
+	ErrorCode    string             `json:"error_code"`
 	Usage        []byte             `json:"usage"`
 	ModelID      pgtype.UUID        `json:"model_id"`
 	StartedAt    pgtype.Timestamptz `json:"started_at"`

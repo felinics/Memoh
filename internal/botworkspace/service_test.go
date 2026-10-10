@@ -3,10 +3,12 @@ package botworkspace
 import (
 	"context"
 	"errors"
-	"strings"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 // ─── fakes ───────────────────────────────────────────────────────────────────
@@ -142,6 +144,7 @@ func (r *memRepo) WriteObserved(_ context.Context, u ObservedWrite) (Workspace, 
 	w.ObservedGeneration = u.ObservedGeneration
 	w.EverReady = w.EverReady || u.MarkReady
 	w.LastError = u.LastError
+	w.LastErrorCode = u.LastErrorCode
 	w.LastErrorPhase = u.LastErrorPhase
 	w.Attempts = u.Attempts
 	w.NextAttemptAt = u.NextAttemptAt
@@ -635,24 +638,55 @@ func TestDriftScanRepairsVanishedStoppedWorkspace(t *testing.T) {
 	}
 }
 
-func TestFailureMessageRedactsCredentials(t *testing.T) {
-	backend := &fakeBackend{provisionErr: errors.New(
-		"pull https://admin:s3cr3t@registry.example.com/v2/memoh?token=abc123: unauthorized")}
-	svc, repo, _, _ := newTestService(t, backend)
-	ctx := context.Background()
-	_, _ = svc.EnsurePresent(ctx, bot, "img:1")
-	_, _ = svc.ReconcileOnce(ctx)
-
-	// last_error reaches the user through the bot's runtime checks, so the
-	// credentials the upstream error quoted must not survive the write.
-	got := repo.get(bot).LastError
-	for _, secret := range []string{"s3cr3t", "abc123"} {
-		if strings.Contains(got, secret) {
-			t.Fatalf("last_error leaked %q: %s", secret, got)
-		}
+// A failed step stores its catalog code and no text: the upstream error, with
+// whatever credentials it quoted, stays with the unit's result record.
+func TestFailureStoresCodeNotText(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"unknown failure", errors.New("pull https://admin:s3cr3t@registry.example.com/v2/memoh?token=abc123: unauthorized"), "workspace_setup_failed"},
+		{"image missing", fmt.Errorf("%w: not found", ErrImageNotFound), "workspace.image_not_found"},
+		{"registry down", fmt.Errorf("%w: dial tcp", ErrImageRegistryUnavailable), "workspace.image_registry_unavailable"},
 	}
-	if !strings.Contains(got, "***") {
-		t.Fatalf("last_error was not redacted: %s", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			backend := &fakeBackend{provisionErr: &StepError{Phase: PhaseImagePrepare, Err: tt.err}}
+			svc, repo, _, _ := newTestService(t, backend)
+			ctx := context.Background()
+			_, _ = svc.EnsurePresent(ctx, bot, "img:1")
+			_, _ = svc.ReconcileOnce(ctx)
+
+			got := repo.get(bot)
+			if got.LastErrorCode != tt.want || got.LastErrorPhase != PhaseImagePrepare {
+				t.Fatalf("code/phase = %q/%q, want %q/%q", got.LastErrorCode, got.LastErrorPhase, tt.want, PhaseImagePrepare)
+			}
+			if got.LastError != "" {
+				t.Fatalf("last_error = %q, want empty", got.LastError)
+			}
+		})
+	}
+}
+
+func TestFailureCode(t *testing.T) {
+	tests := []struct {
+		name string
+		step *StepError
+		want apperror.Code
+	}{
+		{"image missing", &StepError{Phase: PhaseImagePrepare, Err: fmt.Errorf("pull: %w", ErrImageNotFound)}, apperror.CodeWorkspaceImageNotFound},
+		{"registry down", &StepError{Phase: PhaseImagePrepare, Err: fmt.Errorf("pull: %w", ErrImageRegistryUnavailable)}, apperror.CodeWorkspaceImageRegistryUnavailable},
+		{"template", &StepError{Phase: PhaseBootstrap, Err: errors.New("write AGENTS.md")}, apperror.CodeWorkspaceTemplateBootstrapFailed},
+		{"other pull failure", &StepError{Phase: PhaseImagePrepare, Err: errors.New("pull access denied")}, apperror.CodeWorkspaceSetupFailed},
+		{"start", &StepError{Phase: PhaseStart, Err: errors.New("boom")}, apperror.CodeWorkspaceSetupFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := FailureCode(tt.step); got != tt.want {
+				t.Fatalf("FailureCode = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

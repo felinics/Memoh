@@ -3766,6 +3766,11 @@ export type ScheduleListResponse = {
 export type ScheduleLog = {
     bot_id?: string;
     completed_at?: string;
+    error_code?: string;
+    /**
+     * ErrorMessage is the text an earlier server stored; new failures set
+     * ErrorCode and leave it empty.
+     */
     error_message?: string;
     id?: string;
     result_text?: string;

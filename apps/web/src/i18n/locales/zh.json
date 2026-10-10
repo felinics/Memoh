@@ -520,6 +520,8 @@
     "workspace": {
       "archive_invalid": "无法解压该文件，请使用有效的 .zip、.tar.gz 或 .tgz 文件。",
       "display_prepare_failed": "显示环境准备失败，请稍后重试。",
+      "image_not_found": "工作区镜像不存在、需要镜像仓库凭据，或名称无效，请检查镜像名称后重试。",
+      "image_registry_unavailable": "暂时无法连接镜像仓库，请稍后重试。",
       "template_bootstrap_failed": "工作区文件初始化失败，请尝试重建工作区。",
       "unreachable": "暂时无法连接工作区，请稍后重试。"
     },

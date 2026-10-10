@@ -122,6 +122,16 @@ func TestDisplayPrepareErrorEventIsAStreamErrorWithItsStep(t *testing.T) {
 	}
 }
 
+func TestCreateBotHTTPErrorMapsRecordedWorkspaceCode(t *testing.T) {
+	err := createBotHTTPError(&bots.WorkspaceSetupError{Code: string(apperror.CodeWorkspaceImageRegistryUnavailable), Phase: botworkspace.PhaseImagePrepare}, true)
+	if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceImageRegistryUnavailable {
+		t.Fatalf("code = %q, want %q", got, apperror.CodeWorkspaceImageRegistryUnavailable)
+	}
+	if _, fault := errs.Answer(context.Background(), err); fault != apperror.FaultDependency {
+		t.Fatalf("fault = %q, want dependency", fault)
+	}
+}
+
 func TestWorkspaceSetupFailureKeepsBootstrapDiagnosticPrivate(t *testing.T) {
 	var event server.StreamError
 	recorded := sendWorkspaceFailure(context.Background(), func(payload any) bool {

@@ -112,6 +112,7 @@ type WorkspaceOutcome struct {
 	Desired        string
 	Observed       string
 	LastError      string
+	LastErrorCode  string
 	LastErrorPhase string
 	EverReady      bool
 }

@@ -436,6 +436,19 @@ func TestWorkspaceOutcomeErrorKeepsBootstrapSentinel(t *testing.T) {
 	}
 }
 
+func TestWorkspaceOutcomeErrorCarriesRecordedCode(t *testing.T) {
+	err := workspaceOutcomeError(WorkspaceOutcome{Observed: WorkspaceObservedFailed, LastErrorPhase: "image_prepare", LastErrorCode: "workspace.image_not_found"})
+	var setup *WorkspaceSetupError
+	if !errors.As(err, &setup) || setup.Code != "workspace.image_not_found" || setup.Phase != "image_prepare" {
+		t.Fatalf("error = %v, want a WorkspaceSetupError with the recorded code and phase", err)
+	}
+	// A bootstrap failure keeps its sentinel whether or not the row has a code.
+	err = workspaceOutcomeError(WorkspaceOutcome{Observed: WorkspaceObservedFailed, LastErrorPhase: WorkspacePhaseBootstrap, LastErrorCode: "workspace.template_bootstrap_failed"})
+	if !errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
+		t.Fatalf("bootstrap failure must map to the template sentinel, got %v", err)
+	}
+}
+
 func TestWorkspaceImageFromMetadata(t *testing.T) {
 	if got := workspaceImageFromMetadata(map[string]any{"workspace": map[string]any{"image": "  ghcr.io/x/y:1 "}}); got != "ghcr.io/x/y:1" {
 		t.Fatalf("image = %q", got)
@@ -566,5 +579,16 @@ func TestAwaitCreatedAnswersWithTheWorkspaceFailure(t *testing.T) {
 	_, err := svc.AwaitCreated(context.Background(), Bot{ID: "00000000-0000-0000-0000-000000000002"}, CreateBotRequest{WaitForReady: true})
 	if !errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
 		t.Fatalf("err = %v; a resend with wait_for_ready must get the failure its first attempt would have", err)
+	}
+}
+
+func TestContainerSetupFailureMetadataCarriesRecordedCode(t *testing.T) {
+	got := containerSetupFailure{Phase: "image_prepare", Code: "workspace.image_not_found"}.metadata()
+	if got["setup_error_code"] != "workspace.image_not_found" {
+		t.Fatalf("metadata = %v, want the recorded code", got)
+	}
+	plain := containerSetupFailure{Phase: "start"}.metadata()
+	if _, ok := plain["setup_error_code"]; ok {
+		t.Fatal("metadata of a failure without a code must not carry the key")
 	}
 }

@@ -21,7 +21,10 @@ const (
 type containerSetupFailure struct {
 	Phase   string
 	Message string
-	At      string
+	// Code is the catalog code the workspace reconciler recorded; the Web app
+	// renders errors.<code> in place of Message.
+	Code string
+	At   string
 }
 
 // RecordContainerSetupFailure persists a sanitized workspace setup failure so
@@ -130,6 +133,9 @@ func (f containerSetupFailure) metadata() map[string]any {
 	data := map[string]any{
 		"setup_error_phase": f.Phase,
 		"setup_error_at":    f.At,
+	}
+	if f.Code != "" {
+		data["setup_error_code"] = f.Code
 	}
 	return data
 }

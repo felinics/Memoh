@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -284,6 +285,54 @@ func TestCreateBotStreamReportsStableBootstrapError(t *testing.T) {
 	requireStreamFailureRecord(t, logs, apperror.CodeWorkspaceTemplateBootstrapFailed, "server", "/data/AGENTS.md")
 }
 
+func TestCreateBotStreamReportsRecordedWorkspaceCode(t *testing.T) {
+	tests := []struct {
+		name  string
+		code  apperror.Code
+		fault string
+		level string
+	}{
+		{"image missing", apperror.CodeWorkspaceImageNotFound, "client", "INFO"},
+		{"registry unreachable", apperror.CodeWorkspaceImageRegistryUnavailable, "dependency", "ERROR"},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ownerID := fmt.Sprintf("00000000-0000-0000-0000-0000000003%02d", i)
+			botID := fmt.Sprintf("00000000-0000-0000-0000-0000000004%02d", i)
+			streamDB := &createBotStreamDB{ownerID: ownerID, botID: botID}
+			logs := captureLogs()
+			handler := &UsersHandler{
+				logger:     logs.logger,
+				service:    newTestCreateBotAccountService(ownerID),
+				botService: bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
+				workspaceSetup: &createBotStreamWorkspace{
+					err:   errors.New("registry.example/nope: manifest unknown"),
+					phase: botworkspace.PhaseImagePrepare,
+					code:  string(tt.code),
+				},
+			}
+			req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
+				"name": "image-failed-bot",
+				"display_name": "Image Failed Bot",
+				"acl_preset": "allow_all",
+				"wait_for_ready": true
+			}`))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			req.Header.Set(echo.HeaderAccept, "text/event-stream")
+			rec := httptest.NewRecorder()
+			ctx := testAuthContext(echo.New(), req, rec, ownerID)
+
+			wireCreateBotIntents(handler)
+			events := serveWorkspaceStream(t, logs, handler.CreateBot, ctx, rec)
+			requireCatalogErrorEvent(t, events, tt.code, "manifest unknown")
+			records := logs.records(t)
+			if len(records) != 1 || records[0]["reason"] != string(tt.code) || records[0]["fault"] != tt.fault || records[0]["level"] != tt.level {
+				t.Fatalf("records = %#v, want one %s record, fault %s, level %s", records, tt.code, tt.fault, tt.level)
+			}
+		})
+	}
+}
+
 func TestGetMeReturnsUnauthorizedWhenTokenUserIsMissing(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000105"
 
@@ -401,6 +450,9 @@ type createBotStreamWorkspace struct {
 	events []workspace.ContainerSetupEvent
 	err    error
 	phase  string
+	// code is the catalog code a current server records for the failure; the
+	// row then carries no text.
+	code string
 
 	mu      sync.Mutex
 	subs    map[string][]chan botworkspace.ProgressEvent
@@ -485,6 +537,9 @@ func (w *createBotStreamWorkspace) record(botID, image string) {
 		if w.err != nil {
 			final.Observed = botworkspace.ObservedFailed
 			final.LastError = w.err.Error()
+			if w.code != "" {
+				final.LastError, final.LastErrorCode = "", w.code
+			}
 			final.LastErrorPhase = w.phase
 			if final.LastErrorPhase == "" {
 				final.LastErrorPhase = botworkspace.PhaseStart

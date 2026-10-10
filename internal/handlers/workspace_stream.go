@@ -201,15 +201,24 @@ func workspaceCompleteEvent(ctx context.Context, log *slog.Logger, status worksp
 	return createContainerCompleteEvent{Type: "complete", Container: response}, true
 }
 
-// sendWorkspaceFailure reports a failed observation. Template bootstrap
-// failures keep their dedicated code; everything else is the generic setup
-// failure. The backend's error text goes to the result record only.
+// sendWorkspaceFailure reports a failed observation with the code the
+// reconciler recorded. A row written by an earlier server has no code: its
+// template bootstrap failures keep their dedicated code and everything else is
+// the generic setup failure. The backend's error text goes to the result
+// record only.
 func sendWorkspaceFailure(ctx context.Context, send func(payload any) bool, w botworkspace.Workspace, requestID string) error {
-	code := apperror.CodeWorkspaceSetupFailed
-	if w.LastErrorPhase == botworkspace.PhaseBootstrap {
-		code = apperror.CodeWorkspaceTemplateBootstrapFailed
+	code := apperror.Code(w.LastErrorCode)
+	if code == "" {
+		code = apperror.CodeWorkspaceSetupFailed
+		if w.LastErrorPhase == botworkspace.PhaseBootstrap {
+			code = apperror.CodeWorkspaceTemplateBootstrapFailed
+		}
 	}
-	return sendWorkspaceStreamFailure(ctx, send, code, errs.New(w.LastError), requestID)
+	cause := errs.New("workspace provisioning failed", slog.String("phase", w.LastErrorPhase), slog.String("code", w.LastErrorCode))
+	if w.LastError != "" {
+		cause = errs.New(w.LastError)
+	}
+	return sendWorkspaceStreamFailure(ctx, send, code, cause, requestID)
 }
 
 // workspaceStreamBudget bounds how long an SSE stream follows a provisioning

@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/robfig/cron/v3"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/boot"
 	"github.com/felinics/memoh/internal/botagents"
@@ -402,18 +403,18 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 		// The session this schedule was pinned to no longer exists. Every
 		// future fire would fail identically, so disable the schedule after
 		// recording one error log instead of failing every tick.
-		s.completeLog(ctx, logRow.ID, "error", "", sessionErr.Error(), nil, pgtype.UUID{})
+		s.completeLog(ctx, logRow.ID, "error", "", failureCode(sessionErr), nil, pgtype.UUID{})
 		s.disableGoneSchedule(ctx, sched.ID)
 		return sessionErr
 	}
 	if sessionErr != nil {
-		s.completeLog(ctx, logRow.ID, "error", "", sessionErr.Error(), nil, pgtype.UUID{})
+		s.completeLog(ctx, logRow.ID, "error", "", failureCode(sessionErr), nil, pgtype.UUID{})
 		return sessionErr
 	}
 
 	token, err := s.generateTriggerToken(ownerUserID, time.Until(deadline)+5*time.Minute)
 	if err != nil {
-		s.completeLog(ctx, logRow.ID, "error", "", err.Error(), nil, pgtype.UUID{})
+		s.completeLog(ctx, logRow.ID, "error", "", failureCode(err), nil, pgtype.UUID{})
 		return fmt.Errorf("generate trigger token: %w", err)
 	}
 
@@ -433,7 +434,7 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 	}, token)
 	triggerErr = withExecutionTimeout(ctx, triggerErr)
 	if triggerErr != nil {
-		s.completeLog(ctx, logRow.ID, "error", "", triggerErr.Error(), nil, pgtype.UUID{})
+		s.completeLog(ctx, logRow.ID, "error", "", failureCode(triggerErr), nil, pgtype.UUID{})
 		return triggerErr
 	}
 
@@ -531,10 +532,29 @@ func (s *Service) publishChanged(botID, scheduleID string) {
 	messageevent.NotifyScheduleChanged(s.events, botID, scheduleID)
 }
 
-func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, resultText, errorMessage string, usageBytes []byte, modelID pgtype.UUID) {
+// failureCode is the catalog code a run log stores for a failed fire. The
+// error itself belongs to the fire's result record, not to the log row.
+func failureCode(err error) apperror.Code {
+	switch {
+	case errors.Is(err, ErrExecutionTimeout):
+		return apperror.CodeScheduleExecutionTimeout
+	case errors.Is(err, ErrTargetSessionGone):
+		return apperror.CodeSessionNotFound
+	case errors.Is(err, context.Canceled):
+		return apperror.CodeCanceled
+	}
+	if code := apperror.CodeOf(err); code != "" {
+		return code
+	}
+	return apperror.CodeInternal
+}
+
+// completeLog closes a run log. A failed fire passes the code of its cause;
+// a run whose budget expired is an execution timeout whatever else it reports.
+func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, resultText string, errorCode apperror.Code, usageBytes []byte, modelID pgtype.UUID) {
 	if errors.Is(context.Cause(ctx), ErrExecutionTimeout) {
 		status = "error"
-		errorMessage = "This scheduled run reached its execution limit."
+		errorCode = apperror.CodeScheduleExecutionTimeout
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
@@ -542,12 +562,12 @@ func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, re
 		return
 	}
 	_, err := s.queries.CompleteScheduleLog(ctx, sqlc.CompleteScheduleLogParams{
-		ID:           logID,
-		Status:       status,
-		ResultText:   resultText,
-		ErrorMessage: errorMessage,
-		Usage:        usageBytes,
-		ModelID:      modelID,
+		ID:         logID,
+		Status:     status,
+		ResultText: resultText,
+		ErrorCode:  string(errorCode),
+		Usage:      usageBytes,
+		ModelID:    modelID,
 	})
 	if err != nil {
 		s.logger.ErrorContext(ctx, "complete schedule log failed", slog.Any("error", err))
@@ -635,6 +655,7 @@ func toScheduleLog(row sqlc.ListScheduleLogsByBotRow) Log {
 		Status:       row.Status,
 		ResultText:   row.ResultText,
 		ErrorMessage: row.ErrorMessage,
+		ErrorCode:    row.ErrorCode,
 	}
 	if row.StartedAt.Valid {
 		l.StartedAt = row.StartedAt.Time
@@ -661,6 +682,7 @@ func toScheduleLogFromSchedule(row sqlc.ListScheduleLogsByScheduleRow) Log {
 		Status:       row.Status,
 		ResultText:   row.ResultText,
 		ErrorMessage: row.ErrorMessage,
+		ErrorCode:    row.ErrorCode,
 	}
 	if row.StartedAt.Valid {
 		l.StartedAt = row.StartedAt.Time

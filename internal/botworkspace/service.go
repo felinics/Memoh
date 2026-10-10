@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/errs"
@@ -565,7 +566,7 @@ func (s *Service) fail(ctx context.Context, w Workspace, step *StepError) error 
 	message := sanitize(step.Err)
 	final, err := s.writeObserved(ctx, w, ObservedWrite{
 		Observed: ObservedFailed, ObservedGeneration: w.DesiredGeneration,
-		LastError: message, LastErrorPhase: step.Phase,
+		LastErrorCode: string(FailureCode(step)), LastErrorPhase: step.Phase,
 		Attempts: attempts, NextAttemptAt: next, ReleaseLease: true,
 	})
 	if err != nil {
@@ -575,9 +576,10 @@ func (s *Service) fail(ctx context.Context, w Workspace, step *StepError) error 
 		s.deriveBotStatus(ctx, final)
 		s.publish(w.BotID, ProgressEvent{Type: EventError, Phase: step.Phase, Err: step.Err, Message: message, Workspace: &final})
 	}
-	failure := errs.Wrap(step.Err, "provision workspace",
+	// The unit's result names the same code the row records.
+	failure := apperror.Wrap(FailureCode(step), errs.Wrap(step.Err, "provision workspace",
 		slog.String("phase", step.Phase), slog.Bool("retryable", step.Retryable),
-		slog.Int("attempt", int(attempts)), slog.Time("next_attempt_at", next))
+		slog.Int("attempt", int(attempts)), slog.Time("next_attempt_at", next)), nil)
 	if willRetry {
 		return job.WillRetry(failure)
 	}

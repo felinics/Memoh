@@ -517,6 +517,8 @@
     "workspace": {
       "archive_invalid": "アーカイブを展開できません。有効な .zip、.tar.gz、.tgz ファイルを使用してください。",
       "display_prepare_failed": "ディスプレイの準備に失敗しました。しばらくしてからもう一度お試しください。",
+      "image_not_found": "ワークスペースのイメージが存在しないか、レジストリの認証が必要か、名前が正しくありません。イメージ名を確認してからもう一度お試しください。",
+      "image_registry_unavailable": "イメージレジストリに接続できません。しばらくしてからもう一度お試しください。",
       "template_bootstrap_failed": "Workspace ファイルを初期化できませんでした。Workspace を再構築してからもう一度お試しください。",
       "unreachable": "Workspace に接続できません。しばらくしてからもう一度お試しください。"
     },

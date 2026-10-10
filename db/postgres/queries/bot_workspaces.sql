@@ -84,6 +84,7 @@ SET
   observed_generation = sqlc.arg(observed_generation),
   ever_ready          = ever_ready OR sqlc.arg(mark_ready)::boolean,
   last_error          = sqlc.arg(last_error),
+  last_error_code     = sqlc.arg(last_error_code),
   last_error_phase    = sqlc.arg(last_error_phase),
   attempts            = sqlc.arg(attempts),
   next_attempt_at     = sqlc.arg(next_attempt_at),

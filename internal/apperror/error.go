@@ -45,6 +45,8 @@ const (
 	CodeWorkspaceUnreachable                     Code = "workspace.unreachable"
 	CodeWorkspaceTemplateBootstrapFailed         Code = "workspace.template_bootstrap_failed"
 	CodeWorkspaceDisplayPrepareFailed            Code = "workspace.display_prepare_failed"
+	CodeWorkspaceImageNotFound                   Code = "workspace.image_not_found"
+	CodeWorkspaceImageRegistryUnavailable        Code = "workspace.image_registry_unavailable"
 	CodeWorkspaceDependencyNotFound              Code = "workspace_dependency.not_found"
 	CodeWorkspaceDependencyRequestInvalid        Code = "workspace_dependency.request_invalid"
 	CodeWorkspaceDependencyActionUnsupported     Code = "workspace_dependency.action_unsupported"
@@ -588,6 +590,17 @@ var catalog = map[Code]Definition{
 	CodeWorkspaceDisplayPrepareFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "Display preparation failed.",
+	},
+	// The image name is a setting the user can change; the registry is the
+	// dependency whose outage the user can only wait out.
+	CodeWorkspaceImageNotFound: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The workspace image does not exist, needs registry credentials, or its name is invalid. Check the image name and try again.",
+	},
+	CodeWorkspaceImageRegistryUnavailable: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Fault:      FaultDependency,
+		Detail:     "The image registry could not be reached. Try again later.",
 	},
 	// Workspace dependencies (design docs/design/workspace-dependencies.md
 	// §11). The 409 family tells the UI what to offer instead: start or
