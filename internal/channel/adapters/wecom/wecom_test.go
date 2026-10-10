@@ -109,3 +109,23 @@ func TestOutboundStreamErrorReply(t *testing.T) {
 		})
 	}
 }
+
+func TestOutboundStreamErrorDropsBufferedAttachments(t *testing.T) {
+	stream, err := NewWeComAdapter(nil).OpenStream(context.Background(), channel.ChannelConfig{ID: "cfg-1"}, "chat_id:chat_1", channel.StreamOptions{})
+	if err != nil {
+		t.Fatalf("OpenStream: %v", err)
+	}
+	ws := stream.(*wecomOutboundStream)
+	if err := ws.Push(context.Background(), channel.PreparedStreamEvent{Type: channel.StreamEventAttachment, Attachments: []channel.PreparedAttachment{{
+		Kind:    channel.PreparedAttachmentPublicURL,
+		Logical: channel.Attachment{Type: channel.AttachmentImage, URL: "https://example.com/previous.png"},
+	}}}); err != nil {
+		t.Fatalf("Push attachment: %v", err)
+	}
+	// No live connection, so the send fails; only the queued message matters.
+	_ = ws.Push(context.Background(), channel.PreparedStreamEvent{Type: channel.StreamEventError, Error: "The workspace is unreachable.", ErrorCode: "workspace.unreachable"})
+	msg, _ := ws.snapshotMessage(true)
+	if len(msg.Attachments) != 0 || len(msg.Message.Attachments) != 0 {
+		t.Fatalf("error reply carries attachments: %#v", msg)
+	}
+}

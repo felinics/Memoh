@@ -90,6 +90,15 @@ function externalCatalog(
 // useAgentModelCatalog is the single frontend boundary for model discovery.
 // Each runtime keeps its native transport, while consumers always receive the
 // same picker-oriented catalog shape.
+// A catalog request that never settles (server restarting, a stalled proxy)
+// would otherwise keep the picker loading until the connection itself gives
+// up. Past this it fails, and the picker offers a retry.
+const CATALOG_TIMEOUT_MS = 15_000
+
+function withCatalogTimeout(signal: AbortSignal): AbortSignal {
+  return AbortSignal.any([signal, AbortSignal.timeout(CATALOG_TIMEOUT_MS)])
+}
+
 export function useAgentModelCatalog(options: UseAgentModelCatalogOptions) {
   const runtime = computed(() => toValue(options.runtime)?.trim() || 'model')
   const botId = computed(() => toValue(options.botId)?.trim() ?? '')
@@ -103,16 +112,16 @@ export function useAgentModelCatalog(options: UseAgentModelCatalogOptions) {
 
   const nativeModelsQuery = useQuery({
     key: ['models'],
-    query: async () => {
-      const { data } = await getModels({ throwOnError: true })
+    query: async ({ signal }) => {
+      const { data } = await getModels({ signal: withCatalogTimeout(signal), throwOnError: true })
       return data
     },
     enabled: () => isNative.value,
   })
   const nativeProvidersQuery = useQuery({
     key: ['providers'],
-    query: async () => {
-      const { data } = await getProviders({ throwOnError: true })
+    query: async ({ signal }) => {
+      const { data } = await getProviders({ signal: withCatalogTimeout(signal), throwOnError: true })
       return data
     },
     enabled: () => isNative.value,
@@ -127,7 +136,7 @@ export function useAgentModelCatalog(options: UseAgentModelCatalogOptions) {
       const { data } = await getBotsByBotIdAgentsByIdModels({
         path: { bot_id: botId.value, id: botAgentId.value },
         query: { project_path: projectPath.value || undefined, model_id: defaultsModelId.value || undefined },
-        signal,
+        signal: withCatalogTimeout(signal),
         throwOnError: true,
       })
       return { target, catalog: data }

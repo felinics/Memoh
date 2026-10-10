@@ -258,3 +258,110 @@ func exprString(e ast.Expr) string {
 	}
 	return "an expression"
 }
+
+// badRequestStatuses are the statuses whose echo.HTTPError message a user
+// would read as the reason a request was refused.
+var badRequestStatuses = map[string]bool{
+	"StatusBadRequest": true, "StatusUnprocessableEntity": true, "400": true, "422": true,
+}
+
+// TestBadRequestsCarryNoUserText keeps a refusal's explanation out of
+// echo.NewHTTPError. The boundary answers an *echo.HTTPError with the generic
+// code for its status and never sends its message, so a sentence written there
+// for the user is never read. A field problem uses apperror.FieldRequired or
+// FieldInvalid, a rule has a catalog code, and text kept for the access record
+// goes in WithInternal.
+func TestBadRequestsCarryNoUserText(t *testing.T) {
+	root := filepath.Join("..", "..")
+	fset := token.NewFileSet()
+	for _, dir := range []string{"internal", "cmd"} {
+		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return err
+			}
+			file, err := parser.ParseFile(fset, path, nil, 0)
+			if err != nil {
+				return err
+			}
+			ast.Inspect(file, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok || len(call.Args) < 2 {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || sel.Sel.Name != "NewHTTPError" || identName(sel.X) != "echo" {
+					return true
+				}
+				if badRequestStatuses[statusName(call.Args[0])] {
+					t.Errorf("%s: echo.NewHTTPError(%s, ...) carries text the user never sees; use a field or catalog error, or WithInternal", fset.Position(call.Pos()), statusName(call.Args[0]))
+				}
+				return true
+			})
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func statusName(e ast.Expr) string {
+	switch v := e.(type) {
+	case *ast.SelectorExpr:
+		return v.Sel.Name
+	case *ast.BasicLit:
+		return v.Value
+	}
+	return ""
+}
+
+// TestHTTPErrorsCarryNoErrorText keeps an error's text out of the message of
+// an echo.HTTPError in the handlers and channels. The message is not sent, so
+// the text reaches neither the user nor the result record, and the cause is
+// lost with it. A handler returns the error wrapped with errs.Wrap, maps it to
+// a catalog error, or attaches it with WithInternal.
+func TestHTTPErrorsCarryNoErrorText(t *testing.T) {
+	root := filepath.Join("..", "..")
+	fset := token.NewFileSet()
+	for _, dir := range []string{filepath.Join("internal", "handlers"), filepath.Join("internal", "channel")} {
+		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return err
+			}
+			file, err := parser.ParseFile(fset, path, nil, 0)
+			if err != nil {
+				return err
+			}
+			ast.Inspect(file, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok || len(call.Args) < 2 {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || sel.Sel.Name != "NewHTTPError" || identName(sel.X) != "echo" {
+					return true
+				}
+				for _, arg := range call.Args[1:] {
+					if isErrorTextCall(arg) {
+						t.Errorf("%s: echo.NewHTTPError(%s, %s) puts error text in a message that is never sent; return the error with errs.Wrap, map it to a catalog error, or use WithInternal", fset.Position(call.Pos()), statusName(call.Args[0]), exprString(arg))
+					}
+				}
+				return true
+			})
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// isErrorTextCall reports whether e is a call of the form x.Error().
+func isErrorTextCall(e ast.Expr) bool {
+	call, ok := e.(*ast.CallExpr)
+	if !ok || len(call.Args) != 0 {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	return ok && sel.Sel.Name == "Error"
+}

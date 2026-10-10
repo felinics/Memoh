@@ -158,7 +158,7 @@ func (h *CompactionHandler) TriggerCompact(c echo.Context) error {
 
 	sess, err := sessionpkg.NewService(h.logger, h.queries, nil).Get(c.Request().Context(), sessionID)
 	if err != nil || sess.BotID != botID {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.New(apperror.CodeSessionNotFound, nil)
 	}
 	perms, err := (&SessionHandler{botService: h.botService, accountService: h.accountService}).resolveCurrentUserPermissions(c, userID, botID)
 	if err != nil {

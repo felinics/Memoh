@@ -164,7 +164,7 @@ func TestProviderOAuthErrors(t *testing.T) {
 		fault apperror.Fault
 	}{
 		{"bad id", "nope", &mcpErrQueries{}, apperror.CodeRequestFieldInvalid, apperror.FaultClient},
-		{"missing provider", validUUID, &mcpErrQueries{providerEr: pgx.ErrNoRows}, apperror.CodeHTTPNotFound, apperror.FaultClient},
+		{"missing provider", validUUID, &mcpErrQueries{providerEr: pgx.ErrNoRows}, apperror.CodeProviderNotFound, apperror.FaultClient},
 		{"database failure", validUUID, &mcpErrQueries{providerEr: errors.New("connection reset")}, apperror.CodeInternal, apperror.FaultServer},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

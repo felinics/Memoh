@@ -86,8 +86,8 @@ func TestHandleWebhookInvalidXMLKeepsCause(t *testing.T) {
 	if !errors.As(err, &httpErr) {
 		t.Fatalf("error = %T, want *echo.HTTPError", err)
 	}
-	if httpErr.Code != http.StatusBadRequest || httpErr.Message != "invalid xml payload" || httpErr.Internal == nil {
-		t.Fatalf("HTTPError = %d %v internal=%v, want 400 invalid xml payload with its cause", httpErr.Code, httpErr.Message, httpErr.Internal)
+	if httpErr.Code != http.StatusBadRequest || httpErr.Internal == nil || !strings.Contains(httpErr.Internal.Error(), "invalid xml payload") {
+		t.Fatalf("HTTPError = %d internal=%v, want 400 with the invalid xml payload cause", httpErr.Code, httpErr.Internal)
 	}
 }
 

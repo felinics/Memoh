@@ -26,7 +26,6 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/agent/application"
-	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
@@ -72,6 +71,7 @@ type LocalChannelHandler struct {
 	botService          *bots.Service
 	accountService      *accounts.Service
 	sessionService      *sessionpkg.Service
+	workdirs            sessionWorkdirService
 	agentService        *application.Service
 	sessionRuntime      wsTurnAdmitter
 	commandHandler      *command.Handler
@@ -128,6 +128,12 @@ func NewLocalChannelHandler(channelType channel.ChannelType, channelManager *cha
 func (h *LocalChannelHandler) SetAgentService(service *application.Service) {
 	h.agentService = service
 	h.runtimeControls = service
+}
+
+// SetWorkdirService installs the workdir domain used to validate the workdir a
+// first message binds when it creates its session in-band.
+func (h *LocalChannelHandler) SetWorkdirService(workdirs sessionWorkdirService) {
+	h.workdirs = workdirs
 }
 
 // SetSessionRuntime installs the durable admission gate for turn-starting
@@ -270,17 +276,15 @@ func (h *LocalChannelHandler) ExecuteQuickAction(c echo.Context) error {
 	if !quickActionSkillActivationAllowedHint(req.Params) {
 		skillActivationAllowed = false
 	}
-	result, slashErr := h.executeWebQuickAction(c.Request().Context(), botID, actionID, skillActivationAllowed, webQuickActionContext{
+	result, actionErr := h.executeWebQuickAction(c.Request().Context(), botID, actionID, skillActivationAllowed, webQuickActionContext{
 		SessionID: sessionID,
 		ActorID:   channelIdentityID,
 		ModeID:    quickActionStringParam(req.Params, "mode_id"),
 		ToolURL:   buildExternalAgentToolsURL(c, botID),
 	})
 	event := commandEvent(req.InvocationID, req.ComposerScope, sessionID, actionID)
-	if slashErr != nil {
-		event.Type = "command_error"
-		event.Code, event.Message = slashErr.Code, slashUserMessage(slashErr.Code)
-		return c.JSON(http.StatusOK, event)
+	if actionErr != nil {
+		return writeCommandError(c, http.StatusOK, event, actionErr)
 	}
 	event.Type = "command_result"
 	event.Result = result
@@ -317,15 +321,16 @@ type webQuickActionContext struct {
 	ToolURL   string
 }
 
-func (h *LocalChannelHandler) executeWebQuickAction(ctx context.Context, botID, actionID string, skillActivationAllowed bool, control webQuickActionContext) (*CommandActionResult, *slash.Error) {
+// executeWebQuickAction runs a Web quick action. A failure is returned with its
+// cause; the caller answers it and its result record carries the cause.
+func (h *LocalChannelHandler) executeWebQuickAction(ctx context.Context, botID, actionID string, skillActivationAllowed bool, control webQuickActionContext) (*CommandActionResult, error) {
 	switch strings.TrimSpace(actionID) {
 	case "help":
 		items := []CommandActionListItem{
 			{ID: "help", Title: "/help", Description: "Show available quick actions", Kind: "quick_action"},
 			{ID: "new", Title: "/new", Description: "Start a new session", Kind: "quick_action"},
-			{ID: "compact", Title: "/compact", Description: "Compact the current session history", Kind: "quick_action"},
 		}
-		labels := []string{"/help", "/new", "/compact"}
+		labels := []string{"/help", "/new"}
 		text := "Available Web quick actions: %s."
 		// skillActivationAllowed already reflects a native chat
 		// session, which is also the only context where the model picker
@@ -346,27 +351,14 @@ func (h *LocalChannelHandler) executeWebQuickAction(ctx context.Context, botID, 
 		}, nil
 	case "skill.list":
 		if !skillActivationAllowed {
-			err := slash.Error{Code: slash.CodeUnsupportedSkillSlashContext}
-			return nil, &err
+			return nil, apperror.New(slash.CodeUnsupportedSkillSlashContext, nil)
 		}
 		if h.skillResolver == nil {
-			err := slash.Error{Code: slash.CodeRequestedSkillNotRuntimeUsable, Msg: "skill resolver not configured"}
-			return nil, &err
+			return nil, errs.New("skill resolver not configured")
 		}
 		catalog, err := h.skillResolver.ListSafeSkillCatalog(ctx, botID)
 		if err != nil {
-			code := slashErrorCode(err)
-			if code == "" {
-				code = slash.CodeRequestedSkillNotRuntimeUsable
-				// The generic code does not carry the cause, and the request is
-				// answered, so this is where the cause is recorded.
-				result := errlog.Event(ctx, "skill.list", err, errlog.Options{})
-				h.logger.LogAttrs(ctx, result.Level, "skill catalog failed", append([]slog.Attr{
-					slog.String("bot_id", botID),
-				}, result.Attrs()...)...)
-			}
-			slashErr := slash.Error{Code: code}
-			return nil, &slashErr
+			return nil, errs.Wrap(err, "list skill catalog")
 		}
 		items := make([]CommandActionListItem, 0, len(catalog))
 		for _, item := range catalog {
@@ -381,15 +373,16 @@ func (h *LocalChannelHandler) executeWebQuickAction(ctx context.Context, botID, 
 	case "permission":
 		return h.executeWebPermissionQuickAction(ctx, botID, control)
 	default:
-		err := slash.Error{Code: slash.CodeUnsupportedWebCommand}
-		return nil, &err
+		return nil, apperror.New(slash.CodeUnsupportedWebCommand, nil)
 	}
 }
 
-func (h *LocalChannelHandler) executeWebPermissionQuickAction(ctx context.Context, botID string, control webQuickActionContext) (*CommandActionResult, *slash.Error) {
-	if h == nil || h.agentService == nil || strings.TrimSpace(control.SessionID) == "" {
-		err := slash.Error{Code: slash.CodePermissionSessionRequired}
-		return nil, &err
+func (h *LocalChannelHandler) executeWebPermissionQuickAction(ctx context.Context, botID string, control webQuickActionContext) (*CommandActionResult, error) {
+	if h == nil || h.agentService == nil {
+		return nil, errs.New("agent service not configured")
+	}
+	if strings.TrimSpace(control.SessionID) == "" {
+		return nil, apperror.New(apperror.CodeRuntimeControlThreadUnavailable, nil)
 	}
 	request := application.RuntimeControlRequest{BotID: strings.TrimSpace(botID), ThreadID: strings.TrimSpace(control.SessionID), ActorID: strings.TrimSpace(control.ActorID), ModeID: control.ModeID, ToolHTTPURL: strings.TrimSpace(control.ToolURL)}
 	var state external.ModeState
@@ -406,24 +399,7 @@ func (h *LocalChannelHandler) executeWebPermissionQuickAction(ctx context.Contex
 	}
 
 	if err != nil {
-		code := slash.CodePermissionModeFailed
-		switch {
-		case errors.Is(err, toolapproval.ErrForbidden):
-			code = slash.CodePermissionDenied
-		case errors.Is(err, external.ErrControlUnsupported):
-			code = slash.CodePermissionModeUnsupported
-		case errors.Is(err, external.ErrModeUnavailable):
-			code = slash.CodePermissionModeUnavailable
-		default:
-			// The generic code does not carry the cause, and the request is
-			// answered, so this is where the cause is recorded.
-			result := errlog.Event(ctx, "runtime_control.permission", err, errlog.Options{})
-			h.logger.LogAttrs(ctx, result.Level, "permission mode change failed", append([]slog.Attr{
-				slog.String("bot_id", botID), slog.String("session_id", control.SessionID),
-			}, result.Attrs()...)...)
-		}
-		slashErr := slash.Error{Code: code}
-		return nil, &slashErr
+		return nil, runtimeControlError(err)
 	}
 	items := make([]CommandActionListItem, 0, len(state.AvailableModes))
 	for _, mode := range state.AvailableModes {
@@ -446,62 +422,6 @@ func (h *LocalChannelHandler) executeWebPermissionQuickAction(ctx context.Contex
 	return &CommandActionResult{Kind: resultKind, Items: items}, nil
 }
 
-func slashErrorCode(err error) string {
-	if err == nil {
-		return ""
-	}
-	var slashErr slash.Error
-	if errors.As(err, &slashErr) {
-		return slashErr.Code
-	}
-	return ""
-}
-
-func slashUserMessage(code string) string {
-	switch code {
-	case slash.CodeUnknownSlash:
-		return "Unknown slash command."
-	case slash.CodeUnsupportedWebCommand:
-		return "This slash command is not available in Web."
-	case slash.CodeInvalidSkillSlashSyntax:
-		return "Invalid skill slash syntax. Use /<skill-name> [prompt] or pick a skill from the composer."
-	case slash.CodeRequestedSkillNotFound:
-		return "Requested skill was not found."
-	case slash.CodeRequestedSkillAmbiguous:
-		return "Requested skill is ambiguous."
-	case slash.CodeRequestedSkillDisabled:
-		return "Requested skill is disabled."
-	case slash.CodeRequestedSkillNotRuntimeUsable:
-		return "Requested skill is not available for chat."
-	case slash.CodeTooManyRequestedSkills:
-		return "Too many skills selected."
-	case slash.CodeRequestedSkillContextTooLarge:
-		return "Selected skill context is too large."
-	case slash.CodeSlashAttachmentsUnsupported:
-		return "Slash commands cannot be sent with attachments."
-	case slash.CodeUnsupportedSkillSlashContext:
-		return "Requested skills are not supported in this context."
-	case slash.CodeUnsupportedLegacyEndpoint:
-		return "Skill activation requires WebSocket. Reconnect and try again."
-	case slash.CodePermissionDenied:
-		return "You do not have permission to run this command."
-	case slash.CodeReservedSkillMetadata:
-		return "Reserved skill metadata cannot be supplied by clients."
-	case slash.CodeInvalidQuickActionScope:
-		return "This quick action cannot be scoped to a session."
-	case slash.CodePermissionSessionRequired:
-		return "Open an External Agent session before using /permission."
-	case slash.CodePermissionModeUnsupported:
-		return "This Agent does not declare selectable session modes."
-	case slash.CodePermissionModeUnavailable:
-		return "That mode is not available for this Agent session."
-	case slash.CodePermissionModeFailed:
-		return "The Agent session mode could not be loaded or changed."
-	default:
-		return "Slash command failed."
-	}
-}
-
 func (h *LocalChannelHandler) resolveWebRequestedSkillContexts(ctx context.Context, botID string, requested []webRequestedSkill) ([]turn.RequestedSkillContext, error) {
 	names := make([]string, 0, len(requested))
 	for _, item := range requested {
@@ -515,7 +435,7 @@ func (h *LocalChannelHandler) resolveWebTextRequestedSkillContexts(ctx context.C
 		return nil, nil
 	}
 	if h.skillResolver == nil {
-		return nil, slash.NewError(slash.CodeRequestedSkillNotRuntimeUsable)
+		return nil, errs.New("skill resolver not configured")
 	}
 	resolved, err := h.skillResolver.ResolveTextRequestedSkills(ctx, botID, names)
 	if err != nil {
@@ -631,21 +551,37 @@ func webActionID(resource, action string) string {
 	}
 }
 
-func sendWSCommandError(writer *wsWriter, msg wsClientMessage, code string) {
-	event := commandEvent(msg.InvocationID, msg.ComposerScope, msg.SessionID, "")
-	event.Type = "command_error"
-	event.Code, event.Message = code, slashUserMessage(code)
-	writer.SendJSON(event)
+// failWSCommand answers a slash request that was refused or failed before a
+// run took it over with its command_error event, and writes the request's
+// result record.
+func (h *LocalChannelHandler) failWSCommand(ctx context.Context, writer *wsWriter, botID string, msg wsClientMessage, err error) {
+	writer.SendJSON(commandErrorEvent(ctx, msg, "", err))
+	recordWSRequestFailure(ctx, h.logger, botID, wsTurn(msg.InvocationID, msg.SessionID), "ws.command", err)
 }
 
 // commandErrorEvent is the command_error event for a command that failed with
 // err: the public error the HTTP error handler would answer err with.
 func commandErrorEvent(ctx context.Context, msg wsClientMessage, actionID string, err error) CommandEventResponse {
-	frame, _ := server.NewStreamError(ctx, err, "")
-	event := commandEvent(msg.InvocationID, msg.ComposerScope, msg.SessionID, actionID)
+	event, _ := commandError(ctx, commandEvent(msg.InvocationID, msg.ComposerScope, msg.SessionID, actionID), err)
+	return event
+}
+
+// writeCommandError answers an HTTP command request that failed with err with
+// its command_error event, and returns the error the event was rendered from,
+// which the request's result record attributes.
+func writeCommandError(c echo.Context, status int, event CommandEventResponse, err error) error {
+	event, rendered := commandError(c.Request().Context(), event, err)
+	if writeErr := c.JSON(status, event); writeErr != nil {
+		return writeErr
+	}
+	return rendered
+}
+
+func commandError(ctx context.Context, event CommandEventResponse, err error) (CommandEventResponse, error) {
+	frame, rendered := server.NewStreamError(ctx, err, "")
 	event.Type = "command_error"
 	event.Code, event.Args, event.Message, event.Fault = frame.Code, frame.Args, frame.Message, frame.Fault
-	return event
+	return event, rendered
 }
 
 func sendWSCommandResult(writer *wsWriter, msg wsClientMessage, actionID string, result *CommandActionResult) {
@@ -671,7 +607,7 @@ func (h *LocalChannelHandler) executeWSQueueCommand(ctx context.Context, writer 
 		var sess sessionpkg.Thread
 		sess, err = h.sessionService.Get(ctx, msg.SessionID)
 		if err != nil || sess.BotID != botID {
-			err = echo.NewHTTPError(http.StatusNotFound, "session not found")
+			err = apperror.New(apperror.CodeSessionNotFound, nil)
 			break
 		}
 		input := application.QueueInput{
@@ -823,10 +759,7 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	}
 	c.Request().Body = io.NopCloser(bytes.NewReader(body))
 	if jsonBodyHasKey(body, "requested_skills") {
-		event := commandEvent("", "", "", "")
-		event.Type = "command_error"
-		event.Code, event.Message = slash.CodeUnsupportedLegacyEndpoint, slashUserMessage(slash.CodeUnsupportedLegacyEndpoint)
-		return c.JSON(http.StatusBadRequest, event)
+		return writeCommandError(c, http.StatusBadRequest, commandEvent("", "", "", ""), apperror.New(slash.CodeUnsupportedLegacyEndpoint, nil))
 	}
 	var req LocalChannelMessageRequest
 	if err := c.Bind(&req); err != nil {
@@ -848,24 +781,18 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "resolver not configured")
 		}
 		if err := h.agentService.ValidateWorkspaceTarget(c.Request().Context(), botID, workspaceTargetID); err != nil {
-			return echo.NewHTTPError(http.StatusConflict, err.Error())
+			return workspaceTargetError(err)
 		}
 	}
 	if err := channel.RejectReservedSkillMetadata(req.Message); err != nil {
-		event := commandEvent("", "", "", "")
-		event.Type = "command_error"
-		event.Code, event.Message = slash.CodeReservedSkillMetadata, slashUserMessage(slash.CodeReservedSkillMetadata)
-		return c.JSON(http.StatusBadRequest, event)
+		return writeCommandError(c, http.StatusBadRequest, commandEvent("", "", "", ""), err)
 	}
 	// Slash CONTROL input (commands, skill activation) is WS-only; the legacy
 	// REST endpoint rejects it instead of degrading. Run the shared classifier
 	// rather than a bare "/" prefix check so prose that merely starts with a
 	// slash ("/etc/nginx.conf keeps failing…") still reaches the model.
 	if decision := h.classifyWebSlash(strings.TrimSpace(req.Message.PlainText()), len(req.Message.Attachments) > 0, slash.SurfaceWebWS); decision.Kind != slash.DecisionNormalChat {
-		event := commandEvent("", "", "", "")
-		event.Type = "command_error"
-		event.Code, event.Message = slash.CodeUnsupportedLegacyEndpoint, slashUserMessage(slash.CodeUnsupportedLegacyEndpoint)
-		return c.JSON(http.StatusOK, event)
+		return writeCommandError(c, http.StatusOK, commandEvent("", "", "", ""), apperror.New(slash.CodeUnsupportedLegacyEndpoint, nil))
 	}
 	cfg, err := h.channelStore.ResolveEffectiveConfig(c.Request().Context(), botID, h.channelType)
 	if err != nil {
@@ -961,6 +888,11 @@ type wsClientMessage struct {
 	Reason            string                     `json:"reason,omitempty"`
 	Answers           []userinput.QuestionAnswer `json:"answers,omitempty"`
 	Canceled          bool                       `json:"canceled,omitempty"`
+	// WorkdirID is the workdir a first message binds to the session it
+	// creates. It is read only when the message carries no session_id: a
+	// session's workdir binding is immutable, so on an existing session it is
+	// ignored rather than treated as a request to rebind.
+	WorkdirID string `json:"workdir_id,omitempty"`
 	// Cursor is the subscriber's last observed position. It is carried here
 	// rather than in a separate message type because runtime_subscribe shares
 	// this envelope with every other inbound message.
@@ -1018,6 +950,11 @@ type wsOutboundEvent struct {
 	Control   string `json:"control,omitempty"`
 	ControlID string `json:"control_id,omitempty"`
 	Applied   bool   `json:"applied,omitempty"`
+	// WorkdirID is the workdir the session was actually born bound to. It is
+	// set only on session_created, and empty when the session has no workdir,
+	// so a client that asked for one can tell a binding that did not happen
+	// from one that did.
+	WorkdirID string `json:"workdir_id,omitempty"`
 }
 
 // wsTurnRef names the turn an outbound event belongs to. It exists because that
@@ -1273,14 +1210,14 @@ func (h *LocalChannelHandler) resolveWSTargetTurnID(ctx context.Context, session
 	}
 	resolved, err := h.agentService.ResolveTurnIDForMessage(ctx, sessionID, legacy)
 	if err != nil {
-		return "", echo.NewHTTPError(http.StatusNotFound, "message_id does not name a turn in this session").WithInternal(err)
+		return "", apperror.Wrap(apperror.CodeSessionTurnNotFound, err, nil)
 	}
 	return resolved, nil
 }
 
-// wsWorkspaceTargetError is the answer to a send whose selected workspace
-// target does not resolve: a conflict, as the HTTP send answers it.
-func wsWorkspaceTargetError(err error) error {
+// workspaceTargetError is the answer to a send whose selected workspace
+// target does not resolve: a conflict, on HTTP and WebSocket alike.
+func workspaceTargetError(err error) error {
 	return echo.NewHTTPError(http.StatusConflict).WithInternal(err)
 }
 
@@ -1370,6 +1307,17 @@ func sendWSControlAck(writer *wsWriter, ref wsTurnRef, control, controlID string
 		Applied:   applied,
 		Code:      code,
 	})
+}
+
+// failWSControl answers a control that failed with a control_ack carrying
+// ackCode and writes the control's result record. The ack is what the client
+// branches on and the record carries err, so the two are separate: the ack is
+// the stable code the decision surfaces render, the record the cause.
+func failWSControl(ctx context.Context, logger *slog.Logger, writer *wsWriter, botID string, ref wsTurnRef, operation, control, controlID, ackCode string, err error) {
+	if controlID != "" {
+		sendWSControlAck(writer, ref, control, controlID, false, ackCode)
+	}
+	recordWSRequestFailure(ctx, logger, botID, ref, operation, err)
 }
 
 // wsRunRejectionCode maps the admission sentinels to the stable codes clients
@@ -1760,14 +1708,7 @@ func (h *LocalChannelHandler) abortWSRun(ctx context.Context, writer *wsWriter, 
 		applied, err = controller.AbortControl(ctx, botID, sessionID, runID, controlID)
 	}
 	if err != nil {
-		h.logger.WarnContext(ctx, "route ws abort failed",
-			slog.Any("error", err),
-			slog.String("bot_id", botID),
-			slog.String("run_id", runID),
-			slog.String("session_id", sessionID))
-		if controlID != "" {
-			sendWSControlAck(writer, ref, "abort", controlID, false, string(apperror.CodeOf(err)))
-		}
+		failWSControl(ctx, h.logger, writer, botID, ref, "ws.control.abort", "abort", controlID, string(apperror.CodeOf(err)), err)
 		return
 	}
 	if controlID != "" {
@@ -1974,11 +1915,10 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 		}
 		var msg wsClientMessage
 		if err := json.Unmarshal(raw, &msg); err != nil {
-			h.logger.WarnContext(c.Request().Context(), "ws: unmarshal failed",
-				slog.String("bot_id", botID),
-				slog.Any("error", err),
-			)
-			writer.SendJSON(map[string]string{"type": "error", "message": "invalid message format"})
+			// A frame that is not JSON names no field and no invocation.
+			frame, rendered := server.NewStreamError(c.Request().Context(), apperror.Wrap(apperror.CodeHTTPBadRequest, err, nil), "")
+			writer.SendJSON(frame)
+			recordWSRequestFailure(c.Request().Context(), h.logger, botID, wsTurnRef{}, "ws.message", rendered)
 			continue
 		}
 
@@ -2024,12 +1964,12 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				continue
 			}
 			if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
-				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(wsSessionAuthAckCode(err, apperror.CodeToolApprovalForbidden, apperror.CodeToolApprovalOperationFailed)))
+				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.tool_approval", msg.Type, controlID, string(wsSessionAuthAckCode(err, apperror.CodeToolApprovalForbidden, apperror.CodeToolApprovalOperationFailed)), err)
 				continue
 			}
 			controller := h.sessionRuntimeController()
 			if controller == nil {
-				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(apperror.CodeToolApprovalOperationFailed))
+				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.tool_approval", msg.Type, controlID, string(apperror.CodeToolApprovalOperationFailed), apperror.New(apperror.CodeToolApprovalOperationFailed, nil))
 				continue
 			}
 			payload, err := json.Marshal(application.ToolApprovalResponseInput{
@@ -2046,8 +1986,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				SuppressActivePromptAttach: true,
 			})
 			if err != nil {
-				h.logger.WarnContext(c.Request().Context(), "encode ws tool approval response failed", slog.Any("error", err))
-				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(apperror.CodeToolApprovalOperationFailed))
+				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.tool_approval", msg.Type, controlID, string(apperror.CodeToolApprovalOperationFailed), apperror.Wrap(apperror.CodeToolApprovalOperationFailed, err, nil))
 				continue
 			}
 			result, err := controller.RouteDecisionResponse(streamBaseCtx, sessionruntime.DecisionResponse{
@@ -2055,17 +1994,12 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				DecisionID: decisionID, BotID: botID, SessionID: sessionID, RunID: runID,
 				Payload: payload,
 			})
-			code := ""
 			if err != nil {
-				code = string(apperror.CodeOf(toolApprovalHTTPError(err)))
-				h.logger.WarnContext(c.Request().Context(), "route ws tool approval response failed",
-					slog.Any("error", err),
-					slog.String("bot_id", botID),
-					slog.String("run_id", runID),
-					slog.String("session_id", sessionID),
-					slog.String("decision_id", decisionID))
+				err = toolApprovalHTTPError(err)
+				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.tool_approval", msg.Type, controlID, string(apperror.CodeOf(err)), err)
+				continue
 			}
-			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied && err == nil, code)
+			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied, "")
 
 		case "user_input_response":
 			sessionID := strings.TrimSpace(msg.SessionID)
@@ -2090,12 +2024,12 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				continue
 			}
 			if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
-				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(wsSessionAuthAckCode(err, apperror.CodeUserInputForbidden, apperror.CodeUserInputOperationFailed)))
+				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.user_input", msg.Type, controlID, string(wsSessionAuthAckCode(err, apperror.CodeUserInputForbidden, apperror.CodeUserInputOperationFailed)), err)
 				continue
 			}
 			controller := h.sessionRuntimeController()
 			if controller == nil {
-				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(apperror.CodeUserInputOperationFailed))
+				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.user_input", msg.Type, controlID, string(apperror.CodeUserInputOperationFailed), apperror.New(apperror.CodeUserInputOperationFailed, nil))
 				continue
 			}
 			payload, err := json.Marshal(application.UserInputResponseInput{
@@ -2112,8 +2046,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				SuppressActivePromptAttach: true,
 			})
 			if err != nil {
-				h.logger.WarnContext(c.Request().Context(), "encode ws user input response failed", slog.Any("error", err))
-				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(apperror.CodeUserInputOperationFailed))
+				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.user_input", msg.Type, controlID, string(apperror.CodeUserInputOperationFailed), apperror.Wrap(apperror.CodeUserInputOperationFailed, err, nil))
 				continue
 			}
 			result, err := controller.RouteDecisionResponse(streamBaseCtx, sessionruntime.DecisionResponse{
@@ -2121,17 +2054,12 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				DecisionID: decisionID, BotID: botID, SessionID: sessionID, RunID: runID,
 				Payload: payload,
 			})
-			code := ""
 			if err != nil {
-				code = string(apperror.CodeOf(userInputResponseAppError(err)))
-				h.logger.WarnContext(c.Request().Context(), "route ws user input response failed",
-					slog.Any("error", err),
-					slog.String("bot_id", botID),
-					slog.String("run_id", runID),
-					slog.String("session_id", sessionID),
-					slog.String("decision_id", decisionID))
+				err = userInputResponseAppError(err)
+				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.user_input", msg.Type, controlID, string(apperror.CodeOf(err)), err)
+				continue
 			}
-			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied && err == nil, code)
+			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied, "")
 
 		case "message":
 			text := strings.TrimSpace(msg.Text)
@@ -2155,14 +2083,14 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}
 			if workspaceTargetID != "" {
 				if err := h.agentService.ValidateWorkspaceTarget(streamBaseCtx, botID, workspaceTargetID); err != nil {
-					failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.message", wsWorkspaceTargetError(err))
+					failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.message", workspaceTargetError(err))
 					continue
 				}
 			}
 
 			hasRequestedSkills := len(msg.RequestedSkills) > 0
 			if hasRequestedSkills && strings.HasPrefix(text, "/") {
-				sendWSCommandError(writer, msg, slash.CodeInvalidSkillSlashSyntax)
+				h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(slash.CodeInvalidSkillSlashSyntax, nil))
 				continue
 			}
 			controlRequest := application.RuntimeControlRequest{BotID: botID, ThreadID: sessionID, ActorID: channelIdentityID, ToolHTTPURL: buildExternalAgentToolsURL(c, botID)}
@@ -2171,7 +2099,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				controlRequest.Command = command.Name
 				if command.Kind != external.CommandTurn {
 					if len(msg.Attachments) > 0 {
-						sendWSCommandError(writer, msg, slash.CodeSlashAttachmentsUnsupported)
+						h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(slash.CodeSlashAttachmentsUnsupported, nil))
 						continue
 					}
 					go func(controlCtx context.Context, request application.RuntimeControlRequest, command external.Command, message wsClientMessage) {
@@ -2207,7 +2135,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					// Server-side twin of the Web composer guard: a quick action
 					// consumes only the command text, so accepting the message
 					// would silently drop the files.
-					sendWSCommandError(writer, msg, slash.CodeSlashAttachmentsUnsupported)
+					h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(slash.CodeSlashAttachmentsUnsupported, nil))
 					continue
 				}
 				actionID := webActionID(decision.Command.Resource, decision.Command.Action)
@@ -2250,9 +2178,9 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				if decision.Invocation != nil {
 					control.ModeID = decision.Invocation.Rest
 				}
-				result, slashErr := h.executeWebQuickAction(streamBaseCtx, botID, actionID, skillActivationAllowed, control)
-				if slashErr != nil {
-					sendWSCommandError(writer, msg, slashErr.Code)
+				result, actionErr := h.executeWebQuickAction(streamBaseCtx, botID, actionID, skillActivationAllowed, control)
+				if actionErr != nil {
+					h.failWSCommand(streamBaseCtx, writer, botID, msg, actionErr)
 				} else {
 					sendWSCommandResult(writer, msg, actionID, result)
 				}
@@ -2265,10 +2193,10 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				if code == "" {
 					code = slash.CodeUnknownSlash
 				}
-				sendWSCommandError(writer, msg, code)
+				h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(code, nil))
 				continue
 			default:
-				sendWSCommandError(writer, msg, slash.CodeUnknownSlash)
+				h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(slash.CodeUnknownSlash, nil))
 				continue
 			}
 
@@ -2285,11 +2213,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}
 			chatAttachments, attachmentErr := parseWSClientAttachments(msg.Attachments)
 			if attachmentErr != nil {
-				code := slashErrorCode(attachmentErr)
-				if code == "" {
-					code = slash.CodeReservedSkillMetadata
-				}
-				sendWSCommandError(writer, msg, code)
+				h.failWSCommand(streamBaseCtx, writer, botID, msg, attachmentErr)
 				continue
 			}
 
@@ -2317,13 +2241,15 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						continue
 					}
 					if !supported {
-						sendWSCommandError(writer, msg, slash.CodeUnsupportedSkillSlashContext)
+						h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(slash.CodeUnsupportedSkillSlashContext, nil))
 						continue
 					}
 					var reserved bool
 					releaseActiveWSTurn, reserved = h.reserveWSRequestedSkillTurn(botID, sessionID, ref.InvocationID)
 					if !reserved {
-						sendWSCommandError(writer, msg, slash.CodeUnsupportedSkillSlashContext)
+						// The session supports activation; the reservation
+						// failed because another turn of it is still running.
+						h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(apperror.CodeSessionBusy, nil))
 						continue
 					}
 				} else {
@@ -2334,11 +2260,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			if hasRequestedSkills {
 				requestedSkillContexts, err = h.resolveWebRequestedSkillContexts(streamBaseCtx, botID, msg.RequestedSkills)
 				if err != nil {
-					code := slashErrorCode(err)
-					if code == "" {
-						code = slash.CodeUnsupportedSkillSlashContext
-					}
-					sendWSCommandError(writer, msg, code)
+					h.failWSCommand(streamBaseCtx, writer, botID, msg, err)
 					releaseActiveWSTurnNow()
 					continue
 				}
@@ -2346,11 +2268,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			if pendingSkillIntent != nil {
 				requestedSkillContexts, err = h.resolveWebTextRequestedSkillContexts(streamBaseCtx, botID, pendingSkillIntent.Names)
 				if err != nil {
-					code := slashErrorCode(err)
-					if code == "" {
-						code = slash.CodeUnsupportedSkillSlashContext
-					}
-					sendWSCommandError(writer, msg, code)
+					h.failWSCommand(streamBaseCtx, writer, botID, msg, err)
 					releaseActiveWSTurnNow()
 					continue
 				}
@@ -2373,7 +2291,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					releaseActiveWSTurnNow()
 					continue
 				}
-				created, createErr := h.createWSChatSession(streamBaseCtx, botID, channelIdentityID, msg.ModelID, msg.ReasoningEffort)
+				created, createErr := h.createWSChatSession(streamBaseCtx, botID, channelIdentityID, msg.ModelID, msg.ReasoningEffort, msg.WorkdirID)
 				if createErr != nil {
 					failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.message", createErr)
 					releaseActiveWSTurnNow()
@@ -2386,7 +2304,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					var reserved bool
 					releaseActiveWSTurn, reserved = h.reserveWSRequestedSkillTurn(botID, sessionID, ref.InvocationID)
 					if !reserved {
-						sendWSCommandError(writer, msg, slash.CodeUnsupportedSkillSlashContext)
+						h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(apperror.CodeSessionBusy, nil))
 						continue
 					}
 				} else {
@@ -2394,7 +2312,9 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				}
 				// The session exists before the run does, so this is announced
 				// under the client's own name for the turn.
-				writer.SendJSON(ref.event("session_created"))
+				createdEvent := ref.event("session_created")
+				createdEvent.WorkdirID = created.WorkdirID
+				writer.SendJSON(createdEvent)
 			}
 			if !sessionAuthorized {
 				if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
@@ -2410,7 +2330,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				continue
 			}
 			if runtimeInfo.RequiresWorkspaceExec && len(requestedSkillContexts) > 0 {
-				sendWSCommandError(writer, msg, slash.CodeUnsupportedSkillSlashContext)
+				h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(slash.CodeUnsupportedSkillSlashContext, nil))
 				releaseActiveWSTurnNow()
 				continue
 			}
@@ -2570,7 +2490,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}
 			if workspaceTargetID != "" {
 				if err := h.agentService.ValidateWorkspaceTarget(streamBaseCtx, botID, workspaceTargetID); err != nil {
-					failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.retry_message", wsWorkspaceTargetError(err))
+					failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.retry_message", workspaceTargetError(err))
 					continue
 				}
 			}
@@ -2639,11 +2559,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}
 			chatAttachments, attachmentErr := parseWSClientAttachments(msg.Attachments)
 			if attachmentErr != nil {
-				code := slashErrorCode(attachmentErr)
-				if code == "" {
-					code = slash.CodeReservedSkillMetadata
-				}
-				sendWSCommandError(writer, msg, code)
+				h.failWSCommand(streamBaseCtx, writer, botID, msg, attachmentErr)
 				continue
 			}
 			if text == "" && len(chatAttachments) == 0 {
@@ -2660,7 +2576,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}
 			if workspaceTargetID != "" {
 				if err := h.agentService.ValidateWorkspaceTarget(streamBaseCtx, botID, workspaceTargetID); err != nil {
-					failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.edit_message", wsWorkspaceTargetError(err))
+					failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.edit_message", workspaceTargetError(err))
 					continue
 				}
 			}
@@ -2754,7 +2670,11 @@ func userInputResponseAppError(err error) error {
 // broadcast that follows can never be observed with empty preference.
 // Channel-side creation (inbound) calls thread.Create without these fields,
 // so channel sessions are born with NULL preference.
-func (h *LocalChannelHandler) createWSChatSession(ctx context.Context, botID, channelIdentityID, modelID, reasoningEffort string) (sessionpkg.Thread, error) {
+//
+// A requested workdir is validated by the same rule as the REST create
+// (resolveSessionWorkdirBinding) before anything is written, so an invalid
+// binding fails the send without leaving a session behind.
+func (h *LocalChannelHandler) createWSChatSession(ctx context.Context, botID, channelIdentityID, modelID, reasoningEffort, workdirID string) (sessionpkg.Thread, error) {
 	if h == nil || h.sessionService == nil {
 		return sessionpkg.Thread{}, errors.New("session service not configured")
 	}
@@ -2763,6 +2683,14 @@ func (h *LocalChannelHandler) createWSChatSession(ctx context.Context, botID, ch
 		ChannelType:     h.channelType.String(),
 		Type:            sessionpkg.TypeChat,
 		CreatedByUserID: strings.TrimSpace(channelIdentityID),
+	}
+	boundWorkdir, err := resolveSessionWorkdirBinding(ctx, h.workdirs, input.BotID, workdirID, sessionpkg.RuntimeModel)
+	if err != nil {
+		return sessionpkg.Thread{}, err
+	}
+	if boundWorkdir != nil {
+		input.WorkdirID = boundWorkdir.ID
+		input.WorkdirPath = boundWorkdir.Path
 	}
 	// Reconcile a carried pair exactly like the REST first-send (spec §3.3:
 	// every write point reconciles). Without it a stale composer draft naming
@@ -2814,7 +2742,7 @@ func (h *LocalChannelHandler) authorizeWSRuntimeExecution(ctx context.Context, c
 		return info, err
 	}
 	if strings.TrimSpace(info.BotID) != "" && info.BotID != bot.ID {
-		return info, echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return info, apperror.New(apperror.CodeSessionNotFound, nil)
 	}
 	perms, err := h.resolveCurrentUserPermissions(ctx, channelIdentityID, bot.ID)
 	if err != nil {
@@ -2863,10 +2791,10 @@ func (h *LocalChannelHandler) authorizeWSSession(ctx context.Context, channelIde
 	}
 	sess, err := h.sessionService.Get(ctx, sessionID)
 	if err != nil || sess.BotID != bot.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.New(apperror.CodeSessionNotFound, nil)
 	}
 	if !canAccessSession(sess, channelIdentityID, perms) {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.New(apperror.CodeSessionNotFound, nil)
 	}
 	return nil
 }

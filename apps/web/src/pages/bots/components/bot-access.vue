@@ -30,7 +30,7 @@
         <SettingsSection>
           <SettingsRow
             :label="$t('bots.access.modeTitle')"
-            :description="isBlacklistMode ? $t('bots.access.blacklistModeDescription') : $t('bots.access.whitelistModeDescription')"
+            :description="modeDescription"
           >
             <SegmentedControl
               :model-value="defaultEffectDraft"
@@ -40,6 +40,15 @@
               @update:model-value="(value) => handleSetDefaultEffect(String(value))"
             />
           </SettingsRow>
+          <!-- What the mode plus every rule add up to, per conversation type. The
+               New Bot policy presets are expressed only through conversation-type
+               rules, which the member list below never shows; without this line
+               "Private Only" and "Deny All" render identically. -->
+          <SettingsRow
+            v-if="!isPendingRules"
+            :label="$t('bots.access.effective.title')"
+            :description="effectiveSummary"
+          />
         </SettingsSection>
 
         <SettingsSection>
@@ -254,6 +263,7 @@
         >
           <ActionCard
             :title="$t('bots.access.advanced.entryTitle')"
+            :description="advancedRules.length ? $t('bots.access.advanced.activeCount', { count: advancedRules.length }, advancedRules.length) : ''"
             @click="rulesOpen = true"
           >
             <template #icon>
@@ -856,6 +866,74 @@ const advancedRules = computed(() =>
   rules.value.filter(r => r.effect === listEntryEffect.value && !isPureIdentityRule(r) && !isPureGroupRule(r)),
 )
 
+// ---- effective access summary ----
+
+type ConversationKind = 'private' | 'group' | 'thread'
+type EffectiveAccess = 'everyone' | 'listed' | 'exceptListed' | 'nobody'
+
+// Mirrors EvaluateBotACLRule: only enabled chat rules whose effect is opposite
+// to the default can change a decision, and an unset scope field matches any
+// value. A rule "covers everyone" in a conversation type when it pins no
+// sender, platform, conversation or thread — exactly the shape the presets
+// create; anything narrower only flips the decision for part of the traffic.
+function ruleAppliesTo(rule: AclRule, kind: ConversationKind): boolean {
+  const type = rule.source_scope?.conversation_type
+  return !type || type === kind
+}
+
+function ruleCoversEveryone(rule: AclRule): boolean {
+  return !rule.channel_identity_id
+    && !rule.subject_channel_type
+    && !rule.source_scope?.conversation_id
+    && !rule.source_scope?.thread_id
+}
+
+const overrideRules = computed(() =>
+  rules.value.filter(r => r.enabled !== false
+    && (!r.action || r.action === 'chat.trigger')
+    && !!r.effect && r.effect !== defaultEffectDraft.value),
+)
+
+function effectiveAccessFor(kind: ConversationKind): EffectiveAccess {
+  const applicable = overrideRules.value.filter(r => ruleAppliesTo(r, kind))
+  const wide = applicable.some(ruleCoversEveryone)
+  if (isBlacklistMode.value) {
+    if (wide) return 'nobody'
+    return applicable.length ? 'exceptListed' : 'everyone'
+  }
+  if (wide) return 'everyone'
+  return applicable.length ? 'listed' : 'nobody'
+}
+
+const effectiveSummary = computed(() => {
+  const kinds: Array<[ConversationKind, string]> = [
+    ['private', t('bots.access.privateConversationGroup')],
+    ['group', t('bots.access.groupConversationGroup')],
+    ['thread', t('bots.access.threadConversationGroup')],
+  ]
+  return kinds
+    .map(([kind, label]) => t('bots.access.effective.item', {
+      scope: label,
+      access: t(`bots.access.effective.${effectiveAccessFor(kind)}`),
+    }))
+    .join(t('bots.access.effective.separator'))
+})
+
+// The mode only gates IM channels. Web chat is governed by Workspace Members,
+// and owner-only channels (from /channels meta) bypass chat ACL entirely.
+const modeDescription = computed(() => {
+  const base = isBlacklistMode.value
+    ? t('bots.access.blacklistModeDescription')
+    : t('bots.access.whitelistModeDescription')
+  const ownerOnly = (channelMetas.value ?? [])
+    .filter(meta => meta.owner_only && meta.type?.trim())
+    .map(meta => formatPlatformName(meta.type, meta.display_name))
+  const scope = ownerOnly.length
+    ? t('bots.access.effective.scopeNoteWithExempt', { channels: ownerOnly.join(t('bots.access.effective.listJoiner')) })
+    : t('bots.access.effective.scopeNote')
+  return t('bots.access.effective.modeWithScope', { mode: base, scope })
+})
+
 // ---- members aggregation ----
 
 interface MemberRow {
@@ -1112,9 +1190,14 @@ function clearLocalOverride(key: string, field?: 'chat' | 'manage') {
 const memberAddLabel = computed(() =>
   isBlacklistMode.value ? t('bots.access.members.addBlocked') : t('bots.access.members.add'),
 )
-const memberEmptyDescription = computed(() =>
-  isBlacklistMode.value ? t('bots.access.members.emptyBlacklist') : t('bots.access.members.emptyWhitelist'),
-)
+const memberEmptyDescription = computed(() => {
+  // An empty member list is not an empty policy: advanced rules (including the
+  // conversation-type rules a New Bot preset creates) still decide who gets in.
+  if (advancedRules.value.length) {
+    return t('bots.access.members.emptyWithRules', { count: advancedRules.value.length }, advancedRules.value.length)
+  }
+  return isBlacklistMode.value ? t('bots.access.members.emptyBlacklist') : t('bots.access.members.emptyWhitelist')
+})
 const memberAddedMessage = computed(() =>
   isBlacklistMode.value ? t('bots.access.members.blocked') : t('bots.access.members.added'),
 )

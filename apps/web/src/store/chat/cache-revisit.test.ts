@@ -48,7 +48,7 @@ function harness() {
     connectWebSocket: (_bot, handler) => {
       socketEvent = handler
       return {
-        connected: true, onOpen: null, onClose: null, close: () => {}, abort: () => {},
+        connected: true, onOpen: null, onClose: null, close: () => {}, abort: () => {}, forget: () => {},
         send: message => {
           if (message.type !== 'runtime_subscribe') return
           if (!holdSnapshots) snapshot(message.session_id)

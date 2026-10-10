@@ -12,7 +12,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/channel/inbound"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/rpc"
 	runtimeRpc "github.com/felinics/memoh/internal/rpc/runtime"
 	"github.com/felinics/memoh/internal/rpc/runtimepb"
@@ -49,24 +51,28 @@ func newQueueClient(t *testing.T, handlers map[string]runtimeRpc.Handler) *Clien
 	return NewClient(runtimeRpc.NewClient(conn))
 }
 
+// A queue refusal crosses the RPC as its catalog code. The client forwards it:
+// a refusal stays the end user's, a server's unavailability is a dependency's,
+// and the received status stays on the chain.
 func TestQueueCodesSurviveEnvelope(t *testing.T) {
 	for _, code := range queueCodes {
-		envelope := func(ctx context.Context, _ json.RawMessage) (any, error) { return nil, queueStatus(ctx, code) }
-		encodings := map[string]map[string]runtimeRpc.Handler{
-			"envelope": {MethodQueueEnqueueSteer: envelope},
-			"server":   Handlers(nil, &queueHandlerStub{err: inbound.NewQueueCommandError(code)}, nil, nil),
-		}
-		for name, handlers := range encodings {
-			t.Run(code+"/"+name, func(t *testing.T) {
-				err := newQueueClient(t, handlers).EnqueueSteer(context.Background(), inbound.QueueCommandInput{BotID: "bot-1"})
-				if got := inbound.QueueCommandErrorCode(err); got != code {
-					t.Fatalf("queue code = %q from %v, want %q", got, err, code)
-				}
-				if rpc.Received(err).Error() == err.Error() {
-					t.Fatal("received status is not on the chain")
-				}
-			})
-		}
+		t.Run(code, func(t *testing.T) {
+			handlers := Handlers(nil, &queueHandlerStub{err: inbound.NewQueueCommandError(code)}, nil, nil)
+			err := newQueueClient(t, handlers).EnqueueSteer(context.Background(), inbound.QueueCommandInput{BotID: "bot-1"})
+			if got := inbound.QueueCommandErrorCode(err); got != code {
+				t.Fatalf("queue code = %q from %v, want %q", got, err, code)
+			}
+			want := apperror.FaultClient
+			if definition, _ := apperror.Lookup(apperror.Code(code)); definition.HTTPStatus >= 500 {
+				want = apperror.FaultDependency
+			}
+			if _, fault := errs.Answer(context.Background(), err); fault != want {
+				t.Fatalf("fault = %s, want %s", fault, want)
+			}
+			if rpc.Received(err).Error() == err.Error() {
+				t.Fatal("received status is not on the chain")
+			}
+		})
 	}
 }
 

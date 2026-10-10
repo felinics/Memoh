@@ -50,3 +50,47 @@ it('reads a WS failure code from the top level of the frame', () => {
   expect(wsFrameErrorCode({ code: '' })).toBe('')
   expect(wsFrameErrorCode({})).toBe('')
 })
+
+it('shows the local send-failed copy for an error frame that has no code', () => {
+  const rejectAssistantStream = vi.fn()
+  const assistantTurn = {
+    id: 'assistant', role: 'assistant' as const, messages: [], timestamp: '', streaming: true,
+  }
+  const deps = {
+    assistantStreams: {
+      invocationIdForEvent: () => 'inv-1',
+      getAssistantStream: () => ({ botId: 'bot', sessionId: 'session', assistantTurn }),
+      rejectAssistantStream,
+    },
+    hasVisibleAssistantBlocks: () => true,
+    removeTurnFromSession: vi.fn(),
+    sendFailedMessage: () => 'local send failed',
+  } as unknown as RuntimeIntegrationDeps
+  createRuntimeIntegration(deps).handleWebSocketEvent(
+    { type: 'error', message: 'upstream said: secret detail' } as never,
+    'bot',
+  )
+  const failure = rejectAssistantStream.mock.calls[0]![1] as Error
+  expect(failure.message).toBe('local send failed')
+})
+
+it('shows the local send-failed copy for a rejected run that has no code', () => {
+  const rejectAssistantStream = vi.fn()
+  const assistantTurn = {
+    id: 'assistant', role: 'assistant' as const, messages: [], timestamp: '', streaming: true,
+  }
+  const deps = {
+    assistantStreams: {
+      getAssistantStream: () => ({ botId: 'bot', sessionId: 'session', assistantTurn }),
+      rejectAssistantStream,
+    },
+    hasVisibleAssistantBlocks: () => true,
+    removeTurnFromSession: vi.fn(),
+    sendFailedMessage: () => 'local send failed',
+  } as unknown as RuntimeIntegrationDeps
+  createRuntimeIntegration(deps).handleWebSocketEvent(
+    { type: 'run_rejected', invocation_id: 'inv-1', message: 'upstream said: secret detail' } as never,
+    'bot',
+  )
+  expect((rejectAssistantStream.mock.calls[0]![1] as Error).message).toBe('local send failed')
+})

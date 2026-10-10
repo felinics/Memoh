@@ -202,12 +202,12 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 func (s *Service) Get(ctx context.Context, id string) (Schedule, error) {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
-		return Schedule{}, err
+		return Schedule{}, invalidFieldf("id", "invalid schedule id: %v", err)
 	}
 	row, err := s.queries.GetScheduleByID(ctx, pgID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Schedule{}, errors.New("schedule not found")
+			return Schedule{}, ErrScheduleNotFound
 		}
 		return Schedule{}, err
 	}
@@ -431,9 +431,7 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 		RuntimeModelID:  sched.ACPModelID,
 		ReasoningEffort: sched.ReasoningEffort,
 	}, token)
-	if errors.Is(context.Cause(ctx), ErrExecutionTimeout) {
-		triggerErr = ErrExecutionTimeout
-	}
+	triggerErr = withExecutionTimeout(ctx, triggerErr)
 	if triggerErr != nil {
 		s.completeLog(ctx, logRow.ID, "error", "", triggerErr.Error(), nil, pgtype.UUID{})
 		return triggerErr
@@ -443,6 +441,19 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 	s.completeLog(ctx, logRow.ID, result.Status, result.Text, "", result.UsageBytes, modelID)
 	job.Annotate(ctx, slog.String("status", result.Status))
 	return nil
+}
+
+// withExecutionTimeout names the budget as the cause when it expired. It wraps
+// the trigger's own failure instead of replacing it, so a Recorded marker the
+// trigger put on it still reaches the fire unit.
+func withExecutionTimeout(ctx context.Context, err error) error {
+	if !errors.Is(context.Cause(ctx), ErrExecutionTimeout) || errors.Is(err, ErrExecutionTimeout) {
+		return err
+	}
+	if err == nil {
+		return ErrExecutionTimeout
+	}
+	return fmt.Errorf("%w: %w", ErrExecutionTimeout, err)
 }
 
 // resolveRunSession decides which session this fire runs in. new_session

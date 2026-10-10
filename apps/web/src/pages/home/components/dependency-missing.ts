@@ -29,8 +29,8 @@ export function dependencyInstallationInProgress(args: Record<string, string>): 
 /**
  * The description of a missing dependency. While an accepted install runs it
  * says the dependency is installing; otherwise it is the copy for the code,
- * which names the dependency when the block has its id. A block loaded from
- * history keeps the code alone.
+ * which names the dependency when the block has its id. History stores the
+ * args with the code; a row written before it did has the code alone.
  */
 export function dependencyMissingText(block: ErrorBlock, t: Translate, te: HasTranslation): string {
   const args = dependencyMissingArgs(block)

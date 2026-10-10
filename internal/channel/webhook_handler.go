@@ -2,6 +2,8 @@ package channel
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -58,11 +60,11 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 	}
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "unknown channel platform").WithInternal(err)
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(fmt.Errorf("unknown channel platform: %w", err))
 	}
 	configID := strings.TrimSpace(c.Param("config_id"))
 	if configID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "config id is required")
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("config id is required"))
 	}
 	cfg, err := h.findConfigByID(c.Request().Context(), channelType, configID)
 	if err != nil {

@@ -129,6 +129,9 @@ func (h *ConnectorsHandler) ListCatalog(c echo.Context) error {
 	if _, err := RequireChannelIdentityID(c); err != nil {
 		return err
 	}
+	// The catalog is the upstream's own shape, so the response keeps the SDK
+	// type the OpenAPI annotation below names.
+	var items []connectsdk.Connector
 	items, err := h.service.ListCatalog(c.Request().Context())
 	if err != nil {
 		return connectorHTTPError(err)
@@ -257,27 +260,13 @@ func (h *ConnectorsHandler) authorize(c echo.Context) (string, error) {
 
 func connectorHTTPError(err error) error {
 	switch {
-	case errors.Is(err, connectors.ErrInvalidInput):
-		return apperror.Wrap(apperror.CodeConnectorRequestInvalid, err, nil)
 	case errors.Is(err, connectors.ErrNotConfigured):
 		return apperror.New(apperror.CodeConnectorNotConfigured, nil)
 	case errors.Is(err, pgx.ErrNoRows):
 		return apperror.New(apperror.CodeConnectorNotFound, nil)
 	}
-	var apiErr *connectsdk.APIError
-	if errors.As(err, &apiErr) {
-		switch apiErr.StatusCode {
-		case http.StatusBadRequest, http.StatusUnprocessableEntity:
-			return apperror.Wrap(apperror.CodeConnectorRequestRejected, err, nil)
-		case http.StatusNotFound:
-			return apperror.Wrap(apperror.CodeConnectorNotFound, err, nil)
-		case http.StatusConflict:
-			return apperror.Wrap(apperror.CodeConnectorConflict, err, nil)
-		}
-		return apperror.Wrap(apperror.CodeConnectorUpstreamUnavailable, err, nil)
-	}
-	if errors.Is(err, connectors.ErrUpstreamUnavailable) {
-		return apperror.Wrap(apperror.CodeConnectorUpstreamUnavailable, err, nil)
+	if code := connectors.CodeOf(err); code != "" {
+		return apperror.Wrap(code, err, nil)
 	}
 	return apperror.Wrap(apperror.CodeConnectorOperationFailed, err, nil)
 }

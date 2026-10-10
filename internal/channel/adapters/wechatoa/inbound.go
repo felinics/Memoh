@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -69,7 +70,7 @@ func rejectVerify(w http.ResponseWriter, status int, message string, cause error
 func (a *WeChatOAAdapter) handleInbound(ctx context.Context, verifier *securityVerifier, mode string, cfg channel.ChannelConfig, handler channel.InboundHandler, r *http.Request, w http.ResponseWriter) error {
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "read body failed").WithInternal(err)
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(fmt.Errorf("read body failed: %w", err))
 	}
 	defer func() { _ = r.Body.Close() }()
 
@@ -82,7 +83,7 @@ func (a *WeChatOAAdapter) handleInbound(ctx context.Context, verifier *securityV
 
 	var payload wechatEnvelope
 	if err := xml.Unmarshal([]byte(messageXML), &payload); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid xml payload").WithInternal(err)
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(fmt.Errorf("invalid xml payload: %w", err))
 	}
 	if handler != nil {
 		msg, ok := buildInboundMessage(payload)

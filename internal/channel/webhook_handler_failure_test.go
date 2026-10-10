@@ -126,7 +126,7 @@ func TestGenericWebhookHandlerRecordsUnknownPlatformCause(t *testing.T) {
 	c.SetParamNames("platform", "config_id")
 	c.SetParamValues("nosuchplatform", "cfg-1")
 	var httpErr *echo.HTTPError
-	if err := h.Handle(c); !errors.As(err, &httpErr) || httpErr.Message != "unknown channel platform" || httpErr.Internal == nil {
-		t.Fatalf("error = %v, want a constant message with the parse error as its cause", err)
+	if err := h.Handle(c); !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest || httpErr.Internal == nil || !strings.Contains(httpErr.Internal.Error(), "unknown channel platform") {
+		t.Fatalf("error = %v, want a 400 whose cause names the unknown platform", err)
 	}
 }

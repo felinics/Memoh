@@ -119,7 +119,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	ctx := c.Request().Context()
 	sessionRow, err := h.queries.GetSessionByID(ctx, pgSessionID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.Wrap(apperror.CodeSessionNotFound, err, nil)
 	}
 	sessionMode, runtimeType := normalizedSessionDescriptor(session.Thread{
 		Type:        sessionRow.Type,
@@ -131,7 +131,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 		return err
 	}
 	if sessionRow.BotID.String() != bot.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.New(apperror.CodeSessionNotFound, nil)
 	}
 	perms, err := h.resolveCurrentUserPermissions(c, userID, bot.ID)
 	if err != nil {
@@ -148,7 +148,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 		sess.CreatedByUserID = sessionRow.CreatedByUserID.String()
 	}
 	if !canAccessSession(sess, userID, perms) {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.New(apperror.CodeSessionNotFound, nil)
 	}
 
 	messageCount, err := h.queries.CountMessagesBySession(ctx, pgSessionID)

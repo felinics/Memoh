@@ -163,7 +163,7 @@ func (h *SessionQueueHandler) authorizeQueueAccess(ctx context.Context, identity
 	bot, err := h.botService.GetForAccess(ctx, botID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, bots.ErrBotNotFound) {
-			return echo.NewHTTPError(http.StatusNotFound, "bot not found")
+			return apperror.Wrap(apperror.CodeBotNotFound, err, nil)
 		}
 		return errs.Wrap(err, "load queue bot", slog.String("bot_id", botID))
 	}

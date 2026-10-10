@@ -13,6 +13,7 @@ import {
   treeRowSelectedClass,
 } from './tree-row'
 import { useTreeDisclosure } from './tree-disclosure'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 // One directory row in the folder picker. Mirrors file-tree-node's shape and
 // disclosure behaviour, minus everything the Explorer needs and a picker does
@@ -62,7 +63,7 @@ const { expanded, loaded, spinnerVisible, expand, toggle, reload } = useTreeDisc
     // The message is on the retry line below the row; a toast per node would
     // stack one per expanded folder. `failure` clears only on success so the
     // line holds its place during a retry instead of flickering out and back.
-    failure.value = error instanceof Error && error.message ? error.message : t('bots.folders.form.browseFailed')
+    failure.value = resolveApiErrorMessage(error, t('bots.folders.form.browseFailed'))
     return false
   }
 })
@@ -120,7 +121,7 @@ onMounted(() => {
         :key="g"
         :class="treeIndentClass"
       />
-      <span class="ml-1 min-w-0 flex-1 truncate">{{ failure }}</span>
+      <span class="ml-1 min-w-0 flex-1 truncate text-destructive">{{ failure }}</span>
       <TextButton
         class="ml-2 shrink-0"
         @click.stop="reload"

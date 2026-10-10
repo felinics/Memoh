@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n'
 import { getBotsByBotIdWorkdirsDirectories } from '@memohai/sdk'
 import DirectoryPickerNode from './directory-picker-node.vue'
 import type { DirectoryListing } from './directory-picker-types'
+import { UserFacingError } from '@/utils/api-error'
 
 // A directories-only tree for choosing ONE directory on a workspace target —
 // the Cloud Computer or a connected computer. Same row shape and disclosure
@@ -50,16 +51,16 @@ async function listDirectory(path: string): Promise<DirectoryListing> {
       query: { workspace_target_id: props.targetId, path: path || undefined },
     })
   } catch {
-    throw new Error(t('bots.folders.form.browseFailed'))
+    throw new UserFacingError(t('bots.folders.form.browseFailed'))
   }
   const { data, response } = result
   if (!data) {
     // The node shows this on its retry line. A computer that dropped offline
     // and a directory the runtime may not read are different fixes, so they
     // get different words; anything else stays generic.
-    if (response?.status === 503) throw new Error(t('bots.folders.form.browseUnreachable'))
-    if (response?.status === 403) throw new Error(t('bots.folders.form.browseForbidden'))
-    throw new Error(t('bots.folders.form.browseFailed'))
+    if (response?.status === 503) throw new UserFacingError(t('bots.folders.form.browseUnreachable'))
+    if (response?.status === 403) throw new UserFacingError(t('bots.folders.form.browseForbidden'))
+    throw new UserFacingError(t('bots.folders.form.browseFailed'))
   }
   return {
     path: data.path ?? path,

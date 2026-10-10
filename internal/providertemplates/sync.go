@@ -53,7 +53,7 @@ func syncLocked(ctx context.Context, logger *slog.Logger, queries dbstore.Querie
 		}
 		key := identity(string(definition.Domain), definition.Key)
 		if _, duplicate := seen[key]; duplicate {
-			return errs.New(fmt.Sprintf("duplicate provider template %s", key))
+			return errs.New("duplicate provider template", slog.String("key", key))
 		}
 		seen[key] = struct{}{}
 
@@ -75,7 +75,7 @@ func syncLocked(ctx context.Context, logger *slog.Logger, queries dbstore.Querie
 			continue
 		}
 		if err := queries.SetProviderTemplateActive(ctx, sqlc.SetProviderTemplateActiveParams{ID: row.ID, Active: false}); err != nil {
-			return errs.Wrap(err, fmt.Sprintf("deactivate provider template %s/%s", row.Domain, row.Key))
+			return errs.Wrap(err, "deactivate provider template", slog.String("domain", row.Domain), slog.String("key", row.Key))
 		}
 	}
 	return nil
@@ -91,7 +91,7 @@ func normalizeDefinition(raw Definition, fallbackOrder int) (Definition, string,
 		definition.SortOrder = fallbackOrder
 	}
 	if definition.Key == "" || definition.Name == "" || definition.Driver == "" || !IsValidDomain(definition.Domain) {
-		return Definition{}, "", errs.New(fmt.Sprintf("invalid provider template definition %q", definition.Key))
+		return Definition{}, "", errs.New("invalid provider template definition", slog.String("key", definition.Key))
 	}
 	if definition.ConfigSchema == nil {
 		definition.ConfigSchema = map[string]any{}
@@ -120,7 +120,7 @@ func normalizeDefinition(raw Definition, fallbackOrder int) (Definition, string,
 			model.Metadata = map[string]any{}
 		}
 		if model.ModelID == "" {
-			return Definition{}, "", errs.New(fmt.Sprintf("provider template %s has an empty model id", definition.Key))
+			return Definition{}, "", errs.New("provider template has an empty model id", slog.String("key", definition.Key))
 		}
 	}
 	payload, err := json.Marshal(definition)
@@ -174,7 +174,7 @@ func syncModels(ctx context.Context, queries dbstore.Queries, templateID pgtype.
 	for _, definition := range definitions {
 		key := identity(definition.Type, definition.ModelID)
 		if _, duplicate := seen[key]; duplicate {
-			return errs.New(fmt.Sprintf("duplicate template model %s", key))
+			return errs.New("duplicate template model", slog.String("key", key))
 		}
 		seen[key] = struct{}{}
 		config, err := json.Marshal(definition.Config)

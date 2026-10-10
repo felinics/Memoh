@@ -21,7 +21,7 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
-	"github.com/felinics/memoh/internal/textutil"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // OAuthService manages OAuth flows for MCP connections.
@@ -562,8 +562,7 @@ func (s *OAuthService) fetchProtectedResourceMetadata(ctx context.Context, metad
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("resource metadata returned %d: %s", resp.StatusCode, string(body))
+		return nil, errs.NewDependency("resource metadata request failed", slog.Int("status", resp.StatusCode))
 	}
 
 	var meta protectedResourceMetadata
@@ -680,12 +679,12 @@ func (s *OAuthService) exchangeCode(ctx context.Context, tokenEndpoint, code, co
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token exchange returned %d: %s", resp.StatusCode, string(body))
+		return nil, errs.NewDependency("token exchange request failed", slog.Int("status", resp.StatusCode))
 	}
 
 	tok, err := parseTokenResponse(body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse token response: %w (body: %s)", err, truncate(string(body), 256))
+		return nil, errs.WrapDependency(err, "failed to parse token response")
 	}
 	return tok, nil
 }
@@ -736,10 +735,6 @@ func parseTokenResponse(body []byte) (*tokenResponse, error) {
 	return &tok, nil
 }
 
-func truncate(s string, maxLen int) string {
-	return textutil.TruncateRunesWithSuffix(s, maxLen, "...")
-}
-
 func (s *OAuthService) refreshToken(ctx context.Context, tokenEndpoint, refreshToken, clientID, resourceURI string) (*tokenResponse, error) {
 	data := url.Values{
 		"grant_type":    {"refresh_token"},
@@ -769,7 +764,7 @@ func (s *OAuthService) refreshToken(ctx context.Context, tokenEndpoint, refreshT
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token refresh returned %d: %s", resp.StatusCode, string(body))
+		return nil, errs.NewDependency("token refresh request failed", slog.Int("status", resp.StatusCode))
 	}
 
 	tok, err := parseTokenResponse(body)
@@ -820,8 +815,7 @@ func (s *OAuthService) registerClient(ctx context.Context, registrationEndpoint,
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return nil, fmt.Errorf("DCR returned %d: %s", resp.StatusCode, string(respBody))
+		return nil, errs.NewDependency("dynamic client registration failed", slog.Int("status", resp.StatusCode))
 	}
 
 	var result dcrResponse

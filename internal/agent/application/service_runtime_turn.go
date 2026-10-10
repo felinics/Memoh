@@ -917,10 +917,13 @@ func (s *Service) persistRuntimeRound(
 		meta[key] = value
 	}
 	if promptErr != nil {
-		// The failure is recorded by its code, which the history view renders.
-		// The cause's text stays out of history.
+		// The failure is recorded by its code and catalog args, which the
+		// history view renders. The cause's text stays out of history.
 		meta["agent_turn_outcome"] = "failed"
-		meta["error_code"] = string(classifyRuntimeFailure(promptErr))
+		meta[messagepkg.HistoryErrorCodeMetadataKey] = string(classifyRuntimeFailure(promptErr))
+		if args := runtimeFailureArgs(promptErr); len(args) > 0 {
+			meta[messagepkg.HistoryErrorArgsMetadataKey] = args
+		}
 	}
 	output := sdkMessagesToModelMessages(result.Output)
 	if len(output) == 0 {
@@ -1070,13 +1073,20 @@ func runtimeTurnRan(result external.PromptResult) bool {
 // the catalog args of that public error.
 func runtimeFailureEvent(cause error) native.StreamEvent {
 	code := string(classifyRuntimeFailure(cause))
-	event := native.StreamEvent{Type: native.EventError, Code: code, Error: code}
-	if public := ExternalAgentError(cause); hasCatalogCode(public) {
-		if args := apperror.ArgsOf(public); len(args) > 0 {
-			event.Args = args
-		}
+	return native.StreamEvent{Type: native.EventError, Code: code, Error: code, Args: runtimeFailureArgs(cause)}
+}
+
+// runtimeFailureArgs are the catalog args of the public error a failed External
+// Agent turn ends with, or nil when it has none.
+func runtimeFailureArgs(cause error) map[string]string {
+	public := ExternalAgentError(cause)
+	if !hasCatalogCode(public) {
+		return nil
 	}
-	return event
+	if args := apperror.ArgsOf(public); len(args) > 0 {
+		return args
+	}
+	return nil
 }
 
 func runtimeTerminalStreamEvent(eventType native.StreamEventType, result external.PromptResult) native.StreamEvent {

@@ -257,21 +257,28 @@ func (*BotAgentsHandler) publicError(operation string, err error) error {
 func botAgentHTTPError(err error) error {
 	switch {
 	case errors.Is(err, botagents.ErrNotFound):
-		return apperror.New(apperror.CodeBotAgentNotFound, nil)
+		return apperror.Wrap(apperror.CodeBotAgentNotFound, err, nil)
 	case errors.Is(err, botagents.ErrNameTaken):
-		return apperror.New(apperror.CodeBotAgentNameTaken, nil)
-	case errors.Is(err, botagents.ErrInvalidRuntime), errors.Is(err, botagents.ErrProviderDirectRuntime):
-		return apperror.New(apperror.CodeBotAgentInvalidRuntime, nil)
+		return apperror.Wrap(apperror.CodeBotAgentNameTaken, err, nil)
+	case errors.Is(err, botagents.ErrProviderDirectRuntime):
+		var direct *botagents.ProviderDirectRuntimeError
+		args := map[string]string{}
+		if errors.As(err, &direct) {
+			args["runtime"] = direct.Runtime
+		}
+		return apperror.Wrap(apperror.CodeBotAgentProviderDirectRuntime, err, args)
+	case errors.Is(err, botagents.ErrInvalidRuntime):
+		return apperror.Wrap(apperror.CodeBotAgentInvalidRuntime, err, nil)
 	case errors.Is(err, botagents.ErrInvalidMetadata):
-		return apperror.New(apperror.CodeBotAgentInvalidMetadata, nil)
+		return apperror.Wrap(apperror.CodeBotAgentInvalidMetadata, err, nil)
 	case errors.Is(err, botagents.ErrDefaultInUse):
-		return apperror.New(apperror.CodeBotAgentDefaultInUse, nil)
+		return apperror.Wrap(apperror.CodeBotAgentDefaultInUse, err, nil)
 	case errors.Is(err, botagents.ErrUnavailable):
-		return apperror.New(apperror.CodeBotAgentUnavailable, nil)
+		return apperror.Wrap(apperror.CodeBotAgentUnavailable, err, nil)
 	}
 	var configErr *botagents.ConfigurationError
 	if errors.As(err, &configErr) {
-		return apperror.New(apperror.CodeBotAgentUnavailable, map[string]string{"field": configErr.Field})
+		return apperror.Wrap(apperror.CodeBotAgentUnavailable, err, map[string]string{"field": configErr.Field})
 	}
 	return nil
 }

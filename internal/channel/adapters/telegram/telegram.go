@@ -134,7 +134,7 @@ func (a *TelegramAdapter) SetAssetOpener(opener assetOpener) {
 
 var getOrCreateBotForTest func(a *TelegramAdapter, token, configID string) (*tele.Bot, error)
 
-func (a *TelegramAdapter) getOrCreateBot(ctx context.Context, cfg Config, configID string) (*tele.Bot, error) {
+func (a *TelegramAdapter) getOrCreateBot(_ context.Context, cfg Config, configID string) (*tele.Bot, error) {
 	redact.SetSecrets("telegram:"+configID, cfg.BotToken)
 	if getOrCreateBotForTest != nil {
 		return getOrCreateBotForTest(a, cfg.BotToken, configID)
@@ -153,9 +153,6 @@ func (a *TelegramAdapter) getOrCreateBot(ctx context.Context, cfg Config, config
 	}
 	httpClient, err := common.NewHTTPClient(30*time.Second, cfg.HTTPProxy)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.ErrorContext(ctx, "create bot http client failed", slog.String("config_id", configID), slog.Any("error", err))
-		}
 		return nil, err
 	}
 	bot, err = tele.NewBot(tele.Settings{
@@ -175,9 +172,6 @@ func (a *TelegramAdapter) getOrCreateBot(ctx context.Context, cfg Config, config
 		},
 	})
 	if err != nil {
-		if a.logger != nil {
-			a.logger.ErrorContext(ctx, "create bot failed", slog.String("config_id", configID), slog.Any("error", err))
-		}
 		return nil, err
 	}
 	a.bots[cacheKey] = bot
@@ -369,16 +363,10 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 	}
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.ErrorContext(ctx, "decode config failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
 		return nil, err
 	}
 	bot, err := a.getOrCreateBot(ctx, telegramCfg, cfg.ID)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.ErrorContext(ctx, "create bot failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
 		return nil, err
 	}
 	// Advertise the slash-command menu so users discover and tap commands from
@@ -1226,9 +1214,6 @@ func (a *TelegramAdapter) logTelegramInbound(ctx context.Context, configID strin
 func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.PreparedOutboundMessage) error {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.ErrorContext(ctx, "decode config failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
 		return err
 	}
 	to := strings.TrimSpace(msg.Target)
@@ -1264,9 +1249,6 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 				actions = msg.Message.Message.Actions
 			}
 			if err := sendTelegramAttachmentWithAssets(ctx, bot, to, att, caption, applyReply, parseMode, actions); err != nil {
-				if a.logger != nil {
-					a.logger.ErrorContext(ctx, "send attachment failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-				}
 				return err
 			}
 		}

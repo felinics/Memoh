@@ -257,11 +257,11 @@ func fsFileInfoFromEntry(containerPath, name string, isDir bool, size int64, mod
 func fsHTTPError(err error) error {
 	switch {
 	case errors.Is(err, bridge.ErrNotFound):
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.Wrap(apperror.CodeWorkspaceFileNotFound, err, nil)
 	case errors.Is(err, bridge.ErrBadRequest):
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(err)
 	case errors.Is(err, bridge.ErrForbidden):
-		return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		return echo.NewHTTPError(http.StatusForbidden).WithInternal(err)
 	case errors.Is(err, bridge.ErrUnavailable):
 		return workspaceUnavailableError(err)
 	default:

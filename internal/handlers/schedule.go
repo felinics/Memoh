@@ -11,6 +11,7 @@ import (
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/schedule"
 	"github.com/felinics/memoh/internal/workdir"
@@ -100,7 +101,7 @@ func (h *ScheduleHandler) List(c echo.Context) error {
 	}
 	items, err := h.service.List(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "schedule request")
 	}
 	return c.JSON(http.StatusOK, schedule.ListResponse{Items: items})
 }
@@ -131,10 +132,10 @@ func (h *ScheduleHandler) Get(c echo.Context) error {
 	}
 	item, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return scheduleLookupError(err)
 	}
 	if item.BotID != botID {
-		return echo.NewHTTPError(http.StatusForbidden, "bot mismatch")
+		return apperror.New(apperror.CodeHTTPForbidden, nil)
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
@@ -172,10 +173,10 @@ func (h *ScheduleHandler) Update(c echo.Context) error {
 	}
 	item, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return scheduleLookupError(err)
 	}
 	if item.BotID != botID {
-		return echo.NewHTTPError(http.StatusForbidden, "bot mismatch")
+		return apperror.New(apperror.CodeHTTPForbidden, nil)
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
@@ -212,16 +213,16 @@ func (h *ScheduleHandler) Delete(c echo.Context) error {
 	}
 	item, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return scheduleLookupError(err)
 	}
 	if item.BotID != botID {
-		return echo.NewHTTPError(http.StatusForbidden, "bot mismatch")
+		return apperror.New(apperror.CodeHTTPForbidden, nil)
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 	if err := h.service.Delete(c.Request().Context(), id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "schedule request")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -253,7 +254,7 @@ func (h *ScheduleHandler) ListLogs(c echo.Context) error {
 	limit, offset := parseOffsetLimit(c)
 	items, total, err := h.service.ListLogs(c.Request().Context(), botID, limit, offset)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "schedule request")
 	}
 	return c.JSON(http.StatusOK, schedule.ListLogsResponse{Items: items, TotalCount: total})
 }
@@ -290,7 +291,7 @@ func (h *ScheduleHandler) ListLogsBySchedule(c echo.Context) error {
 	limit, offset := parseOffsetLimit(c)
 	items, total, err := h.service.ListLogsBySchedule(c.Request().Context(), scheduleID, limit, offset)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "schedule request")
 	}
 	return c.JSON(http.StatusOK, schedule.ListLogsResponse{Items: items, TotalCount: total})
 }
@@ -317,7 +318,7 @@ func (h *ScheduleHandler) DeleteLogs(c echo.Context) error {
 		return err
 	}
 	if err := h.service.DeleteLogs(c.Request().Context(), botID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "schedule request")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -328,6 +329,15 @@ func (*ScheduleHandler) requireUserID(c echo.Context) (string, error) {
 
 func (h *ScheduleHandler) authorizeBotAccess(ctx context.Context, userID, botID string) (bots.Bot, error) {
 	return AuthorizeBotAccess(ctx, h.botService, h.accountService, userID, botID)
+}
+
+// scheduleLookupError answers a failed schedule lookup: an unknown ID is a
+// 404, a malformed one a field problem, anything else is internal.
+func scheduleLookupError(err error) error {
+	if errors.Is(err, schedule.ErrScheduleNotFound) {
+		return apperror.Wrap(apperror.CodeScheduleNotFound, err, nil)
+	}
+	return scheduleServiceError(err)
 }
 
 // scheduleServiceError maps schedule domain errors onto HTTP status codes:
@@ -341,6 +351,9 @@ func scheduleServiceError(err error) error {
 	}
 	var invalid schedule.InvalidRequestError
 	if errors.As(err, &invalid) {
+		if code, ok := scheduleRuleCodes[invalid.Rule()]; ok {
+			return apperror.Wrap(code, err, map[string]string{"field": invalid.Field()})
+		}
 		if invalid.Required() {
 			return apperror.FieldRequired(invalid.Field())
 		}
@@ -349,5 +362,14 @@ func scheduleServiceError(err error) error {
 	if errors.Is(err, workdir.ErrWorkdirNotFound) || errors.Is(err, workdir.ErrWorkdirArchived) {
 		return apperror.FieldInvalid("workdir_id", err)
 	}
-	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	return errs.Wrap(err, "schedule request")
+}
+
+// scheduleRuleCodes maps a broken schedule validation rule to its public code.
+var scheduleRuleCodes = map[schedule.Rule]apperror.Code{
+	schedule.RuleRunTargetConflict:      apperror.CodeScheduleRunTargetConflict,
+	schedule.RuleModelConflict:          apperror.CodeScheduleModelConflict,
+	schedule.RuleModelUnusable:          apperror.CodeScheduleModelUnusable,
+	schedule.RuleModelRequired:          apperror.CodeScheduleModelRequired,
+	schedule.RuleSessionModeUnsupported: apperror.CodeScheduleSessionModeUnsupported,
 }

@@ -12,6 +12,17 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 )
 
+// isBotOrSessionNotFound reports whether err is the shared authorization
+// answer for a bot or session that does not exist. ACP and context lifecycle
+// routes answer their own not-found code for it.
+func isBotOrSessionNotFound(err error) bool {
+	switch apperror.CodeOf(err) {
+	case apperror.CodeBotNotFound, apperror.CodeSessionNotFound:
+		return true
+	}
+	return false
+}
+
 func isHTTPStatus(err error, status int) bool {
 	var httpErr *echo.HTTPError
 	return errors.As(err, &httpErr) && httpErr.Code == status

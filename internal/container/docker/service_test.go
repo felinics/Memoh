@@ -569,3 +569,21 @@ func writeDockerJSON(t *testing.T, w http.ResponseWriter, value any) {
 		t.Errorf("encode Docker API response: %v", err)
 	}
 }
+
+func TestDecodePullProgressReturnsDaemonErrorFromStream(t *testing.T) {
+	t.Parallel()
+
+	stream := `{"id":"layer1","status":"Downloading","progressDetail":{"current":1,"total":10}}` + "\n" +
+		`{"error":"manifest unknown","errorDetail":{"message":"manifest unknown"}}` + "\n"
+	var reports int
+	err := decodePullProgress(strings.NewReader(stream), func(containerapi.PullProgress) { reports++ })
+	if err == nil || !strings.Contains(err.Error(), "image pull failed") {
+		t.Fatalf("decodePullProgress error = %v, want the stream's error", err)
+	}
+	if reports != 1 {
+		t.Fatalf("progress reports = %d, want 1 before the error", reports)
+	}
+	if got := errs.Analyze(context.Background(), err).Fault; got != apperror.FaultDependency {
+		t.Fatalf("fault = %q, want dependency", got)
+	}
+}

@@ -21,6 +21,7 @@ import (
 
 	"github.com/felinics/memoh/internal/acl"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botbackup/secure"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel"
@@ -1134,7 +1135,7 @@ func (s *Service) restoreMCP(ctx context.Context, botID string, state *importSta
 	for _, item := range items {
 		req := mcpRequestFromConnection(item)
 		if _, err := s.mcp.Create(ctx, botID, req); err != nil {
-			if e := s.itemErr(ctx, state, "mcp_connection", "mcp connection skipped", err); e != nil {
+			if e := s.itemErr(ctx, state, "mcp_connection", "mcp connection skipped", mcpImportError(err)); e != nil {
 				return e
 			}
 			continue
@@ -1142,6 +1143,15 @@ func (s *Service) restoreMCP(ctx context.Context, botID string, state *importSta
 		state.counts[SectionMCP]++
 	}
 	return nil
+}
+
+// mcpImportError attributes a name that is already in use to the data being
+// imported: the user's bundle or bot holds the duplicate, not this process.
+func mcpImportError(err error) error {
+	if errors.Is(err, mcp.ErrNameTaken) {
+		return apperror.Wrap(apperror.CodeMCPNameTaken, err, map[string]string{"field": "name"})
+	}
+	return err
 }
 
 func (s *Service) restoreSchedules(ctx context.Context, botID string, state *importState) error {

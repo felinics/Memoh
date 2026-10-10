@@ -138,12 +138,12 @@ func TestPostgresStoreLifecycle(t *testing.T) {
 		t.Fatalf("intent columns not replaced: %+v", again)
 	}
 
-	// SetStatus writes status and last_error.
-	failed, err := store.SetStatus(ctx, key, StatusFailed, "exec exited 1")
+	// SetStatus writes status and the failure's code, never the text.
+	failed, err := store.SetStatus(ctx, key, StatusFailed, "workspace_dependency.busy")
 	if err != nil {
 		t.Fatalf("set status: %v", err)
 	}
-	if failed.Status != StatusFailed || failed.LastError != "exec exited 1" {
+	if failed.Status != StatusFailed || failed.LastErrorCode != "workspace_dependency.busy" || failed.LastError != "" {
 		t.Fatalf("set status = %+v", failed)
 	}
 
@@ -161,16 +161,16 @@ func TestPostgresStoreLifecycle(t *testing.T) {
 		t.Fatalf("observed columns not written: %+v", observed)
 	}
 	if observed.Source != InstallationSourceImage || observed.InstalledVersion != "0.151.0" ||
-		observed.LastError != "exec exited 1" || observed.ManifestDigest != "sha256:two" || observed.Status != StatusFailed {
+		observed.LastErrorCode != "workspace_dependency.busy" || observed.ManifestDigest != "sha256:two" || observed.Status != StatusFailed {
 		t.Fatalf("nil fields must leave columns untouched: %+v", observed)
 	}
 	empty := ""
-	cleared, err := store.UpdateObserved(ctx, key, ObservedUpdate{LastError: &empty})
+	cleared, err := store.UpdateObserved(ctx, key, ObservedUpdate{LastErrorCode: &empty})
 	if err != nil {
-		t.Fatalf("clear last_error: %v", err)
+		t.Fatalf("clear the failure code: %v", err)
 	}
-	if cleared.LastError != "" || cleared.LatestVersion != latest {
-		t.Fatalf("pointer to empty string must clear only last_error: %+v", cleared)
+	if cleared.LastErrorCode != "" || cleared.LatestVersion != latest || cleared.LastError != "" {
+		t.Fatalf("pointer to empty string must clear only the failure code: %+v", cleared)
 	}
 
 	// Listing by target, bot, and status all see the row.

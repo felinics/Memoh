@@ -147,7 +147,7 @@ func (h *MCPHandler) Get(c echo.Context) error {
 	resp, err := h.service.Get(c.Request().Context(), botID, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, "mcp connection not found")
+			return apperror.Wrap(apperror.CodeMCPConnectionNotFound, err, nil)
 		}
 		return errs.Wrap(err, "get mcp connection")
 	}
@@ -189,7 +189,7 @@ func (h *MCPHandler) Update(c echo.Context) error {
 	resp, err := h.service.Update(c.Request().Context(), botID, id, req)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, "mcp connection not found")
+			return apperror.Wrap(apperror.CodeMCPConnectionNotFound, err, nil)
 		}
 		if errors.Is(err, db.ErrInvalidUUID) {
 			return apperror.FieldInvalid("id", err)
@@ -284,7 +284,7 @@ func (h *MCPHandler) Probe(c echo.Context) error {
 	conn, err := h.service.Get(c.Request().Context(), botID, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, "mcp connection not found")
+			return apperror.Wrap(apperror.CodeMCPConnectionNotFound, err, nil)
 		}
 		return errs.Wrap(err, "get mcp connection")
 	}

@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/textutil"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
@@ -41,13 +43,6 @@ const (
 	lastErrorLimit = 2048
 	// rollbackTimeout bounds the symlink switch; it touches no network.
 	rollbackTimeout = 2 * time.Minute
-	// interruptedMessage is written to last_error when List finds an
-	// in-progress record whose operation is provably gone.
-	interruptedMessage = "operation interrupted"
-	// cancelledMessagePrefix marks a last_error caused by the request going
-	// away (closed dialog, dropped connection, shutdown) rather than by the
-	// script.
-	cancelledMessagePrefix = "operation cancelled: "
 	// finalizeTimeout bounds the writes that record an operation's outcome
 	// once its script has finished or failed. They run on a context detached
 	// from the request so a closed dialog, a dropped connection, or the
@@ -220,11 +215,12 @@ type ListResult struct {
 	// below, inside the isolated workspace.
 	DataRoot string
 	Entries  []Entry
-	// DiscoveryError is set when the workspace is running but could not be
+	// DiscoveryFailed is set when the workspace is running but could not be
 	// inspected (the discovery exec was killed or timed out, the bridge did
 	// not answer). Entries then reflect the records alone, carry no
-	// discovery facts, and offer no actions.
-	DiscoveryError string
+	// discovery facts, and offer no actions. The cause is recorded once as
+	// an event and is not part of the result.
+	DiscoveryFailed bool
 }
 
 // PreflightItem is the verdict for one required dependency.
@@ -326,11 +322,10 @@ func (s *Service) list(ctx context.Context, botID string, force bool) (ListResul
 		// still say what the user asked for, so report them with the problem
 		// instead of failing the whole list. A stopped workspace never gets
 		// here; it keeps its own semantics above.
-		s.logger.WarnContext(ctx, "workspace dependency discovery failed; listing records only",
-			slog.String("bot_id", botID),
-			slog.Any("error", err),
-		)
-		result.DiscoveryError = truncateMessage(err.Error())
+		event := errlog.Event(ctx, "workspacedeps.discover", errs.Wrap(err, "discover workspace dependencies"), errlog.Options{})
+		s.logger.LogAttrs(ctx, event.Level, "workspace dependency discovery failed; listing records only",
+			append([]slog.Attr{slog.String("bot_id", botID)}, event.Attrs()...)...)
+		result.DiscoveryFailed = true
 		if snap, ok := s.cache.Get(botID); ok {
 			result.Platform = snap.Platform
 		}
@@ -966,7 +961,7 @@ func (s *Service) CheckUpdates(ctx context.Context, botID string) (ListResult, e
 	}
 
 	result, err := s.list(ctx, botID, true)
-	if err != nil || result.Workspace != WorkspaceRunning || result.DiscoveryError != "" {
+	if err != nil || result.Workspace != WorkspaceRunning || result.DiscoveryFailed {
 		// Without discovery facts there is nothing to check against.
 		return result, err
 	}
@@ -1310,7 +1305,7 @@ func (s *Service) record(ctx context.Context, op *operation, action catalog.Acti
 	terminal.Source, terminal.Status = InstallationSourceManaged, StatusInstalled
 	terminal.InstalledVersion, terminal.ManifestDigest = state.Version, state.ManifestDigest
 	terminal.SourceURL, terminal.RegistryID, terminal.DefinitionRevision = state.SourceURL, state.RegistryID, state.DefinitionRevision
-	terminal.LastError = ""
+	terminal.LastError, terminal.LastErrorCode = "", ""
 	rec, err := s.store.FinishOperation(storeCtx, op.key, op.operationID, &terminal)
 	if err != nil {
 		return OperationResult{}, s.fail(ctx, op, fmt.Errorf("workspacedeps: record %s %s: %w", action, op.dep.ID, err))
@@ -1417,10 +1412,6 @@ func (s *Service) fail(ctx context.Context, op *operation, cause error) error {
 		s.cache.Invalidate(op.key.BotID)
 		return cause
 	}
-	message := cause.Error()
-	if ctx.Err() != nil || errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
-		message = cancelledMessagePrefix + message
-	}
 	storeCtx, cancel := finalizeContext(ctx)
 	defer cancel()
 	terminal, err := s.store.Get(
@@ -1436,7 +1427,7 @@ func (s *Service) fail(ctx context.Context, op *operation, cause error) error {
 		// readState decodes the dependency's state.json; nil when there is none.
 		op.key)
 	if err == nil {
-		terminal.Status, terminal.LastError = StatusFailed, s.errorDetail(ctx, message)
+		terminal.Status, terminal.LastError, terminal.LastErrorCode = StatusFailed, "", failureCode(cause)
 		_, err = s.store.FinishOperation(storeCtx, op.key, op.operationID, &terminal)
 	}
 	if err != nil {
@@ -1597,13 +1588,12 @@ func (s *Service) recordCheck(ctx context.Context, key InstallationKey, check up
 	now := s.now().UTC()
 	upd := ObservedUpdate{LastCheckedAt: &now}
 	if checkErr != nil {
-		msg := s.errorDetail(ctx, checkErr.Error())
-		upd.LastError = &msg
+		code := failureCode(checkErr)
+		upd.LastErrorCode = &code
 	} else {
-		latest := check.Latest
-		cleared := ""
+		latest, cleared := check.Latest, ""
 		upd.LatestVersion = &latest
-		upd.LastError = &cleared
+		upd.LastErrorCode = &cleared
 	}
 	storeCtx, cancel := finalizeContext(ctx)
 	defer cancel()

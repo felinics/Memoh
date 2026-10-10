@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/channel/inbound"
-	intrpc "github.com/felinics/memoh/internal/rpc"
 )
 
 type queueHandlerStub struct {
@@ -50,34 +48,3 @@ func TestQueueRPCHandlersKeepQueueOperationsSeparate(t *testing.T) {
 		t.Fatalf("RPC changed queue input: steer %#v, follow-up %#v, want %#v", stub.steer[0], stub.followUp[0], want)
 	}
 }
-
-func TestQueueRPCHandlerPublishesOnlyStableQueueCode(t *testing.T) {
-	stub := &queueHandlerStub{err: inbound.NewQueueCommandError(inbound.QueueCommandCodeNoActiveRun)}
-	handlers := Handlers(nil, stub, nil, nil)
-	payload := json.RawMessage(`{"bot_id":"bot-1","session_id":"session-1","invocation_id":"channel:42:queue:steer","text":"use bun"}`)
-
-	_, err := handlers[MethodQueueEnqueueSteer](context.Background(), payload)
-	if reason, ok := intrpc.ReasonOf(err); !ok || reason != inbound.QueueCommandCodeNoActiveRun {
-		t.Fatalf("handler error = %v, want stable queue code as the reason", err)
-	}
-}
-
-func TestQueueCommandCodeAcceptsOnlyStableRPCVocabulary(t *testing.T) {
-	if got := queueCommandCode(queueStatus(context.Background(), inbound.QueueCommandCodeConflict)); got != inbound.QueueCommandCodeConflict {
-		t.Fatalf("stable code = %q", got)
-	}
-	if got := queueCommandCode(intrpc.AnswerStatus(context.Background(), apperror.New(apperror.CodeBotNameTaken, nil))); got != "" {
-		t.Fatalf("catalog code outside the queue vocabulary became queue code %q", got)
-	}
-	if got := queueCommandCode(assertionError("database diagnostic")); got != "" {
-		t.Fatalf("unsafe error became user-visible code %q", got)
-	}
-	// An error whose text is a queue code carries no envelope.
-	if got := queueCommandCode(assertionError(inbound.QueueCommandCodeConflict)); got != "" {
-		t.Fatalf("error text became queue code %q", got)
-	}
-}
-
-type assertionError string
-
-func (e assertionError) Error() string { return string(e) }

@@ -212,7 +212,7 @@ func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 	}
 	resp, err := provider.Add(c.Request().Context(), req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "add memory")
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -729,11 +729,11 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 		decoder.DisallowUnknownFields()
 		parsed := &payload
 		if err := decoder.Decode(&parsed); err != nil || parsed == nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid memory deletion request")
+			return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("invalid memory deletion request"))
 		}
 		var extra any
 		if err := decoder.Decode(&extra); err != io.EOF {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid memory deletion request")
+			return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("invalid memory deletion request"))
 		}
 	}
 
@@ -746,7 +746,7 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 		}
 		resp, delErr := provider.DeleteBatch(c.Request().Context(), botID, payload.MemoryIDs)
 		if delErr != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, delErr.Error())
+			return errs.Wrap(delErr, "delete memories")
 		}
 		return c.JSON(http.StatusOK, resp)
 	}
@@ -798,7 +798,7 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 	}
 	resp, err := provider.Delete(c.Request().Context(), botID, memoryID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "delete memory")
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -847,7 +847,7 @@ func (h *MemoryHandler) ChatUpdate(c echo.Context) error {
 		Memory:   payload.Memory,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "update memory")
 	}
 	return c.JSON(http.StatusOK, item)
 }
@@ -901,20 +901,15 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 	if checkErr != nil {
 		return checkErr
 	}
-	capability := semanticCompactCapability(provider)
-	if !capability.Semantic {
-		reason := strings.TrimSpace(capability.Reason)
-		if reason == "" {
-			reason = "selected memory provider does not support semantic compact"
-		}
-		return echo.NewHTTPError(http.StatusNotImplemented, reason)
+	if err := compactUnavailableError(semanticCompactCapability(provider)); err != nil {
+		return err
 	}
 
 	scope := scopes[0]
 	filters := buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil)
 	result, err := provider.Compact(c.Request().Context(), filters, ratio, decayDays)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "compact memories")
 	}
 	return c.JSON(http.StatusOK, result)
 }
@@ -992,14 +987,14 @@ func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
 	}
 	status, err := syncProvider.Status(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "read memory status")
 	}
 	if !status.CanManualSync {
 		return echo.NewHTTPError(http.StatusConflict, "manual sync is not available for the selected memory provider")
 	}
 	result, err := syncProvider.Rebuild(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "rebuild memory index")
 	}
 	return c.JSON(http.StatusOK, result)
 }
@@ -1032,7 +1027,7 @@ func (h *MemoryHandler) ChatIngest(c echo.Context) error {
 	}
 	result, err := ingestProvider.IngestFromMarkdown(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "ingest markdown memories")
 	}
 	return c.JSON(http.StatusOK, result)
 }
@@ -1065,7 +1060,7 @@ func (h *MemoryHandler) ChatStatus(c echo.Context) error {
 	}
 	status, err := syncProvider.Status(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "read memory status")
 	}
 	status.Compact = semanticCompactCapability(provider)
 	return c.JSON(http.StatusOK, status)
@@ -1122,17 +1117,31 @@ func buildNamespaceFilters(namespace, scopeID string, extra map[string]any) map[
 
 func semanticCompactCapability(provider memprovider.Provider) memprovider.MemoryCompactCapability {
 	if provider == nil {
-		return memprovider.MemoryCompactCapability{Reason: "memory service not available"}
+		return memprovider.MemoryCompactCapability{Reason: memprovider.CompactNotConfigured}
 	}
 	semanticProvider, ok := provider.(memprovider.SemanticCompactProvider)
 	if !ok {
-		return memprovider.MemoryCompactCapability{Reason: "selected memory provider does not support semantic compact"}
+		return memprovider.MemoryCompactCapability{Reason: memprovider.CompactUnsupported}
 	}
 	capability := semanticProvider.SemanticCompactCapability()
-	if !capability.Semantic && strings.TrimSpace(capability.Reason) == "" {
-		capability.Reason = "selected memory provider does not support semantic compact"
+	if !capability.Semantic && capability.Reason == "" {
+		capability.Reason = memprovider.CompactUnsupported
 	}
 	return capability
+}
+
+// compactUnavailableError is the answer to a compact request the capability
+// cannot serve, or nil when it can. A provider without compact is the user's
+// choice to change; anything the server did not wire is its own failure.
+func compactUnavailableError(capability memprovider.MemoryCompactCapability) error {
+	switch {
+	case capability.Semantic:
+		return nil
+	case capability.Reason == memprovider.CompactUnsupported:
+		return apperror.New(apperror.CodeMemoryCompactUnsupported, nil)
+	default:
+		return errs.New("semantic compact unavailable", slog.String("reason", string(capability.Reason)))
+	}
 }
 
 func deduplicateMemoryItems(botID string, items []memprovider.MemoryItem) []memprovider.MemoryItem {

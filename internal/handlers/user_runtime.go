@@ -111,7 +111,7 @@ func (h *UserRuntimeHandler) Delete(c echo.Context) error {
 
 func runtimeHTTPError(err error) error {
 	if errors.Is(err, db.ErrNotFound) {
-		return echo.NewHTTPError(http.StatusNotFound, "runtime not found")
+		return apperror.Wrap(apperror.CodeUserRuntimeNotFound, err, nil)
 	}
 	if db.IsUniqueViolation(err) {
 		return echo.NewHTTPError(http.StatusConflict, "runtime already exists")

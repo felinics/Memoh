@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}
@@ -38,7 +41,7 @@ func apiRequest(ctx context.Context, cfg Config, endpoint string, payload any) (
 		return nil, fmt.Errorf("misskey api read: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("misskey api %s: status %d: %s", endpoint, resp.StatusCode, string(respBody))
+		return nil, errs.NewDependency("misskey api request failed", slog.String("endpoint", endpoint), slog.Int("status", resp.StatusCode))
 	}
 	return json.RawMessage(respBody), nil
 }

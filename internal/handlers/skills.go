@@ -230,7 +230,11 @@ func (h *ContainerdHandler) upsertSkills(
 func skillActionHTTPError(err error) error {
 	switch {
 	case errors.Is(err, skillset.ErrSkillNotFound):
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return apperror.Wrap(apperror.CodeSkillNotFound, err, nil)
+	case errors.Is(err, skillset.ErrRegistrySkillReadOnly):
+		return apperror.Wrap(apperror.CodeSkillRegistryReadOnly, err, nil)
+	case errors.Is(err, skillset.ErrBuiltinSkillReadOnly):
+		return apperror.Wrap(apperror.CodeSkillBuiltinReadOnly, err, nil)
 	case errors.Is(err, skillset.ErrInvalidSkillRequest):
 		return apperror.FieldInvalid("target_path", err)
 	default:

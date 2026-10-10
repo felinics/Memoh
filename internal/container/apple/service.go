@@ -15,6 +15,7 @@ import (
 
 	"github.com/felinics/memoh/internal/config"
 	containerapi "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 var (
@@ -123,8 +124,7 @@ func (s *Service) ensureHealthy(ctx context.Context) error {
 	_ = s.manager.Stop()
 	_ = os.Remove(s.socketPath)
 	if err := s.startSocktainer(ctx); err != nil {
-		s.logger.ErrorContext(ctx, "socktainer restart failed", slog.Any("error", err))
-		return err
+		return errs.Wrap(err, "restart socktainer")
 	}
 	s.logger.InfoContext(ctx, "socktainer restarted successfully")
 	return nil

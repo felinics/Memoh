@@ -636,6 +636,7 @@ func (m *Manager) reconcileTerminalLive(ctx context.Context, terminal TerminalRu
 		run.OwnerLeaseExpiresAt = nil
 		run.ProposedTerminalStatus = ""
 		run.FinishProposedAt = nil
+		run.Retry = nil
 		run.ErrorCode = strings.TrimSpace(terminal.ErrorCode)
 		if status == RunStatusCompleted || status == RunStatusAborted {
 			run.ErrorCode = ""
@@ -1661,6 +1662,7 @@ func (m *Manager) finishRunState(ctx context.Context, handle RunHandle, status, 
 		snapshot.CurrentRunView.OwnerLeaseExpiresAt = nil
 		snapshot.CurrentRunView.ProposedTerminalStatus = ""
 		snapshot.CurrentRunView.FinishProposedAt = nil
+		snapshot.CurrentRunView.Retry = nil
 		return snapshot, true, nil
 	}, func(snapshot Snapshot) RuntimeDelta {
 		if admissionTerminal {
@@ -1909,6 +1911,7 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 	// sees the set it just shrank: the live projection may only leave
 	// waiting_decision when no sibling decision remains open.
 	resumeLiveOnTerminal := inlineDecision && !ctrl.decisionWaitActive()
+	retryCleared := false
 	snapshot, changed, err := m.updateActiveAndPublish(ctx, handle, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
 		run := snapshot.CurrentRunView
 		// Finalization may replay a durable decision after the run entered
@@ -1922,8 +1925,18 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 		snapshot.Seq++
 		snapshot.UpdatedAt = now
 		run.UpdatedAt = now
+		retryCleared = run.Retry != nil
+		run.Retry = nil
 		if event.Type == native.EventRetry {
 			run.Messages = []chatview.UIMessage{}
+			run.Retry = &RunRetryView{
+				Attempt:    event.Attempt,
+				MaxAttempt: event.MaxAttempt,
+				DelayMs:    event.RetryDelayMs,
+				Reason:     event.RetryReason,
+				RetryAt:    now.Add(time.Duration(event.RetryDelayMs) * time.Millisecond),
+			}
+			retryCleared = false
 		}
 		for _, msg := range messages {
 			run.Messages = upsertUIMessage(run.Messages, msg)
@@ -1980,6 +1993,15 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 			delta.Run = runtimeRunPatch(snapshot, true, false, false).Run
 		case native.EventError, native.EventRetry:
 			delta.Run = runtimeRunPatch(snapshot, false, true, false).Run
+		}
+		// Retry state rides every patch that follows an event changing it.
+		if event.Type == native.EventRetry || retryCleared {
+			if delta.Run == nil {
+				delta.Run = runtimeRunPatch(snapshot, false, false, false).Run
+			}
+			if delta.Run != nil {
+				delta.Run.setRetry(snapshot.CurrentRunView.Retry)
+			}
 		}
 		return delta
 	})

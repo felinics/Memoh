@@ -282,8 +282,7 @@ func (s *wecomOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		channel.StreamEventAgentStart,
 		channel.StreamEventAgentEnd,
 		channel.StreamEventProcessingStarted,
-		channel.StreamEventProcessingCompleted,
-		channel.StreamEventProcessingFailed:
+		channel.StreamEventProcessingCompleted:
 		return nil
 	case channel.StreamEventToolCallEnd:
 		return s.sendToolCallSummary(ctx, event.ToolCall)
@@ -327,6 +326,9 @@ func (s *wecomOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		s.final = &channel.PreparedMessage{
 			Message: channel.Message{Format: channel.MessageFormatPlain, Text: channel.ErrorReplyText(event.ErrorCode, text)},
 		}
+		// The error replaces the answer; the attachments buffered for it
+		// must not go out with the error.
+		s.attachments = nil
 		s.mu.Unlock()
 		return s.flush(ctx)
 	}

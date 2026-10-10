@@ -81,6 +81,12 @@ func assertSentinelStatus(t *testing.T, got, cause error, want int) {
 	t.Helper()
 	var httpErr *echo.HTTPError
 	isHTTP := errors.As(got, &httpErr)
+	if want == http.StatusNotFound && apperror.CodeOf(got) != "" {
+		if def, _ := apperror.Lookup(apperror.CodeOf(got)); def.HTTPStatus != want || apperror.CauseOf(got) == nil {
+			t.Fatalf("answer = %v, want a 404 public error with a cause", got)
+		}
+		return
+	}
 	if want == http.StatusInternalServerError {
 		if isHTTP || !errors.Is(got, cause) {
 			t.Fatalf("error = %v, want %v wrapped without a status", got, cause)

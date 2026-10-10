@@ -686,7 +686,13 @@ func (h *ACPRuntimeHandler) authorizedRuntimeControlBot(c echo.Context, actorID,
 }
 
 func acpRuntimeControlError(err error) error {
-	if err == nil || apperror.CodeOf(err) != "" {
+	if err == nil {
+		return nil
+	}
+	if isBotOrSessionNotFound(err) {
+		return apperror.New(apperror.CodeACPRuntimeNotFound, nil)
+	}
+	if apperror.CodeOf(err) != "" {
 		return err
 	}
 	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, bots.ErrBotNotFound) || isHTTPStatus(err, http.StatusNotFound) {
@@ -696,7 +702,13 @@ func acpRuntimeControlError(err error) error {
 }
 
 func acpRuntimeHTTPError(err error) error {
-	if err == nil || apperror.CodeOf(err) != "" {
+	if err == nil {
+		return nil
+	}
+	if isBotOrSessionNotFound(err) {
+		return apperror.New(apperror.CodeACPRuntimeNotFound, nil)
+	}
+	if apperror.CodeOf(err) != "" {
 		return err
 	}
 	var httpErr *echo.HTTPError

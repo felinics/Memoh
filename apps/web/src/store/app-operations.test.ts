@@ -17,6 +17,8 @@ vi.mock('@/lib/auth-session', () => ({ onAuthSessionCleared: vi.fn() }))
 vi.mock('@/composables/api/useApps', () => ({
   invalidateBotApps: vi.fn(),
   appInProgress: (item: { status?: string }) => ['installing', 'updating', 'removing'].includes(item.status ?? ''),
+  appLastError: (item: { last_error?: string, last_error_code?: string }, translate: (key: string) => string) =>
+    item.last_error_code ? translate(`errors.${item.last_error_code}`) : (item.last_error ?? ''),
 }))
 vi.mock('@/composables/api/useWorkspaceDependencies', () => ({ invalidateBotDependencies: vi.fn() }))
 vi.mock('@/composables/api/useAppStream', () => ({ streamAppOperation: mocks.stream }))
@@ -60,6 +62,19 @@ describe('remove operation recovery after a lost stream', () => {
     expect(mocks.success).not.toHaveBeenCalled()
     expect(store.retry(result.operation.key)).toBe(true)
     expect(mocks.stream).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'remove' }))
+  })
+
+  it('renders the error code of a failed removal through the catalog', async () => {
+    mocks.list.mockResolvedValue({ data: { items: [{
+      registry_id: 'memoh', app_id: 'editor', installation_id: 'installation',
+      status: 'failed', last_error_code: 'workspace_dependency.busy',
+    }] } })
+    const store = useAppOperationsStore()
+    const result = store.start(target)
+    if (result.kind !== 'started') throw new Error('operation did not start')
+    store.view(result.operation.key, 'test')
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(result.operation).toMatchObject({ status: 'error', error: 'errors.workspace_dependency.busy' })
   })
 
   it('reports an unwatched failed removal through an error toast', async () => {

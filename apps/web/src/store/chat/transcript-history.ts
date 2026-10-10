@@ -207,8 +207,8 @@ export function createTranscriptHistory(deps: {
     }
   }
 
-  // History stores a failure's code alone; a settled twin keeps the args and
-  // copy the live error frame left on the turn it replaces.
+  // A history row may name a failure by its code alone; a settled twin keeps
+  // the args and copy the live error frame left on the turn it replaces.
   function inheritLiveErrorDetails(incoming: ChatMessage[]) {
     const byId = new Map(deps.messages.map(turn => [turn.id, turn]))
     for (const twin of incoming) {

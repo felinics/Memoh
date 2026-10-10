@@ -1,9 +1,9 @@
 package skills
 
 import (
-	"errors"
 	"testing"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/slash"
 )
 
@@ -121,16 +121,12 @@ func testEntryWithMetadata(name, state, sourceKind, sourcePath, content string, 
 	}
 }
 
-func assertSlashCode(t *testing.T, err error, code string) {
+func assertSlashCode(t *testing.T, err error, code apperror.Code) {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("err = nil, want %s", code)
 	}
-	var slashErr slash.Error
-	if !errors.As(err, &slashErr) {
-		t.Fatalf("err = %T %[1]v, want slash.Error %s", err, code)
-	}
-	if slashErr.Code != code {
-		t.Fatalf("code = %s, want %s", slashErr.Code, code)
+	if got := apperror.CodeOf(err); got != code {
+		t.Fatalf("code = %s (%T %[2]v), want %s", got, err, code)
 	}
 }

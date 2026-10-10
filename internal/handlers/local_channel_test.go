@@ -548,7 +548,7 @@ func TestLocalChannelCreateWSChatSessionDoesNotBindRoute(t *testing.T) {
 		sessionService: sessionpkg.NewService(nil, queries, nil),
 	}
 
-	sess, err := handler.createWSChatSession(context.Background(), botID, userID, "", "")
+	sess, err := handler.createWSChatSession(context.Background(), botID, userID, "", "", "")
 	if err != nil {
 		t.Fatalf("createWSChatSession: %v", err)
 	}
@@ -822,9 +822,8 @@ func TestLocalChannelAuthorizeWSSessionScopesChatToCreator(t *testing.T) {
 	}
 
 	err := handler.authorizeWSSession(testEchoContext(currentUser).Request().Context(), currentUser, botID, sessionID)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
-		t.Fatalf("authorizeWSSession() error = %v, want HTTP 404", err)
+	if apperror.CodeOf(err) != apperror.CodeSessionNotFound {
+		t.Fatalf("authorizeWSSession() error = %v, want session.not_found", err)
 	}
 }
 
@@ -946,8 +945,8 @@ func TestLocalChannelWSMessageAuthorizesSessionBeforeSlashCommand(t *testing.T) 
 		if got := event["type"]; got != "error" {
 			t.Fatalf("event type = %#v, want error; event=%#v", got, event)
 		}
-		if event["code"] != "http.not_found" || event["message"] != "The requested resource was not found." {
-			t.Fatalf("event = %#v, want http.not_found for the unauthorized session", event)
+		if event["code"] != string(apperror.CodeSessionNotFound) || event["message"] != "The conversation was not found." {
+			t.Fatalf("event = %#v, want session.not_found for the unauthorized session", event)
 		}
 		if _, ok := event["result"]; ok {
 			t.Fatalf("unexpected command result before session authorization: %#v", event)
@@ -1155,7 +1154,7 @@ func TestLocalChannelWSQuickActionSkillListRejectsACPSession(t *testing.T) {
 	if event.Type != "command_error" {
 		t.Fatalf("event type = %q, want command_error; event=%#v", event.Type, event)
 	}
-	if event.Code != slash.CodeUnsupportedSkillSlashContext {
+	if event.Code != string(slash.CodeUnsupportedSkillSlashContext) {
 		t.Fatalf("code = %q, want %q", event.Code, slash.CodeUnsupportedSkillSlashContext)
 	}
 }
@@ -1349,9 +1348,8 @@ func TestExecuteQuickActionPermissionEnforcesSessionVisibility(t *testing.T) {
 	if err == nil {
 		t.Fatalf("ExecuteQuickAction should deny permission action on a session the actor cannot access; body=%s", rec.Body.String())
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
-		t.Fatalf("error = %v, want 404 session not found", err)
+	if apperror.CodeOf(err) != apperror.CodeSessionNotFound {
+		t.Fatalf("error = %v, want session.not_found", err)
 	}
 }
 
@@ -1446,11 +1444,11 @@ func TestExecuteWebQuickActionHelpListsAllQuickActions(t *testing.T) {
 	for _, item := range full.Items {
 		gotIDs = append(gotIDs, item.ID)
 	}
-	wantIDs := []string{"help", "new", "compact", "skill.list", "model"}
+	wantIDs := []string{"help", "new", "skill.list", "model"}
 	if !slices.Equal(gotIDs, wantIDs) {
 		t.Fatalf("item ids = %v, want %v", gotIDs, wantIDs)
 	}
-	for _, label := range []string{"/help", "/new", "/compact", "/skill list", "/model"} {
+	for _, label := range []string{"/help", "/new", "/skill list", "/model"} {
 		if !strings.Contains(full.Text, label) {
 			t.Fatalf("help text = %q, missing %q", full.Text, label)
 		}
@@ -1464,7 +1462,7 @@ func TestExecuteWebQuickActionHelpListsAllQuickActions(t *testing.T) {
 	for _, item := range restricted.Items {
 		gotRestrictedIDs = append(gotRestrictedIDs, item.ID)
 	}
-	wantRestrictedIDs := []string{"help", "new", "compact"}
+	wantRestrictedIDs := []string{"help", "new"}
 	if !slices.Equal(gotRestrictedIDs, wantRestrictedIDs) {
 		t.Fatalf("restricted item ids = %v, want %v", gotRestrictedIDs, wantRestrictedIDs)
 	}
@@ -1501,8 +1499,10 @@ func TestPostMessageRejectsSlashOnLegacyRESTEndpoint(t *testing.T) {
 	c.SetParamNames("bot_id")
 	c.SetParamValues(botID)
 
-	if err := handler.PostMessage(c); err != nil {
-		t.Fatalf("PostMessage: %v", err)
+	// The handler wrote the event and returns the refusal it was rendered
+	// from, for the request's result record.
+	if err := handler.PostMessage(c); apperror.CodeOf(err) != slash.CodeUnsupportedLegacyEndpoint {
+		t.Fatalf("PostMessage: %v, want the legacy endpoint refusal", err)
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
@@ -1514,7 +1514,7 @@ func TestPostMessageRejectsSlashOnLegacyRESTEndpoint(t *testing.T) {
 	if event.Type != "command_error" {
 		t.Fatalf("event type = %q, want command_error; event=%#v", event.Type, event)
 	}
-	if event.Code != slash.CodeUnsupportedLegacyEndpoint {
+	if event.Code != string(slash.CodeUnsupportedLegacyEndpoint) {
 		t.Fatalf("code = %q, want %q", event.Code, slash.CodeUnsupportedLegacyEndpoint)
 	}
 }

@@ -147,6 +147,19 @@ export function dependencyAllows(item: Pick<DependencyItem, 'actions'>, action: 
   return (item.actions ?? []).includes(action)
 }
 
+/**
+ * The failure text of a row: the catalog copy for its error code, or the text
+ * recorded by an earlier server when the record has no code.
+ */
+export function dependencyLastError(
+  item: Pick<DependencyItem, 'last_error' | 'last_error_code'>,
+  translate: (key: string) => string,
+): string {
+  const code = item.last_error_code?.trim()
+  if (code) return translate(`errors.${code}`)
+  return item.last_error?.trim() ?? ''
+}
+
 /** Drives the tab count badge: rows the user should act on. */
 export function dependencyNeedsAttention(item: DependencyItem): boolean {
   return item.status === 'missing'

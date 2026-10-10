@@ -108,7 +108,7 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		})
 	case channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd:
 		return nil
-	case channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted, channel.StreamEventProcessingFailed:
+	case channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted:
 		return nil
 	case channel.StreamEventFinal:
 		if event.Final == nil || event.Final.Message.Message.IsEmpty() {

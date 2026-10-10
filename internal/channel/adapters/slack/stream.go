@@ -147,7 +147,6 @@ func (s *slackOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 	case channel.StreamEventAgentStart, channel.StreamEventAgentEnd,
 		channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd,
 		channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted,
-		channel.StreamEventProcessingFailed,
 		channel.StreamEventReaction, channel.StreamEventSpeech:
 		return nil
 

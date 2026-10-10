@@ -239,7 +239,7 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 	result := OperationResult{Installation: inst}
 	record := func(step StepResult) {
 		result.Steps = append(result.Steps, step)
-		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Message: step.Error})
+		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Message: step.Error, Code: step.Code})
 	}
 
 	sink.Send(Event{Type: EventStep, Kind: KindSkills, ID: inst.AppID})
@@ -254,7 +254,7 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 		if dep.Action == RemovalActionRemove && s.dependencies != nil {
 			if _, err := s.dependencies.Remove(ctx, botID, dep.ID, logSink(sink, KindDependency, dep.ID)); err != nil {
 				cause := fail("remove dependency "+dep.ID, err)
-				record(StepResult{Kind: KindDependency, ID: dep.ID, Status: StepFailed, Error: publicMessage(cause)})
+				record(StepResult{Kind: KindDependency, ID: dep.ID, Status: StepFailed, Code: string(publicCode(cause))})
 				return result, failRemoval(errors.Join(cause, tx.Rollback(ctx)))
 			} else {
 				record(StepResult{Kind: KindDependency, ID: dep.ID, Status: StepRemoved})
@@ -271,13 +271,13 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 		sink.Send(Event{Type: EventStep, Kind: KindConnector, ID: conn.Type})
 		if conn.Action == RemovalActionDisconnect && s.connectors == nil {
 			cause := fail("disconnect "+conn.Type, connectors.ErrNotConfigured)
-			record(StepResult{Kind: KindConnector, ID: conn.Type, Status: StepFailed, Error: publicMessage(cause)})
+			record(StepResult{Kind: KindConnector, ID: conn.Type, Status: StepFailed, Code: string(publicCode(cause))})
 			return result, failRemoval(errors.Join(cause, tx.Rollback(ctx)))
 		}
 		if conn.Action == RemovalActionDisconnect {
 			if err := s.connectors.Delete(ctx, botID, conn.ConnectionID); err != nil {
 				cause := fail("disconnect "+conn.Type, err)
-				record(StepResult{Kind: KindConnector, ID: conn.Type, Status: StepFailed, Error: publicMessage(cause)})
+				record(StepResult{Kind: KindConnector, ID: conn.Type, Status: StepFailed, Code: string(publicCode(cause))})
 				return result, failRemoval(errors.Join(cause, tx.Rollback(ctx)))
 			} else {
 				record(StepResult{Kind: KindConnector, ID: conn.Type, Status: StepDisconnected})
