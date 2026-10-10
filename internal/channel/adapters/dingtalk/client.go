@@ -264,7 +264,7 @@ func (c *apiClient) uploadMedia(ctx context.Context, mediaType, filename string,
 		return "", fmt.Errorf("dingtalk upload: parse response: %w", err)
 	}
 	if result.ErrCode != 0 {
-		return "", fmt.Errorf("dingtalk upload: errcode %d: %s", result.ErrCode, result.ErrMsg)
+		return "", errs.NewDependency("dingtalk upload rejected", slog.Int("errcode", result.ErrCode))
 	}
 	if strings.TrimSpace(result.MediaID) == "" {
 		return "", errs.NewDependency("dingtalk upload: empty media_id in response")
@@ -305,7 +305,7 @@ func (c *apiClient) downloadMessageFile(ctx context.Context, robotCode, download
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		_ = resp.Body.Close()
-		return nil, "", fmt.Errorf("dingtalk download file: status %d", resp.StatusCode)
+		return nil, "", errs.NewDependency("dingtalk download file request failed", slog.Int("status", resp.StatusCode))
 	}
 	mimeType := strings.TrimSpace(resp.Header.Get("Content-Type"))
 	return resp.Body, mimeType, nil

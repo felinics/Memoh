@@ -43,7 +43,7 @@ func decryptAESECB(ciphertext, key []byte) ([]byte, error) {
 	}
 	bs := block.BlockSize()
 	if len(ciphertext)%bs != 0 {
-		return nil, fmt.Errorf("ciphertext length %d is not a multiple of block size %d", len(ciphertext), bs)
+		return nil, errs.New("ciphertext length is not a multiple of the block size", slog.Int("length", len(ciphertext)), slog.Int("block_size", bs))
 	}
 	out := make([]byte, len(ciphertext))
 	for i := 0; i < len(ciphertext); i += bs {
@@ -68,11 +68,11 @@ func pkcs7Unpad(data []byte, blockSize int) ([]byte, error) {
 	}
 	padding := int(data[len(data)-1])
 	if padding > blockSize || padding == 0 {
-		return nil, fmt.Errorf("invalid pkcs7 padding %d", padding)
+		return nil, errs.New("invalid pkcs7 padding", slog.Int("padding", padding))
 	}
 	for i := len(data) - padding; i < len(data); i++ {
 		if data[i] != byte(padding) { //nolint:gosec // padding is always 1..blockSize(16)
-			return nil, fmt.Errorf("invalid pkcs7 padding at byte %d", i)
+			return nil, errs.New("invalid pkcs7 padding byte", slog.Int("index", i))
 		}
 	}
 	return data[:len(data)-padding], nil
@@ -106,7 +106,7 @@ func parseAESKey(aesKeyBase64 string) ([]byte, error) {
 			return key, nil
 		}
 	}
-	return nil, fmt.Errorf("aes key must be 16 raw bytes or 32-char hex, got %d bytes", len(decoded))
+	return nil, errs.New("aes key must be 16 raw bytes or 32-char hex", slog.Int("length", len(decoded)))
 }
 
 func isHexString(s string) bool {

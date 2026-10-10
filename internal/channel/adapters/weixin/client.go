@@ -211,7 +211,7 @@ func (c *Client) SendMessage(ctx context.Context, cfg adapterConfig, msg SendMes
 		}
 	}
 	if resp.Ret != 0 {
-		return fmt.Errorf("weixin sendmessage ret=%d: %s", resp.Ret, resp.ErrMsg)
+		return errs.NewDependency("weixin sendmessage failed", slog.Int("ret", resp.Ret))
 	}
 	return nil
 }
@@ -298,7 +298,7 @@ func (c *Client) notifyLifecycle(ctx context.Context, cfg adapterConfig, endpoin
 		}
 	}
 	if resp.Ret != 0 {
-		return fmt.Errorf("weixin %s ret=%d: %s", endpoint, resp.Ret, resp.ErrMsg)
+		return errs.NewDependency("weixin lifecycle notification failed", slog.String("endpoint", endpoint), slog.Int("ret", resp.Ret))
 	}
 	return nil
 }
