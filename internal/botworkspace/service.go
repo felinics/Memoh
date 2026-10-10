@@ -614,7 +614,7 @@ func (s *Service) teardown(ctx context.Context, w Workspace) error {
 		}
 		if _, werr := s.writeObserved(ctx, cur, ObservedWrite{
 			Observed: observed, ObservedGeneration: cur.DesiredGeneration,
-			LastError: sanitize(err), LastErrorPhase: PhaseTeardown,
+			LastErrorCode: string(apperror.CodeWorkspaceTeardownFailed), LastErrorPhase: PhaseTeardown,
 			Attempts: attempts, NextAttemptAt: next, ReleaseLease: true,
 		}); werr != nil {
 			s.event(ctx, "record teardown failure failed", errs.Wrap(werr, "record teardown failure"), slog.String("bot_id", w.BotID))

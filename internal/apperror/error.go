@@ -371,6 +371,7 @@ const (
 	CodeWorkspaceResourceLimitsRequired         Code = "workspace_resource_limits_required"
 	CodeWorkspaceResourceLimitsSaveFailed       Code = "workspace_resource_limits_save_failed"
 	CodeWorkspaceDeleteFailed                   Code = "workspace_delete_failed"
+	CodeWorkspaceTeardownFailed                 Code = "workspace.teardown_failed"
 	CodeWorkspaceStartFailed                    Code = "workspace_start_failed"
 	CodeWorkspaceStopFailed                     Code = "workspace_stop_failed"
 	CodeWorkspaceSnapshotsUnsupported           Code = "workspace_snapshots_unsupported"
@@ -1371,6 +1372,7 @@ var catalog = map[Code]Definition{
 	CodeWorkspaceResourceLimitsRequired:         {HTTPStatus: http.StatusBadRequest, Detail: "Resource limits are required."},
 	CodeWorkspaceResourceLimitsSaveFailed:       {HTTPStatus: http.StatusInternalServerError, Detail: "Failed to save resource limits. Please try again."},
 	CodeWorkspaceDeleteFailed:                   {HTTPStatus: http.StatusInternalServerError, Detail: "Failed to delete the workspace. Please try again."},
+	CodeWorkspaceTeardownFailed:                 {HTTPStatus: http.StatusInternalServerError, Detail: "Workspace removal failed. Retry deleting the bot."},
 	CodeWorkspaceStartFailed:                    {HTTPStatus: http.StatusInternalServerError, Detail: "Failed to start the workspace. Please try again."},
 	CodeWorkspaceStopFailed:                     {HTTPStatus: http.StatusInternalServerError, Detail: "Failed to stop the workspace. Please try again."},
 	CodeWorkspaceSnapshotsUnsupported:           {HTTPStatus: http.StatusNotImplemented, Detail: "Snapshots are not supported by this workspace runtime."},

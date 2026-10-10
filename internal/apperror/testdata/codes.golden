@@ -285,6 +285,7 @@ workspace.archive_invalid	400
 workspace.display_prepare_failed	500
 workspace.image_not_found	400
 workspace.image_registry_unavailable	503
+workspace.teardown_failed	500
 workspace.template_bootstrap_failed	500
 workspace.unreachable	503
 workspace_create_failed	500
