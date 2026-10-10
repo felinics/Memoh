@@ -1784,6 +1784,10 @@
       "title": "替换输入框里的内容？",
       "description": "输入框里有还没发送的内容，替换成这条提示词后，原内容会被丢弃。",
       "confirm": "替换"
+    },
+    "share": {
+      "prompt": "你用 Memoh 做过什么？带上 #Memoh，把你的使用案例分享到 X。",
+      "action": "分享到 X"
     }
   },
   "models": {

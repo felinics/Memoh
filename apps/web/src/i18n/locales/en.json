@@ -1784,6 +1784,10 @@
       "title": "Replace your unsent message?",
       "description": "The chat box already has text you haven't sent. Replacing it with this prompt discards that text.",
       "confirm": "Replace"
+    },
+    "share": {
+      "prompt": "What have you built with Memoh? Share your use case on X with #Memoh.",
+      "action": "Share on X"
     }
   },
   "models": {
