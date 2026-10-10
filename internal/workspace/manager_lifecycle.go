@@ -366,13 +366,9 @@ type ContainerSetupProgress func(ContainerSetupEvent)
 // When preserveData is true, /data is exported to a backup archive before deletion.
 func (m *Manager) CleanupBotContainer(ctx context.Context, botID string, preserveData bool) error {
 	if err := m.Delete(ctx, botID, preserveData); err != nil {
-		if preserveData {
-			// When preserving data, any error (including NotFound) must
-			// block the workflow — we cannot delete the DB record if we
-			// failed to preserve data.
-			return err
-		}
-		if !ctr.IsNotFound(err) {
+		// A failed export blocks the removal: the container holds the only
+		// copy of the data. A container already gone is a finished removal.
+		if errors.Is(err, errPreserveData) || !ctr.IsNotFound(err) {
 			return err
 		}
 		m.logger.WarnContext(ctx, "cleanup: container not found in containerd, continuing",

@@ -84,10 +84,11 @@ func (o Options) withDefaults() Options {
 	// CrashLoopBackOff (KEP-4603 lowers the default cap to 60s).
 	//
 	// Once the fast budget is spent the outcome is reported to the user, and
-	// the row keeps retrying every SlowRetryInterval so an outage that outlasts
-	// the fast window (registry down, runtime restarting) heals without anyone
-	// pressing retry. A Kubernetes controller never gives up either; the slow
-	// cadence bounds the cost of a workspace that will never come up.
+	// a provisioning keeps retrying every SlowRetryInterval so an outage that
+	// outlasts the fast window (registry down, runtime restarting) heals
+	// without anyone pressing retry. A Kubernetes controller never gives up
+	// either; the slow cadence bounds the cost of a workspace that will never
+	// come up.
 	if o.BackoffBase <= 0 {
 		o.BackoffBase = 10 * time.Second
 	}
@@ -201,6 +202,26 @@ func (s *Service) RequestAbsent(ctx context.Context, botID string, preserve bool
 	return w, nil
 }
 
+// CancelRemoval withdraws a removal that failed; one still in flight is left
+// alone, the backend may already be deleting. The workspace is recorded as it
+// stands, not provisioned: that would restore a preserved archive over newer
+// data and start a workspace the user had stopped.
+func (s *Service) CancelRemoval(ctx context.Context, botID string) error {
+	insp, err := s.backend.Inspect(ctx, botID)
+	if err != nil {
+		return err
+	}
+	w, err := s.repo.CancelRemoval(ctx, botID, insp.observed())
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	s.deriveBotStatus(ctx, w)
+	return nil
+}
+
 // Get returns the row.
 func (s *Service) Get(ctx context.Context, botID string) (Workspace, error) {
 	return s.repo.Get(ctx, botID)
@@ -278,7 +299,16 @@ func (s *Service) Await(ctx context.Context, botID string, generation int64) (Wo
 // Observe refreshes the observation for one bot from the backend (after a
 // user-driven start or stop). It never provisions or tears down.
 func (s *Service) Observe(ctx context.Context, botID string) (Workspace, error) {
-	w, err := s.repo.ClaimOne(ctx, botID, s.opts.Owner, s.opts.Lease)
+	w, err := s.repo.Get(ctx, botID)
+	if err != nil {
+		return Workspace{}, err
+	}
+	// A requested removal owns the row: recording "running" over a failed
+	// removal would drop its error and make the row due for teardown again.
+	if w.Desired == DesiredAbsent {
+		return w, nil
+	}
+	w, err = s.repo.ClaimOne(ctx, botID, s.opts.Owner, s.opts.Lease)
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -291,13 +321,7 @@ func (s *Service) Observe(ctx context.Context, botID string) (Workspace, error) 
 	if err != nil {
 		return w, err
 	}
-	observed := ObservedAbsent
-	switch {
-	case insp.Exists && insp.Running:
-		observed = ObservedRunning
-	case insp.Exists:
-		observed = ObservedStopped
-	}
+	observed := insp.observed()
 	if observed == w.Observed {
 		return w, nil
 	}
@@ -512,15 +536,12 @@ func (s *Service) provision(ctx context.Context, w Workspace) error {
 	defer cancel()
 
 	if err := s.replaceStaleContainer(opCtx, cur); err != nil {
-		return s.fail(ctx, cur, &StepError{Phase: PhaseTeardown, Retryable: true, Err: err})
+		return s.fail(ctx, cur, asStep(err, PhaseTeardown))
 	}
 
 	err = s.backend.Provision(opCtx, w.BotID, w.Image, func(ev ProgressEvent) { s.publish(w.BotID, ev) })
 	if err != nil {
-		var step *StepError
-		if !errors.As(err, &step) {
-			step = &StepError{Phase: PhaseStart, Retryable: true, Err: err}
-		}
+		step := asStep(err, PhaseStart)
 		if opCtx.Err() != nil && step.Err == nil {
 			step.Err = opCtx.Err()
 		}
@@ -584,6 +605,24 @@ func (s *Service) fail(ctx context.Context, w Workspace, step *StepError) error 
 	return failure
 }
 
+// asStep keeps the backend's own attribution of a failure when it has one.
+func asStep(err error, phase string) *StepError {
+	var step *StepError
+	if errors.As(err, &step) {
+		return step
+	}
+	return &StepError{Phase: phase, Retryable: true, Err: err}
+}
+
+// gone reports that the backend holds no workspace for the bot. A backend that
+// cannot say is taken to still hold one.
+func (s *Service) gone(ctx context.Context, botID string) bool {
+	ictx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.opts.WriteTimeout)
+	defer cancel()
+	insp, err := s.backend.Inspect(ictx, botID)
+	return err == nil && !insp.Exists
+}
+
 func (s *Service) teardown(ctx context.Context, w Workspace) error {
 	cur, err := s.writeObserved(ctx, w, ObservedWrite{
 		Observed: ObservedRemoving, ObservedGeneration: w.DesiredGeneration,
@@ -601,25 +640,32 @@ func (s *Service) teardown(ctx context.Context, w Workspace) error {
 	defer cancel()
 
 	if err := s.backend.Teardown(opCtx, w.BotID, w.PreserveData); err != nil {
+		step := asStep(err, PhaseTeardown)
 		attempts := cur.Attempts + 1
 		observed := ObservedRemoving
 		next := s.nextAttempt(attempts)
-		willRetry := true
-		if attempts >= s.opts.MaxAttempts {
-			observed = ObservedFailed
-			next = s.slowRetryAt()
-			willRetry = false
+		willRetry := step.Retryable && attempts < s.opts.MaxAttempts
+		if !willRetry {
+			if s.gone(ctx, w.BotID) {
+				// Nothing is left for the user to keep; the leftovers are
+				// cleaned up in the background.
+				next, willRetry = s.slowRetryAt(), true
+			} else {
+				// Still there: a background retry could delete it long after
+				// the user was told it had not been deleted.
+				observed = ObservedFailed
+				attempts = max(attempts, s.opts.MaxAttempts)
+			}
 		}
 		if _, werr := s.writeObserved(ctx, cur, ObservedWrite{
 			Observed: observed, ObservedGeneration: cur.DesiredGeneration,
-			LastError: sanitize(err), LastErrorPhase: PhaseTeardown,
+			LastError: sanitize(step.Err), LastErrorPhase: PhaseTeardown,
 			Attempts: attempts, NextAttemptAt: next, ReleaseLease: true,
 		}); werr != nil {
 			s.event(ctx, "record teardown failure failed", errs.Wrap(werr, "record teardown failure"), slog.String("bot_id", w.BotID))
 			s.release(ctx, w.BotID)
 		}
-		failure := errs.Wrap(err, "tear down workspace",
-			slog.Int("attempt", int(attempts)), slog.Time("next_attempt_at", next))
+		failure := errs.Wrap(err, "tear down workspace", slog.Int("attempt", int(attempts)))
 		if willRetry {
 			return job.WillRetry(failure)
 		}

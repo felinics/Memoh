@@ -256,6 +256,31 @@ func TestListChecksReportsSetupFailureAsSingleIssue(t *testing.T) {
 	}
 }
 
+func TestListChecksDoesNotReportFailedRemovalAsSetupFailure(t *testing.T) {
+	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	db := &fakeDBTX{
+		queryRowFunc: func(_ context.Context, query string, _ ...any) pgx.Row {
+			if strings.Contains(query, "FROM bots") {
+				return makeGetBotRowWithMetadata(botUUID, ownerUUID, []byte(`{}`))
+			}
+			return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+		},
+	}
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
+	svc.SetWorkspaceIntents(&fakeWorkspaceIntents{outcome: WorkspaceOutcome{
+		Desired: WorkspaceDesiredAbsent, Observed: WorkspaceObservedFailed, LastErrorPhase: "teardown", LastError: "too many files",
+	}})
+
+	checks, err := svc.ListChecks(context.Background(), botUUID.String())
+	if err != nil {
+		t.Fatalf("ListChecks() error = %v", err)
+	}
+	if initCheck := findBotCheck(t, checks, BotCheckTypeContainerInit); initCheck.Status != BotCheckStatusOK {
+		t.Fatalf("container.init = %+v, want ok: the workspace came up, only its removal failed", initCheck)
+	}
+}
+
 func TestRecordContainerSetupFailureTruncatesLongMessages(t *testing.T) {
 	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
 	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")

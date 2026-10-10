@@ -3817,6 +3817,8 @@ definitions:
         type: boolean
       namespace:
         type: string
+      removal:
+        $ref: '#/definitions/handlers.WorkspaceRemovalResponse'
       runtime_backend:
         type: string
       status:
@@ -5135,6 +5137,18 @@ definitions:
       description:
         type: string
       name:
+        type: string
+    type: object
+  handlers.WorkspaceRemovalResponse:
+    properties:
+      preserve_data:
+        type: boolean
+      state:
+        enum:
+        - removing
+        - failed
+        type: string
+      updated_at:
         type: string
     type: object
   handlers.acpRuntimeCreateRequest:
@@ -9721,6 +9735,8 @@ paths:
       - connectors
   /bots/{bot_id}/container:
     delete:
+      description: Records the removal and answers at once. The workspace is gone
+        when GET answers 404; until then GET reports the removal's state.
       parameters:
       - description: Bot ID
         in: path
@@ -9732,8 +9748,8 @@ paths:
         name: preserve_data
         type: boolean
       responses:
-        "204":
-          description: No Content
+        "202":
+          description: Accepted
         "404":
           description: Not Found
           schema:
@@ -10552,6 +10568,26 @@ paths:
           schema:
             $ref: '#/definitions/server.Problem'
       summary: Update workspace metrics settings for bot
+      tags:
+      - containerd
+  /bots/{bot_id}/container/removal/cancel:
+    post:
+      description: Keeps the workspace after its removal failed. Does nothing when
+        no removal has failed; one still in progress cannot be withdrawn.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Withdraw a failed workspace removal
       tags:
       - containerd
   /bots/{bot_id}/container/skills:

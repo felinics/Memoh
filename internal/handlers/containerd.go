@@ -126,19 +126,36 @@ func sendWorkspaceStreamFailure(ctx context.Context, send func(payload any) bool
 }
 
 type GetContainerResponse struct {
-	ContainerID      string    `json:"container_id"`
-	WorkspaceBackend string    `json:"workspace_backend"`
-	RuntimeBackend   string    `json:"runtime_backend,omitempty"`
-	Image            string    `json:"image"`
-	Status           string    `json:"status"`
-	Namespace        string    `json:"namespace"`
-	ContainerPath    string    `json:"container_path"`
-	CDIDevices       []string  `json:"cdi_devices,omitempty"`
-	TaskRunning      bool      `json:"task_running"`
-	HasPreservedData bool      `json:"has_preserved_data"`
-	Legacy           bool      `json:"legacy"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ContainerID      string                    `json:"container_id"`
+	WorkspaceBackend string                    `json:"workspace_backend"`
+	RuntimeBackend   string                    `json:"runtime_backend,omitempty"`
+	Image            string                    `json:"image"`
+	Status           string                    `json:"status"`
+	Namespace        string                    `json:"namespace"`
+	ContainerPath    string                    `json:"container_path"`
+	CDIDevices       []string                  `json:"cdi_devices,omitempty"`
+	TaskRunning      bool                      `json:"task_running"`
+	HasPreservedData bool                      `json:"has_preserved_data"`
+	Legacy           bool                      `json:"legacy"`
+	CreatedAt        time.Time                 `json:"created_at"`
+	UpdatedAt        time.Time                 `json:"updated_at"`
+	Removal          *WorkspaceRemovalResponse `json:"removal,omitempty"`
+}
+
+// WorkspaceRemovalResponse is a requested removal that is still running, or
+// that failed and waits for the user to retry or cancel it.
+type WorkspaceRemovalResponse struct {
+	State        string    `json:"state" enums:"removing,failed"`
+	PreserveData bool      `json:"preserve_data"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+func workspaceRemovalResponse(w botworkspace.Workspace) *WorkspaceRemovalResponse {
+	state := w.RemovalState()
+	if state == "" {
+		return nil
+	}
+	return &WorkspaceRemovalResponse{State: state, PreserveData: w.PreserveData, UpdatedAt: w.UpdatedAt}
 }
 
 type ContainerMetricsStatusResponse struct {
@@ -299,6 +316,7 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	group.GET("/metrics", h.GetContainerMetrics)
 	group.PUT("/metrics", h.UpdateContainerMetrics)
 	group.DELETE("", h.DeleteContainer)
+	group.POST("/removal/cancel", h.CancelContainerRemoval)
 	group.POST("/start", h.StartContainer)
 	group.POST("/stop", h.StopContainer)
 	group.POST("/snapshots", h.CreateSnapshot)
@@ -466,6 +484,16 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	// The removal is read before the workspace: the other way round, a removal
+	// finishing in between would answer "still there, nothing being removed".
+	var removal *WorkspaceRemovalResponse
+	if h.workspaces != nil {
+		w, err := h.workspaces.Get(c.Request().Context(), botID)
+		if err != nil && !errors.Is(err, botworkspace.ErrNotFound) {
+			return apperror.Wrap(apperror.CodeWorkspaceLoadFailed, err, nil)
+		}
+		removal = workspaceRemovalResponse(w)
+	}
 	status, err := h.manager.GetContainerInfo(c.Request().Context(), botID)
 	if err != nil {
 		if errors.Is(err, workspace.ErrContainerNotFound) {
@@ -487,6 +515,7 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 		Legacy:           status.Legacy,
 		CreatedAt:        status.CreatedAt,
 		UpdatedAt:        status.UpdatedAt,
+		Removal:          removal,
 	})
 }
 
@@ -591,10 +620,11 @@ func (h *ContainerdHandler) buildContainerMetricsResponse(
 
 // DeleteContainer godoc
 // @Summary Delete workspace for bot
+// @Description Records the removal and answers at once. The workspace is gone when GET answers 404; until then GET reports the removal's state.
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Param preserve_data query bool false "Export /data before deletion"
-// @Success 204
+// @Success 202
 // @Failure 404 {object} server.Problem
 // @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container [delete].
@@ -607,39 +637,35 @@ func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "workspace lifecycle not configured")
 	}
 	preserveData := c.QueryParam("preserve_data") == "true"
-	ctx := c.Request().Context()
-	intent, err := h.workspaces.RequestAbsent(ctx, botID, preserveData)
-	if err != nil {
+	if _, err := h.workspaces.RequestAbsent(c.Request().Context(), botID, preserveData); err != nil {
 		return apperror.Wrap(apperror.CodeWorkspaceDeleteFailed, err, nil)
 	}
-	// The reconciler performs the removal (and keeps retrying transient
-	// backend failures after this request ends). Wait for the outcome within
-	// the request so the client sees a definitive answer when it is quick.
-	waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceDeleteWait)
-	defer cancel()
-	final, err := h.workspaces.Await(waitCtx, botID, intent.DesiredGeneration)
+	// The reconciler removes it. The request does not wait: an export can
+	// outlast any proxy, and the outcome has to survive a reload anyway.
+	return c.NoContent(http.StatusAccepted)
+}
+
+// CancelContainerRemoval godoc
+// @Summary Withdraw a failed workspace removal
+// @Description Keeps the workspace after its removal failed. Does nothing when no removal has failed; one still in progress cannot be withdrawn.
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Success 204
+// @Failure 500 {object} server.Problem
+// @Router /bots/{bot_id}/container/removal/cancel [post].
+func (h *ContainerdHandler) CancelContainerRemoval(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil
-		}
-		return c.JSON(http.StatusAccepted, map[string]any{
-			"code":    "workspace_delete_pending",
-			"message": "workspace removal is still in progress",
-		})
+		return err
 	}
-	if final.Observed != botworkspace.ObservedAbsent {
-		message := strings.TrimSpace(final.LastError)
-		if message == "" {
-			message = "workspace removal failed"
-		}
-		return apperror.Wrap(apperror.CodeWorkspaceDeleteFailed, errs.New("workspace removal failed", slog.String("last_error", message)), nil)
+	if h.workspaces == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "workspace lifecycle not configured")
+	}
+	if err := h.workspaces.CancelRemoval(c.Request().Context(), botID); err != nil {
+		return errs.Wrap(err, "cancel workspace removal", slog.String("bot_id", botID))
 	}
 	return c.NoContent(http.StatusNoContent)
 }
-
-// workspaceDeleteWait bounds how long DELETE waits for the reconciler before
-// answering 202; the removal continues in the background.
-const workspaceDeleteWait = 2 * time.Minute
 
 // StartContainer godoc
 // @Summary Start workspace for bot

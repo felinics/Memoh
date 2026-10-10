@@ -116,8 +116,14 @@ type WorkspaceOutcome struct {
 	EverReady      bool
 }
 
-// Workspace observation values the bots service branches on.
+// removalRequested: a recorded failure is the removal's, not provisioning's.
+func (o WorkspaceOutcome) removalRequested() bool {
+	return o.Desired == WorkspaceDesiredAbsent
+}
+
+// Workspace state values the bots service branches on.
 const (
+	WorkspaceDesiredAbsent   = "absent"
 	WorkspaceObservedAbsent  = "absent"
 	WorkspaceObservedRunning = "running"
 	WorkspaceObservedFailed  = "failed"

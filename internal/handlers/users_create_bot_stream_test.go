@@ -543,6 +543,12 @@ func (*createBotStreamWorkspace) RequestAbsent(context.Context, string, bool) (b
 	return botworkspace.Workspace{}, nil
 }
 
+func (*createBotStreamWorkspace) CancelRemoval(context.Context, string) error { return nil }
+
+func (*createBotStreamWorkspace) Get(context.Context, string) (botworkspace.Workspace, error) {
+	return botworkspace.Workspace{}, botworkspace.ErrNotFound
+}
+
 func (*createBotStreamWorkspace) Observe(context.Context, string) (botworkspace.Workspace, error) {
 	return botworkspace.Workspace{}, nil
 }

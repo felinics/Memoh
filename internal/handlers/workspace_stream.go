@@ -18,6 +18,8 @@ import (
 type workspaceIntents interface {
 	EnsurePresent(ctx context.Context, botID, image string) (botworkspace.Workspace, error)
 	RequestAbsent(ctx context.Context, botID string, preserve bool) (botworkspace.Workspace, error)
+	CancelRemoval(ctx context.Context, botID string) error
+	Get(ctx context.Context, botID string) (botworkspace.Workspace, error)
 	Subscribe(botID string) (<-chan botworkspace.ProgressEvent, func())
 	Kick()
 	Await(ctx context.Context, botID string, generation int64) (botworkspace.Workspace, error)

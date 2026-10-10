@@ -3046,6 +3046,17 @@
       "stopSuccess": "Workspace を停止しました",
       "deleteSuccess": "Workspace を削除しました",
       "deletePreserveSuccess": "Workspace を削除し、データを保存しました",
+      "removal": {
+        "removingTitle": "Workspace を削除しています",
+        "removingHint": "このページを離れても、戻ったときに結果を確認できます。",
+        "removingKeepHint": "先にデータをバックアップしてから Workspace を削除します。このページを離れても、戻ったときに結果を確認できます。",
+        "failedTitle": "Workspace の削除に失敗しました",
+        "failedHint": "Workspace は削除されていません（{time} に失敗）。もう一度試すか、削除をキャンセルして使い続けられます。",
+        "retry": "再試行",
+        "cancel": "削除をキャンセル",
+        "cancelSuccess": "削除をキャンセルしました",
+        "recreateStopped": "古い Workspace を削除できなかったため、再構築は行われませんでした。"
+      },
       "snapshotSuccess": "スナップショットが作成されました",
       "restoreSuccess": "データが復元されました",
       "rollbackSuccess": "スナップショットがロールバックされました",

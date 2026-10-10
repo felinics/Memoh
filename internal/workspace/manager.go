@@ -870,6 +870,9 @@ func (m *Manager) Stop(ctx context.Context, botID string, timeout time.Duration)
 	})
 }
 
+// errPreserveData marks a removal stopped by a failed export of /data.
+var errPreserveData = errors.New("preserve data")
+
 func (m *Manager) Delete(ctx context.Context, botID string, preserveData bool) error {
 	if err := validateBotID(botID); err != nil {
 		return err
@@ -879,7 +882,7 @@ func (m *Manager) Delete(ctx context.Context, botID string, preserveData bool) e
 
 	if preserveData {
 		if err := m.preserveDataBeforeDelete(ctx, botID); err != nil {
-			return fmt.Errorf("preserve data: %w", err)
+			return fmt.Errorf("%w: %w", errPreserveData, err)
 		}
 	}
 

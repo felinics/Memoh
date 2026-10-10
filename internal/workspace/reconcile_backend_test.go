@@ -11,8 +11,39 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/felinics/memoh/internal/botworkspace"
+	"github.com/felinics/memoh/internal/config"
 	ctr "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
+
+type unreadableBridgeService struct{ legacyRouteTestService }
+
+func (*unreadableBridgeService) MCPClient(context.Context, string) (*bridge.Client, error) {
+	return nil, errors.New("bridge refused")
+}
+
+func TestTeardownPreservingData(t *testing.T) {
+	const botID = "00000000-0000-0000-0000-000000000001"
+	svc := &unreadableBridgeService{}
+	m := newLegacyRouteTestManager(t, svc, config.WorkspaceConfig{DataRoot: t.TempDir()})
+
+	// The container is already gone: nothing to export, the removal is done.
+	if err := m.Teardown(context.Background(), botID, true); err != nil {
+		t.Fatalf("Teardown() of a missing container = %v", err)
+	}
+
+	svc.created = true
+	deletes := svc.deleteCalls
+	err := m.Teardown(context.Background(), botID, true)
+	var step *botworkspace.StepError
+	if !errors.As(err, &step) || step.Retryable {
+		t.Fatalf("Teardown() with a failing export = %v, want a non-retryable failure", err)
+	}
+	if svc.deleteCalls != deletes {
+		t.Fatal("container deleted without its data exported")
+	}
+}
 
 func TestIsTransientClassifiesByErrorChain(t *testing.T) {
 	tests := map[string]struct {

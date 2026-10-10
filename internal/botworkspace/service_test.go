@@ -54,6 +54,27 @@ func (r *memRepo) Upsert(_ context.Context, botID, desired, image string, preser
 	return *w, nil
 }
 
+func (r *memRepo) CancelRemoval(_ context.Context, botID, observed string) (Workspace, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	w, ok := r.rows[botID]
+	if !ok || w.RemovalState() != RemovalFailed {
+		return Workspace{}, ErrNotFound
+	}
+	w.Desired = DesiredPresent
+	w.DesiredGeneration++
+	w.PreserveData = false
+	w.Observed = observed
+	w.ObservedGeneration = w.DesiredGeneration
+	w.EverReady = w.EverReady || observed == ObservedRunning
+	w.LastError, w.LastErrorPhase = "", ""
+	w.Attempts = 0
+	w.NextAttemptAt = r.now()
+	w.Version++
+	w.UpdatedAt = r.now()
+	return *w, nil
+}
+
 func (r *memRepo) Get(_ context.Context, botID string) (Workspace, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -76,7 +97,7 @@ func (r *memRepo) due(w *Workspace) bool {
 	case w.ObservedGeneration < w.DesiredGeneration,
 		w.Observed == ObservedProvisioning, w.Observed == ObservedRemoving,
 		w.Desired == DesiredPresent && (w.Observed == ObservedAbsent || w.Observed == ObservedFailed),
-		w.Desired == DesiredAbsent && w.Observed != ObservedAbsent:
+		w.Desired == DesiredAbsent && w.Observed != ObservedAbsent && w.Observed != ObservedFailed:
 		return true
 	}
 	return false
@@ -979,5 +1000,110 @@ func TestAwaitReturnsExhaustedTeardownFailure(t *testing.T) {
 	final, err := svc.Await(ctx, bot, w.DesiredGeneration)
 	if err != nil || final.Observed != ObservedFailed || final.Desired != DesiredAbsent {
 		t.Fatalf("Await() = %+v, %v; want the teardown failure", final, err)
+	}
+}
+
+// failRemoval provisions a workspace and drives a removal through its whole
+// retry budget against a backend that keeps refusing.
+func failRemoval(t *testing.T, svc *Service, backend *fakeBackend, clk *clock) {
+	t.Helper()
+	ctx := context.Background()
+	_, _ = svc.EnsurePresent(ctx, bot, "")
+	_, _ = svc.ReconcileOnce(ctx)
+	backend.teardownErr = errors.New("provider refuses")
+	_, _ = svc.RequestAbsent(ctx, bot, true)
+	for i := 0; i < 3; i++ { // MaxAttempts in newTestService
+		_, _ = svc.ReconcileOnce(ctx)
+		clk.advance(time.Hour)
+	}
+}
+
+func TestFailedRemovalWaitsForTheUser(t *testing.T) {
+	backend := &fakeBackend{}
+	svc, repo, _, clk := newTestService(t, backend)
+	ctx := context.Background()
+	failRemoval(t, svc, backend, clk)
+	attempts := len(backend.teardowns)
+
+	// Neither time nor a user-driven start brings the removal back.
+	clk.advance(24 * time.Hour)
+	_, _ = svc.ReconcileOnce(ctx)
+	if _, err := svc.Observe(ctx, bot); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = svc.ReconcileOnce(ctx)
+	w := repo.get(bot)
+	if len(backend.teardowns) != attempts || w.RemovalState() != RemovalFailed || w.LastError == "" {
+		t.Fatalf("failed removal was touched: teardowns %d -> %d, %+v", attempts, len(backend.teardowns), w)
+	}
+
+	backend.teardownErr = nil
+	_, _ = svc.RequestAbsent(ctx, bot, true)
+	_, _ = svc.ReconcileOnce(ctx)
+	if w := repo.get(bot); w.Observed != ObservedAbsent || w.RemovalState() != "" {
+		t.Fatalf("a new intent should retry the removal: %+v", w)
+	}
+}
+
+func TestRemovalOfVanishedWorkspaceKeepsCleaningUp(t *testing.T) {
+	backend := &fakeBackend{}
+	svc, repo, _, clk := newTestService(t, backend)
+	failRemoval(t, svc, backend, clk)
+	backend.exists, backend.running = false, false
+	_, _ = svc.RequestAbsent(context.Background(), bot, false)
+	for i := 0; i < 5; i++ {
+		_, _ = svc.ReconcileOnce(context.Background())
+		clk.advance(time.Hour)
+	}
+	if w := repo.get(bot); w.RemovalState() != RemovalRemoving || len(backend.teardowns) != 8 {
+		t.Fatalf("leftovers of a vanished workspace should be retried past the fast budget: %+v, %d teardowns", w, len(backend.teardowns))
+	}
+}
+
+func TestNonRetryableRemovalFailsAtOnce(t *testing.T) {
+	backend := &fakeBackend{}
+	svc, repo, _, _ := newTestService(t, backend)
+	ctx := context.Background()
+	_, _ = svc.EnsurePresent(ctx, bot, "")
+	_, _ = svc.ReconcileOnce(ctx)
+	backend.teardownErr = &StepError{Phase: PhaseTeardown, Err: errors.New("too many files")}
+	_, _ = svc.RequestAbsent(ctx, bot, true)
+	_, _ = svc.ReconcileOnce(ctx)
+	w := repo.get(bot)
+	if w.RemovalState() != RemovalFailed || w.LastError != "too many files" || !w.Final(svc.opts.MaxAttempts) {
+		t.Fatalf("after one failed export: %+v", w)
+	}
+}
+
+func TestCancelRemoval(t *testing.T) {
+	backend := &fakeBackend{}
+	svc, repo, _, clk := newTestService(t, backend)
+	ctx := context.Background()
+	failRemoval(t, svc, backend, clk)
+	teardowns, provisions := len(backend.teardowns), backend.provisions
+	if err := svc.CancelRemoval(ctx, bot); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = svc.ReconcileOnce(ctx)
+	clk.advance(24 * time.Hour)
+	_, _ = svc.ReconcileOnce(ctx)
+	w := repo.get(bot)
+	if w.Desired != DesiredPresent || w.Observed != ObservedRunning || w.LastError != "" || !w.Settled() {
+		t.Fatalf("after cancel: %+v", w)
+	}
+	// The workspace is kept as it stands: neither removed nor rebuilt.
+	if len(backend.teardowns) != teardowns || backend.provisions != provisions {
+		t.Fatalf("cancel touched the backend: teardowns %d -> %d, provisions %d -> %d",
+			teardowns, len(backend.teardowns), provisions, backend.provisions)
+	}
+
+	// A removal still in flight is not withdrawn.
+	_, _ = svc.RequestAbsent(ctx, bot, true)
+	_, _ = svc.ReconcileOnce(ctx)
+	if err := svc.CancelRemoval(ctx, bot); err != nil {
+		t.Fatal(err)
+	}
+	if w := repo.get(bot); w.RemovalState() != RemovalRemoving {
+		t.Fatalf("cancel during a removal: %+v", w)
 	}
 }

@@ -34,9 +34,14 @@ func (m *Manager) Provision(ctx context.Context, botID, image string, progress f
 	return m.provisionWorkspace(ctx, botID, image, emit)
 }
 
-// Teardown implements botworkspace.Backend.
+// Teardown implements botworkspace.Backend. An export that cannot succeed is
+// not retried, so the failure reaches the user at once.
 func (m *Manager) Teardown(ctx context.Context, botID string, preserve bool) error {
-	return m.CleanupBotContainer(ctx, botID, preserve)
+	err := m.CleanupBotContainer(ctx, botID, preserve)
+	if errors.Is(err, errPreserveData) {
+		return stepError(botworkspace.PhaseTeardown, err, isTransient(err))
+	}
+	return err
 }
 
 // Inspect implements botworkspace.Backend.

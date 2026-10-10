@@ -43,6 +43,7 @@ type Queries interface {
 	LockAgentAuthorizationOwner(context.Context, string) error
 
 	ClaimBotDependencyOperation(ctx context.Context, arg dbsqlc.ClaimBotDependencyOperationParams) (dbsqlc.BotDependencyInstallation, error)
+	CancelBotWorkspaceRemoval(ctx context.Context, arg dbsqlc.CancelBotWorkspaceRemovalParams) (dbsqlc.BotWorkspace, error)
 	ClaimBotWorkspace(ctx context.Context, arg dbsqlc.ClaimBotWorkspaceParams) (dbsqlc.BotWorkspace, error)
 	ClaimBotWorkspaces(ctx context.Context, arg dbsqlc.ClaimBotWorkspacesParams) ([]dbsqlc.BotWorkspace, error)
 	CountBotWorkspacesByObservedState(ctx context.Context) ([]dbsqlc.CountBotWorkspacesByObservedStateRow, error)

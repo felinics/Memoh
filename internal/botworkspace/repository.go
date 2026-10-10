@@ -34,6 +34,8 @@ type ObservedWrite struct {
 // fake.
 type Repository interface {
 	Upsert(ctx context.Context, botID, desired, image string, preserveData bool) (Workspace, error)
+	// CancelRemoval returns ErrNotFound when the bot has no failed removal.
+	CancelRemoval(ctx context.Context, botID, observed string) (Workspace, error)
 	Get(ctx context.Context, botID string) (Workspace, error)
 	Claim(ctx context.Context, owner string, lease time.Duration, limit int32) ([]Workspace, error)
 	ClaimOne(ctx context.Context, botID, owner string, lease time.Duration) (Workspace, error)
@@ -64,6 +66,24 @@ func (r *postgresRepository) Upsert(ctx context.Context, botID, desired, image s
 		PreserveData: preserveData,
 	})
 	if err != nil {
+		return Workspace{}, err
+	}
+	return fromRow(row), nil
+}
+
+func (r *postgresRepository) CancelRemoval(ctx context.Context, botID, observed string) (Workspace, error) {
+	id, err := db.ParseUUID(botID)
+	if err != nil {
+		return Workspace{}, err
+	}
+	row, err := r.queries.CancelBotWorkspaceRemoval(ctx, dbsqlc.CancelBotWorkspaceRemovalParams{
+		ObservedState: observed,
+		BotID:         id,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Workspace{}, ErrNotFound
+		}
 		return Workspace{}, err
 	}
 	return fromRow(row), nil

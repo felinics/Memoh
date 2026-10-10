@@ -3007,6 +3007,17 @@
       "stopSuccess": "工作区停止成功",
       "deleteSuccess": "工作区删除成功",
       "deletePreserveSuccess": "工作区已删除，数据已保留",
+      "removal": {
+        "removingTitle": "正在删除工作区",
+        "removingHint": "可以先离开此页面，回来仍能看到结果。",
+        "removingKeepHint": "会先备份数据，备份完成后再删除工作区。可以先离开此页面，回来仍能看到结果。",
+        "failedTitle": "工作区删除失败",
+        "failedHint": "工作区没有被删除（失败于 {time}）。可以重试，或取消删除继续使用。",
+        "retry": "重试",
+        "cancel": "取消删除",
+        "cancelSuccess": "已取消删除",
+        "recreateStopped": "旧工作区没有删除成功，未进行重建。"
+      },
       "snapshotSuccess": "快照创建成功",
       "restoreSuccess": "数据恢复成功",
       "rollbackSuccess": "快照回滚成功",

@@ -3007,6 +3007,17 @@
       "stopSuccess": "Workspace stopped",
       "deleteSuccess": "Workspace deleted",
       "deletePreserveSuccess": "Workspace deleted and data preserved",
+      "removal": {
+        "removingTitle": "Deleting workspace",
+        "removingHint": "You can leave this page. The result will be here when you come back.",
+        "removingKeepHint": "Your data is backed up first, then the workspace is deleted. You can leave this page; the result will be here when you come back.",
+        "failedTitle": "Workspace deletion failed",
+        "failedHint": "The workspace was not deleted (failed {time}). Try again, or cancel the deletion to keep using it.",
+        "retry": "Try again",
+        "cancel": "Cancel deletion",
+        "cancelSuccess": "Deletion cancelled",
+        "recreateStopped": "The old workspace could not be deleted, so it was not rebuilt."
+      },
       "snapshotSuccess": "Snapshot created",
       "restoreSuccess": "Data restored",
       "rollbackSuccess": "Snapshot rolled back",

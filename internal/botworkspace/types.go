@@ -81,8 +81,8 @@ func (w Workspace) Settled() bool {
 		return false
 	}
 	if w.Desired == DesiredAbsent {
-		// A teardown that spent its fast retries is recorded as failed; that
-		// is a definite (negative) answer, even though slow retries continue.
+		// A teardown that spent its retries is recorded as failed; that is a
+		// definite (negative) answer.
 		return w.Observed == ObservedAbsent || w.Observed == ObservedFailed
 	}
 	return true
@@ -91,8 +91,8 @@ func (w Workspace) Settled() bool {
 // RetryPending reports whether a failed observation is still inside its fast
 // retry budget of maxAttempts. Attempts counts the budget consumed: a
 // non-retryable failure consumes all of it at once. Beyond the budget the
-// reconciler keeps retrying at a slow cadence, but that is background
-// self-healing and no longer holds up callers.
+// reconciler keeps retrying a provisioning at a slow cadence, but that is
+// background self-healing and no longer holds up callers.
 func (w Workspace) RetryPending(maxAttempts int32) bool {
 	return w.Observed == ObservedFailed && w.Attempts < maxAttempts
 }
@@ -103,6 +103,29 @@ func (w Workspace) RetryPending(maxAttempts int32) bool {
 // failure that recovers on the next attempt never surfaces as a failure.
 func (w Workspace) Final(maxAttempts int32) bool {
 	return w.Settled() && !w.RetryPending(maxAttempts)
+}
+
+const (
+	RemovalRemoving = "removing"
+	RemovalFailed   = "failed"
+)
+
+// RemovalState is empty when no removal is pending.
+func (w Workspace) RemovalState() string {
+	if w.Desired != DesiredAbsent {
+		return ""
+	}
+	if w.ObservedGeneration < w.DesiredGeneration {
+		return RemovalRemoving
+	}
+	switch w.Observed {
+	case ObservedAbsent:
+		return ""
+	case ObservedFailed:
+		return RemovalFailed
+	default:
+		return RemovalRemoving
+	}
 }
 
 // ProgressEvent mirrors the workspace setup progress the SSE creation stream
@@ -142,6 +165,17 @@ type Inspection struct {
 	Running bool
 	// Image is the container's image reference when it exists.
 	Image string
+}
+
+func (i Inspection) observed() string {
+	switch {
+	case i.Exists && i.Running:
+		return ObservedRunning
+	case i.Exists:
+		return ObservedStopped
+	default:
+		return ObservedAbsent
+	}
 }
 
 // StepError attributes a backend failure to a phase and says whether the

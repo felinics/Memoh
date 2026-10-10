@@ -765,9 +765,9 @@ func (s *Service) runDeleteLifecycle(ctx context.Context, botID, revertStatus st
 	// The workspace is removed by the reconciler, which retries transient
 	// backend failures (a Cloud operation still in flight, a slow provider).
 	// The bot row is deleted only once the workspace is observed absent, so
-	// resources cannot be orphaned by a deleted bot. If the budget runs out
-	// the bot returns to its previous status and the reconciler keeps
-	// converging the workspace in the background; deleting again resumes.
+	// resources cannot be orphaned by a deleted bot. If the removal fails or
+	// the budget runs out the bot returns to its previous status; deleting
+	// again retries.
 	if s.workspaceIntents != nil {
 		generation, err := s.workspaceIntents.RequestAbsent(lifecycleCtx, botID, false)
 		if err != nil {
@@ -959,7 +959,7 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 			initCheck.Status = BotCheckStatusError
 			initCheck.Summary = "Workspace initialization failed."
 			initCheck.Detail = "Bot resources failed to provision. Retry the workspace or delete the bot."
-			if outcome, ok := s.workspaceOutcome(ctx, row.ID.String()); ok && strings.TrimSpace(outcome.LastError) != "" {
+			if outcome, ok := s.workspaceOutcome(ctx, row.ID.String()); ok && !outcome.removalRequested() && strings.TrimSpace(outcome.LastError) != "" {
 				initCheck.Detail = outcome.LastError
 				initCheck.Metadata = map[string]any{
 					"setup_error_phase": outcome.LastErrorPhase,
@@ -1042,7 +1042,7 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 	// The reconciler's observation is authoritative for provisioning failures;
 	// the metadata diagnostic only covers degraded initialization detected at
 	// startup for an existing container.
-	if outcome, ok := s.workspaceOutcome(ctx, row.ID.String()); ok && outcome.Observed == WorkspaceObservedFailed {
+	if outcome, ok := s.workspaceOutcome(ctx, row.ID.String()); ok && !outcome.removalRequested() && outcome.Observed == WorkspaceObservedFailed {
 		hasSetupFailure = true
 		setupFailure = containerSetupFailure{Phase: outcome.LastErrorPhase, Message: outcome.LastError}
 	}
