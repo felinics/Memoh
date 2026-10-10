@@ -143,6 +143,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	var retry attempt
 	for _, item := range toCompact {
 		retry.unusable = max(retry.unusable, item.UnusableAttempts)
+		retry.failedBefore = retry.failedBefore || item.RetryRows > 0
 	}
 	retry.halves = halfOf(toCompact, floor) > 0
 	// The progress guarantee may keep one oversized markable group past the
@@ -286,12 +287,10 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		err = fmt.Errorf("summary does not reduce replay tokens: summary_tokens=%d raw_tokens=%d", summaryTokens, replacementTokens)
 	}
 	if err != nil {
-		// A rollup no shorter than everything it replaces says nothing about
-		// the new rows on their own; any other summary that cannot replace
-		// them is recorded against them.
-		if !errors.Is(err, errIneffectiveRollup) {
-			err = fmt.Errorf("%w: %w", ErrIneffectiveSummary, err)
+		if fusing {
+			err = fmt.Errorf("%w: %w", errRollupFailed, err)
 		}
+		err = fmt.Errorf("%w: %w", ErrIneffectiveSummary, err)
 		s.failLog(persistCtx, logID, err, retry)
 		return Result{}, err
 	}
@@ -403,12 +402,13 @@ func expectedCompactionClaims(rows []sqlc.ListUncompactedMessagesBySessionRow, m
 }
 
 // attempt is what a failed claim records for its rows: the unusable attempts
-// they had in a row before it, how many rows it claimed, and whether it could
-// still be halved.
+// they had in a row before it, whether they had already failed on their own,
+// how many rows it claimed, and whether it could still be halved.
 type attempt struct {
-	unusable int
-	rows     int
-	halves   bool
+	unusable     int
+	failedBefore bool
+	rows         int
+	halves       bool
 }
 
 // failLog completes a claimed attempt as failed. A summary that cannot
@@ -416,11 +416,15 @@ type attempt struct {
 // rows: for the epoch when it was not shorter; for a while that grows with
 // each unusable attempt in a row when it was not usable at all; not at all
 // when it was cut off at the output limit and the next pass can retry half of
-// them. Any other failure leaves the rows eligible for a retry.
+// them. A failed rollup records nothing against rows that never failed on
+// their own, which an ordinary pass tries next; rows that did keep failing.
+// Any other failure leaves the rows eligible for a retry.
 func (s *Service) failLog(ctx context.Context, logID pgtype.UUID, cause error, retry attempt) {
 	reason, attempts, rows := "", 0, 0
 	switch {
-	case !errors.Is(cause, ErrIneffectiveSummary):
+	case !errors.Is(cause, ErrIneffectiveSummary), errors.Is(cause, errRollupFailed) && !retry.failedBefore:
+	case errors.Is(cause, errRollupFailed):
+		reason, attempts, rows = failureReasonUnusableSummary, retry.unusable+1, retry.rows
 	case errors.Is(cause, errSummaryCutOff) && retry.halves:
 		reason, attempts, rows = failureReasonCutOffSummary, retry.unusable, retry.rows
 	case errors.Is(cause, errEmptySummary), errors.Is(cause, errIncompleteSummary):

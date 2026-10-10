@@ -307,8 +307,8 @@ func TestCompactionIneffectiveRollupCoolsDown(t *testing.T) {
 	for pass := 0; pass < 6; pass++ {
 		_, _ = svc.RunCompactionSync(context.Background(), cfg)
 	}
-	if stub.calls != 1 {
-		t.Fatalf("summarizer calls = %d over six automatic passes, want 1: a rollup that does not shrink cools down", stub.calls)
+	if stub.calls != 2 || strings.Contains(stub.prompt, "<absorbed_context>") {
+		t.Fatalf("summarizer calls = %d over six automatic passes, want 2: a rollup that does not shrink is not retried; the ordinary pass after it does not shrink either and cools down", stub.calls)
 	}
 }
 
@@ -861,5 +861,68 @@ func TestCompactionIneffectiveRollupFallsBackToOrdinaryPasses(t *testing.T) {
 	clock = clock.Add(unusableSummaryHold)
 	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK || !strings.Contains(stub.prompt, "<absorbed_context>") {
 		t.Fatalf("pass after the backoff = %+v, %v; want the frontier rolled up again", res, err)
+	}
+}
+
+func TestManualCompactionFallsBackFromAnIneffectiveRollup(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubModel{summary: summaryOfTokens(t, 100), verbose: "<absorbed_context>"}
+	cfg := machineryConfig(stub, 200)
+	cfg.AllowFrontierFusion = true
+	cfg.MaxCompactTokens = 4000
+	cfg.Manual = true
+	q := newSessionStore(fusionQualityRows(t, cfg)...)
+	q.priorLogs = fusionParentLogs(t, cfg, strings.Repeat("a", 2400), strings.Repeat("b", 2400))
+	res, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg)
+	if err != nil || res.Status != StatusOK || strings.Contains(stub.prompt, "<absorbed_context>") {
+		t.Fatalf("manual pass = %+v, %v; want an ordinary summary after the rollup did not shrink", res, err)
+	}
+}
+
+func TestCompactionRefusedFrontierLeavesItsSpanToAnOrdinaryPass(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubModel{summary: "rolled up", refuse: "<absorbed_context>"}
+	q, cfg := refusedFusionSession(t, stub, 3)
+	cfg.HardPressure = true
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	for minute := 0; minute < 30; minute += 5 {
+		for pass := 0; pass < 3; pass++ {
+			if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil && !errors.Is(err, ErrIneffectiveSummary) || err == nil && res.Status != StatusOK {
+				break
+			}
+		}
+		clock = clock.Add(5 * time.Minute)
+	}
+	if q.logStatuses[q.claims[q.history[0].ID]] != "ok" {
+		t.Fatal("the oldest span is still raw: a refused rollup held it for the next rollup instead of letting an ordinary pass summarize it")
+	}
+}
+
+func TestRetrySpanKeepsAFailedBatchApart(t *testing.T) {
+	t.Parallel()
+
+	failed := pgtype.UUID{Bytes: [16]byte{7}, Valid: true}
+	span := func(frontTokens int) []CompactionCandidate {
+		items, _ := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{
+			prose(t, "user", "FRONT", frontTokens, 10), prose(t, "user", "FAILED1", 300, 10), prose(t, "assistant", "FAILED2", 300, 10),
+		})
+		for i := 1; i < 3; i++ {
+			items[i].RetryOf, items[i].RetryRows, items[i].UnusableAttempts = failed, 2, 1
+		}
+		return items
+	}
+	if got := retrySpan(span(300), minCompactionSpanTokens); len(got) != 1 || got[0].RetryOf.Valid {
+		t.Errorf("claim of %d rows, want the rows in front of the failed batch alone", len(got))
+	}
+	if got := retrySpan(span(20), minCompactionSpanTokens); len(got) != 1 || got[0].RetryOf != failed {
+		t.Errorf("claim of %d rows, want the first half of the failed batch when the rows in front cannot clear the floor", len(got))
+	}
+	if got := retrySpan(span(300)[1:], minCompactionSpanTokens); len(got) != 1 || got[0].RetryOf != failed {
+		t.Errorf("claim of %d rows, want the first half of a whole failed batch", len(got))
 	}
 }

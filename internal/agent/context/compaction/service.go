@@ -43,6 +43,11 @@ var (
 	// replaces. Nothing is recorded against the rows, so it counts as an
 	// ordinary failure.
 	errIneffectiveRollup = errors.New("compaction: rollup does not reduce replay tokens")
+	// errRollupFailed marks a rollup whose summary cannot replace what it
+	// absorbs. That says nothing about its new rows on their own: nothing is
+	// recorded against them, and fusion backs off so the next pass is an
+	// ordinary one.
+	errRollupFailed = errors.New("compaction: rollup failed")
 	// ErrSummaryWindowTooSmall marks a summarizer whose declared window cannot
 	// hold the fixed prompt plus the output reserve; running it would overflow
 	// on every attempt, so it fails closed before claiming any source rows.
@@ -308,6 +313,10 @@ func (s *Service) RunCompaction(ctx context.Context, cfg TriggerConfig) error {
 // canceled wait degrades to a noop.
 func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) (Result, error) {
 	res, err := s.runCompactionSync(ctx, cfg)
+	if cfg.Manual && errors.Is(err, errRollupFailed) {
+		// Fusion now backs off: the same request makes an ordinary pass.
+		res, err = s.runCompactionSync(ctx, cfg)
+	}
 	if !cfg.Manual || !errors.Is(err, ErrIneffectiveSummary) {
 		return res, err
 	}
