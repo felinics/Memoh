@@ -1227,3 +1227,49 @@ func TestCompactionCutOffSummaryOfARowThatCannotBeHalvedIsHeld(t *testing.T) {
 		t.Fatalf("summarizer calls = %d, reason %q; a row cut off that cannot be halved must be held", stub.calls, q.reasons[q.claims[q.history[0].ID]])
 	}
 }
+
+func TestCompactionCountsRowsHeldAfterAnUnusableSummary(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore(prose(t, "user", "REFUSED question", 300, 100), prose(t, "assistant", "REFUSED answer", 300, 100), reasoningOnlyRow(t), prose(t, "user", "CURRENT", 10, 10))
+	stub := &stubModel{summary: summaryOfTokens(t, 100), refuse: "REFUSED"}
+	svc := newMachineryService(q)
+	cfg := machineryConfig(stub, 50)
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); !errors.Is(err, ErrIneffectiveSummary) {
+		t.Fatalf("first pass = %v, want the refusal recorded", err)
+	}
+	measure, _ := q.MeasureUncompactedMessagesBySession(context.Background(), pgtype.UUID{})
+	read, reason, err := svc.readCompactionSpan(context.Background(), pgtype.UUID{}, cfg, measure, minCompactionSpanTokens, 10000, false)
+	if err != nil || reason != ReasonNoBeneficialSpan || read.stats.HeldGaps != 1 {
+		t.Fatalf("read = %q, %v with %d held gaps; want the held rows counted", reason, err, read.stats.HeldGaps)
+	}
+}
+
+func TestManualCompactionWithNothingHeldReadsOnce(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore(prose(t, "user", "tiny", 10, 10), reasoningOnlyRow(t), prose(t, "user", "CURRENT", 10, 10))
+	cfg := machineryConfig(&stubModel{}, 50)
+	cfg.Manual = true
+	if res, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusNoop || q.windows != 1 {
+		t.Fatalf("manual pass = %+v, %v after %d reads; want one read when nothing is held", res, err, q.windows)
+	}
+}
+
+func TestCompactionForgetsAStaleIneffectiveStrike(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore(prose(t, "user", "VERBOSE question", 300, 100), prose(t, "assistant", "VERBOSE answer", 300, 100), reasoningOnlyRow(t), prose(t, "user", "FIRST", 10, 10))
+	stub := &stubModel{summary: summaryOfTokens(t, 100), verbose: "VERBOSE"}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	cfg := machineryConfig(stub, 50)
+	_, _ = svc.RunCompactionSync(context.Background(), cfg)
+	clock = clock.Add(compactionFailureCooldown)
+	_, _ = svc.RunCompactionSync(context.Background(), cfg)
+	if _, kept := svc.ineffective[cfg.SessionID]; kept {
+		t.Fatal("a strike past the cooldown is kept after a pass that found nothing")
+	}
+}

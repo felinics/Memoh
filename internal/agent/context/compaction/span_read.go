@@ -210,6 +210,11 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			continue
 		}
 		read.stats.add(choice.stats)
+		for _, row := range window {
+			if row.PendingBefore {
+				read.stats.HeldGaps++
+			}
+		}
 		if truncated && open && from > 0 {
 			// The joint runs into the window edge: the next window starts
 			// with it, so the steps behind the edge are held too.
@@ -303,6 +308,7 @@ func (r spanRead) attrs(cfg TriggerConfig, reason string) []slog.Attr {
 		slog.Int("unrendered_groups", r.stats.UnrenderedGroups),
 		slog.Int("open_groups", r.stats.OpenGroups),
 		slog.Int("gaps", r.stats.Gaps),
+		slog.Int("held_gaps", r.stats.HeldGaps),
 		slog.Int("small_spans", r.stats.SmallSpans),
 		slog.Int("ineffective_spans", r.stats.IneffectiveSpans),
 		slog.Int("oversized_rows", r.oversized),

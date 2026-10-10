@@ -16,14 +16,15 @@ const (
 	// ReasonNothingToCompact: every candidate is inside the kept recent tail.
 	ReasonNothingToCompact = "nothing_to_compact"
 	// ReasonNoBeneficialSpan: candidates exist, but each is protected,
-	// unrenderable, already proved ineffective, or too small to shrink.
+	// unrenderable, already proved ineffective, too small to shrink, or held
+	// back for a while after a summary the model could not deliver.
 	ReasonNoBeneficialSpan = "no_beneficial_span"
 	// ReasonReadBudgetExceeded: a single row is larger than one read window,
 	// or the scan budget ran out before a span qualified.
 	ReasonReadBudgetExceeded = "read_budget_exceeded"
 	// ReasonSummaryUnusable: a manual pass got no usable summary from the
-	// model (empty, cut off, or refused); those rows are held back for a
-	// while and the next pass moves past them.
+	// model (empty, cut off, or refused); the next pass moves past those rows
+	// while they are held back, or retries half of them.
 	ReasonSummaryUnusable = "summary_unusable"
 )
 

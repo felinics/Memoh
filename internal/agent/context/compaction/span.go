@@ -98,6 +98,7 @@ type spanStats struct {
 	UnrenderedGroups   int
 	OpenGroups         int
 	Gaps               int
+	HeldGaps           int
 	SmallSpans         int
 	IneffectiveSpans   int
 	SpanTokens         int
@@ -109,6 +110,7 @@ func (s *spanStats) add(other spanStats) {
 	s.UnrenderedGroups += other.UnrenderedGroups
 	s.OpenGroups += other.OpenGroups
 	s.Gaps += other.Gaps
+	s.HeldGaps += other.HeldGaps
 	s.SmallSpans += other.SmallSpans
 	s.IneffectiveSpans += other.IneffectiveSpans
 	s.SpanTokens = other.SpanTokens

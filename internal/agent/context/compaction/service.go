@@ -201,12 +201,13 @@ func (s *Service) recordCompactionFailure(sessionID string) {
 
 // clearCompactionFailure ends the cooldown after a pass that did not fail.
 // Only a committed summary ends a run of ineffective ones: a noop between two
-// of them says nothing about the summarizer.
+// of them says nothing about the summarizer. A strike past the cooldown no
+// longer counts either way and is dropped.
 func (s *Service) clearCompactionFailure(sessionID string, committed bool) {
 	s.inflightMu.Lock()
 	defer s.inflightMu.Unlock()
 	delete(s.failedAt, sessionID)
-	if committed {
+	if last, ok := s.ineffective[sessionID]; ok && (committed || s.nowFn().Sub(last) >= compactionFailureCooldown) {
 		delete(s.ineffective, sessionID)
 	}
 }

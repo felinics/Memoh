@@ -87,7 +87,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	// Both entries budgets below are floored at half of maxCompactTokens, so a
 	// span claimable within that is claimable within the actual one.
 	read, reason, err := s.readCompactionSpan(ctx, sessionUUID, cfg, measure, minSpanTokens, maxCompactTokens/2, false)
-	if err == nil && reason != "" && cfg.Manual {
+	if err == nil && reason != "" && cfg.Manual && read.stats.HeldGaps > 0 {
 		// With nothing else to claim, a manual request retries rows held
 		// after an unusable summary: the user may just have fixed the model.
 		read, reason, err = s.readCompactionSpan(ctx, sessionUUID, cfg, measure, minSpanTokens, maxCompactTokens/2, true)
