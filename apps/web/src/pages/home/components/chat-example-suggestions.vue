@@ -6,16 +6,19 @@ import { useChatExampleAction, useChatExampleEntries } from '@/components/chat-e
 import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-ui'
 
 /**
- * Up to three usage examples under the welcome composer, with "See all"
- * opening the full gallery. Hiding them is remembered on this device; while
- * hidden, the composer's context row shows the entry that brings them back.
- * Hidden by the welcome column's height tiers (style.css) before anything
- * else yields.
+ * Three usage examples, drawn at random, under the welcome composer, with
+ * "See all" opening the full gallery. Hiding them is remembered on this
+ * device; while hidden, the composer's context row shows the entry that
+ * brings them back. Hidden by the welcome column's height tiers (style.css)
+ * before anything else yields.
  */
 const props = defineProps<{ botId: string }>()
 
 const { welcomeDismissed, openGallery } = useChatExamplesUi()
-const entries = useChatExampleEntries(() => props.botId, { surface: 'welcome', limit: 3, spreadCategories: true })
+// A new seed per mounted welcome view: every new chat draws a different three,
+// while this one stays put through re-renders and the capability probe.
+const seed = Math.random()
+const entries = useChatExampleEntries(() => props.botId, { surface: 'welcome', limit: 3, spreadCategories: true, seed })
 const { run } = useChatExampleAction(() => props.botId)
 </script>
 

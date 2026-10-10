@@ -27,13 +27,28 @@ export interface SelectChatExamplesOptions {
   hideUnavailable?: boolean
   /** Prefer one example per category before repeating a category. */
   spreadCategories?: boolean
+  /**
+   * Shuffle instead of ranking by priority. The same seed always yields the
+   * same order, so a surface stays stable while it re-renders.
+   */
+  seed?: number
+}
+
+/** Deterministic pseudo-random rank of an example for a seed (FNV-1a over seed + id). */
+function seededRank(seed: number, id: string): number {
+  let hash = 0x811C9DC5
+  for (const char of `${seed}:${id}`) {
+    hash ^= char.charCodeAt(0)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return hash >>> 0
 }
 
 /**
  * Pick examples for a surface. Order: available before unavailable, then
- * priority (desc), then catalog order. With `spreadCategories`, a first pass
- * takes one example per category in that order and a second pass fills the
- * remaining slots.
+ * priority (desc) — or a seeded shuffle when `seed` is set — then catalog
+ * order. With `spreadCategories`, a first pass takes one example per
+ * category in that order and a second pass fills the remaining slots.
  */
 export function selectChatExamples(examples: readonly ChatExample[], options: SelectChatExamplesOptions): ChatExample[] {
   const category = options.category ?? 'all'
@@ -47,10 +62,13 @@ export function selectChatExamples(examples: readonly ChatExample[], options: Se
       example.surfaces.includes(options.surface)
       && (category === 'all' || example.category === category)
       && !(options.hideUnavailable && unavailable))
-    .sort((a, b) =>
-      Number(a.unavailable) - Number(b.unavailable)
-      || b.example.priority - a.example.priority
-      || a.index - b.index)
+    .sort((a, b) => {
+      const seed = options.seed
+      const order = seed === undefined
+        ? b.example.priority - a.example.priority
+        : seededRank(seed, a.example.id) - seededRank(seed, b.example.id)
+      return Number(a.unavailable) - Number(b.unavailable) || order || a.index - b.index
+    })
     .map(({ example }) => example)
 
   const limit = options.limit ?? ranked.length

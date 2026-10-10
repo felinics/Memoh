@@ -5,8 +5,9 @@ import type { ChatExample } from './types'
  * UI reads it through useChatExamplesQuery, which is also where a backend
  * source would plug in (with this list as the offline fallback).
  *
- * Only capability-free examples may be offered during onboarding, because a
- * freshly created bot has nothing configured yet.
+ * Every example is offered on the welcome strip (three drawn at random per
+ * new chat) and in the gallery. Only capability-free examples may be offered
+ * during onboarding, because a freshly created bot has nothing configured yet.
  */
 export const BUILTIN_CHAT_EXAMPLES: readonly ChatExample[] = [
   {
@@ -85,7 +86,7 @@ export const BUILTIN_CHAT_EXAMPLES: readonly ChatExample[] = [
     icon: 'users',
     priority: 60,
     requires: ['schedule', 'channel'],
-    surfaces: ['gallery'],
+    surfaces: ['welcome', 'gallery'],
     title: { en: 'Weekly report reminder', zh: '周报提醒', ja: '週報リマインダー' },
     prompt: {
       en: 'Every Friday at 5 pm, remind everyone in our group to submit their weekly report, and at 8 pm send me a list of who has not.',
@@ -99,7 +100,7 @@ export const BUILTIN_CHAT_EXAMPLES: readonly ChatExample[] = [
     icon: 'trending-down',
     priority: 65,
     requires: ['browser', 'schedule'],
-    surfaces: ['gallery'],
+    surfaces: ['welcome', 'gallery'],
     title: { en: 'Price drop alert', zh: '降价提醒', ja: '値下がり通知' },
     prompt: {
       en: 'Check the price of this monitor once a day and tell me as soon as it drops below $200: ',
@@ -113,7 +114,7 @@ export const BUILTIN_CHAT_EXAMPLES: readonly ChatExample[] = [
     icon: 'chart-pie',
     priority: 55,
     requires: ['workspace'],
-    surfaces: ['gallery'],
+    surfaces: ['welcome', 'gallery'],
     title: { en: 'Analyze my spending', zh: '账单分析', ja: '支出の分析' },
     prompt: {
       en: 'Use Python to analyze the CSV statement I upload, chart this month\'s spending by category and point out what grew the most.',
@@ -127,7 +128,7 @@ export const BUILTIN_CHAT_EXAMPLES: readonly ChatExample[] = [
     icon: 'messages-square',
     priority: 50,
     requires: ['channel', 'memory'],
-    surfaces: ['gallery'],
+    surfaces: ['welcome', 'gallery'],
     title: { en: 'Group chat minutes', zh: '群聊纪要', ja: 'グループチャットの議事録' },
     prompt: {
       en: 'Turn today\'s discussion in our group chat into meeting notes, with action items and owners.',
@@ -141,7 +142,7 @@ export const BUILTIN_CHAT_EXAMPLES: readonly ChatExample[] = [
     icon: 'link-2-off',
     priority: 45,
     requires: ['browser'],
-    surfaces: ['gallery'],
+    surfaces: ['welcome', 'gallery'],
     title: { en: 'Find broken links', zh: '检查失效链接', ja: 'リンク切れチェック' },
     prompt: {
       en: 'Open our website in the browser, check every page for broken links and put them in a table for me: ',
@@ -155,7 +156,7 @@ export const BUILTIN_CHAT_EXAMPLES: readonly ChatExample[] = [
     icon: 'notebook-pen',
     priority: 40,
     requires: ['schedule', 'memory'],
-    surfaces: ['gallery'],
+    surfaces: ['welcome', 'gallery'],
     title: { en: 'Evening journal', zh: '睡前日记', ja: '夜のジャーナル' },
     prompt: {
       en: 'Every night at 11, ask me how my day went, keep my answer in long-term memory and review the month with me at the end of it.',
@@ -169,7 +170,7 @@ export const BUILTIN_CHAT_EXAMPLES: readonly ChatExample[] = [
     icon: 'mail-open',
     priority: 35,
     requires: ['email'],
-    surfaces: ['gallery'],
+    surfaces: ['welcome', 'gallery'],
     title: { en: 'Draft email replies', zh: '邮件回复草稿', ja: 'メール返信の下書き' },
     prompt: {
       en: 'Look through my unread emails, pick the ones that need a reply and draft one for each. I will review them before anything is sent.',
@@ -197,7 +198,7 @@ export const BUILTIN_CHAT_EXAMPLES: readonly ChatExample[] = [
     icon: 'calendar-days',
     priority: 25,
     requires: [],
-    surfaces: ['gallery', 'onboarding'],
+    surfaces: ['welcome', 'gallery', 'onboarding'],
     title: { en: 'Plan my week', zh: '安排这一周', ja: '今週の計画' },
     prompt: {
       en: 'Help me plan this week. Ask me about my deadlines and commitments first, then propose a realistic day-by-day schedule.',
@@ -211,7 +212,7 @@ export const BUILTIN_CHAT_EXAMPLES: readonly ChatExample[] = [
     icon: 'lightbulb',
     priority: 20,
     requires: [],
-    surfaces: ['gallery', 'onboarding'],
+    surfaces: ['welcome', 'gallery', 'onboarding'],
     title: { en: 'Explain a concept', zh: '讲清楚一个概念', ja: '概念をわかりやすく' },
     prompt: {
       en: 'Explain a concept to me step by step, starting from what I already know. Ask me which concept and how familiar I am with it first.',
