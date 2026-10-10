@@ -73,7 +73,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
   AND id = $2
 RETURNING id, team_id, bot_id, registry_id, app_id, revision, version,
-          status, reason, available_revision, available_version, last_checked_at, last_error,
+          status, reason, available_revision, available_version, last_checked_at, last_error, last_error_code,
           release, installed_at, updated_at
 `
 
@@ -99,6 +99,7 @@ func (q *Queries) DeleteBotAppInstallation(ctx context.Context, arg DeleteBotApp
 		&i.AvailableVersion,
 		&i.LastCheckedAt,
 		&i.LastError,
+		&i.LastErrorCode,
 		&i.Release,
 		&i.InstalledAt,
 		&i.UpdatedAt,
@@ -108,7 +109,7 @@ func (q *Queries) DeleteBotAppInstallation(ctx context.Context, arg DeleteBotApp
 
 const getBotAppInstallation = `-- name: GetBotAppInstallation :one
 SELECT id, team_id, bot_id, registry_id, app_id, revision, version,
-       status, reason, available_revision, available_version, last_checked_at, last_error,
+       status, reason, available_revision, available_version, last_checked_at, last_error, last_error_code,
        release, installed_at, updated_at
 FROM bot_app_installations
 WHERE team_id = public.memoh_current_team_id()
@@ -141,6 +142,7 @@ func (q *Queries) GetBotAppInstallation(ctx context.Context, arg GetBotAppInstal
 		&i.AvailableVersion,
 		&i.LastCheckedAt,
 		&i.LastError,
+		&i.LastErrorCode,
 		&i.Release,
 		&i.InstalledAt,
 		&i.UpdatedAt,
@@ -150,7 +152,7 @@ func (q *Queries) GetBotAppInstallation(ctx context.Context, arg GetBotAppInstal
 
 const getBotAppInstallationByID = `-- name: GetBotAppInstallationByID :one
 SELECT id, team_id, bot_id, registry_id, app_id, revision, version,
-       status, reason, available_revision, available_version, last_checked_at, last_error,
+       status, reason, available_revision, available_version, last_checked_at, last_error, last_error_code,
        release, installed_at, updated_at
 FROM bot_app_installations
 WHERE team_id = public.memoh_current_team_id()
@@ -181,6 +183,7 @@ func (q *Queries) GetBotAppInstallationByID(ctx context.Context, arg GetBotAppIn
 		&i.AvailableVersion,
 		&i.LastCheckedAt,
 		&i.LastError,
+		&i.LastErrorCode,
 		&i.Release,
 		&i.InstalledAt,
 		&i.UpdatedAt,
@@ -365,7 +368,7 @@ func (q *Queries) ListAppDependencyRefsForBot(ctx context.Context, botID pgtype.
 
 const listBotAppInstallations = `-- name: ListBotAppInstallations :many
 SELECT id, team_id, bot_id, registry_id, app_id, revision, version,
-       status, reason, available_revision, available_version, last_checked_at, last_error,
+       status, reason, available_revision, available_version, last_checked_at, last_error, last_error_code,
        release, installed_at, updated_at
 FROM bot_app_installations
 WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
@@ -395,6 +398,7 @@ func (q *Queries) ListBotAppInstallations(ctx context.Context, botID pgtype.UUID
 			&i.AvailableVersion,
 			&i.LastCheckedAt,
 			&i.LastError,
+			&i.LastErrorCode,
 			&i.Release,
 			&i.InstalledAt,
 			&i.UpdatedAt,
@@ -451,7 +455,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $4
   AND id = $5
 RETURNING id, team_id, bot_id, registry_id, app_id, revision, version,
-          status, reason, available_revision, available_version, last_checked_at, last_error,
+          status, reason, available_revision, available_version, last_checked_at, last_error, last_error_code,
           release, installed_at, updated_at
 `
 
@@ -486,6 +490,7 @@ func (q *Queries) UpdateBotAppInstallationCheck(ctx context.Context, arg UpdateB
 		&i.AvailableVersion,
 		&i.LastCheckedAt,
 		&i.LastError,
+		&i.LastErrorCode,
 		&i.Release,
 		&i.InstalledAt,
 		&i.UpdatedAt,
@@ -505,7 +510,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $4
   AND id = $5
 RETURNING id, team_id, bot_id, registry_id, app_id, revision, version,
-          status, reason, available_revision, available_version, last_checked_at, last_error,
+          status, reason, available_revision, available_version, last_checked_at, last_error, last_error_code,
           release, installed_at, updated_at
 `
 
@@ -540,6 +545,7 @@ func (q *Queries) UpdateBotAppInstallationRelease(ctx context.Context, arg Updat
 		&i.AvailableVersion,
 		&i.LastCheckedAt,
 		&i.LastError,
+		&i.LastErrorCode,
 		&i.Release,
 		&i.InstalledAt,
 		&i.UpdatedAt,
@@ -550,27 +556,28 @@ func (q *Queries) UpdateBotAppInstallationRelease(ctx context.Context, arg Updat
 const updateBotAppInstallationStatus = `-- name: UpdateBotAppInstallationStatus :one
 UPDATE bot_app_installations
 SET status = $1,
-    last_error = $2,
+    last_error = '',
+    last_error_code = $2,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $3
   AND id = $4
 RETURNING id, team_id, bot_id, registry_id, app_id, revision, version,
-          status, reason, available_revision, available_version, last_checked_at, last_error,
+          status, reason, available_revision, available_version, last_checked_at, last_error, last_error_code,
           release, installed_at, updated_at
 `
 
 type UpdateBotAppInstallationStatusParams struct {
-	Status    string      `json:"status"`
-	LastError string      `json:"last_error"`
-	BotID     pgtype.UUID `json:"bot_id"`
-	ID        pgtype.UUID `json:"id"`
+	Status        string      `json:"status"`
+	LastErrorCode string      `json:"last_error_code"`
+	BotID         pgtype.UUID `json:"bot_id"`
+	ID            pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateBotAppInstallationStatus(ctx context.Context, arg UpdateBotAppInstallationStatusParams) (BotAppInstallation, error) {
 	row := q.db.QueryRow(ctx, updateBotAppInstallationStatus,
 		arg.Status,
-		arg.LastError,
+		arg.LastErrorCode,
 		arg.BotID,
 		arg.ID,
 	)
@@ -589,6 +596,7 @@ func (q *Queries) UpdateBotAppInstallationStatus(ctx context.Context, arg Update
 		&i.AvailableVersion,
 		&i.LastCheckedAt,
 		&i.LastError,
+		&i.LastErrorCode,
 		&i.Release,
 		&i.InstalledAt,
 		&i.UpdatedAt,
@@ -671,9 +679,10 @@ DO UPDATE SET revision = EXCLUDED.revision,
               reason = CASE WHEN EXCLUDED.reason = 'user' THEN 'user' ELSE bot_app_installations.reason END,
               release = EXCLUDED.release,
               last_error = '',
+              last_error_code = '',
               updated_at = now()
 RETURNING id, team_id, bot_id, registry_id, app_id, revision, version,
-          status, reason, available_revision, available_version, last_checked_at, last_error,
+          status, reason, available_revision, available_version, last_checked_at, last_error, last_error_code,
           release, installed_at, updated_at
 `
 
@@ -714,6 +723,7 @@ func (q *Queries) UpsertBotAppInstallation(ctx context.Context, arg UpsertBotApp
 		&i.AvailableVersion,
 		&i.LastCheckedAt,
 		&i.LastError,
+		&i.LastErrorCode,
 		&i.Release,
 		&i.InstalledAt,
 		&i.UpdatedAt,

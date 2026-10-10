@@ -263,11 +263,11 @@ func TestSupermarketProxyAnswersUpstreamErrorsAsProblem(t *testing.T) {
 		upstream int
 		status   int
 		code     apperror.Code
-		fault    string
+		fault    apperror.Fault
 	}{
-		{"not found", http.StatusNotFound, http.StatusNotFound, apperror.CodeHTTPNotFound, "client"},
-		{"other client status", http.StatusUnauthorized, http.StatusBadGateway, apperror.CodeHTTPBadGateway, "dependency"},
-		{"server status", http.StatusServiceUnavailable, http.StatusBadGateway, apperror.CodeHTTPBadGateway, "dependency"},
+		{"not found", http.StatusNotFound, http.StatusNotFound, apperror.CodeHTTPNotFound, apperror.FaultClient},
+		{"other client status", http.StatusUnauthorized, http.StatusBadGateway, apperror.CodeHTTPBadGateway, apperror.FaultDependency},
+		{"server status", http.StatusServiceUnavailable, http.StatusBadGateway, apperror.CodeHTTPBadGateway, apperror.FaultDependency},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -301,7 +301,7 @@ func TestSupermarketProxyAnswersUpstreamErrorsAsProblem(t *testing.T) {
 				if strings.Contains(rec.Body.String(), "synthetic upstream detail") {
 					t.Fatalf("GET %s forwarded the upstream body: %s", path, rec.Body.String())
 				}
-				var problem apperror.Problem
+				var problem server.Problem
 				if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
 					t.Fatalf("decode problem: %v", err)
 				}

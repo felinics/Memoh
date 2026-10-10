@@ -1,6 +1,6 @@
 <template>
-  <!-- Notices (usage, error, command result) stack as their own banners; decision
-       surfaces (compaction status, approvals) share ONE capsule below them. -->
+  <!-- Notices (usage, error, command result) stack as their own banners; the
+       approval decision surface sits in a capsule below them. -->
   <div class="flex flex-col gap-2">
     <ComposerPanelUsage
       v-if="usageNotice"
@@ -25,15 +25,11 @@
       @dismiss="emit('dismissCommand')"
     />
     <ComposerCapsule
-      v-if="compacting || approvalHead"
+      v-if="approvalHead"
       :label="$t('chat.panel.regionLabel')"
     >
       <AutoHeight>
-        <ComposerPanelCompaction v-if="compacting" />
-        <div
-          v-if="approvalHead"
-          :class="compacting ? 'mt-2 border-t border-border-soft pt-2' : ''"
-        >
+        <div>
           <Transition
             mode="out-in"
             enter-active-class="transition-opacity duration-150 ease-out"
@@ -61,8 +57,7 @@
 // results, tool approvals, and anything added later render HERE. Notices
 // (account usage, error, command result) are page-level destructive/neutral banners that
 // stack upward one per message, each its own solid surface — no shared wrapper
-// around them. Decision surfaces (compaction status, approvals) share ONE
-// capsule, separated by hairlines, so they read as one control block.
+// around them. The approval decision surface sits in its own capsule below.
 //
 // The dock has TWO tiers, and the distinction is load-bearing:
 // - BOX tier (the input slot): ONE box owns the composer's position at a
@@ -94,7 +89,6 @@ import ComposerCapsule from './composer-capsule.vue'
 import ComposerPanelApproval from './composer-panel-approval.vue'
 import ComposerPanelCommand from './composer-panel-command.vue'
 import ComposerPanelError from './composer-panel-error.vue'
-import ComposerPanelCompaction from './composer-panel-compaction.vue'
 import ComposerPanelUsage from './composer-panel-usage.vue'
 import type { PendingApprovalItem } from '../composables/usePendingApprovals'
 import type { CommandActionListItem } from '@/composables/api/useChat'
@@ -118,7 +112,6 @@ const props = defineProps<{
   approvals: PendingApprovalItem[]
   commandPanel: CommandPanelData | null
   errorMessage: string
-  compacting?: boolean
   usageNotice?: UsageNotice | null
 }>()
 

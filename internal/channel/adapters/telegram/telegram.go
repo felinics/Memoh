@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/common"
 	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/redact"
@@ -132,7 +134,7 @@ func (a *TelegramAdapter) SetAssetOpener(opener assetOpener) {
 
 var getOrCreateBotForTest func(a *TelegramAdapter, token, configID string) (*tele.Bot, error)
 
-func (a *TelegramAdapter) getOrCreateBot(ctx context.Context, cfg Config, configID string) (*tele.Bot, error) {
+func (a *TelegramAdapter) getOrCreateBot(_ context.Context, cfg Config, configID string) (*tele.Bot, error) {
 	redact.SetSecrets("telegram:"+configID, cfg.BotToken)
 	if getOrCreateBotForTest != nil {
 		return getOrCreateBotForTest(a, cfg.BotToken, configID)
@@ -151,9 +153,6 @@ func (a *TelegramAdapter) getOrCreateBot(ctx context.Context, cfg Config, config
 	}
 	httpClient, err := common.NewHTTPClient(30*time.Second, cfg.HTTPProxy)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.ErrorContext(ctx, "create bot http client failed", slog.String("config_id", configID), slog.Any("error", err))
-		}
 		return nil, err
 	}
 	bot, err = tele.NewBot(tele.Settings{
@@ -173,9 +172,6 @@ func (a *TelegramAdapter) getOrCreateBot(ctx context.Context, cfg Config, config
 		},
 	})
 	if err != nil {
-		if a.logger != nil {
-			a.logger.ErrorContext(ctx, "create bot failed", slog.String("config_id", configID), slog.Any("error", err))
-		}
 		return nil, err
 	}
 	a.bots[cacheKey] = bot
@@ -367,16 +363,10 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 	}
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.ErrorContext(ctx, "decode config failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
 		return nil, err
 	}
 	bot, err := a.getOrCreateBot(ctx, telegramCfg, cfg.ID)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.ErrorContext(ctx, "create bot failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
 		return nil, err
 	}
 	// Advertise the slash-command menu so users discover and tap commands from
@@ -1224,9 +1214,6 @@ func (a *TelegramAdapter) logTelegramInbound(ctx context.Context, configID strin
 func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.PreparedOutboundMessage) error {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.ErrorContext(ctx, "decode config failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
 		return err
 	}
 	to := strings.TrimSpace(msg.Target)
@@ -1262,9 +1249,6 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 				actions = msg.Message.Message.Actions
 			}
 			if err := sendTelegramAttachmentWithAssets(ctx, bot, to, att, caption, applyReply, parseMode, actions); err != nil {
-				if a.logger != nil {
-					a.logger.ErrorContext(ctx, "send attachment failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-				}
 				return err
 			}
 		}
@@ -2318,12 +2302,12 @@ func (a *TelegramAdapter) ResolveAttachment(ctx context.Context, cfg channel.Cha
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
-		return channel.AttachmentPayload{}, fmt.Errorf("build download request: %w", err)
+		return channel.AttachmentPayload{}, errs.Wrap(withoutFileURLPath(err), "build telegram download request")
 	}
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req) //nolint:gosec // G704: URL is a Telegram file download URL from the Telegram Bot API
 	if err != nil {
-		return channel.AttachmentPayload{}, fmt.Errorf("download attachment: %w", err)
+		return channel.AttachmentPayload{}, errs.WrapDependency(withoutFileURLPath(err), "download telegram attachment")
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer func() {
@@ -2357,6 +2341,24 @@ func (a *TelegramAdapter) ResolveAttachment(ctx context.Context, cfg channel.Cha
 		Name:   strings.TrimSpace(attachment.Name),
 		Size:   size,
 	}, nil
+}
+
+// withoutFileURLPath removes the path and query from the URL that net/http
+// puts in a request error. A Telegram file URL carries the bot token in its
+// path, and with a custom file endpoint it may sit anywhere after the host.
+// The *url.Error is rebuilt rather than reworded, so errors.Is and errors.As
+// still reach its Err and Timeout still reports. http.NewRequestWithContext
+// and http.Client.Do return the *url.Error itself, never a wrapper around it.
+func withoutFileURLPath(err error) error {
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) {
+		return err
+	}
+	origin := "[redacted]"
+	if u, parseErr := url.Parse(urlErr.URL); parseErr == nil && u.Host != "" {
+		origin = u.Scheme + "://" + u.Host + "/[redacted]"
+	}
+	return &url.Error{Op: urlErr.Op, URL: origin, Err: urlErr.Err}
 }
 
 // DiscoverSelf retrieves the bot's own identity from the Telegram platform.

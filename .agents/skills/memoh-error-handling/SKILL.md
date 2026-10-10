@@ -20,14 +20,22 @@ metadata:
 3. **私有诊断不出网**：底层 cause（dial error、stderr、provider 响应）只进服务端日志，
    不进任何用户响应。`args` 走 catalog 白名单（`AllowedArgs`），未声明的键在构造时即被丢弃。
 4. **传输可异、语义同源**：HTTP 用 `application/problem+json`，SSE 用各自 event envelope，
-   但 code/args/detail/request_id 全部来自同一个 `apperror.PublicFrom`，禁止各端点自造。
-5. **旧行为直通**：非 apperror 的错误（`echo.HTTPError` 等）原样走 echo 默认渲染，
-   不做任何转换（`internal/server/server_test.go` 的 legacy 测试锁定此行为）。
+   但 code/args/detail/fault 全部来自同一个 `errs.Answer` 的选择，禁止各端点自造。
+5. **传输错误也是 Problem**：`*echo.HTTPError`（路由不存在、方法不允许、body 过大，以及 handler
+   返回的）在 `errs.Answer` 选择之前转成其状态对应的 `http.*` code，原错误作为 cause；
+   没有专用 code 的 4xx 为 `http.bad_request`，5xx 为 `internal`。它的 message 不下发，
+   handler 有 cause 时用 `WithInternal(err)` 附上，进结果记录
+   （`internal/server/error_handler_test.go` 的 `TestBoundaryAnswersEveryErrorWithAProblem` 锁定此行为）。
+   所以 handler 不要用 `echo.NewHTTPError(4xx, "...")` 告诉用户哪里错了，用户看不到：
+   缺字段用 `apperror.FieldRequired("字段名")` 或 `httpx.RequiredParam/RequiredQuery`，
+   字段值不合法用 `apperror.FieldInvalid("字段名", err)`。字段名照请求里的写法写成字面量
+   （JSON 键、query 或路径参数名，大小写不改，嵌套用点）。修正需要的不止字段名时，
+   在该领域建自己的 code。绑定类型错误由 `httpx.Binder` 自动给出字段，`c.Bind` 的错误直接返回。
 
 ## 后端：新增一个错误的标准步骤
 
-参照实现：`internal/apperror/`（catalog + Problem）、`internal/server/error_handler.go`（HTTP 渲染）、
-`internal/handlers/display.go` 的 `newDisplayPrepareAppError`（SSE envelope 适配）。
+参照实现：`internal/apperror/`（catalog）、`internal/server/error_handler.go` 与 `problem.go`（HTTP 渲染）、
+`internal/server/stream_error.go` 与 `internal/handlers/display.go` 的 `PrepareDisplay`（SSE 错误帧）。
 
 1. **catalog 注册**（`internal/apperror/error.go`）：
    ```go
@@ -40,12 +48,20 @@ metadata:
 2. **调用点**：领域 sentinel error → `apperror.New(code, args)`（无底层 cause）
    或 `apperror.Wrap(code, cause, args)`（保留 cause 供日志）。映射放在 handler 边界，
    不要让 apperror 渗入领域层。
-3. **HTTP 路径零额外代码**：直接 `return` 该 error，全局 `HTTPErrorHandler` 渲染 Problem，
-   自动带 `request_id`，≥500 时自动记 cause 日志。
-4. **SSE 路径**：用该端点的 envelope 适配函数（模式见 `newDisplayPrepareAppError`）——
-   从 `apperror.PublicFrom(err, requestID)` 取公开字段填 event，同时手动 `logger.Error` 记 cause。
-   新 AppError 事件不发 `i18n_key`（那是 legacy 通道）；`Message` 填英文 detail 供旧客户端兜底。
-5. **OpenAPI**：handler 加 `@Failure <status> {object} apperror.Problem` 注解，
+3. **HTTP 路径零额外代码**：直接 `return` 该 error。`server.NewHTTPErrorHandler` 用 `errs.Answer`
+   选出公共错误，渲染成带 `request_id` 的 `server.Problem`。这个请求只有一条结果记录，
+   是 `server.AccessLog` 写的 access 记录（`msg=request`），错误字段和级别由 `errlog.Finish`
+   按 fault 给出。handler 和下层 helper 不记日志，否则同一失败会出现第二条记录。
+4. **SSE / WebSocket 路径**（流已打开）：`frame, rendered := server.NewStreamError(ctx, err, requestID)`
+   取得错误帧（code/args/catalog detail/fault/request_id，`Message` 重复 detail，不含错误原文），
+   发出帧后 `return rendered`。响应已提交，access 记录按同一规则归因 `rendered`，不会再写一次响应；
+   handler 不记日志。客户端断开导致的写失败不算失败，不返回。参照 `display.go` 的 `fail`。
+   后台工作（标题生成、记忆写入、压缩、bot 删除、工作区 provision/teardown、schedule 触发、
+   后台命令）用 `job.Go` / `job.Run` 包成一个单元，单元结束时写一条 `msg=job` 记录
+   （`errlog.Finish` 带 `Async: true`，成功为 INFO）。单元内的代码返回错误，不记日志；
+   处理后继续的失败记 `errlog.Event`（WARN）。同一进程里已有内层单元记过的失败
+   （run 的 `agent run` 记录）由生产方套 `errs.Recorded`，外层记录最高 WARN。
+5. **OpenAPI**：handler 加 `@Failure <status> {object} server.Problem` 注解，
    然后 `mise run swagger-generate && mise run sdk-generate`。spec/SDK 的 diff 必须全部由再生成解释。
 
 ## 前端：消费错误的标准姿势
@@ -54,8 +70,13 @@ metadata:
 
 - **业务分支**：`isApiErrorCode(error, 'xxx.yyy')` 或 `parseMemohError(error)?.code`。
   禁止 `message.includes('...')` 判断业务状态（legacy 兼容兜底除外，必须带注释说明目标旧版本）。
-- **文案**：三语言 locale 各加 `errors.xxx.yyy` 键（code 的点 = JSON 嵌套层级）。
-  `resolveApiErrorMessage` 自动按 `errors.<code>` → `i18n_key`（legacy）→ `detail` 顺序渲染。
+- **文案**：Web 与 IM 的三语言 locale 各加 `errors.xxx.yyy` 键（code 的点 = JSON 嵌套层级）。
+  `errors` 下的键按字母序放（含嵌套层），`codes.golden` 也按 code 排序；新 code 用
+  `go test ./internal/apperror -run TestCatalogGolden -update-golden` 写入。
+  `resolveApiErrorMessage` 先取 `errors.<code>`（代入 `args`）；没有文案时按 status 取通用文案
+  （4xx 取该 status 对应的 `errors.http.*`，没有则 `http.bad_request`；5xx 取 `errors.internal`；499 不显示），
+  无 status 的流错误事件取 `errors.internal`（fault 为 `canceled` 时不显示），最后是调用方的 fallback。
+  不读 `i18n_key`，也不显示服务端的 `detail`/`message`。
   **错误文案是 UX，不是英文 detail 的翻译**：要回答用户"接下来能做什么"——
   可重试的说"请稍后重试"（如 `workspace.unreachable` 的 zh 文案），需要用户改输入的
   指向那个输入（如 `bot.name_taken`）；无法行动的错误才允许只陈述事实。
@@ -72,8 +93,8 @@ metadata:
 - 旧服务器（桌面端可能连接）返回 `{"message":"..."}`、无 code 无 status。
   对这类响应的英文匹配兜底**允许存在但必须带注释**（范例：files-pane 的
   `isTransientWorkspaceError`）。删除兜底 = 明确决定放弃对应旧版本，需报备。
-- 未迁移端点仍发 legacy SSE error（snake_case code + `i18n_key`），前端渲染链自动兼容，
-  不要求一次性迁移。同一 handler 内 legacy `sendError` 与新 `sendAppError` 双轨并存是过渡态。
+- 服务端不再发 legacy SSE error：流错误帧由 `server.NewStreamError` 生成，
+  HTTP 错误一律是 Problem（含 `echo.HTTPError`，见不变量 5）。前端渲染链不读 `i18n_key`。
 - `bot-create-progress` 里 409→`bot.name_taken` 的启发式是旧服务器兜底，
   新增场景禁止模仿"从 status 猜 code"。
 

@@ -145,37 +145,34 @@ function readStatus(record: ErrorRecord): number | undefined {
   return undefined
 }
 
-// A Problem whose code this client has no copy for is described by its fault:
-// what the client got wrong for a client fault, a retry for a server or
-// dependency fault, and nothing for a canceled request. The Problem's detail
-// is not shown. Returns undefined when the error is not a Problem with a fault.
-function pickFaultMessage(error: unknown): string | undefined {
-  for (const record of collectErrorRecords(error)) {
-    const fault = readFault(record)
-    if (!fault) continue
-    if (fault === 'canceled') return ''
-    if (fault === 'client') {
-      const status = readStatus(record)
-      const code = (status !== undefined && clientStatusCodes[status]) || 'http.bad_request'
-      return renderI18nMessage(`errors.${code}`)
-    }
-    return renderI18nMessage('errors.internal')
-  }
-  return undefined
-}
-
-// An error with neither copy nor a fault is described by its HTTP status
-// alone, the same way: what the client got wrong for a 4xx, a retry for a 5xx.
-function pickStatusMessage(error: unknown): string {
+// An error whose code this client has no copy for, or that has no code, is
+// described by its HTTP status: nothing for a canceled request (499), a retry
+// for 429 and a 5xx, and what the client got wrong for any other 4xx. The
+// error's own text is not shown. Returns undefined when the error has no
+// status.
+function pickStatusMessage(error: unknown): string | undefined {
   for (const record of collectErrorRecords(error)) {
     const status = readStatus(record)
     if (status === undefined) continue
+    if (status === 499) return ''
     if (status >= 400 && status < 500) {
       return renderI18nMessage(`errors.${clientStatusCodes[status] ?? 'http.bad_request'}`)
     }
     if (status >= 500) return renderI18nMessage('errors.internal')
   }
-  return ''
+  return undefined
+}
+
+// The error event of an SSE or WebSocket stream (type error) has no status.
+// One whose code this client has no copy for gets the generic failure copy,
+// and nothing when its fault is canceled. Returns undefined when the error
+// holds no such event.
+function pickStreamEventMessage(error: unknown): string | undefined {
+  for (const record of collectErrorRecords(error)) {
+    if (record.type !== 'error' || typeof record.code !== 'string' || !record.code.trim()) continue
+    return readFault(record) === 'canceled' ? '' : renderI18nMessage('errors.internal')
+  }
+  return undefined
 }
 
 function pickErrorDetail(error: unknown): string {
@@ -248,8 +245,8 @@ export function isApiErrorAnswered(error: unknown): boolean {
 /**
  * The message to show for error. It is empty for a canceled request, which is
  * not shown. The error's own text is shown only for a UserFacingError: any
- * other error this client has no copy, fault or status for is described by
- * fallback.
+ * other error this client has no copy or status for, and that is not a stream
+ * error event, is described by fallback.
  */
 export function resolveApiErrorMessage(
   error: unknown,
@@ -257,12 +254,11 @@ export function resolveApiErrorMessage(
   options: ResolveApiErrorMessageOptions = {},
 ): string {
   const feedback = pickApiFeedbackMessage(error)
-  const faultMessage = feedback ? undefined : pickFaultMessage(error)
-  if (faultMessage === '') return ''
+  const generic = feedback ? undefined : pickStatusMessage(error) ?? pickStreamEventMessage(error)
+  if (generic === '') return ''
   const detail = feedback
-    || faultMessage
     || (error instanceof UserFacingError ? error.message.trim() : '')
-    || pickStatusMessage(error)
+    || generic
     || pickNetworkErrorMessage(error)
   if (!detail) return fallback
 

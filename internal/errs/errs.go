@@ -8,12 +8,12 @@ import (
 )
 
 type faultError struct {
-	msg      string
-	cause    error
-	attrs    []slog.Attr
-	stack    []Frame
-	explicit bool
-	panic    bool
+	msg        string
+	cause      error
+	attrs      []slog.Attr
+	stack      []Frame
+	dependency bool
+	panic      bool
 }
 
 func (e *faultError) Error() string {
@@ -78,8 +78,8 @@ func WrapDependencyWithDepth(depth int, err error, msg string, attrs ...slog.Att
 
 // makeError must be called directly by an exported constructor: the skip
 // count below assumes exactly that frame layout.
-func makeError(depth int, msg string, cause error, explicit bool, attrs ...slog.Attr) error {
-	e := &faultError{msg: msg, cause: cause, attrs: append([]slog.Attr(nil), attrs...), explicit: explicit}
+func makeError(depth int, msg string, cause error, dependency bool, attrs ...slog.Attr) error {
+	e := &faultError{msg: msg, cause: cause, attrs: append([]slog.Attr(nil), attrs...), dependency: dependency}
 	if !hasStack(cause) {
 		e.stack = captureStack(4+max(depth, 0), maxStackFrames)
 	}

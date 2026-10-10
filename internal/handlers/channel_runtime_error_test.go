@@ -8,6 +8,7 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/channel"
 	runtimeRpc "github.com/felinics/memoh/internal/rpc/runtime"
+	"github.com/felinics/memoh/internal/server"
 )
 
 func TestMapChannelRuntimeErrorKeepsCausePrivate(t *testing.T) {
@@ -19,7 +20,7 @@ func TestMapChannelRuntimeErrorKeepsCausePrivate(t *testing.T) {
 	if got := apperror.CauseOf(err); !errors.Is(got, runtimeRpc.ErrUnavailable) {
 		t.Fatalf("cause = %v", got)
 	}
-	problem, ok := apperror.ProblemFrom(err, "req-1")
+	problem, ok := server.ProblemFrom(err, "req-1")
 	if !ok {
 		t.Fatal("expected public problem")
 	}
@@ -37,7 +38,7 @@ func TestMapChannelVerificationFailureKeepsPlatformCausePrivate(t *testing.T) {
 	if got := apperror.CauseOf(err); !errors.Is(got, channel.ErrChannelDiscoveryFailed) {
 		t.Fatalf("cause = %v", got)
 	}
-	problem, ok := apperror.ProblemFrom(err, "req-2")
+	problem, ok := server.ProblemFrom(err, "req-2")
 	if !ok {
 		t.Fatal("expected public problem")
 	}

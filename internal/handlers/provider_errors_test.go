@@ -27,7 +27,7 @@ import (
 // serveProblem sends one request to the routes register adds, through the
 // server's error handler, and returns the status and the Problem it answered
 // with.
-func serveProblem(t *testing.T, register func(*echo.Echo), method, target, body string) (int, apperror.Problem) {
+func serveProblem(t *testing.T, register func(*echo.Echo), method, target, body string) (int, server.Problem) {
 	t.Helper()
 	e := echo.New()
 	e.HTTPErrorHandler = server.NewHTTPErrorHandler(slog.New(slog.DiscardHandler))
@@ -36,7 +36,7 @@ func serveProblem(t *testing.T, register func(*echo.Echo), method, target, body 
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
-	var problem apperror.Problem
+	var problem server.Problem
 	if rec.Code >= http.StatusBadRequest {
 		if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
 			t.Fatalf("decode problem %q: %v", rec.Body.String(), err)
@@ -142,22 +142,22 @@ func TestProviderTemplateFailuresAnswerTheirCodes(t *testing.T) {
 		body    string
 		status  int
 		code    apperror.Code
-		fault   string
+		fault   apperror.Fault
 	}{
-		{"list with an unknown domain", providerTemplateQueries{}, http.MethodGet, "/provider-templates?domain=bogus", "", http.StatusBadRequest, apperror.CodeProviderTemplateDomainInvalid, "client"},
-		{"list fails in the database", providerTemplateQueries{listErr: dbDown}, http.MethodGet, "/provider-templates", "", http.StatusInternalServerError, apperror.CodeProviderTemplateOperationFailed, "server"},
-		{"get with an unparsable id", providerTemplateQueries{}, http.MethodGet, "/provider-templates/not-a-uuid", "", http.StatusNotFound, apperror.CodeProviderTemplateNotFound, "client"},
-		{"get an unknown template", providerTemplateQueries{templateErr: pgx.ErrNoRows}, http.MethodGet, "/provider-templates/" + testTemplateID, "", http.StatusNotFound, apperror.CodeProviderTemplateNotFound, "client"},
-		{"get fails in the database", providerTemplateQueries{templateErr: dbDown}, http.MethodGet, "/provider-templates/" + testTemplateID, "", http.StatusInternalServerError, apperror.CodeProviderTemplateOperationFailed, "server"},
-		{"get fails reading models", providerTemplateQueries{template: llm, modelsErr: dbDown}, http.MethodGet, "/provider-templates/" + testTemplateID, "", http.StatusInternalServerError, apperror.CodeProviderTemplateOperationFailed, "server"},
-		{"create with an unknown domain", providerTemplateQueries{}, http.MethodPost, "/providers/from-template", `{"template_id":"` + testTemplateID + `","domain":"bogus"}`, http.StatusBadRequest, apperror.CodeProviderTemplateDomainInvalid, "client"},
-		{"create with an unparsable id", providerTemplateQueries{}, http.MethodPost, "/providers/from-template", `{"template_id":"not-a-uuid"}`, http.StatusNotFound, apperror.CodeProviderTemplateNotFound, "client"},
-		{"create from an unknown template", providerTemplateQueries{templateErr: pgx.ErrNoRows}, http.MethodPost, "/providers/from-template", `{"template_id":"` + testTemplateID + `"}`, http.StatusNotFound, apperror.CodeProviderTemplateNotFound, "client"},
-		{"create reading the template fails", providerTemplateQueries{templateErr: dbDown}, http.MethodPost, "/providers/from-template", `{"template_id":"` + testTemplateID + `"}`, http.StatusInternalServerError, apperror.CodeProviderTemplateOperationFailed, "server"},
-		{"create from a template of another domain", providerTemplateQueries{template: llm}, http.MethodPost, "/providers/from-template", `{"template_id":"` + testTemplateID + `","domain":"speech"}`, http.StatusBadRequest, apperror.CodeProviderTemplateDomainMismatch, "client"},
-		{"create from a template no provider can use", providerTemplateQueries{template: search}, http.MethodPost, "/providers/from-template", `{"template_id":"` + testTemplateID + `"}`, http.StatusBadRequest, apperror.CodeProviderTemplateDomainMismatch, "client"},
-		{"create with a taken name", providerTemplateQueries{template: llm, createErr: &pgconn.PgError{Code: "23505", ConstraintName: "providers_name_unique"}}, http.MethodPost, "/providers/from-template", `{"template_id":"` + testTemplateID + `"}`, http.StatusConflict, apperror.CodeProviderNameTaken, "client"},
-		{"create fails in the database", providerTemplateQueries{template: llm, createErr: dbDown}, http.MethodPost, "/providers/from-template", `{"template_id":"` + testTemplateID + `"}`, http.StatusInternalServerError, apperror.CodeProviderTemplateOperationFailed, "server"},
+		{"list with an unknown domain", providerTemplateQueries{}, http.MethodGet, "/provider-templates?domain=bogus", "", http.StatusBadRequest, apperror.CodeProviderTemplateDomainInvalid, apperror.FaultClient},
+		{"list fails in the database", providerTemplateQueries{listErr: dbDown}, http.MethodGet, "/provider-templates", "", http.StatusInternalServerError, apperror.CodeProviderTemplateOperationFailed, apperror.FaultServer},
+		{"get with an unparsable id", providerTemplateQueries{}, http.MethodGet, "/provider-templates/not-a-uuid", "", http.StatusNotFound, apperror.CodeProviderTemplateNotFound, apperror.FaultClient},
+		{"get an unknown template", providerTemplateQueries{templateErr: pgx.ErrNoRows}, http.MethodGet, "/provider-templates/" + testTemplateID, "", http.StatusNotFound, apperror.CodeProviderTemplateNotFound, apperror.FaultClient},
+		{"get fails in the database", providerTemplateQueries{templateErr: dbDown}, http.MethodGet, "/provider-templates/" + testTemplateID, "", http.StatusInternalServerError, apperror.CodeProviderTemplateOperationFailed, apperror.FaultServer},
+		{"get fails reading models", providerTemplateQueries{template: llm, modelsErr: dbDown}, http.MethodGet, "/provider-templates/" + testTemplateID, "", http.StatusInternalServerError, apperror.CodeProviderTemplateOperationFailed, apperror.FaultServer},
+		{"create with an unknown domain", providerTemplateQueries{}, http.MethodPost, "/providers/from-template", `{"template_id":"` + testTemplateID + `","domain":"bogus"}`, http.StatusBadRequest, apperror.CodeProviderTemplateDomainInvalid, apperror.FaultClient},
+		{"create with an unparsable id", providerTemplateQueries{}, http.MethodPost, "/providers/from-template", `{"template_id":"not-a-uuid"}`, http.StatusNotFound, apperror.CodeProviderTemplateNotFound, apperror.FaultClient},
+		{"create from an unknown template", providerTemplateQueries{templateErr: pgx.ErrNoRows}, http.MethodPost, "/providers/from-template", `{"template_id":"` + testTemplateID + `"}`, http.StatusNotFound, apperror.CodeProviderTemplateNotFound, apperror.FaultClient},
+		{"create reading the template fails", providerTemplateQueries{templateErr: dbDown}, http.MethodPost, "/providers/from-template", `{"template_id":"` + testTemplateID + `"}`, http.StatusInternalServerError, apperror.CodeProviderTemplateOperationFailed, apperror.FaultServer},
+		{"create from a template of another domain", providerTemplateQueries{template: llm}, http.MethodPost, "/providers/from-template", `{"template_id":"` + testTemplateID + `","domain":"speech"}`, http.StatusBadRequest, apperror.CodeProviderTemplateDomainMismatch, apperror.FaultClient},
+		{"create from a template no provider can use", providerTemplateQueries{template: search}, http.MethodPost, "/providers/from-template", `{"template_id":"` + testTemplateID + `"}`, http.StatusBadRequest, apperror.CodeProviderTemplateDomainMismatch, apperror.FaultClient},
+		{"create with a taken name", providerTemplateQueries{template: llm, createErr: &pgconn.PgError{Code: "23505", ConstraintName: "providers_name_unique"}}, http.MethodPost, "/providers/from-template", `{"template_id":"` + testTemplateID + `"}`, http.StatusConflict, apperror.CodeProviderNameTaken, apperror.FaultClient},
+		{"create fails in the database", providerTemplateQueries{template: llm, createErr: dbDown}, http.MethodPost, "/providers/from-template", `{"template_id":"` + testTemplateID + `"}`, http.StatusInternalServerError, apperror.CodeProviderTemplateOperationFailed, apperror.FaultServer},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

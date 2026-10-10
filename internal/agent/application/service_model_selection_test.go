@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -562,6 +563,9 @@ func TestFetchChatModelRejectsDisabledModel(t *testing.T) {
 	_, _, err := resolver.fetchChatModel(ctx, "gpt-disabled")
 	if err == nil || !strings.Contains(err.Error(), "disabled") {
 		t.Fatalf("fetchChatModel disabled model error = %v, want disabled error", err)
+	}
+	if !errors.Is(err, ErrModelPreferenceInvalid) {
+		t.Fatalf("fetchChatModel disabled model error = %v, want ErrModelPreferenceInvalid", err)
 	}
 }
 

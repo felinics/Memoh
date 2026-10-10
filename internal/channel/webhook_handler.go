@@ -3,11 +3,14 @@ package channel
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v4"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 type webhookConfigStore interface {
@@ -53,15 +56,15 @@ func (h *WebhookHandler) Register(e *echo.Echo) {
 // Handle resolves the channel config and delegates the request to the adapter.
 func (h *WebhookHandler) Handle(c echo.Context) error {
 	if h.store == nil || h.manager == nil || h.registry == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "channel webhook dependencies not configured")
+		return errs.New("channel webhook dependencies not configured")
 	}
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(fmt.Errorf("unknown channel platform: %w", err))
 	}
 	configID := strings.TrimSpace(c.Param("config_id"))
 	if configID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "config id is required")
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("config id is required"))
 	}
 	cfg, err := h.findConfigByID(c.Request().Context(), channelType, configID)
 	if err != nil {
@@ -86,20 +89,14 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 	if !ok {
 		return echo.NewHTTPError(http.StatusNotFound, "channel webhook receiver not found")
 	}
+	// The access record is the one record of a failed delivery: the adapter's
+	// error is returned with the channel and config, and an *echo.HTTPError it
+	// chose keeps its status.
 	if err := receiver.HandleWebhook(c.Request().Context(), cfg, h.manager.HandleInbound, c.Request(), c.Response()); err != nil {
-		var httpErr *echo.HTTPError
-		if errors.As(err, &httpErr) {
-			return httpErr
-		}
-		if h.logger != nil {
-			h.logger.WarnContext(c.Request().Context(),
-				"channel webhook failed",
-				slog.String("channel", channelType.String()),
-				slog.String("config_id", configID),
-				slog.Any("error", err),
-			)
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "handle channel webhook",
+			slog.String("channel", channelType.String()),
+			slog.String("config_id", configID),
+		)
 	}
 	return nil
 }
@@ -107,7 +104,7 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 func (h *WebhookHandler) findConfigByID(ctx context.Context, channelType ChannelType, configID string) (ChannelConfig, error) {
 	items, err := h.store.ListConfigsByType(ctx, channelType)
 	if err != nil {
-		return ChannelConfig{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return ChannelConfig{}, errs.Wrap(err, "list channel configs", slog.String("channel", channelType.String()))
 	}
 	for _, item := range items {
 		if item.ChannelType == channelType && strings.TrimSpace(item.ID) == configID {

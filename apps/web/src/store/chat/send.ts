@@ -13,6 +13,7 @@ import {
   requestedSkillRequestsForWire,
 } from '../chat-list.normalize'
 import type { ChatViewEntry } from './view-registry'
+import type { FirstSendTracker } from './first-send'
 import type { createTranscriptController } from './transcript'
 import type {
   ChatAssistantTurn,
@@ -120,7 +121,6 @@ export interface ChatSendDeps {
   ensureChatViewSession: (
     target: ChatViewTarget,
     firstPrompt?: string,
-    pair?: { modelId?: string, reasoningEffort?: string },
   ) => Promise<ChatViewTarget>
   startSessionRuntime: (botId: string, sessionId: string) => void
   recordUserSent: (target: ChatViewTarget, sessionId: string, wasDraft: boolean) => void
@@ -152,6 +152,12 @@ export interface ChatSendDeps {
   ) => Promise<void>
   discardAssistantStream: (invocationId: string) => void
   rememberStartupSendFailure: (failure: Omit<StartupSendFailure, 'id'>) => void
+  // The workdir a native draft is bound to; sent with its first message.
+  draftWorkdirIdFor: (botId: string) => string
+  firstSend: Pick<FirstSendTracker, 'begin' | 'admit' | 'reveal' | 'finish' | 'isRevealed'>
+  // Starts the limit on how long an in-band first send waits for the server
+  // to confirm it; returns its cancel.
+  watchFirstSendConfirmation: (invocationId: string) => () => void
   sendFailedMessage: () => string
   updateForkAnchorForReplacedMessage: (
     sessionId: string,
@@ -184,21 +190,24 @@ export function createChatSend(deps: ChatSendDeps) {
       composerScope,
     }
     const isExternalAgent = deps.isExternalAgentTarget(viewTarget)
+    // A send refused before it started hands the input back to the composer.
+    const refused = (error: string, scope?: string): SendMessageResult => ({
+      ok: false,
+      stage: 'startup',
+      error,
+      restoreInput: text,
+      restoreAttachments: attachments,
+      restoreRequestedSkills: cloneRequestedSkills(requestedSkills),
+      ...(scope ? { composerScope: scope } : {}),
+    })
     if (!trimmed && !attachments?.length && requestedSkills.length === 0) {
       return { ok: false, stage: 'startup' }
     }
 
     if (requestedSkills.length > 0 && deps.isWebSlashInput(trimmed)) {
-      const message = deps.commandErrorMessage('invalid_skill_slash_syntax')
-      deps.showCommandError('invalid_skill_slash_syntax', message, commandScope)
-      return {
-        ok: false,
-        stage: 'startup',
-        error: message,
-        restoreInput: text,
-        restoreAttachments: attachments,
-        restoreRequestedSkills: cloneRequestedSkills(requestedSkills),
-      }
+      const message = deps.commandErrorMessage('slash.skill_syntax_invalid')
+      deps.showCommandError('slash.skill_syntax_invalid', message, commandScope)
+      return refused(message)
     }
 
     if (
@@ -206,45 +215,29 @@ export function createChatSend(deps: ChatSendDeps) {
       && attachments?.length
       && (!isExternalAgent || deps.quickActionIDForSlash(trimmed) !== '')
     ) {
-      const message = deps.commandErrorMessage('slash_attachments_unsupported')
-      deps.showCommandError('slash_attachments_unsupported', message, commandScope)
-      return {
-        ok: false,
-        stage: 'startup',
-        error: message,
-        restoreInput: text,
-        restoreAttachments: attachments,
-        restoreRequestedSkills: cloneRequestedSkills(requestedSkills),
-      }
+      const message = deps.commandErrorMessage('slash.attachments_unsupported')
+      deps.showCommandError('slash.attachments_unsupported', message, commandScope)
+      return refused(message)
     }
 
-    const newCommand = await deps.handleWebNewCommand(trimmed, attachments, viewTarget)
-    if (newCommand.kind === 'handled') return { ok: true }
-    if (newCommand.kind === 'error') {
-      return {
-        ok: false,
-        stage: 'startup',
-        error: newCommand.message,
-        restoreInput: text,
-        restoreAttachments: attachments,
-        restoreRequestedSkills: cloneRequestedSkills(requestedSkills),
+    // Command handling is the only await allowed before the optimistic turn
+    // is appended, and only slash input can be a command. Plain text must not
+    // yield at all: the send has to paint in the same frame as the Enter key.
+    if (deps.isWebSlashInput(trimmed)) {
+      const newCommand = await deps.handleWebNewCommand(trimmed, attachments, viewTarget)
+      if (newCommand.kind === 'handled') return { ok: true }
+      if (newCommand.kind === 'error') {
+        return refused(newCommand.message)
       }
-    }
-    const slashCommand = await deps.handleWebSlashCommand(
-      trimmed,
-      requestedSkills.length > 0,
-      composerScope,
-      viewTarget,
-    )
-    if (slashCommand.kind === 'handled') return { ok: true }
-    if (slashCommand.kind === 'error') {
-      return {
-        ok: false,
-        stage: 'startup',
-        error: slashCommand.message,
-        restoreInput: text,
-        restoreAttachments: attachments,
-        restoreRequestedSkills: cloneRequestedSkills(requestedSkills),
+      const slashCommand = await deps.handleWebSlashCommand(
+        trimmed,
+        requestedSkills.length > 0,
+        composerScope,
+        viewTarget,
+      )
+      if (slashCommand.kind === 'handled') return { ok: true }
+      if (slashCommand.kind === 'error') {
+        return refused(slashCommand.message)
       }
     }
     if (viewTarget.sessionId && deps.chatReadOnlyFor(viewTarget)) {
@@ -265,6 +258,7 @@ export function createChatSend(deps: ChatSendDeps) {
     let sendSessionId = ''
     let sendInvocationId = ''
     let turnAppendStarted = false
+    let firstSendStarted = false
 
     const wasDraft = !viewTarget.sessionId
     const serverSlashActivation = deps.isWebSlashInput(trimmed)
@@ -272,20 +266,20 @@ export function createChatSend(deps: ChatSendDeps) {
       && !isExternalAgent
     const serverSkillActivation = requestedSkills.length > 0 || serverSlashActivation
     if (serverSkillActivation && wasDraft && deps.pendingExternalAgentStateFor(viewTarget)) {
-      const message = deps.commandErrorMessage('unsupported_skill_slash_context')
-      deps.showCommandError('unsupported_skill_slash_context', message, commandScope)
-      return {
-        ok: false,
-        stage: 'startup',
-        error: message,
-        restoreInput: text,
-        restoreAttachments: attachments,
-        restoreRequestedSkills: cloneRequestedSkills(requestedSkills),
-        composerScope,
-      }
+      const message = deps.commandErrorMessage('slash.skill_activation_unsupported')
+      deps.showCommandError('slash.skill_activation_unsupported', message, commandScope)
+      return refused(message, composerScope)
     }
 
-    const deferSessionCreation = serverSkillActivation && wasDraft
+    // A draft's first message creates its session in-band: the server creates
+    // the session for a message without session_id and names it with
+    // session_created before run_accepted. The turns are held until
+    // run_accepted (see first-send.ts), so the draft only becomes a chat once
+    // the server has taken the send. External Agent sessions need runtime
+    // setup the message path does not do, so they still create over REST
+    // first, and that creation is their confirmation.
+    const inband = wasDraft && !isExternalAgent
+    let stopConfirmationWatch = () => {}
     try {
       options.onBeforeMessageSend?.()
       // The pair comes from options only (spec v2 §3.4): the composer passes
@@ -295,35 +289,53 @@ export function createChatSend(deps: ChatSendDeps) {
       const modelId = options.modelId?.trim() || undefined
       const reasoningEffort = options.reasoningEffort?.trim()
         || undefined
-      if (!deferSessionCreation) {
-        viewTarget = await deps.ensureChatViewSession(viewTarget, wasDraft ? trimmed : undefined, {
-          modelId,
-          reasoningEffort,
-        })
+      if (!inband) {
+        viewTarget = await deps.ensureChatViewSession(viewTarget, wasDraft ? trimmed : undefined)
       }
 
       const botId = viewTarget.botId
       const targetSessionId = viewTarget.sessionId ?? ''
-      if (!targetSessionId && !deferSessionCreation) throw new Error('Session not selected')
+      if (!targetSessionId && !inband) throw new Error('Session not selected')
       sendBotId = botId
       sendSessionId = targetSessionId
       sendInvocationId = createInvocationId()
       const transcript = deps.transcriptForTarget(viewTarget)
+      // A session this send just created over REST holds nothing yet but the
+      // turn appended below; its first history load must not mask that turn.
+      if (wasDraft && targetSessionId) deps.chatView(viewTarget).clientBorn = true
       if (targetSessionId) {
         deps.startSessionRuntime(botId, targetSessionId)
         deps.recordUserSent(viewTarget, targetSessionId, wasDraft)
       }
-
-      assistantTurn = transcript.createOptimisticAssistantTurn(sendInvocationId)
-      turnAppendStarted = true
-      options.onBeforeTurnAppend?.({ ...viewTarget })
-      if (!serverSkillActivation) {
-        userTurn = transcript.createOptimisticUserTurn(
-          trimmed,
-          attachments,
-          sendInvocationId,
-        )
-        transcript.appendToView(userTurn, assistantTurn)
+      // The workdir the draft is bound to travels with the message, because
+      // the server now creates the session. The binding is fixed at creation.
+      const workdirId = inband ? deps.draftWorkdirIdFor(botId).trim() : ''
+      const replyTurn = transcript.createOptimisticAssistantTurn(sendInvocationId)
+      assistantTurn = replyTurn
+      const appendTurns = () => {
+        turnAppendStarted = true
+        options.onBeforeTurnAppend?.({ ...viewTarget })
+        if (!serverSkillActivation) {
+          userTurn = transcript.createOptimisticUserTurn(
+            trimmed,
+            attachments,
+            sendInvocationId,
+          )
+          transcript.appendToView(userTurn, replyTurn)
+        }
+      }
+      if (wasDraft) {
+        // A REST-created session is already named, so that send starts
+        // admitted and is revealed at once; an in-band one waits for
+        // run_accepted, which reveals it before promoting the draft.
+        deps.firstSend.begin(viewTarget, sendInvocationId, workdirId, appendTurns)
+        firstSendStarted = true
+        if (!inband) {
+          deps.firstSend.admit(sendInvocationId, targetSessionId)
+          deps.firstSend.reveal(sendInvocationId)
+        }
+      } else {
+        appendTurns()
       }
 
       if (!deps.ensureWebSocket(botId)) {
@@ -344,6 +356,7 @@ export function createChatSend(deps: ChatSendDeps) {
         composer_scope: composerScope,
         text: trimmed,
         session_id: targetSessionId || undefined,
+        workdir_id: workdirId || undefined,
         attachments,
         requested_skills: requestedSkills.length
           ? requestedSkillRequestsForWire(requestedSkills)
@@ -352,7 +365,9 @@ export function createChatSend(deps: ChatSendDeps) {
         reasoning_effort: reasoningEffort,
         workspace_target_id: options.workspaceTargetId?.trim() || undefined,
       })) throw new StreamFailureError('WebSocket is not connected', 'startup')
+      if (inband) stopConfirmationWatch = deps.watchFirstSendConfirmation(sendInvocationId)
       await completion
+      if (firstSendStarted) deps.firstSend.finish(sendInvocationId)
       const createdSessionId = deps.createdSessionIdForInvocation(sendInvocationId)
       const fallbackActiveSessionId = !options.target
         && (deps.currentBotId.value ?? '').trim() === botId
@@ -369,69 +384,64 @@ export function createChatSend(deps: ChatSendDeps) {
       const isCommandError = failure instanceof CommandStreamError
       const reason = resolveApiErrorMessage(error, failure.message || deps.sendFailedMessage())
       const errorCode = parseMemohError(error)?.code
-      const stage: SendMessageStage = failure instanceof StreamFailureError
+      // A first send the server never confirmed showed nothing: the pane is
+      // still on welcome with the input in the composer. Once revealed it is an
+      // ordinary session, and its failure stays in the history.
+      const held = firstSendStarted && !deps.firstSend.isRevealed(sendInvocationId)
+      const revealedFirstSend = firstSendStarted && !held
+      const reportedStage: SendMessageStage = failure instanceof StreamFailureError
         ? failure.stage
         : (assistantTurn ? failureStage(assistantTurn, false, false) : 'startup')
+      const stage: SendMessageStage = held
+        ? 'startup'
+        : (revealedFirstSend ? 'stream' : reportedStage)
       const createdSessionId = sendInvocationId
         ? deps.createdSessionIdForInvocation(sendInvocationId)
         : ''
       const botId = sendBotId || viewTarget.botId || deps.currentBotId.value || ''
       const targetSessionId = sendSessionId || createdSessionId
 
-      if (assistantTurn) {
-        deps.finalizeStreamFailure(assistantTurn, botId, targetSessionId, failure, !isAbort && stage === 'stream')
-      }
-      if (!isAbort && stage === 'startup' && userTurn) {
-        deps.removeTurnFromSession(botId, targetSessionId, userTurn)
-      }
-      if (
-        !isAbort
-        && stage === 'startup'
-        && deferSessionCreation
-        && wasDraft
-        && createdSessionId
-      ) {
-        await deps.cleanupFailedDeferredSession(botId, createdSessionId, composerScope)
+      if (held) {
+        // The server created a session but refused the run (or the socket
+        // dropped in between). Nothing shows it yet, so it is deleted quietly.
+        if (targetSessionId) {
+          void deps.cleanupFailedDeferredSession(botId, targetSessionId, composerScope)
+        }
+        deps.firstSend.finish(sendInvocationId)
+      } else {
+        if (firstSendStarted) deps.firstSend.finish(sendInvocationId)
+        if (assistantTurn) {
+          deps.finalizeStreamFailure(assistantTurn, botId, targetSessionId, failure, !isAbort && stage === 'stream')
+        }
+        if (!isAbort && stage === 'startup' && userTurn) {
+          deps.removeTurnFromSession(botId, targetSessionId, userTurn)
+        }
       }
 
       if (sendInvocationId) deps.discardAssistantStream(sendInvocationId)
       if (sendInvocationId) deps.forgetCreatedSession(sendInvocationId)
-      if (!isAbort && stage === 'startup' && turnAppendStarted) {
+      if (stage === 'startup' && turnAppendStarted && !isAbort) {
         options.onTurnAppendAborted?.()
       }
 
-      if (isAbort) return { ok: false, stage: 'stream', error: reason, errorCode }
+      if (isAbort && !held) return { ok: false, stage: 'stream', error: reason, errorCode }
       if (stage === 'startup') {
         const currentBotId = (deps.currentBotId.value ?? '').trim()
         const currentSessionId = (deps.sessionId.value ?? '').trim()
-        const restoredOriginalDraft = deferSessionCreation
-          && wasDraft
-          && !currentSessionId
-          && deps.focusedChatViewId.value === viewTarget.viewId
-        const stillCurrent = currentBotId === botId
-          && (
-            !targetSessionId
-            || currentSessionId === targetSessionId
-            || restoredOriginalDraft
-          )
-        const deferredDraftStillCurrent = !(
-          deferSessionCreation
-          && wasDraft
-          && currentSessionId
-        )
-        const commandErrorRestoredDraft = isCommandError
-          && deferSessionCreation
-          && wasDraft
-          && !currentSessionId
-        if (
-          options.restoreDraftOnFailure !== false
-          && stillCurrent
-          && deferredDraftStillCurrent
-          && (!isCommandError || commandErrorRestoredDraft)
-        ) {
+        // A held first send is restored to its draft composer, which the
+        // failure is keyed to; the pane applies it only while it still shows
+        // that draft. A failure on an existing session is restored only while
+        // that session is still the active one. Command errors there are
+        // already on screen in the command panel.
+        const restorable = held
+          ? currentBotId === botId
+          : currentBotId === botId
+            && !isCommandError
+            && (!targetSessionId || currentSessionId === targetSessionId)
+        if (options.restoreDraftOnFailure !== false && restorable) {
           deps.rememberStartupSendFailure({
             botId,
-            sessionId: targetSessionId,
+            sessionId: held ? '' : targetSessionId,
             composerScope,
             error: reason,
             restoreInput: text,
@@ -451,6 +461,8 @@ export function createChatSend(deps: ChatSendDeps) {
         }
       }
       return { ok: false, stage, error: reason, errorCode }
+    } finally {
+      stopConfirmationWatch()
     }
   }
 

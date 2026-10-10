@@ -2,25 +2,28 @@ package inbound
 
 import (
 	"context"
-	"errors"
+
+	"github.com/felinics/memoh/internal/apperror"
 )
 
+// Queue command refusal codes for the local queue adapter, each the catalog
+// code the refusal is answered with.
 const (
 	// QueueCommandCodeNoActiveRun means the route has no active run that can
 	// accept a queue item. It is deliberately shared by an absent active
 	// session and a session whose run ended between route lookup and admission.
-	QueueCommandCodeNoActiveRun = "queue_no_active_run"
-	QueueCommandCodeOverloaded  = "queue_admission_overloaded"
-	QueueCommandCodeUnavailable = "queue_admission_unavailable"
-	QueueCommandCodeConflict    = "queue_invocation_conflict"
-	QueueCommandCodeInvalid     = "queue_request_invalid"
-	QueueCommandCodeUnsupported = "queue_unsupported_session"
-	QueueCommandCodeCapacity    = "queue_capacity_exceeded"
+	QueueCommandCodeNoActiveRun = string(apperror.CodeQueueNoActiveRun)
+	QueueCommandCodeOverloaded  = string(apperror.CodeQueueAdmissionOverloaded)
+	QueueCommandCodeUnavailable = string(apperror.CodeQueueAdmissionUnavailable)
+	QueueCommandCodeConflict    = string(apperror.CodeQueueInvocationConflict)
+	QueueCommandCodeInvalid     = string(apperror.CodeQueueRequestInvalid)
+	QueueCommandCodeUnsupported = string(apperror.CodeQueueUnsupportedSession)
+	QueueCommandCodeCapacity    = string(apperror.CodeQueueCapacityExceeded)
 	// QueueCommandCodeFollowUpUnsupportedChannel means the channel cannot
 	// receive the reply of a run that the server starts from the follow-up
 	// queue: platform channels deliver replies from the inbound call's run
 	// handle, which a queued run does not have.
-	QueueCommandCodeFollowUpUnsupportedChannel = "queue_follow_up_unsupported_channel"
+	QueueCommandCodeFollowUpUnsupportedChannel = string(apperror.CodeQueueFollowUpUnsupportedChannel)
 )
 
 // QueueCommandInput contains only facts derived by the channel boundary. The
@@ -46,38 +49,15 @@ type QueueCommandHandler interface {
 	EnqueueFollowUp(context.Context, QueueCommandInput) error
 }
 
-// QueueCommandError carries a stable, user-safe error code across the local
-// and split-runtime boundaries. It intentionally contains no database or RPC
-// diagnostic text.
-type QueueCommandError struct{ Code string }
-
-func (e QueueCommandError) Error() string { return e.Code }
-
-func NewQueueCommandError(code string) error { return QueueCommandError{Code: code} }
-
-func QueueCommandErrorCode(err error) string {
-	var queueErr QueueCommandError
-	if !errors.As(err, &queueErr) {
-		return ""
-	}
-	return NormalizeQueueCommandCode(queueErr.Code)
+// NewQueueCommandError is the public error a queue command is refused with.
+// It carries no database or RPC diagnostic, and it crosses the split-runtime
+// RPC as its catalog code.
+func NewQueueCommandError(code string) error {
+	return apperror.New(apperror.Code(code), nil)
 }
 
-// NormalizeQueueCommandCode accepts only the stable error vocabulary allowed
-// to cross a channel boundary. It is used by the split-runtime RPC client,
-// where the generic RPC transport reconstructs a public error from its code.
-func NormalizeQueueCommandCode(code string) string {
-	switch code {
-	case QueueCommandCodeNoActiveRun,
-		QueueCommandCodeOverloaded,
-		QueueCommandCodeUnavailable,
-		QueueCommandCodeConflict,
-		QueueCommandCodeInvalid,
-		QueueCommandCodeUnsupported,
-		QueueCommandCodeCapacity,
-		QueueCommandCodeFollowUpUnsupportedChannel:
-		return code
-	default:
-		return ""
-	}
+// QueueCommandErrorCode is the code err is answered with, or "" when err
+// carries none.
+func QueueCommandErrorCode(err error) string {
+	return string(apperror.CodeOf(err))
 }

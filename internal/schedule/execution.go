@@ -17,27 +17,87 @@ import (
 )
 
 var (
-	ErrTargetSessionRequired = invalidRequest("target_session_id is required for existing_session run target")
-	ErrTargetSessionNotFound = invalidRequest("target session not found")
+	// ErrScheduleNotFound marks a schedule ID that matches no row.
+	ErrScheduleNotFound      = errors.New("schedule not found")
+	ErrTargetSessionRequired = requiredField("target_session_id", "target_session_id is required for existing_session run target")
+	ErrTargetSessionNotFound = invalidField("target_session_id", "target session not found")
 	// ErrTargetSessionGone marks a fire whose stored target session no
 	// longer exists; the trigger path reports it and disables the schedule.
 	ErrTargetSessionGone = errors.New("target session was deleted")
 	ErrExecutionTimeout  = errors.New("schedule execution budget expired")
 	// ErrModelRequired marks a schedule that would open a fresh session with
 	// no model to run it: the bot has no default and none was given.
-	ErrModelRequired = invalidRequest("this bot has no default model, so a scheduled run needs an explicit model")
+	ErrModelRequired = ruleViolation(RuleModelRequired, "model_id", "this bot has no default model, so a scheduled run needs an explicit model")
 )
 
 // InvalidRequestError marks user-correctable validation failures so the API
-// layer can answer 400 instead of 500.
-type InvalidRequestError struct{ msg string }
+// layer can answer 400 instead of 500. msg is the sentence callers such as the
+// agent tool show to a model; field is the request field the user has to fix,
+// written as the request spells it.
+type InvalidRequestError struct {
+	msg      string
+	field    string
+	required bool
+	rule     Rule
+}
+
+// Rule names the validation rule a request broke when the fix needs more than
+// the field's name. The API layer gives each rule its own public error.
+type Rule string
+
+const (
+	// RuleRunTargetConflict: run target, runtime, agent and session settings
+	// that cannot be combined.
+	RuleRunTargetConflict Rule = "run_target_conflict"
+	// RuleModelConflict: a model setting that does not fit the runtime or
+	// collides with another model setting.
+	RuleModelConflict Rule = "model_conflict"
+	// RuleModelUnusable: the model exists but a schedule cannot run on it.
+	RuleModelUnusable Rule = "model_unusable"
+	// RuleSessionModeUnsupported: the target session is of a mode that cannot
+	// host scheduled runs.
+	RuleSessionModeUnsupported Rule = "session_mode_unsupported"
+	// RuleModelRequired: a fresh session would have no model to run on.
+	RuleModelRequired Rule = "model_required"
+)
 
 func (e InvalidRequestError) Error() string { return e.msg }
 
-func invalidRequest(msg string) error { return InvalidRequestError{msg: msg} }
+// Field is the request field the failure is about.
+func (e InvalidRequestError) Field() string { return e.field }
 
-func invalidRequestf(format string, args ...any) error {
-	return InvalidRequestError{msg: fmt.Sprintf(format, args...)}
+// Rule is the broken validation rule, empty for a plain field problem.
+func (e InvalidRequestError) Rule() Rule { return e.rule }
+
+// Required reports that the field is missing rather than holding a bad value.
+func (e InvalidRequestError) Required() bool { return e.required }
+
+// invalidField and the helpers below take the field as a string literal at
+// the call site; TestRequestFieldNamesAreLiterals enforces it.
+func invalidField(field, msg string) error {
+	return InvalidRequestError{msg: msg, field: field}
+}
+
+func invalidFieldf(field, format string, args ...any) error {
+	return InvalidRequestError{msg: fmt.Sprintf(format, args...), field: field}
+}
+
+// ruleViolation is a request problem with a rule of its own; field is the
+// request field to fix.
+func ruleViolation(rule Rule, field, msg string) error {
+	return InvalidRequestError{msg: msg, field: field, rule: rule, required: rule == RuleModelRequired}
+}
+
+func ruleViolationf(rule Rule, field, format string, args ...any) error {
+	return ruleViolation(rule, field, fmt.Sprintf(format, args...))
+}
+
+func requiredField(field, msg string) error {
+	return InvalidRequestError{msg: msg, field: field, required: true}
+}
+
+func requiredFieldf(field, format string, args ...any) error {
+	return InvalidRequestError{msg: fmt.Sprintf(format, args...), field: field, required: true}
 }
 
 // normalizeExecution trims, defaults, and validates an execution parameter
@@ -62,20 +122,20 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 		out.MaxRunSeconds = 3600
 	}
 	if out.MaxRunSeconds < 300 || out.MaxRunSeconds > 86400 {
-		return ExecutionConfig{}, invalidRequest("max_run_seconds must be between 300 and 86400")
+		return ExecutionConfig{}, invalidField("max_run_seconds", "max_run_seconds must be between 300 and 86400")
 	}
 	if out.RunTarget == "" {
 		out.RunTarget = RunTargetNewSession
 	}
 	if out.ModelID != "" && out.ACPModelID != "" {
-		return ExecutionConfig{}, invalidRequest("model_id and acp_model_id are mutually exclusive")
+		return ExecutionConfig{}, ruleViolation(RuleModelConflict, "acp_model_id", "model_id and acp_model_id are mutually exclusive")
 	}
 
 	targetIsAgent := false
 	switch out.RunTarget {
 	case RunTargetExistingSession:
 		if out.RuntimeType != "" || out.BotAgentID != "" || out.ACPAgentID != "" || out.WorkdirID != "" {
-			return ExecutionConfig{}, invalidRequest("existing_session inherits runtime and workdir from the target session; runtime_type, bot_agent_id, acp_agent_id, and workdir_id must be empty")
+			return ExecutionConfig{}, ruleViolation(RuleRunTargetConflict, "run_target", "existing_session inherits runtime and workdir from the target session; runtime_type, bot_agent_id, acp_agent_id, and workdir_id must be empty")
 		}
 		agentTarget, err := s.validateTargetSession(ctx, botID, out.TargetSessionID)
 		if err != nil {
@@ -83,21 +143,21 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 		}
 		targetIsAgent = agentTarget
 		if targetIsAgent && out.ModelID != "" {
-			return ExecutionConfig{}, invalidRequest("target session runs an external agent; use acp_model_id instead of model_id")
+			return ExecutionConfig{}, ruleViolation(RuleModelConflict, "model_id", "target session runs an external agent; use acp_model_id instead of model_id")
 		}
 		if !targetIsAgent && out.ACPModelID != "" {
-			return ExecutionConfig{}, invalidRequest("target session runs the native model runtime; use model_id instead of acp_model_id")
+			return ExecutionConfig{}, ruleViolation(RuleModelConflict, "acp_model_id", "target session runs the native model runtime; use model_id instead of acp_model_id")
 		}
 	case RunTargetNewSession:
 		if out.TargetSessionID != "" {
-			return ExecutionConfig{}, invalidRequest("target_session_id is only valid with the existing_session run target")
+			return ExecutionConfig{}, ruleViolation(RuleRunTargetConflict, "target_session_id", "target_session_id is only valid with the existing_session run target")
 		}
 		if out.BotAgentID != "" {
 			// The bot agent decides the actual runtime below; an explicit
 			// runtime_type may only name an agent runtime and is checked
 			// against the resolved one after resolution.
 			if out.RuntimeType != "" && !runtimekind.IsExternal(out.RuntimeType) {
-				return ExecutionConfig{}, invalidRequest("bot_agent_id conflicts with the selected runtime_type")
+				return ExecutionConfig{}, ruleViolation(RuleRunTargetConflict, "bot_agent_id", "bot_agent_id conflicts with the selected runtime_type")
 			}
 			resolved, err := s.resolveBotAgentExecution(ctx, botID, out)
 			if err != nil {
@@ -108,30 +168,30 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 		switch out.RuntimeType {
 		case "", RuntimeModel:
 			if out.ACPAgentID != "" || out.ACPModelID != "" {
-				return ExecutionConfig{}, invalidRequest("acp_agent_id and acp_model_id require runtime_type acp_agent")
+				return ExecutionConfig{}, ruleViolation(RuleRunTargetConflict, "acp_agent_id", "acp_agent_id and acp_model_id require runtime_type acp_agent")
 			}
 		case RuntimeACPAgent:
 			if out.ACPAgentID == "" {
-				return ExecutionConfig{}, invalidRequest("acp_agent_id is required for runtime_type acp_agent")
+				return ExecutionConfig{}, requiredField("acp_agent_id", "acp_agent_id is required for runtime_type acp_agent")
 			}
 			if out.ModelID != "" {
-				return ExecutionConfig{}, invalidRequest("ACP schedules use acp_model_id; model_id is only valid for the native model runtime")
+				return ExecutionConfig{}, ruleViolation(RuleModelConflict, "model_id", "ACP schedules use acp_model_id; model_id is only valid for the native model runtime")
 			}
 		case botagents.RuntimeCodex, botagents.RuntimeClaudeCode:
 			if out.BotAgentID == "" {
-				return ExecutionConfig{}, invalidRequestf("runtime_type %q requires bot_agent_id", out.RuntimeType)
+				return ExecutionConfig{}, requiredFieldf("bot_agent_id", "runtime_type %q requires bot_agent_id", out.RuntimeType)
 			}
 			if out.ACPAgentID != "" || out.ModelID != "" {
-				return ExecutionConfig{}, invalidRequest("direct external agent schedules carry no acp_agent_id or model_id")
+				return ExecutionConfig{}, ruleViolation(RuleRunTargetConflict, "acp_agent_id", "direct external agent schedules carry no acp_agent_id or model_id")
 			}
 		default:
-			return ExecutionConfig{}, invalidRequestf("unknown runtime_type %q", out.RuntimeType)
+			return ExecutionConfig{}, invalidFieldf("runtime_type", "unknown runtime_type %q", out.RuntimeType)
 		}
 		if err := s.validateWorkdirBinding(ctx, botID, out.WorkdirID, out.RuntimeType); err != nil {
 			return ExecutionConfig{}, err
 		}
 	default:
-		return ExecutionConfig{}, invalidRequestf("unknown run_target %q", out.RunTarget)
+		return ExecutionConfig{}, invalidFieldf("run_target", "unknown run_target %q", out.RunTarget)
 	}
 
 	if out.ModelID != "" {
@@ -152,7 +212,7 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 	if out.ReasoningEffort != "" && !agentRun &&
 		!models.IsValidReasoningEffort(out.ReasoningEffort) &&
 		!models.IsReasoningDisabled(out.ReasoningEffort) {
-		return ExecutionConfig{}, invalidRequestf("unknown reasoning_effort %q", out.ReasoningEffort)
+		return ExecutionConfig{}, invalidFieldf("reasoning_effort", "unknown reasoning_effort %q", out.ReasoningEffort)
 	}
 	return out, nil
 }
@@ -167,7 +227,7 @@ func (s *Service) resolveBotAgentExecution(ctx context.Context, botID string, ex
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
-		return ExecutionConfig{}, invalidRequestf("invalid bot id: %v", err)
+		return ExecutionConfig{}, invalidFieldf("bot_id", "invalid bot id: %v", err)
 	}
 	bot, err := s.queries.GetBotByID(ctx, botUUID)
 	if err != nil {
@@ -201,7 +261,7 @@ func (s *Service) resolveBotAgentExecution(ctx context.Context, botID string, ex
 		return ExecutionConfig{}, botagents.ErrInvalidRuntime
 	}
 	if declared != "" && declared != exec.RuntimeType {
-		return ExecutionConfig{}, invalidRequest("bot_agent_id conflicts with the selected runtime_type")
+		return ExecutionConfig{}, ruleViolation(RuleRunTargetConflict, "bot_agent_id", "bot_agent_id conflicts with the selected runtime_type")
 	}
 	return exec, nil
 }
@@ -232,7 +292,7 @@ func (s *Service) requireResolvableModel(ctx context.Context, botID string, exec
 	}
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
-		return invalidRequestf("invalid bot id: %v", err)
+		return invalidFieldf("bot_id", "invalid bot id: %v", err)
 	}
 	row, err := s.queries.GetSettingsByBotID(ctx, botUUID)
 	if err != nil {
@@ -256,7 +316,7 @@ func (s *Service) validateTargetSession(ctx context.Context, botID, sessionID st
 	}
 	pgSessionID, err := db.ParseUUID(sessionID)
 	if err != nil {
-		return false, invalidRequestf("invalid target_session_id: %v", err)
+		return false, invalidFieldf("target_session_id", "invalid target_session_id: %v", err)
 	}
 	sess, err := s.queries.GetSessionByID(ctx, pgSessionID)
 	if err != nil {
@@ -275,7 +335,7 @@ func (s *Service) validateTargetSession(ctx context.Context, botID, sessionID st
 	switch strings.TrimSpace(sess.SessionMode) {
 	case "chat", "schedule":
 	default:
-		return false, invalidRequestf("target session has mode %q; only chat or schedule sessions can host scheduled runs", sess.SessionMode)
+		return false, ruleViolationf(RuleSessionModeUnsupported, "target_session_id", "target session has mode %q; only chat or schedule sessions can host scheduled runs", sess.SessionMode)
 	}
 	return isAgentRuntimeSessionRow(sess.RuntimeType, sess.Type), nil
 }
@@ -293,20 +353,20 @@ func isAgentRuntimeSessionRow(runtimeType, legacyType string) bool {
 func (s *Service) validateNativeModel(ctx context.Context, modelID string) error {
 	pgModelID, err := db.ParseUUID(modelID)
 	if err != nil {
-		return invalidRequestf("invalid model_id: %v", err)
+		return invalidFieldf("model_id", "invalid model_id: %v", err)
 	}
 	model, err := s.queries.GetModelByID(ctx, pgModelID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return invalidRequest("model not found")
+			return invalidField("model_id", "model not found")
 		}
 		return err
 	}
 	if model.Type != "chat" {
-		return invalidRequestf("model %s is a %s model; schedules need a chat model", modelID, model.Type)
+		return ruleViolationf(RuleModelUnusable, "model_id", "model %s is a %s model; schedules need a chat model", modelID, model.Type)
 	}
 	if !model.Enable {
-		return invalidRequestf("model %s is disabled", modelID)
+		return ruleViolationf(RuleModelUnusable, "model_id", "model %s is disabled", modelID)
 	}
 	return nil
 }
@@ -325,7 +385,7 @@ func (s *Service) validateWorkdirBinding(ctx context.Context, botID, workdirID, 
 	// External Agents run inside the native workspace and cannot reach a
 	// remote runtime's filesystem — same policy as interactive sessions.
 	if runtimekind.IsExternal(runtimeType) && wd.TargetKind == workdir.TargetKindRemote {
-		return invalidRequest("external Agent schedules cannot bind a remote workdir")
+		return invalidField("workdir_id", "external Agent schedules cannot bind a remote workdir")
 	}
 	return nil
 }

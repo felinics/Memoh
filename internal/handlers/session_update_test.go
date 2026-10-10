@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -242,14 +241,8 @@ func TestUpdateSessionRejectsConflictingTypeAndRuntime(t *testing.T) {
 	// type=acp_agent contradicts runtime_type=model; this must 400, not silently
 	// downgrade the session to a plain model chat.
 	_, err := callUpdateSession(handler, botID, sessionID, `{"type":"acp_agent","runtime_type":"model"}`)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("UpdateSession() error = %v, want HTTP 400", err)
-	}
-	// The 400 must come from the conflict guard specifically, not an unrelated
-	// validation, so assert its message.
-	if msg, _ := httpErr.Message.(string); !strings.Contains(msg, "conflicts with runtime_type") {
-		t.Fatalf("error message = %q, want a 'conflicts with runtime_type' conflict error", msg)
+	if apperror.CodeOf(err) != apperror.CodeRequestFieldInvalid || apperror.ArgsOf(err)["field"] != "runtime_type" {
+		t.Fatalf("UpdateSession() error = %v, want field_invalid on runtime_type", err)
 	}
 	if queries.updateCalled {
 		t.Fatal("UpdateSessionTypeAndMetadata must not be called for a contradictory type/runtime payload")
@@ -280,12 +273,8 @@ func TestUpdateSessionRejectsSystemACPRuntimeAsBadRequest(t *testing.T) {
 	)
 
 	_, err := callUpdateSession(handler, botID, sessionID, `{"session_mode":"schedule","runtime_type":"acp_agent","metadata":{"acp_agent_id":"acp"}}`)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("UpdateSession() error = %v, want HTTP 400", err)
-	}
-	if msg, _ := httpErr.Message.(string); !strings.Contains(msg, "only supported") {
-		t.Fatalf("error message = %q, want an unsupported runtime/mode message", msg)
+	if apperror.CodeOf(err) != apperror.CodeRequestFieldInvalid || apperror.ArgsOf(err)["field"] != "session_mode" {
+		t.Fatalf("UpdateSession() error = %v, want field_invalid on session_mode", err)
 	}
 	if queries.updateCalled {
 		t.Fatal("UpdateSessionTypeAndMetadata must not be called for an unsupported runtime/mode payload")

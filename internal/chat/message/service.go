@@ -156,12 +156,7 @@ func isTurnSequenceUniqueViolation(err error) bool {
 		return false
 	}
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.ConstraintName == "idx_bot_history_messages_turn_seq_unique" {
-		return true
-	}
-	text := err.Error()
-	return strings.Contains(text, "idx_bot_history_messages_turn_seq_unique") ||
-		strings.Contains(text, "bot_history_messages.turn_id, bot_history_messages.turn_message_seq")
+	return errors.As(err, &pgErr) && pgErr.ConstraintName == "idx_bot_history_messages_turn_seq_unique"
 }
 
 // PersistToolTailRound writes the common user -> assistant(tool-call) -> tool

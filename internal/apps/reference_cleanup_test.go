@@ -6,14 +6,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/connectors"
 	"github.com/felinics/memoh/internal/supermarket"
 	"github.com/felinics/memoh/internal/workspacedeps"
 )
 
 var errCleanupProbe = errors.New("injected cleanup failure")
-
-const genericPublicCause = "internal error; see the Server log"
 
 type cleanupStore struct {
 	Store
@@ -153,11 +152,11 @@ func assertCleanupFailed(t *testing.T, f *cleanupFixture, rec *recorder, err err
 		}
 	}
 	inst := f.installation(t)
-	if inst.Status != StatusFailed || inst.LastError == "" {
-		t.Fatalf("failure must remain visible: status=%s last_error=%q", inst.Status, inst.LastError)
+	if inst.Status != StatusFailed || inst.LastErrorCode == "" {
+		t.Fatalf("failure must remain visible: status=%s last_error_code=%q", inst.Status, inst.LastErrorCode)
 	}
-	if strings.Contains(inst.LastError, errCleanupProbe.Error()) {
-		t.Fatalf("last_error leaked the underlying cause: %q", inst.LastError)
+	if inst.LastError != "" || strings.Contains(inst.LastErrorCode, errCleanupProbe.Error()) {
+		t.Fatalf("failure stored text instead of a code: last_error=%q last_error_code=%q", inst.LastError, inst.LastErrorCode)
 	}
 }
 
@@ -392,8 +391,8 @@ func TestFailedPublicationDoesNotSkipSameRevisionRetry(t *testing.T) {
 	rec := &recorder{}
 	_, err := f.service.Update(t.Context(), testBotID, f.inst.ID, rec)
 	assertCleanupFailed(t, f, rec, err)
-	if got := f.installation(t).LastError; got != "publish Skills: "+genericPublicCause {
-		t.Fatalf("last_error = %q", got)
+	if got := f.installation(t).LastErrorCode; got != string(apperror.CodeAppOperationFailed) {
+		t.Fatalf("last_error_code = %q", got)
 	}
 	f.publisher.publishErr = nil
 	f.restartService()
@@ -407,26 +406,26 @@ func TestFailedPublicationDoesNotSkipSameRevisionRetry(t *testing.T) {
 	}
 }
 
-func TestFailedCleanupPersistsPublicMessageOnly(t *testing.T) {
-	t.Run("store error is generic", func(t *testing.T) {
+func TestFailedCleanupPersistsPublicCodeOnly(t *testing.T) {
+	t.Run("store error is the generic code", func(t *testing.T) {
 		f := newCleanupFixture(t)
 		f.storeFaults.failure = "dependency_refs"
 		_, err := f.service.Update(t.Context(), testBotID, f.inst.ID, &recorder{})
 		if err == nil || !strings.Contains(err.Error(), errCleanupProbe.Error()) {
 			t.Fatalf("callers keep the cause: %v", err)
 		}
-		if got := f.installation(t).LastError; got != "list dependency references for cleanup: "+genericPublicCause {
-			t.Fatalf("last_error = %q", got)
+		if got := f.installation(t).LastErrorCode; got != string(apperror.CodeAppOperationFailed) {
+			t.Fatalf("last_error_code = %q", got)
 		}
 	})
-	t.Run("sentinel keeps its text", func(t *testing.T) {
+	t.Run("sentinel keeps its code", func(t *testing.T) {
 		f := newCleanupFixture(t)
 		f.depFaults.removeErr = workspacedeps.ErrBusy
 		if _, err := f.service.Update(t.Context(), testBotID, f.inst.ID, &recorder{}); !errors.Is(err, workspacedeps.ErrBusy) {
 			t.Fatalf("err = %v", err)
 		}
-		if got := f.installation(t).LastError; got != "remove dependency node: "+workspacedeps.ErrBusy.Error() {
-			t.Fatalf("last_error = %q", got)
+		if got := f.installation(t).LastErrorCode; got != string(apperror.CodeWorkspaceDependencyBusy) {
+			t.Fatalf("last_error_code = %q", got)
 		}
 	})
 }

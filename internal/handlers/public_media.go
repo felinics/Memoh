@@ -70,7 +70,7 @@ func (h *PublicMediaHandler) Register(e *echo.Echo) {
 func (h *PublicMediaHandler) ServeOriginal(c echo.Context) error {
 	botID, contentHash, ok := publicMediaParams(c)
 	if !ok {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid media reference")
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("invalid media reference"))
 	}
 	if !h.authorized(c) {
 		return echo.NewHTTPError(http.StatusForbidden, "invalid media signature")
@@ -98,7 +98,7 @@ func (h *PublicMediaHandler) ServeOriginal(c echo.Context) error {
 func (h *PublicMediaHandler) ServePreview(c echo.Context) error {
 	botID, contentHash, ok := publicMediaParams(c)
 	if !ok {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid media reference")
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("invalid media reference"))
 	}
 	if !h.authorized(c) {
 		return echo.NewHTTPError(http.StatusForbidden, "invalid media signature")
@@ -140,7 +140,7 @@ func (h *PublicMediaHandler) openImage(c echo.Context, botID, contentHash string
 		if errors.Is(err, media.ErrAssetNotFound) {
 			return nil, media.Asset{}, echo.NewHTTPError(http.StatusNotFound, "media not found")
 		}
-		return nil, media.Asset{}, echo.NewHTTPError(http.StatusInternalServerError, "open media failed")
+		return nil, media.Asset{}, echo.NewHTTPError(http.StatusInternalServerError).WithInternal(err)
 	}
 	asset.Mime = attachment.NormalizeMime(asset.Mime)
 	if asset.Mime != "image/jpeg" && asset.Mime != "image/png" {
@@ -189,7 +189,7 @@ func publicMediaTooLargeHTTPError(err error) error {
 	if errors.Is(err, media.ErrAssetTooLarge) {
 		return echo.NewHTTPError(http.StatusRequestEntityTooLarge, "media is too large")
 	}
-	return echo.NewHTTPError(http.StatusBadRequest, "read media failed")
+	return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("read media failed"))
 }
 
 func encodePublicMediaPreviewJPEG(data []byte) ([]byte, error) {

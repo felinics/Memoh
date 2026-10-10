@@ -85,17 +85,8 @@ vi.mock('./model-select.vue', async () => {
 
 vi.mock('@/utils/acp', async () => {
   return {
-    findMissingRequiredManagedField: (_profile: unknown, managed: Record<string, unknown>, setupMode: string) =>
-      setupMode === 'self' || String(managed.api_key ?? '').trim() ? null : { id: 'api_key' },
-    isACPAgentEnabled: (metadata: Record<string, unknown> | undefined, provider: string) => {
-      const acp = metadata?.acp as { agents?: Record<string, { enabled?: boolean }> } | undefined
-      return acp?.agents?.[provider]?.enabled === true
-    },
-    readACPAgentConfig: (metadata: Record<string, unknown> | undefined, provider: string) => {
-      const acp = metadata?.acp as { agents?: Record<string, { setup_mode?: string, managed?: Record<string, unknown> }> } | undefined
-      const config = acp?.agents?.[provider] ?? {}
-      return { setupMode: config.setup_mode ?? 'api_key', setupModeSet: !!config.setup_mode, managed: config.managed ?? {} }
-    },
+    isACPAgentConfigured: (agent: { metadata?: { managed?: Record<string, unknown> } }, profile: unknown) =>
+      !!profile && !!String(agent.metadata?.managed?.api_key ?? '').trim(),
   }
 })
 
@@ -128,24 +119,15 @@ function createForm(overrides: Record<string, unknown> = {}) {
 const botAgents = [
   { id: 'agent-codex', name: 'Codex', runtime: 'codex', enabled: true, agent_credential_id: 'credential-codex', metadata: { provider: 'codex', auth: 'api_key' } },
   { id: 'agent-claude', name: 'Claude Code', runtime: 'claude-code', enabled: true, metadata: { provider: 'claude-code', auth: 'workspace' } },
-  { id: 'agent-custom', name: 'Custom', runtime: 'acp', enabled: true, metadata: { provider: 'custom-agent' } },
+  { id: 'agent-custom', name: 'Custom', runtime: 'acp', enabled: true, metadata: { provider: 'custom-agent', managed: { api_key: 'custom-key' } } },
 ]
 
 const acpProfiles = [
   { id: 'custom-agent', display_name: 'Custom' },
 ]
 
-const configuredMetadata = {
-  acp: {
-    agents: {
-      'custom-agent': { enabled: true, setup_mode: 'api_key', managed: { api_key: 'custom-key' } },
-    },
-  },
-}
-
 async function mountCard(form: ReturnType<typeof createForm>, options: {
-  botAgents?: typeof botAgents
-	botMetadata?: Record<string, unknown>
+  botAgents?: Array<Record<string, unknown>>
 } = {}) {
   const Card = (await import('./settings-interaction-card.vue')).default
   const root = document.createElement('div')
@@ -155,7 +137,6 @@ async function mountCard(form: ReturnType<typeof createForm>, options: {
     models: [],
     providers: [],
     botAgents: options.botAgents ?? botAgents,
-		botMetadata: options.botMetadata ?? configuredMetadata,
 		acpProfiles,
   })
   app.config.globalProperties.$t = translate
@@ -241,15 +222,8 @@ describe('settings interaction default Agent selector', () => {
 			botAgents: [
 				{ ...botAgents[0], agent_credential_id: undefined },
 				botAgents[1],
-				botAgents[2],
+				{ ...botAgents[2], metadata: { provider: 'custom-agent', managed: {} } },
 			],
-			botMetadata: {
-				acp: {
-					agents: {
-            'custom-agent': { enabled: true, setup_mode: 'api_key', managed: {} },
-					},
-				},
-			},
 		})
 
 		expect(root.querySelector('[data-option-value="agent:agent-codex"]')).toBeNull()
@@ -259,24 +233,18 @@ describe('settings interaction default Agent selector', () => {
     app.unmount()
   })
 
-  it('keeps legacy enabled Agents selectable when setup mode was not stored', async () => {
+  // Every custom ACP Agent shares one provider; each is judged by its own setup.
+  it('judges two Agents of the same provider by their own setup', async () => {
     const form = createForm()
     const { app, root } = await mountCard(form, {
       botAgents: [
-        { ...botAgents[0], agent_credential_id: undefined },
-        botAgents[2],
+        { id: 'agent-hermes', name: 'Hermes', runtime: 'acp', enabled: true, metadata: { provider: 'custom-agent', managed: { api_key: 'hermes-key' } } },
+        { id: 'agent-grok', name: 'Grok', runtime: 'acp', enabled: true, metadata: { provider: 'custom-agent', managed: {} } },
       ],
-      botMetadata: {
-        acp: {
-          agents: {
-            'custom-agent': { enabled: true, managed: {} },
-          },
-        },
-      },
     })
 
-    expect(root.querySelector('[data-option-value="agent:agent-custom"]')).not.toBeNull()
-    expect(root.querySelector('[data-option-value="agent:agent-codex"]')).toBeNull()
+    expect(root.querySelector('[data-option-value="agent:agent-hermes"]')).not.toBeNull()
+    expect(root.querySelector('[data-option-value="agent:agent-grok"]')).toBeNull()
 
     app.unmount()
   })

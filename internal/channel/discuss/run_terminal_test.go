@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	agentevent "github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
@@ -257,5 +260,43 @@ func TestDiscussStartFailureBroadcast(t *testing.T) {
 		if failures := b.errors(); len(failures) != 0 {
 			t.Fatalf("%v: error broadcasts = %+v, want none", answer, failures)
 		}
+	}
+}
+
+// Whether the worker abandoned a start is read from its own context. A
+// canceled call it did not end is a failure: the server ended the turn.
+func TestDiscussStartCanceledByServerIsAFailure(t *testing.T) {
+	canceled := errs.Remote(status.Error(codes.Canceled, "turn canceled"))
+	service := scriptedDiscussService{fakeTurnService: &fakeTurnService{startErr: canceled}}
+
+	_, b := runScriptedDiscuss(t, service)
+	assertOneFailure(t, b, "runtime_run_failed", discussRunFailedCopy)
+
+	broadcaster := &recordingBroadcaster{}
+	runner := discussTurnRunner{projector: newDiscussEventProjector(broadcaster)}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var logs bytes.Buffer
+	runner.Run(ctx, service, turn.StartTurnCommand{BotID: "bot-1"}, logger.New(&logs, "debug", "json"))
+	if failures := broadcaster.errors(); len(failures) != 0 {
+		t.Fatalf("abandoned start: error broadcasts = %+v, want none", failures)
+	}
+}
+
+// The failure a run's terminal event names is already in the run's result
+// record at ERROR; the discuss turn that reports it again records a WARN.
+func TestRunFailureIsMarkedRecorded(t *testing.T) {
+	terminal := &turn.RunTerminal{State: turn.RunStateFailed, ErrorCode: string(apperror.CodeAgentProviderOverloaded)}
+	withCause := apperror.Wrap(apperror.CodeAgentProviderOverloaded, errors.New("upstream 503"), nil)
+	for name, turnErr := range map[string]error{"turn error": withCause, "code only": nil} {
+		t.Run(name, func(t *testing.T) {
+			err := runFailure(terminal, turnErr)
+			if err == nil || apperror.CodeOf(err) != apperror.CodeAgentProviderOverloaded {
+				t.Fatalf("runFailure() = %v, want the run's code", err)
+			}
+			if !errs.Analyze(context.Background(), err).Recorded {
+				t.Fatalf("runFailure() = %v, want it marked recorded", err)
+			}
+		})
 	}
 }

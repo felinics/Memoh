@@ -3,6 +3,7 @@ package rpc_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -71,7 +72,15 @@ func TestEnvelopeRoundTripsEverySentinel(t *testing.T) {
 			if !errs.Analyze(context.Background(), restored).Remote {
 				t.Fatal("restored error is not marked remote")
 			}
+			// Both codes refuse the request, so the server writes client.
+			if got := errorInfo(t, wire).GetMetadata()[rpc.MetadataFault]; got != string(apperror.FaultClient) {
+				t.Fatalf("fault = %q, want client", got)
+			}
 		})
+	}
+	unknown := rpc.Reason{Reason: "test.unknown", Code: codes.Unknown, Message: "failed"}.Status("adapter text")
+	if got := errorInfo(t, unknown).GetMetadata()[rpc.MetadataFault]; got != string(apperror.FaultServer) {
+		t.Fatalf("unknown code fault = %q, want server", got)
 	}
 }
 
@@ -92,7 +101,7 @@ func TestEnvelopeDecodeIgnoresOtherErrors(t *testing.T) {
 
 func TestEnvelopeRoundTripsCatalogCodeAndArgs(t *testing.T) {
 	sent := apperror.New(apperror.CodeBotNameTaken, map[string]string{"field": "name"})
-	encoded := rpc.AppErrorStatus(fmtWrap(sent))
+	encoded := rpc.AnswerStatus(context.Background(), fmtWrap(sent))
 	if encoded == nil {
 		t.Fatal("catalog apperror not encoded")
 	}
@@ -133,20 +142,20 @@ func TestEnvelopeCarriesTheServerFault(t *testing.T) {
 		name        string
 		sent        error
 		wantFault   string
-		clientFault errs.Fault
+		clientFault apperror.Fault
 	}{
-		{"declared provider fault", apperror.Wrap(apperror.CodeAgentProviderAuthFailed, errors.New("api error 401"), nil), "dependency", errs.FaultDependency},
-		{"client status", apperror.New(apperror.CodeBotNameTaken, map[string]string{"field": "name"}), "client", errs.FaultServer},
-		{"server status", apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("dial"), nil), "server", errs.FaultDependency},
-		{"server status with a dependency cause", apperror.Wrap(apperror.CodeWorkspaceUnreachable, errs.WrapDependency(errors.New("dial"), "reach workspace"), nil), "dependency", errs.FaultDependency},
+		{"declared provider fault", apperror.Wrap(apperror.CodeAgentProviderAuthFailed, errors.New("api error 401"), nil), "dependency", apperror.FaultDependency},
+		{"client status", apperror.New(apperror.CodeBotNameTaken, map[string]string{"field": "name"}), "client", apperror.FaultServer},
+		{"server status", apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("dial"), nil), "server", apperror.FaultDependency},
+		{"server status with a dependency cause", apperror.Wrap(apperror.CodeWorkspaceUnreachable, errs.WrapDependency(errors.New("dial"), "reach workspace"), nil), "dependency", apperror.FaultDependency},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			wire := overWire(t, rpc.AppErrorStatus(fmtWrap(tc.sent)))
+			wire := overWire(t, rpc.AnswerStatus(context.Background(), fmtWrap(tc.sent)))
 			if got := errorInfo(t, wire).GetMetadata()[rpc.MetadataFault]; got != tc.wantFault {
 				t.Fatalf("envelope fault = %q, want %q", got, tc.wantFault)
 			}
 			report := errs.Analyze(context.Background(), rpc.DecodeAppError(wire))
-			if !report.Remote || report.RemoteFault != tc.wantFault || report.Fault != tc.clientFault {
+			if !report.Remote || string(report.RemoteFault) != tc.wantFault || report.Fault != tc.clientFault {
 				t.Fatalf("client report = %+v; want remote_fault=%s fault=%s", report, tc.wantFault, tc.clientFault)
 			}
 		})
@@ -168,7 +177,7 @@ func TestEnvelopeWithoutFaultFromAnOlderServer(t *testing.T) {
 		t.Fatalf("code = %q", got)
 	}
 	report := errs.Analyze(context.Background(), restored)
-	if !report.Remote || report.RemoteFault != "" || report.Fault != errs.FaultDependency {
+	if !report.Remote || report.RemoteFault != "" || report.Fault != apperror.FaultDependency {
 		t.Fatalf("report = %+v; want remote dependency without remote_fault", report)
 	}
 }
@@ -176,7 +185,7 @@ func TestEnvelopeWithoutFaultFromAnOlderServer(t *testing.T) {
 // A client that predates the fault key restores the code and the catalog
 // args only; the fault is never taken for an arg.
 func TestEnvelopeFaultIsNotAnArg(t *testing.T) {
-	restored := rpc.DecodeAppError(overWire(t, rpc.AppErrorStatus(apperror.New(apperror.CodeBotNameTaken, map[string]string{"field": "name"}))))
+	restored := rpc.DecodeAppError(overWire(t, rpc.AnswerStatus(context.Background(), apperror.New(apperror.CodeBotNameTaken, map[string]string{"field": "name"}))))
 	if got := apperror.ArgsOf(restored); len(got) != 1 || got["field"] != "name" {
 		t.Fatalf("args = %v, want the catalog args alone", got)
 	}
@@ -193,11 +202,30 @@ func errorInfo(t *testing.T, err error) *errdetails.ErrorInfo {
 	return nil
 }
 
-func TestAppErrorStatusRejectsNonCatalogErrors(t *testing.T) {
-	for _, err := range []error{errors.New("plain"), apperror.New("not.in.catalog", nil)} {
-		if rpc.AppErrorStatus(err) != nil {
-			t.Fatalf("%v encoded", err)
+// An error without a catalog error of its own travels as the generic code for
+// its fault, and a cancellation by the caller as Canceled.
+func TestAnswerStatusAnswersEveryError(t *testing.T) {
+	for _, tc := range []struct {
+		err    error
+		reason string
+		code   codes.Code
+		fault  string
+	}{
+		{errors.New("plain"), string(apperror.CodeInternal), codes.Internal, "server"},
+		{apperror.New("not.in.catalog", nil), string(apperror.CodeInternal), codes.Internal, "server"},
+		{errs.NewDependency("down"), string(apperror.CodeInternal), codes.Internal, "dependency"},
+		{status.Error(codes.InvalidArgument, "bad payload"), string(apperror.CodeHTTPBadRequest), codes.InvalidArgument, "client"},
+	} {
+		got := rpc.AnswerStatus(context.Background(), tc.err)
+		info := errorInfo(t, got)
+		if status.Code(got) != tc.code || info.GetReason() != tc.reason || info.GetMetadata()[rpc.MetadataFault] != tc.fault {
+			t.Fatalf("%v encoded as %v reason=%q fault=%q", tc.err, status.Code(got), info.GetReason(), info.GetMetadata()[rpc.MetadataFault])
 		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := rpc.AnswerStatus(ctx, fmt.Errorf("call: %w", context.Canceled)); status.Code(got) != codes.Canceled {
+		t.Fatalf("canceled call encoded as %v", got)
 	}
 }
 

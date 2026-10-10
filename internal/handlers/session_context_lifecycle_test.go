@@ -20,6 +20,7 @@ import (
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/server"
 )
 
 const (
@@ -499,7 +500,7 @@ func TestGetSessionContextLifecycleMapsLoadFailureTo500(t *testing.T) {
 			queries := newContextLifecycleTestQueries()
 			test.configure(queries)
 			err := newContextLifecycleTestHandler(queries).GetSessionContextLifecycle(newContextLifecycleTestContext(t, ""))
-			problem, ok := apperror.ProblemFrom(err, "request-1")
+			problem, ok := server.ProblemFrom(err, "request-1")
 			if !ok || problem.Code != string(apperror.CodeContextLifecycleLoadFailed) || problem.Status != http.StatusInternalServerError {
 				t.Fatalf("error = %#v, want context lifecycle load Problem", err)
 			}

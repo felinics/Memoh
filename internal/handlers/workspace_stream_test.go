@@ -18,6 +18,7 @@ import (
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	"github.com/felinics/memoh/internal/server"
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -39,7 +40,7 @@ func TestStreamWorkspaceProvisioningStopsWhenClientDisconnects(t *testing.T) {
 	outcome := streamWorkspaceProvisioning(
 		context.Background(),
 		func(payload any) bool {
-			_, isError := payload.(createContainerErrorEvent)
+			_, isError := payload.(server.StreamError)
 			errorSent = errorSent || isError
 			return false
 		},

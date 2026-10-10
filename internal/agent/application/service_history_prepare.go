@@ -27,6 +27,7 @@ func (s *Service) prepareHistoryContext(
 		return preparedHistoryContext{}, err
 	}
 	loaded = pruneHistoryForGateway(loaded)
+	loaded = dropPreflightFailureTurns(loaded)
 	loaded = dropEmptyHistoryFailures(loaded)
 	boundary := s.loadCompactionArtifactBoundary(ctx, loaded, req.ThreadID, req.HistoryCutoffBeforeMessageID)
 	loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
@@ -67,6 +68,23 @@ func historyErrorCode(meta map[string]any) string {
 	}
 	code, _ := meta[messagepkg.HistoryErrorCodeMetadataKey].(string)
 	return strings.TrimSpace(code)
+}
+
+// dropPreflightFailureTurns removes inputs rejected before the agent accepted
+// them. They stay in the UI, but a later ordinary message must not smuggle a
+// Hook-rejected input into the model context.
+func dropPreflightFailureTurns(records []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
+	if len(records) == 0 {
+		return records
+	}
+	out := make([]historyfrag.HistoryRecord, 0, len(records))
+	for _, rec := range records {
+		if rec.Metadata != nil && rec.Metadata[messagepkg.HistoryFailureOriginMetadataKey] == messagepkg.HistoryFailureOriginUserMessageHook {
+			continue
+		}
+		out = append(out, rec)
+	}
+	return out
 }
 
 // dropEmptyHistoryFailures removes empty assistant rows that exist only to

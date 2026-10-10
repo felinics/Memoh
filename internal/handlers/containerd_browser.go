@@ -18,6 +18,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -170,10 +171,10 @@ func newBrowserSessionID() (string, error) {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body browserSessionCreateRequest true "Browser session request"
 // @Success 200 {object} browserSessionCreateResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 401 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 401 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container/browser/sessions [post].
 func (h *ContainerdHandler) CreateBrowserSession(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -186,20 +187,20 @@ func (h *ContainerdHandler) CreateBrowserSession(c echo.Context) error {
 
 	var req browserSessionCreateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid browser session payload")
+		return err
 	}
 	if err := validateBrowserPort(req.Port); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("port", err)
 	}
 
 	ctx := c.Request().Context()
 	if _, err := h.manager.NativeMCPClient(ctx, botID); err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, "workspace is not reachable: "+err.Error())
+		return errs.WrapDependency(err, "connect workspace")
 	}
 
 	session, err := h.browserSessions.create(botID, req.Port, time.Now())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "create browser session failed")
+		return echo.NewHTTPError(http.StatusInternalServerError).WithInternal(err)
 	}
 	return c.JSON(http.StatusOK, browserSessionCreateResponse{
 		ID:        session.ID,
@@ -214,9 +215,9 @@ func (h *ContainerdHandler) CreateBrowserSession(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Browser session ID"
 // @Success 200 {object} browserSessionKeepAliveResponse
-// @Failure 401 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 401 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/container/browser/sessions/{session_id}/keepalive [post].
 func (h *ContainerdHandler) KeepAliveBrowserSession(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -239,8 +240,8 @@ func (h *ContainerdHandler) KeepAliveBrowserSession(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Browser session ID"
 // @Success 204
-// @Failure 401 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
+// @Failure 401 {object} server.Problem
+// @Failure 403 {object} server.Problem
 // @Router /bots/{bot_id}/container/browser/sessions/{session_id} [delete].
 func (h *ContainerdHandler) DeleteBrowserSession(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -274,7 +275,7 @@ func (h *ContainerdHandler) HandleBrowserProxy(c echo.Context) error {
 	}
 	client, err := h.manager.NativeMCPClient(c.Request().Context(), session.BotID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, "workspace is not reachable: "+err.Error())
+		return errs.WrapDependency(err, "connect workspace")
 	}
 
 	proxy := newBrowserReverseProxy(client, session.Port)

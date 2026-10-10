@@ -367,7 +367,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	case <-srv.proc.Done():
 		stopSteering()
 		result, _ := srv.turnResult(turn)
-		return result, errs.NewDependency(fmt.Sprintf("codex app-server exited mid-turn: %s", srv.proc.StderrTail()))
+		return result, srv.conn.exitError("mid-turn")
 	}
 
 	stopSteering()
@@ -379,6 +379,13 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		// The application layer distinguishes stop from failure by context
 		// state; an interrupted turn is not an error.
 		return result, nil
+	}
+	if resultErr == nil && !result.TurnCompleted {
+		// Codex ended the turn itself. The application records it as an
+		// abort with no cause, so this is the only trace of what happened.
+		d.logger.WarnContext(ctx, "codex turn ended without completing and without a stop",
+			slog.String("thread_id", threadID), slog.String("turn_id", result.AgentTurnID),
+			slog.String("status", result.StopReason))
 	}
 	return result, resultErr
 }
@@ -395,7 +402,7 @@ func (s *appServer) turnResultAfterError(turn *turnState, err error) (external.P
 	result, _ := s.turnResult(turn)
 	var rpcErr *protocol.RPCError
 	if errors.As(err, &rpcErr) {
-		return result, errs.NewDependency(fmt.Sprintf("codex turn/start rejected: %s", rpcErr.Message))
+		return result, errs.NewDependency("codex turn/start rejected: " + rpcErr.Error())
 	}
 	return result, err
 }

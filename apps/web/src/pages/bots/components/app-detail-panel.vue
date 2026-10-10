@@ -40,6 +40,7 @@ import {
   appDisplayName,
   appKey,
   appInProgress,
+  appLastError,
   type AppConnectorItem,
   type AppDependencyItem,
   type AppItem,
@@ -102,16 +103,17 @@ const canRemove = computed(() => !discovered.value && !inProgress.value)
 
 const needsAttention = computed(() => props.item.status === 'failed' || props.item.status === 'partial')
 const errorDetailsOpen = ref(false)
+const lastError = computed(() => appLastError(props.item, key => t(key)))
 const { copyText } = useClipboard()
 
 /** Keep diagnostics collapsed when navigation or a new operation changes their context. */
-watch(() => [appKey(props.item), props.item.installation_id, props.item.status, props.item.last_error], () => {
+watch(() => [appKey(props.item), props.item.installation_id, props.item.status, props.item.last_error, props.item.last_error_code], () => {
   errorDetailsOpen.value = false
 })
 
 /** Copy the persisted diagnostic verbatim, using the shared clipboard feedback. */
 async function copyError() {
-  const ok = await copyText(props.item.last_error ?? '')
+  const ok = await copyText(lastError.value)
   if (ok) toast.success(t('common.copied'))
   else toast.error(t('common.copyFailed'))
 }
@@ -239,7 +241,7 @@ function dependencyName(dep: AppDependencyItem): string {
         :title="t(item.status === 'failed' ? 'apps.diagnostics.failed' : 'apps.diagnostics.partial')"
         :description="t(item.status === 'failed' ? 'apps.progress.recoveryHint' : 'apps.diagnostics.partialHint')"
       />
-      <SettingsSection v-if="item.last_error">
+      <SettingsSection v-if="lastError">
         <ExpandableSettingsRow
           v-model:open="errorDetailsOpen"
           :label="t('apps.diagnostics.errorDetails')"
@@ -255,7 +257,7 @@ function dependencyName(dep: AppDependencyItem): string {
                 tabindex="0"
                 class="max-h-64 min-w-0 overflow-auto"
               >
-                <pre class="whitespace-pre-wrap break-all font-mono text-caption text-foreground">{{ item.last_error }}</pre>
+                <pre class="whitespace-pre-wrap break-all font-mono text-caption text-foreground">{{ lastError }}</pre>
               </div>
               <TextButton @click="copyError">
                 {{ t('apps.diagnostics.copyError') }}

@@ -227,6 +227,8 @@ export type AdaptersCompactResult = {
     results?: Array<AdaptersMemoryItem>;
 };
 
+export type AdaptersCompactUnavailableReason = 'unsupported' | 'not_configured';
+
 export type AdaptersDeleteResponse = {
     message?: string;
 };
@@ -251,7 +253,10 @@ export type AdaptersIngestResult = {
 
 export type AdaptersMemoryCompactCapability = {
     archive?: boolean;
-    reason?: string;
+    /**
+     * Reason says why Semantic is false.
+     */
+    reason?: AdaptersCompactUnavailableReason;
     rebuild_index?: boolean;
     semantic?: boolean;
 };
@@ -367,18 +372,7 @@ export type AgentcredentialPublicCredential = {
     updated_at?: string;
 };
 
-export type ApperrorProblem = {
-    args: {
-        [key: string]: string;
-    };
-    code: string;
-    detail: string;
-    fault: string;
-    request_id?: string;
-    status: number;
-    trace_id?: string;
-    type: string;
-};
+export type ApperrorFault = 'client' | 'server' | 'dependency' | 'canceled';
 
 export type AudioConfigSchema = {
     fields?: Array<AudioFieldSchema>;
@@ -1382,9 +1376,10 @@ export type ConversationUiForwardRef = {
 export type ConversationUiMessage = {
     approval?: ConversationUiToolApproval;
     /**
-     * Args are the machine-readable parameters of a notice block: the string
-     * values of the runtime_notice event metadata (dep_id and install_task_id
-     * for a workspace dependency notice, for instance). The client renders
+     * Args are the machine-readable parameters of a notice or error block: the
+     * string values of the runtime_notice event metadata (dep_id and
+     * install_task_id for a workspace dependency notice, for instance), or the
+     * catalog args stored with a failure's code. The client renders text and
      * actions from them instead of parsing Content.
      */
     args?: {
@@ -1725,7 +1720,12 @@ export type HandlersAppItem = {
     installation_id?: string;
     installed_at?: string;
     last_checked_at?: string;
+    /**
+     * LastError is text recorded by earlier servers. A failure recorded now
+     * carries LastErrorCode, which clients render as errors.<code>.
+     */
     last_error?: string;
+    last_error_code?: string;
     license?: string;
     name?: string;
     reason?: 'user' | 'required';
@@ -1793,6 +1793,7 @@ export type HandlersAppStreamEvent = {
     code?: string;
     data?: string;
     detail?: string;
+    fault?: ApperrorFault;
     id?: string;
     kind?: 'app' | 'dependency' | 'skills' | 'connector';
     message?: string;
@@ -1872,11 +1873,16 @@ export type HandlersCommandActionResult = {
 
 export type HandlersCommandEventResponse = {
     action_id?: string;
+    args?: {
+        [key: string]: string;
+    };
     /**
-     * Code and Message describe a command_error; the client renders the code.
+     * Code, Args, Message and Fault describe a command_error, as the error
+     * event of a stream does; the client renders the code.
      */
     code?: string;
     composer_scope?: string;
+    fault?: ApperrorFault;
     invocation_id?: string;
     message?: string;
     result?: HandlersCommandActionResult;
@@ -2745,7 +2751,15 @@ export type HandlersWorkspaceDependencyItem = {
      */
     installed_version?: string;
     last_checked_at?: string;
+    /**
+     * LastError is text recorded by earlier servers, including the script
+     * output they used to keep. A failure recorded now carries LastErrorCode.
+     */
     last_error?: string;
+    /**
+     * LastErrorCode is the catalog code of a recorded failure, which clients
+     * render as errors.<code>.
+     */
     last_error_code?: string;
     /**
      * LatestVersion is the last upstream check result, omitted until a check
@@ -2878,6 +2892,7 @@ export type HandlersWorkspaceDependencyStreamEvent = {
     entrypoints?: {
         [key: string]: string;
     };
+    fault?: ApperrorFault;
     message?: string;
     request_id?: string;
     stream?: 'stdout' | 'stderr';
@@ -2892,6 +2907,11 @@ export type HandlersWorkspaceDependencyTranslation = {
 
 export type HandlersAcpRuntimeCreateRequest = {
     acp_agent_id?: string;
+    /**
+     * BotAgentID names the Agent instance whose setup launches the runtime;
+     * only a session bound to the same instance can later adopt it.
+     */
+    bot_agent_id?: string;
     project_path?: string;
 };
 
@@ -3897,6 +3917,19 @@ export type SearchprovidersUpdateRequest = {
     provider?: SearchprovidersProviderName;
 };
 
+export type ServerProblem = {
+    args: {
+        [key: string]: string;
+    };
+    code: string;
+    detail: string;
+    fault: ApperrorFault;
+    request_id?: string;
+    status: number;
+    trace_id?: string;
+    type: string;
+};
+
 export type SessionSession = {
     bot_agent_id?: string;
     bot_id?: string;
@@ -4370,23 +4403,23 @@ export type PostAgentAuthorizationsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Too Many Requests
      */
-    429: ApperrorProblem;
+    429: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostAgentAuthorizationsError = PostAgentAuthorizationsErrors[keyof PostAgentAuthorizationsErrors];
@@ -4416,15 +4449,15 @@ export type DeleteAgentAuthorizationsByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type DeleteAgentAuthorizationsByIdError = DeleteAgentAuthorizationsByIdErrors[keyof DeleteAgentAuthorizationsByIdErrors];
@@ -4452,15 +4485,15 @@ export type GetAgentAuthorizationsByIdErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Gone
      */
-    410: ApperrorProblem;
+    410: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetAgentAuthorizationsByIdError = GetAgentAuthorizationsByIdErrors[keyof GetAgentAuthorizationsByIdErrors];
@@ -4493,19 +4526,19 @@ export type PostAgentAuthorizationsByIdExchangeErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Gone
      */
-    410: ApperrorProblem;
+    410: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostAgentAuthorizationsByIdExchangeError = PostAgentAuthorizationsByIdExchangeErrors[keyof PostAgentAuthorizationsByIdExchangeErrors];
@@ -4535,15 +4568,15 @@ export type PostAgentAuthorizationsByIdPollErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Gone
      */
-    410: ApperrorProblem;
+    410: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostAgentAuthorizationsByIdPollError = PostAgentAuthorizationsByIdPollErrors[keyof PostAgentAuthorizationsByIdPollErrors];
@@ -4571,15 +4604,15 @@ export type PostAuthLoginErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Unauthorized
      */
-    401: ApperrorProblem;
+    401: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostAuthLoginError = PostAuthLoginErrors[keyof PostAuthLoginErrors];
@@ -4604,11 +4637,11 @@ export type PostAuthRefreshErrors = {
     /**
      * Unauthorized
      */
-    401: ApperrorProblem;
+    401: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostAuthRefreshError = PostAuthRefreshErrors[keyof PostAuthRefreshErrors];
@@ -4638,15 +4671,15 @@ export type GetBotsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsError = GetBotsErrors[keyof GetBotsErrors];
@@ -4680,19 +4713,19 @@ export type PostBotsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsError = PostBotsErrors[keyof PostBotsErrors];
@@ -4738,15 +4771,15 @@ export type PostBotsBackupImportErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsBackupImportError = PostBotsBackupImportErrors[keyof PostBotsBackupImportErrors];
@@ -4792,11 +4825,11 @@ export type PostBotsBackupImportPreviewErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsBackupImportPreviewError = PostBotsBackupImportPreviewErrors[keyof PostBotsBackupImportPreviewErrors];
@@ -4830,11 +4863,11 @@ export type GetBotsNameAvailabilityErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsNameAvailabilityError = GetBotsNameAvailabilityErrors[keyof GetBotsNameAvailabilityErrors];
@@ -4868,11 +4901,11 @@ export type GetBotsUserAccessCandidatesErrors = {
     /**
      * Unauthorized
      */
-    401: ApperrorProblem;
+    401: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsUserAccessCandidatesError = GetBotsUserAccessCandidatesErrors[keyof GetBotsUserAccessCandidatesErrors];
@@ -4911,15 +4944,15 @@ export type GetBotsByBotIdAclChannelIdentitiesErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdAclChannelIdentitiesError = GetBotsByBotIdAclChannelIdentitiesErrors[keyof GetBotsByBotIdAclChannelIdentitiesErrors];
@@ -4953,15 +4986,15 @@ export type GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsEr
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsError = GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsErrors[keyof GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsErrors];
@@ -4995,15 +5028,15 @@ export type GetBotsByBotIdAclChannelTypesByChannelTypeConversationsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdAclChannelTypesByChannelTypeConversationsError = GetBotsByBotIdAclChannelTypesByChannelTypeConversationsErrors[keyof GetBotsByBotIdAclChannelTypesByChannelTypeConversationsErrors];
@@ -5033,15 +5066,15 @@ export type GetBotsByBotIdAclDefaultEffectErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdAclDefaultEffectError = GetBotsByBotIdAclDefaultEffectErrors[keyof GetBotsByBotIdAclDefaultEffectErrors];
@@ -5074,15 +5107,15 @@ export type PutBotsByBotIdAclDefaultEffectErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutBotsByBotIdAclDefaultEffectError = PutBotsByBotIdAclDefaultEffectErrors[keyof PutBotsByBotIdAclDefaultEffectErrors];
@@ -5110,15 +5143,15 @@ export type GetBotsByBotIdAclRulesErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdAclRulesError = GetBotsByBotIdAclRulesErrors[keyof GetBotsByBotIdAclRulesErrors];
@@ -5151,15 +5184,15 @@ export type PostBotsByBotIdAclRulesErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdAclRulesError = PostBotsByBotIdAclRulesErrors[keyof PostBotsByBotIdAclRulesErrors];
@@ -5193,15 +5226,15 @@ export type DeleteBotsByBotIdAclRulesByRuleIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteBotsByBotIdAclRulesByRuleIdError = DeleteBotsByBotIdAclRulesByRuleIdErrors[keyof DeleteBotsByBotIdAclRulesByRuleIdErrors];
@@ -5236,15 +5269,15 @@ export type PutBotsByBotIdAclRulesByRuleIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutBotsByBotIdAclRulesByRuleIdError = PutBotsByBotIdAclRulesByRuleIdErrors[keyof PutBotsByBotIdAclRulesByRuleIdErrors];
@@ -5277,27 +5310,27 @@ export type PostBotsByBotIdAcpRuntimesErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Too Many Requests
      */
-    429: ApperrorProblem;
+    429: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdAcpRuntimesError = PostBotsByBotIdAcpRuntimesErrors[keyof PostBotsByBotIdAcpRuntimesErrors];
@@ -5331,23 +5364,23 @@ export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdError = DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors[keyof DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors];
@@ -5379,23 +5412,23 @@ export type GetBotsByBotIdAcpRuntimesByRuntimeIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdAcpRuntimesByRuntimeIdError = GetBotsByBotIdAcpRuntimesByRuntimeIdErrors[keyof GetBotsByBotIdAcpRuntimesByRuntimeIdErrors];
@@ -5432,27 +5465,27 @@ export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeError = PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors];
@@ -5489,27 +5522,27 @@ export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelError = PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors];
@@ -5546,27 +5579,27 @@ export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningError = PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors];
@@ -5596,7 +5629,7 @@ export type GetBotsByBotIdAgentsErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
 };
 
 export type GetBotsByBotIdAgentsError = GetBotsByBotIdAgentsErrors[keyof GetBotsByBotIdAgentsErrors];
@@ -5629,15 +5662,15 @@ export type PostBotsByBotIdAgentsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
 };
 
 export type PostBotsByBotIdAgentsError = PostBotsByBotIdAgentsErrors[keyof PostBotsByBotIdAgentsErrors];
@@ -5671,15 +5704,15 @@ export type DeleteBotsByBotIdAgentsByIdErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
 };
 
 export type DeleteBotsByBotIdAgentsByIdError = DeleteBotsByBotIdAgentsByIdErrors[keyof DeleteBotsByBotIdAgentsByIdErrors];
@@ -5711,11 +5744,11 @@ export type GetBotsByBotIdAgentsByIdErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetBotsByBotIdAgentsByIdError = GetBotsByBotIdAgentsByIdErrors[keyof GetBotsByBotIdAgentsByIdErrors];
@@ -5752,19 +5785,19 @@ export type PatchBotsByBotIdAgentsByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
 };
 
 export type PatchBotsByBotIdAgentsByIdError = PatchBotsByBotIdAgentsByIdErrors[keyof PatchBotsByBotIdAgentsByIdErrors];
@@ -5798,15 +5831,15 @@ export type PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeError = PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeErrors[keyof PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeErrors];
@@ -5843,11 +5876,11 @@ export type PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
 };
 
 export type PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelError = PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelErrors[keyof PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelErrors];
@@ -5882,11 +5915,11 @@ export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
 };
 
 export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollError = PostBotsByBotIdAgentsByIdCodexLoginDevicePollErrors[keyof PostBotsByBotIdAgentsByIdCodexLoginDevicePollErrors];
@@ -5920,23 +5953,23 @@ export type GetBotsByBotIdAgentsByIdCodexUsageErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Unprocessable Entity
      */
-    422: ApperrorProblem;
+    422: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type GetBotsByBotIdAgentsByIdCodexUsageError = GetBotsByBotIdAgentsByIdCodexUsageErrors[keyof GetBotsByBotIdAgentsByIdCodexUsageErrors];
@@ -5970,7 +6003,7 @@ export type DeleteBotsByBotIdAgentsByIdCredentialErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type DeleteBotsByBotIdAgentsByIdCredentialError = DeleteBotsByBotIdAgentsByIdCredentialErrors[keyof DeleteBotsByBotIdAgentsByIdCredentialErrors];
@@ -6002,7 +6035,7 @@ export type GetBotsByBotIdAgentsByIdCredentialErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetBotsByBotIdAgentsByIdCredentialError = GetBotsByBotIdAgentsByIdCredentialErrors[keyof GetBotsByBotIdAgentsByIdCredentialErrors];
@@ -6039,19 +6072,19 @@ export type PutBotsByBotIdAgentsByIdCredentialErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Unprocessable Entity
      */
-    422: ApperrorProblem;
+    422: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PutBotsByBotIdAgentsByIdCredentialError = PutBotsByBotIdAgentsByIdCredentialErrors[keyof PutBotsByBotIdAgentsByIdCredentialErrors];
@@ -6088,27 +6121,27 @@ export type PostBotsByBotIdAgentsByIdCredentialClaimErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Gone
      */
-    410: ApperrorProblem;
+    410: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdAgentsByIdCredentialClaimError = PostBotsByBotIdAgentsByIdCredentialClaimErrors[keyof PostBotsByBotIdAgentsByIdCredentialClaimErrors];
@@ -6151,15 +6184,15 @@ export type GetBotsByBotIdAgentsByIdModelsErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetBotsByBotIdAgentsByIdModelsError = GetBotsByBotIdAgentsByIdModelsErrors[keyof GetBotsByBotIdAgentsByIdModelsErrors];
@@ -6193,15 +6226,15 @@ export type GetBotsByBotIdAgentsByIdRuntimeControlsErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdAgentsByIdRuntimeControlsError = GetBotsByBotIdAgentsByIdRuntimeControlsErrors[keyof GetBotsByBotIdAgentsByIdRuntimeControlsErrors];
@@ -6236,23 +6269,23 @@ export type GetBotsByBotIdAppsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetBotsByBotIdAppsError = GetBotsByBotIdAppsErrors[keyof GetBotsByBotIdAppsErrors];
@@ -6285,19 +6318,19 @@ export type PostBotsByBotIdAppsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type PostBotsByBotIdAppsError = PostBotsByBotIdAppsErrors[keyof PostBotsByBotIdAppsErrors];
@@ -6327,15 +6360,15 @@ export type PostBotsByBotIdAppsCheckUpdatesErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type PostBotsByBotIdAppsCheckUpdatesError = PostBotsByBotIdAppsCheckUpdatesErrors[keyof PostBotsByBotIdAppsCheckUpdatesErrors];
@@ -6368,19 +6401,19 @@ export type PostBotsByBotIdAppsUpdateErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type PostBotsByBotIdAppsUpdateError = PostBotsByBotIdAppsUpdateErrors[keyof PostBotsByBotIdAppsUpdateErrors];
@@ -6419,11 +6452,11 @@ export type DeleteBotsByBotIdAppsByInstallationIdErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type DeleteBotsByBotIdAppsByInstallationIdError = DeleteBotsByBotIdAppsByInstallationIdErrors[keyof DeleteBotsByBotIdAppsByInstallationIdErrors];
@@ -6457,15 +6490,15 @@ export type GetBotsByBotIdAppsByInstallationIdErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdAppsByInstallationIdError = GetBotsByBotIdAppsByInstallationIdErrors[keyof GetBotsByBotIdAppsByInstallationIdErrors];
@@ -6506,23 +6539,23 @@ export type PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeApiKeyEr
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeApiKeyError = PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeApiKeyErrors[keyof PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeApiKeyErrors];
@@ -6563,23 +6596,23 @@ export type PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeOauthErr
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeOauthError = PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeOauthErrors[keyof PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeOauthErrors];
@@ -6613,15 +6646,15 @@ export type GetBotsByBotIdAppsByInstallationIdRemovalPreviewErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdAppsByInstallationIdRemovalPreviewError = GetBotsByBotIdAppsByInstallationIdRemovalPreviewErrors[keyof GetBotsByBotIdAppsByInstallationIdRemovalPreviewErrors];
@@ -6655,11 +6688,11 @@ export type PostBotsByBotIdAppsByInstallationIdResumeErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type PostBotsByBotIdAppsByInstallationIdResumeError = PostBotsByBotIdAppsByInstallationIdResumeErrors[keyof PostBotsByBotIdAppsByInstallationIdResumeErrors];
@@ -6692,15 +6725,15 @@ export type PostBotsByBotIdBackupExportErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdBackupExportError = PostBotsByBotIdBackupExportErrors[keyof PostBotsByBotIdBackupExportErrors];
@@ -6728,11 +6761,11 @@ export type GetBotsByBotIdBackupSummaryErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdBackupSummaryError = GetBotsByBotIdBackupSummaryErrors[keyof GetBotsByBotIdBackupSummaryErrors];
@@ -6762,15 +6795,15 @@ export type GetBotsByBotIdChannelManagersErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdChannelManagersError = GetBotsByBotIdChannelManagersErrors[keyof GetBotsByBotIdChannelManagersErrors];
@@ -6803,15 +6836,15 @@ export type PostBotsByBotIdChannelManagersErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdChannelManagersError = PostBotsByBotIdChannelManagersErrors[keyof PostBotsByBotIdChannelManagersErrors];
@@ -6843,15 +6876,15 @@ export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdError = DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors[keyof DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors];
@@ -6879,11 +6912,11 @@ export type DeleteBotsByBotIdCompactionLogsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteBotsByBotIdCompactionLogsError = DeleteBotsByBotIdCompactionLogsErrors[keyof DeleteBotsByBotIdCompactionLogsErrors];
@@ -6920,11 +6953,11 @@ export type GetBotsByBotIdCompactionLogsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdCompactionLogsError = GetBotsByBotIdCompactionLogsErrors[keyof GetBotsByBotIdCompactionLogsErrors];
@@ -6954,23 +6987,23 @@ export type GetBotsByBotIdConnectorsErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetBotsByBotIdConnectorsError = GetBotsByBotIdConnectorsErrors[keyof GetBotsByBotIdConnectorsErrors];
@@ -7004,31 +7037,31 @@ export type DeleteBotsByBotIdConnectorsByConnectionIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type DeleteBotsByBotIdConnectorsByConnectionIdError = DeleteBotsByBotIdConnectorsByConnectionIdErrors[keyof DeleteBotsByBotIdConnectorsByConnectionIdErrors];
@@ -7060,27 +7093,27 @@ export type GetBotsByBotIdConnectorsByConnectionIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetBotsByBotIdConnectorsByConnectionIdError = GetBotsByBotIdConnectorsByConnectionIdErrors[keyof GetBotsByBotIdConnectorsByConnectionIdErrors];
@@ -7117,27 +7150,27 @@ export type PatchBotsByBotIdConnectorsByConnectionIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PatchBotsByBotIdConnectorsByConnectionIdError = PatchBotsByBotIdConnectorsByConnectionIdErrors[keyof PatchBotsByBotIdConnectorsByConnectionIdErrors];
@@ -7169,31 +7202,31 @@ export type PostBotsByBotIdConnectorsByConnectionIdReauthErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdConnectorsByConnectionIdReauthError = PostBotsByBotIdConnectorsByConnectionIdReauthErrors[keyof PostBotsByBotIdConnectorsByConnectionIdReauthErrors];
@@ -7228,11 +7261,11 @@ export type DeleteBotsByBotIdContainerErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteBotsByBotIdContainerError = DeleteBotsByBotIdContainerErrors[keyof DeleteBotsByBotIdContainerErrors];
@@ -7260,11 +7293,11 @@ export type GetBotsByBotIdContainerErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdContainerError = GetBotsByBotIdContainerErrors[keyof GetBotsByBotIdContainerErrors];
@@ -7297,11 +7330,11 @@ export type PostBotsByBotIdContainerErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerError = PostBotsByBotIdContainerErrors[keyof PostBotsByBotIdContainerErrors];
@@ -7334,19 +7367,19 @@ export type PostBotsByBotIdContainerBrowserSessionsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Unauthorized
      */
-    401: ApperrorProblem;
+    401: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerBrowserSessionsError = PostBotsByBotIdContainerBrowserSessionsErrors[keyof PostBotsByBotIdContainerBrowserSessionsErrors];
@@ -7380,11 +7413,11 @@ export type DeleteBotsByBotIdContainerBrowserSessionsBySessionIdErrors = {
     /**
      * Unauthorized
      */
-    401: ApperrorProblem;
+    401: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
 };
 
 export type DeleteBotsByBotIdContainerBrowserSessionsBySessionIdError = DeleteBotsByBotIdContainerBrowserSessionsBySessionIdErrors[keyof DeleteBotsByBotIdContainerBrowserSessionsBySessionIdErrors];
@@ -7416,15 +7449,15 @@ export type PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveErrors = 
     /**
      * Unauthorized
      */
-    401: ApperrorProblem;
+    401: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveError = PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveErrors[keyof PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveErrors];
@@ -7454,11 +7487,11 @@ export type PostBotsByBotIdContainerDataRestoreErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerDataRestoreError = PostBotsByBotIdContainerDataRestoreErrors[keyof PostBotsByBotIdContainerDataRestoreErrors];
@@ -7490,7 +7523,7 @@ export type GetBotsByBotIdContainerDisplayErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetBotsByBotIdContainerDisplayError = GetBotsByBotIdContainerDisplayErrors[keyof GetBotsByBotIdContainerDisplayErrors];
@@ -7520,7 +7553,7 @@ export type PostBotsByBotIdContainerDisplayPrepareErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerDisplayPrepareError = PostBotsByBotIdContainerDisplayPrepareErrors[keyof PostBotsByBotIdContainerDisplayPrepareErrors];
@@ -7550,7 +7583,7 @@ export type GetBotsByBotIdContainerDisplaySessionsErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetBotsByBotIdContainerDisplaySessionsError = GetBotsByBotIdContainerDisplaySessionsErrors[keyof GetBotsByBotIdContainerDisplaySessionsErrors];
@@ -7584,7 +7617,7 @@ export type DeleteBotsByBotIdContainerDisplaySessionsBySessionIdErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type DeleteBotsByBotIdContainerDisplaySessionsBySessionIdError = DeleteBotsByBotIdContainerDisplaySessionsBySessionIdErrors[keyof DeleteBotsByBotIdContainerDisplaySessionsBySessionIdErrors];
@@ -7615,11 +7648,11 @@ export type PostBotsByBotIdContainerDisplayWebrtcOfferErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerDisplayWebrtcOfferError = PostBotsByBotIdContainerDisplayWebrtcOfferErrors[keyof PostBotsByBotIdContainerDisplayWebrtcOfferErrors];
@@ -7654,23 +7687,23 @@ export type GetBotsByBotIdContainerFsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetBotsByBotIdContainerFsError = GetBotsByBotIdContainerFsErrors[keyof GetBotsByBotIdContainerFsErrors];
@@ -7703,23 +7736,23 @@ export type PostBotsByBotIdContainerFsArchiveErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerFsArchiveError = PostBotsByBotIdContainerFsArchiveErrors[keyof PostBotsByBotIdContainerFsArchiveErrors];
@@ -7750,23 +7783,23 @@ export type PostBotsByBotIdContainerFsDeleteErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerFsDeleteError = PostBotsByBotIdContainerFsDeleteErrors[keyof PostBotsByBotIdContainerFsDeleteErrors];
@@ -7801,19 +7834,19 @@ export type GetBotsByBotIdContainerFsDownloadErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetBotsByBotIdContainerFsDownloadError = GetBotsByBotIdContainerFsDownloadErrors[keyof GetBotsByBotIdContainerFsDownloadErrors];
@@ -7844,27 +7877,27 @@ export type PostBotsByBotIdContainerFsExtractErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerFsExtractError = PostBotsByBotIdContainerFsExtractErrors[keyof PostBotsByBotIdContainerFsExtractErrors];
@@ -7899,19 +7932,19 @@ export type GetBotsByBotIdContainerFsListErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetBotsByBotIdContainerFsListError = GetBotsByBotIdContainerFsListErrors[keyof GetBotsByBotIdContainerFsListErrors];
@@ -7944,23 +7977,23 @@ export type PostBotsByBotIdContainerFsMkdirErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerFsMkdirError = PostBotsByBotIdContainerFsMkdirErrors[keyof PostBotsByBotIdContainerFsMkdirErrors];
@@ -7995,19 +8028,19 @@ export type GetBotsByBotIdContainerFsReadErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetBotsByBotIdContainerFsReadError = GetBotsByBotIdContainerFsReadErrors[keyof GetBotsByBotIdContainerFsReadErrors];
@@ -8040,23 +8073,23 @@ export type PostBotsByBotIdContainerFsRenameErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerFsRenameError = PostBotsByBotIdContainerFsRenameErrors[keyof PostBotsByBotIdContainerFsRenameErrors];
@@ -8095,19 +8128,19 @@ export type PostBotsByBotIdContainerFsUploadErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerFsUploadError = PostBotsByBotIdContainerFsUploadErrors[keyof PostBotsByBotIdContainerFsUploadErrors];
@@ -8140,19 +8173,19 @@ export type PostBotsByBotIdContainerFsWriteErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerFsWriteError = PostBotsByBotIdContainerFsWriteErrors[keyof PostBotsByBotIdContainerFsWriteErrors];
@@ -8182,7 +8215,7 @@ export type GetBotsByBotIdContainerMetricsErrors = {
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdContainerMetricsError = GetBotsByBotIdContainerMetricsErrors[keyof GetBotsByBotIdContainerMetricsErrors];
@@ -8215,11 +8248,11 @@ export type PutBotsByBotIdContainerMetricsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutBotsByBotIdContainerMetricsError = PutBotsByBotIdContainerMetricsErrors[keyof PutBotsByBotIdContainerMetricsErrors];
@@ -8252,23 +8285,23 @@ export type DeleteBotsByBotIdContainerSkillsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type DeleteBotsByBotIdContainerSkillsError = DeleteBotsByBotIdContainerSkillsErrors[keyof DeleteBotsByBotIdContainerSkillsErrors];
@@ -8303,19 +8336,19 @@ export type GetBotsByBotIdContainerSkillsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdContainerSkillsError = GetBotsByBotIdContainerSkillsErrors[keyof GetBotsByBotIdContainerSkillsErrors];
@@ -8348,23 +8381,23 @@ export type PostBotsByBotIdContainerSkillsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerSkillsError = PostBotsByBotIdContainerSkillsErrors[keyof PostBotsByBotIdContainerSkillsErrors];
@@ -8397,23 +8430,23 @@ export type PostBotsByBotIdContainerSkillsActionsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerSkillsActionsError = PostBotsByBotIdContainerSkillsActionsErrors[keyof PostBotsByBotIdContainerSkillsActionsErrors];
@@ -8448,7 +8481,7 @@ export type GetBotsByBotIdContainerSnapshotsErrors = {
     /**
      * Snapshots currently not supported on this backend
      */
-    501: ApperrorProblem;
+    501: ServerProblem;
 };
 
 export type GetBotsByBotIdContainerSnapshotsError = GetBotsByBotIdContainerSnapshotsErrors[keyof GetBotsByBotIdContainerSnapshotsErrors];
@@ -8481,15 +8514,15 @@ export type PostBotsByBotIdContainerSnapshotsErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Snapshots currently not supported on this backend
      */
-    501: ApperrorProblem;
+    501: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerSnapshotsError = PostBotsByBotIdContainerSnapshotsErrors[keyof PostBotsByBotIdContainerSnapshotsErrors];
@@ -8522,11 +8555,11 @@ export type PostBotsByBotIdContainerSnapshotsRollbackErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerSnapshotsRollbackError = PostBotsByBotIdContainerSnapshotsRollbackErrors[keyof PostBotsByBotIdContainerSnapshotsRollbackErrors];
@@ -8558,11 +8591,11 @@ export type PostBotsByBotIdContainerStartErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerStartError = PostBotsByBotIdContainerStartErrors[keyof PostBotsByBotIdContainerStartErrors];
@@ -8594,11 +8627,11 @@ export type PostBotsByBotIdContainerStopErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdContainerStopError = PostBotsByBotIdContainerStopErrors[keyof PostBotsByBotIdContainerStopErrors];
@@ -8630,7 +8663,7 @@ export type GetBotsByBotIdContainerTerminalErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetBotsByBotIdContainerTerminalError = GetBotsByBotIdContainerTerminalErrors[keyof GetBotsByBotIdContainerTerminalErrors];
@@ -8673,11 +8706,11 @@ export type GetBotsByBotIdContainerTerminalWsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdContainerTerminalWsError = GetBotsByBotIdContainerTerminalWsErrors[keyof GetBotsByBotIdContainerTerminalWsErrors];
@@ -8703,23 +8736,23 @@ export type GetBotsByBotIdDependenciesErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetBotsByBotIdDependenciesError = GetBotsByBotIdDependenciesErrors[keyof GetBotsByBotIdDependenciesErrors];
@@ -8749,23 +8782,23 @@ export type PostBotsByBotIdDependenciesCheckUpdatesErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdDependenciesCheckUpdatesError = PostBotsByBotIdDependenciesCheckUpdatesErrors[keyof PostBotsByBotIdDependenciesCheckUpdatesErrors];
@@ -8798,23 +8831,23 @@ export type PostBotsByBotIdDependenciesPreflightErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdDependenciesPreflightError = PostBotsByBotIdDependenciesPreflightErrors[keyof PostBotsByBotIdDependenciesPreflightErrors];
@@ -8851,23 +8884,23 @@ export type PostBotsByBotIdDependenciesByDepIdInstallErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Unprocessable Entity
      */
-    422: ApperrorProblem;
+    422: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdDependenciesByDepIdInstallError = PostBotsByBotIdDependenciesByDepIdInstallErrors[keyof PostBotsByBotIdDependenciesByDepIdInstallErrors];
@@ -8904,23 +8937,23 @@ export type PostBotsByBotIdDependenciesByDepIdReinstallErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Unprocessable Entity
      */
-    422: ApperrorProblem;
+    422: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdDependenciesByDepIdReinstallError = PostBotsByBotIdDependenciesByDepIdReinstallErrors[keyof PostBotsByBotIdDependenciesByDepIdReinstallErrors];
@@ -8954,31 +8987,31 @@ export type PostBotsByBotIdDependenciesByDepIdRollbackErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Unprocessable Entity
      */
-    422: ApperrorProblem;
+    422: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdDependenciesByDepIdRollbackError = PostBotsByBotIdDependenciesByDepIdRollbackErrors[keyof PostBotsByBotIdDependenciesByDepIdRollbackErrors];
@@ -9021,23 +9054,23 @@ export type GetBotsByBotIdDependenciesByDepIdScriptErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Unprocessable Entity
      */
-    422: ApperrorProblem;
+    422: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetBotsByBotIdDependenciesByDepIdScriptError = GetBotsByBotIdDependenciesByDepIdScriptErrors[keyof GetBotsByBotIdDependenciesByDepIdScriptErrors];
@@ -9074,23 +9107,23 @@ export type PostBotsByBotIdDependenciesByDepIdUpdateErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Unprocessable Entity
      */
-    422: ApperrorProblem;
+    422: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdDependenciesByDepIdUpdateError = PostBotsByBotIdDependenciesByDepIdUpdateErrors[keyof PostBotsByBotIdDependenciesByDepIdUpdateErrors];
@@ -9120,15 +9153,15 @@ export type GetBotsByBotIdHooksEventsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdHooksEventsError = GetBotsByBotIdHooksEventsErrors[keyof GetBotsByBotIdHooksEventsErrors];
@@ -9161,15 +9194,15 @@ export type PostBotsByBotIdHooksTestErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdHooksTestError = PostBotsByBotIdHooksTestErrors[keyof PostBotsByBotIdHooksTestErrors];
@@ -9194,19 +9227,19 @@ export type GetBotsByBotIdMcpErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdMcpError = GetBotsByBotIdMcpErrors[keyof GetBotsByBotIdMcpErrors];
@@ -9234,19 +9267,19 @@ export type PostBotsByBotIdMcpErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdMcpError = PostBotsByBotIdMcpErrors[keyof PostBotsByBotIdMcpErrors];
@@ -9274,15 +9307,15 @@ export type PostBotsByBotIdMcpOpsBatchDeleteErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdMcpOpsBatchDeleteError = PostBotsByBotIdMcpOpsBatchDeleteErrors[keyof PostBotsByBotIdMcpOpsBatchDeleteErrors];
@@ -9305,15 +9338,15 @@ export type GetBotsByBotIdMcpOpsExportErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdMcpOpsExportError = GetBotsByBotIdMcpOpsExportErrors[keyof GetBotsByBotIdMcpOpsExportErrors];
@@ -9341,15 +9374,15 @@ export type PutBotsByBotIdMcpOpsImportErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutBotsByBotIdMcpOpsImportError = PutBotsByBotIdMcpOpsImportErrors[keyof PutBotsByBotIdMcpOpsImportErrors];
@@ -9382,15 +9415,15 @@ export type PostBotsByBotIdMcpStdioErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdMcpStdioError = PostBotsByBotIdMcpStdioErrors[keyof PostBotsByBotIdMcpStdioErrors];
@@ -9429,15 +9462,15 @@ export type PostBotsByBotIdMcpStdioByConnectionIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdMcpStdioByConnectionIdError = PostBotsByBotIdMcpStdioByConnectionIdErrors[keyof PostBotsByBotIdMcpStdioByConnectionIdErrors];
@@ -9469,19 +9502,19 @@ export type DeleteBotsByBotIdMcpByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteBotsByBotIdMcpByIdError = DeleteBotsByBotIdMcpByIdErrors[keyof DeleteBotsByBotIdMcpByIdErrors];
@@ -9509,19 +9542,19 @@ export type GetBotsByBotIdMcpByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdMcpByIdError = GetBotsByBotIdMcpByIdErrors[keyof GetBotsByBotIdMcpByIdErrors];
@@ -9554,19 +9587,19 @@ export type PutBotsByBotIdMcpByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutBotsByBotIdMcpByIdError = PutBotsByBotIdMcpByIdErrors[keyof PutBotsByBotIdMcpByIdErrors];
@@ -9599,11 +9632,11 @@ export type PostBotsByBotIdMcpByIdOauthAuthorizeErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type PostBotsByBotIdMcpByIdOauthAuthorizeError = PostBotsByBotIdMcpByIdOauthAuthorizeErrors[keyof PostBotsByBotIdMcpByIdOauthAuthorizeErrors];
@@ -9636,11 +9669,11 @@ export type PostBotsByBotIdMcpByIdOauthDiscoverErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type PostBotsByBotIdMcpByIdOauthDiscoverError = PostBotsByBotIdMcpByIdOauthDiscoverErrors[keyof PostBotsByBotIdMcpByIdOauthDiscoverErrors];
@@ -9668,7 +9701,7 @@ export type PostBotsByBotIdMcpByIdOauthExchangeErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
 };
 
 export type PostBotsByBotIdMcpByIdOauthExchangeError = PostBotsByBotIdMcpByIdOauthExchangeErrors[keyof PostBotsByBotIdMcpByIdOauthExchangeErrors];
@@ -9700,11 +9733,11 @@ export type GetBotsByBotIdMcpByIdOauthStatusErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetBotsByBotIdMcpByIdOauthStatusError = GetBotsByBotIdMcpByIdOauthStatusErrors[keyof GetBotsByBotIdMcpByIdOauthStatusErrors];
@@ -9734,7 +9767,7 @@ export type DeleteBotsByBotIdMcpByIdOauthTokenErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
 };
 
 export type DeleteBotsByBotIdMcpByIdOauthTokenError = DeleteBotsByBotIdMcpByIdOauthTokenErrors[keyof DeleteBotsByBotIdMcpByIdOauthTokenErrors];
@@ -9762,19 +9795,19 @@ export type PostBotsByBotIdMcpByIdProbeErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdMcpByIdProbeError = PostBotsByBotIdMcpByIdProbeErrors[keyof PostBotsByBotIdMcpByIdProbeErrors];
@@ -9807,19 +9840,19 @@ export type DeleteBotsByBotIdMemoryErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type DeleteBotsByBotIdMemoryError = DeleteBotsByBotIdMemoryErrors[keyof DeleteBotsByBotIdMemoryErrors];
@@ -9854,19 +9887,19 @@ export type GetBotsByBotIdMemoryErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetBotsByBotIdMemoryError = GetBotsByBotIdMemoryErrors[keyof GetBotsByBotIdMemoryErrors];
@@ -9899,19 +9932,19 @@ export type PostBotsByBotIdMemoryErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdMemoryError = PostBotsByBotIdMemoryErrors[keyof PostBotsByBotIdMemoryErrors];
@@ -9944,23 +9977,23 @@ export type PostBotsByBotIdMemoryCompactErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Not Implemented
      */
-    501: ApperrorProblem;
+    501: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdMemoryCompactError = PostBotsByBotIdMemoryCompactErrors[keyof PostBotsByBotIdMemoryCompactErrors];
@@ -9990,15 +10023,15 @@ export type GetBotsByBotIdMemoryGraphErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetBotsByBotIdMemoryGraphError = GetBotsByBotIdMemoryGraphErrors[keyof GetBotsByBotIdMemoryGraphErrors];
@@ -10028,23 +10061,23 @@ export type PostBotsByBotIdMemoryIngestErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdMemoryIngestError = PostBotsByBotIdMemoryIngestErrors[keyof PostBotsByBotIdMemoryIngestErrors];
@@ -10074,23 +10107,23 @@ export type PostBotsByBotIdMemoryRebuildErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdMemoryRebuildError = PostBotsByBotIdMemoryRebuildErrors[keyof PostBotsByBotIdMemoryRebuildErrors];
@@ -10123,23 +10156,23 @@ export type PostBotsByBotIdMemorySearchErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdMemorySearchError = PostBotsByBotIdMemorySearchErrors[keyof PostBotsByBotIdMemorySearchErrors];
@@ -10169,23 +10202,23 @@ export type GetBotsByBotIdMemoryStatusErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetBotsByBotIdMemoryStatusError = GetBotsByBotIdMemoryStatusErrors[keyof GetBotsByBotIdMemoryStatusErrors];
@@ -10215,19 +10248,19 @@ export type GetBotsByBotIdMemoryUsageErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetBotsByBotIdMemoryUsageError = GetBotsByBotIdMemoryUsageErrors[keyof GetBotsByBotIdMemoryUsageErrors];
@@ -10261,19 +10294,19 @@ export type DeleteBotsByBotIdMemoryByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type DeleteBotsByBotIdMemoryByIdError = DeleteBotsByBotIdMemoryByIdErrors[keyof DeleteBotsByBotIdMemoryByIdErrors];
@@ -10310,19 +10343,19 @@ export type PutBotsByBotIdMemoryByMemoryIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PutBotsByBotIdMemoryByMemoryIdError = PutBotsByBotIdMemoryByMemoryIdErrors[keyof PutBotsByBotIdMemoryByMemoryIdErrors];
@@ -10352,15 +10385,15 @@ export type DeleteBotsByBotIdMessagesErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteBotsByBotIdMessagesError = DeleteBotsByBotIdMessagesErrors[keyof DeleteBotsByBotIdMessagesErrors];
@@ -10405,19 +10438,19 @@ export type GetBotsByBotIdMessagesErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdMessagesError = GetBotsByBotIdMessagesErrors[keyof GetBotsByBotIdMessagesErrors];
@@ -10464,19 +10497,19 @@ export type GetBotsByBotIdMessagesLocateErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdMessagesLocateError = GetBotsByBotIdMessagesLocateErrors[keyof GetBotsByBotIdMessagesLocateErrors];
@@ -10509,15 +10542,15 @@ export type PostBotsByBotIdQuickActionsExecuteErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdQuickActionsExecuteError = PostBotsByBotIdQuickActionsExecuteErrors[keyof PostBotsByBotIdQuickActionsExecuteErrors];
@@ -10547,11 +10580,11 @@ export type GetBotsByBotIdScheduleErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdScheduleError = GetBotsByBotIdScheduleErrors[keyof GetBotsByBotIdScheduleErrors];
@@ -10584,11 +10617,11 @@ export type PostBotsByBotIdScheduleErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdScheduleError = PostBotsByBotIdScheduleErrors[keyof PostBotsByBotIdScheduleErrors];
@@ -10618,11 +10651,11 @@ export type DeleteBotsByBotIdScheduleLogsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteBotsByBotIdScheduleLogsError = DeleteBotsByBotIdScheduleLogsErrors[keyof DeleteBotsByBotIdScheduleLogsErrors];
@@ -10659,11 +10692,11 @@ export type GetBotsByBotIdScheduleLogsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdScheduleLogsError = GetBotsByBotIdScheduleLogsErrors[keyof GetBotsByBotIdScheduleLogsErrors];
@@ -10697,11 +10730,11 @@ export type DeleteBotsByBotIdScheduleByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteBotsByBotIdScheduleByIdError = DeleteBotsByBotIdScheduleByIdErrors[keyof DeleteBotsByBotIdScheduleByIdErrors];
@@ -10733,15 +10766,15 @@ export type GetBotsByBotIdScheduleByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdScheduleByIdError = GetBotsByBotIdScheduleByIdErrors[keyof GetBotsByBotIdScheduleByIdErrors];
@@ -10778,11 +10811,11 @@ export type PutBotsByBotIdScheduleByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutBotsByBotIdScheduleByIdError = PutBotsByBotIdScheduleByIdErrors[keyof PutBotsByBotIdScheduleByIdErrors];
@@ -10825,11 +10858,11 @@ export type GetBotsByBotIdScheduleByIdLogsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdScheduleByIdLogsError = GetBotsByBotIdScheduleByIdLogsErrors[keyof GetBotsByBotIdScheduleByIdLogsErrors];
@@ -10880,11 +10913,11 @@ export type GetBotsByBotIdSessionsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
 };
 
 export type GetBotsByBotIdSessionsError = GetBotsByBotIdSessionsErrors[keyof GetBotsByBotIdSessionsErrors];
@@ -10917,11 +10950,11 @@ export type PostBotsByBotIdSessionsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
 };
 
 export type PostBotsByBotIdSessionsError = PostBotsByBotIdSessionsErrors[keyof PostBotsByBotIdSessionsErrors];
@@ -10951,15 +10984,15 @@ export type GetBotsByBotIdSessionsEventsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdSessionsEventsError = GetBotsByBotIdSessionsEventsErrors[keyof GetBotsByBotIdSessionsEventsErrors];
@@ -10989,11 +11022,11 @@ export type GetBotsByBotIdSessionsModelPreferenceSeedErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
 };
 
 export type GetBotsByBotIdSessionsModelPreferenceSeedError = GetBotsByBotIdSessionsModelPreferenceSeedErrors[keyof GetBotsByBotIdSessionsModelPreferenceSeedErrors];
@@ -11027,11 +11060,11 @@ export type DeleteBotsByBotIdSessionsBySessionIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
 };
 
 export type DeleteBotsByBotIdSessionsBySessionIdError = DeleteBotsByBotIdSessionsBySessionIdErrors[keyof DeleteBotsByBotIdSessionsBySessionIdErrors];
@@ -11063,15 +11096,15 @@ export type GetBotsByBotIdSessionsBySessionIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetBotsByBotIdSessionsBySessionIdError = GetBotsByBotIdSessionsBySessionIdErrors[keyof GetBotsByBotIdSessionsBySessionIdErrors];
@@ -11108,19 +11141,19 @@ export type PatchBotsByBotIdSessionsBySessionIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdError = PatchBotsByBotIdSessionsBySessionIdErrors[keyof PatchBotsByBotIdSessionsBySessionIdErrors];
@@ -11154,23 +11187,23 @@ export type GetBotsByBotIdSessionsBySessionIdAcpRuntimeErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdSessionsBySessionIdAcpRuntimeError = GetBotsByBotIdSessionsBySessionIdAcpRuntimeErrors[keyof GetBotsByBotIdSessionsBySessionIdAcpRuntimeErrors];
@@ -11204,27 +11237,27 @@ export type PostBotsByBotIdSessionsBySessionIdAcpRuntimeErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type PostBotsByBotIdSessionsBySessionIdAcpRuntimeError = PostBotsByBotIdSessionsBySessionIdAcpRuntimeErrors[keyof PostBotsByBotIdSessionsBySessionIdAcpRuntimeErrors];
@@ -11261,27 +11294,27 @@ export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModeErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModeError = PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModeErrors[keyof PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModeErrors];
@@ -11318,27 +11351,27 @@ export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelError = PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelErrors[keyof PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelErrors];
@@ -11375,27 +11408,27 @@ export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningError = PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningErrors[keyof PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningErrors];
@@ -11429,11 +11462,11 @@ export type PostBotsByBotIdSessionsBySessionIdCompactErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdSessionsBySessionIdCompactError = PostBotsByBotIdSessionsBySessionIdCompactErrors[keyof PostBotsByBotIdSessionsBySessionIdCompactErrors];
@@ -11472,23 +11505,23 @@ export type GetBotsByBotIdSessionsBySessionIdContextLifecycleErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Unauthorized
      */
-    401: ApperrorProblem;
+    401: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdSessionsBySessionIdContextLifecycleError = GetBotsByBotIdSessionsBySessionIdContextLifecycleErrors[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleErrors];
@@ -11522,7 +11555,7 @@ export type GetBotsByBotIdSessionsBySessionIdFollowUpQueueErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
 };
 
 export type GetBotsByBotIdSessionsBySessionIdFollowUpQueueError = GetBotsByBotIdSessionsBySessionIdFollowUpQueueErrors[keyof GetBotsByBotIdSessionsBySessionIdFollowUpQueueErrors];
@@ -11559,15 +11592,15 @@ export type PostBotsByBotIdSessionsBySessionIdFollowUpQueueErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
 };
 
 export type PostBotsByBotIdSessionsBySessionIdFollowUpQueueError = PostBotsByBotIdSessionsBySessionIdFollowUpQueueErrors[keyof PostBotsByBotIdSessionsBySessionIdFollowUpQueueErrors];
@@ -11604,15 +11637,15 @@ export type PutBotsByBotIdSessionsBySessionIdFollowUpQueueReorderErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
 };
 
 export type PutBotsByBotIdSessionsBySessionIdFollowUpQueueReorderError = PutBotsByBotIdSessionsBySessionIdFollowUpQueueReorderErrors[keyof PutBotsByBotIdSessionsBySessionIdFollowUpQueueReorderErrors];
@@ -11650,15 +11683,15 @@ export type DeleteBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
 };
 
 export type DeleteBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdError = DeleteBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdErrors[keyof DeleteBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdErrors];
@@ -11697,15 +11730,15 @@ export type PatchBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdError = PatchBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdErrors[keyof PatchBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdErrors];
@@ -11743,15 +11776,15 @@ export type PostBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdSteerErrors =
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
 };
 
 export type PostBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdSteerError = PostBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdSteerErrors[keyof PostBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdSteerErrors];
@@ -11788,19 +11821,19 @@ export type PostBotsByBotIdSessionsBySessionIdForkErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
 };
 
 export type PostBotsByBotIdSessionsBySessionIdForkError = PostBotsByBotIdSessionsBySessionIdForkErrors[keyof PostBotsByBotIdSessionsBySessionIdForkErrors];
@@ -11838,19 +11871,19 @@ export type GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdError = GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdErrors[keyof GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdErrors];
@@ -11884,7 +11917,7 @@ export type GetBotsByBotIdSessionsBySessionIdQueueErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
 };
 
 export type GetBotsByBotIdSessionsBySessionIdQueueError = GetBotsByBotIdSessionsBySessionIdQueueErrors[keyof GetBotsByBotIdSessionsBySessionIdQueueErrors];
@@ -11918,15 +11951,15 @@ export type GetBotsByBotIdSessionsBySessionIdRuntimeControlsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdSessionsBySessionIdRuntimeControlsError = GetBotsByBotIdSessionsBySessionIdRuntimeControlsErrors[keyof GetBotsByBotIdSessionsBySessionIdRuntimeControlsErrors];
@@ -11963,19 +11996,19 @@ export type PostBotsByBotIdSessionsBySessionIdRuntimeControlsCommandsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdSessionsBySessionIdRuntimeControlsCommandsError = PostBotsByBotIdSessionsBySessionIdRuntimeControlsCommandsErrors[keyof PostBotsByBotIdSessionsBySessionIdRuntimeControlsCommandsErrors];
@@ -12009,15 +12042,15 @@ export type GetBotsByBotIdSessionsBySessionIdRuntimeControlsGoalErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdSessionsBySessionIdRuntimeControlsGoalError = GetBotsByBotIdSessionsBySessionIdRuntimeControlsGoalErrors[keyof GetBotsByBotIdSessionsBySessionIdRuntimeControlsGoalErrors];
@@ -12054,15 +12087,15 @@ export type PostBotsByBotIdSessionsBySessionIdRuntimeControlsGoalErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdSessionsBySessionIdRuntimeControlsGoalError = PostBotsByBotIdSessionsBySessionIdRuntimeControlsGoalErrors[keyof PostBotsByBotIdSessionsBySessionIdRuntimeControlsGoalErrors];
@@ -12097,19 +12130,19 @@ export type PatchBotsByBotIdSessionsBySessionIdRuntimeControlsModeErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdRuntimeControlsModeError = PatchBotsByBotIdSessionsBySessionIdRuntimeControlsModeErrors[keyof PatchBotsByBotIdSessionsBySessionIdRuntimeControlsModeErrors];
@@ -12148,15 +12181,15 @@ export type GetBotsByBotIdSessionsBySessionIdStatusErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdSessionsBySessionIdStatusError = GetBotsByBotIdSessionsBySessionIdStatusErrors[keyof GetBotsByBotIdSessionsBySessionIdStatusErrors];
@@ -12190,7 +12223,7 @@ export type GetBotsByBotIdSessionsBySessionIdSteerQueueErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
 };
 
 export type GetBotsByBotIdSessionsBySessionIdSteerQueueError = GetBotsByBotIdSessionsBySessionIdSteerQueueErrors[keyof GetBotsByBotIdSessionsBySessionIdSteerQueueErrors];
@@ -12227,15 +12260,15 @@ export type PostBotsByBotIdSessionsBySessionIdSteerQueueErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
 };
 
 export type PostBotsByBotIdSessionsBySessionIdSteerQueueError = PostBotsByBotIdSessionsBySessionIdSteerQueueErrors[keyof PostBotsByBotIdSessionsBySessionIdSteerQueueErrors];
@@ -12272,15 +12305,15 @@ export type PutBotsByBotIdSessionsBySessionIdSteerQueueReorderErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
 };
 
 export type PutBotsByBotIdSessionsBySessionIdSteerQueueReorderError = PutBotsByBotIdSessionsBySessionIdSteerQueueReorderErrors[keyof PutBotsByBotIdSessionsBySessionIdSteerQueueReorderErrors];
@@ -12318,15 +12351,15 @@ export type DeleteBotsByBotIdSessionsBySessionIdSteerQueueByItemIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
 };
 
 export type DeleteBotsByBotIdSessionsBySessionIdSteerQueueByItemIdError = DeleteBotsByBotIdSessionsBySessionIdSteerQueueByItemIdErrors[keyof DeleteBotsByBotIdSessionsBySessionIdSteerQueueByItemIdErrors];
@@ -12365,15 +12398,15 @@ export type PatchBotsByBotIdSessionsBySessionIdSteerQueueByItemIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdSteerQueueByItemIdError = PatchBotsByBotIdSessionsBySessionIdSteerQueueByItemIdErrors[keyof PatchBotsByBotIdSessionsBySessionIdSteerQueueByItemIdErrors];
@@ -12403,11 +12436,11 @@ export type DeleteBotsByBotIdSettingsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteBotsByBotIdSettingsError = DeleteBotsByBotIdSettingsErrors[keyof DeleteBotsByBotIdSettingsErrors];
@@ -12435,11 +12468,11 @@ export type GetBotsByBotIdSettingsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdSettingsError = GetBotsByBotIdSettingsErrors[keyof GetBotsByBotIdSettingsErrors];
@@ -12472,15 +12505,15 @@ export type PostBotsByBotIdSettingsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByBotIdSettingsError = PostBotsByBotIdSettingsErrors[keyof PostBotsByBotIdSettingsErrors];
@@ -12513,15 +12546,15 @@ export type PutBotsByBotIdSettingsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PutBotsByBotIdSettingsError = PutBotsByBotIdSettingsErrors[keyof PutBotsByBotIdSettingsErrors];
@@ -12551,19 +12584,19 @@ export type GetBotsByBotIdSkillsCatalogErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdSkillsCatalogError = GetBotsByBotIdSkillsCatalogErrors[keyof GetBotsByBotIdSkillsCatalogErrors];
@@ -12610,15 +12643,15 @@ export type GetBotsByBotIdTokenUsageErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdTokenUsageError = GetBotsByBotIdTokenUsageErrors[keyof GetBotsByBotIdTokenUsageErrors];
@@ -12673,15 +12706,15 @@ export type GetBotsByBotIdTokenUsageRecordsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdTokenUsageRecordsError = GetBotsByBotIdTokenUsageRecordsErrors[keyof GetBotsByBotIdTokenUsageRecordsErrors];
@@ -12718,23 +12751,23 @@ export type PostBotsByBotIdToolApprovalsByApprovalIdApproveErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdToolApprovalsByApprovalIdApproveError = PostBotsByBotIdToolApprovalsByApprovalIdApproveErrors[keyof PostBotsByBotIdToolApprovalsByApprovalIdApproveErrors];
@@ -12773,23 +12806,23 @@ export type PostBotsByBotIdToolApprovalsByApprovalIdRejectErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdToolApprovalsByApprovalIdRejectError = PostBotsByBotIdToolApprovalsByApprovalIdRejectErrors[keyof PostBotsByBotIdToolApprovalsByApprovalIdRejectErrors];
@@ -12826,15 +12859,15 @@ export type PostBotsByBotIdToolsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdToolsError = PostBotsByBotIdToolsErrors[keyof PostBotsByBotIdToolsErrors];
@@ -12869,11 +12902,11 @@ export type PostBotsByBotIdTtsSynthesizeErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdTtsSynthesizeError = PostBotsByBotIdTtsSynthesizeErrors[keyof PostBotsByBotIdTtsSynthesizeErrors];
@@ -12903,15 +12936,15 @@ export type GetBotsByBotIdUserAccessErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdUserAccessError = GetBotsByBotIdUserAccessErrors[keyof GetBotsByBotIdUserAccessErrors];
@@ -12944,19 +12977,19 @@ export type PostBotsByBotIdUserAccessErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdUserAccessError = PostBotsByBotIdUserAccessErrors[keyof PostBotsByBotIdUserAccessErrors];
@@ -12995,15 +13028,15 @@ export type GetBotsByBotIdUserAccessCandidatesErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdUserAccessCandidatesError = GetBotsByBotIdUserAccessCandidatesErrors[keyof GetBotsByBotIdUserAccessCandidatesErrors];
@@ -13037,19 +13070,19 @@ export type DeleteBotsByBotIdUserAccessByGrantIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteBotsByBotIdUserAccessByGrantIdError = DeleteBotsByBotIdUserAccessByGrantIdErrors[keyof DeleteBotsByBotIdUserAccessByGrantIdErrors];
@@ -13084,19 +13117,19 @@ export type PutBotsByBotIdUserAccessByGrantIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutBotsByBotIdUserAccessByGrantIdError = PutBotsByBotIdUserAccessByGrantIdErrors[keyof PutBotsByBotIdUserAccessByGrantIdErrors];
@@ -13129,15 +13162,15 @@ export type PostBotsByBotIdWebMessagesErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdWebMessagesError = PostBotsByBotIdWebMessagesErrors[keyof PostBotsByBotIdWebMessagesErrors];
@@ -13169,15 +13202,15 @@ export type GetBotsByBotIdWebStreamErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdWebStreamError = GetBotsByBotIdWebStreamErrors[keyof GetBotsByBotIdWebStreamErrors];
@@ -13207,15 +13240,15 @@ export type GetBotsByBotIdWebWsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdWebWsError = GetBotsByBotIdWebWsErrors[keyof GetBotsByBotIdWebWsErrors];
@@ -13241,11 +13274,11 @@ export type GetBotsByBotIdWorkdirsErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdWorkdirsError = GetBotsByBotIdWorkdirsErrors[keyof GetBotsByBotIdWorkdirsErrors];
@@ -13278,19 +13311,19 @@ export type PostBotsByBotIdWorkdirsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
 };
 
 export type PostBotsByBotIdWorkdirsError = PostBotsByBotIdWorkdirsErrors[keyof PostBotsByBotIdWorkdirsErrors];
@@ -13329,23 +13362,23 @@ export type GetBotsByBotIdWorkdirsDirectoriesErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetBotsByBotIdWorkdirsDirectoriesError = GetBotsByBotIdWorkdirsDirectoriesErrors[keyof GetBotsByBotIdWorkdirsDirectoriesErrors];
@@ -13379,11 +13412,11 @@ export type DeleteBotsByBotIdWorkdirsByWorkdirIdErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type DeleteBotsByBotIdWorkdirsByWorkdirIdError = DeleteBotsByBotIdWorkdirsByWorkdirIdErrors[keyof DeleteBotsByBotIdWorkdirsByWorkdirIdErrors];
@@ -13418,15 +13451,15 @@ export type PatchBotsByBotIdWorkdirsByWorkdirIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type PatchBotsByBotIdWorkdirsByWorkdirIdError = PatchBotsByBotIdWorkdirsByWorkdirIdErrors[keyof PatchBotsByBotIdWorkdirsByWorkdirIdErrors];
@@ -13460,15 +13493,15 @@ export type GetBotsByBotIdWorkdirsByWorkdirIdGitBranchErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdWorkdirsByWorkdirIdGitBranchError = GetBotsByBotIdWorkdirsByWorkdirIdGitBranchErrors[keyof GetBotsByBotIdWorkdirsByWorkdirIdGitBranchErrors];
@@ -13505,19 +13538,19 @@ export type PostBotsByBotIdWorkdirsByWorkdirIdGitBranchErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostBotsByBotIdWorkdirsByWorkdirIdGitBranchError = PostBotsByBotIdWorkdirsByWorkdirIdGitBranchErrors[keyof PostBotsByBotIdWorkdirsByWorkdirIdGitBranchErrors];
@@ -13547,11 +13580,11 @@ export type GetBotsByBotIdWorkspaceTargetsErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByBotIdWorkspaceTargetsError = GetBotsByBotIdWorkspaceTargetsErrors[keyof GetBotsByBotIdWorkspaceTargetsErrors];
@@ -13584,15 +13617,15 @@ export type PutBotsByBotIdWorkspaceTargetsPrimaryErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type PutBotsByBotIdWorkspaceTargetsPrimaryError = PutBotsByBotIdWorkspaceTargetsPrimaryErrors[keyof PutBotsByBotIdWorkspaceTargetsPrimaryErrors];
@@ -13624,15 +13657,15 @@ export type PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdError = PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdErrors[keyof PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdErrors];
@@ -13666,15 +13699,15 @@ export type DeleteBotsByBotIdWorkspaceTargetsByTargetIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type DeleteBotsByBotIdWorkspaceTargetsByTargetIdError = DeleteBotsByBotIdWorkspaceTargetsByTargetIdErrors[keyof DeleteBotsByBotIdWorkspaceTargetsByTargetIdErrors];
@@ -13709,15 +13742,15 @@ export type PutBotsByBotIdWorkspaceTargetsByTargetIdToolApprovalErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type PutBotsByBotIdWorkspaceTargetsByTargetIdToolApprovalError = PutBotsByBotIdWorkspaceTargetsByTargetIdToolApprovalErrors[keyof PutBotsByBotIdWorkspaceTargetsByTargetIdToolApprovalErrors];
@@ -13745,19 +13778,19 @@ export type DeleteBotsByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteBotsByIdError = DeleteBotsByIdErrors[keyof DeleteBotsByIdErrors];
@@ -13789,19 +13822,19 @@ export type GetBotsByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByIdError = GetBotsByIdErrors[keyof GetBotsByIdErrors];
@@ -13834,23 +13867,23 @@ export type PutBotsByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutBotsByIdError = PutBotsByIdErrors[keyof PutBotsByIdErrors];
@@ -13884,19 +13917,19 @@ export type DeleteBotsByIdChannelByPlatformErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type DeleteBotsByIdChannelByPlatformError = DeleteBotsByIdChannelByPlatformErrors[keyof DeleteBotsByIdChannelByPlatformErrors];
@@ -13928,19 +13961,19 @@ export type GetBotsByIdChannelByPlatformErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByIdChannelByPlatformError = GetBotsByIdChannelByPlatformErrors[keyof GetBotsByIdChannelByPlatformErrors];
@@ -13977,27 +14010,27 @@ export type PutBotsByIdChannelByPlatformErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PutBotsByIdChannelByPlatformError = PutBotsByIdChannelByPlatformErrors[keyof PutBotsByIdChannelByPlatformErrors];
@@ -14034,23 +14067,23 @@ export type PostBotsByIdChannelByPlatformSendErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByIdChannelByPlatformSendError = PostBotsByIdChannelByPlatformSendErrors[keyof PostBotsByIdChannelByPlatformSendErrors];
@@ -14089,23 +14122,23 @@ export type PostBotsByIdChannelByPlatformSendChatErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Unauthorized
      */
-    401: ApperrorProblem;
+    401: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByIdChannelByPlatformSendChatError = PostBotsByIdChannelByPlatformSendChatErrors[keyof PostBotsByIdChannelByPlatformSendChatErrors];
@@ -14144,27 +14177,27 @@ export type PatchBotsByIdChannelByPlatformStatusErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PatchBotsByIdChannelByPlatformStatusError = PatchBotsByIdChannelByPlatformStatusErrors[keyof PatchBotsByIdChannelByPlatformStatusErrors];
@@ -14201,23 +14234,23 @@ export type PostBotsByIdChannelByPlatformWebhookEndpointErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type PostBotsByIdChannelByPlatformWebhookEndpointError = PostBotsByIdChannelByPlatformWebhookEndpointErrors[keyof PostBotsByIdChannelByPlatformWebhookEndpointErrors];
@@ -14247,19 +14280,19 @@ export type GetBotsByIdChecksErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetBotsByIdChecksError = GetBotsByIdChecksErrors[keyof GetBotsByIdChecksErrors];
@@ -14292,19 +14325,19 @@ export type PutBotsByIdOwnerErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutBotsByIdOwnerError = PutBotsByIdOwnerErrors[keyof PutBotsByIdOwnerErrors];
@@ -14329,7 +14362,7 @@ export type GetChannelsErrors = {
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetChannelsError = GetChannelsErrors[keyof GetChannelsErrors];
@@ -14359,11 +14392,11 @@ export type GetChannelsByPlatformErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetChannelsByPlatformError = GetChannelsByPlatformErrors[keyof GetChannelsByPlatformErrors];
@@ -14388,15 +14421,15 @@ export type GetConnectorsCatalogErrors = {
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetConnectorsCatalogError = GetConnectorsCatalogErrors[keyof GetConnectorsCatalogErrors];
@@ -14426,7 +14459,7 @@ export type GetFetchProvidersErrors = {
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetFetchProvidersError = GetFetchProvidersErrors[keyof GetFetchProvidersErrors];
@@ -14454,11 +14487,11 @@ export type PostFetchProvidersErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostFetchProvidersError = PostFetchProvidersErrors[keyof PostFetchProvidersErrors];
@@ -14504,11 +14537,11 @@ export type DeleteFetchProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteFetchProvidersByIdError = DeleteFetchProvidersByIdErrors[keyof DeleteFetchProvidersByIdErrors];
@@ -14536,11 +14569,11 @@ export type GetFetchProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetFetchProvidersByIdError = GetFetchProvidersByIdErrors[keyof GetFetchProvidersByIdErrors];
@@ -14573,11 +14606,11 @@ export type PutFetchProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutFetchProvidersByIdError = PutFetchProvidersByIdErrors[keyof PutFetchProvidersByIdErrors];
@@ -14602,7 +14635,7 @@ export type GetMemoryConfigErrors = {
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetMemoryConfigError = GetMemoryConfigErrors[keyof GetMemoryConfigErrors];
@@ -14630,11 +14663,11 @@ export type PutMemoryConfigErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutMemoryConfigError = PutMemoryConfigErrors[keyof PutMemoryConfigErrors];
@@ -14668,11 +14701,11 @@ export type GetModelsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetModelsError = GetModelsErrors[keyof GetModelsErrors];
@@ -14700,11 +14733,11 @@ export type PostModelsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostModelsError = PostModelsErrors[keyof PostModelsErrors];
@@ -14734,11 +14767,11 @@ export type GetModelsCountErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetModelsCountError = GetModelsCountErrors[keyof GetModelsCountErrors];
@@ -14768,15 +14801,15 @@ export type DeleteModelsModelByModelIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteModelsModelByModelIdError = DeleteModelsModelByModelIdErrors[keyof DeleteModelsModelByModelIdErrors];
@@ -14804,15 +14837,15 @@ export type GetModelsModelByModelIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetModelsModelByModelIdError = GetModelsModelByModelIdErrors[keyof GetModelsModelByModelIdErrors];
@@ -14845,15 +14878,15 @@ export type PutModelsModelByModelIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutModelsModelByModelIdError = PutModelsModelByModelIdErrors[keyof PutModelsModelByModelIdErrors];
@@ -14883,15 +14916,15 @@ export type DeleteModelsByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteModelsByIdError = DeleteModelsByIdErrors[keyof DeleteModelsByIdErrors];
@@ -14919,15 +14952,15 @@ export type GetModelsByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetModelsByIdError = GetModelsByIdErrors[keyof GetModelsByIdErrors];
@@ -14960,15 +14993,15 @@ export type PutModelsByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutModelsByIdError = PutModelsByIdErrors[keyof PutModelsByIdErrors];
@@ -14998,15 +15031,15 @@ export type PostModelsByIdTestErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostModelsByIdTestError = PostModelsByIdTestErrors[keyof PostModelsByIdTestErrors];
@@ -15094,11 +15127,11 @@ export type GetProviderTemplatesErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetProviderTemplatesError = GetProviderTemplatesErrors[keyof GetProviderTemplatesErrors];
@@ -15128,11 +15161,11 @@ export type GetProviderTemplatesByIdErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetProviderTemplatesByIdError = GetProviderTemplatesByIdErrors[keyof GetProviderTemplatesByIdErrors];
@@ -15157,7 +15190,7 @@ export type GetProvidersErrors = {
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetProvidersError = GetProvidersErrors[keyof GetProvidersErrors];
@@ -15185,11 +15218,11 @@ export type PostProvidersErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostProvidersError = PostProvidersErrors[keyof PostProvidersErrors];
@@ -15214,7 +15247,7 @@ export type GetProvidersCountErrors = {
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetProvidersCountError = GetProvidersCountErrors[keyof GetProvidersCountErrors];
@@ -15242,19 +15275,19 @@ export type PostProvidersFromTemplateErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostProvidersFromTemplateError = PostProvidersFromTemplateErrors[keyof PostProvidersFromTemplateErrors];
@@ -15284,15 +15317,15 @@ export type GetProvidersNameByNameErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetProvidersNameByNameError = GetProvidersNameByNameErrors[keyof GetProvidersNameByNameErrors];
@@ -15326,7 +15359,7 @@ export type GetProvidersOauthCallbackErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
 };
 
 export type GetProvidersOauthCallbackError = GetProvidersOauthCallbackErrors[keyof GetProvidersOauthCallbackErrors];
@@ -15356,15 +15389,15 @@ export type DeleteProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteProvidersByIdError = DeleteProvidersByIdErrors[keyof DeleteProvidersByIdErrors];
@@ -15392,15 +15425,15 @@ export type GetProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetProvidersByIdError = GetProvidersByIdErrors[keyof GetProvidersByIdErrors];
@@ -15433,15 +15466,15 @@ export type PutProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutProvidersByIdError = PutProvidersByIdErrors[keyof PutProvidersByIdErrors];
@@ -15474,15 +15507,15 @@ export type PostProvidersByIdImportModelsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostProvidersByIdImportModelsError = PostProvidersByIdImportModelsErrors[keyof PostProvidersByIdImportModelsErrors];
@@ -15517,15 +15550,15 @@ export type GetProvidersByIdModelsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetProvidersByIdModelsError = GetProvidersByIdModelsErrors[keyof GetProvidersByIdModelsErrors];
@@ -15555,11 +15588,11 @@ export type GetProvidersByIdOauthAuthorizeErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetProvidersByIdOauthAuthorizeError = GetProvidersByIdOauthAuthorizeErrors[keyof GetProvidersByIdOauthAuthorizeErrors];
@@ -15589,11 +15622,11 @@ export type PostProvidersByIdOauthPollErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type PostProvidersByIdOauthPollError = PostProvidersByIdOauthPollErrors[keyof PostProvidersByIdOauthPollErrors];
@@ -15623,11 +15656,11 @@ export type GetProvidersByIdOauthStatusErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetProvidersByIdOauthStatusError = GetProvidersByIdOauthStatusErrors[keyof GetProvidersByIdOauthStatusErrors];
@@ -15657,11 +15690,11 @@ export type DeleteProvidersByIdOauthTokenErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type DeleteProvidersByIdOauthTokenError = DeleteProvidersByIdOauthTokenErrors[keyof DeleteProvidersByIdOauthTokenErrors];
@@ -15689,15 +15722,15 @@ export type PostProvidersByIdTestErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostProvidersByIdTestError = PostProvidersByIdTestErrors[keyof PostProvidersByIdTestErrors];
@@ -15727,7 +15760,7 @@ export type GetSearchProvidersErrors = {
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetSearchProvidersError = GetSearchProvidersErrors[keyof GetSearchProvidersErrors];
@@ -15755,11 +15788,11 @@ export type PostSearchProvidersErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostSearchProvidersError = PostSearchProvidersErrors[keyof PostSearchProvidersErrors];
@@ -15805,11 +15838,11 @@ export type DeleteSearchProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteSearchProvidersByIdError = DeleteSearchProvidersByIdErrors[keyof DeleteSearchProvidersByIdErrors];
@@ -15837,11 +15870,11 @@ export type GetSearchProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetSearchProvidersByIdError = GetSearchProvidersByIdErrors[keyof GetSearchProvidersByIdErrors];
@@ -15874,11 +15907,11 @@ export type PutSearchProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutSearchProvidersByIdError = PutSearchProvidersByIdErrors[keyof PutSearchProvidersByIdErrors];
@@ -15924,7 +15957,7 @@ export type GetSpeechModelsErrors = {
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetSpeechModelsError = GetSpeechModelsErrors[keyof GetSpeechModelsErrors];
@@ -15954,7 +15987,7 @@ export type GetSpeechModelsByIdErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetSpeechModelsByIdError = GetSpeechModelsByIdErrors[keyof GetSpeechModelsByIdErrors];
@@ -15987,11 +16020,11 @@ export type PutSpeechModelsByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutSpeechModelsByIdError = PutSpeechModelsByIdErrors[keyof PutSpeechModelsByIdErrors];
@@ -16021,7 +16054,7 @@ export type GetSpeechModelsByIdCapabilitiesErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetSpeechModelsByIdCapabilitiesError = GetSpeechModelsByIdCapabilitiesErrors[keyof GetSpeechModelsByIdCapabilitiesErrors];
@@ -16054,11 +16087,11 @@ export type PostSpeechModelsByIdTestErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostSpeechModelsByIdTestError = PostSpeechModelsByIdTestErrors[keyof PostSpeechModelsByIdTestErrors];
@@ -16081,7 +16114,7 @@ export type GetSpeechProvidersErrors = {
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetSpeechProvidersError = GetSpeechProvidersErrors[keyof GetSpeechProvidersErrors];
@@ -16127,11 +16160,11 @@ export type GetSpeechProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetSpeechProvidersByIdError = GetSpeechProvidersByIdErrors[keyof GetSpeechProvidersByIdErrors];
@@ -16161,15 +16194,15 @@ export type PostSpeechProvidersByIdImportModelsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostSpeechProvidersByIdImportModelsError = PostSpeechProvidersByIdImportModelsErrors[keyof PostSpeechProvidersByIdImportModelsErrors];
@@ -16199,11 +16232,11 @@ export type GetSpeechProvidersByIdModelsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetSpeechProvidersByIdModelsError = GetSpeechProvidersByIdModelsErrors[keyof GetSpeechProvidersByIdModelsErrors];
@@ -16261,11 +16294,11 @@ export type GetSupermarketAppsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type GetSupermarketAppsError = GetSupermarketAppsErrors[keyof GetSupermarketAppsErrors];
@@ -16295,15 +16328,15 @@ export type GetSupermarketArtifactsIconByDigestErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type GetSupermarketArtifactsIconByDigestError = GetSupermarketArtifactsIconByDigestErrors[keyof GetSupermarketArtifactsIconByDigestErrors];
@@ -16331,15 +16364,15 @@ export type GetSupermarketCategoriesErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type GetSupermarketCategoriesError = GetSupermarketCategoriesErrors[keyof GetSupermarketCategoriesErrors];
@@ -16364,7 +16397,7 @@ export type GetSupermarketRegistriesErrors = {
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type GetSupermarketRegistriesError = GetSupermarketRegistriesErrors[keyof GetSupermarketRegistriesErrors];
@@ -16419,15 +16452,15 @@ export type GetSupermarketRegistriesByRegistryIdAppsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type GetSupermarketRegistriesByRegistryIdAppsError = GetSupermarketRegistriesByRegistryIdAppsErrors[keyof GetSupermarketRegistriesByRegistryIdAppsErrors];
@@ -16461,15 +16494,15 @@ export type GetSupermarketRegistriesByRegistryIdAppsByAppIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type GetSupermarketRegistriesByRegistryIdAppsByAppIdError = GetSupermarketRegistriesByRegistryIdAppsByAppIdErrors[keyof GetSupermarketRegistriesByRegistryIdAppsByAppIdErrors];
@@ -16507,15 +16540,15 @@ export type GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionErr
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionError = GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionErrors[keyof GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionErrors];
@@ -16553,15 +16586,15 @@ export type GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdErrors
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdError = GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdErrors[keyof GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdErrors];
@@ -16619,11 +16652,11 @@ export type GetSupermarketSkillsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Bad Gateway
      */
-    502: ApperrorProblem;
+    502: ServerProblem;
 };
 
 export type GetSupermarketSkillsError = GetSupermarketSkillsErrors[keyof GetSupermarketSkillsErrors];
@@ -16648,7 +16681,7 @@ export type GetTranscriptionModelsErrors = {
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetTranscriptionModelsError = GetTranscriptionModelsErrors[keyof GetTranscriptionModelsErrors];
@@ -16678,7 +16711,7 @@ export type GetTranscriptionModelsByIdErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetTranscriptionModelsByIdError = GetTranscriptionModelsByIdErrors[keyof GetTranscriptionModelsByIdErrors];
@@ -16711,11 +16744,11 @@ export type PutTranscriptionModelsByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutTranscriptionModelsByIdError = PutTranscriptionModelsByIdErrors[keyof PutTranscriptionModelsByIdErrors];
@@ -16745,7 +16778,7 @@ export type GetTranscriptionModelsByIdCapabilitiesErrors = {
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetTranscriptionModelsByIdCapabilitiesError = GetTranscriptionModelsByIdCapabilitiesErrors[keyof GetTranscriptionModelsByIdCapabilitiesErrors];
@@ -16784,11 +16817,11 @@ export type PostTranscriptionModelsByIdTestErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostTranscriptionModelsByIdTestError = PostTranscriptionModelsByIdTestErrors[keyof PostTranscriptionModelsByIdTestErrors];
@@ -16813,7 +16846,7 @@ export type GetTranscriptionProvidersErrors = {
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetTranscriptionProvidersError = GetTranscriptionProvidersErrors[keyof GetTranscriptionProvidersErrors];
@@ -16859,11 +16892,11 @@ export type GetTranscriptionProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetTranscriptionProvidersByIdError = GetTranscriptionProvidersByIdErrors[keyof GetTranscriptionProvidersByIdErrors];
@@ -16893,15 +16926,15 @@ export type PostTranscriptionProvidersByIdImportModelsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostTranscriptionProvidersByIdImportModelsError = PostTranscriptionProvidersByIdImportModelsErrors[keyof PostTranscriptionProvidersByIdImportModelsErrors];
@@ -16931,11 +16964,11 @@ export type GetTranscriptionProvidersByIdModelsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetTranscriptionProvidersByIdModelsError = GetTranscriptionProvidersByIdModelsErrors[keyof GetTranscriptionProvidersByIdModelsErrors];
@@ -16960,15 +16993,15 @@ export type GetUsersErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetUsersError = GetUsersErrors[keyof GetUsersErrors];
@@ -16996,15 +17029,15 @@ export type PostUsersErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostUsersError = PostUsersErrors[keyof PostUsersErrors];
@@ -17029,15 +17062,15 @@ export type GetUsersMeErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Unauthorized
      */
-    401: ApperrorProblem;
+    401: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetUsersMeError = GetUsersMeErrors[keyof GetUsersMeErrors];
@@ -17065,11 +17098,11 @@ export type PutUsersMeErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutUsersMeError = PutUsersMeErrors[keyof PutUsersMeErrors];
@@ -17094,7 +17127,7 @@ export type GetUsersMeChannelIdentitiesErrors = {
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetUsersMeChannelIdentitiesError = GetUsersMeChannelIdentitiesErrors[keyof GetUsersMeChannelIdentitiesErrors];
@@ -17124,11 +17157,11 @@ export type DeleteUsersMeChannelIdentitiesByChannelIdentityIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteUsersMeChannelIdentitiesByChannelIdentityIdError = DeleteUsersMeChannelIdentitiesByChannelIdentityIdErrors[keyof DeleteUsersMeChannelIdentitiesByChannelIdentityIdErrors];
@@ -17154,11 +17187,11 @@ export type PostUsersMeChannelLinksErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostUsersMeChannelLinksError = PostUsersMeChannelLinksErrors[keyof PostUsersMeChannelLinksErrors];
@@ -17188,15 +17221,15 @@ export type GetUsersMeChannelsByPlatformErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetUsersMeChannelsByPlatformError = GetUsersMeChannelsByPlatformErrors[keyof GetUsersMeChannelsByPlatformErrors];
@@ -17229,11 +17262,11 @@ export type PutUsersMeChannelsByPlatformErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutUsersMeChannelsByPlatformError = PutUsersMeChannelsByPlatformErrors[keyof PutUsersMeChannelsByPlatformErrors];
@@ -17258,11 +17291,11 @@ export type GetUsersMeComputerAccessErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetUsersMeComputerAccessError = GetUsersMeComputerAccessErrors[keyof GetUsersMeComputerAccessErrors];
@@ -17290,11 +17323,11 @@ export type PutUsersMePasswordErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutUsersMePasswordError = PutUsersMePasswordErrors[keyof PutUsersMePasswordErrors];
@@ -17317,7 +17350,7 @@ export type GetUsersMeRuntimesErrors = {
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetUsersMeRuntimesError = GetUsersMeRuntimesErrors[keyof GetUsersMeRuntimesErrors];
@@ -17345,15 +17378,15 @@ export type PostUsersMeRuntimesErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostUsersMeRuntimesError = PostUsersMeRuntimesErrors[keyof PostUsersMeRuntimesErrors];
@@ -17383,15 +17416,15 @@ export type DeleteUsersMeRuntimesByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteUsersMeRuntimesByIdError = DeleteUsersMeRuntimesByIdErrors[keyof DeleteUsersMeRuntimesByIdErrors];
@@ -17419,23 +17452,23 @@ export type DeleteUsersByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type DeleteUsersByIdError = DeleteUsersByIdErrors[keyof DeleteUsersByIdErrors];
@@ -17463,19 +17496,19 @@ export type GetUsersByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetUsersByIdError = GetUsersByIdErrors[keyof GetUsersByIdErrors];
@@ -17508,23 +17541,23 @@ export type PutUsersByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Forbidden
      */
-    403: ApperrorProblem;
+    403: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Conflict
      */
-    409: ApperrorProblem;
+    409: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutUsersByIdError = PutUsersByIdErrors[keyof PutUsersByIdErrors];
@@ -17549,7 +17582,7 @@ export type GetVideoModelsErrors = {
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetVideoModelsError = GetVideoModelsErrors[keyof GetVideoModelsErrors];
@@ -17579,11 +17612,11 @@ export type GetVideoModelsByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetVideoModelsByIdError = GetVideoModelsByIdErrors[keyof GetVideoModelsByIdErrors];
@@ -17616,15 +17649,15 @@ export type PutVideoModelsByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PutVideoModelsByIdError = PutVideoModelsByIdErrors[keyof PutVideoModelsByIdErrors];
@@ -17649,7 +17682,7 @@ export type GetVideoProvidersErrors = {
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetVideoProvidersError = GetVideoProvidersErrors[keyof GetVideoProvidersErrors];
@@ -17695,11 +17728,11 @@ export type GetVideoProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetVideoProvidersByIdError = GetVideoProvidersByIdErrors[keyof GetVideoProvidersByIdErrors];
@@ -17729,11 +17762,11 @@ export type PostVideoProvidersByIdImportModelsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type PostVideoProvidersByIdImportModelsError = PostVideoProvidersByIdImportModelsErrors[keyof PostVideoProvidersByIdImportModelsErrors];
@@ -17763,11 +17796,11 @@ export type GetVideoProvidersByIdModelsErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
+    500: ServerProblem;
 };
 
 export type GetVideoProvidersByIdModelsError = GetVideoProvidersByIdModelsErrors[keyof GetVideoProvidersByIdModelsErrors];
@@ -17808,7 +17841,7 @@ export type GetWorkspaceDependenciesErrors = {
     /**
      * Service Unavailable
      */
-    503: ApperrorProblem;
+    503: ServerProblem;
 };
 
 export type GetWorkspaceDependenciesError = GetWorkspaceDependenciesErrors[keyof GetWorkspaceDependenciesErrors];
@@ -17838,11 +17871,11 @@ export type GetWorkspaceDependenciesIconsByDigestErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
+    400: ServerProblem;
     /**
      * Not Found
      */
-    404: ApperrorProblem;
+    404: ServerProblem;
 };
 
 export type GetWorkspaceDependenciesIconsByDigestError = GetWorkspaceDependenciesIconsByDigestErrors[keyof GetWorkspaceDependenciesIconsByDigestErrors];

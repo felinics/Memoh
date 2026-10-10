@@ -3,6 +3,7 @@ import type { DependencyItem } from '@/composables/api/useWorkspaceDependencies'
 import {
   dependencyText,
   dependencyIsInstalled,
+  dependencyLastError,
   dependencyMenuActions,
   dependencyNeedsAttention,
   dependencyPrimaryAction,
@@ -363,5 +364,19 @@ describe('prerequisites', () => {
       item({ id: 'python', status: 'installed', definition_revision: 'r-python' }),
     ]
     expect(prerequisiteRevisions(items[0]!, items)).toEqual({ python: 'r-python', micromamba: 'r-mamba' })
+  })
+})
+
+describe('dependencyLastError', () => {
+  const translate = (key: string) => `t:${key}`
+
+  it('renders the catalog copy when the record carries a code', () => {
+    expect(dependencyLastError(item({ last_error_code: 'workspace_dependency.busy', last_error: 'old sentence' }), translate))
+      .toBe('t:errors.workspace_dependency.busy')
+  })
+
+  it('shows the text of an earlier server when the record has no code', () => {
+    expect(dependencyLastError(item({ last_error: ' download failed ' }), translate)).toBe('download failed')
+    expect(dependencyLastError(item(), translate)).toBe('')
   })
 })

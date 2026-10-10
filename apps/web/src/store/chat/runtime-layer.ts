@@ -37,6 +37,7 @@ export function createChatRuntimeLayer(deps: ChatRuntimeLayerDeps) {
     sessionId: string,
     commitInitialHistory: (applyHistory: () => void) => Promise<void>,
   ) => Promise<void> = async () => {}
+  let forwardWebSocketClosed: (botId: string) => void = () => {}
 
   const realtime = createChatRealtimeController({
     onWebSocketEvent: (botId, event) => forwardWebSocketEvent(botId, event),
@@ -45,6 +46,7 @@ export function createChatRuntimeLayer(deps: ChatRuntimeLayerDeps) {
     onRuntimeProjection: (botId, sessionId, change) =>
       forwardRuntimeProjection(botId, sessionId, change),
     onBotSessionsActivityEvent: deps.onBotSessionsActivityEvent,
+    onWebSocketClosed: botId => forwardWebSocketClosed(botId),
     onActivityStreamCoverageChanged: deps.onActivityStreamCoverageChanged,
   })
   const decisions = createChatDecisions({
@@ -68,6 +70,7 @@ export function createChatRuntimeLayer(deps: ChatRuntimeLayerDeps) {
     integration.handleWebSocketEvent(event, botId)
   forwardRuntimeProjection = integration.handleProjection
   forwardPrepareSessionRuntime = integration.prepareSessionRuntime
+  forwardWebSocketClosed = integration.handleWebSocketClosed
 
   return { realtime, decisions, integration }
 }

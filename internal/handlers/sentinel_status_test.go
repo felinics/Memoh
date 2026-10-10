@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -58,28 +59,36 @@ func TestGetChannelIdentityConfigStatusFollowsSentinel(t *testing.T) {
 			c := testAuthContext(e, httptest.NewRequest(http.MethodGet, "/", nil), rec, uuid.NewString())
 			c.SetParamNames("platform")
 			c.SetParamValues(string(sentinelTestChannelType))
-			var httpErr *echo.HTTPError
-			if err := h.GetChannelIdentityConfig(c); !errors.As(err, &httpErr) || httpErr.Code != tc.want {
-				t.Fatalf("status = %v, want %d", err, tc.want)
-			}
+			assertSentinelStatus(t, h.GetChannelIdentityConfig(c), tc.err, tc.want)
 		})
 	}
 }
 
 func TestFetchProviderHTTPErrorStatus(t *testing.T) {
-	cases := []struct {
-		err  error
-		want int
-	}{
-		{fmt.Errorf("%w: bogus", fetchproviders.ErrInvalidProvider), http.StatusBadRequest},
-		{fetchproviders.ErrManagedNativeProvider, http.StatusBadRequest},
-		{errors.New("invalid provider row"), http.StatusInternalServerError},
+	invalid := fetchProviderHTTPError(fmt.Errorf("%w: bogus", fetchproviders.ErrInvalidProvider))
+	requireFieldError(t, invalid, apperror.CodeRequestFieldInvalid, "provider")
+	if got := apperror.CodeOf(fetchProviderHTTPError(fetchproviders.ErrManagedNativeProvider)); got != apperror.CodeFetchProviderNativeManaged {
+		t.Fatalf("native provider code = %s, want %s", got, apperror.CodeFetchProviderNativeManaged)
 	}
-	for _, tc := range cases {
-		var httpErr *echo.HTTPError
-		if err := fetchProviderHTTPError(tc.err); !errors.As(err, &httpErr) || httpErr.Code != tc.want {
-			t.Errorf("fetchProviderHTTPError(%v) = %v, want %d", tc.err, err, tc.want)
+	cause := errors.New("invalid provider row")
+	assertSentinelStatus(t, fetchProviderHTTPError(cause), cause, http.StatusInternalServerError)
+}
+
+// assertSentinelStatus checks a 4xx answer as an echo.HTTPError. A 500 is the
+// cause wrapped without a status of its own, which the HTTP boundary answers
+// as an internal error.
+func assertSentinelStatus(t *testing.T, got, cause error, want int) {
+	t.Helper()
+	var httpErr *echo.HTTPError
+	isHTTP := errors.As(got, &httpErr)
+	if want == http.StatusInternalServerError {
+		if isHTTP || !errors.Is(got, cause) {
+			t.Fatalf("error = %v, want %v wrapped without a status", got, cause)
 		}
+		return
+	}
+	if !isHTTP || httpErr.Code != want {
+		t.Fatalf("status = %v, want %d", got, want)
 	}
 }
 
@@ -91,11 +100,12 @@ func TestProviderAndModelHandlersRejectInvalidInputWith400(t *testing.T) {
 		id     string
 		target string
 		call   func(echo.Context) error
+		field  string
 	}{
-		{"provider test id", "not-a-uuid", "/", providersHandler.Test},
-		{"provider models id", "not-a-uuid", "/", providersHandler.ListModelsByProvider},
-		{"provider models type", uuid.NewString(), "/?type=bogus", providersHandler.ListModelsByProvider},
-		{"model test id", "not-a-uuid", "/", modelsHandler.Test},
+		{"provider test id", "not-a-uuid", "/", providersHandler.Test, "id"},
+		{"provider models id", "not-a-uuid", "/", providersHandler.ListModelsByProvider, "id"},
+		{"provider models type", uuid.NewString(), "/?type=bogus", providersHandler.ListModelsByProvider, "type"},
+		{"model test id", "not-a-uuid", "/", modelsHandler.Test, "id"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -103,9 +113,9 @@ func TestProviderAndModelHandlersRejectInvalidInputWith400(t *testing.T) {
 			c := e.NewContext(httptest.NewRequest(http.MethodGet, tc.target, nil), httptest.NewRecorder())
 			c.SetParamNames("id")
 			c.SetParamValues(tc.id)
-			var httpErr *echo.HTTPError
-			if err := tc.call(c); !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-				t.Fatalf("status = %v, want 400", err)
+			err := tc.call(c)
+			if apperror.CodeOf(err) != apperror.CodeRequestFieldInvalid || apperror.ArgsOf(err)["field"] != tc.field {
+				t.Fatalf("error = %v, want %s for field %q", err, apperror.CodeRequestFieldInvalid, tc.field)
 			}
 		})
 	}

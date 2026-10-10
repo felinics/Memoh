@@ -130,7 +130,6 @@ const (
 	StreamEventSpeech              StreamEventType = "speech"
 	StreamEventProcessingStarted   StreamEventType = "processing_started"
 	StreamEventProcessingCompleted StreamEventType = "processing_completed"
-	StreamEventProcessingFailed    StreamEventType = "processing_failed"
 	// StreamEventReset discards the reply text streamed so far: the agent is
 	// retrying and regenerates it from scratch, so the next delta starts a
 	// fresh reply instead of extending the failed attempt's partial output.

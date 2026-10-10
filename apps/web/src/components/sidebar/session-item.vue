@@ -20,7 +20,7 @@
         :data-streaming="streaming || undefined"
         :title="hoverTitle"
         @click="$emit('select', session)"
-        @keydown.enter.prevent="$emit('select', session)"
+        @keydown.enter.exact.prevent="$emit('select', session)"
         @keydown.space.prevent="$emit('select', session)"
       >
         <!-- Native session rows stay text-only. Agent rows carry the agent icon
@@ -98,7 +98,7 @@
                   :class="menuOpen ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open=true]:opacity-100 group-data-[menu-open=true]:pointer-events-auto'"
                   :aria-label="t('chat.sessionActions')"
                   @click.stop
-                  @keydown.enter.stop
+                  @keydown.enter.exact.stop
                   @keydown.space.stop
                 >
                   <MoreHorizontal class="size-4" />

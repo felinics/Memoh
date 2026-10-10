@@ -45,19 +45,14 @@ import {
   type AcpprofilePublicProfile,
 } from '@memohai/sdk'
 import { useAcpSetupModeItems } from '@/composables/useAcpSetupModeItems'
-import {
-  ensureACPAgentForm,
-  findMissingRequiredManagedField,
-  type ACPAgentForm,
-  type ACPForm,
-} from '@/utils/acp'
+import type { ACPAgentForm } from '@/utils/acp'
 import { filterSettingsVisibleManagedFields } from '@/utils/acp/setup-fields'
 import AcpManagedFields from './acp-managed-fields.vue'
 
 const props = defineProps<{
   botId: string
   profile: AcpprofilePublicProfile
-  form: ACPForm
+  setup: ACPAgentForm
 }>()
 
 const emit = defineEmits<{
@@ -67,7 +62,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const { setupModeItems } = useAcpSetupModeItems(() => props.profile)
 
-const agent = computed<ACPAgentForm>(() => ensureACPAgentForm(props.form, props.profile))
+const agent = computed<ACPAgentForm>(() => props.setup)
 const isGenericACP = computed(() => isACPAgent(props.profile.id))
 
 const visibleManagedFields = computed(() =>
@@ -75,9 +70,6 @@ const visibleManagedFields = computed(() =>
 )
 
 function commitForm() {
-  if (agent.value.enabled && findMissingRequiredManagedField(props.profile, agent.value.managed, agent.value.setup_mode)) {
-    return
-  }
   emit('commit')
 }
 

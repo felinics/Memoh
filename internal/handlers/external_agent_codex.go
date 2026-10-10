@@ -102,9 +102,9 @@ type CodexDeviceLoginPollResponse struct {
 // @Tags external-agents
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} CodexDeviceLoginAuthorizeResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Param id path string true "Bot Agent ID"
 // @Router /bots/{bot_id}/agents/{id}/codex/login/device/authorize [post].
 func (h *ExternalAgentCodexHandler) AuthorizeDevice(c echo.Context) error {
@@ -136,8 +136,8 @@ func (h *ExternalAgentCodexHandler) AuthorizeDevice(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param body body CodexDeviceLoginPollRequest true "Login reference"
 // @Success 200 {object} CodexDeviceLoginPollResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
 // @Param id path string true "Bot Agent ID"
 // @Router /bots/{bot_id}/agents/{id}/codex/login/device/poll [post].
 func (h *ExternalAgentCodexHandler) PollDevice(c echo.Context) error {
@@ -146,8 +146,11 @@ func (h *ExternalAgentCodexHandler) PollDevice(c echo.Context) error {
 		return err
 	}
 	var req CodexDeviceLoginPollRequest
-	if err := c.Bind(&req); err != nil || strings.TrimSpace(req.LoginID) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "login_id is required")
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	if strings.TrimSpace(req.LoginID) == "" {
+		return apperror.FieldRequired("login_id")
 	}
 	loginID := strings.TrimSpace(req.LoginID)
 	status := h.driver.PollDeviceLogin(botID, botAgentID, loginID)
@@ -169,8 +172,8 @@ func (h *ExternalAgentCodexHandler) PollDevice(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param body body CodexDeviceLoginPollRequest true "Login reference"
 // @Success 204
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
 // @Param id path string true "Bot Agent ID"
 // @Router /bots/{bot_id}/agents/{id}/codex/login/device/cancel [post].
 func (h *ExternalAgentCodexHandler) CancelDevice(c echo.Context) error {
@@ -179,8 +182,11 @@ func (h *ExternalAgentCodexHandler) CancelDevice(c echo.Context) error {
 		return err
 	}
 	var req CodexDeviceLoginPollRequest
-	if err := c.Bind(&req); err != nil || strings.TrimSpace(req.LoginID) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "login_id is required")
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	if strings.TrimSpace(req.LoginID) == "" {
+		return apperror.FieldRequired("login_id")
 	}
 	if err := h.driver.CancelDeviceLogin(c.Request().Context(), botID, botAgentID, strings.TrimSpace(req.LoginID)); err != nil {
 		return apperror.Wrap(
@@ -214,11 +220,11 @@ type CodexUsageResponse struct {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Bot Agent ID"
 // @Success 200 {object} CodexUsageResponse
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 422 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 422 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /bots/{bot_id}/agents/{id}/codex/usage [get].
 func (h *ExternalAgentCodexHandler) Usage(c echo.Context) error {
 	botID, botAgentID, _, err := h.requireAgentPermission(c, bots.PermissionChat)

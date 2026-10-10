@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -185,5 +187,83 @@ func assertEchoResult(t *testing.T, payload map[string]any, expected string) {
 	}
 	if got := anyToString(structured["echo"]); got != expected {
 		t.Fatalf("unexpected echo result: got=%s want=%s", got, expected)
+	}
+}
+
+func TestFederationGatewayMarksUnauthorizedResponses(t *testing.T) {
+	server := newTestMCPServer()
+	cases := []struct {
+		name    string
+		handler http.Handler
+		list    func(*MCPFederationGateway, mcpgw.Connection) ([]mcpgw.ToolDescriptor, error)
+	}{
+		{
+			name: "http",
+			handler: sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server {
+				return server
+			}, nil),
+			list: func(g *MCPFederationGateway, c mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
+				return g.ListHTTPConnectionTools(context.Background(), c)
+			},
+		},
+		{
+			name: "sse",
+			handler: sdkmcp.NewSSEHandler(func(*http.Request) *sdkmcp.Server {
+				return server
+			}, nil),
+			list: func(g *MCPFederationGateway, c mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
+				return g.ListSSEConnectionTools(context.Background(), c)
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			httpServer := httptest.NewServer(withAuthHeader(tc.handler, "Bearer test-token"))
+			defer httpServer.Close()
+			gateway := &MCPFederationGateway{client: httpServer.Client()}
+
+			_, err := tc.list(gateway, mcpgw.Connection{Config: map[string]any{"url": httpServer.URL}})
+			if !errors.Is(err, errMCPUnauthorized) {
+				t.Fatalf("missing token: err = %v, want errMCPUnauthorized", err)
+			}
+		})
+	}
+}
+
+func TestFederationGatewayDoesNotMarkOtherFailuresUnauthorized(t *testing.T) {
+	// The body names 401 to show the status code decides, not the text.
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "upstream answered 401 Unauthorized", http.StatusBadGateway)
+	}))
+	defer httpServer.Close()
+	gateway := &MCPFederationGateway{client: httpServer.Client()}
+
+	_, err := gateway.ListHTTPConnectionTools(context.Background(), mcpgw.Connection{Config: map[string]any{"url": httpServer.URL}})
+	if err == nil {
+		t.Fatal("expected probe failure")
+	}
+	if errors.Is(err, errMCPUnauthorized) {
+		t.Fatalf("err = %v, must not be errMCPUnauthorized", err)
+	}
+}
+
+func TestProbeFailureResponseHidesCause(t *testing.T) {
+	cause := errors.New(`Post "https://secret.example/mcp?token=abc": dial tcp: connection refused`)
+	resp := probeFailureResponse(cause)
+	if resp.Status != "error" || resp.Error != mcpProbeFailedMessage || resp.AuthRequired {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if strings.Contains(resp.Error, "secret.example") {
+		t.Fatalf("response leaks the cause: %q", resp.Error)
+	}
+
+	resp = probeFailureResponse(errors.Join(errMCPUnauthorized, errors.New("Unauthorized")))
+	if !resp.AuthRequired || resp.Error != mcpProbeFailedMessage {
+		t.Fatalf("unauthorized response: %#v", resp)
+	}
+
+	// Text alone no longer sets auth_required.
+	if probeFailureResponse(errors.New("calling initialize: 401 Unauthorized")).AuthRequired {
+		t.Fatal("auth_required set from error text")
 	}
 }

@@ -126,25 +126,44 @@ they do not constitute automatic job adoption after a server restart.
 ## Model call failures
 
 The native runtime retries a failed model call from the last committed step,
-by default up to five times with a backoff capped at eight seconds. Only the failure
-of the provider call itself is considered: an error returned by `DoStream`, an
-`ErrorPart` in the stream, or a stream that ends before its finish-step part.
-A failure of the loop's own work (the provider-attempt handoff, a step commit,
-a capability refresh, the tool batch) ends the run, since its tools may already
-have run.
+by default up to five times per run with a backoff capped at eight seconds. Only
+the failure of the provider call itself is considered: an error returned by
+`DoStream` or `DoGenerate`, an `ErrorPart` in the stream, or a stream that ends
+before its finish-step part. A failure of the loop's own work (the
+provider-attempt handoff, a step commit, a capability refresh, the tool batch)
+ends the run, since its tools may already have run. The streaming and the
+non-streaming loop share the rule, the budget and the backoff
+(`internal/models/modelretry`).
 
 A provider call is retried when the SDK classifies its `*sdk.APIError` as
 `rate_limited` or `server_error`, when the stream was cut off
-(`sdk.ErrStreamIncomplete`, `io.ErrUnexpectedEOF`), or when the chain holds a
-`net.Error`. Cancellation and expired deadlines are never retried, and every
-other `Kind` is final. Error text is never read.
+(`sdk.ErrStreamIncomplete`, `io.ErrUnexpectedEOF`, or a stream that closed
+before its finish-step part), or when the chain holds a `net.Error`.
+Cancellation and expired deadlines are never retried, and every other `Kind` is
+final. Error text is never read. A `Retry-After` or `retry-after-ms` header on
+the provider's answer sets the wait when it is at most one minute; otherwise the
+backoff does.
 
 A retried attempt is recorded once, as a WARN event for `agent.model_call`, and
-the stream reports it as a `retry` event carrying only the attempt counters. The
-stream publishes an `error` event only for the failure that ends the run, with
-the failure as its `Cause`; after the last retry that is the last attempt's
+the stream reports it as a `retry` event carrying the attempt counters, the wait
+in `retryDelayMs` and the failure's class in `retryReason` (`rate_limited`,
+`server_error`, `stream_incomplete` or `network`), never the provider's text.
+The stream publishes an `error` event only for the failure that ends the run,
+with the failure as its `Cause`; after the last retry that is the last attempt's
 failure, wrapped. A subagent attempt is run again only when its watchdog ended
 it.
+
+The runtime projection keeps the wait visible to subscribers. A `retry` event
+sets `retry` on the current run (`attempt`, `max_attempt`, `delay_ms`, `reason`
+and `retry_at`, the server time of the next attempt) and sends it in the run
+patch. The next visible event, a terminal event or a terminal status clears it;
+a patch removes it with `clear_retry: true`, and a patch carrying neither field
+leaves it unchanged. Snapshots carry the field, so a reconnecting client sees it.
+
+Single model calls outside a run use the same rule: the context compaction
+summary, the memory calls and the session title. Image generation is retried
+only after a `rate_limited` answer, since a failed call may still have produced
+a billed image, and the DashScope task API not at all.
 
 The application names the failure in one translation function shared by the
 WebSocket, IM, discuss, scheduled, decision-continuation and subagent paths. A

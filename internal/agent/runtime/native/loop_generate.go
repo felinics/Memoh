@@ -18,6 +18,7 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models/modelretry"
 )
 
 // runGenerate runs the non-streaming agent invocation with a Memoh-owned step
@@ -187,6 +188,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 		allMessages []sdk.Message
 	)
 
+	// retries counts the model calls made again across the whole run, the
+	// same budget the streaming loop keeps.
+	retries := 0
 	for sdkStep := 0; ; sdkStep++ {
 		stepParams := thread.advance(cfg, dynamic, stepBoundary{
 			first:     sdkStep == 0,
@@ -208,14 +212,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 		if err := thread.dispatch.handoff.publish(stepParams); err != nil {
 			return nil, fmt.Errorf("generate: %w", err)
 		}
-		result, err := cfg.Model.Generate(genCtx, stepParams)
+		result, err := a.generateStep(genCtx, cfg, stepParams, sdkStep, &retries)
 		if err != nil {
-			if loopErr := detectGenerateLoopAbort(genCtx, err); loopErr != nil {
-				return nil, loopErr
-			}
-			// Marked as the streaming loop marks its model calls, so the
-			// failure is translated the same way.
-			return nil, &modelCallFailure{err: errs.WrapDependency(err, "generate", slog.Int("step", sdkStep))}
+			return nil, err
 		}
 		lastResult = result
 
@@ -295,6 +294,42 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 		Speeches:                speeches,
 		Usage:                   &usage,
 	}, nil
+}
+
+// generateStep makes the provider call of one step, and makes it again after a
+// failure the retry policy accepts, under the run's retry budget. The failed
+// call returned no result and nothing of the step has committed, so the same
+// request is sent again; the published provider attempt still describes it.
+//
+//nolint:gocritic // hugeParam: the loop's request value is the frozen payload of this step.
+func (a *Agent) generateStep(ctx context.Context, cfg RunConfig, params sdk.Request, step int, retries *int) (sdk.ModelResult, error) {
+	for {
+		result, err := cfg.Model.Generate(ctx, params)
+		if err == nil {
+			return result, nil
+		}
+		if loopErr := detectGenerateLoopAbort(ctx, err); loopErr != nil {
+			return sdk.ModelResult{}, loopErr
+		}
+		// Marked as the streaming loop marks its model calls, so the
+		// failure is translated the same way.
+		failure := error(&modelCallFailure{err: errs.WrapDependency(err, "generate", slog.Int("step", step))})
+		retry, ok := cfg.Retry.Next(*retries, failure, nil)
+		if !ok {
+			if _, retryable := modelretry.Retryable(failure); retryable {
+				return sdk.ModelResult{}, errs.Wrap(failure, "model call retries exhausted", slog.Int("attempts", *retries))
+			}
+			return sdk.ModelResult{}, failure
+		}
+		a.logModelRetry(ctx, cfg.RunID, step, retry, failure)
+		if err := modelretry.Sleep(ctx, retry.Delay); err != nil {
+			if loopErr := detectGenerateLoopAbort(ctx, err); loopErr != nil {
+				return sdk.ModelResult{}, loopErr
+			}
+			return sdk.ModelResult{}, fmt.Errorf("generate: %w", err)
+		}
+		*retries++
+	}
 }
 
 // generateDispatch is the assembled single-call input for the generate loop:

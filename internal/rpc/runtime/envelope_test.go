@@ -85,7 +85,7 @@ func TestPreEnvelopePublicErrorIsNotRestored(t *testing.T) {
 }
 
 func TestCatalogCodeSurvivesEnvelope(t *testing.T) {
-	wire := rpc.AppErrorStatus(apperror.New(apperror.CodeBotNameTaken, map[string]string{"field": "name"}))
+	wire := rpc.AnswerStatus(context.Background(), apperror.New(apperror.CodeBotNameTaken, map[string]string{"field": "name"}))
 	if wire == nil {
 		t.Fatal("catalog apperror not encoded")
 	}

@@ -7,8 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 
@@ -155,7 +155,7 @@ func (c *Client) DownloadArtifact(ctx context.Context, artifact ArtifactDownload
 		}
 		return nil, &ProtocolError{
 			Kind: kind, Status: resp.StatusCode, Op: "download Artifact",
-			Err: errs.NewDependency(fmt.Sprintf("supermarket returned status %d", resp.StatusCode)),
+			Err: errs.NewDependency("supermarket returned an error status", slog.Int("status", resp.StatusCode)),
 		}
 	}
 	if resp.ContentLength >= 0 && resp.ContentLength != artifact.Size {
@@ -187,7 +187,7 @@ func (c *Client) fetchJSONPayload(ctx context.Context, requestPath string, limit
 	if resp.StatusCode != http.StatusOK {
 		return nil, &ProtocolError{
 			Kind: ErrorUnavailable, Status: resp.StatusCode, Op: op,
-			Err: errs.NewDependency(fmt.Sprintf("supermarket returned status %d", resp.StatusCode)),
+			Err: errs.NewDependency("supermarket returned an error status", slog.Int("status", resp.StatusCode)),
 		}
 	}
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))

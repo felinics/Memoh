@@ -12,31 +12,18 @@
       :lang="language || 'text'"
       class="overflow-x-auto py-1.5 text-[13px] leading-[1.8]"
     />
-    <Button
-      variant="ghost"
-      size="icon-sm"
+    <CopyActionButton
+      :text="code"
+      icon-class="size-3.5"
       class="shrink-0 text-muted-foreground focus-visible:ring-0 hover:text-foreground"
-      :aria-label="t('common.copy', 'Copy')"
-      @click="copy"
-    >
-      <Check
-        v-if="copied"
-        class="size-3.5"
-      />
-      <Copy
-        v-else
-        class="size-3.5"
-      />
-    </Button>
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Check, Copy } from 'lucide-vue-next'
-import { Button, toast, useClipboard } from '@felinic/ui'
-import { useI18n } from 'vue-i18n'
+import { computed } from 'vue'
 import CodeBlock from './code-block.vue'
+import CopyActionButton from './copy-action-button.vue'
 
 interface CodeFenceNode {
   type: string
@@ -47,22 +34,6 @@ interface CodeFenceNode {
 }
 
 const props = defineProps<{ node: CodeFenceNode }>()
-const { t } = useI18n()
-const { copyText } = useClipboard()
-
 const code = computed(() => props.node.code ?? props.node.raw ?? '')
 const language = computed(() => (props.node.language ?? '').trim().toLowerCase())
-
-const copied = ref(false)
-let resetTimer: ReturnType<typeof setTimeout> | null = null
-async function copy() {
-  const ok = await copyText(code.value)
-  if (!ok) {
-    toast.error(t('common.copyFailed'))
-    return
-  }
-  copied.value = true
-  if (resetTimer) clearTimeout(resetTimer)
-  resetTimer = setTimeout(() => { copied.value = false }, 1500)
-}
 </script>
