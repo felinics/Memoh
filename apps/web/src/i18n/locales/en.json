@@ -4080,7 +4080,8 @@
       "update": "Update",
       "remove": "Uninstall",
       "viewProgress": "View progress",
-      "open": "View in Supermarket"
+      "open": "View in Supermarket",
+      "tryIt": "Try it"
     },
     "section": {
       "skills": "{count} Skill | {count} Skills",
@@ -4176,6 +4177,9 @@
       "release": "App release",
       "confirm": "Update {count} item | Update {count} items",
       "none": "Nothing to update."
+    },
+    "tryIt": {
+      "prompt": "Help me test the {name} App: show me how to use its features, then briefly explain what it can do."
     }
   },
   "runtime": {

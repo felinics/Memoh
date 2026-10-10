@@ -4080,7 +4080,8 @@
       "update": "更新",
       "remove": "卸载",
       "viewProgress": "查看进度",
-      "open": "在市场中查看"
+      "open": "在市场中查看",
+      "tryIt": "试用一下"
     },
     "section": {
       "skills": "{count} 个 Skill",
@@ -4176,6 +4177,9 @@
       "release": "应用发布",
       "confirm": "更新 {count} 项",
       "none": "没有可更新的项目。"
+    },
+    "tryIt": {
+      "prompt": "帮我测试 {name} App，演示一下它的功能怎么用，再简单介绍一下它都能做什么。"
     }
   },
   "runtime": {
