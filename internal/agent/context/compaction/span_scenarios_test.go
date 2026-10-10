@@ -1273,3 +1273,41 @@ func TestCompactionForgetsAStaleIneffectiveStrike(t *testing.T) {
 		t.Fatal("a strike past the cooldown is kept after a pass that found nothing")
 	}
 }
+
+func TestCompactionCutOffBatchNeverRejoinsItsIneffectiveHalf(t *testing.T) {
+	t.Parallel()
+
+	// Cut off as a whole, the batch is halved; its first half alone gets a
+	// summary no shorter than itself. The proved half must not pull the rest
+	// of the batch back into one claim that is cut off again, pass after pass.
+	q := newSessionStore(prose(t, "user", "ALPHA", 300, 100), prose(t, "assistant", "BETA", 400, 100), reasoningOnlyRow(t))
+	var later []pgtype.UUID
+	for i := 0; i < 6; i++ {
+		q.append(prose(t, "user", "LATERQ", 100, 100), prose(t, "assistant", "LATERA", 100, 100))
+		later = append(later, q.history[len(q.history)-2].ID, q.history[len(q.history)-1].ID)
+	}
+	q.append(prose(t, "user", "CURRENT", 10, 10))
+	stub := &stubModel{summary: summaryOfTokens(t, 40), verbose: "ALPHA", cutOffOver: 3000}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	cfg := machineryConfig(stub, 50)
+	for tick := 0; tick < 24*12; tick++ {
+		for pass := 0; pass < 3; pass++ {
+			if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil && !errors.Is(err, ErrIneffectiveSummary) || err == nil && res.Status != StatusOK {
+				break
+			}
+		}
+		clock = clock.Add(5 * time.Minute)
+	}
+	for i, id := range later {
+		if q.logStatuses[q.claims[id]] != "ok" {
+			t.Fatalf("later row %d still raw after a day; calls=%d", i, stub.calls)
+		}
+	}
+	if stub.calls > 30 {
+		t.Fatalf("summarizer calls = %d in a day, want the batch settled within a few attempts", stub.calls)
+	}
+	assertClaimsContiguous(t, q)
+}

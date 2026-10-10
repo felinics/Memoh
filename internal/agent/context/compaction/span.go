@@ -277,13 +277,27 @@ func trimSpan(span []CompactionCandidate, budget, minTokens int) []CompactionCan
 	return nil
 }
 
-// retrySpan limits a claim that starts with the rows of an attempt whose
-// summary was unusable or cut off to those rows: rows that never failed are
-// not held back with them. While all of them are still there, it claims only
-// their first half, so a row the model keeps refusing, or a span too large
-// for the summary, is narrowed down within a few attempts; a half that never
-// failed is retried whole.
+// retrySpan keeps the rows of an attempt whose summary was unusable, cut off
+// or rejected apart from every other row: a claim never mixes them with rows
+// that did not fail with them. Rows in front of such a batch are claimed
+// without it when they are worth a call on their own; otherwise the claim
+// starts at the batch. While the batch is whole, only its first half is
+// claimed, so a row the model keeps refusing, or a span too large for one
+// summary, is narrowed down within a few attempts; a half that never failed
+// is retried whole.
 func retrySpan(span []CompactionCandidate, floor int) []CompactionCandidate {
+	for g, group := range toolExchangeGroups(span) {
+		if span[group[0]].RetryRows == 0 {
+			continue
+		}
+		if g > 0 {
+			if front := span[:group[0]]; clearsFloor(front, floor) {
+				return front
+			}
+			span = span[group[0]:]
+		}
+		break
+	}
 	if len(span) == 0 || span[0].RetryRows == 0 {
 		return span
 	}
@@ -300,6 +314,20 @@ func retrySpan(span []CompactionCandidate, floor int) []CompactionCandidate {
 		}
 	}
 	return span[:end]
+}
+
+// clearsFloor reports rows worth a call on their own: at least floor of rows
+// not proved ineffective, and no fewer of them than of proved rows.
+func clearsFloor(span []CompactionCandidate, floor int) bool {
+	fresh, proved := 0, 0
+	for _, group := range toolExchangeGroups(span) {
+		if cost := markableGroupCost(span, group); provedIneffective(span, group) {
+			proved += cost
+		} else {
+			fresh += cost
+		}
+	}
+	return fresh >= max(1, floor) && proved <= fresh
 }
 
 // halfOf returns where to split span into two claims that each clear floor,
