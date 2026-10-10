@@ -141,6 +141,7 @@ func DriverPromptResult(result client.PromptResult, agentID string) external.Pro
 		Output:     result.Output,
 		Text:       result.Text,
 		Usage:      result.Usage,
+		Context:    result.Context,
 		StopReason: result.StopReason,
 		// Every completed ACP turn publishes its run ID: no
 		// runtime snapshots are captured, but pool fencing still compares warm

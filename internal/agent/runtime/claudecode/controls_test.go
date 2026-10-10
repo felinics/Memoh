@@ -403,7 +403,7 @@ func TestClaudeResultUsageAndMetadataAreStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Usage.InputTokens != 300 || result.Usage.OutputTokens != 40 || result.Usage.CachedInputTokens != 60 {
+	if result.Usage.InputTokens != 360 || result.Usage.InputTokenDetails.NoCacheTokens != 300 || result.Usage.OutputTokens != 40 || result.Usage.CachedInputTokens != 60 {
 		t.Fatalf("usage: %+v", result.Usage)
 	}
 	r.runtimeMetadata["model"] = "later"

@@ -180,9 +180,11 @@ func assertProviderUsageQueries(t *testing.T, ctx context.Context, queries *dbsq
 	if err != nil || stats.TotalInputTokens != int64(want.input) || stats.CacheReadTokens != int64(want.cacheRead) {
 		t.Fatalf("session cache stats = %+v, err = %v, want input %d read %d", stats, err, want.input, want.cacheRead)
 	}
-	latest, err := queries.GetLatestAssistantUsage(ctx, sessionID)
-	if last := stored[len(stored)-1].input; err != nil || latest != int64(last) {
-		t.Fatalf("latest assistant input = %d, err = %v, want %d", latest, err, last)
+	row, err := queries.GetLatestContextUsage(ctx, sessionID)
+	latest := messagepkg.ResolveContextObservation(row.SessionRuntimeType, row.MessageRuntimeType, row.Usage, row.ContextUsage)
+	wantLatest := messagepkg.ContextObservation{Basis: messagepkg.ContextBasisProviderInput, Known: true, UsedTokens: int64(stored[len(stored)-1].input)}
+	if err != nil || latest != wantLatest {
+		t.Fatalf("latest context = %+v, err = %v, want %+v", latest, err, wantLatest)
 	}
 	records, err := queries.ListTokenUsageRecords(ctx, dbsqlc.ListTokenUsageRecordsParams{BotID: botID, FromTime: from, ToTime: to, PageLimit: 10})
 	if err != nil || len(records) != len(stored) {

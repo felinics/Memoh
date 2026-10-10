@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
@@ -14,7 +16,10 @@ import (
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/workspace"
 )
@@ -189,7 +194,7 @@ func runtimeModeAccessors(driver external.Driver, kind string) (readRuntimeMode,
 // turn. Turn commands go through the existing chat admission/persistence path.
 func (s *Service) ExecuteRuntimeCommand(ctx context.Context, request RuntimeControlRequest) (result turn.RuntimeCommandResult, resultErr error) {
 	defer func() { resultErr = publicRuntimeControlError(resultErr) }()
-	_, driver, input, err := s.runtimeControlTarget(ctx, request)
+	sess, driver, input, err := s.runtimeControlTarget(ctx, request)
 	if err != nil {
 		return turn.RuntimeCommandResult{}, err
 	}
@@ -210,7 +215,11 @@ func (s *Service) ExecuteRuntimeCommand(ctx context.Context, request RuntimeCont
 		if err != nil {
 			return turn.RuntimeCommandResult{}, err
 		}
-		return provider.ReadCommand(controlCtx, input)
+		result, err := provider.ReadCommand(controlCtx, input)
+		if err == nil && request.Command == "status" {
+			s.attachContextObservation(ctx, sess.ID, result.Data)
+		}
+		return result, err
 	}
 	if command.Kind != external.CommandOperation {
 		return turn.RuntimeCommandResult{}, external.ErrCommandUnavailable
@@ -236,10 +245,62 @@ func (s *Service) ExecuteRuntimeCommand(ctx context.Context, request RuntimeCont
 		if err != nil {
 			return err
 		}
-		_, err = s.sessionService.MergeRuntimeMetadata(ctx, sess.ID, sess.RuntimeType, result.RuntimeMetadata)
-		return err
+		if _, err := s.sessionService.MergeRuntimeMetadata(ctx, sess.ID, sess.RuntimeType, result.RuntimeMetadata); err != nil {
+			return err
+		}
+		return s.markContextUsageStale(ctx, sess.ID, "compact")
 	})
 	return turn.RuntimeCommandResult{}, err
+}
+
+// attachContextObservation adds the session's context observation, the one
+// /context reads, to a runtime status view. Unknown stays null; it never
+// falls back to the runtime's cumulative counts.
+func (s *Service) attachContextObservation(ctx context.Context, sessionID string, data any) {
+	status, ok := data.(map[string]any)
+	if !ok || s.queries == nil {
+		return
+	}
+	status["context_tokens"] = nil
+	status["context_window"] = nil
+	pgSessionID, err := db.ParseUUID(sessionID)
+	if err != nil {
+		return
+	}
+	row, err := s.queries.GetLatestContextUsage(ctx, pgSessionID)
+	if err != nil {
+		s.logger.WarnContext(ctx, "read context observation for runtime status failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		return
+	}
+	observation := messagepkg.ResolveContextObservation(row.SessionRuntimeType, row.MessageRuntimeType, row.Usage, row.ContextUsage)
+	if !observation.Known {
+		return
+	}
+	status["context_tokens"] = observation.UsedTokens
+	if observation.WindowTokens > 0 {
+		status["context_window"] = observation.WindowTokens
+	}
+}
+
+// markContextUsageStale records that a runtime operation replaced the context
+// the session's newest observation measured. It runs inside the operation's
+// fenced run, so a superseded owner cannot mark a successor's state.
+func (s *Service) markContextUsageStale(ctx context.Context, sessionID, reason string) error {
+	if s.queries == nil {
+		return nil
+	}
+	pgSessionID, err := db.ParseUUID(sessionID)
+	if err != nil {
+		return err
+	}
+	fencingToken := pgtype.Int8{}
+	if fence, ok := runtimefence.FromContext(ctx); ok && fence.Token > 0 {
+		fencingToken = pgtype.Int8{Int64: fence.Token, Valid: true}
+	}
+	_, err = s.queries.MarkLatestContextUsageStale(ctx, sqlc.MarkLatestContextUsageStaleParams{
+		SessionID: pgSessionID, Reason: reason, FencingToken: fencingToken,
+	})
+	return err
 }
 
 func (s *Service) runRuntimeControl(ctx context.Context, request RuntimeControlRequest, run func(context.Context, session.Thread, external.Driver, external.PromptInput) error) (resultErr error) {

@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -65,6 +66,8 @@ type fakeCommandQueries struct {
 	// preferenceClears records UpdateSessionModelPreference calls so tests can
 	// assert the /model and /reasoning clear path (issue #879, P11′).
 	preferenceClears []pgtype.UUID
+	// contextRow, when set, replaces the native row carrying latestUsage.
+	contextRow *dbsqlc.GetLatestContextUsageRow
 }
 
 func (f *fakeCommandQueries) GetLatestSessionIDByBot(_ context.Context, _ pgtype.UUID) (pgtype.UUID, error) {
@@ -75,11 +78,17 @@ func (f *fakeCommandQueries) CountMessagesBySession(_ context.Context, _ pgtype.
 	return f.messageCount, nil
 }
 
-func (f *fakeCommandQueries) GetLatestAssistantUsage(_ context.Context, _ pgtype.UUID) (int64, error) {
+func (f *fakeCommandQueries) GetLatestContextUsage(_ context.Context, _ pgtype.UUID) (dbsqlc.GetLatestContextUsageRow, error) {
 	if f.latestUsageErr != nil {
-		return 0, f.latestUsageErr
+		return dbsqlc.GetLatestContextUsageRow{}, f.latestUsageErr
 	}
-	return f.latestUsage, nil
+	if f.contextRow != nil {
+		return *f.contextRow, nil
+	}
+	return dbsqlc.GetLatestContextUsageRow{
+		SessionRuntimeType: "model", MessageRuntimeType: "model",
+		Usage: []byte(fmt.Sprintf(`{"inputTokens":%d}`, f.latestUsage)),
+	}, nil
 }
 
 func (f *fakeCommandQueries) GetSessionCacheStats(_ context.Context, _ pgtype.UUID) (dbsqlc.GetSessionCacheStatsRow, error) {

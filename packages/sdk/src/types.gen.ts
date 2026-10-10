@@ -2014,11 +2014,19 @@ export type HandlersContextLifecycleTurn = {
 };
 
 export type HandlersContextUsage = {
+    basis?: string;
     breakdown?: Array<ContextfragKindBreakdown>;
     budget_plan?: ContextfragContextBudgetPlan;
     compaction?: HandlersCompactionInfo;
     context_window?: number;
+    source?: string;
     tool_defs?: Array<HandlersToolDefBucket>;
+    /**
+     * UsedTokens is omitted when the session's newest context state is
+     * unknown. Basis says what it measures: provider_input is the newest
+     * native request's input; runtime is the External Agent runtime's own
+     * measure, named by Source, with ContextWindow from the same observation.
+     */
     used_tokens?: number;
 };
 

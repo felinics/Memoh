@@ -129,6 +129,7 @@
       "title": "Context",
       "usedWithWindow": "{percent} · {used} / {window} used",
       "tokensUsed": "{used} tokens used",
+      "unavailable": "Not available",
       "fieldCacheHit": "Cache hit"
     },
     "access": {

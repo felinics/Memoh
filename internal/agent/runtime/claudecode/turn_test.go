@@ -150,8 +150,12 @@ func TestClaudeTurnMapping(t *testing.T) {
 	if result.Text != "Done. Tests pass." {
 		t.Fatalf("text = %q", result.Text)
 	}
-	if result.Usage == nil || result.Usage.InputTokens != 1200 || result.Usage.CachedInputTokens != 800 {
-		t.Fatalf("usage: %+v", result.Usage)
+	wantUsage := sdk.Usage{
+		InputTokens: 2000, OutputTokens: 90, TotalTokens: 2090, CachedInputTokens: 800,
+		InputTokenDetails: sdk.InputTokenDetail{NoCacheTokens: 1200, CacheReadTokens: 800},
+	}
+	if result.Usage == nil || *result.Usage != wantUsage {
+		t.Fatalf("usage = %+v, want %+v", result.Usage, wantUsage)
 	}
 	if result.RuntimeMetadata[metadataSessionIDKey] != "sess-abc" {
 		t.Fatalf("runtime metadata: %+v", result.RuntimeMetadata)

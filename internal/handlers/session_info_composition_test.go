@@ -210,6 +210,74 @@ func TestGetSessionInfoOmitsCompactionForACPRuntime(t *testing.T) {
 	if response.ContextUsage.Compaction != nil {
 		t.Fatalf("compaction = %+v, want none: Memoh never compacts ACP sessions", response.ContextUsage.Compaction)
 	}
+	if response.ContextUsage.Basis != "runtime" || response.ContextUsage.UsedTokens != nil || response.ContextUsage.ContextWindow != nil {
+		t.Fatalf("context usage = %+v, want an unknown runtime observation", response.ContextUsage)
+	}
+}
+
+// The runtime basis reports the runtime's measurement with the window of the
+// same observation; unknown omits both rather than reporting zero.
+func TestGetSessionInfoReportsRuntimeObservation(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		context string
+		used    *int64
+		window  *int64
+	}{
+		{"known", `{"used_tokens":1585,"context_window":200000,"source":"acp_usage_update"}`, ptrInt64(1585), ptrInt64(200000)},
+		{"known without window", `{"used_tokens":1585,"source":"acp_usage_update"}`, ptrInt64(1585), nil},
+		{"stale", `{"used_tokens":1585,"context_window":200000,"stale":"compact"}`, nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			queries := &sessionInfoQueryStub{
+				bot: testBotRow(lifecycleTestBotID, map[string]any{}),
+				session: sqlc.BotSession{
+					ID: testUUID(lifecycleTestSessionID), BotID: testUUID(lifecycleTestBotID),
+					Type: session.TypeACPAgent, SessionMode: session.TypeChat, RuntimeType: session.RuntimeACPAgent,
+				},
+				contextRow: &sqlc.GetLatestContextUsageRow{
+					SessionRuntimeType: session.RuntimeACPAgent, MessageRuntimeType: session.RuntimeACPAgent,
+					Usage: []byte(`{"inputTokens":3080000}`), ContextUsage: []byte(tc.context),
+				},
+				settingsRow: sqlc.GetSettingsByBotIDRow{BotID: testUUID(lifecycleTestBotID)},
+			}
+			logger := slog.New(slog.DiscardHandler)
+			handler := NewSessionInfoHandler(logger, queries, bots.NewService(nil, queries), newTestAdminAccountService("admin"), nil, settings.NewService(logger, queries, nil, nil))
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodGet, "/bots/"+lifecycleTestBotID+"/sessions/"+lifecycleTestSessionID+"/status", nil)
+			rec := httptest.NewRecorder()
+			ctx := testAuthContext(e, req, rec, "user-1")
+			ctx.SetPath("/bots/:bot_id/sessions/:session_id/status")
+			ctx.SetParamNames("bot_id", "session_id")
+			ctx.SetParamValues(lifecycleTestBotID, lifecycleTestSessionID)
+			if err := handler.GetSessionInfo(ctx); err != nil {
+				t.Fatalf("GetSessionInfo() error = %v", err)
+			}
+			var response SessionInfoResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			usage := response.ContextUsage
+			if usage.Basis != "runtime" || !equalInt64Ptr(usage.UsedTokens, tc.used) || !equalInt64Ptr(usage.ContextWindow, tc.window) {
+				t.Fatalf("context usage = %+v (used %v window %v), want used %v window %v", usage, derefInt64(usage.UsedTokens), derefInt64(usage.ContextWindow), derefInt64(tc.used), derefInt64(tc.window))
+			}
+		})
+	}
+}
+
+func ptrInt64(v int64) *int64 { return &v }
+
+func equalInt64Ptr(a, b *int64) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
+}
+
+func derefInt64(v *int64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 type sessionInfoQueryStub struct {
@@ -220,6 +288,7 @@ type sessionInfoQueryStub struct {
 	legacyRows    []sqlc.ListRecentAssistantMessagesBySessionRow
 	settingsRow   sqlc.GetSettingsByBotIDRow
 	settingsCalls int
+	contextRow    *sqlc.GetLatestContextUsageRow
 }
 
 func (q *sessionInfoQueryStub) GetBotByID(_ context.Context, _ pgtype.UUID) (sqlc.GetBotByIDRow, error) {
@@ -234,8 +303,11 @@ func (*sessionInfoQueryStub) CountMessagesBySession(_ context.Context, _ pgtype.
 	return 7, nil
 }
 
-func (*sessionInfoQueryStub) GetLatestAssistantUsage(_ context.Context, _ pgtype.UUID) (int64, error) {
-	return 123000, nil
+func (q *sessionInfoQueryStub) GetLatestContextUsage(_ context.Context, _ pgtype.UUID) (sqlc.GetLatestContextUsageRow, error) {
+	if q.contextRow != nil {
+		return *q.contextRow, nil
+	}
+	return sqlc.GetLatestContextUsageRow{SessionRuntimeType: q.session.RuntimeType, MessageRuntimeType: "model", Usage: []byte(`{"inputTokens":123000}`)}, nil
 }
 
 func (*sessionInfoQueryStub) GetSessionCacheStats(_ context.Context, _ pgtype.UUID) (sqlc.GetSessionCacheStatsRow, error) {

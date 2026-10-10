@@ -58,10 +58,11 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
     refetchOnWindowFocus: false,
   })
 
-  const usedTokens = computed(() => info.value?.context_usage?.used_tokens ?? 0)
   const contextView = computed(() => resolveSessionContextView(info.value?.context_usage, {
     fallbackWindow: options.fallbackContextWindow?.value,
   }))
+  const usedTokens = computed(() => contextView.value.usedTokens)
+  const runtimeObserved = computed(() => contextView.value.runtimeObserved)
   const composition = computed(() => contextView.value.composition)
   const estimatedTokens = computed(() => contextView.value.estimatedTokens)
   const contextWindow = computed(() => contextView.value.contextWindow)
@@ -69,10 +70,10 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
   const autoCompactTokens = computed(() => contextView.value.autoCompactTokens)
   const compactionAvailable = computed(() => contextView.value.compactionAvailable)
   // Anything that owns context is compactable, whichever basis reported it.
-  const contextTokens = computed(() => estimatedTokens.value ?? usedTokens.value)
+  const contextTokens = computed(() => estimatedTokens.value ?? usedTokens.value ?? 0)
   const contextPercent = computed(() => {
     if (contextWindow.value == null || contextWindow.value <= 0) return 0
-    return ((estimatedTokens.value ?? usedTokens.value) / contextWindow.value) * 100
+    return (contextTokens.value / contextWindow.value) * 100
   })
 
   // Runtime-owned compaction shares the session lock and feedback; callers
@@ -108,6 +109,7 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
   return {
     info,
     usedTokens,
+    runtimeObserved,
     composition,
     contextWindow,
     outputReserve,

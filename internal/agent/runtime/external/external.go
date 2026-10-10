@@ -260,6 +260,15 @@ type EventSinkFunc func(event.StreamEvent)
 
 func (f EventSinkFunc) EmitStreamEvent(ev event.StreamEvent) { f(ev) }
 
+// ContextUsage is the runtime's own measure of its context occupancy after
+// the turn's latest model request. WindowTokens is zero when the runtime did
+// not report the window for that same observation; Source names the measure.
+type ContextUsage struct {
+	UsedTokens   int
+	WindowTokens int
+	Source       string
+}
+
 // PromptResult is the durable outcome of one turn.
 type PromptResult struct {
 	// Notices are UI-only runtime facts collected across startup and execution.
@@ -274,6 +283,9 @@ type PromptResult struct {
 	Text string
 	// Usage is the turn's token usage, when the runtime reported it.
 	Usage *sdk.Usage
+	// Context is the context occupancy of the turn's latest model request.
+	// Nil when the runtime reported none.
+	Context *ContextUsage
 	// StopReason is the runtime's terminal stop reason, normalized to the
 	// event vocabulary where possible.
 	StopReason string

@@ -15,6 +15,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -57,7 +58,13 @@ type SessionInfoResponse struct {
 }
 
 type ContextUsage struct {
-	UsedTokens    int64                          `json:"used_tokens"`
+	// UsedTokens is omitted when the session's newest context state is
+	// unknown. Basis says what it measures: provider_input is the newest
+	// native request's input; runtime is the External Agent runtime's own
+	// measure, named by Source, with ContextWindow from the same observation.
+	UsedTokens    *int64                         `json:"used_tokens,omitempty"`
+	Basis         string                         `json:"basis"`
+	Source        string                         `json:"source,omitempty"`
 	ContextWindow *int64                         `json:"context_window,omitempty"`
 	Breakdown     []contextfrag.KindBreakdown    `json:"breakdown,omitempty"`
 	ToolDefs      []ToolDefBucket                `json:"tool_defs,omitempty"`
@@ -156,17 +163,25 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 		return errs.Wrap(err, "count messages")
 	}
 
-	var usedTokens int64
-	latestUsage, err := h.queries.GetLatestAssistantUsage(ctx, pgSessionID)
+	latestContext, err := h.queries.GetLatestContextUsage(ctx, pgSessionID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return errs.Wrap(err, "get latest usage")
 	}
-	if err == nil {
-		usedTokens = latestUsage
-	}
+	observation := messagepkg.ResolveContextObservation(latestContext.SessionRuntimeType, latestContext.MessageRuntimeType, latestContext.Usage, latestContext.ContextUsage)
 
 	botSettings, hasSettings := h.loadBotSettings(ctx, bot.ID)
-	contextWindow, resolvedModel := h.resolveContextWindow(c, botSettings)
+	modelWindow, resolvedModel := h.resolveContextWindow(c, botSettings)
+	contextWindow := modelWindow
+	if observation.Basis == messagepkg.ContextBasisRuntime {
+		contextWindow = nil
+		if observation.WindowTokens > 0 {
+			contextWindow = &observation.WindowTokens
+		}
+	}
+	var usedTokens *int64
+	if observation.Known {
+		usedTokens = &observation.UsedTokens
+	}
 
 	cacheRow, err := h.queries.GetSessionCacheStats(ctx, pgSessionID)
 	if err != nil {
@@ -193,7 +208,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 		h.logger.WarnContext(c.Request().Context(), "load latest context snapshot failed", slog.Any("error", err))
 	} else if ok {
 		breakdown, toolDefs, budgetPlan = contextComposition(snapshot)
-		if !budgetPlanApplies(snapshot, resolvedModel, contextWindow) {
+		if !budgetPlanApplies(snapshot, resolvedModel, modelWindow) {
 			budgetPlan = nil
 		}
 	}
@@ -208,6 +223,8 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 		MessageCount: messageCount,
 		ContextUsage: ContextUsage{
 			UsedTokens:    usedTokens,
+			Basis:         observation.Basis,
+			Source:        observation.Source,
 			ContextWindow: contextWindow,
 			Breakdown:     breakdown,
 			ToolDefs:      toolDefs,

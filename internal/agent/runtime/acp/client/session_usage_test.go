@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/messageconv"
 )
@@ -131,5 +133,112 @@ func TestPromptUsageFromACPKeepsCacheWithinInput(t *testing.T) {
 				t.Fatalf("usage = %+v", got)
 			}
 		})
+	}
+}
+
+// The updates and usage are claude-agent-acp 0.44.0 output for one prompt of
+// two API requests, recorded against a local fake Anthropic endpoint.
+func TestPromptKeepsLastUsageUpdateAsContext(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		updates string
+		want    *external.ContextUsage
+	}{
+		{
+			name:    "usage updates",
+			updates: `[{"sessionUpdate":"usage_update","used":1511,"size":200000},{"sessionUpdate":"usage_update","used":1530,"size":200000},{"sessionUpdate":"usage_update","used":1571,"size":200000},{"sessionUpdate":"usage_update","used":1585,"size":200000},{"sessionUpdate":"usage_update","used":1585,"size":200000,"cost":{"amount":0.00342,"currency":"USD"}}]`,
+			want:    &external.ContextUsage{UsedTokens: 1585, WindowTokens: 200000, Source: "acp_usage_update"},
+		},
+		{name: "no usage update"},
+		{
+			// ACP allows zero; it is a reported value, not a sentinel.
+			name:    "explicit zero",
+			updates: `[{"sessionUpdate":"usage_update","used":180000,"size":200000},{"sessionUpdate":"usage_update","used":0,"size":200000}]`,
+			want:    &external.ContextUsage{UsedTokens: 0, WindowTokens: 200000, Source: "acp_usage_update"},
+		},
+		{
+			name:    "unknown window",
+			updates: `[{"sessionUpdate":"usage_update","used":1585,"size":0}]`,
+			want:    &external.ContextUsage{UsedTokens: 1585, Source: "acp_usage_update"},
+		},
+		{
+			name:    "another session",
+			updates: `[{"sessionUpdate":"usage_update","used":1585,"size":200000,"_meta":{"memoh_fake_session":"other-session"}}]`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner, agentPath := newStartSessionTestRunner(t)
+			t.Setenv("MEMOH_ACP_FAKE_AGENT_USAGE", `{"inputTokens":40,"outputTokens":35,"cachedReadTokens":2500,"cachedWriteTokens":540,"totalTokens":3115}`)
+			t.Setenv("MEMOH_ACP_FAKE_AGENT_USAGE_UPDATES", tc.updates)
+			sess, err := runner.StartSession(context.Background(), StartRequest{
+				AgentID:     acpprofile.AgentACPID,
+				BotID:       "bot-1",
+				ProjectPath: "/data/project",
+				Command:     agentPath,
+				Timeout:     10 * time.Second,
+			}, nil)
+			if err != nil {
+				t.Fatalf("StartSession() error = %v", err)
+			}
+			defer func() { _ = sess.Close() }()
+
+			result, err := sess.Prompt(context.Background(), "hi")
+			if err != nil {
+				t.Fatalf("Prompt() error = %v", err)
+			}
+			if result.Usage == nil || result.Usage.InputTokens != 3080 || result.Usage.InputTokenDetails != (sdk.InputTokenDetail{NoCacheTokens: 40, CacheReadTokens: 2500, CacheWriteTokens: 540}) {
+				t.Fatalf("usage = %+v", result.Usage)
+			}
+			if (result.Context == nil) != (tc.want == nil) || (tc.want != nil && *result.Context != *tc.want) {
+				t.Fatalf("context = %+v, want %+v", result.Context, tc.want)
+			}
+		})
+	}
+}
+
+// A cancelled prompt's observations, including one the agent sends while
+// winding down, never become the next prompt's context.
+func TestCancelledPromptUsageDoesNotReachNextPrompt(t *testing.T) {
+	runner, agentPath := newStartSessionTestRunner(t)
+	root := t.TempDir()
+	startedFile := filepath.Join(root, "prompt-started")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_CANCEL_USAGE", "1")
+	t.Setenv("MEMOH_ACP_PROMPT_STARTED_FILE", startedFile)
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		AgentID:     acpprofile.AgentACPID,
+		BotID:       "bot-1",
+		ProjectPath: "/data/project",
+		Command:     agentPath,
+		Timeout:     10 * time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	defer func() { _ = sess.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan PromptResult, 1)
+	go func() {
+		result, _ := sess.Prompt(ctx, "first")
+		done <- result
+	}()
+	waitForFile(t, startedFile, 5*time.Second)
+	cancel()
+	var first PromptResult
+	select {
+	case first = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("cancelled prompt did not return")
+	}
+	if first.Context == nil || first.Context.UsedTokens != 1000 {
+		t.Fatalf("cancelled prompt context = %+v, want the observation made before cancellation", first.Context)
+	}
+
+	second, err := sess.Prompt(context.Background(), "second")
+	if err != nil {
+		t.Fatalf("second Prompt() error = %v", err)
+	}
+	if second.Context != nil {
+		t.Fatalf("second prompt context = %+v, want none of its own", second.Context)
 	}
 }

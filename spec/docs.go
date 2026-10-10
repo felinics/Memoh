@@ -22138,6 +22138,9 @@ const docTemplate = `{
         "handlers.ContextUsage": {
             "type": "object",
             "properties": {
+                "basis": {
+                    "type": "string"
+                },
                 "breakdown": {
                     "type": "array",
                     "items": {
@@ -22153,6 +22156,9 @@ const docTemplate = `{
                 "context_window": {
                     "type": "integer"
                 },
+                "source": {
+                    "type": "string"
+                },
                 "tool_defs": {
                     "type": "array",
                     "items": {
@@ -22160,6 +22166,7 @@ const docTemplate = `{
                     }
                 },
                 "used_tokens": {
+                    "description": "UsedTokens is omitted when the session's newest context state is\nunknown. Basis says what it measures: provider_input is the newest\nnative request's input; runtime is the External Agent runtime's own\nmeasure, named by Source, with ContextWindow from the same observation.",
                     "type": "integer"
                 }
             }

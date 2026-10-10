@@ -61,13 +61,9 @@ func (h *Handler) renderSessionStatus(cc CommandContext, sessionID string, scope
 		return "", fmt.Errorf("count messages: %w", err)
 	}
 
-	var usedTokens int64
-	latestUsage, err := h.queries.GetLatestAssistantUsage(cc.Ctx, pgSessionID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	observation, err := h.contextObservation(cc, pgSessionID)
+	if err != nil {
 		return "", fmt.Errorf("get usage: %w", err)
-	}
-	if err == nil {
-		usedTokens = latestUsage
 	}
 
 	cacheRow, err := h.queries.GetSessionCacheStats(cc.Ctx, pgSessionID)
@@ -82,9 +78,12 @@ func (h *Handler) renderSessionStatus(cc CommandContext, sessionID string, scope
 
 	skills, _ := h.queries.GetSessionUsedSkills(cc.Ctx, pgSessionID)
 
-	contextUsage := formatTokens(usedTokens)
-	if contextWindow := h.resolveContextWindow(cc); contextWindow != "" {
-		contextUsage = contextUsage + " / " + contextWindow
+	contextUsage := cc.T("cmd.context.unavailable")
+	if observation.Known {
+		contextUsage = formatTokens(observation.UsedTokens)
+		if window := h.contextWindowFor(cc, observation); window > 0 {
+			contextUsage += " / " + formatTokens(window)
+		}
 	}
 
 	pairs := make([]kv, 0, 6)

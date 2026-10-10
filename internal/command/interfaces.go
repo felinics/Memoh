@@ -47,7 +47,7 @@ type ContainerFS interface {
 type CommandQueries interface {
 	GetLatestSessionIDByBot(ctx context.Context, botID pgtype.UUID) (pgtype.UUID, error)
 	CountMessagesBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error)
-	GetLatestAssistantUsage(ctx context.Context, sessionID pgtype.UUID) (int64, error)
+	GetLatestContextUsage(ctx context.Context, sessionID pgtype.UUID) (dbsqlc.GetLatestContextUsageRow, error)
 	GetSessionCacheStats(ctx context.Context, sessionID pgtype.UUID) (dbsqlc.GetSessionCacheStatsRow, error)
 	GetSessionUsedSkills(ctx context.Context, sessionID pgtype.UUID) ([]string, error)
 	GetTokenUsageByDayAndType(ctx context.Context, arg dbsqlc.GetTokenUsageByDayAndTypeParams) ([]dbsqlc.GetTokenUsageByDayAndTypeRow, error)

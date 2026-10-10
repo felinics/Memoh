@@ -85,13 +85,14 @@ type inboundMessage struct {
 	Event json.RawMessage `json:"event,omitempty"`
 
 	// result fields.
-	IsError   bool            `json:"is_error,omitempty"`
-	Errors    []string        `json:"errors,omitempty"`
-	Result    string          `json:"result,omitempty"`
-	Usage     *resultUsage    `json:"usage,omitempty"`
-	Request   json.RawMessage `json:"request,omitempty"`
-	RequestID string          `json:"request_id,omitempty"`
-	Response  json.RawMessage `json:"response,omitempty"`
+	IsError    bool                  `json:"is_error,omitempty"`
+	Errors     []string              `json:"errors,omitempty"`
+	Result     string                `json:"result,omitempty"`
+	Usage      *resultUsage          `json:"usage,omitempty"`
+	ModelUsage map[string]modelUsage `json:"modelUsage,omitempty"`
+	Request    json.RawMessage       `json:"request,omitempty"`
+	RequestID  string                `json:"request_id,omitempty"`
+	Response   json.RawMessage       `json:"response,omitempty"`
 }
 
 type initializeResponse struct {
@@ -144,6 +145,21 @@ type resultUsage struct {
 	OutputTokens             int `json:"output_tokens"`
 }
 
+// modelUsage is one model's entry in a result's modelUsage, keyed by the
+// model name the CLI requested.
+type modelUsage struct {
+	ContextWindow int `json:"contextWindow"`
+}
+
+// requestUsage is the usage of one API request as streamed: message_delta
+// may omit the input-side counters.
+type requestUsage struct {
+	InputTokens              *int `json:"input_tokens"`
+	CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
+	OutputTokens             *int `json:"output_tokens"`
+}
+
 // contentBlock is one Anthropic message content block; only the fields the
 // mapping consumes are typed.
 type contentBlock struct {
@@ -164,7 +180,10 @@ type contentBlock struct {
 
 // chatMessage is the Anthropic message envelope inside assistant/user lines.
 type chatMessage struct {
+	ID      string         `json:"id,omitempty"`
+	Model   string         `json:"model,omitempty"`
 	Content []contentBlock `json:"content"`
+	Usage   *requestUsage  `json:"usage,omitempty"`
 }
 
 func decodeChatMessage(raw json.RawMessage) (*chatMessage, bool) {
@@ -180,7 +199,13 @@ func decodeChatMessage(raw json.RawMessage) (*chatMessage, bool) {
 
 // streamEvent is the raw Anthropic streaming event inside a stream_event line.
 type streamEvent struct {
-	Type  string `json:"type"`
+	Type    string `json:"type"`
+	Message *struct {
+		ID    string        `json:"id"`
+		Model string        `json:"model"`
+		Usage *requestUsage `json:"usage"`
+	} `json:"message,omitempty"`
+	Usage *requestUsage `json:"usage,omitempty"`
 	Delta struct {
 		Type     string `json:"type"`
 		Text     string `json:"text,omitempty"`

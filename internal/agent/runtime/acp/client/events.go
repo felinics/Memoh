@@ -10,6 +10,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/event"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 )
 
 const (
@@ -124,7 +125,13 @@ type eventCollector struct {
 	// transcript is kept separately from the capped UI event buffer.
 	transcript *TranscriptRecorder
 	limit      ToolOutputLimit
+	// sessionID scopes usage_update observations; context is the last one
+	// received for that session while this prompt accepted events.
+	sessionID acp.SessionId
+	context   *external.ContextUsage
 }
+
+const contextSourceUsageUpdate = "acp_usage_update"
 
 func (c *eventCollector) bindContext(ctx context.Context) {
 	if c == nil {
@@ -189,6 +196,9 @@ func (c *eventCollector) apply(n acp.SessionNotification, events []event.StreamE
 	if update.AgentMessageChunk != nil {
 		c.text.WriteString(contentText(update.AgentMessageChunk.Content))
 	}
+	if usage := update.UsageUpdate; usage != nil && n.SessionId == c.sessionID {
+		c.context = &external.ContextUsage{UsedTokens: usage.Used, WindowTokens: max(usage.Size, 0), Source: contextSourceUsageUpdate}
+	}
 	return true
 }
 
@@ -209,10 +219,16 @@ func (c *eventCollector) result() RunResult {
 
 	events := append([]event.StreamEvent(nil), c.events...)
 	text := strings.TrimSpace(c.text.String())
+	var observed *external.ContextUsage
+	if c.context != nil {
+		value := *c.context
+		observed = &value
+	}
 	return RunResult{
-		Text:   text,
-		Events: events,
-		Output: c.transcript.Messages(text),
+		Text:    text,
+		Events:  events,
+		Output:  c.transcript.Messages(text),
+		Context: observed,
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 func TestContextRegistered(t *testing.T) {
@@ -46,5 +48,53 @@ func TestRenderContextUsageNoWindow(t *testing.T) {
 	// No model service wired => no window => the "N tokens used" fallback path.
 	if !strings.Contains(out, "1.5K tokens used") {
 		t.Errorf("missing used tokens: %s", out)
+	}
+}
+
+// A runtime session shows the runtime's own measurement against the window of
+// the same observation, never a turn total or another model's window.
+func TestRenderRuntimeContextUsage(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		context string
+		want    []string
+		reject  []string
+	}{
+		{"known with window", `{"used_tokens":1585,"context_window":200000,"source":"acp_usage_update"}`, []string{"1%", "1.6K / 200.0K used"}, []string{"Not available"}},
+		{"known without window", `{"used_tokens":1585}`, []string{"1.6K tokens used"}, []string{"%", "Not available"}},
+		{"unknown", ``, []string{"Not available"}, []string{"tokens used", "%"}},
+		{"stale", `{"used_tokens":180000,"context_window":200000,"stale":"compact"}`, []string{"Not available"}, []string{"180", "%"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			row := dbsqlc.GetLatestContextUsageRow{SessionRuntimeType: "acp_agent", MessageRuntimeType: "acp_agent", Usage: []byte(`{"inputTokens":3080000}`)}
+			if tc.context != "" {
+				row.ContextUsage = []byte(tc.context)
+			}
+			h := newTestHandlerWithQueries(&fakeRoleResolver{role: "owner"}, &fakeCommandQueries{messageCount: 3, contextRow: &row})
+			cc := CommandContext{Ctx: context.Background(), BotID: "b"}
+			out, err := h.renderContextUsage(cc, "11111111-1111-1111-1111-111111111111")
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, err := h.renderSessionStatus(cc, "11111111-1111-1111-1111-111111111111", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(out, want) {
+					t.Errorf("/context missing %q: %s", want, out)
+				}
+			}
+			for _, reject := range tc.reject {
+				if strings.Contains(out, reject) {
+					t.Errorf("/context contains %q: %s", reject, out)
+				}
+			}
+			if strings.Contains(status, "3.1M") || (tc.name == "unknown" && !strings.Contains(status, "Context: Not available")) {
+				t.Errorf("/status context: %s", status)
+			}
+		})
 	}
 }

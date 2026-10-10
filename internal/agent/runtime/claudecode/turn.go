@@ -87,7 +87,29 @@ type turnRunner struct {
 	usage           resultUsage
 	hasUsage        bool
 	resultIDs       map[string]struct{}
+	// request is the latest top-level API request; nativeModel and
+	// responseModels describe the native turn it belongs to.
+	request        *requestObservation
+	nativeTurn     int
+	nativeModel    string
+	responseModels map[string]struct{}
 }
+
+// requestObservation is one top-level API request, identified by its
+// message id. final is set once message_delta delivered the output count.
+type requestObservation struct {
+	id         string
+	model      string
+	nativeTurn int
+	input      int
+	cacheRead  int
+	cacheWrite int
+	output     int
+	final      bool
+	window     int
+}
+
+const contextSourceRequest = "claude_code_request"
 
 func newTurnRunner(parent context.Context, input external.PromptInput, proc cliProcess, approvalSvc approval.FlowService, waiter func(string) func(), logger *slog.Logger) *turnRunner {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
@@ -274,6 +296,11 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 			// never join the model prose that result.result may replace.
 			t.emit(event.StreamEvent{Type: event.CommandOutput, ToolName: t.input.Command, Delta: msg.Content})
 		}
+		if msg.Subtype == "compact_boundary" {
+			t.mu.Lock()
+			t.request = nil
+			t.mu.Unlock()
+		}
 		if msg.Subtype == "compact_boundary" && msg.CompactMetadata != nil && msg.CompactMetadata.Trigger == "manual" {
 			t.mu.Lock()
 			t.compactBoundary = true
@@ -287,6 +314,9 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 		t.observePermissionMode(msg.PermissionMode)
 		if msg.Subtype == "init" {
 			t.mu.Lock()
+			t.nativeTurn++
+			t.nativeModel = msg.Model
+			t.responseModels = map[string]struct{}{}
 			t.steerSupported = slices.Contains(msg.Capabilities, "msg_lifecycle_v1") && slices.Contains(msg.Capabilities, "interrupt_cancel_queued_v1")
 			if msg.Model != "" {
 				t.runtimeMetadata["claude_model"] = msg.Model
@@ -321,6 +351,9 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 		chat, ok := decodeChatMessage(msg.Message)
 		if !ok {
 			return
+		}
+		if msg.LocalCommandSource == "" {
+			t.observeRequest(chat.ID, chat.Model, chat.Usage, false)
 		}
 		streamed := t.streamedText.String()
 		if msg.LocalCommandSource == "" {
@@ -388,8 +421,14 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 			return
 		}
 		if ev.Type == "message_start" {
+			if ev.Message != nil {
+				t.observeRequest(ev.Message.ID, ev.Message.Model, ev.Message.Usage, false)
+			}
 			t.streamedText.Reset()
 			t.emit(event.StreamEvent{Type: event.RuntimeStatus})
+		}
+		if ev.Type == "message_delta" && ev.Usage != nil {
+			t.observeRequest("", "", ev.Usage, true)
 		}
 		if ev.Type != "content_block_delta" {
 			return
@@ -414,6 +453,7 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 		}
 		t.result = msg
 		t.awaitingResult = false
+		t.resolveRequestWindow(msg.ModelUsage)
 		if msg.Usage != nil {
 			t.hasUsage = true
 			t.usage.InputTokens += msg.Usage.InputTokens
@@ -482,6 +522,57 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 			}
 			ch <- result
 		}
+	}
+}
+
+// observeRequest tracks the latest top-level API request. A new message id
+// starts a request; message_delta (final) completes the current one.
+func (t *turnRunner) observeRequest(id, model string, usage *requestUsage, final bool) {
+	if usage == nil || (!final && (id == "" || model == "<synthetic>")) {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	r := t.request
+	if !final && (r == nil || r.id != id) {
+		r = &requestObservation{id: id, model: model, nativeTurn: t.nativeTurn}
+		t.request = r
+		if t.responseModels != nil {
+			t.responseModels[model] = struct{}{}
+		}
+	}
+	if r == nil {
+		return
+	}
+	for _, field := range []struct {
+		dst *int
+		src *int
+	}{{&r.input, usage.InputTokens}, {&r.cacheRead, usage.CacheReadInputTokens}, {&r.cacheWrite, usage.CacheCreationInputTokens}} {
+		if field.src != nil {
+			*field.dst = *field.src
+		}
+	}
+	if final && usage.OutputTokens != nil {
+		r.output = *usage.OutputTokens
+		r.final = true
+	}
+}
+
+// resolveRequestWindow reads the window of the latest request from its native
+// turn's modelUsage: the answered model by name, else the turn's requested
+// model, which keys modelUsage, when every request of the turn answered with
+// one model.
+func (t *turnRunner) resolveRequestWindow(models map[string]modelUsage) {
+	r := t.request
+	if r == nil || r.window > 0 || r.nativeTurn != t.nativeTurn {
+		return
+	}
+	if usage, ok := models[r.model]; ok {
+		r.window = usage.ContextWindow
+		return
+	}
+	if usage, ok := models[t.nativeModel]; ok && t.nativeModel != "" && len(t.responseModels) == 1 {
+		r.window = usage.ContextWindow
 	}
 }
 
@@ -761,11 +852,24 @@ func (t *turnRunner) buildResult(storedSessionID string) (external.PromptResult,
 	out := external.PromptResult{Output: withoutNoResponseSentinel(recorder.Messages(finalText)), Text: finalText, SteerInputIDs: steerIDs}
 	if t.hasUsage {
 		usage := t.usage
+		input := usage.InputTokens + usage.CacheReadInputTokens + usage.CacheCreationInputTokens
 		out.Usage = &sdk.Usage{
-			InputTokens:       usage.InputTokens,
+			InputTokens:       input,
 			OutputTokens:      usage.OutputTokens,
-			TotalTokens:       usage.InputTokens + usage.OutputTokens,
+			TotalTokens:       input + usage.OutputTokens,
 			CachedInputTokens: usage.CacheReadInputTokens,
+			InputTokenDetails: sdk.InputTokenDetail{
+				NoCacheTokens:    usage.InputTokens,
+				CacheReadTokens:  usage.CacheReadInputTokens,
+				CacheWriteTokens: usage.CacheCreationInputTokens,
+			},
+		}
+	}
+	if r := t.request; r != nil && r.final && r.input+r.cacheRead+r.cacheWrite > 0 {
+		out.Context = &external.ContextUsage{
+			UsedTokens:   r.input + r.cacheRead + r.cacheWrite + r.output,
+			WindowTokens: r.window,
+			Source:       contextSourceRequest,
 		}
 	}
 	if t.sessionID != "" && t.sessionID != storedSessionID {

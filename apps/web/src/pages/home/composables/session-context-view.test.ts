@@ -56,4 +56,46 @@ describe('resolveSessionContextView', () => {
     expect(view.estimatedTokens).toBeNull()
     expect(resolveSessionContextView(undefined, { fallbackWindow: null }).contextWindow).toBeNull()
   })
+
+  it('keeps the native reading: provider input, zero when no turn has reported yet', () => {
+    expect(resolveSessionContextView({ ...usage, basis: 'provider_input' }, { fallbackWindow: null }).usedTokens).toBe(10143)
+    expect(resolveSessionContextView({ basis: 'provider_input' }, { fallbackWindow: null }).usedTokens).toBe(0)
+  })
+})
+
+describe('resolveSessionContextView for an External Agent runtime', () => {
+  const runtime: HandlersContextUsage = { ...usage, basis: 'runtime', used_tokens: 1585, context_window: 200000 }
+
+  it('reads the runtime observation, not the context-document estimate or the plan window', () => {
+    const view = resolveSessionContextView(runtime, { fallbackWindow: 128000 })
+
+    expect(view.runtimeObserved).toBe(true)
+    expect(view.usedTokens).toBe(1585)
+    expect(view.contextWindow).toBe(200000)
+    expect(view.composition).toBeNull()
+    expect(view.estimatedTokens).toBeNull()
+    expect(view.outputReserve).toBeNull()
+    expect(view.autoCompactTokens).toBeNull()
+  })
+
+  it('never borrows the selected model window when the runtime reported none', () => {
+    const { context_window: _omitted, ...withoutWindow } = runtime
+    const view = resolveSessionContextView(withoutWindow, { fallbackWindow: 128000 })
+
+    expect(view.usedTokens).toBe(1585)
+    expect(view.contextWindow).toBeNull()
+  })
+
+  it('reports an unknown observation as unknown instead of zero', () => {
+    const { used_tokens: _used, ...unknown } = runtime
+    const view = resolveSessionContextView(unknown, { fallbackWindow: 128000 })
+
+    expect(view.usedTokens).toBeNull()
+    expect(view.contextWindow).toBeNull()
+    expect(view.composition).toBeNull()
+  })
+
+  it('keeps a reported zero', () => {
+    expect(resolveSessionContextView({ ...runtime, used_tokens: 0 }, { fallbackWindow: null }).usedTokens).toBe(0)
+  })
 })
