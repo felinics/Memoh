@@ -1824,6 +1824,35 @@
       }
     }
   },
+  "chatExamples": {
+    "noBot": "请先创建一个 Bot 再试试。",
+    "createBot": "创建 Bot",
+    "tryThese": "试试这些",
+    "needs": "需要{capability}",
+    "capability": {
+      "web_search": "网页搜索",
+      "memory": "长期记忆",
+      "email": "邮件",
+      "workspace": "工作区",
+      "browser": "浏览器",
+      "schedule": "定时任务",
+      "channel": "渠道"
+    },
+    "sidebarEntry": "看看 Memoh 能做什么",
+    "galleryTitle": "看看 Memoh 能做什么",
+    "galleryDescription": "选一个示例填进输入框，发送前可以修改。",
+    "viewAll": "查看更多",
+    "dismiss": "隐藏推荐",
+    "replaceDraft": {
+      "title": "替换输入框里的内容？",
+      "description": "输入框里有还没发送的内容，替换成这条提示词后，原内容会被丢弃。",
+      "confirm": "替换"
+    },
+    "share": {
+      "prompt": "你用 Memoh 做过什么？带上 #Memoh，把你的使用案例分享到 X。",
+      "action": "分享到 X"
+    }
+  },
   "models": {
     "title": "模型",
     "searchPlaceholder": "搜索服务商…",
@@ -4106,23 +4135,10 @@
       "title": "一切就绪",
       "subtitle": "进入 Memoh，开始你的第一段对话",
       "action": "打开 Memoh",
-      "cards": {
-        "im": {
-          "title": "IM 接入",
-          "desc": "把 Bot 部署到 Telegram 等渠道"
-        },
-        "voice": {
-          "title": "语音对话",
-          "desc": "语音合成与转写让 Bot 开口"
-        },
-        "search": {
-          "title": "网络搜索",
-          "desc": "接入搜索引擎，让 Bot 获取实时信息"
-        }
-      },
       "saveFailed": "保存失败，请重试",
       "navigationFailed": "无法打开 Bot，请重试。",
-      "noModelWarning": "尚未为 Bot 选择模型，Bot 将无法回复消息。你可以稍后在 Bot 设置中配置。"
+      "noModelWarning": "尚未为 Bot 选择模型，Bot 将无法回复消息。你可以稍后在 Bot 设置中配置。",
+      "examplesHint": "也可以从一个示例开始"
     }
   },
   "deviceCode": {
@@ -4161,7 +4177,8 @@
       "update": "更新",
       "remove": "卸载",
       "viewProgress": "查看进度",
-      "open": "在市场中查看"
+      "open": "在市场中查看",
+      "tryIt": "试用一下"
     },
     "section": {
       "skills": "{count} 个 Skill",
@@ -4257,6 +4274,9 @@
       "release": "应用发布",
       "confirm": "更新 {count} 项",
       "none": "没有可更新的项目。"
+    },
+    "tryIt": {
+      "prompt": "帮我测试 {name} App，演示一下它的功能怎么用，再简单介绍一下它都能做什么。"
     }
   },
   "runtime": {

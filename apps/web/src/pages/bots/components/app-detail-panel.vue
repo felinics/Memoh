@@ -49,7 +49,7 @@ import type { DependencyItem, DependencyWorkspaceState } from '@/composables/api
 import type { DependencyMenuAction, DependencyPrimaryAction } from '@/utils/workspace-dependency'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import DependencyRow from './dependency-row.vue'
-import { appPrimaryAction, type AppRowAction } from './app-actions'
+import { appCanTry, appPrimaryAction, type AppRowAction } from './app-actions'
 
 export type AppConnectorAction = 'authorize' | 'reauthorize' | 'disconnect'
 
@@ -99,6 +99,7 @@ const discovered = computed(() => props.item.status === 'discovered' || !props.i
 const inProgress = computed(() => appInProgress(props.item))
 const readonly = computed(() => props.workspaceState !== 'running' && props.workspaceState !== undefined)
 const primary = computed(() => appPrimaryAction(props.item, { busy: props.busy, ownsStream: props.ownsStream, readonly: readonly.value }))
+const canTry = computed(() => appCanTry(props.item, { readonly: readonly.value }))
 const canRemove = computed(() => !discovered.value && !inProgress.value)
 
 const needsAttention = computed(() => props.item.status === 'failed' || props.item.status === 'partial')
@@ -180,6 +181,14 @@ function dependencyName(dep: AppDependencyItem): string {
       </div>
       <div class="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
         <Spinner v-if="inProgress" />
+        <Button
+          v-if="canTry"
+          size="sm"
+          variant="outline"
+          @click="emit('action', 'tryIt')"
+        >
+          {{ t('apps.action.tryIt') }}
+        </Button>
         <Button
           v-if="primary"
           size="sm"

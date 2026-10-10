@@ -1793,6 +1793,35 @@
       }
     }
   },
+  "chatExamples": {
+    "noBot": "試すには、まず Bot を作成してください。",
+    "createBot": "Bot を作成",
+    "tryThese": "こんなことを試せます",
+    "needs": "{capability}が必要",
+    "capability": {
+      "web_search": "Web 検索",
+      "memory": "長期記憶",
+      "email": "メール",
+      "workspace": "Workspace",
+      "browser": "ブラウザ",
+      "schedule": "スケジュール",
+      "channel": "チャンネル"
+    },
+    "sidebarEntry": "Memoh でできること",
+    "galleryTitle": "Memoh でできること",
+    "galleryDescription": "例を選ぶと入力欄に入ります。送信前に編集できます。",
+    "viewAll": "もっと見る",
+    "dismiss": "おすすめを非表示",
+    "replaceDraft": {
+      "title": "未送信のメッセージを置き換えますか？",
+      "description": "入力欄にまだ送信していないテキストがあります。このプロンプトに置き換えると、そのテキストは破棄されます。",
+      "confirm": "置き換える"
+    },
+    "share": {
+      "prompt": "Memoh で何を作りましたか？ #Memoh を付けて、活用事例を X でシェアしましょう。",
+      "action": "X でシェア"
+    }
+  },
   "models": {
     "title": "モデル",
     "searchPlaceholder": "プロバイダーを検索…",
@@ -4100,23 +4129,10 @@
       "title": "準備完了です",
       "subtitle": "Memohを開いて最初の会話を始めてください",
       "action": "Memohを開く",
-      "cards": {
-        "im": {
-          "title": "IMチャンネル",
-          "desc": "Botを Telegram などに展開します"
-        },
-        "voice": {
-          "title": "ボイスチャット",
-          "desc": "TTSとSTTでBotに音声機能を追加します"
-        },
-        "search": {
-          "title": "ウェブ検索",
-          "desc": "検索エンジンを接続してリアルタイム情報を入手"
-        }
-      },
       "saveFailed": "保存できませんでした。もう一度お試しください。",
       "navigationFailed": "Bot を開けませんでした。もう一度お試しください。",
-      "noModelWarning": "Bot のモデルが選択されていないため、まだ応答できません。後で Bot の設定から構成できます。"
+      "noModelWarning": "Bot のモデルが選択されていないため、まだ応答できません。後で Bot の設定から構成できます。",
+      "examplesHint": "例から始めることもできます"
     }
   },
   "deviceCode": {
@@ -4155,7 +4171,8 @@
       "update": "更新",
       "remove": "アンインストール",
       "viewProgress": "進捗を表示",
-      "open": "マーケットプレイスで表示"
+      "open": "マーケットプレイスで表示",
+      "tryIt": "試してみる"
     },
     "section": {
       "skills": "スキル {count} 件",
@@ -4251,6 +4268,9 @@
       "release": "アプリのリリース",
       "confirm": "{count} 件を更新",
       "none": "更新できる項目はありません。"
+    },
+    "tryIt": {
+      "prompt": "{name} App をテストして、機能の使い方を実演し、何ができるかを簡単に紹介してください。"
     }
   },
   "runtime": {

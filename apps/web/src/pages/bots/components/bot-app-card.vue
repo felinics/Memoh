@@ -32,7 +32,7 @@ import {
 } from '@/composables/api/useApps'
 import type { DependencyWorkspaceState } from '@/composables/api/useWorkspaceDependencies'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
-import { appPrimaryAction, type AppRowAction } from './app-actions'
+import { appCanTry, appPrimaryAction, type AppRowAction } from './app-actions'
 
 const props = withDefaults(defineProps<{
   item: AppItem
@@ -62,6 +62,7 @@ const discovered = computed(() => props.item.status === 'discovered' || !props.i
 const inProgress = computed(() => appInProgress(props.item))
 const readonly = computed(() => props.workspaceState !== 'running' && props.workspaceState !== undefined)
 const primary = computed(() => appPrimaryAction(props.item, { busy: props.busy, ownsStream: props.ownsStream, readonly: readonly.value }))
+const canTry = computed(() => appCanTry(props.item, { readonly: readonly.value }))
 const canRemove = computed(() => !discovered.value && !inProgress.value)
 const needsAttention = computed(() => props.item.status === 'failed' || props.item.status === 'partial')
 </script>
@@ -109,6 +110,14 @@ const needsAttention = computed(() => props.item.status === 'failed' || props.it
     <template #actions>
       <div class="flex items-center gap-1">
         <Spinner v-if="inProgress" />
+        <Button
+          v-if="canTry"
+          size="sm"
+          variant="outline"
+          @click="emit('action', 'tryIt')"
+        >
+          {{ t('apps.action.tryIt') }}
+        </Button>
         <Button
           v-if="primary"
           size="sm"

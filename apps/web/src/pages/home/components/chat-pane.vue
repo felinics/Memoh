@@ -200,6 +200,17 @@
         :turn-id="pendingForkTurnId"
       />
 
+      <!-- Asked before a usage example or App "Try it" replaces unsent text. -->
+      <ConfirmDeleteDialog
+        :open="replaceDraftConfirm.open.value"
+        :title="$t('chatExamples.replaceDraft.title')"
+        :description="$t('chatExamples.replaceDraft.description')"
+        :cancel-label="$t('common.cancel')"
+        :confirm-label="$t('chatExamples.replaceDraft.confirm')"
+        @update:open="replaceDraftConfirm.setOpen"
+        @confirm="replaceDraftConfirm.answer(true)"
+      />
+
       <!-- The composer is a single instance reused in both layouts: pinned to
            the bottom once a conversation exists, or lifted to the vertical
            centre (with a greeting above it) while the chat is still empty, so a
@@ -1192,6 +1203,20 @@
                   </Button>
                 </div>
 
+                <!-- Brings back the hidden welcome suggestions. It lives on this
+                     row so it lines up with the other session controls, in
+                     the slot the context ring takes once a chat starts. -->
+                <Button
+                  v-if="isWelcome && welcomeDismissed && voiceInputState === 'idle'"
+                  type="button"
+                  variant="quiet"
+                  size="sm"
+                  class="ml-auto shrink-0 gap-1.5 px-1.5 font-normal max-md:h-11"
+                  @click="welcomeDismissed = false"
+                >
+                  <Lightbulb class="size-3.5 shrink-0" />
+                  <span class="text-label">{{ $t('chatExamples.tryThese') }}</span>
+                </Button>
                 <SessionInfoRing
                   v-if="showSessionInfoRing && voiceInputState === 'idle'"
                   class="ml-auto shrink-0"
@@ -1202,6 +1227,12 @@
               </div>
             </ComposerDock>
           </div>
+          <!-- Usage examples under the welcome composer; they yield first
+               when the pane is short (style.css welcome tiers). -->
+          <ChatExampleSuggestions
+            v-if="isWelcome && currentBotId"
+            :bot-id="currentBotId"
+          />
         </div>
       </div>
     </template>
@@ -1241,7 +1272,7 @@ import {
   Lightbulb,
   Target,
 } from 'lucide-vue-next'
-import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, PanePlaceholder, ScrollArea, Skeleton, Spinner, toast } from '@felinic/ui'
+import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, ConfirmDeleteDialog, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, PanePlaceholder, ScrollArea, Skeleton, Spinner, toast } from '@felinic/ui'
 import { useChatStore, type ExternalAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult } from '@/store/chat-list'
 import { useWorkdirsStore } from '@/store/workdirs'
 import type { BotWorkdir } from '@/composables/api/useWorkdirs'
@@ -1288,6 +1319,10 @@ import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, displayedEffort, reconcileStor
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
+import ChatExampleSuggestions from './chat-example-suggestions.vue'
+import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-ui'
+import { useComposerPrefillConsumer } from '../composables/useComposerPrefillConsumer'
+import { useAsyncConfirm } from '@/composables/useAsyncConfirm'
 import { useUnfocusedComposerInput } from '../composables/useUnfocusedComposerInput'
 import { useComposerKeyboardFocus } from '../composables/useComposerKeyboardFocus'
 import { useComposerPair } from '../composables/useComposerPair'
@@ -1375,6 +1410,7 @@ const {
 } = storeToRefs(chatStore)
 
 const isActive = computed(() => props.active !== false)
+const { welcomeDismissed } = useChatExamplesUi()
 const isVisible = computed(() => props.visible !== false)
 const paneTarget = computed(() => ({
   botId: currentBotId.value?.trim() ?? '',
@@ -3631,6 +3667,27 @@ const { inputDraftKey, saveInputDraft, clearAllDrafts } = useComposerDrafts({
   currentBotId,
   tabId: () => props.tabId,
   inputText,
+})
+// Registered after useComposerDrafts so its draft restore runs first and
+// cannot overwrite a prefilled prompt (usage examples, App "Try it").
+const replaceDraftConfirm = useAsyncConfirm()
+useComposerPrefillConsumer({
+  botId: () => paneTarget.value.botId,
+  active: () => isActive.value,
+  writable: () => !activeChatReadOnly.value,
+  ready: () => !loadingChats.value,
+  currentText: () => inputText.value,
+  // Focus the composer first: the dialog returns focus to whatever held it
+  // when it opened, so this keeps the caret in the composer either way.
+  confirmReplace: () => {
+    focusTextarea()
+    return replaceDraftConfirm.ask()
+  },
+  apply: (text) => {
+    inputText.value = text
+    saveInputDraft(inputDraftKey.value, text)
+    void nextTick(focusTextarea)
+  },
 })
 
 // The dock owns ALL geometry/visibility orchestration (box-slot mutex,

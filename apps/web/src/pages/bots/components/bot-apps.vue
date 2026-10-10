@@ -321,6 +321,7 @@ import {
   reauthorizeConnector,
   reauthorizeFailureNotice,
 } from '@/composables/useConnectorOAuth'
+import { useComposerPrefill } from '@/composables/useComposerPrefill'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import { useCapabilitiesStore } from '@/store/capabilities'
@@ -339,6 +340,7 @@ import {
 const props = defineProps<{ botId: string }>()
 
 const { t, locale } = useI18n()
+const { prefillComposer } = useComposerPrefill()
 const route = useRoute()
 const router = useRouter()
 const queryCache = useQueryCache()
@@ -477,6 +479,9 @@ function onAppAction(item: AppItem, action: AppRowAction) {
       return
     case 'remove':
       void openRemove(item)
+      return
+    case 'tryIt':
+      void prefillComposer(t('apps.tryIt.prompt', { name: appDisplayName(item, locale.value) }), { botId: props.botId })
       return
     default:
       break

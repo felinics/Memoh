@@ -1,0 +1,223 @@
+import type { ChatExample } from './types'
+
+/**
+ * Built-in usage examples. This is the single place example content lives;
+ * UI reads it through useChatExamplesQuery, which is also where a backend
+ * source would plug in (with this list as the offline fallback).
+ *
+ * Every example is offered on the welcome strip (three drawn at random per
+ * new chat) and in the gallery. Only capability-free examples may be offered
+ * during onboarding, because a freshly created bot has nothing configured yet.
+ */
+export const BUILTIN_CHAT_EXAMPLES: readonly ChatExample[] = [
+  {
+    id: 'morning-mail-digest',
+    category: 'automation',
+    icon: 'mail',
+    priority: 90,
+    requires: ['email', 'schedule'],
+    surfaces: ['welcome', 'gallery'],
+    title: { en: 'Morning inbox digest', zh: '早间邮件摘要', ja: '朝のメールダイジェスト' },
+    prompt: {
+      en: 'Every morning at 8, go through the unread emails that arrived overnight, sort them by urgency and send me a short digest.',
+      zh: '每天早上 8 点，把昨晚收到的未读邮件按紧急程度整理成一份简短摘要发给我。',
+      ja: '毎朝 8 時に、夜のあいだに届いた未読メールを緊急度順に整理して、短いダイジェストを送ってください。',
+    },
+  },
+  {
+    id: 'tech-news-briefing',
+    category: 'research',
+    icon: 'newspaper',
+    priority: 80,
+    requires: ['browser'],
+    surfaces: ['welcome', 'gallery'],
+    title: { en: 'Tech news briefing', zh: '技术新闻速读', ja: 'テックニュース速読' },
+    prompt: {
+      en: 'Open the Hacker News front page, pick the 5 stories about AI agents today, read them and summarize each in three sentences.',
+      zh: '打开 Hacker News 首页，挑出今天和 AI Agent 相关的 5 篇文章，读完后每篇用三句话总结。',
+      ja: 'Hacker News のトップページを開き、今日の AI Agent 関連の記事を 5 本選んで読み、それぞれ 3 文で要約してください。',
+    },
+  },
+  {
+    id: 'research-brief',
+    category: 'research',
+    icon: 'search',
+    priority: 85,
+    requires: ['web_search'],
+    surfaces: ['welcome', 'gallery'],
+    title: { en: 'Research assistant', zh: '研究助理', ja: 'リサーチアシスタント' },
+    prompt: {
+      en: 'Help me research a topic. First ask me what I want to learn, then find reliable sources and write a one-page brief.',
+      zh: '帮我研究一个主题。先问我想了解什么，然后找可靠的资料来源，最后写一页简报。',
+      ja: 'あるテーマの調査を手伝ってください。まず何を知りたいか質問し、信頼できる情報源を探して、1 ページのまとめを書いてください。',
+    },
+  },
+  {
+    id: 'scaffold-project',
+    category: 'dev',
+    icon: 'square-terminal',
+    priority: 75,
+    requires: ['workspace'],
+    surfaces: ['welcome', 'gallery'],
+    title: { en: 'Start a new project', zh: '起一个新项目', ja: '新しいプロジェクトを作る' },
+    prompt: {
+      en: 'Create a new Vite + Vue project in the workspace, start the dev server and tell me how to open it.',
+      zh: '在工作区里新建一个 Vite + Vue 项目，把开发服务器跑起来，并告诉我怎么打开它。',
+      ja: 'ワークスペースに Vite + Vue の新しいプロジェクトを作成し、開発サーバーを起動して、開き方を教えてください。',
+    },
+  },
+  {
+    id: 'remember-preference',
+    category: 'memory',
+    icon: 'brain',
+    priority: 70,
+    requires: ['memory'],
+    surfaces: ['welcome', 'gallery'],
+    title: { en: 'Remember my preferences', zh: '记住我的偏好', ja: '好みを覚えてもらう' },
+    prompt: {
+      en: 'Remember this: I am allergic to peanuts. Avoid them whenever you suggest recipes or order food for me.',
+      zh: '记住：我对花生过敏。以后推荐菜谱或帮我点外卖时都要避开。',
+      ja: '覚えておいてください：私はピーナッツアレルギーです。レシピの提案や料理の注文では必ず避けてください。',
+    },
+  },
+  {
+    id: 'weekly-report-reminder',
+    category: 'team',
+    icon: 'users',
+    priority: 60,
+    requires: ['schedule', 'channel'],
+    surfaces: ['welcome', 'gallery'],
+    title: { en: 'Weekly report reminder', zh: '周报提醒', ja: '週報リマインダー' },
+    prompt: {
+      en: 'Every Friday at 5 pm, remind everyone in our group to submit their weekly report, and at 8 pm send me a list of who has not.',
+      zh: '每周五下午 5 点提醒群里的成员填周报，晚上 8 点把还没交的人整理成名单发给我。',
+      ja: '毎週金曜 17 時にグループのメンバーへ週報の提出をリマインドし、20 時に未提出の人の一覧を送ってください。',
+    },
+  },
+  {
+    id: 'price-drop-alert',
+    category: 'automation',
+    icon: 'trending-down',
+    priority: 65,
+    requires: ['browser', 'schedule'],
+    surfaces: ['welcome', 'gallery'],
+    title: { en: 'Price drop alert', zh: '降价提醒', ja: '値下がり通知' },
+    prompt: {
+      en: 'Check the price of this monitor once a day and tell me as soon as it drops below $200: ',
+      zh: '每天看一次这款显示器的价格，降到 1500 元以下马上通知我：',
+      ja: 'このモニターの価格を毎日 1 回確認し、2 万円を下回ったらすぐに知らせてください：',
+    },
+  },
+  {
+    id: 'analyze-spending',
+    category: 'dev',
+    icon: 'chart-pie',
+    priority: 55,
+    requires: ['workspace'],
+    surfaces: ['welcome', 'gallery'],
+    title: { en: 'Analyze my spending', zh: '账单分析', ja: '支出の分析' },
+    prompt: {
+      en: 'Use Python to analyze the CSV statement I upload, chart this month\'s spending by category and point out what grew the most.',
+      zh: '用 Python 分析我上传的 CSV 账单，按类别画出本月支出图表，并指出增长最多的一项。',
+      ja: 'アップロードする CSV の明細を Python で分析し、今月の支出をカテゴリ別にグラフ化して、最も増えた項目を教えてください。',
+    },
+  },
+  {
+    id: 'meeting-notes',
+    category: 'team',
+    icon: 'messages-square',
+    priority: 50,
+    requires: ['channel', 'memory'],
+    surfaces: ['welcome', 'gallery'],
+    title: { en: 'Group chat minutes', zh: '群聊纪要', ja: 'グループチャットの議事録' },
+    prompt: {
+      en: 'Turn today\'s discussion in our group chat into meeting notes, with action items and owners.',
+      zh: '把今天群聊里的讨论整理成会议纪要，列出待办事项和负责人。',
+      ja: '今日のグループチャットでの議論を議事録にまとめ、ToDo と担当者を書き出してください。',
+    },
+  },
+  {
+    id: 'broken-links',
+    category: 'dev',
+    icon: 'link-2-off',
+    priority: 45,
+    requires: ['browser'],
+    surfaces: ['welcome', 'gallery'],
+    title: { en: 'Find broken links', zh: '检查失效链接', ja: 'リンク切れチェック' },
+    prompt: {
+      en: 'Open our website in the browser, check every page for broken links and put them in a table for me: ',
+      zh: '用浏览器打开我们的网站，逐页检查失效链接，整理成表格给我：',
+      ja: 'ブラウザでサイトを開き、全ページのリンク切れを確認して表にまとめてください：',
+    },
+  },
+  {
+    id: 'evening-journal',
+    category: 'memory',
+    icon: 'notebook-pen',
+    priority: 40,
+    requires: ['schedule', 'memory'],
+    surfaces: ['welcome', 'gallery'],
+    title: { en: 'Evening journal', zh: '睡前日记', ja: '夜のジャーナル' },
+    prompt: {
+      en: 'Every night at 11, ask me how my day went, keep my answer in long-term memory and review the month with me at the end of it.',
+      zh: '每天晚上 11 点问我今天过得怎么样，把我的回答记进长期记忆，月底陪我回顾一次。',
+      ja: '毎晩 23 時に今日の様子を聞いて、答えを長期記憶に保存し、月末に一緒に振り返ってください。',
+    },
+  },
+  {
+    id: 'draft-replies',
+    category: 'automation',
+    icon: 'mail-open',
+    priority: 35,
+    requires: ['email'],
+    surfaces: ['welcome', 'gallery'],
+    title: { en: 'Draft email replies', zh: '邮件回复草稿', ja: 'メール返信の下書き' },
+    prompt: {
+      en: 'Look through my unread emails, pick the ones that need a reply and draft one for each. I will review them before anything is sent.',
+      zh: '查看我的未读邮件，挑出需要我回复的，为每封写一份回复草稿，我看过之后再发。',
+      ja: '未読メールを確認し、返信が必要なものそれぞれに下書きを作ってください。送信する前に私が確認します。',
+    },
+  },
+  {
+    id: 'polish-writing',
+    category: 'writing',
+    icon: 'pen-line',
+    priority: 30,
+    requires: [],
+    surfaces: ['welcome', 'gallery', 'onboarding'],
+    title: { en: 'Polish my writing', zh: '润色一段文字', ja: '文章を整える' },
+    prompt: {
+      en: 'Make this text clearer and more concise while keeping my tone. Explain the main changes afterwards:\n\n',
+      zh: '帮我把下面这段文字改得更清楚、更简洁，保留我的语气，最后说明主要改了哪里：\n\n',
+      ja: '次の文章を、私の口調を保ったまま、より分かりやすく簡潔にしてください。最後に主な変更点を説明してください：\n\n',
+    },
+  },
+  {
+    id: 'plan-my-week',
+    category: 'writing',
+    icon: 'calendar-days',
+    priority: 25,
+    requires: [],
+    surfaces: ['welcome', 'gallery', 'onboarding'],
+    title: { en: 'Plan my week', zh: '安排这一周', ja: '今週の計画' },
+    prompt: {
+      en: 'Help me plan this week. Ask me about my deadlines and commitments first, then propose a realistic day-by-day schedule.',
+      zh: '帮我安排这一周。先问我有哪些截止日期和固定安排，再给出一份切实可行的每日计划。',
+      ja: '今週の計画を手伝ってください。まず締め切りや予定を質問し、そのうえで無理のない日ごとのスケジュールを提案してください。',
+    },
+  },
+  {
+    id: 'explain-concept',
+    category: 'research',
+    icon: 'lightbulb',
+    priority: 20,
+    requires: [],
+    surfaces: ['welcome', 'gallery', 'onboarding'],
+    title: { en: 'Explain a concept', zh: '讲清楚一个概念', ja: '概念をわかりやすく' },
+    prompt: {
+      en: 'Explain a concept to me step by step, starting from what I already know. Ask me which concept and how familiar I am with it first.',
+      zh: '一步步给我讲清楚一个概念，从我已经知道的部分讲起。先问我想了解哪个概念、我对它有多熟悉。',
+      ja: 'ある概念を、私がすでに知っていることから順を追って説明してください。まず、どの概念か、どのくらい知っているかを質問してください。',
+    },
+  },
+]
