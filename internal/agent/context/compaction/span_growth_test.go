@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -269,121 +270,142 @@ func longHorizonResidue(t *testing.T, target int) map[int]int {
 func TestCompactionLongHorizonLeavesOnlyRunsBelowTheFloor(t *testing.T) {
 	t.Parallel()
 
-	for seed := int64(1); seed <= 3; seed++ {
-		t.Run(strconv.FormatInt(seed, 10), func(t *testing.T) {
-			t.Parallel()
-			rng := rand.New(rand.NewSource(seed)) //nolint:gosec // seeded, reproducible test input
-			q := newSessionStore()
-			stub := &stubModel{summary: summaryOfTokens(t, 100)}
-			svc := newMachineryService(q)
-			clock := time.Unix(1_800_000_000, 0)
-			svc.nowFn = func() time.Time { return clock }
-			q.now = func() time.Time { return clock }
-			cfg := machineryConfig(stub, []int{800, 4000}[seed%2])
-			cfg.HardPressure = true
-			manual := cfg
-			manual.Manual = true
-			pass := func(c TriggerConfig) bool {
-				calls := stub.calls
-				res, err := svc.RunCompactionSync(context.Background(), c)
-				if err != nil && !errors.Is(err, ErrIneffectiveSummary) {
-					t.Fatal(err)
-				}
-				if stub.calls-calls > 1 {
-					t.Fatalf("%d summarizer calls in one pass", stub.calls-calls)
-				}
-				return err == nil && res.Status == StatusOK
-			}
-			drain := func() {
-				for p := 0; p < 4 && pass(cfg); p++ {
-				}
-			}
-			for turn := 1; turn <= 120; turn++ {
-				clock = clock.Add(time.Minute)
-				q.append(prose(t, "user", fmt.Sprintf("U%d", turn), 4+rng.Intn(80), 5+rng.Intn(60)))
-				switch rng.Intn(6) {
-				case 0:
-					q.append(reasoningOnlyRow(t))
-				case 1:
-					q.append(askUserExchange(t, turn)...)
-				}
-				for s := 0; s < []int{0, 0, 1, 3, 8, 20}[rng.Intn(6)]; s++ {
-					switch n := turn*100 + s; rng.Intn(10) {
-					case 0:
-						q.append(reasoningOnlyRow(t))
-					case 1:
-						q.append(bigStep(t, n)...)
-					case 2:
-						q.append(screenshotFeedback(t))
-					default:
-						q.append(execExchange(t, n)...)
-					}
-					if rng.Intn(3) == 0 {
-						drain()
-					}
-				}
-				answer := prose(t, "assistant", fmt.Sprintf("A%d", turn), []int{10, 30, 80, 300, 1500}[rng.Intn(5)], 0)
-				if rng.Intn(4) == 0 {
-					answer.Usage = []byte(`{"outputTokens":6000}`)
-				}
-				q.append(answer)
-				drain()
-				if turn%13 == 0 {
-					pass(manual)
-				}
-			}
-			history := len(q.history)
-			for turn := 0; turn < 30; turn++ {
-				clock = clock.Add(time.Minute)
-				q.append(prose(t, "user", fmt.Sprintf("LATER%d", turn), 300, 300), prose(t, "assistant", fmt.Sprintf("LATER%d", turn), 300, 300))
-				drain()
-			}
-
-			// Each run still raw is bounded on both sides by a barrier, a
-			// summary or the session start. Between barriers it is history
-			// no claim may join; next to a summary, a claim left it behind.
-			items, _ := itemsFromRows(q.history[:history])
-			raw, inherent, stranded := 0, 0, 0
-			start, left := -1, false
-			for i := 0; i <= len(items); i++ {
-				summary, claimable := false, false
-				if i < len(items) {
-					summary = q.logStatuses[q.claims[items[i].ID]] == "ok"
-					_, kind := groupCost(items, []int{i})
-					claimable = !summary && (kind == groupMarkable || kind == groupOrphanResult && start >= 0)
-				}
-				if claimable {
-					raw++
-					if start < 0 {
-						start = i
-					}
-					continue
-				}
-				if start >= 0 {
-					run := items[start:i]
-					fresh := 0
-					for _, group := range toolExchangeGroups(run) {
-						if !provedIneffective(run, group) {
-							fresh += markableGroupCost(run, group)
-						}
-					}
-					if fresh >= minCompactionSpanTokens {
-						t.Errorf("a run of %d rows worth %d tokens stays raw from row %d", len(run), fresh, start)
-					}
-					if left || summary || i == len(items) {
-						stranded += fresh
-					} else {
-						inherent += fresh
-					}
-					start = -1
-				}
-				left = summary
-			}
-			if 2*stranded > 3*inherent {
-				t.Errorf("%d tokens stay raw next to summaries, %d between barriers: claims leave too much behind", stranded, inherent)
-			}
-			t.Logf("seed %d: %d of %d rows raw, %d tokens between barriers, %d next to summaries, %d calls", seed, raw, history, inherent, stranded, stub.calls)
-			assertClaimsContiguous(t, q)
-		})
+	var mu sync.Mutex
+	inherent, stranded := 0, 0
+	t.Run("sessions", func(t *testing.T) {
+		for seed := int64(1); seed <= 20; seed++ {
+			t.Run(strconv.FormatInt(seed, 10), func(t *testing.T) {
+				t.Parallel()
+				between, next := longHorizonMixedResidue(t, seed)
+				mu.Lock()
+				defer mu.Unlock()
+				inherent += between
+				stranded += next
+			})
+		}
+	})
+	t.Logf("20 sessions: %d tokens stay raw between barriers, %d next to summaries", inherent, stranded)
+	// Measured on these seeds: 1.13 times the history between barriers. A
+	// claim that leaves a closed rest behind, or no rows held with the
+	// current task, raises it to 1.64, 2.55 or 4.04.
+	if 2*stranded > 3*inherent {
+		t.Errorf("%d tokens stay raw next to summaries, %d between barriers: claims leave too much behind", stranded, inherent)
 	}
+}
+
+// longHorizonMixedResidue runs one seeded session and returns the entry
+// tokens of its old history still raw between barriers and next to
+// summaries, failing the test on any run that could still be claimed.
+func longHorizonMixedResidue(t *testing.T, seed int64) (int, int) {
+	t.Helper()
+	rng := rand.New(rand.NewSource(seed)) //nolint:gosec // seeded, reproducible test input
+	q := newSessionStore()
+	stub := &stubModel{summary: summaryOfTokens(t, 100)}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	cfg := machineryConfig(stub, []int{800, 4000}[seed%2])
+	cfg.HardPressure = true
+	manual := cfg
+	manual.Manual = true
+	pass := func(c TriggerConfig) bool {
+		calls := stub.calls
+		res, err := svc.RunCompactionSync(context.Background(), c)
+		if err != nil && !errors.Is(err, ErrIneffectiveSummary) {
+			t.Fatal(err)
+		}
+		if stub.calls-calls > 1 {
+			t.Fatalf("%d summarizer calls in one pass", stub.calls-calls)
+		}
+		return err == nil && res.Status == StatusOK
+	}
+	drain := func() {
+		for p := 0; p < 4 && pass(cfg); p++ {
+		}
+	}
+	for turn := 1; turn <= 120; turn++ {
+		clock = clock.Add(time.Minute)
+		q.append(prose(t, "user", fmt.Sprintf("U%d", turn), 4+rng.Intn(80), 5+rng.Intn(60)))
+		switch rng.Intn(6) {
+		case 0:
+			q.append(reasoningOnlyRow(t))
+		case 1:
+			q.append(askUserExchange(t, turn)...)
+		}
+		for s := 0; s < []int{0, 0, 1, 3, 8, 20}[rng.Intn(6)]; s++ {
+			switch n := turn*100 + s; rng.Intn(10) {
+			case 0:
+				q.append(reasoningOnlyRow(t))
+			case 1:
+				q.append(bigStep(t, n)...)
+			case 2:
+				q.append(screenshotFeedback(t))
+			default:
+				q.append(execExchange(t, n)...)
+			}
+			if rng.Intn(3) == 0 {
+				drain()
+			}
+		}
+		answer := prose(t, "assistant", fmt.Sprintf("A%d", turn), []int{10, 30, 80, 300, 1500}[rng.Intn(5)], 0)
+		if rng.Intn(4) == 0 {
+			answer.Usage = []byte(`{"outputTokens":6000}`)
+		}
+		q.append(answer)
+		drain()
+		if turn%13 == 0 {
+			pass(manual)
+		}
+	}
+	history := len(q.history)
+	for turn := 0; turn < 30; turn++ {
+		clock = clock.Add(time.Minute)
+		q.append(prose(t, "user", fmt.Sprintf("LATER%d", turn), 300, 300), prose(t, "assistant", fmt.Sprintf("LATER%d", turn), 300, 300))
+		drain()
+	}
+
+	// Each run still raw is bounded on both sides by a barrier, a
+	// summary or the session start. Between barriers it is history
+	// no claim may join; next to a summary, a claim left it behind.
+	items, _ := itemsFromRows(q.history[:history])
+	raw, inherent, stranded := 0, 0, 0
+	start, left := -1, false
+	for i := 0; i <= len(items); i++ {
+		summary, claimable := false, false
+		if i < len(items) {
+			summary = q.logStatuses[q.claims[items[i].ID]] == "ok"
+			_, kind := groupCost(items, []int{i})
+			claimable = !summary && (kind == groupMarkable || kind == groupOrphanResult && start >= 0)
+		}
+		if claimable {
+			raw++
+			if start < 0 {
+				start = i
+			}
+			continue
+		}
+		if start >= 0 {
+			run := items[start:i]
+			fresh := 0
+			for _, group := range toolExchangeGroups(run) {
+				if !provedIneffective(run, group) {
+					fresh += markableGroupCost(run, group)
+				}
+			}
+			if fresh >= minCompactionSpanTokens {
+				t.Errorf("a run of %d rows worth %d tokens stays raw from row %d", len(run), fresh, start)
+			}
+			if left || summary || i == len(items) {
+				stranded += fresh
+			} else {
+				inherent += fresh
+			}
+			start = -1
+		}
+		left = summary
+	}
+	t.Logf("seed %d: %d of %d rows raw, %d tokens between barriers, %d next to summaries, %d calls", seed, raw, history, inherent, stranded, stub.calls)
+	assertClaimsContiguous(t, q)
+	return inherent, stranded
 }
