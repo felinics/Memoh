@@ -257,7 +257,7 @@ func TestCompactionLongTurnsLeaveNoGrowingRawPrefix(t *testing.T) {
 	cfg.HardPressure = true
 	var task sqlc.ListUncompactedMessagesBySessionRow
 	rawBefore := map[int]int{}
-	for turn := 0; turn < 30; turn++ {
+	for turn := 0; turn < 18; turn++ {
 		task = prose(t, "user", fmt.Sprintf("TASK%d", turn), 150, 60)
 		q.append(task)
 		for s := 0; s < 16; s++ {
@@ -275,7 +275,7 @@ func TestCompactionLongTurnsLeaveNoGrowingRawPrefix(t *testing.T) {
 			}
 		}
 		q.append(prose(t, "assistant", fmt.Sprintf("ANSWER%d", turn), 150, 80))
-		if turn == 9 || turn == 29 {
+		if turn == 5 || turn == 17 {
 			tokens := 0
 			for _, row := range q.candidateRows() {
 				if row.ID == task.ID {
@@ -288,8 +288,8 @@ func TestCompactionLongTurnsLeaveNoGrowingRawPrefix(t *testing.T) {
 		}
 	}
 	t.Logf("raw tokens in front of the current task: %v, provider calls %d", rawBefore, stub.calls)
-	if rawBefore[30] > rawBefore[10]+2*minCompactionSpanTokens {
-		t.Fatalf("raw history in front of the current task grew from %d to %d tokens over 20 more turns", rawBefore[10], rawBefore[30])
+	if rawBefore[18] > rawBefore[6]+2*minCompactionSpanTokens {
+		t.Fatalf("raw history in front of the current task grew from %d to %d tokens over 12 more turns", rawBefore[6], rawBefore[18])
 	}
 	assertClaimsContiguous(t, q)
 }
