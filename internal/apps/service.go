@@ -545,7 +545,9 @@ func (s *Service) connectorRef(ctx context.Context, botID, installationID, conne
 // reconcileStatus promotes a partial installation to installed once every
 // required connector is linked and no dependency step failed.
 func (s *Service) reconcileStatus(ctx context.Context, inst Installation) {
-	if inst.Status != StatusPartial || inst.LastErrorCode != "" {
+	// Migration 0163 does not backfill legacy failure text. Linking a
+	// connector cannot resolve a dependency failure recorded in either column.
+	if inst.Status != StatusPartial || inst.LastErrorCode != "" || inst.LastError != "" {
 		return
 	}
 	refs, err := s.store.ListConnectorRefs(ctx, inst.ID)

@@ -79,7 +79,8 @@ func (m *memoryStore) Upsert(_ context.Context, in UpsertInstallation) (Installa
 	defer m.mu.Unlock()
 	for id, inst := range m.installations {
 		if inst.BotID == in.BotID && inst.RegistryID == in.RegistryID && inst.AppID == in.AppID {
-			inst.Revision, inst.Version, inst.Status, inst.Release, inst.LastError = in.Revision, in.Version, in.Status, in.Release, ""
+			inst.Revision, inst.Version, inst.Status, inst.Release = in.Revision, in.Version, in.Status, in.Release
+			inst.LastError, inst.LastErrorCode = "", ""
 			if in.Reason == ReasonUser {
 				inst.Reason = ReasonUser
 			}
@@ -104,7 +105,7 @@ func (m *memoryStore) SetStatus(_ context.Context, botID, id string, status Stat
 	if !ok || inst.BotID != botID {
 		return Installation{}, ErrNotInstalled
 	}
-	inst.Status, inst.LastErrorCode = status, lastErrorCode
+	inst.Status, inst.LastError, inst.LastErrorCode = status, "", lastErrorCode
 	m.installations[id] = inst
 	return inst, nil
 }
