@@ -17,7 +17,7 @@ function setup(state: { botId?: string | null, dockReady?: boolean, activeChatWr
     activeChatWritable: () => activeChatWritable.value,
     openDraftChat,
   }))
-  const request = (botId = 'bot-a') => { pending.value = { id: Date.now(), botId, text: 'hi' } }
+  const request = (botId = 'bot-a') => { pending.value = { id: Date.now(), botId, text: 'hi', settle: vi.fn() } }
   return { pending, currentBotId, dockReady, activeChatWritable, openDraftChat, request, scope }
 }
 

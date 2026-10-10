@@ -198,6 +198,17 @@
         :turn-id="pendingForkTurnId"
       />
 
+      <!-- Asked before a usage example or App "Try it" replaces unsent text. -->
+      <ConfirmDeleteDialog
+        :open="replaceDraftConfirm.open.value"
+        :title="$t('chatExamples.replaceDraft.title')"
+        :description="$t('chatExamples.replaceDraft.description')"
+        :cancel-label="$t('common.cancel')"
+        :confirm-label="$t('chatExamples.replaceDraft.confirm')"
+        @update:open="replaceDraftConfirm.setOpen"
+        @confirm="replaceDraftConfirm.answer(true)"
+      />
+
       <!-- The composer is a single instance reused in both layouts: pinned to
            the bottom once a conversation exists, or lifted to the vertical
            centre (with a greeting above it) while the chat is still empty, so a
@@ -1268,7 +1279,7 @@ import {
   Lightbulb,
   Target,
 } from 'lucide-vue-next'
-import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, PanePlaceholder, ScrollArea, Skeleton, Spinner, toast } from '@felinic/ui'
+import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, ConfirmDeleteDialog, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, PanePlaceholder, ScrollArea, Skeleton, Spinner, toast } from '@felinic/ui'
 import { useChatStore, type ExternalAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult } from '@/store/chat-list'
 import { useWorkdirsStore } from '@/store/workdirs'
 import type { BotWorkdir } from '@/composables/api/useWorkdirs'
@@ -1318,6 +1329,7 @@ import { useComposerDrafts } from '../composables/useComposerDrafts'
 import ChatExampleSuggestions from './chat-example-suggestions.vue'
 import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-ui'
 import { useComposerPrefillConsumer } from '../composables/useComposerPrefillConsumer'
+import { useAsyncConfirm } from '@/composables/useAsyncConfirm'
 import { useUnfocusedComposerInput } from '../composables/useUnfocusedComposerInput'
 import { useComposerKeyboardFocus } from '../composables/useComposerKeyboardFocus'
 import { useComposerPair } from '../composables/useComposerPair'
@@ -3668,11 +3680,19 @@ const { inputDraftKey, saveInputDraft, clearAllDrafts } = useComposerDrafts({
 })
 // Registered after useComposerDrafts so its draft restore runs first and
 // cannot overwrite a prefilled prompt (usage examples, App "Try it").
+const replaceDraftConfirm = useAsyncConfirm()
 useComposerPrefillConsumer({
   botId: () => paneTarget.value.botId,
   active: () => isActive.value,
   writable: () => !activeChatReadOnly.value,
   ready: () => !loadingChats.value,
+  currentText: () => inputText.value,
+  // Focus the composer first: the dialog returns focus to whatever held it
+  // when it opened, so this keeps the caret in the composer either way.
+  confirmReplace: () => {
+    focusTextarea()
+    return replaceDraftConfirm.ask()
+  },
   apply: (text) => {
     inputText.value = text
     saveInputDraft(inputDraftKey.value, text)

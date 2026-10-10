@@ -1779,7 +1779,12 @@
     "galleryTitle": "See what Memoh can do",
     "galleryDescription": "Pick an example to put it in the chat box. You can edit it before sending.",
     "viewAll": "See all",
-    "dismiss": "Hide suggestions"
+    "dismiss": "Hide suggestions",
+    "replaceDraft": {
+      "title": "Replace your unsent message?",
+      "description": "The chat box already has text you haven't sent. Replacing it with this prompt discards that text.",
+      "confirm": "Replace"
+    }
   },
   "models": {
     "title": "Models",

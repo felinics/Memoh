@@ -1748,7 +1748,12 @@
     "galleryTitle": "Memoh でできること",
     "galleryDescription": "例を選ぶと入力欄に入ります。送信前に編集できます。",
     "viewAll": "もっと見る",
-    "dismiss": "おすすめを非表示"
+    "dismiss": "おすすめを非表示",
+    "replaceDraft": {
+      "title": "未送信のメッセージを置き換えますか？",
+      "description": "入力欄にまだ送信していないテキストがあります。このプロンプトに置き換えると、そのテキストは破棄されます。",
+      "confirm": "置き換える"
+    }
   },
   "models": {
     "title": "モデル",

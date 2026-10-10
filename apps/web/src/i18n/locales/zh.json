@@ -1779,7 +1779,12 @@
     "galleryTitle": "看看 Memoh 能做什么",
     "galleryDescription": "选一个示例填进输入框，发送前可以修改。",
     "viewAll": "查看更多",
-    "dismiss": "隐藏推荐"
+    "dismiss": "隐藏推荐",
+    "replaceDraft": {
+      "title": "替换输入框里的内容？",
+      "description": "输入框里有还没发送的内容，替换成这条提示词后，原内容会被丢弃。",
+      "confirm": "替换"
+    }
   },
   "models": {
     "title": "模型",

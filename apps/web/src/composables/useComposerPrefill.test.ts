@@ -41,28 +41,44 @@ describe('prefillComposer', () => {
     mocks.chat.refreshBots.mockResolvedValue(undefined)
   })
 
-  it('queues the text for the current bot without navigating from the chat page', async () => {
-    const result = await useComposerPrefill().prefillComposer('hello')
-    expect(result).toBe('queued')
-    expect(useComposerPrefillStore().pending).toMatchObject({ botId: 'bot-a', text: 'hello' })
+  /** Stand in for the chat pane: wait for the request, then settle it. */
+  async function consumeAs(outcome: 'applied' | 'cancelled') {
+    await vi.waitFor(() => expect(useComposerPrefillStore().pending).not.toBeNull())
+    const request = useComposerPrefillStore().take(useComposerPrefillStore().pending!.botId)!
+    request.settle(outcome)
+    return request
+  }
+
+  it('resolves with what the chat pane did with the text', async () => {
+    const result = useComposerPrefill().prefillComposer('hello')
+    const request = await consumeAs('applied')
+    expect(request).toMatchObject({ botId: 'bot-a', text: 'hello' })
+    await expect(result).resolves.toBe('applied')
     expect(mocks.push).not.toHaveBeenCalled()
+  })
+
+  it('reports a declined replacement as cancelled', async () => {
+    const result = useComposerPrefill().prefillComposer('hello')
+    await consumeAs('cancelled')
+    await expect(result).resolves.toBe('cancelled')
   })
 
   it('falls back to the first bot when none is selected', async () => {
     mocks.chat.currentBotId = null
-    await useComposerPrefill().prefillComposer('hello')
-    expect(useComposerPrefillStore().pending?.botId).toBe('bot-a')
+    void useComposerPrefill().prefillComposer('hello')
+    expect((await consumeAs('applied')).botId).toBe('bot-a')
   })
 
   it('opens the chat page when called from elsewhere', async () => {
     mocks.route.name = 'bot-detail'
-    await useComposerPrefill().prefillComposer('hello')
+    void useComposerPrefill().prefillComposer('hello')
+    await consumeAs('applied')
     expect(mocks.push).toHaveBeenCalledWith({ name: 'bot', params: { botName: 'bot-a' } })
   })
 
   it('switches to the requested bot', async () => {
-    await useComposerPrefill().prefillComposer('hello', { botId: 'bot-b' })
-    expect(useComposerPrefillStore().pending?.botId).toBe('bot-b')
+    void useComposerPrefill().prefillComposer('hello', { botId: 'bot-b' })
+    expect((await consumeAs('applied')).botId).toBe('bot-b')
     expect(mocks.push).toHaveBeenCalledWith({ name: 'bot', params: { botName: 'bot-b' } })
   })
 
@@ -70,10 +86,10 @@ describe('prefillComposer', () => {
     mocks.chat.bots = []
     mocks.chat.refreshBots.mockImplementation(async () => { mocks.chat.bots = [{ id: 'bot-c' }] })
     mocks.chat.currentBotId = null
-    const result = await useComposerPrefill().prefillComposer('hello')
+    const result = useComposerPrefill().prefillComposer('hello')
+    expect((await consumeAs('applied')).botId).toBe('bot-c')
     expect(mocks.chat.refreshBots).toHaveBeenCalledOnce()
-    expect(result).toBe('queued')
-    expect(useComposerPrefillStore().pending?.botId).toBe('bot-c')
+    await expect(result).resolves.toBe('applied')
   })
 
   it('asks the user to create a bot when there is none', async () => {
