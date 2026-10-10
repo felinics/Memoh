@@ -276,7 +276,7 @@ func TestCompactionLongHorizonLeavesOnlyRunsBelowTheFloor(t *testing.T) {
 		for seed := int64(1); seed <= 20; seed++ {
 			t.Run(strconv.FormatInt(seed, 10), func(t *testing.T) {
 				t.Parallel()
-				between, next := longHorizonMixedResidue(t, seed)
+				between, next := longHorizonMixedResidue(t, seed, false)
 				mu.Lock()
 				defer mu.Unlock()
 				inherent += between
@@ -295,8 +295,11 @@ func TestCompactionLongHorizonLeavesOnlyRunsBelowTheFloor(t *testing.T) {
 
 // longHorizonMixedResidue runs one seeded session and returns the entry
 // tokens of its old history still raw between barriers and next to
-// summaries, failing the test on any run that could still be claimed.
-func longHorizonMixedResidue(t *testing.T, seed int64) (int, int) {
+// summaries, failing the test on any run that could still be claimed. With
+// failing, some tasks hold content the summarizer refuses, some answers
+// content it cannot shrink, long prompts are cut off at the output limit, and
+// frontier fusion is on; runs holding such content may stay raw.
+func longHorizonMixedResidue(t *testing.T, seed int64, failing bool) (int, int) {
 	t.Helper()
 	rng := rand.New(rand.NewSource(seed)) //nolint:gosec // seeded, reproducible test input
 	q := newSessionStore()
@@ -307,6 +310,16 @@ func longHorizonMixedResidue(t *testing.T, seed int64) (int, int) {
 	q.now = func() time.Time { return clock }
 	cfg := machineryConfig(stub, []int{800, 4000}[seed%2])
 	cfg.HardPressure = true
+	tag := func(name, marker string) string {
+		if failing && rng.Intn(20) == 0 {
+			return name + " " + marker
+		}
+		return name
+	}
+	if failing {
+		stub.refuse, stub.verbose, stub.cutOffOver = "POISON", "VERBOSE", 12000
+		cfg.AllowFrontierFusion, cfg.ContextWindowTokens = true, 6000
+	}
 	manual := cfg
 	manual.Manual = true
 	pass := func(c TriggerConfig) bool {
@@ -326,7 +339,7 @@ func longHorizonMixedResidue(t *testing.T, seed int64) (int, int) {
 	}
 	for turn := 1; turn <= 120; turn++ {
 		clock = clock.Add(time.Minute)
-		q.append(prose(t, "user", fmt.Sprintf("U%d", turn), 4+rng.Intn(80), 5+rng.Intn(60)))
+		q.append(prose(t, "user", tag(fmt.Sprintf("U%d", turn), "POISON"), 4+rng.Intn(80), 5+rng.Intn(60)))
 		switch rng.Intn(6) {
 		case 0:
 			q.append(reasoningOnlyRow(t))
@@ -348,7 +361,7 @@ func longHorizonMixedResidue(t *testing.T, seed int64) (int, int) {
 				drain()
 			}
 		}
-		answer := prose(t, "assistant", fmt.Sprintf("A%d", turn), []int{10, 30, 80, 300, 1500}[rng.Intn(5)], 0)
+		answer := prose(t, "assistant", tag(fmt.Sprintf("A%d", turn), "VERBOSE"), []int{10, 30, 80, 300, 1500}[rng.Intn(5)], 0)
 		if rng.Intn(4) == 0 {
 			answer.Usage = []byte(`{"outputTokens":6000}`)
 		}
@@ -387,13 +400,16 @@ func longHorizonMixedResidue(t *testing.T, seed int64) (int, int) {
 		}
 		if start >= 0 {
 			run := items[start:i]
-			fresh := 0
+			fresh, marked := 0, false
 			for _, group := range toolExchangeGroups(run) {
 				if !provedIneffective(run, group) {
 					fresh += markableGroupCost(run, group)
 				}
 			}
-			if fresh >= minCompactionSpanTokens {
+			for _, row := range q.history[start:i] {
+				marked = marked || strings.Contains(string(row.Content), "POISON") || strings.Contains(string(row.Content), "VERBOSE")
+			}
+			if fresh >= minCompactionSpanTokens && !marked {
 				t.Errorf("a run of %d rows worth %d tokens stays raw from row %d", len(run), fresh, start)
 			}
 			if left || summary || i == len(items) {
@@ -405,7 +421,23 @@ func longHorizonMixedResidue(t *testing.T, seed int64) (int, int) {
 		}
 		left = summary
 	}
+	for i, row := range q.history[history : history+30] {
+		if q.logStatuses[q.claims[row.ID]] != "ok" {
+			t.Errorf("seed %d: row %d of the later turns stays raw", seed, i)
+		}
+	}
 	t.Logf("seed %d: %d of %d rows raw, %d tokens between barriers, %d next to summaries, %d calls", seed, raw, history, inherent, stranded, stub.calls)
 	assertClaimsContiguous(t, q)
 	return inherent, stranded
+}
+
+func TestCompactionLongHorizonProgressesPastFailingSummaries(t *testing.T) {
+	t.Parallel()
+
+	for seed := int64(1); seed <= 8; seed++ {
+		t.Run(strconv.FormatInt(seed, 10), func(t *testing.T) {
+			t.Parallel()
+			longHorizonMixedResidue(t, seed, true)
+		})
+	}
 }
