@@ -542,7 +542,7 @@ Live conversation turns are read over the **WebSocket**. SSE carries identifiers
 
 ### Error Handling
 
-- **Global**: `utils/api-error.ts` — `resolveApiErrorMessage()` extracts error from `message`, `error`, `detail` fields
+- **Global**: `utils/api-error.ts` — `resolveApiErrorMessage()` looks up `errors.<code>` (with the error's `args`) in the stored locale. With no copy for the code, it falls back by HTTP status (`errors.http.*` for 4xx including 429, `errors.http.bad_request` for a 4xx without its own entry, `errors.internal` for 5xx, nothing for 499), then by stream error event (`errors.internal`, nothing when `fault` is `canceled`), then to the caller's fallback. It never shows the server's `message`/`detail`; only a `UserFacingError` shows its own message.
 - **Mutations**: `useDialogMutation` composable wraps mutations with automatic `toast.error()` on failure
 - **SDK**: All calls use `throwOnError: true`; try/catch at component level
 - **Streams**: `error` events appended to message blocks

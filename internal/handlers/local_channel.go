@@ -2238,7 +2238,9 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					var reserved bool
 					releaseActiveWSTurn, reserved = h.reserveWSRequestedSkillTurn(botID, sessionID, ref.InvocationID)
 					if !reserved {
-						h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(slash.CodeUnsupportedSkillSlashContext, nil))
+						// The session supports activation; the reservation
+						// failed because another turn of it is still running.
+						h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(apperror.CodeSessionBusy, nil))
 						continue
 					}
 				} else {
@@ -2293,7 +2295,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					var reserved bool
 					releaseActiveWSTurn, reserved = h.reserveWSRequestedSkillTurn(botID, sessionID, ref.InvocationID)
 					if !reserved {
-						h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(slash.CodeUnsupportedSkillSlashContext, nil))
+						h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(apperror.CodeSessionBusy, nil))
 						continue
 					}
 				} else {
