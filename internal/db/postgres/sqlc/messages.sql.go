@@ -5510,7 +5510,7 @@ ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 type ListUncompactedMessagesBySessionWithinBytesParams struct {
 	IneffectiveFailureReason string      `json:"ineffective_failure_reason"`
 	UnusableFailureReason    string      `json:"unusable_failure_reason"`
-	CutOffFailureReason      string      `json:"cut_off_failure_reason"`
+	RetryHalfFailureReason   string      `json:"retry_half_failure_reason"`
 	SessionID                pgtype.UUID `json:"session_id"`
 	AfterMessageID           pgtype.UUID `json:"after_message_id"`
 	UnusableMaxHoldSeconds   int64       `json:"unusable_max_hold_seconds"`
@@ -5571,9 +5571,10 @@ type ListUncompactedMessagesBySessionWithinBytesRow struct {
 // the hold seconds, four times as long for each consecutive such attempt on
 // them, up to the max hold. IneffectiveClaim marks a row whose claim in this
 // epoch failed because the summary was not shorter than the rows. For a row
-// whose latest claim got an unusable or cut-off summary, UnusableAttempts
-// counts such attempts in a row and RetryRows is how many rows that claim
-// held; a cut-off claim holds nothing back. LatestUser marks the session's newest user message
+// whose latest claim failed on them as a whole, unusable or to be retried by
+// halves, UnusableAttempts counts unusable attempts in a row and RetryRows is
+// how many rows that claim held; a claim to retry by halves holds nothing
+// back. LatestUser marks the session's newest user message
 // among the candidates: the task the current turn is working on. Input the
 // runtime feeds back within a turn is stored as a user message too, but
 // starts no turn.
@@ -5581,7 +5582,7 @@ func (q *Queries) ListUncompactedMessagesBySessionWithinBytes(ctx context.Contex
 	rows, err := q.db.Query(ctx, listUncompactedMessagesBySessionWithinBytes,
 		arg.IneffectiveFailureReason,
 		arg.UnusableFailureReason,
-		arg.CutOffFailureReason,
+		arg.RetryHalfFailureReason,
 		arg.SessionID,
 		arg.AfterMessageID,
 		arg.UnusableMaxHoldSeconds,

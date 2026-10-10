@@ -1311,3 +1311,33 @@ func TestCompactionCutOffBatchNeverRejoinsItsIneffectiveHalf(t *testing.T) {
 	}
 	assertClaimsContiguous(t, q)
 }
+
+func TestCompactionRejectedRequestRetriesHalfTheRows(t *testing.T) {
+	t.Parallel()
+
+	// The provider rejects a request it counts as too long, as when the byte
+	// estimate undercounts the real tokens. The rows are retried in halves.
+	q := newSessionStore()
+	for i := 0; i < 20; i++ {
+		q.append(prose(t, "user", fmt.Sprintf("Q%d", i), 300, 100), prose(t, "assistant", fmt.Sprintf("A%d", i), 300, 100))
+	}
+	q.append(reasoningOnlyRow(t), prose(t, "user", "CURRENT", 10, 10))
+	stub := &stubModel{summary: summaryOfTokens(t, 100), rejectOver: 20000}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	cfg := machineryConfig(stub, 50)
+	cfg.MaxCompactTokens = 40000
+	cfg.HardPressure = true
+	for minute := 0; minute < 120; minute++ {
+		_, _ = svc.RunCompactionSync(context.Background(), cfg)
+		clock = clock.Add(time.Minute)
+	}
+	for i, row := range q.history[:40] {
+		if q.logStatuses[q.claims[row.ID]] != "ok" {
+			t.Fatalf("row %d still raw after two hours of rejected requests; calls=%d", i, stub.calls)
+		}
+	}
+	assertClaimsContiguous(t, q)
+}

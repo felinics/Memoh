@@ -5,7 +5,10 @@
 -- within the epoch they are only resent together with new rows;
 -- 'unusable_summary' marks rows the model returned no usable summary for,
 -- held back for a while that grows with failure_attempts, the number of
--- consecutive such attempts on them.
+-- consecutive such attempts on them; 'retry_half' marks rows whose summary hit
+-- the output limit, or whose request the provider rejected, while they could
+-- still be halved: the next pass retries half of them. For both,
+-- message_count is how many rows the attempt claimed.
 -- compaction_scan_after is the last candidate row a pass found permanently
 -- unclaimable in compaction_scan_epoch; later passes in that epoch start
 -- reading after it instead of rescanning the same prefix.

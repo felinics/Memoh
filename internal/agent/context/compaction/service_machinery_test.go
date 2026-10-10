@@ -26,6 +26,7 @@ type stubModel struct {
 	refuse       string // a prompt containing it is refused with content_filter
 	verbose      string // a prompt containing it gets a summary no shorter than itself
 	cutOffOver   int    // a prompt longer than this many bytes is cut off at the output limit
+	rejectOver   int    // a prompt longer than this many bytes is rejected with HTTP 400
 	calls        int
 	prompt       string // decoded text of the captured request messages
 	maxTokens    int    // captured max_tokens of the last request
@@ -52,6 +53,13 @@ func (s *stubModel) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	if s.cutOffOver > 0 && len(s.prompt) > s.cutOffOver {
 		finishReason = "length"
+	}
+	if s.rejectOver > 0 && len(s.prompt) > s.rejectOver {
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"maximum context length exceeded","type":"invalid_request_error","code":"context_length_exceeded"}}`)),
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+		}, nil
 	}
 	summary := s.summary
 	if s.verbose != "" && strings.Contains(s.prompt, s.verbose) {
@@ -557,7 +565,7 @@ type failingModel struct{ calls int }
 func (f *failingModel) RoundTrip(*http.Request) (*http.Response, error) {
 	f.calls++
 	return &http.Response{
-		StatusCode: http.StatusBadRequest,
+		StatusCode: http.StatusForbidden,
 		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"boom"}}`)),
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 	}, nil

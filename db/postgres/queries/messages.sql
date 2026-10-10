@@ -3011,9 +3011,10 @@ WHERE message.team_id = public.memoh_current_team_id()
 -- the hold seconds, four times as long for each consecutive such attempt on
 -- them, up to the max hold. IneffectiveClaim marks a row whose claim in this
 -- epoch failed because the summary was not shorter than the rows. For a row
--- whose latest claim got an unusable or cut-off summary, UnusableAttempts
--- counts such attempts in a row and RetryRows is how many rows that claim
--- held; a cut-off claim holds nothing back. LatestUser marks the session's newest user message
+-- whose latest claim failed on them as a whole, unusable or to be retried by
+-- halves, UnusableAttempts counts unusable attempts in a row and RetryRows is
+-- how many rows that claim held; a claim to retry by halves holds nothing
+-- back. LatestUser marks the session's newest user message
 -- among the candidates: the task the current turn is working on. Input the
 -- runtime feeds back within a turn is stored as a user message too, but
 -- starts no turn.
@@ -3199,7 +3200,7 @@ LEFT JOIN bot_history_message_compacts claim
  AND claim.session_id = s.id
  AND claim.compaction_epoch = s.compaction_epoch
  AND claim.status = 'error'
- AND claim.failure_reason IN (sqlc.arg(ineffective_failure_reason)::text, sqlc.arg(unusable_failure_reason)::text, sqlc.arg(cut_off_failure_reason)::text)
+ AND claim.failure_reason IN (sqlc.arg(ineffective_failure_reason)::text, sqlc.arg(unusable_failure_reason)::text, sqlc.arg(retry_half_failure_reason)::text)
 WHERE m.team_id = public.memoh_current_team_id()
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
 

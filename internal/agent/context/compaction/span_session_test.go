@@ -166,7 +166,7 @@ func (q *sessionStore) ListUncompactedMessagesBySessionWithinBytes(_ context.Con
 		claim := q.claims[c.row.ID]
 		failed := q.claimEpoch[claim] == q.epoch && q.logStatuses[claim] == "error"
 		bounded.IneffectiveClaim = failed && q.reasons[claim] == arg.IneffectiveFailureReason
-		if failed && (q.reasons[claim] == arg.UnusableFailureReason || q.reasons[claim] == arg.CutOffFailureReason) {
+		if failed && (q.reasons[claim] == arg.UnusableFailureReason || q.reasons[claim] == arg.RetryHalfFailureReason) {
 			bounded.UnusableAttempts = int32(q.attempts[claim]) //nolint:gosec // test attempts stay small
 			bounded.RetryRows = int32(q.claimRows[claim])       //nolint:gosec // test claims stay small
 		}

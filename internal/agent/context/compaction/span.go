@@ -24,10 +24,11 @@ const failureReasonIneffectiveSummary = "ineffective_summary"
 // consecutive such attempt on them, up to maxUnusableSummaryHold.
 const failureReasonUnusableSummary = "unusable_summary"
 
-// failureReasonCutOffSummary marks a claim whose summary hit the output limit
-// while the claim could still be halved: its rows are not held, and the next
-// pass retries half of them.
-const failureReasonCutOffSummary = "summary_cut_off"
+// failureReasonRetryHalf marks a claim that failed on its rows as a whole —
+// the summary hit the output limit, or the provider rejected the request
+// (HTTP 400, 413 or 422) — while it could still be halved: its rows are not
+// held, and the next pass retries half of them.
+const failureReasonRetryHalf = "retry_half"
 
 const (
 	unusableSummaryHold    = 15 * time.Minute

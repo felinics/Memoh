@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -412,27 +413,42 @@ type attempt struct {
 }
 
 // failLog completes a claimed attempt as failed. A summary that cannot
-// replace its rows is recorded by reason so later passes select past those
-// rows: for the epoch when it was not shorter; for a while that grows with
-// each unusable attempt in a row when it was not usable at all; not at all
-// when it was cut off at the output limit and the next pass can retry half of
-// them. A failed rollup records nothing against rows that never failed on
+// replace its rows, or a request the provider rejected for what it holds, is
+// recorded by reason so later passes select past those rows: for the epoch
+// when the summary was not shorter; not at all when the next pass can retry
+// half of the rows; otherwise for a while that grows with each such attempt
+// in a row. A failed rollup records nothing against rows that never failed on
 // their own, which an ordinary pass tries next; rows that did keep failing.
 // Any other failure leaves the rows eligible for a retry.
 func (s *Service) failLog(ctx context.Context, logID pgtype.UUID, cause error, retry attempt) {
 	reason, attempts, rows := "", 0, 0
+	rejected := requestRejected(cause)
 	switch {
-	case !errors.Is(cause, ErrIneffectiveSummary), errors.Is(cause, errRollupFailed) && !retry.failedBefore:
+	case !errors.Is(cause, ErrIneffectiveSummary) && !rejected, errors.Is(cause, errRollupFailed) && !retry.failedBefore:
 	case errors.Is(cause, errRollupFailed):
 		reason, attempts, rows = failureReasonUnusableSummary, retry.unusable+1, retry.rows
-	case errors.Is(cause, errSummaryCutOff) && retry.halves:
-		reason, attempts, rows = failureReasonCutOffSummary, retry.unusable, retry.rows
-	case errors.Is(cause, errEmptySummary), errors.Is(cause, errIncompleteSummary):
+	case (rejected || errors.Is(cause, errSummaryCutOff)) && retry.halves:
+		reason, attempts, rows = failureReasonRetryHalf, retry.unusable, retry.rows
+	case rejected, errors.Is(cause, errEmptySummary), errors.Is(cause, errIncompleteSummary):
 		reason, attempts, rows = failureReasonUnusableSummary, retry.unusable+1, retry.rows
 	default:
 		reason = failureReasonIneffectiveSummary
 	}
 	_ = s.completeLog(ctx, logID, "error", "", cause.Error(), rows, nil, pgtype.UUID{}, nil, reason, attempts)
+}
+
+// requestRejected reports a provider that refused the request itself, for
+// what it holds: too long a prompt, or content it will not take.
+func requestRejected(err error) bool {
+	var apiErr *sdk.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	switch apiErr.StatusCode {
+	case http.StatusBadRequest, http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity:
+		return true
+	}
+	return false
 }
 
 func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, messageCount int, usage []byte, modelID pgtype.UUID, artifact *artifactMetadata, failureReason string, failureAttempts int) error {

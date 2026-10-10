@@ -36,8 +36,9 @@ var (
 	// ErrIneffectiveSummary marks a summary that cannot replace its rows: it
 	// would replay at least as many tokens as the raw entries it replaces, or
 	// the model returned none usable for them. Those rows are recorded as
-	// such, so the next pass selects past them; callers may run it right away.
-	// A manual pass reports it as a noop with its reason instead.
+	// such, so the next pass selects past them or retries half of them;
+	// callers may run it right away. A manual pass reports it as a noop with
+	// its reason instead.
 	ErrIneffectiveSummary = errors.New("compaction: summary cannot replace its rows")
 	// errIneffectiveRollup marks a rollup no shorter than everything it
 	// replaces. Nothing is recorded against the rows, so it counts as an

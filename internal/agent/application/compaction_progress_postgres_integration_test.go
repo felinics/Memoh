@@ -832,7 +832,7 @@ func TestPostgresCompactionCutOffSummaryRetriesHalfAtOnce(t *testing.T) {
 		t.Fatal("first pass succeeded, want the summary cut off")
 	}
 	_, claim := f.claims()
-	if got := f.compact(claim[rows[0].ID]); got.reason != "summary_cut_off" || got.count != len(rows) {
+	if got := f.compact(claim[rows[0].ID]); got.reason != "retry_half" || got.count != len(rows) {
 		t.Fatalf("cut-off attempt = %+v, want it recorded against all four rows", got)
 	}
 	for pass := 1; pass <= 2; pass++ {
