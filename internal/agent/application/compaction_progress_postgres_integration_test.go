@@ -950,3 +950,50 @@ func TestPostgresCompactionScanPassesHeldRowsAndComesBackForThem(t *testing.T) {
 		t.Fatalf("pass after the hold = %+v, %v; want the held rows behind the scan position tried again", res, err)
 	}
 }
+
+// lapseDuringPassQueries runs hook after a pass has read its windows and
+// before it records its scan position.
+type lapseDuringPassQueries struct {
+	dbstore.Queries
+	hook func()
+}
+
+func (q *lapseDuringPassQueries) AdvanceCompactionScan(ctx context.Context, arg dbsqlc.AdvanceCompactionScanParams) error {
+	if q.hook != nil {
+		q.hook()
+		q.hook = nil
+	}
+	return q.Queries.AdvanceCompactionScan(ctx, arg)
+}
+
+func TestPostgresCompactionHoldLapsingDuringAPassIsNotLost(t *testing.T) {
+	f, store := newProgressFixture(t)
+	refused := f.text("user", strings.Repeat("REFUSED question. ", 80))
+	f.text("assistant", strings.Repeat("REFUSED answer. ", 80))
+	f.reasoning()
+	f.filler(20)
+	f.text("user", "current question")
+	model := &countingSummarizer{summary: summaryTokens(120), refuse: "REFUSED"}
+	cfg := f.config(model)
+	cfg.Manual = false
+	if _, err := compaction.NewService(slog.New(slog.DiscardHandler), store).RunCompactionSync(f.ctx, cfg); err == nil {
+		t.Fatal("first pass succeeded, want the refusal recorded")
+	}
+	_, claim := f.claims()
+	failed := claim[refused.ID]
+	// The pass reads the refused rows while they are held; their hold ends
+	// before it records how far it got.
+	racing := &lapseDuringPassQueries{Queries: store, hook: func() {
+		if _, err := f.pool.Exec(f.ctx, `UPDATE bot_history_message_compacts SET completed_at = now() - INTERVAL '15 minutes' + INTERVAL '300 milliseconds' WHERE id = $1`, failed); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(600 * time.Millisecond)
+	}}
+	if _, err := compaction.NewService(slog.New(slog.DiscardHandler), racing).RunCompactionSync(f.ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	model.refuse = ""
+	if res, err := compaction.NewService(slog.New(slog.DiscardHandler), store).RunCompactionSync(f.ctx, cfg); err != nil || f.claimStatus(refused.ID) != "ok" {
+		t.Fatalf("pass after the hold lapsed = %+v, %v; want the rows behind the scan position tried again", res, err)
+	}
+}

@@ -3000,7 +3000,7 @@ WHERE message.team_id = public.memoh_current_team_id()
 -- since it was recorded: the scan may pass such rows while they are held.
 -- ReadFromStart ignores the recorded position. HeldClaims counts the
 -- session's attempts in this epoch whose summary was unusable and that are
--- still the latest claim of some row.
+-- still the latest claim of some row. ReadAt is when the rows were read.
 -- Only rows from the cursor on are read. The cumulative filter is evaluated
 -- before the payload join, so a leading row larger than the budget comes back
 -- alone and Oversized, without its payload, instead of crossing the
@@ -3160,6 +3160,7 @@ WITH scan_anchor AS MATERIALIZED (
     ON held_session.id = held_claim.session_id
    AND held_session.team_id = held_claim.team_id
   WHERE held_claim.team_id = public.memoh_current_team_id()
+    AND held_claim.bot_id = held_session.bot_id
     AND held_claim.session_id = sqlc.arg(session_id)
     AND held_claim.compaction_epoch = held_session.compaction_epoch
     AND held_claim.status = 'error'
@@ -3218,6 +3219,7 @@ SELECT
   admitted.pending_before::boolean AS pending_before,
   admitted.held_before::boolean AS held_before,
   held_claims.held_claims,
+  now()::timestamptz AS read_at,
   admitted.latest_user::boolean AS latest_user,
   admitted.oversized::boolean AS oversized,
   COALESCE(claim.failure_reason = sqlc.arg(ineffective_failure_reason)::text, false)::boolean AS ineffective_claim,
@@ -3252,12 +3254,12 @@ ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 
 -- name: AdvanceCompactionScan :exec
 -- Records the last candidate row a pass found permanently unclaimable in the
--- current epoch, and when, so later passes start reading after it. A new
--- epoch voids it.
+-- current epoch, and when the pass first read it, so later passes start
+-- reading after it. A new epoch voids it.
 UPDATE bot_sessions
 SET compaction_scan_after = sqlc.arg(after_message_id),
     compaction_scan_epoch = sqlc.arg(compaction_epoch),
-    compaction_scan_at = now()
+    compaction_scan_at = sqlc.arg(scan_at)::timestamptz
 WHERE team_id = public.memoh_current_team_id()
   AND id = sqlc.arg(session_id)
   AND compaction_epoch = sqlc.arg(compaction_epoch);

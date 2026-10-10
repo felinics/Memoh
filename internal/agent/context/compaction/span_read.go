@@ -67,6 +67,9 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 	// over from the first row.
 	var settledThrough pgtype.UUID
 	var scanEpoch int64
+	// readAt is when the pass read its first window: a hold that lapses
+	// after it may have been passed while it was held.
+	var readAt pgtype.Timestamptz
 	settling := true
 	settle := func(row sqlc.ListUncompactedMessagesBySessionRow) {
 		settledThrough, scanEpoch = row.ID, row.CompactionEpoch
@@ -79,6 +82,7 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			SessionID:       sessionUUID,
 			AfterMessageID:  settledThrough,
 			CompactionEpoch: scanEpoch,
+			ScanAt:          readAt,
 		}); err != nil {
 			s.logger.WarnContext(ctx, "compaction: record scan position failed",
 				slog.String("session_id", cfg.SessionID), slog.Any("error", err))
@@ -111,7 +115,7 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 		read.windows++
 		read.heldClaims = window[0].HeldClaims
 		if read.windows == 1 {
-			epoch = window[0].CompactionEpoch
+			epoch, readAt = window[0].CompactionEpoch, window[0].ReadAt
 		} else if window[0].CompactionEpoch != epoch {
 			// Claims of the old epoch are void: what earlier windows settled
 			// says nothing about the new one.

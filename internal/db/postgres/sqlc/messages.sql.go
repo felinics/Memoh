@@ -15,23 +15,29 @@ const advanceCompactionScan = `-- name: AdvanceCompactionScan :exec
 UPDATE bot_sessions
 SET compaction_scan_after = $1,
     compaction_scan_epoch = $2,
-    compaction_scan_at = now()
+    compaction_scan_at = $3::timestamptz
 WHERE team_id = public.memoh_current_team_id()
-  AND id = $3
+  AND id = $4
   AND compaction_epoch = $2
 `
 
 type AdvanceCompactionScanParams struct {
-	AfterMessageID  pgtype.UUID `json:"after_message_id"`
-	CompactionEpoch int64       `json:"compaction_epoch"`
-	SessionID       pgtype.UUID `json:"session_id"`
+	AfterMessageID  pgtype.UUID        `json:"after_message_id"`
+	CompactionEpoch int64              `json:"compaction_epoch"`
+	ScanAt          pgtype.Timestamptz `json:"scan_at"`
+	SessionID       pgtype.UUID        `json:"session_id"`
 }
 
 // Records the last candidate row a pass found permanently unclaimable in the
-// current epoch, and when, so later passes start reading after it. A new
-// epoch voids it.
+// current epoch, and when the pass first read it, so later passes start
+// reading after it. A new epoch voids it.
 func (q *Queries) AdvanceCompactionScan(ctx context.Context, arg AdvanceCompactionScanParams) error {
-	_, err := q.db.Exec(ctx, advanceCompactionScan, arg.AfterMessageID, arg.CompactionEpoch, arg.SessionID)
+	_, err := q.db.Exec(ctx, advanceCompactionScan,
+		arg.AfterMessageID,
+		arg.CompactionEpoch,
+		arg.ScanAt,
+		arg.SessionID,
+	)
 	return err
 }
 
@@ -5458,6 +5464,7 @@ WITH scan_anchor AS MATERIALIZED (
     ON held_session.id = held_claim.session_id
    AND held_session.team_id = held_claim.team_id
   WHERE held_claim.team_id = public.memoh_current_team_id()
+    AND held_claim.bot_id = held_session.bot_id
     AND held_claim.session_id = $4
     AND held_claim.compaction_epoch = held_session.compaction_epoch
     AND held_claim.status = 'error'
@@ -5516,6 +5523,7 @@ SELECT
   admitted.pending_before::boolean AS pending_before,
   admitted.held_before::boolean AS held_before,
   held_claims.held_claims,
+  now()::timestamptz AS read_at,
   admitted.latest_user::boolean AS latest_user,
   admitted.oversized::boolean AS oversized,
   COALESCE(claim.failure_reason = $1::text, false)::boolean AS ineffective_claim,
@@ -5591,6 +5599,7 @@ type ListUncompactedMessagesBySessionWithinBytesRow struct {
 	PendingBefore           bool               `json:"pending_before"`
 	HeldBefore              bool               `json:"held_before"`
 	HeldClaims              int64              `json:"held_claims"`
+	ReadAt                  pgtype.Timestamptz `json:"read_at"`
 	LatestUser              bool               `json:"latest_user"`
 	Oversized               bool               `json:"oversized"`
 	IneffectiveClaim        bool               `json:"ineffective_claim"`
@@ -5605,7 +5614,7 @@ type ListUncompactedMessagesBySessionWithinBytesRow struct {
 // since it was recorded: the scan may pass such rows while they are held.
 // ReadFromStart ignores the recorded position. HeldClaims counts the
 // session's attempts in this epoch whose summary was unusable and that are
-// still the latest claim of some row.
+// still the latest claim of some row. ReadAt is when the rows were read.
 // Only rows from the cursor on are read. The cumulative filter is evaluated
 // before the payload join, so a leading row larger than the budget comes back
 // alone and Oversized, without its payload, instead of crossing the
@@ -5678,6 +5687,7 @@ func (q *Queries) ListUncompactedMessagesBySessionWithinBytes(ctx context.Contex
 			&i.PendingBefore,
 			&i.HeldBefore,
 			&i.HeldClaims,
+			&i.ReadAt,
 			&i.LatestUser,
 			&i.Oversized,
 			&i.IneffectiveClaim,

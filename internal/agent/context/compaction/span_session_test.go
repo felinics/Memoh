@@ -195,6 +195,7 @@ func (q *sessionStore) ListUncompactedMessagesBySessionWithinBytes(_ context.Con
 		bounded.PendingBefore = c.pendingBefore
 		bounded.HeldBefore = c.heldBefore
 		bounded.HeldClaims = heldClaims
+		bounded.ReadAt = pgtype.Timestamptz{Time: q.now(), Valid: true}
 		claim := q.claims[c.row.ID]
 		failed := q.claimEpoch[claim] == q.epoch && q.logStatuses[claim] == "error"
 		bounded.IneffectiveClaim = failed && q.reasons[claim] == arg.IneffectiveFailureReason
@@ -215,7 +216,7 @@ func (q *sessionStore) ListUncompactedMessagesBySessionWithinBytes(_ context.Con
 
 func (q *sessionStore) AdvanceCompactionScan(_ context.Context, arg sqlc.AdvanceCompactionScanParams) error {
 	if arg.CompactionEpoch == q.epoch {
-		q.scanAfter, q.scanEpoch, q.scanAt = arg.AfterMessageID, arg.CompactionEpoch, q.now()
+		q.scanAfter, q.scanEpoch, q.scanAt = arg.AfterMessageID, arg.CompactionEpoch, arg.ScanAt.Time
 	}
 	return nil
 }
