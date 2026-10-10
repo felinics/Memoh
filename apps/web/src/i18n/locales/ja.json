@@ -1730,6 +1730,10 @@
       }
     }
   },
+  "chatExamples": {
+    "noBot": "試すには、まず Bot を作成してください。",
+    "createBot": "Bot を作成"
+  },
   "models": {
     "title": "モデル",
     "searchPlaceholder": "プロバイダーを検索…",

@@ -1295,6 +1295,7 @@ import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, displayedEffort, reconcileStor
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
+import { useComposerPrefillConsumer } from '../composables/useComposerPrefillConsumer'
 import { useUnfocusedComposerInput } from '../composables/useUnfocusedComposerInput'
 import { useComposerKeyboardFocus } from '../composables/useComposerKeyboardFocus'
 import { useComposerPair } from '../composables/useComposerPair'
@@ -3641,6 +3642,18 @@ const { inputDraftKey, saveInputDraft, clearAllDrafts } = useComposerDrafts({
   currentBotId,
   tabId: () => props.tabId,
   inputText,
+})
+// Registered after useComposerDrafts so its draft restore runs first and
+// cannot overwrite a prefilled prompt (usage examples, App "Try it").
+useComposerPrefillConsumer({
+  botId: () => paneTarget.value.botId,
+  active: () => isActive.value,
+  writable: () => !activeChatReadOnly.value,
+  apply: (text) => {
+    inputText.value = text
+    saveInputDraft(inputDraftKey.value, text)
+    void nextTick(focusTextarea)
+  },
 })
 
 // The dock owns ALL geometry/visibility orchestration (box-slot mutex,

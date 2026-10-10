@@ -1761,6 +1761,10 @@
       }
     }
   },
+  "chatExamples": {
+    "noBot": "请先创建一个 Bot 再试试。",
+    "createBot": "创建 Bot"
+  },
   "models": {
     "title": "模型",
     "searchPlaceholder": "搜索服务商…",
