@@ -29,6 +29,8 @@
     "modeDiscussion": "議論",
     "modeWithRuntime": "{runtime} の{mode}",
     "usage": "読めませんでした。チャットには /new を使用し、ディスカッションには /newDiscussion を使用してください。",
+    "agentNotFound": "その名前のAgentは見つかりません。/new <名前> で次のいずれかを指定してください：\n{agents}",
+    "noAgents": "その名前のAgentは見つかりません。このBotには利用できるAgentがまだありません。",
     "confirmTitle": "⚠️確認/新規",
     "confirmBody": "これにより、新しい {mode} Sessionが開始され、現在の会話履歴が破棄されます。",
     "action": {
@@ -161,7 +163,7 @@
       "top": {
         "help": "このヘルプを表示する",
         "start": "ウェルカムメッセージを表示する",
-        "new": "新しい会話を始める",
+        "new": "新しい会話を始める（Agent名を続けて指定可）",
         "stop": "現在の返信を停止します",
         "approve": "最新のまたは指定された保留中のTool呼び出しを承認します",
         "reject": "最新または指定された保留中のTool呼び出しを拒否します"
@@ -642,7 +644,7 @@
     "fetch_provider": {
       "native_managed": "組み込みの取得プロバイダーは Memoh が管理しており、この方法では変更できません。"
     },
-    "group_chat_acp_unsupported": "グループチャットではチャットモードの外部Agent Sessionを作成できません。/new codex または /new discuss codex を使用してください。",
+    "group_chat_acp_unsupported": "グループチャットではチャットモードの外部Agent Sessionを作成できません。/new <Agent名> または /new discuss <Agent名> を使用してください。",
     "history": {
       "delete_failed": "会話履歴を削除できませんでした。もう一度お試しください。"
     },

@@ -1221,7 +1221,7 @@ var catalog = map[Code]Definition{
 	CodeNoWorkspaceExec:          {HTTPStatus: http.StatusForbidden, Detail: "You do not have permission to run workspace commands for this bot."},
 	CodeACPRuntimeOwnerMissing:   {HTTPStatus: http.StatusConflict, Detail: "This external-agent session has no runtime owner. Start a new session to continue."},
 	CodeACPDiscussUnsupported:    {HTTPStatus: http.StatusBadRequest, Detail: "This external agent cannot run in discuss mode."},
-	CodeGroupChatACPUnsupported:  {HTTPStatus: http.StatusBadRequest, Detail: "Group chats cannot create a chat-mode external-agent session. Use /new codex or /new discuss codex."},
+	CodeGroupChatACPUnsupported:  {HTTPStatus: http.StatusBadRequest, Detail: "Group chats cannot create a chat-mode external-agent session. Use /new <agent name> or /new discuss <agent name>."},
 	CodeACPProjectModeInvalid:    {HTTPStatus: http.StatusBadRequest, Detail: "The external agent project mode is invalid."},
 	CodeACPProjectPathInvalid:    {HTTPStatus: http.StatusBadRequest, Detail: "The external agent project path must be absolute."},
 	CodeACPDisplayArgsInvalid:    {HTTPStatus: http.StatusBadRequest, Detail: "The external agent display arguments are invalid."},

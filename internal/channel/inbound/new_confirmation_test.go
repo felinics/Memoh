@@ -64,9 +64,32 @@ func (testACPProfiles) ResolveACPSetupPreflight(_ context.Context, _, _, agentID
 	return result, nil
 }
 
+const (
+	testACPBotAgentID   = "aaaaaaaa-0000-0000-0000-000000000001"
+	testCodexBotAgentID = "aaaaaaaa-0000-0000-0000-000000000002"
+)
+
+type fakeBotAgentReader []BotAgent
+
+func (f fakeBotAgentReader) BotAgents(context.Context, string) ([]BotAgent, error) {
+	return f, nil
+}
+
+type unreadableBotAgents struct{}
+
+func (unreadableBotAgents) BotAgents(context.Context, string) ([]BotAgent, error) {
+	return nil, errors.New("the bot's agents were read")
+}
+
+var testBotAgents = fakeBotAgentReader{
+	{ID: testACPBotAgentID, Name: "Custom Agent", Runtime: "acp", ACPAgentID: "custom-agent", Enabled: true},
+	{ID: testCodexBotAgentID, Name: "Codex", Runtime: sessionpkg.RuntimeCodex, Enabled: true},
+	{ID: "aaaaaaaa-0000-0000-0000-000000000003", Name: "Retired", Runtime: sessionpkg.RuntimeCodex},
+}
+
 func resolveNewSessionTypeForTest(t *testing.T, text string, msg channel.InboundMessage) (string, error) {
 	t.Helper()
-	spec, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, text).Parsed, msg, testACPProfiles{})
+	spec, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, text).Parsed, msg, testBotAgents)
 	if err != nil {
 		return "", err
 	}
@@ -99,46 +122,74 @@ func TestResolveNewSessionType_BareConfirmFlag(t *testing.T) {
 	if got, err := resolveNewSessionTypeForTest(t, "/new discuss", msg); err != nil || got != sessionpkg.TypeDiscuss {
 		t.Errorf("/new discuss = (%q, %v), want (%q, nil)", got, err, sessionpkg.TypeDiscuss)
 	}
-	// A genuinely unknown mode still errors.
-	if _, err := resolveNewSessionTypeForTest(t, "/new bogus", msg); err == nil {
-		t.Errorf("/new bogus should error on unknown session type")
-	}
 }
 
-func TestResolveNewSessionSpec_ACPAgent(t *testing.T) {
+// /new names an Agent by its name, whatever the case, and the session is
+// bound to that Agent rather than to its kind.
+func TestResolveNewSessionSpecNamesAgent(t *testing.T) {
 	dm := channel.InboundMessage{Channel: channel.ChannelTypeTelegram, Conversation: channel.Conversation{Type: "private"}}
 	group := channel.InboundMessage{Channel: channel.ChannelTypeTelegram, Conversation: channel.Conversation{Type: "group"}}
 
 	cases := []struct {
-		name        string
 		cmd         string
 		msg         channel.InboundMessage
 		wantMode    string
 		wantRuntime string
 		wantType    string
-		wantAgent   string
+		wantAgentID string
 	}{
-		{"bare agent in dm", "/new custom-agent", dm, sessionpkg.TypeChat, sessionpkg.RuntimeACPAgent, sessionpkg.TypeACPAgent, "custom-agent"},
-		{"chat agent in dm", "/new chat custom-agent", dm, sessionpkg.TypeChat, sessionpkg.RuntimeACPAgent, sessionpkg.TypeACPAgent, "custom-agent"},
-		{"discuss agent", "/new discuss custom-agent", group, sessionpkg.TypeDiscuss, sessionpkg.RuntimeACPAgent, sessionpkg.TypeDiscuss, "custom-agent"},
-		{"bare agent in group inherits discuss", "/new custom-agent", group, sessionpkg.TypeDiscuss, sessionpkg.RuntimeACPAgent, sessionpkg.TypeDiscuss, "custom-agent"},
+		{"/new custom agent", dm, sessionpkg.TypeChat, sessionpkg.RuntimeACPAgent, sessionpkg.TypeACPAgent, testACPBotAgentID},
+		{"/new chat Custom  Agent", dm, sessionpkg.TypeChat, sessionpkg.RuntimeACPAgent, sessionpkg.TypeACPAgent, testACPBotAgentID},
+		{"/new discuss custom agent", group, sessionpkg.TypeDiscuss, sessionpkg.RuntimeACPAgent, sessionpkg.TypeDiscuss, testACPBotAgentID},
+		{"/new custom agent", group, sessionpkg.TypeDiscuss, sessionpkg.RuntimeACPAgent, sessionpkg.TypeDiscuss, testACPBotAgentID},
+		{"/new CODEX", dm, sessionpkg.TypeChat, sessionpkg.RuntimeCodex, sessionpkg.TypeChat, testCodexBotAgentID},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			spec, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, tc.cmd).Parsed, tc.msg, testACPProfiles{})
+		t.Run(tc.cmd, func(t *testing.T) {
+			spec, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, tc.cmd).Parsed, tc.msg, testBotAgents)
 			if err != nil {
 				t.Fatalf("resolveNewSessionSpec(%q) error = %v", tc.cmd, err)
 			}
-			if spec.Mode != tc.wantMode || spec.Runtime != tc.wantRuntime || spec.Type != tc.wantType {
-				t.Fatalf("spec = %#v, want mode/runtime/type %q/%q/%q", spec, tc.wantMode, tc.wantRuntime, tc.wantType)
-			}
-			if got := newSessionMetadataString(spec.Metadata, "acp_agent_id"); got != tc.wantAgent {
-				t.Fatalf("agent = %q, want %q", got, tc.wantAgent)
-			}
-			if got := newSessionMetadataString(spec.Metadata, "project_path"); got != sessionpkg.DefaultACPProjectPath {
-				t.Fatalf("project_path = %q, want default", got)
+			if spec.Mode != tc.wantMode || spec.Runtime != tc.wantRuntime || spec.Type != tc.wantType || spec.BotAgentID != tc.wantAgentID {
+				t.Fatalf("spec = %#v, want mode/runtime/type/agent %q/%q/%q/%q", spec, tc.wantMode, tc.wantRuntime, tc.wantType, tc.wantAgentID)
 			}
 		})
+	}
+}
+
+// A kind is not a name: with no Agent called "acp" the operand matches
+// nothing, and a disabled Agent is refused rather than reported missing.
+func TestResolveNewSessionSpecRejectsUnusableAgent(t *testing.T) {
+	dm := channel.InboundMessage{Channel: channel.ChannelTypeTelegram, Conversation: channel.Conversation{Type: "private"}}
+
+	for _, cmd := range []string{"/new acp", "/new chat --id aaaaaaaa-0000-0000-0000-00000000dead"} {
+		if _, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, cmd).Parsed, dm, testBotAgents); !errors.Is(err, errNewSessionAgentNotFound) {
+			t.Fatalf("resolveNewSessionSpec(%q) error = %v, want agent not found", cmd, err)
+		}
+	}
+	_, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, "/new retired").Parsed, dm, testBotAgents)
+	if got := apperror.CodeOf(err); got != apperror.CodeACPAgentNotEnabled {
+		t.Fatalf("disabled agent code = %q, want %s", got, apperror.CodeACPAgentNotEnabled)
+	}
+}
+
+// Words that begin with a mode are tried as one name first, so "Chat GPT" is
+// reachable; a mode word on its own stays the mode even when an Agent has it
+// for a name.
+func TestResolveNewSessionSpecTriesWholeNameBeforeModeWord(t *testing.T) {
+	agents := []BotAgent{
+		{ID: testCodexBotAgentID, Name: "Chat GPT", Runtime: sessionpkg.RuntimeCodex, Enabled: true},
+		{ID: testACPBotAgentID, Name: "chat", Runtime: "acp", ACPAgentID: "custom-agent", Enabled: true},
+	}
+	group := channel.InboundMessage{Channel: channel.ChannelTypeTelegram, Conversation: channel.Conversation{Type: "group"}}
+
+	spec, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, "/new chat gpt").Parsed, group, agents)
+	if err != nil || spec.BotAgentID != testCodexBotAgentID || spec.Mode != sessionpkg.TypeDiscuss {
+		t.Fatalf("/new chat gpt = %#v, %v, want the Agent in the group's default mode", spec, err)
+	}
+	spec, err = resolveNewSessionSpecParsed(mustCommandInvocation(t, "/new chat").Parsed, group, agents)
+	if err != nil || spec.BotAgentID != "" || spec.Mode != sessionpkg.TypeChat {
+		t.Fatalf("/new chat = %#v, %v, want chat mode with no Agent named", spec, err)
 	}
 }
 
@@ -161,11 +212,11 @@ func TestResolveNewSessionSpecCanonicalBotMentionIsNotAnAgent(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseInvocation() error = %v", err)
 			}
-			spec, err := resolveNewSessionSpecParsed(invocation.Parsed, group, testACPProfiles{})
+			spec, err := resolveNewSessionSpecParsed(invocation.Parsed, group, testBotAgents)
 			if err != nil {
 				t.Fatalf("resolveNewSessionSpecParsed() error = %v", err)
 			}
-			if spec.Mode != sessionpkg.TypeDiscuss || spec.Runtime != sessionpkg.RuntimeModel || acpNewSessionAgentID(spec) != "" {
+			if spec.Mode != sessionpkg.TypeDiscuss || spec.Runtime != sessionpkg.RuntimeModel || spec.BotAgentID != "" {
 				t.Fatalf("spec = %#v, want native discuss session", spec)
 			}
 		})
@@ -287,7 +338,7 @@ func TestHandleInboundNewCommandIgnoresCurrentBotMentionArguments(t *testing.T) 
 
 func TestResolveNewSessionSpec_GroupChatACPUnsupported(t *testing.T) {
 	group := channel.InboundMessage{Channel: channel.ChannelTypeTelegram, Conversation: channel.Conversation{Type: "group"}}
-	_, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, "/new chat codex").Parsed, group, testACPProfiles{})
+	_, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, "/new chat codex").Parsed, group, testBotAgents)
 	if err == nil {
 		t.Fatal("resolveNewSessionSpec error = nil, want group chat ACP unsupported")
 	}
@@ -318,11 +369,12 @@ func TestHandleNewSessionCommandCreatesACPChatSpec(t *testing.T) {
 		sessionEnsurer:    ensurer,
 		permissionChecker: &fakeBotPermissionChecker{allowed: true},
 		acpProfiles:       testACPProfiles{},
+		botAgents:         testBotAgents,
 	}
 	sender := &fakeReplySender{}
 	msg := channel.InboundMessage{
 		Channel:     channel.ChannelTypeTelegram,
-		Message:     channel.Message{ID: "msg-1", Text: "/new chat custom-agent"},
+		Message:     channel.Message{ID: "msg-1", Text: "/new chat custom agent"},
 		ReplyTarget: "target-1",
 		Conversation: channel.Conversation{
 			ID:   "dm-1",
@@ -348,11 +400,48 @@ func TestHandleNewSessionCommandCreatesACPChatSpec(t *testing.T) {
 	if spec.CreatedByUserID != ownerID {
 		t.Fatalf("created_by_user_id = %q, want authenticated channel identity", spec.CreatedByUserID)
 	}
-	if got := newSessionMetadataString(spec.Metadata, "acp_agent_id"); got != "custom-agent" {
-		t.Fatalf("agent = %q, want custom-agent", got)
+	if got := newSessionMetadataString(spec.Metadata, "acp_agent_id"); got != "custom-agent" || spec.BotAgentID != testACPBotAgentID {
+		t.Fatalf("agent = %q bound to %q, want custom-agent bound to the named Agent", got, spec.BotAgentID)
 	}
 	if len(sender.sent) != 1 {
 		t.Fatalf("sent replies = %d, want 1", len(sender.sent))
+	}
+}
+
+// A name that matches nothing is answered with the Agents to choose from and
+// creates no session; it is the sender's typo, not a failure. A sender who may
+// not run an Agent is refused without learning their names.
+func TestHandleNewSessionCommandListsAgentsForUnknownName(t *testing.T) {
+	for _, allowed := range []bool{true, false} {
+		ensurer := &fakeSessionEnsurer{}
+		p := &ChannelInboundProcessor{
+			sessionEnsurer:    ensurer,
+			botAgents:         testBotAgents,
+			permissionChecker: &fakeBotPermissionChecker{allowed: allowed},
+		}
+		sender := &fakeReplySender{}
+		msg := channel.InboundMessage{
+			Channel:      channel.ChannelTypeTelegram,
+			Message:      channel.Message{ID: "msg-1", Text: "/new grok"},
+			ReplyTarget:  "target-1",
+			Conversation: channel.Conversation{ID: "dm-1", Type: channel.ConversationTypePrivate},
+		}
+
+		err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{TeamID: "team-test"}, msg, sender, InboundIdentity{
+			BotID:  "bot-1",
+			UserID: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+		}, mustCommandInvocation(t, msg.Message.PlainText()))
+		if ensurer.lastSpec.Mode != "" || len(sender.sent) != 1 {
+			t.Fatalf("allowed=%v: spec = %#v, replies = %d, want one reply and no session", allowed, ensurer.lastSpec, len(sender.sent))
+		}
+		text := sender.sent[0].Message.PlainText()
+		listed := strings.Contains(text, "Custom Agent") && strings.Contains(text, "Codex") && !strings.Contains(text, "Retired")
+		if allowed && (err != nil || !listed) {
+			t.Fatalf("reply = %q, error = %v, want the enabled agents and an answered command", text, err)
+		}
+		if !allowed && (apperror.CodeOf(err) != apperror.CodeNoWorkspaceExec || strings.Contains(text, "Codex")) {
+			t.Fatalf("reply = %q, error = %v, want a refusal that names no agent", text, err)
+		}
 	}
 }
 
@@ -363,6 +452,8 @@ func TestHandleNewSessionCommandCreatesNativeSessionWithCreator(t *testing.T) {
 	p := &ChannelInboundProcessor{
 		routeResolver:  chatSvc,
 		sessionEnsurer: ensurer,
+		// A /new that names no Agent must not depend on the bot's Agents.
+		botAgents: unreadableBotAgents{},
 	}
 	sender := &fakeReplySender{}
 	msg := channel.InboundMessage{
@@ -490,16 +581,18 @@ func TestHandleNewSessionCommandExplicitACPInheritsDefaultProject(t *testing.T) 
 		permissionChecker: &fakeBotPermissionChecker{allowed: true},
 		acpProfiles:       testACPProfiles{},
 		defaultChatRuntime: fakeDefaultChatRuntimeReader{settings: DefaultChatRuntimeSettings{
+			BotAgentID:  testACPBotAgentID,
 			Runtime:     sessionpkg.RuntimeACPAgent,
 			ACPAgentID:  "custom-agent",
 			ProjectPath: "/workspace/default",
 			ProjectMode: sessionpkg.DefaultACPProjectMode,
 		}},
+		botAgents: testBotAgents,
 	}
 	sender := &fakeReplySender{}
 	msg := channel.InboundMessage{
 		Channel:     channel.ChannelTypeTelegram,
-		Message:     channel.Message{ID: "msg-1", Text: "/new custom-agent"},
+		Message:     channel.Message{ID: "msg-1", Text: "/new custom agent"},
 		ReplyTarget: "target-1",
 		Conversation: channel.Conversation{
 			ID:   "dm-1",
@@ -540,11 +633,12 @@ func TestHandleNewSessionCommandPreflightsACPSetup(t *testing.T) {
 				},
 			},
 		}},
+		botAgents: testBotAgents,
 	}
 	sender := &fakeReplySender{}
 	msg := channel.InboundMessage{
 		Channel:     channel.ChannelTypeTelegram,
-		Message:     channel.Message{ID: "msg-1", Text: "/new custom-agent"},
+		Message:     channel.Message{ID: "msg-1", Text: "/new custom agent"},
 		ReplyTarget: "target-1",
 		Conversation: channel.Conversation{
 			ID:   "dm-1",
@@ -636,7 +730,9 @@ func TestRequireWorkspaceExecUnboundIdentityPointsToLink(t *testing.T) {
 	}
 }
 
-func TestHandleNewSessionCommandACPRequiresWorkspaceExec(t *testing.T) {
+// A sender who may not run an Agent is refused before anything about the
+// named Agent is said, its incomplete setup included.
+func TestHandleNewSessionCommandNamedAgentRequiresWorkspaceExec(t *testing.T) {
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
 	ensurer := &fakeSessionEnsurer{activeSession: SessionResult{ID: "22222222-2222-2222-2222-222222222222", Type: sessionpkg.TypeACPAgent}}
 	p := &ChannelInboundProcessor{
@@ -644,11 +740,17 @@ func TestHandleNewSessionCommandACPRequiresWorkspaceExec(t *testing.T) {
 		sessionEnsurer:    ensurer,
 		permissionChecker: &fakeBotPermissionChecker{allowed: false},
 		acpProfiles:       testACPProfiles{},
+		botAgents:         testBotAgents,
+		acpAgentSetup: fakeACPAgentSetupReader{metadata: map[string]any{
+			"acp": map[string]any{"agents": map[string]any{
+				"custom-agent": map[string]any{"enabled": true, "setup_mode": "api_key", "managed": map[string]any{}},
+			}},
+		}},
 	}
 	sender := &fakeReplySender{}
 	msg := channel.InboundMessage{
 		Channel:     channel.ChannelTypeTelegram,
-		Message:     channel.Message{ID: "msg-1", Text: "/new chat codex"},
+		Message:     channel.Message{ID: "msg-1", Text: "/new custom agent"},
 		ReplyTarget: "target-1",
 		Conversation: channel.Conversation{
 			ID:   "dm-1",
@@ -735,102 +837,84 @@ func TestSendNewConfirmation_LocalizesActionLabels(t *testing.T) {
 	}
 }
 
-func TestSendNewConfirmationShowsACPRuntimeLabel(t *testing.T) {
-	p := &ChannelInboundProcessor{acpProfiles: testACPProfiles{}}
-	s := &fakeReplySender{}
-	loc := i18n.New("en")
-	spec := NewSessionSpec{
-		Mode:    sessionpkg.TypeChat,
-		Runtime: sessionpkg.RuntimeACPAgent,
-		Metadata: map[string]any{
-			"acp_agent_id": "custom-agent",
-		},
-	}
-
-	err := p.sendNewConfirmation(
-		context.Background(),
-		channel.InboundMessage{ReplyTarget: "test-target"},
-		s,
-		loc,
-		newSessionConfirmModeText(spec),
-		newSessionDisplayModeLabel(loc, spec, p.acpProfiles),
-		channel.ChannelCapabilities{Buttons: true, Markdown: true, Text: true},
-	)
+// The Confirm button carries a named Agent as its id, so the tap lands on the
+// same Agent through the real command parser. The bot's default Agent is not
+// carried: it is resolved again on confirm.
+func TestNewConfirmationKeepsNamedAgent(t *testing.T) {
+	group := channel.InboundMessage{Channel: channel.ChannelTypeTelegram, Conversation: channel.Conversation{Type: "group"}}
+	spec, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, "/new discuss custom agent").Parsed, group, testBotAgents)
 	if err != nil {
-		t.Fatalf("sendNewConfirmation: %v", err)
+		t.Fatalf("resolveNewSessionSpec() error = %v", err)
 	}
-	if len(s.sent) != 1 {
-		t.Fatalf("expected 1 sent message, got %d", len(s.sent))
+	callback := command.EncodeConfirmNewCallback(newSessionConfirmModeText(spec))
+	parsedCallback, ok := command.DecodeCallback(callback)
+	if !ok {
+		t.Fatalf("callback = %q, want a decodable callback", callback)
 	}
-	out := s.sent[0].Message
-	if !strings.Contains(out.Text, "chat with Custom Agent / ACP") {
-		t.Fatalf("confirmation text = %q, want ACP runtime label", out.Text)
+	confirmed, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, parsedCallback.SyntheticCommand()).Parsed, group, testBotAgents)
+	if err != nil || confirmed.BotAgentID != testACPBotAgentID || confirmed.Mode != sessionpkg.TypeDiscuss {
+		t.Fatalf("confirmed spec = %#v, %v, want the same Agent and mode", confirmed, err)
 	}
-	if len(out.Actions) != 2 || out.Actions[0].Value != command.EncodeConfirmNewCallback("chat custom-agent") {
-		t.Fatalf("actions = %#v, want callback to preserve /new chat custom-agent", out.Actions)
+	if label := newSessionDisplayModeLabel(i18n.New("en"), spec, testACPProfiles{}); label != "discussion with Custom Agent" {
+		t.Fatalf("label = %q, want the Agent's name", label)
+	}
+	if got := newSessionConfirmModeText(NewSessionSpec{Mode: sessionpkg.TypeChat, BotAgentID: testACPBotAgentID}); got != sessionpkg.TypeChat {
+		t.Fatalf("confirm text for the default Agent = %q, want the mode alone", got)
 	}
 }
 
-// Direct external agents are addressed by runtime name in /new: no ACP
-// profile lookup, a plain chat session on the direct runtime, and the same
-// workspace-exec gate as ACP. This path used to bounce with unknown_agent.
-func TestNewSessionCommandResolvesDirectAgents(t *testing.T) {
-	dm := channel.InboundMessage{Channel: channel.ChannelTypeTelegram, Conversation: channel.Conversation{Type: "private"}}
-
-	for _, cmd := range []string{"/new codex", "/new chat codex"} {
-		spec, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, cmd).Parsed, dm, testACPProfiles{})
-		if err != nil {
-			t.Fatalf("resolveNewSessionSpec(%q) error = %v", cmd, err)
-		}
-		if spec.Mode != sessionpkg.TypeChat || spec.Runtime != sessionpkg.RuntimeCodex || spec.Type != sessionpkg.TypeChat {
-			t.Fatalf("spec for %q = %#v, want chat/codex/chat", cmd, spec)
-		}
-	}
-
-	spec, err := resolveNewSessionSpecParsed(mustCommandInvocation(t, "/new claude-code").Parsed, dm, testACPProfiles{})
-	if err != nil {
-		t.Fatalf("resolveNewSessionSpec(/new claude-code) error = %v", err)
-	}
-	if spec.Runtime != sessionpkg.RuntimeClaudeCode {
-		t.Fatalf("spec = %#v, want claude-code runtime", spec)
-	}
-}
-
+// A named direct Agent runs on its own runtime whatever the bot's default is,
+// and takes the project the settings hold only when it is that default.
 func TestHandleNewSessionCommandCreatesDirectAgentChatSpec(t *testing.T) {
 	ownerID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
-	ensurer := &fakeSessionEnsurer{activeSession: SessionResult{ID: "22222222-2222-2222-2222-222222222222", Type: sessionpkg.TypeChat}}
-	p := &ChannelInboundProcessor{
-		routeResolver:     chatSvc,
-		sessionEnsurer:    ensurer,
-		permissionChecker: &fakeBotPermissionChecker{allowed: true},
-		acpProfiles:       testACPProfiles{},
-	}
-	sender := &fakeReplySender{}
-	msg := channel.InboundMessage{
-		Channel:     channel.ChannelTypeTelegram,
-		Message:     channel.Message{ID: "msg-1", Text: "/new chat codex"},
-		ReplyTarget: "target-1",
-		Conversation: channel.Conversation{
-			ID:   "dm-1",
-			Type: channel.ConversationTypePrivate,
-		},
-	}
+	for defaultAgentID, wantProjectPath := range map[string]string{
+		testACPBotAgentID:   "",
+		testCodexBotAgentID: "/workspace/default",
+	} {
+		chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
+		ensurer := &fakeSessionEnsurer{activeSession: SessionResult{ID: "22222222-2222-2222-2222-222222222222", Type: sessionpkg.TypeChat}}
+		p := &ChannelInboundProcessor{
+			routeResolver:     chatSvc,
+			sessionEnsurer:    ensurer,
+			permissionChecker: &fakeBotPermissionChecker{allowed: true},
+			acpProfiles:       testACPProfiles{},
+			botAgents:         testBotAgents,
+			defaultChatRuntime: fakeDefaultChatRuntimeReader{settings: DefaultChatRuntimeSettings{
+				BotAgentID:  defaultAgentID,
+				Runtime:     sessionpkg.RuntimeACPAgent,
+				ACPAgentID:  "custom-agent",
+				ProjectPath: "/workspace/default",
+			}},
+		}
+		sender := &fakeReplySender{}
+		msg := channel.InboundMessage{
+			Channel:     channel.ChannelTypeTelegram,
+			Message:     channel.Message{ID: "msg-1", Text: "/new chat codex"},
+			ReplyTarget: "target-1",
+			Conversation: channel.Conversation{
+				ID:   "dm-1",
+				Type: channel.ConversationTypePrivate,
+			},
+		}
 
-	err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{TeamID: "team-test"}, msg, sender, InboundIdentity{
-		BotID:             "bot-1",
-		ChannelIdentityID: "cccccccc-cccc-cccc-cccc-cccccccccccc",
-		UserID:            ownerID,
-	}, mustCommandInvocation(t, msg.Message.PlainText()))
-	if err != nil {
-		t.Fatalf("handleNewSessionCommand() error = %v", err)
-	}
-	spec := ensurer.lastSpec
-	if spec.Mode != sessionpkg.TypeChat || spec.Runtime != sessionpkg.RuntimeCodex || spec.Type != sessionpkg.TypeChat {
-		t.Fatalf("spec = %#v, want chat/codex/chat", spec)
-	}
-	if spec.RuntimeOwnerAccountID != ownerID {
-		t.Fatalf("runtime owner = %q, want authenticated channel identity", spec.RuntimeOwnerAccountID)
+		err := p.handleNewSessionCommand(context.Background(), channel.ChannelConfig{TeamID: "team-test"}, msg, sender, InboundIdentity{
+			BotID:             "bot-1",
+			ChannelIdentityID: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+			UserID:            ownerID,
+		}, mustCommandInvocation(t, msg.Message.PlainText()))
+		if err != nil {
+			t.Fatalf("handleNewSessionCommand() error = %v", err)
+		}
+		spec := ensurer.lastSpec
+		if spec.Mode != sessionpkg.TypeChat || spec.Runtime != sessionpkg.RuntimeCodex || spec.Type != sessionpkg.TypeChat || spec.BotAgentID != testCodexBotAgentID {
+			t.Fatalf("spec = %#v, want chat/codex/chat bound to the named Agent", spec)
+		}
+		if got := newSessionMetadataString(spec.Metadata, "project_path"); got != wantProjectPath {
+			t.Fatalf("default %s: project_path = %q, want %q", defaultAgentID, got, wantProjectPath)
+		}
+		if spec.RuntimeOwnerAccountID != ownerID {
+			t.Fatalf("runtime owner = %q, want authenticated channel identity", spec.RuntimeOwnerAccountID)
+		}
 	}
 }
 

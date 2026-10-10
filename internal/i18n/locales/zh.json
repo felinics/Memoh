@@ -29,6 +29,8 @@
     "modeDiscussion": "讨论",
     "modeWithRuntime": "{mode}（{runtime}）",
     "usage": "无法识别参数。用 /new 开始对话，/new discuss 开始讨论。",
+    "agentNotFound": "没有找到这个 Agent。用 /new <名称> 指定下面其中一个：\n{agents}",
+    "noAgents": "没有找到这个 Agent，这个 Bot 还没有可用的 Agent。",
     "confirmTitle": "⚠️ 确认 /new",
     "confirmBody": "将开始全新{mode}会话，当前对话记录会被清除。",
     "action": {
@@ -161,7 +163,7 @@
       "top": {
         "help": "显示帮助",
         "start": "显示欢迎信息",
-        "new": "开始新对话",
+        "new": "开始新对话，后面可跟 Agent 名称",
         "stop": "停止当前回复",
         "approve": "批准待执行的工具调用",
         "reject": "拒绝待执行的工具调用"
@@ -642,7 +644,7 @@
     "fetch_provider": {
       "native_managed": "内置抓取服务由 Memoh 管理，无法这样修改。"
     },
-    "group_chat_acp_unsupported": "群聊不能创建对话模式的外部 Agent 会话。请使用 /new codex 或 /new discuss codex。",
+    "group_chat_acp_unsupported": "群聊不能创建对话模式的外部 Agent 会话。请使用 /new <Agent 名称> 或 /new discuss <Agent 名称>。",
     "history": {
       "delete_failed": "会话历史删除失败，请重试。"
     },

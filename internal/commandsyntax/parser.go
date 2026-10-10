@@ -13,7 +13,7 @@ type ParsedCommand struct {
 	Args     []string // remaining positional arguments
 	Page     int      // zero-based page offset from a "--page N" flag (0 if absent)
 	Prov     int      // provider index from a "--prov N" flag (-1 if absent)
-	SelectID string   // stable model id from a "--id V" flag ("" if absent)
+	SelectID string   // stable id of the selected item from a "--id V" flag ("" if absent)
 	Range    string   // time-window key from a "--range V" flag ("" if absent)
 }
 

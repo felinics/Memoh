@@ -29,6 +29,8 @@
     "modeDiscussion": "discussion",
     "modeWithRuntime": "{mode} with {runtime}",
     "usage": "Couldn't read that — use /new for a chat, or /new discuss for a discussion.",
+    "agentNotFound": "No agent has that name. Use /new <name> with one of these:\n{agents}",
+    "noAgents": "No agent has that name, and this bot has no agents available yet.",
     "confirmTitle": "⚠️ Confirm /new",
     "confirmBody": "This starts a fresh {mode} session and discards the current conversation history.",
     "action": {
@@ -161,7 +163,7 @@
       "top": {
         "help": "show this help",
         "start": "show the welcome message",
-        "new": "start a new conversation",
+        "new": "start a new conversation, optionally with an agent name",
         "stop": "stop the current reply",
         "approve": "approve the latest or specified pending tool call",
         "reject": "reject the latest or specified pending tool call"
@@ -642,7 +644,7 @@
     "fetch_provider": {
       "native_managed": "The built-in fetch provider is managed by Memoh and cannot be changed this way."
     },
-    "group_chat_acp_unsupported": "Group chats cannot create a chat-mode external-agent session. Use /new codex or /new discuss codex.",
+    "group_chat_acp_unsupported": "Group chats cannot create a chat-mode external-agent session. Use /new <agent name> or /new discuss <agent name>.",
     "history": {
       "delete_failed": "The conversation history could not be deleted. Please try again."
     },

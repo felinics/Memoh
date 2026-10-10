@@ -268,7 +268,7 @@
     "fetch_provider": {
       "native_managed": "組み込みの取得プロバイダーは Memoh が管理しており、この方法では変更できません。"
     },
-    "group_chat_acp_unsupported": "グループチャットではチャットモードの外部Agent Sessionを作成できません。/new codex または /new discuss codex を使用してください。",
+    "group_chat_acp_unsupported": "グループチャットではチャットモードの外部Agent Sessionを作成できません。/new <Agent名> または /new discuss <Agent名> を使用してください。",
     "history": {
       "delete_failed": "会話履歴を削除できませんでした。もう一度お試しください。"
     },
@@ -1454,7 +1454,7 @@
       "accountUnbound": "この IM アカウントはまだ Memoh アカウントと連携されていないため、この Bot のワークスペースを利用できません。あなたが所有者の場合は、Memoh の Web 画面で「プロフィール → 連携済みアカウント」からリンクコードを取得し、ここで {link} <コード> を送信してください。",
       "runtimeOwnerMissing": "この外部Agent Sessionには実行所有者がありません。新しいSessionを開始してください。",
       "discussUnsupported": "この外部Agentはディスカッションモードでは実行できません。",
-      "groupChatUnsupported": "グループチャットではチャットモードの外部Agent Sessionを作成できません。/new codex または /new discuss codex を使用してください。",
+      "groupChatUnsupported": "グループチャットではチャットモードの外部Agent Sessionを作成できません。/new <Agent名> または /new discuss <Agent名> を使用してください。",
       "projectModeInvalid": "外部Agentのプロジェクトモードが無効です。",
       "projectPathInvalid": "外部Agentのプロジェクトパスは絶対パスである必要があります。",
       "displayArgsInvalid": "外部Agentの表示引数が無効です。",

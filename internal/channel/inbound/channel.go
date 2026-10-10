@@ -144,6 +144,19 @@ type ACPAgentSetupReader interface {
 	ACPAgentSetupMetadata(ctx context.Context, botID string) (map[string]any, error)
 }
 
+// BotAgent is a user-added Agent as /new addresses it.
+type BotAgent struct {
+	ID         string
+	Name       string
+	Runtime    string
+	ACPAgentID string
+	Enabled    bool
+}
+
+type BotAgentReader interface {
+	BotAgents(ctx context.Context, botID string) ([]BotAgent, error)
+}
+
 type BotPermissionChecker interface {
 	HasBotPermission(ctx context.Context, botID, accountID, permission string) (bool, error)
 }
@@ -175,7 +188,9 @@ type SessionResult struct {
 }
 
 type NewSessionSpec struct {
-	BotAgentID            string
+	BotAgentID string
+	// AgentName is set only when /new named the Agent; it labels the replies.
+	AgentName             string
 	Mode                  string
 	Runtime               string
 	Type                  string
@@ -213,6 +228,7 @@ type ChannelInboundProcessor struct {
 	imDisplayOptions    IMDisplayOptionsReader
 	defaultChatRuntime  DefaultChatRuntimeReader
 	acpAgentSetup       ACPAgentSetupReader
+	botAgents           BotAgentReader
 	acpProfiles         turn.ACPProfileResolver
 	permissionChecker   BotPermissionChecker
 	skillResolver       RequestedSkillResolver
@@ -379,6 +395,13 @@ func (p *ChannelInboundProcessor) SetACPAgentSetupReader(reader ACPAgentSetupRea
 		return
 	}
 	p.acpAgentSetup = reader
+}
+
+func (p *ChannelInboundProcessor) SetBotAgentReader(reader BotAgentReader) {
+	if p == nil {
+		return
+	}
+	p.botAgents = reader
 }
 
 func (p *ChannelInboundProcessor) SetACPProfileResolver(resolver turn.ACPProfileResolver) {
@@ -4032,99 +4055,109 @@ func looksLikeApprovalID(value string) bool {
 	return true
 }
 
-// resolveNewSessionSpecParsed determines the session mode/runtime for /new.
-// /new chat → chat+model; a named Agent selects either its direct runtime or
-// the generic ACP runtime while the explicit/default channel mode stays intact.
-func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.InboundMessage, profiles turn.ACPProfileResolver) (NewSessionSpec, error) {
-	operands := newSessionOperands(parsed)
-	explicit := ""
-	var args []string
-	if len(operands) > 0 {
-		explicit = strings.ToLower(strings.TrimSpace(operands[0]))
-		args = operands[1:]
-	}
-	mode := ""
-	agentID := ""
-	switch explicit {
-	case "chat":
-		mode = sessionpkg.TypeChat
-		agentID = firstNewSessionAgentArg(args)
-		if agentID != "" && isGroupConversation(msg) {
+var errNewSessionAgentNotFound = errors.New("no agent with that name")
+
+// resolveNewSessionSpecParsed determines the session mode and Agent for /new:
+// an optional mode word, then the name of one of the bot's Agents. Without a
+// name the spec is native and the bot's default Agent applies later.
+func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.InboundMessage, agents []BotAgent) (NewSessionSpec, error) {
+	mode, name := newSessionModeAndName(newSessionOperands(parsed), agents)
+	named := name != "" || parsed.SelectID != ""
+	switch mode {
+	case sessionpkg.TypeChat:
+		if named && isGroupConversation(msg) {
 			return NewSessionSpec{}, apperror.New(apperror.CodeGroupChatACPUnsupported, nil)
 		}
-	case "discuss":
+	case sessionpkg.TypeDiscuss:
 		if isLocalChannelType(msg.Channel) {
 			return NewSessionSpec{}, errors.New("discuss mode is not supported via WebUI — use a channel adapter (Telegram, Discord, etc.)")
 		}
-		mode = sessionpkg.TypeDiscuss
-		agentID = firstNewSessionAgentArg(args)
-	case "":
-		// Default: local → chat, group → discuss, DM → chat.
-		switch {
-		case isLocalChannelType(msg.Channel), channel.IsPrivateConversationType(msg.Conversation.Type):
-			mode = sessionpkg.TypeChat
-		default:
-			mode = sessionpkg.TypeDiscuss
-		}
 	default:
-		if direct := normalizeACPAgentID(explicit); sessionpkg.IsDirectRuntimeType(direct) {
-			// A bare direct external agent name ("/new codex") is a valid
-			// operand even though it has no ACP profile.
-			agentID = direct
-			switch {
-			case isLocalChannelType(msg.Channel), channel.IsPrivateConversationType(msg.Conversation.Type):
-				mode = sessionpkg.TypeChat
-			default:
-				mode = sessionpkg.TypeDiscuss
-			}
-			break
-		}
-		profile := resolveACPProfile(profiles, explicit)
-		if !profile.Known {
-			return NewSessionSpec{}, fmt.Errorf("unknown session type %q — use /new, /new chat, or /new discuss", explicit)
-		}
-		agentID = profile.ID
-		switch {
-		case isLocalChannelType(msg.Channel), channel.IsPrivateConversationType(msg.Conversation.Type):
+		// Default: local → chat, group → discuss, DM → chat.
+		mode = sessionpkg.TypeDiscuss
+		if isLocalChannelType(msg.Channel) || channel.IsPrivateConversationType(msg.Conversation.Type) {
 			mode = sessionpkg.TypeChat
-		default:
-			mode = sessionpkg.TypeDiscuss
 		}
-	}
-	if mode == "" {
-		mode = sessionpkg.TypeChat
 	}
 	spec := NewSessionSpec{
 		Mode:    mode,
 		Runtime: sessionpkg.RuntimeModel,
 		Type:    mode,
 	}
-	agentID = normalizeACPAgentID(agentID)
-	if agentID == "" {
+	if !named {
 		return spec, nil
 	}
-	// Direct external agents (codex, claude-code) are addressed by their
-	// runtime name and never live in the ACP profile registry.
-	if sessionpkg.IsDirectRuntimeType(agentID) {
-		spec.Runtime = agentID
-		if mode != sessionpkg.TypeChat {
-			spec.Type = sessionpkg.TypeDiscuss
-		}
+	agent, ok := findBotAgent(agents, parsed.SelectID, name)
+	if !ok {
+		return NewSessionSpec{}, errNewSessionAgentNotFound
+	}
+	if !agent.Enabled {
+		return NewSessionSpec{}, apperror.New(apperror.CodeACPAgentNotEnabled, nil)
+	}
+	spec.BotAgentID = agent.ID
+	spec.AgentName = agent.Name
+	if sessionpkg.IsDirectRuntimeType(agent.Runtime) {
+		spec.Runtime = agent.Runtime
 		return spec, nil
 	}
-	profile := resolveACPProfile(profiles, agentID)
-	if !profile.Known {
-		return NewSessionSpec{}, apperror.New(apperror.CodeACPAgentNotFound, nil)
-	}
-	agentID = profile.ID
 	spec.Runtime = sessionpkg.RuntimeACPAgent
-	spec.Metadata = sessionpkg.ApplyACPMetadataDefaults(map[string]any{"acp_agent_id": agentID})
+	spec.Metadata = sessionpkg.ApplyACPMetadataDefaults(map[string]any{"acp_agent_id": agent.ACPAgentID})
 	if mode == sessionpkg.TypeChat {
 		spec.Type = sessionpkg.TypeACPAgent
-	} else {
-		spec.Type = sessionpkg.TypeDiscuss
 	}
 	return spec, nil
+}
+
+// newSessionModeAndName splits /new's operands into an optional leading mode
+// word and an Agent name. The words are tried as one name first, so an Agent
+// called "Chat GPT" is not read as chat mode plus "GPT"; a mode word on its
+// own is always the mode.
+func newSessionModeAndName(operands []string, agents []BotAgent) (mode, name string) {
+	name = strings.Join(operands, " ")
+	if len(operands) == 0 {
+		return "", ""
+	}
+	mode = strings.ToLower(operands[0])
+	if mode != sessionpkg.TypeChat && mode != sessionpkg.TypeDiscuss {
+		return "", name
+	}
+	if len(operands) > 1 {
+		if _, ok := findBotAgent(agents, "", name); ok {
+			return "", name
+		}
+	}
+	return mode, strings.Join(operands[1:], " ")
+}
+
+// newSessionNamesAgent reports a /new that asks for an Agent, by name or by
+// the id the Confirm button carries, before the bot's Agents are known.
+func newSessionNamesAgent(parsed command.ParsedCommand) bool {
+	_, name := newSessionModeAndName(newSessionOperands(parsed), nil)
+	return name != "" || parsed.SelectID != ""
+}
+
+// findBotAgent matches the id the Confirm button carries, else the typed name.
+func findBotAgent(agents []BotAgent, id, name string) (BotAgent, bool) {
+	key := botAgentNameKey(name)
+	for _, agent := range agents {
+		if id != "" {
+			if agent.ID == id {
+				return agent, true
+			}
+			continue
+		}
+		if botAgentNameKey(agent.Name) == key {
+			return agent, true
+		}
+	}
+	return BotAgent{}, false
+}
+
+// botAgentNameKey compares names as the unique index does, lower(btrim(name)),
+// and takes inner runs of whitespace as one space because typed words arrive
+// split on it.
+func botAgentNameKey(name string) string {
+	return strings.ToLower(strings.Join(strings.Fields(name), " "))
 }
 
 // newSessionOperands applies /new's grammar after the shared syntax parser.
@@ -4151,21 +4184,11 @@ func isMentionArgument(value string) bool {
 		(strings.HasPrefix(value, "<@") && strings.HasSuffix(value, ">"))
 }
 
-func firstNewSessionAgentArg(args []string) string {
-	for _, arg := range args {
-		arg = strings.TrimSpace(arg)
-		if arg == "" || strings.HasPrefix(arg, "-") {
-			continue
-		}
-		return normalizeACPAgentID(arg)
-	}
-	return ""
-}
-
 // handleNewSessionCommand resolves the route for the current message and
 // creates a brand-new active session, effectively starting a fresh
 // conversation in the same IM thread/chat.
-// Supports: /new (default), /new chat, /new discuss.
+// Supports: /new (default), /new chat, /new discuss, each optionally followed
+// by the name of one of the bot's Agents.
 func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	ctx context.Context,
 	cfg channel.ChannelConfig,
@@ -4183,11 +4206,30 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 
 	parsed := invocation.Parsed
 	startFailed := friendlyOps(loc, "ops.verb.startSession")
-	spec, err := resolveNewSessionSpecParsed(parsed, msg, p.acpProfiles)
+	var agents []BotAgent
+	if newSessionNamesAgent(parsed) {
+		// What /new says about the bot's Agents is for senders who may run
+		// one, so the refusal comes before anything is looked up.
+		if err := p.requireWorkspaceExecForExternalAgent(ctx, identity); err != nil {
+			return p.replyFailure(ctx, sender, msg, identity, err, startFailed)
+		}
+		if p.botAgents != nil {
+			var err error
+			if agents, err = p.botAgents.BotAgents(ctx, identity.BotID); err != nil {
+				return p.replyFailure(ctx, sender, msg, identity, err, startFailed)
+			}
+		}
+	}
+	spec, err := resolveNewSessionSpecParsed(parsed, msg, agents)
 	if err != nil {
 		// An operand /new cannot use is answered and is not a failure: the
-		// reply is the copy for its code, or the usage.
-		return p.sendFailureReply(ctx, sender, msg, identity, err, loc.T("newSession.usage"))
+		// reply is the copy for its code, the Agents to choose from, or the
+		// usage.
+		fallback := loc.T("newSession.usage")
+		if errors.Is(err, errNewSessionAgentNotFound) {
+			fallback = newSessionAgentNotFoundText(loc, agents)
+		}
+		return p.sendFailureReply(ctx, sender, msg, identity, err, fallback)
 	}
 	spec, err = p.applyDefaultChatRuntimeToNewSessionSpec(ctx, identity, msg, spec)
 	if err != nil {
@@ -4195,11 +4237,6 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	}
 	if spec.Runtime == sessionpkg.RuntimeACPAgent {
 		if err := p.validateACPNewSessionSpec(ctx, identity, spec); err != nil {
-			return p.replyFailure(ctx, sender, msg, identity, err, startFailed)
-		}
-	}
-	if spec.Runtime == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(spec.Runtime) {
-		if err := p.requireWorkspaceExecForExternalAgent(ctx, identity); err != nil {
 			return p.replyFailure(ctx, sender, msg, identity, err, startFailed)
 		}
 	}
@@ -4326,20 +4363,31 @@ func (p *ChannelInboundProcessor) cancelActiveStreamForRoute(botID, routeID, rea
 	return true
 }
 
+// newSessionConfirmModeText is what the Confirm button re-dispatches after
+// /new. A named Agent travels as its id, which fits the callback limit
+// whatever the name is; the bot's default Agent is resolved again on confirm.
 func newSessionConfirmModeText(spec NewSessionSpec) string {
 	mode := strings.TrimSpace(spec.Mode)
 	if mode == "" {
 		mode = sessionpkg.TypeChat
 	}
-	if spec.Runtime == sessionpkg.RuntimeACPAgent {
-		if agentID := acpNewSessionAgentID(spec); agentID != "" {
-			return mode + " " + agentID
-		}
-	}
-	if sessionpkg.IsDirectRuntimeType(spec.Runtime) {
-		return mode + " " + spec.Runtime
+	if spec.AgentName != "" {
+		return mode + " --id " + spec.BotAgentID
 	}
 	return mode
+}
+
+func newSessionAgentNotFoundText(loc *i18n.Localizer, agents []BotAgent) string {
+	var names []string
+	for _, agent := range agents {
+		if agent.Enabled {
+			names = append(names, "- "+command.MdCode(agent.Name))
+		}
+	}
+	if len(names) == 0 {
+		return loc.T("newSession.noAgents")
+	}
+	return loc.T("newSession.agentNotFound", map[string]any{"agents": strings.Join(names, "\n")})
 }
 
 func newSessionModeKey(spec NewSessionSpec) string {
@@ -4353,6 +4401,8 @@ func newSessionDisplayModeLabel(loc *i18n.Localizer, spec NewSessionSpec, profil
 	mode := loc.T(newSessionModeKey(spec))
 	runtime := ""
 	switch {
+	case spec.AgentName != "":
+		runtime = spec.AgentName
 	case spec.Runtime == sessionpkg.RuntimeACPAgent:
 		runtime = newSessionACPRuntimeLabel(spec, profiles)
 		if runtime == "" {
@@ -4391,8 +4441,9 @@ func (p *ChannelInboundProcessor) defaultSessionSpecForInbound(ctx context.Conte
 }
 
 func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx context.Context, identity InboundIdentity, msg channel.InboundMessage, spec NewSessionSpec) (NewSessionSpec, error) {
-	if spec.Runtime == sessionpkg.RuntimeACPAgent {
-		return p.applyDefaultACPProjectToExplicitSpec(ctx, identity, spec)
+	// A named Agent is the user's choice; the bot's default must not replace it.
+	if spec.BotAgentID != "" {
+		return p.applyDefaultProjectToNamedAgent(ctx, identity, spec)
 	}
 	if spec.Mode != sessionpkg.TypeChat || isGroupConversation(msg) {
 		return spec, nil
@@ -4462,44 +4513,28 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 	return spec, nil
 }
 
-func (p *ChannelInboundProcessor) applyDefaultACPProjectToExplicitSpec(ctx context.Context, identity InboundIdentity, spec NewSessionSpec) (NewSessionSpec, error) {
-	if p == nil || p.defaultChatRuntime == nil || spec.Runtime != sessionpkg.RuntimeACPAgent {
+// applyDefaultProjectToNamedAgent gives a named Agent the project the bot's
+// settings hold, which they hold for the default Agent only.
+func (p *ChannelInboundProcessor) applyDefaultProjectToNamedAgent(ctx context.Context, identity InboundIdentity, spec NewSessionSpec) (NewSessionSpec, error) {
+	if p.defaultChatRuntime == nil {
 		return spec, nil
 	}
 	defaults, err := p.defaultChatRuntime.DefaultChatRuntime(ctx, identity.BotID)
 	if err != nil {
 		return NewSessionSpec{}, err
 	}
-	if strings.TrimSpace(defaults.Runtime) != sessionpkg.RuntimeACPAgent {
+	if strings.TrimSpace(defaults.BotAgentID) != spec.BotAgentID {
 		return spec, nil
 	}
-	agentID := acpNewSessionAgentID(spec)
-	defaultAgentID := normalizeACPAgentID(defaults.ACPAgentID)
-	if agentID == "" || agentID != defaultAgentID {
-		return spec, nil
+	if spec.Metadata == nil {
+		spec.Metadata = map[string]any{}
 	}
-	metadata := make(map[string]any, len(spec.Metadata)+3)
-	for key, value := range spec.Metadata {
-		metadata[key] = value
+	if projectPath := strings.TrimSpace(defaults.ProjectPath); projectPath != "" {
+		spec.Metadata["project_path"] = projectPath
 	}
-	metadata["acp_agent_id"] = agentID
-	currentProjectPath := strings.TrimSpace(metadataString(metadata, "project_path"))
-	if currentProjectPath == "" || currentProjectPath == sessionpkg.DefaultACPProjectPath {
-		projectPath := strings.TrimSpace(defaults.ProjectPath)
-		if projectPath == "" {
-			projectPath = sessionpkg.DefaultACPProjectPath
-		}
-		metadata["project_path"] = projectPath
+	if projectMode := strings.TrimSpace(defaults.ProjectMode); projectMode != "" && spec.Runtime == sessionpkg.RuntimeACPAgent {
+		spec.Metadata["acp_project_mode"] = projectMode
 	}
-	currentProjectMode := strings.TrimSpace(metadataString(metadata, "acp_project_mode"))
-	if currentProjectMode == "" || currentProjectMode == sessionpkg.DefaultACPProjectMode {
-		projectMode := strings.TrimSpace(defaults.ProjectMode)
-		if projectMode == "" {
-			projectMode = sessionpkg.DefaultACPProjectMode
-		}
-		metadata["acp_project_mode"] = projectMode
-	}
-	spec.Metadata = metadata
 	return spec, nil
 }
 
@@ -4705,6 +4740,10 @@ func threadError(err error) error {
 }
 
 func currentContextForNewSessionSpec(cc command.CurrentContext, spec NewSessionSpec, profiles turn.ACPProfileResolver) command.CurrentContext {
+	if spec.AgentName != "" {
+		cc.ChatModel = spec.AgentName
+		return cc
+	}
 	if sessionpkg.IsDirectRuntimeType(spec.Runtime) {
 		cc.ChatModel = spec.Runtime
 		return cc

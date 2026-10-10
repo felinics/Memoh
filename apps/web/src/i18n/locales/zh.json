@@ -271,7 +271,7 @@
     "fetch_provider": {
       "native_managed": "内置抓取服务由 Memoh 管理，无法这样修改。"
     },
-    "group_chat_acp_unsupported": "群聊不能创建对话模式的外部 Agent 会话。请使用 /new codex 或 /new discuss codex。",
+    "group_chat_acp_unsupported": "群聊不能创建对话模式的外部 Agent 会话。请使用 /new <Agent 名称> 或 /new discuss <Agent 名称>。",
     "history": {
       "delete_failed": "会话历史删除失败，请重试。"
     },
@@ -1488,7 +1488,7 @@
       "accountUnbound": "你的 IM 账号还没关联到 Memoh 账号，暂时无法使用该 Bot 的工作区。如果你是它的所有者，请在 Memoh 网页端「个人资料 → 关联账号」获取关联码，再在这里发送 {link} <关联码>。",
       "runtimeOwnerMissing": "这个外部 Agent 会话没有运行时所有者。请重新开始一个会话。",
       "discussUnsupported": "这个外部 Agent 无法在讨论模式中运行。",
-      "groupChatUnsupported": "群聊不能创建对话模式的外部 Agent 会话。请使用 /new codex 或 /new discuss codex。",
+      "groupChatUnsupported": "群聊不能创建对话模式的外部 Agent 会话。请使用 /new <Agent 名称> 或 /new discuss <Agent 名称>。",
       "projectModeInvalid": "外部 Agent 的项目模式无效。",
       "projectPathInvalid": "外部 Agent 的项目路径必须是绝对路径。",
       "displayArgsInvalid": "外部 Agent 的显示参数无效。",

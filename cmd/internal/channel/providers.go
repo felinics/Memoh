@@ -241,9 +241,11 @@ func provideChannelRouter(
 	processor.SetDefaultChatRuntime(&settingsDefaultChatRuntime{settings: settingsService})
 	processor.SetACPAgentSetupReader(&botACPAgentSetupReader{bots: botService})
 	// The standalone Channel process has no Server-owned Agent service; setup
-	// resolution only reads Agent rows, so a local instance over the shared
-	// queries is enough.
-	processor.SetACPProfileResolver(acpprofileadapter.NewCatalog(botagents.NewService(log, queries)))
+	// resolution and /new only read Agent rows, so a local instance over the
+	// shared queries is enough.
+	botAgentService := botagents.NewService(log, queries)
+	processor.SetBotAgentReader(&botAgentReader{agents: botAgentService})
+	processor.SetACPProfileResolver(acpprofileadapter.NewCatalog(botAgentService))
 	processor.SetBotPermissionChecker(&botPermissionCheckerAdapter{bots: botService, accounts: accountService})
 	processor.SetCommandHandler(cmdHandler)
 	processor.SetQueueCommandHandler(queueHandler)
@@ -509,6 +511,34 @@ func (r *botACPAgentSetupReader) ACPAgentSetupMetadata(ctx context.Context, botI
 		return nil, err
 	}
 	return bot.Metadata, nil
+}
+
+type botAgentReader struct {
+	agents *botagents.Service
+}
+
+func (r *botAgentReader) BotAgents(ctx context.Context, botID string) ([]inbound.BotAgent, error) {
+	items, err := r.agents.List(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]inbound.BotAgent, 0, len(items))
+	for _, item := range items {
+		descriptor, err := botagents.DescriptorFor(item)
+		if err != nil {
+			// A row no runtime can launch is not a choice, and must not
+			// take /new down for the bot's other Agents.
+			continue
+		}
+		out = append(out, inbound.BotAgent{
+			ID:         item.ID,
+			Name:       item.Name,
+			Runtime:    descriptor.Runtime,
+			ACPAgentID: descriptor.Provider,
+			Enabled:    item.Enabled,
+		})
+	}
+	return out, nil
 }
 
 type botPermissionCheckerAdapter struct {
