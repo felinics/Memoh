@@ -46,7 +46,67 @@ linters:
     paths:
       - internal/db/postgres/sqlc
       - ^.*\.(pb|l|y)\.go$
+    rules:
+      # Process entry points and wiring: startup, shutdown and serve loops
+      # are not units of work (docs/errors.md, Result records).
+      - { path: '^cmd/', linters: [gocritic], text: RG-ATTR }
+      # Packages not yet migrated to errlog. Delete a package's line once its
+      # errors reach logs only through errlog.Finish and errlog.Event.
+      - { path: '^internal/agent/', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/accounts/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/apps/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/botbackup/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/bots/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/channel/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/channel/adapters/dingtalk/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/channel/adapters/feishu/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/channel/adapters/feishu/wsclient/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/channel/adapters/matrix/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/channel/adapters/misskey/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/channel/adapters/qq/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/channel/adapters/slack/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/channel/adapters/telegram/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/channel/adapters/wecom/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/channel/adapters/weixin/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/channel/discuss/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/channel/inbound/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/channel/route/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/chat/message/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/chat/thread/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/chat/timeline/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/command/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/connectors/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/container/docker/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/contextview/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/display/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/fetchproviders/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/handlers/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/healthcheck/checkers/mcp/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/hooks/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/mcp/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/mcp/sources/federation/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/memory/adapters/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/memory/adapters/builtin/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/memory/storefs/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/messageconv/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/models/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/network/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/oauthclients/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/providers/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/registry/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/schedule/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/searchproviders/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/webhooktunnel/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/workspace/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
+      - { path: '^internal/workspacedeps/[^/]+\.go$', linters: [gocritic], text: RG-ATTR }
   settings:
+    gocritic:
+      enabled-checks:
+        - ruleguard
+      settings:
+        ruleguard:
+          rules: "${base-path}/tools/ruleguard/rules.go"
+          failOn: all
     depguard:
       rules:
         # Packages that return package errors. The public error is chosen by
