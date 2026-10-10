@@ -83,6 +83,7 @@ func (c *Checker) ListChecks(ctx context.Context, botID string) []healthcheck.Ch
 	}
 
 	botModels, err := c.lookup.GetBotModelIDs(ctx, botID)
+	//nolint:gocritic // handled: the error becomes the failed check in the result, the check run goes on.
 	if err != nil {
 		c.logger.WarnContext(ctx, "model healthcheck lookup failed", slog.String("bot_id", botID), slog.Any("error", err))
 		return []healthcheck.CheckResult{{

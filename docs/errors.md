@@ -295,6 +295,37 @@ result := errlog.Finish(ctx, operation, err, errlog.Options{})
 logger.LogAttrs(ctx, result.Level, "request", attrs...)
 ```
 
+An error value reaches a log only through `errlog.Finish` or `errlog.Event`,
+never as a plain attribute such as `slog.Any(key, err)` or
+`slog.String(key, err.Error())`. Where an error is logged, what happens to it
+next decides what the log should be:
+
+1. Returned: the error, a wrap of it or an error that replaces it leaves the
+   function (returned, sent on a channel, passed to a callback), and the unit
+   fails with it. Delete the log. Context that only the log had moves into
+   `errs.Wrap` attributes, and a replacing error carries the original as its
+   cause (`WithInternal`, `errs.Wrap`), or the result record has no cause.
+2. Handled: the error stops here and the unit goes on. This covers a fallback,
+   a skip, a dropped item, one attempt of a retry, an error turned into data
+   (a failed healthcheck result), a different error being returned, and a
+   failed tick or reconnect. Record it with `errlog.Event`.
+3. Lifecycle: the code belongs to no unit, such as startup, migration, process
+   shutdown, a CLI or `cmd/bridge`. A plain log is acceptable.
+
+The ruleguard rules in `tools/ruleguard/rules.go` check this in golangci-lint.
+`RG-RETURN` reports a log of an error that is then returned, and `RG-ATTR`
+reports an error used as a slog attribute. Packages not yet migrated are
+listed under `linters.exclusions.rules` in `.golangci.yml`; a package's line
+is deleted when it is migrated. A `nolint` is only for a report the rules
+cannot tell apart: a plain log in lifecycle code, or a `RG-RETURN` report
+where what is returned is a handled result built from the error, not the
+error. Its reason starts with the kind:
+
+```go
+//nolint:gocritic // lifecycle: the listener's exit ends the process.
+//nolint:gocritic // handled: the error becomes the failed check in the result.
+```
+
 A WebSocket message that fails before a run takes it over ends with a
 `ws request` record, chosen and leveled by the same rule as an HTTP request. A
 message that starts a run is recorded by the run's `agent run` record, which

@@ -79,6 +79,7 @@ func (c *Checker) ListChecks(ctx context.Context, botID string) []healthcheck.Ch
 	}
 
 	items, err := c.connections.ListActiveByBot(ctx, botID)
+	//nolint:gocritic // handled: the error becomes the failed check in the result, the check run goes on.
 	if err != nil {
 		if c.logger != nil {
 			c.logger.WarnContext(ctx,
