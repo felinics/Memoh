@@ -1,4 +1,4 @@
--- 0163_compaction_progress
+-- 0164_compaction_progress
 -- Let compaction move past history it cannot shrink.
 -- failure_reason records why an attempt failed when selection acts on it:
 -- 'ineffective_summary' marks rows whose summary was not shorter than them;

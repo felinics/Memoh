@@ -1,4 +1,4 @@
--- 0163_compaction_progress
+-- 0164_compaction_progress
 -- Drop the compaction scan position and the attempt failure reason.
 
 ALTER TABLE bot_history_message_compacts
