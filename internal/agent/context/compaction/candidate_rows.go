@@ -33,6 +33,9 @@ func itemsFromWindow(window []sqlc.ListUncompactedMessagesBySessionWithinBytesRo
 		items[i].GapBefore = window[i].GapBefore
 		items[i].IneffectiveClaim = window[i].IneffectiveClaim
 		items[i].UnusableAttempts = int(window[i].UnusableAttempts)
+		if window[i].RetryRows > 0 {
+			items[i].RetryOf, items[i].RetryRows = window[i].CompactID, int(window[i].RetryRows)
+		}
 	}
 	finishCandidatePolicies(items)
 	return rows, items, barrierCount

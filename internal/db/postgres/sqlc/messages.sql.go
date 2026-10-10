@@ -5324,14 +5324,14 @@ WITH scan_anchor AS MATERIALIZED (
   SELECT anchor.turn_position, anchor.turn_message_seq, anchor.created_at, anchor.id
   FROM bot_visible_history_messages anchor
   WHERE anchor.team_id = public.memoh_current_team_id()
-    AND anchor.session_id = $3
+    AND anchor.session_id = $4
     AND anchor.id = COALESCE(
-      $4::uuid,
+      $5::uuid,
       (
         SELECT scan_session.compaction_scan_after
         FROM bot_sessions scan_session
         WHERE scan_session.team_id = public.memoh_current_team_id()
-          AND scan_session.id = $3
+          AND scan_session.id = $4
           AND scan_session.compaction_scan_epoch = scan_session.compaction_epoch
       )
     )
@@ -5362,14 +5362,14 @@ WITH scan_anchor AS MATERIALIZED (
           c.status = 'error'
           AND c.failure_reason = $2::text
           AND c.completed_at > now() - LEAST(
-            $5::bigint,
-            $6::bigint * power(4, LEAST(GREATEST(c.failure_attempts, 1), 8) - 1)::bigint
+            $6::bigint,
+            $7::bigint * power(4, LEAST(GREATEST(c.failure_attempts, 1), 8) - 1)::bigint
           ) * INTERVAL '1 second'
         )
       )
   ) held ON true
   WHERE m.team_id = public.memoh_current_team_id()
-    AND m.session_id = $3
+    AND m.session_id = $4
     AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
     AND (
       NOT EXISTS (SELECT 1 FROM scan_anchor)
@@ -5438,9 +5438,9 @@ WITH scan_anchor AS MATERIALIZED (
     )::BIGINT AS cumulative_bytes
   FROM candidate_rows
 ), admitted_candidates AS MATERIALIZED (
-  SELECT ranked_candidates.id, ranked_candidates.turn_position, ranked_candidates.turn_message_seq, ranked_candidates.created_at, ranked_candidates.gap_before, ranked_candidates.pending_before, ranked_candidates.latest_user, ranked_candidates.payload_bytes, ranked_candidates.candidate_count, ranked_candidates.candidate_bytes, ranked_candidates.cumulative_bytes, payload_bytes > $7::BIGINT AS oversized
+  SELECT ranked_candidates.id, ranked_candidates.turn_position, ranked_candidates.turn_message_seq, ranked_candidates.created_at, ranked_candidates.gap_before, ranked_candidates.pending_before, ranked_candidates.latest_user, ranked_candidates.payload_bytes, ranked_candidates.candidate_count, ranked_candidates.candidate_bytes, ranked_candidates.cumulative_bytes, payload_bytes > $8::BIGINT AS oversized
   FROM ranked_candidates
-  WHERE cumulative_bytes <= $7::BIGINT
+  WHERE cumulative_bytes <= $8::BIGINT
      OR cumulative_bytes = payload_bytes
 )
 SELECT
@@ -5478,7 +5478,8 @@ SELECT
   admitted.latest_user::boolean AS latest_user,
   admitted.oversized::boolean AS oversized,
   COALESCE(claim.failure_reason = $1::text, false)::boolean AS ineffective_claim,
-  CASE WHEN claim.failure_reason = $2::text THEN claim.failure_attempts ELSE 0 END::integer AS unusable_attempts
+  CASE WHEN claim.failure_reason <> $1::text THEN claim.failure_attempts ELSE 0 END::integer AS unusable_attempts,
+  CASE WHEN claim.failure_reason <> $1::text THEN claim.message_count ELSE 0 END::integer AS retry_rows
 FROM bot_visible_history_messages m
 JOIN admitted_candidates admitted ON admitted.id = m.id
 LEFT JOIN bot_history_messages payload
@@ -5501,7 +5502,7 @@ LEFT JOIN bot_history_message_compacts claim
  AND claim.session_id = s.id
  AND claim.compaction_epoch = s.compaction_epoch
  AND claim.status = 'error'
- AND claim.failure_reason IN ($1::text, $2::text)
+ AND claim.failure_reason IN ($1::text, $2::text, $3::text)
 WHERE m.team_id = public.memoh_current_team_id()
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 `
@@ -5509,6 +5510,7 @@ ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 type ListUncompactedMessagesBySessionWithinBytesParams struct {
 	IneffectiveFailureReason string      `json:"ineffective_failure_reason"`
 	UnusableFailureReason    string      `json:"unusable_failure_reason"`
+	CutOffFailureReason      string      `json:"cut_off_failure_reason"`
 	SessionID                pgtype.UUID `json:"session_id"`
 	AfterMessageID           pgtype.UUID `json:"after_message_id"`
 	UnusableMaxHoldSeconds   int64       `json:"unusable_max_hold_seconds"`
@@ -5548,6 +5550,7 @@ type ListUncompactedMessagesBySessionWithinBytesRow struct {
 	Oversized               bool               `json:"oversized"`
 	IneffectiveClaim        bool               `json:"ineffective_claim"`
 	UnusableAttempts        int32              `json:"unusable_attempts"`
+	RetryRows               int32              `json:"retry_rows"`
 }
 
 // Compaction candidates are admitted oldest-first within a hard serialized
@@ -5567,9 +5570,10 @@ type ListUncompactedMessagesBySessionWithinBytesRow struct {
 // return as candidates once it lapses. An unusable attempt holds its rows for
 // the hold seconds, four times as long for each consecutive such attempt on
 // them, up to the max hold. IneffectiveClaim marks a row whose claim in this
-// epoch failed because the summary was not shorter than the rows;
-// UnusableAttempts counts the consecutive unusable attempts on a row whose
-// claim's hold has lapsed. LatestUser marks the session's newest user message
+// epoch failed because the summary was not shorter than the rows. For a row
+// whose latest claim got an unusable or cut-off summary, UnusableAttempts
+// counts such attempts in a row and RetryRows is how many rows that claim
+// held; a cut-off claim holds nothing back. LatestUser marks the session's newest user message
 // among the candidates: the task the current turn is working on. Input the
 // runtime feeds back within a turn is stored as a user message too, but
 // starts no turn.
@@ -5577,6 +5581,7 @@ func (q *Queries) ListUncompactedMessagesBySessionWithinBytes(ctx context.Contex
 	rows, err := q.db.Query(ctx, listUncompactedMessagesBySessionWithinBytes,
 		arg.IneffectiveFailureReason,
 		arg.UnusableFailureReason,
+		arg.CutOffFailureReason,
 		arg.SessionID,
 		arg.AfterMessageID,
 		arg.UnusableMaxHoldSeconds,
@@ -5622,6 +5627,7 @@ func (q *Queries) ListUncompactedMessagesBySessionWithinBytes(ctx context.Contex
 			&i.Oversized,
 			&i.IneffectiveClaim,
 			&i.UnusableAttempts,
+			&i.RetryRows,
 		); err != nil {
 			return nil, err
 		}

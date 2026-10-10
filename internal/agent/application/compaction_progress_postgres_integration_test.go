@@ -27,17 +27,22 @@ import (
 
 // countingSummarizer is a scripted OpenAI-compatible summarizer.
 type countingSummarizer struct {
-	summary string
-	refuse  string // a request containing it is refused with content_filter
-	calls   int
+	summary    string
+	refuse     string // a request containing it is refused with content_filter
+	cutOffOver int    // a request longer than this many bytes is cut off at the output limit
+	calls      int
 }
 
 func (s *countingSummarizer) RoundTrip(req *http.Request) (*http.Response, error) {
 	s.calls++
 	finish := "stop"
-	if s.refuse != "" && req.Body != nil {
-		if prompt, _ := io.ReadAll(req.Body); strings.Contains(string(prompt), s.refuse) {
+	if req.Body != nil {
+		prompt, _ := io.ReadAll(req.Body)
+		switch {
+		case s.refuse != "" && strings.Contains(string(prompt), s.refuse):
 			finish = "content_filter"
+		case s.cutOffOver > 0 && len(prompt) > s.cutOffOver:
+			finish = "length"
 		}
 	}
 	content, _ := json.Marshal(s.summary)
@@ -774,39 +779,71 @@ func TestPostgresCompactionRefusedSpanIsHeldThenRetried(t *testing.T) {
 		t.Fatalf("replay = %s, want the refused rows raw in place before the summary", got)
 	}
 
-	// With nothing else to claim, a manual request retries them right away.
-	// Refused again, they are held four times as long.
+	// With nothing else to claim, a manual request retries them right away,
+	// half at a time: refused again, the question is held four times as long,
+	// and the answer, never tried on its own, keeps its first attempt.
 	if res, err := f.run(svc, model); err != nil || res.Reason != compaction.ReasonSummaryUnusable || model.calls != 3 {
 		t.Fatalf("manual pass = %+v, %v after %d calls; want the held rows retried", res, err, model.calls)
 	}
 	_, claim = f.claims()
 	again := claim[refused[0].ID]
-	if got := f.compact(again); again == failed || got.status != "error" || got.attempts != 2 {
-		t.Fatalf("manual retry = %+v, want a second unusable attempt recorded", got)
+	if got := f.compact(again); again == failed || got.status != "error" || got.attempts != 2 || got.count != 1 || claim[refused[1].ID] != failed {
+		t.Fatalf("manual retry = %+v, want a second unusable attempt on the first half only", got)
 	}
-	if _, err := f.pool.Exec(f.ctx, `UPDATE bot_history_message_compacts SET completed_at = now() - INTERVAL '30 minutes' WHERE id = $1`, again); err != nil {
-		t.Fatal(err)
-	}
-	// Fresh services, as after a restart: only the recorded hold applies.
-	restarted := func() *compaction.Service { return compaction.NewService(slog.New(slog.DiscardHandler), store) }
-	if res, err := restarted().RunCompactionSync(f.ctx, auto); err != nil || res.Reason != compaction.ReasonNoBeneficialSpan || model.calls != 3 {
-		t.Fatalf("pass half an hour later = %+v, %v after %d calls; want the twice-refused rows still held", res, err, model.calls)
-	}
-
-	// Once the hold lapses they are tried again, half at a time, and, the
-	// provider now willing, compacted in place.
-	if _, err := f.pool.Exec(f.ctx, `UPDATE bot_history_message_compacts SET completed_at = now() - INTERVAL '61 minutes' WHERE id = $1`, again); err != nil {
-		t.Fatal(err)
-	}
-	model.refuse = ""
-	for pass := 1; pass <= 2; pass++ {
-		if res, err := restarted().RunCompactionSync(f.ctx, auto); err != nil || res.Status != compaction.StatusOK || res.MessageCount != 1 {
-			t.Fatalf("retry %d after the hold = %+v, %v; want one of the refused rows committed", pass, res, err)
+	shift := func(id, ago string) {
+		if _, err := f.pool.Exec(f.ctx, `UPDATE bot_history_message_compacts SET completed_at = now() - $2::interval WHERE id = $1`, id, ago); err != nil {
+			t.Fatal(err)
 		}
+	}
+	// Fresh services, as after a restart: only the recorded holds apply.
+	restarted := func() *compaction.Service { return compaction.NewService(slog.New(slog.DiscardHandler), store) }
+	model.refuse = ""
+	shift(failed, "16 minutes")
+	shift(again, "30 minutes")
+	if res, err := restarted().RunCompactionSync(f.ctx, auto); err != nil || res.Status != compaction.StatusOK || res.MessageCount != 1 {
+		t.Fatalf("pass a quarter of an hour on = %+v, %v; want the once-refused answer retried", res, err)
+	}
+	if _, claim = f.claims(); claim[refused[0].ID] != again {
+		t.Fatal("the twice-refused question was retried within the hour")
+	}
+	shift(again, "61 minutes")
+	if res, err := restarted().RunCompactionSync(f.ctx, auto); err != nil || res.Status != compaction.StatusOK || res.MessageCount != 1 {
+		t.Fatalf("pass an hour on = %+v, %v; want the twice-refused question retried", res, err)
 	}
 	_, claim = f.claims()
 	if got := strings.Join(f.replay(labels), ","); got != "summary:"+claim[refused[0].ID]+",summary:"+claim[refused[1].ID]+",reasoning#0,summary:"+committed+",current#0" {
 		t.Fatalf("replay = %s, want every summary in place", got)
+	}
+}
+
+func TestPostgresCompactionCutOffSummaryRetriesHalfAtOnce(t *testing.T) {
+	f, store := newProgressFixture(t)
+	var rows []messagepkg.Message
+	for n := 1; n <= 2; n++ {
+		rows = append(rows, f.text("user", strings.Repeat(fmt.Sprintf("Q%d question. ", n), 160)), f.text("assistant", strings.Repeat(fmt.Sprintf("A%d answer. ", n), 160)))
+	}
+	f.reasoning()
+	f.text("user", "current question")
+	model := &countingSummarizer{summary: summaryTokens(120), cutOffOver: 7000}
+	cfg := f.config(model)
+	cfg.Manual = false
+	svc := compaction.NewService(slog.New(slog.DiscardHandler), store)
+	if _, err := svc.RunCompactionSync(f.ctx, cfg); err == nil {
+		t.Fatal("first pass succeeded, want the summary cut off")
+	}
+	_, claim := f.claims()
+	if got := f.compact(claim[rows[0].ID]); got.reason != "summary_cut_off" || got.count != len(rows) {
+		t.Fatalf("cut-off attempt = %+v, want it recorded against all four rows", got)
+	}
+	for pass := 1; pass <= 2; pass++ {
+		if res, err := compaction.NewService(slog.New(slog.DiscardHandler), store).RunCompactionSync(f.ctx, cfg); err != nil || res.Status != compaction.StatusOK || res.MessageCount != 2 {
+			t.Fatalf("pass %d = %+v, %v; want half the rows committed right away", pass, res, err)
+		}
+	}
+	for _, row := range rows {
+		if f.claimStatus(row.ID) != "ok" {
+			t.Fatalf("row %s still raw", row.ID)
+		}
 	}
 }
 

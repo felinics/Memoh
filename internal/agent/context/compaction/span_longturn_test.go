@@ -812,7 +812,7 @@ func TestCompactionRefusedRollupDoesNotStallLaterHistory(t *testing.T) {
 			later++
 		}
 	}
-	if later == 0 || refused > 6 {
+	if later == 0 || refused > 10 {
 		t.Fatalf("after six hours: %d later rows compacted, %d calls carried the refused span; want the history behind it compacted and the span held", later, refused)
 	}
 	assertClaimsContiguous(t, q)
@@ -855,5 +855,11 @@ func TestCompactionIneffectiveRollupFallsBackToOrdinaryPasses(t *testing.T) {
 	res, err := svc.RunCompactionSync(context.Background(), cfg)
 	if err != nil || res.Status != StatusOK || strings.Contains(stub.prompt, "<absorbed_context>") {
 		t.Fatalf("pass after the cooldown = %+v, %v; want an ordinary summary of the history, not the same rollup again", res, err)
+	}
+	q.append(fusionQualityRows(t, cfg)...)
+	stub.verbose = ""
+	clock = clock.Add(unusableSummaryHold)
+	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK || !strings.Contains(stub.prompt, "<absorbed_context>") {
+		t.Fatalf("pass after the backoff = %+v, %v; want the frontier rolled up again", res, err)
 	}
 }

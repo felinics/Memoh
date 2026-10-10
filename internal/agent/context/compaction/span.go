@@ -24,6 +24,11 @@ const failureReasonIneffectiveSummary = "ineffective_summary"
 // consecutive such attempt on them, up to maxUnusableSummaryHold.
 const failureReasonUnusableSummary = "unusable_summary"
 
+// failureReasonCutOffSummary marks a claim whose summary hit the output limit
+// while the claim could still be halved: its rows are not held, and the next
+// pass retries half of them.
+const failureReasonCutOffSummary = "summary_cut_off"
+
 const (
 	unusableSummaryHold    = 15 * time.Minute
 	maxUnusableSummaryHold = 6 * time.Hour
@@ -270,32 +275,46 @@ func trimSpan(span []CompactionCandidate, budget, minTokens int) []CompactionCan
 	return nil
 }
 
-// retrySpan halves a claim that starts with rows whose summary came back
-// unusable more than once: it claims the first half of them when both halves
-// still clear floor. A row the model keeps refusing thus ends up retried
-// alone within a few attempts, instead of holding back every row once
-// claimed with it.
+// retrySpan limits a claim that starts with the rows of an attempt whose
+// summary was unusable or cut off to those rows: rows that never failed are
+// not held back with them. While all of them are still there, it claims only
+// their first half, so a row the model keeps refusing, or a span too large
+// for the summary, is narrowed down within a few attempts; a half that never
+// failed is retried whole.
 func retrySpan(span []CompactionCandidate, floor int) []CompactionCandidate {
-	if len(span) == 0 || span[0].UnusableAttempts < 2 {
+	if len(span) == 0 || span[0].RetryRows == 0 {
 		return span
 	}
-	groups := toolExchangeGroups(span)
-	var costs []int
-	total := 0
-	for _, group := range groups {
-		if span[group[0]].UnusableAttempts == 0 {
+	end := 0
+	for _, group := range toolExchangeGroups(span) {
+		if span[group[0]].RetryOf != span[0].RetryOf {
 			break
 		}
-		costs = append(costs, markableGroupCost(span, group))
-		total += costs[len(costs)-1]
+		end = group[len(group)-1] + 1
 	}
-	for g, have := 0, 0; g < len(costs)-1; g++ {
-		if have += costs[g]; have >= floor && 2*have >= total && total-have >= floor {
-			last := groups[g]
-			return span[:last[len(last)-1]+1]
+	if end == span[0].RetryRows {
+		if half := halfOf(span[:end], floor); half > 0 {
+			end = half
 		}
 	}
-	return span
+	return span[:end]
+}
+
+// halfOf returns where to split span into two claims that each clear floor,
+// as close to half its entry cost as group boundaries allow, or 0 when no
+// such split exists.
+func halfOf(span []CompactionCandidate, floor int) int {
+	groups := toolExchangeGroups(span)
+	total := markableCompactCost(span)
+	best, bestGap := 0, total
+	for g, have := 0, 0; g < len(groups)-1; g++ {
+		have += markableGroupCost(span, groups[g])
+		gap := max(2*have-total, total-2*have)
+		if have >= floor && total-have >= floor && gap < bestGap {
+			best, bestGap = groups[g][len(groups[g])-1]+1, gap
+		}
+	}
+	return best
 }
 
 // closeRun extends the claimable prefix items[:n] — what the recent tail

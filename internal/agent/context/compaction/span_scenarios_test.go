@@ -735,10 +735,12 @@ func TestManualCompactionReportsASummaryThatDoesNotShrinkAsBlocked(t *testing.T)
 func TestCompactionUnusableSummaryHoldsItsRowsOnlyForAWhile(t *testing.T) {
 	t.Parallel()
 
-	// The model fails once on the oldest claim — cut off, empty or refused —
-	// and works from then on. Later history compacts right away; the failed
-	// rows are held back, then tried again and compacted.
-	for _, mode := range []string{"length", "empty", "content_filter"} {
+	// The model fails once on the oldest claim — empty or refused — and works
+	// from then on. Later history compacts right away; the failed rows are
+	// held back, then tried again and compacted. A summary cut off at the
+	// output limit is retried at once instead (see
+	// TestCompactionCutOffSummaryRetriesHalfRightAway).
+	for _, mode := range []string{"empty", "content_filter"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			q := newSessionStore()
@@ -1083,5 +1085,145 @@ func TestCompactionStaleIneffectiveSummaryDoesNotArmTheCooldown(t *testing.T) {
 	}
 	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
 		t.Fatalf("next pass = %+v, %v; want the later span committed without a cooldown", res, err)
+	}
+}
+
+func TestCompactionRetryIsolatesARefusedRowAtTheEndOfItsClaim(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore(prose(t, "user", "INNOCENT question", 300, 100), prose(t, "assistant", "INNOCENT answer", 100, 100),
+		prose(t, "user", "POISON question", 1000, 100), reasoningOnlyRow(t), prose(t, "user", "CURRENT", 10, 10))
+	innocent := q.history[0].ID
+	stub := &stubModel{summary: summaryOfTokens(t, 100), refuse: "POISON"}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	cfg := machineryConfig(stub, 50)
+	for hour := 0; hour < 24*7; hour++ {
+		_, _ = svc.RunCompactionSync(context.Background(), cfg)
+		clock = clock.Add(time.Hour)
+	}
+	if q.logStatuses[q.claims[innocent]] != "ok" || q.logStatuses[q.claims[q.history[1].ID]] != "ok" {
+		t.Fatal("the rows claimed in front of a refused row are still held with it after a week")
+	}
+	if stub.calls > 4*7+5 {
+		t.Fatalf("summarizer calls = %d in a week, want the refused row retried at most every six hours", stub.calls)
+	}
+}
+
+func TestCompactionRetryKeepsTheUntriedHalfWhole(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore()
+	for i := 0; i < 16; i++ {
+		question := fmt.Sprintf("U%d", i)
+		if i == 0 {
+			question = "POISON"
+		}
+		q.append(prose(t, "user", question, 300, 100), prose(t, "assistant", fmt.Sprintf("A%d", i), 300, 100))
+	}
+	q.append(reasoningOnlyRow(t), prose(t, "user", "CURRENT", 10, 10))
+	stub := &stubModel{summary: summaryOfTokens(t, 100), refuse: "POISON"}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	cfg := machineryConfig(stub, 50)
+	for hour := 0; hour < 48; hour++ {
+		for pass := 0; pass < 3; pass++ {
+			_, _ = svc.RunCompactionSync(context.Background(), cfg)
+		}
+		clock = clock.Add(time.Hour)
+	}
+	summaries := map[pgtype.UUID]bool{}
+	for i, row := range q.history[2:32] {
+		claim := q.claims[row.ID]
+		if q.logStatuses[claim] != "ok" {
+			t.Fatalf("row %d stayed raw; only the refused turn may", i+2)
+		}
+		summaries[claim] = true
+	}
+	if len(summaries) > 5 {
+		t.Fatalf("the 30 rows claimed with the refused one ended up in %d summaries, want each half that never failed retried whole", len(summaries))
+	}
+	assertClaimsContiguous(t, q)
+}
+
+func TestCompactionRetryNeverTakesRowsThatDidNotFail(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore(prose(t, "user", "FAILED question", 300, 100), prose(t, "assistant", "FAILED answer", 300, 100), prose(t, "user", "TASK", 10, 10))
+	first, task := q.history[0].ID, q.history[2].ID
+	stub := &stubModel{summary: ""}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	cfg := machineryConfig(stub, 50)
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); !errors.Is(err, ErrIneffectiveSummary) {
+		t.Fatalf("first pass = %v, want the empty summary recorded", err)
+	}
+	q.append(prose(t, "assistant", "ANSWER", 300, 100), prose(t, "user", "NEXT", 10, 10))
+	stub.summary = summaryOfTokens(t, 100)
+	clock = clock.Add(16 * time.Minute)
+	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
+		t.Fatalf("retry = %+v, %v", res, err)
+	}
+	if q.claims[task] == q.claims[first] {
+		t.Fatal("the retry claimed rows that never failed along with the failed ones")
+	}
+	assertClaimsContiguous(t, q)
+}
+
+func TestCompactionCutOffSummaryRetriesHalfRightAway(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore()
+	for i := 0; i < 20; i++ {
+		q.append(prose(t, "user", fmt.Sprintf("Q%d", i), 300, 100), prose(t, "assistant", fmt.Sprintf("A%d", i), 300, 100))
+	}
+	q.append(reasoningOnlyRow(t), prose(t, "user", "CURRENT", 10, 10))
+	stub := &stubModel{summary: summaryOfTokens(t, 100), cutOffOver: 20000}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	cfg := machineryConfig(stub, 50)
+	cfg.MaxCompactTokens = 40000
+	cfg.HardPressure = true
+	for minute := 0; minute < 120; minute++ {
+		_, _ = svc.RunCompactionSync(context.Background(), cfg)
+		clock = clock.Add(time.Minute)
+	}
+	for i, row := range q.history[:40] {
+		if q.logStatuses[q.claims[row.ID]] != "ok" {
+			t.Fatalf("row %d still raw after two hours; a summary cut off at the output limit should retry half the rows at once", i)
+		}
+	}
+	for claim, reason := range q.reasons {
+		if reason == failureReasonUnusableSummary {
+			t.Fatalf("claim %s was held as unusable; it could still be halved", formatUUID(claim))
+		}
+	}
+	assertClaimsContiguous(t, q)
+}
+
+func TestCompactionCutOffSummaryOfARowThatCannotBeHalvedIsHeld(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore(prose(t, "user", "BIG question", 600, 100), reasoningOnlyRow(t), prose(t, "user", "CURRENT", 10, 10))
+	stub := &stubModel{summary: summaryOfTokens(t, 100), cutOffOver: 1}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	cfg := machineryConfig(stub, 50)
+	for minute := 0; minute < 14; minute++ {
+		_, _ = svc.RunCompactionSync(context.Background(), cfg)
+		clock = clock.Add(time.Minute)
+	}
+	if stub.calls != 1 || q.reasons[q.claims[q.history[0].ID]] != failureReasonUnusableSummary {
+		t.Fatalf("summarizer calls = %d, reason %q; a row cut off that cannot be halved must be held", stub.calls, q.reasons[q.claims[q.history[0].ID]])
 	}
 }

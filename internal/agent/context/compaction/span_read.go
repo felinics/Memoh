@@ -88,6 +88,7 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			AfterMessageID:           after,
 			IneffectiveFailureReason: failureReasonIneffectiveSummary,
 			UnusableFailureReason:    failureReasonUnusableSummary,
+			CutOffFailureReason:      failureReasonCutOffSummary,
 			UnusableHoldSeconds:      int64(hold / time.Second),
 			UnusableMaxHoldSeconds:   int64(maxHold / time.Second),
 		})

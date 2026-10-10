@@ -30,6 +30,9 @@ var (
 	// other than a natural stop (length cap, content filter): the text is
 	// unusable because it may cut mid-thought.
 	errIncompleteSummary = errors.New("compaction: model returned an incomplete summary")
+	// errSummaryCutOff marks an incomplete summary that hit the output limit:
+	// the span may be too large to summarize within it.
+	errSummaryCutOff = errors.New("compaction: summary cut off at the output limit")
 	// ErrIneffectiveSummary marks a summary that cannot replace its rows: it
 	// would replay at least as many tokens as the raw entries it replaces, or
 	// the model returned none usable for them. Those rows are recorded as

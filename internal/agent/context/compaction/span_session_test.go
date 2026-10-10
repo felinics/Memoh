@@ -24,6 +24,7 @@ type sessionStore struct {
 	history     []sqlc.ListUncompactedMessagesBySessionRow
 	reasons     map[pgtype.UUID]string
 	attempts    map[pgtype.UUID]int
+	claimRows   map[pgtype.UUID]int
 	claimEpoch  map[pgtype.UUID]int64
 	completedAt map[pgtype.UUID]time.Time
 	now         func() time.Time
@@ -35,7 +36,7 @@ type sessionStore struct {
 }
 
 func newSessionStore(history ...sqlc.ListUncompactedMessagesBySessionRow) *sessionStore {
-	return &sessionStore{fakeQueries: &fakeQueries{}, history: history, reasons: map[pgtype.UUID]string{}, attempts: map[pgtype.UUID]int{}, claimEpoch: map[pgtype.UUID]int64{}, completedAt: map[pgtype.UUID]time.Time{}, now: time.Now}
+	return &sessionStore{fakeQueries: &fakeQueries{}, history: history, reasons: map[pgtype.UUID]string{}, attempts: map[pgtype.UUID]int{}, claimRows: map[pgtype.UUID]int{}, claimEpoch: map[pgtype.UUID]int64{}, completedAt: map[pgtype.UUID]time.Time{}, now: time.Now}
 }
 
 func payloadBytes(row sqlc.ListUncompactedMessagesBySessionRow) int64 {
@@ -165,8 +166,9 @@ func (q *sessionStore) ListUncompactedMessagesBySessionWithinBytes(_ context.Con
 		claim := q.claims[c.row.ID]
 		failed := q.claimEpoch[claim] == q.epoch && q.logStatuses[claim] == "error"
 		bounded.IneffectiveClaim = failed && q.reasons[claim] == arg.IneffectiveFailureReason
-		if failed && q.reasons[claim] == arg.UnusableFailureReason {
+		if failed && (q.reasons[claim] == arg.UnusableFailureReason || q.reasons[claim] == arg.CutOffFailureReason) {
 			bounded.UnusableAttempts = int32(q.attempts[claim]) //nolint:gosec // test attempts stay small
+			bounded.RetryRows = int32(q.claimRows[claim])       //nolint:gosec // test claims stay small
 		}
 		window = append(window, bounded)
 		if oversized {
@@ -199,6 +201,7 @@ func (q *sessionStore) CompleteCompactionLog(ctx context.Context, arg sqlc.Compl
 	if err == nil {
 		q.reasons[arg.ID] = arg.FailureReason
 		q.attempts[arg.ID] = int(arg.FailureAttempts)
+		q.claimRows[arg.ID] = int(arg.MessageCount)
 		q.completedAt[arg.ID] = q.now()
 	}
 	return row, err

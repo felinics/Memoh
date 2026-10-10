@@ -25,6 +25,7 @@ type stubModel struct {
 	finishReason string // defaults to "stop"
 	refuse       string // a prompt containing it is refused with content_filter
 	verbose      string // a prompt containing it gets a summary no shorter than itself
+	cutOffOver   int    // a prompt longer than this many bytes is cut off at the output limit
 	calls        int
 	prompt       string // decoded text of the captured request messages
 	maxTokens    int    // captured max_tokens of the last request
@@ -48,6 +49,9 @@ func (s *stubModel) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	if s.refuse != "" && strings.Contains(s.prompt, s.refuse) {
 		finishReason = "content_filter"
+	}
+	if s.cutOffOver > 0 && len(s.prompt) > s.cutOffOver {
+		finishReason = "length"
 	}
 	summary := s.summary
 	if s.verbose != "" && strings.Contains(s.prompt, s.verbose) {

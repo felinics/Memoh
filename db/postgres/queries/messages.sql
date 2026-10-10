@@ -3010,9 +3010,10 @@ WHERE message.team_id = public.memoh_current_team_id()
 -- return as candidates once it lapses. An unusable attempt holds its rows for
 -- the hold seconds, four times as long for each consecutive such attempt on
 -- them, up to the max hold. IneffectiveClaim marks a row whose claim in this
--- epoch failed because the summary was not shorter than the rows;
--- UnusableAttempts counts the consecutive unusable attempts on a row whose
--- claim's hold has lapsed. LatestUser marks the session's newest user message
+-- epoch failed because the summary was not shorter than the rows. For a row
+-- whose latest claim got an unusable or cut-off summary, UnusableAttempts
+-- counts such attempts in a row and RetryRows is how many rows that claim
+-- held; a cut-off claim holds nothing back. LatestUser marks the session's newest user message
 -- among the candidates: the task the current turn is working on. Input the
 -- runtime feeds back within a turn is stored as a user message too, but
 -- starts no turn.
@@ -3174,7 +3175,8 @@ SELECT
   admitted.latest_user::boolean AS latest_user,
   admitted.oversized::boolean AS oversized,
   COALESCE(claim.failure_reason = sqlc.arg(ineffective_failure_reason)::text, false)::boolean AS ineffective_claim,
-  CASE WHEN claim.failure_reason = sqlc.arg(unusable_failure_reason)::text THEN claim.failure_attempts ELSE 0 END::integer AS unusable_attempts
+  CASE WHEN claim.failure_reason <> sqlc.arg(ineffective_failure_reason)::text THEN claim.failure_attempts ELSE 0 END::integer AS unusable_attempts,
+  CASE WHEN claim.failure_reason <> sqlc.arg(ineffective_failure_reason)::text THEN claim.message_count ELSE 0 END::integer AS retry_rows
 FROM bot_visible_history_messages m
 JOIN admitted_candidates admitted ON admitted.id = m.id
 LEFT JOIN bot_history_messages payload
@@ -3197,7 +3199,7 @@ LEFT JOIN bot_history_message_compacts claim
  AND claim.session_id = s.id
  AND claim.compaction_epoch = s.compaction_epoch
  AND claim.status = 'error'
- AND claim.failure_reason IN (sqlc.arg(ineffective_failure_reason)::text, sqlc.arg(unusable_failure_reason)::text)
+ AND claim.failure_reason IN (sqlc.arg(ineffective_failure_reason)::text, sqlc.arg(unusable_failure_reason)::text, sqlc.arg(cut_off_failure_reason)::text)
 WHERE m.team_id = public.memoh_current_team_id()
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
 

@@ -38,8 +38,11 @@ type CompactionCandidate struct {
 	// failed because its summary was not shorter than the rows.
 	IneffectiveClaim bool
 	// UnusableAttempts counts the consecutive attempts in the current epoch
-	// whose summary of this row came back unusable.
+	// whose summary of this row came back unusable or cut off. RetryOf is the
+	// latest of them and RetryRows the number of rows it claimed.
 	UnusableAttempts int
+	RetryOf          pgtype.UUID
+	RetryRows        int
 }
 
 func (c CompactionCandidate) HasPolicy(policy CompactPolicy) bool {
