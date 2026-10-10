@@ -1,8 +1,11 @@
 package messaging
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -1029,5 +1032,41 @@ func TestSendDirectPromotesDataPathAttachmentToContentHash(t *testing.T) {
 	att := sender.req.Message.Attachments[0]
 	if att.ContentHash != "hash_1" {
 		t.Fatalf("expected promoted content hash, got %q", att.ContentHash)
+	}
+}
+
+type failingSender struct{ err error }
+
+func (s failingSender) Send(context.Context, string, Platform, SendRequest) error { return s.err }
+
+type failingReactor struct{ err error }
+
+func (r failingReactor) React(context.Context, string, Platform, ReactRequest) error { return r.err }
+
+func TestSendAndReactFailuresAreReturnedWithoutLogging(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("platform refused")
+	var buf bytes.Buffer
+	exec := &Executor{
+		Sender:   failingSender{err: cause},
+		Reactor:  failingReactor{err: cause},
+		Resolver: testResolver{},
+		Logger:   slog.New(slog.NewJSONHandler(&buf, nil)),
+	}
+	session := SessionContext{BotID: "bot_1"}
+
+	_, err := exec.SendDirect(context.Background(), session, "chat-1", map[string]any{"text": "hi", "platform": "telegram"})
+	if !errors.Is(err, cause) {
+		t.Fatalf("SendDirect error = %v, want the sender's error", err)
+	}
+	_, err = exec.React(context.Background(), session, map[string]any{
+		"platform": "telegram", "target": "chat-1", "message_id": "m1", "emoji": "x",
+	})
+	if !errors.Is(err, cause) {
+		t.Fatalf("React error = %v, want the reactor's error", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("executor logged failures the caller returns: %s", buf.String())
 	}
 }

@@ -461,41 +461,9 @@
       "runToSeeList": " 用 {command} 查看可用项。"
     }
   },
-  "slash": {
-    "error": {
-      "unknownSlash": "未知 slash 命令。",
-      "unsupportedWebCommand": "这个 slash 命令不能在 Web Chat 中使用。",
-      "invalidSkillSlashSyntax": "无效的 skill slash 语法。请使用 /<skill-name> [prompt]。",
-      "requestedSkillNotFound": "找不到请求的 skill。",
-      "requestedSkillAmbiguous": "请求的 skill 存在歧义。",
-      "requestedSkillDisabled": "请求的 skill 已被禁用。",
-      "requestedSkillNotRuntimeUsable": "请求的 skill 不能用于本次对话。",
-      "tooManyRequestedSkills": "请求的 skill 数量过多。",
-      "requestedSkillContextTooLarge": "请求的 skill 上下文过大。",
-      "slashAttachmentsUnsupported": "slash 命令不支持附件。",
-      "unsupportedSkillSlashContext": "当前上下文不支持 requested skills。",
-      "unsupportedLegacyEndpoint": "该端点不支持 requested skills。",
-      "invalidQuickActionScope": "该快捷操作不能绑定到 session。",
-      "permissionDenied": "你没有权限使用该 slash 命令。",
-      "permissionSessionRequired": "请先进入一个外部 Agent 会话，再使用 /permission。",
-      "permissionModeUnsupported": "这个 Agent 没有声明可切换的会话模式。",
-      "permissionModeUnavailable": "这个模式不适用于当前 Agent 会话。",
-      "permissionModeFailed": "无法读取或切换 Agent 会话模式。",
-      "reservedSkillMetadata": "不能提交保留的 skill metadata。",
-      "generic": "slash 命令执行失败。"
-    }
-  },
   "queue": {
     "steerAccepted": "已加入 steer 队列。",
-    "accepted": "已加入队列。",
-    "noActiveRun": "当前没有可接收此输入的回复。",
-    "overloaded": "队列正忙，请稍后重试。",
-    "unavailable": "队列暂不可用，请稍后重试。",
-    "conflict": "这条消息已用不同内容提交过。",
-    "invalid": "队列输入需要包含文本。",
-    "unsupported": "讨论会话暂不支持队列操作。",
-    "capacity": "该会话的队列已满，请等待待处理项执行后再添加。",
-    "followUpUnsupportedChannel": "该渠道暂不支持排队消息：渠道回复只能随你发送的消息投递。可用 /steer 补充当前回复，或在 Web 端排队。"
+    "accepted": "已加入队列。"
   },
   "menu": {
     "start": "显示欢迎信息",
@@ -521,69 +489,205 @@
     "steer": "引导当前回复"
   },
   "errors": {
-    "native_history_lost": "Agent 无法恢复此前的对话上下文，已重新开始。上方消息仅保留作历史记录；继续前，请重新提供所需信息。",
-    "tools_unavailable": "此会话的 Memoh 工具不可用，请新建会话后重试。",
-    "elicitation_declined": "工具请求的交互未能展示，此次请求已拒绝。",
-    "capability": {
-      "access_denied": "需要此 Bot 的管理权限才能管理其能力。",
-      "request_invalid": "能力管理请求无效，请检查操作和参数。",
-      "operation_failed": "能力管理操作失败，请检查当前状态后重试。",
-      "approval_required": "请先批准此能力变更请求。",
-      "not_found": "找不到请求的能力，请刷新后重试。"
+    "acp": {
+      "access_forbidden": "你没有权限控制这个 Agent 运行实例。",
+      "command_not_found": "在工作区里找不到命令「{command}」。请先在工作区终端里安装它，或在 Agent 配置里把命令改成绝对路径。",
+      "config_update_failed": "外部 Agent 无法应用所选设置，请重试。",
+      "mode_id_required": "请选择会话模式后重试。",
+      "mode_selection_unsupported": "这个外部 Agent 不支持切换会话模式。",
+      "mode_unavailable": "所选会话模式已不再可用于这个外部 Agent。",
+      "model_id_required": "请选择模型后重试。",
+      "model_selection_unsupported": "这个外部 Agent 不支持切换模型。",
+      "model_unavailable": "所选模型已不再可用于这个外部 Agent。",
+      "operation_failed": "Agent 运行实例操作失败，请重试。",
+      "reasoning_effort_required": "请选择推理强度后重试。",
+      "reasoning_effort_unavailable": "所选推理强度已不再可用于这个外部 Agent。",
+      "reasoning_selection_unsupported": "这个外部 Agent 不支持选择推理强度。",
+      "request_invalid": "Agent 运行实例请求无效，请检查后重试。",
+      "runtime_conflict": "Agent 运行实例尚未准备好执行此操作，请刷新后重试。",
+      "runtime_limit_reached": "当前运行的 Agent 实例过多，请关闭一个后重试。",
+      "runtime_not_found": "这个 Agent 运行实例已失效，将重新启动。"
     },
-    "queue": {
-      "steer_unsupported": "当前运行不支持插入消息，请等它结束后再发送。"
+    "acp_agent_auth_invalid": "外部 Agent 认证无效。请更新 Agent 配置后重试。",
+    "acp_agent_not_configured": "该 Bot 的外部 Agent 配置尚未完成。",
+    "acp_agent_not_enabled": "该 Bot 已停用选中的外部 Agent。",
+    "acp_agent_not_found": "选中的外部 Agent 不可用。",
+    "acp_attachment_invalid": "附件无效，请重新添加。",
+    "acp_attachment_unavailable": "无法让外部 Agent 访问该附件，请重新添加。",
+    "acp_discuss_unsupported": "这个外部 Agent 无法在讨论模式中运行。",
+    "acp_display_args_invalid": "外部 Agent 的显示参数无效。",
+    "acp_image_input_unsupported": "这个外部 Agent 无法读取所附图片。",
+    "acp_project_mode_invalid": "外部 Agent 的项目模式无效。",
+    "acp_project_path_invalid": "外部 Agent 的项目路径必须是绝对路径。",
+    "acp_runtime_busy": "外部 Agent 正在处理该会话的上一轮请求。",
+    "acp_runtime_owner_missing": "这个外部 Agent 会话没有运行时所有者。请重新开始一个会话。",
+    "acp_runtime_start_failed": "外部 Agent 运行时启动失败。",
+    "agent": {
+      "chat_model_not_configured": "尚未选择对话模型。请在 Bot 设置 → 通用中设置默认对话模型，然后重试。",
+      "provider_auth_failed": "模型服务拒绝了当前凭据，请检查该服务商的 API Key。",
+      "provider_overloaded": "模型服务暂时不可用或过载，请稍后重试。",
+      "provider_permission_denied": "模型服务商拒绝访问该模型或资源，请确认该账号有权使用此模型。",
+      "provider_quota_exhausted": "模型服务账户的余额或配额已用尽。",
+      "provider_rate_limited": "已达到模型服务的速率上限，请稍后再发送。",
+      "provider_request_rejected": "模型服务商拒绝了这次请求，请检查模型设置，或换一个模型。",
+      "provider_unreachable": "无法连接到模型服务商，请检查服务地址是否正确、服务是否在运行。",
+      "response_interrupted": "模型响应意外中断，请重试。",
+      "response_timeout": "模型未能及时响应，请重试。",
+      "tool_timeout": "工具长时间没有进度，请先检查已保存的结果再重试。"
+    },
+    "agent_authorization": {
+      "code_invalid": "授权码无效或已过期，请复制 Claude 页面上的完整授权码，或重新连接。",
+      "expired": "授权已过期，请重新连接账号。",
+      "failed": "账号授权失败，请重试。",
+      "limit": "请关闭其他待完成的授权，然后重试。",
+      "not_ready": "请先完成账号连接，再创建 Bot。"
+    },
+    "agent_credential": {
+      "encryption_unavailable": "此服务器尚未配置 Agent 账号存储。",
+      "forbidden": "你没有权限使用这个 Agent 账号。",
+      "incompatible": "这个账号不能用于所选 Agent。",
+      "materialization_failed": "Agent 账号准备失败，请重试。",
+      "not_found": "这个 Agent 账号已不可用，请选择其他账号。",
+      "reauthorization_required": "请先重新连接这个 Agent 账号。",
+      "request_invalid": "请检查 Agent 账号信息后重试。",
+      "revoked": "这个 Agent 账号已断开，请重新连接或选择其他账号。",
+      "runtime_busy": "请等待当前回复结束后再切换 Agent 账号。",
+      "usage_auth_expired": "账户登录已过期，下次对话后会自动续期；如果仍无法查看额度，请重新连接账户。",
+      "usage_unavailable": "暂时无法获取额度，请稍后再试。"
+    },
+    "agent_dependency_missing": "{dep_id} 尚未安装在此工作区。请在 Bot 的「依赖」中安装，或等待正在进行的安装完成，然后重新发送消息。",
+    "app": {
+      "busy": "该应用的另一个操作正在进行中。",
+      "dependencies_unavailable": "此服务器未启用工作区依赖服务，应用无法管理依赖。请联系管理员。",
+      "not_found": "未找到该应用安装记录。",
+      "operation_failed": "应用操作失败。",
+      "prerequisite_failed": "所需的前置依赖安装失败。请先处理该依赖，再重试。",
+      "request_invalid": "应用请求无效。"
     },
     "bot": {
-      "name_taken": "该名称已被占用。",
-      "name_invalid": "名称需为 2-63 个小写字母、数字或连字符，并以字母或数字开头；部分名称为保留名。"
+      "name_invalid": "名称需为 2-63 个小写字母、数字或连字符，并以字母或数字开头；部分名称为保留名。",
+      "name_taken": "该名称已被占用。"
     },
     "bot_agent": {
-      "not_found": "这个 Agent 已不存在。",
-      "name_taken": "这个 Bot 中已存在同名 Agent。",
-      "invalid_runtime": "暂不支持这个 Agent 运行时。",
-      "invalid_metadata": "Agent 配置无效。",
       "default_in_use": "请先选择其他默认 Agent，再停用或删除这个 Agent。",
+      "invalid_metadata": "Agent 配置无效。",
+      "invalid_runtime": "暂不支持这个 Agent 运行时。",
+      "name_taken": "这个 Bot 中已存在同名 Agent。",
+      "not_found": "这个 Agent 已不存在。",
+      "provider_direct_runtime": "该服务商以直连运行时方式运行，请改用 {runtime} 运行时创建 Agent。",
       "unavailable": "这个 Agent 已不能用于新对话。"
     },
+    "bot_backup": {
+      "bundle_invalid": "备份文件已损坏，或版本不受支持。"
+    },
+    "bot_ready_update_failed": "工作区已创建，但未能加载 Bot，请刷新页面。",
+    "canceled": "请求已取消。",
+    "capability": {
+      "access_denied": "需要此 Bot 的管理权限才能管理其能力。",
+      "approval_required": "请先批准此能力变更请求。",
+      "not_found": "找不到请求的能力，请刷新后重试。",
+      "operation_failed": "能力管理操作失败，请检查当前状态后重试。",
+      "request_invalid": "能力管理请求无效，请检查操作和参数。"
+    },
     "channel": {
+      "binding_required": "接收方尚未绑定该渠道。",
+      "enable_failed": "渠道启用失败，请检查凭据后重试。",
       "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试。",
       "verification_failed": "无法验证平台配置，请检查凭据后重试。",
-      "enable_failed": "渠道启用失败，请检查凭据后重试。",
-      "webhook_endpoint_invalid": "请使用公网 HTTPS 地址，不带端口、凭据、查询串或片段，路径须为该渠道显示的 webhook 路径。",
-      "binding_required": "接收方尚未绑定该渠道。"
+      "webhook_endpoint_invalid": "请使用公网 HTTPS 地址，不带端口、凭据、查询串或片段，路径须为该渠道显示的 webhook 路径。"
     },
+    "chat": {
+      "message_empty": "请输入消息或添加附件。"
+    },
+    "codex_auth_token_missing": "该 Bot 工作区的 Codex 认证缺失或不完整。",
+    "codex_oauth_incomplete": "该 Bot 工作区尚未完成 Codex ChatGPT 登录。",
     "compaction": {
       "model_unavailable": "压缩模型不可用。请选择一个已启用、且声明了上下文窗口的对话模型。"
     },
-    "settings": {
-      "reasoning_effort_invalid": "所选对话模型不支持推理级别“{effort}”。",
-      "reasoning_options_unavailable": "暂时无法解析对话模型的推理选项，请稍后重试。"
+    "connector": {
+      "conflict": "该连接器与现有连接冲突。",
+      "not_configured": "此服务器尚未配置连接器，请联系管理员启用 Connect-It。",
+      "not_found": "该连接器已不可用，请刷新后重新连接。",
+      "operation_failed": "连接器操作失败，请重试。",
+      "request_invalid": "连接器请求无效。",
+      "request_rejected": "Connect-It 拒绝了该连接器请求，请检查填写内容后重试。",
+      "upstream_unavailable": "Connect-It 暂时无法完成请求，请稍后重试。"
     },
     "context": {
       "budget_unsatisfied": "模型上下文窗口不足，无法处理当前请求。可尝试 /compact 压缩较早的历史、缩短请求，或改用上下文窗口更大的模型。",
       "protected_overflow": "必要的上下文内容超出了模型上下文预算。可尝试 /compact 压缩较早的历史，或改用上下文窗口更大的模型。"
     },
-    "agent": {
-      "response_timeout": "模型未能及时响应，请重试。",
-      "response_interrupted": "模型响应意外中断，请重试。",
-      "provider_overloaded": "模型服务暂时不可用或过载，请稍后重试。",
-      "provider_rate_limited": "已达到模型服务的速率上限，请稍后再发送。",
-      "provider_quota_exhausted": "模型服务账户的余额或配额已用尽。",
-      "provider_auth_failed": "模型服务拒绝了当前凭据，请检查该服务商的 API Key。",
-      "provider_permission_denied": "模型服务商拒绝访问该模型或资源，请确认该账号有权使用此模型。",
-      "provider_request_rejected": "模型服务商拒绝了这次请求，请检查模型设置，或换一个模型。",
-      "provider_unreachable": "无法连接到模型服务商，请检查服务地址是否正确、服务是否在运行。",
-      "tool_timeout": "工具长时间没有进度，请先检查已保存的结果再重试。",
-      "chat_model_not_configured": "尚未选择对话模型。请在 Bot 设置 → 通用中设置默认对话模型，然后重试。"
+    "context_lifecycle": {
+      "access_denied": "你没有权限查看上下文生命周期诊断信息。",
+      "authentication_required": "请登录后查看上下文生命周期诊断信息。",
+      "load_failed": "无法加载上下文生命周期诊断信息，请稍后重试。",
+      "not_found": "未找到该会话。",
+      "request_invalid": "上下文生命周期请求无效，请检查后重试。"
     },
-    "queue_request_invalid": "请在已有会话中使用 /steer 或 /queue，并在命令后输入内容。",
-    "queue_no_active_run": "当前回复已结束，请将内容作为新消息发送。",
-    "queue_admission_overloaded": "队列当前繁忙，请稍后重试。",
-    "queue_admission_unavailable": "队列服务暂时不可用，请稍后重试。",
-    "queue_item_not_pending": "这条消息已不在待处理队列中。",
-    "queue_capacity_exceeded": "该会话队列已满，请取消或等待待处理项完成后再添加。",
-    "queue_item_not_editable": "只有发送者可以编辑这条排队消息。",
+    "elicitation_declined": "工具请求的交互未能展示，此次请求已拒绝。",
+    "external_agent": {
+      "account_unbound": "你的 IM 账号还没关联到 Memoh 账号，暂时无法使用该 Bot 的工作区。如果你是它的所有者，请在 Memoh 网页端「个人资料 → 关联账号」获取关联码，再在这里发送 {link} <关联码>。",
+      "container_workspace_required": "该 Agent 运行时需要容器工作区。请先把 Bot 切换到容器工作区，再重试。",
+      "turn_replacement_unsupported": "外部 Agent 会话不支持重试或编辑，请改为发送一条新消息。"
+    },
+    "external_runtime": {
+      "auth_required": "Codex 账号未连接或登录已失效。请前往 Agent 设置连接 ChatGPT，或配置 API Key。",
+      "context_window_exceeded": "这个会话已超出模型的上下文长度上限。请压缩上下文，或新开一个会话。",
+      "overloaded": "外部 Agent 的模型服务暂时不可用或过载。请稍后重试，或换一个模型。",
+      "rate_limited": "外部 Agent 已达到模型服务的速率上限，请稍后再发送。",
+      "request_blocked": "这次请求被模型服务的安全策略拦截，请调整内容后再发送。",
+      "session_resume_failed": "会话无法恢复，请重试或新开会话。",
+      "unavailable": "外部 Agent 运行时暂不可用。请检查 Agent 配置和工作区后重试。",
+      "upstream_unreachable": "外部 Agent 无法连接到模型服务，或连接中途断开。请检查网络和 Agent 的服务地址后重试。",
+      "usage_limited": "外部 Agent 账号的使用额度已用完。请等额度重置后再试，或检查该账号的套餐与账单。"
+    },
+    "fetch_provider": {
+      "native_managed": "内置抓取服务由 Memoh 管理，无法这样修改。"
+    },
+    "group_chat_acp_unsupported": "群聊不能创建对话模式的外部 Agent 会话。请使用 /new codex 或 /new discuss codex。",
+    "history": {
+      "delete_failed": "会话历史删除失败，请重试。"
+    },
+    "history_reset": "会话历史已重置，这次回复已取消。",
+    "hook": {
+      "user_message_failed": "消息未能通过消息 Hook，请检查 Hook 配置后重试。"
+    },
+    "http": {
+      "bad_gateway": "上游服务返回了无效响应，请重试。",
+      "bad_request": "请求无效。",
+      "conflict": "请求与当前状态冲突，请刷新后重试。",
+      "forbidden": "你没有执行此操作的权限。",
+      "gateway_timeout": "上游服务响应超时，请重试。",
+      "method_not_allowed": "此处不允许使用该请求方法。",
+      "not_found": "请求的资源不存在。",
+      "not_implemented": "服务器不支持此操作。",
+      "payload_too_large": "请求内容过大。",
+      "service_unavailable": "服务暂时不可用，请稍后重试。",
+      "too_many_requests": "请求过于频繁，请稍后再试。",
+      "unauthorized": "请先登录。",
+      "unsupported_media_type": "不支持该请求内容类型。",
+      "upgrade_required": "该接口需要使用其他协议。"
+    },
+    "internal": "服务器出错了，请重试。",
+    "invalid_chat_runtime": "选择的对话运行时无效。",
+    "mcp": {
+      "endpoint_invalid": "请填写命令（本地服务器）或 URL（远程服务器），二选一，不能同时填写或都不填。",
+      "name_taken": "已存在同名的 MCP 连接。",
+      "oauth_client_id_required": "该服务器无法自动注册客户端。请填写你在该服务器上注册的 OAuth 应用的 Client ID。",
+      "oauth_discovery_failed": "无法从该 MCP 服务器发现 OAuth 配置。请确认 URL 正确且服务器支持 OAuth。",
+      "oauth_not_discovered": "请先对该连接执行 OAuth 发现。"
+    },
+    "memory": {
+      "compact_unsupported": "当前记忆提供方不支持记忆压缩，请在 Bot 的记忆设置中换用支持压缩的提供方。"
+    },
+    "native_history_lost": "Agent 无法恢复此前的对话上下文，已重新开始。上方消息仅保留作历史记录；继续前，请重新提供所需信息。",
+    "network": {
+      "provider_not_configured": "请先为此 Bot 选择网络服务。"
+    },
+    "no_workspace_exec": "你没有执行该 Bot 工作区命令的权限。",
+    "oauth": {
+      "state_invalid": "本次授权已过期或已失效，请重新发起授权。"
+    },
     "profile": {
       "request_invalid": "个人资料更新请求无效。",
       "title_model_invalid": "所选标题模型不可用或不是聊天模型。",
@@ -593,302 +697,196 @@
       "name_taken": "已存在同名提供方。"
     },
     "provider_template": {
-      "not_found": "该提供方模板已不可用。",
       "domain_invalid": "提供方模板类型无效。",
       "domain_mismatch": "该提供方模板不能用于此处。",
+      "not_found": "该提供方模板已不可用。",
       "operation_failed": "提供方模板操作失败。",
       "request_invalid": "提供方配置无效。"
     },
-    "search_provider": {
-      "type_conflict": "该搜索提供方已完成配置。",
-      "invalid_provider": "不支持该搜索提供方。"
+    "queue": {
+      "steer_unsupported": "当前运行不支持插入消息，请等它结束后再发送。"
     },
-    "connector": {
-      "request_invalid": "连接器请求无效。",
-      "not_configured": "此服务器尚未配置连接器，请联系管理员启用 Connect-It。",
-      "not_found": "该连接器已不可用，请刷新后重新连接。",
-      "conflict": "该连接器与现有连接冲突。",
-      "request_rejected": "Connect-It 拒绝了该连接器请求，请检查填写内容后重试。",
-      "upstream_unavailable": "Connect-It 暂时无法完成请求，请稍后重试。",
-      "operation_failed": "连接器操作失败，请重试。"
-    },
-    "tool_approval": {
-      "forbidden": "你没有权限处理这条审批请求。",
-      "not_found": "找不到这条审批请求。",
-      "expired": "这条审批请求已过期或已被处理。",
-      "ambiguous": "匹配到多条审批请求。",
-      "request_invalid": "审批响应格式无效，请刷新后重试。",
-      "operation_failed": "审批响应处理失败。"
-    },
-    "user_input": {
-      "forbidden": "你没有权限回答这个问题。",
-      "expired": "这个问题已过期或已被回答。",
-      "operation_failed": "答案处理失败。"
-    },
-    "skill": {
-      "builtin_read_only": "Memoh 自带 Skill 由系统管理，无法编辑或删除。",
-      "name_taken": "已存在同名 Skill，请换一个名称。",
-      "save_failed": "Skill 保存失败，请重试。",
-      "registry_read_only": "该 Skill 属于 Registry App，请通过更新或卸载 App 来修改。",
-      "name_invalid": "Skill 的 YAML frontmatter 中需要有效的名称。"
-    },
+    "queue_admission_overloaded": "队列当前繁忙，请稍后重试。",
+    "queue_admission_unavailable": "队列服务暂时不可用，请稍后重试。",
+    "queue_capacity_exceeded": "该会话队列已满，请取消或等待待处理项完成后再添加。",
+    "queue_follow_up_command_invalid": "这条排队消息无法启动，请重新作为新消息发送。",
+    "queue_follow_up_unsupported_channel": "该渠道暂不支持排队消息：渠道回复只能随你发送的消息投递。可用 /steer 补充当前回复，或在 Web 端排队。",
+    "queue_invocation_conflict": "这条消息已用不同内容提交过。",
+    "queue_item_not_editable": "只有发送者可以编辑这条排队消息。",
+    "queue_item_not_pending": "这条消息已不在待处理队列中。",
+    "queue_no_active_run": "当前回复已结束，请将内容作为新消息发送。",
+    "queue_request_invalid": "请在已有会话中使用 /steer 或 /queue，并在命令后输入内容。",
+    "queue_target_run_not_active": "这条指令送达前回复已结束，请把它作为新消息发送。",
+    "queue_unsupported_session": "讨论会话暂不支持队列操作。",
     "registry": {
-      "unavailable": "暂时无法连接 Supermarket，请稍后重试。",
-      "app_not_found": "该应用已不存在。",
+      "app_install_failed": "应用安装失败，请重试。",
       "app_invalid": "该应用无效，无法安装。",
-      "app_install_failed": "应用安装失败，请重试。"
+      "app_not_found": "该应用已不存在。",
+      "unavailable": "暂时无法连接 Supermarket，请稍后重试。"
     },
-    "workspace": {
-      "unreachable": "暂时无法连接工作区，请稍后重试。",
-      "template_bootstrap_failed": "工作区文件初始化失败，请尝试重建工作区。",
-      "display_prepare_failed": "显示环境准备失败，请稍后重试。",
-      "archive_invalid": "无法解压该文件，请使用有效的 .zip、.tar.gz 或 .tgz 文件。"
+    "request": {
+      "field_invalid": "{field} 的值无效。",
+      "field_required": "缺少 {field}。"
     },
-    "workspace_dependency": {
-      "not_found": "该依赖不存在。",
-      "request_invalid": "依赖请求无效，请检查后重试。",
-      "action_unsupported": "该依赖不支持此操作。",
-      "platform_unsupported": "当前工作区平台不支持该依赖。",
-      "busy": "该依赖正在进行其他操作，请稍后再试。",
-      "required": "{dependents} 仍依赖它，请先移除这些依赖。",
-      "prerequisites_changed": "确认后，它所需的前置依赖发生了变化，请重新确认此操作。",
-      "workspace_not_running": "工作区未运行，请先启动。",
-      "workspace_missing": "尚未创建工作区，请先创建。",
-      "rollback_unavailable": "没有可回滚的旧版本。",
-      "operation_failed": "依赖操作失败，请查看日志后重试。",
-      "catalog_unavailable": "暂时无法获取依赖目录，请稍后重试。",
-      "definition_invalid": "依赖定义未通过校验，请刷新目录后重试。",
-      "definition_unavailable": "本地没有缓存这份依赖定义，请连接 Supermarket 后重试。",
-      "discovery_failed": "暂时无法检查工作区依赖，请重试。"
+    "runtime_admission_orphaned": "这次回复未能开始，已被清理，请重试。",
+    "runtime_agent_command_stale": "Agent 已不再提供该命令。请重新打开命令面板后重试。",
+    "runtime_control": {
+      "cancelled": "操作已中止。",
+      "command_unavailable": "此命令已不可用，请刷新后重试。",
+      "failed": "操作未能完成，请重试。",
+      "forbidden": "你没有访问此会话的权限。",
+      "goal_requires_default_mode": "请先退出计划模式，再创建或继续目标。",
+      "mode_unavailable": "此权限模式已不可用，请刷新后重新选择。",
+      "request_invalid": "请求无效，请刷新后重试。",
+      "steer_failed": "补充指令未能送达。请等本轮结束后重新发送。",
+      "thread_unavailable": "请先开始对话，再执行此操作。",
+      "unsupported": "当前运行时不支持此操作。"
     },
-    "acp": {
-      "request_invalid": "Agent 运行实例请求无效，请检查后重试。",
-      "access_forbidden": "你没有权限控制这个 Agent 运行实例。",
-      "runtime_not_found": "这个 Agent 运行实例已失效，将重新启动。",
-      "runtime_conflict": "Agent 运行实例尚未准备好执行此操作，请刷新后重试。",
-      "runtime_limit_reached": "当前运行的 Agent 实例过多，请关闭一个后重试。",
-      "operation_failed": "Agent 运行实例操作失败，请重试。",
-      "command_not_found": "在工作区里找不到命令「{command}」。请先在工作区终端里安装它，或在 Agent 配置里把命令改成绝对路径。",
-      "model_selection_unsupported": "这个外部 Agent 不支持切换模型。",
-      "model_id_required": "请选择模型后重试。",
-      "model_unavailable": "所选模型已不再可用于这个外部 Agent。",
-      "reasoning_selection_unsupported": "这个外部 Agent 不支持选择推理强度。",
-      "reasoning_effort_required": "请选择推理强度后重试。",
-      "reasoning_effort_unavailable": "所选推理强度已不再可用于这个外部 Agent。",
-      "mode_selection_unsupported": "这个外部 Agent 不支持切换会话模式。",
-      "mode_id_required": "请选择会话模式后重试。",
-      "mode_unavailable": "所选会话模式已不再可用于这个外部 Agent。",
-      "config_update_failed": "外部 Agent 无法应用所选设置，请重试。"
+    "runtime_fence_activation_failed": "回复未能开始，请稍后重试。",
+    "runtime_live_backend_lost": "这次回复的运行状态已丢失，回复已结束，请重试。",
+    "runtime_owner_lease_expired": "处理这次回复的服务器已无响应，回复已结束，请重试。",
+    "runtime_prompt_failed": "Agent 运行时未能完成这次回复，请重试。",
+    "runtime_reservation_declined": "回复开始前，另一台服务器接管了这个会话，请重试。",
+    "runtime_reservation_failed": "回复未能开始，请稍后重试。",
+    "runtime_run_failed": "回复未能完成，请重试。",
+    "schedule": {
+      "execution_timeout": "定时任务已达到执行时限，请检查执行进度或延长时限。",
+      "model_conflict": "模型设置与该定时任务的运行时不匹配，请改用与运行时对应的模型字段。",
+      "model_required": "该机器人没有默认模型，定时任务需要明确指定模型。请选择模型，或先设置默认模型。",
+      "model_unusable": "该模型无法用于定时任务，请选择已启用的对话模型。",
+      "run_target_conflict": "该定时任务的运行目标、运行时、Agent 与会话设置互相冲突，请调整后重试。",
+      "session_mode_unsupported": "定时任务只能接续对话会话或定时任务会话，请选择其他目标会话。"
     },
-    "external_agent": {
-      "turn_replacement_unsupported": "外部 Agent 会话不支持重试或编辑，请改为发送一条新消息。",
-      "account_unbound": "你的 IM 账号还没关联到 Memoh 账号，暂时无法使用该 Bot 的工作区。如果你是它的所有者，请在 Memoh 网页端「个人资料 → 关联账号」获取关联码，再在这里发送 {link} <关联码>。",
-      "container_workspace_required": "该 Agent 运行时需要容器工作区。请先把 Bot 切换到容器工作区，再重试。"
-    },
-    "agent_credential": {
-      "not_found": "这个 Agent 账号已不可用，请选择其他账号。",
-      "request_invalid": "请检查 Agent 账号信息后重试。",
-      "forbidden": "你没有权限使用这个 Agent 账号。",
-      "incompatible": "这个账号不能用于所选 Agent。",
-      "revoked": "这个 Agent 账号已断开，请重新连接或选择其他账号。",
-      "reauthorization_required": "请先重新连接这个 Agent 账号。",
-      "encryption_unavailable": "此服务器尚未配置 Agent 账号存储。",
-      "runtime_busy": "请等待当前回复结束后再切换 Agent 账号。",
-      "materialization_failed": "Agent 账号准备失败，请重试。",
-      "usage_auth_expired": "账户登录已过期，下次对话后会自动续期；如果仍无法查看额度，请重新连接账户。",
-      "usage_unavailable": "暂时无法获取额度，请稍后再试。"
+    "search_provider": {
+      "invalid_provider": "不支持该搜索提供方。",
+      "type_conflict": "该搜索提供方已完成配置。"
     },
     "session": {
       "model_preference_conflict": "模型选择已在其他位置更新，请刷新，或发送消息以使用当前选择。",
       "not_found": "会话不存在。"
     },
     "session_runtime": {
-      "interrupted": "服务关闭时中断了本次运行，重启后可从已保存的进度继续。",
-      "session_busy": "这个会话还在处理上一条消息，请稍后再试。",
-      "invocation_conflict": "这条消息已用不同内容提交过，请刷新会话查看已保存的内容。",
+      "abort_failed": "会话已删除，但运行中的任务未能停止，请刷新。",
       "history_inconsistent": "会话记录保存出错，请刷新后重试。",
-      "turn_not_latest": "会话已有新内容，请刷新后重试。",
-      "turn_incomplete": "这条消息暂时无法重试，请刷新会话。",
-      "reset_unavailable": "当前无法重置会话历史，请联系开发者。",
-      "reset_conflict": "会话正忙，请稍后再试。",
+      "interrupted": "服务关闭时中断了本次运行，重启后可从已保存的进度继续。",
+      "invocation_conflict": "这条消息已用不同内容提交过，请刷新会话查看已保存的内容。",
       "publish_failed": "会话状态更新失败，请稍后再试。",
-      "abort_failed": "会话已删除，但运行中的任务未能停止，请刷新。"
+      "reset_conflict": "会话正忙，请稍后再试。",
+      "reset_unavailable": "当前无法重置会话历史，请联系开发者。",
+      "session_busy": "这个会话还在处理上一条消息，请稍后再试。",
+      "turn_incomplete": "这条消息暂时无法重试，请刷新会话。",
+      "turn_not_latest": "会话已有新内容，请刷新后重试。"
     },
-    "history": {
-      "delete_failed": "会话历史删除失败，请重试。"
+    "settings": {
+      "reasoning_effort_invalid": "所选对话模型不支持推理级别“{effort}”。",
+      "reasoning_options_unavailable": "暂时无法解析对话模型的推理选项，请稍后重试。"
     },
-    "hook": {
-      "user_message_failed": "消息未能通过消息 Hook，请检查 Hook 配置后重试。"
+    "skill": {
+      "builtin_read_only": "Memoh 自带 Skill 由系统管理，无法编辑或删除。",
+      "name_invalid": "Skill 的 YAML frontmatter 中需要有效的名称。",
+      "name_taken": "已存在同名 Skill，请换一个名称。",
+      "not_found": "未找到该技能，请刷新列表后重试。",
+      "registry_read_only": "该 Skill 属于 Registry App，请通过更新或卸载 App 来修改。",
+      "save_failed": "Skill 保存失败，请重试。"
     },
-    "context_lifecycle": {
-      "request_invalid": "上下文生命周期请求无效，请检查后重试。",
-      "authentication_required": "请登录后查看上下文生命周期诊断信息。",
-      "access_denied": "你没有权限查看上下文生命周期诊断信息。",
-      "not_found": "未找到该会话。",
-      "load_failed": "无法加载上下文生命周期诊断信息，请稍后重试。"
+    "slash": {
+      "attachments_unsupported": "slash 命令不能附带附件，请移除附件后重新发送。",
+      "permission_denied": "你没有使用此命令的权限。",
+      "requires_websocket": "激活 Skill 需要实时对话连接，请重新连接后再试。",
+      "reserved_metadata": "消息中带有保留的 Skill 元数据，客户端不能提交这类数据。",
+      "skill_activation_unsupported": "只有使用 Bot 自身模型的对话会话才能激活 Skill，请切换到这类会话后再试。",
+      "skill_ambiguous": "有多个 Skill 使用这个名称，请在 Bot 的 Skill 中重命名或停用其中一个后再试。",
+      "skill_context_too_large": "所选 Skill 内容过多，一条消息放不下，请减少 Skill 后再试。",
+      "skill_disabled": "该 Skill 已停用，请在 Bot 的 Skill 中启用后再试。",
+      "skill_not_found": "没有这个名称的 Skill，请检查名称后再试。",
+      "skill_not_usable": "该 Skill 不能在对话中使用。",
+      "skill_syntax_invalid": "请用 /<skill-name> [prompt] 激活 Skill。",
+      "too_many_skills": "一条消息里的 Skill 太多，请减少后再试。",
+      "unknown_command": "未知的 slash 命令，发送 /help 可查看可用命令。",
+      "unsupported_in_web": "该 slash 命令不能在 Web 对话中使用。"
     },
-    "external_runtime": {
-      "auth_required": "Codex 账号未连接或登录已失效。请前往 Agent 设置连接 ChatGPT，或配置 API Key。",
-      "unavailable": "外部 Agent 运行时暂不可用。请检查 Agent 配置和工作区后重试。",
-      "session_resume_failed": "会话无法恢复，请重试或新开会话。",
-      "usage_limited": "外部 Agent 账号的使用额度已用完。请等额度重置后再试，或检查该账号的套餐与账单。",
-      "rate_limited": "外部 Agent 已达到模型服务的速率上限，请稍后再发送。",
-      "context_window_exceeded": "这个会话已超出模型的上下文长度上限。请压缩上下文，或新开一个会话。",
-      "overloaded": "外部 Agent 的模型服务暂时不可用或过载。请稍后重试，或换一个模型。",
-      "upstream_unreachable": "外部 Agent 无法连接到模型服务，或连接中途断开。请检查网络和 Agent 的服务地址后重试。",
-      "request_blocked": "这次请求被模型服务的安全策略拦截，请调整内容后再发送。"
+    "tool_approval": {
+      "ambiguous": "匹配到多条审批请求。",
+      "expired": "这条审批请求已过期或已被处理。",
+      "forbidden": "你没有权限处理这条审批请求。",
+      "not_found": "找不到这条审批请求。",
+      "operation_failed": "审批响应处理失败。",
+      "request_invalid": "审批响应格式无效，请刷新后重试。"
     },
-    "app": {
-      "not_found": "未找到该应用安装记录。",
-      "request_invalid": "应用请求无效。",
-      "busy": "该应用的另一个操作正在进行中。",
-      "operation_failed": "应用操作失败。"
-    },
-    "mcp": {
-      "endpoint_invalid": "请填写命令（本地服务器）或 URL（远程服务器），二选一，不能同时填写或都不填。",
-      "name_taken": "已存在同名的 MCP 连接。",
-      "oauth_discovery_failed": "无法从该 MCP 服务器发现 OAuth 配置。请确认 URL 正确且服务器支持 OAuth。",
-      "oauth_not_discovered": "请先对该连接执行 OAuth 发现。",
-      "oauth_client_id_required": "该服务器无法自动注册客户端。请填写你在该服务器上注册的 OAuth 应用的 Client ID。"
-    },
-    "oauth": {
-      "state_invalid": "本次授权已过期或已失效，请重新发起授权。"
-    },
-    "agent_authorization": {
-      "expired": "授权已过期，请重新连接账号。",
-      "not_ready": "请先完成账号连接，再创建 Bot。",
-      "limit": "请关闭其他待完成的授权，然后重试。",
-      "failed": "账号授权失败，请重试。",
-      "code_invalid": "授权码无效或已过期，请复制 Claude 页面上的完整授权码，或重新连接。"
-    },
-    "chat": {
-      "message_empty": "请输入消息或添加附件。"
-    },
-    "workdir": {
-      "git_busy": "有 Agent 正在使用此工作目录，请等待执行结束后再切换分支。",
-      "git_branch_unavailable": "该本地分支已不可用，请刷新后选择已有分支。",
-      "git_switch_failed": "Git 无法切换分支，请检查未提交的修改，以及目标分支是否被其他 Worktree 使用。",
-      "git_unavailable": "无法读取 Git 工作目录，请检查工作区后重试。",
-      "remote_unsupported_for_agent": "外部智能体会话不能使用远程电脑，请改选原生工作区中的工作目录。"
-    },
-    "runtime_control": {
-      "goal_requires_default_mode": "请先退出计划模式，再创建或继续目标。",
-      "steer_failed": "补充指令未能送达。请等本轮结束后重新发送。",
-      "unsupported": "当前运行时不支持此操作。",
-      "command_unavailable": "此命令已不可用，请刷新后重试。",
-      "mode_unavailable": "此权限模式已不可用，请刷新后重新选择。",
-      "thread_unavailable": "请先开始对话，再执行此操作。",
-      "failed": "操作未能完成，请重试。",
-      "forbidden": "你没有访问此会话的权限。",
-      "request_invalid": "请求无效，请刷新后重试。",
-      "cancelled": "操作已中止。"
-    },
-    "schedule": {
-      "execution_timeout": "定时任务已达到执行时限，请检查执行进度或延长时限。"
-    },
-    "video": {
-      "job_outcome_unknown": "无法确认视频任务状态，请先检查已保存的任务，再决定是否重新生成。"
-    },
-    "internal": "服务器出错了，请重试。",
-    "canceled": "请求已取消。",
-    "http": {
-      "bad_request": "请求无效。",
-      "unauthorized": "请先登录。",
-      "forbidden": "你没有执行此操作的权限。",
-      "not_found": "请求的资源不存在。",
-      "method_not_allowed": "此处不允许使用该请求方法。",
-      "conflict": "请求与当前状态冲突，请刷新后重试。",
-      "payload_too_large": "请求内容过大。",
-      "unsupported_media_type": "不支持该请求内容类型。",
-      "upgrade_required": "该接口需要使用其他协议。",
-      "too_many_requests": "请求过于频繁，请稍后再试。",
-      "not_implemented": "服务器不支持此操作。",
-      "bad_gateway": "上游服务返回了无效响应，请重试。",
-      "service_unavailable": "服务暂时不可用，请稍后重试。",
-      "gateway_timeout": "上游服务响应超时，请重试。"
-    },
-    "request": {
-      "field_required": "缺少 {field}。",
-      "field_invalid": "{field} 的值无效。"
-    },
-    "agent_dependency_missing": "{dep_id} 尚未安装在此工作区。请在 Bot 的「依赖」中安装，或等待正在进行的安装完成，然后重新发送消息。",
-    "runtime_run_failed": "回复未能完成，请重试。",
-    "runtime_prompt_failed": "Agent 运行时未能完成这次回复，请重试。",
-    "runtime_owner_lease_expired": "处理这次回复的服务器已无响应，回复已结束，请重试。",
-    "runtime_live_backend_lost": "这次回复的运行状态已丢失，回复已结束，请重试。",
-    "runtime_admission_orphaned": "这次回复未能开始，已被清理，请重试。",
-    "runtime_fence_activation_failed": "回复未能开始，请稍后重试。",
-    "runtime_reservation_failed": "回复未能开始，请稍后重试。",
-    "runtime_reservation_declined": "回复开始前，另一台服务器接管了这个会话，请重试。",
-    "history_reset": "会话历史已重置，这次回复已取消。",
-    "bot_ready_update_failed": "工作区已创建，但未能加载 Bot，请刷新页面。",
-    "workspace_setup_timeout": "工作区仍在创建中，请到 Bot 的工作区页面查看。",
-    "workspace_setup_failed": "创建工作区时出错。",
-    "workspace_display_disabled": "工作区桌面未启用。",
-    "workspace_dependency_operation_unknown": "操作结果尚未确认，请刷新依赖列表查看状态。",
-    "workspace_create_request_invalid": "工作区请求无效。",
-    "workspace_create_failed": "创建工作区失败，请重试。",
-    "workspace_not_found": "该 Bot 还没有工作区。",
-    "workspace_load_failed": "加载工作区信息失败，请重试。",
-    "workspace_metrics_load_failed": "加载资源状态失败，请重试。",
-    "workspace_resource_limits_invalid": "资源限制无效，限制值不能为负数。",
-    "workspace_resource_limits_required": "请填写资源限制。",
-    "workspace_resource_limits_save_failed": "保存资源限制失败，请重试。",
-    "workspace_delete_failed": "删除工作区失败，请重试。",
-    "workspace_start_failed": "启动工作区失败，请重试。",
-    "workspace_stop_failed": "停止工作区失败，请重试。",
-    "workspace_snapshots_unsupported": "当前工作区运行后端不支持快照。",
-    "workspace_snapshot_manager_unavailable": "服务器未配置快照功能。",
-    "workspace_snapshot_request_invalid": "快照请求无效。",
-    "workspace_snapshot_create_failed": "创建快照失败，请重试。",
-    "workspace_snapshots_load_failed": "加载快照失败，请重试。",
-    "workspace_snapshotter_mismatch": "快照器与工作区运行后端不匹配。",
-    "workspace_snapshot_chain_not_found": "找不到工作区的快照历史。",
-    "workspace_manager_unavailable": "服务器未配置工作区管理。",
-    "workspace_snapshot_rollback_request_invalid": "回滚请求无效。",
-    "workspace_snapshot_version_invalid": "快照版本无效。",
-    "workspace_snapshot_rollback_failed": "回滚工作区失败，请重试。",
-    "workspace_preserved_data_not_found": "没有找到保留的工作区数据。",
-    "workspace_restore_failed": "恢复工作区数据失败，请重试。",
-    "acp_agent_not_found": "选中的外部 Agent 不可用。",
-    "acp_agent_not_enabled": "该 Bot 已停用选中的外部 Agent。",
-    "acp_agent_not_configured": "该 Bot 的外部 Agent 配置尚未完成。",
-    "codex_oauth_incomplete": "该 Bot 工作区尚未完成 Codex ChatGPT 登录。",
-    "codex_auth_token_missing": "该 Bot 工作区的 Codex 认证缺失或不完整。",
-    "acp_agent_auth_invalid": "外部 Agent 认证无效。请更新 Agent 配置后重试。",
-    "no_workspace_exec": "你没有执行该 Bot 工作区命令的权限。",
-    "acp_runtime_owner_missing": "这个外部 Agent 会话没有运行时所有者。请重新开始一个会话。",
-    "acp_discuss_unsupported": "这个外部 Agent 无法在讨论模式中运行。",
-    "group_chat_acp_unsupported": "群聊不能创建对话模式的外部 Agent 会话。请使用 /new codex 或 /new discuss codex。",
-    "acp_project_mode_invalid": "外部 Agent 的项目模式无效。",
-    "acp_project_path_invalid": "外部 Agent 的项目路径必须是绝对路径。",
-    "acp_display_args_invalid": "外部 Agent 的显示参数无效。",
-    "acp_runtime_start_failed": "外部 Agent 运行时启动失败。",
-    "acp_runtime_busy": "外部 Agent 正在处理该会话的上一轮请求。",
-    "acp_attachment_invalid": "附件无效，请重新添加。",
-    "acp_attachment_unavailable": "无法让外部 Agent 访问该附件，请重新添加。",
-    "runtime_agent_command_stale": "Agent 已不再提供该命令。请重新打开命令面板后重试。",
-    "acp_image_input_unsupported": "这个外部 Agent 无法读取所附图片。",
-    "invalid_chat_runtime": "选择的对话运行时无效。",
-    "queue_invocation_conflict": "这条消息已用不同内容提交过。",
-    "queue_unsupported_session": "讨论会话暂不支持队列操作。",
-    "queue_follow_up_unsupported_channel": "该渠道暂不支持排队消息：渠道回复只能随你发送的消息投递。可用 /steer 补充当前回复，或在 Web 端排队。",
-    "network": {
-      "provider_not_configured": "请先为此 Bot 选择网络服务。"
+    "tools_unavailable": "此会话的 Memoh 工具不可用，请新建会话后重试。",
+    "tts": {
+      "model_not_configured": "此 Bot 尚未配置语音合成模型，请先在 Bot 设置中选择。",
+      "text_too_long": "文本过长，最多 {max} 个字符。"
     },
     "user": {
       "cannot_remove_self": "不能移除自己，请让其他管理员操作。"
     },
-    "tts": {
-      "text_too_long": "文本过长，最多 {max} 个字符。",
-      "model_not_configured": "此 Bot 尚未配置语音合成模型，请先在 Bot 设置中选择。"
+    "user_input": {
+      "expired": "这个问题已过期或已被回答。",
+      "forbidden": "你没有权限回答这个问题。",
+      "operation_failed": "答案处理失败。"
     },
-    "bot_backup": {
-      "bundle_invalid": "备份文件已损坏，或版本不受支持。"
+    "video": {
+      "job_outcome_unknown": "无法确认视频任务状态，请先检查已保存的任务，再决定是否重新生成。"
     },
-    "fetch_provider": {
-      "native_managed": "内置抓取服务由 Memoh 管理，无法这样修改。"
-    }
+    "workdir": {
+      "git_branch_unavailable": "该本地分支已不可用，请刷新后选择已有分支。",
+      "git_busy": "有 Agent 正在使用此工作目录，请等待执行结束后再切换分支。",
+      "git_switch_failed": "Git 无法切换分支，请检查未提交的修改，以及目标分支是否被其他 Worktree 使用。",
+      "git_unavailable": "无法读取 Git 工作目录，请检查工作区后重试。",
+      "remote_unsupported_for_agent": "外部智能体会话不能使用远程电脑，请改选原生工作区中的工作目录。"
+    },
+    "workspace": {
+      "archive_invalid": "无法解压该文件，请使用有效的 .zip、.tar.gz 或 .tgz 文件。",
+      "display_prepare_failed": "显示环境准备失败，请稍后重试。",
+      "template_bootstrap_failed": "工作区文件初始化失败，请尝试重建工作区。",
+      "unreachable": "暂时无法连接工作区，请稍后重试。"
+    },
+    "workspace_create_failed": "创建工作区失败，请重试。",
+    "workspace_create_request_invalid": "工作区请求无效。",
+    "workspace_delete_failed": "删除工作区失败，请重试。",
+    "workspace_dependency": {
+      "action_unsupported": "该依赖不支持此操作。",
+      "busy": "该依赖正在进行其他操作，请稍后再试。",
+      "catalog_unavailable": "暂时无法获取依赖目录，请稍后重试。",
+      "definition_invalid": "依赖定义未通过校验，请刷新目录后重试。",
+      "definition_unavailable": "本地没有缓存这份依赖定义，请连接 Supermarket 后重试。",
+      "discovery_failed": "暂时无法检查工作区依赖，请重试。",
+      "not_found": "该依赖不存在。",
+      "operation_failed": "依赖操作失败，请查看日志后重试。",
+      "platform_unsupported": "当前工作区平台不支持该依赖。",
+      "prerequisites_changed": "确认后，它所需的前置依赖发生了变化，请重新确认此操作。",
+      "request_invalid": "依赖请求无效，请检查后重试。",
+      "required": "{dependents} 仍依赖它，请先移除这些依赖。",
+      "rollback_unavailable": "没有可回滚的旧版本。",
+      "workspace_missing": "尚未创建工作区，请先创建。",
+      "workspace_not_running": "工作区未运行，请先启动。"
+    },
+    "workspace_dependency_operation_unknown": "操作结果尚未确认，请刷新依赖列表查看状态。",
+    "workspace_display_disabled": "工作区桌面未启用。",
+    "workspace_load_failed": "加载工作区信息失败，请重试。",
+    "workspace_manager_unavailable": "服务器未配置工作区管理。",
+    "workspace_metrics_load_failed": "加载资源状态失败，请重试。",
+    "workspace_not_found": "该 Bot 还没有工作区。",
+    "workspace_preserved_data_not_found": "没有找到保留的工作区数据。",
+    "workspace_resource_limits_invalid": "资源限制无效，限制值不能为负数。",
+    "workspace_resource_limits_required": "请填写资源限制。",
+    "workspace_resource_limits_save_failed": "保存资源限制失败，请重试。",
+    "workspace_restore_failed": "恢复工作区数据失败，请重试。",
+    "workspace_setup_failed": "创建工作区时出错。",
+    "workspace_setup_timeout": "工作区仍在创建中，请到 Bot 的工作区页面查看。",
+    "workspace_snapshot_chain_not_found": "找不到工作区的快照历史。",
+    "workspace_snapshot_create_failed": "创建快照失败，请重试。",
+    "workspace_snapshot_manager_unavailable": "服务器未配置快照功能。",
+    "workspace_snapshot_request_invalid": "快照请求无效。",
+    "workspace_snapshot_rollback_failed": "回滚工作区失败，请重试。",
+    "workspace_snapshot_rollback_request_invalid": "回滚请求无效。",
+    "workspace_snapshot_version_invalid": "快照版本无效。",
+    "workspace_snapshots_load_failed": "加载快照失败，请重试。",
+    "workspace_snapshots_unsupported": "当前工作区运行后端不支持快照。",
+    "workspace_snapshotter_mismatch": "快照器与工作区运行后端不匹配。",
+    "workspace_start_failed": "启动工作区失败，请重试。",
+    "workspace_stop_failed": "停止工作区失败，请重试。"
   },
   "runtime": {
     "claudeCode": {

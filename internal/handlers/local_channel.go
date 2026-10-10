@@ -26,7 +26,6 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/agent/application"
-	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
@@ -270,17 +269,15 @@ func (h *LocalChannelHandler) ExecuteQuickAction(c echo.Context) error {
 	if !quickActionSkillActivationAllowedHint(req.Params) {
 		skillActivationAllowed = false
 	}
-	result, slashErr := h.executeWebQuickAction(c.Request().Context(), botID, actionID, skillActivationAllowed, webQuickActionContext{
+	result, actionErr := h.executeWebQuickAction(c.Request().Context(), botID, actionID, skillActivationAllowed, webQuickActionContext{
 		SessionID: sessionID,
 		ActorID:   channelIdentityID,
 		ModeID:    quickActionStringParam(req.Params, "mode_id"),
 		ToolURL:   buildExternalAgentToolsURL(c, botID),
 	})
 	event := commandEvent(req.InvocationID, req.ComposerScope, sessionID, actionID)
-	if slashErr != nil {
-		event.Type = "command_error"
-		event.Code, event.Message = slashErr.Code, slashUserMessage(slashErr.Code)
-		return c.JSON(http.StatusOK, event)
+	if actionErr != nil {
+		return writeCommandError(c, http.StatusOK, event, actionErr)
 	}
 	event.Type = "command_result"
 	event.Result = result
@@ -317,15 +314,16 @@ type webQuickActionContext struct {
 	ToolURL   string
 }
 
-func (h *LocalChannelHandler) executeWebQuickAction(ctx context.Context, botID, actionID string, skillActivationAllowed bool, control webQuickActionContext) (*CommandActionResult, *slash.Error) {
+// executeWebQuickAction runs a Web quick action. A failure is returned with its
+// cause; the caller answers it and its result record carries the cause.
+func (h *LocalChannelHandler) executeWebQuickAction(ctx context.Context, botID, actionID string, skillActivationAllowed bool, control webQuickActionContext) (*CommandActionResult, error) {
 	switch strings.TrimSpace(actionID) {
 	case "help":
 		items := []CommandActionListItem{
 			{ID: "help", Title: "/help", Description: "Show available quick actions", Kind: "quick_action"},
 			{ID: "new", Title: "/new", Description: "Start a new session", Kind: "quick_action"},
-			{ID: "compact", Title: "/compact", Description: "Compact the current session history", Kind: "quick_action"},
 		}
-		labels := []string{"/help", "/new", "/compact"}
+		labels := []string{"/help", "/new"}
 		text := "Available Web quick actions: %s."
 		// skillActivationAllowed already reflects a native chat
 		// session, which is also the only context where the model picker
@@ -346,27 +344,14 @@ func (h *LocalChannelHandler) executeWebQuickAction(ctx context.Context, botID, 
 		}, nil
 	case "skill.list":
 		if !skillActivationAllowed {
-			err := slash.Error{Code: slash.CodeUnsupportedSkillSlashContext}
-			return nil, &err
+			return nil, apperror.New(slash.CodeUnsupportedSkillSlashContext, nil)
 		}
 		if h.skillResolver == nil {
-			err := slash.Error{Code: slash.CodeRequestedSkillNotRuntimeUsable, Msg: "skill resolver not configured"}
-			return nil, &err
+			return nil, errs.New("skill resolver not configured")
 		}
 		catalog, err := h.skillResolver.ListSafeSkillCatalog(ctx, botID)
 		if err != nil {
-			code := slashErrorCode(err)
-			if code == "" {
-				code = slash.CodeRequestedSkillNotRuntimeUsable
-				// The generic code does not carry the cause, and the request is
-				// answered, so this is where the cause is recorded.
-				result := errlog.Event(ctx, "skill.list", err, errlog.Options{})
-				h.logger.LogAttrs(ctx, result.Level, "skill catalog failed", append([]slog.Attr{
-					slog.String("bot_id", botID),
-				}, result.Attrs()...)...)
-			}
-			slashErr := slash.Error{Code: code}
-			return nil, &slashErr
+			return nil, errs.Wrap(err, "list skill catalog")
 		}
 		items := make([]CommandActionListItem, 0, len(catalog))
 		for _, item := range catalog {
@@ -381,15 +366,16 @@ func (h *LocalChannelHandler) executeWebQuickAction(ctx context.Context, botID, 
 	case "permission":
 		return h.executeWebPermissionQuickAction(ctx, botID, control)
 	default:
-		err := slash.Error{Code: slash.CodeUnsupportedWebCommand}
-		return nil, &err
+		return nil, apperror.New(slash.CodeUnsupportedWebCommand, nil)
 	}
 }
 
-func (h *LocalChannelHandler) executeWebPermissionQuickAction(ctx context.Context, botID string, control webQuickActionContext) (*CommandActionResult, *slash.Error) {
-	if h == nil || h.agentService == nil || strings.TrimSpace(control.SessionID) == "" {
-		err := slash.Error{Code: slash.CodePermissionSessionRequired}
-		return nil, &err
+func (h *LocalChannelHandler) executeWebPermissionQuickAction(ctx context.Context, botID string, control webQuickActionContext) (*CommandActionResult, error) {
+	if h == nil || h.agentService == nil {
+		return nil, errs.New("agent service not configured")
+	}
+	if strings.TrimSpace(control.SessionID) == "" {
+		return nil, apperror.New(apperror.CodeRuntimeControlThreadUnavailable, nil)
 	}
 	request := application.RuntimeControlRequest{BotID: strings.TrimSpace(botID), ThreadID: strings.TrimSpace(control.SessionID), ActorID: strings.TrimSpace(control.ActorID), ModeID: control.ModeID, ToolHTTPURL: strings.TrimSpace(control.ToolURL)}
 	var state external.ModeState
@@ -406,24 +392,7 @@ func (h *LocalChannelHandler) executeWebPermissionQuickAction(ctx context.Contex
 	}
 
 	if err != nil {
-		code := slash.CodePermissionModeFailed
-		switch {
-		case errors.Is(err, toolapproval.ErrForbidden):
-			code = slash.CodePermissionDenied
-		case errors.Is(err, external.ErrControlUnsupported):
-			code = slash.CodePermissionModeUnsupported
-		case errors.Is(err, external.ErrModeUnavailable):
-			code = slash.CodePermissionModeUnavailable
-		default:
-			// The generic code does not carry the cause, and the request is
-			// answered, so this is where the cause is recorded.
-			result := errlog.Event(ctx, "runtime_control.permission", err, errlog.Options{})
-			h.logger.LogAttrs(ctx, result.Level, "permission mode change failed", append([]slog.Attr{
-				slog.String("bot_id", botID), slog.String("session_id", control.SessionID),
-			}, result.Attrs()...)...)
-		}
-		slashErr := slash.Error{Code: code}
-		return nil, &slashErr
+		return nil, runtimeControlError(err)
 	}
 	items := make([]CommandActionListItem, 0, len(state.AvailableModes))
 	for _, mode := range state.AvailableModes {
@@ -446,62 +415,6 @@ func (h *LocalChannelHandler) executeWebPermissionQuickAction(ctx context.Contex
 	return &CommandActionResult{Kind: resultKind, Items: items}, nil
 }
 
-func slashErrorCode(err error) string {
-	if err == nil {
-		return ""
-	}
-	var slashErr slash.Error
-	if errors.As(err, &slashErr) {
-		return slashErr.Code
-	}
-	return ""
-}
-
-func slashUserMessage(code string) string {
-	switch code {
-	case slash.CodeUnknownSlash:
-		return "Unknown slash command."
-	case slash.CodeUnsupportedWebCommand:
-		return "This slash command is not available in Web."
-	case slash.CodeInvalidSkillSlashSyntax:
-		return "Invalid skill slash syntax. Use /<skill-name> [prompt] or pick a skill from the composer."
-	case slash.CodeRequestedSkillNotFound:
-		return "Requested skill was not found."
-	case slash.CodeRequestedSkillAmbiguous:
-		return "Requested skill is ambiguous."
-	case slash.CodeRequestedSkillDisabled:
-		return "Requested skill is disabled."
-	case slash.CodeRequestedSkillNotRuntimeUsable:
-		return "Requested skill is not available for chat."
-	case slash.CodeTooManyRequestedSkills:
-		return "Too many skills selected."
-	case slash.CodeRequestedSkillContextTooLarge:
-		return "Selected skill context is too large."
-	case slash.CodeSlashAttachmentsUnsupported:
-		return "Slash commands cannot be sent with attachments."
-	case slash.CodeUnsupportedSkillSlashContext:
-		return "Requested skills are not supported in this context."
-	case slash.CodeUnsupportedLegacyEndpoint:
-		return "Skill activation requires WebSocket. Reconnect and try again."
-	case slash.CodePermissionDenied:
-		return "You do not have permission to run this command."
-	case slash.CodeReservedSkillMetadata:
-		return "Reserved skill metadata cannot be supplied by clients."
-	case slash.CodeInvalidQuickActionScope:
-		return "This quick action cannot be scoped to a session."
-	case slash.CodePermissionSessionRequired:
-		return "Open an External Agent session before using /permission."
-	case slash.CodePermissionModeUnsupported:
-		return "This Agent does not declare selectable session modes."
-	case slash.CodePermissionModeUnavailable:
-		return "That mode is not available for this Agent session."
-	case slash.CodePermissionModeFailed:
-		return "The Agent session mode could not be loaded or changed."
-	default:
-		return "Slash command failed."
-	}
-}
-
 func (h *LocalChannelHandler) resolveWebRequestedSkillContexts(ctx context.Context, botID string, requested []webRequestedSkill) ([]turn.RequestedSkillContext, error) {
 	names := make([]string, 0, len(requested))
 	for _, item := range requested {
@@ -515,7 +428,7 @@ func (h *LocalChannelHandler) resolveWebTextRequestedSkillContexts(ctx context.C
 		return nil, nil
 	}
 	if h.skillResolver == nil {
-		return nil, slash.NewError(slash.CodeRequestedSkillNotRuntimeUsable)
+		return nil, errs.New("skill resolver not configured")
 	}
 	resolved, err := h.skillResolver.ResolveTextRequestedSkills(ctx, botID, names)
 	if err != nil {
@@ -631,21 +544,37 @@ func webActionID(resource, action string) string {
 	}
 }
 
-func sendWSCommandError(writer *wsWriter, msg wsClientMessage, code string) {
-	event := commandEvent(msg.InvocationID, msg.ComposerScope, msg.SessionID, "")
-	event.Type = "command_error"
-	event.Code, event.Message = code, slashUserMessage(code)
-	writer.SendJSON(event)
+// failWSCommand answers a slash request that was refused or failed before a
+// run took it over with its command_error event, and writes the request's
+// result record.
+func (h *LocalChannelHandler) failWSCommand(ctx context.Context, writer *wsWriter, botID string, msg wsClientMessage, err error) {
+	writer.SendJSON(commandErrorEvent(ctx, msg, "", err))
+	recordWSRequestFailure(ctx, h.logger, botID, wsTurn(msg.InvocationID, msg.SessionID), "ws.command", err)
 }
 
 // commandErrorEvent is the command_error event for a command that failed with
 // err: the public error the HTTP error handler would answer err with.
 func commandErrorEvent(ctx context.Context, msg wsClientMessage, actionID string, err error) CommandEventResponse {
-	frame, _ := server.NewStreamError(ctx, err, "")
-	event := commandEvent(msg.InvocationID, msg.ComposerScope, msg.SessionID, actionID)
+	event, _ := commandError(ctx, commandEvent(msg.InvocationID, msg.ComposerScope, msg.SessionID, actionID), err)
+	return event
+}
+
+// writeCommandError answers an HTTP command request that failed with err with
+// its command_error event, and returns the error the event was rendered from,
+// which the request's result record attributes.
+func writeCommandError(c echo.Context, status int, event CommandEventResponse, err error) error {
+	event, rendered := commandError(c.Request().Context(), event, err)
+	if writeErr := c.JSON(status, event); writeErr != nil {
+		return writeErr
+	}
+	return rendered
+}
+
+func commandError(ctx context.Context, event CommandEventResponse, err error) (CommandEventResponse, error) {
+	frame, rendered := server.NewStreamError(ctx, err, "")
 	event.Type = "command_error"
 	event.Code, event.Args, event.Message, event.Fault = frame.Code, frame.Args, frame.Message, frame.Fault
-	return event
+	return event, rendered
 }
 
 func sendWSCommandResult(writer *wsWriter, msg wsClientMessage, actionID string, result *CommandActionResult) {
@@ -823,10 +752,7 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	}
 	c.Request().Body = io.NopCloser(bytes.NewReader(body))
 	if jsonBodyHasKey(body, "requested_skills") {
-		event := commandEvent("", "", "", "")
-		event.Type = "command_error"
-		event.Code, event.Message = slash.CodeUnsupportedLegacyEndpoint, slashUserMessage(slash.CodeUnsupportedLegacyEndpoint)
-		return c.JSON(http.StatusBadRequest, event)
+		return writeCommandError(c, http.StatusBadRequest, commandEvent("", "", "", ""), apperror.New(slash.CodeUnsupportedLegacyEndpoint, nil))
 	}
 	var req LocalChannelMessageRequest
 	if err := c.Bind(&req); err != nil {
@@ -848,24 +774,18 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "resolver not configured")
 		}
 		if err := h.agentService.ValidateWorkspaceTarget(c.Request().Context(), botID, workspaceTargetID); err != nil {
-			return echo.NewHTTPError(http.StatusConflict, err.Error())
+			return workspaceTargetError(err)
 		}
 	}
 	if err := channel.RejectReservedSkillMetadata(req.Message); err != nil {
-		event := commandEvent("", "", "", "")
-		event.Type = "command_error"
-		event.Code, event.Message = slash.CodeReservedSkillMetadata, slashUserMessage(slash.CodeReservedSkillMetadata)
-		return c.JSON(http.StatusBadRequest, event)
+		return writeCommandError(c, http.StatusBadRequest, commandEvent("", "", "", ""), err)
 	}
 	// Slash CONTROL input (commands, skill activation) is WS-only; the legacy
 	// REST endpoint rejects it instead of degrading. Run the shared classifier
 	// rather than a bare "/" prefix check so prose that merely starts with a
 	// slash ("/etc/nginx.conf keeps failing…") still reaches the model.
 	if decision := h.classifyWebSlash(strings.TrimSpace(req.Message.PlainText()), len(req.Message.Attachments) > 0, slash.SurfaceWebWS); decision.Kind != slash.DecisionNormalChat {
-		event := commandEvent("", "", "", "")
-		event.Type = "command_error"
-		event.Code, event.Message = slash.CodeUnsupportedLegacyEndpoint, slashUserMessage(slash.CodeUnsupportedLegacyEndpoint)
-		return c.JSON(http.StatusOK, event)
+		return writeCommandError(c, http.StatusOK, commandEvent("", "", "", ""), apperror.New(slash.CodeUnsupportedLegacyEndpoint, nil))
 	}
 	cfg, err := h.channelStore.ResolveEffectiveConfig(c.Request().Context(), botID, h.channelType)
 	if err != nil {
@@ -1278,9 +1198,9 @@ func (h *LocalChannelHandler) resolveWSTargetTurnID(ctx context.Context, session
 	return resolved, nil
 }
 
-// wsWorkspaceTargetError is the answer to a send whose selected workspace
-// target does not resolve: a conflict, as the HTTP send answers it.
-func wsWorkspaceTargetError(err error) error {
+// workspaceTargetError is the answer to a send whose selected workspace
+// target does not resolve: a conflict, on HTTP and WebSocket alike.
+func workspaceTargetError(err error) error {
 	return echo.NewHTTPError(http.StatusConflict).WithInternal(err)
 }
 
@@ -1974,11 +1894,10 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 		}
 		var msg wsClientMessage
 		if err := json.Unmarshal(raw, &msg); err != nil {
-			h.logger.WarnContext(c.Request().Context(), "ws: unmarshal failed",
-				slog.String("bot_id", botID),
-				slog.Any("error", err),
-			)
-			writer.SendJSON(map[string]string{"type": "error", "message": "invalid message format"})
+			// A frame that is not JSON names no field and no invocation.
+			frame, rendered := server.NewStreamError(c.Request().Context(), apperror.Wrap(apperror.CodeHTTPBadRequest, err, nil), "")
+			writer.SendJSON(frame)
+			recordWSRequestFailure(c.Request().Context(), h.logger, botID, wsTurnRef{}, "ws.message", rendered)
 			continue
 		}
 
@@ -2155,14 +2074,14 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}
 			if workspaceTargetID != "" {
 				if err := h.agentService.ValidateWorkspaceTarget(streamBaseCtx, botID, workspaceTargetID); err != nil {
-					failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.message", wsWorkspaceTargetError(err))
+					failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.message", workspaceTargetError(err))
 					continue
 				}
 			}
 
 			hasRequestedSkills := len(msg.RequestedSkills) > 0
 			if hasRequestedSkills && strings.HasPrefix(text, "/") {
-				sendWSCommandError(writer, msg, slash.CodeInvalidSkillSlashSyntax)
+				h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(slash.CodeInvalidSkillSlashSyntax, nil))
 				continue
 			}
 			controlRequest := application.RuntimeControlRequest{BotID: botID, ThreadID: sessionID, ActorID: channelIdentityID, ToolHTTPURL: buildExternalAgentToolsURL(c, botID)}
@@ -2171,7 +2090,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				controlRequest.Command = command.Name
 				if command.Kind != external.CommandTurn {
 					if len(msg.Attachments) > 0 {
-						sendWSCommandError(writer, msg, slash.CodeSlashAttachmentsUnsupported)
+						h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(slash.CodeSlashAttachmentsUnsupported, nil))
 						continue
 					}
 					go func(controlCtx context.Context, request application.RuntimeControlRequest, command external.Command, message wsClientMessage) {
@@ -2207,7 +2126,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					// Server-side twin of the Web composer guard: a quick action
 					// consumes only the command text, so accepting the message
 					// would silently drop the files.
-					sendWSCommandError(writer, msg, slash.CodeSlashAttachmentsUnsupported)
+					h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(slash.CodeSlashAttachmentsUnsupported, nil))
 					continue
 				}
 				actionID := webActionID(decision.Command.Resource, decision.Command.Action)
@@ -2250,9 +2169,9 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				if decision.Invocation != nil {
 					control.ModeID = decision.Invocation.Rest
 				}
-				result, slashErr := h.executeWebQuickAction(streamBaseCtx, botID, actionID, skillActivationAllowed, control)
-				if slashErr != nil {
-					sendWSCommandError(writer, msg, slashErr.Code)
+				result, actionErr := h.executeWebQuickAction(streamBaseCtx, botID, actionID, skillActivationAllowed, control)
+				if actionErr != nil {
+					h.failWSCommand(streamBaseCtx, writer, botID, msg, actionErr)
 				} else {
 					sendWSCommandResult(writer, msg, actionID, result)
 				}
@@ -2265,10 +2184,10 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				if code == "" {
 					code = slash.CodeUnknownSlash
 				}
-				sendWSCommandError(writer, msg, code)
+				h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(code, nil))
 				continue
 			default:
-				sendWSCommandError(writer, msg, slash.CodeUnknownSlash)
+				h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(slash.CodeUnknownSlash, nil))
 				continue
 			}
 
@@ -2285,11 +2204,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}
 			chatAttachments, attachmentErr := parseWSClientAttachments(msg.Attachments)
 			if attachmentErr != nil {
-				code := slashErrorCode(attachmentErr)
-				if code == "" {
-					code = slash.CodeReservedSkillMetadata
-				}
-				sendWSCommandError(writer, msg, code)
+				h.failWSCommand(streamBaseCtx, writer, botID, msg, attachmentErr)
 				continue
 			}
 
@@ -2317,13 +2232,13 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						continue
 					}
 					if !supported {
-						sendWSCommandError(writer, msg, slash.CodeUnsupportedSkillSlashContext)
+						h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(slash.CodeUnsupportedSkillSlashContext, nil))
 						continue
 					}
 					var reserved bool
 					releaseActiveWSTurn, reserved = h.reserveWSRequestedSkillTurn(botID, sessionID, ref.InvocationID)
 					if !reserved {
-						sendWSCommandError(writer, msg, slash.CodeUnsupportedSkillSlashContext)
+						h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(slash.CodeUnsupportedSkillSlashContext, nil))
 						continue
 					}
 				} else {
@@ -2334,11 +2249,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			if hasRequestedSkills {
 				requestedSkillContexts, err = h.resolveWebRequestedSkillContexts(streamBaseCtx, botID, msg.RequestedSkills)
 				if err != nil {
-					code := slashErrorCode(err)
-					if code == "" {
-						code = slash.CodeUnsupportedSkillSlashContext
-					}
-					sendWSCommandError(writer, msg, code)
+					h.failWSCommand(streamBaseCtx, writer, botID, msg, err)
 					releaseActiveWSTurnNow()
 					continue
 				}
@@ -2346,11 +2257,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			if pendingSkillIntent != nil {
 				requestedSkillContexts, err = h.resolveWebTextRequestedSkillContexts(streamBaseCtx, botID, pendingSkillIntent.Names)
 				if err != nil {
-					code := slashErrorCode(err)
-					if code == "" {
-						code = slash.CodeUnsupportedSkillSlashContext
-					}
-					sendWSCommandError(writer, msg, code)
+					h.failWSCommand(streamBaseCtx, writer, botID, msg, err)
 					releaseActiveWSTurnNow()
 					continue
 				}
@@ -2386,7 +2293,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					var reserved bool
 					releaseActiveWSTurn, reserved = h.reserveWSRequestedSkillTurn(botID, sessionID, ref.InvocationID)
 					if !reserved {
-						sendWSCommandError(writer, msg, slash.CodeUnsupportedSkillSlashContext)
+						h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(slash.CodeUnsupportedSkillSlashContext, nil))
 						continue
 					}
 				} else {
@@ -2410,7 +2317,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				continue
 			}
 			if runtimeInfo.RequiresWorkspaceExec && len(requestedSkillContexts) > 0 {
-				sendWSCommandError(writer, msg, slash.CodeUnsupportedSkillSlashContext)
+				h.failWSCommand(streamBaseCtx, writer, botID, msg, apperror.New(slash.CodeUnsupportedSkillSlashContext, nil))
 				releaseActiveWSTurnNow()
 				continue
 			}
@@ -2570,7 +2477,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}
 			if workspaceTargetID != "" {
 				if err := h.agentService.ValidateWorkspaceTarget(streamBaseCtx, botID, workspaceTargetID); err != nil {
-					failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.retry_message", wsWorkspaceTargetError(err))
+					failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.retry_message", workspaceTargetError(err))
 					continue
 				}
 			}
@@ -2639,11 +2546,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}
 			chatAttachments, attachmentErr := parseWSClientAttachments(msg.Attachments)
 			if attachmentErr != nil {
-				code := slashErrorCode(attachmentErr)
-				if code == "" {
-					code = slash.CodeReservedSkillMetadata
-				}
-				sendWSCommandError(writer, msg, code)
+				h.failWSCommand(streamBaseCtx, writer, botID, msg, attachmentErr)
 				continue
 			}
 			if text == "" && len(chatAttachments) == 0 {
@@ -2660,7 +2563,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}
 			if workspaceTargetID != "" {
 				if err := h.agentService.ValidateWorkspaceTarget(streamBaseCtx, botID, workspaceTargetID); err != nil {
-					failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.edit_message", wsWorkspaceTargetError(err))
+					failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.edit_message", workspaceTargetError(err))
 					continue
 				}
 			}

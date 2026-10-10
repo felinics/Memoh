@@ -14,7 +14,6 @@
         :approvals="approvals"
         :command-panel="commandPanel"
         :error-message="errorMessage"
-        :compacting="compacting"
         :usage-notice="usageNotice"
         class="mb-2"
         @select-command-item="emit('selectCommandItem', $event)"
@@ -95,7 +94,6 @@ const props = defineProps<{
   commandPanel: CommandPanelData | null
   errorMessage: string
   pendingUserInput: UIUserInput | null
-  compacting?: boolean
   usageNotice?: UsageNotice | null
 }>()
 
@@ -108,7 +106,7 @@ const emit = defineEmits<{
 }>()
 
 const stackVisible = computed(() => Boolean(
-  props.usageNotice || props.errorMessage || props.commandPanel || props.approvals.length || props.compacting,
+  props.usageNotice || props.errorMessage || props.commandPanel || props.approvals.length,
 ))
 
 // Box-tier mutex: while an ask_user request is pending the capsule owns the

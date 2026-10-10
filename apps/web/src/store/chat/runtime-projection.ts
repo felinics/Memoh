@@ -357,6 +357,12 @@ function applyRunPatch(
         ? { owner_lease_expires_at: patch.owner_lease_expires_at }
         : {}),
     }
+    if (patch.clear_retry) {
+      const { retry: _cleared, ...rest } = next
+      next = rest
+    } else if (patch.retry !== undefined) {
+      next = { ...next, retry: { ...patch.retry } }
+    }
   }
 
   const messages = delta.reset_messages ? [] : next.messages

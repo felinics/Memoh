@@ -56,7 +56,7 @@ func (h *BotBackupHandler) Summary(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	userID, err := auth.UserIDFromContext(c)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
+		return echo.NewHTTPError(http.StatusUnauthorized).WithInternal(err)
 	}
 	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, userID, botID); err != nil {
 		return err
@@ -87,7 +87,7 @@ func (h *BotBackupHandler) Export(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	userID, err := auth.UserIDFromContext(c)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
+		return echo.NewHTTPError(http.StatusUnauthorized).WithInternal(err)
 	}
 	bot, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, userID, botID)
 	if err != nil {
@@ -105,7 +105,7 @@ func (h *BotBackupHandler) Export(c echo.Context) error {
 	// rather than a truncated body after a misleading "200 OK".
 	tmp, err := os.CreateTemp("", "memoh-backup-*.zip")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to allocate temp file")
+		return echo.NewHTTPError(http.StatusInternalServerError).WithInternal(err)
 	}
 	tmpPath := tmp.Name()
 	defer func() {
@@ -157,7 +157,7 @@ func (h *BotBackupHandler) PreviewImport(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "bot backup service not configured")
 	}
 	if _, err := auth.UserIDFromContext(c); err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
+		return echo.NewHTTPError(http.StatusUnauthorized).WithInternal(err)
 	}
 	raw, err := readUploadedBackup(c)
 	if err != nil {
@@ -191,7 +191,7 @@ func (h *BotBackupHandler) Import(c echo.Context) error {
 	}
 	userID, err := auth.UserIDFromContext(c)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
+		return echo.NewHTTPError(http.StatusUnauthorized).WithInternal(err)
 	}
 	opts := importOptionsFromForm(c)
 	if opts.Mode == botbackup.ImportModeOverwrite {

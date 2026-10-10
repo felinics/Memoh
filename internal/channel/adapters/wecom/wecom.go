@@ -282,8 +282,7 @@ func (s *wecomOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		channel.StreamEventAgentStart,
 		channel.StreamEventAgentEnd,
 		channel.StreamEventProcessingStarted,
-		channel.StreamEventProcessingCompleted,
-		channel.StreamEventProcessingFailed:
+		channel.StreamEventProcessingCompleted:
 		return nil
 	case channel.StreamEventToolCallEnd:
 		return s.sendToolCallSummary(ctx, event.ToolCall)

@@ -189,8 +189,8 @@ export function createChatSend(deps: ChatSendDeps) {
     }
 
     if (requestedSkills.length > 0 && deps.isWebSlashInput(trimmed)) {
-      const message = deps.commandErrorMessage('invalid_skill_slash_syntax')
-      deps.showCommandError('invalid_skill_slash_syntax', message, commandScope)
+      const message = deps.commandErrorMessage('slash.skill_syntax_invalid')
+      deps.showCommandError('slash.skill_syntax_invalid', message, commandScope)
       return {
         ok: false,
         stage: 'startup',
@@ -206,8 +206,8 @@ export function createChatSend(deps: ChatSendDeps) {
       && attachments?.length
       && (!isExternalAgent || deps.quickActionIDForSlash(trimmed) !== '')
     ) {
-      const message = deps.commandErrorMessage('slash_attachments_unsupported')
-      deps.showCommandError('slash_attachments_unsupported', message, commandScope)
+      const message = deps.commandErrorMessage('slash.attachments_unsupported')
+      deps.showCommandError('slash.attachments_unsupported', message, commandScope)
       return {
         ok: false,
         stage: 'startup',
@@ -272,8 +272,8 @@ export function createChatSend(deps: ChatSendDeps) {
       && !isExternalAgent
     const serverSkillActivation = requestedSkills.length > 0 || serverSlashActivation
     if (serverSkillActivation && wasDraft && deps.pendingExternalAgentStateFor(viewTarget)) {
-      const message = deps.commandErrorMessage('unsupported_skill_slash_context')
-      deps.showCommandError('unsupported_skill_slash_context', message, commandScope)
+      const message = deps.commandErrorMessage('slash.skill_activation_unsupported')
+      deps.showCommandError('slash.skill_activation_unsupported', message, commandScope)
       return {
         ok: false,
         stage: 'startup',

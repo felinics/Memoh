@@ -28,6 +28,7 @@ const (
 	CodeBotAgentInvalidMetadata                  Code = "bot_agent.invalid_metadata"
 	CodeBotAgentDefaultInUse                     Code = "bot_agent.default_in_use"
 	CodeBotAgentUnavailable                      Code = "bot_agent.unavailable"
+	CodeBotAgentProviderDirectRuntime            Code = "bot_agent.provider_direct_runtime"
 	CodeChannelRuntimeUnavailable                Code = "channel.runtime_unavailable"
 	CodeChannelVerificationFailed                Code = "channel.verification_failed"
 	CodeAgentChatModelNotConfigured              Code = "agent.chat_model_not_configured"
@@ -75,6 +76,7 @@ const (
 	CodeSkillSaveFailed                          Code = "skill.save_failed"
 	CodeSkillRegistryReadOnly                    Code = "skill.registry_read_only"
 	CodeSkillNameInvalid                         Code = "skill.name_invalid"
+	CodeSkillNotFound                            Code = "skill.not_found"
 	CodeTTSTextTooLong                           Code = "tts.text_too_long"
 	CodeTTSModelNotConfigured                    Code = "tts.model_not_configured"
 	CodeWorkspaceArchiveInvalid                  Code = "workspace.archive_invalid"
@@ -84,6 +86,8 @@ const (
 	CodeAppRequestInvalid                        Code = "app.request_invalid"
 	CodeAppBusy                                  Code = "app.busy"
 	CodeAppOperationFailed                       Code = "app.operation_failed"
+	CodeAppDependenciesUnavailable               Code = "app.dependencies_unavailable"
+	CodeAppPrerequisiteFailed                    Code = "app.prerequisite_failed"
 	CodeRegistryUnavailable                      Code = "registry.unavailable"
 	CodeRegistryAppNotFound                      Code = "registry.app_not_found"
 	CodeRegistryAppInvalid                       Code = "registry.app_invalid"
@@ -160,6 +164,11 @@ const (
 	CodeAgentToolTimeout                         Code = "agent.tool_timeout"
 	CodeVideoJobOutcomeUnknown                   Code = "video.job_outcome_unknown"
 	CodeScheduleExecutionTimeout                 Code = "schedule.execution_timeout"
+	CodeScheduleRunTargetConflict                Code = "schedule.run_target_conflict"
+	CodeScheduleModelConflict                    Code = "schedule.model_conflict"
+	CodeScheduleModelUnusable                    Code = "schedule.model_unusable"
+	CodeScheduleModelRequired                    Code = "schedule.model_required"
+	CodeScheduleSessionModeUnsupported           Code = "schedule.session_mode_unsupported"
 	CodeAgentResponseInterrupted                 Code = "agent.response_interrupted"
 	CodeAgentProviderOverloaded                  Code = "agent.provider_overloaded"
 	CodeAgentProviderRateLimited                 Code = "agent.provider_rate_limited"
@@ -289,6 +298,29 @@ const (
 	CodeQueueInvocationConflict         Code = "queue_invocation_conflict"
 	CodeQueueUnsupportedSession         Code = "queue_unsupported_session"
 	CodeQueueFollowUpUnsupportedChannel Code = "queue_follow_up_unsupported_channel"
+	// Reasons recorded on a rejected live queue item, registered under the
+	// value the queue state stores (internal/agent/runtime/session/live_queue.go).
+	CodeQueueTargetRunNotActive     Code = "queue_target_run_not_active"
+	CodeQueueFollowUpCommandInvalid Code = "queue_follow_up_command_invalid"
+
+	// Slash request refusals (internal/slash), on the Web composer and in IM
+	// channels alike.
+	CodeSlashAttachmentsUnsupported     Code = "slash.attachments_unsupported"
+	CodeSlashPermissionDenied           Code = "slash.permission_denied"
+	CodeSlashRequiresWebSocket          Code = "slash.requires_websocket"
+	CodeSlashReservedMetadata           Code = "slash.reserved_metadata"
+	CodeSlashSkillActivationUnsupported Code = "slash.skill_activation_unsupported"
+	CodeSlashSkillAmbiguous             Code = "slash.skill_ambiguous"
+	CodeSlashSkillContextTooLarge       Code = "slash.skill_context_too_large"
+	CodeSlashSkillDisabled              Code = "slash.skill_disabled"
+	CodeSlashSkillNotFound              Code = "slash.skill_not_found"
+	CodeSlashSkillNotUsable             Code = "slash.skill_not_usable"
+	CodeSlashSkillSyntaxInvalid         Code = "slash.skill_syntax_invalid"
+	CodeSlashTooManySkills              Code = "slash.too_many_skills"
+	CodeSlashUnknownCommand             Code = "slash.unknown_command"
+	CodeSlashUnsupportedInWeb           Code = "slash.unsupported_in_web"
+
+	CodeMemoryCompactUnsupported Code = "memory.compact_unsupported"
 
 	// Bot and workspace codes published by the workspace HTTP handlers and the
 	// bot creation, display and dependency event streams.
@@ -456,6 +488,11 @@ var catalog = map[Code]Definition{
 		HTTPStatus:  http.StatusConflict,
 		Detail:      "This Agent is disabled or not configured.",
 		AllowedArgs: []string{"field"},
+	},
+	CodeBotAgentProviderDirectRuntime: {
+		HTTPStatus:  http.StatusBadRequest,
+		Detail:      "This provider runs as a direct runtime. Create the Agent with the codex or claude-code runtime instead.",
+		AllowedArgs: []string{"runtime"},
 	},
 	CodeChannelRuntimeUnavailable: {
 		HTTPStatus: http.StatusServiceUnavailable,
@@ -654,6 +691,10 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusBadRequest,
 		Detail:     "The Skill needs a valid name in its YAML frontmatter.",
 	},
+	CodeSkillNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "This Skill was not found. Refresh the list and try again.",
+	},
 	CodeTTSTextTooLong: {
 		HTTPStatus:  http.StatusBadRequest,
 		Detail:      "The text is too long to synthesize.",
@@ -690,6 +731,14 @@ var catalog = map[Code]Definition{
 	CodeAppOperationFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The App operation failed.",
+	},
+	CodeAppDependenciesUnavailable: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Detail:     "Workspace dependencies are unavailable on this server, so the App cannot manage them.",
+	},
+	CodeAppPrerequisiteFailed: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "A dependency this one needs failed to install. Fix that dependency first, then retry.",
 	},
 	CodeRegistryUnavailable: {
 		HTTPStatus: http.StatusBadGateway,
@@ -974,7 +1023,31 @@ var catalog = map[Code]Definition{
 	CodeSessionInterrupted:       {HTTPStatus: http.StatusServiceUnavailable, Detail: "The server interrupted this run during shutdown. It can resume from saved progress after restart."},
 	CodeAgentToolTimeout:         {HTTPStatus: http.StatusGatewayTimeout, Detail: "The tool stopped reporting progress. Review its saved result before retrying."},
 	CodeScheduleExecutionTimeout: {HTTPStatus: http.StatusGatewayTimeout, Detail: "This scheduled run reached its execution limit. Review its progress or increase the limit."},
-	CodeVideoJobOutcomeUnknown:   {HTTPStatus: http.StatusBadGateway, Detail: "The video job status could not be confirmed. Check the saved job before creating another video."},
+	CodeScheduleRunTargetConflict: {
+		HTTPStatus:  http.StatusBadRequest,
+		Detail:      "The run target, runtime, Agent and session settings of this schedule cannot be combined. Adjust them and try again.",
+		AllowedArgs: []string{"field"},
+	},
+	CodeScheduleModelConflict: {
+		HTTPStatus:  http.StatusBadRequest,
+		Detail:      "The model setting does not fit this schedule's runtime. Choose the model field that matches the runtime.",
+		AllowedArgs: []string{"field"},
+	},
+	CodeScheduleModelUnusable: {
+		HTTPStatus:  http.StatusBadRequest,
+		Detail:      "This model cannot run a schedule. Choose an enabled chat model.",
+		AllowedArgs: []string{"field"},
+	},
+	CodeScheduleModelRequired: {
+		HTTPStatus:  http.StatusConflict,
+		Detail:      "This bot has no default model, so the schedule needs an explicit model. Choose a model or set a default one.",
+		AllowedArgs: []string{"field"},
+	},
+	CodeScheduleSessionModeUnsupported: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "Scheduled runs can only continue chat or schedule sessions. Choose another target session.",
+	},
+	CodeVideoJobOutcomeUnknown: {HTTPStatus: http.StatusBadGateway, Detail: "The video job status could not be confirmed. Check the saved job before creating another video."},
 	// Model provider codes. The provider is outside Memoh whoever holds the
 	// credential, so each is a dependency fault regardless of its status: a
 	// rejected key or an exhausted quota is the provider's answer, not a
@@ -1178,6 +1251,23 @@ var catalog = map[Code]Definition{
 	CodeQueueInvocationConflict:                 {HTTPStatus: http.StatusConflict, Detail: "This message was already submitted with different content."},
 	CodeQueueUnsupportedSession:                 {HTTPStatus: http.StatusConflict, Detail: "Queue controls are not available in discussion sessions."},
 	CodeQueueFollowUpUnsupportedChannel:         {HTTPStatus: http.StatusConflict, Detail: "Queued follow-ups are not available on this channel. Add to the current reply instead, or queue from the web app."},
+	CodeQueueTargetRunNotActive:                 {HTTPStatus: http.StatusConflict, Detail: "The response ended before this instruction reached it. Send it as a new message."},
+	CodeQueueFollowUpCommandInvalid:             {HTTPStatus: http.StatusInternalServerError, Detail: "This queued message could not be started. Send it again as a new message."},
+	CodeSlashAttachmentsUnsupported:             {HTTPStatus: http.StatusBadRequest, Detail: "Slash commands cannot include attachments. Remove the attachments and send the command again."},
+	CodeSlashPermissionDenied:                   {HTTPStatus: http.StatusForbidden, Detail: "You do not have permission to use this command."},
+	CodeSlashRequiresWebSocket:                  {HTTPStatus: http.StatusBadRequest, Detail: "Skill activation requires a live chat connection. Reconnect and try again."},
+	CodeSlashReservedMetadata:                   {HTTPStatus: http.StatusBadRequest, Detail: "This message carries reserved skill metadata, which clients cannot supply."},
+	CodeSlashSkillActivationUnsupported:         {HTTPStatus: http.StatusConflict, Detail: "Skills can only be activated in a chat session that uses the bot's own model. Switch to such a session and try again."},
+	CodeSlashSkillAmbiguous:                     {HTTPStatus: http.StatusConflict, Detail: "More than one skill has this name. Rename or disable one of them in the bot's skills, then try again."},
+	CodeSlashSkillContextTooLarge:               {HTTPStatus: http.StatusBadRequest, Detail: "The selected skills are too large for one message. Select fewer skills and try again."},
+	CodeSlashSkillDisabled:                      {HTTPStatus: http.StatusConflict, Detail: "This skill is disabled. Enable it in the bot's skills, then try again."},
+	CodeSlashSkillNotFound:                      {HTTPStatus: http.StatusNotFound, Detail: "No skill has this name. Check the name and try again."},
+	CodeSlashSkillNotUsable:                     {HTTPStatus: http.StatusConflict, Detail: "This skill is not available for chat."},
+	CodeSlashSkillSyntaxInvalid:                 {HTTPStatus: http.StatusBadRequest, Detail: "Use /<skill-name> [prompt] to activate a skill."},
+	CodeSlashTooManySkills:                      {HTTPStatus: http.StatusBadRequest, Detail: "Too many skills in one message. Activate fewer skills and try again."},
+	CodeSlashUnknownCommand:                     {HTTPStatus: http.StatusBadRequest, Detail: "Unknown slash command. Send /help to see the available commands."},
+	CodeSlashUnsupportedInWeb:                   {HTTPStatus: http.StatusBadRequest, Detail: "This slash command is not available in Web chat."},
+	CodeMemoryCompactUnsupported:                {HTTPStatus: http.StatusNotImplemented, Detail: "The selected memory provider does not support memory compaction. Choose a provider that supports it in the bot's memory settings."},
 	CodeBotReadyUpdateFailed:                    {HTTPStatus: http.StatusInternalServerError, Detail: "The bot could not be loaded after its workspace was set up. Refresh the page."},
 	CodeWorkspaceSetupTimeout:                   {HTTPStatus: http.StatusGatewayTimeout, Detail: "Workspace setup is still in progress. Check the bot's workspace page."},
 	CodeWorkspaceSetupFailed:                    {HTTPStatus: http.StatusInternalServerError, Detail: "Something went wrong while setting up the workspace."},

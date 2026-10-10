@@ -82,6 +82,7 @@ export const useChatStore = defineStore('chat', () => {
   })
   const {
     focusedViewId: focusedChatViewId,
+    draftPromoted,
     projectionVersion: runtimeProjectionVersion,
     chatViews, assistantStreams, draftSessionCreations,
     draftCreationKey: draftSessionCreationKey,
@@ -129,7 +130,7 @@ export const useChatStore = defineStore('chat', () => {
     replaceSessions, appendSessions, upsertSession, rememberSession,
     knownSessionSummary, hasListedSession, patchSessionInList,
     updateKnownSessionTitle, removeSessionFromList, touchSessionInList,
-    touchKnownSession, fallbackSessionAfterDelete, markSessionDeleted,
+    touchKnownSession, markSessionDeleted,
     clearDeletedSessionIds, clearRememberedSessions,
   } = sessionList
   const {
@@ -275,7 +276,6 @@ export const useChatStore = defineStore('chat', () => {
     reset: resetDecisions,
   } = decisions
   const {
-    guiToolUseRequested,
     abort,
     abortAllAssistantStreams,
   } = runtimeIntegration
@@ -401,13 +401,11 @@ export const useChatStore = defineStore('chat', () => {
     clearStreamHistory()
     resetDecisions()
     backgroundTasks.clearBackgroundTasks()
-    guiToolUseRequested.value = null
   }
 
   const {
     loadingChats,
     initialize,
-    switchActiveSession,
     selectBot,
     selectSession,
     createNewSession,
@@ -483,8 +481,6 @@ export const useChatStore = defineStore('chat', () => {
     clearHistoryView,
     markSessionDeleted,
     removeSessionFromList,
-    fallbackSessionAfterDelete,
-    switchActiveSession,
     patchSessionInList,
     upsertSession,
     rememberSession,
@@ -608,8 +604,8 @@ export const useChatStore = defineStore('chat', () => {
     fsChangedAt, markFsChanged, affectsPath, fsEventForPath,
     backgroundTaskFor,
     initialize, initializeWithRecovery, refreshBots, selectBot, selectSession, createNewSession,
-    selectDraft, userSentInSession, draftViewRequested, applyDraftViewRequest,
-    forkedSessionRequested, guiToolUseRequested, deletedSession,
+    selectDraft, userSentInSession, draftPromoted, draftViewRequested, applyDraftViewRequest,
+    forkedSessionRequested, deletedSession,
     stageExternalAgentSession, stageDefaultExternalAgentSession, cacheDefaultExternalAgentSession,
     resetToEmptyComposer, ensurePendingACPRuntime,
     setPendingACPModel, setPendingACPMode, setPendingRuntimeMode, setPendingACPReasoning, clearPendingExternalAgentSession,

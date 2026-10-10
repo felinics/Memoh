@@ -5,7 +5,7 @@ import { toast } from '@felinic/ui'
 import i18n from '@/i18n'
 import { useRouter } from 'vue-router'
 import { getBotsByBotIdApps } from '@memohai/sdk'
-import { invalidateBotApps, appInProgress, type AppItem } from '@/composables/api/useApps'
+import { invalidateBotApps, appInProgress, appLastError, type AppItem } from '@/composables/api/useApps'
 import { invalidateBotDependencies } from '@/composables/api/useWorkspaceDependencies'
 import {
   streamAppOperation,
@@ -245,7 +245,7 @@ export const useAppOperationsStore = defineStore('app-operations', () => {
     // inferring either step completion or a successful removal.
     if (item?.status === 'failed') {
       operation.status = 'error'
-      operation.error = item.last_error || t('apps.progress.failedTitle')
+      operation.error = appLastError(item, key => t(key)) || t('apps.progress.failedTitle')
       return
     }
     for (const step of operation.steps) {
@@ -327,7 +327,7 @@ export const useAppOperationsStore = defineStore('app-operations', () => {
             const step = stepFor(operation, event.kind, event.id)
             step.status = event.status
             step.version = event.version ?? ''
-            step.message = event.message ?? ''
+            step.message = event.code ? t(`errors.${event.code}`) : (event.message ?? '')
             break
           }
           case 'done':

@@ -1155,7 +1155,7 @@ func TestLocalChannelWSQuickActionSkillListRejectsACPSession(t *testing.T) {
 	if event.Type != "command_error" {
 		t.Fatalf("event type = %q, want command_error; event=%#v", event.Type, event)
 	}
-	if event.Code != slash.CodeUnsupportedSkillSlashContext {
+	if event.Code != string(slash.CodeUnsupportedSkillSlashContext) {
 		t.Fatalf("code = %q, want %q", event.Code, slash.CodeUnsupportedSkillSlashContext)
 	}
 }
@@ -1446,11 +1446,11 @@ func TestExecuteWebQuickActionHelpListsAllQuickActions(t *testing.T) {
 	for _, item := range full.Items {
 		gotIDs = append(gotIDs, item.ID)
 	}
-	wantIDs := []string{"help", "new", "compact", "skill.list", "model"}
+	wantIDs := []string{"help", "new", "skill.list", "model"}
 	if !slices.Equal(gotIDs, wantIDs) {
 		t.Fatalf("item ids = %v, want %v", gotIDs, wantIDs)
 	}
-	for _, label := range []string{"/help", "/new", "/compact", "/skill list", "/model"} {
+	for _, label := range []string{"/help", "/new", "/skill list", "/model"} {
 		if !strings.Contains(full.Text, label) {
 			t.Fatalf("help text = %q, missing %q", full.Text, label)
 		}
@@ -1464,7 +1464,7 @@ func TestExecuteWebQuickActionHelpListsAllQuickActions(t *testing.T) {
 	for _, item := range restricted.Items {
 		gotRestrictedIDs = append(gotRestrictedIDs, item.ID)
 	}
-	wantRestrictedIDs := []string{"help", "new", "compact"}
+	wantRestrictedIDs := []string{"help", "new"}
 	if !slices.Equal(gotRestrictedIDs, wantRestrictedIDs) {
 		t.Fatalf("restricted item ids = %v, want %v", gotRestrictedIDs, wantRestrictedIDs)
 	}
@@ -1501,8 +1501,10 @@ func TestPostMessageRejectsSlashOnLegacyRESTEndpoint(t *testing.T) {
 	c.SetParamNames("bot_id")
 	c.SetParamValues(botID)
 
-	if err := handler.PostMessage(c); err != nil {
-		t.Fatalf("PostMessage: %v", err)
+	// The handler wrote the event and returns the refusal it was rendered
+	// from, for the request's result record.
+	if err := handler.PostMessage(c); apperror.CodeOf(err) != slash.CodeUnsupportedLegacyEndpoint {
+		t.Fatalf("PostMessage: %v, want the legacy endpoint refusal", err)
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
@@ -1514,7 +1516,7 @@ func TestPostMessageRejectsSlashOnLegacyRESTEndpoint(t *testing.T) {
 	if event.Type != "command_error" {
 		t.Fatalf("event type = %q, want command_error; event=%#v", event.Type, event)
 	}
-	if event.Code != slash.CodeUnsupportedLegacyEndpoint {
+	if event.Code != string(slash.CodeUnsupportedLegacyEndpoint) {
 		t.Fatalf("code = %q, want %q", event.Code, slash.CodeUnsupportedLegacyEndpoint)
 	}
 }

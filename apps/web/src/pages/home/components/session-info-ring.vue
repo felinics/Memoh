@@ -17,8 +17,11 @@
                 variant="ghost"
                 tone="muted"
                 size="icon-sm"
-                class="size-6 rounded-sm max-md:size-11"
-                :class="{ 'text-foreground': open }"
+                class="rounded-sm"
+                :class="[
+                  contextWindow == null ? 'size-6 max-md:size-11' : 'h-6 w-auto gap-1 pl-1 pr-0.75 max-md:h-11 max-md:px-2',
+                  { 'text-foreground': open },
+                ]"
                 :disabled="!sessionId"
                 :aria-label="ringLabel"
               >
@@ -50,6 +53,12 @@
                     class="transition-[stroke-dashoffset] motion-reduce:transition-none"
                   />
                 </svg>
+                <!-- Glanceable number beside the ring; the ring alone only reads as "some". -->
+                <span
+                  v-if="contextWindow != null"
+                  class="text-label leading-none tabular-nums"
+                  :class="ringColorClass"
+                >{{ Math.round(contextPercent) }}%</span>
               </Button>
             </PopoverTrigger>
           </TooltipTrigger>

@@ -187,11 +187,25 @@ type CompactResult struct {
 }
 
 type MemoryCompactCapability struct {
-	Semantic     bool   `json:"semantic"`
-	Archive      bool   `json:"archive,omitempty"`
-	RebuildIndex bool   `json:"rebuild_index,omitempty"`
-	Reason       string `json:"reason,omitempty"`
+	Semantic     bool `json:"semantic"`
+	Archive      bool `json:"archive,omitempty"`
+	RebuildIndex bool `json:"rebuild_index,omitempty"`
+	// Reason says why Semantic is false.
+	Reason CompactUnavailableReason `json:"reason,omitempty"`
 }
+
+// CompactUnavailableReason is why a provider cannot run semantic compact. It
+// is a fixed vocabulary, not text for a reader.
+type CompactUnavailableReason string
+
+const (
+	// CompactUnsupported: the selected provider or its runtime has no
+	// semantic compact.
+	CompactUnsupported CompactUnavailableReason = "unsupported"
+	// CompactNotConfigured: the server did not wire what compact needs, such
+	// as the memory runtime or its LLM.
+	CompactNotConfigured CompactUnavailableReason = "not_configured"
+)
 
 type UsageResponse struct {
 	Count                 int   `json:"count"`

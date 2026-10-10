@@ -301,7 +301,7 @@ func workspaceTargetHTTPError(err error) error {
 	case errors.Is(err, workspace.ErrRemoteRuntimeRevoked),
 		errors.Is(err, workspace.ErrRemoteRuntimeOwnerMismatch),
 		errors.Is(err, workspace.ErrRemoteRuntimeClientUpdateNeeded):
-		return echo.NewHTTPError(http.StatusConflict, err.Error())
+		return echo.NewHTTPError(http.StatusConflict).WithInternal(err)
 	case errors.Is(err, bridge.ErrUnavailable):
 		return workspaceUnavailableError(err)
 	default:

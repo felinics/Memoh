@@ -85,7 +85,7 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 
 	client, err := h.manager.NativeMCPClient(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "workspace is not reachable")
+		return echo.NewHTTPError(http.StatusInternalServerError).WithInternal(err)
 	}
 
 	cols := parseUint32Query(c, "cols", 80)

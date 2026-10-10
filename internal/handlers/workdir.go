@@ -140,7 +140,7 @@ func workdirDirectoriesHTTPError(err error) error {
 		errors.Is(err, bridge.ErrUnavailable):
 		return workspaceUnavailableError(err)
 	case errors.Is(err, workdir.ErrPathForbidden):
-		return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		return echo.NewHTTPError(http.StatusForbidden).WithInternal(err)
 	default:
 		return workdirHTTPError(err)
 	}
@@ -269,7 +269,7 @@ func workdirHTTPError(err error) error {
 		errors.Is(err, workspace.ErrRemoteRuntimeClientUpdateNeeded),
 		errors.Is(err, workspace.ErrRemoteRuntimeNotUsable),
 		errors.Is(err, workspace.ErrRemoteWorkspaceNotBound):
-		return echo.NewHTTPError(http.StatusConflict, err.Error())
+		return echo.NewHTTPError(http.StatusConflict).WithInternal(err)
 	default:
 		return errs.Wrap(err, "workdir request")
 	}

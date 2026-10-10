@@ -10,6 +10,7 @@ import (
 
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/httpx"
 )
@@ -85,7 +86,8 @@ func (h *QRHandler) localTokens(ctx context.Context, botID string) []string {
 	}
 	cfg, found, err := h.lifecycle.ResolveBotChannelConfig(ctx, botID, Type)
 	if err != nil {
-		h.logger.WarnContext(ctx, "weixin qr: read existing config failed", slog.String("bot_id", botID), slog.Any("error", err))
+		result := errlog.Event(ctx, "channel.weixin.qr", errs.Wrap(err, "read existing weixin config", slog.String("bot_id", botID)), errlog.Options{})
+		h.logger.LogAttrs(ctx, result.Level, "weixin qr: read existing config failed", result.Attrs()...)
 		return nil
 	}
 	if !found {

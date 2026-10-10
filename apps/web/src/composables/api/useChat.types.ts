@@ -493,6 +493,20 @@ export interface RuntimeCurrentRunView {
   proposed_terminal_status?: RuntimeRunStatus
   finish_proposed_at?: string
   operation?: RuntimeRunOperation
+  // Present while the model call waits to be retried; cleared by the next
+  // visible output or when the run leaves execution.
+  retry?: RuntimeRunRetry
+}
+
+export type RuntimeRetryReason = 'rate_limited' | 'server_error' | 'stream_incomplete' | 'network'
+
+export interface RuntimeRunRetry {
+  attempt: number
+  max_attempt: number
+  delay_ms: number
+  reason?: RuntimeRetryReason
+  // Server time the next attempt is planned for, for countdowns.
+  retry_at: string
 }
 
 export interface RuntimeSteerTurnView {
@@ -523,6 +537,10 @@ export interface RuntimeCurrentRunPatch {
   error_code?: string
   updated_at?: string
   owner_lease_expires_at?: string
+  // retry replaces the run's retry state, clear_retry removes it; with
+  // neither the state is unchanged.
+  retry?: RuntimeRunRetry
+  clear_retry?: boolean
 }
 
 export interface RuntimeMessageAppend {

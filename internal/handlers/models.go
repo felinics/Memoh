@@ -177,7 +177,7 @@ func (h *ModelsHandler) GetByID(c echo.Context) error {
 
 	resp, err := h.service.GetByID(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
 	}
 	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
 }
@@ -209,9 +209,9 @@ func (h *ModelsHandler) GetByModelID(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; use /models/{id} instead")
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+			return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
 		}
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
 	}
 	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
 }
@@ -284,7 +284,7 @@ func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; use /models/{id} instead")
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+			return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
 		}
 		return modelWriteError(err, "update model by model id")
 	}
@@ -339,7 +339,7 @@ func (h *ModelsHandler) DeleteByModelID(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; use /models/{id} instead")
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+			return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
 		}
 		return errs.Wrap(err, "delete model by model id")
 	}

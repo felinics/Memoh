@@ -1100,7 +1100,7 @@ func TestChannelInboundProcessorQueueCommandNoSessionDoesNotCreateOne(t *testing
 	if ensurer.createCalls != 0 {
 		t.Fatalf("queue command created a session %d times with spec %#v", ensurer.createCalls, ensurer.lastSpec)
 	}
-	if len(sender.sent) != 1 || !strings.Contains(strings.ToLower(sender.sent[0].Message.PlainText()), "no active") {
+	if len(sender.sent) != 1 || sender.sent[0].Message.PlainText() != i18n.New("en").T("errors.queue_no_active_run") {
 		t.Fatalf("reply = %#v, want no-active-run feedback", sender.sent)
 	}
 }
@@ -1976,11 +1976,14 @@ func TestChannelInboundProcessorRejectsDirectSkillBeforeAutoDiscussSession(t *te
 	if ensurer.lastSpec.Type != "" {
 		t.Fatalf("skill slash should not create discuss session, got spec %+v", ensurer.lastSpec)
 	}
-	if len(sender.sent) != 1 || !strings.Contains(sender.sent[0].Message.PlainText(), "not supported") {
+	if len(sender.sent) != 1 || sender.sent[0].Message.PlainText() != i18n.New("en").T("errors.slash.skill_activation_unsupported") {
 		t.Fatalf("expected unsupported skill slash reply, got %+v", sender.sent)
 	}
 }
 
+// A skill request that cannot be resolved because no resolver is configured is
+// this process's failure: it is answered with the generic copy and returned
+// for the message's result record.
 func TestChannelInboundProcessorRejectsUnresolvedDirectSkill(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-use-active"}}
 	policySvc := &fakePolicyService{}
@@ -2007,8 +2010,8 @@ func TestChannelInboundProcessorRejectsUnresolvedDirectSkill(t *testing.T) {
 		},
 	}
 
-	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{TeamID: "team-test", ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}, msg, sender); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{TeamID: "team-test", ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}, msg, sender); err == nil || !strings.Contains(err.Error(), "skill resolver not configured") {
+		t.Fatalf("HandleInbound() error = %v, want the missing resolver", err)
 	}
 	if gateway.gotReq.Query != "" {
 		t.Fatalf("skill slash should not trigger chat call, got query %q", gateway.gotReq.Query)
@@ -2016,8 +2019,8 @@ func TestChannelInboundProcessorRejectsUnresolvedDirectSkill(t *testing.T) {
 	if len(chatSvc.persistedIn) != 0 {
 		t.Fatalf("skill slash should not persist before active-stream reject, got %+v", chatSvc.persistedIn)
 	}
-	if len(sender.sent) != 1 || !strings.Contains(sender.sent[0].Message.PlainText(), "not available") {
-		t.Fatalf("expected unavailable skill slash reply, got %+v", sender.sent)
+	if len(sender.sent) != 1 || sender.sent[0].Message.PlainText() != i18n.New("en").T("errors.internal") {
+		t.Fatalf("expected the generic failure reply, got %+v", sender.sent)
 	}
 }
 
@@ -3662,10 +3665,10 @@ func TestMapStreamChunkToChannelEvents(t *testing.T) {
 			wantType: channel.StreamEventProcessingCompleted,
 		},
 		{
-			name:      "processing_failed",
-			chunk:     `{"type":"processing_failed","error":"failed"}`,
-			wantType:  channel.StreamEventProcessingFailed,
-			wantError: "failed",
+			// No producer sends it; its error text is not relayed to the channel.
+			name:          "processing_failed",
+			chunk:         `{"type":"processing_failed","error":"failed"}`,
+			wantNilEvents: true,
 		},
 		{
 			name:          "empty chunk",

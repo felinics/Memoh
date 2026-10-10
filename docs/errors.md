@@ -51,7 +51,9 @@ when the status would attribute the code wrongly (see
   401. A code for a dependency's failure answers 5xx, or 429 when the client
   should back off.
 - `internal/apperror/testdata/codes.golden` records the status each code was
-  published with and only grows. A published status is changed only when no
+  published with and only grows. It is sorted by code, and so are the keys
+  under `errors` in the locale files; the guard test checks both, so codes
+  added on parallel branches do not touch the same lines. A published status is changed only when no
   client depends on it, and the change is listed in `restatedStatuses` in the
   guard test.
 - `internal` (500) is the answer when no public error applies, `canceled`

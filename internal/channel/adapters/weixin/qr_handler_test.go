@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -99,7 +100,12 @@ func TestQRPollRecordsUpstreamFailureOnce(t *testing.T) {
 	rec, records := serveQR(t, nil, upstreamResponse(http.StatusForbidden, "ilink secret refusal"),
 		"/bots/bot-1/channel/weixin/qr/poll", `{"qr_code":"code-1"}`)
 
-	requireFailureRecord(t, rec, records, http.StatusInternalServerError, "dependency", "ilink secret refusal")
+	requireFailureRecord(t, rec, records, http.StatusInternalServerError, "dependency", "weixin qrstatus request failed")
+	for _, record := range records {
+		if strings.Contains(fmt.Sprint(record), "ilink secret refusal") {
+			t.Fatalf("record carries the upstream body: %#v", record)
+		}
+	}
 }
 
 func TestQRPollRecordsCredentialSaveFailureOnce(t *testing.T) {
@@ -169,5 +175,32 @@ func TestQRPollNamesTheFieldTheCallerGotWrong(t *testing.T) {
 				t.Fatalf("response = %d %+v, want 400 %s field %s client", rec.Code, problem, tc.code, tc.field)
 			}
 		})
+	}
+}
+
+type failingConfigStore struct{ channel.LifecycleStore }
+
+func (failingConfigStore) ResolveEffectiveConfig(context.Context, string, channel.ChannelType) (channel.ChannelConfig, error) {
+	return channel.ChannelConfig{}, errors.New("config table unreachable")
+}
+
+func TestQRStartRecordsUnreadableExistingConfigAsEvent(t *testing.T) {
+	t.Parallel()
+
+	rec, records := serveQR(t, channel.NewLifecycle(failingConfigStore{}, noopController{}),
+		upstreamResponse(http.StatusOK, `{"qrcode":"c","qrcode_img_content":"http://x"}`),
+		"/bots/bot-1/channel/weixin/qr/start", `{}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want the QR to be issued anyway", rec.Code)
+	}
+	var events []map[string]any
+	for _, record := range records {
+		if record["msg"] == "weixin qr: read existing config failed" {
+			events = append(events, record)
+		}
+	}
+	if len(events) != 1 || events[0]["level"] != "WARN" || events[0]["fault"] == nil || events[0]["error"] == nil {
+		t.Fatalf("event records = %v, want one WARN event with fault and error", events)
 	}
 }

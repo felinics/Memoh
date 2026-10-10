@@ -81,7 +81,9 @@ export function shouldRefreshACPComposerConfig(
 // What a failed send hands back to the composer: the draft and the error shown
 // above it. Only a failure before the server accepted the message returns
 // anything. An accepted message stays in the transcript with its failure, so
-// the composer keeps its cleared draft and shows no error.
+// the composer keeps its cleared draft and shows no error. An empty error is a
+// canceled send, which restores the draft without an error; fallbackError is
+// for a failure that gave no error at all.
 export function composerRestoreForSendResult(
   result: SendMessageResult,
   sentText: string,
@@ -90,7 +92,7 @@ export function composerRestoreForSendResult(
   if (result.ok || result.stage !== 'startup') return null
   return {
     input: result.restoreInput ?? sentText,
-    error: result.error || fallbackError,
+    error: result.error ?? fallbackError,
   }
 }
 

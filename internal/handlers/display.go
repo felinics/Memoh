@@ -139,7 +139,7 @@ func displayOfferHTTPError(err error) error {
 	case errors.Is(err, displaypkg.ErrOfferInvalid), errors.Is(err, displaypkg.ErrCodecUnsupported):
 		return apperror.FieldInvalid("sdp", err)
 	case errors.Is(err, displaypkg.ErrEncoderUnavailable), errors.Is(err, displaypkg.ErrDisplayUnavailable):
-		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+		return echo.NewHTTPError(http.StatusServiceUnavailable).WithInternal(err)
 	default:
 		return errs.Wrap(err, "display webrtc offer")
 	}

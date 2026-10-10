@@ -200,7 +200,7 @@ func (h *ContainerdHandler) CreateBrowserSession(c echo.Context) error {
 
 	session, err := h.browserSessions.create(botID, req.Port, time.Now())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "create browser session failed")
+		return echo.NewHTTPError(http.StatusInternalServerError).WithInternal(err)
 	}
 	return c.JSON(http.StatusOK, browserSessionCreateResponse{
 		ID:        session.ID,

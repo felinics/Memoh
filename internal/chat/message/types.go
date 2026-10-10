@@ -7,8 +7,11 @@ import (
 )
 
 const (
-	AgentStepInterruptedMetadataKey     = "agent_step_interrupted"
-	HistoryErrorCodeMetadataKey         = "error_code"
+	AgentStepInterruptedMetadataKey = "agent_step_interrupted"
+	HistoryErrorCodeMetadataKey     = "error_code"
+	// HistoryErrorArgsMetadataKey holds the catalog args of the failure named
+	// by error_code: only the args its catalog entry allows, as strings.
+	HistoryErrorArgsMetadataKey         = "error_args"
 	HistoryFailureOriginMetadataKey     = "failure_origin"
 	HistoryFailureOriginUserMessageHook = "user_message_hook"
 	AgentStepInterruptedReasoningPrefix = "[Previous assistant response was interrupted during reasoning. Continue from this checkpoint:]\n"

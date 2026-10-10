@@ -107,6 +107,11 @@ describe('composer restore after a failed send', () => {
       .toEqual({ input: 'sent text', error: 'Send failed' })
   })
 
+  it('restores the draft of a canceled send without an error', () => {
+    expect(composerRestoreForSendResult({ ok: false, stage: 'startup', error: '', restoreInput: 'hello' }, 'sent text', 'Send failed'))
+      .toEqual({ input: 'hello', error: '' })
+  })
+
   it('leaves the composer cleared with no error once the server accepted the send', () => {
     expect(composerRestoreForSendResult({
       ok: false,

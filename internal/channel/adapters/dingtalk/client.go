@@ -7,11 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const (
@@ -86,7 +89,7 @@ func (c *apiClient) getToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("dingtalk token read: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("dingtalk token: status %d: %s", resp.StatusCode, string(data))
+		return "", errs.NewDependency("dingtalk token request failed", slog.Int("status", resp.StatusCode))
 	}
 	var tr tokenResponse
 	if err := json.Unmarshal(data, &tr); err != nil {
@@ -124,7 +127,7 @@ func (c *apiClient) doPost(ctx context.Context, path string, body any) ([]byte, 
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("dingtalk api %s: status %d: %s", path, resp.StatusCode, string(data))
+		return nil, errs.NewDependency("dingtalk api request failed", slog.String("path", path), slog.Int("status", resp.StatusCode))
 	}
 	return data, nil
 }
@@ -188,8 +191,7 @@ func (c *apiClient) sendViaWebhook(ctx context.Context, webhookURL string, body 
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("dingtalk webhook: status %d: %s", resp.StatusCode, string(data))
+		return errs.NewDependency("dingtalk webhook request failed", slog.Int("status", resp.StatusCode))
 	}
 	return nil
 }
@@ -255,7 +257,7 @@ func (c *apiClient) uploadMedia(ctx context.Context, mediaType, filename string,
 		return "", fmt.Errorf("dingtalk upload: read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("dingtalk upload: status %d: %s", resp.StatusCode, string(raw))
+		return "", errs.NewDependency("dingtalk upload failed", slog.Int("status", resp.StatusCode))
 	}
 	var result uploadMediaResponse
 	if err := json.Unmarshal(raw, &result); err != nil {
@@ -265,7 +267,7 @@ func (c *apiClient) uploadMedia(ctx context.Context, mediaType, filename string,
 		return "", fmt.Errorf("dingtalk upload: errcode %d: %s", result.ErrCode, result.ErrMsg)
 	}
 	if strings.TrimSpace(result.MediaID) == "" {
-		return "", fmt.Errorf("dingtalk upload: empty media_id in response: %s", string(raw))
+		return "", errs.NewDependency("dingtalk upload: empty media_id in response")
 	}
 	return result.MediaID, nil
 }
@@ -291,7 +293,7 @@ func (c *apiClient) downloadMessageFile(ctx context.Context, robotCode, download
 	}
 	downloadURL := strings.TrimSpace(result.DownloadURL)
 	if downloadURL == "" {
-		return nil, "", fmt.Errorf("dingtalk download file: empty downloadUrl in response: %s", string(data))
+		return nil, "", errs.NewDependency("dingtalk download file: empty downloadUrl in response")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {

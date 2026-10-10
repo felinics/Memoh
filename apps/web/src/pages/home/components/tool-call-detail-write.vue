@@ -10,7 +10,6 @@
       v-if="diffText"
       :diff="diffText"
       :filename="extractFilename(filePath)"
-      :edge-bar="false"
     />
     <CodeBlock
       v-else-if="content"

@@ -712,59 +712,6 @@ describe('chat-list store', () => {
       expect(api.fetchSessions).toHaveBeenCalledWith('bot-ready')
     })
 
-  it('requests the Desktop once when each Browser Use or Computer Use call starts', async () => {
-      h.sendUpdates = [
-        runtime.started,
-        runtime.message({
-            id: 1,
-            type: 'tool',
-            name: 'browser_action',
-            input: { action: 'click' },
-            tool_call_id: 'call-browser',
-            running: true,
-        }),
-      ]
-      const store = useChatStore()
-      await store.selectBot('bot-1')
-
-      const sending = store.sendMessage('use the browser')
-      await flushPromises()
-      expect(store.guiToolUseRequested).toMatchObject({
-        botId: 'bot-1',
-        sessionId: 'session-1',
-        toolCallId: 'call-browser',
-        toolName: 'browser_action',
-        seq: 1,
-      })
-
-      emitRuntime(runtime.message({
-          id: 1,
-          type: 'tool',
-          name: 'browser_action',
-          input: { action: 'click', coordinate: [10, 20] },
-          tool_call_id: 'call-browser',
-          running: true,
-      }), 'session-1', h.lastRunId)
-      expect(store.guiToolUseRequested?.seq).toBe(1)
-
-      emitRuntime(runtime.message({
-          id: 2,
-          type: 'tool',
-          name: 'computer_observe',
-          input: { observe: 'snapshot' },
-          tool_call_id: 'call-computer',
-          running: true,
-      }), 'session-1', h.lastRunId)
-      expect(store.guiToolUseRequested).toMatchObject({
-        toolCallId: 'call-computer',
-        toolName: 'computer_observe',
-        seq: 2,
-      })
-
-      emitRuntime(runtime.completed, 'session-1', h.lastRunId)
-      await expect(sending).resolves.toMatchObject({ ok: true, messageSent: true })
-    })
-
   it('keeps an accepted send that fails without output in the transcript', async () => {
       const store = useChatStore()
       const onBeforeTurnAppend = vi.fn()
@@ -1052,7 +999,7 @@ describe('chat-list store', () => {
 
   it.each([
     ['runtime_control.failed', 'The runtime control could not be completed. Try again.'],
-    ['unknown_slash', 'Unknown slash command.'],
+    ['slash.unknown_command', 'Unknown slash command. Send /help to see the available commands.'],
     ['not.a.catalog.code', 'Slash command failed.'],
   ])('renders a command_error with code %s', async (code, expected) => {
       h.acceptRuns = false
@@ -4045,7 +3992,7 @@ describe('chat-list store', () => {
         session_id: 'created-session',
         composer_scope: 'bot-1:draft-a',
         terminal: true,
-        code: 'unsupported_skill_slash_context',
+        code: 'slash.skill_activation_unsupported',
         message: 'Requested skills are not supported here.',
       })
       const result = await sendPromise
@@ -4113,7 +4060,7 @@ describe('chat-list store', () => {
         session_id: 'created-session',
         composer_scope: 'bot-1:draft-a',
         terminal: true,
-        code: 'unsupported_skill_slash_context',
+        code: 'slash.skill_activation_unsupported',
         message: 'Requested skills are not supported here.',
       })
       const result = await sendPromise
@@ -4865,7 +4812,7 @@ describe('chat-list store', () => {
       expect(store.messages).toEqual([])
     })
 
-  it('falls back within the schedule sidebar mode when deleting an active schedule session', async () => {
+  it('clears the selection instead of picking a replacement when deleting the active session', async () => {
       api.fetchSessions.mockResolvedValueOnce({
         items: [
           { id: 'schedule-1', bot_id: 'bot-1', title: 'Morning run', type: 'schedule' },
@@ -4880,10 +4827,10 @@ describe('chat-list store', () => {
       expect(store.sessionId).toBe('schedule-1')
 
       api.deleteSession.mockResolvedValueOnce(undefined)
-      await store.removeSession('schedule-1', { fallbackMode: 'schedule' })
+      await store.removeSession('schedule-1')
 
       expect(store.sessions.map(session => session.id)).toEqual(['schedule-2'])
-      expect(store.sessionId).toBe('schedule-2')
+      expect(store.sessionId).toBeNull()
     })
 
   it('does not mutate the active bot state when a delete resolves after switching bots', async () => {

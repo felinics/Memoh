@@ -66,7 +66,7 @@ func (h *RuntimeConnectHandler) Connect(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUpgradeRequired, "unsupported runtime subprotocol")
 	}
 	if h.pipe == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, userruntime.ErrPipeNotConfigured.Error())
+		return echo.NewHTTPError(http.StatusServiceUnavailable).WithInternal(userruntime.ErrPipeNotConfigured)
 	}
 	conn, err := websocket.Accept(c.Response().Writer, c.Request(), &websocket.AcceptOptions{
 		Subprotocols: []string{runtimeProtocolGRPC},

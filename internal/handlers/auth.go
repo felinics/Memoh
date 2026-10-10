@@ -134,7 +134,7 @@ func (h *AuthHandler) Refresh(c echo.Context) error {
 
 	token, expiresAt, err := auth.RefreshTokenFromContext(c, h.jwtSecret, h.expiresIn)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
+		return echo.NewHTTPError(http.StatusUnauthorized).WithInternal(err)
 	}
 
 	return c.JSON(http.StatusOK, RefreshResponse{

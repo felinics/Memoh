@@ -8,7 +8,6 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/audio"
 	"github.com/felinics/memoh/internal/channel/inbound"
 	"github.com/felinics/memoh/internal/command"
@@ -82,35 +81,11 @@ func (c *Client) ResolveLocale(ctx context.Context, botID string) string {
 }
 
 func (c *Client) EnqueueSteer(ctx context.Context, input inbound.QueueCommandInput) error {
-	return c.queueCall(ctx, MethodQueueEnqueueSteer, input)
+	return c.call(ctx, MethodQueueEnqueueSteer, input, nil)
 }
 
 func (c *Client) EnqueueFollowUp(ctx context.Context, input inbound.QueueCommandInput) error {
-	return c.queueCall(ctx, MethodQueueEnqueueFollowUp, input)
-}
-
-func (c *Client) queueCall(ctx context.Context, method string, input inbound.QueueCommandInput) error {
-	err := c.call(ctx, method, input, nil)
-	if code := queueCommandCode(err); code != "" {
-		return intrpc.Restored(inbound.NewQueueCommandError(code), intrpc.Received(err))
-	}
-	return err
-}
-
-// queueCommandCode reads the queue code of a failed queue call from the reason
-// of the error envelope. Only the stable queue vocabulary is accepted.
-func queueCommandCode(err error) string {
-	reason, ok := intrpc.ReasonOf(err)
-	if !ok {
-		return ""
-	}
-	return inbound.NormalizeQueueCommandCode(reason)
-}
-
-// queueStatus is the error envelope of a queue code. Every queue code is a
-// catalog code, so the envelope is that of the catalog error.
-func queueStatus(ctx context.Context, code string) error {
-	return intrpc.AnswerStatus(ctx, apperror.New(apperror.Code(code), nil))
+	return c.call(ctx, MethodQueueEnqueueFollowUp, input, nil)
 }
 
 func (c *Client) ResolveTextRequestedSkills(ctx context.Context, botID string, names []string) ([]skills.ResolvedSkill, error) {
@@ -278,11 +253,7 @@ func queueHandlerFunc(decode func(json.RawMessage, any) error, handler func(cont
 		if err := decode(raw, &input); err != nil {
 			return nil, err
 		}
-		err := handler(ctx, input)
-		if code := inbound.QueueCommandErrorCode(err); code != "" {
-			return nil, queueStatus(ctx, code)
-		}
-		return nil, err
+		return nil, handler(ctx, input)
 	}
 }
 

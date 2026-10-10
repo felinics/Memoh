@@ -127,15 +127,20 @@ async function maybeStartExternalAgentSession() {
       const { data } = await getBotsByBotIdAgents({ path: { bot_id: botId }, throwOnError: true })
       const botAgent = data.items?.find(agent => agent.enabled !== false && botAgentProvider(agent) === agentId)
       if (!botAgent?.id) return
+      const startedOnPanel = workspaceTabs.activeId
       const { session } = await chatStore.createExternalAgentSession({
         botAgentId: botAgent.id,
         agentId,
         projectMode: ACP_NO_PROJECT_MODE,
         projectPath: createACPNoProjectPath(),
       })
-      // Open (or focus) the tab for the freshly created session; activation selects
-      // it. ensureChatPanel covers the case where the dock mounts later.
-      workspaceTabs.openSessionChat({ sessionId: session.id })
+      // Creation is async. If the user moved to another tab meanwhile, leave the
+      // dock alone: opening a tab now would replace the group's preview tab,
+      // which may be the one they are reading. A draft that was focused when
+      // creation started already shows the session, and Recents lists it.
+      if (workspaceTabs.activeId === startedOnPanel) {
+        workspaceTabs.openSessionChat({ sessionId: session.id })
+      }
     }
   } catch {
     // Bot may not have the agent enabled; user can still pick it from the composer.

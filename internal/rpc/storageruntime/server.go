@@ -208,7 +208,7 @@ func (s *Server) sendReader(ctx context.Context, reader io.Reader, send func(*st
 // sentinel, and records the cause for the call's result line. A failure with
 // no sentinel is an internal error; its text stays in the record.
 func (*Server) mapError(ctx context.Context, operation string, err error) error {
-	intrpc.RecordError(ctx, errs.Wrap(err, "storage "+operation))
+	intrpc.RecordError(ctx, errs.Wrap(err, "storage operation failed", slog.String("operation", operation)))
 	if entry, ok := reasons.Lookup(err); ok {
 		return entry.Status("")
 	}

@@ -13,7 +13,10 @@ import (
 
 	connectsdk "github.com/felinics/connect-it/sdk/go"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/connectors"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/supermarket"
 	"github.com/felinics/memoh/internal/workspacedeps"
@@ -22,9 +25,6 @@ import (
 // DependencyRegistryID is the only registry whose Apps may reference
 // workspace dependencies and connectors.
 const DependencyRegistryID = "memoh"
-
-// lastErrorLimit caps the text stored in last_error.
-const lastErrorLimit = 2048
 
 // Sentinel errors returned by Service.
 var (
@@ -289,14 +289,18 @@ func (s *Service) materialize(ctx context.Context, botID string, release superma
 	}
 	result := OperationResult{Installation: inst}
 	partial := false
-	var problems []string
+	// firstFailure is the code of the first failed step; last_error_code
+	// holds one code, and the steps themselves carry the rest.
+	firstFailure := ""
 	record := func(step StepResult) {
 		result.Steps = append(result.Steps, step)
 		if step.Status == StepFailed {
 			partial = true
-			problems = append(problems, step.Kind+" "+step.ID+": "+step.Error)
+			if firstFailure == "" {
+				firstFailure = step.Code
+			}
 		}
-		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Version: step.Version, Message: step.Error})
+		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Version: step.Version, Message: step.Error, Code: step.Code})
 	}
 
 	// 1. Dependencies: link present ones, install missing ones. Their
@@ -322,21 +326,24 @@ func (s *Service) materialize(ctx context.Context, botID string, release superma
 		entry, known := states[depID]
 		switch {
 		case s.dependencies == nil:
-			record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: ErrDependenciesUnavailable.Error()})
+			record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Code: string(apperror.CodeAppDependenciesUnavailable)})
 		case statesErr != nil:
-			record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: publicCause(statesErr)})
+			record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Code: string(publicCode(statesErr))})
 		case known && dependencyPresent(entry):
 			record(StepResult{Kind: KindDependency, ID: depID, Status: StepLinked, Version: entry.InstalledVersion})
 		default:
 			if blocked := failedPrerequisite(entry, failed); blocked != "" {
 				failed[depID] = true
-				record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: "prerequisite " + blocked + " failed"})
+				record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Code: string(apperror.CodeAppPrerequisiteFailed)})
 				continue
 			}
 			res, err := s.dependencies.Install(ctx, botID, depID, "", logSink(sink, KindDependency, depID))
 			if err != nil {
 				failed[depID] = true
-				record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: err.Error()})
+				// The cause stays in the log; the step and last_error_code
+				// carry only its catalog code.
+				s.logStepFailure(ctx, "install dependency", depID, err)
+				record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Code: string(publicCode(err))})
 				continue
 			}
 			record(StepResult{Kind: KindDependency, ID: depID, Status: StepInstalled, Version: res.Version})
@@ -389,7 +396,7 @@ func (s *Service) materialize(ctx context.Context, botID string, release superma
 	if partial {
 		status = StatusPartial
 	}
-	inst, err = s.store.SetStatus(ctx, botID, inst.ID, status, truncateMessage(strings.Join(problems, "; ")))
+	inst, err = s.store.SetStatus(ctx, botID, inst.ID, status, firstFailure)
 	if err != nil {
 		return result, fmt.Errorf("apps: record installation status: %w", err)
 	}
@@ -398,12 +405,12 @@ func (s *Service) materialize(ctx context.Context, botID string, release superma
 	return result, nil
 }
 
-// failInstallation records a failed operation. last_error keeps only the
-// public description; the cause with its infrastructure detail is logged.
+// failInstallation records a failed operation. last_error_code keeps only
+// the public catalog code; the cause with its infrastructure detail is logged.
 func (s *Service) failInstallation(ctx context.Context, inst Installation, cause error) error {
 	s.logger.WarnContext(ctx, "App operation failed",
 		slog.String("installation_id", inst.ID), slog.String("app_id", inst.AppID), slog.Any("error", cause))
-	if _, err := s.store.SetStatus(ctx, inst.BotID, inst.ID, StatusFailed, truncateMessage(publicMessage(cause))); err != nil {
+	if _, err := s.store.SetStatus(ctx, inst.BotID, inst.ID, StatusFailed, string(publicCode(cause))); err != nil {
 		s.logger.WarnContext(ctx, "record failed App installation", slog.String("installation_id", inst.ID), slog.Any("error", err))
 	}
 	return cause
@@ -538,7 +545,7 @@ func (s *Service) connectorRef(ctx context.Context, botID, installationID, conne
 // reconcileStatus promotes a partial installation to installed once every
 // required connector is linked and no dependency step failed.
 func (s *Service) reconcileStatus(ctx context.Context, inst Installation) {
-	if inst.Status != StatusPartial || inst.LastError != "" {
+	if inst.Status != StatusPartial || inst.LastErrorCode != "" {
 		return
 	}
 	refs, err := s.store.ListConnectorRefs(ctx, inst.ID)
@@ -555,9 +562,10 @@ func (s *Service) reconcileStatus(ctx context.Context, inst Installation) {
 	}
 }
 
-func truncateMessage(message string) string {
-	if len(message) <= lastErrorLimit {
-		return message
-	}
-	return message[:lastErrorLimit]
+// logStepFailure records a failed dependency step. The step event and
+// last_error_code carry only the catalog code, so this is where the cause is
+// kept.
+func (s *Service) logStepFailure(ctx context.Context, message, dependencyID string, cause error) {
+	result := errlog.Event(ctx, "apps.dependency_step", errs.Wrap(cause, message, slog.String("dependency_id", dependencyID)), errlog.Options{})
+	s.logger.LogAttrs(ctx, result.Level, "App dependency step failed", result.Attrs()...)
 }
