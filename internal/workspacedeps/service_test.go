@@ -1,6 +1,7 @@
 package workspacedeps
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1355,11 +1356,17 @@ func TestListDegradesWhenDiscoveryFails(t *testing.T) {
 		return nil, errors.New("workspacedeps: discovery script exited 137 before finishing: ")
 	}
 
+	var logs bytes.Buffer
+	f.svc.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+
 	result, err := f.svc.List(f.ctx(), testBot)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if result.Workspace != WorkspaceRunning || !strings.Contains(result.DiscoveryError, "exited 137") || len(result.Entries) != len(f.cat.List()) {
+	if got := strings.Count(logs.String(), "exited 137"); got != 1 || strings.Count(logs.String(), "workspace dependency discovery failed") != 1 {
+		t.Errorf("discovery cause recorded %d times, want one event: %s", got, logs.String())
+	}
+	if result.Workspace != WorkspaceRunning || !result.DiscoveryFailed || len(result.Entries) != len(f.cat.List()) {
 		t.Fatalf("result = %+v", result)
 	}
 	tool := f.entry(t, result, "tool-y")
@@ -1384,8 +1391,8 @@ func TestListDegradesWhenDiscoveryFails(t *testing.T) {
 		t.Error("Preflight must not answer without discovery facts")
 	}
 	checked, err := f.svc.CheckUpdates(f.ctx(), testBot)
-	if err != nil || checked.DiscoveryError == "" || len(f.runSpecs()) != 0 {
-		t.Errorf("CheckUpdates = %+v, %v (runs = %d); want the degraded list and no checks", checked.DiscoveryError, err, len(f.runSpecs()))
+	if err != nil || !checked.DiscoveryFailed || len(f.runSpecs()) != 0 {
+		t.Errorf("CheckUpdates = %+v, %v (runs = %d); want the degraded list and no checks", checked.DiscoveryFailed, err, len(f.runSpecs()))
 	}
 
 	// A request that went away is not a discovery failure to report.

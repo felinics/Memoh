@@ -2,7 +2,6 @@ package apps
 
 import (
 	"context"
-	"fmt"
 	"slices"
 
 	"github.com/felinics/memoh/internal/supermarket"
@@ -129,8 +128,8 @@ func (s *Service) cleanupDependencyStates(ctx context.Context, inst Installation
 	if view.Workspace != workspacedeps.WorkspaceRunning {
 		return nil, fail("dependency cleanup needs a running workspace (state "+string(view.Workspace)+"); references are retained", workspacedeps.ErrWorkspaceNotRunning)
 	}
-	if view.DiscoveryError != "" {
-		return nil, fail("dependency cleanup needs successful workspace discovery; references are retained", fmt.Errorf("%w: %s", errDiscoveryFailed, view.DiscoveryError))
+	if view.DiscoveryFailed {
+		return nil, fail("dependency cleanup needs successful workspace discovery; references are retained", errDiscoveryFailed)
 	}
 	states := indexEntries(view)
 	for _, ref := range unshared {

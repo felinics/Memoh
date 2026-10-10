@@ -474,9 +474,9 @@ func TestListWorkspaceDependenciesReportsDiscoveryError(t *testing.T) {
 	svc := &fakeWorkspaceDependencyService{
 		deps: deps,
 		list: workspacedeps.ListResult{
-			Workspace:      workspacedeps.WorkspaceRunning,
-			DataRoot:       "/data",
-			DiscoveryError: "workspacedeps: discovery script exited 137 before finishing",
+			Workspace:       workspacedeps.WorkspaceRunning,
+			DataRoot:        "/data",
+			DiscoveryFailed: true,
 			Entries: []workspacedeps.Entry{{
 				Dependency:        deps["codex"],
 				Installation:      &workspacedeps.Installation{Status: workspacedeps.StatusFailed, LastErrorCode: string(apperror.CodeWorkspaceDependencyOperationInterrupted)},
@@ -512,7 +512,7 @@ func TestListWorkspaceDependenciesReportsDiscoveryError(t *testing.T) {
 		t.Errorf("actions = %v, want [] without facts", codex["actions"])
 	}
 
-	svc.list.DiscoveryError = ""
+	svc.list.DiscoveryFailed = false
 	rec, err = depsCall{method: http.MethodGet, target: "/bots/x/dependencies"}.invoke(t, h.ListWorkspaceDependencies)
 	if err != nil {
 		t.Fatalf("ListWorkspaceDependencies: %v", err)

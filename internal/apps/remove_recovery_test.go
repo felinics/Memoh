@@ -112,14 +112,14 @@ func TestRemoveRetainsFailedCleanupUntilRetry(t *testing.T) {
 	}
 }
 
-func TestDiscoveryErrorNeverBecomesPublicFailureText(t *testing.T) {
+func TestDiscoveryFailureRecordsPublicCode(t *testing.T) {
 	f := newCleanupFixture(t)
 	view := f.deps.list()
-	view.DiscoveryError = "bridge dial 10.0.0.8 password=synthetic-test-secret"
+	view.DiscoveryFailed = true
 	f.depFaults.view = &view
 	_, err := f.service.Update(t.Context(), testBotID, f.inst.ID, &recorder{})
-	if err == nil || !strings.Contains(err.Error(), view.DiscoveryError) {
-		t.Fatalf("logs must retain the cause: %v", err)
+	if err == nil || !errors.Is(err, errDiscoveryFailed) {
+		t.Fatalf("update error = %v, want errDiscoveryFailed", err)
 	}
 	if got := f.installation(t).LastErrorCode; got != string(apperror.CodeWorkspaceDependencyDiscoveryFailed) {
 		t.Fatalf("persisted error code = %q", got)

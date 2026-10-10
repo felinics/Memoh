@@ -283,7 +283,7 @@ func TestCleanupRejectsIncompleteDependencyDiscovery(t *testing.T) {
 			case "missing":
 				view.Workspace = workspacedeps.WorkspaceMissing
 			case "discovery_error":
-				view.DiscoveryError = "probe interrupted"
+				view.DiscoveryFailed = true
 			case "busy":
 				view.Entries[0].Status = workspacedeps.StatusInstalling
 			case "start_failed":

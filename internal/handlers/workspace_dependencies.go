@@ -869,7 +869,7 @@ func workspaceDependencyListResponse(result workspacedeps.ListResult) WorkspaceD
 		DiscoveryError: "",
 		CatalogStale:   result.CatalogStale,
 	}
-	if result.DiscoveryError != "" {
+	if result.DiscoveryFailed {
 		resp.DiscoveryError = string(apperror.CodeWorkspaceDependencyDiscoveryFailed)
 	}
 	if !result.CatalogFetchedAt.IsZero() {

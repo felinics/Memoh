@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/textutil"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
@@ -213,11 +215,12 @@ type ListResult struct {
 	// below, inside the isolated workspace.
 	DataRoot string
 	Entries  []Entry
-	// DiscoveryError is set when the workspace is running but could not be
+	// DiscoveryFailed is set when the workspace is running but could not be
 	// inspected (the discovery exec was killed or timed out, the bridge did
 	// not answer). Entries then reflect the records alone, carry no
-	// discovery facts, and offer no actions.
-	DiscoveryError string
+	// discovery facts, and offer no actions. The cause is recorded once as
+	// an event and is not part of the result.
+	DiscoveryFailed bool
 }
 
 // PreflightItem is the verdict for one required dependency.
@@ -319,11 +322,10 @@ func (s *Service) list(ctx context.Context, botID string, force bool) (ListResul
 		// still say what the user asked for, so report them with the problem
 		// instead of failing the whole list. A stopped workspace never gets
 		// here; it keeps its own semantics above.
-		s.logger.WarnContext(ctx, "workspace dependency discovery failed; listing records only",
-			slog.String("bot_id", botID),
-			slog.Any("error", err),
-		)
-		result.DiscoveryError = truncateMessage(err.Error())
+		event := errlog.Event(ctx, "workspacedeps.discover", errs.Wrap(err, "discover workspace dependencies"), errlog.Options{})
+		s.logger.LogAttrs(ctx, event.Level, "workspace dependency discovery failed; listing records only",
+			append([]slog.Attr{slog.String("bot_id", botID)}, event.Attrs()...)...)
+		result.DiscoveryFailed = true
 		if snap, ok := s.cache.Get(botID); ok {
 			result.Platform = snap.Platform
 		}
@@ -959,7 +961,7 @@ func (s *Service) CheckUpdates(ctx context.Context, botID string) (ListResult, e
 	}
 
 	result, err := s.list(ctx, botID, true)
-	if err != nil || result.Workspace != WorkspaceRunning || result.DiscoveryError != "" {
+	if err != nil || result.Workspace != WorkspaceRunning || result.DiscoveryFailed {
 		// Without discovery facts there is nothing to check against.
 		return result, err
 	}
