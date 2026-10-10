@@ -86,9 +86,11 @@ system_files_max_bytes = 32768
 # Pre-turn synchronous compaction backstop on the discuss and pipeline-chat
 # paths: shadow | active | off. shadow (default) only logs would-have-fired
 # decisions; active compacts synchronously before the model call once raw
-# history reaches the hard threshold (adds one summarizer LLM call of latency
+# history plus active summaries reach the hard threshold (adds one summarizer call
 # to that turn); off disables the backstop. The legacy history chat path keeps
 # its always-on synchronous backstop regardless of this setting.
+# Budget admission recovery can compact in shadow or active mode when compaction
+# is enabled for the bot; off disables this recovery.
 # sync_compaction = "shadow"
 
 [session_runtime]

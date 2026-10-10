@@ -11,6 +11,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
@@ -126,6 +127,63 @@ func assertDiscussIDs(t *testing.T, frags []contextfrag.ContextFrag, want []stri
 		if frags[i].ID != id {
 			t.Fatalf("frag %d ID = %q, want %q", i, frags[i].ID, id)
 		}
+	}
+}
+
+func TestDiscussCollectorPreservesExplicitSourcesAndImage(t *testing.T) {
+	frags := collectDiscussContext(t, DiscussContextConfig{ComposedMessages: []timeline.ContextMessage{
+		{Role: "user", Content: "input", Source: &turn.ContextMessageSource{Kind: "external", ID: "input-id", Current: true}},
+		{Role: "user", Content: "echo", Source: &turn.ContextMessageSource{Kind: "self", ID: "echo-id"}},
+	}, InlineImages: []sdk.ImagePart{{Image: "data:image/png;base64,YQ=="}}})
+	if frags[0].Kind != contextfrag.KindCurrentUserMessage || frags[1].Kind == contextfrag.KindCurrentUserMessage || frags[0].Provenance.SourceID != "input-id" {
+		t.Fatalf("source lost: %+v", frags)
+	}
+	if len(contextfrag.FragMessage(frags[0]).Content) != 2 || len(contextfrag.FragMessage(frags[1]).Content) != 1 {
+		t.Fatal("image attached to echo")
+	}
+}
+
+func TestDiscussCollectorProtectsOnlyTheNewestUnconsumedInput(t *testing.T) {
+	frags := collectDiscussContext(t, DiscussContextConfig{ComposedMessages: []timeline.ContextMessage{
+		{Role: "user", Content: "older", Source: &turn.ContextMessageSource{Kind: "external", ID: "older-id", Current: true}},
+		{Role: "user", Content: "newest", Source: &turn.ContextMessageSource{Kind: "external", ID: "newest-id", Current: true}},
+	}})
+	if frags[0].Kind != contextfrag.KindConversationEvent || frags[0].Provenance.SourceID != "older-id" || frags[1].Kind != contextfrag.KindCurrentUserMessage {
+		t.Fatalf("older input must stay compactable history under its source ID: %+v", frags)
+	}
+}
+
+// Images ride on the message they arrived with, so older input of the batch
+// stays history a budget may trim or compaction may cover, with its images.
+func TestDiscussCollectorAttachesImagesToTheirOwnMessages(t *testing.T) {
+	older := sdk.ImagePart{Image: "data:image/png;base64,b2xkZXI="}
+	newest := sdk.ImagePart{Image: "data:image/png;base64,bmV3ZXN0"}
+	omitted := sdk.ImagePart{Image: "data:image/png;base64,b21pdHRlZA=="}
+	frags := collectDiscussContext(t, DiscussContextConfig{
+		ComposedMessages: []timeline.ContextMessage{
+			{Role: "user", Content: "older", Source: &turn.ContextMessageSource{Kind: "external", ID: "older-id", Current: true}},
+			{Role: "assistant", Content: "reply", Source: &turn.ContextMessageSource{Kind: "history", ID: "older-id"}},
+			{Role: "user", Content: "newest", Source: &turn.ContextMessageSource{Kind: "external", ID: "newest-id", Current: true}},
+		},
+		SourceImages: map[string][]sdk.ImagePart{"older-id": {older}, "newest-id": {newest}, "omitted-id": {omitted}},
+	})
+	images := func(frag contextfrag.ContextFrag) []string {
+		var out []string
+		for _, part := range contextfrag.FragMessage(frag).Content {
+			if image, ok := part.(sdk.ImagePart); ok {
+				out = append(out, image.Image)
+			}
+		}
+		return out
+	}
+	if got := images(frags[0]); len(got) != 1 || got[0] != older.Image || frags[0].Kind != contextfrag.KindConversationEvent {
+		t.Fatalf("older input = %s with images %v, want history carrying its own image", frags[0].Kind, got)
+	}
+	if got := images(frags[1]); len(got) != 0 {
+		t.Fatalf("a history reply sharing the source ID took images %v", got)
+	}
+	if got := images(frags[2]); len(got) != 1 || got[0] != newest.Image || frags[2].Kind != contextfrag.KindCurrentUserMessage {
+		t.Fatalf("current input = %s with images %v, want only its own image", frags[2].Kind, got)
 	}
 }
 

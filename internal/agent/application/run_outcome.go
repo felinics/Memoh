@@ -54,8 +54,8 @@ func publicFailureCode(cause error) apperror.Code {
 // ended the run. reported is the error the turn port reports to its caller; it
 // follows the same first-error rule and is cleared by the same AgentEnd, but
 // persistence failures and the idle timeout set it separately. deferred means
-// the terminal event parked the run on a decision, so no lifecycle terminal is
-// written for it yet.
+// no lifecycle terminal is written for the run yet: the terminal event parked it
+// on a decision, or it handed its context back for recomposition.
 type outcomeRecorder struct {
 	runCtx  context.Context
 	idleCtx context.Context
@@ -127,6 +127,12 @@ func (r *outcomeRecorder) observe(event native.StreamEvent) error {
 		}
 	}
 	return eventErr
+}
+
+// handOff ends a run that returned its context to the driver for
+// recomposition before any model call; the resubmitted turn owns the outcome.
+func (r *outcomeRecorder) handOff() {
+	r.deferred = true
 }
 
 // observeSnapshot records the terminal snapshot decoded from a terminal event.

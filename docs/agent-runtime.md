@@ -90,6 +90,9 @@ continuations use the same phase-aware application watchdog:
   remain supervised; explicit cancellation and runtime ownership loss still win.
 - Managed subagents have a ten-minute progress watchdog, with no implicit total
   duration. Detachment preserves an explicit ancestor execution deadline.
+- Context budget recovery before the first native model call pauses the model
+  watchdog while its synchronous compaction runs; the model window restarts
+  when recovery returns. Cancellation and execution budgets still apply.
 
 Schedules expose `max_run_seconds` (default 3600, range 300–86400), independently
 of the selected runtime. Every fire uses its existing log UUID for turn admission,
@@ -247,6 +250,9 @@ bearer tokens. Account-backed credentials are revalidated against current accoun
 state and Bot chat permissions before renewal; scoped chat credentials retain their
 original Bot, chat and route scope. External runtimes retain their existing owner
 and Workspace Exec authorization checks.
+An External Discuss turn saves its composed batch instead of a query, once when it
+starts and again after final admission. A resume admits that batch again behind the
+resume instructions, without compaction, and records the input that no longer fits.
 
 After startup, a bounded worker discovers interrupted sessions, waits for the
 workspace bridge to become reachable, and submits a continuation with the stable

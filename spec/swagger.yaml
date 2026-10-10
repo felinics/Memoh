@@ -2201,6 +2201,8 @@ definitions:
     - read_media
     - renderer_prune
     - mid_stream_retry
+    - current_input_omitted
+    - current_input_images_omitted
     - run_abort_observed
     type: string
     x-enum-varnames:
@@ -2216,6 +2218,8 @@ definitions:
     - MutationReadMedia
     - MutationRendererPrune
     - MutationMidStreamRetry
+    - MutationCurrentInputOmitted
+    - MutationCurrentInputImagesOmitted
     - MutationRunAbortObserved
   contextfrag.MutationRecord:
     properties:

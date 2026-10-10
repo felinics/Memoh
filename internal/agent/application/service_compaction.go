@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/context/compaction"
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/job"
@@ -74,7 +75,7 @@ func syncCompactionShouldRun(pressure, contextTokenBudget int) bool {
 
 func asyncCompactionInputTokens(rc resolvedContext, providerInputTokens int) int {
 	if rc.compactableTokensKnown {
-		return rc.compactableTokens
+		return max(rc.compactableTokens, rc.historyPressureTokens)
 	}
 	return providerInputTokens
 }
@@ -155,6 +156,7 @@ func (s *Service) runCompaction(ctx context.Context, plan compactionPlan) error 
 		return nil
 	}
 	cfg.TargetTokens = compactionTargetTokens(plan.settings.CompactionTargetPercent, plan.rc.contextTokenBudget)
+	cfg.ProtectedSources = compactionProtectedSources(plan.req)
 	cfg.AllowFrontierFusion = true
 	cfg.ContextWindowTokens = plan.rc.contextTokenBudget
 	cfg.HardPressure = syncCompactionShouldRun(plan.inputTokens, plan.rc.contextTokenBudget)
@@ -196,6 +198,17 @@ func (s *Service) runCompactionPass(ctx context.Context, cfg compaction.TriggerC
 // compact) leaves this turn's context untouched: the request proceeds as-is,
 // possibly still above the threshold, and the next turn re-evaluates.
 func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputTokens, contextTokenBudget int, turnModelID string) compaction.Result {
+	return s.runSyncCompaction(ctx, req, inputTokens, contextTokenBudget, turnModelID, syncCompactionShouldRun(inputTokens, contextTokenBudget), 0)
+}
+
+func (s *Service) runBudgetCompactionSync(ctx context.Context, req ChatRequest, inputTokens, historyBudget int, modelID string) compaction.Result {
+	return s.runSyncCompaction(ctx, req, inputTokens, historyBudget, modelID, true, historyBudget)
+}
+
+func (s *Service) runSyncCompaction(ctx context.Context, req ChatRequest, inputTokens, contextTokenBudget int, turnModelID string, hardPressure bool, historyBudget int) compaction.Result {
+	if ctx.Err() != nil {
+		return compaction.Result{}
+	}
 	if s.compactionService == nil || s.settingsService == nil {
 		s.logger.WarnContext(ctx, "compaction sync: skipped, service or settings nil")
 		return compaction.Result{}
@@ -219,9 +232,12 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 		// disabled means there is nothing to compact.
 		return compaction.Result{}
 	}
+	cfg.ProtectedSources = compactionProtectedSources(req)
+	cfg.AllowFrontierFusion = true
 	cfg.TargetTokens = syncBackstopTargetTokens(botSettings.CompactionTargetPercent, contextTokenBudget)
 	cfg.ContextWindowTokens = contextTokenBudget
-	cfg.HardPressure = syncCompactionShouldRun(inputTokens, contextTokenBudget)
+	cfg.HardPressure = hardPressure
+	cfg.HistoryBudgetTokens = historyBudget
 
 	s.logger.InfoContext(ctx, "compaction sync: running synchronously",
 		slog.String("bot_id", req.BotID),
@@ -297,4 +313,18 @@ func (s *Service) buildCompactionConfig(ctx context.Context, req ChatRequest, bo
 	cfg.TotalInputTokens = inputTokens
 	cfg.HTTPClient = s.compactionHTTPClient
 	return cfg, nil
+}
+
+// compactionProtectedSources is the current input a compaction must keep raw.
+// Discuss callers pass the protected suffix their admission chose, so older
+// unconsumed input stays compactable.
+func compactionProtectedSources(req ChatRequest) []turn.ContextMessageSource {
+	sources := append([]turn.ContextMessageSource(nil), req.discussCurrentSources...)
+	if req.ExternalMessageID != "" {
+		sources = append(sources, turn.ContextMessageSource{Kind: "external", ID: req.ExternalMessageID, Current: true})
+	}
+	if req.RequiredHistoryMessageID != "" {
+		sources = append(sources, turn.ContextMessageSource{Kind: "history", ID: req.RequiredHistoryMessageID, Current: true})
+	}
+	return sources
 }

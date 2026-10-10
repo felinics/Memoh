@@ -185,6 +185,7 @@ type RunConfig struct {
 	ContextToolDefsResolved        bool
 	ContextToolExchangePolicy      *contextfrag.ToolExchangePolicy
 	ContextBudgetMaxTokens         int
+	RecoverContextBudget           func(context.Context, RunConfig) (RunConfig, bool, error)
 	ContextRecentProtectTokens     *int
 	ContextHistoryTokenEstimates   []int
 	ContextTrimmableMessages       int

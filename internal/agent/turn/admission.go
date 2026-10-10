@@ -24,9 +24,14 @@ func EstimateTokensFromBytes(n int) int {
 	return contextfrag.TokensFromBytes(n)
 }
 
+func ContextBudgetBytes(tokens int) int64 {
+	return contextfrag.BudgetBytesForTokens(tokens)
+}
+
 // AdmissionEntry describes one context entry, ordered oldest to newest, for
 // the shared pre-materialization admission decision (CM-ADM-001).
 type AdmissionEntry struct {
+	Source *ContextMessageSource
 	// Cost is the entry's estimate in shared-estimator tokens.
 	Cost int
 	// Pinned entries (compaction-artifact summaries) are always selected.
@@ -73,6 +78,7 @@ func AdmitContextEntries(entries []AdmissionEntry, budgetTokens int) AdmissionDe
 	}
 	decision.EstimatedTokens = total
 
+	current := ProtectedAdmissionEntries(entries, budgetTokens)
 	selected := make([]bool, len(entries))
 	used := 0
 	if budgetTokens <= 0 || total <= budgetTokens {
@@ -82,15 +88,10 @@ func AdmitContextEntries(entries []AdmissionEntry, budgetTokens int) AdmissionDe
 		used = total
 	} else {
 		for i := range entries {
-			if entries[i].Pinned {
+			if entries[i].Pinned || current[i] {
 				selected[i] = true
 				used += entries[i].Cost
 			}
-		}
-		newest := newestRawEntry(entries)
-		if newest >= 0 {
-			selected[newest] = true
-			used += entries[newest].Cost
 		}
 		if used > budgetTokens {
 			decision.SelectedTokens = used
@@ -100,7 +101,7 @@ func AdmitContextEntries(entries []AdmissionEntry, budgetTokens int) AdmissionDe
 		// Fill a contiguous recent window: stop at the first entry that does
 		// not fit so selection stays a suffix (plus pinned entries) and
 		// remains deterministic.
-		for i := newest - 1; i >= 0; i-- {
+		for i := len(entries) - 1; i >= 0; i-- {
 			if selected[i] {
 				continue
 			}
@@ -116,7 +117,6 @@ func AdmitContextEntries(entries []AdmissionEntry, budgetTokens int) AdmissionDe
 	// reaches the protected newest entry the window has no valid shape left:
 	// fail closed instead of silently admitting an empty or summary-only
 	// context.
-	protected := newestRawEntry(entries)
 	for i := range entries {
 		if !selected[i] || entries[i].Pinned {
 			continue
@@ -124,7 +124,7 @@ func AdmitContextEntries(entries []AdmissionEntry, budgetTokens int) AdmissionDe
 		if !entries[i].ToolResponse {
 			break
 		}
-		if i == protected {
+		if current[i] {
 			decision.SelectedTokens = used
 			decision.ProtectedOverflow = true
 			return decision
@@ -152,4 +152,58 @@ func newestRawEntry(entries []AdmissionEntry) int {
 		}
 	}
 	return -1
+}
+
+// ProtectedAdmissionEntries marks the current entries no admission may drop:
+// the whole unconsumed batch when it fits beside the pinned entries, otherwise
+// the newest contiguous run of it that leaves a tenth of the budget for the
+// summary of the rest. The newest current entry is always protected. Older
+// current entries become ordinary history that recovery compacts.
+func ProtectedAdmissionEntries(entries []AdmissionEntry, budgetTokens int) []bool {
+	current := CurrentAdmissionEntries(entries)
+	if budgetTokens <= 0 {
+		return current
+	}
+	pinned, batch := 0, 0
+	for i, entry := range entries {
+		if entry.Pinned {
+			pinned += entry.Cost
+		} else if current[i] {
+			batch += entry.Cost
+		}
+	}
+	if pinned+batch <= budgetTokens {
+		return current
+	}
+	limit := budgetTokens - budgetTokens/10 - pinned
+	protected := make([]bool, len(entries))
+	used := 0
+	for i := len(entries) - 1; i >= 0; i-- {
+		if !current[i] || entries[i].Pinned {
+			continue
+		}
+		if used > 0 && used+entries[i].Cost > limit {
+			break
+		}
+		protected[i] = true
+		used += max(1, entries[i].Cost)
+	}
+	return protected
+}
+
+func CurrentAdmissionEntries(entries []AdmissionEntry) []bool {
+	current := make([]bool, len(entries))
+	known := false
+	for i, entry := range entries {
+		if entry.Source != nil {
+			known = true
+			current[i] = entry.Source.Current
+		}
+	}
+	if !known {
+		if i := newestRawEntry(entries); i >= 0 {
+			current[i] = true
+		}
+	}
+	return current
 }

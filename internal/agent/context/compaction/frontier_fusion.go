@@ -27,10 +27,14 @@ type absorbedSegment struct {
 type absorbedRowsLoader func(context.Context, Artifact) ([]sqlc.ListUncompactedMessagesBySessionRow, error)
 
 func shouldFuseFrontier(cfg TriggerConfig, artifacts []Artifact, maxCompactTokens int) bool {
-	if !cfg.AllowFrontierFusion || len(artifacts) < 2 {
+	if !cfg.AllowFrontierFusion || len(artifacts) == 0 {
 		return false
 	}
-	return frontierSummaryTokens(artifacts) > frontierRetainBudget(cfg, maxCompactTokens)
+	tokens := frontierSummaryTokens(artifacts)
+	if cfg.TargetTokens > 0 && tokens > cfg.TargetTokens {
+		return true
+	}
+	return len(artifacts) > 1 && tokens > frontierRetainBudget(cfg, maxCompactTokens)
 }
 
 func frontierRetainBudget(cfg TriggerConfig, maxCompactTokens int) int {

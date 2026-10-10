@@ -25,6 +25,9 @@ type DiscussContextConfig struct {
 	// InlineImages are freshly surfaced attachments delivered as native vision
 	// input on the latest user message.
 	InlineImages []sdk.ImagePart
+	// SourceImages are freshly surfaced attachments keyed by the external
+	// message they arrived with; each rides on that message.
+	SourceImages map[string][]sdk.ImagePart
 }
 
 type DiscussContextCollector struct{}
@@ -43,14 +46,37 @@ func (*DiscussContextCollector) Collect(_ context.Context, req CollectRequest) (
 	}
 
 	frags := make([]contextfrag.ContextFrag, 0, len(cfg.ComposedMessages))
-	currentUserIndex := latestComposedUserMessageIndex(cfg.ComposedMessages)
+	// The provider envelope protects only the newest unconsumed input. Older
+	// input of the same batch is history the final budget may trim, with a
+	// selection decision under its source ID, or recovery may compact.
+	currentUserIndex, known := latestComposedCurrentIndex(cfg.ComposedMessages)
+	if !known {
+		currentUserIndex = latestComposedUserMessageIndex(cfg.ComposedMessages)
+	}
 	for i, message := range cfg.ComposedMessages {
-		frags = append(frags, discussComposedMessageFrag(message, i, i == currentUserIndex, req.Scope))
+		frag := discussComposedMessageFrag(message, i, i == currentUserIndex, req.Scope)
+		if message.Source != nil && message.Source.Kind == "external" {
+			frag = appendDiscussImages(frag, cfg.SourceImages[message.Source.ID])
+		}
+		frags = append(frags, frag)
 	}
 	if req.Intent == contextfrag.IntentRunConfigPreProvider {
 		frags = contextfrag.RepairToolClosureFrags(frags, req.Scope, discussContextCollectorName)
 	}
 	return injectDiscussImages(frags, cfg.InlineImages), nil
+}
+
+func latestComposedCurrentIndex(messages []timeline.ContextMessage) (int, bool) {
+	index, known := -1, false
+	for i, message := range messages {
+		if message.Source != nil {
+			known = true
+			if message.Source.Current {
+				index = i
+			}
+		}
+	}
+	return index, known
 }
 
 func latestComposedUserMessageIndex(messages []timeline.ContextMessage) int {
@@ -79,6 +105,9 @@ func discussComposedMessageFrag(message timeline.ContextMessage, index int, curr
 		Collector:  discussContextCollectorName,
 		Index:      index,
 	}
+	if message.Source != nil {
+		input.SourceID = message.Source.ID
+	}
 	if message.CompactionArtifactID != "" {
 		input.Kind = contextfrag.KindConversationSummary
 		input.Slot = contextfrag.SlotBeforeHistory
@@ -99,26 +128,31 @@ func discussComposedMessageFrag(message timeline.ContextMessage, index int, curr
 // injectDiscussImages mirrors the legacy inject-into-last-user-message
 // behavior at fragment granularity.
 func injectDiscussImages(frags []contextfrag.ContextFrag, images []sdk.ImagePart) []contextfrag.ContextFrag {
-	extra := make([]sdk.MessagePart, 0, len(images))
-	for _, img := range images {
-		if strings.TrimSpace(img.Image) != "" {
-			extra = append(extra, img)
-		}
-	}
-	if len(extra) == 0 {
-		return frags
-	}
 	for i := len(frags) - 1; i >= 0; i-- {
-		msg := contextfrag.FragMessage(frags[i])
-		if msg == nil || msg.Role != sdk.MessageRoleUser {
-			continue
+		if frags[i].Kind == contextfrag.KindCurrentUserMessage && contextfrag.FragMessage(frags[i]) != nil {
+			frags[i] = appendDiscussImages(frags[i], images)
+			return frags
 		}
-		enriched := *msg
-		enriched.Content = append(append([]sdk.MessagePart(nil), msg.Content...), extra...)
-		frags[i] = contextfrag.RebuildFragMessage(frags[i], enriched)
-		return frags
 	}
 	return frags
+}
+
+func appendDiscussImages(frag contextfrag.ContextFrag, images []sdk.ImagePart) contextfrag.ContextFrag {
+	msg := contextfrag.FragMessage(frag)
+	if msg == nil {
+		return frag
+	}
+	enriched := *msg
+	enriched.Content = append([]sdk.MessagePart(nil), msg.Content...)
+	for _, img := range images {
+		if strings.TrimSpace(img.Image) != "" {
+			enriched.Content = append(enriched.Content, img)
+		}
+	}
+	if len(enriched.Content) == len(msg.Content) {
+		return frag
+	}
+	return contextfrag.RebuildFragMessage(frag, enriched)
 }
 
 func discussContextConfig(config any) (DiscussContextConfig, error) {

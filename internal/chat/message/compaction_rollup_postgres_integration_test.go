@@ -39,6 +39,48 @@ func TestPostgresCompleteCompactionRollupSupersedesParentsAtomically(t *testing.
 	assertMessageCompactID(t, fixture.pool, fixture.parentMessageIDs[1], fixture.parentIDs[1])
 }
 
+func TestPostgresSummaryOnlyRollupPreservesFences(t *testing.T) {
+	for _, conflict := range []string{"none", "epoch", "parent"} {
+		t.Run(conflict, func(t *testing.T) {
+			fixture := setupCompactionRollupFixture(t)
+			ctx := t.Context()
+			queries := dbsqlc.New(fixture.pool)
+			target := fixture.createLog(t)
+			params := fixture.rollupParams()
+			params.ID, params.MessageCount = target.ID, 0
+			switch conflict {
+			case "epoch":
+				if _, err := fixture.pool.Exec(ctx, `UPDATE bot_sessions SET compaction_epoch = compaction_epoch + 1 WHERE id = $1`, fixture.sessionID); err != nil {
+					t.Fatal(err)
+				}
+			case "parent":
+				successor := fixture.createLog(t)
+				if _, err := fixture.pool.Exec(ctx, `UPDATE bot_history_message_compacts SET superseded_by = $2, superseded_at = now() WHERE id = $1`, fixture.parentIDs[0], successor.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			completed, err := queries.CompleteCompactionRollup(ctx, params)
+			if conflict == "none" {
+				if err != nil || completed.Status != "ok" || completed.MessageCount != 0 {
+					t.Fatalf("summary-only rollup: result=%+v err=%v", completed, err)
+				}
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				t.Fatalf("conflicted rollup: %v", err)
+			}
+			for i, parentID := range fixture.parentIDs {
+				state := readCompactionRollupState(t, fixture.pool, parentID)
+				if conflict == "none" && state.supersededBy != target.ID {
+					t.Fatalf("parent was not replaced: %+v", state)
+				}
+				if conflict != "none" && (conflict != "parent" || i != 0) && state.supersededBy.Valid {
+					t.Fatalf("conflict partially replaced parent: %+v", state)
+				}
+				assertMessageCompactID(t, fixture.pool, fixture.parentMessageIDs[i], parentID)
+			}
+		})
+	}
+}
+
 func TestPostgresCompleteCompactionRollupRejectsAlreadySupersededParentWithoutPartialUpdate(t *testing.T) {
 	fixture := setupCompactionRollupFixture(t)
 	ctx := context.Background()

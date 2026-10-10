@@ -12,6 +12,15 @@ import (
 // turn. Transport callers should prefer turn.StartTurnCommand; the additional
 // channel and function fields below are strictly in-process runtime state.
 type ChatRequest struct {
+	discussCurrentSources    []turn.ContextMessageSource
+	discussOmittedSources    []turn.ContextMessageSource
+	discussMessages          []turn.DiscussMessage
+	discussContextTokens     int
+	discussRecoveryExhausted bool
+	// discussPromptPrefix and discussPromptSuffix wrap the admitted discuss
+	// prompt; a shutdown resume puts its instructions there.
+	discussPromptPrefix string
+	discussPromptSuffix string
 	// ShutdownResume rebuilds saved history without the transient channel pipeline.
 	ShutdownResume bool `json:"-"`
 	// OnModelPreferenceSettled releases subsequent picker writes once this

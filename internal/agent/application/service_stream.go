@@ -387,6 +387,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		idleCtx, idleCancel := s.withStreamIdleTimeout(streamCtx, reasoningEffortForIdle(cfg))
 		defer idleCancel.Stop()
 		outcome.watchIdle(idleCtx, idleCancel)
+		cfg = pauseIdleDuringBudgetRecovery(cfg, idleCancel)
 
 		eventCh := s.agent.Stream(idleCtx, cfg)
 		stored := false
@@ -732,6 +733,7 @@ func (s *Service) streamChatWSResultWithHooks(
 	idleCtx, idleCancel := s.withStreamIdleTimeout(streamCtx, reasoningEffortForIdle(cfg))
 	defer idleCancel.Stop()
 	outcome.watchIdle(idleCtx, idleCancel)
+	cfg = pauseIdleDuringBudgetRecovery(cfg, idleCancel)
 
 	agentEventCh := s.agent.Stream(idleCtx, cfg)
 	modelID := rc.model.ID

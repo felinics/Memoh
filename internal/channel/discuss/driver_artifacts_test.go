@@ -157,7 +157,10 @@ func TestBuildMentionGatesOnWatermarkNotCoverage(t *testing.T) {
 	}
 }
 
-func TestBuildSkipsImageRefsCoveredByArtifacts(t *testing.T) {
+// A summarized message's image cannot ride in the summary. Its ref still
+// travels, naming a message the composed context no longer carries, so the
+// server records the image instead of attaching it.
+func TestBuildKeepsCoveredImageRefsOutsideTheComposedMessages(t *testing.T) {
 	imageMsg := timeline.RenderedSegment{
 		MessageID:    "m1",
 		ReceivedAtMs: 100,
@@ -182,8 +185,13 @@ func TestBuildSkipsImageRefsCoveredByArtifacts(t *testing.T) {
 	if !ok {
 		t.Fatal("expected a composed plan")
 	}
-	if len(plan.command.DiscussImageRefs) != 0 {
-		t.Fatalf("covered image must not be re-attached, got %+v", plan.command.DiscussImageRefs)
+	if refs := plan.command.DiscussImageRefs; len(refs) != 1 || refs[0].MessageID != "m1" {
+		t.Fatalf("covered image ref = %+v, want it to name its summarized message", refs)
+	}
+	for _, message := range plan.command.DiscussMessages {
+		if message.Source != nil && message.Source.ID == "m1" {
+			t.Fatalf("the summarized message is still composed: %+v", plan.command.DiscussMessages)
+		}
 	}
 
 	planLive, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, nil, timeline.ComposeBudget{})

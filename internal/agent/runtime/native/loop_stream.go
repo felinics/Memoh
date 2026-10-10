@@ -61,8 +61,12 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		eventGate.close()
 	}()
 	aborted := false
+	recompose := false
 	turnError := ""
 	defer func() {
+		if recompose {
+			return
+		}
 		event := hooks.EventTurnEnd
 		if aborted || strings.TrimSpace(turnError) != "" {
 			event = hooks.EventTurnError
@@ -112,6 +116,11 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	var contextViewErr error
 	cfg, contextViewErr = a.applyContextView(streamCtx, cfg)
 	if contextViewErr != nil {
+		if errors.Is(contextViewErr, ErrContextRecompose) {
+			recompose = true
+			sendEvent(ctx, ch, StreamEvent{Type: EventContextRecompose})
+			return
+		}
 		failure := contextViewStreamError(contextViewErr)
 		turnError = turnHookError(failure)
 		sendEvent(ctx, ch, failure)
