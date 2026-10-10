@@ -132,7 +132,6 @@ services:
       MEMOH_WEBHOOK_TUNNEL_METRICS_URL: "http://webhook-tunnel:18735"
     volumes:
       - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
-      - memoh_data:/opt/memoh/data
       - /etc/localtime:/etc/localtime:ro
     expose:
       - "8081"

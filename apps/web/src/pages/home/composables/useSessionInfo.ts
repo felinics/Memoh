@@ -3,7 +3,7 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { toast } from '@felinic/ui'
-import { getBotsByBotIdSessionsBySessionIdStatus, postBotsByBotIdSessionsBySessionIdCompact } from '@memohai/sdk'
+import { getBotsByBotIdSessionsBySessionIdStatus } from '@memohai/sdk'
 import type { HandlersSessionInfoResponse } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatStore } from '@/store/chat-list'
@@ -75,8 +75,8 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
     return ((estimatedTokens.value ?? usedTokens.value) / contextWindow.value) * 100
   })
 
-  // Native and runtime-owned compaction share feedback and request lifetime;
-  // callers supply only the transport when the runtime owns the operation.
+  // Runtime-owned compaction shares the session lock and feedback; callers
+  // supply the transport.
   const { t } = useI18n()
   const queryCache = useQueryCache()
   const isCompacting = computed(() => chatStore.isSessionCompacting(
@@ -103,16 +103,6 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
     }
   }
 
-  async function triggerCompact() {
-    const botId = currentBotId.value
-    const sid = sessionId.value
-    if (!botId || !sid) return
-    await runCompaction(() => postBotsByBotIdSessionsBySessionIdCompact({
-      path: { bot_id: botId, session_id: sid },
-      throwOnError: true,
-    }))
-  }
-
   installTurnEndInvalidation(storeRefs.streamingSessionIds, queryCache)
 
   return {
@@ -128,7 +118,6 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
     currentBotId,
     sessionId,
     isCompacting,
-    triggerCompact,
     runCompaction,
   }
 }

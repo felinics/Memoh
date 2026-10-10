@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -228,6 +229,30 @@ func TestSkillsActionsAPIAdoptDisableEnableAndDeleteManaged(t *testing.T) {
 	}
 }
 
+// A Skill action on a Skill that is not discovered answers 404, and an action
+// the Skill layout does not accept answers 400.
+func TestSkillsActionsAPITranslatesSkillErrors(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	missing := path.Join("/data/.agents/skills", "missing", "SKILL.md")
+	_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills/actions", SkillsActionRequest{Action: skillset.ActionDisable, TargetPath: missing}, env.handler.ApplySkillAction)
+	if apperror.CodeOf(err) != apperror.CodeSkillNotFound {
+		t.Fatalf("missing skill: error = %v, want %s", err, apperror.CodeSkillNotFound)
+	}
+	for _, tc := range []struct {
+		name  string
+		req   SkillsActionRequest
+		code  apperror.Code
+		field string
+	}{
+		{"unknown action", SkillsActionRequest{Action: "rename", TargetPath: missing}, apperror.CodeRequestFieldInvalid, "action"},
+		{"empty action", SkillsActionRequest{TargetPath: missing}, apperror.CodeRequestFieldRequired, "action"},
+		{"empty target", SkillsActionRequest{Action: skillset.ActionDisable}, apperror.CodeRequestFieldRequired, "target_path"},
+	} {
+		_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills/actions", tc.req, env.handler.ApplySkillAction)
+		requireFieldError(t, err, tc.code, tc.field)
+	}
+}
+
 func TestDeleteSkillsAPIReportsMissingManagedSkill(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	env.writeSkillFile(t, path.Join("/data/.agents/skills", "alpha", "SKILL.md"), managedSkillRaw("alpha", "Compat Alpha"))
@@ -255,9 +280,8 @@ func TestDeleteSkillsAPIRejectsRegistryAppSkill(t *testing.T) {
 	_, err := env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
 		SourcePaths: []string{registryPath},
 	}, env.handler.DeleteSkills)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("DeleteSkills(App member) error = %v, want 400", err)
+	if got := apperror.CodeOf(err); got != apperror.CodeSkillRegistryReadOnly {
+		t.Fatalf("DeleteSkills(App member) error = %v, want code %s", err, apperror.CodeSkillRegistryReadOnly)
 	}
 	if _, err := os.Stat(env.localPath(registryPath)); err != nil {
 		t.Fatalf("App Skill should remain: %v", err)
@@ -293,13 +317,7 @@ func TestDeleteSkillsAPIRejectsNonManagedSourcePath(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected deleting a discovered skill by source_path to fail")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("expected echo.HTTPError, got %T", err)
-	}
-	if httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("delete non-managed status = %d, want 400", httpErr.Code)
-	}
+	requireFieldError(t, err, apperror.CodeRequestFieldInvalid, "source_paths")
 	if _, err := os.Stat(env.localPath(compatPath)); err != nil {
 		t.Fatalf("discovered skill should be untouched: %v", err)
 	}
@@ -314,12 +332,8 @@ func TestUpsertSkillsAPIRejectsTraversalName(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected upserting traversal skill name to fail")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("expected echo.HTTPError, got %T", err)
-	}
-	if httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("upsert traversal status = %d, want 400", httpErr.Code)
+	if got := apperror.CodeOf(err); got != apperror.CodeSkillNameInvalid {
+		t.Fatalf("upsert traversal error = %v, want code %s", err, apperror.CodeSkillNameInvalid)
 	}
 }
 
@@ -355,9 +369,8 @@ func TestUpsertSkillsAPIRenamesManagedSkillAndRejectsDirectRegistryEdit(t *testi
 		Skills:     []string{updated},
 		SourcePath: registryPath,
 	}, env.handler.UpsertSkills)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("UpsertSkills(registry) error = %v, want HTTP 400", err)
+	if got := apperror.CodeOf(err); got != apperror.CodeSkillRegistryReadOnly {
+		t.Fatalf("UpsertSkills(registry) error = %v, want code %s", err, apperror.CodeSkillRegistryReadOnly)
 	}
 	got, err := os.ReadFile(env.localPath(registryPath))
 	if err != nil {
@@ -1113,4 +1126,20 @@ func promptFromLoadedSkills(items []SkillItem) string {
 
 func managedSkillRaw(name, description string) string {
 	return "---\nname: " + name + "\ndescription: " + description + "\n---\n\n# " + description + "\n"
+}
+
+func TestSkillActionHTTPErrorMapsEveryPackageRefusal(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want apperror.Code
+	}{
+		{skillset.ErrSkillNotFound, apperror.CodeSkillNotFound},
+		{skillset.ErrRegistrySkillReadOnly, apperror.CodeSkillRegistryReadOnly},
+		{skillset.ErrBuiltinSkillReadOnly, apperror.CodeSkillBuiltinReadOnly},
+	} {
+		got := skillActionHTTPError(fmt.Errorf("apply: %w", tc.err))
+		if apperror.CodeOf(got) != tc.want || !errors.Is(apperror.CauseOf(got), tc.err) {
+			t.Errorf("skillActionHTTPError(%v) = %s, want %s keeping the cause", tc.err, apperror.CodeOf(got), tc.want)
+		}
+	}
 }

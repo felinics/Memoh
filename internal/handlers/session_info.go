@@ -13,11 +13,13 @@ import (
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/agent/application"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/settings"
 )
@@ -91,27 +93,27 @@ type CacheStats struct {
 // @Param session_id path string true "Session ID"
 // @Param model_id query string false "Optional model UUID override for context window"
 // @Success 200 {object} SessionInfoResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/status [get].
 func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
-	sessionID := strings.TrimSpace(c.Param("session_id"))
-	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+	sessionID, err := httpx.RequiredParam(c, "session_id")
+	if err != nil {
+		return err
 	}
 
 	pgSessionID, err := db.ParseUUID(sessionID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid session id")
+		return apperror.FieldInvalid("session_id", err)
 	}
 
 	ctx := c.Request().Context()
@@ -228,11 +230,11 @@ func (h *SessionInfoHandler) resolveCurrentUserPermissions(c echo.Context, chann
 	}
 	isAdmin, err := h.accountService.IsAdmin(c.Request().Context(), channelIdentityID)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return nil, errs.Wrap(err, "check admin")
 	}
 	perms, err := h.botService.ResolveUserPermissions(c.Request().Context(), botID, channelIdentityID, isAdmin)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return nil, errs.Wrap(err, "resolve bot permissions")
 	}
 	return perms, nil
 }

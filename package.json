@@ -1,7 +1,7 @@
 {
   "name": "@memohai/monorepo",
   "private": true,
-  "version": "0.20.0",
+  "version": "0.21.0",
   "scripts": {
     "preinstall": "node scripts/ensure-submodules.mjs --check",
     "web:dev": "pnpm --filter @memohai/web dev",
@@ -51,6 +51,9 @@
       "ignoreMissing": [
         "@algolia/client-search"
       ]
+    },
+    "overrides": {
+      "@memohai/icon": "workspace:*"
     }
   }
 }

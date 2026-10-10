@@ -3,6 +3,7 @@ package view
 import (
 	"encoding/json"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -970,6 +971,14 @@ func TestConvertMessagesToUITurnsProjectsHistoryErrorCode(t *testing.T) {
 		metadata: map[string]any{messagepkg.HistoryErrorCodeMetadataKey: "agent.tool_timeout"},
 		want:     []string{"text checking", "tool exec", "error agent.tool_timeout"},
 	}, {
+		name:    "error args",
+		content: `{"role":"assistant","content":[]}`,
+		metadata: map[string]any{
+			messagepkg.HistoryErrorCodeMetadataKey: "agent_dependency_missing",
+			messagepkg.HistoryErrorArgsMetadataKey: map[string]any{"dep_id": "codex", "operation_in_progress": "false"},
+		},
+		want: []string{"error agent_dependency_missing dep_id=codex operation_in_progress=false"},
+	}, {
 		name:    "no error code",
 		content: `{"role":"assistant","content":[{"type":"text","text":"done"}]}`,
 		want:    []string{"text done"},
@@ -1004,7 +1013,12 @@ func TestConvertMessagesToUITurnsProjectsHistoryErrorCode(t *testing.T) {
 				case UIMessageTool:
 					got = append(got, "tool "+message.Name)
 				case UIMessageError:
-					got = append(got, strings.TrimSpace("error "+message.Code+" "+message.Content))
+					parts := []string{strings.TrimSpace("error " + message.Code + " " + message.Content)}
+					for key, value := range message.Args {
+						parts = append(parts, key+"="+value)
+					}
+					sort.Strings(parts[1:])
+					got = append(got, strings.Join(parts, " "))
 				default:
 					got = append(got, string(message.Type))
 				}

@@ -64,6 +64,8 @@ docker compose up -d
 
 The Compose stack runs Server and Channel as separate services. Keep the internal RPC secret private and use the same value whenever the stack is recreated.
 
+In split deployments, Channel streams media through authenticated internal Storage RPC. Only Server needs access to the workspace and media storage. Upgrade Server before Channel so the Storage service is available.
+
 Running without Docker (or upgrading an existing bare-metal install)? Leave `internal_rpc.shared_secret` empty in `config.toml`: the server then embeds the channel runtime and keeps running as a single all-in-one process — external channels, and webhook endpoints included — with no `memoh-channel` process required. Setting the secret opts into the split two-process deployment.
 
 Existing setup checkouts can keep using `git pull`: the post-merge hook initializes the new

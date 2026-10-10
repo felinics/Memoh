@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/agent/decision"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	tools "github.com/felinics/memoh/internal/agent/tool"
@@ -333,7 +334,8 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		return nil, errResumeScopeMismatch
 	}
 	var input struct {
-		Resume *resumeContext `json:"resume"`
+		Resume                *resumeContext                             `json:"resume"`
+		DecisionContinuations map[string]decision.ContinuationCheckpoint `json:"decision_continuations"`
 	}
 	if err := json.Unmarshal(row.InputJson, &input); err != nil {
 		return nil, fmt.Errorf("%w: %w", errResumeUnrecoverable, err)
@@ -344,6 +346,10 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 	}
 	if data.DeadlineAt != nil && !time.Now().Before(*data.DeadlineAt) {
 		return nil, fmt.Errorf("%w: execution budget expired", errResumeUnrecoverable)
+	}
+	decisionContext, err := s.interruptedDecisionContext(ctx, row, input.DecisionContinuations)
+	if err != nil {
+		return nil, err
 	}
 	if s.resumeReady != nil {
 		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -376,7 +382,7 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		cancel()
 		return nil, err
 	}
-	runCtx, admission, _, err := s.admitTriggeredRun(runBase, row.BotID.String(), row.SessionID.String(), "resume:"+row.RunID.String(), payload, nil, row.RunID.String())
+	runCtx, admission, _, err := s.admitTriggeredRun(runBase, data.SessionType, row.BotID.String(), row.SessionID.String(), "resume:"+row.RunID.String(), payload, nil, row.RunID.String())
 	if err != nil {
 		cancel()
 		if errors.Is(err, ledger.ErrResumeSuperseded) || errors.Is(err, sessionruntime.ErrInvocationConflict) {
@@ -395,10 +401,13 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		WorkspaceTargetID: data.WorkspaceTargetID, SessionType: data.SessionType, ToolHTTPURL: data.ToolHTTPURL,
 		UserMessagePersisted: true, SkipMemoryExtraction: true, SkipTitleGeneration: true, ShutdownResume: true,
 	}
+	if decisionContext != "" {
+		req.Query += "\n\n" + decisionContext
+	}
 	chunks, errs := s.streamTurnChat(runCtx, req)
 	h := &runHandle{
 		id: admission.RunID, ctx: runCtx, cancel: cancel, events: make(chan turn.Event, 16), errs: make(chan error, 1), inject: make(chan turn.InjectMessage),
-		finishRun:         s.turnRunFinisher(runCtx, admission),
+		finishRun:         s.turnRunFinisher(runCtx, admission, data.SessionType),
 		publishAgentEvent: s.turnAgentEventPublisher(admission.Handle),
 	}
 	done := make(chan struct{})

@@ -459,41 +459,9 @@
       "runToSeeList": " Run {command} to see what's available."
     }
   },
-  "slash": {
-    "error": {
-      "unknownSlash": "Unknown slash command.",
-      "unsupportedWebCommand": "That slash command is not available in Web chat.",
-      "invalidSkillSlashSyntax": "Invalid skill slash syntax. Use /<skill-name> [prompt].",
-      "requestedSkillNotFound": "Requested skill was not found.",
-      "requestedSkillAmbiguous": "Requested skill is ambiguous.",
-      "requestedSkillDisabled": "Requested skill is disabled.",
-      "requestedSkillNotRuntimeUsable": "Requested skill is not available for chat.",
-      "tooManyRequestedSkills": "Too many skills requested.",
-      "requestedSkillContextTooLarge": "Requested skill context is too large.",
-      "slashAttachmentsUnsupported": "Slash commands do not support attachments.",
-      "unsupportedSkillSlashContext": "Requested skills are not supported in this context.",
-      "unsupportedLegacyEndpoint": "This endpoint does not support requested skills.",
-      "invalidQuickActionScope": "This quick action cannot be scoped to a session.",
-      "permissionDenied": "You do not have permission to use that slash command.",
-      "permissionSessionRequired": "Open an external-Agent session before using /permission.",
-      "permissionModeUnsupported": "This Agent does not declare selectable session modes.",
-      "permissionModeUnavailable": "That mode is not available for this Agent session.",
-      "permissionModeFailed": "The Agent session mode could not be loaded or changed.",
-      "reservedSkillMetadata": "Reserved skill metadata cannot be supplied.",
-      "generic": "Slash command failed."
-    }
-  },
   "queue": {
     "steerAccepted": "Steer queued.",
-    "accepted": "Queued.",
-    "noActiveRun": "There is no active response to receive this input.",
-    "overloaded": "Queue admission is busy. Try again shortly.",
-    "unavailable": "Queue admission is unavailable. Try again shortly.",
-    "conflict": "This message was already submitted with different content.",
-    "invalid": "Queue input must include text.",
-    "unsupported": "Queue controls are not available in discussion sessions.",
-    "capacity": "The queue for this session is full. Wait for pending items to run before adding more.",
-    "followUpUnsupportedChannel": "Queued follow-ups are not available on this channel; its replies are delivered from the message you send. Use /steer to add to the current reply, or queue from the web app."
+    "accepted": "Queued."
   },
   "menu": {
     "start": "Show the welcome message",
@@ -519,64 +487,205 @@
     "steer": "Steer the current response"
   },
   "errors": {
-    "native_history_lost": "The agent could not restore its previous context and started over. Earlier messages remain as history only. Provide any context needed to continue.",
-    "tools_unavailable": "Memoh tools are unavailable for this conversation. Start a new session to restore them.",
-    "elicitation_declined": "A tool requested an interaction that could not be shown. The request was declined.",
-    "capability": {
-      "access_denied": "You need Manage permission on this bot to manage its capabilities.",
-      "request_invalid": "The capability request is invalid. Check the action and its parameters.",
-      "operation_failed": "The capability operation failed. Check its status before retrying.",
-      "approval_required": "This capability change requires an approved management request.",
-      "not_found": "The requested capability could not be found."
+    "acp": {
+      "access_forbidden": "You do not have permission to control this Agent runtime.",
+      "command_not_found": "The command \"{command}\" was not found in the workspace. Install it from the workspace terminal, or set the Agent command to its absolute path.",
+      "config_update_failed": "The external agent could not apply the selected settings. Please retry.",
+      "mode_id_required": "Choose a session mode and try again.",
+      "mode_selection_unsupported": "This external agent does not support session mode selection.",
+      "mode_unavailable": "The selected session mode is no longer available for this external agent.",
+      "model_id_required": "Choose a model and try again.",
+      "model_selection_unsupported": "This external agent does not support model selection.",
+      "model_unavailable": "The selected model is no longer available for this external agent.",
+      "operation_failed": "The Agent runtime operation failed. Please try again.",
+      "reasoning_effort_required": "Choose a reasoning effort and try again.",
+      "reasoning_effort_unavailable": "The selected reasoning effort is no longer available for this external agent.",
+      "reasoning_selection_unsupported": "This external agent does not support reasoning effort selection.",
+      "request_invalid": "The Agent runtime request is invalid. Check the request and try again.",
+      "runtime_conflict": "The Agent runtime is not ready for this operation. Refresh and try again.",
+      "runtime_limit_reached": "Too many Agent runtimes are active. Close one and try again.",
+      "runtime_not_found": "That Agent runtime is no longer available. It will be started again."
     },
-    "queue": {
-      "steer_unsupported": "This run cannot accept steer input. Wait for it to finish and send a new message."
+    "acp_agent_auth_invalid": "External agent authentication is invalid. Update the agent setup and try again.",
+    "acp_agent_not_configured": "External agent setup is incomplete for this bot.",
+    "acp_agent_not_enabled": "The selected external agent is disabled for this bot.",
+    "acp_agent_not_found": "The selected external agent is unavailable.",
+    "acp_attachment_invalid": "The attachment is invalid. Please attach it again.",
+    "acp_attachment_unavailable": "The attachment could not be made available to the external agent. Please attach it again.",
+    "acp_discuss_unsupported": "This external agent cannot run in discuss mode.",
+    "acp_display_args_invalid": "The external agent display arguments are invalid.",
+    "acp_image_input_unsupported": "This external agent cannot read the attached image.",
+    "acp_project_mode_invalid": "The external agent project mode is invalid.",
+    "acp_project_path_invalid": "The external agent project path must be absolute.",
+    "acp_runtime_busy": "External agent runtime is already processing a turn for this session.",
+    "acp_runtime_owner_missing": "This external-agent session has no runtime owner. Start a new session to continue.",
+    "acp_runtime_start_failed": "External agent runtime failed to start.",
+    "agent": {
+      "chat_model_not_configured": "No chat model is selected. Set a default chat model in Bot settings → General, then try again.",
+      "provider_auth_failed": "The model provider rejected the credentials. Check the provider API key.",
+      "provider_overloaded": "The model provider is unavailable or overloaded right now. Please try again in a moment.",
+      "provider_permission_denied": "The model provider denied access to this model or resource. Check that the provider account can use this model.",
+      "provider_quota_exhausted": "The model provider account has no remaining balance or quota.",
+      "provider_rate_limited": "The model provider rate limit was reached. Please wait a moment before sending again.",
+      "provider_request_rejected": "The model provider rejected the request. Check the model settings, or try another model.",
+      "provider_unreachable": "Memoh could not reach the model provider. Check the provider address and that the service is running.",
+      "response_interrupted": "The model response was interrupted. Please try again.",
+      "response_timeout": "The model did not respond in time. Please try again.",
+      "tool_timeout": "The tool stopped reporting progress. Review its saved result before retrying."
+    },
+    "agent_authorization": {
+      "code_invalid": "The authorization code is invalid or expired. Copy the complete code from Claude or connect again.",
+      "expired": "This authorization has expired. Connect your account again.",
+      "failed": "Account authorization failed. Please try again.",
+      "limit": "Close other pending authorizations and try again.",
+      "not_ready": "Finish connecting your account before creating the Bot."
+    },
+    "agent_credential": {
+      "encryption_unavailable": "Agent account storage is not configured on this server.",
+      "forbidden": "You do not have permission to use this Agent account.",
+      "incompatible": "This account cannot be used with the selected Agent.",
+      "materialization_failed": "The Agent account could not be prepared. Please retry.",
+      "not_found": "This Agent account is no longer available. Choose another account.",
+      "reauthorization_required": "Connect this Agent account again before using it.",
+      "request_invalid": "Check the Agent account details and try again.",
+      "revoked": "This Agent account has been disconnected. Connect it again or choose another account.",
+      "runtime_busy": "Wait for the current response to finish before switching Agent accounts.",
+      "usage_auth_expired": "The account sign-in has expired. It renews after the next conversation; if usage still can't load, connect the account again.",
+      "usage_unavailable": "Couldn't load usage limits right now. Try again later."
+    },
+    "agent_dependency_missing": "{dep_id} is not installed in this workspace. Install it from the bot's dependencies, or wait for the running installation to finish, then send the message again.",
+    "app": {
+      "busy": "Another operation on this App is in progress.",
+      "dependencies_unavailable": "Workspace dependencies are unavailable on this server, so the App cannot manage them.",
+      "not_found": "This App installation was not found.",
+      "operation_failed": "The App operation failed.",
+      "prerequisite_failed": "A dependency this one needs failed to install. Fix that dependency first, then retry.",
+      "request_invalid": "The App request is invalid."
     },
     "bot": {
+      "name_invalid": "Use 2-63 lowercase letters, digits or hyphens, starting with a letter or digit. Some names are reserved.",
       "name_taken": "This name is already taken."
     },
     "bot_agent": {
-      "not_found": "This Agent no longer exists.",
-      "name_taken": "An Agent with this name already exists for this Bot.",
-      "invalid_runtime": "This Agent runtime is not supported.",
-      "invalid_metadata": "This Agent configuration is invalid.",
       "default_in_use": "Choose another default Agent before disabling or deleting this one.",
+      "invalid_metadata": "This Agent configuration is invalid.",
+      "invalid_runtime": "This Agent runtime is not supported.",
+      "name_taken": "An Agent with this name already exists for this Bot.",
+      "not_found": "This Agent no longer exists.",
+      "provider_direct_runtime": "This provider runs as a direct runtime. Create the Agent with the {runtime} runtime instead.",
       "unavailable": "This Agent is unavailable for new conversations."
     },
-    "channel": {
-      "runtime_unavailable": "The channel service could not be reached. Please try again shortly.",
-      "verification_failed": "The channel configuration could not be verified. Check the credentials, then try again."
+    "bot_backup": {
+      "bundle_invalid": "The backup file is damaged or from an unsupported version."
     },
+    "bot_ready_update_failed": "The bot could not be loaded after its workspace was set up. Refresh the page.",
+    "canceled": "The request was canceled.",
+    "capability": {
+      "access_denied": "You need Manage permission on this bot to manage its capabilities.",
+      "approval_required": "This capability change requires an approved management request.",
+      "not_found": "The requested capability could not be found.",
+      "operation_failed": "The capability operation failed. Check its status before retrying.",
+      "request_invalid": "The capability request is invalid. Check the action and its parameters."
+    },
+    "channel": {
+      "binding_required": "The recipient has not linked this channel yet.",
+      "enable_failed": "The channel could not be enabled. Check its credentials, then try again.",
+      "runtime_unavailable": "The channel service could not be reached. Please try again shortly.",
+      "verification_failed": "The channel configuration could not be verified. Check the credentials, then try again.",
+      "webhook_endpoint_invalid": "Use a public HTTPS URL without a port, credentials, query or fragment. Its path must be the webhook path shown for this channel."
+    },
+    "chat": {
+      "message_empty": "Enter a message or attach a file."
+    },
+    "codex_auth_token_missing": "Codex authentication is missing or incomplete for this bot workspace.",
+    "codex_oauth_incomplete": "Codex ChatGPT sign-in is not complete for this bot workspace.",
     "compaction": {
       "model_unavailable": "The compaction model is unavailable. Pick an enabled chat model with a declared context window."
     },
-    "settings": {
-      "reasoning_effort_invalid": "Reasoning level \"{effort}\" is not supported by the selected chat model.",
-      "reasoning_options_unavailable": "The chat model's reasoning options could not be resolved. Please try again."
+    "connector": {
+      "conflict": "This connector conflicts with an existing connection.",
+      "not_configured": "Connectors are not configured on this server.",
+      "not_found": "This connector is no longer available.",
+      "operation_failed": "The connector operation failed. Please try again.",
+      "request_invalid": "The connector request is invalid.",
+      "request_rejected": "Connect-It rejected the connector request.",
+      "upstream_unavailable": "Connect-It could not complete the request. Please try again shortly."
     },
     "context": {
       "budget_unsatisfied": "The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window.",
       "protected_overflow": "Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window."
     },
-    "agent": {
-      "response_timeout": "The model did not respond in time. Please try again.",
-      "response_interrupted": "The model response was interrupted. Please try again.",
-      "provider_overloaded": "The model provider is unavailable or overloaded right now. Please try again in a moment.",
-      "provider_rate_limited": "The model provider rate limit was reached. Please wait a moment before sending again.",
-      "provider_quota_exhausted": "The model provider account has no remaining balance or quota.",
-      "provider_auth_failed": "The model provider rejected the credentials. Check the provider API key.",
-      "provider_permission_denied": "The model provider denied access to this model or resource. Check that the provider account can use this model.",
-      "provider_request_rejected": "The model provider rejected the request. Check the model settings, or try another model.",
-      "provider_unreachable": "Memoh could not reach the model provider. Check the provider address and that the service is running.",
-      "tool_timeout": "The tool stopped reporting progress. Review its saved result before retrying."
+    "context_lifecycle": {
+      "access_denied": "You do not have access to context lifecycle diagnostics.",
+      "authentication_required": "Sign in to view context lifecycle diagnostics.",
+      "load_failed": "Context lifecycle diagnostics could not be loaded. Please try again.",
+      "not_found": "The conversation was not found.",
+      "request_invalid": "The context lifecycle request is invalid."
     },
-    "queue_request_invalid": "Enter text after /steer or /queue in an existing conversation.",
-    "queue_no_active_run": "The current response has ended. Send this as a new message.",
-    "queue_admission_overloaded": "The queue is busy. Please retry shortly.",
-    "queue_admission_unavailable": "Queue admission is temporarily unavailable. Please retry shortly.",
-    "queue_item_not_pending": "This message is no longer pending in the queue.",
-    "queue_capacity_exceeded": "This session queue is full. Cancel or wait for pending items before adding more.",
-    "queue_item_not_editable": "Only the sender can edit this queued message.",
+    "elicitation_declined": "A tool requested an interaction that could not be shown. The request was declined.",
+    "external_agent": {
+      "account_unbound": "Your IM account isn't linked to a Memoh account yet, so you can't use this bot's workspace. If you're its owner, open Profile → Connected Accounts in Memoh on the web, get a link code, and send {link} <code> here.",
+      "container_workspace_required": "This agent runtime needs a container workspace. Switch the bot to its container workspace, then try again.",
+      "turn_replacement_unsupported": "Retry and edit are unavailable for external agent sessions. Send a new message instead."
+    },
+    "external_runtime": {
+      "auth_required": "Codex is not connected, or its sign-in has expired. Open Agent settings to connect ChatGPT or configure an API key.",
+      "context_window_exceeded": "This conversation no longer fits in the model's context window. Compact the context or start a new conversation.",
+      "overloaded": "The external Agent's model service is unavailable or overloaded right now. Try again in a moment, or switch to another model.",
+      "rate_limited": "The external Agent was rate limited by its model service. Please wait a moment before sending again.",
+      "request_blocked": "The model service's safety policy blocked this request. Change the request and send it again.",
+      "session_resume_failed": "The session could not be resumed. Try again or start a new conversation.",
+      "unavailable": "The external Agent runtime is unavailable. Check the Agent setup and workspace, then try again.",
+      "upstream_unreachable": "The external Agent could not reach its model service, or the connection dropped. Check the network and the Agent's service address, then try again.",
+      "usage_limited": "The external Agent's account has no usage left. Try again after the limit resets, or check the account's plan and billing."
+    },
+    "fetch_provider": {
+      "native_managed": "The built-in fetch provider is managed by Memoh and cannot be changed this way."
+    },
+    "group_chat_acp_unsupported": "Group chats cannot create a chat-mode external-agent session. Use /new codex or /new discuss codex.",
+    "history": {
+      "delete_failed": "The conversation history could not be deleted. Please try again."
+    },
+    "history_reset": "This response was canceled because the conversation history was reset.",
+    "hook": {
+      "user_message_failed": "The message could not be accepted by the message hook. Check the Hook configuration and try again."
+    },
+    "http": {
+      "bad_gateway": "An upstream service returned an invalid response. Please try again.",
+      "bad_request": "The request is invalid.",
+      "conflict": "The request conflicts with the current state. Refresh and try again.",
+      "forbidden": "You do not have permission to perform this action.",
+      "gateway_timeout": "An upstream service did not respond in time. Please try again.",
+      "method_not_allowed": "This request method is not allowed here.",
+      "not_found": "The requested resource was not found.",
+      "not_implemented": "This operation is not supported by the server.",
+      "payload_too_large": "The request is too large.",
+      "service_unavailable": "The service is temporarily unavailable. Please try again shortly.",
+      "too_many_requests": "Too many requests. Please wait a moment and try again.",
+      "unauthorized": "Sign in to continue.",
+      "unsupported_media_type": "The request content type is not supported.",
+      "upgrade_required": "This endpoint requires a different protocol."
+    },
+    "internal": "Something went wrong on the server. Please try again.",
+    "invalid_chat_runtime": "The selected chat runtime is invalid.",
+    "mcp": {
+      "endpoint_invalid": "Enter either a command (local server) or a URL (remote server), not both.",
+      "name_taken": "An MCP connection with this name already exists.",
+      "oauth_client_id_required": "Automatic client registration is unavailable for this server. Enter a client ID from an OAuth app you registered with it.",
+      "oauth_discovery_failed": "Could not discover OAuth settings from this MCP server. Check that the URL is correct and that the server supports OAuth.",
+      "oauth_not_discovered": "Run OAuth discovery for this connection first."
+    },
+    "memory": {
+      "compact_unsupported": "The selected memory provider does not support memory compaction. Choose a provider that supports it in the bot's memory settings."
+    },
+    "native_history_lost": "The agent could not restore its previous context and started over. Earlier messages remain as history only. Provide any context needed to continue.",
+    "network": {
+      "provider_not_configured": "Choose a network provider for this bot first."
+    },
+    "no_workspace_exec": "You do not have permission to run workspace commands for this bot.",
+    "oauth": {
+      "state_invalid": "This authorization has expired or is no longer valid. Start the authorization again."
+    },
     "profile": {
       "request_invalid": "The profile update request is invalid.",
       "title_model_invalid": "The selected title model is unavailable or is not a chat model.",
@@ -586,257 +695,197 @@
       "name_taken": "A provider with this name already exists."
     },
     "provider_template": {
-      "not_found": "This provider template is no longer available.",
       "domain_invalid": "This provider template type is invalid.",
       "domain_mismatch": "This provider template cannot be used here.",
+      "not_found": "This provider template is no longer available.",
       "operation_failed": "The provider template operation failed.",
       "request_invalid": "The provider configuration is invalid."
     },
-    "search_provider": {
-      "type_conflict": "This web search provider has already been configured.",
-      "invalid_provider": "This web search provider is not supported."
+    "queue": {
+      "steer_unsupported": "This run cannot accept steer input. Wait for it to finish and send a new message."
     },
-    "connector": {
-      "request_invalid": "The connector request is invalid.",
-      "not_configured": "Connectors are not configured on this server.",
-      "not_found": "This connector is no longer available.",
-      "conflict": "This connector conflicts with an existing connection.",
-      "request_rejected": "Connect-It rejected the connector request.",
-      "upstream_unavailable": "Connect-It could not complete the request. Please try again shortly.",
-      "operation_failed": "The connector operation failed. Please try again."
-    },
-    "tool_approval": {
-      "forbidden": "You do not have permission to answer this approval request.",
-      "not_found": "This approval request could not be found.",
-      "expired": "This approval request has expired or was already answered.",
-      "ambiguous": "More than one approval request matches this response.",
-      "request_invalid": "The approval response is invalid.",
-      "operation_failed": "The approval response could not be processed."
-    },
-    "user_input": {
-      "forbidden": "You do not have permission to answer this question.",
-      "expired": "This question has expired or was already answered.",
-      "operation_failed": "The answer could not be processed."
-    },
-    "skill": {
-      "builtin_read_only": "Built-in Skills are managed by Memoh and cannot be edited or deleted.",
-      "name_taken": "A Skill with this name already exists. Choose a different name.",
-      "save_failed": "The Skill could not be saved. Please try again."
-    },
+    "queue_admission_overloaded": "The queue is busy. Please retry shortly.",
+    "queue_admission_unavailable": "Queue admission is temporarily unavailable. Please retry shortly.",
+    "queue_capacity_exceeded": "This session queue is full. Cancel or wait for pending items before adding more.",
+    "queue_follow_up_command_invalid": "This queued message could not be started. Send it again as a new message.",
+    "queue_follow_up_unsupported_channel": "Queued follow-ups are not available on this channel; its replies are delivered from the message you send. Use /steer to add to the current reply, or queue from the web app.",
+    "queue_invocation_conflict": "This message was already submitted with different content.",
+    "queue_item_not_editable": "Only the sender can edit this queued message.",
+    "queue_item_not_pending": "This message is no longer pending in the queue.",
+    "queue_no_active_run": "The current response has ended. Send this as a new message.",
+    "queue_request_invalid": "Enter text after /steer or /queue in an existing conversation.",
+    "queue_target_run_not_active": "The response ended before this instruction reached it. Send it as a new message.",
+    "queue_unsupported_session": "Queue controls are not available in discussion sessions.",
     "registry": {
-      "unavailable": "The Supermarket is unavailable. Please try again later.",
-      "app_not_found": "This app is no longer available.",
+      "app_install_failed": "The app could not be installed. Please try again.",
       "app_invalid": "This app is invalid and cannot be installed.",
-      "app_install_failed": "The app could not be installed. Please try again."
+      "app_not_found": "This app is no longer available.",
+      "unavailable": "The Supermarket is unavailable. Please try again later."
     },
-    "workspace": {
-      "unreachable": "The workspace could not be reached.",
-      "template_bootstrap_failed": "The workspace files could not be initialized. Please try rebuilding the workspace.",
-      "display_prepare_failed": "Display preparation failed."
+    "request": {
+      "field_invalid": "{field} is invalid.",
+      "field_required": "{field} is required."
     },
-    "workspace_dependency": {
-      "not_found": "This dependency doesn't exist.",
-      "request_invalid": "The dependency request is invalid. Check it and try again.",
-      "action_unsupported": "This action isn't available for the dependency.",
-      "platform_unsupported": "Not available on this workspace platform.",
-      "busy": "Another operation on this dependency is in progress.",
-      "required": "Still needed by {dependents}. Remove those first.",
-      "prerequisites_changed": "The dependencies this one needs changed after you confirmed. Review the operation again.",
-      "workspace_not_running": "The workspace isn't running. Start it first.",
-      "workspace_missing": "The workspace hasn't been created yet.",
-      "rollback_unavailable": "No previous version to roll back to.",
-      "operation_failed": "The dependency operation failed. Check the log and try again.",
-      "catalog_unavailable": "The dependency catalog is unavailable. Please try again later.",
-      "definition_invalid": "The dependency definition could not be verified. Please refresh the catalog.",
-      "definition_unavailable": "The dependency definition is not cached. Please reconnect to Supermarket and try again.",
-      "discovery_failed": "Workspace dependencies could not be inspected. Please try again."
+    "runtime_admission_orphaned": "This response never started and was cleaned up. Please try again.",
+    "runtime_agent_command_stale": "The agent no longer offers this command. Reopen the command picker and try again.",
+    "runtime_control": {
+      "cancelled": "Operation cancelled.",
+      "command_unavailable": "This runtime command is no longer available. Refresh and try again.",
+      "failed": "The runtime control could not be completed. Try again.",
+      "forbidden": "You do not have access to this conversation.",
+      "goal_requires_default_mode": "Exit Plan mode before creating or resuming a goal.",
+      "mode_unavailable": "This permission mode is unavailable. Refresh and choose a supported mode.",
+      "request_invalid": "The runtime control request is invalid.",
+      "steer_failed": "The additional instruction could not be delivered. Send it again after this turn finishes.",
+      "thread_unavailable": "Start a conversation before using this operation.",
+      "unsupported": "This runtime does not support this control."
     },
-    "acp": {
-      "request_invalid": "The Agent runtime request is invalid. Check the request and try again.",
-      "access_forbidden": "You do not have permission to control this Agent runtime.",
-      "runtime_not_found": "That Agent runtime is no longer available. It will be started again.",
-      "runtime_conflict": "The Agent runtime is not ready for this operation. Refresh and try again.",
-      "runtime_limit_reached": "Too many Agent runtimes are active. Close one and try again.",
-      "operation_failed": "The Agent runtime operation failed. Please try again.",
-      "command_not_found": "The command \"{command}\" was not found in the workspace. Install it from the workspace terminal, or set the Agent command to its absolute path.",
-      "model_selection_unsupported": "This external agent does not support model selection.",
-      "model_id_required": "Choose a model and try again.",
-      "model_unavailable": "The selected model is no longer available for this external agent.",
-      "reasoning_selection_unsupported": "This external agent does not support reasoning effort selection.",
-      "reasoning_effort_required": "Choose a reasoning effort and try again.",
-      "reasoning_effort_unavailable": "The selected reasoning effort is no longer available for this external agent.",
-      "mode_selection_unsupported": "This external agent does not support session mode selection.",
-      "mode_id_required": "Choose a session mode and try again.",
-      "mode_unavailable": "The selected session mode is no longer available for this external agent.",
-      "config_update_failed": "The external agent could not apply the selected settings. Please retry."
+    "runtime_fence_activation_failed": "The response could not be started. Please try again shortly.",
+    "runtime_live_backend_lost": "The live state of this response was lost, so the response was ended. Please try again.",
+    "runtime_owner_lease_expired": "The server handling this response stopped responding, so the response was ended. Please try again.",
+    "runtime_prompt_failed": "The agent runtime could not complete this response. Please try again.",
+    "runtime_reservation_declined": "Another server took over this conversation before the response started. Please try again.",
+    "runtime_reservation_failed": "The response could not be started. Please try again shortly.",
+    "runtime_run_failed": "The response could not be completed. Please try again.",
+    "schedule": {
+      "execution_timeout": "This scheduled run reached its execution limit. Review its progress or increase the limit.",
+      "model_conflict": "The model setting does not fit this schedule's runtime. Choose the model field that matches the runtime.",
+      "model_required": "This bot has no default model, so the schedule needs an explicit model. Choose a model or set a default one.",
+      "model_unusable": "This model cannot run a schedule. Choose an enabled chat model.",
+      "run_target_conflict": "The run target, runtime, Agent and session settings of this schedule cannot be combined. Adjust them and try again.",
+      "session_mode_unsupported": "Scheduled runs can only continue chat or schedule sessions. Choose another target session."
     },
-    "external_agent": {
-      "turn_replacement_unsupported": "Retry and edit are unavailable for external agent sessions. Send a new message instead.",
-      "account_unbound": "Your IM account isn't linked to a Memoh account yet, so you can't use this bot's workspace. If you're its owner, open Profile → Connected Accounts in Memoh on the web, get a link code, and send {link} <code> here.",
-      "container_workspace_required": "This agent runtime needs a container workspace. Switch the bot to its container workspace, then try again."
-    },
-    "agent_credential": {
-      "not_found": "This Agent account is no longer available. Choose another account.",
-      "request_invalid": "Check the Agent account details and try again.",
-      "forbidden": "You do not have permission to use this Agent account.",
-      "incompatible": "This account cannot be used with the selected Agent.",
-      "revoked": "This Agent account has been disconnected. Connect it again or choose another account.",
-      "reauthorization_required": "Connect this Agent account again before using it.",
-      "encryption_unavailable": "Agent account storage is not configured on this server.",
-      "runtime_busy": "Wait for the current response to finish before switching Agent accounts.",
-      "materialization_failed": "The Agent account could not be prepared. Please retry.",
-      "usage_auth_expired": "The account sign-in has expired. It renews after the next conversation; if usage still can't load, connect the account again.",
-      "usage_unavailable": "Couldn't load usage limits right now. Try again later."
+    "search_provider": {
+      "invalid_provider": "This web search provider is not supported.",
+      "type_conflict": "This web search provider has already been configured."
     },
     "session": {
       "model_preference_conflict": "The model selection changed elsewhere. Refresh or send your message to apply your selection.",
       "not_found": "The conversation was not found."
     },
     "session_runtime": {
-      "interrupted": "The server interrupted this run during shutdown. It can resume from saved progress after restart.",
-      "session_busy": "This conversation is still working on your previous message. Please try again in a moment.",
-      "invocation_conflict": "This message was already sent with different content. Reload the conversation to see what was saved.",
+      "abort_failed": "The conversation was deleted, but its running task could not be stopped. Refresh and try again.",
       "history_inconsistent": "The conversation could not be saved. Refresh and try again.",
-      "turn_not_latest": "The conversation has newer messages. Refresh and try again.",
-      "turn_incomplete": "This message cannot be retried right now. Refresh the conversation.",
-      "reset_unavailable": "Conversation history cannot be reset right now. Contact the developers.",
-      "reset_conflict": "The conversation is busy. Please try again shortly.",
+      "interrupted": "The server interrupted this run during shutdown. It can resume from saved progress after restart.",
+      "invocation_conflict": "This message was already sent with different content. Reload the conversation to see what was saved.",
       "publish_failed": "The conversation could not be updated. Please try again shortly.",
-      "abort_failed": "The conversation was deleted, but its running task could not be stopped. Refresh and try again."
+      "reset_conflict": "The conversation is busy. Please try again shortly.",
+      "reset_unavailable": "Conversation history cannot be reset right now. Contact the developers.",
+      "session_busy": "This conversation is still working on your previous message. Please try again in a moment.",
+      "turn_incomplete": "This message cannot be retried right now. Refresh the conversation.",
+      "turn_not_latest": "The conversation has newer messages. Refresh and try again."
     },
-    "history": {
-      "delete_failed": "The conversation history could not be deleted. Please try again."
+    "settings": {
+      "reasoning_effort_invalid": "Reasoning level \"{effort}\" is not supported by the selected chat model.",
+      "reasoning_options_unavailable": "The chat model's reasoning options could not be resolved. Please try again."
     },
-    "context_lifecycle": {
-      "request_invalid": "The context lifecycle request is invalid.",
-      "authentication_required": "Sign in to view context lifecycle diagnostics.",
-      "access_denied": "You do not have access to context lifecycle diagnostics.",
-      "not_found": "The conversation was not found.",
-      "load_failed": "Context lifecycle diagnostics could not be loaded. Please try again."
+    "skill": {
+      "builtin_read_only": "Built-in Skills are managed by Memoh and cannot be edited or deleted.",
+      "name_invalid": "The Skill needs a valid name in its YAML frontmatter.",
+      "name_taken": "A Skill with this name already exists. Choose a different name.",
+      "not_found": "This Skill was not found. Refresh the list and try again.",
+      "registry_read_only": "This Skill belongs to a Registry App. Update or uninstall the App instead.",
+      "save_failed": "The Skill could not be saved. Please try again."
     },
-    "external_runtime": {
-      "auth_required": "Codex is not connected yet. Open Agent settings to connect ChatGPT or configure an API key.",
-      "unavailable": "The external Agent runtime is unavailable. Check the Agent setup and workspace, then try again.",
-      "session_resume_failed": "The session could not be resumed. Try again or start a new conversation.",
-      "usage_limited": "The external Agent's usage limit has been reached. Please try again later."
+    "slash": {
+      "attachments_unsupported": "Slash commands cannot include attachments. Remove the attachments and send the command again.",
+      "permission_denied": "You do not have permission to use this command.",
+      "requires_websocket": "Skill activation requires a live chat connection. Reconnect and try again.",
+      "reserved_metadata": "This message carries reserved skill metadata, which clients cannot supply.",
+      "skill_activation_unsupported": "Skills can only be activated in a chat session that uses the bot's own model. Switch to such a session and try again.",
+      "skill_ambiguous": "More than one skill has this name. Rename or disable one of them in the bot's skills, then try again.",
+      "skill_context_too_large": "The selected skills are too large for one message. Select fewer skills and try again.",
+      "skill_disabled": "This skill is disabled. Enable it in the bot's skills, then try again.",
+      "skill_not_found": "No skill has this name. Check the name and try again.",
+      "skill_not_usable": "This skill is not available for chat.",
+      "skill_syntax_invalid": "Use /<skill-name> [prompt] to activate a skill.",
+      "too_many_skills": "Too many skills in one message. Activate fewer skills and try again.",
+      "unknown_command": "Unknown slash command. Send /help to see the available commands.",
+      "unsupported_in_web": "This slash command is not available in Web chat."
     },
-    "app": {
-      "not_found": "This App installation was not found.",
-      "request_invalid": "The App request is invalid.",
-      "busy": "Another operation on this App is in progress.",
-      "operation_failed": "The App operation failed."
+    "tool_approval": {
+      "ambiguous": "More than one approval request matches this response.",
+      "expired": "This approval request has expired or was already answered.",
+      "forbidden": "You do not have permission to answer this approval request.",
+      "not_found": "This approval request could not be found.",
+      "operation_failed": "The approval response could not be processed.",
+      "request_invalid": "The approval response is invalid."
     },
-    "agent_authorization": {
-      "expired": "This authorization has expired. Connect your account again.",
-      "not_ready": "Finish connecting your account before creating the Bot.",
-      "limit": "Close other pending authorizations and try again.",
-      "failed": "Account authorization failed. Please try again.",
-      "code_invalid": "The authorization code is invalid or expired. Copy the complete code from Claude or connect again."
+    "tools_unavailable": "Memoh tools are unavailable for this conversation. Start a new session to restore them.",
+    "tts": {
+      "model_not_configured": "This bot has no text-to-speech model. Choose one in the bot settings.",
+      "text_too_long": "Text is too long. The limit is {max} characters."
     },
-    "workdir": {
-      "git_busy": "An agent is using this working directory. Wait for it to finish before switching branches.",
-      "git_branch_unavailable": "This local branch is unavailable. Refresh and select an existing branch.",
-      "git_switch_failed": "Git could not switch branches. Check uncommitted changes and whether the branch is used by another worktree.",
-      "git_unavailable": "The Git working directory could not be read. Check the workspace and try again."
+    "user": {
+      "cannot_remove_self": "You cannot remove yourself. Ask another admin to remove you."
     },
-    "runtime_control": {
-      "goal_requires_default_mode": "Exit Plan mode before creating or resuming a goal.",
-      "steer_failed": "The additional instruction could not be delivered. Send it again after this turn finishes.",
-      "unsupported": "This runtime does not support this control.",
-      "command_unavailable": "This runtime command is no longer available. Refresh and try again.",
-      "mode_unavailable": "This permission mode is unavailable. Refresh and choose a supported mode.",
-      "thread_unavailable": "Start a conversation before using this operation.",
-      "failed": "The runtime control could not be completed. Try again.",
-      "forbidden": "You do not have access to this conversation.",
-      "request_invalid": "The runtime control request is invalid.",
-      "cancelled": "Operation cancelled."
-    },
-    "schedule": {
-      "execution_timeout": "This scheduled run reached its execution limit. Review its progress or increase the limit."
+    "user_input": {
+      "expired": "This question has expired or was already answered.",
+      "forbidden": "You do not have permission to answer this question.",
+      "operation_failed": "The answer could not be processed."
     },
     "video": {
       "job_outcome_unknown": "The video job status could not be confirmed. Check the saved job before creating another video."
     },
-    "internal": "Something went wrong on the server. Please try again.",
-    "canceled": "The request was canceled.",
-    "http": {
-      "bad_request": "The request is invalid.",
-      "unauthorized": "Sign in to continue.",
-      "forbidden": "You do not have permission to perform this action.",
-      "not_found": "The requested resource was not found.",
-      "method_not_allowed": "This request method is not allowed here.",
-      "conflict": "The request conflicts with the current state. Refresh and try again.",
-      "payload_too_large": "The request is too large.",
-      "unsupported_media_type": "The request content type is not supported.",
-      "upgrade_required": "This endpoint requires a different protocol.",
-      "too_many_requests": "Too many requests. Please wait a moment and try again.",
-      "not_implemented": "This operation is not supported by the server.",
-      "bad_gateway": "An upstream service returned an invalid response. Please try again.",
-      "service_unavailable": "The service is temporarily unavailable. Please try again shortly.",
-      "gateway_timeout": "An upstream service did not respond in time. Please try again."
+    "workdir": {
+      "git_branch_unavailable": "This local branch is unavailable. Refresh and select an existing branch.",
+      "git_busy": "An agent is using this working directory. Wait for it to finish before switching branches.",
+      "git_switch_failed": "Git could not switch branches. Check uncommitted changes and whether the branch is used by another worktree.",
+      "git_unavailable": "The Git working directory could not be read. Check the workspace and try again.",
+      "remote_unsupported_for_agent": "External agent sessions cannot use a remote computer. Choose a workdir on the native workspace instead."
     },
-    "agent_dependency_missing": "{dep_id} is not installed in this workspace. Install it from the bot's dependencies, or wait for the running installation to finish, then send the message again.",
-    "runtime_run_failed": "The response could not be completed. Please try again.",
-    "runtime_prompt_failed": "The agent runtime could not complete this response. Please try again.",
-    "runtime_owner_lease_expired": "The server handling this response stopped responding, so the response was ended. Please try again.",
-    "runtime_live_backend_lost": "The live state of this response was lost, so the response was ended. Please try again.",
-    "runtime_admission_orphaned": "This response never started and was cleaned up. Please try again.",
-    "runtime_fence_activation_failed": "The response could not be started. Please try again shortly.",
-    "runtime_reservation_failed": "The response could not be started. Please try again shortly.",
-    "runtime_reservation_declined": "Another server took over this conversation before the response started. Please try again.",
-    "history_reset": "This response was canceled because the conversation history was reset.",
-    "bot_ready_update_failed": "The bot could not be loaded after its workspace was set up. Refresh the page.",
-    "workspace_setup_timeout": "Workspace setup is still in progress. Check the bot's workspace page.",
-    "workspace_setup_failed": "Something went wrong while setting up the workspace.",
-    "workspace_display_disabled": "Workspace desktop is not enabled.",
-    "workspace_dependency_operation_unknown": "The operation result is not yet confirmed. Refresh dependencies to check its status.",
-    "workspace_create_request_invalid": "The workspace request is invalid.",
+    "workspace": {
+      "archive_invalid": "The archive cannot be extracted. Use a valid .zip, .tar.gz or .tgz file.",
+      "display_prepare_failed": "Display preparation failed.",
+      "template_bootstrap_failed": "The workspace files could not be initialized. Please try rebuilding the workspace.",
+      "unreachable": "The workspace could not be reached."
+    },
     "workspace_create_failed": "Failed to create the workspace. Please try again.",
-    "workspace_not_found": "This bot has no workspace.",
+    "workspace_create_request_invalid": "The workspace request is invalid.",
+    "workspace_delete_failed": "Failed to delete the workspace. Please try again.",
+    "workspace_dependency": {
+      "action_unsupported": "This action isn't available for the dependency.",
+      "busy": "Another operation on this dependency is in progress.",
+      "catalog_unavailable": "The dependency catalog is unavailable. Please try again later.",
+      "definition_invalid": "The dependency definition could not be verified. Please refresh the catalog.",
+      "definition_unavailable": "The dependency definition is not cached. Please reconnect to Supermarket and try again.",
+      "discovery_failed": "Workspace dependencies could not be inspected. Please try again.",
+      "not_found": "This dependency doesn't exist.",
+      "operation_failed": "The dependency operation failed. Check the log and try again.",
+      "operation_interrupted": "The operation was interrupted before it finished. Try it again.",
+      "platform_unsupported": "Not available on this workspace platform.",
+      "prerequisites_changed": "The dependencies this one needs changed after you confirmed. Review the operation again.",
+      "request_invalid": "The dependency request is invalid. Check it and try again.",
+      "required": "Still needed by {dependents}. Remove those first.",
+      "rollback_unavailable": "No previous version to roll back to.",
+      "workspace_missing": "The workspace hasn't been created yet.",
+      "workspace_not_running": "The workspace isn't running. Start it first."
+    },
+    "workspace_dependency_operation_unknown": "The operation result is not yet confirmed. Refresh dependencies to check its status.",
+    "workspace_display_disabled": "Workspace desktop is not enabled.",
     "workspace_load_failed": "Failed to load workspace info. Please try again.",
+    "workspace_manager_unavailable": "Workspace manager is not configured.",
     "workspace_metrics_load_failed": "Failed to load workspace metrics. Please try again.",
+    "workspace_not_found": "This bot has no workspace.",
+    "workspace_preserved_data_not_found": "No preserved workspace data was found.",
     "workspace_resource_limits_invalid": "The resource limits are invalid. Limits must be non-negative.",
     "workspace_resource_limits_required": "Resource limits are required.",
     "workspace_resource_limits_save_failed": "Failed to save resource limits. Please try again.",
-    "workspace_delete_failed": "Failed to delete the workspace. Please try again.",
-    "workspace_start_failed": "Failed to start the workspace. Please try again.",
-    "workspace_stop_failed": "Failed to stop the workspace. Please try again.",
-    "workspace_snapshots_unsupported": "Snapshots are not supported by this workspace runtime.",
+    "workspace_restore_failed": "Failed to restore workspace data. Please try again.",
+    "workspace_setup_failed": "Something went wrong while setting up the workspace.",
+    "workspace_setup_timeout": "Workspace setup is still in progress. Check the bot's workspace page.",
+    "workspace_snapshot_chain_not_found": "The workspace snapshot history could not be found.",
+    "workspace_snapshot_create_failed": "Failed to create the snapshot. Please try again.",
     "workspace_snapshot_manager_unavailable": "Snapshots are not configured on this server.",
     "workspace_snapshot_request_invalid": "The snapshot request is invalid.",
-    "workspace_snapshot_create_failed": "Failed to create the snapshot. Please try again.",
-    "workspace_snapshots_load_failed": "Failed to load snapshots. Please try again.",
-    "workspace_snapshotter_mismatch": "The snapshotter does not match the workspace runtime.",
-    "workspace_snapshot_chain_not_found": "The workspace snapshot history could not be found.",
-    "workspace_manager_unavailable": "Workspace manager is not configured.",
+    "workspace_snapshot_rollback_failed": "Failed to roll back the workspace. Please try again.",
     "workspace_snapshot_rollback_request_invalid": "The rollback request is invalid.",
     "workspace_snapshot_version_invalid": "The snapshot version is invalid.",
-    "workspace_snapshot_rollback_failed": "Failed to roll back the workspace. Please try again.",
-    "workspace_preserved_data_not_found": "No preserved workspace data was found.",
-    "workspace_restore_failed": "Failed to restore workspace data. Please try again.",
-    "acp_agent_not_found": "The selected external agent is unavailable.",
-    "acp_agent_not_enabled": "The selected external agent is disabled for this bot.",
-    "acp_agent_not_configured": "External agent setup is incomplete for this bot.",
-    "codex_oauth_incomplete": "Codex ChatGPT sign-in is not complete for this bot workspace.",
-    "codex_auth_token_missing": "Codex authentication is missing or incomplete for this bot workspace.",
-    "acp_agent_auth_invalid": "External agent authentication is invalid. Update the agent setup and try again.",
-    "no_workspace_exec": "You do not have permission to run workspace commands for this bot.",
-    "acp_runtime_owner_missing": "This external-agent session has no runtime owner. Start a new session to continue.",
-    "acp_discuss_unsupported": "This external agent cannot run in discuss mode.",
-    "group_chat_acp_unsupported": "Group chats cannot create a chat-mode external-agent session. Use /new codex or /new discuss codex.",
-    "acp_project_mode_invalid": "The external agent project mode is invalid.",
-    "acp_project_path_invalid": "The external agent project path must be absolute.",
-    "acp_display_args_invalid": "The external agent display arguments are invalid.",
-    "acp_runtime_start_failed": "External agent runtime failed to start.",
-    "acp_runtime_busy": "External agent runtime is already processing a turn for this session.",
-    "acp_attachment_invalid": "The attachment is invalid. Please attach it again.",
-    "acp_attachment_unavailable": "The attachment could not be made available to the external agent. Please attach it again.",
-    "runtime_agent_command_stale": "The agent no longer offers this command. Reopen the command picker and try again.",
-    "acp_image_input_unsupported": "This external agent cannot read the attached image.",
-    "invalid_chat_runtime": "The selected chat runtime is invalid.",
-    "queue_invocation_conflict": "This message was already submitted with different content.",
-    "queue_unsupported_session": "Queue controls are not available in discussion sessions.",
-    "queue_follow_up_unsupported_channel": "Queued follow-ups are not available on this channel; its replies are delivered from the message you send. Use /steer to add to the current reply, or queue from the web app."
+    "workspace_snapshots_load_failed": "Failed to load snapshots. Please try again.",
+    "workspace_snapshots_unsupported": "Snapshots are not supported by this workspace runtime.",
+    "workspace_snapshotter_mismatch": "The snapshotter does not match the workspace runtime.",
+    "workspace_start_failed": "Failed to start the workspace. Please try again.",
+    "workspace_stop_failed": "Failed to stop the workspace. Please try again."
   },
   "runtime": {
     "claudeCode": {

@@ -39,6 +39,19 @@ func (s *replacementOperationMessageService) GetVisibleTurnByMessage(_ context.C
 	return s.turnByMsg, nil
 }
 
+func TestPreflightHookFailureIsRetriedThroughTheHook(t *testing.T) {
+	if !isPreflightUserMessageHookFailure(messagepkg.Message{
+		Metadata: map[string]any{messagepkg.HistoryFailureOriginMetadataKey: messagepkg.HistoryFailureOriginUserMessageHook},
+	}) {
+		t.Fatal("Hook failure marker was not recognized")
+	}
+	if isPreflightUserMessageHookFailure(messagepkg.Message{
+		Metadata: map[string]any{messagepkg.HistoryErrorCodeMetadataKey: string(apperror.CodeAgentProviderRequestRejected)},
+	}) {
+		t.Fatal("provider failure was incorrectly classified as a Hook failure")
+	}
+}
+
 // The deprecated message-id spelling is resolved to a round at the boundary, so
 // a client shipped before the turn-id contract keeps working after an upgrade.
 func TestResolveTurnIDForMessageMapsTheLegacySpelling(t *testing.T) {

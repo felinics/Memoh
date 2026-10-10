@@ -17,7 +17,9 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 	sdk "github.com/felinics/twilight/sdk"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
@@ -426,6 +428,75 @@ func TestStartMemohToolsBridgeRetriesClosingWorkspaceClient(t *testing.T) {
 	if workspace.calls != 1 {
 		t.Fatalf("workspace MCPClient calls = %d, want retry once", workspace.calls)
 	}
+}
+
+func TestStartMemohToolsBridgeRetriesUnavailableWorkspaceBridge(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	unavailable := newUnavailableBridgeClient(t)
+	fresh := newTestBridgeClient(t, root)
+	workspace := &rotatingTestWorkspace{
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendContainer,
+			DefaultWorkDir: "/data",
+			ToolsHTTPURL:   "http://127.0.0.1:18732/mcp",
+		},
+		clients: []*bridge.Client{fresh},
+	}
+	runner := NewRunner(nil, workspace)
+
+	gotClient, stop, err := runner.startMemohToolsBridge(context.Background(), "bot-1", unavailable, "/mcp/test", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	if err != nil {
+		t.Fatalf("startMemohToolsBridge() error = %v", err)
+	}
+	defer stop()
+	if gotClient != fresh {
+		t.Fatalf("startMemohToolsBridge() client = %#v, want fresh client", gotClient)
+	}
+	if workspace.calls != 1 {
+		t.Fatalf("workspace MCPClient calls = %d, want retry once", workspace.calls)
+	}
+}
+
+func TestStartMemohToolsBridgeDoesNotRetryOtherBridgeErrors(t *testing.T) {
+	t.Parallel()
+
+	denied := newFailingStreamBridgeClient(t, status.Error(codes.PermissionDenied, "transport is closing"))
+	workspace := &rotatingTestWorkspace{clients: []*bridge.Client{newTestBridgeClient(t, t.TempDir())}}
+	runner := NewRunner(nil, workspace)
+
+	_, _, err := runner.startMemohToolsBridge(context.Background(), "bot-1", denied, "/mcp/test", http.NotFoundHandler())
+	if !errors.Is(err, bridge.ErrForbidden) {
+		t.Fatalf("startMemohToolsBridge() error = %v, want bridge.ErrForbidden", err)
+	}
+	if workspace.calls != 0 {
+		t.Fatalf("workspace MCPClient calls = %d, want no retry", workspace.calls)
+	}
+}
+
+// newUnavailableBridgeClient returns a client whose streams fail with the
+// status grpc-go reports for a broken transport.
+func newUnavailableBridgeClient(t *testing.T) *bridge.Client {
+	t.Helper()
+	return newFailingStreamBridgeClient(t, status.Error(codes.Unavailable, "connection error: desc = \"error reading server preface\""))
+}
+
+func newFailingStreamBridgeClient(t *testing.T, streamErr error) *bridge.Client {
+	t.Helper()
+	conn, err := grpc.NewClient("passthrough:///acpclient-failing-stream-test",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStreamInterceptor(func(context.Context, *grpc.StreamDesc, *grpc.ClientConn, string, grpc.Streamer, ...grpc.CallOption) (grpc.ClientStream, error) {
+			return nil, streamErr
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return bridge.NewClientFromConn(conn)
 }
 
 func TestRunnerStartSessionSupportsReleaseTerminalWithoutWait(t *testing.T) {
@@ -3387,6 +3458,14 @@ func (a *fakeACPAgent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.Pro
 	}
 	if os.Getenv("MEMOH_ACP_FAKE_AGENT_RELEASE_TERMINAL_WITHOUT_WAIT") == "1" {
 		return a.promptReleaseTerminalAfterOutput(ctx, p)
+	}
+	if raw := os.Getenv("MEMOH_ACP_FAKE_AGENT_USAGE"); raw != "" {
+		var usage acp.Usage
+		if err := json.Unmarshal([]byte(raw), &usage); err != nil {
+			return acp.PromptResponse{}, err
+		}
+		_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.UpdateAgentMessageText("usage reported")})
+		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn, Usage: &usage}, nil
 	}
 
 	outputPath := filepath.Join(a.cwd, "output.txt")

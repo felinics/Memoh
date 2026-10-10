@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/httpx"
 )
 
 // sessionInvocationLookup is the read-only slice of the session run ledger
@@ -51,27 +51,27 @@ type sessionInvocationResponse struct {
 // @Param session_id path string true "Session ID"
 // @Param invocation_id path string true "Client invocation ID"
 // @Success 200 {object} sessionInvocationResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/invocations/{invocation_id} [get].
 func (h *SessionHandler) GetSessionInvocation(c echo.Context) error {
 	channelIdentityID, err := RequireChannelIdentityID(c)
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
-	sessionID := strings.TrimSpace(c.Param("session_id"))
-	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+	sessionID, err := httpx.RequiredParam(c, "session_id")
+	if err != nil {
+		return err
 	}
-	invocationID := strings.TrimSpace(c.Param("invocation_id"))
-	if invocationID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "invocation id is required")
+	invocationID, err := httpx.RequiredParam(c, "invocation_id")
+	if err != nil {
+		return err
 	}
 	// Same gate as reading the session itself, so a caller who cannot read
 	// the session learns nothing more here than from GetSession.

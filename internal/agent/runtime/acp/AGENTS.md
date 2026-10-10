@@ -44,6 +44,15 @@ conditionals.
 (`HOME=/data`, runtime-local `TMPDIR`, shared `NPM_CONFIG_CACHE`).
 `Profile.SetupModes` declares the setup modes allowed to start a process.
 
+A profile is a kind of agent, not an agent: every custom agent on a bot shares
+the one generic profile id. An Agent instance therefore owns its setup — the
+managed fields live on its `bot_agents` row (`metadata.managed`), and warm
+processes are matched and reset by instance id. Never key a setup or a process
+by profile id alone. Resolve setups through
+`botagents.Service.ResolveACPSetup`; instances that predate per-instance
+setups still read the bot's `metadata.acp.agents.<profile>` slot, which is
+read-only and must not gain new writers.
+
 The ACP terminal/tool environment is separate from the agent environment. Its
 working directory and `HOME` remain under `/data`; do not expose the agent's
 runtime directory to ordinary workspace commands.

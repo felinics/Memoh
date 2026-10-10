@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"testing"
 
 	"github.com/felinics/memoh/internal/apperror"
@@ -19,7 +18,7 @@ func TestAppErrorCauseIsTraversed(t *testing.T) {
 	err := fmt.Errorf("handler: %w", apperror.Wrap(apperror.CodeHTTPConflict, fmt.Errorf("use case: %w", source), nil))
 
 	r := Analyze(context.Background(), err)
-	if r.Public == nil || r.Public.Code != http.StatusConflict || r.Fault != FaultClient {
+	if r.answer == nil || apperror.CodeOf(r.answer) != apperror.CodeHTTPConflict || r.Fault != apperror.FaultClient {
 		t.Fatalf("public error not recognized: %+v", r)
 	}
 	if r.Source == nil || len(r.Attrs) != 1 || r.Attrs[0].Value.String() != "source" {

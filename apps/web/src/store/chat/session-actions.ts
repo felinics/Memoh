@@ -8,7 +8,6 @@ import {
   type SessionSummary,
   type UITurn,
 } from '@/composables/api/useChat'
-import type { SidebarSessionMode } from '../chat-list.utils'
 import type { ChatViewEntry } from './view-registry'
 import type { ChatViewTarget } from './types'
 
@@ -33,8 +32,6 @@ export function createSessionActions(deps: {
   clearHistoryView: () => void
   markSessionDeleted: (botId: string, sessionId: string) => void
   removeSessionFromList: (sessionId: string) => void
-  fallbackSessionAfterDelete: (mode: SidebarSessionMode) => SessionSummary | null
-  switchActiveSession: (sessionId: string, previousSessionId?: string) => void
   patchSessionInList: (sessionId: string, patch: Partial<SessionSummary>) => void
   upsertSession: (session: SessionSummary) => void
   rememberSession: (session: SessionSummary) => void
@@ -105,10 +102,7 @@ export function createSessionActions(deps: {
     }
   }
 
-  async function removeSession(
-    sessionId: string,
-    options: { fallbackMode?: SidebarSessionMode } = {},
-  ) {
+  async function removeSession(sessionId: string) {
     const sid = sessionId.trim()
     if (!sid) return
     const botId = deps.currentBotId.value ?? ''
@@ -123,20 +117,13 @@ export function createSessionActions(deps: {
     deps.clearRuntimeStatus(botId, sid)
     deps.removeSessionFromList(sid)
     if (deps.sessionId.value !== sid) return
-    const next = deps.fallbackSessionAfterDelete(
-      options.fallbackMode ?? 'recent',
-    )
-    if (!next) {
-      deps.sessionId.value = null
-      deps.explicitSessionSelection.value = false
-      deps.draftIntent.value = false
-      deps.clearHistoryView()
-      return
-    }
-    deps.sessionId.value = next.id
+    // No replacement session is picked here. The workspace closes the deleted
+    // session's tabs like browser tabs, and the selection follows whichever
+    // tab the dock activates next.
+    deps.sessionId.value = null
     deps.explicitSessionSelection.value = false
     deps.draftIntent.value = false
-    deps.switchActiveSession(next.id, sid)
+    deps.clearHistoryView()
   }
 
   async function renameSession(sessionId: string, title: string) {

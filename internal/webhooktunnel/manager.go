@@ -18,6 +18,7 @@ import (
 
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/errlog"
 )
 
 const (
@@ -246,11 +247,21 @@ func (m *Manager) startManaged(ctx context.Context) error {
 			m.status = current
 		}
 		m.mu.Unlock()
-		if err != nil && m.log != nil {
-			m.log.WarnContext(ctx, "cloudflared exited", slog.Any("error", err))
+		if err != nil {
+			m.recordExit(ctx, err)
 		}
 	}()
 	return nil
+}
+
+// recordExit writes the one record of a cloudflared process that ended with
+// an error. The status already carries it for the UI; nothing else logs it.
+func (m *Manager) recordExit(ctx context.Context, err error) {
+	if m.log == nil {
+		return
+	}
+	res := errlog.Event(ctx, "webhooktunnel.cloudflared", err, errlog.Options{Async: true})
+	m.log.LogAttrs(ctx, res.Level, "cloudflared exited", res.Attrs()...)
 }
 
 func (m *Manager) pollLoop(ctx context.Context, metricsURL string) {

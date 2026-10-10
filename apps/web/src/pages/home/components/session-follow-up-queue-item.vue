@@ -15,7 +15,7 @@
       v-model="draft"
       :disabled="busy"
       class="h-8 min-w-0 flex-1 border-0 bg-transparent px-1.5 text-label shadow-none focus-visible:ring-0"
-      @keydown.enter.prevent="emit('save', draft)"
+      @keydown.enter.exact.prevent="emit('save', draft)"
       @blur="emit('save', draft)"
     />
     <Button

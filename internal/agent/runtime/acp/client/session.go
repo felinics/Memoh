@@ -483,7 +483,7 @@ func (r *Runner) startMemohToolsBridge(ctx context.Context, botID string, client
 			return current, stop, nil
 		}
 		lastErr = errs.WrapDependency(err, "")
-		if ctx.Err() != nil || !isClosingBridgeClientError(err) || r == nil || r.workspace == nil || strings.TrimSpace(botID) == "" {
+		if ctx.Err() != nil || !errors.Is(err, bridge.ErrUnavailable) || r == nil || r.workspace == nil || strings.TrimSpace(botID) == "" {
 			return current, nil, lastErr
 		}
 		_ = current.Close()
@@ -497,16 +497,6 @@ func (r *Runner) startMemohToolsBridge(ctx context.Context, botID string, client
 		current = next
 	}
 	return current, nil, lastErr
-}
-
-func isClosingBridgeClientError(err error) bool {
-	if err == nil {
-		return false
-	}
-	lower := strings.ToLower(err.Error())
-	return strings.Contains(lower, "client connection is closing") ||
-		strings.Contains(lower, "transport is closing") ||
-		strings.Contains(lower, "use of closed network connection")
 }
 
 func sleepContext(ctx context.Context, d time.Duration) error {
@@ -741,13 +731,20 @@ func promptUsageFromACP(usage *acp.Usage) *sdk.Usage {
 		OutputTokens: usage.OutputTokens,
 		TotalTokens:  usage.TotalTokens,
 	}
+	read, write := 0, 0
 	if usage.CachedReadTokens != nil {
-		out.CachedInputTokens = *usage.CachedReadTokens
-		out.InputTokenDetails.CacheReadTokens = *usage.CachedReadTokens
+		read = *usage.CachedReadTokens
 	}
 	if usage.CachedWriteTokens != nil {
-		out.InputTokenDetails.CacheWriteTokens = *usage.CachedWriteTokens
+		write = *usage.CachedWriteTokens
 	}
+	// ACP leaves open whether inputTokens includes the cache counters;
+	// claude-agent-acp reports them beside it and counts them in totalTokens.
+	if cached := read + write; cached > 0 && (usage.TotalTokens == usage.InputTokens+usage.OutputTokens+cached || usage.InputTokens < cached) {
+		out.InputTokens += cached
+	}
+	out.CachedInputTokens = read
+	out.InputTokenDetails = sdk.InputTokenDetail{NoCacheTokens: out.InputTokens - read - write, CacheReadTokens: read, CacheWriteTokens: write}
 	if usage.ThoughtTokens != nil {
 		out.ReasoningTokens = *usage.ThoughtTokens
 		out.OutputTokenDetails.ReasoningTokens = *usage.ThoughtTokens

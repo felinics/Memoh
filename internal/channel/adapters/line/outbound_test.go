@@ -127,7 +127,7 @@ func TestLineImageMessageUsesPublicMediaURLForPersistedImage(t *testing.T) {
 
 	adapter := NewAdapter(nil)
 	adapter.SetPublicBaseURLProvider(testPublicBaseURLProvider{base: "https://public.example.com"})
-	image, ok := adapter.lineImageMessage(channel.ChannelConfig{
+	image, ok := adapter.lineImageMessage(context.Background(), channel.ChannelConfig{
 		BotID: "bot-1",
 		ID:    "cfg-1",
 	}, channel.PreparedAttachment{
@@ -158,7 +158,7 @@ func TestLineImageMessageRejectsPersistedImageWithoutPublicBaseURL(t *testing.T)
 	t.Parallel()
 
 	adapter := NewAdapter(nil)
-	_, ok := adapter.lineImageMessage(channel.ChannelConfig{BotID: "bot-1"}, channel.PreparedAttachment{
+	_, ok := adapter.lineImageMessage(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, channel.PreparedAttachment{
 		Kind: channel.PreparedAttachmentUpload,
 		Logical: channel.Attachment{
 			Type:        channel.AttachmentImage,
@@ -177,7 +177,7 @@ func TestLineImageMessageRejectsPersistedImageWithNonHexContentHash(t *testing.T
 
 	adapter := NewAdapter(nil)
 	adapter.SetPublicBaseURLProvider(testPublicBaseURLProvider{base: "https://public.example.com"})
-	_, ok := adapter.lineImageMessage(channel.ChannelConfig{BotID: "bot-1"}, channel.PreparedAttachment{
+	_, ok := adapter.lineImageMessage(context.Background(), channel.ChannelConfig{BotID: "bot-1"}, channel.PreparedAttachment{
 		Kind: channel.PreparedAttachmentUpload,
 		Logical: channel.Attachment{
 			Type:        channel.AttachmentImage,

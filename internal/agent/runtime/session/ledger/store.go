@@ -190,6 +190,9 @@ type FinalizeParams struct {
 	FencingToken int64
 	State        State
 	ErrorCode    string
+	// ExpectedState is optional. Shutdown uses it to avoid terminalizing a
+	// decision that parked after its classification read.
+	ExpectedState State
 }
 
 // PrepareFinishParams records the fenced, recoverable terminal proposal. A

@@ -9,6 +9,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
+	"github.com/felinics/memoh/internal/agent/decision"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
@@ -16,6 +17,10 @@ import (
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/bots"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/workspace"
 )
 
@@ -89,6 +94,9 @@ func (s *Service) CommitToolApprovalResponse(ctx context.Context, input ToolAppr
 			return CommittedToolApprovalResponse{}, err
 		}
 		return CommittedToolApprovalResponse{request: target, input: input, usesDecisionWaiter: true, ackOnly: true}, nil
+	}
+	if !usesDecisionWaiter {
+		ctx = decision.WithNativeContinuation(ctx)
 	}
 	decision := strings.ToLower(strings.TrimSpace(input.Decision))
 	optionID := input.OptionID
@@ -396,6 +404,23 @@ func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Requ
 		return sdk.ToolResultPart{}, nil, err
 	}
 	resolved.RunConfig.RunID = runIDForChatRequest(runID)
+	if fence, ok := runtimefence.FromContext(ctx); ok {
+		var count int64
+		err := runtimefence.InTransaction(ctx, s.queries, fence.BotID, fence.SessionID, func(queries dbstore.Queries) error {
+			var err error
+			count, err = queries.MarkSessionRunDecisionExecuting(ctx, sqlc.MarkSessionRunDecisionExecutingParams{
+				BotID: db.ParseUUIDOrEmpty(fence.BotID), SessionID: db.ParseUUIDOrEmpty(fence.SessionID),
+				RunID: db.ParseUUIDOrEmpty(runID), FencingToken: fence.Token, DecisionID: req.ID,
+			})
+			return err
+		})
+		if err != nil {
+			return sdk.ToolResultPart{}, nil, fmt.Errorf("checkpoint approved tool execution: %w", err)
+		}
+		if count != 1 {
+			return sdk.ToolResultPart{}, nil, sessionruntime.ErrRunOwnershipLost
+		}
+	}
 	part, uiMetadata, err := s.agent.ExecuteToolWithUIMetadata(ctx, resolved.RunConfig, sdk.ToolCall{
 		ToolCallID: req.ToolCallID,
 		ToolName:   req.ToolName,
@@ -421,6 +446,10 @@ func (s *Service) storeToolResultAndContinue(
 	if err != nil {
 		return err
 	}
+	requestMessageID, err := s.continuationTurnRequestMessageID(ctx, approval.SessionID, runHandle)
+	if err != nil {
+		return err
+	}
 	modelMessages := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
 	storeOpts := storeRoundOptions{AllowPendingToolCalls: true}
 	// UI-only payloads stripped from the tool output (e.g. the edit diff) ride
@@ -438,6 +467,7 @@ func (s *Service) storeToolResultAndContinue(
 		ReplyTarget:             approval.ReplyTarget,
 		ConversationType:        approval.ConversationType,
 		UserMessagePersisted:    true,
+		PersistedUserMessageID:  requestMessageID,
 		WorkspaceTargetID:       approval.WorkspaceTargetID,
 	}
 	storeReq.WorkspaceTarget = target
@@ -471,6 +501,10 @@ func (s *Service) continueToolApprovalSession(
 		return err
 	}
 	resolved.RunConfig.RunID = runIDForChatRequest(runID)
+	requestMessageID, err := s.continuationTurnRequestMessageID(ctx, approval.SessionID, runHandle)
+	if err != nil {
+		return err
+	}
 
 	cfg, err := s.prepareContinuationRunConfig(
 		ctx,
@@ -494,6 +528,7 @@ func (s *Service) continueToolApprovalSession(
 		ReplyTarget:             approval.ReplyTarget,
 		ConversationType:        approval.ConversationType,
 		UserMessagePersisted:    true,
+		PersistedUserMessageID:  requestMessageID,
 		WorkspaceTargetID:       approval.WorkspaceTargetID,
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}

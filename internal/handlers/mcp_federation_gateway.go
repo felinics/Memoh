@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -40,21 +41,25 @@ func (g *MCPFederationGateway) SetOAuthService(svc *mcpgw.OAuthService) {
 	g.oauthService = svc
 }
 
+// errMCPUnauthorized reports that the MCP server answered a request of the
+// session with 401 Unauthorized.
+var errMCPUnauthorized = errors.New("mcp server requires authorization")
+
 func (g *MCPFederationGateway) ListHTTPConnectionTools(ctx context.Context, connection mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
-	session, err := g.connectStreamableSession(ctx, connection)
+	session, status, err := g.connectStreamableSession(ctx, connection)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = session.Close() }()
 	result, err := session.ListTools(ctx, &sdkmcp.ListToolsParams{})
 	if err != nil {
-		return nil, err
+		return nil, status.annotate(err)
 	}
 	return convertSDKTools(result.Tools), nil
 }
 
 func (g *MCPFederationGateway) CallHTTPConnectionTool(ctx context.Context, connection mcpgw.Connection, toolName string, args map[string]any) (map[string]any, error) {
-	session, err := g.connectStreamableSession(ctx, connection)
+	session, _, err := g.connectStreamableSession(ctx, connection)
 	if err != nil {
 		return nil, err
 	}
@@ -70,20 +75,20 @@ func (g *MCPFederationGateway) CallHTTPConnectionTool(ctx context.Context, conne
 }
 
 func (g *MCPFederationGateway) ListSSEConnectionTools(ctx context.Context, connection mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
-	session, err := g.connectSSESession(ctx, connection)
+	session, status, err := g.connectSSESession(ctx, connection)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = session.Close() }()
 	result, err := session.ListTools(ctx, &sdkmcp.ListToolsParams{})
 	if err != nil {
-		return nil, err
+		return nil, status.annotate(err)
 	}
 	return convertSDKTools(result.Tools), nil
 }
 
 func (g *MCPFederationGateway) CallSSEConnectionTool(ctx context.Context, connection mcpgw.Connection, toolName string, args map[string]any) (map[string]any, error) {
-	session, err := g.connectSSESession(ctx, connection)
+	session, _, err := g.connectSSESession(ctx, connection)
 	if err != nil {
 		return nil, err
 	}
@@ -98,27 +103,32 @@ func (g *MCPFederationGateway) CallSSEConnectionTool(ctx context.Context, connec
 	return wrapSDKToolResult(result)
 }
 
-func (g *MCPFederationGateway) connectStreamableSession(ctx context.Context, connection mcpgw.Connection) (*sdkmcp.ClientSession, error) {
+func (g *MCPFederationGateway) connectStreamableSession(ctx context.Context, connection mcpgw.Connection) (*sdkmcp.ClientSession, *responseStatusRecorder, error) {
 	url := strings.TrimSpace(anyToString(connection.Config["url"]))
 	if url == "" {
-		return nil, errors.New("http mcp url is required")
+		return nil, nil, errors.New("http mcp url is required")
 	}
 	client := sdkmcp.NewClient(&sdkmcp.Implementation{
 		Name:    "memoh-federation-client",
 		Version: "v1",
 	}, nil)
+	httpClient, status := g.connectionHTTPClient(ctx, connection)
 	transport := &sdkmcp.StreamableClientTransport{
 		Endpoint:   url,
-		HTTPClient: g.connectionHTTPClient(ctx, connection),
+		HTTPClient: httpClient,
 		MaxRetries: -1,
 	}
-	return client.Connect(ctx, transport, nil)
+	session, err := client.Connect(ctx, transport, nil)
+	if err != nil {
+		return nil, nil, status.annotate(err)
+	}
+	return session, status, nil
 }
 
-func (g *MCPFederationGateway) connectSSESession(ctx context.Context, connection mcpgw.Connection) (*sdkmcp.ClientSession, error) {
+func (g *MCPFederationGateway) connectSSESession(ctx context.Context, connection mcpgw.Connection) (*sdkmcp.ClientSession, *responseStatusRecorder, error) {
 	endpoints := resolveSSEEndpointCandidates(connection.Config)
 	if len(endpoints) == 0 {
-		return nil, errors.New("sse mcp url is required")
+		return nil, nil, errors.New("sse mcp url is required")
 	}
 	var lastErr error
 	for _, endpoint := range endpoints {
@@ -126,20 +136,21 @@ func (g *MCPFederationGateway) connectSSESession(ctx context.Context, connection
 			Name:    "memoh-federation-client",
 			Version: "v1",
 		}, nil)
+		httpClient, status := g.connectionHTTPClient(ctx, connection)
 		transport := &sdkmcp.SSEClientTransport{
 			Endpoint:   endpoint,
-			HTTPClient: g.connectionHTTPClient(ctx, connection),
+			HTTPClient: httpClient,
 		}
 		session, err := client.Connect(ctx, transport, nil)
 		if err == nil {
-			return session, nil
+			return session, status, nil
 		}
-		lastErr = err
+		lastErr = status.annotate(err)
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no sse endpoint candidate available")
 	}
-	return nil, fmt.Errorf("connect sse mcp failed: %w", lastErr)
+	return nil, nil, fmt.Errorf("connect sse mcp failed: %w", lastErr)
 }
 
 func resolveSSEEndpointCandidates(config map[string]any) []string {
@@ -193,7 +204,10 @@ func resolveSSEEndpointCandidates(config map[string]any) []string {
 	return out
 }
 
-func (g *MCPFederationGateway) connectionHTTPClient(ctx context.Context, connection mcpgw.Connection) *http.Client {
+// connectionHTTPClient returns the client for one MCP session and the
+// recorder of the statuses its responses carried. The go-sdk transports report
+// a failed response only as its status text, so the status is taken here.
+func (g *MCPFederationGateway) connectionHTTPClient(ctx context.Context, connection mcpgw.Connection) (*http.Client, *responseStatusRecorder) {
 	base := g.client
 	if base == nil {
 		base = &http.Client{Timeout: 30 * time.Second}
@@ -214,22 +228,23 @@ func (g *MCPFederationGateway) connectionHTTPClient(ctx context.Context, connect
 		}
 	}
 
-	if len(headers) == 0 {
-		return base
-	}
 	transport := base.Transport
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
+	if len(headers) > 0 {
+		transport = &staticHeaderRoundTripper{
+			next:    transport,
+			headers: headers,
+		}
+	}
+	status := &responseStatusRecorder{next: transport}
 	return &http.Client{
 		Timeout:       base.Timeout,
 		CheckRedirect: base.CheckRedirect,
 		Jar:           base.Jar,
-		Transport: &staticHeaderRoundTripper{
-			next:    transport,
-			headers: headers,
-		},
-	}
+		Transport:     status,
+	}, status
 }
 
 func (g *MCPFederationGateway) ListStdioConnectionTools(ctx context.Context, botID string, connection mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
@@ -427,6 +442,29 @@ func anyToString(v any) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+// responseStatusRecorder records whether any response of an MCP session was
+// 401 Unauthorized.
+type responseStatusRecorder struct {
+	next         http.RoundTripper
+	unauthorized atomic.Bool
+}
+
+func (r *responseStatusRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := r.next.RoundTrip(req)
+	if err == nil && resp.StatusCode == http.StatusUnauthorized {
+		r.unauthorized.Store(true)
+	}
+	return resp, err
+}
+
+// annotate marks err with errMCPUnauthorized when the session saw a 401.
+func (r *responseStatusRecorder) annotate(err error) error {
+	if err == nil || r == nil || !r.unauthorized.Load() {
+		return err
+	}
+	return errors.Join(errMCPUnauthorized, err)
 }
 
 type staticHeaderRoundTripper struct {

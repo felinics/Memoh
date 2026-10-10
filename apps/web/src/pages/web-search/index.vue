@@ -107,6 +107,20 @@ const fetchItems = computed<FetchprovidersGetResponse[]>(() => FETCH_PROVIDER_TY
     }
 }))
 
+// The search box lives in the Providers container's fixed header and pipes the
+// query in as a prop; this panel only filters. (No Add button for this scope —
+// the list IS the catalog: clicking a template card starts configuring it.)
+const props = defineProps<{ searchQuery: string }>()
+
+function byName<T extends { name?: string }>(list: T[]): T[] {
+  const keyword = props.searchQuery.trim().toLowerCase()
+  if (!keyword) return list
+  return list.filter(p => (p.name ?? '').toLowerCase().includes(keyword))
+}
+
+const filteredSearchItems = computed(() => byName(searchItems.value))
+const filteredFetchItems = computed(() => byName(fetchItems.value))
+
 // Page-owned query key, valued `kind:id` so refresh restores which pane.
 const {
   view,
@@ -180,7 +194,8 @@ function handleFetchMaterialized(provider: FetchprovidersGetResponse) {
          pages: PageShell title bar + SectionGroup per provider kind. -->
     <PageShell
       v-if="view === 'list'"
-      :title="t('webSearch.title')"
+      variant="tab"
+      class="px-4 md:px-6"
     >
       <div class="space-y-8">
         <!-- Search providers -->
@@ -190,7 +205,7 @@ function handleFetchMaterialized(provider: FetchprovidersGetResponse) {
         >
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <BackendCard
-              v-for="provider in searchItems"
+              v-for="provider in filteredSearchItems"
               :key="provider.provider"
               :name="provider.name ?? ''"
               :enabled="provider.enable !== false && !!provider.id"
@@ -214,11 +229,11 @@ function handleFetchMaterialized(provider: FetchprovidersGetResponse) {
           :description="t('webSearch.fetchHint')"
         >
           <div
-            v-if="fetchItems.length > 0"
+            v-if="filteredFetchItems.length > 0"
             class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
             <BackendCard
-              v-for="provider in fetchItems"
+              v-for="provider in filteredFetchItems"
               :key="provider.provider"
               :name="provider.name ?? ''"
               :enabled="provider.enable !== false && (provider.provider === 'native' || !!provider.id)"

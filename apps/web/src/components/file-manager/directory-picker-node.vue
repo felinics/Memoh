@@ -3,7 +3,7 @@ import { onMounted, computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronRight } from 'lucide-vue-next'
 import { Spinner, TextButton } from '@felinic/ui'
-import { joinPath } from './utils'
+import type { DirectoryListing, PickerDirectory } from './directory-picker-types'
 import {
   treeAsideClass,
   treeGlyphSlotClass,
@@ -25,13 +25,17 @@ import { useTreeDisclosure } from './tree-disclosure'
 // never closing what you just picked).
 
 const props = defineProps<{
+  /**
+   * Absolute path of this directory. The root may pass '' to mean "the
+   * target's default directory"; the listing then reports the real path.
+   */
   path: string
   /** Row label. The root passes a surface name; children pass the directory name. */
   name: string
   depth: number
   selectedPath: string
-  /** Lists child directory NAMES of a path. Rejects on failure. */
-  listDirectory: (path: string) => Promise<string[]>
+  /** Lists child directories of a path. Rejects with a user-facing message. */
+  listDirectory: (path: string) => Promise<DirectoryListing>
   expandOnMount?: boolean
 }>()
 
@@ -39,27 +43,33 @@ const emit = defineEmits<{ select: [path: string] }>()
 
 const { t } = useI18n()
 
-const failed = ref(false)
-const children = ref<string[]>([])
+const failure = ref('')
+const children = ref<PickerDirectory[]>([])
+// Paths come from the server already joined for the target's OS, so the node
+// never builds one; the root learns its own path from its first listing.
+const resolvedPath = ref(props.path)
 
-const selected = computed(() => props.selectedPath === props.path)
+const selected = computed(() => !!resolvedPath.value && props.selectedPath === resolvedPath.value)
 
 const { expanded, loaded, spinnerVisible, expand, toggle, reload } = useTreeDisclosure(async () => {
   try {
-    children.value = await props.listDirectory(props.path)
-    failed.value = false
+    const listing = await props.listDirectory(resolvedPath.value)
+    resolvedPath.value = listing.path
+    children.value = listing.directories
+    failure.value = ''
     return true
-  } catch {
+  } catch (error) {
     // The message is on the retry line below the row; a toast per node would
-    // stack one per expanded folder. `failed` clears only on success so the
+    // stack one per expanded folder. `failure` clears only on success so the
     // line holds its place during a retry instead of flickering out and back.
-    failed.value = true
+    failure.value = error instanceof Error && error.message ? error.message : t('bots.folders.form.browseFailed')
     return false
   }
 })
 
 function onRowClick() {
-  emit('select', props.path)
+  // An unresolved root has no path to offer yet; the click still opens it.
+  if (resolvedPath.value) emit('select', resolvedPath.value)
   if (!expanded.value) void expand()
 }
 
@@ -74,7 +84,7 @@ onMounted(() => {
     role="button"
     tabindex="0"
     @click="onRowClick"
-    @keydown.enter.prevent="onRowClick"
+    @keydown.enter.exact.prevent="onRowClick"
     @keydown.space.prevent="onRowClick"
   >
     <span
@@ -94,7 +104,7 @@ onMounted(() => {
         v-else
         :stroke-width="1.53"
         class="size-4 text-muted-foreground transition-[rotate]"
-        :class="{ 'rotate-90': expanded && (loaded || failed) }"
+        :class="{ 'rotate-90': expanded && (loaded || !!failure) }"
       />
     </span>
     <span class="ml-1 min-w-0 flex-1 truncate">{{ name }}</span>
@@ -102,7 +112,7 @@ onMounted(() => {
 
   <template v-if="expanded">
     <div
-      v-if="failed"
+      v-if="failure"
       :class="treeAsideClass"
     >
       <span
@@ -110,7 +120,7 @@ onMounted(() => {
         :key="g"
         :class="treeIndentClass"
       />
-      <span class="ml-1 min-w-0 flex-1 truncate">{{ t('bots.folders.form.browseFailed') }}</span>
+      <span class="ml-1 min-w-0 flex-1 truncate">{{ failure }}</span>
       <TextButton
         class="ml-2 shrink-0"
         @click.stop="reload"
@@ -119,12 +129,24 @@ onMounted(() => {
       </TextButton>
     </div>
 
+    <div
+      v-else-if="loaded && !children.length"
+      :class="treeAsideClass"
+    >
+      <span
+        v-for="g in depth + 1"
+        :key="g"
+        :class="treeIndentClass"
+      />
+      <span class="ml-1 min-w-0 flex-1 truncate">{{ t('bots.folders.form.browseEmpty') }}</span>
+    </div>
+
     <DirectoryPickerNode
       v-for="child in children"
       v-else
-      :key="child"
-      :path="joinPath(path, child)"
-      :name="child"
+      :key="child.path"
+      :path="child.path"
+      :name="child.name"
       :depth="depth + 1"
       :selected-path="selectedPath"
       :list-directory="listDirectory"

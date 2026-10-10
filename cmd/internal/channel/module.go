@@ -66,7 +66,6 @@ func ServerLocalModule() fx.Option {
 func RuntimeModule() fx.Option {
 	return fx.Options(
 		fx.Provide(
-			provideLocalMediaService,
 			provideRemoteCommandHandler,
 			provideRemoteQueueCommandHandler,
 			provideRemoteSkillResolver,

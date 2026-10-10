@@ -1169,9 +1169,10 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 // catalog code and its fixed detail; err itself stays on the result for the
 // task's terminal record.
 func (r *agentRunResult) fail(err error) {
-	public, _ := apperror.PublicFrom(apperror.New(subagentFailureCode(err), nil), "")
-	r.Code = string(public.Code)
-	r.Error = public.Detail
+	code := subagentFailureCode(err)
+	definition, _ := apperror.Lookup(code)
+	r.Code = string(code)
+	r.Error = definition.Detail
 	r.Cause = err
 }
 

@@ -15,6 +15,7 @@ import (
 
 var (
 	ErrInvalidInput              = errors.New("invalid runtime input")
+	ErrInvalidName               = errors.New("invalid runtime name")
 	ErrRuntimeConnectionNotReady = errors.New("runtime connection is no longer ready")
 )
 
@@ -63,7 +64,7 @@ func (s *Service) CreateRuntime(ctx context.Context, userID string, req CreateRu
 		return Runtime{}, ErrInvalidInput
 	}
 	if len(name) > maxRuntimeNameBytes || strings.ContainsRune(name, '\x00') || !utf8.ValidString(name) {
-		return Runtime{}, fmt.Errorf("%w: name must be valid UTF-8 of at most %d bytes", ErrInvalidInput, maxRuntimeNameBytes)
+		return Runtime{}, fmt.Errorf("%w: name must be valid UTF-8 of at most %d bytes", ErrInvalidName, maxRuntimeNameBytes)
 	}
 	if err := s.store.ExpirePendingUserRuntimes(ctx, userID); err != nil {
 		return Runtime{}, err

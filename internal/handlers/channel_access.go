@@ -9,8 +9,11 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/acl"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channelaccess"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	identitypkg "github.com/felinics/memoh/internal/identity"
 )
 
@@ -51,9 +54,9 @@ func (h *ChannelAccessHandler) Register(e *echo.Echo) {
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} channelaccess.ListManagersResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/channel-managers [get].
 func (h *ChannelAccessHandler) ListManagers(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -62,7 +65,7 @@ func (h *ChannelAccessHandler) ListManagers(c echo.Context) error {
 	}
 	items, err := h.service.ListManagers(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list managers")
 	}
 	return c.JSON(http.StatusOK, channelaccess.ListManagersResponse{Items: items})
 }
@@ -74,9 +77,9 @@ func (h *ChannelAccessHandler) ListManagers(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body channelaccess.SetManagerRequest true "Override payload"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/channel-managers [post].
 func (h *ChannelAccessHandler) SetManager(c echo.Context) error {
 	botID, actorID, err := h.requireManageAccess(c)
@@ -85,17 +88,17 @@ func (h *ChannelAccessHandler) SetManager(c echo.Context) error {
 	}
 	var req channelaccess.SetManagerRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	channelIdentityID := strings.TrimSpace(req.ChannelIdentityID)
 	if err := identitypkg.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("channel_identity_id", err)
 	}
 	if err := h.service.SetManager(c.Request().Context(), botID, channelIdentityID, req.Granted, actorID); err != nil {
 		if errors.Is(err, channelaccess.ErrInvalidInput) || errors.Is(err, acl.ErrInvalidRuleSubject) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return apperror.FieldInvalid("channel_identity_id", err)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "set manager")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -107,9 +110,9 @@ func (h *ChannelAccessHandler) SetManager(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param channel_identity_id path string true "Channel Identity ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/channel-managers/{channel_identity_id} [delete].
 func (h *ChannelAccessHandler) ClearManagerOverride(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -118,10 +121,10 @@ func (h *ChannelAccessHandler) ClearManagerOverride(c echo.Context) error {
 	}
 	channelIdentityID := strings.TrimSpace(c.Param("channel_identity_id"))
 	if err := identitypkg.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("channel_identity_id", err)
 	}
 	if err := h.service.ClearManagerOverride(c.Request().Context(), botID, channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "clear manager override")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -132,8 +135,8 @@ func (h *ChannelAccessHandler) ClearManagerOverride(c echo.Context) error {
 // @Tags users
 // @Param payload body channelaccess.IssueLinkCodeRequest false "Link code options"
 // @Success 201 {object} channelaccess.LinkCode
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /users/me/channel-links [post].
 func (h *ChannelAccessHandler) IssueLinkCode(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -142,14 +145,11 @@ func (h *ChannelAccessHandler) IssueLinkCode(c echo.Context) error {
 	}
 	var req channelaccess.IssueLinkCodeRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	code, err := h.service.IssueLinkCode(c.Request().Context(), userID, strings.TrimSpace(req.ChannelType))
 	if err != nil {
-		if errors.Is(err, channelaccess.ErrInvalidInput) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "issue link code")
 	}
 	return c.JSON(http.StatusCreated, code)
 }
@@ -159,7 +159,7 @@ func (h *ChannelAccessHandler) IssueLinkCode(c echo.Context) error {
 // @Description List the IM channel identities bound to the current user's account
 // @Tags users
 // @Success 200 {object} channelaccess.ListBindingsResponse
-// @Failure 500 {object} apperror.Problem
+// @Failure 500 {object} server.Problem
 // @Router /users/me/channel-identities [get].
 func (h *ChannelAccessHandler) ListBindings(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -168,7 +168,7 @@ func (h *ChannelAccessHandler) ListBindings(c echo.Context) error {
 	}
 	items, err := h.service.ListUserBindings(c.Request().Context(), userID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list user bindings")
 	}
 	return c.JSON(http.StatusOK, channelaccess.ListBindingsResponse{Items: items})
 }
@@ -179,8 +179,8 @@ func (h *ChannelAccessHandler) ListBindings(c echo.Context) error {
 // @Tags users
 // @Param channel_identity_id path string true "Channel Identity ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /users/me/channel-identities/{channel_identity_id} [delete].
 func (h *ChannelAccessHandler) Unbind(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -189,10 +189,10 @@ func (h *ChannelAccessHandler) Unbind(c echo.Context) error {
 	}
 	channelIdentityID := strings.TrimSpace(c.Param("channel_identity_id"))
 	if err := identitypkg.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("channel_identity_id", err)
 	}
 	if err := h.service.Unbind(c.Request().Context(), userID, channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "unbind")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -202,9 +202,9 @@ func (h *ChannelAccessHandler) requireManageAccess(c echo.Context) (string, stri
 	if err != nil {
 		return "", "", err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", "", err
 	}
 	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, actorID, botID); err != nil {
 		return "", "", err

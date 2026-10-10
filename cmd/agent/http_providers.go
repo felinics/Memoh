@@ -103,8 +103,10 @@ func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service,
 	return handler
 }
 
-func provideACPRuntimeHandler(pool *acpagent.SessionPool, sessionService *sessionpkg.Service, botService *bots.Service, accountService *accounts.Service) *handlers.ACPRuntimeHandler {
-	return handlers.NewACPRuntimeHandler(pool, sessionService, botService, accountService)
+func provideACPRuntimeHandler(pool *acpagent.SessionPool, sessionService *sessionpkg.Service, botService *bots.Service, accountService *accounts.Service, botAgentsService *botagents.Service) *handlers.ACPRuntimeHandler {
+	handler := handlers.NewACPRuntimeHandler(pool, sessionService, botService, accountService)
+	handler.SetBotAgents(botAgentsService)
+	return handler
 }
 
 func provideBotAgentsHandler(log *slog.Logger, service *botagents.Service, botService *bots.Service, accountService *accounts.Service, runtimes external.Drivers) *handlers.BotAgentsHandler {
@@ -145,10 +147,11 @@ func provideProviderOAuthHandler(providersService *providers.Service) *handlers.
 	return handlers.NewProviderOAuthHandler(providersService)
 }
 
-func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *application.Service, sessionRuntime *sessionruntime.Manager, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service, rc *boot.RuntimeConfig, commandHandler *command.Handler, containerdHandler *handlers.ContainerdHandler) *handlers.LocalChannelHandler {
+func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *application.Service, sessionRuntime *sessionruntime.Manager, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service, rc *boot.RuntimeConfig, commandHandler *command.Handler, containerdHandler *handlers.ContainerdHandler, workdirService *workdir.Service) *handlers.LocalChannelHandler {
 	h := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, hub, botService, accountService, sessionService)
 	h.SetAgentService(resolver)
 	h.SetSessionRuntime(sessionRuntime)
+	h.SetWorkdirService(workdirService)
 	h.SetCommandHandler(commandHandler)
 	h.SetRuntimeSkillResolver(containerdHandler)
 	h.SetAuthTokenConfig(rc.JwtSecret, rc.JwtExpiresIn)

@@ -16,10 +16,10 @@ import (
 	"testing"
 )
 
-// updateGolden adds the codes missing from testdata/codes.golden and leaves
-// every recorded status as it is. Run it after adding a code:
+// updateGolden adds the codes missing from testdata/codes.golden, keeps every
+// recorded status as it is, and writes the file sorted by code. Run it after adding a code:
 // go test ./internal/apperror -run TestCatalogGolden -update-golden.
-var updateGolden = flag.Bool("update-golden", false, "add missing codes to testdata/codes.golden")
+var updateGolden = flag.Bool("update-golden", false, "add missing codes to testdata/codes.golden and sort it")
 
 const goldenPath = "testdata/codes.golden"
 
@@ -86,9 +86,26 @@ func sortedCatalogCodes() []Code {
 	return codes
 }
 
+// goldenText is the golden file for records: one "code\tstatus" line per
+// code, sorted by code, so codes added on parallel branches land on different
+// lines.
+func goldenText(records map[Code]int) string {
+	codes := make([]Code, 0, len(records))
+	for code := range records {
+		codes = append(codes, code)
+	}
+	sort.Slice(codes, func(i, j int) bool { return codes[i] < codes[j] })
+	var b strings.Builder
+	for _, code := range codes {
+		fmt.Fprintf(&b, "%s\t%d\n", code, records[code])
+	}
+	return b.String()
+}
+
 // Every declared Code has a catalog entry and every catalog entry is a
-// declared Code. PublicFrom refuses codes outside the catalog, so an
-// undeclared code would surface as an opaque 500 at the transport boundary.
+// declared Code. errs.Answer does not answer with a code outside the catalog,
+// so an undeclared code would surface as an opaque 500 at the transport
+// boundary.
 func TestCatalogCoversEveryDeclaredCode(t *testing.T) {
 	t.Parallel()
 	declared := declaredCodes(t)
@@ -138,6 +155,9 @@ func TestLocaleCatalogAlignment(t *testing.T) {
 			if err := json.Unmarshal(rawErrors, &errorsNode); err != nil {
 				t.Fatalf("decode %s errors: %v", path, err)
 			}
+			if key, ok := firstUnsortedKey(t, rawErrors, "errors"); ok {
+				t.Errorf("%s: keys under errors are not sorted at %s; sort them so codes added on parallel branches land on different lines", filepath.Base(path), key)
+			}
 			leaves := make(map[string]struct{})
 			collectLeaves(errorsNode, "", leaves)
 			for code := range catalog {
@@ -152,6 +172,36 @@ func TestLocaleCatalogAlignment(t *testing.T) {
 			}
 		})
 	}
+}
+
+// firstUnsortedKey returns the first key, in file order, that does not sort
+// after the key before it in its object, searching nested objects too.
+func firstUnsortedKey(t *testing.T, raw json.RawMessage, prefix string) (string, bool) {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return "", false
+	}
+	previous := ""
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			t.Fatalf("decode %s: %v", prefix, err)
+		}
+		key, _ := tok.(string)
+		if previous != "" && key <= previous {
+			return prefix + "." + key, true
+		}
+		previous = key
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			t.Fatalf("decode %s.%s: %v", prefix, key, err)
+		}
+		if found, ok := firstUnsortedKey(t, value, prefix+"."+key); ok {
+			return found, true
+		}
+	}
+	return "", false
 }
 
 func collectLeaves(node map[string]any, prefix string, out map[string]struct{}) {
@@ -184,11 +234,11 @@ var restatedStatuses = map[Code]statusRestatement{
 	CodeAgentProviderQuotaExhausted: {from: http.StatusPaymentRequired, to: http.StatusBadGateway},
 }
 
-// codes.golden is the append-only record of the public contract: a code and
-// the status it was published with are never renamed or removed, and a
+// codes.golden is the record of the public contract, sorted by code: a code
+// and the status it was published with are never renamed or removed, and a
 // status that differs from the record must be listed in restatedStatuses.
-// Adding a code requires appending a line (run with -update-golden); any
-// other difference fails.
+// Adding a code requires adding its line (run with -update-golden); any other
+// difference fails.
 func TestCatalogGolden(t *testing.T) {
 	golden := make(map[Code]int)
 	raw, err := os.ReadFile(goldenPath)
@@ -209,20 +259,18 @@ func TestCatalogGolden(t *testing.T) {
 		t.Fatalf("read golden: %v (run with -update-golden to create it)", err)
 	}
 	if *updateGolden {
-		var b strings.Builder
-		b.Write(raw)
-		if len(raw) > 0 && raw[len(raw)-1] != '\n' {
-			b.WriteByte('\n')
-		}
 		for _, code := range sortedCatalogCodes() {
 			if _, ok := golden[code]; !ok {
-				fmt.Fprintf(&b, "%s\t%d\n", code, catalog[code].HTTPStatus)
+				golden[code] = catalog[code].HTTPStatus
 			}
 		}
-		if err := os.WriteFile(goldenPath, []byte(b.String()), 0o600); err != nil {
+		if err := os.WriteFile(goldenPath, []byte(goldenText(golden)), 0o600); err != nil {
 			t.Fatalf("write golden: %v", err)
 		}
 		return
+	}
+	if string(raw) != goldenText(golden) {
+		t.Errorf("%s is not sorted by code; run with -update-golden to rewrite it", goldenPath)
 	}
 	for code, status := range golden {
 		definition, ok := catalog[code]
@@ -288,8 +336,12 @@ var declaredFaults = map[Code]Fault{
 	CodeAgentResponseTimeout:               FaultDependency,
 	CodeRuntimePromptFailed:                FaultDependency,
 	CodeExternalRuntimeSessionResumeFailed: FaultDependency,
+	CodeMCPOAuthDiscoveryFailed:            FaultDependency,
 	CodeExternalRuntimeUsageLimited:        FaultDependency,
 	CodeACPConfigUpdateFailed:              FaultDependency,
+	CodeExternalRuntimeRateLimited:         FaultDependency,
+	CodeExternalRuntimeOverloaded:          FaultDependency,
+	CodeExternalRuntimeUpstreamUnreachable: FaultDependency,
 }
 
 // providerCodePrefixes name the codes a model provider's answer produces. A
@@ -298,13 +350,36 @@ var declaredFaults = map[Code]Fault{
 // fault its 4xx status would give.
 var providerCodePrefixes = []string{"agent.provider_", "agent.response_"}
 
+// declarable reports whether a catalog entry may declare f. Canceled is
+// attributed at a boundary from the caller's context, never by a code.
+func declarable(f Fault) bool {
+	switch f {
+	case "", FaultClient, FaultServer, FaultDependency:
+		return true
+	default:
+		return false
+	}
+}
+
+func TestDeclarableFaults(t *testing.T) {
+	t.Parallel()
+	for _, f := range []Fault{"", FaultClient, FaultServer, FaultDependency} {
+		if !declarable(f) {
+			t.Errorf("fault %q should be declarable", f)
+		}
+	}
+	for _, f := range []Fault{FaultCanceled, "unknown"} {
+		if declarable(f) {
+			t.Errorf("fault %q must not be declarable", f)
+		}
+	}
+}
+
 func TestCatalogDeclaredFaults(t *testing.T) {
 	t.Parallel()
 	for code, definition := range catalog {
-		switch definition.Fault {
-		case "", FaultClient, FaultServer, FaultDependency:
-		default:
-			t.Errorf("catalog entry %q declares unknown fault %q", code, definition.Fault)
+		if !declarable(definition.Fault) {
+			t.Errorf("catalog entry %q declares fault %q, which a catalog entry cannot declare", code, definition.Fault)
 		}
 		if want, listed := declaredFaults[code]; definition.Fault != want {
 			if listed {

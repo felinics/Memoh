@@ -1,6 +1,11 @@
 package webhooktunnel
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -229,5 +234,23 @@ func TestTargetURLHonorsExplicitTarget(t *testing.T) {
 	}
 	if got != "http://127.0.0.1:9999" {
 		t.Fatalf("targetURL = %q", got)
+	}
+}
+
+func TestRecordExitWritesOneEventRecord(t *testing.T) {
+	var buf bytes.Buffer
+	m := &Manager{log: slog.New(slog.NewJSONHandler(&buf, nil))}
+	m.recordExit(context.Background(), errors.New("exit status 1"))
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("records = %q, want exactly one", lines)
+	}
+	var rec map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec["msg"] != "cloudflared exited" || rec["level"] != "WARN" || rec["fault"] == nil {
+		t.Fatalf("record = %v, want a WARN event with fault attribution", rec)
 	}
 }

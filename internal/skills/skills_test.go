@@ -146,6 +146,26 @@ func TestApplyActionRejectsRegistryAppSkill(t *testing.T) {
 	}
 }
 
+// ApplyAction reports a Skill it cannot find and a request it does not accept
+// with this package's errors, not with the workspace bridge's.
+func TestApplyActionReportsItsOwnErrors(t *testing.T) {
+	client := newFakeClient()
+	missing := pathJoin("/data/.agents/skills", "missing", "SKILL.md")
+	for _, action := range []string{ActionDisable, ActionEnable, ActionAdopt} {
+		if err := ApplyAction(context.Background(), client, nil, ActionRequest{Action: action, TargetPath: missing}); !errors.Is(err, ErrSkillNotFound) {
+			t.Fatalf("ApplyAction(%s) error = %v, want ErrSkillNotFound", action, err)
+		}
+	}
+	for name, req := range map[string]ActionRequest{
+		"empty target":   {Action: ActionDisable},
+		"unknown action": {Action: "rename", TargetPath: missing},
+	} {
+		if err := ApplyAction(context.Background(), client, nil, req); !errors.Is(err, ErrInvalidSkillRequest) {
+			t.Fatalf("%s: error = %v, want ErrInvalidSkillRequest", name, err)
+		}
+	}
+}
+
 func TestApplyActionAdoptRejectsInvalidManagedName(t *testing.T) {
 	client := newFakeClient()
 	externalPath := pathJoin("/data/.agents/skills", "escape", "SKILL.md")
@@ -156,8 +176,8 @@ func TestApplyActionAdoptRejectsInvalidManagedName(t *testing.T) {
 		Action:     ActionAdopt,
 		TargetPath: externalPath,
 	})
-	if !errors.Is(err, bridge.ErrBadRequest) {
-		t.Fatalf("adopt err = %v, want ErrBadRequest", err)
+	if !errors.Is(err, ErrInvalidSkillRequest) {
+		t.Fatalf("adopt err = %v, want ErrInvalidSkillRequest", err)
 	}
 	if _, ok := client.files[pathJoin(ManagedDirPath, "..", "SKILL.md")]; ok {
 		t.Fatalf("unexpected managed write for invalid adopted name")
@@ -217,8 +237,8 @@ func TestIsValidNameRejectsTraversalPatterns(t *testing.T) {
 
 func TestUserSkillDirForNameRejectsEscapingNames(t *testing.T) {
 	for _, name := range []string{".", "..", ".alpha", "alpha..beta"} {
-		if _, err := userSkillDirForName(name); !errors.Is(err, bridge.ErrBadRequest) {
-			t.Fatalf("userSkillDirForName(%q) err = %v, want ErrBadRequest", name, err)
+		if _, err := userSkillDirForName(name); !errors.Is(err, ErrInvalidSkillRequest) {
+			t.Fatalf("userSkillDirForName(%q) err = %v, want ErrInvalidSkillRequest", name, err)
 		}
 	}
 
@@ -256,8 +276,8 @@ func TestDeletableSkillDirForSourcePath(t *testing.T) {
 		"/data/.agents/skills/alpha/SKILL.md",
 		pathJoin(ManagedDirPath, "..", "escape", "SKILL.md"),
 	} {
-		if _, err := DeletableSkillDirForSourcePath(sourcePath); !errors.Is(err, bridge.ErrBadRequest) {
-			t.Fatalf("DeletableSkillDirForSourcePath(%q) err = %v, want ErrBadRequest", sourcePath, err)
+		if _, err := DeletableSkillDirForSourcePath(sourcePath); !errors.Is(err, ErrInvalidSkillRequest) {
+			t.Fatalf("DeletableSkillDirForSourcePath(%q) err = %v, want ErrInvalidSkillRequest", sourcePath, err)
 		}
 	}
 }
@@ -341,8 +361,8 @@ func TestNamespacedSkillPaths(t *testing.T) {
 		{"reg", "pkg", "nul.txt"},
 		{"reg", "pkg", strings.Repeat("a", maxPortableResourceIDBytes+1)},
 	} {
-		if _, err := SkillDirForIDs(tc.registryID, tc.appID, tc.skillID); !errors.Is(err, bridge.ErrBadRequest) {
-			t.Fatalf("SkillDirForIDs(%q,%q,%q) err = %v, want ErrBadRequest", tc.registryID, tc.appID, tc.skillID, err)
+		if _, err := SkillDirForIDs(tc.registryID, tc.appID, tc.skillID); !errors.Is(err, ErrInvalidSkillRequest) {
+			t.Fatalf("SkillDirForIDs(%q,%q,%q) err = %v, want ErrInvalidSkillRequest", tc.registryID, tc.appID, tc.skillID, err)
 		}
 	}
 

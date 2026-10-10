@@ -93,6 +93,7 @@ import (
 	"github.com/felinics/memoh/internal/schedule"
 	"github.com/felinics/memoh/internal/searchproviders"
 	"github.com/felinics/memoh/internal/settings"
+	storagepkg "github.com/felinics/memoh/internal/storage"
 	"github.com/felinics/memoh/internal/storage/providers/containerfs"
 	"github.com/felinics/memoh/internal/storage/providers/fallback"
 	"github.com/felinics/memoh/internal/storage/providers/localfs"
@@ -447,7 +448,9 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, provid
 
 func provideSessionService(log *slog.Logger, queries dbstore.Queries, hub *event.Hub) *sessionpkg.Service {
 	service := sessionpkg.NewService(log, queries, hub)
-	service.SetACPSetupValidator(acpprofileadapter.NewCatalog())
+	// Foundation-level: the Server's Agent service is not in every graph that
+	// builds sessions, and setup resolution only reads Agent rows.
+	service.SetACPSetupValidator(acpprofileadapter.NewCatalog(botagents.NewService(log, queries)))
 	return service
 }
 
@@ -656,8 +659,9 @@ func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.R
 	return acpclient.NewRunner(log, manager)
 }
 
-func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler, sessionRuntime *sessionruntime.Manager) *acpagent.SessionPool {
+func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler, sessionRuntime *sessionruntime.Manager, botAgents *botagents.Service) *acpagent.SessionPool {
 	pool := acpagent.NewSessionPool(log, runner, botService, agentsessionadapter.NewSource(sessionService))
+	pool.SetAgentSetupResolver(botAgents)
 	pool.SetSessionRuntime(sessionRuntime)
 	pool.SetRuntimeStateStore(agentsessionadapter.NewRuntimeStateStore(queries))
 	pool.SetToolGateway(toolGateway)
@@ -1204,15 +1208,18 @@ func (a *acpRuntimePoolAdapter) CloseAgentRuntime(botID, runtimeID string) error
 	return a.pool.CloseRuntime(botID, runtimeID)
 }
 
-func provideMediaService(log *slog.Logger, provider bridge.Provider, cfg config.Config) *media.Service {
+func provideMediaStorage(provider bridge.Provider, cfg config.Config) storagepkg.Provider {
 	primary := containerfs.New(provider)
 	dataRoot := cfg.Workspace.DataRoot
 	if dataRoot == "" {
 		dataRoot = config.DefaultDataRoot
 	}
 	secondary := localfs.New(filepath.Join(dataRoot, "media"))
-	storageProvider := fallback.New(primary, secondary)
-	return media.NewService(log, storageProvider)
+	return fallback.New(primary, secondary)
+}
+
+func provideMediaService(log *slog.Logger, provider storagepkg.Provider) *media.Service {
+	return media.NewService(log, provider)
 }
 
 func provideAudioRegistry() *audiopkg.Registry {
@@ -1453,6 +1460,7 @@ func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memprovider.
 		ChatCompletionsCompat: providers.ProviderConfigString(memoryProvider, models.ChatCompletionsCompatConfigKey),
 		Timeout:               c.timeout,
 		PromptCacheTTL:        providers.ProviderConfigString(memoryProvider, "prompt_cache_ttl"),
+		Logger:                c.logger,
 		OnUsage: func(ctx context.Context, operation string, usage sdk.Usage) {
 			c.recordUsage(ctx, botID, memoryModel.ID, operation, usage)
 		},

@@ -26,6 +26,8 @@ import (
 	messageevent "github.com/felinics/memoh/internal/chat/event"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/media"
 )
 
@@ -177,23 +179,23 @@ func writeSSEJSON(writer io.Writer, flusher http.Flusher, payload any) error {
 // @Param before query string false "Before"
 // @Param before_message_id query string false "Message ID cursor before which to page" format(uuid)
 // @Success 200 {object} UIMessageListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/messages [get].
 func (h *MessageHandler) ListMessages(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
-	sessionID := strings.TrimSpace(c.QueryParam("session_id"))
-	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
+	sessionID, err := httpx.RequiredQuery(c, "session_id")
+	if err != nil {
+		return err
 	}
 	if h.messageService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "message service not configured")
@@ -209,7 +211,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	beforeMessageID := strings.TrimSpace(c.QueryParam("before_message_id"))
 	if beforeMessageID != "" {
 		if _, err := uuid.Parse(beforeMessageID); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid before_message_id")
+			return apperror.FieldInvalid("before_message_id", err)
 		}
 	}
 	before, hasBefore := parseBeforeParam(c.QueryParam("before"))
@@ -233,7 +235,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 		messages, err = h.listLatestUIPageBySession(c.Request().Context(), sessionID, limit)
 	}
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list messages")
 	}
 	// Each page is converted independently, so a page that begins mid assistant
 	// turn (its earlier rows on the previous page) would render one reply as
@@ -292,27 +294,27 @@ func (h *MessageHandler) listLatestUIPageBySession(ctx context.Context, sessionI
 // @Param before query int false "Messages before target" default(30) minimum(0) maximum(100)
 // @Param after query int false "Messages after target" default(30) minimum(0) maximum(100)
 // @Success 200 {object} UILocateMessageResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/messages/locate [get].
 func (h *MessageHandler) LocateMessage(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	if h.messageService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "message service not configured")
 	}
 
-	sessionID := strings.TrimSpace(c.QueryParam("session_id"))
-	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session_id is required")
+	sessionID, err := httpx.RequiredQuery(c, "session_id")
+	if err != nil {
+		return err
 	}
 	bot, _, sess, err := h.authorizeMessageSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
@@ -324,7 +326,7 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 		externalMessageID = strings.TrimSpace(c.QueryParam("message_id"))
 	}
 	if externalMessageID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "external_message_id is required")
+		return apperror.FieldRequired("external_message_id")
 	}
 
 	before := parseBoundedInt32(c.QueryParam("before"), 30, 0, 100)
@@ -334,7 +336,7 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "message not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "get message")
 	}
 
 	items := chatview.ConvertMessagesToUITurns(located.Messages)
@@ -683,18 +685,18 @@ func uiTurnHeadExtensionLimit(currentRows int, limit int32) int {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/messages [delete].
 func (h *MessageHandler) DeleteMessages(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	bot, err := h.authorizeBotManage(c.Request().Context(), channelIdentityID, botID)
 	if err != nil {
@@ -770,21 +772,21 @@ func (h *MessageHandler) authorizeBotMessageAccess(c echo.Context, channelIdenti
 	ctx := c.Request().Context()
 	isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
 	if err != nil {
-		return bots.Bot{}, nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return bots.Bot{}, nil, errs.Wrap(err, "check admin")
 	}
 	bot, err := h.botService.GetForAccess(ctx, botID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return bots.Bot{}, nil, echo.NewHTTPError(http.StatusNotFound, "bot not found")
 		}
-		return bots.Bot{}, nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return bots.Bot{}, nil, errs.Wrap(err, "get bot")
 	}
 	perms, err := h.botService.ResolveUserPermissionsForBot(ctx, bot, channelIdentityID, isAdmin)
 	if err != nil {
 		if errors.Is(err, bots.ErrBotNotFound) {
 			return bots.Bot{}, nil, echo.NewHTTPError(http.StatusNotFound, "bot not found")
 		}
-		return bots.Bot{}, nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return bots.Bot{}, nil, errs.Wrap(err, "get bot")
 	}
 	if !bots.HasPermission(perms, bots.PermissionChat) && !bots.HasPermission(perms, bots.PermissionWorkspaceExec) {
 		return bots.Bot{}, nil, echo.NewHTTPError(http.StatusForbidden, "bot access denied")
@@ -816,13 +818,13 @@ func (h *MessageHandler) ServeMedia(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
-	contentHash := strings.TrimSpace(c.Param("content_hash"))
-	if contentHash == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "content hash is required")
+	contentHash, err := httpx.RequiredParam(c, "content_hash")
+	if err != nil {
+		return err
 	}
 	bot, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID)
 	if err != nil {
@@ -837,7 +839,7 @@ func (h *MessageHandler) ServeMedia(c echo.Context) error {
 		if errors.Is(err, media.ErrAssetNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "asset not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "read media asset")
 	}
 	defer func() { _ = reader.Close() }()
 	contentType := asset.Mime

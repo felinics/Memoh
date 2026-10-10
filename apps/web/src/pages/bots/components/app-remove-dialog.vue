@@ -6,9 +6,8 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  Alert,
-  AlertDescription,
   Button,
+  CalloutBanner,
   Checkbox,
   Dialog,
   DialogBody,
@@ -88,12 +87,11 @@ function reasonLabel(reason?: string): string {
         <InlineLoadingRow v-if="loading">
           {{ t('common.loading') }}
         </InlineLoadingRow>
-        <Alert
+        <CalloutBanner
           v-else-if="error"
-          variant="destructive"
-        >
-          <AlertDescription>{{ error }}</AlertDescription>
-        </Alert>
+          tone="destructive"
+          :description="error"
+        />
         <template v-else-if="preview">
           <section v-if="removedDependencies.length || keptDependencies.length">
             <h4 class="mb-1 text-caption font-medium uppercase tracking-wide text-muted-foreground">

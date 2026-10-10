@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 
 	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/logger"
@@ -26,7 +26,7 @@ func TestRequestIDReachesWhatAHandlerLogs(t *testing.T) {
 	log := logger.New(&buf, "info", "json")
 
 	e := echo.New()
-	e.Use(middleware.RequestID())
+	e.Use(httpx.AssignRequestID())
 	e.Use(httpx.RequestIDContext)
 	e.GET("/probe", func(c echo.Context) error {
 		// A handler logs the way the rest of the codebase should: with the
@@ -42,8 +42,10 @@ func TestRequestIDReachesWhatAHandlerLogs(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
 	}
 	header := rec.Header().Get(echo.HeaderXRequestID)
-	if header == "" {
-		t.Fatal("no request id on the response")
+	// An assigned id is a UUID, the same form as the id of a unit of work that
+	// did not arrive over HTTP.
+	if _, err := uuid.Parse(header); err != nil {
+		t.Fatalf("request id %q is not a UUID: %v", header, err)
 	}
 
 	var payload map[string]any
@@ -61,7 +63,7 @@ func TestRequestIDReachesWhatAHandlerLogs(t *testing.T) {
 }
 
 func TestRequestIDContextPrefersTheAssignedIDOverAClientHeader(t *testing.T) {
-	// echo's RequestID middleware honours an inbound X-Request-Id. Whatever it
+	// AssignRequestID honours an inbound X-Request-Id. Whatever it
 	// settles on is what the client sees, so that is what the logs must say —
 	// this test fails if the middleware ever reads the two from different
 	// places.
@@ -70,7 +72,7 @@ func TestRequestIDContextPrefersTheAssignedIDOverAClientHeader(t *testing.T) {
 	log := logger.New(&buf, "info", "json")
 
 	e := echo.New()
-	e.Use(middleware.RequestID())
+	e.Use(httpx.AssignRequestID())
 	e.Use(httpx.RequestIDContext)
 	e.GET("/probe", func(c echo.Context) error {
 		log.InfoContext(c.Request().Context(), "probe handled")
@@ -82,6 +84,10 @@ func TestRequestIDContextPrefersTheAssignedIDOverAClientHeader(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
+	// An inbound id is adopted whatever its form: readers treat it as opaque.
+	if got := rec.Header().Get(echo.HeaderXRequestID); got != clientSupplied {
+		t.Errorf("response header = %q, want the inbound %q", got, clientSupplied)
+	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &payload); err != nil {
 		t.Fatalf("json.Unmarshal(%q) = %v", buf.String(), err)

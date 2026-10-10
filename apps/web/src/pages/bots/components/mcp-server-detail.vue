@@ -214,7 +214,7 @@
                   v-else-if="sessionProbeResult === 'ok'"
                   class="size-4 text-success"
                 />
-                <AlertCircle
+                <ErrorIcon
                   v-else-if="sessionProbeResult === 'error'"
                   class="size-4 text-destructive"
                 />
@@ -443,7 +443,8 @@ import {
   SelectItem, SelectTrigger, SelectValue, SegmentedControl, Spinner, Switch, toast,
   type SegmentedItem,
 } from '@felinic/ui'
-import { AlertCircle, Globe, KeyRound, Loader2, Pencil, RefreshCw, SlidersHorizontal, Terminal, Trash2 } from 'lucide-vue-next'
+import { Globe, KeyRound, Loader2, Pencil, RefreshCw, SlidersHorizontal, Terminal, Trash2 } from 'lucide-vue-next'
+import { ErrorIcon } from '@memohai/icon/ui'
 import {
   postBotsByBotIdMcp, putBotsByBotIdMcpById, deleteBotsByBotIdMcpById,
   postBotsByBotIdMcpByIdProbe, getBotsByBotIdMcpByIdOauthStatus,

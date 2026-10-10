@@ -218,6 +218,9 @@ func (f *Store) Finalize(_ context.Context, params ledger.FinalizeParams) (ledge
 	if !ok || run.FencingToken != params.FencingToken || run.State.Terminal() {
 		return ledger.Run{}, false, nil
 	}
+	if params.ExpectedState != "" && run.State != params.ExpectedState {
+		return ledger.Run{}, false, nil
+	}
 	state := params.State
 	errorCode := params.ErrorCode
 	// Like FinalizeSessionRun, a finalize writes no message of its own and

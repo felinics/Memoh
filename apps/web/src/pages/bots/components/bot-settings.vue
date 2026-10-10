@@ -70,7 +70,6 @@
         :models="models"
         :providers="providers"
         :bot-agents="botAgents"
-        :bot-metadata="bot?.metadata"
         :acp-profiles="acpProfiles"
       />
 

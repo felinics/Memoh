@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/robfig/cron/v3"
-	"go.opentelemetry.io/otel/trace"
 
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/boot"
@@ -23,6 +22,7 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/job"
 	memtimezone "github.com/felinics/memoh/internal/timezone"
 	"github.com/felinics/memoh/internal/workdir"
 )
@@ -137,11 +137,17 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 	if s.queries == nil {
 		return Schedule{}, errors.New("schedule queries not configured")
 	}
-	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Pattern) == "" || strings.TrimSpace(req.Command) == "" {
-		return Schedule{}, invalidRequest("name, pattern, command are required")
+	if strings.TrimSpace(req.Name) == "" {
+		return Schedule{}, requiredField("name", "name, pattern, command are required")
+	}
+	if strings.TrimSpace(req.Pattern) == "" {
+		return Schedule{}, requiredField("pattern", "name, pattern, command are required")
+	}
+	if strings.TrimSpace(req.Command) == "" {
+		return Schedule{}, requiredField("command", "name, pattern, command are required")
 	}
 	if _, err := s.parser.Parse(req.Pattern); err != nil {
-		return Schedule{}, fmt.Errorf("invalid cron pattern: %w", err)
+		return Schedule{}, invalidFieldf("pattern", "invalid cron pattern: %v", err)
 	}
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -196,12 +202,12 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 func (s *Service) Get(ctx context.Context, id string) (Schedule, error) {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
-		return Schedule{}, err
+		return Schedule{}, invalidFieldf("id", "invalid schedule id: %v", err)
 	}
 	row, err := s.queries.GetScheduleByID(ctx, pgID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Schedule{}, errors.New("schedule not found")
+			return Schedule{}, ErrScheduleNotFound
 		}
 		return Schedule{}, err
 	}
@@ -244,7 +250,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 	pattern := existing.Pattern
 	if req.Pattern != nil {
 		if _, err := s.parser.Parse(*req.Pattern); err != nil {
-			return Schedule{}, fmt.Errorf("invalid cron pattern: %w", err)
+			return Schedule{}, invalidFieldf("pattern", "invalid cron pattern: %v", err)
 		}
 		pattern = *req.Pattern
 	}
@@ -425,9 +431,7 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 		RuntimeModelID:  sched.ACPModelID,
 		ReasoningEffort: sched.ReasoningEffort,
 	}, token)
-	if errors.Is(context.Cause(ctx), ErrExecutionTimeout) {
-		triggerErr = ErrExecutionTimeout
-	}
+	triggerErr = withExecutionTimeout(ctx, triggerErr)
 	if triggerErr != nil {
 		s.completeLog(ctx, logRow.ID, "error", "", triggerErr.Error(), nil, pgtype.UUID{})
 		return triggerErr
@@ -435,8 +439,21 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 
 	modelID := db.ParseUUIDOrEmpty(result.ModelID)
 	s.completeLog(ctx, logRow.ID, result.Status, result.Text, "", result.UsageBytes, modelID)
-	s.logger.InfoContext(ctx, "schedule completed", slog.String("schedule_id", sched.ID), slog.String("status", result.Status))
+	job.Annotate(ctx, slog.String("status", result.Status))
 	return nil
+}
+
+// withExecutionTimeout names the budget as the cause when it expired. It wraps
+// the trigger's own failure instead of replacing it, so a Recorded marker the
+// trigger put on it still reaches the fire unit.
+func withExecutionTimeout(ctx context.Context, err error) error {
+	if !errors.Is(context.Cause(ctx), ErrExecutionTimeout) || errors.Is(err, ErrExecutionTimeout) {
+		return err
+	}
+	if err == nil {
+		return ErrExecutionTimeout
+	}
+	return fmt.Errorf("%w: %w", ErrExecutionTimeout, err)
 }
 
 // resolveRunSession decides which session this fire runs in. new_session
@@ -699,25 +716,16 @@ func (s *Service) scheduleJob(ctx context.Context, schedule sqlc.Schedule) error
 	if id == "" {
 		return errors.New("schedule id missing")
 	}
-	job := func() {
-		item := toSchedule(schedule)
-		runCtx, runCancel := context.WithCancel(context.WithoutCancel(ctx))
-		defer runCancel()
-		// The registering request's span rides along in those values too, so
-		// without this every firing for the life of the process would be
-		// grafted onto the trace of the call that created the schedule. A
-		// firing is its own unit of work and starts its own trace.
-		runCtx = trace.ContextWithSpanContext(runCtx, trace.SpanContext{})
-		if err := s.runSchedule(runCtx, item); err != nil {
-			// Plain Error. Every context reachable here descends from the one
-			// that registered the schedule — on the Create path an HTTP
-			// request that finished long ago — and context.WithoutCancel
-			// drops the cancellation but keeps the values, so runCtx carries
-			// that request's id too. A firing belongs to no request; stamping
-			// it with one points at a request that had nothing to do with it.
-			//logctx:plain
-			s.logger.Error("scheduled job failed", slog.String("schedule_id", schedule.ID.String()), slog.Any("error", err))
-		}
+	fire := func() {
+		// Every context reachable here descends from the one that registered
+		// the schedule, on the Create path an HTTP request that finished long
+		// ago. A firing belongs to no request, so the unit gets its own request
+		// id and its own unlinked trace.
+		_ = job.Run(ctx, s.logger, "schedule.fire", job.Options{OwnRequestID: true}, func(runCtx context.Context) error {
+			runCtx, runCancel := context.WithCancel(runCtx)
+			defer runCancel()
+			return fireResult(runCtx, s.runSchedule(runCtx, toSchedule(schedule)))
+		}, slog.String("schedule_id", id), slog.String("bot_id", schedule.BotID.String()))
 	}
 
 	// Resolve bot timezone so cron expressions are interpreted in the bot's
@@ -727,11 +735,22 @@ func (s *Service) scheduleJob(ctx context.Context, schedule sqlc.Schedule) error
 	if err != nil {
 		return err
 	}
-	entryID := s.cron.Schedule(newLocationSchedule(sched, loc), cron.FuncJob(job))
+	entryID := s.cron.Schedule(newLocationSchedule(sched, loc), cron.FuncJob(fire))
 	s.mu.Lock()
 	s.jobs[id] = entryID
 	s.mu.Unlock()
 	return nil
+}
+
+// fireResult is the outcome a firing's unit reports. A fire that found the
+// session busy is dropped by design, because the next one is due before a
+// retry would be useful, so it is a skip and not a failure.
+func fireResult(ctx context.Context, err error) error {
+	if errors.Is(err, ErrSessionBusy) {
+		job.Annotate(ctx, slog.String("skipped", "busy"))
+		return nil
+	}
+	return err
 }
 
 func (s *Service) rescheduleJob(ctx context.Context, schedule sqlc.Schedule) error {

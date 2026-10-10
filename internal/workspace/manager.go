@@ -21,6 +21,7 @@ import (
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/identity"
 	netctl "github.com/felinics/memoh/internal/network"
@@ -523,8 +524,7 @@ func (m *Manager) Init(ctx context.Context) error {
 		StorageDriver: m.cfg.Snapshotter,
 	})
 	if err != nil {
-		m.logger.WarnContext(ctx, "base image preparation failed", slog.String("image", image), slog.Any("error", err))
-		return err
+		return errs.Wrap(err, "prepare base image", slog.String("image", image))
 	}
 	if result.Mode == ImagePrepareDelegated {
 		m.logger.InfoContext(ctx, "base image pull delegated to container backend", slog.String("image", image))

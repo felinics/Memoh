@@ -29,6 +29,8 @@ const (
 	reasonEnableFailed       = "channel.enable_failed"
 	reasonInvalidWebhook     = "channel.invalid_webhook"
 	reasonWebhookUnsupported = "channel.webhook_unsupported"
+	reasonSendTargetRequired = "channel.send_target_required"
+	reasonBindingRequired    = "channel.binding_required"
 )
 
 type Client struct{ rpc *runtimeRpc.Client }
@@ -100,6 +102,8 @@ var reasons = rpc.Reasons{
 	{Err: channel.ErrEnableChannelFailed, Reason: reasonEnableFailed, Code: codes.FailedPrecondition, Message: "channel enable failed"},
 	{Err: channel.ErrInvalidWebhookEndpoint, Reason: reasonInvalidWebhook, Code: codes.InvalidArgument, Message: "invalid channel webhook endpoint"},
 	{Err: channel.ErrWebhookEndpointUnsupported, Reason: reasonWebhookUnsupported, Code: codes.Unimplemented, Message: "channel webhook endpoint unsupported"},
+	{Err: channel.ErrSendTargetRequired, Reason: reasonSendTargetRequired, Code: codes.InvalidArgument, Message: "channel send target required"},
+	{Err: channel.ErrChannelBindingRequired, Reason: reasonBindingRequired, Code: codes.FailedPrecondition, Message: "channel binding required"},
 }
 
 func (c *Client) call(ctx context.Context, method string, input, output any) error {
@@ -130,6 +134,17 @@ func safeChannelError(err error) error {
 		return err
 	}
 	return entry.Status(err.Error())
+}
+
+// deliveryError encodes the failure of a send or a reaction. A channel
+// sentinel travels as its reason. Any other failure carries the platform
+// adapter's own text ("telegram: chat not found"), which callers surface to
+// users and the agent uses to self-correct.
+func deliveryError(err error) error {
+	if _, ok := reasons.Lookup(err); ok {
+		return safeChannelError(err)
+	}
+	return runtimeRpc.Public(err)
 }
 
 func Handlers(channelRuntime channel.Runtime, tunnel *webhooktunnel.Manager) map[string]runtimeRpc.Handler {
@@ -171,18 +186,14 @@ func Handlers(channelRuntime channel.Runtime, tunnel *webhooktunnel.Manager) map
 			if err := decode(raw, &in); err != nil {
 				return nil, err
 			}
-			// Public: send failures carry the platform adapter's own text
-			// ("telegram: chat not found"), which callers surface to users
-			// and the agent uses to self-correct — sanitizing it regresses
-			// the pre-split behavior.
-			return nil, runtimeRpc.Public(channelRuntime.Send(ctx, in.BotID, in.ChannelType, in.Send))
+			return nil, deliveryError(channelRuntime.Send(ctx, in.BotID, in.ChannelType, in.Send))
 		},
 		MethodReact: func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in channelInput
 			if err := decode(raw, &in); err != nil {
 				return nil, err
 			}
-			return nil, runtimeRpc.Public(channelRuntime.React(ctx, in.BotID, in.ChannelType, in.React))
+			return nil, deliveryError(channelRuntime.React(ctx, in.BotID, in.ChannelType, in.React))
 		},
 		MethodStatuses: func(_ context.Context, raw json.RawMessage) (any, error) {
 			var botID string

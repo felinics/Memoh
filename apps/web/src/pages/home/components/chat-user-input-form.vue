@@ -73,7 +73,7 @@
           :model-value="draftText(question)"
           :placeholder="question.placeholder || $t('chat.tools.userInputPlaceholder')"
           @update:model-value="setDraftText(question, String($event))"
-          @keydown.enter.prevent="handleSubmit"
+          @keydown.enter.exact.prevent="handleSubmit"
         />
       </div>
     </div>
@@ -84,7 +84,7 @@
         :model-value="footerText"
         :placeholder="footerPlaceholder"
         @update:model-value="setFooterText(String($event))"
-        @keydown.enter.prevent="handleSubmit"
+        @keydown.enter.exact.prevent="handleSubmit"
       />
       <div class="flex gap-1.5">
         <Button

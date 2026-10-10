@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -16,9 +15,11 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/settings"
@@ -143,18 +144,24 @@ func TestChatCompactReturnsNotImplementedWhenProviderDoesNotSupportSemanticCompa
 	echoCtx.SetParamValues(botID)
 
 	err := handler.ChatCompact(echoCtx)
-	if err == nil {
-		t.Fatal("expected unsupported semantic compact error")
+	if apperror.CodeOf(err) != apperror.CodeMemoryCompactUnsupported {
+		t.Fatalf("ChatCompact error = %v, want %s", err, apperror.CodeMemoryCompactUnsupported)
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("expected echo HTTP error, got %T", err)
+}
+
+// Compact that the server cannot run because it wired nothing for it is the
+// server's failure, not the provider choice the user can change.
+func TestCompactUnavailableErrorAttributesTheReason(t *testing.T) {
+	t.Parallel()
+	if err := compactUnavailableError(memprovider.MemoryCompactCapability{Semantic: true}); err != nil {
+		t.Fatalf("available compact error = %v", err)
 	}
-	if httpErr.Code != http.StatusNotImplemented {
-		t.Fatalf("status = %d, want 501", httpErr.Code)
+	if err := compactUnavailableError(memprovider.MemoryCompactCapability{Reason: memprovider.CompactUnsupported}); apperror.CodeOf(err) != apperror.CodeMemoryCompactUnsupported {
+		t.Fatalf("unsupported compact error = %v", err)
 	}
-	if !strings.Contains(httpErr.Message.(string), "semantic compact") {
-		t.Fatalf("unexpected error message: %v", httpErr.Message)
+	err := compactUnavailableError(memprovider.MemoryCompactCapability{Reason: memprovider.CompactNotConfigured})
+	if public, fault := errs.Answer(context.Background(), err); apperror.CodeOf(public) != apperror.CodeInternal || fault != apperror.FaultServer {
+		t.Fatalf("unconfigured compact answer = %v %s, want internal from the server", public, fault)
 	}
 }
 
@@ -199,7 +206,7 @@ func TestChatStatusIncludesSemanticCompactCapability(t *testing.T) {
 	if status.Compact.Semantic {
 		t.Fatalf("semantic compact should be unavailable: %+v", status.Compact)
 	}
-	if !strings.Contains(status.Compact.Reason, "semantic compact") {
+	if status.Compact.Reason != memprovider.CompactUnsupported {
 		t.Fatalf("unexpected compact capability reason: %+v", status.Compact)
 	}
 }

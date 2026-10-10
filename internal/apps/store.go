@@ -56,7 +56,10 @@ type Installation struct {
 	AvailableRevision string
 	AvailableVersion  string
 	LastCheckedAt     *time.Time
-	LastError         string
+	// LastError is text written by earlier servers; new failures store only
+	// LastErrorCode, the catalog code clients render.
+	LastError     string
+	LastErrorCode string
 	// Release is the immutable release document the installation
 	// materialized; it lets the App view work without the Supermarket.
 	Release     []byte
@@ -116,7 +119,7 @@ type Store interface {
 	GetByID(ctx context.Context, botID, installationID string) (Installation, error)
 	ListForBot(ctx context.Context, botID string) ([]Installation, error)
 	Upsert(ctx context.Context, in UpsertInstallation) (Installation, error)
-	SetStatus(ctx context.Context, botID, installationID string, status Status, lastError string) (Installation, error)
+	SetStatus(ctx context.Context, botID, installationID string, status Status, lastErrorCode string) (Installation, error)
 	SetRelease(ctx context.Context, botID, installationID, revision, version string, release []byte) (Installation, error)
 	SetCheck(ctx context.Context, botID, installationID, availableRevision, availableVersion string, checkedAt time.Time) (Installation, error)
 	Delete(ctx context.Context, botID, installationID string) (Installation, error)

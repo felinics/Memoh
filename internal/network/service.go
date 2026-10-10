@@ -19,6 +19,13 @@ type statusRuntime interface {
 
 var ErrWorkspaceContainerMissing = errors.New("workspace is not created")
 
+var (
+	// ErrProviderNotConfigured means the bot has no network provider selected.
+	ErrProviderNotConfigured = errors.New("network provider is not configured")
+	// ErrUnsupportedAction means the provider does not offer the requested action.
+	ErrUnsupportedAction = errors.New("unsupported network action")
+)
+
 type Service struct {
 	queries          dbstore.Queries
 	registry         *Registry
@@ -264,7 +271,7 @@ func (s *Service) getBotProvider(ctx context.Context, botID string) (BotOverlayC
 		return BotOverlayConfig{}, nil, err
 	}
 	if strings.TrimSpace(cfg.Provider) == "" {
-		return BotOverlayConfig{}, nil, fmt.Errorf("network provider is not configured for bot %s", botID)
+		return BotOverlayConfig{}, nil, fmt.Errorf("%w for bot %s", ErrProviderNotConfigured, botID)
 	}
 	provider, err := s.requireProvider(cfg.Provider)
 	if err != nil {

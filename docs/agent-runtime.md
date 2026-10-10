@@ -126,25 +126,44 @@ they do not constitute automatic job adoption after a server restart.
 ## Model call failures
 
 The native runtime retries a failed model call from the last committed step,
-by default up to five times with a backoff capped at eight seconds. Only the failure
-of the provider call itself is considered: an error returned by `DoStream`, an
-`ErrorPart` in the stream, or a stream that ends before its finish-step part.
-A failure of the loop's own work (the provider-attempt handoff, a step commit,
-a capability refresh, the tool batch) ends the run, since its tools may already
-have run.
+by default up to five times per run with a backoff capped at eight seconds. Only
+the failure of the provider call itself is considered: an error returned by
+`DoStream` or `DoGenerate`, an `ErrorPart` in the stream, or a stream that ends
+before its finish-step part. A failure of the loop's own work (the
+provider-attempt handoff, a step commit, a capability refresh, the tool batch)
+ends the run, since its tools may already have run. The streaming and the
+non-streaming loop share the rule, the budget and the backoff
+(`internal/models/modelretry`).
 
 A provider call is retried when the SDK classifies its `*sdk.APIError` as
 `rate_limited` or `server_error`, when the stream was cut off
-(`sdk.ErrStreamIncomplete`, `io.ErrUnexpectedEOF`), or when the chain holds a
-`net.Error`. Cancellation and expired deadlines are never retried, and every
-other `Kind` is final. Error text is never read.
+(`sdk.ErrStreamIncomplete`, `io.ErrUnexpectedEOF`, or a stream that closed
+before its finish-step part), or when the chain holds a `net.Error`.
+Cancellation and expired deadlines are never retried, and every other `Kind` is
+final. Error text is never read. A `Retry-After` or `retry-after-ms` header on
+the provider's answer sets the wait when it is at most one minute; otherwise the
+backoff does.
 
 A retried attempt is recorded once, as a WARN event for `agent.model_call`, and
-the stream reports it as a `retry` event carrying only the attempt counters. The
-stream publishes an `error` event only for the failure that ends the run, with
-the failure as its `Cause`; after the last retry that is the last attempt's
+the stream reports it as a `retry` event carrying the attempt counters, the wait
+in `retryDelayMs` and the failure's class in `retryReason` (`rate_limited`,
+`server_error`, `stream_incomplete` or `network`), never the provider's text.
+The stream publishes an `error` event only for the failure that ends the run,
+with the failure as its `Cause`; after the last retry that is the last attempt's
 failure, wrapped. A subagent attempt is run again only when its watchdog ended
 it.
+
+The runtime projection keeps the wait visible to subscribers. A `retry` event
+sets `retry` on the current run (`attempt`, `max_attempt`, `delay_ms`, `reason`
+and `retry_at`, the server time of the next attempt) and sends it in the run
+patch. The next visible event, a terminal event or a terminal status clears it;
+a patch removes it with `clear_retry: true`, and a patch carrying neither field
+leaves it unchanged. Snapshots carry the field, so a reconnecting client sees it.
+
+Single model calls outside a run use the same rule: the context compaction
+summary, the memory calls and the session title. Image generation is retried
+only after a `rate_limited` answer, since a failed call may still have produced
+a billed image, and the DashScope task API not at all.
 
 The application names the failure in one translation function shared by the
 WebSocket, IM, discuss, scheduled, decision-continuation and subagent paths. A
@@ -164,8 +183,62 @@ Server shutdown closes admission and records `session_runtime.interrupted` on
 running session runs before canceling producers or stopping HTTP, RPC, schedules,
 external runtimes and workspaces. The existing `lost` terminal state carries this
 specific reason; no schema migration is needed. Completed finish proposals and
-explicit user aborts retain their authoritative outcomes. Waiting decisions keep
-their existing recovery semantics and are not converted into automatic answers.
+explicit user aborts retain their authoritative outcomes. With a distributed live backend, native parked decisions remain
+`waiting_decision`. After the producer has
+committed its assistant tool call, shutdown advances the run, session and every
+pending decision to a new persistence fence in one transaction, then revokes
+local execution. It leaves the old Redis lease index in place as the recovery
+pointer. Once the lease expires, the existing reaper reserves a fresh owner;
+failed reservations retain that pointer for retry. No answer is synthesized.
+Decision commands cannot begin after shutdown closes admission. A previously
+accepted native answer moves its run to `running` in the same fenced PostgreSQL
+transaction as the decision response. `input_json.decision_continuations` records
+each accepted decision; approved tools checkpoint `executing` before dispatch.
+Shutdown therefore classifies an accepted continuation as running work even while
+the tool is still executing and has not emitted `agent_start`. A state CAS prevents a running-row
+snapshot from terminalizing a decision that parked concurrently.
+
+An expired decision after graceful handoff is retired under the authoritative
+database token, after checking that no live successor owns it. An unapplied
+terminal CAS on an active row retains the recovery index for retry. A renewed
+same-token owner retains its index; only an obsolete entry may be removed while
+a successor remains live.
+
+Codex, Claude Code and ACP inline waiters still depend on the exiting process;
+they are not preserved as resumable native decisions. Expired requests, explicit
+abort, reset, deleted sessions and newer persistence owners must not be revived.
+Transient database/runtime-classification failures retain the recovery pointer
+instead of canceling decisions. This does not guarantee recovery of a producer
+whose tool-call persistence failed or exceeded the shutdown budget.
+
+The continuation keeps its original durable turn and request message ID. A
+response retry uses the existing control-ID deduplication contract; tests cover
+shutdown, a fresh manager's lease recovery, the answer and duplicate submission.
+An accepted continuation interrupted during execution uses the ordinary
+`session_runtime.interrupted` recovery path. Recovery validates saved decision
+records against their Bot, session, run and token, and reconstructs the reasoning
+with the accepted answers and approval status. It does not dispatch the approved
+tool again. An executing tool without a saved result may already have produced
+side effects: inspect history, workspace state and external receipts, and request
+a new user decision if the outcome cannot be established. This is recovery of the
+continuation, not an exactly-once guarantee for arbitrary external tools.
+
+**First upgrade and rollback:** the old executable still runs the shutdown hook
+on the first rollout, so deploying this fix cannot protect waits already ended
+by that executable. Drain those waits before upgrading, or use a separately
+approved recovery procedure with authoritative pending decisions, no newer turn,
+and tenant-scoped checks. Do not revive historical `lost` rows automatically.
+Rolling back reintroduces the old shutdown behavior on the next exit; drain
+pending native waits before rollback. No schema migration is required.
+
+Local browser verification used the documented development stack with Redis,
+a synthetic model and one active Server. The original decision remained visible
+after SIGTERM and a fresh owner resumed the same run and turn after the user
+submitted the answer. The original user message was not duplicated.
+The separate-containerd two-Server fixture could not complete a continuation on
+the peer because its workspace bridge was unavailable; this is not a passed
+multi-node workspace acceptance test. Hosted deployments still need their
+shared workspace integration verified after downstream synchronization.
 
 At turn start, the server saves a versioned resume context in `session_runs.input_json`.
 It preserves the original query, identity, execution location, model selection and

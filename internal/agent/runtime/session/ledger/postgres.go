@@ -727,10 +727,11 @@ func (s *PostgresStore) Finalize(ctx context.Context, params FinalizeParams) (Ru
 		return Run{}, false, fmt.Errorf("ledger(postgres): invalid run id: %w", err)
 	}
 	row, err := s.q.FinalizeSessionRun(ctx, dbsqlc.FinalizeSessionRunParams{
-		RunID:        runID,
-		FencingToken: params.FencingToken,
-		State:        string(params.State),
-		ErrorCode:    textOrNull(params.ErrorCode),
+		RunID:         runID,
+		FencingToken:  params.FencingToken,
+		State:         string(params.State),
+		ErrorCode:     textOrNull(params.ErrorCode),
+		ExpectedState: textOrNull(string(params.ExpectedState)),
 	})
 	return applyResult("finalize run", row, err)
 }

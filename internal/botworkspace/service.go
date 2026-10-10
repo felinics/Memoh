@@ -14,6 +14,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/job"
 	"github.com/felinics/memoh/internal/redact"
 )
 
@@ -362,7 +365,7 @@ func (s *Service) loop(ctx context.Context) {
 		case <-s.kick:
 		}
 		if _, err := s.reconcileOnce(ctx, &wg); err != nil {
-			s.log.ErrorContext(ctx, "reconcile pass failed", slog.Any("error", err))
+			s.event(ctx, "reconcile pass failed", errs.Wrap(err, "claim workspaces"))
 		}
 		if s.now().Sub(s.lastDrift) >= s.opts.DriftInterval {
 			s.lastDrift = s.now()
@@ -444,7 +447,6 @@ func (s *Service) unmarkRunning(botID string) {
 }
 
 func (s *Service) reconcileOne(ctx context.Context, w Workspace) {
-	log := s.log.With(slog.String("bot_id", w.BotID), slog.String("desired", w.Desired), slog.String("observed", w.Observed), slog.Int64("generation", w.DesiredGeneration))
 	switch Decide(w, s.now()) {
 	case ActionNone:
 		if w.ObservedGeneration < w.DesiredGeneration {
@@ -452,7 +454,7 @@ func (s *Service) reconcileOne(ctx context.Context, w Workspace) {
 				Observed: w.Observed, ObservedGeneration: w.DesiredGeneration,
 				Attempts: 0, NextAttemptAt: s.now(), ReleaseLease: true,
 			}); err != nil {
-				log.WarnContext(ctx, "catch up generation failed", slog.Any("error", err))
+				s.event(ctx, "catch up generation failed", errs.Wrap(err, "catch up observed generation"), slog.String("bot_id", w.BotID))
 			}
 			return
 		}
@@ -460,13 +462,36 @@ func (s *Service) reconcileOne(ctx context.Context, w Workspace) {
 	case ActionWait:
 		s.release(ctx, w.BotID)
 	case ActionProvision:
-		s.provision(ctx, log, w)
+		_ = job.Run(ctx, s.log, "workspace.provision", job.Options{}, func(ctx context.Context) error {
+			return s.provision(ctx, w)
+		}, workspaceAttrs(w)...)
 	case ActionTeardown:
-		s.teardown(ctx, log, w)
+		_ = job.Run(ctx, s.log, "workspace.teardown", job.Options{}, func(ctx context.Context) error {
+			return s.teardown(ctx, w)
+		}, workspaceAttrs(w)...)
 	}
 }
 
-func (s *Service) provision(ctx context.Context, log *slog.Logger, w Workspace) {
+func workspaceAttrs(w Workspace) []slog.Attr {
+	return []slog.Attr{
+		slog.String("bot_id", w.BotID), slog.String("desired", w.Desired),
+		slog.String("observed", w.Observed), slog.Int64("generation", w.DesiredGeneration),
+	}
+}
+
+// superseded reports a version-checked write that lost to a concurrent
+// change: another instance took the row over, or the user changed the desired
+// state. The pass is abandoned, not failed; whoever holds the row now
+// converges it.
+func superseded(ctx context.Context, err error) bool {
+	if !errors.Is(err, ErrVersionConflict) {
+		return false
+	}
+	job.Annotate(ctx, slog.String("skipped", "version_conflict"))
+	return true
+}
+
+func (s *Service) provision(ctx context.Context, w Workspace) error {
 	// The version-checked transition into provisioning comes first: a stale
 	// claimant whose lease another instance took over fails here and never
 	// touches the backend.
@@ -475,18 +500,19 @@ func (s *Service) provision(ctx context.Context, log *slog.Logger, w Workspace) 
 		Attempts: w.Attempts, NextAttemptAt: s.now(), ReleaseLease: false,
 	})
 	if err != nil {
-		log.WarnContext(ctx, "enter provisioning failed", slog.Any("error", err))
 		s.release(ctx, w.BotID)
-		return
+		if superseded(ctx, err) {
+			return nil
+		}
+		return errs.Wrap(err, "enter provisioning")
 	}
 	s.deriveBotStatus(ctx, cur)
 
 	opCtx, cancel := s.leasedContext(ctx, w.BotID, s.opts.ProvisionTimeout)
 	defer cancel()
 
-	if err := s.replaceStaleContainer(opCtx, log, cur); err != nil {
-		s.fail(ctx, log, cur, &StepError{Phase: PhaseTeardown, Retryable: true, Err: err})
-		return
+	if err := s.replaceStaleContainer(opCtx, cur); err != nil {
+		return s.fail(ctx, cur, &StepError{Phase: PhaseTeardown, Retryable: true, Err: err})
 	}
 
 	err = s.backend.Provision(opCtx, w.BotID, w.Image, func(ev ProgressEvent) { s.publish(w.BotID, ev) })
@@ -498,8 +524,7 @@ func (s *Service) provision(ctx context.Context, log *slog.Logger, w Workspace) 
 		if opCtx.Err() != nil && step.Err == nil {
 			step.Err = opCtx.Err()
 		}
-		s.fail(ctx, log, cur, step)
-		return
+		return s.fail(ctx, cur, step)
 	}
 
 	final, err := s.writeObserved(ctx, cur, ObservedWrite{
@@ -507,21 +532,28 @@ func (s *Service) provision(ctx context.Context, log *slog.Logger, w Workspace) 
 		Attempts: 0, NextAttemptAt: s.now(), ReleaseLease: true,
 	})
 	if err != nil {
-		log.WarnContext(ctx, "record running failed", slog.Any("error", err))
 		s.release(ctx, w.BotID)
-		return
+		if superseded(ctx, err) {
+			return nil
+		}
+		return errs.Wrap(err, "record running")
 	}
 	s.deriveBotStatus(ctx, final)
 	s.publish(w.BotID, ProgressEvent{Type: EventReady, Workspace: &final})
-	log.InfoContext(ctx, "workspace provisioned")
+	return nil
 }
 
-func (s *Service) fail(ctx context.Context, log *slog.Logger, w Workspace, step *StepError) {
+// fail records a failed provisioning attempt and returns it as the unit's
+// outcome. An attempt still inside the fast retry budget is marked as one the
+// reconciler retries; the attempt that spends the budget is reported as is.
+func (s *Service) fail(ctx context.Context, w Workspace, step *StepError) error {
 	attempts := w.Attempts + 1
 	var next time.Time
+	willRetry := false
 	switch {
 	case step.Retryable && attempts < s.opts.MaxAttempts:
 		next = s.nextAttempt(attempts)
+		willRetry = true
 	default:
 		// The fast budget is spent (or the failure is not worth spending it
 		// on): report the outcome now and fall back to the slow cadence.
@@ -531,32 +563,38 @@ func (s *Service) fail(ctx context.Context, log *slog.Logger, w Workspace, step 
 		next = s.slowRetryAt()
 	}
 	message := sanitize(step.Err)
-	log.ErrorContext(ctx, "workspace provisioning failed",
-		slog.String("phase", step.Phase), slog.Bool("retryable", step.Retryable),
-		slog.Int("attempt", int(attempts)), slog.Time("next_attempt_at", next), slog.Any("error", step.Err))
 	final, err := s.writeObserved(ctx, w, ObservedWrite{
 		Observed: ObservedFailed, ObservedGeneration: w.DesiredGeneration,
 		LastError: message, LastErrorPhase: step.Phase,
 		Attempts: attempts, NextAttemptAt: next, ReleaseLease: true,
 	})
 	if err != nil {
-		log.WarnContext(ctx, "record failure failed", slog.Any("error", err))
+		s.event(ctx, "record failure failed", errs.Wrap(err, "record provisioning failure"), slog.String("bot_id", w.BotID))
 		s.release(ctx, w.BotID)
-		return
+	} else {
+		s.deriveBotStatus(ctx, final)
+		s.publish(w.BotID, ProgressEvent{Type: EventError, Phase: step.Phase, Err: step.Err, Message: message, Workspace: &final})
 	}
-	s.deriveBotStatus(ctx, final)
-	s.publish(w.BotID, ProgressEvent{Type: EventError, Phase: step.Phase, Err: step.Err, Message: message, Workspace: &final})
+	failure := errs.Wrap(step.Err, "provision workspace",
+		slog.String("phase", step.Phase), slog.Bool("retryable", step.Retryable),
+		slog.Int("attempt", int(attempts)), slog.Time("next_attempt_at", next))
+	if willRetry {
+		return job.WillRetry(failure)
+	}
+	return failure
 }
 
-func (s *Service) teardown(ctx context.Context, log *slog.Logger, w Workspace) {
+func (s *Service) teardown(ctx context.Context, w Workspace) error {
 	cur, err := s.writeObserved(ctx, w, ObservedWrite{
 		Observed: ObservedRemoving, ObservedGeneration: w.DesiredGeneration,
 		Attempts: w.Attempts, NextAttemptAt: s.now(), ReleaseLease: false,
 	})
 	if err != nil {
-		log.WarnContext(ctx, "enter removing failed", slog.Any("error", err))
 		s.release(ctx, w.BotID)
-		return
+		if superseded(ctx, err) {
+			return nil
+		}
+		return errs.Wrap(err, "enter removing")
 	}
 
 	opCtx, cancel := s.leasedContext(ctx, w.BotID, s.opts.TeardownTimeout)
@@ -566,20 +604,26 @@ func (s *Service) teardown(ctx context.Context, log *slog.Logger, w Workspace) {
 		attempts := cur.Attempts + 1
 		observed := ObservedRemoving
 		next := s.nextAttempt(attempts)
+		willRetry := true
 		if attempts >= s.opts.MaxAttempts {
 			observed = ObservedFailed
 			next = s.slowRetryAt()
+			willRetry = false
 		}
-		log.ErrorContext(ctx, "workspace teardown failed", slog.Int("attempt", int(attempts)), slog.Any("error", err))
 		if _, werr := s.writeObserved(ctx, cur, ObservedWrite{
 			Observed: observed, ObservedGeneration: cur.DesiredGeneration,
 			LastError: sanitize(err), LastErrorPhase: PhaseTeardown,
 			Attempts: attempts, NextAttemptAt: next, ReleaseLease: true,
 		}); werr != nil {
-			log.WarnContext(ctx, "record teardown failure failed", slog.Any("error", werr))
+			s.event(ctx, "record teardown failure failed", errs.Wrap(werr, "record teardown failure"), slog.String("bot_id", w.BotID))
 			s.release(ctx, w.BotID)
 		}
-		return
+		failure := errs.Wrap(err, "tear down workspace",
+			slog.Int("attempt", int(attempts)), slog.Time("next_attempt_at", next))
+		if willRetry {
+			return job.WillRetry(failure)
+		}
+		return failure
 	}
 
 	final, err := s.writeObserved(ctx, cur, ObservedWrite{
@@ -587,12 +631,14 @@ func (s *Service) teardown(ctx context.Context, log *slog.Logger, w Workspace) {
 		Attempts: 0, NextAttemptAt: s.now(), ReleaseLease: true,
 	})
 	if err != nil {
-		log.WarnContext(ctx, "record absent failed", slog.Any("error", err))
 		s.release(ctx, w.BotID)
-		return
+		if superseded(ctx, err) {
+			return nil
+		}
+		return errs.Wrap(err, "record absent")
 	}
 	s.publish(w.BotID, ProgressEvent{Type: EventReady, Workspace: &final})
-	log.InfoContext(ctx, "workspace removed")
+	return nil
 }
 
 // detectDrift re-inspects settled workspaces that have not been touched for a
@@ -613,7 +659,7 @@ func (s *Service) detectDriftIn(ctx context.Context, observed string) {
 	rows, err := s.repo.ListByObserved(listCtx, observed, 500)
 	cancel()
 	if err != nil {
-		s.log.WarnContext(ctx, "drift scan failed", slog.String("observed", observed), slog.Any("error", err))
+		s.event(ctx, "drift scan failed", errs.Wrap(err, "list workspaces for drift"), slog.String("observed", observed))
 		return
 	}
 	cutoff := s.now().Add(-s.opts.DriftInterval)
@@ -623,7 +669,7 @@ func (s *Service) detectDriftIn(ctx context.Context, observed string) {
 		}
 		obsCtx, cancel := context.WithTimeout(ctx, s.opts.WriteTimeout)
 		if _, err := s.Observe(obsCtx, w.BotID); err != nil && !errors.Is(err, ErrNotFound) {
-			s.log.WarnContext(ctx, "drift observe failed", slog.String("bot_id", w.BotID), slog.Any("error", err))
+			s.event(ctx, "drift observe failed", errs.Wrap(err, "observe workspace"), slog.String("bot_id", w.BotID))
 		}
 		cancel()
 	}
@@ -669,7 +715,7 @@ func (s *Service) release(ctx context.Context, botID string) {
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.opts.WriteTimeout)
 	defer cancel()
 	if err := s.repo.Release(rctx, botID, s.opts.Owner); err != nil {
-		s.log.WarnContext(ctx, "release lease failed", slog.String("bot_id", botID), slog.Any("error", err))
+		s.event(ctx, "release lease failed", errs.Wrap(err, "release workspace lease"), slog.String("bot_id", botID))
 	}
 }
 
@@ -695,7 +741,7 @@ func (s *Service) leasedContext(parent context.Context, botID string, timeout ti
 				err := s.repo.Renew(rctx, botID, s.opts.Owner, s.opts.Lease)
 				rcancel()
 				if err != nil {
-					s.log.WarnContext(parent, "lease lost; abandoning operation", slog.String("bot_id", botID), slog.Any("error", err))
+					s.event(parent, "lease lost; abandoning operation", errs.Wrap(err, "renew workspace lease"), slog.String("bot_id", botID))
 					cancel()
 					return
 				}
@@ -712,7 +758,7 @@ func (s *Service) leasedContext(parent context.Context, botID string, timeout ti
 // preserved-data archive is consumed by the restore, so the container may be
 // the only copy). A container built from the requested image, and any
 // workspace that was ready once, is reused as is.
-func (s *Service) replaceStaleContainer(ctx context.Context, log *slog.Logger, w Workspace) error {
+func (s *Service) replaceStaleContainer(ctx context.Context, w Workspace) error {
 	if w.EverReady || strings.TrimSpace(w.Image) == "" {
 		return nil
 	}
@@ -724,7 +770,7 @@ func (s *Service) replaceStaleContainer(ctx context.Context, log *slog.Logger, w
 	if !insp.Exists || insp.Image == "" || config.NormalizeImageRef(insp.Image) == requested {
 		return nil
 	}
-	log.InfoContext(ctx, "replacing container built from a different image",
+	s.log.InfoContext(ctx, "replacing container built from a different image", slog.String("bot_id", w.BotID),
 		slog.String("current_image", insp.Image), slog.String("requested_image", w.Image))
 	return s.backend.Teardown(ctx, w.BotID, true)
 }
@@ -743,8 +789,14 @@ func (s *Service) deriveBotStatus(ctx context.Context, w Workspace) {
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.opts.WriteTimeout)
 	defer cancel()
 	if err := writer.SetBotStatusFromWorkspace(wctx, w.BotID, status); err != nil {
-		s.log.WarnContext(ctx, "derive bot status failed", slog.String("bot_id", w.BotID), slog.String("status", status), slog.Any("error", err))
+		s.event(ctx, "derive bot status failed", errs.Wrap(err, "write bot status"), slog.String("bot_id", w.BotID), slog.String("status", status))
 	}
+}
+
+// event records a failure the reconciler handles and continues past.
+func (s *Service) event(ctx context.Context, msg string, err error, attrs ...slog.Attr) {
+	result := errlog.Event(ctx, "workspace.reconcile", err, errlog.Options{})
+	s.log.LogAttrs(ctx, result.Level, msg, append(attrs, result.Attrs()...)...) //nolint:sloglint // message is a constant string supplied by internal callers
 }
 
 const maxErrorRunes = 4096

@@ -174,7 +174,7 @@ func TestChatWSKeepsAClientThatShowsSignsOfLife(t *testing.T) {
 			for {
 				select {
 				case reply := <-replies:
-					if strings.Contains(reply, "invalid message format") {
+					if strings.Contains(reply, `"code":"http.bad_request"`) {
 						return
 					}
 				case err := <-readErr:

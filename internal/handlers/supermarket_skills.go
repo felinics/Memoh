@@ -10,6 +10,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	skillset "github.com/felinics/memoh/internal/skills"
 	supermarketclient "github.com/felinics/memoh/internal/supermarket"
 )
@@ -60,7 +61,7 @@ type InstallRegistrySkillResponse = supermarketclient.InstallSkillResponse
 // @Summary List Skill Registries from supermarket
 // @Tags supermarket
 // @Success 200 {object} SupermarketRegistryListResponse
-// @Failure 502 {object} apperror.Problem
+// @Failure 502 {object} server.Problem
 // @Router /supermarket/registries [get].
 func (h *SupermarketHandler) ListRegistries(c echo.Context) error {
 	return h.proxy(c, "/api/registries")
@@ -71,9 +72,9 @@ func (h *SupermarketHandler) ListRegistries(c echo.Context) error {
 // @Tags supermarket
 // @Param registry query string false "Registry ID"
 // @Success 200 {object} SupermarketAppCategoryListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /supermarket/categories [get].
 func (h *SupermarketHandler) ListCategories(c echo.Context) error {
 	return h.proxy(c, "/api/categories")
@@ -91,8 +92,8 @@ func (h *SupermarketHandler) ListCategories(c echo.Context) error {
 // @Param limit query int false "Items per page"
 // @Param sort query string false "Sort order"
 // @Success 200 {object} SupermarketCatalogSkillListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /supermarket/skills [get].
 func (h *SupermarketHandler) ListSkills(c echo.Context) error {
 	return h.proxy(c, "/api/skills")
@@ -110,8 +111,8 @@ func (h *SupermarketHandler) ListSkills(c echo.Context) error {
 // @Param limit query int false "Items per page"
 // @Param sort query string false "Sort order"
 // @Success 200 {object} SupermarketAppListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /supermarket/apps [get].
 func (h *SupermarketHandler) ListApps(c echo.Context) error {
 	return h.proxy(c, "/api/apps")
@@ -128,14 +129,14 @@ func (h *SupermarketHandler) ListApps(c echo.Context) error {
 // @Param limit query int false "Items per page"
 // @Param sort query string false "Sort order"
 // @Success 200 {object} SupermarketAppListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /supermarket/registries/{registry_id}/apps [get].
 func (h *SupermarketHandler) ListRegistryApps(c echo.Context) error {
-	registryID, err := requireRegistryID(c.Param("registry_id"), "registry_id")
-	if err != nil {
-		return err
+	registryID, ok := validRegistryID(c.Param("registry_id"))
+	if !ok {
+		return apperror.FieldInvalid("registry_id", nil)
 	}
 	return h.proxy(c, "/api/registries/"+url.PathEscape(registryID)+"/apps")
 }
@@ -146,18 +147,18 @@ func (h *SupermarketHandler) ListRegistryApps(c echo.Context) error {
 // @Param registry_id path string true "Registry ID"
 // @Param app_id path string true "App ID"
 // @Success 200 {object} SupermarketAppDescriptor
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /supermarket/registries/{registry_id}/apps/{app_id} [get].
 func (h *SupermarketHandler) GetRegistryApp(c echo.Context) error {
-	registryID, err := requireRegistryID(c.Param("registry_id"), "registry_id")
-	if err != nil {
-		return err
+	registryID, ok := validRegistryID(c.Param("registry_id"))
+	if !ok {
+		return apperror.FieldInvalid("registry_id", nil)
 	}
-	appID, err := requireRegistryComponent(c.Param("app_id"), "app_id")
-	if err != nil {
-		return err
+	appID, ok := validRegistryComponent(c.Param("app_id"))
+	if !ok {
+		return apperror.FieldInvalid("app_id", nil)
 	}
 	return h.proxy(c, registryAppUpstreamPath(registryID, appID))
 }
@@ -169,22 +170,22 @@ func (h *SupermarketHandler) GetRegistryApp(c echo.Context) error {
 // @Param app_id path string true "App ID"
 // @Param revision path string true "App revision"
 // @Success 200 {object} SupermarketAppDescriptor
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /supermarket/registries/{registry_id}/apps/{app_id}/releases/{revision} [get].
 func (h *SupermarketHandler) GetRegistryAppRelease(c echo.Context) error {
-	registryID, err := requireRegistryID(c.Param("registry_id"), "registry_id")
-	if err != nil {
-		return err
+	registryID, ok := validRegistryID(c.Param("registry_id"))
+	if !ok {
+		return apperror.FieldInvalid("registry_id", nil)
 	}
-	appID, err := requireRegistryComponent(c.Param("app_id"), "app_id")
-	if err != nil {
-		return err
+	appID, ok := validRegistryComponent(c.Param("app_id"))
+	if !ok {
+		return apperror.FieldInvalid("app_id", nil)
 	}
 	revision := strings.TrimSpace(c.Param("revision"))
 	if !isCanonicalDigest(revision) {
-		return echo.NewHTTPError(http.StatusBadRequest, "revision is invalid")
+		return apperror.FieldInvalid("revision", nil)
 	}
 	pkg, err := h.upstream.FetchAppRelease(c.Request().Context(), registryID, appID, revision)
 	if err != nil {
@@ -219,9 +220,9 @@ func appCategories(skills []supermarketclient.CatalogSkill) []supermarketclient.
 // @Param app_id path string true "App ID"
 // @Param skill_id path string true "Skill ID"
 // @Success 200 {object} SupermarketCatalogSkill
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /supermarket/registries/{registry_id}/apps/{app_id}/skills/{skill_id} [get].
 func (h *SupermarketHandler) GetRegistrySkill(c echo.Context) error {
 	registryID, appID, skillID, err := registrySkillIdentity(
@@ -238,17 +239,17 @@ func (h *SupermarketHandler) GetRegistrySkill(c echo.Context) error {
 // @Tags supermarket
 // @Param digest path string true "SHA-256 digest"
 // @Success 200 {file} binary
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /supermarket/artifacts/icon/{digest} [get].
 func (h *SupermarketHandler) GetRegistrySkillIcon(c echo.Context) error {
 	digest := strings.TrimSpace(c.Param("digest"))
 	if len(digest) != sha256.Size*2 {
-		return echo.NewHTTPError(http.StatusBadRequest, "digest is invalid")
+		return apperror.FieldInvalid("digest", nil)
 	}
 	if _, err := hex.DecodeString(digest); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "digest is invalid")
+		return apperror.FieldInvalid("digest", nil)
 	}
 	return h.proxySkillIcon(c, digest)
 }
@@ -308,12 +309,9 @@ func copySkillIconHeaders(target, source http.Header) {
 	target.Set("X-Content-Type-Options", "nosniff")
 }
 
-func requireRegistryComponent(value, field string) (string, error) {
+func validRegistryComponent(value string) (string, bool) {
 	value = strings.TrimSpace(value)
-	if !skillset.IsValidRegistryComponent(value) {
-		return "", echo.NewHTTPError(http.StatusBadRequest, field+" is invalid")
-	}
-	return value, nil
+	return value, skillset.IsValidRegistryComponent(value)
 }
 
 func isCanonicalDigest(value string) bool {
@@ -324,26 +322,23 @@ func isCanonicalDigest(value string) bool {
 	return err == nil
 }
 
-func requireRegistryID(value, field string) (string, error) {
+func validRegistryID(value string) (string, bool) {
 	value = strings.TrimSpace(value)
-	if !skillset.IsValidRegistryID(value) {
-		return "", echo.NewHTTPError(http.StatusBadRequest, field+" is invalid")
-	}
-	return value, nil
+	return value, skillset.IsValidRegistryID(value)
 }
 
 func registrySkillIdentity(registryValue, appValue, skillValue string) (string, string, string, error) {
-	registryID, err := requireRegistryID(registryValue, "registry_id")
-	if err != nil {
-		return "", "", "", err
+	registryID, ok := validRegistryID(registryValue)
+	if !ok {
+		return "", "", "", apperror.FieldInvalid("registry_id", nil)
 	}
-	appID, err := requireRegistryComponent(appValue, "app_id")
-	if err != nil {
-		return "", "", "", err
+	appID, ok := validRegistryComponent(appValue)
+	if !ok {
+		return "", "", "", apperror.FieldInvalid("app_id", nil)
 	}
-	skillID, err := requireRegistryComponent(skillValue, "skill_id")
-	if err != nil {
-		return "", "", "", err
+	skillID, ok := validRegistryComponent(skillValue)
+	if !ok {
+		return "", "", "", apperror.FieldInvalid("skill_id", nil)
 	}
 	return registryID, appID, skillID, nil
 }

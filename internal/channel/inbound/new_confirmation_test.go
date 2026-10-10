@@ -1,8 +1,10 @@
 package inbound
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -15,6 +17,7 @@ import (
 	"github.com/felinics/memoh/internal/channel/route"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/slash"
 )
@@ -43,7 +46,7 @@ func (testACPProfiles) ResolveACPProfile(agentID string) turn.ACPAgentProfile {
 	}
 }
 
-func (testACPProfiles) ResolveACPSetupPreflight(agentID string, metadata map[string]any) turn.ACPSetupPreflight {
+func (testACPProfiles) ResolveACPSetupPreflight(_ context.Context, _, _, agentID string, metadata map[string]any) (turn.ACPSetupPreflight, error) {
 	acp, _ := metadata["acp"].(map[string]any)
 	agents, _ := acp["agents"].(map[string]any)
 	config, _ := agents[strings.ToLower(strings.TrimSpace(agentID))].(map[string]any)
@@ -52,13 +55,13 @@ func (testACPProfiles) ResolveACPSetupPreflight(agentID string, metadata map[str
 	mode, modeSet := config["setup_mode"].(string)
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	if !modeSet || mode == "" || mode == "self" {
-		return result
+		return result, nil
 	}
 	managed, _ := config["managed"].(map[string]any)
 	if value, _ := managed["api_key"].(string); strings.TrimSpace(value) == "" {
 		result.MissingManagedField = &turn.ACPManagedField{ID: "api_key", Label: "API key"}
 	}
-	return result
+	return result, nil
 }
 
 func resolveNewSessionTypeForTest(t *testing.T, text string, msg channel.InboundMessage) (string, error) {
@@ -554,8 +557,8 @@ func TestHandleNewSessionCommandPreflightsACPSetup(t *testing.T) {
 		ChannelIdentityID: "cccccccc-cccc-cccc-cccc-cccccccccccc",
 		UserID:            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
 	}, mustCommandInvocation(t, msg.Message.PlainText()))
-	if err != nil {
-		t.Fatalf("handleNewSessionCommand() error = %v", err)
+	if apperror.CodeOf(err) != apperror.CodeACPAgentNotConfigured {
+		t.Fatalf("handleNewSessionCommand() error = %v, want the failure for the result record", err)
 	}
 	if ensurer.lastSpec.Runtime != "" {
 		t.Fatalf("session should not be created with incomplete setup, got spec %#v", ensurer.lastSpec)
@@ -565,7 +568,7 @@ func TestHandleNewSessionCommandPreflightsACPSetup(t *testing.T) {
 	}
 }
 
-func TestSendExternalAgentErrorRendersChannelCopyForCode(t *testing.T) {
+func TestReplyFailureRendersChannelCopyForCode(t *testing.T) {
 	p := &ChannelInboundProcessor{}
 	sender := &fakeReplySender{}
 	msg := channel.InboundMessage{
@@ -574,10 +577,9 @@ func TestSendExternalAgentErrorRendersChannelCopyForCode(t *testing.T) {
 		ReplyTarget: "target-1",
 	}
 
-	err := p.sendExternalAgentError(context.Background(), sender, msg, InboundIdentity{BotID: "bot-1"},
-		apperror.Wrap(apperror.CodeNoWorkspaceExec, errors.New("raw backend message"), nil))
-	if err != nil {
-		t.Fatalf("sendExternalAgentError() error = %v", err)
+	failure := apperror.Wrap(apperror.CodeNoWorkspaceExec, errors.New("raw backend message"), nil)
+	if err := p.replyFailure(context.Background(), sender, msg, InboundIdentity{BotID: "bot-1"}, failure, "fallback"); err != failure { //nolint:errorlint // identity: the failure is returned for the result record.
+		t.Fatalf("replyFailure() error = %v, want the failure", err)
 	}
 	if len(sender.sent) != 1 {
 		t.Fatalf("sent replies = %d, want 1", len(sender.sent))
@@ -588,7 +590,7 @@ func TestSendExternalAgentErrorRendersChannelCopyForCode(t *testing.T) {
 	}
 }
 
-func TestSendExternalAgentErrorTranslatesThreadErrors(t *testing.T) {
+func TestThreadErrorTranslatesThreadErrors(t *testing.T) {
 	for _, tc := range []struct {
 		err  error
 		code apperror.Code
@@ -599,15 +601,14 @@ func TestSendExternalAgentErrorTranslatesThreadErrors(t *testing.T) {
 		{sessionpkg.ErrACPAgentNotEnabled, apperror.CodeACPAgentNotEnabled},
 		{sessionpkg.ErrACPRuntimeOwnerMissing, apperror.CodeACPRuntimeOwnerMissing},
 	} {
-		if got := apperror.CodeOf(externalAgentError(tc.err)); got != tc.code {
-			t.Errorf("externalAgentError(%v) code = %q, want %s", tc.err, got, tc.code)
+		if got := apperror.CodeOf(threadError(tc.err)); got != tc.code {
+			t.Errorf("threadError(%v) code = %q, want %s", tc.err, got, tc.code)
 		}
 	}
-	if got := externalAgentError(apperror.New(apperror.CodeAgentProviderRateLimited, nil)); got != nil {
-		t.Errorf("externalAgentError(provider error) = %v, want nil", got)
-	}
-	if got := externalAgentError(errors.New("synthetic failure")); got != nil {
-		t.Errorf("externalAgentError(plain error) = %v, want nil", got)
+	for _, other := range []error{apperror.New(apperror.CodeAgentProviderRateLimited, nil), errors.New("synthetic failure")} {
+		if got := threadError(other); got != other { //nolint:errorlint // identity: other errors pass unchanged.
+			t.Errorf("threadError(%v) = %v, want it unchanged", other, got)
+		}
 	}
 }
 
@@ -623,8 +624,8 @@ func TestRequireWorkspaceExecUnboundIdentityPointsToLink(t *testing.T) {
 	}
 
 	err := p.requireWorkspaceExecForExternalAgent(context.Background(), InboundIdentity{BotID: "bot-1"})
-	if err := p.sendExternalAgentError(context.Background(), sender, msg, InboundIdentity{BotID: "bot-1"}, err); err != nil {
-		t.Fatalf("sendExternalAgentError() error = %v", err)
+	if got := p.replyFailure(context.Background(), sender, msg, InboundIdentity{BotID: "bot-1"}, err, ""); got != err { //nolint:errorlint // identity: the failure is returned for the result record.
+		t.Fatalf("replyFailure() error = %v, want %v", got, err)
 	}
 	if len(sender.sent) != 1 {
 		t.Fatalf("sent replies = %d, want 1", len(sender.sent))
@@ -660,8 +661,12 @@ func TestHandleNewSessionCommandACPRequiresWorkspaceExec(t *testing.T) {
 		ChannelIdentityID: "user-no-exec",
 		UserID:            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
 	}, mustCommandInvocation(t, msg.Message.PlainText()))
-	if err != nil {
-		t.Fatalf("handleNewSessionCommand() error = %v", err)
+	if apperror.CodeOf(err) != apperror.CodeNoWorkspaceExec {
+		t.Fatalf("handleNewSessionCommand() error = %v, want the failure for the result record", err)
+	}
+	// The inbound message record keeps the sender's refusal a client fault.
+	if record := errlog.Finish(context.Background(), "channel.inbound", err, errlog.Options{}); record.Level != slog.LevelInfo || record.Report.Fault != apperror.FaultClient {
+		t.Fatalf("inbound record level=%v fault=%q, want INFO client", record.Level, record.Report.Fault)
 	}
 	if ensurer.lastSpec.Runtime != "" {
 		t.Fatalf("session should not be created without workspace_exec, got spec %#v", ensurer.lastSpec)
@@ -826,5 +831,75 @@ func TestHandleNewSessionCommandCreatesDirectAgentChatSpec(t *testing.T) {
 	}
 	if spec.RuntimeOwnerAccountID != ownerID {
 		t.Fatalf("runtime owner = %q, want authenticated channel identity", spec.RuntimeOwnerAccountID)
+	}
+}
+
+// /new answers a failed session create with the copy for its specific public
+// error, whatever that code is, or with the flow's own failure copy; a caller
+// that has canceled gets no reply. The error is returned for the message's
+// result record.
+func TestHandleNewSessionCommandAnswersCreateFailures(t *testing.T) {
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	en := i18n.New("en")
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		err  error
+		want string
+	}{
+		{"specific code", context.Background(), apperror.New(apperror.CodeWorkspaceUnreachable, nil), en.T("errors.workspace.unreachable")},
+		{"no public error", context.Background(), errors.New("synthetic insert failed"), friendlyOps(en, "ops.verb.startSession")},
+		{"caller canceled", canceled, fmt.Errorf("create: %w", context.Canceled), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
+			p := &ChannelInboundProcessor{routeResolver: chatSvc, sessionEnsurer: &fakeSessionEnsurer{createErr: tc.err}}
+			sender := &fakeReplySender{}
+			msg := channel.InboundMessage{
+				Channel:      channel.ChannelTypeTelegram,
+				Message:      channel.Message{ID: "msg-1", Text: "/new chat"},
+				ReplyTarget:  "target-1",
+				Conversation: channel.Conversation{ID: "dm-1", Type: channel.ConversationTypePrivate},
+			}
+			err := p.handleNewSessionCommand(tc.ctx, channel.ChannelConfig{TeamID: "team-test"}, msg, sender, InboundIdentity{BotID: "bot-1"}, mustCommandInvocation(t, msg.Message.PlainText()))
+			if !errors.Is(err, tc.err) && apperror.CodeOf(err) != apperror.CodeOf(tc.err) {
+				t.Fatalf("error = %v, want %v for the result record", err, tc.err)
+			}
+			switch {
+			case tc.want == "" && len(sender.sent) != 0:
+				t.Fatalf("canceled caller got %+v", sender.sent)
+			case tc.want != "" && (len(sender.sent) != 1 || sender.sent[0].Message.PlainText() != tc.want):
+				t.Fatalf("replies = %+v, want %q", sender.sent, tc.want)
+			}
+		})
+	}
+}
+
+type failingReplySender struct {
+	fakeReplySender
+	err error
+}
+
+func (s *failingReplySender) Send(context.Context, channel.OutboundMessage) error { return s.err }
+
+func TestReplyFailureRecordsUnsentReplyAsEventAndKeepsAttribution(t *testing.T) {
+	var buf bytes.Buffer
+	p := &ChannelInboundProcessor{logger: slog.New(slog.NewJSONHandler(&buf, nil))}
+	sender := &failingReplySender{err: errors.New("telegram down")}
+	msg := channel.InboundMessage{
+		Channel:     channel.ChannelTypeTelegram,
+		Message:     channel.Message{ID: "msg-1"},
+		ReplyTarget: "target-1",
+	}
+
+	failure := apperror.Wrap(apperror.CodeNoWorkspaceExec, errors.New("denied"), nil)
+	got := p.replyFailure(context.Background(), sender, msg, InboundIdentity{BotID: "bot-1"}, failure, "fallback")
+	if got != failure { //nolint:errorlint // identity: the flow's failure is returned unjoined.
+		t.Fatalf("replyFailure() error = %v, want the flow's failure unchanged", got)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], `"msg":"failure reply not sent"`) || !strings.Contains(lines[0], `"level":"WARN"`) {
+		t.Fatalf("records = %q, want one WARN event for the unsent reply", buf.String())
 	}
 }

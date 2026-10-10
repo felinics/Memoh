@@ -41,13 +41,6 @@ const (
 	lastErrorLimit = 2048
 	// rollbackTimeout bounds the symlink switch; it touches no network.
 	rollbackTimeout = 2 * time.Minute
-	// interruptedMessage is written to last_error when List finds an
-	// in-progress record whose operation is provably gone.
-	interruptedMessage = "operation interrupted"
-	// cancelledMessagePrefix marks a last_error caused by the request going
-	// away (closed dialog, dropped connection, shutdown) rather than by the
-	// script.
-	cancelledMessagePrefix = "operation cancelled: "
 	// finalizeTimeout bounds the writes that record an operation's outcome
 	// once its script has finished or failed. They run on a context detached
 	// from the request so a closed dialog, a dropped connection, or the
@@ -1310,7 +1303,7 @@ func (s *Service) record(ctx context.Context, op *operation, action catalog.Acti
 	terminal.Source, terminal.Status = InstallationSourceManaged, StatusInstalled
 	terminal.InstalledVersion, terminal.ManifestDigest = state.Version, state.ManifestDigest
 	terminal.SourceURL, terminal.RegistryID, terminal.DefinitionRevision = state.SourceURL, state.RegistryID, state.DefinitionRevision
-	terminal.LastError = ""
+	terminal.LastError, terminal.LastErrorCode = "", ""
 	rec, err := s.store.FinishOperation(storeCtx, op.key, op.operationID, &terminal)
 	if err != nil {
 		return OperationResult{}, s.fail(ctx, op, fmt.Errorf("workspacedeps: record %s %s: %w", action, op.dep.ID, err))
@@ -1417,10 +1410,6 @@ func (s *Service) fail(ctx context.Context, op *operation, cause error) error {
 		s.cache.Invalidate(op.key.BotID)
 		return cause
 	}
-	message := cause.Error()
-	if ctx.Err() != nil || errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
-		message = cancelledMessagePrefix + message
-	}
 	storeCtx, cancel := finalizeContext(ctx)
 	defer cancel()
 	terminal, err := s.store.Get(
@@ -1436,7 +1425,7 @@ func (s *Service) fail(ctx context.Context, op *operation, cause error) error {
 		// readState decodes the dependency's state.json; nil when there is none.
 		op.key)
 	if err == nil {
-		terminal.Status, terminal.LastError = StatusFailed, s.errorDetail(ctx, message)
+		terminal.Status, terminal.LastError, terminal.LastErrorCode = StatusFailed, "", failureCode(cause)
 		_, err = s.store.FinishOperation(storeCtx, op.key, op.operationID, &terminal)
 	}
 	if err != nil {
@@ -1597,13 +1586,12 @@ func (s *Service) recordCheck(ctx context.Context, key InstallationKey, check up
 	now := s.now().UTC()
 	upd := ObservedUpdate{LastCheckedAt: &now}
 	if checkErr != nil {
-		msg := s.errorDetail(ctx, checkErr.Error())
-		upd.LastError = &msg
+		code := failureCode(checkErr)
+		upd.LastErrorCode = &code
 	} else {
-		latest := check.Latest
-		cleared := ""
+		latest, cleared := check.Latest, ""
 		upd.LatestVersion = &latest
-		upd.LastError = &cleared
+		upd.LastErrorCode = &cleared
 	}
 	storeCtx, cancel := finalizeContext(ctx)
 	defer cancel()

@@ -15,6 +15,7 @@ import (
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models/modelretry"
 )
 
 // SessionContext carries request-scoped identity and routing information.
@@ -218,7 +219,7 @@ type RunConfig struct {
 	HooksLoadNotice      string
 	WorkspaceUnavailable bool
 	LoopDetection        LoopDetectionConfig
-	Retry                RetryConfig
+	Retry                modelretry.Config
 	// StepIndexOffset lets an application-owned continuation of the same run
 	// keep durable step indexes monotonic when the step loop is restarted
 	// after a parked decision.

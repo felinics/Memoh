@@ -17,7 +17,9 @@ import (
 	"github.com/felinics/memoh/internal/apps"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/connectors"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/httpx"
+	"github.com/felinics/memoh/internal/server"
 	supermarketclient "github.com/felinics/memoh/internal/supermarket"
 	"github.com/felinics/memoh/internal/workspacedeps"
 )
@@ -120,24 +122,27 @@ type AppItem struct {
 	Reason string `json:"reason,omitempty" enums:"user,required"`
 	// AvailableRevision and AvailableVersion name the registry's newer
 	// release after a check found one.
-	AvailableRevision string                                      `json:"available_revision,omitempty"`
-	AvailableVersion  string                                      `json:"available_version,omitempty"`
-	LastCheckedAt     *time.Time                                  `json:"last_checked_at,omitempty"`
-	LastError         string                                      `json:"last_error,omitempty"`
-	Icon              *supermarketclient.SkillIcon                `json:"icon,omitempty"`
-	Category          string                                      `json:"category,omitempty"`
-	CategoryName      string                                      `json:"category_name,omitempty"`
-	Author            *supermarketclient.Author                   `json:"author,omitempty"`
-	Homepage          string                                      `json:"homepage,omitempty"`
-	Repository        string                                      `json:"repository,omitempty"`
-	License           string                                      `json:"license,omitempty"`
-	Tags              []string                                    `json:"tags"`
-	Translations      map[string]supermarketclient.AppTranslation `json:"translations,omitempty"`
-	Skills            []AppSkillItem                              `json:"skills"`
-	Dependencies      []AppDependencyItem                         `json:"dependencies"`
-	Connectors        []AppConnectorItem                          `json:"connectors"`
-	InstalledAt       *time.Time                                  `json:"installed_at,omitempty"`
-	UpdatedAt         *time.Time                                  `json:"updated_at,omitempty"`
+	AvailableRevision string     `json:"available_revision,omitempty"`
+	AvailableVersion  string     `json:"available_version,omitempty"`
+	LastCheckedAt     *time.Time `json:"last_checked_at,omitempty"`
+	// LastError is text recorded by earlier servers. A failure recorded now
+	// carries LastErrorCode, which clients render as errors.<code>.
+	LastError     string                                      `json:"last_error,omitempty"`
+	LastErrorCode string                                      `json:"last_error_code,omitempty"`
+	Icon          *supermarketclient.SkillIcon                `json:"icon,omitempty"`
+	Category      string                                      `json:"category,omitempty"`
+	CategoryName  string                                      `json:"category_name,omitempty"`
+	Author        *supermarketclient.Author                   `json:"author,omitempty"`
+	Homepage      string                                      `json:"homepage,omitempty"`
+	Repository    string                                      `json:"repository,omitempty"`
+	License       string                                      `json:"license,omitempty"`
+	Tags          []string                                    `json:"tags"`
+	Translations  map[string]supermarketclient.AppTranslation `json:"translations,omitempty"`
+	Skills        []AppSkillItem                              `json:"skills"`
+	Dependencies  []AppDependencyItem                         `json:"dependencies"`
+	Connectors    []AppConnectorItem                          `json:"connectors"`
+	InstalledAt   *time.Time                                  `json:"installed_at,omitempty"`
+	UpdatedAt     *time.Time                                  `json:"updated_at,omitempty"`
 }
 
 // AppListResponse is the App view of one bot workspace.
@@ -213,8 +218,9 @@ type AppConnectorCredentialRequest struct {
 
 // AppStreamEvent documents the SSE frames of install, resume, update and
 // remove. Type selects which fields are present: started and done carry the
-// app id and status; step and step_done carry kind and id; log carries
-// stream and data; error carries the Problem fields.
+// app id and status; step and step_done carry kind and id, and a failed
+// step_done carries the catalog code of the failure; log carries stream and
+// data; error carries the Problem fields.
 //
 // codesync(app-stream): keep in sync with
 // apps/web/src/composables/api/useAppStream.ts.
@@ -230,6 +236,7 @@ type AppStreamEvent struct {
 	Code      string            `json:"code,omitempty"`
 	Args      map[string]string `json:"args,omitempty"`
 	Detail    string            `json:"detail,omitempty"`
+	Fault     apperror.Fault    `json:"fault,omitempty"`
 	RequestID string            `json:"request_id,omitempty"`
 }
 
@@ -243,11 +250,11 @@ type AppStreamEvent struct {
 // @Param bot_id path string true "Bot ID"
 // @Param refresh query bool false "Refresh workspace discovery"
 // @Success 200 {object} AppListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/apps [get].
 func (h *AppsHandler) List(c echo.Context) error {
 	botID, err := h.authorize(c)
@@ -268,9 +275,9 @@ func (h *AppsHandler) List(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param installation_id path string true "App installation ID"
 // @Success 200 {object} AppItem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/apps/{installation_id} [get].
 func (h *AppsHandler) Get(c echo.Context) error {
 	botID, err := h.authorize(c)
@@ -295,9 +302,9 @@ func (h *AppsHandler) Get(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} AppListResponse
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /bots/{bot_id}/apps/check-updates [post].
 func (h *AppsHandler) CheckUpdates(c echo.Context) error {
 	botID, err := h.authorize(c)
@@ -318,9 +325,9 @@ func (h *AppsHandler) CheckUpdates(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param installation_id path string true "App installation ID"
 // @Success 200 {object} AppRemovalPreviewResponse
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/apps/{installation_id}/removal-preview [get].
 func (h *AppsHandler) RemovalPreview(c echo.Context) error {
 	botID, err := h.authorize(c)
@@ -362,10 +369,10 @@ func (h *AppsHandler) RemovalPreview(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body AppInstallRequest true "App release to install"
 // @Success 200 {object} AppStreamEvent "SSE stream of operation events"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /bots/{bot_id}/apps [post].
 func (h *AppsHandler) Install(c echo.Context) error {
 	botID, err := h.authorize(c)
@@ -394,8 +401,8 @@ func (h *AppsHandler) Install(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param installation_id path string true "App installation ID"
 // @Success 200 {object} AppStreamEvent "SSE stream of operation events"
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/apps/{installation_id}/resume [post].
 func (h *AppsHandler) Resume(c echo.Context) error {
 	botID, err := h.authorize(c)
@@ -420,10 +427,10 @@ func (h *AppsHandler) Resume(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body AppUpdateRequest true "What to update"
 // @Success 200 {object} AppStreamEvent "SSE stream of operation events"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /bots/{bot_id}/apps/update [post].
 func (h *AppsHandler) UpdateSelection(c echo.Context) error {
 	botID, err := h.authorize(c)
@@ -454,8 +461,8 @@ func (h *AppsHandler) UpdateSelection(c echo.Context) error {
 // @Param installation_id path string true "App installation ID"
 // @Param remove_unreferenced_required query bool false "Also remove auto-installed Apps that lose their last reference"
 // @Success 200 {object} AppStreamEvent "SSE stream of operation events"
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/apps/{installation_id} [delete].
 func (h *AppsHandler) Remove(c echo.Context) error {
 	botID, err := h.authorize(c)
@@ -483,11 +490,11 @@ func (h *AppsHandler) Remove(c echo.Context) error {
 // @Param connector_type path string true "Connector type"
 // @Param payload body AppConnectorOAuthRequest true "OAuth request"
 // @Success 201 {object} connectsdk.OAuthAuthorization
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 502 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/apps/{installation_id}/connectors/{connector_type}/oauth [post].
 func (h *AppsHandler) BeginConnectorOAuth(c echo.Context) error {
 	botID, err := h.authorize(c)
@@ -520,11 +527,11 @@ func (h *AppsHandler) BeginConnectorOAuth(c echo.Context) error {
 // @Param connector_type path string true "Connector type"
 // @Param payload body AppConnectorCredentialRequest true "Credential request"
 // @Success 201 {object} connectors.Connector
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 502 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/apps/{installation_id}/connectors/{connector_type}/api-key [post].
 func (h *AppsHandler) CreateConnectorCredential(c echo.Context) error {
 	botID, err := h.authorize(c)
@@ -594,8 +601,9 @@ type appOperation func(ctx context.Context, sink apps.EventSink) (apps.Operation
 
 // stream runs one mutating operation as an SSE stream. The request is
 // validated before the stream opens; everything the service reports
-// afterwards becomes an error frame. A browser disconnect does not cancel
-// the admitted operation.
+// afterwards becomes an error frame, and the handler returns the error the
+// frame was rendered from for the request's result record. A browser
+// disconnect does not cancel the admitted operation.
 func (h *AppsHandler) stream(c echo.Context, action string, run appOperation) error {
 	ctx := context.WithoutCancel(c.Request().Context())
 	writer, flusher, err := beginSSEResponse(c)
@@ -607,36 +615,20 @@ func (h *AppsHandler) stream(c echo.Context, action string, run appOperation) er
 	sink := apps.EventFunc(func(event apps.Event) {
 		stream.send(AppStreamEvent{
 			Type: event.Type, Kind: event.Kind, ID: event.ID, Stream: event.Stream, Data: event.Data,
-			Status: event.Status, Version: event.Version, Message: event.Message,
+			Status: event.Status, Version: event.Version, Message: event.Message, Code: event.Code,
 		})
 	})
 	if _, err := run(ctx, sink); err != nil {
-		requestID := httpx.RequestID(c)
-		h.logger.WarnContext(c.Request().Context(), "app operation failed",
-			slog.String("action", action), slog.String("request_id", requestID), slog.Any("error", err))
-		stream.send(newAppErrorEvent(h.httpError(err), requestID))
+		frame, rendered := server.NewStreamError(c.Request().Context(), errs.Wrap(h.httpError(err), "app operation", slog.String("action", action)), httpx.RequestID(c))
+		stream.send(frame)
+		return rendered
 	}
 	return nil
-}
-
-func newAppErrorEvent(err error, requestID string) AppStreamEvent {
-	public, ok := apperror.PublicFrom(err, requestID)
-	if !ok {
-		return AppStreamEvent{
-			Type: "error", Code: string(apperror.CodeAppOperationFailed), Args: map[string]string{},
-			Message: "The App operation failed.", RequestID: requestID,
-		}
-	}
-	return AppStreamEvent{
-		Type: "error", Code: string(public.Code), Args: public.Args, Detail: public.Detail,
-		Message: public.Detail, RequestID: public.RequestID,
-	}
 }
 
 func (*AppsHandler) httpError(err error) error {
 	err = apps.RegistryError(err)
 	var targetErr *supermarketclient.WorkspaceTargetError
-	var statusErr *supermarketclient.StatusError
 	switch {
 	case err == nil:
 		return nil
@@ -644,8 +636,12 @@ func (*AppsHandler) httpError(err error) error {
 		return err
 	case errors.As(err, &targetErr):
 		return workspaceTargetHTTPError(targetErr.Err)
-	case errors.As(err, &statusErr):
-		return echo.NewHTTPError(statusErr.Status, statusErr.Error())
+	case errors.Is(err, supermarketclient.ErrRevisionInvalid):
+		return apperror.FieldInvalid("revision", err)
+	case errors.Is(err, supermarketclient.ErrRegistryIDInvalid):
+		return apperror.FieldInvalid("registry_id", err)
+	case errors.Is(err, supermarketclient.ErrAppIDInvalid):
+		return apperror.FieldInvalid("app_id", err)
 	case errors.Is(err, apps.ErrNotInstalled):
 		return apperror.Wrap(apperror.CodeAppNotFound, err, nil)
 	case errors.Is(err, apps.ErrInvalidRequest), errors.Is(err, apps.ErrConnectorNotReferenced):
@@ -658,8 +654,7 @@ func (*AppsHandler) httpError(err error) error {
 		errors.Is(err, workspacedeps.ErrDefinitionInvalid), errors.Is(err, workspacedeps.ErrDefinitionUnavailable):
 		return workspaceDependencyError(err)
 	default:
-		var apiErr *connectsdk.APIError
-		if errors.As(err, &apiErr) {
+		if connectors.CodeOf(err) != "" {
 			return connectorHTTPError(err)
 		}
 		return apperror.Wrap(apperror.CodeAppOperationFailed, err, nil)
@@ -694,6 +689,7 @@ func appItem(item apps.Item, dataRoot string) AppItem {
 		out.AvailableVersion = inst.AvailableVersion
 		out.LastCheckedAt = inst.LastCheckedAt
 		out.LastError = inst.LastError
+		out.LastErrorCode = inst.LastErrorCode
 		installedAt, updatedAt := inst.InstalledAt, inst.UpdatedAt
 		if !installedAt.IsZero() {
 			out.InstalledAt = &installedAt

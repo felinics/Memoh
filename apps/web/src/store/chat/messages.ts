@@ -22,30 +22,32 @@ export function sendFailedMessage() {
   return localizedMessages().chat.sendFailed
 }
 
+export function firstSendTimeoutMessage() {
+  return localizedMessages().chat.sendConfirmTimeout
+}
+
+export function workdirMismatchMessage() {
+  return localizedMessages().chat.sendWorkdirUnsupported
+}
+
+// The copy for a command error the client raises itself, by its catalog code.
 export function commandErrorMessage(code: string) {
-  const errors = localizedMessages().chat.slash.errorMessages as Record<string, string>
-  return errors[code] || errors.generic || 'Slash command failed.'
+  return commandActionErrorMessage({ code })
 }
 
 // The copy for a command_error frame, read through lookup, which returns the
-// copy for an i18n key or '' when there is none. Slash-command codes have their
-// own copy; any other code is a catalog code with copy under errors.<code>. A
-// code with neither gets the generic slash-command copy. The frame's message is
-// server text and is never shown.
+// copy for an i18n key or '' when there is none. The code is a catalog code
+// with copy under errors.<code>; a code without copy gets the generic
+// slash-command copy. The frame's message is server text and is never shown.
 export function resolveCommandErrorMessage(error: { code?: string } | undefined, lookup: (key: string) => string) {
   const code = error?.code?.trim() ?? ''
-  if (code) {
-    for (const key of [`chat.slash.errorMessages.${code}`, `errors.${code}`]) {
-      const copy = lookup(key)
-      if (copy) return copy
-    }
-  }
-  return lookup('chat.slash.errorMessages.generic')
+  const copy = code ? lookup(`errors.${code}`) : ''
+  return copy || lookup('chat.slash.errorMessages.generic')
 }
 
 // The copy for a command_error frame in the stored locale.
 export function commandActionErrorMessage(error?: { code?: string }) {
-  return resolveCommandErrorMessage(error, key => renderI18nMessage(key)) || commandErrorMessage('generic')
+  return resolveCommandErrorMessage(error, key => renderI18nMessage(key)) || localizedMessages().chat.slash.errorMessages.generic
 }
 
 export function forkFailedMessage() {

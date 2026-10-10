@@ -3,6 +3,7 @@ package apperror
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -23,40 +24,6 @@ func TestErrorKeepsStableCodeAndPrivateCause(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), cause.Error()) {
 		t.Fatal("infrastructure cause leaked through Error()")
-	}
-}
-
-func TestProblemFromUsesCatalogAndDoesNotExposeCause(t *testing.T) {
-	err := Wrap(CodeWorkspaceUnreachable, errors.New("secret runtime detail"), nil)
-	problem, ok := ProblemFrom(err, "req-1")
-	if !ok {
-		t.Fatal("ProblemFrom() did not recognize AppError")
-	}
-	if problem.Status != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d", problem.Status, http.StatusServiceUnavailable)
-	}
-	if problem.Type != "urn:memoh:error:workspace.unreachable" {
-		t.Fatalf("type = %q", problem.Type)
-	}
-	if problem.Detail != "The workspace could not be reached." {
-		t.Fatalf("detail = %q", problem.Detail)
-	}
-	if problem.RequestID != "req-1" {
-		t.Fatalf("request_id = %q", problem.RequestID)
-	}
-}
-
-func TestPublicFromIsSharedByTransportAdapters(t *testing.T) {
-	err := New(CodeBotNameTaken, map[string]string{"field": "name"})
-	public, ok := PublicFrom(err, "req-public")
-	if !ok {
-		t.Fatal("PublicFrom() did not recognize AppError")
-	}
-	if public.Code != CodeBotNameTaken || public.Detail != "This name is already taken." {
-		t.Fatalf("public error = %#v", public)
-	}
-	if public.Args["field"] != "name" || public.RequestID != "req-public" {
-		t.Fatalf("public error metadata = %#v", public)
 	}
 }
 
@@ -81,12 +48,8 @@ func TestArgsAreCopiedAtInputAndOutput(t *testing.T) {
 	}
 
 	workspaceErr := Wrap(CodeWorkspaceUnreachable, errors.New("private"), map[string]string{"path": "/secret"})
-	problem, ok := ProblemFrom(workspaceErr, "req-2")
-	if !ok {
-		t.Fatal("ProblemFrom() did not recognize workspace error")
-	}
-	if len(problem.Args) != 0 {
-		t.Fatalf("workspace args = %#v, want empty allowlisted metadata", problem.Args)
+	if workspaceArgs := ArgsOf(workspaceErr); len(workspaceArgs) != 0 {
+		t.Fatalf("workspace args = %#v, want empty allowlisted metadata", workspaceArgs)
 	}
 }
 
@@ -284,10 +247,6 @@ func TestWorkspaceDependencyErrorCatalog(t *testing.T) {
 		if definition.Detail == "" {
 			t.Errorf("%s has no detail", code)
 		}
-		problem, ok := ProblemFrom(Wrap(code, errors.New("private cause"), nil), "req-1")
-		if !ok || problem.Code != string(code) || problem.Status != status {
-			t.Errorf("%s problem = %+v, %v", code, problem, ok)
-		}
 	}
 }
 
@@ -322,5 +281,35 @@ func TestErrorCauseIsNotUnwrap(t *testing.T) {
 	var nilErr *Error
 	if got := nilErr.Cause(); got != nil {
 		t.Fatalf("nil Error Cause() = %v, want nil", got)
+	}
+}
+
+func TestParseFault(t *testing.T) {
+	t.Parallel()
+	for _, f := range []Fault{FaultClient, FaultServer, FaultDependency, FaultCanceled} {
+		if got, ok := ParseFault(string(f)); !ok || got != f {
+			t.Errorf("ParseFault(%q) = %q, %v", f, got, ok)
+		}
+	}
+	for _, s := range []string{"", "Client", "unknown"} {
+		if got, ok := ParseFault(s); ok || got != "" {
+			t.Errorf("ParseFault(%q) = %q, %v; want rejected", s, got, ok)
+		}
+	}
+}
+
+// A field error carries only the field to the client; the cause stays private.
+func TestFieldErrorsCarryOnlyTheField(t *testing.T) {
+	cause := errors.New("strconv.Atoi: parsing \"three\": invalid syntax")
+	invalid := FieldInvalid("count", cause)
+	if CodeOf(invalid) != CodeRequestFieldInvalid || !maps.Equal(ArgsOf(invalid), map[string]string{"field": "count"}) {
+		t.Fatalf("FieldInvalid = %s %v", CodeOf(invalid), ArgsOf(invalid))
+	}
+	if !errors.Is(CauseOf(invalid), cause) {
+		t.Fatalf("cause = %v, want the private cause", CauseOf(invalid))
+	}
+	required := FieldRequired("session_id")
+	if CodeOf(required) != CodeRequestFieldRequired || !maps.Equal(ArgsOf(required), map[string]string{"field": "session_id"}) {
+		t.Fatalf("FieldRequired = %s %v", CodeOf(required), ArgsOf(required))
 	}
 }

@@ -3,27 +3,20 @@ package apps
 import (
 	"context"
 	"errors"
-	"fmt"
-
-	connectsdk "github.com/felinics/connect-it/sdk/go"
 
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/connectors"
-	"github.com/felinics/memoh/internal/supermarket"
 	"github.com/felinics/memoh/internal/workspacedeps"
 )
 
-// failure is a failed App step. Error keeps the full cause for logs and
-// callers; Public is the text that may be persisted in last_error and shown
-// to users, which never repeats text from the database, the workspace bridge
-// or a third-party service.
+// failure is a failed App step. Its text keeps the step and the full cause
+// for logs and callers; what the user sees is the catalog code publicCode
+// derives from the cause.
 type failure struct {
 	step  string
 	cause error
 }
 
-// fail returns a failure for step. A nil cause records a message this
-// package authored, which is public as written.
 func fail(step string, cause error) error {
 	return &failure{step: step, cause: cause}
 }
@@ -37,66 +30,54 @@ func (f *failure) Error() string {
 
 func (f *failure) Unwrap() error { return f.cause }
 
-// Public returns the user-safe description of the failure.
-func (f *failure) Public() string {
-	if f.cause == nil {
-		return f.step
-	}
-	return f.step + ": " + publicCause(f.cause)
+// errDiscoveryFailed marks a workspace discovery that reported a problem; its
+// text is the discovery message and stays in the log.
+var errDiscoveryFailed = errors.New("workspace discovery failed")
+
+// sentinelCodes maps the errors the apps service and its collaborators report
+// to the catalog code a user sees.
+var sentinelCodes = []struct {
+	err  error
+	code apperror.Code
+}{
+	{ErrInvalidRequest, apperror.CodeAppRequestInvalid},
+	{ErrConnectorNotReferenced, apperror.CodeAppRequestInvalid},
+	{ErrDependenciesUnavailable, apperror.CodeAppDependenciesUnavailable},
+	{ErrNotInstalled, apperror.CodeAppNotFound},
+	{errDiscoveryFailed, apperror.CodeWorkspaceDependencyDiscoveryFailed},
+	{workspacedeps.ErrDependencyNotFound, apperror.CodeWorkspaceDependencyNotFound},
+	{workspacedeps.ErrPlatformUnsupported, apperror.CodeWorkspaceDependencyPlatformUnsupported},
+	{workspacedeps.ErrBusy, apperror.CodeWorkspaceDependencyBusy},
+	{workspacedeps.ErrWorkspaceNotRunning, apperror.CodeWorkspaceDependencyWorkspaceNotRunning},
+	{workspacedeps.ErrWorkspaceMissing, apperror.CodeWorkspaceDependencyWorkspaceMissing},
+	{workspacedeps.ErrRollbackUnavailable, apperror.CodeWorkspaceDependencyRollbackUnavailable},
+	{workspacedeps.ErrActionUnsupported, apperror.CodeWorkspaceDependencyActionUnsupported},
+	{workspacedeps.ErrOperationUncertain, apperror.CodeWorkspaceDependencyOperationUnknown},
+	{workspacedeps.ErrCatalogUnavailable, apperror.CodeWorkspaceDependencyCatalogUnavailable},
+	{workspacedeps.ErrDefinitionInvalid, apperror.CodeWorkspaceDependencyDefinitionInvalid},
+	{workspacedeps.ErrDefinitionUnavailable, apperror.CodeWorkspaceDependencyDefinitionUnavailable},
 }
 
-// publicMessage returns the user-safe text for an operation error.
-func publicMessage(err error) string {
-	var f *failure
-	if errors.As(err, &f) {
-		return f.Public()
+// publicCode is the catalog code that describes err to a user and is stored
+// in last_error_code. Anything it does not recognize is app.operation_failed;
+// the cause belongs in the log.
+func publicCode(err error) apperror.Code {
+	if code := apperror.CodeOf(RegistryError(err)); code != "" {
+		return code
 	}
-	return publicCause(err)
-}
-
-// publicSentinels are errors whose text is written for users.
-var publicSentinels = []error{
-	ErrInvalidRequest, ErrConnectorNotReferenced, ErrDependenciesUnavailable, ErrNotInstalled,
-	connectors.ErrInvalidInput, connectors.ErrNotConfigured, connectors.ErrUpstreamUnavailable,
-	workspacedeps.ErrDependencyNotFound, workspacedeps.ErrPlatformUnsupported, workspacedeps.ErrBusy,
-	workspacedeps.ErrWorkspaceNotRunning, workspacedeps.ErrWorkspaceMissing,
-	workspacedeps.ErrRollbackUnavailable, workspacedeps.ErrActionUnsupported, workspacedeps.ErrOperationUncertain,
-	workspacedeps.ErrCatalogUnavailable, workspacedeps.ErrDefinitionInvalid, workspacedeps.ErrDefinitionUnavailable,
-}
-
-// publicCause classifies an error from another package: catalog and
-// registry errors keep their public detail, sentinels their message and
-// upstream HTTP failures their status. Anything else is reported
-// generically and belongs in the log.
-func publicCause(err error) string {
-	if err == nil {
-		return ""
-	}
-	var nested *failure
-	if errors.As(err, &nested) {
-		return nested.Public()
-	}
-	if public, ok := apperror.PublicFrom(RegistryError(err), ""); ok {
-		return public.Detail
-	}
-	for _, sentinel := range publicSentinels {
-		if errors.Is(err, sentinel) {
-			return sentinel.Error()
+	for _, s := range sentinelCodes {
+		if errors.Is(err, s.err) {
+			return s.code
 		}
 	}
-	var apiErr *connectsdk.APIError
-	if errors.As(err, &apiErr) {
-		return fmt.Sprintf("Connect-It returned HTTP %d", apiErr.StatusCode)
-	}
-	var statusErr *supermarket.StatusError
-	if errors.As(err, &statusErr) {
-		return fmt.Sprintf("Supermarket returned HTTP %d", statusErr.Status)
+	if code := connectors.CodeOf(err); code != "" {
+		return code
 	}
 	switch {
 	case errors.Is(err, context.Canceled):
-		return "the operation was cancelled"
+		return apperror.CodeCanceled
 	case errors.Is(err, context.DeadlineExceeded):
-		return "the operation timed out"
+		return apperror.CodeHTTPGatewayTimeout
 	}
-	return "internal error; see the Server log"
+	return apperror.CodeAppOperationFailed
 }
