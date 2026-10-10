@@ -134,16 +134,16 @@ func (f progressFixture) claims() ([]string, map[string]string) {
 }
 
 type compactRecord struct {
-	status, reason string
-	count, covered int
+	status, reason           string
+	count, covered, attempts int
 }
 
 func (f progressFixture) compact(id string) compactRecord {
 	f.t.Helper()
 	var record compactRecord
 	if err := f.pool.QueryRow(f.ctx, `
-		SELECT status, failure_reason, message_count, jsonb_array_length(coverage)
-		FROM bot_history_message_compacts WHERE id = $1`, id).Scan(&record.status, &record.reason, &record.count, &record.covered); err != nil {
+		SELECT status, failure_reason, message_count, jsonb_array_length(coverage), failure_attempts
+		FROM bot_history_message_compacts WHERE id = $1`, id).Scan(&record.status, &record.reason, &record.count, &record.covered, &record.attempts); err != nil {
 		f.t.Fatalf("load compact %s: %v", id, err)
 	}
 	return record
@@ -765,26 +765,48 @@ func TestPostgresCompactionRefusedSpanIsHeldThenRetried(t *testing.T) {
 	if after := f.scanAfter(); after == refused[0].ID || after == refused[1].ID || labels[after] == "reasoning#0" || labels[after] == "later#1" {
 		t.Fatalf("scan position = %s, want it in front of the held rows", labels[after])
 	}
-	if res, err := f.run(svc, model); err != nil || res.Reason != compaction.ReasonNoBeneficialSpan || model.calls != 2 {
+	auto := f.config(model)
+	auto.Manual = false
+	if res, err := svc.RunCompactionSync(f.ctx, auto); err != nil || res.Reason != compaction.ReasonNoBeneficialSpan || model.calls != 2 {
 		t.Fatalf("third pass = %+v, %v after %d calls; want no call while the refused rows are held", res, err, model.calls)
 	}
 	if got := strings.Join(f.replay(labels), ","); got != "refused#0,refused#1,reasoning#0,summary:"+committed+",current#0" {
 		t.Fatalf("replay = %s, want the refused rows raw in place before the summary", got)
 	}
 
-	// Once the hold lapses they are tried again and, the provider now
-	// willing, compacted in place.
-	if _, err := f.pool.Exec(f.ctx, `UPDATE bot_history_message_compacts SET completed_at = now() - INTERVAL '7 hours' WHERE id = $1`, failed); err != nil {
+	// With nothing else to claim, a manual request retries them right away.
+	// Refused again, they are held four times as long.
+	if res, err := f.run(svc, model); err != nil || res.Reason != compaction.ReasonSummaryUnusable || model.calls != 3 {
+		t.Fatalf("manual pass = %+v, %v after %d calls; want the held rows retried", res, err, model.calls)
+	}
+	_, claim = f.claims()
+	again := claim[refused[0].ID]
+	if got := f.compact(again); again == failed || got.status != "error" || got.attempts != 2 {
+		t.Fatalf("manual retry = %+v, want a second unusable attempt recorded", got)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE bot_history_message_compacts SET completed_at = now() - INTERVAL '30 minutes' WHERE id = $1`, again); err != nil {
+		t.Fatal(err)
+	}
+	// Fresh services, as after a restart: only the recorded hold applies.
+	restarted := func() *compaction.Service { return compaction.NewService(slog.New(slog.DiscardHandler), store) }
+	if res, err := restarted().RunCompactionSync(f.ctx, auto); err != nil || res.Reason != compaction.ReasonNoBeneficialSpan || model.calls != 3 {
+		t.Fatalf("pass half an hour later = %+v, %v after %d calls; want the twice-refused rows still held", res, err, model.calls)
+	}
+
+	// Once the hold lapses they are tried again, half at a time, and, the
+	// provider now willing, compacted in place.
+	if _, err := f.pool.Exec(f.ctx, `UPDATE bot_history_message_compacts SET completed_at = now() - INTERVAL '61 minutes' WHERE id = $1`, again); err != nil {
 		t.Fatal(err)
 	}
 	model.refuse = ""
-	if res, err := f.run(svc, model); err != nil || res.Status != compaction.StatusOK || res.MessageCount != len(refused) {
-		t.Fatalf("pass after the hold = %+v, %v; want the refused rows retried and committed", res, err)
+	for pass := 1; pass <= 2; pass++ {
+		if res, err := restarted().RunCompactionSync(f.ctx, auto); err != nil || res.Status != compaction.StatusOK || res.MessageCount != 1 {
+			t.Fatalf("retry %d after the hold = %+v, %v; want one of the refused rows committed", pass, res, err)
+		}
 	}
 	_, claim = f.claims()
-	retried := claim[refused[0].ID]
-	if got := strings.Join(f.replay(labels), ","); got != "summary:"+retried+",reasoning#0,summary:"+committed+",current#0" {
-		t.Fatalf("replay = %s, want both summaries in place", got)
+	if got := strings.Join(f.replay(labels), ","); got != "summary:"+claim[refused[0].ID]+",summary:"+claim[refused[1].ID]+",reasoning#0,summary:"+committed+",current#0" {
+		t.Fatalf("replay = %s, want every summary in place", got)
 	}
 }
 
@@ -819,5 +841,33 @@ func TestPostgresCompactionScreenshotFeedbackIsNotTheLatestUser(t *testing.T) {
 	}
 	if !latest[task.ID] || latest[feedback.ID] {
 		t.Fatalf("latest user: task=%v feedback=%v; a screenshot read back in the turn starts no turn", latest[task.ID], latest[feedback.ID])
+	}
+}
+
+func TestPostgresCompactionUnusableHoldIsCapped(t *testing.T) {
+	f, store := newProgressFixture(t)
+	refused := []messagepkg.Message{f.text("user", strings.Repeat("REFUSED question. ", 80)), f.text("assistant", strings.Repeat("REFUSED answer. ", 80))}
+	f.text("user", "current question")
+	model := &countingSummarizer{summary: summaryTokens(120), refuse: "REFUSED"}
+	cfg := f.config(model)
+	cfg.Manual = false
+	if _, err := compaction.NewService(slog.New(slog.DiscardHandler), store).RunCompactionSync(f.ctx, cfg); err == nil {
+		t.Fatal("first pass succeeded, want the refusal recorded")
+	}
+	_, claim := f.claims()
+	// Refused many times over, the rows are still held for six hours at most.
+	hold := func(ago string) {
+		if _, err := f.pool.Exec(f.ctx, `UPDATE bot_history_message_compacts SET failure_attempts = 8, completed_at = now() - $2::interval WHERE id = $1`, claim[refused[0].ID], ago); err != nil {
+			t.Fatal(err)
+		}
+	}
+	model.refuse = ""
+	hold("5 hours 59 minutes")
+	if res, err := compaction.NewService(slog.New(slog.DiscardHandler), store).RunCompactionSync(f.ctx, cfg); err != nil || res.Status != compaction.StatusNoop || model.calls != 1 {
+		t.Fatalf("pass within six hours = %+v, %v after %d calls; want the rows still held", res, err, model.calls)
+	}
+	hold("6 hours 1 minute")
+	if res, err := compaction.NewService(slog.New(slog.DiscardHandler), store).RunCompactionSync(f.ctx, cfg); err != nil || res.Status != compaction.StatusOK {
+		t.Fatalf("pass after six hours = %+v, %v; want the rows retried", res, err)
 	}
 }

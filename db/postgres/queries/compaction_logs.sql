@@ -11,7 +11,7 @@ WITH owner_session AS MATERIALIZED (
 INSERT INTO bot_history_message_compacts (bot_id, session_id, compaction_epoch, team_id)
 SELECT sqlc.arg(bot_id), owner_session.id, owner_session.compaction_epoch, owner_session.team_id
 FROM owner_session
-RETURNING id, bot_id, session_id, status, summary, message_count, error_message, failure_reason, usage, model_id,
+RETURNING id, bot_id, session_id, status, summary, message_count, error_message, failure_reason, failure_attempts, usage, model_id,
           artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
           superseded_by, superseded_at, compaction_epoch, started_at, completed_at, team_id;
 
@@ -56,6 +56,7 @@ SET status = $2,
     anchor_start_ms = $9,
     anchor_end_ms = $10,
     failure_reason = $11,
+    failure_attempts = $12,
     completed_at = now()
 FROM locked_compact locked
 WHERE compact.team_id = public.memoh_current_team_id()
@@ -85,7 +86,7 @@ WHERE compact.team_id = public.memoh_current_team_id()
     )
   )
 RETURNING compact.id, compact.bot_id, compact.session_id, compact.status, compact.summary,
-          compact.message_count, compact.error_message, compact.failure_reason, compact.usage, compact.model_id,
+          compact.message_count, compact.error_message, compact.failure_reason, compact.failure_attempts, compact.usage, compact.model_id,
           compact.artifact_version, compact.coverage, compact.anchor_start_ms, compact.anchor_end_ms,
           compact.artifact_level, compact.parent_ids, compact.superseded_by, compact.superseded_at,
           compact.compaction_epoch, compact.started_at, compact.completed_at, compact.team_id;
@@ -213,13 +214,13 @@ WHERE compact.team_id = public.memoh_current_team_id()
     OR parent_count.value = CARDINALITY(sqlc.arg(parents)::uuid[])
   )
 RETURNING compact.id, compact.bot_id, compact.session_id, compact.status, compact.summary,
-          compact.message_count, compact.error_message, compact.failure_reason, compact.usage, compact.model_id,
+          compact.message_count, compact.error_message, compact.failure_reason, compact.failure_attempts, compact.usage, compact.model_id,
           compact.artifact_version, compact.coverage, compact.anchor_start_ms, compact.anchor_end_ms,
           compact.artifact_level, compact.parent_ids, compact.superseded_by, compact.superseded_at,
           compact.compaction_epoch, compact.started_at, compact.completed_at, compact.team_id;
 
 -- name: GetCompactionLogByID :one
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, failure_reason, usage, model_id,
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, failure_reason, failure_attempts, usage, model_id,
        artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
        superseded_by, superseded_at, compaction_epoch, started_at, completed_at, team_id
 FROM bot_history_message_compacts compact
@@ -262,7 +263,7 @@ WHERE parent.team_id = public.memoh_current_team_id()
 ORDER BY parent.id ASC;
 
 -- name: ListCompactionLogsByBot :many
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, failure_reason, usage, model_id,
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, failure_reason, failure_attempts, usage, model_id,
        artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
        superseded_by, superseded_at, compaction_epoch, started_at, completed_at, team_id
 FROM bot_history_message_compacts
@@ -274,7 +275,7 @@ LIMIT $2 OFFSET $3;
 SELECT count(*) FROM bot_history_message_compacts WHERE team_id = public.memoh_current_team_id() AND bot_id = $1;
 
 -- name: ListCompactionArtifactLineageBySession :many
-SELECT c.id, c.bot_id, c.session_id, c.status, c.summary, c.message_count, c.error_message, c.failure_reason, c.usage, c.model_id,
+SELECT c.id, c.bot_id, c.session_id, c.status, c.summary, c.message_count, c.error_message, c.failure_reason, c.failure_attempts, c.usage, c.model_id,
        c.artifact_version, c.coverage, c.anchor_start_ms, c.anchor_end_ms, c.artifact_level, c.parent_ids,
        c.superseded_by, c.superseded_at, c.compaction_epoch, c.started_at, c.completed_at, c.team_id
 FROM bot_history_message_compacts c

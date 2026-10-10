@@ -19,11 +19,15 @@ const failureReasonIneffectiveSummary = "ineffective_summary"
 
 // failureReasonUnusableSummary marks a claim the model returned no usable
 // summary for: empty, cut off, or refused. That may pass, so its rows are
-// held back only for unusableSummaryHold, while later passes select past
-// them, and are then tried again.
+// held back only for a while, as later passes select past them, and are then
+// tried again: for unusableSummaryHold, four times as long after each
+// consecutive such attempt on them, up to maxUnusableSummaryHold.
 const failureReasonUnusableSummary = "unusable_summary"
 
-const unusableSummaryHold = 6 * time.Hour
+const (
+	unusableSummaryHold    = 15 * time.Minute
+	maxUnusableSummaryHold = 6 * time.Hour
+)
 
 type groupKind int
 
@@ -264,6 +268,34 @@ func trimSpan(span []CompactionCandidate, budget, minTokens int) []CompactionCan
 		}
 	}
 	return nil
+}
+
+// retrySpan halves a claim that starts with rows whose summary came back
+// unusable more than once: it claims the first half of them when both halves
+// still clear floor. A row the model keeps refusing thus ends up retried
+// alone within a few attempts, instead of holding back every row once
+// claimed with it.
+func retrySpan(span []CompactionCandidate, floor int) []CompactionCandidate {
+	if len(span) == 0 || span[0].UnusableAttempts < 2 {
+		return span
+	}
+	groups := toolExchangeGroups(span)
+	var costs []int
+	total := 0
+	for _, group := range groups {
+		if span[group[0]].UnusableAttempts == 0 {
+			break
+		}
+		costs = append(costs, markableGroupCost(span, group))
+		total += costs[len(costs)-1]
+	}
+	for g, have := 0, 0; g < len(costs)-1; g++ {
+		if have += costs[g]; have >= floor && 2*have >= total && total-have >= floor {
+			last := groups[g]
+			return span[:last[len(last)-1]+1]
+		}
+	}
+	return span
 }
 
 // closeRun extends the claimable prefix items[:n] — what the recent tail

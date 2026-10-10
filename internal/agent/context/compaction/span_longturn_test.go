@@ -511,7 +511,7 @@ func TestCompactionGrownWindowCountsItsStatsOnce(t *testing.T) {
 	svc := newMachineryService(q)
 	cfg := machineryConfig(&stubModel{}, 50)
 	measure, _ := q.MeasureUncompactedMessagesBySession(context.Background(), pgtype.UUID{})
-	read, reason, err := svc.readCompactionSpan(context.Background(), pgtype.UUID{}, cfg, measure, minCompactionSpanTokens, 10000)
+	read, reason, err := svc.readCompactionSpan(context.Background(), pgtype.UUID{}, cfg, measure, minCompactionSpanTokens, 10000, false)
 	if err != nil || reason != "" || len(read.span) == 0 {
 		t.Fatalf("read = %d rows, %q, %v; want the exchange read whole", len(read.span), reason, err)
 	}

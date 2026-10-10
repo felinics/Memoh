@@ -37,6 +37,9 @@ type CompactionCandidate struct {
 	// IneffectiveClaim reports that this row's claim in the current epoch
 	// failed because its summary was not shorter than the rows.
 	IneffectiveClaim bool
+	// UnusableAttempts counts the consecutive attempts in the current epoch
+	// whose summary of this row came back unusable.
+	UnusableAttempts int
 }
 
 func (c CompactionCandidate) HasPolicy(policy CompactPolicy) bool {

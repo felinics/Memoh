@@ -32,6 +32,7 @@ func itemsFromWindow(window []sqlc.ListUncompactedMessagesBySessionWithinBytesRo
 	for i := range items {
 		items[i].GapBefore = window[i].GapBefore
 		items[i].IneffectiveClaim = window[i].IneffectiveClaim
+		items[i].UnusableAttempts = int(window[i].UnusableAttempts)
 	}
 	finishCandidatePolicies(items)
 	return rows, items, barrierCount

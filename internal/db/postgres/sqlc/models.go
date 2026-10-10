@@ -318,6 +318,7 @@ type BotHistoryMessageCompact struct {
 	MessageCount    int32              `json:"message_count"`
 	ErrorMessage    string             `json:"error_message"`
 	FailureReason   string             `json:"failure_reason"`
+	FailureAttempts int32              `json:"failure_attempts"`
 	Usage           []byte             `json:"usage"`
 	ModelID         pgtype.UUID        `json:"model_id"`
 	ArtifactVersion int32              `json:"artifact_version"`

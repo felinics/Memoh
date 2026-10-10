@@ -37,8 +37,9 @@ type spanRead struct {
 // span worth claiming. A window that only holds rows staying raw — protected,
 // unrenderable, already proved ineffective, too small, or too large to read —
 // moves the cursor past them, so a span beyond the first window is still
-// reached. A non-empty reason reports why nothing can be claimed now.
-func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUID, cfg TriggerConfig, measure sqlc.MeasureUncompactedMessagesBySessionRow, minSpanTokens, minBudget int) (spanRead, string, error) {
+// reached. A non-empty reason reports why nothing can be claimed now. With
+// retryHeld, rows held back after an unusable summary are candidates again.
+func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUID, cfg TriggerConfig, measure sqlc.MeasureUncompactedMessagesBySessionRow, minSpanTokens, minBudget int, retryHeld bool) (spanRead, string, error) {
 	readMaxBytes := compactionReadMaxBytes(cfg)
 	windowBytes := readMaxBytes
 	// Rows left behind follow the floor of ordinary passes, not this pass's:
@@ -46,6 +47,10 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 	// clear the floor once it can be claimed.
 	floor := min(minCompactionSpanTokens, minBudget)
 	jointTokens := 2 * floor
+	hold, maxHold := unusableSummaryHold, maxUnusableSummaryHold
+	if retryHeld {
+		hold, maxHold = 0, 0
+	}
 	var read spanRead
 	var after pgtype.UUID
 	var epoch int64
@@ -83,7 +88,8 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			AfterMessageID:           after,
 			IneffectiveFailureReason: failureReasonIneffectiveSummary,
 			UnusableFailureReason:    failureReasonUnusableSummary,
-			UnusableHoldSeconds:      int64(unusableSummaryHold / time.Second),
+			UnusableHoldSeconds:      int64(hold / time.Second),
+			UnusableMaxHoldSeconds:   int64(maxHold / time.Second),
 		})
 		if err != nil {
 			return spanRead{}, "", err

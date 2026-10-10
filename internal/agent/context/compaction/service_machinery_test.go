@@ -150,6 +150,7 @@ func (f *fakeQueries) ListUncompactedMessagesBySession(_ context.Context, _ pgty
 	}
 	if f.listStarted != nil {
 		close(f.listStarted)
+		f.listStarted = nil
 	}
 	if f.listRelease != nil {
 		<-f.listRelease

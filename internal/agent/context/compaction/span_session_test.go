@@ -23,6 +23,7 @@ type sessionStore struct {
 	*fakeQueries
 	history     []sqlc.ListUncompactedMessagesBySessionRow
 	reasons     map[pgtype.UUID]string
+	attempts    map[pgtype.UUID]int
 	claimEpoch  map[pgtype.UUID]int64
 	completedAt map[pgtype.UUID]time.Time
 	now         func() time.Time
@@ -34,7 +35,7 @@ type sessionStore struct {
 }
 
 func newSessionStore(history ...sqlc.ListUncompactedMessagesBySessionRow) *sessionStore {
-	return &sessionStore{fakeQueries: &fakeQueries{}, history: history, reasons: map[pgtype.UUID]string{}, claimEpoch: map[pgtype.UUID]int64{}, completedAt: map[pgtype.UUID]time.Time{}, now: time.Now}
+	return &sessionStore{fakeQueries: &fakeQueries{}, history: history, reasons: map[pgtype.UUID]string{}, attempts: map[pgtype.UUID]int{}, claimEpoch: map[pgtype.UUID]int64{}, completedAt: map[pgtype.UUID]time.Time{}, now: time.Now}
 }
 
 func payloadBytes(row sqlc.ListUncompactedMessagesBySessionRow) int64 {
@@ -42,8 +43,9 @@ func payloadBytes(row sqlc.ListUncompactedMessagesBySessionRow) int64 {
 }
 
 // heldBy reports what keeps a row out of the candidate set: "ok", "pending",
-// "unusable" or "" for a candidate.
-func (q *sessionStore) heldBy(row sqlc.ListUncompactedMessagesBySessionRow) string {
+// "unusable" or "" for a candidate. An unusable attempt holds its rows for
+// hold, four times as long for each further consecutive one, up to maxHold.
+func (q *sessionStore) heldBy(row sqlc.ListUncompactedMessagesBySessionRow, hold, maxHold time.Duration) string {
 	claim := q.claims[row.ID]
 	if !claim.Valid || q.claimEpoch[claim] != q.epoch {
 		return ""
@@ -51,8 +53,13 @@ func (q *sessionStore) heldBy(row sqlc.ListUncompactedMessagesBySessionRow) stri
 	switch status := q.logStatuses[claim]; {
 	case status == "ok", status == "pending":
 		return status
-	case status == "error" && q.reasons[claim] == failureReasonUnusableSummary && q.now().Sub(q.completedAt[claim]) < unusableSummaryHold:
-		return "unusable"
+	case status == "error" && q.reasons[claim] == failureReasonUnusableSummary:
+		for n := 1; n < min(max(q.attempts[claim], 1), 8); n++ {
+			hold *= 4
+		}
+		if q.now().Sub(q.completedAt[claim]) < min(hold, maxHold) {
+			return "unusable"
+		}
 	}
 	return ""
 }
@@ -60,7 +67,7 @@ func (q *sessionStore) heldBy(row sqlc.ListUncompactedMessagesBySessionRow) stri
 // isRaw reports a row the replay sends raw: no summary covers it, nor a claim
 // still in flight. MeasureUncompactedMessagesBySession counts these.
 func (q *sessionStore) isRaw(row sqlc.ListUncompactedMessagesBySessionRow) bool {
-	held := q.heldBy(row)
+	held := q.heldBy(row, 0, 0)
 	return held == "" || held == "unusable"
 }
 
@@ -69,7 +76,7 @@ type storeCandidate struct {
 	gap, pendingBefore bool
 }
 
-func (q *sessionStore) candidates(after pgtype.UUID) []storeCandidate {
+func (q *sessionStore) candidates(after pgtype.UUID, hold, maxHold time.Duration) []storeCandidate {
 	if !after.Valid && q.scanEpoch == q.epoch {
 		after = q.scanAfter
 	}
@@ -82,11 +89,11 @@ func (q *sessionStore) candidates(after pgtype.UUID) []storeCandidate {
 	var out []storeCandidate
 	gap, pending := false, false
 	if start > 0 {
-		held := q.heldBy(q.history[start-1])
+		held := q.heldBy(q.history[start-1], hold, maxHold)
 		gap, pending = held != "", held != "" && held != "ok"
 	}
 	for _, row := range q.history[start:] {
-		if held := q.heldBy(row); held != "" {
+		if held := q.heldBy(row, hold, maxHold); held != "" {
 			gap, pending = true, pending || held != "ok"
 			continue
 		}
@@ -123,7 +130,7 @@ func (q *sessionStore) MeasureUncompactedMessagesBySession(context.Context, pgty
 }
 
 func (q *sessionStore) ListUncompactedMessagesBySessionWithinBytes(_ context.Context, arg sqlc.ListUncompactedMessagesBySessionWithinBytesParams) ([]sqlc.ListUncompactedMessagesBySessionWithinBytesRow, error) {
-	candidates := q.candidates(arg.AfterMessageID)
+	candidates := q.candidates(arg.AfterMessageID, time.Duration(arg.UnusableHoldSeconds)*time.Second, time.Duration(arg.UnusableMaxHoldSeconds)*time.Second)
 	var total int64
 	for _, c := range candidates {
 		total += payloadBytes(c.row)
@@ -156,7 +163,11 @@ func (q *sessionStore) ListUncompactedMessagesBySessionWithinBytes(_ context.Con
 		bounded.GapBefore = c.gap
 		bounded.PendingBefore = c.pendingBefore
 		claim := q.claims[c.row.ID]
-		bounded.IneffectiveClaim = q.claimEpoch[claim] == q.epoch && q.logStatuses[claim] == "error" && q.reasons[claim] == arg.IneffectiveFailureReason
+		failed := q.claimEpoch[claim] == q.epoch && q.logStatuses[claim] == "error"
+		bounded.IneffectiveClaim = failed && q.reasons[claim] == arg.IneffectiveFailureReason
+		if failed && q.reasons[claim] == arg.UnusableFailureReason {
+			bounded.UnusableAttempts = int32(q.attempts[claim]) //nolint:gosec // test attempts stay small
+		}
 		window = append(window, bounded)
 		if oversized {
 			break
@@ -187,6 +198,7 @@ func (q *sessionStore) CompleteCompactionLog(ctx context.Context, arg sqlc.Compl
 	row, err := q.fakeQueries.CompleteCompactionLog(ctx, arg)
 	if err == nil {
 		q.reasons[arg.ID] = arg.FailureReason
+		q.attempts[arg.ID] = int(arg.FailureAttempts)
 		q.completedAt[arg.ID] = q.now()
 	}
 	return row, err

@@ -896,3 +896,162 @@ func TestCompactionFreshRowsInFrontOfProvedOnesStillCompact(t *testing.T) {
 	}
 	assertClaimsContiguous(t, q)
 }
+
+func TestCompactionUnusableHoldGrowsWithEachFailureOfTheSameRows(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore()
+	for i := 0; i < 4; i++ {
+		q.append(prose(t, "user", fmt.Sprintf("OLDU%d", i), 300, 100), prose(t, "assistant", fmt.Sprintf("OLDA%d", i), 300, 100))
+	}
+	q.append(prose(t, "user", "CURRENT", 10, 10))
+	first := q.history[0].ID
+	stub := &stubModel{summary: ""}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	cfg := machineryConfig(stub, 50)
+	pass := func(after time.Duration) pgtype.UUID {
+		clock = clock.Add(after)
+		_, _ = svc.RunCompactionSync(context.Background(), cfg)
+		return q.claims[first]
+	}
+	failed := pass(0)
+	if q.logStatuses[failed] != "error" {
+		t.Fatal("the first pass did not fail on the empty summary")
+	}
+	if claim := pass(10 * time.Minute); claim != failed {
+		t.Fatal("rows that failed once were retried within ten minutes")
+	}
+	again := pass(6 * time.Minute)
+	if again == failed || q.logStatuses[again] != "error" {
+		t.Fatal("rows that failed once were not retried a quarter of an hour later")
+	}
+	if claim := pass(30 * time.Minute); claim != again {
+		t.Fatal("rows that failed twice were retried within half an hour")
+	}
+	stub.summary = summaryOfTokens(t, 100)
+	if claim := pass(31 * time.Minute); q.logStatuses[claim] != "ok" {
+		t.Fatalf("rows that failed twice were not retried an hour later: %q", q.logStatuses[claim])
+	}
+	assertClaimsContiguous(t, q)
+}
+
+func TestCompactionRefusedRowIsIsolatedFromTheRowsClaimedWithIt(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore()
+	for i := 0; i < 8; i++ {
+		answer := fmt.Sprintf("OLDA%d", i)
+		if i == 5 {
+			answer = "POISON"
+		}
+		q.append(prose(t, "user", fmt.Sprintf("OLDU%d", i), 300, 100), prose(t, "assistant", answer, 300, 100))
+	}
+	q.append(prose(t, "user", "CURRENT", 10, 10))
+	poison := q.history[11].ID
+	stub := &stubModel{summary: summaryOfTokens(t, 100), refuse: "POISON"}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	cfg := machineryConfig(stub, 50)
+	cfg.MaxCompactTokens = 12000
+	for day := 0; day < 12; day++ {
+		for pass := 0; pass < 10; pass++ {
+			res, err := svc.RunCompactionSync(context.Background(), cfg)
+			if err == nil && res.Status != StatusOK {
+				break
+			}
+		}
+		clock = clock.Add(7 * time.Hour)
+	}
+	var raw []int
+	for i, row := range q.history[:14] {
+		if q.logStatuses[q.claims[row.ID]] != "ok" {
+			raw = append(raw, i)
+		}
+	}
+	if len(raw) != 1 || q.history[raw[0]].ID != poison {
+		t.Fatalf("raw rows %v after 12 retries, want only the refused row %d", raw, 11)
+	}
+	if stub.calls > 30 {
+		t.Fatalf("summarizer calls = %d, want the refused row isolated within a few attempts", stub.calls)
+	}
+	assertClaimsContiguous(t, q)
+}
+
+func TestManualCompactionRetriesRowsHeldAfterAnUnusableSummary(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore()
+	for i := 0; i < 4; i++ {
+		q.append(prose(t, "user", fmt.Sprintf("OLDU%d", i), 300, 100), prose(t, "assistant", fmt.Sprintf("OLDA%d", i), 300, 100))
+	}
+	q.append(prose(t, "user", "CURRENT", 10, 10))
+	stub := &stubModel{summary: ""}
+	svc := newMachineryService(q)
+	auto := machineryConfig(stub, 50)
+	if _, err := svc.RunCompactionSync(context.Background(), auto); !errors.Is(err, ErrIneffectiveSummary) {
+		t.Fatalf("automatic pass = %v, want the empty summary recorded", err)
+	}
+	// The user fixes the model and asks again right away.
+	stub.summary = summaryOfTokens(t, 100)
+	manual := auto
+	manual.Manual = true
+	res, err := svc.RunCompactionSync(context.Background(), manual)
+	if err != nil || res.Status != StatusOK || q.logStatuses[q.claims[q.history[0].ID]] != "ok" {
+		t.Fatalf("manual pass = %+v, %v; want the held rows retried and committed", res, err)
+	}
+}
+
+func TestManualCompactionMovesPastHeldRowsBeforeRetryingThem(t *testing.T) {
+	t.Parallel()
+
+	refused := []sqlc.ListUncompactedMessagesBySessionRow{prose(t, "user", "REFUSED question", 300, 100), prose(t, "assistant", "REFUSED answer", 300, 100)}
+	q := newSessionStore(refused...)
+	q.append(reasoningOnlyRow(t), prose(t, "user", "LATER question", 300, 100), prose(t, "assistant", "LATER answer", 300, 100), prose(t, "user", "CURRENT", 10, 10))
+	later := q.history[3].ID
+	stub := &stubModel{summary: summaryOfTokens(t, 100), refuse: "REFUSED"}
+	svc := newMachineryService(q)
+	auto := machineryConfig(stub, 50)
+	if _, err := svc.RunCompactionSync(context.Background(), auto); !errors.Is(err, ErrIneffectiveSummary) {
+		t.Fatalf("automatic pass = %v, want the refusal recorded", err)
+	}
+	manual := auto
+	manual.Manual = true
+	if res, err := svc.RunCompactionSync(context.Background(), manual); err != nil || res.Status != StatusOK || q.logStatuses[q.claims[later]] != "ok" {
+		t.Fatalf("manual pass = %+v, %v; want the later history committed past the held rows", res, err)
+	}
+	if res, err := svc.RunCompactionSync(context.Background(), manual); err != nil || res.Reason != ReasonSummaryUnusable || stub.calls != 3 {
+		t.Fatalf("second manual pass = %+v, %v after %d calls; want the held rows retried", res, err, stub.calls)
+	}
+}
+
+func TestCompactionRetryNeverStrandsARemainderBelowTheFloor(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore(prose(t, "user", "BIG question", 450, 100), prose(t, "assistant", "SMALL answer", 60, 50), reasoningOnlyRow(t), prose(t, "user", "CURRENT", 10, 10))
+	small := q.history[1].ID
+	stub := &stubModel{summary: ""}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	cfg := machineryConfig(stub, 50)
+	for _, after := range []time.Duration{0, 16 * time.Minute} {
+		clock = clock.Add(after)
+		if _, err := svc.RunCompactionSync(context.Background(), cfg); !errors.Is(err, ErrIneffectiveSummary) {
+			t.Fatalf("pass = %v, want the empty summary recorded", err)
+		}
+	}
+	stub.summary = summaryOfTokens(t, 100)
+	for pass := 0; pass < 3; pass++ {
+		clock = clock.Add(61 * time.Minute)
+		_, _ = svc.RunCompactionSync(context.Background(), cfg)
+	}
+	if q.logStatuses[q.claims[small]] != "ok" {
+		t.Fatal("the retry left a row below the floor behind; it can never be claimed alone")
+	}
+}

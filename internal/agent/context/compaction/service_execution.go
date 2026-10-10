@@ -79,7 +79,12 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 
 	// Both entries budgets below are floored at half of maxCompactTokens, so a
 	// span claimable within that is claimable within the actual one.
-	read, reason, err := s.readCompactionSpan(ctx, sessionUUID, cfg, measure, minSpanTokens, maxCompactTokens/2)
+	read, reason, err := s.readCompactionSpan(ctx, sessionUUID, cfg, measure, minSpanTokens, maxCompactTokens/2, false)
+	if err == nil && reason != "" && cfg.Manual {
+		// With nothing else to claim, a manual request retries rows held
+		// after an unusable summary: the user may just have fixed the model.
+		read, reason, err = s.readCompactionSpan(ctx, sessionUUID, cfg, measure, minSpanTokens, maxCompactTokens/2, true)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -126,7 +131,12 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		slog.Int("prior_context_tokens", priorTokens),
 		slog.Int("absorbed_context_tokens", absorbTokens),
 	)
-	toCompact = trimSpan(toCompact, entriesBudget, minSpanTokens)
+	toCompact = retrySpan(trimSpan(toCompact, entriesBudget, minSpanTokens), min(minCompactionSpanTokens, maxCompactTokens/2))
+	attempts := 0
+	for _, item := range toCompact {
+		attempts = max(attempts, item.UnusableAttempts)
+	}
+	attempts++
 	// The progress guarantee may keep one oversized markable group past the
 	// entries budget; the prior context is reference-only, so shrink it (down
 	// to nothing) before letting the combined prompt exceed MaxCompactTokens.
@@ -183,35 +193,35 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		ExpectedCompactIds: expectedCompactIDs,
 	})
 	if err != nil {
-		s.failLog(persistCtx, logID, err)
+		s.failLog(persistCtx, logID, err, attempts)
 		return Result{}, err
 	}
 	if marked != int64(len(compactedMessageIDs)) {
 		err = fmt.Errorf("marked %d of %d compaction source rows", marked, len(compactedMessageIDs))
-		s.failLog(persistCtx, logID, err)
+		s.failLog(persistCtx, logID, err, attempts)
 		return Result{}, err
 	}
 
 	assetRows, err := s.queries.ListMessageAssetsBatch(persistCtx, compactedMessageIDs)
 	if err != nil {
 		err = fmt.Errorf("load compaction message assets: %w", err)
-		s.failLog(persistCtx, logID, err)
+		s.failLog(persistCtx, logID, err, attempts)
 		return Result{}, err
 	}
 	toCompact, err = candidatesWithAssets(toCompact, rows, assetRows)
 	if err != nil {
-		s.failLog(persistCtx, logID, err)
+		s.failLog(persistCtx, logID, err, attempts)
 		return Result{}, err
 	}
 	artifact, err := artifactMetadataFor(toCompact, compactedMessageIDs)
 	if err != nil {
-		s.failLog(persistCtx, logID, err)
+		s.failLog(persistCtx, logID, err, attempts)
 		return Result{}, err
 	}
 	if fusing {
 		artifact, err = rollupArtifactMetadata(frontier.Artifacts, artifact)
 		if err != nil {
-			s.failLog(persistCtx, logID, err)
+			s.failLog(persistCtx, logID, err, attempts)
 			return Result{}, err
 		}
 	}
@@ -244,7 +254,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	result, err := modelretry.Do(models.WithModelSession(ctx, cfg.SessionID), s.logger, "agent.compaction", modelretry.Config{}, modelretry.Retryable,
 		func(ctx context.Context) (sdk.ModelResult, error) { return model.Generate(ctx, request) })
 	if err != nil {
-		s.failLog(persistCtx, logID, err)
+		s.failLog(persistCtx, logID, err, attempts)
 		return Result{}, err
 	}
 
@@ -270,7 +280,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		if !fusing {
 			err = fmt.Errorf("%w: %w", ErrIneffectiveSummary, err)
 		}
-		s.failLog(persistCtx, logID, err)
+		s.failLog(persistCtx, logID, err, attempts)
 		return Result{}, err
 	}
 
@@ -280,13 +290,13 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	if fusing {
 		err = s.completeRollupLog(persistCtx, logID, summary, len(compactedMessageIDs), usageJSON, modelUUID, artifact, frontier.Artifacts)
 	} else {
-		err = s.completeLog(persistCtx, logID, "ok", summary, "", len(compactedMessageIDs), usageJSON, modelUUID, &artifact, "")
+		err = s.completeLog(persistCtx, logID, "ok", summary, "", len(compactedMessageIDs), usageJSON, modelUUID, &artifact, "", 0)
 	}
 	if err != nil {
 		// The rows are already marked, but the log never reached status=ok, so
 		// the reclaim SQL keeps them eligible for a later pass. Reporting ok
 		// here would claim a summary that was never persisted.
-		s.failLog(persistCtx, logID, err)
+		s.failLog(persistCtx, logID, err, attempts)
 		return Result{}, err
 	}
 	s.logger.InfoContext(ctx, "compaction: summary committed",
@@ -382,21 +392,23 @@ func expectedCompactionClaims(rows []sqlc.ListUncompactedMessagesBySessionRow, m
 
 // failLog completes a claimed attempt as failed. A summary that cannot
 // replace its rows is recorded by reason so later passes select past those
-// rows: for the epoch when it was not shorter, for a while when it was not
-// usable at all. Any other failure leaves the rows eligible for a retry.
-func (s *Service) failLog(ctx context.Context, logID pgtype.UUID, cause error) {
+// rows: for the epoch when it was not shorter, for a while that grows with
+// attempts, the consecutive unusable attempts on them, when it was not usable
+// at all. Any other failure leaves the rows eligible for a retry.
+func (s *Service) failLog(ctx context.Context, logID pgtype.UUID, cause error, attempts int) {
 	reason := ""
 	switch {
 	case !errors.Is(cause, ErrIneffectiveSummary):
+		attempts = 0
 	case errors.Is(cause, errEmptySummary), errors.Is(cause, errIncompleteSummary):
 		reason = failureReasonUnusableSummary
 	default:
-		reason = failureReasonIneffectiveSummary
+		reason, attempts = failureReasonIneffectiveSummary, 0
 	}
-	_ = s.completeLog(ctx, logID, "error", "", cause.Error(), 0, nil, pgtype.UUID{}, nil, reason)
+	_ = s.completeLog(ctx, logID, "error", "", cause.Error(), 0, nil, pgtype.UUID{}, nil, reason, attempts)
 }
 
-func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, messageCount int, usage []byte, modelID pgtype.UUID, artifact *artifactMetadata, failureReason string) error {
+func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, messageCount int, usage []byte, modelID pgtype.UUID, artifact *artifactMetadata, failureReason string, failureAttempts int) error {
 	coverage := []byte("[]")
 	var anchorStartMs, anchorEndMs int64
 	if artifact != nil {
@@ -405,17 +417,18 @@ func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, su
 		anchorEndMs = artifact.AnchorEndMs
 	}
 	_, err := s.queries.CompleteCompactionLog(ctx, sqlc.CompleteCompactionLogParams{
-		ID:            logID,
-		Status:        status,
-		Summary:       summary,
-		MessageCount:  int32(messageCount), //nolint:gosec // count always small
-		ErrorMessage:  errMsg,
-		Usage:         usage,
-		ModelID:       modelID,
-		Coverage:      coverage,
-		AnchorStartMs: anchorStartMs,
-		AnchorEndMs:   anchorEndMs,
-		FailureReason: failureReason,
+		ID:              logID,
+		Status:          status,
+		Summary:         summary,
+		MessageCount:    int32(messageCount), //nolint:gosec // count always small
+		ErrorMessage:    errMsg,
+		Usage:           usage,
+		ModelID:         modelID,
+		Coverage:        coverage,
+		AnchorStartMs:   anchorStartMs,
+		AnchorEndMs:     anchorEndMs,
+		FailureReason:   failureReason,
+		FailureAttempts: int32(failureAttempts), //nolint:gosec // attempts on one span stay small
 	})
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to complete compaction log", slog.String("error", err.Error()))
