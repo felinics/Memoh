@@ -251,8 +251,8 @@ func TestResolveWSTargetTurnIDFailureReachesTheResultRecord(t *testing.T) {
 	frame := decodeWSTestEvent(t, func(writer *wsWriter) {
 		failWSRequest(context.Background(), logger, writer, "bot-1", wsTurn("invocation-1", "session-1"), "ws.retry_message", err)
 	})
-	if frame["code"] != "http.not_found" {
-		t.Fatalf("frame = %#v, want http.not_found", frame)
+	if frame["code"] != string(apperror.CodeSessionTurnNotFound) {
+		t.Fatalf("frame = %#v, want session_runtime.turn_not_found", frame)
 	}
 	if encoded, _ := json.Marshal(frame); strings.Contains(string(encoded), "message service") {
 		t.Fatalf("frame carries the cause: %s", encoded)

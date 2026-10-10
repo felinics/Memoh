@@ -773,6 +773,7 @@
       "reset_unavailable": "Conversation history cannot be reset right now. Contact the developers.",
       "session_busy": "This conversation is still working on your previous message. Please try again in a moment.",
       "turn_incomplete": "This message cannot be retried right now. Refresh the conversation.",
+      "turn_not_found": "This message was not found in the conversation. Refresh the conversation and try again.",
       "turn_not_latest": "The conversation has newer messages. Refresh and try again."
     },
     "settings": {

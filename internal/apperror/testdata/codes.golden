@@ -213,6 +213,7 @@ session_runtime.reset_conflict	409
 session_runtime.reset_unavailable	503
 session_runtime.session_busy	409
 session_runtime.turn_incomplete	409
+session_runtime.turn_not_found	404
 session_runtime.turn_not_latest	409
 settings.reasoning_effort_invalid	400
 settings.reasoning_options_unavailable	503

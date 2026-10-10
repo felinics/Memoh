@@ -607,7 +607,7 @@ func (h *LocalChannelHandler) executeWSQueueCommand(ctx context.Context, writer 
 		var sess sessionpkg.Thread
 		sess, err = h.sessionService.Get(ctx, msg.SessionID)
 		if err != nil || sess.BotID != botID {
-			err = echo.NewHTTPError(http.StatusNotFound, "session not found")
+			err = apperror.New(apperror.CodeSessionNotFound, nil)
 			break
 		}
 		input := application.QueueInput{
@@ -1210,7 +1210,7 @@ func (h *LocalChannelHandler) resolveWSTargetTurnID(ctx context.Context, session
 	}
 	resolved, err := h.agentService.ResolveTurnIDForMessage(ctx, sessionID, legacy)
 	if err != nil {
-		return "", echo.NewHTTPError(http.StatusNotFound, "message_id does not name a turn in this session").WithInternal(err)
+		return "", apperror.Wrap(apperror.CodeSessionTurnNotFound, err, nil)
 	}
 	return resolved, nil
 }
@@ -1307,6 +1307,17 @@ func sendWSControlAck(writer *wsWriter, ref wsTurnRef, control, controlID string
 		Applied:   applied,
 		Code:      code,
 	})
+}
+
+// failWSControl answers a control that failed with a control_ack carrying
+// ackCode and writes the control's result record. The ack is what the client
+// branches on and the record carries err, so the two are separate: the ack is
+// the stable code the decision surfaces render, the record the cause.
+func failWSControl(ctx context.Context, logger *slog.Logger, writer *wsWriter, botID string, ref wsTurnRef, operation, control, controlID, ackCode string, err error) {
+	if controlID != "" {
+		sendWSControlAck(writer, ref, control, controlID, false, ackCode)
+	}
+	recordWSRequestFailure(ctx, logger, botID, ref, operation, err)
 }
 
 // wsRunRejectionCode maps the admission sentinels to the stable codes clients
@@ -1697,14 +1708,7 @@ func (h *LocalChannelHandler) abortWSRun(ctx context.Context, writer *wsWriter, 
 		applied, err = controller.AbortControl(ctx, botID, sessionID, runID, controlID)
 	}
 	if err != nil {
-		h.logger.WarnContext(ctx, "route ws abort failed",
-			slog.Any("error", err),
-			slog.String("bot_id", botID),
-			slog.String("run_id", runID),
-			slog.String("session_id", sessionID))
-		if controlID != "" {
-			sendWSControlAck(writer, ref, "abort", controlID, false, string(apperror.CodeOf(err)))
-		}
+		failWSControl(ctx, h.logger, writer, botID, ref, "ws.control.abort", "abort", controlID, string(apperror.CodeOf(err)), err)
 		return
 	}
 	if controlID != "" {
@@ -1960,12 +1964,12 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				continue
 			}
 			if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
-				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(wsSessionAuthAckCode(err, apperror.CodeToolApprovalForbidden, apperror.CodeToolApprovalOperationFailed)))
+				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.tool_approval", msg.Type, controlID, string(wsSessionAuthAckCode(err, apperror.CodeToolApprovalForbidden, apperror.CodeToolApprovalOperationFailed)), err)
 				continue
 			}
 			controller := h.sessionRuntimeController()
 			if controller == nil {
-				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(apperror.CodeToolApprovalOperationFailed))
+				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.tool_approval", msg.Type, controlID, string(apperror.CodeToolApprovalOperationFailed), apperror.New(apperror.CodeToolApprovalOperationFailed, nil))
 				continue
 			}
 			payload, err := json.Marshal(application.ToolApprovalResponseInput{
@@ -1982,8 +1986,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				SuppressActivePromptAttach: true,
 			})
 			if err != nil {
-				h.logger.WarnContext(c.Request().Context(), "encode ws tool approval response failed", slog.Any("error", err))
-				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(apperror.CodeToolApprovalOperationFailed))
+				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.tool_approval", msg.Type, controlID, string(apperror.CodeToolApprovalOperationFailed), apperror.Wrap(apperror.CodeToolApprovalOperationFailed, err, nil))
 				continue
 			}
 			result, err := controller.RouteDecisionResponse(streamBaseCtx, sessionruntime.DecisionResponse{
@@ -1991,17 +1994,12 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				DecisionID: decisionID, BotID: botID, SessionID: sessionID, RunID: runID,
 				Payload: payload,
 			})
-			code := ""
 			if err != nil {
-				code = string(apperror.CodeOf(toolApprovalHTTPError(err)))
-				h.logger.WarnContext(c.Request().Context(), "route ws tool approval response failed",
-					slog.Any("error", err),
-					slog.String("bot_id", botID),
-					slog.String("run_id", runID),
-					slog.String("session_id", sessionID),
-					slog.String("decision_id", decisionID))
+				err = toolApprovalHTTPError(err)
+				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.tool_approval", msg.Type, controlID, string(apperror.CodeOf(err)), err)
+				continue
 			}
-			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied && err == nil, code)
+			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied, "")
 
 		case "user_input_response":
 			sessionID := strings.TrimSpace(msg.SessionID)
@@ -2026,12 +2024,12 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				continue
 			}
 			if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
-				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(wsSessionAuthAckCode(err, apperror.CodeUserInputForbidden, apperror.CodeUserInputOperationFailed)))
+				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.user_input", msg.Type, controlID, string(wsSessionAuthAckCode(err, apperror.CodeUserInputForbidden, apperror.CodeUserInputOperationFailed)), err)
 				continue
 			}
 			controller := h.sessionRuntimeController()
 			if controller == nil {
-				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(apperror.CodeUserInputOperationFailed))
+				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.user_input", msg.Type, controlID, string(apperror.CodeUserInputOperationFailed), apperror.New(apperror.CodeUserInputOperationFailed, nil))
 				continue
 			}
 			payload, err := json.Marshal(application.UserInputResponseInput{
@@ -2048,8 +2046,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				SuppressActivePromptAttach: true,
 			})
 			if err != nil {
-				h.logger.WarnContext(c.Request().Context(), "encode ws user input response failed", slog.Any("error", err))
-				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(apperror.CodeUserInputOperationFailed))
+				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.user_input", msg.Type, controlID, string(apperror.CodeUserInputOperationFailed), apperror.Wrap(apperror.CodeUserInputOperationFailed, err, nil))
 				continue
 			}
 			result, err := controller.RouteDecisionResponse(streamBaseCtx, sessionruntime.DecisionResponse{
@@ -2057,17 +2054,12 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				DecisionID: decisionID, BotID: botID, SessionID: sessionID, RunID: runID,
 				Payload: payload,
 			})
-			code := ""
 			if err != nil {
-				code = string(apperror.CodeOf(userInputResponseAppError(err)))
-				h.logger.WarnContext(c.Request().Context(), "route ws user input response failed",
-					slog.Any("error", err),
-					slog.String("bot_id", botID),
-					slog.String("run_id", runID),
-					slog.String("session_id", sessionID),
-					slog.String("decision_id", decisionID))
+				err = userInputResponseAppError(err)
+				failWSControl(streamBaseCtx, h.logger, writer, botID, ref, "ws.control.user_input", msg.Type, controlID, string(apperror.CodeOf(err)), err)
+				continue
 			}
-			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied && err == nil, code)
+			sendWSControlAck(writer, ref, msg.Type, controlID, result.Applied, "")
 
 		case "message":
 			text := strings.TrimSpace(msg.Text)
@@ -2750,7 +2742,7 @@ func (h *LocalChannelHandler) authorizeWSRuntimeExecution(ctx context.Context, c
 		return info, err
 	}
 	if strings.TrimSpace(info.BotID) != "" && info.BotID != bot.ID {
-		return info, echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return info, apperror.New(apperror.CodeSessionNotFound, nil)
 	}
 	perms, err := h.resolveCurrentUserPermissions(ctx, channelIdentityID, bot.ID)
 	if err != nil {
@@ -2799,10 +2791,10 @@ func (h *LocalChannelHandler) authorizeWSSession(ctx context.Context, channelIde
 	}
 	sess, err := h.sessionService.Get(ctx, sessionID)
 	if err != nil || sess.BotID != bot.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.New(apperror.CodeSessionNotFound, nil)
 	}
 	if !canAccessSession(sess, channelIdentityID, perms) {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.New(apperror.CodeSessionNotFound, nil)
 	}
 	return nil
 }

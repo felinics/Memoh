@@ -773,6 +773,7 @@
       "reset_unavailable": "当前无法重置会话历史，请联系开发者。",
       "session_busy": "这个会话还在处理上一条消息，请稍后再试。",
       "turn_incomplete": "这条消息暂时无法重试，请刷新会话。",
+      "turn_not_found": "会话中找不到这条消息，请刷新会话后重试。",
       "turn_not_latest": "会话已有新内容，请刷新后重试。"
     },
     "settings": {

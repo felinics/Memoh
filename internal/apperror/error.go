@@ -154,6 +154,7 @@ const (
 	CodeSessionHistoryInconsistent               Code = "session_runtime.history_inconsistent"
 	CodeSessionTurnNotLatest                     Code = "session_runtime.turn_not_latest"
 	CodeSessionTurnIncomplete                    Code = "session_runtime.turn_incomplete"
+	CodeSessionTurnNotFound                      Code = "session_runtime.turn_not_found"
 	CodeSessionResetUnavailable                  Code = "session_runtime.reset_unavailable"
 	CodeSessionResetConflict                     Code = "session_runtime.reset_conflict"
 	CodeHistoryDeleteFailed                      Code = "history.delete_failed"
@@ -991,6 +992,10 @@ var catalog = map[Code]Definition{
 	},
 	// The client named a turn that is no longer the latest visible turn (or
 	// was never persisted). Reloading the conversation resolves it.
+	CodeSessionTurnNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "The message was not found in this conversation. Refresh and try again.",
+	},
 	CodeSessionTurnNotLatest: {
 		HTTPStatus: http.StatusConflict,
 		Detail:     "The conversation has newer messages. Refresh and try again.",

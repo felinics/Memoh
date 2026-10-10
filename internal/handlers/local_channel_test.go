@@ -822,9 +822,8 @@ func TestLocalChannelAuthorizeWSSessionScopesChatToCreator(t *testing.T) {
 	}
 
 	err := handler.authorizeWSSession(testEchoContext(currentUser).Request().Context(), currentUser, botID, sessionID)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
-		t.Fatalf("authorizeWSSession() error = %v, want HTTP 404", err)
+	if apperror.CodeOf(err) != apperror.CodeSessionNotFound {
+		t.Fatalf("authorizeWSSession() error = %v, want session.not_found", err)
 	}
 }
 
@@ -946,8 +945,8 @@ func TestLocalChannelWSMessageAuthorizesSessionBeforeSlashCommand(t *testing.T) 
 		if got := event["type"]; got != "error" {
 			t.Fatalf("event type = %#v, want error; event=%#v", got, event)
 		}
-		if event["code"] != "http.not_found" || event["message"] != "The requested resource was not found." {
-			t.Fatalf("event = %#v, want http.not_found for the unauthorized session", event)
+		if event["code"] != string(apperror.CodeSessionNotFound) || event["message"] != "The conversation was not found." {
+			t.Fatalf("event = %#v, want session.not_found for the unauthorized session", event)
 		}
 		if _, ok := event["result"]; ok {
 			t.Fatalf("unexpected command result before session authorization: %#v", event)
@@ -1349,9 +1348,8 @@ func TestExecuteQuickActionPermissionEnforcesSessionVisibility(t *testing.T) {
 	if err == nil {
 		t.Fatalf("ExecuteQuickAction should deny permission action on a session the actor cannot access; body=%s", rec.Body.String())
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
-		t.Fatalf("error = %v, want 404 session not found", err)
+	if apperror.CodeOf(err) != apperror.CodeSessionNotFound {
+		t.Fatalf("error = %v, want session.not_found", err)
 	}
 }
 
