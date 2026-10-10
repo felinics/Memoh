@@ -26,7 +26,7 @@ import {
   commandErrorMessage,
   forkFailedMessage,
   sendFailedMessage,
-  userInputConnectionLostMessage, workdirMismatchMessage,
+  userInputConnectionLostMessage, workdirMismatchMessage, firstSendTimeoutMessage,
 } from './chat/messages'
 import {
   createBackgroundTaskTracker,
@@ -257,6 +257,7 @@ export const useChatStore = defineStore('chat', () => {
     transcriptForTarget,
     createControlId: createInvocationId,
     connectionLostMessage: userInputConnectionLostMessage,
+    firstSendTimeoutMessage,
     resolveErrorMessage: resolveApiErrorMessage,
     showError: message => toast.error(message),
     onBotSessionsActivityEvent: handleBotSessionsActivityEvent,
@@ -280,6 +281,7 @@ export const useChatStore = defineStore('chat', () => {
   const {
     abort,
     abortAllAssistantStreams,
+    watchFirstSendConfirmation,
   } = runtimeIntegration
 
   const hasExplicitSessionSelection = computed(() => explicitSessionSelection.value)
@@ -573,6 +575,7 @@ export const useChatStore = defineStore('chat', () => {
     rememberStartupSendFailure,
     draftWorkdirIdFor: botId => workdirsStore.sessionWorkdirIdFor(botId, { externalAgent: false }),
     firstSend,
+    watchFirstSendConfirmation,
     sendFailedMessage,
     updateForkAnchorForReplacedMessage,
     restoreTailFromOptimistic,

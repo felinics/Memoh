@@ -22,6 +22,10 @@ export function sendFailedMessage() {
   return localizedMessages().chat.sendFailed
 }
 
+export function firstSendTimeoutMessage() {
+  return localizedMessages().chat.sendConfirmTimeout
+}
+
 export function workdirMismatchMessage() {
   return localizedMessages().chat.sendWorkdirUnsupported
 }

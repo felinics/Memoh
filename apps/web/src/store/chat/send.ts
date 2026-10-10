@@ -155,6 +155,9 @@ export interface ChatSendDeps {
   // The workdir a native draft is bound to; sent with its first message.
   draftWorkdirIdFor: (botId: string) => string
   firstSend: Pick<FirstSendTracker, 'begin' | 'admit' | 'reveal' | 'finish' | 'isRevealed' | 'sessionIdFor'>
+  // Starts the limit on how long an in-band first send waits for the server
+  // to confirm it; returns its cancel.
+  watchFirstSendConfirmation: (invocationId: string) => () => void
   sendFailedMessage: () => string
   updateForkAnchorForReplacedMessage: (
     sessionId: string,
@@ -187,6 +190,16 @@ export function createChatSend(deps: ChatSendDeps) {
       composerScope,
     }
     const isExternalAgent = deps.isExternalAgentTarget(viewTarget)
+    // A send refused before it started hands the input back to the composer.
+    const refused = (error: string, scope?: string): SendMessageResult => ({
+      ok: false,
+      stage: 'startup',
+      error,
+      restoreInput: text,
+      restoreAttachments: attachments,
+      restoreRequestedSkills: cloneRequestedSkills(requestedSkills),
+      ...(scope ? { composerScope: scope } : {}),
+    })
     if (!trimmed && !attachments?.length && requestedSkills.length === 0) {
       return { ok: false, stage: 'startup' }
     }
@@ -194,14 +207,7 @@ export function createChatSend(deps: ChatSendDeps) {
     if (requestedSkills.length > 0 && deps.isWebSlashInput(trimmed)) {
       const message = deps.commandErrorMessage('slash.skill_syntax_invalid')
       deps.showCommandError('slash.skill_syntax_invalid', message, commandScope)
-      return {
-        ok: false,
-        stage: 'startup',
-        error: message,
-        restoreInput: text,
-        restoreAttachments: attachments,
-        restoreRequestedSkills: cloneRequestedSkills(requestedSkills),
-      }
+      return refused(message)
     }
 
     if (
@@ -211,14 +217,7 @@ export function createChatSend(deps: ChatSendDeps) {
     ) {
       const message = deps.commandErrorMessage('slash.attachments_unsupported')
       deps.showCommandError('slash.attachments_unsupported', message, commandScope)
-      return {
-        ok: false,
-        stage: 'startup',
-        error: message,
-        restoreInput: text,
-        restoreAttachments: attachments,
-        restoreRequestedSkills: cloneRequestedSkills(requestedSkills),
-      }
+      return refused(message)
     }
 
     // Command handling is the only await allowed before the optimistic turn
@@ -228,14 +227,7 @@ export function createChatSend(deps: ChatSendDeps) {
       const newCommand = await deps.handleWebNewCommand(trimmed, attachments, viewTarget)
       if (newCommand.kind === 'handled') return { ok: true }
       if (newCommand.kind === 'error') {
-        return {
-          ok: false,
-          stage: 'startup',
-          error: newCommand.message,
-          restoreInput: text,
-          restoreAttachments: attachments,
-          restoreRequestedSkills: cloneRequestedSkills(requestedSkills),
-        }
+        return refused(newCommand.message)
       }
       const slashCommand = await deps.handleWebSlashCommand(
         trimmed,
@@ -245,14 +237,7 @@ export function createChatSend(deps: ChatSendDeps) {
       )
       if (slashCommand.kind === 'handled') return { ok: true }
       if (slashCommand.kind === 'error') {
-        return {
-          ok: false,
-          stage: 'startup',
-          error: slashCommand.message,
-          restoreInput: text,
-          restoreAttachments: attachments,
-          restoreRequestedSkills: cloneRequestedSkills(requestedSkills),
-        }
+        return refused(slashCommand.message)
       }
     }
     if (viewTarget.sessionId && deps.chatReadOnlyFor(viewTarget)) {
@@ -283,15 +268,7 @@ export function createChatSend(deps: ChatSendDeps) {
     if (serverSkillActivation && wasDraft && deps.pendingExternalAgentStateFor(viewTarget)) {
       const message = deps.commandErrorMessage('slash.skill_activation_unsupported')
       deps.showCommandError('slash.skill_activation_unsupported', message, commandScope)
-      return {
-        ok: false,
-        stage: 'startup',
-        error: message,
-        restoreInput: text,
-        restoreAttachments: attachments,
-        restoreRequestedSkills: cloneRequestedSkills(requestedSkills),
-        composerScope,
-      }
+      return refused(message, composerScope)
     }
 
     // A draft's first message creates its session in-band: the server creates
@@ -302,6 +279,7 @@ export function createChatSend(deps: ChatSendDeps) {
     // setup the message path does not do, so they still create over REST
     // first, and that creation is their confirmation.
     const inband = wasDraft && !isExternalAgent
+    let stopConfirmationWatch = () => {}
     try {
       options.onBeforeMessageSend?.()
       // The pair comes from options only (spec v2 §3.4): the composer passes
@@ -387,6 +365,7 @@ export function createChatSend(deps: ChatSendDeps) {
         reasoning_effort: reasoningEffort,
         workspace_target_id: options.workspaceTargetId?.trim() || undefined,
       })) throw new StreamFailureError('WebSocket is not connected', 'startup')
+      if (inband) stopConfirmationWatch = deps.watchFirstSendConfirmation(sendInvocationId)
       await completion
       if (firstSendStarted) deps.firstSend.finish(sendInvocationId)
       const createdSessionId = deps.createdSessionIdForInvocation(sendInvocationId)
@@ -483,6 +462,8 @@ export function createChatSend(deps: ChatSendDeps) {
         }
       }
       return { ok: false, stage, error: reason, errorCode }
+    } finally {
+      stopConfirmationWatch()
     }
   }
 

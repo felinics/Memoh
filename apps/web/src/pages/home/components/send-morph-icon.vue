@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 // The send button's arrow and its busy ring are one drawing. On `busy` the
 // arrow's stem bends into the ring's arc while the head folds into the arc's
@@ -7,6 +8,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 // changing rather than two icons swapped. Path data is interpolated in JS:
 // CSS `d` transitions are not available in every browser the web app serves.
 const props = defineProps<{ busy: boolean }>()
+const { t } = useI18n()
 
 // Both shapes are three cubic segments so each control point has a partner.
 // The stem runs from the bottom (19) to just under the tip (5.75); the arc
@@ -132,7 +134,7 @@ const rotation = computed(() => `rotate(${fmt(angle.value)} 12 12)`)
     stroke-linecap="round"
     stroke-linejoin="round"
     :role="busy ? 'status' : undefined"
-    :aria-label="busy ? 'Loading' : undefined"
+    :aria-label="busy ? t('common.loading') : undefined"
   >
     <circle
       cx="12"
