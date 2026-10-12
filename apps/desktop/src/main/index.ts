@@ -25,6 +25,7 @@ import { dispatchFocusedWindowCommand } from './window-commands'
 import { dispatchRendererNavigate } from './window-navigation'
 import { macWindowChromeOptions } from './window-chrome'
 import { maybeSelfInstallMacOS } from './self-install'
+import { maybePromptAppleSiliconBuild } from './arch-check'
 import { DesktopRemoteRuntimeManager } from './remote-runtime'
 import { isTrustedRendererUrl } from './renderer-trust'
 import { normalizeExternalUrl, resolveNavigationGuardAction } from './external-links'
@@ -660,6 +661,7 @@ async function rebuildAppMenu(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  if (await maybePromptAppleSiliconBuild()) return
   if (maybeSelfInstallMacOS()) return
 
   electronApp.setAppUserModelId(process.env.MEMOH_DESKTOP_APP_ID?.trim() || 'ai.memoh.desktop')
