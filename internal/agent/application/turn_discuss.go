@@ -240,9 +240,6 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		runConfig.ContextLifecycle = contextfrag.NewLifecycleHolder()
 	}
 	runConfig.ContextBudgetMaxTokens = resolved.ContextBudgetMaxTokens
-	if runConfig.ContextToolExchangePolicy == nil {
-		runConfig.ContextToolExchangePolicy = defaultToolExchangePolicy()
-	}
 
 	// Inline image attachments from new RC segments so the model receives
 	// them as native vision input (ImagePart) on the first encounter.

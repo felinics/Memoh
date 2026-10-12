@@ -5,8 +5,6 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 type ctxKey string
@@ -127,19 +125,17 @@ func TestMergePreservesRuntimeLifecycle(t *testing.T) {
 	}
 }
 
-func TestMergeCarriesContextBudgetAndToolExchangePolicy(t *testing.T) {
+func TestMergeCarriesContextBudget(t *testing.T) {
 	t.Parallel()
 
-	policy := &contextfrag.ToolExchangePolicy{}
 	merged := Merge(Session{BotID: "bot-1"}, Session{
-		ContextBudgetMaxTokens:    128000,
-		ContextToolExchangePolicy: policy,
+		ContextBudgetMaxTokens: 128000,
 	})
-	if merged.ContextBudgetMaxTokens != 128000 || merged.ContextToolExchangePolicy != policy {
-		t.Fatalf("merged = %#v, want context budget and policy carried", merged)
+	if merged.ContextBudgetMaxTokens != 128000 {
+		t.Fatalf("merged = %#v, want context budget carried", merged)
 	}
 	kept := Merge(merged, Session{SessionID: "session-1"})
-	if kept.ContextBudgetMaxTokens != 128000 || kept.ContextToolExchangePolicy != policy {
-		t.Fatalf("kept = %#v, want context budget and policy preserved", kept)
+	if kept.ContextBudgetMaxTokens != 128000 {
+		t.Fatalf("kept = %#v, want context budget preserved", kept)
 	}
 }

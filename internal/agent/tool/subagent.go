@@ -71,18 +71,17 @@ type SpawnRunConfig struct {
 	ReasoningConfig *models.ReasoningConfig
 	// Keep the unresolved parent-turn inputs as well, so a nested subagent can
 	// resolve the same override against its own selected model.
-	ReasoningStoredEffort     string
-	ReasoningRequestedEffort  string
-	PromptCacheTTL            string
-	ChatCompletionsCompat     string
-	SupportsImageInput        bool
-	SupportsFileInput         bool
-	SupportsToolCall          bool
-	Skills                    map[string]SkillDetail
-	BackgroundManager         *background.Manager
-	ContextBudgetMaxTokens    int
-	ModelMaxOutputTokens      int
-	ContextToolExchangePolicy *contextfrag.ToolExchangePolicy
+	ReasoningStoredEffort    string
+	ReasoningRequestedEffort string
+	PromptCacheTTL           string
+	ChatCompletionsCompat    string
+	SupportsImageInput       bool
+	SupportsFileInput        bool
+	SupportsToolCall         bool
+	Skills                   map[string]SkillDetail
+	BackgroundManager        *background.Manager
+	ContextBudgetMaxTokens   int
+	ModelMaxOutputTokens     int
 	// TurnRequestMessageID is the persisted task user message this run's
 	// assistant and tool rows bind to, so incremental step persistence files
 	// them into the same history turn the runtime view names.
@@ -970,30 +969,29 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		contextBudgetMaxTokens = req.parentSession.ContextBudgetMaxTokens
 	}
 	cfg := SpawnRunConfig{
-		RunID:                     strings.TrimSpace(req.admission.RunID),
-		Model:                     req.runtime.Model,
-		ModelUUID:                 req.runtime.UUID,
-		ModelID:                   req.runtime.ModelID,
-		ModelProvider:             req.runtime.ProviderName,
-		ModelProviderID:           req.runtime.ProviderID,
-		ReasoningConfig:           req.runtime.ReasoningConfig,
-		ReasoningStoredEffort:     req.parentSession.ReasoningStoredEffort,
-		ReasoningRequestedEffort:  req.parentSession.ReasoningRequestedEffort,
-		System:                    req.systemPrompt,
-		Query:                     req.message,
-		SessionType:               sessionpkg.TypeSubagent,
-		PromptCacheTTL:            req.runtime.PromptCacheTTL,
-		ChatCompletionsCompat:     req.runtime.ChatCompletionsCompat,
-		SupportsImageInput:        req.runtime.SupportsImageInput,
-		SupportsFileInput:         req.runtime.SupportsFileInput,
-		SupportsToolCall:          req.runtime.SupportsToolCall,
-		Messages:                  history,
-		Skills:                    req.parentSession.Skills,
-		BackgroundManager:         p.bgManager,
-		ContextBudgetMaxTokens:    contextBudgetMaxTokens,
-		ModelMaxOutputTokens:      req.runtime.ModelMaxOutputTokens,
-		ContextToolExchangePolicy: req.parentSession.ContextToolExchangePolicy,
-		TurnRequestMessageID:      req.requestMessageID,
+		RunID:                    strings.TrimSpace(req.admission.RunID),
+		Model:                    req.runtime.Model,
+		ModelUUID:                req.runtime.UUID,
+		ModelID:                  req.runtime.ModelID,
+		ModelProvider:            req.runtime.ProviderName,
+		ModelProviderID:          req.runtime.ProviderID,
+		ReasoningConfig:          req.runtime.ReasoningConfig,
+		ReasoningStoredEffort:    req.parentSession.ReasoningStoredEffort,
+		ReasoningRequestedEffort: req.parentSession.ReasoningRequestedEffort,
+		System:                   req.systemPrompt,
+		Query:                    req.message,
+		SessionType:              sessionpkg.TypeSubagent,
+		PromptCacheTTL:           req.runtime.PromptCacheTTL,
+		ChatCompletionsCompat:    req.runtime.ChatCompletionsCompat,
+		SupportsImageInput:       req.runtime.SupportsImageInput,
+		SupportsFileInput:        req.runtime.SupportsFileInput,
+		SupportsToolCall:         req.runtime.SupportsToolCall,
+		Messages:                 history,
+		Skills:                   req.parentSession.Skills,
+		BackgroundManager:        p.bgManager,
+		ContextBudgetMaxTokens:   contextBudgetMaxTokens,
+		ModelMaxOutputTokens:     req.runtime.ModelMaxOutputTokens,
+		TurnRequestMessageID:     req.requestMessageID,
 		Identity: SpawnIdentity{
 			BotID:               req.parentSession.BotID,
 			ChatID:              req.parentSession.ChatID,

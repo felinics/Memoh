@@ -104,18 +104,17 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		CanRequestUserInput:      input.CanRequestUserInput,
 		// Initial user images travel as ACP image blocks above; this flag only
 		// governs image bytes returned later by the read-media MCP tool.
-		SupportsImageInput:        false,
-		ToolOutputLimit:           input.ToolOutputLimit,
-		ToolHTTPURL:               input.ToolHTTPURL,
-		ContextURI:                firstNonEmpty(input.ContextURI, contextURI),
-		ContextMarkdown:           input.ContextMarkdown,
-		ContextBudgetMaxTokens:    input.ContextBudgetMaxTokens,
-		ContextToolExchangePolicy: input.ContextToolExchangePolicy,
-		RuntimeOwnerAccountID:     input.RuntimeOwnerAccountID,
-		ForceFreshRuntime:         input.ForceFreshRuntime,
-		RequiredCommand:           input.Command,
-		PermissionMode:            driverMetadataString(input.RuntimeMetadata, "permission_mode"),
-		Sink:                      sink,
+		SupportsImageInput:     false,
+		ToolOutputLimit:        input.ToolOutputLimit,
+		ToolHTTPURL:            input.ToolHTTPURL,
+		ContextURI:             firstNonEmpty(input.ContextURI, contextURI),
+		ContextMarkdown:        input.ContextMarkdown,
+		ContextBudgetMaxTokens: input.ContextBudgetMaxTokens,
+		RuntimeOwnerAccountID:  input.RuntimeOwnerAccountID,
+		ForceFreshRuntime:      input.ForceFreshRuntime,
+		RequiredCommand:        input.Command,
+		PermissionMode:         driverMetadataString(input.RuntimeMetadata, "permission_mode"),
+		Sink:                   sink,
 	})
 	out := DriverPromptResult(result, agentID)
 	if err != nil {

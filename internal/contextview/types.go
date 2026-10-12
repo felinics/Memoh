@@ -35,7 +35,6 @@ type BudgetEnvelope struct {
 	// RecentProtectTokens bands the newest droppable history within this many
 	// charged tokens to drop last. Zero disables the window.
 	RecentProtectTokens int
-	ToolExchange        *contextfrag.ToolExchangePolicy
 }
 
 type BuildOptions struct {

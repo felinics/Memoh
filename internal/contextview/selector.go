@@ -56,17 +56,12 @@ func (*FragmentSelector) Select(frags []contextfrag.ContextFrag, profile IntentP
 			fragBudgetEdits,
 			fragBudgetWarnings,
 			systemBudgetDropped,
-			nil,
-			nil,
 		)
 	}
 	if budget.Plan != nil {
 		budget.MaxTokens = budget.Plan.HistoryBudget
 	}
 
-	var exchangeDropped []contextfrag.ContextFrag
-	var exchangeEdits []contextfrag.ContextEditTrace
-	frags, exchangeDropped, exchangeEdits = applyToolExchangePolicy(frags, budget.ToolExchange)
 	tagged := tagFragments(frags, profile)
 	historyBudget := budget.MaxTokens
 	trimDrops := budgetTrimDrops
@@ -102,8 +97,6 @@ func (*FragmentSelector) Select(frags []contextfrag.ContextFrag, profile IntentP
 				fragBudgetEdits,
 				fragBudgetWarnings,
 				systemBudgetDropped,
-				exchangeDropped,
-				exchangeEdits,
 			)
 		}
 		historyBudget -= protectedCost
@@ -125,8 +118,6 @@ func (*FragmentSelector) Select(frags []contextfrag.ContextFrag, profile IntentP
 					fragBudgetEdits,
 					fragBudgetWarnings,
 					systemBudgetDropped,
-					exchangeDropped,
-					exchangeEdits,
 				)
 			}
 			drops, dropReasons = budgetTrimDropsEnabled(
@@ -149,8 +140,6 @@ func (*FragmentSelector) Select(frags []contextfrag.ContextFrag, profile IntentP
 			fragBudgetEdits,
 			fragBudgetWarnings,
 			systemBudgetDropped,
-			exchangeDropped,
-			exchangeEdits,
 		)
 	}
 
@@ -164,8 +153,6 @@ func (*FragmentSelector) Select(frags []contextfrag.ContextFrag, profile IntentP
 		fragBudgetEdits,
 		fragBudgetWarnings,
 		systemBudgetDropped,
-		exchangeDropped,
-		exchangeEdits,
 	)
 }
 
@@ -178,10 +165,7 @@ func finalizeSelection(
 	fragBudgetEdits []fragBudgetEdit,
 	fragBudgetWarnings []contextfrag.ValidationWarning,
 	systemBudgetDropped []contextfrag.ContextFrag,
-	exchangeDropped []contextfrag.ContextFrag,
-	exchangeEdits []contextfrag.ContextEditTrace,
 ) SelectionResult {
-	result.Edited = append(result.Edited, exchangeEdits...)
 	for _, edit := range fragBudgetEdits {
 		result.Edited = append(result.Edited, edit.trace)
 		if result.EditReasons == nil {
@@ -201,9 +185,6 @@ func finalizeSelection(
 	}
 	for _, frag := range systemBudgetDropped {
 		result.recordDrop(frag, systemBudgetDropReason)
-	}
-	for _, frag := range exchangeDropped {
-		result.recordDrop(frag, toolExchangeDropReason)
 	}
 	result.Summary.TotalCollected = len(result.Selected) + len(result.Dropped)
 	result.Summary.TotalSelected = len(result.Selected)

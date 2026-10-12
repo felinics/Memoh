@@ -450,10 +450,6 @@ func markRequiredHistoryMessageCurrent(cfg *native.RunConfig, requiredMessageID 
 	}
 }
 
-func defaultToolExchangePolicy() *contextfrag.ToolExchangePolicy {
-	return contextfrag.DefaultToolExchangePolicy()
-}
-
 // resolve builds the run context for one turn and returns the effective
 // request alongside it. Resolution fills in defaults the caller's copy does not
 // have — a direct turn on a subagent thread learns its session type, pinned
@@ -655,10 +651,6 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 				estimatedTokens = prepared.estimatedTokens
 				compactableTokens = prepared.compactableTokens
 				historyPressureTokens = prepared.pressureTokens
-				// Remove tool messages from the recent context — they are large
-				// and unnecessary when we already have a summary. Keep only
-				// user/assistant conversation turns.
-				messages = stripToolMessagesWhenCompactionSummaryIsActive(messages, historyRecords)
 			}
 		}
 	}
@@ -695,9 +687,6 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		runCfg.ContextHistoryTokenEstimates[index] = estimateMessageTokens(messages[index])
 	}
 	runCfg.ContextTrimmableMessages = min(trimmableMessages, len(messages))
-	if runCfg.ContextToolExchangePolicy == nil {
-		runCfg.ContextToolExchangePolicy = defaultToolExchangePolicy()
-	}
 
 	displayName := s.resolveDisplayName(ctx, req)
 	mergedAttachments := s.routeAndMergeAttachments(ctx, chatModel, req)
@@ -1603,16 +1592,10 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 
 func normalizeContextMessages(messages []ModelMessage, currentIndex, memoryIndex *int) ([]ModelMessage, *int, *int) {
 	cleaned := sanitizeMessages(messages)
-	stripTools := len(cleaned) > 10
-	if stripTools {
-		// Tool outputs are large and waste tokens; the LLM doesn't need raw
-		// tool results when summaries and memory tools are available for lookup.
-		cleaned = stripToolMessages(cleaned)
-	}
 	cleaned = repairToolCallClosures(cleaned, syntheticToolClosureError)
 	return cleaned,
-		remapContextMessageIndex(messages, currentIndex, stripTools),
-		remapContextMessageIndex(messages, memoryIndex, stripTools)
+		remapContextMessageIndex(messages, currentIndex),
+		remapContextMessageIndex(messages, memoryIndex)
 }
 
 func prependContextMessages(prefix, messages []ModelMessage, trackedIndex *int) ([]ModelMessage, *int) {
@@ -1634,23 +1617,16 @@ func normalizedContextPrefixLength(messages []ModelMessage, rawPrefixLength int)
 		return 0
 	}
 	rawPrefixLength = min(rawPrefixLength, len(messages))
-	stripTools := len(sanitizeMessages(messages)) > 10
 	prefix := sanitizeMessages(messages[:rawPrefixLength])
-	if stripTools {
-		prefix = stripToolMessages(prefix)
-	}
 	prefix = repairToolCallClosures(prefix, syntheticToolClosureError)
 	return len(prefix)
 }
 
-func remapContextMessageIndex(messages []ModelMessage, index *int, stripTools bool) *int {
+func remapContextMessageIndex(messages []ModelMessage, index *int) *int {
 	if index == nil || *index < 0 || *index >= len(messages) || !strings.EqualFold(strings.TrimSpace(messages[*index].Role), "user") {
 		return nil
 	}
 	prefix := sanitizeMessages(messages[:*index+1])
-	if stripTools {
-		prefix = stripToolMessages(prefix)
-	}
 	prefix = repairToolCallClosures(prefix, syntheticToolClosureError)
 	if len(prefix) == 0 || !strings.EqualFold(strings.TrimSpace(prefix[len(prefix)-1].Role), "user") {
 		return nil

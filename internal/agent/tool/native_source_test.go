@@ -10,7 +10,6 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
@@ -286,21 +285,16 @@ func TestNativeToolSourcePassesContextBudgetToProviders(t *testing.T) {
 	source := NewNativeToolSource(nil, []ToolProvider{provider}, NativeToolSourceOptions{
 		AllowTools: map[string]bool{ToolRead().String(): true},
 	})
-	policy := &contextfrag.ToolExchangePolicy{MinMessages: 7}
 
 	_, err := source.ListTools(context.Background(), mcp.ToolSessionContext{
-		BotID:                     "bot-1",
-		ContextBudgetMaxTokens:    12345,
-		ContextToolExchangePolicy: policy,
+		BotID:                  "bot-1",
+		ContextBudgetMaxTokens: 12345,
 	})
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
 	if provider.session.ContextBudgetMaxTokens != 12345 {
 		t.Fatalf("provider.session.ContextBudgetMaxTokens = %d, want 12345", provider.session.ContextBudgetMaxTokens)
-	}
-	if provider.session.ContextToolExchangePolicy != policy {
-		t.Fatalf("provider.session.ContextToolExchangePolicy = %#v, want %#v", provider.session.ContextToolExchangePolicy, policy)
 	}
 }
 

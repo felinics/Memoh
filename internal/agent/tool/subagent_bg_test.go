@@ -542,15 +542,13 @@ func TestSpawnAgentSessionInheritsParentUserIdentity(t *testing.T) {
 	}
 }
 
-func TestSpawnAgentPropagatesContextBudgetAndToolExchangePolicy(t *testing.T) {
+func TestSpawnAgentPropagatesContextBudget(t *testing.T) {
 	agent := &fakeSpawnAgent{}
 	p, _, _, _ := newAgentControlProvider(t, agent)
-	policy := &contextfrag.ToolExchangePolicy{MinMessages: 10}
 	session := SessionContext{
-		BotID:                     "bot1",
-		SessionID:                 "parent1",
-		ContextBudgetMaxTokens:    128000,
-		ContextToolExchangePolicy: policy,
+		BotID:                  "bot1",
+		SessionID:              "parent1",
+		ContextBudgetMaxTokens: 128000,
 	}
 
 	mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{"task": "alpha"})
@@ -561,9 +559,6 @@ func TestSpawnAgentPropagatesContextBudgetAndToolExchangePolicy(t *testing.T) {
 	}
 	if call.ContextBudgetMaxTokens != 128000 {
 		t.Fatalf("ContextBudgetMaxTokens = %d, want 128000", call.ContextBudgetMaxTokens)
-	}
-	if call.ContextToolExchangePolicy != policy {
-		t.Fatalf("ContextToolExchangePolicy = %p, want same pointer %p", call.ContextToolExchangePolicy, policy)
 	}
 }
 

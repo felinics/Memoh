@@ -836,7 +836,7 @@ func TestDiscussACPSkipsWhenNotAddressed(t *testing.T) {
 	}
 }
 
-func TestDiscussPropagatesContextBudgetAndToolExchangePolicy(t *testing.T) {
+func TestDiscussPropagatesContextBudget(t *testing.T) {
 	agent := &fakeAgentStreamer{}
 	resolver := &fakeDiscussService{
 		resolveResult: ResolveRunConfigResult{
@@ -858,9 +858,6 @@ func TestDiscussPropagatesContextBudgetAndToolExchangePolicy(t *testing.T) {
 	}
 	if agent.lastConfig.ContextBudgetMaxTokens != 128000 {
 		t.Fatalf("ContextBudgetMaxTokens = %d, want 128000", agent.lastConfig.ContextBudgetMaxTokens)
-	}
-	if agent.lastConfig.ContextToolExchangePolicy == nil {
-		t.Fatal("expected a default ContextToolExchangePolicy for the discuss path")
 	}
 }
 

@@ -587,22 +587,3 @@ type ContextConflict struct {
 	Expected string       `json:"expected,omitempty"`
 	Actual   string       `json:"actual,omitempty"`
 }
-
-// ToolExchangePolicy asks the selector to strip bulky tool interactions from
-// history: tool results and non-conversational tool calls are removed while
-// ask_user exchanges survive because the question and answer are part of the
-// visible conversation. MinMessages gates the policy: it applies only when
-// the history holds more message fragments than the threshold (zero applies
-// it unconditionally).
-type ToolExchangePolicy struct {
-	MinMessages int
-}
-
-const defaultToolExchangeMinMessages = 10
-
-// DefaultToolExchangePolicy returns the package's shared default
-// tool-exchange stripping policy. Returns a fresh pointer on every call so
-// callers never share (and risk mutating) the same underlying struct.
-func DefaultToolExchangePolicy() *ToolExchangePolicy {
-	return &ToolExchangePolicy{MinMessages: defaultToolExchangeMinMessages}
-}

@@ -41,20 +41,15 @@ func TestSpawnRunConfigClassifiesRawQueryAsCurrentUser(t *testing.T) {
 	}
 }
 
-func TestSpawnRunConfigCarriesContextBudgetAndToolExchangePolicy(t *testing.T) {
+func TestSpawnRunConfigCarriesContextBudget(t *testing.T) {
 	t.Parallel()
 
-	policy := &contextfrag.ToolExchangePolicy{MinMessages: 10}
 	rc := runConfigFromSpawnRunConfig(tools.SpawnRunConfig{
-		ContextBudgetMaxTokens:    128000,
-		ContextToolExchangePolicy: policy,
+		ContextBudgetMaxTokens: 128000,
 	})
 
 	if rc.ContextBudgetMaxTokens != 128000 {
 		t.Fatalf("ContextBudgetMaxTokens = %d, want 128000", rc.ContextBudgetMaxTokens)
-	}
-	if rc.ContextToolExchangePolicy != policy {
-		t.Fatalf("ContextToolExchangePolicy = %p, want same pointer %p", rc.ContextToolExchangePolicy, policy)
 	}
 }
 
