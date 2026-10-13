@@ -8,12 +8,14 @@
       <template v-if="step === 'command'">
         <DialogHeader class="pr-8">
           <DialogTitle>{{ existing ? t('computerConnect.restore') : t('computerConnect.title') }}</DialogTitle>
-          <DialogDescription v-if="existing">
-            {{ t('computerConnect.existingDescription', { name: credential?.name }) }}
+          <DialogDescription>
+            {{ existing
+              ? t('computerConnect.existingDescription', { name: credential?.name })
+              : t('computerConnect.commandDescription') }}
           </DialogDescription>
         </DialogHeader>
 
-        <SettingsSection>
+        <SettingsSection bordered>
           <SettingsRow
             :label="t('computerConnect.replaceAction')"
             :description="t('computerConnect.replaceDescription')"
@@ -25,37 +27,22 @@
           </SettingsRow>
         </SettingsSection>
 
-        <div>
-          <p class="text-sm text-foreground">
-            {{ t('computerConnect.commandDescription') }}
-          </p>
-          <!-- Same surface as the chat code block: white card + one hairline,
-               not the beige muted-soft fill. -->
-          <div class="relative mt-2.5 min-w-0 overflow-hidden rounded-lg border border-border-soft bg-card">
-            <pre
-              class="max-h-40 min-w-0 overflow-auto whitespace-pre-wrap break-all py-2 pl-3 pr-12 font-mono text-xs leading-relaxed text-foreground"
-              :aria-label="t('computerConnect.commandLabel')"
-            ><code>{{ command }}</code></pre>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              class="absolute right-1.5 top-1.5"
-              :aria-label="t('common.copy')"
-              @click="copyCommand"
-            >
-              <Copy class="size-4" />
-            </Button>
-          </div>
-        </div>
+        <!-- wrap: the command is one long line with an unbroken key; it must
+             be readable in full without widening the dialog. -->
+        <CodePanel
+          wrap
+          :code="command"
+          :copy-label="t('common.copy')"
+          :copied-label="t('common.copied')"
+          :copy-failed-message="t('common.copyFailed')"
+          :aria-label="t('computerConnect.commandLabel')"
+        />
 
-        <!-- The waiting banner is a static card — no spinner chrome. -->
-        <div class="flex items-center gap-2 rounded-lg border border-border-soft px-3 py-2.5">
-          <span class="size-1.5 shrink-0 rounded-full bg-accent-gray-border" />
-          <p class="text-xs text-muted-foreground">
-            {{ t('computerConnect.waiting') }}
-          </p>
-        </div>
+        <CalloutBanner
+          tone="neutral"
+          size="sm"
+          :description="t('computerConnect.waiting')"
+        />
 
         <DialogFooter>
           <Button
@@ -100,6 +87,8 @@ import { deleteUsersMeRuntimesById, type UserruntimeRuntime } from '@memohai/sdk
 import { getBotsQuery } from '@memohai/sdk/colada'
 import {
   Button,
+  CalloutBanner,
+  CodePanel,
   Dialog,
   DialogScrollContent,
   DialogDescription,
@@ -110,9 +99,7 @@ import {
   SettingsSection,
   Switch,
   toast,
-  useClipboard,
 } from '@felinic/ui'
-import { Copy } from 'lucide-vue-next'
 import { sdkApiBaseUrl } from '@/lib/api-client'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { buildRuntimeConnectCommand } from '@/pages/runtimes/command'
@@ -130,7 +117,6 @@ const props = defineProps<{
 const open = defineModel<boolean>('open', { default: false })
 
 const { t } = useI18n()
-const { copyText } = useClipboard()
 
 const step = ref<'command' | 'access'>('command')
 const replaceBinding = ref(false)
@@ -238,14 +224,5 @@ async function revokeAbandonedCredential(abandonedId: string): Promise<void> {
 
 function onOpenChange(next: boolean): void {
   if (!next) close()
-}
-
-async function copyCommand(): Promise<void> {
-  const copied = await copyText(command.value)
-  if (copied) {
-    toast.success(t('common.copied'))
-  } else {
-    toast.error(t('common.copyFailed'))
-  }
 }
 </script>

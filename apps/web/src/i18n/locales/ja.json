@@ -103,12 +103,12 @@
   },
   "computerConnect": {
     "title": "コンピューターを接続",
-    "replaceAction": "保存済みの接続設定を置換",
-    "replaceDescription": "オンにして下のコマンドを実行すると、このコンピューターに保存された接続設定が上書きされ、バックグラウンドサービスが現在の接続に切り替わります。",
+    "replaceAction": "保存済みの接続を置き換える",
+    "replaceDescription": "別の接続があると表示されたらオンにし、再実行。",
     "restore": "接続を復元",
     "existingDescription": "「{name}」でコマンドを実行し、元の認証情報でバックグラウンド接続を復元してください。コンピューターの記録と Bot の権限は保持されます。",
     "commandLabel": "接続コマンド",
-    "commandDescription": "接続するコンピューターに Node.js 20+ をインストールし、ターミナル（macOS/Linux）またはコマンドプロンプト（Windows）で実行してください。Runtime がインストールされ、バックグラウンドで接続します。完了後はターミナルを閉じられます。",
+    "commandDescription": "接続先に Node.js 20+ を入れ、ターミナルで次のコマンドを実行してください。",
     "waiting": "コンピューターの接続を待っています…",
     "finish": "完了"
   },

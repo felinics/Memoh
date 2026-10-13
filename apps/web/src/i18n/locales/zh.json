@@ -106,12 +106,12 @@
   },
   "computerConnect": {
     "title": "连接电脑",
-    "replaceAction": "替换本机已有绑定",
-    "replaceDescription": "开启后，运行下方命令会覆盖这台电脑保存的绑定，后台服务将改用当前连接。",
+    "replaceAction": "覆盖这台电脑已保存的连接",
+    "replaceDescription": "终端提示已有其他连接时开启，再重新复制命令运行。",
     "restore": "恢复连接",
     "existingDescription": "在「{name}」上运行命令，沿用原凭证恢复后台连接。电脑记录和 Bot 权限会保留。",
     "commandLabel": "连接命令",
-    "commandDescription": "在要连接的电脑上安装 Node.js 20+，然后在终端（macOS/Linux）或命令提示符（Windows）中运行。命令会安装并连接后台服务，完成后可关闭终端。",
+    "commandDescription": "在要连接的电脑上安装 Node.js 20+，然后在终端运行下方命令。",
     "waiting": "等待电脑连接…",
     "finish": "完成"
   },

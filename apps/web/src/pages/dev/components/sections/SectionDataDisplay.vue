@@ -5,6 +5,7 @@ import {
   Button,
   ButtonGroup, ButtonGroupText,
   Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
+  CodePanel,
   Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemSeparator, ItemTitle,
   ScrollArea, ScrollBar,
   Table, TableBody, TableCell, TableEmpty, TableFooter, TableHead, TableHeader, TableRow,
@@ -13,6 +14,8 @@ import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'
 import VariantMatrix from '../components/VariantMatrix.vue'
 import { variantSpecs } from '../lib/variant-specs'
+
+const connectCommand = 'npm install -g @memohai/runtime@latest && memoh-runtime enroll --server https://memoh.example.com/api --key mrk_0123456789abcdef0123456789abcdef0123456789abcdef && memoh-runtime service start'
 
 const invoices = [
   { id: 'INV-001', status: 'Paid', total: '$250.00' },
@@ -49,6 +52,28 @@ const invoices = [
             </Button>
           </CardFooter>
         </Card>
+      </Specimen>
+
+      <Specimen
+        label="<CodePanel>"
+        note="read-only code + its copy button. same menu-shell radius as SettingsSection / SurfaceCard so a code block beside a settings card lines up. width=fit hugs a chat fence; wrap breaks a long one-line command instead of scrolling it."
+      >
+        <div class="w-full max-w-sm space-y-3">
+          <CodePanel
+            code="pnpm --filter @memohai/web dev"
+            width="fit"
+            copy-label="Copy"
+            copied-label="Copied"
+            copy-failed-message="Copy failed"
+          />
+          <CodePanel
+            wrap
+            :code="connectCommand"
+            copy-label="Copy"
+            copied-label="Copied"
+            copy-failed-message="Copy failed"
+          />
+        </div>
       </Specimen>
 
       <Specimen
