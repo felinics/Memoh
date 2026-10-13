@@ -252,3 +252,7 @@ func TestIsImageOnlyChatModelToolCallEscape(t *testing.T) {
 		t.Fatal("a non-tool-calling image model name should be treated as image-only")
 	}
 }
+
+func (*compactionModelQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
+}

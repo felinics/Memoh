@@ -242,3 +242,7 @@ func TestImportedModelConfigCarriesTheWireDeclarations(t *testing.T) {
 		t.Error("a model declaring it rejects an explicit off must not offer one")
 	}
 }
+
+func (*providerModelsReasoningQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
+}

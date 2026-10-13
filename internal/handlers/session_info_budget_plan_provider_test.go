@@ -99,3 +99,7 @@ func TestGetSessionInfoDropsThePlanWhenASameNamedModelHasASmallerWindow(t *testi
 		t.Fatalf("provider switch still applies the old plan: %s → %s resolved window %d, retained plan window %d", providerA.String(), providerB.String(), *response.ContextUsage.ContextWindow, response.ContextUsage.BudgetPlan.Window)
 	}
 }
+
+func (*providerCollisionQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
+}

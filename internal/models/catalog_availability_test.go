@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"testing"
@@ -22,7 +23,7 @@ func TestConvertToEnabledGetResponseListFiltersUnavailableCatalogModels(t *testi
 	}
 
 	service := &Service{logger: slog.Default()}
-	models := service.convertToEnabledGetResponseList([]sqlc.Model{
+	models := service.convertToEnabledGetResponseList(context.Background(), []sqlc.Model{
 		{ModelID: "legacy-model", Config: configJSON(nil)},
 		{ModelID: "available-model", Config: configJSON(&available)},
 		{ModelID: "unavailable-model", Config: configJSON(&unavailable)},

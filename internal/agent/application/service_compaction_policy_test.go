@@ -146,3 +146,7 @@ func TestCompactForBudgetReadsCandidatesFromTheContextWindow(t *testing.T) {
 		}
 	}
 }
+
+func (*controllerQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
+}

@@ -66,6 +66,60 @@ func DecodeModelConfig(raw []byte, ctx ConfigContext) (ModelConfig, error) {
 	return normalizeModelConfig(config), nil
 }
 
+// storedConfigVersion reads the schema version a stored config was written
+// in; a config without one, or empty input, is version 1.
+func storedConfigVersion(raw []byte) int {
+	var head struct {
+		SchemaVersion int `json:"schema_version"`
+	}
+	if err := json.Unmarshal(raw, &head); err != nil || head.SchemaVersion < 1 {
+		return 1
+	}
+	return head.SchemaVersion
+}
+
+// configNeedsWriteBack reports whether a stored config is older than the
+// current version and belongs to a model whose config is a ModelConfig. Speech,
+// transcription and video models keep their own settings in the same column,
+// which ModelConfig does not describe, so they are never rewritten.
+func configNeedsWriteBack(raw []byte, modelType ModelType) bool {
+	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding {
+		return false
+	}
+	if len(strings.TrimSpace(string(raw))) == 0 || string(raw) == "null" {
+		return false
+	}
+	return storedConfigVersion(raw) < ModelConfigSchemaVersion
+}
+
+// encodeUpgradedConfig writes config over the stored object: version 1 keys
+// are dropped, current keys replace theirs, and keys this version does not
+// know are kept for whoever wrote them.
+func encodeUpgradedConfig(raw []byte, config ModelConfig) ([]byte, error) {
+	stored := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		return nil, err
+	}
+	if stored == nil {
+		stored = map[string]json.RawMessage{}
+	}
+	for _, key := range legacyOnlyKeys {
+		delete(stored, key)
+	}
+	current, err := json.Marshal(config)
+	if err != nil {
+		return nil, err
+	}
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(current, &fields); err != nil {
+		return nil, err
+	}
+	for key, value := range fields {
+		stored[key] = value
+	}
+	return json.Marshal(stored)
+}
+
 // legacyOnlyKeys are version 1 keys that version 2 does not use.
 var legacyOnlyKeys = []string{
 	"compatibilities", "reasoning_efforts", "thinking_mode", "reasoning_dialect",
