@@ -6189,6 +6189,15 @@ definitions:
       type:
         $ref: '#/definitions/models.ModelType'
     type: object
+  providers.CatalogModel:
+    properties:
+      config:
+        $ref: '#/definitions/models.ModelConfig'
+      model_id:
+        type: string
+      name:
+        type: string
+    type: object
   providers.CountResponse:
     properties:
       count:
@@ -6259,6 +6268,10 @@ definitions:
       default_compatibilities:
         items:
           type: string
+        type: array
+      models:
+        items:
+          $ref: '#/definitions/providers.CatalogModel'
         type: array
     type: object
   providers.ImportModelsResponse:
@@ -17157,7 +17170,8 @@ paths:
         name: id
         required: true
         type: string
-      - description: Explicit defaults for unknown custom chat models
+      - description: Explicit defaults for unknown custom chat models, or the catalog
+          models to import
         in: body
         name: request
         schema:

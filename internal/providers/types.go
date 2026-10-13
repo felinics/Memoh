@@ -151,8 +151,20 @@ type RemoteModel struct {
 // ImportModelsRequest carries caller-supplied capability defaults for chat
 // models whose provider cannot describe them. Templates and trusted discovery
 // remain authoritative.
+//
+// Models, when set, is the model list to import instead of the provider's
+// /models endpoint: the catalog of the provider's models.dev source, already
+// turned into model configs by the client.
 type ImportModelsRequest struct {
-	DefaultCompatibilities []string `json:"default_compatibilities,omitempty"`
+	DefaultCompatibilities []string       `json:"default_compatibilities,omitempty"`
+	Models                 []CatalogModel `json:"models,omitempty"`
+}
+
+// CatalogModel is one chat model of a provider's catalog.
+type CatalogModel struct {
+	ModelID string             `json:"model_id"`
+	Name    string             `json:"name,omitempty"`
+	Config  models.ModelConfig `json:"config"`
 }
 
 // ImportModelsResponse represents the response for importing models.

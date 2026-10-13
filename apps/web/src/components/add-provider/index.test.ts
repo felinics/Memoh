@@ -155,7 +155,7 @@ describe('add provider dialog', () => {
       open: true,
       templates: [
         { id: 'template-openrouter', key: 'openrouter', domain: 'llm', name: 'OpenRouter Template', driver: 'openai-completions' },
-        { id: 'template-codex', key: 'codex', domain: 'llm', name: 'Codex Template', driver: 'openai-codex' },
+        { id: 'template-gateway', key: 'internal-gateway', domain: 'llm', name: 'Gateway Template', driver: 'openai-completions' },
       ],
       sources: MODEL_SOURCES,
       initialSource: 'openrouter',
@@ -166,7 +166,8 @@ describe('add provider dialog', () => {
 
     const presetSelect = root.querySelector('select') as HTMLSelectElement
     const labels = [...presetSelect.options].map(option => option.textContent)
-    expect(labels).toContain('Codex Template')
+    expect(labels).toContain('Gateway Template')
+    expect(labels).toContain('OpenAI Codex')
     expect(labels).not.toContain('OpenRouter Template')
     expect(labels).toContain('OpenRouter')
     expect(presetSelect.value).toBe('source:openrouter')

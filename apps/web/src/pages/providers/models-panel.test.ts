@@ -37,7 +37,6 @@ vi.mock('@pinia/colada', async () => {
 vi.mock('@memohai/sdk', () => ({
   getModels: vi.fn(),
   getProviders: vi.fn(),
-  getProviderTemplates: vi.fn(),
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -144,7 +143,7 @@ vi.mock('./model-setting.vue', () => ({
     props: ['provider'],
     emits: ['materialized'],
     setup(
-      props: { provider?: { id?: string, name?: string, provider_template_id?: string } },
+      props: { provider?: { id?: string, name?: string, provider_template_id?: string, metadata?: Record<string, unknown> } },
       { emit }: { emit: (event: 'materialized', provider: Record<string, unknown>) => void },
     ) {
       return () => h('div', { 'data-testid': 'provider-detail' }, [
@@ -155,6 +154,9 @@ vi.mock('./model-setting.vue', () => ({
             id: 'provider-anthropic',
             name: props.provider?.name,
             provider_template_id: props.provider?.provider_template_id,
+            // The created provider records the draft's entry, which takes the
+            // entry off the gallery before the route moves.
+            metadata: props.provider?.metadata,
           }),
         }),
       ])
@@ -199,7 +201,7 @@ describe('models panel route state', () => {
     document.body.innerHTML = ''
   })
 
-  it.each(['providers', 'templates'] as const)('keeps cached cards mounted while %s refresh', async (source) => {
+  it.each(['providers'] as const)('keeps cached cards mounted while %s refresh', async (source) => {
     const { app, root } = await mountPage()
     const cards = [...root.querySelectorAll('[data-provider]')]
     expect(cardNames(root).slice(0, 2)).toEqual(['One', 'Two'])
@@ -216,7 +218,7 @@ describe('models panel route state', () => {
     app.unmount()
   })
 
-  it.each(['providers', 'templates'] as const)('waits for unresolved %s before showing cards', async (source) => {
+  it.each(['providers'] as const)('waits for unresolved %s before showing cards', async (source) => {
     const data = source === 'providers' ? mocks.providerData : mocks.templateData
     const loading = source === 'providers' ? mocks.providersLoading : mocks.templatesLoading
     data.value = undefined
@@ -234,16 +236,16 @@ describe('models panel route state', () => {
   })
 
   it('leaves the skeleton when an initial request fails without data', async () => {
-    mocks.templateData.value = undefined
-    mocks.templatesLoading.value = true
+    mocks.providerData.value = undefined
+    mocks.providersLoading.value = true
     const { app, root } = await mountPage()
     expect(root.querySelector('[data-slot="skeleton"]')).not.toBeNull()
 
     // A rejected query returns to idle and keeps its data undefined.
-    mocks.templatesLoading.value = false
+    mocks.providersLoading.value = false
     await nextTick()
     expect(root.querySelector('[data-slot="skeleton"]')).toBeNull()
-    expect(cardNames(root).slice(0, 2)).toEqual(['One', 'Two'])
+    expect(cardNames(root)).toContain('302.AI')
     app.unmount()
   })
 
@@ -296,41 +298,28 @@ describe('models panel route state', () => {
     app.unmount()
   })
 
-  it('opens an unconfigured template as a draft detail without opening the add dialog', async () => {
-    mocks.templateData.value = [{
-      id: 'template-anthropic',
-      name: 'Anthropic',
-      driver: 'anthropic-messages',
-      default_config: { base_url: 'https://api.anthropic.com' },
-      configured: false,
-    }]
-    const { app, root } = await mountPage()
+  it('opens a source as a draft detail without opening the add dialog', async () => {
+    const { app, root } = await mountPage('anthropic')
 
     ;(root.querySelector('[data-provider="Anthropic"]') as HTMLButtonElement).click()
     await nextTick()
 
-    expect(mocks.replace).toHaveBeenCalledWith({ query: { provider: 'template:template-anthropic' } })
+    expect(mocks.replace).toHaveBeenCalledWith({ query: { provider: 'source:anthropic' } })
     expect(root.querySelector('[data-testid="provider-detail"]')?.textContent).toBe('undefined:Anthropic')
     expect(root.querySelector('[data-testid="add-provider-dialog"]')).toBeNull()
     app.unmount()
   })
 
-  it('keeps the template route and detail open after the draft is materialized', async () => {
-    mocks.templateData.value = [{
-      id: 'template-anthropic',
-      name: 'Anthropic',
-      driver: 'anthropic-messages',
-      default_config: { base_url: 'https://api.anthropic.com' },
-      configured: false,
-    }]
-    const { app, root } = await mountPage()
+  it('moves the route to the provider once a draft is created', async () => {
+    const { app, root } = await mountPage('anthropic')
 
     ;(root.querySelector('[data-provider="Anthropic"]') as HTMLButtonElement).click()
     await nextTick()
     ;(root.querySelector('[data-testid="materialize-provider"]') as HTMLButtonElement).click()
     await nextTick()
 
-    expect(mocks.replace).toHaveBeenLastCalledWith({ query: { provider: 'template:template-anthropic' } })
+    expect(mocks.replace).toHaveBeenLastCalledWith({ query: { provider: 'provider-anthropic' } })
+    expect(mocks.replace).not.toHaveBeenCalledWith({ query: {} })
     expect(root.querySelector('[data-testid="provider-detail"]')?.textContent).toContain('provider-anthropic:Anthropic')
     app.unmount()
   })
@@ -362,16 +351,12 @@ describe('models panel route state', () => {
     app.unmount()
   })
 
-  it('leaves out sources a provider already uses, and the templates they replace', async () => {
+  it('leaves out entries a provider already uses, by any route it was made', async () => {
     mocks.providerData.value = [
-      { id: 'from-source', name: 'My DeepSeek', enable: true, metadata: { source: 'deepseek' } },
-      { id: 'from-template', name: 'My Groq', enable: true, provider_template_id: 'template-groq' },
+      { id: 'from-source', name: 'My DeepSeek', enable: true, metadata: { catalog: 'deepseek', source: 'deepseek' } },
+      { id: 'from-template', name: 'My Groq', enable: true, metadata: { registry: { source: 'groq.yaml' } } },
       { id: 'from-preset', name: 'My Mistral', enable: true, metadata: { preset: { source: 'mistral.yaml' } } },
-    ]
-    mocks.templateData.value = [
-      { id: 'template-groq', key: 'groq', name: 'Groq Template', configured: true },
-      { id: 'template-openai', key: 'openai', name: 'OpenAI Template', configured: false },
-      { id: 'template-codex', key: 'codex', name: 'Codex Template', configured: false },
+      { id: 'from-entry', name: 'My Ollama', enable: true, metadata: { catalog: 'ollama' } },
     ]
     const { app, root } = await mountPage('')
     const all: string[] = []
@@ -383,12 +368,9 @@ describe('models panel route state', () => {
       ;(root.querySelector('[data-testid="next-page"]') as HTMLButtonElement).click()
       await nextTick()
     }
-    expect(all).not.toContain('DeepSeek')
-    expect(all).not.toContain('Groq')
-    expect(all).not.toContain('Mistral')
-    expect(all).not.toContain('OpenAI Template')
+    for (const name of ['DeepSeek', 'Groq', 'Mistral', 'Ollama']) expect(all).not.toContain(name)
     expect(all).toContain('OpenAI')
-    expect(all).toContain('Codex Template')
+    expect(all).toContain('OpenAI Codex')
     app.unmount()
   })
 
@@ -401,17 +383,6 @@ describe('models panel route state', () => {
     await nextTick()
     expect(cardNames(root)).toEqual(['DeepSeek'])
     expect(root.querySelector('[data-testid="pagination"]')).toBeNull()
-    app.unmount()
-  })
-
-  it('opens the add dialog preset to a clicked source', async () => {
-    const { app, root } = await mountPage('openrouter')
-    ;(root.querySelector('[data-provider="OpenRouter"]') as HTMLButtonElement).click()
-    await nextTick()
-
-    const dialog = root.querySelector('[data-testid="add-provider-dialog"]')
-    expect(dialog?.getAttribute('data-open')).toBe('true')
-    expect(dialog?.getAttribute('data-initial-source')).toBe('openrouter')
     app.unmount()
   })
 })

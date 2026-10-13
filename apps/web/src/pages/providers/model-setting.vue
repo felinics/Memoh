@@ -61,6 +61,9 @@
         :models="providerModels"
         :managed="isManagedModelCatalogClientType(curProvider?.client_type)"
         :client-type="curProvider?.client_type"
+        :source="providerSource(curProvider)"
+        :preview="isSourcePreview"
+        :preview-loading="isSourcePreview && catalogLoading"
         :ensure-provider-id="curProvider?.id ? undefined : ensureProviderId"
         :delete-model-loading="deleteModelLoading"
         @edit="handleEditModel"
@@ -85,15 +88,17 @@ import {
   deleteModelsById,
   deleteProvidersById,
   getProvidersByIdModels,
-  postProvidersByIdImportModels,
-  postProvidersFromTemplate,
+  postProviders,
   putProvidersById,
 } from '@memohai/sdk'
 import type { ModelsGetResponse, ProvidersGetResponse, ProvidersUpdateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
 import { isManagedModelCatalogClientType } from '@/constants/client-types'
-import { isMonochromeLogo } from '@/constants/model-sources'
+import { isMonochromeLogo, providerSource } from '@/constants/model-sources'
+import { useModelsDevCatalog } from '@/composables/useModelsDevCatalog'
+import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
+import { catalogModelsFor } from '@/lib/models-dev'
 
 // ---- Model 编辑状态（provide 给 CreateModel） ----
 const openModel = reactive<{
@@ -144,10 +149,7 @@ const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
     if (!curProviderId.value) return
     await deleteProvidersById({ path: { id: curProviderId.value }, throwOnError: true })
   },
-  onSettled: () => {
-    invalidateProviderQueries()
-    queryCache.invalidateQueries({ key: ['provider-templates', 'llm'] })
-  },
+  onSettled: invalidateProviderQueries,
 })
 
 // mutateAsync (not mutate) because the form's autosave queue must await each
@@ -165,11 +167,10 @@ const { mutateAsync: saveProvider, isLoading: editLoading } = useMutation({
     })
     return result
   },
-  onSettled: () => {
-    invalidateProviderQueries()
-    queryCache.invalidateQueries({ key: ['provider-templates', 'llm'] })
-  },
+  onSettled: invalidateProviderQueries,
 })
+
+const { importProviderModels } = useProviderModelCatalog()
 
 async function materializeProvider(
   data: Record<string, unknown>,
@@ -179,17 +180,18 @@ async function materializeProvider(
   if (curProvider.value?.id) return curProvider.value
   if (materializePromise) return materializePromise
 
-  const templateId = curProvider.value?.provider_template_id
-  if (!templateId) throw new Error('provider template is missing')
+  const draft = curProvider.value
+  if (!draft) throw new Error('provider is missing')
 
   materializePromise = (async () => {
-    const { data: created } = await postProvidersFromTemplate({
+    const { data: created } = await postProviders({
       body: {
-        template_id: templateId,
-        domain: 'llm',
-        name: String(data.name ?? curProvider.value?.name ?? ''),
-        config: (data.config as Record<string, unknown> | undefined) ?? {},
-        metadata: (data.metadata as Record<string, unknown> | undefined) ?? {},
+        name: String(data.name ?? draft.name ?? ''),
+        client_type: String(data.client_type ?? draft.client_type ?? ''),
+        config: (data.config as Record<string, unknown> | undefined) ?? draft.config ?? {},
+        // The draft's metadata records the gallery entry and source.
+        metadata: { ...(draft.metadata ?? {}), ...((data.metadata as Record<string, unknown> | undefined) ?? {}) },
+        ...(draft.icon && { icon: draft.icon }),
       },
       throwOnError: true,
     })
@@ -210,17 +212,13 @@ async function materializeProvider(
 
     if (importModels) {
       try {
-        await postProvidersByIdImportModels({
-          path: { id: created.id },
-          throwOnError: true,
-        })
+        await importProviderModels(result)
       } catch {
         toast.error(t('models.importFailed'))
       }
     }
 
     invalidateProviderQueries()
-    queryCache.invalidateQueries({ key: ['provider-templates', 'llm'] })
     return result
   })()
 
@@ -245,7 +243,7 @@ async function ensureOAuthProvider(): Promise<ProvidersGetResponse> {
 
 const providerForm = useTemplateRef('providerForm')
 
-// Adding a model to a template draft creates the provider first, from the
+// Adding a model to a draft creates the provider first, from the
 // form's current (possibly unsaved) values. Models are not imported here:
 // without an API key the endpoint cannot be listed.
 async function ensureProviderId(): Promise<string> {
@@ -253,6 +251,8 @@ async function ensureProviderId(): Promise<string> {
   if (!provider) throw new Error('provider is missing')
   if (provider.id) return provider.id
 
+  // A source's catalog needs no API key, so its models come along; listing an
+  // endpoint's models has to wait for the key.
   const created = await materializeProvider(
     providerForm.value?.draftPayload() ?? {
       name: provider.name,
@@ -260,7 +260,7 @@ async function ensureProviderId(): Promise<string> {
       metadata: provider.metadata ?? {},
     },
     provider.enable !== false,
-    false,
+    !!providerSource(provider),
   )
   if (!created.id) throw new Error('provider creation returned no id')
   return created.id
@@ -319,10 +319,22 @@ const { data: modelDataList } = useQuery({
   enabled: () => !!curProviderId.value,
 })
 
-// A template draft has no models of its own. The template catalog only
-// enriches imported models, so listing it here would show models that vanish
-// as soon as the provider is created.
-const providerModels = computed<ModelsGetResponse[]>(() => modelDataList.value ?? [])
+// A draft from a models.dev source previews the source's models, read-only;
+// creating the provider imports them.
+const isSourcePreview = computed(() => !curProviderId.value && !!providerSource(curProvider.value))
+const { data: catalog, isLoading: catalogLoading } = useModelsDevCatalog(() => isSourcePreview.value)
+const previewModels = computed<ModelsGetResponse[]>(() =>
+  catalogModelsFor(catalog.value, providerSource(curProvider.value), curProvider.value?.client_type ?? '')
+    .map(model => ({
+      model_id: model.model_id,
+      name: model.name,
+      type: model.type,
+      enable: false,
+      config: model.config,
+    })))
+
+const providerModels = computed<ModelsGetResponse[]>(() =>
+  isSourcePreview.value ? previewModels.value : (modelDataList.value ?? []))
 
 watch(curProvider, () => {
   queryCache.invalidateQueries({ key: ['provider-models'] })

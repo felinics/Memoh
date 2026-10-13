@@ -5,7 +5,7 @@ import type { Slots } from 'vue'
 import type { ProvidersGetResponse } from '@memohai/sdk'
 
 const mocks = vi.hoisted(() => ({
-  postProvidersFromTemplate: vi.fn(),
+  postProviders: vi.fn(),
   postProvidersByIdImportModels: vi.fn(),
   putProvidersById: vi.fn(),
   deleteModelsById: vi.fn(),
@@ -42,14 +42,10 @@ vi.mock('@memohai/sdk', () => ({
   deleteProvidersById: mocks.deleteProvidersById,
   getProvidersByIdModels: mocks.getProvidersByIdModels,
   postProvidersByIdImportModels: mocks.postProvidersByIdImportModels,
-  postProvidersFromTemplate: mocks.postProvidersFromTemplate,
+  postProviders: mocks.postProviders,
   putProvidersById: mocks.putProvidersById,
 }))
 
-vi.mock('@/composables/useProviderTemplateModels', async () => {
-  const { ref } = await import('vue')
-  return { useProviderTemplateModels: () => ({ models: ref([]) }) }
-})
 
 vi.mock('@/constants/client-types', () => ({
   isManagedModelCatalogClientType: () => false,
@@ -81,6 +77,7 @@ vi.mock('@felinic/ui', async () => {
     Button: Passthrough,
     ConfirmPopover: Passthrough,
     SettingsShell: Passthrough,
+    SurfaceCard: (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', [slots.default?.(), slots.media?.(), slots.actions?.()]),
     Switch: define({
       props: ['modelValue', 'disabled'],
       emits: ['update:modelValue'],
@@ -101,7 +98,7 @@ vi.mock('@felinic/ui', async () => {
 describe('provider draft enable', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.postProvidersFromTemplate.mockResolvedValue({
+    mocks.postProviders.mockResolvedValue({
       data: {
         id: 'created-provider',
         name: 'New API',
@@ -118,10 +115,10 @@ describe('provider draft enable', () => {
     document.body.innerHTML = ''
   })
 
-  it('keeps a template draft local when enabling before save', async () => {
+  it('keeps a gallery draft local when enabling before save', async () => {
     const ModelSetting = (await import('./model-setting.vue')).default
     const provider = ref<ProvidersGetResponse | undefined>({
-      provider_template_id: 'template-newapi',
+      metadata: { catalog: 'newapi' },
       name: 'New API',
       client_type: 'openai-completions',
       enable: false,
@@ -135,8 +132,8 @@ describe('provider draft enable', () => {
       setup() {
         return () => h(ModelSetting, {
           provider: provider.value,
-          'onUpdate:provider': (value: typeof provider.value) => {
-            provider.value = value
+          'onUpdate:provider': (value: ProvidersGetResponse | undefined) => {
+            if (value) provider.value = value
           },
         })
       },
@@ -153,7 +150,7 @@ describe('provider draft enable', () => {
     await flushPromises()
 
     expect(provider.value?.enable).toBe(true)
-    expect(mocks.postProvidersFromTemplate).not.toHaveBeenCalled()
+    expect(mocks.postProviders).not.toHaveBeenCalled()
     expect(mocks.postProvidersByIdImportModels).not.toHaveBeenCalled()
     expect(mocks.putProvidersById).not.toHaveBeenCalled()
 

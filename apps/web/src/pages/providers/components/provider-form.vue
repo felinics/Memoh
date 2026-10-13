@@ -406,7 +406,7 @@ import { useI18n } from 'vue-i18n'
 import { ConfirmPopover, DeviceCodePanel, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { providerPresets } from '@/constants/provider-presets'
+import { modelSourceNeedsApiKey, providerCatalogEntry } from '@/constants/model-sources'
 
 const { t, te } = useI18n()
 const { syncProviderModelCatalog } = useProviderModelCatalog()
@@ -442,7 +442,8 @@ const props = defineProps<{
   saveProvider: (payload: Record<string, unknown>) => Promise<unknown>
 }>()
 
-const isDraft = computed(() => !props.provider?.id && !!props.provider?.provider_template_id)
+// A gallery entry not yet created as a provider.
+const isDraft = computed(() => !!props.provider && !props.provider.id)
 const isManagedOAuthProvider = computed(() => isManagedOAuthClientType(props.provider?.client_type))
 
 let testGeneration = 0
@@ -522,24 +523,12 @@ const clientTypeOptions = computed(() =>
 // Validation lives in the schema; the payload keeps the write-only api_key
 // contract (empty = keep the stored secret; the backend shallow-merges config
 // and preserves masked secrets).
-function providerPresetSource(): string {
-  const metadata = props.provider?.metadata as Record<string, unknown> | undefined
-  // Template materialization stamps registry.source; template drafts carry
-  // preset.source — check both before falling back to "key required".
-  for (const section of ['registry', 'preset']) {
-    const nested = metadata?.[section] as Record<string, unknown> | undefined
-    const source = nested?.source
-    if (typeof source === 'string' && source) return source
-  }
-  return ''
-}
-
-// Some presets legitimately need no key (Ollama, LM Studio, …); requiring one
-// would make any edit to such a provider unsaveable. Custom (preset-less)
-// providers keep the strict default.
+// Some entries legitimately need no key (Ollama, LM Studio, …); requiring one
+// would make any edit to such a provider unsaveable. Custom providers keep the
+// strict default.
 function presetRequiresApiKey(): boolean {
-  const preset = providerPresets.find(p => p.source === providerPresetSource())
-  return preset ? preset.requiresApiKey !== false : true
+  const entry = providerCatalogEntry(props.provider as { metadata?: Record<string, unknown> } | undefined)
+  return entry ? modelSourceNeedsApiKey(entry) : true
 }
 
 const providerSchema = toTypedSchema(z.object({
@@ -607,8 +596,7 @@ watch(() => props.provider, (provider, previous) => {
     prompt_cache_ttl: normalizeCacheTtl(cfg?.prompt_cache_ttl as string | undefined),
   }
   applyClientTypeDefaults(next)
-  const switched = (provider.id ?? provider.provider_template_id)
-    !== (previous?.id ?? previous?.provider_template_id)
+  const switched = providerIdentity(provider) !== providerIdentity(previous)
   for (const key of Object.keys(next) as (keyof ProviderFormValues)[]) {
     // Per-field guard: a refetch landing mid-edit must not clobber it.
     if (switched || form.values[key] === synced.value[key]) {
@@ -655,6 +643,14 @@ watch(
   },
 )
 
+// Which provider the form shows: its id, or the gallery entry of a draft.
+function providerIdentity(provider: ProviderWithAuth | undefined): string | undefined {
+  if (!provider) return undefined
+  if (provider.id) return provider.id
+  const catalog = (provider.metadata as Record<string, unknown> | undefined)?.catalog
+  return typeof catalog === 'string' ? `catalog:${catalog}` : provider.provider_template_id
+}
+
 function buildPayload(value: ProviderFormValues): Record<string, unknown> {
   const config: Record<string, unknown> = {}
   if (value.base_url && value.base_url.trim() !== '') {
@@ -684,8 +680,8 @@ function buildPayload(value: ProviderFormValues): Record<string, unknown> {
   return payload
 }
 
-// A template draft can be materialized from outside the form (adding a model).
-// It must be created from what is on screen, not from the template defaults,
+// A draft can be materialized from outside the form (adding a model).
+// It must be created from what is on screen, not from the entry defaults,
 // or unsaved edits are dropped when the form re-syncs to the new provider.
 // Validation is skipped on purpose: a model can be added before the API key.
 defineExpose({
