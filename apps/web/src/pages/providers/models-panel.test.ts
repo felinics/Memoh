@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createApp, h, nextTick } from 'vue'
+import { createApp, h, nextTick, ref } from 'vue'
 import type { Component, Ref, Slots } from 'vue'
 
 const mocks = vi.hoisted(() => ({
@@ -97,17 +97,42 @@ vi.mock('@felinic/ui', () => {
     InputGroupAddon: Passthrough,
     InputGroupInput: Passthrough,
     Skeleton: (props: { class?: string }) => h('div', { 'data-slot': 'skeleton', class: props.class }),
+    Pagination: {
+      props: ['page', 'total', 'itemsPerPage'],
+      emits: ['update:page'],
+      setup(
+        props: { page: number, total: number, itemsPerPage: number },
+        { slots, emit }: { slots: Slots, emit: (event: 'update:page', page: number) => void },
+      ) {
+        return () => h('nav', {
+          'data-testid': 'pagination',
+          'data-page': String(props.page),
+          'data-pages': String(Math.ceil(props.total / props.itemsPerPage)),
+        }, [
+          h('button', { 'data-testid': 'next-page', 'onClick': () => emit('update:page', props.page + 1) }, 'next'),
+          slots.default?.(),
+        ])
+      },
+    },
+    PaginationContent: (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', slots.default?.({ items: [] })),
+    PaginationEllipsis: Passthrough,
+    PaginationFirst: Passthrough,
+    PaginationItem: Passthrough,
+    PaginationLast: Passthrough,
+    PaginationNext: Passthrough,
+    PaginationPrevious: Passthrough,
   }
 })
 
 vi.mock('@/components/add-provider/index.vue', () => ({
   default: {
-    props: ['open'],
+    props: ['open', 'initialSource'],
     emits: ['update:open'],
-    setup(props: { open?: boolean }) {
+    setup(props: { open?: boolean, initialSource?: string }) {
       return () => h('div', {
         'data-testid': 'add-provider-dialog',
         'data-open': String(props.open ?? false),
+        'data-initial-source': props.initialSource ?? '',
       })
     },
   },
@@ -139,14 +164,19 @@ vi.mock('./model-setting.vue', () => ({
 
 let ModelsPanel: Component
 
-async function mountPage() {
+async function mountPage(searchQuery = '') {
   const root = document.createElement('div')
   document.body.append(root)
   // The container page owns the search box; the panel only receives its query.
-  const app = createApp(ModelsPanel, { searchQuery: '' })
+  const query = ref(searchQuery)
+  const app = createApp({ render: () => h(ModelsPanel, { searchQuery: query.value }) })
   app.mount(root)
   await nextTick()
-  return { app, root }
+  return { app, root, query }
+}
+
+function cardNames(root: Element) {
+  return [...root.querySelectorAll('[data-provider]')].map(card => card.getAttribute('data-provider'))
 }
 
 describe('models panel route state', () => {
@@ -172,7 +202,7 @@ describe('models panel route state', () => {
   it.each(['providers', 'templates'] as const)('keeps cached cards mounted while %s refresh', async (source) => {
     const { app, root } = await mountPage()
     const cards = [...root.querySelectorAll('[data-provider]')]
-    expect(cards).toHaveLength(2)
+    expect(cardNames(root).slice(0, 2)).toEqual(['One', 'Two'])
 
     const loading = source === 'providers' ? mocks.providersLoading : mocks.templatesLoading
     loading.value = true
@@ -213,7 +243,7 @@ describe('models panel route state', () => {
     mocks.templatesLoading.value = false
     await nextTick()
     expect(root.querySelector('[data-slot="skeleton"]')).toBeNull()
-    expect(root.querySelectorAll('[data-provider]')).toHaveLength(2)
+    expect(cardNames(root).slice(0, 2)).toEqual(['One', 'Two'])
     app.unmount()
   })
 
@@ -312,6 +342,76 @@ describe('models panel route state', () => {
 
     expect(mocks.replace).toHaveBeenCalledWith({ query: { tab: 'kept' } })
     expect(root.querySelector('[data-testid="provider-detail"]')).toBeNull()
+    app.unmount()
+  })
+
+  it('offers models.dev sources after the configured providers, a page at a time', async () => {
+    const { app, root } = await mountPage()
+
+    const names = cardNames(root)
+    expect(names).toHaveLength(20)
+    expect(names.slice(0, 2)).toEqual(['One', 'Two'])
+    expect(names).toContain('above.dev')
+    const pagination = root.querySelector('[data-testid="pagination"]')
+    expect(Number(pagination?.getAttribute('data-pages'))).toBeGreaterThan(5)
+
+    ;(root.querySelector('[data-testid="next-page"]') as HTMLButtonElement).click()
+    await nextTick()
+    expect(cardNames(root)).not.toContain('One')
+    expect(cardNames(root)).toHaveLength(20)
+    app.unmount()
+  })
+
+  it('leaves out sources a provider already uses, and the templates they replace', async () => {
+    mocks.providerData.value = [
+      { id: 'from-source', name: 'My DeepSeek', enable: true, metadata: { source: 'deepseek' } },
+      { id: 'from-template', name: 'My Groq', enable: true, provider_template_id: 'template-groq' },
+      { id: 'from-preset', name: 'My Mistral', enable: true, metadata: { preset: { source: 'mistral.yaml' } } },
+    ]
+    mocks.templateData.value = [
+      { id: 'template-groq', key: 'groq', name: 'Groq Template', configured: true },
+      { id: 'template-openai', key: 'openai', name: 'OpenAI Template', configured: false },
+      { id: 'template-codex', key: 'codex', name: 'Codex Template', configured: false },
+    ]
+    const { app, root } = await mountPage('')
+    const all: string[] = []
+    let guard = 0
+    while (guard++ < 20) {
+      all.push(...cardNames(root).map(String))
+      const pagination = root.querySelector('[data-testid="pagination"]')
+      if (Number(pagination?.getAttribute('data-page')) >= Number(pagination?.getAttribute('data-pages'))) break
+      ;(root.querySelector('[data-testid="next-page"]') as HTMLButtonElement).click()
+      await nextTick()
+    }
+    expect(all).not.toContain('DeepSeek')
+    expect(all).not.toContain('Groq')
+    expect(all).not.toContain('Mistral')
+    expect(all).not.toContain('OpenAI Template')
+    expect(all).toContain('OpenAI')
+    expect(all).toContain('Codex Template')
+    app.unmount()
+  })
+
+  it('filters sources by search and returns to the first page', async () => {
+    const { app, root, query } = await mountPage()
+    ;(root.querySelector('[data-testid="next-page"]') as HTMLButtonElement).click()
+    await nextTick()
+
+    query.value = 'deepseek'
+    await nextTick()
+    expect(cardNames(root)).toEqual(['DeepSeek'])
+    expect(root.querySelector('[data-testid="pagination"]')).toBeNull()
+    app.unmount()
+  })
+
+  it('opens the add dialog preset to a clicked source', async () => {
+    const { app, root } = await mountPage('openrouter')
+    ;(root.querySelector('[data-provider="OpenRouter"]') as HTMLButtonElement).click()
+    await nextTick()
+
+    const dialog = root.querySelector('[data-testid="add-provider-dialog"]')
+    expect(dialog?.getAttribute('data-open')).toBe('true')
+    expect(dialog?.getAttribute('data-initial-source')).toBe('openrouter')
     app.unmount()
   })
 })

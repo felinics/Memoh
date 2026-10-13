@@ -2,7 +2,17 @@
   <component
     :is="iconComponent"
     v-if="iconComponent"
-    :size="size"
+    :size="size ?? '1em'"
+    v-bind="$attrs"
+  />
+  <!-- A monochrome logo drawn in currentColor cannot inherit the text color
+       through an <img>, so it paints the text color through the logo's shape. -->
+  <span
+    v-else-if="monochrome && imageSource"
+    role="img"
+    aria-hidden="true"
+    class="inline-block shrink-0 bg-current"
+    :style="maskStyle"
     v-bind="$attrs"
   />
   <img
@@ -10,8 +20,9 @@
     :src="imageSource"
     decoding="sync"
     loading="eager"
-    :width="size"
-    :height="size"
+    :width="numericSize"
+    :height="numericSize"
+    :style="cssSize ? { width: cssSize, height: cssSize } : undefined"
     alt=""
     class="[color-scheme:light] dark:[color-scheme:dark]"
     v-bind="$attrs"
@@ -38,12 +49,13 @@ import { computed, ref, type Component } from 'vue'
 import { iconMap } from './icons.ts'
 import { providerIconSource } from './preload'
 
-const props = withDefaults(defineProps<{
+const props = defineProps<{
   icon: string
+  // Unset leaves an image to the caller's sizing classes; a glyph defaults to 1em.
   size?: string | number
-}>(), {
-  size: '1em',
-})
+  // Paint a URL logo in the current text color, for logos drawn in one color.
+  monochrome?: boolean
+}>()
 
 defineOptions({ inheritAttrs: false })
 
@@ -62,6 +74,27 @@ function onImageError(event: Event): void {
   // fails. Record the failed node's source so a late event cannot hide a new URL.
   failedSource.value = (event.currentTarget as HTMLImageElement).getAttribute('src') ?? ''
 }
+
+// The width attribute only takes pixels, so an em size would be dropped and the
+// image would render at the SVG's own size. The style carries any unit, and is
+// left out when the caller sizes the image with classes instead.
+const numericSize = computed(() => typeof props.size === 'number' ? props.size : undefined)
+const cssSize = computed(() => typeof props.size === 'number' ? `${props.size}px` : props.size)
+
+const maskStyle = computed(() => {
+  const mask = `url("${imageSource.value}")`
+  return {
+    ...(cssSize.value ? { width: cssSize.value, height: cssSize.value } : {}),
+    maskImage: mask,
+    WebkitMaskImage: mask,
+    maskSize: 'contain',
+    WebkitMaskSize: 'contain',
+    maskRepeat: 'no-repeat',
+    WebkitMaskRepeat: 'no-repeat',
+    maskPosition: 'center',
+    WebkitMaskPosition: 'center',
+  }
+})
 
 const iconComponent = computed<Component | undefined>(() => {
   if (isUrl.value) return undefined

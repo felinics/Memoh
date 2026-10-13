@@ -41,7 +41,7 @@
                 <ProviderIcon
                   v-if="getPresetById(option.value)?.icon"
                   :icon="getPresetById(option.value)?.icon ?? ''"
-                  size="1em"
+                  :monochrome="isMonochromeLogo(getPresetById(option.value)?.icon)"
                   class="size-4 shrink-0"
                 />
                 <span
@@ -207,6 +207,7 @@ import { providerPresets } from '@/constants/provider-presets'
 import type { ProviderPreset } from '@/constants/provider-presets'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { templateConfigFields, templateDefaultConfig } from '@/utils/provider-template'
+import { isMonochromeLogo, modelSourceLogo, modelSourceNeedsApiKey, TEMPLATE_SOURCES, type ModelSource } from '@/constants/model-sources'
 import { suggestProviderName } from './provider-presets'
 
 const open = defineModel<boolean>('open')
@@ -216,6 +217,10 @@ const props = withDefaults(defineProps<{
   presetDomain?: 'llm' | 'video' | 'speech' | 'transcription'
   templates?: ProvidertemplatesGetResponse[]
   initialTemplateId?: string
+  // models.dev providers to offer alongside the templates; a template one of them
+  // replaces is left out. initialSource preselects one by its source id.
+  sources?: readonly ModelSource[]
+  initialSource?: string
   importModels?: (providerId: string, defaultCompatibilities?: string[]) => Promise<{ created?: number, skipped?: number } | null | undefined>
 }>(), {
   providers: () => [],
@@ -228,13 +233,33 @@ const { run } = useDialogMutation()
 type SelectablePreset = ProviderPreset & {
   templateId?: string
   templateFieldKeys?: string[]
+  // models.dev provider id, for a preset taken from the source list.
+  modelSource?: string
 }
+
+function sourcePresetId(source: string) {
+  return `source:${source}`
+}
+
+const sourcePresets = computed<SelectablePreset[]>(() => (props.sources ?? []).map(item => ({
+  id: sourcePresetId(item.source),
+  name: item.name,
+  clientType: item.client_type,
+  baseUrl: item.base_url,
+  icon: modelSourceLogo(item),
+  source: item.source,
+  modelSource: item.source,
+  requiresApiKey: modelSourceNeedsApiKey(item),
+  requiresBaseUrl: true,
+  domain: 'llm',
+})))
 
 const customPresetId = 'custom'
 const availablePresets = computed<SelectablePreset[]>(() => {
   if (props.templates) {
-    return props.templates
-      .filter(template => template.id && template.domain === props.presetDomain)
+    const replaced = props.sources ? TEMPLATE_SOURCES : {}
+    const templatePresets: SelectablePreset[] = props.templates
+      .filter(template => template.id && template.domain === props.presetDomain && !replaced[template.key ?? ''])
       .map((template) => {
         const uiPreset = providerPresets.find(preset => preset.source === template.source)
         const fields = templateConfigFields(template)
@@ -256,12 +281,16 @@ const availablePresets = computed<SelectablePreset[]>(() => {
           domain: props.presetDomain,
         }
       })
+    return [...templatePresets, ...sourcePresets.value].sort((a, b) => a.name.localeCompare(b.name))
   }
   return providerPresets.filter(preset => (preset.domain ?? 'llm') === props.presetDomain)
 })
 // Only the LLM domain offers a free-form "custom" entry; the others (video,
 // speech, transcription) always start on a concrete preset.
 const defaultPresetId = computed(() => {
+  if (props.initialSource && availablePresets.value.some(preset => preset.modelSource === props.initialSource)) {
+    return sourcePresetId(props.initialSource)
+  }
   if (props.initialTemplateId && availablePresets.value.some(preset => preset.templateId === props.initialTemplateId)) {
     return props.initialTemplateId
   }
@@ -346,19 +375,23 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
         if (preset.icon) {
           payload.icon = preset.icon
         }
-        payload.metadata = {
-          preset: {
-            id: preset.id,
-            source: preset.source,
-          },
-        }
+        payload.metadata = preset.modelSource
+          ? { source: preset.modelSource }
+          : {
+              preset: {
+                id: preset.id,
+                source: preset.source,
+              },
+            }
       }
       const response = await postProviders({ body: payload, throwOnError: true })
       result = response.data
     }
     if (data.auto_import && result?.id && importsModelsOnCreate(data.client_type)) {
       try {
-        const defaultCompatibilities = preset
+        // A models.dev source carries no capabilities into this import yet, so it
+        // gets the same protocol defaults as a custom provider.
+        const defaultCompatibilities = preset && !preset.modelSource
           ? undefined
           : suggestedModelCompatibilities(data.client_type)
         const importResult = props.importModels

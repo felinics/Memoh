@@ -145,4 +145,36 @@ describe('add provider dialog', () => {
     app.unmount()
     root.remove()
   })
+
+  it('offers sources in place of the templates they replace and preselects one', async () => {
+    const AddProvider = (await import('./index.vue')).default
+    const { MODEL_SOURCES } = await import('@/constants/model-sources')
+    const root = document.createElement('div')
+    document.body.append(root)
+    const app = createApp(AddProvider, {
+      open: true,
+      templates: [
+        { id: 'template-openrouter', key: 'openrouter', domain: 'llm', name: 'OpenRouter Template', driver: 'openai-completions' },
+        { id: 'template-codex', key: 'codex', domain: 'llm', name: 'Codex Template', driver: 'openai-codex' },
+      ],
+      sources: MODEL_SOURCES,
+      initialSource: 'openrouter',
+    })
+    app.config.globalProperties.$t = translate
+    app.mount(root)
+    await flushPromises()
+
+    const presetSelect = root.querySelector('select') as HTMLSelectElement
+    const labels = [...presetSelect.options].map(option => option.textContent)
+    expect(labels).toContain('Codex Template')
+    expect(labels).not.toContain('OpenRouter Template')
+    expect(labels).toContain('OpenRouter')
+    expect(presetSelect.value).toBe('source:openrouter')
+    await vi.waitFor(() => {
+      expect((root.querySelector('#provider-create-base-url') as HTMLInputElement).value).toBe('https://openrouter.ai/api/v1')
+    })
+
+    app.unmount()
+    root.remove()
+  })
 })

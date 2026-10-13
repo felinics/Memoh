@@ -37,3 +37,34 @@ it('shows the caller fallback without an image request for a native rejection', 
   expect(root.querySelector('img')).toBeNull()
   expect(root.querySelector('span.size-4 > svg[data-fallback]')).not.toBeNull()
 })
+
+// An em size cannot go in the width attribute, which only takes pixels; it has to
+// reach the image as a style or the SVG renders at its own size.
+it('sizes an image by style, and leaves it to classes when no size is given', async () => {
+  const root = document.createElement('div')
+  document.body.append(root)
+  app = createApp(() => h('div', [
+    h(ProviderIcon, { icon: 'https://example.com/em.svg', size: '1.5em' }),
+    h(ProviderIcon, { icon: 'https://example.com/px.svg', size: 22 }),
+    h(ProviderIcon, { icon: 'https://example.com/class.svg', class: 'size-4' }),
+  ]))
+  app.mount(root)
+  const [em, px, byClass] = [...root.querySelectorAll('img')]
+  expect(em!.style.width).toBe('1.5em')
+  expect(em!.hasAttribute('width')).toBe(false)
+  expect(px!.getAttribute('width')).toBe('22')
+  expect(px!.style.height).toBe('22px')
+  expect(byClass!.getAttribute('style')).toBeNull()
+})
+
+it('paints a monochrome logo in the text color through its shape', async () => {
+  const root = document.createElement('div')
+  document.body.append(root)
+  app = createApp(() => h(ProviderIcon, { icon: 'https://example.com/mono.svg', size: '1.5em', monochrome: true }))
+  app.mount(root)
+  expect(root.querySelector('img')).toBeNull()
+  const mask = root.querySelector('span[role="img"]') as HTMLElement
+  expect(mask.className).toContain('bg-current')
+  expect(mask.style.width).toBe('1.5em')
+  expect(mask.getAttribute('style')).toContain('mono.svg')
+})

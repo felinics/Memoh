@@ -8,6 +8,7 @@
           <ProviderIcon
             v-if="curProvider?.icon"
             :icon="curProvider.icon"
+            :monochrome="isMonochromeLogo(curProvider.icon)"
             size="1.5em"
           />
           <span
@@ -92,6 +93,7 @@ import type { ModelsGetResponse, ProvidersGetResponse, ProvidersUpdateRequest } 
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
 import { isManagedModelCatalogClientType } from '@/constants/client-types'
+import { isMonochromeLogo } from '@/constants/model-sources'
 
 // ---- Model 编辑状态（provide 给 CreateModel） ----
 const openModel = reactive<{
