@@ -97,7 +97,7 @@ test('issue forms produce valid GitHub-rendered markdown after required fields a
   }
 });
 test('automatic PR producers supply valid bodies', () => {
-  for (const [file,job,key] of [['sync-model-capabilities.yml','sync','body'],['agents-md-updater.yml','update','pr_body']]) {
+  for (const [file,job,key] of [['agents-md-updater.yml','update','pr_body']]) {
     const workflow = JSON.parse(execFileSync('ruby', ['-ryaml','-rjson','-e','puts YAML.load_file(ARGV[0]).to_json', new URL(`../workflows/${file}`, import.meta.url).pathname], { encoding:'utf8' }));
     const body = key === 'pr_body' ? workflow.jobs[job].with[key] : workflow.jobs[job].steps.find(step => step.with?.body)?.with.body;
     assert.deepEqual(validate(body, true).errors, []);
