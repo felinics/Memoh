@@ -1359,6 +1359,7 @@ import { BOT_AGENT_RUNTIME_ACP, BOT_AGENT_RUNTIME_CODEX, botAgentIcon, botAgentN
 import { UserFacingError, isApiErrorCode, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
 import { workspaceTargetAvailable } from '@/utils/workspace-target'
+import { modelAccepts } from '@/utils/model-capabilities'
 import { findLatestPendingChatDecision } from './chat-pending-decision'
 import {
   runtimeCommandComposerText,
@@ -2716,7 +2717,7 @@ watch(() => pendingFiles.value.length, (len, prevLen) => {
   const model = activeModel.value
   if (!model) return
   const added = pendingFiles.value.slice(prevLen ?? 0)
-  if (!model.config?.compatibilities?.includes('file-input')) {
+  if (!modelAccepts(model.config, 'pdf')) {
     if (added.some(isPdfFile)) {
       toast.warning(t('chat.pdfUnsupportedByModel'))
     }
