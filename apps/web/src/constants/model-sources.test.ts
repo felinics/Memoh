@@ -100,5 +100,7 @@ describe('providers and entries', () => {
     expect(providerCatalogEntry({ metadata: {} })).toBeUndefined()
     expect(providerSource({ metadata: { source: 'xai' } })).toBe('xai')
     expect(providerSource({ metadata: { catalog: 'ollama' } })).toBeUndefined()
+    // A provider from a former template imports through its entry's source.
+    expect(providerSource({ metadata: { registry: { source: 'qwen.yaml' } } })).toBe('alibaba-cn')
   })
 })

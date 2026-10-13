@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -55,55 +53,6 @@ func TestMaskAPIKey(t *testing.T) {
 			t.Fatalf("expected empty, got %q", got)
 		}
 	})
-}
-
-func TestFetchTemplateModelsUsesPresetSource(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "zai.yaml")
-	if err := os.WriteFile(path, []byte(`
-name: Z.AI GLM
-client_type: openai-completions
-icon: zhipu-color
-base_url: https://api.z.ai/api/paas/v4
-
-models:
-  - model_id: glm-5
-    name: GLM 5
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-`), 0o600); err != nil {
-		t.Fatalf("write template: %v", err)
-	}
-
-	svc := NewService(nil, nil, "", dir)
-	models, ok := svc.fetchTemplateModels(context.Background(), sqlc.Provider{
-		Metadata: []byte(`{"preset":{"source":"zai.yaml"}}`),
-	})
-	if !ok {
-		t.Fatal("expected template models")
-	}
-	if len(models) != 1 {
-		t.Fatalf("models = %d, want 1", len(models))
-	}
-	model := models[0]
-	if model.ID != "glm-5" || model.Name != "GLM 5" || model.Type != "chat" {
-		t.Fatalf("unexpected model: %#v", model)
-	}
-	if got := strings.Join(model.Compatibilities, ","); got != "tool-call,reasoning" {
-		t.Fatalf("compatibilities = %q", got)
-	}
-	if !model.CapabilitiesKnown {
-		t.Fatal("expected legacy preset template capabilities to be authoritative")
-	}
-	if model.ContextWindow == nil || *model.ContextWindow != 200000 {
-		t.Fatalf("context window = %#v", model.ContextWindow)
-	}
 }
 
 func TestListCodexRemoteModels(t *testing.T) {
@@ -813,24 +762,6 @@ func TestFetchRemoteModelsViaSDK(t *testing.T) {
 				t.Fatalf("missing agent capabilities or unsafe synthetic thinking control: %+v", item)
 			}
 		}
-		// A preset must retain curated capabilities when discovery uses the
-		// live endpoint. Conservative custom-provider defaults must not erase
-		// Luna's reasoning controls, vision support, or context window.
-		s.templatesDir = "../../conf/providers"
-		items, err = s.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
-			ClientType: string(models.ClientTypeOpenCodeGo),
-			Config:     []byte(`{"base_url":"` + server.URL + `"}`),
-			Metadata:   []byte(`{"preset":{"source":"opencode-go.yaml"}}`),
-		})
-		if err != nil || len(items) != 4 {
-			t.Fatalf("preset models = %v, error = %v", items, err)
-		}
-		luna := items[2]
-		if luna.ID != "gpt-5.6-luna" || luna.ThinkingMode != models.ThinkingModeToggle ||
-			len(luna.ReasoningEfforts) == 0 || luna.ContextWindow == nil || *luna.ContextWindow != 1050000 ||
-			!strings.Contains(strings.Join(luna.Compatibilities, ","), "vision") {
-			t.Fatalf("preset capabilities were overwritten: %+v", luna)
-		}
 	})
 
 	t.Run("anthropic", func(t *testing.T) {
@@ -984,16 +915,24 @@ func TestFetchRemoteModelsViaSDK(t *testing.T) {
 		t.Parallel()
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/models" {
-				t.Fatalf("expected /models path, got %q", r.URL.Path)
+			switch r.URL.Path {
+			case "/models":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"data": []map[string]any{
+						{"id": "gpt-4o", "object": "model", "created": 1700000000, "owned_by": "openai"},
+						{"id": "text-embedding-ada-002", "object": "model", "created": 1700000000, "owned_by": "openai-internal"},
+					},
+				})
+			case "/embeddings":
+				// The dimensions probe of the model the id names an embedding model.
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"object": "list",
+					"data":   []map[string]any{{"object": "embedding", "index": 0, "embedding": []float64{0.1, 0.2, 0.3}}},
+					"model":  "text-embedding-ada-002",
+				})
+			default:
+				t.Errorf("unexpected path %q", r.URL.Path)
 			}
-
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"data": []map[string]any{
-					{"id": "gpt-4o", "object": "model", "created": 1700000000, "owned_by": "openai"},
-					{"id": "text-embedding-ada-002", "object": "model", "created": 1700000000, "owned_by": "openai-internal"},
-				},
-			})
 		}))
 		defer server.Close()
 
@@ -1014,166 +953,12 @@ func TestFetchRemoteModelsViaSDK(t *testing.T) {
 		if remoteModels[0].Name != "gpt-4o" {
 			t.Fatalf("expected Name to fall back to ID when DisplayName is empty, got %q", remoteModels[0].Name)
 		}
-	})
-}
-
-// Regression for the New API "import 0 models" report: a provider linked to a
-// template (even an EMPTY one) must still list models from the live endpoint;
-// the template only enriches matching IDs with curated capabilities.
-func TestFetchRemoteModelsViaSDKMergesTemplateCapabilities(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "newapi.yaml"), []byte(`
-name: New API
-client_type: openai-completions
-base_url: https://example.invalid/v1
-
-models:
-  - model_id: curated-chat
-    name: Curated Chat
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 128000
-  - model_id: curated-embed
-    name: Curated Embed
-    type: embedding
-    config:
-      dimensions: 1536
-`), 0o600); err != nil {
-		t.Fatalf("write template: %v", err)
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" {
-			t.Fatalf("expected /v1/models path, got %q", r.URL.Path)
+		// The OpenAI protocol lists embedding models as chat; the id decides.
+		embedding := remoteModels[1]
+		if embedding.Type != string(models.ModelTypeEmbedding) || embedding.Dimensions == nil || *embedding.Dimensions != 3 {
+			t.Fatalf("embedding model = %+v, want type embedding with 3 dimensions", embedding)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": []map[string]any{
-				{"id": "curated-chat", "object": "model"},
-				{"id": "curated-embed", "object": "model"},
-				{"id": "endpoint-only", "object": "model"},
-			},
-		})
-	}))
-	defer server.Close()
-
-	svc := NewService(nil, nil, "", dir)
-	remoteModels, err := svc.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
-		ClientType: string(models.ClientTypeOpenAICompletions),
-		Config:     []byte(`{"base_url":"` + server.URL + `/v1","api_key":"sk-test"}`),
-		Metadata:   []byte(`{"preset":{"source":"newapi.yaml"}}`),
 	})
-	if err != nil {
-		t.Fatalf("fetch remote models: %v", err)
-	}
-	if len(remoteModels) != 3 {
-		t.Fatalf("expected the endpoint's 3 models (template must not short-circuit), got %d", len(remoteModels))
-	}
-
-	var curated, embed, endpointOnly *RemoteModel
-	for i := range remoteModels {
-		switch remoteModels[i].ID {
-		case "curated-chat":
-			curated = &remoteModels[i]
-		case "curated-embed":
-			embed = &remoteModels[i]
-		case "endpoint-only":
-			endpointOnly = &remoteModels[i]
-		}
-	}
-	if curated == nil || embed == nil || endpointOnly == nil {
-		t.Fatalf("missing expected models: %#v", remoteModels)
-	}
-	if curated.Name != "Curated Chat" {
-		t.Fatalf("expected curated template name, got %q", curated.Name)
-	}
-	if !curated.CapabilitiesKnown {
-		t.Fatal("expected CapabilitiesKnown for a template-matched model")
-	}
-	if curated.ContextWindow == nil || *curated.ContextWindow != 128000 {
-		t.Fatalf("expected template context window, got %#v", curated.ContextWindow)
-	}
-	if got := strings.Join(curated.Compatibilities, ","); got != "tool-call" {
-		t.Fatalf("compatibilities = %q", got)
-	}
-	// The OpenAI wire has no per-model type (the SDK defaults everything to
-	// chat): the template's curated embedding type and dimensions must win,
-	// and the server must never see a dimensions probe.
-	if embed.Type != string(models.ModelTypeEmbedding) {
-		t.Fatalf("expected template embedding type, got %q", embed.Type)
-	}
-	if embed.Dimensions == nil || *embed.Dimensions != 1536 {
-		t.Fatalf("expected template dimensions 1536, got %#v", embed.Dimensions)
-	}
-	if endpointOnly.CapabilitiesKnown {
-		t.Fatal("endpoint-only model must stay CapabilitiesKnown=false")
-	}
-	if endpointOnly.Name != "endpoint-only" {
-		t.Fatalf("expected ID fallback name, got %q", endpointOnly.Name)
-	}
-}
-
-// A template that curates an embedding model's dimensions spares the live
-// dimensions probe entirely: probing spends tokens and fails spuriously on
-// gateways whose key lacks embedding permission.
-func TestFetchRemoteModelsViaSDKTemplateDimensionsSkipProbe(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "gemini-gw.yaml"), []byte(`
-name: Gemini Gateway
-client_type: google-generative-ai
-
-models:
-  - model_id: gemini-embedding-001
-    name: Gemini Embedding 001
-    type: embedding
-    config:
-      dimensions: 768
-`), 0o600); err != nil {
-		t.Fatalf("write template: %v", err)
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/models" {
-			t.Fatalf("unexpected request (probe should have been skipped): %s", r.URL.Path)
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"models": []map[string]any{
-				{
-					"name":                       "models/gemini-embedding-001",
-					"displayName":                "Gemini Embedding 001",
-					"supportedGenerationMethods": []string{"embedContent"},
-				},
-			},
-		})
-	}))
-	defer server.Close()
-
-	svc := NewService(nil, nil, "", dir)
-	remoteModels, err := svc.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
-		ClientType: string(models.ClientTypeGoogleGenerativeAI),
-		Config:     []byte(`{"base_url":"` + server.URL + `","api_key":"gm-test"}`),
-		Metadata:   []byte(`{"preset":{"source":"gemini-gw.yaml"}}`),
-	})
-	if err != nil {
-		t.Fatalf("fetch remote models: %v", err)
-	}
-	if len(remoteModels) != 1 {
-		t.Fatalf("expected 1 model, got %d", len(remoteModels))
-	}
-	got := remoteModels[0]
-	if got.Dimensions == nil || *got.Dimensions != 768 {
-		t.Fatalf("expected template dimensions 768, got %#v", got.Dimensions)
-	}
-	if got.Type != string(models.ModelTypeEmbedding) {
-		t.Fatalf("expected embedding type, got %q", got.Type)
-	}
-	if !got.CapabilitiesKnown {
-		t.Fatal("expected CapabilitiesKnown for a template-matched model")
-	}
 }
 
 // providerTestQueries stubs dbstore.Queries with the single row Test needs;
@@ -1386,38 +1171,21 @@ func requireStatusAttr(t *testing.T, err error, want int) {
 func TestFetchRemoteModelsViaSDKReadsMaxOutputTokens(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "gateway.yaml"), []byte(`
-name: Gateway
-client_type: openai-completions
-base_url: https://example.invalid/v1
-
-models:
-  - model_id: templated
-    name: Templated
-    type: chat
-    config:
-      max_output_tokens: 4096
-`), 0o600); err != nil {
-		t.Fatalf("write template: %v", err)
-	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]any{
 				{"id": "declared", "object": "model", "max_output_tokens": 64000},
 				{"id": "undeclared", "object": "model"},
 				{"id": "invalid", "object": "model", "max_output_tokens": 0},
-				{"id": "templated", "object": "model", "max_output_tokens": 8192},
 			},
 		})
 	}))
 	defer server.Close()
 
-	svc := NewService(nil, nil, "", dir)
+	svc := NewService(nil, nil, "")
 	remoteModels, err := svc.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
 		ClientType: string(models.ClientTypeOpenAICompletions),
 		Config:     []byte(`{"base_url":"` + server.URL + `","api_key":"sk-test"}`),
-		Metadata:   []byte(`{"preset":{"source":"gateway.yaml"}}`),
 	})
 	if err != nil {
 		t.Fatalf("fetch remote models: %v", err)
@@ -1432,7 +1200,21 @@ models:
 	if got["undeclared"] != nil || got["invalid"] != nil {
 		t.Fatalf("undeclared = %v, invalid = %v, want unknown", got["undeclared"], got["invalid"])
 	}
-	if got["templated"] == nil || *got["templated"] != 8192 {
-		t.Fatalf("templated = %v, want the endpoint's 8192 over the template's 4096", got["templated"])
+}
+
+func TestLooksLikeEmbeddingModel(t *testing.T) {
+	t.Parallel()
+
+	for id, want := range map[string]bool{
+		"text-embedding-3-small":   true,
+		"gemini-embedding-001":     true,
+		"Qwen/Qwen3-Embedding-8B":  true,
+		"gpt-5.1":                  false,
+		"deepseek-v4-pro":          false,
+		"claude-sonnet-4-20250514": false,
+	} {
+		if got := looksLikeEmbeddingModel(id); got != want {
+			t.Errorf("looksLikeEmbeddingModel(%q) = %v, want %v", id, got, want)
+		}
 	}
 }

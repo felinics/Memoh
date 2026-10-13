@@ -1,4 +1,0 @@
-name: OpenAI Codex
-client_type: openai-codex
-icon: openai
-base_url: https://chatgpt.com/backend-api

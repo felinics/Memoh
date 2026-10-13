@@ -2,11 +2,8 @@ import { ref, computed, watch, provide, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import {
-  getProviderTemplates,
   postProviders,
-  postProvidersByIdImportModels,
   postProvidersByIdTest,
-  postProvidersFromTemplate,
   deleteModelsById,
   getProvidersByIdModels,
   getProvidersNameByName,
@@ -15,10 +12,12 @@ import {
   type ProvidersGetResponse,
   type ModelsGetResponse,
 } from '@memohai/sdk'
-import { MANUAL_LLM_CLIENT_TYPE_LIST, suggestedModelCompatibilities } from '@/constants/client-types'
+import { MANUAL_LLM_CLIENT_TYPE_LIST } from '@/constants/client-types'
 import type { ProviderPreset } from '@/constants/provider-presets'
 import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
-import { findProviderTemplate } from './provider-setup'
+import { modelSourceLogo, providerSourceMetadata } from '@/constants/model-sources'
+import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
+import { findPresetEntry } from './provider-setup'
 
 export function useProviderSetup(options: {
   selectedPreset: () => ProviderPreset | null
@@ -90,41 +89,19 @@ export function useProviderSetup(options: {
     },
   })
 
-  const { mutateAsync: createProviderFromTemplate } = useMutation({
-    mutation: async (payload: { templateId: string, name: string, config: Record<string, unknown> }) => {
-      const { data } = await postProvidersFromTemplate({
-        body: {
-          template_id: payload.templateId,
-          domain: 'llm',
-          name: payload.name,
-          config: payload.config,
-        },
-        throwOnError: true,
-      })
-      return data
-    },
-    onSettled: () => {
-      queryCache.invalidateQueries({ key: ['providers'] })
-      queryCache.invalidateQueries({ key: ['provider-templates', 'llm'] })
-    },
-  })
+  const { importProviderModels } = useProviderModelCatalog()
+  const importing = ref(false)
 
-  const { mutateAsync: importModels, isLoading: importing } = useMutation({
-    mutation: async (payload: { providerId: string, defaultCompatibilities?: string[] }) => {
-      const { data } = await postProvidersByIdImportModels({
-        path: { id: payload.providerId },
-        ...(payload.defaultCompatibilities !== undefined && {
-          body: { default_compatibilities: payload.defaultCompatibilities },
-        }),
-        throwOnError: true,
-      })
-      return data
-    },
-    onSettled: () => {
-      queryCache.invalidateQueries({ key: ['models'] })
-      queryCache.invalidateQueries({ key: ['provider-models'] })
-    },
-  })
+  // Imports from the preset's models.dev source when it has one, and from the
+  // provider's endpoint otherwise.
+  async function importModels(payload: { providerId: string, clientType: string, metadata: Record<string, unknown> }) {
+    importing.value = true
+    try {
+      return await importProviderModels({ id: payload.providerId, client_type: payload.clientType, metadata: payload.metadata })
+    } finally {
+      importing.value = false
+    }
+  }
 
   const { mutateAsync: deleteModel, isLoading: deleteModelLoading } = useMutation({
     mutation: async (id: string) => {
@@ -205,32 +182,28 @@ export function useProviderSetup(options: {
       }
 
       if (preset) {
-        const { data: templates } = await getProviderTemplates({
-          query: { domain: 'llm' },
-          throwOnError: true,
-        })
-        const template = findProviderTemplate(templates ?? [], preset)
-        if (!template?.id) {
-          formError.value = t('onboarding.provider.form.saveFailed')
-          return null
-        }
-
+        const entry = findPresetEntry(preset)
+        const clientType = entry?.client_type ?? preset.clientType
         const config = { base_url: baseUrl, api_key: apiKey }
         let result: ProvidersGetResponse | undefined
         try {
-          result = await createProviderFromTemplate({
-            templateId: template.id,
+          result = await createProvider({
             name,
+            client_type: clientType,
             config,
-          })
+            metadata: entry ? providerSourceMetadata(entry) : {},
+            ...((entry || preset.icon) && { icon: entry ? modelSourceLogo(entry) : preset.icon }),
+          } as ProvidersCreateRequest)
         } catch (error) {
           if (!isApiErrorCode(error, 'provider.name_taken')) throw error
 
+          // Retrying onboarding reuses the provider it created, recognised by
+          // its protocol; another provider with the name is not overwritten.
           const { data: existing } = await getProvidersNameByName({
             path: { name },
             throwOnError: true,
           })
-          if (!existing?.id || existing.provider_template_id !== template.id) throw error
+          if (!existing?.id || existing.client_type !== clientType) throw error
 
           await putProvidersById({
             path: { id: existing.id },
@@ -295,7 +268,7 @@ export function useProviderSetup(options: {
     return key && te(key) ? t(key) : ''
   }
 
-  async function runImport(providerId: string, defaultCompatibilities?: string[]) {
+  async function runImport(providerId: string) {
     errorState.value = null
     errorDetail.value = ''
 
@@ -321,7 +294,13 @@ export function useProviderSetup(options: {
 
     let importFailed = false
     try {
-      await importModels({ providerId, defaultCompatibilities })
+      const preset = options.selectedPreset()
+      const entry = preset ? findPresetEntry(preset) : undefined
+      await importModels({
+        providerId,
+        clientType: entry?.client_type ?? preset?.clientType ?? formValues.value.client_type,
+        metadata: entry ? providerSourceMetadata(entry) : {},
+      })
     } catch {
       importFailed = true
     }
@@ -359,10 +338,7 @@ export function useProviderSetup(options: {
     try {
       const providerId = await ensureProviderCreated()
       if (!providerId) return
-      const defaultCompatibilities = options.selectedPreset()
-        ? undefined
-        : suggestedModelCompatibilities(formValues.value.client_type)
-      await runImport(providerId, defaultCompatibilities)
+      await runImport(providerId)
     } finally {
       saving.value = false
     }
@@ -373,10 +349,7 @@ export function useProviderSetup(options: {
       await saveAndNext()
       return
     }
-    const defaultCompatibilities = options.selectedPreset()
-      ? undefined
-      : suggestedModelCompatibilities(formValues.value.client_type)
-    await runImport(createdProviderId.value, defaultCompatibilities)
+    await runImport(createdProviderId.value)
   }
 
   async function onEnterManual() {

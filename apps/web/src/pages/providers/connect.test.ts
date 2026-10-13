@@ -8,9 +8,7 @@ const mocks = vi.hoisted(() => ({
   setQueryData: vi.fn(),
   invalidateQueries: vi.fn(),
   getProviders: vi.fn(),
-  getProviderTemplates: vi.fn(),
   postProviders: vi.fn(),
-  postProvidersFromTemplate: vi.fn(),
   postProvidersByIdImportModels: vi.fn(),
   toastError: vi.fn(),
   calls: [] as string[],
@@ -33,9 +31,7 @@ vi.mock('@pinia/colada', () => ({
 
 vi.mock('@memohai/sdk', () => ({
   getProviders: mocks.getProviders,
-  getProviderTemplates: mocks.getProviderTemplates,
   postProviders: mocks.postProviders,
-  postProvidersFromTemplate: mocks.postProvidersFromTemplate,
   postProvidersByIdImportModels: mocks.postProvidersByIdImportModels,
 }))
 
@@ -105,9 +101,7 @@ describe('provider connect page', () => {
     mocks.invalidateQueries.mockReset()
     mocks.toastError.mockReset()
     mocks.getProviders.mockReset().mockResolvedValue({ data: [{ id: 'created-id', name: 'A' }] })
-    mocks.getProviderTemplates.mockReset().mockResolvedValue({ data: [] })
     mocks.postProviders.mockReset().mockResolvedValue({ data: { id: 'created-id' } })
-    mocks.postProvidersFromTemplate.mockReset().mockResolvedValue({ data: { id: 'created-id' } })
     mocks.postProvidersByIdImportModels.mockReset().mockResolvedValue({ data: {} })
     ConnectPage = (await import('./connect.vue')).default
   })
@@ -185,6 +179,29 @@ describe('provider connect page', () => {
     await vi.waitFor(() => expect(mocks.replace).toHaveBeenCalled())
 
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ key: ['providers'] })
+    app.unmount()
+  })
+
+  it('records the gallery entry a template key names when the protocols agree', async () => {
+    const { app, root } = await mountPage(linkFor({ name: 'Gateway A', template: 'newapi' }))
+    root.querySelectorAll('button')[1]?.click()
+    await vi.waitFor(() => expect(mocks.replace).toHaveBeenCalled())
+
+    expect(mocks.postProviders.mock.calls[0]![0].body).toMatchObject({
+      name: 'Gateway A',
+      client_type: 'openai-completions',
+      metadata: { catalog: 'newapi' },
+      icon: 'newapi-color',
+    })
+    app.unmount()
+  })
+
+  it('creates a custom provider when the entry speaks another protocol', async () => {
+    const { app, root } = await mountPage(linkFor({ name: 'Gateway A', template: 'anthropic' }))
+    root.querySelectorAll('button')[1]?.click()
+    await vi.waitFor(() => expect(mocks.replace).toHaveBeenCalled())
+
+    expect(mocks.postProviders.mock.calls[0]![0].body.metadata).toBeUndefined()
     app.unmount()
   })
 })

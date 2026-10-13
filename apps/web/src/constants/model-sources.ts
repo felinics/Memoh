@@ -318,10 +318,16 @@ export function providerSourceMetadata(item: ModelSource): Record<string, unknow
   return { catalog: item.id, ...(item.source && { source: item.source }) }
 }
 
-// The models.dev source whose catalog a provider imports from.
-export function providerSource(provider: ProviderLike | null | undefined): string | undefined {
+function recordedSource(provider: ProviderLike | null | undefined): string | undefined {
   const source = provider?.metadata?.source
   return typeof source === 'string' && source ? source : undefined
+}
+
+// The models.dev source whose catalog a provider imports from: recorded on the
+// provider, or the source of the entry it was created from, which covers
+// providers made from a former template or preset.
+export function providerSource(provider: ProviderLike | null | undefined): string | undefined {
+  return recordedSource(provider) ?? providerCatalogEntry(provider)?.source
 }
 
 // The entry a provider was created from: recorded on the provider, or the
@@ -329,7 +335,7 @@ export function providerSource(provider: ProviderLike | null | undefined): strin
 export function providerCatalogEntry(provider: ProviderLike | null | undefined): ModelSource | undefined {
   const metadata = provider?.metadata ?? {}
   if (typeof metadata.catalog === 'string') return findModelSource(metadata.catalog)
-  const source = providerSource(provider)
+  const source = recordedSource(provider)
   if (source) return findModelSourceBySource(source)
   for (const section of ['preset', 'registry']) {
     const legacy = (metadata[section] as { source?: unknown } | undefined)?.source
