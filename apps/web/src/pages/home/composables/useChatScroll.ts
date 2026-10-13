@@ -70,6 +70,14 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // True around a scroll the code itself performs, so the resulting scroll
   // event is not misread as user intent.
   let isProgrammaticScroll = false
+  // Bumped on every instant follow write. A queued frame may clear only the
+  // write that scheduled it; a newer write owns the guard until its own frame.
+  let programmaticGeneration = 0
+  // Set by an instant follow write until a stationary scroll event reports
+  // it. The frame clears `isProgrammaticScroll` so a later physical move is
+  // visible, but the write's event can arrive after that frame — while a
+  // touch grace window is still open — and must not re-arm follow.
+  let programmaticScrollPending = false
   let lastScrollTop = 0
   // THE mode switch: while true, content growth pulls the viewport to the
   // bottom; while false the view is parked (user scrolled up, or a just-sent
@@ -497,24 +505,31 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // Instant follow used by the content heartbeat while follow is engaged. Marks
   // itself programmatic so the scroll it triggers is not read as user intent.
   //
-  // Timing: `scrollTo` dispatches its `scroll` event before the next rAF fires,
-  // so the scroll handler runs while `isProgrammaticScroll` is still true and
-  // correctly ignores it. The rAF then clears the flag and refreshes the
-  // at-bottom mirror. Do not "simplify" by clearing the flag synchronously —
-  // the scroll event would then be read as a user gesture.
+  // Timing: `scrollTo` often dispatches `scroll` before the next frame, but a
+  // touchscreen engine can deliver that event a frame later — after the user
+  // has already moved. The direction baseline is therefore the landing
+  // position, synchronously, so the write itself is stationary and a smaller
+  // scrollTop is an upward escape from the bottom actually written. The frame
+  // clears the guard and refreshes the at-bottom mirror only. It must not
+  // rewrite the baseline: doing so hides an escape whose scroll event is
+  // still queued. Do not clear the guard synchronously either — the write's
+  // own event would then be read as a gesture.
   function stickToBottomNow() {
     const el = scrollEl.value
     // A content update must not replace an in-flight native smooth scroll.
     if (!el || smoothScrollActive) return
+    const top = bottomTarget(el)
+    const generation = ++programmaticGeneration
     isProgrammaticScroll = true
-    el.scrollTo({ top: bottomTarget(el), behavior: 'auto' })
+    programmaticScrollPending = true
+    lastScrollTop = top
+    el.scrollTo({ top, behavior: 'auto' })
     requestAnimationFrame(() => {
-      if (smoothScrollActive) return
+      if (generation !== programmaticGeneration || smoothScrollActive) return
       isProgrammaticScroll = false
       const cur = scrollEl.value
       if (!cur) return
-      isAtBottom.value = isNearBottom(cur)
-      lastScrollTop = cur.scrollTop
+      if (!pinScrollActive) isAtBottom.value = isNearBottom(cur)
     })
   }
 
@@ -598,6 +613,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
     cancelSmoothScroll?.()
     elId.clear()
     followBottom()
+    // A follow write queued in the previous session must not swallow the
+    // first stationary scroll of the new one.
+    programmaticScrollPending = false
     // A send pin armed in the previous session must not fire against the new
     // session's rows.
     pinPending = false
@@ -686,6 +704,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     cancelSmoothScroll?.()
     lockScroll.value = true
     followBottom()
+    programmaticScrollPending = false
     // The pin reserve (last-turn min-height) intentionally SURVIVES tab
     // switches: KeepAlive preserves the DOM, and clearing it here would make
     // the conversation land in a different spot than the user left it.
@@ -757,13 +776,37 @@ export function useChatScroll(options: UseChatScrollOptions) {
     if (!el) return
     const top = el.scrollTop
     const isScrollingUp = top < lastScrollTop
+    const isStationary = top === lastScrollTop
     lastScrollTop = top
     // Frozen while the pin's entrance tween animates, or the jump button would
     // flash for its whole flight; the settle timer refreshes it on landing.
     if (!pinScrollActive) isAtBottom.value = isNearBottom(el)
-    // A scroll we triggered ourselves only updates the at-bottom mirror; it
-    // must never move the follow latch.
-    if (isProgrammaticScroll) return
+    const now = performance.now()
+    const touchPhysical = touchActive || now - lastTouchScrollAt < PHYSICAL_SCROLL_GRACE_MS
+    const physical = pointerActive
+      || touchPhysical
+      || now - lastWheelAt < PHYSICAL_SCROLL_GRACE_MS
+      || now - lastKeyNavAt < KEY_NAV_GRACE_MS
+    // Streaming follow writes hold `isProgrammaticScroll` until the next
+    // frame, and tokens arrive faster than that frame. An upward physical
+    // move has to escape before the guard returns, or the finger never wins.
+    // The write itself is stationary against the landing baseline, so it
+    // cannot take this path. A downward or stationary write must not escape
+    // or re-arm merely because a touch grace window is still open.
+    if (physical && isScrollingUp) {
+      // Momentum scroll emits no more touch events. Extend the grace window
+      // only on frames that still belong to that gesture so pointercancel
+      // and touchend cannot turn momentum into a fake layout scroll.
+      // Programmatic writes must not refresh it: a tap would otherwise stay
+      // "physical" for the whole stream.
+      if (touchPhysical) lastTouchScrollAt = now
+      handleUserScroll(true)
+      return
+    }
+    if (isProgrammaticScroll || (programmaticScrollPending && isStationary)) {
+      programmaticScrollPending = false
+      return
+    }
     // Escape may ONLY be latched from a physical gesture. Everything else
     // reaching here is a LAYOUT-induced scroll the browser performed on its
     // own — clamp when content transiently shrinks (completion flips
@@ -776,18 +819,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
     // event was delivered. Wheel/touch scroll events do reach here, so their
     // short-lived gesture latches must survive the browser's post-input event
     // ordering. Pointer drag and keyboard paging are latched alongside them.
-    const now = performance.now()
-    const touchPhysical = touchActive || now - lastTouchScrollAt < PHYSICAL_SCROLL_GRACE_MS
-    // Momentum scroll emits no more touch events. Extend the grace window on
-    // every scroll frame that still belongs to that gesture so pointercancel
-    // and touchend cannot turn momentum into a fake layout scroll.
     if (touchPhysical) lastTouchScrollAt = now
-    const physical = pointerActive
-      || touchPhysical
-      || now - lastWheelAt < PHYSICAL_SCROLL_GRACE_MS
-      || now - lastKeyNavAt < KEY_NAV_GRACE_MS
     if (physical) {
-      handleUserScroll(isScrollingUp)
+      handleUserScroll(false)
       return
     }
     // Layout displacement while following: heal it. Completion re-renders can
@@ -907,6 +941,10 @@ export function useChatScroll(options: UseChatScrollOptions) {
     lastTouchScrollAt = Number.NEGATIVE_INFINITY
     lastWheelAt = Number.NEGATIVE_INFINITY
     lastKeyNavAt = Number.NEGATIVE_INFINITY
+    programmaticScrollPending = false
+    // Drop a queued frame so it cannot clear a guard owned by a new element.
+    programmaticGeneration++
+    isProgrammaticScroll = false
     mutationObserver?.disconnect()
     mutationObserver = null
   }
