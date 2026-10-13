@@ -236,7 +236,7 @@ func TestIsImageOnlyChatModelToolCallEscape(t *testing.T) {
 	toolCaller := GetResponse{
 		ModelID: "wan2.7-omni",
 		Model: Model{
-			Config: ModelConfig{Compatibilities: []string{CompatToolCall, CompatImageOutput}},
+			Config: ModelConfig{Modalities: &ModelModalities{Input: []Modality{ModalityText}, Output: []Modality{ModalityText, ModalityImage}}, ToolCall: true},
 		},
 	}
 	if IsImageOnlyChatModel(toolCaller, sqlc.Provider{}) {
@@ -246,7 +246,7 @@ func TestIsImageOnlyChatModelToolCallEscape(t *testing.T) {
 	// Without tool calling, the same name is still rejected.
 	imageOnly := GetResponse{
 		ModelID: "wan2.7-image",
-		Model:   Model{Config: ModelConfig{Compatibilities: []string{CompatImageOutput}}},
+		Model:   Model{Config: ModelConfig{Modalities: &ModelModalities{Input: []Modality{ModalityText}, Output: []Modality{ModalityText, ModalityImage}}}},
 	}
 	if !IsImageOnlyChatModel(imageOnly, sqlc.Provider{}) {
 		t.Fatal("a non-tool-calling image model name should be treated as image-only")

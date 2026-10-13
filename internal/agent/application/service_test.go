@@ -162,9 +162,7 @@ func TestRouteAndMergeAttachments_ImagePathOnlyFallsBackToFile(t *testing.T) {
 	resolver := &Service{logger: slog.Default()}
 	model := models.GetResponse{
 		Model: models.Model{
-			Config: models.ModelConfig{
-				Compatibilities: []string{models.CompatVision},
-			},
+			Config: models.ModelConfig{Modalities: &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityImage}, Output: []models.Modality{models.ModalityText}}},
 		},
 	}
 	req := ChatRequest{
@@ -446,9 +444,7 @@ func TestRouteAndMergeAttachments_DropsUnsupportedInlineWithoutFallbackPath(t *t
 	resolver := &Service{logger: slog.Default()}
 	model := models.GetResponse{
 		Model: models.Model{
-			Config: models.ModelConfig{
-				Compatibilities: []string{},
-			},
+			Config: models.ModelConfig{},
 		},
 	}
 	req := ChatRequest{

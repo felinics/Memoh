@@ -43,7 +43,7 @@ func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 // Create adds a new model to the database.
 func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, error) {
 	model := req.toModel(ResolveEnable(req.Enable, true))
-	model.Config = normalizeModelConfig(model.Config)
+	model.Config = inferUndeclaredDialect(normalizeModelConfig(model.Config), model.ModelID)
 	if err := s.fillEmbeddingDimensions(ctx, &model); err != nil {
 		return AddResponse{}, err
 	}
@@ -293,7 +293,7 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 	}
 
 	model := req.toModel(ResolveEnable(req.Enable, current.Enable))
-	model.Config = normalizeModelConfig(model.Config)
+	model.Config = inferUndeclaredDialect(normalizeModelConfig(model.Config), model.ModelID)
 	if err := s.fillEmbeddingDimensions(ctx, &model); err != nil {
 		return GetResponse{}, err
 	}
@@ -355,7 +355,7 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 	}
 
 	model := req.toModel(ResolveEnable(req.Enable, current.Enable))
-	model.Config = normalizeModelConfig(model.Config)
+	model.Config = inferUndeclaredDialect(normalizeModelConfig(model.Config), model.ModelID)
 	if err := s.fillEmbeddingDimensions(ctx, &model); err != nil {
 		return GetResponse{}, err
 	}
@@ -469,13 +469,12 @@ func (s *Service) convertToGetResponse(dbModel sqlc.Model) GetResponse {
 		resp.Name = dbModel.Name.String
 	}
 
-	if len(dbModel.Config) > 0 {
-		if err := json.Unmarshal(dbModel.Config, &resp.Config); err != nil {
-			s.logger.Warn("failed to unmarshal model config", slog.String("model_id", dbModel.ModelID), slog.Any("error", err))
-		}
-		// Rows written before "off" was unified still advertise the legacy spelling.
-		resp.Config = normalizeModelConfig(resp.Config)
+	config, err := DecodeModelConfig(dbModel.Config, ConfigContext{ModelID: dbModel.ModelID, Type: ModelType(dbModel.Type)})
+	if err != nil {
+		s.logger.Warn("failed to decode model config", slog.String("model_id", dbModel.ModelID), slog.Any("error", err))
+		config = normalizeModelConfig(ModelConfig{})
 	}
+	resp.Config = config
 
 	return resp
 }

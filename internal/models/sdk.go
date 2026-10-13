@@ -40,6 +40,9 @@ type SDKModelConfig struct {
 	// ReasoningDefaultOn reports whether omitting the thinking field leaves the
 	// model thinking. nil means unknown.
 	ReasoningDefaultOn *bool
+	// ReasoningReplay is the model's declared replay for Chat Completions hosts.
+	// It overrides the replay the compatibility mode implies; nil keeps it.
+	ReasoningReplay *ReasoningReplay
 	// ContextWindow is the configured context window the turn budgets against;
 	// legacy Anthropic thinking budgets are fitted to it. Zero means unknown.
 	ContextWindow int
@@ -76,6 +79,7 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 			opts = append(opts, openaicompletions.WithBaseURL(cfg.BaseURL))
 		}
 		opts = appendChatCompletionsCompat(opts, chatCompletionsCompat)
+		opts = appendModelReasoningReplay(opts, cfg.ReasoningReplay)
 		p := openaicompletions.New(opts...)
 		return p.ChatModel(cfg.ModelID)
 
@@ -170,9 +174,22 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 			opts = append(opts, openaicompletions.WithBaseURL(cfg.BaseURL))
 		}
 		opts = appendChatCompletionsCompat(opts, chatCompletionsCompat)
+		opts = appendModelReasoningReplay(opts, cfg.ReasoningReplay)
 		p := openaicompletions.New(opts...)
 		return p.ChatModel(cfg.ModelID)
 	}
+}
+
+// appendModelReasoningReplay applies a model's declared replay after the
+// compatibility options, so the model's declaration wins.
+func appendModelReasoningReplay(opts []openaicompletions.Option, replay *ReasoningReplay) []openaicompletions.Option {
+	if replay == nil {
+		return opts
+	}
+	return append(opts, openaicompletions.WithReasoningReplay(sdk.ReasoningReplay{
+		Field:    sdk.ReasoningReplayField(replay.Field),
+		Required: replay.Required,
+	}))
 }
 
 func appendChatCompletionsCompat(

@@ -166,23 +166,17 @@ func TestResolveSubagentReasoningFollowsTheSubagentModel(t *testing.T) {
 	t.Parallel()
 
 	canDisable := models.GetResponse{
-		Model: models.Model{Config: models.ModelConfig{
-			ThinkingMode:     models.ThinkingModeToggle,
-			ReasoningEfforts: []string{models.ReasoningEffortDisable, models.ReasoningEffortLow, models.ReasoningEffortHigh},
-		}},
+		Model: models.Model{Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Toggle: true, Efforts: []string{models.ReasoningEffortLow, models.ReasoningEffortHigh}}}},
 	}
 	cannotDisable := models.GetResponse{
-		Model: models.Model{Config: models.ModelConfig{
-			ThinkingMode:     models.ThinkingModeToggle,
-			ReasoningEfforts: []string{models.ReasoningEffortMinimal, models.ReasoningEffortLow},
-		}},
+		Model: models.Model{Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Efforts: []string{models.ReasoningEffortMinimal, models.ReasoningEffortLow}}}},
 	}
 
 	const clientType = string(models.ClientTypeOpenAICompletions)
 
 	// Stored "off" reaches the wire as "none" on the model that can be turned off.
 	off := reasoning.ResolveConfig(
-		canDisable.ResolveThinkingMode(), canDisable.Config.ReasoningEfforts,
+		canDisable.ResolveThinkingMode(), canDisable.Config.ReasoningEfforts(),
 		canDisable.ReasoningOptions(clientType),
 		models.ReasoningEffortDisable, "",
 	)
@@ -194,7 +188,7 @@ func TestResolveSubagentReasoningFollowsTheSubagentModel(t *testing.T) {
 	// active supported tier. Marking it Disabled would only omit the field and let
 	// the provider turn reasoning back on at an unreported default.
 	offElsewhere := reasoning.ResolveConfig(
-		cannotDisable.ResolveThinkingMode(), cannotDisable.Config.ReasoningEfforts,
+		cannotDisable.ResolveThinkingMode(), cannotDisable.Config.ReasoningEfforts(),
 		cannotDisable.ReasoningOptions(clientType),
 		models.ReasoningEffortDisable, "",
 	)
@@ -205,7 +199,7 @@ func TestResolveSubagentReasoningFollowsTheSubagentModel(t *testing.T) {
 	// A stored tier the subagent's model does not advertise falls back instead of
 	// being forwarded verbatim.
 	stranded := reasoning.ResolveConfig(
-		cannotDisable.ResolveThinkingMode(), cannotDisable.Config.ReasoningEfforts,
+		cannotDisable.ResolveThinkingMode(), cannotDisable.Config.ReasoningEfforts(),
 		cannotDisable.ReasoningOptions(clientType),
 		models.ReasoningEffortHigh, "",
 	)
@@ -218,10 +212,7 @@ func TestResolveSubagentReasoningPreservesParentTurnOverride(t *testing.T) {
 	t.Parallel()
 
 	provider := &SpawnProvider{}
-	model := models.GetResponse{Model: models.Model{Config: models.ModelConfig{
-		ThinkingMode:     models.ThinkingModeToggle,
-		ReasoningEfforts: []string{models.ReasoningEffortDisable, models.ReasoningEffortLow, models.ReasoningEffortHigh},
-	}}}
+	model := models.GetResponse{Model: models.Model{Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Toggle: true, Efforts: []string{models.ReasoningEffortLow, models.ReasoningEffortHigh}}}}}
 
 	cfg, err := provider.resolveSubagentReasoning(context.Background(), SessionContext{
 		ReasoningStoredEffort:    models.ReasoningEffortHigh,
@@ -265,10 +256,7 @@ func TestResolveSubagentReasoningUsesStoredFallbackWhenRequestedOffIsUnavailable
 		nil,
 		nil,
 	)}
-	model := models.GetResponse{Model: models.Model{Config: models.ModelConfig{
-		ThinkingMode:     models.ThinkingModeToggle,
-		ReasoningEfforts: []string{models.ReasoningEffortLow, models.ReasoningEffortHigh},
-	}}}
+	model := models.GetResponse{Model: models.Model{Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Efforts: []string{models.ReasoningEffortLow, models.ReasoningEffortHigh}}}}}
 
 	cfg, err := provider.resolveSubagentReasoning(context.Background(), SessionContext{
 		BotID:                    "00000000-0000-0000-0000-000000000001",
@@ -292,10 +280,7 @@ func TestResolveSubagentReasoningPropagatesSettingsError(t *testing.T) {
 		nil,
 		nil,
 	)}
-	model := models.GetResponse{Model: models.Model{Config: models.ModelConfig{
-		ThinkingMode:     models.ThinkingModeToggle,
-		ReasoningEfforts: []string{models.ReasoningEffortLow, models.ReasoningEffortHigh},
-	}}}
+	model := models.GetResponse{Model: models.Model{Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Efforts: []string{models.ReasoningEffortLow, models.ReasoningEffortHigh}}}}}
 
 	_, err := provider.resolveSubagentReasoning(context.Background(), SessionContext{
 		BotID: "00000000-0000-0000-0000-000000000001",
@@ -308,9 +293,7 @@ func TestResolveSubagentReasoningPropagatesSettingsError(t *testing.T) {
 func TestSubagentOpenCodeGoReasoningKeepsProviderPolicy(t *testing.T) {
 	provider := &SpawnProvider{}
 	for id, effort := range map[string]string{"gpt-6-luna": "max", "gpt-5.6-luna": "max", "glm-5.3": "max", "qwen3.8-flash": "xhigh"} {
-		model := models.GetResponse{Model: models.Model{ModelID: id, Config: models.ModelConfig{
-			ThinkingMode: reasoning.ModeToggle, ReasoningEfforts: []string{"low", "medium", effort},
-		}}}
+		model := models.GetResponse{Model: models.Model{ModelID: id, Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Efforts: []string{"low", "medium", effort}}}}}
 		cfg, err := provider.resolveSubagentReasoning(context.Background(), SessionContext{ReasoningRequestedEffort: effort}, model, string(models.ClientTypeOpenCodeGo))
 		if err != nil || cfg == nil || cfg.Effort != effort || cfg.Adaptive {
 			t.Fatalf("%s: %+v, %v", id, cfg, err)

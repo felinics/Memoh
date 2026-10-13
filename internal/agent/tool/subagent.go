@@ -1703,7 +1703,7 @@ func (p *SpawnProvider) listModelCatalog(ctx context.Context, providerID string)
 			ModelID:      model.ModelID,
 			ProviderName: provider.Name,
 			Description:  description,
-			EffortLevels: append([]string(nil), model.Config.ReasoningEfforts...),
+			EffortLevels: append([]string(nil), model.Config.ReasoningEfforts()...),
 		})
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -1852,11 +1852,12 @@ func (p *SpawnProvider) resolveModel(
 		BaseURL:               baseURL,
 		ChatCompletionsCompat: chatCompletionsCompat,
 		ReasoningConfig:       reasoningConfig,
-		ReasoningDialect:      modelInfo.Config.ReasoningDialect,
-		ReasoningOffSupport:   modelInfo.Config.ReasoningOffSupport,
-		ReasoningDefaultOn:    modelInfo.Config.ReasoningDefaultOn,
-		ThinkingBudgetMin:     modelInfo.Config.ThinkingBudgetMin,
-		ThinkingBudgetMax:     modelInfo.Config.ThinkingBudgetMax,
+		ReasoningDialect:      modelInfo.Config.ReasoningDialect(),
+		ReasoningOffSupport:   modelInfo.Config.ReasoningOffSupport(),
+		ReasoningReplay:       modelInfo.Config.ReasoningReplay(),
+		ReasoningDefaultOn:    modelInfo.Config.ReasoningDefaultOn(),
+		ThinkingBudgetMin:     modelInfo.Config.ThinkingBudgetMin(),
+		ThinkingBudgetMax:     modelInfo.Config.ThinkingBudgetMax(),
 		ContextWindow:         contextWindow,
 		MaxOutputTokens:       modelInfo.Config.MaxOutputTokensLimit(),
 	})
@@ -1920,7 +1921,7 @@ func (p *SpawnProvider) resolveSubagentReasoning(
 	}
 	return reasoning.ResolveConfig(
 		modelInfo.ResolveThinkingMode(),
-		modelInfo.Config.ReasoningEfforts,
+		modelInfo.Config.ReasoningEfforts(),
 		modelInfo.ReasoningOptions(clientType),
 		stored,
 		requested,
