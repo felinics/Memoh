@@ -360,7 +360,6 @@ func TestAgentGenerateHookStaysGovernedAcrossAnthropicProviderSteps(t *testing.T
 		Model: &sdk.Model{
 			ID:       "claude-round8",
 			Provider: anthropicNameMockProvider{atomicMockProvider: modelProvider},
-			Type:     sdk.ModelTypeChat,
 		},
 		System:           "stable system",
 		Messages:         []sdk.Message{sdk.UserMessage("task")},

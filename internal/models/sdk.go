@@ -125,8 +125,8 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		//     field. Omission means "off" only up to 4.8; from Opus 5 and Sonnet 5
 		//     on, thinking is the default and an omitted field leaves it running —
 		//     billed, counted against max_tokens, and invisible to a user who
-		//     believes they turned it off. Sending the explicit shape is only safe
-		//     where the model accepts it, which the catalog declares.
+		//     believes they turned it off. The explicit shape is sent wherever the
+		//     catalog declares the model accepts it; on 4.x it equals omission.
 		if rc := cfg.ReasoningConfig; rc != nil {
 			switch {
 			case rc.Active && rc.Adaptive:
@@ -138,7 +138,7 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 					Type:         "enabled",
 					BudgetTokens: AnthropicThinkingBudget(rc.Effort, cfg.ContextWindow, cfg.MaxOutputTokens),
 				}))
-			case rc.Disabled && anthropicNeedsExplicitOff(cfg.ReasoningOffSupport, cfg.ReasoningDefaultOn):
+			case rc.Disabled && anthropicAcceptsExplicitOff(cfg.ReasoningOffSupport):
 				opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
 					Type: "disabled",
 				}))
@@ -180,12 +180,25 @@ func appendChatCompletionsCompat(
 	compat string,
 ) []openaicompletions.Option {
 	switch {
+	// The compat options no longer imply how reasoning is replayed, so the
+	// replay each vendor needs is set alongside: DeepSeek and Kimi reject a
+	// thinking-mode tool call replayed without reasoning_content, and MiniMax
+	// reads its reasoning back from reasoning_details.
 	case isDeepSeekChatCompletionsCompat(compat):
-		return append(opts, openaicompletions.WithDeepSeekChatCompletionsCompat())
+		return append(opts,
+			openaicompletions.WithDeepSeekChatCompletionsCompat(),
+			openaicompletions.WithReasoningReplay(sdk.ReasoningReplay{Required: true}),
+		)
 	case isMiniMaxChatCompletionsCompat(compat):
-		return append(opts, openaicompletions.WithMiniMaxChatCompletionsCompat())
+		return append(opts,
+			openaicompletions.WithMiniMaxChatCompletionsCompat(),
+			openaicompletions.WithReasoningReplay(sdk.ReasoningReplay{Field: sdk.ReasoningReplayDetails}),
+		)
 	case isKimiChatCompletionsCompat(compat):
-		return append(opts, openaicompletions.WithKimiChatCompletionsCompat())
+		return append(opts,
+			openaicompletions.WithKimiChatCompletionsCompat(),
+			openaicompletions.WithReasoningReplay(sdk.ReasoningReplay{Required: true}),
+		)
 	default:
 		return opts
 	}
@@ -444,31 +457,17 @@ func googleBudgetFor(rc *ReasoningConfig, minBudget, maxBudget *int, offSupport 
 
 func boolPtr(v bool) *bool { return &v }
 
-// anthropicNeedsExplicitOff reports whether a disabled call must say so on the
-// wire rather than express it by omitting the thinking field.
-//
-// Two independent facts decide this, which is why they are two fields. Whether the
-// model *accepts* thinking{type:"disabled"} — Fable 5 and Mythos 5 answer with a
-// 400 — and whether omission would have worked anyway. Omitting reads as off only
-// through Opus 4.8; Opus 5 and Sonnet 5 think by default, so an omitted field
-// leaves thinking running, billed as output tokens and counted against max_tokens,
-// while the user believes it is off.
-//
-// Sending the explicit shape where omission already means off is harmless but
-// noisy, so it is reserved for models that need it: accepted *and* on by default.
-// An undeclared model keeps the omission behaviour, which is correct for every
-// generation we currently ship.
-func anthropicNeedsExplicitOff(offSupport string, defaultOn *bool) bool {
-	if !reasoning.DefaultOn(defaultOn) {
-		return false
-	}
+// anthropicAcceptsExplicitOff reports whether thinking{type:"disabled"} may be
+// sent: the catalog declares the model accepts it, at any effort or at high and
+// below. A model that rejects it (Fable 5, Mythos 5) cannot be turned off, and
+// an undeclared model keeps the omission behaviour, which is off on every
+// generation up to 4.8 and avoids sending a shape a third-party
+// Anthropic-compatible endpoint may not accept.
+func anthropicAcceptsExplicitOff(offSupport string) bool {
 	switch offSupport {
 	case reasoning.OffSupportAccepted, reasoning.OffSupportLowEffortOnly:
 		return true
 	default:
-		// Thinks by default and rejects an explicit disable: off is unreachable on
-		// this model. OptionsFor keeps the control out of the picker, so arriving
-		// here means a stale stored setting rather than a user choice.
 		return false
 	}
 }

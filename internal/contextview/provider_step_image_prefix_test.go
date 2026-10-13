@@ -89,7 +89,7 @@ func TestAgentToolLoopSurvivesPhotoInFrozenPrefix(t *testing.T) {
 			ledger := contextfrag.NewMutationLedger()
 			lifecycle := contextfrag.NewLifecycleHolder()
 			_, genErr := agent.Generate(context.Background(), agentpkg.RunConfig{
-				Model:                          &sdk.Model{ID: "vision-model", Provider: provider, Type: sdk.ModelTypeChat},
+				Model:                          &sdk.Model{ID: "vision-model", Provider: provider},
 				System:                         "you are helpful",
 				Messages:                       photoPrefix(1_000_000),
 				ContextCurrentUserMessageIndex: &currentIndex,

@@ -84,7 +84,6 @@ func TestSpawnCleanEndRacingAbortControlAlignsAllTerminals(t *testing.T) {
 		Model: &sdk.Model{
 			ID:       "clean-end-abort-model",
 			Provider: abortAlignmentProvider{complete: true},
-			Type:     sdk.ModelTypeChat,
 		},
 		Query: "abort as the run completes",
 		Identity: tools.SpawnIdentity{
