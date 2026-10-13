@@ -169,7 +169,7 @@ type RequestedSkillResolver interface {
 // Channel process supplies an authenticated RPC client.
 type CommandHandler interface {
 	CommandAccess(context.Context, command.ExecuteInput) (bool, error)
-	CurrentContext(context.Context, string) (command.CurrentContext, error)
+	CurrentContext(ctx context.Context, botID, sessionID string) (command.CurrentContext, error)
 	ExecuteResult(context.Context, command.ExecuteInput) (*command.Result, error)
 	ExecuteWithInput(context.Context, command.ExecuteInput) (string, error)
 	HasCommandResource(string) bool
@@ -588,6 +588,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 
 	if pendingSkillIntent == nil && slashDecision.Kind == slash.DecisionCommandAction && p.commandHandler != nil && !isToolApprovalCommand && !isUserInputResponseCommand && !isQueueCommand && invocation != nil && (isDirectedAtBot(msg) || slashDirected) {
 		loc := p.localizer(ctx, identity.BotID)
+		routeID, sessionID := p.existingActiveSession(ctx, identity, msg)
 		result, err := p.commandHandler.ExecuteResult(ctx, command.ExecuteInput{
 			BotID:             strings.TrimSpace(identity.BotID),
 			ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
@@ -598,6 +599,8 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
 			ConversationID:    strings.TrimSpace(msg.Conversation.ID),
 			ThreadID:          extractThreadID(msg),
+			RouteID:           routeID,
+			SessionID:         sessionID,
 			CommandTarget:     telegramGroupBotUsername(msg),
 			Locale:            loc.Locale(),
 		})
@@ -4213,7 +4216,8 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	// --confirm" which lands back here with newCommandConfirmed == true and
 	// performs the reset. Non-button channels reset immediately (unchanged).
 	modeText := newSessionConfirmModeText(spec)
-	modeLabel := newSessionDisplayModeLabel(loc, spec, p.acpProfiles)
+	harness := newSessionHarnessName(spec, p.newSessionAgentName(ctx, identity.BotID, spec), p.acpProfiles)
+	modeLabel := newSessionDisplayModeLabel(loc, spec, harness)
 	if caps.Buttons && !newCommandConfirmedParsed(parsed) {
 		return p.sendNewConfirmation(ctx, msg, sender, loc, modeText, modeLabel, caps)
 	}
@@ -4262,7 +4266,6 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	}
 	p.cancelActiveStreamForRoute(identity.BotID, resolved.RouteID, "new session created")
 
-	modeLabel = newSessionDisplayModeLabel(loc, spec, p.acpProfiles)
 	if p.logger != nil {
 		p.logger.InfoContext(ctx, "new session created via /new command",
 			slog.String("bot_id", strings.TrimSpace(identity.BotID)),
@@ -4278,9 +4281,17 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	botUsername := telegramGroupBotUsername(msg)
 	renderedSessionDetails := false
 	if p.commandHandler != nil {
-		if cc, err := p.commandHandler.CurrentContext(ctx, identity.BotID); err == nil {
-			cc = currentContextForNewSessionSpec(cc, spec, p.acpProfiles)
-			text = formatNewSessionMessage(loc, modeLabel, cc, botUsername)
+		cc, err := p.commandHandler.CurrentContext(ctx, identity.BotID, sess.ID)
+		if err != nil && harness != "" {
+			// The session exists; an Agent whose catalog cannot be read now
+			// still gets its card, without a model the reply cannot confirm.
+			if p.logger != nil {
+				p.logger.DebugContext(ctx, "resolve agent model for /new reply failed", slog.Any("error", err))
+			}
+			cc, err = command.CurrentContext{Agent: true}, nil
+		}
+		if err == nil {
+			text = formatNewSessionMessage(loc, modeLabel, harness, cc, botUsername)
 			renderedSessionDetails = true
 		}
 	}
@@ -4364,26 +4375,99 @@ func newSessionModeKey(spec NewSessionSpec) string {
 	return "newSession.modeChat"
 }
 
-func newSessionDisplayModeLabel(loc *i18n.Localizer, spec NewSessionSpec, profiles turn.ACPProfileResolver) string {
+// existingActiveSession is the conversation's route and active session, for
+// commands that act on the session the conversation is on (/model and
+// /reasoning on an Agent, /compact, /context). It only reads: a conversation
+// that has no route yet gets none, and its commands take the bot-level path.
+func (p *ChannelInboundProcessor) existingActiveSession(ctx context.Context, identity InboundIdentity, msg channel.InboundMessage) (string, string) {
+	if p.sessionEnsurer == nil {
+		return "", ""
+	}
+	finder, ok := p.routeResolver.(interface {
+		Find(context.Context, string, string, string, string) (route.Route, error)
+	})
+	if !ok {
+		return "", ""
+	}
+	existing, err := finder.Find(ctx, identity.BotID, msg.Channel.String(), msg.Conversation.ID, extractThreadID(msg))
+	if err != nil {
+		return "", ""
+	}
+	sess, err := p.sessionEnsurer.GetActiveSession(ctx, existing.ID)
+	if err != nil {
+		return strings.TrimSpace(existing.ID), ""
+	}
+	return strings.TrimSpace(existing.ID), strings.TrimSpace(sess.ID)
+}
+
+// newSessionDisplayModeLabel names the session /new starts: the mode, and the
+// harness when the session does not run on Memoh's own.
+func newSessionDisplayModeLabel(loc *i18n.Localizer, spec NewSessionSpec, harness string) string {
 	mode := loc.T(newSessionModeKey(spec))
-	runtime := ""
-	switch {
-	case spec.AgentName != "":
-		runtime = spec.AgentName
-	case spec.Runtime == sessionpkg.RuntimeACPAgent:
-		runtime = newSessionACPRuntimeLabel(spec, profiles)
-		if runtime == "" {
-			runtime = "ACP"
-		}
-	case sessionpkg.IsDirectRuntimeType(spec.Runtime):
-		runtime = spec.Runtime
-	default:
+	if harness == "" {
 		return mode
 	}
 	return loc.T("newSession.modeWithRuntime", map[string]any{
 		"mode":    mode,
-		"runtime": runtime,
+		"runtime": harness,
 	})
+}
+
+// newSessionHarnessName is the harness a /new session runs on, "" for Memoh's
+// own. An Agent is named by its required Name, which is what the user created
+// and picks it by; a session with no Agent row falls back to the runtime's
+// product name or the ACP profile's display name.
+func newSessionHarnessName(spec NewSessionSpec, agentName string, profiles turn.ACPProfileResolver) string {
+	if name := strings.TrimSpace(agentName); name != "" {
+		return name
+	}
+	switch {
+	case spec.Runtime == sessionpkg.RuntimeACPAgent:
+		agentID := acpNewSessionAgentID(spec)
+		if profile := resolveACPProfile(profiles, agentID); profile.Known && strings.TrimSpace(profile.DisplayName) != "" {
+			return strings.TrimSpace(profile.DisplayName)
+		}
+		if agentID != "" {
+			return agentID
+		}
+		return "ACP"
+	case sessionpkg.IsDirectRuntimeType(spec.Runtime):
+		if name, ok := directRuntimeNames[spec.Runtime]; ok {
+			return name
+		}
+		return spec.Runtime
+	}
+	return ""
+}
+
+var directRuntimeNames = map[string]string{
+	string(runtimekind.Codex):      "Codex",
+	string(runtimekind.ClaudeCode): "Claude Code",
+}
+
+// newSessionAgentName is the Name of the Agent a /new session runs on. /new
+// that named the Agent carries it; the bot's default Agent is found by id.
+// A failed read only costs the label its Agent name.
+func (p *ChannelInboundProcessor) newSessionAgentName(ctx context.Context, botID string, spec NewSessionSpec) string {
+	if spec.AgentName != "" {
+		return spec.AgentName
+	}
+	if spec.BotAgentID == "" || p.botAgents == nil {
+		return ""
+	}
+	agents, err := p.botAgents.BotAgents(ctx, botID)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.DebugContext(ctx, "read agents for /new reply failed", slog.Any("error", err))
+		}
+		return ""
+	}
+	for _, agent := range agents {
+		if agent.ID == spec.BotAgentID {
+			return agent.Name
+		}
+	}
+	return ""
 }
 
 func (p *ChannelInboundProcessor) defaultSessionSpecForInbound(ctx context.Context, identity InboundIdentity, msg channel.InboundMessage) (NewSessionSpec, bool, error) {
@@ -4704,38 +4788,6 @@ func threadError(err error) error {
 		return err
 	}
 	return apperror.Wrap(code, err, nil)
-}
-
-func currentContextForNewSessionSpec(cc command.CurrentContext, spec NewSessionSpec, profiles turn.ACPProfileResolver) command.CurrentContext {
-	if spec.AgentName != "" {
-		cc.ChatModel = spec.AgentName
-		return cc
-	}
-	if sessionpkg.IsDirectRuntimeType(spec.Runtime) {
-		cc.ChatModel = spec.Runtime
-		return cc
-	}
-	if spec.Runtime != sessionpkg.RuntimeACPAgent {
-		return cc
-	}
-	label := newSessionACPRuntimeLabel(spec, profiles)
-	if label == "" {
-		cc.ChatModel = "ACP agent"
-		return cc
-	}
-	cc.ChatModel = label
-	return cc
-}
-
-func newSessionACPRuntimeLabel(spec NewSessionSpec, profiles turn.ACPProfileResolver) string {
-	agentID := acpNewSessionAgentID(spec)
-	if agentID == "" {
-		return ""
-	}
-	if profile := resolveACPProfile(profiles, agentID); profile.Known && strings.TrimSpace(profile.DisplayName) != "" {
-		return profile.DisplayName + " / ACP"
-	}
-	return agentID + " / ACP"
 }
 
 func acpNewSessionAgentID(spec NewSessionSpec) string {

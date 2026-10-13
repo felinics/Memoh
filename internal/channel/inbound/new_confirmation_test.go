@@ -347,15 +347,15 @@ func TestResolveNewSessionSpec_GroupChatACPUnsupported(t *testing.T) {
 	}
 }
 
-func TestCurrentContextForNewSessionSpecUsesACPDisplayName(t *testing.T) {
-	cc := currentContextForNewSessionSpec(command.CurrentContext{ChatModel: "gpt-4.1"}, NewSessionSpec{
+func TestNewSessionHarnessNameUsesACPDisplayName(t *testing.T) {
+	harness := newSessionHarnessName(NewSessionSpec{
 		Runtime: sessionpkg.RuntimeACPAgent,
 		Metadata: map[string]any{
 			"acp_agent_id": "custom-agent",
 		},
-	}, testACPProfiles{})
-	if cc.ChatModel != "Custom Agent / ACP" {
-		t.Fatalf("ChatModel = %q, want ACP display label", cc.ChatModel)
+	}, "", testACPProfiles{})
+	if harness != "Custom Agent" {
+		t.Fatalf("harness = %q, want ACP display name", harness)
 	}
 }
 
@@ -855,7 +855,7 @@ func TestNewConfirmationKeepsNamedAgent(t *testing.T) {
 	if err != nil || confirmed.BotAgentID != testACPBotAgentID || confirmed.Mode != sessionpkg.TypeDiscuss {
 		t.Fatalf("confirmed spec = %#v, %v, want the same Agent and mode", confirmed, err)
 	}
-	if label := newSessionDisplayModeLabel(i18n.New("en"), spec, testACPProfiles{}); label != "discussion with Custom Agent" {
+	if label := newSessionDisplayModeLabel(i18n.New("en"), spec, newSessionHarnessName(spec, spec.AgentName, testACPProfiles{})); label != "discussion with Custom Agent" {
 		t.Fatalf("label = %q, want the Agent's name", label)
 	}
 	if got := newSessionConfirmModeText(NewSessionSpec{Mode: sessionpkg.TypeChat, BotAgentID: testACPBotAgentID}); got != sessionpkg.TypeChat {

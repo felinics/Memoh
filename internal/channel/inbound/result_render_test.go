@@ -303,7 +303,7 @@ func TestFormatStartWelcomeMessageTelegramGroup(t *testing.T) {
 }
 
 func TestFormatNewSessionMessage(t *testing.T) {
-	got := formatNewSessionMessage(i18n.New("en"), "chat", command.CurrentContext{
+	got := formatNewSessionMessage(i18n.New("en"), "chat", "", command.CurrentContext{
 		ChatModel:       "Claude Opus 4.7 (Anthropic)",
 		ReasoningEffort: "medium", ContextWindow: "128.0K",
 	}, "")
@@ -335,7 +335,7 @@ func TestFormatNewSessionMessage(t *testing.T) {
 
 	// Reasoning off is still shown (it sets expectations on a fresh start); an
 	// unknown context window is omitted.
-	off := formatNewSessionMessage(i18n.New("en"), "discussion", command.CurrentContext{ChatModel: "(none)", ReasoningEffort: models.ReasoningEffortDisable}, "")
+	off := formatNewSessionMessage(i18n.New("en"), "discussion", "", command.CurrentContext{ChatModel: "(none)", ReasoningEffort: models.ReasoningEffortDisable}, "")
 	if !strings.Contains(off, "Reasoning: off") {
 		t.Errorf("reasoning state should be confirmed on the fresh-start card: %s", off)
 	}
@@ -348,7 +348,7 @@ func TestFormatNewSessionMessage(t *testing.T) {
 }
 
 func TestFormatNewSessionMessageTelegramGroup(t *testing.T) {
-	got := formatNewSessionMessage(i18n.New("en"), "chat", command.CurrentContext{
+	got := formatNewSessionMessage(i18n.New("en"), "chat", "", command.CurrentContext{
 		ChatModel: "Claude Opus 4.7 (Anthropic)",
 	}, "@snowluocat_bot")
 	for _, want := range []string{

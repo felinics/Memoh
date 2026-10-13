@@ -37,6 +37,7 @@
       "confirm": "✅ 确认",
       "cancel": "✕ 取消"
     },
+    "labelHarness": "Harness",
     "labelModel": "模型",
     "labelReasoning": "推理",
     "labelContext": "上下文",
@@ -131,6 +132,7 @@
       "title": "上下文",
       "usedWithWindow": "{percent} · 已用 {used} / {window}",
       "tokensUsed": "已用 {used} tokens",
+      "agentUnsupported": "当前会话的 Agent 自行管理上下文，/context 在这里没有可显示的内容。",
       "fieldCacheHit": "缓存命中"
     },
     "access": {
@@ -283,11 +285,15 @@
     "model": {
       "title": "对话模型",
       "currentTitle": "当前模型",
+      "sessionModel": "会话模型",
       "byProvider": "按服务商：",
       "fieldProvider": "服务商",
       "unavailable": "模型功能暂不可用。",
       "listChanged": "模型列表已更新，请重新选择。",
+      "sessionChanged": "当前会话的模型刚在别处被修改，请重新打开 /model 选择。",
       "setUsage": "用法：/model set <model_id> | <provider_name> <model_name>",
+      "agentUnsupported": "当前会话的 Agent 自行选择模型，不能用 /model 切换。",
+      "directSetUsage": "用法：/model set <model_name>",
       "noneUnderProvider": "服务商 {provider} 下没有可用模型。用 {command} 查看全部服务商。",
       "empty": "尚未添加对话模型。\n\n请在 Web 控制台添加。",
       "notFound": "找不到模型 {name}。用 {command} 查看可用模型。",
@@ -446,6 +452,7 @@
       "unavailable": "推理功能暂不可用。",
       "unsupported": "当前模型不支持推理。",
       "uncontrollable": "当前模型始终进行推理，且不提供可调节的推理选项。",
+      "agentUnsupported": "当前会话的 Agent 自行设置推理，不能用 /reasoning 调整。",
       "unknownLevel": "未知级别 {level} —— 可用级别：{levels}。"
     },
     "error": {

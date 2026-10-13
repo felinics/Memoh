@@ -113,8 +113,17 @@ func EncodeModelProviderCallback(providerIndex, page int) string {
 // positional/flat index) means a model-list change between render and tap can't
 // silently resolve the tap to a different model. The id is a UUID (~36 bytes),
 // so "m~ms~"+id stays well within Telegram's 64-byte callback_data limit.
+//
+// External Agent runtimes select by their own model id ("gpt-5.6-luna"), which
+// has no length bound; one that would overflow the limit is stashed like list
+// args, and a stash miss invalidates the stale button.
 func EncodeModelSelectCallback(modelDBID string) string {
-	return fmt.Sprintf("%sms~%s", callbackNamespace, url.QueryEscape(strings.TrimSpace(modelDBID)))
+	escaped := url.QueryEscape(strings.TrimSpace(modelDBID))
+	encoded := fmt.Sprintf("%sms~%s", callbackNamespace, escaped)
+	if len(encoded) <= telegramCallbackLimit {
+		return encoded
+	}
+	return callbackNamespace + "ms~#" + stashArgs(escaped)
 }
 
 // EncodeRangeCallback builds the callback_data for a time-window preset button.
@@ -193,7 +202,13 @@ func DecodeCallback(data string) (ParsedCallback, bool) {
 		}
 		return ParsedCallback{Kind: callbackKindModelProvider, ProviderIndex: prov, Page: page}, true
 	case strings.HasPrefix(body, "ms~"):
-		id, err := url.QueryUnescape(strings.TrimPrefix(body, "ms~"))
+		token := strings.TrimPrefix(body, "ms~")
+		if strings.HasPrefix(token, "#") {
+			argsStashMu.Lock()
+			token = argsStash[strings.TrimPrefix(token, "#")]
+			argsStashMu.Unlock()
+		}
+		id, err := url.QueryUnescape(token)
 		if err != nil || strings.TrimSpace(id) == "" {
 			return ParsedCallback{}, false
 		}

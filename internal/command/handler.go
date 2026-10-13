@@ -84,6 +84,7 @@ type Handler struct {
 	skillLoader       SkillLoader
 	containerFS       ContainerFS
 	linkConsumer      LinkConsumer
+	sessionModels     SessionModels
 
 	logger *slog.Logger
 }
@@ -173,12 +174,26 @@ func (h *Handler) clearSessionModelPreference(cc CommandContext) {
 	}
 }
 
-// CurrentContext resolves the bot's current model/reasoning state for
-// enriching command output (e.g. the /new confirmation). It is a read-only view
-// over existing bot settings and makes no changes.
-func (h *Handler) CurrentContext(ctx context.Context, botID string) (CurrentContext, error) {
+// CurrentContext resolves the model/reasoning state a session runs with, for
+// enriching command output (e.g. the /new confirmation). A session on an
+// external Agent reports that runtime's model; any other session, or an empty
+// sessionID, reports the bot settings. It is read-only and makes no changes.
+func (h *Handler) CurrentContext(ctx context.Context, botID, sessionID string) (CurrentContext, error) {
 	loc := i18n.New(h.ResolveLocale(ctx, botID))
-	cc := CommandContext{Ctx: ctx, BotID: strings.TrimSpace(botID), Locale: loc.Locale(), L: loc}
+	cc := CommandContext{Ctx: ctx, BotID: strings.TrimSpace(botID), SessionID: strings.TrimSpace(sessionID), Locale: loc.Locale(), L: loc}
+	state, external, err := h.externalSession(cc)
+	if err != nil {
+		return CurrentContext{}, err
+	}
+	if external {
+		// ACP reports its model through its own runtime controls, not here.
+		out := CurrentContext{Agent: true}
+		if state.Direct {
+			out.ChatModel = catalogModelName(state.Catalog, state.ModelID)
+			out.ReasoningEffort = state.ReasoningEffort
+		}
+		return out, nil
+	}
 	s, err := h.getBotSettings(cc)
 	if err != nil {
 		return CurrentContext{}, err
@@ -561,6 +576,14 @@ func (h *Handler) failureReply(ctx context.Context, t *i18n.Localizer, resource 
 			"level":  fmt.Sprintf("%q", invalidReasoning.Effort),
 			"levels": strings.Join(reasoningChoicesFor(invalidReasoning.Options), ", "),
 		})
+	}
+	// A concurrent pick or a model the runtime dropped is the user's next
+	// step, not a failure of this process.
+	if errors.Is(err, ErrSessionModelConflict) {
+		return t.T("cmd.model.sessionChanged")
+	}
+	if errors.Is(err, ErrSessionModelUnavailable) {
+		return t.T("cmd.model.listChanged")
 	}
 	if fault := errs.Analyze(ctx, err).Fault; fault == apperror.FaultServer || fault == apperror.FaultDependency {
 		h.recordFailure(ctx, resource, err)

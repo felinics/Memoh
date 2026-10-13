@@ -55,6 +55,9 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 		Name:  "show",
 		Usage: "show - Show the reasoning level and pick a new one",
 		ResultHandler: func(cc CommandContext) (*Result, error) {
+			if res, handled, err := h.externalReasoning(cc, false); handled || err != nil {
+				return res, err
+			}
 			s, err := h.getBotSettings(cc)
 			if err != nil {
 				return nil, err
@@ -77,6 +80,9 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 		Usage:   "set <off|minimal|low|medium|high|xhigh|max> - Set the reasoning level",
 		IsWrite: true,
 		ResultHandler: func(cc CommandContext) (*Result, error) {
+			if res, handled, err := h.externalReasoning(cc, true); handled || err != nil {
+				return res, err
+			}
 			if h.settingsService == nil {
 				return &Result{Text: cc.T("cmd.reasoning.unavailable")}, nil
 			}
@@ -217,4 +223,71 @@ func acceptsEffort(level string, opts reasoning.Options) bool {
 		return opts.CanDisable
 	}
 	return slices.Contains(opts.Efforts, level)
+}
+
+// externalReasoning answers /reasoning for an Agent session. Codex and Claude
+// Code offer the levels their current model advertises and remember the pick
+// on the session; ACP changes its level through the Agent itself.
+func (h *Handler) externalReasoning(cc CommandContext, set bool) (*Result, bool, error) {
+	state, ok, err := h.externalSession(cc)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	if !state.Direct {
+		return &Result{Text: cc.T("cmd.reasoning.agentUnsupported")}, true, nil
+	}
+	model, found := catalogModel(state.Catalog, state.ModelID)
+	levels := make([]string, 0, len(model.ReasoningEfforts))
+	for _, option := range model.ReasoningEfforts {
+		if id := strings.TrimSpace(option.ID); id != "" {
+			levels = append(levels, id)
+		}
+	}
+	if !found || len(levels) == 0 {
+		return &Result{Text: cc.T("cmd.reasoning.uncontrollable")}, true, nil
+	}
+	if !set {
+		return directReasoningResult(cc.L, state.ReasoningEffort, levels), true, nil
+	}
+	if len(cc.Args) < 1 {
+		return &Result{Text: cc.T("cmd.reasoning.setUsage", map[string]any{"levels": strings.Join(levels, "|")})}, true, nil
+	}
+	level := strings.ToLower(strings.TrimSpace(cc.Args[0]))
+	if !slices.Contains(levels, level) {
+		return &Result{Text: cc.T("cmd.reasoning.unknownLevel", map[string]any{
+			"level":  fmt.Sprintf("%q", cc.Args[0]),
+			"levels": strings.Join(levels, ", "),
+		})}, true, nil
+	}
+	// Name the model explicitly: the session may be on its Agent default,
+	// and an effort-only write would otherwise reconcile against no model.
+	modelID := model.ID
+	if err := h.sessionModels.SetSessionModelPreference(cc.Ctx, cc.BotID, cc.SessionID, &modelID, &level, state.Revision); err != nil {
+		return nil, true, err
+	}
+	return directReasoningResult(cc.L, level, levels), true, nil
+}
+
+// directReasoningResult is reasoningResult for a runtime's own levels, which
+// have no separate off switch.
+func directReasoningResult(t *i18n.Localizer, effort string, levels []string) *Result {
+	effort = strings.TrimSpace(effort)
+	current := effort
+	if current == "" {
+		current = t.T("cmd.common.default")
+	}
+	header := MdBold(t.T("cmd.reasoning.header")) + "\n" + t.T("cmd.reasoning.current", map[string]any{"level": current})
+	choices := make([]ListItem, 0, len(levels))
+	for _, level := range levels {
+		choices = append(choices, ListItem{
+			Label:    level,
+			Selected: level == effort,
+			Action:   &ItemAction{Resource: "reasoning", Action: "set", Args: []string{level}},
+		})
+	}
+	body := header + "\n\n" + t.T("cmd.reasoning.choosePrompt")
+	return &Result{
+		Text:        body,
+		Interactive: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{Title: body, Choices: choices}},
+	}
 }

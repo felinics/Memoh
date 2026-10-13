@@ -42,13 +42,29 @@ func reasoningLabel(t *i18n.Localizer, cc command.CurrentContext) string {
 	return reasoning
 }
 
-// appendCurrentContextLines adds the model/reasoning/context summary
-// shown after /new resets a session.
-func appendCurrentContextLines(b *strings.Builder, t *i18n.Localizer, cc command.CurrentContext) {
-	fmt.Fprintf(b, "\n\n- %s: %s", t.T("newSession.labelModel"), cc.ChatModel)
-	fmt.Fprintf(b, "\n- %s: %s", t.T("newSession.labelReasoning"), reasoningLabel(t, cc))
-	if cw := strings.TrimSpace(cc.ContextWindow); cw != "" {
-		fmt.Fprintf(b, "\n- %s: %s %s", t.T("newSession.labelContext"), cw, t.T("newSession.contextUnit"))
+// appendCurrentContextLines adds the harness/model/reasoning/context summary
+// shown after /new resets a session. The harness and the model are separate
+// lines: one is what runs the session, the other what it answers with. An
+// Agent session shows only the model and effort its runtime reports, and no
+// context window, which the Agent manages itself.
+func appendCurrentContextLines(b *strings.Builder, t *i18n.Localizer, harness string, cc command.CurrentContext) {
+	b.WriteString("\n")
+	if harness = strings.TrimSpace(harness); harness != "" {
+		fmt.Fprintf(b, "\n- %s: %s", t.T("newSession.labelHarness"), harness)
+	}
+	if !cc.Agent {
+		fmt.Fprintf(b, "\n- %s: %s", t.T("newSession.labelModel"), cc.ChatModel)
+		fmt.Fprintf(b, "\n- %s: %s", t.T("newSession.labelReasoning"), reasoningLabel(t, cc))
+		if cw := strings.TrimSpace(cc.ContextWindow); cw != "" {
+			fmt.Fprintf(b, "\n- %s: %s %s", t.T("newSession.labelContext"), cw, t.T("newSession.contextUnit"))
+		}
+		return
+	}
+	if model := strings.TrimSpace(cc.ChatModel); model != "" {
+		fmt.Fprintf(b, "\n- %s: %s", t.T("newSession.labelModel"), model)
+	}
+	if effort := strings.TrimSpace(cc.ReasoningEffort); effort != "" {
+		fmt.Fprintf(b, "\n- %s: %s", t.T("newSession.labelReasoning"), effort)
 	}
 }
 
@@ -74,10 +90,10 @@ func formatStartWelcomeMessage(t *i18n.Localizer, botUsername string) string {
 // much context budget they have. These are not "defaults to hide"; on this
 // surface they reassure and inform. Markdown markers are authored unconditionally
 // and stripped later for non-markdown channels.
-func formatNewSessionMessage(t *i18n.Localizer, modeLabel string, cc command.CurrentContext, botUsername string) string {
+func formatNewSessionMessage(t *i18n.Localizer, modeLabel, harness string, cc command.CurrentContext, botUsername string) string {
 	var b strings.Builder
 	b.WriteString(command.MdBold(t.T("newSession.title", map[string]any{"mode": modeLabel})))
-	appendCurrentContextLines(&b, t, cc)
+	appendCurrentContextLines(&b, t, harness, cc)
 	fmt.Fprintf(&b, "\n\n%s", t.T("newSession.tip", map[string]any{
 		"model":     command.CommandText("model", ""),
 		"reasoning": command.CommandText("reasoning", ""),
@@ -447,7 +463,7 @@ func renderModelPicker(fallbackText string, p *command.ModelPickerView, t *i18n.
 		row++
 	}
 
-	if p.Level == command.LevelModels {
+	if p.Level == command.LevelModels && !p.Direct {
 		actions = append(actions, channel.Action{
 			Type: actionTypeCallback, Label: t.T("chrome.providers"),
 			Value: command.EncodeListCallback("model", "list", nil, 0), Row: row,
@@ -467,7 +483,7 @@ func renderModelPicker(fallbackText string, p *command.ModelPickerView, t *i18n.
 func modelPickerHeader(p *command.ModelPickerView, start, end int, t *i18n.Localizer) string {
 	var b strings.Builder
 	b.WriteString(command.MdBold(t.T("chrome.modelConfiguration")) + "\n\n")
-	if p.Level == command.LevelModels {
+	if p.Level == command.LevelModels && !p.Direct {
 		provider := p.ProviderName
 		if provider == "" {
 			provider = t.T("chrome.models")
@@ -493,6 +509,11 @@ func modelPickerHeader(p *command.ModelPickerView, start, end int, t *i18n.Local
 	if r := strings.TrimSpace(p.Reasoning); r != "" {
 		fmt.Fprintf(&b, "%s\n", t.T("chrome.reasoningLine", map[string]any{"effort": r}))
 	}
+	if p.Direct {
+		// An Agent's catalog has no providers: the models are the first level.
+		b.WriteString("\n" + t.T("chrome.selectModel"))
+		return b.String()
+	}
 	b.WriteString("\n" + t.T("chrome.selectProvider"))
 	return b.String()
 }
@@ -500,7 +521,7 @@ func modelPickerHeader(p *command.ModelPickerView, start, end int, t *i18n.Local
 // pickerPageCallback builds the callback_data for paginating within the current
 // picker level.
 func pickerPageCallback(p *command.ModelPickerView, page int) string {
-	if p.Level == command.LevelModels {
+	if p.Level == command.LevelModels && !p.Direct {
 		return command.EncodeModelProviderCallback(p.ProviderIndex, page)
 	}
 	return command.EncodeListCallback("model", "list", nil, page)
