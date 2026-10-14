@@ -107,7 +107,7 @@
   "computerConnect": {
     "title": "Connect computer",
     "replaceAction": "Replace saved connection",
-    "replaceDescription": "Turn on if the terminal reports another connection, then rerun.",
+    "replaceDescription": "If the terminal reports another connection, turn on and copy again.",
     "restore": "Reconnect",
     "existingDescription": "Run the command on “{name}” to restore its background connection with its original credentials. Its computer record and Bot permissions are preserved.",
     "commandLabel": "Connection command",

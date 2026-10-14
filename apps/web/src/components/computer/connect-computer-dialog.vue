@@ -31,6 +31,7 @@
              be readable in full without widening the dialog. -->
         <CodePanel
           wrap
+          bordered
           :code="command"
           :copy-label="t('common.copy')"
           :copied-label="t('common.copied')"

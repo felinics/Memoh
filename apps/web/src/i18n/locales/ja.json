@@ -104,7 +104,7 @@
   "computerConnect": {
     "title": "コンピューターを接続",
     "replaceAction": "保存済みの接続を置き換える",
-    "replaceDescription": "別の接続があると表示されたらオンにし、再実行。",
+    "replaceDescription": "別の接続があると表示されたらオンにし、コピーし直して実行。",
     "restore": "接続を復元",
     "existingDescription": "「{name}」でコマンドを実行し、元の認証情報でバックグラウンド接続を復元してください。コンピューターの記録と Bot の権限は保持されます。",
     "commandLabel": "接続コマンド",
