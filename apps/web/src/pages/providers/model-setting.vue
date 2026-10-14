@@ -275,12 +275,25 @@ async function handleToggleEnable(value: boolean) {
     enable: value,
   }
 
-  // 草稿的启用状态与表单字段同属一次手动保存，不能在这里提前物化；
-  // 否则会使用父组件快照创建 provider，覆盖表单里尚未保存的 key/URL。
-  if (!curProviderId.value) return
-
   enableLoading.value = true
   try {
+    if (!curProviderId.value) {
+      // Toggling a draft saves it. The provider is created from the form's
+      // current values, not the parent snapshot, so an unsaved key or URL is
+      // kept. A models.dev source imports its catalog without a key; an
+      // endpoint is listed only when the form has what listing needs.
+      const form = providerForm.value
+      await materializeProvider(
+        form?.draftPayload() ?? {
+          name: curProvider.value.name,
+          config: curProvider.value.config ?? {},
+          metadata: curProvider.value.metadata ?? {},
+        },
+        value,
+        !!providerSource(curProvider.value) || (form?.canListModels() ?? false),
+      )
+      return
+    }
     await putProvidersById({
       path: { id: curProviderId.value },
       body: { enable: value },

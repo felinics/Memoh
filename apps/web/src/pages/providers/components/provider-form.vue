@@ -597,13 +597,21 @@ watch(() => props.provider, (provider, previous) => {
   }
   applyClientTypeDefaults(next)
   const switched = providerIdentity(provider) !== providerIdentity(previous)
+  const previousSynced = synced.value
+  synced.value = next
+  // Server state hydrates without validating: nothing has been entered yet,
+  // so opening a draft or enabling one (which creates it) must not flag the
+  // empty key box. Errors surface once the user edits or saves.
+  if (switched) {
+    form.resetForm({ values: { ...next } })
+    return
+  }
   for (const key of Object.keys(next) as (keyof ProviderFormValues)[]) {
     // Per-field guard: a refetch landing mid-edit must not clobber it.
-    if (switched || form.values[key] === synced.value[key]) {
-      form.setFieldValue(key, next[key] as never)
+    if (form.values[key] === previousSynced[key]) {
+      form.setFieldValue(key, next[key] as never, false)
     }
   }
-  synced.value = next
 }, { immediate: true })
 
 watch(() => form.values.client_type, (clientType) => {
@@ -686,6 +694,13 @@ function buildPayload(value: ProviderFormValues): Record<string, unknown> {
 // Validation is skipped on purpose: a model can be added before the API key.
 defineExpose({
   draftPayload: () => buildPayload(form.values),
+  // Whether the draft on screen can list the endpoint's models: a key was
+  // typed, or the preset needs none. OAuth types have no token before the
+  // provider exists, so they never can.
+  canListModels: () => {
+    if (isManagedOAuthClientType(form.values.client_type)) return false
+    return !presetRequiresApiKey() || Boolean(form.values.api_key?.trim())
+  },
 })
 
 const onSubmit = form.handleSubmit(async (value) => {
