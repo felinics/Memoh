@@ -192,7 +192,7 @@ export function useProviderSetup(options: {
             client_type: clientType,
             config,
             metadata: entry ? providerSourceMetadata(entry) : {},
-            ...(entry && modelSourceLogo(entry) && { icon: modelSourceLogo(entry) }),
+            ...(entry && { icon: modelSourceLogo(entry) }),
           } as ProvidersCreateRequest)
         } catch (error) {
           if (!isApiErrorCode(error, 'provider.name_taken')) throw error

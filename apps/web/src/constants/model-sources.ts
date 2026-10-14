@@ -28,9 +28,9 @@ export interface ModelSource {
   // Empty for a client type that has a fixed endpoint.
   base_url: string
   // The models.dev provider whose logo to show, when it is not source (or id
-  // for an entry without one). null means models.dev has no logo for it; the
-  // initials stand in.
-  logo?: string | null
+  // for an entry without one). models.dev answers an id it has no logo for
+  // with its generic logo, which keeps such entries in the same style.
+  logo?: string
   // The models.dev logo carries its own colors; others are drawn in one color
   // and take the text color.
   colored_logo?: boolean
@@ -55,7 +55,7 @@ export const MODEL_SOURCES: readonly ModelSource[] = [
   { id: 'alibaba-coding-plan', source: 'alibaba-coding-plan', name: 'Alibaba Coding Plan', client_type: 'openai-completions', base_url: 'https://coding-intl.dashscope.aliyuncs.com/v1' },
   { id: 'alibaba-coding-plan-cn', source: 'alibaba-coding-plan-cn', name: 'Alibaba Coding Plan (China)', client_type: 'openai-completions', base_url: 'https://coding.dashscope.aliyuncs.com/v1' },
   { id: 'alibaba-token-plan', source: 'alibaba-token-plan', name: 'Alibaba Token Plan', client_type: 'openai-completions', base_url: 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1' },
-  { id: 'alibaba-token-plan-cn', source: 'alibaba-token-plan-cn', name: 'Alibaba Token Plan (China)', client_type: 'openai-completions', base_url: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', logo: null },
+  { id: 'alibaba-token-plan-cn', source: 'alibaba-token-plan-cn', name: 'Alibaba Token Plan (China)', client_type: 'openai-completions', base_url: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1' },
   { id: 'ambient', source: 'ambient', name: 'Ambient', client_type: 'openai-completions', base_url: 'https://api.ambient.xyz/v1' },
   { id: 'amd', source: 'amd', name: 'AMD', client_type: 'openai-completions', base_url: 'https://developer.amd.com.cn/radeon/api/v1' },
   { id: 'anthropic', source: 'anthropic', name: 'Anthropic', client_type: 'anthropic-messages', base_url: 'https://api.anthropic.com/v1' },
@@ -71,11 +71,11 @@ export const MODEL_SOURCES: readonly ModelSource[] = [
   { id: 'bothub', source: 'bothub', name: 'Bothub', client_type: 'openai-completions', base_url: 'https://openai.bothub.ru/v1' },
   { id: 'cerebras', source: 'cerebras', name: 'Cerebras', client_type: 'openai-completions', base_url: 'https://api.cerebras.ai/v1' },
   { id: 'claudinio', source: 'claudinio', name: 'Claudinio', client_type: 'openai-completions', base_url: 'https://api.claudin.io/v1' },
-  { id: 'cline-pass', source: 'cline-pass', name: 'ClinePass', client_type: 'openai-completions', base_url: 'https://api.cline.bot/api/v1', logo: null },
+  { id: 'cline-pass', source: 'cline-pass', name: 'ClinePass', client_type: 'openai-completions', base_url: 'https://api.cline.bot/api/v1' },
   { id: 'cloudflare', source: 'cloudflare-workers-ai', name: 'Cloudflare Workers AI', client_type: 'openai-completions', base_url: 'https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1' },
   { id: 'codex', name: 'OpenAI Codex', client_type: 'openai-codex', base_url: 'https://chatgpt.com/backend-api', logo: 'openai' },
   { id: 'coralbricks', source: 'coralbricks', name: 'CoralBricks', client_type: 'openai-completions', base_url: 'https://inference.coralbricks.ai/v1' },
-  { id: 'cortecs', source: 'cortecs', name: 'Cortecs', client_type: 'openai-completions', base_url: 'https://api.cortecs.ai/v1', logo: null },
+  { id: 'cortecs', source: 'cortecs', name: 'Cortecs', client_type: 'openai-completions', base_url: 'https://api.cortecs.ai/v1' },
   { id: 'crossmodel', source: 'crossmodel', name: 'CrossModel', client_type: 'openai-completions', base_url: 'https://api.crossmodel.ai/v1' },
   { id: 'crusoe', source: 'crusoe', name: 'Crusoe', client_type: 'openai-completions', base_url: 'https://api.inference.crusoecloud.com/v1' },
   { id: 'daoxe', source: 'daoxe', name: 'DaoXE', client_type: 'openai-completions', base_url: 'https://daoxe.com/v1' },
@@ -142,13 +142,13 @@ export const MODEL_SOURCES: readonly ModelSource[] = [
   { id: 'modelscope', source: 'modelscope', name: 'ModelScope', client_type: 'openai-completions', base_url: 'https://api-inference.modelscope.cn/v1' },
   { id: 'moonshotai', source: 'moonshotai', name: 'Moonshot AI', client_type: 'openai-completions', base_url: 'https://api.moonshot.ai/v1' },
   { id: 'moonshotai-cn', source: 'moonshotai-cn', name: 'Moonshot', client_type: 'openai-completions', base_url: 'https://api.moonshot.cn/v1' },
-  { id: 'morph', source: 'morph', name: 'Morph', client_type: 'openai-completions', base_url: 'https://api.morphllm.com/v1', logo: null },
+  { id: 'morph', source: 'morph', name: 'Morph', client_type: 'openai-completions', base_url: 'https://api.morphllm.com/v1' },
   { id: 'nan', source: 'nan', name: 'NaN', client_type: 'openai-completions', base_url: 'https://api.nan.builders/v1' },
   { id: 'nano-gpt', source: 'nano-gpt', name: 'NanoGPT', client_type: 'openai-completions', base_url: 'https://nano-gpt.com/api/v1' },
   { id: 'nearai', source: 'nearai', name: 'NEAR AI Cloud', client_type: 'openai-completions', base_url: 'https://cloud-api.near.ai/v1' },
   { id: 'nebius', source: 'nebius', name: 'Nebius Token Factory', client_type: 'openai-completions', base_url: 'https://api.tokenfactory.nebius.com/v1' },
   { id: 'neuralwatt', source: 'neuralwatt', name: 'Neuralwatt', client_type: 'openai-completions', base_url: 'https://api.neuralwatt.com/v1' },
-  { id: 'newapi', name: 'New API', client_type: 'openai-completions', base_url: 'https://your.new-api-provider.com/v1', logo: null },
+  { id: 'newapi', name: 'New API', client_type: 'openai-completions', base_url: 'https://your.new-api-provider.com/v1' },
   { id: 'novita-ai', source: 'novita-ai', name: 'Novita AI', client_type: 'openai-completions', base_url: 'https://api.novita.ai/openai', colored_logo: true },
   { id: 'nvidia', source: 'nvidia', name: 'Nvidia', client_type: 'openai-completions', base_url: 'https://integrate.api.nvidia.com/v1' },
   { id: 'oci', source: 'oci', name: 'OCI Generative AI', client_type: 'openai-completions', base_url: 'https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/openai/v1' },
@@ -171,10 +171,10 @@ export const MODEL_SOURCES: readonly ModelSource[] = [
   { id: 'qihang-ai', source: 'qihang-ai', name: 'QiHang', client_type: 'openai-completions', base_url: 'https://api.qhaigc.net/v1' },
   { id: 'qiniu-ai', source: 'qiniu-ai', name: 'Qiniu', client_type: 'openai-completions', base_url: 'https://api.qnaigc.com/v1' },
   { id: 'regolo-ai', source: 'regolo-ai', name: 'Regolo AI', client_type: 'openai-completions', base_url: 'https://api.regolo.ai/v1', colored_logo: true },
-  { id: 'requesty', source: 'requesty', name: 'Requesty', client_type: 'openai-completions', base_url: 'https://router.requesty.ai/v1', logo: null },
+  { id: 'requesty', source: 'requesty', name: 'Requesty', client_type: 'openai-completions', base_url: 'https://router.requesty.ai/v1' },
   { id: 'routing-run', source: 'routing-run', name: 'routing.run', client_type: 'openai-completions', base_url: 'https://api.routing.run/v1' },
   { id: 'runinfra', source: 'runinfra', name: 'RunInfra', client_type: 'openai-completions', base_url: 'https://api.runinfra.ai/v1' },
-  { id: 'sarvam', source: 'sarvam', name: 'Sarvam AI', client_type: 'openai-completions', base_url: 'https://api.sarvam.ai/v1', logo: null },
+  { id: 'sarvam', source: 'sarvam', name: 'Sarvam AI', client_type: 'openai-completions', base_url: 'https://api.sarvam.ai/v1' },
   { id: 'scaleway', source: 'scaleway', name: 'Scaleway', client_type: 'openai-completions', base_url: 'https://api.scaleway.ai/v1' },
   { id: 'scnet-token-plan', source: 'scnet-token-plan', name: 'SCNet Token Plan', client_type: 'openai-completions', base_url: 'https://api.scnet.cn/api/llm/v1' },
   { id: 'scx-ai', source: 'scx-ai', name: 'SCX.ai', client_type: 'openai-completions', base_url: 'https://api.scx.ai/v1' },
@@ -188,7 +188,7 @@ export const MODEL_SOURCES: readonly ModelSource[] = [
   { id: 'stepfun-step-plan', source: 'stepfun-step-plan', name: 'StepFun Step Plan (China)', client_type: 'openai-completions', base_url: 'https://api.stepfun.com/step_plan/v1' },
   { id: 'subconscious', source: 'subconscious', name: 'Subconscious', client_type: 'anthropic-messages', base_url: 'https://api.subconscious.dev/v1' },
   { id: 'submodel', source: 'submodel', name: 'submodel', client_type: 'openai-completions', base_url: 'https://llm.submodel.ai/v1' },
-  { id: 'synthetic', source: 'synthetic', name: 'Synthetic', client_type: 'openai-completions', base_url: 'https://api.synthetic.new/openai/v1', logo: null },
+  { id: 'synthetic', source: 'synthetic', name: 'Synthetic', client_type: 'openai-completions', base_url: 'https://api.synthetic.new/openai/v1' },
   { id: 'tempr', source: 'tempr', name: 'Tempr Gateway', client_type: 'openai-completions', base_url: 'https://api.temprhq.io/v1' },
   { id: 'tencent-coding-plan', source: 'tencent-coding-plan', name: 'Tencent Coding Plan (China)', client_type: 'openai-completions', base_url: 'https://api.lkeap.cloud.tencent.com/coding/v3' },
   { id: 'tencent-token-plan', source: 'tencent-token-plan', name: 'Tencent Token Plan', client_type: 'openai-completions', base_url: 'https://api.lkeap.cloud.tencent.com/plan/v3' },
@@ -204,7 +204,7 @@ export const MODEL_SOURCES: readonly ModelSource[] = [
   { id: 'umans-ai', source: 'umans-ai', name: 'Umans AI', client_type: 'openai-completions', base_url: 'https://api.code.umans.ai/v1', colored_logo: true },
   { id: 'umans-ai-coding-plan', source: 'umans-ai-coding-plan', name: 'Umans AI Coding Plan', client_type: 'openai-completions', base_url: 'https://api.code.umans.ai/v1', colored_logo: true },
   { id: 'unorouter', source: 'unorouter', name: 'UnoRouter', client_type: 'openai-completions', base_url: 'https://api.unorouter.com/v1' },
-  { id: 'upstage', source: 'upstage', name: 'Upstage', client_type: 'openai-completions', base_url: 'https://api.upstage.ai/v1/solar', logo: null },
+  { id: 'upstage', source: 'upstage', name: 'Upstage', client_type: 'openai-completions', base_url: 'https://api.upstage.ai/v1/solar' },
   { id: 'vancine', source: 'vancine', name: 'Vancine', client_type: 'openai-completions', base_url: 'https://vancine.com/v1' },
   { id: 'venice', source: 'venice', name: 'Venice AI', client_type: 'openai-completions', base_url: 'https://api.venice.ai/api/v1' },
   { id: 'vispark', source: 'vispark', name: 'Vispark', client_type: 'openai-completions', base_url: 'https://api.lab.vispark.in/v1' },
@@ -238,10 +238,9 @@ export function findModelSourceBySource(source: string | null | undefined): Mode
   return source ? bySource.get(source) : undefined
 }
 
-// The logo models.dev serves for an entry, or undefined when it has none
-// (models.dev would answer with a generic logo).
-export function modelSourceLogo(item: ModelSource): string | undefined {
-  if (item.logo === null) return undefined
+// The logo models.dev serves for an entry; an id without a logo of its own gets
+// models.dev's generic one.
+export function modelSourceLogo(item: ModelSource): string {
   return `https://models.dev/logos/${encodeURIComponent(item.logo ?? item.source ?? item.id)}.svg`
 }
 
@@ -328,7 +327,7 @@ export function providerDraftFromSource(item: ModelSource) {
   return {
     name: item.name,
     client_type: item.client_type,
-    ...(modelSourceLogo(item) && { icon: modelSourceLogo(item) }),
+    icon: modelSourceLogo(item),
     enable: false,
     config: item.base_url ? { base_url: item.base_url } : {},
     metadata: providerSourceMetadata(item),

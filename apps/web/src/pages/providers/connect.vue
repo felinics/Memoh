@@ -182,8 +182,7 @@ async function confirm() {
         name: p.name,
         client_type: p.clientType,
         config,
-        ...(entry && { metadata: providerSourceMetadata(entry) }),
-        ...(entry && modelSourceLogo(entry) && { icon: modelSourceLogo(entry) }),
+        ...(entry && { metadata: providerSourceMetadata(entry), icon: modelSourceLogo(entry) }),
       },
       throwOnError: true,
     })).data

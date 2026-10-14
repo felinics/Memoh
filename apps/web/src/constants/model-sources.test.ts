@@ -43,15 +43,15 @@ describe('model sources', () => {
     }
   })
 
-  it('draws every entry with a models.dev logo or none', () => {
+  it('draws every entry with a models.dev logo', () => {
     for (const item of MODEL_SOURCES) {
-      const logo = modelSourceLogo(item)
-      if (logo !== undefined) expect(logo, item.id).toMatch(/^https:\/\/models\.dev\/logos\/[^/]+\.svg$/)
+      expect(modelSourceLogo(item), item.id).toMatch(/^https:\/\/models\.dev\/logos\/[^/]+\.svg$/)
     }
     expect(modelSourceLogo(findModelSource('codex')!)).toBe('https://models.dev/logos/openai.svg')
     expect(modelSourceLogo(findModelSource('github-copilot')!)).toBe('https://models.dev/logos/github-copilot.svg')
     expect(modelSourceLogo(findModelSource('ollama')!)).toBe('https://models.dev/logos/ollama-cloud.svg')
-    expect(modelSourceLogo(findModelSource('newapi')!)).toBeUndefined()
+    // models.dev has no New API logo and serves its generic one.
+    expect(modelSourceLogo(findModelSource('newapi')!)).toBe('https://models.dev/logos/newapi.svg')
     expect(modelSourceLogoForKey('qwen')).toBe('https://models.dev/logos/alibaba-cn.svg')
     expect(modelSourceLogoForKey('unknown')).toBeUndefined()
   })
@@ -97,7 +97,7 @@ describe('providers and entries', () => {
     // A custom provider keeps a models.dev logo it was given, and drops a local icon.
     expect(providerLogo({ icon: 'https://models.dev/logos/groq.svg', metadata: {} })).toBe('https://models.dev/logos/groq.svg')
     expect(providerLogo({ icon: 'openai', metadata: {} })).toBeUndefined()
-    expect(providerLogo({ metadata: { catalog: 'newapi' } })).toBeUndefined()
+    expect(providerLogo({ metadata: { catalog: 'newapi' } })).toBe('https://models.dev/logos/newapi.svg')
   })
 
   it('drafts a provider that records its entry and source', () => {

@@ -192,9 +192,8 @@ describe('provider connect page', () => {
       name: 'Gateway A',
       client_type: 'openai-completions',
       metadata: { catalog: 'newapi' },
+      icon: 'https://models.dev/logos/newapi.svg',
     })
-    // models.dev has no logo for New API, so none is stored.
-    expect(body).not.toHaveProperty('icon')
     app.unmount()
   })
 
