@@ -5,13 +5,14 @@ import {
   isMonochromeLogo,
   MODEL_SOURCES,
   modelSourceLogo,
+  modelSourceLogoForKey,
   modelSourceNeedsApiKey,
   providerCatalogEntry,
   providerDraftFromSource,
+  providerLogo,
   providerSource,
   TEMPLATE_SOURCES,
 } from './model-sources'
-import { iconMap } from '@/components/provider-icon/icons'
 
 const CLIENT_TYPES = new Set([
   'openai-completions', 'openai-responses', 'anthropic-messages', 'google-generative-ai',
@@ -42,10 +43,17 @@ describe('model sources', () => {
     }
   })
 
-  it('only names local icons that exist', () => {
+  it('draws every entry with a models.dev logo or none', () => {
     for (const item of MODEL_SOURCES) {
-      if (item.icon) expect(iconMap[item.icon], item.id).toBeDefined()
+      const logo = modelSourceLogo(item)
+      if (logo !== undefined) expect(logo, item.id).toMatch(/^https:\/\/models\.dev\/logos\/[^/]+\.svg$/)
     }
+    expect(modelSourceLogo(findModelSource('codex')!)).toBe('https://models.dev/logos/openai.svg')
+    expect(modelSourceLogo(findModelSource('github-copilot')!)).toBe('https://models.dev/logos/github-copilot.svg')
+    expect(modelSourceLogo(findModelSource('ollama')!)).toBe('https://models.dev/logos/ollama-cloud.svg')
+    expect(modelSourceLogo(findModelSource('newapi')!)).toBeUndefined()
+    expect(modelSourceLogoForKey('qwen')).toBe('https://models.dev/logos/alibaba-cn.svg')
+    expect(modelSourceLogoForKey('unknown')).toBeUndefined()
   })
 
   it('maps every former template to an entry', () => {
@@ -59,7 +67,7 @@ describe('model sources', () => {
     expect(findModelSource('azure-openai')?.source).toBe('azure')
     expect(findModelSourceBySource('azure')?.id).toBe('azure-openai')
     expect(findModelSource(undefined)).toBeUndefined()
-    expect(modelSourceLogo(findModelSource('anthropic')!)).toBe('anthropic')
+    expect(modelSourceLogo(findModelSource('anthropic')!)).toBe('https://models.dev/logos/anthropic.svg')
     expect(modelSourceLogo(findModelSource('baseten')!)).toBe('https://models.dev/logos/baseten.svg')
   })
 
@@ -80,6 +88,18 @@ describe('model sources', () => {
 })
 
 describe('providers and entries', () => {
+  it('shows a provider its entry\'s models.dev logo, never a former local icon', () => {
+    // Created from the former qwen template, still carrying the old local icon.
+    expect(providerLogo({ icon: 'qwen-color', metadata: { registry: { source: 'qwen.yaml' } } }))
+      .toBe('https://models.dev/logos/alibaba-cn.svg')
+    expect(providerLogo({ icon: 'https://models.dev/logos/deepseek.svg', metadata: { catalog: 'deepseek' } }))
+      .toBe('https://models.dev/logos/deepseek.svg')
+    // A custom provider keeps a models.dev logo it was given, and drops a local icon.
+    expect(providerLogo({ icon: 'https://models.dev/logos/groq.svg', metadata: {} })).toBe('https://models.dev/logos/groq.svg')
+    expect(providerLogo({ icon: 'openai', metadata: {} })).toBeUndefined()
+    expect(providerLogo({ metadata: { catalog: 'newapi' } })).toBeUndefined()
+  })
+
   it('drafts a provider that records its entry and source', () => {
     const draft = providerDraftFromSource(findModelSource('azure-openai')!)
     expect(draft).toMatchObject({

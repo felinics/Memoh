@@ -6,9 +6,9 @@
       >
         <template #media>
           <ProviderIcon
-            v-if="curProvider?.icon"
-            :icon="curProvider.icon"
-            :monochrome="isMonochromeLogo(curProvider.icon)"
+            v-if="providerLogo(curProvider)"
+            :icon="providerLogo(curProvider)!"
+            :monochrome="isMonochromeLogo(providerLogo(curProvider))"
             size="1.5em"
           />
           <span
@@ -95,7 +95,7 @@ import type { ModelsGetResponse, ProvidersGetResponse, ProvidersUpdateRequest } 
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
 import { isManagedModelCatalogClientType } from '@/constants/client-types'
-import { isMonochromeLogo, providerSource } from '@/constants/model-sources'
+import { isMonochromeLogo, providerLogo, providerSource } from '@/constants/model-sources'
 import { useModelsDevCatalog } from '@/composables/useModelsDevCatalog'
 import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
 import { catalogModelsFor } from '@/lib/models-dev'

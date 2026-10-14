@@ -187,12 +187,14 @@ describe('provider connect page', () => {
     root.querySelectorAll('button')[1]?.click()
     await vi.waitFor(() => expect(mocks.replace).toHaveBeenCalled())
 
-    expect(mocks.postProviders.mock.calls[0]![0].body).toMatchObject({
+    const body = mocks.postProviders.mock.calls[0]![0].body
+    expect(body).toMatchObject({
       name: 'Gateway A',
       client_type: 'openai-completions',
       metadata: { catalog: 'newapi' },
-      icon: 'newapi-color',
     })
+    // models.dev has no logo for New API, so none is stored.
+    expect(body).not.toHaveProperty('icon')
     app.unmount()
   })
 

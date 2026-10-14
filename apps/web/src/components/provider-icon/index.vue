@@ -78,8 +78,13 @@ function onImageError(event: Event): void {
 // The width attribute only takes pixels, so an em size would be dropped and the
 // image would render at the SVG's own size. The style carries any unit, and is
 // left out when the caller sizes the image with classes instead.
-const numericSize = computed(() => typeof props.size === 'number' ? props.size : undefined)
-const cssSize = computed(() => typeof props.size === 'number' ? `${props.size}px` : props.size)
+// A bare number, given as a number or a string such as size="22", is pixels: a
+// unitless CSS width is invalid and would collapse a masked logo to nothing.
+const numericSize = computed(() => {
+  if (typeof props.size === 'number') return props.size
+  return props.size && /^\d+(\.\d+)?$/.test(props.size) ? Number(props.size) : undefined
+})
+const cssSize = computed(() => numericSize.value !== undefined ? `${numericSize.value}px` : props.size)
 
 const maskStyle = computed(() => {
   const mask = `url("${imageSource.value}")`

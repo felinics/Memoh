@@ -68,3 +68,13 @@ it('paints a monochrome logo in the text color through its shape', async () => {
   expect(mask.style.width).toBe('1.5em')
   expect(mask.getAttribute('style')).toContain('mono.svg')
 })
+
+it('reads a unitless size string as pixels, so a masked logo keeps its size', async () => {
+  const root = document.createElement('div')
+  document.body.append(root)
+  app = createApp(() => h(ProviderIcon, { icon: 'https://example.com/mono.svg', size: '22', monochrome: true }))
+  app.mount(root)
+  const mask = root.querySelector('span[role="img"]') as HTMLElement
+  expect(mask.style.width).toBe('22px')
+  expect(mask.style.height).toBe('22px')
+})

@@ -113,7 +113,7 @@ describe('useProviderSetup', () => {
         client_type: 'openai-completions',
         config: { base_url: preset.baseUrl, api_key: 'sk-test' },
         metadata: { catalog: 'deepseek', source: 'deepseek' },
-        icon: 'deepseek-color',
+        icon: 'https://models.dev/logos/deepseek.svg',
       },
       throwOnError: true,
     })

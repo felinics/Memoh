@@ -207,7 +207,7 @@ import { providerPresets } from '@/constants/provider-presets'
 import type { ProviderPreset } from '@/constants/provider-presets'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { templateConfigFields, templateDefaultConfig } from '@/utils/provider-template'
-import { findModelSource, isMonochromeLogo, modelSourceLogo, modelSourceNeedsApiKey, providerSourceMetadata, TEMPLATE_SOURCES, type ModelSource } from '@/constants/model-sources'
+import { findModelSource, isMonochromeLogo, modelSourceLogo, modelSourceLogoForKey, modelSourceNeedsApiKey, providerSourceMetadata, TEMPLATE_SOURCES, type ModelSource } from '@/constants/model-sources'
 import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
 import { suggestProviderName } from './provider-presets'
 
@@ -269,7 +269,8 @@ function templatePreset(template: ProvidertemplatesGetResponse): SelectablePrese
     registryName: uiPreset?.registryName,
     clientType: template.driver ?? uiPreset?.clientType ?? '',
     baseUrl: typeof defaults.base_url === 'string' ? defaults.base_url : (uiPreset?.baseUrl ?? ''),
-    icon: template.icon ?? uiPreset?.icon,
+    // A model provider shows its models.dev logo; the other domains keep their own.
+    icon: props.presetDomain === 'llm' ? modelSourceLogoForKey(template.key ?? '') : (template.icon ?? uiPreset?.icon),
     source: template.source ?? uiPreset?.source ?? '',
     requiresApiKey: apiKeyField?.required ?? false,
     requiresBaseUrl: baseUrlField?.required ?? false,
@@ -288,7 +289,9 @@ const availablePresets = computed<SelectablePreset[]>(() => {
     return [...kept.map(templatePreset), ...sourcePresets.value].sort((a, b) => a.name.localeCompare(b.name))
   }
   if (props.templates) return templates.map(templatePreset)
-  return providerPresets.filter(preset => (preset.domain ?? 'llm') === props.presetDomain)
+  return providerPresets
+    .filter(preset => (preset.domain ?? 'llm') === props.presetDomain)
+    .map(preset => props.presetDomain === 'llm' ? { ...preset, icon: modelSourceLogoForKey(preset.id) } : preset)
 })
 // Only the LLM domain offers a free-form "custom" entry; the others (video,
 // speech, transcription) always start on a concrete preset.

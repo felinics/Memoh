@@ -30,6 +30,7 @@ import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import { avatarInitials } from '@/composables/useAvatarInitials'
 import {
   isMonochromeLogo,
+  providerLogo,
   MODEL_SOURCES,
   modelSourceLogo,
   providerCatalogEntry,
@@ -273,9 +274,9 @@ function openAddProvider() {
               <template #leading>
                 <span class="flex size-10 items-center justify-center rounded-full bg-muted">
                   <ProviderIcon
-                    v-if="card.provider.icon"
-                    :icon="card.provider.icon"
-                    :monochrome="isMonochromeLogo(card.provider.icon)"
+                    v-if="providerLogo(card.provider)"
+                    :icon="providerLogo(card.provider)!"
+                    :monochrome="isMonochromeLogo(providerLogo(card.provider))"
                     size="1.5em"
                   />
                   <span
@@ -310,7 +311,8 @@ function openAddProvider() {
               <template #leading>
                 <span class="flex size-10 items-center justify-center rounded-full bg-muted">
                   <ProviderIcon
-                    :icon="modelSourceLogo(card.source)"
+                    v-if="modelSourceLogo(card.source)"
+                    :icon="modelSourceLogo(card.source)!"
                     :monochrome="isMonochromeLogo(modelSourceLogo(card.source))"
                     size="1.5em"
                   >
@@ -318,6 +320,12 @@ function openAddProvider() {
                       {{ avatarInitials(card.source.name, '?') }}
                     </span>
                   </ProviderIcon>
+                  <span
+                    v-else
+                    class="text-xs font-medium text-muted-foreground"
+                  >
+                    {{ avatarInitials(card.source.name, '?') }}
+                  </span>
                 </span>
               </template>
             </BackendCard>
