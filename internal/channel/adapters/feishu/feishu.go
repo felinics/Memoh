@@ -776,7 +776,7 @@ func (a *FeishuAdapter) sendAttachment(ctx context.Context, client *lark.Client,
 		if isFeishuImageAttachment(typeProbe) {
 			uploadReq := larkim.NewCreateImageReqBuilder().
 				Body(larkim.NewCreateImageReqBodyBuilder().
-					ImageType(larkim.ImageTypeMessage).
+					ImageType(larkim.CreateImageImageTypeMessage).
 					Image(reader).
 					Build()).
 				Build()
@@ -930,20 +930,20 @@ func resolveFeishuFileType(name, mime string) string {
 	lowerName := strings.ToLower(strings.TrimSpace(name))
 	switch {
 	case strings.Contains(lower, "mp4") || strings.Contains(lower, "video"):
-		return larkim.FileTypeMp4
+		return larkim.CreateFileFileTypeMp4
 	case strings.Contains(lower, "pdf"):
-		return larkim.FileTypePdf
+		return larkim.CreateFileFileTypePdf
 	case strings.Contains(lower, "word") || strings.Contains(lower, "msword") || strings.HasSuffix(lowerName, ".doc") || strings.HasSuffix(lowerName, ".docx"):
-		return larkim.FileTypeDoc
+		return larkim.CreateFileFileTypeDoc
 	case strings.Contains(lower, "excel") || strings.Contains(lower, "spreadsheet") || strings.HasSuffix(lowerName, ".xls") || strings.HasSuffix(lowerName, ".xlsx"):
-		return larkim.FileTypeXls
+		return larkim.CreateFileFileTypeXls
 	case strings.Contains(lower, "powerpoint") || strings.Contains(lower, "presentation") || strings.HasSuffix(lowerName, ".ppt") || strings.HasSuffix(lowerName, ".pptx"):
-		return larkim.FileTypePpt
+		return larkim.CreateFileFileTypePpt
 	case strings.Contains(lower, "zip") || strings.Contains(lower, "compressed") || strings.Contains(lower, "archive"):
-		return larkim.FileTypeStream
+		return larkim.CreateFileFileTypeStream
 	case strings.HasSuffix(lowerName, ".zip") || strings.HasSuffix(lowerName, ".tar") || strings.HasSuffix(lowerName, ".tgz") || strings.HasSuffix(lowerName, ".tar.gz") || strings.HasSuffix(lowerName, ".rar") || strings.HasSuffix(lowerName, ".7z") || strings.HasSuffix(lowerName, ".gz") || strings.HasSuffix(lowerName, ".bz2") || strings.HasSuffix(lowerName, ".xz"):
-		return larkim.FileTypeStream
+		return larkim.CreateFileFileTypeStream
 	default:
-		return larkim.FileTypeStream
+		return larkim.CreateFileFileTypeStream
 	}
 }

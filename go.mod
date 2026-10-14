@@ -33,7 +33,7 @@ require (
 	github.com/kenshaw/emoji v0.4.1
 	github.com/labstack/echo-jwt/v4 v4.4.0
 	github.com/labstack/echo/v4 v4.15.0
-	github.com/larksuite/oapi-sdk-go/v3 v3.5.3
+	github.com/larksuite/oapi-sdk-go/v3 v3.12.1
 	github.com/line/line-bot-sdk-go/v8 v8.20.1
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/opencontainers/image-spec v1.1.1

@@ -310,14 +310,14 @@ func TestResolveFeishuFileType(t *testing.T) {
 		mime string
 		want string
 	}{
-		{name: "video mime", file: "clip.bin", mime: "video/mp4", want: larkim.FileTypeMp4},
-		{name: "pdf mime", file: "doc.bin", mime: "application/pdf", want: larkim.FileTypePdf},
-		{name: "doc ext", file: "a.docx", mime: "application/octet-stream", want: larkim.FileTypeDoc},
-		{name: "xls ext", file: "a.xlsx", mime: "application/octet-stream", want: larkim.FileTypeXls},
-		{name: "ppt ext", file: "a.pptx", mime: "application/octet-stream", want: larkim.FileTypePpt},
-		{name: "zip mime", file: "a.bin", mime: "application/zip", want: larkim.FileTypeStream},
-		{name: "tar gz ext", file: "backup.tar.gz", mime: "application/octet-stream", want: larkim.FileTypeStream},
-		{name: "default stream", file: "notes.txt", mime: "text/plain", want: larkim.FileTypeStream},
+		{name: "video mime", file: "clip.bin", mime: "video/mp4", want: larkim.CreateFileFileTypeMp4},
+		{name: "pdf mime", file: "doc.bin", mime: "application/pdf", want: larkim.CreateFileFileTypePdf},
+		{name: "doc ext", file: "a.docx", mime: "application/octet-stream", want: larkim.CreateFileFileTypeDoc},
+		{name: "xls ext", file: "a.xlsx", mime: "application/octet-stream", want: larkim.CreateFileFileTypeXls},
+		{name: "ppt ext", file: "a.pptx", mime: "application/octet-stream", want: larkim.CreateFileFileTypePpt},
+		{name: "zip mime", file: "a.bin", mime: "application/zip", want: larkim.CreateFileFileTypeStream},
+		{name: "tar gz ext", file: "backup.tar.gz", mime: "application/octet-stream", want: larkim.CreateFileFileTypeStream},
+		{name: "default stream", file: "notes.txt", mime: "text/plain", want: larkim.CreateFileFileTypeStream},
 	}
 	for _, tc := range cases {
 		tc := tc
