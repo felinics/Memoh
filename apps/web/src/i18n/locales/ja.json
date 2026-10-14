@@ -1874,7 +1874,6 @@
     "managedEmptyDescription": "認証を完了してから、管理対象の Model カタログを更新してください。",
     "draftEmptyDescription": "手動で追加するか、API キーを入力してこのプロバイダーから完全なリストをインポートします。",
     "sourcePreviewLoading": "models.dev からモデル一覧を読み込んでいます…",
-    "sourcePreviewHint": "models.dev に載っているこのプロバイダーのモデルです。プロバイダーを作成すると無効の状態でインポートされます。",
     "importFromCatalog": "models.dev のカタログからインポート",
     "importFromEndpoint": "プロバイダーのエンドポイントから取得",
     "importFromCatalogHint": "カタログにあって未登録のモデルを無効の状態で追加し、既存のモデルは機能情報だけを更新します。有効・無効と説明はそのままです。",

@@ -1905,7 +1905,6 @@
     "managedEmptyDescription": "Authorize the provider, then refresh the managed model catalog.",
     "draftEmptyDescription": "Add one manually, or enter an API key to import the full list from this provider.",
     "sourcePreviewLoading": "Loading the model list from models.dev…",
-    "sourcePreviewHint": "These are the provider's models on models.dev. Creating the provider imports them, disabled.",
     "importFromCatalog": "Import from the models.dev catalog",
     "importFromEndpoint": "List the provider's endpoint",
     "importFromCatalogHint": "Adds the catalog models you do not have, disabled, and updates what the catalog says about the rest. Whether a model is enabled and its description stay as they are.",

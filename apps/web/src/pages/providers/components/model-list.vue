@@ -50,13 +50,6 @@
       {{ $t('models.sourcePreviewLoading') }}
     </InlineLoadingRow>
 
-    <p
-      v-else-if="preview && models && models.length > 0"
-      class="px-4 pb-2 text-body text-muted-foreground"
-    >
-      {{ $t('models.sourcePreviewHint') }}
-    </p>
-
     <template v-if="!previewLoading && models && models.length > 0">
       <div
         v-if="displayedModels.length > 0"

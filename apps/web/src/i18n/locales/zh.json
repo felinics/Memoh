@@ -1905,7 +1905,6 @@
     "managedEmptyDescription": "请先完成授权，再刷新托管模型目录。",
     "draftEmptyDescription": "手动添加，或填写 API 密钥后从该服务商导入完整列表。",
     "sourcePreviewLoading": "正在从 models.dev 读取模型列表…",
-    "sourcePreviewHint": "以下是 models.dev 上该服务商的模型，创建服务商后会导入为停用状态。",
     "importFromCatalog": "从 models.dev 目录导入",
     "importFromEndpoint": "从服务商接口拉取",
     "importFromCatalogHint": "新增目录中缺少的模型并设为停用，已有模型只更新能力信息，保留你的启用状态与描述。",
