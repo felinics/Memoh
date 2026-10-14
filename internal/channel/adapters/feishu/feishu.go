@@ -29,8 +29,9 @@ type assetOpener interface {
 
 // FeishuAdapter implements the channel.Adapter, channel.Sender, and channel.Receiver interfaces for Feishu.
 type FeishuAdapter struct {
-	logger *slog.Logger
-	assets assetOpener
+	logger  *slog.Logger
+	assets  assetOpener
+	cardKit feishuCardKitAvailability
 }
 
 const (
@@ -702,6 +703,7 @@ func (a *FeishuAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfi
 		client:        client,
 		receiveID:     receiveID,
 		receiveType:   receiveType,
+		useCardKit:    a.cardKit.available(cfg.ID),
 		patchInterval: feishuStreamPatchInterval,
 	}, nil
 }

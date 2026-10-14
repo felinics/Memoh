@@ -7,7 +7,7 @@ import (
 	"github.com/felinics/memoh/internal/channel/partsfixture"
 )
 
-// TestCanonicalPartsRendering pins the Feishu adapter's lark_md output for
+// TestCanonicalPartsRendering pins the Feishu adapter's card markdown output for
 // the shared canonical fixture.
 func TestCanonicalPartsRendering(t *testing.T) {
 	t.Parallel()
