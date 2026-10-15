@@ -3,7 +3,13 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, ref, shallowRef } from 'vue'
 
 vi.mock('./icons.ts', () => ({ iconMap: {} }))
-vi.mock('./preload', () => ({ providerIconSource: (url: string) => shallowRef(url.includes('/blocked') ? null : url) }))
+// The preload hands back the fetched bytes as a data URL, null for a native
+// rejection, and the raw URL when its own request failed.
+vi.mock('./preload', () => ({
+  providerIconSource: (url: string) => shallowRef(
+    url.includes('/blocked') ? null : url.includes('/mono.svg') ? `data:image/svg+xml;base64,${btoa(url)}` : url,
+  ),
+}))
 import ProviderIcon from './index.vue'
 
 let app: ReturnType<typeof createApp> | undefined
@@ -66,7 +72,26 @@ it('paints a monochrome logo in the text color through its shape', async () => {
   const mask = root.querySelector('span[role="img"]') as HTMLElement
   expect(mask.className).toContain('bg-current')
   expect(mask.style.width).toBe('1.5em')
-  expect(mask.getAttribute('style')).toContain('mono.svg')
+  expect(mask.getAttribute('style')).toContain('data:image/svg+xml')
+})
+
+// A mask reports no load error, so a monochrome logo the preload could not
+// fetch goes through the image, whose error falls back to the caller's slot
+// instead of leaving an invisible box.
+it('falls back to the caller slot when a monochrome logo cannot be fetched', async () => {
+  const root = document.createElement('div')
+  document.body.append(root)
+  app = createApp(() => h(ProviderIcon, { icon: 'https://example.com/mono-dead.svg', size: '1.5em', monochrome: true }, {
+    default: () => h('svg', { 'data-fallback': '' }),
+  }))
+  app.mount(root)
+  expect(root.querySelector('span[role="img"]')).toBeNull()
+  const img = root.querySelector('img')!
+  expect(img.getAttribute('src')).toBe('https://example.com/mono-dead.svg')
+  img.dispatchEvent(new Event('error'))
+  await nextTick()
+  expect(root.querySelector('img')).toBeNull()
+  expect(root.querySelector('svg[data-fallback]')).not.toBeNull()
 })
 
 it('reads a unitless size string as pixels, so a masked logo keeps its size', async () => {

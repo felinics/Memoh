@@ -59,6 +59,19 @@ describe('reasoningFromCatalog', () => {
   it('reads an empty option list as always reasoning', () => {
     expect(reasoningOf('minimax', 'MiniMax-M2.7', 'openai-completions')).toEqual({})
   })
+
+  // The server sends Gemini thinking as a budget or a level and has no wire
+  // for a bare switch, so declaring one would offer a control that never
+  // reaches the model.
+  it('leaves a Google model that only offers a switch without a control', () => {
+    expect(reasoningFromCatalog({ id: 'gemma-4-31b-it', reasoning: true, reasoning_options: [{ type: 'toggle' }] }, 'google-generative-ai'))
+      .toEqual({ off: 'rejected' })
+  })
+
+  it('drops null and empty effort values the catalog lists', () => {
+    expect(reasoningFromCatalog({ id: 'sarvam-m', reasoning: true, reasoning_options: [{ type: 'effort', values: [null, 'low', '', 'high'] }] }, 'openai-completions'))
+      .toEqual({ efforts: ['low', 'high'], dialect: 'tier' })
+  })
 })
 
 describe('catalogModelsFor', () => {

@@ -23,6 +23,7 @@ vi.mock('vue-i18n', () => ({
 }))
 
 vi.mock('@pinia/colada', () => ({
+  defineQueryOptions: (options: unknown) => options,
   useQueryCache: () => ({
     setQueryData: mocks.setQueryData,
     invalidateQueries: mocks.invalidateQueries,

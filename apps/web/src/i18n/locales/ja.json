@@ -1957,6 +1957,7 @@
     "importFailed": "モデルのインポートに失敗しました",
     "refreshModels": "Model を更新",
     "refreshSuccess": "Model カタログを更新しました: {created} 件追加、{updated} 件更新",
+    "catalogUnavailable": "models.dev に接続できなかったため、プロバイダーのエンドポイントから Model をインポートしました",
     "refreshFailed": "Model カタログの更新に失敗しました",
     "refreshConfirmHint": "このアカウントで現在利用できる最新の Model を取得し、利用できない Model を選択肢から除外します。",
     "importConfirmHint": "このプロバイダーで現在利用できる Model を取得してインポートします。",

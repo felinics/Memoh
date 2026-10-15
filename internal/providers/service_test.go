@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -862,12 +863,15 @@ func TestFetchRemoteModelsViaSDK(t *testing.T) {
 		if remoteModels[1].Type != string(models.ModelTypeEmbedding) {
 			t.Fatalf("expected embedding type, got %q", remoteModels[1].Type)
 		}
-		if remoteModels[1].Dimensions == nil || *remoteModels[1].Dimensions != 5 {
-			t.Fatalf("expected inferred embedding dimensions 5, got %v", remoteModels[1].Dimensions)
+		if remoteModels[1].Dimensions != nil {
+			t.Fatalf("listing must leave the vector size to the model's creation, got %d", *remoteModels[1].Dimensions)
 		}
 	})
 
-	t.Run("google skips embedding when dimensions probe fails", func(t *testing.T) {
+	// The vector size is probed when the model is created, on its own time; a
+	// listing that probed would spend its budget on every embedding model and
+	// drop the ones whose probe failed before anyone saw them.
+	t.Run("google lists embedding models without probing their dimensions", func(t *testing.T) {
 		t.Parallel()
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -888,6 +892,7 @@ func TestFetchRemoteModelsViaSDK(t *testing.T) {
 					},
 				})
 			case "/models/gemini-embedding-001:embedContent":
+				t.Errorf("listing probed the dimensions of %q", r.URL.Path)
 				http.Error(w, `{"error":{"message":"quota exceeded"}}`, http.StatusTooManyRequests)
 			default:
 				t.Fatalf("unexpected path %q", r.URL.Path)
@@ -903,11 +908,78 @@ func TestFetchRemoteModelsViaSDK(t *testing.T) {
 		if err != nil {
 			t.Fatalf("fetch remote models: %v", err)
 		}
-		if len(remoteModels) != 1 {
-			t.Fatalf("expected only chat model after failed embedding probe, got %d", len(remoteModels))
+		if len(remoteModels) != 2 || remoteModels[1].ID != "gemini-embedding-001" || remoteModels[1].Dimensions != nil {
+			t.Fatalf("remote models = %+v, want the chat model and the unprobed embedding model", remoteModels)
 		}
-		if remoteModels[0].ID != "gemini-2.0-flash" {
-			t.Fatalf("expected chat model to still import, got %q", remoteModels[0].ID)
+	})
+
+	// Google lists embedding models through a second request to the same
+	// endpoint. The chat models have already been listed by then, so a failure
+	// of the second request keeps them instead of failing the whole listing.
+	t.Run("google keeps the chat models when the embedding listing fails", func(t *testing.T) {
+		t.Parallel()
+
+		var calls atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/models" {
+				t.Fatalf("unexpected path %q", r.URL.Path)
+			}
+			if calls.Add(1) > 1 {
+				http.Error(w, `{"error":{"message":"backend error"}}`, http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"models": []map[string]any{{
+					"name":                       "models/gemini-2.0-flash",
+					"displayName":                "Gemini 2.0 Flash",
+					"supportedGenerationMethods": []string{"generateContent", "countTokens"},
+				}},
+			})
+		}))
+		defer server.Close()
+
+		s := &Service{}
+		remoteModels, err := s.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+			ClientType: string(models.ClientTypeGoogleGenerativeAI),
+			Config:     []byte(`{"base_url":"` + server.URL + `","api_key":"gm-test"}`),
+		})
+		if err != nil {
+			t.Fatalf("fetch remote models: %v", err)
+		}
+		if len(remoteModels) != 1 || remoteModels[0].ID != "gemini-2.0-flash" {
+			t.Fatalf("remote models = %+v, want the chat model alone", remoteModels)
+		}
+	})
+
+	// A Google model serving both generateContent and embedContent is returned
+	// by both listings; it must be imported once.
+	t.Run("google lists a model serving both methods once", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/models" {
+				t.Fatalf("unexpected path %q", r.URL.Path)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"models": []map[string]any{{
+					"name":                       "models/gemini-dual",
+					"displayName":                "Gemini Dual",
+					"supportedGenerationMethods": []string{"generateContent", "embedContent"},
+				}},
+			})
+		}))
+		defer server.Close()
+
+		s := &Service{}
+		remoteModels, err := s.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+			ClientType: string(models.ClientTypeGoogleGenerativeAI),
+			Config:     []byte(`{"base_url":"` + server.URL + `","api_key":"gm-test"}`),
+		})
+		if err != nil {
+			t.Fatalf("fetch remote models: %v", err)
+		}
+		if len(remoteModels) != 1 || remoteModels[0].ID != "gemini-dual" || remoteModels[0].Type != string(models.ModelTypeChat) {
+			t.Fatalf("remote models = %+v, want the dual model once, as chat", remoteModels)
 		}
 	})
 
@@ -924,7 +996,7 @@ func TestFetchRemoteModelsViaSDK(t *testing.T) {
 					},
 				})
 			case "/embeddings":
-				// The dimensions probe of the model the id names an embedding model.
+				t.Errorf("listing probed the dimensions of an embedding model")
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"object": "list",
 					"data":   []map[string]any{{"object": "embedding", "index": 0, "embedding": []float64{0.1, 0.2, 0.3}}},
@@ -954,9 +1026,10 @@ func TestFetchRemoteModelsViaSDK(t *testing.T) {
 			t.Fatalf("expected Name to fall back to ID when DisplayName is empty, got %q", remoteModels[0].Name)
 		}
 		// The OpenAI protocol lists embedding models as chat; the id decides.
+		// The vector size is left to the model's creation.
 		embedding := remoteModels[1]
-		if embedding.Type != string(models.ModelTypeEmbedding) || embedding.Dimensions == nil || *embedding.Dimensions != 3 {
-			t.Fatalf("embedding model = %+v, want type embedding with 3 dimensions", embedding)
+		if embedding.Type != string(models.ModelTypeEmbedding) || embedding.Dimensions != nil {
+			t.Fatalf("embedding model = %+v, want type embedding without dimensions", embedding)
 		}
 	})
 }
@@ -1209,7 +1282,10 @@ func TestLooksLikeEmbeddingModel(t *testing.T) {
 		"text-embedding-3-small":   true,
 		"gemini-embedding-001":     true,
 		"Qwen/Qwen3-Embedding-8B":  true,
+		"embeddinggemma-300m":      true,
+		"nomic-embed-text":         true,
 		"gpt-5.1":                  false,
+		"chat-prembed":             false,
 		"deepseek-v4-pro":          false,
 		"claude-sonnet-4-20250514": false,
 	} {

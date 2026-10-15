@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/felinics/memoh/internal/models"
@@ -165,6 +166,33 @@ type CatalogModel struct {
 	ModelID string             `json:"model_id"`
 	Name    string             `json:"name,omitempty"`
 	Config  models.ModelConfig `json:"config"`
+}
+
+// UnmarshalJSON reads config in any schema version, as a single model's
+// AddRequest does; see models.DecodeRequestModelConfig. A version 1 shape sent
+// by an older client upgrades instead of losing its capabilities, and the
+// result is normalized so a refresh compares it with the stored row like for
+// like.
+func (m *CatalogModel) UnmarshalJSON(data []byte) error {
+	type plain CatalogModel
+	var body struct {
+		plain
+		Config json.RawMessage `json:"config"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		return err
+	}
+	*m = CatalogModel(body.plain)
+	if len(body.Config) == 0 || string(body.Config) == "null" {
+		m.Config = models.ModelConfig{}
+		return nil
+	}
+	config, err := models.DecodeRequestModelConfig(body.Config, models.ConfigContext{ModelID: m.ModelID, Type: models.ModelTypeChat})
+	if err != nil {
+		return err
+	}
+	m.Config = config
+	return nil
 }
 
 // ImportModelsResponse represents the response for importing models.

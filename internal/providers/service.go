@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -382,9 +383,44 @@ type listedModel struct {
 	Type        string
 }
 
+// embeddingModelID matches an id in which "embed" starts a word: text-embedding-3,
+// nomic-embed-text, embeddinggemma-300m, but not an id that merely contains it.
+var embeddingModelID = regexp.MustCompile(`(?i)(?:^|[^a-z])embed`)
+
 // looksLikeEmbeddingModel reports whether a model id names an embedding model.
 func looksLikeEmbeddingModel(modelID string) bool {
-	return strings.Contains(strings.ToLower(modelID), "embed")
+	return embeddingModelID.MatchString(modelID)
+}
+
+// listGoogleEmbeddingModels lists the embedding models of a Google provider
+// that listed does not already hold. Google lists them through a second request
+// to the same endpoint, so it runs on its own time, and it is best effort: the
+// chat models have already been listed, so a failure here is logged and keeps
+// them. A model serving both methods is listed by both requests and kept once.
+func (s *Service) listGoogleEmbeddingModels(ctx context.Context, baseURL, apiKey string, listed []listedModel) []listedModel {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	embeddingModels, err := models.ListGoogleEmbeddingModels(ctx, baseURL, apiKey, probeTimeout, nil)
+	if err != nil {
+		logger := s.logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.WarnContext(ctx, "skip google embedding models because listing failed", slog.Any("error", err))
+		return nil
+	}
+	seen := make(map[string]struct{}, len(listed))
+	for _, m := range listed {
+		seen[m.ID] = struct{}{}
+	}
+	out := make([]listedModel, 0, len(embeddingModels))
+	for _, m := range embeddingModels {
+		if _, dup := seen[m.ID]; dup {
+			continue
+		}
+		out = append(out, listedModel{ID: m.ID, DisplayName: m.DisplayName, Type: string(models.ModelTypeEmbedding)})
+	}
+	return out
 }
 
 func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {
@@ -403,7 +439,8 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 
 	sdkProvider := models.NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
 
-	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	parent := ctx
+	ctx, cancel := context.WithTimeout(parent, probeTimeout)
 	defer cancel()
 
 	sdkModels, err := sdkProvider.ListModels(ctx)
@@ -414,15 +451,8 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 	for _, m := range sdkModels {
 		listed = append(listed, listedModel{ID: m.ID, DisplayName: m.DisplayName, Type: string(models.ModelTypeChat)})
 	}
-	// Google lists embedding models apart from chat models.
 	if clientType == models.ClientTypeGoogleGenerativeAI {
-		embeddingModels, err := models.ListGoogleEmbeddingModels(ctx, baseURL, creds.APIKey, probeTimeout, nil)
-		if err != nil {
-			return nil, errs.WrapDependency(err, "list embedding models")
-		}
-		for _, m := range embeddingModels {
-			listed = append(listed, listedModel{ID: m.ID, DisplayName: m.DisplayName, Type: string(models.ModelTypeEmbedding)})
-		}
+		listed = append(listed, s.listGoogleEmbeddingModels(parent, baseURL, creds.APIKey, listed)...)
 	}
 
 	liveMaxOutput := fetchMaxOutputTokens(ctx, clientType, baseURL, creds.APIKey)
@@ -439,24 +469,14 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 		if name == "" {
 			name = m.ID
 		}
-		var dimensions *int
-		if modelType == models.ModelTypeEmbedding {
-			dim, err := models.InferEmbeddingDimensions(ctx, string(clientType), baseURL, creds.APIKey, m.ID, probeTimeout, nil)
-			if err != nil {
-				logger := s.logger
-				if logger == nil {
-					logger = slog.Default()
-				}
-				logger.WarnContext(ctx, "skip embedding model import because dimensions probe failed", slog.String("model_id", m.ID), slog.Any("error", err))
-				continue
-			}
-			dimensions = &dim
-		}
+		// An embedding model's vector size is not listed. The model service
+		// probes it when the model is created, on its own time, so a slow or
+		// refused probe skips that one model instead of spending this list's
+		// budget or dropping the model before anyone sees it.
 		remote := RemoteModel{
-			ID:         m.ID,
-			Name:       name,
-			Type:       string(modelType),
-			Dimensions: dimensions,
+			ID:   m.ID,
+			Name: name,
+			Type: string(modelType),
 		}
 		if clientType == models.ClientTypeOpenCodeGo && modelType == models.ModelTypeChat {
 			remote.Compatibilities = []string{models.CompatToolCall, models.CompatReasoning}

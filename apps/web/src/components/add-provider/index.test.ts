@@ -32,6 +32,7 @@ vi.mock('@pinia/colada', async () => {
   return {
     useMutation: () => ({ mutateAsync: vi.fn(), isLoading: ref(false) }),
     useQueryCache: () => ({ invalidateQueries: vi.fn() }),
+    defineQueryOptions: (options: unknown) => options,
   }
 })
 

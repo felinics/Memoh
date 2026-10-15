@@ -6,9 +6,12 @@
     v-bind="$attrs"
   />
   <!-- A monochrome logo drawn in currentColor cannot inherit the text color
-       through an <img>, so it paints the text color through the logo's shape. -->
+       through an <img>, so it paints the text color through the logo's shape.
+       Only a logo the preload fetched is painted this way: a mask reports no
+       load error, so a URL it could not fetch goes through the <img> below,
+       whose error falls back to the slot. -->
   <span
-    v-else-if="monochrome && imageSource"
+    v-else-if="monochrome && maskSource"
     role="img"
     aria-hidden="true"
     class="inline-block shrink-0 bg-current"
@@ -67,6 +70,9 @@ const source = computed(() => isUrl.value && typeof Image !== 'undefined'
   ? providerIconSource(props.icon)
   : undefined)
 const imageSource = computed(() => source.value ? source.value.value : '')
+// The fetched bytes of a logo; a raw URL means the preload fell back to the
+// browser's own request, which only the <img> branch can watch fail.
+const maskSource = computed(() => imageSource.value?.startsWith('data:') ? imageSource.value : '')
 const failedSource = ref('')
 
 function onImageError(event: Event): void {
@@ -87,7 +93,7 @@ const numericSize = computed(() => {
 const cssSize = computed(() => numericSize.value !== undefined ? `${numericSize.value}px` : props.size)
 
 const maskStyle = computed(() => {
-  const mask = `url("${imageSource.value}")`
+  const mask = `url("${maskSource.value}")`
   return {
     ...(cssSize.value ? { width: cssSize.value, height: cssSize.value } : {}),
     maskImage: mask,

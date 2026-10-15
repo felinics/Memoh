@@ -1988,6 +1988,7 @@
     "importFailed": "Failed to import models",
     "refreshModels": "Refresh Models",
     "refreshSuccess": "Model catalog refreshed: {created} added, {updated} updated",
+    "catalogUnavailable": "models.dev could not be reached, so the models were imported from the provider's endpoint instead",
     "refreshFailed": "Failed to refresh the model catalog",
     "refreshConfirmHint": "Fetch the latest models available to this account and remove unavailable models from model pickers.",
     "importConfirmHint": "Fetch and import the models currently available from this provider.",

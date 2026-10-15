@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"slices"
 	"testing"
 
@@ -259,6 +260,48 @@ func TestRefreshFromCatalogKeepsTheUsersChoices(t *testing.T) {
 	empty, _ := refreshFromCatalog(models.ModelConfig{}, catalog)
 	if empty.Description == nil || *empty.Description != catalogDescription {
 		t.Fatalf("description = %v, want the catalog's when the model has none", empty.Description)
+	}
+}
+
+// A provider created from the gallery records its catalog entry and its
+// models.dev source in its metadata. Its endpoint-only models are as unknown
+// as a template provider's and must not receive protocol-wide capability
+// guesses.
+func TestCatalogMetadataDisablesImplicitCapabilityDefaults(t *testing.T) {
+	t.Parallel()
+
+	for _, metadata := range []map[string]any{
+		{"catalog": "openai", "source": "openai"},
+		{"catalog": "ollama"},
+		{"source": "deepinfra"},
+	} {
+		if allowCustomModelCapabilityDefaults(providers.GetResponse{Metadata: metadata}) {
+			t.Fatalf("provider with metadata %v must not receive implicit capability defaults", metadata)
+		}
+	}
+	if !allowCustomModelCapabilityDefaults(providers.GetResponse{Metadata: map[string]any{"catalog": " ", "other": "x"}}) {
+		t.Fatal("blank catalog metadata must not count as a catalog")
+	}
+}
+
+// A catalog refresh compares the stored row with what the request carried.
+// Both go through the same decoding, so a catalog entry with blank or repeated
+// values reads as the row it produced and a second refresh changes nothing.
+func TestRefreshFromCatalogIsStableAcrossNormalization(t *testing.T) {
+	t.Parallel()
+
+	var req providers.ImportModelsRequest
+	raw := `{"models":[{"model_id":"m","config":{"schema_version":2,"tool_call":true,"reasoning":{"efforts":["","low","low","high"]}}}]}`
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		t.Fatal(err)
+	}
+	catalog := req.Models[0].Config
+	stored, changed := refreshFromCatalog(models.ModelConfig{}, catalog)
+	if !changed || stored.Reasoning == nil || !slices.Equal(stored.Reasoning.Efforts, []string{"low", "high"}) {
+		t.Fatalf("first refresh = %+v changed %v", stored, changed)
+	}
+	if _, again := refreshFromCatalog(stored, catalog); again {
+		t.Fatal("a second refresh with the same catalog entry reported a change")
 	}
 }
 

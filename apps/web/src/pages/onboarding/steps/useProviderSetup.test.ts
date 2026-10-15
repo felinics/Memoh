@@ -6,7 +6,7 @@ import type { ProviderPreset } from '@/constants/provider-presets'
 const mocks = vi.hoisted(() => ({
   deleteModel: vi.fn(),
   getProviderModels: vi.fn(),
-  loadModelsDevCatalog: vi.fn(),
+  fetchModelsDevCatalog: vi.fn(),
   getProviderByName: vi.fn(),
   importModels: vi.fn(),
   postProvider: vi.fn(),
@@ -40,7 +40,12 @@ vi.mock('@pinia/colada', async () => {
         },
       }
     },
-    useQueryCache: () => ({ invalidateQueries: mocks.invalidateQueries }),
+    useQueryCache: () => ({
+      invalidateQueries: mocks.invalidateQueries,
+      ensure: (options: { query: () => Promise<unknown> }) => options,
+      refresh: async (entry: { query: () => Promise<unknown> }) => ({ status: 'success', data: await entry.query() }),
+    }),
+    defineQueryOptions: (options: unknown) => options,
   }
 })
 
@@ -57,7 +62,7 @@ vi.mock('@memohai/sdk', () => ({
 
 vi.mock('@/lib/models-dev', async importOriginal => ({
   ...(await importOriginal<typeof import('@/lib/models-dev')>()),
-  loadModelsDevCatalog: mocks.loadModelsDevCatalog,
+  fetchModelsDevCatalog: mocks.fetchModelsDevCatalog,
 }))
 
 import { useProviderSetup } from './useProviderSetup'
@@ -89,7 +94,7 @@ describe('useProviderSetup', () => {
     vi.clearAllMocks()
     mocks.testProvider.mockResolvedValue({ data: { status: 'ok' } })
     mocks.importModels.mockResolvedValue({ data: { created: 2 } })
-    mocks.loadModelsDevCatalog.mockResolvedValue({
+    mocks.fetchModelsDevCatalog.mockResolvedValue({
       deepseek: { id: 'deepseek', models: { 'deepseek-v4-pro': { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', tool_call: true } } },
     })
     mocks.getProviderModels.mockResolvedValue({

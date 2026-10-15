@@ -6,7 +6,8 @@ export const MODELS_DEV_CATALOG_URL = 'https://models.dev/api.json'
 
 export interface ModelsDevReasoningOption {
   type: 'toggle' | 'effort' | 'budget_tokens' | string
-  values?: string[]
+  // Effort values; the catalog lists null for some models.
+  values?: (string | null)[]
   min?: number
   max?: number
 }
@@ -130,7 +131,7 @@ export function reasoningFromCatalog(model: ModelsDevModel, protocol: string): M
   let toggle = false
   let budget: { min?: number, max?: number } | undefined
   for (const option of options) {
-    if (option.type === 'effort') efforts = [...(option.values ?? [])]
+    if (option.type === 'effort') efforts = (option.values ?? []).filter((value): value is string => typeof value === 'string' && value !== '')
     else if (option.type === 'toggle') toggle = true
     else if (option.type === 'budget_tokens') budget = { min: option.min, max: option.max }
   }
@@ -158,9 +159,13 @@ export function reasoningFromCatalog(model: ModelsDevModel, protocol: string): M
       reasoning.off = 'accepted'
     }
   } else if (protocol === 'google-generative-ai') {
-    reasoning.dialect = efforts.length ? 'tier' : budget ? 'budget' : toggle ? 'toggle' : ''
-    // Gemini 2.5 turns off with a zero budget; without a switch it cannot.
-    const off = toggle || budget?.min === 0
+    // The server sends Gemini thinking as a budget or a level. A model that
+    // only offers a switch (Gemma 4) gets no control at all: declaring a
+    // toggle the server cannot send would offer a control that never reaches
+    // the model.
+    reasoning.dialect = efforts.length ? 'tier' : budget ? 'budget' : ''
+    // Gemini 2.5 turns off with a zero budget; otherwise it cannot.
+    const off = budget?.min === 0
     if (off) reasoning.toggle = true
     reasoning.off = off ? 'accepted' : 'rejected'
   } else {
@@ -205,19 +210,4 @@ function claudeReadsAdaptive(modelID: string): boolean {
 
 function isClaude4(modelID: string): boolean {
   return claudeVersion(modelID)?.[0] === 4
-}
-
-const CATALOG_TTL_MS = 30 * 60 * 1000
-let cached: { at: number, promise: Promise<ModelsDevCatalog> } | undefined
-
-// loadModelsDevCatalog shares one request per half hour between the gallery
-// preview and imports; a failed request is not kept.
-export function loadModelsDevCatalog(): Promise<ModelsDevCatalog> {
-  if (cached && Date.now() - cached.at < CATALOG_TTL_MS) return cached.promise
-  const promise = fetchModelsDevCatalog()
-  cached = { at: Date.now(), promise }
-  promise.catch(() => {
-    if (cached?.promise === promise) cached = undefined
-  })
-  return promise
 }

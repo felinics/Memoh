@@ -453,6 +453,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 				continue
 			}
 			h.logger.WarnContext(c.Request().Context(), "failed to import model", slog.String("model_id", m.ID), slog.Any("error", err))
+			resp.Skipped++
 			continue
 		}
 
@@ -561,6 +562,14 @@ func allowCustomModelCapabilityDefaults(provider providers.GetResponse) bool {
 		}
 		source, _ := metadata["source"].(string)
 		if strings.TrimSpace(source) != "" {
+			return false
+		}
+	}
+	// A provider created from the gallery records its catalog entry and its
+	// models.dev source. Its endpoint-only models are as unknown as a template
+	// provider's: the catalog did not list them, so nothing says what they do.
+	for _, key := range []string{"catalog", "source"} {
+		if value, _ := provider.Metadata[key].(string); strings.TrimSpace(value) != "" {
 			return false
 		}
 	}

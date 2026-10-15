@@ -164,7 +164,7 @@ Memoh/
 │   ├── docker-compose.selinux.yml # SELinux overlay compose
 │   └── app.dev.toml            #   Dev config (connects to devenv docker-compose)
 ├── docker/                     # Production Docker (Dockerfiles, entrypoints, nginx.conf, toolkit/)
-├── scripts/                    # Utility scripts (db-up, db-drop, release, install, sync-openrouter-models)
+├── scripts/                    # Utility scripts (db-up, db-drop, release, install)
 ├── docker-compose.yml          # Docker Compose orchestration (production)
 ├── mise.toml                   # mise tasks and tool version definitions
 ├── sqlc.yaml                   # sqlc code generation config
