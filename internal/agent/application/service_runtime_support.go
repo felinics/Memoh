@@ -480,6 +480,8 @@ func isRuntimeDecisionProjectionEvent(ev native.StreamEvent) bool {
 }
 
 func (s *Service) persistRuntimeLeadingUserMessage(ctx context.Context, req ChatRequest) (ChatRequest, *messagepkg.Message, error) {
+	ctx, cancelWrite := context.WithTimeout(ctx, terminalWriteTimeout)
+	defer cancelWrite()
 	if req.UserMessagePersisted || s == nil || s.messageService == nil || strings.TrimSpace(req.BotID) == "" {
 		return req, nil, nil
 	}

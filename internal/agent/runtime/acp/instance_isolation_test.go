@@ -75,3 +75,17 @@ func TestCloseBotAgentRuntimesLeavesOtherInstancesRunning(t *testing.T) {
 		t.Fatal("a runtime that names no instance must be closed too")
 	}
 }
+
+func TestWarmRuntimeNeverServesSubagent(t *testing.T) {
+	pool := newSessionPool(nil, nil, nil, fakeSessionGetter{session: SessionDescriptor{
+		BotID:       "bot-1",
+		BotAgentID:  "agent-grok",
+		SessionType: "subagent",
+		IsACP:       true,
+	}})
+	warm := warmInstanceRuntime("agent-grok")
+	injectRuntime(pool, warm)
+	if err := pool.BindRuntime(context.Background(), "bot-1", warm.id, "child-session", acpprofile.AgentACPID, "/data", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
+		t.Fatalf("binding an unmarked warm runtime to a subagent: error = %v, want ErrRuntimeBindRejected", err)
+	}
+}

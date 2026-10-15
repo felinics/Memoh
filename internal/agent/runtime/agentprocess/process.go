@@ -18,6 +18,8 @@ import (
 
 const stderrTailLimit = 8 * 1024
 
+var ErrTerminationUnconfirmed = errors.New("agent process termination was not confirmed")
+
 // Process is one long-lived command running through a workspace bridge exec
 // stream and exposed as an io.ReadWriter.
 type Process struct {
@@ -26,10 +28,11 @@ type Process struct {
 	stdout *io.PipeReader
 	done   chan struct{}
 
-	mu      sync.Mutex
-	closed  bool
-	tail    []byte
-	exitErr error
+	mu            sync.Mutex
+	closed        bool
+	tail          []byte
+	exitErr       error
+	exitConfirmed bool
 }
 
 // Start launches command without a bridge-side timeout. Closing the returned
@@ -97,11 +100,12 @@ func Start(ctx context.Context, client *bridge.Client, command, workDir string, 
 			case pb.ExecOutput_STDERR:
 				proc.appendStderr(output.GetData())
 			case pb.ExecOutput_EXIT:
+				proc.mu.Lock()
+				proc.exitConfirmed = true
 				if output.GetExitCode() != 0 {
-					proc.mu.Lock()
 					proc.exitErr = fmt.Errorf("agent process exited with code %d", output.GetExitCode())
-					proc.mu.Unlock()
 				}
+				proc.mu.Unlock()
 				_ = stdoutW.Close()
 				return
 			}
@@ -141,6 +145,41 @@ func (p *Process) Err() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.exitErr
+}
+
+// Stop terminates the process group and waits for the bridge's EXIT receipt.
+// A closed transport without that receipt leaves termination unconfirmed.
+func (p *Process) Stop(ctx context.Context) error {
+	confirmed := func() error {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if p.exitConfirmed {
+			return nil
+		}
+		return errors.Join(ErrTerminationUnconfirmed, p.exitErr)
+	}
+	select {
+	case <-p.done:
+		return confirmed()
+	default:
+	}
+	sent := make(chan error, 1)
+	go func() { sent <- p.stream.Terminate() }()
+	select {
+	case <-p.done:
+		return confirmed()
+	case <-sent:
+	case <-ctx.Done():
+		_ = p.Close()
+		return errors.Join(ErrTerminationUnconfirmed, ctx.Err())
+	}
+	select {
+	case <-p.done:
+		return confirmed()
+	case <-ctx.Done():
+		_ = p.Close()
+		return errors.Join(ErrTerminationUnconfirmed, ctx.Err())
+	}
 }
 
 // Close terminates the process and waits briefly for the stream to settle.

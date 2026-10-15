@@ -320,12 +320,18 @@ invalidated_sessions AS (
       -- Runtime continuity anchors (codex_thread_id, claude_session_id, and
       -- whatever future drivers store) must die with the history they resume,
       -- or the next turn replays the cleared conversation from the runtime's
-      -- own thread. Identity keys survive: keep only acp_agent_id.
-      runtime_metadata = CASE
-        WHEN session.runtime_metadata ? 'acp_agent_id'
-          THEN jsonb_build_object('acp_agent_id', session.runtime_metadata->'acp_agent_id')
-        ELSE '{}'::jsonb
-      END
+      -- own thread. Identity keys survive: acp_agent_id, and a subagent's
+      -- binding. So do external execution records: clearing history does not
+      -- stop what an unconfirmed run left in the workspace.
+      runtime_metadata = jsonb_strip_nulls(jsonb_build_object(
+        'acp_agent_id', session.runtime_metadata->'acp_agent_id',
+        'runtime_owner_account_id', CASE WHEN session.type = 'subagent' THEN session.runtime_metadata->'runtime_owner_account_id' END,
+        'project_path', CASE WHEN session.type = 'subagent' THEN session.runtime_metadata->'project_path' END,
+        'external_execution_run', session.runtime_metadata->'external_execution_run',
+        'external_termination_unconfirmed', session.runtime_metadata->'external_termination_unconfirmed',
+        'external_termination_reap', session.runtime_metadata->'external_termination_reap',
+        'external_termination_resolved', session.runtime_metadata->'external_termination_resolved'
+      ))
   FROM target_sessions target
   WHERE session.team_id = public.memoh_current_team_id()
     AND session.id = target.id
@@ -389,12 +395,16 @@ invalidated_session AS (
   SET compaction_epoch = session.compaction_epoch + 1,
       runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint,
       -- Same anchor scrub as ClearHistoryByBot: continuity keys die with the
-      -- history, identity (acp_agent_id) survives.
-      runtime_metadata = CASE
-        WHEN session.runtime_metadata ? 'acp_agent_id'
-          THEN jsonb_build_object('acp_agent_id', session.runtime_metadata->'acp_agent_id')
-        ELSE '{}'::jsonb
-      END
+      -- history, identity and external execution records survive.
+      runtime_metadata = jsonb_strip_nulls(jsonb_build_object(
+        'acp_agent_id', session.runtime_metadata->'acp_agent_id',
+        'runtime_owner_account_id', CASE WHEN session.type = 'subagent' THEN session.runtime_metadata->'runtime_owner_account_id' END,
+        'project_path', CASE WHEN session.type = 'subagent' THEN session.runtime_metadata->'project_path' END,
+        'external_execution_run', session.runtime_metadata->'external_execution_run',
+        'external_termination_unconfirmed', session.runtime_metadata->'external_termination_unconfirmed',
+        'external_termination_reap', session.runtime_metadata->'external_termination_reap',
+        'external_termination_resolved', session.runtime_metadata->'external_termination_resolved'
+      ))
   FROM target_session target
   WHERE session.team_id = public.memoh_current_team_id()
     AND session.id = target.id

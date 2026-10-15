@@ -2,6 +2,7 @@ package background
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -54,6 +55,9 @@ type SpawnBranch struct {
 
 // AgentTaskResult is the terminal output for one managed subagent run.
 type AgentTaskResult struct {
+	RuntimeType    string
+	BotAgentID     string
+	Usage          json.RawMessage
 	AgentID        string
 	AgentSessionID string
 	Message        string
@@ -63,6 +67,7 @@ type AgentTaskResult struct {
 	Status         TaskStatus
 	Report         string
 	Error          string
+	Code           string
 }
 
 // StartAgentTask registers a managed subagent task. Queued tasks are visible
@@ -177,6 +182,15 @@ func (m *Manager) CompleteAgentTask(taskID string, result AgentTaskResult) {
 	task.AgentModelID = result.ModelID
 	task.AgentProvider = result.Provider
 	task.AgentFork = result.Fork
+	if result.RuntimeType != "" {
+		task.Result = map[string]any{"runtime_type": result.RuntimeType, "bot_agent_id": result.BotAgentID, "usage_known": len(result.Usage) > 0}
+		if result.Code != "" {
+			task.Result["code"] = result.Code
+		}
+		if len(result.Usage) > 0 {
+			task.Result["usage"] = result.Usage
+		}
+	}
 	if result.Message != "" {
 		task.AgentMessage = result.Message
 	}

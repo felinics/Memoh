@@ -28,6 +28,10 @@ func (b *MemoryBackend) liveSnapshotLocked(key Key, now time.Time) (Snapshot, bo
 }
 
 func (b *MemoryBackend) EnqueueSteer(ctx context.Context, key Key, itemID, invocationID string, payload []byte) (SteerItem, error) {
+	return b.EnqueueSteerForRun(ctx, key, "", itemID, invocationID, payload)
+}
+
+func (b *MemoryBackend) EnqueueSteerForRun(ctx context.Context, key Key, runID, itemID, invocationID string, payload []byte) (SteerItem, error) {
 	if err := contextError(ctx); err != nil {
 		return SteerItem{}, err
 	}
@@ -43,12 +47,18 @@ func (b *MemoryBackend) EnqueueSteer(ctx context.Context, key Key, itemID, invoc
 	b.purgeLiveQueuesLocked(now)
 	state := b.steerQueues[key.String()]
 	if item, ok, err := replaySteer(state, invocationID, payload); ok {
+		if runID != "" && item.TargetRunID != runID {
+			return SteerItem{}, ErrCommandTargetMismatch
+		}
 		return item, err
 	}
 	snapshot, ok := b.liveSnapshotLocked(key, now)
 	run, active := activeRun(snapshot, ok)
 	if !active || state.ClosedRunID == run.RunID {
 		return SteerItem{}, ErrQueueNoActiveRun
+	}
+	if runID != "" && run.RunID != runID {
+		return SteerItem{}, ErrCommandTargetMismatch
 	}
 	if !SteerRunAvailable(run) {
 		return SteerItem{}, ErrQueueSteerUnsupported

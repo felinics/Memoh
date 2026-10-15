@@ -3,6 +3,8 @@ package client
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -224,5 +226,46 @@ func TestTerminalEndEventUsesPromptToolOutputLimit(t *testing.T) {
 	}
 	if truncated, _ := output["truncated"].(bool); !truncated {
 		t.Fatalf("terminal end truncated = %#v, want true", output["truncated"])
+	}
+}
+
+func TestTerminalProcessStopsWithItsTerminal(t *testing.T) {
+	for _, mode := range []string{"run ended", "killed", "session closed", "timed out"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			effect := filepath.Join(root, "effect")
+			runCtx, cancelRun := context.WithCancel(context.Background())
+			defer cancelRun()
+			timeout := int32(30)
+			if mode == "timed out" {
+				timeout = 1
+			}
+			manager := newTerminalManager(context.Background(), newTestBridgeClient(t, root), "/data", "/data", timeout, nil, nil, nil)
+			term, err := manager.CreateTerminal(context.Background(), acp.CreateTerminalRequest{Command: "sh", Args: []string{"-c", "sleep 2; touch " + effect}}, nil, terminalRuntimeScope{runContext: runCtx})
+			if err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(200 * time.Millisecond)
+			switch mode {
+			case "run ended":
+				cancelRun()
+			case "killed":
+				if _, err := manager.KillTerminal(context.Background(), acp.KillTerminalRequest{TerminalId: term.TerminalId}); err != nil {
+					t.Fatal(err)
+				}
+			case "session closed":
+				manager.killAll()
+			}
+			waitCtx, cancelWait := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancelWait()
+			if _, err := manager.WaitForTerminalExit(waitCtx, acp.WaitForTerminalExitRequest{TerminalId: term.TerminalId}); err != nil && mode != "session closed" {
+				t.Fatalf("terminal never reported its exit: %v", err)
+			}
+			time.Sleep(2500 * time.Millisecond)
+			if _, err := os.Stat(effect); err == nil {
+				t.Fatal("the terminal's process kept running after the terminal stopped")
+			}
+		})
 	}
 }

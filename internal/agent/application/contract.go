@@ -22,7 +22,8 @@ type ChatRequest struct {
 	discussPromptPrefix string
 	discussPromptSuffix string
 	// ShutdownResume rebuilds saved history without the transient channel pipeline.
-	ShutdownResume bool `json:"-"`
+	ShutdownResume             bool  `json:"-"`
+	RuntimeCanRequestUserInput *bool `json:"-"`
 	// OnModelPreferenceSettled releases subsequent picker writes once this
 	// turn can no longer overwrite them. It does not acknowledge generation.
 	OnModelPreferenceSettled func() `json:"-"`

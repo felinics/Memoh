@@ -56,6 +56,9 @@ func (c *clientCallbacks) CreateElicitation(ctx context.Context, request createE
 	if strings.TrimSpace(session.BotID) == "" || strings.TrimSpace(session.SessionID) == "" {
 		return acp.NewUnstableCreateElicitationResponseCancel(), nil
 	}
+	if session.IsSubagent {
+		return acp.NewUnstableCreateElicitationResponseDecline(), nil
+	}
 	acpSessionID := c.elicitationACPSessionID(request.SessionID)
 	if c.userInput == nil || !session.CanRequestUserInput {
 		return acp.NewUnstableCreateElicitationResponseCancel(), nil

@@ -21,6 +21,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
 )
 
 // Driver runs turns for one external agent runtime type.
@@ -62,6 +63,8 @@ type ModelCatalogProvider interface {
 }
 
 var ErrModelCatalogUnavailable = errors.New("external agent model catalog unavailable")
+
+var ErrTerminationUnconfirmed = errors.New("external agent execution termination was not confirmed")
 
 type Drivers []Driver
 
@@ -227,6 +230,7 @@ type PromptInput struct {
 	// RuntimeOwnerAccountID is the account whose workspace authority the
 	// runtime executes under.
 	RuntimeOwnerAccountID string
+	ActorUserID           string
 	// ChannelIdentityID identifies the acting user for tool attribution.
 	ChannelIdentityID string
 	// SessionToken authenticates runtime-side calls back into Memoh.
@@ -235,12 +239,42 @@ type PromptInput struct {
 	// the gateway is unavailable.
 	ToolHTTPURL string
 
-	// CanRequestUserInput reports whether the surface driving this turn can
-	// deliver interactive decisions such as approvals and ask_user.
+	// CanRequestUserInput permits interactive execution approvals. User questions
+	// additionally require CanAskUser; subagents cannot ask the user directly.
 	CanRequestUserInput bool
 
 	// Sink receives stream events as the turn runs. Never nil.
 	Sink EventSink
+}
+
+func (input PromptInput) IsSubagent() bool {
+	return strings.TrimSpace(input.SessionMode) == sessionmode.Subagent
+}
+
+// SubagentThreadEnv marks every process started for a managed subagent with
+// the child thread. Descendants inherit it, so Memoh can find and stop what the
+// child session left running when one of its runs does not finish.
+const SubagentThreadEnv = "MEMOH_SUBAGENT_THREAD"
+
+// SubagentThreadEnvEntry is the marker entry for a subagent thread.
+func SubagentThreadEnvEntry(threadID string) []string {
+	if threadID = strings.TrimSpace(threadID); threadID == "" {
+		return nil
+	}
+	return []string{SubagentThreadEnv + "=" + threadID}
+}
+
+// ProcessEnv is the marker for processes this prompt starts: the child thread
+// for a subagent, none for a conversation that shares its process.
+func (input PromptInput) ProcessEnv() []string {
+	if !input.IsSubagent() {
+		return nil
+	}
+	return SubagentThreadEnvEntry(input.ThreadID)
+}
+
+func (input PromptInput) CanAskUser() bool {
+	return input.CanRequestUserInput && !input.IsSubagent()
 }
 
 // Image is an inline prompt image.
@@ -285,6 +319,9 @@ type PromptResult struct {
 	// TurnCompleted reports whether the runtime finished the turn (as opposed
 	// to an interrupt or failure part-way).
 	TurnCompleted bool
+	// TerminationUnconfirmed prevents re-entry after an interrupted execution
+	// whose process exit could not be confirmed. Preserve its partial result.
+	TerminationUnconfirmed bool
 	// PublishHead asks the application to publish a completed round's run ID
 	// with its messages so warm runtimes can detect another process's progress.
 	PublishHead bool

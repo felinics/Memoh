@@ -73,6 +73,45 @@ func TestRenderRuntimeContextMarkdownIncludesDynamicRuntimeAndRecall(t *testing.
 	}
 }
 
+func TestRuntimeContextPreservesMemohToolRoutingAcrossExternalRuntimes(t *testing.T) {
+	for _, runtime := range []string{"codex", "claude-code", "acp"} {
+		for _, large := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/large=%t", runtime, large), func(t *testing.T) {
+				input := runtimeContextRenderInput{AgentID: runtime, BotID: "bot", SessionID: "session", ProjectPath: "/data/project"}
+				if large {
+					input.SystemFilesMaxBytes = 512
+					input.Files = []agentpkg.SystemFile{{Filename: "AGENTS.md", Content: strings.Repeat("Workspace guidance.\n", 8000)}}
+					for i := range 900 {
+						input.Attachments = append(input.Attachments, ChatAttachment{Name: fmt.Sprintf("report-%03d-%s.pdf", i, strings.Repeat("x", 80)), Path: fmt.Sprintf("/data/uploads/report-%03d.pdf", i)})
+					}
+				}
+				sections := buildRuntimeContextSections(input)
+				query := "current task remains outside the runtime resource"
+				markdown, uri, _ := runtimeContextViaContextView(t.Context(), nil, sections, query)
+				for _, required := range []string{
+					"`memoh`", "`Memoh Tools`", "`Memoh_Tools`", "`mcp__memoh__*`", "`mcp__Memoh_Tools__*`",
+					"exact tool names", "filter the tool catalog", "`ALL_TOOLS` when available", "Memoh tools needed for this task",
+					"When a task specifies a Memoh tool", "unavailable after discovery", "silently substituting",
+					"When a task requires Memoh-managed subagents", "`spawn_agent`", "returned `agent_id`",
+					"Runtime-native collaboration or Agent workers", "must not substitute for that request",
+					"Use available runtime-native tools normally when the task does not specify a tool source",
+				} {
+					if !strings.Contains(markdown, required) {
+						t.Errorf("rendered runtime context lacks routing contract %q", required)
+					}
+				}
+				withoutQuery, _, _ := runtimeContextViaContextView(t.Context(), nil, sections, "")
+				if uri != runtimeContextURI || strings.Contains(markdown, query) || markdown != withoutQuery {
+					t.Fatal("routing guidance changed the virtual resource or embedded the current query")
+				}
+				if large && (len(markdown) > 64*1024 || !strings.Contains(markdown, "[memoh pruned]")) {
+					t.Fatalf("large context did not exercise bounded rendering: bytes=%d", len(markdown))
+				}
+			})
+		}
+	}
+}
+
 func TestRenderRuntimeContextMarkdownRespectsSystemFilesBudget(t *testing.T) {
 	t.Parallel()
 

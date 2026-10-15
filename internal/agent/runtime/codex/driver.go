@@ -99,7 +99,8 @@ func (d *Driver) SetLauncherResolver(r external.LauncherResolver) {
 func (d *Driver) ResetBot(botID string) { d.CloseBot(botID) }
 
 func (d *Driver) ResetBotAgent(botID, botAgentID string) {
-	d.servers.recycle(serverKey(botID, botAgentID))
+	prefix := serverKey(botID, botAgentID)
+	d.servers.recycleWhere(func(key string) bool { return key == prefix || strings.HasPrefix(key, prefix+"\x00") })
 }
 
 func serverKey(botID, botAgentID string) string {
@@ -108,6 +109,7 @@ func serverKey(botID, botAgentID string) string {
 
 func splitServerKey(key string) (string, string) {
 	botID, botAgentID, _ := strings.Cut(key, "\x00")
+	botAgentID, _, _ = strings.Cut(botAgentID, "\x00")
 	return botID, botAgentID
 }
 
@@ -255,7 +257,7 @@ func (d *Driver) nativeModels(ctx context.Context, botID, botAgentID string, cfg
 
 // Prompt implements external.Driver: it runs one turn on the bot's
 // app-server, streaming events through the sink.
-func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (external.PromptResult, error) {
+func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (result external.PromptResult, resultErr error) {
 	if input.Command == "goal" && !goalExecutionAllowed(input) {
 		return external.PromptResult{}, external.Fail(external.FailureGoalRequiresDefaultMode, nil)
 	}
@@ -279,11 +281,16 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		return external.PromptResult{}, err
 	}
 
-	srv, releaseServer, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)
+	srv, releaseServer, err := d.acquireTurnServer(ctx, input)
 	if err != nil {
 		return external.PromptResult{}, wrapServerError(err)
 	}
 	defer releaseServer()
+	if input.IsSubagent() {
+		defer func() {
+			resultErr = errors.Join(resultErr, d.finishSubagentPrompt(ctx, input, srv, &result))
+		}()
+	}
 	if err := srv.ensureAuth(ctx, cfg); err != nil {
 		if errors.Is(err, ErrAuthRequired) {
 			return external.PromptResult{}, external.Fail(external.FailureAuthRequired, err)
@@ -346,7 +353,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 			} else {
 				d.logger.WarnContext(ctx, "codex turn/start cancelled before a turn id arrived; draining app-server",
 					slog.String("thread_id", threadID))
-				d.ResetBotAgent(input.BotID, input.BotAgentID)
+				d.recycleTurnServer(input, srv)
 			}
 		}
 		return srv.turnResultAfterError(turn, err)
@@ -384,7 +391,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 			// its last user releases it.
 			d.logger.WarnContext(ctx, "codex turn did not settle after interrupt; draining app-server",
 				slog.String("thread_id", threadID))
-			d.ResetBotAgent(input.BotID, input.BotAgentID)
+			d.recycleTurnServer(input, srv)
 		case <-srv.proc.Done():
 		}
 	case <-srv.proc.Done():
@@ -394,7 +401,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	}
 
 	stopSteering()
-	result, resultErr := srv.turnResult(turn)
+	result, resultErr = srv.turnResult(turn)
 	if cfg.Auth == AuthChatGPT {
 		d.persistChatGPTCredential(ctx, srv.client, input, credential)
 	}
@@ -605,7 +612,7 @@ func (d *Driver) startServer(ctx context.Context, key string) (recyclable, error
 	if err != nil {
 		return nil, err
 	}
-	srv, err := startAppServerSession(context.WithoutCancel(ctx), botID, botAgentID, client, cfg, launcher, d.logger)
+	srv, err := startAppServerSession(context.WithoutCancel(ctx), key, client, cfg, launcher, d.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -687,6 +694,11 @@ func emitThreadNotices(srv *appServer, threadID string, sink external.EventSink)
 // must defer; the reference keeps the server alive across a concurrent
 // recycle (which drains instead of killing).
 func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*appServer, func(), error) {
+	return d.acquireServerKey(ctx, serverKey(botID, botAgentID))
+}
+
+func (d *Driver) acquireServerKey(ctx context.Context, key string) (*appServer, func(), error) {
+	botID, _ := splitServerKey(key)
 	info, err := d.bridges.WorkspaceInfo(ctx, botID)
 	if err != nil {
 		return nil, nil, err
@@ -694,7 +706,6 @@ func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*
 	if err := external.RequireContainerWorkspace(info, RuntimeType); err != nil {
 		return nil, nil, err
 	}
-	key := serverKey(botID, botAgentID)
 	if current := d.servers.peek(key); current != nil && d.launchers != nil {
 		launcher, err := d.resolveLauncher(ctx, botID)
 		if err != nil {

@@ -280,6 +280,7 @@
       "rate_limited": "外部 Agent 已达到模型服务的速率上限，请稍后再发送。",
       "request_blocked": "这次请求被模型服务的安全策略拦截，请调整内容后再发送。",
       "session_resume_failed": "会话无法恢复，请重试或新开会话。",
+      "termination_unconfirmed": "尚未确认外部任务已停止，为避免重复执行，此会话暂时锁定。请确认工作区正在运行后重试：再次使用此会话时，Memoh 会检查工作区并停止它能找到的残留进程，约每分钟最多尝试一次。",
       "unavailable": "外部 Agent 运行时暂不可用。请检查 Agent 配置和工作区后重试。",
       "upstream_unreachable": "外部 Agent 无法连接到模型服务，或连接中途断开。请检查网络和 Agent 的服务地址后重试。",
       "usage_limited": "外部 Agent 账号的使用额度已用完。请等额度重置后再试，或检查该账号的套餐与账单。"

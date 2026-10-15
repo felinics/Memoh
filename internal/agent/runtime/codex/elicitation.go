@@ -81,7 +81,7 @@ func (t *turnState) handleElicitation(c *conn, req *protocol.Inbound, params *pr
 func (t *turnState) runElicitation(ctx context.Context, params *protocol.McpServerElicitationRequestParams) protocol.McpServerElicitationRequestResponse {
 	decline := protocol.McpServerElicitationRequestResponse{Action: protocol.McpServerElicitationActionDecline}
 	cancel := protocol.McpServerElicitationRequestResponse{Action: protocol.McpServerElicitationActionCancel}
-	if t == nil || t.userInput == nil || !t.input.CanRequestUserInput {
+	if t == nil || !t.input.CanRequestUserInput {
 		return decline
 	}
 
@@ -126,6 +126,9 @@ func (t *turnState) runElicitation(ctx context.Context, params *protocol.McpServ
 	// (whose empty-properties schema it would fail anyway).
 	if approvalKind, _ := meta["codex_approval_kind"].(string); approvalKind == "mcp_tool_call" {
 		return t.runMCPToolConsent(ctx, message, meta)
+	}
+	if t.userInput == nil || !t.input.CanAskUser() {
+		return decline
 	}
 	if schema == nil {
 		t.logger.WarnContext(ctx, "codex: declining MCP elicitation with unreadable schema", slog.String("mode", params.Tag))
@@ -193,6 +196,9 @@ func (t *turnState) runMCPToolConsent(ctx context.Context, message string, meta 
 // user confirms, decline when they cancel.
 func (t *turnState) runURLElicitation(ctx context.Context, params *protocol.URLMcpServerElicitationRequestParams) protocol.McpServerElicitationRequestResponse {
 	decline := protocol.McpServerElicitationRequestResponse{Action: protocol.McpServerElicitationActionDecline}
+	if t.userInput == nil || !t.input.CanAskUser() {
+		return decline
+	}
 	input, err := userinput.ElicitationURLInput(params.Message, params.URL)
 	if err != nil {
 		return decline

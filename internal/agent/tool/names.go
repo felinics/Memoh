@@ -30,20 +30,22 @@ func ToolSend() ToolName  { return toolname.ToolSend() }
 func ToolReact() ToolName { return toolname.ToolReact() }
 func ToolSpeak() ToolName { return toolname.ToolSpeak() }
 
-func ToolGetContacts() ToolName    { return toolname.ToolGetContacts() }
-func ToolListSessions() ToolName   { return toolname.ToolListSessions() }
-func ToolGetMessages() ToolName    { return toolname.ToolGetMessages() }
-func ToolSearchMessages() ToolName { return toolname.ToolSearchMessages() }
-func ToolSearchMemory() ToolName   { return toolname.ToolSearchMemory() }
-func ToolCreateMemory() ToolName   { return toolname.ToolCreateMemory() }
-func ToolUpdateMemory() ToolName   { return toolname.ToolUpdateMemory() }
-func ToolDeleteMemory() ToolName   { return toolname.ToolDeleteMemory() }
-func ToolListSkills() ToolName     { return toolname.ToolListSkills() }
-func ToolUseSkill() ToolName       { return toolname.ToolUseSkill() }
-func ToolSpawnAgent() ToolName     { return toolname.ToolSpawnAgent() }
-func ToolSendMessage() ToolName    { return toolname.ToolSendMessage() }
-func ToolListAgents() ToolName     { return toolname.ToolListAgents() }
-func ToolListModels() ToolName     { return toolname.ToolListModels() }
+func ToolGetContacts() ToolName       { return toolname.ToolGetContacts() }
+func ToolListSessions() ToolName      { return toolname.ToolListSessions() }
+func ToolGetMessages() ToolName       { return toolname.ToolGetMessages() }
+func ToolSearchMessages() ToolName    { return toolname.ToolSearchMessages() }
+func ToolSearchMemory() ToolName      { return toolname.ToolSearchMemory() }
+func ToolCreateMemory() ToolName      { return toolname.ToolCreateMemory() }
+func ToolUpdateMemory() ToolName      { return toolname.ToolUpdateMemory() }
+func ToolDeleteMemory() ToolName      { return toolname.ToolDeleteMemory() }
+func ToolListSkills() ToolName        { return toolname.ToolListSkills() }
+func ToolUseSkill() ToolName          { return toolname.ToolUseSkill() }
+func ToolSpawnAgent() ToolName        { return toolname.ToolSpawnAgent() }
+func ToolSendMessage() ToolName       { return toolname.ToolSendMessage() }
+func ToolListAgents() ToolName        { return toolname.ToolListAgents() }
+func ToolControlAgent() ToolName      { return toolname.ToolControlAgent() }
+func ToolListAgentBackends() ToolName { return toolname.ToolListAgentBackends() }
+func ToolListModels() ToolName        { return toolname.ToolListModels() }
 
 func ToolListWorkdirs() ToolName  { return toolname.ToolListWorkdirs() }
 func ToolListACPAgents() ToolName { return toolname.ToolListACPAgents() }

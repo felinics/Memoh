@@ -18,6 +18,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/hooks"
 	workspacepkg "github.com/felinics/memoh/internal/workspace"
@@ -1177,7 +1178,7 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 
 	// Fallback: no background manager, plain synchronous exec.
 	wrapped, err := p.execWithWorkspaceHooks(ctx, session, hookWorkspace, command, workDir, timeout, false, func() (any, error) {
-		result, err := client.Exec(ctx, command, workDir, timeout)
+		result, err := client.ExecWithEnv(ctx, command, workDir, timeout, subagentProcessEnv(session))
 		if err != nil {
 			return nil, err
 		}
@@ -1189,6 +1190,13 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 		return nil, err
 	}
 	return wrapped, nil
+}
+
+func subagentProcessEnv(session SessionContext) []string {
+	if !session.IsSubagent {
+		return nil
+	}
+	return external.SubagentThreadEnvEntry(session.SessionID)
 }
 
 func (p *ContainerProvider) execWithWorkspaceHooks(ctx context.Context, session SessionContext, workspace hooks.WorkspaceInfo, command, workDir string, timeout int32, background bool, run func() (any, error)) (any, error) {
@@ -1390,7 +1398,7 @@ func (p *ContainerProvider) execExecWithFlip(
 	// Use a fully independent context (not derived from the agent request ctx)
 	// so the gRPC stream is never cancelled when the foreground session ends.
 	streamCtx, streamCancel := execBudgetContext(ctx, budgets)
-	stream, err := client.ExecStreamWithOptions(streamCtx, command, workDir, -1, bridge.ExecOptions{ReportLiveness: true})
+	stream, err := client.ExecStreamWithOptions(streamCtx, command, workDir, -1, bridge.ExecOptions{ReportLiveness: true, Env: subagentProcessEnv(session)})
 	if err != nil {
 		streamCancel()
 		return nil, err
@@ -1499,7 +1507,7 @@ func (p *ContainerProvider) execExecBackground(
 	command, workDir, description, outputDir string, budgets ...time.Duration,
 ) (any, error) {
 	streamCtx, streamCancel := execBudgetContext(ctx, budgets)
-	stream, err := client.ExecStreamWithOptions(streamCtx, command, workDir, -1, bridge.ExecOptions{ReportLiveness: true})
+	stream, err := client.ExecStreamWithOptions(streamCtx, command, workDir, -1, bridge.ExecOptions{ReportLiveness: true, Env: subagentProcessEnv(session)})
 	if err != nil {
 		streamCancel()
 		return nil, err

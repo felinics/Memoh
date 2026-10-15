@@ -28,22 +28,23 @@ import (
 // original admission input. It contains no JWTs, provider keys or tool outputs.
 // The admission fingerprint still names the original request, unchanged.
 type resumeContext struct {
-	Version           int               `json:"version"`
-	Query             string            `json:"query"`
-	ChatID            string            `json:"chat_id"`
-	UserID            string            `json:"user_id"`
-	ChannelIdentityID string            `json:"channel_identity_id,omitempty"`
-	CurrentChannel    string            `json:"current_channel,omitempty"`
-	ReplyTarget       string            `json:"reply_target,omitempty"`
-	ConversationType  string            `json:"conversation_type,omitempty"`
-	Model             string            `json:"model,omitempty"`
-	ReasoningEffort   string            `json:"reasoning_effort,omitempty"`
-	WorkspaceTargetID string            `json:"workspace_target_id,omitempty"`
-	SessionType       string            `json:"session_type,omitempty"`
-	ToolHTTPURL       string            `json:"tool_http_url,omitempty"`
-	TokenClaims       map[string]string `json:"token_claims,omitempty"`
-	ChatClaims        map[string]string `json:"chat_claims,omitempty"`
-	DeadlineAt        *time.Time        `json:"deadline_at,omitempty"`
+	RuntimeCanRequestUserInput *bool             `json:"runtime_can_request_user_input,omitempty"`
+	Version                    int               `json:"version"`
+	Query                      string            `json:"query"`
+	ChatID                     string            `json:"chat_id"`
+	UserID                     string            `json:"user_id"`
+	ChannelIdentityID          string            `json:"channel_identity_id,omitempty"`
+	CurrentChannel             string            `json:"current_channel,omitempty"`
+	ReplyTarget                string            `json:"reply_target,omitempty"`
+	ConversationType           string            `json:"conversation_type,omitempty"`
+	Model                      string            `json:"model,omitempty"`
+	ReasoningEffort            string            `json:"reasoning_effort,omitempty"`
+	WorkspaceTargetID          string            `json:"workspace_target_id,omitempty"`
+	SessionType                string            `json:"session_type,omitempty"`
+	ToolHTTPURL                string            `json:"tool_http_url,omitempty"`
+	TokenClaims                map[string]string `json:"token_claims,omitempty"`
+	ChatClaims                 map[string]string `json:"chat_claims,omitempty"`
+	DeadlineAt                 *time.Time        `json:"deadline_at,omitempty"`
 	// Version 2 carries an External Discuss batch instead of a query: the
 	// resume admits it again behind its instructions.
 	DiscussMessages       []turn.DiscussMessage       `json:"discuss_messages,omitempty"`
@@ -71,7 +72,8 @@ func (s *Service) recordRunResumeContext(ctx context.Context, req ChatRequest) e
 		return nil
 	}
 	data := resumeContext{
-		Version: 1, Query: modelQueryText(req), ChatID: req.ChatID,
+		RuntimeCanRequestUserInput: req.RuntimeCanRequestUserInput,
+		Version:                    1, Query: modelQueryText(req), ChatID: req.ChatID,
 		UserID: req.UserID, ChannelIdentityID: req.SourceChannelIdentityID,
 		CurrentChannel: req.CurrentChannel, ReplyTarget: req.ReplyTarget,
 		ConversationType: req.ConversationType, Model: req.Model, ReasoningEffort: req.ReasoningEffort,
@@ -401,7 +403,8 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		return nil, err
 	}
 	req := ChatRequest{
-		BotID: row.BotID.String(), ThreadID: row.SessionID.String(), ChatID: data.ChatID,
+		RuntimeCanRequestUserInput: data.RuntimeCanRequestUserInput,
+		BotID:                      row.BotID.String(), ThreadID: row.SessionID.String(), ChatID: data.ChatID,
 		RunID: admission.RunID, RunHandle: admission.Handle, TurnID: admission.TurnID, TurnPosition: &admission.TurnPosition,
 		Query: resumeInstruction + data.Query, UserID: data.UserID, SourceChannelIdentityID: data.ChannelIdentityID,
 		Token: token, ChatToken: chatToken, CurrentChannel: data.CurrentChannel, ReplyTarget: data.ReplyTarget,

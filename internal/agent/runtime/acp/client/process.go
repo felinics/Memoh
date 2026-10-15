@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/felinics/memoh/internal/errs"
@@ -68,10 +69,11 @@ type bridgeProcess struct {
 	lease    *runtimeLease
 	logger   *slog.Logger
 
-	closeOnce    sync.Once
-	finalizeOnce sync.Once
-	finalizeDone chan struct{}
-	finalizeErr  error
+	closeOnce     sync.Once
+	finalizeOnce  sync.Once
+	finalizeDone  chan struct{}
+	finalizeErr   error
+	exitConfirmed atomic.Bool
 }
 
 func startBridgeProcess(ctx context.Context, client *bridge.Client, command string, args []string, workDir string, timeout time.Duration, opts processOptions) (*bridgeProcess, error) {
@@ -175,6 +177,7 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 			case pb.ExecOutput_STDERR:
 				proc.tail.append(output.GetData())
 			case pb.ExecOutput_EXIT:
+				proc.exitConfirmed.Store(true)
 				_ = stdoutW.Close()
 				return
 			}

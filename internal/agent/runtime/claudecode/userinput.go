@@ -33,11 +33,11 @@ func (t *turnRunner) answerQuestions(ctx context.Context, requestID string, payl
 	if err != nil || ctx.Err() != nil {
 		return
 	}
-	_ = t.writeLine(line)
+	_ = t.writeLine(ctx, line)
 }
 
 func (t *turnRunner) collectAnswers(ctx context.Context, requestID string, payload *controlRequestPayload) (map[string]any, bool) {
-	if t.userInput == nil {
+	if t.userInput == nil || t.input.IsSubagent() {
 		return nil, false
 	}
 	raw, err := json.Marshal(payload.Input)
@@ -103,7 +103,7 @@ func (t *turnRunner) requestUserInput(ctx context.Context, callID string, input 
 			ToolCallID: callID, ToolName: userinput.ToolNameAskUser, Input: input, ProviderMetadata: metadata,
 			SourcePlatform: t.input.CurrentPlatform, ReplyTarget: t.input.ReplyTarget, ConversationType: t.input.ConversationType, ExpiresAt: &expiresAt,
 		},
-		ActorChannelIdentityID: t.input.ChannelIdentityID, Interactive: t.input.CanRequestUserInput,
+		ActorChannelIdentityID: t.input.ChannelIdentityID, Interactive: t.input.CanAskUser(),
 		WaitTimeout: userinput.DefaultWaitTimeout, Emit: t.emitUserInputRequest,
 		NonInteractiveReason: "claude requested user input without an interactive stream",
 		UndeliveredReason:    "claude user input was not delivered", TimeoutReason: "claude user input timed out", AbortReason: "claude user input aborted",

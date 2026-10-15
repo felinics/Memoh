@@ -26,7 +26,7 @@ type UserInputService interface {
 // answer set.
 func (t *turnState) requestUserInput(ctx context.Context, params *protocol.ToolRequestUserInputParams) protocol.ToolRequestUserInputResponse {
 	answers := map[string]protocol.ToolRequestUserInputAnswer{}
-	if t.userInput == nil || len(params.Questions) == 0 {
+	if t.userInput == nil || t.input.IsSubagent() || len(params.Questions) == 0 {
 		return protocol.ToolRequestUserInputResponse{Answers: answers}
 	}
 	// ask_user renders a bounded number of questions per card; longer
@@ -73,7 +73,7 @@ func (t *turnState) runUserInputCard(ctx context.Context, params *protocol.ToolR
 			SourcePlatform: "",
 		},
 		ActorChannelIdentityID: t.input.ChannelIdentityID,
-		Interactive:            t.input.CanRequestUserInput,
+		Interactive:            t.input.CanAskUser(),
 		WaitTimeout:            userinput.DefaultWaitTimeout,
 		Emit:                   t.emitUserInputRequest,
 		NonInteractiveReason:   "codex requested user input without an interactive stream",

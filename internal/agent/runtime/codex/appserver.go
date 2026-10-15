@@ -79,8 +79,9 @@ var ErrAuthRequired = external.ErrAuthRequired
 // handshakeTimeout bounds initialize plus auth setup on a fresh process.
 const handshakeTimeout = 60 * time.Second
 
-func startAppServerSession(ctx context.Context, botID, botAgentID string, client *bridge.Client, cfg Config, launcher external.Launcher, logger *slog.Logger) (*appServer, error) {
-	proc, err := startAppServer(ctx, client, defaultProjectPath, codexHome(botAgentID), cfg, launcher.Path)
+func startAppServerSession(ctx context.Context, key string, client *bridge.Client, cfg Config, launcher external.Launcher, logger *slog.Logger) (*appServer, error) {
+	botID, botAgentID := splitServerKey(key)
+	proc, err := startAppServer(ctx, client, defaultProjectPath, codexHome(botAgentID), cfg, launcher.Path, serverProcessEnv(key)...)
 	if err != nil {
 		return nil, fmt.Errorf("start codex app-server: %w", err)
 	}
@@ -425,6 +426,8 @@ func (s *appServer) matchesLauncher(launcher external.Launcher) bool {
 
 // Done reports process exit; the server lifecycle table watches it.
 func (s *appServer) Done() <-chan struct{} { return s.proc.Done() }
+
+func (s *appServer) Stop(ctx context.Context) error { return s.proc.Stop(ctx) }
 
 func (s *appServer) Close() error {
 	if s.mountCancel != nil {

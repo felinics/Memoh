@@ -43,20 +43,22 @@ func ToolSend() Name  { return newName("send") }
 func ToolReact() Name { return newName("react") }
 func ToolSpeak() Name { return newName("speak") }
 
-func ToolGetContacts() Name    { return newName("get_contacts") }
-func ToolListSessions() Name   { return newName("list_sessions") }
-func ToolGetMessages() Name    { return newName("get_messages") }
-func ToolSearchMessages() Name { return newName("search_messages") }
-func ToolSearchMemory() Name   { return newName(memprovider.ToolSearchMemory) }
-func ToolCreateMemory() Name   { return newName(memprovider.ToolCreateMemory) }
-func ToolUpdateMemory() Name   { return newName(memprovider.ToolUpdateMemory) }
-func ToolDeleteMemory() Name   { return newName(memprovider.ToolDeleteMemory) }
-func ToolListSkills() Name     { return newName("list_skills") }
-func ToolUseSkill() Name       { return newName("use_skill") }
-func ToolSpawnAgent() Name     { return newName("spawn_agent") }
-func ToolSendMessage() Name    { return newName("send_message") }
-func ToolListAgents() Name     { return newName("list_agents") }
-func ToolListModels() Name     { return newName("list_models") }
+func ToolGetContacts() Name       { return newName("get_contacts") }
+func ToolListSessions() Name      { return newName("list_sessions") }
+func ToolGetMessages() Name       { return newName("get_messages") }
+func ToolSearchMessages() Name    { return newName("search_messages") }
+func ToolSearchMemory() Name      { return newName(memprovider.ToolSearchMemory) }
+func ToolCreateMemory() Name      { return newName(memprovider.ToolCreateMemory) }
+func ToolUpdateMemory() Name      { return newName(memprovider.ToolUpdateMemory) }
+func ToolDeleteMemory() Name      { return newName(memprovider.ToolDeleteMemory) }
+func ToolListSkills() Name        { return newName("list_skills") }
+func ToolUseSkill() Name          { return newName("use_skill") }
+func ToolSpawnAgent() Name        { return newName("spawn_agent") }
+func ToolSendMessage() Name       { return newName("send_message") }
+func ToolListAgents() Name        { return newName("list_agents") }
+func ToolControlAgent() Name      { return newName("control_agent") }
+func ToolListAgentBackends() Name { return newName("list_agent_backends") }
+func ToolListModels() Name        { return newName("list_models") }
 
 func ToolListWorkdirs() Name  { return newName("list_workdirs") }
 func ToolListACPAgents() Name { return newName("list_acp_agents") }
@@ -88,7 +90,7 @@ var all = []Name{
 	ToolMCPManage(), ToolAppSearch(), ToolAppManage(),
 	ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolExec(), ToolApplyPatch(), ToolListExecutionLocations(), ToolListBackground(), ToolGetBackgroundStatus(), ToolKillBackground(), ToolWait(), ToolWaitUntil(),
 	ToolSend(), ToolReact(), ToolSpeak(),
-	ToolGetContacts(), ToolListSessions(), ToolGetMessages(), ToolSearchMessages(), ToolSearchMemory(), ToolCreateMemory(), ToolUpdateMemory(), ToolDeleteMemory(), ToolListSkills(), ToolUseSkill(), ToolSpawnAgent(), ToolSendMessage(), ToolListAgents(), ToolListModels(),
+	ToolGetContacts(), ToolListSessions(), ToolGetMessages(), ToolSearchMessages(), ToolSearchMemory(), ToolCreateMemory(), ToolUpdateMemory(), ToolDeleteMemory(), ToolListSkills(), ToolUseSkill(), ToolSpawnAgent(), ToolSendMessage(), ToolListAgents(), ToolControlAgent(), ToolListAgentBackends(), ToolListModels(),
 	ToolListWorkdirs(), ToolListACPAgents(),
 	ToolListSchedule(), ToolGetSchedule(), ToolCreateSchedule(), ToolUpdateSchedule(), ToolDeleteSchedule(),
 	ToolBrowserAction(), ToolBrowserObserve(), ToolComputerObserve(), ToolComputerAction(), ToolBrowserRemoteSession(),

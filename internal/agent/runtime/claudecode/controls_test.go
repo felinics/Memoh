@@ -25,10 +25,11 @@ func (p *controlProcess) Write(b []byte) (int, error) {
 	p.writes <- append([]byte(nil), b...)
 	return len(b), nil
 }
-func (*controlProcess) CloseStdin()             {}
-func (*controlProcess) Close() error            { return nil }
-func (p *controlProcess) Done() <-chan struct{} { return p.done }
-func (*controlProcess) StderrTail() string      { return "" }
+func (*controlProcess) CloseStdin()                {}
+func (*controlProcess) Close() error               { return nil }
+func (*controlProcess) Stop(context.Context) error { return nil }
+func (p *controlProcess) Done() <-chan struct{}    { return p.done }
+func (*controlProcess) StderrTail() string         { return "" }
 
 func controlTestRunner() (*turnRunner, *controlProcess) {
 	p := &controlProcess{writes: make(chan []byte, 16), done: make(chan struct{})}
@@ -351,44 +352,47 @@ func TestClaudeNativeApprovalBoundary(t *testing.T) {
 		{"ExitPlanMode", approval.StatusRejected, "deny", 1},
 		{"mcp__memoh__exec", approval.StatusRejected, "allow", 0},
 	} {
-		t.Run(tc.tool+"/"+tc.status, func(t *testing.T) {
-			r, p := controlTestRunner()
-			defer r.close()
-			svc := &explicitRuntimeApproval{status: tc.status}
-			r.approval = svc
-			r.input.CanRequestUserInput = true
-			r.permissionMode = "plan"
-			input := map[string]any{"command": "ls"}
-			if tc.tool == "Write" {
-				input = map[string]any{"file_path": "/data/result.txt"}
-			}
-			go r.handleCanUseTool(r.ctx, "approval", &controlRequestPayload{ToolName: tc.tool, ToolUseID: "tool-1", Input: input})
-			var response struct {
-				Response struct {
-					Response struct {
-						Behavior     string         `json:"behavior"`
-						UpdatedInput map[string]any `json:"updatedInput"`
-					} `json:"response"`
-				} `json:"response"`
-			}
-			select {
-			case line := <-p.writes:
-				if err := json.Unmarshal(line, &response); err != nil {
-					t.Fatal(err)
+		for _, mode := range []string{"chat", "subagent"} {
+			t.Run(mode+"/"+tc.tool+"/"+tc.status, func(t *testing.T) {
+				r, p := controlTestRunner()
+				defer r.close()
+				svc := &explicitRuntimeApproval{status: tc.status}
+				r.approval = svc
+				r.input.CanRequestUserInput = true
+				r.input.SessionMode = mode
+				r.permissionMode = "plan"
+				input := map[string]any{"command": "ls"}
+				if tc.tool == "Write" {
+					input = map[string]any{"file_path": "/data/result.txt"}
 				}
-			case <-time.After(time.Second):
-				t.Fatal("no permission response")
-			}
-			if svc.policyCalls != 0 || svc.pendingCalls != tc.pending {
-				t.Fatalf("wrong approval boundary: %+v", svc)
-			}
-			if response.Response.Response.Behavior != tc.behavior || r.permissionMode != "plan" {
-				t.Fatalf("response %+v, mode %s", response, r.permissionMode)
-			}
-			if tc.behavior == "allow" && !maps.Equal(response.Response.Response.UpdatedInput, input) {
-				t.Fatalf("approval presentation changed the native input: %+v", response)
-			}
-		})
+				go r.handleCanUseTool(r.ctx, "approval", &controlRequestPayload{ToolName: tc.tool, ToolUseID: "tool-1", Input: input})
+				var response struct {
+					Response struct {
+						Response struct {
+							Behavior     string         `json:"behavior"`
+							UpdatedInput map[string]any `json:"updatedInput"`
+						} `json:"response"`
+					} `json:"response"`
+				}
+				select {
+				case line := <-p.writes:
+					if err := json.Unmarshal(line, &response); err != nil {
+						t.Fatal(err)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("no permission response")
+				}
+				if svc.policyCalls != 0 || svc.pendingCalls != tc.pending {
+					t.Fatalf("wrong approval boundary: %+v", svc)
+				}
+				if response.Response.Response.Behavior != tc.behavior || r.permissionMode != "plan" {
+					t.Fatalf("response %+v, mode %s", response, r.permissionMode)
+				}
+				if tc.behavior == "allow" && !maps.Equal(response.Response.Response.UpdatedInput, input) {
+					t.Fatalf("approval presentation changed the native input: %+v", response)
+				}
+			})
+		}
 	}
 }
 
@@ -431,7 +435,7 @@ func (p *drainingProcess) Err() error  { return p.exitErr }
 func TestClaudeDrainWaitsForTranscriptFlush(t *testing.T) {
 	p := &drainingProcess{controlProcess: controlProcess{done: make(chan struct{})}, eof: make(chan struct{})}
 	done := make(chan error, 1)
-	go func() { done <- drainCLI(p, time.Second) }()
+	go func() { done <- drainCLI(t.Context(), p, time.Second) }()
 	<-p.eof
 	select {
 	case err := <-done:

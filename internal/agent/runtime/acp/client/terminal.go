@@ -12,6 +12,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
@@ -176,7 +177,7 @@ func (m *terminalManager) CreateTerminal(ctx context.Context, p acp.CreateTermin
 		if name == "" {
 			continue
 		}
-		if envNameBlocked(name, m.unsetEnv) {
+		if strings.Contains(name, "=") || name == external.SubagentThreadEnv || envNameBlocked(name, m.unsetEnv) {
 			continue
 		}
 		env = append(env, name+"="+item.Value)
@@ -187,11 +188,12 @@ func (m *terminalManager) CreateTerminal(ctx context.Context, p acp.CreateTermin
 			return acp.CreateTerminalResponse{}, err
 		}
 	}
-	execCtx := m.ctx
-	releaseExecContext := func() {}
+	// The bridge stops a command only when its stream ends if it runs without
+	// a timeout of its own, so the deadline lives here: ending the stream, by
+	// kill, release, the run ending or the deadline, always stops the command.
+	execCtx, cancelExec := context.WithTimeout(m.ctx, time.Duration(m.timeout)*time.Second)
+	releaseExecContext := cancelExec
 	if runtimeScope.runContext != nil {
-		var cancelExec context.CancelFunc
-		execCtx, cancelExec = context.WithCancel(m.ctx)
 		stopRunCancel := context.AfterFunc(runtimeScope.runContext, cancelExec) //nolint:contextcheck // The owning run is deliberately independent from the ACP callback context.
 		if runtimeScope.runContext.Err() != nil {
 			cancelExec()
@@ -201,7 +203,7 @@ func (m *terminalManager) CreateTerminal(ctx context.Context, p acp.CreateTermin
 			cancelExec()
 		}
 	}
-	stream, err := m.client.ExecStreamWithOptions(execCtx, command, cwd, m.timeout, bridge.ExecOptions{ //nolint:contextcheck // execution outlives the create RPC but not its owning run.
+	stream, err := m.client.ExecStreamWithOptions(execCtx, command, cwd, -1, bridge.ExecOptions{ //nolint:contextcheck // execution outlives the create RPC but not its owning run.
 		Env:      env,
 		UnsetEnv: m.unsetEnv,
 	})

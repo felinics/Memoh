@@ -400,6 +400,14 @@ func (s *ExecStream) Recv() (*pb.ExecOutput, error) {
 	return msg, mapStreamError(s.stream, err)
 }
 
+// Terminate requests process-group termination without cancelling the stream.
+// The caller must receive EXIT to confirm the remote process has stopped.
+func (s *ExecStream) Terminate() error {
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	return s.stream.Send(&pb.ExecInput{Terminate: true})
+}
+
 // Resize sends a terminal resize event to the running process.
 func (s *ExecStream) Resize(cols, rows uint32) error {
 	s.sendMu.Lock()

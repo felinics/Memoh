@@ -240,6 +240,14 @@ func (m *fakeModel) handleChatCompletions(writer http.ResponseWriter, request *h
 		}
 		return
 	}
+	if directive.mode == "external_subagent" {
+		if handled, err := writeExternalSubagentCall(writer, flusher, requestID, payload); handled {
+			if err != nil {
+				m.markDisconnected(directive.marker)
+			}
+			return
+		}
+	}
 	if directive.mode == "binary_output" && !hasToolResult(payload) {
 		if err := writeExecToolCall(writer, flusher, requestID, directive.marker, `printf 'SQLite format 3\000中文'`); err != nil {
 			m.markDisconnected(directive.marker)

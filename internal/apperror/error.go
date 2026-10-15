@@ -135,6 +135,7 @@ const (
 	CodeRuntimeControlRequestInvalid             Code = "runtime_control.request_invalid"
 	CodeExternalRuntimeAuthRequired              Code = "external_runtime.auth_required"
 	CodeExternalRuntimeUnavailable               Code = "external_runtime.unavailable"
+	CodeExternalRuntimeTerminationUnconfirmed    Code = "external_runtime.termination_unconfirmed"
 	CodeExternalRuntimeSessionResumeFailed       Code = "external_runtime.session_resume_failed"
 	CodeExternalRuntimeUsageLimited              Code = "external_runtime.usage_limited"
 	CodeExternalRuntimeRateLimited               Code = "external_runtime.rate_limited"
@@ -886,6 +887,7 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The external agent runtime for this session is not available on this server.",
 	},
+	CodeExternalRuntimeTerminationUnconfirmed: {HTTPStatus: http.StatusConflict, Detail: "Memoh could not confirm that the external task stopped, so the session stays blocked to prevent duplicate work. Make sure the workspace is running, then try again: when the session is next used, Memoh checks the workspace and stops the leftover processes it can find, at most about once a minute."},
 	// The request to resume the external agent's own session (a Codex thread)
 	// failed before the agent could accept or refuse it, so a retry may still
 	// resume it. The turn is treated as not run; the user retries or starts a

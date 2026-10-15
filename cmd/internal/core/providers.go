@@ -552,8 +552,9 @@ func agentLoopReselectModeFromConfig(log *slog.Logger, cfg config.AgentConfig) n
 	return native.LoopReselectMode(mode)
 }
 
-func injectToolProviders(a *native.Agent, msgService *message.DBService, hookService *hookspkg.Service, agentService *application.Service, providers []agenttools.ToolProvider) {
+func injectToolProviders(a *native.Agent, msgService *message.DBService, hookService *hookspkg.Service, agentService *application.Service, botAgentService *botagents.Service, providers []agenttools.ToolProvider) {
 	a.SetToolProviders(providers)
+	agentService.SetSubagentBackends(botAgentService)
 	for _, p := range providers {
 		if cp, ok := p.(*agenttools.ContainerProvider); ok {
 			cp.SetHookService(hookService)
@@ -576,6 +577,7 @@ func injectToolProviders(a *native.Agent, msgService *message.DBService, hookSer
 			// A spawned turn takes its thread's single run slot like any other,
 			// so without admission this provider starts nothing.
 			sp.SetSubagentAdmitter(agentService)
+			sp.SetExternalSubagents(agentService)
 		}
 	}
 }
@@ -850,6 +852,9 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 	service.SetUserInputService(userInput)
 	service.SetACPSessionPool(acpPool)
 	service.SetExternalRuntimes(directAgents...)
+	if workspaceManager != nil {
+		service.SetSubagentProcessReaper(application.NewSubagentProcessReaper(workspaceManager))
+	}
 	return service
 }
 
@@ -1052,9 +1057,11 @@ func provideOAuthService(log *slog.Logger, queries dbstore.Queries, cfg config.C
 	return mcp.NewOAuthService(log, queries, callbackURL)
 }
 
-func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, userInput *userinput.Service, toolContexts *mcp.ToolSessionContextStore, cfg config.Config) *agenttools.NativeToolSource {
+func provideACPToolSource(log *slog.Logger, toolApproval *toolapproval.Service, userInput *userinput.Service, toolContexts *mcp.ToolSessionContextStore, sessions *sessionpkg.Service, workdirs *workdir.Service, cfg config.Config) *agenttools.NativeToolSource {
 	limits := agentLimitsFromConfig(cfg.Agent)
 	return agenttools.NewNativeToolSource(log, nil, agenttools.NativeToolSourceOptions{
+		Sessions:        sessions,
+		Workdirs:        workdirs,
 		AllowAll:        true,
 		Approval:        toolApproval,
 		UserInput:       userInput,

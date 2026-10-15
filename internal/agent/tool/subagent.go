@@ -24,11 +24,14 @@ import (
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
 	"github.com/felinics/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/settings"
 )
 
@@ -139,10 +142,13 @@ type SpawnLoopConfig struct {
 
 // SpawnResult mirrors agent.GenerateResult.
 type SpawnResult struct {
-	Messages         []sdk.Message
-	Text             string
-	Usage            *sdk.Usage
-	ContextLifecycle *contextfrag.LifecycleSnapshot
+	ExecutionUnconfirmed bool
+	TerminalResolved     bool
+	TerminalOutcome      SpawnAttemptDisposition
+	Messages             []sdk.Message
+	Text                 string
+	Usage                *sdk.Usage
+	ContextLifecycle     *contextfrag.LifecycleSnapshot
 	// Persisted reports that incremental step persistence owned this run's
 	// history, so the caller must not persist the result again.
 	Persisted bool
@@ -276,19 +282,20 @@ type subagentModelResolver func(
 
 // SpawnProvider exposes managed subagent control tools.
 type SpawnProvider struct {
-	agent          SpawnAgent
-	settings       *settings.Service
-	models         *models.Service
-	queries        dbstore.Queries
-	sessionService agentSessionService
-	messageService messagepkg.Service
-	systemPromptFn func(sessionType string) string
-	bgManager      *background.Manager
-	hookService    *hooks.Service
-	admitter       SubagentAdmitter
-	modelResolver  subagentModelResolver
-	coord          *agentCoordinator
-	logger         *slog.Logger
+	agent             SpawnAgent
+	settings          *settings.Service
+	models            *models.Service
+	queries           dbstore.Queries
+	sessionService    agentSessionService
+	messageService    messagepkg.Service
+	systemPromptFn    func(sessionType string) string
+	bgManager         *background.Manager
+	hookService       *hooks.Service
+	admitter          SubagentAdmitter
+	externalSubagents ExternalSubagentService
+	modelResolver     subagentModelResolver
+	coord             *agentCoordinator
+	logger            *slog.Logger
 }
 
 func NewSpawnProvider(
@@ -340,13 +347,17 @@ func (*SpawnProvider) Usage(_ context.Context, _ SessionContext, available Avail
 		parts = append(parts,
 			"Use "+spawnRef+" to create a managed subagent for an independent task.",
 			"Subagents can use the bot's configured tools, including workspace, web, memory, skills, browser, media, and MCP tools. They cannot ask the user, send direct chat messages or reactions, or create more subagents.",
-			"Subagents use an enabled chat model from the current session's provider. `model_id` selects a model within that provider; omitting it uses the current session model.",
-			"Set `fork: true` when the worker needs the parent model's current message context; otherwise it starts with only the assigned task.",
+			"Native subagents default to the native parent's model, or the Bot's configured chat model when the parent is external. `model_id` selects an enabled chat model within that model's provider.",
+			"To delegate to a configured External Agent, select `bot_agent_id` from list_agent_backends; do not combine it with model_id, provider, or fork. The instance owns its model and reasoning configuration.",
+			"Set `fork: true` only for native workers needing the parent model's current context; otherwise send explicit task materials. Subagents share the parent's working directory, so coordinate file ownership before concurrent writes.",
 			"Use subagents when work benefits from isolated context or can proceed while you continue. Don't use one for simple single-step work — just do it directly.",
 		)
 	}
 	if ref, ok := available.Ref(ToolListModels()); ok {
 		parts = append(parts, ref+" lists enabled chat models, provider names, and descriptions. Only models from the current session's provider are available to subagents.")
+	}
+	if ref, ok := available.Ref(ToolListAgentBackends()); ok {
+		parts = append(parts, "Use "+ref+" to discover configured External Agent instances before selecting bot_agent_id for a new child.")
 	}
 	if ref, ok := available.Ref(ToolSendMessage()); ok {
 		canStartBackground = true
@@ -360,6 +371,9 @@ func (*SpawnProvider) Usage(_ context.Context, _ SessionContext, available Avail
 	}
 	if ref, ok := available.Ref(ToolListAgents()); ok {
 		parts = append(parts, "Use "+ref+" to see agents created in the current session.")
+	}
+	if ref, ok := available.Ref(ToolControlAgent()); ok {
+		parts = append(parts, "Use "+ref+" with a child's exact run_id to stop it, or steer only when steer_supported is true. A stop acknowledgement is not terminal; inspect list_agents for the outcome.")
 	}
 	if ref, ok := available.Ref(ToolSearchMessages()); ok {
 		parts = append(parts, "Read a finished task's full transcript with "+ref+" using the session ID returned by get_background_status when the brief result is not enough.")
@@ -375,13 +389,31 @@ func (p *SpawnProvider) Tools(ctx context.Context, session SessionContext) ([]to
 		return nil, nil
 	}
 	sess := session
-	spawnDescription := "Create one managed subagent for an independent task. Returns a memorable agent_id."
+	spawnDescription := "Create one managed subagent for an independent task. For an External Agent, select bot_agent_id from list_agent_backends and omit model_id, provider, and fork; the instance owns those settings. Otherwise create a native subagent using its default or the native model options. Returns a memorable agent_id."
 	if parent, err := p.parentModel(ctx, session); err == nil {
 		if catalog, err := p.listModelCatalog(ctx, parent.ProviderID); err == nil {
 			spawnDescription = appendModelCatalogToSpawnDescription(spawnDescription, catalog, session)
 		}
 	}
 	return []toolexec.Tool{
+		{
+			Name:        ToolListAgentBackends().String(),
+			Description: "List this bot's External Agent instances and their availability for delegation. These are execution backends; list_agents lists children already created by this parent.",
+			Parameters:  toolexec.SchemaFor[listAgentsArgs](),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, _ listAgentsArgs) (sdk.ToolOutput, error) {
+				if err := validateParentSession(sess); err != nil {
+					return sdk.ToolOutput{}, err
+				}
+				if p.externalSubagents == nil {
+					return toolexec.OutputFromValue(map[string]any{"backends": []SubagentBackend{}, "count": 0}), nil
+				}
+				items, err := p.externalSubagents.ListSubagentBackends(ctx.Context, sess)
+				if err != nil {
+					return sdk.ToolOutput{}, err
+				}
+				return toolexec.OutputFromValue(map[string]any{"backends": items, "count": len(items)}), nil
+			}),
+		},
 		{
 			Name:        ToolSpawnAgent().String(),
 			Description: spawnDescription,
@@ -406,6 +438,7 @@ func (p *SpawnProvider) Tools(ctx context.Context, session SessionContext) ([]to
 				return toolexec.OutputPair(p.execListAgents(ctx.Context, sess))
 			}),
 		},
+		p.controlAgentTool(sess),
 		{
 			Name:        ToolListModels().String(),
 			Description: "List enabled chat models, including model_id, provider, description, and the current session model marker. Subagents can only use models from the current session's provider.",
@@ -418,14 +451,19 @@ func (p *SpawnProvider) Tools(ctx context.Context, session SessionContext) ([]to
 }
 
 type agentRecord struct {
-	AgentID   string
-	SessionID string
-	Title     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	RuntimeType string
+	BotAgentID  string
+	AgentID     string
+	SessionID   string
+	Title       string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type agentRunResult struct {
+	Usage            *sdk.Usage                     `json:"usage,omitempty"`
+	RuntimeType      string                         `json:"runtime_type,omitempty"`
+	BotAgentID       string                         `json:"bot_agent_id,omitempty"`
 	AgentID          string                         `json:"agent_id"`
 	SessionID        string                         `json:"session_id,omitempty"`
 	TaskID           string                         `json:"task_id,omitempty"`
@@ -447,6 +485,11 @@ type agentRunResult struct {
 }
 
 type agentRequest struct {
+	queueCtx         context.Context
+	queueCancel      context.CancelFunc
+	externalSlot     bool
+	runtimeType      string
+	botAgentID       string
 	taskID           string
 	agentID          string
 	agentSessionID   string
@@ -465,8 +508,10 @@ type agentRequest struct {
 }
 
 type agentCoordinator struct {
-	mu     sync.Mutex
-	states map[string]*agentState
+	mu              sync.Mutex
+	states          map[string]*agentState
+	externalRunning map[string]map[*agentRequest]string
+	externalLocks   map[string]*sync.Mutex
 }
 
 type agentState struct {
@@ -475,6 +520,7 @@ type agentState struct {
 	agentID         string
 	agentSessionID  string
 	runningTaskID   string
+	waiting         bool
 	queue           []*agentRequest
 	last            agentRunResult
 }
@@ -518,12 +564,17 @@ func (c *agentCoordinator) snapshot(botID, parentSessionID, agentID string) agen
 	if st == nil {
 		return agentStateSnapshot{}
 	}
-	queued := make([]string, 0, len(st.queue))
+	queued := make([]string, 0, len(st.queue)+1)
+	runningTaskID := st.runningTaskID
+	if st.waiting {
+		queued = append(queued, runningTaskID)
+		runningTaskID = ""
+	}
 	for _, req := range st.queue {
 		queued = append(queued, req.taskID)
 	}
 	return agentStateSnapshot{
-		RunningTaskID: st.runningTaskID,
+		RunningTaskID: runningTaskID,
 		QueuedTaskIDs: queued,
 		Last:          st.last,
 	}
@@ -548,6 +599,12 @@ func (p *SpawnProvider) execSpawnAgent(ctx context.Context, session SessionConte
 	}
 	requestedModelID := strings.TrimSpace(args.ModelID)
 	requestedProvider := strings.TrimSpace(args.Provider)
+	if strings.TrimSpace(args.BotAgentID) != "" {
+		if requestedModelID != "" || requestedProvider != "" || args.Fork {
+			return nil, errors.New("bot_agent_id cannot be combined with model_id, provider, or fork")
+		}
+		return p.spawnExternalSubagent(ctx, session, agentID, task, args)
+	}
 	if requestedModelID == "" && requestedProvider != "" {
 		return nil, errors.New("provider requires model_id")
 	}
@@ -673,6 +730,27 @@ func (p *SpawnProvider) execListAgents(ctx context.Context, session SessionConte
 			"created_at":   session.FormatTime(rec.CreatedAt),
 			"updated_at":   session.FormatTime(rec.UpdatedAt),
 		}
+		if runtime, ok := p.admitter.(SubagentRuntimeService); ok {
+			state, err := runtime.SnapshotSubagent(ctx, session, rec.SessionID)
+			if err != nil {
+				state = SubagentRuntimeState{Code: string(apperror.CodeOf(err))}
+			}
+			if state.RunID != "" {
+				item["run_id"] = state.RunID
+				if state.Active || snap.RunningTaskID == "" {
+					item["status"] = state.Status
+				}
+			}
+			item["steer_supported"] = state.SteerSupported
+			if state.Code != "" {
+				item["code"] = state.Code
+			}
+		}
+		if runtimekind.IsExternal(rec.RuntimeType) {
+			item["runtime_type"] = rec.RuntimeType
+			item["bot_agent_id"] = rec.BotAgentID
+			item["fork_supported"] = false
+		}
 		if config, configErr := p.sessionService.GetSubagentConfig(ctx, rec.SessionID); configErr == nil {
 			item["model_id"] = config.ModelID
 			item["provider"] = config.ProviderName
@@ -698,9 +776,17 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 	if p.admitter == nil {
 		return nil, errors.New("session runtime is not available")
 	}
-	runtime, err := p.modelResolver(context.WithoutCancel(ctx), session, config.ModelUUID, config.ModelID, config.ProviderName)
-	if err != nil {
-		return nil, fmt.Errorf("resolve model: %w", err)
+	var runtime resolvedSubagentModel
+	if runtimekind.IsExternal(rec.RuntimeType) {
+		if p.externalSubagents == nil {
+			return nil, errors.New("external subagent service unavailable")
+		}
+	} else {
+		var err error
+		runtime, err = p.modelResolver(context.WithoutCancel(ctx), session, config.ModelUUID, config.ModelID, config.ProviderName)
+		if err != nil {
+			return nil, fmt.Errorf("resolve model: %w", err)
+		}
 	}
 	systemPrompt := ""
 	if p.systemPromptFn != nil {
@@ -708,6 +794,8 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 	}
 
 	req := &agentRequest{
+		runtimeType:    rec.RuntimeType,
+		botAgentID:     rec.BotAgentID,
 		agentID:        rec.AgentID,
 		agentSessionID: rec.SessionID,
 		message:        message,
@@ -717,20 +805,53 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 		systemPrompt:   systemPrompt,
 	}
 	description := truncateTitle(fmt.Sprintf("%s: %s", rec.AgentID, message), 120)
+	durableBusy, err := p.subagentBusy(ctx, session, rec.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	queueCtx, queueCancel := boundedAgentTaskContext(ctx)
+	req.queueCtx, req.queueCancel = queueCtx, queueCancel
 
 	key := agentStateKey(session.BotID, session.SessionID, rec.AgentID)
+	held, unlockExternal, err := p.lockExternalSlots(ctx, req)
+	if err != nil {
+		req.queueCancel()
+		return nil, err
+	}
 	p.coord.mu.Lock()
 	st := p.coord.ensure(session.BotID, session.SessionID, rec.AgentID, rec.SessionID)
-	if st.runningTaskID != "" {
-		taskID, _, err := p.bgManager.StartAgentTask(ctx, session.BotID, session.SessionID, rec.AgentID, rec.SessionID, message, description, true)
+	if st.runningTaskID != "" || durableBusy {
+		pending := len(st.queue)
+		if st.waiting {
+			pending++
+		}
+		if pending >= maxQueuedSubagentMessages {
+			p.coord.mu.Unlock()
+			unlockExternal()
+			req.queueCancel()
+			return nil, apperror.New(apperror.CodeQueueCapacityExceeded, nil)
+		}
+		taskID, _, err := p.bgManager.StartAgentTask(queueCtx, session.BotID, session.SessionID, rec.AgentID, rec.SessionID, message, description, true)
 		if err != nil {
 			p.coord.mu.Unlock()
+			unlockExternal()
+			req.queueCancel()
 			return nil, err
 		}
 		req.taskID = taskID
-		st.queue = append(st.queue, req)
-		queuePosition := len(st.queue)
+		startWaiter := st.runningTaskID == ""
+		if startWaiter {
+			st.runningTaskID, st.waiting = taskID, true
+		} else {
+			st.queue = append(st.queue, req)
+		}
+		queuePosition := pending + 1
 		p.coord.mu.Unlock()
+		unlockExternal()
+		p.watchQueuedAgentRequest(key, req)
+		if startWaiter {
+			go p.runQueuedAgentRequest(queueCtx, key, req)
+		}
 		return map[string]any{
 			"agent_id":       rec.AgentID,
 			"session_id":     rec.SessionID,
@@ -745,14 +866,24 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 		}, nil
 	}
 
-	taskID, taskCtx, err := p.bgManager.StartAgentTask(ctx, session.BotID, session.SessionID, rec.AgentID, rec.SessionID, message, description, false)
-	if err != nil {
+	if err := p.reserveExternalSlotLocked(req, held); err != nil {
 		p.coord.mu.Unlock()
+		unlockExternal()
+		req.queueCancel()
+		return nil, err
+	}
+	taskID, taskCtx, err := p.bgManager.StartAgentTask(queueCtx, session.BotID, session.SessionID, rec.AgentID, rec.SessionID, message, description, false)
+	if err != nil {
+		p.releaseExternalSlotLocked(req)
+		p.coord.mu.Unlock()
+		unlockExternal()
+		req.queueCancel()
 		return nil, err
 	}
 	req.taskID = taskID
 	st.runningTaskID = taskID
 	p.coord.mu.Unlock()
+	unlockExternal()
 
 	if runInBackground {
 		go p.runAgentRequest(taskCtx, key, req)
@@ -777,18 +908,20 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 }
 
 func (p *SpawnProvider) runAgentRequest(ctx context.Context, key string, req *agentRequest) agentRunResult {
-	runCtx, finishRun, admitErr := p.admitAgentRun(ctx, req)
+	runCtx, finishRun, admitErr := p.admitAgentRunWhenReady(ctx, req)
 	if admitErr != nil {
 		// Nothing was started and nothing was persisted, but the task record has
 		// to close anyway: a caller waiting on it would otherwise wait on a run
 		// that will never exist.
 		p.recordAdmissionFailure(ctx, req, admitErr)
-		return p.completeAgentRequest(ctx, key, req, rejectedAgentRun(req, admitErr))
+		return p.completeAgentRequest(key, req, rejectedAgentRun(req, admitErr))
 	}
-	requestMessageID, persisted := p.persistUserMessage(context.WithoutCancel(runCtx), req)
-	req.messagePersisted = persisted
-	if persisted {
-		req.requestMessageID = requestMessageID
+	if !runtimekind.IsExternal(req.runtimeType) {
+		requestMessageID, persisted := p.persistUserMessage(context.WithoutCancel(runCtx), req)
+		req.messagePersisted = persisted
+		if persisted {
+			req.requestMessageID = requestMessageID
+		}
 	}
 	result := p.runSubagentTask(runCtx, req)
 	if result.AttemptResolved && result.AttemptOutcome == SpawnAttemptAbort {
@@ -822,7 +955,7 @@ func (p *SpawnProvider) runAgentRequest(ctx context.Context, key string, req *ag
 	// the successor's admission finds this run still active and is told the
 	// agent is busy.
 	finishRun(result)
-	return p.completeAgentRequest(ctx, key, req, result)
+	return p.completeAgentRequest(key, req, result)
 }
 
 func (p *SpawnProvider) agentTaskStopRequested(taskID string) bool {
@@ -832,7 +965,15 @@ func (p *SpawnProvider) agentTaskStopRequested(taskID string) bool {
 // completeAgentRequest closes the background record and hands the agent's queue
 // to whatever is next. Both the executed and the refused path end here, so a
 // task can never be left running in the manager's view.
-func (p *SpawnProvider) completeAgentRequest(ctx context.Context, key string, req *agentRequest, result agentRunResult) agentRunResult {
+func (p *SpawnProvider) completeAgentRequest(key string, req *agentRequest, result agentRunResult) agentRunResult {
+	if req.queueCancel != nil {
+		req.queueCancel()
+	}
+	unlockExternal := p.coord.lockExternal(req)
+	p.coord.mu.Lock()
+	p.releaseExternalSlotLocked(req)
+	p.coord.mu.Unlock()
+	unlockExternal()
 	status := background.TaskCompleted
 	switch {
 	case result.Status == string(background.TaskKilled):
@@ -844,6 +985,9 @@ func (p *SpawnProvider) completeAgentRequest(ctx context.Context, key string, re
 		result.Status = string(background.TaskCompleted)
 	}
 	p.bgManager.CompleteAgentTask(req.taskID, background.AgentTaskResult{
+		RuntimeType:    req.runtimeType,
+		BotAgentID:     req.botAgentID,
+		Usage:          marshalSubagentUsage(result.Usage),
 		AgentID:        req.agentID,
 		AgentSessionID: req.agentSessionID,
 		Message:        req.message,
@@ -853,17 +997,19 @@ func (p *SpawnProvider) completeAgentRequest(ctx context.Context, key string, re
 		Status:         status,
 		Report:         result.Text,
 		Error:          result.Error,
+		Code:           result.Code,
 	})
-	p.finishAgentRequest(ctx, key, result)
+	p.finishAgentRequest(key, result)
 	return result
 }
 
-func (p *SpawnProvider) finishAgentRequest(ctx context.Context, key string, result agentRunResult) {
+func (p *SpawnProvider) finishAgentRequest(key string, result agentRunResult) {
 	var next *agentRequest
 	p.coord.mu.Lock()
 	st := p.coord.states[key]
 	if st != nil {
 		st.runningTaskID = ""
+		st.waiting = false
 		st.last = result
 		for len(st.queue) > 0 {
 			candidate := st.queue[0]
@@ -874,6 +1020,7 @@ func (p *SpawnProvider) finishAgentRequest(ctx context.Context, key string, resu
 			}
 			next = candidate
 			st.runningTaskID = candidate.taskID
+			st.waiting = true
 			break
 		}
 	}
@@ -881,38 +1028,13 @@ func (p *SpawnProvider) finishAgentRequest(ctx context.Context, key string, resu
 	if next == nil {
 		return
 	}
-	runCtx, ok, err := p.bgManager.MarkAgentTaskRunning(ctx, next.taskID)
-	if err != nil {
-		p.logger.WarnContext(ctx, "start queued agent task failed", slog.String("task_id", next.taskID), slog.Any("error", err))
-		p.finishAgentRequest(ctx, key, agentRunResult{
-			AgentID:   next.agentID,
-			SessionID: next.agentSessionID,
-			TaskID:    next.taskID,
-			ModelID:   next.config.ModelID,
-			Provider:  next.config.ProviderName,
-			Fork:      next.config.Forked,
-			Status:    string(background.TaskFailed),
-			Message:   next.message,
-		}.failed(err))
-		return
-	}
-	if !ok {
-		p.finishAgentRequest(ctx, key, agentRunResult{
-			AgentID:   next.agentID,
-			SessionID: next.agentSessionID,
-			TaskID:    next.taskID,
-			ModelID:   next.config.ModelID,
-			Provider:  next.config.ProviderName,
-			Fork:      next.config.Forked,
-			Status:    string(background.TaskKilled),
-			Message:   next.message,
-		})
-		return
-	}
-	go p.runAgentRequest(runCtx, key, next)
+	go p.runQueuedAgentRequest(next.queueCtx, key, next)
 }
 
 func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) agentRunResult {
+	if runtimekind.IsExternal(req.runtimeType) {
+		return p.runExternalSubagentTask(ctx, req)
+	}
 	res := agentRunResult{
 		AgentID:   req.agentID,
 		SessionID: req.agentSessionID,
@@ -1308,24 +1430,29 @@ func (p *SpawnProvider) createAgentSession(
 		ForkContext:  forkContext,
 	})
 	if err != nil {
-		return agentRecord{}, sessionpkg.SubagentConfig{}, err
+		return agentRecord{}, sessionpkg.SubagentConfig{}, p.sessionStoreError(ctx, "agent.subagent_create", err)
 	}
 	return agentRecord{
-		AgentID:   agentID,
-		SessionID: sess.ID,
-		Title:     sess.Title,
-		CreatedAt: sess.CreatedAt,
-		UpdatedAt: sess.UpdatedAt,
+		RuntimeType: sess.RuntimeType,
+		BotAgentID:  sess.BotAgentID,
+		AgentID:     agentID,
+		SessionID:   sess.ID,
+		Title:       sess.Title,
+		CreatedAt:   sess.CreatedAt,
+		UpdatedAt:   sess.UpdatedAt,
 	}, config, nil
 }
 
 func (p *SpawnProvider) loadSubagentConfig(ctx context.Context, rec agentRecord) (sessionpkg.SubagentConfig, error) {
+	if runtimekind.IsExternal(rec.RuntimeType) {
+		return sessionpkg.SubagentConfig{}, nil
+	}
 	if p.sessionService == nil {
 		return sessionpkg.SubagentConfig{}, errors.New("session service not available")
 	}
 	config, err := p.sessionService.GetSubagentConfig(ctx, rec.SessionID)
 	if err != nil {
-		return sessionpkg.SubagentConfig{}, fmt.Errorf("load subagent config: %w", err)
+		return sessionpkg.SubagentConfig{}, p.sessionStoreError(ctx, "agent.subagent_config", err)
 	}
 	return config, nil
 }
@@ -1363,13 +1490,22 @@ func (p *SpawnProvider) findAgent(ctx context.Context, session SessionContext, a
 	return agentRecord{}, fmt.Errorf("%w: %q in current session", errAgentNotFound, agentID)
 }
 
+func (p *SpawnProvider) sessionStoreError(ctx context.Context, operation string, err error) error {
+	public, fault := errs.Answer(ctx, err)
+	if fault == apperror.FaultServer || fault == apperror.FaultDependency {
+		result := errlog.Event(ctx, operation, err, errlog.Options{})
+		p.logger.LogAttrs(ctx, result.Level, "subagent session store failed", result.Attrs()...)
+	}
+	return public
+}
+
 func (p *SpawnProvider) listAgentRecords(ctx context.Context, session SessionContext) ([]agentRecord, error) {
 	if p.sessionService == nil {
 		return nil, errors.New("session service not available")
 	}
 	sessions, err := p.sessionService.ListSubagentsByParent(ctx, session.SessionID)
 	if err != nil {
-		return nil, err
+		return nil, p.sessionStoreError(ctx, "agent.subagent_list", err)
 	}
 	records := make([]agentRecord, 0, len(sessions))
 	for _, sess := range sessions {
@@ -1382,11 +1518,13 @@ func (p *SpawnProvider) listAgentRecords(ctx context.Context, session SessionCon
 			continue
 		}
 		records = append(records, agentRecord{
-			AgentID:   agentID,
-			SessionID: sess.ID,
-			Title:     sess.Title,
-			CreatedAt: sess.CreatedAt,
-			UpdatedAt: sess.UpdatedAt,
+			RuntimeType: sess.RuntimeType,
+			BotAgentID:  sess.BotAgentID,
+			AgentID:     agentID,
+			SessionID:   sess.ID,
+			Title:       sess.Title,
+			CreatedAt:   sess.CreatedAt,
+			UpdatedAt:   sess.UpdatedAt,
 		})
 	}
 	sort.Slice(records, func(i, j int) bool {
@@ -1401,7 +1539,7 @@ func (p *SpawnProvider) loadAgentForkContext(ctx context.Context, sessionID stri
 	}
 	rows, err := p.sessionService.ListSubagentForkContext(ctx, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, p.sessionStoreError(ctx, "agent.subagent_fork_context", err)
 	}
 	messages := make([]sdk.Message, 0, len(rows))
 	for _, row := range rows {
@@ -1488,6 +1626,9 @@ func messageTextContent(msg sdk.Message) string {
 }
 
 func validateParentSession(session SessionContext) error {
+	if session.IsSubagent || session.SessionType == sessionpkg.TypeSubagent {
+		return errors.New("subagents cannot manage other agents")
+	}
 	if strings.TrimSpace(session.BotID) == "" {
 		return errors.New("bot_id is required")
 	}
@@ -1514,6 +1655,14 @@ func agentResultMap(res agentRunResult) map[string]any {
 		"session_id": res.SessionID,
 		"task_id":    res.TaskID,
 		"status":     res.Status,
+	}
+	if res.RuntimeType != "" {
+		out["runtime_type"] = res.RuntimeType
+		out["bot_agent_id"] = res.BotAgentID
+		out["usage_known"] = res.Usage != nil
+		if res.Usage != nil {
+			out["usage"] = res.Usage
+		}
 	}
 	if res.ModelID != "" {
 		out["model_id"] = res.ModelID
@@ -1727,7 +1876,7 @@ func appendModelCatalogToSpawnDescription(base string, catalog []subagentModelCa
 		return base + " No enabled chat models are currently available."
 	}
 	lines := make([]string, 0, len(catalog)+2)
-	lines = append(lines, base, "Enabled subagent models (model_id | provider | description):")
+	lines = append(lines, base, "Enabled native subagent models (model_id | provider | description):")
 	for _, item := range catalog {
 		marker := ""
 		if item.UUID == session.CurrentModelUUID {
@@ -1739,7 +1888,7 @@ func appendModelCatalogToSpawnDescription(base string, catalog []subagentModelCa
 		}
 		lines = append(lines, fmt.Sprintf("- %s | %s | %s%s", item.ModelID, item.ProviderName, description, marker))
 	}
-	lines = append(lines, "list_models includes models from all providers; subagents are limited to the current session's provider.")
+	lines = append(lines, "list_models includes models from all providers; native subagents are limited to their default model's provider.")
 	return strings.Join(lines, "\n")
 }
 
@@ -1953,10 +2102,11 @@ func (p *SpawnProvider) resolveSubagentReasoning(
 }
 
 type spawnAgentArgs struct {
-	Fork            bool   `json:"fork,omitempty" jsonschema:"If true, inherit the parent model's current message context while keeping the subagent system prompt and tools."`
+	BotAgentID      string `json:"bot_agent_id,omitempty" jsonschema:"External Agent instance from list_agent_backends. Mutually exclusive with model_id, provider, and fork. Omit for a native subagent."`
+	Fork            bool   `json:"fork,omitempty" jsonschema:"Native subagents only; omit with bot_agent_id. If true, inherit the parent model's current message context while keeping the subagent system prompt and tools."`
 	ID              string `json:"id,omitempty" jsonschema:"Optional memorable agent id. If omitted, an id like agent_1 is assigned. Must be lowercase letters, digits, underscore, or hyphen."`
-	ModelID         string `json:"model_id,omitempty" jsonschema:"Optional external model name from the current session's provider. Omit to use the current session model."`
-	Provider        string `json:"provider,omitempty" jsonschema:"Optional provider name. Must match the current session's provider."`
+	ModelID         string `json:"model_id,omitempty" jsonschema:"Native subagents only; omit with bot_agent_id. Optional model name. Omit to use the native parent's model, or the Bot's configured chat model when the parent is external."`
+	Provider        string `json:"provider,omitempty" jsonschema:"Native subagents only; omit with bot_agent_id. Requires model_id and must match the native parent's provider, or the Bot's chat model provider when the parent is external."`
 	RunInBackground bool   `json:"run_in_background,omitempty" jsonschema:"If true, return immediately with a task_id. Use wait_until(task_id), then get_background_status(task_id) to inspect result."`
 	Task            string `json:"task" jsonschema:"Task instruction for the new agent."`
 }

@@ -164,6 +164,21 @@ func (t *serverTable) recycleResource(botID string, expected recyclable) {
 	}
 }
 
+// retireIdle closes the observed generation only when nothing holds it, so a
+// user still on it keeps it in place for later acquires.
+func (t *serverTable) retireIdle(botID string, expected recyclable) {
+	t.mu.Lock()
+	entry := t.entries[botID]
+	if entry == nil || entry.resource != expected || entry.starting || entry.refs > 0 {
+		t.mu.Unlock()
+		return
+	}
+	delete(t.entries, botID)
+	entry.draining = true
+	t.mu.Unlock()
+	_ = expected.Close()
+}
+
 func (t *serverTable) recycleWhere(match func(string) bool) {
 	t.mu.Lock()
 	resources := make([]recyclable, 0)

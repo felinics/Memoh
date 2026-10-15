@@ -100,7 +100,7 @@ func (t *turnRunner) submitSteer(ctx context.Context, input external.SteerInput)
 	t.mu.Unlock()
 	line, err := json.Marshal(map[string]any{"type": "user", "uuid": input.ID, "session_id": sessionID, "priority": "now", "parent_tool_use_id": nil, "message": map[string]any{"role": "user", "content": input.Text}})
 	if err == nil {
-		err = t.writeLine(line)
+		err = t.writeLine(ctx, line)
 	}
 	t.submissionMu.Unlock()
 	if err != nil {

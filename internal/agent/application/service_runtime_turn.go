@@ -194,6 +194,22 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		return RunOutcome{}, err
 	}
 	runtimeType := strings.TrimSpace(driver.RuntimeType())
+	stopNotice := false
+	if sess.SessionMode == session.TypeSubagent {
+		pendingExecution := metadataString(sess.RuntimeMetadata, "external_execution_run")
+		if metadataString(sess.RuntimeMetadata, "external_termination_unconfirmed") != "" || (pendingExecution != "" && pendingExecution != req.RunID) {
+			if sess, err = s.settledSubagent(ctx, sess); err != nil {
+				return RunOutcome{}, err
+			}
+		}
+		if _, err := s.externalSubagentBackend(ctx, sess.BotID, sess.BotAgentID); err != nil {
+			return RunOutcome{}, err
+		}
+		stopNotice = req.AgentCommand == "" && metadataString(sess.RuntimeMetadata, "external_termination_resolved") != ""
+		req.SessionType = session.TypeSubagent
+		req.SkipMemoryExtraction = true
+		req.SkipTitleGeneration = true
+	}
 	runtimeMeta := runtimeSessionMeta(sess)
 	projectPath := metadataString(runtimeMeta, "project_path")
 	runtimeOwnerAccountID := metadataString(runtimeMeta, "runtime_owner_account_id")
@@ -266,7 +282,9 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	// round exists at all — may clean it up.
 	cleanupLeadingUser := func() {
 		if leadingUser != nil {
-			s.cleanupReplacementMessages(context.WithoutCancel(ctx), []messagepkg.Message{*leadingUser})
+			writeCtx, cancelWrite := context.WithTimeout(context.WithoutCancel(ctx), terminalWriteTimeout)
+			defer cancelWrite()
+			s.cleanupReplacementMessages(writeCtx, []messagepkg.Message{*leadingUser})
 		}
 	}
 	s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
@@ -363,7 +381,11 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		s.cleanupReplacementMessages(cleanupCtx, projectedSnapshot())
 		s.cleanupRuntimeDecisionProjectionRows(cleanupCtx, req)
 	}
-	cleanupProjections := func() { cleanupProjectionsIn(context.WithoutCancel(ctx)) }
+	cleanupProjections := func() {
+		writeCtx, cancelWrite := context.WithTimeout(context.WithoutCancel(ctx), terminalWriteTimeout)
+		defer cancelWrite()
+		cleanupProjectionsIn(writeCtx)
+	}
 
 	var notices runtimeNotices
 	emitWithContext := func(deliveryCtx context.Context, ev native.StreamEvent) {
@@ -405,8 +427,25 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	}
 
 	emit(native.StreamEvent{Type: native.EventStart})
+	canRequestUserInput := s.canDeliverUserInputWS(eventCh)
+	if req.RuntimeCanRequestUserInput != nil {
+		canRequestUserInput = canRequestUserInput && *req.RuntimeCanRequestUserInput
+	}
 
+	if sess.SessionMode == session.TypeSubagent {
+		writeCtx, cancelWrite := context.WithTimeout(ctx, terminalWriteTimeout)
+		_, guardErr := s.sessionService.MergeRuntimeMetadata(writeCtx, req.ThreadID, runtimeType, map[string]any{"external_execution_run": req.RunID})
+		cancelWrite()
+		if err := guardErr; err != nil {
+			return RunOutcome{}, apperror.Wrap(apperror.CodeSessionHistoryInconsistent, err, nil)
+		}
+	}
+	prompt := req.Query
+	if stopNotice {
+		prompt = subagentStopConfirmedNotice + "\n\n" + prompt
+	}
 	result, err := driver.Prompt(idleCtx, external.PromptInput{
+		ActorUserID:               req.UserID,
 		Steering:                  s.runtimeSteering(req),
 		BotID:                     req.BotID,
 		BotAgentID:                sess.BotAgentID,
@@ -414,7 +453,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		ThreadID:                  req.ThreadID,
 		RunID:                     req.RunID,
 		RouteID:                   req.RouteID,
-		Prompt:                    req.Query,
+		Prompt:                    prompt,
 		ContextMarkdown:           contextMarkdown,
 		ContextURI:                contextURI,
 		ContextBudgetMaxTokens:    s.runtimeContextBudgetDefault(streamCtx, req.BotID),
@@ -439,9 +478,19 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		// Elicitation rides each runtime's own protocol (ACP elicitation,
 		// codex requestUserInput), independent of the MCP tool gateway.
 		ToolOutputLimit:     s.toolOutputLimit(),
-		CanRequestUserInput: s.canDeliverUserInputWS(eventCh),
+		CanRequestUserInput: canRequestUserInput,
 		Sink:                external.EventSinkFunc(emit),
 	})
+	terminationUnconfirmed := sess.SessionMode == session.TypeSubagent && result.TerminationUnconfirmed
+	reapClaimed := false
+	if sess.SessionMode == session.TypeSubagent && s.subagentReaper != nil && (result.TerminationUnconfirmed || !result.TurnCompleted) {
+		var reaped bool
+		_, reapClaimed, reaped = s.reapSubagent(ctx, sess, req.RunID)
+		terminationUnconfirmed = !reaped
+		if reaped && result.TurnCompleted {
+			err = withoutUnconfirmedTermination(err)
+		}
+	}
 	err = runtimeTurnError(runtimeType, err)
 	configurationFailure := isRuntimeConfigurationError(err)
 	err = ExternalAgentError(err)
@@ -459,7 +508,33 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	}
 
 	cancelPending := func() {
-		s.cancelPendingRuntimeApprovals(context.WithoutCancel(ctx), req, "tool approval cancelled: the turn ended before a decision arrived")
+		writeCtx, cancelWrite := context.WithTimeout(context.WithoutCancel(ctx), terminalWriteTimeout)
+		defer cancelWrite()
+		s.cancelPendingRuntimeApprovals(writeCtx, req, "tool approval cancelled: the turn ended before a decision arrived")
+	}
+	if sess.SessionMode == session.TypeSubagent {
+		if result.RuntimeMetadata == nil {
+			result.RuntimeMetadata = map[string]any{}
+		}
+		if reapClaimed {
+			result.RuntimeMetadata["external_termination_reap"] = nil
+		}
+		if terminationUnconfirmed {
+			result.RuntimeMetadata["external_execution_run"] = req.RunID
+		} else {
+			result.RuntimeMetadata["external_execution_run"] = nil
+		}
+		if stopNotice && result.TurnCompleted {
+			result.RuntimeMetadata["external_termination_resolved"] = nil
+		}
+	}
+	if terminationUnconfirmed {
+		if result.RuntimeMetadata == nil {
+			result.RuntimeMetadata = map[string]any{}
+		}
+		result.RuntimeMetadata["external_termination_unconfirmed"] = req.RunID
+		err = apperror.Wrap(apperror.CodeExternalRuntimeTerminationUnconfirmed, err, nil)
+		outcome.setCause(err)
 	}
 
 	// Persist driver-owned session keys (e.g. the runtime's thread id) before
@@ -469,19 +544,40 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	// Failing the round keeps state consistent instead — nothing is committed,
 	// and a retry runs against the stored anchor.
 	if len(result.RuntimeMetadata) > 0 {
-		if _, mergeErr := s.sessionService.MergeRuntimeMetadata(context.WithoutCancel(ctx), req.ThreadID, runtimeType, result.RuntimeMetadata); mergeErr != nil {
+		writeCtx, cancelWrite := context.WithTimeout(context.WithoutCancel(ctx), terminalWriteTimeout)
+		_, mergeErr := s.sessionService.MergeRuntimeMetadata(writeCtx, req.ThreadID, runtimeType, result.RuntimeMetadata)
+		cancelWrite()
+		if mergeErr != nil {
 			s.logger.ErrorContext(ctx, "external runtime metadata merge failed",
 				slog.String("session_id", req.ThreadID), slog.String("runtime", runtimeType), slog.Any("error", mergeErr))
-			cancelPending()
-			cleanupProjections()
-			cleanupLeadingUser()
 			anchorErr := fmt.Errorf("persist runtime session anchor: %w", mergeErr)
 			if err != nil {
 				anchorErr = errors.Join(err, anchorErr)
 			}
 			outcome.setCause(anchorErr)
-			return RunOutcome{}, anchorErr
+			if sess.SessionMode == session.TypeSubagent {
+				terminationUnconfirmed = true
+				err = apperror.Wrap(apperror.CodeExternalRuntimeTerminationUnconfirmed, anchorErr, nil)
+				outcome.setCause(err)
+			} else {
+				cancelPending()
+				cleanupProjections()
+				cleanupLeadingUser()
+				return RunOutcome{}, anchorErr
+			}
 		}
+	}
+	if terminationUnconfirmed {
+		cancelPending()
+		if persistErr := s.persistRuntimeRound(context.WithoutCancel(ctx), req, runtimeType, projectPath, result, err, false, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); persistErr != nil {
+			s.logger.ErrorContext(ctx, "persist uncertain external execution failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
+		}
+		cleanupProjections()
+		ev := runtimeTerminalStreamEvent(native.EventError, result)
+		ev.Code = string(apperror.CodeExternalRuntimeTerminationUnconfirmed)
+		ev.Error = ev.Code
+		emitWithContext(context.WithoutCancel(ctx), ev)
+		return RunOutcome{Status: sessionruntime.RunStatusErrored, Cause: err, ExecutionUnconfirmed: true}, err
 	}
 
 	if err != nil {
@@ -692,6 +788,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, strings.TrimSpace(payload.ReasoningEffort))
 	defer idleCancel.Stop()
 	result, promptErr := driver.Prompt(idleCtx, external.PromptInput{
+		ActorUserID:               req.UserID,
 		BotID:                     botID,
 		BotAgentID:                sess.BotAgentID,
 		ChatID:                    botID,
@@ -735,7 +832,10 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 	// Same contract as the chat path: the round must not commit past a lost
 	// runtime session anchor, or later fires resume the pre-round context.
 	if len(result.RuntimeMetadata) > 0 {
-		if _, mergeErr := s.sessionService.MergeRuntimeMetadata(context.WithoutCancel(ctx), payload.SessionID, runtimeType, result.RuntimeMetadata); mergeErr != nil {
+		writeCtx, cancelWrite := context.WithTimeout(context.WithoutCancel(ctx), terminalWriteTimeout)
+		_, mergeErr := s.sessionService.MergeRuntimeMetadata(writeCtx, payload.SessionID, runtimeType, result.RuntimeMetadata)
+		cancelWrite()
+		if mergeErr != nil {
 			s.logger.ErrorContext(ctx, "external runtime metadata merge failed",
 				slog.String("session_id", payload.SessionID), slog.String("runtime", runtimeType), slog.Any("error", mergeErr))
 			s.cancelPendingRuntimeApprovals(context.WithoutCancel(ctx), req, "tool approval cancelled: the scheduled run ended before a decision arrived")
@@ -907,6 +1007,8 @@ func (s *Service) persistRuntimeRound(
 	contextLifecycle *contextfrag.LifecycleHolder,
 	reasoningTiming []messagepkg.ReasoningTimingSegment,
 ) error {
+	ctx, cancelWrite := context.WithTimeout(ctx, terminalWriteTimeout)
+	defer cancelWrite()
 	req.RuntimeType = runtimeType
 	meta := map[string]any{
 		"runtime_type": runtimeType,
@@ -1039,6 +1141,25 @@ func (s *Service) persistRuntimeRound(
 		s.storeMemory(context.WithoutCancel(ctx), req, persisted)
 	}
 	return err
+}
+
+// withoutUnconfirmedTermination drops the parts of a runtime error that only
+// report that its processes were not confirmed stopped.
+func withoutUnconfirmedTermination(err error) error {
+	if !errors.Is(err, external.ErrTerminationUnconfirmed) {
+		return err
+	}
+	joined, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		return err
+	}
+	var kept []error
+	for _, part := range joined.Unwrap() {
+		if !errors.Is(part, external.ErrTerminationUnconfirmed) {
+			kept = append(kept, part)
+		}
+	}
+	return errors.Join(kept...)
 }
 
 // runtimeTurnError marks err as the failure of a turn runtimeType ran. Every

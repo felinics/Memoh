@@ -149,7 +149,12 @@ func buildRuntimeContextSections(input runtimeContextRenderInput) []contextview.
 		CacheClass: contextfrag.CacheStable,
 		Budget:     contextfrag.BudgetPolicy{Overflow: contextfrag.OverflowKeep},
 		Text: "# Memoh Runtime Context\n\n" +
-			"This virtual resource is already embedded in the current External Agent prompt. It is not a workspace file and no file lookup is needed. Use it for identity, memory, user preferences, and session background. The user prompt outside this resource is the actual task.",
+			"This virtual resource is already embedded in the current External Agent prompt. It is not a workspace file and no file lookup is needed. Use it for identity, memory, user preferences, and session background. The user prompt outside this resource is the actual task.\n\n" +
+			"## Memoh tool routing\n\n" +
+			"- Memoh tools come from the MCP server `memoh` (often `mcp__memoh__*`), or `Memoh Tools` / `Memoh_Tools` for ACP (often `mcp__Memoh_Tools__*`). Use the exact tool names exposed by your runtime's tool catalog. If tools are deferred, filter the tool catalog or `ALL_TOOLS` when available to the Memoh tools needed for this task.\n" +
+			"- When a task specifies a Memoh tool, use that tool source. If it is unavailable after discovery, report this instead of silently substituting a runtime-native tool.\n" +
+			"- When a task requires Memoh-managed subagents, use this server's `spawn_agent` and the returned `agent_id` with its follow-up and control tools. Runtime-native collaboration or Agent workers do not provide Memoh's managed child identity and controls and must not substitute for that request.\n" +
+			"- Use available runtime-native tools normally when the task does not specify a tool source or require Memoh-managed delegation.",
 	})
 
 	runtimePairs := [][2]string{

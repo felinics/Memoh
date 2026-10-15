@@ -694,6 +694,11 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 	// Correlated real Memoh MCP tool calls remain delegated to the gateway's own
 	// scoped policy and approval flow rather than creating a duplicate prompt.
 	consentShaped := isConsentShapedPermission(state)
+	if consentShaped && c.currentToolSession().IsSubagent {
+		if input, ok := state.input.(map[string]any); ok && strings.TrimSpace(stringFromAny(input["url"])) != "" {
+			return rejectOncePermission(p), nil
+		}
+	}
 	forceReview := consentShaped
 	mcpShaped := false
 	if preflight, ok := mcpPermissionPreflightFromState(state); ok {

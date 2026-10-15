@@ -82,6 +82,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	sink := client.EventSinkFunc(input.Sink.EmitStreamEvent)
 	result, err := d.pool.Prompt(ctx, PromptInput{
 		BotID:                    input.BotID,
+		ActorUserID:              input.ActorUserID,
 		BotAgentID:               input.BotAgentID,
 		ChatID:                   input.ChatID,
 		SessionID:                input.ThreadID,
@@ -118,6 +119,9 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		Sink:                      sink,
 	})
 	out := DriverPromptResult(result, agentID)
+	if out.TerminationUnconfirmed {
+		return out, errors.Join(external.ErrTerminationUnconfirmed, err)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			// The port's interrupt contract: a canceled turn returns its
@@ -138,10 +142,11 @@ func DriverPromptResult(result client.PromptResult, agentID string) external.Pro
 		result.Output = external.TranscriptFromEvents(result.Events, result.Text)
 	}
 	out := external.PromptResult{
-		Output:     result.Output,
-		Text:       result.Text,
-		Usage:      result.Usage,
-		StopReason: result.StopReason,
+		Output:                 result.Output,
+		Text:                   result.Text,
+		Usage:                  result.Usage,
+		StopReason:             result.StopReason,
+		TerminationUnconfirmed: result.TerminationUnconfirmed,
 		// Every completed ACP turn publishes its run ID: no
 		// runtime snapshots are captured, but pool fencing still compares warm
 		// handles against the canonical head watermark.

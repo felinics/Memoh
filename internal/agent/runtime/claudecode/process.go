@@ -2,11 +2,13 @@ package claudecode
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/runtime/agentprocess"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	"github.com/felinics/memoh/internal/workspace/vpath"
@@ -36,6 +38,7 @@ type cliProcess interface {
 	Err() error
 	StderrTail() string
 	Close() error
+	Stop(context.Context) error
 }
 
 // startCLI spawns one Claude Code process from the resolved launcher path.
@@ -67,15 +70,29 @@ func cliCommand(launcher string, args []string) string {
 
 // drainCLI closes input and waits for the CLI's durable writes to finish.
 // A result event can precede transcript flush, especially after /compact.
-func drainCLI(proc cliProcess, timeout time.Duration) error {
+func drainCLI(ctx context.Context, proc cliProcess, timeout time.Duration) error {
 	proc.CloseStdin()
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
 	case <-proc.Done():
+		if err := stopCLI(ctx, proc); err != nil {
+			return err
+		}
 		return errs.WrapDependency(proc.Err(), "")
 	case <-timer.C:
-		_ = proc.Close()
+		if err := stopCLI(ctx, proc); err != nil {
+			return err
+		}
 		return errs.NewDependency("claude did not exit after closing stdin")
 	}
+}
+
+func stopCLI(ctx context.Context, proc cliProcess) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := proc.Stop(ctx); err != nil {
+		return errors.Join(external.ErrTerminationUnconfirmed, err)
+	}
+	return nil
 }

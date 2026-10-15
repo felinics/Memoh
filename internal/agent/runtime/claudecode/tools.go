@@ -28,18 +28,22 @@ const memohMCPServerName = "memoh"
 const MemohToolTimeoutMillis = 900_000
 
 // mountTurnTools serves the gateway for one turn and returns the
-// --mcp-config JSON naming it. An empty string means no gateway this turn;
-// the mount (when non-nil) must be stopped when the turn ends.
-func (d *Driver) mountTurnTools(ctx context.Context, client *bridge.Client, workspaceInfo bridge.WorkspaceInfo, input external.PromptInput) (string, *toolmount.Mount, error) {
+// --mcp-config JSON naming it and the stop that ends the turn's tools. Tool
+// calls belong to the run: they end when ctx does or when stop is called. The
+// route outlives ctx until stop, so calls cut short during the CLI's
+// interrupt handshake still deliver their answers.
+func (d *Driver) mountTurnTools(ctx context.Context, client *bridge.Client, workspaceInfo bridge.WorkspaceInfo, input external.PromptInput) (string, func(), error) {
 	baseURL := toolmount.ResolveBaseURL(workspaceInfo, input.ToolHTTPURL)
 	if baseURL == "" {
 		return "", nil, errs.New(fmt.Sprintf("resolve Memoh tool gateway URL for %s workspace", workspaceInfo.Backend))
 	}
-	session := turnToolSession(ctx, input)
-	mount, err := toolmount.Serve(ctx, client, baseURL, d.toolGateway, func() mcp.ToolSessionContext {
+	toolsCtx, cancelTools := context.WithCancel(ctx)
+	session := turnToolSession(toolsCtx, input)
+	mount, err := toolmount.Serve(context.WithoutCancel(ctx), client, baseURL, d.toolGateway, func() mcp.ToolSessionContext {
 		return session
 	})
 	if err != nil {
+		cancelTools()
 		return "", nil, fmt.Errorf("mount Memoh tool gateway: %w", err)
 	}
 	config := fmt.Sprintf(
@@ -48,7 +52,10 @@ func (d *Driver) mountTurnTools(ctx context.Context, client *bridge.Client, work
 		strconv.Quote(mount.URL),
 		MemohToolTimeoutMillis,
 	)
-	return config, mount, nil
+	return config, func() {
+		cancelTools()
+		mount.Stop()
+	}, nil
 }
 
 // turnToolSession builds the trusted tool identity for one turn. Everything
@@ -56,6 +63,7 @@ func (d *Driver) mountTurnTools(ctx context.Context, client *bridge.Client, work
 func turnToolSession(ctx context.Context, input external.PromptInput) mcp.ToolSessionContext {
 	session := mcp.ToolSessionContext{
 		BotID:                     input.BotID,
+		UserID:                    input.ActorUserID,
 		ChatID:                    firstNonEmpty(input.ChatID, input.BotID),
 		SessionID:                 input.ThreadID,
 		RunID:                     input.RunID,
@@ -67,6 +75,7 @@ func turnToolSession(ctx context.Context, input external.PromptInput) mcp.ToolSe
 		ChannelIdentityID:         input.ChannelIdentityID,
 		SessionToken:              input.SessionToken,
 		CanRequestUserInput:       input.CanRequestUserInput,
+		IsSubagent:                input.IsSubagent(),
 		CanListUserInput:          true,
 		RuntimeActive:             true,
 		RequireActiveRun:          true,

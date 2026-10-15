@@ -280,6 +280,7 @@
       "rate_limited": "The external Agent was rate limited by its model service. Please wait a moment before sending again.",
       "request_blocked": "The model service's safety policy blocked this request. Change the request and send it again.",
       "session_resume_failed": "The session could not be resumed. Try again or start a new conversation.",
+      "termination_unconfirmed": "Memoh could not confirm that the external task stopped, so the session stays blocked to prevent duplicate work. Make sure the workspace is running, then try again: when the session is next used, Memoh checks the workspace and stops the leftover processes it can find, at most about once a minute.",
       "unavailable": "The external Agent runtime is unavailable. Check the Agent setup and workspace, then try again.",
       "upstream_unreachable": "The external Agent could not reach its model service, or the connection dropped. Check the network and the Agent's service address, then try again.",
       "usage_limited": "The external Agent's account has no usage left. Try again after the limit resets, or check the account's plan and billing."

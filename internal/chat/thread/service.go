@@ -292,6 +292,9 @@ type Queries interface {
 	ListSessionsByBotPaged(context.Context, sqlc.ListSessionsByBotPagedParams) ([]sqlc.ListSessionsByBotPagedRow, error)
 	ListSessionsByRoute(context.Context, pgtype.UUID) ([]sqlc.BotSession, error)
 	ListSubagentForkContext(context.Context, pgtype.UUID) ([]sqlc.ListSubagentForkContextRow, error)
+	ListExternalSubagentExecutionHolds(context.Context, pgtype.UUID) ([]sqlc.BotSession, error)
+	ClaimExternalSubagentReap(context.Context, sqlc.ClaimExternalSubagentReapParams) (string, error)
+	ResolveExternalSubagentTermination(context.Context, sqlc.ResolveExternalSubagentTerminationParams) (sqlc.BotSession, error)
 	ListSubagentSessionsByParent(context.Context, pgtype.UUID) ([]sqlc.BotSession, error)
 	SoftDeleteSession(context.Context, pgtype.UUID) error
 	TouchSession(context.Context, pgtype.UUID) error
@@ -434,6 +437,13 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Thread, error)
 	sessionType = desc.LegacyType
 	meta = desc.Metadata
 	runtimeMeta := desc.RuntimeMetadata
+	if desc.SessionMode == TypeSubagent && runtimekind.IsExternal(desc.RuntimeType) {
+		input, err = s.prepareExternalSubagent(ctx, input)
+		if err != nil {
+			return Thread{}, err
+		}
+		runtimeOwnerUserID = metadataString(input.RuntimeMetadata, "runtime_owner_account_id")
+	}
 	if desc.RuntimeType == RuntimeACPAgent {
 		meta = ApplyACPMetadataDefaults(meta)
 		runtimeMeta = ApplyACPMetadataDefaults(runtimeMeta)
@@ -527,6 +537,15 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Thread, error)
 // model/fork configuration when the backing store supports transactions.
 func (s *Service) CreateSubagent(ctx context.Context, input CreateSubagentInput) (Thread, SubagentConfig, error) {
 	input.Thread.Type = TypeSubagent
+	input.Thread.SessionMode = TypeSubagent
+	input.Thread.Visibility = VisibilityInternal
+	if runtimekind.IsExternal(input.Thread.RuntimeType) {
+		if input.ModelUUID != "" || input.ModelID != "" || input.ProviderName != "" || input.Forked || len(input.ForkContext) != 0 {
+			return Thread{}, SubagentConfig{}, fmt.Errorf("%w: native model and fork configuration are unsupported", ErrInvalidExternalSubagent)
+		}
+		created, err := s.Create(ctx, input.Thread)
+		return created, SubagentConfig{}, err
+	}
 	modelUUID, err := dbpkg.ParseUUID(input.ModelUUID)
 	if err != nil {
 		return Thread{}, SubagentConfig{}, fmt.Errorf("invalid subagent model uuid: %w", err)
@@ -1006,6 +1025,22 @@ func (s *Service) updateDescriptorAndMetadata(ctx context.Context, queries Queri
 	if err != nil {
 		return Thread{}, err
 	}
+	if normalizeSessionMode(existing.SessionMode, existing.Type) == TypeSubagent && runtimekind.IsExternal(existing.RuntimeType) {
+		for _, key := range []string{"external_execution_run", "external_termination_unconfirmed", "external_termination_reap", "external_termination_resolved"} {
+			if value := metadataString(existingRuntimeMeta, key); value != "" {
+				desc.RuntimeMetadata[key] = value
+			}
+		}
+		if desc.SessionMode != TypeSubagent || desc.RuntimeType != existing.RuntimeType || pgBotAgentID != existing.BotAgentID {
+			return Thread{}, ErrSubagentBindingImmutable
+		}
+		for _, key := range []string{"acp_agent_id", "project_path", "acp_project_mode"} {
+			if value := metadataString(existingRuntimeMeta, key); value != "" {
+				desc.RuntimeMetadata[key] = value
+				desc.Metadata[key] = value
+			}
+		}
+	}
 	sessionType = desc.LegacyType
 	metadata = desc.Metadata
 	runtimeMeta := desc.RuntimeMetadata
@@ -1454,6 +1489,55 @@ func (s *Service) ListSubagentsByParent(ctx context.Context, parentSessionID str
 	return threads, nil
 }
 
+// ListExternalExecutionHolds returns the bot's external subagent sessions,
+// deleted ones included, that still carry a durable execution record.
+func (s *Service) ListExternalExecutionHolds(ctx context.Context, botID string) ([]Thread, error) {
+	pgBotID, err := dbpkg.ParseUUID(botID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid bot id: %w", err)
+	}
+	rows, err := s.queries.ListExternalSubagentExecutionHolds(ctx, pgBotID)
+	if err != nil {
+		return nil, err
+	}
+	threads := make([]Thread, 0, len(rows))
+	for _, row := range rows {
+		threads = append(threads, toThread(row))
+	}
+	return threads, nil
+}
+
+// ClaimExternalSubagentReap claims confirming that runID stopped. It reports
+// false while another claim is live or the session records a different run.
+func (s *Service) ClaimExternalSubagentReap(ctx context.Context, sessionID, runID string, lease time.Duration) (string, bool, error) {
+	pgID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return "", false, fmt.Errorf("invalid session id: %w", err)
+	}
+	claim, err := s.queries.ClaimExternalSubagentReap(ctx, sqlc.ClaimExternalSubagentReapParams{ID: pgID, RunID: runID, LeaseSeconds: lease.Seconds()})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	return claim, err == nil, err
+}
+
+// ResolveExternalSubagentTermination records that runID stopped under claim.
+// It reports false when the claim was lost.
+func (s *Service) ResolveExternalSubagentTermination(ctx context.Context, sessionID, runID, claim string) (Thread, bool, error) {
+	pgID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return Thread{}, false, fmt.Errorf("invalid session id: %w", err)
+	}
+	row, err := s.queries.ResolveExternalSubagentTermination(ctx, sqlc.ResolveExternalSubagentTerminationParams{ID: pgID, RunID: runID, Claim: claim})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Thread{}, false, nil
+	}
+	if err != nil {
+		return Thread{}, false, err
+	}
+	return toThread(row), true, nil
+}
+
 // UpdateTitle updates a session's title.
 func (s *Service) UpdateTitle(ctx context.Context, sessionID, title string) (Thread, error) {
 	pgID, err := dbpkg.ParseUUID(sessionID)
@@ -1769,8 +1853,7 @@ func normalizeDescriptor(legacyType, sessionMode, runtimeType string, metadata, 
 	if !IsKnownRuntimeType(runtimeType) {
 		return descriptor{}, &DescriptorError{Field: "runtime_type", Err: fmt.Errorf("unknown runtime type %q", runtimeType)}
 	}
-	// The runtime capability table owns which modes each runtime can host
-	// (e.g. agent runtimes never back subagent loops).
+	// The runtime capability table owns which modes each runtime can host.
 	if !runtimekind.SupportsSessionMode(runtimeType, sessionMode) {
 		return descriptor{}, &DescriptorError{Field: "session_mode", Err: fmt.Errorf("runtime type %q is only supported for %s session modes", runtimeType, strings.Join(runtimekind.SupportedSessionModes(runtimeType), ", "))}
 	}

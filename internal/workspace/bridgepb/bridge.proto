@@ -78,6 +78,8 @@ message ExecInput {
   repeated string unset_env = 9;
   // Opt-in process liveness frames; older bridges safely ignore this field.
   bool report_liveness = 10;
+  // Terminate the process group while preserving the stream for its EXIT frame.
+  bool terminate = 11;
 }
 
 message TerminalResize {

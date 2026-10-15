@@ -461,3 +461,28 @@ func valueContainsString(value any, needle string) bool {
 	}
 	return false
 }
+
+type runHistoryRow struct {
+	ID      string          `json:"message_id"`
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
+	Usage   json.RawMessage `json:"usage,omitempty"`
+	ModelID string          `json:"model_id,omitempty"`
+}
+
+func (p *ledgerProbe) runHistory(ctx context.Context, runID string) ([]runHistoryRow, error) {
+	rows, err := p.pool.Query(ctx, `SELECT id::text,role,content,COALESCE(usage,'{}'::jsonb),COALESCE(model_id::text,'') FROM bot_history_messages WHERE run_id=$1 AND turn_superseded_at IS NULL ORDER BY turn_message_seq,created_at,id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []runHistoryRow
+	for rows.Next() {
+		var row runHistoryRow
+		if err := rows.Scan(&row.ID, &row.Role, &row.Content, &row.Usage, &row.ModelID); err != nil {
+			return nil, err
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
+}

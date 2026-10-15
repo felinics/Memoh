@@ -25,7 +25,9 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agent/runtime/agentprocess"
 	"github.com/felinics/memoh/internal/agent/runtime/agentstate"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/bots"
@@ -205,6 +207,7 @@ type runtimeHandle struct {
 	status                   string
 	lastActive               time.Time
 	boundSession             string
+	subagent                 bool
 	defaultModelID           string
 	active                   *client.ToolSessionContext
 	persistenceFence         runtimefence.Fence
@@ -259,6 +262,7 @@ type PromptInput struct {
 	ContextURI                string
 	ContextMarkdown           string
 	RuntimeOwnerAccountID     string
+	ActorUserID               string
 	ForceFreshRuntime         bool
 	ContextBudgetMaxTokens    int
 	ContextToolExchangePolicy *contextfrag.ToolExchangePolicy
@@ -908,6 +912,10 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 		_ = p.teardown(h) //nolint:contextcheck // stale warm generation must be destroyed before retry.
 		return client.PromptResult{}, true, nil
 	}
+	if sess.Disconnected() {
+		_ = p.teardown(h) //nolint:contextcheck // no prompt was sent on this disconnected warm transport.
+		return client.PromptResult{}, true, nil
+	}
 
 	h.state.Lock()
 	if h.closed || h.session != sess {
@@ -1023,14 +1031,19 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 				// blocked in the connection write lock. Break the transport first;
 				// graceful teardown would otherwise block trying session/close behind
 				// that same writer and never reach the process close.
-				_ = sess.ForceClose() //nolint:contextcheck // forced lifecycle teardown must outlive the cancelled turn.
-				_ = p.teardown(h)     //nolint:contextcheck // lifecycle close uses the handle owner context.
+				closeErr := sess.ForceClose() //nolint:contextcheck // forced lifecycle teardown must outlive the cancelled turn.
+				result.TerminationUnconfirmed = errors.Is(closeErr, agentprocess.ErrTerminationUnconfirmed)
+				err = errors.Join(err, closeErr)
+				_ = p.teardown(h) //nolint:contextcheck // lifecycle close uses the handle owner context.
 			}
 			return result, false, err
 		}
 		// Prompt failures usually indicate the ACP process is in a bad state
 		// (transport hang, agent crash); drop the runtime so the next call
 		// starts fresh.
+		closeErr := sess.ForceClose() //nolint:contextcheck // execution must stop before releasing its active slot.
+		result.TerminationUnconfirmed = errors.Is(closeErr, agentprocess.ErrTerminationUnconfirmed)
+		err = errors.Join(err, closeErr)
 		_ = p.teardown(h) //nolint:contextcheck // lifecycle close uses the handle owner context.
 		return result, false, err
 	}
@@ -1357,6 +1370,7 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 				status:                stateStarting,
 				lastActive:            time.Now(),
 				boundSession:          sessionID,
+				subagent:              strings.TrimSpace(input.SessionType) == sessionmode.Subagent,
 			}
 			p.runtimes[h.id] = h
 			p.bySession[sessionID] = h.id
@@ -1500,6 +1514,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		DefaultReasoningEffort: profile.DefaultReasoningEffort,
 		Timeout:                0,
 		ToolHTTPURL:            toolHTTPURL,
+		Env:                    h.processEnv(),
 		// The handler resolves identity from the handle per request, so the
 		// process configuration only ever carries stable runtime identity.
 		ToolHTTPHandler:  p.toolHTTPHandler(h),
@@ -2306,6 +2321,10 @@ func (p *SessionPool) sessionBotAgentID(ctx context.Context, sessionID string) (
 	if err != nil {
 		return "", fmt.Errorf("load ACP session metadata: %w", err)
 	}
+	// A warm process carries no subagent marker, so a child never adopts one.
+	if strings.TrimSpace(sess.SessionType) == sessionmode.Subagent {
+		return "", ErrRuntimeBindRejected
+	}
 	return strings.TrimSpace(sess.BotAgentID), nil
 }
 
@@ -2388,6 +2407,15 @@ func (h *runtimeHandle) stableToolIdentity() client.ToolSessionContext {
 	}
 }
 
+// processEnv marks a subagent's agent process, and the terminal commands it
+// starts, with the child thread.
+func (h *runtimeHandle) processEnv() []string {
+	if !h.subagent {
+		return nil
+	}
+	return external.SubagentThreadEnvEntry(h.boundSession)
+}
+
 // toolContext resolves the trusted MCP tool context for the runtime: stable
 // identity plus, while a prompt is running, the per-prompt fields (stream,
 // token, chat, reply target...).
@@ -2406,12 +2434,14 @@ func (h *runtimeHandle) toolContext() mcp.ToolSessionContext {
 		return ctx
 	}
 	ctx.RuntimeActive = true
+	ctx.IsSubagent = h.active.IsSubagent
 	overlay := func(dst *string, value string) {
 		if value = strings.TrimSpace(value); value != "" {
 			*dst = value
 		}
 	}
 	overlay(&ctx.ChatID, h.active.ChatID)
+	overlay(&ctx.UserID, h.active.UserID)
 	overlay(&ctx.SessionID, h.active.SessionID)
 	overlay(&ctx.RunID, h.active.RunID)
 	overlay(&ctx.SessionType, h.active.SessionType)
@@ -2466,6 +2496,7 @@ func toolSessionContext(ctx context.Context, input PromptInput, h *runtimeHandle
 	fence, _ := runtimefence.FromContext(ctx)
 	return client.ToolSessionContext{
 		BotID:             h.botID,
+		UserID:            input.ActorUserID,
 		ChatID:            firstNonEmpty(input.ChatID, h.botID),
 		RuntimeID:         h.id,
 		SessionID:         strings.TrimSpace(input.SessionID),
@@ -2482,7 +2513,7 @@ func toolSessionContext(ctx context.Context, input PromptInput, h *runtimeHandle
 		// context does not already carry one.
 		ReasoningRequestedEffort:  strings.TrimSpace(input.ReasoningEffort),
 		CanRequestUserInput:       input.CanRequestUserInput,
-		IsSubagent:                false,
+		IsSubagent:                strings.TrimSpace(input.SessionType) == sessionmode.Subagent,
 		SupportsImageInput:        input.SupportsImageInput,
 		ContextBudgetMaxTokens:    input.ContextBudgetMaxTokens,
 		ContextToolExchangePolicy: input.ContextToolExchangePolicy,

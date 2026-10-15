@@ -293,8 +293,9 @@ func (r *outcomeRecorder) finishLifecycle(terminal func(error)) {
 // session runtime, which derives it from what the run recorded. Cause is the
 // failure the owner holds, if any.
 type RunOutcome struct {
-	Status string
-	Cause  error
+	ExecutionUnconfirmed bool
+	Status               string
+	Cause                error
 }
 
 // ErrorCode is the code the terminal write records for the run: the catalogued

@@ -131,6 +131,10 @@ func redisMutateWithKeys[T any, R any](ctx context.Context, b *RedisBackend, key
 }
 
 func (b *RedisBackend) EnqueueSteer(ctx context.Context, key Key, itemID, invocationID string, payload []byte) (SteerItem, error) {
+	return b.EnqueueSteerForRun(ctx, key, "", itemID, invocationID, payload)
+}
+
+func (b *RedisBackend) EnqueueSteerForRun(ctx context.Context, key Key, runID, itemID, invocationID string, payload []byte) (SteerItem, error) {
 	if err := b.ensureQueueOpen(); err != nil {
 		return SteerItem{}, err
 	}
@@ -148,6 +152,9 @@ func (b *RedisBackend) EnqueueSteer(ctx context.Context, key Key, itemID, invoca
 			return err
 		}
 		if replay, ok, replayErr := replaySteer(queue, invocationID, payload); ok {
+			if runID != "" && replay.TargetRunID != runID {
+				return ErrCommandTargetMismatch
+			}
 			item = replay
 			return replayErr
 		}
@@ -158,6 +165,9 @@ func (b *RedisBackend) EnqueueSteer(ctx context.Context, key Key, itemID, invoca
 		run, active := activeRun(snapshot, ok)
 		if !active || queue.ClosedRunID == run.RunID {
 			return ErrQueueNoActiveRun
+		}
+		if runID != "" && run.RunID != runID {
+			return ErrCommandTargetMismatch
 		}
 		if !SteerRunAvailable(run) {
 			return ErrQueueSteerUnsupported

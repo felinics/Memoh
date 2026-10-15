@@ -552,6 +552,10 @@ func (s *Server) execPTY(stream pb.ContainerService_ExecServer, firstMsg *pb.Exe
 			if recvErr != nil {
 				return
 			}
+			if msg.GetTerminate() {
+				cancel()
+				return
+			}
 			if r := msg.GetResize(); r != nil && r.GetCols() > 0 && r.GetRows() > 0 {
 				_ = pty.Setsize(ptmx, &pty.Winsize{
 					Rows: uint16(r.GetRows()), //nolint:gosec // G115
@@ -659,6 +663,10 @@ func (s *Server) execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.Ex
 			msg, recvErr := stream.Recv()
 			if recvErr != nil {
 				_ = stdinPipe.Close()
+				return
+			}
+			if msg.GetTerminate() {
+				procCancel()
 				return
 			}
 			if data := msg.GetStdinData(); len(data) > 0 {

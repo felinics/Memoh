@@ -95,7 +95,7 @@ func (d *Driver) ReadCommand(ctx context.Context, input external.PromptInput) (e
 	if _, _, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID, true); err != nil {
 		return external.CommandResult{}, err
 	}
-	srv, release, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)
+	srv, release, err := d.acquireControlServer(ctx, input)
 	if err != nil {
 		return external.CommandResult{}, err
 	}

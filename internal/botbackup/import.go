@@ -34,6 +34,7 @@ import (
 	modelpkg "github.com/felinics/memoh/internal/models"
 	providerpkg "github.com/felinics/memoh/internal/providers"
 	"github.com/felinics/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/schedule"
 	searchpkg "github.com/felinics/memoh/internal/searchproviders"
 	"github.com/felinics/memoh/internal/settings"
@@ -1291,9 +1292,12 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		}
 		metadata := defaultJSONMap(item.Metadata)
 		runtimeMetadata := defaultJSONMap(item.RuntimeMetadata)
-		if runtimeType == sessionpkg.RuntimeACPAgent {
+		if runtimekind.IsExternal(runtimeType) {
 			metadata = rebindRestoredRuntimeOwner(metadata, actorUserID)
 			runtimeMetadata = rebindRestoredRuntimeOwner(runtimeMetadata, actorUserID)
+			if sessionMode == sessionpkg.TypeSubagent {
+				state.warnings = appendWarningOnce(state.warnings, "external subagent history restored without runtime bindings; imported subagents cannot execute")
+			}
 		}
 		// Remap the source workdir binding onto the recreated workdir. A
 		// missing map entry (remote workdir, or an import without workdirs)

@@ -42,6 +42,9 @@ func (s *Service) PrepareExternalFork(ctx context.Context, botID, sessionID, tur
 	if !session.IsDirectRuntime(sess) {
 		return nil, fmt.Errorf("session %s is not on an external runtime", sessionID)
 	}
+	if err := s.externalSubagentExecutionGate(ctx, sess); err != nil {
+		return nil, err
+	}
 	runtimeType := strings.TrimSpace(sess.RuntimeType)
 	driver, ok := s.externalDrivers[runtimeType]
 	if !ok {

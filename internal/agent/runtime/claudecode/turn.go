@@ -136,13 +136,6 @@ func (t *turnRunner) finish() {
 	t.doneOnce.Do(func() { close(t.done) })
 }
 
-func (t *turnRunner) writeLine(line []byte) error {
-	t.writeMu.Lock()
-	defer t.writeMu.Unlock()
-	_, err := t.proc.Write(append(line, '\n'))
-	return errs.WrapDependency(err, "")
-}
-
 type controlResult struct {
 	response json.RawMessage
 	err      error
@@ -171,7 +164,7 @@ func (t *turnRunner) callControl(ctx context.Context, subtype string, extra map[
 		delete(t.pendingCtrl, id)
 		t.mu.Unlock()
 	}()
-	if err := t.writeLine(line); err != nil {
+	if err := t.writeLine(ctx, line); err != nil {
 		return nil, err
 	}
 	select {
@@ -527,7 +520,7 @@ func (t *turnRunner) respondControlError(requestID, message string) {
 	if err != nil {
 		return
 	}
-	_ = t.writeLine(line)
+	_ = t.writeLine(t.ctx, line)
 }
 
 // handleCanUseTool routes one permission callback through the Memoh approval
@@ -546,7 +539,7 @@ func (t *turnRunner) handleCanUseTool(ctx context.Context, requestID string, pay
 			t.respondControlError(requestID, "memoh could not encode the decision")
 			return
 		}
-		_ = t.writeLine(line)
+		_ = t.writeLine(ctx, line)
 		return
 	}
 	callID := strings.TrimSpace(payload.ToolUseID)
@@ -587,7 +580,7 @@ func (t *turnRunner) handleCanUseTool(ctx context.Context, requestID string, pay
 		t.respondControlError(requestID, "memoh could not encode the decision")
 		return
 	}
-	_ = t.writeLine(line)
+	_ = t.writeLine(ctx, line)
 }
 
 func canonicalDisplayToolName(toolName string) string {
@@ -714,12 +707,15 @@ func (t *turnRunner) observeExit(err error) {
 func (t *turnRunner) interrupt() {
 	// No response waiter: teardown waits for the native result and process exit.
 	line, err := controlRequestLine("memoh-interrupt", "interrupt", map[string]any{"cancel_queued": true})
-	if err == nil {
-		err = t.writeLine(line)
-	}
 	if err != nil {
 		t.logger.Warn("claude interrupt send failed", slog.Any("error", err))
+		return
 	}
+	go func() {
+		if err := t.writeLine(t.ctx, line); err != nil {
+			t.logger.Warn("claude interrupt send failed", slog.Any("error", err))
+		}
+	}()
 }
 
 func (t *turnRunner) emitModelText(text string) {
@@ -734,9 +730,15 @@ func (t *turnRunner) emitModelText(text string) {
 }
 
 // buildResult assembles the durable outcome after the turn settled.
-func (t *turnRunner) buildResult(storedSessionID string) (external.PromptResult, error) {
+func (t *turnRunner) buildResult(storedSessionID string) (out external.PromptResult, resultErr error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	defer func() {
+		if (t.input.IsSubagent() || !out.TurnCompleted) && errors.Is(t.exitErr, external.ErrTerminationUnconfirmed) {
+			out.TerminationUnconfirmed = true
+			resultErr = errors.Join(resultErr, t.exitErr)
+		}
+	}()
 
 	finalText := t.assistantTxt.String()
 	if t.result != nil && !t.result.IsError {
@@ -758,7 +760,7 @@ func (t *turnRunner) buildResult(storedSessionID string) (external.PromptResult,
 			recorder.Add(ev)
 		}
 	}
-	out := external.PromptResult{Output: withoutNoResponseSentinel(recorder.Messages(finalText)), Text: finalText, SteerInputIDs: steerIDs}
+	out = external.PromptResult{Output: withoutNoResponseSentinel(recorder.Messages(finalText)), Text: finalText, SteerInputIDs: steerIDs}
 	if t.hasUsage {
 		usage := t.usage
 		out.Usage = &sdk.Usage{

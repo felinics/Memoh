@@ -121,6 +121,7 @@ external_runtime.overloaded	503
 external_runtime.rate_limited	429
 external_runtime.request_blocked	422
 external_runtime.session_resume_failed	502
+external_runtime.termination_unconfirmed	409
 external_runtime.unavailable	503
 external_runtime.upstream_unreachable	502
 external_runtime.usage_limited	429

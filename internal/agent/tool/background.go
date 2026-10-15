@@ -301,6 +301,11 @@ func backgroundStatusMap(session SessionContext, s background.TaskSnapshot) map[
 	}
 	switch s.Kind {
 	case background.KindAgent:
+		for _, key := range []string{"runtime_type", "bot_agent_id", "usage_known", "usage", "code"} {
+			if value, ok := s.Result[key]; ok {
+				result[key] = value
+			}
+		}
 		result["agent_id"] = s.AgentID
 		result["session_id"] = s.AgentSessionID
 		if s.AgentModelID != "" {

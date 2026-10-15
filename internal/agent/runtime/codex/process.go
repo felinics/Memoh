@@ -18,7 +18,7 @@ const containerPath = vpath.DataMount + "/.memoh/deps/bin:/opt/memoh/toolkit/bin
 type appServerProcess = agentprocess.Process
 
 // startAppServer launches `codex app-server` from the resolved launcher path.
-func startAppServer(ctx context.Context, client *bridge.Client, workDir, home string, cfg Config, launcher string) (*appServerProcess, error) {
+func startAppServer(ctx context.Context, client *bridge.Client, workDir, home string, cfg Config, launcher string, env ...string) (*appServerProcess, error) {
 	workDir = strings.TrimSpace(workDir)
 	if workDir == "" {
 		workDir = defaultProjectPath
@@ -29,7 +29,7 @@ func startAppServer(ctx context.Context, client *bridge.Client, workDir, home st
 	if err := materializeCodexConfig(ctx, client, home, cfg); err != nil {
 		return nil, err
 	}
-	proc, err := agentprocess.Start(ctx, client, appServerCommand(launcher), workDir, codexAppServerEnv(home))
+	proc, err := agentprocess.Start(ctx, client, appServerCommand(launcher), workDir, append(codexAppServerEnv(home), env...))
 	if err != nil {
 		return nil, errs.WrapDependency(err, "")
 	}

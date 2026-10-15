@@ -6,6 +6,7 @@ import (
 	"time"
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
 )
 
 type testUserInputService struct {
@@ -13,6 +14,39 @@ type testUserInputService struct {
 	answer   userinput.Request
 	waiting  chan struct{}
 	canceled chan struct{}
+}
+
+func TestClaudeSubagentCannotAskQuestions(t *testing.T) {
+	for _, kind := range []string{"question", "form", "url"} {
+		t.Run(kind, func(t *testing.T) {
+			r := newTestRunner(&recordingSink{})
+			defer r.close()
+			r.input.SessionMode = sessionmode.Subagent
+			r.input.CanRequestUserInput = true
+			svc := &testUserInputService{answer: userinput.Request{Status: userinput.StatusSubmitted, Result: map[string]any{
+				"answers": []any{map[string]any{"question_id": "q1", "text": "answer", "selected": []any{map[string]any{"id": "q1.o1", "label": "Done"}}}},
+			}}}
+			r.userInput = svc
+			if kind == "question" {
+				_, ok := r.collectAnswers(t.Context(), "ask", &controlRequestPayload{ToolUseID: "ask", Input: map[string]any{
+					"questions": []any{map[string]any{"question": "Choose?"}},
+				}})
+				if ok {
+					t.Fatal("child question was answered")
+				}
+			} else {
+				response := r.elicit(t.Context(), "ask", elicitationRequest{Mode: kind, Message: "Value?", URL: "https://example.com", RequestedSchema: map[string]any{
+					"type": "object", "properties": map[string]any{"value": map[string]any{"type": "string"}},
+				}})
+				if response["action"] != "decline" {
+					t.Fatalf("child elicitation was not declined: %+v", response)
+				}
+			}
+			if svc.pending.ToolCallID != "" {
+				t.Fatalf("child opened a user question: %+v", svc.pending)
+			}
+		})
+	}
 }
 
 func (s *testUserInputService) CreatePending(_ context.Context, input userinput.CreatePendingInput) (userinput.Request, error) {

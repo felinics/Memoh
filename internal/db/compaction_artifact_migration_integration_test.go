@@ -52,7 +52,8 @@ CREATE TABLE bot_sessions (
   team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
   runtime_fencing_token BIGINT NOT NULL DEFAULT 0,
   -- ClearHistoryBySession/ByBot scrub runtime continuity anchors alongside
-  -- the epoch bump; the fixture carries the column those queries touch.
+  -- the epoch bump; the fixture carries the columns those queries touch.
+  type TEXT NOT NULL DEFAULT 'chat',
   runtime_metadata JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 

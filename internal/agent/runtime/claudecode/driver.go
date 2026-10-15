@@ -145,7 +145,7 @@ func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalog
 	if err != nil {
 		return external.ModelCatalog{}, err
 	}
-	proc, err := startCLI(ctx, client, projectPath, cliArgs(cfg, external.PromptInput{}, "", ""), cliEnv(cfg), launcher.Path)
+	proc, err := startCLI(ctx, client, projectPath, cliArgs(cfg, external.PromptInput{}, "", ""), cliEnv(cfg, external.PromptInput{}), launcher.Path)
 	if err != nil {
 		return external.ModelCatalog{}, err
 	}
@@ -282,7 +282,7 @@ func modelCatalogFromInitialize(configuredModel string, response initializeRespo
 
 // Prompt implements external.Driver: one CLI process serves one turn, resumed
 // from the session id in runtime metadata.
-func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (external.PromptResult, error) {
+func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (result external.PromptResult, resultErr error) {
 	cfg, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID)
 	if err != nil {
 		if external.IsFailure(err) {
@@ -316,23 +316,15 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		// CLI's own saved history.
 		storedSessionID = ""
 	}
-	workDir := strings.TrimSpace(metadataString(input.RuntimeMetadata, "project_path"))
 	storedSessionID = d.ensureResumableSession(ctx, client, input, storedSessionID)
-	// The mount must survive a caller disconnect exactly as long as the CLI
-	// process does (the interrupt handshake still runs tools).
-	mountCtx, cancelMount := context.WithCancel(context.WithoutCancel(ctx))
-	defer cancelMount()
-	mcpConfig, toolsMount, err := d.mountTurnTools(mountCtx, client, workspaceInfo, input)
+	mcpConfig, stopTools, err := d.mountTurnTools(ctx, client, workspaceInfo, input)
 	if err != nil {
 		return external.PromptResult{}, external.Unavailable(err)
 	}
-	defer toolsMount.Stop()
-	args := cliArgs(cfg, input, storedSessionID, mcpConfig)
-	env := cliEnv(cfg)
-
+	defer stopTools()
 	// The process must survive a caller disconnect long enough for the
 	// interrupt handshake below.
-	proc, err := startCLI(context.WithoutCancel(ctx), client, workDir, args, env, launcher.Path)
+	proc, err := startTurnCLI(context.WithoutCancel(ctx), client, cfg, input, storedSessionID, mcpConfig, launcher.Path)
 	if err != nil {
 		return external.PromptResult{}, external.Unavailable(err)
 	}
@@ -343,6 +335,12 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	turn.userInput = d.userInput
 	defer turn.close()
 	go turn.readLoop() //nolint:contextcheck // turnRunner owns the control-channel lifetime
+	settled := false
+	defer func() {
+		if !settled {
+			result, resultErr = turn.finishEarlyPrompt(ctx, storedSessionID, resultErr)
+		}
+	}()
 	unregisterToolEvents := toolmount.RegisterTurnSink(d.toolGateway.Contexts, input.BotID, input.ThreadID, input.RunID, turn.emit)
 	defer unregisterToolEvents()
 
@@ -390,7 +388,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	if err != nil {
 		return external.PromptResult{}, err
 	}
-	if err := turn.writeLine(line); err != nil {
+	if err := turn.writeLine(ctx, line); err != nil {
 		return external.PromptResult{}, external.Unavailable(err)
 	}
 	stopSteering := turn.startSteering(ctx)
@@ -410,7 +408,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		case <-turn.done:
 		case <-proc.Done():
 		case <-grace.C:
-			_ = proc.Close()
+			turn.observeExit(stopCLI(ctx, proc))
 		}
 		grace.Stop()
 		drainTimeout = time.Until(deadline)
@@ -419,13 +417,17 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	// writes may trail its result, so the teardown outcome is observed
 	// separately from the protocol outcome the CLI already reported.
 	stopSteering()
-	turn.observeExit(drainCLI(proc, drainTimeout))
+	turn.observeExit(drainCLI(ctx, proc, drainTimeout))
 	// Process completion closes stdout; finish reading its buffered result and
 	// transport outcome before taking the immutable turn snapshot.
 	<-turn.readDone
 	turn.close()
 
-	result, resultErr := turn.buildResult(storedSessionID)
+	result, resultErr = turn.buildResult(storedSessionID)
+	settled = true
+	if result.TerminationUnconfirmed {
+		return result, resultErr
+	}
 	if ctx.Err() != nil {
 		// The application layer distinguishes stop from failure by context
 		// state; an interrupted turn is not an error, and its partial output
@@ -492,9 +494,14 @@ func cliArgs(cfg claudecfg.Config, input external.PromptInput, sessionID, mcpCon
 	return args
 }
 
-// cliEnv builds the process environment: durable state under the bot volume
-// plus the configured credential.
-func cliEnv(cfg claudecfg.Config) []string {
+func startTurnCLI(ctx context.Context, client *bridge.Client, cfg claudecfg.Config, input external.PromptInput, sessionID, mcpConfig, launcher string) (cliProcess, error) {
+	workDir := strings.TrimSpace(metadataString(input.RuntimeMetadata, "project_path"))
+	return startCLI(ctx, client, workDir, cliArgs(cfg, input, sessionID, mcpConfig), cliEnv(cfg, input), launcher)
+}
+
+// cliEnv builds the process environment: durable state under the bot volume,
+// the configured credential and the subagent marker.
+func cliEnv(cfg claudecfg.Config, input external.PromptInput) []string {
 	env := []string{
 		"PATH=" + containerPath,
 		"HOME=" + defaultProjectPath,
@@ -519,7 +526,7 @@ func cliEnv(cfg claudecfg.Config) []string {
 	if cfg.Auth != claudecfg.AuthWorkspace && cfg.BaseURL != "" {
 		env = append(env, "ANTHROPIC_BASE_URL="+cfg.BaseURL)
 	}
-	return env
+	return append(env, input.ProcessEnv()...)
 }
 
 // buildUserContent assembles the user message blocks: the Memoh context

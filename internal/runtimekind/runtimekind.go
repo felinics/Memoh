@@ -75,7 +75,7 @@ var capabilityByKind = map[Kind]capabilities{
 		DecisionWaiter: true,
 		WorkspaceExec:  true,
 		AgentModel:     true,
-		SessionModes:   []string{ModeChat, ModeDiscuss, ModeSchedule},
+		SessionModes:   []string{ModeChat, ModeDiscuss, ModeSchedule, ModeSubagent},
 	},
 	Codex: {
 		External:       true,
@@ -83,7 +83,7 @@ var capabilityByKind = map[Kind]capabilities{
 		DecisionWaiter: true,
 		WorkspaceExec:  true,
 		AgentModel:     true,
-		SessionModes:   []string{ModeChat, ModeDiscuss, ModeSchedule},
+		SessionModes:   []string{ModeChat, ModeDiscuss, ModeSchedule, ModeSubagent},
 	},
 	ClaudeCode: {
 		External:       true,
@@ -91,7 +91,7 @@ var capabilityByKind = map[Kind]capabilities{
 		DecisionWaiter: true,
 		WorkspaceExec:  true,
 		AgentModel:     true,
-		SessionModes:   []string{ModeChat, ModeDiscuss, ModeSchedule},
+		SessionModes:   []string{ModeChat, ModeDiscuss, ModeSchedule, ModeSubagent},
 	},
 }
 

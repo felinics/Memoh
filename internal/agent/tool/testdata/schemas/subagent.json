@@ -1,4 +1,8 @@
 {
+  "list_agent_backends": {
+    "properties": {},
+    "type": "object"
+  },
   "list_agents": {
     "properties": {},
     "type": "object"
@@ -30,8 +34,12 @@
   },
   "spawn_agent": {
     "properties": {
+      "bot_agent_id": {
+        "description": "External Agent instance from list_agent_backends. Mutually exclusive with model_id, provider, and fork. Omit for a native subagent.",
+        "type": "string"
+      },
       "fork": {
-        "description": "If true, inherit the parent model's current message context while keeping the subagent system prompt and tools.",
+        "description": "Native subagents only; omit with bot_agent_id. If true, inherit the parent model's current message context while keeping the subagent system prompt and tools.",
         "type": "boolean"
       },
       "id": {
@@ -39,11 +47,11 @@
         "type": "string"
       },
       "model_id": {
-        "description": "Optional external model name from the current session's provider. Omit to use the current session model.",
+        "description": "Native subagents only; omit with bot_agent_id. Optional model name. Omit to use the native parent's model, or the Bot's configured chat model when the parent is external.",
         "type": "string"
       },
       "provider": {
-        "description": "Optional provider name. Must match the current session's provider.",
+        "description": "Native subagents only; omit with bot_agent_id. Requires model_id and must match the native parent's provider, or the Bot's chat model provider when the parent is external.",
         "type": "string"
       },
       "run_in_background": {
@@ -59,5 +67,35 @@
       "task"
     ],
     "type": "object"
+  },
+  "control_agent": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": "Child agent_id returned by spawn_agent or list_agents."
+      },
+      "run_id": {
+        "type": "string",
+        "description": "Exact run_id from list_agents. A replacement run is never controlled."
+      },
+      "action": {
+        "type": "string",
+        "description": "Stop the specified run, or steer it when steer_supported is true.",
+        "enum": [
+          "stop",
+          "steer"
+        ]
+      },
+      "message": {
+        "type": "string",
+        "description": "Required for steer; the additional instruction for this run."
+      }
+    },
+    "required": [
+      "id",
+      "run_id",
+      "action"
+    ]
   }
 }

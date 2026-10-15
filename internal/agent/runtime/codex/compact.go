@@ -19,7 +19,7 @@ func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (exter
 	if err != nil {
 		return external.CompactionResult{}, err
 	}
-	srv, release, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)
+	srv, release, err := d.acquireControlServer(ctx, input)
 	if err != nil {
 		return external.CompactionResult{}, err
 	}
@@ -81,7 +81,7 @@ func awaitCompaction(ctx context.Context, connection *conn, turn *turnState, pro
 func (d *Driver) cancelOperation(srv *appServer, input external.PromptInput, turn *turnState) {
 	id := turn.currentTurnID()
 	if id == "" {
-		d.ResetBotAgent(input.BotID, input.BotAgentID)
+		d.recycleTurnServer(input, srv)
 		return
 	}
 	d.interruptTurn(srv, turn.threadID, id)
@@ -91,6 +91,6 @@ func (d *Driver) cancelOperation(srv *appServer, input external.PromptInput, tur
 	case <-turn.done:
 	case <-srv.proc.Done():
 	case <-timer.C:
-		d.ResetBotAgent(input.BotID, input.BotAgentID)
+		d.recycleTurnServer(input, srv)
 	}
 }

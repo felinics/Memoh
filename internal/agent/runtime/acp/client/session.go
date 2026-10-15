@@ -64,10 +64,11 @@ type StartRequest struct {
 }
 
 type PromptResult struct {
-	StopReason string              `json:"stop_reason,omitempty"`
-	Text       string              `json:"text,omitempty"`
-	Events     []event.StreamEvent `json:"events,omitempty"`
-	Usage      *sdk.Usage          `json:"usage,omitempty"`
+	StopReason             string              `json:"stop_reason,omitempty"`
+	Text                   string              `json:"text,omitempty"`
+	Events                 []event.StreamEvent `json:"events,omitempty"`
+	Usage                  *sdk.Usage          `json:"usage,omitempty"`
+	TerminationUnconfirmed bool                `json:"termination_unconfirmed,omitempty"`
 	// Output is the in-process transcript used for persistence.
 	Output []sdk.Message `json:"-"`
 }
@@ -587,6 +588,27 @@ func (s *Session) ProjectPath() string {
 	return s.projectPath
 }
 
+func (s *Session) Disconnected() bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	conn, closed := s.conn, s.closed
+	s.mu.Unlock()
+	if closed {
+		return true
+	}
+	if conn == nil {
+		return false
+	}
+	select {
+	case <-conn.conn.Done():
+		return true
+	default:
+		return false
+	}
+}
+
 // CancelPrompt asks an in-flight prompt to unwind without closing the ACP
 // session. Pool shutdown uses this before waiting for the per-runtime operation
 // lock: a prompt that already completed can finish its durable snapshot, while
@@ -943,12 +965,20 @@ func (s *Session) close(force bool) error {
 	if force {
 		// Close the process/pipe before any graceful JSON-RPC request. This is the
 		// operation that releases a writer stuck behind connection.writeMu.
+		var closeErr error
+		if proc != nil {
+			if lifecycleCtx == nil {
+				lifecycleCtx = context.Background()
+			}
+			stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(lifecycleCtx), 5*time.Second)
+			closeErr = proc.Stop(stopCtx)
+			stopCancel()
+		}
 		if cancel != nil {
 			cancel()
 		}
-		var closeErr error
 		if proc != nil {
-			closeErr = proc.Close()
+			closeErr = errors.Join(closeErr, proc.Close())
 		}
 		if callbacks != nil {
 			callbacks.close()

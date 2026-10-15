@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
@@ -252,8 +254,8 @@ func TestCreateTerminalFiltersBlockedEnv(t *testing.T) {
 	if _, err := manager.WaitForTerminalExit(context.Background(), acp.WaitForTerminalExitRequest{TerminalId: term.TerminalId}); err != nil {
 		t.Fatalf("WaitForTerminalExit() error = %v", err)
 	}
-	server.waitForRecordWithTimeout(t, 7, time.Second)
-	record, ok := findRecordWithTimeout(server.records(), 7)
+	server.waitForRecordWithTimeout(t, -1, time.Second)
+	record, ok := findRecordWithTimeout(server.records(), -1)
 	if !ok {
 		t.Fatalf("missing terminal exec record: %#v", server.records())
 	}
@@ -270,6 +272,36 @@ func TestCreateTerminalFiltersBlockedEnv(t *testing.T) {
 		if !hasString(record.UnsetEnv, key) {
 			t.Fatalf("terminal UnsetEnv = %#v, missing %q", record.UnsetEnv, key)
 		}
+	}
+}
+
+func TestCreateTerminalKeepsTheSubagentMarker(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	marker := external.SubagentThreadEnvEntry("child")
+	manager := newTerminalManager(context.Background(), client, "/data", "/data", 7, marker, nil, nil)
+	term, err := manager.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
+		Command: "env",
+		Env:     []acp.EnvVariable{{Name: external.SubagentThreadEnv, Value: ""}, {Name: external.SubagentThreadEnv, Value: "other"}, {Name: external.SubagentThreadEnv + "=other", Value: ""}},
+	}, nil, terminalRuntimeScope{})
+	if err != nil {
+		t.Fatalf("CreateTerminal() error = %v", err)
+	}
+	if _, err := manager.WaitForTerminalExit(context.Background(), acp.WaitForTerminalExitRequest{TerminalId: term.TerminalId}); err != nil {
+		t.Fatalf("WaitForTerminalExit() error = %v", err)
+	}
+	server.waitForRecordWithTimeout(t, -1, time.Second)
+	record, ok := findRecordWithTimeout(server.records(), -1)
+	if !ok {
+		t.Fatalf("missing terminal exec record: %#v", server.records())
+	}
+	var got []string
+	for _, entry := range record.Env {
+		if strings.HasPrefix(entry, external.SubagentThreadEnv+"=") {
+			got = append(got, entry)
+		}
+	}
+	if !slices.Equal(got, marker) {
+		t.Fatalf("terminal replaced the subagent marker: %#v", got)
 	}
 }
 
@@ -308,6 +340,7 @@ func TestStartBridgeProcessCanRunWithoutBridgeHardTimeout(t *testing.T) {
 	assertEnvHas(t, processRecord.Env, "TRACE_ID=trace-1")
 	assertEnvHas(t, processRecord.Env, "HOME=/data")
 	assertEnvHas(t, processRecord.Env, "TMPDIR="+path.Join(proc.lease.root, "tmp"))
+	assertEnvHas(t, processRecord.Env, "MCP_TOOL_TIMEOUT=900000")
 }
 
 func TestStartBridgeProcessUsesContainerToolkitFallback(t *testing.T) {

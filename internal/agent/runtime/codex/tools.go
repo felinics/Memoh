@@ -134,6 +134,7 @@ func (s *appServer) toolSessionForThread(threadID string) mcp.ToolSessionContext
 		}
 	}
 	overlay(&session.ChatID, in.ChatID)
+	overlay(&session.UserID, in.ActorUserID)
 	overlay(&session.SessionID, in.ThreadID)
 	overlay(&session.RunID, in.RunID)
 	overlay(&session.SessionType, in.SessionMode)
@@ -144,6 +145,7 @@ func (s *appServer) toolSessionForThread(threadID string) mcp.ToolSessionContext
 	overlay(&session.ChannelIdentityID, in.ChannelIdentityID)
 	overlay(&session.SessionToken, in.SessionToken)
 	session.CanRequestUserInput = in.CanRequestUserInput
+	session.IsSubagent = in.IsSubagent()
 	session.RuntimeActive = true
 	session.SupportsImageInput = true
 	session.ContextBudgetMaxTokens = in.ContextBudgetMaxTokens

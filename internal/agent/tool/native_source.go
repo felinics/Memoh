@@ -19,6 +19,8 @@ import (
 )
 
 type NativeToolSourceOptions struct {
+	Sessions        NativeToolSessionReader
+	Workdirs        NativeToolWorkdirResolver
 	AllowAll        bool
 	AllowTools      map[string]bool
 	Approval        NativeToolApprovalService
@@ -55,6 +57,8 @@ type NativeToolEventSink interface {
 // NativeToolSource exposes Memoh-native ToolProvider tools through the MCP
 // ToolSource interface used by ACP and external tool gateways.
 type NativeToolSource struct {
+	sessions   NativeToolSessionReader
+	workdirs   NativeToolWorkdirResolver
 	logger     *slog.Logger
 	mu         sync.RWMutex
 	providers  []ToolProvider
@@ -88,6 +92,8 @@ func NewNativeToolSource(log *slog.Logger, providers []ToolProvider, opts Native
 		}
 	}
 	source := &NativeToolSource{
+		sessions:   opts.Sessions,
+		workdirs:   opts.Workdirs,
 		logger:     log.With(slog.String("tool_source", "native")),
 		allowAll:   opts.AllowAll,
 		allow:      allow,
@@ -116,7 +122,11 @@ func (s *NativeToolSource) SetProviders(providers []ToolProvider) {
 }
 
 func (s *NativeToolSource) ListTools(ctx context.Context, session mcp.ToolSessionContext) ([]mcp.ToolDescriptor, error) {
-	tools := s.loadTools(ctx, session)
+	toolSession, err := s.resolveSession(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	tools := s.loadTools(ctx, session, toolSession)
 	if len(tools) == 0 {
 		return []mcp.ToolDescriptor{}, nil
 	}
@@ -141,7 +151,7 @@ func (s *NativeToolSource) ListTools(ctx context.Context, session mcp.ToolSessio
 		tool := item.tool
 		description := strings.TrimSpace(tool.Description)
 		if item.usageProvider != nil && !usageApplied[item.usageID] {
-			if usage := strings.TrimSpace(item.usageProvider.Usage(ctx, sessionFromMCP(session), available)); usage != "" {
+			if usage := strings.TrimSpace(item.usageProvider.Usage(ctx, toolSession, available)); usage != "" {
 				description = appendToolUsageDescription(description, usage)
 			}
 			usageApplied[item.usageID] = true
@@ -160,7 +170,12 @@ func (s *NativeToolSource) CallTool(ctx context.Context, session mcp.ToolSession
 	if toolName == "" || !s.allowed(toolName) {
 		return nil, mcp.ErrToolNotFound
 	}
-	tools := s.loadTools(ctx, session)
+	toolSession, err := s.resolveSession(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	ctx = workspaceContextForSession(ctx, toolSession)
+	tools := s.loadTools(ctx, session, toolSession)
 	for _, item := range tools {
 		tool := item.tool
 		if strings.TrimSpace(tool.Name) != toolName || tool.Execute == nil || !s.allowed(toolName) {
@@ -397,14 +412,13 @@ func (s *NativeToolSource) emitUserInputRequest(session mcp.ToolSessionContext, 
 	return delivered
 }
 
-func (s *NativeToolSource) loadTools(ctx context.Context, session mcp.ToolSessionContext) []nativeLoadedTool {
+func (s *NativeToolSource) loadTools(ctx context.Context, session mcp.ToolSessionContext, toolSession SessionContext) []nativeLoadedTool {
 	if s == nil {
 		return nil
 	}
 	s.mu.RLock()
 	providers := append([]ToolProvider(nil), s.providers...)
 	s.mu.RUnlock()
-	toolSession := sessionFromMCP(session)
 	toolSession.ApprovalEmitter = func(req toolapproval.Request) bool { return s.emitToolApprovalRequest(session, req) }
 	var out []nativeLoadedTool
 	for providerIndex, provider := range providers {

@@ -27,10 +27,11 @@ type testCLIProcess struct {
 	done chan struct{}
 }
 
-func (*testCLIProcess) CloseStdin()             {}
-func (p *testCLIProcess) Done() <-chan struct{} { return p.done }
-func (*testCLIProcess) StderrTail() string      { return "" }
-func (*testCLIProcess) Close() error            { return nil }
+func (*testCLIProcess) CloseStdin()                {}
+func (p *testCLIProcess) Done() <-chan struct{}    { return p.done }
+func (*testCLIProcess) StderrTail() string         { return "" }
+func (*testCLIProcess) Close() error               { return nil }
+func (*testCLIProcess) Stop(context.Context) error { return nil }
 
 type recordingSink struct {
 	mu     sync.Mutex

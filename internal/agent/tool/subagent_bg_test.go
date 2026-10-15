@@ -103,6 +103,8 @@ func (s *fakeAgentSessionService) Create(_ context.Context, input sessionpkg.Cre
 		ID:              "child_" + strconv.Itoa(s.next),
 		BotID:           input.BotID,
 		Type:            input.Type,
+		RuntimeType:     input.RuntimeType,
+		BotAgentID:      input.BotAgentID,
 		Title:           input.Title,
 		Metadata:        input.Metadata,
 		ParentThreadID:  input.ParentThreadID,
@@ -464,7 +466,7 @@ func TestAgentControlToolsExposeSingleAgentSurface(t *testing.T) {
 		t.Fatalf("Tools failed: %v", err)
 	}
 	got := toolNames(tools)
-	want := []string{"spawn_agent", "send_message", "list_agents", "list_models"}
+	want := []string{"list_agent_backends", "spawn_agent", "send_message", "list_agents", "control_agent", "list_models"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected tools: got %v want %v", got, want)
 	}
@@ -475,6 +477,71 @@ func TestAgentControlToolsExposeSingleAgentSurface(t *testing.T) {
 	}
 	if len(subagentTools) != 0 {
 		t.Fatalf("subagent should not see agent control tools, got %v", toolNames(subagentTools))
+	}
+}
+
+type subagentRuntimeStub struct {
+	SubagentAdmitter
+	state   SubagentRuntimeState
+	control SubagentControlInput
+	failing map[string]error
+}
+
+func (s *subagentRuntimeStub) SnapshotSubagent(_ context.Context, _ SessionContext, childID string) (SubagentRuntimeState, error) {
+	if err := s.failing[childID]; err != nil {
+		return SubagentRuntimeState{}, err
+	}
+	return s.state, nil
+}
+
+func (*subagentRuntimeStub) WaitSubagentIdle(context.Context, SessionContext, string) error {
+	return nil
+}
+
+func (s *subagentRuntimeStub) ControlSubagent(_ context.Context, input SubagentControlInput) (SubagentControlResult, error) {
+	s.control = input
+	return SubagentControlResult{SubagentRuntimeState: s.state, Accepted: true}, nil
+}
+
+func TestAgentControlUsesDurableStateAndParentScopedChild(t *testing.T) {
+	p, _, _, _ := newAgentControlProvider(t, &fakeSpawnAgent{})
+	parent := SessionContext{BotID: "bot1", SessionID: "parent1"}
+	spawn := asMap(t, mustExecuteAgentTool(t, p, parent, "spawn_agent", map[string]any{"id": "worker", "task": "inspect"}))
+	runtime := &subagentRuntimeStub{SubagentAdmitter: p.admitter, state: SubagentRuntimeState{RunID: "active-run", Status: "waiting_decision", Active: true, SteerSupported: true, Code: "approval_pending"}}
+	p.SetSubagentAdmitter(runtime)
+	p.coord = newAgentCoordinator()
+	listed := asMap(t, mustExecuteAgentTool(t, p, parent, "list_agents", map[string]any{}))
+	item := listed["agents"].([]any)[0].(map[string]any)
+	if item["status"] != "waiting_decision" || item["run_id"] != "active-run" || item["steer_supported"] != true || item["code"] != "approval_pending" {
+		t.Fatalf("durable state not projected: %v", item)
+	}
+	result := asMap(t, mustExecuteAgentTool(t, p, parent, "control_agent", map[string]any{"id": "worker", "run_id": "active-run", "action": "stop"}))
+	if result["accepted"] != true || runtime.control.SessionID != spawn["session_id"] || runtime.control.Parent.SessionID != parent.SessionID || runtime.control.RunID != "active-run" {
+		t.Fatalf("control result=%v input=%+v", result, runtime.control)
+	}
+	if _, err := executeAgentTool(t, p, SessionContext{BotID: "bot1", SessionID: "other-parent"}, "control_agent", map[string]any{"id": "worker", "run_id": "active-run", "action": "stop"}); err == nil {
+		t.Fatal("foreign parent controlled child")
+	}
+}
+
+func TestListAgentsReportsAChildWhoseStateIsUnavailable(t *testing.T) {
+	p, _, _, _ := newAgentControlProvider(t, &fakeSpawnAgent{})
+	parent := SessionContext{BotID: "bot1", SessionID: "parent1"}
+	broken := asMap(t, mustExecuteAgentTool(t, p, parent, "spawn_agent", map[string]any{"id": "broken", "task": "inspect"}))
+	mustExecuteAgentTool(t, p, parent, "spawn_agent", map[string]any{"id": "healthy", "task": "inspect"})
+	runtime := &subagentRuntimeStub{SubagentAdmitter: p.admitter, state: SubagentRuntimeState{RunID: "run", Status: "running", Active: true, SteerSupported: true}, failing: map[string]error{broken["session_id"].(string): apperror.New(apperror.CodeSessionBusy, nil)}}
+	p.SetSubagentAdmitter(runtime)
+	listed := asMap(t, mustExecuteAgentTool(t, p, parent, "list_agents", map[string]any{}))
+	items := map[string]map[string]any{}
+	for _, raw := range listed["agents"].([]any) {
+		item := raw.(map[string]any)
+		items[item["agent_id"].(string)] = item
+	}
+	if got := items["broken"]; got == nil || got["code"] != string(apperror.CodeSessionBusy) || got["steer_supported"] != false {
+		t.Fatalf("broken child = %v", got)
+	}
+	if got := items["healthy"]; got == nil || got["run_id"] != "run" || got["steer_supported"] != true || got["code"] != nil {
+		t.Fatalf("healthy child = %v", got)
 	}
 }
 

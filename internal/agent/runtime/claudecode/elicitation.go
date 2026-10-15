@@ -28,14 +28,14 @@ func (t *turnRunner) handleElicitation(ctx context.Context, id string, raw json.
 	}
 	line, err := controlSuccessResponse(id, response)
 	if err == nil {
-		_ = t.writeLine(line)
+		_ = t.writeLine(ctx, line)
 	}
 }
 
 func (t *turnRunner) elicit(ctx context.Context, id string, request elicitationRequest) map[string]any {
 	decline := map[string]any{"action": "decline"}
 	canceled := map[string]any{"action": "cancel"}
-	if t.userInput == nil || !t.input.CanRequestUserInput {
+	if t.userInput == nil || !t.input.CanAskUser() {
 		return decline
 	}
 	var input any

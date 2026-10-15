@@ -35,6 +35,35 @@ func (q *Queries) ActivateSessionRuntimeFence(ctx context.Context, arg ActivateS
 	return runtime_fencing_token, err
 }
 
+const claimExternalSubagentReap = `-- name: ClaimExternalSubagentReap :one
+UPDATE bot_sessions
+SET runtime_metadata = runtime_metadata || jsonb_build_object('external_termination_reap', clock_timestamp()::text)
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $1
+  AND COALESCE(NULLIF(runtime_metadata->>'external_execution_run', ''), $2::text) = $2::text
+  AND COALESCE(NULLIF(runtime_metadata->>'external_termination_unconfirmed', ''), $2::text) = $2::text
+  AND (COALESCE(runtime_metadata->>'external_execution_run', '') <> ''
+    OR COALESCE(runtime_metadata->>'external_termination_unconfirmed', '') <> '')
+  AND COALESCE((runtime_metadata->>'external_termination_reap')::timestamptz, '-infinity') < clock_timestamp() - make_interval(secs => $3::float8)
+RETURNING (runtime_metadata->>'external_termination_reap')::text AS claim
+`
+
+type ClaimExternalSubagentReapParams struct {
+	ID           pgtype.UUID `json:"id"`
+	RunID        string      `json:"run_id"`
+	LeaseSeconds float64     `json:"lease_seconds"`
+}
+
+// Claims confirming that run_id stopped while it is still the only run the
+// session records. An expired claim may be taken again, so a failed attempt
+// also spaces out the next one.
+func (q *Queries) ClaimExternalSubagentReap(ctx context.Context, arg ClaimExternalSubagentReapParams) (string, error) {
+	row := q.db.QueryRow(ctx, claimExternalSubagentReap, arg.ID, arg.RunID, arg.LeaseSeconds)
+	var claim string
+	err := row.Scan(&claim)
+	return claim, err
+}
+
 const compareAndSetSessionModelPreference = `-- name: CompareAndSetSessionModelPreference :execrows
 UPDATE bot_sessions
 SET preferred_chat_model_id = $1::uuid,
@@ -615,6 +644,69 @@ func (q *Queries) GetSessionDiscussCursor(ctx context.Context, arg GetSessionDis
 	return i, err
 }
 
+const listExternalSubagentExecutionHolds = `-- name: ListExternalSubagentExecutionHolds :many
+SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, preferred_chat_model_id, preferred_reasoning_effort, preferred_external_model_id, model_preference_revision, visibility, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, runtime_reset_token, runtime_reset_expires_at, runtime_config_epoch, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id, bot_agent_id
+FROM bot_sessions
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1
+  AND session_mode = 'subagent'
+  AND runtime_type IN ('codex', 'claude-code', 'acp_agent')
+  AND (COALESCE(runtime_metadata->>'external_execution_run', '') <> ''
+    OR COALESCE(runtime_metadata->>'external_termination_unconfirmed', '') <> '')
+`
+
+// Deleted sessions are kept: deleting a session does not stop what its last
+// run left in the workspace.
+func (q *Queries) ListExternalSubagentExecutionHolds(ctx context.Context, botID pgtype.UUID) ([]BotSession, error) {
+	rows, err := q.db.Query(ctx, listExternalSubagentExecutionHolds, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BotSession
+	for rows.Next() {
+		var i BotSession
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.RouteID,
+			&i.ChannelType,
+			&i.Type,
+			&i.SessionMode,
+			&i.RuntimeType,
+			&i.RuntimeMetadata,
+			&i.PreferredChatModelID,
+			&i.PreferredReasoningEffort,
+			&i.PreferredExternalModelID,
+			&i.ModelPreferenceRevision,
+			&i.Visibility,
+			&i.Title,
+			&i.Metadata,
+			&i.NextTurnPosition,
+			&i.CompactionEpoch,
+			&i.RuntimeFencingToken,
+			&i.RuntimeResetToken,
+			&i.RuntimeResetExpiresAt,
+			&i.RuntimeConfigEpoch,
+			&i.ParentSessionID,
+			&i.CreatedByUserID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.TeamID,
+			&i.WorkdirID,
+			&i.BotAgentID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionDiscussCursorsByBot = `-- name: ListSessionDiscussCursorsByBot :many
 SELECT c.session_id, c.scope_key, c.route_id, c.source, c.consumed_cursor, c.consumed_event_cursor, c.updated_at, c.team_id
 FROM bot_session_discuss_cursors c
@@ -1152,12 +1244,12 @@ WHERE team_id = public.memoh_current_team_id()
   AND parent_session_id = $1
   AND type = 'subagent'
   AND deleted_at IS NULL
-  AND EXISTS (
+  AND (runtime_type IN ('codex', 'claude-code', 'acp_agent') OR EXISTS (
     SELECT 1
     FROM subagent_configs config
     WHERE config.team_id = public.memoh_current_team_id()
       AND config.session_id = bot_sessions.id
-  )
+  ))
 ORDER BY created_at DESC
 `
 
@@ -1313,6 +1405,62 @@ func (q *Queries) NextSessionRuntimeFenceToken(ctx context.Context) (int64, erro
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const resolveExternalSubagentTermination = `-- name: ResolveExternalSubagentTermination :one
+UPDATE bot_sessions
+SET runtime_metadata = (runtime_metadata - 'external_execution_run' - 'external_termination_unconfirmed' - 'external_termination_reap')
+      || jsonb_build_object('external_termination_resolved', $1::text),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $2
+  AND runtime_metadata->>'external_termination_reap' = $3::text
+  AND COALESCE(NULLIF(runtime_metadata->>'external_execution_run', ''), $1::text) = $1::text
+  AND COALESCE(NULLIF(runtime_metadata->>'external_termination_unconfirmed', ''), $1::text) = $1::text
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, preferred_chat_model_id, preferred_reasoning_effort, preferred_external_model_id, model_preference_revision, visibility, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, runtime_reset_token, runtime_reset_expires_at, runtime_config_epoch, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id, bot_agent_id
+`
+
+type ResolveExternalSubagentTerminationParams struct {
+	RunID string      `json:"run_id"`
+	ID    pgtype.UUID `json:"id"`
+	Claim string      `json:"claim"`
+}
+
+func (q *Queries) ResolveExternalSubagentTermination(ctx context.Context, arg ResolveExternalSubagentTerminationParams) (BotSession, error) {
+	row := q.db.QueryRow(ctx, resolveExternalSubagentTermination, arg.RunID, arg.ID, arg.Claim)
+	var i BotSession
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.RouteID,
+		&i.ChannelType,
+		&i.Type,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.RuntimeMetadata,
+		&i.PreferredChatModelID,
+		&i.PreferredReasoningEffort,
+		&i.PreferredExternalModelID,
+		&i.ModelPreferenceRevision,
+		&i.Visibility,
+		&i.Title,
+		&i.Metadata,
+		&i.NextTurnPosition,
+		&i.CompactionEpoch,
+		&i.RuntimeFencingToken,
+		&i.RuntimeResetToken,
+		&i.RuntimeResetExpiresAt,
+		&i.RuntimeConfigEpoch,
+		&i.ParentSessionID,
+		&i.CreatedByUserID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.TeamID,
+		&i.WorkdirID,
+		&i.BotAgentID,
+	)
+	return i, err
 }
 
 const setSessionNextTurnPosition = `-- name: SetSessionNextTurnPosition :exec

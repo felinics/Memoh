@@ -560,13 +560,52 @@ WHERE team_id = public.memoh_current_team_id()
   AND parent_session_id = sqlc.arg(parent_session_id)
   AND type = 'subagent'
   AND deleted_at IS NULL
-  AND EXISTS (
+  AND (runtime_type IN ('codex', 'claude-code', 'acp_agent') OR EXISTS (
     SELECT 1
     FROM subagent_configs config
     WHERE config.team_id = public.memoh_current_team_id()
       AND config.session_id = bot_sessions.id
-  )
+  ))
 ORDER BY created_at DESC;
+
+-- name: ListExternalSubagentExecutionHolds :many
+-- Deleted sessions are kept: deleting a session does not stop what its last
+-- run left in the workspace.
+SELECT *
+FROM bot_sessions
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id)
+  AND session_mode = 'subagent'
+  AND runtime_type IN ('codex', 'claude-code', 'acp_agent')
+  AND (COALESCE(runtime_metadata->>'external_execution_run', '') <> ''
+    OR COALESCE(runtime_metadata->>'external_termination_unconfirmed', '') <> '');
+
+-- name: ClaimExternalSubagentReap :one
+-- Claims confirming that run_id stopped while it is still the only run the
+-- session records. An expired claim may be taken again, so a failed attempt
+-- also spaces out the next one.
+UPDATE bot_sessions
+SET runtime_metadata = runtime_metadata || jsonb_build_object('external_termination_reap', clock_timestamp()::text)
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(id)
+  AND COALESCE(NULLIF(runtime_metadata->>'external_execution_run', ''), sqlc.arg(run_id)::text) = sqlc.arg(run_id)::text
+  AND COALESCE(NULLIF(runtime_metadata->>'external_termination_unconfirmed', ''), sqlc.arg(run_id)::text) = sqlc.arg(run_id)::text
+  AND (COALESCE(runtime_metadata->>'external_execution_run', '') <> ''
+    OR COALESCE(runtime_metadata->>'external_termination_unconfirmed', '') <> '')
+  AND COALESCE((runtime_metadata->>'external_termination_reap')::timestamptz, '-infinity') < clock_timestamp() - make_interval(secs => sqlc.arg(lease_seconds)::float8)
+RETURNING (runtime_metadata->>'external_termination_reap')::text AS claim;
+
+-- name: ResolveExternalSubagentTermination :one
+UPDATE bot_sessions
+SET runtime_metadata = (runtime_metadata - 'external_execution_run' - 'external_termination_unconfirmed' - 'external_termination_reap')
+      || jsonb_build_object('external_termination_resolved', sqlc.arg(run_id)::text),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(id)
+  AND runtime_metadata->>'external_termination_reap' = sqlc.arg(claim)::text
+  AND COALESCE(NULLIF(runtime_metadata->>'external_execution_run', ''), sqlc.arg(run_id)::text) = sqlc.arg(run_id)::text
+  AND COALESCE(NULLIF(runtime_metadata->>'external_termination_unconfirmed', ''), sqlc.arg(run_id)::text) = sqlc.arg(run_id)::text
+RETURNING *;
 
 -- name: SoftDeleteSessionsByBot :exec
 WITH target_sessions AS MATERIALIZED (

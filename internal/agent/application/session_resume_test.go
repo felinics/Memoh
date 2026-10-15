@@ -51,12 +51,20 @@ func TestResumeContextPreservesDeadlineAndScopesWithoutCredentials(t *testing.T)
 	deadline := time.Now().Add(time.Minute)
 	ctx, cancel := context.WithDeadline(runtimefence.WithContext(t.Context(), runtimefence.Fence{BotID: "bot", SessionID: "session", Token: 7}), deadline)
 	defer cancel()
-	req := ChatRequest{RunID: uuid.NewString(), UserID: "sender", ChatID: "chat", Token: "Bearer " + bearer, ChatToken: "Bearer " + scoped, Query: "do the work"}
+	canRequestInput := false
+	req := ChatRequest{RunID: uuid.NewString(), UserID: "sender", ChatID: "chat", Token: "Bearer " + bearer, ChatToken: "Bearer " + scoped, Query: "do the work", RuntimeCanRequestUserInput: &canRequestInput}
 	if err := svc.recordRunResumeContext(ctx, req); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(q.saved.ResumeContext), bearer) || strings.Contains(string(q.saved.ResumeContext), scoped) || strings.Contains(string(q.saved.ResumeContext), secret) {
 		t.Fatal("credential persisted")
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(q.saved.ResumeContext, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if value, exists := raw["runtime_can_request_user_input"]; !exists || value != false {
+		t.Fatal("resume lost non-interactive execution policy")
 	}
 	var saved resumeContext
 	if err := json.Unmarshal(q.saved.ResumeContext, &saved); err != nil {

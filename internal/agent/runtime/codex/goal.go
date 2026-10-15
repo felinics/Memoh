@@ -42,10 +42,10 @@ func (d *Driver) Goal(ctx context.Context, input external.PromptInput) (*externa
 		return nil, nil
 	}
 	if metadataString(input.RuntimeMetadata, metadataThreadIDKey) == "" &&
-		(d.servers == nil || d.servers.peek(serverKey(input.BotID, input.BotAgentID)) == nil) {
+		(d.servers == nil || d.servers.peek(promptServerKey(input)) == nil) {
 		return nil, nil
 	}
-	srv, release, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)
+	srv, release, err := d.acquireControlServer(ctx, input)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +75,7 @@ func (d *Driver) Goal(ctx context.Context, input external.PromptInput) (*externa
 }
 
 func (d *Driver) ControlGoal(ctx context.Context, input external.PromptInput, action string) error {
-	srv, release, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)
+	srv, release, err := d.acquireControlServer(ctx, input)
 	if err != nil {
 		return err
 	}
@@ -188,7 +188,7 @@ func (d *Driver) pauseGoalOnExit(ctx context.Context, srv *appServer, turn *turn
 	defer cancel()
 	if err := srv.setGoalStatus(cleanup, turn.threadID, protocol.ThreadGoalStatusPaused); err != nil {
 		d.logger.WarnContext(ctx, "codex goal pause failed; draining app-server", slog.Any("error", err))
-		d.ResetBotAgent(turn.input.BotID, turn.input.BotAgentID)
+		d.recycleTurnServer(turn.input, srv)
 	}
 }
 

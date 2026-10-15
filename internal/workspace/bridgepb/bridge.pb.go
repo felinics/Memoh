@@ -526,8 +526,10 @@ type ExecInput struct {
 	UnsetEnv       []string               `protobuf:"bytes,9,rep,name=unset_env,json=unsetEnv,proto3" json:"unset_env,omitempty"`
 	// Opt-in process liveness frames; older bridges safely ignore this field.
 	ReportLiveness bool `protobuf:"varint,10,opt,name=report_liveness,json=reportLiveness,proto3" json:"report_liveness,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Terminate the process group while preserving the stream for its EXIT frame.
+	Terminate     bool `protobuf:"varint,11,opt,name=terminate,proto3" json:"terminate,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ExecInput) Reset() {
@@ -626,6 +628,13 @@ func (x *ExecInput) GetUnsetEnv() []string {
 func (x *ExecInput) GetReportLiveness() bool {
 	if x != nil {
 		return x.ReportLiveness
+	}
+	return false
+}
+
+func (x *ExecInput) GetTerminate() bool {
+	if x != nil {
+		return x.Terminate
 	}
 	return false
 }
@@ -1895,7 +1904,7 @@ const file_internal_workspace_bridgepb_bridge_proto_rawDesc = "" +
 	"\aentries\x18\x01 \x03(\v2\x13.bridgepb.FileEntryR\aentries\x12\x1f\n" +
 	"\vtotal_count\x18\x02 \x01(\x05R\n" +
 	"totalCount\x12\x1c\n" +
-	"\ttruncated\x18\x03 \x01(\bR\ttruncated\"\xc1\x02\n" +
+	"\ttruncated\x18\x03 \x01(\bR\ttruncated\"\xdf\x02\n" +
 	"\tExecInput\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x19\n" +
 	"\bwork_dir\x18\x02 \x01(\tR\aworkDir\x12\x10\n" +
@@ -1908,7 +1917,8 @@ const file_internal_workspace_bridgepb_bridge_proto_rawDesc = "" +
 	"\tclean_env\x18\b \x01(\bR\bcleanEnv\x12\x1b\n" +
 	"\tunset_env\x18\t \x03(\tR\bunsetEnv\x12'\n" +
 	"\x0freport_liveness\x18\n" +
-	" \x01(\bR\x0ereportLiveness\"8\n" +
+	" \x01(\bR\x0ereportLiveness\x12\x1c\n" +
+	"\tterminate\x18\v \x01(\bR\tterminate\"8\n" +
 	"\x0eTerminalResize\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\rR\x04cols\x12\x12\n" +
 	"\x04rows\x18\x02 \x01(\rR\x04rows\"\xad\x01\n" +

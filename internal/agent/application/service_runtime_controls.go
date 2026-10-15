@@ -65,13 +65,17 @@ func (s *Service) runtimeControlTarget(ctx context.Context, request RuntimeContr
 			return sess, nil, external.PromptInput{}, approval.ErrForbidden
 		}
 	}
+	if err := s.externalSubagentExecutionGate(ctx, sess); err != nil {
+		return sess, nil, external.PromptInput{}, err
+	}
 	return sess, s.externalDrivers[sess.RuntimeType], runtimeControlInput(sess, request), nil
 }
 
 func runtimeControlInput(sess session.Thread, request RuntimeControlRequest) external.PromptInput {
 	meta := runtimeSessionMeta(sess)
 	input := external.PromptInput{
-		BotID: sess.BotID, BotAgentID: sess.BotAgentID, ThreadID: sess.ID,
+		ActorUserID: request.ActorID,
+		BotID:       sess.BotID, BotAgentID: sess.BotAgentID, ThreadID: sess.ID, SessionMode: sess.SessionMode,
 		RuntimeMetadata: meta, Command: request.Command,
 		RuntimeOwnerAccountID: metadataString(meta, "runtime_owner_account_id"),
 		ChannelIdentityID:     request.ActorID, ToolHTTPURL: request.ToolHTTPURL,

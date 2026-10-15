@@ -65,7 +65,7 @@ func TestContainerPathPrefersManagedOverlays(t *testing.T) {
 	if !strings.HasPrefix(containerPath, "/data/.memoh/deps/bin:/opt/memoh/toolkit/bin:") {
 		t.Fatalf("containerPath = %q, want the managed shim directory ahead of the toolkit", containerPath)
 	}
-	if got := cliEnv(claudecfg.Config{}); got[0] != "PATH="+containerPath {
+	if got := cliEnv(claudecfg.Config{}, external.PromptInput{}); got[0] != "PATH="+containerPath {
 		t.Fatalf("cliEnv PATH = %q", got[0])
 	}
 }

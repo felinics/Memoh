@@ -36,6 +36,10 @@ func genericACPRuntimeStorage() RuntimeStoragePolicy {
 			{Name: "HOME", Value: "/data"},
 			{Name: "TMPDIR", RuntimePath: "tmp"},
 			{Name: "NPM_CONFIG_CACHE", Value: "/tmp/memoh-acp-cache/npm"},
+			// ACP cannot set a per-server MCP timeout. Claude-based agents read
+			// this one, and their default cuts a Memoh tool off after 60s even
+			// though it may wait on a subagent or a decision for much longer.
+			{Name: "MCP_TOOL_TIMEOUT", Value: "900000"},
 		},
 	}
 }

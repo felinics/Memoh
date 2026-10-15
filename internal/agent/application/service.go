@@ -123,6 +123,8 @@ type Service struct {
 	sessionService          SessionService
 	acpPool                 acpPrompter
 	externalDrivers         map[string]external.Driver
+	subagentBackends        subagentBackendCatalog
+	subagentReaper          subagentProcessReaperPort
 	compactionService       compactionRunner
 	eventPublisher          messageevent.Publisher
 	skillLoader             SkillLoader
