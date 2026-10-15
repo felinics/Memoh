@@ -301,3 +301,93 @@ func TestInferUndeclaredDialectOnWrite(t *testing.T) {
 		t.Fatalf("non-Claude dialect = %q, want empty", other.Reasoning.Dialect)
 	}
 }
+
+// The switch shapes the old model form could save, which no shipped template
+// used: a switch declared by the disable token alone, and one declared by the
+// enabled token alone. Each must keep its version 1 off answer and the effort
+// version 1 put on the wire, on every protocol.
+func TestUpgradeKeepsFormSwitchShapesResolvingTheSame(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name       string
+		efforts    []string
+		clientType string
+		canDisable bool
+		effort     string
+	}{
+		{name: "disable alone on OpenAI", efforts: []string{"disable"}, clientType: string(ClientTypeOpenAICompletions), canDisable: true, effort: reasoning.EffortMedium},
+		{name: "disable alone on Anthropic", efforts: []string{"disable"}, clientType: string(ClientTypeAnthropicMessages), canDisable: true, effort: reasoning.EffortMedium},
+		{name: "enabled alone on OpenAI", efforts: []string{"enabled"}, clientType: string(ClientTypeOpenAICompletions), canDisable: false, effort: reasoning.EffortEnabled},
+		{name: "enabled alone on Anthropic", efforts: []string{"enabled"}, clientType: string(ClientTypeAnthropicMessages), canDisable: true, effort: reasoning.EffortEnabled},
+		{name: "enabled and disable on OpenAI", efforts: []string{"enabled", "disable"}, clientType: string(ClientTypeOpenAICompletions), canDisable: true, effort: reasoning.EffortEnabled},
+		{name: "nothing on OpenAI", clientType: string(ClientTypeOpenAICompletions), canDisable: false, effort: reasoning.EffortMedium},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			v1 := LegacyModelConfig{ThinkingMode: reasoning.ModeToggle, ReasoningEfforts: tt.efforts}
+			raw, err := json.Marshal(v1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v2, err := DecodeModelConfig(raw, ConfigContext{ModelID: "m", Type: ModelTypeChat, ClientType: tt.clientType})
+			if err != nil {
+				t.Fatal(err)
+			}
+			model := Model{ModelID: "m", Type: ModelTypeChat, Config: v2}
+			got := model.ReasoningOptions(tt.clientType)
+			if want := legacyReasoningOptions(v1, "m", tt.clientType); got.CanDisable != want.CanDisable || got.CanDisable != tt.canDisable {
+				t.Fatalf("can disable = %v, want %v (version 1 said %v)", got.CanDisable, tt.canDisable, want.CanDisable)
+			}
+			rc := reasoning.ResolveConfig(v2.ThinkingMode(), v2.ReasoningEfforts(), got, "", "")
+			if rc == nil || !rc.Active || rc.Effort != tt.effort {
+				t.Fatalf("resolved = %+v, want active with effort %q", rc, tt.effort)
+			}
+		})
+	}
+}
+
+// Without the provider's client type the upgrade cannot tell where a switch
+// advertised by the enabled token alone could be turned off, so it leaves the
+// off answer unstated rather than guessing a protocol.
+func TestUpgradeLeavesEnabledOnlySwitchOffUnstatedWithoutClientType(t *testing.T) {
+	t.Parallel()
+
+	v1 := LegacyModelConfig{ThinkingMode: reasoning.ModeToggle, ReasoningEfforts: []string{"enabled"}}
+	got := v1.Upgrade(ConfigContext{ModelID: "m", Type: ModelTypeChat})
+	if want := (&ModelReasoning{Toggle: true}); !reflect.DeepEqual(got.Reasoning, want) {
+		t.Fatalf("reasoning = %+v, want %+v", got.Reasoning, want)
+	}
+}
+
+// Legacy reads "none" for a model without reasoning, as version 1 stored it.
+// Discovery reports a mode for every model, and an empty mode here made every
+// non-reasoning model look changed on each managed refresh.
+func TestLegacyReadsNoneWithoutReasoning(t *testing.T) {
+	t.Parallel()
+
+	if got := (ModelConfig{ToolCall: true}).Legacy().ThinkingMode; got != reasoning.ModeNone {
+		t.Fatalf("thinking mode = %q, want %q", got, reasoning.ModeNone)
+	}
+}
+
+// Only a switch advertised by the enabled token alone needs the provider's
+// client type to upgrade; the stored-row reader looks the provider up for
+// those rows and no others.
+func TestUpgradeNeedsClientTypeOnlyForEnabledOnlySwitches(t *testing.T) {
+	t.Parallel()
+
+	for raw, want := range map[string]bool{
+		`{"thinking_mode":"toggle","reasoning_efforts":["enabled"]}`:           true,
+		`{"thinking_mode":"toggle","reasoning_efforts":["enabled","disable"]}`: false,
+		`{"thinking_mode":"toggle","reasoning_efforts":["disable"]}`:           false,
+		`{"thinking_mode":"toggle","reasoning_efforts":["low","high"]}`:        false,
+		`{"compatibilities":["tool-call"]}`:                                    false,
+		`{"schema_version":2,"reasoning":{"toggle":true}}`:                     false,
+		``: false,
+	} {
+		if got := upgradeNeedsClientType([]byte(raw)); got != want {
+			t.Errorf("upgradeNeedsClientType(%s) = %v, want %v", raw, got, want)
+		}
+	}
+}

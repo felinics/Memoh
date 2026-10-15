@@ -428,7 +428,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 			req.DefaultCompatibilities,
 			allowCustomModelCapabilityDefaults(provider),
 		)
-		configContext := models.ConfigContext{ModelID: m.ID, Type: modelType}
+		configContext := models.ConfigContext{ModelID: m.ID, Type: modelType, ClientType: provider.ClientType}
 		_, err := h.modelsService.Create(ctx, models.AddRequest{
 			ModelID:    m.ID,
 			Name:       name,
@@ -441,7 +441,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 			if errors.Is(err, models.ErrModelIDAlreadyExists) {
 				// Upsert/assert: re-importing fills in newly discovered
 				// capabilities on existing models without clobbering user config.
-				if h.fillExistingModel(ctx, id, m.ID, discoveredConfig, managedCatalog && m.CapabilitiesKnown) {
+				if h.fillExistingModel(ctx, provider.ClientType, id, m.ID, discoveredConfig, managedCatalog && m.CapabilitiesKnown) {
 					resp.Updated++
 				} else {
 					resp.Skipped++
@@ -528,7 +528,7 @@ func (h *ProvidersHandler) markUnavailableManagedModels(ctx context.Context, pro
 //
 // The lookup is provider-scoped because model_id is only unique per provider;
 // same-named models under other providers must not affect this refresh.
-func (h *ProvidersHandler) fillExistingModel(ctx context.Context, providerID, modelID string, discovered models.LegacyModelConfig, replaceCapabilities bool) bool {
+func (h *ProvidersHandler) fillExistingModel(ctx context.Context, clientType, providerID, modelID string, discovered models.LegacyModelConfig, replaceCapabilities bool) bool {
 	existing, err := h.modelsService.GetByProviderAndModelID(ctx, providerID, modelID)
 	if err != nil {
 		return false
@@ -550,7 +550,7 @@ func (h *ProvidersHandler) fillExistingModel(ctx context.Context, providerID, mo
 		Name:       existing.Name,
 		ProviderID: existing.ProviderID,
 		Type:       existing.Type,
-		Config:     models.MergeLegacyConfig(existing.Config, merged, models.ConfigContext{ModelID: existing.ModelID, Type: existing.Type}),
+		Config:     models.MergeLegacyConfig(existing.Config, merged, models.ConfigContext{ModelID: existing.ModelID, Type: existing.Type, ClientType: clientType}),
 	}); err != nil {
 		h.logger.WarnContext(ctx, "failed to fill model capabilities", slog.String("model_id", modelID), slog.Any("error", err))
 		return false

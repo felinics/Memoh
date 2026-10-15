@@ -469,7 +469,7 @@ func (s *Service) convertToGetResponse(ctx context.Context, dbModel sqlc.Model) 
 		resp.Name = dbModel.Name.String
 	}
 
-	config, err := DecodeModelConfig(dbModel.Config, ConfigContext{ModelID: dbModel.ModelID, Type: ModelType(dbModel.Type)})
+	config, err := DecodeModelConfig(dbModel.Config, s.storedConfigContext(ctx, dbModel))
 	if err != nil {
 		s.logger.Warn("failed to decode model config", slog.String("model_id", dbModel.ModelID), slog.Any("error", err))
 		config = normalizeModelConfig(ModelConfig{})
@@ -479,6 +479,22 @@ func (s *Service) convertToGetResponse(ctx context.Context, dbModel sqlc.Model) 
 	resp.Config = config
 
 	return resp
+}
+
+// storedConfigContext describes a stored row to DecodeModelConfig. A version 1
+// row whose upgrade depends on the protocol also carries its provider's client
+// type, so a switch keeps resolving as it did; every other row skips the lookup.
+func (s *Service) storedConfigContext(ctx context.Context, dbModel sqlc.Model) ConfigContext {
+	out := ConfigContext{ModelID: dbModel.ModelID, Type: ModelType(dbModel.Type)}
+	if !configNeedsWriteBack(dbModel.Config, out.Type) || !upgradeNeedsClientType(dbModel.Config) || !dbModel.ProviderID.Valid {
+		return out
+	}
+	provider, err := s.queries.GetProviderByID(ctx, dbModel.ProviderID)
+	if err != nil {
+		return out
+	}
+	out.ClientType = provider.ClientType
+	return out
 }
 
 // writeBackUpgradedConfig stores a config read in an older schema version in

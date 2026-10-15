@@ -37,9 +37,6 @@ type SDKModelConfig struct {
 	// ReasoningOffSupport declares whether this model accepts an explicit
 	// thinking{type:"disabled"}. See anthropicAcceptsExplicitOff.
 	ReasoningOffSupport string
-	// ReasoningDefaultOn reports whether omitting the thinking field leaves the
-	// model thinking. nil means unknown.
-	ReasoningDefaultOn *bool
 	// ReasoningReplay is the model's declared replay for Chat Completions hosts.
 	// It overrides the replay the compatibility mode implies; nil keeps it.
 	ReasoningReplay *ReasoningReplay

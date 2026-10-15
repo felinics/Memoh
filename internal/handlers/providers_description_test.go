@@ -209,3 +209,19 @@ func TestMergeDiscoveredConfigRefreshesMaxOutputTokens(t *testing.T) {
 		t.Fatalf("an endpoint that reports nothing must keep the stored value: %v changed = %v", got.MaxOutputTokens, changed)
 	}
 }
+
+// A managed refresh reports the thinking mode of every model, "none" included.
+// A model without reasoning must read the same back, or every refresh rewrites
+// it and reports an update that changed nothing.
+func TestMergeDiscoveredConfigLeavesNonReasoningModelsAlone(t *testing.T) {
+	t.Parallel()
+
+	existing := models.ModelConfig{ToolCall: true}.Legacy()
+	discovered := models.LegacyModelConfig{ThinkingMode: reasoning.ModeNone, Compatibilities: []string{models.CompatToolCall}}
+	if _, changed := mergeDiscoveredConfig(existing, discovered); changed {
+		t.Fatal("a non-reasoning model changed on a refresh that discovered nothing new")
+	}
+	if _, changed := mergeManagedDiscoveredConfig(existing, discovered); changed {
+		t.Fatal("a managed non-reasoning model changed on a refresh that discovered nothing new")
+	}
+}

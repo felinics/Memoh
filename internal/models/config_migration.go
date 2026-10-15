@@ -23,6 +23,10 @@ import (
 type ConfigContext struct {
 	ModelID string
 	Type    ModelType
+	// ClientType is the provider's client type when the caller knows it. The
+	// version 1 upgrade reads it to keep a switch that only the protocol could
+	// turn off resolving as it did; empty leaves that answer as not stated.
+	ClientType string
 }
 
 // configMigrations[v] upgrades a version v config to version v+1.
@@ -76,6 +80,24 @@ func storedConfigVersion(raw []byte) int {
 		return 1
 	}
 	return head.SchemaVersion
+}
+
+// upgradeNeedsClientType reports whether the version 1 upgrade of a stored
+// config reads the provider's client type: only a switch advertised by the
+// enabled token alone, whose off answer depends on the protocol. Every other
+// row upgrades the same on every protocol, so callers skip the lookup.
+func upgradeNeedsClientType(raw []byte) bool {
+	if storedConfigVersion(raw) >= ModelConfigSchemaVersion {
+		return false
+	}
+	var head struct {
+		ReasoningEfforts []string `json:"reasoning_efforts"`
+	}
+	if err := json.Unmarshal(raw, &head); err != nil {
+		return false
+	}
+	advertised := reasoning.NormalizeAdvertised(head.ReasoningEfforts)
+	return slices.Contains(advertised, reasoning.EffortEnabled) && !slices.Contains(advertised, reasoning.EffortDisable)
 }
 
 // configNeedsWriteBack reports whether a stored config is older than the
@@ -214,12 +236,12 @@ func (v1 LegacyModelConfig) Upgrade(ctx ConfigContext) ModelConfig {
 	}
 	out.Modalities = modalities
 	out.ToolCall = has(CompatToolCall)
-	out.Reasoning = upgradeReasoningV1(v1, has(CompatReasoning), ctx.ModelID)
+	out.Reasoning = upgradeReasoningV1(v1, has(CompatReasoning), ctx)
 	return out
 }
 
-func upgradeReasoningV1(v1 LegacyModelConfig, hasReasoning bool, modelID string) *ModelReasoning {
-	mode := reasoning.ResolveMode(v1.ThinkingMode, hasReasoning, modelID)
+func upgradeReasoningV1(v1 LegacyModelConfig, hasReasoning bool, ctx ConfigContext) *ModelReasoning {
+	mode := reasoning.ResolveMode(v1.ThinkingMode, hasReasoning, ctx.ModelID)
 	if !reasoning.Supported(mode) {
 		return nil
 	}
@@ -253,9 +275,20 @@ func upgradeReasoningV1(v1 LegacyModelConfig, hasReasoning bool, modelID string)
 			r.Efforts = append(r.Efforts, effort)
 		}
 	}
-	if len(advertised) == 0 {
-		// Version 1 offered low, medium and high to a model that listed nothing.
+	hasEnabled := slices.Contains(advertised, reasoning.EffortEnabled)
+	if len(r.Efforts) == 0 && !hasEnabled {
+		// Version 1 offered low, medium and high to a model that listed no tier,
+		// whether it listed nothing or only the disable token, and sent medium
+		// once reasoning was on. Only the enabled token made it a plain switch.
 		r.Efforts = []string{reasoning.EffortLow, reasoning.EffortMedium, reasoning.EffortHigh}
+	}
+	if hasEnabled && !slices.Contains(advertised, reasoning.EffortDisable) && r.Off == "" &&
+		ctx.ClientType != "" && !reasoning.OffByOmission(ctx.ClientType) {
+		// A switch advertised without the disable token could only be turned off
+		// where the protocol does so by leaving thinking out. Elsewhere version 1
+		// offered no off at all, which version 2 states as rejected: a toggle with
+		// an unstated Off would otherwise read as switchable off.
+		r.Off = reasoning.OffSupportRejected
 	}
 	if v1.ThinkingBudgetMin != nil || v1.ThinkingBudgetMax != nil {
 		r.Budget = &ReasoningBudget{Min: v1.ThinkingBudgetMin, Max: v1.ThinkingBudgetMax}
@@ -278,8 +311,11 @@ func (c ModelConfig) Legacy() LegacyModelConfig {
 			out.Compatibilities = append(out.Compatibilities, token)
 		}
 	}
+	// The mode reads "none" without Reasoning, as version 1 stored it: discovery
+	// reports a mode for every model, so an empty one here would make every
+	// non-reasoning model look changed on each managed refresh.
+	out.ThinkingMode = c.ThinkingMode()
 	if c.Reasoning != nil {
-		out.ThinkingMode = c.ThinkingMode()
 		out.ReasoningEfforts = c.ReasoningEfforts()
 		out.ReasoningDialect = c.ReasoningDialect()
 		out.ReasoningOffSupport = c.ReasoningOffSupport()
