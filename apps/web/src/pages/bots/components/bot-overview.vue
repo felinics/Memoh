@@ -161,9 +161,8 @@
           <MetricReadout
             v-for="m in runtimeMetricCards"
             :key="m.key"
-            :label="m.label"
+            :label="m.limit ? `${m.label} · ${m.limit}` : m.label"
             :value="m.value"
-            :sub="m.sub"
           />
         </div>
 
@@ -296,7 +295,7 @@ import BotChecksPanel from './bot-checks-panel.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
-import { resolveBotWorkspaceBackend } from '@/utils/bot-workspace'
+import { resolveBotWorkspaceBackend, resolveRuntimeStatusKey, runtimeStatusLabelKey } from '@/utils/bot-workspace'
 import { formatMetricBytes, formatMetricPercent } from '@/utils/format-bytes'
 import { formatDateTime } from '@/utils/date-time'
 
@@ -477,6 +476,8 @@ const containerRunning = computed(() => {
   return status === 'running' || status === 'created'
 })
 
+const containerPaused = computed(() => resolveRuntimeStatusKey(container.value?.status) === 'paused')
+
 // Poll metrics (and container state) every 10s while running, mirroring the
 // detail-page pattern. KeepAlive wraps this tab, so onUnmounted never fires on
 // tab switch — gate on onActivated/onDeactivated instead, and stop polling once
@@ -493,7 +494,9 @@ function stopPolling() {
 }
 
 function syncPolling() {
-  const shouldPoll = isActive && isContainerBot.value && containerRunning.value
+  // Paused keeps polling: a runtime that resumes on its own (e.g. a hosted
+  // sandbox woken by the next message) updates without a reload.
+  const shouldPoll = isActive && isContainerBot.value && (containerRunning.value || containerPaused.value)
   if (shouldPoll && !pollTimer) {
     pollTimer = setInterval(() => {
       void refetchMetrics()
@@ -504,7 +507,7 @@ function syncPolling() {
   }
 }
 
-watch([isContainerBot, containerRunning], syncPolling, { immediate: true })
+watch([isContainerBot, containerRunning, containerPaused], syncPolling, { immediate: true })
 
 onActivated(() => {
   isActive = true
@@ -518,26 +521,17 @@ onDeactivated(() => {
 
 onBeforeUnmount(stopPolling)
 
-// Status dot + label reuse the Container tab's status vocabulary so the two
-// pages never disagree on "is it running".
+// Status label reuses the Container tab's status vocabulary so the two pages
+// never disagree on "is it running". Badge is always secondary (neutral gray) —
+// green "Running" was too loud for a quiet telemetry row.
 const runtimeStatusKey = computed(() => {
-  const status = (container.value?.status ?? '').trim().toLowerCase()
-  if (status === 'running') return 'running'
-  if (status === 'created') return 'created'
-  if (status === 'stopped' || status === 'exited') return 'stopped'
-  return containerRunning.value ? 'running' : 'unknown'
+  const key = resolveRuntimeStatusKey(container.value?.status)
+  if (key === 'exited') return 'stopped'
+  if (key === 'unknown' && containerRunning.value) return 'running'
+  return key
 })
 
-// Status label reuses the Container tab vocabulary. Badge is always secondary
-// (neutral gray) — green "Running" was too loud for a quiet telemetry row.
-const runtimeStatusLabel = computed(() => {
-  switch (runtimeStatusKey.value) {
-    case 'running': return t('bots.container.statusRunning')
-    case 'created': return t('bots.container.statusCreated')
-    case 'stopped': return t('bots.container.statusStopped')
-    default: return t('bots.container.statusUnknown')
-  }
-})
+const runtimeStatusLabel = computed(() => t(runtimeStatusLabelKey(runtimeStatusKey.value)))
 
 const runtimeSampledAt = computed(() => {
   const ts = containerMetrics.value?.sampled_at
@@ -553,26 +547,31 @@ const runtimeHasMetrics = computed(
 )
 
 const runtimeMetricCards = computed(() => {
+  const cpu = cpuMetrics.value
   const mem = memoryMetrics.value
   const memLimit = mem?.limit_bytes
+  const storage = storageMetrics.value
+  const storageLimit = storage?.limit_bytes
   return [
     {
       key: 'cpu',
       label: t('bots.container.metricsLabels.cpu'),
-      value: formatMetricPercent(cpuMetrics.value?.usage_percent),
-      sub: '',
+      value: formatMetricPercent(cpu?.usage_percent),
+      limit: cpu?.cores ? t('bots.overview.runtimeCpuCores', { count: cpu.cores }) : '',
     },
     {
       key: 'memory',
       label: t('bots.container.metricsLabels.memory'),
-      value: formatMetricBytes(mem?.usage_bytes),
-      sub: memLimit && memLimit > 0 ? `/ ${formatMetricBytes(memLimit)}` : '',
+      // A paused runtime reports 0 bytes; "0 B" reads as a unit glitch next to
+      // a GiB limit, so zero is shown in MiB like typical usage.
+      value: mem?.usage_bytes === 0 ? '0 MiB' : formatMetricBytes(mem?.usage_bytes),
+      limit: memLimit && memLimit > 0 ? formatMetricBytes(memLimit) : '',
     },
     {
       key: 'storage',
       label: t('bots.container.metricsLabels.storage'),
-      value: formatMetricBytes(storageMetrics.value?.used_bytes),
-      sub: '',
+      value: formatMetricBytes(storage?.used_bytes),
+      limit: storageLimit && storageLimit > 0 ? formatMetricBytes(storageLimit) : '',
     },
   ]
 })

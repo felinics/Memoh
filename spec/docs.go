@@ -22064,6 +22064,9 @@ const docTemplate = `{
         "handlers.ContainerCPUMetricsResponse": {
             "type": "object",
             "properties": {
+                "cores": {
+                    "type": "integer"
+                },
                 "kernel_nanoseconds": {
                     "type": "integer"
                 },
@@ -22193,10 +22196,14 @@ const docTemplate = `{
         "handlers.ContainerStorageMetricsResponse": {
             "type": "object",
             "properties": {
+                "limit_bytes": {
+                    "type": "integer"
+                },
                 "path": {
                     "type": "string"
                 },
                 "used_bytes": {
+                    "description": "UsedBytes is omitted when only the allotment is known.",
                     "type": "integer"
                 }
             }

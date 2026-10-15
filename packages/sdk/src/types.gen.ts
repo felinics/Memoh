@@ -1907,6 +1907,7 @@ export type HandlersConnectorEnabledRequest = {
 };
 
 export type HandlersContainerCpuMetricsResponse = {
+    cores?: number;
     kernel_nanoseconds?: number;
     usage_nanocores?: number;
     usage_nanoseconds?: number;
@@ -1961,7 +1962,11 @@ export type HandlersContainerResourceLimitValuesResponse = {
 };
 
 export type HandlersContainerStorageMetricsResponse = {
+    limit_bytes?: number;
     path?: string;
+    /**
+     * UsedBytes is omitted when only the allotment is known.
+     */
     used_bytes?: number;
 };
 

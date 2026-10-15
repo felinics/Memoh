@@ -164,6 +164,7 @@ type ContainerMetricsStatusResponse struct {
 }
 
 type ContainerCPUMetricsResponse struct {
+	Cores             int64   `json:"cores,omitempty"`
 	UsagePercent      float64 `json:"usage_percent"`
 	UsageNanoseconds  uint64  `json:"usage_nanoseconds"`
 	UsageNanocores    uint64  `json:"usage_nanocores"`
@@ -178,8 +179,10 @@ type ContainerMemoryMetricsResponse struct {
 }
 
 type ContainerStorageMetricsResponse struct {
-	Path      string `json:"path"`
-	UsedBytes uint64 `json:"used_bytes"`
+	Path string `json:"path"`
+	// UsedBytes is omitted when only the allotment is known.
+	UsedBytes  *uint64 `json:"used_bytes,omitempty"`
+	LimitBytes uint64  `json:"limit_bytes,omitempty"`
 }
 
 type ContainerMetricsPayloadResponse struct {
@@ -878,6 +881,7 @@ func toContainerCPUMetricsResponse(metrics *ctr.CPUMetrics) *ContainerCPUMetrics
 		return nil
 	}
 	return &ContainerCPUMetricsResponse{
+		Cores:             metrics.Cores,
 		UsagePercent:      metrics.UsagePercent,
 		UsageNanoseconds:  metrics.UsageNanoseconds,
 		UsageNanocores:    metrics.UsageNanocores,
@@ -901,10 +905,15 @@ func toContainerStorageMetricsResponse(metrics *workspace.ContainerStorageMetric
 	if metrics == nil {
 		return nil
 	}
-	return &ContainerStorageMetricsResponse{
-		Path:      metrics.Path,
-		UsedBytes: metrics.UsedBytes,
+	resp := &ContainerStorageMetricsResponse{
+		Path:       metrics.Path,
+		LimitBytes: metrics.LimitBytes,
 	}
+	if !metrics.UsedUnknown {
+		used := metrics.UsedBytes
+		resp.UsedBytes = &used
+	}
+	return resp
 }
 
 func (h *ContainerdHandler) toContainerResourceLimitsResponse(result *workspace.ResourceLimitsResult) GetContainerResourceLimitsResponse {

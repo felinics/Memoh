@@ -51,6 +51,7 @@ import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { formatDateTime, formatRelativeTime } from '@/utils/date-time'
 import { shortenImageRef } from '@/utils/image-ref'
+import { resolveRuntimeStatusKey, runtimeStatusLabelKey } from '@/utils/bot-workspace'
 import { formatMetricBytes, formatMetricPercent } from '@/utils/format-bytes'
 import { UserFacingError, resolveApiErrorMessage } from '@/utils/api-error'
 
@@ -364,31 +365,17 @@ const displayedCDIDevices = computed(() => containerInfo.value?.cdi_devices ?? [
 const { isPending: botLifecyclePending } = useBotStatusMeta(bot, t)
 
 // Runtime status as a Badge variant (like bot-overview), not a loose pulse dot
-const runtimeStatusKey = computed(() => {
-  const status = (containerInfo.value?.status ?? '').trim().toLowerCase()
-  if (status === 'running') return 'running'
-  if (status === 'created') return 'created'
-  if (status === 'stopped' || status === 'exited') return 'stopped'
-  return 'unknown'
-})
+const runtimeStatusKey = computed(() => resolveRuntimeStatusKey(containerInfo.value?.status))
 
 const runtimeStatusVariant = computed<'success' | 'secondary' | 'default'>(() => {
   switch (runtimeStatusKey.value) {
     case 'running': return 'success'
     case 'created': return 'default'
-    case 'stopped': return 'secondary'
     default: return 'secondary'
   }
 })
 
-const runtimeStatusLabel = computed(() => {
-  switch (runtimeStatusKey.value) {
-    case 'running': return t('bots.container.statusRunning')
-    case 'created': return t('bots.container.statusCreated')
-    case 'stopped': return t('bots.container.statusStopped')
-    default: return t('bots.container.statusUnknown')
-  }
-})
+const runtimeStatusLabel = computed(() => t(runtimeStatusLabelKey(runtimeStatusKey.value)))
 
 const isContainerTaskRunning = computed(() => {
   const info = containerInfo.value
@@ -807,19 +794,6 @@ async function handleRestorePreservedData() {
     t('bots.container.restoreSuccess'),
   )
 }
-
-const statusKeyMap: Record<string, string> = {
-  created: 'statusCreated',
-  running: 'statusRunning',
-  stopped: 'statusStopped',
-  exited: 'statusExited',
-}
-
-const containerStatusText = computed(() => {
-  const status = (containerInfo.value?.status ?? '').trim().toLowerCase()
-  const key = statusKeyMap[status] ?? 'statusUnknown'
-  return t(`bots.container.${key}`)
-})
 
 const containerTaskText = computed(() => {
   const info = containerInfo.value
@@ -1663,7 +1637,7 @@ watch([activeTab, botId], ([tab]) => {
           </div>
           <div class="mx-4 flex items-start justify-between gap-4 border-b border-border py-3 last:border-b-0">
             <span class="shrink-0 text-sm text-muted-foreground">{{ $t('bots.container.fields.status') }}</span>
-            <span class="text-right text-sm text-foreground">{{ containerStatusText }}</span>
+            <span class="text-right text-sm text-foreground">{{ runtimeStatusLabel }}</span>
           </div>
           <div class="mx-4 flex items-start justify-between gap-4 border-b border-border py-3 last:border-b-0">
             <span class="shrink-0 text-sm text-muted-foreground">{{ $t('bots.container.fields.task') }}</span>

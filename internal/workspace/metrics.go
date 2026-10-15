@@ -54,6 +54,14 @@ func (m *Manager) GetContainerMetrics(ctx context.Context, botID string) (*Conta
 		result.CPU = runtimeMetrics.CPU
 		result.Memory = runtimeMetrics.Memory
 		result.SampledAt = runtimeMetrics.SampledAt
+		if runtimeMetrics.Storage != nil {
+			result.Storage = &ContainerStorageMetrics{
+				Path:        "/",
+				UsedBytes:   runtimeMetrics.Storage.UsedBytes,
+				LimitBytes:  runtimeMetrics.Storage.LimitBytes,
+				UsedUnknown: runtimeMetrics.Storage.UsedUnknown,
+			}
+		}
 	case errors.Is(err, ctr.ErrNotSupported):
 		result.Supported = false
 		result.UnsupportedReason = unsupportedReasonBackend
@@ -66,7 +74,7 @@ func (m *Manager) GetContainerMetrics(ctx context.Context, botID string) (*Conta
 		return nil, err
 	}
 
-	if result.Supported {
+	if result.Supported && result.Storage == nil {
 		storage, err := m.collectStorageMetrics(ctx, info)
 		if err != nil {
 			if errors.Is(err, ctr.ErrNotSupported) {

@@ -89,8 +89,10 @@ type ContainerMetricsStatus struct {
 }
 
 type ContainerStorageMetrics struct {
-	Path      string `json:"path"`
-	UsedBytes uint64 `json:"used_bytes"`
+	Path        string `json:"path"`
+	UsedBytes   uint64 `json:"used_bytes"`
+	LimitBytes  uint64 `json:"limit_bytes,omitempty"`
+	UsedUnknown bool   `json:"-"`
 }
 
 type ContainerMetricsResult struct {

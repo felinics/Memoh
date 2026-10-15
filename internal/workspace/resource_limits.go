@@ -180,7 +180,7 @@ func (m *Manager) GetResourceLimits(ctx context.Context, botID string) (*Resourc
 			result.Observed.MemoryUsageBytes = metrics.Memory.UsageBytes
 			result.Observed.MemoryLimitBytes = metrics.Memory.LimitBytes
 		}
-		if metrics.Storage != nil {
+		if metrics.Storage != nil && !metrics.Storage.UsedUnknown {
 			result.Observed.StorageUsedBytes = metrics.Storage.UsedBytes
 			result.Observed.StorageOverSoftLimit = desired.StorageBytes > 0 && metrics.Storage.UsedBytes > uint64(desired.StorageBytes)
 		}
