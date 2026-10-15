@@ -4224,13 +4224,9 @@ async function handleSend() {
   // A draft's first send keeps its input on screen, locked, until the server
   // confirms it (onBeforeTurnAppend); a failure then leaves it where it is.
   const holdsInput = !sentContext.target.sessionId
-  const clearSentInput = () => {
+  const clearSentInput = (onSentPane = true) => {
     saveInputDraft(sentDraftKey, '')
-    if (holdsInput && !matchesChatPaneSendContext(
-      sentContext,
-      paneTarget.value,
-      inputDraftKey.value || 'chat',
-    )) return
+    if (!onSentPane) return
     inputText.value = ''
     pendingFiles.value = []
     requestedSkills.value = []
@@ -4273,19 +4269,22 @@ async function handleSend() {
     onBeforeMessageSend: () => pairSend.begin(),
     onModelPreferenceSettled: () => pairSend.finish(false),
     onBeforeTurnAppend: (target) => {
+      // The confirmed target carries the session the send created; a draft
+      // pane that was promoted to it is still the pane that sent.
+      const onSentPane = matchesChatPaneSendContext(
+        { ...sentContext, target },
+        { ...paneTarget.value, sessionId: paneView.value.sessionId },
+        inputDraftKey.value || 'chat',
+      )
       if (holdsInput) {
-        clearSentInput()
+        clearSentInput(onSentPane)
         draftSendStarting.value = false
       }
       if (goalSend && goalDraftScope.value === sentGoalScope) goalDraftScope.value = ''
       if (preserveDirectDraftSelection) {
         void nextTick(() => { directDraftPromotionPending = false })
       }
-      if (!matchesChatPaneSendContext(
-        { ...sentContext, target },
-        { ...paneTarget.value, sessionId: paneView.value.sessionId },
-        inputDraftKey.value || 'chat',
-      )) return
+      if (!onSentPane) return
       rollbackPin = pinAfterSend()
     },
     onTurnAppendAborted: () => {
