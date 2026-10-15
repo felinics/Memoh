@@ -3179,7 +3179,6 @@
       "metricsUnavailable": "利用可能な指標はありません。",
       "metricsStopped": "Workspace は実行されていません。ストレージ使用量のみ表示しています。",
       "metricsPath": "パス",
-      "metricsUnlimited": "制限なし",
       "currentSample": "現在",
       "sampledAt": "サンプリングされた場所",
       "metricsLabels": {
@@ -3198,7 +3197,6 @@
         "storageHint": "VM のハード上限用に予約されています。コンテナランタイムでは現在、ソフト上限として記録されます。",
         "unlimited": "無制限",
         "unlimitedPlaceholder": "無制限",
-        "cpuCoresValue": "{value} コア",
         "cpuSummary": "CPU {value}",
         "memorySummary": "Memory{value}",
         "storageSummary": "ストレージ {value}",

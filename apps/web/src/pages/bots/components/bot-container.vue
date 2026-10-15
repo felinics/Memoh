@@ -52,7 +52,7 @@ import { useCapabilitiesStore } from '@/store/capabilities'
 import { formatDateTime, formatRelativeTime } from '@/utils/date-time'
 import { shortenImageRef } from '@/utils/image-ref'
 import { resolveRuntimeStatusKey, runtimeStatusLabelKey } from '@/utils/bot-workspace'
-import { formatMetricBytes, formatMetricPercent } from '@/utils/format-bytes'
+import { buildRuntimeMetricCards } from '@/utils/format-bytes'
 import { UserFacingError, resolveApiErrorMessage } from '@/utils/api-error'
 
 const route = useRoute()
@@ -604,13 +604,6 @@ async function handleApplyResourceLimitsNow() {
   }
 }
 
-function formatLimitCPU(value?: number): string {
-  if (!value || value <= 0) return t('bots.container.resourceLimits.unlimited')
-  return t('bots.container.resourceLimits.cpuCoresValue', {
-    value: trimTrailingZeros((value / 1000).toFixed(3)),
-  })
-}
-
 const storageHardLimitSupported = computed(() =>
   resourceLimits.value?.capabilities?.storage?.hard_limit_supported === true,
 )
@@ -628,50 +621,12 @@ const metricsTaskRunning = computed(() => containerMetricsStatus.value?.task_run
 const hasAnyMetric = computed(() =>
   !!cpuMetrics.value || !!memoryMetrics.value || !!storageMetrics.value,
 )
-const cpuMetricValueText = computed(() => formatMetricPercent(cpuMetrics.value?.usage_percent))
-const memoryMetricValueText = computed(() => formatMetricBytes(memoryMetrics.value?.usage_bytes))
-const storageMetricValueText = computed(() => formatMetricBytes(storageMetrics.value?.used_bytes))
-// Like CPU, storage has no live ceiling in the payload, so the cap comes from the
-// configured limit — never the mount path, which is diagnostic (it lives in Details)
-// and renders as a bare "/" that says nothing about capacity.
-const storageMetricHintText = computed(() => {
-  if (!storageMetrics.value) return ''
-  const limit = resourceLimits.value?.desired?.storage_bytes
-  if (limit && limit > 0) {
-    return `${formatMetricBytes(storageMetrics.value?.used_bytes)} / ${formatMetricBytes(limit)}`
-  }
-  return t('bots.container.metricsUnlimited')
-})
 const sampledAtText = computed(() =>
   formatRelativeTime(containerMetrics.value?.sampled_at, { locale: locale.value, fallback: '' }),
 )
-const memoryMetricHintText = computed(() => {
-  const limit = memoryMetrics.value?.limit_bytes
-  if (limit && limit > 0) {
-    const usagePercent = formatMetricPercent(memoryMetrics.value?.usage_percent)
-    return `${formatMetricBytes(memoryMetrics.value?.usage_bytes)} / ${formatMetricBytes(limit)}${usagePercent === '--' ? '' : ` (${usagePercent})`}`
-  }
-  if (memoryMetrics.value) {
-    return t('bots.container.metricsUnlimited')
-  }
-  return t('bots.container.metricsUnavailable')
-})
 
-// CPU has no live cgroup ceiling in the metrics payload, so the cap comes from the
-// configured limit. Mirrors Memory's tile so every gauge states its ceiling.
-const cpuMetricHintText = computed(() => {
-  if (!cpuMetrics.value) return ''
-  const cpuLimit = resourceLimits.value?.desired?.cpu_millicores
-  if (cpuLimit && cpuLimit > 0) return formatLimitCPU(cpuLimit)
-  return t('bots.container.metricsUnlimited')
-})
-
-// Runtime metric tiles for the overview-style tile grid
-const runtimeMetricCards = computed(() => [
-  { key: 'cpu', label: t('bots.container.metricsLabels.cpu'), value: cpuMetricValueText.value, sub: cpuMetricHintText.value },
-  { key: 'memory', label: t('bots.container.metricsLabels.memory'), value: memoryMetricValueText.value, sub: memoryMetricHintText.value },
-  { key: 'storage', label: t('bots.container.metricsLabels.storage'), value: storageMetricValueText.value, sub: storageMetricHintText.value },
-])
+// Runtime metric tiles, shared with the Overview runtime block
+const runtimeMetricCards = computed(() => buildRuntimeMetricCards(containerMetrics.value, t))
 
 const runtimeMetricsNote = computed(() => {
   if (metricsBackendUnsupported.value) return t('bots.container.metricsUnsupported')
@@ -1204,7 +1159,6 @@ watch([activeTab, botId], ([tab]) => {
               :key="m.key"
               :label="m.label"
               :value="m.value"
-              :sub="m.sub"
             />
           </div>
           <SettingsSection v-else>

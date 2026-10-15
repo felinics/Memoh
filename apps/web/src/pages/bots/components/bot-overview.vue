@@ -161,7 +161,7 @@
           <MetricReadout
             v-for="m in runtimeMetricCards"
             :key="m.key"
-            :label="m.limit ? `${m.label} · ${m.limit}` : m.label"
+            :label="m.label"
             :value="m.value"
           />
         </div>
@@ -296,7 +296,7 @@ import ChannelIcon from '@/components/channel-icon/index.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { resolveBotWorkspaceBackend, resolveRuntimeStatusKey, runtimeStatusLabelKey } from '@/utils/bot-workspace'
-import { formatMetricBytes, formatMetricPercent } from '@/utils/format-bytes'
+import { buildRuntimeMetricCards } from '@/utils/format-bytes'
 import { formatDateTime } from '@/utils/date-time'
 
 use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent])
@@ -546,35 +546,7 @@ const runtimeHasMetrics = computed(
   () => !!cpuMetrics.value || !!memoryMetrics.value || !!storageMetrics.value,
 )
 
-const runtimeMetricCards = computed(() => {
-  const cpu = cpuMetrics.value
-  const mem = memoryMetrics.value
-  const memLimit = mem?.limit_bytes
-  const storage = storageMetrics.value
-  const storageLimit = storage?.limit_bytes
-  return [
-    {
-      key: 'cpu',
-      label: t('bots.container.metricsLabels.cpu'),
-      value: formatMetricPercent(cpu?.usage_percent),
-      limit: cpu?.cores ? t('bots.overview.runtimeCpuCores', { count: cpu.cores }) : '',
-    },
-    {
-      key: 'memory',
-      label: t('bots.container.metricsLabels.memory'),
-      // A paused runtime reports 0 bytes; "0 B" reads as a unit glitch next to
-      // a GiB limit, so zero is shown in MiB like typical usage.
-      value: mem?.usage_bytes === 0 ? '0 MiB' : formatMetricBytes(mem?.usage_bytes),
-      limit: memLimit && memLimit > 0 ? formatMetricBytes(memLimit) : '',
-    },
-    {
-      key: 'storage',
-      label: t('bots.container.metricsLabels.storage'),
-      value: formatMetricBytes(storage?.used_bytes),
-      limit: storageLimit && storageLimit > 0 ? formatMetricBytes(storageLimit) : '',
-    },
-  ]
-})
+const runtimeMetricCards = computed(() => buildRuntimeMetricCards(containerMetrics.value, t))
 
 // Footnote only when the tile grid is present but nothing has been sampled yet.
 const runtimeMetricsNote = computed(() => {

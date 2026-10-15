@@ -3140,7 +3140,6 @@
       "metricsUnavailable": "暂无可用指标。",
       "metricsStopped": "工作区未运行，仅显示存储使用情况。",
       "metricsPath": "统计范围",
-      "metricsUnlimited": "未配置限额",
       "currentSample": "当前采样",
       "sampledAt": "采样时间",
       "metricsLabels": {
@@ -3159,7 +3158,6 @@
         "storageHint": "为 VM 硬限制预留；容器运行后端当前仅将其记录为软限制。",
         "unlimited": "不限制",
         "unlimitedPlaceholder": "不限制",
-        "cpuCoresValue": "{value} 核",
         "cpuSummary": "CPU {value}",
         "memorySummary": "内存 {value}",
         "storageSummary": "存储 {value}",

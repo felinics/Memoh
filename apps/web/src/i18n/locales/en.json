@@ -3140,7 +3140,6 @@
       "metricsUnavailable": "No metrics available.",
       "metricsStopped": "Workspace isn't running; only storage usage is available.",
       "metricsPath": "Path",
-      "metricsUnlimited": "No limit",
       "currentSample": "Current",
       "sampledAt": "Sampled at",
       "metricsLabels": {
@@ -3159,7 +3158,6 @@
         "storageHint": "Reserved as a VM hard limit; container runtime backends currently track it as a soft limit.",
         "unlimited": "Unlimited",
         "unlimitedPlaceholder": "unlimited",
-        "cpuCoresValue": "{value} cores",
         "cpuSummary": "CPU {value}",
         "memorySummary": "Memory {value}",
         "storageSummary": "Storage {value}",
