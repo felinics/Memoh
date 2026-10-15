@@ -94,6 +94,24 @@ describe('catalogModelsFor', () => {
     expect(mimo.config.reasoning).toEqual({ replay: { field: 'reasoning_content' } })
   })
 
+  // models.dev marks almost no embedding model with a type; the id says what
+  // it is. The catalog has no vector size, so such a model is left to the
+  // endpoint import, which probes it when the model is created.
+  it('leaves embedding models out by id as well as by type', () => {
+    const models = catalogModelsFor({
+      openai: {
+        id: 'openai',
+        models: {
+          'gpt-5': { id: 'gpt-5' },
+          'text-embedding-3-small': { id: 'text-embedding-3-small' },
+          'embeddinggemma-300m': { id: 'embeddinggemma-300m' },
+          'typed': { id: 'typed', type: 'embedding' },
+        },
+      },
+    }, 'openai', 'openai-responses')
+    expect(models.map(model => model.model_id)).toEqual(['gpt-5'])
+  })
+
   it('returns nothing for an unknown or missing source', () => {
     expect(catalogModelsFor(catalog, 'nobody', 'openai-completions')).toEqual([])
     expect(catalogModelsFor(catalog, undefined, 'openai-completions')).toEqual([])

@@ -53,13 +53,14 @@ export interface CatalogModel {
 }
 
 // The chat models a models.dev provider lists, as Memoh would store them for a
-// provider of clientType. Embedding models are left out: the catalog does not
-// carry their vector size, which Memoh needs to store one.
+// provider of clientType. Embedding models are left out, by type or by id: the
+// catalog does not carry their vector size, which Memoh needs to store one,
+// and it marks almost none of them with a type.
 export function catalogModelsFor(catalog: ModelsDevCatalog | undefined, source: string | undefined, clientType: string): CatalogModel[] {
   const provider = source ? catalog?.[source] : undefined
   if (!provider?.models) return []
   return Object.values(provider.models)
-    .filter(model => model.id && (!model.type || model.type === 'chat') && model.status !== 'deprecated')
+    .filter(model => model.id && (!model.type || model.type === 'chat') && model.status !== 'deprecated' && !looksLikeEmbeddingModel(model.id))
     .map(model => ({
       model_id: model.id,
       name: model.name?.trim() || model.id,
@@ -67,6 +68,14 @@ export function catalogModelsFor(catalog: ModelsDevCatalog | undefined, source: 
       config: modelConfigFromCatalog(model, modelProtocol(model, provider, clientType)),
     }))
     .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+// An id in which "embed" starts a word names an embedding model, by the same
+// rule the server applies to a provider's own model list.
+const EMBEDDING_MODEL_ID = /(?:^|[^a-z])embed/i
+
+function looksLikeEmbeddingModel(modelID: string): boolean {
+  return EMBEDDING_MODEL_ID.test(modelID)
 }
 
 const NPM_PROTOCOLS: Record<string, string> = {
