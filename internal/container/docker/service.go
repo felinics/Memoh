@@ -866,13 +866,11 @@ func taskInfoFromSummary(info container.Summary) containerapi.TaskInfo {
 }
 
 func taskStatusFromDocker(status container.ContainerState, running, paused bool) containerapi.TaskStatus {
-	// Docker keeps State.Running true while a container is paused, so paused
-	// must be checked first or a paused container reports as running.
-	if paused {
-		return containerapi.TaskStatusPaused
-	}
 	if running {
 		return containerapi.TaskStatusRunning
+	}
+	if paused {
+		return containerapi.TaskStatusPaused
 	}
 	switch strings.ToLower(status) {
 	case "created":
