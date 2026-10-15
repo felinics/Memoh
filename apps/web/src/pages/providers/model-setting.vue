@@ -10,7 +10,11 @@
             :icon="providerLogo(curProvider)!"
             :monochrome="isMonochromeLogo(providerLogo(curProvider))"
             size="1.5em"
-          />
+          >
+            <span class="text-xs font-medium text-muted-foreground">
+              {{ avatarInitials(curProvider?.name, '?') }}
+            </span>
+          </ProviderIcon>
           <span
             v-else
             class="text-xs font-medium text-muted-foreground"

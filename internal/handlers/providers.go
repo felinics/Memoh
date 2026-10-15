@@ -511,7 +511,7 @@ func (h *ProvidersHandler) refreshCatalogModel(ctx context.Context, providerID, 
 	if err != nil || existing.Type != models.ModelTypeChat {
 		return false
 	}
-	refreshed, changed := refreshFromCatalog(existing.Config, catalog)
+	refreshed, changed := refreshFromCatalog(modelID, existing.Config, catalog)
 	if !changed {
 		return false
 	}
@@ -530,8 +530,9 @@ func (h *ProvidersHandler) refreshCatalogModel(ctx context.Context, providerID, 
 
 // refreshFromCatalog replaces what the catalog describes: modalities, limits,
 // tool calling, structured output and reasoning. A description is filled in
-// only when the model has none.
-func refreshFromCatalog(existing, catalog models.ModelConfig) (models.ModelConfig, bool) {
+// only when the model has none. The result is compared in its stored form,
+// since that is what the row holds and what an update would write.
+func refreshFromCatalog(modelID string, existing, catalog models.ModelConfig) (models.ModelConfig, bool) {
 	out := existing
 	out.Modalities = catalog.Modalities
 	out.ContextWindow = catalog.ContextWindow
@@ -542,6 +543,7 @@ func refreshFromCatalog(existing, catalog models.ModelConfig) (models.ModelConfi
 	if out.Description == nil || strings.TrimSpace(*out.Description) == "" {
 		out.Description = catalog.Description
 	}
+	out = out.StoredForm(modelID)
 	before, _ := json.Marshal(existing)
 	after, _ := json.Marshal(out)
 	return out, string(before) != string(after)

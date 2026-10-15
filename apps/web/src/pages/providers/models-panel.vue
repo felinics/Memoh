@@ -278,7 +278,11 @@ function openAddProvider() {
                     :icon="providerLogo(card.provider)!"
                     :monochrome="isMonochromeLogo(providerLogo(card.provider))"
                     size="1.5em"
-                  />
+                  >
+                    <span class="text-xs font-medium text-muted-foreground">
+                      {{ avatarInitials(card.provider.name, '?') }}
+                    </span>
+                  </ProviderIcon>
                   <span
                     v-else
                     class="text-xs font-medium text-muted-foreground"

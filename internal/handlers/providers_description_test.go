@@ -246,18 +246,18 @@ func TestRefreshFromCatalogKeepsTheUsersChoices(t *testing.T) {
 		Reasoning:     &models.ModelReasoning{Efforts: []string{"low", "high"}, Dialect: reasoning.DialectAdaptive},
 	}
 
-	got, changed := refreshFromCatalog(existing, catalog)
+	got, changed := refreshFromCatalog("m", existing, catalog)
 	if !changed || !got.ToolCall || got.ContextWindow == nil || *got.ContextWindow != window || !got.Accepts(models.ModalityImage) {
 		t.Fatalf("refreshed = %+v, changed %v", got, changed)
 	}
 	if got.Description == nil || *got.Description != own {
 		t.Fatalf("description = %v, want the user's", got.Description)
 	}
-	if _, again := refreshFromCatalog(got, catalog); again {
+	if _, again := refreshFromCatalog("m", got, catalog); again {
 		t.Fatal("a second refresh with the same catalog reported a change")
 	}
 
-	empty, _ := refreshFromCatalog(models.ModelConfig{}, catalog)
+	empty, _ := refreshFromCatalog("m", models.ModelConfig{}, catalog)
 	if empty.Description == nil || *empty.Description != catalogDescription {
 		t.Fatalf("description = %v, want the catalog's when the model has none", empty.Description)
 	}
@@ -296,12 +296,28 @@ func TestRefreshFromCatalogIsStableAcrossNormalization(t *testing.T) {
 		t.Fatal(err)
 	}
 	catalog := req.Models[0].Config
-	stored, changed := refreshFromCatalog(models.ModelConfig{}, catalog)
+	stored, changed := refreshFromCatalog("m", models.ModelConfig{}, catalog)
 	if !changed || stored.Reasoning == nil || !slices.Equal(stored.Reasoning.Efforts, []string{"low", "high"}) {
 		t.Fatalf("first refresh = %+v changed %v", stored, changed)
 	}
-	if _, again := refreshFromCatalog(stored, catalog); again {
+	if _, again := refreshFromCatalog("m", stored, catalog); again {
 		t.Fatal("a second refresh with the same catalog entry reported a change")
+	}
+}
+
+// Create and Update store a config with the dialect its model id implies when
+// the catalog declares none. A refresh must compare against that stored form,
+// or every Claude thinking row reads as changed on every refresh.
+func TestRefreshFromCatalogComparesTheStoredForm(t *testing.T) {
+	t.Parallel()
+
+	catalog := models.ModelConfig{ToolCall: true, Reasoning: &models.ModelReasoning{}}
+	stored := catalog.StoredForm("claude-opus-5-thinking")
+	if stored.Reasoning == nil || stored.Reasoning.Dialect != reasoning.DialectAdaptive {
+		t.Fatalf("stored form = %+v, want the adaptive dialect inferred", stored.Reasoning)
+	}
+	if _, changed := refreshFromCatalog("claude-opus-5-thinking", stored, catalog); changed {
+		t.Fatal("a refresh with the catalog entry the row was created from reported a change")
 	}
 }
 
