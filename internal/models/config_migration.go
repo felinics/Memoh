@@ -276,10 +276,14 @@ func upgradeReasoningV1(v1 LegacyModelConfig, hasReasoning bool, ctx ConfigConte
 		}
 	}
 	hasEnabled := slices.Contains(advertised, reasoning.EffortEnabled)
-	if len(r.Efforts) == 0 && !hasEnabled {
+	hasBudget := v1.ThinkingBudgetMin != nil || v1.ThinkingBudgetMax != nil
+	if len(r.Efforts) == 0 && !hasEnabled && !hasBudget {
 		// Version 1 offered low, medium and high to a model that listed no tier,
 		// whether it listed nothing or only the disable token, and sent medium
 		// once reasoning was on. Only the enabled token made it a plain switch.
+		// A budget is a control of its own: no shipped template paired one with
+		// an empty tier list, and Legacy reads a budget-only row back without
+		// tiers, so filling them here would add tiers on every round trip.
 		r.Efforts = []string{reasoning.EffortLow, reasoning.EffortMedium, reasoning.EffortHigh}
 	}
 	if hasEnabled && !slices.Contains(advertised, reasoning.EffortDisable) && r.Off == "" &&

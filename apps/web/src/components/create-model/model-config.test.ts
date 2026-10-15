@@ -5,6 +5,7 @@ import {
   defaultCapabilityForm,
   defaultReasoningForm,
   reasoningFormFrom,
+  reasoningBudgetError,
   reasoningIsUncontrollable,
 } from './model-config'
 
@@ -139,5 +140,17 @@ describe('model config form state', () => {
     expect(reasoningIsUncontrollable({ ...defaultReasoningForm(), enabled: true, efforts: [] })).toBe(true)
     expect(reasoningIsUncontrollable({ ...defaultReasoningForm(), enabled: true, efforts: [], toggle: true })).toBe(false)
     expect(reasoningIsUncontrollable({ ...defaultReasoningForm(), enabled: true })).toBe(false)
+  })
+
+  // The server rejects a non-positive maximum and a minimum above the maximum;
+  // the form must say so before the request is sent.
+  it('names a budget the server would refuse', () => {
+    const form = { ...defaultReasoningForm(), enabled: true }
+    expect(reasoningBudgetError(form)).toBeUndefined()
+    expect(reasoningBudgetError({ ...form, budgetMin: 0, budgetMax: 1024 })).toBeUndefined()
+    expect(reasoningBudgetError({ ...form, budgetMax: 0 })).toBe('max')
+    expect(reasoningBudgetError({ ...form, budgetMax: -5 })).toBe('max')
+    expect(reasoningBudgetError({ ...form, budgetMin: 2048, budgetMax: 1024 })).toBe('range')
+    expect(reasoningBudgetError({ ...form, enabled: false, budgetMax: 0 })).toBeUndefined()
   })
 })

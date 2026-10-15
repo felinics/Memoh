@@ -391,3 +391,33 @@ func TestUpgradeNeedsClientTypeOnlyForEnabledOnlySwitches(t *testing.T) {
 		}
 	}
 }
+
+// Legacy and Upgrade are inverses for every reasoning shape version 2 stores,
+// so a refresh that merges in the version 1 vocabulary (fillExistingModel)
+// writes back exactly what the catalog imported instead of adding tiers.
+func TestLegacyUpgradeRoundTripKeepsReasoning(t *testing.T) {
+	t.Parallel()
+
+	zero, low, high := 0, 128, 24576
+	for _, tt := range []struct {
+		name      string
+		reasoning *ModelReasoning
+	}{
+		{"budget switch (Gemini 2.5 Flash)", &ModelReasoning{Toggle: true, Budget: &ReasoningBudget{Min: &zero, Max: &high}, Off: reasoning.OffSupportAccepted, Dialect: reasoning.DialectBudget}},
+		{"budget without a switch (Gemini 2.5 Pro)", &ModelReasoning{Budget: &ReasoningBudget{Min: &low, Max: &high}, Off: reasoning.OffSupportRejected, Dialect: reasoning.DialectBudget}},
+		{"plain switch", &ModelReasoning{Toggle: true, Off: reasoning.OffSupportAccepted, Dialect: reasoning.DialectToggle}},
+		{"switch that cannot turn off", &ModelReasoning{Toggle: true, Off: reasoning.OffSupportRejected}},
+		{"tiers", &ModelReasoning{Efforts: []string{"low", "high"}, Dialect: reasoning.DialectTier}},
+		{"tiers with a switch", &ModelReasoning{Toggle: true, Efforts: []string{"low", "medium", "high"}, Dialect: reasoning.DialectTier}},
+		{"adaptive", &ModelReasoning{Efforts: []string{"low", "max"}, Dialect: reasoning.DialectAdaptive, Off: reasoning.OffSupportAccepted}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := ModelConfig{Reasoning: tt.reasoning}
+			got := c.Legacy().Upgrade(ConfigContext{ModelID: "m", Type: ModelTypeChat, ClientType: string(ClientTypeOpenAICompletions)})
+			if !reflect.DeepEqual(got.Reasoning, tt.reasoning) {
+				t.Fatalf("round trip = %+v, want %+v", got.Reasoning, tt.reasoning)
+			}
+		})
+	}
+}

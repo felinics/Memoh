@@ -155,6 +155,17 @@ function buildReasoning(form: ReasoningForm): ModelsModelReasoning | undefined {
   return r
 }
 
+// reasoningBudgetError names why the budget the form holds would be refused by
+// the server: a maximum that is not positive, or a minimum above the maximum.
+export function reasoningBudgetError(form: ReasoningForm): 'max' | 'range' | undefined {
+  if (!form.enabled) return undefined
+  const max = typeof form.budgetMax === 'number' && Number.isFinite(form.budgetMax) ? form.budgetMax : undefined
+  const min = positiveOrZero(form.budgetMin)
+  if (max !== undefined && max <= 0) return 'max'
+  if (min !== undefined && max !== undefined && min > max) return 'range'
+  return undefined
+}
+
 // A model that reasons but takes no effort, toggle or budget cannot be steered;
 // the chat picker then shows no control for it.
 export function reasoningIsUncontrollable(form: ReasoningForm): boolean {

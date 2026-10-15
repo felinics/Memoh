@@ -373,6 +373,7 @@
                         v-model.number="reasoning.budgetMin"
                         type="number"
                         min="0"
+                        :aria-invalid="budgetError === 'range' || undefined"
                         :aria-label="$t('models.reasoningBudgetMin')"
                         :placeholder="$t('models.reasoningBudgetMin')"
                       />
@@ -380,10 +381,14 @@
                         v-model.number="reasoning.budgetMax"
                         type="number"
                         min="1"
+                        :aria-invalid="!!budgetError || undefined"
                         :aria-label="$t('models.reasoningBudgetMax')"
                         :placeholder="$t('models.reasoningBudgetMax')"
                       />
                     </div>
+                    <FieldError v-if="budgetError">
+                      {{ $t(budgetError === 'max' ? 'models.reasoningBudgetMaxMin' : 'models.reasoningBudgetRange') }}
+                    </FieldError>
                   </FieldStack>
 
                   <FieldStack
@@ -537,7 +542,7 @@ import { useMutation, useQueryCache } from '@pinia/colada'
 import { postModels, putModelsById, putModelsModelByModelId } from '@memohai/sdk'
 import type { ModelsGetResponse, ModelsAddRequest, ModelsUpdateRequest } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import { FieldStack } from '@felinic/ui'
+import { FieldError, FieldStack } from '@felinic/ui'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import {
   buildModelConfig,
@@ -550,6 +555,7 @@ import {
   REASONING_EFFORTS,
   REASONING_OFF_SUPPORT,
   REASONING_REPLAY_FIELDS,
+  reasoningBudgetError,
   reasoningFormFrom,
   reasoningIsUncontrollable,
   type CapabilityForm,
@@ -629,7 +635,12 @@ function toggleModality(direction: 'input' | 'output', modality: CapabilityForm[
     : current.filter(m => m !== modality)
 }
 
+// The server refuses a budget whose maximum is not positive or below the
+// minimum; the form says so inline and holds the submit until it is fixed.
+const budgetError = computed(() => reasoningBudgetError(reasoning.value))
+
 const canSubmit = computed(() => {
+  if (budgetError.value) return false
   if (title.value === 'edit') return true
   const { type, model_id } = form.values
   if (!type || !model_id) return false

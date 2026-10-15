@@ -3,11 +3,15 @@ package models
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/reasoning"
 )
 
 type writeBackQueries struct {
@@ -76,5 +80,51 @@ func TestReadLeavesCurrentAndForeignConfigsAlone(t *testing.T) {
 	}
 	if len(queries.writes) != 0 {
 		t.Fatalf("writes = %+v, want none", queries.writes)
+	}
+}
+
+type providerLookupQueries struct {
+	writeBackQueries
+	err error
+}
+
+func (q *providerLookupQueries) GetProviderByID(context.Context, pgtype.UUID) (sqlc.Provider, error) {
+	if q.err != nil {
+		return sqlc.Provider{}, q.err
+	}
+	return sqlc.Provider{ClientType: string(ClientTypeOpenAICompletions)}, nil
+}
+
+// A switch advertised by the enabled token alone upgrades differently per
+// protocol. When the provider cannot be read the upgrade is lossy: it is served
+// for this read but not written back, so the next read tries again instead of
+// storing a can-disable toggle for good.
+func TestReadSkipsWriteBackWhenTheProviderLookupFails(t *testing.T) {
+	t.Parallel()
+
+	row := sqlc.Model{
+		ModelID:    "m",
+		Type:       string(ModelTypeChat),
+		Config:     []byte(`{"thinking_mode":"toggle","reasoning_efforts":["enabled"]}`),
+		ProviderID: pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
+	}
+	failing := &providerLookupQueries{err: errors.New("provider unavailable")}
+	service := &Service{queries: failing, logger: slog.Default()}
+	resp := service.convertToGetResponse(context.Background(), row)
+	if resp.Config.Reasoning == nil || !resp.Config.Reasoning.Toggle || resp.Config.Reasoning.Off != "" {
+		t.Fatalf("served config = %+v, want the switch with its off answer unstated", resp.Config.Reasoning)
+	}
+	if len(failing.writes) != 0 {
+		t.Fatal("a lossy upgrade was written back")
+	}
+
+	working := &providerLookupQueries{}
+	service = &Service{queries: working, logger: slog.Default()}
+	resp = service.convertToGetResponse(context.Background(), row)
+	if resp.Config.Reasoning == nil || resp.Config.Reasoning.Off != reasoning.OffSupportRejected {
+		t.Fatalf("served config = %+v, want off rejected on OpenAI", resp.Config.Reasoning)
+	}
+	if len(working.writes) != 1 {
+		t.Fatalf("writes = %d, want the upgrade written back once the provider is known", len(working.writes))
 	}
 }

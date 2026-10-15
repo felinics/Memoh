@@ -469,11 +469,12 @@ func (s *Service) convertToGetResponse(ctx context.Context, dbModel sqlc.Model) 
 		resp.Name = dbModel.Name.String
 	}
 
-	config, err := DecodeModelConfig(dbModel.Config, s.storedConfigContext(ctx, dbModel))
+	configContext, complete := s.storedConfigContext(ctx, dbModel)
+	config, err := DecodeModelConfig(dbModel.Config, configContext)
 	if err != nil {
 		s.logger.Warn("failed to decode model config", slog.String("model_id", dbModel.ModelID), slog.Any("error", err))
 		config = normalizeModelConfig(ModelConfig{})
-	} else {
+	} else if complete {
 		s.writeBackUpgradedConfig(ctx, dbModel, config)
 	}
 	resp.Config = config
@@ -483,18 +484,25 @@ func (s *Service) convertToGetResponse(ctx context.Context, dbModel sqlc.Model) 
 
 // storedConfigContext describes a stored row to DecodeModelConfig. A version 1
 // row whose upgrade depends on the protocol also carries its provider's client
-// type, so a switch keeps resolving as it did; every other row skips the lookup.
-func (s *Service) storedConfigContext(ctx context.Context, dbModel sqlc.Model) ConfigContext {
+// type, so a switch keeps resolving as it did; every other row skips the
+// lookup. complete is false when that lookup was needed but failed: the
+// upgrade is then served without it and must not be written back, so the next
+// read tries again instead of storing a lossy answer for good.
+func (s *Service) storedConfigContext(ctx context.Context, dbModel sqlc.Model) (ConfigContext, bool) {
 	out := ConfigContext{ModelID: dbModel.ModelID, Type: ModelType(dbModel.Type)}
-	if !configNeedsWriteBack(dbModel.Config, out.Type) || !upgradeNeedsClientType(dbModel.Config) || !dbModel.ProviderID.Valid {
-		return out
+	if !configNeedsWriteBack(dbModel.Config, out.Type) || !upgradeNeedsClientType(dbModel.Config) {
+		return out, true
+	}
+	if !dbModel.ProviderID.Valid {
+		return out, false
 	}
 	provider, err := s.queries.GetProviderByID(ctx, dbModel.ProviderID)
 	if err != nil {
-		return out
+		s.logger.WarnContext(ctx, "failed to read the provider of a model config being upgraded", slog.String("model_id", dbModel.ModelID), slog.Any("error", err))
+		return out, false
 	}
 	out.ClientType = provider.ClientType
-	return out
+	return out, true
 }
 
 // writeBackUpgradedConfig stores a config read in an older schema version in
