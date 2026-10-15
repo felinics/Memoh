@@ -85,16 +85,9 @@ func (h *Handler) renderSessionStatus(cc CommandContext, sessionID string, scope
 	skills, _ := h.queries.GetSessionUsedSkills(cc.Ctx, pgSessionID)
 
 	// An Agent session runs its own model in its own context window; the
-	// bot's chat model and window would describe a different model. "latest"
-	// reads another session, so only the current one is checked.
-	external := false
-	if sessionID == strings.TrimSpace(cc.SessionID) {
-		runtime, err := h.sessionRuntimeKind(cc)
-		if err != nil {
-			return "", err
-		}
-		external = runtimekind.IsExternal(runtime)
-	}
+	// bot's chat model and window would describe a different model. Only the
+	// current session's runtime is known here, so "latest" keeps them.
+	external := sessionID == strings.TrimSpace(cc.SessionID) && runtimekind.IsExternal(cc.SessionRuntime)
 
 	pairs := make([]kv, 0, 6)
 	// Lead with the model — the single most load-bearing "where am I" fact.

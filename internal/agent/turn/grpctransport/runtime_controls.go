@@ -113,6 +113,74 @@ func (c *Client) SetRuntimeMode(ctx context.Context, input turn.RuntimeControlRe
 	return out, err
 }
 
+func (s *Server) RuntimeModel(ctx context.Context, req *turnpb.JsonRequest) (*turnpb.JsonResponse, error) {
+	var input turn.RuntimeControlRequest
+	if err := json.Unmarshal(req.GetJson(), &input); err != nil || input.TeamID == "" {
+		return nil, status.Error(codes.InvalidArgument, "invalid runtime control request")
+	}
+	service, ok := s.service.(turn.RuntimeControlService)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "runtime controls unavailable")
+	}
+	out, err := service.RuntimeModel(ctx, input)
+	if err != nil {
+		return nil, s.mapError(ctx, "runtime control", err)
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return nil, s.mapError(ctx, "runtime control response", err)
+	}
+	return &turnpb.JsonResponse{Json: data}, nil
+}
+
+func (c *Client) RuntimeModel(ctx context.Context, input turn.RuntimeControlRequest) (turn.RuntimeModelState, error) {
+	var out turn.RuntimeModelState
+	data, err := json.Marshal(input)
+	if err != nil {
+		return out, err
+	}
+	response, err := c.client.RuntimeModel(ctx, &turnpb.JsonRequest{Json: data})
+	if err != nil {
+		return out, mapClientError(err)
+	}
+	err = json.Unmarshal(response.GetJson(), &out)
+	return out, err
+}
+
+func (s *Server) SetRuntimeModel(ctx context.Context, req *turnpb.JsonRequest) (*turnpb.JsonResponse, error) {
+	var input turn.RuntimeControlRequest
+	if err := json.Unmarshal(req.GetJson(), &input); err != nil || input.TeamID == "" {
+		return nil, status.Error(codes.InvalidArgument, "invalid runtime control request")
+	}
+	service, ok := s.service.(turn.RuntimeControlService)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "runtime controls unavailable")
+	}
+	out, err := service.SetRuntimeModel(ctx, input)
+	if err != nil {
+		return nil, s.mapError(ctx, "runtime control", err)
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return nil, s.mapError(ctx, "runtime control response", err)
+	}
+	return &turnpb.JsonResponse{Json: data}, nil
+}
+
+func (c *Client) SetRuntimeModel(ctx context.Context, input turn.RuntimeControlRequest) (turn.RuntimeModelState, error) {
+	var out turn.RuntimeModelState
+	data, err := json.Marshal(input)
+	if err != nil {
+		return out, err
+	}
+	response, err := c.client.SetRuntimeModel(ctx, &turnpb.JsonRequest{Json: data})
+	if err != nil {
+		return out, mapClientError(err)
+	}
+	err = json.Unmarshal(response.GetJson(), &out)
+	return out, err
+}
+
 func (s *Server) ExecuteRuntimeCommand(ctx context.Context, req *turnpb.JsonRequest) (*turnpb.JsonResponse, error) {
 	var input turn.RuntimeControlRequest
 	if err := json.Unmarshal(req.GetJson(), &input); err != nil || input.TeamID == "" {

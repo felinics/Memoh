@@ -268,7 +268,6 @@ func provideCommandHandler(
 	containerdHandler *handlers.ContainerdHandler,
 	provider bridge.Provider,
 	compactionService *compaction.Service,
-	agentService *application.Service,
 ) *command.Handler {
 	cmdHandler := command.NewHandler(
 		log,
@@ -286,7 +285,6 @@ func provideCommandHandler(
 	)
 	cmdHandler.SetCompactionService(compactionService, queries)
 	cmdHandler.SetLinkConsumer(channelAccessService)
-	cmdHandler.SetSessionModels(&commandSessionModelsAdapter{agents: agentService})
 	return cmdHandler
 }
 
@@ -630,43 +628,6 @@ func startChannelManager(lc fx.Lifecycle, channelManager *channel.Manager) {
 			return channelManager.Shutdown(stopCtx)
 		},
 	})
-}
-
-// commandSessionModelsAdapter gives channel commands the session model state
-// the Web composer uses, and maps the preference errors to command sentinels.
-type commandSessionModelsAdapter struct {
-	agents *application.Service
-}
-
-func (a *commandSessionModelsAdapter) SessionRuntime(ctx context.Context, botID, sessionID string) (string, error) {
-	return a.agents.SessionRuntime(ctx, botID, sessionID)
-}
-
-func (a *commandSessionModelsAdapter) SessionModelState(ctx context.Context, botID, sessionID string) (command.SessionModelState, error) {
-	state, err := a.agents.SessionModelState(ctx, botID, sessionID)
-	if err != nil {
-		return command.SessionModelState{}, err
-	}
-	return command.SessionModelState{
-		Runtime:         state.Runtime,
-		BotAgentID:      state.BotAgentID,
-		Direct:          state.Direct,
-		ModelID:         state.ModelID,
-		ReasoningEffort: state.ReasoningEffort,
-		Revision:        state.Revision,
-		Catalog:         state.Catalog,
-	}, nil
-}
-
-func (a *commandSessionModelsAdapter) SetSessionModelPreference(ctx context.Context, botID, sessionID string, modelID, effort *string, revision string) error {
-	err := a.agents.SetSessionModelPreference(ctx, botID, sessionID, modelID, effort, revision)
-	switch {
-	case errors.Is(err, application.ErrModelPreferenceConflict):
-		return fmt.Errorf("%w: %w", command.ErrSessionModelConflict, err)
-	case errors.Is(err, application.ErrDirectModelUnavailable), errors.Is(err, application.ErrModelPreferenceInvalid):
-		return fmt.Errorf("%w: %w", command.ErrSessionModelUnavailable, err)
-	}
-	return err
 }
 
 type commandSkillLoaderAdapter struct {

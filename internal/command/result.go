@@ -103,10 +103,6 @@ type ModelPickerView struct {
 	CurrentModelDBID string // settings.ChatModelID, for ●/✓ marking
 	CurrentDisplay   string // resolved current chat model "Name (Provider)", for the header
 	Reasoning        string // current reasoning effort label, for the header
-	// Direct marks a session-scoped catalog from an external Agent runtime:
-	// one flat model level, no providers to go back to, and the header shows
-	// the current model rather than a provider.
-	Direct bool
 }
 
 // PickerLevel is the drill-down level of a ModelPickerView.
@@ -173,8 +169,4 @@ type CurrentContext struct {
 	// ReasoningEffort carries models.ReasoningEffortDisable when reasoning is off.
 	ReasoningEffort string
 	ContextWindow   string // resolved chat-model context window (e.g. "128.0K"), "" if unknown
-	// Agent marks a session on an external Agent runtime. ChatModel and
-	// ReasoningEffort are then the runtime's own, empty when it reports none,
-	// and there is no Memoh context window to show.
-	Agent bool
 }

@@ -18,19 +18,18 @@ import (
 )
 
 const (
-	MethodCommandAccess         = "server.command.access"
-	MethodCommandContext        = "server.command.context"
-	MethodCommandSessionContext = "server.command.session_context"
-	MethodCommandExecute        = "server.command.execute"
-	MethodCommandExecuteText    = "server.command.execute_text"
-	MethodCommandHasResource    = "server.command.has_resource"
-	MethodCommandMemberRole     = "server.command.member_role"
-	MethodCommandResolveLocale  = "server.command.resolve_locale"
-	MethodQueueEnqueueSteer     = "server.queue.enqueue_steer"
-	MethodQueueEnqueueFollowUp  = "server.queue.enqueue_follow_up"
-	MethodResolveSkills         = "server.skills.resolve"
-	MethodSynthesize            = "server.audio.synthesize"
-	MethodTranscribe            = "server.audio.transcribe"
+	MethodCommandAccess        = "server.command.access"
+	MethodCommandContext       = "server.command.context"
+	MethodCommandExecute       = "server.command.execute"
+	MethodCommandExecuteText   = "server.command.execute_text"
+	MethodCommandHasResource   = "server.command.has_resource"
+	MethodCommandMemberRole    = "server.command.member_role"
+	MethodCommandResolveLocale = "server.command.resolve_locale"
+	MethodQueueEnqueueSteer    = "server.queue.enqueue_steer"
+	MethodQueueEnqueueFollowUp = "server.queue.enqueue_follow_up"
+	MethodResolveSkills        = "server.skills.resolve"
+	MethodSynthesize           = "server.audio.synthesize"
+	MethodTranscribe           = "server.audio.transcribe"
 )
 
 type Client struct{ rpc *runtimeRpc.Client }
@@ -42,12 +41,10 @@ func (c *Client) CommandAccess(ctx context.Context, input command.ExecuteInput) 
 	return out, c.call(ctx, MethodCommandAccess, input, &out)
 }
 
-func (c *Client) CurrentContext(ctx context.Context, botID, sessionID string) (command.CurrentContext, error) {
+func (c *Client) CurrentContext(ctx context.Context, botID string) (command.CurrentContext, error) {
 	var out command.CurrentContext
-	return out, c.call(ctx, MethodCommandSessionContext, sessionContextInput{BotID: botID, SessionID: sessionID}, &out)
+	return out, c.call(ctx, MethodCommandContext, botID, &out)
 }
-
-type sessionContextInput struct{ BotID, SessionID string }
 
 func (c *Client) ExecuteResult(ctx context.Context, input command.ExecuteInput) (*command.Result, error) {
 	var out command.Result
@@ -163,21 +160,12 @@ func Handlers(commandHandler *command.Handler, queueHandler inbound.QueueCommand
 			}
 			return commandHandler.CommandAccess(ctx, in)
 		},
-		// The bot-level form stays for a Channel process older than this
-		// Server during a rolling deploy.
 		MethodCommandContext: func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var botID string
 			if err := decode(raw, &botID); err != nil {
 				return nil, err
 			}
-			return commandHandler.CurrentContext(ctx, botID, "")
-		},
-		MethodCommandSessionContext: func(ctx context.Context, raw json.RawMessage) (any, error) {
-			var in sessionContextInput
-			if err := decode(raw, &in); err != nil {
-				return nil, err
-			}
-			return commandHandler.CurrentContext(ctx, in.BotID, in.SessionID)
+			return commandHandler.CurrentContext(ctx, botID)
 		},
 		MethodCommandExecute: func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in command.ExecuteInput

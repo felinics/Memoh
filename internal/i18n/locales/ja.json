@@ -285,15 +285,13 @@
     "model": {
       "title": "チャットModel",
       "currentTitle": "現行Model",
-      "sessionModel": "セッションの Model",
+      "sessionCurrent": "このセッションの Model：{model}",
       "byProvider": "Provider別:",
       "fieldProvider": "Provider",
       "unavailable": "現在Modelは入手できません。",
       "listChanged": "Model リストが変更されました - /model を再度開いて選択します。",
-      "sessionChanged": "このセッションの Model が別の場所で変更されました。/model を開き直して選んでください。",
       "setUsage": "使い方: /Modelセット<model_id> | <provider_name> <model_name>",
-      "agentUnsupported": "このセッションの Agent は Model を自分で選ぶため、/model では変更できません。",
-      "directSetUsage": "使い方: /model set <model_name>",
+      "agentUnsupported": "このセッションの Agent は Agent 内で Model を切り替えます。Web のチャットで切り替えてください。",
       "noneUnderProvider": "Provider {provider} にはチャット Modelがありません。 {command} を実行してすべてのProviderを表示します。",
       "empty": "チャットModelはまだありません。\n\nWeb ダッシュボードにModelを追加します。",
       "notFound": "{name} という名前のModelはありません。 {command} を実行して、利用可能なものを確認します。",
@@ -452,7 +450,7 @@
       "unavailable": "推論は現在利用できません。",
       "unsupported": "現在のモデルは推論に対応していません。",
       "uncontrollable": "現在のモデルは常に推論を行い、調整可能な推論設定はありません。",
-      "agentUnsupported": "このセッションの Agent は推論を自分で設定するため、/reasoning では変更できません。",
+      "agentUnsupported": "このセッションの Agent は Agent 内で推論レベルを設定します。Web のチャットで切り替えてください。",
       "unknownLevel": "不明なレベル {level} —— 利用可能なレベル: {levels}。"
     },
     "error": {

@@ -303,10 +303,10 @@ func TestFormatStartWelcomeMessageTelegramGroup(t *testing.T) {
 }
 
 func TestFormatNewSessionMessage(t *testing.T) {
-	got := formatNewSessionMessage(i18n.New("en"), "chat", "", command.CurrentContext{
+	got := formatNewSessionMessage(i18n.New("en"), "chat", newSessionCard{Context: command.CurrentContext{
 		ChatModel:       "Claude Opus 4.7 (Anthropic)",
 		ReasoningEffort: "medium", ContextWindow: "128.0K",
-	}, "")
+	}}, "")
 	// A fresh-start card confirms the full setup: model (+provider), reasoning,
 	// and context budget. Header is bold; values are plain (display names/enums).
 	for _, want := range []string{
@@ -335,7 +335,7 @@ func TestFormatNewSessionMessage(t *testing.T) {
 
 	// Reasoning off is still shown (it sets expectations on a fresh start); an
 	// unknown context window is omitted.
-	off := formatNewSessionMessage(i18n.New("en"), "discussion", "", command.CurrentContext{ChatModel: "(none)", ReasoningEffort: models.ReasoningEffortDisable}, "")
+	off := formatNewSessionMessage(i18n.New("en"), "discussion", newSessionCard{Context: command.CurrentContext{ChatModel: "(none)", ReasoningEffort: models.ReasoningEffortDisable}}, "")
 	if !strings.Contains(off, "Reasoning: off") {
 		t.Errorf("reasoning state should be confirmed on the fresh-start card: %s", off)
 	}
@@ -348,9 +348,9 @@ func TestFormatNewSessionMessage(t *testing.T) {
 }
 
 func TestFormatNewSessionMessageTelegramGroup(t *testing.T) {
-	got := formatNewSessionMessage(i18n.New("en"), "chat", "", command.CurrentContext{
+	got := formatNewSessionMessage(i18n.New("en"), "chat", newSessionCard{Context: command.CurrentContext{
 		ChatModel: "Claude Opus 4.7 (Anthropic)",
-	}, "@snowluocat_bot")
+	}}, "@snowluocat_bot")
 	for _, want := range []string{
 		"/model",
 		"/reasoning",

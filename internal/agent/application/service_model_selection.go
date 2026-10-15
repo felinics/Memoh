@@ -252,14 +252,20 @@ func (s *Service) PatchSessionModelPreference(ctx context.Context, botID, sessio
 	if err != nil {
 		return err
 	}
+	return s.compareAndSetModelPreference(ctx, sessionUUID, sess.RuntimeType, nativeID, externalID, reconciledEffort, expectedRevision)
+}
+
+// compareAndSetModelPreference writes an already reconciled pair, only if the
+// session's preference is still at expectedRevision.
+func (s *Service) compareAndSetModelPreference(ctx context.Context, sessionUUID pgtype.UUID, runtimeType string, nativeID pgtype.UUID, externalID pgtype.Text, effort, expectedRevision string) error {
 	revision, err := parsePreferenceRevision(expectedRevision)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrModelPreferenceRevisionInvalid, err)
 	}
 	n, err := s.queries.CompareAndSetSessionModelPreference(ctx, sqlc.CompareAndSetSessionModelPreferenceParams{
-		ID: sessionUUID, RuntimeType: sess.RuntimeType, ExpectedRevision: revision,
+		ID: sessionUUID, RuntimeType: runtimeType, ExpectedRevision: revision,
 		PreferredChatModelID: nativeID, PreferredExternalModelID: externalID,
-		PreferredReasoningEffort: pgtype.Text{String: reconciledEffort, Valid: reconciledEffort != ""},
+		PreferredReasoningEffort: pgtype.Text{String: effort, Valid: effort != ""},
 	})
 	if err != nil {
 		return err

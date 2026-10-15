@@ -15,9 +15,6 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 		Name:  "list",
 		Usage: "list [provider_name] - List available chat models",
 		ResultHandler: func(cc CommandContext) (*Result, error) {
-			if res, handled, err := h.externalModelList(cc); handled || err != nil {
-				return res, err
-			}
 			if h.modelsService == nil {
 				return &Result{Text: cc.T("cmd.model.unavailable")}, nil
 			}
@@ -28,17 +25,6 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 		Name:  "current",
 		Usage: "current - Show current chat model",
 		Handler: func(cc CommandContext) (string, error) {
-			if state, ok, err := h.externalSession(cc); err != nil || ok {
-				if err != nil {
-					return "", err
-				}
-				if !state.Direct {
-					return cc.T("cmd.model.agentUnsupported"), nil
-				}
-				return formatKVTitled(cc.T("cmd.model.currentTitle"), []kv{
-					{cc.T("cmd.model.sessionModel"), catalogModelName(state.Catalog, state.ModelID)},
-				}), nil
-			}
 			if h.settingsService == nil {
 				return cc.T("cmd.model.unavailable"), nil
 			}
@@ -56,17 +42,6 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 		Usage:   "set <model_id> | <provider_name> <model_name> - Set the chat model",
 		IsWrite: true,
 		Handler: func(cc CommandContext) (string, error) {
-			// An Agent session chooses its model itself; the bot's chat model
-			// would not reach it.
-			if state, ok, err := h.externalSession(cc); err != nil || ok {
-				if err != nil {
-					return "", err
-				}
-				if !state.Direct {
-					return cc.T("cmd.model.agentUnsupported"), nil
-				}
-				return h.setDirectModel(cc, state)
-			}
 			var selectedID string
 			if cc.SelectID != "" {
 				// Selection from a picker button: resolve the stable model id.
@@ -105,20 +80,6 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 		},
 	})
 	return g
-}
-
-// externalModelList answers /model list for an Agent session: the runtime's
-// own catalog for Codex / Claude Code, and a refusal for ACP, whose model is
-// changed through the Agent itself.
-func (h *Handler) externalModelList(cc CommandContext) (*Result, bool, error) {
-	state, ok, err := h.externalSession(cc)
-	if err != nil || !ok {
-		return nil, false, err
-	}
-	if !state.Direct {
-		return &Result{Text: cc.T("cmd.model.agentUnsupported")}, true, nil
-	}
-	return directModelListResult(cc, state), true, nil
 }
 
 func (h *Handler) resolveProviderName(cc CommandContext, providerID string) string {

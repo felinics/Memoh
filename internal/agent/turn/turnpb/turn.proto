@@ -8,6 +8,8 @@ service TurnService {
   rpc RuntimeCommands(JsonRequest) returns (JsonResponse);
   rpc RuntimeControls(JsonRequest) returns (JsonResponse);
   rpc SetRuntimeMode(JsonRequest) returns (JsonResponse);
+  rpc RuntimeModel(JsonRequest) returns (JsonResponse);
+  rpc SetRuntimeModel(JsonRequest) returns (JsonResponse);
   rpc ExecuteRuntimeCommand(JsonRequest) returns (JsonResponse);
   rpc StopTurn(JsonRequest) returns (JsonResponse);
   rpc Run(stream RunRequest) returns (stream RunResponse);

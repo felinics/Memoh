@@ -169,7 +169,7 @@ type RequestedSkillResolver interface {
 // Channel process supplies an authenticated RPC client.
 type CommandHandler interface {
 	CommandAccess(context.Context, command.ExecuteInput) (bool, error)
-	CurrentContext(ctx context.Context, botID, sessionID string) (command.CurrentContext, error)
+	CurrentContext(context.Context, string) (command.CurrentContext, error)
 	ExecuteResult(context.Context, command.ExecuteInput) (*command.Result, error)
 	ExecuteWithInput(context.Context, command.ExecuteInput) (string, error)
 	HasCommandResource(string) bool
@@ -588,7 +588,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 
 	if pendingSkillIntent == nil && slashDecision.Kind == slash.DecisionCommandAction && p.commandHandler != nil && !isToolApprovalCommand && !isUserInputResponseCommand && !isQueueCommand && invocation != nil && (isDirectedAtBot(msg) || slashDirected) {
 		loc := p.localizer(ctx, identity.BotID)
-		routeID, sessionID := p.existingActiveSession(ctx, identity, msg)
+		// /model and /reasoning clear the Web's remembered session pick, and
+		// /compact compacts the conversation's own session, not the bot's latest.
+		routeID, sess, _ := p.existingActiveSession(ctx, identity, msg)
 		result, err := p.commandHandler.ExecuteResult(ctx, command.ExecuteInput{
 			BotID:             strings.TrimSpace(identity.BotID),
 			ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
@@ -600,7 +602,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			ConversationID:    strings.TrimSpace(msg.Conversation.ID),
 			ThreadID:          extractThreadID(msg),
 			RouteID:           routeID,
-			SessionID:         sessionID,
+			SessionID:         strings.TrimSpace(sess.ID),
 			CommandTarget:     telegramGroupBotUsername(msg),
 			Locale:            loc.Locale(),
 		})
@@ -4280,20 +4282,9 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	text := loc.T("newSession.title", map[string]any{"mode": modeLabel})
 	botUsername := telegramGroupBotUsername(msg)
 	renderedSessionDetails := false
-	if p.commandHandler != nil {
-		cc, err := p.commandHandler.CurrentContext(ctx, identity.BotID, sess.ID)
-		if err != nil && harness != "" {
-			// The session exists; an Agent whose catalog cannot be read now
-			// still gets its card, without a model the reply cannot confirm.
-			if p.logger != nil {
-				p.logger.DebugContext(ctx, "resolve agent model for /new reply failed", slog.Any("error", err))
-			}
-			cc, err = command.CurrentContext{Agent: true}, nil
-		}
-		if err == nil {
-			text = formatNewSessionMessage(loc, modeLabel, harness, cc, botUsername)
-			renderedSessionDetails = true
-		}
+	if card, ok := p.newSessionCard(ctx, cfg, identity, sess, harness); ok {
+		text = formatNewSessionMessage(loc, modeLabel, card, botUsername)
+		renderedSessionDetails = true
 	}
 	if botUsername != "" && !renderedSessionDetails {
 		var b strings.Builder
@@ -4375,29 +4366,30 @@ func newSessionModeKey(spec NewSessionSpec) string {
 	return "newSession.modeChat"
 }
 
-// existingActiveSession is the conversation's route and active session, for
-// commands that act on the session the conversation is on (/model and
-// /reasoning on an Agent, /compact, /context). It only reads: a conversation
-// that has no route yet gets none, and its commands take the bot-level path.
-func (p *ChannelInboundProcessor) existingActiveSession(ctx context.Context, identity InboundIdentity, msg channel.InboundMessage) (string, string) {
+// existingActiveSession is the conversation's route and active session. It
+// only reads: a conversation with no route yet has neither, so command
+// discovery never creates a thread. ok is false when there is no active
+// session; routeID may still be set.
+func (p *ChannelInboundProcessor) existingActiveSession(ctx context.Context, identity InboundIdentity, msg channel.InboundMessage) (string, SessionResult, bool) {
 	if p.sessionEnsurer == nil {
-		return "", ""
+		return "", SessionResult{}, false
 	}
 	finder, ok := p.routeResolver.(interface {
 		Find(context.Context, string, string, string, string) (route.Route, error)
 	})
 	if !ok {
-		return "", ""
+		return "", SessionResult{}, false
 	}
 	existing, err := finder.Find(ctx, identity.BotID, msg.Channel.String(), msg.Conversation.ID, extractThreadID(msg))
 	if err != nil {
-		return "", ""
+		return "", SessionResult{}, false
 	}
+	routeID := strings.TrimSpace(existing.ID)
 	sess, err := p.sessionEnsurer.GetActiveSession(ctx, existing.ID)
 	if err != nil {
-		return strings.TrimSpace(existing.ID), ""
+		return routeID, SessionResult{}, false
 	}
-	return strings.TrimSpace(existing.ID), strings.TrimSpace(sess.ID)
+	return routeID, sess, true
 }
 
 // newSessionDisplayModeLabel names the session /new starts: the mode, and the
@@ -4411,6 +4403,44 @@ func newSessionDisplayModeLabel(loc *i18n.Localizer, spec NewSessionSpec, harnes
 		"mode":    mode,
 		"runtime": harness,
 	})
+}
+
+// newSessionCard reads what the /new confirmation reports. A native session
+// shows the bot's model settings. An Agent session shows the model its
+// runtime will use, read through the runtime controls; the card still goes
+// out without it when the runtime cannot answer yet, since the session exists.
+func (p *ChannelInboundProcessor) newSessionCard(ctx context.Context, cfg channel.ChannelConfig, identity InboundIdentity, sess SessionResult, harness string) (newSessionCard, bool) {
+	card := newSessionCard{Harness: harness}
+	if !sessionUsesExternalRuntime(sess) {
+		if p.commandHandler == nil {
+			return card, false
+		}
+		cc, err := p.commandHandler.CurrentContext(ctx, identity.BotID)
+		if err != nil {
+			return card, false
+		}
+		card.Context = cc
+		return card, true
+	}
+	card.Agent = true
+	service, ok := p.turnSvc.(turn.RuntimeControlService)
+	if !ok {
+		return card, true
+	}
+	state, err := service.RuntimeModel(ctx, turn.RuntimeControlRequest{TeamID: cfg.TeamID, BotID: identity.BotID, ThreadID: sess.ID, ActorID: identity.UserID})
+	if err != nil {
+		if p.logger != nil {
+			p.logger.DebugContext(ctx, "resolve agent model for /new reply failed", slog.Any("error", err))
+		}
+		return card, true
+	}
+	if model, ok := state.Model(); ok {
+		card.Context.ChatModel = model.Name
+	} else {
+		card.Context.ChatModel = state.ModelID
+	}
+	card.Context.ReasoningEffort = state.ReasoningEffort
+	return card, true
 }
 
 // newSessionHarnessName is the harness a /new session runs on, "" for Memoh's
@@ -4687,6 +4717,15 @@ func requireExternalRuntimeActor(identity InboundIdentity, runtimeOwnerAccountID
 	return externalAgentExecDenied("runtime_owner_mismatch")
 }
 
+// externalSessionRuntime is the session's runtime type as the command layer
+// branches on it: an ACP session may carry its runtime only in its type.
+func externalSessionRuntime(sess SessionResult) string {
+	if strings.TrimSpace(sess.Type) == sessionpkg.TypeACPAgent {
+		return sessionpkg.RuntimeACPAgent
+	}
+	return strings.TrimSpace(sess.Runtime)
+}
+
 // sessionUsesExternalRuntime reports a session that runs on an agent runtime with
 // workspace access — ACP or a direct external agent — and therefore needs the
 // runtime-owner workspace-exec gate before a turn starts.
@@ -4906,11 +4945,11 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 		})
 	}
 
-	sessionID := ""
+	sessionID, sessionRuntime := "", ""
 	if p.sessionEnsurer != nil {
 		sess, sessErr := p.sessionEnsurer.GetActiveSession(ctx, resolved.RouteID)
 		if sessErr == nil {
-			sessionID = strings.TrimSpace(sess.ID)
+			sessionID, sessionRuntime = strings.TrimSpace(sess.ID), externalSessionRuntime(sess)
 		} else if p.logger != nil {
 			p.logger.DebugContext(ctx, "resolve active session for /status command failed", slog.Any("error", sessErr))
 		}
@@ -4928,6 +4967,7 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 		ThreadID:          threadID,
 		RouteID:           strings.TrimSpace(resolved.RouteID),
 		SessionID:         sessionID,
+		SessionRuntime:    sessionRuntime,
 	})
 	if execErr != nil {
 		p.recordCommandFailure(ctx, msg, identity, execErr)

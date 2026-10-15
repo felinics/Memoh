@@ -24,13 +24,9 @@ func (h *Handler) buildContextGroup() *CommandGroup {
 			if strings.TrimSpace(cc.SessionID) == "" {
 				return cc.T("cmd.session.noActive"), nil
 			}
-			// Codex and Claude Code manage their own context; the bot's
-			// chat-model window says nothing about it.
-			runtime, err := h.sessionRuntimeKind(cc)
-			if err != nil {
-				return "", err
-			}
-			if runtimekind.IsDirect(runtime) {
+			// An Agent manages its own context; the bot's chat-model window
+			// says nothing about it.
+			if runtimekind.IsExternal(cc.SessionRuntime) {
 				return cc.T("cmd.context.agentUnsupported"), nil
 			}
 			return h.renderContextUsage(cc, cc.SessionID)
