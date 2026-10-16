@@ -2351,7 +2351,7 @@
       "confirmReset": "すべてのツール承認ルールをデフォルト状態に戻しますか?",
       "resetWarningExtra": "カスタムのバイパスルールとレビュー必須ルールは失われます。",
       "title": "ツール呼び出しの承認",
-      "intro": "この Bot が Workspace と各接続済みコンピューターで実行できる操作を設定します。これらのルールは Memoh が提供するツールにのみ適用されます。Claude Code と Codex の組み込みツールはそれぞれの権限モードに従い、確認の要求はカードとして表示され、該当する Workspace 権限を持つユーザーが判断します。",
+      "intro": "この Bot が Workspace と各接続済みコンピューターで実行できる操作を設定します。これらのルールは Memoh が提供するツールにのみ適用されます。Claude Code、Codex、Grok Build の組み込みツールはそれぞれの権限モードに従い、確認の要求はカードとして表示され、該当する Workspace 権限を持つユーザーが判断します。",
       "loading": "承認ルールを読み込んでいます...",
       "loadFailed": "Tool の承認設定を読み込めませんでした",
       "loadFailedDescription": "Server への接続を確認して、もう一度お試しください。",
@@ -2459,6 +2459,7 @@
     "createBot": "新しいBot",
     "createBotWaitHint": "初めて作成する場合は、基本イメージを取得するため、少し時間がかかる場合があります。",
     "createBotSuccess": "Botが正常に作成されました。",
+    "createBotSignInFirst": "Bot を作成しました。Agent が応答できるようにするには、先にアカウントにサインインしてください。",
     "createBotSettingUp": "セットアップ中...",
     "createBotSetupTitle": "Botのセットアップ",
     "createBotSetupDesc": "Bot と Workspace を作成しています。準備が完了すると、自動的にページが開きます。",
@@ -2739,7 +2740,7 @@
       "namePlaceholder": "Agent 名を入力",
       "nameRequired": "Agent 名を入力してください。",
       "emptyTitle": "Agent はまだありません",
-      "emptyDescription": "Agent を追加すると、この Bot で Codex、Claude Code、またはカスタム ACP Agent を利用できます。",
+      "emptyDescription": "Agent を追加すると、この Bot で Codex、Claude Code、Grok Build、またはカスタム ACP Agent を利用できます。",
       "statusNeedsConfig": "設定が必要",
       "statusOff": "無効",
       "deleteTitle": "Agent を削除しますか？",
@@ -2770,6 +2771,14 @@
       "codexDeviceHint": "認証ページを開き、このワンタイムコードを入力してください。表示された OpenAI の認証ページ以外には入力しないでください。Memoh が認証を自動で完了します。",
       "codexLoginSuccess": "Codex を ChatGPT アカウントに接続しました",
       "codexLoginFailed": "Codex アカウントを認証できませんでした。もう一度お試しください。",
+      "authGrokAccountDescription": "Grok アカウントで Grok Build にサインインします。",
+      "grokAccount": "Grok アカウント",
+      "grokAccountDescription": "Memoh はこの Agent の Grok 認証情報を暗号化して保存し、Runtime でのみ Grok Build に渡します。",
+      "grokAccountConnectedDescription": "この Agent の Grok 認証情報は暗号化して保存されています。",
+      "grokDeviceHint": "認証ページを開き、このワンタイムコードを確認してください。表示された accounts.x.ai のページ以外では確認しないでください。Memoh が認証を自動で完了します。",
+      "grokLoginSuccess": "Grok Build を Grok アカウントに接続しました",
+      "grokLoginFailed": "Grok アカウントにサインインできませんでした。もう一度お試しください。",
+      "signInAfterCreate": "Bot の作成後に Agent の設定からサインインしてください。アカウントは Agent 自身の Workspace 内でサインインします。",
       "usage": {
         "window": {
           "weekly": "週間上限",
@@ -4395,6 +4404,32 @@
         "goal": {
           "description": "継続して取り組む目標を設定",
           "input_hint": "目標を入力"
+        }
+      }
+    },
+    "grokBuild": {
+      "modes": {
+        "ask": {
+          "name": "毎回確認",
+          "description": "副作用のある操作を実行する前に確認します。"
+        },
+        "auto": {
+          "name": "自動判断",
+          "description": "安全に実行できる操作を Grok が判断し、確認を省きます。"
+        },
+        "alwaysApprove": {
+          "name": "すべて承認",
+          "description": "すべての操作を確認なしで承認します。Memoh ツールの権限は引き続き適用されます。"
+        }
+      },
+      "commands": {
+        "status": {
+          "description": "セッションのモデルとコンテキスト使用量を表示"
+        },
+        "compact": {
+          "description": "Grok セッションのコンテキストを圧縮",
+          "running_text": "圧縮中",
+          "completed_text": "圧縮が完了しました"
         }
       }
     },

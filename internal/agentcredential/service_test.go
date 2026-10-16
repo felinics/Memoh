@@ -52,6 +52,10 @@ func TestCompatibilityMatrix(t *testing.T) {
 		{"claude-code", AuthKindClaudeCodeOAuth, true},
 		{"claude-code", AuthKindOpenAIAPIKey, false},
 		{"claude-code", AuthKindAnthropicAPIKey, true},
+		{"grok-build", AuthKindXAIAPIKey, true},
+		{"grok-build", AuthKindXAIGrokOAuth, true},
+		{"grok-build", AuthKindOpenAIAPIKey, false},
+		{"codex", AuthKindXAIAPIKey, false},
 		{"codex", "unknown_kind", false},
 	} {
 		if got := Compatible(tc.agent, tc.kind); got != tc.want {

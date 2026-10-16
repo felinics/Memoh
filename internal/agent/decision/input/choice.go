@@ -7,7 +7,8 @@ import (
 
 // ChoiceQuestion is a question in the shape an agent's own question tool
 // asks it: text, the options to pick from, and whether several may be picked.
-// Its JSON is what Claude Code's AskUserQuestion sends.
+// Its JSON is what Claude Code's AskUserQuestion and Grok's
+// ask_user_question both send.
 type ChoiceQuestion struct {
 	Text        string         `json:"question"`
 	Options     []ChoiceOption `json:"options"`

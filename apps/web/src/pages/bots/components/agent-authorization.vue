@@ -33,6 +33,9 @@ const authorizationCode = ref('')
 const { session, ready, pending, busy, loading, error, deviceLogin, start, exchange, cancel, handoff, resume } = useAgentAuthorization(() => props.runtime, props.storageKey)
 const agentAuth = computed(() => mode.value === 'claude_account' ? 'oauth_token' : mode.value)
 const deviceLoginAuth = computed(() => isDeviceLoginAuthMode(mode.value) ? mode.value : undefined)
+// An account that signs in on the Agent's own process has nothing to stage
+// here: the Bot is created first and signs in from its settings.
+const signsInAfterCreate = computed(() => !!deviceLoginAuth.value && !DEVICE_LOGINS[deviceLoginAuth.value].staged)
 const authKind = computed(() => deviceLoginAuth.value
   ? DEVICE_LOGINS[deviceLoginAuth.value].authKind
   : agentAuth.value === 'oauth_token' ? 'claude_code_oauth' : DIRECT_BOT_AGENT_API_KEY_AUTH_KIND[props.runtime])
@@ -45,8 +48,8 @@ watch(() => session.value?.auth_kind, (kind) => {
   // Both Claude choices store the same credential kind; keep the one in use.
   mode.value = auth === 'oauth_token' && mode.value !== 'oauth_token' ? 'claude_account' : auth
 })
-watch([ready, busy, agentAuth, () => session.value?.id], () => {
-  emit('status', { ready: ready.value, busy: busy.value, id: session.value?.id ?? '', auth: agentAuth.value })
+watch([ready, busy, agentAuth, signsInAfterCreate, () => session.value?.id], () => {
+  emit('status', { ready: signsInAfterCreate.value || ready.value, busy: busy.value, id: session.value?.id ?? '', auth: agentAuth.value })
 }, { immediate: true })
 watch([ready, () => session.value?.id], () => { authorizationCode.value = '' })
 function changeMode(value: unknown) {
@@ -88,8 +91,13 @@ defineExpose({ handoff, resume })
       </SelectContent>
     </Select>
   </SettingsRow>
+  <SettingsRow
+    v-if="deviceLoginAuth && signsInAfterCreate"
+    :label="$t(AGENT_AUTH_MODE_COPY[deviceLoginAuth].label)"
+    :description="$t('bots.agent.signInAfterCreate')"
+  />
   <DeviceLoginPanel
-    v-if="deviceLoginAuth"
+    v-else-if="deviceLoginAuth"
     :auth="deviceLoginAuth"
     :authorized="ready"
     :authorizing="loading"

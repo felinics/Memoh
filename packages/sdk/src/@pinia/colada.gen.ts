@@ -62,9 +62,9 @@ export const getAcpProfilesQuery = defineQueryOptions<Options<GetAcpProfilesData
 }));
 
 /**
- * Authorize an Agent account before creating a Bot
+ * Authorize an Agent account independently of a Bot
  *
- * Starts Codex device authorization or Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.
+ * Starts Codex device authorization or Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. A Grok account cannot be staged: it signs in on the Agent itself. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.
  */
 export const postAgentAuthorizationsMutation = (options?: Partial<Options<PostAgentAuthorizationsData>>): UseMutationOptions<PostAgentAuthorizationsResponse, Options<PostAgentAuthorizationsData>, PostAgentAuthorizationsError> => ({
     mutation: async (vars) => {
@@ -692,7 +692,7 @@ export const postBotsByBotIdAgentsByIdCredentialClaimMutation = (options?: Parti
 /**
  * Start a device-code account sign-in on a direct runtime Agent
  *
- * The Agent's own process obtains the device code; the user opens the URL and confirms the code there. Only runtimes that sign in this way (Codex) accept it.
+ * The Agent's own process obtains the device code; the user opens the URL and confirms the code there. Only runtimes that sign in this way (Codex, Grok Build) accept it.
  */
 export const postBotsByBotIdAgentsByIdLoginDeviceAuthorizeMutation = (options?: Partial<Options<PostBotsByBotIdAgentsByIdLoginDeviceAuthorizeData>>): UseMutationOptions<PostBotsByBotIdAgentsByIdLoginDeviceAuthorizeResponse, Options<PostBotsByBotIdAgentsByIdLoginDeviceAuthorizeData>, PostBotsByBotIdAgentsByIdLoginDeviceAuthorizeError> => ({
     mutation: async (vars) => {

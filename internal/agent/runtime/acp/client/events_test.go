@@ -1,6 +1,9 @@
 package client
 
 import (
+	"bytes"
+	"encoding/json"
+	"os"
 	"reflect"
 	"strconv"
 	"testing"
@@ -208,6 +211,52 @@ func TestACPToolResultKeepsWhatTheAgentReportedBeyondTheNativeShape(t *testing.T
 	want := map[string]any{"stdout": "/data\n", "exit_code": 0, "duration_ms": 12, "truncated": false}
 	if len(events) != 1 || !reflect.DeepEqual(events[0].Result, want) {
 		t.Fatalf("result = %#v, want %#v", events[0].Result, want)
+	}
+}
+
+// testdata/grok-tool-calls.jsonl is one Grok 1.0.52 turn as its tool updates
+// arrived: exec, read, write and edit, each succeeding and failing.
+func TestACPToolResultsOfARecordedGrokTurn(t *testing.T) {
+	t.Parallel()
+
+	recorded, err := os.ReadFile("testdata/grok-tool-calls.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := func(text string) map[string]any {
+		return map[string]any{"isError": true, "content": []map[string]any{{"type": "text", "text": text}}}
+	}
+	want := []any{
+		map[string]any{"stdout": "hello\n", "exit_code": 0},
+		map[string]any{"stdout": "ls: cannot access '/nonexistent-dir': No such file or directory\n", "exit_code": 2},
+		map[string]any{"content": "1→round3\n"},
+		failure("Error: /data/no-such-file.txt does not exist.\nNote: your current working directory is /data"),
+		map[string]any{"ok": true},
+		map[string]any{"ok": true},
+		failure("The string to replace was not found in the file, use the read_file tool to see the correct string. The user may have changed the file since you last read it."),
+		failure("Tool `write` failed: IO Error: No such file or directory (os error 2)"),
+	}
+	// A session on a shared connection maps with the default quirks.
+	mapper := newACPToolEventMapper(acpprofile.ToolQuirks{})
+	var got []any
+	for _, line := range bytes.Split(bytes.TrimSpace(recorded), []byte("\n")) {
+		var update acp.SessionNotification
+		if err := json.Unmarshal(line, &update); err != nil {
+			t.Fatal(err)
+		}
+		for _, ev := range mapper.eventsFromNotification(update) {
+			if ev.Type == event.ToolCallEnd {
+				got = append(got, ev.Result)
+			}
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("results =\n%#v\nwant %d results", got, len(want))
+	}
+	for i := range want {
+		if !resultHas(got[i], want[i].(map[string]any)) {
+			t.Fatalf("result %d = %#v, want it to carry %#v", i, got[i], want[i])
+		}
 	}
 }
 

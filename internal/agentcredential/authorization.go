@@ -53,7 +53,7 @@ func NewAuthorizationService(credentials *Service, oauth *providers.Service) *Au
 // A struct tag cannot be computed, so the runtime enum repeats the runtimes of
 // the authKinds table; TestAuthorizationRuntimeEnumMatchesAuthKinds pins it.
 type AuthorizationRequest struct {
-	Runtime  string            `json:"runtime" validate:"required" enums:"codex,claude-code"`
+	Runtime  string            `json:"runtime" validate:"required" enums:"codex,claude-code,grok-build"`
 	AuthKind string            `json:"auth_kind" validate:"required"`
 	Secret   map[string]string `json:"secret,omitempty"`
 }
@@ -81,6 +81,11 @@ func (s *AuthorizationService) Create(ctx context.Context, owner string, req Aut
 	}
 	req.Runtime = normalize(req.Runtime)
 	if !Compatible(req.Runtime, req.AuthKind) {
+		return Authorization{}, ErrInvalidRequest
+	}
+	// A Grok account signs in inside the Agent's own process, which does not
+	// exist before the Bot does; only Grok writes that credential.
+	if req.AuthKind == AuthKindXAIGrokOAuth {
 		return Authorization{}, ErrInvalidRequest
 	}
 	claudeBrowser := req.AuthKind == AuthKindClaudeCodeOAuth && len(req.Secret) == 0

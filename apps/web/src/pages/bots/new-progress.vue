@@ -77,7 +77,7 @@ import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import { readCreatedBotSession, writeCreatedBotSession } from './created-bot-session'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { readOnboardingBotResult, writeOnboardingBotResult } from '@/pages/onboarding/session'
-import { isDirectBotAgentRuntime } from '@/utils/bot-agent'
+import { DEVICE_LOGINS, isDeviceLoginAuthMode, isDirectBotAgentRuntime } from '@/utils/bot-agent'
 import BotCreateTerminal from './components/bot-create-terminal.vue'
 
 const props = defineProps<{ onboarding?: boolean }>()
@@ -140,15 +140,22 @@ async function goToBot() {
     return
   }
   const target = bot.value?.name ?? bot.value?.id
+  // An account that signs in on the Agent itself has not signed in yet: land
+  // on the Agent's settings rather than on a chat that cannot run.
+  const agent = createdAgent.value
+  const auth = String(agent?.metadata?.auth ?? '')
+  const signInFirst = !!agent?.id && isDeviceLoginAuthMode(auth) && !DEVICE_LOGINS[auth].staged && !agent.agent_credential_id
   if (setupError.value) {
     toast.error(setupError.value)
+  } else if (signInFirst) {
+    toast.info(t('bots.createBotSignInFirst'))
   } else {
     toast.success(t('bots.createBotSuccess'))
   }
   void queryCache.invalidateQueries({ key: getBotsQueryKey() })
   try {
     await (target
-      ? router.replace({ name: 'bot-detail', params: { botName: target } })
+      ? router.replace({ name: 'bot-detail', params: { botName: target }, ...(signInFirst && { query: { tab: 'agents', openAgent: agent.id } }) })
       : router.replace({ name: 'bots' }))
   } catch {
     // Navigation aborted/failed — keep the page as-is rather than blanking it.

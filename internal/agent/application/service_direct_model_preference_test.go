@@ -14,6 +14,7 @@ import (
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 type preferenceCatalogDriver struct {
@@ -34,7 +35,7 @@ func (d preferenceCatalogDriver) ModelCatalog(_ context.Context, request externa
 }
 
 func TestDirectModelPreferenceSurvivesServiceRestart(t *testing.T) {
-	for _, runtimeType := range []string{session.RuntimeCodex, session.RuntimeClaudeCode} {
+	for _, runtimeType := range []string{session.RuntimeCodex, session.RuntimeClaudeCode, string(runtimekind.GrokBuild)} {
 		t.Run(runtimeType, func(t *testing.T) {
 			const sid = "00000000-0000-0000-0000-000000000610"
 			catalog := external.ModelCatalog{ConfiguredModelID: "default", ConfiguredReasoningEffort: "medium", Models: []external.ModelOption{{ID: "chosen", DefaultReasoningEffort: "medium", ReasoningEfforts: []external.ReasoningEffortOption{{ID: "medium"}, {ID: "high"}}}}}

@@ -27,9 +27,9 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 export const getAcpProfiles = <ThrowOnError extends boolean = false>(options?: Options<GetAcpProfilesData, ThrowOnError>): RequestResult<GetAcpProfilesResponses, unknown, ThrowOnError> => (options?.client ?? client).get<GetAcpProfilesResponses, unknown, ThrowOnError>({ url: '/acp/profiles', ...options });
 
 /**
- * Authorize an Agent account before creating a Bot
+ * Authorize an Agent account independently of a Bot
  *
- * Starts Codex device authorization or Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.
+ * Starts Codex device authorization or Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. A Grok account cannot be staged: it signs in on the Agent itself. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.
  */
 export const postAgentAuthorizations = <ThrowOnError extends boolean = false>(options: Options<PostAgentAuthorizationsData, ThrowOnError>): RequestResult<PostAgentAuthorizationsResponses, PostAgentAuthorizationsErrors, ThrowOnError> => (options.client ?? client).post<PostAgentAuthorizationsResponses, PostAgentAuthorizationsErrors, ThrowOnError>({
     url: '/agent-authorizations',
@@ -394,7 +394,7 @@ export const postBotsByBotIdAgentsByIdCredentialClaim = <ThrowOnError extends bo
 /**
  * Start a device-code account sign-in on a direct runtime Agent
  *
- * The Agent's own process obtains the device code; the user opens the URL and confirms the code there. Only runtimes that sign in this way (Codex) accept it.
+ * The Agent's own process obtains the device code; the user opens the URL and confirms the code there. Only runtimes that sign in this way (Codex, Grok Build) accept it.
  */
 export const postBotsByBotIdAgentsByIdLoginDeviceAuthorize = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdAgentsByIdLoginDeviceAuthorizeData, ThrowOnError>): RequestResult<PostBotsByBotIdAgentsByIdLoginDeviceAuthorizeResponses, PostBotsByBotIdAgentsByIdLoginDeviceAuthorizeErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdAgentsByIdLoginDeviceAuthorizeResponses, PostBotsByBotIdAgentsByIdLoginDeviceAuthorizeErrors, ThrowOnError>({ url: '/bots/{bot_id}/agents/{id}/login/device/authorize', ...options });
 

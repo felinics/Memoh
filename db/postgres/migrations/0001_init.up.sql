@@ -239,7 +239,7 @@ CREATE TABLE IF NOT EXISTS bots (
   command_ui_language TEXT NOT NULL DEFAULT 'auto',
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
-  chat_runtime TEXT NOT NULL DEFAULT 'model' CHECK (chat_runtime IN ('model', 'acp_agent', 'codex', 'claude-code')),
+  chat_runtime TEXT NOT NULL DEFAULT 'model' CHECK (chat_runtime IN ('model', 'acp_agent', 'codex', 'claude-code', 'grok-build')),
   chat_acp_agent_id TEXT,
   chat_acp_project_path TEXT NOT NULL DEFAULT '/data',
   chat_acp_project_mode TEXT NOT NULL DEFAULT 'project' CHECK (chat_acp_project_mode IN ('project', 'none')),
@@ -542,7 +542,7 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   channel_type TEXT,
   type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'schedule', 'subagent', 'discuss', 'acp_agent')),
   session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'schedule', 'subagent')),
-  runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent', 'codex', 'claude-code')),
+  runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent', 'codex', 'claude-code', 'grok-build')),
   runtime_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   -- Per-session persisted (chat model, reasoning effort) pair (issue #879);
   -- logically one value, written/read as a unit. NULL = no memory yet.
@@ -624,7 +624,7 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   usage JSONB,
   session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'schedule', 'subagent')),
-  runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent', 'codex', 'claude-code')),
+  runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent', 'codex', 'claude-code', 'grok-build')),
   model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   compact_id UUID,
   event_id UUID REFERENCES bot_session_events(id) ON DELETE SET NULL,
@@ -913,7 +913,7 @@ CREATE TABLE IF NOT EXISTS schedule (
   -- once schedule.team_id exists — see the deferred block near the end.
   run_target TEXT NOT NULL DEFAULT 'new_session' CHECK (run_target IN ('new_session', 'existing_session')),
   target_session_id UUID,
-  runtime_type TEXT CHECK (runtime_type IS NULL OR runtime_type IN ('model', 'acp_agent', 'codex', 'claude-code')),
+  runtime_type TEXT CHECK (runtime_type IS NULL OR runtime_type IN ('model', 'acp_agent', 'codex', 'claude-code', 'grok-build')),
   bot_agent_id UUID,
   acp_agent_id TEXT,
   model_id UUID,
@@ -933,7 +933,7 @@ CREATE TABLE IF NOT EXISTS schedule (
   CONSTRAINT schedule_acp_fields_check CHECK (
     run_target <> 'new_session'
     OR (runtime_type = 'acp_agent' AND acp_agent_id IS NOT NULL AND model_id IS NULL)
-    OR (runtime_type IN ('codex', 'claude-code') AND bot_agent_id IS NOT NULL AND acp_agent_id IS NULL AND model_id IS NULL)
+    OR (runtime_type IN ('codex', 'claude-code', 'grok-build') AND bot_agent_id IS NOT NULL AND acp_agent_id IS NULL AND model_id IS NULL)
     OR (COALESCE(runtime_type, 'model') = 'model' AND bot_agent_id IS NULL AND acp_agent_id IS NULL AND acp_model_id IS NULL)
   ),
   CONSTRAINT schedule_model_exclusive_check CHECK (
@@ -2973,7 +2973,7 @@ CREATE TABLE IF NOT EXISTS public.agent_authorizations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     team_id UUID NOT NULL DEFAULT public.memoh_current_team_id() REFERENCES public.teams(id) ON DELETE RESTRICT,
     owner_user_id UUID NOT NULL,
-    runtime TEXT NOT NULL CHECK (runtime IN ('codex', 'claude-code')),
+    runtime TEXT NOT NULL CHECK (runtime IN ('codex', 'claude-code', 'grok-build')),
     auth_kind TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'claimed')),
     encrypted_payload BYTEA NOT NULL,

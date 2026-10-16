@@ -4,9 +4,10 @@ This directory owns the boundary between durable ACP agent configuration and
 process-local agent state. ACP is the generic channel for custom,
 user-supplied agents speaking the Agent Client Protocol; the only registered
 profile is the generic `acp` profile (managed launch `command`/`arguments`,
-`api_key` setup mode). Built-in External Agents (Codex, Claude Code) are not
-ACP profiles — they run as direct external runtimes under
-`internal/agent/runtime/codex` and `internal/agent/runtime/claudecode`.
+`api_key` setup mode). Built-in External Agents (Codex, Claude Code, Grok
+Build) are not ACP profiles — they run as direct external runtimes under
+`internal/agent/runtime/codex`, `internal/agent/runtime/claudecode` and
+`internal/agent/runtime/grok`.
 
 Keep the boundary profile-driven. The launcher must not grow agent-name
 conditionals.
@@ -32,15 +33,16 @@ permission handling. It has two entry points.
   `Authenticate` and `Subscribe`, whose method names and shapes the caller
   owns.
 
-A built-in agent whose own protocol is ACP is a direct runtime that uses
-`Connect`. It must not import the pool or `profile/`, and the client must not
-learn its name: add a field to `SessionConfig` or expose a response value
-instead.
+A built-in agent whose own protocol is ACP (Grok Build) is a direct runtime
+that uses `Connect`. It must not import the pool or `profile/`
+(`internal/arch` enforces this), and the client must not learn its name: add
+a field to `SessionConfig` or expose a response value instead.
 
 ## Required invariants
 
 These hold for the processes and sessions the pool starts. A direct runtime
-on `Connect` owns its own process environment and session continuity.
+on `Connect` owns its own process environment and session continuity (Grok
+Build resumes its sessions; see `docs/agent-runtime.md`).
 
 - Every pool-started ACP process receives a fresh runtime directory under
   `/tmp/memoh-acp-runtime/<agent>/<uuid>` with mode `0700`. It holds only

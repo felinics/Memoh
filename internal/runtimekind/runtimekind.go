@@ -7,7 +7,7 @@
 // Consumers share this table instead of copying the vocabulary and rules.
 //
 // The CHECK constraints on the runtime columns enumerate the same kinds, so
-// adding a kind here also takes a migration that admits it (0144).
+// adding a kind here also takes a migration that admits it (0144, 0167).
 //
 // This is deliberately a leaf package (stdlib-only) so that packages which
 // cannot import the session domain (chat/message, schedule) still share the
@@ -28,6 +28,8 @@ const (
 	Codex Kind = "codex"
 	// ClaudeCode is the direct Claude Code external agent runtime.
 	ClaudeCode Kind = "claude-code"
+	// GrokBuild is the direct Grok Build external agent runtime.
+	GrokBuild Kind = "grok-build"
 )
 
 // Session modes a runtime can host. The string values are the session_mode
@@ -97,6 +99,15 @@ var capabilityByKind = map[Kind]capabilities{
 		External:       true,
 		Direct:         true,
 		DisplayName:    "Claude Code",
+		DecisionWaiter: true,
+		WorkspaceExec:  true,
+		AgentModel:     true,
+		SessionModes:   []string{ModeChat, ModeDiscuss, ModeSchedule},
+	},
+	GrokBuild: {
+		External:       true,
+		Direct:         true,
+		DisplayName:    "Grok Build",
 		DecisionWaiter: true,
 		WorkspaceExec:  true,
 		AgentModel:     true,

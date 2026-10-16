@@ -29,7 +29,7 @@ func (d noticeTestDriver) Prompt(ctx context.Context, input external.PromptInput
 }
 
 func TestRuntimeNoticesSurviveTerminalAndHistory(t *testing.T) {
-	for _, runtime := range []string{"codex", "claude-code", "acp_agent"} {
+	for _, runtime := range []string{"codex", "claude-code", "grok-build", "acp_agent"} {
 		for _, outcome := range []string{"completed", "failed", "stopped_during_setup", "configuration_failure"} {
 			t.Run(runtime+"/"+outcome, func(t *testing.T) {
 				ctx, cancel := context.WithCancel(context.Background())

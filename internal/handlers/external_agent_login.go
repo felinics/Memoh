@@ -16,9 +16,9 @@ import (
 )
 
 // ExternalAgentLoginHandler exposes the account sign-in of direct runtimes
-// that sign in inside the Agent's own process (Codex): the agent obtains a
-// device code, the user confirms it, and the login the agent wrote is copied
-// into the encrypted Agent credential store.
+// that sign in inside the Agent's own process (Codex, Grok Build): the agent
+// obtains a device code, the user confirms it, and the login the agent wrote
+// is copied into the encrypted Agent credential store.
 type ExternalAgentLoginHandler struct {
 	runtimes       external.Drivers
 	agents         *botagents.Service
@@ -97,7 +97,7 @@ type DeviceLoginPollResponse struct {
 
 // AuthorizeDevice godoc
 // @Summary Start a device-code account sign-in on a direct runtime Agent
-// @Description The Agent's own process obtains the device code; the user opens the URL and confirms the code there. Only runtimes that sign in this way (Codex) accept it.
+// @Description The Agent's own process obtains the device code; the user opens the URL and confirms the code there. Only runtimes that sign in this way (Codex, Grok Build) accept it.
 // @Tags external-agents
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Bot Agent ID"

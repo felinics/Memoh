@@ -37,9 +37,11 @@ normal persistence failure/rollback contract.
 
 ## Native session state of direct runtimes
 
-Codex and Claude Code keep their own conversation record on the bot's data
-volume: Codex writes rollouts under `CODEX_HOME` (`/data/.codex/agents/<agent>/`),
-Claude Code writes transcripts under `/data/.claude/projects/`. These files are
+Codex, Claude Code and Grok Build keep their own conversation record on the
+bot's data volume: Codex writes rollouts under `CODEX_HOME`
+(`/data/.codex/agents/<agent>/`), Claude Code writes transcripts under
+`/data/.claude/projects/`, Grok Build writes sessions under `GROK_HOME`
+(`/data/.grok/agents/<agent>/`). These files are
 the authoritative native conversation record; Memoh does not snapshot them into the
 database. Chat history stays in PostgreSQL as usual, so losing the native file
 costs the model its own memory of tool details, not the visible conversation.
@@ -54,14 +56,35 @@ thread id and, once Codex has reported it, the rollout path
 (`codex_rollout_path`); the Claude Code session id. Codex resumes by path
 first, which also works when its own SQLite index no longer lists the thread,
 and by id when the path is refused. Claude Code checks that the transcript
-still exists before passing `--resume`.
+still exists before passing `--resume`. Grok Build records its session id and
+reattaches with ACP `session/resume`, passing the permission mode again
+because Grok does not store it with the session.
 
-When the native session cannot be resumed — Codex refuses `thread/resume`, or
-the Claude transcript is gone — the turn starts a new native session and says
+When the native session cannot be resumed — Codex refuses `thread/resume`,
+the Claude transcript is gone, or Grok answers `session/resume` that the
+session file is missing — the turn
+starts a new native session and says
 so with a `native_history_lost` runtime notice; the next turns continue from
-Memoh's composed context. A transport failure while resuming is reported as
-`external_runtime.session_resume_failed` instead, since a retry may still resume
-the thread. Nothing here can make a thread permanently unusable.
+Memoh's composed context. Any other failure while resuming is reported
+instead, since a retry may still resume the thread: as
+`external_runtime.session_resume_failed`, or, for a failure the user can fix
+such as Grok rejecting its sign-in, as that failure. Nothing here can make a
+thread permanently unusable.
+
+Grok Build drives the rest of its session through Grok's own ACP extension
+methods, read as Grok 1.0.60 defines them (`internal/agent/runtime/grok/config.go`
+lists them; a process of another version is logged at start): compaction is
+`_x.ai/compact_conversation` on the open session, the `status` command reads
+`_x.ai/session/info` for the model and context use, and the model catalog
+follows `_x.ai/models/update` because the snapshot in initialize goes stale.
+A fork is `_x.ai/session/fork`, which copies the session whole; the turn's
+prompt id is recorded as the fork anchor and a fork is refused from any turn
+but the latest. Grok reports a Memoh tool gateway it could not reach through
+`_x.ai/mcp/server_status`, which the turn surfaces as a tools-unavailable
+notice. Grok's ACP surface has no mid-turn input: a prompt sent while one runs
+is queued until the turn ends, so steering is not offered, and `mcp/upsert`
+writes a server into the Agent's config for every later session, so a session
+opened without the gateway is reopened with it rather than amended.
 
 Forks use Codex's native `thread/fork` on the running app-server; the branch
 records its own rollout path. Threads created before this behaviour still
@@ -76,15 +99,23 @@ structure, not deleted snapshot data.
 
 ## Account sign-in of direct runtimes
 
-A direct runtime that signs its account in inside the Agent's own process
-implements `external.DeviceLoginProvider`, served at
-`POST /bots/{bot_id}/agents/{id}/login/device/{authorize,poll,cancel}`. The
-runtime obtains the device code, the user opens the URL and confirms it, and
-the runtime writes its own login file in the Agent's home; Memoh then copies
-the result into the encrypted Agent credential store and restarts the Agent's
-process from it. Codex signs in this way and stores the tokens it finds in
-`auth.json`. The staged authorizations (`/agent-authorizations`) cover API
-keys, the ChatGPT device login and the Claude browser login.
+Codex and Grok Build sign their account in inside the Agent's own process,
+through `POST /bots/{bot_id}/agents/{id}/login/device/{authorize,poll,cancel}`
+(`external.DeviceLoginProvider`). The runtime obtains the device code, the
+user opens the URL and confirms it, and the runtime writes its own login file
+in the Agent's home; Memoh then copies the result into the encrypted Agent
+credential store and restarts the Agent's process from it. Codex stores the
+tokens it finds in `auth.json`; Grok Build stores the whole file, since only
+Grok knows its shape and Grok rewrites it when it refreshes. A Grok sign-in
+runs on a Grok process of its own with an empty home under `/tmp`: on a home
+that already holds a login, ACP `authenticate` answers from it without asking
+anyone, and the Agent's current login must stay until the new one is stored.
+Grok hands the device URL out through its `_x.ai/auth/get_url` request while
+`authenticate` waits for the user. A Grok account can therefore not be staged
+before the Bot exists: the Agent is created in `grok_account` mode without a
+credential and signs in from its settings. The staged authorizations
+(`/agent-authorizations`) cover API keys, the ChatGPT device login and the
+Claude browser login only.
 
 ## Execution timeouts and budgets
 
