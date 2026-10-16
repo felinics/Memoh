@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -130,8 +132,11 @@ func TestClaudeTurnMapping(t *testing.T) {
 		types = append(types, ev.Type)
 	}
 	want := []event.StreamEventType{
+		event.ReasoningStart,
 		event.ReasoningDelta,
+		event.ReasoningEnd,
 		event.TextDelta,
+		event.TextEnd,
 		event.ToolCallStart,
 		event.ToolCallEnd,
 	}
@@ -161,6 +166,209 @@ func TestClaudeTurnMapping(t *testing.T) {
 	}
 	if raw, _ := json.Marshal(result.Output); !json.Valid(raw) {
 		t.Fatal("transcript not serializable")
+	}
+}
+
+// TestClaudeRecordedThinking pins the thinking wire shape of the pinned CLI
+// that the mapping relies on: the block starts with empty text, and its full
+// message arrives before its stop carrying exactly the streamed deltas. The
+// recorded turn must then surface its thinking once, live and in the
+// transcript.
+func TestClaudeRecordedThinking(t *testing.T) {
+	raw, err := os.ReadFile("protocolref/lifecycle.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Thinking struct {
+			Events []json.RawMessage `json:"events"`
+		} `json:"thinking"`
+	}
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.Thinking.Events) == 0 {
+		t.Fatal("recapture the thinking turn when updating the CLI baseline")
+	}
+
+	var (
+		streamed   strings.Builder
+		full       string
+		openBlock  string
+		stopped    bool
+		resultText string
+	)
+	for _, line := range fixture.Thinking.Events {
+		msg, err := decodeInbound(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch msg.Type {
+		case messageTypeStreamEvent:
+			var ev streamEvent
+			if err := json.Unmarshal(msg.Event, &ev); err != nil {
+				t.Fatal(err)
+			}
+			switch ev.Type {
+			case "content_block_start":
+				openBlock = ev.ContentBlock.Type
+				if openBlock == "thinking" && ev.ContentBlock.Thinking != "" {
+					t.Fatalf("thinking block started with text %q", ev.ContentBlock.Thinking)
+				}
+			case "content_block_delta":
+				if ev.Delta.Type == "thinking_delta" {
+					streamed.WriteString(ev.Delta.Thinking)
+				}
+			case "content_block_stop":
+				if openBlock == "thinking" {
+					stopped = true
+				}
+			}
+		case messageTypeAssistant:
+			chat, _ := decodeChatMessage(msg.Message)
+			for _, block := range chat.Content {
+				if block.Type != "thinking" {
+					continue
+				}
+				if stopped || block.Thinking != streamed.String() {
+					t.Fatalf("thinking message after stop = %v, text matches deltas = %v", stopped, block.Thinking == streamed.String())
+				}
+				full = block.Thinking
+			}
+		case messageTypeResult:
+			resultText = msg.Result
+		}
+	}
+	if full == "" || !stopped {
+		t.Fatalf("recording has no complete thinking block: full=%q stopped=%v", full, stopped)
+	}
+
+	sink := &recordingSink{}
+	r := newTestRunner(sink)
+	defer r.close()
+	for _, line := range fixture.Thinking.Events {
+		feed(t, r, string(line))
+	}
+	var reasoning strings.Builder
+	var starts, ends int
+	for _, ev := range sink.snapshot() {
+		switch ev.Type {
+		case event.ReasoningStart:
+			starts++
+		case event.ReasoningDelta:
+			if ends > 0 {
+				t.Fatal("reasoning continued after the block ended")
+			}
+			reasoning.WriteString(ev.Delta)
+		case event.ReasoningEnd:
+			ends++
+		}
+	}
+	if starts != 1 || ends != 1 || reasoning.String() != full {
+		t.Fatalf("live reasoning: starts=%d ends=%d text matches=%v", starts, ends, reasoning.String() == full)
+	}
+	result, err := r.buildResult("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parts []string
+	for _, message := range result.Output {
+		for _, part := range message.Content {
+			switch part := part.(type) {
+			case sdk.ReasoningPart:
+				parts = append(parts, "reasoning:"+part.Text)
+			case sdk.TextPart:
+				parts = append(parts, "text:"+part.Text)
+			}
+		}
+	}
+	if want := []string{"reasoning:" + full, "text:" + resultText}; !slices.Equal(parts, want) {
+		t.Fatalf("transcript parts = %q, want %q", parts, want)
+	}
+}
+
+// Thinking reaches the CLI in different shapes depending on the provider or
+// gateway; each must surface once, as one bounded reasoning block. The CLI
+// sends every streamed block's full message before the block's stop,
+// carrying exactly its deltas (TestClaudeRecordedThinking pins that).
+func TestClaudeThinkingSurfacesOnce(t *testing.T) {
+	stream := func(ev string) string {
+		return `{"type":"stream_event","session_id":"s","parent_tool_use_id":null,"event":` + ev + `}`
+	}
+	assistant := func(thinking string) string {
+		return `{"type":"assistant","session_id":"s","parent_tool_use_id":null,"message":{"role":"assistant","content":[{"type":"thinking","thinking":"` + thinking + `","signature":"sig"}]}}`
+	}
+	start := func(thinking string) string {
+		return stream(`{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"` + thinking + `","signature":""}}`)
+	}
+	delta := func(thinking string) string {
+		return stream(`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"` + thinking + `"}}`)
+	}
+	stop := stream(`{"type":"content_block_stop","index":0}`)
+
+	for _, tc := range []struct {
+		name  string
+		lines []string
+		want  []string
+	}{
+		{"deltas", []string{start(""), delta("A "), delta("B"), assistant("A B"), stop}, []string{"start", "A ", "B", "end"}},
+		{"inline in content_block_start", []string{start("X"), assistant(""), stop}, []string{"start", "X", "end"}},
+		{"inline start then deltas", []string{start("A"), delta(" B"), assistant(" B"), stop}, []string{"start", "A", " B", "end"}},
+		{"complete message only", []string{assistant("X")}, []string{"start", "X", "end"}},
+		// CLI 2.1.269 answers a broken stream with a non-streaming request and
+		// no content_block_stop; the new generation continues the cut block
+		// only when it repeats what was streamed.
+		{"non-streaming retry continuing the cut stream", []string{start(""), delta("CUT"), assistant("CUT MORE")}, []string{"start", "CUT", " MORE", "end"}},
+		{"non-streaming retry after a cut stream", []string{start(""), delta("CUT"), assistant("NEW")}, []string{"start", "CUT", "end", "start", "NEW", "end"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			r := newTestRunner(sink)
+			defer r.close()
+			for _, line := range tc.lines {
+				feed(t, r, line)
+			}
+			feed(t, r, `{"type":"result","subtype":"success","session_id":"s","is_error":false,"result":"ok"}`)
+
+			var got []string
+			for _, ev := range sink.snapshot() {
+				switch ev.Type {
+				case event.ReasoningStart:
+					got = append(got, "start")
+				case event.ReasoningDelta:
+					got = append(got, ev.Delta)
+				case event.ReasoningEnd:
+					got = append(got, "end")
+				}
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("reasoning events = %q, want %q", got, tc.want)
+			}
+			result, err := r.buildResult("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wantParts, gotParts []string
+			for _, item := range tc.want {
+				switch item {
+				case "start":
+					wantParts = append(wantParts, "")
+				case "end":
+				default:
+					wantParts[len(wantParts)-1] += item
+				}
+			}
+			for _, message := range result.Output {
+				for _, part := range message.Content {
+					if reasoning, ok := part.(sdk.ReasoningPart); ok {
+						gotParts = append(gotParts, reasoning.Text)
+					}
+				}
+			}
+			if !slices.Equal(gotParts, wantParts) {
+				t.Fatalf("transcript reasoning = %q, want %q", gotParts, wantParts)
+			}
+		})
 	}
 }
 
@@ -447,16 +655,27 @@ func TestClaudeModelCatalogFromInitialize(t *testing.T) {
 }
 
 func TestClaudeCLIArgsIncludeTurnOverrides(t *testing.T) {
-	args := strings.Join(cliArgs(claudecfg.Config{}, external.PromptInput{ModelID: "model-a", ReasoningEffort: "high"}, "resumed-session", ""), " ")
+	args := strings.Join(cliArgs(claudecfg.Config{}, external.PromptInput{ModelID: "model-a", ReasoningEffort: "high"}, "resumed-session", "", ""), " ")
 	if !strings.Contains(args, "--model 'model-a'") || !strings.Contains(args, "--effort 'high'") || !strings.Contains(args, "--resume 'resumed-session'") {
 		t.Fatalf("args = %q", args)
 	}
-	if strings.Contains(args, "--thinking") {
+	if strings.Contains(args, "--thinking ") {
 		t.Fatalf("effort must preserve native thinking settings: %q", args)
 	}
-	args = strings.Join(cliArgs(claudecfg.Config{}, external.PromptInput{}, "", ""), " ")
-	if strings.Contains(args, "--thinking") || strings.Contains(args, "--effort") {
+	args = strings.Join(cliArgs(claudecfg.Config{}, external.PromptInput{}, "", "", ""), " ")
+	if strings.Contains(args, "--thinking ") || strings.Contains(args, "--effort") {
 		t.Fatalf("an inherited default must stay unset: %q", args)
+	}
+}
+
+// Thinking text is requested from every CLI known to accept the option; an
+// older CLI would exit on it.
+func TestClaudeCLIArgsRequestThinkingTextWhenSupported(t *testing.T) {
+	for version, want := range map[string]bool{"2.1.94": true, "2.1.269": true, "": false, "2.1.92": false, "2.0.5": false} {
+		args := strings.Join(cliArgs(claudecfg.Config{}, external.PromptInput{}, "", "", version), " ")
+		if got := strings.Contains(args, "--thinking-display summarized"); got != want {
+			t.Fatalf("version %q: thinking display requested = %v, want %v (%q)", version, got, want, args)
+		}
 	}
 }
 

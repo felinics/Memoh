@@ -144,8 +144,8 @@ func (t *turnRunner) handleCommandLifecycle(msg *inboundMessage) {
 	observed := pending.observed
 	t.mu.Unlock()
 	if started {
-		t.emit(event.StreamEvent{Type: event.TextEnd})
-		t.emit(event.StreamEvent{Type: event.ReasoningEnd})
+		t.endText()
+		t.closeThinking()
 		t.emit(event.StreamEvent{Type: event.StepEnd, StepNumber: pending.step})
 		t.mu.Lock()
 		t.events = append(t.events, event.StreamEvent{Type: steerInputEvent, ToolCallID: pending.input.ID, Delta: pending.input.Text})

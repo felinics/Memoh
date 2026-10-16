@@ -2575,6 +2575,30 @@ func TestBuildChannelMessageKeepsReasoningTextMarkdownOnRichChannels(t *testing.
 	}
 }
 
+// A turn whose last stretch holds several assistant outputs (reasoning between
+// two texts) finalizes them as one reply, without text the stream already
+// delivered before a tool call and without outputs the user must not see.
+func TestAssistantReplyFoldsTurnOutputsIntoOneMessage(t *testing.T) {
+	text := func(s string) turn.ModelMessage {
+		return turn.ModelMessage{Role: "assistant", Content: turn.NewTextContent(s)}
+	}
+	msg, ok := assistantReply([]turn.ModelMessage{
+		text("Before the tool."),
+		{Role: "assistant", ToolCalls: []turn.ToolCall{{Type: "function", Function: turn.ToolCallFunction{Name: "exec", Arguments: `{}`}}}},
+		{Role: "tool", Content: turn.NewTextContent("ok")},
+		text("First part."),
+		text("NO_REPLY"),
+		text("Already sent."),
+		text("Second part."),
+	}, channel.ChannelCapabilities{Text: true, Markdown: true}, []string{"Already sent."})
+	if !ok || msg.Text != "First part.\nSecond part." {
+		t.Fatalf("reply = %#v, ok = %v", msg, ok)
+	}
+	if _, ok := assistantReply([]turn.ModelMessage{text("NO_REPLY")}, channel.ChannelCapabilities{Text: true}, nil); ok {
+		t.Fatal("a silent turn must not finalize a reply")
+	}
+}
+
 func TestBuildChannelMessagePromotesStyledPartWithoutDuplicateText(t *testing.T) {
 	msg := buildChannelMessage(turn.AssistantOutput{
 		Content: "bold",

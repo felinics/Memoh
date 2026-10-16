@@ -78,7 +78,7 @@ func TestResolveLauncherWithoutResolverUsesToolkitPath(t *testing.T) {
 	if launcher.Path != defaultLauncherPath || launcher.Source != external.LauncherSourceToolkit {
 		t.Fatalf("launcher = %+v, want toolkit default", launcher)
 	}
-	command := cliCommand(launcher.Path, cliArgs(claudecfg.Config{}, external.PromptInput{}, "", ""))
+	command := cliCommand(launcher.Path, cliArgs(claudecfg.Config{}, external.PromptInput{}, "", "", launcher.Version))
 	if !strings.HasPrefix(command, "'/opt/memoh/toolkit/bin/claude' --output-format stream-json") {
 		t.Fatalf("command = %q", command)
 	}

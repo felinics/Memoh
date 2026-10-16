@@ -87,6 +87,12 @@ type turnRunner struct {
 	usage           resultUsage
 	hasUsage        bool
 	resultIDs       map[string]struct{}
+
+	// The open thinking block and the deltas it received, and whether a model
+	// text block is open (closed by endText); read loop only.
+	thinkingOpen     bool
+	streamedThinking strings.Builder
+	textOpen         bool
 }
 
 func newTurnRunner(parent context.Context, input external.PromptInput, proc cliProcess, approvalSvc approval.FlowService, waiter func(string) func(), logger *slog.Logger) *turnRunner {
@@ -272,6 +278,7 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 		if msg.Subtype == "local_command_output" && msg.Content != "" {
 			// Command receipts keep their own identity in the transcript; they
 			// never join the model prose that result.result may replace.
+			t.endText()
 			t.emit(event.StreamEvent{Type: event.CommandOutput, ToolName: t.input.Command, Delta: msg.Content})
 		}
 		if msg.Subtype == "compact_boundary" && msg.CompactMetadata != nil && msg.CompactMetadata.Trigger == "manual" {
@@ -337,9 +344,13 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 					_ = json.Unmarshal(block.Input, &input)
 				}
 				toolName, input := canonicalDisplayToolCall(block.Name, input)
+				t.endText()
 				t.emit(event.StreamEvent{Type: event.ToolCallStart, ToolCallID: block.ID, ToolName: toolName, Input: input})
+			case "thinking":
+				t.completeThinking(block.Thinking)
 			case "text":
 				if msg.LocalCommandSource != "" {
+					t.endText()
 					t.emit(event.StreamEvent{Type: event.CommandOutput, ToolName: t.input.Command, Delta: block.Text})
 					continue
 				}
@@ -387,20 +398,28 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 		if err := json.Unmarshal(msg.Event, &ev); err != nil {
 			return
 		}
-		if ev.Type == "message_start" {
+		switch ev.Type {
+		case "message_start":
 			t.streamedText.Reset()
 			t.emit(event.StreamEvent{Type: event.RuntimeStatus})
-		}
-		if ev.Type != "content_block_delta" {
-			return
-		}
-		switch ev.Delta.Type {
-		case "text_delta":
-			t.streamedText.WriteString(ev.Delta.Text)
-			t.emitModelText(ev.Delta.Text)
-		case "thinking_delta":
-			if ev.Delta.Thinking != "" {
-				t.emit(event.StreamEvent{Type: event.ReasoningDelta, Delta: ev.Delta.Thinking})
+		case "content_block_start":
+			if ev.ContentBlock.Type == "thinking" {
+				t.openThinking()
+				// Gateways may put the thinking text here instead of in deltas.
+				t.emitThinking(ev.ContentBlock.Thinking)
+			}
+		case "content_block_stop":
+			t.closeThinking()
+		case "content_block_delta":
+			switch ev.Delta.Type {
+			case "text_delta":
+				t.streamedText.WriteString(ev.Delta.Text)
+				t.emitModelText(ev.Delta.Text)
+			case "thinking_delta":
+				// Only deltas: the CLI builds the block's full message from them,
+				// never from inline start text.
+				t.streamedThinking.WriteString(ev.Delta.Thinking)
+				t.emitThinking(ev.Delta.Thinking)
 			}
 		}
 	case messageTypeResult:
@@ -428,6 +447,7 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 		}
 		hasText := t.turnHasText
 		t.mu.Unlock()
+		t.closeThinking()
 		if !hasText && !msg.IsError {
 			t.emitModelText(msg.Result)
 		}
@@ -730,7 +750,60 @@ func (t *turnRunner) emitModelText(text string) {
 	t.assistantTxt.WriteString(text)
 	t.turnHasText = true
 	t.mu.Unlock()
+	t.closeThinking()
+	t.textOpen = true
 	t.emit(event.StreamEvent{Type: event.TextDelta, Delta: text})
+}
+
+// endText closes the open model text block. Reasoning, a tool call, a
+// command receipt and queued input end it where the transcript starts a new
+// part; live views split at that same point.
+func (t *turnRunner) endText() {
+	if t.textOpen {
+		t.textOpen = false
+		t.emit(event.StreamEvent{Type: event.TextEnd})
+	}
+}
+
+func (t *turnRunner) openThinking() {
+	t.closeThinking()
+	t.thinkingOpen = true
+	t.emit(event.StreamEvent{Type: event.ReasoningStart})
+}
+
+func (t *turnRunner) emitThinking(text string) {
+	if text == "" {
+		return
+	}
+	if !t.thinkingOpen {
+		t.openThinking()
+	}
+	t.endText()
+	t.emit(event.StreamEvent{Type: event.ReasoningDelta, Delta: text})
+}
+
+func (t *turnRunner) closeThinking() {
+	if t.thinkingOpen {
+		t.thinkingOpen = false
+		t.emit(event.StreamEvent{Type: event.ReasoningEnd})
+	}
+	t.streamedThinking.Reset()
+}
+
+// completeThinking settles a full-message thinking block. The CLI sends it
+// before the streamed block's stop, carrying that block's deltas, so a block
+// continuing what was streamed only adds its missing rest (nothing for the
+// usual echo), as the text path does. Any other block is a separate
+// generation, such as the CLI's non-streaming retry of a broken stream, and
+// stands alone instead of joining the cut one.
+func (t *turnRunner) completeThinking(thinking string) {
+	if rest, ok := strings.CutPrefix(thinking, t.streamedThinking.String()); ok && t.thinkingOpen {
+		t.emitThinking(rest)
+	} else {
+		t.closeThinking()
+		t.emitThinking(thinking)
+	}
+	t.closeThinking()
 }
 
 // buildResult assembles the durable outcome after the turn settled.

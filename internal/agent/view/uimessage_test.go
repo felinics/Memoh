@@ -10,7 +10,9 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	agentevent "github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/partmeta"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
@@ -699,6 +701,99 @@ func TestUIMessageStreamConverterKeepsReasoningBeforeText(t *testing.T) {
 	}
 	if reasoning[0].ID >= text[0].ID {
 		t.Fatalf("reasoning id %d must sort before text id %d", reasoning[0].ID, text[0].ID)
+	}
+}
+
+// The live converter and the external transcript split blocks at the same
+// events, so the terminal snapshot replaces each live block in place:
+// separate thinking blocks, thinking around a tool call, and text after it.
+func TestUIMessageStreamMatchesExternalTranscript(t *testing.T) {
+	events := []agentevent.StreamEvent{
+		{Type: agentevent.ReasoningDelta, Delta: "A1"},
+		{Type: agentevent.ReasoningEnd},
+		{Type: agentevent.ReasoningDelta, Delta: "A2"},
+		{Type: agentevent.ReasoningEnd},
+		{Type: agentevent.ToolCallStart, ToolCallID: "call-1", ToolName: "exec"},
+		{Type: agentevent.ToolCallEnd, ToolCallID: "call-1", ToolName: "exec", Result: "ok"},
+		{Type: agentevent.ReasoningDelta, Delta: "B"},
+		{Type: agentevent.TextDelta, Delta: "T1"},
+		{Type: agentevent.TextDelta, Delta: "T2"},
+	}
+	converter := NewUIMessageStreamConverter()
+	recorder := external.NewTranscriptRecorder()
+	live := map[int]UIMessage{}
+	for _, ev := range events {
+		for _, block := range converter.HandleEvent(UIStreamEventFromAgentEvent(ev)) {
+			live[block.ID] = block
+		}
+		recorder.Add(ev)
+	}
+	raw, err := json.Marshal(recorder.Messages(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal := converter.ConvertTerminalMessages(raw)
+	if len(terminal) != len(live) {
+		t.Fatalf("terminal = %#v, live = %#v", terminal, live)
+	}
+	for i, block := range terminal {
+		if block.ID != i || live[i].Type != block.Type || live[i].Content != block.Content {
+			t.Fatalf("terminal block %d = %#v, live = %#v", i, block, live[i])
+		}
+	}
+}
+
+// Reasoning does not end the open text block: the native runtime persists one
+// text part per step, so text resumed after reasoning stays in the same live
+// block the terminal snapshot will reuse.
+func TestUIMessageStreamConverterKeepsTextAcrossReasoning(t *testing.T) {
+	converter := NewUIMessageStreamConverter()
+	before := converter.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "T1"})
+	converter.HandleEvent(UIMessageStreamEvent{Type: "reasoning_start"})
+	converter.HandleEvent(UIMessageStreamEvent{Type: "reasoning_delta", Delta: "R"})
+	converter.HandleEvent(UIMessageStreamEvent{Type: "reasoning_end"})
+	after := converter.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "T2"})
+	if after[0].ID != before[0].ID || after[0].Content != "T1T2" {
+		t.Fatalf("text resumed after reasoning = %#v, want block %d with T1T2", after, before[0].ID)
+	}
+}
+
+// External runtimes stream reasoning without reasoning_end. A tool call ends
+// the block, as it does in the runtime transcript, so the live view and the
+// terminal snapshot agree.
+func TestUIMessageStreamConverterSplitsReasoningAroundToolCall(t *testing.T) {
+	converter := NewUIMessageStreamConverter()
+	converter.HandleEvent(UIMessageStreamEvent{Type: "reasoning_start"}) // hidden thinking: no content
+	first := converter.HandleEvent(UIMessageStreamEvent{Type: "reasoning_delta", Delta: "A"})
+	converter.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "t"})
+	converter.HandleEvent(UIMessageStreamEvent{Type: "reasoning_delta", Delta: "\n\n"}) // blank: dropped from the snapshot
+	converter.HandleEvent(UIMessageStreamEvent{Type: "tool_call_start", ToolCallID: "call-1", ToolName: "exec"})
+	converter.HandleEvent(UIMessageStreamEvent{Type: "tool_call_end", ToolCallID: "call-1", ToolName: "exec"})
+	second := converter.HandleEvent(UIMessageStreamEvent{Type: "reasoning_delta", Delta: "B"})
+	if first[0].ID == second[0].ID || second[0].Content != "B" {
+		t.Fatalf("reasoning after a tool call joined the earlier block: first=%#v second=%#v", first, second)
+	}
+
+	raw, err := json.Marshal([]sdk.Message{
+		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.ReasoningPart{Text: "A"}, sdk.TextPart{Text: "t"}}},
+		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
+			sdk.ReasoningPart{Text: "\n\n"},
+			sdk.ToolCallPart{ToolCallID: "call-1", ToolName: "exec"},
+		}},
+		{Role: sdk.MessageRoleTool, Content: []sdk.MessagePart{sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "exec"}}},
+		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.ReasoningPart{Text: "B"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int
+	for _, block := range converter.ConvertTerminalMessages(raw) {
+		if block.Type == UIMessageReasoning {
+			ids = append(ids, block.ID)
+		}
+	}
+	if len(ids) != 2 || ids[0] != first[0].ID || ids[1] != second[0].ID {
+		t.Fatalf("terminal reasoning ids = %v, want [%d %d]", ids, first[0].ID, second[0].ID)
 	}
 }
 
