@@ -55,21 +55,22 @@ type Manager struct {
 	newEpoch       func() string
 	newGeneration  func() string
 
-	mu                     sync.Mutex
-	controls               map[runControlKey]*runControl
-	commandHandler         func(context.Context, Command) error
-	decisionStore          DecisionStore
-	terminalObserver       func(context.Context, TerminalRun)
-	admissionObserver      func(botID, sessionID string)
-	decisionFinalizer      func(context.Context, RunHandle) error
-	terminalReconciler     func(context.Context) error
-	cancelLostRunDecisions func(context.Context, string, string, string, int64, string) error
-	historyResetHandler    HistoryResetHandler
-	pendingCommands        map[string]map[*commandWaiter]struct{}
-	inflightCommandTargets map[string]struct{}
-	commandExecutions      map[string]chan struct{}
-	admittedCommands       map[string]struct{}
-	localCommandResults    map[string]localCommandResult
+	mu                      sync.Mutex
+	controls                map[runControlKey]*runControl
+	commandHandler          func(context.Context, Command) error
+	decisionStore           DecisionStore
+	terminalObserver        func(context.Context, TerminalRun)
+	admissionObserver       func(botID, sessionID string)
+	waitingDecisionObserver func(ctx context.Context, botID, sessionID string)
+	decisionFinalizer       func(context.Context, RunHandle) error
+	terminalReconciler      func(context.Context) error
+	cancelLostRunDecisions  func(context.Context, string, string, string, int64, string) error
+	historyResetHandler     HistoryResetHandler
+	pendingCommands         map[string]map[*commandWaiter]struct{}
+	inflightCommandTargets  map[string]struct{}
+	commandExecutions       map[string]chan struct{}
+	admittedCommands        map[string]struct{}
+	localCommandResults     map[string]localCommandResult
 	// localFinishHandoffs are memory-backend runs whose owner retry budget was
 	// exhausted. Memory has no lease index, so the shared reaper loop retries
 	// these durable conclusions without retaining one goroutine per run.
@@ -2053,6 +2054,7 @@ func (m *Manager) setWaitingDecision(ctx context.Context, handle RunHandle) erro
 	if !applied {
 		return ErrRunOwnershipLost
 	}
+	m.observeWaitingDecision(ctx, handle.BotID, handle.SessionID)
 	return nil
 }
 
