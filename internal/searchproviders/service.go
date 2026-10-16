@@ -226,8 +226,9 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 						Type:        "object",
 						Title:       "HTTP headers",
 						Description: "Custom request headers, such as Authorization: Bearer <key>.",
-						Required:    false,
-						Example:     map[string]string{"Authorization": "Bearer <key>"},
+						// No Example: draft configs are seeded from non-secret
+						// examples, which would send a placeholder credential.
+						Required: false,
 					},
 					"language": {
 						Type:        "string",

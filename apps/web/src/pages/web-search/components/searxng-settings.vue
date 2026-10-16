@@ -143,9 +143,17 @@ watch(
   () => props.modelValue,
   (val) => {
     localConfig.base_url = String(val?.base_url ?? '')
-    localConfig.headers = val?.headers && typeof val.headers === 'object' && !Array.isArray(val.headers)
+    const incoming = val?.headers && typeof val.headers === 'object' && !Array.isArray(val.headers)
       ? Object.entries(val.headers as Record<string, unknown>).map(([name, value]) => ({ name, value: String(value) }))
-      : [{ name: 'Authorization', value: '' }]
+      : null
+    // The emitted config comes straight back as modelValue. Rebuilding the
+    // rows from it every time would re-emit forever and drop rows still being
+    // typed, so only replace them when they actually say something different.
+    if (incoming === null) {
+      if (localConfig.headers.length === 0) localConfig.headers = [{ name: 'Authorization', value: '' }]
+    } else if (JSON.stringify(headersRecord(incoming)) !== JSON.stringify(headersRecord(localConfig.headers))) {
+      localConfig.headers = incoming
+    }
     localConfig.language = String(val?.language ?? 'all')
     localConfig.safesearch = String(val?.safesearch ?? '1')
     localConfig.categories = String(val?.categories ?? 'general')
@@ -158,15 +166,19 @@ watch(
 watch(localConfig, () => {
   emit('update:modelValue', {
     base_url: localConfig.base_url,
-    headers: Object.fromEntries(localConfig.headers
-      .filter(header => header.name.trim())
-      .map(header => [header.name.trim(), header.value])),
+    headers: headersRecord(localConfig.headers),
     language: localConfig.language,
     safesearch: localConfig.safesearch,
     categories: localConfig.categories,
     timeout_seconds: localConfig.timeout_seconds,
   })
 }, { deep: true })
+
+function headersRecord(headers: HeaderBinding[]): Record<string, string> {
+  return Object.fromEntries(headers
+    .filter(header => header.name.trim())
+    .map(header => [header.name.trim(), header.value]))
+}
 
 function addHeader() {
   const name = localConfig.headers.length === 0

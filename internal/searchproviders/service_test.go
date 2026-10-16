@@ -61,3 +61,24 @@ func TestMapSearchProviderWriteError(t *testing.T) {
 		})
 	}
 }
+
+// Draft configs are seeded from non-secret field examples, so a header
+// example would be saved and sent as a real placeholder credential.
+func TestSearXNGHeadersHaveNoDraftExample(t *testing.T) {
+	t.Parallel()
+
+	for _, meta := range (&Service{}).ListMeta(t.Context()) {
+		if meta.Provider != string(ProviderSearXNG) {
+			continue
+		}
+		field, ok := meta.ConfigSchema.Fields["headers"]
+		if !ok {
+			t.Fatal("SearXNG meta has no headers field")
+		}
+		if field.Example != nil {
+			t.Fatalf("headers example = %#v, want none", field.Example)
+		}
+		return
+	}
+	t.Fatal("SearXNG meta not found")
+}
