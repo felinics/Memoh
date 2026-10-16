@@ -123,6 +123,7 @@ func ServerModule() fx.Option {
 			provideSessionRunLedger,
 			provideRuntimeFenceActivator,
 			provideSessionRuntimeManager,
+			provideAttentionService,
 			provideDisplayService,
 			provideWorkspaceDependencyCatalog,
 			provideWorkspaceDependencyService,
