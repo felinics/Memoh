@@ -60,7 +60,7 @@ func TestGetSessionInfoDropsThePlanWhenASameNamedModelHasASmallerWindow(t *testi
 			}},
 			settingsRow: sqlc.GetSettingsByBotIDRow{
 				BotID: testUUID(lifecycleTestBotID), ChatModelID: modelA,
-				Language: "auto", ReasoningEffort: "medium",
+				ReasoningEffort: "medium",
 			},
 		},
 		models: map[pgtype.UUID]sqlc.Model{

@@ -30,7 +30,7 @@ func (s *Service) reconcileDirectModelPreference(ctx context.Context, botID, bot
 		BotID: botID, BotAgentID: botAgentID, ProjectPath: projectPath, ModelID: modelID, ResolveDefaults: strings.TrimSpace(modelID) == "",
 	})
 	if err != nil {
-		return "", "", err
+		return "", "", ExternalRuntimeError(err)
 	}
 	return reconcileDirectPair(catalog, modelID, effort)
 }
@@ -109,7 +109,7 @@ func (s *Service) applyDirectModelPreference(ctx context.Context, req ChatReques
 		ID: db.ParseUUIDOrEmpty(sess.ID), PreferredExternalModelID: pgtype.Text{String: modelID, Valid: true}, PreferredReasoningEffort: pgtype.Text{String: effort, Valid: effort != ""},
 	})
 	if err != nil {
-		s.logger.Warn("write-back direct model preference",
+		s.logger.WarnContext(ctx, "write-back direct model preference",
 			slog.String("session_id", sess.ID),
 			slog.Any("error", err),
 		)

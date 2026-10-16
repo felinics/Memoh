@@ -47,6 +47,9 @@ func NewSDKEmbeddingModel(clientType, baseURL, apiKey, modelID string, timeout t
 	}
 }
 
+// ErrEmptyEmbeddingVector reports that the provider returned an empty vector.
+var ErrEmptyEmbeddingVector = errors.New("embedding provider returned no vector values")
+
 // InferEmbeddingDimensions probes the embedding endpoint and returns the vector
 // length produced by the provider for a minimal input.
 func InferEmbeddingDimensions(ctx context.Context, clientType, baseURL, apiKey, modelID string, timeout time.Duration, httpClient *http.Client) (int, error) {
@@ -57,7 +60,7 @@ func InferEmbeddingDimensions(ctx context.Context, clientType, baseURL, apiKey, 
 		return 0, err
 	}
 	if len(vector) == 0 {
-		return 0, errors.New("embedding provider returned no vector values")
+		return 0, ErrEmptyEmbeddingVector
 	}
 	return len(vector), nil
 }

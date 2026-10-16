@@ -2,12 +2,27 @@ package botbackup
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
 // ErrHistoryResetUnavailable means an overwrite that can invalidate ACP state
 // could not acquire the mandatory distributed runtime-reset boundary.
 var ErrHistoryResetUnavailable = errors.New("bot backup: ACP history reset coordination is unavailable")
+
+// ErrInvalidBundle means the uploaded file is not a backup this version can
+// read: not a zip, a missing or malformed manifest, an unsafe entry path,
+// malformed entry JSON, a damaged encrypted stream or an unsupported schema
+// version.
+var ErrInvalidBundle = errors.New("bot backup: invalid backup bundle")
+
+// ErrTargetBotRequired means an overwrite import named no target bot.
+var ErrTargetBotRequired = errors.New("bot backup: target bot is required for overwrite import")
+
+// invalidBundle marks cause as a problem with the uploaded file.
+func invalidBundle(cause error) error {
+	return fmt.Errorf("%w: %w", ErrInvalidBundle, cause)
+}
 
 const (
 	BackupSchemaVersion = 1
@@ -30,7 +45,6 @@ const (
 	SectionChannels  Section = "channels"
 	SectionMCP       Section = "mcp"
 	SectionSchedules Section = "schedules"
-	SectionEmail     Section = "email"
 	SectionHistory   Section = "history"
 	SectionAssets    Section = "assets"
 	SectionWorkspace Section = "workspace"
@@ -40,14 +54,14 @@ const (
 // profile is always exported (it identifies the bot) and is not user-toggleable.
 var AllExportSections = []Section{
 	SectionSettings, SectionModels, SectionACL, SectionChannels, SectionMCP,
-	SectionSchedules, SectionEmail, SectionHistory, SectionAssets, SectionWorkspace,
+	SectionSchedules, SectionHistory, SectionAssets, SectionWorkspace,
 }
 
 // isSensitiveSection reports whether a section may carry API keys or other
 // credentials, so the UI can warn before export/import. Single source of truth.
 func isSensitiveSection(key Section) bool {
 	switch key {
-	case SectionModels, SectionChannels, SectionMCP, SectionEmail:
+	case SectionModels, SectionChannels, SectionMCP:
 		return true
 	default:
 		return false
@@ -219,7 +233,6 @@ type backupData struct {
 	Channels                any                            `json:"channels,omitempty"`
 	MCP                     any                            `json:"mcp,omitempty"`
 	Schedules               any                            `json:"schedules,omitempty"`
-	EmailBindings           any                            `json:"email_bindings,omitempty"`
 	Dependencies            backupDependencies             `json:"dependencies,omitempty"`
 	History                 backupHistory                  `json:"history,omitempty"`
 }
@@ -246,8 +259,6 @@ type backupDependencies struct {
 	Models          any `json:"models,omitempty"`
 	SearchProviders any `json:"search_providers,omitempty"`
 	FetchProviders  any `json:"fetch_providers,omitempty"`
-	MemoryProviders any `json:"memory_providers,omitempty"`
-	EmailProviders  any `json:"email_providers,omitempty"`
 }
 
 type backupHistory struct {

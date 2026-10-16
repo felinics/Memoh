@@ -43,9 +43,7 @@ func TestExecSpeakRequiresTargetBeforeLoadingSettings(t *testing.T) {
 	_, err := provider.execSpeak(context.Background(), SessionContext{
 		BotID:           "bot_1",
 		CurrentPlatform: "telegram",
-	}, "call-test", map[string]any{
-		"text": "hello",
-	})
+	}, "call-test", speakArgs{Text: "hello"})
 	if err == nil || !strings.Contains(err.Error(), "target is required") {
 		t.Fatalf("execSpeak error = %v, want target is required", err)
 	}
@@ -59,10 +57,7 @@ func TestExecSpeakWithDifferentPlatformDoesNotReuseCurrentTarget(t *testing.T) {
 		BotID:           "bot_1",
 		CurrentPlatform: "telegram",
 		ReplyTarget:     "telegram-chat-1",
-	}, "call-test", map[string]any{
-		"platform": "discord",
-		"text":     "hello",
-	})
+	}, "call-test", speakArgs{Platform: "discord", Text: "hello"})
 	if err == nil || !strings.Contains(err.Error(), "target is required") {
 		t.Fatalf("execSpeak error = %v, want target is required", err)
 	}
@@ -100,9 +95,7 @@ func TestExecSpeakCurrentConversationCollectingEmitterUsesChannelAdapter(t *test
 		Emitter: func(ToolStreamEvent) {
 			emitted = true
 		},
-	}, "call-test", map[string]any{
-		"text": "hello",
-	})
+	}, "call-test", speakArgs{Text: "hello"})
 	if err != nil {
 		t.Fatalf("execSpeak returned error: %v", err)
 	}
@@ -134,9 +127,7 @@ func TestExecSpeakCurrentConversationLiveStreamUsesEmitter(t *testing.T) {
 		Emitter: func(ToolStreamEvent) {
 			emitted++
 		},
-	}, "call-test", map[string]any{
-		"text": "hello",
-	})
+	}, "call-test", speakArgs{Text: "hello"})
 	if err != nil {
 		t.Fatalf("execSpeak returned error: %v", err)
 	}
@@ -167,11 +158,7 @@ func TestExecSpeakDiscussCurrentTargetUsesChannelAdapter(t *testing.T) {
 		Emitter: func(ToolStreamEvent) {
 			emitted = true
 		},
-	}, "call-test", map[string]any{
-		"platform": "telegram",
-		"target":   "chat-1",
-		"text":     "hello",
-	})
+	}, "call-test", speakArgs{Platform: "telegram", Target: "chat-1", Text: "hello"})
 	if err != nil {
 		t.Fatalf("execSpeak returned error: %v", err)
 	}

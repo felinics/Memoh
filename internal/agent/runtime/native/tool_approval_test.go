@@ -3,14 +3,14 @@ package native
 import (
 	"testing"
 
-	sdk "github.com/felinics/twilight/sdk"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestMarkApprovalToolsCoversWorkspaceTools(t *testing.T) {
 	t.Parallel()
 
-	tools := map[string]sdk.Tool{}
-	for _, tool := range markApprovalTools([]sdk.Tool{
+	tools := map[string]toolexec.Tool{}
+	for _, tool := range markApprovalTools([]toolexec.Tool{
 		{Name: "read"},
 		{Name: "list"},
 		{Name: "write"},

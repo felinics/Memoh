@@ -71,12 +71,12 @@ func TestRenderedFramesAreCachedAcrossTurns(t *testing.T) {
 	s := countingStickerService(t, &opens)
 	refs := []timeline.ImageAttachmentRef{{ContentHash: "sticker", Mime: "application/x-tgsticker"}}
 
-	first := s.InlineImageAttachments(context.Background(), "bot-1", refs)
+	first := inlineImageParts(context.Background(), s, "bot-1", refs)
 	if len(first) != animationFrameCount || opens != 1 {
 		t.Fatalf("first turn: %d parts, %d opens", len(first), opens)
 	}
 	for turn := range 3 {
-		again := s.InlineImageAttachments(context.Background(), "bot-1", refs)
+		again := inlineImageParts(context.Background(), s, "bot-1", refs)
 		if opens != 1 {
 			t.Fatalf("turn %d re-read the asset: %d opens", turn+2, opens)
 		}
@@ -96,8 +96,8 @@ func TestFrameCacheIsScopedPerBot(t *testing.T) {
 	opens := 0
 	s := countingStickerService(t, &opens)
 	refs := []timeline.ImageAttachmentRef{{ContentHash: "sticker", Mime: "application/x-tgsticker"}}
-	s.InlineImageAttachments(context.Background(), "bot-a", refs)
-	s.InlineImageAttachments(context.Background(), "bot-b", refs)
+	inlineImageParts(context.Background(), s, "bot-a", refs)
+	inlineImageParts(context.Background(), s, "bot-b", refs)
 	if opens != 2 {
 		t.Fatalf("asset opened %d time(s), want one per bot", opens)
 	}
@@ -139,7 +139,7 @@ func TestTurnVisionBudgetShedsExpansionFirst(t *testing.T) {
 		})
 	}
 
-	parts := s.InlineImageAttachments(context.Background(), "bot-1", refs)
+	parts := inlineImageParts(context.Background(), s, "bot-1", refs)
 	if len(parts) > maxTurnVisionImages {
 		t.Fatalf("InlineImageAttachments() = %d parts, over the %d budget", len(parts), maxTurnVisionImages)
 	}

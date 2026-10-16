@@ -21,7 +21,7 @@ func SyncRegistry(ctx context.Context, logger *slog.Logger, queries dbstore.Quer
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				if logger != nil {
-					logger.Warn("video registry skipped provider without template",
+					logger.WarnContext(ctx, "video registry skipped provider without template",
 						slog.String("provider", string(def.ClientType)),
 						slog.String("display_name", def.DisplayName))
 				}
@@ -50,7 +50,7 @@ func SyncRegistry(ctx context.Context, logger *slog.Logger, queries dbstore.Quer
 		}
 
 		if logger != nil {
-			logger.Info("video registry synced", slog.String("provider", string(def.ClientType)), slog.Int("models", synced))
+			logger.InfoContext(ctx, "video registry synced", slog.String("provider", string(def.ClientType)), slog.Int("models", synced))
 		}
 	}
 	return nil

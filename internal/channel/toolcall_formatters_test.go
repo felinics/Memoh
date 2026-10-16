@@ -265,29 +265,6 @@ func TestFormatSendCarriesTargetAndBody(t *testing.T) {
 	}
 }
 
-func TestFormatSendEmailCarriesSubject(t *testing.T) {
-	t.Parallel()
-
-	tc := &StreamToolCall{
-		Name: "send_email",
-		Input: map[string]any{
-			"to":      "alice@example.com",
-			"subject": "Meeting notes",
-		},
-		Result: map[string]any{"status": "sent", "message_id": "mid1"},
-	}
-	p := BuildToolCallEnd(tc)
-	if p.Header != "→ alice@example.com" {
-		t.Fatalf("unexpected header: %q", p.Header)
-	}
-	if !hasTextBlock(p.Body, "Subject: Meeting notes") {
-		t.Fatalf("expected subject block, got %+v", p.Body)
-	}
-	if !strings.Contains(p.Footer, "status=sent") || !strings.Contains(p.Footer, "message_id=mid1") {
-		t.Fatalf("unexpected footer: %q", p.Footer)
-	}
-}
-
 func TestFormatSearchMemoryPrintsScoreAndTotal(t *testing.T) {
 	t.Parallel()
 

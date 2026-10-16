@@ -177,7 +177,6 @@ func newControllerPolicyService(t *testing.T, targetPercent *int) (*Service, *re
 		},
 		settings: sqlc.GetSettingsByBotIDRow{
 			BotID:                   compactionConfigUUID(t, botUUID),
-			Language:                "auto",
 			ReasoningEffort:         "medium",
 			CompactionEnabled:       true,
 			CompactionTargetPercent: target,
@@ -209,7 +208,7 @@ func TestAutomaticCompactionPathsApplyTargetAndBoundAsyncDrain(t *testing.T) {
 		compactableTokensKnown: true,
 	}
 
-	service.maybeCompact(context.Background(), req, resolved, 150000)
+	runAutomaticCompaction(t, service, req, resolved, 150000)
 	if len(runner.configs) != 3 {
 		t.Fatalf("async compaction passes = %d, want 3", len(runner.configs))
 	}
@@ -236,8 +235,8 @@ func TestAutomaticCompactionPathsApplyTargetAndBoundAsyncDrain(t *testing.T) {
 	if got := runner.configs[0].TargetTokens; got != 100000 {
 		t.Fatalf("sync TargetTokens = %d, want 100000 soft-share cap", got)
 	}
-	if runner.configs[0].AllowFrontierFusion {
-		t.Fatal("sync AllowFrontierFusion = true, want false")
+	if !runner.configs[0].AllowFrontierFusion {
+		t.Fatal("sync recovery must be able to replace oversized summaries")
 	}
 	if got := runner.configs[0].ContextWindowTokens; got != 200000 {
 		t.Fatalf("sync ContextWindowTokens = %d, want 200000", got)
@@ -292,7 +291,7 @@ func TestSyncBackstopTargetCapsAtSoftShare(t *testing.T) {
 				compactableTokensKnown: true,
 			}
 
-			service.maybeCompact(context.Background(), req, resolved, 4000)
+			runAutomaticCompaction(t, service, req, resolved, 4000)
 			if len(runner.configs) != maxAsyncCompactionPasses {
 				t.Fatalf("async compaction passes = %d, want %d", len(runner.configs), maxAsyncCompactionPasses)
 			}
@@ -329,4 +328,17 @@ func TestSetCompactionServicePreservesNil(t *testing.T) {
 
 func targetPercentPointer(value int) *int {
 	return &value
+}
+
+// runAutomaticCompaction runs what maybeCompact starts as a unit, on the
+// test's goroutine.
+func runAutomaticCompaction(t *testing.T, service *Service, req ChatRequest, rc resolvedContext, inputTokens int) {
+	t.Helper()
+	plan, ok := service.planCompaction(context.Background(), req, rc, inputTokens)
+	if !ok {
+		t.Fatal("planCompaction() = false, want a compaction to run")
+	}
+	if err := service.runCompaction(context.Background(), plan); err != nil {
+		t.Fatalf("runCompaction() error = %v", err)
+	}
 }

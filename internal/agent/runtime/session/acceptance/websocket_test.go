@@ -32,7 +32,6 @@ type wsEvent struct {
 	Snapshot     map[string]any `json:"snapshot,omitempty"`
 	Delta        map[string]any `json:"delta,omitempty"`
 	Message      string         `json:"message,omitempty"`
-	Feedback     map[string]any `json:"feedback,omitempty"`
 }
 
 func dialChatWebSocket(baseURL, token, botID string) (*websocket.Conn, error) {
@@ -244,7 +243,7 @@ func eventCode(event wsEvent) string {
 	if event.Code != "" {
 		return event.Code
 	}
-	return firstNestedString("code", event.Data, event.Feedback)
+	return firstNestedString("code", event.Data)
 }
 
 func readAccepted(connection *websocket.Conn, invocationID string, timeout time.Duration) ([]wsEvent, wsEvent, error) {

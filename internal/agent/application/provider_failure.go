@@ -1,52 +1,50 @@
 package application
 
 import (
-	"regexp"
-	"strings"
+	"errors"
+	"net/url"
+
+	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/apperror"
 )
 
-// Provider stream failures reach the application layer as the provider's own
-// text: the runtime forwards `StreamEvent.Error`, and the native runtime's
-// retry decision already reads the same text (`internal/agent/runtime/native/
-// retry.go`). The patterns below name the four conditions a user can act on.
-// Everything else keeps the generic interrupted response.
-var (
-	providerAuthPattern = regexp.MustCompile(
-		`(?i)api error 40[13]\b|invalid[ _-]api[ _-]key|invalid_request_error: incorrect api key|authentication_error|unauthorized|permission_denied`,
-	)
-	providerQuotaPattern = regexp.MustCompile(
-		`(?i)api error 402\b|insufficient[ _-](balance|quota|credit|funds)|exceeded your current quota|billing_(hard_limit|not_active)|payment required`,
-	)
-	providerRateLimitPattern = regexp.MustCompile(
-		`(?i)(^|[^0-9])429($|[^0-9])|rate[ _-]?limit|too many requests|usage limit reached`,
-	)
-	providerOverloadPattern = regexp.MustCompile(
-		`(?i)server_is_overloaded|overloaded_error|\boverloaded\b|api error 50[0234]\b|service unavailable|temporarily unavailable`,
-	)
-)
-
-// providerFailureCode names the provider condition a failure text describes, or
-// returns an empty code when the text does not identify one. Order resolves the
-// overlaps in provider wording: an exhausted quota is often reported alongside
-// a rate limit ("exceeded your current quota" arrives as a 429), and a rejected
-// key is reported alongside both, so the more specific cause is matched first.
-func providerFailureCode(detail string) apperror.Code {
-	detail = strings.TrimSpace(detail)
-	if detail == "" {
-		return ""
+// providerFailureCode names the provider condition a run failure reports, or
+// returns an empty code when the failure does not identify one. modelCall
+// reports whether err is the failure of the model call itself.
+//
+// A provider that answered is read from the *sdk.APIError in the chain: its
+// Kind names the condition, and an answer the SDK did not classify is a
+// refusal the user has to resolve in the model settings. An error event inside
+// a stream carries no HTTP status, so an unclassified one names nothing. A
+// model call without an APIError whose chain holds a *url.Error is a request
+// net/http got no response to: the provider could not be reached. The same
+// error from the runtime's own work, such as an approval handler's request,
+// names no provider.
+func providerFailureCode(err error, modelCall bool) apperror.Code {
+	var apiErr *sdk.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.Kind {
+		case sdk.KindAuthentication:
+			return apperror.CodeAgentProviderAuthFailed
+		case sdk.KindPermissionDenied:
+			return apperror.CodeAgentProviderPermissionDenied
+		case sdk.KindQuotaExhausted:
+			return apperror.CodeAgentProviderQuotaExhausted
+		case sdk.KindRateLimited:
+			return apperror.CodeAgentProviderRateLimited
+		case sdk.KindServerError:
+			return apperror.CodeAgentProviderOverloaded
+		default:
+			if apiErr.StatusCode >= 400 {
+				return apperror.CodeAgentProviderRequestRejected
+			}
+			return ""
+		}
 	}
-	switch {
-	case providerAuthPattern.MatchString(detail):
-		return apperror.CodeAgentProviderAuthFailed
-	case providerQuotaPattern.MatchString(detail):
-		return apperror.CodeAgentProviderQuotaExhausted
-	case providerRateLimitPattern.MatchString(detail):
-		return apperror.CodeAgentProviderRateLimited
-	case providerOverloadPattern.MatchString(detail):
-		return apperror.CodeAgentProviderOverloaded
-	default:
-		return ""
+	var urlErr *url.Error
+	if modelCall && errors.As(err, &urlErr) {
+		return apperror.CodeAgentProviderUnreachable
 	}
+	return ""
 }

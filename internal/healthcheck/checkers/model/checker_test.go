@@ -32,7 +32,6 @@ func (p testProber) Test(ctx context.Context, id string) (models.TestResponse, e
 	return models.TestResponse{
 		Status:    models.TestStatusOK,
 		Reachable: true,
-		Message:   "ok",
 	}, nil
 }
 

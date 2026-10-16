@@ -107,7 +107,7 @@ func (m *Manager) readDecisionOutput(ctx context.Context, response DecisionRespo
 			// Done or Failed: the log has no further readers. Reclaim the entries
 			// now instead of waiting for the state TTL; the claim marker stays.
 			if releaseErr := m.backend.ReleaseDecisionOutput(context.WithoutCancel(ctx), ref); releaseErr != nil {
-				m.logger.Warn("release decision output log failed", slog.Any("error", releaseErr))
+				m.logger.WarnContext(ctx, "release decision output log failed", slog.Any("error", releaseErr))
 			}
 		}
 		return true, err
@@ -174,7 +174,7 @@ func (m *Manager) PublishDecisionOutput(ctx context.Context, command Command, se
 			Type: EventDecisionOutput, BotID: topic.BotID, SessionID: topic.SessionID,
 			RunID: command.RunID, Seq: int64(state.Length),
 		}); err != nil {
-			m.logger.Warn("publish decision output wakeup failed; reader will reconcile from log", slog.Any("error", err))
+			m.logger.WarnContext(ctx, "publish decision output wakeup failed; reader will reconcile from log", slog.Any("error", err))
 		}
 	}
 	if state.Exceeded {

@@ -4,6 +4,9 @@ import (
 	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/step"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 // interruptedStepCapture retains only the current model call's text and
@@ -12,7 +15,7 @@ import (
 // finish event was still buffered for this consumer.
 type interruptedStepCapture struct {
 	text                 strings.Builder
-	textProviderMetadata map[string]any
+	textProviderMetadata sdk.ProviderMetadata
 	reasoningBlocks      reasoningBlockCapture
 	toolActivity         bool
 	finished             bool
@@ -61,7 +64,7 @@ func (c *reasoningBlockCapture) observe(
 	id, text string,
 	format sdk.ReasoningFormat,
 	model string,
-	meta map[string]any,
+	meta sdk.ProviderMetadata,
 ) {
 	idx := c.at(id)
 	c.parts[idx].Text += text
@@ -71,15 +74,7 @@ func (c *reasoningBlockCapture) observe(
 	if model != "" {
 		c.parts[idx].Model = model
 	}
-	if len(meta) == 0 {
-		return
-	}
-	if c.parts[idx].ProviderMetadata == nil {
-		c.parts[idx].ProviderMetadata = make(map[string]any, len(meta))
-	}
-	for key, value := range meta {
-		c.parts[idx].ProviderMetadata[key] = value
-	}
+	c.parts[idx].ProviderMetadata = c.parts[idx].ProviderMetadata.Merge(meta)
 }
 
 func (c *reasoningBlockCapture) messageParts() []sdk.MessagePart {
@@ -162,8 +157,8 @@ func (c *interruptedStepCapture) observe(part sdk.StreamPart) {
 	case *sdk.ReasoningEndPart:
 		c.reasoningBlocks.observe(p.ID, "", p.Format, p.Model, p.ProviderMetadata)
 	case *sdk.ToolInputStartPart, *sdk.ToolInputDeltaPart, *sdk.ToolInputEndPart,
-		*sdk.StreamToolCallPart, *sdk.StreamToolResultPart, *sdk.StreamToolErrorPart,
-		*sdk.ToolOutputDeniedPart, *sdk.ToolApprovalRequestPart, *sdk.ToolProgressPart:
+		*sdk.StreamToolCallPart, *toolexec.StreamToolResultPart, *toolexec.StreamToolErrorPart,
+		*toolexec.ToolOutputDeniedPart, *toolexec.ToolApprovalRequestPart, *toolexec.ToolProgressPart:
 		c.toolActivity = true
 	case *sdk.FinishStepPart:
 		c.finished = true
@@ -173,7 +168,7 @@ func (c *interruptedStepCapture) observe(part sdk.StreamPart) {
 // snapshot returns retained output only at the uncommitted frontier. A finished
 // step is still eligible when its complete commit lost the abort race; a
 // successful complete commit advances nextDurableStep and rejects it here.
-func (c *interruptedStepCapture) snapshot(nextDurableStep int) *sdk.StepResult {
+func (c *interruptedStepCapture) snapshot(nextDurableStep int) *step.Record {
 	text := c.text.String()
 	if c.toolActivity || c.stepIndex != nextDurableStep ||
 		(strings.TrimSpace(text) == "" && c.reasoningBlocks.empty()) {
@@ -188,10 +183,12 @@ func (c *interruptedStepCapture) snapshot(nextDurableStep int) *sdk.StepResult {
 			ProviderMetadata: c.textProviderMetadata,
 		})
 	}
-	return &sdk.StepResult{
-		Text:           text,
-		Reasoning:      c.reasoningBlocks.text(),
-		ReasoningParts: c.reasoningBlocks.parts,
-		Messages:       []sdk.Message{{Role: sdk.MessageRoleAssistant, Content: parts}},
+	return &step.Record{
+		Result: sdk.ModelResult{
+			Text:           text,
+			Reasoning:      c.reasoningBlocks.text(),
+			ReasoningParts: c.reasoningBlocks.parts,
+		},
+		Messages: []sdk.Message{{Role: sdk.MessageRoleAssistant, Content: parts}},
 	}
 }

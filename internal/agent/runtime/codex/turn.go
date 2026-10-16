@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // interruptSettleTimeout bounds how long an interrupted turn may take to
@@ -280,7 +280,11 @@ func (t *turnState) handleNotification(decoded any) {
 			return
 		}
 		if params.WillRetry {
-			t.logger.Warn("codex turn error, retrying", slog.String("thread_id", t.threadID), slog.String("message", params.Error.Message))
+			attrs := append([]slog.Attr{
+				slog.String("thread_id", t.threadID),
+				slog.String("message", errs.RedactURLs(turnErrorText(&params.Error))),
+			}, summarizeErrorInfo(params.Error.CodexErrorInfo).attrs()...)
+			t.logger.LogAttrs(t.ctx, slog.LevelWarn, "codex turn error, retrying", attrs...)
 			return
 		}
 		t.mu.Lock()
@@ -624,7 +628,7 @@ func (t *turnState) decide(ctx context.Context, callID, toolName string, input m
 		if ctx.Err() != nil {
 			return approval.FlowResult{Status: approval.StatusCancelled, DecisionReason: "the turn ended before a decision arrived"}
 		}
-		t.logger.Error("codex approval flow failed", slog.String("thread_id", t.threadID), slog.Any("error", err))
+		t.logger.ErrorContext(ctx, "codex approval flow failed", slog.String("thread_id", t.threadID), slog.Any("error", err))
 		return approval.FlowResult{Status: approval.StatusCancelled, DecisionReason: "approval flow failed"}
 	}
 	return result
@@ -647,7 +651,7 @@ func (t *turnState) emitApprovalRequest(req approval.Request) bool {
 }
 
 // result assembles the durable outcome after the turn settled.
-func (t *turnState) result(newThreadID string) (external.PromptResult, error) {
+func (t *turnState) result() (external.PromptResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -670,16 +674,11 @@ func (t *turnState) result(newThreadID string) (external.PromptResult, error) {
 		usage := *t.usage
 		out.Usage = &usage
 	}
-	if newThreadID != "" || t.threadTotals != nil {
+	if t.threadTotals != nil {
 		out.RuntimeMetadata = map[string]any{}
-		if newThreadID != "" {
-			out.RuntimeMetadata[metadataThreadIDKey] = newThreadID
-		}
 		// Context-occupancy data for the session UI: the thread's cumulative
 		// token count against its model context window.
-		if t.threadTotals != nil {
-			out.RuntimeMetadata["codex_thread_total_tokens"] = t.threadTotals.TotalTokens
-		}
+		out.RuntimeMetadata["codex_thread_total_tokens"] = t.threadTotals.TotalTokens
 		if t.contextWindow != nil {
 			out.RuntimeMetadata["codex_context_window"] = *t.contextWindow
 		}
@@ -704,11 +703,7 @@ func (t *turnState) result(newThreadID string) (external.PromptResult, error) {
 	case protocol.TurnStatusInterrupted:
 		return out, nil
 	default:
-		message := "codex turn failed"
-		if turnErr != nil && strings.TrimSpace(turnErr.Message) != "" {
-			message = turnErr.Message
-		}
-		return out, errors.New(message)
+		return out, failedTurnError(turnErr)
 	}
 }
 

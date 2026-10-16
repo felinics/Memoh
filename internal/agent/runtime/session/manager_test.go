@@ -15,6 +15,8 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agent/turn"
 	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const (
@@ -93,6 +95,8 @@ type blockingCommandResultLoadBackend struct {
 	DistributedBackend
 	started chan struct{}
 	once    sync.Once
+	// answered is how many reads find no result before the reads block.
+	answered atomic.Int32
 }
 
 type closeErrorBackend struct {
@@ -124,6 +128,9 @@ type gatedCommandResultLoadBackend struct {
 
 func (b *blockingCommandResultLoadBackend) LoadCommandResult(ctx context.Context, _ string) (Command, bool, error) {
 	b.once.Do(func() { close(b.started) })
+	if b.answered.Add(-1) >= 0 {
+		return Command{}, false, nil
+	}
 	<-ctx.Done()
 	return Command{}, false, ctx.Err()
 }
@@ -156,6 +163,101 @@ func TestRuntimeCommandResultPollingHonorsAcknowledgementDeadline(t *testing.T) 
 	case <-backend.started:
 	default:
 		t.Fatal("result polling did not reach the backend")
+	}
+}
+
+// A lookup that outlives its own budget is the backend's failure, whether it
+// is the first lookup or one after lookups that found no result yet.
+func TestRuntimeCommandResultPollingReportsALookupOverItsBudget(t *testing.T) {
+	for name, answered := range map[string]int32{"first lookup blocks": 0, "a later lookup blocks": 1} {
+		t.Run(name, func(t *testing.T) {
+			backend := &blockingCommandResultLoadBackend{started: make(chan struct{})}
+			backend.answered.Store(answered)
+			manager := NewManager(backend, Options{CommandAckTTL: 50 * time.Millisecond})
+
+			startedAt := time.Now()
+			err := manager.waitCommandResult(context.Background(), Command{ID: "command-blocked"}, make(chan error), 400*time.Millisecond)
+			elapsed := time.Since(startedAt)
+			if errs.FaultOf(err) != apperror.FaultDependency || errors.Is(err, ErrCommandNotAcknowledged) {
+				t.Fatalf("wait error = %v (fault %q), want the backend's failure", err, errs.FaultOf(err))
+			}
+			if elapsed > 650*time.Millisecond {
+				t.Fatalf("blocked result lookup exceeded the wait: %s", elapsed)
+			}
+		})
+	}
+}
+
+// slowCommandResultLoadBackend answers every result lookup, without a result,
+// after a delay.
+type slowCommandResultLoadBackend struct {
+	DistributedBackend
+	delay time.Duration
+}
+
+func (b slowCommandResultLoadBackend) LoadCommandResult(ctx context.Context, _ string) (Command, bool, error) {
+	select {
+	case <-time.After(b.delay):
+		return Command{}, false, nil
+	case <-ctx.Done():
+		return Command{}, false, ctx.Err()
+	}
+}
+
+// A slow backend that answers every lookup within its budget is no evidence
+// of a failure, though the wait's deadline cuts its last lookup short.
+func TestRuntimeCommandResultPollingIgnoresALookupTheDeadlineCut(t *testing.T) {
+	for _, delay := range []time.Duration{60 * time.Millisecond, 90 * time.Millisecond, 120 * time.Millisecond} {
+		manager := NewManager(slowCommandResultLoadBackend{delay: delay}, Options{CommandAckTTL: 200 * time.Millisecond})
+		err := manager.waitCommandResult(context.Background(), Command{ID: "command-slow"}, make(chan error), 500*time.Millisecond)
+		if !errors.Is(err, ErrCommandNotAcknowledged) {
+			t.Fatalf("lookups of %s: wait error = %v (fault %q), want ErrCommandNotAcknowledged", delay, err, errs.FaultOf(err))
+		}
+	}
+}
+
+// deadlineTimeoutCommandResultLoadBackend answers lookups without a result,
+// except the one its context's deadline is about to cut: that one fails when
+// the deadline passes, the way a socket deadline set from the context can,
+// before the context itself reports it.
+type deadlineTimeoutCommandResultLoadBackend struct {
+	DistributedBackend
+	timeouts atomic.Int32
+}
+
+func (b *deadlineTimeoutCommandResultLoadBackend) LoadCommandResult(ctx context.Context, _ string) (Command, bool, error) {
+	deadline, ok := ctx.Deadline()
+	// Within a poll interval of the deadline: the last lookup of the wait.
+	if !ok || time.Until(deadline) > 70*time.Millisecond {
+		return Command{}, false, nil
+	}
+	time.Sleep(time.Until(deadline))
+	b.timeouts.Add(1)
+	return Command{}, false, errors.New("i/o timeout")
+}
+
+func TestRuntimeCommandResultPollingIgnoresATimeoutAtTheWaitDeadline(t *testing.T) {
+	for range 20 {
+		backend := &deadlineTimeoutCommandResultLoadBackend{}
+		manager := NewManager(backend, Options{CommandAckTTL: 2 * time.Second})
+		err := manager.waitCommandResult(context.Background(), Command{ID: "command-cut"}, make(chan error), 200*time.Millisecond)
+		if backend.timeouts.Load() == 0 {
+			t.Fatal("no lookup ran into the wait's deadline")
+		}
+		if !errors.Is(err, ErrCommandNotAcknowledged) {
+			t.Fatalf("wait error = %v (fault %q), want ErrCommandNotAcknowledged", err, errs.FaultOf(err))
+		}
+	}
+}
+
+// An owner that never answers leaves lookups that return without a result.
+func TestRuntimeCommandResultPollingReportsAnUnansweredCommand(t *testing.T) {
+	backend := &blockingCommandResultLoadBackend{started: make(chan struct{})}
+	backend.answered.Store(1 << 20)
+	manager := NewManager(backend, Options{CommandAckTTL: 40 * time.Millisecond})
+	err := manager.waitCommandResult(context.Background(), Command{ID: "command-unanswered"}, make(chan error), manager.commandTimeout())
+	if !errors.Is(err, ErrCommandNotAcknowledged) {
+		t.Fatalf("wait error = %v, want ErrCommandNotAcknowledged", err)
 	}
 }
 
@@ -994,7 +1096,7 @@ func runManagerAbortAcknowledgesReservedRunBeforeTerminalCompletion(t *testing.T
 	if err := receiveTestResult(t, "aborted run admission", startErr); err == nil {
 		t.Fatal("start run unexpectedly activated after abort")
 	}
-	if err := manager.FinishRun(context.Background(), handle, RunStatusAborted, ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, RunStatusAborted); err != nil {
 		t.Fatalf("finish aborted run: %v", err)
 	}
 	snapshot, err = manager.Snapshot(context.Background(), testBotID, testSessionID)
@@ -1066,7 +1168,7 @@ func runManagerDoesNotRetryFinishAfterOwnershipLoss(t *testing.T, suite distribu
 	}
 	_ = manager.stopLeaseRenewalContext(context.Background(), manager.localControl("stream-expired-finish"))
 	time.Sleep(leaseTTL + leaseTTL/2)
-	if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, "stream-expired-finish"), RunStatusCompleted, ""); !errors.Is(err, ErrRunOwnershipLost) {
+	if _, err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, "stream-expired-finish"), RunStatusCompleted); !errors.Is(err, ErrRunOwnershipLost) {
 		t.Fatalf("finish expired run error = %v, want ErrRunOwnershipLost", err)
 	}
 	if manager.localControl("stream-expired-finish") != nil {
@@ -1273,7 +1375,7 @@ func runCommonRuntimeManagerContract(t *testing.T, suite runtimeBackendContractS
 	})
 	t.Run("clears a retried error when the recovered stream ends", func(t *testing.T) {
 		t.Parallel()
-		runRuntimeManagerClearsRetriedErrorOnCleanEndContract(t, suite)
+		runRuntimeManagerRetryDiscardsAttemptOutputContract(t, suite)
 	})
 	t.Run("fences delayed owner mutations after stream id reuse", func(t *testing.T) {
 		t.Parallel()
@@ -1322,7 +1424,7 @@ func runRuntimeManagerScopesIdenticalRunIDsContract(t *testing.T, suite runtimeB
 	}
 	for _, sessionID := range []string{"session-scope-a", "session-scope-b"} {
 		handle := requireRunHandle(t, manager, testBotID, sessionID, runID)
-		if err := manager.FinishRun(context.Background(), handle, RunStatusAborted, ""); err != nil {
+		if _, err := manager.FinishRun(context.Background(), handle, RunStatusAborted); err != nil {
 			t.Fatalf("finish %s: %v", sessionID, err)
 		}
 	}
@@ -1413,7 +1515,7 @@ func runRuntimeManagerFencesDelayedOwnerMutationsContract(t *testing.T, suite ru
 	if err != nil {
 		t.Fatalf("start first generation: %v", err)
 	}
-	if err := manager.FinishRun(context.Background(), oldHandle, RunStatusCompleted, ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), oldHandle, RunStatusCompleted); err != nil {
 		t.Fatalf("finish first generation: %v", err)
 	}
 	newAbort := make(chan struct{}, 1)
@@ -1439,7 +1541,7 @@ func runRuntimeManagerFencesDelayedOwnerMutationsContract(t *testing.T, suite ru
 	if _, err := manager.HandleAgentEvent(context.Background(), oldHandle, native.StreamEvent{Type: native.EventTextDelta, Delta: "late output"}); !errors.Is(err, ErrRunOwnershipLost) {
 		t.Fatalf("late event error = %v, want ErrRunOwnershipLost", err)
 	}
-	if err := manager.FinishRun(context.Background(), oldHandle, RunStatusErrored, "late finish"); !errors.Is(err, ErrRunOwnershipLost) {
+	if _, err := manager.FinishRun(context.Background(), oldHandle, RunStatusErrored); !errors.Is(err, ErrRunOwnershipLost) {
 		t.Fatalf("late finish error = %v, want ErrRunOwnershipLost", err)
 	}
 	if manager.localControlForHandle(newHandle) == nil {
@@ -1450,7 +1552,7 @@ func runRuntimeManagerFencesDelayedOwnerMutationsContract(t *testing.T, suite ru
 	if err != nil {
 		t.Fatalf("load current generation: %v", err)
 	}
-	if !runMatchesHandle(snapshot.CurrentRunView, newHandle) || snapshot.CurrentRunView.Status != RunStatusRunning || len(snapshot.CurrentRunView.Messages) != 0 || snapshot.CurrentRunView.Error != "" {
+	if !runMatchesHandle(snapshot.CurrentRunView, newHandle) || snapshot.CurrentRunView.Status != RunStatusRunning || len(snapshot.CurrentRunView.Messages) != 0 || snapshot.CurrentRunView.ErrorCode != "" {
 		t.Fatalf("current generation changed by stale callback: %#v", snapshot.CurrentRunView)
 	}
 }
@@ -1651,7 +1753,7 @@ func runRuntimeManagerSkipsHappyPathTerminalReconciliation(t *testing.T, suite d
 		t.Fatalf("admit run: %v", err)
 	}
 	loadsBeforeFinish := backend.loads.Load()
-	if err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	if got := backend.loads.Load(); got != loadsBeforeFinish {
@@ -1710,7 +1812,7 @@ func runRuntimeManagerHandsExhaustedDurableFinishToReaper(t *testing.T, suite di
 				}
 				runs.SetFinalizeErr(transient)
 			}
-			if err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err == nil {
+			if _, err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted); err == nil {
 				t.Fatal("FinishRun() error = nil, want initial durable failure")
 			}
 
@@ -1869,7 +1971,7 @@ func runRuntimeManagerAcknowledgesAbortAfterRunReplacement(t *testing.T, suite d
 	}
 	receiveTestResult(t, "abort result polling", loadStarted)
 
-	if err := owner.FinishRun(context.Background(), handle, RunStatusAborted, ""); err != nil {
+	if _, err := owner.FinishRun(context.Background(), handle, RunStatusAborted); err != nil {
 		t.Fatalf("finish aborted run: %v", err)
 	}
 	replacement, err := owner.StartRunHandle(
@@ -2137,7 +2239,7 @@ func runRuntimeManagerScopesRunRefCleanupToGeneration(t *testing.T, suite distri
 	if err != nil || !ok {
 		t.Fatalf("load first generation ref = ok:%v err:%v", ok, err)
 	}
-	if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, runID), RunStatusCompleted, ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, runID), RunStatusCompleted); err != nil {
 		t.Fatalf("finish first generation: %v", err)
 	}
 	if err := manager.StartRun(context.Background(), testBotID, testSessionID, runID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
@@ -2186,7 +2288,7 @@ func runRuntimeManagerRejectsDelayedOldGenerationCommand(t *testing.T, suite dis
 	if err != nil || !ok {
 		t.Fatalf("load first generation ref = ok:%v err:%v", ok, err)
 	}
-	if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, runID), RunStatusCompleted, ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, runID), RunStatusCompleted); err != nil {
 		t.Fatalf("finish first generation: %v", err)
 	}
 	newAbort := make(chan struct{}, 1)
@@ -2283,6 +2385,10 @@ func runRuntimeManagerRejectsExpiredLeaseRevivalContract(t *testing.T, suite dis
 	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusLost {
 		t.Fatalf("expired current run = %#v, want lost", snapshot.CurrentRunView)
 	}
+	// The view names the expired lease by the code the reaper records for it.
+	if snapshot.CurrentRunView.ErrorCode != runErrorOwnerLeaseExpired {
+		t.Fatalf("expired current run code = %q, want %q", snapshot.CurrentRunView.ErrorCode, runErrorOwnerLeaseExpired)
+	}
 }
 
 func runRuntimeManagerCancelsExecutionAfterOwnershipLossContract(t *testing.T, suite distributedRuntimeBackendContractSuite) {
@@ -2365,7 +2471,7 @@ func runRuntimeManagerKeepsHookAuthorityForUserAbort(t *testing.T, suite distrib
 		t.Fatalf("user abort revoked terminal hook authority: %v", context.Cause(authorityCtx))
 	default:
 	}
-	if err := owner.FinishRun(context.Background(), requireRunHandle(t, owner, testBotID, testSessionID, testRunID), RunStatusAborted, ""); err != nil {
+	if _, err := owner.FinishRun(context.Background(), requireRunHandle(t, owner, testBotID, testSessionID, testRunID), RunStatusAborted); err != nil {
 		t.Fatalf("finish aborted run: %v", err)
 	}
 	select {
@@ -2437,7 +2543,7 @@ func runRuntimeManagerRetriesTerminalUpdateBeforeDroppingOwnerRoute(t *testing.T
 	firstHandle := requireRunHandle(t, manager, testBotID, testSessionID, "stream-finish-retry")
 
 	backend.failing.Store(true)
-	if err := manager.FinishRun(context.Background(), firstHandle, RunStatusErrored, "stream failed"); err == nil {
+	if _, err := manager.FinishRun(context.Background(), firstHandle, RunStatusErrored); err == nil {
 		t.Fatal("terminal update unexpectedly succeeded")
 	}
 	if manager.localControlForHandle(firstHandle) == nil {
@@ -2451,15 +2557,15 @@ func runRuntimeManagerRetriesTerminalUpdateBeforeDroppingOwnerRoute(t *testing.T
 	snapshot := waitRuntimeSnapshot(t, manager, testBotID, testSessionID, func(snapshot Snapshot) bool {
 		return snapshot.CurrentRunView != nil && snapshot.CurrentRunView.Status == RunStatusErrored
 	})
-	if snapshot.CurrentRunView.Error != "stream failed" {
-		t.Fatalf("terminal retry error = %q", snapshot.CurrentRunView.Error)
+	if snapshot.CurrentRunView.ErrorCode != "runtime_run_failed" {
+		t.Fatalf("terminal retry error code = %q", snapshot.CurrentRunView.ErrorCode)
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		_, ok, err := manager.RunRef(context.Background(), testBotID, testSessionID, "stream-finish-retry")
 		if err == nil && !ok && manager.localControlForHandle(firstHandle) == nil {
 			secondHandle := requireRunHandle(t, manager, testBotID, secondSessionID, "stream-finish-retry")
-			if err := manager.FinishRun(context.Background(), secondHandle, RunStatusCompleted, ""); err != nil {
+			if _, err := manager.FinishRun(context.Background(), secondHandle, RunStatusCompleted); err != nil {
 				t.Fatalf("finish duplicate-id run: %v", err)
 			}
 			return
@@ -2930,10 +3036,10 @@ func runRuntimeManagerRoutesAbortAcrossManagersContract(t *testing.T, suite dist
 	snapshot := waitRuntimeSnapshot(t, owner, testBotID, testSessionID, func(s Snapshot) bool {
 		return s.CurrentRunView != nil && s.CurrentRunView.Status == RunStatusAborting
 	})
-	if snapshot.CurrentRunView.Error != "" {
-		t.Fatalf("abort error = %q, want empty", snapshot.CurrentRunView.Error)
+	if snapshot.CurrentRunView.ErrorCode != "" {
+		t.Fatalf("abort error code = %q, want empty", snapshot.CurrentRunView.ErrorCode)
 	}
-	if err := owner.FinishRun(context.Background(), requireRunHandle(t, owner, testBotID, testSessionID, testRunID), RunStatusAborted, ""); err != nil {
+	if _, err := owner.FinishRun(context.Background(), requireRunHandle(t, owner, testBotID, testSessionID, testRunID), RunStatusAborted); err != nil {
 		t.Fatalf("finish aborted run: %v", err)
 	}
 	snapshot, err := owner.Snapshot(context.Background(), testBotID, testSessionID)
@@ -3061,7 +3167,8 @@ func runRuntimeManagerAcknowledgesAppliedResponseAfterFinish(t *testing.T, suite
 	}
 	handle := requireRunHandle(t, owner, testBotID, testSessionID, testRunID)
 	owner.SetCommandHandler(func(ctx context.Context, _ Command) error {
-		return owner.FinishRun(context.WithoutCancel(ctx), handle, RunStatusCompleted, "")
+		_, err := owner.FinishRun(context.WithoutCancel(ctx), handle, RunStatusCompleted)
+		return err
 	})
 	if _, err := owner.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
 		Type: native.EventToolApprovalRequest, ToolName: "exec", ToolCallID: "call-applied",
@@ -3144,7 +3251,7 @@ func runRuntimeManagerCancelsActiveResponseOnFinish(t *testing.T, suite distribu
 		dispatchDone <- dispatchResult{handled: handled, err: err}
 	}()
 	receiveTestResult(t, "active response handler start", handlerStarted)
-	if err := owner.FinishRun(context.Background(), handle, RunStatusCompleted, ""); err != nil {
+	if _, err := owner.FinishRun(context.Background(), handle, RunStatusCompleted); err != nil {
 		t.Fatalf("finish run with active response: %v", err)
 	}
 	if err := receiveTestResult(t, "active response handler cancellation", handlerCanceled); !errors.Is(err, context.Canceled) {
@@ -3737,7 +3844,7 @@ func runRuntimeManagerReleasesOwnedRunOnClose(t *testing.T, suite distributedRun
 	if err != nil {
 		t.Fatalf("load released snapshot: %v", err)
 	}
-	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusLost || snapshot.CurrentRunView.Error != runtimeOwnerShutdownError || snapshot.CurrentRunView.OwnerLeaseExpiresAt != nil {
+	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusLost || snapshot.CurrentRunView.OwnerLeaseExpiresAt != nil {
 		t.Fatalf("released snapshot = %#v", snapshot.CurrentRunView)
 	}
 	if _, ok, err := backends[1].LoadRunRef(context.Background(), Key{BotID: testBotID, SessionID: "session-graceful-release"}, "stream-graceful-release"); err != nil || ok {
@@ -3830,7 +3937,7 @@ func runRuntimeManagerPreservesPreparedOutcomeOnClose(t *testing.T, suite distri
 	if err != nil || !ok {
 		t.Fatalf("load active shutdown snapshot = ok:%v err:%v", ok, err)
 	}
-	if activeSnapshot.CurrentRunView == nil || activeSnapshot.CurrentRunView.Status != RunStatusLost || activeSnapshot.CurrentRunView.Error != runtimeOwnerShutdownError {
+	if activeSnapshot.CurrentRunView == nil || activeSnapshot.CurrentRunView.Status != RunStatusLost {
 		t.Fatalf("active shutdown snapshot = %#v", activeSnapshot.CurrentRunView)
 	}
 }
@@ -3914,7 +4021,7 @@ func runRuntimeManagerKeepsErroredStreamErroredAfterAbortContract(t *testing.T, 
 	}); err != nil {
 		t.Fatalf("handle abort terminal event: %v", err)
 	}
-	if err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, ""); err != nil {
 		t.Fatalf("finish errored run: %v", err)
 	}
 
@@ -3925,8 +4032,8 @@ func runRuntimeManagerKeepsErroredStreamErroredAfterAbortContract(t *testing.T, 
 	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusErrored {
 		t.Fatalf("current run = %#v, want errored", snapshot.CurrentRunView)
 	}
-	if snapshot.CurrentRunView.Error != "runtime interrupted" {
-		t.Fatalf("error = %q, want runtime interrupted", snapshot.CurrentRunView.Error)
+	if snapshot.CurrentRunView.ErrorCode != "runtime_run_failed" {
+		t.Fatalf("error code = %q, want runtime_run_failed", snapshot.CurrentRunView.ErrorCode)
 	}
 }
 
@@ -3949,8 +4056,8 @@ func TestRuntimeManagerPublishesStableStreamErrorCode(t *testing.T) {
 	if snapshot.CurrentRunView == nil {
 		t.Fatal("current run is nil")
 	}
-	if snapshot.CurrentRunView.ErrorCode != "agent.response_timeout" || snapshot.CurrentRunView.Error != "public timeout" {
-		t.Fatalf("runtime error = code:%q detail:%q", snapshot.CurrentRunView.ErrorCode, snapshot.CurrentRunView.Error)
+	if snapshot.CurrentRunView.ErrorCode != "agent.response_timeout" {
+		t.Fatalf("runtime error code = %q", snapshot.CurrentRunView.ErrorCode)
 	}
 }
 
@@ -3981,7 +4088,7 @@ func runRuntimeManagerKeepsErroredStreamErroredAfterEndContract(t *testing.T, su
 		prepared.CurrentRunView.ProposedTerminalStatus != RunStatusErrored {
 		t.Fatalf("prepared run = %#v, want finishing -> errored", prepared.CurrentRunView)
 	}
-	if err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, ""); err != nil {
 		t.Fatalf("finish errored run: %v", err)
 	}
 
@@ -3989,12 +4096,12 @@ func runRuntimeManagerKeepsErroredStreamErroredAfterEndContract(t *testing.T, su
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusErrored || snapshot.CurrentRunView.Error != "provider failed" {
+	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusErrored || snapshot.CurrentRunView.ErrorCode != "runtime_run_failed" {
 		t.Fatalf("current run = %#v, want errored provider failure", snapshot.CurrentRunView)
 	}
 }
 
-func runRuntimeManagerClearsRetriedErrorOnCleanEndContract(t *testing.T, suite runtimeBackendContractSuite) {
+func runRuntimeManagerRetryDiscardsAttemptOutputContract(t *testing.T, suite runtimeBackendContractSuite) {
 	t.Helper()
 
 	manager := testRuntimeManager(t, suite.newBackend(t), "owner-retry-recovered")
@@ -4002,21 +4109,31 @@ func runRuntimeManagerClearsRetriedErrorOnCleanEndContract(t *testing.T, suite r
 		t.Fatalf("start run: %v", err)
 	}
 	handle := requireRunHandle(t, manager, testBotID, testSessionID, testRunID)
-	// The native stream publishes the mid-stream failure before it retries, so
-	// a run that recovers must not stay errored once it reaches a clean end.
+	// The failed attempt streamed some text before the native stream retried
+	// it. The retry discards that output; the recovered attempt then ends
+	// cleanly and the run completes.
 	if _, err := manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
-		Type:  native.EventError,
-		Error: "provider hung up",
+		Type:  native.EventTextDelta,
+		Delta: "partial answer",
 	}); err != nil {
-		t.Fatalf("handle error event: %v", err)
+		t.Fatalf("handle text event: %v", err)
+	}
+	if streamed, err := manager.Snapshot(context.Background(), testBotID, testSessionID); err != nil || streamed.CurrentRunView == nil || len(streamed.CurrentRunView.Messages) == 0 {
+		t.Fatalf("run before retry = %#v, %v; want the attempt's partial output", streamed.CurrentRunView, err)
 	}
 	if _, err := manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
 		Type:       native.EventRetry,
 		Attempt:    1,
 		MaxAttempt: 3,
-		RetryError: "provider hung up",
 	}); err != nil {
 		t.Fatalf("handle retry event: %v", err)
+	}
+	retried, err := manager.Snapshot(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatalf("retried snapshot: %v", err)
+	}
+	if retried.CurrentRunView == nil || len(retried.CurrentRunView.Messages) != 0 || retried.CurrentRunView.ErrorCode != "" {
+		t.Fatalf("run after retry = %#v, want the attempt's output discarded and no error", retried.CurrentRunView)
 	}
 	if _, err := manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
 		Type: native.EventAgentEnd,
@@ -4031,7 +4148,7 @@ func runRuntimeManagerClearsRetriedErrorOnCleanEndContract(t *testing.T, suite r
 		prepared.CurrentRunView.ProposedTerminalStatus != RunStatusCompleted {
 		t.Fatalf("prepared run = %#v, want finishing -> completed", prepared.CurrentRunView)
 	}
-	if err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, ""); err != nil {
 		t.Fatalf("finish recovered run: %v", err)
 	}
 
@@ -4042,8 +4159,8 @@ func runRuntimeManagerClearsRetriedErrorOnCleanEndContract(t *testing.T, suite r
 	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusCompleted {
 		t.Fatalf("current run = %#v, want completed", snapshot.CurrentRunView)
 	}
-	if snapshot.CurrentRunView.Error != "" {
-		t.Fatalf("error = %q, want the retried failure cleared", snapshot.CurrentRunView.Error)
+	if snapshot.CurrentRunView.ErrorCode != "" {
+		t.Fatalf("error code = %q, want none for a recovered run", snapshot.CurrentRunView.ErrorCode)
 	}
 }
 

@@ -10,11 +10,15 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/settings"
 	"github.com/felinics/memoh/internal/userruntime"
 	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 type botRemoteRuntimeService interface {
@@ -79,8 +83,8 @@ func (h *BotRemoteRuntimeHandler) Register(e *echo.Echo) {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} workspace.WorkspaceTargetsResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/workspace-targets [get].
 func (h *BotRemoteRuntimeHandler) List(c echo.Context) error {
 	botID, err := h.requirePermission(c, bots.PermissionWorkspaceRead)
@@ -89,7 +93,7 @@ func (h *BotRemoteRuntimeHandler) List(c echo.Context) error {
 	}
 	targets, err := h.workspaces.ListWorkspaceTargets(c.Request().Context(), botID)
 	if err != nil {
-		return workspaceTargetHTTPError(h.log, err)
+		return workspaceTargetHTTPError(err)
 	}
 	return c.JSON(http.StatusOK, workspace.WorkspaceTargetsResponse{Targets: targets})
 }
@@ -101,9 +105,9 @@ func (h *BotRemoteRuntimeHandler) List(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param runtime_id path string true "Runtime ID"
 // @Success 200 {object} workspace.WorkspaceTarget
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/workspace-targets/remotes/{runtime_id} [put].
 func (h *BotRemoteRuntimeHandler) Mount(c echo.Context) error {
 	botID, err := h.requirePermission(c, bots.PermissionManage)
@@ -112,7 +116,10 @@ func (h *BotRemoteRuntimeHandler) Mount(c echo.Context) error {
 	}
 	target, err := h.service.Mount(c.Request().Context(), botID, c.Param("runtime_id"))
 	if err != nil {
-		return workspaceTargetHTTPError(h.log, err)
+		if errors.Is(err, userruntime.ErrInvalidInput) {
+			return apperror.FieldInvalid("runtime_id", err)
+		}
+		return workspaceTargetHTTPError(err)
 	}
 	return c.JSON(http.StatusOK, target)
 }
@@ -124,9 +131,9 @@ func (h *BotRemoteRuntimeHandler) Mount(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param target_id path string true "Workspace target ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/workspace-targets/{target_id} [delete].
 func (h *BotRemoteRuntimeHandler) Delete(c echo.Context) error {
 	botID, err := h.requirePermission(c, bots.PermissionManage)
@@ -134,10 +141,10 @@ func (h *BotRemoteRuntimeHandler) Delete(c echo.Context) error {
 		return err
 	}
 	if strings.TrimSpace(c.Param("target_id")) == workspace.WorkspaceTargetNative {
-		return echo.NewHTTPError(http.StatusBadRequest, "native workspace target cannot be deleted")
+		return apperror.FieldInvalid("target_id", errors.New("native workspace target cannot be deleted"))
 	}
 	if err := h.service.DeleteMount(c.Request().Context(), botID, c.Param("target_id")); err != nil {
-		return workspaceTargetHTTPError(h.log, err)
+		return workspaceTargetHTTPError(err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -149,9 +156,9 @@ func (h *BotRemoteRuntimeHandler) Delete(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param request body workspace.SetPrimaryWorkspaceTargetRequest true "Primary target"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/workspace-targets/primary [put].
 func (h *BotRemoteRuntimeHandler) SetPrimary(c echo.Context) error {
 	botID, err := h.requirePermission(c, bots.PermissionManage)
@@ -160,13 +167,13 @@ func (h *BotRemoteRuntimeHandler) SetPrimary(c echo.Context) error {
 	}
 	var req workspace.SetPrimaryWorkspaceTargetRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if strings.TrimSpace(req.TargetID) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "target_id is required")
+		return apperror.FieldRequired("target_id")
 	}
 	if err := h.service.SetPrimary(c.Request().Context(), botID, req.TargetID); err != nil {
-		return workspaceTargetHTTPError(h.log, err)
+		return workspaceTargetHTTPError(err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -180,9 +187,9 @@ func (h *BotRemoteRuntimeHandler) SetPrimary(c echo.Context) error {
 // @Param target_id path string true "Workspace target ID"
 // @Param request body workspace.UpdateWorkspaceTargetToolApprovalRequest true "Target tool approval"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/workspace-targets/{target_id}/tool-approval [put].
 func (h *BotRemoteRuntimeHandler) UpdateToolApproval(c echo.Context) error {
 	botID, err := h.requirePermission(c, bots.PermissionManage)
@@ -191,23 +198,23 @@ func (h *BotRemoteRuntimeHandler) UpdateToolApproval(c echo.Context) error {
 	}
 	var req workspace.UpdateWorkspaceTargetToolApprovalRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	targetID := strings.TrimSpace(c.Param("target_id"))
 	config, err := h.resolveToolApprovalUpdate(c.Request().Context(), botID, targetID, req)
 	if err != nil {
-		return workspaceTargetHTTPError(h.log, err)
+		return workspaceTargetHTTPError(err)
 	}
 	if targetID == workspace.WorkspaceTargetNative {
 		if h.settings == nil {
-			return workspaceTargetHTTPError(h.log, errors.New("settings service not configured"))
+			return workspaceTargetHTTPError(errors.New("settings service not configured"))
 		}
 		_, err = h.settings.UpsertBot(c.Request().Context(), botID, settings.UpsertRequest{ToolApprovalConfig: &config})
 	} else {
 		err = h.service.UpdateToolApprovalConfig(c.Request().Context(), botID, targetID, config)
 	}
 	if err != nil {
-		return workspaceTargetHTTPError(h.log, err)
+		return workspaceTargetHTTPError(err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -243,7 +250,7 @@ func (h *BotRemoteRuntimeHandler) resolveToolApprovalUpdate(
 	hasModes := req.Read != "" || req.Write != "" || req.Exec != ""
 	if !hasModes {
 		if req.ToolApprovalConfig == nil && req.Enabled == nil {
-			return config, workspace.ErrInvalidWorkspaceToolApprovalMode
+			return config, apperror.FieldRequired("tool_approval_config")
 		}
 		return config, nil
 	}
@@ -257,9 +264,9 @@ func (h *BotRemoteRuntimeHandler) requirePermission(c echo.Context, permission s
 	if err != nil {
 		return "", err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", err
 	}
 	if _, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.bots, h.accounts, identityID, botID, permission); err != nil {
 		return "", err
@@ -267,23 +274,37 @@ func (h *BotRemoteRuntimeHandler) requirePermission(c echo.Context, permission s
 	return botID, nil
 }
 
-func workspaceTargetHTTPError(log *slog.Logger, err error) error {
+// toolApprovalModeHTTPError names the mode field that is not allow, ask or deny.
+func toolApprovalModeHTTPError(err error) error {
+	var invalid *workspace.InvalidToolApprovalModeError
+	if errors.As(err, &invalid) {
+		switch invalid.Field {
+		case "read":
+			return apperror.FieldInvalid("read", err)
+		case "write":
+			return apperror.FieldInvalid("write", err)
+		case "exec":
+			return apperror.FieldInvalid("exec", err)
+		}
+	}
+	return errs.Wrap(err, "tool approval mode")
+}
+
+func workspaceTargetHTTPError(err error) error {
 	switch {
-	case errors.Is(err, workspace.ErrInvalidWorkspaceToolApprovalMode),
-		errors.Is(err, userruntime.ErrInvalidInput):
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	case errors.Is(err, workspace.ErrInvalidWorkspaceToolApprovalMode):
+		return toolApprovalModeHTTPError(err)
 	case errors.Is(err, workspace.ErrRemoteRuntimeNotUsable),
 		errors.Is(err, workspace.ErrWorkspaceTargetNotFound),
 		errors.Is(err, db.ErrNotFound):
-		return echo.NewHTTPError(http.StatusNotFound, "workspace target not found")
+		return apperror.Wrap(apperror.CodeWorkspaceTargetNotFound, err, nil)
 	case errors.Is(err, workspace.ErrRemoteRuntimeRevoked),
 		errors.Is(err, workspace.ErrRemoteRuntimeOwnerMismatch),
 		errors.Is(err, workspace.ErrRemoteRuntimeClientUpdateNeeded):
-		return echo.NewHTTPError(http.StatusConflict, err.Error())
+		return echo.NewHTTPError(http.StatusConflict).WithInternal(err)
+	case errors.Is(err, bridge.ErrUnavailable):
+		return workspaceUnavailableError(err)
 	default:
-		if log != nil {
-			log.Error("workspace target request failed", slog.Any("error", err))
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "internal server error")
+		return errs.Wrap(err, "workspace target request")
 	}
 }

@@ -43,6 +43,9 @@ type SDKModelConfig struct {
 	// ContextWindow is the configured context window the turn budgets against;
 	// legacy Anthropic thinking budgets are fitted to it. Zero means unknown.
 	ContextWindow int
+	// MaxOutputTokens is the model's configured output cap; the legacy
+	// Anthropic thinking budget is fitted below it. Zero means unknown.
+	MaxOutputTokens int
 }
 
 // ReasoningConfig is the resolved extended-thinking decision for one call,
@@ -61,6 +64,9 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 	chatCompletionsCompat := ResolveChatCompletionsCompat(cfg.BaseURL, cfg.ChatCompletionsCompat)
 
 	switch ClientType(cfg.ClientType) {
+	case ClientTypeOpenCodeGo:
+		return newOpenCodeGoModel(cfg)
+
 	case ClientTypeOpenAICompletions:
 		opts := []openaicompletions.Option{
 			openaicompletions.WithAPIKey(cfg.APIKey),
@@ -107,7 +113,7 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		}
 		// Anthropic extended thinking has two wire shapes by model generation:
 		//   - 4.6+ (Adaptive): thinking{type:"adaptive"}; effort is carried
-		//     per-request via output_config.effort (see BuildReasoningOptions).
+		//     per-request via output_config.effort (see ApplyReasoningToRequest).
 		//     budget_tokens is deprecated on 4.6 and rejected (400) on 4.7+, so it
 		//     is never sent here.
 		//   - <=4.5 (legacy): thinking is only enabled via
@@ -130,7 +136,7 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 			case rc.Active:
 				opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
 					Type:         "enabled",
-					BudgetTokens: AnthropicThinkingBudget(rc.Effort, cfg.ContextWindow),
+					BudgetTokens: AnthropicThinkingBudget(rc.Effort, cfg.ContextWindow, cfg.MaxOutputTokens),
 				}))
 			case rc.Disabled && anthropicNeedsExplicitOff(cfg.ReasoningOffSupport, cfg.ReasoningDefaultOn):
 				opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
@@ -185,14 +191,30 @@ func appendChatCompletionsCompat(
 	}
 }
 
-// BuildReasoningOptions returns per-request SDK generation options for
-// reasoning/thinking. It only ever sets an effort string (output_config.effort
-// for Anthropic, reasoning.effort for OpenAI); the adaptive thinking flag is set
-// at provider construction time in NewSDKChatModel. No token budgets are sent.
-func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
+// ApplyReasoningToRequest translates the resolved decision into the provider
+// effort and, for OpenCode Go, the catalog-declared thinking control.
+func ApplyReasoningToRequest(req *sdk.Request, cfg SDKModelConfig) {
+	if req == nil {
+		return
+	}
+	if cfg.ClientType == string(ClientTypeOpenCodeGo) {
+		applyOpenCodeGoThinking(req, cfg)
+	}
+	if effort, ok := ReasoningEffortParam(cfg); ok {
+		req.ReasoningEffort = &effort
+	}
+}
+
+// ReasoningEffortParam resolves the per-request reasoning effort value for the
+// resolved thinking decision. ok reports whether an effort should be sent at
+// all; ApplyReasoningToRequest sets Request.ReasoningEffort from it.
+func ReasoningEffortParam(cfg SDKModelConfig) (string, bool) {
 	rc := cfg.ReasoningConfig
 	if rc == nil {
-		return nil
+		return "", false
+	}
+	if cfg.ClientType == string(ClientTypeOpenCodeGo) {
+		return openCodeGoEffortParam(cfg)
 	}
 	ct := ClientType(cfg.ClientType)
 
@@ -206,11 +228,11 @@ func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
 		(isDeepSeekChatCompletionsCompat(cfg.ChatCompletionsCompat) || isMiniMaxChatCompletionsCompat(cfg.ChatCompletionsCompat)) {
 		switch {
 		case rc.Disabled:
-			return []sdk.GenerateOption{sdk.WithReasoningEffort(ReasoningEffortNone)}
+			return ReasoningEffortNone, true
 		case rc.Active && rc.Effort != "":
-			return []sdk.GenerateOption{sdk.WithReasoningEffort(openAIWireEffort(ct, rc.Effort))}
+			return rc.Effort, true
 		default:
-			return nil
+			return "", false
 		}
 	}
 
@@ -222,62 +244,51 @@ func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
 		// so send nothing for them. When disabled, send nothing too (absence of
 		// thinking == off for Anthropic).
 		if rc.Active && rc.Adaptive && rc.Effort != "" {
-			return []sdk.GenerateOption{sdk.WithReasoningEffort(rc.Effort)}
+			return rc.Effort, true
 		}
-		return nil
+		return "", false
 
 	case ClientTypeGoogleGenerativeAI:
 		// Google's thinking control rides on the provider (see googleThinkingFor),
 		// because budget and level are mutually exclusive and which one applies is
 		// a property of the model, not of the request.
-		return nil
+		return "", false
 
-	case ClientTypeOpenAIResponses, ClientTypeOpenAICodex, ClientTypeOpenAICompletions:
-		return openAIEffortOptions(ct, rc)
-
+	// Everything else rides the OpenAI effort field, with the value passed through
+	// as declared. The client type is not consulted: it names the shape of the
+	// request body, while which tiers an endpoint accepts is a property of the
+	// endpoint. Treating the OpenAI-shaped clients as capped at xhigh is what made
+	// max unreachable and silently downgraded a selected max (issue #1470).
 	default:
-		return openAIEffortOptions(ct, rc)
+		return openAIEffortParam(rc)
 	}
 }
 
-// openAIEffortOptions maps a reasoning decision to OpenAI-style reasoning.effort.
+// openAIEffortParam maps a reasoning decision to OpenAI-style reasoning.effort.
 // OpenAI expresses "off" as a member of the same enum ("none" from gpt-5.1 on),
 // so the off state travels in the very field that carries the tiers.
-func openAIEffortOptions(clientType ClientType, rc *ReasoningConfig) []sdk.GenerateOption {
+func openAIEffortParam(rc *ReasoningConfig) (string, bool) {
 	switch {
 	case rc.Active:
-		effort := openAIWireEffort(clientType, rc.Effort)
+		effort := rc.Effort
 		if effort == "" {
 			effort = ReasoningEffortMedium
 		}
-		return []sdk.GenerateOption{sdk.WithReasoningEffort(effort)}
+		return effort, true
 	case rc.Disabled:
 		// OffEffort is "none" when the model advertised that it can be turned off,
 		// and "" when it cannot. Omitting the field in the latter case lets the
 		// provider default stand; sending a real tier instead would turn thinking
 		// ON (OpenRouter, for instance, maps reasoning_effort:"low" onto Anthropic
 		// extended thinking), which is the opposite of what the user asked for.
-		off := openAIWireEffort(clientType, rc.OffEffort)
+		off := rc.OffEffort
 		if off == "" {
-			return nil
+			return "", false
 		}
-		return []sdk.GenerateOption{sdk.WithReasoningEffort(off)}
+		return off, true
 	default:
-		return nil
+		return "", false
 	}
-}
-
-// openAIWireEffort retains the generic OpenAI clients' existing max-to-xhigh
-// compatibility behavior. Codex accepts the catalog-advertised max value.
-//
-// The resolver already filters "max" out of the selectable tiers for these
-// clients, so this only fires for values that bypassed it — a stale stored effort,
-// or a caller that built a ReasoningConfig by hand.
-func openAIWireEffort(clientType ClientType, effort string) string {
-	if clientType != ClientTypeOpenAICodex && effort == reasoning.EffortMax {
-		return reasoning.EffortXHigh
-	}
-	return effort
 }
 
 // anthropicLegacyBudget maps an effort tier to the extended-thinking token

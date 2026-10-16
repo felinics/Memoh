@@ -56,21 +56,17 @@ func (q *Queries) CreateMemoryProvider(ctx context.Context, arg CreateMemoryProv
 	return i, err
 }
 
-const deleteMemoryProvider = `-- name: DeleteMemoryProvider :exec
-DELETE FROM memory_providers WHERE team_id = public.memoh_current_team_id() AND id = $1
+const getBuiltinMemoryProvider = `-- name: GetBuiltinMemoryProvider :one
+SELECT id, name, provider, config, is_default, created_at, updated_at, team_id FROM memory_providers
+WHERE team_id = public.memoh_current_team_id() AND provider = 'builtin'
+ORDER BY created_at ASC, id ASC
+LIMIT 1
 `
 
-func (q *Queries) DeleteMemoryProvider(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteMemoryProvider, id)
-	return err
-}
-
-const getDefaultMemoryProvider = `-- name: GetDefaultMemoryProvider :one
-SELECT id, name, provider, config, is_default, created_at, updated_at, team_id FROM memory_providers WHERE team_id = public.memoh_current_team_id() AND is_default = true LIMIT 1
-`
-
-func (q *Queries) GetDefaultMemoryProvider(ctx context.Context) (MemoryProvider, error) {
-	row := q.db.QueryRow(ctx, getDefaultMemoryProvider)
+// The team's Built-in Memory configuration row: the earliest builtin row,
+// matching the one the memory settings page has always edited.
+func (q *Queries) GetBuiltinMemoryProvider(ctx context.Context) (MemoryProvider, error) {
+	row := q.db.QueryRow(ctx, getBuiltinMemoryProvider)
 	var i MemoryProvider
 	err := row.Scan(
 		&i.ID,

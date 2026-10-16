@@ -14,6 +14,9 @@ format = "text"
 
 [server]
 addr = ":8080"
+# Externally reachable Web origin for capability setup links and MCP OAuth.
+# May also be set with MEMOH_SERVER_PUBLIC_URL.
+public_url = ""
 rpc_listen_addr = "127.0.0.1:9090"
 
 [channel]
@@ -22,7 +25,7 @@ rpc_listen_addr = "127.0.0.1:9091"
 
 [internal_rpc]
 # Leave shared_secret empty to run the pre-split all-in-one deployment: the
-# server embeds the channel runtime (external channels, email, webhooks) and
+# server embeds the channel runtime (external channels, webhooks) and
 # no memoh-channel process or internal RPC is needed.
 # Set a secret (e.g. `openssl rand -hex 32`) to split the channel runtime
 # into its own memoh-channel process; the internal RPC is plaintext, so keep
@@ -83,9 +86,11 @@ system_files_max_bytes = 32768
 # Pre-turn synchronous compaction backstop on the discuss and pipeline-chat
 # paths: shadow | active | off. shadow (default) only logs would-have-fired
 # decisions; active compacts synchronously before the model call once raw
-# history reaches the hard threshold (adds one summarizer LLM call of latency
+# history plus active summaries reach the hard threshold (adds one summarizer call
 # to that turn); off disables the backstop. The legacy history chat path keeps
 # its always-on synchronous backstop regardless of this setting.
+# Budget admission recovery can compact in shadow or active mode when compaction
+# is enabled for the bot; off disables this recovery.
 # sync_compaction = "shadow"
 
 [session_runtime]
@@ -239,3 +244,24 @@ discovery_cache_ttl_seconds = 600
 # UV_RELEASES_URL = "https://github.com/astral-sh/uv/releases"
 # NPM_MIRROR = "https://registry.npmjs.org"
 # UV_PYTHON_INSTALL_MIRROR = "https://github.com/astral-sh/python-build-standalone/releases/download"
+
+# Distributed tracing, off unless an endpoint is set here or in
+# OTEL_EXPORTER_OTLP_ENDPOINT. With no endpoint the process installs no
+# exporter at all, so leaving this section out costs nothing.
+# Full reference: docs/observability.md
+# [telemetry]
+# OTLP collector address. host:port for grpc, a URL for http.
+# endpoint = "127.0.0.1:4317"
+# "grpc" (default) or "http".
+# protocol = "grpc"
+# Plaintext. Required for a collector without TLS.
+# insecure = true
+# Fraction of traces this process starts that are recorded, 0 to 1. A trace
+# already sampled by the caller is always kept, whatever this says.
+# sample_ratio = 1.0
+# Reported service.name. Defaults to the binary's own ("memoh-server",
+# "memoh-channel").
+# service_name = ""
+# Sent with every export, for collectors that authenticate.
+# [telemetry.headers]
+# authorization = "Bearer ..."

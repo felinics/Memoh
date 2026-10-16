@@ -22,10 +22,3 @@ client_id = "${GITHUB_OAUTH_CLIENT_ID}"
 client_secret = "${GITHUB_OAUTH_CLIENT_SECRET}"
 redirect_uri = ""
 allowed_scopes = ["repo", "read:org"]
-
-[clients.gmail]
-display_name = "Gmail"
-client_id = "${GMAIL_OAUTH_CLIENT_ID}"
-client_secret = "${GMAIL_OAUTH_CLIENT_SECRET}"
-redirect_uri = ""
-allowed_scopes = ["https://mail.google.com/"]

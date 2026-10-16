@@ -4,19 +4,20 @@ import (
 	"encoding/json"
 	"reflect"
 
-	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/jsonschema-go/jsonschema"
+
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 // canonicalizeProviderToolSchemas mirrors Twilight's buildConfig schema
 // resolution before provider-attempt budgeting and hashing. Twilight treats
 // an already-resolved *jsonschema.Schema as final, so the SDK cannot rewrite
 // the audited tool payload later.
-func canonicalizeProviderToolSchemas(tools []sdk.Tool) []sdk.Tool {
+func canonicalizeProviderToolSchemas(tools []toolexec.Tool) []toolexec.Tool {
 	if len(tools) == 0 {
 		return tools
 	}
-	out := append([]sdk.Tool(nil), tools...)
+	out := append([]toolexec.Tool(nil), tools...)
 	for i := range out {
 		if schema, ok := canonicalProviderToolSchema(out[i].Parameters); ok {
 			out[i].Parameters = schema

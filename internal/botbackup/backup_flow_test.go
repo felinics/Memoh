@@ -7,7 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
-	"strings"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -37,7 +37,9 @@ func buildSampleBundle(t *testing.T) []byte {
 	write("bot/channel_configs.json", "channels", []map[string]any{{"channel_type": "telegram"}, {"channel_type": "discord"}})
 	write("bot/mcp_connections.json", "mcp", []map[string]any{{"name": "srv"}})
 	write("bot/schedules.json", "schedules", []map[string]any{{"name": "job"}})
-	write("bot/email_bindings.json", "email", []map[string]any{{"email_address": "a@b.com"}})
+	// Older bundles may still contain retired email data. It is never offered for restore.
+	write("bot/email_bindings.json", "email", []map[string]any{{"email_address": "legacy@example.com"}})
+	write("dependencies/email_providers.json", "email_providers", []map[string]any{{"provider": "gmail"}})
 	write("history/sessions.json", "history", []map[string]any{{"title": "chat 1", "type": "conversation"}})
 	write("history/messages.json", "history", []map[string]any{{"id": "1"}, {"id": "2"}, {"id": "3"}})
 	write("assets/message_assets.json", "assets", []map[string]any{{"name": "image.png"}})
@@ -89,6 +91,11 @@ func TestPreviewPlainBundleRoundTrip(t *testing.T) {
 	preview, err := svc.Preview(context.Background(), buildSampleBundle(t), ImportOptions{}, "")
 	if err != nil {
 		t.Fatalf("Preview() error = %v", err)
+	}
+	for _, section := range preview.Sections {
+		if section.Key == "email" {
+			t.Fatal("retired email data must not be offered for restore")
+		}
 	}
 	if preview.Encrypted {
 		t.Fatal("plain bundle reported as encrypted")
@@ -163,9 +170,8 @@ func TestImportEncryptedWithoutPassphraseErrors(t *testing.T) {
 		t.Fatalf("Encrypt() error = %v", err)
 	}
 	svc := &Service{}
-	if _, err := svc.Import(context.Background(), "user", enc.Bytes(), ImportOptions{}, ""); err == nil ||
-		!strings.Contains(err.Error(), "encrypted") {
-		t.Fatalf("Import(no passphrase) error = %v, want an 'encrypted' error", err)
+	if _, err := svc.Import(context.Background(), "user", enc.Bytes(), ImportOptions{}, ""); !errors.Is(err, secure.ErrPassphraseRequired) {
+		t.Fatalf("Import(no passphrase) error = %v, want ErrPassphraseRequired", err)
 	}
 }
 
@@ -190,9 +196,12 @@ func TestDecodeBundle(t *testing.T) {
 }
 
 func TestImportStateItemErr(t *testing.T) {
+	svc := &Service{logger: slog.New(slog.DiscardHandler)}
+	ctx := context.Background()
+
 	// Create mode: an item failure is fatal so the caller can roll back.
 	create := &importState{createMode: true}
-	if err := create.itemErr("acl rule", errString("boom")); err == nil {
+	if err := svc.itemErr(ctx, create, "acl_rule", "acl rule skipped", errString("boom")); err == nil {
 		t.Fatal("create mode itemErr should be fatal")
 	}
 	if len(create.warnings) != 0 {
@@ -200,12 +209,13 @@ func TestImportStateItemErr(t *testing.T) {
 	}
 
 	// Overwrite mode: the same failure degrades to a warning and continues.
+	// The warning names the item and leaves the cause out.
 	overwrite := &importState{createMode: false}
-	if err := overwrite.itemErr("acl rule", errString("boom")); err != nil {
+	if err := svc.itemErr(ctx, overwrite, "acl_rule", "acl rule skipped", errString("boom")); err != nil {
 		t.Fatalf("overwrite mode itemErr should not be fatal, got %v", err)
 	}
-	if len(overwrite.warnings) != 1 || !strings.Contains(overwrite.warnings[0], "acl rule") {
-		t.Fatalf("overwrite warnings = %v, want one mentioning 'acl rule'", overwrite.warnings)
+	if len(overwrite.warnings) != 1 || overwrite.warnings[0] != "acl rule skipped" {
+		t.Fatalf("overwrite warnings = %q, want [\"acl rule skipped\"]", overwrite.warnings)
 	}
 }
 

@@ -19,7 +19,6 @@ func TestToolCallEmojiBuiltin(t *testing.T) {
 		"list_schedule":  "📅",
 		"send":           "💬",
 		"get_contacts":   "👥",
-		"send_email":     "📧",
 		"spawn_agent":    "🤖",
 		"send_message":   "🤖",
 		"wait":           "⏱️",

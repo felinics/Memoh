@@ -2,10 +2,10 @@ package codex
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/runtime/agentprocess"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	"github.com/felinics/memoh/internal/workspace/vpath"
 )
@@ -24,12 +24,16 @@ func startAppServer(ctx context.Context, client *bridge.Client, workDir, home st
 		workDir = defaultProjectPath
 	}
 	if err := client.Mkdir(ctx, home); err != nil {
-		return nil, fmt.Errorf("create codex home %s: %w", home, err)
+		return nil, errs.WrapDependency(err, "create codex home "+home)
 	}
 	if err := materializeCodexConfig(ctx, client, home, cfg); err != nil {
 		return nil, err
 	}
-	return agentprocess.Start(ctx, client, appServerCommand(launcher), workDir, codexAppServerEnv(home))
+	proc, err := agentprocess.Start(ctx, client, appServerCommand(launcher), workDir, codexAppServerEnv(home))
+	if err != nil {
+		return nil, errs.WrapDependency(err, "")
+	}
+	return proc, nil
 }
 
 func codexAppServerEnv(home string) []string {

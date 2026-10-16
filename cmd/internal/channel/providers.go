@@ -1,5 +1,5 @@
 // Package channel assembles the shared command-side Channel module:
-// registry/manager/processor, discuss pipeline, email, and webhook tunnel.
+// registry/manager/processor, discuss pipeline, and webhook tunnel.
 package channel
 
 import (
@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	stdpath "path"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,7 +26,7 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
 	audiopkg "github.com/felinics/memoh/internal/audio"
-	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/adapters/dingtalk"
@@ -54,39 +53,25 @@ import (
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/config"
-	"github.com/felinics/memoh/internal/db"
 	dbstore "github.com/felinics/memoh/internal/db/store"
-	emailpkg "github.com/felinics/memoh/internal/email"
-	emailgeneric "github.com/felinics/memoh/internal/email/adapters/generic"
-	emailgmail "github.com/felinics/memoh/internal/email/adapters/gmail"
-	emailmailgun "github.com/felinics/memoh/internal/email/adapters/mailgun"
 	"github.com/felinics/memoh/internal/handlers"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/media"
-	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/models"
-	"github.com/felinics/memoh/internal/oauthclients"
 	"github.com/felinics/memoh/internal/policy"
 	"github.com/felinics/memoh/internal/providers"
 	"github.com/felinics/memoh/internal/schedule"
 	"github.com/felinics/memoh/internal/searchproviders"
+	"github.com/felinics/memoh/internal/server"
 	"github.com/felinics/memoh/internal/settings"
-	"github.com/felinics/memoh/internal/storage/providers/localfs"
-	"github.com/felinics/memoh/internal/team"
+	"github.com/felinics/memoh/internal/telemetry"
 	"github.com/felinics/memoh/internal/webhooktunnel"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 func providePipeline(log *slog.Logger) *timeline.Pipeline {
 	return timeline.NewPipelineWithOptions(timeline.RenderParams{}, timeline.PipelineOptions{Logger: log})
-}
-
-func provideLocalMediaService(log *slog.Logger, cfg config.Config) *media.Service {
-	dataRoot := cfg.Workspace.DataRoot
-	if strings.TrimSpace(dataRoot) == "" {
-		dataRoot = config.DefaultDataRoot
-	}
-	return media.NewService(log, localfs.New(filepath.Join(dataRoot, "media")))
 }
 
 func provideEventStore(log *slog.Logger, queries dbstore.Queries) *timeline.EventStore {
@@ -225,6 +210,7 @@ func provideChannelRouter(
 	cmdHandler inbound.CommandHandler,
 	queueHandler inbound.QueueCommandHandler,
 	skillResolver inbound.RequestedSkillResolver,
+	queries dbstore.Queries,
 ) *inbound.ChannelInboundProcessor {
 	adapter, ok := registry.Get(qq.Type)
 	if !ok {
@@ -254,7 +240,12 @@ func provideChannelRouter(
 	processor.SetIMDisplayOptions(&settingsIMDisplayOptions{settings: settingsService})
 	processor.SetDefaultChatRuntime(&settingsDefaultChatRuntime{settings: settingsService})
 	processor.SetACPAgentSetupReader(&botACPAgentSetupReader{bots: botService})
-	processor.SetACPProfileResolver(acpprofileadapter.NewCatalog())
+	// The standalone Channel process has no Server-owned Agent service; setup
+	// resolution and /new only read Agent rows, so a local instance over the
+	// shared queries is enough.
+	botAgentService := botagents.NewService(log, queries)
+	processor.SetBotAgentReader(&botAgentReader{agents: botAgentService})
+	processor.SetACPProfileResolver(acpprofileadapter.NewCatalog(botAgentService))
 	processor.SetBotPermissionChecker(&botPermissionCheckerAdapter{bots: botService, accounts: accountService})
 	processor.SetCommandHandler(cmdHandler)
 	processor.SetQueueCommandHandler(queueHandler)
@@ -271,10 +262,7 @@ func provideCommandHandler(
 	mcpConnService *mcp.ConnectionService,
 	modelsService *models.Service,
 	providersService *providers.Service,
-	memProvService *memprovider.Service,
 	searchProvService *searchproviders.Service,
-	emailService *emailpkg.Service,
-	emailOutboxService *emailpkg.OutboxService,
 	queries dbstore.Queries,
 	aclService *acl.Service,
 	containerdHandler *handlers.ContainerdHandler,
@@ -289,10 +277,7 @@ func provideCommandHandler(
 		mcpConnService,
 		modelsService,
 		providersService,
-		memProvService,
 		searchProvService,
-		emailService,
-		emailOutboxService,
 		queries,
 		aclService,
 		&commandSkillLoaderAdapter{handler: containerdHandler},
@@ -336,7 +321,7 @@ func startWebhookTunnel(lc fx.Lifecycle, manager *webhooktunnel.Manager) {
 	})
 }
 
-func startWebhookTunnelListener(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, store *channel.Store, channelManager *channel.Manager, mediaService *media.Service, emailService *emailpkg.Service, emailManager *emailpkg.Manager, emailTrigger *emailpkg.Trigger) {
+func startWebhookTunnelListener(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, store *channel.Store, channelManager *channel.Manager, mediaService *media.Service) {
 	if cfg.WebhookTunnel.EffectiveMode() == config.WebhookTunnelModeDisabled {
 		return
 	}
@@ -344,16 +329,8 @@ func startWebhookTunnelListener(lc fx.Lifecycle, log *slog.Logger, cfg config.Co
 	if addr == "" {
 		addr = webhooktunnel.DefaultListenAddr
 	}
-	e := echo.New()
-	e.HideBanner = true
-	e.HidePort = true
-	e.Use(middleware.Recover())
-	e.Use(middleware.BodyLimit("1M"))
-	e.GET("/health", func(c echo.Context) error {
-		return c.String(http.StatusOK, "ok\n")
-	})
+	e := newWebhookTunnelEcho(log)
 	channel.NewWebhookServerHandler(log, store, channelManager).Register(e)
-	handlers.NewEmailWebhookHandler(log, emailService, emailManager, emailTrigger).Register(e)
 	// This listener is only started for tunnel modes. Its public base URL is
 	// resolved from either configured public_base_url or the running tunnel, so
 	// the configured-public-base gate used by the main server is intentionally
@@ -378,6 +355,32 @@ func startWebhookTunnelListener(lc fx.Lifecycle, log *slog.Logger, cfg config.Co
 			return e.Shutdown(ctx)
 		},
 	})
+}
+
+// newWebhookTunnelEcho builds the tunnel listener's Echo instance without its
+// routes other than /health.
+func newWebhookTunnelEcho(log *slog.Logger) *echo.Echo {
+	e := echo.New()
+	e.Binder = &httpx.Binder{}
+	e.HideBanner = true
+	e.HidePort = true
+	// This listener faces the public internet: it receives third-party channel
+	// webhooks and serves public media. It had neither a request id nor an
+	// access log, so a delivery a platform reports as failed left nothing to
+	// look up. Both are assigned before anything else runs. Errors are
+	// answered and recorded the same way as on the main server, and the
+	// access log uses the same URI sanitizer: the media paths this listener
+	// serves carry an authorising token in the query string.
+	e.HTTPErrorHandler = server.NewHTTPErrorHandler(log)
+	e.Use(httpx.AssignRequestID())
+	e.Use(httpx.RequestIDContext)
+	e.Use(telemetry.EchoServer)
+	e.Use(server.AccessLog(log))
+	e.Use(middleware.BodyLimit("1M"))
+	e.GET("/health", func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok\n")
+	})
+	return e
 }
 
 type sessionEnsurerAdapter struct {
@@ -510,6 +513,34 @@ func (r *botACPAgentSetupReader) ACPAgentSetupMetadata(ctx context.Context, botI
 	return bot.Metadata, nil
 }
 
+type botAgentReader struct {
+	agents *botagents.Service
+}
+
+func (r *botAgentReader) BotAgents(ctx context.Context, botID string) ([]inbound.BotAgent, error) {
+	items, err := r.agents.List(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]inbound.BotAgent, 0, len(items))
+	for _, item := range items {
+		descriptor, err := botagents.DescriptorFor(item)
+		if err != nil {
+			// A row no runtime can launch is not a choice, and must not
+			// take /new down for the bot's other Agents.
+			continue
+		}
+		out = append(out, inbound.BotAgent{
+			ID:         item.ID,
+			Name:       item.Name,
+			Runtime:    descriptor.Runtime,
+			ACPAgentID: descriptor.Provider,
+			Enabled:    item.Enabled,
+		})
+	}
+	return out, nil
+}
+
 type botPermissionCheckerAdapter struct {
 	bots     *bots.Service
 	accounts *accounts.Service
@@ -583,112 +614,6 @@ func provideLocalChannelSettings(service *settings.Service) channelSettings { re
 
 func provideStandaloneChannelSettings(log *slog.Logger, queries dbstore.Queries, aclService *acl.Service) channelSettings {
 	return settings.NewService(log, queries, aclService, nil)
-}
-
-func provideEmailRegistry(log *slog.Logger, tokenStore *emailpkg.DBOAuthTokenStore, oauthClients *oauthclients.Registry) *emailpkg.Registry {
-	reg := emailpkg.NewRegistry()
-	reg.Register(emailgeneric.New(log))
-	reg.Register(emailmailgun.New(log))
-	reg.Register(emailgmail.New(log, tokenStore, oauthClients))
-	return reg
-}
-
-func provideEmailChatGateway(turnService turn.Service, queries dbstore.Queries, sessionService *sessionpkg.Service, cfg config.Config, log *slog.Logger) emailpkg.ChatTriggerer {
-	return &emailTurnGateway{turnService: turnService, queries: queries, sessions: sessionService, jwtSecret: cfg.Auth.JWTSecret, logger: log}
-}
-
-type emailTurnGateway struct {
-	turnService turn.Service
-	queries     dbstore.Queries
-	sessions    *sessionpkg.Service
-	jwtSecret   string
-	logger      *slog.Logger
-}
-
-func (g *emailTurnGateway) TriggerBotChat(ctx context.Context, botID, content string) error {
-	pgBotID, err := db.ParseUUID(botID)
-	if err != nil {
-		return err
-	}
-	bot, err := g.queries.GetBotByID(ctx, pgBotID)
-	if err != nil {
-		return fmt.Errorf("get bot: %w", err)
-	}
-	ownerID := bot.OwnerUserID.String()
-	token, _, err := auth.GenerateToken(ownerID, g.jwtSecret, 10*time.Minute)
-	if err != nil {
-		return fmt.Errorf("generate email turn token: %w", err)
-	}
-	// Each inbound email runs in a thread of its own, which is what it already
-	// meant by carrying no thread at all: no shared history with the previous
-	// email. It needs a real one now because a turn is admitted against a thread,
-	// and that is what gives the run an owner, a fence, and a terminal state.
-	thread, err := g.sessions.Create(ctx, sessionpkg.CreateInput{
-		BotID:       botID,
-		ChannelType: "email",
-		Type:        "chat",
-	})
-	if err != nil {
-		return fmt.Errorf("create email turn thread: %w", err)
-	}
-	handle, err := g.turnService.StartTurn(ctx, turn.StartTurnCommand{
-		SchemaVersion:  1,
-		TeamID:         team.DefaultTeamID,
-		Mode:           turn.ModeChat,
-		BotID:          botID,
-		ChatID:         botID,
-		ThreadID:       thread.ID,
-		UserID:         ownerID,
-		Token:          "Bearer " + token,
-		Query:          content,
-		CurrentChannel: "email",
-	})
-	if err != nil {
-		return fmt.Errorf("start email turn: %w", err)
-	}
-	defer handle.Cancel()
-	events, errs := handle.Events(), handle.Errs()
-	for events != nil || errs != nil {
-		select {
-		case _, ok := <-events:
-			if !ok {
-				events = nil
-			}
-		case runErr, ok := <-errs:
-			if ok && runErr != nil {
-				return runErr
-			}
-			if !ok {
-				errs = nil
-			}
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	return nil
-}
-
-func provideEmailTrigger(log *slog.Logger, service *emailpkg.Service, chatTriggerer emailpkg.ChatTriggerer) *emailpkg.Trigger {
-	return emailpkg.NewTrigger(log, service, chatTriggerer)
-}
-
-func startEmailManager(lc fx.Lifecycle, emailManager *emailpkg.Manager) {
-	ctx, cancel := context.WithCancel(context.Background())
-	lc.Append(fx.Hook{
-		OnStart: func(_ context.Context) error {
-			go func() {
-				if err := emailManager.Start(ctx); err != nil {
-					slog.Default().Error("email manager start failed", slog.Any("error", err))
-				}
-			}()
-			return nil
-		},
-		OnStop: func(stopCtx context.Context) error {
-			cancel()
-			emailManager.Stop(stopCtx)
-			return nil
-		},
-	})
 }
 
 func startChannelManager(lc fx.Lifecycle, channelManager *channel.Manager) {

@@ -172,7 +172,6 @@ func TestGetSessionInfoOmitsCompactionForACPRuntime(t *testing.T) {
 		}},
 		settingsRow: sqlc.GetSettingsByBotIDRow{
 			BotID:             testUUID(lifecycleTestBotID),
-			Language:          "auto",
 			ReasoningEffort:   "medium",
 			CompactionEnabled: true,
 		},
@@ -290,7 +289,6 @@ func TestGetSessionInfoReportsBudgetPlanAndCompactionMarks(t *testing.T) {
 		}},
 		settingsRow: sqlc.GetSettingsByBotIDRow{
 			BotID:               testUUID(lifecycleTestBotID),
-			Language:            "auto",
 			ReasoningEffort:     "medium",
 			CompactionEnabled:   true,
 			CompactionThreshold: 90000,
@@ -368,7 +366,6 @@ func TestGetSessionInfoFallsBackToLegacyLifecycleMetadata(t *testing.T) {
 		}},
 		settingsRow: sqlc.GetSettingsByBotIDRow{
 			BotID:             testUUID(lifecycleTestBotID),
-			Language:          "auto",
 			ReasoningEffort:   "medium",
 			CompactionEnabled: true,
 		},

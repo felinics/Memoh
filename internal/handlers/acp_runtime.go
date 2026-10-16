@@ -10,10 +10,12 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/agent/application"
 	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
@@ -24,6 +26,11 @@ type ACPRuntimeHandler struct {
 	sessionService *session.Service
 	botService     *bots.Service
 	accountService *accounts.Service
+	botAgents      *botagents.Service
+}
+
+func (h *ACPRuntimeHandler) SetBotAgents(service *botagents.Service) {
+	h.botAgents = service
 }
 
 type acpRuntimePool interface {
@@ -41,7 +48,10 @@ type acpRuntimePool interface {
 }
 
 type acpRuntimeCreateRequest struct {
-	AgentID     string `json:"acp_agent_id"`
+	AgentID string `json:"acp_agent_id"`
+	// BotAgentID names the Agent instance whose setup launches the runtime;
+	// only a session bound to the same instance can later adopt it.
+	BotAgentID  string `json:"bot_agent_id,omitempty"`
 	ProjectPath string `json:"project_path,omitempty"`
 }
 
@@ -91,11 +101,12 @@ func (h *ACPRuntimeHandler) Register(e *echo.Echo) {
 // @Param bot_id path string true "Bot ID"
 // @Param body body acpRuntimeCreateRequest true "Runtime spec"
 // @Success 200 {object} acpagent.RuntimeStatus
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 429 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 429 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/acp-runtimes [post].
 func (h *ACPRuntimeHandler) CreateRuntime(c echo.Context) error {
 	channelIdentityID, err := RequireChannelIdentityID(c)
@@ -114,7 +125,18 @@ func (h *ACPRuntimeHandler) CreateRuntime(c echo.Context) error {
 	if agentID == "" {
 		return apperror.New(apperror.CodeACPRequestInvalid, nil)
 	}
-	if err := acpAgentSetupHTTPError(bot.Metadata, agentID); err != nil {
+	botAgentID := strings.TrimSpace(req.BotAgentID)
+	if botAgentID != "" && h.botAgents != nil {
+		// Only a session created on this instance can bind the runtime, so the
+		// prewarm admits what session creation admits.
+		if _, err := h.botAgents.GetActiveACP(c.Request().Context(), bot.ID, botAgentID, agentID); err != nil {
+			if publicErr := botAgentHTTPError(err); publicErr != nil {
+				return publicErr
+			}
+			return acpRuntimeHTTPError(err)
+		}
+	}
+	if err := acpAgentSetupError(c.Request().Context(), h.botAgents, bot, botAgentID, agentID); err != nil {
 		return acpRuntimeHTTPError(err)
 	}
 	projectPath := strings.TrimSpace(req.ProjectPath)
@@ -123,6 +145,7 @@ func (h *ACPRuntimeHandler) CreateRuntime(c echo.Context) error {
 	}
 	status, err := h.pool.CreateRuntime(c.Request().Context(), acpagent.CreateRuntimeInput{
 		BotID:                 bot.ID,
+		BotAgentID:            botAgentID,
 		AgentID:               agentID,
 		ProjectPath:           projectPath,
 		RuntimeOwnerAccountID: channelIdentityID,
@@ -143,11 +166,11 @@ func (h *ACPRuntimeHandler) CreateRuntime(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param runtime_id path string true "Runtime ID"
 // @Success 200 {object} acpagent.RuntimeStatus
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/acp-runtimes/{runtime_id} [get].
 func (h *ACPRuntimeHandler) GetRuntimeByID(c echo.Context) error {
 	_, _, status, err := h.authorizedRuntimeByID(c)
@@ -168,12 +191,12 @@ func (h *ACPRuntimeHandler) GetRuntimeByID(c echo.Context) error {
 // @Param runtime_id path string true "Runtime ID"
 // @Param body body acpRuntimeModelRequest true "Model selection"
 // @Success 200 {object} acpagent.RuntimeStatus
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /bots/{bot_id}/acp-runtimes/{runtime_id}/model [patch].
 func (h *ACPRuntimeHandler) SetRuntimeModel(c echo.Context) error {
 	bot, runtimeID, _, err := h.authorizedRuntimeByID(c)
@@ -201,12 +224,12 @@ func (h *ACPRuntimeHandler) SetRuntimeModel(c echo.Context) error {
 // @Param runtime_id path string true "Runtime ID"
 // @Param body body acpRuntimeReasoningRequest true "Reasoning effort selection"
 // @Success 200 {object} acpagent.RuntimeStatus
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /bots/{bot_id}/acp-runtimes/{runtime_id}/reasoning [patch].
 func (h *ACPRuntimeHandler) SetRuntimeReasoning(c echo.Context) error {
 	bot, runtimeID, _, err := h.authorizedRuntimeByID(c)
@@ -235,12 +258,12 @@ func (h *ACPRuntimeHandler) SetRuntimeReasoning(c echo.Context) error {
 // @Param runtime_id path string true "Runtime ID"
 // @Param body body acpRuntimeModeRequest true "Mode selection"
 // @Success 200 {object} acpagent.RuntimeStatus
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /bots/{bot_id}/acp-runtimes/{runtime_id}/mode [patch].
 func (h *ACPRuntimeHandler) SetRuntimeMode(c echo.Context) error {
 	bot, runtimeID, _, err := h.authorizedRuntimeByID(c)
@@ -270,11 +293,11 @@ func (h *ACPRuntimeHandler) SetRuntimeMode(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param runtime_id path string true "Runtime ID"
 // @Success 204
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/acp-runtimes/{runtime_id} [delete].
 func (h *ACPRuntimeHandler) CloseRuntime(c echo.Context) error {
 	bot, runtimeID, _, err := h.authorizedRuntimeByID(c)
@@ -303,11 +326,11 @@ func (h *ACPRuntimeHandler) CloseRuntime(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
 // @Success 200 {object} acpagent.RuntimeStatus
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/acp-runtime [get].
 func (h *ACPRuntimeHandler) GetRuntime(c echo.Context) error {
 	_, sessionID, sess, err := h.authorizedACPSession(c)
@@ -325,12 +348,12 @@ func (h *ACPRuntimeHandler) GetRuntime(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
 // @Success 200 {object} acpagent.RuntimeStatus
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/acp-runtime [post].
 func (h *ACPRuntimeHandler) EnsureRuntime(c echo.Context) error {
 	bot, sessionID, sess, err := h.authorizedACPSession(c)
@@ -339,7 +362,7 @@ func (h *ACPRuntimeHandler) EnsureRuntime(c echo.Context) error {
 	}
 	botID := bot.ID
 	acpMeta := acpRuntimeSessionMetadata(sess)
-	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
+	if err := acpAgentSetupError(c.Request().Context(), h.botAgents, bot, sess.BotAgentID, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
 		return acpRuntimeHTTPError(err)
 	}
 	if sessionMetadataString(acpMeta, "runtime_owner_account_id") == "" {
@@ -366,12 +389,12 @@ func (h *ACPRuntimeHandler) EnsureRuntime(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param body body acpRuntimeModelRequest true "ACP model selection"
 // @Success 200 {object} acpagent.RuntimeStatus
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/acp-runtime/model [patch].
 func (h *ACPRuntimeHandler) SetModel(c echo.Context) error {
 	bot, sessionID, sess, err := h.authorizedACPSession(c)
@@ -391,7 +414,7 @@ func (h *ACPRuntimeHandler) SetModel(c echo.Context) error {
 	if sessionMetadataString(acpMeta, "runtime_owner_account_id") == "" {
 		return apperror.New(apperror.CodeACPRuntimeConflict, nil)
 	}
-	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
+	if err := acpAgentSetupError(c.Request().Context(), h.botAgents, bot, sess.BotAgentID, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
 		return acpRuntimeHTTPError(err)
 	}
 	status, err := h.pool.SetModel(context.WithoutCancel(c.Request().Context()), acpagent.PromptInput{
@@ -415,12 +438,12 @@ func (h *ACPRuntimeHandler) SetModel(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param body body acpRuntimeReasoningRequest true "Reasoning effort selection"
 // @Success 200 {object} acpagent.RuntimeStatus
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/acp-runtime/reasoning [patch].
 func (h *ACPRuntimeHandler) SetReasoning(c echo.Context) error {
 	bot, sessionID, sess, err := h.authorizedACPSession(c)
@@ -440,7 +463,7 @@ func (h *ACPRuntimeHandler) SetReasoning(c echo.Context) error {
 	if sessionMetadataString(acpMeta, "runtime_owner_account_id") == "" {
 		return apperror.New(apperror.CodeACPRuntimeConflict, nil)
 	}
-	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
+	if err := acpAgentSetupError(c.Request().Context(), h.botAgents, bot, sess.BotAgentID, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
 		return acpRuntimeHTTPError(err)
 	}
 	status, err := h.pool.SetReasoning(context.WithoutCancel(c.Request().Context()), acpagent.PromptInput{
@@ -465,12 +488,12 @@ func (h *ACPRuntimeHandler) SetReasoning(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param body body acpRuntimeModeRequest true "ACP session mode selection"
 // @Success 200 {object} acpagent.RuntimeStatus
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 502 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/acp-runtime/mode [patch].
 func (h *ACPRuntimeHandler) SetMode(c echo.Context) error {
 	bot, sessionID, sess, err := h.authorizedACPSession(c)
@@ -489,7 +512,7 @@ func (h *ACPRuntimeHandler) SetMode(c echo.Context) error {
 	if sessionMetadataString(acpMeta, "runtime_owner_account_id") == "" {
 		return apperror.New(apperror.CodeACPRuntimeConflict, nil)
 	}
-	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
+	if err := acpAgentSetupError(c.Request().Context(), h.botAgents, bot, sess.BotAgentID, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
 		return acpRuntimeHTTPError(err)
 	}
 	status, err := h.pool.SetMode(context.WithoutCancel(c.Request().Context()), acpagent.PromptInput{
@@ -523,10 +546,13 @@ func runtimePoolError(err error) error {
 	if err == nil || apperror.CodeOf(err) != "" {
 		return err
 	}
-	if feedbackErr := externalAgentFeedbackHTTPError(err); feedbackErr != nil {
-		return acpRuntimeHTTPError(feedbackErr)
+	if translated := application.ExternalAgentError(err); apperror.CodeOf(translated) != "" {
+		return translated
 	}
+	var commandNotFound *acpclient.CommandNotFoundError
 	switch {
+	case errors.As(err, &commandNotFound):
+		return apperror.Wrap(apperror.CodeACPCommandNotFound, err, map[string]string{"command": commandNotFound.Command})
 	case errors.Is(err, acpagent.ErrRuntimeNotFound):
 		return apperror.New(apperror.CodeACPRuntimeNotFound, nil)
 	case errors.Is(err, acpagent.ErrRuntimeConfigUpdateFailed):
@@ -660,7 +686,13 @@ func (h *ACPRuntimeHandler) authorizedRuntimeControlBot(c echo.Context, actorID,
 }
 
 func acpRuntimeControlError(err error) error {
-	if err == nil || apperror.CodeOf(err) != "" {
+	if err == nil {
+		return nil
+	}
+	if isBotOrSessionNotFound(err) {
+		return apperror.New(apperror.CodeACPRuntimeNotFound, nil)
+	}
+	if apperror.CodeOf(err) != "" {
 		return err
 	}
 	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, bots.ErrBotNotFound) || isHTTPStatus(err, http.StatusNotFound) {
@@ -670,7 +702,13 @@ func acpRuntimeControlError(err error) error {
 }
 
 func acpRuntimeHTTPError(err error) error {
-	if err == nil || apperror.CodeOf(err) != "" {
+	if err == nil {
+		return nil
+	}
+	if isBotOrSessionNotFound(err) {
+		return apperror.New(apperror.CodeACPRuntimeNotFound, nil)
+	}
+	if apperror.CodeOf(err) != "" {
 		return err
 	}
 	var httpErr *echo.HTTPError

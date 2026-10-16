@@ -64,7 +64,6 @@ ALTER TABLE memory_providers ADD COLUMN team_id UUID NOT NULL DEFAULT public.mem
 
 func settingsTestUpsertParams(botID uuid.UUID) sqlc.UpsertBotSettingsParams {
 	return sqlc.UpsertBotSettingsParams{
-		Language:           "en",
 		ReasoningEffort:    "medium",
 		ChatRuntime:        "model",
 		ChatAcpProjectMode: "project",

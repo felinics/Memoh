@@ -6,7 +6,7 @@ import {
 
 export interface WorkspaceTabCommandStore {
   activeId: string | null
-  closeTab(id: string): void
+  requestCloseTab(id: string): void
 }
 
 export function handleWorkspaceKeyboardCommand(
@@ -16,7 +16,7 @@ export function handleWorkspaceKeyboardCommand(
   if (command !== appKeyboardCommands.closeCurrentWorkspaceTab) return false
   const activeId = store.activeId
   if (!activeId) return false
-  store.closeTab(activeId)
+  store.requestCloseTab(activeId)
   return true
 }
 

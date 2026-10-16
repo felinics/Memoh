@@ -1,7 +1,9 @@
 package builtin
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -38,8 +40,8 @@ func TestBuiltinProviderFileRuntimeDoesNotAdvertiseSemanticCompact(t *testing.T)
 	if withoutLLM.Semantic {
 		t.Fatal("semantic compact should be unavailable without an LLM")
 	}
-	if withoutLLM.Reason == "" {
-		t.Fatal("expected unavailable semantic compact to explain why")
+	if withoutLLM.Reason != adapters.CompactNotConfigured {
+		t.Fatalf("compact reason without an LLM = %q, want %q", withoutLLM.Reason, adapters.CompactNotConfigured)
 	}
 
 	p.SetLLM(&fakeLLM{})
@@ -47,8 +49,12 @@ func TestBuiltinProviderFileRuntimeDoesNotAdvertiseSemanticCompact(t *testing.T)
 	if withLLM.Semantic {
 		t.Fatalf("file runtime should not advertise semantic compact: %+v", withLLM)
 	}
-	if !strings.Contains(withLLM.Reason, "does not support semantic compact") {
-		t.Fatalf("file runtime compact reason = %q", withLLM.Reason)
+	if withLLM.Reason != adapters.CompactUnsupported {
+		t.Fatalf("file runtime compact reason = %q, want %q", withLLM.Reason, adapters.CompactUnsupported)
+	}
+	_, err := p.Compact(context.Background(), nil, 0.5, 0)
+	if err == nil || !strings.Contains(err.Error(), "semantic compact unavailable") {
+		t.Fatalf("Compact() error = %v, want the constant unavailable error", err)
 	}
 }
 
@@ -255,10 +261,10 @@ func TestBuiltinProviderCRUDErrorsWithNilService(t *testing.T) {
 	if _, err := p.Update(context.Background(), adapters.UpdateRequest{}); err == nil {
 		t.Fatal("expected Update error")
 	}
-	if _, err := p.Delete(context.Background(), "x"); err == nil {
+	if _, err := p.Delete(context.Background(), "bot-1", "x"); err == nil {
 		t.Fatal("expected Delete error")
 	}
-	if _, err := p.DeleteBatch(context.Background(), []string{"x"}); err == nil {
+	if _, err := p.DeleteBatch(context.Background(), "bot-1", []string{"x"}); err == nil {
 		t.Fatal("expected DeleteBatch error")
 	}
 	if _, err := p.DeleteAll(context.Background(), adapters.DeleteAllRequest{}); err == nil {
@@ -304,5 +310,30 @@ func TestNewBuiltinRuntimeFromConfig_GraphRequiresWikiStore(t *testing.T) {
 	// No wiki store -> error.
 	if _, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, nil, nil); err == nil {
 		t.Fatal("expected error for graph mode without wiki store")
+	}
+}
+
+type searchFailingRuntime struct {
+	capturingRuntime
+	err error
+}
+
+func (r *searchFailingRuntime) Search(context.Context, adapters.SearchRequest) (adapters.SearchResponse, error) {
+	return adapters.SearchResponse{}, r.err
+}
+
+func TestOnBeforeChatReturnsSearchFailureWithoutLogging(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("index unavailable")
+	var buf bytes.Buffer
+	p := NewBuiltinProvider(slog.New(slog.NewJSONHandler(&buf, nil)), &searchFailingRuntime{err: cause})
+
+	_, err := p.OnBeforeChat(context.Background(), adapters.BeforeChatRequest{BotID: "bot-1", Query: "hello"})
+	if !errors.Is(err, cause) {
+		t.Fatalf("OnBeforeChat error = %v, want the search error", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("provider logged the failure its caller records: %s", buf.String())
 	}
 }

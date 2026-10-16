@@ -58,6 +58,7 @@ func TestGraphRuntimeUpdateUnionsSourceMessageIDs(t *testing.T) {
 	memoryID := added.Results[0].ID
 
 	updated, err := rt.Update(context.Background(), adapters.UpdateRequest{
+		BotID:            "bot-1",
 		MemoryID:         memoryID,
 		Memory:           "User prefers strong oolong tea",
 		SourceMessageIDs: []string{"sess-1/msg-2", "sess-2/msg-3"},

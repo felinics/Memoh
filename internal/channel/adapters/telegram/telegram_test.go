@@ -1,11 +1,15 @@
 package telegram
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +19,7 @@ import (
 
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // newStubTelegramBot builds a telebot bot suitable for tests that need a
@@ -32,6 +37,24 @@ func newStubTelegramBot(t *testing.T) *tele.Bot {
 		t.Fatalf("create stub telegram bot: %v", err)
 	}
 	return bot
+}
+
+func TestTelegramInboundLogDoesNotIncludeMessageText(t *testing.T) {
+	const messageText = "private telegram message 82f0c"
+	var logs bytes.Buffer
+	adapter := NewTelegramAdapter(slog.New(slog.NewJSONHandler(&logs, nil)))
+	msg := channel.InboundMessage{
+		Message:      channel.Message{Text: messageText},
+		Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate},
+		Sender:       channel.Identity{Attributes: map[string]string{"user_id": "user-1"}},
+	}
+	adapter.logTelegramInbound(context.Background(), "config-1", msg)
+	if !strings.Contains(logs.String(), `"msg":"inbound received"`) || !strings.Contains(logs.String(), `"chat_id":"chat-1"`) {
+		t.Fatal("inbound event or chat ID missing")
+	}
+	if strings.Contains(logs.String(), messageText) || strings.Contains(logs.String(), `"text":`) {
+		t.Fatal("telegram inbound log exposed message text")
+	}
 }
 
 func TestResolveTelegramSender(t *testing.T) {
@@ -2036,5 +2059,104 @@ func TestCollectTelegramStickerCarriesEmojiInName(t *testing.T) {
 	})
 	if len(without) != 1 || without[0].Name != "sticker" {
 		t.Fatalf("attachment = %+v, want a plain sticker name", without)
+	}
+}
+
+func TestResolveAttachmentDownloadErrorOmitsBotToken(t *testing.T) {
+	const botToken = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ_secret"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: botToken}, nil
+	}
+	t.Cleanup(func() { getOrCreateBotForTest = origGetBot })
+
+	adapter := NewTelegramAdapter(nil)
+	cfg := channel.ChannelConfig{ID: "config", Credentials: map[string]any{"bot_token": botToken}}
+	fileURL := server.URL + "/file/bot" + botToken + "/photos/file_1.jpg"
+
+	t.Run("request fails", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, err := adapter.ResolveAttachment(ctx, cfg, channel.Attachment{URL: fileURL})
+		if err == nil {
+			t.Fatal("expected download error")
+		}
+		if strings.Contains(err.Error(), botToken) {
+			t.Fatalf("error text contains the bot token: %q", err.Error())
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("errors.Is(err, context.Canceled) = false: %v", err)
+		}
+		var urlErr *url.Error
+		if !errors.As(err, &urlErr) {
+			t.Fatalf("errors.As(err, *url.Error) = false: %v", err)
+		}
+		want := server.URL + "/[redacted]"
+		if urlErr.URL != want {
+			t.Fatalf("url.Error URL = %q, want %q", urlErr.URL, want)
+		}
+		// The recorded text renders the URL again; the placeholder must
+		// survive it unescaped.
+		if text := errs.Text(err); !strings.Contains(text, want) {
+			t.Fatalf("recorded text %q does not show %q", text, want)
+		}
+	})
+
+	t.Run("request cannot be built", func(t *testing.T) {
+		_, err := adapter.ResolveAttachment(context.Background(), cfg, channel.Attachment{URL: fileURL + "\x7f"})
+		if err == nil {
+			t.Fatal("expected request build error")
+		}
+		if strings.Contains(err.Error(), botToken) {
+			t.Fatalf("error text contains the bot token: %q", err.Error())
+		}
+		var urlErr *url.Error
+		if !errors.As(err, &urlErr) || urlErr.Op != "parse" {
+			t.Fatalf("errors.As(err, *url.Error) did not find the parse error: %v", err)
+		}
+	})
+}
+
+func TestTelegramAdapter_ProcessingRefreshSendsTypingToReplyTarget(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	var actions []map[string]any
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(req.URL.Path, "/sendChatAction") {
+			t.Fatalf("unexpected Telegram request path %s", req.URL.Path)
+		}
+		body, _ := io.ReadAll(req.Body)
+		actions = append(actions, decodeTelegramBody(t, body))
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":true}`)),
+		}, nil
+	}))
+	origGetBot := getOrCreateBotForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	defer func() { getOrCreateBotForTest = origGetBot }()
+
+	if got := adapter.ProcessingRefreshInterval(); got <= 0 || got >= 5*time.Second {
+		t.Fatalf("refresh interval = %s, want below Telegram's ~5s typing expiry", got)
+	}
+	cfg := channel.ChannelConfig{ID: "cfg", Credentials: map[string]any{"bot_token": "fake"}}
+	info := channel.ProcessingStatusInfo{ReplyTarget: "-100123"}
+	if err := adapter.ProcessingRefresh(context.Background(), cfg, channel.InboundMessage{}, info, channel.ProcessingStatusHandle{}); err != nil {
+		t.Fatalf("ProcessingRefresh: %v", err)
+	}
+	if len(actions) != 1 || fmt.Sprint(actions[0]["chat_id"]) != "-100123" || actions[0]["action"] != "typing" {
+		t.Fatalf("chat actions = %v, want one typing action to -100123", actions)
+	}
+	if err := adapter.ProcessingRefresh(context.Background(), cfg, channel.InboundMessage{}, channel.ProcessingStatusInfo{}, channel.ProcessingStatusHandle{}); err != nil || len(actions) != 1 {
+		t.Fatalf("refresh without a reply target sent %d actions, err %v; want none", len(actions)-1, err)
 	}
 }

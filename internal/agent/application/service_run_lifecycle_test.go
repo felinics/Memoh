@@ -15,6 +15,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -88,9 +89,9 @@ func (a *lifecycleTurnAdmitter) FinishRunWithErrorCode(
 	_ context.Context,
 	handle sessionruntime.RunHandle,
 	status, code string,
-) error {
+) (sessionruntime.TerminalRun, error) {
 	a.finishes = append(a.finishes, recordedFinish{handle: handle, status: status, message: code})
-	return a.finishErr
+	return sessionruntime.TerminalRun{}, a.finishErr
 }
 
 func (s *recordingContextLifecycleStore) GetContextLifecycleByRunID(
@@ -494,7 +495,7 @@ func TestTurnRunFinisherCreatesFallbackOnlyAfterFencedTerminalFinish(t *testing.
 			service := &Service{sessionRuntime: admitter, contextLifecycles: store}
 			admission := lifecycleTestAdmission()
 
-			service.turnRunFinisher(tt.ctx, admission)(tt.status, tt.cause)
+			service.turnRunFinisher(tt.ctx, admission, sessionmode.Chat)(RunOutcome{Status: tt.status, Cause: tt.cause})
 
 			if len(admitter.finishes) != 1 {
 				t.Fatalf("FinishRun calls = %d, want 1", len(admitter.finishes))

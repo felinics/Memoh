@@ -1,4 +1,7 @@
-import { getBotsByBotIdConnectorsByConnectionId } from '@memohai/sdk'
+import { getBotsByBotIdConnectorsByConnectionId, postBotsByBotIdConnectorsByConnectionIdReauth } from '@memohai/sdk'
+import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
+
+type Translate = (key: string, params?: Record<string, unknown>) => string
 
 const oauthTimeoutMs = 120_000
 
@@ -11,6 +14,24 @@ export function connectorOAuthErrorKey(error: unknown): string | null {
   if (error.message === 'oauth_popup_blocked') return 'connectors.oauthPopupBlocked'
   if (error.message === 'oauth_failed') return 'connectors.oauthFailed'
   return null
+}
+
+// Connect-It without an OAuth App for the connector is fixed by whoever runs
+// it, so the copy tells the current user who that is.
+export function connectorErrorMessage(
+  error: unknown,
+  t: Translate,
+  context: { role: string, connector: string, fallback: string },
+): string {
+  const oauthKey = connectorOAuthErrorKey(error)
+  if (oauthKey) return t(oauthKey)
+  if (isApiErrorCode(error, 'connector.oauth_client_not_configured')) {
+    const hint = context.role === 'admin'
+      ? 'connectors.oauthAppNotConfigured.admin'
+      : 'connectors.oauthAppNotConfigured.member'
+    return t(hint, { connector: context.connector })
+  }
+  return resolveApiErrorMessage(error, context.fallback)
 }
 
 // A caller-initiated abort is not a failure: the caller swallows it instead of
@@ -119,4 +140,33 @@ export function waitForConnectorOAuth(
     signal?.addEventListener('abort', onAbort)
     void poll()
   })
+}
+
+export async function reauthorizeConnector(botId: string, connectionId: string, popup: Window | null): Promise<void> {
+  const { data } = await postBotsByBotIdConnectorsByConnectionIdReauth({
+    path: { bot_id: botId, connection_id: connectionId },
+    throwOnError: true,
+  })
+  if (!data.authorization_url) throw new Error('oauth_failed')
+  await openConnectorOAuthURL(data.authorization_url, popup)
+  await waitForConnectorOAuth(botId, connectionId, popup)
+}
+
+// The missing-OAuth-App copy is several steps long, so its notice stays until
+// the reader dismisses it instead of timing out mid-read.
+export function reauthorizeFailureNotice(
+  error: unknown,
+  t: Translate,
+  role: string,
+  connector: { type?: string },
+  catalog: ReadonlyMap<string, { name?: string }>,
+): { message: string, duration?: number } {
+  const type = connector.type ?? ''
+  const message = connectorErrorMessage(error, t, {
+    role,
+    connector: catalog.get(type)?.name || type,
+    fallback: t('connectors.oauthFailed'),
+  })
+  const persistent = isApiErrorCode(error, 'connector.oauth_client_not_configured')
+  return { message, duration: persistent ? Number.POSITIVE_INFINITY : undefined }
 }

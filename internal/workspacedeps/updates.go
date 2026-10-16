@@ -106,7 +106,7 @@ func (w *UpdateWorker) loop(ctx context.Context, done chan struct{}) {
 		case <-ticks:
 			checks, err := w.RunOnce(ctx)
 			if err != nil {
-				w.logger.Warn("dependency update check round finished with errors",
+				w.logger.WarnContext(ctx, "dependency update check round finished with errors",
 					slog.Int("checks", checks),
 					slog.Any("error", err),
 				)

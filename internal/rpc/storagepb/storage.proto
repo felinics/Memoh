@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package memoh.storage.v1;
+
+option go_package = "github.com/felinics/memoh/internal/rpc/storagepb";
+
+// StorageService keeps media bytes owned by the Server process. Channel uses
+// this streaming boundary instead of sharing Server's local data directory.
+service StorageService {
+  rpc Put(stream PutRequest) returns (Empty);
+  rpc Open(KeyRequest) returns (stream DataChunk);
+  rpc Delete(KeyRequest) returns (Empty);
+  rpc AccessPath(KeyRequest) returns (AccessPathResponse);
+  rpc EnsureAccessPath(KeyRequest) returns (AccessPathResponse);
+  rpc ListPrefix(ListPrefixRequest) returns (ListPrefixResponse);
+  rpc OpenContainerFile(ContainerFileRequest) returns (stream DataChunk);
+}
+
+message Empty {}
+
+message PutRequest {
+  oneof body {
+    PutMetadata metadata = 1;
+    bytes chunk = 2;
+  }
+}
+
+message PutMetadata {
+  string key = 1;
+}
+
+message KeyRequest {
+  string key = 1;
+}
+
+message DataChunk {
+  bytes data = 1;
+}
+
+message AccessPathResponse {
+  string path = 1;
+}
+
+message ListPrefixRequest {
+  string prefix = 1;
+}
+
+message ListPrefixResponse {
+  repeated string keys = 1;
+}
+
+message ContainerFileRequest {
+  string bot_id = 1;
+  string path = 2;
+}

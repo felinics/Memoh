@@ -40,6 +40,8 @@ const api = {
     runtimeState: (): Promise<DesktopRuntimeState> => ipcRenderer.invoke('desktop:runtime-state'),
     configureRuntime: (config: DesktopRuntimeConfig | null): Promise<DesktopRuntimeState> =>
       ipcRenderer.invoke('desktop:configure-runtime', config),
+    setRuntimePaused: (paused: boolean): Promise<DesktopRuntimeState> =>
+      ipcRenderer.invoke('desktop:set-runtime-paused', paused),
     onRuntimeStateChanged: (cb: (state: DesktopRuntimeState) => void): (() => void) => {
       const listener = (_event: IpcRendererEvent, state: DesktopRuntimeState) => cb(state)
       ipcRenderer.on('desktop:runtime-state-changed', listener)
@@ -91,6 +93,7 @@ const api = {
     },
   },
   window: {
+    setIgnoreMenuShortcuts: (ignore: boolean): Promise<void> => ipcRenderer.invoke('window:ignore-menu-shortcuts', ignore),
     closeSelf: (): Promise<void> => ipcRenderer.invoke('window:close-self'),
     // Native app/tray menu actions ask the renderer to navigate by route path.
     // Listener lives for the entire renderer lifetime.
@@ -101,7 +104,8 @@ const api = {
     },
     onKeyboardCommand: (cb: (command: AppKeyboardCommand) => void): (() => void) => {
       const listener = (_event: IpcRendererEvent, command: unknown) => {
-        if (isAppKeyboardCommand(command)) cb(command)
+        if (!isAppKeyboardCommand(command)) return
+        cb(command)
       }
       ipcRenderer.on(DESKTOP_KEYBOARD_COMMAND_CHANNEL, listener)
       return () => {

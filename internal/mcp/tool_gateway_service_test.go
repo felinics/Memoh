@@ -457,3 +457,17 @@ func TestToolGatewayServiceLimitsProviderError(t *testing.T) {
 		t.Fatalf("limited provider error missing prune marker: %#v", result)
 	}
 }
+
+func TestToolRegistryCacheSeparatesPublicAndTrustedIdentity(t *testing.T) {
+	base := ToolSessionContext{BotID: "bot", SessionID: "session", ChannelIdentityID: "identity"}
+	public := base
+	public.PublicRequest = true
+	if toolRegistryCacheKey(base) == toolRegistryCacheKey(public) {
+		t.Fatal("public request reused trusted registry")
+	}
+	other := public
+	other.UserID = "other"
+	if toolRegistryCacheKey(public) == toolRegistryCacheKey(other) {
+		t.Fatal("authenticated users reused registry")
+	}
+}

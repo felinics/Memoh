@@ -3,6 +3,7 @@ import type { DependencyItem } from '@/composables/api/useWorkspaceDependencies'
 import {
   dependencyText,
   dependencyIsInstalled,
+  dependencyLastError,
   dependencyMenuActions,
   dependencyNeedsAttention,
   dependencyPrimaryAction,
@@ -11,6 +12,9 @@ import {
   validDependencyVersion,
   dependencyUpdateOperation,
   formatDependencyVersion,
+  missingPrerequisites,
+  prerequisiteOrder,
+  prerequisiteRevisions,
   sortDependencies,
 } from './workspace-dependency'
 
@@ -329,5 +333,50 @@ describe('validDependencyVersion', () => {
 
   it.each(['../current', '1..2', '/tmp/version', '-latest', 'https://example.com/cli', '1; id', '$(id)', '1\n2', '^1.0.0', 'x'.repeat(129)])('rejects paths, arguments and malformed versions: %j', (version) => {
     expect(validDependencyVersion(version)).toBe(false)
+  })
+})
+
+describe('prerequisites', () => {
+  const requires: Record<string, string[]> = {
+    pandoc: ['python', 'micromamba'],
+    poppler: ['python', 'micromamba'],
+    micromamba: ['python'],
+  }
+
+  it('orders shared prerequisites once, before what needs them', () => {
+    expect(prerequisiteOrder(['pandoc', 'poppler'], id => requires[id])).toEqual(['python', 'micromamba'])
+    expect(prerequisiteOrder(['micromamba', 'pandoc'], id => requires[id])).toEqual(['python'])
+  })
+
+  it('lists only prerequisites the workspace lacks', () => {
+    const items = [
+      item({ id: 'pandoc', requires: requires.pandoc }),
+      item({ id: 'micromamba', status: undefined, requires: requires.micromamba }),
+      item({ id: 'python', status: 'installed' }),
+    ]
+    expect(missingPrerequisites(items[0]!, items).map(entry => entry.id)).toEqual(['micromamba'])
+  })
+
+  it('confirms the revision of every prerequisite the dialog showed', () => {
+    const items = [
+      item({ id: 'pandoc', definition_revision: 'r-pandoc', requires: requires.pandoc }),
+      item({ id: 'micromamba', definition_revision: 'r-mamba', requires: requires.micromamba }),
+      item({ id: 'python', status: 'installed', definition_revision: 'r-python' }),
+    ]
+    expect(prerequisiteRevisions(items[0]!, items)).toEqual({ python: 'r-python', micromamba: 'r-mamba' })
+  })
+})
+
+describe('dependencyLastError', () => {
+  const translate = (key: string) => `t:${key}`
+
+  it('renders the catalog copy when the record carries a code', () => {
+    expect(dependencyLastError(item({ last_error_code: 'workspace_dependency.busy', last_error: 'old sentence' }), translate))
+      .toBe('t:errors.workspace_dependency.busy')
+  })
+
+  it('shows the text of an earlier server when the record has no code', () => {
+    expect(dependencyLastError(item({ last_error: ' download failed ' }), translate)).toBe('download failed')
+    expect(dependencyLastError(item(), translate)).toBe('')
   })
 })

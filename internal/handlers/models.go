@@ -6,12 +6,16 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
@@ -100,13 +104,13 @@ func (h *ModelsHandler) Register(e *echo.Echo) {
 // @Tags models
 // @Param payload body models.AddRequest true "Model configuration"
 // @Success 201 {object} models.AddResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models [post].
 func (h *ModelsHandler) Create(c echo.Context) error {
 	var req models.AddRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	resp, err := h.service.Create(c.Request().Context(), req)
@@ -114,7 +118,7 @@ func (h *ModelsHandler) Create(c echo.Context) error {
 		if errors.Is(err, models.ErrModelIDAlreadyExists) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id already exists under the selected provider")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return modelWriteError(err, "create model")
 	}
 	return c.JSON(http.StatusCreated, resp)
 }
@@ -126,8 +130,8 @@ func (h *ModelsHandler) Create(c echo.Context) error {
 // @Param type query string false "Model type (chat, embedding)"
 // @Param client_type query string false "Provider client type (openai-responses, openai-completions, anthropic-messages, google-generative-ai)"
 // @Success 200 {array} models.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models [get].
 func (h *ModelsHandler) List(c echo.Context) error {
 	modelType := c.QueryParam("type")
@@ -142,7 +146,7 @@ func (h *ModelsHandler) List(c echo.Context) error {
 	case clientType != "":
 		ct := models.ClientType(clientType)
 		if !models.IsLLMClientType(ct) {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid client type for LLM models endpoint")
+			return apperror.FieldInvalid("client_type", nil)
 		}
 		resp, err = h.service.ListEnabledByProviderClientType(c.Request().Context(), ct)
 	default:
@@ -150,7 +154,7 @@ func (h *ModelsHandler) List(c echo.Context) error {
 	}
 
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list models")
 	}
 	return c.JSON(http.StatusOK, h.withReasoning(c.Request().Context(), resp))
 }
@@ -161,19 +165,19 @@ func (h *ModelsHandler) List(c echo.Context) error {
 // @Tags models
 // @Param id path string true "Model internal ID (UUID)"
 // @Success 200 {object} models.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models/{id} [get].
 func (h *ModelsHandler) GetByID(c echo.Context) error {
-	id := c.Param("id")
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 
 	resp, err := h.service.GetByID(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return resourceLookupError(err, "id", apperror.CodeModelNotFound, "get model")
 	}
 	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
 }
@@ -184,19 +188,19 @@ func (h *ModelsHandler) GetByID(c echo.Context) error {
 // @Tags models
 // @Param modelId path string true "Model ID (e.g., gpt-4)"
 // @Success 200 {object} models.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models/model/{modelId} [get].
 func (h *ModelsHandler) GetByModelID(c echo.Context) error {
-	modelID := c.Param("modelId")
-	if modelID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "modelId is required")
+	modelID, err := httpx.RequiredParam(c, "modelId")
+	if err != nil {
+		return err
 	}
 	if decoded, err := url.PathUnescape(modelID); err == nil {
 		modelID = decoded
 	} else {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid modelId")
+		return apperror.FieldInvalid("modelId", err)
 	}
 
 	resp, err := h.service.GetByModelID(c.Request().Context(), modelID)
@@ -204,10 +208,7 @@ func (h *ModelsHandler) GetByModelID(c echo.Context) error {
 		if errors.Is(err, models.ErrModelIDAmbiguous) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; use /models/{id} instead")
 		}
-		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, err.Error())
-		}
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return resourceLookupError(err, "modelId", apperror.CodeModelNotFound, "get model by model id")
 	}
 	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
 }
@@ -219,19 +220,19 @@ func (h *ModelsHandler) GetByModelID(c echo.Context) error {
 // @Param id path string true "Model internal ID (UUID)"
 // @Param payload body models.UpdateRequest true "Updated model configuration"
 // @Success 200 {object} models.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models/{id} [put].
 func (h *ModelsHandler) UpdateByID(c echo.Context) error {
-	id := c.Param("id")
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 
 	var req models.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	resp, err := h.service.UpdateByID(c.Request().Context(), id, req)
@@ -239,7 +240,7 @@ func (h *ModelsHandler) UpdateByID(c echo.Context) error {
 		if errors.Is(err, models.ErrModelIDAlreadyExists) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id already exists under the selected provider")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return modelWriteError(err, "update model")
 	}
 	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
 }
@@ -251,24 +252,24 @@ func (h *ModelsHandler) UpdateByID(c echo.Context) error {
 // @Param modelId path string true "Model ID (e.g., gpt-4)"
 // @Param payload body models.UpdateRequest true "Updated model configuration"
 // @Success 200 {object} models.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models/model/{modelId} [put].
 func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
-	modelID := c.Param("modelId")
-	if modelID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "modelId is required")
+	modelID, err := httpx.RequiredParam(c, "modelId")
+	if err != nil {
+		return err
 	}
 	if decoded, err := url.PathUnescape(modelID); err == nil {
 		modelID = decoded
 	} else {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid modelId")
+		return apperror.FieldInvalid("modelId", err)
 	}
 
 	var req models.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	resp, err := h.service.UpdateByModelID(c.Request().Context(), modelID, req)
@@ -280,9 +281,9 @@ func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; use /models/{id} instead")
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+			return apperror.Wrap(apperror.CodeModelNotFound, err, nil)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return modelWriteError(err, "update model by model id")
 	}
 	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
 }
@@ -293,18 +294,18 @@ func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 // @Tags models
 // @Param id path string true "Model internal ID (UUID)"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models/{id} [delete].
 func (h *ModelsHandler) DeleteByID(c echo.Context) error {
-	id := c.Param("id")
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 
 	if err := h.service.DeleteByID(c.Request().Context(), id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "delete model")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -315,19 +316,19 @@ func (h *ModelsHandler) DeleteByID(c echo.Context) error {
 // @Tags models
 // @Param modelId path string true "Model ID (e.g., gpt-4)"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models/model/{modelId} [delete].
 func (h *ModelsHandler) DeleteByModelID(c echo.Context) error {
-	modelID := c.Param("modelId")
-	if modelID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "modelId is required")
+	modelID, err := httpx.RequiredParam(c, "modelId")
+	if err != nil {
+		return err
 	}
 	if decoded, err := url.PathUnescape(modelID); err == nil {
 		modelID = decoded
 	} else {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid modelId")
+		return apperror.FieldInvalid("modelId", err)
 	}
 
 	if err := h.service.DeleteByModelID(c.Request().Context(), modelID); err != nil {
@@ -335,9 +336,9 @@ func (h *ModelsHandler) DeleteByModelID(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; use /models/{id} instead")
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+			return apperror.Wrap(apperror.CodeModelNotFound, err, nil)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "delete model by model id")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -350,14 +351,14 @@ func (h *ModelsHandler) DeleteByModelID(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Model internal ID (UUID)"
 // @Success 200 {object} models.TestResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models/{id}/test [post].
 func (h *ModelsHandler) Test(c echo.Context) error {
-	id := c.Param("id")
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 
 	ctx := c.Request().Context()
@@ -367,10 +368,23 @@ func (h *ModelsHandler) Test(c echo.Context) error {
 
 	resp, err := h.service.Test(ctx, id)
 	if err != nil {
-		if strings.Contains(err.Error(), "invalid") {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		if errors.Is(err, db.ErrInvalidUUID) {
+			return apperror.FieldInvalid("id", err)
 		}
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
+			return apperror.Wrap(apperror.CodeModelNotFound, err, nil)
+		}
+		return errs.Wrap(err, "test model")
+	}
+	if resp.Cause != nil {
+		// The response carries only the code; this event is where the cause
+		// is kept.
+		failure := probeError(resp.Cause, resp.Status == models.TestStatusAuthError)
+		result := errlog.Event(ctx, "model.test", failure, errlog.Options{})
+		h.logger.LogAttrs(ctx, result.Level, "model test failed", append([]slog.Attr{
+			slog.String("model_id", id), slog.String("status", string(resp.Status)),
+		}, result.Attrs()...)...)
+		resp.Code = string(apperror.CodeOf(failure))
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -382,8 +396,8 @@ func (h *ModelsHandler) Test(c echo.Context) error {
 // @Tags models
 // @Param type query string false "Model type (chat, embedding)"
 // @Success 200 {object} models.CountResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models/count [get].
 func (h *ModelsHandler) Count(c echo.Context) error {
 	modelType := c.QueryParam("type")
@@ -398,7 +412,21 @@ func (h *ModelsHandler) Count(c echo.Context) error {
 	}
 
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "count models")
 	}
 	return c.JSON(http.StatusOK, models.CountResponse{Count: count})
+}
+
+// modelWriteError names the request field a rejected model write came from and
+// treats any other failure as an internal failure of op.
+func modelWriteError(err error, op string) error {
+	var fieldErr *models.FieldError
+	if errors.As(err, &fieldErr) {
+		code := apperror.CodeRequestFieldInvalid
+		if fieldErr.Required {
+			code = apperror.CodeRequestFieldRequired
+		}
+		return apperror.Wrap(code, fieldErr.Err, map[string]string{"field": fieldErr.Field})
+	}
+	return errs.Wrap(err, op)
 }

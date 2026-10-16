@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/healthcheck"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
@@ -71,7 +72,7 @@ func (c *Checker) ListChecks(ctx context.Context, botID string) []healthcheck.Ch
 		return nil
 	}
 	if c.lookup == nil || c.prober == nil {
-		c.logger.Warn("model healthcheck dependencies unavailable", slog.String("bot_id", botID))
+		c.logger.WarnContext(ctx, "model healthcheck dependencies unavailable", slog.String("bot_id", botID))
 		return []healthcheck.CheckResult{{
 			ID:       checkTypeModelConnection + ".service",
 			Type:     checkTypeModelConnection,
@@ -83,7 +84,7 @@ func (c *Checker) ListChecks(ctx context.Context, botID string) []healthcheck.Ch
 
 	botModels, err := c.lookup.GetBotModelIDs(ctx, botID)
 	if err != nil {
-		c.logger.Warn("model healthcheck lookup failed", slog.String("bot_id", botID), slog.Any("error", err))
+		c.logger.WarnContext(ctx, "model healthcheck lookup failed", slog.String("bot_id", botID), slog.Any("error", err))
 		return []healthcheck.CheckResult{{
 			ID:       checkTypeModelConnection + ".lookup",
 			Type:     checkTypeModelConnection,
@@ -154,11 +155,17 @@ func (c *Checker) probeSlot(ctx context.Context, s modelSlot) healthcheck.CheckR
 	case models.TestStatusAuthError:
 		result.Status = healthcheck.StatusError
 		result.Summary = fmt.Sprintf("%s authentication failed.", s.label)
-		result.Detail = resp.Message
 	default:
 		result.Status = healthcheck.StatusError
 		result.Summary = fmt.Sprintf("%s probe failed.", s.label)
-		result.Detail = resp.Message
+	}
+	if resp.Cause != nil {
+		// The check result reaches the client, so it names the outcome and
+		// never carries the cause; this event is where the cause is kept.
+		event := errlog.Event(ctx, "healthcheck.model", resp.Cause, errlog.Options{})
+		c.logger.LogAttrs(ctx, event.Level, "model health probe failed", append([]slog.Attr{
+			slog.String("model_id", s.id), slog.String("role", s.key),
+		}, event.Attrs()...)...)
 	}
 
 	if resp.LatencyMs > 0 {

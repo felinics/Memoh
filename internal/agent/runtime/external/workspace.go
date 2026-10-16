@@ -1,11 +1,15 @@
 package external
 
 import (
-	"net/http"
+	"errors"
+	"fmt"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
+
+// ErrContainerWorkspaceRequired reports a direct runtime asked to start in a
+// workspace that is not a container.
+var ErrContainerWorkspaceRequired = errors.New("direct agent runtime requires a container workspace")
 
 // RequireContainerWorkspace guards drivers whose executable environment and
 // credential paths assume the container layout. The remote bridge maps file
@@ -14,12 +18,5 @@ func RequireContainerWorkspace(info bridge.WorkspaceInfo, runtime string) error 
 	if info.Backend != bridge.WorkspaceBackendRemote {
 		return nil
 	}
-	return agentfeedback.New(
-		agentfeedback.CodeNoWorkspaceExec,
-		"remote_workspace_unsupported",
-		http.StatusConflict,
-		"",
-		"This direct Agent runtime requires a container workspace. Select the bot's container workspace before starting it.",
-		map[string]string{"runtime": runtime, "workspace_backend": info.Backend},
-	)
+	return fmt.Errorf("%w: %s on workspace backend %q", ErrContainerWorkspaceRequired, runtime, info.Backend)
 }

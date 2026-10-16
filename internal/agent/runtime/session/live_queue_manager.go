@@ -191,7 +191,7 @@ func (m *Manager) notifySteer(ctx context.Context, key Key, runID string) {
 		err = m.dispatchRemoteCommand(ctx, run.OwnerID, cmd)
 	}
 	if err != nil {
-		m.logger.Warn("notify accepted steer failed", slog.String("run_id", runID), slog.Any("error", err))
+		m.logger.WarnContext(ctx, "notify accepted steer failed", slog.String("run_id", runID), slog.Any("error", err))
 	}
 }
 
@@ -249,4 +249,12 @@ func (m *Manager) ReleaseFollowUp(ctx context.Context, key Key, ref FollowUpClai
 		return err
 	}
 	return queue.ReleaseFollowUp(ctx, key, ref)
+}
+
+func (m *Manager) RejectFollowUp(ctx context.Context, key Key, ref FollowUpClaimRef, errorCode string) error {
+	queue, err := m.liveQueueBackend()
+	if err != nil {
+		return err
+	}
+	return queue.RejectFollowUp(ctx, key, ref, errorCode)
 }

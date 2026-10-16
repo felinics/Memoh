@@ -17,7 +17,9 @@ type preparedProviderAttempt struct {
 	systemPrepended   bool
 	reselectionDetail string
 	protectedPruned   int
-	provenance        preparedMessageProvenance
+	// admitted are the loop-owned dynamic messages the prepared payload
+	// carries, with their positions in that payload.
+	admitted []dynamicSourceRef
 }
 
 // providerAttemptHandoff publishes successful attempt state at the last
@@ -39,14 +41,10 @@ func (h *providerAttemptHandoff) stage(
 	systemPrepended bool,
 	reselectionDetail string,
 	protectedPruned int,
-	provenanceValues ...preparedMessageProvenance,
+	admitted []dynamicSourceRef,
 ) {
 	if h == nil {
 		return
-	}
-	var provenance preparedMessageProvenance
-	if len(provenanceValues) > 0 {
-		provenance = provenanceValues[0]
 	}
 	h.mu.Lock()
 	h.pending = &preparedProviderAttempt{
@@ -54,29 +52,27 @@ func (h *providerAttemptHandoff) stage(
 		systemPrepended:   systemPrepended,
 		reselectionDetail: reselectionDetail,
 		protectedPruned:   protectedPruned,
-		provenance:        clonePreparedMessageProvenance(provenance),
+		admitted:          cloneDynamicSourceRefs(admitted),
 	}
 	h.mu.Unlock()
 }
 
-func (h *providerAttemptHandoff) reject(provenanceValues ...preparedMessageProvenance) {
+// reject drops the staged attempt and removes provider-visibility admission
+// for the boundary the attempt targeted: it will not be dispatched.
+func (h *providerAttemptHandoff) reject() {
 	if h == nil {
 		return
 	}
 	h.mu.Lock()
-	var provenance preparedMessageProvenance
-	if h.pending != nil {
-		provenance = h.pending.provenance
-	}
-	if len(provenanceValues) > 0 {
-		provenance = provenanceValues[0]
-	}
 	h.pending = nil
 	h.mu.Unlock()
-	h.cfg.preparedStepMessages.revoke(provenance)
+	h.cfg.dynamicInputs.revoke()
 }
 
-func (h *providerAttemptHandoff) publish(params sdk.GenerateParams) error {
+// publish publishes the staged attempt for the request about to be dispatched.
+//
+//nolint:gocritic // hugeParam: the loop's request value is the frozen payload this publishes.
+func (h *providerAttemptHandoff) publish(params sdk.Request) error {
 	if h == nil {
 		return errProviderAttemptNotPrepared
 	}
@@ -87,22 +83,17 @@ func (h *providerAttemptHandoff) publish(params sdk.GenerateParams) error {
 	}
 
 	pending := *h.pending
-	if pending.provenance.known && len(pending.provenance.messageIndexes) != len(params.Messages) {
-		h.pending = nil
-		h.cfg.preparedStepMessages.revoke(pending.provenance)
-		return errProviderAttemptNotPrepared
-	}
 	if h.cfg.ForkContext != nil {
 		if err := h.cfg.ForkContext.Store(params.Messages); err != nil {
 			h.pending = nil
-			h.cfg.preparedStepMessages.revoke(pending.provenance)
+			h.cfg.dynamicInputs.revoke()
 			return err
 		}
 	}
 
-	h.cfg.preparedStepMessages.reconcile(params.Messages, pending.provenance)
+	h.cfg.dynamicInputs.commit(pending.admitted)
 	hash := contextfrag.ProviderPayloadHash(params.System, params.Messages, params.Tools)
-	h.cfg.providerAttemptState.store(&params, pending.snapshot.StepIndex, pending.systemPrepended, pending.provenance)
+	h.cfg.providerAttemptState.store(&params, pending.snapshot.StepIndex, pending.systemPrepended, pending.admitted)
 	h.cfg.ContextMutations.SetFinalInputHash(hash)
 	pending.snapshot.PostPrepareInputHash = hash
 	h.cfg.ContextMutations.AppendStepSnapshot(pending.snapshot)

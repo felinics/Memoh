@@ -45,7 +45,7 @@ func (t *turnRunner) elicit(ctx context.Context, id string, request elicitationR
 	case "", "form":
 		input, mapping, err = userinput.ElicitationFormInput(request.Message, request.RequestedSchema)
 		if err != nil {
-			t.logger.Warn("claude elicitation form is unsupported", slog.Any("error", err))
+			t.logger.WarnContext(ctx, "claude elicitation form is unsupported", slog.Any("error", err))
 			return decline
 		}
 	case "url":

@@ -35,6 +35,9 @@ var builtinToolCallEmoji = map[string]string{
 	"web_fetch":             "🌐",
 
 	"search_memory":   "🧠",
+	"create_memory":   "🧠",
+	"update_memory":   "🧠",
+	"delete_memory":   "🧠",
 	"search_messages": "🧠",
 	"list_sessions":   "🧠",
 
@@ -48,11 +51,6 @@ var builtinToolCallEmoji = map[string]string{
 	"react": "💬",
 
 	"get_contacts": "👥",
-
-	"list_email_accounts": "📧",
-	"send_email":          "📧",
-	"list_email":          "📧",
-	"read_email":          "📧",
 
 	"spawn_agent":  "🤖",
 	"send_message": "🤖",

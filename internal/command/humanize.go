@@ -259,17 +259,6 @@ func cronWeekday(dow string) (string, bool) {
 	return cronWeekdays[d], true
 }
 
-// isSuccessStatus reports whether a status string represents a successful run.
-// Used to suppress a redundant "Success" flag on rows where success is the
-// expected, common state (absence of a failure flag conveys success).
-func isSuccessStatus(s string) bool {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "ok", "success", "succeeded":
-		return true
-	}
-	return false
-}
-
 // humanizeStatus renders a status/enum token as a friendly Title-cased label,
 // mapping known machine values to clearer words. Unknown values are Title-cased
 // as-is; the empty string passes through unchanged.

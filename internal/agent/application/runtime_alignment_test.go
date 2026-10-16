@@ -161,7 +161,7 @@ func TestACPGenericPromptFailurePublishesSanitizedErroredTerminalToChatAndDiscus
 	service := newACPLifecycleService(t, pool, &recordingMessageService{}, lifecycles)
 	eventCh := make(chan WSStreamEvent, 16)
 
-	if err := service.streamACPAgentWS(context.Background(), ChatRequest{
+	if _, err := service.streamACPAgentWS(context.Background(), ChatRequest{
 		BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID,
 		RunID: lifecycleTestRunID, Query: "inspect",
 	}, eventCh, make(chan struct{})); err != nil {
@@ -224,7 +224,7 @@ func TestACPPersistFailureReplacesSuccessTerminalWithSanitizedErrorAbort(t *test
 	)
 	eventCh := make(chan WSStreamEvent, 16)
 
-	if err := service.streamACPAgentWS(context.Background(), ChatRequest{
+	if _, err := service.streamACPAgentWS(context.Background(), ChatRequest{
 		BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID,
 		RunID: lifecycleTestRunID, Query: "inspect",
 	}, eventCh, make(chan struct{})); err != nil {
@@ -263,10 +263,10 @@ func TestACPExplicitCancellationDoesNotPublishProviderError(t *testing.T) {
 	abortCh := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- service.streamACPAgentWS(context.Background(), ChatRequest{
+		done <- ignoreOutcome(service.streamACPAgentWS(context.Background(), ChatRequest{
 			BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID,
 			RunID: lifecycleTestRunID, Query: "inspect",
-		}, eventCh, abortCh)
+		}, eventCh, abortCh))
 	}()
 	<-started
 	close(abortCh)
@@ -410,7 +410,7 @@ func TestACPCommitUnknownResolutionMatrix(t *testing.T) {
 		service.queries = &reconcileOutcomeQueries{outcome: "succeeded"}
 		eventCh := make(chan WSStreamEvent, 16)
 
-		if err := service.streamACPAgentWS(context.Background(), ChatRequest{
+		if _, err := service.streamACPAgentWS(context.Background(), ChatRequest{
 			BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID,
 			RunID: lifecycleTestRunID, Query: "inspect",
 		}, eventCh, make(chan struct{})); err != nil {
@@ -433,7 +433,7 @@ func TestACPCommitUnknownResolutionMatrix(t *testing.T) {
 		service.queries = &reconcileOutcomeQueries{outcome: ""}
 		eventCh := make(chan WSStreamEvent, 16)
 
-		if err := service.streamACPAgentWS(context.Background(), ChatRequest{
+		if _, err := service.streamACPAgentWS(context.Background(), ChatRequest{
 			BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID,
 			RunID: lifecycleTestRunID, Query: "inspect",
 		}, eventCh, make(chan struct{})); err != nil {
@@ -461,7 +461,7 @@ func TestACPCommitUnknownResolutionMatrix(t *testing.T) {
 		service.queries = queries
 		eventCh := make(chan WSStreamEvent, 16)
 
-		err := service.streamACPAgentWS(context.Background(), ChatRequest{
+		_, err := service.streamACPAgentWS(context.Background(), ChatRequest{
 			BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID,
 			RunID: lifecycleTestRunID, Query: "inspect",
 		}, eventCh, make(chan struct{}))
@@ -495,10 +495,10 @@ func TestACPCommitUnknownResolutionMatrix(t *testing.T) {
 		abortCh := make(chan struct{})
 		done := make(chan error, 1)
 		go func() {
-			done <- service.streamACPAgentWS(context.Background(), ChatRequest{
+			done <- ignoreOutcome(service.streamACPAgentWS(context.Background(), ChatRequest{
 				BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID,
 				RunID: lifecycleTestRunID, Query: "inspect",
-			}, eventCh, abortCh)
+			}, eventCh, abortCh))
 		}()
 		<-started
 		close(abortCh)

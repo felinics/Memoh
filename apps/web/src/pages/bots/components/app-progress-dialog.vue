@@ -8,10 +8,8 @@ import { useQuery } from '@pinia/colada'
 import { getConnectorsCatalog } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
   Button,
+  CalloutBanner,
   Dialog,
   DialogBody,
   DialogDescription,
@@ -271,33 +269,33 @@ function finish() {
           @phase="authPhase = $event"
           @authorized="authorization.authorized"
         />
-        <Alert
+        <CalloutBanner
           v-else-if="needsSetup"
-          variant="destructive"
-        >
-          <AlertTitle>{{ t('apps.progress.authorizationLoadFailed') }}</AlertTitle>
-          <AlertDescription>{{ authorizationError || t('apps.connector.unavailableDescription') }}</AlertDescription>
-        </Alert>
+          tone="destructive"
+          :title="t('apps.progress.authorizationLoadFailed')"
+          :description="authorizationError || t('apps.connector.unavailableDescription')"
+        />
 
-        <Alert
+        <CalloutBanner
           v-if="status === 'error' || status === 'unknown'"
-          :variant="status === 'error' ? 'destructive' : 'default'"
-          class="min-w-0"
+          :tone="status === 'error' ? 'destructive' : 'neutral'"
+          :title="status === 'unknown' ? t('apps.progress.unknownTitle') : t('apps.progress.failedTitle')"
+          :description="t(status === 'unknown' ? 'apps.progress.unknownHint' : 'apps.progress.failedHint')"
         >
-          <AlertTitle class="break-words">
-            {{ status === 'unknown' ? t('apps.progress.unknownTitle') : error || t('apps.progress.failedTitle') }}
-          </AlertTitle>
-          <AlertDescription>{{ t(status === 'unknown' ? 'apps.progress.unknownHint' : 'apps.progress.failedHint') }}</AlertDescription>
-        </Alert>
+          <template
+            v-if="status === 'error' && error"
+            #details
+          >
+            {{ error }}
+          </template>
+        </CalloutBanner>
 
-        <Alert
+        <CalloutBanner
           v-else-if="status === 'done' && result === 'partial' && !needsSetup"
-          variant="default"
-          class="min-w-0"
-        >
-          <AlertTitle>{{ t('apps.progress.partialTitle') }}</AlertTitle>
-          <AlertDescription>{{ t('apps.progress.partialHint') }}</AlertDescription>
-        </Alert>
+          tone="warning"
+          :title="t('apps.progress.partialTitle')"
+          :description="t('apps.progress.partialHint')"
+        />
       </DialogBody>
 
       <DialogFooter class="min-w-0 items-center gap-2 sm:justify-between">

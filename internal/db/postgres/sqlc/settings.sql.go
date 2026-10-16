@@ -13,8 +13,7 @@ import (
 
 const deleteSettingsByBotID = `-- name: DeleteSettingsByBotID :exec
 UPDATE bots
-SET language = 'auto',
-    command_ui_language = 'auto',
+SET command_ui_language = 'auto',
     reasoning_effort = 'medium',
     compaction_enabled = true,
     compaction_threshold = 0,
@@ -26,6 +25,7 @@ SET language = 'auto',
     chat_acp_project_path = '/data',
     chat_acp_project_mode = 'project',
     compaction_model_id = NULL,
+    memory_llm_model_id = NULL,
     image_model_id = NULL,
     search_provider_id = NULL,
     fetch_provider_id = NULL,
@@ -52,7 +52,6 @@ func (q *Queries) DeleteSettingsByBotID(ctx context.Context, id pgtype.UUID) err
 const getSettingsByBotID = `-- name: GetSettingsByBotID :one
 SELECT
   bots.id AS bot_id,
-  bots.language,
   bots.reasoning_effort,
   bots.compaction_enabled,
   bots.compaction_threshold,
@@ -65,6 +64,7 @@ SELECT
   bots.chat_acp_project_path,
   bots.chat_acp_project_mode,
   compaction_models.id AS compaction_model_id,
+  memory_llm_models.id AS memory_llm_model_id,
   search_providers.id AS search_provider_id,
   fetch_providers.id AS fetch_provider_id,
   memory_providers.id AS memory_provider_id,
@@ -83,6 +83,7 @@ SELECT
 FROM bots
 LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS compaction_models ON compaction_models.id = bots.compaction_model_id AND compaction_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS memory_llm_models ON memory_llm_models.id = bots.memory_llm_model_id AND memory_llm_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS image_models ON image_models.id = bots.image_model_id AND image_models.team_id = public.memoh_current_team_id()
 LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id AND search_providers.team_id = public.memoh_current_team_id()
 LEFT JOIN fetch_providers ON fetch_providers.id = bots.fetch_provider_id AND fetch_providers.team_id = public.memoh_current_team_id()
@@ -95,7 +96,6 @@ WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $1
 
 type GetSettingsByBotIDRow struct {
 	BotID                   pgtype.UUID `json:"bot_id"`
-	Language                string      `json:"language"`
 	ReasoningEffort         string      `json:"reasoning_effort"`
 	CompactionEnabled       bool        `json:"compaction_enabled"`
 	CompactionThreshold     int32       `json:"compaction_threshold"`
@@ -108,6 +108,7 @@ type GetSettingsByBotIDRow struct {
 	ChatAcpProjectPath      string      `json:"chat_acp_project_path"`
 	ChatAcpProjectMode      string      `json:"chat_acp_project_mode"`
 	CompactionModelID       pgtype.UUID `json:"compaction_model_id"`
+	MemoryLlmModelID        pgtype.UUID `json:"memory_llm_model_id"`
 	SearchProviderID        pgtype.UUID `json:"search_provider_id"`
 	FetchProviderID         pgtype.UUID `json:"fetch_provider_id"`
 	MemoryProviderID        pgtype.UUID `json:"memory_provider_id"`
@@ -130,7 +131,6 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 	var i GetSettingsByBotIDRow
 	err := row.Scan(
 		&i.BotID,
-		&i.Language,
 		&i.ReasoningEffort,
 		&i.CompactionEnabled,
 		&i.CompactionThreshold,
@@ -143,6 +143,7 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.ChatAcpProjectPath,
 		&i.ChatAcpProjectMode,
 		&i.CompactionModelID,
+		&i.MemoryLlmModelID,
 		&i.SearchProviderID,
 		&i.FetchProviderID,
 		&i.MemoryProviderID,
@@ -165,75 +166,77 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 const upsertBotSettings = `-- name: UpsertBotSettings :one
 WITH updated AS (
   UPDATE bots
-  SET language = $1,
-      reasoning_effort = $2,
-      compaction_enabled = $3,
-      compaction_threshold = $4,
+  SET reasoning_effort = $1,
+      compaction_enabled = $2,
+      compaction_threshold = $3,
       compaction_target_percent = CASE
-        WHEN $5::boolean
-          THEN $6::integer
+        WHEN $4::boolean
+          THEN $5::integer
         ELSE bots.compaction_target_percent
       END,
-      timezone = COALESCE($7::text, bots.timezone),
+      timezone = COALESCE($6::text, bots.timezone),
       chat_model_id = CASE
-        WHEN $8::boolean THEN $9::uuid
+        WHEN $7::boolean THEN $8::uuid
         ELSE bots.chat_model_id
       END,
       default_bot_agent_id = CASE
-        WHEN $10::boolean THEN $11::uuid
+        WHEN $9::boolean THEN $10::uuid
         ELSE bots.default_bot_agent_id
       END,
-      chat_runtime = $12,
-      chat_acp_agent_id = $13::text,
-      chat_acp_project_path = $14,
-      chat_acp_project_mode = $15,
+      chat_runtime = $11,
+      chat_acp_agent_id = $12::text,
+      chat_acp_project_path = $13,
+      chat_acp_project_mode = $14,
       compaction_model_id = CASE
-        WHEN $16::boolean THEN $17::uuid
+        WHEN $15::boolean THEN $16::uuid
         ELSE bots.compaction_model_id
       END,
+      memory_llm_model_id = CASE
+        WHEN $17::boolean THEN $18::uuid
+        ELSE bots.memory_llm_model_id
+      END,
       search_provider_id = CASE
-        WHEN $18::boolean THEN $19::uuid
+        WHEN $19::boolean THEN $20::uuid
         ELSE bots.search_provider_id
       END,
       fetch_provider_id = CASE
-        WHEN $20::boolean THEN $21::uuid
+        WHEN $21::boolean THEN $22::uuid
         ELSE bots.fetch_provider_id
       END,
       memory_provider_id = CASE
-        WHEN $22::boolean THEN $23::uuid
+        WHEN $23::boolean THEN $24::uuid
         ELSE bots.memory_provider_id
       END,
       image_model_id = CASE
-        WHEN $24::boolean THEN $25::uuid
+        WHEN $25::boolean THEN $26::uuid
         ELSE bots.image_model_id
       END,
       tts_model_id = CASE
-        WHEN $26::boolean THEN $27::uuid
+        WHEN $27::boolean THEN $28::uuid
         ELSE bots.tts_model_id
       END,
       transcription_model_id = CASE
-        WHEN $28::boolean THEN $29::uuid
+        WHEN $29::boolean THEN $30::uuid
         ELSE bots.transcription_model_id
       END,
       video_model_id = CASE
-        WHEN $30::boolean THEN $31::uuid
+        WHEN $31::boolean THEN $32::uuid
         ELSE bots.video_model_id
       END,
-      persist_full_tool_results = $32,
-      show_tool_calls_in_im = $33,
-      tool_approval_config = $34,
-      display_enabled = $35,
-      overlay_provider = $36,
-      overlay_enabled = $37,
-      overlay_config = $38,
-      command_ui_language = $39,
+      persist_full_tool_results = $33,
+      show_tool_calls_in_im = $34,
+      tool_approval_config = $35,
+      display_enabled = $36,
+      overlay_provider = $37,
+      overlay_enabled = $38,
+      overlay_config = $39,
+      command_ui_language = $40,
       updated_at = now()
-  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $40
-  RETURNING bots.id, bots.language, bots.reasoning_effort, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.default_bot_agent_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
+  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $41
+  RETURNING bots.id, bots.reasoning_effort, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.default_bot_agent_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.compaction_model_id, bots.memory_llm_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
   updated.id AS bot_id,
-  updated.language,
   updated.reasoning_effort,
   updated.compaction_enabled,
   updated.compaction_threshold,
@@ -246,6 +249,7 @@ SELECT
   updated.chat_acp_project_path,
   updated.chat_acp_project_mode,
   compaction_models.id AS compaction_model_id,
+  memory_llm_models.id AS memory_llm_model_id,
   search_providers.id AS search_provider_id,
   fetch_providers.id AS fetch_provider_id,
   memory_providers.id AS memory_provider_id,
@@ -264,6 +268,7 @@ SELECT
 FROM updated
 LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS compaction_models ON compaction_models.id = updated.compaction_model_id AND compaction_models.team_id = public.memoh_current_team_id()
+LEFT JOIN models AS memory_llm_models ON memory_llm_models.id = updated.memory_llm_model_id AND memory_llm_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS image_models ON image_models.id = updated.image_model_id AND image_models.team_id = public.memoh_current_team_id()
 LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id AND search_providers.team_id = public.memoh_current_team_id()
 LEFT JOIN fetch_providers ON fetch_providers.id = updated.fetch_provider_id AND fetch_providers.team_id = public.memoh_current_team_id()
@@ -274,7 +279,6 @@ LEFT JOIN models AS video_models ON video_models.id = updated.video_model_id AND
 `
 
 type UpsertBotSettingsParams struct {
-	Language                   string      `json:"language"`
 	ReasoningEffort            string      `json:"reasoning_effort"`
 	CompactionEnabled          bool        `json:"compaction_enabled"`
 	CompactionThreshold        int32       `json:"compaction_threshold"`
@@ -291,6 +295,8 @@ type UpsertBotSettingsParams struct {
 	ChatAcpProjectMode         string      `json:"chat_acp_project_mode"`
 	CompactionModelIDSet       bool        `json:"compaction_model_id_set"`
 	CompactionModelID          pgtype.UUID `json:"compaction_model_id"`
+	MemoryLlmModelIDSet        bool        `json:"memory_llm_model_id_set"`
+	MemoryLlmModelID           pgtype.UUID `json:"memory_llm_model_id"`
 	SearchProviderIDSet        bool        `json:"search_provider_id_set"`
 	SearchProviderID           pgtype.UUID `json:"search_provider_id"`
 	FetchProviderIDSet         bool        `json:"fetch_provider_id_set"`
@@ -318,7 +324,6 @@ type UpsertBotSettingsParams struct {
 
 type UpsertBotSettingsRow struct {
 	BotID                   pgtype.UUID `json:"bot_id"`
-	Language                string      `json:"language"`
 	ReasoningEffort         string      `json:"reasoning_effort"`
 	CompactionEnabled       bool        `json:"compaction_enabled"`
 	CompactionThreshold     int32       `json:"compaction_threshold"`
@@ -331,6 +336,7 @@ type UpsertBotSettingsRow struct {
 	ChatAcpProjectPath      string      `json:"chat_acp_project_path"`
 	ChatAcpProjectMode      string      `json:"chat_acp_project_mode"`
 	CompactionModelID       pgtype.UUID `json:"compaction_model_id"`
+	MemoryLlmModelID        pgtype.UUID `json:"memory_llm_model_id"`
 	SearchProviderID        pgtype.UUID `json:"search_provider_id"`
 	FetchProviderID         pgtype.UUID `json:"fetch_provider_id"`
 	MemoryProviderID        pgtype.UUID `json:"memory_provider_id"`
@@ -350,7 +356,6 @@ type UpsertBotSettingsRow struct {
 
 func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsParams) (UpsertBotSettingsRow, error) {
 	row := q.db.QueryRow(ctx, upsertBotSettings,
-		arg.Language,
 		arg.ReasoningEffort,
 		arg.CompactionEnabled,
 		arg.CompactionThreshold,
@@ -367,6 +372,8 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.ChatAcpProjectMode,
 		arg.CompactionModelIDSet,
 		arg.CompactionModelID,
+		arg.MemoryLlmModelIDSet,
+		arg.MemoryLlmModelID,
 		arg.SearchProviderIDSet,
 		arg.SearchProviderID,
 		arg.FetchProviderIDSet,
@@ -394,7 +401,6 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 	var i UpsertBotSettingsRow
 	err := row.Scan(
 		&i.BotID,
-		&i.Language,
 		&i.ReasoningEffort,
 		&i.CompactionEnabled,
 		&i.CompactionThreshold,
@@ -407,6 +413,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.ChatAcpProjectPath,
 		&i.ChatAcpProjectMode,
 		&i.CompactionModelID,
+		&i.MemoryLlmModelID,
 		&i.SearchProviderID,
 		&i.FetchProviderID,
 		&i.MemoryProviderID,

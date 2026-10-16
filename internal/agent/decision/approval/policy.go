@@ -10,6 +10,16 @@ import (
 func policyDecision(cfg PolicyConfig, toolName string, input any) string {
 	cfg = NormalizePolicyConfig(cfg)
 	args := inputMap(input)
+	if toolName == "mcp_manage" || toolName == "app_manage" {
+		action := readString(args, "action")
+		if action == "list" || action == "get" {
+			return DecisionBypass
+		}
+		if cfg.Enabled && (cfg.Write.Mode == PolicyModeDeny || cfg.Exec.Mode == PolicyModeDeny) {
+			return DecisionDeny
+		}
+		return DecisionNeedsApproval
+	}
 	operation, ok := OperationForTool(toolName)
 	if !ok {
 		return DecisionBypass
@@ -148,7 +158,7 @@ func OperationForTool(toolName string) (string, bool) {
 		return OperationWrite, true
 	case "exec":
 		return OperationExec, true
-	case "permission":
+	case "permission", "mcp_manage", "app_manage":
 		return OperationPermission, true
 	default:
 		return "", false

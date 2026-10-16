@@ -1,47 +1,57 @@
+// Package logger builds the process's slog logger.
+//
+// The rules this package exists to enforce:
+//
+//   - A logger is constructed and passed, never reached for. There is no
+//     package-level logger variable and no logging functions here. Code that
+//     logs takes a *slog.Logger the way it takes any other dependency.
+//   - The context carries request data, not the logger. slog's own API took
+//     the opposite direction on purpose: Handler.Handle receives a context so
+//     a handler can read values that are already there, which is what
+//     correlation.Handler below does.
+//   - Output keys are snake_case, including the correlation fields. Log
+//     records are not OpenTelemetry attributes; renaming them to dotted form
+//     would only collide with the underscore-flattening most log pipelines
+//     apply on ingest.
+//
+// Nothing here writes to os.Stdout by itself. Init used to, which is why this
+// package had no test that could look at its output.
 package logger
 
 import (
-	"context"
+	"io"
 	"log/slog"
-	"os"
 	"strings"
 )
 
-type ctxKey struct{}
+// New builds a logger writing to w. format selects the encoding ("json" for
+// JSON, anything else for text); level is one of debug, info, warn, error and
+// falls back to info.
+//
+// The returned logger already carries the correlation handler, so any record
+// logged with a context that has a request or trace identity picks those
+// fields up without the call site repeating them.
+func New(w io.Writer, level, format string) *slog.Logger {
+	opts := &slog.HandlerOptions{Level: parseLevel(level)}
 
-var (
-	L      = slog.Default()
-	logKey = ctxKey{}
-)
-
-// Init initializes the global logger with the given level and format (e.g. "debug", "json").
-func Init(level, format string) {
-	var handler slog.Handler
-	opts := &slog.HandlerOptions{
-		Level: parseLevel(level),
-	}
-
+	var encoder slog.Handler
 	if strings.ToLower(format) == "json" {
-		handler = slog.NewJSONHandler(os.Stdout, opts)
+		encoder = slog.NewJSONHandler(w, opts)
 	} else {
-		handler = slog.NewTextHandler(os.Stdout, opts)
+		encoder = slog.NewTextHandler(w, opts)
 	}
 
-	L = slog.New(handler)
-	slog.SetDefault(L)
+	return slog.New(correlationHandler{inner: encoder})
 }
 
-// FromContext returns the logger from ctx, or the global logger if not set.
-func FromContext(ctx context.Context) *slog.Logger {
-	if l, ok := ctx.Value(logKey).(*slog.Logger); ok {
-		return l
-	}
-	return L
-}
-
-// WithContext stores the logger in ctx and returns the new context.
-func WithContext(ctx context.Context, l *slog.Logger) context.Context {
-	return context.WithValue(ctx, logKey, l)
+// SetDefault points slog's package-level logger, and with it the standard
+// log package, at l.
+//
+// This exists for output that is not ours: a dependency calling log.Printf,
+// or slog.Default() from a library. Call it once during startup. It is not
+// the way this codebase logs — application code holds a *slog.Logger.
+func SetDefault(l *slog.Logger) {
+	slog.SetDefault(l)
 }
 
 func parseLevel(level string) slog.Level {
@@ -57,21 +67,4 @@ func parseLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
-}
-
-// Debug, Info, Warn, Error log with the global logger (slog.Attr or key-value pairs).
-func Debug(msg string, args ...any) {
-	L.Log(context.Background(), slog.LevelDebug, "global log", append([]any{slog.String("message", msg)}, args...)...)
-}
-
-func Info(msg string, args ...any) {
-	L.Log(context.Background(), slog.LevelInfo, "global log", append([]any{slog.String("message", msg)}, args...)...)
-}
-
-func Warn(msg string, args ...any) {
-	L.Log(context.Background(), slog.LevelWarn, "global log", append([]any{slog.String("message", msg)}, args...)...)
-}
-
-func Error(msg string, args ...any) {
-	L.Log(context.Background(), slog.LevelError, "global log", append([]any{slog.String("message", msg)}, args...)...)
 }

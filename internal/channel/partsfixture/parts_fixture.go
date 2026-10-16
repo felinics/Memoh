@@ -42,10 +42,11 @@ const (
 	// the Discord adapter.
 	CanonicalMarkdown = "**Hello**\n\n*world*\n\n[docs](https://example.test/page)\n\n[wiki](https://example.test/%3Cx%3E%28y%29%7Cz)\n\nempty url\n\nevil\n\n`literal.code`\n\n```bash\ngo test\n```\n\n```python\nline1\nline2\n```\n\n```\nraw\n```\n\n## Title \\[x\\]\n\n> alpha \\[x\\]\n> beta\n\n- item \\[x\\]\n\n@alice\n\n🎉"
 
-	// CanonicalFeishuLarkMD matches Feishu's lark_md renderer. It is mostly
-	// GFM-aligned, but headings degrade to bold text because lark_md cards do
-	// not support ATX headings reliably.
-	CanonicalFeishuLarkMD = "**Hello**\n\n*world*\n\n[docs](https://example.test/page)\n\n[wiki](https://example.test/%3Cx%3E%28y%29%7Cz)\n\nempty url\n\nevil\n\n`literal.code`\n\n```bash\ngo test\n```\n\n```python\nline1\nline2\n```\n\n```\nraw\n```\n\n**Title \\[x\\]**\n\n> alpha \\[x\\]\n> beta\n\n- item \\[x\\]\n\n@alice\n\n🎉"
+	// CanonicalFeishuLarkMD matches Feishu's card JSON 2.0 markdown component.
+	// It is mostly GFM-aligned; heading parts carry no level, so they render as
+	// bold text, and markdown characters are escaped as HTML character
+	// references.
+	CanonicalFeishuLarkMD = "**Hello**\n\n*world*\n\n[docs](https://example.test/page)\n\n[wiki](https://example.test/%3Cx%3E%28y%29%7Cz)\n\nempty url\n\nevil\n\n`literal.code`\n\n```bash\ngo test\n```\n\n```python\nline1\nline2\n```\n\n```\nraw\n```\n\n**Title &#91;x&#93;**\n\n> alpha &#91;x&#93;\n> beta\n\n- item &#91;x&#93;\n\n@alice\n\n🎉"
 
 	// CanonicalPlain is the plain-text degrader output used when neither
 	// RichText nor Markdown is supported.

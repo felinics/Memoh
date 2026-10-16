@@ -352,3 +352,29 @@ func TestWaitingDecisionRecoveryPreservesParallelDecisions(t *testing.T) {
 		t.Fatalf("preserved decision tokens = approval:%d input:%d, want both 6", approvalToken, inputToken)
 	}
 }
+
+func TestWaitingDecisionRecoveryDoesNotReplayFrozenCapabilityApproval(t *testing.T) {
+	const runID, sessionID = "run-inline-lost", "session-inline-lost"
+	runs := newFakeLedger()
+	runs.InsertClaimed(runID, sessionID, 5, "generation-old")
+	if _, applied, err := runs.SetWaitingDecision(t.Context(), runID, 5); err != nil || !applied {
+		t.Fatalf("park run: %v %v", applied, err)
+	}
+	decisions := &fakeDecisionStore{target: DecisionTarget{Type: CommandToolApprovalResponse, ID: "frozen-approval", BotID: testBotID, SessionID: sessionID, RunID: runID, TurnID: runID + "-turn", Status: "pending", FencingToken: 5, InlineDecision: true}}
+	candidate := LeaseCandidate{Key: Key{BotID: testBotID, SessionID: sessionID}, RunID: runID, FencingToken: 5, ExpiresAt: time.Now().Add(-time.Minute)}
+	backend := newRetryingRecoveryBackend("generation-new", candidate)
+	t.Cleanup(func() { _ = backend.Close() })
+	fence := &waitingDecisionRecoveryFence{runs: runs, decisions: decisions}
+	manager := NewManager(backend, Options{OwnerID: "owner-new", OwnerLeaseTTL: time.Hour, Ledger: runs, Fence: fence})
+	manager.SetDecisionStore(decisions)
+	reaper := newTestReaperWithLiveness(t, runs, backend, "generation-new")
+	reaper.SetWaitingDecisionRecoverer(manager.recoverWaitingDecision)
+	reaper.tick(t.Context())
+	run, err := runs.Get(t.Context(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.State != ledger.StateLost || len(fence.recordedReclaims()) != 0 {
+		t.Fatalf("lost frozen plan was reclaimed: %+v", run)
+	}
+}

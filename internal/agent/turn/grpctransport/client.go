@@ -9,12 +9,11 @@ import (
 	"sync"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/agent/turn/turnpb"
+	"github.com/felinics/memoh/internal/rpc"
 )
 
 type Client struct {
@@ -70,7 +69,7 @@ func (c *Client) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (turn
 		return nil, errors.New("turn rpc: missing started frame")
 	}
 	h := &runHandle{
-		id: started.GetRunId(), stream: stream,
+		id: started.GetRunId(), reportsTerminal: started.GetReportsRunTerminal(), stream: stream,
 		events: make(chan turn.Event, 16), errs: make(chan error, 1),
 		ctx: runCtx, cancel: cancel, done: make(chan struct{}),
 		logger: c.logger,
@@ -139,21 +138,25 @@ func receiveContinuation(ctx context.Context, recv continuationReceiver, eventCh
 }
 
 type runHandle struct {
-	id     string
-	stream turnpb.TurnService_RunClient
-	events chan turn.Event
-	errs   chan error
-	ctx    context.Context
-	cancel context.CancelFunc
-	done   chan struct{}
-	logger *slog.Logger
-	mu     sync.Mutex
-	once   sync.Once
+	id string
+	// reportsTerminal is the server's answer in the started frame. A server
+	// that predates run_terminal leaves it false.
+	reportsTerminal bool
+	stream          turnpb.TurnService_RunClient
+	events          chan turn.Event
+	errs            chan error
+	ctx             context.Context
+	cancel          context.CancelFunc
+	done            chan struct{}
+	logger          *slog.Logger
+	mu              sync.Mutex
+	once            sync.Once
 }
 
 func (h *runHandle) RunID() string             { return h.id }
 func (h *runHandle) Events() <-chan turn.Event { return h.events }
 func (h *runHandle) Errs() <-chan error        { return h.errs }
+func (h *runHandle) ReportsRunTerminal() bool  { return h.reportsTerminal }
 
 func (h *runHandle) Inject(ctx context.Context, msg turn.InjectMessage) error {
 	data, err := json.Marshal(injectPayload{
@@ -237,34 +240,13 @@ func (h *runHandle) pump() {
 	}
 }
 
+// mapClientError restores the turn failure an error envelope carries, by
+// rpc.Decode. A turn carries an end user's request, so a restored catalog
+// error is forwarded: the user gets the same answer as when the channel runs
+// in the server process. A canceled or expired call stays a status; a caller
+// that needs to know whether it ended the call reads its own context.
 func mapClientError(err error) error {
-	if err == nil {
-		return nil
-	}
-	switch status.Code(err) {
-	case codes.Aborted:
-		return turn.ErrSessionBusy
-	case codes.AlreadyExists:
-		return turn.ErrDuplicateTurn
-	case codes.ResourceExhausted:
-		if status.Convert(err).Message() == turnDeferredStatusMessage {
-			return turn.ErrTurnDeferred
-		}
-		return err
-	case codes.PermissionDenied:
-		return turn.ErrTeamNotServed
-	case codes.Canceled:
-		return context.Canceled
-	case codes.DeadlineExceeded:
-		return context.DeadlineExceeded
-	case codes.FailedPrecondition:
-		if feedback := decodeFeedback(status.Convert(err).Message()); feedback != nil {
-			return feedback
-		}
-		return err
-	default:
-		return err
-	}
+	return rpc.Forward(rpc.Decode(err, turnReasons, nil))
 }
 
 func (c *Client) StopTurn(ctx context.Context, cmd turn.StopCommand) (bool, error) {

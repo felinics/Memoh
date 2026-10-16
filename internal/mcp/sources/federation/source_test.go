@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	mcpgw "github.com/felinics/memoh/internal/mcp"
 )
@@ -190,5 +191,30 @@ func TestSourceRenamesReservedToolAliases(t *testing.T) {
 	}
 	if route, _ := result["route"].(string); route != "sse" {
 		t.Fatalf("result = %#v, want sse route", result)
+	}
+}
+
+func TestCachedRouteCannotCallRemovedOrReconfiguredConnection(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "removed-or-disabled", true: "reconfigured"}[changed], func(t *testing.T) {
+			gateway := &testGateway{listHTTP: []mcpgw.ToolDescriptor{{Name: "search"}}}
+			lister := &testConnectionLister{items: []mcpgw.Connection{{ID: "connection", Name: "Remote", Type: "http", Active: true, Config: map[string]any{"url": "https://example.com/mcp"}}}}
+			source := NewSource(slog.Default(), gateway, lister)
+			session := mcpgw.ToolSessionContext{BotID: "bot"}
+			if _, err := source.ListTools(t.Context(), session); err != nil {
+				t.Fatal(err)
+			}
+			if changed {
+				lister.items[0].UpdatedAt = time.Now()
+			} else {
+				lister.items = nil
+			}
+			if _, err := source.CallTool(t.Context(), session, "remote_search", nil); !errors.Is(err, mcpgw.ErrToolNotFound) {
+				t.Fatalf("stale call error: %v", err)
+			}
+			if gateway.lastCallType != "" {
+				t.Fatal("stale route reached remote server")
+			}
+		})
 	}
 }

@@ -1,7 +1,5 @@
 package command
 
-import agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
-
 // InteractiveKind discriminates the structured payload carried by a Result.
 type InteractiveKind string
 
@@ -27,10 +25,9 @@ const (
 // (Close/Prev/Next/…) so the whole reply stays in one language. Empty means the
 // server default (English).
 type Result struct {
-	Text          string
-	Interactive   *Interactive
-	Locale        string
-	FeedbackError *agentfeedback.Error
+	Text        string
+	Interactive *Interactive
+	Locale      string
 }
 
 // Interactive carries optional structured data for rich rendering. Exactly one

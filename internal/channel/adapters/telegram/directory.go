@@ -38,12 +38,12 @@ func (*TelegramAdapter) ListGroups(_ context.Context, _ channel.ChannelConfig, _
 }
 
 // ListGroupMembers returns group managers for the given group (Telegram only exposes this list, not all members).
-func (a *TelegramAdapter) ListGroupMembers(_ context.Context, cfg channel.ChannelConfig, groupID string, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
+func (a *TelegramAdapter) ListGroupMembers(ctx context.Context, cfg channel.ChannelConfig, groupID string, query channel.DirectoryQuery) ([]channel.DirectoryEntry, error) {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return nil, err
 	}
-	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
+	bot, err := a.getOrCreateBot(ctx, telegramCfg, cfg.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func (a *TelegramAdapter) ResolveEntry(ctx context.Context, cfg channel.ChannelC
 	if err != nil {
 		return channel.DirectoryEntry{}, err
 	}
-	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
+	bot, err := a.getOrCreateBot(ctx, telegramCfg, cfg.ID)
 	if err != nil {
 		return channel.DirectoryEntry{}, err
 	}

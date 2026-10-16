@@ -48,3 +48,6 @@ docker compose up -d        # Start all services
 
 Production deploy services are `postgres`, `pgvector`, `migrate`, `server`, `channel`, and `web`.
 Optional profile: `webhook-tunnel` (cloudflared for channels behind NAT). Desktop connects to Memoh Cloud or this hosted server instead of running its own server.
+
+For split deployment storage ownership and Server-first upgrades, see
+[Channel media storage](storage-rpc.md).

@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	tools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/testutil/sessionledger"
 )
 
@@ -23,34 +25,62 @@ func (abortAlignmentProvider) Name() string { return "abort-alignment" }
 
 func (abortAlignmentProvider) ListModels(context.Context) ([]sdk.Model, error) { return nil, nil }
 
-func (abortAlignmentProvider) Test(context.Context) *sdk.ProviderTestResult {
-	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK, Message: "ok"}
+func (abortAlignmentProvider) Test(context.Context) error {
+	return nil
 }
 
 func (abortAlignmentProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {
 	return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
 }
 
-func (abortAlignmentProvider) DoGenerate(context.Context, sdk.GenerateParams) (*sdk.GenerateResult, error) {
-	return &sdk.GenerateResult{FinishReason: sdk.FinishReasonStop}, nil
+func (abortAlignmentProvider) DoGenerate(context.Context, sdk.Request) (sdk.ModelResult, error) {
+	return sdk.ModelResult{FinishReason: sdk.FinishReasonStop}, nil
 }
 
-func (p abortAlignmentProvider) DoStream(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
-	parts := make(chan sdk.StreamPart, 7)
-	parts <- &sdk.StartPart{}
-	parts <- &sdk.StartStepPart{}
+// DoStream either completes normally or streams the same 256-character chunk
+// until the loop's text-loop guard aborts the run. The SDK has no abort part:
+// an abort the run raises itself is the loop's own decision, and this is the
+// one path that produces it from provider output.
+func (p abortAlignmentProvider) DoStream(ctx context.Context, _ sdk.Request) (<-chan sdk.StreamPart, error) {
+	parts := make(chan sdk.StreamPart, 16)
 	if p.complete {
+		parts <- &sdk.StartPart{}
+		parts <- &sdk.StartStepPart{}
 		parts <- &sdk.TextStartPart{ID: "completed"}
 		parts <- &sdk.TextDeltaPart{ID: "completed", Text: "done"}
 		parts <- &sdk.TextEndPart{ID: "completed"}
 		parts <- &sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}
 		parts <- &sdk.FinishPart{FinishReason: sdk.FinishReasonStop}
 		close(parts)
-		return &sdk.StreamResult{Stream: parts}, nil
+		return parts, nil
 	}
-	parts <- &sdk.AbortPart{}
-	close(parts)
-	return &sdk.StreamResult{Stream: parts}, nil
+	go func() {
+		defer close(parts)
+		send := func(part sdk.StreamPart) bool {
+			select {
+			case <-ctx.Done():
+				return false
+			case parts <- part:
+				return true
+			}
+		}
+		if !send(&sdk.StartPart{}) || !send(&sdk.StartStepPart{}) || !send(&sdk.TextStartPart{ID: "loop"}) {
+			return
+		}
+		repeated := strings.Repeat("abcd", 64)
+		for range 4 {
+			if !send(&sdk.TextDeltaPart{ID: "loop", Text: repeated}) {
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
+		_ = send(&sdk.FinishPart{FinishReason: sdk.FinishReasonStop})
+	}()
+	return parts, nil
 }
 
 type abortAlignmentFence struct{}
@@ -92,7 +122,8 @@ func TestSpawnAbortAlignsManagerLedgerAndLifecycle(t *testing.T) {
 			Provider: abortAlignmentProvider{},
 			Type:     sdk.ModelTypeChat,
 		},
-		Query: "abort internally",
+		Query:         "abort internally",
+		LoopDetection: tools.SpawnLoopConfig{Enabled: true},
 		Identity: tools.SpawnIdentity{
 			BotID:      lifecycleTestBotID,
 			SessionID:  lifecycleTestSessionID,
@@ -117,22 +148,100 @@ func TestSpawnAbortAlignsManagerLedgerAndLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime snapshot: %v", err)
 	}
+	// The spawned run's failure is named like any native run's: an abort the
+	// runtime reported without a provider answer is an interrupted response.
 	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != sessionruntime.RunStatusErrored ||
-		snapshot.CurrentRunView.Error != "agent run aborted" {
-		t.Fatalf("live run = %#v, want generic errored terminal", snapshot.CurrentRunView)
+		snapshot.CurrentRunView.ErrorCode != string(apperror.CodeAgentResponseInterrupted) {
+		t.Fatalf("live run = %#v, want errored with an interrupted response", snapshot.CurrentRunView)
 	}
 	durable, err := runs.Get(context.Background(), admission.RunID)
 	if err != nil {
 		t.Fatalf("durable run: %v", err)
 	}
-	if durable.State != ledger.StateFailed || durable.ErrorCode != "runtime_run_failed" {
-		t.Fatalf("durable run = %#v, want failed terminal", durable)
+	if durable.State != ledger.StateFailed || durable.ErrorCode != string(apperror.CodeAgentResponseInterrupted) {
+		t.Fatalf("durable run = %#v, want failed with an interrupted response", durable)
 	}
 	if len(lifecycles.terminalUpserts) != 1 || lifecycles.terminalUpserts[0].Status != contextLifecycleStatusFailedProvider {
 		t.Fatalf("lifecycle terminal = %#v, want failed_provider", lifecycles.terminalUpserts)
 	}
 	if errors.Is(runErr, context.Canceled) {
 		t.Fatalf("internal abort was misclassified as owning cancellation: %v", runErr)
+	}
+}
+
+// rejectingSpawnProvider answers every model call with the provider failure
+// it holds.
+type rejectingSpawnProvider struct{ abortAlignmentProvider }
+
+func (rejectingSpawnProvider) DoStream(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
+	return nil, &sdk.APIError{Provider: "openai-completions", StatusCode: 401, Kind: sdk.KindAuthentication, Message: "SECRET key"}
+}
+
+// A spawned run that fails on the provider's answer records the provider's
+// code in its session, live and durable, and the spawn provider gets the same
+// code with the provider's own error in its chain.
+func TestSpawnProviderFailureNamesTheSessionRun(t *testing.T) {
+	runs := newAbortAlignmentLedger()
+	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{
+		OwnerID:       "provider-failure-owner",
+		OwnerLeaseTTL: time.Minute,
+		Ledger:        runs,
+		Fence:         abortAlignmentFence{},
+	})
+	t.Cleanup(func() { _ = manager.Close() })
+	service := &Service{contextLifecycles: &recordingContextLifecycleStore{}}
+	service.SetSessionRuntime(manager)
+
+	runCtx, admission, finish, err := service.AdmitSubagentRun(
+		context.Background(),
+		lifecycleTestBotID,
+		lifecycleTestSessionID,
+		"subagent:provider-failure",
+		[]byte(`{"task":"provider failure"}`),
+	)
+	if err != nil {
+		t.Fatalf("admit subagent run: %v", err)
+	}
+	adapter := native.NewSpawnAdapter(native.New(native.Deps{}))
+	adapter.SetRunObserverFactory(service.SubagentRunObserver)
+	adapter.SetFailureTranslator(service.SubagentFailure)
+	result, runErr := adapter.GenerateWithWatchdog(runCtx, tools.SpawnRunConfig{
+		RunID: admission.RunID,
+		Model: &sdk.Model{ID: "rejecting-model", Provider: rejectingSpawnProvider{}, Type: sdk.ModelTypeChat},
+		Query: "fail on the provider",
+		Identity: tools.SpawnIdentity{
+			BotID:      lifecycleTestBotID,
+			SessionID:  lifecycleTestSessionID,
+			IsSubagent: true,
+		},
+	}, func() {})
+	var apiErr *sdk.APIError
+	if got := apperror.CodeOf(runErr); got != apperror.CodeAgentProviderAuthFailed {
+		t.Fatalf("spawn error code = %q, want the provider's code", got)
+	}
+	if !errors.As(apperror.CauseOf(runErr), &apiErr) || apiErr.Kind != sdk.KindAuthentication {
+		t.Fatalf("spawn error cause = %v, want the provider's failure", apperror.CauseOf(runErr))
+	}
+	finish(tools.SubagentTerminal{
+		Cause:            runErr,
+		ContextLifecycle: result.ContextLifecycle,
+		OutcomeResolved:  true,
+		Outcome:          tools.SpawnAttemptFailure,
+	})
+
+	snapshot, err := manager.Snapshot(context.Background(), lifecycleTestBotID, lifecycleTestSessionID)
+	if err != nil {
+		t.Fatalf("runtime snapshot: %v", err)
+	}
+	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.ErrorCode != string(apperror.CodeAgentProviderAuthFailed) {
+		t.Fatalf("live run = %#v, want the provider's code", snapshot.CurrentRunView)
+	}
+	durable, err := runs.Get(context.Background(), admission.RunID)
+	if err != nil {
+		t.Fatalf("durable run: %v", err)
+	}
+	if durable.State != ledger.StateFailed || durable.ErrorCode != string(apperror.CodeAgentProviderAuthFailed) || durable.ErrorMessage != "" {
+		t.Fatalf("durable run = %#v, want failed with the provider's code", durable)
 	}
 }
 
@@ -196,7 +305,7 @@ func TestSpawnWatchdogRetryKeepsManagerRunActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime snapshot after retry: %v", err)
 	}
-	if active.CurrentRunView == nil || active.CurrentRunView.Status != sessionruntime.RunStatusRunning || active.CurrentRunView.Error != "" {
+	if active.CurrentRunView == nil || active.CurrentRunView.Status != sessionruntime.RunStatusRunning || active.CurrentRunView.ErrorCode != "" {
 		t.Fatalf("live run after retry = %#v, want clean running state", active.CurrentRunView)
 	}
 	intermediate, err := runs.Get(context.Background(), admission.RunID)

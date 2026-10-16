@@ -276,7 +276,6 @@ export function createChatBootstrap(deps: ChatBootstrapDeps) {
   return {
     loadingChats,
     initialize,
-    switchActiveSession,
     selectBot,
     selectSession,
     createNewSession,

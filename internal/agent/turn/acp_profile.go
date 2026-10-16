@@ -1,5 +1,7 @@
 package turn
 
+import "context"
+
 // ACPAgentProfile is the channel-safe view of one external agent profile.
 // Runtime launch commands, compatibility quirks, and credential details stay
 // behind ACPProfileResolver and never cross the Channel boundary.
@@ -26,8 +28,9 @@ type ACPSetupPreflight struct {
 
 // ACPProfileResolver is the read-only Agent port used by Channel while
 // interpreting /new commands. Implementations own profile normalization,
-// registration, and setup validation; Channel supplies only stable inputs.
+// registration, and setup validation, including which Agent instance's setup
+// applies; Channel supplies only stable inputs.
 type ACPProfileResolver interface {
 	ResolveACPProfile(agentID string) ACPAgentProfile
-	ResolveACPSetupPreflight(agentID string, metadata map[string]any) ACPSetupPreflight
+	ResolveACPSetupPreflight(ctx context.Context, botID, botAgentID, agentID string, metadata map[string]any) (ACPSetupPreflight, error)
 }

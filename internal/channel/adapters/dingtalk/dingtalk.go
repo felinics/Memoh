@@ -13,6 +13,7 @@ import (
 	dtsdk "github.com/felinics/dingtalk-stream-sdk-go/client"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // DingTalkAdapter implements the Memoh channel adapter for DingTalk bots.
@@ -143,7 +144,7 @@ func (a *DingTalkAdapter) DiscoverSelf(ctx context.Context, credentials map[stri
 	}
 	info, err := cli.getBotInfo(callCtx, cfg.AppKey)
 	if err != nil {
-		a.logger.Warn("dingtalk: getBotInfo failed, using appKey as identity",
+		a.logger.WarnContext(ctx, "dingtalk: getBotInfo failed, using appKey as identity",
 			slog.String("app_key", cfg.AppKey),
 			slog.Any("error", err),
 		)
@@ -265,7 +266,7 @@ func (a *DingTalkAdapter) sendViaAPI(
 	if !ok {
 		return errors.New("dingtalk: invalid target")
 	}
-	a.logger.Debug("dingtalk: sendViaAPI",
+	a.logger.DebugContext(ctx, "dingtalk: sendViaAPI",
 		slog.String("target", target),
 		slog.String("kind", kind),
 		slog.String("id", id),
@@ -277,7 +278,7 @@ func (a *DingTalkAdapter) sendViaAPI(
 	case "group":
 		return apiCli.sendToGroup(ctx, parsed.AppKey, id, msgKey, msgParam)
 	default:
-		return errors.New("dingtalk: unknown target kind: " + kind)
+		return errs.New("dingtalk: unknown target kind", slog.String("kind", kind))
 	}
 }
 
@@ -417,12 +418,8 @@ func (a *DingTalkAdapter) newChatBotHandler(cfg channel.ChannelConfig, handler c
 			return nil, nil
 		}
 		msg.BotID = cfg.BotID
-		if err := handler(ctx, cfg, msg); err != nil {
-			a.logger.Error("dingtalk: inbound handler error",
-				slog.String("config_id", cfg.ID),
-				slog.Any("error", err),
-			)
-		}
+		// The inbound unit writes the result line of the message.
+		_ = handler(ctx, cfg, msg)
 		return nil, nil
 	}
 }

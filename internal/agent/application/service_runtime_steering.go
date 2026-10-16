@@ -90,7 +90,7 @@ func (s *Service) publishRuntimeSteerHistory(ctx context.Context, req ChatReques
 		}
 	}
 	if len(users) < len(ids) {
-		s.logger.Error("runtime steer history identity missing", slog.String("run_id", req.RunID))
+		s.logger.ErrorContext(ctx, "runtime steer history identity missing", slog.String("run_id", req.RunID))
 		return
 	}
 	users = users[len(users)-len(ids):]
@@ -98,7 +98,7 @@ func (s *Service) publishRuntimeSteerHistory(ctx context.Context, req ChatReques
 		if err := s.sessionManager.PublishQueueUserTurns(ctx, req.RunHandle, sessionruntime.QueueUserTurnUpdate{
 			PersistedTurns: []chatview.UITurn{users[i]}, AppliedSteerItemID: id, AppliedSteerTurn: &users[i],
 		}); err != nil {
-			s.logger.Warn("runtime steer history projection failed", slog.Any("error", err))
+			s.logger.WarnContext(ctx, "runtime steer history projection failed", slog.Any("error", err))
 			return
 		}
 	}

@@ -7,7 +7,6 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/channel"
-	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
@@ -31,7 +30,7 @@ type DiscussStreamBroadcaster interface {
 // DiscussDriverDeps holds dependencies injected into the DiscussDriver.
 type DiscussDriverDeps struct {
 	Turn           turn.Service
-	MessageService messagepkg.Service
+	MessageService HistoryReader
 	CursorStore    DiscussCursorStore
 	Artifacts      DiscussArtifactProvider
 	Broadcaster    DiscussStreamBroadcaster
@@ -56,7 +55,17 @@ type DiscussSessionConfig struct {
 	SessionToken      string //nolint:gosec // session credential material
 	ChatToken         string //nolint:gosec // scoped chat routing token
 	ToolHTTPURL       string
+	// StartProcessing shows the platform processing indicator ("typing")
+	// for one addressed run; nil when the channel has none. It is bound to
+	// the inbound message that last woke the session.
+	StartProcessing StartProcessingFunc
 }
+
+// StartProcessingFunc starts the processing indicator and returns the
+// function that ends it: a nil cause reports completion, a non-nil cause a
+// failure. Built by the inbound processor, so this package needs no channel
+// registry.
+type StartProcessingFunc func(ctx context.Context) (finish func(cause error))
 
 // DiscussDriver owns worker lifecycle only. Trigger construction, history,
 // cursor persistence, turn execution, and stream projection live in dedicated

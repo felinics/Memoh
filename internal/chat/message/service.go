@@ -156,12 +156,7 @@ func isTurnSequenceUniqueViolation(err error) bool {
 		return false
 	}
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.ConstraintName == "idx_bot_history_messages_turn_seq_unique" {
-		return true
-	}
-	text := err.Error()
-	return strings.Contains(text, "idx_bot_history_messages_turn_seq_unique") ||
-		strings.Contains(text, "bot_history_messages.turn_id, bot_history_messages.turn_message_seq")
+	return errors.As(err, &pgErr) && pgErr.ConstraintName == "idx_bot_history_messages_turn_seq_unique"
 }
 
 // PersistToolTailRound writes the common user -> assistant(tool-call) -> tool
@@ -381,10 +376,9 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 					return fmt.Errorf("runtime publication requires run_id: %w", parseErr)
 				}
 				moved, upsertErr := queries.UpsertAgentSessionPublication(ctx, sqlc.UpsertAgentSessionPublicationParams{
-					SessionID:       pgSessionID,
-					BotID:           pgBotID,
-					RunID:           pgRunID,
-					CheckpointReset: options.AgentPublication.CheckpointReset,
+					SessionID: pgSessionID,
+					BotID:     pgBotID,
+					RunID:     pgRunID,
 				})
 				if upsertErr != nil {
 					return fmt.Errorf("publish runtime session head: %w", upsertErr)
@@ -760,7 +754,7 @@ func (s *DBService) finishPersistedMessage(ctx context.Context, result Message, 
 		}
 		contentHash := strings.TrimSpace(ref.ContentHash)
 		if contentHash == "" {
-			s.logger.Warn("skip asset ref without content_hash")
+			s.logger.WarnContext(ctx, "skip asset ref without content_hash")
 			continue
 		}
 		if ref.Ordinal < math.MinInt32 || ref.Ordinal > math.MaxInt32 {
@@ -819,7 +813,7 @@ func (s *DBService) cleanupPersistedMessage(ctx context.Context, messageID pgtyp
 		return
 	}
 	if err := cleanup.DeleteMessagesByIDs(ctx, []pgtype.UUID{messageID}); err != nil {
-		s.logger.Error("cleanup message after history turn failure failed", slog.String("message_id", messageID.String()), slog.Any("error", err))
+		s.logger.ErrorContext(ctx, "cleanup message after history turn failure failed", slog.String("message_id", messageID.String()), slog.Any("error", err))
 	}
 }
 
@@ -1375,6 +1369,25 @@ func (s *DBService) ListVisibleFromBySession(ctx context.Context, sessionID stri
 	msgs := toMessagesFromVisibleFromBySession(rows)
 	s.enrichAssets(ctx, msgs)
 	return msgs, nil
+}
+
+func (s *DBService) GetVisibleHistoryTurnRequestMessageIDByTurn(ctx context.Context, sessionID string, turnID string) (string, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return "", err
+	}
+	pgTurnID, err := dbpkg.ParseUUID(turnID)
+	if err != nil {
+		return "", err
+	}
+	turn, err := s.queries.GetHistoryTurnByID(ctx, sqlc.GetHistoryTurnByIDParams{
+		SessionID: pgSessionID,
+		OldTurnID: pgTurnID,
+	})
+	if err != nil {
+		return "", err
+	}
+	return uuidString(turn.RequestMessageID), nil
 }
 
 func (s *DBService) GetVisibleTurnByMessage(ctx context.Context, sessionID string, messageID string) (HistoryTurn, error) {
@@ -2336,7 +2349,7 @@ func toMessagesFromActiveSinceBySession(rows []sqlc.ListActiveMessagesSinceBySes
 func toMessagesFromActiveSinceWithinBytes(rows []sqlc.ListActiveMessagesSinceWithinBytesRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
-		messages = append(messages, toMessageFromActiveSinceBySessionRow(sqlc.ListActiveMessagesSinceBySessionRow(row)))
+		messages = append(messages, toAdmissionMessage(sqlc.ListActiveMessagesSinceBySessionRow(row)))
 	}
 	return messages
 }
@@ -2344,9 +2357,41 @@ func toMessagesFromActiveSinceWithinBytes(rows []sqlc.ListActiveMessagesSinceWit
 func toMessagesFromActiveSinceBySessionWithinBytes(rows []sqlc.ListActiveMessagesSinceBySessionWithinBytesRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
-		messages = append(messages, toMessageFromActiveSinceBySessionRow(sqlc.ListActiveMessagesSinceBySessionRow(row)))
+		messages = append(messages, toAdmissionMessage(sqlc.ListActiveMessagesSinceBySessionRow(row)))
 	}
 	return messages
+}
+
+// toAdmissionMessage leaves metadata undecoded for the byte-budgeted loaders:
+// the budget only covers content, and decoding every row up front holds all
+// of their metadata, legacy lifecycle audits included, at once (CM-ADM-001).
+func toAdmissionMessage(row sqlc.ListActiveMessagesSinceBySessionRow) Message {
+	m := toMessageFieldsWithMetadata(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
+		row.EventID,
+		row.DisplayText,
+		row.CreatedAt,
+		nil,
+	)
+	if row.CompactID.Valid {
+		m.CompactID = row.CompactID.String()
+	}
+	return m
 }
 
 func toMessagesFromLatest(rows []sqlc.ListMessagesLatestRow) []Message {
@@ -2590,7 +2635,7 @@ func (s *DBService) enrichAssets(ctx context.Context, messages []Message) {
 	}
 	rows, err := s.queries.ListMessageAssetsBatch(ctx, ids)
 	if err != nil {
-		s.logger.Warn("enrich assets failed, returning messages without assets", slog.Any("error", err))
+		s.logger.WarnContext(ctx, "enrich assets failed, returning messages without assets", slog.Any("error", err))
 		ensureAssetsSlice(messages)
 		return
 	}

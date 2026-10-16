@@ -11,8 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/server"
 )
 
 type fakeGatewayAssetLoader struct {
@@ -358,7 +359,7 @@ func TestPrepareACPAttachments_RejectsInvalidOrUnreachableData(t *testing.T) {
 		name     string
 		resolver *Service
 		input    ChatAttachment
-		wantCode string
+		wantCode apperror.Code
 	}{
 		{
 			name:     "invalid image base64",
@@ -368,7 +369,7 @@ func TestPrepareACPAttachments_RejectsInvalidOrUnreachableData(t *testing.T) {
 				Name:   "broken.png",
 				Base64: "data:image/png;base64,not-valid***",
 			},
-			wantCode: agentfeedback.CodeAttachmentInvalid,
+			wantCode: apperror.CodeACPAttachmentInvalid,
 		},
 		{
 			name: "stored file without reachable path",
@@ -385,7 +386,7 @@ func TestPrepareACPAttachments_RejectsInvalidOrUnreachableData(t *testing.T) {
 				Name:        "missing.pdf",
 				ContentHash: "missing",
 			},
-			wantCode: agentfeedback.CodeAttachmentUnavailable,
+			wantCode: apperror.CodeACPAttachmentUnavailable,
 		},
 	}
 	for _, tt := range tests {
@@ -395,9 +396,9 @@ func TestPrepareACPAttachments_RejectsInvalidOrUnreachableData(t *testing.T) {
 				BotID:       "bot-1",
 				Attachments: []ChatAttachment{tt.input},
 			})
-			var feedback *agentfeedback.Error
-			if !errors.As(err, &feedback) || feedback.Code != tt.wantCode || feedback.HTTPStatus != 400 {
-				t.Fatalf("error = %#v, want feedback code %q with status 400", err, tt.wantCode)
+			problem, _ := server.ProblemFrom(err, "")
+			if apperror.CodeOf(err) != tt.wantCode || problem.Status != 400 {
+				t.Fatalf("error = %#v, want code %q with status 400", err, tt.wantCode)
 			}
 		})
 	}

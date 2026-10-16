@@ -4,13 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	connectsdk "github.com/felinics/connect-it/sdk/go"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/connectors"
 	"github.com/felinics/memoh/internal/supermarket"
 	"github.com/felinics/memoh/internal/workspacedeps"
@@ -74,7 +80,8 @@ func (m *memoryStore) Upsert(_ context.Context, in UpsertInstallation) (Installa
 	defer m.mu.Unlock()
 	for id, inst := range m.installations {
 		if inst.BotID == in.BotID && inst.RegistryID == in.RegistryID && inst.AppID == in.AppID {
-			inst.Revision, inst.Version, inst.Status, inst.Release, inst.LastError = in.Revision, in.Version, in.Status, in.Release, ""
+			inst.Revision, inst.Version, inst.Status, inst.Release = in.Revision, in.Version, in.Status, in.Release
+			inst.LastError, inst.LastErrorCode = "", ""
 			if in.Reason == ReasonUser {
 				inst.Reason = ReasonUser
 			}
@@ -92,14 +99,14 @@ func (m *memoryStore) Upsert(_ context.Context, in UpsertInstallation) (Installa
 	return inst, nil
 }
 
-func (m *memoryStore) SetStatus(_ context.Context, botID, id string, status Status, lastError string) (Installation, error) {
+func (m *memoryStore) SetStatus(_ context.Context, botID, id string, status Status, lastErrorCode string) (Installation, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	inst, ok := m.installations[id]
 	if !ok || inst.BotID != botID {
 		return Installation{}, ErrNotInstalled
 	}
-	inst.Status, inst.LastError = status, lastError
+	inst.Status, inst.LastError, inst.LastErrorCode = status, "", lastErrorCode
 	m.installations[id] = inst
 	return inst, nil
 }
@@ -266,7 +273,7 @@ type fakeRegistry struct {
 func (f *fakeRegistry) FetchRelease(_ context.Context, registryID, appID, revision string) (supermarket.AppDescriptor, error) {
 	pkg, ok := f.releases[registryID+"/"+appID+"/"+revision]
 	if !ok {
-		return supermarket.AppDescriptor{}, &supermarket.ProtocolError{Kind: supermarket.ErrorNotFound, Op: "fetch"}
+		return supermarket.AppDescriptor{}, supermarket.ErrAppNotFound
 	}
 	return pkg, nil
 }
@@ -274,7 +281,7 @@ func (f *fakeRegistry) FetchRelease(_ context.Context, registryID, appID, revisi
 func (f *fakeRegistry) FetchCurrentApp(_ context.Context, registryID, appID string) (supermarket.AppDescriptor, error) {
 	pkg, ok := f.current[registryID+"/"+appID]
 	if !ok {
-		return supermarket.AppDescriptor{}, &supermarket.ProtocolError{Kind: supermarket.ErrorNotFound, Op: "fetch"}
+		return supermarket.AppDescriptor{}, supermarket.ErrAppNotFound
 	}
 	return pkg, nil
 }
@@ -315,11 +322,12 @@ func (f *fakePublisher) RemoveSkills(_ context.Context, _, _, appID, _ string) (
 }
 
 type fakeDeps struct {
-	present    map[string]workspacedeps.Entry
-	installErr map[string]error
-	installed  []string
-	updated    []string
-	removed    []string
+	present          map[string]workspacedeps.Entry
+	installErr       map[string]error
+	checksIncomplete bool
+	installed        []string
+	updated          []string
+	removed          []string
 }
 
 func (f *fakeDeps) list() workspacedeps.ListResult {
@@ -339,7 +347,9 @@ func (f *fakeDeps) Refresh(context.Context, string) (workspacedeps.ListResult, e
 }
 
 func (f *fakeDeps) CheckUpdates(context.Context, string) (workspacedeps.ListResult, error) {
-	return f.list(), nil
+	result := f.list()
+	result.ChecksIncomplete = f.checksIncomplete
+	return result, nil
 }
 
 func (f *fakeDeps) Install(_ context.Context, _, depID, _ string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error) {
@@ -380,6 +390,40 @@ func (f *fakeDeps) Remove(_ context.Context, _, depID string, _ workspacedeps.Lo
 	f.removed = append(f.removed, depID)
 	delete(f.present, depID)
 	return workspacedeps.OperationResult{DependencyID: depID}, nil
+}
+
+// InstallOrder expands requires from the entries' manifests, prerequisites
+// first, the way the real catalog does.
+func (f *fakeDeps) InstallOrder(_ context.Context, depIDs []string) ([]string, error) {
+	seen := map[string]bool{}
+	var order []string
+	var visit func(id string)
+	visit = func(id string) {
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		for _, required := range f.present[id].Dependency.Requires {
+			visit(required)
+		}
+		order = append(order, id)
+	}
+	for _, id := range depIDs {
+		visit(id)
+	}
+	return order, nil
+}
+
+// Dependents lists present managed entries whose requires name depID.
+func (f *fakeDeps) Dependents(_ context.Context, _, depID string) ([]string, error) {
+	var dependents []string
+	for id, entry := range f.present {
+		if id != depID && entry.Observed.Present && entry.Observed.Source == workspacedeps.SourceManaged && slices.Contains(entry.Dependency.Requires, depID) {
+			dependents = append(dependents, id)
+		}
+	}
+	slices.Sort(dependents)
+	return dependents, nil
 }
 
 type fakeConnectors struct {
@@ -559,7 +603,7 @@ func TestInstallIsPartialWhenADependencyFailsAndResumeCompletesIt(t *testing.T) 
 	h.publish(pkg)
 
 	result, rec := h.install(t, pkg)
-	if result.Installation.Status != StatusPartial || !strings.Contains(result.Installation.LastError, "npm exploded") {
+	if result.Installation.Status != StatusPartial || result.Installation.LastErrorCode != string(apperror.CodeAppOperationFailed) || result.Installation.LastError != "" {
 		t.Fatalf("installation = %+v", result.Installation)
 	}
 	if !strings.Contains(rec.types(), "step_done:dependency:codex=failed") || !strings.HasSuffix(rec.types(), "done=partial") {
@@ -571,7 +615,7 @@ func TestInstallIsPartialWhenADependencyFailsAndResumeCompletesIt(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
-	if resumed.Installation.Status != StatusInstalled || resumed.Installation.LastError != "" {
+	if resumed.Installation.Status != StatusInstalled || resumed.Installation.LastErrorCode != "" {
 		t.Fatalf("resumed installation = %+v", resumed.Installation)
 	}
 	if len(h.publisher.published) != 2 {
@@ -737,6 +781,208 @@ func TestListShowsDiscoveredDependenciesThroughTheirCanonicalApp(t *testing.T) {
 	}
 	if !byID["node"].Discovered || byID["node"].Installation != nil || byID["node"].Dependencies[0].Entry == nil {
 		t.Fatalf("node item = %+v", byID["node"])
+	}
+}
+
+func TestCheckUpdatesIgnoresAppMissingFromRealRegistry(t *testing.T) {
+	liveRevision := revisionOf("a")
+	var liveChecked atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/api/registries/memoh/apps/gone":
+			http.NotFound(w, req)
+		case "/api/registries/memoh/apps/live":
+			liveChecked.Store(true)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"schema_version":"2","registry_id":"memoh","app_id":"live","name":"live","description":"","tags":[],"version":"2.0.0","category":"tool","category_name":"Tools","dependencies":["node"],"connectors":[],"skill_count":0,"dependency_count":1,"connector_count":0,"revision":"%s","skills":[]}`, liveRevision)
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer server.Close()
+
+	h := newHarness()
+	gone, err := h.store.Upsert(context.Background(), UpsertInstallation{
+		BotID: testBotID, RegistryID: "memoh", AppID: "gone", Revision: revisionOf("c"),
+		Version: "1.0.0", Status: StatusInstalled, Reason: ReasonUser,
+	})
+	if err != nil {
+		t.Fatalf("store.Upsert(gone): %v", err)
+	}
+	live, err := h.store.Upsert(context.Background(), UpsertInstallation{
+		BotID: testBotID, RegistryID: "memoh", AppID: "live", Revision: revisionOf("b"),
+		Version: "1.0.0", Status: StatusInstalled, Reason: ReasonUser,
+	})
+	if err != nil {
+		t.Fatalf("store.Upsert(live): %v", err)
+	}
+	oldRevision := revisionOf("d")
+	if _, err := h.store.SetCheck(context.Background(), testBotID, gone.ID, oldRevision, "0.9.0", time.Now()); err != nil {
+		t.Fatalf("store.SetCheck(gone): %v", err)
+	}
+	if _, err := h.store.SetCheck(context.Background(), testBotID, live.ID, oldRevision, "0.9.0", time.Now()); err != nil {
+		t.Fatalf("store.SetCheck(live): %v", err)
+	}
+
+	installer := supermarket.NewInstaller(
+		supermarket.NewClient(server.URL, server.Client()), nil, nil,
+	)
+	registry := NewSupermarketPublisher(installer)
+	h.service = NewService(Options{
+		Store: h.store, Registry: registry, Skills: h.publisher,
+		Dependencies: h.deps, Connectors: h.connectors,
+	})
+	checked, err := h.service.CheckUpdates(context.Background(), testBotID)
+	if err != nil {
+		t.Fatalf("CheckUpdates: %v", err)
+	}
+	if !liveChecked.Load() {
+		t.Fatal("CheckUpdates did not inspect the remaining App")
+	}
+	items := make(map[string]Installation, len(checked.Items))
+	for _, item := range checked.Items {
+		if item.Installation != nil {
+			items[item.AppID] = *item.Installation
+		}
+	}
+	if gone := items["gone"]; gone.AvailableRevision != "" || gone.AvailableVersion != "" || gone.LastCheckedAt == nil {
+		t.Fatalf("removed App check = %+v", gone)
+	}
+	if live := items["live"]; live.AvailableRevision != liveRevision || live.AvailableVersion != "2.0.0" || live.LastCheckedAt == nil {
+		t.Fatalf("remaining App check = %+v", live)
+	}
+}
+
+// hookedRegistry runs fetch before answering FetchCurrentApp from the
+// wrapped registry.
+type hookedRegistry struct {
+	*fakeRegistry
+	fetch func(ctx context.Context, appID string) error
+}
+
+func (r *hookedRegistry) FetchCurrentApp(ctx context.Context, registryID, appID string) (supermarket.AppDescriptor, error) {
+	if err := r.fetch(ctx, appID); err != nil {
+		return supermarket.AppDescriptor{}, err
+	}
+	return r.fakeRegistry.FetchCurrentApp(ctx, registryID, appID)
+}
+
+func installApps(t *testing.T, h *harness, ids ...string) {
+	t.Helper()
+	for i, id := range ids {
+		pkg := release("memoh", id, strconv.Itoa(i), "1.0.0", nil, nil, nil)
+		h.publish(pkg)
+		h.install(t, pkg)
+	}
+}
+
+func checkedAt(result ListResult) map[string]*time.Time {
+	out := make(map[string]*time.Time, len(result.Items))
+	for _, item := range result.Items {
+		if item.Installation != nil {
+			out[item.AppID] = item.Installation.LastCheckedAt
+		}
+	}
+	return out
+}
+
+func TestCheckUpdatesQueriesTheRegistryConcurrently(t *testing.T) {
+	h := newHarness()
+	ids := make([]string, 0, 2*appCheckConcurrency)
+	for i := range 2 * appCheckConcurrency {
+		ids = append(ids, fmt.Sprintf("app-%d", i))
+	}
+	installApps(t, h, ids...)
+	var running, peak atomic.Int32
+	release := make(chan struct{})
+	go func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for running.Load() < appCheckConcurrency && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		close(release)
+	}()
+	h.service.registry = &hookedRegistry{fakeRegistry: h.registry, fetch: func(context.Context, string) error {
+		n := running.Add(1)
+		defer running.Add(-1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		<-release
+		return nil
+	}}
+
+	checked, err := h.service.CheckUpdates(context.Background(), testBotID)
+	if err != nil {
+		t.Fatalf("CheckUpdates: %v", err)
+	}
+	if got := peak.Load(); got != appCheckConcurrency {
+		t.Errorf("peak concurrent registry requests = %d, want %d", got, appCheckConcurrency)
+	}
+	if checked.UpdateChecksIncomplete {
+		t.Error("UpdateChecksIncomplete set although every check finished")
+	}
+	for id, at := range checkedAt(checked) {
+		if at == nil {
+			t.Errorf("%s was not checked", id)
+		}
+	}
+}
+
+func TestCheckUpdatesBudgetReportsUncheckedApps(t *testing.T) {
+	h := newHarness()
+	installApps(t, h, "fast", "slow")
+	h.service.updateCheckBudget = 50 * time.Millisecond
+	h.service.registry = &hookedRegistry{fakeRegistry: h.registry, fetch: func(ctx context.Context, appID string) error {
+		if appID == "slow" {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
+	}}
+
+	checked, err := h.service.CheckUpdates(context.Background(), testBotID)
+	if err != nil {
+		t.Fatalf("CheckUpdates: %v", err)
+	}
+	if !checked.UpdateChecksIncomplete {
+		t.Error("UpdateChecksIncomplete not set after the budget ran out")
+	}
+	at := checkedAt(checked)
+	if at["fast"] == nil || at["slow"] != nil {
+		t.Errorf("checked at = fast %v, slow %v; want only fast recorded", at["fast"], at["slow"])
+	}
+
+	// Dependency checks the budget cut short make the view incomplete too.
+	h.service.registry = h.registry
+	h.deps.checksIncomplete = true
+	checked, err = h.service.CheckUpdates(context.Background(), testBotID)
+	if err != nil || !checked.UpdateChecksIncomplete {
+		t.Errorf("CheckUpdates = incomplete %v, %v; want the dependency verdict carried", checked.UpdateChecksIncomplete, err)
+	}
+}
+
+func TestCheckUpdatesOutlivesTheRequestAndReportsRegistryFailures(t *testing.T) {
+	h := newHarness()
+	installApps(t, h, "only")
+	ctx, cancel := context.WithCancel(context.Background())
+	h.service.registry = &hookedRegistry{fakeRegistry: h.registry, fetch: func(context.Context, string) error {
+		// The proxy gives up while the registry answers.
+		cancel()
+		return nil
+	}}
+	checked, err := h.service.CheckUpdates(ctx, testBotID)
+	if err != nil || checkedAt(checked)["only"] == nil || checked.UpdateChecksIncomplete {
+		t.Fatalf("CheckUpdates = %+v, %v; want the check recorded", checked, err)
+	}
+
+	unavailable := errors.New("registry unavailable")
+	h.service.registry = &hookedRegistry{fakeRegistry: h.registry, fetch: func(context.Context, string) error { return unavailable }}
+	if _, err := h.service.CheckUpdates(context.Background(), testBotID); !errors.Is(err, unavailable) {
+		t.Fatalf("CheckUpdates with a failing registry = %v, want it reported", err)
 	}
 }
 
@@ -909,5 +1155,39 @@ func TestUpdateSelectionRunsDependenciesBeforeTheRelease(t *testing.T) {
 	}
 	if !strings.HasSuffix(types, "done=installed") {
 		t.Fatalf("events = %s", types)
+	}
+}
+
+func TestUpdateSelectionKeepsApprovedRevisionWhenLatestChanges(t *testing.T) {
+	h := newHarness()
+	v1 := release("memoh", "codex", "a", "1.0.0", []string{"codex"}, nil, nil)
+	h.publish(v1)
+	h.install(t, v1)
+	approved := release("memoh", "codex", "b", "1.1.0", []string{"codex"}, nil, nil)
+	h.publish(approved)
+	h.publish(release("memoh", "codex", "c", "2.0.0", []string{"codex"}, nil, nil))
+	result, err := h.service.UpdateSelection(context.Background(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "codex", Release: true, Revision: approved.Revision}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Installation.Revision != approved.Revision || result.Installation.Version != approved.Version {
+		t.Fatalf("installed %+v instead of approved release %+v", result.Installation, approved)
+	}
+}
+
+func TestResumeApprovedRejectsChangedRelease(t *testing.T) {
+	h := newHarness()
+	pkg := release("memoh", "pdf", "a", "1.0.0", []string{"pdf"}, nil, nil)
+	h.publish(pkg)
+	result, _ := h.install(t, pkg)
+	next := release("memoh", "pdf", "b", "2.0.0", []string{"pdf"}, nil, nil)
+	h.publish(next)
+	h.install(t, next)
+	published := len(h.publisher.published)
+	if _, err := h.service.ResumeApproved(t.Context(), testBotID, result.Installation.ID, pkg.Revision, nil); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("changed release accepted: %v", err)
+	}
+	if len(h.publisher.published) != published {
+		t.Fatal("changed release was published")
 	}
 }

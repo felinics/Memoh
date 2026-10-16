@@ -183,7 +183,7 @@ func TestGraphRuntimeAddSearchDelete(t *testing.T) {
 
 	// Delete one node; count drops to 1.
 	firstID := all.Results[0].ID
-	if _, err := rt.Delete(ctx, firstID); err != nil {
+	if _, err := rt.Delete(ctx, botID, firstID); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	remaining, _ := rt.GetAll(ctx, adapters.GetAllRequest{BotID: botID})
@@ -261,6 +261,7 @@ func TestGraphRuntimeUpdateCanonicalIDMigratesLegacyBareNode(t *testing.T) {
 	}
 
 	item, err := rt.Update(ctx, adapters.UpdateRequest{
+		BotID:    botID,
 		MemoryID: botID + ":mem_legacy",
 		Memory:   "new body",
 	})
@@ -295,7 +296,7 @@ func TestGraphRuntimeDeleteCanonicalIDRemovesLegacyBareNode(t *testing.T) {
 		Layer: migrate.LayerNote,
 	}
 
-	if _, err := rt.Delete(ctx, botID+":mem_legacy"); err != nil {
+	if _, err := rt.Delete(ctx, botID, botID+":mem_legacy"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	if _, ok := store.nodes["mem_legacy"]; ok {

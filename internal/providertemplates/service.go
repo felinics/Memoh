@@ -10,10 +10,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 type Service struct {
@@ -34,11 +34,11 @@ func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 func (s *Service) List(ctx context.Context, domain string) ([]GetResponse, error) {
 	domain = strings.TrimSpace(domain)
 	if domain != "" && !IsValidDomain(Domain(domain)) {
-		return nil, apperror.New(apperror.CodeProviderTemplateDomainInvalid, nil)
+		return nil, fmt.Errorf("%w: %s", ErrDomainInvalid, domain)
 	}
 	rows, err := s.queries.ListProviderTemplates(ctx, domain)
 	if err != nil {
-		return nil, apperror.Wrap(apperror.CodeProviderTemplateOperationFailed, fmt.Errorf("list provider templates: %w", err), nil)
+		return nil, errs.Wrap(err, "list provider templates")
 	}
 	items := make([]GetResponse, 0, len(rows))
 	for _, row := range rows {
@@ -50,21 +50,21 @@ func (s *Service) List(ctx context.Context, domain string) ([]GetResponse, error
 func (s *Service) Get(ctx context.Context, id, expectedDomain string) (GetResponse, error) {
 	pgID, err := db.ParseUUID(strings.TrimSpace(id))
 	if err != nil {
-		return GetResponse{}, apperror.Wrap(apperror.CodeProviderTemplateNotFound, err, nil)
+		return GetResponse{}, fmt.Errorf("%w: %w", ErrNotFound, err)
 	}
 	row, err := s.queries.GetProviderTemplateByID(ctx, pgID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
-			return GetResponse{}, apperror.New(apperror.CodeProviderTemplateNotFound, nil)
+			return GetResponse{}, ErrNotFound
 		}
-		return GetResponse{}, apperror.Wrap(apperror.CodeProviderTemplateOperationFailed, fmt.Errorf("get provider template: %w", err), nil)
+		return GetResponse{}, errs.Wrap(err, "get provider template")
 	}
 	if expectedDomain = strings.TrimSpace(expectedDomain); expectedDomain != "" && row.Domain != expectedDomain {
-		return GetResponse{}, apperror.New(apperror.CodeProviderTemplateDomainMismatch, nil)
+		return GetResponse{}, ErrDomainMismatch
 	}
 	models, err := s.queries.ListProviderTemplateModels(ctx, row.ID)
 	if err != nil {
-		return GetResponse{}, apperror.Wrap(apperror.CodeProviderTemplateOperationFailed, fmt.Errorf("list provider template models: %w", err), nil)
+		return GetResponse{}, errs.Wrap(err, "list provider template models")
 	}
 	response := responseFromRow(row)
 	response.Models = make([]ModelResponse, 0, len(models))

@@ -8,6 +8,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 // TestAgentGenerateReadMediaRecordsMutationThroughContextViewApplier proves
@@ -28,18 +29,18 @@ func TestAgentGenerateReadMediaRecordsMutationThroughContextViewApplier(t *testi
 	pngBytes := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00payload")
 
 	modelProvider := &agentReadMediaMockProvider{
-		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
 			if call == 1 {
-				return &sdk.GenerateResult{
+				return sdk.ModelResult{
 					FinishReason: sdk.FinishReasonToolCalls,
 					ToolCalls: []sdk.ToolCall{{
 						ToolCallID: "call-1",
 						ToolName:   "read",
-						Input:      map[string]any{"path": "/data/images/demo.png"},
+						Input:      toolexec.ArgumentsFromValue(map[string]any{"path": "/data/images/demo.png"}),
 					}},
 				}, nil
 			}
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				Text:         "done",
 				FinishReason: sdk.FinishReasonStop,
 			}, nil

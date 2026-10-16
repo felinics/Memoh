@@ -7,6 +7,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func attentionMessageFrag(id string, msg sdk.Message, tokens int, reasons ...contextfrag.AttentionReason) contextfrag.ContextFrag {
@@ -538,7 +539,7 @@ func toolCallFrag(id, name, callID string) contextfrag.ContextFrag {
 	return messageFrag(id, sdk.Message{
 		Role: sdk.MessageRoleAssistant,
 		Content: []sdk.MessagePart{
-			sdk.ToolCallPart{ToolCallID: callID, ToolName: name, Input: map[string]any{}},
+			sdk.ToolCallPart{ToolCallID: callID, ToolName: name, Input: toolexec.ArgumentsFromValue(map[string]any{})},
 		},
 	})
 }
@@ -547,6 +548,6 @@ func toolResultFrag(id, name, callID, result string) contextfrag.ContextFrag {
 	return messageFrag(id, sdk.ToolMessage(sdk.ToolResultPart{
 		ToolCallID: callID,
 		ToolName:   name,
-		Result:     result,
+		Result:     toolexec.OutputFromValue(result),
 	}))
 }

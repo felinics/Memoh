@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/channeltest"
@@ -911,4 +912,108 @@ func newTestQQAdapter(server *httptest.Server) *QQAdapter {
 	adapter.apiBaseURL = server.URL
 	adapter.tokenURL = server.URL + "/app/getAppAccessToken"
 	return adapter
+}
+
+func TestQQInputHintRenewalStopsOnCompleted(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/app/getAppAccessToken":
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "token-1", "expires_in": 7200})
+		case "/v2/users/user-openid/messages":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "m-4"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	adapter := newTestQQAdapter(server)
+	cfg := channel.ChannelConfig{
+		ID: "cfg-hint",
+		Credentials: map[string]any{
+			"appId":           "4096",
+			"clientSecret":    "secret",
+			"enableInputHint": true,
+		},
+	}
+	info := channel.ProcessingStatusInfo{ReplyTarget: "c2c:user-openid", SourceMessageID: "source-msg"}
+
+	handle, err := adapter.ProcessingStarted(context.Background(), cfg, channel.InboundMessage{}, info)
+	if err != nil {
+		t.Fatalf("processing started: %v", err)
+	}
+	if handle.Token != "source-msg" {
+		t.Fatalf("unexpected handle token: %q", handle.Token)
+	}
+	adapter.mu.Lock()
+	_, registered := adapter.inputHints["source-msg"]
+	adapter.mu.Unlock()
+	if !registered {
+		t.Fatal("renewal loop was not registered")
+	}
+
+	if err := adapter.ProcessingCompleted(context.Background(), cfg, channel.InboundMessage{}, info, handle); err != nil {
+		t.Fatalf("processing completed: %v", err)
+	}
+	adapter.mu.Lock()
+	_, registered = adapter.inputHints["source-msg"]
+	adapter.mu.Unlock()
+	if registered {
+		t.Fatal("renewal loop was not stopped")
+	}
+
+	// Stopping twice must be a safe no-op.
+	if err := adapter.ProcessingFailed(context.Background(), cfg, channel.InboundMessage{}, info, handle, nil); err != nil {
+		t.Fatalf("processing failed: %v", err)
+	}
+}
+
+func TestQQInputHintRenewalSurvivesCallbackContextCancel(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/app/getAppAccessToken":
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "token-1", "expires_in": 7200})
+		case "/v2/users/user-openid/messages":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "m-5"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	adapter := newTestQQAdapter(server)
+	cfg := channel.ChannelConfig{
+		ID: "cfg-hint-cancel",
+		Credentials: map[string]any{
+			"appId":           "4096",
+			"clientSecret":    "secret",
+			"enableInputHint": true,
+		},
+	}
+	info := channel.ProcessingStatusInfo{ReplyTarget: "c2c:user-openid", SourceMessageID: "source-msg-cancel"}
+
+	// Real callers cancel the callback context right after ProcessingStarted
+	// returns; the renewal loop must outlive it until Completed.
+	ctx, cancel := context.WithCancel(context.Background())
+	handle, err := adapter.ProcessingStarted(ctx, cfg, channel.InboundMessage{}, info)
+	if err != nil {
+		t.Fatalf("processing started: %v", err)
+	}
+	cancel()
+	time.Sleep(50 * time.Millisecond)
+
+	adapter.mu.Lock()
+	_, registered := adapter.inputHints["source-msg-cancel"]
+	adapter.mu.Unlock()
+	if !registered {
+		t.Fatal("renewal loop exited with the callback context")
+	}
+
+	if err := adapter.ProcessingCompleted(context.Background(), cfg, channel.InboundMessage{}, info, handle); err != nil {
+		t.Fatalf("processing completed: %v", err)
+	}
 }

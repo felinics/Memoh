@@ -7,6 +7,10 @@ import (
 // ToolName identifies a built-in Memoh agent tool.
 type ToolName = toolname.Name
 
+func ToolMCPManage() ToolName { return toolname.ToolMCPManage() }
+func ToolAppSearch() ToolName { return toolname.ToolAppSearch() }
+func ToolAppManage() ToolName { return toolname.ToolAppManage() }
+
 func ToolRead() ToolName       { return toolname.ToolRead() }
 func ToolWrite() ToolName      { return toolname.ToolWrite() }
 func ToolList() ToolName       { return toolname.ToolList() }
@@ -31,6 +35,9 @@ func ToolListSessions() ToolName   { return toolname.ToolListSessions() }
 func ToolGetMessages() ToolName    { return toolname.ToolGetMessages() }
 func ToolSearchMessages() ToolName { return toolname.ToolSearchMessages() }
 func ToolSearchMemory() ToolName   { return toolname.ToolSearchMemory() }
+func ToolCreateMemory() ToolName   { return toolname.ToolCreateMemory() }
+func ToolUpdateMemory() ToolName   { return toolname.ToolUpdateMemory() }
+func ToolDeleteMemory() ToolName   { return toolname.ToolDeleteMemory() }
 func ToolListSkills() ToolName     { return toolname.ToolListSkills() }
 func ToolUseSkill() ToolName       { return toolname.ToolUseSkill() }
 func ToolSpawnAgent() ToolName     { return toolname.ToolSpawnAgent() }
@@ -59,11 +66,6 @@ func ToolGenerateImage() ToolName   { return toolname.ToolGenerateImage() }
 func ToolGenerateVideo() ToolName   { return toolname.ToolGenerateVideo() }
 func ToolTranscribeAudio() ToolName { return toolname.ToolTranscribeAudio() }
 func ToolAskUser() ToolName         { return toolname.ToolAskUser() }
-
-func ToolListEmailAccounts() ToolName { return toolname.ToolListEmailAccounts() }
-func ToolSendEmail() ToolName         { return toolname.ToolSendEmail() }
-func ToolListEmail() ToolName         { return toolname.ToolListEmail() }
-func ToolReadEmail() ToolName         { return toolname.ToolReadEmail() }
 
 func toolRef(name ToolName) string {
 	return "`" + name.String() + "`"

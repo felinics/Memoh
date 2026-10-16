@@ -4,12 +4,9 @@ package channelqueue
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/application"
-	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/channel/inbound"
 )
 
@@ -18,20 +15,20 @@ type Adapter struct{ service *application.Service }
 func New(service *application.Service) *Adapter { return &Adapter{service: service} }
 
 func (a *Adapter) EnqueueSteer(ctx context.Context, input inbound.QueueCommandInput) error {
-	return a.enqueue(ctx, input, func(payload []byte) error {
-		_, err := a.service.EnqueueSteer(ctx, input.BotID, input.SessionID, input.InvocationID, payload)
+	return a.enqueue(input, func(queued application.QueueInput) error {
+		_, err := a.service.EnqueueSteer(ctx, queued)
 		return err
 	})
 }
 
 func (a *Adapter) EnqueueFollowUp(ctx context.Context, input inbound.QueueCommandInput) error {
-	return a.enqueue(ctx, input, func(payload []byte) error {
-		_, err := a.service.EnqueueFollowUp(ctx, input.BotID, input.SessionID, input.InvocationID, payload)
+	return a.enqueue(input, func(queued application.QueueInput) error {
+		_, err := a.service.EnqueueFollowUp(ctx, queued)
 		return err
 	})
 }
 
-func (a *Adapter) enqueue(_ context.Context, input inbound.QueueCommandInput, admit func([]byte) error) error {
+func (a *Adapter) enqueue(input inbound.QueueCommandInput, admit func(application.QueueInput) error) error {
 	if a == nil || a.service == nil {
 		return inbound.NewQueueCommandError(inbound.QueueCommandCodeUnavailable)
 	}
@@ -39,32 +36,35 @@ func (a *Adapter) enqueue(_ context.Context, input inbound.QueueCommandInput, ad
 		strings.TrimSpace(input.InvocationID) == "" || strings.TrimSpace(input.Text) == "" {
 		return inbound.NewQueueCommandError(inbound.QueueCommandCodeInvalid)
 	}
-	payload, err := json.Marshal(map[string]string{"text": strings.TrimSpace(input.Text)})
-	if err != nil {
-		return inbound.NewQueueCommandError(inbound.QueueCommandCodeInvalid)
-	}
-	return mapAdmissionError(admit(payload))
+	return mapAdmissionError(admit(application.QueueInput{
+		TeamID:                  input.TeamID,
+		BotID:                   input.BotID,
+		SessionID:               input.SessionID,
+		InvocationID:            input.InvocationID,
+		UserID:                  input.UserID,
+		SourceChannelIdentityID: input.ChannelIdentityID,
+		Text:                    input.Text,
+	}))
+}
+
+// admissionCodes renders queue admission refusals in the channel command
+// vocabulary, which crosses the split-runtime RPC and is not the HTTP one.
+var admissionCodes = map[application.QueueAdmissionFailure]string{
+	application.QueueAdmissionSteerUnsupported:   inbound.QueueCommandCodeUnsupported,
+	application.QueueAdmissionNoActiveRun:        inbound.QueueCommandCodeNoActiveRun,
+	application.QueueAdmissionInvocationConflict: inbound.QueueCommandCodeConflict,
+	application.QueueAdmissionOverloaded:         inbound.QueueCommandCodeOverloaded,
+	application.QueueAdmissionCapacityExceeded:   inbound.QueueCommandCodeCapacity,
+	application.QueueAdmissionInvalidReference:   inbound.QueueCommandCodeInvalid,
+	application.QueueAdmissionUnavailable:        inbound.QueueCommandCodeUnavailable,
 }
 
 func mapAdmissionError(err error) error {
-	switch {
-	case err == nil:
-		return nil
-	case errors.Is(err, sessionruntime.ErrQueueSteerUnsupported):
-		return inbound.NewQueueCommandError(inbound.QueueCommandCodeUnsupported)
-	case errors.Is(err, sessionruntime.ErrQueueNoActiveRun):
-		return inbound.NewQueueCommandError(inbound.QueueCommandCodeNoActiveRun)
-	case errors.Is(err, sessionruntime.ErrQueueInvocationConflict):
-		return inbound.NewQueueCommandError(inbound.QueueCommandCodeConflict)
-	case errors.Is(err, sessionruntime.ErrQueueAdmissionOverloaded):
-		return inbound.NewQueueCommandError(inbound.QueueCommandCodeOverloaded)
-	case errors.Is(err, sessionruntime.ErrQueueCapacityExceeded):
-		return inbound.NewQueueCommandError(inbound.QueueCommandCodeCapacity)
-	case errors.Is(err, sessionruntime.ErrQueueInvalidReference):
-		return inbound.NewQueueCommandError(inbound.QueueCommandCodeInvalid)
-	default:
+	code, ok := admissionCodes[application.QueueAdmissionFailureOf(err)]
+	if !ok {
 		return err
 	}
+	return inbound.NewQueueCommandError(code)
 }
 
 var _ inbound.QueueCommandHandler = (*Adapter)(nil)

@@ -32,7 +32,8 @@ const (
 	Error               StreamEventType = "error"
 	// RuntimeNotice surfaces a runtime-side degradation the user should see
 	// in the conversation (tools unavailable, an interaction declined).
-	// Code carries the machine-readable reason, Delta the human text.
+	// A runtime sets NoticeKind and Delta; the application turns the kind
+	// into the public Code before the event leaves it.
 	RuntimeNotice StreamEventType = "runtime_notice"
 	// CommandOutput is native command output, separate from model prose.
 	CommandOutput StreamEventType = "command_output"
@@ -46,20 +47,42 @@ const (
 	StepEnd StreamEventType = "step_end"
 )
 
+// NoticeKind names the degradation a RuntimeNotice reports.
+type NoticeKind string
+
+const (
+	// NoticeNativeHistoryLost: the runtime started a new native session and
+	// does not remember the conversation shown so far.
+	NoticeNativeHistoryLost NoticeKind = "native_history_lost"
+	// NoticeToolsUnavailable: Memoh tools could not be mounted for the turn.
+	NoticeToolsUnavailable NoticeKind = "tools_unavailable"
+	// NoticeElicitationDeclined: a request for user input was declined
+	// without asking the user.
+	NoticeElicitationDeclined NoticeKind = "elicitation_declined"
+	// NoticeSteerFailed: an instruction sent during the turn was not
+	// delivered to the runtime.
+	NoticeSteerFailed NoticeKind = "steer_failed"
+	// NoticeOutputTruncated: the model stopped because it reached its output
+	// limit, so the reply is cut off.
+	NoticeOutputTruncated NoticeKind = "output_truncated"
+)
+
 // StreamEvent is emitted by an agent runtime during streaming. The JSON
 // shape is the wire format WebSocket clients consume; do not change tags.
 type StreamEvent struct {
 	InternalFeedbackIndexes []int `json:"internal_feedback_indexes,omitempty"`
 
-	Type           StreamEventType  `json:"type"`
-	Delta          string           `json:"delta,omitempty"`
-	ToolName       string           `json:"toolName,omitempty"`
-	ToolCallID     string           `json:"toolCallId,omitempty"`
-	ApprovalID     string           `json:"approvalId,omitempty"`
-	UserInputID    string           `json:"userInputId,omitempty"`
-	ShortID        int              `json:"shortId,omitempty"`
-	Status         string           `json:"status,omitempty"`
-	Input          any              `json:"input,omitempty"`
+	Type        StreamEventType `json:"type"`
+	Delta       string          `json:"delta,omitempty"`
+	ToolName    string          `json:"toolName,omitempty"`
+	ToolCallID  string          `json:"toolCallId,omitempty"`
+	ApprovalID  string          `json:"approvalId,omitempty"`
+	UserInputID string          `json:"userInputId,omitempty"`
+	ShortID     int             `json:"shortId,omitempty"`
+	Status      string          `json:"status,omitempty"`
+	Input       any             `json:"input,omitempty"`
+	// InlineDecision marks a request whose caller waits inside the current turn.
+	InlineDecision bool             `json:"inline_decision,omitempty"`
 	Metadata       map[string]any   `json:"metadata,omitempty"`
 	Progress       any              `json:"progress,omitempty"`
 	Result         any              `json:"result,omitempty"`
@@ -73,10 +96,26 @@ type StreamEvent struct {
 	Error          string           `json:"error,omitempty"`
 	Attempt        int              `json:"attempt,omitempty"`
 	MaxAttempt     int              `json:"maxAttempt,omitempty"`
-	RetryError     string           `json:"retryError,omitempty"`
 	StepNumber     int              `json:"stepNumber,omitempty"`
 	TotalSteps     int              `json:"totalSteps,omitempty"`
 	ProgressStatus string           `json:"progressStatus,omitempty"`
+	// RetryDelayMs and RetryReason describe a Retry: how long the runtime
+	// waits before it calls the model again, and the class of the failure
+	// (rate_limited, server_error, stream_incomplete, network). The
+	// provider's own text never reaches the wire.
+	RetryDelayMs int64  `json:"retryDelayMs,omitempty"`
+	RetryReason  string `json:"retryReason,omitempty"`
+	// NoticeKind is set by the runtime on a RuntimeNotice. It never reaches
+	// the wire: the application replaces it with Code.
+	NoticeKind NoticeKind `json:"-"`
+	// Cause is the failure an Error event from the native runtime reports. It
+	// never reaches the wire: the application translates it into Code and
+	// the catalog detail.
+	Cause error `json:"-"`
+
+	// Args are the catalog args of the public error an Error event reports
+	// under Code.
+	Args map[string]string `json:"args,omitempty"`
 }
 
 // IsTerminal returns true for events that signal end of stream.

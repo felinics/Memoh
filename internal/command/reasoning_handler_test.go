@@ -28,7 +28,6 @@ type reasoningCommandQueries struct {
 
 func (q *reasoningCommandQueries) GetSettingsByBotID(context.Context, pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
 	return sqlc.GetSettingsByBotIDRow{
-		Language:           settings.DefaultLanguage,
 		CommandUiLanguage:  settings.DefaultCommandUILanguage,
 		ReasoningEffort:    settings.DefaultReasoningEffort,
 		ChatModelID:        q.model.ID,
@@ -99,7 +98,7 @@ func newReasoningCommandHarness(
 		nil,
 		models.NewService(logger, queries),
 		providers.NewService(logger, queries, ""),
-		nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil,
 	)
 	return handler, queries, botID
 }

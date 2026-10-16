@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   apiErrorStatus,
+  isApiErrorAnswered,
   isApiErrorCode,
   parseMemohError,
   resolveApiErrorMessage,
+  UserFacingError,
 } from '@/utils/api-error'
 
 describe('resolveApiErrorMessage', () => {
@@ -25,7 +27,6 @@ describe('resolveApiErrorMessage', () => {
     const message = resolveApiErrorMessage({
       body: {
         code: 'no_workspace_exec',
-        i18n_key: 'chat.externalAgent.noWorkspaceExec',
         args: {},
         message: 'raw backend message',
       },
@@ -38,7 +39,6 @@ describe('resolveApiErrorMessage', () => {
     const message = resolveApiErrorMessage({
       message: {
         code: 'no_workspace_exec',
-        i18n_key: 'chat.externalAgent.noWorkspaceExec',
         args: {},
         message: 'raw backend message',
       },
@@ -47,21 +47,24 @@ describe('resolveApiErrorMessage', () => {
     expect(message).toBe('You do not have permission to run workspace commands for this bot.')
   })
 
-  it('renders ACP feedback when WebSocket stream errors carry it under feedback', () => {
+  it('renders a WebSocket error frame by its top-level code', () => {
     locale = 'zh'
 
     const message = resolveApiErrorMessage({
       type: 'error',
+      code: 'no_workspace_exec',
+      args: {},
       message: 'raw backend message',
-      feedback: {
-        code: 'no_workspace_exec',
-        i18n_key: 'chat.externalAgent.noWorkspaceExec',
-        args: {},
-        message: 'raw backend message',
-      },
     }, 'fallback')
 
     expect(message).toBe('你没有执行该 Bot 工作区命令的权限。')
+  })
+
+  it('does not render copy from an i18n_key without a code', () => {
+    expect(resolveApiErrorMessage({
+      i18n_key: 'chat.externalAgent.noWorkspaceExec',
+      message: 'raw backend message',
+    }, 'fallback')).toBe('fallback')
   })
 
   it('reads error_code when code is absent', () => {
@@ -75,8 +78,47 @@ describe('resolveApiErrorMessage', () => {
     }, 'fallback')).toBe('The model did not respond in time. Please try again.')
   })
 
-  it('falls back to existing detail extraction', () => {
-    expect(resolveApiErrorMessage({ detail: 'plain detail' }, 'fallback')).toBe('plain detail')
+  it.each([
+    'plain detail',
+    new Error('plain detail'),
+    { detail: 'plain detail' },
+    { message: 'plain detail' },
+    { response: { data: { error: 'plain detail' } } },
+    new SyntaxError('Unexpected token < in JSON at position 0'),
+  ])('does not show the text of an error without a code: %s', (error) => {
+    expect(resolveApiErrorMessage(error, 'fallback')).toBe('fallback')
+    expect(resolveApiErrorMessage(error, 'fallback', { prefixFallback: true })).toBe('fallback')
+  })
+
+  it.each([
+    [404, 'The requested resource was not found.'],
+    [422, 'The request is invalid.'],
+    [429, 'Too many requests. Please wait a moment and try again.'],
+    [502, 'Something went wrong on the server. Please try again.'],
+  ])('describes an error without a code by its status %d', (status, expected) => {
+    const error = { status, message: 'raw gateway text' }
+
+    expect(resolveApiErrorMessage(error, 'fallback')).toBe(expected)
+    expect(resolveApiErrorMessage(error, 'Save failed', { prefixFallback: true })).toBe(`Save failed: ${expected}`)
+  })
+
+  it('shows the message of a UserFacingError', () => {
+    const error = new UserFacingError('Enter at least one GPU device.')
+
+    expect(resolveApiErrorMessage(error, 'fallback')).toBe('Enter at least one GPU device.')
+    expect(resolveApiErrorMessage(error, 'Save failed', { prefixFallback: true }))
+      .toBe('Save failed: Enter at least one GPU device.')
+  })
+
+  it.each(['en', 'zh', 'ja'])('localizes durable runtime notices in %s', (language) => {
+    locale = language
+    const message = resolveApiErrorMessage({
+      code: 'native_history_lost',
+      detail: 'backend fallback',
+    }, 'fallback')
+    expect(message).not.toBe('backend fallback')
+    expect(message).not.toBe('fallback')
+    expect(message).not.toContain('errors.native_history_lost')
   })
 
   it.each([
@@ -91,23 +133,6 @@ describe('resolveApiErrorMessage', () => {
   ])('does not display an HTML error page: %s', (error) => {
     expect(resolveApiErrorMessage(error, '无法预览备份')).toBe('无法预览备份')
     expect(resolveApiErrorMessage(error, '无法预览备份', { prefixFallback: true })).toBe('无法预览备份')
-  })
-
-  it('keeps prefixing plain error details', () => {
-    expect(resolveApiErrorMessage({ detail: 'plain detail' }, 'fallback', { prefixFallback: true }))
-      .toBe('fallback: plain detail')
-  })
-
-  it.each([
-    '<!-- gateway --> plain detail',
-    '<!-- expected <html> --> invalid document',
-    '<!-- prefix -->plain detail <!-- suffix --><html>example</html>',
-    '<!-- unterminated comment with <html>',
-    'Expected <html> at the beginning of the document',
-  ])('preserves non-document error details: %s', (detail) => {
-    expect(resolveApiErrorMessage({ detail }, 'fallback')).toBe(detail)
-    expect(resolveApiErrorMessage({ detail }, 'fallback', { prefixFallback: true }))
-      .toBe(`fallback: ${detail}`)
   })
 
   it.each([
@@ -134,9 +159,9 @@ describe('resolveApiErrorMessage', () => {
   })
 
   it.each([
-    ['zh', '启动工作区失败'],
-    ['ja', 'Workspace を起動できませんでした'],
-  ])('localizes workspace errors for %s instead of exposing backend English', (language, expected) => {
+    ['zh', '启动工作区失败，请重试。'],
+    ['ja', 'Workspace を起動できませんでした。もう一度お試しください。'],
+  ])('localizes workspace errors for %s by code, ignoring a legacy i18n_key', (language, expected) => {
     locale = language
 
     const message = resolveApiErrorMessage({
@@ -173,6 +198,21 @@ describe('resolveApiErrorMessage', () => {
       requestId: 'req-1',
       status: 409,
     })
+  })
+
+  it.each([
+    ['en', 'request.field_required', 'session_id is required.'],
+    ['zh', 'request.field_required', '缺少 session_id。'],
+    ['ja', 'request.field_required', 'session_id は必須です。'],
+    ['en', 'request.field_invalid', 'session_id is invalid.'],
+    ['zh', 'request.field_invalid', 'session_id 的值无效。'],
+    ['ja', 'request.field_invalid', 'session_id の値が無効です。'],
+  ])('names the field of a %s %s error', (language, code, expected) => {
+    locale = language
+
+    const error = { code, args: { field: 'session_id' }, detail: 'A field problem.', request_id: 'req-1', status: 400 }
+
+    expect(resolveApiErrorMessage(error, 'fallback')).toBe(expected)
   })
 
   it.each([
@@ -231,12 +271,12 @@ describe('resolveApiErrorMessage', () => {
   })
 
   it.each([
-    ['context.budget_unsatisfied', 'en', 'The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window.'],
-    ['context.budget_unsatisfied', 'zh', '模型上下文窗口不足，无法处理当前请求。可尝试 /compact 压缩较早的历史、缩短请求，或改用上下文窗口更大的模型。'],
-    ['context.budget_unsatisfied', 'ja', 'モデルのコンテキストウィンドウが不足しているため、このリクエストを処理できません。/compact で古い履歴を要約するか、リクエストを短くするか、より大きなコンテキストウィンドウのモデルをお試しください。'],
-    ['context.protected_overflow', 'en', 'Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window.'],
-    ['context.protected_overflow', 'zh', '必要的上下文内容超出了模型上下文预算。可尝试 /compact 压缩较早的历史，或改用上下文窗口更大的模型。'],
-    ['context.protected_overflow', 'ja', '必須コンテキストがモデルのコンテキスト予算を超えています。/compact で古い履歴を要約するか、より大きなコンテキストウィンドウのモデルをお試しください。'],
+    ['context.budget_unsatisfied', 'en', 'The model context window is too small for this request. Shorten the request, or switch to a model with a larger context window.'],
+    ['context.budget_unsatisfied', 'zh', '模型上下文窗口不足，无法处理当前请求。可尝试缩短请求，或改用上下文窗口更大的模型。'],
+    ['context.budget_unsatisfied', 'ja', 'モデルのコンテキストウィンドウが不足しているため、このリクエストを処理できません。リクエストを短くするか、より大きなコンテキストウィンドウのモデルをお試しください。'],
+    ['context.protected_overflow', 'en', 'Required context exceeds the model context budget. Switch to a model with a larger context window.'],
+    ['context.protected_overflow', 'zh', '必要的上下文内容超出了模型上下文预算。可尝试改用上下文窗口更大的模型。'],
+    ['context.protected_overflow', 'ja', '必須コンテキストがモデルのコンテキスト予算を超えています。より大きなコンテキストウィンドウのモデルをお試しください。'],
   ])('localizes %s for %s', (code, language, expected) => {
     locale = language
 
@@ -254,14 +294,23 @@ describe('resolveApiErrorMessage', () => {
     ['agent.response_interrupted', 'en', 'The model response was interrupted. Please try again.'],
     ['agent.response_interrupted', 'zh', '模型响应意外中断，请重试。'],
     ['agent.response_interrupted', 'ja', 'モデルの応答が中断されました。もう一度お試しください。'],
-    ['agent.provider_overloaded', 'en', 'The model provider is overloaded right now. Please try again in a moment.'],
-    ['agent.provider_overloaded', 'zh', '模型服务当前过载，请稍后重试。'],
-    ['agent.provider_overloaded', 'ja', 'モデルプロバイダーが混雑しています。しばらくしてからお試しください。'],
+    ['agent.provider_overloaded', 'en', 'The model provider is unavailable or overloaded right now. Please try again in a moment.'],
+    ['agent.provider_overloaded', 'zh', '模型服务暂时不可用或过载，请稍后重试。'],
+    ['agent.provider_overloaded', 'ja', 'モデルプロバイダーは現在利用できないか、過負荷の状態です。しばらくしてからもう一度お試しください。'],
     ['agent.provider_rate_limited', 'zh', '已达到模型服务的速率上限，请稍后再发送。'],
     ['agent.provider_quota_exhausted', 'en', 'The model provider account has no remaining balance or quota.'],
     ['agent.provider_quota_exhausted', 'zh', '模型服务账户的余额或配额已用尽。'],
     ['agent.provider_auth_failed', 'en', 'The model provider rejected the credentials. Check the provider API key.'],
     ['agent.provider_auth_failed', 'zh', '模型服务拒绝了当前凭据，请检查该服务商的 API Key。'],
+    ['agent.provider_permission_denied', 'en', 'The model provider denied access to this model or resource. Check that the provider account can use this model.'],
+    ['agent.provider_permission_denied', 'zh', '模型服务商拒绝访问该模型或资源，请确认该账号有权使用此模型。'],
+    ['agent.provider_permission_denied', 'ja', 'モデルプロバイダーがこのモデルまたはリソースへのアクセスを拒否しました。プロバイダーのアカウントがこのモデルを利用できるか確認してください。'],
+    ['agent.provider_request_rejected', 'en', 'The model provider rejected the request. Check the model settings, or try another model.'],
+    ['agent.provider_request_rejected', 'zh', '模型服务商拒绝了这次请求，请检查模型设置，或换一个模型。'],
+    ['agent.provider_request_rejected', 'ja', 'モデルプロバイダーがリクエストを拒否しました。モデル設定を確認するか、別のモデルをお試しください。'],
+    ['agent.provider_unreachable', 'en', 'Memoh could not reach the model provider. Check the provider address and that the service is running.'],
+    ['agent.provider_unreachable', 'zh', '无法连接到模型服务商，请检查服务地址是否正确、服务是否在运行。'],
+    ['agent.provider_unreachable', 'ja', 'Memoh からモデルプロバイダーに接続できませんでした。プロバイダーのアドレスとサービスが稼働中か確認してください。'],
   ])('localizes structural stream failure %s for %s', (code, language, expected) => {
     locale = language
 
@@ -276,7 +325,61 @@ describe('resolveApiErrorMessage', () => {
     }
 
     expect(parseMemohError(error)?.code).toBe('future.new_condition')
-    expect(resolveApiErrorMessage(error, 'fallback')).toBe('A future error occurred.')
+    expect(resolveApiErrorMessage(error, 'fallback')).toBe('fallback')
+  })
+
+  it.each([
+    ['client', 409, 'The request conflicts with the current state. Refresh and try again.'],
+    ['client', 422, 'The request is invalid.'],
+    ['dependency', 429, 'Too many requests. Please wait a moment and try again.'],
+    ['client', 500, 'Something went wrong on the server. Please try again.'],
+    ['dependency', 502, 'Something went wrong on the server. Please try again.'],
+  ])('describes an unrecognized code with a %s fault and status %d by its status', (fault, status, expected) => {
+    const problem = { code: 'future.new_condition', status, fault, args: {}, detail: 'raw server detail' }
+
+    expect(resolveApiErrorMessage(problem, 'fallback')).toBe(expected)
+    expect(resolveApiErrorMessage(problem, 'Save failed', { prefixFallback: true })).toBe(`Save failed: ${expected}`)
+  })
+
+  it.each([
+    ['a canceled fault', { code: 'future.new_condition', status: 499, fault: 'canceled', args: {} }],
+    ['no fault', { code: 'future.new_condition', status: 499, args: {} }],
+  ])('shows nothing for an unrecognized code of a canceled request with %s', (_case, problem) => {
+    expect(resolveApiErrorMessage(problem, 'fallback', { prefixFallback: true })).toBe('')
+  })
+
+  it.each([
+    ['client', { type: 'error', code: 'future.new_condition', fault: 'client', args: {}, message: 'raw server detail' }],
+    ['dependency', { type: 'error', code: 'future.new_condition', fault: 'dependency', args: {}, message: 'raw server detail' }],
+    ['no', { type: 'error', code: 'future.new_condition', args: {}, message: 'raw server detail' }],
+  ])('describes a stream error event with an unrecognized code and %s fault as a failure', (_case, event) => {
+    expect(resolveApiErrorMessage(event, 'raw server detail')).toBe('Something went wrong on the server. Please try again.')
+  })
+
+  it('shows nothing for a stream error event of a canceled run', () => {
+    expect(resolveApiErrorMessage({ type: 'error', code: 'future.new_condition', fault: 'canceled', args: {}, message: 'raw server detail' }, 'fallback')).toBe('')
+  })
+
+  it('prefers the copy of a recognized code over its fault', () => {
+    const problem = { code: 'bot.name_taken', status: 409, fault: 'client', args: {}, detail: 'raw server detail' }
+
+    expect(resolveApiErrorMessage(problem, 'fallback')).toBe('This name is already taken.')
+  })
+
+  it('reads the fault and trace of a Problem', () => {
+    expect(parseMemohError({ code: 'internal', status: 500, fault: 'server', trace_id: 'trace-1', request_id: 'req-1' })).toMatchObject({
+      code: 'internal', status: 500, fault: 'server', traceId: 'trace-1', requestId: 'req-1',
+    })
+    expect(parseMemohError({ code: 'internal', fault: 'unheard-of' })?.fault).toBeUndefined()
+  })
+
+  it.each([
+    ['a client rejection', { code: 'http.conflict', status: 409, fault: 'client' }, true],
+    ['a server failure', { code: 'internal', status: 500, fault: 'server' }, true],
+    ['a canceled request', { code: 'canceled', status: 499, fault: 'canceled' }, false],
+    ['a network failure', new TypeError('Failed to fetch'), false],
+  ])('tells whether the server answered %s', (_case, error, answered) => {
+    expect(isApiErrorAnswered(error)).toBe(answered)
   })
 
   it('reads legacy HTTP status without parsing a message', () => {

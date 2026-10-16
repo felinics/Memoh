@@ -29,6 +29,8 @@ const (
 // means "new session with all bot defaults" — exactly the pre-parameter
 // behavior.
 type ExecutionConfig struct {
+	// MaxRunSeconds is the execution budget (300-86400 seconds); zero uses one hour.
+	MaxRunSeconds int `json:"max_run_seconds,omitempty"`
 	// RunTarget is new_session (default) or existing_session.
 	RunTarget string `json:"run_target,omitempty"`
 	// TargetSessionID names the session reused by existing_session mode.
@@ -129,13 +131,16 @@ type ListResponse struct {
 }
 
 type Log struct {
-	ID           string     `json:"id"`
-	ScheduleID   string     `json:"schedule_id"`
-	BotID        string     `json:"bot_id"`
-	SessionID    string     `json:"session_id,omitempty"`
-	Status       string     `json:"status"`
-	ResultText   string     `json:"result_text"`
+	ID         string `json:"id"`
+	ScheduleID string `json:"schedule_id"`
+	BotID      string `json:"bot_id"`
+	SessionID  string `json:"session_id,omitempty"`
+	Status     string `json:"status"`
+	ResultText string `json:"result_text"`
+	// ErrorMessage is the text an earlier server stored; new failures set
+	// ErrorCode and leave it empty.
 	ErrorMessage string     `json:"error_message"`
+	ErrorCode    string     `json:"error_code,omitempty"`
 	Usage        any        `json:"usage,omitempty"`
 	StartedAt    time.Time  `json:"started_at"`
 	CompletedAt  *time.Time `json:"completed_at,omitempty"`

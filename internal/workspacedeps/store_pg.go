@@ -131,7 +131,7 @@ func (s *postgresStore) FinishOperation(ctx context.Context, key InstallationKey
 	row, err := s.q.FinishBotDependencyOperation(ctx, dbsqlc.FinishBotDependencyOperationParams{
 		BotID: botID, DependencyID: key.DependencyID, OperationID: operationID,
 		Source: terminal.Source, Status: string(terminal.Status), InstalledVersion: terminal.InstalledVersion,
-		LatestVersion: terminal.LatestVersion, LastCheckedAt: nullableTimestamptz(terminal.LastCheckedAt), LastError: terminal.LastError,
+		LatestVersion: terminal.LatestVersion, LastCheckedAt: nullableTimestamptz(terminal.LastCheckedAt), LastErrorCode: terminal.LastErrorCode,
 		ManifestDigest: terminal.ManifestDigest, SourceUrl: terminal.SourceURL, RegistryID: terminal.RegistryID,
 		DefinitionRevision: terminal.DefinitionRevision,
 	})
@@ -145,15 +145,15 @@ func operationResult(row dbsqlc.BotDependencyInstallation, err error) (Installat
 	return installationResult(row, err)
 }
 
-func (s *postgresStore) SetStatus(ctx context.Context, key InstallationKey, status Status, lastError string) (Installation, error) {
+func (s *postgresStore) SetStatus(ctx context.Context, key InstallationKey, status Status, lastErrorCode string) (Installation, error) {
 	botID, err := parseBotID(key.BotID)
 	if err != nil {
 		return Installation{}, err
 	}
 	row, err := s.q.UpdateBotDependencyInstallationStatus(ctx, dbsqlc.UpdateBotDependencyInstallationStatusParams{
-		Status:    string(status),
-		LastError: lastError,
-		BotID:     botID,
+		Status:        string(status),
+		LastErrorCode: lastErrorCode,
+		BotID:         botID,
 
 		DependencyID: key.DependencyID,
 	})
@@ -198,6 +198,7 @@ func observedParams(botID pgtype.UUID, key InstallationKey, upd ObservedUpdate) 
 		LatestVersion:    nullableText(upd.LatestVersion),
 		LastCheckedAt:    nullableTimestamptz(upd.LastCheckedAt),
 		LastError:        nullableText(upd.LastError),
+		LastErrorCode:    nullableText(upd.LastErrorCode),
 		ManifestDigest:   nullableText(upd.ManifestDigest),
 		SourceUrl:        nullableText(upd.SourceURL), RegistryID: nullableText(upd.RegistryID), DefinitionRevision: nullableText(upd.DefinitionRevision),
 		BotID: botID,
@@ -256,6 +257,7 @@ func installationFromRow(row dbsqlc.BotDependencyInstallation) Installation {
 		InstalledVersion: row.InstalledVersion,
 		LatestVersion:    row.LatestVersion,
 		LastError:        row.LastError,
+		LastErrorCode:    row.LastErrorCode,
 		ManifestDigest:   row.ManifestDigest,
 		SourceURL:        row.SourceUrl, RegistryID: row.RegistryID, DefinitionRevision: row.DefinitionRevision,
 		CreatedAt: db.TimeFromPg(row.CreatedAt),

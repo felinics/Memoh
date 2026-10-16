@@ -4,19 +4,17 @@
       <!-- Identity card: logo + name on the left, delete + enable on the right —
            the same header shape as the provider detail, so every backend reads
            the same way. -->
-      <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
-        <span class="flex size-9 shrink-0 items-center justify-center">
+      <ProviderIdentityCard
+        :name="curProvider?.name"
+        media="bare"
+      >
+        <template #media>
           <SearchProviderLogo
             :provider="curProvider?.provider || ''"
             size="md"
           />
-        </span>
-        <div class="min-w-0 flex-1">
-          <h2 class="truncate text-sm font-semibold">
-            {{ curProvider?.name }}
-          </h2>
-        </div>
-        <div class="ml-auto flex items-center gap-2">
+        </template>
+        <template #actions>
           <ConfirmPopover
             v-if="curProvider?.id"
             :message="$t('webSearch.deleteConfirm')"
@@ -44,8 +42,8 @@
             :aria-label="$t('common.enable')"
             @update:model-value="handleToggleEnable"
           />
-        </div>
-      </section>
+        </template>
+      </ProviderIdentityCard>
 
       <form @submit="editProvider">
         <SettingsSection
@@ -135,6 +133,7 @@
 </template>
 
 <script setup lang="ts">
+import ProviderIdentityCard from '@/components/provider-identity-card/index.vue'
 import {
   Input,
   Button,

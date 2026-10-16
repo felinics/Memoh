@@ -50,6 +50,9 @@
                 <SelectItem value="schedule">
                   {{ $t('usage.schedule') }}
                 </SelectItem>
+                <SelectItem value="memory">
+                  {{ $t('usage.memory') }}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -187,7 +190,10 @@
           </EmptyHeader>
         </Empty>
 
-        <SettingsSection :title="$t('usage.records')">
+        <SectionGroup
+          :title="$t('usage.records')"
+          tone="muted"
+        >
           <template
             v-if="recordsPaginationSummary"
             #actions
@@ -201,7 +207,7 @@
             <TableHeader>
               <TableRow>
                 <TableHead>{{ $t('usage.colTime') }}</TableHead>
-                <TableHead>{{ $t('usage.colSessionType') }}</TableHead>
+                <TableHead>{{ $t('usage.colHarness') }}</TableHead>
                 <TableHead>{{ $t('usage.colModel') }}</TableHead>
                 <TableHead>{{ $t('usage.colProvider') }}</TableHead>
                 <TableHead class="text-right">
@@ -242,10 +248,10 @@
                   <TableCell class="whitespace-nowrap text-muted-foreground">
                     {{ formatDateTimeShort(r.created_at, { locale }) }}
                   </TableCell>
-                  <TableCell>{{ sessionTypeLabel(r.session_type) }}</TableCell>
+                  <TableCell>{{ r.session_type === 'memory' ? $t('usage.memory') : harnessLabel(r.harness) }}</TableCell>
                   <TableCell>{{ recordModelLabel(r) }}</TableCell>
                   <TableCell class="text-muted-foreground">
-                    {{ r.provider_name || '-' }}
+                    {{ recordProviderLabel(r.provider_name) }}
                   </TableCell>
                   <TableCell class="text-right tabular-nums">
                     {{ formatNumber(r.input_tokens ?? 0) }}
@@ -257,7 +263,7 @@
               </template>
             </TableBody>
           </Table>
-        </SettingsSection>
+        </SectionGroup>
 
         <!-- Pagination lives OUTSIDE the section card: it's the table's pager, not
              a row of the card. Kept justify-end below the card so it doesn't fight
@@ -347,7 +353,7 @@ import {
 } from '@felinic/ui'
 import { getBotsQuery } from '@memohai/sdk/colada'
 import { getBotsByBotIdTokenUsage, getBotsByBotIdTokenUsageRecords } from '@memohai/sdk'
-import { MetricReadout, PageShell, SettingsSection } from '@felinic/ui'
+import { MetricReadout, PageShell, SectionGroup, SettingsSection } from '@felinic/ui'
 import BotSelect from '@/components/bot-select/index.vue'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import type { HandlersDailyTokenUsage, HandlersModelTokenUsage, HandlersTokenUsageRecord } from '@memohai/sdk'
@@ -450,7 +456,7 @@ const modelIdFilter = computed(() =>
   selectedModelId.value === 'all' ? undefined : selectedModelId.value,
 )
 
-type UsageBucketType = 'chat' | 'discuss' | 'acp_agent' | 'schedule'
+type UsageBucketType = 'chat' | 'discuss' | 'acp_agent' | 'schedule' | 'memory'
 type SessionTypeFilter = UsageBucketType
 
 // Declared before the first useQuery below: Pinia Colada evaluates `key`
@@ -564,18 +570,23 @@ function setRecordsPage(page: number) {
   recordsPage.value = String(clamped)
 }
 
-function sessionTypeLabel(type: string | undefined): string {
+function harnessLabel(type: string | undefined): string {
   switch (type) {
-    case 'chat': return t('usage.chat')
-    case 'discuss': return t('usage.discuss')
-    case 'acp_agent': return t('usage.acpAgent')
-    case 'schedule': return t('usage.schedule')
-    default: return type || '-'
+    case 'model': return 'Memoh'
+    case 'codex': return 'Codex'
+    case 'claude-code': return 'Claude Code'
+    case 'acp_agent': return 'ACP'
+    default: return type || t('usage.unknown')
   }
 }
 
+function recordProviderLabel(name: string | undefined): string {
+  return !name || name.toLowerCase() === 'unknown' ? t('usage.unknown') : name
+}
+
 function recordModelLabel(r: HandlersTokenUsageRecord): string {
-  return r.model_name || r.model_slug || '-'
+  const label = r.model_name || r.model_slug
+  return !label || label.toLowerCase() === 'unknown' ? t('usage.unknown') : label
 }
 
 onMounted(() => {
@@ -589,9 +600,10 @@ interface TypedDayMaps {
   discuss: Map<string, HandlersDailyTokenUsage>
   acp_agent: Map<string, HandlersDailyTokenUsage>
   schedule: Map<string, HandlersDailyTokenUsage>
+  memory: Map<string, HandlersDailyTokenUsage>
 }
 
-const usageBucketTypes: UsageBucketType[] = ['chat', 'discuss', 'acp_agent', 'schedule']
+const usageBucketTypes: UsageBucketType[] = ['chat', 'discuss', 'acp_agent', 'schedule', 'memory']
 
 function buildDayMap(rows: HandlersDailyTokenUsage[] | undefined) {
   const map = new Map<string, HandlersDailyTokenUsage>()
@@ -606,6 +618,7 @@ const dayMaps = computed<TypedDayMaps>(() => ({
   discuss: buildDayMap(usageData.value?.discuss),
   acp_agent: buildDayMap(usageData.value?.acp_agent),
   schedule: buildDayMap(usageData.value?.schedule),
+  memory: buildDayMap(usageData.value?.memory),
 }))
 
 const activeTypes = computed<UsageBucketType[]>(() => {
@@ -637,7 +650,8 @@ const hasData = computed(() => {
   const discuss = usageData.value?.discuss ?? []
   const acpAgent = usageData.value?.acp_agent ?? []
   const schedule = usageData.value?.schedule ?? []
-  return chat.length > 0 || discuss.length > 0 || acpAgent.length > 0 || schedule.length > 0 || byModelData.value.length > 0
+  const memory = usageData.value?.memory ?? []
+  return chat.length > 0 || discuss.length > 0 || acpAgent.length > 0 || schedule.length > 0 || memory.length > 0 || byModelData.value.length > 0
 })
 
 const summary = computed(() => {

@@ -331,20 +331,6 @@ invalidated_sessions AS (
     AND session.id = target.id
   RETURNING session.id
 ),
-deleted_acp_states AS (
-  DELETE FROM agent_session_states state
-  USING invalidated_sessions invalidated
-  WHERE state.team_id = public.memoh_current_team_id()
-    AND state.session_id = invalidated.id
-  RETURNING state.session_id
-),
-deleted_acp_lines AS (
-  DELETE FROM agent_session_state_lines line
-  USING invalidated_sessions invalidated
-  WHERE line.team_id = public.memoh_current_team_id()
-    AND line.session_id = invalidated.id
-  RETURNING line.session_id
-),
 deleted_acp_publications AS (
   DELETE FROM agent_session_publications publication
   USING invalidated_sessions invalidated
@@ -352,14 +338,27 @@ deleted_acp_publications AS (
     AND publication.session_id = invalidated.id
   RETURNING publication.session_id
 ),
+retired_runs AS (
+  UPDATE session_runs run
+  SET input_json = run.input_json - 'resume',
+      error_code = CASE WHEN run.fencing_token = 0 THEN 'history_reset' ELSE run.error_code END
+  FROM invalidated_sessions invalidated
+  WHERE run.team_id = public.memoh_current_team_id()
+    AND run.session_id = invalidated.id
+    AND (
+      run.state = 'lost' AND run.error_code = 'session_runtime.interrupted' AND run.input_json ? 'resume'
+      OR run.fencing_token = 0
+        AND run.state IN ('completed', 'aborted', 'failed', 'lost')
+        AND run.error_code IS DISTINCT FROM 'history_reset'
+    )
+  RETURNING run.run_id
+),
 target_compaction_artifacts AS MATERIALIZED (
   SELECT compact.id
   FROM bot_history_message_compacts compact
   WHERE compact.team_id = public.memoh_current_team_id()
     AND compact.bot_id = $1
     AND (SELECT count(*) FROM invalidated_sessions) >= 0
-    AND (SELECT count(*) FROM deleted_acp_states) >= 0
-    AND (SELECT count(*) FROM deleted_acp_lines) >= 0
     AND (SELECT count(*) FROM deleted_acp_publications) >= 0
   ORDER BY compact.id
   FOR UPDATE
@@ -387,6 +386,12 @@ WHERE message.team_id = public.memoh_current_team_id()
   AND message.id = target.id
 `
 
+// Runs go with the history they belong to. A turn interrupted by a graceful
+// shutdown loses its resume intent. A run that ended before it was ever
+// claimed has no fencing token to order against the reset, so it is marked
+// history_reset; the reset holds new admissions out, so every such run here
+// predates it. One statement does both, as a row updated twice in a
+// statement keeps only one of the updates.
 func (q *Queries) ClearHistoryByBot(ctx context.Context, targetBotID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, clearHistoryByBot, targetBotID)
 	return err
@@ -416,20 +421,6 @@ invalidated_session AS (
     AND session.id = target.id
   RETURNING session.id
 ),
-deleted_acp_state AS (
-  DELETE FROM agent_session_states state
-  USING invalidated_session invalidated
-  WHERE state.team_id = public.memoh_current_team_id()
-    AND state.session_id = invalidated.id
-  RETURNING state.session_id
-),
-deleted_acp_lines AS (
-  DELETE FROM agent_session_state_lines line
-  USING invalidated_session invalidated
-  WHERE line.team_id = public.memoh_current_team_id()
-    AND line.session_id = invalidated.id
-  RETURNING line.session_id
-),
 deleted_acp_publications AS (
   DELETE FROM agent_session_publications publication
   USING invalidated_session invalidated
@@ -437,14 +428,27 @@ deleted_acp_publications AS (
     AND publication.session_id = invalidated.id
   RETURNING publication.session_id
 ),
+retired_runs AS (
+  UPDATE session_runs run
+  SET input_json = run.input_json - 'resume',
+      error_code = CASE WHEN run.fencing_token = 0 THEN 'history_reset' ELSE run.error_code END
+  FROM invalidated_session invalidated
+  WHERE run.team_id = public.memoh_current_team_id()
+    AND run.session_id = invalidated.id
+    AND (
+      run.state = 'lost' AND run.error_code = 'session_runtime.interrupted' AND run.input_json ? 'resume'
+      OR run.fencing_token = 0
+        AND run.state IN ('completed', 'aborted', 'failed', 'lost')
+        AND run.error_code IS DISTINCT FROM 'history_reset'
+    )
+  RETURNING run.run_id
+),
 target_compaction_artifacts AS MATERIALIZED (
   SELECT compact.id
   FROM bot_history_message_compacts compact
   WHERE compact.team_id = public.memoh_current_team_id()
     AND compact.session_id = $1
     AND (SELECT count(*) FROM invalidated_session) >= 0
-    AND (SELECT count(*) FROM deleted_acp_state) >= 0
-    AND (SELECT count(*) FROM deleted_acp_lines) >= 0
     AND (SELECT count(*) FROM deleted_acp_publications) >= 0
   ORDER BY compact.id
   FOR UPDATE
@@ -472,6 +476,12 @@ WHERE message.team_id = public.memoh_current_team_id()
   AND message.id = target.id
 `
 
+// Runs go with the history they belong to. A turn interrupted by a graceful
+// shutdown loses its resume intent. A run that ended before it was ever
+// claimed has no fencing token to order against the reset, so it is marked
+// history_reset; the reset holds new admissions out, so every such run here
+// predates it. One statement does both, as a row updated twice in a
+// statement keeps only one of the updates.
 func (q *Queries) ClearHistoryBySession(ctx context.Context, targetSessionID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, clearHistoryBySession, targetSessionID)
 	return err
@@ -2996,8 +3006,9 @@ type ListActiveMessagesSinceBySessionWithinBytesRow struct {
 // Byte-budgeted variant of ListActiveMessagesSinceBySession (CM-ADM-001):
 // rows are admitted newest-first until their running content byte total
 // crosses max_bytes (the crossing row is kept, so the newest row always
-// loads), then returned in ascending order. Process memory is bounded by
-// max_bytes regardless of total history size.
+// loads), then returned in ascending order. Only content is budgeted: full
+// rows, metadata included, still load, so callers that need content alone
+// use ListTurnResponseSourcesSinceBySessionWithinBytes.
 func (q *Queries) ListActiveMessagesSinceBySessionWithinBytes(ctx context.Context, arg ListActiveMessagesSinceBySessionWithinBytesParams) ([]ListActiveMessagesSinceBySessionWithinBytesRow, error) {
 	rows, err := q.db.Query(ctx, listActiveMessagesSinceBySessionWithinBytes, arg.SessionID, arg.CreatedAt, arg.MaxBytes)
 	if err != nil {
@@ -5118,6 +5129,79 @@ func (q *Queries) ListObservedConversationsByChannelType(ctx context.Context, ar
 			&i.ConversationName,
 			&i.ConversationAvatarUrl,
 			&i.LastObservedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTurnResponseSourcesSinceBySessionWithinBytes = `-- name: ListTurnResponseSourcesSinceBySessionWithinBytes :many
+SELECT
+  ranked.id,
+  ranked.role,
+  ranked.content,
+  ranked.created_at,
+  ranked.interrupted
+FROM (
+  SELECT
+    m.id,
+    m.role,
+    m.content,
+    m.created_at,
+    m.turn_position,
+    m.turn_message_seq,
+    COALESCE(m.metadata->'agent_step_interrupted' = 'true'::jsonb, false)::boolean AS interrupted,
+    (SUM(octet_length(m.content::text)) OVER (
+      ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+    ) - octet_length(m.content::text))::BIGINT AS preceding_bytes
+  FROM bot_visible_history_messages m
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.session_id = $1
+    AND m.created_at >= $2
+    AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+) ranked
+WHERE ranked.preceding_bytes < $3::BIGINT
+ORDER BY ranked.turn_position ASC, ranked.turn_message_seq ASC, ranked.created_at ASC, ranked.id ASC
+`
+
+type ListTurnResponseSourcesSinceBySessionWithinBytesParams struct {
+	SessionID pgtype.UUID        `json:"session_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	MaxBytes  int64              `json:"max_bytes"`
+}
+
+type ListTurnResponseSourcesSinceBySessionWithinBytesRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	Role        string             `json:"role"`
+	Content     []byte             `json:"content"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	Interrupted bool               `json:"interrupted"`
+}
+
+// Turn-response (TR) composition, in Discuss and in pipeline chat, only needs
+// content and the interrupted-checkpoint flag. Never return full metadata:
+// legacy context_lifecycle snapshots can dwarf the content budget. Preserve
+// the active-history window, including its crossing row and turn order.
+func (q *Queries) ListTurnResponseSourcesSinceBySessionWithinBytes(ctx context.Context, arg ListTurnResponseSourcesSinceBySessionWithinBytesParams) ([]ListTurnResponseSourcesSinceBySessionWithinBytesRow, error) {
+	rows, err := q.db.Query(ctx, listTurnResponseSourcesSinceBySessionWithinBytes, arg.SessionID, arg.CreatedAt, arg.MaxBytes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTurnResponseSourcesSinceBySessionWithinBytesRow
+	for rows.Next() {
+		var i ListTurnResponseSourcesSinceBySessionWithinBytesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Role,
+			&i.Content,
+			&i.CreatedAt,
+			&i.Interrupted,
 		); err != nil {
 			return nil, err
 		}

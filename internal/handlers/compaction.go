@@ -15,6 +15,8 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/providers"
 	"github.com/felinics/memoh/internal/settings"
@@ -68,17 +70,17 @@ func (h *CompactionHandler) Register(e *echo.Echo) {
 // @Param limit query int false "Limit" default(50)
 // @Param offset query int false "Offset" default(0)
 // @Success 200 {object} compaction.ListLogsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/compaction/logs [get].
 func (h *CompactionHandler) ListLogs(c echo.Context) error {
 	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	if _, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, userID, botID, bots.PermissionChat); err != nil {
 		return err
@@ -87,7 +89,7 @@ func (h *CompactionHandler) ListLogs(c echo.Context) error {
 	limit, offset := parseOffsetLimit(c)
 	items, total, err := h.service.ListLogs(c.Request().Context(), botID, limit, offset)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list logs")
 	}
 	return c.JSON(http.StatusOK, compaction.ListLogsResponse{Items: items, TotalCount: total})
 }
@@ -98,23 +100,23 @@ func (h *CompactionHandler) ListLogs(c echo.Context) error {
 // @Tags compaction
 // @Param bot_id path string true "Bot ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/compaction/logs [delete].
 func (h *CompactionHandler) DeleteLogs(c echo.Context) error {
 	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 	if err := h.service.DeleteLogs(c.Request().Context(), botID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "delete logs")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -133,30 +135,30 @@ type TriggerCompactResponse struct {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
 // @Success 200 {object} TriggerCompactResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/compact [post].
 func (h *CompactionHandler) TriggerCompact(c echo.Context) error {
 	userID, err := h.requireUserID(c)
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	_, err = AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, userID, botID, bots.PermissionChat)
 	if err != nil {
 		return err
 	}
-	sessionID := strings.TrimSpace(c.Param("session_id"))
-	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+	sessionID, err := httpx.RequiredParam(c, "session_id")
+	if err != nil {
+		return err
 	}
 
 	sess, err := sessionpkg.NewService(h.logger, h.queries, nil).Get(c.Request().Context(), sessionID)
 	if err != nil || sess.BotID != botID {
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.New(apperror.CodeSessionNotFound, nil)
 	}
 	perms, err := (&SessionHandler{botService: h.botService, accountService: h.accountService}).resolveCurrentUserPermissions(c, userID, botID)
 	if err != nil {
@@ -173,19 +175,12 @@ func (h *CompactionHandler) TriggerCompact(c echo.Context) error {
 		if apperror.CodeOf(err) != "" {
 			return err
 		}
-		h.logger.Error("compaction: build trigger config failed",
-			slog.String("bot_id", botID), slog.String("session_id", sessionID), slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "compaction failed")
+		return errs.Wrap(err, "build compaction trigger config", slog.String("bot_id", botID), slog.String("session_id", sessionID))
 	}
 
 	res, err := h.service.RunCompactionSync(c.Request().Context(), cfg)
 	if err != nil {
-		mapped := compactionRunFailure(err)
-		if apperror.CodeOf(mapped) == "" {
-			h.logger.Error("compaction: manual run failed",
-				slog.String("bot_id", botID), slog.String("session_id", sessionID), slog.Any("error", err))
-		}
-		return mapped
+		return compactionRunFailure(errs.Wrap(err, "run compaction", slog.String("bot_id", botID), slog.String("session_id", sessionID)))
 	}
 	return c.JSON(http.StatusOK, TriggerCompactResponse{
 		Status:       res.Status,
@@ -289,5 +284,5 @@ func compactionRunFailure(err error) error {
 			"reason": "window_too_small",
 		})
 	}
-	return echo.NewHTTPError(http.StatusInternalServerError, "compaction failed")
+	return err
 }

@@ -5,7 +5,16 @@
       v-else
       class="flex-1 bg-card"
     >
-      <PanePlaceholder :title="t('chat.selectBot')">
+      <PanePlaceholder
+        v-if="missingBotName"
+        :title="t('bots.notFound')"
+      >
+        {{ t('bots.notFoundDescription') }}
+      </PanePlaceholder>
+      <PanePlaceholder
+        v-else
+        :title="t('chat.selectBot')"
+      >
         {{ t('chat.selectBotHint') }}
       </PanePlaceholder>
     </div>
@@ -14,19 +23,23 @@
 
 <script setup lang="ts">
 import { normalizeAgentID } from '@/utils/external-agent'
-import { watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { useTitle } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getBotsByBotIdAgents, getBotsById } from '@memohai/sdk'
+import { fetchBot } from '@/composables/api/useBot'
 import { PanePlaceholder } from '@felinic/ui'
+import { CHAT_ROUTE_NAMES } from '@/constants/chat-routes'
 import { useChatStore } from '@/store/chat-list'
 import { routeConversationLabel } from '@/store/chat-list.utils'
+import { useComposerPrefillStore } from '@/store/composer-prefill'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { ACP_NO_PROJECT_MODE, createACPNoProjectPath } from '@/utils/acp'
 import { botAgentProvider } from '@/utils/bot-agent'
 import ChatWorkspace from './components/chat-workspace.vue'
+import { useComposerPrefillResolver } from './composables/useComposerPrefillResolver'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,20 +47,29 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()
 const { currentBotId, bots, activeSession } = storeToRefs(chatStore)
+const composerPrefill = useComposerPrefillStore()
+
+useComposerPrefillResolver({
+  pending: () => composerPrefill.pending,
+  currentBotId: () => currentBotId.value,
+  // Wait out a bot switch: until the new bot's chats load, the dock may still
+  // show the previous bot's panels.
+  dockReady: () => !!workspaceTabs.api && !chatStore.loadingChats,
+  activeChatWritable: () => !!workspaceTabs.activeId && workspaceTabs.activePanelIsChat && !chatStore.activeChatReadOnly,
+  openDraftChat: () => workspaceTabs.openDraftChat({ title: t('chat.newSession'), explicitSelection: false }),
+})
 
 // Resolve a bot UUID from a URL name slug. Prefers the already-loaded bot list,
 // falling back to the API (which accepts both name and UUID identifiers).
+// Returns null when the server reports no such bot; throws on other failures
+// so a transient error isn't mistaken for a missing bot.
 async function resolveBotIdFromName(nameOrId: string): Promise<string | null> {
   const value = nameOrId.trim()
   if (!value) return null
   const cached = bots.value.find((b) => b.name === value || b.id === value)
   if (cached?.id) return cached.id
-  try {
-    const { data } = await getBotsById({ path: { id: value }, throwOnError: true })
-    return data?.id ?? null
-  } catch {
-    return null
-  }
+  const bot = await fetchBot(value)
+  return bot?.id ?? null
 }
 
 // Resolve a URL name slug from a bot UUID, preferring the loaded bot list.
@@ -66,6 +88,10 @@ async function resolveBotNameFromId(botId: string): Promise<string | null> {
 
 let suppressUrlSync = false
 
+// The URL's bot identifier when the server has no such bot. While set, the
+// pane shows the not-found state and the URL is left as the user typed it.
+const missingBotName = ref('')
+
 // home is now mounted persistently (via main-container, which App.vue keeps
 // alive across chat↔settings) rather than torn down when leaving chat. So these
 // route watchers keep running while the user is in settings. The settings route
@@ -74,13 +100,14 @@ let suppressUrlSync = false
 // yanking the user out of settings. URL sync must only run while a chat route
 // (home/bot) is current. route.name is the reliable signal (no mount/unmount
 // timing to race).
-const CHAT_ROUTE_NAMES = new Set(['home', 'bot'])
 const isChatRoute = () => CHAT_ROUTE_NAMES.has(route.name as string)
 
 // Home remains mounted behind settings, so the route gates the browser title.
+// A first send's session is titled like the draft it came from until the
+// server confirms the send (see isSessionTentative).
 useTitle(() => {
   const session = activeSession.value
-  if (!isChatRoute() || !currentBotId.value || !session) return 'Memoh'
+  if (!isChatRoute() || !currentBotId.value || !session || chatStore.isSessionTentative(session.id)) return 'Memoh'
   const title = (session.title ?? '').trim() || routeConversationLabel(session) || t('chat.untitledSession')
   return `Memoh · ${title}`
 }, { restoreOnUnmount: () => 'Memoh' })
@@ -115,15 +142,20 @@ async function maybeStartExternalAgentSession() {
       const { data } = await getBotsByBotIdAgents({ path: { bot_id: botId }, throwOnError: true })
       const botAgent = data.items?.find(agent => agent.enabled !== false && botAgentProvider(agent) === agentId)
       if (!botAgent?.id) return
+      const startedOnPanel = workspaceTabs.activeId
       const { session } = await chatStore.createExternalAgentSession({
         botAgentId: botAgent.id,
         agentId,
         projectMode: ACP_NO_PROJECT_MODE,
         projectPath: createACPNoProjectPath(),
       })
-      // Open (or focus) the tab for the freshly created session; activation selects
-      // it. ensureChatPanel covers the case where the dock mounts later.
-      workspaceTabs.openSessionChat({ sessionId: session.id })
+      // Creation is async. If the user moved to another tab meanwhile, leave the
+      // dock alone: opening a tab now would replace the group's preview tab,
+      // which may be the one they are reading. A draft that was focused when
+      // creation started already shows the session, and Recents lists it.
+      if (workspaceTabs.activeId === startedOnPanel) {
+        workspaceTabs.openSessionChat({ sessionId: session.id })
+      }
     }
   } catch {
     // Bot may not have the agent enabled; user can still pick it from the composer.
@@ -136,14 +168,35 @@ async function maybeStartExternalAgentSession() {
 async function syncStoreFromUrl(rawName: string) {
   const urlName = rawName.trim()
   if (!urlName) {
+    missingBotName.value = ''
     if (!currentBotId.value) {
       await chatStore.initializeWithRecovery()
     }
     await maybeStartExternalAgentSession()
     return
   }
-  const resolvedId = await resolveBotIdFromName(urlName)
-  if (!resolvedId) return
+  let resolvedId: string | null
+  try {
+    resolvedId = await resolveBotIdFromName(urlName)
+  } catch {
+    return
+  }
+  if (!resolvedId) {
+    // The URL may have moved on while the lookup was in flight; only the
+    // current URL may clear the selection.
+    if (((route.params.botName as string) ?? '').trim() !== urlName) return
+    missingBotName.value = urlName
+    // Drop the previously selected bot rather than showing its chat under
+    // this URL. Clearing the selection resets the chat store, bot list
+    // included, so reload the list for the bot switcher afterwards.
+    if (currentBotId.value) {
+      currentBotId.value = null
+      await nextTick()
+    }
+    void chatStore.refreshBots()
+    return
+  }
+  missingBotName.value = ''
   if (resolvedId !== (currentBotId.value ?? '').trim()) {
     suppressUrlSync = true
     try {
@@ -190,6 +243,7 @@ watch(currentBotId, async (newBotId) => {
   if (!isChatRoute()) return
   const storeBot = (newBotId ?? '').trim()
   if (!storeBot) {
+    if (missingBotName.value) return
     if (route.name !== 'home') {
       void router.replace({ name: 'home' })
     }

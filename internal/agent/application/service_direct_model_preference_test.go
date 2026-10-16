@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/agentcredential"
+	"github.com/felinics/memoh/internal/apperror"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -128,10 +130,17 @@ func TestDirectModelSwitchReconcilesAgainstNewModel(t *testing.T) {
 	catalog := external.ModelCatalog{Models: []external.ModelOption{
 		{ID: "A", DefaultReasoningEffort: "medium", ReasoningEfforts: []external.ReasoningEffortOption{{ID: "medium"}, {ID: "high"}}},
 		{ID: "B", DefaultReasoningEffort: "low", ReasoningEfforts: []external.ReasoningEffortOption{{ID: "low"}}},
+		{ID: "no-default", ReasoningEfforts: []external.ReasoningEffortOption{{ID: "low"}, {ID: "max"}}},
 	}}
 	id, effort, err := reconcileDirectPair(catalog, "B", "high")
 	if err != nil || id != "B" || effort != "low" {
 		t.Fatalf("pair=%s/%s err=%v", id, effort, err)
+	}
+	// Without a model default the effort stays unset until a level is picked.
+	for sent, want := range map[string]string{"": "", "max": "max", "high": ""} {
+		if _, effort, err = reconcileDirectPair(catalog, "no-default", sent); err != nil || effort != want {
+			t.Fatalf("no-default effort %q = %q, want %q (err=%v)", sent, effort, want, err)
+		}
 	}
 	if _, _, err = reconcileDirectPair(catalog, "", ""); err == nil {
 		t.Fatal("accepted empty model without a configured or advertised default")
@@ -216,5 +225,42 @@ func TestDirectModelPreferenceWriteFailureDoesNotBreakTurn(t *testing.T) {
 	}
 	if req.Model != "A" || req.ReasoningEffort != "high" {
 		t.Fatalf("request=%+v", req)
+	}
+}
+
+type failingCatalogDriver struct {
+	external.Driver
+	err error
+}
+
+func (d failingCatalogDriver) ModelCatalog(context.Context, external.ModelCatalogRequest) (external.ModelCatalog, error) {
+	return external.ModelCatalog{}, d.err
+}
+
+// A runtime failure while reading the model catalog reaches the caller with
+// its public code; other errors are left for the caller to answer.
+func TestDirectModelPreferenceAnswersCatalogFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		code apperror.Code
+	}{
+		{"auth required", external.Fail(external.FailureAuthRequired, external.ErrAuthRequired), apperror.CodeExternalRuntimeAuthRequired},
+		{"credential revoked", external.CredentialError(agentcredential.ErrRevoked), apperror.CodeAgentCredentialRevoked},
+		{"runtime unavailable", external.Unavailable(errors.New("bridge refused")), apperror.CodeExternalRuntimeUnavailable},
+		{"missing dependency", &external.DependencyMissingError{DependencyID: "codex"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newModelSelectionService(t, &modelSelectionFakeQueries{})
+			svc.externalDrivers = map[string]external.Driver{session.RuntimeCodex: failingCatalogDriver{err: tc.err}}
+			sess := session.Thread{ID: "00000000-0000-0000-0000-000000000613", BotID: "bot", RuntimeType: session.RuntimeCodex}
+			_, err := svc.applyDirectModelPreference(context.Background(), ChatRequest{BotID: "bot", Model: "chosen"}, sess)
+			if got := apperror.CodeOf(err); got != tc.code {
+				t.Fatalf("code = %q, want %q: %v", got, tc.code, err)
+			}
+			if !errors.Is(apperror.CauseOf(err), tc.err) && !errors.Is(err, tc.err) {
+				t.Fatalf("error lost the runtime failure: %v", err)
+			}
+		})
 	}
 }

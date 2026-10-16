@@ -12,5 +12,6 @@ import (
 type DiscussContextInput struct {
 	ComposedMessages []timeline.ContextMessage
 	InlineImages     []sdk.ImagePart
+	SourceImages     map[string][]sdk.ImagePart
 	SystemFrags      []contextfrag.ContextFrag
 }

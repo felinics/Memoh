@@ -167,7 +167,7 @@ func (s *Service) RunConfig(ctx context.Context, cfg Config, req Request, runner
 				onError := normalizeOnError(action.OnError)
 				if onError == OnErrorIgnore {
 					if s != nil && s.logger != nil {
-						s.logger.Warn("hook action failed but was ignored",
+						s.logger.WarnContext(ctx, "hook action failed but was ignored",
 							slog.String("event", req.Event),
 							slog.String("hook", hook.Name),
 							slog.String("action", action.Type),

@@ -7,6 +7,7 @@
         class="fixed inset-0 z-(--z-top) flex items-center justify-center"
         :class="overlayClass"
         role="dialog"
+        data-keyboard-scope="mediaLightbox"
         aria-modal="true"
         :aria-label="currentItem?.name ? `Media preview: ${currentItem.name}` : 'Media preview'"
         tabindex="-1"

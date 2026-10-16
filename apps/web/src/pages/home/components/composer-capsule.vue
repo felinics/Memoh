@@ -3,8 +3,8 @@
     data-slot="input-group"
     role="group"
     :aria-label="label || undefined"
-    class="chat-composer-edge rounded-2xl bg-surface-composer"
-    :class="compact ? 'px-3 py-1' : 'p-3'"
+    class="chat-composer-edge chat-composer-member rounded-2xl bg-surface-composer"
+    :class="compact ? 'px-(--composer-pad) py-1' : 'px-(--composer-pad) py-3'"
   >
     <slot />
   </div>
@@ -19,6 +19,11 @@
 // markup; everything else shares this shell so the chrome (input-group edge,
 // surface, radius, padding) can never drift into N hand-copies. Keep the
 // chrome classes here in lockstep with the composer div in chat-pane.vue.
+// Inline padding is the composer's own --composer-pad (style.css), so a
+// member's content box starts exactly where the composer's does.
+// `chat-composer-member` makes the edge mirror the composer's current tier
+// (rest / docked / focus), resolved on the ComposerDock ancestor — see
+// style.css — so a stacked capsule never reads as a different material.
 defineProps<{
   // Accessible region name; omit when the content already names itself.
   label?: string

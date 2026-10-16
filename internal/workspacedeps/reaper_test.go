@@ -1,7 +1,10 @@
 package workspacedeps
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -92,4 +95,34 @@ func TestStartReaperStopsWhenContextEnds(t *testing.T) {
 	// Loop cleanup proves cancellation ends the worker before Stop is called.
 	<-tickerStopped
 	stop()
+}
+
+func TestStartReaperWritesOneResultRecordPerPass(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	ticks := make(chan time.Time)
+	done := make(chan struct{})
+	reap := func(context.Context) (int, error) {
+		defer close(done)
+		return 2, errors.New("one operation could not be reconciled")
+	}
+	stop := startReaper(t.Context(), reap, ticks, func() {}, logger)
+	<-done
+	stop()
+
+	var records []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("decode %q: %v", line, err)
+		}
+		records = append(records, rec)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records = %v, want exactly one", records)
+	}
+	rec := records[0]
+	if rec["msg"] != "job" || rec["operation"] != "workspacedeps.reap" || rec["level"] != "ERROR" || rec["reaped"] != float64(2) {
+		t.Fatalf("record = %v, want an ERROR job record for workspacedeps.reap with reaped=2", rec)
+	}
 }

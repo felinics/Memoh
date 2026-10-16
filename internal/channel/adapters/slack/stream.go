@@ -71,6 +71,13 @@ func (s *slackOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 
 		return s.updateMessage(ctx)
 
+	case channel.StreamEventReset:
+		// Keep the message; the regenerated reply edits over the failed text.
+		s.mu.Lock()
+		s.buffer.Reset()
+		s.mu.Unlock()
+		return nil
+
 	case channel.StreamEventFinal:
 		if event.Final == nil {
 			return errors.New("slack stream final payload is required")
@@ -98,7 +105,7 @@ func (s *slackOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		if errText == "" {
 			return nil
 		}
-		return s.finalizeMessage(ctx, "Error: "+errText, nil)
+		return s.finalizeMessage(ctx, channel.ErrorReplyText(event.ErrorCode, errText), nil)
 
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {
@@ -122,25 +129,27 @@ func (s *slackOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		return nil
 
 	case channel.StreamEventToolCallStart:
-		s.mu.Lock()
-		bufText := strings.TrimSpace(s.buffer.String())
-		s.mu.Unlock()
-		if bufText != "" {
-			if err := s.finalizeMessage(ctx, bufText, nil); err != nil {
-				return err
-			}
-		} else if err := s.clearPlaceholder(ctx); err != nil {
+		if err := s.commitSegment(ctx); err != nil {
 			return err
 		}
-		s.resetStreamState()
 		return s.sendToolCallMessage(ctx, event.ToolCall, channel.BuildToolCallStart(event.ToolCall))
 	case channel.StreamEventToolCallEnd:
 		return s.sendToolCallMessage(ctx, event.ToolCall, channel.BuildToolCallEnd(event.ToolCall))
 
+	case channel.StreamEventSegmentEnd:
+		// The text before a hidden tool call becomes its own message. With
+		// nothing buffered, keep the placeholder for the text that follows.
+		s.mu.Lock()
+		hasText := strings.TrimSpace(s.buffer.String()) != ""
+		s.mu.Unlock()
+		if !hasText {
+			return nil
+		}
+		return s.commitSegment(ctx)
+
 	case channel.StreamEventAgentStart, channel.StreamEventAgentEnd,
 		channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd,
 		channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted,
-		channel.StreamEventProcessingFailed,
 		channel.StreamEventReaction, channel.StreamEventSpeech:
 		return nil
 
@@ -216,7 +225,7 @@ func (s *slackOutboundStream) updateMessage(ctx context.Context) error {
 		s.nextUpdate = time.Now().Add(delay)
 		s.mu.Unlock()
 		if s.adapter != nil && s.adapter.logger != nil {
-			s.adapter.logger.Warn("slack stream update throttled",
+			s.adapter.logger.WarnContext(ctx, "slack stream update throttled",
 				slog.String("config_id", s.cfg.ID),
 				slog.String("target", s.target),
 				slog.Duration("retry_after", delay),
@@ -226,7 +235,7 @@ func (s *slackOutboundStream) updateMessage(ctx context.Context) error {
 		return nil
 	}
 	if s.adapter != nil && s.adapter.logger != nil {
-		s.adapter.logger.Warn("slack stream update failed",
+		s.adapter.logger.WarnContext(ctx, "slack stream update failed",
 			slog.String("config_id", s.cfg.ID),
 			slog.String("target", s.target),
 			slog.Any("error", err),
@@ -293,7 +302,7 @@ func (s *slackOutboundStream) finalizeMessageBody(ctx context.Context, body slac
 	}
 
 	if s.adapter != nil && s.adapter.logger != nil {
-		s.adapter.logger.Warn("slack stream final update failed, falling back to new message",
+		s.adapter.logger.WarnContext(ctx, "slack stream final update failed, falling back to new message",
 			slog.String("config_id", s.cfg.ID),
 			slog.String("target", s.target),
 			slog.Any("error", err),
@@ -408,6 +417,24 @@ func (s *slackOutboundStream) forgetToolCallMessage(callID string) {
 		return
 	}
 	delete(s.toolMessages, callID)
+}
+
+// commitSegment finalizes the buffered text as its own message (or removes
+// the placeholder when nothing was buffered) and resets the streaming state,
+// so the next text starts a fresh message.
+func (s *slackOutboundStream) commitSegment(ctx context.Context) error {
+	s.mu.Lock()
+	bufText := strings.TrimSpace(s.buffer.String())
+	s.mu.Unlock()
+	if bufText != "" {
+		if err := s.finalizeMessage(ctx, bufText, nil); err != nil {
+			return err
+		}
+	} else if err := s.clearPlaceholder(ctx); err != nil {
+		return err
+	}
+	s.resetStreamState()
+	return nil
 }
 
 func (s *slackOutboundStream) resetStreamState() {

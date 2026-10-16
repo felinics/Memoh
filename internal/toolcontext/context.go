@@ -16,6 +16,10 @@ import (
 // Session carries request-scoped identity and runtime ownership for tool
 // execution. Runtime-only fields remain process-local and are never serialized.
 type Session struct {
+	// PublicRequest marks HTTP routing headers that must not become tool authority.
+	PublicRequest bool `json:"-"`
+	// UserID is authenticated by the server; it is never read from a routing header.
+	UserID            string `json:"-"`
 	BotID             string
 	ChatID            string
 	RuntimeID         string
@@ -114,6 +118,10 @@ func ValidateRuntimeGuard(ctx context.Context, session Session) error {
 // per-call and assigned by the caller after merging.
 func Merge(base, latest Session) Session {
 	merged := base
+	merged.PublicRequest = base.PublicRequest || latest.PublicRequest
+	if value := strings.TrimSpace(latest.UserID); value != "" {
+		merged.UserID = value
+	}
 	if value := strings.TrimSpace(latest.BotID); value != "" {
 		merged.BotID = value
 	}

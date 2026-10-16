@@ -83,5 +83,20 @@ export function useComputerAccessActions() {
     onSettled: (_data, _error, vars) => invalidate(vars.botId),
   })
 
-  return { grantAccess, revokeAccess }
+  // New computers start granted to every bot; the user only trims. Grants run
+  // one at a time and a failure does not stop the rest; the caller reports the
+  // returned errors.
+  async function grantBots(runtimeId: string, botIds: string[]): Promise<unknown[]> {
+    const failures: unknown[] = []
+    for (const botId of botIds) {
+      try {
+        await grantAccess({ botId, runtimeId })
+      } catch (error) {
+        failures.push(error)
+      }
+    }
+    return failures
+  }
+
+  return { grantAccess, revokeAccess, grantBots }
 }

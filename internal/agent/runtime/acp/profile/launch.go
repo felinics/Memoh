@@ -1,9 +1,10 @@
 package profile
 
 import (
-	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const (
@@ -21,7 +22,7 @@ func ResolveLaunch(profile Profile, setup AgentSetup) (string, []string, error) 
 	if policy.ManagedCommandField == "" {
 		command := strings.TrimSpace(policy.Command)
 		if command == "" {
-			return "", nil, fmt.Errorf("ACP command is required for %s", profile.DisplayName)
+			return "", nil, errs.New(fmt.Sprintf("ACP command is required for %s", profile.DisplayName))
 		}
 		return command, nil, nil
 	}
@@ -29,10 +30,10 @@ func ResolveLaunch(profile Profile, setup AgentSetup) (string, []string, error) 
 	commandField := NormalizeAgentID(policy.ManagedCommandField)
 	command := strings.TrimSpace(setup.Managed[commandField])
 	if command == "" {
-		return "", nil, fmt.Errorf("%s required", commandField)
+		return "", nil, errs.New(commandField + " required")
 	}
 	if strings.ContainsAny(command, "\x00\r\n") {
-		return "", nil, fmt.Errorf("%s contains an invalid control character", commandField)
+		return "", nil, errs.New(commandField + " contains an invalid control character")
 	}
 
 	argumentsField := NormalizeAgentID(policy.ManagedArgumentsField)
@@ -55,14 +56,14 @@ func parseGenericACPArguments(raw string) ([]string, error) {
 			continue
 		}
 		if strings.ContainsAny(argument, "\x00\r\n") {
-			return nil, errors.New("arguments contains an invalid control character")
+			return nil, errs.New("arguments contains an invalid control character")
 		}
 		if len(argument) > maxGenericACPArgumentBytes {
-			return nil, fmt.Errorf("argument exceeds %d bytes", maxGenericACPArgumentBytes)
+			return nil, errs.New(fmt.Sprintf("argument exceeds %d bytes", maxGenericACPArgumentBytes))
 		}
 		arguments = append(arguments, argument)
 		if len(arguments) > maxGenericACPArguments {
-			return nil, fmt.Errorf("arguments exceeds %d entries", maxGenericACPArguments)
+			return nil, errs.New(fmt.Sprintf("arguments exceeds %d entries", maxGenericACPArguments))
 		}
 	}
 	return arguments, nil

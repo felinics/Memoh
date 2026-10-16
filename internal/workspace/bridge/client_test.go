@@ -303,56 +303,48 @@ func TestClientWriteRawDoesNotReplaceTargetOnReaderFailure(t *testing.T) {
 	}
 }
 
-func TestClientNoFollowRawIORejectsSymlinksAndExistingTargets(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("strict anchored nofollow I/O requires Linux openat2")
+// writeRawUnavailableTestServer ends every WriteRaw stream with Unavailable,
+// after the path chunk or after the whole payload.
+type writeRawUnavailableTestServer struct {
+	pb.UnimplementedContainerServiceServer
+	drain bool
+}
+
+func (s *writeRawUnavailableTestServer) WriteRaw(stream pb.ContainerService_WriteRawServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
 	}
+	for s.drain {
+		if _, err := stream.Recv(); err != nil {
+			break
+		}
+	}
+	return status.Error(codes.Unavailable, "bridge restarting")
+}
+
+func TestClientWriteRawMapsStreamStatus(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	outside := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "sessions"), 0o750); err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		name    string
+		drain   bool
+		payload int
+	}{
+		// The stream ends while chunks are still being sent, so Send fails.
+		{name: "during send", payload: 8 << 20},
+		// The stream ends after the payload, so CloseAndRecv fails.
+		{name: "at close", drain: true, payload: 16},
 	}
-	victim := filepath.Join(outside, "victim.jsonl")
-	if err := os.WriteFile(victim, []byte("secret\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(victim, filepath.Join(root, "sessions", "read-link.jsonl")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(victim, filepath.Join(root, "sessions", "write-link.jsonl")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(outside, filepath.Join(root, "escaped")); err != nil {
-		t.Fatal(err)
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	client := newTestClient(t, bridgesvc.New(bridgesvc.Options{AllowHostAbsolute: true}))
-	if _, err := client.ReadRawNoFollow(context.Background(), root, "sessions/read-link.jsonl"); err == nil {
-		t.Fatal("ReadRawNoFollow() followed a final symlink")
-	}
-	if _, err := client.WriteRawNoFollow(context.Background(), root, "sessions/write-link.jsonl", strings.NewReader("replacement\n")); err == nil {
-		t.Fatal("WriteRawNoFollow() replaced a final symlink")
-	}
-	if _, err := client.WriteRawNoFollow(context.Background(), root, "escaped/new.jsonl", strings.NewReader("outside\n")); err == nil {
-		t.Fatal("WriteRawNoFollow() followed a parent symlink")
-	}
-	if _, err := client.WriteRawNoFollow(context.Background(), root, "new/tree/session.jsonl", strings.NewReader("restored\n")); err != nil {
-		t.Fatalf("WriteRawNoFollow() create nested file: %v", err)
-	}
-	if _, err := client.WriteRawNoFollow(context.Background(), root, "new/tree/session.jsonl", strings.NewReader("overwrite\n")); err == nil {
-		t.Fatal("WriteRawNoFollow() replaced an existing target")
-	}
-
-	if got, err := os.ReadFile(victim); err != nil || string(got) != "secret\n" { //nolint:gosec // victim is below t.TempDir.
-		t.Fatalf("outside victim changed: data=%q err=%v", got, err)
-	}
-	if _, err := os.Stat(filepath.Join(outside, "new.jsonl")); !os.IsNotExist(err) {
-		t.Fatalf("parent symlink received a file: %v", err)
-	}
-	if got, err := os.ReadFile(filepath.Join(root, "new", "tree", "session.jsonl")); err != nil || string(got) != "restored\n" { //nolint:gosec // root is t.TempDir.
-		t.Fatalf("nested restore = %q, %v", got, err)
+			client := newTestClient(t, &writeRawUnavailableTestServer{drain: tc.drain})
+			_, err := client.WriteRaw(context.Background(), "/data/file", bytes.NewReader(make([]byte, tc.payload)))
+			if !errors.Is(err, ErrUnavailable) {
+				t.Fatalf("WriteRaw() error = %v, want ErrUnavailable", err)
+			}
+		})
 	}
 }
 
@@ -569,6 +561,45 @@ func TestExecStreamCloseCancelsServerContext(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("server stream context was not cancelled after ExecStream.Close")
 	}
+}
+
+// The interactive terminal must not inherit the bridge's default PTY
+// deadline; only the stream's lifetime bounds the shell.
+func TestExecStreamPTYRequestsNoDeadline(t *testing.T) {
+	server := &execInputCaptureServer{first: make(chan *pb.ExecInput, 1)}
+	client := newTestClient(t, server)
+	stream, err := client.ExecStreamPTY(context.Background(), "/bin/sh", "/data", 80, 24)
+	if err != nil {
+		t.Fatalf("ExecStreamPTY returned error: %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+
+	select {
+	case msg := <-server.first:
+		if !msg.GetPty() {
+			t.Fatal("pty = false, want true")
+		}
+		if msg.GetTimeoutSeconds() != -1 {
+			t.Fatalf("timeout_seconds = %d, want -1", msg.GetTimeoutSeconds())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("server stream did not receive exec config")
+	}
+}
+
+type execInputCaptureServer struct {
+	pb.UnimplementedContainerServiceServer
+	first chan *pb.ExecInput
+}
+
+func (s *execInputCaptureServer) Exec(stream pb.ContainerService_ExecServer) error {
+	msg, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	s.first <- msg
+	<-stream.Context().Done()
+	return stream.Context().Err()
 }
 
 func TestClientWithOutgoingMetadataScopesUnaryAndStreamingWithoutOwningConnection(t *testing.T) {

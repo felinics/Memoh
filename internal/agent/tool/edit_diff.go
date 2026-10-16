@@ -29,17 +29,20 @@ const maxUIDiffBytes = 64 * 1024 // 64 KB
 // file too large for a line-based diff to be worth computing and persisting
 // (the chat UI then falls back to the plain old/new block view).
 func editContextDiff(filePath, before, after string) (string, error) {
+	return contextDiffBetween(filePath, filePath, before, after)
+}
+
+// contextDiffBetween is editContextDiff with distinct header paths, for a
+// change that also moves the file (apply_patch's "Move to").
+func contextDiffBetween(fromPath, toPath, before, after string) (string, error) {
 	if len(before) > largeFileThreshold || len(after) > largeFileThreshold {
 		return "", nil
 	}
-	_, before = stripBOM(before)
-	_, after = stripBOM(after)
-	before = normalizeToLF(before)
-	after = normalizeToLF(after)
+	before = diffDisplayText(before)
+	after = diffDisplayText(after)
 	if before == after {
 		return "", nil
 	}
-	displayPath := strings.TrimPrefix(filePath, "/")
 	// SplitLines("") yields one empty line, which would show up as a phantom
 	// empty context row for whole-file creations/deletions; an empty side
 	// must be a truly empty slice. SplitLines also appends a phantom empty
@@ -55,8 +58,8 @@ func editContextDiff(filePath, before, after string) (string, error) {
 	diff, err := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
 		A:        aLines,
 		B:        bLines,
-		FromFile: "a/" + displayPath,
-		ToFile:   "b/" + displayPath,
+		FromFile: "a/" + strings.TrimPrefix(fromPath, "/"),
+		ToFile:   "b/" + strings.TrimPrefix(toPath, "/"),
 		Context:  editDiffContextLines,
 	})
 	if err != nil {
@@ -67,6 +70,14 @@ func editContextDiff(filePath, before, after string) (string, error) {
 		return "", nil
 	}
 	return diff, nil
+}
+
+// diffDisplayText is the form a side of the diff is compared and rendered in.
+// Two contents that only differ in BOM or line endings are equal here, so they
+// produce no diff.
+func diffDisplayText(content string) string {
+	_, content = stripBOM(content)
+	return normalizeToLF(content)
 }
 
 func trimPhantomLine(lines []string) []string {

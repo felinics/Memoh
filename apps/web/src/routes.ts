@@ -13,11 +13,6 @@ const pageBotCreateProgress = () => import('@/pages/bots/new-progress.vue')
 const pageBotDetail = () => import('@/pages/bots/detail.vue')
 const pageProviders = () => import('@/pages/providers/index.vue')
 const pageRuntimes = () => import('@/pages/runtimes/index.vue')
-const pageWebSearch = () => import('@/pages/web-search/index.vue')
-const pageMemory = () => import('@/pages/memory/index.vue')
-const pageVoice = () => import('@/pages/voice/index.vue')
-const pageVideo = () => import('@/pages/video/index.vue')
-const pageEmail = () => import('@/pages/email/index.vue')
 const pageUsage = () => import('@/pages/usage/index.vue')
 const pagePeople = () => import('@/pages/people/index.vue')
 const pageAppearance = () => import('@/pages/appearance/index.vue')
@@ -37,8 +32,8 @@ const pageAbout = () => import('@/pages/about/index.vue')
  */
 export const settingsPageLoaders = [
   pageSettings,
-  pageBots, pageProviders, pageRuntimes, pageWebSearch, pageMemory, pageVoice,
-  pageVideo, pageEmail, pageUsage, pagePeople, pageAppearance, pageKeyboard,
+  pageBots, pageProviders, pageRuntimes,
+  pageUsage, pagePeople, pageAppearance, pageKeyboard,
   pageProfile, pageSupermarket, pageAbout,
   pageBotNew, pageBotCreateProgress, pageBotDetail,
   pageSupermarketCategory, pageSupermarketAppDetail,
@@ -196,52 +191,32 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
         {
           name: 'web-search',
           path: 'web-search',
-          component: pageWebSearch,
-          meta: {
-            breadcrumb: i18nRef('sidebar.webSearch'),
-          },
-        },
-        {
-          name: 'memory',
-          path: 'memory',
-          component: pageMemory,
-          meta: {
-            breadcrumb: i18nRef('sidebar.memory'),
-          },
+          redirect: to => ({ name: 'providers', query: { ...to.query, tab: 'web-search' }, hash: to.hash }),
         },
         {
           name: 'voice',
           path: 'voice',
-          component: pageVoice,
-          meta: {
-            breadcrumb: i18nRef('sidebar.voice'),
-          },
+          redirect: to => ({ name: 'providers', query: { ...to.query, tab: 'voice' }, hash: to.hash }),
         },
         {
           name: 'video',
           path: 'video',
-          component: pageVideo,
-          meta: {
-            breadcrumb: i18nRef('sidebar.video'),
-          },
+          redirect: to => ({ name: 'providers', query: { ...to.query, tab: 'video' }, hash: to.hash }),
         },
-        // Speech and transcription merged into the Voice page; keep the old paths
-        // working for existing links/bookmarks.
+        // Preserve legacy voice links, including their provider detail query.
         {
           path: 'speech',
-          redirect: { name: 'voice' },
+          redirect: to => ({ name: 'providers', query: { ...to.query, tab: 'voice' }, hash: to.hash }),
         },
         {
           path: 'transcription',
-          redirect: { name: 'voice' },
+          redirect: to => ({ name: 'providers', query: { ...to.query, tab: 'voice' }, hash: to.hash }),
         },
+        // The Memory page was removed — its settings now live in each bot's
+        // Memories tab — so old links and desktop deep links land on Bots.
         {
-          name: 'email',
-          path: 'email',
-          component: pageEmail,
-          meta: {
-            breadcrumb: i18nRef('sidebar.email'),
-          },
+          path: 'memory',
+          redirect: { name: 'bots' },
         },
         {
           name: 'usage',
@@ -333,6 +308,15 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
       name: 'oauth-mcp-callback',
       path: '/oauth/mcp/callback',
       component: () => import('@/pages/oauth/mcp-callback.vue'),
+    },
+    {
+      // Generic provider deep-link target (`#payload=` carries the prefilled
+      // provider as base64url JSON; see utils/provider-connect.ts). Standalone
+      // confirm page — the key stays in the fragment and is only saved after
+      // explicit user confirmation.
+      name: 'provider-connect',
+      path: '/providers/connect',
+      component: () => import('@/pages/providers/connect.vue'),
     },
     // Dev-only component wall. Registered ONLY in dev builds, so the chunk and
     // its auth-bypass guard never exist in production. Reached by setting the

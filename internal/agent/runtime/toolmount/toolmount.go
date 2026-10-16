@@ -18,6 +18,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -82,7 +83,7 @@ func Serve(ctx context.Context, client *bridge.Client, baseURL string, gateway G
 	})
 	stop, err := client.ServeReverseHTTPRoute(ctx, guardedPath, handler)
 	if err != nil {
-		return nil, fmt.Errorf("serve tool gateway route: %w", err)
+		return nil, errs.WrapDependency(err, "serve tool gateway route")
 	}
 	return &Mount{URL: guardedURL, stop: stop}, nil
 }
@@ -95,7 +96,7 @@ func mintRouteURL(rawURL string) (string, string, error) {
 		return "", "", err
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return "", "", fmt.Errorf("invalid Memoh tools URL %q", rawURL)
+		return "", "", errs.New(fmt.Sprintf("invalid Memoh tools URL %q", rawURL))
 	}
 	basePath := strings.TrimRight(u.Path, "/")
 	if basePath == "" {
@@ -109,9 +110,9 @@ func mintRouteURL(rawURL string) (string, string, error) {
 // conversation instead of only in server logs.
 func EmitUnavailableNotice(sink external.EventSink, reason string) {
 	sink.EmitStreamEvent(event.StreamEvent{
-		Type:  event.RuntimeNotice,
-		Code:  "tools_unavailable",
-		Delta: "Memoh tools are unavailable for this turn: " + reason,
+		Type:       event.RuntimeNotice,
+		NoticeKind: event.NoticeToolsUnavailable,
+		Delta:      "Memoh tools are unavailable for this turn: " + reason,
 	})
 }
 

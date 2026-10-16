@@ -3,6 +3,9 @@ package tools
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,6 +15,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
@@ -73,18 +77,57 @@ func TestSubagentAttemptDisposition(t *testing.T) {
 			wantDisposition: SpawnAttemptRetry,
 		},
 		{
-			name:            "safety deadline retries while budget remains",
+			name:            "wrapped watchdog retries while budget remains",
 			ctx:             context.Background(),
-			err:             context.DeadlineExceeded,
+			err:             fmt.Errorf("stream ended: %w", ErrWatchdogTimedOut),
 			attemptsRemain:  true,
 			wantDisposition: SpawnAttemptRetry,
 		},
 		{
-			name:            "provider failure retries while budget remains",
-			ctx:             context.Background(),
-			err:             errors.New("provider returned 429"),
+			name: "network error is failure",
+			ctx:  context.Background(),
+			err: &net.OpError{
+				Op:  "read",
+				Net: "tcp",
+				Err: errors.New("connection reset by peer"),
+			},
 			attemptsRemain:  true,
-			wantDisposition: SpawnAttemptRetry,
+			wantDisposition: SpawnAttemptFailure,
+		},
+		{
+			name:            "provider server error is failure",
+			ctx:             context.Background(),
+			err:             errors.New("api error 529"),
+			attemptsRemain:  true,
+			wantDisposition: SpawnAttemptFailure,
+		},
+		{
+			name:            "provider rate limit is failure",
+			ctx:             context.Background(),
+			err:             errors.New("provider returned 429: rate limit exceeded"),
+			attemptsRemain:  true,
+			wantDisposition: SpawnAttemptFailure,
+		},
+		{
+			name:            "truncated stream is failure",
+			ctx:             context.Background(),
+			err:             io.ErrUnexpectedEOF,
+			attemptsRemain:  true,
+			wantDisposition: SpawnAttemptFailure,
+		},
+		{
+			name:            "cancellation inside the attempt is failure",
+			ctx:             context.Background(),
+			err:             context.Canceled,
+			attemptsRemain:  true,
+			wantDisposition: SpawnAttemptFailure,
+		},
+		{
+			name:            "deadline inside the attempt is failure",
+			ctx:             context.Background(),
+			err:             context.DeadlineExceeded,
+			attemptsRemain:  true,
+			wantDisposition: SpawnAttemptFailure,
 		},
 		{
 			name:            "persisted checkpoint forbids retry",
@@ -119,14 +162,14 @@ func TestSubagentAttemptDisposition(t *testing.T) {
 }
 
 // TestSubagentDoesNotRetryAfterPersistedStep: once a step has durably
-// committed, a retryable error must surface instead of restarting the turn —
+// committed, a watchdog timeout must surface instead of restarting the turn —
 // the committed step may carry real side effects that a replay would repeat.
 func TestSubagentDoesNotRetryAfterPersistedStep(t *testing.T) {
 	t.Parallel()
 
 	agent := &mockSpawnAgent{
 		generateFunc: func(_ context.Context, cfg SpawnRunConfig, _ func()) (*SpawnResult, error) {
-			retryErr := errors.New("api error 500: provider fell over mid-run")
+			retryErr := ErrWatchdogTimedOut
 			if cfg.OnStepPersisted != nil {
 				cfg.OnStepPersisted()
 			}
@@ -155,22 +198,18 @@ func TestSubagentDoesNotRetryAfterPersistedStep(t *testing.T) {
 		!strings.Contains(errText, "send a follow-up message to continue") {
 		t.Fatalf("error does not tell the parent how to continue: %q", errText)
 	}
+	assertCatalogFailure(t, result, apperror.CodeAgentResponseTimeout, ErrWatchdogTimedOut.Error())
 }
 
-// TestSubagentStillRetriesBeforeAnyPersistedStep: the pre-commit retry
-// behavior is unchanged — a retryable failure with no durable output restarts
-// the attempt.
+// TestSubagentStillRetriesBeforeAnyPersistedStep: a watchdog timeout with no
+// durable output restarts the attempt.
 func TestSubagentStillRetriesBeforeAnyPersistedStep(t *testing.T) {
 	t.Parallel()
 
-	agent := &mockSpawnAgent{
-		generateFunc: func(_ context.Context, _ SpawnRunConfig, _ func()) (*SpawnResult, error) {
-			return nil, errors.New("api error 500: transient")
-		},
-	}
+	agent := &mockSpawnAgent{}
 	agent.generateFunc = func(_ context.Context, cfg SpawnRunConfig, _ func()) (*SpawnResult, error) {
 		if agent.generateCount.Load() == 1 {
-			retryErr := errors.New("api error 500: transient")
+			retryErr := ErrWatchdogTimedOut
 			if cfg.Attempt != 1 || cfg.MaxAttempts != subagentMaxRetries+1 {
 				t.Errorf("attempt metadata = %d/%d, want 1/%d", cfg.Attempt, cfg.MaxAttempts, subagentMaxRetries+1)
 			}
@@ -197,6 +236,53 @@ func TestSubagentStillRetriesBeforeAnyPersistedStep(t *testing.T) {
 	}
 	if result["text"] != "recovered" {
 		t.Fatalf("text = %v, want recovered", result["text"])
+	}
+}
+
+// TestSubagentDoesNotRetryProviderFailure: the native runtime inside the
+// attempt already retried the provider, so a provider failure that reaches the
+// spawn provider ends the run after one attempt. The parent model reads the
+// code the run failed with, as the spawn adapter names it.
+func TestSubagentDoesNotRetryProviderFailure(t *testing.T) {
+	t.Parallel()
+
+	providerErr := apperror.Wrap(apperror.CodeAgentProviderOverloaded, errors.New("mid-stream retry: all 5 attempts failed (last: api error 529)"), nil)
+	agent := &mockSpawnAgent{
+		generateFunc: func(_ context.Context, cfg SpawnRunConfig, _ func()) (*SpawnResult, error) {
+			if cfg.ResolveAttempt == nil || cfg.ResolveAttempt(providerErr) != SpawnAttemptFailure {
+				t.Errorf("provider failure disposition is not failure")
+			}
+			return nil, providerErr
+		},
+	}
+	p, _ := newStepPersistProvider(t, agent, &fakeSubagentAdmitter{})
+	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
+
+	result := asMap(t, mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{
+		"id":   "worker",
+		"task": "do the work",
+	}))
+
+	if got := agent.generateCount.Load(); got != 1 {
+		t.Fatalf("agent ran %d times, want exactly 1 (no outer retry of a provider failure)", got)
+	}
+	if result["status"] != string(background.TaskFailed) {
+		t.Fatalf("status = %v, want failed", result["status"])
+	}
+	assertCatalogFailure(t, result, apperror.CodeAgentProviderOverloaded, "api error 529")
+}
+
+// assertCatalogFailure checks that a failed task hands the parent model the
+// catalog code and its fixed detail, and none of the failure's own text.
+func assertCatalogFailure(t *testing.T, result map[string]any, code apperror.Code, raw string) {
+	t.Helper()
+	definition, ok := apperror.Lookup(code)
+	if !ok {
+		t.Fatalf("code %q is not in the catalog", code)
+	}
+	errText, _ := result["error"].(string)
+	if result["code"] != string(code) || !strings.HasPrefix(errText, definition.Detail) || strings.Contains(errText, raw) {
+		t.Fatalf("result code/error = %v/%q, want %s with its detail and without %q", result["code"], errText, code, raw)
 	}
 }
 

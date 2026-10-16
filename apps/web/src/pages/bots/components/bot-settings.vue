@@ -4,7 +4,7 @@
     :title="$t('bots.tabs.settings')"
   >
     <div class="space-y-8">
-      <!-- URL Name -->
+      <!-- Bot identity and timezone -->
       <SettingsSection>
         <SettingsRow
           :label="$t('bots.name')"
@@ -46,16 +46,30 @@
             </p>
           </div>
         </SettingsRow>
+        <SettingsRow
+          :label="$t('bots.timezone')"
+          :description="$t('bots.timezoneHint')"
+          stack="sm"
+        >
+          <div class="w-full sm:w-52">
+            <TimezoneSelect
+              :model-value="form.timezone || emptyTimezoneValue"
+              :placeholder="$t('bots.timezonePlaceholder')"
+              allow-empty
+              :empty-label="$t('bots.timezoneInherited')"
+              popover-class="min-w-[var(--reka-popover-trigger-width)] w-72"
+              popover-align="end"
+              @update:model-value="(val: string) => form.timezone = val === emptyTimezoneValue ? '' : val"
+            />
+          </div>
+        </SettingsRow>
       </SettingsSection>
-
-      <SettingsGlobalCard :form="form" />
 
       <SettingsInteractionCard
         :form="form"
         :models="models"
         :providers="providers"
         :bot-agents="botAgents"
-        :bot-metadata="bot?.metadata"
         :acp-profiles="acpProfiles"
       />
 
@@ -63,7 +77,6 @@
         :form="form"
         :search-providers="searchProviders"
         :fetch-providers="fetchProviders"
-        :memory-providers="memoryProviders"
       />
 
       <SettingsMultimediaCard
@@ -112,14 +125,16 @@ import { useDebounceFn } from '@vueuse/core'
 import { useRouter, useRoute } from 'vue-router'
 import { PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
-import SettingsGlobalCard from './settings-global-card.vue'
+import TimezoneSelect from '@/components/timezone-select/index.vue'
+import { emptyTimezoneValue } from '@/utils/timezones'
 import SettingsInteractionCard from './settings-interaction-card.vue'
 import SettingsContextCard from './settings-context-card.vue'
 import SettingsMultimediaCard from './settings-multimedia-card.vue'
 import SettingsDangerZone from './settings-danger-zone.vue'
 import BotBackupActions from './bot-backup-actions.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsById, putBotsById, getBotsByBotIdAgents, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsNameAvailability, getAcpProfiles } from '@memohai/sdk'
+import { putBotsById, getBotsByBotIdAgents, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsNameAvailability, getAcpProfiles } from '@memohai/sdk'
+import { useBotQuery } from '@/composables/api/useBot'
 import type { AcpprofilePublicProfile, BotagentsBotAgent, SettingsSettings, SettingsUpsertRequest } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
@@ -175,14 +190,7 @@ const { data: settings } = useQuery({
   enabled: () => !!botIdRef.value,
 })
 
-const { data: bot } = useQuery({
-  key: () => ['bot', botIdRef.value],
-  query: async () => {
-    const { data } = await getBotsById({ path: { id: botIdRef.value }, throwOnError: true })
-    return data
-  },
-  enabled: () => !!botIdRef.value,
-})
+const { data: bot } = useBotQuery(botIdRef)
 
 const { data: modelData } = useQuery({
   key: ['models'],
@@ -232,14 +240,6 @@ const { data: fetchProviderData } = useQuery({
   key: ['fetch-providers'],
   query: async () => {
     const { data } = await getFetchProviders({ throwOnError: true })
-    return data
-  },
-})
-
-const { data: memoryProviderData } = useQuery({
-  key: ['memory-providers'],
-  query: async () => {
-    const { data } = await getMemoryProviders({ throwOnError: true })
     return data
   },
 })
@@ -311,7 +311,6 @@ const imageCapableModels = computed(() =>
 )
 const searchProviders = computed(() => (searchProviderData.value ?? []).filter((p) => p.enable !== false))
 const fetchProviders = computed(() => (fetchProviderData.value ?? []).filter((p) => p.enable !== false || p.provider === 'native' || p.id === form.fetch_provider_id))
-const memoryProviders = computed(() => memoryProviderData.value ?? [])
 const ttsProviders = computed(() => (ttsProviderData.value ?? []).filter((p) => p.enable !== false))
 const enabledTtsProviderIds = computed(() => new Set(ttsProviders.value.map((p) => p.id)))
 const transcriptionProviders = computed(() => (transcriptionProviderData.value ?? []).filter((p: Record<string, unknown>) => p.enable !== false))
@@ -351,12 +350,11 @@ const form = reactive<SettingsForm>({
   image_model_id: '',
   search_provider_id: '',
   fetch_provider_id: '',
-  memory_provider_id: '',
+  memory_enabled: false,
   tts_model_id: '',
   transcription_model_id: '',
   video_model_id: '',
   timezone: '',
-  language: '',
   reasoning_effort: 'medium',
   show_tool_calls_in_im: false,
   name: '',
@@ -373,11 +371,10 @@ const SETTINGS_FIELD_KEYS = [
   'image_model_id',
   'search_provider_id',
   'fetch_provider_id',
-  'memory_provider_id',
+  'memory_enabled',
   'tts_model_id',
   'transcription_model_id',
   'video_model_id',
-  'language',
   'reasoning_effort',
   'show_tool_calls_in_im',
 ] as const satisfies readonly (keyof SettingsForm)[]
@@ -400,11 +397,10 @@ watch(settings, (val) => {
     image_model_id: val.image_model_id ?? '',
     search_provider_id: val.search_provider_id ?? '',
     fetch_provider_id: val.fetch_provider_id ?? '',
-    memory_provider_id: val.memory_provider_id ?? '',
+    memory_enabled: val.memory_enabled ?? false,
     tts_model_id: val.tts_model_id ?? '',
     transcription_model_id: val.transcription_model_id ?? '',
     video_model_id: val.video_model_id ?? '',
-    language: val.language ?? '',
     reasoning_effort: val.reasoning_effort || 'medium',
     show_tool_calls_in_im: val.show_tool_calls_in_im ?? false,
   }
@@ -629,6 +625,9 @@ function handleBackupImported(botId: string) {
 async function handleDeleteBot() {
   try {
     await deleteBot()
+    // Move the chat selection off the deleted bot before leaving; otherwise
+    // the persistent chat pane keeps talking to it and "back to chat" lands on it.
+    void chatStore.refreshBots().catch(() => {})
     await router.push({ name: 'bots' })
     toast.success(t('bots.deleteSuccess'))
   } catch (error) {

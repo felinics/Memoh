@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	neturl "net/url"
 	"strings"
 	"testing"
 
@@ -23,6 +22,8 @@ func TestShouldSkipJWT_ChannelWebhookPaths(t *testing.T) {
 		path string
 		want bool
 	}{
+		{path: "/ready", want: true},
+		{path: "/ready/private", want: false},
 		{path: "/channels/feishu/webhook/cfg-1", want: true},
 		{path: "/channels/wechatoa/webhook/cfg-1", want: true},
 		{path: "/channels/line/webhook/cfg-1", want: true},
@@ -60,20 +61,6 @@ func TestShouldLimitPublicRequestBody(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("path=%q want=%v got=%v", tc.path, tc.want, got)
 		}
-	}
-}
-
-func TestSafeRequestLogURIStripsPublicMediaQuery(t *testing.T) {
-	t.Parallel()
-
-	u, err := neturl.Parse("/channels/line/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/preview.jpg?exp=123&sig=secret")
-	if err != nil {
-		t.Fatalf("parse url: %v", err)
-	}
-	got := safeRequestLogURI(u, u.RequestURI())
-	want := "/channels/line/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/preview.jpg"
-	if got != want {
-		t.Fatalf("safeRequestLogURI = %q, want %q", got, want)
 	}
 }
 
@@ -119,7 +106,7 @@ func TestServerRendersAppErrorAsProblemWithRequestID(t *testing.T) {
 		t.Fatal("response request ID is empty")
 	}
 
-	var problem apperror.Problem
+	var problem Problem
 	if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
 		t.Fatalf("decode problem: %v", err)
 	}
@@ -152,26 +139,6 @@ func TestServerLogsFinalProblemStatus(t *testing.T) {
 	}
 	if got := logs.String(); !strings.Contains(got, `"msg":"request"`) || !strings.Contains(got, `"status":503`) {
 		t.Fatalf("request log did not capture final status: %s", got)
-	}
-}
-
-func TestServerKeepsLegacyHTTPErrorBehavior(t *testing.T) {
-	server := NewServer(
-		slog.New(slog.DiscardHandler),
-		":0",
-		"test-secret",
-		errorTestHandler{err: echo.NewHTTPError(http.StatusBadRequest, "legacy message")},
-	)
-
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
-	server.echo.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
-	if rec.Body.String() != "{\"message\":\"legacy message\"}\n" {
-		t.Fatalf("legacy body changed: %s", rec.Body.String())
 	}
 }
 

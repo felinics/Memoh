@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -19,6 +19,7 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // SessionQueueHandler exposes the live steer and follow-up queues. It owns
@@ -91,26 +92,50 @@ type followUpQueueReorderRequest struct {
 	Before sessionruntime.FollowUpPendingRef `json:"before"`
 }
 
-func (h *SessionQueueHandler) authorize(c echo.Context) (string, string, error) {
+// queueScope is the authorized target of one queue request together with the
+// identity a queued item records: the session's team and the acting user.
+type queueScope struct {
+	BotID      string
+	SessionID  string
+	TeamID     string
+	IdentityID string
+}
+
+func (s queueScope) input(invocationID, text string) application.QueueInput {
+	return application.QueueInput{
+		TeamID:                  s.TeamID,
+		BotID:                   s.BotID,
+		SessionID:               s.SessionID,
+		InvocationID:            invocationID,
+		UserID:                  s.IdentityID,
+		SourceChannelIdentityID: s.IdentityID,
+		Text:                    text,
+	}
+}
+
+func (h *SessionQueueHandler) authorize(c echo.Context) (queueScope, error) {
 	identityID, err := auth.UserIDFromContext(c)
 	if err != nil {
-		return "", "", err
+		return queueScope{}, err
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	sessionID := strings.TrimSpace(c.Param("session_id"))
 	if botID == "" || sessionID == "" {
-		return "", "", apperror.New(apperror.CodeQueueRequestInvalid, nil)
+		return queueScope{}, apperror.New(apperror.CodeQueueRequestInvalid, nil)
 	}
 	sid, err := db.ParseUUID(sessionID)
 	if err != nil {
-		return "", "", apperror.New(apperror.CodeQueueRequestInvalid, nil)
+		return queueScope{}, apperror.New(apperror.CodeQueueRequestInvalid, nil)
 	}
 	if h.agentService == nil || h.queries == nil {
-		return "", "", apperror.New(apperror.CodeQueueAdmissionUnavailable, nil)
+		return queueScope{}, apperror.New(apperror.CodeQueueAdmissionUnavailable, nil)
 	}
 	sess, err := h.queries.GetSessionByID(c.Request().Context(), sid)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) && !errors.Is(err, db.ErrNotFound) {
+		return queueScope{}, errs.Wrap(err, "load queue session", slog.String("session_id", sessionID))
+	}
 	if err != nil || sess.BotID.String() != botID {
-		return "", "", echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return queueScope{}, apperror.New(apperror.CodeSessionNotFound, nil)
 	}
 	// Queue admission is session-scoped. A chat grant is sufficient only for
 	// sessions owned by that actor; manage access retains the existing ability
@@ -118,9 +143,13 @@ func (h *SessionQueueHandler) authorize(c echo.Context) (string, string, error) 
 	// panel refresh), so permissions are resolved once from a bot row fetched
 	// without runtime check summaries instead of through two full authorizations.
 	if err := h.authorizeQueueAccess(c.Request().Context(), identityID, botID, sess.CreatedByUserID.Valid && sess.CreatedByUserID.String() == identityID); err != nil {
-		return "", "", err
+		return queueScope{}, err
 	}
-	return botID, sessionID, nil
+	teamID := ""
+	if sess.TeamID.Valid {
+		teamID = sess.TeamID.String()
+	}
+	return queueScope{BotID: botID, SessionID: sessionID, TeamID: teamID, IdentityID: identityID}, nil
 }
 
 func (h *SessionQueueHandler) authorizeQueueAccess(ctx context.Context, identityID, botID string, ownsSession bool) error {
@@ -129,25 +158,25 @@ func (h *SessionQueueHandler) authorizeQueueAccess(ctx context.Context, identity
 	}
 	isAdmin, err := h.accountService.IsAdmin(ctx, identityID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "resolve admin role")
 	}
 	bot, err := h.botService.GetForAccess(ctx, botID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, bots.ErrBotNotFound) {
-			return echo.NewHTTPError(http.StatusNotFound, "bot not found")
+			return apperror.Wrap(apperror.CodeBotNotFound, err, nil)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "load queue bot", slog.String("bot_id", botID))
 	}
 	perms, err := h.botService.ResolveUserPermissionsForBot(ctx, bot, identityID, isAdmin)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "resolve bot permissions", slog.String("bot_id", botID))
 	}
 	switch {
 	case bots.HasPermission(perms, bots.PermissionManage):
 		return nil
 	case bots.HasPermission(perms, bots.PermissionChat):
 		if !ownsSession {
-			return echo.NewHTTPError(http.StatusNotFound, "session not found")
+			return apperror.New(apperror.CodeSessionNotFound, nil)
 		}
 		return nil
 	default:
@@ -167,29 +196,24 @@ func decodeQueueRequest(c echo.Context) (enqueueQueueRequest, error) {
 	return req, nil
 }
 
-func marshalQueuePayload(text string) ([]byte, error) {
-	return json.Marshal(map[string]string{"text": strings.TrimSpace(text)})
+// queueAdmissionCodes renders queue admission refusals in the HTTP
+// vocabulary. The values are published and do not follow the channel codes.
+var queueAdmissionCodes = map[application.QueueAdmissionFailure]apperror.Code{
+	application.QueueAdmissionSteerUnsupported:   apperror.CodeQueueSteerUnsupported,
+	application.QueueAdmissionNoActiveRun:        apperror.CodeQueueNoActiveRun,
+	application.QueueAdmissionInvocationConflict: apperror.CodeSessionInvocationConflict,
+	application.QueueAdmissionOverloaded:         apperror.CodeQueueAdmissionOverloaded,
+	application.QueueAdmissionCapacityExceeded:   apperror.CodeQueueCapacityExceeded,
+	application.QueueAdmissionInvalidReference:   apperror.CodeQueueRequestInvalid,
+	application.QueueAdmissionUnavailable:        apperror.CodeQueueAdmissionUnavailable,
 }
 
 func queueAdmissionError(err error) error {
-	switch {
-	case err == nil:
-		return nil
-	case errors.Is(err, sessionruntime.ErrQueueSteerUnsupported):
-		return apperror.New(apperror.CodeQueueSteerUnsupported, nil)
-	case errors.Is(err, sessionruntime.ErrQueueNoActiveRun):
-		return apperror.New(apperror.CodeQueueNoActiveRun, nil)
-	case errors.Is(err, sessionruntime.ErrQueueInvocationConflict):
-		return apperror.New(apperror.CodeSessionInvocationConflict, nil)
-	case errors.Is(err, sessionruntime.ErrQueueAdmissionOverloaded):
-		return apperror.New(apperror.CodeQueueAdmissionOverloaded, nil)
-	case errors.Is(err, sessionruntime.ErrQueueCapacityExceeded):
-		return apperror.New(apperror.CodeQueueCapacityExceeded, nil)
-	case errors.Is(err, sessionruntime.ErrQueueInvalidReference):
-		return apperror.New(apperror.CodeQueueRequestInvalid, nil)
-	default:
+	code, ok := queueAdmissionCodes[application.QueueAdmissionFailureOf(err)]
+	if !ok {
 		return err
 	}
+	return apperror.New(code, nil)
 }
 
 func queueMutationError(err error) error {
@@ -204,6 +228,8 @@ func queueMutationError(err error) error {
 		return apperror.New(apperror.CodeQueueItemNotPending, nil)
 	case errors.Is(err, sessionruntime.ErrQueueCapacityExceeded):
 		return apperror.New(apperror.CodeQueueCapacityExceeded, nil)
+	case errors.Is(err, application.ErrQueueItemNotEditable):
+		return apperror.New(apperror.CodeQueueItemNotEditable, nil)
 	default:
 		return err
 	}
@@ -266,12 +292,12 @@ func validateReorderRefs(item, before string) error {
 // @Param session_id path string true "Session ID"
 // @Param body body enqueueQueueRequest true "Steer payload"
 // @Success 202 {object} steerQueueItemResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/steer-queue [post].
 func (h *SessionQueueHandler) EnqueueSteer(c echo.Context) error {
-	botID, sid, err := h.authorize(c)
+	scope, err := h.authorize(c)
 	if err != nil {
 		return err
 	}
@@ -279,11 +305,7 @@ func (h *SessionQueueHandler) EnqueueSteer(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	payload, err := marshalQueuePayload(req.Text)
-	if err != nil {
-		return err
-	}
-	item, err := h.agentService.EnqueueSteer(c.Request().Context(), botID, sid, req.InvocationID, payload)
+	item, err := h.agentService.EnqueueSteer(c.Request().Context(), scope.input(req.InvocationID, req.Text))
 	if err = queueAdmissionError(err); err != nil {
 		return err
 	}
@@ -297,12 +319,12 @@ func (h *SessionQueueHandler) EnqueueSteer(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param body body enqueueQueueRequest true "Follow-up payload"
 // @Success 202 {object} followUpQueueItemResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/follow-up-queue [post].
 func (h *SessionQueueHandler) EnqueueFollowUp(c echo.Context) error {
-	botID, sid, err := h.authorize(c)
+	scope, err := h.authorize(c)
 	if err != nil {
 		return err
 	}
@@ -310,11 +332,7 @@ func (h *SessionQueueHandler) EnqueueFollowUp(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	payload, err := marshalQueuePayload(req.Text)
-	if err != nil {
-		return err
-	}
-	item, err := h.agentService.EnqueueFollowUp(c.Request().Context(), botID, sid, req.InvocationID, payload)
+	item, err := h.agentService.EnqueueFollowUp(c.Request().Context(), scope.input(req.InvocationID, req.Text))
 	if err = queueAdmissionError(err); err != nil {
 		return err
 	}
@@ -327,14 +345,14 @@ func (h *SessionQueueHandler) EnqueueFollowUp(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
 // @Success 200 {object} steerQueueResponse
-// @Failure 403 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/steer-queue [get].
 func (h *SessionQueueHandler) ListSteer(c echo.Context) error {
-	botID, sid, err := h.authorize(c)
+	scope, err := h.authorize(c)
 	if err != nil {
 		return err
 	}
-	queues, err := h.agentService.ListSessionQueues(c.Request().Context(), botID, sid)
+	queues, err := h.agentService.ListSessionQueues(c.Request().Context(), scope.BotID, scope.SessionID)
 	if err != nil {
 		return err
 	}
@@ -347,14 +365,14 @@ func (h *SessionQueueHandler) ListSteer(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
 // @Success 200 {object} followUpQueueResponse
-// @Failure 403 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/follow-up-queue [get].
 func (h *SessionQueueHandler) ListFollowUp(c echo.Context) error {
-	botID, sid, err := h.authorize(c)
+	scope, err := h.authorize(c)
 	if err != nil {
 		return err
 	}
-	queues, err := h.agentService.ListSessionQueues(c.Request().Context(), botID, sid)
+	queues, err := h.agentService.ListSessionQueues(c.Request().Context(), scope.BotID, scope.SessionID)
 	if err != nil {
 		return err
 	}
@@ -367,14 +385,14 @@ func (h *SessionQueueHandler) ListFollowUp(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
 // @Success 200 {object} sessionQueueResponse
-// @Failure 403 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/queue [get].
 func (h *SessionQueueHandler) ListSessionQueue(c echo.Context) error {
-	botID, sid, err := h.authorize(c)
+	scope, err := h.authorize(c)
 	if err != nil {
 		return err
 	}
-	queues, err := h.agentService.ListSessionQueues(c.Request().Context(), botID, sid)
+	queues, err := h.agentService.ListSessionQueues(c.Request().Context(), scope.BotID, scope.SessionID)
 	if err != nil {
 		return err
 	}
@@ -392,12 +410,12 @@ func (h *SessionQueueHandler) ListSessionQueue(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param body body steerQueueReorderRequest true "Typed steer queue references"
 // @Success 200 {object} steerQueueResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/steer-queue/reorder [put].
 func (h *SessionQueueHandler) ReorderSteer(c echo.Context) error {
-	botID, sid, err := h.authorize(c)
+	scope, err := h.authorize(c)
 	if err != nil {
 		return err
 	}
@@ -405,7 +423,7 @@ func (h *SessionQueueHandler) ReorderSteer(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	items, err := h.agentService.ReorderSteer(c.Request().Context(), botID, sid, req.Item, req.Before)
+	items, err := h.agentService.ReorderSteer(c.Request().Context(), scope.BotID, scope.SessionID, req.Item, req.Before)
 	if err = queueMutationError(err); err != nil {
 		return err
 	}
@@ -419,12 +437,12 @@ func (h *SessionQueueHandler) ReorderSteer(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param body body followUpQueueReorderRequest true "Typed follow-up queue references"
 // @Success 200 {object} followUpQueueResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/follow-up-queue/reorder [put].
 func (h *SessionQueueHandler) ReorderFollowUp(c echo.Context) error {
-	botID, sid, err := h.authorize(c)
+	scope, err := h.authorize(c)
 	if err != nil {
 		return err
 	}
@@ -432,7 +450,7 @@ func (h *SessionQueueHandler) ReorderFollowUp(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	items, err := h.agentService.ReorderFollowUp(c.Request().Context(), botID, sid, req.Item, req.Before)
+	items, err := h.agentService.ReorderFollowUp(c.Request().Context(), scope.BotID, scope.SessionID, req.Item, req.Before)
 	if err = queueMutationError(err); err != nil {
 		return err
 	}
@@ -447,12 +465,12 @@ func (h *SessionQueueHandler) ReorderFollowUp(c echo.Context) error {
 // @Param item_id path string true "Queue item ID"
 // @Param body body updateQueueRequest true "Updated steer payload"
 // @Success 200 {object} steerQueueItemResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/steer-queue/{item_id} [patch].
 func (h *SessionQueueHandler) UpdateSteer(c echo.Context) error {
-	botID, sid, err := h.authorize(c)
+	scope, err := h.authorize(c)
 	if err != nil {
 		return err
 	}
@@ -464,11 +482,7 @@ func (h *SessionQueueHandler) UpdateSteer(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	payload, err := marshalQueuePayload(req.Text)
-	if err != nil {
-		return err
-	}
-	item, err := h.agentService.UpdateSteer(c.Request().Context(), botID, sid, itemID, payload)
+	item, err := h.agentService.UpdateSteer(c.Request().Context(), scope.BotID, scope.SessionID, itemID, scope.IdentityID, req.Text)
 	if err = queueMutationError(err); err != nil {
 		return err
 	}
@@ -482,12 +496,12 @@ func (h *SessionQueueHandler) UpdateSteer(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param item_id path string true "Queue item ID"
 // @Success 204
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/steer-queue/{item_id} [delete].
 func (h *SessionQueueHandler) CancelSteer(c echo.Context) error {
-	botID, sid, err := h.authorize(c)
+	scope, err := h.authorize(c)
 	if err != nil {
 		return err
 	}
@@ -495,7 +509,7 @@ func (h *SessionQueueHandler) CancelSteer(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = queueMutationError(h.agentService.CancelSteer(c.Request().Context(), botID, sid, itemID)); err != nil {
+	if err = queueMutationError(h.agentService.CancelSteer(c.Request().Context(), scope.BotID, scope.SessionID, itemID)); err != nil {
 		return err
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -509,12 +523,12 @@ func (h *SessionQueueHandler) CancelSteer(c echo.Context) error {
 // @Param item_id path string true "Queue item ID"
 // @Param body body updateQueueRequest true "Updated follow-up payload"
 // @Success 200 {object} followUpQueueItemResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/follow-up-queue/{item_id} [patch].
 func (h *SessionQueueHandler) UpdateFollowUp(c echo.Context) error {
-	botID, sid, err := h.authorize(c)
+	scope, err := h.authorize(c)
 	if err != nil {
 		return err
 	}
@@ -526,11 +540,7 @@ func (h *SessionQueueHandler) UpdateFollowUp(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	payload, err := marshalQueuePayload(req.Text)
-	if err != nil {
-		return err
-	}
-	item, err := h.agentService.UpdateFollowUp(c.Request().Context(), botID, sid, itemID, payload)
+	item, err := h.agentService.UpdateFollowUp(c.Request().Context(), scope.BotID, scope.SessionID, itemID, scope.IdentityID, req.Text)
 	if err = queueMutationError(err); err != nil {
 		return err
 	}
@@ -544,12 +554,12 @@ func (h *SessionQueueHandler) UpdateFollowUp(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param item_id path string true "Queue item ID"
 // @Success 204
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/follow-up-queue/{item_id} [delete].
 func (h *SessionQueueHandler) CancelFollowUp(c echo.Context) error {
-	botID, sid, err := h.authorize(c)
+	scope, err := h.authorize(c)
 	if err != nil {
 		return err
 	}
@@ -557,7 +567,7 @@ func (h *SessionQueueHandler) CancelFollowUp(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = queueMutationError(h.agentService.CancelFollowUp(c.Request().Context(), botID, sid, itemID)); err != nil {
+	if err = queueMutationError(h.agentService.CancelFollowUp(c.Request().Context(), scope.BotID, scope.SessionID, itemID)); err != nil {
 		return err
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -570,12 +580,12 @@ func (h *SessionQueueHandler) CancelFollowUp(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param item_id path string true "Follow-up queue item ID"
 // @Success 202 {object} steerQueueItemResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/follow-up-queue/{item_id}/steer [post].
 func (h *SessionQueueHandler) PromoteFollowUpToSteer(c echo.Context) error {
-	botID, sid, err := h.authorize(c)
+	scope, err := h.authorize(c)
 	if err != nil {
 		return err
 	}
@@ -583,7 +593,7 @@ func (h *SessionQueueHandler) PromoteFollowUpToSteer(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	result, err := h.agentService.PromoteFollowUpToSteer(c.Request().Context(), botID, sid, sessionruntime.FollowUpPendingRef{ItemID: sessionruntime.FollowUpItemID(itemID)})
+	result, err := h.agentService.PromoteFollowUpToSteer(c.Request().Context(), scope.BotID, scope.SessionID, sessionruntime.FollowUpPendingRef{ItemID: sessionruntime.FollowUpItemID(itemID)})
 	if err = queueMutationError(err); err != nil {
 		return err
 	}

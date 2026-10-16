@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 	adapters "github.com/felinics/memoh/internal/memory/adapters"
 )
@@ -53,8 +54,8 @@ type Runtime interface {
 	Search(ctx context.Context, req adapters.SearchRequest) (adapters.SearchResponse, error)
 	GetAll(ctx context.Context, req adapters.GetAllRequest) (adapters.SearchResponse, error)
 	Update(ctx context.Context, req adapters.UpdateRequest) (adapters.MemoryItem, error)
-	Delete(ctx context.Context, memoryID string) (adapters.DeleteResponse, error)
-	DeleteBatch(ctx context.Context, memoryIDs []string) (adapters.DeleteResponse, error)
+	Delete(ctx context.Context, botID string, memoryID string) (adapters.DeleteResponse, error)
+	DeleteBatch(ctx context.Context, botID string, memoryIDs []string) (adapters.DeleteResponse, error)
 	DeleteAll(ctx context.Context, req adapters.DeleteAllRequest) (adapters.DeleteResponse, error)
 	Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (adapters.CompactResult, error)
 	Usage(ctx context.Context, filters map[string]any) (adapters.UsageResponse, error)
@@ -160,14 +161,11 @@ func (p *BuiltinProvider) MemoryVersion(ctx context.Context, botID string) strin
 }
 
 func (p *BuiltinProvider) SemanticCompactCapability() adapters.MemoryCompactCapability {
-	if p.service == nil {
-		return adapters.MemoryCompactCapability{Reason: "memory runtime not configured"}
-	}
-	if p.llm == nil {
-		return adapters.MemoryCompactCapability{Reason: "semantic compact requires a configured LLM"}
+	if p.service == nil || p.llm == nil {
+		return adapters.MemoryCompactCapability{Reason: adapters.CompactNotConfigured}
 	}
 	if _, ok := p.service.(llmCompactRuntime); !ok {
-		return adapters.MemoryCompactCapability{Reason: "selected memory runtime does not support semantic compact"}
+		return adapters.MemoryCompactCapability{Reason: adapters.CompactUnsupported}
 	}
 	mode := strings.TrimSpace(p.service.Mode())
 	return adapters.MemoryCompactCapability{
@@ -222,7 +220,6 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req adapters.BeforeC
 		NoStats: true,
 	})
 	if err != nil {
-		p.logger.Warn("memory search for context failed", slog.Any("error", err))
 		return nil, err
 	}
 
@@ -284,9 +281,18 @@ func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req adapters.AfterCha
 		return nil
 	}
 
+	if req.SkipFormation {
+		// The runtime that ran this turn owns its own model. Extracting facts
+		// would borrow a second model the user never asked to pay for, and the
+		// raw-transcript fallback below would mix unextracted turns into the
+		// same store the extracted facts live in. Those runtimes write what
+		// matters through the memory write tools while the turn is running.
+		return nil
+	}
+
 	if p.llm != nil {
 		result := runFormation(ctx, p.logger, p.llm, p.service, req)
-		p.logger.Debug("memory formation completed",
+		p.logger.DebugContext(ctx, "memory formation completed",
 			slog.String("bot_id", botID),
 			slog.Int("extracted", result.ExtractedFacts),
 			slog.Int("added", result.Added),
@@ -311,7 +317,7 @@ func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req adapters.AfterCha
 		Filters:          filters,
 		SourceMessageIDs: sourceMessageIDsFromMessages(req.Messages),
 	}); err != nil {
-		p.logger.Warn("store memory failed", slog.String("bot_id", botID), slog.Any("error", err))
+		p.logger.WarnContext(ctx, "store memory failed", slog.String("bot_id", botID), slog.Any("error", err))
 	}
 	return nil
 }
@@ -446,18 +452,18 @@ func (p *BuiltinProvider) Update(ctx context.Context, req adapters.UpdateRequest
 	return p.service.Update(ctx, req)
 }
 
-func (p *BuiltinProvider) Delete(ctx context.Context, memoryID string) (adapters.DeleteResponse, error) {
+func (p *BuiltinProvider) Delete(ctx context.Context, botID string, memoryID string) (adapters.DeleteResponse, error) {
 	if p.service == nil {
 		return adapters.DeleteResponse{}, errors.New("memory runtime not configured")
 	}
-	return p.service.Delete(ctx, memoryID)
+	return p.service.Delete(ctx, botID, memoryID)
 }
 
-func (p *BuiltinProvider) DeleteBatch(ctx context.Context, memoryIDs []string) (adapters.DeleteResponse, error) {
+func (p *BuiltinProvider) DeleteBatch(ctx context.Context, botID string, memoryIDs []string) (adapters.DeleteResponse, error) {
 	if p.service == nil {
 		return adapters.DeleteResponse{}, errors.New("memory runtime not configured")
 	}
-	return p.service.DeleteBatch(ctx, memoryIDs)
+	return p.service.DeleteBatch(ctx, botID, memoryIDs)
 }
 
 func (p *BuiltinProvider) DeleteAll(ctx context.Context, req adapters.DeleteAllRequest) (adapters.DeleteResponse, error) {
@@ -469,15 +475,11 @@ func (p *BuiltinProvider) DeleteAll(ctx context.Context, req adapters.DeleteAllR
 
 func (p *BuiltinProvider) Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (adapters.CompactResult, error) {
 	if p.service == nil {
-		return adapters.CompactResult{}, errors.New("memory runtime not configured")
+		return adapters.CompactResult{}, errs.New("memory runtime not configured")
 	}
 	capability := p.SemanticCompactCapability()
 	if !capability.Semantic {
-		reason := strings.TrimSpace(capability.Reason)
-		if reason == "" {
-			reason = "semantic compact is not available"
-		}
-		return adapters.CompactResult{}, errors.New(reason)
+		return adapters.CompactResult{}, errs.New("semantic compact unavailable", slog.String("reason", string(capability.Reason)))
 	}
 	return p.service.(llmCompactRuntime).CompactWithLLM(ctx, filters, ratio, decayDays, p.llm)
 }

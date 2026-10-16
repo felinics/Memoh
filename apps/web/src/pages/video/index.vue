@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, provide, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { BackendCard, Button, DetailPane, PageShell, SwapTransition } from '@felinic/ui'
+import { BackendCard, DetailPane, PageShell, SwapTransition } from '@felinic/ui'
 import { getProviderTemplates, getVideoProviders, postVideoProvidersByIdImportModels } from '@memohai/sdk'
 import type { ProvidersGetResponse, ProvidertemplatesGetResponse, VideoProviderResponse } from '@memohai/sdk'
-import { Plus } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import AddProvider from '@/components/add-provider/index.vue'
 import BackendCardGridSkeleton from '@/components/backend-card-grid-skeleton/index.vue'
@@ -40,6 +39,11 @@ provide('curVideoProvider', curProvider)
 const openStatus = reactive({ addOpen: false })
 const initialTemplateId = ref('')
 
+// Search box + Add button live in the Providers container's fixed header; this
+// panel receives the query and exposes its add dialog trigger instead.
+const props = defineProps<{ searchQuery: string }>()
+defineExpose({ openAdd: () => openAddProvider() })
+
 const providers = computed<VideoProviderResponse[]>(() => {
   const list = Array.isArray(providersData.value) ? providersData.value : []
   return [...list].sort((a, b) => Number(b.enable !== false) - Number(a.enable !== false))
@@ -59,6 +63,17 @@ const catalogProviders = computed<TemplateVideoProvider[]>(() => {
 const templateDrafts = computed<TemplateVideoProvider[]>(() =>
   availableTemplates.value.map(template => providerDraftFromTemplate(template) as TemplateVideoProvider),
 )
+
+const filteredCatalogProviders = computed(() => {
+  const keyword = props.searchQuery.trim().toLowerCase()
+  if (!keyword) return catalogProviders.value
+  return catalogProviders.value.filter(p => (p.name ?? '').toLowerCase().includes(keyword))
+})
+const filteredTemplateDrafts = computed(() => {
+  const keyword = props.searchQuery.trim().toLowerCase()
+  if (!keyword) return templateDrafts.value
+  return templateDrafts.value.filter(p => (p.name ?? '').toLowerCase().includes(keyword))
+})
 
 // Page-owned query key (unique under settings KeepAlive — see useViewSwap.ts).
 const {
@@ -129,23 +144,16 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
 
 <template>
   <SwapTransition :direction="direction">
-    <!-- Single provider group — same shell as the providers gallery: PageShell owns
-         the title, the hint (as its description), and the Add action; the body is a
-         bare BackendCard grid. NOT a SectionGroup — that owner is only for pages that
-         stack SEVERAL provider groups (voice TTS/STT, web-search search/fetch). The
-         page-level "视频生成" heading was dropped: title + description already say it. -->
+    <!-- Single provider group — the body is a bare BackendCard grid inside the
+         tab frame. NOT a SectionGroup — that owner is only for pages that stack
+         SEVERAL provider groups (voice TTS/STT, web-search search/fetch). The
+         page-level hint was dropped: the catalog cards below already name the
+         same providers it listed. -->
     <PageShell
       v-if="view === 'list'"
-      :title="t('video.title')"
-      :description="t('video.providersHint')"
+      variant="tab"
+      class="px-4 md:px-6"
     >
-      <template #actions>
-        <Button @click="openAddProvider()">
-          <Plus class="size-4" />
-          {{ t('common.add') }}
-        </Button>
-      </template>
-
       <BackendCardGridSkeleton v-if="listLoading" />
 
       <div
@@ -153,7 +161,7 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
         class="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
         <BackendCard
-          v-for="provider in catalogProviders"
+          v-for="provider in filteredCatalogProviders"
           :key="provider.id"
           :name="provider.name ?? ''"
           :enabled="provider.enable !== false"
@@ -176,7 +184,7 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
           </template>
         </BackendCard>
         <BackendCard
-          v-for="provider in templateDrafts"
+          v-for="provider in filteredTemplateDrafts"
           :key="`template:${provider.provider_template_id}`"
           :name="provider.name ?? ''"
           @click="openProvider(provider)"

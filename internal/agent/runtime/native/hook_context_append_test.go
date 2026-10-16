@@ -43,7 +43,7 @@ func TestApplyBeforeModelCallAppendContextEmptyIsNoop(t *testing.T) {
 
 func TestApplyStepHookAppendContextRecordsMutation(t *testing.T) {
 	ledger := contextfrag.NewMutationLedger()
-	p := &sdk.GenerateParams{}
+	p := &sdk.Request{}
 	out := applyStepHookAppendContext(p, ledger, 2, "extra guidance")
 	if len(out.Messages) != 1 {
 		t.Fatalf("messages = %d, want 1", len(out.Messages))
@@ -59,7 +59,7 @@ func TestApplyStepHookAppendContextRecordsMutation(t *testing.T) {
 
 func TestApplyStepHookAppendContextEmptyIsNoop(t *testing.T) {
 	ledger := contextfrag.NewMutationLedger()
-	p := &sdk.GenerateParams{}
+	p := &sdk.Request{}
 	out := applyStepHookAppendContext(p, ledger, 1, "  ")
 	if len(out.Messages) != 0 || len(ledger.Records()) != 0 {
 		t.Fatalf("expected noop, got messages=%d records=%d", len(out.Messages), len(ledger.Records()))

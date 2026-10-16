@@ -6,21 +6,21 @@ describe('workspace tab commands', () => {
   it('closes the active workspace tab', () => {
     const store = {
       activeId: 'terminal:1',
-      closeTab: vi.fn(),
+      requestCloseTab: vi.fn(),
     }
 
     expect(handleWorkspaceKeyboardCommand(appKeyboardCommands.closeCurrentWorkspaceTab, store)).toBe(true)
-    expect(store.closeTab).toHaveBeenCalledWith('terminal:1')
+    expect(store.requestCloseTab).toHaveBeenCalledWith('terminal:1')
   })
 
   it('leaves the workspace unchanged when there is no active tab', () => {
     const store = {
       activeId: null,
-      closeTab: vi.fn(),
+      requestCloseTab: vi.fn(),
     }
 
     expect(handleWorkspaceKeyboardCommand(appKeyboardCommands.closeCurrentWorkspaceTab, store)).toBe(false)
-    expect(store.closeTab).not.toHaveBeenCalled()
+    expect(store.requestCloseTab).not.toHaveBeenCalled()
   })
 
   it('registers the close-tab command with a keyboard registry', () => {
@@ -34,7 +34,7 @@ describe('workspace tab commands', () => {
     }
     const store = {
       activeId: 'browser:1',
-      closeTab: vi.fn(),
+      requestCloseTab: vi.fn(),
     }
 
     const cleanup = registerWorkspaceTabCommands(registry, store)
@@ -43,7 +43,7 @@ describe('workspace tab commands', () => {
 
     expect(registry.register).toHaveBeenCalledWith(appKeyboardCommands.closeCurrentWorkspaceTab, expect.any(Function))
     expect(handler()).toBe(true)
-    expect(store.closeTab).toHaveBeenCalledWith('browser:1')
+    expect(store.requestCloseTab).toHaveBeenCalledWith('browser:1')
     cleanup()
     expect(unregister).toHaveBeenCalledOnce()
   })

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log/slog"
 	"os"
 	"strings"
 
@@ -44,8 +43,8 @@ func runMigrateCommand(args []string) error {
 		return fmt.Errorf("config: %w", err)
 	}
 
-	logger.Init(cfg.Log.Level, cfg.Log.Format)
-	log := logger.L
+	log := logger.New(os.Stdout, cfg.Log.Level, cfg.Log.Format)
+	logger.SetDefault(log)
 
 	migrateCmd := args[0]
 	var migrateArgs []string
@@ -54,7 +53,6 @@ func runMigrateCommand(args []string) error {
 	}
 
 	if err := db.RunMigrateConfig(log, cfg, migrationsFS(cfg), migrateCmd, migrateArgs); err != nil {
-		log.Error("migration failed", slog.Any("error", err))
 		return err
 	}
 	return nil

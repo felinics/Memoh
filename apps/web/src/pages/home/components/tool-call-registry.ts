@@ -29,13 +29,9 @@ import {
   Heading,
   Image as ImageIcon,
   ImagePlus,
-  Inbox,
   Keyboard,
   Link,
   ListChecks,
-  Mail,
-  MailOpen,
-  MailPlus,
   MessageSquareReply,
   MessageSquareText,
   MessagesSquare,
@@ -81,9 +77,6 @@ import ToolCallDetailApplyPatch from './tool-call-detail-apply-patch.vue'
 import ToolCallDetailComputer from './tool-call-detail-computer.vue'
 import ToolCallDetailContacts from './tool-call-detail-contacts.vue'
 import ToolCallDetailEdit from './tool-call-detail-edit.vue'
-import ToolCallDetailEmailAccounts from './tool-call-detail-email-accounts.vue'
-import ToolCallDetailEmailList from './tool-call-detail-email-list.vue'
-import ToolCallDetailEmailRead from './tool-call-detail-email-read.vue'
 import ToolCallDetailExec from './tool-call-detail-exec.vue'
 import ToolCallDetailImage from './tool-call-detail-image.vue'
 import ToolCallDetailMemory from './tool-call-detail-memory.vue'
@@ -96,6 +89,7 @@ import ToolCallDetailWebFetch from './tool-call-detail-web-fetch.vue'
 import ToolCallDetailWebSearch from './tool-call-detail-web-search.vue'
 import ToolCallDetailWrite from './tool-call-detail-write.vue'
 import { isGuiToolName } from '@/utils/gui-tools'
+import { splitUnifiedDiffFiles } from '@/composables/useShikiHighlighter'
 
 export interface ToolDisplay {
   icon: Component
@@ -147,8 +141,9 @@ export function isDirPathTool(toolName: string): boolean {
 // Read-only tools contribute lookup counts to the process summary.
 const READONLY_TOOLS = new Set([
   'read', 'list', 'web_search', 'web_fetch', 'search_memory', 'search_messages',
+  'app_search',
   'list_execution_locations',
-  'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
+  'get_contacts', 'list_sessions',
   'list_schedule', 'get_schedule', 'list_skills', 'bg_status', 'list_background', 'get_background_status', 'wait', 'wait_until',
   'browser_observe', 'computer_observe',
 ])
@@ -167,13 +162,14 @@ export type ToolBucket = 'browse' | 'edit' | 'run' | 'message' | 'schedule' | 'm
 const BUCKETS: Array<[ToolBucket, Set<string>]> = [
   ['browse', new Set([
     'read', 'list', 'web_search', 'web_fetch', 'search_memory', 'search_messages', 'get_messages',
-    'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
+    'get_contacts', 'list_sessions',
     'list_schedule', 'get_schedule', 'list_skills', 'list_models', 'list_workdirs',
     'list_acp_agents', 'list_execution_locations',
+    'app_search',
   ])],
   ['edit', new Set(['write', 'edit', 'apply_patch'])],
   ['run', new Set(['exec'])],
-  ['message', new Set(['send', 'react', 'send_email', 'speak'])],
+  ['message', new Set(['send', 'react', 'speak'])],
   ['schedule', new Set(['create_schedule', 'update_schedule', 'delete_schedule'])],
   ['media', new Set(['generate_image', 'generate_video', 'transcribe_audio'])],
   ['agent', new Set(['spawn_agent', 'send_message', 'list_agents'])],
@@ -201,7 +197,7 @@ export type SummaryFragment = 'fileOperations' | 'searches' | 'commands' | 'mess
 const FRAGMENT_TOOLS: Array<[SummaryFragment, Set<string>]> = [
   ['fileOperations', new Set(['read', 'list', 'write', 'edit', 'apply_patch'])],
   ['commands', new Set(['exec'])],
-  ['messages', new Set(['send', 'react', 'send_email', 'speak'])],
+  ['messages', new Set(['send', 'react', 'speak'])],
   ['schedules', new Set(['create_schedule', 'update_schedule', 'delete_schedule'])],
   ['media', new Set(['generate_image', 'generate_video', 'transcribe_audio'])],
   ['agents', new Set(['spawn_agent', 'send_message', 'list_agents'])],
@@ -215,7 +211,7 @@ export function toolFragmentKind(toolName: string): SummaryFragment {
   for (const [kind, names] of FRAGMENT_TOOLS) {
     if (names.has(toolName)) return kind
   }
-  // Read-only lookups (web/memory/message search, list_*/get_*, email reads,
+  // Read-only lookups (web/memory/message search, list_*/get_*,
   // bg status, waits) all read to the user as "it looked something up" — one
   // 'searches' counter keeps the header to one clause instead of a taxonomy.
   return isReadOnlyTool(toolName) ? 'searches' : 'steps'
@@ -393,6 +389,48 @@ function patchLineCounts(patch: string): { add: number; remove: number } {
     else if (line.startsWith('-') && !line.startsWith('***')) remove++
   }
   return { add, remove }
+}
+
+// PatchFileDiff is one file of a successful apply_patch call, ready to render
+// as its own edit-style row: the result file list paired with its section of
+// the server-attached diff. Deleted files have no section (diff "").
+export interface PatchFileDiff {
+  operation: PatchFileTarget['operation']
+  path: string
+  movedTo: string
+  diff: string
+  add: number
+  remove: number
+}
+
+// patchFileDiffs pairs apply_patch's result files with the per-file sections
+// of the server-computed diff. Returns [] when there is nothing reliable to
+// split — failed calls, older records without a diff, diffs past the server's
+// size bound, or a diff section no result file claims — so the caller keeps
+// the single raw-patch row: a partial split would hide a change.
+export function patchFileDiffs(block: ToolCallBlock): PatchFileDiff[] {
+  if (block.toolName !== 'apply_patch' || !block.diff) return []
+  const pending = splitUnifiedDiffFiles(block.diff)
+  if (pending.length === 0) return []
+  const out = patchFilesFromResult(block).map((file) => {
+    // Diff headers drop the leading slash of absolute paths (a/data/x).
+    const key = file.path.replace(/^\//, '')
+    const index = file.operation === 'delete' ? -1 : pending.findIndex(segment => segment.oldPath === key)
+    const segment = index >= 0 ? pending.splice(index, 1)[0] : undefined
+    const counts = segment ? unifiedDiffLineCounts(segment.diff) : { add: 0, remove: 0 }
+    // A move stays within one path style, so an absolute source gets its
+    // destination's stripped slash back (the row opens it in the file manager).
+    const movedTo = segment && segment.newPath !== segment.oldPath
+      ? (file.path.startsWith('/') ? `/${segment.newPath}` : segment.newPath)
+      : ''
+    return {
+      ...file,
+      movedTo,
+      diff: segment?.diff ?? '',
+      ...counts,
+    }
+  })
+  return pending.length > 0 ? [] : out
 }
 
 // The server-attached unified diff is the ground truth for what changed, so
@@ -726,7 +764,13 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
       const fullTarget = fileTargets
         .map(file => `${PATCH_OPERATION_MARK[file.operation]} ${file.path}`)
         .join('\n')
-      const counts = patchLineCounts(patch)
+      // The server-attached diff counts what actually changed; the raw patch
+      // also carries the model's context lines. Group headers sum this total,
+      // so it stays correct when the row itself renders per file.
+      const fileDiffs = patchFileDiffs(block)
+      const counts = fileDiffs.length > 0
+        ? fileDiffs.reduce((sum, file) => ({ add: sum.add + file.add, remove: sum.remove + file.remove }), { add: 0, remove: 0 })
+        : patchLineCounts(patch)
       return {
         icon: FilePen,
         actionKey: 'apply_patch',
@@ -892,6 +936,81 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         expandable: true,
       }
     }
+    case 'mcp_manage': {
+      const action = pickString(input, 'action')
+      const connectionId = pickString(input, 'connection_id')
+      const variants: Record<string, { icon: Component; actionKey: string }> = {
+        list: { icon: Cable, actionKey: 'mcp_manage_list' },
+        get: { icon: SearchCheck, actionKey: 'mcp_manage_get' },
+        create: { icon: Plus, actionKey: 'mcp_manage_create' },
+        update: { icon: Wrench, actionKey: 'mcp_manage_update' },
+        delete: { icon: Unplug, actionKey: 'mcp_manage_delete' },
+        probe: { icon: Activity, actionKey: 'mcp_manage_probe' },
+        authorize: { icon: Link, actionKey: 'mcp_manage_authorize' },
+      }
+      const variant = variants[action] ?? { icon: Cable, actionKey: 'mcp_manage' }
+      return {
+        ...variant,
+        target: action === 'create' ? pickString(input, 'name') : connectionId,
+        expandable: true,
+      }
+    }
+    case 'app_search': {
+      const action = pickString(input, 'action')
+      if (action === 'categories') {
+        return {
+          icon: ListChecks,
+          actionKey: 'app_search_categories',
+          target: pickString(input, 'registry'),
+          expandable: true,
+        }
+      }
+      if (action === 'get') {
+        return {
+          icon: SearchCheck,
+          actionKey: 'app_search_get',
+          target: pickString(input, 'app_id'),
+          expandable: true,
+        }
+      }
+      const query = pickString(input, 'q')
+      return {
+        icon: Search,
+        actionKey: 'app_search',
+        target: query ? `"${query}"` : pickString(input, 'category', 'registry'),
+        fullTarget: query,
+        expandable: true,
+      }
+    }
+    case 'app_manage': {
+      const action = pickString(input, 'action')
+      const installationId = pickString(input, 'installation_id')
+      if (action === 'list') {
+        const actionKey = input.check_updates === true
+          ? 'app_manage_check_updates'
+          : input.refresh === true
+            ? 'app_manage_refresh'
+            : 'app_manage_list'
+        return { icon: Boxes, actionKey, target: '', expandable: true }
+      }
+      const variants: Record<string, { icon: Component; actionKey: string }> = {
+        install: { icon: Plus, actionKey: 'app_manage_install' },
+        update: { icon: RotateCw, actionKey: 'app_manage_update' },
+        resume: { icon: Power, actionKey: 'app_manage_resume' },
+        uninstall: { icon: X, actionKey: 'app_manage_uninstall' },
+        authorize: { icon: Link, actionKey: 'app_manage_authorize' },
+      }
+      const variant = variants[action] ?? { icon: Boxes, actionKey: 'app_manage' }
+      return {
+        ...variant,
+        target: action === 'install'
+          ? pickString(input, 'app_id')
+          : action === 'authorize'
+            ? pickString(input, 'connector_type') || installationId
+            : installationId,
+        expandable: true,
+      }
+    }
     case 'list_schedule':
       return { icon: Calendar, actionKey: 'list_schedule', target: '', detail: ToolCallDetailSchedule }
     case 'get_schedule':
@@ -921,41 +1040,6 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         target: pickString(input, 'id'),
         expandable: true,
       }
-    case 'list_email_accounts':
-      return {
-        icon: Mail,
-        actionKey: 'list_email_accounts',
-        target: '',
-        detail: ToolCallDetailEmailAccounts,
-      }
-    case 'send_email': {
-      const subject = pickString(input, 'subject')
-      const to = pickString(input, 'to')
-      return {
-        icon: MailPlus,
-        actionKey: 'send_email',
-        target: subject || to,
-        fullTarget: subject ? `${to} — ${subject}` : to,
-        expandable: true,
-      }
-    }
-    case 'list_email':
-      return {
-        icon: Inbox,
-        actionKey: 'list_email',
-        target: '',
-        detail: ToolCallDetailEmailList,
-      }
-    case 'read_email': {
-      const uid = input.uid
-      const target = uid != null ? `#${String(uid)}` : ''
-      return {
-        icon: MailOpen,
-        actionKey: 'read_email',
-        target,
-        detail: ToolCallDetailEmailRead,
-      }
-    }
     case 'speak': {
       const text = pickString(input, 'text')
       return {

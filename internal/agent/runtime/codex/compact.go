@@ -2,7 +2,6 @@ package codex
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/event"
@@ -29,7 +28,7 @@ func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (exter
 		return external.CompactionResult{}, err
 	}
 	input.Command = "compact"
-	threadID, _, err := d.ensureThread(ctx, srv, cfg, input)
+	threadID, err := d.ensureThread(ctx, srv, cfg, input)
 	if err != nil {
 		return external.CompactionResult{}, err
 	}
@@ -46,6 +45,7 @@ func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (exter
 	srv.registerTurn(threadID, turn)
 	defer srv.unregisterTurn(threadID, turn)
 	metadata, err := awaitCompaction(ctx, srv.conn, turn, srv.proc.Done(), func() { d.cancelOperation(srv, input, turn) })
+	recordThreadMetadata(&metadata, input.RuntimeMetadata, threadID, srv.threadPath(threadID))
 	return external.CompactionResult{RuntimeMetadata: metadata}, err
 }
 
@@ -63,12 +63,12 @@ func awaitCompaction(ctx context.Context, connection *conn, turn *turnState, pro
 		cancelOperation()
 		return nil, ctx.Err()
 	case <-processDone:
-		return nil, errors.New("codex app-server exited during compaction")
+		return nil, connection.exitError("during compaction")
 	}
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	result, err := turn.result("")
+	result, err := turn.result()
 	if err != nil {
 		return nil, err
 	}

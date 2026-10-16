@@ -35,6 +35,7 @@ ON CONFLICT (team_id, id) DO UPDATE SET
   topic = EXCLUDED.topic,
   expires_at = EXCLUDED.expires_at,
   updated_at = now()
+WHERE memory_nodes.bot_id = EXCLUDED.bot_id
 RETURNING *;
 
 -- name: GetMemoryNode :one

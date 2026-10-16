@@ -72,8 +72,7 @@ func writeFeishuRichLinkPart(b *strings.Builder, part channel.MessagePart) {
 	b.WriteString(")")
 }
 
-// writeFeishuRichMentionPart emits Feishu's lark_md <at user_id="…"></at>
-// tag when the canonical Part carries a safe open_id. Feishu open IDs are
+// writeFeishuRichMentionPart emits the card markdown <at id=…></at> tag when the canonical Part carries a safe open_id. Feishu open IDs are
 // lowercase alphanumeric with a single underscore-separated prefix
 // (e.g. "ou_abc123"); IDs outside that class fall back to the inline-text
 // path so the visible mention still reaches the channel.
@@ -86,9 +85,9 @@ func writeFeishuRichMentionPart(b *strings.Builder, part channel.MessagePart) {
 	if b.Len() > 0 {
 		b.WriteString("\n\n")
 	}
-	b.WriteString(`<at user_id="`)
+	b.WriteString(`<at id=`)
 	b.WriteString(id)
-	b.WriteString(`"></at>`)
+	b.WriteString(`></at>`)
 }
 
 func isSafeFeishuMentionID(id string) bool {
@@ -206,24 +205,25 @@ func isAllowedFeishuRichHref(href string) bool {
 		strings.HasPrefix(href, "tel:")
 }
 
-// escapeFeishuInlineLarkMD neutralises lark_md control characters in
+// escapeFeishuInlineLarkMD neutralises card markdown control characters in
 // attacker-supplied inline text so injected `[text](url)`, `<at id=…>`, code
-// spans, or stray bold/italic markers cannot break out of the wrapper. `\`
-// must come first so subsequent escapes are themselves preserved.
+// spans, or stray bold/italic markers cannot break out of the wrapper. The
+// JSON 2.0 markdown component documents HTML character references, not
+// backslashes, as its escape syntax.
 var escapeFeishuInlineLarkMD = strings.NewReplacer(
-	`\`, `\\`,
-	"`", "\\`",
-	`*`, `\*`,
-	`_`, `\_`,
-	`~`, `\~`,
-	`[`, `\[`,
-	`]`, `\]`,
-	`<`, `\<`,
-	`>`, `\>`,
+	`\`, `&#92;`,
+	"`", `&#96;`,
+	`*`, `&#42;`,
+	`_`, `&#95;`,
+	`~`, `&#126;`,
+	`[`, `&#91;`,
+	`]`, `&#93;`,
+	`<`, `&#60;`,
+	`>`, `&#62;`,
 ).Replace
 
 // escapeFeishuLinkText escapes the characters that can prematurely close or
-// split a `[text](url)` label, and collapses control whitespace that lark_md
+// split a `[text](url)` label, and collapses control whitespace that card markdown
 // otherwise treats as a paragraph break inside the label.
 func escapeFeishuLinkText(text string) string {
 	text = strings.ReplaceAll(text, "\r", "")

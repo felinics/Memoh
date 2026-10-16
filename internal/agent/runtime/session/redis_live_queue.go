@@ -508,6 +508,19 @@ func (b *RedisBackend) ReleaseFollowUp(ctx context.Context, key Key, ref FollowU
 	return err
 }
 
+func (b *RedisBackend) RejectFollowUp(ctx context.Context, key Key, ref FollowUpClaimRef, errorCode string) error {
+	if err := validateFollowUpClaim(key, ref); err != nil {
+		return err
+	}
+	if strings.TrimSpace(errorCode) == "" {
+		return ErrQueueInvalidReference
+	}
+	_, err := redisMutate(ctx, b, b.followUpQueueKey(key), func(state *followUpQueueState, now time.Time) (struct{}, error) {
+		return struct{}{}, state.reject(ref, errorCode, now)
+	})
+	return err
+}
+
 func (b *RedisBackend) steerQueueKey(key Key) string {
 	return b.keyPrefix + "steer_queue:" + key.String()
 }

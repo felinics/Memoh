@@ -3,14 +3,12 @@ package grpctransport
 import (
 	"context"
 	"encoding/json"
-	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/agent/turn/turnpb"
-	"github.com/felinics/memoh/internal/apperror"
 )
 
 func (s *Server) RuntimeCommands(ctx context.Context, req *turnpb.JsonRequest) (*turnpb.JsonResponse, error) {
@@ -24,11 +22,11 @@ func (s *Server) RuntimeCommands(ctx context.Context, req *turnpb.JsonRequest) (
 	}
 	out, err := service.RuntimeCommands(ctx, input)
 	if err != nil {
-		return nil, s.runtimeControlError(err)
+		return nil, s.mapError(ctx, "runtime control", err)
 	}
 	data, err := json.Marshal(out)
 	if err != nil {
-		return nil, s.mapError("runtime control response", err)
+		return nil, s.mapError(ctx, "runtime control response", err)
 	}
 	return &turnpb.JsonResponse{Json: data}, nil
 }
@@ -41,7 +39,7 @@ func (c *Client) RuntimeCommands(ctx context.Context, input turn.RuntimeControlR
 	}
 	response, err := c.client.RuntimeCommands(ctx, &turnpb.JsonRequest{Json: data})
 	if err != nil {
-		return out, runtimeControlClientError(err)
+		return out, mapClientError(err)
 	}
 	err = json.Unmarshal(response.GetJson(), &out)
 	return out, err
@@ -58,11 +56,11 @@ func (s *Server) RuntimeControls(ctx context.Context, req *turnpb.JsonRequest) (
 	}
 	out, err := service.RuntimeControls(ctx, input)
 	if err != nil {
-		return nil, s.runtimeControlError(err)
+		return nil, s.mapError(ctx, "runtime control", err)
 	}
 	data, err := json.Marshal(out)
 	if err != nil {
-		return nil, s.mapError("runtime control response", err)
+		return nil, s.mapError(ctx, "runtime control response", err)
 	}
 	return &turnpb.JsonResponse{Json: data}, nil
 }
@@ -75,7 +73,7 @@ func (c *Client) RuntimeControls(ctx context.Context, input turn.RuntimeControlR
 	}
 	response, err := c.client.RuntimeControls(ctx, &turnpb.JsonRequest{Json: data})
 	if err != nil {
-		return out, runtimeControlClientError(err)
+		return out, mapClientError(err)
 	}
 	err = json.Unmarshal(response.GetJson(), &out)
 	return out, err
@@ -92,11 +90,11 @@ func (s *Server) SetRuntimeMode(ctx context.Context, req *turnpb.JsonRequest) (*
 	}
 	out, err := service.SetRuntimeMode(ctx, input)
 	if err != nil {
-		return nil, s.runtimeControlError(err)
+		return nil, s.mapError(ctx, "runtime control", err)
 	}
 	data, err := json.Marshal(out)
 	if err != nil {
-		return nil, s.mapError("runtime control response", err)
+		return nil, s.mapError(ctx, "runtime control response", err)
 	}
 	return &turnpb.JsonResponse{Json: data}, nil
 }
@@ -109,7 +107,75 @@ func (c *Client) SetRuntimeMode(ctx context.Context, input turn.RuntimeControlRe
 	}
 	response, err := c.client.SetRuntimeMode(ctx, &turnpb.JsonRequest{Json: data})
 	if err != nil {
-		return out, runtimeControlClientError(err)
+		return out, mapClientError(err)
+	}
+	err = json.Unmarshal(response.GetJson(), &out)
+	return out, err
+}
+
+func (s *Server) RuntimeModel(ctx context.Context, req *turnpb.JsonRequest) (*turnpb.JsonResponse, error) {
+	var input turn.RuntimeControlRequest
+	if err := json.Unmarshal(req.GetJson(), &input); err != nil || input.TeamID == "" {
+		return nil, status.Error(codes.InvalidArgument, "invalid runtime control request")
+	}
+	service, ok := s.service.(turn.RuntimeControlService)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "runtime controls unavailable")
+	}
+	out, err := service.RuntimeModel(ctx, input)
+	if err != nil {
+		return nil, s.mapError(ctx, "runtime control", err)
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return nil, s.mapError(ctx, "runtime control response", err)
+	}
+	return &turnpb.JsonResponse{Json: data}, nil
+}
+
+func (c *Client) RuntimeModel(ctx context.Context, input turn.RuntimeControlRequest) (turn.RuntimeModelState, error) {
+	var out turn.RuntimeModelState
+	data, err := json.Marshal(input)
+	if err != nil {
+		return out, err
+	}
+	response, err := c.client.RuntimeModel(ctx, &turnpb.JsonRequest{Json: data})
+	if err != nil {
+		return out, mapClientError(err)
+	}
+	err = json.Unmarshal(response.GetJson(), &out)
+	return out, err
+}
+
+func (s *Server) SetRuntimeModel(ctx context.Context, req *turnpb.JsonRequest) (*turnpb.JsonResponse, error) {
+	var input turn.RuntimeControlRequest
+	if err := json.Unmarshal(req.GetJson(), &input); err != nil || input.TeamID == "" {
+		return nil, status.Error(codes.InvalidArgument, "invalid runtime control request")
+	}
+	service, ok := s.service.(turn.RuntimeControlService)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "runtime controls unavailable")
+	}
+	out, err := service.SetRuntimeModel(ctx, input)
+	if err != nil {
+		return nil, s.mapError(ctx, "runtime control", err)
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return nil, s.mapError(ctx, "runtime control response", err)
+	}
+	return &turnpb.JsonResponse{Json: data}, nil
+}
+
+func (c *Client) SetRuntimeModel(ctx context.Context, input turn.RuntimeControlRequest) (turn.RuntimeModelState, error) {
+	var out turn.RuntimeModelState
+	data, err := json.Marshal(input)
+	if err != nil {
+		return out, err
+	}
+	response, err := c.client.SetRuntimeModel(ctx, &turnpb.JsonRequest{Json: data})
+	if err != nil {
+		return out, mapClientError(err)
 	}
 	err = json.Unmarshal(response.GetJson(), &out)
 	return out, err
@@ -126,11 +192,11 @@ func (s *Server) ExecuteRuntimeCommand(ctx context.Context, req *turnpb.JsonRequ
 	}
 	out, err := service.ExecuteRuntimeCommand(ctx, input)
 	if err != nil {
-		return nil, s.runtimeControlError(err)
+		return nil, s.mapError(ctx, "runtime control", err)
 	}
 	data, err := json.Marshal(out)
 	if err != nil {
-		return nil, s.mapError("runtime control response", err)
+		return nil, s.mapError(ctx, "runtime control response", err)
 	}
 	return &turnpb.JsonResponse{Json: data}, nil
 }
@@ -143,24 +209,8 @@ func (c *Client) ExecuteRuntimeCommand(ctx context.Context, input turn.RuntimeCo
 	}
 	response, err := c.client.ExecuteRuntimeCommand(ctx, &turnpb.JsonRequest{Json: data})
 	if err != nil {
-		return out, runtimeControlClientError(err)
+		return out, mapClientError(err)
 	}
 	err = json.Unmarshal(response.GetJson(), &out)
 	return out, err
-}
-
-const runtimeControlErrorPrefix = "memoh-runtime-control:"
-
-func (s *Server) runtimeControlError(err error) error {
-	if code := apperror.CodeOf(err); code != "" {
-		return status.Error(codes.FailedPrecondition, runtimeControlErrorPrefix+string(code))
-	}
-	return s.mapError("runtime control", err)
-}
-
-func runtimeControlClientError(err error) error {
-	if status.Code(err) == codes.FailedPrecondition && strings.HasPrefix(status.Convert(err).Message(), runtimeControlErrorPrefix) {
-		return apperror.New(apperror.Code(strings.TrimPrefix(status.Convert(err).Message(), runtimeControlErrorPrefix)), nil)
-	}
-	return mapClientError(err)
 }

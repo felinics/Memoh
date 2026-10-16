@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/reasoning"
 )
@@ -18,9 +20,8 @@ const (
 	codexDefaultBaseURL = "https://chatgpt.com/backend-api"
 	// The catalog endpoint uses the client version for model-availability gates.
 	// Use the stable protocol target instead of coupling discovery to Memoh's release version.
-	codexModelsClientVersion  = "1.0.0"
-	codexModelsResponseLimit  = 8 << 20
-	codexModelsErrorBodyLimit = 16 << 10
+	codexModelsClientVersion = "1.0.0"
+	codexModelsResponseLimit = 8 << 20
 )
 
 type codexModelsResponse struct {
@@ -80,22 +81,17 @@ func (s *Service) listCodexRemoteModels(ctx context.Context, baseURL string, cre
 	}
 	resp, err := httpClient.Do(req) //nolint:gosec // Provider base URLs are explicitly user-configurable throughout model discovery.
 	if err != nil {
-		return nil, fmt.Errorf("request Codex models: %w", err)
+		return nil, errs.WrapDependency(err, "request Codex models")
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, codexModelsErrorBodyLimit))
-		detail := strings.TrimSpace(string(body))
-		if detail == "" {
-			detail = http.StatusText(resp.StatusCode)
-		}
-		return nil, fmt.Errorf("codex models request failed (%d): %s", resp.StatusCode, detail)
+		return nil, errs.NewDependency("codex models request failed", slog.Int("status", resp.StatusCode))
 	}
 
 	var catalog codexModelsResponse
 	decoder := json.NewDecoder(io.LimitReader(resp.Body, codexModelsResponseLimit))
 	if err := decoder.Decode(&catalog); err != nil {
-		return nil, fmt.Errorf("decode Codex models response: %w", err)
+		return nil, errs.WrapDependency(err, "decode Codex models response")
 	}
 
 	remoteModels := make([]RemoteModel, 0, len(catalog.Models))

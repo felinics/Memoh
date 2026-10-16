@@ -141,8 +141,10 @@ func EncodeSkillActivateCallback(name string) string {
 }
 
 // EncodeConfirmNewCallback builds the callback_data for confirming a /new reset.
-// Layout: "m~cn~{mode}" where mode is chat|discuss. Tapping re-dispatches
-// "/new {mode} --confirm", which performs the actual session reset.
+// Layout: "m~cn~{mode}" where mode is chat|discuss, followed by " --id {agent}"
+// when /new named an Agent. Tapping re-dispatches that text as
+// "/new {mode} [--id {agent}] --confirm", which performs the actual session
+// reset.
 func EncodeConfirmNewCallback(mode string) string {
 	return fmt.Sprintf("%scn~%s", callbackNamespace, mode)
 }

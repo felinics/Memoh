@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestRepairToolClosureFragsRefreshesRebuiltMessageAccounting(t *testing.T) {
@@ -21,8 +23,8 @@ func TestRepairToolClosureFragsRefreshesRebuiltMessageAccounting(t *testing.T) {
 	result := MessageFrag(MessageFragInput{
 		ID: "history.result",
 		Message: sdk.Message{Role: sdk.MessageRoleTool, Content: []sdk.MessagePart{
-			sdk.ToolResultPart{ToolCallID: "call-orphan", ToolName: "search", Result: "orphan"},
-			sdk.ToolResultPart{ToolCallID: "call-valid", ToolName: "search", Result: "kept"},
+			sdk.ToolResultPart{ToolCallID: "call-orphan", ToolName: "search", Result: toolexec.OutputFromValue("orphan")},
+			sdk.ToolResultPart{ToolCallID: "call-valid", ToolName: "search", Result: toolexec.OutputFromValue("kept")},
 		}},
 		Kind:          KindConversationEvent,
 		Slot:          SlotHistory,

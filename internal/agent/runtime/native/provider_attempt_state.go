@@ -4,6 +4,8 @@ import (
 	"sync"
 
 	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/step"
 )
 
 type providerAttemptState struct {
@@ -11,33 +13,35 @@ type providerAttemptState struct {
 	messages        []sdk.Message
 	stepIndex       int
 	systemPrepended bool
-	provenance      preparedMessageProvenance
-	stored          bool
+	// dynamicRefs are the loop-owned dynamic messages the stored payload
+	// carried, positioned within the stored messages.
+	dynamicRefs []dynamicSourceRef
+	stored      bool
 }
 
 func (s *providerAttemptState) store(
-	params *sdk.GenerateParams,
+	params *sdk.Request,
 	stepIndex int,
 	systemPrepended bool,
-	provenanceValues ...preparedMessageProvenance,
+	dynamicRefs []dynamicSourceRef,
 ) {
 	if s == nil || params == nil {
 		return
-	}
-	var provenance preparedMessageProvenance
-	if len(provenanceValues) > 0 {
-		provenance = provenanceValues[0]
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.messages = cloneProviderMessages(params.Messages)
 	s.stepIndex = stepIndex
 	s.systemPrepended = systemPrepended
-	s.provenance = clonePreparedMessageProvenance(provenance)
+	s.dynamicRefs = cloneDynamicSourceRefs(dynamicRefs)
 	s.stored = true
 }
 
-func (s *providerAttemptState) retryInput(previous *sdk.StreamResult) (providerRetryInput, bool) {
+// retryInput rebuilds the provider input for a retried dispatch from the
+// stored attempt payload plus the output of the step the attempt reached.
+// previousSteps are the steps the current dispatch already committed, in
+// call-local order.
+func (s *providerAttemptState) retryInput(previousSteps []step.Record) (providerRetryInput, bool) {
 	if s == nil {
 		return providerRetryInput{}, false
 	}
@@ -45,7 +49,7 @@ func (s *providerAttemptState) retryInput(previous *sdk.StreamResult) (providerR
 	messages := cloneProviderMessages(s.messages)
 	stepIndex := s.stepIndex
 	systemPrepended := s.systemPrepended
-	provenance := clonePreparedMessageProvenance(s.provenance)
+	dynamicRefs := cloneDynamicSourceRefs(s.dynamicRefs)
 	stored := s.stored
 	s.mu.RUnlock()
 	if !stored {
@@ -57,34 +61,24 @@ func (s *providerAttemptState) retryInput(previous *sdk.StreamResult) (providerR
 			return providerRetryInput{}, false
 		}
 		messages = messages[1:]
-		if provenance.known {
-			if len(provenance.messageIndexes) == 0 {
-				return providerRetryInput{}, false
-			}
-			provenance.messageIndexes = provenance.messageIndexes[1:]
-		}
+		dynamicRefs = shiftDynamicSourceRefs(dynamicRefs, -1)
 	}
 	clearProviderCacheControls(messages)
-	if previous != nil && stepIndex >= 0 && stepIndex < len(previous.Steps) {
-		stepMessages := cloneProviderMessages(previous.Steps[stepIndex].Messages)
+	if stepIndex >= 0 && stepIndex < len(previousSteps) {
+		stepMessages := cloneProviderMessages(previousSteps[stepIndex].Messages)
 		messages = append(messages, stepMessages...)
-		if provenance.known {
-			for range stepMessages {
-				provenance.messageIndexes = append(provenance.messageIndexes, -1)
-			}
-		}
 	}
-	return providerRetryInput{messages: messages, provenance: provenance}, true
+	return providerRetryInput{messages: messages, dynamicRefs: dynamicRefs}, true
 }
 
-func (s *providerAttemptState) retryMessages(previous *sdk.StreamResult) ([]sdk.Message, bool) {
-	input, ok := s.retryInput(previous)
+func (s *providerAttemptState) retryMessages(previousSteps []step.Record) ([]sdk.Message, bool) {
+	input, ok := s.retryInput(previousSteps)
 	return input.messages, ok
 }
 
 type providerRetryInput struct {
-	messages   []sdk.Message
-	provenance preparedMessageProvenance
+	messages    []sdk.Message
+	dynamicRefs []dynamicSourceRef
 }
 
 func cloneProviderMessages(messages []sdk.Message) []sdk.Message {
@@ -121,22 +115,14 @@ func clearProviderCacheControls(messages []sdk.Message) {
 	}
 }
 
-func retryProviderAttemptMessages(cfg RunConfig, previous *sdk.StreamResult) providerRetryInput {
-	if input, ok := cfg.providerAttemptState.retryInput(previous); ok {
+// retryProviderAttemptMessages falls back to durable history when no provider
+// attempt was stored: the segment's committed steps plus its output messages.
+func retryProviderAttemptMessages(cfg RunConfig, steps []step.Record, messages []sdk.Message) providerRetryInput {
+	if input, ok := cfg.providerAttemptState.retryInput(steps); ok {
 		return input
 	}
-	accumulated := []sdk.Message(nil)
-	if previous != nil {
-		accumulated = previous.Messages
-	}
-	merged := make([]sdk.Message, 0, len(cfg.Messages)+len(accumulated))
+	merged := make([]sdk.Message, 0, len(cfg.Messages)+len(messages))
 	merged = append(merged, cfg.Messages...)
-	merged = append(merged, accumulated...)
-	provenance := clonePreparedMessageProvenance(cfg.providerMessageProvenance)
-	if provenance.known {
-		for range accumulated {
-			provenance.messageIndexes = append(provenance.messageIndexes, -1)
-		}
-	}
-	return providerRetryInput{messages: merged, provenance: provenance}
+	merged = append(merged, messages...)
+	return providerRetryInput{messages: merged, dynamicRefs: cloneDynamicSourceRefs(cfg.retryDynamicRefs)}
 }

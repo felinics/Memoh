@@ -1,0 +1,27 @@
+{
+  "transcribe_audio": {
+    "properties": {
+      "contentType": {
+        "description": "Optional MIME type override",
+        "type": "string"
+      },
+      "language": {
+        "description": "Optional language hint",
+        "type": "string"
+      },
+      "path": {
+        "description": "Audio file path from the message context, usually under /data/.memoh/media/...",
+        "type": "string"
+      },
+      "prompt": {
+        "description": "Optional transcription prompt",
+        "type": "string"
+      },
+      "url": {
+        "description": "Direct audio URL when a path is unavailable",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  }
+}

@@ -64,7 +64,7 @@ func (s *Service) storeRoundWithOptionsResult(ctx context.Context, req ChatReque
 	filtered := make([]ModelMessage, 0, len(fullRound))
 	for _, m := range fullRound {
 		if m.Role == "assistant" && isEmptyAssistantMessage(m) && !opts.AllowEmptyAssistantText {
-			s.logger.Warn("skipping empty assistant message in storeRound",
+			s.logger.WarnContext(ctx, "skipping empty assistant message in storeRound",
 				slog.String("bot_id", req.BotID),
 			)
 			continue
@@ -86,7 +86,7 @@ func (s *Service) storeRoundWithOptionsResult(ctx context.Context, req ChatReque
 		if opts.RequireCompletePersist {
 			return persisted, fmt.Errorf("persisted %d of %d messages", len(persisted), len(filtered))
 		}
-		s.logger.Warn("skipping memory extraction for partially persisted round",
+		s.logger.WarnContext(ctx, "skipping memory extraction for partially persisted round",
 			slog.String("bot_id", req.BotID),
 			slog.Int("persisted", len(persisted)),
 			slog.Int("expected", len(filtered)),
@@ -94,7 +94,7 @@ func (s *Service) storeRoundWithOptionsResult(ctx context.Context, req ChatReque
 		return persisted, nil
 	}
 	if !opts.SkipMemory && !req.SkipMemoryExtraction {
-		go s.storeMemory(context.WithoutCancel(ctx), req, persisted)
+		s.storeMemory(context.WithoutCancel(ctx), req, persisted)
 	}
 
 	return persisted, nil
@@ -196,7 +196,7 @@ func (s *Service) StoreRound(ctx context.Context, botID, sessionID, channelIdent
 func (s *Service) storeMessages(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) []messagepkg.Message {
 	persisted, err := s.storeMessagesResult(ctx, req, messages, modelID, opts)
 	if err != nil {
-		s.logger.Warn("persist message round failed", slog.Any("error", err))
+		s.logger.WarnContext(ctx, "persist message round failed", slog.Any("error", err))
 	}
 	return persisted
 }
@@ -212,9 +212,8 @@ func (s *Service) storeMessagesResult(ctx context.Context, req ChatRequest, mess
 	if err != nil {
 		return nil, fmt.Errorf("prepare messages for persistence: %w", err)
 	}
-	// Persist the complete round and any runtime checkpoint watermark in one
-	// transaction so a staged snapshot cannot become canonical before every
-	// message in its round exists.
+	// Persist the complete round and its runtime publication in one
+	// transaction so warm processes observe only committed rounds.
 	if opts.RequireCompletePersist {
 		atomic, ok := s.messageService.(messagepkg.AtomicRoundPersister)
 		if !ok {
@@ -450,7 +449,7 @@ func (s *Service) persistMessageInputs(ctx context.Context, inputs []messagepkg.
 		}
 		persistedMessage, err := s.messageService.Persist(ctx, input)
 		if err != nil {
-			s.logger.Warn("persist message failed", slog.Any("error", err))
+			s.logger.WarnContext(ctx, "persist message failed", slog.Any("error", err))
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(input.Role), "user") && !input.SkipHistoryTurn && !messagepkg.IsInternalFeedback(input.Metadata) {
@@ -755,7 +754,7 @@ func (s *Service) LinkOutboundAssets(ctx context.Context, botID, sessionID strin
 		msgs, err = s.messageService.ListLatest(ctx, botID, anchorSearchWindow)
 	}
 	if err != nil {
-		s.logger.Warn("LinkOutboundAssets: list latest failed", slog.Any("error", err))
+		s.logger.WarnContext(ctx, "LinkOutboundAssets: list latest failed", slog.Any("error", err))
 		return
 	}
 
@@ -767,7 +766,7 @@ func (s *Service) LinkOutboundAssets(ctx context.Context, botID, sessionID strin
 		}
 	}
 	if latestAssistantID == "" {
-		s.logger.Warn("LinkOutboundAssets: no assistant message found", slog.String("bot_id", botID))
+		s.logger.WarnContext(ctx, "LinkOutboundAssets: no assistant message found", slog.String("bot_id", botID))
 		return
 	}
 
@@ -779,7 +778,7 @@ func (s *Service) LinkOutboundAssets(ctx context.Context, botID, sessionID strin
 			if id := findAssistantMessageForToolCall(msgs, strings.TrimSpace(toolCallID)); id != "" {
 				targetID = id
 			} else {
-				s.logger.Debug("LinkOutboundAssets: tool call not found in search window, anchoring to latest assistant",
+				s.logger.DebugContext(ctx, "LinkOutboundAssets: tool call not found in search window, anchoring to latest assistant",
 					slog.String("tool_call_id", strings.TrimSpace(toolCallID)))
 			}
 		}
@@ -794,7 +793,7 @@ func (s *Service) LinkOutboundAssets(ctx context.Context, botID, sessionID strin
 			group[i].Ordinal = i
 		}
 		if linkErr := s.messageService.LinkAssets(ctx, id, group); linkErr != nil {
-			s.logger.Warn("LinkOutboundAssets: link failed", slog.Any("error", linkErr))
+			s.logger.WarnContext(ctx, "LinkOutboundAssets: link failed", slog.Any("error", linkErr))
 		}
 	}
 }

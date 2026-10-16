@@ -109,12 +109,36 @@ WHERE team_id = public.memoh_current_team_id()
 ORDER BY session_id, run_id;
 
 -- name: GetLatestSessionRun :one
+-- The latest run, reported only while it belongs to the session's current
+-- runtime generation. Clearing history and deleting the session move
+-- bot_sessions.runtime_fencing_token past the token of every run claimed
+-- before them, and a run a history reset ended, or retired before it was
+-- ever claimed, carries history_reset. Such a run has nothing left to
+-- report, and no older run stands in for it; nor has any run of a deleted
+-- session.
 SELECT *
-FROM session_runs
-WHERE team_id = public.memoh_current_team_id()
-  AND session_id = sqlc.arg(session_id)
-ORDER BY created_at DESC, run_id DESC
-LIMIT 1;
+FROM session_runs run
+WHERE run.team_id = public.memoh_current_team_id()
+  AND run.session_id = sqlc.arg(session_id)
+  AND run.run_id = (
+    SELECT latest.run_id
+    FROM session_runs latest
+    WHERE latest.team_id = public.memoh_current_team_id()
+      AND latest.session_id = sqlc.arg(session_id)
+    ORDER BY latest.created_at DESC, latest.run_id DESC
+    LIMIT 1
+  )
+  AND run.error_code IS DISTINCT FROM 'history_reset'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_sessions session
+    WHERE session.team_id = run.team_id
+      AND session.id = run.session_id
+      AND (
+        session.deleted_at IS NOT NULL
+        OR run.fencing_token > 0 AND session.runtime_fencing_token > run.fencing_token
+      )
+  );
 
 -- name: LockBotForSessionRunClaim :one
 -- Claim uses a real transaction and a fresh statement after this parent lock.
@@ -185,6 +209,7 @@ SET owner_id = sqlc.arg(owner_id),
 WHERE team_id = public.memoh_current_team_id()
   AND run_id = sqlc.arg(run_id)
   AND state = 'waiting_decision'
+  AND abort_requested_at IS NULL
   AND fencing_token = sqlc.arg(previous_fencing_token)
   AND fencing_token < sqlc.arg(new_fencing_token)
 RETURNING *;
@@ -224,7 +249,38 @@ WHERE team_id = public.memoh_current_team_id()
   AND run_id = sqlc.arg(run_id)
   AND fencing_token = sqlc.arg(fencing_token)
   AND state IN ('accepted', 'running', 'waiting_decision', 'finishing')
+  AND (sqlc.narg(expected_state)::text IS NULL OR state = sqlc.narg(expected_state)::text)
 RETURNING *;
+
+-- name: AcceptSessionRunDecisionContinuation :one
+-- Called in the same fenced transaction that accepts the decision. A committed
+-- answer is executing work, even before the resumed producer's agent_start.
+UPDATE session_runs
+SET state = 'running',
+    input_json = jsonb_set(input_json, '{decision_continuations}',
+      COALESCE(input_json->'decision_continuations', '{}'::jsonb) ||
+      jsonb_build_object(sqlc.arg(decision_id)::text,
+        jsonb_build_object('kind', sqlc.arg(decision_kind)::text, 'phase', 'accepted')), true),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id) AND session_id = sqlc.arg(session_id)
+  AND run_id = sqlc.arg(run_id) AND fencing_token = sqlc.arg(fencing_token)
+  AND state IN ('running', 'waiting_decision') AND abort_requested_at IS NULL
+RETURNING *;
+
+-- name: MarkSessionRunDecisionExecuting :execrows
+-- Checkpoint before invoking an approved tool; interruption is an uncertain
+-- result, never authorization to execute the approved operation a second time.
+UPDATE session_runs
+SET input_json = jsonb_set(input_json,
+      ARRAY['decision_continuations', sqlc.arg(decision_id)::text, 'phase'],
+      '"executing"'::jsonb, false),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id) AND session_id = sqlc.arg(session_id)
+  AND run_id = sqlc.arg(run_id) AND fencing_token = sqlc.arg(fencing_token)
+  AND state = 'running' AND abort_requested_at IS NULL
+  AND input_json->'decision_continuations'->(sqlc.arg(decision_id)::text)->>'phase' = 'accepted';
 
 -- name: PrepareSessionRunFinish :one
 -- Persist the terminal proposal before the live projection enters finishing.
@@ -339,3 +395,54 @@ LIMIT sqlc.arg(batch_size);
 
 -- name: NextSessionRunFencingToken :one
 SELECT nextval('session_runtime_fencing_token_seq')::bigint AS token;
+
+-- name: SaveSessionRunResumeContext :execrows
+-- Credentials are represented by verified claim scopes, never bearer tokens.
+UPDATE session_runs SET input_json = jsonb_set(input_json, '{resume}', sqlc.arg(resume_context)::jsonb), updated_at = now()
+WHERE team_id = public.memoh_current_team_id() AND run_id = sqlc.arg(run_id)
+  AND fencing_token = sqlc.arg(fencing_token) AND state = 'running';
+
+-- name: ListInterruptedSessionRuns :many
+-- A later user turn supersedes the old intent. Admission's existing unique
+-- invocation index arbitrates concurrent startup workers without another lease.
+SELECT r.* FROM session_runs r
+JOIN bot_sessions s ON s.team_id = r.team_id AND s.id = r.session_id
+JOIN bots b ON b.team_id = r.team_id AND b.id = r.bot_id
+WHERE r.team_id = public.memoh_current_team_id()
+  AND r.state = 'lost' AND r.error_code = 'session_runtime.interrupted'
+  AND r.input_json ? 'resume' AND s.deleted_at IS NULL AND b.status <> 'deleting'
+  AND r.run_id > sqlc.arg(after_run_id)::uuid
+  AND NOT EXISTS (SELECT 1 FROM session_runs later WHERE later.team_id = r.team_id
+    AND later.session_id = r.session_id AND later.turn_position > r.turn_position)
+ORDER BY r.run_id LIMIT 100;
+
+-- name: IsInterruptedSessionRunLatest :one
+-- Called under the same parent lock as admission. A newer accepted turn must
+-- supersede recovery even if it has already completed since discovery.
+SELECT EXISTS (
+ SELECT 1 FROM session_runs source
+ WHERE source.team_id = public.memoh_current_team_id() AND source.run_id = sqlc.arg(run_id)
+  AND source.state = 'lost' AND source.error_code = 'session_runtime.interrupted'
+  AND source.abort_requested_at IS NULL AND source.input_json ? 'resume'
+  AND NOT EXISTS (SELECT 1 FROM session_runs later WHERE later.team_id = source.team_id
+   AND later.session_id = source.session_id AND later.turn_position > source.turn_position)
+)::boolean;
+
+-- name: RetireSupersededInterruptedSessionRuns :execrows
+-- Drops the resume intent of interrupted runs a later turn has answered or whose
+-- session was deleted. Interrupted runs stay lost forever; retiring the intent
+-- keeps idx_session_runs_resume_pending limited to work that can still continue.
+UPDATE session_runs r SET input_json = r.input_json - 'resume'
+WHERE r.team_id = public.memoh_current_team_id()
+  AND r.state = 'lost' AND r.error_code = 'session_runtime.interrupted' AND r.input_json ? 'resume'
+  AND (EXISTS (SELECT 1 FROM session_runs later WHERE later.team_id = r.team_id
+      AND later.session_id = r.session_id AND later.turn_position > r.turn_position)
+    OR EXISTS (SELECT 1 FROM bot_sessions s WHERE s.team_id = r.team_id
+      AND s.id = r.session_id AND s.deleted_at IS NOT NULL));
+
+-- name: RetireInterruptedSessionRun :execrows
+-- Drops a resume intent that can never continue: its budget expired, its saved
+-- context is unsupported, or its credential scope was revoked.
+UPDATE session_runs SET input_json = input_json - 'resume'
+WHERE team_id = public.memoh_current_team_id() AND run_id = sqlc.arg(run_id)
+  AND state = 'lost' AND error_code = 'session_runtime.interrupted' AND input_json ? 'resume';

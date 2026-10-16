@@ -35,6 +35,7 @@ func (*DiscussSDKContextBuilder) CollectDiscussSourceFrags(
 		Config: DiscussContextConfig{
 			ComposedMessages: input.ComposedMessages,
 			InlineImages:     input.InlineImages,
+			SourceImages:     input.SourceImages,
 		},
 	})
 	if err != nil {

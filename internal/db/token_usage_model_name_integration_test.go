@@ -58,6 +58,15 @@ ALTER TABLE bot_sessions ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_c
 ALTER TABLE bot_history_messages ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
 ALTER TABLE providers ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
 ALTER TABLE models ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
+CREATE TABLE bot_memory_usage (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
+  bot_id UUID NOT NULL,
+  model_id UUID,
+  operation TEXT NOT NULL,
+  usage JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `); err != nil {
 		t.Fatalf("add team query fixture schema: %v", err)
 	}

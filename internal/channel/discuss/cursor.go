@@ -18,7 +18,7 @@ func (t discussCursorTracker) Load(ctx context.Context, cfg DiscussSessionConfig
 	}
 	position, err := t.store.GetDiscussCursor(ctx, cfg.ThreadID, discussCursorScope(cfg))
 	if err != nil {
-		log.Warn("discuss cursor load failed", slog.Any("error", err))
+		log.WarnContext(ctx, "discuss cursor load failed", slog.Any("error", err))
 		return timeline.DiscussCursorPosition{}
 	}
 	return position
@@ -41,7 +41,7 @@ func (t discussCursorTracker) Advance(ctx context.Context, sess *discussSession,
 		strings.TrimSpace(cfg.CurrentPlatform),
 		merged,
 	); err != nil {
-		log.Warn("discuss cursor persist failed", slog.Any("error", err), slog.Int64("cursor", merged.EventCursor), slog.Int64("source_cursor", merged.SourceCursor))
+		log.WarnContext(ctx, "discuss cursor persist failed", slog.Any("error", err), slog.Int64("cursor", merged.EventCursor), slog.Int64("source_cursor", merged.SourceCursor))
 	}
 }
 

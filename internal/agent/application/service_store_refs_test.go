@@ -11,8 +11,12 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/settings"
 )
 
@@ -118,6 +122,9 @@ func TestStoreRoundPassesSourceRefsToMemory(t *testing.T) {
 
 	select {
 	case got := <-memory.afterChat:
+		if got.SkipFormation {
+			t.Fatal("native model turns must retain memory formation")
+		}
 		want := []string{"session-1/msg-1", "session-1/msg-2"}
 		refs := make([]string, 0, len(got.Messages))
 		for _, message := range got.Messages {
@@ -128,6 +135,52 @@ func TestStoreRoundPassesSourceRefsToMemory(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("memory provider was not called")
+	}
+}
+
+func TestPersistRuntimeRoundSkipsMemoryFormation(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []runtimekind.Kind{runtimekind.Codex, runtimekind.ClaudeCode, runtimekind.ACPAgent} {
+		for _, eagerUser := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/eager_user=%t", kind, eagerUser), func(t *testing.T) {
+				memory := &storeRoundMemoryProvider{afterChat: make(chan memprovider.AfterChatRequest, 1)}
+				registry := memprovider.NewRegistry(slog.New(slog.DiscardHandler))
+				registry.Register(storeRoundMemoryProviderID, memory)
+				user := storedMemoryTestMessage(t, "message-id", "session-1", "user", "remember this")
+				messages := &recordingMessageService{}
+				if eagerUser {
+					messages.persisted = []messagepkg.PersistInput{{SessionID: user.SessionID, Role: user.Role, Content: user.Content}}
+				}
+				service := &Service{
+					messageService:  messages,
+					memoryRegistry:  registry,
+					settingsService: settings.NewService(slog.New(slog.DiscardHandler), &storeRoundSettingsQueries{}, nil, nil),
+					logger:          slog.New(slog.DiscardHandler),
+				}
+				req := ChatRequest{
+					BotID: storeRoundBotID, ThreadID: user.SessionID, Query: "remember this",
+					UserMessagePersisted: eagerUser, PersistedUserMessageID: user.ID,
+				}
+				err := service.persistRuntimeRound(t.Context(), req, string(kind), "/data", external.PromptResult{
+					Output: []sdk.Message{sdk.AssistantMessage("external agent answer")},
+				}, nil, true, nil, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case got := <-memory.afterChat:
+					if !got.SkipFormation {
+						t.Fatal("external runtime turns must not form memory on the platform's models")
+					}
+					if len(got.Messages) != 2 || got.Messages[0].Content != "remember this" || got.Messages[1].Content != "external agent answer" {
+						t.Fatalf("memory transcript = %+v", got.Messages)
+					}
+				case <-time.After(2 * time.Second):
+					t.Fatal("memory provider was not called")
+				}
+			})
+		}
 	}
 }
 

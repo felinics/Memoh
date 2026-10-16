@@ -64,6 +64,13 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 		}
 		return nil
 
+	case channel.StreamEventReset:
+		// Keep the message; the regenerated reply edits over the failed text.
+		s.mu.Lock()
+		s.buffer.Reset()
+		s.mu.Unlock()
+		return nil
+
 	case channel.StreamEventFinal:
 		s.mu.Lock()
 		bufText := strings.TrimSpace(s.buffer.String())
@@ -88,7 +95,7 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 		if errText == "" {
 			return nil
 		}
-		return s.finalizeMessage("Error: "+errText, nil, nil)
+		return s.finalizeMessage(channel.ErrorReplyText(event.ErrorCode, errText), nil, nil)
 
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {
@@ -112,20 +119,25 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 		return nil
 
 	case channel.StreamEventToolCallStart:
-		s.mu.Lock()
-		bufText := strings.TrimSpace(s.buffer.String())
-		s.mu.Unlock()
-		if bufText != "" {
-			if err := s.finalizeMessage(bufText, nil, nil); err != nil {
-				return err
-			}
+		if err := s.commitSegment(); err != nil {
+			return err
 		}
-		s.resetStreamState()
 		return s.sendToolCallMessage(event.ToolCall, channel.BuildToolCallStart(event.ToolCall))
 	case channel.StreamEventToolCallEnd:
 		return s.sendToolCallMessage(event.ToolCall, channel.BuildToolCallEnd(event.ToolCall))
 
-	case channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted, channel.StreamEventProcessingFailed:
+	case channel.StreamEventSegmentEnd:
+		// The text before a hidden tool call becomes its own message. With
+		// nothing buffered, keep the placeholder for the text that follows.
+		s.mu.Lock()
+		hasText := strings.TrimSpace(s.buffer.String()) != ""
+		s.mu.Unlock()
+		if !hasText {
+			return nil
+		}
+		return s.commitSegment()
+
+	case channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted:
 		// Status events - no action needed for Discord
 		return nil
 
@@ -339,6 +351,21 @@ func (s *discordOutboundStream) forgetToolCallMessage(callID string) {
 		return
 	}
 	delete(s.toolMessages, callID)
+}
+
+// commitSegment finalizes the buffered text as its own message and resets the
+// streaming state, so the next text starts a fresh message.
+func (s *discordOutboundStream) commitSegment() error {
+	s.mu.Lock()
+	bufText := strings.TrimSpace(s.buffer.String())
+	s.mu.Unlock()
+	if bufText != "" {
+		if err := s.finalizeMessage(bufText, nil, nil); err != nil {
+			return err
+		}
+	}
+	s.resetStreamState()
+	return nil
 }
 
 func (s *discordOutboundStream) resetStreamState() {

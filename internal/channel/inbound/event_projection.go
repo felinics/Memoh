@@ -32,7 +32,7 @@ func persistAndProjectEvent(
 		event = persisted
 		if err != nil {
 			if log != nil {
-				log.Warn("persist pipeline event failed", slog.Any("error", err))
+				log.WarnContext(ctx, "persist pipeline event failed", slog.Any("error", err))
 			}
 		} else {
 			eventID = id

@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 // buildContextGroup registers /context — a focused token/context-window view for
@@ -21,6 +23,11 @@ func (h *Handler) buildContextGroup() *CommandGroup {
 		Handler: func(cc CommandContext) (string, error) {
 			if strings.TrimSpace(cc.SessionID) == "" {
 				return cc.T("cmd.session.noActive"), nil
+			}
+			// An Agent manages its own context; the bot's chat-model window
+			// says nothing about it.
+			if runtimekind.IsExternal(cc.SessionRuntime) {
+				return cc.T("cmd.context.agentUnsupported"), nil
 			}
 			return h.renderContextUsage(cc, cc.SessionID)
 		},

@@ -57,11 +57,10 @@ type Compactor interface {
 	Compact(context.Context, PromptInput) (CompactionResult, error)
 }
 
-// CompactionResult lets a runtime publish a staged native snapshot without
-// manufacturing a chat round. Publication remains application-owned.
+// CompactionResult returns updated native session references or usage.
+// The Agent owns compaction and persists its own conversation files.
 type CompactionResult struct {
 	RuntimeMetadata map[string]any
-	Checkpoint      CheckpointOutcome
 }
 
 type (

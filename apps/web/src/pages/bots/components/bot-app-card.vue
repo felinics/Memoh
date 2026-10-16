@@ -7,7 +7,6 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  AlertTriangle,
   ExternalLink,
   MoreHorizontal,
   Package as AppIcon,
@@ -63,7 +62,6 @@ const inProgress = computed(() => appInProgress(props.item))
 const readonly = computed(() => props.workspaceState !== 'running' && props.workspaceState !== undefined)
 const primary = computed(() => appPrimaryAction(props.item, { busy: props.busy, ownsStream: props.ownsStream, readonly: readonly.value }))
 const canRemove = computed(() => !discovered.value && !inProgress.value)
-const needsAttention = computed(() => props.item.status === 'failed' || props.item.status === 'partial')
 </script>
 
 <template>
@@ -88,22 +86,6 @@ const needsAttention = computed(() => props.item.status === 'failed' || props.it
         v-else
         class="size-5 text-muted-foreground"
       />
-    </template>
-
-    <template
-      v-if="needsAttention"
-      #meta
-    >
-      <span
-        class="flex items-center gap-1 text-caption"
-        :class="item.status === 'failed' ? 'text-destructive' : 'text-warning-foreground'"
-      >
-        <AlertTriangle
-          class="size-3 shrink-0"
-          aria-hidden="true"
-        />
-        {{ t(item.status === 'failed' ? 'apps.diagnostics.failed' : 'apps.diagnostics.partial') }}
-      </span>
     </template>
 
     <template #actions>

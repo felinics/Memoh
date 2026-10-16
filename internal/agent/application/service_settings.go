@@ -30,7 +30,7 @@ func (s *Service) loadBotRuntimeInfo(ctx context.Context, botID string) (native.
 	}
 	row, err := s.queries.GetBotByID(ctx, botUUID)
 	if err != nil {
-		s.logger.Debug("failed to load bot metadata for loop detection",
+		s.logger.DebugContext(ctx, "failed to load bot metadata for loop detection",
 			slog.String("bot_id", botID),
 			slog.Any("error", err),
 		)

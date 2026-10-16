@@ -49,10 +49,6 @@ The base `docker-compose.yml` contains the standard services: `postgres`,
 use the separate pgvector service for memory semantic search. SQLite deployments
 keep the local graph store only and do not run vector search.
 
-### SaaS / external providers
-
-For Mem0, OpenViking SaaS, or a separately hosted OpenViking service, no Compose profile is needed. Configure the provider directly in the Memoh admin UI with the external `base_url` and API key.
-
 ### China Mainland Mirror
 
 Uncomment `registry = "memoh.cn"` in `config.toml` under `[container]`, then add the CN overlay:

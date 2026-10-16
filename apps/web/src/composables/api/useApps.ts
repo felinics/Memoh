@@ -16,6 +16,7 @@ import {
   type HandlersSupermarketAppCategory,
   type HandlersSupermarketAppTranslation,
 } from '@memohai/sdk'
+import { renderI18nMessage, UserFacingError } from '@/utils/api-error'
 import { dependencyUpdateAvailable } from '@/utils/workspace-dependency'
 
 // Domain aliases over the generated SDK types for the App surfaces: the
@@ -42,15 +43,12 @@ export function botAppsQueryKey(botId: string): string[] {
   return [BOT_APPS_QUERY_KEY, botId]
 }
 
-export function useBotAppsQuery(botId: Ref<string>, forceRefresh?: Ref<boolean>) {
+export function useBotAppsQuery(botId: Ref<string>) {
   return useQuery({
     key: () => botAppsQueryKey(botId.value),
     query: async () => {
-      const refresh = forceRefresh?.value ?? false
-      if (forceRefresh) forceRefresh.value = false
       const { data } = await getBotsByBotIdApps({
         path: { bot_id: botId.value },
-        query: { refresh: refresh || undefined },
         throwOnError: true,
       })
       return data
@@ -67,16 +65,24 @@ export function invalidateBotApps(
   return queryCache.invalidateQueries({ key: [BOT_APPS_QUERY_KEY, botId] })
 }
 
+// Statuses a reverse proxy answers with when the server took too long; the
+// body is the proxy's own page, so nothing else describes the failure.
+const gatewayTimeoutStatuses = new Set([504, 524])
+
 /**
  * Compares every installed App with the registry and runs the dependency
- * update checks, returning the refreshed list.
+ * update checks, returning the refreshed list. The server bounds the checks
+ * and sets update_checks_incomplete when some did not finish in time.
  */
 export async function checkAppUpdates(botId: string): Promise<AppListResponse> {
-  const { data } = await postBotsByBotIdAppsCheckUpdates({
+  const { data, error, response } = await postBotsByBotIdAppsCheckUpdates({
     path: { bot_id: botId },
-    throwOnError: true,
   })
-  return data
+  if (data && !error) return data
+  if (response && gatewayTimeoutStatuses.has(response.status)) {
+    throw new UserFacingError(renderI18nMessage('apps.checkUpdatesTimedOut'))
+  }
+  throw error
 }
 
 export async function fetchAppRemovalPreview(botId: string, installationId: string): Promise<AppRemovalPreview> {
@@ -154,6 +160,16 @@ export function categoryDisplayName(category: Pick<AppCategory, 'name' | 'names'
 
 export function appInProgress(item: Pick<AppItem, 'status'>): boolean {
   return item.status === 'installing' || item.status === 'updating' || item.status === 'removing'
+}
+
+/**
+ * The failure text of an installation: the catalog copy for its error code, or
+ * the text recorded by an earlier server when the row has no code.
+ */
+export function appLastError(item: Pick<AppItem, 'last_error' | 'last_error_code'>, translate: (key: string) => string): string {
+  const code = item.last_error_code?.trim()
+  if (code) return translate(`errors.${code}`)
+  return item.last_error?.trim() ?? ''
 }
 
 /** A newer release is known for this installation. */

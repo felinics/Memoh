@@ -55,27 +55,13 @@
     </SettingsRow>
 
     <SettingsRow
-      :label="$t('bots.settings.memoryProvider')"
-      stack="sm"
+      :label="$t('bots.settings.memory')"
+      :description="$t('bots.settings.memoryDescription')"
     >
-      <div class="flex w-full justify-end sm:w-52">
-        <MemoryProviderSelect
-          v-if="memoryProviders.length > 0 || form.memory_provider_id"
-          v-model="form.memory_provider_id"
-          popover-align="end"
-          :providers="memoryProviders"
-          :placeholder="$t('bots.settings.memoryProviderPlaceholder')"
-        />
-        <Button
-          v-else
-          variant="outline"
-          size="sm"
-          @click="openProviderSettings('memory')"
-        >
-          <Plus />
-          {{ $t('provider.add') }}
-        </Button>
-      </div>
+      <Switch
+        :model-value="form.memory_enabled"
+        @update:model-value="(value) => form.memory_enabled = value"
+      />
     </SettingsRow>
   </SettingsSection>
 </template>
@@ -84,13 +70,11 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus } from 'lucide-vue-next'
-import { Button, SettingsRow, SettingsSection } from '@felinic/ui'
+import { Button, SettingsRow, SettingsSection, Switch } from '@felinic/ui'
 import SearchProviderSelect from './search-provider-select.vue'
 import FetchProviderSelect from './fetch-provider-select.vue'
-import MemoryProviderSelect from './memory-provider-select.vue'
 import type {
   SettingsSettings,
-  AdaptersProviderGetResponse,
   FetchprovidersGetResponse,
   SearchprovidersGetResponse,
 } from '@memohai/sdk'
@@ -99,7 +83,6 @@ const props = defineProps<{
   form: SettingsSettings
   searchProviders: SearchprovidersGetResponse[]
   fetchProviders: FetchprovidersGetResponse[]
-  memoryProviders: AdaptersProviderGetResponse[]
 }>()
 
 const router = useRouter()
@@ -108,7 +91,7 @@ const hasExternalFetchProviders = computed(() =>
   props.fetchProviders.some((p) => p.provider !== 'native'),
 )
 
-function openProviderSettings(routeName: 'web-search' | 'memory'): void {
+function openProviderSettings(routeName: 'web-search'): void {
   void router.push({ name: routeName })
 }
 </script>

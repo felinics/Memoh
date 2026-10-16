@@ -289,3 +289,26 @@ func TestOperationForTool(t *testing.T) {
 		t.Fatalf("OperationForTool(web_search) = %q, %v; want unsupported", got, ok)
 	}
 }
+
+func TestCapabilityActionsCannotBorrowReadOnlyBypass(t *testing.T) {
+	cfg := DefaultPolicyConfig()
+	for _, name := range []string{"mcp_manage", "app_manage"} {
+		for _, enabled := range []bool{false, true} {
+			cfg.Enabled = enabled
+			if got := policyDecision(cfg, name, map[string]any{"action": "list"}); got != DecisionBypass {
+				t.Fatalf("list should bypass review: %s", got)
+			}
+			for _, action := range []string{"install", "probe", "authorize", "update"} {
+				if got := policyDecision(cfg, name, map[string]any{"action": action}); got != DecisionNeedsApproval {
+					t.Fatalf("%s/%s bypassed concrete management approval: %s", name, action, got)
+				}
+			}
+		}
+		cfg.Enabled = true
+		cfg.Exec.Mode = PolicyModeDeny
+		if got := policyDecision(cfg, name, map[string]any{"action": "authorize"}); got != DecisionDeny {
+			t.Fatalf("explicit deny bypassed: %s", got)
+		}
+		cfg = DefaultPolicyConfig()
+	}
+}

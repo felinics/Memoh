@@ -71,6 +71,49 @@ func TestImportedCompatibilitiesRequireExplicitDefaultsForUnknownModels(t *testi
 	}
 }
 
+func TestPresetMetadataDisablesImplicitCapabilityDefaults(t *testing.T) {
+	t.Parallel()
+
+	unknown := providers.RemoteModel{ID: "provider-only-model"}
+	provider := providers.GetResponse{
+		Metadata: map[string]any{
+			"preset": map[string]any{"source": "openai.yaml"},
+		},
+	}
+	if got := importedCompatibilities(
+		unknown,
+		models.ModelTypeChat,
+		[]string{models.CompatToolCall, models.CompatReasoning},
+		allowCustomModelCapabilityDefaults(provider),
+	); len(got) != 0 {
+		t.Fatalf("preset mismatch capabilities = %#v, want none", got)
+	}
+
+	custom := providers.GetResponse{}
+	if got := importedCompatibilities(
+		unknown,
+		models.ModelTypeChat,
+		[]string{models.CompatToolCall},
+		allowCustomModelCapabilityDefaults(custom),
+	); len(got) != 1 || got[0] != models.CompatToolCall {
+		t.Fatalf("custom provider defaults = %#v, want explicit default", got)
+	}
+}
+
+func TestProviderTemplateIDDisablesImplicitCapabilityDefaults(t *testing.T) {
+	t.Parallel()
+
+	providersWithTemplates := []providers.GetResponse{
+		{ProviderTemplateID: "template-id"},
+		{Metadata: map[string]any{"registry": map[string]any{"source": "deepseek.yaml"}}},
+	}
+	for _, provider := range providersWithTemplates {
+		if allowCustomModelCapabilityDefaults(provider) {
+			t.Fatal("template provider must not receive implicit capability defaults")
+		}
+	}
+}
+
 func TestMergeManagedDiscoveredConfigReplacesCapabilities(t *testing.T) {
 	t.Parallel()
 
@@ -151,3 +194,18 @@ func TestMergeDiscoveredConfigRefreshesTrustedReasoningMetadata(t *testing.T) {
 
 func boolPointer(value bool) *bool { return &value }
 func intPointer(value int) *int    { return &value }
+
+func TestMergeDiscoveredConfigRefreshesMaxOutputTokens(t *testing.T) {
+	t.Parallel()
+
+	existing := models.ModelConfig{MaxOutputTokens: intPointer(4096)}
+
+	got, changed := mergeDiscoveredConfig(existing, models.ModelConfig{MaxOutputTokens: intPointer(8192)})
+	if !changed || got.MaxOutputTokens == nil || *got.MaxOutputTokens != 8192 {
+		t.Fatalf("max_output_tokens = %v changed = %v, want 8192 refreshed", got.MaxOutputTokens, changed)
+	}
+	got, changed = mergeDiscoveredConfig(existing, models.ModelConfig{})
+	if changed || got.MaxOutputTokens == nil || *got.MaxOutputTokens != 4096 {
+		t.Fatalf("an endpoint that reports nothing must keep the stored value: %v changed = %v", got.MaxOutputTokens, changed)
+	}
+}

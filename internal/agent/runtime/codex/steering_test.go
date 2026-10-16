@@ -110,7 +110,7 @@ func TestCodexSteerConsumerProcessesTwoInputsInOrder(t *testing.T) {
 	if source.enabled != 1 || source.closed != 1 || len(source.accepted) != 2 || source.accepted[0] != "one" || source.accepted[1] != "two" {
 		t.Fatalf("consumer lifecycle: %+v", source)
 	}
-	result, err := turn.result("")
+	result, err := turn.result()
 	if err != nil || len(result.Output) != 5 || len(result.SteerInputIDs) != 2 {
 		t.Fatalf("two identical inputs must stay distinct: %+v, %v", result, err)
 	}
@@ -160,7 +160,7 @@ func TestCodexSteerAcknowledgmentAloneDoesNotApplyInput(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("steer leaked past turn end")
 	}
-	result, err := turn.result("")
+	result, err := turn.result()
 	if err != nil {
 		t.Fatal(err)
 	}

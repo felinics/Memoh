@@ -124,3 +124,60 @@ func TestPostgresUpsertNodeConcurrentlyUnionsSourceRefs(t *testing.T) {
 		t.Fatalf("bounded refs retained range = %q...%q", got.SourceMessageIDs[0], got.SourceMessageIDs[len(got.SourceMessageIDs)-1])
 	}
 }
+
+func TestPostgresUpsertNodeRejectsConflictingBotScope(t *testing.T) {
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not set")
+	}
+	ctx := context.Background()
+	pool, err := dbpkg.OpenPostgresDSN(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	const teamID = "00000000-0000-0000-0000-000000000001"
+	tail := time.Now().UnixNano() % 1_000_000_000_000
+	userID := fmt.Sprintf("00000000-0000-0000-0000-%012d", tail)
+	botA := fmt.Sprintf("10000000-0000-0000-0000-%012d", tail)
+	botB := fmt.Sprintf("20000000-0000-0000-0000-%012d", tail)
+	name := fmt.Sprintf("scope-qa-%d", tail)
+	if _, err := pool.Exec(ctx, `INSERT INTO users (id,username,email) VALUES ($1,$2,$3)`, userID, name, name+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM bots WHERE team_id=$1 AND id IN ($2,$3)`, teamID, botA, botB)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM team_members WHERE team_id=$1 AND user_id=$2`, teamID, userID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, userID)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO team_members (team_id,user_id,role) VALUES ($1,$2,'member')`, teamID, userID); err != nil {
+		t.Fatal(err)
+	}
+	for i, bot := range []string{botA, botB} {
+		if _, err := pool.Exec(ctx, `INSERT INTO bots (team_id,id,owner_user_id,name) VALUES ($1,$2,$3,$4)`, teamID, bot, userID, fmt.Sprintf("%s-%d", name, i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := NewPostgres(dbsqlc.New(pool))
+	original := migrate.NodeSpec{ID: botA + ":memory", BotID: botA, Body: "A private original", Layer: migrate.LayerNote, CapturedAt: time.Now().UTC()}
+	if _, err := store.UpsertNode(ctx, original); err != nil {
+		t.Fatal(err)
+	}
+	attack := original
+	attack.BotID = botB
+	attack.Body = "B attempted overwrite"
+	if _, err := store.UpsertNode(ctx, attack); err == nil {
+		t.Fatal("cross-bot ID conflict overwrote the existing row")
+	}
+	got, err := store.GetNode(ctx, botA, original.ID)
+	if err != nil || got.BotID != botA || got.Body != original.Body {
+		t.Fatalf("original changed: %+v, %v", got, err)
+	}
+	if _, err := store.GetNode(ctx, botB, original.ID); err == nil {
+		t.Fatal("foreign row readable through B")
+	}
+	original.Body = "authorized A update"
+	if _, err := store.UpsertNode(ctx, original); err != nil {
+		t.Fatal(err)
+	}
+}

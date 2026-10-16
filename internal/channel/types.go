@@ -130,7 +130,16 @@ const (
 	StreamEventSpeech              StreamEventType = "speech"
 	StreamEventProcessingStarted   StreamEventType = "processing_started"
 	StreamEventProcessingCompleted StreamEventType = "processing_completed"
-	StreamEventProcessingFailed    StreamEventType = "processing_failed"
+	// StreamEventReset discards the reply text streamed so far: the agent is
+	// retrying and regenerates it from scratch, so the next delta starts a
+	// fresh reply instead of extending the failed attempt's partial output.
+	StreamEventReset StreamEventType = "reset"
+	// StreamEventSegmentEnd marks that the current assistant text segment
+	// ended at a tool call hidden from this channel. Adapters commit the
+	// buffered text as its own message and reset per-message streaming
+	// state, without rendering any tool-call UI, so the text that follows
+	// the tool call starts a fresh message.
+	StreamEventSegmentEnd StreamEventType = "segment_end"
 )
 
 // StreamStatus indicates the lifecycle state of a streaming reply.
@@ -168,12 +177,15 @@ const (
 )
 
 // StreamEvent represents a unified stream event routed through the channel layer.
+// ErrorCode names the catalog code Error was rendered from: with a code, Error
+// is complete user-facing copy; without one it is a bare error text.
 type StreamEvent struct {
 	Type        StreamEventType        `json:"type"`
 	Status      StreamStatus           `json:"status,omitempty"`
 	Delta       string                 `json:"delta,omitempty"`
 	Final       *StreamFinalizePayload `json:"final,omitempty"`
 	Error       string                 `json:"error,omitempty"`
+	ErrorCode   string                 `json:"error_code,omitempty"`
 	ToolCall    *StreamToolCall        `json:"tool_call,omitempty"`
 	Phase       StreamPhase            `json:"phase,omitempty"`
 	Attachments []Attachment           `json:"attachments,omitempty"`

@@ -14,6 +14,12 @@ function translate(key: string) {
   return key
 }
 
+// Only the probe failure codes have copy in this mock, so an unknown code
+// exercises the fallback.
+function hasTranslation(key: string) {
+  return key.startsWith('errors.agent.provider_')
+}
+
 async function flushPromises() {
   await Promise.resolve()
   await nextTick()
@@ -22,7 +28,7 @@ async function flushPromises() {
 }
 
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: translate }),
+  useI18n: () => ({ t: translate, te: hasTranslation }),
 }))
 
 vi.mock('@memohai/sdk', () => ({
@@ -38,7 +44,6 @@ vi.mock('@/composables/useProviderModelCatalog', () => ({
 }))
 
 vi.mock('lucide-vue-next', () => ({
-  AlertCircle: () => h('span'),
   KeyRound: () => h('span'),
   RefreshCw: () => h('span'),
 }))
@@ -90,10 +95,12 @@ describe('provider test connection states', () => {
     document.body.innerHTML = ''
   })
 
-  async function mountAndRunTest(status: string, message = 'service error (404): not found') {
-    mocks.postTest.mockResolvedValue({
-      data: { status, reachable: true, latency_ms: 12, message },
-    })
+  async function mountAndRunTest(result: Record<string, unknown> | Error) {
+    if (result instanceof Error || !('status' in result)) {
+      mocks.postTest.mockRejectedValue(result)
+    } else {
+      mocks.postTest.mockResolvedValue({ data: { latency_ms: 12, ...result } })
+    }
     const providerForm = (await import('./provider-form.vue')).default
     const root = document.createElement('div')
     document.body.append(root)
@@ -123,31 +130,59 @@ describe('provider test connection states', () => {
     return { app, root }
   }
 
-  // #1087: unverified 是"无法确认"而非失败,必须给指引文案,不能落进错误态。
-  it('shows the unverified hint when the provider cannot be confirmed', async () => {
-    const { app, root } = await mountAndRunTest('unverified')
+  // #1087: unverified 是"无法确认"而非失败,必须给指引文案,不能落进错误态;
+  // code 文案降为次要行。
+  it('shows the unverified hint with the code copy as a second line', async () => {
+    const { app, root } = await mountAndRunTest({
+      status: 'unverified',
+      reachable: true,
+      code: 'agent.provider_request_rejected',
+    })
     expect(root.textContent).toContain('provider.testUnverifiedHint')
+    expect(root.textContent).toContain('errors.agent.provider_request_rejected')
     app.unmount()
     root.remove()
   })
 
-  it('does not show the unverified hint on a plain error', async () => {
-    const { app, root } = await mountAndRunTest('error')
+  it('shows the copy of the failure code without the unverified hint', async () => {
+    const { app, root } = await mountAndRunTest({
+      status: 'auth_error',
+      reachable: true,
+      code: 'agent.provider_auth_failed',
+    })
+    expect(root.textContent).toContain('errors.agent.provider_auth_failed')
     expect(root.textContent).not.toContain('provider.testUnverifiedHint')
     app.unmount()
     root.remove()
   })
 
-  // Base URL 指向网页时,上游把整个 HTML 页面塞在错误体里;页面散文
-  // (含剥了链接的死文字)不是有用的 API 错误,必须整条丢掉,只留状态头。
-  it('drops HTML page prose from the upstream error body', async () => {
-    const { app, root } = await mountAndRunTest(
-      'unverified',
-      'api error 404: 404 Not Found [body: <!doctype html><html><body><h1>Example Domain</h1><a href="https://iana.org">Learn more</a></body></html>]',
-    )
-    expect(root.textContent).toContain('api error 404')
-    expect(root.textContent).not.toContain('Learn more')
-    expect(root.textContent).not.toContain('Example Domain')
+  it('falls back to the unreachable copy when no code was sent', async () => {
+    const { app, root } = await mountAndRunTest({ status: 'error', reachable: false })
+    expect(root.textContent).toContain('provider.unreachable')
+    app.unmount()
+    root.remove()
+  })
+
+  it('falls back to the generic copy for a code without copy', async () => {
+    const { app, root } = await mountAndRunTest({
+      status: 'unverified',
+      reachable: true,
+      code: 'agent.some_future_code',
+    })
+    expect(root.textContent).toContain('provider.testFailed')
+    expect(root.textContent).not.toContain('agent.some_future_code')
+    app.unmount()
+    root.remove()
+  })
+
+  // 请求本身失败时只显示 code 对应的文案,不显示 Problem 的 detail。
+  it('shows the copy of a failed request, not its detail', async () => {
+    const { app, root } = await mountAndRunTest(Object.assign(new Error('dial tcp 10.0.0.7:443: connect: connection refused'), {
+      code: 'agent.provider_unreachable',
+      fault: 'dependency',
+    }))
+    expect(root.textContent).toContain('could not reach the model provider')
+    expect(root.textContent).not.toContain('dial tcp')
     app.unmount()
     root.remove()
   })

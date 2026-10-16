@@ -615,6 +615,36 @@ func (q *Queries) GetSessionDiscussCursor(ctx context.Context, arg GetSessionDis
 	return i, err
 }
 
+const listBotSessionIDs = `-- name: ListBotSessionIDs :many
+SELECT id
+FROM bot_sessions
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1
+ORDER BY id
+`
+
+// Every session a bot-wide runtime reset covers, deleted ones included, as
+// ClearHistoryByBot does.
+func (q *Queries) ListBotSessionIDs(ctx context.Context, botID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listBotSessionIDs, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionDiscussCursorsByBot = `-- name: ListSessionDiscussCursorsByBot :many
 SELECT c.session_id, c.scope_key, c.route_id, c.source, c.consumed_cursor, c.consumed_event_cursor, c.updated_at, c.team_id
 FROM bot_session_discuss_cursors c
@@ -1342,32 +1372,14 @@ WITH invalidated_session AS MATERIALIZED (
     AND id = $1
     AND deleted_at IS NULL
   RETURNING id
-),
-deleted_acp_states AS (
-  DELETE FROM agent_session_states state
-  USING invalidated_session invalidated
-  WHERE state.team_id = public.memoh_current_team_id()
-    AND state.session_id = invalidated.id
-  RETURNING state.session_id
-),
-deleted_acp_lines AS (
-  DELETE FROM agent_session_state_lines line
-  USING invalidated_session invalidated
-  WHERE line.team_id = public.memoh_current_team_id()
-    AND line.session_id = invalidated.id
-  RETURNING line.session_id
 )
 DELETE FROM agent_session_publications publication
 USING invalidated_session invalidated
 WHERE publication.team_id = public.memoh_current_team_id()
   AND publication.session_id = invalidated.id
-  AND (SELECT count(*) FROM deleted_acp_states) >= 0
-  AND (SELECT count(*) FROM deleted_acp_lines) >= 0
 `
 
-// ACP state is removed in full: soft delete never fires the hard-delete FK
-// cascades, so headers, the shared line set, and the publication head must
-// all be dropped here or they orphan forever.
+// Soft delete does not fire FK cascades; remove the runtime publication head.
 func (q *Queries) SoftDeleteSession(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, softDeleteSession, id)
 	return err
@@ -1393,27 +1405,11 @@ invalidated_sessions AS MATERIALIZED (
   WHERE session.team_id = public.memoh_current_team_id()
     AND session.id = target.id
   RETURNING session.id
-),
-deleted_acp_states AS (
-  DELETE FROM agent_session_states state
-  USING invalidated_sessions invalidated
-  WHERE state.team_id = public.memoh_current_team_id()
-    AND state.session_id = invalidated.id
-  RETURNING state.session_id
-),
-deleted_acp_lines AS (
-  DELETE FROM agent_session_state_lines line
-  USING invalidated_sessions invalidated
-  WHERE line.team_id = public.memoh_current_team_id()
-    AND line.session_id = invalidated.id
-  RETURNING line.session_id
 )
 DELETE FROM agent_session_publications publication
 USING invalidated_sessions invalidated
 WHERE publication.team_id = public.memoh_current_team_id()
   AND publication.session_id = invalidated.id
-  AND (SELECT count(*) FROM deleted_acp_states) >= 0
-  AND (SELECT count(*) FROM deleted_acp_lines) >= 0
 `
 
 func (q *Queries) SoftDeleteSessionsByBot(ctx context.Context, botID pgtype.UUID) error {

@@ -6,19 +6,27 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 type SkillProvider struct {
 	logger *slog.Logger
+	load   func(context.Context, string) (map[string]SkillDetail, error)
 }
 
-func NewSkillProvider(log *slog.Logger) *SkillProvider {
+func NewSkillProvider(log *slog.Logger, loaders ...func(context.Context, string) (map[string]SkillDetail, error)) *SkillProvider {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &SkillProvider{logger: log.With(slog.String("tool", "skill"))}
+	p := &SkillProvider{logger: log.With(slog.String("tool", "skill"))}
+	if len(loaders) > 0 {
+		p.load = loaders[0]
+	}
+	return p
 }
 
 func (*SkillProvider) Usage(_ context.Context, _ SessionContext, available AvailableTools) string {
@@ -35,20 +43,24 @@ func (*SkillProvider) Usage(_ context.Context, _ SessionContext, available Avail
 	return usageSection("Skills", parts)
 }
 
-func (*SkillProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *SkillProvider) Tools(ctx context.Context, session SessionContext) ([]toolexec.Tool, error) {
+	if p.load != nil {
+		loaded, err := p.load(ctx, session.BotID)
+		if err != nil {
+			return nil, err
+		}
+		session.Skills = loaded
+	}
 	if len(session.Skills) == 0 {
 		return nil, nil
 	}
 	skills := session.Skills
-	return []sdk.Tool{
+	return []toolexec.Tool{
 		{
 			Name:        ToolListSkills().String(),
 			Description: "List the skills available in the current session.",
-			Parameters: map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
-			},
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+			Parameters:  toolexec.SchemaFor[listSkillsArgs](),
+			Execute: toolexec.Typed(func(_ *toolexec.ToolExecContext, _ listSkillsArgs) (sdk.ToolOutput, error) {
 				names := make([]string, 0, len(skills))
 				for name := range skills {
 					names = append(names, name)
@@ -64,51 +76,44 @@ func (*SkillProvider) Tools(_ context.Context, session SessionContext) ([]sdk.To
 						"path":        skill.Path,
 					})
 				}
-				return map[string]any{
+				return toolexec.OutputFromValue(map[string]any{
 					"success": true,
 					"count":   len(items),
 					"skills":  items,
-				}, nil
-			},
+				}), nil
+			}),
 		},
 		{
 			Name:        ToolUseSkill().String(),
 			Description: "Activate a skill to get its full instructions. Call this when you think a skill is relevant to the current task.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"skillName": map[string]any{
-						"type":        "string",
-						"description": "The name of the skill to activate",
-					},
-					"reason": map[string]any{
-						"type":        "string",
-						"description": "Why this skill is relevant to the current task",
-					},
-				},
-				"required": []string{"skillName", "reason"},
-			},
-			Execute: func(_ *sdk.ToolExecContext, input any) (any, error) {
-				args := inputAsMap(input)
-				skillName := StringArg(args, "skillName")
+			Parameters:  toolexec.SchemaFor[useSkillArgs](),
+			Execute: toolexec.Typed(func(_ *toolexec.ToolExecContext, args useSkillArgs) (sdk.ToolOutput, error) {
+				skillName := strings.TrimSpace(args.SkillName)
 				if skillName == "" {
-					return nil, errors.New("skillName is required")
+					return sdk.ToolOutput{}, errors.New("skillName is required")
 				}
 				skill, ok := skills[skillName]
 				if !ok {
-					return map[string]any{
+					return toolexec.OutputFromValue(map[string]any{
 						"success": false,
 						"error":   fmt.Sprintf("skill %q not found — check available skills in the system prompt", skillName),
-					}, nil
+					}), nil
 				}
-				return map[string]any{
+				return toolexec.OutputFromValue(map[string]any{
 					"success":     true,
 					"skillName":   skillName,
 					"description": skill.Description,
 					"content":     skill.Content,
 					"path":        skill.Path,
-				}, nil
-			},
+				}), nil
+			}),
 		},
 	}, nil
+}
+
+type listSkillsArgs struct{}
+
+type useSkillArgs struct {
+	Reason    string `json:"reason" jsonschema:"Why this skill is relevant to the current task"`
+	SkillName string `json:"skillName" jsonschema:"The name of the skill to activate"`
 }

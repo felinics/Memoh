@@ -39,16 +39,6 @@ func TestRuntimeBotID(t *testing.T) {
 	}
 }
 
-func TestRuntimeBotIDFromMemoryID(t *testing.T) {
-	t.Parallel()
-	if got := runtimeBotIDFromMemoryID("bot-1:mem_123"); got != "bot-1" {
-		t.Fatalf("expected bot-1, got %q", got)
-	}
-	if got := runtimeBotIDFromMemoryID("invalid"); got != "" {
-		t.Fatalf("expected empty for invalid format, got %q", got)
-	}
-}
-
 func TestRuntimeLocalMemoryID(t *testing.T) {
 	t.Parallel()
 	if got := runtimeLocalMemoryID("bot-1:mem_123"); got != "mem_123" {

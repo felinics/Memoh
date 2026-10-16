@@ -1,29 +1,4 @@
 #!/usr/bin/env sh
-# Check for large files before commit
-
-MAX_SIZE=1048576      # 1MB in bytes
-
-files=$(git diff --cached --name-only --diff-filter=ACMR)
-has_large_file=false
-
-echo "Checking for large files..."
-
-for file in $files; do
-  if [ -f "$file" ]; then
-    size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null)
-    if [ "$size" -gt "$MAX_SIZE" ]; then
-      size_mb=$(echo "scale=2; $size / 1048576" | bc 2>/dev/null || echo "$((size / 1048576))")
-      echo "  File '$file' is too large (${size_mb}MB). Maximum allowed is $((MAX_SIZE / 1048576))MB."
-      has_large_file=true
-    fi
-  fi
-done
-
-if [ "$has_large_file" = true ]; then
-  echo ""
-  echo "Error: Large files detected. Commit rejected."
-  echo "   If this is intentional, use: git commit --no-verify"
-  exit 1
-fi
-
-echo "File size check passed"
+export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec node "$SCRIPT_DIR/checks.mjs" sizes

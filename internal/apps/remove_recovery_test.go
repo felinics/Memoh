@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 type removalConnectors struct {
@@ -76,8 +78,8 @@ func TestRemoveRetainsFailedCleanupUntilRetry(t *testing.T) {
 			rec := &recorder{}
 			_, err := f.service.Remove(t.Context(), testBotID, f.inst.ID, RemoveOptions{}, rec)
 			assertCleanupFailed(t, f, rec, err)
-			if !strings.HasPrefix(f.installation(t).LastError, "App removal failed:") {
-				t.Fatal("removal failure must identify the failed operation")
+			if inst := f.installation(t); inst.LastErrorCode == "" || inst.LastError != "" {
+				t.Fatalf("removal failure must store its code only: %+v", inst)
 			}
 			if !errors.Is(err, errCleanupProbe) {
 				t.Fatalf("lost error cause: %v", err)
@@ -110,18 +112,17 @@ func TestRemoveRetainsFailedCleanupUntilRetry(t *testing.T) {
 	}
 }
 
-func TestDiscoveryErrorNeverBecomesPublicFailureText(t *testing.T) {
+func TestDiscoveryFailureRecordsPublicCode(t *testing.T) {
 	f := newCleanupFixture(t)
 	view := f.deps.list()
-	view.DiscoveryError = "bridge dial 10.0.0.8 password=synthetic-test-secret"
+	view.DiscoveryFailed = true
 	f.depFaults.view = &view
 	_, err := f.service.Update(t.Context(), testBotID, f.inst.ID, &recorder{})
-	if err == nil || !strings.Contains(err.Error(), view.DiscoveryError) {
-		t.Fatalf("logs must retain the cause: %v", err)
+	if err == nil || !errors.Is(err, errDiscoveryFailed) {
+		t.Fatalf("update error = %v, want errDiscoveryFailed", err)
 	}
-	got := f.installation(t).LastError
-	if strings.Contains(got, "synthetic-test-secret") || strings.Contains(got, "10.0.0.8") || !strings.Contains(got, genericPublicCause) {
-		t.Fatalf("unsafe persisted error: %q", got)
+	if got := f.installation(t).LastErrorCode; got != string(apperror.CodeWorkspaceDependencyDiscoveryFailed) {
+		t.Fatalf("persisted error code = %q", got)
 	}
 }
 

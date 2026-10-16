@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
@@ -57,6 +58,12 @@ func DialTLS(_ context.Context, target string, tlsOpts *TLSOptions) (*Client, er
 	creds := insecure.NewCredentials()
 	opts := []grpc.DialOption{
 		grpc.WithNoProxy(),
+		// Every dial to a workspace funnels through here — UDS and TCP mTLS
+		// alike — so this is the one place the client span and the outgoing
+		// traceparent have to be attached. The bridge on the other end is not
+		// instrumented: it runs inside the workspace container, which has no
+		// collector to export to (see docs/observability.md).
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                30 * time.Second, // ping every 30s if idle
 			Timeout:             10 * time.Second, // wait 10s for ping ack
@@ -152,7 +159,7 @@ func (c *Client) ReadFile(ctx context.Context, path string, lineOffset, nLines i
 		LineOffset: lineOffset,
 		NLines:     nLines,
 	})
-	return resp, mapError(err)
+	return resp, mapError(ctx, err)
 }
 
 func (c *Client) WriteFile(ctx context.Context, path string, content []byte) error {
@@ -160,7 +167,7 @@ func (c *Client) WriteFile(ctx context.Context, path string, content []byte) err
 		Path:    path,
 		Content: content,
 	})
-	return mapError(err)
+	return mapError(ctx, err)
 }
 
 // ListDirResult holds the paginated result of a directory listing.
@@ -179,7 +186,7 @@ func (c *Client) ListDir(ctx context.Context, path string, recursive bool, offse
 		CollapseThreshold: collapseThreshold,
 	})
 	if err != nil {
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 	return &ListDirResult{
 		Entries:    resp.GetEntries(),
@@ -199,9 +206,8 @@ func (c *Client) ListDirAll(ctx context.Context, path string, recursive bool) ([
 
 // ListDirBounded lists at most maxEntries entries. The bridge stops traversing
 // once the bound is exceeded and fails with a resource-exhausted error, so
-// server-side memory stays bounded BEFORE collection - callers with a hard
-// ceiling (the ACP session-state capture) must use this instead of judging an
-// unbounded listing after the fact.
+// server-side memory stays bounded before collection. Callers with a hard
+// ceiling use this instead of judging an unbounded listing after the fact.
 func (c *Client) ListDirBounded(ctx context.Context, path string, recursive bool, maxEntries int32) ([]*pb.FileEntry, error) {
 	resp, err := c.svc.ListDir(ctx, &pb.ListDirRequest{
 		Path:       path,
@@ -209,7 +215,7 @@ func (c *Client) ListDirBounded(ctx context.Context, path string, recursive bool
 		MaxEntries: maxEntries,
 	})
 	if err != nil {
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 	return resp.GetEntries(), nil
 }
@@ -217,19 +223,19 @@ func (c *Client) ListDirBounded(ctx context.Context, path string, recursive bool
 func (c *Client) Stat(ctx context.Context, path string) (*pb.FileEntry, error) {
 	resp, err := c.svc.Stat(ctx, &pb.StatRequest{Path: path})
 	if err != nil {
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 	return resp.GetEntry(), nil
 }
 
 func (c *Client) Mkdir(ctx context.Context, path string) error {
 	_, err := c.svc.Mkdir(ctx, &pb.MkdirRequest{Path: path})
-	return mapError(err)
+	return mapError(ctx, err)
 }
 
 func (c *Client) Rename(ctx context.Context, oldPath, newPath string) error {
 	_, err := c.svc.Rename(ctx, &pb.RenameRequest{OldPath: oldPath, NewPath: newPath})
-	return mapError(err)
+	return mapError(ctx, err)
 }
 
 // ExecResult holds the output of a non-streaming exec call.
@@ -247,9 +253,10 @@ type ExecResult struct {
 // inherited environment keys before Env is appended, so explicit Env entries
 // remain authoritative.
 type ExecOptions struct {
-	Env      []string
-	CleanEnv bool
-	UnsetEnv []string
+	ReportLiveness bool
+	Env            []string
+	CleanEnv       bool
+	UnsetEnv       []string
 }
 
 // Exec runs a command and collects all output. For streaming, use ExecStream.
@@ -276,7 +283,7 @@ func (c *Client) ExecWithStdinEnv(ctx context.Context, command, workDir string, 
 func (c *Client) ExecWithOptions(ctx context.Context, command, workDir string, timeout int32, stdinData []byte, opts ExecOptions) (*ExecResult, error) {
 	stream, err := c.svc.Exec(ctx)
 	if err != nil {
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 
 	// A command may exit without consuming its stdin; the server then closes
@@ -290,17 +297,18 @@ func (c *Client) ExecWithOptions(ctx context.Context, command, workDir string, t
 		TimeoutSeconds: timeout,
 		CleanEnv:       opts.CleanEnv,
 		UnsetEnv:       opts.UnsetEnv,
+		ReportLiveness: opts.ReportLiveness,
 	})
 	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
+		return nil, mapError(ctx, err)
 	}
 	if err == nil && len(stdinData) > 0 {
 		if err := stream.Send(&pb.ExecInput{StdinData: stdinData}); err != nil && !errors.Is(err, io.EOF) {
-			return nil, err
+			return nil, mapError(ctx, err)
 		}
 	}
 	if err := stream.CloseSend(); err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
+		return nil, mapError(ctx, err)
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -312,7 +320,7 @@ func (c *Client) ExecWithOptions(ctx context.Context, command, workDir string, t
 			break
 		}
 		if err != nil {
-			return nil, err
+			return nil, mapError(ctx, err)
 		}
 		switch msg.GetStream() {
 		case pb.ExecOutput_STDOUT:
@@ -349,7 +357,7 @@ func (c *Client) ExecStreamWithOptions(ctx context.Context, command, workDir str
 	stream, err := c.svc.Exec(streamCtx)
 	if err != nil {
 		cancel()
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 
 	// Send config message first
@@ -360,10 +368,11 @@ func (c *Client) ExecStreamWithOptions(ctx context.Context, command, workDir str
 		TimeoutSeconds: timeout,
 		CleanEnv:       opts.CleanEnv,
 		UnsetEnv:       opts.UnsetEnv,
+		ReportLiveness: opts.ReportLiveness,
 	})
 	if err != nil {
 		cancel()
-		return nil, err
+		return nil, mapError(ctx, err)
 	}
 
 	return &ExecStream{stream: stream, cancel: cancel}, nil
@@ -380,23 +389,24 @@ type ExecStream struct {
 func (s *ExecStream) SendStdin(data []byte) error {
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
-	return s.stream.Send(&pb.ExecInput{
+	return mapStreamError(s.stream, s.stream.Send(&pb.ExecInput{
 		StdinData: data,
-	})
+	}))
 }
 
 // Recv receives output from the process.
 func (s *ExecStream) Recv() (*pb.ExecOutput, error) {
-	return s.stream.Recv()
+	msg, err := s.stream.Recv()
+	return msg, mapStreamError(s.stream, err)
 }
 
 // Resize sends a terminal resize event to the running process.
 func (s *ExecStream) Resize(cols, rows uint32) error {
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
-	return s.stream.Send(&pb.ExecInput{
+	return mapStreamError(s.stream, s.stream.Send(&pb.ExecInput{
 		Resize: &pb.TerminalResize{Cols: cols, Rows: rows},
-	})
+	}))
 }
 
 // Close closes the stream.
@@ -428,7 +438,7 @@ func (c *Client) ExecStreamPTYWithOptions(ctx context.Context, command, workDir 
 	stream, err := c.svc.Exec(streamCtx)
 	if err != nil {
 		cancel()
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 
 	err = stream.Send(&pb.ExecInput{
@@ -439,10 +449,13 @@ func (c *Client) ExecStreamPTYWithOptions(ctx context.Context, command, workDir 
 		Resize:   &pb.TerminalResize{Cols: cols, Rows: rows},
 		CleanEnv: opts.CleanEnv,
 		UnsetEnv: opts.UnsetEnv,
+		// A terminal has no command deadline; the stream's lifetime bounds
+		// the shell. Without this the bridge applies its default PTY timeout.
+		TimeoutSeconds: -1,
 	})
 	if err != nil {
 		cancel()
-		return nil, err
+		return nil, mapError(ctx, err)
 	}
 
 	return &ExecStream{stream: stream, cancel: cancel}, nil
@@ -454,23 +467,7 @@ func (c *Client) ReadRaw(ctx context.Context, path string) (io.ReadCloser, error
 	stream, err := c.svc.ReadRaw(streamCtx, &pb.ReadRawRequest{Path: path})
 	if err != nil {
 		cancel()
-		return nil, mapError(err)
-	}
-	return newStreamReader(stream, cancel)
-}
-
-// ReadRawNoFollow streams a regular file below root without following any
-// symbolic-link component. The bridge performs validation and open as one
-// descriptor-anchored operation; callers must pass a clean relative path.
-func (c *Client) ReadRawNoFollow(ctx context.Context, root, relativePath string) (io.ReadCloser, error) {
-	streamCtx, cancel := context.WithCancel(ctx)
-	stream, err := c.svc.ReadRawNoFollow(streamCtx, &pb.ReadRawNoFollowRequest{
-		Root:         root,
-		RelativePath: relativePath,
-	})
-	if err != nil {
-		cancel()
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 	return newStreamReader(stream, cancel)
 }
@@ -482,13 +479,13 @@ func (c *Client) WriteRaw(ctx context.Context, path string, r io.Reader) (int64,
 
 	stream, err := c.svc.WriteRaw(streamCtx)
 	if err != nil {
-		return 0, mapError(err)
+		return 0, mapError(ctx, err)
 	}
 	// Always send the path first, even for an empty reader. Besides making empty
 	// files representable, this lets the server create its temporary file before
 	// any payload chunks arrive.
 	if err := stream.Send(&pb.WriteRawChunk{Path: path}); err != nil {
-		return 0, err
+		return 0, writeRawSendError(stream, err)
 	}
 
 	buf := make([]byte, 64*1024)
@@ -497,7 +494,7 @@ func (c *Client) WriteRaw(ctx context.Context, path string, r io.Reader) (int64,
 		if n > 0 {
 			chunk := &pb.WriteRawChunk{Data: buf[:n]}
 			if sendErr := stream.Send(chunk); sendErr != nil {
-				return 0, sendErr
+				return 0, writeRawSendError(stream, sendErr)
 			}
 		}
 		if readErr == io.EOF {
@@ -515,50 +512,21 @@ func (c *Client) WriteRaw(ctx context.Context, path string, r io.Reader) (int64,
 
 	resp, err := stream.CloseAndRecv()
 	if err != nil {
-		return 0, err
+		return 0, mapError(ctx, err)
 	}
 	return resp.GetBytesWritten(), nil
 }
 
-// WriteRawNoFollow creates a new regular file below root without following any
-// symbolic-link component. It fails closed if the target already exists.
-func (c *Client) WriteRawNoFollow(ctx context.Context, root, relativePath string, r io.Reader) (int64, error) {
-	streamCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	stream, err := c.svc.WriteRawNoFollow(streamCtx)
-	if err != nil {
-		return 0, mapError(err)
-	}
-	if err := stream.Send(&pb.WriteRawNoFollowChunk{Root: root, RelativePath: relativePath}); err != nil {
-		return 0, mapError(err)
-	}
-
-	buf := make([]byte, 64*1024)
-	for {
-		n, readErr := r.Read(buf)
-		if n > 0 {
-			if sendErr := stream.Send(&pb.WriteRawNoFollowChunk{Data: buf[:n]}); sendErr != nil {
-				return 0, mapError(sendErr)
-			}
-		}
-		if errors.Is(readErr, io.EOF) {
-			break
-		}
-		if readErr != nil {
-			// Mirror WriteRaw: an explicit abort keeps the failure terminal on
-			// the bridge side before this call returns.
-			_ = stream.Send(&pb.WriteRawNoFollowChunk{Abort: true})
-			_, _ = stream.CloseAndRecv()
-			return 0, readErr
+// writeRawSendError returns the status of a WriteRaw stream that Send failed
+// on. Send reports io.EOF when the stream has already ended, and the status is
+// left for CloseAndRecv.
+func writeRawSendError(stream pb.ContainerService_WriteRawClient, err error) error {
+	if errors.Is(err, io.EOF) {
+		if _, recvErr := stream.CloseAndRecv(); recvErr != nil {
+			err = recvErr
 		}
 	}
-
-	resp, err := stream.CloseAndRecv()
-	if err != nil {
-		return 0, mapError(err)
-	}
-	return resp.GetBytesWritten(), nil
+	return mapStreamError(stream, err)
 }
 
 func (c *Client) DeleteFile(ctx context.Context, path string, recursive bool) error {
@@ -566,7 +534,7 @@ func (c *Client) DeleteFile(ctx context.Context, path string, recursive bool) er
 		Path:      path,
 		Recursive: recursive,
 	})
-	return mapError(err)
+	return mapError(ctx, err)
 }
 
 func (c *Client) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
@@ -580,13 +548,13 @@ func (c *Client) DialContext(ctx context.Context, network, address string) (net.
 	stream, err := c.svc.Tunnel(streamCtx)
 	if err != nil {
 		cancel()
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 	if err := sendTunnelFrame(ctx, stream, &pb.TunnelFrame{
 		Frame: &pb.TunnelFrame_Open{Open: &pb.TunnelOpen{Address: address}},
 	}); err != nil {
 		cancel()
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 	conn := &tunnelConn{
 		stream: stream,
@@ -645,7 +613,7 @@ func (c *tunnelConn) waitOpen(ctx context.Context) error {
 	select {
 	case result := <-resultCh:
 		if result.err != nil {
-			return mapError(result.err)
+			return mapError(ctx, result.err)
 		}
 		switch payload := result.frame.GetFrame().(type) {
 		case *pb.TunnelFrame_Data:
@@ -679,7 +647,7 @@ func (c *tunnelConn) Read(p []byte) (int, error) {
 			if errors.Is(err, io.EOF) {
 				return 0, io.EOF
 			}
-			return 0, mapError(err)
+			return 0, mapStreamError(c.stream, err)
 		}
 		switch payload := frame.GetFrame().(type) {
 		case *pb.TunnelFrame_Data:
@@ -713,7 +681,7 @@ func (c *tunnelConn) Write(p []byte) (int, error) {
 	if err := c.stream.Send(&pb.TunnelFrame{
 		Frame: &pb.TunnelFrame_Data{Data: &pb.TunnelData{Data: data}},
 	}); err != nil {
-		return 0, mapError(err)
+		return 0, mapStreamError(c.stream, err)
 	}
 	return len(p), nil
 }
@@ -756,7 +724,7 @@ func newStreamReader(stream pb.ContainerService_ReadRawClient, cancel context.Ca
 		return io.NopCloser(bytes.NewReader(nil)), nil
 	case err != nil:
 		cancel()
-		return nil, mapError(err)
+		return nil, mapStreamError(stream, err)
 	default:
 		return &streamReader{stream: stream, buf: first.GetData(), cancel: cancel}, nil
 	}
@@ -770,7 +738,7 @@ func (r *streamReader) fill() error {
 			if errors.Is(err, io.EOF) {
 				return io.EOF
 			}
-			return mapError(err)
+			return mapStreamError(r.stream, err)
 		}
 		r.buf = msg.GetData()
 		r.off = 0

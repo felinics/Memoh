@@ -17,6 +17,8 @@ package claudecode
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // PinnedCLIVersion is the CLI version verified by the protocol fixtures.
@@ -129,7 +131,7 @@ type settingsResponse struct {
 func decodeInbound(line []byte) (*inboundMessage, error) {
 	var msg inboundMessage
 	if err := json.Unmarshal(line, &msg); err != nil {
-		return nil, err
+		return nil, errs.WrapDependency(err, "")
 	}
 	return &msg, nil
 }

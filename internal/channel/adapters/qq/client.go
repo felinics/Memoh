@@ -17,6 +17,21 @@ import (
 	"github.com/felinics/memoh/internal/redact"
 )
 
+// statusError is a non-2xx response from the QQ token or API endpoint.
+type statusError struct {
+	StatusCode int
+	message    string
+}
+
+func (e *statusError) Error() string { return e.message }
+
+// isUnauthorized reports a 401 from either endpoint; the caller drops the
+// cached token and retries once.
+func isUnauthorized(err error) bool {
+	var statusErr *statusError
+	return errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusUnauthorized
+}
+
 type qqClient struct {
 	appID        string
 	clientSecret string
@@ -83,7 +98,10 @@ func (c *qqClient) accessToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("qq token read: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("qq token request failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		return "", &statusError{
+			StatusCode: resp.StatusCode,
+			message:    fmt.Sprintf("qq token request failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(raw))),
+		}
 	}
 
 	var result map[string]json.RawMessage
@@ -177,7 +195,7 @@ func (c *qqClient) doJSONWithRetry(ctx context.Context, method, url string, payl
 		if lastErr == nil {
 			return nil
 		}
-		if !auth || !strings.Contains(lastErr.Error(), "status=401") {
+		if !auth || !isUnauthorized(lastErr) {
 			return lastErr
 		}
 		c.clearToken()
@@ -224,13 +242,16 @@ func (c *qqClient) doJSONOnce(ctx context.Context, method, requestURL string, pa
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf(
-			"qq api request failed: method=%s url=%s status=%d body=%s",
-			method,
-			requestURL,
-			resp.StatusCode,
-			strings.TrimSpace(string(raw)),
-		)
+		return &statusError{
+			StatusCode: resp.StatusCode,
+			message: fmt.Sprintf(
+				"qq api request failed: method=%s url=%s status=%d body=%s",
+				method,
+				requestURL,
+				resp.StatusCode,
+				strings.TrimSpace(string(raw)),
+			),
+		}
 	}
 	if out == nil || len(raw) == 0 {
 		return nil
@@ -386,6 +407,51 @@ func (c *qqClient) sendMedia(ctx context.Context, target qqTarget, fileInfo, rep
 	default:
 		return fmt.Errorf("qq media send not supported for target kind: %s", target.Kind)
 	}
+}
+
+const (
+	qqStreamInputGenerating = 1
+	qqStreamInputDone       = 10
+)
+
+type qqStreamShardRequest struct {
+	StreamMsgID string
+	Index       int
+	InputState  int
+	ContentRaw  string
+}
+
+type qqStreamShardResponse struct {
+	ID           string `json:"id"`
+	RemainMsgLen int    `json:"remain_msg_len"`
+}
+
+// sendStreamShard posts one chunk of a C2C streaming message.
+// All shards use input_mode=replace with the cumulative text so far: the
+// payload always starts with whatever prefix the server has already
+// delivered, so silently dropped middle shards (observed on QQ clients)
+// never corrupt the final content.
+func (c *qqClient) sendStreamShard(ctx context.Context, openID, replyTo string, shard qqStreamShardRequest) (qqStreamShardResponse, error) {
+	body := map[string]any{
+		"input_mode":   "replace",
+		"input_state":  shard.InputState,
+		"index":        shard.Index,
+		"content_type": "markdown",
+		"content_raw":  shard.ContentRaw,
+		"msg_seq":      c.nextMsgSeq(replyTo),
+	}
+	if strings.TrimSpace(shard.StreamMsgID) != "" {
+		body["stream_msg_id"] = strings.TrimSpace(shard.StreamMsgID)
+	}
+	if strings.TrimSpace(replyTo) != "" {
+		body["msg_id"] = strings.TrimSpace(replyTo)
+	}
+
+	var result qqStreamShardResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/v2/users/"+openID+"/stream_messages", body, &result); err != nil {
+		return qqStreamShardResponse{}, err
+	}
+	return result, nil
 }
 
 func isLocalhost(host string) bool {

@@ -9,7 +9,7 @@ import (
 
 func TestBuildInboundMessage_TextOnly(t *testing.T) {
 	msg := WeixinMessage{
-		MessageID:    12345,
+		MessageID:    "12345",
 		Seq:          1,
 		FromUserID:   "user1@im.wechat",
 		CreateTimeMs: 1700000000000,
@@ -52,7 +52,7 @@ func TestBuildInboundMessage_TextOnly(t *testing.T) {
 
 func TestBuildInboundMessage_Empty(t *testing.T) {
 	msg := WeixinMessage{
-		MessageID:  1,
+		MessageID:  "1",
 		FromUserID: "u1",
 		ItemList:   []MessageItem{},
 	}
@@ -64,7 +64,7 @@ func TestBuildInboundMessage_Empty(t *testing.T) {
 
 func TestBuildInboundMessage_NoFrom(t *testing.T) {
 	msg := WeixinMessage{
-		MessageID: 1,
+		MessageID: "1",
 		ItemList:  []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: "hi"}}},
 	}
 	_, ok := buildInboundMessage(msg)
@@ -75,7 +75,7 @@ func TestBuildInboundMessage_NoFrom(t *testing.T) {
 
 func TestBuildInboundMessage_ImageAttachment(t *testing.T) {
 	msg := WeixinMessage{
-		MessageID:  1,
+		MessageID:  "1",
 		FromUserID: "u1",
 		ItemList: []MessageItem{
 			{
@@ -111,7 +111,7 @@ func TestBuildInboundMessage_ImageAttachment(t *testing.T) {
 
 func TestBuildInboundMessage_VoiceWithText(t *testing.T) {
 	msg := WeixinMessage{
-		MessageID:  1,
+		MessageID:  "1",
 		FromUserID: "u1",
 		ItemList: []MessageItem{
 			{
@@ -137,7 +137,7 @@ func TestBuildInboundMessage_VoiceWithText(t *testing.T) {
 
 func TestBuildInboundMessage_QuotedText(t *testing.T) {
 	msg := WeixinMessage{
-		MessageID:  1,
+		MessageID:  "1",
 		FromUserID: "u1",
 		ItemList: []MessageItem{
 			{
@@ -174,7 +174,7 @@ func TestBuildInboundMessage_QuotedText(t *testing.T) {
 
 func TestBuildInboundMessage_FileAttachment(t *testing.T) {
 	msg := WeixinMessage{
-		MessageID:  1,
+		MessageID:  "1",
 		FromUserID: "u1",
 		ItemList: []MessageItem{
 			{

@@ -13,6 +13,7 @@ import (
 
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/toolcontext"
 )
@@ -66,7 +67,7 @@ type NativeToolSource struct {
 }
 
 type nativeLoadedTool struct {
-	tool          sdk.Tool
+	tool          toolexec.Tool
 	usageProvider ToolUsage
 	usageID       int
 }
@@ -185,10 +186,10 @@ func (s *NativeToolSource) CallTool(ctx context.Context, session mcp.ToolSession
 		if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
 			return nil, err
 		}
-		result, err := tool.Execute(&sdk.ToolExecContext{
+		result, err := tool.Execute(&toolexec.ToolExecContext{
 			Context:  ctx,
 			ToolName: toolName,
-		}, arguments)
+		}, toolexec.ArgumentsFromValue(arguments))
 		if err != nil {
 			return nil, err
 		}
@@ -206,25 +207,19 @@ func (s *NativeToolSource) limitMCPResult(toolName string, result map[string]any
 	return mcp.LimitToolResult(result, "tool result ("+toolName+")", limit)
 }
 
-func publicNativeToolResult(result any) any {
-	switch value := result.(type) {
-	case ReadMediaToolOutput:
+func publicNativeToolResult(result sdk.ToolOutput) any {
+	if value, ok := DecodeReadMediaToolOutput(result); ok {
 		return value.Public
-	case *ReadMediaToolOutput:
-		if value == nil {
-			return nil
-		}
-		return value.Public
-	default:
-		// The reserved UI-only payload (e.g. the edit/write diff) is stripped
-		// by the native runtime wrapper, but this gateway path has no wrapper
-		// and no UI consumer — without the delete it would reach external
-		// runtimes' model context verbatim.
-		if m, ok := result.(map[string]any); ok {
-			delete(m, UIOutputMetadataKey)
-		}
-		return result
 	}
+	out := toolexec.OutputValue(result)
+	// The reserved UI-only payload (e.g. the edit/write diff) is stripped by
+	// the native runtime wrapper, but this gateway path has no wrapper and no
+	// UI consumer — without the delete it would reach external runtimes'
+	// model context verbatim.
+	if m, ok := out.(map[string]any); ok {
+		delete(m, UIOutputMetadataKey)
+	}
+	return out
 }
 
 func (s *NativeToolSource) callAskUser(ctx context.Context, session mcp.ToolSessionContext, arguments map[string]any) (map[string]any, error) {
@@ -300,6 +295,9 @@ type nativeApprovalResult struct {
 
 // requireApproval delegates approval policy and waiting to toolapproval.RunFlow.
 func (s *NativeToolSource) requireApproval(ctx context.Context, session mcp.ToolSessionContext, toolName string, arguments map[string]any) (nativeApprovalResult, error) {
+	if toolName == ToolMCPManage().String() || toolName == ToolAppManage().String() {
+		return nativeApprovalResult{approved: true}, nil
+	}
 	if s == nil || s.approval == nil {
 		return nativeApprovalResult{approved: true}, nil
 	}
@@ -339,6 +337,9 @@ func (s *NativeToolSource) requireApproval(ctx context.Context, session mcp.Tool
 }
 
 func isWorkspaceTargetToolName(toolName string) bool {
+	if toolName == "mcp_manage" || toolName == "app_manage" {
+		return false
+	}
 	_, ok := toolapproval.OperationForTool(toolName)
 	return ok
 }
@@ -404,11 +405,12 @@ func (s *NativeToolSource) loadTools(ctx context.Context, session mcp.ToolSessio
 	providers := append([]ToolProvider(nil), s.providers...)
 	s.mu.RUnlock()
 	toolSession := sessionFromMCP(session)
+	toolSession.ApprovalEmitter = func(req toolapproval.Request) bool { return s.emitToolApprovalRequest(session, req) }
 	var out []nativeLoadedTool
 	for providerIndex, provider := range providers {
 		providerTools, err := provider.Tools(ctx, toolSession)
 		if err != nil {
-			s.logger.Warn("native tool provider failed", slog.Any("error", err))
+			s.logger.WarnContext(ctx, "native tool provider failed", slog.Any("error", err))
 			continue
 		}
 		var usageProvider ToolUsage
@@ -425,8 +427,16 @@ func (s *NativeToolSource) loadTools(ctx context.Context, session mcp.ToolSessio
 }
 
 func sessionFromMCP(session mcp.ToolSessionContext) SessionContext {
+	// Public HTTP session/run headers are event-routing hints, not proof of
+	// membership in a private conversation. Only server-bound runtime mounts
+	// may use a current session to expand history scope or infer its author.
+	if session.PublicRequest {
+		session.SessionID = ""
+		session.SessionType = ""
+	}
 	return SessionContext{
 		BotID:                     session.BotID,
+		UserID:                    session.UserID,
 		ChatID:                    firstNonEmpty(session.ChatID, session.BotID),
 		SessionID:                 session.SessionID,
 		SessionType:               session.SessionType,
@@ -448,7 +458,7 @@ func sessionFromMCP(session mcp.ToolSessionContext) SessionContext {
 }
 
 func availableFromLoadedTools(items []nativeLoadedTool) AvailableTools {
-	sdkTools := make([]sdk.Tool, 0, len(items))
+	sdkTools := make([]toolexec.Tool, 0, len(items))
 	for _, item := range items {
 		sdkTools = append(sdkTools, item.tool)
 	}

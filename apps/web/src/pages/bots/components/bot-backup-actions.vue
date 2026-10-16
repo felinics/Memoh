@@ -43,7 +43,7 @@ const summary = ref<BotbackupSummaryResult | null>(null)
 const exportPassphrase = ref('')
 
 const EXPORT_SECTIONS = [
-  'settings', 'models', 'acl', 'channels', 'mcp', 'schedules', 'email', 'history', 'assets', 'workspace',
+  'settings', 'models', 'acl', 'channels', 'mcp', 'schedules', 'history', 'assets', 'workspace',
 ] as const
 
 const exportSections = reactive<Record<string, 'skip' | 'merge' | 'replace'>>({})

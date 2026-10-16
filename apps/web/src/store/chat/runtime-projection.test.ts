@@ -255,6 +255,37 @@ describe('runtime projection', () => {
     expect(completed.transcript.turns.flatMap(turn => turn.role === 'assistant' ? turn.messages : []).some(message => message.type === 'status')).toBe(false)
   })
 
+  it('merges the retry state from a run patch and clears it explicitly', () => {
+    const retry = {
+      attempt: 2,
+      max_attempt: 4,
+      delay_ms: 1500,
+      reason: 'rate_limited' as const,
+      retry_at: '2026-07-27T08:00:03.500Z',
+    }
+    const base = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot())
+    const waiting = reduceRuntimeProjection(base, delta(5, {
+      run: { run_id: 'run-1', retry },
+      reset_messages: true,
+    }))
+    expect(waiting.currentRunView?.retry).toEqual(retry)
+
+    // A patch with neither field leaves the retry state alone.
+    const unrelated = reduceRuntimeProjection(waiting, delta(6, {
+      run: { run_id: 'run-1', updated_at: '2026-07-27T08:00:02.000Z' },
+    }))
+    expect(unrelated.currentRunView?.retry).toEqual(retry)
+
+    const cleared = reduceRuntimeProjection(unrelated, delta(7, {
+      run: { run_id: 'run-1', clear_retry: true },
+    }))
+    expect(cleared.currentRunView).not.toHaveProperty('retry')
+
+    // A snapshot carries the retry state for reconnects.
+    const hydrated = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(runView({ retry })))
+    expect(hydrated.currentRunView?.retry).toEqual(retry)
+  })
+
   it('drops the empty trailing assistant segment once the run has settled', () => {
     const state = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(runView({
       status: 'completed',
@@ -358,7 +389,6 @@ describe('runtime projection', () => {
         run_id: 'run-1',
         status: 'lost',
         error_code: 'agent.response_timeout',
-        error: 'The model did not respond in time. Please try again.',
       },
     }))
 
@@ -370,7 +400,7 @@ describe('runtime projection', () => {
         id: 0,
         type: 'error',
         code: 'agent.response_timeout',
-        content: 'The model did not respond in time. Please try again.',
+        content: '',
       }],
     })
   })
@@ -380,7 +410,6 @@ describe('runtime projection', () => {
       status: 'errored',
       request_user_turn: undefined,
       error_code: 'agent.response_interrupted',
-      error: undefined,
       messages: [],
     })))
 

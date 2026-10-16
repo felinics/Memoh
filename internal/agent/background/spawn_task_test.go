@@ -83,11 +83,37 @@ func TestRunningAgentKillWaitsForRuntimeTerminal(t *testing.T) {
 	}
 }
 
+func TestAgentTaskHasNoAbsoluteDeadline(t *testing.T) {
+	mgr := New(nil)
+	parent, cancelParent := context.WithCancel(context.Background())
+	taskID, taskCtx, err := mgr.StartAgentTask(parent, "bot1", "sess1", "worker", "child-1", "do work", "worker: do work", false)
+	if err != nil {
+		t.Fatalf("StartAgentTask returned error: %v", err)
+	}
+	if _, hasDeadline := taskCtx.Deadline(); hasDeadline {
+		t.Fatal("active agent task still has an absolute deadline")
+	}
+	cancelParent()
+	if taskCtx.Err() != nil {
+		t.Fatalf("parent cancellation stopped detached agent task: %v", taskCtx.Err())
+	}
+	if err := mgr.Kill(taskID); err != nil {
+		t.Fatalf("Kill returned error: %v", err)
+	}
+	if !errors.Is(taskCtx.Err(), context.Canceled) {
+		t.Fatalf("task context error = %v, want explicit cancellation", taskCtx.Err())
+	}
+	mgr.CompleteAgentTask(taskID, AgentTaskResult{Status: TaskKilled})
+}
+
 func TestCompleteSpawnTaskStoresBranches(t *testing.T) {
 	mgr := New(nil)
-	taskID, _, err := mgr.StartSpawnTask(context.Background(), "bot1", "sess1", "parallel research")
+	taskID, taskCtx, err := mgr.StartSpawnTask(context.Background(), "bot1", "sess1", "parallel research")
 	if err != nil {
 		t.Fatalf("StartSpawnTask returned error: %v", err)
+	}
+	if _, hasDeadline := taskCtx.Deadline(); hasDeadline {
+		t.Fatal("spawn batch still has an absolute deadline")
 	}
 	branches := []SpawnBranch{
 		{Task: "alpha", ChildSessionID: "child-a", Status: TaskCompleted, Report: "alpha result"},
@@ -140,4 +166,19 @@ func TestRunningTasksSummaryIncludesSpawnTasks(t *testing.T) {
 		}
 	}
 	_ = mgr.Kill(taskID)
+}
+
+func TestDetachedAgentRetainsExplicitExecutionBudget(t *testing.T) {
+	parent, cancel := context.WithTimeout(t.Context(), time.Hour)
+	ctx, stop := detachedTaskContext(parent)
+	defer stop()
+	want, _ := parent.Deadline()
+	got, ok := ctx.Deadline()
+	if !ok || !got.Equal(want) {
+		t.Fatal("detachment dropped the owner's execution budget")
+	}
+	cancel()
+	if ctx.Err() != nil {
+		t.Fatal("transient caller cancellation leaked into detached task")
+	}
 }

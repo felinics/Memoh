@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/i18n"
@@ -43,14 +42,40 @@ func reasoningLabel(t *i18n.Localizer, cc command.CurrentContext) string {
 	return reasoning
 }
 
-// appendCurrentContextLines adds the model/reasoning/context summary
-// shown after /new resets a session.
-func appendCurrentContextLines(b *strings.Builder, t *i18n.Localizer, cc command.CurrentContext) {
-	fmt.Fprintf(b, "\n\n- %s: %s", t.T("newSession.labelModel"), cc.ChatModel)
-	fmt.Fprintf(b, "\n- %s: %s", t.T("newSession.labelReasoning"), reasoningLabel(t, cc))
-	if cw := strings.TrimSpace(cc.ContextWindow); cw != "" {
-		fmt.Fprintf(b, "\n- %s: %s %s", t.T("newSession.labelContext"), cw, t.T("newSession.contextUnit"))
+// appendCurrentContextLines adds the harness/model/reasoning/context summary
+// shown after /new resets a session. The harness and the model are separate
+// lines: one is what runs the session, the other what it answers with. An
+// Agent session shows only the model and effort its runtime reports, and no
+// context window, which the Agent manages itself.
+func appendCurrentContextLines(b *strings.Builder, t *i18n.Localizer, card newSessionCard) {
+	b.WriteString("\n")
+	if harness := strings.TrimSpace(card.Harness); harness != "" {
+		fmt.Fprintf(b, "\n- %s: %s", t.T("newSession.labelHarness"), harness)
 	}
+	cc := card.Context
+	if !card.Agent {
+		fmt.Fprintf(b, "\n- %s: %s", t.T("newSession.labelModel"), cc.ChatModel)
+		fmt.Fprintf(b, "\n- %s: %s", t.T("newSession.labelReasoning"), reasoningLabel(t, cc))
+		if cw := strings.TrimSpace(cc.ContextWindow); cw != "" {
+			fmt.Fprintf(b, "\n- %s: %s %s", t.T("newSession.labelContext"), cw, t.T("newSession.contextUnit"))
+		}
+		return
+	}
+	if model := strings.TrimSpace(cc.ChatModel); model != "" {
+		fmt.Fprintf(b, "\n- %s: %s", t.T("newSession.labelModel"), model)
+	}
+	if effort := strings.TrimSpace(cc.ReasoningEffort); effort != "" {
+		fmt.Fprintf(b, "\n- %s: %s", t.T("newSession.labelReasoning"), effort)
+	}
+}
+
+// newSessionCard is what the /new confirmation reports. Agent marks a session
+// on an external Agent: Context then holds the runtime's own model and
+// effort, either of which may be empty when the runtime cannot report it.
+type newSessionCard struct {
+	Harness string
+	Agent   bool
+	Context command.CurrentContext
 }
 
 // formatStartWelcomeMessage builds the /start doorway greeting. It welcomes the
@@ -75,10 +100,10 @@ func formatStartWelcomeMessage(t *i18n.Localizer, botUsername string) string {
 // much context budget they have. These are not "defaults to hide"; on this
 // surface they reassure and inform. Markdown markers are authored unconditionally
 // and stripped later for non-markdown channels.
-func formatNewSessionMessage(t *i18n.Localizer, modeLabel string, cc command.CurrentContext, botUsername string) string {
+func formatNewSessionMessage(t *i18n.Localizer, modeLabel string, card newSessionCard, botUsername string) string {
 	var b strings.Builder
 	b.WriteString(command.MdBold(t.T("newSession.title", map[string]any{"mode": modeLabel})))
-	appendCurrentContextLines(&b, t, cc)
+	appendCurrentContextLines(&b, t, card)
 	fmt.Fprintf(&b, "\n\n%s", t.T("newSession.tip", map[string]any{
 		"model":     command.CommandText("model", ""),
 		"reasoning": command.CommandText("reasoning", ""),
@@ -147,9 +172,6 @@ func renderResult(result *command.Result, rc RenderContext) channel.Message {
 		return channel.Message{}
 	}
 	t := rc.localizerFor(result)
-	if result.FeedbackError != nil {
-		return applyMessageFormat(channel.Message{Text: renderACPFeedbackText(result.FeedbackError, t)}, rc.Caps)
-	}
 	var msg channel.Message
 	if result.Interactive == nil || !rc.Caps.Buttons {
 		msg = channel.Message{Text: appendFallbackTrailer(result.Text, result.Interactive, rc.Caps, t)}
@@ -168,27 +190,6 @@ func renderResult(result *command.Result, rc RenderContext) channel.Message {
 		}
 	}
 	return applyMessageFormat(msg, rc.Caps)
-}
-
-func renderACPFeedbackText(feedback *agentfeedback.Error, t *i18n.Localizer) string {
-	if feedback == nil {
-		return ""
-	}
-	text := strings.TrimSpace(feedback.Message)
-	if key := strings.TrimSpace(feedback.I18nKey); key != "" && t != nil {
-		params := make(map[string]any, len(feedback.Args))
-		for name, value := range feedback.Args {
-			params[name] = value
-		}
-		localized := t.T(key, params)
-		if strings.TrimSpace(localized) != "" && localized != key {
-			text = localized
-		}
-	}
-	if text == "" {
-		text = strings.TrimSpace(feedback.Code)
-	}
-	return text
 }
 
 // appendFallbackTrailer adds a typeable-command guide derived from Interactive

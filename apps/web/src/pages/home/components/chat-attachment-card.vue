@@ -10,7 +10,7 @@
       :tabindex="clickable ? 0 : undefined"
       :aria-label="clickable ? previewLabel : undefined"
       @click="clickable ? emit('preview') : undefined"
-      @keydown.enter.prevent="clickable ? emit('preview') : undefined"
+      @keydown.enter.exact.prevent="clickable ? emit('preview') : undefined"
       @keydown.space.prevent="clickable ? emit('preview') : undefined"
     >
       <!-- Image / video cover -->

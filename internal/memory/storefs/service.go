@@ -14,11 +14,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/felinics/memoh/internal/config"
 	memslug "github.com/felinics/memoh/internal/memory/slug"
+	"github.com/felinics/memoh/internal/textutil"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
@@ -167,13 +169,13 @@ func (s *Service) buildScanIndex(ctx context.Context, botID string) (map[string]
 		entryPath := memoryEntryPath(entry.GetPath())
 		content, readErr := s.readFile(ctx, botID, entryPath)
 		if readErr != nil {
-			s.logger.Warn("buildScanIndex: failed to read memory file",
+			s.logger.WarnContext(ctx, "buildScanIndex: failed to read memory file",
 				slog.String("bot_id", botID), slog.String("path", entryPath), slog.Any("error", readErr))
 			continue
 		}
 		parsed, parseErr := parseMemoryFile(content)
 		if parseErr != nil {
-			s.logger.Warn("buildScanIndex: failed to parse memory file",
+			s.logger.WarnContext(ctx, "buildScanIndex: failed to parse memory file",
 				slog.String("bot_id", botID), slog.String("path", entryPath), slog.Any("error", parseErr))
 			continue
 		}
@@ -273,7 +275,7 @@ func (s *Service) removeProjectionFiles(ctx context.Context, botID string) error
 		entryPath := memoryEntryPath(entry.GetPath())
 		content, readErr := s.readFile(ctx, botID, entryPath)
 		if readErr != nil {
-			s.logger.Warn("rebuild: failed to read memory file; preserving it",
+			s.logger.WarnContext(ctx, "rebuild: failed to read memory file; preserving it",
 				slog.String("bot_id", botID), slog.String("path", entryPath), slog.Any("error", readErr))
 			continue
 		}
@@ -1003,8 +1005,8 @@ func formatMemoryOverviewMDWithPaths(items []MemoryItem, relPaths map[string]str
 			continue
 		}
 		body = strings.Join(strings.Fields(body), " ")
-		if len(body) > 400 {
-			body = strings.TrimSpace(body[:400]) + "..."
+		if utf8.RuneCountInString(body) > 400 {
+			body = strings.TrimSpace(textutil.TruncateRunes(body, 400)) + "..."
 		}
 		b.WriteString(strconv.Itoa(i + 1))
 		title := firstNonEmpty(plan.Title, created, id)
@@ -1254,8 +1256,8 @@ func conceptTitle(item MemoryItem) string {
 		body = strings.TrimSpace(body[:idx])
 	}
 	body = strings.Join(strings.Fields(body), " ")
-	if len(body) > 80 {
-		body = strings.TrimSpace(body[:80]) + "..."
+	if utf8.RuneCountInString(body) > 80 {
+		body = strings.TrimSpace(textutil.TruncateRunes(body, 80)) + "..."
 	}
 	return body
 }

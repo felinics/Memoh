@@ -62,7 +62,8 @@ fi
 NETWORK_NAME="${COMPOSE_PROJECT_NAME}_memoh-network"
 PROJECT_CONTAINERS="memoh-postgres memoh-pgvector memoh-migrate memoh-server memoh-channel memoh-web memoh-webhook-tunnel memoh-connect-it"
 LEGACY_PROJECT_CONTAINERS="memoh-connect-it-web"
-PROJECT_VOLUMES="${COMPOSE_PROJECT_NAME}_postgres_data ${COMPOSE_PROJECT_NAME}_pgvector_data ${COMPOSE_PROJECT_NAME}_containerd_data ${COMPOSE_PROJECT_NAME}_memoh_data ${COMPOSE_PROJECT_NAME}_server_cni_state ${COMPOSE_PROJECT_NAME}_openviking_data"
+PROJECT_VOLUMES="${COMPOSE_PROJECT_NAME}_postgres_data ${COMPOSE_PROJECT_NAME}_pgvector_data ${COMPOSE_PROJECT_NAME}_containerd_data ${COMPOSE_PROJECT_NAME}_memoh_data ${COMPOSE_PROJECT_NAME}_server_cni_state"
+LEGACY_PROJECT_VOLUMES="${COMPOSE_PROJECT_NAME}_openviking_data"
 
 EXISTING_CONFIG_SOURCE=""
 EXISTING_ENV_SOURCE=""
@@ -387,7 +388,7 @@ detect_existing_installation() {
     fi
   fi
 
-  for volume in $PROJECT_VOLUMES; do
+  for volume in $PROJECT_VOLUMES $LEGACY_PROJECT_VOLUMES; do
     if $DOCKER volume inspect "$volume" >/dev/null 2>&1; then
       EXISTING_DOCKER_STATE=true
       EXISTING_INSTALL_STATE=true
@@ -645,7 +646,7 @@ cleanup_existing_installation() {
   for container in $PROJECT_CONTAINERS $LEGACY_PROJECT_CONTAINERS; do
     $DOCKER rm -f "$container" >/dev/null 2>&1 || true
   done
-  for volume in $PROJECT_VOLUMES; do
+  for volume in $PROJECT_VOLUMES $LEGACY_PROJECT_VOLUMES; do
     $DOCKER volume rm -f "$volume" >/dev/null 2>&1 || true
   done
   $DOCKER network rm "$NETWORK_NAME" >/dev/null 2>&1 || true

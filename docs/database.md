@@ -24,6 +24,7 @@ PostgreSQL migrations live in `db/postgres/migrations/`:
 - **Idempotent DDL**: Use `IF NOT EXISTS` / `IF EXISTS` guards (e.g., `CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `DROP TABLE IF EXISTS`) so migrations are safe to re-run.
 - **Down migration must fully reverse up**: The `.down.sql` must cleanly undo everything its `.up.sql` does, in reverse order.
 - **After creating or modifying migrations**, run `mise run sqlc-generate` to regenerate Go sqlc code, then validate the PostgreSQL migration path.
+- **0157 is reserved**: `0157_reserved_cloud_alignment` is intentionally empty. It realigns this stream with Memoh-Cloud's copy, which numbers every migration from 0141 onward one higher, so both use the same numbers from 0158 on. Never reuse a number or renumber a merged migration; Cloud-only schema changes belong in Cloud's own migration stream.
 
 ## Database Tables
 
@@ -57,7 +58,7 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 - `models` — Model definitions (chat/embedding/speech types, modalities, reasoning, vision, tool calling)
 - `model_variants` — Model variant definitions (weight, metadata)
 - `search_providers` — Search engine provider configurations
-- `memory_providers` — Multi-provider memory adapter configurations
+- `memory_providers` — Team Built-in Memory configuration (embedding model); `bots.memory_provider_id` is non-null when a bot's memory is on
 
 **MCP**
 - `mcp_connections` — MCP connection configurations per bot
@@ -67,17 +68,12 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 - `bot_app_installations` — Installed Registry App revision per bot in its isolated workspace
 
 **Containers**
+- `bot_workspaces` — Declarative workspace state per bot: desired/observed state with generations, retry backoff, reconciler lease
 - `containers` — Bot container instances
 - `snapshots` — Container snapshots
 - `container_versions` — Container version tracking
 - `lifecycle_events` — Container lifecycle events
 - `bot_workspace_resource_limits` — Per-bot CPU/memory/storage quotas
-
-**Email**
-- `email_providers` — Pluggable email service backends (Mailgun, generic SMTP)
-- `email_oauth_tokens` — OAuth2 tokens for email providers (Gmail)
-- `bot_email_bindings` — Per-bot email provider binding with permissions
-- `email_outbox` — Outbound email audit log
 
 **Scheduling & Automation**
 - `schedule` — Scheduled tasks (cron)

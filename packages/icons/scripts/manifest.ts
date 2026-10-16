@@ -17,6 +17,7 @@ const llmProviders: string[] = [
   ...withVariants('acp', []),
   ...withVariants('memoh', ['color']),
   ...withVariants('openai', []),
+  ...withVariants('opencode-go', []),
   ...withVariants('anthropic', []),
   ...withVariants('google', ['color', 'brand-color']),
   ...withVariants('deepseek', ['color']),
@@ -101,11 +102,12 @@ const channelPlatforms: string[] = [
 ]
 
 // ---------------------------------------------------------------------------
-// Email Providers
+// Social Platforms
 // ---------------------------------------------------------------------------
 
-const emailProviders: string[] = [
-  'gmail',
+const socialPlatforms: string[] = [
+  // x: Simple Icons "x" (https://simpleicons.org), CC0-1.0
+  'x',
 ]
 
 // ---------------------------------------------------------------------------
@@ -116,5 +118,5 @@ export const manifest: string[] = [
   ...llmProviders,
   ...searchProviders,
   ...channelPlatforms,
-  ...emailProviders,
+  ...socialPlatforms,
 ]

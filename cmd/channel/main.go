@@ -1,4 +1,4 @@
-// cmd/channel hosts external channel adapters, email receivers, and webhook
+// cmd/channel hosts external channel adapters, and webhook
 // endpoints as a standalone service. Agent turns run in the Server process and
 // are reached through the authenticated internal RPC transport.
 package main
@@ -10,10 +10,13 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
+	"google.golang.org/grpc"
+	grpc_health_v1 "google.golang.org/grpc/health/grpc_health_v1"
 
 	channelmodule "github.com/felinics/memoh/cmd/internal/channel"
 	coremodule "github.com/felinics/memoh/cmd/internal/core"
@@ -21,15 +24,21 @@ import (
 	"github.com/felinics/memoh/internal/channel/adapters/weixin"
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/handlers"
+	"github.com/felinics/memoh/internal/rpc/storagepb"
 	"github.com/felinics/memoh/internal/server"
+	"github.com/felinics/memoh/internal/telemetry"
 	"github.com/felinics/memoh/internal/version"
 )
 
-type healthHandler struct{}
+type healthHandler struct {
+	serverHealth grpc_health_v1.HealthClient
+}
 
-func newHealthHandler() *healthHandler { return &healthHandler{} }
+func newHealthHandler(conn *grpc.ClientConn) *healthHandler {
+	return &healthHandler{serverHealth: grpc_health_v1.NewHealthClient(conn)}
+}
 
-func (*healthHandler) Register(e *echo.Echo) {
+func (h *healthHandler) Register(e *echo.Echo) {
 	e.GET("/ping", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{
 			"status":      "ok",
@@ -38,7 +47,27 @@ func (*healthHandler) Register(e *echo.Echo) {
 			"commit_hash": version.ShortCommitHash(),
 		})
 	})
-	e.HEAD("/health", func(c echo.Context) error { return c.NoContent(http.StatusOK) })
+	// Kubernetes httpGet probes always issue GET. Keep readiness separate from
+	// /ping so a transient Server outage removes Channel from Service endpoints
+	// without turning it into a liveness restart loop.
+	e.GET("/ready", h.readiness)
+	e.HEAD("/ready", h.readiness)
+	e.HEAD("/health", h.readiness)
+}
+
+func (h *healthHandler) readiness(c echo.Context) error {
+	if h == nil || h.serverHealth == nil {
+		return c.NoContent(http.StatusServiceUnavailable)
+	}
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 2*time.Second)
+	defer cancel()
+	response, err := h.serverHealth.Check(ctx, &grpc_health_v1.HealthCheckRequest{
+		Service: storagepb.StorageService_ServiceDesc.ServiceName,
+	})
+	if err != nil || response.GetStatus() != grpc_health_v1.HealthCheckResponse_SERVING {
+		return c.NoContent(http.StatusServiceUnavailable)
+	}
+	return c.NoContent(http.StatusOK)
 }
 
 func main() {
@@ -104,11 +133,13 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 func options() fx.Option {
 	return fx.Options(
 		fx.Provide(provideConfig),
+		fx.Supply(telemetry.Service{Name: "memoh-channel"}),
 		coremodule.FoundationModule(),
 		channelmodule.FoundationModule(),
 		channelmodule.RuntimeModule(),
 		fx.Provide(
 			provideServerRPCConn,
+			provideRemoteMediaService,
 			provideTurnClient,
 			provideRuntimeRPCClient,
 			provideServerRuntimeClient,
@@ -117,7 +148,6 @@ func options() fx.Option {
 			provideServerHandler(channel.NewWebhookServerHandler),
 			provideServerHandler(weixin.NewQRServerHandler),
 			provideServerHandler(handlers.NewConfiguredPublicMediaHandler),
-			provideServerHandler(handlers.NewEmailWebhookHandler),
 			provideServer,
 		),
 		fx.Invoke(startChannelRPC, startServer),

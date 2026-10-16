@@ -12,6 +12,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
@@ -119,7 +120,7 @@ func (m *terminalManager) CreateTerminal(ctx context.Context, p acp.CreateTermin
 	}
 	command := buildShellCommand(p.Command, p.Args)
 	if strings.TrimSpace(command) == "" {
-		return acp.CreateTerminalResponse{}, errors.New("terminal command is required")
+		return acp.CreateTerminalResponse{}, errs.New("terminal command is required")
 	}
 	id := m.nextTerminalID()
 	input := map[string]any{
@@ -144,7 +145,7 @@ func (m *terminalManager) CreateTerminal(ctx context.Context, p acp.CreateTermin
 			if message == "" {
 				message = "tool execution was not approved"
 			}
-			err := errors.New(message)
+			err := errs.New(message)
 			m.emitToolCallStart(toolCallID, "exec", input)
 			m.emitToolCallEnd(toolCallID, "exec", input, toolErrorResult(err), err)
 			return acp.CreateTerminalResponse{}, err
@@ -205,6 +206,7 @@ func (m *terminalManager) CreateTerminal(ctx context.Context, p acp.CreateTermin
 		UnsetEnv: m.unsetEnv,
 	})
 	if err != nil {
+		err = errs.WrapDependency(err, "")
 		releaseExecContext()
 		m.emitToolCallEnd(toolCallID, "exec", input, toolErrorResult(err), err)
 		return acp.CreateTerminalResponse{}, err
@@ -385,7 +387,7 @@ func (m *terminalManager) get(id string) (*terminal, error) {
 	defer m.mu.Unlock()
 	term := m.terminals[id]
 	if term == nil {
-		return nil, fmt.Errorf("terminal %q not found", id)
+		return nil, errs.New(fmt.Sprintf("terminal %q not found", id))
 	}
 	return term, nil
 }
@@ -395,7 +397,7 @@ func (m *terminalManager) remove(id string) (*terminal, error) {
 	defer m.mu.Unlock()
 	term := m.terminals[id]
 	if term == nil {
-		return nil, fmt.Errorf("terminal %q not found", id)
+		return nil, errs.New(fmt.Sprintf("terminal %q not found", id))
 	}
 	delete(m.terminals, id)
 	return term, nil

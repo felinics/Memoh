@@ -152,11 +152,17 @@ func TestAppPublicationRollbackRestoresPreviousRevision(t *testing.T) {
 
 func newAppInstallTestClient(t *testing.T) *bridge.Client {
 	t.Helper()
+	return newWorkspaceTestClient(t, t.TempDir())
+}
+
+// newWorkspaceTestClient serves /data from workspaceRoot on the host.
+func newWorkspaceTestClient(t *testing.T, workspaceRoot string) *bridge.Client {
+	t.Helper()
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
 	pb.RegisterContainerServiceServer(server, bridgesvc.New(bridgesvc.Options{
 		DefaultWorkDir: "/data",
-		WorkspaceRoot:  t.TempDir(),
+		WorkspaceRoot:  workspaceRoot,
 		DataMount:      "/data",
 	}))
 	done := make(chan struct{})

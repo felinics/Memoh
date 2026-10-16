@@ -24,7 +24,7 @@ import type { RuntimeTranscriptSlice } from './runtime-projection'
 import { createTranscriptHistory } from './transcript-history'
 import { createTranscriptDecisions } from './transcript-decisions'
 import { createTranscriptQueries } from './transcript-queries'
-import { admissibleRuntimeTurns, insertRuntimeTurns, markRuntimeTurn, reconcileRuntimeTurns } from './runtime-transcript-merge'
+import { admissibleRuntimeTurns, fillTurnErrorDetails, insertRuntimeTurns, markRuntimeTurn, reconcileRuntimeTurns } from './runtime-transcript-merge'
 
 export interface TranscriptDeps {
   currentBotId: Ref<string | null>
@@ -615,11 +615,12 @@ export function createTranscriptController({
     assistantTurn.messages.push({ id, type: 'error', code, content: text, args: stringRecord(args) })
   }
 
-  function finalizeStreamFailure(assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, error: Error) {
+  // keepTurn: history keeps this turn, so an empty one shows its failure instead of being removed.
+  function finalizeStreamFailure(assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, error: Error, keepTurn = false) {
     const parsed = parseMemohError(error)
     if (!hasVisibleAssistantBlocks(assistantTurn)) {
-      if (parsed?.code) {
-        appendAssistantError(assistantTurn, error.message, parsed.code, parsed.args)
+      if (parsed?.code || keepTurn) {
+        appendAssistantError(assistantTurn, error.message, parsed?.code, parsed?.args)
         return
       }
       const turnId = assistantTurn.turnId?.trim()
@@ -631,7 +632,7 @@ export function createTranscriptController({
       return
     }
     if (error.name === 'AbortError') return
-    if (assistantTurn.messages.some(block => block.type === 'error')) return
+    if (fillTurnErrorDetails(assistantTurn, { code: parsed?.code, content: error.message.trim(), args: stringRecord(parsed?.args) })) return
     appendAssistantError(assistantTurn, error.message, parsed?.code, parsed?.args)
   }
 

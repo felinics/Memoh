@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/toolcontext"
 )
 
@@ -29,16 +29,16 @@ type createElicitationRequest struct {
 
 func (r *createElicitationRequest) Validate() error {
 	if r == nil {
-		return errors.New("elicitation request is required")
+		return errs.New("elicitation request is required")
 	}
 	if r.Mode != "form" {
-		return errors.New("only form elicitation is supported")
+		return errs.New("only form elicitation is supported")
 	}
 	if strings.TrimSpace(r.Message) == "" {
-		return errors.New("elicitation message is required")
+		return errs.New("elicitation message is required")
 	}
 	if r.RequestedSchema == nil {
-		return errors.New("elicitation requestedSchema is required")
+		return errs.New("elicitation requestedSchema is required")
 	}
 	return nil
 }

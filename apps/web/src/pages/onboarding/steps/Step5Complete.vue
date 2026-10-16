@@ -1,28 +1,32 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Plug, AudioLines, Globe, AlertTriangle } from 'lucide-vue-next'
+import { AlertTriangle } from 'lucide-vue-next'
+import ChatExampleCard from '@/components/chat-examples/chat-example-card.vue'
+import { useChatExampleEntries } from '@/components/chat-examples/use-chat-example-action'
 import { useOnboarding } from '@/composables/useOnboarding'
+import { localizeText } from '@/lib/chat-examples/select'
+import type { ChatExample } from '@/lib/chat-examples/types'
+import { useComposerPrefillStore } from '@/store/composer-prefill'
 import { nextFrame } from '../useStepTransition'
 import StepExitShell from '../components/step-exit-shell.vue'
 import HintBox from '../components/hint-box.vue'
 import { safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from '../constants'
 import { readOnboardingBotResult } from '../session'
+import { finishOnboardingWithPrompt } from '../finish-with-prompt'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const { complete, completing } = useOnboarding()
+const prefillStore = useComposerPrefillStore()
 
 const visible = ref(false)
 const exiting = ref(false)
 const botResult = readOnboardingBotResult()
 const hasConfiguredAI = botResult?.modelConfigured === true || !!botResult?.agent
 
-const cards = [
-  { icon: Plug, titleKey: 'onboarding.complete.cards.im.title', descKey: 'onboarding.complete.cards.im.desc' },
-  { icon: AudioLines, titleKey: 'onboarding.complete.cards.voice.title', descKey: 'onboarding.complete.cards.voice.desc' },
-  { icon: Globe, titleKey: 'onboarding.complete.cards.search.title', descKey: 'onboarding.complete.cards.search.desc' },
-] as const
+// Onboarding examples need no capability, so no bot probe is needed here.
+const starters = useChatExampleEntries('', { surface: 'onboarding', limit: 3 })
 
 onMounted(() => {
   nextFrame(() => {
@@ -30,11 +34,17 @@ onMounted(() => {
   })
 })
 
-async function handleComplete() {
+/** Finish onboarding; with an example, the first chat opens with its prompt in the composer. */
+async function handleComplete(example?: ChatExample) {
   if (completing.value) return
   exiting.value = true
   safeSessionSet(ONBOARDING_KEYS.entryAnimation, '1')
-  const ok = await complete(175)
+  const ok = await finishOnboardingWithPrompt({
+    complete: () => complete(175),
+    prefill: prefillStore,
+    botId: botResult?.botId,
+    prompt: example ? localizeText(example.prompt, locale.value) : undefined,
+  })
   if (!ok) {
     exiting.value = false
     safeSessionRemove(ONBOARDING_KEYS.entryAnimation)
@@ -61,25 +71,20 @@ async function handleComplete() {
     </p>
 
     <div
-      class="grid grid-cols-3 gap-3 mb-12 text-left transition-all duration-[350ms] ease-out delay-[160ms]"
+      v-if="starters?.length"
+      class="mx-auto mb-12 max-w-md space-y-2 text-left transition-all duration-[350ms] ease-out delay-[160ms]"
       :class="visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
     >
-      <div
-        v-for="card in cards"
-        :key="card.titleKey"
-        class="rounded-xl border bg-muted/30 px-5 py-6"
-      >
-        <component
-          :is="card.icon"
-          class="size-5 text-muted-foreground mb-4"
-        />
-        <div class="text-sm font-medium mb-1.5">
-          {{ t(card.titleKey) }}
-        </div>
-        <div class="text-xs text-muted-foreground leading-relaxed">
-          {{ t(card.descKey) }}
-        </div>
-      </div>
+      <p class="px-1 text-caption font-medium text-muted-foreground">
+        {{ t('onboarding.complete.examplesHint') }}
+      </p>
+      <ChatExampleCard
+        v-for="entry in starters"
+        :key="entry.example.id"
+        :example="entry.example"
+        :missing="entry.missing"
+        @select="handleComplete(entry.example)"
+      />
     </div>
 
     <div
@@ -107,7 +112,7 @@ async function handleComplete() {
       <button
         class="inline-flex h-[2.625rem] w-[240px] items-center justify-center rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         :disabled="completing"
-        @click="handleComplete"
+        @click="handleComplete()"
       >
         {{ t('onboarding.complete.action') }}
       </button>

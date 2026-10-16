@@ -163,6 +163,13 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 		}
 		state.Identity.UserID = userID
 	}
+	if strings.TrimSpace(state.Identity.UserID) == "" {
+		ownerUserID, err := r.ownerOnlyUserID(ctx, botID, msg)
+		if err != nil {
+			return state, err
+		}
+		state.Identity.UserID = ownerUserID
+	}
 	state.Identity.DisplayName = displayName
 	state.Identity.AvatarURL = avatarURL
 
@@ -194,7 +201,7 @@ func (r *IdentityResolver) accountUserIDForChannelIdentity(ctx context.Context, 
 		return strings.TrimSpace(userIDs[0]), nil
 	}
 	if len(userIDs) > 1 && r.logger != nil {
-		r.logger.Warn("channel identity has multiple linked users; account principal is ambiguous",
+		r.logger.WarnContext(ctx, "channel identity has multiple linked users; account principal is ambiguous",
 			slog.String("channel_identity_id", strings.TrimSpace(channelIdentityID)),
 			slog.Int("linked_user_count", len(userIDs)))
 	}
@@ -281,6 +288,23 @@ func extractDisplayName(msg channel.InboundMessage) string {
 	return ""
 }
 
+// ownerOnlyUserID resolves the account principal of an unlinked sender on an
+// owner-only channel. Every sender there is the bot owner by construction, so
+// the identity is settled here once instead of each downstream gate (chat ACL,
+// write commands, workspace exec, external runtime actor, approvals) carrying
+// its own owner-only exemption and the next new gate forgetting one. A sender
+// who did /link keeps their linked account; this only fills the gap.
+func (r *IdentityResolver) ownerOnlyUserID(ctx context.Context, botID string, msg channel.InboundMessage) (string, error) {
+	if r.registry == nil || r.policy == nil || !r.registry.IsOwnerOnly(msg.Channel) {
+		return "", nil
+	}
+	ownerUserID, err := r.policy.BotOwnerUserID(ctx, botID)
+	if err != nil {
+		return "", fmt.Errorf("resolve owner-only channel sender: %w", err)
+	}
+	return strings.TrimSpace(ownerUserID), nil
+}
+
 func (r *IdentityResolver) configlessUserID(msg channel.InboundMessage) string {
 	if r.registry == nil || !r.registry.IsConfigless(msg.Channel) {
 		return ""
@@ -317,7 +341,7 @@ func (r *IdentityResolver) resolveProfileFromDirectory(ctx context.Context, cfg 
 	entry, err := directoryAdapter.ResolveEntry(lookupCtx, cfg, subjectID, channel.DirectoryEntryUser)
 	if err != nil {
 		if r.logger != nil {
-			r.logger.Debug(
+			r.logger.DebugContext(ctx,
 				"resolve profile from directory failed",
 				slog.String("channel", msg.Channel.String()),
 				slog.String("subject_id", subjectID),

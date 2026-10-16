@@ -50,13 +50,13 @@ describe('useViewSwap', () => {
 
   it('writes a non-empty resource id without history', () => {
     mocks.route.query = { tab: 'kept' }
-    const { scope, swap } = setupSwap('emailProvider')
+    const { scope, swap } = setupSwap('memoryProvider')
 
-    swap.openDetail('email-1')
+    swap.openDetail('memory-1')
 
     expect(swap.view.value).toBe('detail')
     expect(mocks.replace).toHaveBeenCalledWith({
-      query: { tab: 'kept', emailProvider: 'email-1' },
+      query: { tab: 'kept', memoryProvider: 'memory-1' },
     })
     scope.stop()
   })
@@ -162,31 +162,31 @@ describe('useRoutedViewSwap', () => {
   })
 
   it('does not strip another page key under KeepAlive (unique keys)', async () => {
-    // Simulate two settings pages still mounted: providers (cached) and email (active).
-    mocks.route.query = { emailProvider: 'email-1' }
+    // Simulate two settings pages still mounted: providers (cached) and memory (active).
+    mocks.route.query = { memoryProvider: 'memory-1' }
 
     const providers = setupRouted('provider')
     providers.items.value = [{ routeValue: 'llm-1' }]
     providers.ready.value = true
     providers.loading.value = false
 
-    const email = setupRouted('emailProvider')
-    email.items.value = [{ routeValue: 'email-1' }]
-    email.ready.value = true
-    email.loading.value = false
+    const memory = setupRouted('memoryProvider')
+    memory.items.value = [{ routeValue: 'memory-1' }]
+    memory.ready.value = true
+    memory.loading.value = false
     await nextTick()
 
-    // Providers page sees no `provider` key — must not touch emailProvider.
+    // Providers page sees no `provider` key — must not touch memoryProvider.
     expect(providers.selected.value).toBeUndefined()
-    expect(email.selected.value?.routeValue).toBe('email-1')
+    expect(memory.selected.value?.routeValue).toBe('memory-1')
     expect(mocks.replace).not.toHaveBeenCalled()
 
     providers.scope.stop()
-    email.scope.stop()
+    memory.scope.stop()
   })
 
   it('would race if two pages shared one key (documents why keys must be unique)', async () => {
-    mocks.route.query = { provider: 'email-1' }
+    mocks.route.query = { provider: 'memory-1' }
 
     const providers = setupRouted('provider')
     providers.items.value = [{ routeValue: 'llm-1' }]

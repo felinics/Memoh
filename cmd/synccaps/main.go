@@ -174,8 +174,13 @@ func enrichFile(path string, resolver *capabilities.Resolver, check bool) (int, 
 
 // applyToModel sets thinking_mode + reasoning_efforts inside a model's config
 // mapping, creating config if absent. Returns true if anything changed.
+// A hand-maintained always declaration is authoritative: the registry only
+// knows a model reasons, never that its thinking cannot be turned off.
 func applyToModel(model *yaml.Node, mode string, efforts []string) bool {
 	cfg := mapValue(model, "config")
+	if scalarValue(mapValue(cfg, "thinking_mode")) == "always" {
+		return false
+	}
 	if cfg == nil {
 		cfg = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		mapSet(model, "config", cfg)

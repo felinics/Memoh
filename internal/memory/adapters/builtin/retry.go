@@ -156,7 +156,7 @@ func (q *semanticRetryQueue) flush(ctx context.Context, index semanticUpserter) 
 		err := index.Upsert(attemptCtx, entry.botID, entry.nodeID, entry.body, entry.hash)
 		cancel()
 		if err != nil {
-			q.logger.Debug("semantic retry upsert still failing", "bot_id", entry.botID, "node_id", entry.nodeID, "err", err)
+			q.logger.DebugContext(ctx, "semantic retry upsert still failing", "bot_id", entry.botID, "node_id", entry.nodeID, "err", err)
 			continue
 		}
 		q.mu.Lock()

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"go.uber.org/fx"
 
@@ -20,11 +19,13 @@ import (
 	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agentcredential"
 	audiopkg "github.com/felinics/memoh/internal/audio"
 	"github.com/felinics/memoh/internal/boot"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/botworkspace"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/adapters/local"
 	"github.com/felinics/memoh/internal/channel/route"
@@ -35,7 +36,6 @@ import (
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/config"
 	dbstore "github.com/felinics/memoh/internal/db/store"
-	emailpkg "github.com/felinics/memoh/internal/email"
 	"github.com/felinics/memoh/internal/handlers"
 	"github.com/felinics/memoh/internal/healthcheck"
 	channelchecker "github.com/felinics/memoh/internal/healthcheck/checkers/channel"
@@ -45,7 +45,6 @@ import (
 	"github.com/felinics/memoh/internal/media"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/models"
-	"github.com/felinics/memoh/internal/oauthclients"
 	"github.com/felinics/memoh/internal/providers"
 	"github.com/felinics/memoh/internal/server"
 	"github.com/felinics/memoh/internal/settings"
@@ -92,7 +91,7 @@ func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sess
 	return h
 }
 
-func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService, workdirService *workdir.Service, botAgentsService *botagents.Service, agentService *application.Service, pipeline *timeline.Pipeline) *handlers.SessionHandler {
+func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService, workdirService *workdir.Service, botAgentsService *botagents.Service, agentService *application.Service, pipeline *timeline.Pipeline, runs ledger.Store) *handlers.SessionHandler {
 	handler := handlers.NewSessionHandler(log, sessionService, acpPool, botService, accountService)
 	handler.SetThreadEnricher(routeService)
 	handler.SetWorkdirService(workdirService)
@@ -100,19 +99,23 @@ func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service,
 	handler.SetAgentRuntimeService(agentService)
 	handler.SetModelPreferenceService(agentService)
 	handler.SetProjectionCache(pipeline)
+	handler.SetInvocationLookup(runs)
 	return handler
 }
 
-func provideACPRuntimeHandler(pool *acpagent.SessionPool, sessionService *sessionpkg.Service, botService *bots.Service, accountService *accounts.Service) *handlers.ACPRuntimeHandler {
-	return handlers.NewACPRuntimeHandler(pool, sessionService, botService, accountService)
+func provideACPRuntimeHandler(pool *acpagent.SessionPool, sessionService *sessionpkg.Service, botService *bots.Service, accountService *accounts.Service, botAgentsService *botagents.Service) *handlers.ACPRuntimeHandler {
+	handler := handlers.NewACPRuntimeHandler(pool, sessionService, botService, accountService)
+	handler.SetBotAgents(botAgentsService)
+	return handler
 }
 
 func provideBotAgentsHandler(log *slog.Logger, service *botagents.Service, botService *bots.Service, accountService *accounts.Service, runtimes external.Drivers) *handlers.BotAgentsHandler {
 	return handlers.NewBotAgentsHandler(log, service, botService, accountService, runtimes)
 }
 
-func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaceManager *workspace.Manager, acpPool *acpagent.SessionPool, agentDrivers external.Drivers, credentialService *agentcredential.Service) *handlers.UsersHandler {
-	handler := handlers.NewUsersHandler(log, accountService, botService, routeService, channelStore, channelRuntime, registry, workspaceManager)
+func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaces *botworkspace.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool, agentDrivers external.Drivers, credentialService *agentcredential.Service) *handlers.UsersHandler {
+	handler := handlers.NewUsersHandler(log, accountService, botService, routeService, channelStore, channelRuntime, registry, workspaces)
+	handler.SetWorkspaceStatus(manager)
 	handler.SetRuntimeResetService(botRuntimeResets{pool: acpPool, agents: agentDrivers})
 	handler.SetCredentialService(credentialService)
 	return handler
@@ -144,29 +147,17 @@ func provideProviderOAuthHandler(providersService *providers.Service) *handlers.
 	return handlers.NewProviderOAuthHandler(providersService)
 }
 
-func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *application.Service, sessionRuntime *sessionruntime.Manager, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service, rc *boot.RuntimeConfig, commandHandler *command.Handler, containerdHandler *handlers.ContainerdHandler) *handlers.LocalChannelHandler {
+func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *application.Service, sessionRuntime *sessionruntime.Manager, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service, rc *boot.RuntimeConfig, commandHandler *command.Handler, containerdHandler *handlers.ContainerdHandler, workdirService *workdir.Service) *handlers.LocalChannelHandler {
 	h := handlers.NewLocalChannelHandler(local.WebType, channelManager, channelStore, hub, botService, accountService, sessionService)
 	h.SetAgentService(resolver)
 	h.SetSessionRuntime(sessionRuntime)
+	h.SetWorkdirService(workdirService)
 	h.SetCommandHandler(commandHandler)
 	h.SetRuntimeSkillResolver(containerdHandler)
 	h.SetAuthTokenConfig(rc.JwtSecret, rc.JwtExpiresIn)
 	h.SetMediaService(mediaService)
 	h.SetSpeechService(audioService, &webSpeechModelResolver{settings: settingsService})
 	return h
-}
-
-func provideEmailOAuthHandler(log *slog.Logger, service *emailpkg.Service, tokenStore *emailpkg.DBOAuthTokenStore, oauthClients *oauthclients.Registry, cfg config.Config) *handlers.EmailOAuthHandler {
-	addr := strings.TrimSpace(cfg.Server.Addr)
-	if addr == "" {
-		addr = ":8080"
-	}
-	host := addr
-	if strings.HasPrefix(host, ":") {
-		host = "localhost" + host
-	}
-	callbackURL := "http://" + host + "/api/email/oauth/callback"
-	return handlers.NewEmailOAuthHandler(log, service, tokenStore, oauthClients, callbackURL)
 }
 
 type serverParams struct {
@@ -193,12 +184,12 @@ func provideServer(params serverParams) *server.Server {
 	)
 }
 
-func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, emailService *emailpkg.Service, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelRuntime channel.Runtime, modelsService *models.Service) {
+func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, agentService *application.Service, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelRuntime channel.Runtime, modelsService *models.Service) {
 	fmt.Printf("Starting Memoh Agent %s\n", version.GetInfo())
 
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			if err := coremodule.EnsureAdminUser(ctx, logger, accountStore, emailService, cfg); err != nil {
+			if err := coremodule.EnsureAdminUser(ctx, logger, accountStore, cfg); err != nil {
 				return err
 			}
 			botService.SetContainerReachability(func(ctx context.Context, botID string) error {
@@ -224,10 +215,13 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 			return nil
 		},
 		OnStop: func(ctx context.Context) error {
-			if err := srv.Stop(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				return fmt.Errorf("server stop: %w", err)
+			stopErr := srv.Stop(ctx)
+			if errors.Is(stopErr, http.ErrServerClosed) {
+				stopErr = nil
+			} else if stopErr != nil {
+				stopErr = fmt.Errorf("server stop: %w", stopErr)
 			}
-			return nil
+			return errors.Join(stopErr, agentService.DrainActiveTurns(ctx))
 		},
 	})
 }

@@ -2,6 +2,7 @@ package codex
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,17 +12,17 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/version"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 // appServer is one long-lived `codex app-server` process for one Bot Agent.
 type appServer struct {
-	botID      string
-	botAgentID string
-	proc       *appServerProcess
-	conn       *conn
-	logger     *slog.Logger
+	botID  string
+	proc   *appServerProcess
+	conn   *conn
+	logger *slog.Logger
 	// client is the workspace bridge the process runs over; tool-gateway
 	// mounts reuse it.
 	client *bridge.Client
@@ -42,7 +43,10 @@ type appServer struct {
 	// loadedThreads tracks thread ids this process has started or resumed;
 	// resuming an already-loaded thread is a no-op server-side but tracking
 	// avoids redundant calls.
-	loadedThreads  map[string]bool
+	loadedThreads map[string]bool
+	// threadPaths remembers each thread's rollout file as codex reported it,
+	// so the session can be resumed by path when codex's own index is gone.
+	threadPaths    map[string]string
 	threadSettings map[string]protocol.Settings
 	// toollessThreads marks threads whose start-time config carried no Memoh
 	// tool gateway; the driver re-emits a notice for them every turn.
@@ -83,7 +87,6 @@ func startAppServerSession(ctx context.Context, botID, botAgentID string, client
 	mountCtx, mountCancel := context.WithCancel(ctx)
 	srv := &appServer{
 		botID:           botID,
-		botAgentID:      botAgentID,
 		proc:            proc,
 		logger:          logger,
 		client:          client,
@@ -92,6 +95,7 @@ func startAppServerSession(ctx context.Context, botID, botAgentID string, client
 		mountCancel:     mountCancel,
 		turns:           map[string]*turnState{},
 		loadedThreads:   map[string]bool{},
+		threadPaths:     map[string]string{},
 		toollessThreads: map[string]bool{},
 		logins:          map[string]*loginOutcome{},
 		toolMounts:      map[string]*toolmount.Mount{},
@@ -111,6 +115,10 @@ func startAppServerSession(ctx context.Context, botID, botAgentID string, client
 	}, &initResp)
 	if err != nil {
 		_ = srv.conn.Close()
+		if errors.Is(err, ErrConnClosed) {
+			// The closed connection's error already carries the exit and stderr.
+			return nil, fmt.Errorf("codex initialize failed: %w", err)
+		}
 		return nil, fmt.Errorf("codex initialize failed: %w (stderr: %s)", err, proc.StderrTail())
 	}
 	if err := srv.conn.Notify(protocol.MethodInitialized, nil); err != nil {
@@ -123,7 +131,7 @@ func startAppServerSession(ctx context.Context, botID, botAgentID string, client
 		// binary usually still speaks a compatible superset (unknown fields
 		// and methods are tolerated by design), so warn loudly instead of
 		// refusing service; the toolkit pin and this check must converge.
-		logger.Warn("codex CLI version differs from the pinned protocol snapshot",
+		logger.WarnContext(ctx, "codex CLI version differs from the pinned protocol snapshot",
 			slog.String("bot_id", botID),
 			slog.String("cli_version", srv.codexVersion),
 			slog.String("pinned", protocol.PinnedCodexVersion),
@@ -242,6 +250,29 @@ func (s *appServer) threadLoaded(threadID string) bool {
 	return s.loadedThreads[threadID]
 }
 
+// forgetThread drops a thread codex reported closed; the next turn resumes it
+// from its rollout.
+func (s *appServer) forgetThread(threadID string) {
+	s.mu.Lock()
+	delete(s.loadedThreads, threadID)
+	s.mu.Unlock()
+}
+
+func (s *appServer) rememberThreadPath(threadID string, path *string) {
+	if path == nil || strings.TrimSpace(*path) == "" {
+		return
+	}
+	s.mu.Lock()
+	s.threadPaths[threadID] = *path
+	s.mu.Unlock()
+}
+
+func (s *appServer) threadPath(threadID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.threadPaths[threadID]
+}
+
 func (s *appServer) setThreadToolless(threadID string, toolless bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -260,15 +291,15 @@ func (s *appServer) threadToolless(threadID string) bool {
 
 // HandleServerRequest routes app-server → Memoh requests to the owning turn.
 // It runs on the read loop, so decisions are dispatched to goroutines.
-func (s *appServer) HandleServerRequest(_ context.Context, req *protocol.Inbound) {
+func (s *appServer) HandleServerRequest(ctx context.Context, req *protocol.Inbound) {
 	decoded, known, err := protocol.DecodeServerRequestParams(req.Method, req.Params)
 	if err != nil {
-		s.logger.Error("codex: undecodable server request", slog.String("method", req.Method), slog.Any("error", err))
+		s.logger.ErrorContext(ctx, "codex: undecodable server request", slog.String("method", req.Method), slog.Any("error", err))
 		_ = s.conn.RespondError(req.ID, -32602, "memoh could not decode this request")
 		return
 	}
 	if !known {
-		s.logger.Warn("codex: unhandled server request method", slog.String("method", req.Method))
+		s.logger.WarnContext(ctx, "codex: unhandled server request method", slog.String("method", req.Method))
 		_ = s.conn.RespondError(req.ID, -32601, "memoh does not handle this request")
 		return
 	}
@@ -285,7 +316,7 @@ func (s *appServer) HandleServerRequest(_ context.Context, req *protocol.Inbound
 	turn := s.turnForThread(threadID)
 	if turn == nil {
 		// Fail closed: an approval with no live turn has nobody to decide it.
-		s.logger.Warn("codex: server request for idle thread", slog.String("method", req.Method), slog.String("thread_id", threadID))
+		s.logger.WarnContext(ctx, "codex: server request for idle thread", slog.String("method", req.Method), slog.String("thread_id", threadID))
 		_ = s.conn.RespondError(req.ID, -32000, "no active turn for this thread")
 		return
 	}
@@ -295,16 +326,20 @@ func (s *appServer) HandleServerRequest(_ context.Context, req *protocol.Inbound
 }
 
 // HandleNotification routes app-server notifications to the owning turn.
-func (s *appServer) HandleNotification(_ context.Context, note *protocol.Inbound) {
+func (s *appServer) HandleNotification(ctx context.Context, note *protocol.Inbound) {
 	decoded, known, err := protocol.DecodeServerNotificationParams(note.Method, note.Params)
 	if err != nil {
-		s.logger.Warn("codex: undecodable notification", slog.String("method", note.Method), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "codex: undecodable notification", slog.String("method", note.Method), slog.Any("error", err))
 		return
 	}
 	if !known {
 		return
 	}
 	s.cacheControlNotification(decoded)
+	if closed, ok := decoded.(*protocol.ThreadClosedNotification); ok {
+		s.forgetThread(closed.ThreadID)
+		return
+	}
 	threadID := notificationThreadID(decoded)
 	if threadID == "" {
 		s.handleGlobalNotification(note.Method, decoded)
@@ -331,7 +366,8 @@ func (s *appServer) handleGlobalNotification(method string, decoded any) {
 			outcome.Error = *completed.Error
 		}
 		s.mu.Lock()
-		if _, tracked := s.logins[*completed.LoginID]; tracked {
+		_, tracked := s.logins[*completed.LoginID]
+		if tracked {
 			s.logins[*completed.LoginID] = outcome
 		}
 		if completed.Success {
@@ -339,6 +375,15 @@ func (s *appServer) handleGlobalNotification(method string, decoded any) {
 			s.authReady = true
 		}
 		s.mu.Unlock()
+		// A login the user cancelled is no longer tracked and is not a failure.
+		if tracked && !completed.Success {
+			// The poll response carries only the state, so this record is the
+			// one place the reason Codex gave survives.
+			s.logger.Warn("codex device login failed",
+				slog.String("bot_id", s.botID),
+				slog.String("login_id", *completed.LoginID),
+				slog.String("error", errs.RedactURLs(outcome.Error)))
+		}
 	}
 }
 

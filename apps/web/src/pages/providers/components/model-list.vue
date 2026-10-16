@@ -18,11 +18,15 @@
           :placeholder="$t('models.searchModelPlaceholder')"
         />
       </InputGroup>
+      <!-- A template draft has no provider row yet. Adding a model creates it
+           on submit; importing stays hidden because it lists the endpoint's
+           real models and cannot succeed before an API key is configured. -->
       <div
-        v-if="providerId"
+        v-if="providerId || ensureProviderId"
         class="ml-auto flex items-center gap-2"
       >
         <ImportModelsDialog
+          v-if="providerId"
           :provider-id="providerId"
           size="sm"
           :mode="(models?.length ?? 0) > 0 ? 'refresh' : 'import'"
@@ -31,6 +35,7 @@
         <CreateModel
           v-if="!managed"
           :id="providerId"
+          :ensure-provider-id="ensureProviderId"
           size="sm"
         />
       </div>
@@ -48,7 +53,6 @@
           :delete-loading="deleteModelLoading"
           :search-aligned="searchVisible"
           :managed="managed"
-          :preview="preview"
           @edit="(model) => $emit('edit', model)"
           @delete="(id) => $emit('delete', id)"
         />
@@ -116,7 +120,9 @@
       </EmptyHeader>
       <EmptyTitle>{{ $t('models.emptyTitle') }}</EmptyTitle>
       <EmptyDescription>
-        {{ $t(managed ? 'models.managedEmptyDescription' : 'models.emptyDescription') }}
+        {{ $t(managed
+          ? 'models.managedEmptyDescription'
+          : providerId ? 'models.emptyDescription' : 'models.draftEmptyDescription') }}
       </EmptyDescription>
     </Empty>
   </SettingsSection>
@@ -157,7 +163,7 @@ const props = defineProps<{
   deleteModelLoading: boolean
   managed?: boolean
   clientType?: string
-  preview?: boolean
+  ensureProviderId?: () => Promise<string>
 }>()
 
 defineEmits<{

@@ -279,7 +279,7 @@ func transcriptionProviderDefinitions(base []ProviderDefinition) []ProviderDefin
 
 func defaultProviderDefinitions() []ProviderDefinition {
 	edgeVoices := make([]VoiceInfo, 0)
-	for lang, ids := range edgespeech.EdgeTTSVoices {
+	for lang, ids := range edgespeech.Voices() {
 		for _, id := range ids {
 			name := strings.TrimPrefix(id, lang+"-")
 			name = strings.TrimSuffix(name, "Neural")

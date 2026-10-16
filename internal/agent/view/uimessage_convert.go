@@ -8,8 +8,10 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/messageconv"
 	"github.com/felinics/memoh/internal/textutil"
 )
 
@@ -21,6 +23,7 @@ var (
 	uiMessageCollapsedNewlinesRe = regexp.MustCompile(`\n{3,}`)
 	uiTaskNotificationRe         = regexp.MustCompile(`(?s)<task-notification>\s*(.*?)\s*</task-notification>`)
 	uiMetadataParseKeys          = [][]byte{
+		[]byte(`"runtime_notices"`),
 		[]byte(`"agent_turn_id"`),
 		[]byte(`"message_source"`),
 		[]byte(`"forward"`),
@@ -46,6 +49,7 @@ type uiContentPart struct {
 	Input            any            `json:"input,omitempty"`
 	Output           any            `json:"output,omitempty"`
 	Result           any            `json:"result,omitempty"`
+	IsError          bool           `json:"isError,omitempty"`
 	ProviderMetadata map[string]any `json:"providerMetadata,omitempty"`
 }
 
@@ -88,13 +92,18 @@ type uiDecodedModelMessage struct {
 
 // ConvertRawModelMessagesToUIAssistantMessages converts terminal stream payload
 // messages into frontend-friendly assistant UI messages.
+// ConvertRawModelMessagesToUIAssistantMessages converts the Messages payload
+// of a step or terminal stream event. That payload is a serialized
+// []sdk.Message, whose tool input and provider metadata are shaped for the
+// SDK, so it goes through the stored-shape codec before the extraction below
+// reads it the way it reads persisted rows.
 func ConvertRawModelMessagesToUIAssistantMessages(raw json.RawMessage) []UIMessage {
 	if len(raw) == 0 {
 		return nil
 	}
 
-	var messages []turn.ModelMessage
-	if err := json.Unmarshal(raw, &messages); err != nil {
+	messages, err := messageconv.SDKMessagesJSONToModelMessages(raw)
+	if err != nil {
 		return nil
 	}
 	return ConvertModelMessagesToUIAssistantMessages(messages)
@@ -337,20 +346,15 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			reasonings := extractPersistedReasoning(&modelMessage)
 			attachments := uiAttachmentsFromMessageAssets(raw)
 			commands := extractCommandOutputs(&modelMessage)
+			notices := event.NoticesFromMetadata(raw.Metadata)
 
 			// A persisted turn_id is the only grouping key. Plain-text assistant
 			// messages and tool calls with that same id remain one reply.
-			if len(toolCalls) == 0 && text == "" && len(reasonings) == 0 && len(attachments) == 0 && len(commands) == 0 {
-				if code := persistedHistoryErrorCode(raw.Metadata); code != "" {
-					if pending == nil {
-						pending = newPendingAssistantTurn(raw)
-					}
-					appendPendingAssistantMessage(pending, UIMessage{
-						Type:    UIMessageError,
-						Code:    code,
-						Content: persistedHistoryErrorDetail(raw.Metadata),
-					})
-				}
+			// A row that recorded a failure keeps its error block after whatever
+			// output it already had, so a partially answered turn still shows why
+			// it stopped once history is reloaded.
+			errorCode := persistedHistoryErrorCode(raw.Metadata)
+			if len(toolCalls) == 0 && text == "" && len(reasonings) == 0 && len(attachments) == 0 && len(commands) == 0 && len(notices) == 0 && errorCode == "" {
 				continue
 			}
 
@@ -359,6 +363,9 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			}
 
 			reasoningTimings := uiReasoningTimingsByOrdinal(raw.Metadata)
+			for _, notice := range notices {
+				appendPendingAssistantMessage(pending, noticeUIMessage(notice))
+			}
 			for _, command := range commands {
 				appendPendingAssistantMessage(pending, command)
 			}
@@ -385,6 +392,14 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 					ID:          pending.NextID,
 					Type:        UIMessageAttachments,
 					Attachments: attachments,
+				})
+			}
+			if errorCode != "" {
+				appendPendingAssistantMessage(pending, UIMessage{
+					Type:    UIMessageError,
+					Code:    errorCode,
+					Content: persistedHistoryErrorDetail(raw.Metadata),
+					Args:    persistedHistoryErrorArgs(raw.Metadata),
 				})
 			}
 
@@ -522,6 +537,25 @@ func persistedHistoryErrorCode(meta map[string]any) string {
 	}
 	code, _ := meta[messagepkg.HistoryErrorCodeMetadataKey].(string)
 	return strings.TrimSpace(code)
+}
+
+// persistedHistoryErrorArgs are the string args stored beside a failure's
+// code. A row written before args were stored has none.
+func persistedHistoryErrorArgs(meta map[string]any) map[string]string {
+	stored, _ := meta[messagepkg.HistoryErrorArgsMetadataKey].(map[string]any)
+	if len(stored) == 0 {
+		return nil
+	}
+	args := make(map[string]string, len(stored))
+	for key, value := range stored {
+		if text, ok := value.(string); ok {
+			args[key] = text
+		}
+	}
+	if len(args) == 0 {
+		return nil
+	}
+	return args
 }
 
 func persistedHistoryErrorDetail(meta map[string]any) string {
@@ -1052,6 +1086,9 @@ func extractPersistedToolResults(message *uiDecodedModelMessage) []uiExtractedTo
 		if output == nil {
 			output = part.Result
 		}
+		if part.IsError {
+			output = failedToolOutput(output)
+		}
 		results = append(results, uiExtractedToolResult{
 			ToolCallID: strings.TrimSpace(part.ToolCallID),
 			Output:     output,
@@ -1400,6 +1437,36 @@ func stripPersistedAgentTags(text string) string {
 	}
 	stripped := uiMessageAgentTagsRe.ReplaceAllString(text, "")
 	return strings.TrimSpace(uiMessageCollapsedNewlinesRe.ReplaceAllString(stripped, "\n\n"))
+}
+
+// failedToolOutput gives a failed tool result the shape the web client reads
+// failure from: an object carrying isError plus text content, as MCP results
+// already are. A native tool that returns a Go error is recorded as plain text
+// with the flag on the tool-result part (and streams only an error string),
+// so without this the client cannot tell the call failed and renders the
+// tool's success detail for it.
+func failedToolOutput(output any) any {
+	if payload, ok := output.(map[string]any); ok {
+		if failed, _ := payload["isError"].(bool); failed {
+			return payload
+		}
+		marked := make(map[string]any, len(payload)+1)
+		for key, value := range payload {
+			marked[key] = value
+		}
+		marked["isError"] = true
+		return marked
+	}
+	text, ok := output.(string)
+	if !ok && output != nil {
+		if encoded, err := json.Marshal(output); err == nil {
+			text = string(encoded)
+		}
+	}
+	return map[string]any{
+		"isError": true,
+		"content": []any{map[string]any{"type": "text", "text": text}},
+	}
 }
 
 func applyToolResultToUIMessage(message *UIMessage, output any) {

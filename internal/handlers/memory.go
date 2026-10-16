@@ -2,7 +2,10 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -13,7 +16,10 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/memory/migrate"
 	"github.com/felinics/memoh/internal/settings"
@@ -108,8 +114,7 @@ func (h *MemoryHandler) resolveProvider(ctx context.Context, botID string) (memp
 				if getErr == nil {
 					return p, nil
 				}
-				h.logger.Warn("memory provider lookup failed", slog.String("provider_id", providerID), slog.Any("error", getErr))
-				return nil, fmt.Errorf("configured memory provider is unavailable: %w", getErr)
+				return nil, errs.Wrap(getErr, "configured memory provider is unavailable", slog.String("provider_id", providerID))
 			}
 		}
 	}
@@ -140,7 +145,7 @@ func (h *MemoryHandler) Register(e *echo.Echo) {
 func (h *MemoryHandler) checkService(ctx context.Context, botID string) (memprovider.Provider, error) {
 	p, err := h.resolveProvider(ctx, botID)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+		return nil, echo.NewHTTPError(http.StatusServiceUnavailable, "memory provider unavailable").WithInternal(err)
 	}
 	if p != nil {
 		return p, nil
@@ -159,10 +164,10 @@ func (h *MemoryHandler) checkService(ctx context.Context, botID string) (memprov
 // @Param bot_id path string true "Bot ID"
 // @Param payload body memoryAddPayload true "Memory add payload"
 // @Success 200 {object} adapters.SearchResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Failure 503 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/memory [post].
 func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -172,7 +177,7 @@ func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 
 	var payload memoryAddPayload
 	if err := c.Bind(&payload); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	namespace, err := normalizeSharedMemoryNamespace(payload.Namespace)
@@ -207,7 +212,7 @@ func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 	}
 	resp, err := provider.Add(c.Request().Context(), req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "add memory")
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -221,11 +226,11 @@ func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body memorySearchPayload true "Memory search payload"
 // @Success 200 {object} adapters.SearchResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Failure 503 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/memory/search [post].
 func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -235,7 +240,7 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 
 	var payload memorySearchPayload
 	if err := c.Bind(&payload); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	scopes, err := h.resolveEnabledScopes(botID)
@@ -262,7 +267,7 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 		}
 		resp, searchErr := provider.Search(c.Request().Context(), req)
 		if searchErr != nil {
-			h.logger.Warn("search namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", searchErr))
+			h.logger.WarnContext(c.Request().Context(), "search namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", searchErr))
 			continue
 		}
 		results = append(results, resp.Results...)
@@ -279,10 +284,10 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param no_stats query bool false "Skip optional stats in memory search response"
 // @Success 200 {object} adapters.SearchResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Failure 503 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/memory [get].
 func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -308,7 +313,7 @@ func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 		}
 		resp, getAllErr := provider.GetAll(c.Request().Context(), req)
 		if getAllErr != nil {
-			h.logger.Warn("getall namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", getAllErr))
+			h.logger.WarnContext(c.Request().Context(), "getall namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", getAllErr))
 			continue
 		}
 		allResults = append(allResults, resp.Results...)
@@ -357,9 +362,9 @@ type graphResponse struct {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} graphResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Failure 503 {object} ErrorResponse
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/memory/graph [get].
 func (h *MemoryHandler) ChatGraph(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -672,14 +677,10 @@ func graphParseTime(s string) time.Time {
 	return time.Now().UTC()
 }
 
-// requireMemoryOwnedByBot rejects memory IDs whose bot prefix does not match
-// the authorized bot. Builtin providers derive the target bot from the memory
-// ID prefix ("<botID>:mem_..."), not from the authorized bot, so without this
-// check /bots/A/memory/B:mem_x would operate on bot B's memory. The prefix is
-// parsed exactly like the provider does (everything before the first ":").
+// requireMemoryOwnedByBot rejects foreign or malformed canonical memory IDs.
+// Providers also validate the independently authorized scope before storage.
 func requireMemoryOwnedByBot(botID, memoryID string) error {
-	parts := strings.SplitN(strings.TrimSpace(memoryID), ":", 2)
-	if len(parts) != 2 || strings.TrimSpace(parts[0]) != botID {
+	if err := memprovider.ValidateMemoryScope(botID, memoryID); err != nil {
 		return echo.NewHTTPError(http.StatusForbidden, "memory does not belong to this bot")
 	}
 	return nil
@@ -704,10 +705,10 @@ func memoryIDFromPath(c echo.Context) string {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body memoryDeletePayload false "Optional: specify memory_ids to delete; if omitted, deletes all"
 // @Success 200 {object} adapters.DeleteResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Failure 503 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/memory [delete].
 func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -720,7 +721,21 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 	}
 
 	var payload memoryDeletePayload
-	_ = c.Bind(&payload)
+	if c.Request().ContentLength != 0 {
+		// An absent body retains the documented delete-all operation. A supplied
+		// body must be exactly one valid object: malformed/unknown fields must
+		// never silently turn a targeted deletion into deleting every memory.
+		decoder := json.NewDecoder(http.MaxBytesReader(c.Response(), c.Request().Body, 1<<20))
+		decoder.DisallowUnknownFields()
+		parsed := &payload
+		if err := decoder.Decode(&parsed); err != nil || parsed == nil {
+			return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("invalid memory deletion request"))
+		}
+		var extra any
+		if err := decoder.Decode(&extra); err != io.EOF {
+			return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("invalid memory deletion request"))
+		}
+	}
 
 	if len(payload.MemoryIDs) > 0 {
 		// Reject the whole batch if any ID targets another bot's memory.
@@ -729,9 +744,9 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 				return err
 			}
 		}
-		resp, delErr := provider.DeleteBatch(c.Request().Context(), payload.MemoryIDs)
+		resp, delErr := provider.DeleteBatch(c.Request().Context(), botID, payload.MemoryIDs)
 		if delErr != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, delErr.Error())
+			return errs.Wrap(delErr, "delete memories")
 		}
 		return c.JSON(http.StatusOK, resp)
 	}
@@ -745,7 +760,7 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 			Filters: buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil),
 		}
 		if _, delErr := provider.DeleteAll(c.Request().Context(), req); delErr != nil {
-			h.logger.Warn("deleteall namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", delErr))
+			h.logger.WarnContext(c.Request().Context(), "deleteall namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", delErr))
 		}
 	}
 	return c.JSON(http.StatusOK, memprovider.DeleteResponse{Message: "All memories deleted successfully!"})
@@ -759,10 +774,10 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Memory ID"
 // @Success 200 {object} adapters.DeleteResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Failure 503 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/memory/{id} [delete].
 func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -776,14 +791,14 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 
 	memoryID := memoryIDFromPath(c)
 	if memoryID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "memory_id is required")
+		return apperror.FieldRequired("memory_id")
 	}
 	if err := requireMemoryOwnedByBot(botID, memoryID); err != nil {
 		return err
 	}
-	resp, err := provider.Delete(c.Request().Context(), memoryID)
+	resp, err := provider.Delete(c.Request().Context(), botID, memoryID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "delete memory")
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -798,10 +813,10 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 // @Param memory_id path string true "Memory ID"
 // @Param payload body memoryUpdatePayload true "Update request"
 // @Success 200 {object} adapters.MemoryItem
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Failure 503 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/memory/{memory_id} [put].
 func (h *MemoryHandler) ChatUpdate(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -814,24 +829,25 @@ func (h *MemoryHandler) ChatUpdate(c echo.Context) error {
 	}
 	memoryID := memoryIDFromPath(c)
 	if memoryID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "memory_id is required")
+		return apperror.FieldRequired("memory_id")
 	}
 	if err := requireMemoryOwnedByBot(botID, memoryID); err != nil {
 		return err
 	}
 	var payload memoryUpdatePayload
 	if err := c.Bind(&payload); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if strings.TrimSpace(payload.Memory) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "memory is required")
+		return apperror.FieldRequired("memory")
 	}
 	item, err := provider.Update(c.Request().Context(), memprovider.UpdateRequest{
+		BotID:    botID,
 		MemoryID: memoryID,
 		Memory:   payload.Memory,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "update memory")
 	}
 	return c.JSON(http.StatusOK, item)
 }
@@ -852,11 +868,11 @@ func (h *MemoryHandler) ChatUpdate(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body memoryCompactPayload true "ratio (0,1] required; decay_days optional"
 // @Success 200 {object} adapters.CompactResult
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Failure 501 {object} ErrorResponse
-// @Failure 503 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 501 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/memory/compact [post].
 func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -865,10 +881,10 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 	}
 	var payload memoryCompactPayload
 	if err := c.Bind(&payload); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if payload.Ratio <= 0 || payload.Ratio > 1 {
-		return echo.NewHTTPError(http.StatusBadRequest, "ratio is required and must be in range (0, 1]")
+		return apperror.FieldInvalid("ratio", errors.New("ratio must be in range (0, 1]"))
 	}
 	ratio := payload.Ratio
 	var decayDays int
@@ -880,28 +896,20 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if len(scopes) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "no memory scopes found")
-	}
 
 	provider, checkErr := h.checkService(c.Request().Context(), botID)
 	if checkErr != nil {
 		return checkErr
 	}
-	capability := semanticCompactCapability(provider)
-	if !capability.Semantic {
-		reason := strings.TrimSpace(capability.Reason)
-		if reason == "" {
-			reason = "selected memory provider does not support semantic compact"
-		}
-		return echo.NewHTTPError(http.StatusNotImplemented, reason)
+	if err := compactUnavailableError(semanticCompactCapability(provider)); err != nil {
+		return err
 	}
 
 	scope := scopes[0]
 	filters := buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil)
 	result, err := provider.Compact(c.Request().Context(), filters, ratio, decayDays)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "compact memories")
 	}
 	return c.JSON(http.StatusOK, result)
 }
@@ -913,10 +921,10 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} adapters.UsageResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Failure 503 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/memory/usage [get].
 func (h *MemoryHandler) ChatUsage(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -938,7 +946,7 @@ func (h *MemoryHandler) ChatUsage(c echo.Context) error {
 		filters := buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil)
 		usage, usageErr := provider.Usage(c.Request().Context(), filters)
 		if usageErr != nil {
-			h.logger.Warn("usage namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", usageErr))
+			h.logger.WarnContext(c.Request().Context(), "usage namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", usageErr))
 			continue
 		}
 		totalUsage.Count += usage.Count
@@ -958,11 +966,11 @@ func (h *MemoryHandler) ChatUsage(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} adapters.RebuildResult
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 409 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Failure 503 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/memory/rebuild [post].
 func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -979,14 +987,14 @@ func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
 	}
 	status, err := syncProvider.Status(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "read memory status")
 	}
 	if !status.CanManualSync {
 		return echo.NewHTTPError(http.StatusConflict, "manual sync is not available for the selected memory provider")
 	}
 	result, err := syncProvider.Rebuild(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "rebuild memory index")
 	}
 	return c.JSON(http.StatusOK, result)
 }
@@ -998,11 +1006,11 @@ func (h *MemoryHandler) ChatRebuild(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} adapters.IngestResult
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 409 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Failure 503 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/memory/ingest [post].
 func (h *MemoryHandler) ChatIngest(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -1019,7 +1027,7 @@ func (h *MemoryHandler) ChatIngest(c echo.Context) error {
 	}
 	result, err := ingestProvider.IngestFromMarkdown(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "ingest markdown memories")
 	}
 	return c.JSON(http.StatusOK, result)
 }
@@ -1031,11 +1039,11 @@ func (h *MemoryHandler) ChatIngest(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} adapters.MemoryStatusResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 409 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Failure 503 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/memory/status [get].
 func (h *MemoryHandler) ChatStatus(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -1052,7 +1060,7 @@ func (h *MemoryHandler) ChatStatus(c echo.Context) error {
 	}
 	status, err := syncProvider.Status(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "read memory status")
 	}
 	status.Compact = semanticCompactCapability(provider)
 	return c.JSON(http.StatusOK, status)
@@ -1064,7 +1072,7 @@ func (h *MemoryHandler) ChatStatus(c echo.Context) error {
 func (*MemoryHandler) resolveEnabledScopes(botID string) ([]namespaceScope, error) {
 	botID = strings.TrimSpace(botID)
 	if botID == "" {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "bot id is empty")
+		return nil, errs.New("bot id is empty")
 	}
 	return []namespaceScope{{
 		Namespace: sharedMemoryNamespace,
@@ -1086,16 +1094,12 @@ func normalizeSharedMemoryNamespace(raw string) (string, error) {
 	case "", sharedMemoryNamespace:
 		return sharedMemoryNamespace, nil
 	default:
-		return "", echo.NewHTTPError(http.StatusBadRequest, "invalid namespace: "+raw)
+		return "", apperror.FieldInvalid("namespace", fmt.Errorf("invalid namespace: %s", raw))
 	}
 }
 
 func (*MemoryHandler) resolveBotID(c echo.Context) (string, error) {
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
-	}
-	return botID, nil
+	return httpx.RequiredParam(c, "bot_id")
 }
 
 func buildNamespaceFilters(namespace, scopeID string, extra map[string]any) map[string]any {
@@ -1113,17 +1117,31 @@ func buildNamespaceFilters(namespace, scopeID string, extra map[string]any) map[
 
 func semanticCompactCapability(provider memprovider.Provider) memprovider.MemoryCompactCapability {
 	if provider == nil {
-		return memprovider.MemoryCompactCapability{Reason: "memory service not available"}
+		return memprovider.MemoryCompactCapability{Reason: memprovider.CompactNotConfigured}
 	}
 	semanticProvider, ok := provider.(memprovider.SemanticCompactProvider)
 	if !ok {
-		return memprovider.MemoryCompactCapability{Reason: "selected memory provider does not support semantic compact"}
+		return memprovider.MemoryCompactCapability{Reason: memprovider.CompactUnsupported}
 	}
 	capability := semanticProvider.SemanticCompactCapability()
-	if !capability.Semantic && strings.TrimSpace(capability.Reason) == "" {
-		capability.Reason = "selected memory provider does not support semantic compact"
+	if !capability.Semantic && capability.Reason == "" {
+		capability.Reason = memprovider.CompactUnsupported
 	}
 	return capability
+}
+
+// compactUnavailableError is the answer to a compact request the capability
+// cannot serve, or nil when it can. A provider without compact is the user's
+// choice to change; anything the server did not wire is its own failure.
+func compactUnavailableError(capability memprovider.MemoryCompactCapability) error {
+	switch {
+	case capability.Semantic:
+		return nil
+	case capability.Reason == memprovider.CompactUnsupported:
+		return apperror.New(apperror.CodeMemoryCompactUnsupported, nil)
+	default:
+		return errs.New("semantic compact unavailable", slog.String("reason", string(capability.Reason)))
+	}
 }
 
 func deduplicateMemoryItems(botID string, items []memprovider.MemoryItem) []memprovider.MemoryItem {

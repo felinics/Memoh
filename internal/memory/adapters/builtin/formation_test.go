@@ -381,6 +381,37 @@ func TestOnAfterChatFallbackWithoutLLM(t *testing.T) {
 	}
 }
 
+func TestOnAfterChatSkipsFormationWhenRequested(t *testing.T) {
+	t.Parallel()
+	store := newFakeStore()
+	runtime := newFileRuntime(store)
+	llm := &fakeLLM{
+		extractFacts: []string{"this must not be extracted"},
+	}
+
+	p := NewBuiltinProvider(slog.Default(), runtime)
+	p.SetLLM(llm)
+
+	err := p.OnAfterChat(context.Background(), adapters.AfterChatRequest{
+		BotID:         "bot-1",
+		SkipFormation: true,
+		Messages: []adapters.Message{
+			{Role: "user", Content: "An external agent runtime ran this turn"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("OnAfterChat error: %v", err)
+	}
+	if llm.extractCalls != 0 {
+		t.Fatalf("expected no extraction calls, got %d", llm.extractCalls)
+	}
+	// Not the raw-transcript fallback either: a skipped turn writes nothing,
+	// so one store never holds both extracted facts and unextracted dumps.
+	if len(store.items) != 0 {
+		t.Fatalf("skipped formation must not write anything, got %d items", len(store.items))
+	}
+}
+
 func TestOnBeforeChatRecallsFactMemory(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()

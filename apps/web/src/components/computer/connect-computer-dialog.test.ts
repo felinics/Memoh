@@ -33,10 +33,17 @@ vi.mock('@felinic/ui', () => {
         onClick: () => emit('update:modelValue', !props.modelValue),
       }),
     }),
+    CalloutBanner: (props: { description: string }) => h('div', props.description), Spinner: Wrapper,
+    CodePanel: defineComponent({
+      props: { code: { type: String, default: '' }, copyLabel: { type: String, default: '' } },
+      setup: props => () => h('div', [
+        h('code', props.code),
+        h('button', { onClick: () => { void api.copy(props.code) } }, props.copyLabel),
+      ]),
+    }),
     Dialog: Wrapper, DialogScrollContent: Wrapper, DialogDescription: Wrapper,
     DialogFooter: Wrapper, DialogHeader: Wrapper, DialogTitle: Wrapper,
     toast: { success: vi.fn(), error: vi.fn() },
-    useClipboard: () => ({ copyText: api.copy }),
   }
 })
 
@@ -97,14 +104,14 @@ describe('connection and recovery', () => {
     const command = root.querySelector('code')?.textContent
     expect(command).toContain('--replace && memoh-runtime service install && memoh-runtime service start')
     expect(root.textContent).toContain('computerConnect.replaceDescription')
-    root.querySelector<HTMLButtonElement>('[aria-label="common.copy"]')!.click()
+    clickButton('common.copy')
     await flush()
     expect(api.copy).toHaveBeenCalledWith(command)
     toggleReplacement()
     await flush()
     expect(control.getAttribute('aria-checked')).toBe('false')
     expect(root.querySelector('code')?.textContent).not.toContain('--replace')
-    root.querySelector<HTMLButtonElement>('[aria-label="common.copy"]')!.click()
+    clickButton('common.copy')
     await flush()
     expect(api.copy).toHaveBeenLastCalledWith(root.querySelector('code')?.textContent)
   })

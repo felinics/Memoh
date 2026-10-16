@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 type matrixOutboundStream struct {
@@ -48,8 +49,7 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		channel.StreamEventAgentStart,
 		channel.StreamEventAgentEnd,
 		channel.StreamEventProcessingStarted,
-		channel.StreamEventProcessingCompleted,
-		channel.StreamEventProcessingFailed:
+		channel.StreamEventProcessingCompleted:
 		return nil
 	case channel.StreamEventPhaseEnd:
 		if event.Phase != channel.StreamPhaseText {
@@ -60,18 +60,15 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		s.mu.Unlock()
 		return s.upsertText(ctx, text, channel.MessageFormatPlain, true)
 	case channel.StreamEventToolCallStart:
-		s.mu.Lock()
-		bufText := strings.TrimSpace(s.rawBuffer.String())
-		s.mu.Unlock()
-		if bufText != "" {
-			if err := s.upsertText(ctx, bufText, channel.MessageFormatPlain, true); err != nil {
-				return err
-			}
+		if err := s.commitSegment(ctx); err != nil {
+			return err
 		}
-		s.resetMessageState()
 		return s.sendToolCallMessage(ctx, event.ToolCall, channel.BuildToolCallStart(event.ToolCall))
 	case channel.StreamEventToolCallEnd:
 		return s.sendToolCallMessage(ctx, event.ToolCall, channel.BuildToolCallEnd(event.ToolCall))
+	case channel.StreamEventSegmentEnd:
+		// The text before a hidden tool call becomes its own message.
+		return s.commitSegment(ctx)
 	case channel.StreamEventDelta:
 		if event.Phase == channel.StreamPhaseReasoning || event.Delta == "" {
 			return nil
@@ -80,12 +77,17 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		s.rawBuffer.WriteString(event.Delta)
 		s.mu.Unlock()
 		return nil
+	case channel.StreamEventReset:
+		s.mu.Lock()
+		s.rawBuffer.Reset()
+		s.mu.Unlock()
+		return nil
 	case channel.StreamEventError:
-		errText := strings.TrimSpace(event.Error)
+		errText := redact.Text(strings.TrimSpace(event.Error))
 		if errText == "" {
 			return nil
 		}
-		return s.upsertText(ctx, "Error: "+errText, channel.MessageFormatPlain, true)
+		return s.upsertText(ctx, channel.ErrorReplyText(event.ErrorCode, errText), channel.MessageFormatPlain, true)
 	case channel.StreamEventAttachment:
 		return s.pushAttachments(ctx, event.Attachments)
 	case channel.StreamEventFinal:
@@ -300,6 +302,21 @@ func (s *matrixOutboundStream) forgetToolCallMessage(callID string) {
 		return
 	}
 	delete(s.toolMessages, callID)
+}
+
+// commitSegment sends the buffered text as its own message and resets the
+// message state, so the next text starts a fresh message.
+func (s *matrixOutboundStream) commitSegment(ctx context.Context) error {
+	s.mu.Lock()
+	bufText := strings.TrimSpace(s.rawBuffer.String())
+	s.mu.Unlock()
+	if bufText != "" {
+		if err := s.upsertText(ctx, bufText, channel.MessageFormatPlain, true); err != nil {
+			return err
+		}
+	}
+	s.resetMessageState()
+	return nil
 }
 
 func (s *matrixOutboundStream) resetMessageState() {

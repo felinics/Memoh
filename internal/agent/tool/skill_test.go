@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"testing"
+
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestListSkillReturnsSortedSummaries(t *testing.T) {
@@ -32,21 +34,26 @@ func TestListSkillReturnsSortedSummaries(t *testing.T) {
 		t.Fatalf("first tool = %q, want list_skills", got)
 	}
 
-	result, err := toolset[0].Execute(nil, nil)
+	result, err := toolset[0].Execute(nil, toolexec.ArgumentsFromValue(nil))
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 
-	payload, ok := result.(map[string]any)
+	payload, ok := toolexec.OutputValue(result).(map[string]any)
 	if !ok {
 		t.Fatalf("result type = %T, want map[string]any", result)
 	}
-	if got := payload["count"]; got != 2 {
+	if got := payload["count"]; got != float64(2) {
 		t.Fatalf("count = %#v, want 2", got)
 	}
-	items, ok := payload["skills"].([]map[string]any)
+	rawItems, ok := payload["skills"].([]any)
 	if !ok {
-		t.Fatalf("skills type = %T, want []map[string]any", payload["skills"])
+		t.Fatalf("skills type = %T, want []any", payload["skills"])
+	}
+	items := make([]map[string]any, 0, len(rawItems))
+	for _, item := range rawItems {
+		entry, _ := item.(map[string]any)
+		items = append(items, entry)
 	}
 	if got := items[0]["name"]; got != "alpha" {
 		t.Fatalf("first skill name = %#v, want alpha", got)
@@ -78,15 +85,15 @@ func TestUseSkillReturnsPath(t *testing.T) {
 		t.Fatalf("expected 2 tools, got %d", len(toolset))
 	}
 
-	result, err := toolset[1].Execute(nil, map[string]any{
+	result, err := toolset[1].Execute(nil, toolexec.ArgumentsFromValue(map[string]any{
 		"skillName": "pdf",
 		"reason":    "Need to process a PDF attachment",
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 
-	payload, ok := result.(map[string]any)
+	payload, ok := toolexec.OutputValue(result).(map[string]any)
 	if !ok {
 		t.Fatalf("result type = %T, want map[string]any", result)
 	}

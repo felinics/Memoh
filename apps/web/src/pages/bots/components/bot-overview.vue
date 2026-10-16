@@ -163,7 +163,6 @@
             :key="m.key"
             :label="m.label"
             :value="m.value"
-            :sub="m.sub"
           />
         </div>
 
@@ -280,7 +279,6 @@ import VChart from 'vue-echarts'
 import { useDark } from '@vueuse/core'
 import { Badge, Button, CalloutBanner, MetricReadout, PageShell, SettingsRow, SettingsSection, Skeleton } from '@felinic/ui'
 import {
-  getBotsById,
   getBotsByBotIdSettings,
   getBotsByBotIdMemoryStatus,
   getBotsByBotIdTokenUsage,
@@ -292,12 +290,13 @@ import {
   type ChannelChannelConfig,
   type HandlersDailyTokenUsage,
 } from '@memohai/sdk'
+import { useBotQuery } from '@/composables/api/useBot'
 import BotChecksPanel from './bot-checks-panel.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
-import { resolveBotWorkspaceBackend } from '@/utils/bot-workspace'
-import { formatMetricBytes, formatMetricPercent } from '@/utils/format-bytes'
+import { resolveBotWorkspaceBackend, resolveRuntimeStatusKey, runtimeStatusLabelKey } from '@/utils/bot-workspace'
+import { buildRuntimeMetricCards } from '@/utils/format-bytes'
 import { formatDateTime } from '@/utils/date-time'
 
 use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent])
@@ -315,14 +314,7 @@ const { t } = useI18n()
 const routeIdentifier = computed(() => route.params.botName as string)
 const checksOpen = ref(false)
 
-const { data: bot } = useQuery({
-  key: () => ['bot', routeIdentifier.value],
-  query: async () => {
-    const { data } = await getBotsById({ path: { id: routeIdentifier.value }, throwOnError: true })
-    return data
-  },
-  enabled: () => !!routeIdentifier.value,
-})
+const { data: bot } = useBotQuery(routeIdentifier)
 const botId = computed(() => bot.value?.id ?? '')
 
 const { hasIssue, issueTitle } = useBotStatusMeta(bot, t)
@@ -410,11 +402,7 @@ const reminders = computed<BotReminder[]>(() => {
   return list
 })
 
-const showMemorySection = computed(() => !!settings.value?.memory_provider_id)
-
-const memoryIsBuiltin = computed(() =>
-  (memoryStatus.value?.provider_type ?? 'builtin') === 'builtin',
-)
+const showMemorySection = computed(() => !!settings.value?.memory_enabled)
 
 const memoryMetricCards = computed(() => {
   const status = memoryStatus.value
@@ -427,10 +415,8 @@ const memoryMetricCards = computed(() => {
     },
     {
       key: 'edges',
-      label: memoryIsBuiltin.value
-        ? t('bots.settings.memoryGraphEdges')
-        : t('bots.settings.memorySourceEntries'),
-      value: formatCount(memoryIsBuiltin.value ? status?.edge_count : status?.source_count),
+      label: t('bots.settings.memoryGraphEdges'),
+      value: formatCount(status?.edge_count),
     },
     {
       key: 'sources',
@@ -442,7 +428,7 @@ const memoryMetricCards = computed(() => {
 
 const memoryStatsNote = computed(() => {
   if (memoryLoading.value) return ''
-  if (!settings.value?.memory_provider_id) return ''
+  if (!settings.value?.memory_enabled) return ''
   if (memoryStatus.value) return ''
   return t('bots.overview.memoryNoStats')
 })
@@ -490,6 +476,8 @@ const containerRunning = computed(() => {
   return status === 'running' || status === 'created'
 })
 
+const containerPaused = computed(() => resolveRuntimeStatusKey(container.value?.status) === 'paused')
+
 // Poll metrics (and container state) every 10s while running, mirroring the
 // detail-page pattern. KeepAlive wraps this tab, so onUnmounted never fires on
 // tab switch — gate on onActivated/onDeactivated instead, and stop polling once
@@ -506,7 +494,9 @@ function stopPolling() {
 }
 
 function syncPolling() {
-  const shouldPoll = isActive && isContainerBot.value && containerRunning.value
+  // Paused keeps polling: a runtime that resumes on its own (e.g. a hosted
+  // sandbox woken by the next message) updates without a reload.
+  const shouldPoll = isActive && isContainerBot.value && (containerRunning.value || containerPaused.value)
   if (shouldPoll && !pollTimer) {
     pollTimer = setInterval(() => {
       void refetchMetrics()
@@ -517,7 +507,7 @@ function syncPolling() {
   }
 }
 
-watch([isContainerBot, containerRunning], syncPolling, { immediate: true })
+watch([isContainerBot, containerRunning, containerPaused], syncPolling, { immediate: true })
 
 onActivated(() => {
   isActive = true
@@ -531,26 +521,17 @@ onDeactivated(() => {
 
 onBeforeUnmount(stopPolling)
 
-// Status dot + label reuse the Container tab's status vocabulary so the two
-// pages never disagree on "is it running".
+// Status label reuses the Container tab's status vocabulary so the two pages
+// never disagree on "is it running". Badge is always secondary (neutral gray) —
+// green "Running" was too loud for a quiet telemetry row.
 const runtimeStatusKey = computed(() => {
-  const status = (container.value?.status ?? '').trim().toLowerCase()
-  if (status === 'running') return 'running'
-  if (status === 'created') return 'created'
-  if (status === 'stopped' || status === 'exited') return 'stopped'
-  return containerRunning.value ? 'running' : 'unknown'
+  const key = resolveRuntimeStatusKey(container.value?.status)
+  if (key === 'exited') return 'stopped'
+  if (key === 'unknown' && containerRunning.value) return 'running'
+  return key
 })
 
-// Status label reuses the Container tab vocabulary. Badge is always secondary
-// (neutral gray) — green "Running" was too loud for a quiet telemetry row.
-const runtimeStatusLabel = computed(() => {
-  switch (runtimeStatusKey.value) {
-    case 'running': return t('bots.container.statusRunning')
-    case 'created': return t('bots.container.statusCreated')
-    case 'stopped': return t('bots.container.statusStopped')
-    default: return t('bots.container.statusUnknown')
-  }
-})
+const runtimeStatusLabel = computed(() => t(runtimeStatusLabelKey(runtimeStatusKey.value)))
 
 const runtimeSampledAt = computed(() => {
   const ts = containerMetrics.value?.sampled_at
@@ -565,30 +546,7 @@ const runtimeHasMetrics = computed(
   () => !!cpuMetrics.value || !!memoryMetrics.value || !!storageMetrics.value,
 )
 
-const runtimeMetricCards = computed(() => {
-  const mem = memoryMetrics.value
-  const memLimit = mem?.limit_bytes
-  return [
-    {
-      key: 'cpu',
-      label: t('bots.container.metricsLabels.cpu'),
-      value: formatMetricPercent(cpuMetrics.value?.usage_percent),
-      sub: '',
-    },
-    {
-      key: 'memory',
-      label: t('bots.container.metricsLabels.memory'),
-      value: formatMetricBytes(mem?.usage_bytes),
-      sub: memLimit && memLimit > 0 ? `/ ${formatMetricBytes(memLimit)}` : '',
-    },
-    {
-      key: 'storage',
-      label: t('bots.container.metricsLabels.storage'),
-      value: formatMetricBytes(storageMetrics.value?.used_bytes),
-      sub: '',
-    },
-  ]
-})
+const runtimeMetricCards = computed(() => buildRuntimeMetricCards(containerMetrics.value, t))
 
 // Footnote only when the tile grid is present but nothing has been sampled yet.
 const runtimeMetricsNote = computed(() => {

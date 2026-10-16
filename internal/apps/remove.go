@@ -16,9 +16,10 @@ const (
 	RemovalActionDisconnect = "disconnect"
 	RemovalActionNone       = "none"
 
-	RemovalReasonShared = "shared"
-	RemovalReasonImage  = "image"
-	RemovalReasonAbsent = "absent"
+	RemovalReasonShared   = "shared"
+	RemovalReasonImage    = "image"
+	RemovalReasonAbsent   = "absent"
+	RemovalReasonRequired = "required"
 )
 
 // RemovalPreviewDependency says what removing the App does to one
@@ -93,6 +94,14 @@ func (s *Service) plan(ctx context.Context, inst Installation, prepareWorkspace 
 			item.Action, item.Reason = RemovalActionKeep, RemovalReasonAbsent
 		case entry.Observed.Source != workspacedeps.SourceManaged:
 			item.Action, item.Reason = RemovalActionKeep, RemovalReasonImage
+		default:
+			required, err := s.requiredByDependencies(ctx, inst.BotID, ref.DependencyID)
+			if err != nil {
+				return RemovalPreview{}, fail("inspect dependencies before removal", err)
+			}
+			if required {
+				item.Action, item.Reason = RemovalActionKeep, RemovalReasonRequired
+			}
 		}
 		preview.Dependencies = append(preview.Dependencies, item)
 	}
@@ -169,6 +178,16 @@ func (s *Service) orphanedRequired(ctx context.Context, inst Installation, botRe
 	return result, nil
 }
 
+// requiredByDependencies reports whether other installed dependencies still
+// require depID. Those keep it in the workspace like another App's reference.
+func (s *Service) requiredByDependencies(ctx context.Context, botID, depID string) (bool, error) {
+	if s.dependencies == nil {
+		return false, nil
+	}
+	dependents, err := s.dependencies.Dependents(ctx, botID, depID)
+	return len(dependents) > 0, err
+}
+
 func referencedByOthers(refs []BotDependencyRef, dependencyID, installationID string) bool {
 	for _, ref := range refs {
 		if ref.DependencyID == dependencyID && ref.InstallationID != installationID {
@@ -220,7 +239,7 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 	result := OperationResult{Installation: inst}
 	record := func(step StepResult) {
 		result.Steps = append(result.Steps, step)
-		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Message: step.Error})
+		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Message: step.Error, Code: step.Code})
 	}
 
 	sink.Send(Event{Type: EventStep, Kind: KindSkills, ID: inst.AppID})
@@ -235,7 +254,7 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 		if dep.Action == RemovalActionRemove && s.dependencies != nil {
 			if _, err := s.dependencies.Remove(ctx, botID, dep.ID, logSink(sink, KindDependency, dep.ID)); err != nil {
 				cause := fail("remove dependency "+dep.ID, err)
-				record(StepResult{Kind: KindDependency, ID: dep.ID, Status: StepFailed, Error: publicMessage(cause)})
+				record(StepResult{Kind: KindDependency, ID: dep.ID, Status: StepFailed, Code: string(publicCode(cause))})
 				return result, failRemoval(errors.Join(cause, tx.Rollback(ctx)))
 			} else {
 				record(StepResult{Kind: KindDependency, ID: dep.ID, Status: StepRemoved})
@@ -252,13 +271,13 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 		sink.Send(Event{Type: EventStep, Kind: KindConnector, ID: conn.Type})
 		if conn.Action == RemovalActionDisconnect && s.connectors == nil {
 			cause := fail("disconnect "+conn.Type, connectors.ErrNotConfigured)
-			record(StepResult{Kind: KindConnector, ID: conn.Type, Status: StepFailed, Error: publicMessage(cause)})
+			record(StepResult{Kind: KindConnector, ID: conn.Type, Status: StepFailed, Code: string(publicCode(cause))})
 			return result, failRemoval(errors.Join(cause, tx.Rollback(ctx)))
 		}
 		if conn.Action == RemovalActionDisconnect {
-			if err := s.connectors.Delete(ctx, botID, conn.ConnectionID); err != nil && !isNotFound(err) && !errors.Is(err, errConnectorGone) {
+			if err := s.connectors.Delete(ctx, botID, conn.ConnectionID); err != nil {
 				cause := fail("disconnect "+conn.Type, err)
-				record(StepResult{Kind: KindConnector, ID: conn.Type, Status: StepFailed, Error: publicMessage(cause)})
+				record(StepResult{Kind: KindConnector, ID: conn.Type, Status: StepFailed, Code: string(publicCode(cause))})
 				return result, failRemoval(errors.Join(cause, tx.Rollback(ctx)))
 			} else {
 				record(StepResult{Kind: KindConnector, ID: conn.Type, Status: StepDisconnected})
@@ -298,8 +317,3 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 	sink.Send(Event{Type: EventDone, Kind: KindApp, ID: inst.AppID, Status: "removed"})
 	return result, nil
 }
-
-// errConnectorGone matches a connection Connect-It no longer knows; the
-// connectors service already treats a 404 as deleted, so this only guards
-// wrapped sentinel errors from fakes.
-var errConnectorGone = errors.New("connector connection is gone")

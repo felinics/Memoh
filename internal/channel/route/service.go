@@ -159,13 +159,13 @@ func (s *DBService) ResolveConversation(ctx context.Context, input ResolveInput)
 	if err == nil {
 		if strings.TrimSpace(input.ReplyTarget) != "" && input.ReplyTarget != route.ReplyTarget {
 			if updateErr := s.UpdateReplyTarget(ctx, route.ID, input.ReplyTarget); updateErr != nil && s.logger != nil {
-				s.logger.Warn("update route reply target failed", slog.Any("error", updateErr))
+				s.logger.WarnContext(ctx, "update route reply target failed", slog.Any("error", updateErr))
 			}
 		}
 		if len(input.Metadata) > 0 && metadataChanged(route.Metadata, input.Metadata) {
 			merged := mergeMetadata(route.Metadata, input.Metadata)
 			if updateErr := s.UpdateMetadata(ctx, route.ID, merged); updateErr != nil && s.logger != nil {
-				s.logger.Warn("update route metadata failed", slog.Any("error", updateErr))
+				s.logger.WarnContext(ctx, "update route metadata failed", slog.Any("error", updateErr))
 			}
 		}
 		pgBotID, parseErr := dbpkg.ParseUUID(route.BotID)
@@ -173,7 +173,7 @@ func (s *DBService) ResolveConversation(ctx context.Context, input ResolveInput)
 			return ResolveConversationResult{}, fmt.Errorf("parse route bot id: %w", parseErr)
 		}
 		if touchErr := s.queries.TouchBotActivity(ctx, pgBotID); touchErr != nil && s.logger != nil {
-			s.logger.Warn("touch bot activity failed", slog.Any("error", touchErr))
+			s.logger.WarnContext(ctx, "touch bot activity failed", slog.Any("error", touchErr))
 		}
 		return ResolveConversationResult{BotID: route.BotID, RouteID: route.ID, Created: false}, nil
 	}

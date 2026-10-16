@@ -1,6 +1,8 @@
 package botbackup
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/felinics/memoh/internal/models"
@@ -134,6 +136,81 @@ func TestSettingsLabelsReasoningState(t *testing.T) {
 			}
 			if !found {
 				t.Fatalf("labels %v missing %q", labels, tc.want)
+			}
+		})
+	}
+}
+
+func TestDecodeBackupSettingsIgnoresRetiredLanguage(t *testing.T) {
+	t.Parallel()
+	current := []byte(`{"command_ui_language":"ja","timezone":"Asia/Tokyo","reasoning_effort":"high"}`)
+	legacy := []byte(`{"language":"zh","command_ui_language":"ja","timezone":"Asia/Tokyo","reasoning_effort":"high"}`)
+	want, err := decodeBackupSettings(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeBackupSettings(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("legacy archive changed retained settings: got %+v, want %+v", got, want)
+	}
+	if !reflect.DeepEqual(settingsLabels(legacy), settingsLabels(current)) {
+		t.Fatal("legacy language changes the import preview")
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := fields["language"]; exists {
+		t.Fatal("export reintroduced the retired language setting")
+	}
+}
+
+func TestImportMemorySwitchCompatibility(t *testing.T) {
+	t.Parallel()
+
+	legacyProviders := `[
+		{"id":"builtin-1","provider":"builtin"},
+		{"id":"mem0-1","provider":"mem0"},
+		{"id":"viking-1","provider":"openviking"}
+	]`
+	cases := []struct {
+		name         string
+		raw          string
+		dependencies string
+		want         bool
+	}{
+		{name: "current archive on", raw: `{"memory_enabled":true}`, want: true},
+		{name: "current archive off", raw: `{"memory_enabled":false}`, want: false},
+		{name: "legacy builtin selection", raw: `{"memory_provider_id":"builtin-1"}`, dependencies: legacyProviders, want: true},
+		{name: "legacy mem0 selection", raw: `{"memory_provider_id":"mem0-1"}`, dependencies: legacyProviders, want: false},
+		{name: "legacy openviking selection", raw: `{"memory_provider_id":"viking-1"}`, dependencies: legacyProviders, want: false},
+		{name: "legacy selection without dependency file", raw: `{"memory_provider_id":"builtin-1"}`, want: true},
+		{name: "legacy no selection", raw: `{"memory_provider_id":""}`, dependencies: legacyProviders, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			state := &importState{entries: map[string]backupZipEntry{}}
+			if tc.dependencies != "" {
+				state.entries["dependencies/memory_providers.json"] = backupZipEntry{data: []byte(tc.dependencies)}
+			}
+			cfg, err := decodeBackupSettings([]byte(tc.raw))
+			if err != nil {
+				t.Fatalf("decodeBackupSettings() error = %v", err)
+			}
+			cfg = resolveLegacyMemoryProvider(state, cfg)
+			if cfg.MemoryEnabled != tc.want {
+				t.Fatalf("MemoryEnabled = %v, want %v", cfg.MemoryEnabled, tc.want)
+			}
+			if cfg.MemoryProviderID != "" {
+				t.Fatalf("archive-local provider id leaked into settings: %q", cfg.MemoryProviderID)
 			}
 		})
 	}

@@ -13,6 +13,13 @@
         class="size-4 animate-spin text-muted-foreground"
       />
       <span
+        v-else-if="isFailed"
+        class="flex items-center text-destructive"
+        :title="$t('bots.lifecycle.createFailed')"
+      >
+        <AlertTriangle class="size-4" />
+      </span>
+      <span
         v-else-if="hasIssue"
         class="flex items-center text-destructive"
         :title="issueTitle"
@@ -70,7 +77,7 @@ const botRef = computed(() => props.bot)
 
 const avatarFallback = useAvatarInitials(() => props.bot.display_name || props.bot.id)
 
-const { hasIssue, isPending, issueTitle } = useBotStatusMeta(botRef, t)
+const { hasIssue, isFailed, isPending, issueTitle } = useBotStatusMeta(botRef, t)
 
 function onOpenDetail() {
   if (isPending.value) return

@@ -312,6 +312,10 @@ func ApplyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 }
 
 func applyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentpkg.RunConfig) (agentpkg.RunConfig, error) {
+	return applyProviderRunConfigAttempt(ctx, logger, cfg, 0)
+}
+
+func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg agentpkg.RunConfig, recoveryAttempts int) (agentpkg.RunConfig, error) {
 	ledger := cfg.ContextMutations
 	if ledger == nil {
 		ledger = contextfrag.NewMutationLedger()
@@ -377,6 +381,25 @@ func applyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 		},
 		DynamicMutators: cfg.ContextDynamicMutators,
 	})
+	if (recoveryAttempts == 0 || (budgetPlan != nil && providerHistoryCost(cfg.ContextSourceFrags) > budgetPlan.HistoryBudget)) && budgetErr == nil && (err == nil || errors.Is(err, contextfrag.ErrProtectedContextOverflow)) &&
+		recoveryAttempts < 3 && cfg.RecoverContextBudget != nil && budgetPlan != nil && budgetPlan.HistoryBudget > 0 &&
+		budgetPlan.ActualSystemCost <= budgetPlan.SystemBudget && ctx.Err() == nil {
+		recovery := cfg
+		recovery.ContextManifest.BudgetPlan = budgetPlan
+		recovery, recovered, recoveryErr := cfg.RecoverContextBudget(ctx, recovery)
+		if ctx.Err() != nil {
+			return cfg, ctx.Err()
+		}
+		if errors.Is(recoveryErr, agentpkg.ErrContextRecompose) {
+			return cfg, recoveryErr
+		}
+		if recoveryErr != nil && logger != nil {
+			logger.WarnContext(ctx, "context budget recovery failed", slog.Any("error", recoveryErr))
+		}
+		if recovered && recoveryErr == nil && !reflect.DeepEqual(recovery.ContextSourceFrags, cfg.ContextSourceFrags) {
+			return applyProviderRunConfigAttempt(ctx, logger, recovery, recoveryAttempts+1)
+		}
+	}
 	if budgetErr != nil {
 		recordContextBudgetFailure(ledger, budgetErr)
 		return providerBudgetAuditConfig(cfg, view, ledger, budgetPlan), budgetErr
@@ -909,4 +932,14 @@ func warnMissingContextWindow(ctx context.Context, logger *slog.Logger, cfg agen
 		slog.String("session_id", cfg.ContextScope.SessionID),
 		slog.String("model_id", cfg.CurrentModelID),
 	)
+}
+
+func providerHistoryCost(frags []contextfrag.ContextFrag) int {
+	cost := 0
+	for _, frag := range frags {
+		if frag.Slot != contextfrag.SlotSystem && frag.Slot != contextfrag.SlotCurrentUser && frag.Kind != contextfrag.KindCurrentUserMessage {
+			cost += contextfrag.ResolveProviderBudgetFragTokens(frag)
+		}
+	}
+	return cost
 }

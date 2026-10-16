@@ -81,26 +81,11 @@ func (c *Client) ResolveLocale(ctx context.Context, botID string) string {
 }
 
 func (c *Client) EnqueueSteer(ctx context.Context, input inbound.QueueCommandInput) error {
-	return c.queueCall(ctx, MethodQueueEnqueueSteer, input)
+	return c.call(ctx, MethodQueueEnqueueSteer, input, nil)
 }
 
 func (c *Client) EnqueueFollowUp(ctx context.Context, input inbound.QueueCommandInput) error {
-	return c.queueCall(ctx, MethodQueueEnqueueFollowUp, input)
-}
-
-func (c *Client) queueCall(ctx context.Context, method string, input inbound.QueueCommandInput) error {
-	err := c.call(ctx, method, input, nil)
-	if code := queueCommandCode(err); code != "" {
-		return inbound.NewQueueCommandError(code)
-	}
-	return err
-}
-
-func queueCommandCode(err error) string {
-	if err == nil {
-		return ""
-	}
-	return inbound.NormalizeQueueCommandCode(err.Error())
+	return c.call(ctx, MethodQueueEnqueueFollowUp, input, nil)
 }
 
 func (c *Client) ResolveTextRequestedSkills(ctx context.Context, botID string, names []string) ([]skills.ResolvedSkill, error) {
@@ -151,8 +136,12 @@ func (c *Client) Transcribe(ctx context.Context, modelID string, data []byte, fi
 	return out, nil
 }
 
+// call runs one method on the server. Every method serves an end user's
+// message or command in a channel, so a restored catalog error is forwarded:
+// the user gets the same answer as when the channel runs in the server
+// process.
 func (c *Client) call(ctx context.Context, method string, input, output any) error {
-	return c.rpc.Call(ctx, method, input, output)
+	return intrpc.Forward(c.rpc.Call(ctx, method, input, output))
 }
 
 type transcriptionResult struct {
@@ -264,11 +253,7 @@ func queueHandlerFunc(decode func(json.RawMessage, any) error, handler func(cont
 		if err := decode(raw, &input); err != nil {
 			return nil, err
 		}
-		err := handler(ctx, input)
-		if code := inbound.QueueCommandErrorCode(err); code != "" {
-			return nil, runtimeRpc.Public(inbound.NewQueueCommandError(code))
-		}
-		return nil, err
+		return nil, handler(ctx, input)
 	}
 }
 

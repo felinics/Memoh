@@ -130,11 +130,6 @@ export interface CommandActionResult {
   items?: CommandActionListItem[]
 }
 
-export interface CommandActionError {
-  code: string
-  message: string
-}
-
 export interface CommandEventResponse {
   type: 'command_result' | 'command_error'
   invocation_id?: string
@@ -143,7 +138,9 @@ export interface CommandEventResponse {
   action_id?: string
   terminal: boolean
   result?: CommandActionResult
-  error?: CommandActionError
+  // A command_error's catalog or slash-command code, and the server's text.
+  code?: string
+  message?: string
 }
 
 export interface UIAttachment {
@@ -432,13 +429,16 @@ export interface UIStreamErrorEvent {
   session_id?: string
   code?: string
   message: string
-  feedback?: unknown
+  args?: Record<string, string>
 }
 
 export interface UIStreamSessionCreatedEvent {
   type: 'session_created'
   invocation_id: string
   session_id: string
+  /** The workdir the session was actually born bound to; absent when it has
+   *  none. A backend that predates in-band workdir binding never sends it. */
+  workdir_id?: string
 }
 
 export type RuntimeRunStatus =
@@ -490,11 +490,26 @@ export interface RuntimeCurrentRunView {
   // boundary. Claimed entries are provisional; applied entries reference the
   // settled history turn that replaces them.
   steer_turns?: RuntimeSteerTurnView[]
+  // The catalog code of the run's failure. The run view carries no error text;
+  // the client shows the copy for the code.
   error_code?: string
-  error?: string
   proposed_terminal_status?: RuntimeRunStatus
   finish_proposed_at?: string
   operation?: RuntimeRunOperation
+  // Present while the model call waits to be retried; cleared by the next
+  // visible output or when the run leaves execution.
+  retry?: RuntimeRunRetry
+}
+
+export type RuntimeRetryReason = 'rate_limited' | 'server_error' | 'stream_incomplete' | 'network'
+
+export interface RuntimeRunRetry {
+  attempt: number
+  max_attempt: number
+  delay_ms: number
+  reason?: RuntimeRetryReason
+  // Server time the next attempt is planned for, for countdowns.
+  retry_at: string
 }
 
 export interface RuntimeSteerTurnView {
@@ -523,9 +538,12 @@ export interface RuntimeCurrentRunPatch {
   run_id: string
   status?: RuntimeRunStatus
   error_code?: string
-  error?: string
   updated_at?: string
   owner_lease_expires_at?: string
+  // retry replaces the run's retry state, clear_retry removes it; with
+  // neither the state is unchanged.
+  retry?: RuntimeRunRetry
+  clear_retry?: boolean
 }
 
 export interface RuntimeMessageAppend {

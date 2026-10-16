@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/schedule"
 )
 
@@ -24,6 +26,14 @@ func attachCurrentTurnPrompt(cfg native.RunConfig, prompt string) native.RunConf
 
 // TriggerSchedule executes a scheduled command via the internal agent.
 func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) (triggerResult schedule.TriggerResult, err error) {
+	endActiveTurn, beginErr := s.activeTurns.begin()
+	if beginErr != nil {
+		return schedule.TriggerResult{}, beginErr
+	}
+	defer endActiveTurn()
+	if strings.TrimSpace(payload.FireID) == "" {
+		return schedule.TriggerResult{}, errors.New("schedule fire id is required")
+	}
 	if strings.TrimSpace(botID) == "" {
 		return schedule.TriggerResult{}, errors.New("bot id is required")
 	}
@@ -55,14 +65,21 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 			},
 		}
 	}
-	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, botID, payload.SessionID, scheduleInvocationID(payload), submission, viewFn)
+	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, sessionmode.Schedule, botID, payload.SessionID, scheduleInvocationID(payload), submission, viewFn)
+	if errors.Is(err, sessionruntime.ErrSessionBusy) {
+		// A fire that cannot take the thread's slot has no value once the next
+		// one is due, so it is dropped rather than retried here.
+		return schedule.TriggerResult{}, fmt.Errorf("%w: %w", schedule.ErrSessionBusy, err)
+	}
 	if err != nil {
-		// Including a busy answer: a fire that cannot take the thread's slot has
-		// no value once the next one is due, so it is reported and dropped rather
-		// than retried here.
 		return schedule.TriggerResult{}, err
 	}
-	defer func() { finish(triggeredRunTerminal{cause: err}) }()
+	defer func() {
+		finish(RunOutcome{Cause: err})
+		// The run's own result record carries this failure at its level; the
+		// fire that returns it does not record it again.
+		err = errs.Recorded(err)
+	}()
 	ctx = runCtx
 
 	// Runtime sessions (ACP, codex, claude-code) must never silently degrade
@@ -88,6 +105,9 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		Model:           payload.ModelID,
 		ReasoningEffort: payload.ReasoningEffort,
 		SessionType:     sessionmode.Schedule,
+	}
+	if err := s.recordRunResumeContext(ctx, req); err != nil {
+		return schedule.TriggerResult{}, err
 	}
 	rc, req, err := s.resolve(ctx, req)
 	if err != nil {
@@ -150,6 +170,7 @@ func (s *Service) runTriggeredNativeStream(
 		cancelStream()
 		idleCancel.Stop()
 	}()
+	cfg = pauseIdleDuringBudgetRecovery(cfg, idleCancel)
 
 	return s.consumeTriggeredStreamWithIdle(
 		idleCtx,
@@ -204,20 +225,19 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 			terminalSeen = true
 		}
 		if idle != nil {
-			idle.Reset()
-			if event.Type == native.EventToolCallStart {
-				idle.RecordToolCall()
-			}
+			idle.Observe(event)
 		}
-		if eventErr := agentStreamEventError(event); eventErr != nil {
-			s.logger.Error("triggered run stream error",
-				slog.String("bot_id", req.BotID),
-				slog.String("session_id", req.ThreadID),
-				slog.Any("error", eventErr),
-			)
+		if eventErr := agentStreamFailure(event); eventErr != nil {
 			if streamErr == nil {
 				streamErr = eventErr
 			}
+		}
+		if event.Type == native.EventAgentEnd && strings.TrimSpace(event.ApprovalID) == "" {
+			// A clean end means an earlier retryable stream error recovered.
+			// Only event errors can be recorded before the terminal event: a
+			// refused publish stops the loop, and persistence errors are
+			// recorded below, after this reset.
+			streamErr = nil
 		}
 		if event.IsTerminal() && event.Type == native.EventAgentAbort && strings.TrimSpace(event.ApprovalID) == "" {
 			// A stopped run is not a success: mirror the WS loop, which maps
@@ -271,7 +291,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 						if streamErr == nil {
 							streamErr = terminalPersistErr
 						}
-						s.logger.Error("triggered run step finalization failed", slog.Any("error", storeErr))
+						s.logger.ErrorContext(ctx, "triggered run step finalization failed", slog.Any("error", storeErr))
 					} else {
 						stored = true
 					}
@@ -281,7 +301,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 						if streamErr == nil {
 							streamErr = terminalPersistErr
 						}
-						s.logger.Error("triggered run terminal persist failed", slog.Any("error", storeErr))
+						s.logger.ErrorContext(ctx, "triggered run terminal persist failed", slog.Any("error", storeErr))
 					} else {
 						stored = true
 					}
@@ -319,8 +339,8 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 			}
 		}
 	}
-	if streamErr == nil {
-		streamErr = context.Cause(ctx)
+	if streamErr == nil && context.Cause(ctx) != nil {
+		streamErr = agentAbortCause(ctx)
 	}
 
 	// Mid-run abort/error: finalize whatever the step committer already landed
@@ -332,7 +352,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 			if streamErr == nil {
 				streamErr = storeErr
 			}
-			s.logger.Error("triggered run step finalization failed", slog.Any("error", storeErr))
+			s.logger.ErrorContext(ctx, "triggered run step finalization failed", slog.Any("error", storeErr))
 		}
 	}
 
@@ -350,7 +370,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 	case streamErr != nil && !hasSnapshot:
 		if idle != nil && idle.DidFire() {
 			if _, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, rc, snapshotFailureCode(true, streamErr)); storeErr != nil {
-				s.logger.Error("triggered run timeout persist failed", slog.Any("error", storeErr))
+				s.logger.ErrorContext(ctx, "triggered run timeout persist failed", slog.Any("error", storeErr))
 			}
 		}
 		return schedule.TriggerResult{}, streamErr
@@ -385,13 +405,7 @@ type scheduleSubmission struct {
 	Command    string `json:"command"`
 }
 
-// scheduleInvocationID names one fire.
-//
-// Each fire runs in a thread of its own, and invocation uniqueness is already
-// scoped per thread, so the thread id is what distinguishes consecutive fires.
-// Naming it explicitly also keeps these ids correct if a schedule ever reuses one
-// thread across fires, which would otherwise make every fire after the first look
-// like a replay of the first.
+// scheduleInvocationID identifies one persisted fire, independently of its target session.
 func scheduleInvocationID(payload schedule.TriggerPayload) string {
-	return "schedule:" + strings.TrimSpace(payload.ID) + ":" + strings.TrimSpace(payload.SessionID)
+	return "schedule:" + strings.TrimSpace(payload.ID) + ":" + strings.TrimSpace(payload.FireID)
 }

@@ -85,14 +85,14 @@ func Sync(ctx context.Context, logger *slog.Logger, queries dbstore.Queries, def
 		providerCfg := providerConfigFromDefinition(def)
 		providerConfigJSON, err := json.Marshal(providerCfg)
 		if err != nil {
-			logger.Warn("registry: failed to marshal provider config",
+			logger.WarnContext(ctx, "registry: failed to marshal provider config",
 				slog.String("name", def.Name), slog.Any("error", err))
 			continue
 		}
 
 		provider, err := syncProvider(ctx, queries, providerIndex, usedProviders, def, icon, providerCfg, providerConfigJSON)
 		if err != nil {
-			logger.Warn("registry: failed to upsert provider", slog.String("name", def.Name), slog.Any("error", err))
+			logger.WarnContext(ctx, "registry: failed to upsert provider", slog.String("name", def.Name), slog.Any("error", err))
 			continue
 		}
 		providerIndex.add(provider)
@@ -101,7 +101,7 @@ func Sync(ctx context.Context, logger *slog.Logger, queries dbstore.Queries, def
 		for _, m := range def.Models {
 			configJSON, err := json.Marshal(m.Config)
 			if err != nil {
-				logger.Warn("registry: failed to marshal model config",
+				logger.WarnContext(ctx, "registry: failed to marshal model config",
 					slog.String("provider", def.Name), slog.String("model", m.ModelID), slog.Any("error", err))
 				continue
 			}
@@ -124,13 +124,13 @@ func Sync(ctx context.Context, logger *slog.Logger, queries dbstore.Queries, def
 				Config:     configJSON,
 			})
 			if err != nil {
-				logger.Warn("registry: failed to upsert model",
+				logger.WarnContext(ctx, "registry: failed to upsert model",
 					slog.String("provider", def.Name), slog.String("model", m.ModelID), slog.Any("error", err))
 				continue
 			}
 		}
 
-		logger.Info("registry: synced provider", slog.String("name", def.Name), slog.Int("models", len(def.Models)))
+		logger.InfoContext(ctx, "registry: synced provider", slog.String("name", def.Name), slog.Int("models", len(def.Models)))
 	}
 	return nil
 }

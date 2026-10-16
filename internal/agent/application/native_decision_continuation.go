@@ -46,11 +46,8 @@ func (s *Service) runNativeDecisionContinuation(ctx context.Context, req ChatReq
 	failureEventForwarded := false
 	var hasVisibleOutput bool
 	for event := range stream {
-		idleCancel.Reset()
-		if event.Type == native.EventToolCallStart {
-			idleCancel.RecordToolCall()
-		}
-		if eventErr := agentStreamLifecycleError(event); eventErr != nil && lifecycleCause == nil {
+		idleCancel.Observe(event)
+		if eventErr := agentStreamFailure(event); eventErr != nil && lifecycleCause == nil {
 			lifecycleCause = eventErr
 			// The public event forwarded downstream carries only a stable code;
 			// keep the runtime's private detail in the server log so a failed
@@ -147,7 +144,7 @@ func (s *Service) runNativeDecisionContinuation(ctx context.Context, req ChatReq
 		lifecycleCause = context.Cause(idleCtx)
 		if !stored {
 			if _, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, resolvedContext{runConfig: cfg, model: models.GetResponse{ID: modelID}}, snapshotFailureCode(true, lifecycleCause)); storeErr != nil {
-				s.logger.Error("decision continuation timeout persist failed", slog.Any("error", storeErr))
+				s.logger.ErrorContext(ctx, "decision continuation timeout persist failed", slog.Any("error", storeErr))
 			}
 		}
 		if eventCh != nil && !failureEventForwarded {

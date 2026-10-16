@@ -42,11 +42,11 @@ export function parseBrowserAddress(raw: string): BrowserAddress {
   }
 
   const hostname = parsed.hostname.toLowerCase()
-  if (!['localhost', '127.0.0.1', '::1'].includes(hostname)) {
-    throw new Error('Browser address must use localhost or 127.0.0.1')
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(hostname)) {
+    throw new Error('Browser address must use localhost, 127.0.0.1 or [::1]')
   }
 
-  const port = Number.parseInt(parsed.port || '', 10)
+  const port = Number.parseInt(portMatch?.[1] || parsed.port || '', 10)
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error('Browser address must include a port from 1 to 65535')
   }

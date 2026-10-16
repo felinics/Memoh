@@ -32,10 +32,21 @@ func (f *fakeRoleResolver) GetMemberRole(_ context.Context, _, _ string) (string
 type fakeAccessEvaluator struct {
 	allow bool
 	err   error
+	// ownerOnlyChannels mirrors the production wiring, where the predicate is
+	// keyed by channel type (weixin), not a blanket flag.
+	ownerOnlyChannels map[string]bool
 }
 
-func (f *fakeAccessEvaluator) Evaluate(_ context.Context, _ acl.EvaluateRequest) (bool, error) {
+func (f *fakeAccessEvaluator) Evaluate(_ context.Context, req acl.EvaluateRequest) (bool, error) {
+	// Mirror acl.Service.Evaluate: owner-only channels short-circuit to allow.
+	if f.ownerOnlyChannels[req.ChannelType] {
+		return true, nil
+	}
 	return f.allow, f.err
+}
+
+func (f *fakeAccessEvaluator) OwnerOnlyChannel(channelType string) bool {
+	return f.ownerOnlyChannels[channelType]
 }
 
 type fakeScheduleService struct {
@@ -97,11 +108,11 @@ func (f *fakeCommandQueries) UpdateSessionModelPreference(_ context.Context, arg
 
 // newTestHandler creates a Handler with nil services for use in tests.
 func newTestHandler(roleResolver MemberRoleResolver) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 func newTestHandlerWithQueries(roleResolver MemberRoleResolver, queries CommandQueries) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, queries, nil, nil, nil)
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, queries, nil, nil, nil)
 }
 
 // The /model and /reasoning clear path (issue #879, P11′): a session-bound
@@ -130,7 +141,7 @@ func TestClearSessionModelPreference(t *testing.T) {
 }
 
 func newTestHandlerWithACL(roleResolver MemberRoleResolver, evaluator AccessEvaluator) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, evaluator, nil, nil)
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, evaluator, nil, nil)
 }
 
 // --- tests ---
@@ -329,6 +340,11 @@ func TestExecute_WritePermissionDenied(t *testing.T) {
 	if !strings.Contains(result, "Only the bot owner") {
 		t.Errorf("expected permission denied, got: %s", result)
 	}
+	// An owner whose IM account isn't linked lands here too, so the denial must
+	// say how to link rather than leave them guessing.
+	if !strings.Contains(result, "/link") {
+		t.Errorf("expected owner-only denial to point at /link, got: %s", result)
+	}
 }
 
 func TestExecute_WritePermissionAllowedForOwner(t *testing.T) {
@@ -346,25 +362,42 @@ func TestExecute_WritePermissionAllowedForOwner(t *testing.T) {
 	}
 }
 
-func TestExecute_WritePermissionDeniedForQQAndWeixinWithoutLinkedUser(t *testing.T) {
+func TestExecute_WritePermissionDeniedForQQWithoutLinkedUser(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(&fakeRoleResolver{role: ""})
-	for _, channelType := range []string{"qq", "weixin"} {
-		t.Run(channelType, func(t *testing.T) {
-			t.Parallel()
-			result, err := h.ExecuteWithInput(context.Background(), ExecuteInput{
-				BotID:             "bot-1",
-				ChannelIdentityID: "channel-id-1",
-				Text:              "/model set",
-				ChannelType:       channelType,
-			})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if !strings.Contains(result, "Only the bot owner") {
-				t.Fatalf("%s unlinked write command should be denied, got: %s", channelType, result)
-			}
-		})
+	result, err := h.ExecuteWithInput(context.Background(), ExecuteInput{
+		BotID:             "bot-1",
+		ChannelIdentityID: "channel-id-1",
+		Text:              "/model set",
+		ChannelType:       "qq",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Only the bot owner") {
+		t.Fatalf("qq unlinked write command should be denied, got: %s", result)
+	}
+}
+
+// On owner-only channels (weixin) every reachable sender is the operator, so
+// write commands must run without /link — even when the chat ACL would deny.
+func TestExecute_WritePermissionAllowedForOwnerOnlyChannelWithoutLink(t *testing.T) {
+	t.Parallel()
+	h := newTestHandlerWithACL(&fakeRoleResolver{role: ""}, &fakeAccessEvaluator{allow: false, ownerOnlyChannels: map[string]bool{"weixin": true}})
+	result, err := h.ExecuteWithInput(context.Background(), ExecuteInput{
+		BotID:             "bot-1",
+		ChannelIdentityID: "channel-id-1",
+		Text:              "/settings update",
+		ChannelType:       "weixin",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "Only the bot owner") {
+		t.Fatalf("owner-only channel must not require /link for write commands, got: %s", result)
+	}
+	if !strings.Contains(result, "Usage:") {
+		t.Fatalf("expected the write command to reach its handler (usage hint), got: %s", result)
 	}
 }
 
@@ -394,6 +427,35 @@ func TestExecute_SettingsDefaultAction(t *testing.T) {
 	}
 	if strings.Contains(result, "Unknown action") {
 		t.Errorf("expected settings get attempt, not unknown action, got: %s", result)
+	}
+}
+
+func TestMemoryStatusResultOffersTheOppositeSwitch(t *testing.T) {
+	t.Parallel()
+	cc := CommandContext{L: i18n.New("en")}
+	cases := []struct {
+		enabled    bool
+		wantState  string
+		wantAction string
+	}{
+		{enabled: true, wantState: "Memory: on", wantAction: "off"},
+		{enabled: false, wantState: "Memory: off", wantAction: "on"},
+	}
+	for _, tc := range cases {
+		result := memoryStatusResult(cc, tc.enabled)
+		if !strings.Contains(result.Text, tc.wantState) {
+			t.Fatalf("status text = %q, want %q", result.Text, tc.wantState)
+		}
+		if !strings.Contains(result.Text, "/memory "+tc.wantAction) {
+			t.Fatalf("status text = %q, want text-channel hint for /memory %s", result.Text, tc.wantAction)
+		}
+		if result.Interactive == nil || result.Interactive.Choices == nil || len(result.Interactive.Choices.Choices) != 1 {
+			t.Fatalf("status choices = %#v, want one switch", result.Interactive)
+		}
+		action := result.Interactive.Choices.Choices[0].Action
+		if action == nil || action.Resource != "memory" || action.Action != tc.wantAction {
+			t.Fatalf("switch action = %#v, want memory %s", action, tc.wantAction)
+		}
 	}
 }
 
@@ -480,7 +542,6 @@ func TestExecute_MissingArgs(t *testing.T) {
 		{"/mcp delete", "Usage:"},
 		{"/fs read", "isn't available"},
 		{"/model set", "Usage:"},
-		{"/memory set", "Usage:"},
 		{"/search set", "Usage:"},
 	}
 	for _, tt := range tests {
@@ -568,8 +629,8 @@ func TestBareInvocationLandings(t *testing.T) {
 	h := newTestHandler(nil)
 	// Groups that previously dumped Usage() help now land on a useful read view.
 	want := map[string]string{
-		"schedule": "list", "mcp": "list", "memory": "list",
-		"search": "list", "email": "outbox", "fs": "list",
+		"schedule": "list", "mcp": "list", "memory": "status",
+		"search": "list", "fs": "list",
 	}
 	for name, action := range want {
 		g, ok := h.registry.groups[name]
@@ -604,7 +665,7 @@ func TestGlobalHelp_AllGroups(t *testing.T) {
 	for _, group := range []string{
 		"schedule", "mcp", "settings",
 		"model", "memory", "search", "usage",
-		"email", "skill", "fs", "access",
+		"skill", "fs", "access",
 	} {
 		if !strings.Contains(help, "/"+group) {
 			t.Errorf("missing /%s in global help", group)
@@ -818,62 +879,6 @@ var (
 	_ = settings.Settings{}
 )
 
-// TestLooksLikeInternalError_KeepsRealLeaksHidden pins the markers that MUST
-// flag a message as internal (so the user sees a clean retry line instead of
-// raw infra).
-func TestLooksLikeInternalError_KeepsRealLeaksHidden(t *testing.T) {
-	t.Parallel()
-	internalCases := []string{
-		"failed to dial backend: connection refused",
-		"dial tcp 10.0.0.1:5432: connect: connection refused",
-		"context deadline exceeded",
-		"i/o timeout",
-		"no such host: api.example.com",
-		"pq: relation \"foo\" does not exist",
-		"sql: no rows in result set",
-		"x509: certificate signed by unknown authority",
-		"panic: nil pointer dereference",
-		"runtime error: invalid memory address or nil pointer dereference",
-		"goroutine 12 [running]:",
-	}
-	for _, msg := range internalCases {
-		if !looksLikeInternalError(msg) {
-			t.Errorf("expected internal-error classification for %q, got false", msg)
-		}
-	}
-}
-
-// TestLooksLikeInternalError_AllowsDomainMessages pins the legitimate-message
-// boundary. These are real strings handlers emit; flagging them as internal
-// would swap a helpful domain error for a dead "please try again" line.
-//
-// Documents the trade-offs of the current marker set:
-//   - "sqlcoder" (a real model name) used to trip on the bare "sql" marker;
-//     the marker is now "sql:" so model IDs with "sql" prefix/substring pass.
-//   - URLs in domain messages used to trip on "://"; that marker was removed.
-//     Actual URL-bearing transport leaks ("dial tcp…", "no such host") still
-//     get caught by the more-specific markers.
-//   - "failed to …" as a Go wrap-chain marker still flags legitimate English
-//     phrasing like "failed to find a matching schedule" — that's the known
-//     trade-off; handlers should phrase domain not-found errors without the
-//     "failed to" prefix (or with a more specific verb).
-func TestLooksLikeInternalError_AllowsDomainMessages(t *testing.T) {
-	t.Parallel()
-	domainCases := []string{
-		`model "sqlcoder" not found`,
-		`ambiguous model: openai/gpt-4 or sqlcoder/sqlcoder-7b`,
-		`schedule "daily-recap" not found`,
-		`visit https://example.com/docs to configure`,
-		`memory provider mem0 returned no matches`,
-		"reasoning effort must be one of: low, medium, high",
-	}
-	for _, msg := range domainCases {
-		if looksLikeInternalError(msg) {
-			t.Errorf("expected domain-message classification for %q, got true (this leaks the message into a dead retry line)", msg)
-		}
-	}
-}
-
 // TestNormalizeLanguageShorthand guards the "/language zh" shorthand: the bare
 // value must be rewritten into the set handler's arg slice. Regression for the
 // bug where the rewrite ran after CommandContext.Args was frozen, so /language
@@ -1018,13 +1023,13 @@ func TestCommandAccess(t *testing.T) {
 		{name: "outsider denied", role: "", allow: false, text: "/new", wantOK: false},
 		{name: "outsider allowed by chat acl", role: "", allow: true, text: "/status", wantOK: true},
 		{name: "qq unbound denied by chat acl", role: "", channel: "qq", allow: false, text: "/new", wantOK: false},
-		{name: "weixin unbound denied by chat acl", role: "", channel: "weixin", allow: false, text: "/stop", wantOK: false},
+		{name: "weixin unbound allowed on owner-only channel", role: "", channel: "weixin", allow: false, text: "/stop", wantOK: true},
 		{name: "eval error propagates", role: "", allow: false, evalErr: errors.New("boom"), text: "/new", wantOK: false, wantError: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			h := newTestHandlerWithACL(&fakeRoleResolver{role: tc.role}, &fakeAccessEvaluator{allow: tc.allow, err: tc.evalErr})
+			h := newTestHandlerWithACL(&fakeRoleResolver{role: tc.role}, &fakeAccessEvaluator{allow: tc.allow, err: tc.evalErr, ownerOnlyChannels: map[string]bool{"weixin": true}})
 			ch := tc.channel
 			if ch == "" {
 				ch = "discord"
@@ -1047,37 +1052,5 @@ func TestCommandAccess(t *testing.T) {
 				t.Errorf("CommandAccess(%q) = %v, want %v", tc.text, ok, tc.wantOK)
 			}
 		})
-	}
-}
-
-func TestEndsWithTerminalPunct(t *testing.T) {
-	t.Parallel()
-	for _, s := range []string{"done.", "really?", "stop!", "完成。", "真的？", "等等…", "  trailing.  "} {
-		if !endsWithTerminalPunct(s) {
-			t.Errorf("endsWithTerminalPunct(%q) = false, want true", s)
-		}
-	}
-	for _, s := range []string{"", "no punct", "model x", "中文无标点"} {
-		if endsWithTerminalPunct(s) {
-			t.Errorf("endsWithTerminalPunct(%q) = true, want false", s)
-		}
-	}
-}
-
-// TestFriendlyCommandError_NoDoublePunctZh guards the CJK-aware period logic:
-// a zh domain error already ending in the ideographic full stop "。" must not
-// gain a trailing ASCII ".". The model not-found path (now carrying a baked-in
-// discovery pointer) flows through here in zh sessions.
-func TestFriendlyCommandError_NoDoublePunctZh(t *testing.T) {
-	t.Parallel()
-	h := newTestHandler(nil)
-	zh := i18n.New("zh")
-	err := errors.New("找不到模型 \"x\"。用 `/model list` 查看可用模型。")
-	got := h.friendlyCommandError(zh, "model", err)
-	if strings.Contains(got, "。.") {
-		t.Errorf("zh error gained a trailing ASCII period: %q", got)
-	}
-	if !strings.HasSuffix(got, "。") {
-		t.Errorf("zh error should still end with 。, got %q", got)
 	}
 }

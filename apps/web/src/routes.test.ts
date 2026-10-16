@@ -42,13 +42,29 @@ describe.each(['web', 'desktop'] as const)('%s shared routes', (platform) => {
     expect(router.currentRoute.value.path).toBe('/settings/supermarket/category/developer-tools')
   })
 
+  it.each([
+    ['web-search', 'web-search', 'webProvider'],
+    ['voice', 'voice', 'voiceProvider'],
+    ['video', 'video', 'videoProvider'],
+    ['speech', 'voice', 'voiceProvider'],
+    ['transcription', 'voice', 'voiceProvider'],
+  ])('preserves the provider detail when redirecting %s', async (path, tab, key) => {
+    const router = makeRouter(platform)
+    await router.push(`/settings/${path}?${key}=template:example#details`)
+    expect(router.currentRoute.value.name).toBe('providers')
+    expect(router.currentRoute.value.query).toEqual({ [key]: 'template:example', tab })
+    expect(router.currentRoute.value.hash).toBe('#details')
+  })
+
   it('preserves settings metadata and redirects legacy voice links', async () => {
     const router = makeRouter(platform)
     expect(router.resolve({ name: 'people' }).meta.adminOnly).toBe(true)
     await router.push('/settings/speech')
-    expect(router.currentRoute.value.name).toBe('voice')
+    expect(router.currentRoute.value.name).toBe('providers')
+    expect(router.currentRoute.value.query.tab).toBe('voice')
     await router.push('/settings/transcription')
-    expect(router.currentRoute.value.name).toBe('voice')
+    expect(router.currentRoute.value.name).toBe('providers')
+    expect(router.currentRoute.value.query.tab).toBe('voice')
   })
 })
 

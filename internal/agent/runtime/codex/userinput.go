@@ -83,7 +83,7 @@ func (t *turnState) runUserInputCard(ctx context.Context, params *protocol.ToolR
 	})
 	if err != nil {
 		if ctx.Err() == nil {
-			t.logger.Error("codex user input flow failed", slog.String("thread_id", t.threadID), slog.Any("error", err))
+			t.logger.ErrorContext(ctx, "codex user input flow failed", slog.String("thread_id", t.threadID), slog.Any("error", err))
 		}
 		return nil, false
 	}

@@ -89,20 +89,21 @@ func (q *Queries) ClearBotRuntimeData(ctx context.Context, botID pgtype.UUID) er
 }
 
 const createBot = `-- name: CreateBot :one
-INSERT INTO bots (owner_user_id, name, display_name, avatar_url, timezone, is_active, metadata, status)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at
+INSERT INTO bots (owner_user_id, name, display_name, avatar_url, timezone, is_active, metadata, status, create_request_key)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at
 `
 
 type CreateBotParams struct {
-	OwnerUserID pgtype.UUID `json:"owner_user_id"`
-	Name        string      `json:"name"`
-	DisplayName pgtype.Text `json:"display_name"`
-	AvatarUrl   pgtype.Text `json:"avatar_url"`
-	Timezone    pgtype.Text `json:"timezone"`
-	IsActive    bool        `json:"is_active"`
-	Metadata    []byte      `json:"metadata"`
-	Status      string      `json:"status"`
+	OwnerUserID      pgtype.UUID `json:"owner_user_id"`
+	Name             string      `json:"name"`
+	DisplayName      pgtype.Text `json:"display_name"`
+	AvatarUrl        pgtype.Text `json:"avatar_url"`
+	Timezone         pgtype.Text `json:"timezone"`
+	IsActive         bool        `json:"is_active"`
+	Metadata         []byte      `json:"metadata"`
+	Status           string      `json:"status"`
+	CreateRequestKey pgtype.Text `json:"create_request_key"`
 }
 
 type CreateBotRow struct {
@@ -114,7 +115,6 @@ type CreateBotRow struct {
 	Timezone         pgtype.Text        `json:"timezone"`
 	IsActive         bool               `json:"is_active"`
 	Status           string             `json:"status"`
-	Language         string             `json:"language"`
 	ReasoningEffort  string             `json:"reasoning_effort"`
 	ChatModelID      pgtype.UUID        `json:"chat_model_id"`
 	SearchProviderID pgtype.UUID        `json:"search_provider_id"`
@@ -134,6 +134,7 @@ func (q *Queries) CreateBot(ctx context.Context, arg CreateBotParams) (CreateBot
 		arg.IsActive,
 		arg.Metadata,
 		arg.Status,
+		arg.CreateRequestKey,
 	)
 	var i CreateBotRow
 	err := row.Scan(
@@ -145,7 +146,6 @@ func (q *Queries) CreateBot(ctx context.Context, arg CreateBotParams) (CreateBot
 		&i.Timezone,
 		&i.IsActive,
 		&i.Status,
-		&i.Language,
 		&i.ReasoningEffort,
 		&i.ChatModelID,
 		&i.SearchProviderID,
@@ -230,8 +230,69 @@ func (q *Queries) DeleteBotByID(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const getBotByCreateRequestKey = `-- name: GetBotByCreateRequestKey :one
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, compaction_enabled, compaction_threshold, compaction_target_percent, compaction_model_id, metadata, created_at, updated_at
+FROM bots
+WHERE team_id = public.memoh_current_team_id() AND owner_user_id = $1 AND create_request_key = $2
+`
+
+type GetBotByCreateRequestKeyParams struct {
+	OwnerUserID      pgtype.UUID `json:"owner_user_id"`
+	CreateRequestKey pgtype.Text `json:"create_request_key"`
+}
+
+type GetBotByCreateRequestKeyRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	OwnerUserID             pgtype.UUID        `json:"owner_user_id"`
+	Name                    string             `json:"name"`
+	DisplayName             pgtype.Text        `json:"display_name"`
+	AvatarUrl               pgtype.Text        `json:"avatar_url"`
+	Timezone                pgtype.Text        `json:"timezone"`
+	IsActive                bool               `json:"is_active"`
+	Status                  string             `json:"status"`
+	ReasoningEffort         string             `json:"reasoning_effort"`
+	ChatModelID             pgtype.UUID        `json:"chat_model_id"`
+	SearchProviderID        pgtype.UUID        `json:"search_provider_id"`
+	MemoryProviderID        pgtype.UUID        `json:"memory_provider_id"`
+	CompactionEnabled       bool               `json:"compaction_enabled"`
+	CompactionThreshold     int32              `json:"compaction_threshold"`
+	CompactionTargetPercent pgtype.Int4        `json:"compaction_target_percent"`
+	CompactionModelID       pgtype.UUID        `json:"compaction_model_id"`
+	Metadata                []byte             `json:"metadata"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+}
+
+// The bot an earlier POST /bots with this Idempotency-Key created for the owner.
+func (q *Queries) GetBotByCreateRequestKey(ctx context.Context, arg GetBotByCreateRequestKeyParams) (GetBotByCreateRequestKeyRow, error) {
+	row := q.db.QueryRow(ctx, getBotByCreateRequestKey, arg.OwnerUserID, arg.CreateRequestKey)
+	var i GetBotByCreateRequestKeyRow
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerUserID,
+		&i.Name,
+		&i.DisplayName,
+		&i.AvatarUrl,
+		&i.Timezone,
+		&i.IsActive,
+		&i.Status,
+		&i.ReasoningEffort,
+		&i.ChatModelID,
+		&i.SearchProviderID,
+		&i.MemoryProviderID,
+		&i.CompactionEnabled,
+		&i.CompactionThreshold,
+		&i.CompactionTargetPercent,
+		&i.CompactionModelID,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getBotByID = `-- name: GetBotByID :one
-SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, compaction_enabled, compaction_threshold, compaction_target_percent, compaction_model_id, metadata, created_at, updated_at
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, compaction_enabled, compaction_threshold, compaction_target_percent, compaction_model_id, metadata, created_at, updated_at
 FROM bots
 WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
@@ -245,7 +306,6 @@ type GetBotByIDRow struct {
 	Timezone                pgtype.Text        `json:"timezone"`
 	IsActive                bool               `json:"is_active"`
 	Status                  string             `json:"status"`
-	Language                string             `json:"language"`
 	ReasoningEffort         string             `json:"reasoning_effort"`
 	ChatModelID             pgtype.UUID        `json:"chat_model_id"`
 	SearchProviderID        pgtype.UUID        `json:"search_provider_id"`
@@ -271,7 +331,6 @@ func (q *Queries) GetBotByID(ctx context.Context, id pgtype.UUID) (GetBotByIDRow
 		&i.Timezone,
 		&i.IsActive,
 		&i.Status,
-		&i.Language,
 		&i.ReasoningEffort,
 		&i.ChatModelID,
 		&i.SearchProviderID,
@@ -288,7 +347,7 @@ func (q *Queries) GetBotByID(ctx context.Context, id pgtype.UUID) (GetBotByIDRow
 }
 
 const getBotByName = `-- name: GetBotByName :one
-SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, compaction_enabled, compaction_threshold, compaction_target_percent, compaction_model_id, metadata, created_at, updated_at
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, compaction_enabled, compaction_threshold, compaction_target_percent, compaction_model_id, metadata, created_at, updated_at
 FROM bots
 WHERE team_id = public.memoh_current_team_id() AND name = $1
 `
@@ -302,7 +361,6 @@ type GetBotByNameRow struct {
 	Timezone                pgtype.Text        `json:"timezone"`
 	IsActive                bool               `json:"is_active"`
 	Status                  string             `json:"status"`
-	Language                string             `json:"language"`
 	ReasoningEffort         string             `json:"reasoning_effort"`
 	ChatModelID             pgtype.UUID        `json:"chat_model_id"`
 	SearchProviderID        pgtype.UUID        `json:"search_provider_id"`
@@ -328,7 +386,6 @@ func (q *Queries) GetBotByName(ctx context.Context, name string) (GetBotByNameRo
 		&i.Timezone,
 		&i.IsActive,
 		&i.Status,
-		&i.Language,
 		&i.ReasoningEffort,
 		&i.ChatModelID,
 		&i.SearchProviderID,
@@ -345,7 +402,7 @@ func (q *Queries) GetBotByName(ctx context.Context, name string) (GetBotByNameRo
 }
 
 const listAccessibleBots = `-- name: ListAccessibleBots :many
-SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at
 FROM bots b
 WHERE b.team_id = public.memoh_current_team_id()
   AND (
@@ -372,7 +429,6 @@ type ListAccessibleBotsRow struct {
 	Timezone         pgtype.Text        `json:"timezone"`
 	IsActive         bool               `json:"is_active"`
 	Status           string             `json:"status"`
-	Language         string             `json:"language"`
 	ReasoningEffort  string             `json:"reasoning_effort"`
 	ChatModelID      pgtype.UUID        `json:"chat_model_id"`
 	SearchProviderID pgtype.UUID        `json:"search_provider_id"`
@@ -400,7 +456,6 @@ func (q *Queries) ListAccessibleBots(ctx context.Context, ownerUserID pgtype.UUI
 			&i.Timezone,
 			&i.IsActive,
 			&i.Status,
-			&i.Language,
 			&i.ReasoningEffort,
 			&i.ChatModelID,
 			&i.SearchProviderID,
@@ -420,7 +475,7 @@ func (q *Queries) ListAccessibleBots(ctx context.Context, ownerUserID pgtype.UUI
 }
 
 const listBotsByOwner = `-- name: ListBotsByOwner :many
-SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at
 FROM bots
 WHERE team_id = public.memoh_current_team_id() AND owner_user_id = $1
 ORDER BY created_at DESC
@@ -435,7 +490,6 @@ type ListBotsByOwnerRow struct {
 	Timezone         pgtype.Text        `json:"timezone"`
 	IsActive         bool               `json:"is_active"`
 	Status           string             `json:"status"`
-	Language         string             `json:"language"`
 	ReasoningEffort  string             `json:"reasoning_effort"`
 	ChatModelID      pgtype.UUID        `json:"chat_model_id"`
 	SearchProviderID pgtype.UUID        `json:"search_provider_id"`
@@ -463,7 +517,6 @@ func (q *Queries) ListBotsByOwner(ctx context.Context, ownerUserID pgtype.UUID) 
 			&i.Timezone,
 			&i.IsActive,
 			&i.Status,
-			&i.Language,
 			&i.ReasoningEffort,
 			&i.ChatModelID,
 			&i.SearchProviderID,
@@ -513,7 +566,7 @@ UPDATE bots
 SET owner_user_id = $2,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $1
-RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at
+RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at
 `
 
 type UpdateBotOwnerParams struct {
@@ -530,7 +583,6 @@ type UpdateBotOwnerRow struct {
 	Timezone         pgtype.Text        `json:"timezone"`
 	IsActive         bool               `json:"is_active"`
 	Status           string             `json:"status"`
-	Language         string             `json:"language"`
 	ReasoningEffort  string             `json:"reasoning_effort"`
 	ChatModelID      pgtype.UUID        `json:"chat_model_id"`
 	SearchProviderID pgtype.UUID        `json:"search_provider_id"`
@@ -552,7 +604,6 @@ func (q *Queries) UpdateBotOwner(ctx context.Context, arg UpdateBotOwnerParams) 
 		&i.Timezone,
 		&i.IsActive,
 		&i.Status,
-		&i.Language,
 		&i.ReasoningEffort,
 		&i.ChatModelID,
 		&i.SearchProviderID,
@@ -581,7 +632,7 @@ SET name = $2,
           END,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $1
-RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at
+RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at
 `
 
 type UpdateBotProfileParams struct {
@@ -603,7 +654,6 @@ type UpdateBotProfileRow struct {
 	Timezone         pgtype.Text        `json:"timezone"`
 	IsActive         bool               `json:"is_active"`
 	Status           string             `json:"status"`
-	Language         string             `json:"language"`
 	ReasoningEffort  string             `json:"reasoning_effort"`
 	ChatModelID      pgtype.UUID        `json:"chat_model_id"`
 	SearchProviderID pgtype.UUID        `json:"search_provider_id"`
@@ -637,7 +687,6 @@ func (q *Queries) UpdateBotProfile(ctx context.Context, arg UpdateBotProfilePara
 		&i.Timezone,
 		&i.IsActive,
 		&i.Status,
-		&i.Language,
 		&i.ReasoningEffort,
 		&i.ChatModelID,
 		&i.SearchProviderID,

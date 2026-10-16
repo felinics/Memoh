@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -24,6 +25,7 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspacedeps"
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
@@ -472,12 +474,12 @@ func TestListWorkspaceDependenciesReportsDiscoveryError(t *testing.T) {
 	svc := &fakeWorkspaceDependencyService{
 		deps: deps,
 		list: workspacedeps.ListResult{
-			Workspace:      workspacedeps.WorkspaceRunning,
-			DataRoot:       "/data",
-			DiscoveryError: "workspacedeps: discovery script exited 137 before finishing",
+			Workspace:       workspacedeps.WorkspaceRunning,
+			DataRoot:        "/data",
+			DiscoveryFailed: true,
 			Entries: []workspacedeps.Entry{{
 				Dependency:        deps["codex"],
-				Installation:      &workspacedeps.Installation{Status: workspacedeps.StatusFailed, LastError: "operation interrupted"},
+				Installation:      &workspacedeps.Installation{Status: workspacedeps.StatusFailed, LastErrorCode: string(apperror.CodeWorkspaceDependencyOperationInterrupted)},
 				Status:            workspacedeps.StatusFailed,
 				PlatformSupported: true,
 			}},
@@ -503,14 +505,14 @@ func TestListWorkspaceDependenciesReportsDiscoveryError(t *testing.T) {
 		t.Fatalf("items = %v", raw["items"])
 	}
 	codex := items[0].(map[string]any)
-	if codex["status"] != "failed" || codex["last_error_code"] != string(apperror.CodeWorkspaceDependencyOperationFailed) {
+	if codex["status"] != "failed" || codex["last_error_code"] != string(apperror.CodeWorkspaceDependencyOperationInterrupted) {
 		t.Errorf("codex = %v", codex)
 	}
 	if actions, _ := codex["actions"].([]any); actions == nil || len(actions) != 0 {
 		t.Errorf("actions = %v, want [] without facts", codex["actions"])
 	}
 
-	svc.list.DiscoveryError = ""
+	svc.list.DiscoveryFailed = false
 	rec, err = depsCall{method: http.MethodGet, target: "/bots/x/dependencies"}.invoke(t, h.ListWorkspaceDependencies)
 	if err != nil {
 		t.Fatalf("ListWorkspaceDependencies: %v", err)
@@ -700,9 +702,7 @@ func TestWorkspaceDependencyStreamReportsErrorsAsFrames(t *testing.T) {
 	svc := &fakeWorkspaceDependencyService{deps: depsTestCatalog(), opLogs: [][2]string{{"stderr", "starting"}}, opErr: workspacedeps.ErrBusy}
 	h := newDepsTestHandler("admin", svc)
 	rec, err := depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/update", depID: "codex"}.invoke(t, h.UpdateWorkspaceDependency)
-	if err != nil {
-		t.Fatalf("UpdateWorkspaceDependency: %v", err)
-	}
+	requireAppErrorCode(t, err, apperror.CodeWorkspaceDependencyBusy)
 	frames := sseFrames(t, rec.Body.String())
 	if len(frames) != 3 || frames[2]["type"] != "error" {
 		t.Fatalf("frames = %v", frames)
@@ -716,14 +716,15 @@ func TestWorkspaceDependencyStreamReportsErrorsAsFrames(t *testing.T) {
 	if _, ok := frames[2]["args"].(map[string]any); !ok {
 		t.Errorf("error args must be an object: %v", frames[2])
 	}
+	if frames[2]["fault"] != string(apperror.FaultClient) {
+		t.Errorf("error fault = %v, want client", frames[2]["fault"])
+	}
 
 	// Structured errors must not leak private diagnostics. Execution logs
 	// remain separate log events.
 	svc.opErr = &workspacedeps.ExitError{Code: 1, StderrTail: "npm ERR! 404"}
 	rec, err = depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/reinstall", depID: "codex"}.invoke(t, h.ReinstallWorkspaceDependency)
-	if err != nil {
-		t.Fatalf("ReinstallWorkspaceDependency: %v", err)
-	}
+	requireAppErrorCode(t, err, apperror.CodeWorkspaceDependencyOperationFailed)
 	frames = sseFrames(t, rec.Body.String())
 	last := frames[len(frames)-1]
 	if last["type"] != "error" || last["code"] != string(apperror.CodeWorkspaceDependencyOperationFailed) {
@@ -737,33 +738,32 @@ func TestWorkspaceDependencyStreamReportsErrorsAsFrames(t *testing.T) {
 	}
 }
 
-// TestWorkspaceDependencyStreamLogsRefusalsBelowWarn pins the log level of
-// the two outcomes that are not faults: a busy verdict (operations never
-// queue) and the client going away. A script failure stays a warning.
-func TestWorkspaceDependencyStreamLogsRefusalsBelowWarn(t *testing.T) {
-	var logs strings.Builder
-	svc := &fakeWorkspaceDependencyService{deps: depsTestCatalog(), opErr: workspacedeps.ErrBusy}
+// TestWorkspaceDependencyStreamReturnsTheRenderedError pins what the
+// request's result record attributes after the error frame: a busy verdict is
+// a refusal (operations never queue), a script failure is not, and an
+// operation whose result is unconfirmed keeps its own code.
+func TestWorkspaceDependencyStreamReturnsTheRenderedError(t *testing.T) {
+	svc := &fakeWorkspaceDependencyService{deps: depsTestCatalog()}
 	h := newDepsTestHandler("admin", svc)
-	h.logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-
-	if _, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/update", depID: "codex"}).invoke(t, h.UpdateWorkspaceDependency); err != nil {
-		t.Fatalf("UpdateWorkspaceDependency: %v", err)
-	}
-	out := logs.String()
-	if strings.Contains(out, "level=WARN") || strings.Contains(out, "level=ERROR") {
-		t.Errorf("busy verdict logged above INFO:\n%s", out)
-	}
-	if !strings.Contains(out, "level=INFO") || !strings.Contains(out, "another operation is in progress") {
-		t.Errorf("busy verdict not logged at INFO:\n%s", out)
-	}
-
-	logs.Reset()
-	svc.opErr = &workspacedeps.ExitError{Code: 1, StderrTail: "boom"}
-	if _, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/update", depID: "codex"}).invoke(t, h.UpdateWorkspaceDependency); err != nil {
-		t.Fatalf("UpdateWorkspaceDependency: %v", err)
-	}
-	if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "operation failed") {
-		t.Errorf("script failure not logged at WARN:\n%s", out)
+	for _, tc := range []struct {
+		err   error
+		code  apperror.Code
+		fault apperror.Fault
+	}{
+		{workspacedeps.ErrBusy, apperror.CodeWorkspaceDependencyBusy, apperror.FaultClient},
+		{&workspacedeps.ExitError{Code: 1, StderrTail: "boom"}, apperror.CodeWorkspaceDependencyOperationFailed, apperror.FaultServer},
+		{workspacedeps.ErrOperationUncertain, apperror.CodeWorkspaceDependencyOperationUnknown, apperror.FaultServer},
+	} {
+		svc.opErr = tc.err
+		rec, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/update", depID: "codex"}).invoke(t, h.UpdateWorkspaceDependency)
+		requireAppErrorCode(t, err, tc.code)
+		if fault := errs.Analyze(context.Background(), err).Fault; fault != tc.fault {
+			t.Errorf("%v: result fault = %s, want %s", tc.err, fault, tc.fault)
+		}
+		frames := sseFrames(t, rec.Body.String())
+		if last := frames[len(frames)-1]; last["code"] != string(tc.code) || last["fault"] != string(tc.fault) {
+			t.Errorf("%v: frame = %v, want %s %s", tc.err, last, tc.code, tc.fault)
+		}
 	}
 }
 
@@ -941,6 +941,10 @@ func TestWorkspaceDependencyErrorMapping(t *testing.T) {
 			t.Errorf("%v -> %q, want %q", sentinel, got, want)
 		}
 	}
+	required := workspaceDependencyError(fmt.Errorf("remove: %w", &workspacedeps.RequiredError{DependencyID: "micromamba", Dependents: []string{"pandoc", "poppler"}}))
+	if apperror.CodeOf(required) != apperror.CodeWorkspaceDependencyRequired || apperror.ArgsOf(required)["dependents"] != "pandoc,poppler" {
+		t.Errorf("required error mapped to %q %v", apperror.CodeOf(required), apperror.ArgsOf(required))
+	}
 	if workspaceDependencyError(nil) != nil {
 		t.Error("nil must map to nil")
 	}
@@ -994,13 +998,25 @@ func TestWorkspaceDependencyMutationRejectsMalformedRevision(t *testing.T) {
 	}
 }
 
-func TestWorkspaceDependencyItemIncludesSanitizedErrorDetail(t *testing.T) {
+// TestWorkspaceDependencyItemReportsRecordedFailure covers both shapes of a
+// failed record: one written since failures store a catalog code carries the
+// code and no text, one written by an earlier server carries the text it
+// wrote, redacted, and no code.
+func TestWorkspaceDependencyItemReportsRecordedFailure(t *testing.T) {
 	item := workspaceDependencyItem(workspacedeps.Entry{
+		Dependency:   catalog.Dependency{ID: "codex"},
+		Installation: &workspacedeps.Installation{Status: workspacedeps.StatusFailed, LastError: "download failed: should not be sent", LastErrorCode: string(apperror.CodeWorkspaceDependencyBusy)},
+	}, "/data")
+	if item.LastErrorCode != string(apperror.CodeWorkspaceDependencyBusy) || item.LastError != "" {
+		t.Fatalf("recorded code = %+v, want the code alone", item)
+	}
+
+	legacy := workspaceDependencyItem(workspacedeps.Entry{
 		Dependency:   catalog.Dependency{ID: "codex"},
 		Installation: &workspacedeps.Installation{Status: workspacedeps.StatusFailed, LastError: "download failed: https://user:pass@mirror.test/release?token=private"},
 	}, "/data")
-	if item.LastErrorCode == "" || !strings.Contains(item.LastError, "download failed") || strings.Contains(item.LastError, "user:pass") || strings.Contains(item.LastError, "private") {
-		t.Fatalf("error detail=%+v", item)
+	if legacy.LastErrorCode != "" || !strings.Contains(legacy.LastError, "download failed") || strings.Contains(legacy.LastError, "user:pass") || strings.Contains(legacy.LastError, "private") {
+		t.Fatalf("legacy detail=%+v", legacy)
 	}
 }
 
@@ -1087,4 +1103,42 @@ func TestWorkspaceDependencyCatalogUnavailable(t *testing.T) {
 	e := echo.New()
 	err := h.ListWorkspaceDependencyCatalog(e.NewContext(httptest.NewRequest(http.MethodGet, "/workspace-dependencies", nil), httptest.NewRecorder()))
 	requireAppErrorCode(t, err, apperror.CodeWorkspaceDependencyCatalogUnavailable)
+}
+
+func TestWorkspaceDependencyInstallCarriesConfirmedPrerequisites(t *testing.T) {
+	revision := strings.Repeat("c", 64)
+	var got map[string]string
+	var pinned bool
+	svc := &fakeWorkspaceDependencyService{
+		deps:    depsTestCatalog(),
+		preview: workspacedeps.ScriptPreview{Revision: strings.Repeat("a", 64)},
+		beforeRun: func(ctx context.Context) {
+			got, pinned = workspacedeps.PrerequisiteRevisions(ctx)
+		},
+	}
+	h := newDepsTestHandler("admin", svc)
+	body := WorkspaceDependencyInstallRequest{PrerequisiteRevisions: map[string]string{"node": revision}}
+	if _, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/install", depID: "codex", body: body}).invoke(t, h.InstallWorkspaceDependency); err != nil {
+		t.Fatal(err)
+	}
+	if !pinned || got["node"] != revision || len(got) != 1 {
+		t.Fatalf("confirmed prerequisites = %v (pinned %v)", got, pinned)
+	}
+
+	// Without the field, prerequisites resolve when the operation starts.
+	if _, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/install", depID: "codex"}).invoke(t, h.InstallWorkspaceDependency); err != nil {
+		t.Fatal(err)
+	}
+	if pinned {
+		t.Fatal("an omitted field must not pin prerequisites")
+	}
+
+	invalid := WorkspaceDependencyInstallRequest{PrerequisiteRevisions: map[string]string{"node": "not-a-revision"}}
+	_, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/install", depID: "codex", body: invalid}).invoke(t, h.InstallWorkspaceDependency)
+	if apperror.CodeOf(err) != apperror.CodeWorkspaceDependencyRequestInvalid {
+		t.Fatalf("invalid revision error = %v", err)
+	}
+	if code := apperror.CodeOf(workspaceDependencyError(fmt.Errorf("x: %w", workspacedeps.ErrPrerequisitesChanged))); code != apperror.CodeWorkspaceDependencyPrerequisitesChanged {
+		t.Fatalf("prerequisites changed mapped to %q", code)
+	}
 }

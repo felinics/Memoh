@@ -25,6 +25,7 @@ export interface DesktopRuntimeState {
 export interface DesktopRuntimeBridge {
   runtimeState(): Promise<DesktopRuntimeState>
   configureRuntime(config: { runtimeId: string, name: string, key: string, teamId?: string } | null): Promise<DesktopRuntimeState>
+  setRuntimePaused(paused: boolean): Promise<DesktopRuntimeState>
   onRuntimeStateChanged(listener: (state: DesktopRuntimeState) => void): () => void
 }
 
@@ -36,6 +37,7 @@ export const DesktopRuntimeKey: InjectionKey<DesktopRuntimeBridge | undefined> =
 export interface DesktopWindowBridge {
   isFullScreen(): Promise<boolean>
   onFullScreenChanged(listener: (fullScreen: boolean) => void): () => void
+  setIgnoreMenuShortcuts?(ignore: boolean): Promise<void>
 }
 
 export const DesktopWindowKey: InjectionKey<DesktopWindowBridge | undefined> = Symbol('memohai:desktop-window')

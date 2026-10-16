@@ -122,6 +122,15 @@ func (s *Lifecycle) SetBotChannelStatus(ctx context.Context, botID string, chann
 	return updated, nil
 }
 
+// ResolveBotChannelConfig reads the bot's stored config for channelType without
+// touching its connection. found is false when the bot has none.
+func (s *Lifecycle) ResolveBotChannelConfig(ctx context.Context, botID string, channelType ChannelType) (cfg ChannelConfig, found bool, err error) {
+	if s.store == nil {
+		return ChannelConfig{}, false, errors.New("channel lifecycle store not configured")
+	}
+	return s.getPreviousConfig(ctx, botID, channelType)
+}
+
 func (s *Lifecycle) getPreviousConfig(ctx context.Context, botID string, channelType ChannelType) (ChannelConfig, bool, error) {
 	cfg, err := s.store.ResolveEffectiveConfig(ctx, botID, channelType)
 	if err == nil {

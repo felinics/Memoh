@@ -1,0 +1,26 @@
+{
+  "speak": {
+    "properties": {
+      "platform": {
+        "description": "Channel platform name. Defaults to current session platform.",
+        "type": "string"
+      },
+      "reply_to": {
+        "description": "Message ID to reply to. The voice message will reference this message on the platform.",
+        "type": "string"
+      },
+      "target": {
+        "description": "Channel target (chat/group/thread ID). Optional — omit to speak in the current conversation.",
+        "type": "string"
+      },
+      "text": {
+        "description": "The text to convert to speech (max 500 characters)",
+        "type": "string"
+      }
+    },
+    "required": [
+      "text"
+    ],
+    "type": "object"
+  }
+}

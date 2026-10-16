@@ -1,9 +1,14 @@
 package acpprofile
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	runtimeprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+)
 
 func TestCatalogExposesOnlyChannelSafeProfileData(t *testing.T) {
-	catalog := NewCatalog()
+	catalog := NewCatalog(nil)
 
 	profile := catalog.ResolveACPProfile(" ACP ")
 	if !profile.Known || profile.ID != "acp" || profile.DisplayName != "ACP" {
@@ -15,7 +20,7 @@ func TestCatalogExposesOnlyChannelSafeProfileData(t *testing.T) {
 }
 
 func TestCatalogPreflightDoesNotExposeManagedValues(t *testing.T) {
-	catalog := NewCatalog()
+	catalog := NewCatalog(nil)
 	metadata := map[string]any{
 		"acp": map[string]any{
 			"agents": map[string]any{
@@ -27,7 +32,10 @@ func TestCatalogPreflightDoesNotExposeManagedValues(t *testing.T) {
 			},
 		},
 	}
-	result := catalog.ResolveACPSetupPreflight("acp", metadata)
+	result, err := catalog.ResolveACPSetupPreflight(context.Background(), "bot-1", "", "acp", metadata)
+	if err != nil {
+		t.Fatalf("ResolveACPSetupPreflight() error = %v", err)
+	}
 
 	if !result.Enabled {
 		t.Fatal("preflight should preserve enabled state")
@@ -38,18 +46,50 @@ func TestCatalogPreflightDoesNotExposeManagedValues(t *testing.T) {
 		t.Fatalf("missing field = %#v, want public command descriptor", result.MissingManagedField)
 	}
 
-	threadValidation := catalog.ValidateACPSetup("acp", metadata)
-	if !threadValidation.Known || !threadValidation.Enabled || threadValidation.MissingManagedFieldID != "command" {
-		t.Fatalf("thread validation = %#v, want known enabled agent missing command", threadValidation)
+	threadValidation, err := catalog.ValidateACPSetup(context.Background(), "bot-1", "", "acp", metadata)
+	if err != nil {
+		t.Fatalf("ValidateACPSetup() error = %v", err)
 	}
-	if unknown := catalog.ValidateACPSetup("missing", metadata); unknown.Known {
-		t.Fatalf("unknown thread validation = %#v, want unknown agent", unknown)
+	if !threadValidation.Enabled || threadValidation.MissingManagedFieldID != "command" {
+		t.Fatalf("thread validation = %#v, want enabled agent missing command", threadValidation)
+	}
+	if !catalog.KnownACPAgent("acp") || catalog.KnownACPAgent("missing") {
+		t.Fatal("KnownACPAgent should accept only registered profiles")
 	}
 	// Former ACP providers are disowned: their sessions run direct runtimes.
-	if moved := catalog.ValidateACPSetup("codex", metadata); moved.Known {
-		t.Fatalf("codex validation = %#v, want unknown (direct runtime)", moved)
+	if catalog.KnownACPAgent("codex") || catalog.KnownACPAgent("claude-code") {
+		t.Fatal("direct runtimes must not be known ACP agents")
 	}
-	if moved := catalog.ValidateACPSetup("claude-code", metadata); moved.Known {
-		t.Fatalf("claude-code validation = %#v, want unknown (direct runtime)", moved)
+}
+
+type recordingSetupResolver struct {
+	botAgentID string
+	setup      runtimeprofile.AgentSetup
+}
+
+func (r *recordingSetupResolver) ResolveACPSetup(_ context.Context, _, botAgentID, _ string, _ map[string]any) (runtimeprofile.AgentSetup, error) {
+	r.botAgentID = botAgentID
+	return r.setup, nil
+}
+
+func TestCatalogValidatesTheBoundInstanceSetup(t *testing.T) {
+	resolver := &recordingSetupResolver{setup: runtimeprofile.AgentSetup{
+		Enabled: true,
+		Mode:    "api_key",
+		ModeSet: true,
+		Managed: map[string]string{"command": "grok-acp"},
+	}}
+	catalog := NewCatalog(resolver)
+
+	// The bot's legacy slot is unconfigured; only the instance carries a command.
+	validation, err := catalog.ValidateACPSetup(context.Background(), "bot-1", "agent-grok", "acp", map[string]any{})
+	if err != nil {
+		t.Fatalf("ValidateACPSetup() error = %v", err)
+	}
+	if resolver.botAgentID != "agent-grok" {
+		t.Fatalf("resolved instance = %q, want the thread's bound instance", resolver.botAgentID)
+	}
+	if !validation.Enabled || validation.MissingManagedFieldID != "" {
+		t.Fatalf("validation = %#v, want the instance's configured setup", validation)
 	}
 }

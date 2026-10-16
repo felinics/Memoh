@@ -9,6 +9,9 @@ import (
 	"sort"
 	"strings"
 
+	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -76,6 +79,51 @@ type applyPatchPlan struct {
 	added      []string
 	modified   []string
 	deleted    []string
+	// displayChanges records, in patch order, each added or updated file's
+	// content before and after its hunk, for the UI-only diff. Deletions are
+	// absent: the plan never reads a deleted file, and reading it only for
+	// display is not worth a bridge round trip.
+	displayChanges []applyPatchDisplayChange
+}
+
+type applyPatchDisplayChange struct {
+	fromPath string
+	toPath   string
+	before   string
+	after    string
+}
+
+// uiDiff renders the plan's changes as one unified diff with a git-style
+// section per file, the multi-file form of the edit tool's context diff; the
+// chat card splits it back into per-file panels. It returns "" when any
+// section cannot be shown (file past the line-diff bound) or the whole diff
+// exceeds maxUIDiffBytes — a partial diff would list fewer files than the
+// patch touched, so the card falls back to the raw patch instead.
+func (p applyPatchPlan) uiDiff() string {
+	var b strings.Builder
+	for _, change := range p.displayChanges {
+		diff, err := contextDiffBetween(change.fromPath, change.toPath, change.before, change.after)
+		if err != nil {
+			return ""
+		}
+		if diff == "" {
+			// An update that leaves the text as it was has nothing to show,
+			// unless it also moved the file: a pure move has no diff section
+			// to carry its destination, so the whole diff falls back.
+			if change.fromPath == change.toPath && diffDisplayText(change.before) == diffDisplayText(change.after) {
+				continue
+			}
+			return ""
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(diff)
+		if b.Len() > maxUIDiffBytes {
+			return ""
+		}
+	}
+	return b.String()
 }
 
 func (p applyPatchPlan) files() []map[string]any {
@@ -158,30 +206,34 @@ type applyPatchVirtualFile struct {
 	contentLoaded bool
 }
 
-func execApplyPatchInput(input any) (string, error) {
-	if text, ok := input.(string); ok {
+// execApplyPatchInput reads the patch from the arguments: a model that sent
+// the patch text in place of a JSON object (invalid arguments, or a JSON
+// string document) is accepted, otherwise the "patch" field of the object.
+func execApplyPatchInput(input sdk.ToolArguments) (applyPatchArgs, error) {
+	var text string
+	if !input.Valid() {
+		text = input.Text
+	} else if err := input.Unmarshal(&text); err != nil {
+		text = ""
+	}
+	if text != "" {
 		if strings.TrimSpace(text) == "" {
-			return "", errors.New("patch is required")
+			return applyPatchArgs{}, errors.New("patch is required")
 		}
-		return text, nil
+		return applyPatchArgs{Patch: text}, nil
 	}
-	args := inputAsMap(input)
-	raw, ok := args["patch"]
-	if !ok || raw == nil {
-		return "", errors.New("patch is required")
+	args, err := toolexec.DecodeArguments[applyPatchArgs](ToolApplyPatch().String(), input)
+	if err != nil {
+		return applyPatchArgs{}, err
 	}
-	text, ok := raw.(string)
-	if !ok {
-		return "", errors.New("patch must be a string")
+	if strings.TrimSpace(args.Patch) == "" {
+		return applyPatchArgs{}, errors.New("patch is required")
 	}
-	if strings.TrimSpace(text) == "" {
-		return "", errors.New("patch is required")
-	}
-	return text, nil
+	return args, nil
 }
 
-func (p *ContainerProvider) execApplyPatch(ctx context.Context, session SessionContext, input any) (any, error) {
-	patch, err := execApplyPatchInput(input)
+func (p *ContainerProvider) execApplyPatch(ctx context.Context, session SessionContext, input sdk.ToolArguments) (any, error) {
+	args, err := execApplyPatchInput(input)
 	if err != nil {
 		return nil, err
 	}
@@ -189,12 +241,12 @@ func (p *ContainerProvider) execApplyPatch(ctx context.Context, session SessionC
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	target, err := p.resolveToolTarget(opCtx, session, inputAsMap(input))
+	target, err := p.resolveToolTarget(opCtx, session, args.TargetID)
 	if err != nil {
 		return nil, err
 	}
 	client := target.client
-	hunks, err := parseApplyPatch(patch)
+	hunks, err := parseApplyPatch(args.Patch)
 	if err != nil {
 		return nil, err
 	}
@@ -227,14 +279,21 @@ func (p *ContainerProvider) execApplyPatch(ctx context.Context, session SessionC
 		p.logWorkspaceToolHookError(hooks.EventAfterFileWrite, session.BotID, session.SessionID, err)
 	}
 
-	return map[string]any{
+	result := map[string]any{
 		"ok":       true,
 		"summary":  plan.summary(),
 		"added":    plan.added,
 		"modified": plan.modified,
 		"deleted":  plan.deleted,
 		"files":    plan.files(),
-	}, nil
+	}
+	// Same UI-only diff channel as edit and write (see execEdit), computed
+	// from the plan's real before/after content rather than the model's patch
+	// text, and stripped before the model sees the tool result.
+	if diff := plan.uiDiff(); diff != "" {
+		result[UIOutputMetadataKey] = map[string]any{"diff": diff}
+	}
+	return result, nil
 }
 
 func commitApplyPatchPlan(ctx context.Context, client *bridge.Client, plan *applyPatchPlan) error {
@@ -497,6 +556,7 @@ func buildApplyPatchPlan(ctx context.Context, fs applyPatchReadFS, workspace too
 			files[path] = applyPatchVirtualFile{exists: true, content: hunk.contents, contentLoaded: true}
 			plan.operations = append(plan.operations, applyPatchOperation{kind: applyPatchOperationWrite, path: path, content: hunk.contents})
 			plan.added = append(plan.added, path)
+			plan.displayChanges = append(plan.displayChanges, applyPatchDisplayChange{fromPath: path, toPath: path, after: hunk.contents})
 		case applyPatchHunkDelete:
 			info, err := statApplyPatchVirtualFile(ctx, fs, files, path)
 			if err != nil {
@@ -520,6 +580,7 @@ func buildApplyPatchPlan(ctx context.Context, fs applyPatchReadFS, workspace too
 			if err != nil {
 				return nil, err
 			}
+			display := applyPatchDisplayChange{fromPath: path, toPath: path, before: original, after: newContent}
 			if hunk.movePath != "" {
 				movePath, err := normalizeApplyPatchPath(hunk.movePath, workspace)
 				if err != nil {
@@ -536,6 +597,7 @@ func buildApplyPatchPlan(ctx context.Context, fs applyPatchReadFS, workspace too
 					if info.exists && info.isDir {
 						return nil, fmt.Errorf("cannot move file over directory: %s", movePath)
 					}
+					display.toPath = movePath
 					files[path] = applyPatchVirtualFile{exists: false, contentLoaded: true}
 					files[movePath] = applyPatchVirtualFile{exists: true, content: newContent, contentLoaded: true}
 					plan.operations = append(plan.operations,
@@ -548,6 +610,7 @@ func buildApplyPatchPlan(ctx context.Context, fs applyPatchReadFS, workspace too
 				plan.operations = append(plan.operations, applyPatchOperation{kind: applyPatchOperationWrite, path: path, content: newContent})
 			}
 			plan.modified = append(plan.modified, path)
+			plan.displayChanges = append(plan.displayChanges, display)
 		default:
 			return nil, fmt.Errorf("unknown apply_patch hunk kind %q", hunk.kind)
 		}

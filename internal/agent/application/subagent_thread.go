@@ -2,11 +2,11 @@ package application
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 )
 
@@ -80,12 +80,13 @@ func (s *Service) subagentForkContextModelMessages(ctx context.Context, req Chat
 	}
 	messages := make([]sdk.Message, 0, len(rows))
 	for _, row := range rows {
-		var msg sdk.Message
-		if err := json.Unmarshal(row.Message, &msg); err != nil || (msg.Role == "" && len(msg.Content) == 0) {
-			continue
-		}
+		// Fork rows are written in the stored shape (history.MarshalStoredSDKMessage).
+		msg := historyfrag.StoredModelMessageToSDKMessage(historyfrag.DecodeStoredModelMessage(nil, "", row.Role, row.Message))
 		if msg.Role == "" {
 			msg.Role = sdk.MessageRole(row.Role)
+		}
+		if len(msg.Content) == 0 {
+			continue
 		}
 		messages = append(messages, msg)
 	}

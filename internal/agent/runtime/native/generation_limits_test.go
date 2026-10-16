@@ -44,10 +44,10 @@ func TestAgentGenerateSendsMaxTokensOnlyWhenLimitsAreRequested(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			var seen sdk.GenerateParams
-			handler := func(_ int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			var seen sdk.Request
+			handler := func(_ int, params sdk.Request) (sdk.ModelResult, error) {
 				seen = cloneGenerateParams(params)
-				return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+				return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 			}
 			switch p := tc.provider.(type) {
 			case anthropicNameMockProvider:

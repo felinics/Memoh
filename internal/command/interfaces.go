@@ -61,4 +61,7 @@ type CommandQueries interface {
 // AccessEvaluator checks whether the current channel context may trigger chat.
 type AccessEvaluator interface {
 	Evaluate(ctx context.Context, req acl.EvaluateRequest) (bool, error)
+	// OwnerOnlyChannel reports channels that no third party can ever reach;
+	// senders there are treated as the operator (write access included).
+	OwnerOnlyChannel(channelType string) bool
 }

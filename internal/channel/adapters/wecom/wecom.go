@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 const Type channel.ChannelType = "wecom"
@@ -154,7 +155,7 @@ func (a *WeComAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, h
 			return a.handleFrame(frameCtx, cfg, frame, handler)
 		})
 		if err != nil && connCtx.Err() == nil {
-			a.logger.Error("wecom websocket stopped",
+			a.logger.ErrorContext(ctx, "wecom websocket stopped",
 				slog.String("config_id", cfg.ID),
 				slog.Any("error", err),
 			)
@@ -278,11 +279,11 @@ func (s *wecomOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		channel.StreamEventPhaseStart,
 		channel.StreamEventPhaseEnd,
 		channel.StreamEventToolCallStart,
+		channel.StreamEventSegmentEnd,
 		channel.StreamEventAgentStart,
 		channel.StreamEventAgentEnd,
 		channel.StreamEventProcessingStarted,
-		channel.StreamEventProcessingCompleted,
-		channel.StreamEventProcessingFailed:
+		channel.StreamEventProcessingCompleted:
 		return nil
 	case channel.StreamEventToolCallEnd:
 		return s.sendToolCallSummary(ctx, event.ToolCall)
@@ -294,6 +295,12 @@ func (s *wecomOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		s.textBuilder.WriteString(event.Delta)
 		s.mu.Unlock()
 		return s.pushPreview(ctx)
+	case channel.StreamEventReset:
+		// The next preview replaces the failed attempt's text on the same stream.
+		s.mu.Lock()
+		s.textBuilder.Reset()
+		s.mu.Unlock()
+		return nil
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {
 			return nil
@@ -312,14 +319,17 @@ func (s *wecomOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		s.mu.Unlock()
 		return s.flush(ctx)
 	case channel.StreamEventError:
-		text := strings.TrimSpace(event.Error)
+		text := redact.Text(strings.TrimSpace(event.Error))
 		if text == "" {
 			return nil
 		}
 		s.mu.Lock()
 		s.final = &channel.PreparedMessage{
-			Message: channel.Message{Format: channel.MessageFormatPlain, Text: "Error: " + text},
+			Message: channel.Message{Format: channel.MessageFormatPlain, Text: channel.ErrorReplyText(event.ErrorCode, text)},
 		}
+		// The error replaces the answer; the attachments buffered for it
+		// must not go out with the error.
+		s.attachments = nil
 		s.mu.Unlock()
 		return s.flush(ctx)
 	}

@@ -5,6 +5,8 @@ export interface AssistantStream {
   readonly invocationId: string
   readonly runId: string
   readonly assistantTurn: ChatAssistantTurn
+  // A retry or edit, which replaces a turn the history already has.
+  readonly replacesTurn: boolean
   readonly botId: string
   readonly sessionId: string
   readonly composerScope: string
@@ -48,6 +50,7 @@ export interface TrackAssistantStreamInput {
   onModelPreferenceSettled?: () => void
   invocationId: string
   assistantTurn: ChatAssistantTurn
+  replacesTurn?: boolean
   botId: string
   sessionId: string
   composerScope?: string
@@ -135,6 +138,7 @@ export function createAssistantStreamRegistry({ finishAssistantTurn }: Assistant
         invocationId: id,
         runId: '',
         assistantTurn: input.assistantTurn,
+        replacesTurn: input.replacesTurn ?? false,
         botId: input.botId,
         sessionId: input.sessionId.trim(),
         composerScope: input.composerScope?.trim() || 'chat',

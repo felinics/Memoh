@@ -6,6 +6,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 type ToolOutputLimit = contextlimit.ToolOutputLimit
@@ -18,11 +19,11 @@ func LimitToolError(err error, label string, limit ToolOutputLimit) error {
 	return contextlimit.LimitError(err, label, limit)
 }
 
-func WrapToolOutputLimits(sdkTools []sdk.Tool, limit ToolOutputLimit) []sdk.Tool {
+func WrapToolOutputLimits(sdkTools []toolexec.Tool, limit ToolOutputLimit) []toolexec.Tool {
 	if len(sdkTools) == 0 {
 		return sdkTools
 	}
-	wrapped := make([]sdk.Tool, len(sdkTools))
+	wrapped := make([]toolexec.Tool, len(sdkTools))
 	copy(wrapped, sdkTools)
 	for i := range wrapped {
 		execute := wrapped[i].Execute
@@ -34,12 +35,12 @@ func WrapToolOutputLimits(sdkTools []sdk.Tool, limit ToolOutputLimit) []sdk.Tool
 		if toolName != "" {
 			label = "tool result (" + toolName + ")"
 		}
-		wrapped[i].Execute = func(ctx *sdk.ToolExecContext, input any) (any, error) {
+		wrapped[i].Execute = func(ctx *toolexec.ToolExecContext, input sdk.ToolArguments) (sdk.ToolOutput, error) {
 			output, err := execute(ctx, input)
 			if err != nil {
 				return output, LimitToolError(err, label, limit)
 			}
-			return LimitToolOutput(output, label, limit), nil
+			return toolexec.OutputFromValue(LimitToolOutput(toolexec.OutputValue(output), label, limit)), nil
 		}
 	}
 	return wrapped

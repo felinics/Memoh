@@ -9,6 +9,7 @@ import (
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 type AskUserProvider struct{}
@@ -37,14 +38,14 @@ func (*AskUserProvider) Usage(_ context.Context, session SessionContext, availab
 	})
 }
 
-func (*AskUserProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (*AskUserProvider) Tools(_ context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	if session.IsSubagent || !canExposeAskUserTool(session) {
 		return nil, nil
 	}
-	return []sdk.Tool{{
+	return []toolexec.Tool{{
 		Name:        ToolAskUser().String(),
 		Description: "Pause the run and ask the user one or more questions (a quiz question, a plan choice, a decision, or open text input). Use this whenever the user asks you to quiz them, test them, or pose a multiple-choice question, and whenever the user must make a choice before you continue. Put the question text in `text` and every answer choice in `options`; never write the choices as ordinary assistant text or simulate the interaction yourself. For multi_select, make the multi-answer behavior clear in the question text itself, such as `（多选）` in Chinese or `(select all that apply)` in English. Wait for this tool's result before grading, explaining answers, or continuing. If the latest user message asks for another question, quiz, or choice, create it with this tool — do not treat that request itself as the user's answer.",
-		Parameters: map[string]any{
+		Parameters: toolexec.SchemaFromValue(map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"questions": map[string]any{
@@ -101,17 +102,17 @@ func (*AskUserProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 			},
 			"required":             []string{"questions"},
 			"additionalProperties": false,
-		},
+		}),
 		RequireApproval: true,
-		Execute: func(_ *sdk.ToolExecContext, input any) (any, error) {
-			if err := userinput.ValidateAskUserInput(input); err != nil {
-				return map[string]any{
+		Execute: func(_ *toolexec.ToolExecContext, input sdk.ToolArguments) (sdk.ToolOutput, error) {
+			if err := userinput.ValidateAskUserInput(toolexec.ArgumentsValue(input)); err != nil {
+				return toolexec.OutputFromValue(map[string]any{
 					"status":      "invalid_arguments",
 					"error":       err.Error(),
 					"instruction": "Call " + toolRef(ToolAskUser()) + " again with a valid `questions` array. Every question needs `text` and a `kind` of single_select, multi_select, or text; select kinds need `options` with labels.",
-				}, nil
+				}), nil
 			}
-			return nil, errors.New(ToolAskUser().String() + " must be resolved through user input before execution")
+			return sdk.ToolOutput{}, errors.New(ToolAskUser().String() + " must be resolved through user input before execution")
 		},
 	}}, nil
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"testing"
 	"time"
@@ -71,7 +72,7 @@ func TestBridgeGRPCShutdownStopsActiveStreams(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	shutdownDone := make(chan struct{})
 	go func() {
-		stopBridgeGRPCServer(ctx, server)
+		stopBridgeGRPCServer(ctx, slog.New(slog.DiscardHandler), server)
 		close(shutdownDone)
 	}()
 	cancel()

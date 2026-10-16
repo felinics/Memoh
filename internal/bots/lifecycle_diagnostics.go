@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 const (
@@ -18,15 +18,13 @@ const (
 	botSetupFailureMessageMaxRune = 4096
 )
 
-var (
-	diagnosticURLUserinfoPattern = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)([^/\s:@]+):([^/\s@]+)@`)
-	diagnosticSecretParamPattern = regexp.MustCompile(`(?i)\b(token|password|passwd|pwd|secret|api_key|access_token)=([^&\s]+)`)
-)
-
 type containerSetupFailure struct {
 	Phase   string
 	Message string
-	At      string
+	// Code is the catalog code the workspace reconciler recorded; the Web app
+	// renders errors.<code> in place of Message.
+	Code string
+	At   string
 }
 
 // RecordContainerSetupFailure persists a sanitized workspace setup failure so
@@ -136,6 +134,9 @@ func (f containerSetupFailure) metadata() map[string]any {
 		"setup_error_phase": f.Phase,
 		"setup_error_at":    f.At,
 	}
+	if f.Code != "" {
+		data["setup_error_code"] = f.Code
+	}
 	return data
 }
 
@@ -165,8 +166,7 @@ func sanitizeDiagnosticMessage(message, fallback string) string {
 	if message == "" {
 		message = fallback
 	}
-	message = diagnosticURLUserinfoPattern.ReplaceAllString(message, "${1}***:***@")
-	message = diagnosticSecretParamPattern.ReplaceAllString(message, "${1}=***")
+	message = redact.Diagnostic(message)
 	runes := []rune(message)
 	if len(runes) > botSetupFailureMessageMaxRune {
 		message = string(runes[:botSetupFailureMessageMaxRune])

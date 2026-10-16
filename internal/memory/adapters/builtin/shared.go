@@ -99,14 +99,6 @@ func runtimeBotID(botID string, filters map[string]any) (string, error) {
 	return botID, nil
 }
 
-func runtimeBotIDFromMemoryID(memoryID string) string {
-	parts := strings.SplitN(strings.TrimSpace(memoryID), ":", 2)
-	if len(parts) != 2 {
-		return ""
-	}
-	return strings.TrimSpace(parts[0])
-}
-
 func runtimeLocalMemoryID(memoryID string) string {
 	memoryID = strings.TrimSpace(memoryID)
 	if memoryID == "" {

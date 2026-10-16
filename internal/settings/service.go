@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/acl"
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/db"
@@ -29,12 +28,19 @@ type ReasoningOptionsResolver interface {
 	ResolveReasoningOptions(context.Context, string) (reasoning.Options, error)
 }
 
+// BuiltinMemoryResolver returns the team's Built-in Memory provider row that a
+// memory-enabled bot references, creating it on first use.
+type BuiltinMemoryResolver interface {
+	EnsureBuiltinID(context.Context) (string, error)
+}
+
 type Service struct {
 	queries           dbstore.Queries
 	acl               *acl.Service
 	network           *netctl.Service
 	reasoningResolver ReasoningOptionsResolver
 	botAgents         *botagents.Service
+	builtinMemory     BuiltinMemoryResolver
 	logger            *slog.Logger
 }
 
@@ -47,12 +53,32 @@ var (
 	ErrModelIDAmbiguous            = errors.New("model_id is ambiguous across providers")
 	ErrInvalidModelRef             = errors.New("invalid model reference")
 	ErrReasoningOptionsUnavailable = errors.New("reasoning options unavailable")
+
+	// Chat runtime settings a bot cannot be saved with. Invalid chat_runtime
+	// is checked for every bot; the rest apply when the default chat runtime
+	// is an External Agent.
+	ErrInvalidChatRuntime    = errors.New("invalid chat_runtime")
+	ErrACPProjectModeInvalid = errors.New("invalid chat_acp_project_mode")
+	ErrACPProjectPathInvalid = errors.New("chat_acp_project_path must be absolute")
+	ErrACPUnknownAgent       = errors.New("unknown ACP agent")
+	ErrACPAgentNotEnabled    = errors.New("ACP agent is not enabled for this bot")
+	ErrACPAgentNotConfigured = errors.New("ACP agent is not configured for this bot")
 )
 
 type InvalidReasoningEffortError struct {
 	Effort  string
 	Options reasoning.Options
 }
+
+// InvalidModelRefError is ErrInvalidModelRef together with the request field
+// that held the reference.
+type InvalidModelRefError struct {
+	Field string
+	Err   error
+}
+
+func (e *InvalidModelRefError) Error() string { return e.Err.Error() }
+func (e *InvalidModelRefError) Unwrap() error { return e.Err }
 
 func (e *InvalidReasoningEffortError) Error() string {
 	return fmt.Sprintf("reasoning effort %q is not supported by the chat model", e.Effort)
@@ -73,6 +99,10 @@ func (s *Service) SetReasoningOptionsResolver(resolver ReasoningOptionsResolver)
 
 func (s *Service) SetBotAgents(service *botagents.Service) {
 	s.botAgents = service
+}
+
+func (s *Service) SetBuiltinMemoryResolver(resolver BuiltinMemoryResolver) {
+	s.builtinMemory = resolver
 }
 
 func (s *Service) GetBot(ctx context.Context, botID string) (Settings, error) {
@@ -137,7 +167,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
-	current := normalizeBotSetting(botRow.Language, "", aclDefaultEffect, botRow.ReasoningEffort, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionTargetPercent)
+	current := normalizeBotSetting("", aclDefaultEffect, botRow.ReasoningEffort, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionTargetPercent)
 	// A read error here must abort: falling through would leave `current` at the
 	// model defaults and silently overwrite a saved chat_runtime=acp_agent (and
 	// its agent id) on the next save. ErrNoRows is impossible because the bot
@@ -155,6 +185,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		current.ChatACPAgentID = existingSettings.ChatACPAgentID
 		current.ChatACPProjectPath = existingSettings.ChatACPProjectPath
 		current.ChatACPProjectMode = existingSettings.ChatACPProjectMode
+		current.MemoryProviderID = existingSettings.MemoryProviderID
 		current.ToolApprovalConfig = parseToolApprovalConfig(settingsRow.ToolApprovalConfig)
 		current.DisplayEnabled = settingsRow.DisplayEnabled
 		current.CommandUILanguage = settingsRow.CommandUiLanguage
@@ -162,12 +193,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	current.OverlayEnabled = overlayBindingRow.OverlayEnabled
 	current.OverlayProvider = strings.TrimSpace(overlayBindingRow.OverlayProvider)
 	current.OverlayConfig = normalizeJSONObject(overlayBindingRow.OverlayConfig)
-	if req.Language != nil {
-		current.Language = strings.TrimSpace(*req.Language)
-		if current.Language == "" {
-			current.Language = DefaultLanguage
-		}
-	}
 	if strings.TrimSpace(req.CommandUILanguage) != "" {
 		current.CommandUILanguage = strings.TrimSpace(req.CommandUILanguage)
 	}
@@ -200,14 +225,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if req.ChatRuntime != nil {
 		current.ChatRuntime = normalizeChatRuntime(*req.ChatRuntime)
 		if current.ChatRuntime == "" {
-			return Settings{}, agentfeedback.New(
-				agentfeedback.CodeInvalidChatRuntime,
-				"invalid_chat_runtime",
-				400,
-				"chat.externalAgent.invalidChatRuntime",
-				"invalid chat_runtime",
-				nil,
-			)
+			return Settings{}, ErrInvalidChatRuntime
 		}
 	}
 	if req.ChatACPAgentID != nil {
@@ -219,14 +237,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if req.ChatACPProjectMode != nil {
 		current.ChatACPProjectMode = normalizeACPProjectMode(*req.ChatACPProjectMode)
 		if current.ChatACPProjectMode == "" {
-			return Settings{}, agentfeedback.New(
-				agentfeedback.CodeProjectModeInvalid,
-				"invalid_project_mode",
-				400,
-				"chat.externalAgent.projectModeInvalid",
-				"invalid chat_acp_project_mode",
-				map[string]string{"project_mode": strings.TrimSpace(*req.ChatACPProjectMode)},
-			)
+			return Settings{}, fmt.Errorf("%w: %q", ErrACPProjectModeInvalid, strings.TrimSpace(*req.ChatACPProjectMode))
 		}
 	}
 	defaultBotAgentIDSet := req.DefaultBotAgentID != nil
@@ -293,7 +304,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	chatModelIDSet := req.ChatModelID != nil
 	if req.ChatModelID != nil {
 		if value := strings.TrimSpace(*req.ChatModelID); value != "" {
-			modelID, err := s.resolveModelUUID(ctx, value)
+			modelID, err := s.resolveModelUUID(ctx, "chat_model_id", value)
 			if err != nil {
 				return Settings{}, err
 			}
@@ -312,18 +323,29 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	compactionModelIDSet := req.CompactionModelID != nil
 	if req.CompactionModelID != nil {
 		if value := strings.TrimSpace(*req.CompactionModelID); value != "" {
-			modelID, err := s.resolveModelUUID(ctx, value)
+			modelID, err := s.resolveModelUUID(ctx, "compaction_model_id", value)
 			if err != nil {
 				return Settings{}, err
 			}
 			compactionModelUUID = modelID
 		}
 	}
+	memoryLLMModelUUID := pgtype.UUID{}
+	memoryLLMModelIDSet := req.MemoryLLMModelID != nil
+	if req.MemoryLLMModelID != nil {
+		if value := strings.TrimSpace(*req.MemoryLLMModelID); value != "" {
+			modelID, err := s.resolveModelUUID(ctx, "memory_llm_model_id", value)
+			if err != nil {
+				return Settings{}, err
+			}
+			memoryLLMModelUUID = modelID
+		}
+	}
 	imageModelUUID := pgtype.UUID{}
 	imageModelIDSet := req.ImageModelID != nil
 	if req.ImageModelID != nil {
 		if value := strings.TrimSpace(*req.ImageModelID); value != "" {
-			modelID, err := s.resolveModelUUID(ctx, value)
+			modelID, err := s.resolveModelUUID(ctx, "image_model_id", value)
 			if err != nil {
 				return Settings{}, err
 			}
@@ -352,15 +374,28 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 			fetchProviderUUID = providerID
 		}
 	}
+	// Enabling memory keeps a bot's existing Built-in Memory reference and
+	// otherwise points it at the team's builtin row; disabling clears it.
 	memoryProviderUUID := pgtype.UUID{}
-	memoryProviderIDSet := req.MemoryProviderID != nil
-	if req.MemoryProviderID != nil {
-		if value := strings.TrimSpace(*req.MemoryProviderID); value != "" {
+	memoryProviderIDSet := false
+	if req.MemoryEnabled != nil {
+		switch {
+		case !*req.MemoryEnabled:
+			memoryProviderIDSet = true
+		case strings.TrimSpace(current.MemoryProviderID) == "":
+			if s.builtinMemory == nil {
+				return Settings{}, errors.New("built-in memory not configured")
+			}
+			value, err := s.builtinMemory.EnsureBuiltinID(ctx)
+			if err != nil {
+				return Settings{}, err
+			}
 			providerID, err := db.ParseUUID(value)
 			if err != nil {
 				return Settings{}, err
 			}
 			memoryProviderUUID = providerID
+			memoryProviderIDSet = true
 		}
 	}
 	ttsModelUUID := pgtype.UUID{}
@@ -397,7 +432,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 	}
 	current = normalizeChatRuntimeFields(current)
-	if err := validateChatRuntimeSettings(botRow.Metadata, current); err != nil {
+	if err := validateChatRuntimeSettings(botRow.Metadata, current, s.acpSetupResolver(ctx, botID)); err != nil {
 		return Settings{}, err
 	}
 	toolApprovalConfig, err := json.Marshal(current.ToolApprovalConfig)
@@ -435,7 +470,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	upsertParams := sqlc.UpsertBotSettingsParams{
 		ID:                         pgID,
 		Timezone:                   timezoneValue,
-		Language:                   current.Language,
 		CommandUiLanguage:          current.CommandUILanguage,
 		ReasoningEffort:            current.ReasoningEffort,
 		CompactionEnabled:          current.CompactionEnabled,
@@ -452,6 +486,8 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		ChatAcpProjectMode:         current.ChatACPProjectMode,
 		CompactionModelIDSet:       compactionModelIDSet,
 		CompactionModelID:          compactionModelUUID,
+		MemoryLlmModelIDSet:        memoryLLMModelIDSet,
+		MemoryLlmModelID:           memoryLLMModelUUID,
 		ImageModelID:               imageModelUUID,
 		ImageModelIDSet:            imageModelIDSet,
 		SearchProviderID:           searchProviderUUID,
@@ -546,9 +582,8 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	return nil
 }
 
-func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEffect string, reasoningEffort string, compactionEnabled bool, compactionThreshold int32, compactionTargetPercent pgtype.Int4) Settings {
+func normalizeBotSetting(commandUILanguage string, aclDefaultEffect string, reasoningEffort string, compactionEnabled bool, compactionThreshold int32, compactionTargetPercent pgtype.Int4) Settings {
 	settings := Settings{
-		Language:                strings.TrimSpace(language),
 		CommandUILanguage:       strings.TrimSpace(commandUILanguage),
 		AclDefaultEffect:        strings.TrimSpace(aclDefaultEffect),
 		ReasoningEffort:         strings.TrimSpace(reasoningEffort),
@@ -559,9 +594,6 @@ func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEf
 		ChatRuntime:             ChatRuntimeModel,
 		ChatACPProjectPath:      DefaultACPProjectPath,
 		ChatACPProjectMode:      DefaultACPProjectMode,
-	}
-	if settings.Language == "" {
-		settings.Language = DefaultLanguage
 	}
 	if settings.CommandUILanguage == "" {
 		settings.CommandUILanguage = DefaultCommandUILanguage
@@ -679,7 +711,6 @@ func normalizeDormantReasoningEffort(effort string) string {
 
 func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 	return normalizeBotSettingsFields(
-		row.Language,
 		row.CommandUiLanguage,
 		row.ReasoningEffort,
 		row.CompactionEnabled,
@@ -693,6 +724,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.ChatAcpProjectPath,
 		row.ChatAcpProjectMode,
 		row.CompactionModelID,
+		row.MemoryLlmModelID,
 		row.ImageModelID,
 		row.SearchProviderID,
 		row.FetchProviderID,
@@ -712,7 +744,6 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 
 func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 	return normalizeBotSettingsFields(
-		row.Language,
 		row.CommandUiLanguage,
 		row.ReasoningEffort,
 		row.CompactionEnabled,
@@ -726,6 +757,7 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.ChatAcpProjectPath,
 		row.ChatAcpProjectMode,
 		row.CompactionModelID,
+		row.MemoryLlmModelID,
 		row.ImageModelID,
 		row.SearchProviderID,
 		row.FetchProviderID,
@@ -744,7 +776,6 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 }
 
 func normalizeBotSettingsFields(
-	language string,
 	commandUILanguage string,
 	reasoningEffort string,
 	compactionEnabled bool,
@@ -758,6 +789,7 @@ func normalizeBotSettingsFields(
 	chatACPProjectPath string,
 	chatACPProjectMode string,
 	compactionModelID pgtype.UUID,
+	memoryLLMModelID pgtype.UUID,
 	imageModelID pgtype.UUID,
 	searchProviderID pgtype.UUID,
 	fetchProviderID pgtype.UUID,
@@ -773,7 +805,7 @@ func normalizeBotSettingsFields(
 	overlayEnabled bool,
 	overlayConfig []byte,
 ) Settings {
-	settings := normalizeBotSetting(language, commandUILanguage, "", reasoningEffort, compactionEnabled, compactionThreshold, compactionTargetPercent)
+	settings := normalizeBotSetting(commandUILanguage, "", reasoningEffort, compactionEnabled, compactionThreshold, compactionTargetPercent)
 	if timezone.Valid {
 		settings.Timezone = timezone.String
 	}
@@ -808,6 +840,9 @@ func normalizeBotSettingsFields(
 	if compactionModelID.Valid {
 		settings.CompactionModelID = uuid.UUID(compactionModelID.Bytes).String()
 	}
+	if memoryLLMModelID.Valid {
+		settings.MemoryLLMModelID = uuid.UUID(memoryLLMModelID.Bytes).String()
+	}
 	if imageModelID.Valid {
 		settings.ImageModelID = uuid.UUID(imageModelID.Bytes).String()
 	}
@@ -819,6 +854,7 @@ func normalizeBotSettingsFields(
 	}
 	if memoryProviderID.Valid {
 		settings.MemoryProviderID = uuid.UUID(memoryProviderID.Bytes).String()
+		settings.MemoryEnabled = true
 	}
 	if ttsModelID.Valid {
 		settings.TtsModelID = uuid.UUID(ttsModelID.Bytes).String()
@@ -919,7 +955,24 @@ func normalizeChatRuntimeFields(current Settings) Settings {
 	return current
 }
 
-func validateChatRuntimeSettings(botMetadata []byte, current Settings) error {
+// acpSetupResolver returns the setup a provider-addressed ACP default runs
+// with.
+type acpSetupResolver func(agentID string, botMetadata map[string]any) (acpprofile.AgentSetup, error)
+
+func legacyACPSetup(agentID string, botMetadata map[string]any) (acpprofile.AgentSetup, error) {
+	return acpprofile.ParseAgentSetup(botMetadata, agentID), nil
+}
+
+func (s *Service) acpSetupResolver(ctx context.Context, botID string) acpSetupResolver {
+	if s.botAgents == nil {
+		return legacyACPSetup
+	}
+	return func(agentID string, botMetadata map[string]any) (acpprofile.AgentSetup, error) {
+		return s.botAgents.ResolveACPSetup(ctx, botID, "", agentID, botMetadata)
+	}
+}
+
+func validateChatRuntimeSettings(botMetadata []byte, current Settings, resolveSetup acpSetupResolver) error {
 	current = normalizeChatRuntimeFields(current)
 	if strings.TrimSpace(current.DefaultBotAgentID) != "" {
 		// The BotAgent path validates availability and shared provider config
@@ -931,67 +984,27 @@ func validateChatRuntimeSettings(botMetadata []byte, current Settings) error {
 	}
 	agentID := acpprofile.NormalizeAgentID(current.ChatACPAgentID)
 	if agentID == "" {
-		return agentfeedback.New(
-			agentfeedback.CodeAgentNotConfigured,
-			"missing_agent_id",
-			400,
-			"chat.externalAgent.agentNotConfigured",
-			"chat_acp_agent_id is required when chat_runtime is acp_agent",
-			nil,
-		)
+		return fmt.Errorf("%w: chat_acp_agent_id is required when chat_runtime is acp_agent", ErrACPAgentNotConfigured)
 	}
 	if current.ChatACPProjectMode == "none" {
-		return agentfeedback.New(
-			agentfeedback.CodeProjectModeInvalid,
-			"none_not_supported_for_default_chat",
-			400,
-			"chat.externalAgent.projectModeInvalid",
-			"chat_acp_project_mode=none is not supported for default chat runtime",
-			map[string]string{"agent_id": agentID, "project_mode": current.ChatACPProjectMode},
-		)
+		return fmt.Errorf("%w: none is not supported for the default chat runtime", ErrACPProjectModeInvalid)
 	}
 	if !strings.HasPrefix(strings.TrimSpace(current.ChatACPProjectPath), "/") {
-		return agentfeedback.New(
-			agentfeedback.CodeProjectPathInvalid,
-			"project_path_must_be_absolute",
-			400,
-			"chat.externalAgent.projectPathInvalid",
-			"chat_acp_project_path must be absolute",
-			map[string]string{"agent_id": agentID},
-		)
+		return ErrACPProjectPathInvalid
 	}
 	profile, ok := acpprofile.Lookup(agentID)
 	if !ok {
-		return agentfeedback.New(
-			agentfeedback.CodeAgentNotFound,
-			"unknown_agent",
-			400,
-			"chat.externalAgent.agentNotFound",
-			fmt.Sprintf("unknown ACP agent %q", agentID),
-			map[string]string{"agent_id": agentID, "agent_name": agentID},
-		)
+		return fmt.Errorf("%w: %q", ErrACPUnknownAgent, agentID)
 	}
-	metadata := normalizeJSONObject(botMetadata)
-	setup := acpprofile.ParseAgentSetup(metadata, agentID)
+	setup, err := resolveSetup(agentID, normalizeJSONObject(botMetadata))
+	if err != nil {
+		return err
+	}
 	if !setup.Enabled {
-		return agentfeedback.New(
-			agentfeedback.CodeAgentNotEnabled,
-			"agent_disabled",
-			400,
-			"chat.externalAgent.agentNotEnabled",
-			fmt.Sprintf("ACP agent %q is not enabled for this bot", agentID),
-			map[string]string{"agent_id": agentID, "agent_name": profile.DisplayName},
-		)
+		return fmt.Errorf("%w: %q", ErrACPAgentNotEnabled, agentID)
 	}
 	if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
-		return agentfeedback.New(
-			agentfeedback.CodeAgentNotConfigured,
-			"missing_"+acpprofile.NormalizeAgentID(field.ID),
-			400,
-			"chat.externalAgent.agentNotConfigured",
-			fmt.Sprintf("ACP agent %q is missing required field %q", agentID, field.ID),
-			map[string]string{"agent_id": agentID, "agent_name": profile.DisplayName, "field_id": field.ID, "field_label": field.Label},
-		)
+		return fmt.Errorf("%w: ACP agent %q is missing required field %q", ErrACPAgentNotConfigured, agentID, field.ID)
 	}
 	return nil
 }
@@ -1090,10 +1103,12 @@ func (s *Service) setDefaultEffect(ctx context.Context, botID, effect string) er
 	return s.acl.SetDefaultEffect(ctx, botID, effect)
 }
 
-func (s *Service) resolveModelUUID(ctx context.Context, modelID string) (pgtype.UUID, error) {
+// resolveModelUUID resolves the model a request names in field. A reference
+// that is empty or matches no model is returned as *InvalidModelRefError.
+func (s *Service) resolveModelUUID(ctx context.Context, field, modelID string) (pgtype.UUID, error) {
 	modelID = strings.TrimSpace(modelID)
 	if modelID == "" {
-		return pgtype.UUID{}, fmt.Errorf("%w: model_id is required", ErrInvalidModelRef)
+		return pgtype.UUID{}, &InvalidModelRefError{Field: field, Err: fmt.Errorf("%w: model_id is required", ErrInvalidModelRef)}
 	}
 
 	// Preferred path: when caller already passes the model UUID.
@@ -1110,7 +1125,7 @@ func (s *Service) resolveModelUUID(ctx context.Context, modelID string) (pgtype.
 		return pgtype.UUID{}, err
 	}
 	if len(rows) == 0 {
-		return pgtype.UUID{}, fmt.Errorf("%w: model not found: %s", ErrInvalidModelRef, modelID)
+		return pgtype.UUID{}, &InvalidModelRefError{Field: field, Err: fmt.Errorf("%w: model not found: %s", ErrInvalidModelRef, modelID)}
 	}
 	if len(rows) > 1 {
 		return pgtype.UUID{}, fmt.Errorf("%w: %s", ErrModelIDAmbiguous, modelID)

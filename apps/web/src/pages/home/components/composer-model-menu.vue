@@ -15,7 +15,7 @@ import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import ModelOptions from '@/pages/bots/components/model-options.vue'
 import ModelDescriptionTooltip from '@/components/model-description-tooltip/index.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
-import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, selectableEfforts } from '@/pages/bots/components/reasoning-effort'
+import { EFFORT_LABELS, displayedEffort, selectableEfforts } from '@/pages/bots/components/reasoning-effort'
 
 const props = defineProps<{
   modelValue: string
@@ -58,9 +58,9 @@ const activeModel = computed(() => {
   return props.models.find(model => (model.id || model.model_id) === id)
 })
 const efforts = computed(() => props.reasoningOptions !== undefined
-  ? props.reasoningOptions.flatMap(option => {
+  ? props.reasoningOptions.map(option => {
       const value = option.value.trim()
-      return value ? [{ value, label: option.label.trim() || value, description: option.description?.trim() }] : []
+      return { value, label: option.label.trim() || value, description: option.description?.trim() }
     })
   : selectableEfforts(activeModel.value?.reasoning).map(value => ({
       value,
@@ -69,7 +69,7 @@ const efforts = computed(() => props.reasoningOptions !== undefined
     })))
 const currentEffort = computed(() => props.reasoningOptions !== undefined
   ? props.reasoningEffort
-  : efforts.value.length ? props.reasoningEffort || REASONING_EFFORT_DISABLE : REASONING_EFFORT_DISABLE)
+  : displayedEffort(props.reasoningEffort, activeModel.value?.reasoning))
 const effortLabel = computed(() => efforts.value.find(option => option.value === currentEffort.value)?.label
   || (currentEffort.value ? t(EFFORT_LABELS[currentEffort.value] ?? 'chat.modelDefault') : t('chat.modelDefault')))
 
@@ -147,7 +147,7 @@ function onModelKeydown(event: KeyboardEvent) {
     </DropdownMenuSubContent>
   </DropdownMenuSub>
   <DropdownMenuSub
-    v-if="showReasoning"
+    v-if="showReasoning && efforts.length"
     v-model:open="reasoningOpen"
   >
     <DropdownMenuSubTrigger :disabled="loading || !!error || !efforts.length">

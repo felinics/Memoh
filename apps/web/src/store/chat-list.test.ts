@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import enMessages from '@/i18n/locales/en.json'
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia'
+import type { ChatAssistantTurn } from './chat/types'
+import { sendFailedMessage } from './chat/messages'
 import type {
   BotSessionActivityEvent,
   RuntimeCurrentRunView,
@@ -78,14 +81,19 @@ function flushPromises() {
 }
 
 type RuntimeTestUpdate =
-  | { kind: 'run', status: RuntimeRunStatus, error?: string }
+  | { kind: 'run', status: RuntimeRunStatus, errorCode?: string }
   | { kind: 'message', message: UIMessage }
   | { kind: 'user_turn', turn: UIUserTurn }
 
 const runtime = {
   started: { kind: 'run', status: 'running' } as RuntimeTestUpdate,
   completed: { kind: 'run', status: 'completed' } as RuntimeTestUpdate,
-  failed: (error: string): RuntimeTestUpdate => ({ kind: 'run', status: 'errored', error }),
+  // The run view has no error text; a failed run is described by its code.
+  failed: (errorCode?: string): RuntimeTestUpdate => ({
+    kind: 'run',
+    status: 'errored',
+    errorCode,
+  }),
   message: (message: UIMessage): RuntimeTestUpdate => ({ kind: 'message', message }),
   userTurn: (turn: UIUserTurn): RuntimeTestUpdate => ({ kind: 'user_turn', turn }),
 }
@@ -116,12 +124,20 @@ const h = {
   streamHandler: null as UIStreamEventHandler | null,
   sessionsActivityHandler: null as ((event: BotSessionActivityEvent) => void) | null,
   sendUpdates: [] as RuntimeTestUpdate[],
+  // False makes the fake server answer nothing to a submission, so a test can
+  // play a failure from before the server accepted it.
+  acceptRuns: true,
   sentWSMessages: [] as Array<Record<string, unknown>>,
   runtimeUnsubscribes: [] as string[],
   wsRunIds: [] as string[],
   abortedWSRuns: [] as string[],
   lastRunId: '',
   lastSessionId: '',
+  // Mirrors the server: a message without session_id creates a session and
+  // announces it with session_created before run_accepted. Tests that drive
+  // session_created themselves turn this off.
+  inbandSessionId: 'session-1',
+  manualSessionCreation: false,
   wsRunSeq: 0,
   runtimeBySession: new Map<string, {
     epoch: string
@@ -186,14 +202,14 @@ function publishRuntimeUpdate(
   let delta: RuntimeDelta
   if (update.kind === 'run') {
     run.status = update.status
-    run.error = update.error
+    run.error_code = update.errorCode
     run.updated_at = now
     delta = publishedRun
       ? {
           run: {
             run_id: runId,
             status: update.status,
-            error: update.error,
+            error_code: update.errorCode,
             updated_at: now,
           },
         }
@@ -267,13 +283,16 @@ beforeEach(() => {
     h.sessionsActivityHandler = null
     h.lastRunId = ''
     h.lastSessionId = ''
+    h.inbandSessionId = 'session-1'
+    h.manualSessionCreation = false
     h.wsRunSeq = 0
     h.runtimeBySession = new Map()
     h.sentWSMessages = []
     h.runtimeUnsubscribes = []
     h.wsRunIds = []
     h.abortedWSRuns = []
-    h.sendUpdates = [runtime.started, runtime.failed('model failed')]
+    h.sendUpdates = [runtime.started, runtime.failed('runtime_run_failed')]
+    h.acceptRuns = true
     vi.clearAllMocks()
 
     api.fetchBots.mockResolvedValue([
@@ -417,6 +436,7 @@ beforeEach(() => {
           session_id?: string
           message_id?: string
           text?: string
+          workdir_id?: string
         }) => {
           if (message.type === 'runtime_subscribe') {
             if (message.session_id) emitRuntimeSnapshot(onStreamEvent, message.session_id)
@@ -500,7 +520,16 @@ beforeEach(() => {
           // The server names the run and announces it before any turn output,
           // so every later event is addressed by run_id.
           const invocationId = message.invocation_id ?? ''
-          h.lastRunId = invocationId ? `run-${++h.wsRunSeq}` : ''
+          if (message.type === 'message' && !h.lastSessionId && invocationId && !h.manualSessionCreation) {
+            h.lastSessionId = h.inbandSessionId
+            onStreamEvent({
+              type: 'session_created',
+              invocation_id: invocationId,
+              session_id: h.lastSessionId,
+              workdir_id: message.workdir_id,
+            })
+          }
+          h.lastRunId = invocationId && h.acceptRuns ? `run-${++h.wsRunSeq}` : ''
           h.wsRunIds.push(h.lastRunId)
           if (h.lastRunId) {
             const runtime = testRuntime(h.lastSessionId)
@@ -556,7 +585,9 @@ beforeEach(() => {
                 type: 'error',
                 run_id: h.lastRunId,
                 invocation_id: invocationId,
-                message: update.error ?? 'model failed',
+                // The frame carries a code and its copy, never the run's text.
+                code: update.errorCode,
+                message: '',
               })
               continue
             }
@@ -567,6 +598,8 @@ beforeEach(() => {
           h.abortedWSRuns.push(runId)
         }),
         close: vi.fn(),
+        forget: vi.fn(),
+        bindSession: vi.fn(),
         onOpen: null,
         onClose: null,
       }
@@ -646,7 +679,7 @@ function interruptedRunStoreScript(): RuntimeTestUpdate[] {
   return [
     runtime.started,
     runtime.message({ id: 0, type: 'text', content: 'partial output' }),
-    runtime.failed('runtime interrupted'),
+    runtime.failed('runtime_run_failed'),
   ]
 }
 
@@ -700,60 +733,7 @@ describe('chat-list store', () => {
       expect(api.fetchSessions).toHaveBeenCalledWith('bot-ready')
     })
 
-  it('requests the Desktop once when each Browser Use or Computer Use call starts', async () => {
-      h.sendUpdates = [
-        runtime.started,
-        runtime.message({
-            id: 1,
-            type: 'tool',
-            name: 'browser_action',
-            input: { action: 'click' },
-            tool_call_id: 'call-browser',
-            running: true,
-        }),
-      ]
-      const store = useChatStore()
-      await store.selectBot('bot-1')
-
-      const sending = store.sendMessage('use the browser')
-      await flushPromises()
-      expect(store.guiToolUseRequested).toMatchObject({
-        botId: 'bot-1',
-        sessionId: 'session-1',
-        toolCallId: 'call-browser',
-        toolName: 'browser_action',
-        seq: 1,
-      })
-
-      emitRuntime(runtime.message({
-          id: 1,
-          type: 'tool',
-          name: 'browser_action',
-          input: { action: 'click', coordinate: [10, 20] },
-          tool_call_id: 'call-browser',
-          running: true,
-      }), 'session-1', h.lastRunId)
-      expect(store.guiToolUseRequested?.seq).toBe(1)
-
-      emitRuntime(runtime.message({
-          id: 2,
-          type: 'tool',
-          name: 'computer_observe',
-          input: { observe: 'snapshot' },
-          tool_call_id: 'call-computer',
-          running: true,
-      }), 'session-1', h.lastRunId)
-      expect(store.guiToolUseRequested).toMatchObject({
-        toolCallId: 'call-computer',
-        toolName: 'computer_observe',
-        seq: 2,
-      })
-
-      emitRuntime(runtime.completed, 'session-1', h.lastRunId)
-      await expect(sending).resolves.toMatchObject({ ok: true, messageSent: true })
-    })
-
-  it('projects startup failures identically while returning them to the composer', async () => {
+  it('keeps an accepted send that fails without output in the transcript', async () => {
       const store = useChatStore()
       const onBeforeTurnAppend = vi.fn()
       const onBeforeMessageSend = vi.fn()
@@ -769,45 +749,347 @@ describe('chat-list store', () => {
 
       expect(result).toMatchObject({
         ok: false,
-        stage: 'startup',
-        error: 'model failed',
-        restoreInput: 'hello',
+        stage: 'stream',
+        error: 'The response could not be completed. Please try again.',
       })
+      expect(result.restoreInput).toBeUndefined()
       expect(store.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+      expect(store.messages[0]).toMatchObject({ role: 'user', text: 'hello' })
       expect(store.messages[1]).toMatchObject({
         role: 'assistant',
         streaming: false,
-        messages: [{ type: 'error', content: 'model failed' }],
+        messages: [{ type: 'error', code: 'runtime_run_failed', content: '' }],
       })
-      expect(store.startupSendFailure).toMatchObject({
-        botId: 'bot-1',
-        sessionId: 'session-1',
-        error: 'model failed',
-        restoreInput: 'hello',
-      })
+      expect(store.startupSendFailure).toBeNull()
       expect(onBeforeTurnAppend).toHaveBeenCalledWith(expect.objectContaining({
         botId: 'bot-1',
-        sessionId: expect.any(String),
+        sessionId: null,
       }))
       expect(onBeforeMessageSend).toHaveBeenCalledOnce()
-      expect(onTurnAppendAborted).toHaveBeenCalledOnce()
+      expect(onTurnAppendAborted).not.toHaveBeenCalled()
       expect(h.sentWSMessages.at(-1)).toMatchObject({
         type: 'message',
         workspace_target_id: 'computer-b',
       })
     })
 
-  it('uses structured API feedback for startup send failures', async () => {
-      api.createSession.mockRejectedValueOnce({
-        body: {
-          i18n_key: 'chat.externalAgent.agentNotConfigured',
-          message: 'raw backend message',
-        },
-      })
+  // The server writes an accepted send and its failure to history, so the
+  // failure stays in the transcript as one error block whichever of the error
+  // frame and the errored projection arrives first.
+  it.each(['error frame first', 'projection first'])(
+    'keeps an accepted send that fails with a code and no output (%s)',
+    async (order) => {
+      h.sendUpdates = [runtime.started]
       const store = useChatStore()
 
       await store.selectBot('bot-1')
+      const sending = store.sendMessage('hello')
+      await flushPromises()
+      // What the server wrote to history for the failed turn.
+      const turnId = `turn-${wsRunId(0)}`
+      api.fetchMessagesUI.mockResolvedValue([
+        {
+          id: 'user-1',
+          turn_id: turnId,
+          role: 'user',
+          text: 'hello',
+          attachments: [],
+          timestamp: '2026-09-28T08:00:00.000Z',
+        },
+        {
+          id: 'assistant-1',
+          turn_id: turnId,
+          role: 'assistant',
+          messages: [{ id: 0, type: 'error', code: 'context.budget_unsatisfied', content: '' }],
+          timestamp: '2026-09-28T08:00:01.000Z',
+          streaming: false,
+        },
+      ])
+      const errorFrame = () => h.streamHandler?.({
+        type: 'error',
+        run_id: wsRunId(0),
+        invocation_id: wsInvocationId(0),
+        session_id: 'session-1',
+        code: 'context.budget_unsatisfied',
+        message: 'context budget unsatisfied',
+      })
+      const projection = () => emitRuntime(
+        runtime.failed('context.budget_unsatisfied'),
+      )
+      if (order === 'error frame first') {
+        errorFrame()
+        projection()
+      } else {
+        projection()
+        errorFrame()
+      }
+      const result = await sending
+      await flushPromises()
+
+      expect(result).toMatchObject({ ok: false, stage: 'stream' })
+      expect(result.restoreInput).toBeUndefined()
+      expect(store.startupSendFailure).toBeNull()
+      expect(store.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+      expect(store.messages[0]).toMatchObject({ role: 'user', text: 'hello' })
+      const assistant = store.messages[1] as ChatAssistantTurn
+      expect(assistant.messages).toHaveLength(1)
+      expect(assistant.messages[0]).toMatchObject({
+        type: 'error',
+        code: 'context.budget_unsatisfied',
+      })
+    },
+  )
+
+  // The run view carries the failure's code alone; its args come only on the
+  // error frame. The one error block keeps them whichever arrives first, and
+  // without a frame it has the code and no args.
+  it.each(['error frame first', 'projection first', 'projection only'])(
+    'keeps the args of a coded failure on its error block (%s)',
+    async (order) => {
+      h.sendUpdates = [runtime.started]
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const sending = store.sendMessage('hello')
+      await flushPromises()
+      // History, read again once the run settles, keeps the code alone.
+      const turnId = `turn-${wsRunId(0)}`
+      api.fetchMessagesUI.mockResolvedValue([
+        { id: 'user-1', turn_id: turnId, role: 'user', text: 'hello', attachments: [], timestamp: '2026-09-28T08:00:00.000Z' },
+        {
+          id: 'assistant-1',
+          turn_id: turnId,
+          role: 'assistant',
+          messages: [{ id: 0, type: 'error', code: 'agent_dependency_missing', content: '' }],
+          timestamp: '2026-09-28T08:00:01.000Z',
+          streaming: false,
+        },
+      ])
+      const errorFrame = () => h.streamHandler?.({
+        type: 'error',
+        run_id: wsRunId(0),
+        invocation_id: wsInvocationId(0),
+        session_id: 'session-1',
+        code: 'agent_dependency_missing',
+        args: { dep_id: 'codex' },
+        message: '',
+      })
+      const projection = () => emitRuntime(runtime.failed('agent_dependency_missing'))
+      if (order === 'error frame first') {
+        errorFrame()
+        projection()
+      } else if (order === 'projection first') {
+        projection()
+        errorFrame()
+      } else {
+        projection()
+      }
+      if (order !== 'projection only') await sending
+      await flushPromises()
+
+      const assistant = store.messages[1] as ChatAssistantTurn
+      const errors = assistant.messages.filter(block => block.type === 'error')
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toMatchObject({ type: 'error', code: 'agent_dependency_missing' })
+      if (order === 'projection only') {
+        expect(errors[0]).not.toHaveProperty('args.dep_id')
+      } else {
+        expect(errors[0]).toMatchObject({
+          args: { dep_id: 'codex' },
+          content: 'codex is not installed in this workspace. Install it from the bot\'s dependencies, or wait for the running installation to finish, then send the message again.',
+        })
+      }
+    },
+  )
+
+  // A run that fails after streaming text keeps the text and shows one error
+  // block with the run's code: the in-stream frame is only an early hint, and
+  // history, which records the same code after the text, shows the same turn.
+  it.each([
+    ['error frame first', 'top-level code'],
+    ['projection first', 'top-level code'],
+    ['error frame first', 'different frame code'],
+  ])('shows one error block after partial text, live and after reload (%s, %s)', async (order, position) => {
+      const runCode = 'agent.response_interrupted'
+      h.sendUpdates = [
+        runtime.started,
+        runtime.message({ id: 1, type: 'text', content: 'partial' }),
+      ]
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const sending = store.sendMessage('hello')
+      await flushPromises()
+      const turnId = `turn-${wsRunId(0)}`
+      api.fetchMessagesUI.mockResolvedValue([
+        {
+          id: 'user-1',
+          turn_id: turnId,
+          role: 'user',
+          text: 'hello',
+          attachments: [],
+          timestamp: '2026-09-28T08:00:00.000Z',
+        },
+        {
+          id: 'assistant-1',
+          turn_id: turnId,
+          role: 'assistant',
+          messages: [
+            { id: 0, type: 'text', content: 'partial' },
+            { id: 1, type: 'error', code: runCode, content: '' },
+          ],
+          timestamp: '2026-09-28T08:00:01.000Z',
+          streaming: false,
+        },
+      ])
+      const frame = {
+        type: 'error' as const,
+        run_id: wsRunId(0),
+        invocation_id: wsInvocationId(0),
+        session_id: 'session-1',
+        message: 'stream reset',
+      }
+      const errorFrame = () => h.streamHandler?.(
+        position === 'top-level code' ? { ...frame, code: runCode }
+        : { ...frame, code: 'agent.provider_auth_failed' })
+      const projection = () => emitRuntime(runtime.failed(runCode))
+      if (order === 'error frame first') {
+        errorFrame()
+        projection()
+      } else {
+        projection()
+        errorFrame()
+      }
+      const result = await sending
+
+      // The send reports the frame's code at once; the transcript shows the run's.
+      expect(result).toMatchObject({
+        ok: false,
+        stage: 'stream',
+        errorCode: position === 'different frame code' ? 'agent.provider_auth_failed' : runCode,
+      })
+      expect(store.startupSendFailure).toBeNull()
+      const blocks = (chat = store) => (chat.messages[1] as ChatAssistantTurn).messages
+        .map(block => block.type === 'error' ? `error ${block.code}` : `${block.type} ${'content' in block ? block.content : ''}`)
+      expect(store.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+      const live = blocks()
+      expect(live).toEqual(['text partial', `error ${runCode}`])
+
+      // A page reload: a fresh store opens the session from history.
+      setActivePinia(createPinia())
+      const reloaded = useChatStore()
+      await reloaded.selectBot('bot-1')
+      await reloaded.selectSession('session-1')
+      await flushPromises()
+      expect(api.fetchMessagesUI).toHaveBeenCalled()
+      expect(reloaded.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+      expect(blocks(reloaded)).toEqual(live)
+    })
+
+  // A send the server refused before accepting a run is not in history, so the
+  // composer gets it back and no turn is left behind, whichever position of
+  // the frame carries the code.
+  it.each([
+    ['top-level code', { code: 'acp_agent_not_configured' }],
+  ])('returns a pre-admission failure with a %s to the composer', async (_position, coded) => {
+      h.acceptRuns = false
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const sending = store.sendMessage('hello')
+      await flushPromises()
+      h.streamHandler?.({
+        type: 'error',
+        invocation_id: wsInvocationId(0),
+        session_id: 'session-1',
+        message: 'raw',
+        ...coded,
+      })
+      const result = await sending
+
+      expect(result).toMatchObject({
+        ok: false,
+        stage: 'startup',
+        restoreInput: 'hello',
+        error: 'External agent setup is incomplete for this bot.',
+        errorCode: 'acp_agent_not_configured',
+      })
+      expect(store.startupSendFailure).toMatchObject({ restoreInput: 'hello' })
+      expect(store.messages).toEqual([])
+    })
+
+  it.each([
+    ['runtime_control.failed', 'The runtime control could not be completed. Try again.'],
+    ['slash.unknown_command', 'Unknown slash command. Send /help to see the available commands.'],
+    ['not.a.catalog.code', 'Slash command failed.'],
+  ])('renders a command_error with code %s', async (code, expected) => {
+      h.acceptRuns = false
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const sending = store.sendMessage('hello')
+      await flushPromises()
+      h.streamHandler?.({
+        type: 'command_error',
+        invocation_id: wsInvocationId(0),
+        session_id: 'session-1',
+        terminal: true,
+        code,
+        message: 'server message',
+      })
+      const result = await sending
+
+      expect(result).toMatchObject({
+        ok: false,
+        stage: 'startup',
+        restoreInput: 'hello',
+        error: expected,
+        errorCode: code,
+      })
+    })
+
+  it('returns a send to the composer when the socket fails before the server accepts it', async () => {
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const socket = api.connectWebSocket.mock.results.at(-1)?.value as {
+        send: ReturnType<typeof vi.fn>
+      }
+      socket.send.mockImplementation((message: { type?: string }) => {
+        if (message.type === 'message') throw new Error('WebSocket is not connected')
+      })
       const result = await store.sendMessage('hello')
+
+      expect(result).toMatchObject({
+        ok: false,
+        stage: 'startup',
+        restoreInput: 'hello',
+      })
+      expect(store.startupSendFailure).toMatchObject({ restoreInput: 'hello' })
+      expect(store.messages.some(turn => turn.role === 'user')).toBe(false)
+    })
+
+  it('uses structured API feedback for startup send failures', async () => {
+      // A draft's first message creates its session in-band; here the server
+      // refuses to create it, so no session_created ever arrives.
+      h.manualSessionCreation = true
+      h.sendUpdates = []
+      h.acceptRuns = false
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const sending = store.sendMessage('hello')
+      await flushPromises()
+      // Nothing of the send is shown before the server confirms it.
+      expect(store.messages).toEqual([])
+      expect(store.firstSendFor({ botId: 'bot-1', viewId: 'chat' })).toMatchObject({ revealed: false })
+      h.streamHandler?.({
+        type: 'error',
+        invocation_id: wsInvocationId(0),
+        code: 'acp_agent_not_configured',
+        message: 'raw backend message',
+      })
+      const result = await sending
 
       expect(result).toMatchObject({
         ok: false,
@@ -815,7 +1097,13 @@ describe('chat-list store', () => {
         error: 'External agent setup is incomplete for this bot.',
         restoreInput: 'hello',
       })
+      // The failed first send never left the draft: it is still empty, no
+      // first send is left in flight, and the failure carries the input.
+      expect(store.messages).toEqual([])
+      expect(store.firstSendFor({ botId: 'bot-1', viewId: 'chat' })).toBeUndefined()
+      expect(api.deleteSession).not.toHaveBeenCalled()
       expect(store.startupSendFailure).toMatchObject({
+        sessionId: '',
         error: 'External agent setup is incomplete for this bot.',
         restoreInput: 'hello',
       })
@@ -954,7 +1242,7 @@ describe('chat-list store', () => {
               can_approve: true,
             },
         }),
-        runtime.failed('stop after visible output'),
+        runtime.failed(),
       ]
       const store = useChatStore()
 
@@ -2004,21 +2292,21 @@ describe('chat-list store', () => {
       h.sendUpdates = [
         runtime.started,
         runtime.message({ id: 0, type: 'text', content: 'partial response' }),
-        runtime.failed('model failed'),
+        runtime.failed('runtime_run_failed'),
       ]
       const store = useChatStore()
 
       await store.selectBot('bot-1')
       const result = await store.sendMessage('hello')
 
-      expect(result).toMatchObject({ ok: false, stage: 'stream', error: 'model failed' })
+      expect(result).toMatchObject({ ok: false, stage: 'stream', error: 'The response could not be completed. Please try again.' })
       expect(store.messages).toHaveLength(2)
       expect(store.messages[0]).toMatchObject({ role: 'user', text: 'hello' })
       expect(store.messages[1]).toMatchObject({
         role: 'assistant',
         messages: [
           { type: 'text', content: 'partial response' },
-          { type: 'error', content: 'model failed' },
+          { type: 'error', code: 'runtime_run_failed', content: '' },
         ],
         streaming: false,
       })
@@ -2388,7 +2676,7 @@ describe('chat-list store', () => {
     })
 
   it('restores the old assistant when retry fails before streaming starts', async () => {
-      h.sendUpdates = [runtime.failed('model failed')]
+      h.sendUpdates = [runtime.failed()]
       api.fetchSessions.mockResolvedValueOnce({
         items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
         nextCursor: null,
@@ -2417,7 +2705,7 @@ describe('chat-list store', () => {
       await flushPromises()
       const result = await store.retryLatestAssistant('turn-fx-4-1')
 
-      expect(result).toMatchObject({ ok: false, stage: 'startup', error: 'model failed' })
+      expect(result).toMatchObject({ ok: false, stage: 'startup', error: 'Message failed to send' })
       expect(store.messages.map(message => message.id)).toEqual(['user-1', 'assistant-old'])
     })
 
@@ -2623,7 +2911,7 @@ describe('chat-list store', () => {
       const result = await retry
       await flushPromises()
 
-      expect(result).toMatchObject({ ok: false, stage: 'startup', error: 'model failed' })
+      expect(result).toMatchObject({ ok: false, stage: 'startup', error: sendFailedMessage() })
       expect(store.sessionId).toBe('session-b')
       expect(store.messages.map(message => message.id)).toEqual(['user-b'])
     })
@@ -2706,7 +2994,7 @@ describe('chat-list store', () => {
     })
 
   it('restores the old latest turn tail when edit fails before streaming starts', async () => {
-      h.sendUpdates = [runtime.failed('model failed')]
+      h.sendUpdates = [runtime.failed()]
       api.fetchSessions.mockResolvedValueOnce({
         items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
         nextCursor: null,
@@ -2738,7 +3026,7 @@ describe('chat-list store', () => {
       expect(result).toMatchObject({
         ok: false,
         stage: 'startup',
-        error: 'model failed',
+        error: 'Message failed to send',
         restoreInput: 'new prompt',
       })
       expect(store.messages.map(message => message.id)).toEqual(['user-1', 'assistant-old'])
@@ -2814,7 +3102,7 @@ describe('chat-list store', () => {
       expect(result).toMatchObject({
         ok: false,
         stage: 'startup',
-        error: 'model failed',
+        error: sendFailedMessage(),
         restoreInput: 'new prompt',
       })
       expect(store.sessionId).toBe('session-b')
@@ -3287,6 +3575,25 @@ describe('chat-list store', () => {
       expect(onTurnAppendAborted).not.toHaveBeenCalled()
     })
 
+  it('renders a quick action command_error by its catalog code', async () => {
+      api.executeQuickAction.mockResolvedValueOnce({
+        type: 'command_error',
+        terminal: true,
+        composer_scope: 'bot-1:panel-a',
+        code: 'runtime_control.failed',
+        message: 'server message',
+      })
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const result = await store.sendMessage('/help', undefined, { composerScope: 'bot-1:panel-a' })
+
+      expect(result).toMatchObject({
+        ok: false,
+        error: 'The runtime control could not be completed. Try again.',
+      })
+    })
+
   it('keeps quick action transport failures as startup command errors', async () => {
       api.executeQuickAction.mockRejectedValueOnce(new Error('network unavailable'))
       const store = useChatStore()
@@ -3298,31 +3605,38 @@ describe('chat-list store', () => {
         ok: false,
         stage: 'startup',
         restoreInput: '/help',
-        error: 'network unavailable',
+        error: 'Slash command failed.',
       })
       const commandEvent = store.commandEventForScope({ botId: 'bot-1', composerScope: 'bot-1:panel-a' })
       expect(commandEvent).toMatchObject({
         type: 'command_error',
         composer_scope: 'bot-1:panel-a',
-        error: { code: 'generic', message: 'network unavailable' },
+        code: 'generic',
+        message: 'Slash command failed.',
       })
     })
 
   it('keeps direct skill slash websocket startup failures restorable', async () => {
-      h.sendUpdates = [
-        runtime.started,
-        runtime.failed('model failed'),
-      ]
+      h.sendUpdates = []
+      h.acceptRuns = false
       const store = useChatStore()
 
       await store.selectBot('bot-1')
-      const result = await store.sendMessage('/wat', undefined, { composerScope: 'bot-1:panel-a' })
+      const sending = store.sendMessage('/wat', undefined, { composerScope: 'bot-1:panel-a' })
+      await flushPromises()
+      h.streamHandler?.({
+        type: 'error',
+        invocation_id: wsInvocationId(0),
+        session_id: 'session-1',
+        message: 'model failed',
+      })
+      const result = await sending
 
       expect(result).toMatchObject({
         ok: false,
         stage: 'startup',
         restoreInput: '/wat',
-        error: 'model failed',
+        error: sendFailedMessage(),
       })
       expect(h.sentWSMessages[0]).toMatchObject({
         type: 'message',
@@ -3473,6 +3787,7 @@ describe('chat-list store', () => {
     })
 
   it('blocks a second deferred draft send while the first stream is still unbound', async () => {
+      h.manualSessionCreation = true
       h.sendUpdates = []
       const store = useChatStore()
 
@@ -3504,6 +3819,7 @@ describe('chat-list store', () => {
     })
 
   it('aborts a deferred draft stream before session_created binds it', async () => {
+      h.manualSessionCreation = true
       h.sendUpdates = []
       const store = useChatStore()
 
@@ -3600,6 +3916,7 @@ describe('chat-list store', () => {
 
   it('fails a rejected submission with the code the server refused it by', async () => {
       h.sendUpdates = []
+      h.acceptRuns = false
       const store = useChatStore()
 
       await store.selectBot('bot-1')
@@ -3623,10 +3940,12 @@ describe('chat-list store', () => {
         errorCode: 'session_runtime.session_busy',
         restoreInput: 'hello',
       })
+      expect(store.startupSendFailure).toMatchObject({ restoreInput: 'hello' })
       expect(store.streaming).toBe(false)
     })
 
   it('keeps the first created-session correlation when a stream receives a conflicting duplicate', async () => {
+      h.manualSessionCreation = true
       h.sendUpdates = []
       const store = useChatStore()
 
@@ -3651,6 +3970,7 @@ describe('chat-list store', () => {
     })
 
   it('does not select a late session_created event after the user switches sessions', async () => {
+      h.manualSessionCreation = true
       h.sendUpdates = []
       api.fetchSession.mockImplementation(async (_botId: string, sessionID: string) => ({
         id: sessionID,
@@ -3685,7 +4005,10 @@ describe('chat-list store', () => {
     })
 
   it('deletes a deferred draft session when requested skill preflight fails after session_created', async () => {
+      h.manualSessionCreation = true
       h.sendUpdates = []
+      // The server refuses requested skills before it accepts a run.
+      h.acceptRuns = false
       const store = useChatStore()
       const requestedSkill = { name: 'alpha' }
       const attachment = {
@@ -3705,7 +4028,9 @@ describe('chat-list store', () => {
 
       h.streamHandler?.({ type: 'session_created', invocation_id: invocationId, session_id: 'created-session' })
       await flushPromises()
-      expect(store.sessionId).toBe('created-session')
+      // The run is not accepted yet, so the pane is still the draft.
+      expect(store.sessionId).toBeNull()
+      expect(store.messages).toHaveLength(0)
 
       h.streamHandler?.({
         type: 'command_error',
@@ -3713,10 +4038,8 @@ describe('chat-list store', () => {
         session_id: 'created-session',
         composer_scope: 'bot-1:draft-a',
         terminal: true,
-        error: {
-          code: 'unsupported_skill_slash_context',
-          message: 'Requested skills are not supported here.',
-        },
+        code: 'slash.skill_activation_unsupported',
+        message: 'Requested skills are not supported here.',
       })
       const result = await sendPromise
 
@@ -3757,8 +4080,146 @@ describe('chat-list store', () => {
       })
     })
 
-  it('keeps the current session when deferred draft failure arrives after a session switch', async () => {
+  it('keeps a held first send across a dropped socket once the server named its session', async () => {
+      h.manualSessionCreation = true
       h.sendUpdates = []
+      h.acceptRuns = false
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const socket = api.connectWebSocket.mock.results.at(-1)!.value
+      const sending = store.sendMessage('hello', [], { composerScope: 'bot-1:draft-a' })
+      await flushPromises()
+      const invocationId = wsInvocationId(0)
+      h.streamHandler?.({ type: 'session_created', invocation_id: invocationId, session_id: 'created-session' })
+      await flushPromises()
+      // The resend a reconnect makes goes to the session the server named, so
+      // the server answers with the run this invocation already has.
+      expect(socket.bindSession).toHaveBeenCalledWith(invocationId, 'created-session')
+
+      // The run_accepted frame is lost with the socket. The server may have
+      // taken the run, so the send waits and its session stays.
+      socket.onClose?.()
+      await flushPromises()
+      expect(api.deleteSession).not.toHaveBeenCalled()
+      expect(store.sessionId).toBeNull()
+
+      // The reconnect resends the request, now addressed to that session, and
+      // the server answers with the invocation's run.
+      // As on a real reconnect, the pending request goes out before onOpen.
+      h.lastSessionId = 'created-session'
+      h.acceptRuns = true
+      socket.send({ ...h.sentWSMessages[0], session_id: 'created-session' })
+      socket.onOpen?.()
+      await flushPromises()
+      emitRuntime(runtime.completed)
+
+      await expect(sending).resolves.toMatchObject({ ok: true })
+      expect(store.sessionId).toBe('created-session')
+      expect(api.deleteSession).not.toHaveBeenCalled()
+    })
+
+  // A refusal of the resend says nothing about the first attempt: the server
+  // refuses before admission looks the invocation up (access, workspace
+  // target, a skill activation finding its own run holding the session).
+  it.each([
+    ['an error frame', { type: 'error', code: 'workspace_target.unavailable', message: 'target offline' }],
+    ['a rejected run', { type: 'run_rejected', code: 'session_runtime.ledger_unavailable', message: 'ledger unavailable' }],
+    ['a command error', { type: 'command_error', terminal: true, code: 'slash.unknown', message: 'unknown command' }],
+    ['a busy session', { type: 'command_error', terminal: true, code: 'session_runtime.session_busy', message: 'session busy' }],
+  ] as const)('keeps the session when the resent first send is refused with %s', async (_, refusal) => {
+      h.manualSessionCreation = true
+      h.sendUpdates = []
+      h.acceptRuns = false
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const socket = api.connectWebSocket.mock.results.at(-1)!.value
+      const sending = store.sendMessage('hello', [], { composerScope: 'bot-1:draft-a' })
+      await flushPromises()
+      const invocationId = wsInvocationId(0)
+      h.streamHandler?.({ type: 'session_created', invocation_id: invocationId, session_id: 'created-session' })
+      await flushPromises()
+      socket.onClose?.()
+      await flushPromises()
+
+      h.streamHandler?.({ ...refusal, invocation_id: invocationId, session_id: 'created-session' })
+      const result = await sending
+
+      expect(result).toMatchObject({ ok: false, stage: 'startup', restoreInput: 'hello' })
+      expect(result.error).toBe(enMessages.chat.sendOutcomeUnknown)
+      expect(api.deleteSession).not.toHaveBeenCalled()
+    })
+
+  it('keeps the session of a held first send whose confirmation timed out', async () => {
+      h.manualSessionCreation = true
+      h.sendUpdates = []
+      h.acceptRuns = false
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      // flushPromises waits on a timer, which is fake here.
+      const flush = () => vi.advanceTimersByTimeAsync(0)
+      try {
+        const store = useChatStore()
+
+        await store.selectBot('bot-1')
+        const sending = store.sendMessage('hello', [], { composerScope: 'bot-1:draft-a' })
+        await flush()
+        const invocationId = wsInvocationId(0)
+        h.streamHandler?.({ type: 'session_created', invocation_id: invocationId, session_id: 'created-session' })
+        await flush()
+
+        await vi.advanceTimersByTimeAsync(30_000)
+        const result = await sending
+
+        // Unconfirmed is not refused: the session may hold the run, so it is
+        // kept, and the copy does not ask for a blind resend.
+        expect(result).toMatchObject({ ok: false, stage: 'startup', restoreInput: 'hello' })
+        expect(result.error).toBe(enMessages.chat.sendOutcomeUnknown)
+        expect(api.deleteSession).not.toHaveBeenCalled()
+
+        // A confirmation that still arrives stops the run the user was told
+        // did not go through.
+        h.streamHandler?.({
+          type: 'run_accepted',
+          run_id: 'run-late',
+          invocation_id: invocationId,
+          session_id: 'created-session',
+          turn_id: 'turn-run-late',
+          epoch: 'epoch-created-session',
+          seq: 1,
+        })
+        await flush()
+        expect(h.abortedWSRuns).toEqual(['run-late'])
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+  it('reports an unknown outcome when the socket drops before the server named a session', async () => {
+      h.manualSessionCreation = true
+      h.sendUpdates = []
+      h.acceptRuns = false
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const socket = api.connectWebSocket.mock.results.at(-1)!.value
+      const sending = store.sendMessage('hello', [], { composerScope: 'bot-1:draft-a' })
+      await flushPromises()
+
+      socket.onClose?.()
+      const result = await sending
+
+      expect(result).toMatchObject({ ok: false, stage: 'startup', restoreInput: 'hello' })
+      expect(result.error).toBe(enMessages.chat.sendOutcomeUnknown)
+      expect(socket.bindSession).not.toHaveBeenCalled()
+      expect(api.deleteSession).not.toHaveBeenCalled()
+    })
+
+  it('keeps the current session when deferred draft failure arrives after a session switch', async () => {
+      h.manualSessionCreation = true
+      h.sendUpdates = []
+      // The server refuses requested skills before it accepts a run.
+      h.acceptRuns = false
       api.fetchSession.mockImplementation(async (_botId: string, sessionID: string) => ({
         id: sessionID,
         bot_id: 'bot-1',
@@ -3783,10 +4244,8 @@ describe('chat-list store', () => {
         session_id: 'created-session',
         composer_scope: 'bot-1:draft-a',
         terminal: true,
-        error: {
-          code: 'unsupported_skill_slash_context',
-          message: 'Requested skills are not supported here.',
-        },
+        code: 'slash.skill_activation_unsupported',
+        message: 'Requested skills are not supported here.',
       })
       const result = await sendPromise
 
@@ -3803,7 +4262,9 @@ describe('chat-list store', () => {
     })
 
   it('keeps deferred draft websocket errors scoped away from the switched session', async () => {
+      h.manualSessionCreation = true
       h.sendUpdates = []
+      h.acceptRuns = false
       api.fetchSession.mockImplementation(async (_botId: string, sessionID: string) => ({
         id: sessionID,
         bot_id: 'bot-1',
@@ -3819,11 +4280,15 @@ describe('chat-list store', () => {
       })
       await flushPromises()
       const invocationId = wsInvocationId(0)
-      const runId = wsRunId(0)
 
       await store.selectSession('session-b')
       h.streamHandler?.({ type: 'session_created', invocation_id: invocationId, session_id: 'created-session' })
-      h.streamHandler?.({ type: 'error', run_id: runId, session_id: 'created-session', message: 'model failed' })
+      h.streamHandler?.({
+        type: 'error',
+        invocation_id: invocationId,
+        session_id: 'created-session',
+        message: 'model failed',
+      })
       const result = await sendPromise
 
       expect(result).toMatchObject({ ok: false, stage: 'startup', composerScope: 'bot-1:draft-a' })
@@ -3863,11 +4328,11 @@ describe('chat-list store', () => {
       expect(store.commandEvent).toMatchObject({
         type: 'command_error',
         session_id: 'session-b',
-        error: { code: 'current_error' },
+        code: 'current_error',
       })
       expect(store.commandEventForScope({ botId: 'bot-1', composerScope: 'bot-1:draft-a' })).toMatchObject({
         type: 'command_error',
-        error: { code: 'late_error' },
+        code: 'late_error',
       })
     })
 
@@ -4532,7 +4997,7 @@ describe('chat-list store', () => {
       expect(store.messages).toEqual([])
     })
 
-  it('falls back within the schedule sidebar mode when deleting an active schedule session', async () => {
+  it('clears the selection instead of picking a replacement when deleting the active session', async () => {
       api.fetchSessions.mockResolvedValueOnce({
         items: [
           { id: 'schedule-1', bot_id: 'bot-1', title: 'Morning run', type: 'schedule' },
@@ -4547,10 +5012,10 @@ describe('chat-list store', () => {
       expect(store.sessionId).toBe('schedule-1')
 
       api.deleteSession.mockResolvedValueOnce(undefined)
-      await store.removeSession('schedule-1', { fallbackMode: 'schedule' })
+      await store.removeSession('schedule-1')
 
       expect(store.sessions.map(session => session.id)).toEqual(['schedule-2'])
-      expect(store.sessionId).toBe('schedule-2')
+      expect(store.sessionId).toBeNull()
     })
 
   it('does not mutate the active bot state when a delete resolves after switching bots', async () => {
@@ -4921,45 +5386,13 @@ describe('chat-list store', () => {
       expect(store.pendingExternalAgentStateFor(targetB)).toMatchObject({ metadata: { acp_agent_id: 'claude' } })
     })
 
-  it('does not let a late native Draft creation steal focus from another Draft', async () => {
-      const creation = deferred<{
-        id: string
-        bot_id: string
-        title: string
-        type: string
-      }>()
-      api.createSession.mockReturnValueOnce(creation.promise)
-      const store = useChatStore()
-      await store.selectBot('bot-1')
-      const targetA = { botId: 'bot-1', sessionId: null, viewId: 'chat:draft-a' }
-      const targetB = { botId: 'bot-1', sessionId: null, viewId: 'chat:draft-b' }
-      store.bindChatView(targetA.viewId, targetA, true)
-      store.bindChatView(targetB.viewId, targetB, true)
-      store.focusChatView(targetA.viewId)
-
-      const sending = store.sendMessage('from A', undefined, { target: targetA })
-      await flushPromises()
-      store.focusChatView(targetB.viewId)
-      store.selectDraft({ explicitSelection: true })
-      creation.resolve({ id: 'session-a', bot_id: 'bot-1', title: '', type: 'chat' })
-      await sending
-
-      expect(store.sessionId).toBeNull()
-      expect(store.chatView({ ...targetA, sessionId: 'session-a' }).sessionId).toBe('session-a')
-      expect(store.chatView(targetB).kind).toBe('draft')
-      expect(store.userSentInSession).toMatchObject({ id: 'session-a', viewId: targetA.viewId })
-    })
-
   it('drops a late Draft creation result after the authenticated scope resets', async () => {
       const windowTarget = new EventTarget()
       vi.stubGlobal('window', windowTarget)
-      const creation = deferred<{
-        id: string
-        bot_id: string
-        title: string
-        type: string
-      }>()
-      api.createSession.mockReturnValueOnce(creation.promise)
+      // The first message creates its session in-band; hold session_created
+      // back so the scope resets while creation is still in flight.
+      h.manualSessionCreation = true
+      h.sendUpdates = []
       const store = useChatStore()
       await store.selectBot('bot-1')
       const target = { botId: 'bot-1', sessionId: null, viewId: 'chat:draft-a' }
@@ -4971,7 +5404,7 @@ describe('chat-list store', () => {
       windowTarget.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT, {
         detail: { reason: 'logout' },
       }))
-      creation.resolve({ id: 'old-session', bot_id: 'bot-1', title: '', type: 'chat' })
+      h.streamHandler?.({ type: 'session_created', invocation_id: wsInvocationId(0), session_id: 'old-session' })
 
       await expect(sending).resolves.toMatchObject({ ok: false })
       expect(store.sessions).toEqual([])
@@ -5043,6 +5476,7 @@ describe('chat-list store', () => {
     })
 
   it('does not let a late session_created event steal focus from another Draft', async () => {
+      h.manualSessionCreation = true
       h.sendUpdates = []
       const store = useChatStore()
       await store.selectBot('bot-1')
@@ -5358,13 +5792,13 @@ describe('chat-list store', () => {
       expect(result).toMatchObject({
         ok: false,
         stage: 'stream',
-        error: 'runtime interrupted',
+        error: 'The response could not be completed. Please try again.',
       })
       const assistant = store.messages.find(turn => turn.role === 'assistant')
       expect(assistant?.role).toBe('assistant')
       if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
       expect(assistant.messages.some(block => block.type === 'text' && block.content === 'partial output')).toBe(true)
-      expect(assistant.messages.some(block => block.type === 'error' && block.content === 'runtime interrupted')).toBe(true)
+      expect(assistant.messages.some(block => block.type === 'error' && block.code === 'runtime_run_failed')).toBe(true)
     })
 
   it('does not let stale active-run events for another session pollute the visible transcript', async () => {

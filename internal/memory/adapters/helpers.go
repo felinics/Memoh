@@ -3,6 +3,8 @@ package adapters
 import (
 	"fmt"
 	"strings"
+
+	"github.com/felinics/memoh/internal/memory/migrate"
 )
 
 // TruncateSnippet truncates a string to n runes, appending "..." if truncated.
@@ -67,6 +69,48 @@ func MergeMetadata(base map[string]any, extra map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// SharedMemoryNamespace is the namespace bot-shared memory lives in. Every
+// writer — formation, the management API, and the agent-facing write tools —
+// must scope to it, or the write lands somewhere recall never looks.
+const SharedMemoryNamespace = "bot"
+
+// BotScopeFilters is the canonical scope for one bot's shared memory.
+func BotScopeFilters(botID string) map[string]any {
+	return map[string]any{
+		"namespace": SharedMemoryNamespace,
+		"scopeId":   botID,
+		"bot_id":    botID,
+	}
+}
+
+// MemoryLayers is the layer vocabulary a memory write may declare. It is
+// derived from the node vocabulary rather than restated, so a tool schema and
+// the store it writes into cannot drift apart.
+func MemoryLayers() []string {
+	return []string{
+		string(migrate.LayerPreference),
+		string(migrate.LayerIdentity),
+		string(migrate.LayerContext),
+		string(migrate.LayerExperience),
+		string(migrate.LayerActivity),
+		string(migrate.LayerPersona),
+		string(migrate.LayerNote),
+	}
+}
+
+// NormalizeMemoryLayer accepts only the declared vocabulary. An unknown layer
+// is dropped rather than rejected, so the node falls back to its own default
+// instead of failing a write over a cosmetic field.
+func NormalizeMemoryLayer(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	for _, layer := range MemoryLayers() {
+		if raw == layer {
+			return layer
+		}
+	}
+	return ""
 }
 
 func BuildProfileMetadata(userID, channelIdentityID, displayName string) map[string]any {

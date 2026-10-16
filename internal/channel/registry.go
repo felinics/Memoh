@@ -224,6 +224,16 @@ func (r *Registry) IsConfigless(channelType ChannelType) bool {
 	return desc.Configless
 }
 
+// IsOwnerOnly reports whether the given channel type is owner-only: no third
+// party can ever become a sender there (see Descriptor.OwnerOnly).
+func (r *Registry) IsOwnerOnly(channelType ChannelType) bool {
+	desc, ok := r.GetDescriptor(channelType)
+	if !ok {
+		return false
+	}
+	return desc.OwnerOnly
+}
+
 // --- Sender / Receiver accessors ---
 
 // GetSender returns the Sender for the given channel type, or nil if unsupported.

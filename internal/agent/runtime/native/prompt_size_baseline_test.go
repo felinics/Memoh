@@ -10,7 +10,7 @@ import (
 const (
 	staticPromptTokenHeadroom           = 4
 	staticPromptChatBaselineTokens      = 1212
-	staticPromptDiscussBaselineTokens   = 1278
+	staticPromptDiscussBaselineTokens   = 1281
 	staticPromptScheduleBaselineTokens  = 1220
 	staticPromptSubagentBaselineTokens  = 599
 	staticPromptChatPreRound6Tokens     = 1224

@@ -64,19 +64,28 @@ type EditLatestMessageInput struct {
 	OnModelPreferenceSettled func()
 }
 
-func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMessageInput, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
+func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMessageInput, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) (RunOutcome, error) {
 	sessionID := strings.TrimSpace(input.SessionID)
 	turn, cutoffMessageID, err := s.prepareRetryLatestTurnOperation(ctx, sessionID, strings.TrimSpace(input.TargetTurnID))
 	if err != nil {
-		return err
+		return RunOutcome{}, err
 	}
 	requestMessageID := strings.TrimSpace(turn.RequestMessageID)
 	requestMessage, err := s.messageService.GetByIDBySession(ctx, sessionID, requestMessageID)
 	if err != nil {
-		return err
+		return RunOutcome{}, err
 	}
 	if !strings.EqualFold(requestMessage.Role, "user") {
-		return errors.New("retry target request is not a user message")
+		return RunOutcome{}, errors.New("retry target request is not a user message")
+	}
+	assistantMessage, err := s.messageService.GetByIDBySession(ctx, sessionID, strings.TrimSpace(turn.AssistantMessageID))
+	if err != nil {
+		return RunOutcome{}, err
+	}
+	retryUserMessageHook := isPreflightUserMessageHookFailure(assistantMessage)
+	persistedUserMessageID := requestMessage.ID
+	if retryUserMessageHook {
+		persistedUserMessageID = ""
 	}
 
 	req := ChatRequest{
@@ -103,8 +112,8 @@ func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMes
 		ToolHTTPURL:                  strings.TrimSpace(input.ToolHTTPURL),
 		InjectCh:                     input.InjectCh,
 		QueueSteerEnabled:            input.InjectCh != nil,
-		ReusePersistedUserMessage:    true,
-		PersistedUserMessageID:       requestMessage.ID,
+		ReusePersistedUserMessage:    !retryUserMessageHook,
+		PersistedUserMessageID:       persistedUserMessageID,
 		SkipHistoryTurn:              true,
 		HistoryCutoffBeforeMessageID: cutoffMessageID,
 		RequiredHistoryMessageID:     requestMessage.ID,
@@ -113,16 +122,21 @@ func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMes
 	return s.streamReplacementWS(ctx, req, turn.ID, requestMessage.ID, "retry", eventCh, abortCh)
 }
 
-func (s *Service) EditLatestMessageWS(ctx context.Context, input EditLatestMessageInput, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
+func isPreflightUserMessageHookFailure(message messagepkg.Message) bool {
+	return message.Metadata != nil &&
+		message.Metadata[messagepkg.HistoryFailureOriginMetadataKey] == messagepkg.HistoryFailureOriginUserMessageHook
+}
+
+func (s *Service) EditLatestMessageWS(ctx context.Context, input EditLatestMessageInput, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) (RunOutcome, error) {
 	sessionID := strings.TrimSpace(input.SessionID)
 	text := strings.TrimSpace(input.Text)
 	if text == "" && len(input.Attachments) == 0 {
-		return errors.New("message text or attachments required")
+		return RunOutcome{}, errors.New("message text or attachments required")
 	}
 
 	turn, err := s.prepareEditLatestTurnOperation(ctx, sessionID, strings.TrimSpace(input.TargetTurnID))
 	if err != nil {
-		return err
+		return RunOutcome{}, err
 	}
 
 	req := ChatRequest{
@@ -175,10 +189,12 @@ func (s *Service) prepareRetryLatestTurnOperation(ctx context.Context, sessionID
 	}
 	// The turn's own assistant anchor, not a message the client named: a turn
 	// that reached the client without one is a history the server cannot cut.
+	// The request message is still there, so the client may edit instead.
 	replaceFromMessageID := strings.TrimSpace(turn.AssistantMessageID)
 	if replaceFromMessageID == "" {
-		return messagepkg.HistoryTurn{}, "", apperror.New(
-			apperror.CodeSessionHistoryInconsistent,
+		return messagepkg.HistoryTurn{}, "", apperror.Wrap(
+			apperror.CodeSessionTurnIncomplete,
+			fmt.Errorf("turn %s has no assistant anchor", turn.ID),
 			nil,
 		)
 	}
@@ -267,14 +283,15 @@ func (s *Service) resolveLatestVisibleTurn(ctx context.Context, sessionID, turnI
 		// A session with no visible turn at all and a session whose latest turn
 		// is a different one are the same answer to the client: the round it
 		// named is not the one the server can replace, so it has to reload.
-		// Both are reported with that code instead of the store's own wording.
+		// Both are stale-client conflicts, not history faults, and are reported
+		// with the 409 code instead of the store's own wording.
 		if errors.Is(err, messagepkg.ErrNoVisibleTurn) {
-			return messagepkg.HistoryTurn{}, apperror.Wrap(apperror.CodeSessionHistoryInconsistent, err, nil)
+			return messagepkg.HistoryTurn{}, apperror.Wrap(apperror.CodeSessionTurnNotLatest, err, nil)
 		}
 		return messagepkg.HistoryTurn{}, fmt.Errorf("load latest visible turn: %w", err)
 	}
 	if strings.TrimSpace(latest.ID) != turnID {
-		return messagepkg.HistoryTurn{}, apperror.Wrap(apperror.CodeSessionHistoryInconsistent, errors.New(notLatest), nil)
+		return messagepkg.HistoryTurn{}, apperror.Wrap(apperror.CodeSessionTurnNotLatest, errors.New(notLatest), nil)
 	}
 	return latest, nil
 }
@@ -292,7 +309,7 @@ func (s *Service) streamReplacementWS(
 	reason string,
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
-) error {
+) (RunOutcome, error) {
 	replacement := &messagepkg.TurnReplacement{
 		OldTurnID:               strings.TrimSpace(oldTurnID),
 		ReplacementTurnID:       strings.TrimSpace(req.TurnID),
@@ -304,7 +321,7 @@ func (s *Service) streamReplacementWS(
 		replacement.SessionMetadata = update.metadata
 	}
 	req.TurnReplacement = replacement
-	_, err := s.streamChatWSResultWithHooks(
+	_, outcome, err := s.streamChatWSResultWithHooks(
 		ctx,
 		req,
 		eventCh,
@@ -316,7 +333,7 @@ func (s *Service) streamReplacementWS(
 			return s.replacePersistedTurn(ctx, req, oldTurnID, requestMessageID, reason, persisted)
 		},
 	)
-	return err
+	return outcome, err
 }
 
 func (s *Service) replacePersistedTurn(
@@ -348,7 +365,7 @@ func (s *Service) replacePersistedTurn(
 		replacementID,
 		reason,
 	); err != nil {
-		s.logger.Error("replace history turn failed", slog.String("reason", reason), slog.Any("error", err))
+		s.logger.ErrorContext(ctx, "replace history turn failed", slog.String("reason", reason), slog.Any("error", err))
 		s.cleanupReplacementMessages(ctx, persisted)
 		return fmt.Errorf("replace history turn: %w", err)
 	}
@@ -544,7 +561,7 @@ func (s *Service) cleanupReplacementMessages(ctx context.Context, persisted []me
 		return
 	}
 	if err := s.messageService.DeleteByIDs(context.WithoutCancel(ctx), ids); err != nil {
-		s.logger.Error("cleanup replacement messages failed", slog.Any("error", err), slog.Int("message_count", len(ids)))
+		s.logger.ErrorContext(ctx, "cleanup replacement messages failed", slog.Any("error", err), slog.Int("message_count", len(ids)))
 	}
 }
 

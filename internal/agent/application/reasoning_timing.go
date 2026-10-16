@@ -6,9 +6,8 @@ import (
 	"sync"
 	"time"
 
-	sdk "github.com/felinics/twilight/sdk"
-
 	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/step"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
@@ -177,19 +176,22 @@ func configureNativeReasoningTiming(
 	}
 
 	previousCommit := cfg.OnStepCommitted
-	cfg.OnStepCommitted = func(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
+	cfg.OnStepCommitted = func(ctx context.Context, stepIndex int, record *step.Record) (native.StepDirective, error) {
+		var dir native.StepDirective
 		if previousCommit != nil {
-			if err := previousCommit(ctx, stepIndex, step); err != nil {
-				return err
+			var err error
+			dir, err = previousCommit(ctx, stepIndex, record)
+			if err != nil {
+				return native.StepDirective{}, err
 			}
 		}
 		tracker.checkpoint("completed")
-		return nil
+		return dir, nil
 	}
 	previousInterrupt := cfg.OnStepInterrupted
-	cfg.OnStepInterrupted = func(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
+	cfg.OnStepInterrupted = func(ctx context.Context, stepIndex int, record *step.Record) error {
 		if previousInterrupt != nil {
-			if err := previousInterrupt(ctx, stepIndex, step); err != nil {
+			if err := previousInterrupt(ctx, stepIndex, record); err != nil {
 				return err
 			}
 		}

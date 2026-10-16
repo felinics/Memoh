@@ -13,6 +13,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
@@ -52,7 +53,7 @@ func (r *threadRef) get() string {
 func (d *Driver) prepareThreadTools(srv *appServer, input external.PromptInput) (map[string]any, func(threadID string), error) {
 	baseURL := toolmount.ResolveBaseURL(srv.workspaceInfo, input.ToolHTTPURL)
 	if baseURL == "" {
-		return nil, nil, fmt.Errorf("resolve Memoh tool gateway URL for %s workspace", srv.workspaceInfo.Backend)
+		return nil, nil, errs.New(fmt.Sprintf("resolve Memoh tool gateway URL for %s workspace", srv.workspaceInfo.Backend))
 	}
 	ref := &threadRef{}
 	mount, err := toolmount.Serve(srv.mountCtx, srv.client, baseURL, d.toolGateway, func() mcp.ToolSessionContext {

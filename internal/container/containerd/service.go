@@ -27,6 +27,7 @@ import (
 	cdi "tags.cncf.io/container-device-interface/pkg/cdi"
 
 	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 var ErrTaskStopTimeout = errors.New("timeout waiting for task to stop")
@@ -921,11 +922,24 @@ func mapContainerdErr(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errdefs.IsNotFound(err) {
+	// A registry that refuses a pull answers the same way for a repository that
+	// does not exist and for one that needs credentials. Both are an image
+	// reference the user has to fix.
+	if errdefs.IsNotFound(err) || errors.Is(err, docker.ErrInvalidAuthorization) {
 		return errors.Join(ErrNotFound, err)
 	}
 	if errdefs.IsAlreadyExists(err) {
 		return errors.Join(ErrAlreadyExists, err)
+	}
+	// An image reference containerd cannot parse is a bad argument; callers
+	// tell it apart from a runtime failure.
+	if errdefs.IsInvalidArgument(err) {
+		return errors.Join(ErrInvalidArgument, err)
+	}
+	// containerd is a dependency of this process: when it cannot be reached
+	// or refuses the call for now, the failure is its own.
+	if errdefs.IsUnavailable(err) {
+		return errs.WrapDependency(errors.Join(ErrUnavailable, ErrRuntime, err), "containerd unavailable")
 	}
 	return errors.Join(ErrRuntime, err)
 }

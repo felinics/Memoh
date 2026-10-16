@@ -20,7 +20,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	mcptools "github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/workspace"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
@@ -323,7 +327,7 @@ func startMCPStderrLogger(stderr io.ReadCloser, containerID string, logger *slog
 			logger.Warn("mcp stderr", slog.String("container_id", containerID), slog.String("message", line))
 		}
 		if err := scanner.Err(); err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || strings.Contains(err.Error(), "closed pipe") {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) {
 				return
 			}
 			logger.Error("mcp stderr read failed", slog.Any("error", err), slog.String("container_id", containerID))
@@ -419,9 +423,9 @@ type mcpStdioSession struct {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body MCPStdioRequest true "Stdio MCP payload"
 // @Success 200 {object} MCPStdioResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/mcp-stdio [post].
 func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -430,18 +434,21 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 	}
 	var req MCPStdioRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if strings.TrimSpace(req.Command) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "command is required")
+		return apperror.FieldRequired("command")
 	}
 	ctx := c.Request().Context()
 	if err := h.manager.EnsureRunning(ctx, botID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "start workspace runtime")
 	}
 	containerID, err := h.manager.ContainerID(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "workspace runtime not found for bot")
+		if errors.Is(err, workspace.ErrContainerNotFound) {
+			return apperror.Wrap(apperror.CodeWorkspaceNotFound, err, nil)
+		}
+		return errs.Wrap(err, "resolve workspace container")
 	}
 
 	connectionID := uuid.NewString()
@@ -460,7 +467,7 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 	// list — without burning the session's handshake on memoh's capabilities.
 	probeSess, err := h.startContainerdMCPCommandSession(ctx, botID, containerID, req, nil, defaultStdioSDKClient())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "probe stdio mcp command")
 	}
 	tools := h.probeMCPTools(ctx, probeSess, botID, strings.TrimSpace(req.Name))
 	probeSess.Close()
@@ -483,9 +490,9 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 // @Param connection_id path string true "Connection ID"
 // @Param payload body object true "JSON-RPC request"
 // @Success 200 {object} object "JSON-RPC response: {jsonrpc,id,result|error}"
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/mcp-stdio/{connection_id} [post].
 // ensureStdioSession lazily starts the session process on the first proxied
 // message. An initialize starts it with a client built from the message's own
@@ -521,20 +528,20 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	connectionID := strings.TrimSpace(c.Param("connection_id"))
-	if connectionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "connection_id is required")
+	connectionID, err := httpx.RequiredParam(c, "connection_id")
+	if err != nil {
+		return err
 	}
 	h.mcpStdioMu.Lock()
 	record := h.mcpStdioSess[connectionID]
 	h.mcpStdioMu.Unlock()
 	if record == nil || record.botID != botID {
-		return echo.NewHTTPError(http.StatusNotFound, "mcp connection not found")
+		return apperror.New(apperror.CodeMCPConnectionNotFound, nil)
 	}
 
 	var req mcptools.JSONRPCRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if req.JSONRPC != "" && req.JSONRPC != "2.0" {
 		return c.JSON(http.StatusOK, mcptools.JSONRPCErrorResponse(req.ID, -32600, "invalid jsonrpc version"))
@@ -545,11 +552,11 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 
 	sess, err := h.ensureStdioSession(c.Request().Context(), record, &req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "open stdio mcp session")
 	}
 	select {
 	case <-sess.done:
-		return echo.NewHTTPError(http.StatusNotFound, "mcp connection closed")
+		return apperror.New(apperror.CodeMCPConnectionNotFound, nil)
 	default:
 	}
 
@@ -564,7 +571,7 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 		if strings.TrimSpace(req.Method) == "notifications/cancelled" {
 			sess.cancelInFlight(req)
 		} else {
-			h.logger.Debug("mcp stdio notification dropped",
+			h.logger.DebugContext(c.Request().Context(), "mcp stdio notification dropped",
 				slog.String("connection_id", connectionID),
 				slog.String("method", req.Method),
 			)
@@ -701,7 +708,7 @@ func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context
 			output, err := execStream.Recv()
 			if err != nil {
 				if !errors.Is(err, io.EOF) {
-					h.logger.Debug("exec stream recv done", slog.Any("error", err))
+					h.logger.DebugContext(ctx, "exec stream recv done", slog.Any("error", err))
 				}
 				_ = stdoutW.Close()
 				_ = stderrW.Close()
@@ -748,7 +755,7 @@ func (h *ContainerdHandler) probeMCPTools(ctx context.Context, sess *mcpStdioCli
 	defer cancel()
 	result, err := sess.session.ListTools(probeCtx, &sdkmcp.ListToolsParams{})
 	if err != nil {
-		h.logger.Warn("mcp stdio tools probe failed",
+		h.logger.WarnContext(ctx, "mcp stdio tools probe failed",
 			slog.String("bot_id", botID),
 			slog.String("name", name),
 			slog.Any("error", sess.enrichError(err)),
@@ -766,12 +773,12 @@ func (h *ContainerdHandler) probeMCPTools(ctx context.Context, sess *mcpStdioCli
 	}
 	sort.Strings(tools)
 	if len(tools) == 0 {
-		h.logger.Warn("mcp stdio tools empty",
+		h.logger.WarnContext(ctx, "mcp stdio tools empty",
 			slog.String("bot_id", botID),
 			slog.String("name", name),
 		)
 	} else {
-		h.logger.Info("mcp stdio tools loaded",
+		h.logger.InfoContext(ctx, "mcp stdio tools loaded",
 			slog.String("bot_id", botID),
 			slog.String("name", name),
 			slog.Int("count", len(tools)),

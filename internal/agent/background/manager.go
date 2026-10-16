@@ -17,6 +17,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/job"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
@@ -25,8 +28,9 @@ const (
 	DefaultExecTimeout int32 = 30
 	// MaxExecTimeout is the maximum allowed timeout (10 minutes).
 	MaxExecTimeout int32 = 600
-	// BackgroundExecTimeout is the timeout for background tasks (30 minutes).
-	BackgroundExecTimeout int32 = 1800
+	// BackgroundExecTimeout is the default finite command budget (two hours).
+	BackgroundExecTimeout    int32 = 7200
+	MaxBackgroundExecTimeout int32 = 86400
 	// DefaultWaitTimeout bounds a single wait_until call. The task keeps
 	// running afterwards; callers re-wait to keep observing.
 	DefaultWaitTimeout = 120 * time.Second
@@ -162,17 +166,35 @@ func (m *Manager) Spawn(
 	m.tasks[taskID] = task
 	m.mu.Unlock()
 
+	execCtx, cancel := detachedContextWithTimeout(parentCtx, time.Duration(BackgroundExecTimeout)*time.Second)
+	task.mu.Lock()
+	task.cancel = cancel
+	task.mu.Unlock()
+
 	m.initializeOutputFile(parentCtx, task, writeFn)
 
-	m.logger.Info("background task spawned",
+	m.logger.InfoContext(parentCtx, "background task spawned",
 		slog.String("task_id", taskID),
 		slog.String("bot_id", botID),
 		slog.String("command", truncate(command, 120)),
 	)
 	m.emitTaskEvent(task, TaskEventStarted, "", "")
 
-	go m.run(parentCtx, task, execFn, writeFn, readFn)
+	job.Go(parentCtx, m.logger, "background.exec", job.Options{}, func(unitCtx context.Context) error {
+		ctx, stop := bound(unitCtx, execCtx)
+		defer stop()
+		defer cancel()
+		return m.run(ctx, task, execFn, writeFn, readFn)
+	}, taskAttrs(task)...)
 	return taskID, outputFile
+}
+
+// AdoptOptions transfers ownership of a running stream. Deadline is absolute,
+// so moving to background never restarts the command's execution budget.
+// A zero deadline explicitly means a service that runs until stopped.
+type AdoptOptions struct {
+	Deadline time.Time
+	Cancel   context.CancelFunc
 }
 
 // SpawnAdopt registers a background task for a command that is already running
@@ -184,7 +206,25 @@ func (m *Manager) SpawnAdopt(
 	botID, sessionID, command, workDir, description, outputDir string,
 	resultCh <-chan AdoptResult,
 	writeFn WriteFileFunc,
+	options ...AdoptOptions,
 ) (taskID, outputFile string) {
+	option := AdoptOptions{Deadline: time.Now().Add(time.Duration(BackgroundExecTimeout) * time.Second)}
+	if len(options) > 0 {
+		option = options[0]
+	}
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if option.Deadline.IsZero() {
+		ctx, cancel = context.WithCancel(context.WithoutCancel(parentCtx))
+	} else {
+		ctx, cancel = context.WithDeadline(context.WithoutCancel(parentCtx), option.Deadline)
+	}
+	stop := func() {
+		cancel()
+		if option.Cancel != nil {
+			option.Cancel()
+		}
+	}
 	m.mu.Lock()
 	taskID = m.newTaskIDLocked(botID)
 	outputFile = backgroundOutputFile(outputDir, taskID)
@@ -201,20 +241,26 @@ func (m *Manager) SpawnAdopt(
 		OutputFile:  outputFile,
 		StartedAt:   time.Now(),
 		changed:     make(chan struct{}),
+		cancel:      stop,
+		deadlineAt:  option.Deadline,
 	}
 	m.tasks[taskID] = task
 	m.mu.Unlock()
 
 	m.initializeOutputFile(parentCtx, task, writeFn)
 
-	m.logger.Info("background task adopted",
+	m.logger.InfoContext(parentCtx, "background task adopted",
 		slog.String("task_id", taskID),
 		slog.String("bot_id", botID),
 		slog.String("command", truncate(command, 120)),
 	)
 	m.emitTaskEvent(task, TaskEventStarted, "", "")
 
-	go m.runAdopt(parentCtx, task, resultCh, writeFn)
+	job.Go(parentCtx, m.logger, "background.exec", job.Options{}, func(unitCtx context.Context) error {
+		runCtx, release := bound(unitCtx, ctx)
+		defer release()
+		return m.runAdopt(runCtx, task, resultCh, writeFn)
+	}, append(taskAttrs(task), slog.Bool("adopted", true))...)
 	return taskID, outputFile
 }
 
@@ -256,12 +302,8 @@ func shortRandHex(n int) string {
 }
 
 // runAdopt waits for the adopted stream result and handles completion.
-func (m *Manager) runAdopt(parentCtx context.Context, task *Task, resultCh <-chan AdoptResult, writeFn WriteFileFunc) {
-	ctx, cancel := detachedContextWithTimeout(parentCtx, time.Duration(BackgroundExecTimeout)*time.Second)
-	task.mu.Lock()
-	task.cancel = cancel
-	task.mu.Unlock()
-	defer cancel()
+func (m *Manager) runAdopt(ctx context.Context, task *Task, resultCh <-chan AdoptResult, writeFn WriteFileFunc) error {
+	defer task.Cancel()
 
 	// Ensure output directory exists.
 	_ = ensureOutputDir(ctx, writeFn, task.OutputFile)
@@ -274,7 +316,15 @@ func (m *Manager) runAdopt(parentCtx context.Context, task *Task, resultCh <-cha
 	select {
 	case result = <-resultCh:
 	case <-ctx.Done():
-		result = AdoptResult{Err: ctx.Err()}
+		task.Cancel()
+		select {
+		case result = <-resultCh:
+			if result.Err == nil {
+				result.Err = ctx.Err()
+			}
+		case <-time.After(5 * time.Second):
+			result = AdoptResult{Err: ctx.Err()}
+		}
 	}
 
 	// Write output to log file in container.
@@ -285,11 +335,9 @@ func (m *Manager) runAdopt(parentCtx context.Context, task *Task, resultCh <-cha
 		}
 		if combined != "" || result.Err != nil {
 			if err := writeFn(context.WithoutCancel(ctx), task.OutputFile, []byte(combined)); err != nil {
-				m.logger.Warn("background task: write output log failed",
-					slog.String("task_id", task.ID),
-					slog.String("output_file", task.OutputFile),
-					slog.Any("error", err),
-				)
+				record := errlog.Event(ctx, "background.exec", errs.Wrap(err, "write background output log"), errlog.Options{Async: true})
+				m.logger.LogAttrs(ctx, record.Level, "background task: write output log failed",
+					append([]slog.Attr{slog.String("task_id", task.ID), slog.String("output_file", task.OutputFile)}, record.Attrs()...)...)
 			}
 		}
 	}
@@ -300,16 +348,12 @@ func (m *Manager) runAdopt(parentCtx context.Context, task *Task, resultCh <-cha
 		stdout = ""
 		stderr = ""
 	}
-	m.completeTask(task, stdout, stderr, result.Err, result.ExitCode, result.ExitReceived)
+	return m.completeTask(ctx, task, stdout, stderr, result.Err, result.ExitCode, result.ExitReceived, true)
 }
 
-func (m *Manager) run(parentCtx context.Context, task *Task, execFn ExecFunc, writeFn WriteFileFunc, readFn ReadFileFunc) {
-	ctx, cancel := detachedContextWithTimeout(parentCtx, time.Duration(BackgroundExecTimeout)*time.Second)
-	task.mu.Lock()
-	task.cancel = cancel
-	task.mu.Unlock()
-	defer cancel()
-
+// run executes one spawned command. ctx is bounded by the task's execution
+// budget and is cancelled by Kill.
+func (m *Manager) run(ctx context.Context, task *Task, execFn ExecFunc, writeFn WriteFileFunc, readFn ReadFileFunc) error {
 	// Ensure output directory exists.
 	_ = ensureOutputDir(ctx, writeFn, task.OutputFile)
 
@@ -326,12 +370,6 @@ func (m *Manager) run(parentCtx context.Context, task *Task, execFn ExecFunc, wr
 	)
 
 	result, err := execFn(ctx, wrappedCmd, task.WorkDir, BackgroundExecTimeout)
-	if err != nil {
-		m.logger.Warn("background task: execFn returned error",
-			slog.String("task_id", task.ID),
-			slog.Any("exec_error", err),
-		)
-	}
 
 	// Always prefer the sentinel file for the real exit code.
 	// The wrappedCmd uses a pipeline: the shell exits with tee's code (0),
@@ -341,7 +379,7 @@ func (m *Manager) run(parentCtx context.Context, task *Task, execFn ExecFunc, wr
 		ec, recoverErr := readSentinelExitCode(ctx, task.OutputFile+".exit", readFn)
 		if recoverErr == nil {
 			if err != nil {
-				m.logger.Info("background task: recovered exit code from sentinel file after stream error",
+				m.logger.InfoContext(ctx, "background task: recovered exit code from sentinel file after stream error",
 					slog.String("task_id", task.ID),
 					slog.Int("recovered_exit_code", int(ec)),
 					slog.Any("stream_error", err),
@@ -350,10 +388,9 @@ func (m *Manager) run(parentCtx context.Context, task *Task, execFn ExecFunc, wr
 			result = &bridge.ExecResult{ExitCode: ec}
 			err = nil
 		} else if err != nil {
-			m.logger.Warn("background task: sentinel recovery failed",
-				slog.String("task_id", task.ID),
-				slog.Any("recover_error", recoverErr),
-			)
+			record := errlog.Event(ctx, "background.exec", errs.Wrap(recoverErr, "recover exit code from sentinel"), errlog.Options{Async: true})
+			m.logger.LogAttrs(ctx, record.Level, "background task: sentinel recovery failed",
+				append([]slog.Attr{slog.String("task_id", task.ID)}, record.Attrs()...)...)
 		}
 		// If err==nil but sentinel unreadable: fall through to use gRPC exit code
 	}
@@ -369,7 +406,7 @@ func (m *Manager) run(parentCtx context.Context, task *Task, execFn ExecFunc, wr
 		stderr = result.Stderr
 		exitCode = result.ExitCode
 	}
-	m.completeTask(task, stdout, stderr, err, exitCode, exitKnown)
+	return m.completeTask(ctx, task, stdout, stderr, err, exitCode, exitKnown)
 }
 
 // completeTask finalises a task's bookkeeping after execution.
@@ -380,25 +417,42 @@ func (m *Manager) run(parentCtx context.Context, task *Task, execFn ExecFunc, wr
 //     real — record it instead of overwriting with -1.
 //   - exitKnown=false: we genuinely have no exit code (stream died before
 //     EXIT, sentinel unreadable) — fall back to -1 to flag the unknown.
-func (m *Manager) completeTask(task *Task, stdout, stderr string, execErr error, exitCode int32, exitKnown bool) {
-	if execErr != nil {
-		task.AppendOutput(fmt.Sprintf("[error] %v\n", execErr))
-	} else {
-		task.AppendOutput(stdout)
-		if stderr != "" {
-			task.AppendOutput(stderr)
-		}
-	}
-
+//
+// The returned error is the task unit's outcome. A command that ran and exited
+// non-zero is the user's result, not a failure of ours; so are a kill, the
+// execution budget running out, and an adopted stream whose owner stopped it.
+// Only an execution error with no exit code is returned.
+func (m *Manager) completeTask(ctx context.Context, task *Task, stdout, stderr string, execErr error, exitCode int32, exitKnown bool, adopted ...bool) error {
 	task.mu.Lock()
 	if task.Status == TaskKilled {
 		task.mu.Unlock()
-		return
+		job.Annotate(ctx, slog.String("status", string(TaskKilled)))
+		return nil
 	}
+	errorMessage := ""
+	if execErr != nil {
+		errorMessage = execErr.Error()
+	}
+	if execErr != nil && !exitKnown && len(adopted) > 0 && adopted[0] {
+		errorMessage = "Execution stopped without a confirmed exit. Check the saved output before retrying."
+	}
+
+	if execErr != nil {
+		task.appendOutputLocked(fmt.Sprintf("[error] %s\n", errorMessage))
+	} else {
+		task.appendOutputLocked(stdout)
+		if stderr != "" {
+			task.appendOutputLocked(stderr)
+		}
+	}
+
 	task.CompletedAt = time.Now()
 	switch {
 	case execErr != nil && !exitKnown:
 		task.Status = TaskFailed
+		if len(adopted) > 0 && adopted[0] {
+			task.Status = TaskUnknown
+		}
 		task.ExitCode = -1
 	case execErr != nil && exitKnown:
 		task.Status = TaskFailed
@@ -413,22 +467,41 @@ func (m *Manager) completeTask(task *Task, stdout, stderr string, execErr error,
 	}
 	status := task.Status
 	finalExitCode := task.ExitCode
-	duration := task.CompletedAt.Sub(task.StartedAt)
 	task.signalChangedLocked()
 	task.mu.Unlock()
 
-	m.logger.Info("background task finished",
-		slog.String("task_id", task.ID),
-		slog.String("status", string(status)),
-		slog.Int("exit_code", int(finalExitCode)),
-		slog.Duration("duration", duration),
-	)
-
 	eventType := TaskEventCompleted
-	if status == TaskFailed {
+	if status == TaskFailed || status == TaskUnknown {
 		eventType = TaskEventFailed
 	}
 	m.emitTaskEvent(task, eventType, "", "")
+
+	job.Annotate(ctx, slog.String("status", string(status)), slog.Int("exit_code", int(finalExitCode)))
+	if execErr == nil || exitKnown || ctx.Err() != nil {
+		return nil
+	}
+	return errs.Wrap(execErr, "execute background command")
+}
+
+func taskAttrs(task *Task) []slog.Attr {
+	return []slog.Attr{slog.String("task_id", task.ID), slog.String("bot_id", task.BotID)}
+}
+
+// bound returns ctx carrying budget's deadline and cancellation. A job unit
+// starts from a context detached from its caller, while a task's execution
+// budget and Kill must still reach the command.
+func bound(ctx, budget context.Context) (context.Context, context.CancelFunc) {
+	var cancel context.CancelFunc
+	if deadline, ok := budget.Deadline(); ok {
+		ctx, cancel = context.WithDeadline(ctx, deadline)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
+	stop := context.AfterFunc(budget, cancel)
+	return ctx, func() {
+		stop()
+		cancel()
+	}
 }
 
 func readSentinelExitCode(ctx context.Context, path string, readFn ReadFileFunc) (int32, error) {
@@ -476,7 +549,7 @@ func (m *Manager) initializeOutputFile(parentCtx context.Context, task *Task, wr
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parentCtx), 5*time.Second)
 	defer cancel()
 	if err := ensureOutputFile(ctx, writeFn, task.OutputFile); err != nil {
-		m.logger.Warn("background task: initialize output log failed",
+		m.logger.WarnContext(parentCtx, "background task: initialize output log failed",
 			slog.String("task_id", task.ID),
 			slog.String("output_file", task.OutputFile),
 			slog.Any("error", err),
@@ -821,7 +894,7 @@ func (m *Manager) stallWatchdog(ctx context.Context, task *Task) {
 			continue
 		}
 
-		m.logger.Warn("background task appears stalled on interactive prompt",
+		m.logger.WarnContext(ctx, "background task appears stalled on interactive prompt",
 			slog.String("task_id", task.ID),
 		)
 
@@ -852,5 +925,22 @@ func detachedContextWithTimeout(parentCtx context.Context, timeout time.Duration
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
-	return context.WithTimeout(context.WithoutCancel(parentCtx), timeout)
+	deadline := time.Now().Add(timeout)
+	if parentDeadline, ok := parentCtx.Deadline(); ok && parentDeadline.Before(deadline) {
+		deadline = parentDeadline
+	}
+	return context.WithDeadline(context.WithoutCancel(parentCtx), deadline)
+}
+
+// RecordLiveness is distinct from output activity: a quiet process can be healthy.
+func (m *Manager) RecordLiveness(taskID string, at time.Time) {
+	task := m.Get(taskID)
+	if task == nil {
+		return
+	}
+	task.mu.Lock()
+	defer task.mu.Unlock()
+	if task.Status == TaskRunning && at.After(task.lastLivenessAt) {
+		task.lastLivenessAt = at
+	}
 }

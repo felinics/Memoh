@@ -5,19 +5,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 
 	memohcopilot "github.com/felinics/memoh/internal/copilot"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/reasoning"
 )
 
 const (
-	copilotModelsResponseLimit  = 8 << 20
-	copilotModelsErrorBodyLimit = 16 << 10
+	copilotModelsResponseLimit = 8 << 20
 )
 
 type copilotModelsResponse struct {
@@ -82,22 +83,17 @@ func (s *Service) listGitHubCopilotRemoteModels(ctx context.Context, baseURL, gi
 
 	resp, err := memohcopilot.NewHTTPClient(s.httpClient).Do(req) //nolint:gosec // The production endpoint is fixed; the parameter exists for isolated tests.
 	if err != nil {
-		return nil, fmt.Errorf("request GitHub Copilot models: %w", err)
+		return nil, errs.WrapDependency(err, "request GitHub Copilot models")
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, copilotModelsErrorBodyLimit))
-		detail := strings.TrimSpace(string(body))
-		if detail == "" {
-			detail = http.StatusText(resp.StatusCode)
-		}
-		return nil, fmt.Errorf("github copilot models request failed (%d): %s", resp.StatusCode, detail)
+		return nil, errs.NewDependency("github copilot models request failed", slog.Int("status", resp.StatusCode))
 	}
 
 	var catalog copilotModelsResponse
 	decoder := json.NewDecoder(io.LimitReader(resp.Body, copilotModelsResponseLimit))
 	if err := decoder.Decode(&catalog); err != nil {
-		return nil, fmt.Errorf("decode GitHub Copilot models response: %w", err)
+		return nil, errs.WrapDependency(err, "decode GitHub Copilot models response")
 	}
 
 	// Some OAuth clients receive a catalog where every picker flag is false,

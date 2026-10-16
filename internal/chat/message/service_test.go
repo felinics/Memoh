@@ -3,6 +3,7 @@ package message
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -237,18 +238,6 @@ func (q *clearHistoryQueries) ClearHistoryByBot(_ context.Context, id pgtype.UUI
 func (q *clearHistoryQueries) ClearHistoryBySession(_ context.Context, id pgtype.UUID) error {
 	q.sessionID = id
 	return nil
-}
-
-func (*clearHistoryQueries) DeleteAgentSessionPublicationsBySession(context.Context, pgtype.UUID) (int64, error) {
-	return 0, nil
-}
-
-func (*clearHistoryQueries) DeleteAgentSessionStatesBySession(context.Context, pgtype.UUID) (int64, error) {
-	return 0, nil
-}
-
-func (*clearHistoryQueries) DeleteAgentSessionStateLinesBySession(context.Context, pgtype.UUID) (int64, error) {
-	return 0, nil
 }
 
 func TestDeleteByScopeClearsCanonicalHistory(t *testing.T) {
@@ -488,4 +477,35 @@ func testMessageUUID(value string) pgtype.UUID {
 		panic(err)
 	}
 	return id
+}
+
+func TestIsTurnSequenceUniqueViolationUsesConstraintName(t *testing.T) {
+	tests := map[string]struct {
+		err  error
+		want bool
+	}{
+		"turn sequence constraint": {
+			err:  fmt.Errorf("link message: %w", &pgconn.PgError{Code: "23505", ConstraintName: "idx_bot_history_messages_turn_seq_unique"}),
+			want: true,
+		},
+		"other unique constraint naming the index in its message": {
+			err: &pgconn.PgError{
+				Code:           "23505",
+				ConstraintName: "bot_history_messages_pkey",
+				Message:        `duplicate key value violates unique constraint "bot_history_messages_pkey" (after idx_bot_history_messages_turn_seq_unique)`,
+			},
+			want: false,
+		},
+		"not a unique violation": {
+			err:  errors.New("idx_bot_history_messages_turn_seq_unique"),
+			want: false,
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := isTurnSequenceUniqueViolation(tt.err); got != tt.want {
+				t.Fatalf("isTurnSequenceUniqueViolation(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
 }

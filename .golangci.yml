@@ -17,6 +17,7 @@ linters:
   enable:
     - bodyclose
     - contextcheck
+    - depguard
     - errcheck
     - errorlint
     - exptostd
@@ -46,6 +47,26 @@ linters:
       - internal/db/postgres/sqlc
       - ^.*\.(pb|l|y)\.go$
   settings:
+    depguard:
+      rules:
+        # Packages that return package errors. The public error is chosen by
+        # the translation function of the caller, see docs/errors.md.
+        package-errors:
+          files:
+            - "**/internal/agent/runtime/acp/**"
+            - "**/internal/agent/runtime/claudecode/**"
+            - "**/internal/agent/runtime/codex/**"
+            - "**/internal/agent/runtime/external/**"
+            - "**/internal/agent/runtime/native/**"
+            - "**/internal/agent/runtime/toolmount/**"
+            - "**/internal/models/**"
+            - "**/internal/providers/**"
+            - "**/internal/providertemplates/**"
+            - "**/internal/searchproviders/**"
+            - "**/internal/supermarket/**"
+          deny:
+            - pkg: github.com/felinics/memoh/internal/apperror
+              desc: return a package error; the caller's translation function chooses the public error (docs/errors.md)
     govet:
       enable-all: true
       disable:

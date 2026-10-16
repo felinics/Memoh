@@ -113,7 +113,7 @@ func TestPostgresOperationClaimsFenceCompetingServersAndStaleReceipts(t *testing
 				t.Fatal("new operation not owned")
 			}
 			terminal.Status = StatusFailed
-			terminal.LastError = "stale interrupted attempt"
+			terminal.LastErrorCode = "workspace_dependency.operation_interrupted"
 			if _, err := store.FinishOperation(ctx, key, winner.token, &terminal); !errors.Is(err, ErrBusy) {
 				t.Fatalf("stale terminal write: %v", err)
 			}
@@ -165,7 +165,7 @@ func TestPostgresOperationFinishCannotCrossTeam(t *testing.T) {
 		}
 	}
 	scoped := NewPostgresStore(postgresstore.NewQueries(dbsqlc.New(tx))).(*postgresStore)
-	terminal := Installation{Source: InstallationSourceManaged, Status: StatusFailed, LastError: "cross-team attempt"}
+	terminal := Installation{Source: InstallationSourceManaged, Status: StatusFailed, LastErrorCode: "workspace_dependency.busy"}
 	if _, err := scoped.FinishOperation(ctx, key, token, &terminal); !errors.Is(err, ErrBusy) {
 		t.Fatalf("cross-team finish: %v", err)
 	}

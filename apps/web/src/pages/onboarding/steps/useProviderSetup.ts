@@ -24,7 +24,7 @@ export function useProviderSetup(options: {
   selectedPreset: () => ProviderPreset | null
   onProviderReady: (result: { providerId: string }) => void
 }) {
-  const { t } = useI18n()
+  const { t, te } = useI18n()
   const queryCache = useQueryCache()
 
   const formValues = ref({
@@ -288,6 +288,13 @@ export function useProviderSetup(options: {
     }
   }
 
+  // A failed test names its reason only by catalog code; its copy is the
+  // detail line under the state's own title. A code without copy adds none.
+  function codeCopy(code: string | undefined): string {
+    const key = code ? `errors.${code}` : ''
+    return key && te(key) ? t(key) : ''
+  }
+
   async function runImport(providerId: string, defaultCompatibilities?: string[]) {
     errorState.value = null
     errorDetail.value = ''
@@ -299,12 +306,12 @@ export function useProviderSetup(options: {
       })
       if (testResult?.status === 'auth_error') {
         errorState.value = 'authError'
-        errorDetail.value = testResult?.message ?? ''
+        errorDetail.value = codeCopy(testResult.code)
         return
       }
       if (testResult?.status === 'error') {
-        errorState.value = testResult?.reachable ? 'http' : 'unreachable'
-        errorDetail.value = testResult?.message ?? ''
+        errorState.value = testResult.reachable ? 'http' : 'unreachable'
+        errorDetail.value = codeCopy(testResult.code)
         return
       }
     } catch {

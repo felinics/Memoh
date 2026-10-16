@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,16 +64,25 @@ models:
 func TestEnrichFilePreservesHandMaintainedAlwaysMode(t *testing.T) {
 	t.Parallel()
 
-	resolver, err := capabilities.NewResolver([]byte(`{
-		"always-model": {"mode": "chat", "supports_reasoning": false}
-	}`))
-	if err != nil {
-		t.Fatalf("NewResolver: %v", err)
-	}
+	// LiteLLM cannot say "thinking cannot be turned off", so neither a
+	// negative nor a positive reasoning discovery may replace always.
+	for name, supportsReasoning := range map[string]bool{
+		"registry says none":      false,
+		"registry says reasoning": true,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	dir := t.TempDir()
-	path := filepath.Join(dir, "provider.yaml")
-	raw := []byte(`name: Test
+			resolver, err := capabilities.NewResolver([]byte(fmt.Sprintf(`{
+		"always-model": {"mode": "chat", "supports_reasoning": %t}
+	}`, supportsReasoning)))
+			if err != nil {
+				t.Fatalf("NewResolver: %v", err)
+			}
+
+			dir := t.TempDir()
+			path := filepath.Join(dir, "provider.yaml")
+			raw := []byte(`name: Test
 client_type: openai-completions
 models:
   - model_id: always-model
@@ -82,23 +92,25 @@ models:
       compatibilities: [reasoning, tool-call]
       thinking_mode: always
 `)
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatalf("write fixture: %v", err)
-	}
+			if err := os.WriteFile(path, raw, 0o600); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
 
-	changed, err := enrichFile(path, resolver, false)
-	if err != nil {
-		t.Fatalf("enrichFile: %v", err)
-	}
-	if changed != 0 {
-		t.Fatalf("changed = %d, want 0", changed)
-	}
-	got, err := os.ReadFile(path) //nolint:gosec // test reads its own temp fixture
-	if err != nil {
-		t.Fatalf("read output: %v", err)
-	}
-	if string(got) != string(raw) {
-		t.Fatalf("hand-maintained always mode should remain authoritative:\n%s", got)
+			changed, err := enrichFile(path, resolver, false)
+			if err != nil {
+				t.Fatalf("enrichFile: %v", err)
+			}
+			if changed != 0 {
+				t.Fatalf("changed = %d, want 0", changed)
+			}
+			got, err := os.ReadFile(path) //nolint:gosec // test reads its own temp fixture
+			if err != nil {
+				t.Fatalf("read output: %v", err)
+			}
+			if string(got) != string(raw) {
+				t.Fatalf("hand-maintained always mode should remain authoritative:\n%s", got)
+			}
+		})
 	}
 }
 

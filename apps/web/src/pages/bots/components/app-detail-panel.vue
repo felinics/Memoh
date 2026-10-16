@@ -40,6 +40,7 @@ import {
   appDisplayName,
   appKey,
   appInProgress,
+  appLastError,
   type AppConnectorItem,
   type AppDependencyItem,
   type AppItem,
@@ -48,7 +49,7 @@ import type { DependencyItem, DependencyWorkspaceState } from '@/composables/api
 import type { DependencyMenuAction, DependencyPrimaryAction } from '@/utils/workspace-dependency'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import DependencyRow from './dependency-row.vue'
-import { appPrimaryAction, type AppRowAction } from './app-actions'
+import { appCanTry, appPrimaryAction, type AppRowAction } from './app-actions'
 
 export type AppConnectorAction = 'authorize' | 'reauthorize' | 'disconnect'
 
@@ -98,20 +99,22 @@ const discovered = computed(() => props.item.status === 'discovered' || !props.i
 const inProgress = computed(() => appInProgress(props.item))
 const readonly = computed(() => props.workspaceState !== 'running' && props.workspaceState !== undefined)
 const primary = computed(() => appPrimaryAction(props.item, { busy: props.busy, ownsStream: props.ownsStream, readonly: readonly.value }))
+const canTry = computed(() => appCanTry(props.item, { readonly: readonly.value }))
 const canRemove = computed(() => !discovered.value && !inProgress.value)
 
 const needsAttention = computed(() => props.item.status === 'failed' || props.item.status === 'partial')
 const errorDetailsOpen = ref(false)
+const lastError = computed(() => appLastError(props.item, key => t(key)))
 const { copyText } = useClipboard()
 
 /** Keep diagnostics collapsed when navigation or a new operation changes their context. */
-watch(() => [appKey(props.item), props.item.installation_id, props.item.status, props.item.last_error], () => {
+watch(() => [appKey(props.item), props.item.installation_id, props.item.status, props.item.last_error, props.item.last_error_code], () => {
   errorDetailsOpen.value = false
 })
 
 /** Copy the persisted diagnostic verbatim, using the shared clipboard feedback. */
 async function copyError() {
-  const ok = await copyText(props.item.last_error ?? '')
+  const ok = await copyText(lastError.value)
   if (ok) toast.success(t('common.copied'))
   else toast.error(t('common.copyFailed'))
 }
@@ -179,6 +182,14 @@ function dependencyName(dep: AppDependencyItem): string {
       <div class="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
         <Spinner v-if="inProgress" />
         <Button
+          v-if="canTry"
+          size="sm"
+          variant="outline"
+          @click="emit('action', 'tryIt')"
+        >
+          {{ t('apps.action.tryIt') }}
+        </Button>
+        <Button
           v-if="primary"
           size="sm"
           :variant="primary.variant"
@@ -239,7 +250,7 @@ function dependencyName(dep: AppDependencyItem): string {
         :title="t(item.status === 'failed' ? 'apps.diagnostics.failed' : 'apps.diagnostics.partial')"
         :description="t(item.status === 'failed' ? 'apps.progress.recoveryHint' : 'apps.diagnostics.partialHint')"
       />
-      <SettingsSection v-if="item.last_error">
+      <SettingsSection v-if="lastError">
         <ExpandableSettingsRow
           v-model:open="errorDetailsOpen"
           :label="t('apps.diagnostics.errorDetails')"
@@ -255,7 +266,7 @@ function dependencyName(dep: AppDependencyItem): string {
                 tabindex="0"
                 class="max-h-64 min-w-0 overflow-auto"
               >
-                <pre class="whitespace-pre-wrap break-all font-mono text-caption text-foreground">{{ item.last_error }}</pre>
+                <pre class="whitespace-pre-wrap break-all font-mono text-caption text-foreground">{{ lastError }}</pre>
               </div>
               <TextButton @click="copyError">
                 {{ t('apps.diagnostics.copyError') }}

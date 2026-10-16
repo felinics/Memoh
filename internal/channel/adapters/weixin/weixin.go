@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 // Type is the channel type identifier for WeChat.
@@ -47,6 +49,10 @@ func (*WeixinAdapter) Descriptor() channel.Descriptor {
 	return channel.Descriptor{
 		Type:        Type,
 		DisplayName: "WeChat",
+		// The iLink ClawBot lives only inside the activating user's own
+		// WeChat as a plugin entry; no third party can become a sender,
+		// so every sender is the operator by construction.
+		OwnerOnly: true,
 		Capabilities: channel.ChannelCapabilities{
 			Text:           true,
 			Attachments:    true,
@@ -122,12 +128,24 @@ func (a *WeixinAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 
 	go func() {
 		defer close(done)
+		// notifystart/notifystop mirror upstream's channel start/stop hooks. They
+		// are advisory: a failure is logged and never blocks message delivery.
+		if err := a.client.NotifyStart(connCtx, parsed); err != nil && connCtx.Err() == nil {
+			a.logger.WarnContext(connCtx, "weixin notifystart failed",
+				slog.String("config_id", cfg.ID), slog.Any("error", err))
+		}
 		a.pollLoop(connCtx, cfg, parsed, handler)
 	}()
 
-	stop := func(context.Context) error {
+	stop := func(stopCtx context.Context) error {
 		cancel()
 		<-done
+		// The poll context is already cancelled, so notifystop runs on the
+		// caller's context instead.
+		if err := a.client.NotifyStop(stopCtx, parsed); err != nil {
+			a.logger.WarnContext(stopCtx, "weixin notifystop failed",
+				slog.String("config_id", cfg.ID), slog.Any("error", err))
+		}
 		return nil
 	}
 	return channel.NewConnection(cfg, stop), nil
@@ -144,7 +162,7 @@ func (a *WeixinAdapter) pollLoop(ctx context.Context, cfg channel.ChannelConfig,
 	var getUpdatesBuf string
 	var consecutiveFailures int
 
-	a.logger.Info("weixin poll loop started",
+	a.logger.InfoContext(ctx, "weixin poll loop started",
 		slog.String("config_id", cfg.ID),
 		slog.String("bot_id", cfg.BotID),
 		slog.String("base_url", parsed.BaseURL),
@@ -153,7 +171,7 @@ func (a *WeixinAdapter) pollLoop(ctx context.Context, cfg channel.ChannelConfig,
 	for {
 		select {
 		case <-ctx.Done():
-			a.logger.Info("weixin poll loop stopped", slog.String("config_id", cfg.ID))
+			a.logger.InfoContext(ctx, "weixin poll loop stopped", slog.String("config_id", cfg.ID))
 			return
 		default:
 		}
@@ -164,7 +182,7 @@ func (a *WeixinAdapter) pollLoop(ctx context.Context, cfg channel.ChannelConfig,
 				return
 			}
 			consecutiveFailures++
-			a.logger.Error("weixin getupdates error",
+			a.logger.ErrorContext(ctx, "weixin getupdates error",
 				slog.String("config_id", cfg.ID),
 				slog.Any("error", err),
 				slog.Int("failures", consecutiveFailures),
@@ -182,7 +200,7 @@ func (a *WeixinAdapter) pollLoop(ctx context.Context, cfg channel.ChannelConfig,
 		isAPIError := (resp.Ret != 0) || (resp.ErrCode != 0)
 		if isAPIError {
 			if resp.ErrCode == sessionExpiredErrCode || resp.Ret == sessionExpiredErrCode {
-				a.logger.Error("weixin session expired, pausing",
+				a.logger.ErrorContext(ctx, "weixin session expired, pausing",
 					slog.String("config_id", cfg.ID),
 					slog.Int("errcode", resp.ErrCode),
 				)
@@ -191,7 +209,7 @@ func (a *WeixinAdapter) pollLoop(ctx context.Context, cfg channel.ChannelConfig,
 				continue
 			}
 			consecutiveFailures++
-			a.logger.Error("weixin getupdates api error",
+			a.logger.ErrorContext(ctx, "weixin getupdates api error",
 				slog.String("config_id", cfg.ID),
 				slog.Int("ret", resp.Ret),
 				slog.Int("errcode", resp.ErrCode),
@@ -226,13 +244,8 @@ func (a *WeixinAdapter) pollLoop(ctx context.Context, cfg channel.ChannelConfig,
 
 			inbound.BotID = cfg.BotID
 
-			if err := handler(ctx, cfg, inbound); err != nil {
-				a.logger.Error("weixin inbound handler error",
-					slog.String("config_id", cfg.ID),
-					slog.String("from", msg.FromUserID),
-					slog.Any("error", err),
-				)
-			}
+			// The inbound unit writes the result line of the message.
+			_ = handler(ctx, cfg, inbound)
 		}
 	}
 }
@@ -266,7 +279,7 @@ func (a *WeixinAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 	cacheKey := cfg.ID + ":" + target
 	contextToken, ok := a.contextCache.Get(cacheKey)
 	if !ok {
-		return fmt.Errorf("weixin: no context_token cached for target %s (reply-only channel — message can only be sent after receiving an inbound message)", target)
+		return errs.New("weixin: no context_token cached for target (reply-only channel, a message can only be sent after receiving an inbound message)", slog.String("target", target))
 	}
 
 	// Send attachments first if present (media + text in one flow).
@@ -274,7 +287,7 @@ func (a *WeixinAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 		return a.sendWithAttachments(ctx, parsed, target, contextToken, msg.Message)
 	}
 
-	text := strings.TrimSpace(msg.Message.Message.PlainText())
+	text := strings.TrimSpace(filterMarkdown(msg.Message.Message.PlainText()))
 	if text == "" {
 		return errors.New("weixin: message is empty")
 	}
@@ -282,7 +295,7 @@ func (a *WeixinAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 }
 
 func (a *WeixinAdapter) sendWithAttachments(ctx context.Context, cfg adapterConfig, target, contextToken string, msg channel.PreparedMessage) error {
-	text := strings.TrimSpace(msg.Message.PlainText())
+	text := strings.TrimSpace(filterMarkdown(msg.Message.PlainText()))
 
 	for i, att := range msg.Attachments {
 		caption := ""
@@ -328,7 +341,7 @@ func (a *WeixinAdapter) sendWithAttachments(ctx context.Context, cfg adapterConf
 
 func openAttachment(ctx context.Context, att channel.PreparedAttachment) (io.ReadCloser, error) {
 	if att.Kind != channel.PreparedAttachmentUpload {
-		return nil, fmt.Errorf("weixin attachment requires upload source, got %s", att.Kind)
+		return nil, errs.New("weixin attachment requires upload source", slog.String("kind", string(att.Kind)))
 	}
 	if att.Open == nil {
 		return nil, errors.New("weixin attachment upload is not openable")
@@ -345,27 +358,31 @@ func (*WeixinAdapter) ResolveAttachment(_ context.Context, cfg channel.ChannelCo
 	}
 
 	encryptedQP := ""
+	fullURL := ""
 	aesKey := ""
 	if attachment.Metadata != nil {
 		if v, ok := attachment.Metadata["encrypt_query_param"].(string); ok {
 			encryptedQP = strings.TrimSpace(v)
 		}
+		if v, ok := attachment.Metadata["full_url"].(string); ok {
+			fullURL = strings.TrimSpace(v)
+		}
 		if v, ok := attachment.Metadata["aes_key"].(string); ok {
 			aesKey = strings.TrimSpace(v)
 		}
 	}
-	if encryptedQP == "" {
+	if encryptedQP == "" && fullURL == "" {
 		encryptedQP = strings.TrimSpace(attachment.PlatformKey)
 	}
-	if encryptedQP == "" {
-		return channel.AttachmentPayload{}, errors.New("weixin: no encrypt_query_param for attachment")
+	if encryptedQP == "" && fullURL == "" {
+		return channel.AttachmentPayload{}, errors.New("weixin: no encrypt_query_param or full_url for attachment")
 	}
 
 	var data []byte
 	if aesKey != "" {
-		data, err = downloadAndDecrypt(parsed.CDNBaseURL, encryptedQP, aesKey)
+		data, err = downloadAndDecrypt(parsed.CDNBaseURL, encryptedQP, fullURL, aesKey)
 	} else {
-		data, err = downloadPlain(parsed.CDNBaseURL, encryptedQP)
+		data, err = downloadPlain(parsed.CDNBaseURL, encryptedQP, fullURL)
 	}
 	if err != nil {
 		return channel.AttachmentPayload{}, fmt.Errorf("weixin: download attachment: %w", err)
@@ -450,15 +467,32 @@ type weixinBlockStream struct {
 	closed      bool
 }
 
-func (s *weixinBlockStream) Push(_ context.Context, event channel.PreparedStreamEvent) error {
+func (s *weixinBlockStream) Push(ctx context.Context, event channel.PreparedStreamEvent) error {
 	if s.closed {
 		return nil
 	}
 	switch event.Type {
+	case channel.StreamEventError:
+		errText := redact.Text(strings.TrimSpace(event.Error))
+		s.textBuilder.Reset()
+		s.attachments = nil
+		s.final = nil
+		if errText == "" {
+			return nil
+		}
+		return s.adapter.Send(ctx, s.cfg, channel.PreparedOutboundMessage{
+			Target: s.target,
+			Message: channel.PreparedMessage{Message: channel.Message{
+				Format: channel.MessageFormatPlain,
+				Text:   channel.ErrorReplyText(event.ErrorCode, errText),
+			}},
+		})
 	case channel.StreamEventDelta:
 		if strings.TrimSpace(event.Delta) != "" && event.Phase != channel.StreamPhaseReasoning {
 			s.textBuilder.WriteString(event.Delta)
 		}
+	case channel.StreamEventReset:
+		s.textBuilder.Reset()
 	case channel.StreamEventAttachment:
 		s.attachments = append(s.attachments, event.Attachments...)
 	case channel.StreamEventFinal:

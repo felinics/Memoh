@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 func (h *Handler) buildStatusGroup() *CommandGroup {
@@ -82,22 +84,28 @@ func (h *Handler) renderSessionStatus(cc CommandContext, sessionID string, scope
 
 	skills, _ := h.queries.GetSessionUsedSkills(cc.Ctx, pgSessionID)
 
-	contextUsage := formatTokens(usedTokens)
-	if contextWindow := h.resolveContextWindow(cc); contextWindow != "" {
-		contextUsage = contextUsage + " / " + contextWindow
-	}
+	// An Agent session runs its own model in its own context window; the
+	// bot's chat model and window would describe a different model. Only the
+	// current session's runtime is known here, so "latest" keeps them.
+	external := sessionID == strings.TrimSpace(cc.SessionID) && runtimekind.IsExternal(cc.SessionRuntime)
 
 	pairs := make([]kv, 0, 6)
 	// Lead with the model — the single most load-bearing "where am I" fact.
-	if s, err := h.getBotSettings(cc); err == nil {
-		if m := h.resolveModelName(cc, s.ChatModelID); m != "" && m != cc.T("cmd.common.none") {
-			pairs = append(pairs, kv{cc.T("cmd.status.fieldModel"), m})
+	if !external {
+		if s, err := h.getBotSettings(cc); err == nil {
+			if m := h.resolveModelName(cc, s.ChatModelID); m != "" && m != cc.T("cmd.common.none") {
+				pairs = append(pairs, kv{cc.T("cmd.status.fieldModel"), m})
+			}
 		}
 	}
-	pairs = append(pairs,
-		kv{cc.T("cmd.status.fieldMessages"), strconv.FormatInt(msgCount, 10)},
-		kv{cc.T("cmd.status.fieldContext"), contextUsage},
-	)
+	pairs = append(pairs, kv{cc.T("cmd.status.fieldMessages"), strconv.FormatInt(msgCount, 10)})
+	if !external {
+		contextUsage := formatTokens(usedTokens)
+		if contextWindow := h.resolveContextWindow(cc); contextWindow != "" {
+			contextUsage = contextUsage + " / " + contextWindow
+		}
+		pairs = append(pairs, kv{cc.T("cmd.status.fieldContext"), contextUsage})
+	}
 	// On a brand-new session, cache stats are forced to 0 and read as a
 	// measured-bad result rather than "no data" — show them only once there is
 	// input to measure.

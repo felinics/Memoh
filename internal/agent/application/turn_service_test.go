@@ -47,6 +47,10 @@ type scriptedAdmitter struct {
 	// replay of a run owned elsewhere or already finished.
 	started bool
 
+	// terminal and finishErr are what FinishRunWithErrorCode returns.
+	terminal  sessionruntime.TerminalRun
+	finishErr error
+
 	inputs     []sessionruntime.AdmitInput
 	finishes   []recordedFinish
 	published  []native.StreamEvent
@@ -88,11 +92,11 @@ func (a *scriptedAdmitter) Admit(_ context.Context, in sessionruntime.AdmitInput
 	}, nil
 }
 
-func (a *scriptedAdmitter) FinishRunWithErrorCode(_ context.Context, handle sessionruntime.RunHandle, status, message string) error {
+func (a *scriptedAdmitter) FinishRunWithErrorCode(_ context.Context, handle sessionruntime.RunHandle, status, message string) (sessionruntime.TerminalRun, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.finishes = append(a.finishes, recordedFinish{handle: handle, status: status, message: message})
-	return nil
+	return a.terminal, a.finishErr
 }
 
 func (*scriptedAdmitter) MarkInlineDecisionRun(string, string, string) {}
@@ -315,8 +319,8 @@ func TestStartTurnFailsWhenRuntimeEventPublicationFails(t *testing.T) {
 	if got := admitter.awaitFinish(t); got.status != sessionruntime.RunStatusErrored {
 		t.Fatalf("publication failure status = %q, want %q", got.status, sessionruntime.RunStatusErrored)
 	}
-	if got := apperror.CodeOf(publicErr); got != apperror.CodeSessionHistoryInconsistent {
-		t.Fatalf("publication failure code = %q, want %q", got, apperror.CodeSessionHistoryInconsistent)
+	if got := apperror.CodeOf(publicErr); got != apperror.CodeSessionPublishFailed {
+		t.Fatalf("publication failure code = %q, want %q", got, apperror.CodeSessionPublishFailed)
 	}
 	if got := apperror.CauseOf(publicErr); !errors.Is(got, publishErr) {
 		t.Fatalf("private publication cause = %v, want %v", got, publishErr)

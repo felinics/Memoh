@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"sync"
+	"time"
 
 	"github.com/felinics/memoh/internal/connectors"
 	"github.com/felinics/memoh/internal/supermarket"
@@ -57,6 +59,13 @@ type ListResult struct {
 	Workspace              workspacedeps.WorkspaceState
 	DataRoot               string
 	DependencyCatalogStale bool
+	// DependencyCatalogRefreshing is set while the dependency catalog is
+	// refreshed in the background; listing again shortly may show more.
+	DependencyCatalogRefreshing bool
+	// UpdateChecksIncomplete is set by CheckUpdates when its budget ran out
+	// before every App and dependency check finished; the unfinished ones
+	// keep their last check.
+	UpdateChecksIncomplete bool
 	Items                  []Item
 }
 
@@ -118,10 +127,11 @@ func (s *Service) assemble(ctx context.Context, botID string, installations []In
 	}
 	connectionsByID := s.connectionsByID(ctx, botID)
 	result := ListResult{
-		Workspace:              deps.Workspace,
-		DataRoot:               deps.DataRoot,
-		DependencyCatalogStale: deps.CatalogStale,
-		Items:                  make([]Item, 0, len(installations)),
+		Workspace:                   deps.Workspace,
+		DataRoot:                    deps.DataRoot,
+		DependencyCatalogStale:      deps.CatalogStale,
+		DependencyCatalogRefreshing: deps.CatalogRefreshing,
+		Items:                       make([]Item, 0, len(installations)),
 	}
 	for _, inst := range installations {
 		item, err := s.item(ctx, inst, entries, refCounts, connectionsByID)
@@ -167,7 +177,7 @@ func (s *Service) item(ctx context.Context, inst Installation, entries map[strin
 			release = normalizeRelease(release)
 			item.Release = &release
 		} else {
-			s.logger.Warn("decode cached App release", slog.String("installation_id", inst.ID), slog.Any("error", err))
+			s.logger.WarnContext(ctx, "decode cached App release", slog.String("installation_id", inst.ID), slog.Any("error", err))
 		}
 	}
 	depRefs, err := s.store.ListDependencyRefs(ctx, inst.ID)
@@ -204,7 +214,7 @@ func (s *Service) connectionsByID(ctx context.Context, botID string) map[string]
 	}
 	items, err := s.connectors.List(ctx, botID)
 	if err != nil {
-		s.logger.Warn("list bot connectors", slog.String("bot_id", botID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "list bot connectors", slog.String("bot_id", botID), slog.Any("error", err))
 		return result
 	}
 	for _, item := range items {
@@ -213,54 +223,127 @@ func (s *Service) connectionsByID(ctx context.Context, botID string) map[string]
 	return result
 }
 
+// appCheckConcurrency bounds the registry requests one manual update check
+// makes at once.
+const appCheckConcurrency = 8
+
 // CheckUpdates compares every installed App with the registry's current
 // release, records what is available, refreshes the dependency update
 // checks, and returns the refreshed view.
+//
+// The App and dependency checks run side by side, each concurrently, on a
+// context detached from the request and bounded by the update check budget,
+// so a reverse proxy's response timeout does not cut the request off and a
+// dropped connection does not abandon the checks halfway. A check the budget
+// cuts short keeps its last result and marks the view UpdateChecksIncomplete.
 func (s *Service) CheckUpdates(ctx context.Context, botID string) (ListResult, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.updateCheckBudget)
+	defer cancel()
 	installations, err := s.store.ListForBot(ctx, botID)
 	if err != nil {
 		return ListResult{}, fmt.Errorf("apps: list installations: %w", err)
 	}
-	now := s.now().UTC()
-	for _, inst := range installations {
-		current, err := s.registry.FetchCurrentApp(ctx, inst.RegistryID, inst.AppID)
-		switch {
-		case err == nil && current.Revision != inst.Revision:
-			_, err = s.store.SetCheck(ctx, botID, inst.ID, current.Revision, current.Version, now)
-		case err == nil:
-			_, err = s.store.SetCheck(ctx, botID, inst.ID, "", "", now)
-		case supermarket.ErrorKindOf(err) == supermarket.ErrorNotFound || isNotFound(err):
-			// The App left the registry; nothing newer can be offered.
-			_, err = s.store.SetCheck(ctx, botID, inst.ID, "", "", now)
-		default:
+	var (
+		deps     workspacedeps.ListResult
+		depsErr  error
+		depsDone = make(chan struct{})
+	)
+	if s.dependencies != nil {
+		go func() {
+			defer close(depsDone)
+			deps, depsErr = s.dependencies.CheckUpdates(ctx, botID)
+		}()
+	} else {
+		close(depsDone)
+	}
+	appsIncomplete, appsErr := s.checkAppUpdates(ctx, botID, installations)
+	<-depsDone
+	if appsErr != nil {
+		return ListResult{}, appsErr
+	}
+
+	// The budget may be spent; assembling the recorded results gets its own
+	// short deadline.
+	listCtx, cancelList := context.WithTimeout(context.WithoutCancel(ctx), updateCheckListTimeout)
+	defer cancelList()
+	if depsErr != nil {
+		s.logger.WarnContext(ctx, "check dependency updates", slog.String("bot_id", botID), slog.Any("error", depsErr))
+		deps, err = s.dependencies.List(listCtx, botID)
+		if err != nil {
 			return ListResult{}, err
 		}
-		if err != nil {
-			return ListResult{}, fmt.Errorf("apps: record update check: %w", err)
-		}
 	}
-	var deps workspacedeps.ListResult
-	if s.dependencies != nil {
-		deps, err = s.dependencies.CheckUpdates(ctx, botID)
-		if err != nil {
-			s.logger.Warn("check dependency updates", slog.String("bot_id", botID), slog.Any("error", err))
-			deps, err = s.dependencies.List(ctx, botID)
-			if err != nil {
-				return ListResult{}, err
-			}
-		}
-	}
-	installations, err = s.store.ListForBot(ctx, botID)
+	installations, err = s.store.ListForBot(listCtx, botID)
 	if err != nil {
 		return ListResult{}, fmt.Errorf("apps: list installations: %w", err)
 	}
-	return s.assemble(ctx, botID, installations, deps)
+	result, err := s.assemble(listCtx, botID, installations, deps)
+	if err != nil {
+		return ListResult{}, err
+	}
+	result.UpdateChecksIncomplete = appsIncomplete || deps.ChecksIncomplete
+	return result, nil
 }
 
-func isNotFound(err error) bool {
-	var notFound interface{ NotFound() bool }
-	if errors.As(err, &notFound) {
-		return notFound.NotFound()
+// updateCheckListTimeout bounds reading back the results of an update check
+// whose budget may already be spent.
+const updateCheckListTimeout = 10 * time.Second
+
+// checkAppUpdates asks the registry for the current release of every
+// installation and records the answer. incomplete reports installations the
+// budget on ctx left unchecked; err is the first registry or store failure.
+func (s *Service) checkAppUpdates(ctx context.Context, botID string, installations []Installation) (incomplete bool, err error) {
+	var (
+		wg    sync.WaitGroup
+		mu    sync.Mutex
+		slots = make(chan struct{}, appCheckConcurrency)
+	)
+	now := s.now().UTC()
+	for _, inst := range installations {
+		select {
+		case slots <- struct{}{}:
+		case <-ctx.Done():
+			mu.Lock()
+			incomplete = true
+			mu.Unlock()
+			continue
+		}
+		wg.Add(1)
+		go func(inst Installation) {
+			defer wg.Done()
+			defer func() { <-slots }()
+			checkErr := s.checkAppUpdate(ctx, botID, inst, now)
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case checkErr == nil:
+			case ctx.Err() != nil:
+				// Cut short by the budget: the record keeps its last check.
+				incomplete = true
+			case err == nil:
+				err = checkErr
+			}
+		}(inst)
 	}
-	return false
+	wg.Wait()
+	return incomplete, err
+}
+
+func (s *Service) checkAppUpdate(ctx context.Context, botID string, inst Installation, now time.Time) error {
+	current, err := s.registry.FetchCurrentApp(ctx, inst.RegistryID, inst.AppID)
+	switch {
+	case err == nil && current.Revision != inst.Revision:
+		_, err = s.store.SetCheck(ctx, botID, inst.ID, current.Revision, current.Version, now)
+	case err == nil:
+		_, err = s.store.SetCheck(ctx, botID, inst.ID, "", "", now)
+	case errors.Is(err, supermarket.ErrAppNotFound):
+		// The App left the registry; nothing newer can be offered.
+		_, err = s.store.SetCheck(ctx, botID, inst.ID, "", "", now)
+	default:
+		return err
+	}
+	if err != nil {
+		return fmt.Errorf("apps: record update check: %w", err)
+	}
+	return nil
 }

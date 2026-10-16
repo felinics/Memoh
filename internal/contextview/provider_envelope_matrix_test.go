@@ -69,7 +69,7 @@ func TestProviderEnvelopeAuthorityMatrix(t *testing.T) {
 			t.Run(client.name+"/"+path.name, func(t *testing.T) {
 				t.Parallel()
 
-				limits := models.ResolveGenerationLimits(client.clientType, client.reasoning, window)
+				limits := models.ResolveGenerationLimits(client.clientType, client.reasoning, window, 0)
 				// Inside the window, outside the allowance: only the output reserve
 				// can reject it, so an allowance that forgot the reserve would dispatch.
 				overAllowanceTokens := window - limits.MaxOutputTokens + 1_000
@@ -77,10 +77,10 @@ func TestProviderEnvelopeAuthorityMatrix(t *testing.T) {
 				if cost := contextfrag.ProviderEnvelopeTokens("", oversized, nil); cost <= window-limits.MaxOutputTokens || cost >= window {
 					t.Fatalf("oversized fixture costs %d tokens, want strictly between allowance %d and window %d", cost, window-limits.MaxOutputTokens, window)
 				}
-				var seen sdk.GenerateParams
-				probe := &envelopeProbeProvider{handler: func(_ int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+				var seen sdk.Request
+				probe := &envelopeProbeProvider{handler: func(_ int, params sdk.Request) (sdk.ModelResult, error) {
 					seen = params
-					return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+					return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 				}}
 				provider := namedEnvelopeProbeProvider{envelopeProbeProvider: probe, name: client.provider}
 				run := func(messages []sdk.Message) (*contextfrag.LifecycleSnapshot, []contextfrag.MutationRecord, error) {

@@ -1,0 +1,68 @@
+{
+  "get_background_status": {
+    "properties": {
+      "task_id": {
+        "description": "Background task ID",
+        "type": "string"
+      }
+    },
+    "required": [
+      "task_id"
+    ],
+    "type": "object"
+  },
+  "kill_background": {
+    "properties": {
+      "task_id": {
+        "description": "Background task ID",
+        "type": "string"
+      }
+    },
+    "required": [
+      "task_id"
+    ],
+    "type": "object"
+  },
+  "list_background": {
+    "properties": {},
+    "type": "object"
+  },
+  "wait": {
+    "properties": {
+      "duration": {
+        "description": "Seconds to wait. Must be > 0 and at most 300.",
+        "maximum": 300,
+        "minimum": 0,
+        "type": "number"
+      }
+    },
+    "required": [
+      "duration"
+    ],
+    "type": "object"
+  },
+  "wait_until": {
+    "properties": {
+      "idle_timeout": {
+        "description": "Seconds of output silence after which a running command returns with reason 'idle'. Default 20, max 300. Only applies to exec tasks.",
+        "maximum": 300,
+        "minimum": 1,
+        "type": "number"
+      },
+      "task_id": {
+        "description": "Background task ID",
+        "type": "string"
+      },
+      "timeout": {
+        "description": "Max seconds to wait before returning with reason 'timeout'. Default 120, max 600. The task keeps running; call wait_until again to keep observing.",
+        "maximum": 600,
+        "minimum": 1,
+        "type": "number"
+      }
+    },
+    "required": [
+      "task_id"
+    ],
+    "type": "object"
+  }
+}

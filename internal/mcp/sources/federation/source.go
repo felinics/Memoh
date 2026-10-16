@@ -83,6 +83,9 @@ func NewSource(log *slog.Logger, gateway Gateway, connections ConnectionLister, 
 	return source
 }
 
+// Invalidate forgets discovery after a management change.
+func (s *Source) Invalidate(botID string) { s.mu.Lock(); delete(s.cache, botID); s.mu.Unlock() }
+
 func (s *Source) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" || s.gateway == nil {
@@ -113,12 +116,28 @@ func (s *Source) CallTool(ctx context.Context, session mcpgw.ToolSessionContext,
 	if !ok {
 		// Refresh route cache; result intentionally discarded.
 		if _, err := s.ListTools(ctx, session); err != nil {
-			s.logger.Warn("federation: refresh tools cache failed", slog.Any("error", err))
+			s.logger.WarnContext(ctx, "federation: refresh tools cache failed", slog.Any("error", err))
 		}
 		route, ok = s.getRoute(botID, toolName)
 		if !ok {
 			return nil, mcpgw.ErrToolNotFound
 		}
+	}
+	connections, listErr := s.connections.ListActiveByBot(ctx, botID)
+	if listErr != nil {
+		return nil, listErr
+	}
+	valid := false
+	for _, connection := range connections {
+		if connection.ID == route.connection.ID && connection.UpdatedAt.Equal(route.connection.UpdatedAt) {
+			valid = true
+			route.connection = connection
+			break
+		}
+	}
+	if !valid {
+		s.Invalidate(botID)
+		return nil, mcpgw.ErrToolNotFound
 	}
 	if arguments == nil {
 		arguments = map[string]any{}
@@ -188,7 +207,7 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 	if s.connections != nil {
 		items, err := s.connections.ListActiveByBot(ctx, botID)
 		if err != nil {
-			s.logger.Warn("list mcp connections failed", slog.String("bot_id", botID), slog.Any("error", err))
+			s.logger.WarnContext(ctx, "list mcp connections failed", slog.String("bot_id", botID), slog.Any("error", err))
 		} else {
 			sort.Slice(items, func(i, j int) bool {
 				if items[i].Name == items[j].Name {
@@ -208,12 +227,12 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 					connTools, err = s.gateway.ListStdioConnectionTools(listCtx, botID, connection)
 				default:
 					listCancel()
-					s.logger.Warn("unsupported mcp connection type", slog.String("connection_id", connection.ID), slog.String("type", connection.Type))
+					s.logger.WarnContext(ctx, "unsupported mcp connection type", slog.String("connection_id", connection.ID), slog.String("type", connection.Type))
 					continue
 				}
 				listCancel()
 				if err != nil {
-					s.logger.Warn("list tools from connection failed", slog.String("connection_id", connection.ID), slog.String("name", connection.Name), slog.Any("error", err))
+					s.logger.WarnContext(ctx, "list tools from connection failed", slog.String("connection_id", connection.ID), slog.String("name", connection.Name), slog.Any("error", err))
 					continue
 				}
 				prefix := sanitizePrefix(connection.Name)

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	session "github.com/felinics/memoh/internal/chat/thread"
@@ -76,115 +77,42 @@ func (*HistoryProvider) Usage(_ context.Context, _ SessionContext, available Ava
 	return usageSection("Sessions & History", parts)
 }
 
-func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.Tool, error) {
-	var tools []sdk.Tool
+func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]toolexec.Tool, error) {
+	var tools []toolexec.Tool
 
 	if p.sessions != nil {
 		s := sess
-		tools = append(tools, sdk.Tool{
+		tools = append(tools, toolexec.Tool{
 			Name:        ToolListSessions().String(),
 			Description: "List chat sessions accessible from the current user or channel route, with their bound contact/route information.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"type": map[string]any{
-						"type":        "string",
-						"description": "Filter by session type: chat or schedule. Returns all types when omitted.",
-						"enum":        []string{"chat", "schedule"},
-					},
-					"platform": map[string]any{
-						"type":        "string",
-						"description": "Filter by channel platform (e.g. telegram, feishu). Returns all platforms when omitted.",
-					},
-					"limit": map[string]any{
-						"type":        "integer",
-						"description": "Maximum number of sessions to return. Default 50.",
-					},
-				},
-				"required": []string{},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execListSessions(ctx.Context, s, inputAsMap(input))
-			},
+			Parameters:  toolexec.SchemaFor[listSessionsArgs](toolexec.Enum("type", "chat", "schedule")),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args listSessionsArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execListSessions(ctx.Context, s, args))
+			}),
 		})
 	}
 
 	if p.messages != nil {
 		s := sess
-		tools = append(tools, sdk.Tool{
+		tools = append(tools, toolexec.Tool{
 			Name:        ToolGetMessages().String(),
 			Description: "Get recent messages from a chat session, or resolve one exact message ID. Defaults to the current session. Results are returned oldest-first.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"session_id": map[string]any{
-						"type":        "string",
-						"description": "Session ID to read. Defaults to the current session when omitted.",
-					},
-					"message_id": map[string]any{
-						"type":        "string",
-						"description": "Exact persisted message ID to resolve, such as a message_id returned in search_memory source_refs.",
-					},
-					"before": map[string]any{
-						"type":        "string",
-						"description": "ISO 8601 timestamp cursor. When provided, returns messages created before this time.",
-					},
-					"limit": map[string]any{
-						"type":        "integer",
-						"description": "Maximum number of messages to return. Default 30, max 100.",
-					},
-				},
-				"required": []string{},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execGetMessages(ctx.Context, s, inputAsMap(input))
-			},
+			Parameters:  toolexec.SchemaFor[getMessagesArgs](),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args getMessagesArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execGetMessages(ctx.Context, s, args))
+			}),
 		})
 	}
 
 	if p.queries != nil {
 		s := sess
-		tools = append(tools, sdk.Tool{
+		tools = append(tools, toolexec.Tool{
 			Name:        ToolSearchMessages().String(),
 			Description: "Search message history across sessions accessible from the current user or channel route. Supports filtering by time range, keyword, session, contact, and role. All parameters are optional. If start_time is not provided, only the last 7 days are searched.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"start_time": map[string]any{
-						"type":        "string",
-						"description": "ISO 8601 timestamp. Only return messages created at or after this time.",
-					},
-					"end_time": map[string]any{
-						"type":        "string",
-						"description": "ISO 8601 timestamp. Only return messages created at or before this time.",
-					},
-					"keyword": map[string]any{
-						"type":        "string",
-						"description": "Search keyword — matches against the text content of messages (case-insensitive).",
-					},
-					"session_id": map[string]any{
-						"type":        "string",
-						"description": "Filter by session ID.",
-					},
-					"contact_id": map[string]any{
-						"type":        "string",
-						"description": "Filter by sender channel identity ID.",
-					},
-					"role": map[string]any{
-						"type":        "string",
-						"description": "Filter by message role.",
-						"enum":        []string{"user", "assistant"},
-					},
-					"limit": map[string]any{
-						"type":        "integer",
-						"description": "Maximum number of messages to return. Default 50, max 200.",
-					},
-				},
-				"required": []string{},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execSearchMessages(ctx.Context, s, inputAsMap(input))
-			},
+			Parameters:  toolexec.SchemaFor[searchMessagesArgs](toolexec.Enum("role", "user", "assistant")),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args searchMessagesArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execSearchMessages(ctx.Context, s, args))
+			}),
 		})
 	}
 
@@ -195,7 +123,7 @@ func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.T
 // list_sessions
 // ---------------------------------------------------------------------------
 
-func (p *HistoryProvider) execListSessions(ctx context.Context, sess SessionContext, args map[string]any) (any, error) {
+func (p *HistoryProvider) execListSessions(ctx context.Context, sess SessionContext, args listSessionsArgs) (any, error) {
 	botID := strings.TrimSpace(sess.BotID)
 	if botID == "" {
 		return nil, errors.New("bot_id is required")
@@ -206,12 +134,12 @@ func (p *HistoryProvider) execListSessions(ctx context.Context, sess SessionCont
 		return nil, err
 	}
 
-	typeFilter := strings.ToLower(strings.TrimSpace(StringArg(args, "type")))
-	platformFilter := strings.ToLower(strings.TrimSpace(StringArg(args, "platform")))
+	typeFilter := strings.ToLower(strings.TrimSpace(args.Type))
+	platformFilter := strings.ToLower(strings.TrimSpace(args.Platform))
 
 	limit := 50
-	if v, ok, _ := IntArg(args, "limit"); ok && v > 0 {
-		limit = v
+	if args.Limit != nil && *args.Limit > 0 {
+		limit = *args.Limit
 	}
 
 	results := make([]map[string]any, 0, len(sessions))
@@ -264,23 +192,19 @@ func (p *HistoryProvider) execListSessions(ctx context.Context, sess SessionCont
 // get_messages
 // ---------------------------------------------------------------------------
 
-func (p *HistoryProvider) execGetMessages(ctx context.Context, sess SessionContext, args map[string]any) (any, error) {
+func (p *HistoryProvider) execGetMessages(ctx context.Context, sess SessionContext, args getMessagesArgs) (any, error) {
 	botID := strings.TrimSpace(sess.BotID)
 	if botID == "" {
 		return nil, errors.New("bot_id is required")
 	}
 
 	limit := int32(30)
-	if v, ok, err := IntArg(args, "limit"); err != nil {
-		return nil, err
-	} else if ok && v > 0 {
-		if v > 100 {
-			v = 100
-		}
+	if args.Limit != nil && *args.Limit > 0 {
+		v := min(*args.Limit, 100)
 		limit = int32(v) //nolint:gosec // upper-bounded above
 	}
 
-	sessionID := strings.TrimSpace(StringArg(args, "session_id"))
+	sessionID := strings.TrimSpace(args.SessionID)
 	if sessionID == "" {
 		sessionID = strings.TrimSpace(sess.SessionID)
 	}
@@ -292,8 +216,8 @@ func (p *HistoryProvider) execGetMessages(ctx context.Context, sess SessionConte
 			return nil, err
 		}
 	}
-	messageID := strings.TrimSpace(StringArg(args, "message_id"))
-	if messageID != "" && strings.TrimSpace(StringArg(args, "before")) != "" {
+	messageID := strings.TrimSpace(args.MessageID)
+	if messageID != "" && strings.TrimSpace(args.Before) != "" {
 		return nil, errors.New("message_id and before cannot be used together")
 	}
 
@@ -312,7 +236,7 @@ func (p *HistoryProvider) execGetMessages(ctx context.Context, sess SessionConte
 		default:
 			messages = []messagepkg.Message{message}
 		}
-	} else if rawBefore := StringArg(args, "before"); rawBefore != "" {
+	} else if rawBefore := strings.TrimSpace(args.Before); rawBefore != "" {
 		before, err = parseFlexibleTime(rawBefore)
 		if err != nil {
 			return nil, err
@@ -362,7 +286,7 @@ func (p *HistoryProvider) ensureSessionVisible(ctx context.Context, sess Session
 // search_messages
 // ---------------------------------------------------------------------------
 
-func (p *HistoryProvider) execSearchMessages(ctx context.Context, sess SessionContext, args map[string]any) (any, error) {
+func (p *HistoryProvider) execSearchMessages(ctx context.Context, sess SessionContext, args searchMessagesArgs) (any, error) {
 	botID := strings.TrimSpace(sess.BotID)
 	if botID == "" {
 		return nil, errors.New("bot_id is required")
@@ -374,8 +298,8 @@ func (p *HistoryProvider) execSearchMessages(ctx context.Context, sess SessionCo
 	}
 
 	limit := int32(50)
-	if v, ok, _ := IntArg(args, "limit"); ok && v > 0 && v <= 200 {
-		limit = int32(v) //nolint:gosec // bounds-checked above
+	if args.Limit != nil && *args.Limit > 0 && *args.Limit <= 200 {
+		limit = int32(*args.Limit) //nolint:gosec // bounds-checked above
 	}
 
 	_, allowed, err := visibleHistorySessions(ctx, p.sessions, sess)
@@ -401,7 +325,7 @@ func (p *HistoryProvider) execSearchMessages(ctx context.Context, sess SessionCo
 		MaxCount:   limit,
 	}
 
-	if v := StringArg(args, "session_id"); v != "" {
+	if v := strings.TrimSpace(args.SessionID); v != "" {
 		if !historySessionVisible(allowed, v) {
 			return nil, errors.New("session_id is not accessible from the current context")
 		}
@@ -411,16 +335,16 @@ func (p *HistoryProvider) execSearchMessages(ctx context.Context, sess SessionCo
 		}
 		params.SessionID = parsed
 	}
-	if v := StringArg(args, "contact_id"); v != "" {
+	if v := args.ContactID; v != "" {
 		params.ContactID = dbpkg.ParseUUIDOrEmpty(v)
 	}
-	if v := StringArg(args, "role"); v != "" {
+	if v := strings.TrimSpace(args.Role); v != "" {
 		params.Role = pgtype.Text{String: v, Valid: true}
 	}
-	if v := StringArg(args, "keyword"); v != "" {
+	if v := strings.TrimSpace(args.Keyword); v != "" {
 		params.Keyword = pgtype.Text{String: v, Valid: true}
 	}
-	if v := StringArg(args, "start_time"); v != "" {
+	if v := strings.TrimSpace(args.StartTime); v != "" {
 		if t, parseErr := parseFlexibleTime(v); parseErr == nil {
 			params.StartTime = pgtype.Timestamptz{Time: t, Valid: true}
 		}
@@ -428,7 +352,7 @@ func (p *HistoryProvider) execSearchMessages(ctx context.Context, sess SessionCo
 		defaultLookback := time.Now().UTC().AddDate(0, 0, -defaultMaxLookbackDays)
 		params.StartTime = pgtype.Timestamptz{Time: defaultLookback, Valid: true}
 	}
-	if v := StringArg(args, "end_time"); v != "" {
+	if v := strings.TrimSpace(args.EndTime); v != "" {
 		if t, parseErr := parseFlexibleTime(v); parseErr == nil {
 			params.EndTime = pgtype.Timestamptz{Time: t, Valid: true}
 		}
@@ -709,4 +633,27 @@ func parseFlexibleTime(s string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, errors.New("unsupported time format")
+}
+
+type listSessionsArgs struct {
+	Limit    *int   `json:"limit,omitempty" jsonschema:"Maximum number of sessions to return. Default 50."`
+	Platform string `json:"platform,omitempty" jsonschema:"Filter by channel platform (e.g. telegram, feishu). Returns all platforms when omitted."`
+	Type     string `json:"type,omitempty" jsonschema:"Filter by session type: chat or schedule. Returns all types when omitted."`
+}
+
+type getMessagesArgs struct {
+	Before    string `json:"before,omitempty" jsonschema:"ISO 8601 timestamp cursor. When provided, returns messages created before this time."`
+	Limit     *int   `json:"limit,omitempty" jsonschema:"Maximum number of messages to return. Default 30, max 100."`
+	MessageID string `json:"message_id,omitempty" jsonschema:"Exact persisted message ID to resolve, such as a message_id returned in search_memory source_refs."`
+	SessionID string `json:"session_id,omitempty" jsonschema:"Session ID to read. Defaults to the current session when omitted."`
+}
+
+type searchMessagesArgs struct {
+	ContactID string `json:"contact_id,omitempty" jsonschema:"Filter by sender channel identity ID."`
+	EndTime   string `json:"end_time,omitempty" jsonschema:"ISO 8601 timestamp. Only return messages created at or before this time."`
+	Keyword   string `json:"keyword,omitempty" jsonschema:"Search keyword — matches against the text content of messages (case-insensitive)."`
+	Limit     *int   `json:"limit,omitempty" jsonschema:"Maximum number of messages to return. Default 50, max 200."`
+	Role      string `json:"role,omitempty" jsonschema:"Filter by message role."`
+	SessionID string `json:"session_id,omitempty" jsonschema:"Filter by session ID."`
+	StartTime string `json:"start_time,omitempty" jsonschema:"ISO 8601 timestamp. Only return messages created at or after this time."`
 }

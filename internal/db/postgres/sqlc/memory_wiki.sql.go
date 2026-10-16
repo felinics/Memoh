@@ -459,6 +459,7 @@ ON CONFLICT (team_id, id) DO UPDATE SET
   topic = EXCLUDED.topic,
   expires_at = EXCLUDED.expires_at,
   updated_at = now()
+WHERE memory_nodes.bot_id = EXCLUDED.bot_id
 RETURNING id, bot_id, body, hash, layer, fact_type, subject, confidence, metadata, source_message_ids, profile_ref, topic, captured_at, expires_at, updated_at, created_at, team_id
 `
 

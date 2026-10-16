@@ -64,6 +64,15 @@ func NewSource(log *slog.Logger, service *Service) *Source {
 	}
 }
 
+// Invalidate drops the discovery cache after capability management.
+func (s *Source) Invalidate(botID string) {
+	s.mu.Lock()
+	delete(s.tools, botID)
+	delete(s.auths, botID)
+	delete(s.retryAfter, botID)
+	s.mu.Unlock()
+}
+
 func (s *Source) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if cached, ok := s.cachedToolList(botID); ok {
@@ -96,7 +105,7 @@ func (s *Source) ListTools(ctx context.Context, session mcpgw.ToolSessionContext
 		}
 		inputSchema, err := schemaObject(tool.InputSchema)
 		if err != nil {
-			s.logger.Warn(
+			s.logger.WarnContext(ctx,
 				"skip connect-it tool with invalid input schema",
 				slog.String("tool", tool.Name),
 				slog.Any("error", err),

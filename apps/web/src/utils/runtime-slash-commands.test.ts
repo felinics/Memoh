@@ -21,7 +21,7 @@ describe('runtime slash commands', () => {
     ])
     expect(runtimeCommandComposerText(visible[0]!)).toBe('/review:deep ')
     expect(visibleRuntimeCommands(commands, '')).toHaveLength(1)
-    expect(composerLocalQuickActionID('/compact', true)).toBe('')
+    expect(composerLocalQuickActionID('/model', true)).toBe('')
   })
 })
 

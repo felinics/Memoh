@@ -1,51 +1,73 @@
 <template>
+  <!-- A successful apply_patch splits into one edit-style row per file: the
+       call is one tool step, but each file reads exactly like an edit (title,
+       counts, flush diff card) instead of a second, bespoke layout. -->
   <div
+    v-if="patchFiles.length"
+    class="font-[400] space-y-0.5"
+    :class="inGroup ? '' : 'text-[0.90625rem]'"
+  >
+    <div
+      v-for="(file, index) in patchFiles"
+      :key="index"
+    >
+      <!-- A deleted file has no diff (the server never reads it), so its row
+           does not expand; the struck-through name says what happened. -->
+      <ToolRow
+        :expandable="Boolean(file.diff)"
+        :open="patchFileOpen(index)"
+        :action="renderedActionLabel"
+        :target="patchFileTarget(file)"
+        :target-class="file.operation === 'delete' ? 'line-through' : ''"
+        :target-title="patchFileTitle(file)"
+        :openable="Boolean(file.diff && openInFileManager)"
+        :execution-location="executionLocationLabel"
+        :add="file.add"
+        :remove="file.remove"
+        @toggle="togglePatchFile(index)"
+        @open-target="openInFileManager?.(file.movedTo || file.path, false)"
+      />
+      <CollapseSection
+        v-if="file.diff"
+        :open="patchFileOpen(index)"
+      >
+        <!-- Same flush card as edit (see below). -->
+        <div class="mt-1.5 rounded-sm bg-card font-[400] overflow-hidden">
+          <DiffPanel
+            :diff="file.diff"
+            :filename="extractFilename(file.movedTo || file.path)"
+          />
+        </div>
+      </CollapseSection>
+    </div>
+  </div>
+
+  <div
+    v-else
     class="font-[400]"
     :class="inGroup ? '' : 'text-[0.90625rem]'"
   >
-    <HeaderRow
-      v-if="expandable"
+    <ToolRow
+      :expandable="expandable"
       :open="open"
-      nested
+      :action="showActionLabel ? renderedActionLabel : ''"
+      :action-class="actionClass"
+      :target="display.target"
+      :target-class="targetClass"
+      :target-title="display.fullTarget"
+      :openable="canOpenInFiles"
+      :execution-location="executionLocationLabel"
+      :add="display.diffAdd"
+      :remove="display.diffRemove"
       @toggle="toggleOpen"
+      @open-target="handleOpenInFiles"
     >
-      <ConnectorLogo
-        v-if="connector"
-        :connector="connector"
-      />
-      <span
-        v-if="showActionLabel"
-        class="shrink-0"
-        :class="actionClass"
-      >{{ renderedActionLabel }}</span>
-      <button
-        v-if="display.target && canOpenInFiles"
-        class="truncate min-w-0 hover:underline cursor-pointer"
-        :class="targetClass"
-        :title="display.fullTarget || undefined"
-        @click.stop="handleOpenInFiles"
-      >
-        {{ display.target }}
-      </button>
-      <span
-        v-else-if="display.target"
-        class="truncate min-w-0"
-        :class="targetClass"
-        :title="display.fullTarget || undefined"
-      >{{ display.target }}</span>
-      <span
-        v-if="executionLocationLabel"
-        class="shrink-0 text-muted-foreground"
-        :title="t('chat.tools.executionLocation')"
-      >· {{ executionLocationLabel }}</span>
-      <span
-        v-if="display.diffAdd"
-        class="font-mono shrink-0 text-success-foreground"
-      >+{{ display.diffAdd }}</span>
-      <span
-        v-if="display.diffRemove"
-        class="font-mono shrink-0 text-destructive"
-      >-{{ display.diffRemove }}</span>
+      <template #leading>
+        <ConnectorLogo
+          v-if="connector"
+          :connector="connector"
+        />
+      </template>
       <span
         v-if="approvalLabel"
         class="shrink-0 text-xs"
@@ -55,72 +77,13 @@
         v-if="userInputLabel"
         class="shrink-0 text-xs text-muted-foreground"
       >{{ userInputLabel }}</span>
-      <ExpandChevron
-        :open="open"
-        class="ml-0.5"
-      />
-      <span
-        v-if="elapsedLabel"
-        class="shrink-0 text-xs text-muted-foreground"
-      >{{ elapsedLabel }}</span>
-    </HeaderRow>
-
-    <div
-      v-else
-      class="flex items-center gap-1.5 w-full py-px"
-      :class="rowClass"
-    >
-      <ConnectorLogo
-        v-if="connector"
-        :connector="connector"
-      />
-      <span
-        v-if="showActionLabel"
-        class="shrink-0"
-        :class="actionClass"
-      >{{ renderedActionLabel }}</span>
-      <button
-        v-if="display.target && canOpenInFiles"
-        class="truncate min-w-0 hover:underline cursor-pointer"
-        :class="targetClass"
-        :title="display.fullTarget || undefined"
-        @click="handleOpenInFiles"
-      >
-        {{ display.target }}
-      </button>
-      <span
-        v-else-if="display.target"
-        class="truncate min-w-0"
-        :class="targetClass"
-        :title="display.fullTarget || undefined"
-      >{{ display.target }}</span>
-      <span
-        v-if="executionLocationLabel"
-        class="shrink-0 text-muted-foreground"
-        :title="t('chat.tools.executionLocation')"
-      >· {{ executionLocationLabel }}</span>
-      <span
-        v-if="display.diffAdd"
-        class="font-mono shrink-0 text-success-foreground"
-      >+{{ display.diffAdd }}</span>
-      <span
-        v-if="display.diffRemove"
-        class="font-mono shrink-0 text-destructive"
-      >-{{ display.diffRemove }}</span>
-      <span
-        v-if="approvalLabel"
-        class="shrink-0 text-xs"
-        :class="block.approval?.status === 'pending' ? 'text-warning-foreground' : 'text-muted-foreground'"
-      >{{ approvalLabel }}</span>
-      <span
-        v-if="userInputLabel"
-        class="shrink-0 text-xs text-muted-foreground"
-      >{{ userInputLabel }}</span>
-      <span
-        v-if="elapsedLabel"
-        class="shrink-0 text-xs text-muted-foreground"
-      >{{ elapsedLabel }}</span>
-    </div>
+      <template #trailing>
+        <span
+          v-if="elapsedLabel"
+          class="shrink-0 text-xs text-muted-foreground"
+        >{{ elapsedLabel }}</span>
+      </template>
+    </ToolRow>
 
     <CollapseSection
       v-if="expandable"
@@ -179,15 +142,18 @@ import {
   getToolTitle,
   isDirPathTool,
   isFilePathTool,
+  patchFileDiffs,
+  type PatchFileDiff,
 } from './tool-call-registry'
+import { extractFilename } from '@/composables/useShikiHighlighter'
+import DiffPanel from './tool-call-diff-panel.vue'
 import ConnectorLogo from './tool-detail/connector-logo.vue'
+import ToolRow from './tool-detail/tool-row.vue'
 import ToolCallDetailGeneric from './tool-call-detail-generic.vue'
 import { hasToolResultError } from './tool-result-error'
 import ToolCallDetailWrite from './tool-call-detail-write.vue'
 import CollapseSection from './collapse-section.vue'
 import { getCollapseOpen, setCollapseOpen, toolCollapseKey } from './process-collapse'
-import HeaderRow from './tool-detail/header-row.vue'
-import ExpandChevron from './tool-detail/expand-chevron.vue'
 import Capsule from './tool-detail/capsule.vue'
 
 const props = defineProps<{ block: ToolCallBlock, messageId: string, inGroup?: boolean, showExecutionLocation?: boolean }>()
@@ -247,17 +213,50 @@ const renderedActionLabel = computed(() => title.value.action)
 
 // edit always renders its diff flush with the card edges; write joins it
 // only when the server attached a diff (older write records keep the padded
-// content block).
+// content block). A failed call shows the generic diagnostic detail instead
+// of a diff, so it keeps the padded card every other detail uses.
 const flushDiffCard = computed(() => {
+  if (resultFailed.value) return false
   if (props.block.toolName === 'edit') return true
   return props.block.toolName === 'write' && Boolean(props.block.diff)
 })
 
-// 工具标题是执行过程摘要。Agent 在虚拟机中试错、检查并修复命令是正常的
-// 长任务行为；非零退出码（包括 -1）或工具 isError 不等于用户任务失败。
-// 标题保持中性色，不附加退出码或错误染色；诊断留在展开详情中，真正的
-// 任务失败由回合级错误反馈表达，不能从某一次工具调用推导。
-const rowClass = 'text-cop-title hover:text-foreground transition-colors duration-75'
+// Per-file rows of a successful apply_patch (empty → the single row below).
+// Each file keeps its own persisted open state under the call's collapse key.
+const patchFiles = computed<PatchFileDiff[]>(() => {
+  if (isPending.value || resultFailed.value) return []
+  return patchFileDiffs(props.block)
+})
+const patchFileOpenState = ref<Record<number, boolean>>({})
+watch(collapseKey, () => {
+  patchFileOpenState.value = {}
+})
+
+function patchFileCollapseKey(index: number): string {
+  return collapseKey.value ? `${collapseKey.value}#${index}` : ''
+}
+
+function patchFileOpen(index: number): boolean {
+  return patchFileOpenState.value[index]
+    ?? getCollapseOpen(patchFileCollapseKey(index))
+    ?? (display.value.defaultOpen === true)
+}
+
+function togglePatchFile(index: number) {
+  const next = !patchFileOpen(index)
+  patchFileOpenState.value = { ...patchFileOpenState.value, [index]: next }
+  setCollapseOpen(patchFileCollapseKey(index), next)
+}
+
+function patchFileTarget(file: PatchFileDiff): string {
+  const from = extractFilename(file.path)
+  const to = extractFilename(file.movedTo)
+  return !file.movedTo || from === to ? to || from : `${from} → ${to}`
+}
+
+function patchFileTitle(file: PatchFileDiff): string {
+  return file.movedTo ? `${file.path} → ${file.movedTo}` : file.path
+}
 
 // Brief tools (e.g. send/memory) finish in <100ms. Showing the running
 // shimmer for them flickers, so we only display it after a short delay.

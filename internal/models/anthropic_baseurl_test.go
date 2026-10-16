@@ -50,12 +50,10 @@ func TestNewSDKChatModelAnthropicMessagesBaseURLGainsV1(t *testing.T) {
 				APIKey:     "test-key",
 			})
 
-			if _, err := sdk.GenerateTextResult(
-				context.Background(),
-				sdk.WithModel(model),
-				sdk.WithMessages([]sdk.Message{sdk.UserMessage("hi")}),
-			); err != nil {
-				t.Fatalf("generate text: %v", err)
+			if _, err := model.Generate(context.Background(), sdk.Request{
+				Messages: []sdk.Message{sdk.UserMessage("hi")},
+			}); err != nil {
+				t.Fatalf("generate: %v", err)
 			}
 
 			if gotPath != "/v1/messages" {

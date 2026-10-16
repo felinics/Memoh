@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 const Type channel.ChannelType = "wechatoa"
@@ -188,7 +189,7 @@ func (a *WeChatOAAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 		return err
 	}
 	if a.logger != nil {
-		a.logger.Debug("wechatoa send start",
+		a.logger.DebugContext(ctx, "wechatoa send start",
 			slog.String("config_id", cfg.ID),
 			slog.String("target", openID),
 			slog.Bool("has_text", strings.TrimSpace(msg.Message.Message.PlainText()) != ""),
@@ -196,17 +197,10 @@ func (a *WeChatOAAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 		)
 	}
 	if err := client.sendPreparedMessage(ctx, openID, msg.Message); err != nil {
-		if a.logger != nil {
-			a.logger.Error("wechatoa send failed",
-				slog.String("config_id", cfg.ID),
-				slog.String("target", openID),
-				slog.Any("error", err),
-			)
-		}
 		return err
 	}
 	if a.logger != nil {
-		a.logger.Info("wechatoa send success",
+		a.logger.InfoContext(ctx, "wechatoa send success",
 			slog.String("config_id", cfg.ID),
 			slog.String("target", openID),
 		)
@@ -251,17 +245,38 @@ type outboundStream struct {
 	mu          sync.Mutex
 }
 
-func (s *outboundStream) Push(_ context.Context, event channel.PreparedStreamEvent) error {
+func (s *outboundStream) Push(ctx context.Context, event channel.PreparedStreamEvent) error {
 	if s.closed {
 		return errors.New("wechatoa stream is closed")
 	}
 	switch event.Type {
+	case channel.StreamEventError:
+		errText := redact.Text(strings.TrimSpace(event.Error))
+		s.mu.Lock()
+		s.textBuilder.Reset()
+		s.attachments = nil
+		s.final = nil
+		s.mu.Unlock()
+		if errText == "" {
+			return nil
+		}
+		return s.adapter.Send(ctx, s.cfg, channel.PreparedOutboundMessage{
+			Target: s.target,
+			Message: channel.PreparedMessage{Message: channel.Message{
+				Format: channel.MessageFormatPlain,
+				Text:   channel.ErrorReplyText(event.ErrorCode, errText),
+			}},
+		})
 	case channel.StreamEventDelta:
 		if strings.TrimSpace(event.Delta) == "" || event.Phase == channel.StreamPhaseReasoning {
 			return nil
 		}
 		s.mu.Lock()
 		s.textBuilder.WriteString(event.Delta)
+		s.mu.Unlock()
+	case channel.StreamEventReset:
+		s.mu.Lock()
+		s.textBuilder.Reset()
 		s.mu.Unlock()
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {

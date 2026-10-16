@@ -120,9 +120,9 @@ func (r *fileRuntime) Update(ctx context.Context, req adapters.UpdateRequest) (a
 	if memoryID == "" {
 		return adapters.MemoryItem{}, errors.New("memory_id is required")
 	}
-	botID := runtimeBotIDFromMemoryID(memoryID)
-	if botID == "" {
-		return adapters.MemoryItem{}, errors.New("invalid memory_id")
+	botID := strings.TrimSpace(req.BotID)
+	if err := adapters.ValidateMemoryScope(botID, memoryID); err != nil {
+		return adapters.MemoryItem{}, err
 	}
 	items, err := r.store.ReadAllMemoryFiles(ctx, botID)
 	if err != nil {
@@ -158,19 +158,20 @@ func (r *fileRuntime) Update(ctx context.Context, req adapters.UpdateRequest) (a
 	return item, nil
 }
 
-func (r *fileRuntime) Delete(ctx context.Context, memoryID string) (adapters.DeleteResponse, error) {
-	return r.DeleteBatch(ctx, []string{memoryID})
+func (r *fileRuntime) Delete(ctx context.Context, botID string, memoryID string) (adapters.DeleteResponse, error) {
+	return r.DeleteBatch(ctx, botID, []string{memoryID})
 }
 
-func (r *fileRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (adapters.DeleteResponse, error) {
+func (r *fileRuntime) DeleteBatch(ctx context.Context, botID string, memoryIDs []string) (adapters.DeleteResponse, error) {
+	botID = strings.TrimSpace(botID)
+	// Validate the complete batch before the first mutation.
+	if err := adapters.ValidateMemoryScope(botID, memoryIDs...); err != nil {
+		return adapters.DeleteResponse{}, err
+	}
 	grouped := map[string][]string{}
 	for _, id := range memoryIDs {
 		id = strings.TrimSpace(id)
 		if id == "" {
-			continue
-		}
-		botID := runtimeBotIDFromMemoryID(id)
-		if botID == "" {
 			continue
 		}
 		grouped[botID] = append(grouped[botID], id)

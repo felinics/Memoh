@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/workdir"
 )
 
@@ -34,24 +35,24 @@ func NewWorkdirProvider(log *slog.Logger, service WorkdirLister) *WorkdirProvide
 	}
 }
 
-func (p *WorkdirProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *WorkdirProvider) Tools(_ context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	if p.service == nil {
 		return nil, nil
 	}
 	sess := session
-	return []sdk.Tool{
+	return []toolexec.Tool{
 		{
 			Name:        ToolListWorkdirs().String(),
 			Description: "List this bot's workdirs (named working directories): workdir_id, name, target kind (native workspace or remote runtime), and path. Use a workdir_id to bind a scheduled task's sessions to that directory.",
-			Parameters:  emptyObjectSchema(),
-			Execute: func(ctx *sdk.ToolExecContext, _ any) (any, error) {
+			Parameters:  toolexec.SchemaFor[listWorkdirsArgs](),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, _ listWorkdirsArgs) (sdk.ToolOutput, error) {
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
-					return nil, errors.New("bot_id is required")
+					return sdk.ToolOutput{}, errors.New("bot_id is required")
 				}
 				workdirs, err := p.service.List(ctx.Context, botID, false)
 				if err != nil {
-					return nil, err
+					return sdk.ToolOutput{}, err
 				}
 				items := make([]map[string]any, 0, len(workdirs))
 				for _, wd := range workdirs {
@@ -62,8 +63,10 @@ func (p *WorkdirProvider) Tools(_ context.Context, session SessionContext) ([]sd
 						"path":        wd.Path,
 					})
 				}
-				return map[string]any{"workdirs": items, "count": len(items)}, nil
-			},
+				return toolexec.OutputFromValue(map[string]any{"workdirs": items, "count": len(items)}), nil
+			}),
 		},
 	}, nil
 }
+
+type listWorkdirsArgs struct{}

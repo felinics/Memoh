@@ -275,7 +275,7 @@ func TestClaudeSteeringStopDoesNotReportUndeliveredInput(t *testing.T) {
 	stop()
 	for _, ev := range sink.snapshot() {
 		if ev.Type == event.RuntimeNotice {
-			t.Fatalf("normal shutdown emitted %s", ev.Code)
+			t.Fatalf("normal shutdown emitted %s", ev.NoticeKind)
 		}
 	}
 }

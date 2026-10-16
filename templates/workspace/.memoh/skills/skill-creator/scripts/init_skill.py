@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Initialize a Memoh workspace skill under /data/skills."""
+"""Initialize a Memoh workspace skill under /data/skills/user/personal."""
 
 import argparse
 import re
@@ -13,7 +13,7 @@ ALLOWED_RESOURCES = {"scripts", "references", "assets"}
 
 SKILL_TEMPLATE = """---
 name: {skill_name}
-description: TODO: Explain what this skill does and exactly when to use it.
+description: "TODO: Explain what this skill does and exactly when to use it."
 ---
 
 # {skill_title}
@@ -124,7 +124,7 @@ def init_skill(skill_name: str, root: Path, resources: list[str], examples: bool
 def main() -> int:
     parser = argparse.ArgumentParser(description="Create a Memoh skill folder.")
     parser.add_argument("skill_name", help="Skill name; normalized to lowercase hyphen-case")
-    parser.add_argument("--path", default="/data/skills", help="Directory that will contain the skill folder")
+    parser.add_argument("--path", default="/data/skills/user/personal", help="Directory that will contain the skill folder")
     parser.add_argument("--resources", default="", help="Comma-separated list: scripts,references,assets")
     parser.add_argument("--examples", action="store_true", help="Create placeholder files in resource folders")
     args = parser.parse_args()

@@ -120,6 +120,35 @@ describe('keyComboFromEvent', () => {
       .toBeNull()
   })
 
+  it('on mac records Command+Option by the physical key instead of the Option character', () => {
+    expect(keyComboFromEvent({ key: '¡', code: 'Digit1', ctrlKey: false, metaKey: true, altKey: true, shiftKey: false }, true))
+      .toEqual({ mod: true, alt: true, shift: false, key: '1' })
+    expect(keyComboFromEvent({ key: 'Dead', code: 'KeyN', ctrlKey: false, metaKey: true, altKey: true, shiftKey: false }, true))
+      .toEqual({ mod: true, alt: true, shift: false, key: 'n' })
+    expect(keyComboFromEvent({ key: '’', code: 'BracketRight', ctrlKey: false, metaKey: true, altKey: true, shiftKey: true }, true))
+      .toEqual({ mod: true, alt: true, shift: true, key: ']' })
+  })
+
+  it('on mac rejects Option without Command when it produces a character or dead key', () => {
+    expect(keyComboFromEvent({ key: 'Dead', code: 'KeyN', ctrlKey: false, metaKey: false, altKey: true, shiftKey: false }, true)).toBeNull()
+    expect(keyComboFromEvent({ key: 'å', code: 'KeyA', ctrlKey: false, metaKey: false, altKey: true, shiftKey: false }, true)).toBeNull()
+    expect(keyComboFromEvent({ key: 'Á', code: 'KeyY', ctrlKey: false, metaKey: false, altKey: true, shiftKey: true }, true)).toBeNull()
+    expect(keyComboFromEvent({ key: 'ArrowLeft', code: 'ArrowLeft', ctrlKey: false, metaKey: false, altKey: true, shiftKey: false }, true))
+      .toEqual({ mod: false, alt: true, shift: false, key: 'ArrowLeft' })
+  })
+
+  it('records the digit row by its digit when Shift changes the character', () => {
+    expect(keyComboFromEvent({ key: '!', code: 'Digit1', ctrlKey: false, metaKey: false, altKey: true, shiftKey: true }, false))
+      .toEqual({ mod: false, alt: true, shift: true, key: '1' })
+    expect(keyComboFromEvent({ key: '§', code: 'Digit3', ctrlKey: false, metaKey: false, altKey: true, shiftKey: true }, false))
+      .toEqual({ mod: false, alt: true, shift: true, key: '3' })
+  })
+
+  it('keeps the produced character for Ctrl+Alt outside macOS', () => {
+    expect(keyComboFromEvent({ key: 'ń', code: 'KeyN', ctrlKey: true, metaKey: false, altKey: true, shiftKey: false }, false))
+      .toEqual({ mod: true, alt: true, shift: false, key: 'ń' })
+  })
+
   it('on non-mac maps ctrlKey to mod', () => {
     expect(keyComboFromEvent({ key: 's', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false }, false))
       .toEqual({ mod: true, alt: false, shift: false, key: 's' })

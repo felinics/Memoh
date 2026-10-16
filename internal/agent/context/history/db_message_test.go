@@ -347,6 +347,48 @@ func TestFromDBMessageContentHashIgnoresCompactionMarker(t *testing.T) {
 	}
 }
 
+func TestFromDBMessageHashesLifecycleAuditWithoutKeepingIt(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{"ratio": 1.50, "reply": {"sender": "<Bob & Co>"}, "agent_step_interrupted": true, "context_lifecycle": {"version": 2, "selection_decisions": [{"id": "history:1", "decision": "kept", "token_estimate": 12}]}}`)
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	base := messagepkg.Message{
+		ID: "row-1", BotID: "bot-1", SessionID: "sess-1", Role: "assistant",
+		Content:   persistedModelMessage(t, turn.ModelMessage{Role: "assistant", Content: turn.NewTextContent("done")}),
+		Assets:    []messagepkg.MessageAsset{{ContentHash: "asset-1", Role: "attachment", Ordinal: 1, StorageKey: "objects/asset-1"}},
+		CreatedAt: time.Date(2026, 6, 24, 3, 0, 0, 0, time.UTC),
+	}
+	withDecoded := base
+	withDecoded.Metadata, withDecoded.RawMetadata = decoded, raw
+	undecoded := base
+	undecoded.RawMetadata = raw
+
+	// Computed before lifecycle audits were dropped from records. Compaction
+	// coverage persisted hashes like this one, so they must never change.
+	const persistedHash = "f521a80e2e022e592dc032da9d3849533b88cea65f18a546edb74db4bfd6c029"
+	for name, msg := range map[string]messagepkg.Message{"decoded": withDecoded, "undecoded": undecoded} {
+		record, err := FromDBMessage(msg, ScopeFallback{})
+		if err != nil {
+			t.Fatalf("%s: FromDBMessage failed: %v", name, err)
+		}
+		if record.Ref.ContentHash != persistedHash || DBMessageSourceHash(msg).Value != persistedHash {
+			t.Fatalf("%s: source hash = %s, want %s", name, record.Ref.ContentHash, persistedHash)
+		}
+		if _, ok := record.Metadata[contextfrag.MetadataContextLifecycleKey]; ok {
+			t.Fatalf("%s: record kept the lifecycle audit", name)
+		}
+		if reply, _ := record.Metadata["reply"].(map[string]any); record.Metadata[messagepkg.AgentStepInterruptedMetadataKey] != true || reply["sender"] != "<Bob & Co>" {
+			t.Fatalf("%s: record lost context metadata: %#v", name, record.Metadata)
+		}
+	}
+	if _, ok := decoded[contextfrag.MetadataContextLifecycleKey]; !ok {
+		t.Fatal("caller metadata was mutated")
+	}
+}
+
 func TestHistoryRecordsRenderLegacyModelAndSDKMessages(t *testing.T) {
 	t.Parallel()
 

@@ -6,13 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	connectsdk "github.com/felinics/connect-it/sdk/go"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/connectors"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/supermarket"
 	"github.com/felinics/memoh/internal/workspacedeps"
@@ -21,9 +25,6 @@ import (
 // DependencyRegistryID is the only registry whose Apps may reference
 // workspace dependencies and connectors.
 const DependencyRegistryID = "memoh"
-
-// lastErrorLimit caps the text stored in last_error.
-const lastErrorLimit = 2048
 
 // Sentinel errors returned by Service.
 var (
@@ -65,6 +66,8 @@ type DependencyManager interface {
 	Install(ctx context.Context, botID, depID, version string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
 	Update(ctx context.Context, botID, depID, version string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
 	Remove(ctx context.Context, botID, depID string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
+	InstallOrder(ctx context.Context, depIDs []string) ([]string, error)
+	Dependents(ctx context.Context, botID, depID string) ([]string, error)
 	// EnsureRunning starts a stopped bot workspace before a mutating step.
 	EnsureRunning(ctx context.Context, botID string) error
 }
@@ -99,6 +102,8 @@ type Service struct {
 	connectors   ConnectorManager
 	logger       *slog.Logger
 	now          func() time.Time
+	// updateCheckBudget is workspacedeps.UpdateCheckBudget; tests shorten it.
+	updateCheckBudget time.Duration
 }
 
 // NewService wires a Service. It panics when a required option is nil, which
@@ -116,6 +121,7 @@ func NewService(opts Options) *Service {
 		store: opts.Store, registry: opts.Registry, skills: opts.Skills,
 		dependencies: opts.Dependencies, connectors: opts.Connectors,
 		logger: opts.Logger, now: opts.Now,
+		updateCheckBudget: workspacedeps.UpdateCheckBudget,
 	}
 	if s.logger == nil {
 		s.logger = slog.Default()
@@ -172,11 +178,21 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest,
 // missing are installed again, Skills are reconciled and connectors are
 // linked when a connection appeared since.
 func (s *Service) Resume(ctx context.Context, botID, installationID string, sink EventSink) (OperationResult, error) {
-	inst, err := s.store.GetByID(ctx, botID, installationID)
-	if err != nil {
-		return OperationResult{}, err
+	return s.resume(ctx, botID, installationID, "", sink)
+}
+
+// ResumeApproved resumes only the release the user reviewed. The revision is
+// checked while holding the installation lock so a concurrent update cannot
+// substitute a different release between approval and materialization.
+func (s *Service) ResumeApproved(ctx context.Context, botID, installationID, revision string, sink EventSink) (OperationResult, error) {
+	if revision == "" {
+		return OperationResult{}, ErrInvalidRequest
 	}
-	release, err := s.releaseFor(ctx, inst)
+	return s.resume(ctx, botID, installationID, revision, sink)
+}
+
+func (s *Service) resume(ctx context.Context, botID, installationID, revision string, sink EventSink) (OperationResult, error) {
+	inst, err := s.store.GetByID(ctx, botID, installationID)
 	if err != nil {
 		return OperationResult{}, err
 	}
@@ -185,6 +201,17 @@ func (s *Service) Resume(ctx context.Context, botID, installationID string, sink
 		return OperationResult{}, err
 	}
 	defer unlock()
+	inst, err = s.store.GetByID(ctx, botID, installationID)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	if revision != "" && inst.Revision != revision {
+		return OperationResult{}, ErrInvalidRequest
+	}
+	release, err := s.releaseFor(ctx, inst)
+	if err != nil {
+		return OperationResult{}, err
+	}
 	return s.materialize(ctx, botID, release, inst.Reason, StatusInstalling, sink, false)
 }
 
@@ -265,37 +292,61 @@ func (s *Service) materialize(ctx context.Context, botID string, release superma
 	}
 	result := OperationResult{Installation: inst}
 	partial := false
-	var problems []string
+	// firstFailure is the code of the first failed step; last_error_code
+	// holds one code, and the steps themselves carry the rest.
+	firstFailure := ""
 	record := func(step StepResult) {
 		result.Steps = append(result.Steps, step)
 		if step.Status == StepFailed {
 			partial = true
-			problems = append(problems, step.Kind+" "+step.ID+": "+step.Error)
+			if firstFailure == "" {
+				firstFailure = step.Code
+			}
 		}
-		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Version: step.Version, Message: step.Error})
+		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Version: step.Version, Message: step.Error, Code: step.Code})
 	}
 
-	// 1. Dependencies: link present ones, install missing ones.
+	// 1. Dependencies: link present ones, install missing ones. Their
+	// requires run first as steps of their own; only the App's direct
+	// dependencies are referenced by the installation.
 	states, statesErr := s.dependencyStates(ctx, botID)
-	for _, depID := range release.Dependencies {
-		sink.Send(Event{Type: EventStep, Kind: KindDependency, ID: depID})
-		if err := s.store.AddDependencyRef(ctx, inst.ID, depID); err != nil {
-			return result, s.failInstallation(ctx, inst, fail("record dependency reference "+depID, err))
+	order := release.Dependencies
+	if s.dependencies != nil && statesErr == nil {
+		// A failed expansion leaves the direct list; Install then reports
+		// the same problem for the dependency that has it.
+		if expanded, err := s.dependencies.InstallOrder(ctx, release.Dependencies); err == nil {
+			order = expanded
 		}
+	}
+	failed := map[string]bool{}
+	for _, depID := range order {
+		sink.Send(Event{Type: EventStep, Kind: KindDependency, ID: depID})
+		if slices.Contains(release.Dependencies, depID) {
+			if err := s.store.AddDependencyRef(ctx, inst.ID, depID); err != nil {
+				return result, s.failInstallation(ctx, inst, fail("record dependency reference "+depID, err))
+			}
+		}
+		entry, known := states[depID]
 		switch {
 		case s.dependencies == nil:
-			record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: ErrDependenciesUnavailable.Error()})
+			record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Code: string(apperror.CodeAppDependenciesUnavailable)})
 		case statesErr != nil:
-			record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: publicCause(statesErr)})
+			record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Code: string(publicCode(statesErr))})
+		case known && dependencyPresent(entry):
+			record(StepResult{Kind: KindDependency, ID: depID, Status: StepLinked, Version: entry.InstalledVersion})
 		default:
-			entry, known := states[depID]
-			if known && dependencyPresent(entry) {
-				record(StepResult{Kind: KindDependency, ID: depID, Status: StepLinked, Version: entry.InstalledVersion})
+			if blocked := failedPrerequisite(entry, failed); blocked != "" {
+				failed[depID] = true
+				record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Code: string(apperror.CodeAppPrerequisiteFailed)})
 				continue
 			}
 			res, err := s.dependencies.Install(ctx, botID, depID, "", logSink(sink, KindDependency, depID))
 			if err != nil {
-				record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: err.Error()})
+				failed[depID] = true
+				// The cause stays in the log; the step and last_error_code
+				// carry only its catalog code.
+				s.logStepFailure(ctx, "install dependency", depID, err)
+				record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Code: string(publicCode(err))})
 				continue
 			}
 			record(StepResult{Kind: KindDependency, ID: depID, Status: StepInstalled, Version: res.Version})
@@ -313,7 +364,7 @@ func (s *Service) materialize(ctx context.Context, botID string, release superma
 		return result, s.failInstallation(ctx, inst, errors.Join(fail("record release", err), rollbackErr))
 	}
 	if err := tx.Commit(ctx); err != nil {
-		s.logger.Warn("cleanup replaced App Skills failed", slog.String("app_id", release.AppID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "cleanup replaced App Skills failed", slog.String("app_id", release.AppID), slog.Any("error", err))
 	}
 	record(StepResult{Kind: KindSkills, ID: release.AppID, Status: StepInstalled, Version: strconv.Itoa(len(installed))})
 
@@ -348,7 +399,7 @@ func (s *Service) materialize(ctx context.Context, botID string, release superma
 	if partial {
 		status = StatusPartial
 	}
-	inst, err = s.store.SetStatus(ctx, botID, inst.ID, status, truncateMessage(strings.Join(problems, "; ")))
+	inst, err = s.store.SetStatus(ctx, botID, inst.ID, status, firstFailure)
 	if err != nil {
 		return result, fmt.Errorf("apps: record installation status: %w", err)
 	}
@@ -357,13 +408,12 @@ func (s *Service) materialize(ctx context.Context, botID string, release superma
 	return result, nil
 }
 
-// failInstallation records a failed operation. last_error keeps only the
-// public description; the cause with its infrastructure detail is logged.
+// failInstallation records a failed operation. last_error_code keeps only the
+// public catalog code; the caller records the returned cause with its
+// infrastructure detail.
 func (s *Service) failInstallation(ctx context.Context, inst Installation, cause error) error {
-	s.logger.Warn("App operation failed",
-		slog.String("installation_id", inst.ID), slog.String("app_id", inst.AppID), slog.Any("error", cause))
-	if _, err := s.store.SetStatus(ctx, inst.BotID, inst.ID, StatusFailed, truncateMessage(publicMessage(cause))); err != nil {
-		s.logger.Warn("record failed App installation", slog.String("installation_id", inst.ID), slog.Any("error", err))
+	if _, err := s.store.SetStatus(ctx, inst.BotID, inst.ID, StatusFailed, string(publicCode(cause))); err != nil {
+		s.logger.WarnContext(ctx, "record failed App installation", slog.String("installation_id", inst.ID), slog.Any("error", err))
 	}
 	return cause
 }
@@ -395,6 +445,17 @@ func indexEntries(result workspacedeps.ListResult) map[string]workspacedeps.Entr
 	return states
 }
 
+// failedPrerequisite returns the first requirement of entry that already
+// failed in this operation; installing entry would only repeat that failure.
+func failedPrerequisite(entry workspacedeps.Entry, failed map[string]bool) string {
+	for _, required := range entry.Dependency.Requires {
+		if failed[required] {
+			return required
+		}
+	}
+	return ""
+}
+
 // dependencyPresent reports whether a usable copy of the dependency exists.
 func dependencyPresent(entry workspacedeps.Entry) bool {
 	return entry.Observed.Present && entry.Status != workspacedeps.StatusFailed && entry.Status != workspacedeps.StatusMissing
@@ -409,7 +470,7 @@ func (s *Service) activeConnections(ctx context.Context, botID string) map[strin
 	}
 	items, err := s.connectors.List(ctx, botID)
 	if err != nil {
-		s.logger.Warn("list bot connectors", slog.String("bot_id", botID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "list bot connectors", slog.String("bot_id", botID), slog.Any("error", err))
 		return result
 	}
 	for _, item := range items {
@@ -486,7 +547,9 @@ func (s *Service) connectorRef(ctx context.Context, botID, installationID, conne
 // reconcileStatus promotes a partial installation to installed once every
 // required connector is linked and no dependency step failed.
 func (s *Service) reconcileStatus(ctx context.Context, inst Installation) {
-	if inst.Status != StatusPartial || inst.LastError != "" {
+	// Migration 0163 does not backfill legacy failure text. Linking a
+	// connector cannot resolve a dependency failure recorded in either column.
+	if inst.Status != StatusPartial || inst.LastErrorCode != "" || inst.LastError != "" {
 		return
 	}
 	refs, err := s.store.ListConnectorRefs(ctx, inst.ID)
@@ -499,13 +562,14 @@ func (s *Service) reconcileStatus(ctx context.Context, inst Installation) {
 		}
 	}
 	if _, err := s.store.SetStatus(ctx, inst.BotID, inst.ID, StatusInstalled, ""); err != nil {
-		s.logger.Warn("promote App installation", slog.String("installation_id", inst.ID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "promote App installation", slog.String("installation_id", inst.ID), slog.Any("error", err))
 	}
 }
 
-func truncateMessage(message string) string {
-	if len(message) <= lastErrorLimit {
-		return message
-	}
-	return message[:lastErrorLimit]
+// logStepFailure records a failed dependency step. The step event and
+// last_error_code carry only the catalog code, so this is where the cause is
+// kept.
+func (s *Service) logStepFailure(ctx context.Context, message, dependencyID string, cause error) {
+	result := errlog.Event(ctx, "apps.dependency_step", errs.Wrap(cause, message, slog.String("dependency_id", dependencyID)), errlog.Options{})
+	s.logger.LogAttrs(ctx, result.Level, "App dependency step failed", result.Attrs()...)
 }

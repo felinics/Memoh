@@ -247,11 +247,12 @@ export function useChatScroll(options: UseChatScrollOptions) {
     pinAnchorId = anchorId ?? lastUserMessage()?.id ?? null
     // Arm only — do NOT clear / set reserves here.
     //
-    // sendMessage pushes the optimistic user turn only after several awaits
-    // (command parse, session setup, …). Anything we mutate now paints one
-    // Vue flush BEFORE that turn exists: a positional or "clear previous
-    // blank now" edit either hits the wrong container or shrinks scrollHeight
-    // under a bottom-parked viewport (zero-frame jerk). The full handover
+    // The store calls this immediately before it appends the optimistic user
+    // turn, but the turn is only in the DOM after Vue's next patch, and a
+    // slash command or an External Agent session can still await before the
+    // store gets here. A positional or "clear previous blank now" edit made
+    // now either hits the wrong container or shrinks scrollHeight under a
+    // bottom-parked viewport (zero-frame jerk). The full handover
     // (collapseReserveKeepingView → new min-height → latest-turn translation) runs in
     // tryApplyPin on the first mutation where the NEW prompt is in the DOM.
 

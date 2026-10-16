@@ -45,7 +45,10 @@
                 <span class="min-w-0 truncate">{{ backLabel }}</span>
               </NavItem>
 
-              <SettingsSection class="mt-3">
+              <SettingsSection
+                v-if="!botUnavailable"
+                class="mt-3"
+              >
                 <div class="flex items-center gap-3 p-3">
                   <!-- Avatar -->
                   <div class="group/avatar relative size-12 shrink-0 rounded-full overflow-hidden bg-muted">
@@ -144,7 +147,10 @@
               </SettingsSection>
 
               <!-- Search Input -->
-              <div class="mt-3 relative">
+              <div
+                v-if="!botUnavailable"
+                class="mt-3 relative"
+              >
                 <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
                 <Input
                   v-model="searchQuery"
@@ -172,7 +178,10 @@
           <template #sidebar-content>
             <!-- Same NavItem rows as the settings sidebar; search narrows the
                groups in place instead of swapping to a separate result list. -->
-            <div class="px-2 pb-2">
+            <div
+              v-if="!botUnavailable"
+              class="px-2 pb-2"
+            >
               <template v-if="displayGroups.length">
                 <div
                   v-for="(group, idx) in displayGroups"
@@ -221,13 +230,25 @@
           <template #sidebar-footer />
 
           <template #detail>
+            <!-- A bot that doesn't exist has no tabs to show, so the whole pane
+                 becomes the message. -->
+            <PanePlaceholder
+              v-if="botMissing"
+              class="absolute inset-0"
+              :title="$t('bots.notFound')"
+            >
+              {{ $t('bots.notFoundDescription') }}
+            </PanePlaceholder>
             <!-- scrollbar-gutter: stable reserves the scrollbar track on every tab,
                  scrolling or not. Without it a long tab (e.g. General) shows a
                  scrollbar that narrows the pane, so PageShell's mx-auto column
                  re-centers and the title + card edges shift vs a short tab (e.g.
                  Platforms). Reserving the gutter keeps the content width — and thus
                  every tab's alignment — identical. -->
-            <div class="absolute inset-0 overflow-y-auto bg-background [scrollbar-gutter:stable]">
+            <div
+              v-else
+              class="absolute inset-0 overflow-y-auto bg-background [scrollbar-gutter:stable]"
+            >
               <!-- Top drag strip over the detail pane only (mac desktop), so the
                    window stays draggable beside the sidebar. No fill/border — it
                    shares --background with the content, so the sidebar's vertical
@@ -241,7 +262,21 @@
                    phone keeps a 16px margin; the 'tab' PageShell variant inside
                    adds no horizontal padding of its own. -->
               <div class="px-4 md:px-6 pt-4 pb-4">
-                <KeepAlive>
+                <SettingsSection v-if="botLoadFailed">
+                  <SettingsRow
+                    :label="$t('bots.loadFailed')"
+                    :description="resolveErrorMessage(botError, $t('common.loadFailed'))"
+                  >
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      @click="refetchBot()"
+                    >
+                      {{ $t('common.retry') }}
+                    </Button>
+                  </SettingsRow>
+                </SettingsSection>
+                <KeepAlive v-else>
                   <component
                     :is="activeComponent?.component"
                     v-bind="activeComponent?.params"
@@ -264,12 +299,12 @@
 
 <script setup lang="ts">
 import {
-  Avatar, AvatarImage, AvatarFallback, Input,
-  SidebarMenu, SidebarMenuItem, SettingsSection,
+  Avatar, AvatarImage, AvatarFallback, Button, Input, PanePlaceholder,
+  SidebarMenu, SidebarMenuItem, SettingsRow, SettingsSection,
 } from '@felinic/ui'
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, MessageSquare,
-  ShieldAlert, Database, Mail, Link, Server, SlidersHorizontal,
+  ShieldAlert, Database, Link, Server, SlidersHorizontal,
   Bot as BotIcon, ChevronLeft, Laptop, Package as App
 } from 'lucide-vue-next'
 import { SettingsIcon as Settings } from '@memohai/icon/ui'
@@ -277,9 +312,9 @@ import { computed, ref, watch, onMounted, toValue, nextTick, type Ref } from 'vu
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { BadgeCount, NavItem, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
-import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
+import { useMutation, useQueryCache } from '@pinia/colada'
 import {
-  getBotsById, putBotsById,
+  putBotsById,
   getBotsByIdChecks,
   getBotsByBotIdContainer,
   getBotsByBotIdContainerSnapshots,
@@ -290,13 +325,13 @@ import type {
   HandlersListSnapshotsResponse,
 } from '@memohai/sdk'
 import { useCapabilitiesStore } from '@/store/capabilities'
+import { useBotQuery } from '@/composables/api/useBot'
 
 import BotAdvanced from './components/bot-advanced.vue'
 import BotSettings from './components/bot-settings.vue'
 import BotChannels from './components/bot-channels.vue'
 import BotMcp from './components/bot-mcp.vue'
 import BotMemory from './components/bot-memory.vue'
-import BotEmail from './components/bot-email.vue'
 import BotOverview from './components/bot-overview.vue'
 import BotContainer from './components/bot-container.vue'
 import BotRemoteRuntime from './components/bot-remote-runtime.vue'
@@ -359,14 +394,13 @@ const routeIdentifier = computed(() => {
   return typeof id === 'string' ? id : ''
 })
 
-const { data: bot } = useQuery({
-  key: () => ['bot', routeIdentifier.value],
-  query: async () => {
-    const { data } = await getBotsById({ path: { id: routeIdentifier.value }, throwOnError: true })
-    return data
-  },
-  enabled: () => !!routeIdentifier.value,
-})
+const { data: bot, error: botError, refetch: refetchBot } = useBotQuery(routeIdentifier)
+
+const botMissing = computed(() => bot.value === null)
+// Only a first load that failed replaces the page; a failed refetch keeps the
+// bot already on screen.
+const botLoadFailed = computed(() => !!botError.value && bot.value === undefined)
+const botUnavailable = computed(() => botMissing.value || botLoadFailed.value)
 
 const botId = computed(() => bot.value?.id ?? '')
 
@@ -408,7 +442,6 @@ const tabList = computed(() => {
     { value: 'advanced', label: 'bots.tabs.advanced', icon: SlidersHorizontal, component: BotAdvanced, params: { 'bot-id': bot_id, 'workspace-backend': botWorkspaceBackend.value } },
     { value: 'access', label: 'bots.tabs.access', icon: ShieldAlert, component: BotAccess, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
     { value: 'agents', label: 'bots.tabs.agents', icon: BotIcon, component: BotAgents, params: { 'bot-id': bot_id } },
-    { value: 'email', label: 'bots.tabs.email', icon: Mail, component: BotEmail, params: { 'bot-id': bot_id } },
     { value: 'mcp', label: 'bots.tabs.mcp', icon: Link, component: BotMcp, params: { 'bot-id': bot_id } },
     { value: 'apps', label: 'bots.tabs.apps', icon: App, component: BotApps, params: { 'bot-id': bot_id } },
   ] satisfies Array<BotDetailsTabRule & {
@@ -427,8 +460,9 @@ const searchQuery = ref('')
 
 const searchIndex = computed(() => {
   return [
-    { tab: 'general', key: 'bots.settings.blocks.global', keywords: ['name', 'avatar', 'description', 'timezone'] },
-    { tab: 'general', key: 'bots.settings.blocks.interaction', keywords: ['language', 'chat model', 'reasoning', 'model', 'llm', '模型', '换模型', '更换模型', 'モデル'] },
+    { tab: 'general', key: 'bots.name', keywords: ['name', 'url', '名称'] },
+    { tab: 'general', key: 'bots.timezone', keywords: ['timezone', 'schedule', '时区', '定时', 'タイムゾーン'] },
+    { tab: 'general', key: 'bots.settings.blocks.interaction', keywords: ['chat model', 'reasoning', 'model', 'llm', '模型', '换模型', '更换模型', 'モデル'] },
     { tab: 'general', key: 'bots.settings.blocks.context', keywords: ['browser', 'search', 'provider'] },
     { tab: 'general', key: 'bots.settings.blocks.multimedia', keywords: ['image', 'tts', 'transcription'] },
     { tab: 'general', key: 'bots.settings.dangerZone', keywords: ['delete', 'remove'] },
@@ -444,7 +478,6 @@ const searchIndex = computed(() => {
     { tab: 'advanced', section: 'network', key: 'bots.tabs.network', keywords: ['network', 'proxy', 'vpn', '网络', 'ネットワーク'] },
     { tab: 'advanced', section: 'hooks', key: 'bots.hooks.title', keywords: ['hooks', 'events', 'tool calls', 'approval', 'workspace'] },
     { tab: 'agents', key: 'bots.tabs.agents', keywords: ['codex', 'claude code', 'external agent', 'acp'] },
-    { tab: 'email', key: 'bots.email.title', keywords: ['smtp', 'imap', 'mailbox', 'bindings'] },
     { tab: 'mcp', key: 'bots.tabs.mcp', keywords: ['servers', 'connect', 'custom mcp'] },
     { tab: 'advanced', section: 'compaction', key: 'bots.tabs.compaction', keywords: ['compaction', 'compress', 'summarize', 'context window'] },
   ].filter(item => botWorkspaceBackend.value !== 'remote'
@@ -534,7 +567,7 @@ function closeMobileDetail(): void {
 
 const groupedTabs = computed(() => [
   { key: 'core', keys: ['overview', 'general', 'channels'] },
-  { key: 'capabilities', keys: ['memory', 'agents', 'apps', 'mcp', 'container', 'remote-runtime', 'email'] },
+  { key: 'capabilities', keys: ['memory', 'agents', 'apps', 'mcp', 'container', 'remote-runtime'] },
   { key: 'administration', keys: ['advanced', 'access'] },
 ].map(group => ({
   key: group.key,

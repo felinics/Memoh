@@ -10,6 +10,8 @@ import (
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/partmeta"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 // TranscriptRecorder folds stream events into the persisted round transcript.
@@ -51,7 +53,7 @@ func (b *TranscriptRecorder) Add(ev event.StreamEvent) {
 		// Messages must still apply when the reply never streamed as deltas.
 		b.flushAssistant()
 		b.output = append(b.output, sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
-			sdk.TextPart{Text: ev.Delta, ProviderMetadata: map[string]any{"runtime_command": ev.ToolName}},
+			sdk.TextPart{Text: ev.Delta, ProviderMetadata: partmeta.Fold(map[string]any{"runtime_command": ev.ToolName})},
 		}})
 	case event.ToolCallStart:
 		b.upsertToolCallStart(ev)
@@ -158,7 +160,7 @@ func (b *TranscriptRecorder) appendToolResult(ev event.StreamEvent) {
 	b.output = append(b.output, sdk.ToolMessage(sdk.ToolResultPart{
 		ToolCallID: strings.TrimSpace(ev.ToolCallID),
 		ToolName:   strings.TrimSpace(ev.ToolName),
-		Result:     result,
+		Result:     toolexec.OutputFromValue(result),
 		IsError:    isError,
 	}))
 }
@@ -212,12 +214,9 @@ func (b *TranscriptRecorder) attachToolMetadata(ev event.StreamEvent, key string
 	toolName := strings.TrimSpace(ev.ToolName)
 	if idx := b.findToolCallPart(toolCallID, toolName); idx >= 0 {
 		toolCall := b.assistantParts[idx].(sdk.ToolCallPart)
-		if toolCall.ProviderMetadata == nil {
-			toolCall.ProviderMetadata = map[string]any{}
-		}
-		toolCall.ProviderMetadata[key] = value
+		toolCall.ProviderMetadata = partmeta.Set(toolCall.ProviderMetadata, key, value)
 		if ev.Input != nil {
-			toolCall.Input = ev.Input
+			toolCall.Input = toolexec.ArgumentsFromValue(ev.Input)
 		}
 		b.assistantParts[idx] = toolCall
 		return
@@ -226,12 +225,10 @@ func (b *TranscriptRecorder) attachToolMetadata(ev event.StreamEvent, key string
 		b.flushAssistant()
 	}
 	b.assistantParts = append(b.assistantParts, sdk.ToolCallPart{
-		ToolCallID: toolCallID,
-		ToolName:   toolName,
-		Input:      ev.Input,
-		ProviderMetadata: map[string]any{
-			key: value,
-		},
+		ToolCallID:       toolCallID,
+		ToolName:         toolName,
+		Input:            toolexec.ArgumentsFromValue(ev.Input),
+		ProviderMetadata: partmeta.Set(nil, key, value),
 	})
 }
 
@@ -249,7 +246,7 @@ func (b *TranscriptRecorder) upsertToolCallStart(ev event.StreamEvent) {
 			toolCall.ToolName = toolName
 		}
 		if ev.Input != nil {
-			toolCall.Input = ev.Input
+			toolCall.Input = toolexec.ArgumentsFromValue(ev.Input)
 		}
 		b.assistantParts[idx] = toolCall
 		return
@@ -257,7 +254,7 @@ func (b *TranscriptRecorder) upsertToolCallStart(ev event.StreamEvent) {
 	b.assistantParts = append(b.assistantParts, sdk.ToolCallPart{
 		ToolCallID: toolCallID,
 		ToolName:   toolName,
-		Input:      ev.Input,
+		Input:      toolexec.ArgumentsFromValue(ev.Input),
 	})
 }
 
@@ -312,49 +309,4 @@ func TranscriptFromEvents(events []event.StreamEvent, fallbackText string) []sdk
 		builder.Add(ev)
 	}
 	return builder.Messages(fallbackText)
-}
-
-// AppendTranscriptText appends extra text (e.g. a failure note) to a
-// finalized transcript with the same merge semantics the builder uses while
-// streaming: merge into the trailing assistant text when possible, otherwise
-// start a new assistant message.
-func AppendTranscriptText(messages []sdk.Message, delta string) []sdk.Message {
-	delta = strings.TrimSpace(delta)
-	if delta == "" {
-		return messages
-	}
-	out := append([]sdk.Message(nil), messages...)
-	if len(out) > 0 {
-		last := out[len(out)-1]
-		if last.Role == sdk.MessageRoleAssistant && !messageHasToolCall(last) {
-			if len(last.Content) > 0 {
-				if text, ok := last.Content[len(last.Content)-1].(sdk.TextPart); ok {
-					text.Text = strings.TrimSpace(text.Text + "\n\n" + delta)
-					content := append([]sdk.MessagePart(nil), last.Content...)
-					content[len(content)-1] = text
-					last.Content = content
-					out[len(out)-1] = last
-					return out
-				}
-			}
-			content := append([]sdk.MessagePart(nil), last.Content...)
-			content = append(content, sdk.TextPart{Text: delta})
-			last.Content = content
-			out[len(out)-1] = last
-			return out
-		}
-	}
-	return append(out, sdk.Message{
-		Role:    sdk.MessageRoleAssistant,
-		Content: []sdk.MessagePart{sdk.TextPart{Text: delta}},
-	})
-}
-
-func messageHasToolCall(message sdk.Message) bool {
-	for _, part := range message.Content {
-		if _, ok := part.(sdk.ToolCallPart); ok {
-			return true
-		}
-	}
-	return false
 }

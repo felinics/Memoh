@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/agent/application"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/apperror"
@@ -48,7 +49,7 @@ type agentCredentialPutRequest struct {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Bot Agent ID"
 // @Success 200 {object} agentcredential.PublicCredential
-// @Failure 404 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/agents/{id}/credential [get].
 func (h *AgentCredentialHandler) Get(c echo.Context) error {
 	botID, botAgentID, err := h.requireBotManage(c)
@@ -73,10 +74,10 @@ func (h *AgentCredentialHandler) Get(c echo.Context) error {
 // @Param id path string true "Bot Agent ID"
 // @Param payload body agentCredentialPutRequest true "Secret"
 // @Success 200 {object} agentcredential.PublicCredential
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 422 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 422 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/agents/{id}/credential [put].
 func (h *AgentCredentialHandler) Put(c echo.Context) error {
 	botID, botAgentID, err := h.requireBotManage(c)
@@ -116,7 +117,7 @@ func (h *AgentCredentialHandler) Put(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Bot Agent ID"
 // @Success 204
-// @Failure 404 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/agents/{id}/credential [delete].
 func (h *AgentCredentialHandler) Delete(c echo.Context) error {
 	botID, botAgentID, err := h.requireBotManage(c)
@@ -127,7 +128,7 @@ func (h *AgentCredentialHandler) Delete(c echo.Context) error {
 	if err != nil {
 		return mapAgentCredentialError(agentcredential.ErrNotFound)
 	}
-	if err := h.runtimes.PurgeBotAgentAuth(c.Request().Context(), agent.Runtime, botID, botAgentID); err != nil {
+	if err := application.ExternalRuntimeError(h.runtimes.PurgeBotAgentAuth(c.Request().Context(), agent.Runtime, botID, botAgentID)); err != nil {
 		if apperror.CodeOf(err) != "" {
 			return err
 		}

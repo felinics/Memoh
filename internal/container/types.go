@@ -12,6 +12,9 @@ var (
 	ErrAlreadyExists   = errors.New("already exists")
 	ErrConflict        = errors.New("conflict")
 	ErrRuntime         = errors.New("runtime operation failed")
+	// ErrUnavailable reports that the runtime, or a service it called, could
+	// not be reached or refused the call for now. A later attempt may succeed.
+	ErrUnavailable = errors.New("runtime unavailable")
 )
 
 func IsNotFound(err error) bool {
@@ -120,9 +123,22 @@ type ContainerMetrics struct {
 	SampledAt time.Time
 	CPU       *CPUMetrics
 	Memory    *MemoryMetrics
+	// Storage is set only by backends whose runtime reports filesystem usage
+	// itself. When nil, the workspace manager measures the snapshot on the host.
+	Storage *StorageMetrics
+}
+
+type StorageMetrics struct {
+	UsedBytes  uint64
+	LimitBytes uint64
+	// UsedUnknown marks UsedBytes as unavailable while LimitBytes is still
+	// known, e.g. a runtime paused past the raw sample retention window.
+	UsedUnknown bool
 }
 
 type CPUMetrics struct {
+	// Cores is the allotted vCPU count when the backend reports it; 0 means unknown.
+	Cores             int64
 	UsagePercent      float64
 	UsageNanoseconds  uint64
 	UsageNanocores    uint64

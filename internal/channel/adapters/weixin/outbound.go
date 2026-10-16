@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/media"
 )
 
@@ -93,11 +94,11 @@ func sendMediaBytes(ctx context.Context, client *Client, cfg adapterConfig, targ
 	if err != nil {
 		return fmt.Errorf("weixin: get upload url: %w", err)
 	}
-	if strings.TrimSpace(uploadResp.UploadParam) == "" {
-		return errors.New("weixin: empty upload_param")
+	if strings.TrimSpace(uploadResp.UploadFullURL) == "" && strings.TrimSpace(uploadResp.UploadParam) == "" {
+		return errors.New("weixin: getuploadurl returned neither upload_full_url nor upload_param")
 	}
 
-	downloadParam, err := uploadToCDN(cfg.CDNBaseURL, uploadResp.UploadParam, filekeyHex, data, aesKey)
+	downloadParam, err := uploadToCDN(cfg.CDNBaseURL, uploadResp, filekeyHex, data, aesKey)
 	if err != nil {
 		return fmt.Errorf("weixin: cdn upload: %w", err)
 	}
@@ -129,11 +130,11 @@ func sendMediaBytes(ctx context.Context, client *Client, cfg adapterConfig, targ
 			},
 		}
 	default:
-		return fmt.Errorf("weixin: unsupported media item type %d", itemType)
+		return errs.New("weixin: unsupported media item type", slog.Int("item_type", itemType))
 	}
 
 	if logger != nil {
-		logger.Debug("weixin media uploaded",
+		logger.DebugContext(ctx, "weixin media uploaded",
 			slog.String("filekey", filekeyHex),
 			slog.Int("raw_size", len(data)),
 			slog.Int("cipher_size", fileSize),
@@ -195,17 +196,17 @@ func sendMediaBytesAsFile(ctx context.Context, client *Client, cfg adapterConfig
 	if err != nil {
 		return fmt.Errorf("weixin: get upload url: %w", err)
 	}
-	if strings.TrimSpace(uploadResp.UploadParam) == "" {
-		return errors.New("weixin: empty upload_param")
+	if strings.TrimSpace(uploadResp.UploadFullURL) == "" && strings.TrimSpace(uploadResp.UploadParam) == "" {
+		return errors.New("weixin: getuploadurl returned neither upload_full_url nor upload_param")
 	}
 
-	downloadParam, err := uploadToCDN(cfg.CDNBaseURL, uploadResp.UploadParam, filekeyHex, data, aesKey)
+	downloadParam, err := uploadToCDN(cfg.CDNBaseURL, uploadResp, filekeyHex, data, aesKey)
 	if err != nil {
 		return fmt.Errorf("weixin: cdn upload: %w", err)
 	}
 
 	if logger != nil {
-		logger.Debug("weixin file uploaded",
+		logger.DebugContext(ctx, "weixin file uploaded",
 			slog.String("filekey", filekeyHex),
 			slog.String("filename", fileName),
 			slog.Int("raw_size", len(data)),

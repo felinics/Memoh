@@ -13,6 +13,14 @@ export interface ProviderPreset {
 
 export const providerPresets: ProviderPreset[] = [
   {
+    id: 'opencode-go',
+    name: 'OpenCode Go',
+    clientType: 'opencode-go',
+    baseUrl: 'https://opencode.ai/zen/go/v1',
+    icon: 'opencode-go',
+    source: 'opencode-go.yaml',
+  },
+  {
     id: 'openai',
     name: 'OpenAI',
     clientType: 'openai-responses',
@@ -199,7 +207,7 @@ export const providerPresets: ProviderPreset[] = [
     id: 'newapi',
     name: 'New API',
     clientType: 'openai-completions',
-    baseUrl: 'https://your.new-api-provider.com',
+    baseUrl: 'https://your.new-api-provider.com/v1',
     icon: 'newapi-color',
     source: 'newapi.yaml',
   },

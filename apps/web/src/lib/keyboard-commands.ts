@@ -3,6 +3,18 @@ export const appKeyboardCommands = {
   saveActiveFile: 'save-active-file',
   toggleSidebar: 'toggle-sidebar',
   openSettings: 'open-settings',
+  newChatSession: 'new-chat-session',
+  focusChatInput: 'focus-chat-input',
+  showSessions: 'show-sessions',
+  showFiles: 'show-files',
+  showSchedule: 'show-schedule',
+  showSupermarket: 'show-supermarket',
+  nextWorkspaceTab: 'next-workspace-tab',
+  previousWorkspaceTab: 'previous-workspace-tab',
+  splitWorkspaceRight: 'split-workspace-right',
+  splitWorkspaceBelow: 'split-workspace-below',
+  newTerminal: 'new-terminal',
+  newBrowser: 'new-browser',
   closeMediaLightbox: 'close-media-lightbox',
   mediaLightboxPrev: 'media-lightbox-prev',
   mediaLightboxNext: 'media-lightbox-next',
@@ -66,7 +78,9 @@ export function createScopedKeyboardBinding(
   }
 }
 
-export function createKeyboardCommandRegistry(): KeyboardCommandRegistry {
+export function createKeyboardCommandRegistry(
+  canDispatch: (command: AppKeyboardCommand) => boolean = () => true,
+): KeyboardCommandRegistry {
   const handlers = new Map<AppKeyboardCommand, Set<KeyboardCommandHandler>>()
 
   return {
@@ -81,13 +95,13 @@ export function createKeyboardCommandRegistry(): KeyboardCommandRegistry {
     },
 
     dispatch(command) {
+      if (!canDispatch(command)) return true
       const commandHandlers = handlers.get(command)
       if (!commandHandlers) return false
-      let handled = false
       for (const handler of commandHandlers) {
-        handled = handler() === true || handled
+        if (handler() === true) return true
       }
-      return handled
+      return false
     },
 
     connect(api, onUnhandled) {

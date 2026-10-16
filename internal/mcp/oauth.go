@@ -15,12 +15,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
-	"github.com/felinics/memoh/internal/textutil"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // OAuthService manages OAuth flows for MCP connections.
@@ -113,7 +114,7 @@ func (s *OAuthService) Discover(ctx context.Context, serverURL string) (*Discove
 	} else {
 		// Fallback: some MCP servers (e.g. Linear) don't serve PRM.
 		// Try the server origin directly as the authorization server.
-		s.logger.Info("PRM unavailable, falling back to direct ASM discovery",
+		s.logger.InfoContext(ctx, "PRM unavailable, falling back to direct ASM discovery",
 			slog.String("server_url", serverURL),
 			slog.Any("prm_error", prmErr),
 		)
@@ -200,11 +201,14 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, connectionID, cli
 
 	token, err := s.queries.GetMCPOAuthToken(ctx, connUUID)
 	if err != nil {
-		return nil, fmt.Errorf("oauth not discovered for this connection: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("%w: %w", ErrOAuthNotDiscovered, err)
+		}
+		return nil, fmt.Errorf("get oauth token: %w", err)
 	}
 
 	if token.AuthorizationEndpoint == "" {
-		return nil, errors.New("authorization endpoint not configured")
+		return nil, fmt.Errorf("%w: authorization endpoint not configured", ErrOAuthNotDiscovered)
 	}
 
 	// Resolve client_id via priority chain
@@ -218,7 +222,7 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, connectionID, cli
 		// Attempt Dynamic Client Registration (RFC 7591)
 		regResult, regErr := s.registerClient(ctx, token.RegistrationEndpoint, callbackURL)
 		if regErr != nil {
-			s.logger.Warn("dynamic client registration failed", slog.Any("error", regErr))
+			s.logger.WarnContext(ctx, "dynamic client registration failed", slog.Any("error", regErr))
 		} else {
 			clientID = regResult.ClientID
 			dcrSecret := regResult.ClientSecret
@@ -229,7 +233,7 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, connectionID, cli
 				ClientID:         clientID,
 				RedirectUri:      callbackURL,
 			}); err != nil {
-				s.logger.Warn("failed to save DCR client_id", slog.Any("error", err))
+				s.logger.WarnContext(ctx, "failed to save DCR client_id", slog.Any("error", err))
 			}
 			if dcrSecret != "" {
 				clientSecret = dcrSecret
@@ -238,11 +242,11 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, connectionID, cli
 					ClientSecret: dcrSecret,
 				})
 			}
-			s.logger.Info("dynamic client registration succeeded", slog.String("client_id", clientID))
+			s.logger.InfoContext(ctx, "dynamic client registration succeeded", slog.String("client_id", clientID))
 		}
 	}
 	if clientID == "" {
-		return nil, errors.New("client_id is required: the authorization server does not support automatic registration, please provide a client_id from a registered OAuth application")
+		return nil, fmt.Errorf("%w: the authorization server does not support automatic registration, please provide a client_id from a registered OAuth application", ErrClientIDRequired)
 	}
 
 	// Persist client_secret if provided by the user
@@ -311,11 +315,14 @@ func (s *OAuthService) HandleCallback(ctx context.Context, state, code string) (
 
 	token, err := s.queries.GetMCPOAuthTokenByState(ctx, state)
 	if err != nil {
-		return "", fmt.Errorf("invalid or expired state parameter: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("%w: %w", ErrOAuthStateInvalid, err)
+		}
+		return "", fmt.Errorf("get oauth token by state: %w", err)
 	}
 
 	if token.TokenEndpoint == "" || token.PkceCodeVerifier == "" {
-		return "", errors.New("invalid OAuth state: missing token endpoint or code verifier")
+		return "", fmt.Errorf("%w: missing token endpoint or code verifier", ErrOAuthStateInvalid)
 	}
 
 	redirectURI := token.RedirectUri
@@ -324,7 +331,7 @@ func (s *OAuthService) HandleCallback(ctx context.Context, state, code string) (
 	}
 	tokenResp, err := s.exchangeCode(ctx, token.TokenEndpoint, code, token.PkceCodeVerifier, token.ClientID, token.ClientSecret, token.ResourceUri, redirectURI)
 	if err != nil {
-		return "", fmt.Errorf("token exchange failed: %w", err)
+		return "", fmt.Errorf("%w: %w", ErrTokenExchange, err)
 	}
 
 	var expiresAt pgtype.Timestamptz
@@ -396,7 +403,7 @@ func (s *OAuthService) GetValidToken(ctx context.Context, connectionID string) (
 			ExpiresAt:    expiresAt,
 			Scope:        refreshed.Scope,
 		}); err != nil {
-			s.logger.Warn("failed to save refreshed tokens", slog.Any("error", err))
+			s.logger.WarnContext(ctx, "failed to save refreshed tokens", slog.Any("error", err))
 		}
 		return refreshed.AccessToken, nil
 	}
@@ -555,8 +562,7 @@ func (s *OAuthService) fetchProtectedResourceMetadata(ctx context.Context, metad
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("resource metadata returned %d: %s", resp.StatusCode, string(body))
+		return nil, errs.NewDependency("resource metadata request failed", slog.Int("status", resp.StatusCode))
 	}
 
 	var meta protectedResourceMetadata
@@ -645,7 +651,7 @@ func (s *OAuthService) exchangeCode(ctx context.Context, tokenEndpoint, code, co
 		data.Set("resource", resourceURI)
 	}
 
-	s.logger.Info("exchangeCode request",
+	s.logger.InfoContext(ctx, "exchangeCode request",
 		slog.String("token_endpoint", tokenEndpoint),
 		slog.String("redirect_uri", redirectURI),
 		slog.String("client_id", clientID),
@@ -673,12 +679,12 @@ func (s *OAuthService) exchangeCode(ctx context.Context, tokenEndpoint, code, co
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token exchange returned %d: %s", resp.StatusCode, string(body))
+		return nil, errs.NewDependency("token exchange request failed", slog.Int("status", resp.StatusCode))
 	}
 
 	tok, err := parseTokenResponse(body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse token response: %w (body: %s)", err, truncate(string(body), 256))
+		return nil, errs.WrapDependency(err, "failed to parse token response")
 	}
 	return tok, nil
 }
@@ -729,10 +735,6 @@ func parseTokenResponse(body []byte) (*tokenResponse, error) {
 	return &tok, nil
 }
 
-func truncate(s string, maxLen int) string {
-	return textutil.TruncateRunesWithSuffix(s, maxLen, "...")
-}
-
 func (s *OAuthService) refreshToken(ctx context.Context, tokenEndpoint, refreshToken, clientID, resourceURI string) (*tokenResponse, error) {
 	data := url.Values{
 		"grant_type":    {"refresh_token"},
@@ -762,7 +764,7 @@ func (s *OAuthService) refreshToken(ctx context.Context, tokenEndpoint, refreshT
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token refresh returned %d: %s", resp.StatusCode, string(body))
+		return nil, errs.NewDependency("token refresh request failed", slog.Int("status", resp.StatusCode))
 	}
 
 	tok, err := parseTokenResponse(body)
@@ -813,8 +815,7 @@ func (s *OAuthService) registerClient(ctx context.Context, registrationEndpoint,
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return nil, fmt.Errorf("DCR returned %d: %s", resp.StatusCode, string(respBody))
+		return nil, errs.NewDependency("dynamic client registration failed", slog.Int("status", resp.StatusCode))
 	}
 
 	var result dcrResponse

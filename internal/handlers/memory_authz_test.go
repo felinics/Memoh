@@ -24,6 +24,7 @@ type recordingMemoryProvider struct {
 	updateCalls      []string
 	deleteCalls      []string
 	deleteBatchCalls [][]string
+	deleteAllCalls   int
 }
 
 func (p *recordingMemoryProvider) Update(_ context.Context, req memprovider.UpdateRequest) (memprovider.MemoryItem, error) {
@@ -31,12 +32,12 @@ func (p *recordingMemoryProvider) Update(_ context.Context, req memprovider.Upda
 	return memprovider.MemoryItem{ID: req.MemoryID}, nil
 }
 
-func (p *recordingMemoryProvider) Delete(_ context.Context, memoryID string) (memprovider.DeleteResponse, error) {
+func (p *recordingMemoryProvider) Delete(_ context.Context, _ string, memoryID string) (memprovider.DeleteResponse, error) {
 	p.deleteCalls = append(p.deleteCalls, memoryID)
 	return memprovider.DeleteResponse{}, nil
 }
 
-func (p *recordingMemoryProvider) DeleteBatch(_ context.Context, memoryIDs []string) (memprovider.DeleteResponse, error) {
+func (p *recordingMemoryProvider) DeleteBatch(_ context.Context, _ string, memoryIDs []string) (memprovider.DeleteResponse, error) {
 	p.deleteBatchCalls = append(p.deleteBatchCalls, memoryIDs)
 	return memprovider.DeleteResponse{}, nil
 }
@@ -301,5 +302,33 @@ func TestChatDeleteBatchAllowsOwnBotMemoryIDs(t *testing.T) {
 	}
 	if len(provider.deleteBatchCalls) != 1 || len(provider.deleteBatchCalls[0]) != 2 {
 		t.Fatalf("provider.DeleteBatch calls = %v, want one call with 2 ids", provider.deleteBatchCalls)
+	}
+}
+
+func (p *recordingMemoryProvider) DeleteAll(_ context.Context, _ memprovider.DeleteAllRequest) (memprovider.DeleteResponse, error) {
+	p.deleteAllCalls++
+	return memprovider.DeleteResponse{}, nil
+}
+
+func TestChatDeleteMalformedBodyNeverFallsBackToDeleteAll(t *testing.T) {
+	for _, body := range []string{`{"memory_ids":`, `{"memory_ids":"bad"}`, `{"memory_ids":[1]}`, `{"memory_id":"typo"}`, `{} {}`, `{} trailing`, `null`} {
+		t.Run(body, func(t *testing.T) {
+			botID, userID := "11111111-1111-1111-1111-111111111111", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+			h, p := newMemoryAuthzHandler(t, botID, userID)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/bots/"+botID+"/memory", bytes.NewBufferString(body))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			c := testAuthContext(echo.New(), req, httptest.NewRecorder(), userID)
+			c.SetPath("/bots/:bot_id/memory")
+			c.SetParamNames("bot_id")
+			c.SetParamValues(botID)
+			err := h.ChatDelete(c)
+			var httpErr *echo.HTTPError
+			if !errors.As(err, &httpErr) || httpErr.Code != 400 {
+				t.Fatalf("want bad request, got %v", err)
+			}
+			if p.deleteAllCalls != 0 || len(p.deleteBatchCalls) != 0 {
+				t.Fatal("malformed request deleted memories")
+			}
+		})
 	}
 }

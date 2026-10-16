@@ -30,4 +30,24 @@ describe('computeMarqueeMotion', () => {
     const dwellMs = (2 * MARQUEE_OVERSHOOT_PX * 1000) / MARQUEE_SPEED_PX_PER_S
     expect(dwellMs).toBe(400)
   })
+
+  it('leaves a short title still fitting beside the overlay', () => {
+    expect(computeMarqueeMotion(-50, 24)).toEqual({ truncated: false, travelPx: 0, durationMs: 0 })
+  })
+
+  it('reveals the tail of a title that only overflows while actions are visible', () => {
+    const titleWidth = 195.5
+    const viewportWidth = 200.25
+    const overlayWidth = 24
+    expect(computeMarqueeMotion(titleWidth - viewportWidth).truncated).toBe(false)
+    const covered = computeMarqueeMotion(titleWidth - viewportWidth, overlayWidth)
+    expect(covered.truncated).toBe(true)
+    expect(titleWidth - covered.travelPx).toBe(viewportWidth - overlayWidth)
+  })
+
+  it('accounts for the overlay at the endpoint without changing reading speed', () => {
+    const covered = computeMarqueeMotion(120, 24)
+    expect(covered.travelPx).toBe(144)
+    expect(covered.durationMs).toBe(Math.round(((144 + 2 * MARQUEE_OVERSHOOT_PX) * 2000) / MARQUEE_SPEED_PX_PER_S))
+  })
 })

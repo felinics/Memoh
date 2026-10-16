@@ -42,9 +42,12 @@ const props = withDefaults(defineProps<{
   loading?: boolean
   /** Overrides the confirm label (the enable flow says "Install and enable"). */
   confirmLabel?: string
+  /** Display names of missing prerequisites the Server installs first. */
+  prerequisites?: string[]
 }>(), {
   loading: false,
   confirmLabel: '',
+  prerequisites: () => [],
 })
 
 const emit = defineEmits<{
@@ -53,8 +56,9 @@ const emit = defineEmits<{
   confirm: [version: string]
 }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const { dependencyName } = useWorkspaceDependencyText()
+const prerequisiteNames = computed(() => new Intl.ListFormat(locale.value, { type: 'conjunction' }).format(props.prerequisites))
 
 const name = computed(() => (props.item ? dependencyName(props.item) : ''))
 const installedVersion = computed(() => formatDependencyVersion(props.item?.installed_version))
@@ -137,6 +141,12 @@ const submit = form.handleSubmit(({ version }) => {
       </DialogHeader>
 
       <DialogBody class="min-w-0 space-y-4">
+        <p
+          v-if="prerequisites.length"
+          class="text-sm text-muted-foreground break-words"
+        >
+          {{ t('bots.dependencies.confirm.prerequisites', { names: prerequisiteNames }) }}
+        </p>
         <form
           id="dependency-confirm-form"
           @submit.prevent="submit"

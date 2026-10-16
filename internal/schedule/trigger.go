@@ -1,9 +1,17 @@
 package schedule
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrSessionBusy is returned by a Triggerer when the target session already
+// has an active run. The fire is dropped, not retried.
+var ErrSessionBusy = errors.New("session busy")
 
 // TriggerPayload describes the parameters passed to the chat side when a schedule triggers.
 type TriggerPayload struct {
+	FireID      string
 	ID          string
 	Name        string
 	Description string

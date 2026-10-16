@@ -11,9 +11,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // encryptAESECB encrypts plaintext with AES-128-ECB and PKCS7 padding.
@@ -39,7 +43,7 @@ func decryptAESECB(ciphertext, key []byte) ([]byte, error) {
 	}
 	bs := block.BlockSize()
 	if len(ciphertext)%bs != 0 {
-		return nil, fmt.Errorf("ciphertext length %d is not a multiple of block size %d", len(ciphertext), bs)
+		return nil, errs.New("ciphertext length is not a multiple of the block size", slog.Int("length", len(ciphertext)), slog.Int("block_size", bs))
 	}
 	out := make([]byte, len(ciphertext))
 	for i := 0; i < len(ciphertext); i += bs {
@@ -64,11 +68,11 @@ func pkcs7Unpad(data []byte, blockSize int) ([]byte, error) {
 	}
 	padding := int(data[len(data)-1])
 	if padding > blockSize || padding == 0 {
-		return nil, fmt.Errorf("invalid pkcs7 padding %d", padding)
+		return nil, errs.New("invalid pkcs7 padding", slog.Int("padding", padding))
 	}
 	for i := len(data) - padding; i < len(data); i++ {
 		if data[i] != byte(padding) { //nolint:gosec // padding is always 1..blockSize(16)
-			return nil, fmt.Errorf("invalid pkcs7 padding at byte %d", i)
+			return nil, errs.New("invalid pkcs7 padding byte", slog.Int("index", i))
 		}
 	}
 	return data[:len(data)-padding], nil
@@ -102,7 +106,7 @@ func parseAESKey(aesKeyBase64 string) ([]byte, error) {
 			return key, nil
 		}
 	}
-	return nil, fmt.Errorf("aes key must be 16 raw bytes or 32-char hex, got %d bytes", len(decoded))
+	return nil, errs.New("aes key must be 16 raw bytes or 32-char hex", slog.Int("length", len(decoded)))
 }
 
 func isHexString(s string) bool {
@@ -125,13 +129,31 @@ func buildCDNUploadURL(cdnBaseURL, uploadParam, filekey string) string {
 		"&filekey=" + url.QueryEscape(filekey)
 }
 
+// resolveCDNURL picks the server-built URL when iLink sent one, else builds it
+// from the configured CDN base. Server URLs must be https: they arrive inside
+// message payloads and are fetched server-side.
+func resolveCDNURL(fullURL string, build func() string) (string, error) {
+	fullURL = strings.TrimSpace(fullURL)
+	if fullURL == "" {
+		return build(), nil
+	}
+	parsed, err := url.Parse(fullURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return "", errors.New("cdn: refusing non-https full url")
+	}
+	return fullURL, nil
+}
+
 // downloadAndDecrypt fetches encrypted bytes from the CDN and decrypts with AES-128-ECB.
-func downloadAndDecrypt(cdnBaseURL, encryptedQueryParam, aesKeyBase64 string) ([]byte, error) {
+func downloadAndDecrypt(cdnBaseURL, encryptedQueryParam, fullURL, aesKeyBase64 string) ([]byte, error) {
 	key, err := parseAESKey(aesKeyBase64)
 	if err != nil {
 		return nil, err
 	}
-	u := buildCDNDownloadURL(encryptedQueryParam, cdnBaseURL)
+	u, err := resolveCDNURL(fullURL, func() string { return buildCDNDownloadURL(encryptedQueryParam, cdnBaseURL) })
+	if err != nil {
+		return nil, err
+	}
 	encrypted, err := fetchURL(u)
 	if err != nil {
 		return nil, fmt.Errorf("cdn download: %w", err)
@@ -140,8 +162,11 @@ func downloadAndDecrypt(cdnBaseURL, encryptedQueryParam, aesKeyBase64 string) ([
 }
 
 // downloadPlain fetches unencrypted bytes from the CDN.
-func downloadPlain(cdnBaseURL, encryptedQueryParam string) ([]byte, error) {
-	u := buildCDNDownloadURL(encryptedQueryParam, cdnBaseURL)
+func downloadPlain(cdnBaseURL, encryptedQueryParam, fullURL string) ([]byte, error) {
+	u, err := resolveCDNURL(fullURL, func() string { return buildCDNDownloadURL(encryptedQueryParam, cdnBaseURL) })
+	if err != nil {
+		return nil, err
+	}
 	return fetchURL(u)
 }
 
@@ -152,19 +177,22 @@ func fetchURL(u string) ([]byte, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("cdn %d: %s", resp.StatusCode, string(body))
+		return nil, errs.NewDependency("weixin cdn download failed", slog.Int("status", resp.StatusCode))
 	}
 	return io.ReadAll(resp.Body)
 }
 
 // uploadToCDN encrypts and uploads bytes to the WeChat CDN, returning the download param.
-func uploadToCDN(cdnBaseURL, uploadParam, filekey string, plaintext, aesKey []byte) (string, error) {
+// upload is the getuploadurl response; its UploadFullURL wins over UploadParam.
+func uploadToCDN(cdnBaseURL string, upload *GetUploadURLResponse, filekey string, plaintext, aesKey []byte) (string, error) {
 	ciphertext, err := encryptAESECB(plaintext, aesKey)
 	if err != nil {
 		return "", fmt.Errorf("cdn encrypt: %w", err)
 	}
-	u := buildCDNUploadURL(cdnBaseURL, uploadParam, filekey)
+	u, err := resolveCDNURL(upload.UploadFullURL, func() string { return buildCDNUploadURL(cdnBaseURL, upload.UploadParam, filekey) })
+	if err != nil {
+		return "", err
+	}
 
 	req, err := http.NewRequest(http.MethodPost, u, bytes.NewReader(ciphertext)) //nolint:noctx
 	if err != nil {
@@ -177,8 +205,7 @@ func uploadToCDN(cdnBaseURL, uploadParam, filekey string, plaintext, aesKey []by
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("cdn upload %d: %s", resp.StatusCode, string(body))
+		return "", errs.NewDependency("weixin cdn upload failed", slog.Int("status", resp.StatusCode))
 	}
 	downloadParam := resp.Header.Get("x-encrypted-param")
 	if downloadParam == "" {

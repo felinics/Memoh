@@ -222,6 +222,32 @@ describe('useChat.ws', () => {
     expect(third.sent).toEqual([])
   })
 
+  it('resends a draft message into the session the server named for it', () => {
+    vi.useFakeTimers()
+    const ws = connectWebSocket('bot-1', vi.fn())
+    const first = MockWebSocket.instances[0]!
+    first.open()
+
+    ws.send({ type: 'message', invocation_id: 'invocation-1', text: 'hello' })
+    // An unknown invocation is left alone; a named request is not renamed.
+    ws.bindSession('invocation-unknown', 'session-x')
+    ws.bindSession('invocation-1', 'session-created')
+    ws.bindSession('invocation-1', 'session-other')
+
+    first.close()
+    vi.advanceTimersByTime(1000)
+    const second = MockWebSocket.instances[1]!
+    second.open()
+
+    // The first name stands, and nothing else of the request changes.
+    expect(second.sent.map(payload => JSON.parse(payload))).toEqual([{
+      type: 'message',
+      invocation_id: 'invocation-1',
+      session_id: 'session-created',
+      text: 'hello',
+    }])
+  })
+
   it('forwards preference settlement before the response completes', () => {
     const onStreamEvent = vi.fn()
     connectWebSocket('bot-1', onStreamEvent)

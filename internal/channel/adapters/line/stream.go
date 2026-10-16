@@ -50,6 +50,10 @@ func (s *outboundStream) Push(ctx context.Context, event channel.PreparedStreamE
 		}
 		s.mu.Unlock()
 		return nil
+	case channel.StreamEventReset:
+		s.textBuilder.Reset()
+		s.mu.Unlock()
+		return nil
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) > 0 {
 			s.attachments = append(s.attachments, event.Attachments...)
@@ -71,7 +75,7 @@ func (s *outboundStream) Push(ctx context.Context, event channel.PreparedStreamE
 		return s.sendSnapshot(ctx, channel.PreparedMessage{
 			Message: channel.Message{
 				Format: channel.MessageFormatPlain,
-				Text:   "Error: " + errText,
+				Text:   channel.ErrorReplyText(event.ErrorCode, errText),
 			},
 		})
 	default:
@@ -140,7 +144,7 @@ func (s *outboundStream) sendSnapshot(ctx context.Context, prepared channel.Prep
 		Message: prepared,
 	})
 	if err != nil && sent > 0 {
-		s.adapter.logWarn("line stream partial send failed after push",
+		s.adapter.logWarn(ctx, "line stream partial send failed after push", err,
 			slog.String("config_id", s.cfg.ID),
 			slog.String("bot_id", s.cfg.BotID),
 			slog.String("target_hash", hashValue(s.target)),

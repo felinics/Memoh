@@ -228,11 +228,9 @@ func (s *Server) ListDir(ctx context.Context, req *pb.ListDirRequest) (*pb.ListD
 	}
 	dir = s.resolvePath(dir)
 
-	// Without max_entries, listings are unbounded on purpose: general callers
-	// (data export, data counting, secret cleanup) must see every entry,
-	// matching the pre-existing behavior. Callers with a hard ceiling - the
-	// ACP session-state capture - pass max_entries so the walk STOPS at the
-	// bound instead of collecting an attacker-sized tree into memory first.
+	// Without max_entries, callers such as data export and counting receive
+	// every entry. A positive limit stops traversal before an unbounded tree
+	// can be collected into memory.
 	maxEntries := int(req.GetMaxEntries())
 	var all []*pb.FileEntry
 	appendEntry := func(entry *pb.FileEntry) error {
@@ -258,7 +256,7 @@ func (s *Server) ListDir(ctx context.Context, req *pb.ListDirRequest) (*pb.ListD
 			return nil, ctxErr
 		}
 		if err != nil {
-			return nil, status.Errorf(codes.NotFound, "walk: %v", err)
+			return nil, listDirStatusError("walk", err)
 		}
 		sort.Slice(all, func(i, j int) bool { return all[i].GetPath() < all[j].GetPath() })
 
@@ -277,7 +275,7 @@ func (s *Server) ListDir(ctx context.Context, req *pb.ListDirRequest) (*pb.ListD
 			if ctxErr := contextStatusError(ctx); ctxErr != nil {
 				return nil, ctxErr
 			}
-			return nil, status.Errorf(codes.NotFound, "readdir: %v", err)
+			return nil, listDirStatusError("readdir", err)
 		}
 		sort.Slice(all, func(i, j int) bool { return all[i].GetPath() < all[j].GetPath() })
 	}
@@ -312,6 +310,17 @@ func (s *Server) ListDir(ctx context.Context, req *pb.ListDirRequest) (*pb.ListD
 }
 
 const listReadBatchEntries = 256
+
+func listDirStatusError(operation string, err error) error {
+	code := codes.Internal
+	// Listing a file reports ENOTDIR: the requested directory does not exist.
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		code = codes.NotFound
+	} else if errors.Is(err, fs.ErrPermission) {
+		code = codes.PermissionDenied
+	}
+	return status.Errorf(code, "%s: %v", operation, err)
+}
 
 func readDirBatched(ctx context.Context, dir string, visit func(fs.DirEntry) error) error {
 	file, err := os.Open(dir) //nolint:gosec // dir is resolved by the bridge workspace policy.
@@ -368,7 +377,19 @@ func walkDirBatched(ctx context.Context, root string, visit func(string, fs.DirE
 	return nil
 }
 
+type serializedExecStream struct {
+	pb.ContainerService_ExecServer
+	mu sync.Mutex
+}
+
+func (s *serializedExecStream) Send(output *pb.ExecOutput) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ContainerService_ExecServer.Send(output)
+}
+
 func (s *Server) Exec(stream pb.ContainerService_ExecServer) error {
+	stream = &serializedExecStream{ContainerService_ExecServer: stream}
 	firstMsg, err := stream.Recv()
 	if err != nil {
 		return status.Error(codes.InvalidArgument, "failed to receive exec config")
@@ -489,10 +510,18 @@ func (s *Server) execPTY(stream pb.ContainerService_ExecServer, firstMsg *pb.Exe
 	workDir := s.resolveExecWorkDir(firstMsg.GetWorkDir())
 
 	timeout := int(firstMsg.GetTimeoutSeconds())
-	if timeout <= 0 {
-		timeout = defaultPTYTimeout
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if timeout < 0 {
+		// Interactive terminals outlive any deadline; the stream's lifetime
+		// is the bound, as with a negative timeout on execPipe.
+		ctx, cancel = context.WithCancel(stream.Context())
+	} else {
+		if timeout == 0 {
+			timeout = defaultPTYTimeout
+		}
+		ctx, cancel = context.WithTimeout(stream.Context(), time.Duration(timeout)*time.Second)
 	}
-	ctx, cancel := context.WithTimeout(stream.Context(), time.Duration(timeout)*time.Second)
 	defer cancel()
 
 	var cmd *exec.Cmd
@@ -584,6 +613,31 @@ func (s *Server) execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.Ex
 	if err := cmd.Start(); err != nil {
 		return status.Errorf(codes.Internal, "start: %v", err)
 	}
+	heartbeatDone := make(chan struct{})
+	var heartbeat sync.WaitGroup
+	if firstMsg.GetReportLiveness() {
+		heartbeat.Add(1)
+		go func() {
+			defer heartbeat.Done()
+			if err := stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_HEARTBEAT}); err != nil {
+				return
+			}
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-heartbeatDone:
+					return
+				case <-stream.Context().Done():
+					return
+				case <-ticker.C:
+					if err := stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_HEARTBEAT}); err != nil {
+						return
+					}
+				}
+			}
+		}()
+	}
 	if data := firstMsg.GetStdinData(); len(data) > 0 {
 		_, _ = stdinPipe.Write(data)
 	}
@@ -622,6 +676,8 @@ func (s *Server) execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.Ex
 	<-done
 
 	exitCode := resolveExitCode(cmd.Wait())
+	close(heartbeatDone)
+	heartbeat.Wait()
 
 	_ = stream.Send(&pb.ExecOutput{
 		Stream:   pb.ExecOutput_EXIT,

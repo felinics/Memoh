@@ -106,7 +106,7 @@ If the user asks for documentation, create it as an intentional skill resource, 
 
 ## Creation Checklist
 
-- The folder lives under `/data/skills/<skill-name>/`.
+- The folder lives under `/data/skills/user/personal/<skill-name>/`.
 - `SKILL.md` exists and has valid frontmatter.
 - The description says when to use the skill.
 - Optional resources are referenced from `SKILL.md`.

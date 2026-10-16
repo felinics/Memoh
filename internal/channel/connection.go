@@ -6,6 +6,9 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/logger"
 )
 
 type connectionEntry struct {
@@ -26,7 +29,7 @@ func (m *Manager) refresh(ctx context.Context) {
 		items, err := m.service.ListConfigsByType(ctx, channelType)
 		if err != nil {
 			if m.logger != nil {
-				m.logger.Error("list configs failed", slog.String("channel", channelType.String()), slog.Any("error", err))
+				m.logger.ErrorContext(ctx, "list configs failed", slog.String("channel", channelType.String()), slog.Any("error", err))
 			}
 			continue
 		}
@@ -45,7 +48,7 @@ func (m *Manager) reconcile(ctx context.Context, configs []ChannelConfig) {
 		if err := m.ensureConnection(ctx, cfg); err != nil {
 			m.markConnectionStatus(cfg, false, err)
 			if m.logger != nil {
-				m.logger.Error(
+				m.logger.ErrorContext(ctx,
 					"adapter start failed",
 					slog.String("bot_id", cfg.BotID),
 					slog.String("channel", cfg.ChannelType.String()),
@@ -64,7 +67,7 @@ func (m *Manager) reconcile(ctx context.Context, configs []ChannelConfig) {
 		}
 		if entry != nil && entry.connection != nil {
 			if m.logger != nil {
-				m.logger.Info(
+				m.logger.InfoContext(ctx,
 					"adapter stop",
 					slog.String("bot_id", entry.config.BotID),
 					slog.String("channel", entry.config.ChannelType.String()),
@@ -72,7 +75,7 @@ func (m *Manager) reconcile(ctx context.Context, configs []ChannelConfig) {
 				)
 			}
 			if err := entry.connection.Stop(ctx); err != nil && !errors.Is(err, ErrStopNotSupported) && m.logger != nil {
-				m.logger.Warn(
+				m.logger.WarnContext(ctx,
 					"adapter stop failed",
 					slog.String("bot_id", entry.config.BotID),
 					slog.String("channel", entry.config.ChannelType.String()),
@@ -120,7 +123,7 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 
 	if oldConn != nil {
 		if m.logger != nil {
-			m.logger.Info(
+			m.logger.InfoContext(ctx,
 				"adapter restart",
 				slog.String("bot_id", cfg.BotID),
 				slog.String("channel", cfg.ChannelType.String()),
@@ -130,7 +133,7 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 		if err := oldConn.Stop(ctx); err != nil {
 			if errors.Is(err, ErrStopNotSupported) {
 				if m.logger != nil {
-					m.logger.Warn(
+					m.logger.WarnContext(ctx,
 						"adapter restart skipped",
 						slog.String("bot_id", cfg.BotID),
 						slog.String("channel", cfg.ChannelType.String()),
@@ -170,19 +173,27 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 	m.mu.Unlock()
 
 	if m.logger != nil {
-		m.logger.Info(
+		m.logger.InfoContext(ctx,
 			"adapter start",
 			slog.String("bot_id", cfg.BotID),
 			slog.String("channel", cfg.ChannelType.String()),
 			slog.String("config_id", cfg.ID),
 		)
 	}
-	handler := m.handleInbound
+	handler := m.handleConnectionInbound
 	for i := len(m.middlewares) - 1; i >= 0; i-- {
 		handler = m.middlewares[i](handler)
 	}
+	// The id is assigned outside the middlewares so that what they log for a
+	// message reports the same id as its result line.
+	chain := handler
+	handler = func(ctx context.Context, cfg ChannelConfig, msg InboundMessage) error {
+		return chain(withInboundRequestID(ctx), cfg, msg)
+	}
 	// Decouple long-lived adapter connections from short-lived request contexts.
-	connectCtx := context.WithoutCancel(ctx)
+	// The connection also drops the request's id: what an adapter logs on it
+	// later is not part of the request that started it.
+	connectCtx := logger.ContextWithoutRequestID(context.WithoutCancel(ctx))
 	conn, err := receiver.Connect(connectCtx, cfg, handler)
 	if err != nil {
 		m.markConnectionStatus(cfg, false, err)
@@ -234,7 +245,7 @@ func (m *Manager) RemoveConnection(ctx context.Context, botID string, channelTyp
 		}
 		if entry.connection != nil {
 			if m.logger != nil {
-				m.logger.Info(
+				m.logger.InfoContext(ctx,
 					"connection remove",
 					slog.String("bot_id", botID),
 					slog.String("channel", channelType.String()),
@@ -242,7 +253,7 @@ func (m *Manager) RemoveConnection(ctx context.Context, botID string, channelTyp
 				)
 			}
 			if err := entry.connection.Stop(ctx); err != nil && !errors.Is(err, ErrStopNotSupported) && m.logger != nil {
-				m.logger.Warn(
+				m.logger.WarnContext(ctx,
 					"connection stop failed",
 					slog.String("bot_id", botID),
 					slog.String("channel", channelType.String()),
@@ -270,7 +281,7 @@ func (m *Manager) removeConnection(ctx context.Context, configID string) error {
 
 	if entry.connection != nil {
 		if m.logger != nil {
-			m.logger.Info(
+			m.logger.InfoContext(ctx,
 				"connection remove",
 				slog.String("bot_id", entry.config.BotID),
 				slog.String("channel", entry.config.ChannelType.String()),
@@ -278,16 +289,11 @@ func (m *Manager) removeConnection(ctx context.Context, configID string) error {
 			)
 		}
 		if err := entry.connection.Stop(ctx); err != nil && !errors.Is(err, ErrStopNotSupported) {
-			if m.logger != nil {
-				m.logger.Warn(
-					"connection stop failed",
-					slog.String("bot_id", entry.config.BotID),
-					slog.String("channel", entry.config.ChannelType.String()),
-					slog.String("config_id", configID),
-					slog.Any("error", err),
-				)
-			}
-			return err
+			return errs.Wrap(err, "stop channel connection",
+				slog.String("bot_id", entry.config.BotID),
+				slog.String("channel", entry.config.ChannelType.String()),
+				slog.String("config_id", configID),
+			)
 		}
 	}
 	return nil
@@ -299,7 +305,7 @@ func (m *Manager) stopAll(ctx context.Context) {
 	for id, entry := range m.connections {
 		if entry != nil && entry.connection != nil {
 			if m.logger != nil {
-				m.logger.Info(
+				m.logger.InfoContext(ctx,
 					"adapter stop",
 					slog.String("bot_id", entry.config.BotID),
 					slog.String("channel", entry.config.ChannelType.String()),
@@ -307,7 +313,7 @@ func (m *Manager) stopAll(ctx context.Context) {
 				)
 			}
 			if err := entry.connection.Stop(ctx); err != nil && !errors.Is(err, ErrStopNotSupported) && m.logger != nil {
-				m.logger.Warn(
+				m.logger.WarnContext(ctx,
 					"adapter stop failed",
 					slog.String("bot_id", entry.config.BotID),
 					slog.String("channel", entry.config.ChannelType.String()),
@@ -364,7 +370,7 @@ func (m *Manager) StopByBot(ctx context.Context, botID string) error {
 		}
 		if err := entry.connection.Stop(ctx); err != nil && !errors.Is(err, ErrStopNotSupported) {
 			if m.logger != nil {
-				m.logger.Warn(
+				m.logger.WarnContext(ctx,
 					"connection stop failed",
 					slog.String("bot_id", botID),
 					slog.String("channel", entry.config.ChannelType.String()),

@@ -24,9 +24,9 @@ import (
 //  1. Provider construction — models.NewSDKChatModel wires Anthropic
 //     thinking{adaptive} / thinking{enabled,budget_tokens} from the
 //     ReasoningConfig (internal/models/sdk.go:121-132).
-//  2. Per-request options — models.BuildReasoningOptions emits the effort string
-//     (internal/models/sdk.go:181-228), fed from native.RunConfig's five
-//     reasoning fields (native/agent.go:935-945).
+//  2. Per-request reasoning — models.ApplyReasoningToRequest sets the effort
+//     string on the sdk.Request (internal/models/sdk.go:181-228), fed from
+//     native.RunConfig's five reasoning fields (native/agent.go:935-945).
 //
 // The subagent path loses both. SpawnProvider.resolveModel builds a fresh
 // *sdk.Model with no ReasoningConfig, and runSubagentTask never assigned the lone
@@ -118,6 +118,8 @@ func TestResolveModelResolvesReasoningForTheSubagentModel(t *testing.T) {
 // not advertise, or an adaptive flag for a legacy model.
 func TestSubagentMayRunADifferentModelThanParent(t *testing.T) {
 	queries, modelAUUID, modelBUUID := newSubagentModelCatalog(t)
+	queries.models[0].ProviderID = queries.models[1].ProviderID
+	queries.models[0].ModelID = "other-model"
 	agent := &fakeSpawnAgent{}
 	provider, _, _, _ := newAgentControlProvider(t, agent)
 	provider.models = models.NewService(slog.Default(), queries)
@@ -134,20 +136,20 @@ func TestSubagentMayRunADifferentModelThanParent(t *testing.T) {
 		CurrentModelProvider: "provider-b",
 	}
 
-	// The caller pins the subagent to provider-a instead.
+	// The caller selects another model within the same provider.
 	mustExecuteAgentTool(t, provider, session, ToolSpawnAgent().String(), map[string]any{
 		"id":       "worker",
 		"task":     "inspect",
-		"model_id": "worker-model",
-		"provider": "provider-a",
+		"model_id": "other-model",
+		"provider": "provider-b",
 	})
 
 	call, ok := agent.callAt(0)
 	if !ok {
 		t.Fatal("expected the subagent run to reach the spawn agent")
 	}
-	if call.ModelUUID != modelAUUID || call.ModelProvider != "provider-a" {
-		t.Fatalf("expected the subagent to run provider-a's model, got uuid=%q provider=%q",
+	if call.ModelUUID != modelAUUID || call.ModelProvider != "provider-b" {
+		t.Fatalf("expected the subagent to run the other model on provider-b, got uuid=%q provider=%q",
 			call.ModelUUID, call.ModelProvider)
 	}
 	if session.CurrentModelUUID == call.ModelUUID {
@@ -182,7 +184,7 @@ func TestResolveSubagentReasoningFollowsTheSubagentModel(t *testing.T) {
 	off := reasoning.ResolveConfig(
 		canDisable.ResolveThinkingMode(), canDisable.Config.ReasoningEfforts,
 		canDisable.ReasoningOptions(clientType),
-		models.ReasoningEffortDisable, "", clientType,
+		models.ReasoningEffortDisable, "",
 	)
 	if off == nil || !off.Disabled || off.OffEffort != models.ReasoningEffortNone {
 		t.Fatalf("model that can be turned off: got %+v", off)
@@ -194,7 +196,7 @@ func TestResolveSubagentReasoningFollowsTheSubagentModel(t *testing.T) {
 	offElsewhere := reasoning.ResolveConfig(
 		cannotDisable.ResolveThinkingMode(), cannotDisable.Config.ReasoningEfforts,
 		cannotDisable.ReasoningOptions(clientType),
-		models.ReasoningEffortDisable, "", clientType,
+		models.ReasoningEffortDisable, "",
 	)
 	if offElsewhere == nil || !offElsewhere.Active || offElsewhere.Disabled || offElsewhere.Effort != models.ReasoningEffortLow {
 		t.Fatalf("model that cannot be turned off: got %+v", offElsewhere)
@@ -205,7 +207,7 @@ func TestResolveSubagentReasoningFollowsTheSubagentModel(t *testing.T) {
 	stranded := reasoning.ResolveConfig(
 		cannotDisable.ResolveThinkingMode(), cannotDisable.Config.ReasoningEfforts,
 		cannotDisable.ReasoningOptions(clientType),
-		models.ReasoningEffortHigh, "", clientType,
+		models.ReasoningEffortHigh, "",
 	)
 	if stranded == nil || !stranded.Active || stranded.Effort == models.ReasoningEffortHigh {
 		t.Fatalf("stranded tier should not be forwarded: got %+v", stranded)
@@ -300,5 +302,18 @@ func TestResolveSubagentReasoningPropagatesSettingsError(t *testing.T) {
 	}, model, string(models.ClientTypeOpenAICompletions))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("resolveSubagentReasoning error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestSubagentOpenCodeGoReasoningKeepsProviderPolicy(t *testing.T) {
+	provider := &SpawnProvider{}
+	for id, effort := range map[string]string{"gpt-6-luna": "max", "gpt-5.6-luna": "max", "glm-5.3": "max", "qwen3.8-flash": "xhigh"} {
+		model := models.GetResponse{Model: models.Model{ModelID: id, Config: models.ModelConfig{
+			ThinkingMode: reasoning.ModeToggle, ReasoningEfforts: []string{"low", "medium", effort},
+		}}}
+		cfg, err := provider.resolveSubagentReasoning(context.Background(), SessionContext{ReasoningRequestedEffort: effort}, model, string(models.ClientTypeOpenCodeGo))
+		if err != nil || cfg == nil || cfg.Effort != effort || cfg.Adaptive {
+			t.Fatalf("%s: %+v, %v", id, cfg, err)
+		}
 	}
 }

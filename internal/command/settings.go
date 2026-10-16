@@ -25,7 +25,7 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 	})
 	g.Register(SubCommand{
 		Name:    "update",
-		Usage:   "update [--language L] [--acl_default_effect allow|deny] ... - Update settings",
+		Usage:   "update [--acl_default_effect allow|deny] ... - Update settings",
 		IsWrite: true,
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if len(cc.Args) == 0 {
@@ -38,9 +38,6 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 					return &Result{Text: cc.T("cmd.settings.missingValue", map[string]any{"option": args[i], "usage": cc.T("cmd.settings.updateUsage")})}, nil
 				}
 				switch args[i] {
-				case "--language":
-					i++
-					req.Language = &args[i]
 				case "--acl_default_effect":
 					i++
 					req.AclDefaultEffect = args[i]
@@ -172,7 +169,7 @@ func (h *Handler) settingsResult(cc CommandContext, s settings.Settings) *Result
 		{cc.T("cmd.settings.fieldAclDefault"), aclLine},
 		{cc.T("cmd.settings.fieldChatModel"), h.resolveModelName(cc, s.ChatModelID)},
 		{cc.T("cmd.settings.fieldSearchProvider"), h.resolveSearchProviderName(cc, s.SearchProviderID)},
-		{cc.T("cmd.settings.fieldMemoryProvider"), h.resolveMemoryProviderName(cc, s.MemoryProviderID)},
+		{cc.T("cmd.settings.fieldMemory"), memoryStateLabel(cc, s.MemoryEnabled)},
 		{cc.T("cmd.settings.fieldCommandLanguage"), commandLanguageDisplay(cc, s.CommandUILanguage)},
 	})
 	aclNext := "deny"
@@ -186,7 +183,7 @@ func (h *Handler) settingsResult(cc CommandContext, s settings.Settings) *Result
 		{Label: cc.T("cmd.settings.section.models"), Action: &ItemAction{Resource: "model", Action: "list"}},
 		{Label: aclAction, Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--acl_default_effect", aclNext}}},
 		{Label: cc.T("cmd.settings.section.search"), Action: &ItemAction{Resource: "search", Action: "list"}},
-		{Label: cc.T("cmd.settings.section.memory"), Action: &ItemAction{Resource: "memory", Action: "list"}},
+		{Label: cc.T("cmd.settings.section.memory"), Action: &ItemAction{Resource: "memory", Action: "status"}},
 		{Label: cc.T("cmd.settings.section.language"), Action: &ItemAction{Resource: "settings", Action: "language"}},
 	}
 	return &Result{
@@ -257,21 +254,6 @@ func (h *Handler) resolveSearchProviderName(cc CommandContext, id string) string
 		return cc.T("cmd.common.unavailable")
 	}
 	p, err := h.searchProvService.Get(cc.Ctx, id)
-	if err != nil {
-		return cc.T("cmd.common.unavailable")
-	}
-	return p.Name
-}
-
-// resolveMemoryProviderName resolves a memory provider UUID to its name.
-func (h *Handler) resolveMemoryProviderName(cc CommandContext, id string) string {
-	if id == "" {
-		return cc.T("cmd.common.none")
-	}
-	if h.memProvService == nil {
-		return cc.T("cmd.common.unavailable")
-	}
-	p, err := h.memProvService.Get(cc.Ctx, id)
 	if err != nil {
 		return cc.T("cmd.common.unavailable")
 	}

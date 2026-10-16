@@ -12,21 +12,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
-	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 type controlQueries struct {
 	dbstore.Queries
-	row          sqlc.BotSession
-	writes       int
-	publications []sqlc.UpsertAgentSessionPublicationParams
-	stale        bool
+	row    sqlc.BotSession
+	writes int
+	stale  bool
 }
 
 func (*controlQueries) SupportsTransactions() bool                                     { return true }
@@ -40,11 +37,6 @@ func (q *controlQueries) LockSessionRuntimeFence(_ context.Context, in sqlc.Lock
 		return 0, pgx.ErrNoRows
 	}
 	return in.RuntimeFencingToken, nil
-}
-
-func (q *controlQueries) UpsertAgentSessionPublication(_ context.Context, in sqlc.UpsertAgentSessionPublicationParams) (int64, error) {
-	q.publications = append(q.publications, in)
-	return 1, nil
 }
 
 func (q *controlQueries) GetSessionByID(context.Context, pgtype.UUID) (sqlc.BotSession, error) {
@@ -64,7 +56,6 @@ type controlDriver struct {
 	commands     []external.Command
 	compactCalls int
 	mode         string
-	checkpoint   external.CheckpointOutcome
 }
 
 func (*controlDriver) RuntimeType() string { return "codex" }
@@ -82,41 +73,7 @@ func (*controlDriver) ReadCommand(context.Context, external.PromptInput) (extern
 
 func (d *controlDriver) Compact(context.Context, external.PromptInput) (external.CompactionResult, error) {
 	d.compactCalls++
-	return external.CompactionResult{RuntimeMetadata: map[string]any{"tokens": 12}, Checkpoint: d.checkpoint}, nil
-}
-
-type operationAdmitter struct{ *scriptedAdmitter }
-
-func (a operationAdmitter) Admit(ctx context.Context, input sessionruntime.AdmitInput) (sessionruntime.Admission, error) {
-	admission, err := a.scriptedAdmitter.Admit(ctx, input)
-	admission.RunID = uuid.NewString()
-	admission.Handle.RunID = admission.RunID
-	return admission, err
-}
-
-func TestRuntimeOperationPublishesCheckpointWithoutChatRound(t *testing.T) {
-	for _, checkpoint := range []external.CheckpointOutcome{external.CheckpointStaged, external.CheckpointDeclined} {
-		svc, q, driver, admitter, req := runtimeControlFixture(t)
-		svc.queries = q
-		svc.sessionRuntime = operationAdmitter{admitter}
-		driver.checkpoint = checkpoint
-		req.Command = "shrink"
-		if _, err := svc.ExecuteRuntimeCommand(t.Context(), req); err != nil {
-			t.Fatal(err)
-		}
-		if len(q.publications) != 1 || q.publications[0].CheckpointReset != (checkpoint == external.CheckpointDeclined) || len(admitter.finishes) != 1 {
-			t.Fatalf("publication: %+v", q.publications)
-		}
-		if uuid.UUID(q.publications[0].RunID.Bytes).String() != admitter.finishes[0].handle.RunID {
-			t.Fatal("published the wrong operation run")
-		}
-		q.stale = true
-		ctx := runtimefence.WithContext(t.Context(), runtimefence.Fence{BotID: req.BotID, SessionID: req.ThreadID, Token: 1})
-		err := svc.publishRuntimeOperation(ctx, external.PromptInput{BotID: req.BotID, ThreadID: req.ThreadID, RunID: uuid.NewString()}, external.CheckpointStaged)
-		if !errors.Is(err, runtimefence.ErrStale) || len(q.publications) != 1 {
-			t.Fatalf("stale publication: %v %+v", err, q.publications)
-		}
-	}
+	return external.CompactionResult{RuntimeMetadata: map[string]any{"tokens": 12}}, nil
 }
 
 func (*controlDriver) Modes(context.Context, external.PromptInput) (external.ModeState, error) {

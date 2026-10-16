@@ -1,0 +1,64 @@
+{
+  "create_memory": {
+    "properties": {
+      "layer": {
+        "description": "What kind of fact this is. Defaults to note.",
+        "enum": [
+          "preference",
+          "identity",
+          "context",
+          "experience",
+          "activity",
+          "persona",
+          "note"
+        ],
+        "type": "string"
+      },
+      "memory": {
+        "description": "The fact to remember, as one self-contained statement.",
+        "type": "string"
+      },
+      "subject": {
+        "description": "Who or what the fact is about, when it is not the user.",
+        "type": "string"
+      },
+      "topic": {
+        "description": "Short topic label used to relate this memory to others.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "memory"
+    ],
+    "type": "object"
+  },
+  "delete_memory": {
+    "properties": {
+      "id": {
+        "description": "Id of the memory to delete, as returned by memory search.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id"
+    ],
+    "type": "object"
+  },
+  "update_memory": {
+    "properties": {
+      "id": {
+        "description": "Id of the memory to replace, as returned by memory search.",
+        "type": "string"
+      },
+      "memory": {
+        "description": "The corrected fact, as one self-contained statement.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "memory"
+    ],
+    "type": "object"
+  }
+}

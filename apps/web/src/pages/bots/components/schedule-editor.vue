@@ -224,6 +224,28 @@
         :form="execution"
         :submitted="submitted"
       />
+      <SettingsRow
+        :label="t('bots.schedule.form.maxRunMinutes')"
+        :description="t('bots.schedule.form.maxRunMinutesHelp')"
+        stack="sm"
+      >
+        <div class="w-full sm:w-56">
+          <NumberField
+            id="sched-max-run-minutes"
+            v-model="maxRunMinutes"
+            :min="5"
+            :max="1440"
+            :aria-label="t('bots.schedule.form.maxRunMinutes')"
+            disable-wheel-change
+          />
+          <p
+            v-if="durationError"
+            class="text-caption text-destructive"
+          >
+            {{ durationError }}
+          </p>
+        </div>
+      </SettingsRow>
       <!-- The placeholder carries the empty-value meaning, so no help line
            repeats it. -->
       <SettingsRow
@@ -292,6 +314,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useForm } from 'vee-validate'
+import { toTypedSchema } from '@vee-validate/zod'
+import { z } from 'zod'
 import { Trash2 } from 'lucide-vue-next'
 import {
   Button,
@@ -342,6 +367,14 @@ const emit = defineEmits<{
 }>()
 
 const { t, locale } = useI18n()
+const durationForm = useForm({
+  validationSchema: computed(() => toTypedSchema(z.object({
+    maxRunMinutes: z.number({ required_error: t('bots.schedule.form.invalidMaxRunMinutes'), invalid_type_error: t('bots.schedule.form.invalidMaxRunMinutes') }).int(t('bots.schedule.form.invalidMaxRunMinutes')).min(5, t('bots.schedule.form.invalidMaxRunMinutes')).max(1440, t('bots.schedule.form.invalidMaxRunMinutes')),
+  }))),
+  initialValues: { maxRunMinutes: 60 },
+})
+const [maxRunMinutes] = durationForm.defineField('maxRunMinutes')
+const durationError = computed(() => durationForm.errors.value.maxRunMinutes)
 
 const SCHEDULE_MODES: { value: ScheduleMode; labelKey: string }[] = [
   { value: 'minutes', labelKey: 'bots.schedule.mode.minutes' },
@@ -483,6 +516,7 @@ function hydrateExecution(schedule: ScheduleSchedule) {
 
 function executionRequestBlock() {
   return {
+    max_run_seconds: (maxRunMinutes.value ?? 60) * 60,
     run_target: execution.runTarget,
     target_session_id: execution.targetSessionId || undefined,
     runtime_type: execution.runTarget === 'new_session' && execution.runtimeType ? execution.runtimeType : undefined,
@@ -496,6 +530,7 @@ function executionRequestBlock() {
 }
 
 function resetForm() {
+  durationForm.resetForm({ values: { maxRunMinutes: 60 } })
   form.name = ''
   form.description = ''
   form.command = ''
@@ -508,6 +543,7 @@ function resetForm() {
 }
 
 function hydrateForm(schedule: ScheduleSchedule) {
+  durationForm.resetForm({ values: { maxRunMinutes: (schedule.max_run_seconds || 3600) / 60 } })
   form.name = schedule.name ?? ''
   form.description = schedule.description ?? ''
   form.command = schedule.command ?? ''
@@ -543,7 +579,7 @@ async function handleSubmit() {
   if (isSaving.value) return
   submitted.value = true
   submitError.value = null
-  if (!canSubmit.value) return
+  if (!canSubmit.value || !(await durationForm.validate()).valid) return
   isSaving.value = true
   try {
     const base = {

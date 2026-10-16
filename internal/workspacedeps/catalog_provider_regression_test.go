@@ -26,7 +26,7 @@ func TestRemoteCatalogCachedReadDoesNotWaitForRefresh(t *testing.T) {
 	// stale readers must still receive the already validated generation.
 	p.refreshGate <- struct{}{}
 	defer func() { <-p.refreshGate }()
-	for _, age := range []time.Duration{0, 2 * CatalogRefreshInterval} {
+	for _, age := range []time.Duration{0, catalogStaleRefreshes * CatalogRefreshInterval} {
 		p.now = func() time.Time { return first.FetchedAt.Add(age) }
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		got, err := p.Snapshot(ctx, false)

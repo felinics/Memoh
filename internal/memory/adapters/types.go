@@ -15,7 +15,7 @@ type BeforeChatRequest struct {
 // BeforeChatResult contains memory context to inject into the conversation.
 type BeforeChatResult struct {
 	ContextText    string // formatted text to inject as a user message
-	RetrievalMode  string // graph, file_fallback, mem0, etc.
+	RetrievalMode  string // graph, file_fallback, etc.
 	FallbackReason string // non-empty when the provider degraded to another retrieval path
 	ResultCount    int    // number of memory items represented in ContextText; zero when item metadata is unavailable
 	ResultRefs     []string
@@ -29,6 +29,12 @@ type AfterChatRequest struct {
 	ChannelIdentityID string
 	DisplayName       string
 	TimezoneLocation  *time.Location
+	// SkipFormation turns off automatic memory formation for this turn.
+	// External agent runtimes own the model that ran the turn: the platform
+	// neither borrows another model to extract facts nor dumps the raw
+	// transcript into the same store those facts live in. Those runtimes
+	// write their own memories through the create_memory tool instead.
+	SkipFormation bool
 }
 
 // LLM is the interface for LLM operations needed by memory service.
@@ -70,6 +76,8 @@ type SearchRequest struct {
 }
 
 type UpdateRequest struct {
+	// BotID is the trusted caller scope, never inferred from MemoryID.
+	BotID            string   `json:"bot_id"`
 	MemoryID         string   `json:"memory_id"`
 	Memory           string   `json:"memory"`
 	EmbeddingEnabled *bool    `json:"embedding_enabled,omitempty"`
@@ -179,11 +187,25 @@ type CompactResult struct {
 }
 
 type MemoryCompactCapability struct {
-	Semantic     bool   `json:"semantic"`
-	Archive      bool   `json:"archive,omitempty"`
-	RebuildIndex bool   `json:"rebuild_index,omitempty"`
-	Reason       string `json:"reason,omitempty"`
+	Semantic     bool `json:"semantic"`
+	Archive      bool `json:"archive,omitempty"`
+	RebuildIndex bool `json:"rebuild_index,omitempty"`
+	// Reason says why Semantic is false.
+	Reason CompactUnavailableReason `json:"reason,omitempty"`
 }
+
+// CompactUnavailableReason is why a provider cannot run semantic compact. It
+// is a fixed vocabulary, not text for a reader.
+type CompactUnavailableReason string
+
+const (
+	// CompactUnsupported: the selected provider or its runtime has no
+	// semantic compact.
+	CompactUnsupported CompactUnavailableReason = "unsupported"
+	// CompactNotConfigured: the server did not wire what compact needs, such
+	// as the memory runtime or its LLM.
+	CompactNotConfigured CompactUnavailableReason = "not_configured"
+)
 
 type UsageResponse struct {
 	Count                 int   `json:"count"`
@@ -224,25 +246,12 @@ type MemoryStatusResponse struct {
 	RetryQueueDepth int  `json:"retry_queue_depth"`
 }
 
-// Memory provider admin types.
+// Memory provider storage types. Built-in Memory is the only provider type;
+// memory_providers rows store the team's Built-in Memory configuration, and a
+// bot's memory_provider_id is non-null exactly when its memory is enabled.
 type ProviderType string
 
-const (
-	ProviderBuiltin    ProviderType = "builtin"
-	ProviderMem0       ProviderType = "mem0"
-	ProviderOpenViking ProviderType = "openviking"
-)
-
-type ProviderCreateRequest struct {
-	Name     string         `json:"name"`
-	Provider ProviderType   `json:"provider"`
-	Config   map[string]any `json:"config,omitempty"`
-}
-
-type ProviderUpdateRequest struct {
-	Name   *string        `json:"name,omitempty"`
-	Config map[string]any `json:"config,omitempty"`
-}
+const ProviderBuiltin ProviderType = "builtin"
 
 type ProviderGetResponse struct {
 	ID        string         `json:"id"`
@@ -254,35 +263,15 @@ type ProviderGetResponse struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 }
 
-type ProviderConfigSchema struct {
-	Fields map[string]ProviderFieldSchema `json:"fields"`
+// MemoryConfig is the team-level Built-in Memory configuration.
+type MemoryConfig struct {
+	// EmbeddingModelID optionally maintains the pgvector semantic seed index
+	// for graph recall. Empty means graph-only recall.
+	EmbeddingModelID string `json:"embedding_model_id"`
 }
 
-type ProviderFieldSchema struct {
-	Type        string `json:"type"`
-	Title       string `json:"title,omitempty"`
-	Description string `json:"description,omitempty"`
-	Required    bool   `json:"required,omitempty"`
-	Secret      bool   `json:"secret,omitempty"`
-	Example     any    `json:"example,omitempty"`
-}
-
-type ProviderMeta struct {
-	Provider     string               `json:"provider"`
-	DisplayName  string               `json:"display_name"`
-	ConfigSchema ProviderConfigSchema `json:"config_schema"`
-}
-
-type ProviderCollectionStatus struct {
-	Name   string       `json:"name"`
-	Exists bool         `json:"exists"`
-	Points int          `json:"points"`
-	Health HealthStatus `json:"health"`
-}
-
-type ProviderStatusResponse struct {
-	ProviderType     string                     `json:"provider_type"`
-	MemoryMode       string                     `json:"memory_mode,omitempty"`
-	EmbeddingModelID string                     `json:"embedding_model_id,omitempty"`
-	Collections      []ProviderCollectionStatus `json:"collections,omitempty"`
+// MemoryConfigUpdateRequest updates the team-level Built-in Memory
+// configuration: nil keeps the current value, "" clears it.
+type MemoryConfigUpdateRequest struct {
+	EmbeddingModelID *string `json:"embedding_model_id,omitempty"`
 }

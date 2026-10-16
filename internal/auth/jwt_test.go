@@ -147,4 +147,40 @@ func TestJWTMiddlewareDoesNotValidateChatRouteTokenAsAccount(t *testing.T) {
 	assert.False(t, validatorCalled)
 }
 
+// The token a handler forwards has to be the one that was checked. A browser
+// WebSocket sends it as a query parameter, and an Authorization header in
+// another scheme does not replace it.
+func TestRawTokenFromContextIsTheValidatedToken(t *testing.T) {
+	const secret = "test-secret"
+	token, _, err := GenerateToken("user-123", secret, time.Hour)
+	require.NoError(t, err)
+
+	e := echo.New()
+	e.Use(JWTMiddleware(secret, func(echo.Context) bool { return false }))
+	e.GET("/protected", func(c echo.Context) error { return c.String(http.StatusOK, RawTokenFromContext(c)) })
+
+	for name, setup := range map[string]func(*http.Request){
+		"header": func(r *http.Request) { r.Header.Set(echo.HeaderAuthorization, "Bearer "+token) },
+		"query":  func(r *http.Request) { r.URL.RawQuery = "token=" + token },
+		"query beside another scheme": func(r *http.Request) {
+			r.Header.Set(echo.HeaderAuthorization, "Basic dXNlcjpwYXNz")
+			r.URL.RawQuery = "token=" + token
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+			setup(req)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Equal(t, token, rec.Body.String())
+		})
+	}
+}
+
+func TestRawTokenFromContextWithoutToken(t *testing.T) {
+	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder())
+	assert.Empty(t, RawTokenFromContext(c))
+}
+
 var errTestInactiveSession = errors.New("inactive test session")

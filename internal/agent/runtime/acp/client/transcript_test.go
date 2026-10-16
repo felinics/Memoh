@@ -1,6 +1,7 @@
 package client
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,8 @@ import (
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/partmeta"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 // TestTranscriptSurvivesEventBufferCap ensures transcript persistence is not
@@ -38,36 +41,6 @@ func TestTranscriptSurvivesEventBufferCap(t *testing.T) {
 	}
 	if !strings.HasSuffix(text.Text, fmt.Sprintf("[%d]", total-1)) {
 		t.Fatalf("transcript lost its end")
-	}
-}
-
-// TestAppendTranscriptTextMergeSemantics pins the failure-note semantics:
-// merge into a trailing assistant text when possible, otherwise a new
-// assistant message - mirroring how the builder accumulates text while
-// streaming.
-func TestAppendTranscriptTextMergeSemantics(t *testing.T) {
-	t.Parallel()
-
-	merged := AppendTranscriptText([]sdk.Message{
-		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.TextPart{Text: "partial answer"}}},
-	}, "agent failed: boom")
-	if len(merged) != 1 {
-		t.Fatalf("messages = %d, want merged into existing assistant", len(merged))
-	}
-	if text := merged[0].Content[0].(sdk.TextPart).Text; text != "partial answer\n\nagent failed: boom" {
-		t.Fatalf("merged text = %q", text)
-	}
-
-	appended := AppendTranscriptText([]sdk.Message{
-		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.ToolCallPart{ToolCallID: "c1", ToolName: "exec"}}},
-	}, "agent failed: boom")
-	if len(appended) != 2 {
-		t.Fatalf("messages = %d, want new assistant after tool-call message", len(appended))
-	}
-
-	fromEmpty := AppendTranscriptText(nil, "agent failed: boom")
-	if len(fromEmpty) != 1 || fromEmpty[0].Role != sdk.MessageRoleAssistant {
-		t.Fatalf("fromEmpty = %#v, want single assistant message", fromEmpty)
 	}
 }
 
@@ -133,8 +106,11 @@ func TestTranscriptKeepsSubmittedUserInputAnswers(t *testing.T) {
 
 	messages := recorder.Messages("")
 	toolCall := messages[0].Content[0].(sdk.ToolCallPart)
-	metadata := toolCall.ProviderMetadata["user_input"].(map[string]any)
-	answers := metadata["answers"].([]userinput.UIAnswer)
+	metadata, _ := partmeta.Object(toolCall.ProviderMetadata, partmeta.KeyUserInput)
+	var answers []userinput.UIAnswer
+	if raw, err := json.Marshal(metadata["answers"]); err != nil || json.Unmarshal(raw, &answers) != nil {
+		t.Fatalf("submitted answers did not decode: %#v", metadata["answers"])
+	}
 	if len(answers) != 1 || answers[0].Selected[0].Label != "Yes" {
 		t.Fatalf("submitted answers = %#v", answers)
 	}
@@ -163,7 +139,7 @@ func TestTranscriptLimitsToolResultOutput(t *testing.T) {
 	if !ok {
 		t.Fatalf("message[1] = %#v, want tool result", messages[1])
 	}
-	output, ok := result.Result.(map[string]any)
+	output, ok := toolexec.OutputValue(result.Result).(map[string]any)
 	if !ok {
 		t.Fatalf("tool result = %#v, want map", result.Result)
 	}

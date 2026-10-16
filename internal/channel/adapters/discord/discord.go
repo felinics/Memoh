@@ -15,7 +15,6 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/felinics/memoh/internal/channel"
-	"github.com/felinics/memoh/internal/channel/common"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/redact"
 )
@@ -168,7 +167,6 @@ func (a *DiscordAdapter) getOrCreateSession(token, configID string) (*discordgo.
 
 	session, err := discordgo.New("Bot " + token)
 	if err != nil {
-		a.logger.Error("create session failed", slog.String("config_id", configID), slog.Any("error", err))
 		return nil, err
 	}
 
@@ -184,7 +182,7 @@ func discordSessionCacheKey(configID, token string) string {
 
 func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler) (channel.Connection, error) {
 	if a.logger != nil {
-		a.logger.Info("start", slog.String("config_id", cfg.ID))
+		a.logger.InfoContext(ctx, "start", slog.String("config_id", cfg.ID))
 	}
 
 	discordCfg, err := parseConfig(cfg.Credentials)
@@ -282,19 +280,17 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 		}
 
 		if a.logger != nil {
-			a.logger.Info("inbound received",
+			a.logger.InfoContext(ctx, "inbound received",
 				slog.String("config_id", cfg.ID),
 				slog.String("chat_type", chatType),
 				slog.String("user_id", m.Author.ID),
 				slog.String("username", m.Author.Username),
-				slog.String("text", common.SummarizeText(text)),
 			)
 		}
 
 		go func() {
-			if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-				a.logger.Error("handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-			}
+			// The inbound unit writes the result line of the message.
+			_ = handler(ctx, cfg, msg)
 		}()
 	})
 
@@ -307,7 +303,7 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 
 	stop := func(_ context.Context) error {
 		if a.logger != nil {
-			a.logger.Info("stop", slog.String("config_id", cfg.ID))
+			a.logger.InfoContext(ctx, "stop", slog.String("config_id", cfg.ID))
 		}
 		remove := a.clearSessionState(sessionKey)
 		if remove != nil {
@@ -616,25 +612,44 @@ func (a *DiscordAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig
 	}, nil
 }
 
-func (a *DiscordAdapter) ProcessingStarted(_ context.Context, cfg channel.ChannelConfig, _ channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
+// discordTypingRefreshInterval re-sends the typing indicator before Discord
+// clears it, about ten seconds after it was sent.
+const discordTypingRefreshInterval = 8 * time.Second
+
+var _ channel.ProcessingStatusRefresher = (*DiscordAdapter)(nil)
+
+func (a *DiscordAdapter) ProcessingStarted(ctx context.Context, cfg channel.ChannelConfig, _ channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
+	return channel.ProcessingStatusHandle{}, a.sendTyping(ctx, cfg, info)
+}
+
+// ProcessingRefreshInterval implements channel.ProcessingStatusRefresher.
+func (*DiscordAdapter) ProcessingRefreshInterval() time.Duration {
+	return discordTypingRefreshInterval
+}
+
+// ProcessingRefresh re-sends the typing indicator so it stays visible for
+// the whole turn.
+func (a *DiscordAdapter) ProcessingRefresh(ctx context.Context, cfg channel.ChannelConfig, _ channel.InboundMessage, info channel.ProcessingStatusInfo, _ channel.ProcessingStatusHandle) error {
+	return a.sendTyping(ctx, cfg, info)
+}
+
+func (a *DiscordAdapter) sendTyping(ctx context.Context, cfg channel.ChannelConfig, info channel.ProcessingStatusInfo) error {
 	chatID := strings.TrimSpace(info.ReplyTarget)
 	if chatID == "" {
-		return channel.ProcessingStatusHandle{}, nil
+		return nil
 	}
 
 	discordCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
-		return channel.ProcessingStatusHandle{}, err
+		return err
 	}
 
 	session, err := a.getOrCreateSession(discordCfg.BotToken, cfg.ID)
 	if err != nil {
-		return channel.ProcessingStatusHandle{}, err
+		return err
 	}
 
-	// Discord typing indicator
-	err = session.ChannelTyping(chatID)
-	return channel.ProcessingStatusHandle{}, err
+	return session.ChannelTyping(chatID, discordgo.WithContext(ctx))
 }
 
 func (*DiscordAdapter) ProcessingCompleted(_ context.Context, _ channel.ChannelConfig, _ channel.InboundMessage, _ channel.ProcessingStatusInfo, _ channel.ProcessingStatusHandle) error {

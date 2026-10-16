@@ -2,9 +2,10 @@
 // speaks the v2 protocol (internal/agent/runtime/codex/protocol) to a pinned
 // codex CLI running inside the bot workspace, with no ACP adapter in between.
 //
-// Session state is owned by codex itself under CODEX_HOME on the bot's
-// persistent data volume; Memoh keeps only the thread id in session runtime
-// metadata and projects the turn transcript into its own history.
+// Codex writes native rollouts under CODEX_HOME on the bot's data volume;
+// they are the only copy of its conversation. Memoh keeps the thread id and
+// rollout path in session metadata and resumes from them; a thread codex can
+// no longer resume starts over and says so.
 package codex
 
 import (
@@ -19,8 +20,10 @@ const (
 	RuntimeType = string(runtimekind.Codex)
 
 	// metadataThreadIDKey stores the codex thread id in session runtime
-	// metadata. Losing it starts a fresh codex thread on the next turn.
-	metadataThreadIDKey = "codex_thread_id"
+	// metadata; metadataRolloutPathKey stores the rollout file codex reported
+	// for it, which resumes the thread even when codex's own index lost it.
+	metadataThreadIDKey    = "codex_thread_id"
+	metadataRolloutPathKey = "codex_rollout_path"
 
 	codexHomeRoot = "/data/.codex/agents"
 	// dependencyID names the managed workspace dependency that provides the

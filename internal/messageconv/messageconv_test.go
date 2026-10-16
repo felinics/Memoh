@@ -6,6 +6,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/agent/turn"
 )
 
@@ -35,7 +36,7 @@ func TestModelMessageToSDKMessageStructuredParts(t *testing.T) {
 		Role: sdk.MessageRoleAssistant,
 		Content: []sdk.MessagePart{
 			sdk.TextPart{Text: "checking"},
-			sdk.ToolCallPart{ToolCallID: "call-1", ToolName: "lookup", Input: map[string]any{"q": "memoh"}},
+			sdk.ToolCallPart{ToolCallID: "call-1", ToolName: "lookup", Input: toolexec.ArgumentsFromValue(map[string]any{"q": "memoh"})},
 		},
 	})
 }

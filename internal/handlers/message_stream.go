@@ -15,6 +15,7 @@ import (
 	messageevent "github.com/felinics/memoh/internal/chat/event"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/httpx"
 )
 
 // sessionMessageStreamBuffer sizes the per-subscriber channel for the activity
@@ -36,18 +37,18 @@ const sseHeartbeatInterval = 20 * time.Second
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {string} string "SSE stream"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/events [get].
 func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	bot, perms, err := h.authorizeBotMessageAccess(c, channelIdentityID, botID)
 	if err != nil {
@@ -152,7 +153,7 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 			case messageevent.EventTypeMessageCreated:
 				var message messagepkg.Message
 				if err := json.Unmarshal(event.Data, &message); err != nil {
-					h.logger.Warn("activity stream: decode message_created event failed",
+					h.logger.WarnContext(c.Request().Context(), "activity stream: decode message_created event failed",
 						slog.String("bot_id", botID),
 						slog.Any("error", err),
 					)
@@ -167,7 +168,7 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 			case messageevent.EventTypeSessionTitleUpdated:
 				var payload map[string]string
 				if err := json.Unmarshal(event.Data, &payload); err != nil {
-					h.logger.Warn("activity stream: decode session_title_updated event failed",
+					h.logger.WarnContext(c.Request().Context(), "activity stream: decode session_title_updated event failed",
 						slog.String("bot_id", botID),
 						slog.Any("error", err),
 					)
@@ -190,7 +191,7 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 			case messageevent.EventTypeSessionCreated:
 				var payload map[string]any
 				if err := json.Unmarshal(event.Data, &payload); err != nil {
-					h.logger.Warn("activity stream: decode session_created event failed",
+					h.logger.WarnContext(c.Request().Context(), "activity stream: decode session_created event failed",
 						slog.String("bot_id", botID),
 						slog.Any("error", err),
 					)
@@ -220,7 +221,7 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 			case messageevent.EventTypeScheduleChanged:
 				var change messageevent.ScheduleChange
 				if err := json.Unmarshal(event.Data, &change); err != nil {
-					h.logger.Warn("activity stream: decode schedule_changed event failed",
+					h.logger.WarnContext(c.Request().Context(), "activity stream: decode schedule_changed event failed",
 						slog.String("bot_id", botID),
 						slog.Any("error", err),
 					)
@@ -383,7 +384,7 @@ func (c *sessionCache) get(ctx context.Context, sessionID string) (session.Threa
 	}
 	sess, err := c.svc.Get(ctx, sessionID)
 	if err != nil {
-		c.logger.Warn("activity stream: load session failed",
+		c.logger.WarnContext(ctx, "activity stream: load session failed",
 			slog.String("session_id", sessionID),
 			slog.Any("error", err),
 		)

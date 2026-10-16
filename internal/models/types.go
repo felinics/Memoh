@@ -9,6 +9,33 @@ import (
 	"github.com/felinics/memoh/internal/reasoning"
 )
 
+// FieldError is a model write rejected because of one request field. Field is
+// the name the request uses for it, with dots for a nested key; Required says
+// the field is missing or empty rather than holding a bad value. Err is the
+// private reason.
+type FieldError struct {
+	Field    string
+	Required bool
+	Err      error
+}
+
+func (e *FieldError) Error() string {
+	if e.Err == nil {
+		return e.Field
+	}
+	return e.Field + ": " + e.Err.Error()
+}
+
+func (e *FieldError) Unwrap() error { return e.Err }
+
+func fieldRequired(field string) error {
+	return &FieldError{Field: field, Required: true, Err: errors.New("is required")}
+}
+
+func fieldInvalid(field string, cause error) error {
+	return &FieldError{Field: field, Err: cause}
+}
+
 type ModelType string
 
 const (
@@ -28,6 +55,7 @@ const (
 	ClientTypeGoogleGenerativeAI      ClientType = "google-generative-ai"
 	ClientTypeOpenAICodex             ClientType = "openai-codex"
 	ClientTypeGitHubCopilot           ClientType = "github-copilot"
+	ClientTypeOpenCodeGo              ClientType = "opencode-go"
 	ClientTypeEdgeSpeech              ClientType = "edge-speech"
 	ClientTypeOpenAISpeech            ClientType = "openai-speech"
 	ClientTypeOpenAITranscription     ClientType = "openai-transcription"
@@ -93,11 +121,10 @@ func NearestEffortToMedium(levels []string) string {
 // Thinking mode tokens. Semantics live in internal/reasoning; these are
 // forwarding aliases so existing call sites keep compiling while they migrate.
 const (
-	ThinkingModeAdaptive     = reasoning.ModeAdaptive
-	ThinkingModeToggle       = reasoning.ModeToggle
-	ThinkingModeAlways       = reasoning.ModeAlways
-	ThinkingModeOnlyAdaptive = reasoning.ModeOnlyAdaptive
-	ThinkingModeNone         = reasoning.ModeNone
+	ThinkingModeAdaptive = reasoning.ModeAdaptive
+	ThinkingModeToggle   = reasoning.ModeToggle
+	ThinkingModeAlways   = reasoning.ModeAlways
+	ThinkingModeNone     = reasoning.ModeNone
 )
 
 // validCompatibilities enumerates accepted compatibility tokens.
@@ -159,6 +186,10 @@ type ModelConfig struct {
 	// off, while Flash starts at 0 and can.
 	ThinkingBudgetMin *int `json:"thinking_budget_min,omitempty"`
 	ThinkingBudgetMax *int `json:"thinking_budget_max,omitempty"`
+	// MaxOutputTokens is the most output tokens the model can produce in one
+	// response; nil means unknown. When set, every turn requests an explicit
+	// limit within it.
+	MaxOutputTokens *int `json:"max_output_tokens,omitempty"`
 }
 
 func normalizeModelConfig(config ModelConfig) ModelConfig {
@@ -188,6 +219,15 @@ func (c ModelConfig) ContextBudgetMaxTokens() int {
 	return 0
 }
 
+// MaxOutputTokensLimit returns the configured maximum output tokens, or zero
+// when the model's cap is unknown.
+func (c ModelConfig) MaxOutputTokensLimit() int {
+	if c.MaxOutputTokens != nil && *c.MaxOutputTokens > 0 {
+		return *c.MaxOutputTokens
+	}
+	return 0
+}
+
 type Model struct {
 	ModelID    string      `json:"model_id"`
 	Name       string      `json:"name"`
@@ -207,40 +247,45 @@ func ResolveEnable(override *bool, current bool) bool {
 	return *override
 }
 
+// Validate checks a model write. Every failure is a *FieldError naming the
+// request field that holds the offending value.
 func (m *Model) Validate() error {
 	if m.ModelID == "" {
-		return errors.New("model ID is required")
+		return fieldRequired("model_id")
 	}
 	if m.ProviderID == "" {
-		return errors.New("provider ID is required")
+		return fieldRequired("provider_id")
 	}
 	if _, err := uuid.Parse(m.ProviderID); err != nil {
-		return errors.New("provider ID must be a valid UUID")
+		return fieldInvalid("provider_id", err)
 	}
 	if !IsValidModelType(m.Type) {
-		return errors.New("invalid model type")
+		return fieldInvalid("type", ErrInvalidModelType)
+	}
+	if m.Config.MaxOutputTokens != nil && *m.Config.MaxOutputTokens <= 0 {
+		return errors.New("max output tokens must be greater than 0")
 	}
 	if m.Type == ModelTypeEmbedding {
 		if m.Config.Dimensions == nil || *m.Config.Dimensions <= 0 {
-			return errors.New("dimensions must be greater than 0 for embedding models")
+			return fieldRequired("config.dimensions")
 		}
 	}
 	if err := ValidateCompatibilities(m.Config.Compatibilities); err != nil {
-		return err
+		return fieldInvalid("config.compatibilities", err)
 	}
 	for _, effort := range m.Config.ReasoningEfforts {
 		if !IsValidReasoningEffort(effort) {
-			return errors.New("invalid reasoning effort: " + effort)
+			return fieldInvalid("config.reasoning_efforts", errors.New("invalid reasoning effort: "+effort))
 		}
 	}
 	if m.Config.ThinkingMode != "" && !reasoning.IsValidMode(m.Config.ThinkingMode) {
-		return errors.New("invalid thinking mode: " + m.Config.ThinkingMode)
+		return fieldInvalid("config.thinking_mode", errors.New("invalid thinking mode: "+m.Config.ThinkingMode))
 	}
 	if !reasoning.IsValidDialect(m.Config.ReasoningDialect) {
-		return errors.New("invalid reasoning dialect: " + m.Config.ReasoningDialect)
+		return fieldInvalid("config.reasoning_dialect", errors.New("invalid reasoning dialect: "+m.Config.ReasoningDialect))
 	}
 	if !reasoning.IsValidOffSupport(m.Config.ReasoningOffSupport) {
-		return errors.New("invalid reasoning off support: " + m.Config.ReasoningOffSupport)
+		return fieldInvalid("config.reasoning_off_support", errors.New("invalid reasoning off support: "+m.Config.ReasoningOffSupport))
 	}
 	return nil
 }
@@ -384,5 +429,10 @@ type TestResponse struct {
 	Status    TestStatus `json:"status"`
 	Reachable bool       `json:"reachable"`
 	LatencyMs int64      `json:"latency_ms,omitempty"`
-	Message   string     `json:"message,omitempty"`
+	// Code is the error catalog code for why the test did not pass. It is
+	// empty on success and when no catalog code describes the failure.
+	Code string `json:"code,omitempty"`
+	// Cause is why the test did not pass. It never leaves the process; the
+	// handler records it and derives Code from it.
+	Cause error `json:"-"`
 }

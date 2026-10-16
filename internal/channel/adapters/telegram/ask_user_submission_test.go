@@ -54,7 +54,8 @@ func TestAskUserSummaryRequiresDurableAcceptance(t *testing.T) {
 				return nil
 			}
 			err = adapter.finishAskUserSubmission(context.Background(), channel.ChannelConfig{}, handler, bot, i18n.New("en"), req, channel.InboundMessage{}, 123, 1)
-			if (err != nil) != (state == "handler-error" || state == "accepted-output-error") {
+			// The handler error belongs to the inbound unit's result line.
+			if err != nil {
 				t.Fatalf("result: %v", err)
 			}
 			if (edits.Load() == 1) != (storedStatus == userinput.StatusSubmitted) {

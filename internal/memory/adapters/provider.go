@@ -6,17 +6,21 @@ import (
 	"github.com/felinics/memoh/internal/mcp"
 )
 
-const ToolSearchMemory = "search_memory"
+const (
+	ToolSearchMemory = "search_memory"
+	ToolCreateMemory = "create_memory"
+	ToolUpdateMemory = "update_memory"
+	ToolDeleteMemory = "delete_memory"
+)
 
 // DefaultBuiltinProviderID is the virtual provider selected when a bot has no
 // persisted memory_provider_id. Registries materialize it per team.
 const DefaultBuiltinProviderID = "__builtin_default__"
 
-// Provider is the unified interface for memory systems. Each provider type
-// (builtin, mem0, openviking, etc.) implements this independently with its
-// own storage, retrieval, and tool logic.
+// Provider is the interface the Built-in Memory runtime implements for chat
+// hooks, memory tools, and management operations.
 type Provider interface {
-	// Type returns the provider type identifier (e.g. "builtin", "mem0").
+	// Type returns the provider type identifier ("builtin").
 	Type() string
 
 	// --- Conversation Hooks ---
@@ -34,9 +38,10 @@ type Provider interface {
 	Add(ctx context.Context, req AddRequest) (SearchResponse, error)
 	Search(ctx context.Context, req SearchRequest) (SearchResponse, error)
 	GetAll(ctx context.Context, req GetAllRequest) (SearchResponse, error)
+	// Update/Delete/DeleteBatch require the authorized bot, independently of caller-supplied IDs.
 	Update(ctx context.Context, req UpdateRequest) (MemoryItem, error)
-	Delete(ctx context.Context, memoryID string) (DeleteResponse, error)
-	DeleteBatch(ctx context.Context, memoryIDs []string) (DeleteResponse, error)
+	Delete(ctx context.Context, botID string, memoryID string) (DeleteResponse, error)
+	DeleteBatch(ctx context.Context, botID string, memoryIDs []string) (DeleteResponse, error)
 	DeleteAll(ctx context.Context, req DeleteAllRequest) (DeleteResponse, error)
 
 	// --- Lifecycle ---

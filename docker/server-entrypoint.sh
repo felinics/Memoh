@@ -35,7 +35,11 @@ if [ "$CONTAINER_BACKEND" != "docker" ] && [ "$CONTAINER_BACKEND" != "apple" ]; 
 
   # ---- Start containerd in background ----
   mkdir -p /run/containerd
-  containerd &
+  # OTEL_* in this environment configures Memoh, and containerd reads the same
+  # variables: with an endpoint set it starts exporting its own spans, by
+  # default over http/protobuf and under Memoh's OTEL_SERVICE_NAME. Against
+  # Memoh's default gRPC collector port that fails on every export.
+  OTEL_SDK_DISABLED=true containerd &
   CONTAINERD_PID=$!
 
   echo "Waiting for containerd..."
@@ -59,6 +63,8 @@ echo "Starting memoh-server..."
 shutdown() {
   echo "Shutting down..."
   kill "$SERVER_PID" 2>/dev/null || true
+  # Keep workspace processes reachable until the server records interruptions.
+  wait "$SERVER_PID" 2>/dev/null || true
   if [ -n "$CONTAINERD_PID" ]; then
     kill "$CONTAINERD_PID" 2>/dev/null || true
   fi

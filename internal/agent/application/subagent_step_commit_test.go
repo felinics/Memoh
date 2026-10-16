@@ -10,6 +10,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/step"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
@@ -81,16 +82,16 @@ func TestSubagentStepCommitPersistsStepsInOrder(t *testing.T) {
 		t.Fatal("step persistence callbacks not enabled")
 	}
 
-	if err := commit(ctx, 0, &sdk.StepResult{Messages: []sdk.Message{
+	if err := commit(ctx, 0, &step.Record{Messages: []sdk.Message{
 		{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "task"}}},
 		sdk.AssistantMessage("step one"),
 	}}); err != nil {
 		t.Fatalf("commit step 0: %v", err)
 	}
-	if err := commit(ctx, 1, &sdk.StepResult{Messages: []sdk.Message{sdk.AssistantMessage("step two")}}); err != nil {
+	if err := commit(ctx, 1, &step.Record{Messages: []sdk.Message{sdk.AssistantMessage("step two")}}); err != nil {
 		t.Fatalf("commit step 1: %v", err)
 	}
-	if err := commit(ctx, 3, &sdk.StepResult{Messages: []sdk.Message{sdk.AssistantMessage("skipped ahead")}}); err == nil {
+	if err := commit(ctx, 3, &step.Record{Messages: []sdk.Message{sdk.AssistantMessage("skipped ahead")}}); err == nil {
 		t.Fatal("out-of-order step index was accepted")
 	}
 
@@ -138,7 +139,7 @@ func TestSubagentStepCommitPersistsStepsInOrder(t *testing.T) {
 		Role:    sdk.MessageRoleAssistant,
 		Content: []sdk.MessagePart{sdk.ReasoningPart{Text: "partial inference"}},
 	}
-	if err := interrupt(ctx, 2, &sdk.StepResult{Messages: []sdk.Message{interrupted}}); err != nil {
+	if err := interrupt(ctx, 2, &step.Record{Messages: []sdk.Message{interrupted}}); err != nil {
 		t.Fatalf("persist interrupted step: %v", err)
 	}
 	if len(store.steps) != 3 || !store.steps[2].Interrupted {
@@ -163,7 +164,7 @@ func TestSubagentStepCommitSkipsEmptyStepWithoutPersisting(t *testing.T) {
 	persistedSteps := 0
 	commit, _ := service.SubagentStepCommit(ctx, botID, sessionID, "model", "req-msg-1", nil, func() { persistedSteps++ })
 
-	if err := commit(ctx, 0, &sdk.StepResult{Messages: []sdk.Message{
+	if err := commit(ctx, 0, &step.Record{Messages: []sdk.Message{
 		{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "only user"}}},
 	}}); err != nil {
 		t.Fatalf("commit user-only step: %v", err)
@@ -172,7 +173,7 @@ func TestSubagentStepCommitSkipsEmptyStepWithoutPersisting(t *testing.T) {
 		t.Fatalf("user-only step persisted: steps=%d fired=%d", len(store.steps), persistedSteps)
 	}
 	// The empty step still advanced the cursor: the next step index is 1.
-	if err := commit(ctx, 1, &sdk.StepResult{Messages: []sdk.Message{sdk.AssistantMessage("real output")}}); err != nil {
+	if err := commit(ctx, 1, &step.Record{Messages: []sdk.Message{sdk.AssistantMessage("real output")}}); err != nil {
 		t.Fatalf("commit step 1 after empty step: %v", err)
 	}
 	if len(store.steps) != 1 || persistedSteps != 1 {

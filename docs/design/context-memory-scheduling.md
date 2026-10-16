@@ -399,9 +399,15 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
       the discuss TR load (previously unbounded since the Unix epoch), the
       pipeline-chat TR load, and the legacy `loadHistoryRecords` (both
       session- and bot-scoped). Total history size never bounds process
-      memory; the budget does. Remaining resident-state bounds — the RC
-      pipeline cache and event replay — are CM-CCH-001/CM-RPL-001 and land
-      in PR 3; PR 4's persisted per-fragment costs refine the measures.
+      memory; the budget does. The budget covers content only, so metadata
+      is handled separately: both TR loads project content and the
+      interrupted flag (`ListTurnResponseSourcesSinceBySessionWithinBytes`),
+      and `loadHistoryRecords` receives metadata undecoded and decodes one
+      row at a time — its source hash must still cover the full metadata,
+      which persisted compaction coverage compares. Remaining resident-state
+      bounds — the RC pipeline cache and event replay — are
+      CM-CCH-001/CM-RPL-001 and land in PR 3; PR 4's persisted per-fragment
+      costs refine the measures.
 - [x] Deterministic over-budget trim (artifact summaries + newest message + recent
       contiguous window, no orphaned tool responses); `context.protected_overflow`
       stable error when even the protected set does not fit — CM-ADM-002. Both

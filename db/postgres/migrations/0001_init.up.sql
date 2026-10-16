@@ -137,6 +137,7 @@ CREATE TABLE IF NOT EXISTS providers (
     'google-generative-ai',
     'openai-codex',
     'github-copilot',
+    'opencode-go',
     'edge-speech',
     'openai-speech',
     'openai-transcription',
@@ -230,6 +231,10 @@ CREATE TABLE IF NOT EXISTS bots (
   timezone TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
   status TEXT NOT NULL DEFAULT 'ready',
+  -- Idempotency-Key of the POST /bots that created this row.
+  create_request_key TEXT,
+  -- Retired setting: no code reads or writes this column. Kept so dropping it
+  -- never becomes a breaking schema change for an already-deployed server.
   language TEXT NOT NULL DEFAULT 'auto',
   command_ui_language TEXT NOT NULL DEFAULT 'auto',
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
@@ -245,6 +250,7 @@ CREATE TABLE IF NOT EXISTS bots (
   compaction_threshold INTEGER NOT NULL DEFAULT 0,
   compaction_target_percent INTEGER,
   compaction_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  memory_llm_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   image_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   discuss_probe_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   tts_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
@@ -265,7 +271,7 @@ CREATE TABLE IF NOT EXISTS bots (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   acl_default_effect TEXT NOT NULL DEFAULT 'allow',
   CONSTRAINT bots_type_check CHECK (type IN ('personal', 'public')),
-  CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
+  CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting', 'failed')),
   CONSTRAINT bots_acl_default_effect_check CHECK (acl_default_effect IN ('allow', 'deny')),
   CONSTRAINT bots_runtime_reset_pair_check CHECK (
     (runtime_reset_token IS NULL) = (runtime_reset_expires_at IS NULL)
@@ -886,6 +892,7 @@ CREATE INDEX IF NOT EXISTS idx_lifecycle_events_container_id ON lifecycle_events
 CREATE INDEX IF NOT EXISTS idx_lifecycle_events_event_type ON lifecycle_events(event_type);
 
 CREATE TABLE IF NOT EXISTS schedule (
+  max_run_seconds integer NOT NULL DEFAULT 3600 CHECK (max_run_seconds BETWEEN 300 AND 86400),
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   description TEXT NOT NULL,
@@ -981,7 +988,6 @@ CREATE TABLE IF NOT EXISTS bot_history_message_assets (
 
 CREATE INDEX IF NOT EXISTS idx_message_assets_message_id ON bot_history_message_assets(message_id);
 
-
 CREATE TABLE IF NOT EXISTS bot_history_message_compacts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
@@ -1019,6 +1025,7 @@ CREATE TABLE IF NOT EXISTS schedule_logs (
   status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'error')),
   result_text TEXT NOT NULL DEFAULT '',
   error_message TEXT NOT NULL DEFAULT '',
+  error_code TEXT NOT NULL DEFAULT '',
   usage JSONB,
   model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1028,75 +1035,7 @@ CREATE TABLE IF NOT EXISTS schedule_logs (
 CREATE INDEX IF NOT EXISTS idx_schedule_logs_schedule ON schedule_logs(schedule_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_schedule_logs_bot ON schedule_logs(bot_id, started_at DESC);
 
--- email_providers: pluggable email service backends
-CREATE TABLE IF NOT EXISTS email_providers (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  provider TEXT NOT NULL,
-  config JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT email_providers_user_name_unique UNIQUE (user_id, name)
-);
-
-CREATE INDEX IF NOT EXISTS idx_email_providers_user_id ON email_providers(user_id);
 CREATE INDEX IF NOT EXISTS idx_providers_provider_template_id ON providers(provider_template_id);
-
--- email_oauth_tokens: stored OAuth2 tokens for Gmail email providers
-CREATE TABLE IF NOT EXISTS email_oauth_tokens (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email_provider_id UUID NOT NULL UNIQUE REFERENCES email_providers(id) ON DELETE CASCADE,
-  email_address TEXT NOT NULL DEFAULT '',
-  access_token TEXT NOT NULL DEFAULT '',
-  refresh_token TEXT NOT NULL DEFAULT '',
-  expires_at TIMESTAMPTZ,
-  scope TEXT NOT NULL DEFAULT '',
-  state TEXT NOT NULL DEFAULT '',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_email_oauth_tokens_state ON email_oauth_tokens(state) WHERE state != '';
-
--- bot_email_bindings: per-bot email provider binding with read/write/delete permissions
-CREATE TABLE IF NOT EXISTS bot_email_bindings (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  email_provider_id UUID NOT NULL REFERENCES email_providers(id) ON DELETE CASCADE,
-  email_address TEXT NOT NULL,
-  can_read BOOLEAN NOT NULL DEFAULT TRUE,
-  can_write BOOLEAN NOT NULL DEFAULT TRUE,
-  can_delete BOOLEAN NOT NULL DEFAULT FALSE,
-  config JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT bot_email_bindings_unique UNIQUE (bot_id, email_provider_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_bot_email_bindings_bot_id ON bot_email_bindings(bot_id);
-CREATE INDEX IF NOT EXISTS idx_bot_email_bindings_provider_id ON bot_email_bindings(email_provider_id);
-
--- email_outbox: outbound email audit log
-CREATE TABLE IF NOT EXISTS email_outbox (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  provider_id UUID NOT NULL REFERENCES email_providers(id) ON DELETE CASCADE,
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  message_id TEXT NOT NULL DEFAULT '',
-  from_address TEXT NOT NULL DEFAULT '',
-  to_addresses JSONB NOT NULL DEFAULT '[]'::jsonb,
-  subject TEXT NOT NULL DEFAULT '',
-  body_text TEXT NOT NULL DEFAULT '',
-  body_html TEXT NOT NULL DEFAULT '',
-  attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'failed')),
-  error TEXT NOT NULL DEFAULT '',
-  sent_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_email_outbox_provider_id ON email_outbox(provider_id);
-CREATE INDEX IF NOT EXISTS idx_email_outbox_bot_id ON email_outbox(bot_id, created_at DESC);
 
 -- provider_oauth_tokens: OAuth2 tokens for LLM providers (e.g. OpenAI Codex OAuth)
 CREATE TABLE IF NOT EXISTS provider_oauth_tokens (
@@ -1202,7 +1141,6 @@ CREATE TABLE IF NOT EXISTS memory_edges (
 CREATE INDEX IF NOT EXISTS idx_memory_edges_src  ON memory_edges (bot_id, src_node);
 CREATE INDEX IF NOT EXISTS idx_memory_edges_dst  ON memory_edges (bot_id, dst_node);
 CREATE INDEX IF NOT EXISTS idx_memory_edges_rel  ON memory_edges (bot_id, rel);
-
 
 -- ---------------------------------------------------------------------------
 -- Canonical team and membership schema
@@ -1331,7 +1269,6 @@ ALTER TABLE IF EXISTS public.bot_acl_rules ADD COLUMN IF NOT EXISTS team_id uuid
 ALTER TABLE IF EXISTS public.bot_channel_admins ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.bot_channel_configs ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.bot_channel_routes ADD COLUMN IF NOT EXISTS team_id uuid;
-ALTER TABLE IF EXISTS public.bot_email_bindings ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.bot_history_message_assets ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.bot_history_message_compacts ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.bot_history_messages ADD COLUMN IF NOT EXISTS team_id uuid;
@@ -1347,9 +1284,6 @@ ALTER TABLE IF EXISTS public.channel_identities ADD COLUMN IF NOT EXISTS team_id
 ALTER TABLE IF EXISTS public.channel_link_codes ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.container_versions ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.containers ADD COLUMN IF NOT EXISTS team_id uuid;
-ALTER TABLE IF EXISTS public.email_oauth_tokens ADD COLUMN IF NOT EXISTS team_id uuid;
-ALTER TABLE IF EXISTS public.email_outbox ADD COLUMN IF NOT EXISTS team_id uuid;
-ALTER TABLE IF EXISTS public.email_providers ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.fetch_providers ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.lifecycle_events ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.mcp_connections ADD COLUMN IF NOT EXISTS team_id uuid;
@@ -1387,7 +1321,6 @@ BEGIN
 END
 $users_legacy_team_column$;
 
-
 -- Give team_id a DEFAULT so any INSERT (sqlc-generated or raw) auto-fills the
 -- current team from the session/transaction GUC. Fail-closed: if the GUC is
 -- unset, public.memoh_current_team_id() raises rather than inserting a NULL/guessed team.
@@ -1395,7 +1328,6 @@ ALTER TABLE IF EXISTS public.bot_acl_rules ALTER COLUMN team_id SET DEFAULT publ
 ALTER TABLE IF EXISTS public.bot_channel_admins ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.bot_channel_configs ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.bot_channel_routes ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
-ALTER TABLE IF EXISTS public.bot_email_bindings ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.bot_history_message_assets ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.bot_history_message_compacts ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.bot_history_messages ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
@@ -1411,9 +1343,6 @@ ALTER TABLE IF EXISTS public.channel_identities ALTER COLUMN team_id SET DEFAULT
 ALTER TABLE IF EXISTS public.channel_link_codes ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.container_versions ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.containers ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
-ALTER TABLE IF EXISTS public.email_oauth_tokens ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
-ALTER TABLE IF EXISTS public.email_outbox ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
-ALTER TABLE IF EXISTS public.email_providers ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.fetch_providers ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.lifecycle_events ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.mcp_connections ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
@@ -1713,6 +1642,10 @@ DROP INDEX IF EXISTS idx_bots_name;
 CREATE UNIQUE INDEX idx_bots_name
     ON public.bots (team_id, name);
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_create_request_key
+    ON public.bots (team_id, owner_user_id, create_request_key)
+    WHERE create_request_key IS NOT NULL;
+
 DROP INDEX IF EXISTS idx_session_events_dedup;
 CREATE UNIQUE INDEX idx_session_events_dedup
     ON public.bot_session_events (team_id, session_id, event_kind, external_message_id)
@@ -1953,8 +1886,6 @@ ALTER TABLE public.bots NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.bots DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.channel_link_codes NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.channel_link_codes DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.email_providers NO FORCE ROW LEVEL SECURITY;
-ALTER TABLE public.email_providers DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_channel_bindings NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.user_channel_bindings DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_channel_identity_bindings NO FORCE ROW LEVEL SECURITY;
@@ -1981,8 +1912,6 @@ ALTER TABLE public.bots
     DROP CONSTRAINT IF EXISTS bots_owner_user_id_fkey;
 ALTER TABLE public.channel_link_codes
     DROP CONSTRAINT IF EXISTS channel_link_codes_user_id_fkey;
-ALTER TABLE public.email_providers
-    DROP CONSTRAINT IF EXISTS email_providers_user_id_fkey;
 ALTER TABLE public.user_channel_bindings
     DROP CONSTRAINT IF EXISTS user_channel_bindings_user_id_fkey;
 ALTER TABLE public.user_channel_identity_bindings
@@ -2030,11 +1959,6 @@ ALTER TABLE public.channel_link_codes
     FOREIGN KEY (team_id, user_id)
     REFERENCES public.team_members(team_id, user_id)
     ON DELETE CASCADE;
-ALTER TABLE public.email_providers
-    ADD CONSTRAINT email_providers_user_id_fkey
-    FOREIGN KEY (team_id, user_id)
-    REFERENCES public.team_members(team_id, user_id)
-    ON DELETE CASCADE;
 ALTER TABLE public.user_channel_bindings
     ADD CONSTRAINT user_channel_bindings_user_id_fkey
     FOREIGN KEY (team_id, user_id)
@@ -2070,8 +1994,6 @@ ALTER TABLE public.bots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bots FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.channel_link_codes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.channel_link_codes FORCE ROW LEVEL SECURITY;
-ALTER TABLE public.email_providers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.email_providers FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.user_channel_bindings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_channel_bindings FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.user_channel_identity_bindings ENABLE ROW LEVEL SECURITY;
@@ -2328,6 +2250,12 @@ CREATE INDEX IF NOT EXISTS idx_session_runs_orphan
     ON public.session_runs (team_id, created_at, run_id)
     WHERE state = 'accepted' AND owner_id IS NULL;
 
+-- Interrupted runs whose resume intent is still pending; the recovery worker
+-- lists these instead of walking a team's run history.
+CREATE INDEX IF NOT EXISTS idx_session_runs_resume_pending
+    ON public.session_runs (team_id, run_id)
+    WHERE state = 'lost' AND error_code = 'session_runtime.interrupted' AND input_json ? 'resume';
+
 ALTER TABLE public.session_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.session_runs FORCE ROW LEVEL SECURITY;
 
@@ -2466,6 +2394,7 @@ CREATE TABLE IF NOT EXISTS public.bot_app_installations (
     available_version   TEXT        NOT NULL DEFAULT '',
     last_checked_at     TIMESTAMPTZ,
     last_error          TEXT        NOT NULL DEFAULT '',
+    last_error_code     TEXT        NOT NULL DEFAULT '',
     -- The release document the installation materialized, so the App
     -- view does not depend on the Supermarket being reachable.
     release             BYTEA       NOT NULL DEFAULT ''::bytea,
@@ -2713,117 +2642,14 @@ ALTER TABLE public.schedule
     ADD CONSTRAINT schedule_workdir_id_fkey
     FOREIGN KEY (team_id, workdir_id)
     REFERENCES public.bot_workdirs(team_id, id) ON DELETE SET NULL (workdir_id);
--- Runtimes that own native session state (ACP agents, codex, claude-code)
--- use a fresh process-local home for every process. Persist the resumable
--- native session separately from the runtime home so a later process can
--- reconstruct the runtime's JSONL transcript before resuming. Snapshots are
--- staged by run: canonical history promotes a staged version by committing
--- the session's publication head in the same transaction as the round's
--- messages.
-CREATE TABLE IF NOT EXISTS public.agent_session_states (
-    team_id               UUID        NOT NULL DEFAULT public.memoh_current_team_id()
-                                      REFERENCES public.teams(id) ON DELETE RESTRICT,
-    session_id            UUID        NOT NULL,
-    through_run_id        UUID        NOT NULL,
-    agent_id              TEXT        NOT NULL,
-    agent_session_id        TEXT        NOT NULL,
-    cwd                   TEXT        NOT NULL,
-    transcript_path       TEXT        NOT NULL,
-    runtime_fencing_token BIGINT      NOT NULL,
-    file_count            INTEGER     NOT NULL,
-    record_count          BIGINT      NOT NULL,
-    file_shapes           JSONB       NOT NULL DEFAULT '[]'::jsonb,
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (team_id, session_id, through_run_id),
-    CONSTRAINT agent_session_states_session_id_fkey
-        FOREIGN KEY (team_id, session_id)
-        REFERENCES public.bot_sessions(team_id, id) ON DELETE CASCADE,
-    CONSTRAINT agent_session_states_run_fkey
-        FOREIGN KEY (team_id, session_id, through_run_id)
-        REFERENCES public.session_runs(team_id, session_id, run_id) ON DELETE CASCADE,
-    CONSTRAINT agent_session_states_agent_id_check
-        CHECK (btrim(agent_id) <> '' AND octet_length(btrim(agent_id)) <= 256),
-    CONSTRAINT agent_session_states_agent_session_id_check
-        CHECK (btrim(agent_session_id) <> '' AND octet_length(btrim(agent_session_id)) <= 1024),
-    CONSTRAINT agent_session_states_cwd_check
-        CHECK (btrim(cwd) <> '' AND octet_length(btrim(cwd)) <= 16384),
-    CONSTRAINT agent_session_states_transcript_path_check
-        CHECK (
-            transcript_path <> ''
-            AND octet_length(transcript_path) <= 4096
-            AND left(transcript_path, 1) <> '/'
-            AND right(transcript_path, 6) = '.jsonl'
-            AND position(chr(92) in transcript_path) = 0
-            AND transcript_path !~ '(^|/)\.\.?(/|$)'
-            AND transcript_path !~ E'[\r\n]'
-        ),
-    CONSTRAINT agent_session_states_runtime_fencing_token_check
-        CHECK (runtime_fencing_token > 0),
-    CONSTRAINT agent_session_states_file_count_check
-        CHECK (file_count > 0 AND file_count <= 1024),
-    CONSTRAINT agent_session_states_record_count_check
-        CHECK (record_count > 0 AND record_count <= 2000000),
-    CONSTRAINT agent_session_states_file_shapes_check
-        CHECK (jsonb_typeof(file_shapes) = 'array')
-);
-
--- Single line set per session: staging appends each file's tail after proving
--- the stored canonical prefix byte-identical. When the proof fails, staging
--- DECLINES without touching canonical rows - the turn publishes a reset head,
--- and only once that reset is canonical may the next turn stage a full
--- rewrite. Lines reference the session directly (not a version header)
--- because versions share them; version membership is defined by the header's
--- file_shapes.
-CREATE TABLE IF NOT EXISTS public.agent_session_state_lines (
-    team_id       UUID   NOT NULL DEFAULT public.memoh_current_team_id()
-                          REFERENCES public.teams(id) ON DELETE RESTRICT,
-    session_id    UUID   NOT NULL,
-    file_path     TEXT COLLATE "C" NOT NULL,
-    line_number   BIGINT NOT NULL,
-    -- Verbatim compacted JSON text. TEXT (not JSONB) is deliberate: the
-    -- capture digest, the append-only prefix proof, and the load-time digest
-    -- verification all promise byte fidelity across the database round trip,
-    -- which JSONB normalization (key order, whitespace, number rendering)
-    -- would silently break. JSON validity is enforced by the adapter.
-    content       TEXT   NOT NULL,
-    content_bytes INTEGER NOT NULL,
-    PRIMARY KEY (team_id, session_id, file_path, line_number),
-    CONSTRAINT agent_session_state_lines_session_fkey
-        FOREIGN KEY (team_id, session_id)
-        REFERENCES public.bot_sessions(team_id, id) ON DELETE CASCADE,
-    CONSTRAINT agent_session_state_lines_file_path_check
-        CHECK (
-            file_path <> ''
-            AND octet_length(file_path) <= 4096
-            AND left(file_path, 1) <> '/'
-            AND right(file_path, 6) = '.jsonl'
-            AND position(chr(92) in file_path) = 0
-            AND file_path !~ '(^|/)\.\.?(/|$)'
-            AND file_path !~ E'[\r\n]'
-        ),
-    CONSTRAINT agent_session_state_lines_content_size_check
-        CHECK (
-            content_bytes = octet_length(content)
-            AND content_bytes > 0
-            AND content_bytes <= 8388608
-        ),
-    CONSTRAINT agent_session_state_lines_line_number_check
-        CHECK (line_number > 0)
-);
-
--- The canonical publication head: one row per session naming the run whose
--- native state the canonical chat history is at. It is written in the same
--- transaction as the round's messages, so a crash can never publish a
--- "ghost transcript" that history does not contain. checkpoint_reset = true
--- means the head is canonical but nothing is resumable (the profile cannot
--- snapshot, or the runtime deliberately started fresh).
+-- Last committed round observed by a warm external runtime. Written with the
+-- round's messages to invalidate processes that have fallen behind. Native
+-- conversation state remains in Agent-owned workspace files.
 CREATE TABLE IF NOT EXISTS public.agent_session_publications (
     team_id          UUID        NOT NULL DEFAULT public.memoh_current_team_id()
                                  REFERENCES public.teams(id) ON DELETE RESTRICT,
     session_id       UUID        NOT NULL,
     run_id           UUID        NOT NULL,
-    checkpoint_reset BOOLEAN     NOT NULL DEFAULT false,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (team_id, session_id),
     CONSTRAINT agent_session_publications_session_fkey
@@ -2846,33 +2672,6 @@ CREATE POLICY agent_session_publications_team_update ON public.agent_session_pub
     USING (team_id = public.memoh_current_team_id())
     WITH CHECK (team_id = public.memoh_current_team_id());
 CREATE POLICY agent_session_publications_team_delete ON public.agent_session_publications
-    FOR DELETE USING (team_id = public.memoh_current_team_id());
-
-ALTER TABLE public.agent_session_states ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.agent_session_states FORCE ROW LEVEL SECURITY;
-ALTER TABLE public.agent_session_state_lines ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.agent_session_state_lines FORCE ROW LEVEL SECURITY;
-
-CREATE POLICY agent_session_states_team_select ON public.agent_session_states
-    FOR SELECT USING (team_id = public.memoh_current_team_id());
-CREATE POLICY agent_session_states_team_insert ON public.agent_session_states
-    FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
-CREATE POLICY agent_session_states_team_update ON public.agent_session_states
-    FOR UPDATE
-    USING (team_id = public.memoh_current_team_id())
-    WITH CHECK (team_id = public.memoh_current_team_id());
-CREATE POLICY agent_session_states_team_delete ON public.agent_session_states
-    FOR DELETE USING (team_id = public.memoh_current_team_id());
-
-CREATE POLICY agent_session_state_lines_team_select ON public.agent_session_state_lines
-    FOR SELECT USING (team_id = public.memoh_current_team_id());
-CREATE POLICY agent_session_state_lines_team_insert ON public.agent_session_state_lines
-    FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
-CREATE POLICY agent_session_state_lines_team_update ON public.agent_session_state_lines
-    FOR UPDATE
-    USING (team_id = public.memoh_current_team_id())
-    WITH CHECK (team_id = public.memoh_current_team_id());
-CREATE POLICY agent_session_state_lines_team_delete ON public.agent_session_state_lines
     FOR DELETE USING (team_id = public.memoh_current_team_id());
 
 -- ---------------------------------------------------------------------------
@@ -3050,6 +2849,7 @@ CREATE TABLE IF NOT EXISTS public.bot_dependency_installations (
     latest_version      TEXT        NOT NULL DEFAULT '',
     last_checked_at     TIMESTAMPTZ,
     last_error          TEXT        NOT NULL DEFAULT '',
+    last_error_code     TEXT        NOT NULL DEFAULT '',
     manifest_digest     TEXT        NOT NULL DEFAULT '',
     source_url          TEXT        NOT NULL DEFAULT '',
     registry_id         TEXT        NOT NULL DEFAULT '',
@@ -3194,3 +2994,118 @@ DROP POLICY IF EXISTS agent_authorizations_team ON public.agent_authorizations;
 CREATE POLICY agent_authorizations_team ON public.agent_authorizations
     USING (team_id = public.memoh_current_team_id())
     WITH CHECK (team_id = public.memoh_current_team_id());
+
+-- Declarative workspace state for bots, converged by the internal/botworkspace reconciler.
+-- desired_* is written only by the API layer; observed_* and the lease only by
+-- the reconciler. ever_ready gates whether any automated step may delete the
+-- workspace's data.
+CREATE TABLE IF NOT EXISTS public.bot_workspaces (
+    bot_id              UUID        PRIMARY KEY,
+    team_id             UUID        NOT NULL DEFAULT public.memoh_current_team_id()
+                                    REFERENCES public.teams(id) ON DELETE RESTRICT,
+    desired_state       TEXT        NOT NULL,
+    desired_generation  BIGINT      NOT NULL DEFAULT 1,
+    image               TEXT        NOT NULL DEFAULT '',
+    preserve_data       BOOLEAN     NOT NULL DEFAULT false,
+    observed_state      TEXT        NOT NULL DEFAULT 'absent',
+    observed_generation BIGINT      NOT NULL DEFAULT 0,
+    ever_ready          BOOLEAN     NOT NULL DEFAULT false,
+    last_error          TEXT        NOT NULL DEFAULT '',
+    last_error_code     TEXT        NOT NULL DEFAULT '',
+    last_error_phase    TEXT        NOT NULL DEFAULT '',
+    attempts            INTEGER     NOT NULL DEFAULT 0,
+    next_attempt_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    lease_owner         TEXT        NOT NULL DEFAULT '',
+    lease_until         TIMESTAMPTZ,
+    version             BIGINT      NOT NULL DEFAULT 1,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT memoh_team_key_7443107a7495 UNIQUE (team_id, bot_id),
+    CONSTRAINT bot_workspaces_desired_state_check
+        CHECK (desired_state IN ('present', 'absent')),
+    CONSTRAINT bot_workspaces_observed_state_check
+        CHECK (observed_state IN ('absent', 'provisioning', 'running', 'stopped', 'failed', 'removing')),
+    CONSTRAINT bot_workspaces_last_error_phase_check
+        CHECK (last_error_phase IN ('', 'image_prepare', 'start', 'bridge', 'bootstrap', 'teardown'))
+);
+
+ALTER TABLE public.bot_workspaces
+    DROP CONSTRAINT IF EXISTS bot_workspaces_bot_id_fkey;
+ALTER TABLE public.bot_workspaces
+    ADD CONSTRAINT bot_workspaces_bot_id_fkey
+    FOREIGN KEY (team_id, bot_id)
+    REFERENCES public.bots(team_id, id) ON DELETE CASCADE
+    NOT VALID;
+
+CREATE INDEX IF NOT EXISTS idx_bot_workspaces_due
+    ON public.bot_workspaces (team_id, next_attempt_at);
+
+ALTER TABLE public.bot_workspaces ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_workspaces FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS bot_workspaces_team_select ON public.bot_workspaces;
+DROP POLICY IF EXISTS bot_workspaces_team_insert ON public.bot_workspaces;
+DROP POLICY IF EXISTS bot_workspaces_team_update ON public.bot_workspaces;
+DROP POLICY IF EXISTS bot_workspaces_team_delete ON public.bot_workspaces;
+
+CREATE POLICY bot_workspaces_team_select ON public.bot_workspaces
+    FOR SELECT USING (team_id = public.memoh_current_team_id());
+CREATE POLICY bot_workspaces_team_insert ON public.bot_workspaces
+    FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY bot_workspaces_team_update ON public.bot_workspaces
+    FOR UPDATE
+    USING (team_id = public.memoh_current_team_id())
+    WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY bot_workspaces_team_delete ON public.bot_workspaces
+    FOR DELETE USING (team_id = public.memoh_current_team_id());
+
+-- Usage ledger for memory LLM calls (extract / decide / compact), which never
+-- produce a chat message. bots.memory_llm_model_id picks their model.
+CREATE TABLE IF NOT EXISTS public.bot_memory_usage (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  team_id    UUID        NOT NULL DEFAULT public.memoh_current_team_id()
+                         REFERENCES public.teams(id) ON DELETE RESTRICT,
+  bot_id     UUID        NOT NULL,
+  model_id   UUID,
+  operation  TEXT        NOT NULL,
+  usage      JSONB       NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT memoh_team_key_cdc0b6740345 UNIQUE (team_id, id),
+  CONSTRAINT bot_memory_usage_operation_check
+    CHECK (operation IN ('extract', 'decide', 'compact'))
+);
+
+ALTER TABLE public.bot_memory_usage
+  DROP CONSTRAINT IF EXISTS bot_memory_usage_bot_id_fkey,
+  ADD CONSTRAINT bot_memory_usage_bot_id_fkey
+    FOREIGN KEY (team_id, bot_id)
+    REFERENCES public.bots(team_id, id) ON DELETE CASCADE;
+
+ALTER TABLE public.bot_memory_usage
+  DROP CONSTRAINT IF EXISTS bot_memory_usage_model_id_fkey,
+  ADD CONSTRAINT bot_memory_usage_model_id_fkey
+    FOREIGN KEY (team_id, model_id)
+    REFERENCES public.models(team_id, id)
+    ON DELETE SET NULL (model_id);
+
+CREATE INDEX IF NOT EXISTS idx_bot_memory_usage_bot_created
+  ON public.bot_memory_usage (team_id, bot_id, created_at DESC);
+
+ALTER TABLE public.bot_memory_usage ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_memory_usage FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS bot_memory_usage_team_select ON public.bot_memory_usage;
+DROP POLICY IF EXISTS bot_memory_usage_team_insert ON public.bot_memory_usage;
+DROP POLICY IF EXISTS bot_memory_usage_team_update ON public.bot_memory_usage;
+DROP POLICY IF EXISTS bot_memory_usage_team_delete ON public.bot_memory_usage;
+
+CREATE POLICY bot_memory_usage_team_select ON public.bot_memory_usage
+  FOR SELECT USING (team_id = public.memoh_current_team_id());
+CREATE POLICY bot_memory_usage_team_insert ON public.bot_memory_usage
+  FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY bot_memory_usage_team_update ON public.bot_memory_usage
+  FOR UPDATE
+  USING (team_id = public.memoh_current_team_id())
+  WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY bot_memory_usage_team_delete ON public.bot_memory_usage
+  FOR DELETE USING (team_id = public.memoh_current_team_id());

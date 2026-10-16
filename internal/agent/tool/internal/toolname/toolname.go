@@ -48,6 +48,9 @@ func ToolListSessions() Name   { return newName("list_sessions") }
 func ToolGetMessages() Name    { return newName("get_messages") }
 func ToolSearchMessages() Name { return newName("search_messages") }
 func ToolSearchMemory() Name   { return newName(memprovider.ToolSearchMemory) }
+func ToolCreateMemory() Name   { return newName(memprovider.ToolCreateMemory) }
+func ToolUpdateMemory() Name   { return newName(memprovider.ToolUpdateMemory) }
+func ToolDeleteMemory() Name   { return newName(memprovider.ToolDeleteMemory) }
 func ToolListSkills() Name     { return newName("list_skills") }
 func ToolUseSkill() Name       { return newName("use_skill") }
 func ToolSpawnAgent() Name     { return newName("spawn_agent") }
@@ -77,20 +80,19 @@ func ToolGenerateVideo() Name   { return newName("generate_video") }
 func ToolTranscribeAudio() Name { return newName("transcribe_audio") }
 func ToolAskUser() Name         { return newName(userinput.ToolNameAskUser) }
 
-func ToolListEmailAccounts() Name { return newName("list_email_accounts") }
-func ToolSendEmail() Name         { return newName("send_email") }
-func ToolListEmail() Name         { return newName("list_email") }
-func ToolReadEmail() Name         { return newName("read_email") }
+func ToolMCPManage() Name { return newName("mcp_manage") }
+func ToolAppSearch() Name { return newName("app_search") }
+func ToolAppManage() Name { return newName("app_manage") }
 
 var all = []Name{
+	ToolMCPManage(), ToolAppSearch(), ToolAppManage(),
 	ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolExec(), ToolApplyPatch(), ToolListExecutionLocations(), ToolListBackground(), ToolGetBackgroundStatus(), ToolKillBackground(), ToolWait(), ToolWaitUntil(),
 	ToolSend(), ToolReact(), ToolSpeak(),
-	ToolGetContacts(), ToolListSessions(), ToolGetMessages(), ToolSearchMessages(), ToolSearchMemory(), ToolListSkills(), ToolUseSkill(), ToolSpawnAgent(), ToolSendMessage(), ToolListAgents(), ToolListModels(),
+	ToolGetContacts(), ToolListSessions(), ToolGetMessages(), ToolSearchMessages(), ToolSearchMemory(), ToolCreateMemory(), ToolUpdateMemory(), ToolDeleteMemory(), ToolListSkills(), ToolUseSkill(), ToolSpawnAgent(), ToolSendMessage(), ToolListAgents(), ToolListModels(),
 	ToolListWorkdirs(), ToolListACPAgents(),
 	ToolListSchedule(), ToolGetSchedule(), ToolCreateSchedule(), ToolUpdateSchedule(), ToolDeleteSchedule(),
 	ToolBrowserAction(), ToolBrowserObserve(), ToolComputerObserve(), ToolComputerAction(), ToolBrowserRemoteSession(),
 	ToolWebSearch(), ToolWebFetch(), ToolGenerateImage(), ToolGenerateVideo(), ToolTranscribeAudio(), ToolAskUser(),
-	ToolListEmailAccounts(), ToolSendEmail(), ToolListEmail(), ToolReadEmail(),
 }
 
 // All returns the complete built-in Memoh tool catalog.

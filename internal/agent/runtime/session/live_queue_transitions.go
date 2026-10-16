@@ -121,6 +121,22 @@ func (state *followUpQueueState) release(ref FollowUpClaimRef, now time.Time) er
 	return ErrQueueInvalidReference
 }
 
+func (state *followUpQueueState) reject(ref FollowUpClaimRef, errorCode string, now time.Time) error {
+	for i := range state.Items {
+		claim := state.Items[i].Claim
+		if state.Items[i].ID == ref.ItemID && state.Items[i].Status == QueueClaimed && claim != nil && *claim == ref {
+			state.Items[i].Status = QueueRejected
+			state.Items[i].ErrorCode = errorCode
+			state.Items[i].Claim = nil
+			delete(state.TerminalClaims, ref.TriggerRunID)
+			state.UpdatedAt = now
+			state.compact()
+			return nil
+		}
+	}
+	return ErrQueueInvalidReference
+}
+
 func (state *steerQueueState) edit(itemID SteerItemID, payload []byte, now time.Time) (SteerItem, error) {
 	for i := range state.Items {
 		if state.Items[i].ID == itemID && state.Items[i].Status == QueueAccepted {

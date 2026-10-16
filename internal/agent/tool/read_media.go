@@ -3,11 +3,14 @@ package tools
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+
+	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -54,6 +57,54 @@ type ReadMediaToolOutput struct {
 	FileBase64     string
 	FileMediaType  string
 	Filename       string
+}
+
+// readMediaOutputEnvelopeKey marks the JSON form of ReadMediaToolOutput. The
+// executor encodes every non-text output, so the loop-side decorator and the
+// MCP gateway recognise the internal result by this envelope rather than by
+// its Go type, and only the read_media tool ever produces it.
+const readMediaOutputEnvelopeKey = "memoh_read_media"
+
+type readMediaToolOutputWire struct {
+	Public         ReadMediaToolResult `json:"public"`
+	ImageBase64    string              `json:"image_base64,omitempty"`
+	ImageMediaType string              `json:"image_media_type,omitempty"`
+	FileBase64     string              `json:"file_base64,omitempty"`
+	FileMediaType  string              `json:"file_media_type,omitempty"`
+	Filename       string              `json:"filename,omitempty"`
+}
+
+// MarshalJSON writes the envelope DecodeReadMediaToolOutput reads back.
+func (o ReadMediaToolOutput) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]readMediaToolOutputWire{readMediaOutputEnvelopeKey: {
+		Public:         o.Public,
+		ImageBase64:    o.ImageBase64,
+		ImageMediaType: o.ImageMediaType,
+		FileBase64:     o.FileBase64,
+		FileMediaType:  o.FileMediaType,
+		Filename:       o.Filename,
+	}})
+}
+
+// DecodeReadMediaToolOutput recovers the internal read-media result from a
+// tool output; any other output reports false.
+func DecodeReadMediaToolOutput(output sdk.ToolOutput) (ReadMediaToolOutput, bool) {
+	if !output.IsJSON() {
+		return ReadMediaToolOutput{}, false
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(output.JSON, &envelope); err != nil || len(envelope) != 1 {
+		return ReadMediaToolOutput{}, false
+	}
+	raw, ok := envelope[readMediaOutputEnvelopeKey]
+	if !ok {
+		return ReadMediaToolOutput{}, false
+	}
+	var wire readMediaToolOutputWire
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return ReadMediaToolOutput{}, false
+	}
+	return ReadMediaToolOutput(wire), true
 }
 
 // mimeSniffSize is the number of bytes http.DetectContentType needs.

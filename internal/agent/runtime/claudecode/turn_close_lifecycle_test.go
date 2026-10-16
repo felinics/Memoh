@@ -123,7 +123,7 @@ func TestClosedApprovalDoesNotParkFinishedRun(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := m.FinishRun(ctx, h, "", ""); err != nil {
+			if _, err := m.FinishRun(ctx, h, ""); err != nil {
 				t.Fatal(err)
 			}
 			snap, err := m.Snapshot(ctx, h.BotID, h.SessionID)

@@ -7,6 +7,8 @@ import (
 	"unicode/utf8"
 
 	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestTierLimitStringEmptyUnchanged(t *testing.T) {
@@ -63,7 +65,7 @@ func TestTierLimitStringBoundsLineCountUnderByteCeiling(t *testing.T) {
 func TestTruncateStepToolResultUnderThresholdUnchanged(t *testing.T) {
 	t.Parallel()
 
-	msg := sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "lookup", Result: "ok"})
+	msg := sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "lookup", Result: toolexec.OutputFromValue("ok")})
 
 	got, ok := TruncateStepToolResult(msg, 512)
 	if ok {
@@ -77,7 +79,7 @@ func TestTruncateStepToolResultUnderThresholdUnchanged(t *testing.T) {
 func TestTruncateStepToolResultOverThresholdReplacesWithSummary(t *testing.T) {
 	t.Parallel()
 
-	msg := sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-2", ToolName: "lookup", Result: strings.Repeat("x", 1000)})
+	msg := sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-2", ToolName: "lookup", Result: toolexec.OutputFromValue(strings.Repeat("x", 1000))})
 
 	got, ok := TruncateStepToolResult(msg, 512)
 	if !ok {
@@ -93,7 +95,7 @@ func TestTruncateStepToolResultOverThresholdReplacesWithSummary(t *testing.T) {
 	if part.ToolCallID != "call-2" || part.ToolName != "lookup" {
 		t.Fatalf("expected ToolCallID/ToolName preserved, got %+v", part)
 	}
-	text, _ := part.Result.(string)
+	text, _ := toolexec.OutputValue(part.Result).(string)
 	if !strings.Contains(text, "[tool result pruned: ") {
 		t.Fatalf("expected pruned summary text, got %q", text)
 	}
@@ -102,7 +104,7 @@ func TestTruncateStepToolResultOverThresholdReplacesWithSummary(t *testing.T) {
 func TestTruncateStepToolResultNonPositiveThresholdDefaultsTo512(t *testing.T) {
 	t.Parallel()
 
-	msg := sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-3", ToolName: "lookup", Result: strings.Repeat("x", 100)})
+	msg := sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-3", ToolName: "lookup", Result: toolexec.OutputFromValue(strings.Repeat("x", 100))})
 
 	if _, ok := TruncateStepToolResult(msg, 0); ok {
 		t.Fatal("expected default threshold 512 to keep 100-byte content unchanged when thresholdBytes=0")

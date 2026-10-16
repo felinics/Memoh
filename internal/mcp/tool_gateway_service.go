@@ -167,12 +167,12 @@ func (s *ToolGatewayService) getRegistry(ctx context.Context, session ToolSessio
 	for _, source := range s.sources {
 		tools, err := source.ListTools(ctx, session)
 		if err != nil {
-			s.logger.Warn("list tools from source failed", slog.Any("error", err))
+			s.logger.WarnContext(ctx, "list tools from source failed", slog.Any("error", err))
 			continue
 		}
 		for _, tool := range tools {
 			if err := registry.Register(source, tool); err != nil {
-				s.logger.Warn("skip duplicated/invalid tool", slog.String("tool", tool.Name), slog.Any("error", err))
+				s.logger.WarnContext(ctx, "skip duplicated/invalid tool", slog.String("tool", tool.Name), slog.Any("error", err))
 			}
 		}
 	}
@@ -189,6 +189,7 @@ func (s *ToolGatewayService) getRegistry(ctx context.Context, session ToolSessio
 func toolRegistryCacheKey(session ToolSessionContext) string {
 	parts := []string{
 		strings.TrimSpace(session.BotID),
+		strings.TrimSpace(session.UserID),
 		strings.TrimSpace(session.ChatID),
 		strings.TrimSpace(session.RuntimeID),
 		hashCacheKeySecret(session.RuntimeToken),
@@ -201,6 +202,9 @@ func toolRegistryCacheKey(session ToolSessionContext) string {
 		strings.TrimSpace(session.ReplyTarget),
 		strings.TrimSpace(session.ConversationType),
 		hashCacheKeySecret(session.SessionToken),
+	}
+	if session.PublicRequest {
+		parts = append(parts, "public-request")
 	}
 	if session.IsSubagent {
 		parts = append(parts, "subagent")

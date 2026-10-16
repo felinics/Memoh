@@ -26,9 +26,12 @@ func buildInboundMessage(msg WeixinMessage) (channel.InboundMessage, bool) {
 		return channel.InboundMessage{}, false
 	}
 
-	msgID := strconv.FormatInt(msg.MessageID, 10)
+	msgID := msg.MessageID.String()
+	if msgID == "" {
+		msgID = "0"
+	}
 	if msg.Seq > 0 {
-		msgID = strconv.FormatInt(msg.MessageID, 10) + ":" + strconv.Itoa(msg.Seq)
+		msgID += ":" + strconv.Itoa(msg.Seq)
 	}
 
 	meta := map[string]any{
@@ -166,24 +169,45 @@ func trimPreview(value string) string {
 }
 
 func hasMediaRef(item MessageItem) bool {
-	return item.VoiceItem != nil && item.VoiceItem.Media != nil &&
-		strings.TrimSpace(item.VoiceItem.Media.EncryptQueryParam) != ""
+	return item.VoiceItem != nil && hasCDNRef(item.VoiceItem.Media)
+}
+
+// hasCDNRef reports whether media can be downloaded: iLink addresses it either
+// by encrypt_query_param (URL built client-side) or by a server-built full_url.
+func hasCDNRef(m *CDNMedia) bool {
+	return m != nil && (strings.TrimSpace(m.EncryptQueryParam) != "" || strings.TrimSpace(m.FullURL) != "")
+}
+
+// cdnPlatformKey is the attachment's stable platform reference.
+func cdnPlatformKey(m *CDNMedia) string {
+	if key := strings.TrimSpace(m.EncryptQueryParam); key != "" {
+		return key
+	}
+	return strings.TrimSpace(m.FullURL)
+}
+
+// cdnMetadata carries what ResolveAttachment needs to download the media later.
+func cdnMetadata(m *CDNMedia, aesKey string) map[string]any {
+	meta := map[string]any{
+		"encrypt_query_param": m.EncryptQueryParam,
+		"aes_key":             aesKey,
+	}
+	if fullURL := strings.TrimSpace(m.FullURL); fullURL != "" {
+		meta["full_url"] = fullURL
+	}
+	return meta
 }
 
 func buildImageAttachment(item MessageItem) (channel.Attachment, bool) {
 	img := item.ImageItem
-	if img == nil || img.Media == nil || strings.TrimSpace(img.Media.EncryptQueryParam) == "" {
+	if img == nil || !hasCDNRef(img.Media) {
 		return channel.Attachment{}, false
 	}
-	aesKey := resolveImageAESKey(img)
 	return channel.Attachment{
 		Type:           channel.AttachmentImage,
-		PlatformKey:    img.Media.EncryptQueryParam,
+		PlatformKey:    cdnPlatformKey(img.Media),
 		SourcePlatform: Type.String(),
-		Metadata: map[string]any{
-			"encrypt_query_param": img.Media.EncryptQueryParam,
-			"aes_key":             aesKey,
-		},
+		Metadata:       cdnMetadata(img.Media, resolveImageAESKey(img)),
 	}, true
 }
 
@@ -204,51 +228,43 @@ func resolveImageAESKey(img *ImageItem) string {
 
 func buildVoiceAttachment(item MessageItem) (channel.Attachment, bool) {
 	v := item.VoiceItem
-	if v == nil || v.Media == nil || strings.TrimSpace(v.Media.EncryptQueryParam) == "" || strings.TrimSpace(v.Media.AESKey) == "" {
+	if v == nil || !hasCDNRef(v.Media) || strings.TrimSpace(v.Media.AESKey) == "" {
 		return channel.Attachment{}, false
 	}
+	meta := cdnMetadata(v.Media, v.Media.AESKey)
+	meta["encode_type"] = v.EncodeType
 	return channel.Attachment{
 		Type:           channel.AttachmentVoice,
-		PlatformKey:    v.Media.EncryptQueryParam,
+		PlatformKey:    cdnPlatformKey(v.Media),
 		SourcePlatform: Type.String(),
 		DurationMs:     int64(v.Playtime),
-		Metadata: map[string]any{
-			"encrypt_query_param": v.Media.EncryptQueryParam,
-			"aes_key":             v.Media.AESKey,
-			"encode_type":         v.EncodeType,
-		},
+		Metadata:       meta,
 	}, true
 }
 
 func buildFileAttachment(item MessageItem) (channel.Attachment, bool) {
 	f := item.FileItem
-	if f == nil || f.Media == nil || strings.TrimSpace(f.Media.EncryptQueryParam) == "" || strings.TrimSpace(f.Media.AESKey) == "" {
+	if f == nil || !hasCDNRef(f.Media) || strings.TrimSpace(f.Media.AESKey) == "" {
 		return channel.Attachment{}, false
 	}
 	return channel.Attachment{
 		Type:           channel.AttachmentFile,
-		PlatformKey:    f.Media.EncryptQueryParam,
+		PlatformKey:    cdnPlatformKey(f.Media),
 		SourcePlatform: Type.String(),
 		Name:           strings.TrimSpace(f.FileName),
-		Metadata: map[string]any{
-			"encrypt_query_param": f.Media.EncryptQueryParam,
-			"aes_key":             f.Media.AESKey,
-		},
+		Metadata:       cdnMetadata(f.Media, f.Media.AESKey),
 	}, true
 }
 
 func buildVideoAttachment(item MessageItem) (channel.Attachment, bool) {
 	v := item.VideoItem
-	if v == nil || v.Media == nil || strings.TrimSpace(v.Media.EncryptQueryParam) == "" || strings.TrimSpace(v.Media.AESKey) == "" {
+	if v == nil || !hasCDNRef(v.Media) || strings.TrimSpace(v.Media.AESKey) == "" {
 		return channel.Attachment{}, false
 	}
 	return channel.Attachment{
 		Type:           channel.AttachmentVideo,
-		PlatformKey:    v.Media.EncryptQueryParam,
+		PlatformKey:    cdnPlatformKey(v.Media),
 		SourcePlatform: Type.String(),
-		Metadata: map[string]any{
-			"encrypt_query_param": v.Media.EncryptQueryParam,
-			"aes_key":             v.Media.AESKey,
-		},
+		Metadata:       cdnMetadata(v.Media, v.Media.AESKey),
 	}, true
 }

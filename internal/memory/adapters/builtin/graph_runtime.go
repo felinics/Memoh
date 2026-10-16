@@ -94,12 +94,12 @@ func (r *graphRuntime) syncAndInvalidate(ctx context.Context, botID string) {
 	}
 	nodes, err := r.store.ListNodes(ctx, botID)
 	if err != nil {
-		r.logger.Warn("graph: list nodes for sync failed", "bot_id", botID, "err", err)
+		r.logger.WarnContext(ctx, "graph: list nodes for sync failed", "bot_id", botID, "err", err)
 	} else if err := r.syncer.syncMarkdownFromNodes(ctx, botID, nodes); err != nil {
-		r.logger.Warn("graph: markdown sync failed", "bot_id", botID, "err", err)
+		r.logger.WarnContext(ctx, "graph: markdown sync failed", "bot_id", botID, "err", err)
 	}
 	if _, err := r.store.RebuildDerivedEdges(ctx, botID); err != nil {
-		r.logger.Debug("graph: rebuild derived edges failed", "bot_id", botID, "err", err)
+		r.logger.DebugContext(ctx, "graph: rebuild derived edges failed", "bot_id", botID, "err", err)
 	}
 	r.cache.invalidate(botID)
 }
@@ -173,7 +173,7 @@ func (r *graphRuntime) Search(ctx context.Context, req adapters.SearchRequest) (
 	}
 
 	// Reliability fallback: degrade to file-lexical over the derived Markdown.
-	r.logger.Warn("graph search failed, falling back to file lexical", "bot_id", botID, "err", graphErr)
+	r.logger.WarnContext(ctx, "graph search failed, falling back to file lexical", "bot_id", botID, "err", graphErr)
 	fallback, err := r.searchFileFallback(ctx, botID, req.Query, limit)
 	if fallback.FallbackReason == "" {
 		fallback.FallbackReason = "graph_error"
@@ -203,7 +203,7 @@ func (r *graphRuntime) searchGraph(ctx context.Context, botID, query string, lim
 	seedScores := map[string]float64{}
 	if r.semantic != nil {
 		if semanticSeeds, semanticErr := r.semantic.SearchSeeds(ctx, botID, query, overfetch); semanticErr != nil {
-			r.logger.Debug("graph: pgvector seed search failed, using lexical seeds", "bot_id", botID, "err", semanticErr)
+			r.logger.DebugContext(ctx, "graph: pgvector seed search failed, using lexical seeds", "bot_id", botID, "err", semanticErr)
 		} else {
 			for id, score := range semanticSeeds {
 				if _, ok := graph.nodes[id]; ok {
@@ -338,7 +338,7 @@ func (r *graphRuntime) GetAll(ctx context.Context, req adapters.GetAllRequest) (
 	nodes, err := r.store.ListNodes(ctx, botID)
 	if err != nil {
 		// Fallback to derived files if the store is unavailable.
-		r.logger.Warn("graph GetAll failed, falling back to files", "bot_id", botID, "err", err)
+		r.logger.WarnContext(ctx, "graph GetAll failed, falling back to files", "bot_id", botID, "err", err)
 		fallback, fallbackErr := r.searchFileFallback(ctx, botID, "", req.Limit)
 		if fallback.FallbackReason == "" {
 			fallback.FallbackReason = "graph_error"
@@ -368,9 +368,9 @@ func (r *graphRuntime) Update(ctx context.Context, req adapters.UpdateRequest) (
 	if text == "" {
 		return adapters.MemoryItem{}, errors.New("graph runtime: memory is required")
 	}
-	botID := runtimeBotIDFromMemoryID(memoryID)
-	if botID == "" {
-		return adapters.MemoryItem{}, errors.New("graph runtime: invalid memory_id")
+	botID := strings.TrimSpace(req.BotID)
+	if err := adapters.ValidateMemoryScope(botID, memoryID); err != nil {
+		return adapters.MemoryItem{}, err
 	}
 	existing, storedID, err := r.resolveNodeByMemoryID(ctx, botID, memoryID)
 	if err != nil {
@@ -397,11 +397,16 @@ func (r *graphRuntime) Update(ctx context.Context, req adapters.UpdateRequest) (
 	return nodeSpecToMemoryItem(saved), nil
 }
 
-func (r *graphRuntime) Delete(ctx context.Context, memoryID string) (adapters.DeleteResponse, error) {
-	return r.DeleteBatch(ctx, []string{memoryID})
+func (r *graphRuntime) Delete(ctx context.Context, botID string, memoryID string) (adapters.DeleteResponse, error) {
+	return r.DeleteBatch(ctx, botID, []string{memoryID})
 }
 
-func (r *graphRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (adapters.DeleteResponse, error) {
+func (r *graphRuntime) DeleteBatch(ctx context.Context, botID string, memoryIDs []string) (adapters.DeleteResponse, error) {
+	botID = strings.TrimSpace(botID)
+	// Validate the complete batch before the first mutation.
+	if err := adapters.ValidateMemoryScope(botID, memoryIDs...); err != nil {
+		return adapters.DeleteResponse{}, err
+	}
 	if r.store == nil {
 		return adapters.DeleteResponse{}, errors.New("graph runtime: wiki store not configured")
 	}
@@ -413,10 +418,6 @@ func (r *graphRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (ada
 			continue
 		}
 		seen[memoryID] = true
-		botID := runtimeBotIDFromMemoryID(memoryID)
-		if botID == "" {
-			continue
-		}
 		_, storedID, err := r.resolveNodeByMemoryID(ctx, botID, memoryID)
 		if err != nil {
 			if !errors.Is(err, wikistore.ErrNodeNotFound) {
@@ -441,7 +442,7 @@ func (r *graphRuntime) DeleteBatch(ctx context.Context, memoryIDs []string) (ada
 		defer cancel()
 		for botID, ids := range deletedByBot {
 			if err := r.semantic.DeleteNodes(semanticCtx, botID, ids); err != nil {
-				r.logger.Debug("graph: pgvector delete failed", "bot_id", botID, "err", err)
+				r.logger.DebugContext(ctx, "graph: pgvector delete failed", "bot_id", botID, "err", err)
 			}
 		}
 	}
@@ -478,7 +479,7 @@ func (r *graphRuntime) discardSemanticNodes(ctx context.Context, botID string, n
 	semanticCtx, cancel := context.WithTimeout(ctx, semanticEmbedTimeout)
 	defer cancel()
 	if err := r.semantic.DeleteNodes(semanticCtx, botID, nodeIDs); err != nil {
-		r.logger.Debug("graph: pgvector delete failed", "bot_id", botID, "err", err)
+		r.logger.DebugContext(ctx, "graph: pgvector delete failed", "bot_id", botID, "err", err)
 	}
 }
 
@@ -495,7 +496,7 @@ func (r *graphRuntime) DeleteAll(ctx context.Context, req adapters.DeleteAllRequ
 	}
 	if r.fs != nil {
 		if err := r.fs.RemoveAllMemories(ctx, botID); err != nil {
-			r.logger.Warn("graph: remove derived markdown failed", "bot_id", botID, "err", err)
+			r.logger.WarnContext(ctx, "graph: remove derived markdown failed", "bot_id", botID, "err", err)
 		}
 	}
 	r.retry.discardBot(botID)
@@ -503,7 +504,7 @@ func (r *graphRuntime) DeleteAll(ctx context.Context, req adapters.DeleteAllRequ
 		auxCtx, cancel := context.WithTimeout(ctx, semanticEmbedTimeout)
 		defer cancel()
 		if err := r.semantic.DeleteBot(auxCtx, botID); err != nil {
-			r.logger.Debug("graph: pgvector delete bot failed", "bot_id", botID, "err", err)
+			r.logger.DebugContext(ctx, "graph: pgvector delete bot failed", "bot_id", botID, "err", err)
 		}
 	}
 	r.cache.invalidate(botID)
@@ -583,7 +584,7 @@ func (r *graphRuntime) Rebuild(ctx context.Context, botID string) (adapters.Rebu
 	// agent wrote directly that has not yet been ingested.
 	if r.fs != nil {
 		if _, err := r.IngestMarkdownFiles(ctx, botID); err != nil {
-			r.logger.Warn("graph: rebuild ingest failed", "bot_id", botID, "err", err)
+			r.logger.WarnContext(ctx, "graph: rebuild ingest failed", "bot_id", botID, "err", err)
 		}
 	}
 	nodes, err := r.store.ListNodes(ctx, botID)
@@ -596,7 +597,7 @@ func (r *graphRuntime) Rebuild(ctx context.Context, botID string) (adapters.Rebu
 	if r.semantic != nil {
 		r.retry.discardBot(botID)
 		if err := r.semantic.DeleteBot(ctx, botID); err != nil {
-			r.logger.Debug("graph: pgvector rebuild clear failed", "bot_id", botID, "err", err)
+			r.logger.DebugContext(ctx, "graph: pgvector rebuild clear failed", "bot_id", botID, "err", err)
 		}
 		for _, node := range nodes {
 			r.semanticUpsertBestEffort(botID, node) //nolint:contextcheck // async semantic upsert uses its own bounded context

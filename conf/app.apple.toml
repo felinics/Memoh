@@ -15,7 +15,7 @@ rpc_listen_addr = "127.0.0.1:9091"
 
 [internal_rpc]
 # Leave shared_secret empty to run the pre-split all-in-one deployment: the
-# server embeds the channel runtime (external channels, email, webhooks) and
+# server embeds the channel runtime (external channels, webhooks) and
 # no memoh-channel process or internal RPC is needed.
 # Set a secret (e.g. `openssl rand -hex 32`) to split the channel runtime
 # into its own memoh-channel process; the internal RPC is plaintext, so keep

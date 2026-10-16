@@ -11,6 +11,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 // The step reselection envelope resolves the same recent-protect window as
@@ -43,22 +44,22 @@ func TestProviderStepReselectorPreservesPrefixAndDropsLoopSpan(t *testing.T) {
 		sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.ToolCallPart{
 			ToolCallID: "old-call",
 			ToolName:   "search",
-			Input:      map[string]any{"q": "old"},
+			Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "old"}),
 		}}},
 		sdk.ToolMessage(sdk.ToolResultPart{
 			ToolCallID: "old-call",
 			ToolName:   "search",
-			Result:     strings.Repeat("old ", 2048),
+			Result:     toolexec.OutputFromValue(strings.Repeat("old ", 2048)),
 		}),
 		sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.ToolCallPart{
 			ToolCallID: "new-call",
 			ToolName:   "search",
-			Input:      map[string]any{"q": "new"},
+			Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "new"}),
 		}}},
 		sdk.ToolMessage(sdk.ToolResultPart{
 			ToolCallID: "new-call",
 			ToolName:   "search",
-			Result:     "new",
+			Result:     toolexec.OutputFromValue("new"),
 		}),
 	)
 
@@ -198,16 +199,16 @@ func TestProviderRunConfigApplierInstallsStepReselectorOnAssembledPayloads(t *te
 		prefix := []sdk.Message{sdk.UserMessage("provider-prefix")}
 		messages := append(append([]sdk.Message(nil), prefix...),
 			sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.ToolCallPart{
-				ToolCallID: "old-call", ToolName: "search", Input: map[string]any{"q": "old"},
+				ToolCallID: "old-call", ToolName: "search", Input: toolexec.ArgumentsFromValue(map[string]any{"q": "old"}),
 			}}},
 			sdk.ToolMessage(sdk.ToolResultPart{
-				ToolCallID: "old-call", ToolName: "search", Result: strings.Repeat("old ", 2048),
+				ToolCallID: "old-call", ToolName: "search", Result: toolexec.OutputFromValue(strings.Repeat("old ", 2048)),
 			}),
 			sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.ToolCallPart{
-				ToolCallID: "new-call", ToolName: "search", Input: map[string]any{"q": "new"},
+				ToolCallID: "new-call", ToolName: "search", Input: toolexec.ArgumentsFromValue(map[string]any{"q": "new"}),
 			}}},
 			sdk.ToolMessage(sdk.ToolResultPart{
-				ToolCallID: "new-call", ToolName: "search", Result: "new",
+				ToolCallID: "new-call", ToolName: "search", Result: toolexec.OutputFromValue("new"),
 			}),
 		)
 		result := out.ContextStepReselector(context.Background(), agentpkg.ContextStepSelectionInput{

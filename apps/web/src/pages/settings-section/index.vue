@@ -207,7 +207,10 @@ function onAfterLeave(): void {
 <style>
 /* Keep the scroll viewport stationary while list and detail cross-slide.
    The shell bar overlays it; only the list pane reserves the bar's h-11.
-   Each transitioning pane retains its own inset until it leaves the DOM. */
+   Each transitioning pane retains its own inset until it leaves the DOM.
+   A page that hosts its own detail view without a top-level SwapTransition
+   (Providers swaps inside each scope panel) drops the inset while a detail is
+   open: the bar is hidden then, so the inset would only leave a gap. */
 [data-settings-content-shell] > [data-settings-content-bar] {
   position: absolute;
   inset-inline: 0;
@@ -217,7 +220,7 @@ function onAfterLeave(): void {
 [data-settings-content-shell]:has(> [data-settings-content-bar]) > [data-settings-content-scroll] > [data-view-swap] {
   display: flow-root;
 }
-[data-settings-content-shell]:has(> [data-settings-content-bar]) > [data-settings-content-scroll] > :not([data-view-swap]),
+[data-settings-content-shell]:has(> [data-settings-content-bar]) > [data-settings-content-scroll] > :not([data-view-swap]):not(:has([data-settings-detail-back])),
 [data-settings-content-shell]:has(> [data-settings-content-bar]) > [data-settings-content-scroll] > [data-view-swap] > :not(:has([data-settings-detail-back])) {
   margin-top: calc(var(--spacing) * 11);
 }

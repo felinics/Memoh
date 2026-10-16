@@ -62,15 +62,14 @@ func TestAnthropicGenerationLimitsMatchTheAdapterDefaults(t *testing.T) {
 				ReasoningConfig: tc.reasoning,
 				ContextWindow:   tc.window,
 			}
-			opts := append([]sdk.GenerateOption{
-				sdk.WithModel(NewSDKChatModel(cfg)),
-				sdk.WithMessages([]sdk.Message{sdk.UserMessage("hi")}),
-			}, BuildReasoningOptions(cfg)...)
-			if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
-				t.Fatalf("generate text: %v", err)
+			model := NewSDKChatModel(cfg)
+			req := sdk.Request{Messages: []sdk.Message{sdk.UserMessage("hi")}}
+			ApplyReasoningToRequest(&req, cfg)
+			if _, err := model.Generate(context.Background(), req); err != nil {
+				t.Fatalf("generate: %v", err)
 			}
 
-			limits := ResolveGenerationLimits(ClientTypeAnthropicMessages, tc.reasoning, tc.window)
+			limits := ResolveGenerationLimits(ClientTypeAnthropicMessages, tc.reasoning, tc.window, 0)
 			if body.MaxTokens != limits.MaxOutputTokens {
 				t.Fatalf("adapter max_tokens = %d, resolver reserves %d", body.MaxTokens, limits.MaxOutputTokens)
 			}

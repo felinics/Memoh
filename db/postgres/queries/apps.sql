@@ -1,6 +1,6 @@
 -- name: GetBotAppInstallation :one
 SELECT id, team_id, bot_id, registry_id, app_id, revision, version,
-       status, reason, available_revision, available_version, last_checked_at, last_error,
+       status, reason, available_revision, available_version, last_checked_at, last_error, last_error_code,
        release, installed_at, updated_at
 FROM bot_app_installations
 WHERE team_id = public.memoh_current_team_id()
@@ -11,7 +11,7 @@ LIMIT 1;
 
 -- name: GetBotAppInstallationByID :one
 SELECT id, team_id, bot_id, registry_id, app_id, revision, version,
-       status, reason, available_revision, available_version, last_checked_at, last_error,
+       status, reason, available_revision, available_version, last_checked_at, last_error, last_error_code,
        release, installed_at, updated_at
 FROM bot_app_installations
 WHERE team_id = public.memoh_current_team_id()
@@ -21,7 +21,7 @@ LIMIT 1;
 
 -- name: ListBotAppInstallations :many
 SELECT id, team_id, bot_id, registry_id, app_id, revision, version,
-       status, reason, available_revision, available_version, last_checked_at, last_error,
+       status, reason, available_revision, available_version, last_checked_at, last_error, last_error_code,
        release, installed_at, updated_at
 FROM bot_app_installations
 WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
@@ -39,21 +39,23 @@ DO UPDATE SET revision = EXCLUDED.revision,
               reason = CASE WHEN EXCLUDED.reason = 'user' THEN 'user' ELSE bot_app_installations.reason END,
               release = EXCLUDED.release,
               last_error = '',
+              last_error_code = '',
               updated_at = now()
 RETURNING id, team_id, bot_id, registry_id, app_id, revision, version,
-          status, reason, available_revision, available_version, last_checked_at, last_error,
+          status, reason, available_revision, available_version, last_checked_at, last_error, last_error_code,
           release, installed_at, updated_at;
 
 -- name: UpdateBotAppInstallationStatus :one
 UPDATE bot_app_installations
 SET status = sqlc.arg(status),
-    last_error = sqlc.arg(last_error),
+    last_error = '',
+    last_error_code = sqlc.arg(last_error_code),
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = sqlc.arg(bot_id)
   AND id = sqlc.arg(id)
 RETURNING id, team_id, bot_id, registry_id, app_id, revision, version,
-          status, reason, available_revision, available_version, last_checked_at, last_error,
+          status, reason, available_revision, available_version, last_checked_at, last_error, last_error_code,
           release, installed_at, updated_at;
 
 -- name: UpdateBotAppInstallationRelease :one
@@ -68,7 +70,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND bot_id = sqlc.arg(bot_id)
   AND id = sqlc.arg(id)
 RETURNING id, team_id, bot_id, registry_id, app_id, revision, version,
-          status, reason, available_revision, available_version, last_checked_at, last_error,
+          status, reason, available_revision, available_version, last_checked_at, last_error, last_error_code,
           release, installed_at, updated_at;
 
 -- name: UpdateBotAppInstallationCheck :one
@@ -81,7 +83,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND bot_id = sqlc.arg(bot_id)
   AND id = sqlc.arg(id)
 RETURNING id, team_id, bot_id, registry_id, app_id, revision, version,
-          status, reason, available_revision, available_version, last_checked_at, last_error,
+          status, reason, available_revision, available_version, last_checked_at, last_error, last_error_code,
           release, installed_at, updated_at;
 
 -- name: DeleteBotAppInstallation :one
@@ -90,7 +92,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
   AND id = $2
 RETURNING id, team_id, bot_id, registry_id, app_id, revision, version,
-          status, reason, available_revision, available_version, last_checked_at, last_error,
+          status, reason, available_revision, available_version, last_checked_at, last_error, last_error_code,
           release, installed_at, updated_at;
 
 -- name: ListAppDependencyRefs :many

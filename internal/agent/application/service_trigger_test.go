@@ -17,7 +17,10 @@ import (
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/apperror"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/schedule"
 )
 
 type silentTriggerProvider struct {
@@ -31,19 +34,19 @@ func (*silentTriggerProvider) Name() string { return "silent-trigger" }
 
 func (*silentTriggerProvider) ListModels(context.Context) ([]sdk.Model, error) { return nil, nil }
 
-func (*silentTriggerProvider) Test(context.Context) *sdk.ProviderTestResult {
-	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK}
+func (*silentTriggerProvider) Test(context.Context) error {
+	return nil
 }
 
 func (*silentTriggerProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {
 	return &sdk.ModelTestResult{Supported: true}, nil
 }
 
-func (*silentTriggerProvider) DoGenerate(context.Context, sdk.GenerateParams) (*sdk.GenerateResult, error) {
-	return nil, errors.New("unexpected non-streaming call")
+func (*silentTriggerProvider) DoGenerate(context.Context, sdk.Request) (sdk.ModelResult, error) {
+	return sdk.ModelResult{}, errors.New("unexpected non-streaming call")
 }
 
-func (p *silentTriggerProvider) DoStream(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+func (p *silentTriggerProvider) DoStream(ctx context.Context, _ sdk.Request) (<-chan sdk.StreamPart, error) {
 	p.mu.Lock()
 	p.attempts++
 	p.mu.Unlock()
@@ -54,7 +57,7 @@ func (p *silentTriggerProvider) DoStream(ctx context.Context, _ sdk.GeneratePara
 		<-ctx.Done()
 		close(stream)
 	}()
-	return &sdk.StreamResult{Stream: stream}, nil
+	return stream, nil
 }
 
 func (p *silentTriggerProvider) attemptCount() int {
@@ -377,13 +380,82 @@ func TestConsumeTriggeredStreamSurfacesStreamErrorWithoutTerminal(t *testing.T) 
 
 	svc := newTriggerStreamService(&recordingMessageService{}, &recordingTurnEventPublisher{})
 
+	providerErr := errors.New("provider boom")
 	events := make(chan native.StreamEvent, 1)
-	events <- native.StreamEvent{Type: native.EventError, Error: "provider boom"}
+	events <- native.StreamEvent{Type: native.EventError, Cause: providerErr}
 	close(events)
 
 	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "provider boom") {
-		t.Fatalf("consumeTriggeredStream() error = %v, want the provider error", err)
+	if apperror.CodeOf(err) != apperror.CodeAgentResponseInterrupted || !errors.Is(apperror.CauseOf(err), providerErr) {
+		t.Fatalf("consumeTriggeredStream() error = %v, want the provider error under its code", err)
+	}
+}
+
+// A retried stream error that recovered does not fail the schedule run, even
+// when the clean terminal carries no snapshot to settle it.
+func TestConsumeTriggeredStreamRecoveredRetryIsNotAFailure(t *testing.T) {
+	t.Parallel()
+
+	svc := newTriggerStreamService(&recordingMessageService{}, &recordingTurnEventPublisher{})
+
+	events := make(chan native.StreamEvent, 2)
+	events <- native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 5}
+	events <- native.StreamEvent{Type: native.EventAgentEnd}
+	close(events)
+
+	result, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
+	if err != nil {
+		t.Fatalf("consumeTriggeredStream() error = %v, want nil after a recovered retry", err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("result.Status = %q, want ok", result.Status)
+	}
+}
+
+// A stream error followed by an abort still fails the schedule run.
+func TestConsumeTriggeredStreamErrorThenAbortFails(t *testing.T) {
+	t.Parallel()
+
+	svc := newTriggerStreamService(&recordingMessageService{}, &recordingTurnEventPublisher{})
+
+	events := make(chan native.StreamEvent, 2)
+	events <- native.StreamEvent{Type: native.EventError, Cause: charExhausted(charProviderErr(503, sdk.KindServerError))}
+	events <- native.StreamEvent{Type: native.EventAgentAbort}
+	close(events)
+
+	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
+	var apiErr *sdk.APIError
+	if apperror.CodeOf(err) != apperror.CodeAgentProviderOverloaded || !errors.As(apperror.CauseOf(err), &apiErr) {
+		t.Fatalf("consumeTriggeredStream() error = %v, want the giving-up error under the provider's code", err)
+	}
+}
+
+// A background run records the provider's condition in its history marker,
+// the same code its published failure event carries.
+func TestConsumeTriggeredStreamRecordsTheProviderCodeInHistory(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	pub := &recordingTurnEventPublisher{}
+	svc := newTriggerStreamService(messages, pub)
+
+	terminal := scheduleTerminalEvent(t, "")
+	terminal.Type = native.EventAgentAbort
+	events := make(chan native.StreamEvent, 2)
+	events <- native.StreamEvent{Type: native.EventError, Cause: charExhausted(charProviderErr(503, sdk.KindServerError))}
+	events <- terminal
+	close(events)
+
+	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
+	if apperror.CodeOf(err) != apperror.CodeAgentProviderOverloaded {
+		t.Fatalf("consumeTriggeredStream() error = %v, want the provider's code", err)
+	}
+	if len(messages.persisted) != 2 || messages.persisted[1].Metadata[messagepkg.HistoryErrorCodeMetadataKey] != string(apperror.CodeAgentProviderOverloaded) {
+		t.Fatalf("persisted = %#v, want a failure marker with the provider's code", messages.persisted)
+	}
+	published := pub.published()
+	if len(published) == 0 || published[0].Code != string(apperror.CodeAgentProviderOverloaded) {
+		t.Fatalf("published events = %#v, want the provider's code first", published)
 	}
 }
 
@@ -393,12 +465,13 @@ func TestConsumeTriggeredStreamKeepsDiagnosticsInternalAndPublishesStableFailure
 	pub := &recordingTurnEventPublisher{}
 	svc := newTriggerStreamService(&recordingMessageService{}, pub)
 
+	providerErr := errors.New("SECRET provider boom")
 	events := make(chan native.StreamEvent, 1)
-	events <- native.StreamEvent{Type: native.EventError, Error: "SECRET provider boom"}
+	events <- native.StreamEvent{Type: native.EventError, Cause: providerErr}
 	close(events)
 
 	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "SECRET provider boom") {
+	if !errors.Is(apperror.CauseOf(err), providerErr) {
 		t.Fatalf("internal trigger error = %v, want private provider diagnostic", err)
 	}
 	published := pub.published()
@@ -522,10 +595,14 @@ func TestConsumeTriggeredStreamWithStepCommitterDoesNotDoublePersist(t *testing.
 // admission hook exactly the way the runtime manager would at activation.
 type fakeTriggeredAdmitter struct {
 	admitInput sessionruntime.AdmitInput
+	admitErr   error
 }
 
 func (f *fakeTriggeredAdmitter) Admit(_ context.Context, input sessionruntime.AdmitInput) (sessionruntime.Admission, error) {
 	f.admitInput = input
+	if f.admitErr != nil {
+		return sessionruntime.Admission{}, f.admitErr
+	}
 	return sessionruntime.Admission{
 		Started:      true,
 		RunID:        "run-1",
@@ -541,8 +618,8 @@ func (f *fakeTriggeredAdmitter) Admit(_ context.Context, input sessionruntime.Ad
 	}, nil
 }
 
-func (*fakeTriggeredAdmitter) FinishRunWithErrorCode(context.Context, sessionruntime.RunHandle, string, string) error {
-	return nil
+func (*fakeTriggeredAdmitter) FinishRunWithErrorCode(context.Context, sessionruntime.RunHandle, string, string) (sessionruntime.TerminalRun, error) {
+	return sessionruntime.TerminalRun{}, nil
 }
 
 func TestAdmitTriggeredRunInjectsAdmissionView(t *testing.T) {
@@ -562,7 +639,7 @@ func TestAdmitTriggeredRunInjectsAdmissionView(t *testing.T) {
 		}
 	}
 
-	ctx, admission, _, err := svc.admitTriggeredRun(context.Background(), "bot-1", "session-1", "inv-1", []byte(`{}`), viewFn)
+	ctx, admission, _, err := svc.admitTriggeredRun(context.Background(), sessionmode.Schedule, "bot-1", "session-1", "inv-1", []byte(`{}`), viewFn)
 	if err != nil {
 		t.Fatalf("admitTriggeredRun() error = %v", err)
 	}
@@ -590,7 +667,7 @@ func TestAdmitTriggeredRunWithoutViewKeepsEmptyProjection(t *testing.T) {
 	admitter := &fakeTriggeredAdmitter{}
 	svc := &Service{logger: slog.New(slog.DiscardHandler), sessionRuntime: admitter}
 
-	ctx, admission, _, err := svc.admitTriggeredRun(context.Background(), "bot-1", "session-1", "inv-1", []byte(`{}`), nil)
+	ctx, admission, _, err := svc.admitTriggeredRun(context.Background(), sessionmode.Schedule, "bot-1", "session-1", "inv-1", []byte(`{}`), nil)
 	if err != nil {
 		t.Fatalf("admitTriggeredRun() error = %v", err)
 	}
@@ -604,3 +681,47 @@ func TestAdmitTriggeredRunWithoutViewKeepsEmptyProjection(t *testing.T) {
 }
 
 func (*fakeTriggeredAdmitter) MarkInlineDecisionRun(string, string, string) {}
+
+func TestScheduleInvocationUsesFireIdentity(t *testing.T) {
+	a := scheduleInvocationID(schedule.TriggerPayload{ID: "schedule", SessionID: "shared", FireID: "fire-a"})
+	b := scheduleInvocationID(schedule.TriggerPayload{ID: "schedule", SessionID: "shared", FireID: "fire-b"})
+	if a == b {
+		t.Fatal("different fires collided in the same session")
+	}
+	if a != scheduleInvocationID(schedule.TriggerPayload{ID: "schedule", SessionID: "shared", FireID: "fire-a"}) {
+		t.Fatal("same fire lost retry identity")
+	}
+}
+
+// A fire that finds the session busy reports the schedule's busy sentinel,
+// which its unit treats as a skip. A failure before admission has no run
+// record, so it is not marked recorded.
+func TestTriggerScheduleBusyIsTheScheduleSentinel(t *testing.T) {
+	t.Parallel()
+	svc := &Service{logger: slog.New(slog.DiscardHandler), sessionRuntime: &fakeTriggeredAdmitter{admitErr: sessionruntime.ErrSessionBusy}}
+
+	_, err := svc.TriggerSchedule(context.Background(), "bot-1", schedule.TriggerPayload{FireID: "fire-1", ID: "schedule-1", SessionID: "session-1", Command: "run"}, "token")
+
+	if !errors.Is(err, schedule.ErrSessionBusy) || !errors.Is(err, sessionruntime.ErrSessionBusy) {
+		t.Fatalf("err = %v, want the schedule busy sentinel over the runtime's", err)
+	}
+	if errs.Analyze(context.Background(), err).Recorded {
+		t.Fatal("a fire refused before admission must not be marked recorded")
+	}
+}
+
+// A failure after admission ends the run, whose result record carries it at
+// its level; the fire returns it marked recorded so its own record is a WARN.
+func TestTriggerScheduleFailureAfterAdmissionIsRecorded(t *testing.T) {
+	t.Parallel()
+	svc := &Service{logger: slog.New(slog.DiscardHandler), sessionRuntime: &fakeTriggeredAdmitter{}}
+
+	_, err := svc.TriggerSchedule(context.Background(), "bot-1", schedule.TriggerPayload{FireID: "fire-1", ID: "schedule-1", SessionID: "session-1", Command: "run"}, "token")
+
+	if err == nil {
+		t.Fatal("TriggerSchedule() error = nil, want the run's failure")
+	}
+	if !errs.Analyze(context.Background(), err).Recorded {
+		t.Fatalf("err = %v, want it marked recorded", err)
+	}
+}

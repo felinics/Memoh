@@ -6,23 +6,11 @@ export type ContextCategoryId = (typeof CONTEXT_CATEGORY_IDS)[number]
 export interface ContextCategoryStat {
   id: ContextCategoryId
   tokens: number
-  colorClass: string
 }
 
 export interface ContextComposition {
   categories: ContextCategoryStat[]
   totalTokens: number
-}
-
-const CATEGORY_COLOR_CLASS: Record<ContextCategoryId, string> = {
-  system: 'bg-accent-gray',
-  rules: 'bg-accent-green',
-  tools: 'bg-accent-purple',
-  skills: 'bg-accent-yellow',
-  memory: 'bg-accent-teal',
-  summary: 'bg-accent-brown',
-  conversation: 'bg-accent-orange',
-  other: 'bg-accent-blue',
 }
 
 const KIND_CATEGORY: Record<ContextfragKind, ContextCategoryId> = {
@@ -74,7 +62,7 @@ export function computeContextComposition(usage: ContextCompositionSource | null
   for (const id of CONTEXT_CATEGORY_IDS) {
     const tokens = tokensByCategory.get(id) ?? 0
     if (tokens <= 0) continue
-    categories.push({ id, tokens, colorClass: CATEGORY_COLOR_CLASS[id] })
+    categories.push({ id, tokens })
     totalTokens += tokens
   }
   if (categories.length === 0) return null

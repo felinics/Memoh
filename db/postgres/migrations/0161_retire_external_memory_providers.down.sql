@@ -1,0 +1,5 @@
+-- 0161_retire_external_memory_providers (down)
+-- Intentionally empty: the up migration only deletes no-op mem0/OpenViking
+-- placeholder rows and clears bot selections that already behaved as "memory
+-- off". There is no schema change to reverse, and the placeholders are not
+-- recreated.

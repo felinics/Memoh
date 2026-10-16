@@ -82,7 +82,8 @@ export function createCommandEventRegistry({ currentBotId, sessionId }: CommandE
       invocation_id: createInvocationId(),
       composer_scope: scope.composerScope || 'chat',
       terminal: true,
-      error: { code, message },
+      code,
+      message,
     }, scope)
   }
 

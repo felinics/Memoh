@@ -18,17 +18,10 @@ type Config struct {
 }
 
 // ClientTypeAnthropicMessages is the one client type this package must recognise
-// by name, because the Anthropic wire changed shape between model generations and
-// the era has to be inferred from the advertised tiers. Callers pass their own
+// by name, because the Anthropic Messages wire expresses "off" by omitting the
+// thinking field rather than by sending a value. Callers pass their own
 // client-type string; this constant is what it is compared against.
 const ClientTypeAnthropicMessages = "anthropic-messages"
-
-// Client types whose wire policy maps "max" onto "xhigh". Codex uses its catalog
-// levels directly and is deliberately absent.
-const (
-	clientTypeOpenAICompletions = "openai-completions"
-	clientTypeOpenAIResponses   = "openai-responses"
-)
 
 // ResolveConfig makes the single reasoning decision for a call.
 //
@@ -42,10 +35,9 @@ const (
 //	options:    the model's resolved selectable options
 //	stored:     the bot's persisted effort ("" when unset, "disable" for off)
 //	requested:  this message's override ("" when absent)
-//	clientType: the provider's client type, for wire policy
 //
 // Returns nil when the model has no thinking concept at all.
-func ResolveConfig(mode string, advertised []string, options Options, stored, requested, clientType string) *Config {
+func ResolveConfig(mode string, advertised []string, options Options, stored, requested string) *Config {
 	if !Supported(mode) || !options.Supported {
 		return nil
 	}
@@ -57,10 +49,10 @@ func ResolveConfig(mode string, advertised []string, options Options, stored, re
 		return nil
 	}
 
-	levels := effectiveEfforts(advertised, clientType)
+	levels := effectiveEfforts(advertised)
 	offEffort := offEffortFor(levels)
 	req := strings.TrimSpace(requested)
-	adaptive := isAdaptiveWire(mode, levels, clientType)
+	adaptive := mode == ModeAdaptive
 	canTurnOff := options.CanDisable
 	active := func(requestedEffort string) *Config {
 		return &Config{
@@ -80,10 +72,6 @@ func ResolveConfig(mode string, advertised []string, options Options, stored, re
 		// here would make the settings surface claim Off while the provider receives
 		// no off signal and continues with its own (usually active) default.
 		return active("")
-	case req == EffortAdaptive:
-		// Legacy "adaptive" override on a toggle model: treat as on (toggle has no
-		// adaptive concept; send a normal effort).
-		return active("")
 	case req != "":
 		return active(req)
 	case IsDisabled(stored) && canTurnOff:
@@ -96,47 +84,12 @@ func ResolveConfig(mode string, advertised []string, options Options, stored, re
 	}
 }
 
-// isAdaptiveWire reports whether a call should use the Anthropic adaptive wire.
-//
-// A declared adaptive mode says so directly. Beyond that, Anthropic 4.6+ uses the
-// effort/adaptive wire (no budget_tokens), and cloud variants
-// (bedrock/vertex/azure/openrouter) are missing supports_adaptive_thinking in the
-// LiteLLM registry while still advertising the 4.6+ effort tiers — so promote them
-// here. This keeps them off the legacy budget path, where budget_tokens is
-// rejected with 400 on 4.7+.
-func isAdaptiveWire(mode string, levels []string, clientType string) bool {
-	if mode == ModeAdaptive {
-		return true
-	}
-	return clientType == ClientTypeAnthropicMessages && anthropicEffortEra(levels)
-}
-
-// anthropicEffortEra reports whether an Anthropic model uses the 4.6+
-// effort/adaptive thinking mechanism rather than the legacy
-// thinking{type:"enabled", budget_tokens:N} path. Pre-4.6 Claude advertises only
-// the implicit low/medium/high base; 4.6+ adds at least one of minimal/xhigh/max.
-// Detecting any of those catches the cloud-provider variants that the registry
-// leaves without supports_adaptive_thinking.
-//
-// The disable token is deliberately not a signal. It declares that a model can be
-// turned off, which every Claude generation can do, so reading it as "4.6+" would
-// put a legacy model on the adaptive wire that it rejects.
-func anthropicEffortEra(levels []string) bool {
-	for _, e := range levels {
-		switch e {
-		case EffortMinimal, EffortXHigh, EffortMax:
-			return true
-		}
-	}
-	return false
-}
-
 // pickEffort resolves the effort to send when thinking is active: the per-message
 // override (if a concrete tier) wins, then the stored default, then medium. Values
 // outside the effective model+wire effort list are ignored so stale settings or
 // command/API overrides cannot send a known-invalid wire value.
 func pickEffort(requested, stored string, levels []string) string {
-	if e := strings.TrimSpace(requested); e != "" && e != EffortAdaptive && e != EffortDisable {
+	if e := strings.TrimSpace(requested); e != "" && e != EffortDisable {
 		if hasEffort(levels, e) {
 			return e
 		}
@@ -147,6 +100,9 @@ func pickEffort(requested, stored string, levels []string) string {
 	// upstream, where no provider knows the word.
 	if e := strings.TrimSpace(stored); e != "" && !IsDisabled(e) && hasEffort(levels, e) {
 		return e
+	}
+	if hasEffort(levels, EffortEnabled) {
+		return EffortEnabled
 	}
 	if hasEffort(levels, EffortMedium) {
 		return EffortMedium
@@ -159,35 +115,27 @@ func pickEffort(requested, stored string, levels []string) string {
 	return EffortMedium
 }
 
-// effectiveEfforts intersects the model's advertised effort levels with the
-// selected client's wire policy, and supplies the common base when a model
-// advertises nothing. Generic OpenAI-format clients drop "max" (they take xhigh as
-// the ceiling); Codex uses its catalog levels directly.
-func effectiveEfforts(advertised []string, clientType string) []string {
+// effectiveEfforts supplies the common base when a model advertises nothing, and
+// otherwise returns the model's own tiers with duplicates removed.
+//
+// The declared ladder is authoritative, and the client type is deliberately not
+// consulted. Which tiers an endpoint accepts is a fact about the endpoint, not
+// about the shape of the request body: the same OpenAI-shaped wire carries OpenAI
+// models whose ceiling is xhigh and models from other vendors whose ceiling is
+// max. Deriving the ceiling from the client type made the top tier unreachable for
+// the latter, and rewrote a selected max into xhigh on the way out.
+func effectiveEfforts(advertised []string) []string {
 	levels := advertised
 	if len(levels) == 0 {
 		levels = []string{EffortLow, EffortMedium, EffortHigh}
 	}
 	out := make([]string, 0, len(levels))
 	for _, e := range levels {
-		if normalizesMax(clientType) && e == EffortMax {
-			continue
-		}
 		if !hasEffort(out, e) {
 			out = append(out, e)
 		}
 	}
 	return out
-}
-
-// normalizesMax reports whether the client's wire policy maps "max" to "xhigh".
-func normalizesMax(clientType string) bool {
-	switch clientType {
-	case clientTypeOpenAICompletions, clientTypeOpenAIResponses:
-		return true
-	default:
-		return false
-	}
 }
 
 // offEffortFor translates "off" into the effort value an OpenAI-format provider

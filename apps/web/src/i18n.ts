@@ -7,6 +7,18 @@ import { detectLocale } from '@/utils/detect-locale'
 
 export type Locale = 'en' | 'zh' | 'ja'
 
+// Language names in the language picker are endonyms — each language written
+// in itself — and must NOT go through t(). Translating them made the same
+// option read "中文" in the English UI and "简体中文" in the Chinese UI, so
+// users looking for their own language saw a label that changed with the UI.
+// Keep this list the only source of these labels; don't add langXx keys back
+// to the locale JSON files.
+export const LOCALE_OPTIONS: ReadonlyArray<{ value: Locale, label: string }> = [
+  { value: 'en', label: 'English' },
+  { value: 'zh', label: '简体中文' },
+  { value: 'ja', label: '日本語' },
+]
+
 function getInitialLocale(): Locale {
   const stored = localStorage.getItem('language')
   if (stored === 'en' || stored === 'zh' || stored === 'ja') return stored

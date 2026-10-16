@@ -9,6 +9,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/runtime/claudecode/claudecfg"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 func nativePermissionMode(mode string) bool {
@@ -30,7 +31,7 @@ func unavailablePermissionModes(model initializeModel) []string {
 func (t *turnRunner) configureModes(ctx context.Context, cfg claudecfg.Config, models []initializeModel) error {
 	mode := firstNonEmpty(metadataString(t.input.RuntimeMetadata, "permission_mode"), cfg.PermissionMode, "inherit")
 	if !claudecfg.ValidPermissionMode(mode) {
-		return fmt.Errorf("invalid claude permission mode %q", mode)
+		return errs.New(fmt.Sprintf("invalid claude permission mode %q", mode))
 	}
 	plan := metadataString(t.input.RuntimeMetadata, "collaboration_mode")
 	if plan != "" {

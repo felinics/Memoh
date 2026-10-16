@@ -193,9 +193,10 @@ func TestReaperObservesAppliedAndAlreadyTerminalOutcomes(t *testing.T) {
 		seedState      ledger.State
 		abortRequested bool
 		wantState      ledger.State
+		wantApplied    bool
 	}{
-		{name: "applied lost", wantState: ledger.StateLost},
-		{name: "applied abort intent", abortRequested: true, wantState: ledger.StateAborted},
+		{name: "applied lost", wantState: ledger.StateLost, wantApplied: true},
+		{name: "applied abort intent", abortRequested: true, wantState: ledger.StateAborted, wantApplied: true},
 		{name: "already completed", seedState: ledger.StateCompleted, wantState: ledger.StateCompleted},
 	}
 	for _, tt := range tests {
@@ -231,8 +232,9 @@ func TestReaperObservesAppliedAndAlreadyTerminalOutcomes(t *testing.T) {
 			}
 			if observed[0].RunID != "run-observed" || observed[0].BotID != testBotID ||
 				observed[0].SessionID != "session-observed" || observed[0].FencingToken != 5 ||
-				observed[0].State != string(tt.wantState) {
-				t.Fatalf("terminal observation = %+v, want state %q and authoritative identity", observed[0], tt.wantState)
+				observed[0].State != string(tt.wantState) || observed[0].Applied != tt.wantApplied {
+				t.Fatalf("terminal observation = %+v, want state %q, applied %v and authoritative identity",
+					observed[0], tt.wantState, tt.wantApplied)
 			}
 		})
 	}

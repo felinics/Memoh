@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -18,6 +19,7 @@ import (
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/botworkspace"
 	ctr "github.com/felinics/memoh/internal/container"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -52,6 +54,7 @@ func TestCreateBotStreamsLifecycleWhenSSERequested(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(echo.New(), req, rec, ownerID)
 
+	wireCreateBotIntents(handler)
 	if err := handler.CreateBot(ctx); err != nil {
 		t.Fatalf("CreateBot() error = %v", err)
 	}
@@ -156,6 +159,7 @@ func TestCreateBotStreamsContainerProgressEvents(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(echo.New(), req, rec, ownerID)
 
+	wireCreateBotIntents(handler)
 	if err := handler.CreateBot(ctx); err != nil {
 		t.Fatalf("CreateBot() error = %v", err)
 	}
@@ -165,6 +169,9 @@ func TestCreateBotStreamsContainerProgressEvents(t *testing.T) {
 		if !hasEventType(events, eventType) {
 			t.Fatalf("missing %q event: %#v", eventType, events)
 		}
+	}
+	if !handler.workspaceSetup.(*createBotStreamWorkspace).subscribedAtKick {
+		t.Fatal("the reconciler was woken before the stream subscribed")
 	}
 	complete, ok := findEventType(events, "complete")
 	if !ok {
@@ -196,8 +203,9 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 		botID:   botID,
 	}
 
+	logs := captureLogs()
 	handler := &UsersHandler{
-		logger:         slog.Default(),
+		logger:         logs.logger,
 		service:        newTestCreateBotAccountService(ownerID),
 		botService:     bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
 		workspaceSetup: &createBotStreamWorkspace{err: errors.New("image pull failed")},
@@ -214,11 +222,8 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(echo.New(), req, rec, ownerID)
 
-	if err := handler.CreateBot(ctx); err != nil {
-		t.Fatalf("CreateBot() error = %v", err)
-	}
-
-	events := decodeSSEEvents(t, rec.Body.String())
+	wireCreateBotIntents(handler)
+	events := serveWorkspaceStream(t, logs, handler.CreateBot, ctx, rec)
 	if len(events) < 2 {
 		t.Fatalf("events len = %d, want bot_created and error: %#v", len(events), events)
 	}
@@ -232,35 +237,31 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 	if last["type"] != "error" {
 		t.Fatalf("last event type = %#v, want error; events=%#v", last["type"], events)
 	}
-	message, _ := last["message"].(string)
-	if message != "workspace setup failed" {
-		t.Fatalf("error message = %q, want stable workspace setup failure", message)
+	requireCatalogErrorEvent(t, events, apperror.CodeWorkspaceSetupFailed, "image pull failed")
+	requireStreamFailureRecord(t, logs, apperror.CodeWorkspaceSetupFailed, "server", "image pull failed")
+	if _, ok := last["i18n_key"]; ok {
+		t.Fatalf("error event = %#v, want no i18n_key", last)
 	}
-	setupError := requireStreamLastSetupError(t, streamDB.persistedMetadata)
-	if setupError["phase"] != "setup" {
-		t.Fatalf("phase = %#v, want setup", setupError["phase"])
-	}
-	if got, _ := setupError["message"].(string); !strings.Contains(got, "image pull failed") {
-		t.Fatalf("persisted message = %q, want setup failure", got)
-	}
-	if streamDB.status != bots.BotStatusReady {
-		t.Fatalf("bot status = %q, want %q", streamDB.status, bots.BotStatusReady)
+	// The handler only records intent; bots.status is derived by the
+	// reconciler, so the request path must not touch it.
+	if streamDB.status != "" {
+		t.Fatalf("handler wrote bot status %q; the reconciler owns it", streamDB.status)
 	}
 }
 
-func TestCreateBotStreamReportsStableBootstrapErrorAndLeavesBotReady(t *testing.T) {
+func TestCreateBotStreamReportsStableBootstrapError(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000108"
 	botID := "00000000-0000-0000-0000-000000000208"
 	streamDB := &createBotStreamDB{ownerID: ownerID, botID: botID}
-	setupErr := errors.Join(
-		workspace.ErrWorkspaceTemplateBootstrapFailed,
-		errors.New("write /data/AGENTS.md: permission denied"),
-	)
+	logs := captureLogs()
 	handler := &UsersHandler{
-		logger:         slog.Default(),
-		service:        newTestCreateBotAccountService(ownerID),
-		botService:     bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
-		workspaceSetup: &createBotStreamWorkspace{err: setupErr},
+		logger:     logs.logger,
+		service:    newTestCreateBotAccountService(ownerID),
+		botService: bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
+		workspaceSetup: &createBotStreamWorkspace{
+			err:   errors.New("write /data/AGENTS.md: permission denied"),
+			phase: botworkspace.PhaseBootstrap,
+		},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
@@ -274,23 +275,61 @@ func TestCreateBotStreamReportsStableBootstrapErrorAndLeavesBotReady(t *testing.
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(echo.New(), req, rec, ownerID)
 
-	if err := handler.CreateBot(ctx); err != nil {
-		t.Fatalf("CreateBot() error = %v", err)
-	}
-	events := decodeSSEEvents(t, rec.Body.String())
+	wireCreateBotIntents(handler)
+	events := serveWorkspaceStream(t, logs, handler.CreateBot, ctx, rec)
 	last := events[len(events)-1]
 	if last["type"] != "error" {
 		t.Fatalf("last event type = %#v, want error; events=%#v", last["type"], events)
 	}
-	if last["code"] != string(apperror.CodeWorkspaceTemplateBootstrapFailed) {
-		t.Fatalf("error code = %#v, want %q", last["code"], apperror.CodeWorkspaceTemplateBootstrapFailed)
+	requireCatalogErrorEvent(t, events, apperror.CodeWorkspaceTemplateBootstrapFailed, "/data/AGENTS.md")
+	requireStreamFailureRecord(t, logs, apperror.CodeWorkspaceTemplateBootstrapFailed, "server", "/data/AGENTS.md")
+}
+
+func TestCreateBotStreamReportsRecordedWorkspaceCode(t *testing.T) {
+	tests := []struct {
+		name  string
+		code  apperror.Code
+		fault string
+		level string
+	}{
+		{"image missing", apperror.CodeWorkspaceImageNotFound, "client", "INFO"},
+		{"registry unreachable", apperror.CodeWorkspaceImageRegistryUnavailable, "dependency", "ERROR"},
 	}
-	message, _ := last["message"].(string)
-	if strings.Contains(message, "/data/AGENTS.md") {
-		t.Fatalf("private workspace path leaked in message %q", message)
-	}
-	if streamDB.status != bots.BotStatusReady {
-		t.Fatalf("bot status = %q, want %q", streamDB.status, bots.BotStatusReady)
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ownerID := fmt.Sprintf("00000000-0000-0000-0000-0000000003%02d", i)
+			botID := fmt.Sprintf("00000000-0000-0000-0000-0000000004%02d", i)
+			streamDB := &createBotStreamDB{ownerID: ownerID, botID: botID}
+			logs := captureLogs()
+			handler := &UsersHandler{
+				logger:     logs.logger,
+				service:    newTestCreateBotAccountService(ownerID),
+				botService: bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
+				workspaceSetup: &createBotStreamWorkspace{
+					err:   errors.New("registry.example/nope: manifest unknown"),
+					phase: botworkspace.PhaseImagePrepare,
+					code:  string(tt.code),
+				},
+			}
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots", strings.NewReader(`{
+				"name": "image-failed-bot",
+				"display_name": "Image Failed Bot",
+				"acl_preset": "allow_all",
+				"wait_for_ready": true
+			}`))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			req.Header.Set(echo.HeaderAccept, "text/event-stream")
+			rec := httptest.NewRecorder()
+			ctx := testAuthContext(echo.New(), req, rec, ownerID)
+
+			wireCreateBotIntents(handler)
+			events := serveWorkspaceStream(t, logs, handler.CreateBot, ctx, rec)
+			requireCatalogErrorEvent(t, events, tt.code, "manifest unknown")
+			records := logs.records(t)
+			if len(records) != 1 || records[0]["reason"] != string(tt.code) || records[0]["fault"] != tt.fault || records[0]["level"] != tt.level {
+				t.Fatalf("records = %#v, want one %s record, fault %s, level %s", records, tt.code, tt.fault, tt.level)
+			}
+		})
 	}
 }
 
@@ -403,16 +442,170 @@ func newTestCreateBotAccountService(userID string) *accounts.Service {
 	return accounts.NewService(nil, createBotAccountStore{userID: userID})
 }
 
+// createBotStreamWorkspace stands in for the botworkspace reconciler: every
+// intent runs, once Kick wakes it, a fake provisioning in the background that
+// relays the scripted progress events to subscribers and settles on running or
+// failed.
 type createBotStreamWorkspace struct {
 	events []workspace.ContainerSetupEvent
 	err    error
+	phase  string
+	// code is the catalog code a current server records for the failure; the
+	// row then carries no text.
+	code string
+
+	mu      sync.Mutex
+	subs    map[string][]chan botworkspace.ProgressEvent
+	final   map[string]botworkspace.Workspace
+	settled map[string]chan struct{}
+	intents []string
+	kick    chan struct{}
+	kicked  sync.Once
+	// subscribedAtKick: whether the stream listened before the reconciler woke.
+	subscribedAtKick bool
 }
 
-func (w *createBotStreamWorkspace) SetupBotContainerWithProgress(_ context.Context, _ string, progress workspace.ContainerSetupProgress) error {
-	for _, event := range w.events {
-		progress(event)
+func (w *createBotStreamWorkspace) woken() chan struct{} {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.kick == nil {
+		w.kick = make(chan struct{})
 	}
-	return w.err
+	return w.kick
+}
+
+func (w *createBotStreamWorkspace) Kick() {
+	w.kicked.Do(func() {
+		w.mu.Lock()
+		w.subscribedAtKick = len(w.subs) > 0
+		w.mu.Unlock()
+		close(w.woken())
+	})
+}
+
+// createBotIntents is the bots side of the same fake, as providers.go wires the
+// real reconciler into both.
+type createBotIntents struct {
+	bots.WorkspaceIntents
+	w *createBotStreamWorkspace
+}
+
+func (i createBotIntents) RecordPresent(_ context.Context, _ dbstore.Queries, botID, image string) error {
+	i.w.record(botID, image)
+	return nil
+}
+
+func (i createBotIntents) Wake(context.Context) { i.w.Kick() }
+
+func (createBotIntents) Current(context.Context, string) (bots.WorkspaceOutcome, bool, error) {
+	return bots.WorkspaceOutcome{}, false, nil
+}
+
+func wireCreateBotIntents(h *UsersHandler) {
+	h.botService.SetWorkspaceIntents(createBotIntents{w: h.workspaceSetup.(*createBotStreamWorkspace)})
+}
+
+func (w *createBotStreamWorkspace) EnsurePresent(_ context.Context, botID, image string) (botworkspace.Workspace, error) {
+	w.record(botID, image)
+	w.Kick()
+	return botworkspace.Workspace{BotID: botID, Desired: botworkspace.DesiredPresent, DesiredGeneration: 1}, nil
+}
+
+// record is an intent that waits for Kick, as one Create commits does.
+func (w *createBotStreamWorkspace) record(botID, image string) {
+	w.mu.Lock()
+	if w.final == nil {
+		w.final = map[string]botworkspace.Workspace{}
+		w.settled = map[string]chan struct{}{}
+	}
+	w.intents = append(w.intents, botID)
+	done := make(chan struct{})
+	w.settled[botID] = done
+	w.mu.Unlock()
+
+	go func() {
+		<-w.woken()
+		for _, ev := range w.events {
+			w.publish(botID, botworkspace.ProgressEvent{
+				Type: ev.Type, Image: ev.Image, Message: ev.Message, Layers: ev.Layers,
+				ContainerID: ev.ContainerID, WorkspaceBackend: ev.WorkspaceBackend, RuntimeBackend: ev.RuntimeBackend,
+				ContainerPath: ev.ContainerPath, CDIDevices: ev.CDIDevices, Snapshotter: ev.Snapshotter, Started: ev.Started,
+				DataRestored: ev.DataRestored, HasPreservedData: ev.HasPreservedData,
+			})
+		}
+		final := botworkspace.Workspace{BotID: botID, Desired: botworkspace.DesiredPresent, DesiredGeneration: 1, ObservedGeneration: 1, Image: image}
+		if w.err != nil {
+			final.Observed = botworkspace.ObservedFailed
+			final.LastError = w.err.Error()
+			if w.code != "" {
+				final.LastError, final.LastErrorCode = "", w.code
+			}
+			final.LastErrorPhase = w.phase
+			if final.LastErrorPhase == "" {
+				final.LastErrorPhase = botworkspace.PhaseStart
+			}
+		} else {
+			final.Observed = botworkspace.ObservedRunning
+			final.EverReady = true
+		}
+		w.mu.Lock()
+		w.final[botID] = final
+		w.mu.Unlock()
+		close(done)
+	}()
+}
+
+func (w *createBotStreamWorkspace) publish(botID string, ev botworkspace.ProgressEvent) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, ch := range w.subs[botID] {
+		select {
+		case ch <- ev:
+		default:
+		}
+	}
+}
+
+func (w *createBotStreamWorkspace) Subscribe(botID string) (<-chan botworkspace.ProgressEvent, func()) {
+	ch := make(chan botworkspace.ProgressEvent, 64)
+	w.mu.Lock()
+	if w.subs == nil {
+		w.subs = map[string][]chan botworkspace.ProgressEvent{}
+	}
+	w.subs[botID] = append(w.subs[botID], ch)
+	w.mu.Unlock()
+	return ch, func() {}
+}
+
+func (w *createBotStreamWorkspace) Await(ctx context.Context, botID string, _ int64) (botworkspace.Workspace, error) {
+	w.mu.Lock()
+	done := w.settled[botID]
+	w.mu.Unlock()
+	if done == nil {
+		return botworkspace.Workspace{}, botworkspace.ErrNotFound
+	}
+	select {
+	case <-done:
+	case <-ctx.Done():
+		return botworkspace.Workspace{}, ctx.Err()
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.final[botID], nil
+}
+
+func (*createBotStreamWorkspace) RequestAbsent(context.Context, string, bool) (botworkspace.Workspace, error) {
+	return botworkspace.Workspace{}, nil
+}
+
+func (*createBotStreamWorkspace) CancelRemoval(context.Context, string) error { return nil }
+
+func (*createBotStreamWorkspace) Get(context.Context, string) (botworkspace.Workspace, error) {
+	return botworkspace.Workspace{}, botworkspace.ErrNotFound
+}
+
+func (*createBotStreamWorkspace) Observe(context.Context, string) (botworkspace.Workspace, error) {
+	return botworkspace.Workspace{}, nil
 }
 
 type createBotAccountStore struct {
@@ -441,6 +634,14 @@ type createBotStreamDB struct {
 	status            string
 	metadata          []byte
 	persistedMetadata []byte
+
+	// requestKey is the Idempotency-Key this fake's bot was created with;
+	// keyHeld says whether that bot exists. racedInsert makes the INSERT lose
+	// to an identical create that inserted first.
+	requestKey  string
+	keyHeld     bool
+	racedInsert bool
+	inserts     int
 }
 
 func (d *createBotStreamDB) Exec(_ context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
@@ -458,7 +659,17 @@ func (d *createBotStreamDB) QueryRow(_ context.Context, query string, args ...an
 	switch {
 	case strings.Contains(query, "FROM users") && strings.Contains(query, "id = $1"):
 		return &createBotStreamRow{scanFunc: func(_ ...any) error { return nil }}
+	case strings.Contains(query, "create_request_key = $2"):
+		if !d.keyHeld || args[1] != (pgtype.Text{String: d.requestKey, Valid: true}) {
+			return &createBotStreamRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+		}
+		return d.botRow(d.statusOr(bots.BotStatusCreating))
 	case strings.Contains(query, "INSERT INTO bots"):
+		d.inserts++
+		if d.racedInsert {
+			d.keyHeld = true
+			return &createBotStreamRow{scanFunc: func(_ ...any) error { return &pgconn.PgError{Code: "23505"} }}
+		}
 		if len(args) > 6 {
 			if payload, ok := args[6].([]byte); ok {
 				d.metadata = append([]byte(nil), payload...)
@@ -483,6 +694,13 @@ func (d *createBotStreamDB) QueryRow(_ context.Context, query string, args ...an
 	}
 }
 
+func (d *createBotStreamDB) statusOr(fallback string) string {
+	if d.status != "" {
+		return d.status
+	}
+	return fallback
+}
+
 func (d *createBotStreamDB) botRow(status string) pgx.Row {
 	botID := testUUID(d.botID)
 	ownerID := testUUID(d.ownerID)
@@ -491,7 +709,7 @@ func (d *createBotStreamDB) botRow(status string) pgx.Row {
 		metadata = []byte(`{}`)
 	}
 	return &createBotStreamRow{scanFunc: func(dest ...any) error {
-		if len(dest) < 16 {
+		if len(dest) < 15 {
 			return pgx.ErrNoRows
 		}
 		*dest[0].(*pgtype.UUID) = botID
@@ -502,43 +720,25 @@ func (d *createBotStreamDB) botRow(status string) pgx.Row {
 		*dest[5].(*pgtype.Text) = pgtype.Text{}
 		*dest[6].(*bool) = true
 		*dest[7].(*string) = status
-		*dest[8].(*string) = "en"
-		*dest[9].(*string) = "medium"
+		*dest[8].(*string) = "medium"
+		*dest[9].(*pgtype.UUID) = pgtype.UUID{}
 		*dest[10].(*pgtype.UUID) = pgtype.UUID{}
 		*dest[11].(*pgtype.UUID) = pgtype.UUID{}
-		*dest[12].(*pgtype.UUID) = pgtype.UUID{}
-		if len(dest) == 16 {
-			*dest[13].(*[]byte) = append([]byte(nil), metadata...)
+		if len(dest) == 15 {
+			*dest[12].(*[]byte) = append([]byte(nil), metadata...)
+			*dest[13].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 			*dest[14].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
-			*dest[15].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 			return nil
 		}
-		*dest[13].(*bool) = false
-		*dest[14].(*int32) = 200
-		*dest[15].(*pgtype.Int4) = pgtype.Int4{Int32: 50, Valid: true}
-		*dest[16].(*pgtype.UUID) = pgtype.UUID{}
-		*dest[17].(*[]byte) = append([]byte(nil), metadata...)
+		*dest[12].(*bool) = false
+		*dest[13].(*int32) = 200
+		*dest[14].(*pgtype.Int4) = pgtype.Int4{Int32: 50, Valid: true}
+		*dest[15].(*pgtype.UUID) = pgtype.UUID{}
+		*dest[16].(*[]byte) = append([]byte(nil), metadata...)
+		*dest[17].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 		*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
-		*dest[19].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 		return nil
 	}}
-}
-
-func requireStreamLastSetupError(t *testing.T, payload []byte) map[string]any {
-	t.Helper()
-	var metadata map[string]any
-	if err := json.Unmarshal(payload, &metadata); err != nil {
-		t.Fatalf("decode metadata: %v", err)
-	}
-	workspace, ok := metadata["workspace"].(map[string]any)
-	if !ok {
-		t.Fatalf("workspace metadata missing: %#v", metadata)
-	}
-	setupError, ok := workspace["last_setup_error"].(map[string]any)
-	if !ok {
-		t.Fatalf("last_setup_error missing: %#v", workspace)
-	}
-	return setupError
 }
 
 type createBotStreamRow struct {
@@ -547,4 +747,88 @@ type createBotStreamRow struct {
 
 func (r *createBotStreamRow) Scan(dest ...any) error {
 	return r.scanFunc(dest...)
+}
+
+func newResendHandler(ownerID string, dbFake *createBotStreamDB, ws *createBotStreamWorkspace) *UsersHandler {
+	h := &UsersHandler{
+		service:        newTestCreateBotAccountService(ownerID),
+		botService:     bots.NewService(nil, postgresstore.NewQueries(sqlc.New(dbFake))),
+		workspaceSetup: ws,
+	}
+	wireCreateBotIntents(h)
+	return h
+}
+
+func newCreateRequest(key string, stream bool) *http.Request {
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots", strings.NewReader(`{"display_name":"Stream Bot","acl_preset":"allow_all"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Header.Set(createRequestKeyHeader, key)
+	if stream {
+		req.Header.Set(echo.HeaderAccept, "text/event-stream")
+	}
+	return req
+}
+
+func TestCreateBotStreamAnswersAResendWithTheBotItAlreadyMade(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000101"
+	botID := "00000000-0000-0000-0000-000000000201"
+	dbFake := &createBotStreamDB{ownerID: ownerID, botID: botID, requestKey: "key-1", keyHeld: true}
+	ws := &createBotStreamWorkspace{}
+	ws.record(botID, "") // the first attempt's intent
+	rec := httptest.NewRecorder()
+	if err := newResendHandler(ownerID, dbFake, ws).CreateBot(testAuthContext(echo.New(), newCreateRequest("key-1", true), rec, ownerID)); err != nil {
+		t.Fatalf("CreateBot() error = %v", err)
+	}
+	events := decodeSSEEvents(t, rec.Body.String())
+	if len(events) == 0 || eventBotID(events[0]) != botID || events[len(events)-1]["type"] != "ready" {
+		t.Fatalf("want bot_created ... ready for the first attempt's bot %s; events=%#v", botID, events)
+	}
+	if dbFake.inserts != 0 || len(ws.intents) != 1 {
+		t.Fatalf("inserts = %d, intents = %d; a resend must write nothing", dbFake.inserts, len(ws.intents))
+	}
+}
+
+func TestCreateBotAnswersAResendWithTheBotItAlreadyMade(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000101"
+	botID := "00000000-0000-0000-0000-000000000201"
+	dbFake := &createBotStreamDB{ownerID: ownerID, botID: botID, requestKey: "key-1", keyHeld: true}
+	ws := &createBotStreamWorkspace{}
+	rec := httptest.NewRecorder()
+	if err := newResendHandler(ownerID, dbFake, ws).CreateBot(testAuthContext(echo.New(), newCreateRequest("key-1", false), rec, ownerID)); err != nil {
+		t.Fatalf("CreateBot() error = %v", err)
+	}
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), botID) || dbFake.inserts != 0 || len(ws.intents) != 0 {
+		t.Fatalf("status = %d body = %s inserts = %d intents = %d; want 201 with the first attempt's bot and nothing written", rec.Code, rec.Body.String(), dbFake.inserts, len(ws.intents))
+	}
+}
+
+func TestCreateBotAnswersTheLoserOfARaceWithTheWinnersBot(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000101"
+	botID := "00000000-0000-0000-0000-000000000201"
+	dbFake := &createBotStreamDB{ownerID: ownerID, botID: botID, requestKey: "key-1", racedInsert: true}
+	rec := httptest.NewRecorder()
+	if err := newResendHandler(ownerID, dbFake, &createBotStreamWorkspace{}).CreateBot(testAuthContext(echo.New(), newCreateRequest("key-1", false), rec, ownerID)); err != nil {
+		t.Fatalf("CreateBot() error = %v", err)
+	}
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), botID) {
+		t.Fatalf("status = %d body = %s; want 201 with the winner's bot %s", rec.Code, rec.Body.String(), botID)
+	}
+}
+
+func TestCreateBotRefusesAResendWhoseBotIsBeingDeleted(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000101"
+	dbFake := &createBotStreamDB{ownerID: ownerID, botID: "00000000-0000-0000-0000-000000000201", requestKey: "key-1", keyHeld: true, status: bots.BotStatusDeleting}
+	err := newResendHandler(ownerID, dbFake, &createBotStreamWorkspace{}).CreateBot(testAuthContext(echo.New(), newCreateRequest("key-1", true), httptest.NewRecorder(), ownerID))
+	if httpErr := requireHTTPError(t, err); httpErr.Code != http.StatusConflict || dbFake.inserts != 0 {
+		t.Fatalf("status = %d inserts = %d, want %d and no insert", httpErr.Code, dbFake.inserts, http.StatusConflict)
+	}
+}
+
+func TestCreateBotRejectsAnOverlongIdempotencyKey(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000101"
+	dbFake := &createBotStreamDB{ownerID: ownerID, botID: "00000000-0000-0000-0000-000000000201"}
+	err := newResendHandler(ownerID, dbFake, &createBotStreamWorkspace{}).CreateBot(testAuthContext(echo.New(), newCreateRequest(strings.Repeat("k", maxCreateRequestKeyLen+1), false), httptest.NewRecorder(), ownerID))
+	if httpErr := requireHTTPError(t, err); httpErr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", httpErr.Code, http.StatusBadRequest)
+	}
 }

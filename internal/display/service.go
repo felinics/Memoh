@@ -83,6 +83,12 @@ var (
 	ErrDisplayUnavailable = errors.New("display server not reachable")
 	ErrEncoderUnavailable = errors.New("gstreamer unavailable")
 	ErrCodecUnsupported   = errors.New("no compatible video codec offered")
+	// ErrOfferRequired, ErrOfferTypeUnsupported and ErrOfferInvalid are the
+	// ways a viewer's WebRTC offer can be refused: missing, not an offer, or
+	// not a description the peer connection accepts.
+	ErrOfferRequired        = errors.New("offer sdp is required")
+	ErrOfferTypeUnsupported = errors.New("unsupported session description type")
+	ErrOfferInvalid         = errors.New("invalid offer sdp")
 )
 
 var screenshotJPEGCandidates = []screenshotJPEGCandidate{
@@ -291,10 +297,10 @@ func (s *Service) Answer(ctx context.Context, botID string, req OfferRequest) (O
 		return OfferResponse{}, ErrDisplayDisabled
 	}
 	if strings.TrimSpace(req.SDP) == "" {
-		return OfferResponse{}, errors.New("offer sdp is required")
+		return OfferResponse{}, ErrOfferRequired
 	}
 	if req.Type != "" && req.Type != "offer" {
-		return OfferResponse{}, fmt.Errorf("unsupported session description type %q", req.Type)
+		return OfferResponse{}, fmt.Errorf("%w %q", ErrOfferTypeUnsupported, req.Type)
 	}
 
 	if !s.displayReachable(ctx, botID) {
@@ -650,17 +656,17 @@ func (s *session) start(ctx context.Context) error {
 		input, inputErr := newRFBInputClient(conn)
 		if inputErr != nil {
 			_ = conn.Close()
-			s.service.logger.Warn("display input channel unavailable", slog.String("bot_id", s.botID), slog.Any("error", inputErr))
+			s.service.logger.WarnContext(ctx, "display input channel unavailable", slog.String("bot_id", s.botID), slog.Any("error", inputErr))
 		} else {
 			s.input = input
 		}
 	} else {
-		s.service.logger.Warn("display input channel unavailable", slog.String("bot_id", s.botID), slog.Any("error", err))
+		s.service.logger.WarnContext(ctx, "display input channel unavailable", slog.String("bot_id", s.botID), slog.Any("error", err))
 	}
 	s.runCtxCancel = runCtxCancel
 	cancelRunCtx = false
 
-	s.service.logger.Info("display encoder started",
+	s.service.logger.InfoContext(ctx, "display encoder started",
 		slog.String("bot_id", s.botID),
 		slog.String("rfb_target", s.service.displayTarget(s.botID)),
 		slog.String("gst_launch", s.gstLaunch),
@@ -722,7 +728,7 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 		return OfferResponse{}, err
 	}
 	if rtcCfg.UDPPort != 0 || rtcCfg.UDPPortMin != 0 || len(rtcCfg.NATIPs) > 0 {
-		s.service.logger.Info("display webrtc configured",
+		s.service.logger.InfoContext(ctx, "display webrtc configured",
 			slog.String("bot_id", s.botID),
 			slog.Int("udp_port", int(rtcCfg.UDPPort)),
 			slog.Int("udp_port_min", int(rtcCfg.UDPPortMin)),
@@ -753,7 +759,7 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 		}
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 			if err := s.handleInput(msg.Data); err != nil {
-				s.service.logger.Debug("display input event dropped", slog.String("bot_id", s.botID), slog.Any("error", err))
+				s.service.logger.DebugContext(ctx, "display input event dropped", slog.String("bot_id", s.botID), slog.Any("error", err))
 			}
 		})
 	})
@@ -786,7 +792,7 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		peer.setState(state.String())
-		s.service.logger.Info("display webrtc connection state",
+		s.service.logger.InfoContext(ctx, "display webrtc connection state",
 			slog.String("bot_id", s.botID),
 			slog.String("session_id", sessionID),
 			slog.String("state", state.String()),
@@ -800,7 +806,7 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 		}
 	})
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		s.service.logger.Info("display webrtc ice state",
+		s.service.logger.InfoContext(ctx, "display webrtc ice state",
 			slog.String("bot_id", s.botID),
 			slog.String("session_id", sessionID),
 			slog.String("state", state.String()),
@@ -812,7 +818,7 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 		SDP:  req.SDP,
 	}); err != nil {
 		cleanup(true)
-		return OfferResponse{}, err
+		return OfferResponse{}, fmt.Errorf("%w: %w", ErrOfferInvalid, err)
 	}
 
 	answer, err := pc.CreateAnswer(nil)
@@ -1090,7 +1096,7 @@ func proxyRFBListener(ctx context.Context, listener net.Listener, dialRFB func(c
 		conn, err := listener.Accept()
 		if err != nil {
 			if ctx.Err() == nil && !errors.Is(err, net.ErrClosed) {
-				logger.Warn("display RFB screenshot shim stopped", slog.String("bot_id", botID), slog.Any("error", err))
+				logger.WarnContext(ctx, "display RFB screenshot shim stopped", slog.String("bot_id", botID), slog.Any("error", err))
 			}
 			return
 		}
@@ -1103,7 +1109,7 @@ func proxyRFBConnection(ctx context.Context, conn net.Conn, dialRFB func(context
 
 	rfbConn, err := dialRFB(ctx)
 	if err != nil {
-		logger.Warn("display RFB dial failed", slog.String("bot_id", botID), slog.Any("error", err))
+		logger.WarnContext(ctx, "display RFB dial failed", slog.String("bot_id", botID), slog.Any("error", err))
 		return
 	}
 	defer func() { _ = rfbConn.Close() }()

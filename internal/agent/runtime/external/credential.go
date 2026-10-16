@@ -4,19 +4,18 @@ import (
 	"errors"
 
 	"github.com/felinics/memoh/internal/agentcredential"
-	"github.com/felinics/memoh/internal/apperror"
 )
 
+// CredentialError reports an Agent credential the user must fix (missing, of
+// the wrong kind, revoked, or undecryptable) as a FailureCredential. Any other
+// error is returned unchanged.
 func CredentialError(err error) error {
 	switch {
-	case errors.Is(err, agentcredential.ErrNotFound):
-		return apperror.Wrap(apperror.CodeAgentCredentialNotFound, err, nil)
-	case errors.Is(err, agentcredential.ErrIncompatible):
-		return apperror.Wrap(apperror.CodeAgentCredentialIncompatible, err, nil)
-	case errors.Is(err, agentcredential.ErrRevoked):
-		return apperror.Wrap(apperror.CodeAgentCredentialRevoked, err, nil)
-	case errors.Is(err, agentcredential.ErrEncryptionUnavailable):
-		return apperror.Wrap(apperror.CodeAgentCredentialEncryptionUnavailable, err, nil)
+	case errors.Is(err, agentcredential.ErrNotFound),
+		errors.Is(err, agentcredential.ErrIncompatible),
+		errors.Is(err, agentcredential.ErrRevoked),
+		errors.Is(err, agentcredential.ErrEncryptionUnavailable):
+		return &Failure{Kind: FailureCredential, Err: err}
 	default:
 		return err
 	}

@@ -6,6 +6,8 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/partmeta"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 const syntheticToolClosureError = "tool execution interrupted before a response was recorded"
@@ -263,17 +265,15 @@ func isDecisionProjection(call sdk.ToolCallPart) bool {
 	if strings.TrimSpace(call.ToolCallID) == "" || call.ProviderMetadata == nil {
 		return false
 	}
-	_, userInput := call.ProviderMetadata["user_input"]
-	_, approval := call.ProviderMetadata["approval"]
-	return userInput || approval
+	return partmeta.Has(call.ProviderMetadata, partmeta.KeyUserInput) || partmeta.Has(call.ProviderMetadata, partmeta.KeyApproval)
 }
 
 func resolvedDecisionResult(call sdk.ToolCallPart) (sdk.ToolResultPart, bool) {
-	metadata, ok := call.ProviderMetadata["user_input"].(map[string]any)
+	metadata, ok := partmeta.Object(call.ProviderMetadata, partmeta.KeyUserInput)
 	// A standalone permission card represents only the decision. Approval
 	// metadata on a real tool call must still wait for that tool's result.
 	if !ok && call.ToolName == "permission" {
-		metadata, ok = call.ProviderMetadata["approval"].(map[string]any)
+		metadata, ok = partmeta.Object(call.ProviderMetadata, partmeta.KeyApproval)
 	}
 	if !ok {
 		return sdk.ToolResultPart{}, false
@@ -290,7 +290,7 @@ func resolvedDecisionResult(call sdk.ToolCallPart) (sdk.ToolResultPart, bool) {
 	return sdk.ToolResultPart{
 		ToolCallID: strings.TrimSpace(call.ToolCallID),
 		ToolName:   strings.TrimSpace(call.ToolName),
-		Result:     result,
+		Result:     toolexec.OutputFromValue(result),
 		IsError:    status == userinput.StatusExpired || status == userinput.StatusFailed,
 	}, true
 }
@@ -312,7 +312,7 @@ func syntheticToolResultMessage(toolCallID, toolName, reason string) ModelMessag
 	converted := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(sdk.ToolResultPart{
 		ToolCallID: strings.TrimSpace(toolCallID),
 		ToolName:   strings.TrimSpace(toolName),
-		Result:     strings.TrimSpace(reason),
+		Result:     toolexec.OutputFromValue(strings.TrimSpace(reason)),
 		IsError:    true,
 	})})
 	if len(converted) == 0 {

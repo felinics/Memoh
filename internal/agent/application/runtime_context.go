@@ -62,7 +62,7 @@ func (s *Service) buildRuntimeContextSections(ctx context.Context, req ChatReque
 		identities, err := s.platformIdentities.ListPlatformIdentities(ctx, req.BotID)
 		if err != nil {
 			if s.logger != nil {
-				s.logger.Warn("load bot platform identities for Runtime context failed",
+				s.logger.WarnContext(ctx, "load bot platform identities for Runtime context failed",
 					slog.String("bot_id", req.BotID),
 					slog.Any("error", err),
 				)

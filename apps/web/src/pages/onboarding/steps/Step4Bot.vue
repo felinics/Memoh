@@ -18,12 +18,16 @@ import {
   TooltipTrigger,
 } from '@felinic/ui'
 import { SquarePen, CircleHelp, Bot, Dices } from 'lucide-vue-next'
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { FieldStack, InlineLoadingRow, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { getModels, getProviders, getProvidersByIdModels, getMemoryProviders, putModelsById } from '@memohai/sdk'
-import { useOnboarding } from '@/composables/useOnboarding'
+import { getBots, getBotsByBotIdSettings, getModels, getProviders, getProvidersByIdModels, putModelsById } from '@memohai/sdk'
+import { markOnboardingCompleted, useOnboarding } from '@/composables/useOnboarding'
+import { useUserStore } from '@/store/user'
+import { readCreatedBotSession } from '@/pages/bots/created-bot-session'
+import { safeLocalGet } from '@/utils/safe-storage'
+import { apiErrorStatus } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { defaultAclPreset } from '@/constants/acl-presets'
 import { randomCatName } from '@/constants/bot-name-presets'
@@ -41,7 +45,9 @@ import {
   clearOnboardingBotResult,
   readOnboardingProviderId,
   readOnboardingBotResult,
+  writeOnboardingBotResult,
 } from '../session'
+import { ONBOARDING_KEYS } from '../constants'
 import { mergeOnboardingModels } from './provider-setup'
 import StepFrame from '../components/step-frame.vue'
 import StepExitShell from '../components/step-exit-shell.vue'
@@ -49,14 +55,70 @@ import HintBox from '../components/hint-box.vue'
 import FooterNav from '../components/footer-nav.vue'
 
 const { t } = useI18n()
-const { nextStep, prevStep } = useOnboarding()
+const { nextStep, prevStep, skipToEnd } = useOnboarding()
 const queryCache = useQueryCache()
 const { visible, exiting, leave } = useStepTransition()
 
 const submitting = ref(false)
-onMounted(() => { if (readOnboardingBotResult()) nextStep() })
-
 const store = useBotCreateProgressStore()
+const userStore = useUserStore()
+
+onMounted(() => {
+  if (readOnboardingBotResult()) {
+    nextStep()
+    return
+  }
+  void adoptExistingBot()
+})
+
+// The wizard's progress lives in this tab's session storage, so a new tab or
+// device starts over at this step. Onboarding exists to give the user a first
+// Bot; if they already own one, finish with it instead of creating another
+// (which may also exceed the team's resources).
+async function adoptExistingBot() {
+  // A dev replay explicitly wants to exercise creation again; a creation that
+  // is in flight or resumable in this tab is still owned by the progress step.
+  if (import.meta.env.DEV && safeLocalGet(ONBOARDING_KEYS.forceOnboarding)?.trim() === '1') return
+  if (store.status !== 'idle' || readCreatedBotSession(true)) return
+  submitting.value = true
+  try {
+    const { data } = await getBots({ throwOnError: true })
+    const owned = (data.items ?? []).filter(item => item.id
+      && item.owner_user_id === userStore.userInfo.id && item.status !== 'deleting')
+    const adopted = owned.find(item => item.status === 'ready')
+    if (!adopted?.id) {
+      // A Bot still provisioning or whose workspace failed goes to the progress
+      // step, which follows it to ready or offers Retry / Continue later on that
+      // same Bot instead of creating another.
+      const pending = owned.find(item => item.status === 'creating') ?? owned[0]
+      if (!pending?.id) return
+      void store.restore({
+        botId: pending.id, botName: pending.name ?? '', displayName: pending.display_name ?? '',
+        avatarUrl: pending.avatar_url, setupError: null,
+      }, true)
+      leave(nextStep)
+      return
+    }
+    let modelConfigured = false
+    try {
+      const { data: settings } = await getBotsByBotIdSettings({ path: { bot_id: adopted.id }, throwOnError: true })
+      // A direct Agent (Codex / Claude Code) answers without a chat model.
+      modelConfigured = !!settings.chat_model_id || !!settings.default_bot_agent_id
+    } catch (error) {
+      // Deleted in the meantime: nothing to adopt, so create as usual.
+      if (apiErrorStatus(error) === 404) return
+      // The Bot still exists; creating another would duplicate it. The final
+      // step then points the user at Bot Settings to check the model.
+    }
+    writeOnboardingBotResult({ botId: adopted.id, modelConfigured })
+    void markOnboardingCompleted().catch(() => {})
+    leave(skipToEnd)
+  } catch {
+    // Without the list the user can still create a Bot as before.
+  } finally {
+    submitting.value = false
+  }
+}
 
 const authorizationKey = 'memoh:onboarding:agent-authorization'
 const agentType = ref(readAgentAuthorizationDraft(authorizationKey)?.runtime ?? MEMOH_AGENT_VALUE)
@@ -74,7 +136,6 @@ const form = reactive({
   display_name: randomCatName(),
   avatar_url: '',
   chat_model_id: '',
-  memory_provider_id: '',
 })
 
 const avatarDialogOpen = ref(false)
@@ -83,24 +144,6 @@ const avatarFallback = useAvatarInitials(() => form.display_name || '')
 function rollRandomName() {
   form.display_name = randomCatName(form.display_name)
 }
-
-const { data: memoryProviderData } = useQuery({
-  key: ['memory-providers'],
-  query: async () => {
-    const { data } = await getMemoryProviders({ throwOnError: true })
-    return data
-  },
-})
-
-const memoryProviders = computed(() => memoryProviderData.value ?? [])
-
-watch(memoryProviders, (list) => {
-  if (form.memory_provider_id) return
-  const builtin = list.find(p => p.provider === 'builtin')
-  if (builtin?.id) {
-    form.memory_provider_id = builtin.id
-  }
-}, { immediate: true })
 
 const { data: modelData } = useQuery({
   key: ['models'],
@@ -204,7 +247,7 @@ async function handleSubmit() {
     },
     settings: {
       chat_model_id: form.chat_model_id || undefined,
-      memory_provider_id: form.memory_provider_id || undefined,
+      memory_enabled: true,
     },
     ...(selectedDirectRuntime.value
       ? {

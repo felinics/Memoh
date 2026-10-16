@@ -10,6 +10,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func collectToolResults(messages []sdk.Message) []sdk.ToolResultPart {
@@ -55,7 +56,7 @@ func TestStepReselectionRescuesProtectedOverflowByPruningInFlightResults(t *test
 	if len(results) != 1 {
 		t.Fatalf("tool results = %d, want the exchange preserved as parts", len(results))
 	}
-	text, _ := results[0].Result.(string)
+	text, _ := toolexec.OutputValue(results[0].Result).(string)
 	if !strings.Contains(text, "pruned") {
 		t.Fatalf("protected result must carry the pruned stub, got %q", text)
 	}
@@ -83,7 +84,7 @@ func TestStepReselectionRescueEscalatesToNewestResultAsLastResort(t *testing.T) 
 	if len(results) == 0 {
 		t.Fatal("expected surviving tool results")
 	}
-	newest, _ := results[len(results)-1].Result.(string)
+	newest, _ := toolexec.OutputValue(results[len(results)-1].Result).(string)
 	if !strings.Contains(newest, "pruned") {
 		t.Fatalf("newest result must be stubbed once older prunes cannot fit the budget, got %q", newest)
 	}
@@ -96,8 +97,8 @@ func TestStepReselectionRescueKeepsNewestResultWhenOlderPruneSuffices(t *testing
 	newestBody := strings.Repeat("keep", 200)
 	messages := append(append([]sdk.Message(nil), prefix...),
 		sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
-			sdk.ToolCallPart{ToolCallID: "call-old", ToolName: "lookup", Input: map[string]any{}},
-			sdk.ToolCallPart{ToolCallID: "call-new", ToolName: "lookup", Input: map[string]any{}},
+			sdk.ToolCallPart{ToolCallID: "call-old", ToolName: "lookup", Input: toolexec.ArgumentsFromValue(map[string]any{})},
+			sdk.ToolCallPart{ToolCallID: "call-new", ToolName: "lookup", Input: toolexec.ArgumentsFromValue(map[string]any{})},
 		}},
 		toolResultMessage("call-old", "lookup", strings.Repeat("x", 8_000)),
 		toolResultMessage("call-new", "lookup", newestBody),
@@ -122,8 +123,8 @@ func TestStepReselectionRescueKeepsNewestResultWhenOlderPruneSuffices(t *testing
 	if len(results) != 2 {
 		t.Fatalf("tool results = %d, want both preserved as parts", len(results))
 	}
-	older, _ := results[0].Result.(string)
-	newest, _ := results[1].Result.(string)
+	older, _ := toolexec.OutputValue(results[0].Result).(string)
+	newest, _ := toolexec.OutputValue(results[1].Result).(string)
 	if !strings.Contains(older, "pruned") {
 		t.Fatalf("older result must be stubbed, got %q", older)
 	}
@@ -138,12 +139,12 @@ func TestStepReselectionRescuePreservesSiblingsInParallelBatch(t *testing.T) {
 	prefix := []sdk.Message{sdk.UserMessage("task")}
 	messages := append(append([]sdk.Message(nil), prefix...),
 		sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
-			sdk.ToolCallPart{ToolCallID: "call-big", ToolName: "exec", Input: map[string]any{}},
-			sdk.ToolCallPart{ToolCallID: "call-small", ToolName: "exec", Input: map[string]any{}},
+			sdk.ToolCallPart{ToolCallID: "call-big", ToolName: "exec", Input: toolexec.ArgumentsFromValue(map[string]any{})},
+			sdk.ToolCallPart{ToolCallID: "call-small", ToolName: "exec", Input: toolexec.ArgumentsFromValue(map[string]any{})},
 		}},
 		sdk.Message{Role: sdk.MessageRoleTool, Content: []sdk.MessagePart{
-			sdk.ToolResultPart{ToolCallID: "call-big", ToolName: "exec", Result: strings.Repeat("x", 8_000), IsError: true},
-			sdk.ToolResultPart{ToolCallID: "call-small", ToolName: "exec", Result: "ok: created id-42"},
+			sdk.ToolResultPart{ToolCallID: "call-big", ToolName: "exec", Result: toolexec.OutputFromValue(strings.Repeat("x", 8_000)), IsError: true},
+			sdk.ToolResultPart{ToolCallID: "call-small", ToolName: "exec", Result: toolexec.OutputFromValue("ok: created id-42")},
 		}},
 	)
 
@@ -164,13 +165,13 @@ func TestStepReselectionRescuePreservesSiblingsInParallelBatch(t *testing.T) {
 		t.Fatalf("tool results = %d, want both parts preserved", len(results))
 	}
 	big, small := results[0], results[1]
-	if text, _ := big.Result.(string); !strings.Contains(text, "pruned") {
+	if text, _ := toolexec.OutputValue(big.Result).(string); !strings.Contains(text, "pruned") {
 		t.Fatalf("oversized part must be stubbed, got %v", big.Result)
 	}
 	if !big.IsError {
 		t.Fatal("a failed result must not read as success after the rescue")
 	}
-	if small.Result != "ok: created id-42" {
+	if toolexec.OutputValue(small.Result) != "ok: created id-42" {
 		t.Fatalf("small sibling must survive verbatim, got %v", small.Result)
 	}
 }

@@ -1,19 +1,24 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 
 	channelmodule "github.com/felinics/memoh/cmd/internal/channel"
 	coremodule "github.com/felinics/memoh/cmd/internal/core"
+	"github.com/felinics/memoh/internal/agent/application"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	channelpkg "github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/adapters/weixin"
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/handlers"
+	"github.com/felinics/memoh/internal/telemetry"
 )
 
 func runServe() {
@@ -22,20 +27,20 @@ func runServe() {
 		fmt.Fprintf(os.Stderr, "memoh: %v\n", err)
 		os.Exit(1)
 	}
-	fx.New(optionsFor(cfg)).Run()
+	fx.New(optionsFor(cfg), fx.StopTimeout(30*time.Second)).Run()
 }
 
 // optionsFor assembles the server for one of two deployment shapes.
 // With internal_rpc.shared_secret set (docker compose), the channel
 // runtime is a separate process reached over authenticated gRPC. Without
 // it (pre-split bare-metal installs), the full channel runtime runs
-// embedded in this process so external channels, email, and webhook
+// embedded in this process so external channels, and webhook
 // endpoints keep working with a single binary and an unchanged config.
 func optionsFor(cfg config.Config) fx.Option {
 	if cfg.SplitChannelRuntime() {
-		return fx.Options(commonOptions(), splitOptions())
+		return fx.Options(commonOptions(), splitOptions(), fx.Invoke(startSessionResume))
 	}
-	return fx.Options(commonOptions(), embeddedOptions())
+	return fx.Options(commonOptions(), embeddedOptions(), fx.Invoke(startSessionResume))
 }
 
 func splitOptions() fx.Option {
@@ -46,7 +51,6 @@ func splitOptions() fx.Option {
 			provideRuntimeRPCClient,
 			provideChannelRuntimeClient,
 			provideChannelRuntime,
-			provideEmailRuntime,
 			provideWebhookTunnelStatus,
 			provideServerRPC,
 		),
@@ -63,7 +67,6 @@ func embeddedOptions() fx.Option {
 			// are served from this process again, as before the split.
 			provideServerHandler(channelpkg.NewWebhookServerHandler),
 			provideServerHandler(weixin.NewQRServerHandler),
-			provideServerHandler(handlers.NewEmailWebhookHandler),
 			provideServerHandler(handlers.NewConfiguredPublicMediaHandler),
 		),
 	)
@@ -72,6 +75,7 @@ func embeddedOptions() fx.Option {
 func commonOptions() fx.Option {
 	return fx.Options(
 		fx.Provide(provideConfig),
+		fx.Supply(telemetry.Service{Name: "memoh-server"}),
 		coremodule.FoundationModule(),
 		channelmodule.FoundationModule(),
 		coremodule.ServerModule(),
@@ -83,6 +87,7 @@ func commonOptions() fx.Option {
 			provideServerHandler(provideMessageHandler),
 			provideServerHandler(provideSessionHandler),
 			provideServerHandler(provideSessionQueueHandler),
+			provideServerHandler(handlers.NewStarterPromptsHandler),
 			provideServerHandler(handlers.NewUserRuntimeHandler),
 			provideServerHandler(handlers.NewUserComputerAccessHandler),
 			provideServerHandler(handlers.NewRuntimeConnectHandler),
@@ -99,6 +104,7 @@ func commonOptions() fx.Option {
 			provideServerHandler(provideExternalAgentCodexServerHandler),
 			provideServerHandler(handlers.NewFetchProvidersHandler),
 			provideServerHandler(handlers.NewSearchProvidersHandler),
+			provideServerHandler(handlers.NewSiteIconHandler),
 			provideServerHandler(handlers.NewModelsHandler),
 			provideServerHandler(provideBotAgentsHandler),
 			provideServerHandler(handlers.NewSettingsHandler),
@@ -111,15 +117,11 @@ func commonOptions() fx.Option {
 			provideServerHandler(handlers.NewCompactionHandler),
 			provideServerHandler(handlers.NewChannelHandler),
 			provideServerHandler(provideUsersHandler),
-			provideServerHandler(handlers.NewMemoryProvidersHandler),
+			provideServerHandler(handlers.NewMemoryConfigHandler),
 			provideServerHandler(handlers.NewNetworkHandler),
 			provideServerHandler(handlers.NewAudioHandler),
 			provideServerHandler(handlers.NewVideoHandler),
 			provideServerHandler(handlers.NewBotAudioHandler),
-			provideServerHandler(handlers.NewEmailProvidersHandler),
-			provideServerHandler(handlers.NewEmailBindingsHandler),
-			provideServerHandler(handlers.NewEmailOutboxHandler),
-			provideServerHandler(provideEmailOAuthHandler),
 			provideServerHandler(handlers.NewMCPHandler),
 			provideServerHandler(handlers.NewMCPOAuthHandler),
 			provideServerHandler(handlers.NewConnectorsHandler),
@@ -138,4 +140,16 @@ func commonOptions() fx.Option {
 			return &fxevent.SlogLogger{Logger: logger.With(slog.String("component", "fx"))}
 		}),
 	)
+}
+
+// Registered last: stop admission and persist interruptions before HTTP/gRPC,
+// schedule, external runtime and workspace shutdown hooks tear down producers.
+func startSessionResume(lc fx.Lifecycle, service *application.Service, manager *sessionruntime.Manager) {
+	lc.Append(fx.Hook{
+		OnStart: service.StartSessionResume,
+		OnStop: func(ctx context.Context) error {
+			service.StopSessionResume()
+			return manager.InterruptForShutdown(ctx)
+		},
+	})
 }

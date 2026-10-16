@@ -23,8 +23,10 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/toolcontext"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -103,7 +105,7 @@ func NewRunner(log *slog.Logger, workspace Workspace) *Runner {
 		log = slog.Default()
 	}
 	return &Runner{
-		logger:    log.With(slog.String("component", "acpclient")),
+		logger:    log.With(slog.String("component", "acpclient"), slog.String("runtime", string(runtimekind.ACPAgent))),
 		workspace: workspace,
 		timeout:   DefaultRunTimeout,
 	}
@@ -111,14 +113,14 @@ func NewRunner(log *slog.Logger, workspace Workspace) *Runner {
 
 func (r *Runner) WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error) {
 	if r == nil || r.workspace == nil {
-		return bridge.WorkspaceInfo{}, errors.New("ACP workspace provider is not configured")
+		return bridge.WorkspaceInfo{}, errs.New("ACP workspace provider is not configured")
 	}
 	return r.workspace.WorkspaceInfo(ctx, botID)
 }
 
 func (r *Runner) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
 	if r == nil || r.workspace == nil {
-		return nil, errors.New("ACP workspace provider is not configured")
+		return nil, errs.New("ACP workspace provider is not configured")
 	}
 	return r.workspace.MCPClient(ctx, botID)
 }
@@ -134,7 +136,7 @@ func (r *Runner) MCPClient(ctx context.Context, botID string) (*bridge.Client, e
 //nolint:contextcheck // lifecycle close intentionally uses background ctx.
 func (r *Runner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	if strings.TrimSpace(req.Task) == "" {
-		return RunResult{}, errors.New("task is required")
+		return RunResult{}, errs.New("task is required")
 	}
 
 	timeout := req.Timeout
@@ -181,7 +183,6 @@ type clientCallbacks struct {
 	client         *bridge.Client
 	logger         *slog.Logger
 	root           string
-	cwd            string
 	approval       ToolApprovalService
 	userInput      UserInputService
 	toolGateway    *mcp.ToolGatewayService
@@ -275,7 +276,6 @@ func newClientCallbacks(ctx context.Context, client *bridge.Client, root, cwd st
 	return &clientCallbacks{
 		client:      client,
 		root:        root,
-		cwd:         cwd,
 		approval:    approval,
 		toolGateway: toolGateway,
 		baseSession: toolSession,
@@ -429,7 +429,7 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 		return acp.ReadTextFileResponse{}, err
 	}
 	if !approval.Approved {
-		err := errors.New(c.limitedApprovalRejectionMessage("read", approval))
+		err := errs.New(c.limitedApprovalRejectionMessage("read", approval))
 		c.emitToolCallEnd(toolID, "read", input, toolErrorResult(err), err)
 		return acp.ReadTextFileResponse{}, err
 	}
@@ -462,11 +462,11 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 	}
 	resp, err := c.client.ReadFile(ctx, path, line, limit)
 	if err != nil {
-		toolErr = err
-		return acp.ReadTextFileResponse{}, err
+		toolErr = errs.WrapDependency(err, "")
+		return acp.ReadTextFileResponse{}, toolErr
 	}
 	if resp.GetBinary() {
-		toolErr = fmt.Errorf("path %q is binary; ACP text file reads only support text", p.Path)
+		toolErr = errs.New(fmt.Sprintf("path %q is binary; ACP text file reads only support text", p.Path))
 		return acp.ReadTextFileResponse{}, toolErr
 	}
 	content := resp.GetContent()
@@ -508,7 +508,7 @@ func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFile
 		return acp.WriteTextFileResponse{}, err
 	}
 	if !approval.Approved {
-		err := errors.New(c.limitedApprovalRejectionMessage("write", approval))
+		err := errs.New(c.limitedApprovalRejectionMessage("write", approval))
 		c.emitToolCallEnd(toolID, "write", input, toolErrorResult(err), err)
 		return acp.WriteTextFileResponse{}, err
 	}
@@ -532,8 +532,8 @@ func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFile
 		return acp.WriteTextFileResponse{}, err
 	}
 	if err := c.client.WriteFile(ctx, path, []byte(p.Content)); err != nil {
-		toolErr = err
-		return acp.WriteTextFileResponse{}, err
+		toolErr = errs.WrapDependency(err, "")
+		return acp.WriteTextFileResponse{}, toolErr
 	}
 	return acp.WriteTextFileResponse{}, nil
 }
@@ -623,7 +623,7 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 			// options simply cannot be shown to a decider, so resolve the
 			// request as cancelled instead of aborting the agent's turn.
 			if c.logger != nil {
-				c.logger.Warn("permission options unmappable; cancelling",
+				c.logger.WarnContext(ctx, "permission options unmappable; cancelling",
 					slog.String("tool_call_id", strings.TrimSpace(string(p.ToolCall.ToolCallId))),
 					slog.String("error", err.Error()))
 			}
@@ -684,7 +684,7 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		// workspace root. Log it (an agent probing the boundary is exactly what
 		// we want visibility into) before refusing.
 		if c.logger != nil {
-			c.logger.Warn("rejecting out-of-scope ACP permission request", slog.Any("error", err))
+			c.logger.WarnContext(ctx, "rejecting out-of-scope ACP permission request", slog.Any("error", err))
 		}
 		return rejectOncePermission(p), nil
 	}
@@ -708,7 +708,7 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		// an allow option on the user's behalf.
 		forceReview = true
 		if c.logger != nil {
-			c.logger.Info("routing non-Memoh MCP permission request to generic approval",
+			c.logger.InfoContext(ctx, "routing non-Memoh MCP permission request to generic approval",
 				slog.String("tool_call_id", state.id),
 				slog.String("server_name", preflight.serverName),
 				slog.String("tool_name", preflight.toolName),
@@ -741,7 +741,7 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		if c.logger != nil {
 			// The raw-input summary reports the shape without echoing values
 			// into logs, which is how a new agent encoding gets noticed.
-			c.logger.Info("routing unmapped ACP permission request to generic approval",
+			c.logger.InfoContext(ctx, "routing unmapped ACP permission request to generic approval",
 				slog.String("tool_call_id", toolCallID),
 				slog.String("title", stringFromAny(input["title"])),
 				slog.String("kind", stringFromAny(input["kind"])),
@@ -793,7 +793,7 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		// grant behind would let a later callback run on a permission the
 		// agent believes was cancelled.
 		if c.logger != nil {
-			c.logger.Warn("approval granted but the agent offered no allow_once option; cancelling",
+			c.logger.WarnContext(ctx, "approval granted but the agent offered no allow_once option; cancelling",
 				slog.String("tool_call_id", toolCallID),
 				slog.String("tool_name", toolName))
 		}
@@ -1180,17 +1180,17 @@ var errUnsupportedOptionKind = errors.New("permission option kind is unsupported
 
 func approvalOptionsFromACP(options []acp.PermissionOption) ([]toolapproval.PermissionOption, error) {
 	if len(options) == 0 {
-		return nil, errors.New("permission options must not be empty")
+		return nil, errs.New("permission options must not be empty")
 	}
 	converted := make([]toolapproval.PermissionOption, 0, len(options))
 	seen := make(map[string]struct{}, len(options))
 	for _, option := range options {
 		id := string(option.OptionId)
 		if strings.TrimSpace(id) == "" {
-			return nil, errors.New("permission option id must not be empty")
+			return nil, errs.New("permission option id must not be empty")
 		}
 		if _, duplicate := seen[id]; duplicate {
-			return nil, fmt.Errorf("permission option id %q is duplicated", id)
+			return nil, errs.New(fmt.Sprintf("permission option id %q is duplicated", id))
 		}
 		seen[id] = struct{}{}
 		kind := string(normalizeACPOptionKind(option.Kind))
@@ -1309,7 +1309,7 @@ func (c *clientCallbacks) allowsMemohMCPToolPreflight(ctx context.Context, prefl
 	}
 	if !isMemohToolsMCPServerName(preflight.serverName) {
 		if c.logger != nil {
-			c.logger.Warn("rejecting MCP tool preflight for missing or non-Memoh server",
+			c.logger.WarnContext(ctx, "rejecting MCP tool preflight for missing or non-Memoh server",
 				slog.String("shape", preflight.shape),
 				slog.String("server_name", preflight.serverName),
 				slog.String("tool_name", preflight.toolName))
@@ -1330,7 +1330,7 @@ func (c *clientCallbacks) allowsMemohMCPToolPreflight(ctx context.Context, prefl
 	_, ok, err := c.toolGateway.LookupTool(ctx, session, preflight.toolName)
 	if err != nil {
 		if c.logger != nil {
-			c.logger.Warn("failed to classify MCP tool preflight",
+			c.logger.WarnContext(ctx, "failed to classify MCP tool preflight",
 				slog.String("shape", preflight.shape),
 				slog.String("tool_name", preflight.toolName),
 				slog.Any("error", err))

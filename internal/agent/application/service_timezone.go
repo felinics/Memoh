@@ -57,7 +57,7 @@ func (s *Service) loadBotTimezone(ctx context.Context, botID string) (string, *t
 	loc, name, err := timezone.Resolve(tz)
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Warn("resolve bot timezone failed",
+			s.logger.WarnContext(ctx, "resolve bot timezone failed",
 				slog.String("bot_id", botID),
 				slog.String("timezone", tz),
 				slog.Any("error", err),
@@ -83,7 +83,7 @@ func (s *Service) loadUserTimezone(ctx context.Context, userID string) (string, 
 	loc, name, err := timezone.Resolve(tz)
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Warn("resolve user timezone failed",
+			s.logger.WarnContext(ctx, "resolve user timezone failed",
 				slog.String("user_id", userID),
 				slog.String("timezone", tz),
 				slog.Any("error", err),

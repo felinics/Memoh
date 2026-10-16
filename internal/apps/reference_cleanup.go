@@ -2,7 +2,6 @@ package apps
 
 import (
 	"context"
-	"errors"
 	"slices"
 
 	"github.com/felinics/memoh/internal/supermarket"
@@ -51,10 +50,10 @@ func (s *Service) pruneReferences(ctx context.Context, inst Installation, releas
 	}
 	record := func(step StepResult, cause error) error {
 		if cause != nil {
-			step.Status, step.Error = StepFailed, publicMessage(cause)
+			step.Status, step.Code = StepFailed, string(publicCode(cause))
 		}
 		result.Steps = append(result.Steps, step)
-		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Message: step.Error})
+		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Message: step.Error, Code: step.Code})
 		return cause
 	}
 	for _, ref := range deps {
@@ -69,6 +68,14 @@ func (s *Service) pruneReferences(ctx context.Context, inst Installation, releas
 		case entry.Observed.Source != workspacedeps.SourceManaged:
 			step.Error = RemovalReasonImage
 		default:
+			required, err := s.requiredByDependencies(ctx, inst.BotID, ref.DependencyID)
+			if err != nil {
+				return record(step, fail("inspect dependencies before cleanup", err))
+			}
+			if required {
+				step.Error = RemovalReasonRequired
+				break
+			}
 			sink.Send(Event{Type: EventStep, Kind: KindDependency, ID: ref.DependencyID})
 			if _, err := s.dependencies.Remove(ctx, inst.BotID, ref.DependencyID, logSink(sink, KindDependency, ref.DependencyID)); err != nil {
 				return record(step, fail("remove dependency "+ref.DependencyID, err))
@@ -119,17 +126,17 @@ func (s *Service) cleanupDependencyStates(ctx context.Context, inst Installation
 		}
 	}
 	if view.Workspace != workspacedeps.WorkspaceRunning {
-		return nil, fail("dependency cleanup needs a running workspace (state "+string(view.Workspace)+"); references are retained", nil)
+		return nil, fail("dependency cleanup needs a running workspace (state "+string(view.Workspace)+"); references are retained", workspacedeps.ErrWorkspaceNotRunning)
 	}
-	if view.DiscoveryError != "" {
-		return nil, fail("dependency cleanup needs successful workspace discovery; references are retained", errors.New(view.DiscoveryError))
+	if view.DiscoveryFailed {
+		return nil, fail("dependency cleanup needs successful workspace discovery; references are retained", errDiscoveryFailed)
 	}
 	states := indexEntries(view)
 	for _, ref := range unshared {
 		// A dependency the catalog no longer lists is absent from states and
 		// has nothing to remove; pruneReferences drops its reference.
 		if entry, known := states[ref.DependencyID]; known && entry.Status.InProgress() {
-			return nil, fail("dependency "+ref.DependencyID+" has an operation in progress; its cleanup reference is retained", nil)
+			return nil, fail("dependency "+ref.DependencyID+" has an operation in progress; its cleanup reference is retained", workspacedeps.ErrBusy)
 		}
 	}
 	return states, nil

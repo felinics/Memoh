@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue'
+import { computed, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useQuery } from '@pinia/colada'
 import { getBotsByBotIdSessionsBySessionIdContextLifecycle } from '@memohai/sdk'
@@ -9,9 +9,10 @@ import { useChatViewTarget } from './useChatViewContext'
 const PAGE_LIMIT = 50
 const MAX_LIMIT = 200
 
-// Mounted only inside the open inspector, so the entry goes inactive with the
-// dialog and the short gcTime releases the page instead of pinning it.
-export function useContextLifecycle() {
+// The inspector stays mounted once opened, so `open` gates the query: while
+// the dialog is closed, turn-end invalidations skip the refetch and the short
+// gcTime releases the page instead of pinning it.
+export function useContextLifecycle(open: MaybeRefOrGetter<boolean>) {
   const storeRefs = storeToRefs(useChatStore())
   const viewTarget = useChatViewTarget()
   const botId = computed(() => viewTarget.value.botId || storeRefs.currentBotId.value)
@@ -32,16 +33,17 @@ export function useContextLifecycle() {
       })
       return data as HandlersContextLifecycleResponse
     },
-    enabled: () => !!botId.value && !!sessionId.value,
+    enabled: () => toValue(open) && !!botId.value && !!sessionId.value,
     gcTime: 60_000,
     refetchOnWindowFocus: false,
   })
 
   const hasTarget = computed(() => !!botId.value && !!sessionId.value)
+  const hasOlder = computed(() => data.value?.has_more === true || data.value?.legacy_history_may_exist === true)
   const canLoadOlder = computed(() => data.value?.has_more === true && limit.value < MAX_LIMIT)
   function loadOlder() {
     limit.value = MAX_LIMIT
   }
 
-  return { data, status, hasTarget, canLoadOlder, loadOlder, maxLimit: MAX_LIMIT }
+  return { data, status, hasTarget, hasOlder, canLoadOlder, loadOlder, maxLimit: MAX_LIMIT }
 }

@@ -24,6 +24,25 @@ func TestPlanModeCarriesEffectiveSettingsIndependentlyOfPermissions(t *testing.T
 	}
 }
 
+func TestTurnWithoutEffortDropsTheThreadsEarlierLevel(t *testing.T) {
+	held := protocol.ReasoningEffort("high")
+	params := protocol.TurnStartParams{}
+	if err := applyCollaborationMode(&params, external.PromptInput{}, protocol.Settings{Model: "thread-model", ReasoningEffort: &held}); err != nil {
+		t.Fatal(err)
+	}
+	if got := params.CollaborationMode; got == nil || got.Mode != "default" || got.Settings.Model != "thread-model" || got.Settings.ReasoningEffort != nil {
+		t.Fatalf("preset must drop the held level: %+v", got)
+	}
+
+	params = protocol.TurnStartParams{}
+	if err := applyCollaborationMode(&params, external.PromptInput{}, protocol.Settings{Model: "thread-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if params.CollaborationMode != nil {
+		t.Fatalf("nothing to drop, preset must stay unset: %+v", params.CollaborationMode)
+	}
+}
+
 func TestCompletedPlanBecomesAssistantTranscript(t *testing.T) {
 	turn := newTurnState(t.Context(), external.PromptInput{Sink: &captureSink{}}, "thread", nil, nil, nil, nil, slog.Default())
 	defer turn.close()
@@ -35,7 +54,7 @@ func TestCompletedPlanBecomesAssistantTranscript(t *testing.T) {
 	turn.handleNotification(&protocol.ItemCompletedNotification{ThreadID: "thread", TurnID: "old", Item: item})
 	turn.handleNotification(&protocol.ItemCompletedNotification{ThreadID: "thread", TurnID: "current", Item: item})
 	turn.handleNotification(&protocol.TurnCompletedNotification{ThreadID: "thread", Turn: protocol.Turn{ID: "current", Status: protocol.TurnStatusCompleted}})
-	result, err := turn.result("")
+	result, err := turn.result()
 	if err != nil {
 		t.Fatal(err)
 	}

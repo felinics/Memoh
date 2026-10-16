@@ -1,11 +1,4 @@
 #!/usr/bin/env sh
-
 export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-
-if ! command -v go >/dev/null 2>&1; then
-  echo "go not found, skipping Go test..."
-  exit 0
-fi
-
-echo "Check Go test..."
-go test ./...
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec node "$SCRIPT_DIR/checks.mjs" go-test

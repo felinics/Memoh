@@ -50,6 +50,7 @@ var (
 	ErrCommandTargetNotActive  = errors.New("runtime command target is not active")
 	ErrCommandTargetMismatch   = errors.New("run does not belong to this session")
 	ErrCommandExpired          = errors.New("runtime command expired before acknowledgement")
+	ErrCommandNotAcknowledged  = errors.New("runtime command was not acknowledged")
 	ErrCommandBusy             = errors.New("runtime command executor is busy")
 	ErrCommandPayloadConflict  = errors.New("runtime command payload conflicts with an earlier request")
 	ErrDecisionNotFound        = errors.New("runtime decision was not found")
@@ -191,7 +192,17 @@ type TerminalRun struct {
 	FencingToken int64
 	State        string
 	ErrorCode    string
-	ErrorMessage string
+	// Cause is why this process ended the run when the session runtime, not
+	// the run's owner, ended it: an admission it could not complete, or a
+	// shutdown. It is a diagnostic for the run's result record and is never
+	// persisted, so an observation of a run another process ended has none.
+	Cause error
+	// Applied reports that this observation's own fenced write made the run
+	// terminal. It is false when a replay, a retry, or a stale owner observes
+	// a transition some other write already applied. Exactly one observation
+	// of a run is Applied, so a consumer that must act once per run (the
+	// run's result record) keys on it rather than on the callback firing.
+	Applied bool
 }
 
 func (h RunHandle) normalized() RunHandle {
@@ -294,12 +305,27 @@ type CurrentRunView struct {
 	// SteerTurns locates live queue inputs inside the run's assistant message
 	// stream. Claimed entries are provisional runtime state; applied entries
 	// point at the history turn written by the application.
-	SteerTurns             []SteerTurnView   `json:"steer_turns,omitempty"`
+	SteerTurns []SteerTurnView `json:"steer_turns,omitempty"`
+	// ErrorCode is the catalog code of the run's failure. The view carries no
+	// error text: a subscriber renders the copy for the code.
 	ErrorCode              string            `json:"error_code,omitempty"`
-	Error                  string            `json:"error,omitempty"`
 	ProposedTerminalStatus string            `json:"proposed_terminal_status,omitempty"`
 	FinishProposedAt       *time.Time        `json:"finish_proposed_at,omitempty"`
 	Operation              *RunOperationView `json:"operation,omitempty"`
+	// Retry is set while the model call is waiting to be retried and cleared
+	// by the next visible output or by the run leaving execution.
+	Retry *RunRetryView `json:"retry,omitempty"`
+}
+
+// RunRetryView describes the model-call retry the run is waiting on. It
+// carries the retry event's values and no provider text.
+type RunRetryView struct {
+	Attempt    int    `json:"attempt"`
+	MaxAttempt int    `json:"max_attempt"`
+	DelayMs    int64  `json:"delay_ms"`
+	Reason     string `json:"reason,omitempty" enums:"rate_limited,server_error,stream_incomplete,network"`
+	// RetryAt is the server time the next attempt is planned for.
+	RetryAt time.Time `json:"retry_at"`
 }
 
 type SteerTurnView struct {
@@ -362,9 +388,12 @@ type CurrentRunPatch struct {
 	RunID               string     `json:"run_id"`
 	Status              *string    `json:"status,omitempty"`
 	ErrorCode           *string    `json:"error_code,omitempty"`
-	Error               *string    `json:"error,omitempty"`
 	UpdatedAt           *time.Time `json:"updated_at,omitempty"`
 	OwnerLeaseExpiresAt *time.Time `json:"owner_lease_expires_at,omitempty"`
+	// Retry replaces the run's retry state; ClearRetry removes it. Both absent
+	// means the retry state is unchanged. A status patch always carries one.
+	Retry      *RunRetryView `json:"retry,omitempty"`
+	ClearRetry bool          `json:"clear_retry,omitempty"`
 }
 
 type RuntimeMessageAppend struct {
@@ -400,6 +429,12 @@ type Command struct {
 	CreatedAt        time.Time       `json:"created_at"`
 	ExpiresAt        time.Time       `json:"expires_at,omitempty"`
 
+	// ErrorArgs are the catalog args of a failure whose ErrorCode is a catalog code.
+	ErrorArgs map[string]string `json:"error_args,omitempty"`
+	// ErrorFault is "dependency" for a failure of a service the executor
+	// called, which its code alone does not tell.
+	ErrorFault string `json:"error_fault,omitempty"`
+
 	// StreamOutput is fixed at admission and travels to the owner with the command.
 	// It must not depend on subscriber liveness: disconnecting cannot change a run.
 	StreamOutput bool `json:"stream_output,omitempty"`
@@ -424,6 +459,8 @@ type DecisionTarget struct {
 	// rebuilt from the database) from an inline waiter run (codex, claude,
 	// ACP), whose blocked turn died with its owner and cannot be resumed.
 	SessionRuntime string
+	// InlineDecision also covers native tools that retain prepared work in process.
+	InlineDecision bool
 }
 
 func (t DecisionTarget) normalized() DecisionTarget {

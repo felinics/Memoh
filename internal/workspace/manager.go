@@ -21,6 +21,7 @@ import (
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/identity"
 	netctl "github.com/felinics/memoh/internal/network"
@@ -56,6 +57,14 @@ const (
 // ErrContainerNotFound is returned when no container exists for a bot.
 var ErrContainerNotFound = errors.New("workspace not found for bot")
 
+// IsNotReady reports whether err says that the bot's workspace container does
+// not exist in the runtime or that its bridge does not answer. Both clear once
+// a workspace that is being created has started, so a caller that waits for a
+// new workspace retries on them.
+func IsNotReady(err error) bool {
+	return errors.Is(err, ErrContainerNotFound) || ctr.IsNotFound(err) || errors.Is(err, bridge.ErrUnavailable)
+}
+
 // ContainerStatus combines DB records with live containerd state.
 type ContainerStatus struct {
 	ContainerID      string    `json:"container_id"`
@@ -66,6 +75,7 @@ type ContainerStatus struct {
 	Namespace        string    `json:"namespace"`
 	ContainerPath    string    `json:"container_path"`
 	CDIDevices       []string  `json:"cdi_devices,omitempty"`
+	Snapshotter      string    `json:"snapshotter,omitempty"`
 	TaskRunning      bool      `json:"task_running"`
 	HasPreservedData bool      `json:"has_preserved_data"`
 	Legacy           bool      `json:"legacy"`
@@ -79,8 +89,10 @@ type ContainerMetricsStatus struct {
 }
 
 type ContainerStorageMetrics struct {
-	Path      string `json:"path"`
-	UsedBytes uint64 `json:"used_bytes"`
+	Path        string `json:"path"`
+	UsedBytes   uint64 `json:"used_bytes"`
+	LimitBytes  uint64 `json:"limit_bytes,omitempty"`
+	UsedUnknown bool   `json:"-"`
 }
 
 type ContainerMetricsResult struct {
@@ -514,11 +526,10 @@ func (m *Manager) Init(ctx context.Context) error {
 		StorageDriver: m.cfg.Snapshotter,
 	})
 	if err != nil {
-		m.logger.Warn("base image preparation failed", slog.String("image", image), slog.Any("error", err))
-		return err
+		return errs.Wrap(err, "prepare base image", slog.String("image", image))
 	}
 	if result.Mode == ImagePrepareDelegated {
-		m.logger.Info("base image pull delegated to container backend", slog.String("image", image))
+		m.logger.InfoContext(ctx, "base image pull delegated to container backend", slog.String("image", image))
 	}
 	return nil
 }
@@ -825,7 +836,7 @@ func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image stri
 	// regain outbound connectivity. Server communication still uses UDS.
 	if err := m.startTaskAndEnsureNetwork(ctx, botID, containerID); err != nil {
 		if stopErr := m.service.StopContainer(ctx, containerID, &ctr.StopTaskOptions{Force: true}); stopErr != nil {
-			m.logger.Warn("cleanup: stop task failed", slog.String("container_id", containerID), slog.Any("error", stopErr))
+			m.logger.WarnContext(ctx, "cleanup: stop task failed", slog.String("container_id", containerID), slog.Any("error", stopErr))
 		}
 		return err
 	}
@@ -861,6 +872,9 @@ func (m *Manager) Stop(ctx context.Context, botID string, timeout time.Duration)
 	})
 }
 
+// errPreserveData marks a removal stopped by a failed export of /data.
+var errPreserveData = errors.New("preserve data")
+
 func (m *Manager) Delete(ctx context.Context, botID string, preserveData bool) error {
 	if err := validateBotID(botID); err != nil {
 		return err
@@ -870,18 +884,18 @@ func (m *Manager) Delete(ctx context.Context, botID string, preserveData bool) e
 
 	if preserveData {
 		if err := m.preserveDataBeforeDelete(ctx, botID); err != nil {
-			return fmt.Errorf("preserve data: %w", err)
+			return fmt.Errorf("%w: %w", errPreserveData, err)
 		}
 	}
 
 	m.clearLegacyRoute(botID)
 
 	if err := m.removeContainerNetwork(ctx, botID, containerID); err != nil {
-		m.logger.Warn("delete: remove network failed",
+		m.logger.WarnContext(ctx, "delete: remove network failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
 	}
 	if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
-		m.logger.Warn("delete: delete task failed",
+		m.logger.WarnContext(ctx, "delete: delete task failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
 	}
 	return m.service.DeleteContainer(ctx, containerID, &ctr.DeleteContainerOptions{

@@ -409,41 +409,6 @@ type MCPOAuthStore interface {
 	ClearTokens(ctx context.Context, connectionID ID) error
 }
 
-type EmailProviderStore interface {
-	Create(ctx context.Context, input Input) (Record, error)
-	GetByID(ctx context.Context, id ID) (Record, error)
-	GetRawByID(ctx context.Context, id ID) (Record, error)
-	List(ctx context.Context, filter Filter) ([]Record, error)
-	Update(ctx context.Context, id ID, input Patch) (Record, error)
-	Delete(ctx context.Context, id ID) error
-}
-
-type EmailBindingStore interface {
-	Create(ctx context.Context, input Input) (Record, error)
-	GetByID(ctx context.Context, id ID) (Record, error)
-	ListByBot(ctx context.Context, botID ID) ([]Record, error)
-	ListReadableByProvider(ctx context.Context, providerID ID) ([]Record, error)
-	Update(ctx context.Context, id ID, input Patch) (Record, error)
-	Delete(ctx context.Context, id ID) error
-}
-
-type EmailOutboxStore interface {
-	Create(ctx context.Context, input Input) (Record, error)
-	MarkSent(ctx context.Context, id ID, input Patch) (Record, error)
-	MarkFailed(ctx context.Context, id ID, input Patch) (Record, error)
-	GetByID(ctx context.Context, id ID) (Record, error)
-	ListByBot(ctx context.Context, botID ID, page Page) ([]Record, error)
-	CountByBot(ctx context.Context, botID ID) (int64, error)
-}
-
-type EmailOAuthTokenStore interface {
-	GetByProvider(ctx context.Context, providerID ID) (Record, error)
-	Upsert(ctx context.Context, input Input) (Record, error)
-	UpdateState(ctx context.Context, providerID ID, state string) error
-	GetByState(ctx context.Context, state string) (Record, error)
-	Delete(ctx context.Context, providerID ID) error
-}
-
 type MemoryProviderStore interface {
 	Create(ctx context.Context, input Input) (Record, error)
 	GetByID(ctx context.Context, id ID) (Record, error)

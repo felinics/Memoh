@@ -4,23 +4,19 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 type SessionContextInput struct {
-	AgentID     string
-	SetupMode   SetupMode
 	Backend     string
 	ProjectPath string
 }
 
 type ResolvedSessionContext struct {
-	AgentID       string
-	SetupMode     SetupMode
 	Backend       WorkspaceBackend
 	WorkspaceRoot string
 	ProjectPath   string
-	CWD           string
 }
 
 func ResolveSessionContext(input SessionContextInput) (ResolvedSessionContext, error) {
@@ -29,7 +25,7 @@ func ResolveSessionContext(input SessionContextInput) (ResolvedSessionContext, e
 	case "", bridge.WorkspaceBackendContainer:
 		backend = WorkspaceBackendContainer
 	default:
-		return ResolvedSessionContext{}, fmt.Errorf("unsupported workspace backend %q", input.Backend)
+		return ResolvedSessionContext{}, errs.New(fmt.Sprintf("unsupported workspace backend %q", input.Backend))
 	}
 	resolvedRoot := dataMountPath
 	projectPath, err := ResolvePathUnderVirtualRoot(resolvedRoot, input.ProjectPath)
@@ -38,12 +34,9 @@ func ResolveSessionContext(input SessionContextInput) (ResolvedSessionContext, e
 	}
 
 	ctx := ResolvedSessionContext{
-		AgentID:       strings.TrimSpace(input.AgentID),
-		SetupMode:     normalizeSetupMode(input.SetupMode),
 		Backend:       backend,
 		WorkspaceRoot: resolvedRoot,
 		ProjectPath:   projectPath,
-		CWD:           projectPath,
 	}
 	return ctx, nil
 }

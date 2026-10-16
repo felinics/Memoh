@@ -6,6 +6,8 @@ import (
 	anthropicmessages "github.com/felinics/twilight/provider/anthropic/messages"
 	openaicompletions "github.com/felinics/twilight/provider/openai/completions"
 	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestNormalizePromptCacheTTL(t *testing.T) {
@@ -52,7 +54,7 @@ func TestApplyPromptCache_AnthropicDefaultMovesSystemAndCachesLastTool(t *testin
 	model := newAnthropicTestModel(t)
 	system := "you are a helpful bot"
 	messages := []sdk.Message{sdk.UserMessage("hi")}
-	tools := []sdk.Tool{
+	tools := []toolexec.Tool{
 		{Name: "first"},
 		{Name: "second"},
 	}
@@ -87,7 +89,7 @@ func TestApplyPromptCache_AnthropicOneHourTTL(t *testing.T) {
 		PromptCacheTTL1h,
 		"system text",
 		[]sdk.Message{sdk.UserMessage("hi")},
-		[]sdk.Tool{{Name: "only"}},
+		[]toolexec.Tool{{Name: "only"}},
 	)
 	if gotSystem != "" {
 		t.Fatalf("system should be cleared, got %q", gotSystem)
@@ -105,7 +107,7 @@ func TestApplyPromptCache_OffLeavesPayloadUnchanged(t *testing.T) {
 	model := newAnthropicTestModel(t)
 	system := "system text"
 	messages := []sdk.Message{sdk.UserMessage("hi")}
-	tools := []sdk.Tool{{Name: "first"}, {Name: "second"}}
+	tools := []toolexec.Tool{{Name: "first"}, {Name: "second"}}
 
 	gotSystem, gotMessages, gotTools := ApplyPromptCache(
 		model,
@@ -132,7 +134,7 @@ func TestApplyPromptCache_NonAnthropicNoop(t *testing.T) {
 	model := newOpenAITestModel(t)
 	system := "system text"
 	messages := []sdk.Message{sdk.UserMessage("hi")}
-	tools := []sdk.Tool{{Name: "only"}}
+	tools := []toolexec.Tool{{Name: "only"}}
 
 	gotSystem, gotMessages, gotTools := ApplyPromptCache(model, "", system, messages, tools)
 	if gotSystem != system {
@@ -163,7 +165,7 @@ func TestApplyPromptCache_AnthropicEmptySystemSkipsPromotion(t *testing.T) {
 
 func TestApplyPromptCache_AnthropicDoesNotMutateInput(t *testing.T) {
 	model := newAnthropicTestModel(t)
-	tools := []sdk.Tool{{Name: "first"}, {Name: "second"}}
+	tools := []toolexec.Tool{{Name: "first"}, {Name: "second"}}
 	messages := []sdk.Message{sdk.UserMessage("hi")}
 	_, _, _ = ApplyPromptCache(model, "", "system", messages, tools)
 	if tools[1].CacheControl != nil {

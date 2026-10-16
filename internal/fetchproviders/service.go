@@ -15,6 +15,9 @@ import (
 
 var ErrManagedNativeProvider = errors.New("native fetch provider is managed by the system")
 
+// ErrInvalidProvider reports a provider type that is not registered.
+var ErrInvalidProvider = errors.New("invalid provider")
+
 type Service struct {
 	queries dbstore.Queries
 	logger  *slog.Logger
@@ -103,7 +106,7 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 
 func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, error) {
 	if !isValidProviderName(req.Provider) {
-		return GetResponse{}, fmt.Errorf("invalid provider: %s", req.Provider)
+		return GetResponse{}, fmt.Errorf("%w: %s", ErrInvalidProvider, req.Provider)
 	}
 	if req.Provider == ProviderNative {
 		return GetResponse{}, ErrManagedNativeProvider
@@ -188,7 +191,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	provider := current.Provider
 	if req.Provider != nil {
 		if !isValidProviderName(*req.Provider) {
-			return GetResponse{}, fmt.Errorf("invalid provider: %s", *req.Provider)
+			return GetResponse{}, fmt.Errorf("%w: %s", ErrInvalidProvider, *req.Provider)
 		}
 		if *req.Provider == ProviderNative {
 			return GetResponse{}, ErrManagedNativeProvider
@@ -260,7 +263,7 @@ func (s *Service) EnsureDefaults(ctx context.Context) error {
 					Enable:   true,
 				})
 				if err != nil {
-					s.logger.Warn("failed to enable native fetch provider", slog.Any("error", err))
+					s.logger.WarnContext(ctx, "failed to enable native fetch provider", slog.Any("error", err))
 				}
 			}
 			continue
@@ -272,13 +275,13 @@ func (s *Service) EnsureDefaults(ctx context.Context) error {
 			Enable:   dp.Enable,
 		})
 		if err != nil {
-			s.logger.Warn("failed to create default fetch provider",
+			s.logger.WarnContext(ctx, "failed to create default fetch provider",
 				slog.String("provider", string(dp.Name)),
 				slog.Any("error", err),
 			)
 			continue
 		}
-		s.logger.Info("created default fetch provider", slog.String("provider", string(dp.Name)))
+		s.logger.InfoContext(ctx, "created default fetch provider", slog.String("provider", string(dp.Name)))
 	}
 	return nil
 }

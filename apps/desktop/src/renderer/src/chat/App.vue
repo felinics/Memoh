@@ -17,10 +17,12 @@ provide(DesktopShellKey, true)
 provide(DesktopWindowKey, {
   isFullScreen: window.api.desktop.isFullScreen,
   onFullScreenChanged: window.api.desktop.onFullScreenChanged,
+  setIgnoreMenuShortcuts: window.api.window.setIgnoreMenuShortcuts,
 } satisfies DesktopWindowBridge)
 provide(DesktopRuntimeKey, {
   runtimeState: window.api.desktop.runtimeState,
   configureRuntime: window.api.desktop.configureRuntime,
+  setRuntimePaused: window.api.desktop.setRuntimePaused,
   onRuntimeStateChanged: window.api.desktop.onRuntimeStateChanged,
 } satisfies DesktopRuntimeBridge)
 provide(DesktopUpdatesKey, {

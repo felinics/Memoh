@@ -15,8 +15,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/felinics/memoh/internal/logger"
 )
 
 const (
@@ -44,33 +42,33 @@ const (
 
 var desktopSessionMonitorOnce sync.Once
 
-func startDisplaySupervisor(ctx context.Context) {
+func startDisplaySupervisor(ctx context.Context, log *slog.Logger) {
 	if !isTruthy(os.Getenv(displayEnabledEnv)) {
 		return
 	}
-	go superviseXvnc(ctx)
+	go superviseXvnc(ctx, log)
 }
 
-func ensureDisplayRuntimeLinks(ctx context.Context, xkbcompPath string) {
+func ensureDisplayRuntimeLinks(ctx context.Context, log *slog.Logger, xkbcompPath string) {
 	if _, err := os.Stat(systemXkbcompPath); err == nil {
 		return
 	}
 	if strings.TrimSpace(xkbcompPath) == "" {
-		logger.FromContext(ctx).Warn("display requested but xkbcomp is unavailable")
+		log.WarnContext(ctx, "display requested but xkbcomp is unavailable")
 		return
 	}
 	if err := os.Symlink(xkbcompPath, systemXkbcompPath); err != nil && !os.IsExist(err) {
-		logger.FromContext(ctx).Warn("failed to link xkbcomp for Xvnc", slog.String("target", xkbcompPath), slog.String("link", systemXkbcompPath), slog.Any("error", err))
+		log.WarnContext(ctx, "failed to link xkbcomp for Xvnc", slog.String("target", xkbcompPath), slog.String("link", systemXkbcompPath), slog.Any("error", err))
 	}
 }
 
-func superviseXvnc(ctx context.Context) {
+func superviseXvnc(ctx context.Context, log *slog.Logger) {
 	backoff := time.Second
 	for {
 		startedAt := time.Now()
 		xvncPath := resolveDisplayCommand(toolkitXvncPath, "/usr/bin/Xvnc", "/usr/local/bin/Xvnc", "Xvnc")
 		if xvncPath == "" {
-			logger.FromContext(ctx).Warn("display requested but Xvnc is unavailable")
+			log.WarnContext(ctx, "display requested but Xvnc is unavailable")
 			if waitDisplayRetry(ctx, backoff) {
 				return
 			}
@@ -79,13 +77,13 @@ func superviseXvnc(ctx context.Context) {
 			}
 			continue
 		}
-		ensureDisplayRuntimeLinks(ctx, resolveDisplayCommand(toolkitXkbcompPath, "/usr/bin/xkbcomp", "/usr/local/bin/xkbcomp", "xkbcomp"))
+		ensureDisplayRuntimeLinks(ctx, log, resolveDisplayCommand(toolkitXkbcompPath, "/usr/bin/xkbcomp", "/usr/local/bin/xkbcomp", "xkbcomp"))
 		rfbTCPAddr := displayRFBTCPAddr()
 		geometry := displayGeometry()
-		prepareX11SocketDir(ctx)
+		prepareX11SocketDir(ctx, log)
 		if displayTCPReady(ctx, rfbTCPAddr) {
-			logger.FromContext(ctx).Info("Xvnc display already available", slog.String("display", xvncDisplay), slog.String("rfb_tcp_addr", rfbTCPAddr))
-			go startDisplaySession(ctx)
+			log.InfoContext(ctx, "Xvnc display already available", slog.String("display", xvncDisplay), slog.String("rfb_tcp_addr", rfbTCPAddr))
+			go startDisplaySession(ctx, log)
 			if waitExistingDisplay(ctx, rfbTCPAddr) {
 				return
 			}
@@ -95,7 +93,7 @@ func superviseXvnc(ctx context.Context) {
 		if xvncProcessRunning() {
 			stopXvncProcesses(ctx)
 		}
-		prepareDisplaySockets(ctx)
+		prepareDisplaySockets(ctx, log)
 		cmd := exec.CommandContext(ctx, xvncPath, //nolint:gosec // path is a fixed runtime bundle executable
 			xvncDisplay,
 			"-geometry", geometry,
@@ -109,10 +107,10 @@ func superviseXvnc(ctx context.Context) {
 		cmd.Stderr = os.Stderr
 
 		if err := cmd.Start(); err != nil {
-			logger.FromContext(ctx).Warn("failed to start Xvnc", slog.Any("error", err))
+			log.WarnContext(ctx, "failed to start Xvnc", slog.Any("error", err))
 		} else {
-			logger.FromContext(ctx).Info("Xvnc display started", slog.Int("pid", cmd.Process.Pid), slog.String("display", xvncDisplay), slog.String("rfb_tcp_addr", rfbTCPAddr))
-			go startDisplaySession(ctx)
+			log.InfoContext(ctx, "Xvnc display started", slog.Int("pid", cmd.Process.Pid), slog.String("display", xvncDisplay), slog.String("rfb_tcp_addr", rfbTCPAddr))
+			go startDisplaySession(ctx, log)
 			waitErr := make(chan error, 1)
 			go func() {
 				waitErr <- cmd.Wait()
@@ -127,9 +125,9 @@ func superviseXvnc(ctx context.Context) {
 					return
 				}
 				if err != nil {
-					logger.FromContext(ctx).Warn("Xvnc exited", slog.Any("error", err))
+					log.WarnContext(ctx, "Xvnc exited", slog.Any("error", err))
 				} else {
-					logger.FromContext(ctx).Warn("Xvnc exited")
+					log.WarnContext(ctx, "Xvnc exited")
 				}
 			}
 		}
@@ -300,46 +298,46 @@ func displayRFBTCPPort(addr string) string {
 	return "5999"
 }
 
-func prepareDisplaySockets(ctx context.Context) {
+func prepareDisplaySockets(ctx context.Context, log *slog.Logger) {
 	if xvncProcessRunning() {
 		return
 	}
 	for _, stalePath := range []string{xvncSocketPath, xvncLockPath} {
 		if err := os.Remove(stalePath); err != nil && !os.IsNotExist(err) {
-			logger.FromContext(ctx).Warn("failed to remove stale Xvnc file", slog.String("path", stalePath), slog.Any("error", err))
+			log.WarnContext(ctx, "failed to remove stale Xvnc file", slog.String("path", stalePath), slog.Any("error", err))
 		}
 	}
 }
 
-func prepareX11SocketDir(ctx context.Context) {
+func prepareX11SocketDir(ctx context.Context, log *slog.Logger) {
 	if err := os.MkdirAll(x11SocketDir, 0o1777); err != nil { //nolint:gosec // X11 socket dir must be world-writable with sticky bit.
-		logger.FromContext(ctx).Warn("failed to create X11 socket directory", slog.String("dir", x11SocketDir), slog.Any("error", err))
+		log.WarnContext(ctx, "failed to create X11 socket directory", slog.String("dir", x11SocketDir), slog.Any("error", err))
 		return
 	}
 	if err := os.Chmod(x11SocketDir, 0o1777); err != nil { //nolint:gosec // X11 socket dir must be world-writable with sticky bit.
-		logger.FromContext(ctx).Warn("failed to set X11 socket directory permissions", slog.String("dir", x11SocketDir), slog.Any("error", err))
+		log.WarnContext(ctx, "failed to set X11 socket directory permissions", slog.String("dir", x11SocketDir), slog.Any("error", err))
 	}
 }
 
-func startDisplaySession(ctx context.Context) {
+func startDisplaySession(ctx context.Context, log *slog.Logger) {
 	if err := waitForDisplaySocket(ctx, displayReadyTimeout); err != nil {
-		logger.FromContext(ctx).Warn("display session skipped; X socket not ready", slog.Any("error", err))
+		log.WarnContext(ctx, "display session skipped; X socket not ready", slog.Any("error", err))
 		return
 	}
 	if err := sleepWithContext(ctx, 300*time.Millisecond); err != nil {
 		return
 	}
 	if xsetroot := resolveDisplayCommand(toolkitXsetrootPath, "/usr/bin/xsetroot", "/usr/local/bin/xsetroot", "xsetroot"); xsetroot != "" {
-		runDisplayCommand(ctx, xsetroot, "-solid", desktopBackgroundColor())
-		runDisplayCommand(ctx, xsetroot, "-cursor_name", "left_ptr")
+		runDisplayCommand(ctx, log, xsetroot, "-solid", desktopBackgroundColor())
+		runDisplayCommand(ctx, log, xsetroot, "-cursor_name", "left_ptr")
 	}
-	startDesktopSession(ctx)
+	startDesktopSession(ctx, log)
 	desktopSessionMonitorOnce.Do(func() {
-		go superviseDesktopSession(ctx)
+		go superviseDesktopSession(ctx, log)
 	})
-	startDesktopStyle(ctx)
-	startDisplayTerminal(ctx)
-	startDisplayBrowser(ctx)
+	startDesktopStyle(ctx, log)
+	startDisplayTerminal(ctx, log)
+	startDisplayBrowser(ctx, log)
 }
 
 func waitForDisplaySocket(ctx context.Context, timeout time.Duration) error {
@@ -372,7 +370,7 @@ func sleepWithContext(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-func runDisplayCommand(ctx context.Context, path string, args ...string) {
+func runDisplayCommand(ctx context.Context, log *slog.Logger, path string, args ...string) {
 	info, err := os.Stat(path)
 	if err != nil || info.Mode().Perm()&0o111 == 0 {
 		return
@@ -384,44 +382,44 @@ func runDisplayCommand(ctx context.Context, path string, args ...string) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		logger.FromContext(ctx).Warn("display helper failed", slog.String("path", path), slog.Any("error", err))
+		log.WarnContext(ctx, "display helper failed", slog.String("path", path), slog.Any("error", err))
 	}
 }
 
-func startDesktopSession(ctx context.Context) {
+func startDesktopSession(ctx context.Context, log *slog.Logger) {
 	if xfceSessionAvailable() {
 		if xfceSessionRunning(ctx) {
-			ensureXfceWindowManager(ctx)
+			ensureXfceWindowManager(ctx, log)
 			return
 		}
 		if desktop := resolveDisplayCommand("startxfce4"); desktop != "" {
 			stopFallbackWindowManagers(ctx)
-			startDisplayCommand(ctx, "desktop", desktop)
+			startDisplayCommand(ctx, log, "desktop", desktop)
 			return
 		}
 		if desktop := resolveDisplayCommand("xfce4-session"); desktop != "" {
 			stopFallbackWindowManagers(ctx)
-			startDisplayCommand(ctx, "desktop", desktop)
+			startDisplayCommand(ctx, log, "desktop", desktop)
 			return
 		}
 	}
 	if xfceWindowManagerRunning(ctx) {
 		return
 	}
-	if ensureXfceWindowManager(ctx) {
+	if ensureXfceWindowManager(ctx, log) {
 		return
 	}
 	if displayProcessRunning(ctx, "twm") {
 		return
 	}
 	if windowManager := resolveDisplayCommand(toolkitTwmPath); windowManager != "" {
-		startDisplayCommand(ctx, "window manager", windowManager)
+		startDisplayCommand(ctx, log, "window manager", windowManager)
 		return
 	}
-	logger.FromContext(ctx).Warn("display desktop session unavailable")
+	log.WarnContext(ctx, "display desktop session unavailable")
 }
 
-func superviseDesktopSession(ctx context.Context) {
+func superviseDesktopSession(ctx context.Context, log *slog.Logger) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	lastRestart := time.Time{}
@@ -440,9 +438,9 @@ func superviseDesktopSession(ctx context.Context) {
 				continue
 			}
 			lastRestart = time.Now()
-			logger.FromContext(ctx).Warn("display desktop session is not running; restarting")
-			startDesktopSession(ctx)
-			startDesktopStyle(ctx)
+			log.WarnContext(ctx, "display desktop session is not running; restarting")
+			startDesktopSession(ctx, log)
+			startDesktopStyle(ctx, log)
 		}
 	}
 }
@@ -474,7 +472,7 @@ func xfceWindowManagerRunning(ctx context.Context) bool {
 	return displayProcessRunning(ctx, "xfwm4")
 }
 
-func ensureXfceWindowManager(ctx context.Context) bool {
+func ensureXfceWindowManager(ctx context.Context, log *slog.Logger) bool {
 	windowManager := resolveDisplayCommand("xfwm4")
 	if windowManager == "" {
 		return false
@@ -483,7 +481,7 @@ func ensureXfceWindowManager(ctx context.Context) bool {
 		return true
 	}
 	stopFallbackWindowManagers(ctx)
-	startDisplayCommand(ctx, "window manager", windowManager, "--replace")
+	startDisplayCommand(ctx, log, "window manager", windowManager, "--replace")
 	return true
 }
 
@@ -491,7 +489,7 @@ func stopFallbackWindowManagers(ctx context.Context) {
 	stopDisplayProcesses(ctx, "twm")
 }
 
-func startDisplayTerminal(ctx context.Context) {
+func startDisplayTerminal(ctx context.Context, log *slog.Logger) {
 	const title = "Memoh Workspace"
 	workdir := "/data"
 	if info, err := os.Stat(workdir); err != nil || !info.IsDir() {
@@ -501,7 +499,7 @@ func startDisplayTerminal(ctx context.Context) {
 	// Prefer a GTK terminal so the window inherits the desktop theme, fonts and
 	// window decorations. Only the bundled xterm is guaranteed on bare images.
 	if term := resolveDisplayCommand("xfce4-terminal"); term != "" {
-		startDisplayCommand(ctx, "terminal", term,
+		startDisplayCommand(ctx, log, "terminal", term,
 			"--title="+title,
 			"--working-directory="+workdir,
 			"--hide-menubar",
@@ -515,7 +513,7 @@ func startDisplayTerminal(ctx context.Context) {
 		return
 	}
 	background := desktopBackgroundColor()
-	startDisplayCommand(ctx, "terminal", xterm,
+	startDisplayCommand(ctx, log, "terminal", xterm,
 		"-geometry", "100x30+28+28",
 		"-title", title,
 		"-fa", "DejaVu Sans Mono",
@@ -528,25 +526,25 @@ func startDisplayTerminal(ctx context.Context) {
 	)
 }
 
-func startDisplayBrowser(ctx context.Context) {
+func startDisplayBrowser(ctx context.Context, log *slog.Logger) {
 	if browserProcessRunning(true) {
 		return
 	}
 	browser := resolveDisplayCommand("google-chrome-stable", "google-chrome", "chromium", "chromium-browser")
 	if browser == "" {
-		logger.FromContext(ctx).Warn("display browser unavailable")
+		log.WarnContext(ctx, "display browser unavailable")
 		return
 	}
 	if browserProcessRunning(false) {
 		stopBrowserProcesses(ctx)
 		_ = sleepWithContext(ctx, time.Second)
 	}
-	cleanupBrowserProfile(ctx)
+	cleanupBrowserProfile(ctx, log)
 	url := strings.TrimSpace(os.Getenv(displayBrowserURLEnv))
 	if url == "" {
 		url = "about:blank"
 	}
-	startDisplayCommand(ctx, "browser", browser,
+	startDisplayCommand(ctx, log, "browser", browser,
 		"--no-sandbox",
 		"--disable-dev-shm-usage",
 		"--disable-gpu",
@@ -561,16 +559,16 @@ func startDisplayBrowser(ctx context.Context) {
 	)
 }
 
-func startDesktopStyle(ctx context.Context) {
+func startDesktopStyle(ctx context.Context, log *slog.Logger) {
 	info, err := os.Stat(desktopStylePath)
 	if err != nil || info.IsDir() {
-		logger.FromContext(ctx).Warn("display desktop style script is unavailable",
+		log.WarnContext(ctx, "display desktop style script is unavailable",
 			slog.String("path", desktopStylePath),
 			slog.Any("error", err),
 		)
 		return
 	}
-	startDisplayCommand(ctx, "desktop style", "/bin/sh", desktopStylePath)
+	startDisplayCommand(ctx, log, "desktop style", "/bin/sh", desktopStylePath)
 }
 
 func desktopBackgroundColor() string {
@@ -706,14 +704,14 @@ func stopBrowserProcesses(_ context.Context) {
 	}
 }
 
-func cleanupBrowserProfile(ctx context.Context) {
+func cleanupBrowserProfile(ctx context.Context, log *slog.Logger) {
 	if browserProcessRunning(false) {
 		return
 	}
 	for _, name := range []string{"SingletonLock", "SingletonSocket", "SingletonCookie"} {
 		path := filepath.Join(displayBrowserProfile, name)
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			logger.FromContext(ctx).Warn("failed to remove stale browser profile lock", slog.String("path", path), slog.Any("error", err))
+			log.WarnContext(ctx, "failed to remove stale browser profile lock", slog.String("path", path), slog.Any("error", err))
 		}
 	}
 }
@@ -771,14 +769,14 @@ func stopXvncProcesses(ctx context.Context) {
 	}
 }
 
-func startDisplayCommand(ctx context.Context, name, path string, args ...string) {
+func startDisplayCommand(ctx context.Context, log *slog.Logger, name, path string, args ...string) {
 	info, err := os.Stat(path)
 	if err != nil {
-		logger.FromContext(ctx).Warn("display helper unavailable", slog.String("name", name), slog.String("path", path), slog.Any("error", err))
+		log.WarnContext(ctx, "display helper unavailable", slog.String("name", name), slog.String("path", path), slog.Any("error", err))
 		return
 	}
 	if info.Mode().Perm()&0o111 == 0 {
-		logger.FromContext(ctx).Warn("display helper is not executable", slog.String("name", name), slog.String("path", path))
+		log.WarnContext(ctx, "display helper is not executable", slog.String("name", name), slog.String("path", path))
 		return
 	}
 	cmd := exec.CommandContext(ctx, path, args...) //nolint:gosec // path is a fixed runtime bundle executable
@@ -786,13 +784,13 @@ func startDisplayCommand(ctx context.Context, name, path string, args ...string)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
-		logger.FromContext(ctx).Warn("failed to start display helper", slog.String("name", name), slog.Any("error", err))
+		log.WarnContext(ctx, "failed to start display helper", slog.String("name", name), slog.Any("error", err))
 		return
 	}
-	logger.FromContext(ctx).Info("display helper started", slog.String("name", name), slog.Int("pid", cmd.Process.Pid))
+	log.InfoContext(ctx, "display helper started", slog.String("name", name), slog.Int("pid", cmd.Process.Pid))
 	go func() {
 		if err := cmd.Wait(); err != nil && ctx.Err() == nil {
-			logger.FromContext(ctx).Warn("display helper exited", slog.String("name", name), slog.Any("error", err))
+			log.WarnContext(ctx, "display helper exited", slog.String("name", name), slog.Any("error", err))
 		}
 	}()
 }

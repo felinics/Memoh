@@ -3,8 +3,6 @@ package native
 import (
 	"context"
 	"errors"
-	"strings"
-	"sync/atomic"
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -12,85 +10,50 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
-// delayedErrContext models cancellation becoming visible after the retry
-// loop's ctx.Err check but before it handles the provider's ErrorPart. The
-// first Err call is the retry preflight and the second is the loop guard;
-// the third call is the ErrorPart budget check.
-type delayedErrContext struct {
-	context.Context
-	errCalls atomic.Int32
-}
-
-func (c *delayedErrContext) Err() error {
-	if c.errCalls.Add(1) <= 2 {
-		return nil
-	}
-	return c.Context.Err()
-}
-
-func (*delayedErrContext) Done() <-chan struct{} {
-	return nil
-}
-
-func TestRunMidStreamRetrySuppressesRawErrorAfterStepBudgetCancellation(t *testing.T) {
+// TestFailureAfterStepBudgetCancellationStaysOffTheWire pins the budget
+// fence on the engine's failure paths: a provider or local failure observed
+// after the run context was cancelled with a step-budget cause must stay off
+// the event wire (the segment owner publishes the context error instead) and
+// must abort the engine rather than trigger a retry, even when the failure is
+// one a retry would otherwise take.
+func TestFailureAfterStepBudgetCancellationStaysOffTheWire(t *testing.T) {
 	t.Parallel()
 
-	baseCtx, cancel := context.WithCancelCause(context.Background())
-	streamCtx := &delayedErrContext{Context: baseCtx}
-	var providerCalls atomic.Int32
-	provider := &atomicMockProvider{
-		stream: func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
-			providerCalls.Add(1)
+	for _, tc := range []struct {
+		name string
+		fail func(*streamEngine) error
+	}{
+		{"provider failure", func(eng *streamEngine) error {
+			return eng.providerFailure(&sdk.APIError{StatusCode: 503, Kind: sdk.KindServerError})
+		}},
+		{"local failure", func(eng *streamEngine) error {
+			eng.localFailure(errors.New("raw commit failure must not escape"))
+			return nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			streamCtx, cancel := context.WithCancelCause(context.Background())
 			cancel(contextfrag.ErrProtectedContextOverflow)
-			parts := make(chan sdk.StreamPart, 1)
-			parts <- &sdk.ErrorPart{Error: errors.New("raw provider cancellation must not escape")}
-			close(parts)
-			return &sdk.StreamResult{Stream: parts}, nil
-		},
-	}
-	ledger := contextfrag.NewMutationLedger()
-	cfg := captureProviderAttemptPrefix(RunConfig{
-		Model:            &sdk.Model{ID: "mock-model", Provider: provider},
-		Messages:         []sdk.Message{sdk.UserMessage("task")},
-		Identity:         SessionContext{BotID: "bot-1"},
-		ContextMutations: ledger,
-	})
-	events := make(chan StreamEvent, 16)
 
-	_, aborted := New(Deps{}).runMidStreamRetry(
-		context.Background(),
-		streamCtx,
-		cancel,
-		newToolAbortRegistry(),
-		events,
-		cfg,
-		nil,
-		nil,
-		newToolExecutionMetadataRegistry(nil),
-		nil,
-		&sdk.StreamResult{},
-		&stepMessageCapture{},
-		nil,
-		&interruptedStepCapture{},
-		0,
-		"api error 500",
-		&strings.Builder{},
-		nil,
-	)
-	close(events)
-
-	if !aborted {
-		t.Fatal("runMidStreamRetry() did not abort after step budget cancellation")
-	}
-	if got := providerCalls.Load(); got != 1 {
-		t.Fatalf("provider calls = %d, want the retry call that observed cancellation", got)
-	}
-	if !errors.Is(context.Cause(streamCtx), contextfrag.ErrProtectedContextOverflow) {
-		t.Fatalf("stream cause = %v, want protected overflow", context.Cause(streamCtx))
-	}
-	for event := range events {
-		if event.Type == EventError {
-			t.Fatalf("retry leaked raw provider error event: %#v", event)
-		}
+			eng := &streamEngine{
+				streamCtx: streamCtx,
+				events:    make(chan StreamEvent, 4),
+			}
+			if retry := tc.fail(eng); retry != nil {
+				t.Fatalf("failure = %v, want suppressed and not retried", retry)
+			}
+			if !eng.aborted {
+				t.Fatal("failure did not abort the engine after step budget cancellation")
+			}
+			select {
+			case ev := <-eng.events:
+				t.Fatalf("failure leaked an error event: %#v", ev)
+			default:
+			}
+			if eng.turnError != "" {
+				t.Fatalf("failure recorded a turn error: %q", eng.turnError)
+			}
+		})
 	}
 }

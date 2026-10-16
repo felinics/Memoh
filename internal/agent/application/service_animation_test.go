@@ -98,7 +98,7 @@ func TestAnimatedStickerIsIdenticalAcrossEntryPoints(t *testing.T) {
 	}}}
 
 	gateway := extractNativeImageParts(s.routeAndMergeAttachments(context.Background(), model, req))
-	discuss := s.InlineImageAttachments(context.Background(), "bot-1",
+	discuss := inlineImageParts(context.Background(), s, "bot-1",
 		[]timeline.ImageAttachmentRef{{ContentHash: "sticker", Mime: "application/x-gzip"}})
 	injected := s.inlineInjectAttachments(context.Background(), "bot-1", req.Attachments)
 
@@ -139,7 +139,7 @@ func TestAnimatedStickerReachesExternalAgentAsFrames(t *testing.T) {
 // times costs five times as much and says nothing more.
 func TestStaticAnimationCollapsesToOneFrame(t *testing.T) {
 	s := imageInputService(t, map[string][]byte{"still": tgsSticker(t)})
-	parts := s.InlineImageAttachments(context.Background(), "bot-1",
+	parts := inlineImageParts(context.Background(), s, "bot-1",
 		[]timeline.ImageAttachmentRef{{ContentHash: "still", Mime: "application/x-gzip"}})
 	if len(parts) != 1 {
 		t.Fatalf("InlineImageAttachments() = %d parts, want identical frames collapsed to one", len(parts))
@@ -150,7 +150,7 @@ func TestStaticAnimationCollapsesToOneFrame(t *testing.T) {
 // providers as a subject on black.
 func TestAnimatedStickerFramesAreFlattenedOnWhite(t *testing.T) {
 	s := imageInputService(t, map[string][]byte{"sticker": movingStickerTGS(t)})
-	parts := s.InlineImageAttachments(context.Background(), "bot-1",
+	parts := inlineImageParts(context.Background(), s, "bot-1",
 		[]timeline.ImageAttachmentRef{{ContentHash: "sticker", Mime: "application/x-gzip"}})
 	if len(parts) == 0 {
 		t.Fatal("no frames rendered")
@@ -171,7 +171,7 @@ func TestAnimationFailureLeavesOtherImagesAlone(t *testing.T) {
 		"photo":  rasterPNG(t),
 	})
 	s.logger = slog.Default()
-	parts := s.InlineImageAttachments(context.Background(), "bot-1", []timeline.ImageAttachmentRef{
+	parts := inlineImageParts(context.Background(), s, "bot-1", []timeline.ImageAttachmentRef{
 		{ContentHash: "broken", Mime: "application/x-gzip"},
 		{ContentHash: "photo", Mime: "image/png"},
 	})
@@ -186,7 +186,7 @@ func TestAnimationFailureLeavesOtherImagesAlone(t *testing.T) {
 // bytes decide, and the sticker reaches the model as frames.
 func TestAdapterLabelledAnimatedStickerRenders(t *testing.T) {
 	s := imageInputService(t, map[string][]byte{"sticker": movingStickerTGS(t)})
-	parts := s.InlineImageAttachments(context.Background(), "bot-1",
+	parts := inlineImageParts(context.Background(), s, "bot-1",
 		[]timeline.ImageAttachmentRef{{ContentHash: "sticker", Mime: "application/x-tgsticker"}})
 	if len(parts) != animationFrameCount {
 		t.Fatalf("InlineImageAttachments() = %d parts, want %d frames", len(parts), animationFrameCount)

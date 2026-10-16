@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
@@ -18,10 +20,12 @@ import (
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/server"
 )
 
 type acpRuntimeQueries struct {
@@ -319,7 +323,7 @@ func TestACPRuntimeHandlerEnsureRejectsMissingRuntimeOwner(t *testing.T) {
 	ctx.SetParamValues(botID, sessionID)
 
 	err := handler.EnsureRuntime(ctx)
-	problem, ok := apperror.ProblemFrom(err, "")
+	problem, ok := server.ProblemFrom(err, "")
 	if !ok || problem.Status != http.StatusConflict || problem.Code != string(apperror.CodeACPRuntimeConflict) {
 		t.Fatalf("EnsureRuntime() error = %v, want %d %s", err, http.StatusConflict, apperror.CodeACPRuntimeConflict)
 	}
@@ -403,9 +407,8 @@ func TestAuthorizeACPRuntimeSessionAccess(t *testing.T) {
 			[]string{bots.PermissionChat},
 			"user-1",
 		)
-		var httpErr *echo.HTTPError
-		if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-			t.Fatalf("authorizeExternalAgentSessionAccess() error = %v, want HTTP 403", err)
+		if apperror.CodeOf(err) != apperror.CodeNoWorkspaceExec {
+			t.Fatalf("authorizeExternalAgentSessionAccess() error = %v, want %s", err, apperror.CodeNoWorkspaceExec)
 		}
 	})
 
@@ -426,9 +429,8 @@ func TestAuthorizeACPRuntimeSessionAccess(t *testing.T) {
 			[]string{bots.PermissionChat},
 			"user-2",
 		)
-		var httpErr *echo.HTTPError
-		if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-			t.Fatalf("authorizeExternalAgentSessionAccess() error = %v, want HTTP 403", err)
+		if apperror.CodeOf(err) != apperror.CodeNoWorkspaceExec {
+			t.Fatalf("authorizeExternalAgentSessionAccess() error = %v, want %s", err, apperror.CodeNoWorkspaceExec)
 		}
 	})
 }
@@ -694,9 +696,9 @@ func TestACPRuntimeHandlerCreateRuntimeRejectsDisabledAgent(t *testing.T) {
 	ctx.SetParamValues(botID)
 
 	err := handler.CreateRuntime(ctx)
-	problem, ok := apperror.ProblemFrom(err, "")
-	if !ok || problem.Status != http.StatusForbidden || problem.Code != string(apperror.CodeACPAccessForbidden) {
-		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusForbidden, apperror.CodeACPAccessForbidden)
+	problem, ok := server.ProblemFrom(err, "")
+	if !ok || problem.Status != http.StatusForbidden || problem.Code != string(apperror.CodeACPAgentNotEnabled) {
+		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusForbidden, apperror.CodeACPAgentNotEnabled)
 	}
 	if pool.createInput.BotID != "" {
 		t.Fatalf("pool should not be called for a disabled agent: %#v", pool.createInput)
@@ -736,9 +738,9 @@ func TestACPRuntimeHandlerCreateRuntimeRejectsUnconfiguredAgent(t *testing.T) {
 	ctx.SetParamValues(botID)
 
 	err := handler.CreateRuntime(ctx)
-	problem, ok := apperror.ProblemFrom(err, "")
-	if !ok || problem.Status != http.StatusBadRequest || problem.Code != string(apperror.CodeACPRequestInvalid) {
-		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusBadRequest, apperror.CodeACPRequestInvalid)
+	problem, ok := server.ProblemFrom(err, "")
+	if !ok || problem.Status != http.StatusBadRequest || problem.Code != string(apperror.CodeACPAgentNotConfigured) {
+		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusBadRequest, apperror.CodeACPAgentNotConfigured)
 	}
 	if pool.createInput.BotID != "" {
 		t.Fatalf("pool should not be called for an unconfigured agent: %#v", pool.createInput)
@@ -772,7 +774,7 @@ func TestACPRuntimeHandlerCreateRuntimeMapsCapToTooManyRequests(t *testing.T) {
 	ctx.SetParamValues(botID)
 
 	err := handler.CreateRuntime(ctx)
-	problem, ok := apperror.ProblemFrom(err, "")
+	problem, ok := server.ProblemFrom(err, "")
 	if !ok || problem.Status != http.StatusTooManyRequests || problem.Code != string(apperror.CodeACPRuntimeLimitReached) {
 		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusTooManyRequests, apperror.CodeACPRuntimeLimitReached)
 	}
@@ -805,7 +807,7 @@ func TestACPRuntimeHandlerCreateRuntimeRedactsStartFailure(t *testing.T) {
 	ctx.SetParamValues(botID)
 
 	err := handler.CreateRuntime(ctx)
-	problem, ok := apperror.ProblemFrom(err, "")
+	problem, ok := server.ProblemFrom(err, "")
 	if !ok || problem.Status != http.StatusInternalServerError || problem.Code != string(apperror.CodeACPOperationFailed) {
 		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusInternalServerError, apperror.CodeACPOperationFailed)
 	}
@@ -976,6 +978,24 @@ func TestRuntimePoolConfigFailureUsesApplicationError(t *testing.T) {
 	err := runtimePoolError(cause)
 	if got := apperror.CodeOf(err); got != apperror.CodeACPConfigUpdateFailed {
 		t.Fatalf("runtimePoolError() code = %q, want %q", got, apperror.CodeACPConfigUpdateFailed)
+	}
+	if got := apperror.CauseOf(err); !errors.Is(got, cause) {
+		t.Fatalf("runtimePoolError() cause = %v, want private cause", got)
+	}
+}
+
+func TestRuntimePoolMissingCommandNamesTheCommand(t *testing.T) {
+	cause := fmt.Errorf("start devin acp: %w", &acpclient.CommandNotFoundError{Command: "devin"})
+	err := runtimePoolError(cause)
+	problem, ok := server.ProblemFrom(err, "")
+	if !ok || problem.Status != http.StatusConflict || problem.Code != string(apperror.CodeACPCommandNotFound) {
+		t.Fatalf("runtimePoolError() = %v, want %d %s", err, http.StatusConflict, apperror.CodeACPCommandNotFound)
+	}
+	if got := apperror.ArgsOf(err)["command"]; got != "devin" {
+		t.Fatalf("runtimePoolError() command arg = %q, want the command the user must install", got)
+	}
+	if strings.Contains(problem.Detail, "/opt/memoh") {
+		t.Fatalf("missing command problem leaked the private diagnostic: %q", problem.Detail)
 	}
 	if got := apperror.CauseOf(err); !errors.Is(got, cause) {
 		t.Fatalf("runtimePoolError() cause = %v, want private cause", got)
@@ -1189,5 +1209,94 @@ func testBotRow(botID string, metadata map[string]any) sqlc.GetBotByIDRow {
 		Metadata:  testJSON(metadata),
 		CreatedAt: pgtype.Timestamptz{Valid: true},
 		UpdatedAt: pgtype.Timestamptz{Valid: true},
+	}
+}
+
+type acpRuntimeInstanceQueries struct {
+	acpRuntimeQueries
+	agent sqlc.BotAgent
+}
+
+func (q acpRuntimeInstanceQueries) GetBotAgentByID(context.Context, sqlc.GetBotAgentByIDParams) (sqlc.BotAgent, error) {
+	return q.agent, nil
+}
+
+func TestACPRuntimeHandlerCreateRuntimeAdmitsOnlyActiveACPInstances(t *testing.T) {
+	t.Setenv("MEMOH_ACP_MCP_HTTP_BASE_URL", "http://example.com")
+
+	const (
+		botID      = "11111111-1111-1111-1111-111111111111"
+		botAgentID = "22222222-2222-2222-2222-222222222222"
+	)
+	instance := func(mutate func(*sqlc.BotAgent)) sqlc.BotAgent {
+		row := sqlc.BotAgent{
+			ID:       pgtype.UUID{Valid: true, Bytes: [16]byte{0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22}},
+			BotID:    pgtype.UUID{Valid: true, Bytes: [16]byte{0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11}},
+			Runtime:  botagents.RuntimeACP,
+			Enabled:  true,
+			Metadata: []byte(`{"provider":"acp","managed":{"command":"grok-acp"}}`),
+		}
+		if mutate != nil {
+			mutate(&row)
+		}
+		return row
+	}
+	tests := []struct {
+		name     string
+		agent    sqlc.BotAgent
+		wantCode apperror.Code
+	}{
+		{name: "active", agent: instance(nil)},
+		{name: "disabled", agent: instance(func(row *sqlc.BotAgent) { row.Enabled = false }), wantCode: apperror.CodeBotAgentUnavailable},
+		{name: "deleted", agent: instance(func(row *sqlc.BotAgent) {
+			row.DeletedAt = pgtype.Timestamptz{Time: time.Unix(1_700_000_000, 0), Valid: true}
+		}), wantCode: apperror.CodeBotAgentUnavailable},
+		{name: "another runtime", agent: instance(func(row *sqlc.BotAgent) {
+			row.Runtime = botagents.RuntimeCodex
+			row.Metadata = []byte(`{"provider":"codex","managed":{"command":"grok-acp"}}`)
+		}), wantCode: apperror.CodeBotAgentInvalidRuntime},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			queries := acpRuntimeInstanceQueries{
+				acpRuntimeQueries: acpRuntimeQueries{bot: testBotRow(botID, map[string]any{})},
+				agent:             tc.agent,
+			}
+			pool := &fakeACPRuntimePool{}
+			handler := newACPRuntimeHandler(
+				pool,
+				session.NewService(nil, queries, nil),
+				bots.NewService(nil, queries),
+				newTestAdminAccountService("admin"),
+			)
+			handler.SetBotAgents(botagents.NewService(slog.Default(), queries))
+
+			e := echo.New()
+			req := httptest.NewRequest(
+				http.MethodPost,
+				"/bots/"+botID+"/acp-runtimes",
+				bytes.NewBufferString(`{"acp_agent_id":"acp","bot_agent_id":"`+botAgentID+`"}`),
+			)
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			ctx := testAuthContext(e, req, rec, "user-1")
+			ctx.SetPath("/bots/:bot_id/acp-runtimes")
+			ctx.SetParamNames("bot_id")
+			ctx.SetParamValues(botID)
+
+			err := handler.CreateRuntime(ctx)
+			if tc.wantCode == "" {
+				if err != nil || pool.createInput.BotAgentID != botAgentID {
+					t.Fatalf("CreateRuntime() error = %v, input = %#v, want the instance's runtime", err, pool.createInput)
+				}
+				return
+			}
+			if apperror.CodeOf(err) != tc.wantCode {
+				t.Fatalf("CreateRuntime() error = %v, want %s", err, tc.wantCode)
+			}
+			if pool.createInput.BotID != "" {
+				t.Fatalf("pool should not start a runtime for this instance: %#v", pool.createInput)
+			}
+		})
 	}
 }

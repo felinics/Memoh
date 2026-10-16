@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // maxLineBytes bounds one NDJSON line from the app-server. Turn payloads can
@@ -87,13 +89,13 @@ func (c *conn) Call(ctx context.Context, method string, params any, result any) 
 			return c.closeErr()
 		}
 		if resp.Err != nil {
-			return resp.Err
+			return errs.WrapDependency(resp.Err, "")
 		}
 		if result == nil {
 			return nil
 		}
 		if err := json.Unmarshal(resp.Result, result); err != nil {
-			return fmt.Errorf("codex: decoding %s response: %w", method, err)
+			return errs.WrapDependency(err, "codex: decoding "+method+" response")
 		}
 		return nil
 	}
@@ -134,11 +136,11 @@ func (c *conn) writeLine(payload any) error {
 	select {
 	case writeErr := <-done:
 		if writeErr != nil {
-			return errors.Join(ErrConnClosed, writeErr)
+			return c.closedError(errs.WrapDependency(writeErr, ""))
 		}
 		return nil
 	case <-time.After(writeTimeout):
-		c.shutdown(errors.New("app-server stdio write stalled"))
+		c.shutdown(errs.NewDependency("app-server stdio write stalled"))
 		return c.closeErr()
 	}
 }
@@ -165,11 +167,48 @@ func (c *conn) closeErr() error {
 	return c.errLocked()
 }
 
+// exitError is the failure of an operation the app-server exited under.
+func (c *conn) exitError(operation string) error {
+	return errs.WrapDependency(c.closeErr(), "codex app-server exited "+operation)
+}
+
 func (c *conn) errLocked() error {
-	if c.err != nil {
-		return errors.Join(ErrConnClosed, c.err)
+	return c.closedError(c.err)
+}
+
+// closedError is the error of a call the closed connection failed. A caller
+// waiting on a response has no other account of a crashed app-server, so the
+// error names how the process ended.
+func (c *conn) closedError(cause error) error {
+	err := ErrConnClosed
+	if cause != nil {
+		err = errors.Join(ErrConnClosed, cause)
 	}
-	return ErrConnClosed
+	if reporter, ok := c.proc.(exitReporter); ok {
+		if detail := processExitDetail(reporter); detail != "" {
+			return fmt.Errorf("%w: %s", err, detail)
+		}
+	}
+	return err
+}
+
+// exitReporter is the part of a process that says how it ended. The
+// app-server process implements it; a test pipe does not.
+type exitReporter interface {
+	Err() error
+	StderrTail() string
+}
+
+// processExitDetail is how a process ended and what it last wrote to stderr.
+func processExitDetail(proc exitReporter) string {
+	var parts []string
+	if err := proc.Err(); err != nil {
+		parts = append(parts, err.Error())
+	}
+	if stderr := proc.StderrTail(); stderr != "" {
+		parts = append(parts, "stderr: "+stderr)
+	}
+	return strings.Join(parts, "; ")
 }
 
 func (c *conn) readLoop() {
@@ -210,7 +249,7 @@ func (c *conn) readLoop() {
 			c.handler.HandleNotification(ctx, inbound)
 		}
 	}
-	scanErr := scanner.Err()
+	scanErr := errs.WrapDependency(scanner.Err(), "")
 	if scanErr == nil {
 		scanErr = io.EOF
 	}

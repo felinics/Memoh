@@ -4,18 +4,23 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/models"
 )
 
@@ -535,9 +540,7 @@ func TestOpenAICodexACPDeviceAuthorizationSanitizesNon404FailureBody(t *testing.
 	if strings.Contains(err.Error(), "sensitive-body") {
 		t.Fatalf("error should not expose upstream body: %v", err)
 	}
-	if !strings.Contains(err.Error(), "status 401") {
-		t.Fatalf("error should keep status code context: %v", err)
-	}
+	requireStatusAttr(t, err, http.StatusUnauthorized)
 }
 
 func TestOpenAICodexACPDevicePollPendingAndSuccess(t *testing.T) {
@@ -655,9 +658,7 @@ func TestOpenAICodexACPDevicePollSanitizesHardFailureBody(t *testing.T) {
 	if strings.Contains(err.Error(), "sensitive-body") {
 		t.Fatalf("error should not expose upstream body: %v", err)
 	}
-	if !strings.Contains(err.Error(), "status 401") {
-		t.Fatalf("error should keep status code context: %v", err)
-	}
+	requireStatusAttr(t, err, http.StatusUnauthorized)
 }
 
 func TestCodexAccountIDFromTokensPrefersIDToken(t *testing.T) {
@@ -790,6 +791,47 @@ func serverURL(r *http.Request) string {
 
 func TestFetchRemoteModelsViaSDK(t *testing.T) {
 	t.Parallel()
+
+	t.Run("opencode go imports listed models with agent defaults", func(t *testing.T) {
+		t.Parallel()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{
+				{"id": "glm-5.2"}, {"id": "minimax-m2.7"}, {"id": "gpt-5.6-luna"}, {"id": "future-model"},
+			}})
+		}))
+		defer server.Close()
+		s := &Service{}
+		items, err := s.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+			ClientType: string(models.ClientTypeOpenCodeGo),
+			Config:     []byte(`{"base_url":"` + server.URL + `"}`),
+		})
+		if err != nil || len(items) != 4 {
+			t.Fatalf("models = %v, error = %v", items, err)
+		}
+		for _, item := range items {
+			if !item.CapabilitiesKnown || strings.Join(item.Compatibilities, ",") != "tool-call,reasoning" || item.ThinkingMode != models.ThinkingModeAlways {
+				t.Fatalf("missing agent capabilities or unsafe synthetic thinking control: %+v", item)
+			}
+		}
+		// A preset must retain curated capabilities when discovery uses the
+		// live endpoint. Conservative custom-provider defaults must not erase
+		// Luna's reasoning controls, vision support, or context window.
+		s.templatesDir = "../../conf/providers"
+		items, err = s.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+			ClientType: string(models.ClientTypeOpenCodeGo),
+			Config:     []byte(`{"base_url":"` + server.URL + `"}`),
+			Metadata:   []byte(`{"preset":{"source":"opencode-go.yaml"}}`),
+		})
+		if err != nil || len(items) != 4 {
+			t.Fatalf("preset models = %v, error = %v", items, err)
+		}
+		luna := items[2]
+		if luna.ID != "gpt-5.6-luna" || luna.ThinkingMode != models.ThinkingModeToggle ||
+			len(luna.ReasoningEfforts) == 0 || luna.ContextWindow == nil || *luna.ContextWindow != 1050000 ||
+			!strings.Contains(strings.Join(luna.Compatibilities, ","), "vision") {
+			t.Fatalf("preset capabilities were overwritten: %+v", luna)
+		}
+	})
 
 	t.Run("anthropic", func(t *testing.T) {
 		t.Parallel()
@@ -975,6 +1017,165 @@ func TestFetchRemoteModelsViaSDK(t *testing.T) {
 	})
 }
 
+// Regression for the New API "import 0 models" report: a provider linked to a
+// template (even an EMPTY one) must still list models from the live endpoint;
+// the template only enriches matching IDs with curated capabilities.
+func TestFetchRemoteModelsViaSDKMergesTemplateCapabilities(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "newapi.yaml"), []byte(`
+name: New API
+client_type: openai-completions
+base_url: https://example.invalid/v1
+
+models:
+  - model_id: curated-chat
+    name: Curated Chat
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 128000
+  - model_id: curated-embed
+    name: Curated Embed
+    type: embedding
+    config:
+      dimensions: 1536
+`), 0o600); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("expected /v1/models path, got %q", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": "curated-chat", "object": "model"},
+				{"id": "curated-embed", "object": "model"},
+				{"id": "endpoint-only", "object": "model"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	svc := NewService(nil, nil, "", dir)
+	remoteModels, err := svc.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+		ClientType: string(models.ClientTypeOpenAICompletions),
+		Config:     []byte(`{"base_url":"` + server.URL + `/v1","api_key":"sk-test"}`),
+		Metadata:   []byte(`{"preset":{"source":"newapi.yaml"}}`),
+	})
+	if err != nil {
+		t.Fatalf("fetch remote models: %v", err)
+	}
+	if len(remoteModels) != 3 {
+		t.Fatalf("expected the endpoint's 3 models (template must not short-circuit), got %d", len(remoteModels))
+	}
+
+	var curated, embed, endpointOnly *RemoteModel
+	for i := range remoteModels {
+		switch remoteModels[i].ID {
+		case "curated-chat":
+			curated = &remoteModels[i]
+		case "curated-embed":
+			embed = &remoteModels[i]
+		case "endpoint-only":
+			endpointOnly = &remoteModels[i]
+		}
+	}
+	if curated == nil || embed == nil || endpointOnly == nil {
+		t.Fatalf("missing expected models: %#v", remoteModels)
+	}
+	if curated.Name != "Curated Chat" {
+		t.Fatalf("expected curated template name, got %q", curated.Name)
+	}
+	if !curated.CapabilitiesKnown {
+		t.Fatal("expected CapabilitiesKnown for a template-matched model")
+	}
+	if curated.ContextWindow == nil || *curated.ContextWindow != 128000 {
+		t.Fatalf("expected template context window, got %#v", curated.ContextWindow)
+	}
+	if got := strings.Join(curated.Compatibilities, ","); got != "tool-call" {
+		t.Fatalf("compatibilities = %q", got)
+	}
+	// The OpenAI wire has no per-model type (the SDK defaults everything to
+	// chat): the template's curated embedding type and dimensions must win,
+	// and the server must never see a dimensions probe.
+	if embed.Type != string(models.ModelTypeEmbedding) {
+		t.Fatalf("expected template embedding type, got %q", embed.Type)
+	}
+	if embed.Dimensions == nil || *embed.Dimensions != 1536 {
+		t.Fatalf("expected template dimensions 1536, got %#v", embed.Dimensions)
+	}
+	if endpointOnly.CapabilitiesKnown {
+		t.Fatal("endpoint-only model must stay CapabilitiesKnown=false")
+	}
+	if endpointOnly.Name != "endpoint-only" {
+		t.Fatalf("expected ID fallback name, got %q", endpointOnly.Name)
+	}
+}
+
+// A template that curates an embedding model's dimensions spares the live
+// dimensions probe entirely: probing spends tokens and fails spuriously on
+// gateways whose key lacks embedding permission.
+func TestFetchRemoteModelsViaSDKTemplateDimensionsSkipProbe(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "gemini-gw.yaml"), []byte(`
+name: Gemini Gateway
+client_type: google-generative-ai
+
+models:
+  - model_id: gemini-embedding-001
+    name: Gemini Embedding 001
+    type: embedding
+    config:
+      dimensions: 768
+`), 0o600); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			t.Fatalf("unexpected request (probe should have been skipped): %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"models": []map[string]any{
+				{
+					"name":                       "models/gemini-embedding-001",
+					"displayName":                "Gemini Embedding 001",
+					"supportedGenerationMethods": []string{"embedContent"},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	svc := NewService(nil, nil, "", dir)
+	remoteModels, err := svc.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+		ClientType: string(models.ClientTypeGoogleGenerativeAI),
+		Config:     []byte(`{"base_url":"` + server.URL + `","api_key":"gm-test"}`),
+		Metadata:   []byte(`{"preset":{"source":"gemini-gw.yaml"}}`),
+	})
+	if err != nil {
+		t.Fatalf("fetch remote models: %v", err)
+	}
+	if len(remoteModels) != 1 {
+		t.Fatalf("expected 1 model, got %d", len(remoteModels))
+	}
+	got := remoteModels[0]
+	if got.Dimensions == nil || *got.Dimensions != 768 {
+		t.Fatalf("expected template dimensions 768, got %#v", got.Dimensions)
+	}
+	if got.Type != string(models.ModelTypeEmbedding) {
+		t.Fatalf("expected embedding type, got %q", got.Type)
+	}
+	if !got.CapabilitiesKnown {
+		t.Fatal("expected CapabilitiesKnown for a template-matched model")
+	}
+}
+
 // providerTestQueries stubs dbstore.Queries with the single row Test needs;
 // every other method nil-panics, which keeps this test honest about how
 // little the probe path is allowed to touch the database.
@@ -985,6 +1186,26 @@ type providerTestQueries struct {
 
 func (s providerTestQueries) GetProviderByID(context.Context, pgtype.UUID) (sqlc.Provider, error) {
 	return s.provider, nil
+}
+
+func TestOpenCodeGoPublicCatalogDoesNotVerifyCredentials(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			t.Errorf("provider connectivity check unexpectedly generated text: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "glm-5.2"}}})
+	}))
+	defer server.Close()
+	providerID := pgtype.UUID{Bytes: [16]byte{0x13, 0x10}, Valid: true}
+	service := &Service{queries: providerTestQueries{provider: sqlc.Provider{
+		ID: providerID, ClientType: string(models.ClientTypeOpenCodeGo),
+		Config: []byte(`{"api_key":"invalid","base_url":"` + server.URL + `"}`),
+	}}}
+	resp, err := service.Test(context.Background(), providerID.String())
+	if err != nil || resp.Status != TestStatusUnverified || !resp.Reachable {
+		t.Fatalf("public catalog falsely verified credentials: %+v, %v", resp, err)
+	}
 }
 
 // Regression for #1042: a successful models list is conclusive for
@@ -1019,7 +1240,7 @@ func TestTestSkipsModelProbeAfterSuccessfulModelsList(t *testing.T) {
 		t.Fatalf("Test() error = %v", err)
 	}
 	if resp.Status != TestStatusOK {
-		t.Fatalf("status = %q, want %q (message: %s)", resp.Status, TestStatusOK, resp.Message)
+		t.Fatalf("status = %q, want %q (cause: %v)", resp.Status, TestStatusOK, resp.Cause)
 	}
 	if !resp.Reachable {
 		t.Fatal("reachable = false, want true")
@@ -1065,10 +1286,56 @@ func TestTestModelsListOutcomeMapping(t *testing.T) {
 				t.Fatalf("Test() error = %v", err)
 			}
 			if resp.Status != tc.wantStatus {
-				t.Fatalf("status = %q, want %q (message: %s)", resp.Status, tc.wantStatus, resp.Message)
+				t.Fatalf("status = %q, want %q (cause: %v)", resp.Status, tc.wantStatus, resp.Cause)
 			}
 			if !resp.Reachable {
 				t.Fatal("reachable = false, want true")
+			}
+		})
+	}
+}
+
+// Locks the outcome rules on Service.Test against the three shapes
+// sdk.Provider.Test returns: nil, an *sdk.APIError, and any other error.
+func TestProviderTestOutcome(t *testing.T) {
+	t.Parallel()
+
+	refused := &url.Error{Op: "Get", URL: "http://127.0.0.1:1/models", Err: errors.New("connect: connection refused")}
+	cases := []struct {
+		name          string
+		err           error
+		wantStatus    TestStatus
+		wantReachable bool
+	}{
+		{"passed", nil, TestStatusOK, true},
+		{"401", &sdk.APIError{StatusCode: http.StatusUnauthorized, Kind: sdk.KindAuthentication}, TestStatusAuthError, true},
+		{"403", &sdk.APIError{StatusCode: http.StatusForbidden, Kind: sdk.KindPermissionDenied}, TestStatusAuthError, true},
+		{"404", &sdk.APIError{StatusCode: http.StatusNotFound, Kind: sdk.KindUnknown}, TestStatusUnverified, true},
+		{"429", &sdk.APIError{StatusCode: http.StatusTooManyRequests, Kind: sdk.KindRateLimited}, TestStatusUnverified, true},
+		{"503", &sdk.APIError{StatusCode: http.StatusServiceUnavailable, Kind: sdk.KindServerError}, TestStatusUnverified, true},
+		{"wrapped 401", fmt.Errorf("openai: test request failed: %w", &sdk.APIError{StatusCode: http.StatusUnauthorized, Kind: sdk.KindAuthentication}), TestStatusAuthError, true},
+		{"connection refused", fmt.Errorf("request failed: %w", refused), TestStatusError, false},
+		{"context ended", context.DeadlineExceeded, TestStatusError, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			resp := providerTestOutcome(tc.err)
+			if resp.Status != tc.wantStatus {
+				t.Fatalf("status = %q, want %q", resp.Status, tc.wantStatus)
+			}
+			if resp.Reachable != tc.wantReachable {
+				t.Fatalf("reachable = %v, want %v", resp.Reachable, tc.wantReachable)
+			}
+			if tc.err == nil {
+				if resp.Cause != nil {
+					t.Fatalf("cause = %v, want nil", resp.Cause)
+				}
+				return
+			}
+			if !errors.Is(resp.Cause, tc.err) {
+				t.Fatalf("cause = %v, want it to wrap %v", resp.Cause, tc.err)
 			}
 		})
 	}
@@ -1094,5 +1361,78 @@ func TestTestUnreachableStaysHardError(t *testing.T) {
 	}
 	if resp.Reachable {
 		t.Fatal("reachable = true, want false")
+	}
+	var urlErr *url.Error
+	if !errors.As(resp.Cause, &urlErr) {
+		t.Fatalf("cause = %v, want a *url.Error in the chain", resp.Cause)
+	}
+}
+
+// requireStatusAttr checks that the status code travels as an attribute of
+// the error rather than as part of its text.
+func requireStatusAttr(t *testing.T, err error, want int) {
+	t.Helper()
+	for _, attr := range errs.Analyze(context.Background(), err).Attrs {
+		if attr.Key == "status" {
+			if got := int(attr.Value.Int64()); got != want {
+				t.Fatalf("status attr = %d, want %d", got, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("error has no status attr: %v", err)
+}
+
+func TestFetchRemoteModelsViaSDKReadsMaxOutputTokens(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "gateway.yaml"), []byte(`
+name: Gateway
+client_type: openai-completions
+base_url: https://example.invalid/v1
+
+models:
+  - model_id: templated
+    name: Templated
+    type: chat
+    config:
+      max_output_tokens: 4096
+`), 0o600); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": "declared", "object": "model", "max_output_tokens": 64000},
+				{"id": "undeclared", "object": "model"},
+				{"id": "invalid", "object": "model", "max_output_tokens": 0},
+				{"id": "templated", "object": "model", "max_output_tokens": 8192},
+			},
+		})
+	}))
+	defer server.Close()
+
+	svc := NewService(nil, nil, "", dir)
+	remoteModels, err := svc.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+		ClientType: string(models.ClientTypeOpenAICompletions),
+		Config:     []byte(`{"base_url":"` + server.URL + `","api_key":"sk-test"}`),
+		Metadata:   []byte(`{"preset":{"source":"gateway.yaml"}}`),
+	})
+	if err != nil {
+		t.Fatalf("fetch remote models: %v", err)
+	}
+	got := map[string]*int{}
+	for _, m := range remoteModels {
+		got[m.ID] = m.MaxOutputTokens
+	}
+	if got["declared"] == nil || *got["declared"] != 64000 {
+		t.Fatalf("declared = %v, want 64000", got["declared"])
+	}
+	if got["undeclared"] != nil || got["invalid"] != nil {
+		t.Fatalf("undeclared = %v, invalid = %v, want unknown", got["undeclared"], got["invalid"])
+	}
+	if got["templated"] == nil || *got["templated"] != 8192 {
+		t.Fatalf("templated = %v, want the endpoint's 8192 over the template's 4096", got["templated"])
 	}
 }

@@ -58,7 +58,6 @@
         @update:model-value="(v: string) => emit('update:modelValue', v)"
       >
         <SelectTrigger
-          size="sm"
           class="w-full"
         >
           <SelectValue :placeholder="field.title || fieldKey" />

@@ -368,6 +368,10 @@ func TestMigrationsDoNotRequireClusterRolePrivileges(t *testing.T) {
 	if err := db.RunMigrate(logger, pgConfigFromDSN(t, limitedDSN), postgresMigrationsFS(t), "up", nil); err != nil {
 		t.Fatalf("migrate as database owner without CREATEROLE/BYPASSRLS: %v", err)
 	}
+	// Down migrations run under the same role and must not touch FORCE RLS
+	// tables through a policy that needs memoh.team_id either.
+	stepDown(t, limitedDSN, 1)
+	stepUp(t, limitedDSN, 1)
 }
 
 // stepDown rolls back exactly n migration steps using the golang-migrate library

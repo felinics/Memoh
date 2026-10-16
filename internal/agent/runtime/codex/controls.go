@@ -2,11 +2,11 @@ package codex
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 var (
@@ -138,7 +138,7 @@ func (d *Driver) ReadCommand(ctx context.Context, input external.PromptInput) (e
 				break
 			}
 			if seen[*response.NextCursor] {
-				return external.CommandResult{}, errors.New("codex MCP list repeated cursor")
+				return external.CommandResult{}, errs.NewDependency("codex MCP list repeated cursor")
 			}
 			seen[*response.NextCursor] = true
 			params.Cursor = response.NextCursor

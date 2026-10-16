@@ -7,6 +7,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/turn"
 )
 
@@ -101,10 +102,10 @@ func TestExtractToolCallDiffsFromSDK(t *testing.T) {
 			sdk.ToolCallPart{
 				ToolCallID: "call-1",
 				ToolName:   "edit",
-				ProviderMetadata: map[string]any{
+				ProviderMetadata: partmeta.Fold(map[string]any{
 					"diff":               "@@ -1 +1 @@",
 					"execution_location": map[string]any{"kind": "remote"},
-				},
+				}),
 			},
 		},
 	}
@@ -117,15 +118,15 @@ func TestExtractToolCallDiffsFromSDK(t *testing.T) {
 	if !ok {
 		t.Fatalf("part type = %T", got.Content[0])
 	}
-	if _, leaked := call.ProviderMetadata["diff"]; leaked {
+	if partmeta.Has(call.ProviderMetadata, "diff") {
 		t.Fatalf("diff still in providerMetadata: %#v", call.ProviderMetadata)
 	}
-	if _, ok := call.ProviderMetadata["execution_location"]; !ok {
+	if !partmeta.Has(call.ProviderMetadata, "execution_location") {
 		t.Fatalf("unrelated providerMetadata was dropped: %#v", call.ProviderMetadata)
 	}
 	// Original untouched.
 	orig := msg.Content[0].(sdk.ToolCallPart)
-	if _, ok := orig.ProviderMetadata["diff"]; !ok {
+	if !partmeta.Has(orig.ProviderMetadata, "diff") {
 		t.Fatal("input message was mutated")
 	}
 }

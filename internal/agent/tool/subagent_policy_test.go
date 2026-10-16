@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	sdk "github.com/felinics/twilight/sdk"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestFilterSubagentToolsBlocksOnlyDirectInteractionAndDelegation(t *testing.T) {
@@ -12,13 +12,13 @@ func TestFilterSubagentToolsBlocksOnlyDirectInteractionAndDelegation(t *testing.
 		ToolAskUser().String(), ToolSend().String(), ToolReact().String(),
 		ToolSpawnAgent().String(), ToolSendMessage().String(), ToolListAgents().String(), ToolListModels().String(),
 		ToolSpeak().String(), ToolCreateSchedule().String(), ToolSearchMemory().String(), ToolUseSkill().String(),
-		ToolBrowserAction().String(), ToolComputerAction().String(), ToolSendEmail().String(),
+		ToolBrowserAction().String(), ToolComputerAction().String(),
 		ToolGenerateImage().String(), ToolGenerateVideo().String(), ToolTranscribeAudio().String(),
 		"external_mcp_tool",
 	}
-	toolList := make([]sdk.Tool, 0, len(names))
+	toolList := make([]toolexec.Tool, 0, len(names))
 	for _, name := range names {
-		toolList = append(toolList, sdk.Tool{Name: name})
+		toolList = append(toolList, toolexec.Tool{Name: name})
 	}
 	filtered := FilterSubagentTools(toolList)
 	got := make([]string, 0, len(filtered))
@@ -27,7 +27,7 @@ func TestFilterSubagentToolsBlocksOnlyDirectInteractionAndDelegation(t *testing.
 	}
 	want := []string{
 		ToolSpeak().String(), ToolCreateSchedule().String(), ToolSearchMemory().String(), ToolUseSkill().String(),
-		ToolBrowserAction().String(), ToolComputerAction().String(), ToolSendEmail().String(),
+		ToolBrowserAction().String(), ToolComputerAction().String(),
 		ToolGenerateImage().String(), ToolGenerateVideo().String(), ToolTranscribeAudio().String(),
 		"external_mcp_tool",
 	}

@@ -39,6 +39,19 @@ func (s *replacementOperationMessageService) GetVisibleTurnByMessage(_ context.C
 	return s.turnByMsg, nil
 }
 
+func TestPreflightHookFailureIsRetriedThroughTheHook(t *testing.T) {
+	if !isPreflightUserMessageHookFailure(messagepkg.Message{
+		Metadata: map[string]any{messagepkg.HistoryFailureOriginMetadataKey: messagepkg.HistoryFailureOriginUserMessageHook},
+	}) {
+		t.Fatal("Hook failure marker was not recognized")
+	}
+	if isPreflightUserMessageHookFailure(messagepkg.Message{
+		Metadata: map[string]any{messagepkg.HistoryErrorCodeMetadataKey: string(apperror.CodeAgentProviderRequestRejected)},
+	}) {
+		t.Fatal("provider failure was incorrectly classified as a Hook failure")
+	}
+}
+
 // The deprecated message-id spelling is resolved to a round at the boundary, so
 // a client shipped before the turn-id contract keeps working after an upgrade.
 func TestResolveTurnIDForMessageMapsTheLegacySpelling(t *testing.T) {
@@ -121,11 +134,13 @@ func TestPrepareReplacementOperationUsesPersistedTurnBoundary(t *testing.T) {
 		}
 		service := &Service{messageService: messages}
 
-		if _, err := service.PrepareRetryLatestTurnOperation(context.Background(), "session-1", "turn-old"); err == nil {
-			t.Fatal("prepare retry operation on a superseded turn: want error")
+		_, err := service.PrepareRetryLatestTurnOperation(context.Background(), "session-1", "turn-old")
+		if got := apperror.CodeOf(err); got != apperror.CodeSessionTurnNotLatest {
+			t.Fatalf("retry on a superseded turn: error code = %q, want %q", got, apperror.CodeSessionTurnNotLatest)
 		}
-		if _, err := service.PrepareEditLatestTurnOperation(context.Background(), "session-1", "turn-old"); err == nil {
-			t.Fatal("prepare edit operation on a superseded turn: want error")
+		_, err = service.PrepareEditLatestTurnOperation(context.Background(), "session-1", "turn-old")
+		if got := apperror.CodeOf(err); got != apperror.CodeSessionTurnNotLatest {
+			t.Fatalf("edit on a superseded turn: error code = %q, want %q", got, apperror.CodeSessionTurnNotLatest)
 		}
 	})
 
@@ -147,19 +162,22 @@ func TestPrepareReplacementOperationUsesPersistedTurnBoundary(t *testing.T) {
 		service := &Service{messageService: messages}
 
 		_, err := service.PrepareRetryLatestTurnOperation(context.Background(), "session-1", "turn-old")
-		if got := apperror.CodeOf(err); got != apperror.CodeSessionHistoryInconsistent {
-			t.Fatalf("error code = %q, want %q", got, apperror.CodeSessionHistoryInconsistent)
+		if got := apperror.CodeOf(err); got != apperror.CodeSessionTurnIncomplete {
+			t.Fatalf("error code = %q, want %q", got, apperror.CodeSessionTurnIncomplete)
+		}
+		if apperror.CauseOf(err) == nil {
+			t.Fatal("incomplete turn error must carry a private cause for logs")
 		}
 	})
 
 	// The store's own no-rows wording used to reach the composer verbatim.
-	t.Run("a session with no visible turn reports the history code", func(t *testing.T) {
+	t.Run("a session with no visible turn reports the stale-turn code", func(t *testing.T) {
 		messages := &replacementOperationMessageService{latestErr: messagepkg.ErrNoVisibleTurn}
 		service := &Service{messageService: messages}
 
 		_, err := service.PrepareRetryLatestTurnOperation(context.Background(), "session-1", "turn-old")
-		if got := apperror.CodeOf(err); got != apperror.CodeSessionHistoryInconsistent {
-			t.Fatalf("error code = %q, want %q", got, apperror.CodeSessionHistoryInconsistent)
+		if got := apperror.CodeOf(err); got != apperror.CodeSessionTurnNotLatest {
+			t.Fatalf("error code = %q, want %q", got, apperror.CodeSessionTurnNotLatest)
 		}
 	})
 }

@@ -17,6 +17,8 @@ vi.mock('@/lib/auth-session', () => ({ onAuthSessionCleared: vi.fn() }))
 vi.mock('@/composables/api/useApps', () => ({
   invalidateBotApps: vi.fn(),
   appInProgress: (item: { status?: string }) => ['installing', 'updating', 'removing'].includes(item.status ?? ''),
+  appLastError: (item: { last_error?: string, last_error_code?: string }, translate: (key: string) => string) =>
+    item.last_error_code ? translate(`errors.${item.last_error_code}`) : (item.last_error ?? ''),
 }))
 vi.mock('@/composables/api/useWorkspaceDependencies', () => ({ invalidateBotDependencies: vi.fn() }))
 vi.mock('@/composables/api/useAppStream', () => ({ streamAppOperation: mocks.stream }))
@@ -62,6 +64,19 @@ describe('remove operation recovery after a lost stream', () => {
     expect(mocks.stream).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'remove' }))
   })
 
+  it('renders the error code of a failed removal through the catalog', async () => {
+    mocks.list.mockResolvedValue({ data: { items: [{
+      registry_id: 'memoh', app_id: 'editor', installation_id: 'installation',
+      status: 'failed', last_error_code: 'workspace_dependency.busy',
+    }] } })
+    const store = useAppOperationsStore()
+    const result = store.start(target)
+    if (result.kind !== 'started') throw new Error('operation did not start')
+    store.view(result.operation.key, 'test')
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(result.operation).toMatchObject({ status: 'error', error: 'errors.workspace_dependency.busy' })
+  })
+
   it('reports an unwatched failed removal through an error toast', async () => {
     mocks.list.mockResolvedValue({ data: { items: [{
       registry_id: 'memoh', app_id: 'editor', installation_id: 'installation', status: 'failed', last_error: 'cleanup failed',
@@ -84,5 +99,40 @@ describe('remove operation recovery after a lost stream', () => {
     await vi.advanceTimersByTimeAsync(3000)
     expect(result.operation).toMatchObject({ status: 'done', result: 'removed' })
     expect(mocks.success).toHaveBeenCalledWith('apps.background.removed', expect.anything())
+  })
+})
+
+describe('stream that fails before its first event', () => {
+  const failingStream = (error: unknown) => () => ({
+    [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(error) }),
+  })
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.useFakeTimers()
+    vi.clearAllMocks()
+  })
+  afterEach(() => {
+    useAppOperationsStore().reset()
+    vi.useRealTimers()
+  })
+
+  it('reports a request the server rejected as failed', async () => {
+    mocks.stream.mockImplementation(failingStream({ code: 'http.conflict', status: 409, fault: 'client' }))
+    const result = useAppOperationsStore().start(target)
+    if (result.kind !== 'started') throw new Error('operation did not start')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(result.operation.status).toBe('error')
+    expect(mocks.list).not.toHaveBeenCalled()
+  })
+
+  it('reconciles a request the server abandoned as canceled', async () => {
+    mocks.list.mockResolvedValue({ data: { items: [] } })
+    mocks.stream.mockImplementation(failingStream({ code: 'canceled', status: 499, fault: 'canceled' }))
+    const result = useAppOperationsStore().start(target)
+    if (result.kind !== 'started') throw new Error('operation did not start')
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(mocks.list).toHaveBeenCalled()
+    expect(result.operation).toMatchObject({ status: 'done', result: 'removed' })
   })
 })

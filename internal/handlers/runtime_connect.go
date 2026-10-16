@@ -59,14 +59,14 @@ func (h *RuntimeConnectHandler) Connect(c echo.Context) error {
 	}
 	info, err := userruntime.ParseHandshakeMetadata(c.Request().Header.Get(userruntime.RuntimeMetadataHeader))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(err)
 	}
 	if !offersSubprotocol(c.Request(), runtimeProtocolGRPC) {
 		c.Response().Header().Set("Sec-WebSocket-Protocol", runtimeProtocolGRPC)
 		return echo.NewHTTPError(http.StatusUpgradeRequired, "unsupported runtime subprotocol")
 	}
 	if h.pipe == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, userruntime.ErrPipeNotConfigured.Error())
+		return echo.NewHTTPError(http.StatusServiceUnavailable).WithInternal(userruntime.ErrPipeNotConfigured)
 	}
 	conn, err := websocket.Accept(c.Response().Writer, c.Request(), &websocket.AcceptOptions{
 		Subprotocols: []string{runtimeProtocolGRPC},
@@ -90,7 +90,7 @@ func (h *RuntimeConnectHandler) Connect(c echo.Context) error {
 	grpcConn, err := h.pipe.ClientConn(transportCtx, netConn)
 	cancelTransport()
 	if err != nil {
-		h.log.Warn("create runtime transport failed", slog.String("runtime_id", runtime.ID), slog.Any("error", err))
+		h.log.WarnContext(c.Request().Context(), "create runtime transport failed", slog.String("runtime_id", runtime.ID), slog.Any("error", err))
 		return nil
 	}
 	client := bridge.NewClientFromConn(grpcConn)
@@ -108,7 +108,7 @@ func (h *RuntimeConnectHandler) Connect(c echo.Context) error {
 		err = errors.New("runtime readiness root is not a directory")
 	}
 	if err != nil {
-		h.log.Warn("runtime readiness probe failed", slog.String("runtime_id", runtime.ID), slog.Any("error", err))
+		h.log.WarnContext(c.Request().Context(), "runtime readiness probe failed", slog.String("runtime_id", runtime.ID), slog.Any("error", err))
 		return nil
 	}
 	activationCtx, cancelActivation := context.WithTimeout(ctx, runtimeActivationTimeout)
@@ -128,7 +128,7 @@ func (h *RuntimeConnectHandler) Connect(c echo.Context) error {
 	activationErr := h.service.ActivateConnection(activationCtx, key, runtime.ID, info, connection, transportGuard.Check)
 	cancelActivation()
 	if activationErr != nil {
-		h.log.Warn("activate runtime connection failed", slog.String("runtime_id", runtime.ID), slog.Any("error", activationErr))
+		h.log.WarnContext(c.Request().Context(), "activate runtime connection failed", slog.String("runtime_id", runtime.ID), slog.Any("error", activationErr))
 		return nil
 	}
 	disconnectReason := "runtime connection closed"
@@ -143,7 +143,7 @@ func (h *RuntimeConnectHandler) Connect(c echo.Context) error {
 			return nil
 		case state := <-transportLost:
 			disconnectReason = "gRPC transport lost"
-			h.log.Warn("runtime gRPC transport lost",
+			h.log.WarnContext(c.Request().Context(), "runtime gRPC transport lost",
 				slog.String("runtime_id", runtime.ID),
 				slog.String("state", state.String()),
 			)
@@ -154,7 +154,7 @@ func (h *RuntimeConnectHandler) Connect(c echo.Context) error {
 			cancel()
 			if err != nil {
 				disconnectReason = "websocket ping failed"
-				h.log.Warn("runtime websocket ping failed", slog.String("runtime_id", runtime.ID), slog.Any("error", err))
+				h.log.WarnContext(c.Request().Context(), "runtime websocket ping failed", slog.String("runtime_id", runtime.ID), slog.Any("error", err))
 				return nil
 			}
 		}

@@ -1,0 +1,251 @@
+package server
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/labstack/echo/v4"
+
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/logger"
+)
+
+type requestLogTestHandler struct {
+	handle echo.HandlerFunc
+}
+
+func (h requestLogTestHandler) Register(e *echo.Echo) {
+	e.GET("/*", h.handle)
+}
+
+func TestServerRequestLogOmitsQuery(t *testing.T) {
+	token, _, err := auth.GenerateToken("request-log-user", "test-secret", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name       string
+		path       string
+		query      string
+		authed     bool
+		nilURL     bool
+		requestURI string
+		clearURI   bool
+		wantPath   string
+	}{
+		{name: "query token websocket", path: "/chat/ws", query: "token=" + token, authed: true, wantPath: "/chat/ws"},
+		{name: "authenticated media", path: "/bots/bot-1/media/file-1", query: "token=" + token, authed: true, wantPath: "/bots/bot-1/media/file-1"},
+		{name: "public media", path: "/channels/line/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/preview.jpg", query: "exp=123&sig=synthetic-signature", wantPath: "/channels/line/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/preview.jpg"},
+		{name: "OAuth code and state", path: "/oauth/mcp/callback", query: "code=synthetic-code&state=synthetic-state", wantPath: "/oauth/mcp/callback"},
+		{name: "provider OAuth", path: "/providers/oauth/callback", query: "code=synthetic-code&state=synthetic-state", wantPath: "/providers/oauth/callback"},
+		{name: "ordinary query", path: "/health", query: "search=synthetic-search&page=2", wantPath: "/health"},
+		{name: "encoded and repeated keys", path: "/health", query: "%74oken=synthetic-first&token=synthetic-second&%63ode=synthetic-code", wantPath: "/health"},
+		{name: "escaped path", path: "/assets/a%2Fb%20c", query: "value=synthetic-value", wantPath: "/assets/a%2Fb%20c"},
+		{name: "no query", path: "/health", wantPath: "/health"},
+		{name: "URL takes precedence", path: "/health", query: "value=synthetic-value", requestURI: "/other?value=synthetic-fallback", wantPath: "/health"},
+		{name: "URL missing at log time", path: "/health", query: "value=synthetic-value", nilURL: true, wantPath: "/health"},
+		{name: "escaped fallback", path: "/assets/a%2Fb", query: "value=synthetic-value", nilURL: true, wantPath: "/assets/a%2Fb"},
+		{name: "absolute fallback", path: "/health", nilURL: true, requestURI: "https://example.test/assets/a%2Fb?value=synthetic-fallback", wantPath: "/assets/a%2Fb"},
+		{name: "invalid fallback", path: "/health", nilURL: true, requestURI: "/%zz?value=synthetic-fallback", wantPath: ""},
+		{name: "empty fallback", path: "/health", nilURL: true, clearURI: true, wantPath: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			handled := false
+			// logger.New, not a bare JSON handler: request_id reaches the
+			// record through the correlation handler rather than being
+			// written by this middleware, so a logger assembled any other
+			// way would drop it — which is what this case would then be
+			// asserting about.
+			srv := NewServer(logger.New(&logs, "info", "json"), ":0", "test-secret", requestLogTestHandler{
+				handle: func(c echo.Context) error {
+					handled = true
+					if c.Request().URL.RawQuery != tc.query {
+						t.Error("request query changed before reaching handler")
+					}
+					if tc.authed {
+						userID, err := auth.UserIDFromContext(c)
+						if err != nil || userID != "request-log-user" {
+							t.Errorf("query token did not authenticate: user=%q err=%v", userID, err)
+						}
+					}
+					if tc.nilURL {
+						c.Request().URL = nil
+					}
+					return c.NoContent(http.StatusNoContent)
+				},
+			})
+			target := tc.path
+			if tc.query != "" {
+				target += "?" + tc.query
+			}
+			req := httptest.NewRequest(http.MethodGet, target, nil)
+			if tc.requestURI != "" {
+				req.RequestURI = tc.requestURI
+			}
+			if tc.clearURI {
+				req.RequestURI = ""
+			}
+			rec := httptest.NewRecorder()
+			srv.echo.ServeHTTP(rec, req)
+			if !handled || rec.Code != http.StatusNoContent {
+				t.Fatalf("handler=%v status=%d", handled, rec.Code)
+			}
+			if strings.Contains(logs.String(), token) || strings.Contains(logs.String(), "synthetic-") {
+				t.Fatal("request log exposed query values")
+			}
+			var entry struct {
+				URI       string `json:"uri"`
+				Method    string `json:"method"`
+				Status    int    `json:"status"`
+				RequestID string `json:"request_id"`
+			}
+			if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
+				t.Fatal(err)
+			}
+			if entry.URI != tc.wantPath || entry.Method != http.MethodGet || entry.Status != http.StatusNoContent || entry.RequestID == "" || entry.RequestID != rec.Header().Get(echo.HeaderXRequestID) {
+				t.Fatalf("request observability lost: %+v", entry)
+			}
+		})
+	}
+}
+
+// latency is the field an operator sorts by to find a slow request. Echo only
+// measures it when asked, and without that every line reads 0s.
+func TestServerRequestLogReportsLatency(t *testing.T) {
+	var logs bytes.Buffer
+	srv := NewServer(logger.New(&logs, "info", "json"), ":0", "test-secret", requestLogTestHandler{
+		handle: func(c echo.Context) error {
+			time.Sleep(20 * time.Millisecond)
+			return c.NoContent(http.StatusNoContent)
+		},
+	})
+	srv.echo.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/health", nil))
+
+	var entry struct {
+		Msg     string `json:"msg"`
+		Latency int64  `json:"latency"`
+	}
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		if err := json.Unmarshal([]byte(line), &entry); err == nil && entry.Msg == "request" {
+			break
+		}
+	}
+	if entry.Msg != "request" {
+		t.Fatalf("no request line in %s", logs.String())
+	}
+	if got := time.Duration(entry.Latency); got < 20*time.Millisecond {
+		t.Errorf("latency = %v, want at least the 20ms the handler took", got)
+	}
+}
+
+type routeLogTestHandler struct{}
+
+func (routeLogTestHandler) Register(e *echo.Echo) {
+	e.GET("/bots/:bot_id/media/:asset_id", func(c echo.Context) error {
+		return c.NoContent(http.StatusNoContent)
+	})
+}
+
+// route is what an operator groups the access log by: the template the router
+// matched, not the concrete path with its IDs. A request that matched nothing
+// has no template to report.
+func TestServerRequestLogReportsRoute(t *testing.T) {
+	cases := []struct {
+		name      string
+		path      string
+		wantRoute string
+		wantField bool
+	}{
+		{name: "matched", path: "/bots/bot-1/media/file-1", wantRoute: "/bots/:bot_id/media/:asset_id", wantField: true},
+		{name: "unmatched", path: "/no-such-route/bot-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			srv := NewServer(logger.New(&logs, "info", "json"), ":0", "test-secret", routeLogTestHandler{})
+			srv.echo.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, tc.path, nil))
+
+			var entry map[string]any
+			for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+				var candidate map[string]any
+				if err := json.Unmarshal([]byte(line), &candidate); err == nil && candidate["msg"] == "request" {
+					entry = candidate
+					break
+				}
+			}
+			if entry == nil {
+				t.Fatalf("no request line in %s", logs.String())
+			}
+			route, ok := entry["route"]
+			if ok != tc.wantField || (ok && route != tc.wantRoute) {
+				t.Fatalf("route = %v (present %v), want %q (present %v)", route, ok, tc.wantRoute, tc.wantField)
+			}
+			if entry["uri"] != tc.path {
+				t.Fatalf("uri = %v, want %q", entry["uri"], tc.path)
+			}
+		})
+	}
+}
+
+type committedLogTestHandler struct {
+	err error
+}
+
+func (h committedLogTestHandler) Register(e *echo.Echo) {
+	e.GET("/stream", func(c echo.Context) error {
+		c.Response().WriteHeader(http.StatusOK)
+		_, _ = c.Response().Write([]byte("data: {\"type\":\"error\"}\n\n"))
+		return h.err
+	})
+}
+
+// A handler that wrote its own body returns the error the body was rendered
+// from. The record attributes it by the rule of the error handler, without a
+// second response.
+func TestServerRequestLogAttributesAnErrorReturnedAfterTheResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name, level, fault, reason string
+		err                        error
+	}{
+		{name: "http error", err: echo.NewHTTPError(http.StatusForbidden).WithInternal(errors.New("synthetic signature mismatch")), level: "INFO", fault: "client", reason: string(apperror.CodeHTTPForbidden)},
+		{name: "catalog error", err: apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("synthetic refused"), nil), level: "ERROR", fault: "server", reason: string(apperror.CodeWorkspaceUnreachable)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			srv := NewServer(logger.New(&logs, "info", "json"), ":0", "test-secret", committedLogTestHandler{err: tc.err})
+			rec := httptest.NewRecorder()
+			token, _, err := auth.GenerateToken("request-log-user", "test-secret", time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodGet, "/stream", nil)
+			req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+			srv.echo.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "problem") || strings.Count(rec.Body.String(), "data:") != 1 {
+				t.Fatalf("response was answered again: %d %s", rec.Code, rec.Body.String())
+			}
+			var entry map[string]any
+			for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+				var candidate map[string]any
+				if err := json.Unmarshal([]byte(line), &candidate); err == nil && candidate["msg"] == "request" {
+					entry = candidate
+				}
+			}
+			if entry == nil {
+				t.Fatalf("no request line in %s", logs.String())
+			}
+			if entry["level"] != tc.level || entry["fault"] != tc.fault || entry["reason"] != tc.reason {
+				t.Fatalf("record level=%v fault=%v reason=%v, want %s %s %s", entry["level"], entry["fault"], entry["reason"], tc.level, tc.fault, tc.reason)
+			}
+		})
+	}
+}

@@ -56,6 +56,7 @@ import {
   NvidiaColor,
   Ollama,
   Openai,
+  OpencodeGo,
   Openrouter,
   Perplexity,
   PerplexityColor,
@@ -87,6 +88,7 @@ import {
 export const iconMap: Record<string, Component> = {
   'slack': Slack,
   'openai': Openai,
+  'opencode-go': OpencodeGo,
   'anthropic': Anthropic,
   'github-copilot': GithubCopilot,
   'google': Google,

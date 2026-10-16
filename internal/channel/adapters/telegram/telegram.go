@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/common"
 	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/redact"
@@ -132,7 +134,7 @@ func (a *TelegramAdapter) SetAssetOpener(opener assetOpener) {
 
 var getOrCreateBotForTest func(a *TelegramAdapter, token, configID string) (*tele.Bot, error)
 
-func (a *TelegramAdapter) getOrCreateBot(cfg Config, configID string) (*tele.Bot, error) {
+func (a *TelegramAdapter) getOrCreateBot(_ context.Context, cfg Config, configID string) (*tele.Bot, error) {
 	redact.SetSecrets("telegram:"+configID, cfg.BotToken)
 	if getOrCreateBotForTest != nil {
 		return getOrCreateBotForTest(a, cfg.BotToken, configID)
@@ -151,9 +153,6 @@ func (a *TelegramAdapter) getOrCreateBot(cfg Config, configID string) (*tele.Bot
 	}
 	httpClient, err := common.NewHTTPClient(30*time.Second, cfg.HTTPProxy)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.Error("create bot http client failed", slog.String("config_id", configID), slog.Any("error", err))
-		}
 		return nil, err
 	}
 	bot, err = tele.NewBot(tele.Settings{
@@ -162,14 +161,17 @@ func (a *TelegramAdapter) getOrCreateBot(cfg Config, configID string) (*tele.Bot
 		Client: httpClient,
 		OnError: func(handlerErr error, _ tele.Context) {
 			if a.logger != nil {
+				// Plain Warn: this bot is cached and outlives the call that
+				// created it, so ctx here is whichever request happened to be
+				// first. Correlating an SDK error years of requests later
+				// with that one would name a request that has nothing to do
+				// with it. The error belongs to no request.
+				//logctx:plain
 				a.logger.Warn("telegram bot sdk error", slog.String("config_id", configID), slog.Any("error", handlerErr))
 			}
 		},
 	})
 	if err != nil {
-		if a.logger != nil {
-			a.logger.Error("create bot failed", slog.String("config_id", configID), slog.Any("error", err))
-		}
 		return nil, err
 	}
 	a.bots[cacheKey] = bot
@@ -333,7 +335,7 @@ func (*TelegramAdapter) BuildUserConfig(identity channel.Identity) map[string]an
 // registerCommandMenu publishes the curated slash-command list to Telegram via
 // setMyCommands, so the bot's "/" menu is populated automatically (no per-bot
 // setup). Best-effort: errors are logged, never fatal.
-func (a *TelegramAdapter) registerCommandMenu(bot *tele.Bot, configID string) {
+func (a *TelegramAdapter) registerCommandMenu(ctx context.Context, bot *tele.Bot, configID string) {
 	// The native command menu is registered once per connection, before any
 	// per-bot command-UI locale is available at this transport layer, so it is
 	// rendered in the server default locale. TODO: thread the bot's
@@ -345,38 +347,35 @@ func (a *TelegramAdapter) registerCommandMenu(bot *tele.Bot, configID string) {
 	}
 	if err := bot.SetCommands(cmds); err != nil {
 		if a.logger != nil {
-			a.logger.Warn("register command menu failed", slog.String("config_id", configID), slog.Any("error", err))
+			a.logger.WarnContext(ctx, "register command menu failed", slog.String("config_id", configID), slog.Any("error", err))
 		}
 		return
 	}
 	if a.logger != nil {
-		a.logger.Info("registered command menu", slog.String("config_id", configID), slog.Int("count", len(cmds)))
+		a.logger.InfoContext(ctx, "registered command menu", slog.String("config_id", configID), slog.Int("count", len(cmds)))
 	}
 }
 
 // Connect starts long-polling for Telegram updates and forwards messages to the handler.
 func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler) (channel.Connection, error) {
 	if a.logger != nil {
-		a.logger.Info("start", slog.String("config_id", cfg.ID))
+		a.logger.InfoContext(ctx, "start", slog.String("config_id", cfg.ID))
 	}
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.Error("decode config failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
 		return nil, err
 	}
-	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
+	bot, err := a.getOrCreateBot(ctx, telegramCfg, cfg.ID)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.Error("create bot failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
 		return nil, err
 	}
 	// Advertise the slash-command menu so users discover and tap commands from
 	// Telegram's native "/" menu without any per-bot configuration. Non-blocking
 	// and best-effort — a failure here must not stop the bot from connecting.
-	go a.registerCommandMenu(bot, cfg.ID)
+	// context.WithoutCancel, not ctx: this outlives Connect, so the
+	// request's cancellation must not reach it while its correlation
+	// values still should.
+	go a.registerCommandMenu(context.WithoutCancel(ctx), bot, cfg.ID)
 	connCtx, cancel := context.WithCancel(ctx)
 	mediaGroups := make(map[string]*telegramMediaGroupBuffer)
 	var mediaGroupsMu sync.Mutex
@@ -466,6 +465,12 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 		}
 		if a.seenTelegramUpdate(cfg.ID, upd.ID, time.Now()) {
 			if a.logger != nil {
+				// Plain Debug. connCtx descends from the call that opened
+				// this connection, and WithoutCancel kept that call's values,
+				// so any context here carries an id belonging to whichever
+				// reconcile happened to start the poller — not to this
+				// update, which arrived from Telegram on its own.
+				//logctx:plain
 				a.logger.Debug("skip duplicate telegram update",
 					slog.String("config_id", cfg.ID),
 					slog.Int("update_id", upd.ID),
@@ -504,9 +509,11 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 
 	go bot.Start()
 
-	stop := func(_ context.Context) error {
+	stop := func(stopCtx context.Context) error {
 		if a.logger != nil {
-			a.logger.Info("stop", slog.String("config_id", cfg.ID))
+			// The caller's shutdown context, not the one that opened this
+			// connection: by the time stop runs, that one is usually done.
+			a.logger.InfoContext(stopCtx, "stop", slog.String("config_id", cfg.ID))
 		}
 		bot.Stop()
 		cancel()
@@ -543,11 +550,10 @@ func isTelegramMediaGroupForChat(groupKey string, chatID int64) bool {
 }
 
 func (a *TelegramAdapter) dispatchInbound(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, msg channel.InboundMessage) {
-	a.logTelegramInbound(cfg.ID, msg)
+	a.logTelegramInbound(ctx, cfg.ID, msg)
 	go func() {
-		if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-			a.logger.Error("handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
+		// The inbound unit writes the result line of the message.
+		_ = handler(ctx, cfg, msg)
 	}()
 }
 
@@ -763,7 +769,7 @@ func (a *TelegramAdapter) handleAskUserWizardCallback(ctx context.Context, cfg c
 	})
 	if err != nil {
 		if a.logger != nil {
-			a.logger.Warn("telegram: ask_user advance failed", slog.Any("error", err))
+			a.logger.WarnContext(ctx, "telegram: ask_user advance failed", slog.Any("error", err))
 		}
 		_ = bot.Respond(cb, &tele.CallbackResponse{Text: loc.T("cmd.userInput.unavailable"), ShowAlert: true})
 		return true
@@ -791,7 +797,7 @@ func (a *TelegramAdapter) handleAskUserWizardCallback(ctx context.Context, cfg c
 	// Free-text input is opt-in. Auto-prompting on page entry adds another
 	// message and reply preview before the user has chosen to answer.
 	if needText {
-		a.promptAskUserText(bot, loc, req, parsed.QIndex, chatID, msgID)
+		a.promptAskUserText(ctx, bot, loc, req, parsed.QIndex, chatID, msgID)
 	}
 	return true
 }
@@ -818,7 +824,7 @@ func interactionOpFromCallback(cb askUserCallback) (op userinput.InteractionOp, 
 
 // promptAskUserText sends a force-reply prompt for the question at qIndex and
 // binds the sent message to the request so the next reply routes back here.
-func (a *TelegramAdapter) promptAskUserText(bot *tele.Bot, loc *i18n.Localizer, req userinput.Request, qIndex int, cardChatID int64, cardMsgID int) {
+func (a *TelegramAdapter) promptAskUserText(ctx context.Context, bot *tele.Bot, loc *i18n.Localizer, req userinput.Request, qIndex int, cardChatID int64, cardMsgID int) {
 	if bot == nil || cardChatID == 0 || qIndex < 0 || qIndex >= len(req.UIPayload.Questions) {
 		return
 	}
@@ -838,7 +844,7 @@ func (a *TelegramAdapter) promptAskUserText(bot *tele.Bot, loc *i18n.Localizer, 
 	sent, err := bot.Send(tele.ChatID(cardChatID), prompt, opts)
 	if err != nil || sent == nil {
 		if a.logger != nil {
-			a.logger.Warn("telegram: ask_user force-reply prompt failed", slog.Any("error", err))
+			a.logger.WarnContext(ctx, "telegram: ask_user force-reply prompt failed", slog.Any("error", err))
 		}
 		return
 	}
@@ -883,7 +889,7 @@ func (a *TelegramAdapter) tryHandleAskUserTextReply(ctx context.Context, cfg cha
 	})
 	if err != nil || !result.Handled {
 		if err != nil && a.logger != nil {
-			a.logger.Warn("telegram: ask_user text answer failed", slog.Any("error", err))
+			a.logger.WarnContext(ctx, "telegram: ask_user text answer failed", slog.Any("error", err))
 		}
 		if bot != nil {
 			key := "cmd.userInput.expired"
@@ -932,30 +938,32 @@ func (a *TelegramAdapter) submitAskUser(ctx context.Context, cfg channel.Channel
 	if !ok {
 		return
 	}
-	a.logTelegramInbound(cfg.ID, msg)
+	a.logTelegramInbound(ctx, cfg.ID, msg)
 	go func() {
 		if err := a.finishAskUserSubmission(ctx, cfg, handler, bot, loc, req, msg, cardChatID, cardMsgID); err != nil && a.logger != nil {
-			a.logger.Warn("telegram: ask_user submit failed", slog.Any("error", err))
+			a.logger.WarnContext(ctx, "telegram: ask_user submit failed", slog.Any("error", err))
 		}
 	}()
 }
 
 func (a *TelegramAdapter) finishAskUserSubmission(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, bot *tele.Bot, loc *i18n.Localizer, req userinput.Request, msg channel.InboundMessage, cardChatID int64, cardMsgID int) error {
-	handlerErr := handler(ctx, cfg, msg)
+	// The inbound unit writes the result line of the message, so its error is
+	// not returned here.
+	_ = handler(ctx, cfg, msg)
 	// Ingress can return nil after a permission denial. Only durable acceptance
 	// authorizes a submitted summary, never mere completion of the handler.
 	accepted, err := a.userInput.Get(ctx, req.ID)
 	if err != nil {
-		return errors.Join(handlerErr, err)
+		return err
 	}
 	if accepted.Status != userinput.StatusSubmitted {
-		return handlerErr
+		return nil
 	}
 	if bot != nil && cardChatID != 0 && cardMsgID != 0 {
 		summary := formatAskUserSubmittedSummary(loc, req.UIPayload, req.Interaction)
-		return errors.Join(handlerErr, editTelegramMessageTextWithActions(bot, cardChatID, cardMsgID, summary, "", nil))
+		return editTelegramMessageTextWithActions(bot, cardChatID, cardMsgID, summary, "", nil)
 	}
-	return handlerErr
+	return nil
 }
 
 func (a *TelegramAdapter) buildAskUserSubmitInbound(cfg channel.ChannelConfig, update *tele.Update, req userinput.Request, cardMsgID int) (channel.InboundMessage, bool) {
@@ -1187,18 +1195,17 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	}, true
 }
 
-func (a *TelegramAdapter) logTelegramInbound(configID string, msg channel.InboundMessage) {
+func (a *TelegramAdapter) logTelegramInbound(ctx context.Context, configID string, msg channel.InboundMessage) {
 	if a.logger == nil {
 		return
 	}
-	a.logger.Info(
+	a.logger.InfoContext(ctx,
 		"inbound received",
 		slog.String("config_id", configID),
 		slog.String("chat_type", msg.Conversation.Type),
 		slog.String("chat_id", msg.Conversation.ID),
 		slog.String("user_id", msg.Sender.Attribute("user_id")),
 		slog.String("username", msg.Sender.Attribute("username")),
-		slog.String("text", common.SummarizeText(msg.Message.Text)),
 		slog.Int("attachments", len(msg.Message.Attachments)),
 	)
 }
@@ -1207,9 +1214,6 @@ func (a *TelegramAdapter) logTelegramInbound(configID string, msg channel.Inboun
 func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.PreparedOutboundMessage) error {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.Error("decode config failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
 		return err
 	}
 	to := strings.TrimSpace(msg.Target)
@@ -1219,7 +1223,7 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 	if err := validateTelegramPreparedOutbound(msg); err != nil {
 		return err
 	}
-	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
+	bot, err := a.getOrCreateBot(ctx, telegramCfg, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -1245,9 +1249,6 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 				actions = msg.Message.Message.Actions
 			}
 			if err := sendTelegramAttachmentWithAssets(ctx, bot, to, att, caption, applyReply, parseMode, actions); err != nil {
-				if a.logger != nil {
-					a.logger.Error("send attachment failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-				}
 				return err
 			}
 		}
@@ -1260,7 +1261,7 @@ func (a *TelegramAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, m
 		if _, _, err := sendTelegramRichMessageReturnMessage(bot, to, rich, replyTo, msg.Message.Message.Actions); err == nil {
 			return nil
 		} else if a.logger != nil {
-			a.logger.Warn("telegram: rich message send failed, falling back to text",
+			a.logger.WarnContext(ctx, "telegram: rich message send failed, falling back to text",
 				slog.String("config_id", cfg.ID),
 				slog.Any("error", err),
 			)
@@ -1319,12 +1320,12 @@ func runeLenTelegramText(text string) int {
 // satisfying channel.MessageEditor. It powers interactive pagination/selection:
 // passing empty Actions removes the keyboard. Channel-username targets are not
 // supported (edits require a numeric chat ID).
-func (a *TelegramAdapter) Update(_ context.Context, cfg channel.ChannelConfig, target string, messageID string, msg channel.PreparedMessage) error {
+func (a *TelegramAdapter) Update(ctx context.Context, cfg channel.ChannelConfig, target string, messageID string, msg channel.PreparedMessage) error {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err
 	}
-	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
+	bot, err := a.getOrCreateBot(ctx, telegramCfg, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -1344,7 +1345,7 @@ func (a *TelegramAdapter) Update(_ context.Context, cfg channel.ChannelConfig, t
 		if err := editTelegramRichMessage(bot, chatID, mid, rich, msg.Message.Actions); err == nil {
 			return nil
 		} else if a.logger != nil {
-			a.logger.Warn("telegram: rich message edit failed, falling back to text",
+			a.logger.WarnContext(ctx, "telegram: rich message edit failed, falling back to text",
 				slog.String("config_id", cfg.ID),
 				slog.Any("error", err),
 			)
@@ -1354,12 +1355,12 @@ func (a *TelegramAdapter) Update(_ context.Context, cfg channel.ChannelConfig, t
 }
 
 // Unsend deletes a previously-sent message, satisfying channel.MessageEditor.
-func (a *TelegramAdapter) Unsend(_ context.Context, cfg channel.ChannelConfig, target string, messageID string) error {
+func (a *TelegramAdapter) Unsend(ctx context.Context, cfg channel.ChannelConfig, target string, messageID string) error {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err
 	}
-	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
+	bot, err := a.getOrCreateBot(ctx, telegramCfg, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -2288,7 +2289,7 @@ func (a *TelegramAdapter) ResolveAttachment(ctx context.Context, cfg channel.Cha
 	if err != nil {
 		return channel.AttachmentPayload{}, err
 	}
-	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
+	bot, err := a.getOrCreateBot(ctx, telegramCfg, cfg.ID)
 	if err != nil {
 		return channel.AttachmentPayload{}, err
 	}
@@ -2301,12 +2302,12 @@ func (a *TelegramAdapter) ResolveAttachment(ctx context.Context, cfg channel.Cha
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
-		return channel.AttachmentPayload{}, fmt.Errorf("build download request: %w", err)
+		return channel.AttachmentPayload{}, errs.Wrap(withoutFileURLPath(err), "build telegram download request")
 	}
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req) //nolint:gosec // G704: URL is a Telegram file download URL from the Telegram Bot API
 	if err != nil {
-		return channel.AttachmentPayload{}, fmt.Errorf("download attachment: %w", err)
+		return channel.AttachmentPayload{}, errs.WrapDependency(withoutFileURLPath(err), "download telegram attachment")
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer func() {
@@ -2342,13 +2343,31 @@ func (a *TelegramAdapter) ResolveAttachment(ctx context.Context, cfg channel.Cha
 	}, nil
 }
 
+// withoutFileURLPath removes the path and query from the URL that net/http
+// puts in a request error. A Telegram file URL carries the bot token in its
+// path, and with a custom file endpoint it may sit anywhere after the host.
+// The *url.Error is rebuilt rather than reworded, so errors.Is and errors.As
+// still reach its Err and Timeout still reports. http.NewRequestWithContext
+// and http.Client.Do return the *url.Error itself, never a wrapper around it.
+func withoutFileURLPath(err error) error {
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) {
+		return err
+	}
+	origin := "[redacted]"
+	if u, parseErr := url.Parse(urlErr.URL); parseErr == nil && u.Host != "" {
+		origin = u.Scheme + "://" + u.Host + "/[redacted]"
+	}
+	return &url.Error{Op: urlErr.Op, URL: origin, Err: urlErr.Err}
+}
+
 // DiscoverSelf retrieves the bot's own identity from the Telegram platform.
-func (a *TelegramAdapter) DiscoverSelf(_ context.Context, credentials map[string]any) (map[string]any, string, error) {
+func (a *TelegramAdapter) DiscoverSelf(ctx context.Context, credentials map[string]any) (map[string]any, string, error) {
 	cfg, err := parseConfig(credentials)
 	if err != nil {
 		return nil, "", err
 	}
-	bot, err := a.getOrCreateBot(cfg, "discover")
+	bot, err := a.getOrCreateBot(ctx, cfg, "discover")
 	if err != nil {
 		return nil, "", fmt.Errorf("telegram discover self: %w", err)
 	}
@@ -2406,24 +2425,53 @@ func truncateTelegramText(text string) string {
 	return textutil.TruncateRunesWithSuffix(text, telegramMaxMessageLength, "...")
 }
 
+// telegramTypingRefreshInterval re-sends the typing action before Telegram
+// clears it, about five seconds after it was sent.
+const telegramTypingRefreshInterval = 4 * time.Second
+
+var _ channel.ProcessingStatusRefresher = (*TelegramAdapter)(nil)
+
 // ProcessingStarted sends a "typing" chat action to indicate processing.
-func (a *TelegramAdapter) ProcessingStarted(_ context.Context, cfg channel.ChannelConfig, _ channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
+func (a *TelegramAdapter) ProcessingStarted(ctx context.Context, cfg channel.ChannelConfig, _ channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
 	chatID := strings.TrimSpace(info.ReplyTarget)
 	if chatID == "" {
 		return channel.ProcessingStatusHandle{}, nil
 	}
-	telegramCfg, err := parseConfig(cfg.Credentials)
-	if err != nil {
-		return channel.ProcessingStatusHandle{}, err
-	}
-	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
+	bot, err := a.processingBot(ctx, cfg)
 	if err != nil {
 		return channel.ProcessingStatusHandle{}, err
 	}
 	if err := sendTelegramTyping(bot, chatID); err != nil && a.logger != nil {
-		a.logger.Warn("send typing action failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+		a.logger.WarnContext(ctx, "send typing action failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 	}
 	return channel.ProcessingStatusHandle{}, nil
+}
+
+// ProcessingRefreshInterval implements channel.ProcessingStatusRefresher.
+func (*TelegramAdapter) ProcessingRefreshInterval() time.Duration {
+	return telegramTypingRefreshInterval
+}
+
+// ProcessingRefresh re-sends the "typing" chat action so it stays visible
+// for the whole turn: model latency, reasoning and tool calls included.
+func (a *TelegramAdapter) ProcessingRefresh(ctx context.Context, cfg channel.ChannelConfig, _ channel.InboundMessage, info channel.ProcessingStatusInfo, _ channel.ProcessingStatusHandle) error {
+	chatID := strings.TrimSpace(info.ReplyTarget)
+	if chatID == "" {
+		return nil
+	}
+	bot, err := a.processingBot(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	return sendTelegramTyping(bot, chatID)
+}
+
+func (a *TelegramAdapter) processingBot(ctx context.Context, cfg channel.ChannelConfig) (*tele.Bot, error) {
+	telegramCfg, err := parseConfig(cfg.Credentials)
+	if err != nil {
+		return nil, err
+	}
+	return a.getOrCreateBot(ctx, telegramCfg, cfg.ID)
 }
 
 // ProcessingCompleted is a no-op for Telegram (typing indicator clears automatically).
@@ -2465,12 +2513,12 @@ func clearTelegramReaction(bot *tele.Bot, chatID, messageID string) error {
 }
 
 // React adds an emoji reaction to a message (implements channel.Reactor).
-func (a *TelegramAdapter) React(_ context.Context, cfg channel.ChannelConfig, target string, messageID string, emoji string) error {
+func (a *TelegramAdapter) React(ctx context.Context, cfg channel.ChannelConfig, target string, messageID string, emoji string) error {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err
 	}
-	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
+	bot, err := a.getOrCreateBot(ctx, telegramCfg, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -2479,12 +2527,12 @@ func (a *TelegramAdapter) React(_ context.Context, cfg channel.ChannelConfig, ta
 
 // Unreact removes the bot's reaction from a message (implements channel.Reactor).
 // The emoji parameter is ignored; Telegram clears all bot reactions at once.
-func (a *TelegramAdapter) Unreact(_ context.Context, cfg channel.ChannelConfig, target string, messageID string, _ string) error {
+func (a *TelegramAdapter) Unreact(ctx context.Context, cfg channel.ChannelConfig, target string, messageID string, _ string) error {
 	telegramCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err
 	}
-	bot, err := a.getOrCreateBot(telegramCfg, cfg.ID)
+	bot, err := a.getOrCreateBot(ctx, telegramCfg, cfg.ID)
 	if err != nil {
 		return err
 	}
@@ -2502,7 +2550,7 @@ func (a *TelegramAdapter) authorizeAskUser(ctx context.Context, cfg channel.Chan
 	allowed, err := a.userInputAuthorize(ctx, cfg, msg)
 	if err != nil {
 		if a.logger != nil {
-			a.logger.Warn("telegram: ask_user authorization failed", slog.Any("error", err))
+			a.logger.WarnContext(ctx, "telegram: ask_user authorization failed", slog.Any("error", err))
 		}
 		return false
 	}

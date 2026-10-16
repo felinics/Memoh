@@ -5,14 +5,16 @@ import (
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestTruncateStepToolResultStubsEachOversizedPartIndependently(t *testing.T) {
 	t.Parallel()
 
 	msg := sdk.Message{Role: sdk.MessageRoleTool, Content: []sdk.MessagePart{
-		sdk.ToolResultPart{ToolCallID: "call-big", ToolName: "exec", Result: strings.Repeat("x", 1_000)},
-		sdk.ToolResultPart{ToolCallID: "call-small", ToolName: "exec", Result: "ok: created id-42"},
+		sdk.ToolResultPart{ToolCallID: "call-big", ToolName: "exec", Result: toolexec.OutputFromValue(strings.Repeat("x", 1_000))},
+		sdk.ToolResultPart{ToolCallID: "call-small", ToolName: "exec", Result: toolexec.OutputFromValue("ok: created id-42")},
 	}}
 
 	out, changed := TruncateStepToolResult(msg, 512)
@@ -20,10 +22,10 @@ func TestTruncateStepToolResultStubsEachOversizedPartIndependently(t *testing.T)
 		t.Fatal("oversized part must be stubbed")
 	}
 	big, small := out.Content[0].(sdk.ToolResultPart), out.Content[1].(sdk.ToolResultPart)
-	if text, _ := big.Result.(string); !strings.Contains(text, "pruned") {
+	if text, _ := toolexec.OutputValue(big.Result).(string); !strings.Contains(text, "pruned") {
 		t.Fatalf("oversized part must carry the stub, got %v", big.Result)
 	}
-	if small.Result != "ok: created id-42" {
+	if toolexec.OutputValue(small.Result) != "ok: created id-42" {
 		t.Fatalf("small sibling must survive verbatim, got %v", small.Result)
 	}
 }
@@ -35,7 +37,7 @@ func TestTruncateStepToolResultPreservesErrorAndCacheMetadata(t *testing.T) {
 	msg := sdk.Message{Role: sdk.MessageRoleTool, Content: []sdk.MessagePart{
 		sdk.ToolResultPart{
 			ToolCallID: "call-fail", ToolName: "exec",
-			Result: strings.Repeat("stderr ", 200), IsError: true, CacheControl: cache,
+			Result: toolexec.OutputFromValue(strings.Repeat("stderr ", 200)), IsError: true, CacheControl: cache,
 		},
 	}}
 
@@ -56,7 +58,7 @@ func TestTruncateStepToolResultLeavesSmallPartsUntouched(t *testing.T) {
 	t.Parallel()
 
 	msg := sdk.Message{Role: sdk.MessageRoleTool, Content: []sdk.MessagePart{
-		sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "exec", Result: "small"},
+		sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "exec", Result: toolexec.OutputFromValue("small")},
 	}}
 	if _, changed := TruncateStepToolResult(msg, 512); changed {
 		t.Fatal("under-threshold results must pass through unchanged")

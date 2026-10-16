@@ -17,6 +17,8 @@ import (
 	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/partmeta"
 )
 
 const (
@@ -198,7 +200,7 @@ func (p *Provider) DoTranscribe(ctx context.Context, params sdk.TranscriptionPar
 	}
 	out := &sdk.TranscriptionResult{
 		Text: *message.Content, DurationSeconds: result.Usage.Seconds,
-		ProviderMetadata: map[string]any{"id": result.ID, "model": result.Model},
+		ProviderMetadata: partmeta.Fold(map[string]any{"id": result.ID, "model": result.Model}),
 	}
 	for _, annotation := range message.Annotations {
 		if annotation.Type == "audio_info" {

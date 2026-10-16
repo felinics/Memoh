@@ -52,6 +52,15 @@
               <span>{{ $t('supermarket.installPreviewDependency') }}</span>
             </li>
             <li
+              v-for="prerequisite in prerequisites"
+              :key="prerequisite.id"
+              class="flex items-center gap-2"
+            >
+              <App class="size-3.5 shrink-0" />
+              <span class="font-mono">{{ prerequisite.id }}</span>
+              <span>{{ $t('supermarket.installPreviewPrerequisite', { by: prerequisite.requiredBy.join(', ') }) }}</span>
+            </li>
+            <li
               v-for="connector in pkg.connectors"
               :key="connector.type"
               class="flex items-center gap-2"
@@ -99,7 +108,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQuery } from '@pinia/colada'
@@ -117,6 +126,7 @@ import {
 } from '@felinic/ui'
 import {
   getConnectorsCatalog,
+  getWorkspaceDependencies,
   type HandlersSupermarketAppDescriptor,
 } from '@memohai/sdk'
 import BotSelect from '@/components/bot-select/index.vue'
@@ -124,6 +134,7 @@ import AppProgressDialog from '@/pages/bots/components/app-progress-dialog.vue'
 import { useAppOperation } from '@/pages/bots/composables/useAppOperation'
 import { prepareConnectorOAuthPopup } from '@/composables/useConnectorOAuth'
 import { appDisplayName } from '@/composables/api/useApps'
+import { prerequisiteOrder } from '@/utils/workspace-dependency'
 
 const props = defineProps<{
   open: boolean
@@ -153,6 +164,24 @@ const catalogQuery = useQuery({
   query: async () => (await getConnectorsCatalog({ throwOnError: true })).data,
   enabled: () => props.open && !!props.pkg?.connectors.length,
 })
+// Dependencies install what they require first; list those too, with the
+// direct dependencies that need them.
+const dependencyCatalogQuery = useQuery({
+  key: () => ['workspace-dependency-catalog'],
+  query: async () => (await getWorkspaceDependencies({ throwOnError: true })).data,
+  enabled: () => props.open && !!props.pkg?.dependencies.length,
+})
+const prerequisites = computed(() => {
+  const direct = props.pkg?.dependencies ?? []
+  const requires = new Map((dependencyCatalogQuery.data.value?.items ?? []).map(item => [item.id ?? '', item.requires ?? []]))
+  const order = prerequisiteOrder(direct, id => requires.get(id))
+  const nodes = [...direct, ...order]
+  return order.map(id => ({
+    id,
+    requiredBy: nodes.filter(node => requires.get(node)?.includes(id)),
+  }))
+})
+
 function closePopup() {
   oauthPopup.value?.close()
   oauthPopup.value = null

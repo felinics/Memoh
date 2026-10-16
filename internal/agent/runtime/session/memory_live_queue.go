@@ -428,4 +428,27 @@ func (b *MemoryBackend) ReleaseFollowUp(ctx context.Context, key Key, ref Follow
 	return err
 }
 
+func (b *MemoryBackend) RejectFollowUp(ctx context.Context, key Key, ref FollowUpClaimRef, errorCode string) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return ErrLiveQueueUnavailable
+	}
+	if err := validateFollowUpClaim(key, ref); err != nil {
+		return err
+	}
+	if strings.TrimSpace(errorCode) == "" {
+		return ErrQueueInvalidReference
+	}
+	state := b.followUpQueues[key.String()]
+	err := state.reject(ref, errorCode, time.Now().UTC())
+	if err == nil {
+		b.followUpQueues[key.String()] = state
+	}
+	return err
+}
+
 var _ LiveQueueBackend = (*MemoryBackend)(nil)

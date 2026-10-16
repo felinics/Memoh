@@ -57,7 +57,6 @@ func TestTeamIDBackfilledOnFreshInstall(t *testing.T) {
 			t.Fatalf("team table %q has %d rows with NULL team_id after backfill", tbl, nulls)
 		}
 	}
-
 }
 
 // quoteIdent double-quotes a SQL identifier for safe interpolation of a table

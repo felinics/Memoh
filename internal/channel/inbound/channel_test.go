@@ -20,6 +20,7 @@ import (
 	"github.com/felinics/memoh/internal/acl"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/discuss"
@@ -30,6 +31,7 @@ import (
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/command"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/media"
 	skillset "github.com/felinics/memoh/internal/skills"
@@ -533,6 +535,10 @@ func (f *fakeChatACL) Evaluate(_ context.Context, req acl.EvaluateRequest) (bool
 	return f.allowed, nil
 }
 
+func (*fakeChatACL) OwnerOnlyChannel(_ string) bool {
+	return false
+}
+
 type fakeMediaIngestor struct {
 	nextID          string
 	nextMime        string
@@ -695,6 +701,38 @@ func (f *fakeChatService) Persist(_ context.Context, input messagepkg.PersistInp
 	}
 	f.persisted = append(f.persisted, msg)
 	return msg, nil
+}
+
+func TestHandleInboundLogsDoNotIncludeMessageText(t *testing.T) {
+	const messageText = "private inbound message 82f0c"
+	for _, conversationType := range []string{channel.ConversationTypePrivate, channel.ConversationTypeGroup} {
+		t.Run(conversationType, func(t *testing.T) {
+			var logs bytes.Buffer
+			log := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			identitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "identity-1"}}
+			chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "route-1"}}
+			processor := NewChannelInboundProcessor(log, nil, chatSvc, chatSvc, &fakeChatGateway{}, identitySvc, &fakePolicyService{}, "", 0)
+			msg := channel.InboundMessage{
+				BotID: "bot-1", Channel: channel.ChannelType("telegram"),
+				Message:     channel.Message{ID: "msg-1", Text: messageText},
+				ReplyTarget: "chat-1", Sender: channel.Identity{SubjectID: "user-1"},
+				Conversation: channel.Conversation{ID: "chat-1", Type: conversationType},
+			}
+			cfg := channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1", ChannelType: msg.Channel}
+			if err := processor.HandleInbound(context.Background(), cfg, msg, &fakeReplySender{}); err != nil {
+				t.Fatalf("HandleInbound() error = %v", err)
+			}
+			if !strings.Contains(logs.String(), `"msg":"inbound handle start"`) || !strings.Contains(logs.String(), `"message_id":"msg-1"`) {
+				t.Fatal("inbound start record or identifier missing")
+			}
+			if conversationType == channel.ConversationTypeGroup && !strings.Contains(logs.String(), `"msg":"inbound not triggering assistant (group trigger condition not met)"`) {
+				t.Fatal("passive inbound record missing")
+			}
+			if strings.Contains(logs.String(), messageText) || strings.Contains(logs.String(), `"query":`) {
+				t.Fatal("inbound log exposed message text or query field")
+			}
+		})
+	}
 }
 
 func TestChannelInboundProcessorWithIdentity(t *testing.T) {
@@ -992,7 +1030,8 @@ func TestChannelInboundProcessorQueueCommandsUseResolvedSession(t *testing.T) {
 					t.Fatal("steer was not admitted")
 				}
 				input := queueHandler.steerInputs[len(queueHandler.steerInputs)-1]
-				if input.SessionID != "session-1" || input.Text != tc.wantPayload || input.InvocationID == "" {
+				if input.SessionID != "session-1" || input.Text != tc.wantPayload || input.InvocationID == "" ||
+					input.TeamID != cfg.TeamID || input.ChannelIdentityID != "channelIdentity-1" {
 					t.Fatalf("steer input = %#v", input)
 				}
 			} else {
@@ -1000,7 +1039,8 @@ func TestChannelInboundProcessorQueueCommandsUseResolvedSession(t *testing.T) {
 					t.Fatal("follow-up was not admitted")
 				}
 				input := queueHandler.followUpInputs[len(queueHandler.followUpInputs)-1]
-				if input.SessionID != "session-1" || input.Text != tc.wantPayload || input.InvocationID == "" {
+				if input.SessionID != "session-1" || input.Text != tc.wantPayload || input.InvocationID == "" ||
+					input.TeamID != cfg.TeamID || input.ChannelIdentityID != "channelIdentity-1" {
 					t.Fatalf("follow-up input = %#v", input)
 				}
 			}
@@ -1060,7 +1100,7 @@ func TestChannelInboundProcessorQueueCommandNoSessionDoesNotCreateOne(t *testing
 	if ensurer.createCalls != 0 {
 		t.Fatalf("queue command created a session %d times with spec %#v", ensurer.createCalls, ensurer.lastSpec)
 	}
-	if len(sender.sent) != 1 || !strings.Contains(strings.ToLower(sender.sent[0].Message.PlainText()), "no active") {
+	if len(sender.sent) != 1 || sender.sent[0].Message.PlainText() != i18n.New("en").T("errors.queue_no_active_run") {
 		t.Fatalf("reply = %#v, want no-active-run feedback", sender.sent)
 	}
 }
@@ -1373,8 +1413,13 @@ func TestChannelInboundProcessorDefaultACPRequiresWorkspaceExec(t *testing.T) {
 		},
 	}
 
-	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	err := processor.HandleInbound(context.Background(), cfg, msg, sender)
+	if err == nil {
+		t.Fatal("the failure is not returned for the result record")
+	}
+	// The inbound message record keeps the sender's refusal a client fault.
+	if record := errlog.Finish(context.Background(), "channel.inbound", err, errlog.Options{}); record.Level != slog.LevelInfo || record.Report.Fault != apperror.FaultClient {
+		t.Fatalf("inbound record level=%v fault=%q, want INFO client", record.Level, record.Report.Fault)
 	}
 	if ensurer.lastSpec.Runtime != "" {
 		t.Fatalf("session should not be created when workspace_exec is missing, got spec %#v", ensurer.lastSpec)
@@ -1418,8 +1463,8 @@ func TestChannelInboundProcessorActiveACPRequiresRuntimeOwner(t *testing.T) {
 		},
 	}
 
-	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err == nil {
+		t.Fatal("the failure is not returned for the result record")
 	}
 	if gateway.gotReq.Query != "" {
 		t.Fatalf("chat should not run without runtime owner, got query %q", gateway.gotReq.Query)
@@ -1470,8 +1515,8 @@ func TestChannelInboundProcessorActiveACPRequiresCurrentActorOwnerOrManage(t *te
 			},
 		}
 
-		if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err == nil {
+			t.Fatal("the failure is not returned for the result record")
 		}
 		if gateway.gotReq.Query != "" {
 			t.Fatalf("chat should not run for non-owner actor, got query %q", gateway.gotReq.Query)
@@ -1519,8 +1564,8 @@ func TestChannelInboundProcessorActiveACPRequiresCurrentActorOwnerOrManage(t *te
 			},
 		}
 
-		if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err == nil {
+			t.Fatal("the failure is not returned for the result record")
 		}
 		if gateway.gotReq.Query != "" {
 			t.Fatalf("chat should not run for manager on another user's runtime, got query %q", gateway.gotReq.Query)
@@ -1669,9 +1714,6 @@ func TestChannelInboundProcessorACLDeniedManagerMessageDoesNotSuggestLink(t *tes
 	processor.SetCommandHandler(command.NewHandler(
 		nil,
 		&fakeCommandRoleResolver{role: "manager"},
-		nil,
-		nil,
-		nil,
 		nil,
 		nil,
 		nil,
@@ -1866,7 +1908,7 @@ func TestChannelInboundProcessorQQAndWeixinWriteCommandsNeedLinkedManager(t *tes
 			processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
 			aclSvc := &fakeChatACL{allowed: false}
 			processor.SetACLService(aclSvc)
-			processor.SetCommandHandler(command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil))
+			processor.SetCommandHandler(command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil))
 			sender := &fakeReplySender{}
 
 			msg := channel.InboundMessage{
@@ -1934,11 +1976,14 @@ func TestChannelInboundProcessorRejectsDirectSkillBeforeAutoDiscussSession(t *te
 	if ensurer.lastSpec.Type != "" {
 		t.Fatalf("skill slash should not create discuss session, got spec %+v", ensurer.lastSpec)
 	}
-	if len(sender.sent) != 1 || !strings.Contains(sender.sent[0].Message.PlainText(), "not supported") {
+	if len(sender.sent) != 1 || sender.sent[0].Message.PlainText() != i18n.New("en").T("errors.slash.skill_activation_unsupported") {
 		t.Fatalf("expected unsupported skill slash reply, got %+v", sender.sent)
 	}
 }
 
+// A skill request that cannot be resolved because no resolver is configured is
+// this process's failure: it is answered with the generic copy and returned
+// for the message's result record.
 func TestChannelInboundProcessorRejectsUnresolvedDirectSkill(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-use-active"}}
 	policySvc := &fakePolicyService{}
@@ -1965,8 +2010,8 @@ func TestChannelInboundProcessorRejectsUnresolvedDirectSkill(t *testing.T) {
 		},
 	}
 
-	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{TeamID: "team-test", ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}, msg, sender); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{TeamID: "team-test", ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}, msg, sender); err == nil || !strings.Contains(err.Error(), "skill resolver not configured") {
+		t.Fatalf("HandleInbound() error = %v, want the missing resolver", err)
 	}
 	if gateway.gotReq.Query != "" {
 		t.Fatalf("skill slash should not trigger chat call, got query %q", gateway.gotReq.Query)
@@ -1974,8 +2019,8 @@ func TestChannelInboundProcessorRejectsUnresolvedDirectSkill(t *testing.T) {
 	if len(chatSvc.persistedIn) != 0 {
 		t.Fatalf("skill slash should not persist before active-stream reject, got %+v", chatSvc.persistedIn)
 	}
-	if len(sender.sent) != 1 || !strings.Contains(sender.sent[0].Message.PlainText(), "not available") {
-		t.Fatalf("expected unavailable skill slash reply, got %+v", sender.sent)
+	if len(sender.sent) != 1 || sender.sent[0].Message.PlainText() != i18n.New("en").T("errors.internal") {
+		t.Fatalf("expected the generic failure reply, got %+v", sender.sent)
 	}
 }
 
@@ -2329,9 +2374,6 @@ func TestChannelInboundProcessorStatusUsesRouteSession(t *testing.T) {
 		nil,
 		nil,
 		nil,
-		nil,
-		nil,
-		nil,
 		cmdQueries,
 		nil,
 		nil,
@@ -2389,9 +2431,6 @@ func TestChannelInboundProcessorDirectedModeCommandPermissionDeniedReplies(t *te
 	gateway := &fakeChatGateway{}
 	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
 	processor.SetCommandHandler(command.NewHandler(
-		nil,
-		nil,
-		nil,
 		nil,
 		nil,
 		nil,
@@ -3498,6 +3537,7 @@ func TestMapStreamChunkToChannelEvents(t *testing.T) {
 		wantToolName  string
 		wantAttCount  int
 		wantError     string
+		wantErrorCode string
 		wantNilEvents bool
 	}{
 		{
@@ -3572,16 +3612,32 @@ func TestMapStreamChunkToChannelEvents(t *testing.T) {
 			wantNilEvents: true,
 		},
 		{
-			name:      "error",
-			chunk:     `{"type":"error","error":"something failed"}`,
-			wantType:  channel.StreamEventError,
-			wantError: "something failed",
+			name:          "uncoded error shows the failed run copy",
+			chunk:         `{"type":"error","error":"something failed"}`,
+			wantType:      channel.StreamEventError,
+			wantError:     "The response could not be completed. Please try again.",
+			wantErrorCode: "runtime_run_failed",
 		},
 		{
-			name:      "error fallback to message",
-			chunk:     `{"type":"error","message":"fallback msg"}`,
-			wantType:  channel.StreamEventError,
-			wantError: "fallback msg",
+			name:          "uncoded error with a message shows the failed run copy",
+			chunk:         `{"type":"error","message":"fallback msg"}`,
+			wantType:      channel.StreamEventError,
+			wantError:     "The response could not be completed. Please try again.",
+			wantErrorCode: "runtime_run_failed",
+		},
+		{
+			name:          "error with a catalogued code shows its copy",
+			chunk:         `{"type":"error","code":"agent.provider_overloaded","error":"upstream 529 overloaded_error"}`,
+			wantType:      channel.StreamEventError,
+			wantError:     "The model provider is unavailable or overloaded right now. Please try again in a moment.",
+			wantErrorCode: "agent.provider_overloaded",
+		},
+		{
+			name:          "error with an unknown code shows the failed run copy",
+			chunk:         `{"type":"error","code":"not.in_catalog","error":"something failed"}`,
+			wantType:      channel.StreamEventError,
+			wantError:     "The response could not be completed. Please try again.",
+			wantErrorCode: "runtime_run_failed",
 		},
 		{
 			name:     "agent_start",
@@ -3594,6 +3650,11 @@ func TestMapStreamChunkToChannelEvents(t *testing.T) {
 			wantType: channel.StreamEventAgentEnd,
 		},
 		{
+			name:     "retry",
+			chunk:    `{"type":"retry","attempt":1,"maxAttempt":3,"retryError":"stream cut"}`,
+			wantType: channel.StreamEventReset,
+		},
+		{
 			name:     "processing_started",
 			chunk:    `{"type":"processing_started"}`,
 			wantType: channel.StreamEventProcessingStarted,
@@ -3604,10 +3665,10 @@ func TestMapStreamChunkToChannelEvents(t *testing.T) {
 			wantType: channel.StreamEventProcessingCompleted,
 		},
 		{
-			name:      "processing_failed",
-			chunk:     `{"type":"processing_failed","error":"failed"}`,
-			wantType:  channel.StreamEventProcessingFailed,
-			wantError: "failed",
+			// No producer sends it; its error text is not relayed to the channel.
+			name:          "processing_failed",
+			chunk:         `{"type":"processing_failed","error":"failed"}`,
+			wantNilEvents: true,
 		},
 		{
 			name:          "empty chunk",
@@ -3620,7 +3681,7 @@ func TestMapStreamChunkToChannelEvents(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(tt.chunk))
+			events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(tt.chunk), i18n.New("en"))
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -3657,6 +3718,9 @@ func TestMapStreamChunkToChannelEvents(t *testing.T) {
 			if tt.wantError != "" && ev.Error != tt.wantError {
 				t.Fatalf("expected error %q, got %q", tt.wantError, ev.Error)
 			}
+			if ev.ErrorCode != tt.wantErrorCode {
+				t.Fatalf("expected error code %q, got %q", tt.wantErrorCode, ev.ErrorCode)
+			}
 		})
 	}
 }
@@ -3665,7 +3729,7 @@ func TestMapStreamChunkToChannelEvents_ToolCallFields(t *testing.T) {
 	t.Parallel()
 
 	chunk := `{"type":"tool_call_end","toolName":"calc","toolCallId":"c1","input":{"x":1},"result":{"sum":2}}`
-	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk))
+	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk), i18n.New("en"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3689,7 +3753,7 @@ func TestMapStreamChunkToChannelEvents_UserInputRequest(t *testing.T) {
 	t.Parallel()
 
 	chunk := `{"type":"user_input_request","toolName":"ask_user","toolCallId":"ask-1","userInputId":"input-1","shortId":7,"status":"pending","input":{"questions":[{"text":"Original model input","kind":"single_select","options":[{"label":"Alpha"},{"label":"Beta"}]}]},"metadata":{"ui_payload":{"version":2,"questions":[{"id":"q1","text":"Pick one","kind":"single_select","options":[{"id":"q1.o1","label":"Alpha"},{"id":"q1.o2","label":"Beta"}]}]}}}`
-	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk))
+	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk), i18n.New("en"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3729,7 +3793,7 @@ func TestMapStreamChunkToChannelEvents_UserInputTextFallback(t *testing.T) {
 	t.Parallel()
 
 	chunk := `{"type":"user_input_request","toolName":"ask_user","toolCallId":"ask-1","userInputId":"input-1","shortId":7,"status":"pending","input":{"questions":[{"id":"q1","text":"Explain","kind":"text"}]}}`
-	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk))
+	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk), i18n.New("en"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3746,7 +3810,7 @@ func TestMapStreamChunkToChannelEvents_UserInputCustomOptionFallback(t *testing.
 	t.Parallel()
 
 	chunk := `{"type":"user_input_request","toolName":"ask_user","toolCallId":"ask-1","userInputId":"input-1","shortId":7,"status":"pending","metadata":{"ui_payload":{"version":2,"questions":[{"id":"q1","text":"Pick one","kind":"single_select","allow_custom":true,"options":[{"id":"q1.o1","label":"Alpha"},{"id":"q1.o2","label":"Beta"}]}]}}}`
-	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk))
+	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk), i18n.New("en"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3763,7 +3827,7 @@ func TestMapStreamChunkToChannelEvents_UserInputMultiQuestionKeepsActions(t *tes
 	// show_tool_calls_in_im filter does not drop the pending card. Telegram
 	// rebuilds the paged keyboard from the payload.
 	chunk := `{"type":"user_input_request","toolName":"ask_user","toolCallId":"ask-1","userInputId":"input-1","shortId":7,"status":"pending","metadata":{"ui_payload":{"version":2,"questions":[{"id":"q1","text":"What?","kind":"text"},{"id":"q2","text":"How fast?","kind":"single_select","options":[{"id":"q2.o1","label":"Fast"},{"id":"q2.o2","label":"Slow"}]}]}}}`
-	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk))
+	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk), i18n.New("en"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3837,7 +3901,7 @@ func TestMapStreamChunkToChannelEvents_FinalMessages(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			events, messages, err := mapStreamChunkToChannelEvents(json.RawMessage(tt.chunk))
+			events, messages, err := mapStreamChunkToChannelEvents(json.RawMessage(tt.chunk), i18n.New("en"))
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -4081,9 +4145,6 @@ func TestChannelInboundProcessorCommandExecutesWithUnprovenReplyAttachments(t *t
 		},
 	}
 	processor.SetCommandHandler(command.NewHandler(
-		nil,
-		nil,
-		nil,
 		nil,
 		nil,
 		nil,

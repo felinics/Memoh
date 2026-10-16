@@ -159,7 +159,7 @@ func TestGenerateOpenAIImagesImageUsesImagesEndpointAndDownloadsURL(t *testing.T
 	}))
 	t.Cleanup(server.Close)
 
-	image, err := generateOpenAIImagesImage(context.Background(), imageTestClient(t, server), server.URL+"/api/v3", "openai-key", "gpt-image-1", "a blue sphere", "1024x1024")
+	image, err := generateOpenAIImagesImage(context.Background(), nil, imageTestClient(t, server), server.URL+"/api/v3", "openai-key", "gpt-image-1", "a blue sphere", "1024x1024")
 	if err != nil {
 		t.Fatalf("generateOpenAIImagesImage() error = %v", err)
 	}

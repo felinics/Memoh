@@ -3,21 +3,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, type App } from 'vue'
 import AppConnectorAuthForm from './app-connector-auth-form.vue'
 
-const mocks = vi.hoisted(() => ({ begin: vi.fn(), credential: vi.fn(), prepare: vi.fn(), open: vi.fn(), wait: vi.fn() }))
+const mocks = vi.hoisted(() => ({ begin: vi.fn(), credential: vi.fn(), prepare: vi.fn(), open: vi.fn(), wait: vi.fn(), user: { role: 'member' } }))
 vi.mock('@/composables/api/useApps', () => ({ beginAppConnectorOAuth: mocks.begin, createAppConnectorCredential: mocks.credential }))
-vi.mock('@/composables/useConnectorOAuth', () => ({
+vi.mock('@/composables/useConnectorOAuth', async importOriginal => ({
+  ...await importOriginal<typeof import('@/composables/useConnectorOAuth')>(),
   prepareConnectorOAuthPopup: mocks.prepare, openConnectorOAuthURL: mocks.open, waitForConnectorOAuth: mocks.wait,
-  connectorOAuthErrorKey: () => null,
   isConnectorOAuthCancelled: (error: Error) => error.message === 'cancelled',
 }))
-vi.mock('@/utils/api-error', () => ({ resolveApiErrorMessage: (_: unknown, fallback: string) => fallback }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('@/utils/api-error', async importOriginal => ({
+  ...await importOriginal<typeof import('@/utils/api-error')>(),
+  resolveApiErrorMessage: (_: unknown, fallback: string) => fallback,
+}))
+vi.mock('@/store/user', () => ({ useUserStore: () => ({ userInfo: mocks.user }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: { connector?: string }) => params?.connector ? `${key}(${params.connector})` : key }) }))
 
 vi.mock('@felinic/ui', async () => {
   const { Field } = await import('vee-validate')
   const slot = { template: '<div><slot /></div>' }
   return {
-    Alert: slot, AlertTitle: slot, AlertDescription: slot, FormStack: slot, FormControl: slot,
+    CalloutBanner: { props: ['title', 'description'], template: '<div role="alert">{{ title }}: {{ description }}</div>' },
+    FormStack: slot, FormControl: slot,
     FormField: { components: { Field }, props: ['name'], template: '<Field :name="name" v-slot="{ componentField, errors }"><slot :componentField="componentField" /><span>{{ errors[0] }}</span></Field>' },
     FieldStack: { props: ['label'], template: '<div><label>{{ label }}</label><slot /></div>' },
     Input: { props: ['modelValue'], emits: ['update:modelValue'], template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
@@ -38,7 +43,7 @@ function setup(methods: unknown[], extra: Record<string, unknown> = {}) {
   let form!: InstanceType<typeof AppConnectorAuthForm>
   app = createApp({ render: () => h(AppConnectorAuthForm, {
     ref: (instance: unknown) => { form = instance as typeof form }, botId: 'bot', installationId: 'installation',
-    connector: { type: 'example' }, catalog: { type: 'example', auth_methods: methods },
+    connector: { type: 'example' }, catalog: { type: 'example', name: 'Example', auth_methods: methods },
     onAuthorized: authorized, onPhase: phase, ...extra,
   } as never) })
   app.mount(root)
@@ -49,7 +54,7 @@ beforeEach(() => {
   mocks.begin.mockResolvedValue({ connection_id: 'connection', authorization_url: 'https://example.com/authorize' })
   mocks.open.mockResolvedValue(undefined)
 })
-afterEach(() => { app?.unmount(); root?.remove(); vi.resetAllMocks() })
+afterEach(() => { app?.unmount(); root?.remove(); vi.resetAllMocks(); mocks.user.role = 'member' })
 
 describe('App connector authorization form', () => {
   it('automatically uses the window reserved by Install and waits for active authorization', async () => {
@@ -125,5 +130,34 @@ describe('App connector authorization form', () => {
     finish({})
     await attempt
     expect(flow.authorized).not.toHaveBeenCalled()
+  })
+
+  describe('when Connect-It has no OAuth App for the connector', () => {
+    const missingOAuthApp = {
+      type: 'urn:memoh:error:connector.oauth_client_not_configured', code: 'connector.oauth_client_not_configured',
+      status: 503, fault: 'dependency', detail: 'Connect-It has no OAuth App configured for this connector.', args: {},
+    }
+    it.each([
+      ['admin', 'connectors.oauthAppNotConfigured.admin(Example)'],
+      ['member', 'connectors.oauthAppNotConfigured.member(Example)'],
+    ])('tells a %s what to do next', async (role, hint) => {
+      mocks.user.role = role
+      mocks.prepare.mockReturnValue({ close: vi.fn() })
+      mocks.begin.mockRejectedValue(missingOAuthApp)
+      const flow = setup(oauth)
+      await flow.form.connect()
+      expect(root.querySelector('[role="alert"]')?.textContent).toBe(`connectors.connectFailed: ${hint}`)
+      expect(mocks.open).not.toHaveBeenCalled()
+      expect(flow.form.phase).toBe('idle')
+    })
+
+    it('keeps the generic message for other rejections', async () => {
+      mocks.user.role = 'admin'
+      mocks.prepare.mockReturnValue({ close: vi.fn() })
+      mocks.begin.mockRejectedValue({ ...missingOAuthApp, code: 'connector.request_rejected', status: 400, fault: 'client' })
+      const flow = setup(oauth)
+      await flow.form.connect()
+      expect(root.querySelector('[role="alert"]')?.textContent).toBe('connectors.connectFailed: connectors.connectFailed')
+    })
   })
 })

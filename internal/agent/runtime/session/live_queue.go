@@ -29,6 +29,12 @@ const (
 	// QueueErrorTargetRunNotActive marks a steer whose target run reached a
 	// terminal state before the steer entered a model step.
 	QueueErrorTargetRunNotActive = "queue_target_run_not_active"
+	// QueueErrorFollowUpCommandInvalid marks a follow-up whose stored payload
+	// cannot be replayed as a turn: it carries no command, names another
+	// session, lacks a team, or names a team this deployment does not serve.
+	// Such an item is terminal; retrying it at the next boundary would fail
+	// the same way.
+	QueueErrorFollowUpCommandInvalid = "queue_follow_up_command_invalid"
 )
 
 const (
@@ -141,6 +147,12 @@ type LiveQueueBackend interface {
 	ClaimNextFollowUp(context.Context, Key, string) (FollowUpItem, FollowUpClaimRef, bool, error)
 	ApplyFollowUp(context.Context, Key, FollowUpClaimRef) error
 	ReleaseFollowUp(context.Context, Key, FollowUpClaimRef) error
+	// RejectFollowUp moves a claimed follow-up to rejected with the given
+	// error code and frees its trigger run's claim slot, so the same terminal
+	// boundary can go on to the next accepted item. It is for items the
+	// continuation cannot start at all; a transient start failure releases
+	// the item instead.
+	RejectFollowUp(context.Context, Key, FollowUpClaimRef, string) error
 }
 
 type steerQueueState struct {

@@ -17,67 +17,78 @@
           </Button>
         </template>
 
-        <div
-          v-if="isLoading && configuredChannels.length === 0"
-          class="grid grid-cols-1 gap-3 sm:grid-cols-2"
-        >
-          <Skeleton
-            v-for="n in 4"
-            :key="n"
-            class="h-[4.5rem] w-full rounded-[var(--radius-menu-shell)]"
+        <div class="space-y-8">
+          <CalloutBanner
+            v-if="needsChatModel"
+            tone="warning"
+            clickable
+            :title="t('bots.channels.modelRequiredTitle')"
+            :description="t('bots.channels.modelRequiredDescription')"
+            @click="openModelSettings"
           />
-        </div>
 
-        <!-- Platforms + a dashed add tile to drop another in -->
-        <div
-          v-else-if="configuredChannels.length > 0"
-          class="grid grid-cols-1 gap-3 sm:grid-cols-2"
-        >
-          <BackendCard
-            v-for="item in configuredChannels"
-            :key="item.meta.type"
-            :name="channelTitle(item.meta)"
-            :subtitle="!item.config?.disabled ? t('bots.channels.statusActive') : t('bots.channels.configured')"
-            :enabled="!item.config?.disabled"
-            @click="openPlatform(item)"
+          <div
+            v-if="isLoading && configuredChannels.length === 0"
+            class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
-            <template #leading>
-              <span class="flex size-10 items-center justify-center rounded-full bg-muted">
-                <ChannelIcon
-                  :channel="item.meta.type as string"
-                  size="1.5em"
-                />
-              </span>
-            </template>
-          </BackendCard>
+            <Skeleton
+              v-for="n in 4"
+              :key="n"
+              class="h-[4.5rem] w-full rounded-[var(--radius-menu-shell)]"
+            />
+          </div>
 
-          <button
-            v-if="unconfiguredChannels.length > 0"
-            type="button"
-            class="group/add flex min-h-[4.5rem] items-center justify-center gap-2 rounded-[var(--radius-menu-shell)] border border-dashed border-border bg-background text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            @click="addOpen = true"
+          <!-- Platforms + a dashed add tile to drop another in -->
+          <div
+            v-else-if="configuredChannels.length > 0"
+            class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
-            <Plus class="size-4" />
-            {{ t('bots.channels.addChannel') }}
-          </button>
-        </div>
+            <BackendCard
+              v-for="item in configuredChannels"
+              :key="item.meta.type"
+              :name="channelTitle(item.meta)"
+              :subtitle="!item.config?.disabled ? t('bots.channels.statusActive') : t('bots.channels.configured')"
+              :enabled="!item.config?.disabled"
+              @click="openPlatform(item)"
+            >
+              <template #leading>
+                <span class="flex size-10 items-center justify-center rounded-full bg-muted">
+                  <ChannelIcon
+                    :channel="item.meta.type as string"
+                    size="1.5em"
+                  />
+                </span>
+              </template>
+            </BackendCard>
 
-        <!-- Empty: a framed box that guides with one line + the add action, no decorative icon -->
-        <SettingsSection v-else>
-          <Empty class="py-16">
-            <EmptyTitle>{{ t('bots.channels.emptyTitle') }}</EmptyTitle>
-            <EmptyDescription>{{ t('bots.channels.emptyDescription') }}</EmptyDescription>
-            <EmptyContent>
-              <Button
-                variant="outline"
-                @click="addOpen = true"
-              >
-                <Plus class="size-4" />
-                {{ t('bots.channels.addChannel') }}
-              </Button>
-            </EmptyContent>
-          </Empty>
-        </SettingsSection>
+            <button
+              v-if="unconfiguredChannels.length > 0"
+              type="button"
+              class="group/add flex min-h-[4.5rem] items-center justify-center gap-2 rounded-[var(--radius-menu-shell)] border border-dashed border-border bg-background text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              @click="addOpen = true"
+            >
+              <Plus class="size-4" />
+              {{ t('bots.channels.addChannel') }}
+            </button>
+          </div>
+
+          <!-- Empty: a framed box that guides with one line + the add action, no decorative icon -->
+          <SettingsSection v-else>
+            <Empty class="py-16">
+              <EmptyTitle>{{ t('bots.channels.emptyTitle') }}</EmptyTitle>
+              <EmptyDescription>{{ t('bots.channels.emptyDescription') }}</EmptyDescription>
+              <EmptyContent>
+                <Button
+                  variant="outline"
+                  @click="addOpen = true"
+                >
+                  <Plus class="size-4" />
+                  {{ t('bots.channels.addChannel') }}
+                </Button>
+              </EmptyContent>
+            </Empty>
+          </SettingsSection>
+        </div>
       </PageShell>
 
       <!-- Platform detail -->
@@ -134,17 +145,18 @@
 </template>
 
 <script setup lang="ts">
-import { SettingsSection } from '@felinic/ui'
+import { CalloutBanner, SettingsSection } from '@felinic/ui'
 import { Plus, ChevronLeft } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import {
   Button, Skeleton,
   Dialog, DialogContent, DialogHeader, DialogTitle,
   Empty, EmptyTitle, EmptyDescription, EmptyContent,
 } from '@felinic/ui'
 import { useQuery } from '@pinia/colada'
-import { getChannels, getBotsByIdChannelByPlatform } from '@memohai/sdk'
+import { getChannels, getBotsByIdChannelByPlatform, getBotsByBotIdSettings } from '@memohai/sdk'
 import type { HandlersChannelMeta, ChannelChannelConfig } from '@memohai/sdk'
 import { BackendCard, PageShell, SwapTransition } from '@felinic/ui'
 import ChannelSettingsPanel from './channel-settings-panel.vue'
@@ -160,6 +172,8 @@ export interface BotChannelItem {
 
 const props = defineProps<{ botId: string }>()
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 
 const { view, direction, openDetail, backToList } = useViewSwap()
 const addOpen = ref(false)
@@ -169,6 +183,24 @@ function channelTitle(meta: HandlersChannelMeta) {
 }
 
 const botIdRef = computed(() => props.botId)
+
+const { data: settings } = useQuery({
+  key: () => ['bot-settings', botIdRef.value],
+  query: async () => {
+    const { data } = await getBotsByBotIdSettings({ path: { bot_id: botIdRef.value }, throwOnError: true })
+    return data
+  },
+  enabled: () => !!botIdRef.value,
+})
+
+/** External runtimes select their own models; unloaded settings are not a configuration failure. */
+const needsChatModel = computed(() => settings.value
+  && (settings.value.chat_runtime ?? 'model') === 'model'
+  && !settings.value.chat_model_id?.trim())
+
+function openModelSettings() {
+  void router.push({ query: { ...route.query, tab: 'general', section: 'interaction' } })
+}
 
 const { data: channels, isLoading, refetch } = useQuery({
   key: () => ['bot-channels', botIdRef.value],

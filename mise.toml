@@ -80,7 +80,8 @@ PATH="$(go env GOPATH)/bin:$PATH" protoc \
   --go_out=paths=source_relative:. \
   --go-grpc_out=paths=source_relative:. \
   internal/agent/turn/turnpb/turn.proto \
-  internal/rpc/runtimepb/runtime.proto
+  internal/rpc/runtimepb/runtime.proto \
+  internal/rpc/storagepb/storage.proto
 """
 
 [tasks.icons-generate]

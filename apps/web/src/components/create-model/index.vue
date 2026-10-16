@@ -127,10 +127,9 @@
               for="create-model-dimensions"
             >
               <FormControl>
-                <NumberField
+                <Input
                   id="create-model-dimensions"
-                  :min="1"
-                  disable-wheel-change
+                  type="number"
                   :placeholder="$t('models.dimensionsPlaceholder')"
                   v-bind="componentField"
                 />
@@ -158,6 +157,38 @@
             </div>
           </FieldStack>
 
+          <!-- Supported efforts (chat + reasoning only). Hand-added models get
+               no catalog fill, so this is the only place a BYOK user can say
+               which tiers the model accepts and whether it can be turned off. -->
+          <FieldStack
+            v-if="selectedType === 'chat' && selectedCompat.includes('reasoning') && !alwaysThinking"
+            :label="$t('models.reasoningEfforts')"
+          >
+            <Select
+              :model-value="selectedEfforts"
+              multiple
+              @update:model-value="onEffortsUpdate"
+            >
+              <SelectTrigger
+                class="w-full"
+                :aria-label="$t('models.reasoningEfforts')"
+              >
+                <SelectValue :placeholder="$t('models.reasoningEffortsPlaceholder')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem
+                    v-for="effort in DECLARABLE_EFFORTS"
+                    :key="effort"
+                    :value="effort"
+                  >
+                    {{ $t(EFFORT_LABELS[effort] ?? effort) }}
+                  </SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </FieldStack>
+
           <!-- Context Window (optional) -->
           <FormField
             v-if="selectedType === 'chat'"
@@ -172,11 +203,34 @@
                 </Label>
               </template>
               <FormControl>
-                <NumberField
+                <Input
                   id="create-model-context-window"
-                  :min="1"
-                  disable-wheel-change
+                  type="number"
                   :placeholder="$t('models.contextWindowPlaceholder')"
+                  v-bind="componentField"
+                />
+              </FormControl>
+            </FieldStack>
+          </FormField>
+
+          <!-- Max Output Tokens (optional) -->
+          <FormField
+            v-if="selectedType === 'chat'"
+            v-slot="{ componentField }"
+            name="max_output_tokens"
+          >
+            <FieldStack for="create-model-max-output-tokens">
+              <template #label>
+                <Label for="create-model-max-output-tokens">
+                  {{ $t('models.maxOutputTokens') }}
+                  <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
+                </Label>
+              </template>
+              <FormControl>
+                <Input
+                  id="create-model-max-output-tokens"
+                  type="number"
+                  :placeholder="$t('models.maxOutputTokensPlaceholder')"
                   v-bind="componentField"
                 />
               </FormControl>
@@ -202,7 +256,6 @@ import {
   SelectValue,
   Checkbox,
   Label,
-  NumberField,
   Textarea,
 } from '@felinic/ui'
 import type { ButtonVariants } from '@felinic/ui'
@@ -217,7 +270,8 @@ import { useI18n } from 'vue-i18n'
 import { FieldStack, FormDialogShell } from '@felinic/ui'
 import { COMPATIBILITY_OPTIONS } from '@/constants/compatibilities'
 import { useDialogMutation } from '@/composables/useDialogMutation'
-import { buildModelConfig } from './model-config'
+import { buildModelConfig, DECLARABLE_EFFORTS } from './model-config'
+import { EFFORT_LABELS } from '@/pages/bots/components/reasoning-effort'
 
 interface ModelTypeOption {
   value: string
@@ -225,6 +279,14 @@ interface ModelTypeOption {
 }
 
 const selectedCompat = ref<string[]>([])
+// The server serves an undeclared effort list as low/medium/high, so that is
+// what the picker starts from: leaving it untouched keeps the old behavior.
+const DEFAULT_EFFORTS = ['low', 'medium', 'high']
+const selectedEfforts = ref<string[]>([...DEFAULT_EFFORTS])
+// Whether the model being edited already declared an effort list. Without one,
+// an untouched default selection is saved as "still undeclared" rather than
+// pinning low/medium/high onto a row the user never configured.
+const storedEffortsDeclared = ref(false)
 const { t } = useI18n()
 const { run } = useDialogMutation()
 
@@ -235,10 +297,14 @@ const formSchema = toTypedSchema(z.object({
   description: z.string().optional(),
   dimensions: z.coerce.number().min(1, t('models.dimensionsMin')).optional(),
   context_window: z.coerce.number().min(1, t('models.contextWindowMin')).optional(),
+  max_output_tokens: z.coerce.number().min(1, t('models.maxOutputTokensMin')).optional(),
 }))
 
 const props = withDefaults(defineProps<{
-  id: string
+  id?: string
+  // Resolves the provider on submit when `id` is not known yet (a template
+  // draft); cancelling the dialog therefore never creates a provider.
+  ensureProviderId?: () => Promise<string>
   typeOptions?: ModelTypeOption[]
   defaultType?: string
   hideType?: boolean
@@ -267,6 +333,30 @@ const selectedType = computed(() => form.values.type || props.defaultType)
 const open = inject<Ref<boolean>>('openModel', ref(false))
 const title = inject<Ref<'edit' | 'title'>>('openModelTitle', ref('title'))
 const editInfo = inject<Ref<ModelsGetResponse | null>>('openModelState', ref(null))
+
+// The server sends no reasoning control at all for an always-thinking model
+// (reasoning.ResolveConfig), so an effort picker there would have no effect.
+// Snapshotted on open: editInfo is cleared on close, while the exit animation
+// is still rendering the form.
+const alwaysThinking = ref(false)
+const storedEfforts = ref<string[]>([])
+
+// An empty list is not a declaration the server can honour: it reads as
+// "unknown" and serves low/medium/high, so a picker showing nothing selected
+// would contradict what the chat picker then offers. Keep at least one.
+function onEffortsUpdate(value: unknown) {
+  const next = Array.isArray(value) ? value.map(String) : []
+  if (next.length) selectedEfforts.value = next
+}
+
+function effortsToSave(): string[] {
+  if (alwaysThinking.value) return storedEfforts.value
+  const selected = selectedEfforts.value
+  const isDefault = selected.length === DEFAULT_EFFORTS.length
+    && DEFAULT_EFFORTS.every(effort => selected.includes(effort))
+  if (!storedEffortsDeclared.value && isDefault) return []
+  return selected
+}
 
 const canSubmit = computed(() => {
   if (title.value === 'edit') return true
@@ -331,19 +421,25 @@ async function addModel() {
 
   if (!type || !model_id) return
 
+  // A cleared number input holds '' rather than undefined. Treat it as empty so
+  // the server detects dimensions instead of rejecting a string for an int.
+  const dimensions = typeof form.values.dimensions === 'number' ? form.values.dimensions : undefined
+
   const config = buildModelConfig({
     type,
     description: form.values.description,
-    dimensions: form.values.dimensions ?? (isEdit ? fallback!.config?.dimensions : undefined),
+    dimensions: dimensions ?? (isEdit ? fallback!.config?.dimensions : undefined),
     contextWindow: form.values.context_window ?? (isEdit ? fallback!.config?.context_window : undefined),
+    maxOutputTokens: (typeof form.values.max_output_tokens === 'number' ? form.values.max_output_tokens : undefined)
+      ?? (isEdit ? fallback!.config?.max_output_tokens : undefined),
     compatibilities: selectedCompat.value,
+    reasoningEfforts: effortsToSave(),
     existing: isEdit ? fallback!.config : undefined,
   })
 
   const payload: Record<string, unknown> = {
     type,
     model_id,
-    provider_id: props.id,
     config,
   }
 
@@ -357,12 +453,17 @@ async function addModel() {
     () => {
       if (isEdit) {
         const modelUUID = fallback?.id
+        const data = { ...payload, provider_id: props.id ?? fallback!.provider_id } as ModelsUpdateRequest
         if (modelUUID) {
-          return updateModel({ id: modelUUID, data: payload as ModelsUpdateRequest })
+          return updateModel({ id: modelUUID, data })
         }
-        return updateModelByLegacyModelID({ modelId: fallback!.model_id, data: payload as ModelsUpdateRequest })
+        return updateModelByLegacyModelID({ modelId: fallback!.model_id, data })
       }
-      return createModel(payload)
+      return (async () => {
+        const providerId = props.id ?? await props.ensureProviderId?.()
+        if (!providerId) throw new Error('provider is missing')
+        return createModel({ ...payload, provider_id: providerId })
+      })()
     },
     {
       fallbackMessage: t('common.saveFailed'),
@@ -375,10 +476,15 @@ async function addModel() {
 
 watch(open, async () => {
   if (!open.value) {
-    title.value = 'title'
+    // Keep the mode until the next open: the dialog is still playing its exit
+    // animation here, and flipping it now flashes "Add model" on an edit dialog.
     editInfo.value = null
     return
   }
+
+  // Openers set the edit state together with opening; the built-in trigger
+  // opens without it, which means add. Runs before render, so no stale frame.
+  if (!editInfo.value) title.value = 'title'
 
   await nextTick()
 
@@ -394,9 +500,16 @@ watch(open, async () => {
         description: config?.description ?? '',
         dimensions: config?.dimensions,
         context_window: config?.context_window,
+        max_output_tokens: config?.max_output_tokens,
       },
     })
     selectedCompat.value = config?.compatibilities ?? []
+    alwaysThinking.value = config?.thinking_mode === 'always'
+    storedEfforts.value = [...(config?.reasoning_efforts ?? [])]
+    storedEffortsDeclared.value = !!config?.reasoning_efforts?.length
+    selectedEfforts.value = config?.reasoning_efforts?.length
+      ? [...config.reasoning_efforts]
+      : [...DEFAULT_EFFORTS]
   } else {
     form.resetForm({
       values: {
@@ -406,9 +519,14 @@ watch(open, async () => {
         description: '',
         dimensions: undefined,
         context_window: undefined,
+        max_output_tokens: undefined,
       },
     })
     selectedCompat.value = []
+    alwaysThinking.value = false
+    storedEfforts.value = []
+    storedEffortsDeclared.value = false
+    selectedEfforts.value = [...DEFAULT_EFFORTS]
   }
 }, {
   immediate: true,

@@ -68,9 +68,9 @@ func (s *EventStore) PersistEvent(ctx context.Context, botID, sessionID string, 
 
 	original := event
 	if cursor, cursorErr := s.queries.NextSessionEventCursor(ctx); cursorErr != nil {
-		s.logger.Warn("allocate session event cursor failed", slog.Any("error", cursorErr))
+		s.logger.WarnContext(ctx, "allocate session event cursor failed", slog.Any("error", cursorErr))
 	} else if stamped, stampErr := assignEventCursor(event, cursor); stampErr != nil {
-		s.logger.Warn("stamp session event cursor failed", slog.Any("error", stampErr))
+		s.logger.WarnContext(ctx, "stamp session event cursor failed", slog.Any("error", stampErr))
 	} else {
 		event = stamped
 	}
@@ -187,7 +187,7 @@ func (s *EventStore) loadEvents(ctx context.Context, botID, sessionID string, ar
 	for _, row := range rows {
 		event, parseErr := parseEventData(row.EventKind, row.EventData)
 		if parseErr != nil {
-			s.logger.Warn("skip unparseable event",
+			s.logger.WarnContext(ctx, "skip unparseable event",
 				slog.String("session_id", sessionID),
 				slog.String("event_id", row.ID.String()),
 				slog.Any("error", parseErr))
@@ -198,9 +198,9 @@ func (s *EventStore) loadEvents(ctx context.Context, botID, sessionID string, ar
 	loadedBytes := int64(defaultReplayMaxBytes) - remaining
 	totalEvents, countErr := s.queries.CountSessionEvents(ctx, pgSessionID)
 	if countErr != nil {
-		s.logger.Warn("measure replay event count failed", slog.String("session_id", sessionID), slog.Any("error", countErr))
+		s.logger.WarnContext(ctx, "measure replay event count failed", slog.String("session_id", sessionID), slog.Any("error", countErr))
 	}
-	s.logger.Info("timeline replay payload admitted",
+	s.logger.InfoContext(ctx, "timeline replay payload admitted",
 		slog.String("bot_id", botID),
 		slog.String("session_id", sessionID),
 		slog.Int("event_count", len(events)),
