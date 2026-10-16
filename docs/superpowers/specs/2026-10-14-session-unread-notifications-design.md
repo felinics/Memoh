@@ -176,18 +176,51 @@ notification.
 
 ### 6.3 Where dots appear
 
+Chosen direction: **variant C, the "Needs you" inbox** from the interactive
+demo (https://claude.ai/artifact/4wxR22qBb9FkHjCSy32ZSR). Variants A
+(switcher dot only) and B (always-visible bot row) were compared and not
+chosen; B's idea returns in the bot switcher redesign follow-up.
+
 - **Session row** (`session-item.vue`): in the existing trailing overlay slot.
   While running it shows the spinner; when the run ends and the session is
-  unread it shows a red dot; on hover the actions button takes the slot as
-  today. One red dot for every kind; the kind only changes notification text.
-  Color token: `bg-accent-red-fill` (the `BadgeCount` destructive fill). Check
-  against `packages/ui/AGENTS.md` and the UI contract guard during
-  implementation.
+  unread it shows a dot; on hover the actions button takes the slot as today.
+  The title of an unread row is set in the semibold weight so it reads as
+  unread even before the eye reaches the dot.
+- **Dot color by kind**: `reply` and `failed` use the red alert fill
+  (`bg-accent-red-fill`, the `BadgeCount` destructive fill); `needs_input`
+  uses the yellow accent (`--accent-yellow`), so "the agent is blocked on you"
+  is distinguishable from "there is something to read". The two must also
+  differ in lightness, not hue alone. Check both against `packages/ui/AGENTS.md`
+  and the UI contract guard during implementation.
 - **Bot switcher** (`bot-switcher.vue`): a dot on the trigger when any *other*
-  bot has unread sessions; a dot on each unread bot in the dropdown list.
+  bot has unread sessions; an unread count on each bot in the dropdown list.
 - **Counts**: web prefixes `document.title` with `(n) `; desktop sets the dock
-  badge to `n`. `n` = total unread sessions. Rows and the bot list show dots,
-  not numbers.
+  badge to `n`. `n` = total unread sessions. Rows show dots, not numbers.
+
+### 6.4 "Needs you" inbox
+
+A section at the top of the sessions panel, above folders and Recents, that
+lists every unread session of the current user across all bots of the team.
+It is the main cross-bot surface: the user does not need to open the switcher
+to find out where the attention is.
+
+- **Visibility**: rendered only while the unread store is non-empty; it
+  disappears when the last entry is read, so the resting sidebar is unchanged.
+- **Header**: "Needs you" plus the total count (`BadgeCount` destructive).
+- **Row**: the bot's avatar (small), the session title, and the kind as a
+  short colored label — replied (muted), run failed (red), waiting for you
+  (yellow). Sorted by `attention_at`, newest first.
+- **Overflow**: at most 5 rows; a "Show all (n)" row expands the rest in
+  place. No separate page.
+- **Click**: switches to the row's bot when it differs, opens the session, and
+  therefore marks it read (6.2). The row leaves the inbox; the same session's
+  dot in Recents clears at the same time.
+- **Data**: the unread store (6.1) already holds `botId`, `title`, `kind` and
+  `attentionAt` for every bot, so the inbox needs no new API. Bot avatars
+  come from the existing bot list query.
+- **Schedules later**: the inbox is the intended home for schedule runs that
+  need attention once `report_run` grading lands (see 10). Its row model is
+  kind-driven, so a schedule kind adds a label and color, not a new surface.
 
 ## 7. Notifications
 
@@ -246,7 +279,8 @@ Failing tests first, then the implementation.
   access is revoked; mark-read rejects non-creators.
 - **Vitest (web)**: unread store transitions (seed, attention, read, dropped);
   viewing detection (tab switch, blur, hidden); notification gating (viewed
-  session, setting off, initial summary).
+  session, setting off, initial summary); inbox ordering, overflow and
+  cross-bot open.
 - **Vitest (desktop main)**: notification de-duplication, click navigation,
   badge count.
 - **Real UI verification** (mandatory, `mise run dev` + in-app browser, with
@@ -255,8 +289,9 @@ Failing tests first, then the implementation.
      dot, the title shows `(1)`, and a browser notification appears.
   2. Open the session: the dot clears, also in a second tab.
   3. Stay in the session while it runs: no dot, no notification.
-  4. In bot B, an unread session in bot A shows on the switcher trigger and in
-     the list.
+  4. In bot B, an unread session in bot A shows on the switcher trigger, in
+     the switcher list, and in the "Needs you" inbox; clicking the inbox row
+     switches to bot A and opens the session.
   5. Trigger a tool approval: "waiting for your confirmation".
   6. Desktop via electron-vite dev: native notification, click navigation, dock
      badge.
@@ -274,7 +309,9 @@ Failing tests first, then the implementation.
 ## 10. Follow-ups (out of scope)
 
 - Schedule sessions: grey dot plus `report_run` outcome grading (MEMOH-119
-  follow-up).
+  follow-up). Runs graded as needing the user enter the "Needs you" inbox
+  (6.4) through a new `attention_kind`; runs graded as nothing to report get
+  only the grey dot and never enter the inbox or notify.
 - Always-visible bot switcher (Arc-style icon row) using `unreadCountByBot`.
 - Web Push for closed tabs.
 - Per-session mute and "mark all as read".
