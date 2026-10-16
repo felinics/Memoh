@@ -6969,6 +6969,8 @@ definitions:
     type: object
   session.Session:
     properties:
+      attention_at:
+        type: string
       attention_kind:
         description: |-
           AttentionKind and Unread describe the requesting user's unread state.

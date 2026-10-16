@@ -187,7 +187,9 @@ func (s *Service) Annotate(ctx context.Context, userID string, threads []thread.
 	}
 	for i := range threads {
 		if r, ok := byID[strings.TrimSpace(threads[i].ID)]; ok {
+			at := r.AttentionAt.Time
 			threads[i].AttentionKind = r.AttentionKind.String
+			threads[i].AttentionAt = &at
 			threads[i].Unread = r.Unread
 		}
 	}

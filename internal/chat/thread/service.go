@@ -71,6 +71,7 @@ type Thread struct {
 	// AttentionKind and Unread describe the requesting user's unread state.
 	// They are filled by the attention service for list responses only.
 	AttentionKind string     `json:"attention_kind,omitempty"`
+	AttentionAt   *time.Time `json:"attention_at,omitempty"`
 	Unread        bool       `json:"unread,omitempty"`
 	Visibility    Visibility `json:"-"`
 } // @name session.Session

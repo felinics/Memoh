@@ -46,6 +46,7 @@ LIMIT sqlc.arg(limit_count)::int;
 -- them. Sessions created by someone else, or never marked, are omitted.
 SELECT s.id AS session_id,
        s.attention_kind,
+       s.attention_at,
        (r.read_at IS NULL OR s.attention_at > r.read_at)::bool AS unread
 FROM bot_sessions s
 LEFT JOIN session_reads r

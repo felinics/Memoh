@@ -14,6 +14,7 @@ import (
 const listSessionAttentionForUser = `-- name: ListSessionAttentionForUser :many
 SELECT s.id AS session_id,
        s.attention_kind,
+       s.attention_at,
        (r.read_at IS NULL OR s.attention_at > r.read_at)::bool AS unread
 FROM bot_sessions s
 LEFT JOIN session_reads r
@@ -30,9 +31,10 @@ type ListSessionAttentionForUserParams struct {
 }
 
 type ListSessionAttentionForUserRow struct {
-	SessionID     pgtype.UUID `json:"session_id"`
-	AttentionKind pgtype.Text `json:"attention_kind"`
-	Unread        bool        `json:"unread"`
+	SessionID     pgtype.UUID        `json:"session_id"`
+	AttentionKind pgtype.Text        `json:"attention_kind"`
+	AttentionAt   pgtype.Timestamptz `json:"attention_at"`
+	Unread        bool               `json:"unread"`
 }
 
 // Attention and unread state of the given sessions, for the user who created
@@ -46,7 +48,12 @@ func (q *Queries) ListSessionAttentionForUser(ctx context.Context, arg ListSessi
 	var items []ListSessionAttentionForUserRow
 	for rows.Next() {
 		var i ListSessionAttentionForUserRow
-		if err := rows.Scan(&i.SessionID, &i.AttentionKind, &i.Unread); err != nil {
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.AttentionKind,
+			&i.AttentionAt,
+			&i.Unread,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

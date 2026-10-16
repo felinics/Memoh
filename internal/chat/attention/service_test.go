@@ -161,6 +161,7 @@ func TestAnnotateSetsUnreadOnlyForReturnedRows(t *testing.T) {
 	q := &fakeQueries{attention: []dbsqlc.ListSessionAttentionForUserRow{{
 		SessionID:     pgtype.UUID{Bytes: testSession, Valid: true},
 		AttentionKind: pgtype.Text{String: "needs_input", Valid: true},
+		AttentionAt:   pgtype.Timestamptz{Time: testNow, Valid: true},
 		Unread:        true,
 	}}}
 	threads := []thread.Thread{{ID: testSession.String()}, {ID: other.String()}}
@@ -169,10 +170,10 @@ func TestAnnotateSetsUnreadOnlyForReturnedRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Annotate: %v", err)
 	}
-	if !got[0].Unread || got[0].AttentionKind != "needs_input" {
+	if !got[0].Unread || got[0].AttentionKind != "needs_input" || got[0].AttentionAt == nil || !got[0].AttentionAt.Equal(testNow) {
 		t.Fatalf("annotated = %+v, want unread needs_input", got[0])
 	}
-	if got[1].Unread || got[1].AttentionKind != "" {
+	if got[1].Unread || got[1].AttentionKind != "" || got[1].AttentionAt != nil {
 		t.Fatalf("unmarked thread = %+v, want untouched", got[1])
 	}
 }

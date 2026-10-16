@@ -27430,6 +27430,9 @@ const docTemplate = `{
         "session.Session": {
             "type": "object",
             "properties": {
+                "attention_at": {
+                    "type": "string"
+                },
                 "attention_kind": {
                     "description": "AttentionKind and Unread describe the requesting user's unread state.\nThey are filled by the attention service for list responses only.",
                     "type": "string"
