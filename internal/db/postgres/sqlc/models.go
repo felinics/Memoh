@@ -376,6 +376,8 @@ type BotSession struct {
 	RuntimeConfigEpoch       int64              `json:"runtime_config_epoch"`
 	ParentSessionID          pgtype.UUID        `json:"parent_session_id"`
 	CreatedByUserID          pgtype.UUID        `json:"created_by_user_id"`
+	AttentionAt              pgtype.Timestamptz `json:"attention_at"`
+	AttentionKind            pgtype.Text        `json:"attention_kind"`
 	CreatedAt                pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
 	DeletedAt                pgtype.Timestamptz `json:"deleted_at"`
@@ -800,6 +802,13 @@ type SearchProvider struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 	TeamID    pgtype.UUID        `json:"team_id"`
+}
+
+type SessionRead struct {
+	TeamID    pgtype.UUID        `json:"team_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	SessionID pgtype.UUID        `json:"session_id"`
+	ReadAt    pgtype.Timestamptz `json:"read_at"`
 }
 
 type SessionRun struct {
