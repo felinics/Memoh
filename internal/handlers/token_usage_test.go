@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -213,10 +213,7 @@ func TestListTokenUsageRecordsRejectsUnknownSessionType(t *testing.T) {
 	if err == nil {
 		t.Fatalf("ListTokenUsageRecords() error = nil, want HTTP 400")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("ListTokenUsageRecords() error = %v, want HTTP 400", err)
-	}
+	requireFieldError(t, err, apperror.CodeRequestFieldInvalid, "session_type")
 	if queries.listCalled || queries.countCalled {
 		t.Fatalf("usage queries should not run for invalid session_type")
 	}

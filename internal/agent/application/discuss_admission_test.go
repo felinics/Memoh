@@ -83,16 +83,6 @@ func TestAdmitDiscussMessagesDropsLeadingOrphanToolMessage(t *testing.T) {
 	}
 }
 
-func TestDiscussCompactableTokensUsesSharedEstimator(t *testing.T) {
-	messages := []turn.DiscussMessage{
-		{Role: "user", Content: strings.Repeat("x", 400)},
-		{Role: "user", Content: "pinned", CompactionArtifactID: "a1"},
-	}
-	if got := discussCompactableTokens(messages); got != 100 {
-		t.Fatalf("discussCompactableTokens = %d, want 100", got)
-	}
-}
-
 func TestAdmitDiscussMessagesNewestOrphanToolFailsClosed(t *testing.T) {
 	// When the budget fits only a newest tool response whose call fell
 	// outside the window, admission must fail closed instead of handing the

@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const (
@@ -90,7 +93,7 @@ func FetchCopilotToken(ctx context.Context, githubToken string) (string, time.Ti
 		return "", time.Time{}, fmt.Errorf("read copilot token response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", time.Time{}, fmt.Errorf("copilot token request failed: %s", strings.TrimSpace(string(body)))
+		return "", time.Time{}, errs.NewDependency("copilot token request failed", slog.Int("status", resp.StatusCode))
 	}
 
 	var parsed tokenResponse

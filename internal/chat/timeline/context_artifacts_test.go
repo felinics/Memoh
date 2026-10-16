@@ -150,14 +150,17 @@ func TestComposeContextWithArtifactsKeepsSegmentsEditedAfterCompletion(t *testin
 	}}
 
 	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
-	if composed == nil || len(composed.Messages) != 2 {
-		t.Fatalf("expected summary + merged rc, got %+v", composed)
+	if composed == nil || len(composed.Messages) != 3 {
+		t.Fatalf("expected summary and two independent sources, got %+v", composed)
 	}
 	if composed.Messages[0].CompactionArtifactID != "a1" {
 		t.Fatalf("expected summary before edited segment, got %+v", composed.Messages[0])
 	}
 	if !strings.Contains(composed.Messages[1].Content, "edited later") {
 		t.Fatalf("edited segment must survive coverage, got %+v", composed.Messages[1])
+	}
+	if composed.Messages[2].Content != "tail" {
+		t.Fatalf("current source must exclude edited history: %+v", composed.Messages[2])
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/server"
 )
 
 type contextLifecycleBoundaryQueries struct {
@@ -132,7 +133,7 @@ func TestGetSessionContextLifecycleMapsEndpointBoundaryErrors(t *testing.T) {
 			ctx := newContextLifecycleTestContext(t, "")
 			test.configure(queries, ctx)
 			err := newContextLifecycleBoundaryHandler(queries, test.accountRole).GetSessionContextLifecycle(ctx)
-			problem, ok := apperror.ProblemFrom(err, "request-1")
+			problem, ok := server.ProblemFrom(err, "request-1")
 			if !ok || problem.Code != string(test.wantCode) || problem.Status != test.wantStatus {
 				t.Fatalf("error = %#v, problem = %#v, want %s with status %d", err, problem, test.wantCode, test.wantStatus)
 			}
@@ -173,7 +174,7 @@ func TestMapContextLifecycleErrorConvertsLegacyHelperErrors(t *testing.T) {
 			t.Parallel()
 
 			err := mapContextLifecycleError(test.err)
-			problem, ok := apperror.ProblemFrom(err, "request-1")
+			problem, ok := server.ProblemFrom(err, "request-1")
 			if !ok || problem.Code != string(test.wantCode) || problem.Status != test.wantStatus {
 				t.Fatalf("error = %#v, problem = %#v, want %s with status %d", err, problem, test.wantCode, test.wantStatus)
 			}

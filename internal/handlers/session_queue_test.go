@@ -19,6 +19,7 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/server"
 )
 
 func TestSessionQueueHandlerRegistersSeparateQueueRoutes(t *testing.T) {
@@ -92,7 +93,7 @@ func TestSessionQueueResponsesDoNotUseMixedQueueKind(t *testing.T) {
 
 func TestSessionQueueEditBySomeoneElseIsForbidden(t *testing.T) {
 	err := queueMutationError(fmt.Errorf("update: %w", application.ErrQueueItemNotEditable))
-	problem, ok := apperror.ProblemFrom(err, "")
+	problem, ok := server.ProblemFrom(err, "")
 	if !ok || problem.Status != http.StatusForbidden || problem.Code != string(apperror.CodeQueueItemNotEditable) {
 		t.Fatalf("queueMutationError() = %v, want %d %s", err, http.StatusForbidden, apperror.CodeQueueItemNotEditable)
 	}

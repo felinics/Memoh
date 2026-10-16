@@ -310,6 +310,7 @@ import {
 } from '@/lib/desktop-shell'
 import { useDesktopUpdates } from '@/composables/useDesktopUpdates'
 import { SettingsRow, SettingsSection } from '@felinic/ui'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { useSettingsStore } from '@/store/settings'
 import { useUpdateStore } from '@/store/update'
@@ -400,7 +401,8 @@ const updateDesc = computed(() => {
       return state.progress == null ? t('about.preparingUpdate') : t('about.downloadingUpdate', { progress: state.progress })
     }
     if (state.status === 'downloaded') return t(state.autoUpdate ? 'about.desktopUpdateDownloadedDesc' : 'about.updateReadyPaused')
-    if (state.status === 'error') return state.error || t('about.desktopUpdateFailed')
+    // The updater's own error text is not shown; the label already says it failed.
+    if (state.status === 'error') return ''
     return t('about.desktopUpdatesUnavailableDesc')
   }
   if (update.hasUpdate) return t('about.newVersionDesc')
@@ -484,7 +486,7 @@ async function setAutoUpdate(enabled: boolean) {
   try {
     await desktopUpdates.value.setAutoUpdate(enabled)
   } catch (error) {
-    toast.error(`${t('about.checkFailed')}: ${error instanceof Error ? error.message : String(error)}`)
+    toast.error(resolveApiErrorMessage(error, t('about.checkFailed')))
   } finally {
     preferencePending.value = false
   }
@@ -494,8 +496,7 @@ async function recheck() {
   try {
     await update.check()
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    toast.error(`${t('about.checkFailed')}: ${reason}`)
+    toast.error(resolveApiErrorMessage(error, t('about.checkFailed')))
   }
 }
 
@@ -508,11 +509,10 @@ async function runDesktopUpdateAction() {
       ? await desktopUpdates.value.install()
       : await desktopUpdates.value.check()
     if (state.status === 'error') {
-      toast.error(`${t('about.checkFailed')}: ${state.error || t('about.desktopUpdateFailed')}`)
+      toast.error(`${t('about.checkFailed')}: ${t('about.desktopUpdateFailed')}`)
     }
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    toast.error(`${t('about.checkFailed')}: ${reason}`)
+    toast.error(resolveApiErrorMessage(error, t('about.checkFailed')))
   } finally {
     actionPending.value = false
   }

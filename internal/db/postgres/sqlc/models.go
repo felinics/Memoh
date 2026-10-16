@@ -196,6 +196,7 @@ type BotAppInstallation struct {
 	AvailableVersion  string             `json:"available_version"`
 	LastCheckedAt     pgtype.Timestamptz `json:"last_checked_at"`
 	LastError         string             `json:"last_error"`
+	LastErrorCode     string             `json:"last_error_code"`
 	Release           []byte             `json:"release"`
 	InstalledAt       pgtype.Timestamptz `json:"installed_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
@@ -255,6 +256,7 @@ type BotDependencyInstallation struct {
 	LatestVersion      string             `json:"latest_version"`
 	LastCheckedAt      pgtype.Timestamptz `json:"last_checked_at"`
 	LastError          string             `json:"last_error"`
+	LastErrorCode      string             `json:"last_error_code"`
 	ManifestDigest     string             `json:"manifest_digest"`
 	SourceUrl          string             `json:"source_url"`
 	RegistryID         string             `json:"registry_id"`
@@ -482,6 +484,7 @@ type BotWorkspace struct {
 	ObservedGeneration int64              `json:"observed_generation"`
 	EverReady          bool               `json:"ever_ready"`
 	LastError          string             `json:"last_error"`
+	LastErrorCode      string             `json:"last_error_code"`
 	LastErrorPhase     string             `json:"last_error_phase"`
 	Attempts           int32              `json:"attempts"`
 	NextAttemptAt      pgtype.Timestamptz `json:"next_attempt_at"`
@@ -784,6 +787,7 @@ type ScheduleLog struct {
 	Status       string             `json:"status"`
 	ResultText   string             `json:"result_text"`
 	ErrorMessage string             `json:"error_message"`
+	ErrorCode    string             `json:"error_code"`
 	Usage        []byte             `json:"usage"`
 	ModelID      pgtype.UUID        `json:"model_id"`
 	StartedAt    pgtype.Timestamptz `json:"started_at"`

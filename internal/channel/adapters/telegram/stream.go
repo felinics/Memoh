@@ -35,7 +35,6 @@ type telegramOutboundStream struct {
 	isPrivateChat bool
 	draftID       int
 	closed        atomic.Bool
-	wg            sync.WaitGroup
 	mu            sync.Mutex
 	buf           strings.Builder
 	streamChatID  int64
@@ -80,29 +79,8 @@ func (s *telegramOutboundStream) getBotAndReply(ctx context.Context) (bot *tele.
 	return bot, replyTo, nil
 }
 
-func (s *telegramOutboundStream) refreshTypingAction(ctx context.Context, chatID int64) error {
-	if err := s.adapter.waitStreamLimit(ctx); err != nil {
-		return err
-	}
-	bot, err := s.getBot(ctx)
-	if err != nil {
-		return err
-	}
-	return bot.Notify(tele.ChatID(chatID), tele.Typing)
-}
-
 func (s *telegramOutboundStream) ensureStreamMessage(ctx context.Context, text string) error {
 	s.mu.Lock()
-	typingChatID := s.streamChatID
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		if err := s.refreshTypingAction(ctx, typingChatID); err != nil {
-			if s.adapter != nil && s.adapter.logger != nil {
-				s.adapter.logger.DebugContext(ctx, "refresh typing action failed", slog.Any("error", err))
-			}
-		}
-	}()
 	if s.streamMsgID != 0 {
 		s.mu.Unlock()
 		return nil
@@ -399,6 +377,28 @@ func (s *telegramOutboundStream) deliverFinalTextWithActions(ctx context.Context
 }
 
 func (s *telegramOutboundStream) pushToolCallStart(ctx context.Context, tc *channel.StreamToolCall) error {
+	s.commitSegment(ctx)
+	return s.sendToolCallMessage(ctx, tc, channel.BuildToolCallStart(tc))
+}
+
+// pushSegmentEnd closes the text streamed before a hidden tool call as its own
+// message. With nothing buffered there is no segment to close, so the stream
+// message (if any) is kept for the text that follows.
+func (s *telegramOutboundStream) pushSegmentEnd(ctx context.Context) error {
+	s.mu.Lock()
+	hasText := strings.TrimSpace(s.buf.String()) != ""
+	s.mu.Unlock()
+	if hasText {
+		s.commitSegment(ctx)
+	}
+	return nil
+}
+
+// commitSegment commits the buffered text as its own message and resets the
+// streaming state, so the next delta starts a fresh message. In draft mode
+// the text is sent as a permanent message; otherwise the streamed message is
+// edited to its final text.
+func (s *telegramOutboundStream) commitSegment(ctx context.Context) {
 	s.mu.Lock()
 	bufText := strings.TrimSpace(s.buf.String())
 	hasMsg := s.streamMsgID != 0
@@ -419,7 +419,6 @@ func (s *telegramOutboundStream) pushToolCallStart(ctx context.Context, tc *chan
 		_ = s.editStreamMessageFinal(ctx, bufText)
 	}
 	s.resetStreamState()
-	return s.sendToolCallMessage(ctx, tc, channel.BuildToolCallStart(tc))
 }
 
 func (s *telegramOutboundStream) pushToolCallEnd(ctx context.Context, tc *channel.StreamToolCall) error {
@@ -764,9 +763,6 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 				actions = msg.Message.Actions
 			}
 			if err := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", to, parseMode, actions); err != nil {
-				if s.adapter.logger != nil {
-					s.adapter.logger.ErrorContext(ctx, "stream final attachment failed", slog.String("config_id", s.cfg.ID), slog.Any("error", err))
-				}
 				return err
 			}
 		}
@@ -941,6 +937,8 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.Prepare
 		return s.pushToolCallStart(ctx, event.ToolCall)
 	case channel.StreamEventToolCallEnd:
 		return s.pushToolCallEnd(ctx, event.ToolCall)
+	case channel.StreamEventSegmentEnd:
+		return s.pushSegmentEnd(ctx)
 	case channel.StreamEventAttachment:
 		return s.pushAttachment(ctx, event)
 	case channel.StreamEventPhaseEnd:

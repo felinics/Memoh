@@ -69,7 +69,7 @@ func TestAnthropicGenerationLimitsMatchTheAdapterDefaults(t *testing.T) {
 				t.Fatalf("generate: %v", err)
 			}
 
-			limits := ResolveGenerationLimits(ClientTypeAnthropicMessages, tc.reasoning, tc.window)
+			limits := ResolveGenerationLimits(ClientTypeAnthropicMessages, tc.reasoning, tc.window, 0)
 			if body.MaxTokens != limits.MaxOutputTokens {
 				t.Fatalf("adapter max_tokens = %d, resolver reserves %d", body.MaxTokens, limits.MaxOutputTokens)
 			}

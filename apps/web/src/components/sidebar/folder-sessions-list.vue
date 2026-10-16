@@ -90,7 +90,10 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const { sessionId, currentBotId } = storeToRefs(chatStore)
 
-const sessions = computed(() => chatStore.workdirSessionsFor(props.workdirId))
+// A first send's session joins its folder once the server confirms the send,
+// as in Recents (see isSessionTentative).
+const sessions = computed(() => chatStore.workdirSessionsFor(props.workdirId)
+  .filter(session => !chatStore.isSessionTentative(session.id)))
 const paging = computed(() => chatStore.workdirSessionsState(props.workdirId))
 
 // Show more / Retry sit under the folder's rows and read as list footers, so

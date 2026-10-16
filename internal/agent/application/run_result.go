@@ -6,6 +6,7 @@ import (
 
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/errs"
@@ -19,6 +20,9 @@ type runOutcomeKey struct{}
 type runOutcomeValue struct {
 	runID   string
 	outcome RunOutcome
+	// async is whether nobody is waiting for the run's terminal frame. The
+	// side that admitted the run decides it from the run's mode.
+	async bool
 }
 
 // WithRunOutcome carries the owner's outcome of run runID to the run's
@@ -29,17 +33,27 @@ type runOutcomeValue struct {
 //
 // The value names its run because contexts outlive runs: a follow-up run
 // started from a terminal observation inherits the finished run's context.
+//
+// The run is recorded as one a user is waiting for. A run admitted for
+// nobody in particular carries that through withRunOutcome instead.
 func WithRunOutcome(ctx context.Context, runID string, outcome RunOutcome) context.Context {
-	return context.WithValue(ctx, runOutcomeKey{}, runOutcomeValue{runID: runID, outcome: outcome})
+	return withRunOutcome(ctx, runID, outcome, sessionmode.Chat)
 }
 
-// runOutcomeFrom is the outcome ctx carries for run runID, or zero.
-func runOutcomeFrom(ctx context.Context, runID string) RunOutcome {
+// withRunOutcome is WithRunOutcome for a run admitted in mode. A mode no user
+// is in the loop of (schedule, discuss, subagent) records the run as
+// asynchronous.
+func withRunOutcome(ctx context.Context, runID string, outcome RunOutcome, mode string) context.Context {
+	return context.WithValue(ctx, runOutcomeKey{}, runOutcomeValue{runID: runID, outcome: outcome, async: !sessionmode.IsInteractive(mode)})
+}
+
+// runOutcomeFrom is the value ctx carries for run runID, or zero.
+func runOutcomeFrom(ctx context.Context, runID string) runOutcomeValue {
 	value, ok := ctx.Value(runOutcomeKey{}).(runOutcomeValue)
 	if !ok || value.runID != runID {
-		return RunOutcome{}
+		return runOutcomeValue{}
 	}
-	return value.outcome
+	return value
 }
 
 // logRunResult writes the one result record of an agent run.
@@ -56,19 +70,21 @@ func runOutcomeFrom(ctx context.Context, runID string) RunOutcome {
 // runs failed.
 //
 // The level follows the fault: a server or dependency failure is an error, a
-// client failure and a stop are not. A run's client failure is reported to
-// the user in the run's terminal frame, the same as a request's, so it is not
-// treated as asynchronous.
+// client failure and a stop are not. A run started by a user who sees its
+// terminal frame is attributed like a request; a run no user is waiting for
+// (schedule, discuss, subagent) is asynchronous, and a client fault in it is
+// this process's fault.
 func (s *Service) logRunResult(ctx context.Context, terminal sessionruntime.TerminalRun) {
 	if s.logger == nil || !terminal.Applied {
 		return
 	}
-	cause := runOutcomeFrom(ctx, terminal.RunID).Cause
+	owner := runOutcomeFrom(ctx, terminal.RunID)
+	cause := owner.outcome.Cause
 	if cause == nil {
 		cause = terminal.Cause
 	}
 	failure := runResultError(terminal, cause)
-	result := errlog.Finish(ctx, runResultOperation, failure, errlog.Options{})
+	result := errlog.Finish(ctx, runResultOperation, failure, errlog.Options{Async: owner.async})
 	attrs := append([]slog.Attr{
 		slog.String("operation", runResultOperation),
 		slog.String("run_id", terminal.RunID),

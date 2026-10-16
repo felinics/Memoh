@@ -310,6 +310,15 @@ WHERE team_id = public.memoh_current_team_id()
   AND deleted_at IS NULL
 FOR UPDATE;
 
+-- name: ListBotSessionIDs :many
+-- Every session a bot-wide runtime reset covers, deleted ones included, as
+-- ClearHistoryByBot does.
+SELECT id
+FROM bot_sessions
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id)
+ORDER BY id;
+
 -- name: ListSessionsByBot :many
 SELECT
   s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,

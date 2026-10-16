@@ -344,7 +344,7 @@ func (r *AppRemoval) Rollback(ctx context.Context) error {
 func appOperationPaths(registryID, appID string) (appPaths, error) {
 	targetDir, err := AppDirForIDs(registryID, appID)
 	if err != nil || registryID == UserSkillNamespace {
-		return appPaths{}, bridge.ErrBadRequest
+		return appPaths{}, ErrInvalidSkillRequest
 	}
 	stagingDir := path.Join(ManagedDir(), ".staging", registryID, appID)
 	return appPaths{

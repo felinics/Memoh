@@ -206,6 +206,7 @@ func runConfigFromSpawnRunConfig(cfg tools.SpawnRunConfig) RunConfig {
 		Skills:                         skills,
 		BackgroundManager:              cfg.BackgroundManager,
 		ContextBudgetMaxTokens:         cfg.ContextBudgetMaxTokens,
+		ModelMaxOutputTokens:           cfg.ModelMaxOutputTokens,
 		ContextToolExchangePolicy:      cfg.ContextToolExchangePolicy,
 		ContextScope: contextfrag.Scope{
 			BotID:             identity.BotID,

@@ -62,6 +62,9 @@ const (
 	// NoticeSteerFailed: an instruction sent during the turn was not
 	// delivered to the runtime.
 	NoticeSteerFailed NoticeKind = "steer_failed"
+	// NoticeOutputTruncated: the model stopped because it reached its output
+	// limit, so the reply is cut off.
+	NoticeOutputTruncated NoticeKind = "output_truncated"
 )
 
 // StreamEvent is emitted by an agent runtime during streaming. The JSON
@@ -96,6 +99,12 @@ type StreamEvent struct {
 	StepNumber     int              `json:"stepNumber,omitempty"`
 	TotalSteps     int              `json:"totalSteps,omitempty"`
 	ProgressStatus string           `json:"progressStatus,omitempty"`
+	// RetryDelayMs and RetryReason describe a Retry: how long the runtime
+	// waits before it calls the model again, and the class of the failure
+	// (rate_limited, server_error, stream_incomplete, network). The
+	// provider's own text never reaches the wire.
+	RetryDelayMs int64  `json:"retryDelayMs,omitempty"`
+	RetryReason  string `json:"retryReason,omitempty"`
 	// NoticeKind is set by the runtime on a RuntimeNotice. It never reaches
 	// the wire: the application replaces it with Code.
 	NoticeKind NoticeKind `json:"-"`

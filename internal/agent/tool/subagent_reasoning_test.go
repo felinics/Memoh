@@ -184,7 +184,7 @@ func TestResolveSubagentReasoningFollowsTheSubagentModel(t *testing.T) {
 	off := reasoning.ResolveConfig(
 		canDisable.ResolveThinkingMode(), canDisable.Config.ReasoningEfforts,
 		canDisable.ReasoningOptions(clientType),
-		models.ReasoningEffortDisable, "", clientType,
+		models.ReasoningEffortDisable, "",
 	)
 	if off == nil || !off.Disabled || off.OffEffort != models.ReasoningEffortNone {
 		t.Fatalf("model that can be turned off: got %+v", off)
@@ -196,7 +196,7 @@ func TestResolveSubagentReasoningFollowsTheSubagentModel(t *testing.T) {
 	offElsewhere := reasoning.ResolveConfig(
 		cannotDisable.ResolveThinkingMode(), cannotDisable.Config.ReasoningEfforts,
 		cannotDisable.ReasoningOptions(clientType),
-		models.ReasoningEffortDisable, "", clientType,
+		models.ReasoningEffortDisable, "",
 	)
 	if offElsewhere == nil || !offElsewhere.Active || offElsewhere.Disabled || offElsewhere.Effort != models.ReasoningEffortLow {
 		t.Fatalf("model that cannot be turned off: got %+v", offElsewhere)
@@ -207,7 +207,7 @@ func TestResolveSubagentReasoningFollowsTheSubagentModel(t *testing.T) {
 	stranded := reasoning.ResolveConfig(
 		cannotDisable.ResolveThinkingMode(), cannotDisable.Config.ReasoningEfforts,
 		cannotDisable.ReasoningOptions(clientType),
-		models.ReasoningEffortHigh, "", clientType,
+		models.ReasoningEffortHigh, "",
 	)
 	if stranded == nil || !stranded.Active || stranded.Effort == models.ReasoningEffortHigh {
 		t.Fatalf("stranded tier should not be forwarded: got %+v", stranded)

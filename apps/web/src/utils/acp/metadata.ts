@@ -1,94 +1,39 @@
 import { randomUUID } from '@/utils/uuid'
 import { normalizeAgentID } from '@/utils/external-agent'
-import type { AcpprofileManagedField, AcpprofilePublicProfile } from '@memohai/sdk'
+import type { AcpprofileManagedField, AcpprofilePublicProfile, BotagentsBotAgent } from '@memohai/sdk'
 
 export const ACP_NO_PROJECT_MODE = 'none'
 export const ACP_NO_PROJECT_ROOT = '/data/.memoh/acp-work/no-project'
 
 export interface ACPAgentForm {
-  enabled: boolean
   setup_mode: string
   managed: Record<string, string>
 }
 
-export interface ACPForm {
-  agents: Record<string, ACPAgentForm>
-}
+type ACPAgentSource = Pick<BotagentsBotAgent, 'metadata'> | null | undefined
 
-export interface ACPAgentConfig {
-  setupMode: string
-  setupModeSet: boolean
-  managed: Record<string, unknown>
-}
-
-
-export function readACPConfig(metadata: Record<string, unknown> | undefined, profiles: AcpprofilePublicProfile[]): ACPForm {
-  const out: ACPForm = { agents: {} }
-  const acp = isRecord(metadata?.acp) ? metadata.acp : {}
-  const agents = isRecord(acp.agents) ? acp.agents : {}
-  for (const profile of profiles) {
-    const id = normalizeAgentID(profile.id)
-    if (!id) continue
-    const defaults = emptyACPAgentForm(profile)
-    const raw = agents[id]
-    if (typeof raw === 'boolean') {
-      out.agents[id] = { ...defaults, enabled: raw }
-      continue
-    }
-    const record = isRecord(raw) ? raw : {}
-    const managed = isRecord(record.managed) ? record.managed : {}
-    out.agents[id] = {
-      enabled: typeof record.enabled === 'boolean' ? record.enabled : legacyEnabled(acp, id),
-      setup_mode: normalizeSetupMode(typeof record.setup_mode === 'string' ? record.setup_mode : defaults.setup_mode, managed),
-      managed: fieldsFromProfile(profile, managed),
-    }
+// 每个 ACP Agent 的启动配置存在它自己那一行的 metadata.managed 上。
+// 所有自定义 ACP Agent 共用同一个 profile id(acp),所以配置不能按 profile 存取 ——
+// 那样同一个 Bot 下的多个 Agent 会互相覆盖。
+export function readACPAgentForm(agent: ACPAgentSource, profile: AcpprofilePublicProfile): ACPAgentForm {
+  const managed = isRecord(agent?.metadata?.managed) ? agent.metadata.managed : {}
+  return {
+    setup_mode: defaultSetupMode(profile),
+    managed: fieldsFromProfile(profile, managed),
   }
-  return out
 }
 
-export function normalizeACPForm(source: ACPForm, profiles: AcpprofilePublicProfile[]): ACPForm {
-  const out: ACPForm = { agents: {} }
-  for (const profile of profiles) {
-    const id = normalizeAgentID(profile.id)
-    if (!id) continue
-    const agent = source.agents[id] ?? emptyACPAgentForm(profile)
-    out.agents[id] = {
-      enabled: !!agent.enabled,
-      setup_mode: normalizeSetupMode(agent.setup_mode || defaultSetupMode(profile), agent.managed),
-      managed: fieldsFromProfile(profile, agent.managed),
-    }
+export function withACPAgentForm(agent: ACPAgentSource, form: ACPAgentForm): Record<string, unknown> {
+  return {
+    ...(isRecord(agent?.metadata) ? agent.metadata : {}),
+    managed: { ...form.managed },
   }
-  return out
 }
 
-export function withACPMetadata(metadata: Record<string, unknown> | undefined, acpForm: ACPForm, profiles: AcpprofilePublicProfile[] = []): Record<string, unknown> {
-  const nextMetadata = isRecord(metadata) ? { ...metadata } : {}
-  const currentACP = isRecord(nextMetadata.acp) ? nextMetadata.acp : {}
-  const acp: Record<string, unknown> = { ...currentACP }
-  const currentAgents = isRecord(acp.agents) ? acp.agents : {}
-  acp.agents = {
-    ...currentAgents,
-    ...serializeACPAgents(metadata, acpForm, profiles),
-  }
-  delete acp.codex_enabled
-  delete acp.enabled_agents
-  nextMetadata.acp = acp
-  return nextMetadata
-}
-
-// Agent creation must only touch the selected profile. Re-serializing every
-// profile would turn defaults or stale client state for an unrelated Agent
-// into an explicit server update and can make that unrelated config fail
-// validation before the new BotAgent row is created.
-export function withEnabledACPAgentMetadataIfConfigured(
-  metadata: Record<string, unknown> | undefined,
-  profile: AcpprofilePublicProfile,
-): Record<string, unknown> | undefined {
-  const form = readACPConfig(metadata, [profile])
-  const agent = ensureACPAgentForm(form, profile)
-  if (findMissingRequiredManagedField(profile, agent.managed, agent.setup_mode)) return undefined
-  agent.enabled = true
-  return withACPMetadata(metadata, form, [profile])
+export function isACPAgentConfigured(agent: ACPAgentSource, profile: AcpprofilePublicProfile | null | undefined): boolean {
+  if (!profile) return false
+  const form = readACPAgentForm(agent, profile)
+  return findMissingRequiredManagedField(profile, form.managed, form.setup_mode) === null
 }
 
 export function findMissingRequiredManagedField(profile: AcpprofilePublicProfile | null | undefined, managed: Record<string, unknown>, setupMode: string): AcpprofileManagedField | null {
@@ -112,50 +57,8 @@ function profileSupportsSetupMode(profile: AcpprofilePublicProfile, mode: string
   return modes.some(supported => normalizeAgentID(supported) === mode)
 }
 
-export function readACPAgentConfig(metadata: Record<string, unknown> | undefined, rawAgentID: string | undefined): ACPAgentConfig {
-  const agentID = normalizeAgentID(rawAgentID)
-  const acp = isRecord(metadata?.acp) ? metadata.acp : {}
-  const agents = isRecord(acp.agents) ? acp.agents : {}
-  const raw = agentID ? agents[agentID] : undefined
-  const record = isRecord(raw) ? raw : {}
-  const managed = isRecord(record.managed) ? record.managed : {}
-  return {
-    setupMode: normalizeSetupMode(typeof record.setup_mode === 'string' ? record.setup_mode : '', managed),
-    setupModeSet: typeof record.setup_mode === 'string' && record.setup_mode.trim() !== '',
-    managed,
-  }
-}
-
-export function isACPAgentEnabled(metadata: Record<string, unknown> | undefined, rawAgentID: unknown): boolean {
-  const agentID = normalizeAgentID(rawAgentID)
-  if (!agentID || !metadata) return false
-  const acp = isRecord(metadata.acp) ? metadata.acp : {}
-  const agents = isRecord(acp.agents) ? acp.agents : {}
-  const raw = agents[agentID]
-  if (typeof raw === 'boolean') return raw
-  if (isRecord(raw) && typeof raw.enabled === 'boolean') return raw.enabled
-  return legacyEnabled(acp, agentID)
-}
-
 export function createACPNoProjectPath(): string {
-  return `${ACP_NO_PROJECT_ROOT}/${randomID()}`
-}
-
-export function emptyACPAgentForm(profile: AcpprofilePublicProfile): ACPAgentForm {
-  return {
-    enabled: false,
-    setup_mode: defaultSetupMode(profile),
-    managed: fieldsFromProfile(profile, {}),
-  }
-}
-
-export function ensureACPAgentForm(form: ACPForm, profile: AcpprofilePublicProfile): ACPAgentForm {
-  const id = normalizeAgentID(profile.id)
-  if (!id) return emptyACPAgentForm(profile)
-  if (!form.agents[id]) {
-    form.agents[id] = emptyACPAgentForm(profile)
-  }
-  return form.agents[id]
+  return `${ACP_NO_PROJECT_ROOT}/${randomUUID()}`
 }
 
 export function fieldsFromProfile(profile: AcpprofilePublicProfile, source: Record<string, unknown>): Record<string, string> {
@@ -177,13 +80,6 @@ export function defaultSetupMode(profile: AcpprofilePublicProfile): string {
   return normalizeSetupMode(modes[0] ?? 'api_key')
 }
 
-
-function legacyEnabled(acp: Record<string, unknown>, id: string): boolean {
-  if (Array.isArray(acp.enabled_agents) && acp.enabled_agents.some((item) => normalizeAgentID(item) === id)) return true
-  if (id === 'codex' && typeof acp.codex_enabled === 'boolean') return acp.codex_enabled
-  return false
-}
-
 function normalizeSetupMode(mode: string, managed: Record<string, unknown> = {}): string {
   const value = normalizeAgentID(mode)
   if (value === 'oauth' || value === 'self') return value
@@ -193,49 +89,6 @@ function normalizeSetupMode(mode: string, managed: Record<string, unknown> = {})
   }
   if (value === 'api_key') return value
   return value || 'api_key'
-}
-
-function serializeACPAgents(metadata: Record<string, unknown> | undefined, acpForm: ACPForm, profiles: AcpprofilePublicProfile[]): Record<string, unknown> {
-  const profileByID = new Map(profiles.map(profile => [normalizeAgentID(profile.id), profile]))
-  const out: Record<string, unknown> = {}
-  for (const [rawAgentID, agent] of Object.entries(acpForm.agents)) {
-    const agentID = normalizeAgentID(rawAgentID)
-    const profile = profileByID.get(agentID)
-    const managed: Record<string, unknown> = { ...agent.managed }
-    if (profile) {
-      const existingManaged = existingManagedFields(metadata, agentID)
-      for (const field of profile.managed_fields ?? []) {
-        const fieldID = normalizeAgentID(field.id)
-        if (!fieldID || !isSensitiveManagedField(field)) continue
-        const value = managed[fieldID]
-        const existing = existingManaged[fieldID]
-        if (typeof value === 'string' && value.trim() === '' && typeof existing === 'string' && existing.trim() !== '') {
-          managed[fieldID] = null
-        }
-      }
-    }
-    out[agentID || rawAgentID] = {
-      enabled: !!agent.enabled,
-      setup_mode: normalizeSetupMode(agent.setup_mode, managed),
-      managed,
-    }
-  }
-  return out
-}
-
-function existingManagedFields(metadata: Record<string, unknown> | undefined, agentID: string): Record<string, unknown> {
-  const acp = isRecord(metadata?.acp) ? metadata.acp : {}
-  const agents = isRecord(acp.agents) ? acp.agents : {}
-  const agent = isRecord(agents[agentID]) ? agents[agentID] : {}
-  return isRecord(agent.managed) ? agent.managed : {}
-}
-
-function isSensitiveManagedField(field: AcpprofileManagedField): boolean {
-  return field.sensitive === true || field.type === 'password'
-}
-
-function randomID(): string {
-  return randomUUID()
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

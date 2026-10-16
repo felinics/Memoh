@@ -18,7 +18,10 @@ describe('workspace links', () => {
   it.each(['https://example.com', '//example.com/a', 'http://localhost.example.com:8080/'])(
     'keeps public URL %s external', (href) => expect(classifyWorkspaceLink(href)).toEqual({ kind: 'external' }),
   )
-  it.each(['#section', 'mailto:user@example.com', 'javascript:alert(1)', 'file:///data/a', '/bad%zz', '/data/%00', '']) (
+  it.each(['#section', 'mailto:user@example.com'])(
+    'leaves %s to the browser', (href) => expect(classifyWorkspaceLink(href)).toEqual({ kind: 'native' }),
+  )
+  it.each(['javascript:alert(1)', 'file:///data/a', '/bad%zz', '/data/%00', '']) (
     'does not classify %s as a workspace link', (href) => expect(classifyWorkspaceLink(href)).toBeNull(),
   )
 })

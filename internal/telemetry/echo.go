@@ -33,7 +33,7 @@ const livenessRoute = "/health"
 // the span name uses the matched route rather than the raw path, and the URL
 // attribute goes through the same sanitizer as the access log.
 //
-// Install it after middleware.RequestID and httpx.RequestIDContext, so the
+// Install it after httpx.AssignRequestID and httpx.RequestIDContext, so the
 // span can carry the id the client is given.
 //
 // The span and the metric cover the same requests, with the same exceptions

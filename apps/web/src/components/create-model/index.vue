@@ -212,6 +212,30 @@
               </FormControl>
             </FieldStack>
           </FormField>
+
+          <!-- Max Output Tokens (optional) -->
+          <FormField
+            v-if="selectedType === 'chat'"
+            v-slot="{ componentField }"
+            name="max_output_tokens"
+          >
+            <FieldStack for="create-model-max-output-tokens">
+              <template #label>
+                <Label for="create-model-max-output-tokens">
+                  {{ $t('models.maxOutputTokens') }}
+                  <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
+                </Label>
+              </template>
+              <FormControl>
+                <Input
+                  id="create-model-max-output-tokens"
+                  type="number"
+                  :placeholder="$t('models.maxOutputTokensPlaceholder')"
+                  v-bind="componentField"
+                />
+              </FormControl>
+            </FieldStack>
+          </FormField>
         </div>
       </template>
     </FormDialogShell>
@@ -273,6 +297,7 @@ const formSchema = toTypedSchema(z.object({
   description: z.string().optional(),
   dimensions: z.coerce.number().min(1, t('models.dimensionsMin')).optional(),
   context_window: z.coerce.number().min(1, t('models.contextWindowMin')).optional(),
+  max_output_tokens: z.coerce.number().min(1, t('models.maxOutputTokensMin')).optional(),
 }))
 
 const props = withDefaults(defineProps<{
@@ -405,6 +430,8 @@ async function addModel() {
     description: form.values.description,
     dimensions: dimensions ?? (isEdit ? fallback!.config?.dimensions : undefined),
     contextWindow: form.values.context_window ?? (isEdit ? fallback!.config?.context_window : undefined),
+    maxOutputTokens: (typeof form.values.max_output_tokens === 'number' ? form.values.max_output_tokens : undefined)
+      ?? (isEdit ? fallback!.config?.max_output_tokens : undefined),
     compatibilities: selectedCompat.value,
     reasoningEfforts: effortsToSave(),
     existing: isEdit ? fallback!.config : undefined,
@@ -473,6 +500,7 @@ watch(open, async () => {
         description: config?.description ?? '',
         dimensions: config?.dimensions,
         context_window: config?.context_window,
+        max_output_tokens: config?.max_output_tokens,
       },
     })
     selectedCompat.value = config?.compatibilities ?? []
@@ -491,6 +519,7 @@ watch(open, async () => {
         description: '',
         dimensions: undefined,
         context_window: undefined,
+        max_output_tokens: undefined,
       },
     })
     selectedCompat.value = []

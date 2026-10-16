@@ -13,6 +13,7 @@ import (
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 var _ turn.Service = (*Service)(nil)
@@ -103,7 +104,7 @@ func (s *Service) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 			defer assetMu.Unlock()
 			assets = append(assets, refs...)
 		},
-		finishRun:         s.turnRunFinisher(runCtx, admission),
+		finishRun:         s.turnRunFinisher(runCtx, admission, string(cmd.Mode)),
 		publishAgentEvent: s.turnAgentEventPublisher(admission.Handle),
 	}
 	go h.pump(cmd, chunkCh, errCh)
@@ -155,6 +156,16 @@ func (h *runHandle) Cancel()                   { h.cancel() }
 // ReportsRunTerminal reports that a run with a durable record ends its event
 // stream with turn.EventRunTerminal.
 func (h *runHandle) ReportsRunTerminal() bool { return h.finishRun != nil }
+
+// consumerErr is the run failure as it is handed to the consumer of Errs. A
+// run with a durable record writes its own result record, so the consumer's
+// unit (the inbound message, the RPC) does not record the failure again.
+func (h *runHandle) consumerErr(err error) error {
+	if h.finishRun == nil {
+		return err
+	}
+	return errs.Recorded(err)
+}
 
 func (h *runHandle) Inject(ctx context.Context, msg turn.InjectMessage) error {
 	h.injectMu.Lock()
@@ -399,7 +410,7 @@ func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan StreamChunk, 
 				if err := h.publishChunk(chunk); err != nil {
 					if h.recordStreamFailure(err) {
 						select {
-						case h.errs <- err:
+						case h.errs <- h.consumerErr(err):
 						case <-h.ctx.Done():
 						}
 					}
@@ -440,7 +451,7 @@ func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan StreamChunk, 
 				}
 				if !clientGone {
 					select {
-					case h.errs <- err:
+					case h.errs <- h.consumerErr(err):
 					case <-h.ctx.Done():
 						clientGone = true
 						ctxDone = nil

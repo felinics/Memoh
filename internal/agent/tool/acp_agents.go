@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/db"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 )
@@ -47,6 +49,7 @@ type ACPRuntimePool interface {
 type ACPAgentsProvider struct {
 	pool    ACPRuntimePool
 	queries dbstore.Queries
+	setups  *botagents.Service
 	logger  *slog.Logger
 }
 
@@ -57,6 +60,7 @@ func NewACPAgentsProvider(log *slog.Logger, pool ACPRuntimePool, queries dbstore
 	return &ACPAgentsProvider{
 		pool:    pool,
 		queries: queries,
+		setups:  botagents.NewService(log, queries),
 		logger:  log.With(slog.String("tool", "acp_agents")),
 	}
 }
@@ -88,13 +92,12 @@ func (p *ACPAgentsProvider) Tools(_ context.Context, session SessionContext) ([]
 }
 
 func (p *ACPAgentsProvider) listAgents(ctx context.Context, botID string) (any, error) {
-	metadata, err := p.botMetadata(ctx, botID)
-	if err != nil {
-		return nil, err
-	}
 	items := make([]map[string]any, 0)
 	for _, profile := range acpprofile.List() {
-		enabled := acpprofile.MetadataAgentEnabledRaw(metadata, profile.ID)
+		enabled, err := p.agentEnabled(ctx, botID, profile.ID)
+		if err != nil {
+			return nil, err
+		}
 		if !enabled {
 			continue
 		}
@@ -115,14 +118,14 @@ func (p *ACPAgentsProvider) listAgents(ctx context.Context, botID string) (any, 
 // web pre-session model picker uses), reads its model and reasoning state,
 // and closes the runtime again.
 func (p *ACPAgentsProvider) describeAgent(ctx context.Context, botID, agentID string, sess SessionContext) (any, error) {
-	metadata, err := p.botMetadata(ctx, botID)
+	if _, known := acpprofile.Lookup(agentID); !known {
+		return nil, fmt.Errorf("unknown ACP agent %q", agentID)
+	}
+	enabled, err := p.agentEnabled(ctx, botID, agentID)
 	if err != nil {
 		return nil, err
 	}
-	if !acpprofile.MetadataAgentEnabledRaw(metadata, agentID) {
-		if _, known := acpprofile.Lookup(agentID); !known {
-			return nil, fmt.Errorf("unknown ACP agent %q", agentID)
-		}
+	if !enabled {
 		return nil, fmt.Errorf("ACP agent %q is not enabled for this bot", agentID)
 	}
 	runtimeOwner := strings.TrimSpace(sess.ChannelIdentityID)
@@ -169,16 +172,28 @@ func (p *ACPAgentsProvider) describeAgent(ctx context.Context, botID, agentID st
 	}, nil
 }
 
-func (p *ACPAgentsProvider) botMetadata(ctx context.Context, botID string) ([]byte, error) {
+// agentEnabled reports whether the bot can run agentID. The tool addresses
+// agents by provider, so this is the setup of the instance a provider-only
+// session would run as.
+func (p *ACPAgentsProvider) agentEnabled(ctx context.Context, botID, agentID string) (bool, error) {
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	bot, err := p.queries.GetBotByID(ctx, pgBotID)
 	if err != nil {
-		return nil, fmt.Errorf("get bot: %w", err)
+		return false, fmt.Errorf("get bot: %w", err)
 	}
-	return bot.Metadata, nil
+	var metadata map[string]any
+	if len(bot.Metadata) > 0 {
+		// Undecodable metadata reads as no legacy setup, as it always has.
+		_ = json.Unmarshal(bot.Metadata, &metadata)
+	}
+	setup, err := p.setups.ResolveACPSetup(ctx, botID, "", agentID, metadata)
+	if err != nil {
+		return false, fmt.Errorf("resolve ACP agent setup: %w", err)
+	}
+	return setup.Enabled, nil
 }
 
 type listACPAgentsArgs struct {

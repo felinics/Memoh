@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/redact"
 	"github.com/felinics/memoh/internal/textutil"
 )
@@ -549,7 +550,7 @@ func (a *MisskeyAdapter) logInbound(configID string, msg channel.InboundMessage)
 // --- Sender ---
 
 // Send delivers an outbound message to Misskey by creating a note.
-func (a *MisskeyAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.PreparedOutboundMessage) error {
+func (*MisskeyAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.PreparedOutboundMessage) error {
 	mkCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		return err
@@ -565,10 +566,7 @@ func (a *MisskeyAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, ms
 
 	_, err = createNote(ctx, mkCfg, text, replyID, visibility)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.ErrorContext(ctx, "send note failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
-		return err
+		return errs.Wrap(err, "send misskey note", slog.String("config_id", cfg.ID))
 	}
 	return nil
 }

@@ -188,11 +188,11 @@
                 v-else-if="testStatus === 'ok'"
                 class="size-4 text-success"
               />
-              <AlertCircle
+              <ErrorIcon
                 v-else-if="testStatus === 'unverified'"
                 class="size-4 text-warning"
               />
-              <AlertCircle
+              <ErrorIcon
                 v-else-if="testStatus === 'error'"
                 class="size-4 text-destructive"
               />
@@ -377,7 +377,8 @@ import {
   SelectValue,
   Spinner,
 } from '@felinic/ui'
-import { AlertCircle, KeyRound, RefreshCw } from 'lucide-vue-next'
+import { KeyRound, RefreshCw } from 'lucide-vue-next'
+import { ErrorIcon } from '@memohai/icon/ui'
 import CheckDrawIcon from '@/components/check-draw-icon/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import {

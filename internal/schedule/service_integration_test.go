@@ -3,6 +3,7 @@ package schedule_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"strings"
@@ -52,6 +53,7 @@ type mockTriggerer struct {
 	botID   string
 	payload schedule.TriggerPayload
 	token   string
+	err     error
 }
 
 func (m *mockTriggerer) TriggerSchedule(_ context.Context, botID string, payload schedule.TriggerPayload, token string) (schedule.TriggerResult, error) {
@@ -59,6 +61,9 @@ func (m *mockTriggerer) TriggerSchedule(_ context.Context, botID string, payload
 	m.botID = botID
 	m.payload = payload
 	m.token = token
+	if m.err != nil {
+		return schedule.TriggerResult{}, m.err
+	}
 	return schedule.TriggerResult{Status: "ok"}, nil
 }
 
@@ -200,5 +205,44 @@ func TestIntegrationScheduleFireIdentityAndBudget(t *testing.T) {
 	loaded, err := svc.Get(ctx, id)
 	if err != nil || loaded.MaxRunSeconds != 7200 {
 		t.Fatalf("budget=%d err=%v", loaded.MaxRunSeconds, err)
+	}
+}
+
+// A failed fire stores the catalog code of its cause and no text; a log row
+// written by an earlier server still reads back with its message.
+func TestIntegrationFailedFireLogStoresCode(t *testing.T) {
+	svc, q, pool, mock, cleanup := setupScheduleIntegrationTest(t)
+	defer cleanup()
+	ctx := t.Context()
+	owner, bot, id := createUserBotAndSchedule(ctx, t, q)
+	defer cleanupScheduleTestData(context.Background(), t, q, pool, owner, bot, id)
+
+	mock.err = errors.New("upstream said: secret detail")
+	if err := svc.Trigger(ctx, id); err == nil {
+		t.Fatal("Trigger succeeded, want the triggerer's failure")
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO schedule_logs (schedule_id, bot_id, status, error_message, completed_at)
+		SELECT id, bot_id, 'error', 'This scheduled run reached its execution limit.', now() FROM schedule WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+
+	logs, _, err := svc.ListLogsBySchedule(ctx, id, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var failed, legacy *schedule.Log
+	for i := range logs {
+		switch {
+		case logs[i].ErrorCode != "":
+			failed = &logs[i]
+		case logs[i].ErrorMessage != "":
+			legacy = &logs[i]
+		}
+	}
+	if failed == nil || failed.ErrorCode != "internal" || failed.ErrorMessage != "" || failed.Status != "error" {
+		t.Fatalf("failed fire log = %+v, want code internal and no message", failed)
+	}
+	if legacy == nil || legacy.ErrorCode != "" {
+		t.Fatalf("earlier server's log = %+v, want its message and no code", legacy)
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 func TestStackOrigin(t *testing.T) {
@@ -44,7 +46,7 @@ func TestNewWithDepthLocatesHelperCaller(t *testing.T) {
 	if r.Source == nil || r.Source.File != file || r.Source.Line != line+1 {
 		t.Fatalf("source = %+v, want %s:%d", r.Source, file, line+1)
 	}
-	if r.Fault != FaultServer {
+	if r.Fault != apperror.FaultServer {
 		t.Fatalf("fault = %s, want server", r.Fault)
 	}
 }
@@ -57,7 +59,7 @@ func TestWithDepthLocatesHelperCaller(t *testing.T) {
 		if r.Source == nil || r.Source.File != file || r.Source.Line != line+1 {
 			t.Fatalf("dependency=%t source = %+v, want %s:%d", dependency, r.Source, file, line+1)
 		}
-		if want := map[bool]Fault{true: FaultDependency, false: FaultServer}[dependency]; r.Fault != want {
+		if want := map[bool]apperror.Fault{true: apperror.FaultDependency, false: apperror.FaultServer}[dependency]; r.Fault != want {
 			t.Fatalf("dependency=%t fault = %s, want %s", dependency, r.Fault, want)
 		}
 	}
@@ -76,7 +78,7 @@ func panicAt(v any) (err error) {
 func TestRecovered(t *testing.T) {
 	err := panicAt("secret user input")
 	r := Analyze(context.Background(), err)
-	if !r.Panic || r.Fault != FaultServer || r.Unlocated {
+	if !r.Panic || r.Fault != apperror.FaultServer || r.Unlocated {
 		t.Fatalf("report=%+v", r)
 	}
 	if strings.Contains(r.Text, "secret") || r.Text != "job: panic" {

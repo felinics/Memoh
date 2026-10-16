@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/logger"
 )
 
@@ -288,16 +289,11 @@ func (m *Manager) removeConnection(ctx context.Context, configID string) error {
 			)
 		}
 		if err := entry.connection.Stop(ctx); err != nil && !errors.Is(err, ErrStopNotSupported) {
-			if m.logger != nil {
-				m.logger.WarnContext(ctx,
-					"connection stop failed",
-					slog.String("bot_id", entry.config.BotID),
-					slog.String("channel", entry.config.ChannelType.String()),
-					slog.String("config_id", configID),
-					slog.Any("error", err),
-				)
-			}
-			return err
+			return errs.Wrap(err, "stop channel connection",
+				slog.String("bot_id", entry.config.BotID),
+				slog.String("channel", entry.config.ChannelType.String()),
+				slog.String("config_id", configID),
+			)
 		}
 	}
 	return nil

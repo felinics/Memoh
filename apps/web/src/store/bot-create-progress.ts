@@ -18,6 +18,7 @@ import {
 } from '@/composables/api/botCreateTerminal'
 import { markOnboardingCompleted } from '@/composables/useOnboarding'
 import { apiErrorStatus, parseMemohError, renderI18nMessage, resolveApiErrorMessage } from '@/utils/api-error'
+import { botCheckDetail } from '@/utils/bot-check'
 import { botAgentRuntimeForProvider, directBotAgentMetadata } from '@/utils/bot-agent'
 import { externalAgentDisplayName } from '@/utils/external-agent'
 import { writeCreatedBotSession, type CreatedBotSession, type CreatedBotSessionRuntime } from '@/pages/bots/created-bot-session'
@@ -132,15 +133,13 @@ async function applyGrants(
         throwOnError: true,
       })
     } catch (error) {
-      onError?.(resolveApiErrorMessage(error, toMessage(error)))
+      onError?.(resolveApiErrorMessage(error, localFailureMessage()))
     }
   }
 }
 
-function toMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === 'string' && error.trim()) return error
-  return 'Bot create failed'
+function localFailureMessage(): string {
+  return renderI18nMessage('errors.internal')
 }
 
 // Polls the Bot until the server has settled its workspace one way or the
@@ -156,16 +155,29 @@ async function awaitBotSettled(botId: string): Promise<BotsBot> {
 }
 
 // The failure reason of a `failed` Bot lives in its runtime checks; the
-// initialization check carries the reconciler's last error.
-async function workspaceFailureDetail(botId: string): Promise<string> {
+// initialization check carries the reconciler's last error. The detail is read
+// the same way the checks panel reads it, so a code recorded by the
+// reconciler renders its catalog copy instead of falling back to the generic
+// subtitle.
+async function workspaceFailure(
+  botId: string,
+): Promise<{ detail: string; code: string | null }> {
   try {
     const { data } = await getBotsByIdChecks({ path: { id: botId }, throwOnError: true })
-    const detail = data.items?.find(check => check.type === CONTAINER_INIT_CHECK && check.status === 'error')?.detail?.trim()
-    if (detail) return detail
+    const check = data.items?.find(item => item.type === CONTAINER_INIT_CHECK && item.status === 'error')
+    if (check) {
+      const meta = check.metadata?.setup_error_code
+      const code = typeof meta === 'string' && meta.trim() ? meta.trim() : null
+      const detail = botCheckDetail(check, key => renderI18nMessage(key)).trim()
+      if (detail) return { detail, code }
+    }
   } catch {
     // The check list is a nicety; the failure itself is already known.
   }
-  return renderI18nMessage('bots.create.failedSubtitle') || 'Workspace setup failed'
+  return {
+    detail: renderI18nMessage('bots.create.failedSubtitle') || 'Workspace setup failed',
+    code: null,
+  }
 }
 
 // Owns the bot-create SSE stream and derived state so it survives navigation
@@ -246,7 +258,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
   }
 
   function failWithoutBot(error: unknown) {
-    const message = resolveApiErrorMessage(error, toMessage(error))
+    const message = resolveApiErrorMessage(error, localFailureMessage())
     setupError.value = message
     errorCode.value = parseMemohError(error)?.code ?? (apiErrorStatus(error) === 409 ? 'bot.name_taken' : null)
     progress.value = { phase: 'error', error: message }
@@ -333,7 +345,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       if (!setupError.value) lines.value = pushBotCreateTerminalLine(lines.value, { kind: 'ready', status: 'done' })
       status.value = 'ready'
     } catch (error) {
-      setupError.value = resolveApiErrorMessage(error, toMessage(error))
+      setupError.value = resolveApiErrorMessage(error, localFailureMessage())
       errorCode.value = parseMemohError(error)?.code ?? null
       lines.value = finalizeBotCreateTerminalLines(lines.value, 'error')
       ensureErrorLine(setupError.value)
@@ -398,7 +410,8 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
         display.value = { display_name: current.display_name, avatar_url: current.avatar_url }
       }
       if (current.status === BOT_STATUS_FAILED) {
-        failWorkspace(await workspaceFailureDetail(botId), 'workspace_setup_failed')
+        const failure = await workspaceFailure(botId)
+        failWorkspace(failure.detail, failure.code ?? 'workspace_setup_failed')
         return NOTHING_APPLIED
       }
       if (current.status === BOT_STATUS_CREATING) {
@@ -415,7 +428,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
         failWithoutBot(error)
         return NOTHING_APPLIED
       }
-      failWorkspace(resolveApiErrorMessage(error, toMessage(error)), parseMemohError(error)?.code ?? null)
+      failWorkspace(resolveApiErrorMessage(error, localFailureMessage()), parseMemohError(error)?.code ?? null)
       return NOTHING_APPLIED
     }
   }
@@ -438,7 +451,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       lines.value = finalizeBotCreateTerminalLines(lines.value)
       return await finishSetup()
     } catch (error) {
-      failWorkspace(resolveApiErrorMessage(error, toMessage(error)), parseMemohError(error)?.code ?? null)
+      failWorkspace(resolveApiErrorMessage(error, localFailureMessage()), parseMemohError(error)?.code ?? null)
       return NOTHING_APPLIED
     }
   }
@@ -470,7 +483,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       if (!bot.value) {
         setupError.value = result.setupError ?? null
         errorCode.value = result.errorCode ?? null
-        ensureErrorLine(result.setupError ?? toMessage(undefined))
+        ensureErrorLine(result.setupError ?? localFailureMessage())
         status.value = 'error'
         return NOTHING_APPLIED
       }
@@ -484,7 +497,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       return await finishSetup()
     } catch (error) {
       if (bot.value) {
-        failWorkspace(resolveApiErrorMessage(error, toMessage(error)), parseMemohError(error)?.code ?? null)
+        failWorkspace(resolveApiErrorMessage(error, localFailureMessage()), parseMemohError(error)?.code ?? null)
         return NOTHING_APPLIED
       }
       failWithoutBot(error)

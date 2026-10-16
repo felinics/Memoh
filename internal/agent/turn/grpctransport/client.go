@@ -9,8 +9,6 @@ import (
 	"sync"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
@@ -242,27 +240,13 @@ func (h *runHandle) pump() {
 	}
 }
 
-// mapClientError restores the turn failure an error envelope carries, keeping
-// the received status on its chain. A canceled or expired call reads as the
-// context error. Any other status is returned unchanged.
+// mapClientError restores the turn failure an error envelope carries, by
+// rpc.Decode. A turn carries an end user's request, so a restored catalog
+// error is forwarded: the user gets the same answer as when the channel runs
+// in the server process. A canceled or expired call stays a status; a caller
+// that needs to know whether it ended the call reads its own context.
 func mapClientError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if restored := turnReasons.Decode(err); restored != nil {
-		return restored
-	}
-	if restored := rpc.DecodeAppError(err); restored != nil {
-		return restored
-	}
-	switch status.Code(err) {
-	case codes.Canceled:
-		return context.Canceled
-	case codes.DeadlineExceeded:
-		return context.DeadlineExceeded
-	default:
-		return err
-	}
+	return rpc.Forward(rpc.Decode(err, turnReasons, nil))
 }
 
 func (c *Client) StopTurn(ctx context.Context, cmd turn.StopCommand) (bool, error) {

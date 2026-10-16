@@ -15,6 +15,7 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/turn"
 	chatview "github.com/felinics/memoh/internal/agent/view"
@@ -169,7 +170,7 @@ func (s *Service) admitTurnRun(
 		req.RunID = admission.RunID
 		req.SessionType = "discuss"
 		if err := s.recordRunResumeContext(s.withAdmissionRuntimeFence(ctx, admission), req); err != nil {
-			s.turnRunFinisher(ctx, admission)(RunOutcome{Status: sessionruntime.RunStatusErrored, Cause: err})
+			s.turnRunFinisher(ctx, admission, string(cmd.Mode))(RunOutcome{Status: sessionruntime.RunStatusErrored, Cause: err})
 			return sessionruntime.Admission{}, err
 		}
 	}
@@ -191,7 +192,10 @@ const terminalWriteTimeout = 10 * time.Second
 // It returns the run's terminal record when this write ended the run. A run
 // that parked on a decision, whose owner lost it, or whose write failed returns
 // none.
-func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.Admission) func(RunOutcome) sessionruntime.TerminalRun {
+//
+// mode is the session mode the run was admitted in; it tells the run's result
+// record whether a user is waiting for the outcome.
+func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.Admission, mode string) func(RunOutcome) sessionruntime.TerminalRun {
 	if s.sessionRuntime == nil || admission.Handle.FencingToken <= 0 {
 		return nil
 	}
@@ -219,7 +223,7 @@ func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.
 			lifecycleCause,
 			contextLifecycleCandidateMinimal,
 		)
-		ctx, cancel := context.WithTimeout(WithRunOutcome(writeCtx, handle.RunID, outcome), terminalWriteTimeout)
+		ctx, cancel := context.WithTimeout(withRunOutcome(writeCtx, handle.RunID, outcome, mode), terminalWriteTimeout)
 		defer cancel()
 		terminal, err := s.sessionRuntime.FinishRunWithErrorCode(ctx, handle, outcome.Status, outcome.ErrorCode())
 		switch {
@@ -284,6 +288,9 @@ type triggeredAdmissionView func(handle sessionruntime.RunHandle) *sessionruntim
 // stop a long schedule run, and so a lost owner lease revokes execution instead
 // of letting a superseded owner keep writing.
 //
+// mode is the session mode of the run (schedule, subagent, or the mode of the
+// run a resume continues).
+//
 // viewFn optionally supplies the subscriber-facing admission view (the request
 // user turn projection); nil keeps the run contentless in the projection, the
 // historical default for triggers and subagents alike.
@@ -291,7 +298,7 @@ type triggeredAdmissionView func(handle sessionruntime.RunHandle) *sessionruntim
 // The finish function is always returned non-nil when the error is nil, so a
 // caller can defer it unconditionally. It takes the run's outcome; an outcome
 // without a status is resolved from its cause and the run context.
-func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invocationID string, submission []byte, viewFn triggeredAdmissionView, resumeRunIDs ...string) (context.Context, sessionruntime.Admission, func(RunOutcome), error) {
+func (s *Service) admitTriggeredRun(ctx context.Context, mode, botID, threadID, invocationID string, submission []byte, viewFn triggeredAdmissionView, resumeRunIDs ...string) (context.Context, sessionruntime.Admission, func(RunOutcome), error) {
 	if s.sessionRuntime == nil {
 		return nil, sessionruntime.Admission{}, nil, errors.New("session runtime is not configured")
 	}
@@ -331,7 +338,7 @@ func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invoca
 		return nil, sessionruntime.Admission{}, nil, fmt.Errorf("%w: %s", sessionruntime.ErrInvocationConflict, invocationID)
 	}
 	runCtx = s.withAdmissionRuntimeFence(runCtx, admission)
-	finishRun := s.turnRunFinisher(runCtx, admission)
+	finishRun := s.turnRunFinisher(runCtx, admission, mode)
 	finish := func(outcome RunOutcome) {
 		defer cancelCause(context.Canceled)
 		if finishRun == nil {
@@ -394,7 +401,7 @@ func (s *Service) AdmitSubagentRun(
 	if beginErr != nil {
 		return nil, tools.SubagentAdmission{}, nil, beginErr
 	}
-	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, botID, threadID, invocationID, submission, nil)
+	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, sessionmode.Subagent, botID, threadID, invocationID, submission, nil)
 	if err != nil {
 		endActiveTurn()
 	}

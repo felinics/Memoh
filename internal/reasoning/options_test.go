@@ -131,10 +131,10 @@ func TestAlwaysOnModelIsSupportedWithoutAControl(t *testing.T) {
 	if !opts.Supported || opts.CanDisable || len(opts.Efforts) != 0 || opts.DefaultEffort != "" {
 		t.Fatalf("always-on options = %+v, want supported with no controls", opts)
 	}
-	if cfg := ResolveConfig(ModeAlways, []string{EffortLow, EffortHigh}, opts, EffortHigh, EffortLow, "openai-completions"); cfg != nil {
+	if cfg := ResolveConfig(ModeAlways, []string{EffortLow, EffortHigh}, opts, EffortHigh, EffortLow); cfg != nil {
 		t.Fatalf("always-on model received a synthetic control: %+v", cfg)
 	}
-	if cfg := ResolveConfig(ModeToggle, []string{EffortLow, EffortHigh}, Options{Supported: true}, EffortHigh, EffortLow, "google-generative-ai"); cfg != nil {
+	if cfg := ResolveConfig(ModeToggle, []string{EffortLow, EffortHigh}, Options{Supported: true}, EffortHigh, EffortLow); cfg != nil {
 		t.Fatalf("supported-but-uncontrollable model received a synthetic control: %+v", cfg)
 	}
 	if got := ReconcileStored(EffortHigh, opts); got != EffortHigh {
@@ -145,33 +145,33 @@ func TestAlwaysOnModelIsSupportedWithoutAControl(t *testing.T) {
 	}
 }
 
-func TestOptionsForAppliesTheSameWirePolicyAsResolve(t *testing.T) {
+func TestOptionsForKeepsTheDeclaredTiersForEveryClientType(t *testing.T) {
 	t.Parallel()
 
-	// Generic OpenAI clients take xhigh as the ceiling. If the picker offered max
-	// while the resolver filtered it, a user could select a tier that silently
-	// became something else — the class of drift this package prevents.
+	// The declared ladder is the only authority on tiers. A client type names the
+	// shape of the request body, not the set of values the endpoint accepts, so a
+	// model that advertises max must offer it and send it on every wire. Deriving
+	// the ceiling from the client type is what made the top tier unreachable for
+	// models on the OpenAI-shaped clients (issue #1470).
 	const advertisedMax = EffortMax
 	advertised := []string{EffortLow, EffortHigh, advertisedMax}
 
-	opts := OptionsFor(ModeToggle, advertised, "openai-completions", "")
-	if slices.Contains(opts.Efforts, advertisedMax) {
-		t.Fatalf("max should be filtered for generic OpenAI clients: %v", opts.Efforts)
-	}
+	for _, clientType := range []string{
+		"openai-completions",
+		"openai-responses",
+		"openai-codex",
+		"github-copilot",
+		"anthropic-messages",
+	} {
+		opts := OptionsFor(ModeToggle, advertised, clientType, "")
+		if !slices.Contains(opts.Efforts, advertisedMax) {
+			t.Fatalf("%s: picker dropped a declared tier: %v", clientType, opts.Efforts)
+		}
 
-	cfg := ResolveConfig(ModeToggle, advertised, opts, advertisedMax, "", "openai-completions")
-	if cfg == nil || cfg.Effort == advertisedMax {
-		t.Fatalf("resolver should not send a filtered tier, got %+v", cfg)
-	}
-
-	// Codex keeps max, and both answers must agree about that too.
-	codexOpts := OptionsFor(ModeToggle, advertised, "openai-codex", "")
-	if !slices.Contains(codexOpts.Efforts, advertisedMax) {
-		t.Fatalf("codex should keep max: %v", codexOpts.Efforts)
-	}
-	codexCfg := ResolveConfig(ModeToggle, advertised, codexOpts, advertisedMax, "", "openai-codex")
-	if codexCfg == nil || codexCfg.Effort != advertisedMax {
-		t.Fatalf("codex resolver should send max, got %+v", codexCfg)
+		cfg := ResolveConfig(ModeToggle, advertised, opts, advertisedMax, "")
+		if cfg == nil || cfg.Effort != advertisedMax {
+			t.Fatalf("%s: resolver should send the selected max, got %+v", clientType, cfg)
+		}
 	}
 }
 
@@ -189,7 +189,7 @@ func TestOptionsDefaultEffortMatchesWhatResolveWouldSend(t *testing.T) {
 		nil,
 	} {
 		opts := OptionsFor(ModeToggle, advertised, "openai-codex", "")
-		cfg := ResolveConfig(ModeToggle, advertised, opts, "", "", "openai-codex")
+		cfg := ResolveConfig(ModeToggle, advertised, opts, "", "")
 		if cfg == nil {
 			t.Fatalf("advertised %v: resolver returned nil for a toggle model", advertised)
 		}
@@ -318,7 +318,7 @@ func TestResolveConfigAgreesWithOffReachability(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			cfg := ResolveConfig(ModeToggle, advertised, opts, tt.stored, tt.requested, clientType)
+			cfg := ResolveConfig(ModeToggle, advertised, opts, tt.stored, tt.requested)
 			if cfg == nil || !cfg.Active || cfg.Disabled || cfg.Effort != tt.want {
 				t.Fatalf("ResolveConfig() = %+v, want active effort %q", cfg, tt.want)
 			}
@@ -338,7 +338,7 @@ func TestResolveConfigHonorsProjectedOffDeclarations(t *testing.T) {
 			t.Fatal("accepted declaration must make off reachable without a disable token")
 		}
 
-		cfg := ResolveConfig(ModeToggle, advertised, opts, EffortLow, EffortDisable, "google-generative-ai")
+		cfg := ResolveConfig(ModeToggle, advertised, opts, EffortLow, EffortDisable)
 		if cfg == nil || !cfg.Disabled || cfg.Active {
 			t.Fatalf("accepted off declaration = %+v, want disabled", cfg)
 		}
@@ -368,7 +368,7 @@ func TestResolveConfigHonorsProjectedOffDeclarations(t *testing.T) {
 				t.Fatal("rejected declaration must override every derived off fallback")
 			}
 
-			cfg := ResolveConfig(ModeToggle, tt.advertised, opts, EffortLow, EffortDisable, tt.clientType)
+			cfg := ResolveConfig(ModeToggle, tt.advertised, opts, EffortLow, EffortDisable)
 			if cfg == nil || !cfg.Active || cfg.Disabled || cfg.Effort != EffortLow {
 				t.Fatalf("rejected off declaration = %+v, want active low", cfg)
 			}

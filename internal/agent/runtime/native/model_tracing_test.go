@@ -205,7 +205,8 @@ func TestModelSpanReportsTheWaitBeforeTheFirstPart(t *testing.T) {
 
 // A stream that never produces a part still has to end its span. A span that
 // never ends never leaves the process, so the round would vanish from the
-// trace in exactly the case an operator is looking into.
+// trace in exactly the case an operator is looking into. Such a stream was cut
+// off and is retried, so every call of the run has its own ended span.
 func TestModelSpanEndsWhenTheStreamProducesNothing(t *testing.T) {
 	recorder := recordToolSpans(t)
 
@@ -217,12 +218,13 @@ func TestModelSpanEndsWhenTheStreamProducesNothing(t *testing.T) {
 		Model:    &sdk.Model{ID: "mock-model", Provider: provider},
 		Messages: []sdk.Message{sdk.UserMessage("task")},
 		Identity: SessionContext{BotID: "bot-1"},
+		Retry:    fastRetry,
 	})
 	for range events {
 	}
 
-	if spans := spansNamed(recorder, spanModelStream); len(spans) != 1 {
-		t.Fatalf("%s spans = %d, want 1; got %v", spanModelStream, len(spans), spanNames(recorder))
+	if spans := spansNamed(recorder, spanModelStream); len(spans) != fastRetry.MaxAttempts+1 {
+		t.Fatalf("%s spans = %d, want %d; got %v", spanModelStream, len(spans), fastRetry.MaxAttempts+1, spanNames(recorder))
 	}
 }
 

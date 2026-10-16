@@ -8,6 +8,7 @@ import './style.css'
 import App from './App.vue'
 import router from './router'
 import { appKeyboardCommands, createKeyboardCommandRegistry } from './lib/keyboard-commands'
+import { canDispatchKeyboardCommand, selectActiveKeyboardBindings } from './lib/keyboard-context'
 import { connectBrowserKeyboardShortcutsLive } from './lib/browser-keyboard-shortcuts'
 import { selectWebBindings } from './lib/keyboard-bindings'
 import { KEYBOARD_REGISTRY } from './composables/useKeyboardCommand'
@@ -34,8 +35,9 @@ setupApiClient({
 installFileDropGuard()
 
 const pinia = createPinia().use(piniaPluginPersistedstate)
-const keyboardCommands = createKeyboardCommandRegistry()
-registerWorkspaceTabCommands(keyboardCommands, useWorkspaceTabsStore(pinia))
+const workspaceTabs = useWorkspaceTabsStore(pinia)
+const keyboardCommands = createKeyboardCommandRegistry(command => canDispatchKeyboardCommand(command, router.currentRoute.value, document, workspaceTabs.activeId !== null))
+registerWorkspaceTabCommands(keyboardCommands, workspaceTabs)
 // Browser-owned combos (e.g. Cmd/Ctrl+W on its default) are excluded by
 // selectWebBindings, so they keep their native behavior — we don't intercept
 // them in the browser. The getter form reads from the shortcuts store on each
@@ -43,7 +45,7 @@ registerWorkspaceTabCommands(keyboardCommands, useWorkspaceTabsStore(pinia))
 const shortcutsStore = useKeyboardShortcutsStore(pinia)
 connectBrowserKeyboardShortcutsLive(
   keyboardCommands,
-  () => selectWebBindings(shortcutsStore.effectiveBindings),
+  () => selectActiveKeyboardBindings(selectWebBindings(shortcutsStore.effectiveBindings)),
 )
 keyboardCommands.register(appKeyboardCommands.openSettings, () => {
   // Already inside settings → no-op. Pushing /settings would redirect to

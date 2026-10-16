@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,8 +17,12 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 )
 
+// handleVerifyRequest answers WeChat's URL verification. The protocol body is
+// written here; a rejection is then returned so the access record carries it.
 func handleVerifyRequest(verifier *securityVerifier, mode string, r *http.Request, w http.ResponseWriter) error {
 	query := r.URL.Query()
 	timestamp := strings.TrimSpace(query.Get("timestamp"))
@@ -25,23 +30,17 @@ func handleVerifyRequest(verifier *securityVerifier, mode string, r *http.Reques
 	signature := strings.TrimSpace(query.Get("signature"))
 	echostr := strings.TrimSpace(query.Get("echostr"))
 	if timestamp == "" || nonce == "" || signature == "" || echostr == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte("invalid verify query"))
-		return nil
+		return rejectVerify(w, http.StatusBadRequest, "invalid verify query", nil)
 	}
 	if mode == encryptionModeSafe || mode == encryptionModeCompat {
 		msgSig := strings.TrimSpace(query.Get("msg_signature"))
 		if msgSig != "" {
 			if !verifier.verifyMessageSignature(msgSig, timestamp, nonce, echostr) {
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = w.Write([]byte("invalid signature"))
-				return nil
+				return rejectVerify(w, http.StatusForbidden, "invalid signature", nil)
 			}
 			plain, err := verifier.decrypt(echostr)
 			if err != nil {
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = w.Write([]byte("decrypt echostr failed"))
-				return nil
+				return rejectVerify(w, http.StatusForbidden, "decrypt echostr failed", err)
 			}
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(plain)) //nolint:gosec // WeChat requires echoing the decrypted verification string verbatim.
@@ -49,42 +48,53 @@ func handleVerifyRequest(verifier *securityVerifier, mode string, r *http.Reques
 		}
 	}
 	if !verifier.verifyURLSignature(signature, timestamp, nonce) {
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte("invalid signature"))
-		return nil
+		return rejectVerify(w, http.StatusForbidden, "invalid signature", nil)
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(echostr)) //nolint:gosec // WeChat requires echoing the verification string verbatim.
 	return nil
 }
 
+// rejectVerify writes the plain-text rejection WeChat expects and returns the
+// same answer as an error for the access record.
+func rejectVerify(w http.ResponseWriter, status int, message string, cause error) error {
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(message))
+	answer := echo.NewHTTPError(status, message)
+	if cause != nil {
+		return answer.WithInternal(cause)
+	}
+	return answer
+}
+
 func (a *WeChatOAAdapter) handleInbound(ctx context.Context, verifier *securityVerifier, mode string, cfg channel.ChannelConfig, handler channel.InboundHandler, r *http.Request, w http.ResponseWriter) error {
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "read body failed")
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(fmt.Errorf("read body failed: %w", err))
 	}
 	defer func() { _ = r.Body.Close() }()
 
 	messageXML, err := decodeInboundXML(verifier, mode, r, raw)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.WarnContext(ctx, "decode wechatoa inbound failed", slog.Any("error", err))
-		}
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte("forbidden"))
-		return nil
+		return echo.NewHTTPError(http.StatusForbidden, "forbidden").WithInternal(err)
 	}
 
 	var payload wechatEnvelope
 	if err := xml.Unmarshal([]byte(messageXML), &payload); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid xml payload")
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(fmt.Errorf("invalid xml payload: %w", err))
 	}
 	if handler != nil {
 		msg, ok := buildInboundMessage(payload)
 		if ok {
 			msg.BotID = cfg.BotID
+			// WeChat is answered success either way, so a message that could
+			// not be queued is dropped here and this event is its record.
 			if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-				a.logger.WarnContext(ctx, "handle inbound failed", slog.Any("error", err))
+				dropped := errs.Wrap(err, "enqueue wechatoa inbound", slog.String("config_id", cfg.ID), slog.String("bot_id", cfg.BotID))
+				result := errlog.Event(ctx, "channel.wechatoa.enqueue_inbound", dropped, errlog.Options{})
+				a.logger.LogAttrs(ctx, result.Level, "wechatoa inbound dropped", result.Attrs()...)
 			}
 		}
 	}

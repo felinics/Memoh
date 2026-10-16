@@ -58,7 +58,7 @@ func OptionsFor(mode string, advertised []string, clientType, offSupport string)
 		return Options{Supported: true}
 	}
 
-	levels := effectiveEfforts(advertised, clientType)
+	levels := effectiveEfforts(advertised)
 	tiers := make([]string, 0, len(levels))
 	for _, e := range levels {
 		if e == EffortDisable {

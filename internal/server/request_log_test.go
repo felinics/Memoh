@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/logger"
 )
@@ -189,6 +191,60 @@ func TestServerRequestLogReportsRoute(t *testing.T) {
 			}
 			if entry["uri"] != tc.path {
 				t.Fatalf("uri = %v, want %q", entry["uri"], tc.path)
+			}
+		})
+	}
+}
+
+type committedLogTestHandler struct {
+	err error
+}
+
+func (h committedLogTestHandler) Register(e *echo.Echo) {
+	e.GET("/stream", func(c echo.Context) error {
+		c.Response().WriteHeader(http.StatusOK)
+		_, _ = c.Response().Write([]byte("data: {\"type\":\"error\"}\n\n"))
+		return h.err
+	})
+}
+
+// A handler that wrote its own body returns the error the body was rendered
+// from. The record attributes it by the rule of the error handler, without a
+// second response.
+func TestServerRequestLogAttributesAnErrorReturnedAfterTheResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name, level, fault, reason string
+		err                        error
+	}{
+		{name: "http error", err: echo.NewHTTPError(http.StatusForbidden).WithInternal(errors.New("synthetic signature mismatch")), level: "INFO", fault: "client", reason: string(apperror.CodeHTTPForbidden)},
+		{name: "catalog error", err: apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("synthetic refused"), nil), level: "ERROR", fault: "server", reason: string(apperror.CodeWorkspaceUnreachable)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			srv := NewServer(logger.New(&logs, "info", "json"), ":0", "test-secret", committedLogTestHandler{err: tc.err})
+			rec := httptest.NewRecorder()
+			token, _, err := auth.GenerateToken("request-log-user", "test-secret", time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodGet, "/stream", nil)
+			req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+			srv.echo.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "problem") || strings.Count(rec.Body.String(), "data:") != 1 {
+				t.Fatalf("response was answered again: %d %s", rec.Code, rec.Body.String())
+			}
+			var entry map[string]any
+			for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+				var candidate map[string]any
+				if err := json.Unmarshal([]byte(line), &candidate); err == nil && candidate["msg"] == "request" {
+					entry = candidate
+				}
+			}
+			if entry == nil {
+				t.Fatalf("no request line in %s", logs.String())
+			}
+			if entry["level"] != tc.level || entry["fault"] != tc.fault || entry["reason"] != tc.reason {
+				t.Fatalf("record level=%v fault=%v reason=%v, want %s %s %s", entry["level"], entry["fault"], entry["reason"], tc.level, tc.fault, tc.reason)
 			}
 		})
 	}

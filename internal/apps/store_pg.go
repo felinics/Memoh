@@ -71,13 +71,13 @@ func (s *postgresStore) Upsert(ctx context.Context, in UpsertInstallation) (Inst
 	return installationResult(row, err)
 }
 
-func (s *postgresStore) SetStatus(ctx context.Context, botID, installationID string, status Status, lastError string) (Installation, error) {
+func (s *postgresStore) SetStatus(ctx context.Context, botID, installationID string, status Status, lastErrorCode string) (Installation, error) {
 	botUUID, id, err := installationKey(botID, installationID)
 	if err != nil {
 		return Installation{}, err
 	}
 	row, err := s.q.UpdateBotAppInstallationStatus(ctx, dbsqlc.UpdateBotAppInstallationStatusParams{
-		Status: string(status), LastError: lastError, BotID: botUUID, ID: id,
+		Status: string(status), LastErrorCode: lastErrorCode, BotID: botUUID, ID: id,
 	})
 	return installationResult(row, err)
 }
@@ -290,7 +290,7 @@ func installationFromRow(row dbsqlc.BotAppInstallation) Installation {
 		RegistryID: row.RegistryID, AppID: row.AppID, Revision: row.Revision, Version: row.Version,
 		Status: Status(row.Status), Reason: Reason(row.Reason),
 		AvailableRevision: row.AvailableRevision, AvailableVersion: row.AvailableVersion,
-		LastError: row.LastError, Release: row.Release,
+		LastError: row.LastError, LastErrorCode: row.LastErrorCode, Release: row.Release,
 		InstalledAt: row.InstalledAt.Time, UpdatedAt: row.UpdatedAt.Time,
 	}
 	if row.LastCheckedAt.Valid {

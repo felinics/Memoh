@@ -20,6 +20,7 @@ import (
 	"github.com/felinics/memoh/internal/acl"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/discuss"
@@ -30,6 +31,7 @@ import (
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/command"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/media"
 	skillset "github.com/felinics/memoh/internal/skills"
@@ -1098,7 +1100,7 @@ func TestChannelInboundProcessorQueueCommandNoSessionDoesNotCreateOne(t *testing
 	if ensurer.createCalls != 0 {
 		t.Fatalf("queue command created a session %d times with spec %#v", ensurer.createCalls, ensurer.lastSpec)
 	}
-	if len(sender.sent) != 1 || !strings.Contains(strings.ToLower(sender.sent[0].Message.PlainText()), "no active") {
+	if len(sender.sent) != 1 || sender.sent[0].Message.PlainText() != i18n.New("en").T("errors.queue_no_active_run") {
 		t.Fatalf("reply = %#v, want no-active-run feedback", sender.sent)
 	}
 }
@@ -1411,8 +1413,13 @@ func TestChannelInboundProcessorDefaultACPRequiresWorkspaceExec(t *testing.T) {
 		},
 	}
 
-	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	err := processor.HandleInbound(context.Background(), cfg, msg, sender)
+	if err == nil {
+		t.Fatal("the failure is not returned for the result record")
+	}
+	// The inbound message record keeps the sender's refusal a client fault.
+	if record := errlog.Finish(context.Background(), "channel.inbound", err, errlog.Options{}); record.Level != slog.LevelInfo || record.Report.Fault != apperror.FaultClient {
+		t.Fatalf("inbound record level=%v fault=%q, want INFO client", record.Level, record.Report.Fault)
 	}
 	if ensurer.lastSpec.Runtime != "" {
 		t.Fatalf("session should not be created when workspace_exec is missing, got spec %#v", ensurer.lastSpec)
@@ -1456,8 +1463,8 @@ func TestChannelInboundProcessorActiveACPRequiresRuntimeOwner(t *testing.T) {
 		},
 	}
 
-	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err == nil {
+		t.Fatal("the failure is not returned for the result record")
 	}
 	if gateway.gotReq.Query != "" {
 		t.Fatalf("chat should not run without runtime owner, got query %q", gateway.gotReq.Query)
@@ -1508,8 +1515,8 @@ func TestChannelInboundProcessorActiveACPRequiresCurrentActorOwnerOrManage(t *te
 			},
 		}
 
-		if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err == nil {
+			t.Fatal("the failure is not returned for the result record")
 		}
 		if gateway.gotReq.Query != "" {
 			t.Fatalf("chat should not run for non-owner actor, got query %q", gateway.gotReq.Query)
@@ -1557,8 +1564,8 @@ func TestChannelInboundProcessorActiveACPRequiresCurrentActorOwnerOrManage(t *te
 			},
 		}
 
-		if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err == nil {
+			t.Fatal("the failure is not returned for the result record")
 		}
 		if gateway.gotReq.Query != "" {
 			t.Fatalf("chat should not run for manager on another user's runtime, got query %q", gateway.gotReq.Query)
@@ -1969,11 +1976,14 @@ func TestChannelInboundProcessorRejectsDirectSkillBeforeAutoDiscussSession(t *te
 	if ensurer.lastSpec.Type != "" {
 		t.Fatalf("skill slash should not create discuss session, got spec %+v", ensurer.lastSpec)
 	}
-	if len(sender.sent) != 1 || !strings.Contains(sender.sent[0].Message.PlainText(), "not supported") {
+	if len(sender.sent) != 1 || sender.sent[0].Message.PlainText() != i18n.New("en").T("errors.slash.skill_activation_unsupported") {
 		t.Fatalf("expected unsupported skill slash reply, got %+v", sender.sent)
 	}
 }
 
+// A skill request that cannot be resolved because no resolver is configured is
+// this process's failure: it is answered with the generic copy and returned
+// for the message's result record.
 func TestChannelInboundProcessorRejectsUnresolvedDirectSkill(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-use-active"}}
 	policySvc := &fakePolicyService{}
@@ -2000,8 +2010,8 @@ func TestChannelInboundProcessorRejectsUnresolvedDirectSkill(t *testing.T) {
 		},
 	}
 
-	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{TeamID: "team-test", ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}, msg, sender); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{TeamID: "team-test", ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}, msg, sender); err == nil || !strings.Contains(err.Error(), "skill resolver not configured") {
+		t.Fatalf("HandleInbound() error = %v, want the missing resolver", err)
 	}
 	if gateway.gotReq.Query != "" {
 		t.Fatalf("skill slash should not trigger chat call, got query %q", gateway.gotReq.Query)
@@ -2009,8 +2019,8 @@ func TestChannelInboundProcessorRejectsUnresolvedDirectSkill(t *testing.T) {
 	if len(chatSvc.persistedIn) != 0 {
 		t.Fatalf("skill slash should not persist before active-stream reject, got %+v", chatSvc.persistedIn)
 	}
-	if len(sender.sent) != 1 || !strings.Contains(sender.sent[0].Message.PlainText(), "not available") {
-		t.Fatalf("expected unavailable skill slash reply, got %+v", sender.sent)
+	if len(sender.sent) != 1 || sender.sent[0].Message.PlainText() != i18n.New("en").T("errors.internal") {
+		t.Fatalf("expected the generic failure reply, got %+v", sender.sent)
 	}
 }
 
@@ -3655,10 +3665,10 @@ func TestMapStreamChunkToChannelEvents(t *testing.T) {
 			wantType: channel.StreamEventProcessingCompleted,
 		},
 		{
-			name:      "processing_failed",
-			chunk:     `{"type":"processing_failed","error":"failed"}`,
-			wantType:  channel.StreamEventProcessingFailed,
-			wantError: "failed",
+			// No producer sends it; its error text is not relayed to the channel.
+			name:          "processing_failed",
+			chunk:         `{"type":"processing_failed","error":"failed"}`,
+			wantNilEvents: true,
 		},
 		{
 			name:          "empty chunk",

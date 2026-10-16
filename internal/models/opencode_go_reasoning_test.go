@@ -123,7 +123,7 @@ func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
 						defer server.Close()
 						cfg := models.SDKModelConfig{
 							ModelID: entry.ModelID, ClientType: catalog.ClientType, BaseURL: server.URL, HTTPClient: server.Client(),
-							ReasoningConfig:  reasoning.ResolveConfig(model.ResolveThinkingMode(), model.Config.ReasoningEfforts, opts, "", effort, catalog.ClientType),
+							ReasoningConfig:  reasoning.ResolveConfig(model.ResolveThinkingMode(), model.Config.ReasoningEfforts, opts, "", effort),
 							ReasoningDialect: model.Config.ReasoningDialect, ReasoningOffSupport: model.Config.ReasoningOffSupport,
 							ThinkingBudgetMin: model.Config.ThinkingBudgetMin, ThinkingBudgetMax: model.Config.ThinkingBudgetMax,
 						}

@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/felinics/memoh/internal/errs"
 )
@@ -121,8 +122,19 @@ type RPCError struct {
 	Data    json.RawMessage `json:"data,omitempty"`
 }
 
+// rpcErrorDataLimit bounds how much of an error's data its text carries.
+const rpcErrorDataLimit = 512
+
 func (e *RPCError) Error() string {
-	return fmt.Sprintf("codex app-server error %d: %s", e.Code, e.Message)
+	text := fmt.Sprintf("codex app-server error %d: %s", e.Code, e.Message)
+	data := string(e.Data)
+	if data == "" || data == "null" {
+		return text
+	}
+	if len(data) > rpcErrorDataLimit {
+		data = strings.ToValidUTF8(data[:rpcErrorDataLimit], "") + "…"
+	}
+	return text + " (data: " + data + ")"
 }
 
 // InboundKind classifies a line received from the app-server.

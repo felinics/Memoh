@@ -70,6 +70,16 @@ type InvalidReasoningEffortError struct {
 	Options reasoning.Options
 }
 
+// InvalidModelRefError is ErrInvalidModelRef together with the request field
+// that held the reference.
+type InvalidModelRefError struct {
+	Field string
+	Err   error
+}
+
+func (e *InvalidModelRefError) Error() string { return e.Err.Error() }
+func (e *InvalidModelRefError) Unwrap() error { return e.Err }
+
 func (e *InvalidReasoningEffortError) Error() string {
 	return fmt.Sprintf("reasoning effort %q is not supported by the chat model", e.Effort)
 }
@@ -294,7 +304,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	chatModelIDSet := req.ChatModelID != nil
 	if req.ChatModelID != nil {
 		if value := strings.TrimSpace(*req.ChatModelID); value != "" {
-			modelID, err := s.resolveModelUUID(ctx, value)
+			modelID, err := s.resolveModelUUID(ctx, "chat_model_id", value)
 			if err != nil {
 				return Settings{}, err
 			}
@@ -313,7 +323,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	compactionModelIDSet := req.CompactionModelID != nil
 	if req.CompactionModelID != nil {
 		if value := strings.TrimSpace(*req.CompactionModelID); value != "" {
-			modelID, err := s.resolveModelUUID(ctx, value)
+			modelID, err := s.resolveModelUUID(ctx, "compaction_model_id", value)
 			if err != nil {
 				return Settings{}, err
 			}
@@ -324,7 +334,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	memoryLLMModelIDSet := req.MemoryLLMModelID != nil
 	if req.MemoryLLMModelID != nil {
 		if value := strings.TrimSpace(*req.MemoryLLMModelID); value != "" {
-			modelID, err := s.resolveModelUUID(ctx, value)
+			modelID, err := s.resolveModelUUID(ctx, "memory_llm_model_id", value)
 			if err != nil {
 				return Settings{}, err
 			}
@@ -335,7 +345,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	imageModelIDSet := req.ImageModelID != nil
 	if req.ImageModelID != nil {
 		if value := strings.TrimSpace(*req.ImageModelID); value != "" {
-			modelID, err := s.resolveModelUUID(ctx, value)
+			modelID, err := s.resolveModelUUID(ctx, "image_model_id", value)
 			if err != nil {
 				return Settings{}, err
 			}
@@ -422,7 +432,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 	}
 	current = normalizeChatRuntimeFields(current)
-	if err := validateChatRuntimeSettings(botRow.Metadata, current); err != nil {
+	if err := validateChatRuntimeSettings(botRow.Metadata, current, s.acpSetupResolver(ctx, botID)); err != nil {
 		return Settings{}, err
 	}
 	toolApprovalConfig, err := json.Marshal(current.ToolApprovalConfig)
@@ -945,7 +955,24 @@ func normalizeChatRuntimeFields(current Settings) Settings {
 	return current
 }
 
-func validateChatRuntimeSettings(botMetadata []byte, current Settings) error {
+// acpSetupResolver returns the setup a provider-addressed ACP default runs
+// with.
+type acpSetupResolver func(agentID string, botMetadata map[string]any) (acpprofile.AgentSetup, error)
+
+func legacyACPSetup(agentID string, botMetadata map[string]any) (acpprofile.AgentSetup, error) {
+	return acpprofile.ParseAgentSetup(botMetadata, agentID), nil
+}
+
+func (s *Service) acpSetupResolver(ctx context.Context, botID string) acpSetupResolver {
+	if s.botAgents == nil {
+		return legacyACPSetup
+	}
+	return func(agentID string, botMetadata map[string]any) (acpprofile.AgentSetup, error) {
+		return s.botAgents.ResolveACPSetup(ctx, botID, "", agentID, botMetadata)
+	}
+}
+
+func validateChatRuntimeSettings(botMetadata []byte, current Settings, resolveSetup acpSetupResolver) error {
 	current = normalizeChatRuntimeFields(current)
 	if strings.TrimSpace(current.DefaultBotAgentID) != "" {
 		// The BotAgent path validates availability and shared provider config
@@ -969,8 +996,10 @@ func validateChatRuntimeSettings(botMetadata []byte, current Settings) error {
 	if !ok {
 		return fmt.Errorf("%w: %q", ErrACPUnknownAgent, agentID)
 	}
-	metadata := normalizeJSONObject(botMetadata)
-	setup := acpprofile.ParseAgentSetup(metadata, agentID)
+	setup, err := resolveSetup(agentID, normalizeJSONObject(botMetadata))
+	if err != nil {
+		return err
+	}
 	if !setup.Enabled {
 		return fmt.Errorf("%w: %q", ErrACPAgentNotEnabled, agentID)
 	}
@@ -1074,10 +1103,12 @@ func (s *Service) setDefaultEffect(ctx context.Context, botID, effect string) er
 	return s.acl.SetDefaultEffect(ctx, botID, effect)
 }
 
-func (s *Service) resolveModelUUID(ctx context.Context, modelID string) (pgtype.UUID, error) {
+// resolveModelUUID resolves the model a request names in field. A reference
+// that is empty or matches no model is returned as *InvalidModelRefError.
+func (s *Service) resolveModelUUID(ctx context.Context, field, modelID string) (pgtype.UUID, error) {
 	modelID = strings.TrimSpace(modelID)
 	if modelID == "" {
-		return pgtype.UUID{}, fmt.Errorf("%w: model_id is required", ErrInvalidModelRef)
+		return pgtype.UUID{}, &InvalidModelRefError{Field: field, Err: fmt.Errorf("%w: model_id is required", ErrInvalidModelRef)}
 	}
 
 	// Preferred path: when caller already passes the model UUID.
@@ -1094,7 +1125,7 @@ func (s *Service) resolveModelUUID(ctx context.Context, modelID string) (pgtype.
 		return pgtype.UUID{}, err
 	}
 	if len(rows) == 0 {
-		return pgtype.UUID{}, fmt.Errorf("%w: model not found: %s", ErrInvalidModelRef, modelID)
+		return pgtype.UUID{}, &InvalidModelRefError{Field: field, Err: fmt.Errorf("%w: model not found: %s", ErrInvalidModelRef, modelID)}
 	}
 	if len(rows) > 1 {
 		return pgtype.UUID{}, fmt.Errorf("%w: %s", ErrModelIDAmbiguous, modelID)

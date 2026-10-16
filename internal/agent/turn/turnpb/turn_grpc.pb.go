@@ -22,6 +22,8 @@ const (
 	TurnService_RuntimeCommands_FullMethodName           = "/memoh.turn.v1.TurnService/RuntimeCommands"
 	TurnService_RuntimeControls_FullMethodName           = "/memoh.turn.v1.TurnService/RuntimeControls"
 	TurnService_SetRuntimeMode_FullMethodName            = "/memoh.turn.v1.TurnService/SetRuntimeMode"
+	TurnService_RuntimeModel_FullMethodName              = "/memoh.turn.v1.TurnService/RuntimeModel"
+	TurnService_SetRuntimeModel_FullMethodName           = "/memoh.turn.v1.TurnService/SetRuntimeModel"
 	TurnService_ExecuteRuntimeCommand_FullMethodName     = "/memoh.turn.v1.TurnService/ExecuteRuntimeCommand"
 	TurnService_StopTurn_FullMethodName                  = "/memoh.turn.v1.TurnService/StopTurn"
 	TurnService_Run_FullMethodName                       = "/memoh.turn.v1.TurnService/Run"
@@ -37,6 +39,8 @@ type TurnServiceClient interface {
 	RuntimeCommands(ctx context.Context, in *JsonRequest, opts ...grpc.CallOption) (*JsonResponse, error)
 	RuntimeControls(ctx context.Context, in *JsonRequest, opts ...grpc.CallOption) (*JsonResponse, error)
 	SetRuntimeMode(ctx context.Context, in *JsonRequest, opts ...grpc.CallOption) (*JsonResponse, error)
+	RuntimeModel(ctx context.Context, in *JsonRequest, opts ...grpc.CallOption) (*JsonResponse, error)
+	SetRuntimeModel(ctx context.Context, in *JsonRequest, opts ...grpc.CallOption) (*JsonResponse, error)
 	ExecuteRuntimeCommand(ctx context.Context, in *JsonRequest, opts ...grpc.CallOption) (*JsonResponse, error)
 	StopTurn(ctx context.Context, in *JsonRequest, opts ...grpc.CallOption) (*JsonResponse, error)
 	Run(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[RunRequest, RunResponse], error)
@@ -77,6 +81,26 @@ func (c *turnServiceClient) SetRuntimeMode(ctx context.Context, in *JsonRequest,
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(JsonResponse)
 	err := c.cc.Invoke(ctx, TurnService_SetRuntimeMode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *turnServiceClient) RuntimeModel(ctx context.Context, in *JsonRequest, opts ...grpc.CallOption) (*JsonResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(JsonResponse)
+	err := c.cc.Invoke(ctx, TurnService_RuntimeModel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *turnServiceClient) SetRuntimeModel(ctx context.Context, in *JsonRequest, opts ...grpc.CallOption) (*JsonResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(JsonResponse)
+	err := c.cc.Invoke(ctx, TurnService_SetRuntimeModel_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -171,6 +195,8 @@ type TurnServiceServer interface {
 	RuntimeCommands(context.Context, *JsonRequest) (*JsonResponse, error)
 	RuntimeControls(context.Context, *JsonRequest) (*JsonResponse, error)
 	SetRuntimeMode(context.Context, *JsonRequest) (*JsonResponse, error)
+	RuntimeModel(context.Context, *JsonRequest) (*JsonResponse, error)
+	SetRuntimeModel(context.Context, *JsonRequest) (*JsonResponse, error)
 	ExecuteRuntimeCommand(context.Context, *JsonRequest) (*JsonResponse, error)
 	StopTurn(context.Context, *JsonRequest) (*JsonResponse, error)
 	Run(grpc.BidiStreamingServer[RunRequest, RunResponse]) error
@@ -195,6 +221,12 @@ func (UnimplementedTurnServiceServer) RuntimeControls(context.Context, *JsonRequ
 }
 func (UnimplementedTurnServiceServer) SetRuntimeMode(context.Context, *JsonRequest) (*JsonResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetRuntimeMode not implemented")
+}
+func (UnimplementedTurnServiceServer) RuntimeModel(context.Context, *JsonRequest) (*JsonResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RuntimeModel not implemented")
+}
+func (UnimplementedTurnServiceServer) SetRuntimeModel(context.Context, *JsonRequest) (*JsonResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetRuntimeModel not implemented")
 }
 func (UnimplementedTurnServiceServer) ExecuteRuntimeCommand(context.Context, *JsonRequest) (*JsonResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExecuteRuntimeCommand not implemented")
@@ -285,6 +317,42 @@ func _TurnService_SetRuntimeMode_Handler(srv interface{}, ctx context.Context, d
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(TurnServiceServer).SetRuntimeMode(ctx, req.(*JsonRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TurnService_RuntimeModel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JsonRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TurnServiceServer).RuntimeModel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TurnService_RuntimeModel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TurnServiceServer).RuntimeModel(ctx, req.(*JsonRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TurnService_SetRuntimeModel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JsonRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TurnServiceServer).SetRuntimeModel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TurnService_SetRuntimeModel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TurnServiceServer).SetRuntimeModel(ctx, req.(*JsonRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -390,6 +458,14 @@ var TurnService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetRuntimeMode",
 			Handler:    _TurnService_SetRuntimeMode_Handler,
+		},
+		{
+			MethodName: "RuntimeModel",
+			Handler:    _TurnService_RuntimeModel_Handler,
+		},
+		{
+			MethodName: "SetRuntimeModel",
+			Handler:    _TurnService_SetRuntimeModel_Handler,
 		},
 		{
 			MethodName: "ExecuteRuntimeCommand",

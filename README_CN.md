@@ -62,6 +62,8 @@ docker compose up -d
 
 Compose 会分别启动 Server 和 Channel 服务。请妥善保存内部 RPC 密钥，重新创建服务时继续使用同一个值。
 
+拆分部署中，Channel 通过认证后的内部 Storage RPC 流式读写媒体，只有 Server 需要访问工作区和媒体存储。升级时先更新 Server，再更新 Channel，确保 Storage 服务已可用。
+
 不使用 Docker（或从已有裸机部署升级）？在 `config.toml` 中将 `internal_rpc.shared_secret` 留空即可：Server 会内嵌 Channel 运行时，继续以单进程 all-in-one 方式运行——外部渠道、webhook 端点全部保留，无需运行 `memoh-channel` 进程。设置密钥则切换为双进程拆分部署。
 
 执行过 setup 的已有仓库仍然可以继续使用 `git pull`：post-merge hook 会初始化新增的

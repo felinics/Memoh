@@ -36,7 +36,7 @@ func (r Report) LogAttrs() []slog.Attr {
 		out = append(out, slog.Bool("remote", true))
 	}
 	if r.RemoteFault != "" {
-		out = append(out, slog.String("remote_fault", r.RemoteFault))
+		out = append(out, slog.String("remote_fault", string(r.RemoteFault)))
 	}
 	if r.Panic {
 		out = append(out, slog.Bool("panic", true))

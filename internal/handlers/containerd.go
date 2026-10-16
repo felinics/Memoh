@@ -25,6 +25,7 @@ import (
 	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/policy"
+	"github.com/felinics/memoh/internal/server"
 	"github.com/felinics/memoh/internal/workspace"
 )
 
@@ -110,48 +111,51 @@ type createContainerRestoringEvent struct {
 	Type string `json:"type"`
 }
 
-type createContainerErrorEvent struct {
-	Type      string            `json:"type"`
-	Code      string            `json:"code"`
-	Args      map[string]string `json:"args"`
-	Detail    string            `json:"detail,omitempty"`
-	Message   string            `json:"message"`
-	RequestID string            `json:"request_id,omitempty"`
-}
-
 // sendWorkspaceStreamFailure ends a workspace stream with the error event for
 // the catalog code code and returns the error the handler returns. The event
 // carries the code's detail and none of the text of cause; the request's
 // result record carries cause. The response is already committed, so the
-// access log records the returned error without answering it again.
-func sendWorkspaceStreamFailure(send func(payload any) bool, code apperror.Code, cause error, requestID string) error {
-	recorded := apperror.Wrap(code, cause, nil)
-	public, _ := apperror.PublicFrom(recorded, requestID)
-	_ = send(createContainerErrorEvent{
-		Type:      "error",
-		Code:      string(public.Code),
-		Args:      public.Args,
-		Detail:    public.Detail,
-		Message:   public.Detail,
-		RequestID: public.RequestID,
-	})
-	return recorded
+// access log records the returned error without answering it again. The
+// handler chose code, so the event names it whatever has become of ctx, such
+// as a stream budget that ran out; the result record still reads the
+// request's own context.
+func sendWorkspaceStreamFailure(ctx context.Context, send func(payload any) bool, code apperror.Code, cause error, requestID string) error {
+	frame, rendered := server.NewStreamError(context.WithoutCancel(ctx), apperror.Wrap(code, cause, nil), requestID)
+	_ = send(frame)
+	return rendered
 }
 
 type GetContainerResponse struct {
-	ContainerID      string    `json:"container_id"`
-	WorkspaceBackend string    `json:"workspace_backend"`
-	RuntimeBackend   string    `json:"runtime_backend,omitempty"`
-	Image            string    `json:"image"`
-	Status           string    `json:"status"`
-	Namespace        string    `json:"namespace"`
-	ContainerPath    string    `json:"container_path"`
-	CDIDevices       []string  `json:"cdi_devices,omitempty"`
-	TaskRunning      bool      `json:"task_running"`
-	HasPreservedData bool      `json:"has_preserved_data"`
-	Legacy           bool      `json:"legacy"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ContainerID      string                    `json:"container_id"`
+	WorkspaceBackend string                    `json:"workspace_backend"`
+	RuntimeBackend   string                    `json:"runtime_backend,omitempty"`
+	Image            string                    `json:"image"`
+	Status           string                    `json:"status"`
+	Namespace        string                    `json:"namespace"`
+	ContainerPath    string                    `json:"container_path"`
+	CDIDevices       []string                  `json:"cdi_devices,omitempty"`
+	TaskRunning      bool                      `json:"task_running"`
+	HasPreservedData bool                      `json:"has_preserved_data"`
+	Legacy           bool                      `json:"legacy"`
+	CreatedAt        time.Time                 `json:"created_at"`
+	UpdatedAt        time.Time                 `json:"updated_at"`
+	Removal          *WorkspaceRemovalResponse `json:"removal,omitempty"`
+}
+
+// WorkspaceRemovalResponse is a requested removal that is still running, or
+// that failed and waits for the user to retry or cancel it.
+type WorkspaceRemovalResponse struct {
+	State        string    `json:"state" enums:"removing,failed"`
+	PreserveData bool      `json:"preserve_data"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+func workspaceRemovalResponse(w botworkspace.Workspace) *WorkspaceRemovalResponse {
+	state := w.RemovalState()
+	if state == "" {
+		return nil
+	}
+	return &WorkspaceRemovalResponse{State: state, PreserveData: w.PreserveData, UpdatedAt: w.UpdatedAt}
 }
 
 type ContainerMetricsStatusResponse struct {
@@ -160,6 +164,7 @@ type ContainerMetricsStatusResponse struct {
 }
 
 type ContainerCPUMetricsResponse struct {
+	Cores             int64   `json:"cores,omitempty"`
 	UsagePercent      float64 `json:"usage_percent"`
 	UsageNanoseconds  uint64  `json:"usage_nanoseconds"`
 	UsageNanocores    uint64  `json:"usage_nanocores"`
@@ -174,8 +179,10 @@ type ContainerMemoryMetricsResponse struct {
 }
 
 type ContainerStorageMetricsResponse struct {
-	Path      string `json:"path"`
-	UsedBytes uint64 `json:"used_bytes"`
+	Path string `json:"path"`
+	// UsedBytes is omitted when only the allotment is known.
+	UsedBytes  *uint64 `json:"used_bytes,omitempty"`
+	LimitBytes uint64  `json:"limit_bytes,omitempty"`
 }
 
 type ContainerMetricsPayloadResponse struct {
@@ -312,6 +319,7 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	group.GET("/metrics", h.GetContainerMetrics)
 	group.PUT("/metrics", h.UpdateContainerMetrics)
 	group.DELETE("", h.DeleteContainer)
+	group.POST("/removal/cancel", h.CancelContainerRemoval)
 	group.POST("/start", h.StartContainer)
 	group.POST("/stop", h.StopContainer)
 	group.POST("/snapshots", h.CreateSnapshot)
@@ -375,8 +383,8 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body CreateContainerRequest true "Create workspace payload"
 // @Success 200 {object} CreateContainerResponse "SSE stream of workspace creation events"
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container [post].
 func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -429,7 +437,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	intent, err := h.workspaces.EnsurePresent(intentCtx, botID, imageOverride)
 	cancelIntent()
 	if err != nil {
-		return sendWorkspaceStreamFailure(send, apperror.CodeWorkspaceCreateFailed, err, httpx.RequestID(c))
+		return sendWorkspaceStreamFailure(ctx, send, apperror.CodeWorkspaceCreateFailed, err, httpx.RequestID(c))
 	}
 
 	streamCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceStreamBudget)
@@ -450,7 +458,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	if req.RestoreData && h.manager.HasPreservedData(botID) {
 		send(createContainerRestoringEvent{Type: "restoring"})
 		if err := h.manager.RestorePreservedData(streamCtx, botID); err != nil {
-			return sendWorkspaceStreamFailure(send, apperror.CodeWorkspaceRestoreFailed, err, httpx.RequestID(c))
+			return sendWorkspaceStreamFailure(streamCtx, send, apperror.CodeWorkspaceRestoreFailed, err, httpx.RequestID(c))
 		}
 		dataRestored = true
 	}
@@ -471,13 +479,23 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} GetContainerResponse
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container [get].
 func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
 		return err
+	}
+	// The removal is read before the workspace: the other way round, a removal
+	// finishing in between would answer "still there, nothing being removed".
+	var removal *WorkspaceRemovalResponse
+	if h.workspaces != nil {
+		w, err := h.workspaces.Get(c.Request().Context(), botID)
+		if err != nil && !errors.Is(err, botworkspace.ErrNotFound) {
+			return apperror.Wrap(apperror.CodeWorkspaceLoadFailed, err, nil)
+		}
+		removal = workspaceRemovalResponse(w)
 	}
 	status, err := h.manager.GetContainerInfo(c.Request().Context(), botID)
 	if err != nil {
@@ -500,6 +518,7 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 		Legacy:           status.Legacy,
 		CreatedAt:        status.CreatedAt,
 		UpdatedAt:        status.UpdatedAt,
+		Removal:          removal,
 	})
 }
 
@@ -508,7 +527,7 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} GetContainerMetricsResponse
-// @Failure 500 {object} apperror.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container/metrics [get].
 func (h *ContainerdHandler) GetContainerMetrics(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -529,8 +548,8 @@ func (h *ContainerdHandler) GetContainerMetrics(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body UpdateContainerMetricsRequest true "Metrics settings payload"
 // @Success 200 {object} GetContainerMetricsResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container/metrics [put].
 func (h *ContainerdHandler) UpdateContainerMetrics(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionManage)
@@ -604,12 +623,13 @@ func (h *ContainerdHandler) buildContainerMetricsResponse(
 
 // DeleteContainer godoc
 // @Summary Delete workspace for bot
+// @Description Records the removal and answers at once. The workspace is gone when GET answers 404; until then GET reports the removal's state.
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Param preserve_data query bool false "Export /data before deletion"
-// @Success 204
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Success 202
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container [delete].
 func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -620,47 +640,43 @@ func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "workspace lifecycle not configured")
 	}
 	preserveData := c.QueryParam("preserve_data") == "true"
-	ctx := c.Request().Context()
-	intent, err := h.workspaces.RequestAbsent(ctx, botID, preserveData)
-	if err != nil {
+	if _, err := h.workspaces.RequestAbsent(c.Request().Context(), botID, preserveData); err != nil {
 		return apperror.Wrap(apperror.CodeWorkspaceDeleteFailed, err, nil)
 	}
-	// The reconciler performs the removal (and keeps retrying transient
-	// backend failures after this request ends). Wait for the outcome within
-	// the request so the client sees a definitive answer when it is quick.
-	waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceDeleteWait)
-	defer cancel()
-	final, err := h.workspaces.Await(waitCtx, botID, intent.DesiredGeneration)
+	// The reconciler removes it. The request does not wait: an export can
+	// outlast any proxy, and the outcome has to survive a reload anyway.
+	return c.NoContent(http.StatusAccepted)
+}
+
+// CancelContainerRemoval godoc
+// @Summary Withdraw a failed workspace removal
+// @Description Keeps the workspace after its removal failed. Does nothing when no removal has failed; one still in progress cannot be withdrawn.
+// @Tags containerd
+// @Param bot_id path string true "Bot ID"
+// @Success 204
+// @Failure 500 {object} server.Problem
+// @Router /bots/{bot_id}/container/removal/cancel [post].
+func (h *ContainerdHandler) CancelContainerRemoval(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil
-		}
-		return c.JSON(http.StatusAccepted, map[string]any{
-			"code":    "workspace_delete_pending",
-			"message": "workspace removal is still in progress",
-		})
+		return err
 	}
-	if final.Observed != botworkspace.ObservedAbsent {
-		message := strings.TrimSpace(final.LastError)
-		if message == "" {
-			message = "workspace removal failed"
-		}
-		return apperror.Wrap(apperror.CodeWorkspaceDeleteFailed, errs.New("workspace removal failed", slog.String("last_error", message)), nil)
+	if h.workspaces == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "workspace lifecycle not configured")
+	}
+	if err := h.workspaces.CancelRemoval(c.Request().Context(), botID); err != nil {
+		return errs.Wrap(err, "cancel workspace removal", slog.String("bot_id", botID))
 	}
 	return c.NoContent(http.StatusNoContent)
 }
-
-// workspaceDeleteWait bounds how long DELETE waits for the reconciler before
-// answering 202; the removal continues in the background.
-const workspaceDeleteWait = 2 * time.Minute
 
 // StartContainer godoc
 // @Summary Start workspace for bot
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} object
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container/start [post].
 func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -682,8 +698,8 @@ func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} object
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container/stop [post].
 func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -719,9 +735,9 @@ func (h *ContainerdHandler) observeWorkspace(ctx context.Context, botID string) 
 // @Param bot_id path string true "Bot ID"
 // @Param payload body CreateSnapshotRequest true "Create snapshot payload"
 // @Success 200 {object} CreateSnapshotResponse
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 501 {object} apperror.Problem "Snapshots currently not supported on this backend"
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 501 {object} server.Problem "Snapshots currently not supported on this backend"
 // @Router /bots/{bot_id}/container/snapshots [post].
 func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 	if h.containerBackend == "apple" {
@@ -762,7 +778,7 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param snapshotter query string false "Snapshotter name"
 // @Success 200 {object} ListSnapshotsResponse
-// @Failure 501 {object} apperror.Problem "Snapshots currently not supported on this backend"
+// @Failure 501 {object} server.Problem "Snapshots currently not supported on this backend"
 // @Router /bots/{bot_id}/container/snapshots [get].
 func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 	if h.containerBackend == "apple" {
@@ -807,8 +823,8 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body RollbackRequest true "Rollback payload"
 // @Success 200 {object} object
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container/snapshots/rollback [post].
 func (h *ContainerdHandler) RollbackSnapshot(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -838,8 +854,8 @@ func (h *ContainerdHandler) RollbackSnapshot(c echo.Context) error {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} object
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container/data/restore [post].
 func (h *ContainerdHandler) RestorePreservedData(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -865,6 +881,7 @@ func toContainerCPUMetricsResponse(metrics *ctr.CPUMetrics) *ContainerCPUMetrics
 		return nil
 	}
 	return &ContainerCPUMetricsResponse{
+		Cores:             metrics.Cores,
 		UsagePercent:      metrics.UsagePercent,
 		UsageNanoseconds:  metrics.UsageNanoseconds,
 		UsageNanocores:    metrics.UsageNanocores,
@@ -888,10 +905,15 @@ func toContainerStorageMetricsResponse(metrics *workspace.ContainerStorageMetric
 	if metrics == nil {
 		return nil
 	}
-	return &ContainerStorageMetricsResponse{
-		Path:      metrics.Path,
-		UsedBytes: metrics.UsedBytes,
+	resp := &ContainerStorageMetricsResponse{
+		Path:       metrics.Path,
+		LimitBytes: metrics.LimitBytes,
 	}
+	if !metrics.UsedUnknown {
+		used := metrics.UsedBytes
+		resp.UsedBytes = &used
+	}
+	return resp
 }
 
 func (h *ContainerdHandler) toContainerResourceLimitsResponse(result *workspace.ResourceLimitsResult) GetContainerResourceLimitsResponse {
@@ -1134,9 +1156,9 @@ func (h *ContainerdHandler) requireBotAccessWithPermission(c echo.Context, permi
 	if err != nil {
 		return "", err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", err
 	}
 	if _, err := h.authorizeBotAccessWithPermission(c.Request().Context(), channelIdentityID, botID, permission); err != nil {
 		return "", err
@@ -1159,9 +1181,9 @@ func (h *ContainerdHandler) requireBotAccessWithGuest(c echo.Context) (string, e
 	if err != nil {
 		return "", err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", err
 	}
 	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID); err != nil {
 		return "", err

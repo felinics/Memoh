@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,8 +18,7 @@ import (
 )
 
 const (
-	copilotModelsResponseLimit  = 8 << 20
-	copilotModelsErrorBodyLimit = 16 << 10
+	copilotModelsResponseLimit = 8 << 20
 )
 
 type copilotModelsResponse struct {
@@ -87,12 +87,7 @@ func (s *Service) listGitHubCopilotRemoteModels(ctx context.Context, baseURL, gi
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, copilotModelsErrorBodyLimit))
-		detail := strings.TrimSpace(string(body))
-		if detail == "" {
-			detail = http.StatusText(resp.StatusCode)
-		}
-		return nil, errs.NewDependency(fmt.Sprintf("github copilot models request failed (%d): %s", resp.StatusCode, detail))
+		return nil, errs.NewDependency("github copilot models request failed", slog.Int("status", resp.StatusCode))
 	}
 
 	var catalog copilotModelsResponse

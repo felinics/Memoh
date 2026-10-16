@@ -30,8 +30,8 @@ func (h *ProviderTemplatesHandler) Register(e *echo.Echo) {
 // @Produce json
 // @Param domain query string false "Template domain (llm, speech, transcription, video)"
 // @Success 200 {array} providertemplates.GetResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /provider-templates [get].
 func (h *ProviderTemplatesHandler) List(c echo.Context) error {
 	items, err := h.service.List(c.Request().Context(), c.QueryParam("domain"))
@@ -48,8 +48,8 @@ func (h *ProviderTemplatesHandler) List(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider template ID"
 // @Success 200 {object} providertemplates.GetResponse
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /provider-templates/{id} [get].
 func (h *ProviderTemplatesHandler) Get(c echo.Context) error {
 	item, err := h.service.Get(c.Request().Context(), strings.TrimSpace(c.Param("id")), "")

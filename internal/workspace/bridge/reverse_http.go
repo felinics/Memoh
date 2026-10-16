@@ -34,7 +34,7 @@ func (c *Client) ServeReverseHTTPRoute(ctx context.Context, route string, handle
 	stream, err := c.svc.ReverseHTTP(streamCtx)
 	if err != nil {
 		cancel()
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 
 	var sendMu sync.Mutex

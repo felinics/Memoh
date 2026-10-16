@@ -13,6 +13,7 @@ import (
 	dtsdk "github.com/felinics/dingtalk-stream-sdk-go/client"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // DingTalkAdapter implements the Memoh channel adapter for DingTalk bots.
@@ -277,7 +278,7 @@ func (a *DingTalkAdapter) sendViaAPI(
 	case "group":
 		return apiCli.sendToGroup(ctx, parsed.AppKey, id, msgKey, msgParam)
 	default:
-		return errors.New("dingtalk: unknown target kind: " + kind)
+		return errs.New("dingtalk: unknown target kind", slog.String("kind", kind))
 	}
 }
 

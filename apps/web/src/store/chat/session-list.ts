@@ -1,10 +1,5 @@
 import { computed, isRef, ref, type Ref } from 'vue'
 import type { SessionSummary } from '@/composables/api/useChat.types'
-import {
-  isSessionVisibleInSidebarMode,
-  sortByRecency,
-  type SidebarSessionMode,
-} from '../chat-list.utils'
 import { messageIdentityId } from '../chat-list.normalize'
 import type { ChatMessage } from './types'
 
@@ -328,11 +323,6 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     return { source: 'remembered', session: remembered, visibleInRecents: isRecentsSession(remembered) }
   }
 
-  function fallbackSessionAfterDelete(mode: SidebarSessionMode): SessionSummary | null {
-    const visibleSessions = sessions.value.filter(session => isSessionVisibleInSidebarMode(session, mode))
-    return sortByRecency(visibleSessions)[0] ?? null
-  }
-
   function markSessionDeleted(botId: string, targetSessionId: string) {
     const bid = botId.trim()
     const sid = targetSessionId.trim()
@@ -381,7 +371,6 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
     removeSessionFromList,
     touchSessionInList,
     touchKnownSession,
-    fallbackSessionAfterDelete,
     markSessionDeleted,
     clearDeletedSessionIds,
     clearRememberedSessions,

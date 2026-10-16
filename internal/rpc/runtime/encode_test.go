@@ -42,3 +42,15 @@ func TestServerRedactsPublicAdapterMessage(t *testing.T) {
 		t.Fatalf("adapter message %q lost its text", err.Error())
 	}
 }
+
+// A Public error that wraps a catalog error crosses as the catalog code: the
+// code is what the client renders, and the adapter text would hide it.
+func TestServerEncodesCatalogErrorInsidePublic(t *testing.T) {
+	err := callOverWire(t, Public(fmt.Errorf("resolve config: %w", apperror.New(apperror.CodeBotNameTaken, nil))))
+	if apperror.CodeOf(err) != apperror.CodeBotNameTaken {
+		t.Fatalf("got %v, want the catalog error", err)
+	}
+	if errors.Is(err, errPublic) {
+		t.Fatalf("%v was restored as a Public error", err)
+	}
+}

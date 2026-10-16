@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
@@ -104,7 +104,7 @@ func TestUpdateWorkerRunOnceDedupesAndFansOut(t *testing.T) {
 	}
 	for _, key := range []InstallationKey{keyA, keyB, keyD, keyE} {
 		rec, _ := f.store.get(key)
-		if rec.Status != StatusInstalled || rec.LatestVersion != "1.2.0" || !strings.Contains(rec.LastError, "ETIMEDOUT") || !rec.LastCheckedAt.Equal(f.now) {
+		if rec.Status != StatusInstalled || rec.LatestVersion != "1.2.0" || rec.LastErrorCode != string(apperror.CodeWorkspaceDependencyOperationFailed) || !rec.LastCheckedAt.Equal(f.now) {
 			t.Errorf("record after failed round = %+v", rec)
 		}
 	}
@@ -116,7 +116,7 @@ func TestUpdateWorkerRunOnceDedupesAndFansOut(t *testing.T) {
 	if _, err := worker.RunOnce(f.ctx()); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if rec, _ := f.store.get(keyA); !strings.Contains(rec.LastError, "no latest version") {
+	if rec, _ := f.store.get(keyA); rec.LastErrorCode != string(apperror.CodeWorkspaceDependencyOperationFailed) {
 		t.Errorf("record after malformed payload = %+v", rec)
 	}
 }

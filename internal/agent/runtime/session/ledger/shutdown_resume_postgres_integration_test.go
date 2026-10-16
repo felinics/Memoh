@@ -218,3 +218,22 @@ func TestPostgresResumeIntentRetirementLeavesPendingSet(t *testing.T) {
 		t.Fatalf("retirement changed the run outcome: %s %s %v", state, code, err)
 	}
 }
+
+func TestPostgresShutdownDoesNotFinalizeRunThatJustParked(t *testing.T) {
+	ctx := t.Context()
+	pool := openLedgerResetPostgres(t, ctx)
+	botID, sessionID := createLedgerResetFixture(t, ctx, pool)
+	runID, token := createClaimedLedgerRun(t, ctx, pool, botID, sessionID)
+	runs := ledger.NewPostgres(dbsqlc.New(pool), pool)
+	if _, _, err := runs.SetWaitingDecision(ctx, runID, token); err != nil {
+		t.Fatal(err)
+	}
+	_, applied, err := runs.Finalize(ctx, ledger.FinalizeParams{RunID: runID, FencingToken: token, State: ledger.StateLost, ErrorCode: sessionruntime.RunErrorInterrupted, ExpectedState: ledger.StateRunning})
+	if err != nil || applied {
+		t.Fatalf("shutdown overtook new decision: %v %v", applied, err)
+	}
+	run, err := runs.Get(ctx, runID)
+	if err != nil || run.State != ledger.StateWaitingDecision {
+		t.Fatalf("parked run lost: %+v %v", run, err)
+	}
+}

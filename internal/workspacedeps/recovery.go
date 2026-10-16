@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
@@ -117,6 +118,6 @@ func (s *Service) markInterrupted(ctx context.Context, key InstallationKey, rec 
 	if err := runFilesystemScript(ctx, client, home, key.DependencyID, script); err != nil {
 		return Installation{}, err
 	}
-	rec.Status, rec.LastError = StatusFailed, interruptedMessage
+	rec.Status, rec.LastError, rec.LastErrorCode = StatusFailed, "", string(apperror.CodeWorkspaceDependencyOperationInterrupted)
 	return s.store.FinishOperation(ctx, key, rec.OperationID, &rec)
 }

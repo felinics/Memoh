@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
@@ -39,7 +38,7 @@ func recordSpans(t *testing.T) *tracetest.SpanRecorder {
 func serve(t *testing.T, req *http.Request, handler echo.HandlerFunc) *httptest.ResponseRecorder {
 	t.Helper()
 	e := echo.New()
-	e.Use(middleware.RequestID())
+	e.Use(httpx.AssignRequestID())
 	e.Use(httpx.RequestIDContext)
 	e.Use(telemetry.EchoServer)
 	e.GET("/bots/:id", handler)

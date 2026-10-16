@@ -516,6 +516,25 @@ func TestStopTurnSurvivesTransport(t *testing.T) {
 	}
 }
 
+func TestDiscussCurrentSourcesCrossAuthenticatedTransport(t *testing.T) {
+	fake := &fakeService{}
+	client, cleanup := newTestClient(t, fake, "secret")
+	defer cleanup()
+	source := turn.ContextMessageSource{Kind: "external", ID: "required-input", Current: true}
+	handle, err := client.StartTurn(t.Context(), turn.StartTurnCommand{SchemaVersion: 1, Mode: turn.ModeDiscuss, TeamID: "team-1", BotID: "bot-1", ThreadID: "session-1", DiscussRecoveryExhausted: true, DiscussCurrentSources: []turn.ContextMessageSource{source}, DiscussMessages: []turn.DiscussMessage{{Role: "user", Content: "input", Source: &source}, {Role: "user", Content: "echo", Source: &turn.ContextMessageSource{Kind: "self", ID: "echo"}}}, DiscussImageRefs: []turn.DiscussImageRef{{ContentHash: "image", Mime: "image/png", MessageID: source.ID}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range handle.Events() {
+	}
+	if !fake.started.DiscussRecoveryExhausted || len(fake.started.DiscussCurrentSources) != 1 || fake.started.DiscussCurrentSources[0] != source || fake.started.DiscussMessages[0].Source == nil || *fake.started.DiscussMessages[0].Source != source || fake.started.DiscussMessages[1].Source.Current {
+		t.Fatalf("transport lost provenance: %+v", fake.started.DiscussMessages)
+	}
+	if len(fake.started.DiscussImageRefs) != 1 || fake.started.DiscussImageRefs[0].MessageID != source.ID {
+		t.Fatalf("transport lost the message an image arrived with: %+v", fake.started.DiscussImageRefs)
+	}
+}
+
 // An internal failure is recorded once, by the RPC result line, with the cause
 // the Internal status hides from the client.
 func TestInternalTurnErrorHasOneResultLine(t *testing.T) {

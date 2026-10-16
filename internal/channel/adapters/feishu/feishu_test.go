@@ -246,7 +246,7 @@ func TestFeishuDescriptorIncludesStreamingAndMedia(t *testing.T) {
 		t.Fatal("expected media capability")
 	}
 	if !caps.Markdown {
-		t.Fatal("expected markdown capability for lark_md card rendering")
+		t.Fatal("expected markdown capability for card markdown rendering")
 	}
 	policy := channel.NormalizeOutboundPolicy(desc.OutboundPolicy)
 	if policy.RichTextChunkLimit != feishuStreamMaxRunes {
@@ -310,14 +310,14 @@ func TestResolveFeishuFileType(t *testing.T) {
 		mime string
 		want string
 	}{
-		{name: "video mime", file: "clip.bin", mime: "video/mp4", want: larkim.FileTypeMp4},
-		{name: "pdf mime", file: "doc.bin", mime: "application/pdf", want: larkim.FileTypePdf},
-		{name: "doc ext", file: "a.docx", mime: "application/octet-stream", want: larkim.FileTypeDoc},
-		{name: "xls ext", file: "a.xlsx", mime: "application/octet-stream", want: larkim.FileTypeXls},
-		{name: "ppt ext", file: "a.pptx", mime: "application/octet-stream", want: larkim.FileTypePpt},
-		{name: "zip mime", file: "a.bin", mime: "application/zip", want: larkim.FileTypeStream},
-		{name: "tar gz ext", file: "backup.tar.gz", mime: "application/octet-stream", want: larkim.FileTypeStream},
-		{name: "default stream", file: "notes.txt", mime: "text/plain", want: larkim.FileTypeStream},
+		{name: "video mime", file: "clip.bin", mime: "video/mp4", want: larkim.CreateFileFileTypeMp4},
+		{name: "pdf mime", file: "doc.bin", mime: "application/pdf", want: larkim.CreateFileFileTypePdf},
+		{name: "doc ext", file: "a.docx", mime: "application/octet-stream", want: larkim.CreateFileFileTypeDoc},
+		{name: "xls ext", file: "a.xlsx", mime: "application/octet-stream", want: larkim.CreateFileFileTypeXls},
+		{name: "ppt ext", file: "a.pptx", mime: "application/octet-stream", want: larkim.CreateFileFileTypePpt},
+		{name: "zip mime", file: "a.bin", mime: "application/zip", want: larkim.CreateFileFileTypeStream},
+		{name: "tar gz ext", file: "backup.tar.gz", mime: "application/octet-stream", want: larkim.CreateFileFileTypeStream},
+		{name: "default stream", file: "notes.txt", mime: "text/plain", want: larkim.CreateFileFileTypeStream},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -418,8 +418,8 @@ func TestBuildFeishuOutboundContentRichPartsUsesInteractiveCard(t *testing.T) {
 	if msgType != larkim.MsgTypeInteractive {
 		t.Fatalf("msg type = %q, want %q", msgType, larkim.MsgTypeInteractive)
 	}
-	if !strings.Contains(content, `"tag":"lark_md"`) || !strings.Contains(content, "**bold**") {
-		t.Fatalf("expected interactive card lark_md content, got %s", content)
+	if !strings.Contains(content, `"tag":"markdown"`) || !strings.Contains(content, "**bold**") {
+		t.Fatalf("expected interactive card markdown content, got %s", content)
 	}
 }
 
@@ -427,19 +427,19 @@ func decodeFeishuCardTextObject(t *testing.T, content string) map[string]any {
 	t.Helper()
 
 	var card struct {
-		Elements []struct {
-			Fields []struct {
+		Body struct {
+			Elements []struct {
 				Text map[string]any `json:"text"`
-			} `json:"fields"`
-		} `json:"elements"`
+			} `json:"elements"`
+		} `json:"body"`
 	}
 	if err := json.Unmarshal([]byte(content), &card); err != nil {
 		t.Fatalf("content is not json: %v", err)
 	}
-	if len(card.Elements) == 0 || len(card.Elements[0].Fields) == 0 || card.Elements[0].Fields[0].Text == nil {
+	if len(card.Body.Elements) == 0 || card.Body.Elements[0].Text == nil {
 		t.Fatalf("missing card text object: %s", content)
 	}
-	return card.Elements[0].Fields[0].Text
+	return card.Body.Elements[0].Text
 }
 
 func TestBuildFeishuOutboundContentLongRichPartsFallsBackToText(t *testing.T) {
@@ -481,30 +481,6 @@ func TestNormalizeFeishuStreamText(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, "...\n") {
 		t.Fatalf("expected truncation prefix, got: %s", got[:4])
-	}
-}
-
-func TestProcessFeishuCardMarkdown(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"literal newline", "a\\nb", "a\nb"},
-		{"atx h1", "# Title", "**Title**"},
-		{"atx h2", "## Section", "**Section**"},
-		{"atx h6", "###### Small", "**Small**"},
-		{"heading with newline", "# Hi\n\nBody", "**Hi**\n\nBody"},
-		{"no heading", "plain **bold**", "plain **bold**"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := processFeishuCardMarkdown(tt.in)
-			if got != tt.want {
-				t.Errorf("processFeishuCardMarkdown() = %q, want %q", got, tt.want)
-			}
-		})
 	}
 }
 

@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 func resolveConfiguredBotOpenID(cfg channel.ChannelConfig) string {
@@ -33,7 +35,8 @@ func (a *FeishuAdapter) resolveBotOpenID(ctx context.Context, cfg channel.Channe
 	discovered, externalID, err := a.DiscoverSelf(ctx, cfg.Credentials)
 	if err != nil {
 		if a != nil && a.logger != nil {
-			a.logger.WarnContext(ctx, "discover self fallback failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+			result := errlog.Event(ctx, "channel.feishu.bot_identity", errs.Wrap(err, "discover feishu self", slog.String("config_id", cfg.ID)), errlog.Options{})
+			a.logger.LogAttrs(ctx, result.Level, "discover self fallback failed", result.Attrs()...)
 		}
 		return ""
 	}

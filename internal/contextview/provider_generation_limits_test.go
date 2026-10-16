@@ -96,7 +96,7 @@ func TestGenerateReservesExactlyTheMaxTokensItSends(t *testing.T) {
 			if !ok || snapshot.BudgetPlan == nil {
 				t.Fatal("lifecycle snapshot lost the budget plan")
 			}
-			limits := models.ResolveGenerationLimits(models.ClientType(models.ResolveClientType(&sdk.Model{Provider: tc.provider(probe)})), tc.reasoning, 200_000)
+			limits := models.ResolveGenerationLimits(models.ClientType(models.ResolveClientType(&sdk.Model{Provider: tc.provider(probe)})), tc.reasoning, 200_000, 0)
 			if snapshot.BudgetPlan.OutputReserve != limits.MaxOutputTokens {
 				t.Fatalf("OutputReserve = %d, want resolved %d", snapshot.BudgetPlan.OutputReserve, limits.MaxOutputTokens)
 			}

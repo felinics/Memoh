@@ -186,15 +186,15 @@ func resolveFeishuReceiveID(raw string) (string, string, error) {
 		return "", "", errors.New("feishu target is required")
 	}
 	if strings.HasPrefix(raw, "open_id:") {
-		return strings.TrimPrefix(raw, "open_id:"), larkim.ReceiveIdTypeOpenId, nil
+		return strings.TrimPrefix(raw, "open_id:"), larkim.CreateMessageV1ReceiveIDTypeOpenId, nil
 	}
 	if strings.HasPrefix(raw, "user_id:") {
-		return strings.TrimPrefix(raw, "user_id:"), larkim.ReceiveIdTypeUserId, nil
+		return strings.TrimPrefix(raw, "user_id:"), larkim.CreateMessageV1ReceiveIDTypeUserId, nil
 	}
 	if strings.HasPrefix(raw, "chat_id:") {
-		return strings.TrimPrefix(raw, "chat_id:"), larkim.ReceiveIdTypeChatId, nil
+		return strings.TrimPrefix(raw, "chat_id:"), larkim.CreateMessageV1ReceiveIDTypeChatId, nil
 	}
-	return raw, larkim.ReceiveIdTypeOpenId, nil
+	return raw, larkim.CreateMessageV1ReceiveIDTypeOpenId, nil
 }
 
 func ptrStr(s *string) string {

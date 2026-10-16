@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/logger"
 )
 
@@ -50,6 +51,8 @@ func TestInboundTaskWritesOneResultLine(t *testing.T) {
 		{name: "success", ctx: context.Background(), wantLevel: "INFO"},
 		{name: "failure", ctx: context.Background(), err: errors.New("resolve route: connection reset"), wantLevel: "ERROR", wantFault: "server", wantError: "resolve route: connection reset"},
 		{name: "canceled", ctx: canceled, err: context.Canceled, wantLevel: "INFO", wantFault: "canceled", wantError: "context canceled"},
+		// A message has a sender, so a refusal it caused stays a client fault.
+		{name: "client", ctx: context.Background(), err: apperror.Wrap(apperror.CodeNoWorkspaceExec, errors.New("workspace exec denied"), nil), wantLevel: "INFO", wantFault: "client", wantError: "no_workspace_exec: workspace exec denied"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

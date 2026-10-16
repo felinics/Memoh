@@ -19,7 +19,7 @@ func TestExtractNewImageRefs(t *testing.T) {
 	rc := timeline.RenderedContext{
 		{ReceivedAtMs: 100, ImageRefs: []timeline.ImageAttachmentRef{{ContentHash: "old-hash", Mime: "image/png"}}},
 		{ReceivedAtMs: 200, IsMyself: true, ImageRefs: []timeline.ImageAttachmentRef{{ContentHash: "self-hash"}}},
-		{ReceivedAtMs: 300, ImageRefs: []timeline.ImageAttachmentRef{{ContentHash: "new-hash", Mime: "image/jpeg"}}},
+		{MessageID: "new-message", ReceivedAtMs: 300, ImageRefs: []timeline.ImageAttachmentRef{{ContentHash: "new-hash", Mime: "image/jpeg"}}},
 		{ReceivedAtMs: 400, ImageRefs: nil},
 	}
 
@@ -32,6 +32,9 @@ func TestExtractNewImageRefs(t *testing.T) {
 	}
 	if refs[0].Mime != "image/jpeg" {
 		t.Fatalf("expected image/jpeg, got %q", refs[0].Mime)
+	}
+	if refs[0].MessageID != "new-message" {
+		t.Fatalf("image ref names message %q, want the message it arrived with", refs[0].MessageID)
 	}
 }
 

@@ -655,9 +655,6 @@ func (a *SlackAdapter) sendSlackMessage(ctx context.Context, api *slack.Client, 
 	if len(msg.Message.Attachments) > 0 {
 		for _, att := range msg.Message.Attachments {
 			if err := a.uploadPreparedAttachment(ctx, api, channelID, threadTS, att); err != nil {
-				if a.logger != nil {
-					a.logger.ErrorContext(ctx, "upload attachment failed", slog.Any("error", err))
-				}
 				return err
 			}
 		}

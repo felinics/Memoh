@@ -10,12 +10,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	dbpkg "github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/dbtest"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -304,4 +306,124 @@ func createLedgerResetSession(t *testing.T, ctx context.Context, pool *pgxpool.P
 		t.Fatalf("create ledger reset session: %v", err)
 	}
 	return sessionID.String()
+}
+
+// LatestRun is what a runtime that lost its live projection reports for a
+// session. Every reset that invalidates the session's runtime (clearing its or
+// its bot's history, deleting it) leaves nothing to report of the runs claimed
+// before it, and an older run never stands in for a hidden one.
+func TestPostgresLedgerLatestRunBelongsToTheCurrentRuntime(t *testing.T) {
+	ctx := context.Background()
+	pool := openLedgerResetPostgres(t, ctx)
+	botID, _ := createLedgerResetFixture(t, ctx, pool)
+	store := ledger.NewPostgres(dbsqlc.New(pool), pool)
+	queries := dbsqlc.New(pool)
+	fence := runtimefence.NewActivator(postgresstore.NewQueriesWithPool(pool, queries))
+
+	admit := func(sessionID string) string {
+		t.Helper()
+		run, created, err := store.Admit(ctx, ledger.AdmitParams{
+			RunID: uuid.NewString(), BotID: botID, SessionID: sessionID,
+			InvocationID: uuid.NewString(), TurnID: uuid.NewString(),
+			Input: []byte(`{}`), InputFingerprint: "latest-run",
+		})
+		if err != nil || !created {
+			t.Fatalf("admit = (%v, %v)", created, err)
+		}
+		return run.RunID
+	}
+	// claim runs the admission's claim and persistence fence activation, the
+	// way Manager.Admit does, and finishes the run with state.
+	claim := func(sessionID string, state ledger.State) string {
+		t.Helper()
+		runID := admit(sessionID)
+		token, err := store.NextFencingToken(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, applied, err := store.Claim(ctx, ledger.ClaimParams{RunID: runID, OwnerID: "owner-latest-run", FencingToken: token, LiveGeneration: "generation-latest-run"}); err != nil || !applied {
+			t.Fatalf("claim = (%v, %v)", applied, err)
+		}
+		if err := fence.Activate(ctx, botID, sessionID, token); err != nil {
+			t.Fatalf("activate fence: %v", err)
+		}
+		if _, applied, err := store.Finalize(ctx, ledger.FinalizeParams{RunID: runID, FencingToken: token, State: state}); err != nil || !applied {
+			t.Fatalf("finalize %s = (%v, %v)", state, applied, err)
+		}
+		return runID
+	}
+	latest := func(sessionID string) string {
+		t.Helper()
+		run, err := store.LatestRun(ctx, sessionID)
+		if errors.Is(err, ledger.ErrRunNotFound) {
+			return ""
+		}
+		if err != nil {
+			t.Fatalf("LatestRun() error = %v", err)
+		}
+		return run.RunID
+	}
+	pgUUID := func(id string) pgtype.UUID { return pgtype.UUID{Bytes: uuid.MustParse(id), Valid: true} }
+
+	for _, tc := range []struct {
+		name  string
+		reset func(sessionID string) error
+	}{
+		{"clear session history", func(sessionID string) error { return queries.ClearHistoryBySession(ctx, pgUUID(sessionID)) }},
+		{"clear bot history", func(string) error { return queries.ClearHistoryByBot(ctx, pgUUID(botID)) }},
+		{"delete session", func(sessionID string) error { return queries.SoftDeleteSession(ctx, pgUUID(sessionID)) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sessionID := createLedgerResetSession(t, ctx, pool, botID)
+			// An admission whose process died before claiming it: the reaper
+			// marks it lost with no fencing token. It is older than the next
+			// run and must not stand in for it once that one is hidden.
+			orphaned := admit(sessionID)
+			if _, applied, err := store.Finalize(ctx, ledger.FinalizeParams{RunID: orphaned, State: ledger.StateLost, ErrorCode: "runtime_admission_orphaned"}); err != nil || !applied {
+				t.Fatalf("mark orphaned admission lost = (%v, %v)", applied, err)
+			}
+			completed := claim(sessionID, ledger.StateCompleted)
+			if got := latest(sessionID); got != completed {
+				t.Fatalf("latest run = %q, want the completed run %q", got, completed)
+			}
+			if err := tc.reset(sessionID); err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			if got := latest(sessionID); got != "" {
+				t.Fatalf("latest run after %s = %q, want none", tc.name, got)
+			}
+		})
+	}
+
+	sessionID := createLedgerResetSession(t, ctx, pool, botID)
+	claim(sessionID, ledger.StateCompleted)
+	if err := queries.ClearHistoryBySession(ctx, pgUUID(sessionID)); err != nil {
+		t.Fatal(err)
+	}
+	// A run admitted after the clear but not claimed yet carries no token to
+	// compare; it is the session's latest run.
+	unclaimed := admit(sessionID)
+	if got := latest(sessionID); got != unclaimed {
+		t.Fatalf("latest run = %q, want the unclaimed run %q", got, unclaimed)
+	}
+	lease, applied, err := store.(ledger.ResetStore).AcquireReset(ctx, ledger.ResetLease{
+		Scope: ledger.ResetScopeBot, BotID: botID, Token: uuid.NewString(),
+	}, time.Minute)
+	if err != nil || !applied {
+		t.Fatalf("acquire reset lease = (%v, %v)", applied, err)
+	}
+	if _, applied, err := store.(ledger.OrphanResetStore).FenceAndFinalizeOrphan(ctx, lease, ledger.Run{RunID: unclaimed, BotID: botID, SessionID: sessionID}); err != nil || !applied {
+		t.Fatalf("finalize unclaimed run by the reset = (%v, %v)", applied, err)
+	}
+	if ok, err := store.(ledger.ResetStore).ReleaseReset(ctx, lease); err != nil || !ok {
+		t.Fatalf("release reset lease = (%v, %v)", ok, err)
+	}
+	if got := latest(sessionID); got != "" {
+		t.Fatalf("latest run ended by the reset = %q, want none", got)
+	}
+	// A claimed run whose owner disappeared is reported, as lost.
+	lost := claim(sessionID, ledger.StateLost)
+	if got := latest(sessionID); got != lost {
+		t.Fatalf("latest run = %q, want the lost run %q", got, lost)
+	}
 }

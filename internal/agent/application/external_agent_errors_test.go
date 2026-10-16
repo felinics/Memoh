@@ -40,9 +40,6 @@ func TestExternalAgentErrorTranslatesRuntimeErrors(t *testing.T) {
 			if code := apperror.CodeOf(got); code != tc.want {
 				t.Fatalf("code = %q, want %q", code, tc.want)
 			}
-			if !apperror.IsExternalAgentCode(tc.want) {
-				t.Fatalf("%q is not an External Agent code", tc.want)
-			}
 		})
 	}
 }
@@ -133,29 +130,34 @@ func TestExternalAgentErrorTranslatesRuntimeFailures(t *testing.T) {
 		err   error
 		code  apperror.Code
 		args  map[string]string
-		fault errs.Fault
+		fault apperror.Fault
 	}{
-		{"runtime unavailable", external.Unavailable(errors.New("SECRET exit")), apperror.CodeExternalRuntimeUnavailable, nil, errs.FaultServer},
-		{"runtime unreachable", external.Unavailable(errs.WrapDependency(errors.New("SECRET refused"), "dial bridge")), apperror.CodeExternalRuntimeUnavailable, nil, errs.FaultDependency},
-		{"auth required", external.Fail(external.FailureAuthRequired, external.ErrAuthRequired), apperror.CodeExternalRuntimeAuthRequired, nil, errs.FaultClient},
-		{"session resume failed", external.Fail(external.FailureSessionResumeFailed, errors.New("SECRET rpc")), apperror.CodeExternalRuntimeSessionResumeFailed, nil, errs.FaultDependency},
-		{"goal outside default mode", external.Fail(external.FailureGoalRequiresDefaultMode, nil), apperror.CodeRuntimeControlGoalRequiresDefaultMode, nil, errs.FaultClient},
-		{"mode unavailable", external.Fail(external.FailureModeUnavailable, external.ErrModeUnavailable), apperror.CodeRuntimeControlModeUnavailable, nil, errs.FaultClient},
-		{"control failed", external.Fail(external.FailureControlFailed, errors.New("SECRET control")), apperror.CodeRuntimeControlFailed, nil, errs.FaultServer},
-		{"credential busy", external.Fail(external.FailureCredentialBusy, nil), apperror.CodeAgentCredentialRuntimeBusy, nil, errs.FaultClient},
-		{"usage limited", external.Fail(external.FailureUsageLimited, errs.NewDependency("SECRET resets at 5 PM")), apperror.CodeExternalRuntimeUsageLimited, nil, errs.FaultDependency},
-		{"credential not found", external.CredentialError(agentcredential.ErrNotFound), apperror.CodeAgentCredentialNotFound, nil, errs.FaultClient},
-		{"credential incompatible", external.CredentialError(agentcredential.ErrIncompatible), apperror.CodeAgentCredentialIncompatible, nil, errs.FaultClient},
-		{"credential revoked", external.CredentialError(agentcredential.ErrRevoked), apperror.CodeAgentCredentialRevoked, nil, errs.FaultClient},
-		{"credential encryption unavailable", external.CredentialError(agentcredential.ErrEncryptionUnavailable), apperror.CodeAgentCredentialEncryptionUnavailable, nil, errs.FaultServer},
-		{"command not found", &acpagent.PromptError{Err: fmt.Errorf("start devin: %w", &acpclient.CommandNotFoundError{Command: "devin"})}, apperror.CodeACPCommandNotFound, map[string]string{"command": "devin"}, errs.FaultClient},
-		{"model selection unsupported", &acpagent.PromptError{Err: acpclient.ErrModelSelectionUnsupported}, apperror.CodeACPModelSelectionUnsupported, nil, errs.FaultClient},
-		{"model id required", &acpagent.PromptError{Err: acpclient.ErrModelIDRequired}, apperror.CodeACPModelIDRequired, nil, errs.FaultClient},
-		{"model unavailable", &acpagent.PromptError{Err: acpclient.ErrModelUnavailable}, apperror.CodeACPModelUnavailable, nil, errs.FaultClient},
-		{"reasoning unsupported", &acpagent.PromptError{Err: acpclient.ErrReasoningSelectionUnsupported}, apperror.CodeACPReasoningUnsupported, nil, errs.FaultClient},
-		{"reasoning effort required", &acpagent.PromptError{Err: acpclient.ErrReasoningEffortRequired}, apperror.CodeACPReasoningEffortRequired, nil, errs.FaultClient},
-		{"reasoning effort unavailable", &acpagent.PromptError{Err: acpclient.ErrReasoningEffortUnavailable}, apperror.CodeACPReasoningUnavailable, nil, errs.FaultClient},
-		{"config update failed", &acpagent.PromptError{Err: fmt.Errorf("%w: SECRET", acpagent.ErrRuntimeConfigUpdateFailed)}, apperror.CodeACPConfigUpdateFailed, nil, errs.FaultDependency},
+		{"runtime unavailable", external.Unavailable(errors.New("SECRET exit")), apperror.CodeExternalRuntimeUnavailable, nil, apperror.FaultServer},
+		{"runtime unreachable", external.Unavailable(errs.WrapDependency(errors.New("SECRET refused"), "dial bridge")), apperror.CodeExternalRuntimeUnavailable, nil, apperror.FaultDependency},
+		{"auth required", external.Fail(external.FailureAuthRequired, external.ErrAuthRequired), apperror.CodeExternalRuntimeAuthRequired, nil, apperror.FaultClient},
+		{"session resume failed", external.Fail(external.FailureSessionResumeFailed, errors.New("SECRET rpc")), apperror.CodeExternalRuntimeSessionResumeFailed, nil, apperror.FaultDependency},
+		{"goal outside default mode", external.Fail(external.FailureGoalRequiresDefaultMode, nil), apperror.CodeRuntimeControlGoalRequiresDefaultMode, nil, apperror.FaultClient},
+		{"mode unavailable", external.Fail(external.FailureModeUnavailable, external.ErrModeUnavailable), apperror.CodeRuntimeControlModeUnavailable, nil, apperror.FaultClient},
+		{"control failed", external.Fail(external.FailureControlFailed, errors.New("SECRET control")), apperror.CodeRuntimeControlFailed, nil, apperror.FaultServer},
+		{"credential busy", external.Fail(external.FailureCredentialBusy, nil), apperror.CodeAgentCredentialRuntimeBusy, nil, apperror.FaultClient},
+		{"usage limited", external.Fail(external.FailureUsageLimited, errs.NewDependency("SECRET resets at 5 PM")), apperror.CodeExternalRuntimeUsageLimited, nil, apperror.FaultDependency},
+		{"rate limited", external.Fail(external.FailureRateLimited, errs.NewDependency("SECRET throttled")), apperror.CodeExternalRuntimeRateLimited, nil, apperror.FaultDependency},
+		{"context window exceeded", external.Fail(external.FailureContextWindowExceeded, errs.NewDependency("SECRET too long")), apperror.CodeExternalRuntimeContextWindowExceeded, nil, apperror.FaultClient},
+		{"overloaded", external.Fail(external.FailureOverloaded, errs.NewDependency("SECRET at capacity")), apperror.CodeExternalRuntimeOverloaded, nil, apperror.FaultDependency},
+		{"upstream unreachable", external.Fail(external.FailureUpstreamUnreachable, errs.NewDependency("SECRET connection failed")), apperror.CodeExternalRuntimeUpstreamUnreachable, nil, apperror.FaultDependency},
+		{"request blocked", external.Fail(external.FailureRequestBlocked, errs.NewDependency("SECRET flagged")), apperror.CodeExternalRuntimeRequestBlocked, nil, apperror.FaultClient},
+		{"credential not found", external.CredentialError(agentcredential.ErrNotFound), apperror.CodeAgentCredentialNotFound, nil, apperror.FaultClient},
+		{"credential incompatible", external.CredentialError(agentcredential.ErrIncompatible), apperror.CodeAgentCredentialIncompatible, nil, apperror.FaultClient},
+		{"credential revoked", external.CredentialError(agentcredential.ErrRevoked), apperror.CodeAgentCredentialRevoked, nil, apperror.FaultClient},
+		{"credential encryption unavailable", external.CredentialError(agentcredential.ErrEncryptionUnavailable), apperror.CodeAgentCredentialEncryptionUnavailable, nil, apperror.FaultServer},
+		{"command not found", &acpagent.PromptError{Err: fmt.Errorf("start devin: %w", &acpclient.CommandNotFoundError{Command: "devin"})}, apperror.CodeACPCommandNotFound, map[string]string{"command": "devin"}, apperror.FaultClient},
+		{"model selection unsupported", &acpagent.PromptError{Err: acpclient.ErrModelSelectionUnsupported}, apperror.CodeACPModelSelectionUnsupported, nil, apperror.FaultClient},
+		{"model id required", &acpagent.PromptError{Err: acpclient.ErrModelIDRequired}, apperror.CodeACPModelIDRequired, nil, apperror.FaultClient},
+		{"model unavailable", &acpagent.PromptError{Err: acpclient.ErrModelUnavailable}, apperror.CodeACPModelUnavailable, nil, apperror.FaultClient},
+		{"reasoning unsupported", &acpagent.PromptError{Err: acpclient.ErrReasoningSelectionUnsupported}, apperror.CodeACPReasoningUnsupported, nil, apperror.FaultClient},
+		{"reasoning effort required", &acpagent.PromptError{Err: acpclient.ErrReasoningEffortRequired}, apperror.CodeACPReasoningEffortRequired, nil, apperror.FaultClient},
+		{"reasoning effort unavailable", &acpagent.PromptError{Err: acpclient.ErrReasoningEffortUnavailable}, apperror.CodeACPReasoningUnavailable, nil, apperror.FaultClient},
+		{"config update failed", &acpagent.PromptError{Err: fmt.Errorf("%w: SECRET", acpagent.ErrRuntimeConfigUpdateFailed)}, apperror.CodeACPConfigUpdateFailed, nil, apperror.FaultDependency},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -165,8 +167,7 @@ func TestExternalAgentErrorTranslatesRuntimeFailures(t *testing.T) {
 			} {
 				returned := fmt.Errorf("prompt: %w", tc.err)
 				got := translate(returned)
-				public, ok := apperror.PublicFrom(got, "")
-				if !ok || public.Code != tc.code {
+				if _, ok := apperror.Lookup(apperror.CodeOf(got)); !ok || apperror.CodeOf(got) != tc.code {
 					t.Fatalf("%s code = %q, want %q", name, apperror.CodeOf(got), tc.code)
 				}
 				if args := apperror.ArgsOf(got); !maps.Equal(args, tc.args) {
@@ -178,8 +179,8 @@ func TestExternalAgentErrorTranslatesRuntimeFailures(t *testing.T) {
 				if !errors.Is(apperror.CauseOf(got), returned) {
 					t.Fatalf("%s cause = %v, want the driver's error", name, apperror.CauseOf(got))
 				}
-				if strings.Contains(public.Detail, "SECRET") {
-					t.Fatalf("%s detail leaked the cause: %q", name, public.Detail)
+				if definition, _ := apperror.Lookup(apperror.CodeOf(got)); strings.Contains(definition.Detail, "SECRET") {
+					t.Fatalf("%s detail leaked the cause: %q", name, definition.Detail)
 				}
 			}
 		})

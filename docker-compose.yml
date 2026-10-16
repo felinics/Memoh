@@ -132,7 +132,6 @@ services:
       MEMOH_WEBHOOK_TUNNEL_METRICS_URL: "http://webhook-tunnel:18735"
     volumes:
       - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
-      - memoh_data:/opt/memoh/data
       - /etc/localtime:/etc/localtime:ro
     expose:
       - "8081"
@@ -181,7 +180,7 @@ services:
   # Connect-It at startup and presented by the Memoh server as its bearer
   # token — the install script generates and persists all of these values.
   connect-it:
-    image: "${MEMOH_CONNECT_IT_IMAGE:-ghcr.io/felinics/connect-it:0.3.0}"
+    image: "${MEMOH_CONNECT_IT_IMAGE:-ghcr.io/felinics/connect-it:0.3.1}"
     container_name: memoh-connect-it
     profiles: [connectors]
     environment:

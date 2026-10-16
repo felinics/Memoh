@@ -92,7 +92,7 @@ services:
   # Connect-It owns the connect_it schema and creates it on startup; it only
   # needs postgres, never Memoh's migrations.
   connect-it:
-    image: "${MEMOH_DEV_CONNECT_IT_IMAGE:-ghcr.io/felinics/connect-it:0.3.0}"
+    image: "${MEMOH_DEV_CONNECT_IT_IMAGE:-ghcr.io/felinics/connect-it:0.3.1}"
     container_name: memoh-dev-connect-it
     environment:
       DATABASE_URL: "postgres://memoh:memoh123@postgres:5432/memoh?sslmode=disable&search_path=connect_it"
@@ -223,7 +223,6 @@ services:
       - ..:/workspace
       - go_mod_cache:/go/pkg/mod
       - go_build_cache:/root/.cache/go-build
-      - memoh_data:/opt/memoh/data
     ports:
       - "${MEMOH_DEV_CHANNEL_PORT:-18081}:8081"
     healthcheck:

@@ -11,6 +11,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/models/modelretry"
 )
 
 // A mid-stream retry regenerates the answer from the last committed boundary.
@@ -44,7 +45,7 @@ func TestMidStreamRetryResetsTextLoopGuard(t *testing.T) {
 		Identity:         SessionContext{BotID: "bot-1"},
 		LoopDetection:    LoopDetectionConfig{Enabled: true},
 		ContextMutations: contextfrag.NewMutationLedger(),
-		Retry:            RetryConfig{MaxAttempts: 2, FastAttempts: 2, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond},
+		Retry:            modelretry.Config{MaxAttempts: 2, FastAttempts: 2, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond},
 	}) {
 		events = append(events, ev)
 	}

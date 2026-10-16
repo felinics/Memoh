@@ -11,6 +11,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 func (m *Manager) localControl(runID string) *runControl {
@@ -117,7 +118,7 @@ func (m *Manager) stopAllLocalControls(ctx context.Context) error {
 	m.mu.Unlock()
 	var stopErr error
 	for _, ctrl := range controls {
-		ctrl.revokeOwnership(context.Canceled)
+		ctrl.revokeOwnership(ErrRunOwnershipLost)
 		ctrl.stopCommands()
 		select {
 		case ctrl.abortCh <- struct{}{}:
@@ -163,10 +164,11 @@ func (m *Manager) releaseAllLocalRuns(ctx context.Context) error {
 	return releaseErr
 }
 
-// releaseLocalRunOnShutdown makes the durable terminal decision before the
-// live owner route disappears. A run that already crossed the finishing
+// releaseLocalRunOnShutdown records the durable handoff or terminal decision
+// before the live owner route disappears. A run that crossed the finishing
 // boundary keeps its stored proposal. Running work with a saved resume context
-// gets an interrupt marker; other active work follows the existing lost path.
+// gets an interrupt marker; native parked decisions retain their waiting state.
+// Other active work follows the existing lost path.
 // If PostgreSQL is temporarily unavailable, the live lease is deliberately
 // retained so a peer reaper can make the same decision after it expires.
 func (m *Manager) releaseLocalRunOnShutdown(ctx context.Context, ctrl *runControl) error {
@@ -180,10 +182,37 @@ func (m *Manager) releaseLocalRunOnShutdown(ctx context.Context, ctrl *runContro
 		if err != nil {
 			return err
 		}
+		// An answer may already be committed while its native continuation is
+		// still between the producer barrier and EventAgentStart. Let it leave
+		// waiting before classifying the run; otherwise shutdown can preserve
+		// sibling prompts while discarding the accepted answer's execution.
+		if run.State == ledger.StateWaitingDecision && ctrl.decisionContinuations.Load() > 0 && !ctrl.hasInlineDecision() {
+			drainCtx, cancel := context.WithTimeout(ctx, m.ownerLeaseTTL)
+			defer cancel()
+			ticker := time.NewTicker(10 * time.Millisecond)
+			defer ticker.Stop()
+			for run.State == ledger.StateWaitingDecision && ctrl.decisionContinuations.Load() > 0 {
+				select {
+				case <-drainCtx.Done():
+					return drainCtx.Err()
+				case <-ticker.C:
+				}
+				run, err = m.runs.Get(ctx, handle.RunID)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		if run.State == ledger.StateWaitingDecision && run.AbortRequestedAt.IsZero() && m.distributed != nil {
+			preserved, err := m.handoffWaitingDecisionOnShutdown(ctx, ctrl, run)
+			if err != nil || preserved {
+				return err
+			}
+		}
 		if run.State == ledger.StateRunning && run.AbortRequestedAt.IsZero() && ledger.HasResumeContext(run.Input) {
 			code = RunErrorInterrupted
 		}
-		terminal, err := m.finalizeLedgerRun(ctx, handle, RunStatusLost, code)
+		terminal, err := m.finalizeLedgerRunFromState(ctx, handle, RunStatusLost, code, run.State)
 		if terminal.RunID != "" {
 			// The ledger records only the code, so the shutdown is named to the
 			// run's result record here.
@@ -197,11 +226,71 @@ func (m *Manager) releaseLocalRunOnShutdown(ctx context.Context, ctrl *runContro
 	return err
 }
 
+// handoffWaitingDecisionOnShutdown revokes durable write authority without
+// finishing a parked run. Leave the old Redis lease AND its index untouched:
+// after expiry the normal reaper uses that index to recover the new DB fence.
+// In particular, a database or Redis outage must not erase the retry pointer.
+func (m *Manager) handoffWaitingDecisionOnShutdown(ctx context.Context, ctrl *runControl, run ledger.Run) (bool, error) {
+	if run.FencingToken != ctrl.fencingToken {
+		return false, ErrRunOwnershipLost
+	}
+	m.mu.Lock()
+	decisions := m.decisionStore
+	m.mu.Unlock()
+	reclaimer, ok := m.fence.(DecisionFenceActivator)
+	if decisions == nil || !ok {
+		return false, errors.New("waiting-decision shutdown recovery is not configured")
+	}
+	preserved, err := pendingRecoverableDecisions(ctx, decisions, run)
+	if err != nil || len(preserved) == 0 {
+		return false, err
+	}
+	// Do not revoke a native producer before its assistant tool-call write has
+	// committed. The shutdown hook runs before the producer teardown hooks.
+	ready := ctrl.decisionReadySignal()
+	if ready == nil {
+		return false, errors.New("waiting-decision producer has no persistence barrier")
+	}
+	drainCtx, cancel := context.WithTimeout(ctx, m.ownerLeaseTTL)
+	defer cancel()
+	select {
+	case <-ready:
+	case <-drainCtx.Done():
+		return false, drainCtx.Err()
+	}
+	// Parallel tools may have added more decisions while the producer drained.
+	// Preserve the complete committed set, not the earlier event-time snapshot.
+	preserved, err = pendingRecoverableDecisions(ctx, decisions, run)
+	if err != nil || len(preserved) == 0 {
+		return false, err
+	}
+	newToken, err := m.runs.NextFencingToken(ctx)
+	if err != nil {
+		return false, err
+	}
+	if newToken <= run.FencingToken {
+		return false, errors.New("waiting-decision shutdown fencing token did not advance")
+	}
+	// Reclaim uses a single PostgreSQL transaction for the run, session fence
+	// and every pending decision. An answer, abort or newer owner wins via CAS;
+	// a failed handoff must never fall through to destructive finalization.
+	if err := reclaimer.ReclaimWaitingDecision(ctx, run.BotID, run.SessionID, run.RunID,
+		run.OwnerID, run.LiveGeneration, run.FencingToken, newToken, preserved); err != nil {
+		if errors.Is(err, runtimefence.ErrStale) {
+			return false, ErrRunOwnershipLost
+		}
+		return false, err
+	}
+	requestRunControlStop(ctrl)
+	m.forgetLocalControlForHandle(ctx, ctrl.handle())
+	return true, nil
+}
+
 func requestRunControlStop(ctrl *runControl) {
 	if ctrl == nil {
 		return
 	}
-	// The terminal decision was durable before this call. The old owner can no
+	// The terminal decision or fence handoff is durable before this call. The old owner can no
 	// longer append to that run, including while its canceled stream unwinds.
 	ctrl.revokeOwnership(ErrRunOwnershipLost)
 	select {
@@ -574,6 +663,14 @@ func (m *Manager) InterruptForShutdown(ctx context.Context) error {
 	if m == nil {
 		return nil
 	}
-	m.closeOnce.Do(func() { close(m.closeCh) })
+	m.closeAdmission()
 	return m.releaseAllLocalRuns(ctx)
+}
+
+func (m *Manager) closeAdmission() {
+	// Serialize with decision-continuation registration. An answer either
+	// belongs to the set drained by shutdown or is rejected before committing.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closeOnce.Do(func() { close(m.closeCh) })
 }

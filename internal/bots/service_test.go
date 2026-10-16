@@ -256,6 +256,31 @@ func TestListChecksReportsSetupFailureAsSingleIssue(t *testing.T) {
 	}
 }
 
+func TestListChecksDoesNotReportFailedRemovalAsSetupFailure(t *testing.T) {
+	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	db := &fakeDBTX{
+		queryRowFunc: func(_ context.Context, query string, _ ...any) pgx.Row {
+			if strings.Contains(query, "FROM bots") {
+				return makeGetBotRowWithMetadata(botUUID, ownerUUID, []byte(`{}`))
+			}
+			return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+		},
+	}
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
+	svc.SetWorkspaceIntents(&fakeWorkspaceIntents{outcome: WorkspaceOutcome{
+		Desired: WorkspaceDesiredAbsent, Observed: WorkspaceObservedFailed, LastErrorPhase: "teardown", LastError: "too many files",
+	}})
+
+	checks, err := svc.ListChecks(context.Background(), botUUID.String())
+	if err != nil {
+		t.Fatalf("ListChecks() error = %v", err)
+	}
+	if initCheck := findBotCheck(t, checks, BotCheckTypeContainerInit); initCheck.Status != BotCheckStatusOK {
+		t.Fatalf("container.init = %+v, want ok: the workspace came up, only its removal failed", initCheck)
+	}
+}
+
 func TestRecordContainerSetupFailureTruncatesLongMessages(t *testing.T) {
 	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
 	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
@@ -436,6 +461,19 @@ func TestWorkspaceOutcomeErrorKeepsBootstrapSentinel(t *testing.T) {
 	}
 }
 
+func TestWorkspaceOutcomeErrorCarriesRecordedCode(t *testing.T) {
+	err := workspaceOutcomeError(WorkspaceOutcome{Observed: WorkspaceObservedFailed, LastErrorPhase: "image_prepare", LastErrorCode: "workspace.image_not_found"})
+	var setup *WorkspaceSetupError
+	if !errors.As(err, &setup) || setup.Code != "workspace.image_not_found" || setup.Phase != "image_prepare" {
+		t.Fatalf("error = %v, want a WorkspaceSetupError with the recorded code and phase", err)
+	}
+	// A bootstrap failure keeps its sentinel whether or not the row has a code.
+	err = workspaceOutcomeError(WorkspaceOutcome{Observed: WorkspaceObservedFailed, LastErrorPhase: WorkspacePhaseBootstrap, LastErrorCode: "workspace.template_bootstrap_failed"})
+	if !errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
+		t.Fatalf("bootstrap failure must map to the template sentinel, got %v", err)
+	}
+}
+
 func TestWorkspaceImageFromMetadata(t *testing.T) {
 	if got := workspaceImageFromMetadata(map[string]any{"workspace": map[string]any{"image": "  ghcr.io/x/y:1 "}}); got != "ghcr.io/x/y:1" {
 		t.Fatalf("image = %q", got)
@@ -515,7 +553,9 @@ func TestRunDeleteLifecycleWaitsForWorkspaceAbsent(t *testing.T) {
 	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
 	svc.SetWorkspaceIntents(intents)
 
-	svc.runDeleteLifecycle(context.Background(), botID, BotStatusReady)
+	if err := svc.runDeleteLifecycle(context.Background(), botID, BotStatusReady); err != nil {
+		t.Fatalf("delete lifecycle should succeed once the workspace is absent: %v", err)
+	}
 	if len(intents.absent) != 1 || intents.absent[0] != botID || intents.preserve[0] {
 		t.Fatalf("delete must request a non-preserving absent workspace, got %v/%v", intents.absent, intents.preserve)
 	}
@@ -549,7 +589,9 @@ func TestRunDeleteLifecycleRevertsToPreviousStatusWhenWorkspaceLingers(t *testin
 	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
 	svc.SetWorkspaceIntents(intents)
 
-	svc.runDeleteLifecycle(context.Background(), botID, BotStatusFailed)
+	if err := svc.runDeleteLifecycle(context.Background(), botID, BotStatusFailed); err == nil || !strings.Contains(err.Error(), "did not complete") {
+		t.Fatalf("a lingering workspace must fail the delete unit, got %v", err)
+	}
 	if len(exec) != 1 || exec[0] != "status:"+BotStatusFailed {
 		t.Fatalf("a failed bot whose deletion lingers must revert to failed, not ready, and not be deleted; exec=%v", exec)
 	}
@@ -562,5 +604,16 @@ func TestAwaitCreatedAnswersWithTheWorkspaceFailure(t *testing.T) {
 	_, err := svc.AwaitCreated(context.Background(), Bot{ID: "00000000-0000-0000-0000-000000000002"}, CreateBotRequest{WaitForReady: true})
 	if !errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
 		t.Fatalf("err = %v; a resend with wait_for_ready must get the failure its first attempt would have", err)
+	}
+}
+
+func TestContainerSetupFailureMetadataCarriesRecordedCode(t *testing.T) {
+	got := containerSetupFailure{Phase: "image_prepare", Code: "workspace.image_not_found"}.metadata()
+	if got["setup_error_code"] != "workspace.image_not_found" {
+		t.Fatalf("metadata = %v, want the recorded code", got)
+	}
+	plain := containerSetupFailure{Phase: "start"}.metadata()
+	if _, ok := plain["setup_error_code"]; ok {
+		t.Fatal("metadata of a failure without a code must not carry the key")
 	}
 }

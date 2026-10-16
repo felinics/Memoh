@@ -164,10 +164,10 @@
            sub-level (sub-pages are reserved for entities like a Provider); a
            dialog keeps the page visibly underneath, so "where am I" never
            arises and no back-button chrome is needed. -->
-      <section class="space-y-2.5">
-        <h2 class="px-2 text-label font-medium text-muted-foreground">
-          {{ t('settings.appearance.advanced') }}
-        </h2>
+      <SectionGroup
+        :title="t('settings.appearance.advanced')"
+        tone="muted"
+      >
         <ActionCard
           :title="t('settings.appearance.advancedEntryTitle')"
           @click="advancedOpen = true"
@@ -176,7 +176,7 @@
             <SlidersHorizontal />
           </template>
         </ActionCard>
-      </section>
+      </SectionGroup>
     </div>
   </PageShell>
 
@@ -363,7 +363,7 @@ import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MarkdownRender, { enableMermaid, setCustomComponents } from 'markstream-vue'
-import { PageShell, SettingsRow, SettingsSection } from '@felinic/ui'
+import { PageShell, SettingsRow, SettingsSection, SectionGroup } from '@felinic/ui'
 import { useShikiHighlighter } from '@/composables/useShikiHighlighter'
 import { LOCALE_OPTIONS, type Locale } from '@/i18n'
 import type { BundledTheme } from 'shiki'

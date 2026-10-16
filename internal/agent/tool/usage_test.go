@@ -282,6 +282,30 @@ func TestMessageProviderUsageGatesRegisteredTools(t *testing.T) {
 	}
 }
 
+func TestMessageProviderUsageGuidesDiscussProgressUpdates(t *testing.T) {
+	t.Parallel()
+
+	provider := NewMessageProvider(nil, usageTestSender{}, usageTestReactor{}, usageTestResolver{}, nil)
+	discussSession := SessionContext{SessionType: sessionmode.Discuss, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}
+
+	got := provider.Usage(context.Background(), discussSession, availableToolsForTest(ToolSend()))
+	assertUsageItemsAreBulleted(t, got)
+	for _, want := range []string{"short acknowledgement", "meaningful stage", "Do not narrate each tool call"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("discuss Usage should guide acknowledgement and progress updates containing %q, got:\n%s", want, got)
+		}
+	}
+
+	if got := provider.Usage(context.Background(), discussSession, availableToolsForTest(ToolReact())); strings.Contains(got, "acknowledgement") {
+		t.Fatalf("discuss Usage without send should not guide progress updates, got:\n%s", got)
+	}
+
+	chatSession := SessionContext{SessionType: sessionmode.Chat, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}
+	if got := provider.Usage(context.Background(), chatSession, availableToolsForTest(ToolSend())); strings.Contains(got, "acknowledgement") {
+		t.Fatalf("chat Usage should not guide send-based progress updates, got:\n%s", got)
+	}
+}
+
 func TestMessageProviderToolDescriptionsGateCurrentConversationTarget(t *testing.T) {
 	t.Parallel()
 

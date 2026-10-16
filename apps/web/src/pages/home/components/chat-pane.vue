@@ -43,9 +43,11 @@
               </div>
 
               <!-- A session with a live run but no messages yet (a subagent
-                   that has not produced output) reads as starting, not empty. -->
+                   that has not produced output) reads as starting, not empty.
+                   A first send waiting on welcome already shows its spinner
+                   on the send button. -->
               <div
-                v-if="messages.length === 0 && !loadingChats && !loadingMessages && streaming"
+                v-if="messages.length === 0 && !loadingChats && !loadingMessages && streaming && !isWelcome"
                 class="flex items-center justify-center min-h-75"
               >
                 <Spinner class="size-3.5" />
@@ -196,6 +198,17 @@
       <ChatForkDialog
         v-model:open="forkDialogOpen"
         :turn-id="pendingForkTurnId"
+      />
+
+      <!-- Asked before a usage example or App "Try it" replaces unsent text. -->
+      <ConfirmDeleteDialog
+        :open="replaceDraftConfirm.open.value"
+        :title="$t('chatExamples.replaceDraft.title')"
+        :description="$t('chatExamples.replaceDraft.description')"
+        :cancel-label="$t('common.cancel')"
+        :confirm-label="$t('chatExamples.replaceDraft.confirm')"
+        @update:open="replaceDraftConfirm.setOpen"
+        @confirm="replaceDraftConfirm.answer(true)"
       />
 
       <!-- The composer is a single instance reused in both layouts: pinned to
@@ -439,21 +452,21 @@
               ref="dockEl"
               :approvals="pendingApprovals"
               :command-panel="composerCommandPanel"
-              :error-message="goalSubmissionBlocked ? goalExecutionBlockedReason : runtimeModeUnavailableReason || composerError"
+              :error-message="composerPanelError"
               :pending-user-input="pendingUserInput"
-              :compacting="isCompactingSession"
               :usage-notice="composerUsageNotice"
               @select-command-item="selectCommandResultItem"
               @dismiss-command="clearCurrentCommandEvent"
               @dismiss-usage="dismissCodexUsageNotice"
+              @dismiss-error="dismissComposerPanelError"
               @reveal-composer="handleDockRevealComposer"
             >
               <CodexGoalBar
-                v-if="runtimeControls.goal.value || runtimeGoalError"
+                v-if="runtimeControls.goal.value || visibleRuntimeGoalError"
                 :key="runtimeModeScope"
                 class="mx-3 mb-2"
                 :goal="runtimeControls.goal.value"
-                :error="runtimeGoalError"
+                :error="visibleRuntimeGoalError"
                 :disabled="goalControlsDisabled"
                 :resume-disabled="goalResumeDisabled"
                 :resume-disabled-reason="goalExecutionBlockedReason"
@@ -461,6 +474,7 @@
                 @pause="controlGoal('pause')"
                 @clear="controlGoal('clear')"
                 @resume="controlGoal('resume')"
+                @dismiss-error="dismissedRuntimeGoalError = runtimeGoalError"
               />
               <!-- The composer is ALWAYS a two-row card (textarea on top,
                    controls below) — no pill↔multiline morph: a fixed rounded-2xl
@@ -469,7 +483,7 @@
                    Docked (non-welcome) state compresses and quiets: no min
                    height + tighter padding (p-2.5) + a shorter textarea row
                    (min-h-10) pull the two rows together — the centered welcome
-                   card keeps the full presence (min-h-28, p-3); docked it sits
+                   card keeps the full presence (min-h-28, wider --composer-pad); docked it sits
                    under the conversation and should read lighter, with the edge
                    softened to --border-soft (.chat-composer-docked, style.css).
                    Mobile radius is DERIVED from the control circles inside:
@@ -482,9 +496,9 @@
                 ref="composerEl"
                 data-slot="input-group"
                 role="group"
-                class="chat-composer-edge @container/composer relative flex w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer cursor-text max-md:rounded-3xl max-md:p-2.5"
+                class="chat-composer-edge @container/composer relative flex w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer cursor-text p-(--composer-pad) max-md:rounded-3xl"
                 :class="[
-                  isWelcome ? 'min-h-28 p-3' : 'p-2.5 chat-composer-docked',
+                  isWelcome ? 'min-h-28' : 'chat-composer-docked',
                   voiceInputState !== 'idle' ? 'chat-composer-voice' : '',
                 ]"
                 @click="handleComposerClick"
@@ -619,13 +633,28 @@
                   ref="textareaEl"
                   v-model="inputText"
                   rows="1"
-                  :placeholder="composerPlaceholder"
-                  :disabled="!currentBotId || activeChatReadOnly || loadingMessages"
-                  class="order-none max-h-52 w-full basis-full field-sizing-content resize-none break-words bg-transparent pl-2 pr-1 pt-2 pb-1.5 text-base leading-[var(--chat-leading)] text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
-                  :class="isWelcome ? 'min-h-12' : 'min-h-10'"
+                  :placeholder="composerPreviewShown ? '' : composerPlaceholder"
+                  :disabled="!currentBotId || activeChatReadOnly || loadingMessages || firstSendAwaiting"
+                  class="order-none max-h-52 w-full basis-full field-sizing-content resize-none break-words bg-transparent pl-2 pr-1 pt-2 pb-1.5 text-base leading-[var(--chat-leading)] outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
+                  :class="[isWelcome ? 'min-h-12' : 'min-h-10', composerPreviewShown ? 'text-transparent' : 'text-foreground']"
                   @keydown="handleComposerKeydown"
                   @paste="handlePaste"
                 />
+                <!-- The suggestion preview: laid exactly over the textarea's
+                     text box (same padding, size and leading), so it wraps line
+                     for line like the text it becomes. Out of flow, so the
+                     composer never resizes while a row is hovered. -->
+                <div
+                  v-if="composerPreviewShown && composerPreviewBox"
+                  :key="composerPreview?.text"
+                  data-composer-preview
+                  :data-landing="composerPreview?.landing || undefined"
+                  aria-hidden="true"
+                  class="pointer-events-none absolute line-clamp-2 break-words pl-2 pr-1 pt-2 text-base leading-[var(--chat-leading)] max-md:line-clamp-1"
+                  :style="composerPreviewBox"
+                >
+                  {{ composerPreview?.text }}
+                </div>
 
                 <!-- max-md size bumps on the composer controls (the ＋ and voice
                      buttons, the model trigger, and the send ring below) grow the
@@ -692,10 +721,6 @@
                         <!-- One transformable wrapper for the press squish —
                              same contract as composer-continue-on's pill. -->
                         <span class="composer-pill-content inline-flex min-w-0 items-center gap-2">
-                          <Spinner
-                            v-if="composerSpinnerVisible"
-                            class="size-3.5 shrink-0"
-                          />
                           <span class="min-w-0 truncate text-label text-composer-control-label">{{ modelTriggerLabel }}</span>
                           <ChevronDown
                             class="size-3.5 shrink-0 text-muted-foreground"
@@ -722,7 +747,7 @@
                         :none-label="activeUsesDirectRuntime && composerDefaultModelId && composerDefaultModelId !== 'default' ? composerDefaultModelLabel : undefined"
                         :show-reasoning="!activeUsesDirectRuntime || !!composerReasoningOptions?.length"
                         :loading="composerModelsLoading"
-                        :error="directModelCatalogError"
+                        :error="modelCatalogMenuError"
                         :auth-required="directRuntimeAuthRequired"
                         @update:model-value="onComposerModelValueSelected"
                         @update:reasoning-effort="onComposerReasoningEffortSelected"
@@ -897,6 +922,7 @@
                         :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages || composerConfigPending || composerHasNoModel || goalSubmissionBlocked || !!runtimeModeUnavailableReason)"
                         :title="goalSubmissionBlocked ? goalExecutionBlockedReason : undefined"
                         :class="runtimeModeChanging && !streaming && showSend && !!currentBotId && !activeChatReadOnly && !loadingMessages && !composerAgentConfigPending && !composerHasNoModel ? 'disabled:opacity-100' : undefined"
+                        :aria-busy="firstSendAwaiting || undefined"
                         :aria-label="streaming && showSend ? $t(composerQueueCommand?.mode === 'steer' ? 'chat.queue.enqueueSteer' : 'chat.queue.enqueueFollowUp') : (streaming ? 'Stop generating response' : 'Send message')"
                         class="size-full"
                         @click="handleSendButton"
@@ -905,24 +931,18 @@
                           class="grid size-[18px] max-md:size-5 shrink-0 place-items-center"
                           aria-hidden="true"
                         >
-                          <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.5"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
+                          <!-- The arrow, which bends into the busy ring while a
+                               first send waits for the server. -->
+                          <SendMorphIcon
+                            :busy="firstSendAwaiting"
                             class="col-start-1 row-start-1 size-[18px] max-md:size-5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
-                            :class="streaming ? 'opacity-0' : 'opacity-100'"
-                          >
-                            <path d="M12 19 V5.75" />
-                            <path d="M6.5 10.5 L12 5 L17.5 10.5" />
-                          </svg>
+                            :class="streaming && !firstSendAwaiting ? 'opacity-0' : 'opacity-100'"
+                          />
                           <svg
                             viewBox="0 0 24 24"
                             fill="currentColor"
                             class="col-start-1 row-start-1 size-4 max-md:size-4.5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
-                            :class="streaming ? 'opacity-100' : 'opacity-0'"
+                            :class="streaming && !firstSendAwaiting ? 'opacity-100' : 'opacity-0'"
                           >
                             <rect
                               x="4"
@@ -976,7 +996,7 @@
                     :bot-id="currentBotId || ''"
                     :project="runtimeProject"
                     :projects="selectableFolders"
-                    :editable="!hasRenderedSession"
+                    :editable="draftSetupEditable"
                     :locked="computerSwitchLocked || composerConfigPending || !canWorkspaceRead"
                     :visible="isVisible && canWorkspaceRead"
                     :streaming="streaming"
@@ -1198,6 +1218,20 @@
                   </Button>
                 </div>
 
+                <!-- Brings back the hidden welcome suggestions. It lives on this
+                     row so it lines up with the other session controls, in
+                     the slot the context ring takes once a chat starts. -->
+                <Button
+                  v-if="isWelcome && welcomeDismissed && voiceInputState === 'idle'"
+                  type="button"
+                  variant="quiet"
+                  size="sm"
+                  class="ml-auto shrink-0 gap-1.5 px-1.5 font-normal max-md:h-11"
+                  @click="welcomeDismissed = false"
+                >
+                  <Lightbulb class="size-3.5 shrink-0" />
+                  <span class="text-label">{{ $t('chatExamples.tryThese') }}</span>
+                </Button>
                 <SessionInfoRing
                   v-if="showSessionInfoRing && voiceInputState === 'idle'"
                   class="ml-auto shrink-0"
@@ -1208,6 +1242,14 @@
               </div>
             </ComposerDock>
           </div>
+          <!-- Usage examples under the welcome composer; they yield first
+               when the pane is short (style.css welcome tiers). -->
+          <ChatExampleSuggestions
+            v-if="isWelcome && currentBotId"
+            v-model:preview="composerPreview"
+            :bot-id="currentBotId"
+            :composer-replaceable="composerReplaceable"
+          />
         </div>
       </div>
     </template>
@@ -1231,7 +1273,7 @@ import { Memoh as MemohIcon, MemohColor } from '@memohai/icon'
 import { AddIcon, UploadIcon } from '@memohai/icon/ui'
 
 import { EXTERNAL_AGENT_DEFAULT_PROJECT_MODE, EXTERNAL_AGENT_DEFAULT_PROJECT_PATH, normalizeAgentID } from '@/utils/external-agent'
-import { ref, reactive, computed, onBeforeUnmount, useTemplateRef, watch, onWatcherCleanup, nextTick, onActivated, onDeactivated, type Ref } from 'vue'
+import { ref, reactive, computed, onBeforeUnmount, useTemplateRef, watch, onWatcherCleanup, nextTick, onActivated, onDeactivated } from 'vue'
 import {
   ImagePlus,
   ChevronDown,
@@ -1241,14 +1283,13 @@ import {
   X,
   HelpCircle,
   List,
-  Minimize2,
   Package,
   SquarePen,
   ShieldCheck,
   Lightbulb,
   Target,
 } from 'lucide-vue-next'
-import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, PanePlaceholder, ScrollArea, Skeleton, Spinner, toast } from '@felinic/ui'
+import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, ConfirmDeleteDialog, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, PanePlaceholder, ScrollArea, Skeleton, Spinner, toast } from '@felinic/ui'
 import { useChatStore, type ExternalAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult } from '@/store/chat-list'
 import { useWorkdirsStore } from '@/store/workdirs'
 import type { BotWorkdir } from '@/composables/api/useWorkdirs'
@@ -1295,7 +1336,13 @@ import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, displayedEffort, reconcileStor
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
+import ChatExampleSuggestions from './chat-example-suggestions.vue'
+import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-ui'
+import { useComposerPrefillConsumer } from '../composables/useComposerPrefillConsumer'
+import { useComposerPreviewBox, type ComposerPreview } from '../composables/useComposerPreview'
+import { useAsyncConfirm } from '@/composables/useAsyncConfirm'
 import { useUnfocusedComposerInput } from '../composables/useUnfocusedComposerInput'
+import { useComposerKeyboardFocus } from '../composables/useComposerKeyboardFocus'
 import { useComposerPair } from '../composables/useComposerPair'
 import { COMPOSER_MASK_BELOW_PX, useComposerLayout } from '../composables/useComposerLayout'
 import { provideChatViewTarget } from '../composables/useChatViewContext'
@@ -1304,12 +1351,13 @@ import { enqueueSteerQueue, enqueueFollowUpQueue, fetchSafeSkillCatalog, fetchSe
 import { parseSessionQueueCommand, SessionQueueSubmissionGate } from './session-queue-submission'
 import { localizeRuntimeControls, localizeRuntimeCommandResult } from '@/utils/runtime-control-presentation'
 import { commandResultPresentation, isCommandResultItemVisible, resolveCommandResultSelection } from './slash-command-result'
+import SendMorphIcon from './send-morph-icon.vue'
 import { captureChatPaneSendContext, clearComposerPairDraft, composerRestoreForSendResult, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, shouldRefreshACPComposerConfig, welcomeSendConsumedDraft } from './chat-pane-send'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { useAgentModelCatalog } from '@/composables/useAgentModelCatalog'
 import { useVirtualKeyboard } from '@/composables/useVirtualKeyboard'
-import { findMissingRequiredManagedField, readACPAgentConfig } from '@/utils/acp'
+import { isACPAgentConfigured } from '@/utils/acp'
 import { BOT_AGENT_RUNTIME_ACP, BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, botAgentIcon, botAgentName, botAgentProvider, isDirectBotAgentConfigured, normalizeBotAgentRuntime } from '@/utils/bot-agent'
 import { UserFacingError, isApiErrorCode, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
@@ -1380,6 +1428,7 @@ const {
 } = storeToRefs(chatStore)
 
 const isActive = computed(() => props.active !== false)
+const { welcomeDismissed } = useChatExamplesUi()
 const isVisible = computed(() => props.visible !== false)
 const paneTarget = computed(() => ({
   botId: currentBotId.value?.trim() ?? '',
@@ -1426,25 +1475,6 @@ const overrideReasoningEffort = computed({
   set: (value: string) => { paneView.value.pairEffort.value = value },
 })
 
-// Show the composer loading spinner only when the load outlasts a fast
-// round-trip: sub-3s catalog loads must not flash a spinner on every pane
-// switch (user feedback, 2026-09-02). The popover's own loading row stays
-// immediate — there the user is actively waiting on an open menu.
-function useDelayedTrue(source: Ref<boolean>, delayMs: number): Ref<boolean> {
-  const visible = ref(false)
-  let timer: ReturnType<typeof setTimeout> | undefined
-  watch(source, (value) => {
-    if (value) {
-      timer ??= setTimeout(() => { visible.value = true }, delayMs)
-      return
-    }
-    if (timer) { clearTimeout(timer); timer = undefined }
-    visible.value = false
-  }, { immediate: true })
-  onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
-  return visible
-}
-
 // Session creation briefly changes several pieces of the direct-runtime
 // identity. That is one draft being promoted, not a switch to another chat.
 let directDraftPromotionPending = false
@@ -1459,17 +1489,32 @@ const startupSendFailure = computed(() => chatStore.startupSendFailureFor(
 const hasRenderedSession = computed(() =>
   !!(paneTarget.value.sessionId || activeChatTarget.value.sessionId || '').trim(),
 )
+// The first message sent from this pane's draft, from Enter until it is an
+// ordinary session (or failed). The store owns the phase; the pane only reads
+// it. It is keyed by the pane's view id, so it outlives the draft -> session
+// repoint.
+const firstSendEntry = computed(() => chatStore.firstSendFor(paneTarget.value))
+// From Enter on a draft until the server confirms the send. The pane stays on
+// welcome with the input in a locked composer. draftSendStarting covers the
+// part before the store has registered the send (attachment encoding, an
+// External Agent's REST session creation).
+const draftSendStarting = ref(false)
+const firstSendAwaiting = computed(() =>
+  draftSendStarting.value || (!!firstSendEntry.value && !firstSendEntry.value.revealed))
+// A draft whose first message is in flight is committed to its setup (the
+// folder travels with that message), even before a session id exists.
+const draftSetupEditable = computed(() => !hasRenderedSession.value && !firstSendEntry.value && !draftSendStarting.value)
 
 // A fresh, writable chat opens with the composer centred and a greeting above
 // it. Read-only sessions (system / synced channel threads) hide the composer
-// entirely, so they never reach this state.
-const isWelcome = computed(() =>
-  !!currentBotId.value
-  && !hasRenderedSession.value
-  && !activeChatReadOnly.value
-  && !loadingChats.value
-  && messages.value.length === 0,
-)
+// entirely, so they never reach this state. A first send stays on welcome
+// until the server confirms it; from then on the pane is a chat even before
+// a turn has rendered (a skill activation appends none of its own).
+const isWelcome = computed(() => {
+  if (!currentBotId.value || activeChatReadOnly.value || loadingChats.value) return false
+  if (firstSendEntry.value?.revealed) return false
+  return !hasRenderedSession.value && messages.value.length === 0
+})
 
 // During boot, "a draft that stays a draft" and "a draft about to be
 // repointed to the most recent session" are indistinguishable until
@@ -1482,15 +1527,10 @@ const isWelcome = computed(() =>
 // from the first frame, so this gate never engages on session routes.
 const composerPlacementPending = computed(() => loadingChats.value && !hasRenderedSession.value)
 const composerPlacementEl = useTemplateRef<HTMLElement>('composerPlacementEl')
-// Armed by handleSend when the send leaves from welcome; consumed on the
-// welcome→chat flip. Without an armed send the flip is navigation, and the
-// composer just lands docked with the rest of the pane.
-const welcomeSendMotionArmed = ref(false)
-useComposerPlacementMotion(composerPlacementEl, isWelcome, () => {
-  const armed = welcomeSendMotionArmed.value
-  welcomeSendMotionArmed.value = false
-  return armed
-})
+// Only a first send moves the composer, out of welcome when the server
+// confirms it, together with the turns appearing. Any other flip is
+// navigation, and the composer just lands with the rest of the pane.
+useComposerPlacementMotion(composerPlacementEl, isWelcome, () => !!firstSendEntry.value?.revealed)
 
 // Rotate the greeting per fresh chat so the entry point feels alive rather than
 // a fixed banner; the pick stays stable while a single welcome screen is shown
@@ -1519,7 +1559,9 @@ const welcomeGreeting = computed(() => {
   return t(WELCOME_GREETING_KEYS[welcomeGreetingIndex.value] ?? WELCOME_GREETING_KEYS[0])
 })
 watch([isWelcome, currentBotId, () => activeSession.value?.id], ([welcome]) => {
-  if (welcome) welcomeGreetingIndex.value = pickWelcomeGreetingIndex()
+  // A first send that failed before confirmation never left this welcome, so
+  // the greeting stays: its failure is still on screen with the input.
+  if (welcome && !startupSendFailure.value) welcomeGreetingIndex.value = pickWelcomeGreetingIndex()
 })
 
 const pendingDecision = computed(() => findLatestPendingChatDecision(messages.value))
@@ -1687,7 +1729,6 @@ interface ForkSourceMeta {
 }
 
 const acpProfiles = computed<AcpprofilePublicProfile[]>(() => acpProfileData.value?.items ?? [])
-const currentBotMetadata = computed(() => currentBot.value?.metadata as Record<string, unknown> | undefined)
 const botAgents = computed<BotagentsBotAgent[]>(() => botAgentData.value?.items ?? [])
 const enabledBotAgents = computed(() => botAgents.value.filter(agent => agent.enabled !== false && !!agent.id))
 
@@ -1910,7 +1951,10 @@ const activeDirectRuntime = computed(() => {
   return ''
 })
 const activeUsesDirectRuntime = computed(() => activeDirectRuntime.value !== '')
-const showSessionInfoRing = computed(() => !isWelcome.value && !!activeSession.value && (!activeUsesExternalAgentComposer.value || activeUsesACPRuntime.value))
+// For external agents Memoh only sees the part of the context it injects, so
+// a reading built from that would understate the real window; they get no
+// entry until a runtime reports its own current context usage.
+const showSessionInfoRing = computed(() => !isWelcome.value && !!activeSession.value && !activeUsesExternalAgentComposer.value)
 const activeACPAgentId = computed(() => normalizeAgentID(activeSessionMetadata.value.acp_agent_id))
 const composerAgent = computed(() => {
   if (!activeUsesExternalAgentComposer.value) return null
@@ -2074,16 +2118,6 @@ const slashQuickActions = computed(() => [
         icon: Lightbulb,
       }]
     : []),
-  ...(canCompactViaSlash.value
-    ? [{
-        id: 'compact',
-        label: '/compact',
-        description: sessionContextPercentKnown.value
-          ? t('chat.slash.compactDescription', { percent: Math.round(sessionContextPercent.value) })
-          : t('chat.slash.compactDescriptionNoStats'),
-        icon: Minimize2,
-      }]
-    : []),
   ...(!activeIsExternalAgent.value && !activeIsPendingExternalAgent.value
     ? [{
         id: 'model',
@@ -2225,7 +2259,7 @@ async function controlGoal(action: 'pause' | 'clear' | 'resume') {
         onBeforeTurnAppend: releaseRequest,
       })
       pairSend.finish(result.messageSent === true || result.stage === 'stream')
-      if (!result.ok && scope === runtimeModeScope.value) composerError.value = result.error || t('chat.sendFailed')
+      if (!result.ok && scope === runtimeModeScope.value) composerError.value = result.error ?? t('chat.sendFailed')
     } else if (action !== 'resume') {
       await runtimeControls.controlGoal(action)
     }
@@ -2258,17 +2292,12 @@ const slashPanelHasResults = computed(() =>
   || visibleSlashSkills.value.length > 0,
 )
 
-// Session usage for the /compact quick action's live description ("42% full")
-// and its availability. Shares the query key with SessionInfoRing/panel, so
-// this adds no extra fetch.
+// Runtime-owned compaction (an external Agent's own compact command) shares
+// the session's compaction lock and feedback. Shares the query key with
+// SessionInfoRing/panel, so this adds no extra fetch.
 const sessionFallbackContextWindow = computed(() => activeModel.value?.config?.context_window ?? null)
 const {
-  contextTokens: sessionContextTokens,
-  compactionAvailable: sessionCompactionAvailable,
-  contextWindow: sessionContextWindow,
-  contextPercent: sessionContextPercent,
   isCompacting: isCompactingSession,
-  triggerCompact: triggerSessionCompact,
   runCompaction: runSessionCompaction,
 } = useSessionInfo({
   botId: computed(() => paneTarget.value.botId),
@@ -2277,14 +2306,10 @@ const {
   overrideModelId,
   fallbackContextWindow: sessionFallbackContextWindow,
 })
-const sessionContextPercentKnown = computed(() => sessionContextWindow.value != null && sessionContextWindow.value > 0)
-const canCompactViaSlash = computed(() =>
-  !!activeSessionId.value && sessionCompactionAvailable.value && sessionContextTokens.value > 0 && !isCompactingSession.value,
-)
 
 // Client-side quick actions run an existing UI affordance directly instead of
-// round-tripping text through send: /compact triggers the session-info
-// panel's compaction, /model opens the composer's model picker. Everything
+// round-tripping text through send: /model opens the composer's model
+// picker. Everything
 // else keeps the type-and-send flow (the store intercepts /new; /help and
 // /skill list execute server-side).
 async function runPendingPermission(text: string) {
@@ -2345,14 +2370,6 @@ function runLocalQuickAction(id: string, text = ''): boolean {
     void togglePlanMode()
     return true
   }
-  if (id === 'compact') {
-    if (!canCompactViaSlash.value) {
-      composerError.value = t('chat.slash.compactUnavailable')
-      return true
-    }
-    void triggerSessionCompact()
-    return true
-  }
   if (id === 'model') {
     modelPopoverOpen.value = true
     return true
@@ -2370,7 +2387,7 @@ function localQuickActionBlocked(): boolean {
     return true
   }
   if (requestedSkills.value.length > 0) {
-    composerError.value = t('chat.slash.errorMessages.invalid_skill_slash_syntax')
+    composerError.value = t('errors.slash.skill_syntax_invalid')
     return true
   }
   return false
@@ -2407,9 +2424,9 @@ function selectRuntimeCommand(command: RuntimeCommand) {
   void nextTick(focusTextarea)
 }
 
-// Typed forms of the client-side quick actions ("/compact", "/model") — must
+// Typed forms of the client-side quick actions ("/model") — must
 // be intercepted before the store send path, which would otherwise classify
-// them as skill activation and fail with requested_skill_not_found.
+// them as skill activation and fail with slash.skill_not_found.
 function localQuickActionIDForSlash(text: string): string {
   if (activeIsPendingExternalAgent.value && /^\/permission(?:\s|$)/i.test(text.trim())) return 'permission'
   return composerLocalQuickActionID(
@@ -2554,6 +2571,13 @@ const directRuntimeAuthRequired = computed(() =>
     || isApiErrorCode(composerModelCatalogError.value, 'agent_credential.reauthorization_required')
   ),
 )
+// Native catalogs keep the last loaded list on a failed refresh, so the menu
+// only reports a failure it has nothing to show for.
+const modelCatalogMenuError = computed(() => {
+  if (activeUsesDirectRuntime.value) return directModelCatalogError.value
+  if (!composerModelCatalogError.value || composerModels.value.length) return ''
+  return resolveApiErrorMessage(composerModelCatalogError.value, t('common.loadFailed'))
+})
 const directModelCatalogError = computed(() => {
   if (!activeUsesDirectRuntime.value || !composerModelCatalogError.value) return ''
   return resolveApiErrorMessage(composerModelCatalogError.value, t('bots.agent.modelsLoadFailed'))
@@ -2566,10 +2590,6 @@ const composerAgentConfigPending = computed(() => activeUsesExternalAgentCompose
 // manual loading paints hover chrome. Keep opacity only, with no busy chrome
 // or model/Agent preparation spinner.
 const composerConfigPending = computed(() => composerAgentConfigPending.value || runtimeModeChanging.value)
-const composerSpinnerVisible = useDelayedTrue(
-  computed(() => composerAgentConfigPending.value || composerModelsLoading.value),
-  3000,
-)
 const canAddAgent = computed(() => !!currentBotId.value && hasBotPermission(currentBot.value?.current_user_permissions, 'manage'))
 const canChangeAgent = computed(() => !!currentBotId.value
   && !hasRenderedSession.value
@@ -2586,6 +2606,32 @@ const unavailableRuntimeModes = computed(() => composerModelCatalog.value.unavai
 const runtimeModeUnavailableReason = computed(() => unavailableRuntimeModes.value.includes(currentRuntimeModeId.value)
   ? t('chat.runtimeModeModelUnavailable')
   : '')
+// What the dock's error line shows. Standing reasons (goal blocked by plan
+// mode, runtime mode without a usable model) win over the transient
+// composerError, matching their precedence before dismissal existed.
+const rawComposerPanelError = computed(() => goalSubmissionBlocked.value
+  ? goalExecutionBlockedReason.value
+  : runtimeModeUnavailableReason.value || composerError.value)
+// Every error line can be dismissed, standing reasons included: a user who
+// already understands the reason should not be forced to keep reading it.
+// Dismissal hides that exact message only — a different message, or the same
+// one returning after it went away, shows again. The underlying state (and
+// the send button's disabled state) is untouched.
+const dismissedComposerPanelError = ref('')
+const composerPanelError = computed(() => rawComposerPanelError.value === dismissedComposerPanelError.value ? '' : rawComposerPanelError.value)
+watch(rawComposerPanelError, (message) => {
+  if (!message) dismissedComposerPanelError.value = ''
+})
+function dismissComposerPanelError() {
+  dismissedComposerPanelError.value = rawComposerPanelError.value
+  // A transient error is consumed outright; a standing reason only gets hidden.
+  if (composerError.value === dismissedComposerPanelError.value) composerError.value = ''
+}
+const dismissedRuntimeGoalError = ref('')
+const visibleRuntimeGoalError = computed(() => runtimeGoalError.value === dismissedRuntimeGoalError.value ? '' : runtimeGoalError.value)
+watch(runtimeGoalError, (message) => {
+  if (!message) dismissedRuntimeGoalError.value = ''
+})
 const composerModelProviders = computed(() => composerModelCatalog.value.providers)
 
 // "Default" alone tells the user nothing — resolve what it actually means:
@@ -2623,7 +2669,7 @@ const composerReasoningEffort = computed(() => {
 const composerReasoningOptions = computed(() => {
   const efforts = composerModelCatalog.value.reasoningEfforts
   if (!efforts) return undefined
-  return efforts.flatMap((effort) => {
+  const options = efforts.flatMap((effort) => {
     const value = effort.id?.trim() ?? ''
     if (!value) return []
     const runtimeLabel = effort.name?.trim() ?? ''
@@ -2634,6 +2680,12 @@ const composerReasoningOptions = computed(() => {
       description: effort.description?.trim() || undefined,
     }]
   })
+  // A Codex model without a default level sends none until one is picked, so
+  // the menu needs a way back to that state.
+  if (activeDirectRuntime.value === BOT_AGENT_RUNTIME_CODEX && options.length && !composerModelCatalog.value.defaultReasoningEffort) {
+    options.unshift({ value: '', label: t('chat.modelDefault'), description: undefined })
+  }
+  return options
 })
 
 function openAgentSettings(addAgent: boolean) {
@@ -2781,8 +2833,7 @@ const defaultExternalAgentAvailability = computed<DefaultExternalAgentAvailabili
     }
     const profile = acpProfiles.value.find(item => normalizeAgentID(item.id) === agentId)
     if (!profile) return { input: null, messageKey: 'chat.defaultAgentUnavailable', loading: false }
-    const config = readACPAgentConfig(currentBotMetadata.value, agentId)
-    if (config.setupModeSet && findMissingRequiredManagedField(profile, config.managed, config.setupMode)) {
+    if (!isACPAgentConfigured(agent, profile)) {
       return { input: null, messageKey: 'chat.defaultAgentNotConfigured', loading: false }
     }
   }
@@ -2994,9 +3045,13 @@ function pendingMatchesDefaultExternalAgent(input: ExternalAgentSessionInput): b
     && chatStore.pendingExternalAgentMatchesInput(input, paneTarget.value)
 }
 
+// The Bot's default External Agent only applies to an empty draft. A pane that
+// already renders a Session keeps it: staging a default there would clear the
+// selection behind the tab the user is looking at.
 watch([defaultExternalAgentUnavailableMessage, defaultExternalAgentLoading, currentBotId, hasExplicitSessionSelection, isActive], ([message, loading, _bot, _explicit, focused]) => {
   if (!focused) return
   clearDefaultExternalAgentComposerError()
+  if (hasRenderedSession.value) return
   if (!message || !currentBotId.value) return
   if (hasExplicitSessionSelection.value) return
   if (!loading) {
@@ -3013,13 +3068,13 @@ watch([defaultExternalAgentSessionInput, defaultExternalAgentLoading, currentBot
     if (!loading) {
       chatStore.cacheDefaultExternalAgentSession(null)
     }
-    if (!loading && !hasExplicitSessionSelection.value && activeIsPendingExternalAgent.value) {
+    if (!loading && !hasExplicitSessionSelection.value && !hasRenderedSession.value && activeIsPendingExternalAgent.value) {
       chatStore.resetToEmptyComposer({}, paneTarget.value)
     }
     return
   }
   chatStore.cacheDefaultExternalAgentSession(input)
-  if (hasExplicitSessionSelection.value) return
+  if (hasExplicitSessionSelection.value || hasRenderedSession.value) return
   clearDefaultExternalAgentComposerError()
   if (pendingMatchesDefaultExternalAgent(input)) return
   chatStore.stageDefaultExternalAgentSession(input, paneTarget.value)
@@ -3157,7 +3212,7 @@ async function setRuntimeMode(modeId: string, modeKind: 'permission' | 'plan' = 
       if (modeKind === 'permission' && activeUsesACPRuntime.value) await setACPMode(modeId)
       else {
         const modes = modeKind === 'plan' ? runtimeControlSnapshot.value?.plan_mode?.available_modes ?? [] : runtimeModes.value
-        if (!modes.some(mode => mode.id === modeId)) throw new UserFacingError(t('chat.slash.errorMessages.permission_mode_unavailable'))
+        if (!modes.some(mode => mode.id === modeId)) throw new UserFacingError(t('errors.runtime_control.mode_unavailable'))
         chatStore.setPendingRuntimeMode(modeId, paneTarget.value, modeKind)
       }
     } else await runtimeControls.setMode(modeId, modeKind)
@@ -3301,6 +3356,21 @@ const inactiveSlotVisible = computed(() => !sendButtonVisible.value)
 type VoiceInputState = 'idle' | 'recording' | 'transcribing'
 
 const voiceInputState = ref<VoiceInputState>('idle')
+
+useComposerKeyboardFocus({
+  textarea: textareaEl,
+  enabled: () => isActive.value && isVisible.value,
+  available: () => (router.currentRoute.value.name === 'home' || router.currentRoute.value.name === 'bot')
+    && !!currentBotId.value && !activeChatReadOnly.value
+    && voiceInputState.value === 'idle',
+  ready: () => !loadingMessages.value && !composerPlacementPending.value,
+  owner: () => `${paneTarget.value.botId}:${paneTarget.value.viewId}:${paneTarget.value.sessionId ?? ''}`,
+  request: () => workspaceTabs.pendingChatInputFocus?.panelId === props.tabId
+    && workspaceTabs.pendingChatInputFocus.botId === paneTarget.value.botId
+    && workspaceTabs.pendingChatInputFocus.sessionId === paneTarget.value.sessionId,
+  consumeRequest: () => { workspaceTabs.pendingChatInputFocus = null },
+})
+
 const voiceInputLabel = computed(() => {
   if (voiceInputState.value === 'recording') return t('chat.voiceInput.stop')
   if (voiceInputState.value === 'transcribing') return t('chat.voiceInput.transcribing')
@@ -3424,7 +3494,8 @@ function voiceFileExtension(mimeType: string): string {
 function openTranscriptionSettings() {
   const botName = currentBot.value?.name || currentBot.value?.id || currentBotId.value
   if (!botName) {
-    void router.push({ name: 'voice' })
+    // Voice is a scope of the Providers settings page now (no flat route).
+    void router.push({ name: 'providers', query: { tab: 'voice' } })
     return
   }
   void router.push({
@@ -3621,6 +3692,40 @@ const { inputDraftKey, saveInputDraft, clearAllDrafts } = useComposerDrafts({
   tabId: () => props.tabId,
   inputText,
 })
+// Registered after useComposerDrafts so its draft restore runs first and
+// cannot overwrite a prefilled prompt (usage examples, App "Try it").
+const replaceDraftConfirm = useAsyncConfirm()
+const { lastPrefilled } = useComposerPrefillConsumer({
+  botId: () => paneTarget.value.botId,
+  active: () => isActive.value,
+  writable: () => !activeChatReadOnly.value,
+  ready: () => !loadingChats.value,
+  currentText: () => inputText.value,
+  // Focus the composer first: the dialog returns focus to whatever held it
+  // when it opened, so this keeps the caret in the composer either way.
+  confirmReplace: () => {
+    focusTextarea()
+    return replaceDraftConfirm.ask()
+  },
+  apply: (text) => {
+    inputText.value = text
+    saveInputDraft(inputDraftKey.value, text)
+    void nextTick(focusTextarea)
+  },
+})
+
+// The welcome composer holds no text of the user's own: it is empty, or still
+// exactly what a prefill last wrote. Only then may a suggestion preview into it
+// and Enter pick one, since replacing it loses nothing. A first send in flight
+// keeps its text locked in the composer, so nothing may replace it then.
+const composerReplaceable = computed(() =>
+  isWelcome.value && voiceInputState.value === 'idle' && !firstSendAwaiting.value
+  && (inputText.value === '' || inputText.value === lastPrefilled.value))
+// A welcome suggestion previews its prompt in the composer while it is hovered
+// or focused (chat-example-suggestions.vue owns the value).
+const composerPreview = ref<ComposerPreview | null>(null)
+const composerPreviewShown = computed(() => !!composerPreview.value && composerReplaceable.value)
+const composerPreviewBox = useComposerPreviewBox(textareaEl, () => composerPreviewShown.value)
 
 // The dock owns ALL geometry/visibility orchestration (box-slot mutex,
 // backdrop-mask height) — the pane only needs two readings back from it: the
@@ -3677,7 +3782,7 @@ watch([
   requestedSkills.value = skillSlashEnabled.value
     ? (failure.restoreRequestedSkills ?? []).map(skill => ({ ...skill }))
     : []
-  composerError.value = failure.error || t('chat.sendFailed')
+  composerError.value = failure.error ?? t('chat.sendFailed')
   chatStore.clearStartupSendFailure(failure.id)
 }, { immediate: true })
 
@@ -4019,7 +4124,7 @@ async function handleSend() {
     if (files.length || skills.length) {
       composerError.value = files.length
         ? t('chat.slash.attachmentsUnsupported')
-        : t('chat.slash.errorMessages.invalid_skill_slash_syntax')
+        : t('errors.slash.skill_syntax_invalid')
       return
     }
     if (!queueCommand.text || !activeSessionId.value) {
@@ -4116,10 +4221,18 @@ async function handleSend() {
   const sentWorkspaceTargetId = sendWorkspaceTargetId.value
   const preserveDirectDraftSelection = activeUsesDirectRuntime.value && !sentContext.target.sessionId
   composerError.value = ''
-  inputText.value = ''
-  saveInputDraft(sentDraftKey, '')
-  pendingFiles.value = []
-  requestedSkills.value = []
+  // A draft's first send keeps its input on screen, locked, until the server
+  // confirms it (onBeforeTurnAppend); a failure then leaves it where it is.
+  const holdsInput = !sentContext.target.sessionId
+  const clearSentInput = (onSentPane = true) => {
+    saveInputDraft(sentDraftKey, '')
+    if (!onSentPane) return
+    inputText.value = ''
+    pendingFiles.value = []
+    requestedSkills.value = []
+  }
+  if (holdsInput) draftSendStarting.value = true
+  else clearSentInput()
 
   let attachments: ChatAttachment[] | undefined
   try {
@@ -4128,6 +4241,7 @@ async function handleSend() {
     }
   } catch (error) {
     pairSend.releaseReads()
+    draftSendStarting.value = false
     if (!matchesChatPaneSendContext(
       sentContext,
       paneTarget.value,
@@ -4136,14 +4250,10 @@ async function handleSend() {
     inputText.value = text
     pendingFiles.value = files
     requestedSkills.value = skills
-    composerError.value = error instanceof Error ? error.message : t('chat.sendFailed')
+    composerError.value = resolveApiErrorMessage(error, t('chat.sendFailed'))
     return
   }
 
-  // Arm the placement FLIP only after attachment conversion has succeeded and
-  // the send is really going out: arming earlier lets a navigation during the
-  // async read (or a failed conversion) consume/inherit the flag.
-  welcomeSendMotionArmed.value = isWelcome.value
   // Arm the pin only once the store has passed command handling and session
   // setup and is about to start a real turn. Command-only sends therefore do
   // not leave a latent pin behind; startup failures roll the arm back.
@@ -4159,15 +4269,22 @@ async function handleSend() {
     onBeforeMessageSend: () => pairSend.begin(),
     onModelPreferenceSettled: () => pairSend.finish(false),
     onBeforeTurnAppend: (target) => {
+      // The confirmed target carries the session the send created; a draft
+      // pane that was promoted to it is still the pane that sent.
+      const onSentPane = matchesChatPaneSendContext(
+        { ...sentContext, target },
+        { ...paneTarget.value, sessionId: paneView.value.sessionId },
+        inputDraftKey.value || 'chat',
+      )
+      if (holdsInput) {
+        clearSentInput(onSentPane)
+        draftSendStarting.value = false
+      }
       if (goalSend && goalDraftScope.value === sentGoalScope) goalDraftScope.value = ''
       if (preserveDirectDraftSelection) {
         void nextTick(() => { directDraftPromotionPending = false })
       }
-      if (!matchesChatPaneSendContext(
-        { ...sentContext, target },
-        { ...paneTarget.value, sessionId: paneView.value.sessionId },
-        inputDraftKey.value || 'chat',
-      )) return
+      if (!onSentPane) return
       rollbackPin = pinAfterSend()
     },
     onTurnAppendAborted: () => {
@@ -4175,16 +4292,12 @@ async function handleSend() {
       rollbackPin = null
     },
   }).finally(() => {
+    draftSendStarting.value = false
     directDraftPromotionPending = false
     pairSend.finish(false)
     pairSend.releaseReads()
   })
   rollbackPin = null
-  // A send that never promoted the draft (command-only, or failed before the
-  // turn) leaves the motion armed; disarm so a later navigation can't inherit it.
-  void nextTick(() => {
-    if (isWelcome.value) welcomeSendMotionArmed.value = false
-  })
   pairSend.finish(result.messageSent === true || result.stage === 'stream')
   await refreshACPComposerConfigAfterSelectionError(result)
   const restore = composerRestoreForSendResult(result, text, t('chat.sendFailed'))
@@ -4213,6 +4326,8 @@ async function handleSend() {
 }
 
 function handleSendButton() {
+  // A first send waits for the server to confirm it.
+  if (firstSendAwaiting.value) return
   if (streaming.value && !showSend.value) {
     chatStore.abort(paneTarget.value)
     return

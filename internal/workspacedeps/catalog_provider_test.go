@@ -208,6 +208,182 @@ func TestRemoteCatalogPersistsVerifiedDefinitionsAndWorksOffline(t *testing.T) {
 	}
 }
 
+// A background refresh that runs late or fails once must not mark the cache
+// stale; only a cache that missed several refreshes in a row is.
+func TestRemoteCatalogToleratesLateRefreshBeforeReportingStale(t *testing.T) {
+	p, _, _ := providerFixture(t)
+	fetchedAt := time.Date(2026, 10, 9, 6, 32, 0, 0, time.UTC)
+	now := fetchedAt
+	p.now = func() time.Time { return now }
+	if _, err := p.Snapshot(t.Context(), true); err != nil {
+		t.Fatal(err)
+	}
+	// Hold the refresh gate so reads of a due cache do not republish it
+	// in the background while the ages below are measured.
+	p.refreshGate <- struct{}{}
+	defer func() { <-p.refreshGate }()
+	for _, tc := range []struct {
+		age   time.Duration
+		stale bool
+	}{
+		{age: CatalogRefreshInterval - time.Second},
+		{age: CatalogRefreshInterval + 30*time.Second},
+		{age: 2*CatalogRefreshInterval + time.Minute},
+		{age: catalogStaleRefreshes*CatalogRefreshInterval - time.Second},
+		{age: catalogStaleRefreshes * CatalogRefreshInterval, stale: true},
+	} {
+		now = fetchedAt.Add(tc.age)
+		result, err := p.Snapshot(t.Context(), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Stale != tc.stale {
+			t.Fatalf("age %s: stale = %v, want %v", tc.age, result.Stale, tc.stale)
+		}
+	}
+}
+
+// waitForCatalog polls the store until the cached index satisfies ok.
+func waitForCatalog(t *testing.T, store *memoryCatalogStore, source string, ok func(CachedCatalog) bool) CachedCatalog {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		entry, err := store.GetCatalog(t.Context(), source)
+		if err == nil && ok(entry) {
+			return entry
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("catalog never reached the expected state: %+v, %v", entry, err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// A read of a cache that is due answers from it at once and refreshes it in
+// the background; the reader is told to look again.
+func TestRemoteCatalogReadRevalidatesDueCacheInBackground(t *testing.T) {
+	p, store, server := providerFixture(t)
+	first, err := p.Snapshot(t.Context(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hits := server.hits.Load()
+
+	p.now = func() time.Time { return first.FetchedAt.Add(CatalogRefreshInterval - time.Second) }
+	fresh, err := p.Snapshot(t.Context(), false)
+	if err != nil || fresh.Refreshing || server.hits.Load() != hits {
+		t.Fatalf("read before the cache is due = refreshing %v, %v, hits %d -> %d", fresh.Refreshing, err, hits, server.hits.Load())
+	}
+
+	due := first.FetchedAt.Add(CatalogRefreshInterval)
+	p.now = func() time.Time { return due }
+	got, err := p.Snapshot(t.Context(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Refreshing || got.Catalog.Fingerprint() != first.Catalog.Fingerprint() || !got.FetchedAt.Equal(first.FetchedAt) {
+		t.Fatalf("read of a due cache = %+v, want the cached generation and a background refresh", got)
+	}
+	waitForCatalog(t, store, p.sourceURL, func(entry CachedCatalog) bool { return entry.FetchedAt.Equal(due) })
+	p.revalidations.Wait()
+	if server.hits.Load() == hits {
+		t.Fatal("background refresh never reached the registry")
+	}
+	after, err := p.Snapshot(t.Context(), false)
+	if err != nil || after.Refreshing || !after.FetchedAt.Equal(due) {
+		t.Fatalf("read after the refresh = %+v, %v; want the new generation, no refresh", after, err)
+	}
+}
+
+// An unreachable registry is asked again only after the backoff, however
+// often the page is read, and one running refresh is never doubled.
+func TestRemoteCatalogReadRevalidationBacksOffAndIsSingleFlight(t *testing.T) {
+	p, _, server := providerFixture(t)
+	first, err := p.Snapshot(t.Context(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.mu.Lock()
+	server.status = http.StatusServiceUnavailable
+	server.mu.Unlock()
+	now := first.FetchedAt.Add(2 * CatalogRefreshInterval)
+	p.now = func() time.Time { return now }
+
+	got, err := p.Snapshot(t.Context(), false)
+	if err != nil || !got.Refreshing {
+		t.Fatalf("first read of a due cache = refreshing %v, %v", got.Refreshing, err)
+	}
+	p.revalidations.Wait()
+	hits := server.hits.Load()
+	for range 5 {
+		got, err := p.Snapshot(t.Context(), false)
+		if err != nil || got.Refreshing {
+			t.Fatalf("read within the backoff = refreshing %v, %v", got.Refreshing, err)
+		}
+	}
+	p.revalidations.Wait()
+	if server.hits.Load() != hits {
+		t.Fatalf("reads within the backoff reached the registry: %d -> %d", hits, server.hits.Load())
+	}
+
+	now = now.Add(catalogRevalidateBackoff)
+	// Another refresh holds the gate: report it, start nothing.
+	p.refreshGate <- struct{}{}
+	got, err = p.Snapshot(t.Context(), false)
+	<-p.refreshGate
+	if err != nil || !got.Refreshing {
+		t.Fatalf("read while a refresh runs = refreshing %v, %v", got.Refreshing, err)
+	}
+	p.revalidations.Wait()
+	if server.hits.Load() != hits {
+		t.Fatal("read started a second refresh beside a running one")
+	}
+}
+
+// Stopping the catalog worker waits for the refreshes reads started and
+// refuses new ones.
+func TestRemoteCatalogStopEndsReadRevalidation(t *testing.T) {
+	p, store, _ := providerFixture(t)
+	var clock atomic.Int64
+	clock.Store(time.Now().UnixNano())
+	p.now = func() time.Time { return time.Unix(0, clock.Load()) }
+	stop := p.Start(t.Context())
+	first := waitForCatalog(t, store, p.sourceURL, func(entry CachedCatalog) bool { return len(entry.Data) > 0 })
+	clock.Store(first.FetchedAt.Add(CatalogRefreshInterval).UnixNano())
+	if _, err := p.Snapshot(t.Context(), false); err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	// Nothing may still hold the gate once stop returns.
+	select {
+	case p.refreshGate <- struct{}{}:
+		<-p.refreshGate
+	default:
+		t.Fatal("a refresh outlived stop")
+	}
+	clock.Store(first.FetchedAt.Add(10 * CatalogRefreshInterval).UnixNano())
+	got, err := p.Snapshot(t.Context(), false)
+	if err != nil || got.Refreshing {
+		t.Fatalf("read after stop = refreshing %v, %v", got.Refreshing, err)
+	}
+}
+
+func TestRemoteCatalogOfflineReadNeverRevalidates(t *testing.T) {
+	p, _, server := providerFixture(t)
+	first, err := p.Snapshot(t.Context(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Configure(0, true)
+	p.now = func() time.Time { return first.FetchedAt.Add(10 * CatalogRefreshInterval) }
+	hits := server.hits.Load()
+	got, err := p.Snapshot(t.Context(), false)
+	p.revalidations.Wait()
+	if err != nil || got.Refreshing || server.hits.Load() != hits {
+		t.Fatalf("offline read = refreshing %v, %v, hits %d -> %d", got.Refreshing, err, hits, server.hits.Load())
+	}
+}
+
 func TestRemoteCatalogNoCacheAndInvalidContentFailExplicitly(t *testing.T) {
 	p, store, server := providerFixture(t)
 	server.mu.Lock()

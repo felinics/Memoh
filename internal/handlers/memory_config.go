@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/errs"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 )
 
@@ -35,12 +36,12 @@ func (h *MemoryConfigHandler) Register(e *echo.Echo) {
 // @Tags memory
 // @Produce json
 // @Success 200 {object} adapters.MemoryConfig
-// @Failure 500 {object} apperror.Problem
+// @Failure 500 {object} server.Problem
 // @Router /memory/config [get].
 func (h *MemoryConfigHandler) Get(c echo.Context) error {
 	cfg, err := h.service.GetConfig(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "get config")
 	}
 	return c.JSON(http.StatusOK, cfg)
 }
@@ -53,17 +54,17 @@ func (h *MemoryConfigHandler) Get(c echo.Context) error {
 // @Produce json
 // @Param request body adapters.MemoryConfigUpdateRequest true "Built-in Memory configuration"
 // @Success 200 {object} adapters.MemoryConfig
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /memory/config [put].
 func (h *MemoryConfigHandler) Update(c echo.Context) error {
 	var req memprovider.MemoryConfigUpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	cfg, err := h.service.UpdateConfig(c.Request().Context(), req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "update config")
 	}
 	return c.JSON(http.StatusOK, cfg)
 }

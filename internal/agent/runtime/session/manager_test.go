@@ -15,6 +15,8 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agent/turn"
 	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const (
@@ -93,6 +95,8 @@ type blockingCommandResultLoadBackend struct {
 	DistributedBackend
 	started chan struct{}
 	once    sync.Once
+	// answered is how many reads find no result before the reads block.
+	answered atomic.Int32
 }
 
 type closeErrorBackend struct {
@@ -124,6 +128,9 @@ type gatedCommandResultLoadBackend struct {
 
 func (b *blockingCommandResultLoadBackend) LoadCommandResult(ctx context.Context, _ string) (Command, bool, error) {
 	b.once.Do(func() { close(b.started) })
+	if b.answered.Add(-1) >= 0 {
+		return Command{}, false, nil
+	}
 	<-ctx.Done()
 	return Command{}, false, ctx.Err()
 }
@@ -156,6 +163,101 @@ func TestRuntimeCommandResultPollingHonorsAcknowledgementDeadline(t *testing.T) 
 	case <-backend.started:
 	default:
 		t.Fatal("result polling did not reach the backend")
+	}
+}
+
+// A lookup that outlives its own budget is the backend's failure, whether it
+// is the first lookup or one after lookups that found no result yet.
+func TestRuntimeCommandResultPollingReportsALookupOverItsBudget(t *testing.T) {
+	for name, answered := range map[string]int32{"first lookup blocks": 0, "a later lookup blocks": 1} {
+		t.Run(name, func(t *testing.T) {
+			backend := &blockingCommandResultLoadBackend{started: make(chan struct{})}
+			backend.answered.Store(answered)
+			manager := NewManager(backend, Options{CommandAckTTL: 50 * time.Millisecond})
+
+			startedAt := time.Now()
+			err := manager.waitCommandResult(context.Background(), Command{ID: "command-blocked"}, make(chan error), 400*time.Millisecond)
+			elapsed := time.Since(startedAt)
+			if errs.FaultOf(err) != apperror.FaultDependency || errors.Is(err, ErrCommandNotAcknowledged) {
+				t.Fatalf("wait error = %v (fault %q), want the backend's failure", err, errs.FaultOf(err))
+			}
+			if elapsed > 650*time.Millisecond {
+				t.Fatalf("blocked result lookup exceeded the wait: %s", elapsed)
+			}
+		})
+	}
+}
+
+// slowCommandResultLoadBackend answers every result lookup, without a result,
+// after a delay.
+type slowCommandResultLoadBackend struct {
+	DistributedBackend
+	delay time.Duration
+}
+
+func (b slowCommandResultLoadBackend) LoadCommandResult(ctx context.Context, _ string) (Command, bool, error) {
+	select {
+	case <-time.After(b.delay):
+		return Command{}, false, nil
+	case <-ctx.Done():
+		return Command{}, false, ctx.Err()
+	}
+}
+
+// A slow backend that answers every lookup within its budget is no evidence
+// of a failure, though the wait's deadline cuts its last lookup short.
+func TestRuntimeCommandResultPollingIgnoresALookupTheDeadlineCut(t *testing.T) {
+	for _, delay := range []time.Duration{60 * time.Millisecond, 90 * time.Millisecond, 120 * time.Millisecond} {
+		manager := NewManager(slowCommandResultLoadBackend{delay: delay}, Options{CommandAckTTL: 200 * time.Millisecond})
+		err := manager.waitCommandResult(context.Background(), Command{ID: "command-slow"}, make(chan error), 500*time.Millisecond)
+		if !errors.Is(err, ErrCommandNotAcknowledged) {
+			t.Fatalf("lookups of %s: wait error = %v (fault %q), want ErrCommandNotAcknowledged", delay, err, errs.FaultOf(err))
+		}
+	}
+}
+
+// deadlineTimeoutCommandResultLoadBackend answers lookups without a result,
+// except the one its context's deadline is about to cut: that one fails when
+// the deadline passes, the way a socket deadline set from the context can,
+// before the context itself reports it.
+type deadlineTimeoutCommandResultLoadBackend struct {
+	DistributedBackend
+	timeouts atomic.Int32
+}
+
+func (b *deadlineTimeoutCommandResultLoadBackend) LoadCommandResult(ctx context.Context, _ string) (Command, bool, error) {
+	deadline, ok := ctx.Deadline()
+	// Within a poll interval of the deadline: the last lookup of the wait.
+	if !ok || time.Until(deadline) > 70*time.Millisecond {
+		return Command{}, false, nil
+	}
+	time.Sleep(time.Until(deadline))
+	b.timeouts.Add(1)
+	return Command{}, false, errors.New("i/o timeout")
+}
+
+func TestRuntimeCommandResultPollingIgnoresATimeoutAtTheWaitDeadline(t *testing.T) {
+	for range 20 {
+		backend := &deadlineTimeoutCommandResultLoadBackend{}
+		manager := NewManager(backend, Options{CommandAckTTL: 2 * time.Second})
+		err := manager.waitCommandResult(context.Background(), Command{ID: "command-cut"}, make(chan error), 200*time.Millisecond)
+		if backend.timeouts.Load() == 0 {
+			t.Fatal("no lookup ran into the wait's deadline")
+		}
+		if !errors.Is(err, ErrCommandNotAcknowledged) {
+			t.Fatalf("wait error = %v (fault %q), want ErrCommandNotAcknowledged", err, errs.FaultOf(err))
+		}
+	}
+}
+
+// An owner that never answers leaves lookups that return without a result.
+func TestRuntimeCommandResultPollingReportsAnUnansweredCommand(t *testing.T) {
+	backend := &blockingCommandResultLoadBackend{started: make(chan struct{})}
+	backend.answered.Store(1 << 20)
+	manager := NewManager(backend, Options{CommandAckTTL: 40 * time.Millisecond})
+	err := manager.waitCommandResult(context.Background(), Command{ID: "command-unanswered"}, make(chan error), manager.commandTimeout())
+	if !errors.Is(err, ErrCommandNotAcknowledged) {
+		t.Fatalf("wait error = %v, want ErrCommandNotAcknowledged", err)
 	}
 }
 

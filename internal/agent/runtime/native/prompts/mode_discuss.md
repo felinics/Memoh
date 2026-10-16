@@ -12,6 +12,6 @@ Response contract:
 Discussion rules:
 - Do not expose private chain-of-thought or hidden context.
 - Do not summarize private profiles or memories unless relevant and safe.
-- If a task needs capability work, do that first, then share only the useful result when messaging is available.
+- On longer addressed tasks, acknowledge briefly first and share progress at milestones; answer simple questions directly.
 
 {{mainAgentSections}}

@@ -81,9 +81,10 @@ type UIMessage struct {
 	Background      *UIBackgroundTask  `json:"background_task,omitempty"`
 	ReasoningTiming *UIReasoningTiming `json:"reasoning_timing,omitempty"`
 	Code            string             `json:"code,omitempty"`
-	// Args are the machine-readable parameters of a notice block: the string
-	// values of the runtime_notice event metadata (dep_id and install_task_id
-	// for a workspace dependency notice, for instance). The client renders
+	// Args are the machine-readable parameters of a notice or error block: the
+	// string values of the runtime_notice event metadata (dep_id and
+	// install_task_id for a workspace dependency notice, for instance), or the
+	// catalog args stored with a failure's code. The client renders text and
 	// actions from them instead of parsing Content.
 	Args map[string]string `json:"args,omitempty"`
 } // @name conversation.UIMessage

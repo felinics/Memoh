@@ -19,6 +19,13 @@ var (
 	// ErrInstallFailed is a valid App that could not be written into the
 	// workspace.
 	ErrInstallFailed = errors.New("registry App could not be installed")
+
+	// ErrRevisionInvalid, ErrRegistryIDInvalid and ErrAppIDInvalid mean the
+	// request named an identifier that is not well formed. They are the
+	// caller's input, not a registry answer.
+	ErrRevisionInvalid   = errors.New("revision is invalid")
+	ErrRegistryIDInvalid = errors.New("registry_id is invalid")
+	ErrAppIDInvalid      = errors.New("app_id is invalid")
 )
 
 func invalidApp(err error) error {

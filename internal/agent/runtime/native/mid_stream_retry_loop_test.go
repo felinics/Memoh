@@ -15,6 +15,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/step"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/models/modelretry"
 )
 
 // streamScript builds a DoStream implementation that plays back one scripted
@@ -120,7 +121,7 @@ func countToolResultText(messages []sdk.Message, text string) int {
 }
 
 // fastRetry keeps tests instant: every attempt fires with no backoff delay.
-var fastRetry = RetryConfig{MaxAttempts: 5, FastAttempts: 5, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond}
+var fastRetry = modelretry.Config{MaxAttempts: 5, FastAttempts: 5, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond}
 
 // TestAgentStreamMidStreamRetryExhaustsAttempts pins the terminal behavior of
 // the retry fold: the run must stop at MaxAttempts, publish the giving-up
@@ -149,7 +150,7 @@ func TestAgentStreamMidStreamRetryExhaustsAttempts(t *testing.T) {
 		SupportsToolCall: true,
 		Identity:         SessionContext{BotID: "bot-1"},
 		ContextMutations: contextfrag.NewMutationLedger(),
-		Retry:            RetryConfig{MaxAttempts: 3, FastAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond},
+		Retry:            modelretry.Config{MaxAttempts: 3, FastAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond},
 	}) {
 		events = append(events, ev)
 	}
@@ -259,7 +260,7 @@ func TestAgentStreamMidStreamRetryBackoffHonorsContextCancel(t *testing.T) {
 		Messages:         []sdk.Message{sdk.UserMessage("task")},
 		Identity:         SessionContext{BotID: "bot-1"},
 		ContextMutations: contextfrag.NewMutationLedger(),
-		Retry:            RetryConfig{MaxAttempts: 5, FastAttempts: 1, BaseDelay: time.Hour, MaxDelay: time.Hour},
+		Retry:            modelretry.Config{MaxAttempts: 5, FastAttempts: 1, BaseDelay: time.Hour, MaxDelay: time.Hour},
 	})
 
 	done := make(chan StreamEvent, 1)
@@ -370,7 +371,7 @@ func TestAgentStreamMidStreamRetryChainRecovers(t *testing.T) {
 
 // A failed attempt the loop retries is recorded once, as an event: a WARN
 // record with the failure's attribution and text. The stream carries only the
-// retry, so a run that recovers publishes no error.
+// retry and the failure's class, so a run that recovers publishes no error.
 func TestMidStreamRetryRecordsTheFailedAttemptAsAnEvent(t *testing.T) {
 	t.Parallel()
 
@@ -405,8 +406,9 @@ func TestMidStreamRetryRecordsTheFailedAttemptAsAnEvent(t *testing.T) {
 		}
 	}
 	if len(retries) != 1 || retries[0].Attempt != 1 || retries[0].MaxAttempt != fastRetry.MaxAttempts ||
+		retries[0].RetryReason != string(modelretry.ReasonServerError) ||
 		retries[0].Error != "" || retries[0].Code != "" || retries[0].Cause != nil {
-		t.Fatalf("retry events = %#v, want one carrying its counters alone", retries)
+		t.Fatalf("retry events = %#v, want one carrying its counters and the failure's class alone", retries)
 	}
 
 	handler.mu.Lock()

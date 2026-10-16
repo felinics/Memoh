@@ -23,7 +23,7 @@ type requestIDContextKey struct{}
 // with that context reports it.
 //
 // The request identifier already leaves this process in error responses
-// (apperror.Problem carries request_id). Putting it on log records is what
+// (server.Problem carries request_id). Putting it on log records is what
 // makes an identifier a user can quote back useful: without it, the
 // identifier names something the logs cannot find.
 func ContextWithRequestID(ctx context.Context, id string) context.Context {

@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -195,10 +196,23 @@ func TestResolveReasoningConfig(t *testing.T) {
 	// Cloud-variant Claude 4.6+: the registry left it toggle (no
 	// supports_adaptive_thinking) but it advertises 4.6+ effort tiers, so the
 	// Anthropic wire promotes it to adaptive to stay off the legacy budget path.
-	cloudEffortModel := models.GetResponse{
+	// A declared toggle with the 4.6+ tier list: the declaration is the wire, and
+	// the tiers do not get to override it.
+	declaredToggleModel := models.GetResponse{
 		Model: models.Model{
 			Config: models.ModelConfig{
 				ThinkingMode:     models.ThinkingModeToggle,
+				ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"},
+			},
+		},
+	}
+	// The same tiers with no declared mode, on an id Anthropic documents as
+	// adaptive-only.
+	undeclaredClaudeModel := models.GetResponse{
+		Model: models.Model{
+			ModelID: "claude-opus-4-7",
+			Config: models.ModelConfig{
+				Compatibilities:  []string{models.CompatReasoning},
 				ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"},
 			},
 		},
@@ -221,9 +235,14 @@ func TestResolveReasoningConfig(t *testing.T) {
 			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
 		},
 		{
+			// "adaptive" was a per-message override from before the thinking mode was
+			// resolved from the model. It is not a tier, so it neither selects one nor
+			// turns reasoning off: the request resolves like any other value the model
+			// does not offer, landing on the default tier. 0165 clears it from stored
+			// settings; an in-flight override still reads this way.
 			name:          "legacy adaptive request enables toggle with default effort",
 			model:         toggleModel,
-			requestEffort: reasoning.EffortAdaptive,
+			requestEffort: "adaptive",
 			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortMedium},
 		},
 		{
@@ -301,11 +320,11 @@ func TestResolveReasoningConfig(t *testing.T) {
 			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortXHigh},
 		},
 		{
-			name:          "generic openai compatibility drops max and falls back to medium",
+			name:          "generic openai compatibility preserves max",
 			model:         adaptiveModel,
 			requestEffort: models.ReasoningEffortMax,
 			clientType:    string(models.ClientTypeOpenAICompletions),
-			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortMedium},
+			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortMax},
 		},
 		{
 			name:          "codex wire preserves max",
@@ -336,18 +355,21 @@ func TestResolveReasoningConfig(t *testing.T) {
 			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
 		},
 		{
-			name:        "anthropic cloud variant with effort tiers is promoted to adaptive",
-			model:       cloudEffortModel,
+			// The wire mechanism is declared, not read off the tier list: Opus 4.5 has
+			// an effort knob yet only the budget mechanism, and Opus 4.6 has max without
+			// xhigh yet is adaptive.
+			name:        "a declared toggle is not promoted to adaptive by its tiers",
+			model:       declaredToggleModel,
+			botSettings: settings.Settings{ReasoningEffort: models.ReasoningEffortHigh},
+			clientType:  string(models.ClientTypeAnthropicMessages),
+			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
+		},
+		{
+			name:        "an undeclared claude 4.6+ id resolves to adaptive",
+			model:       undeclaredClaudeModel,
 			botSettings: settings.Settings{ReasoningEffort: models.ReasoningEffortHigh},
 			clientType:  string(models.ClientTypeAnthropicMessages),
 			want:        &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortHigh},
-		},
-		{
-			name:        "non-anthropic effort tiers are not promoted to adaptive",
-			model:       cloudEffortModel,
-			botSettings: settings.Settings{ReasoningEffort: models.ReasoningEffortHigh},
-			clientType:  string(models.ClientTypeOpenAICompletions),
-			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
 		},
 		{
 			name:          "model without reasoning ignores request",
@@ -562,6 +584,9 @@ func TestFetchChatModelRejectsDisabledModel(t *testing.T) {
 	_, _, err := resolver.fetchChatModel(ctx, "gpt-disabled")
 	if err == nil || !strings.Contains(err.Error(), "disabled") {
 		t.Fatalf("fetchChatModel disabled model error = %v, want disabled error", err)
+	}
+	if !errors.Is(err, ErrModelPreferenceInvalid) {
+		t.Fatalf("fetchChatModel disabled model error = %v, want ErrModelPreferenceInvalid", err)
 	}
 }
 

@@ -159,7 +159,9 @@ onBeforeUnmount(() => titleSub?.dispose())
 
 const title = computed(() => {
   if (!activePanelIsChat.value) return activePanelTitle.value || botLabel.value
-  if (selectionStore.sessionId) {
+  // A first send's session reads as the draft until the server confirms the
+  // send (see isSessionTentative).
+  if (selectionStore.sessionId && !chatStore.isSessionTentative(selectionStore.sessionId)) {
     return chatStore.activeSession?.title?.trim() || routeConversationLabel(chatStore.activeSession) || t('chat.untitledSession')
   }
   return botLabel.value

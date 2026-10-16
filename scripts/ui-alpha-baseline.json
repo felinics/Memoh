@@ -73,7 +73,7 @@
   "apps/web/src/pages/onboarding/steps/Step4Bot.vue": 1,
   "apps/web/src/pages/onboarding/steps/Step5Complete.vue": 2,
   "apps/web/src/pages/profile/components/connected-accounts-section.vue": 1,
-  "apps/web/src/pages/providers/index.vue": 1,
+  "apps/web/src/pages/providers/models-panel.vue": 1,
   "apps/web/src/pages/supermarket/components/market-item-card.vue": 2,
   "packages/ui/src/components/alert/index.ts": 1,
   "packages/ui/src/components/breadcrumb/BreadcrumbSeparator.vue": 1,

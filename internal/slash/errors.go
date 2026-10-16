@@ -1,39 +1,41 @@
 package slash
 
+import "github.com/felinics/memoh/internal/apperror"
+
+// Refusals of a slash request. Each is the catalog code the refusal is
+// answered with, on the Web composer and in IM channels alike.
 const (
-	CodeUnknownSlash                   = "unknown_slash"
-	CodeUnsupportedWebCommand          = "unsupported_web_command"
-	CodeInvalidSkillSlashSyntax        = "invalid_skill_slash_syntax"
-	CodeRequestedSkillNotFound         = "requested_skill_not_found"
-	CodeRequestedSkillAmbiguous        = "requested_skill_ambiguous"
-	CodeRequestedSkillDisabled         = "requested_skill_disabled"
-	CodeRequestedSkillNotRuntimeUsable = "requested_skill_not_runtime_usable"
-	CodeTooManyRequestedSkills         = "too_many_requested_skills"
-	CodeRequestedSkillContextTooLarge  = "requested_skill_context_too_large"
-	CodeSlashAttachmentsUnsupported    = "slash_attachments_unsupported"
-	CodeUnsupportedSkillSlashContext   = "unsupported_skill_slash_context"
-	CodeUnsupportedLegacyEndpoint      = "unsupported_legacy_endpoint"
-	CodePermissionDenied               = "permission_denied"
-	CodeReservedSkillMetadata          = "reserved_skill_metadata"
-	CodeInvalidQuickActionScope        = "invalid_quick_action_scope"
-	CodePermissionSessionRequired      = "permission_session_required"
-	CodePermissionModeUnsupported      = "permission_mode_unsupported"
-	CodePermissionModeUnavailable      = "permission_mode_unavailable"
-	CodePermissionModeFailed           = "permission_mode_failed"
+	CodeUnknownSlash                   = apperror.CodeSlashUnknownCommand
+	CodeUnsupportedWebCommand          = apperror.CodeSlashUnsupportedInWeb
+	CodeInvalidSkillSlashSyntax        = apperror.CodeSlashSkillSyntaxInvalid
+	CodeRequestedSkillNotFound         = apperror.CodeSlashSkillNotFound
+	CodeRequestedSkillAmbiguous        = apperror.CodeSlashSkillAmbiguous
+	CodeRequestedSkillDisabled         = apperror.CodeSlashSkillDisabled
+	CodeRequestedSkillNotRuntimeUsable = apperror.CodeSlashSkillNotUsable
+	CodeTooManyRequestedSkills         = apperror.CodeSlashTooManySkills
+	CodeRequestedSkillContextTooLarge  = apperror.CodeSlashSkillContextTooLarge
+	CodeSlashAttachmentsUnsupported    = apperror.CodeSlashAttachmentsUnsupported
+	CodeUnsupportedSkillSlashContext   = apperror.CodeSlashSkillActivationUnsupported
+	CodeUnsupportedLegacyEndpoint      = apperror.CodeSlashRequiresWebSocket
+	CodePermissionDenied               = apperror.CodeSlashPermissionDenied
+	CodeReservedSkillMetadata          = apperror.CodeSlashReservedMetadata
 )
 
+// Error is a slash request refused for Code. Callers in the process match it
+// with errors.As; it unwraps to the catalog error for Code, so every boundary
+// answers it with that code, also when it crosses an RPC.
 type Error struct {
-	Code string
-	Msg  string
+	Code apperror.Code
+}
+
+func NewError(code apperror.Code) Error {
+	return Error{Code: code}
 }
 
 func (e Error) Error() string {
-	if e.Msg != "" {
-		return e.Msg
-	}
-	return e.Code
+	return string(e.Code)
 }
 
-func NewError(code string) Error {
-	return Error{Code: code, Msg: code}
+func (e Error) Unwrap() error {
+	return apperror.New(e.Code, nil)
 }

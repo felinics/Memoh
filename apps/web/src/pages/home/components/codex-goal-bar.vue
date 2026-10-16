@@ -1,17 +1,22 @@
 <template>
+  <!-- An error replaces the bar with the dock's standalone notice banner
+       rather than nesting a banner inside the goal capsule. -->
+  <ComposerPanelError
+    v-if="error"
+    :message="error"
+    @dismiss="emit('dismissError')"
+  />
   <ComposerCapsule
+    v-else-if="goal"
     compact
     :label="$t('chat.goal.label')"
   >
-    <ComposerPanelError
-      v-if="error"
-      :message="error"
-    />
     <div
-      v-else-if="goal"
-      class="flex min-w-0 items-center gap-2 text-label"
+      class="flex min-w-0 items-center gap-2 px-(--composer-text-inset) text-label"
     >
-      <Target class="size-4 shrink-0 text-muted-foreground" />
+      <!-- Same 14px icon + text-inset column as the dock's notice rows, so the
+           goal's first glyph lines up with an error line shown in its place. -->
+      <Target class="size-3.5 shrink-0 text-muted-foreground" />
       <span class="shrink-0">{{ $t(`chat.goal.status.${goal.status}`) }}</span>
       <span
         class="min-w-0 flex-1 truncate text-muted-foreground"
@@ -59,7 +64,7 @@ import ComposerCapsule from './composer-capsule.vue'
 import ComposerPanelError from './composer-panel-error.vue'
 
 const props = defineProps<{ goal?: ExternalGoal | null; error?: string; disabled: boolean; resumeDisabled: boolean; resumeDisabledReason?: string; streaming: boolean }>()
-const emit = defineEmits<{ pause: []; resume: []; clear: [] }>()
+const emit = defineEmits<{ pause: []; resume: []; clear: []; dismissError: [] }>()
 const { t } = useI18n()
 const goalActionLabel = computed(() => props.goal?.status === 'active' ? t('chat.goal.pause') : props.resumeDisabledReason || t('chat.goal.resume'))
 

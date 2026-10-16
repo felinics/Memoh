@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -242,5 +244,103 @@ func TestDiscordOutboundStream_FinalPreservesURLActionsOnEdit(t *testing.T) {
 	}
 	if parse, ok := allowed["parse"].([]any); !ok || len(parse) != 0 {
 		t.Fatalf("expected parse=[] to suppress ambient mentions, got %#v", allowed["parse"])
+	}
+}
+
+type discordRecordedRequest struct {
+	method  string
+	path    string
+	content string
+}
+
+func newDiscordRecordingSession(t *testing.T) (*discordgo.Session, *[]discordRecordedRequest) {
+	t.Helper()
+	session, err := discordgo.New("Bot test")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	var requests []discordRecordedRequest
+	posts := 0
+	session.Client = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			body, _ := io.ReadAll(req.Body)
+			var payload struct {
+				Content string `json:"content"`
+			}
+			_ = json.Unmarshal(body, &payload)
+			requests = append(requests, discordRecordedRequest{method: req.Method, path: req.URL.Path, content: payload.Content})
+			id := "msg-edited"
+			if req.Method == http.MethodPost {
+				posts++
+				id = "msg-" + strconv.Itoa(posts)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"id":"` + id + `","channel_id":"ch-1"}`)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		}),
+	}
+	return session, &requests
+}
+
+func pushDiscordEvents(t *testing.T, stream *discordOutboundStream, events []channel.PreparedStreamEvent) {
+	t.Helper()
+	for _, event := range events {
+		if err := stream.Push(context.Background(), event); err != nil {
+			t.Fatalf("push %s: %v", event.Type, err)
+		}
+	}
+}
+
+func discordFinalEvent(text string) channel.PreparedStreamEvent {
+	return channel.PreparedStreamEvent{
+		Type:  channel.StreamEventFinal,
+		Final: &channel.PreparedStreamFinalizePayload{Message: channel.PreparedMessage{Message: channel.Message{Text: text}}},
+	}
+}
+
+func TestDiscordOutboundStream_SegmentEndKeepsPreToolText(t *testing.T) {
+	t.Parallel()
+
+	session, requests := newDiscordRecordingSession(t)
+	stream := &discordOutboundStream{adapter: &DiscordAdapter{}, target: "ch-1", session: session}
+	pushDiscordEvents(t, stream, []channel.PreparedStreamEvent{
+		{Type: channel.StreamEventStatus, Status: channel.StreamStatusStarted},
+		{Type: channel.StreamEventDelta, Delta: "Let me check.", Phase: channel.StreamPhaseText},
+		{Type: channel.StreamEventSegmentEnd},
+		{Type: channel.StreamEventDelta, Delta: "Here is the answer.", Phase: channel.StreamPhaseText},
+		discordFinalEvent("Here is the answer."),
+	})
+
+	want := []discordRecordedRequest{
+		{method: http.MethodPost, path: "/api/v9/channels/ch-1/messages", content: "Thinking..."},
+		{method: http.MethodPatch, path: "/api/v9/channels/ch-1/messages/msg-1", content: "Let me check."},
+		{method: http.MethodPost, path: "/api/v9/channels/ch-1/messages", content: "Here is the answer."},
+	}
+	if !reflect.DeepEqual(*requests, want) {
+		t.Fatalf("requests = %+v, want %+v", *requests, want)
+	}
+}
+
+func TestDiscordOutboundStream_SegmentEndWithoutTextKeepsPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	session, requests := newDiscordRecordingSession(t)
+	stream := &discordOutboundStream{adapter: &DiscordAdapter{}, target: "ch-1", session: session}
+	pushDiscordEvents(t, stream, []channel.PreparedStreamEvent{
+		{Type: channel.StreamEventStatus, Status: channel.StreamStatusStarted},
+		{Type: channel.StreamEventSegmentEnd},
+		{Type: channel.StreamEventSegmentEnd},
+		{Type: channel.StreamEventDelta, Delta: "Here is the answer.", Phase: channel.StreamPhaseText},
+		discordFinalEvent("Here is the answer."),
+	})
+
+	want := []discordRecordedRequest{
+		{method: http.MethodPost, path: "/api/v9/channels/ch-1/messages", content: "Thinking..."},
+		{method: http.MethodPatch, path: "/api/v9/channels/ch-1/messages/msg-1", content: "Here is the answer."},
+	}
+	if !reflect.DeepEqual(*requests, want) {
+		t.Fatalf("requests = %+v, want %+v", *requests, want)
 	}
 }

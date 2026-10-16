@@ -109,12 +109,36 @@ WHERE team_id = public.memoh_current_team_id()
 ORDER BY session_id, run_id;
 
 -- name: GetLatestSessionRun :one
+-- The latest run, reported only while it belongs to the session's current
+-- runtime generation. Clearing history and deleting the session move
+-- bot_sessions.runtime_fencing_token past the token of every run claimed
+-- before them, and a run a history reset ended, or retired before it was
+-- ever claimed, carries history_reset. Such a run has nothing left to
+-- report, and no older run stands in for it; nor has any run of a deleted
+-- session.
 SELECT *
-FROM session_runs
-WHERE team_id = public.memoh_current_team_id()
-  AND session_id = sqlc.arg(session_id)
-ORDER BY created_at DESC, run_id DESC
-LIMIT 1;
+FROM session_runs run
+WHERE run.team_id = public.memoh_current_team_id()
+  AND run.session_id = sqlc.arg(session_id)
+  AND run.run_id = (
+    SELECT latest.run_id
+    FROM session_runs latest
+    WHERE latest.team_id = public.memoh_current_team_id()
+      AND latest.session_id = sqlc.arg(session_id)
+    ORDER BY latest.created_at DESC, latest.run_id DESC
+    LIMIT 1
+  )
+  AND run.error_code IS DISTINCT FROM 'history_reset'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_sessions session
+    WHERE session.team_id = run.team_id
+      AND session.id = run.session_id
+      AND (
+        session.deleted_at IS NOT NULL
+        OR run.fencing_token > 0 AND session.runtime_fencing_token > run.fencing_token
+      )
+  );
 
 -- name: LockBotForSessionRunClaim :one
 -- Claim uses a real transaction and a fresh statement after this parent lock.
@@ -185,6 +209,7 @@ SET owner_id = sqlc.arg(owner_id),
 WHERE team_id = public.memoh_current_team_id()
   AND run_id = sqlc.arg(run_id)
   AND state = 'waiting_decision'
+  AND abort_requested_at IS NULL
   AND fencing_token = sqlc.arg(previous_fencing_token)
   AND fencing_token < sqlc.arg(new_fencing_token)
 RETURNING *;
@@ -224,7 +249,38 @@ WHERE team_id = public.memoh_current_team_id()
   AND run_id = sqlc.arg(run_id)
   AND fencing_token = sqlc.arg(fencing_token)
   AND state IN ('accepted', 'running', 'waiting_decision', 'finishing')
+  AND (sqlc.narg(expected_state)::text IS NULL OR state = sqlc.narg(expected_state)::text)
 RETURNING *;
+
+-- name: AcceptSessionRunDecisionContinuation :one
+-- Called in the same fenced transaction that accepts the decision. A committed
+-- answer is executing work, even before the resumed producer's agent_start.
+UPDATE session_runs
+SET state = 'running',
+    input_json = jsonb_set(input_json, '{decision_continuations}',
+      COALESCE(input_json->'decision_continuations', '{}'::jsonb) ||
+      jsonb_build_object(sqlc.arg(decision_id)::text,
+        jsonb_build_object('kind', sqlc.arg(decision_kind)::text, 'phase', 'accepted')), true),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id) AND session_id = sqlc.arg(session_id)
+  AND run_id = sqlc.arg(run_id) AND fencing_token = sqlc.arg(fencing_token)
+  AND state IN ('running', 'waiting_decision') AND abort_requested_at IS NULL
+RETURNING *;
+
+-- name: MarkSessionRunDecisionExecuting :execrows
+-- Checkpoint before invoking an approved tool; interruption is an uncertain
+-- result, never authorization to execute the approved operation a second time.
+UPDATE session_runs
+SET input_json = jsonb_set(input_json,
+      ARRAY['decision_continuations', sqlc.arg(decision_id)::text, 'phase'],
+      '"executing"'::jsonb, false),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id) AND session_id = sqlc.arg(session_id)
+  AND run_id = sqlc.arg(run_id) AND fencing_token = sqlc.arg(fencing_token)
+  AND state = 'running' AND abort_requested_at IS NULL
+  AND input_json->'decision_continuations'->(sqlc.arg(decision_id)::text)->>'phase' = 'accepted';
 
 -- name: PrepareSessionRunFinish :one
 -- Persist the terminal proposal before the live projection enters finishing.

@@ -86,7 +86,8 @@ func (s *Service) UpdateSelection(ctx context.Context, botID string, req UpdateR
 		step := StepResult{Kind: KindDependency, ID: depID}
 		res, err := s.dependencies.Update(ctx, botID, depID, "", logSink(sink, KindDependency, depID))
 		if err != nil {
-			step.Status, step.Error = StepFailed, err.Error()
+			s.logStepFailure(ctx, "update dependency", depID, err)
+			step.Status, step.Code = StepFailed, string(publicCode(err))
 			failed++
 			if firstErr == nil {
 				firstErr = err
@@ -95,7 +96,7 @@ func (s *Service) UpdateSelection(ctx context.Context, botID string, req UpdateR
 			step.Status, step.Version = StepUpdated, res.Version
 		}
 		result.Steps = append(result.Steps, step)
-		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Version: step.Version, Message: step.Error})
+		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Version: step.Version, Message: step.Error, Code: step.Code})
 	}
 	if req.Release {
 		releaseResult, err := s.updateRelease(ctx, botID, inst, sink, true, req.Revision)

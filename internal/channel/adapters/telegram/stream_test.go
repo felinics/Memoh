@@ -640,7 +640,7 @@ func TestEditMode_ResetEditsSameMessageFromEmpty(t *testing.T) {
 	s.buf.WriteString("Hello from the ")
 	ctx := context.Background()
 
-	// Answers the typing action the preview refresh sends.
+	// Answers any Telegram API call the stream makes.
 	bot := newTestTelegramBot(telegramRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -678,7 +678,6 @@ func TestEditMode_ResetEditsSameMessageFromEmpty(t *testing.T) {
 	if err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "Hello "})); err != nil {
 		t.Fatalf("push delta: %v", err)
 	}
-	s.wg.Wait()
 
 	if sends != 0 {
 		t.Fatalf("reset must not open a new preview message, got %d sends", sends)
@@ -1357,7 +1356,7 @@ func TestStreamFinal_RichSendFallbackPreservesParseMode(t *testing.T) {
 	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
 		return bot, nil
 	}
-	defer func() { s.wg.Wait(); getOrCreateBotForTest = origGetBot }()
+	defer func() { getOrCreateBotForTest = origGetBot }()
 
 	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{
 		Type: channel.StreamEventFinal,
@@ -1794,5 +1793,185 @@ func TestStreamFinal_AttachmentActionsRejectInvalidBeforeTextOrUpload(t *testing
 	}))
 	if err == nil || !strings.Contains(err.Error(), "callback data") {
 		t.Fatalf("expected invalid attachment action error before send, got %v", err)
+	}
+}
+
+// segmentEndSequence is a reply whose tool call is hidden from the chat: the
+// pre-tool text, the segment end standing in for the tool call, the post-tool
+// text, and the authoritative final that only carries the post-tool text.
+func segmentEndSequence() []channel.StreamEvent {
+	return []channel.StreamEvent{
+		{Type: channel.StreamEventDelta, Delta: "Let me check.", Phase: channel.StreamPhaseText},
+		{Type: channel.StreamEventSegmentEnd},
+		{Type: channel.StreamEventDelta, Delta: "Here is the answer.", Phase: channel.StreamPhaseText},
+		{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{Message: channel.Message{Text: "Here is the answer."}}},
+	}
+}
+
+// TestDraftMode_SegmentEndKeepsPreToolText verifies that in private chats the
+// text streamed before a hidden tool call is committed as its own permanent
+// message, and the final answer still follows as a separate message.
+func TestDraftMode_SegmentEndKeepsPreToolText(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter:       adapter,
+		cfg:           channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:        "123",
+		isPrivateChat: true,
+		draftID:       1,
+		streamChatID:  123,
+	}
+	ctx := context.Background()
+
+	origGetBot := getOrCreateBotForTest
+	origDraft := sendDraftForTest
+	origSendText := sendTextForTest
+	origSendEdit := sendEditForTest
+	origEdit := testEditFunc
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: "fake"}, nil
+	}
+	sendDraftForTest = func(*tele.Bot, int64, int, string, string) error { return nil }
+	var sent []string
+	sendTextForTest = func(_ *tele.Bot, _ string, text string, _ int, _ string) (int64, int, error) {
+		sent = append(sent, text)
+		return 123, len(sent), nil
+	}
+	sendEditForTest = func(*tele.Bot, int64, int, string, string) error {
+		t.Error("draft mode must not edit messages")
+		return nil
+	}
+	testEditFunc = func(*tele.Bot, int64, int, string, string) error {
+		t.Error("draft mode must not edit messages")
+		return nil
+	}
+	defer func() {
+		getOrCreateBotForTest = origGetBot
+		sendDraftForTest = origDraft
+		sendTextForTest = origSendText
+		sendEditForTest = origSendEdit
+		testEditFunc = origEdit
+	}()
+
+	for _, event := range segmentEndSequence() {
+		if err := s.Push(ctx, mustPreparedTelegramEvent(t, event)); err != nil {
+			t.Fatalf("push %s: %v", event.Type, err)
+		}
+	}
+
+	want := []string{"Let me check.", "Here is the answer."}
+	if !reflect.DeepEqual(sent, want) {
+		t.Fatalf("sent = %q, want %q", sent, want)
+	}
+}
+
+// TestEditMode_SegmentEndKeepsPreToolText verifies that in group chats the
+// streamed message holding the pre-tool text is finalized to that text, and
+// the post-tool text and final answer go to a new message instead of
+// overwriting it.
+func TestEditMode_SegmentEndKeepsPreToolText(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter: adapter,
+		cfg:     channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:  "123",
+	}
+	ctx := context.Background()
+
+	// Answers the typing action the preview refresh sends.
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":true}`)),
+		}, nil
+	}))
+	origGetBot := getOrCreateBotForTest
+	origSendText := sendTextForTest
+	origEdit := testEditFunc
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	var sent []string
+	sendTextForTest = func(_ *tele.Bot, _ string, text string, _ int, _ string) (int64, int, error) {
+		sent = append(sent, normalizeStreamComparableText(text))
+		return 42, len(sent), nil
+	}
+	edits := map[int][]string{}
+	testEditFunc = func(_ *tele.Bot, _ int64, msgID int, text string, _ string) error {
+		edits[msgID] = append(edits[msgID], text)
+		return nil
+	}
+	defer func() {
+		getOrCreateBotForTest = origGetBot
+		sendTextForTest = origSendText
+		testEditFunc = origEdit
+	}()
+
+	for _, event := range segmentEndSequence() {
+		if err := s.Push(ctx, mustPreparedTelegramEvent(t, event)); err != nil {
+			t.Fatalf("push %s: %v", event.Type, err)
+		}
+	}
+
+	if want := []string{"Let me check.", "Here is the answer."}; !reflect.DeepEqual(sent, want) {
+		t.Fatalf("sent = %q, want two separate stream messages %q", sent, want)
+	}
+	if want := []string{"Let me check."}; !reflect.DeepEqual(edits[1], want) {
+		t.Fatalf("edits of the pre-tool message = %q, want %q", edits[1], want)
+	}
+	if want := []string{"Here is the answer."}; !reflect.DeepEqual(edits[2], want) {
+		t.Fatalf("edits of the post-tool message = %q, want %q", edits[2], want)
+	}
+}
+
+// TestSegmentEnd_EmptyBufferIsNoOp verifies that a segment end with nothing
+// buffered (a tool call before any text, or several tool calls in a row)
+// sends and edits nothing and keeps the current stream message.
+func TestSegmentEnd_EmptyBufferIsNoOp(t *testing.T) {
+	for _, private := range []bool{true, false} {
+		adapter := NewTelegramAdapter(nil)
+		s := &telegramOutboundStream{
+			adapter:       adapter,
+			cfg:           channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+			target:        "123",
+			isPrivateChat: private,
+			draftID:       1,
+			streamChatID:  42,
+		}
+		if !private {
+			s.streamMsgID = 7
+		}
+
+		origGetBot := getOrCreateBotForTest
+		origSendText := sendTextForTest
+		origEdit := testEditFunc
+		getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+			return &tele.Bot{Token: "fake"}, nil
+		}
+		sendTextForTest = func(*tele.Bot, string, string, int, string) (int64, int, error) {
+			t.Errorf("private=%v: segment end with empty buffer must not send", private)
+			return 0, 0, nil
+		}
+		testEditFunc = func(*tele.Bot, int64, int, string, string) error {
+			t.Errorf("private=%v: segment end with empty buffer must not edit", private)
+			return nil
+		}
+
+		for range 2 {
+			if err := s.Push(context.Background(), mustPreparedTelegramEvent(t, channel.StreamEvent{Type: channel.StreamEventSegmentEnd})); err != nil {
+				t.Fatalf("private=%v: push segment end: %v", private, err)
+			}
+		}
+		getOrCreateBotForTest = origGetBot
+		sendTextForTest = origSendText
+		testEditFunc = origEdit
+
+		if !private && s.streamMsgID != 7 {
+			t.Fatalf("segment end with empty buffer must keep the stream message, got %d", s.streamMsgID)
+		}
+		if private && s.draftPermanentSent {
+			t.Fatal("segment end with empty buffer must not mark a permanent message")
+		}
 	}
 }

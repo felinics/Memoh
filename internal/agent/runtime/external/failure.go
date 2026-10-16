@@ -31,6 +31,21 @@ const (
 	// FailureUsageLimited: the runtime's account has used up its usage
 	// allowance; a later turn may run once it resets.
 	FailureUsageLimited
+	// FailureRateLimited: the runtime's model service is throttling the
+	// account; a turn sent a moment later may run.
+	FailureRateLimited
+	// FailureContextWindowExceeded: the conversation no longer fits in the
+	// model's context window; it has to be compacted or started over.
+	FailureContextWindowExceeded
+	// FailureOverloaded: the runtime's model service is failing or at
+	// capacity; a later turn or another model may run.
+	FailureOverloaded
+	// FailureUpstreamUnreachable: the runtime could not reach its model
+	// service, or lost the connection to it.
+	FailureUpstreamUnreachable
+	// FailureRequestBlocked: the model service's policy refused the request;
+	// the same request will be refused again.
+	FailureRequestBlocked
 )
 
 var failureText = map[FailureKind]string{ //nolint:gosec // G101 matches the credential kinds; these are failure texts.
@@ -43,6 +58,11 @@ var failureText = map[FailureKind]string{ //nolint:gosec // G101 matches the cre
 	FailureCredential:              "agent credential is unusable",
 	FailureCredentialBusy:          "agent credential is in use by a running turn",
 	FailureUsageLimited:            "external agent usage limit reached",
+	FailureRateLimited:             "external agent rate limit reached",
+	FailureContextWindowExceeded:   "external agent context window exceeded",
+	FailureOverloaded:              "external agent model service is overloaded",
+	FailureUpstreamUnreachable:     "external agent model service is unreachable",
+	FailureRequestBlocked:          "external agent request was blocked by policy",
 }
 
 // Failure is a runtime failure the user can act on. Like a public error it

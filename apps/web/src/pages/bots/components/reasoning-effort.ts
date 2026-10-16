@@ -1,10 +1,6 @@
 import type { ReasoningOptions } from '@memohai/sdk'
 
 export const REASONING_EFFORT_DISABLE = 'disable'
-// Legacy override value. "adaptive" is no longer an effort tier the UI offers —
-// it is a thinking mode handled server-side. The constant is
-// kept so previously-stored values still render gracefully.
-export const REASONING_EFFORT_ADAPTIVE = 'adaptive'
 // How off was spelled before the two tokens were unified, and still OpenAI's wire
 // word for it. Stored values may carry it, so it has to render and reconcile as
 // off — naming it keeps that intent visible wherever it appears.
@@ -12,7 +8,6 @@ export const REASONING_EFFORT_LEGACY_OFF = 'none'
 
 export const EFFORT_LABELS: Record<string, string> = {
   [REASONING_EFFORT_DISABLE]: 'chat.reasoningOff',
-  [REASONING_EFFORT_ADAPTIVE]: 'chat.reasoningAdaptive',
   // Under the same label as off, not a second one.
   [REASONING_EFFORT_LEGACY_OFF]: 'chat.reasoningOff',
   enabled: 'chat.reasoningOn',
@@ -26,7 +21,6 @@ export const EFFORT_LABELS: Record<string, string> = {
 
 export const EFFORT_OPACITY: Record<string, number> = {
   [REASONING_EFFORT_DISABLE]: 0.1,
-  [REASONING_EFFORT_ADAPTIVE]: 0.25,
   [REASONING_EFFORT_LEGACY_OFF]: 0.1,
   enabled: 1,
   minimal: 0.25,

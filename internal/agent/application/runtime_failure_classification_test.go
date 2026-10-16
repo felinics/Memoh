@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -16,6 +18,7 @@ import (
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/schedule"
 )
 
@@ -28,10 +31,17 @@ func TestPersistRuntimeRoundFailureCode(t *testing.T) {
 		name     string
 		cause    error
 		wantCode string
+		wantArgs map[string]any
 	}{
 		{name: "catalogued code", cause: apperror.Wrap(apperror.CodeAgentResponseTimeout, errors.New("SECRET"), nil), wantCode: "agent.response_timeout"},
 		{name: "external agent code", cause: fmt.Errorf("prompt: %w", apperror.New(apperror.CodeACPRuntimeBusy, nil)), wantCode: "acp_runtime_busy"},
 		{name: "plain error", cause: errors.New("SECRET driver exit"), wantCode: "runtime_prompt_failed"},
+		{
+			name:     "missing dependency",
+			cause:    &external.DependencyMissingError{DependencyID: "codex", TaskID: "task-1"},
+			wantCode: "agent_dependency_missing",
+			wantArgs: map[string]any{"dep_id": "codex", "install_task_id": "task-1", "operation_in_progress": "false"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -57,6 +67,12 @@ func TestPersistRuntimeRoundFailureCode(t *testing.T) {
 			meta := messages.persisted[1].Metadata
 			if got, _ := meta["error_code"].(string); got != tc.wantCode {
 				t.Fatalf("error_code = %q, want %q", got, tc.wantCode)
+			}
+			stored, _ := json.Marshal(meta[messagepkg.HistoryErrorArgsMetadataKey])
+			var gotArgs map[string]any
+			_ = json.Unmarshal(stored, &gotArgs)
+			if !reflect.DeepEqual(gotArgs, tc.wantArgs) {
+				t.Fatalf("error_args = %s, want %v", stored, tc.wantArgs)
 			}
 			for _, key := range []string{"error_reason", "i18n_key"} {
 				if got, found := meta[key]; found {
@@ -102,6 +118,26 @@ func TestStreamRuntimeExternalAgentFailureCarriesOneCode(t *testing.T) {
 	}
 	if got, _ := messages.persisted[len(messages.persisted)-1].Metadata["error_code"].(string); got != want {
 		t.Fatalf("history error_code = %q, want %q", got, want)
+	}
+}
+
+// The cause an External Agent turn hands to its result record names the
+// runtime that failed, so one query over the records finds every External
+// Agent failure whatever code it took.
+func TestStreamRuntimeFailureNamesItsRuntime(t *testing.T) {
+	service := newACPLifecycleService(t, &recordingACPPrompter{}, &recordingMessageService{}, &recordingContextLifecycleStore{})
+	driver := noticeTestDriver{kind: "codex", prompt: func(context.Context, external.PromptInput) (external.PromptResult, error) {
+		return external.PromptResult{Output: []sdk.Message{sdk.AssistantMessage("partial")}}, errors.New("driver exit")
+	}}
+	outcome, err := service.streamRuntimeWS(context.Background(), driver, ChatRequest{
+		BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID, RunID: lifecycleTestRunID, Query: "test",
+	}, make(chan WSStreamEvent, 64), make(chan struct{}), true)
+	if err != nil {
+		t.Fatalf("streamRuntimeWS() error = %v", err)
+	}
+	attrs := errs.Analyze(context.Background(), outcome.Cause).Attrs
+	if !slices.ContainsFunc(attrs, func(attr slog.Attr) bool { return attr.Key == "runtime" && attr.Value.String() == "codex" }) {
+		t.Fatalf("result record attrs = %v, want runtime=codex", attrs)
 	}
 }
 
@@ -263,6 +299,25 @@ func TestScheduledRuntimeFailureRoundHasNoFailureText(t *testing.T) {
 				t.Fatalf("error_code = %#v, want %s", last.Metadata["error_code"], apperror.CodeACPRuntimeBusy)
 			}
 		})
+	}
+}
+
+// The schedule log stores the text of the error a fire returns, and the API
+// serves it. A scheduled External Agent failure therefore reads as its code
+// alone, while the agent's own words stay behind it for the result record.
+func TestScheduledRuntimeFailureTextIsItsCode(t *testing.T) {
+	service := newACPLifecycleService(t, &recordingACPPrompter{}, &recordingMessageService{}, &recordingContextLifecycleStore{})
+	driver := noticeTestDriver{kind: "codex", prompt: func(context.Context, external.PromptInput) (external.PromptResult, error) {
+		return external.PromptResult{Output: []sdk.Message{sdk.AssistantMessage("partial")}}, errors.New("SECRET stderr tail")
+	}}
+	_, err := service.triggerScheduleRuntime(context.Background(), lifecycleTestBotID, schedule.TriggerPayload{
+		SessionID: lifecycleTestSessionID, Command: "inspect", OwnerUserID: "user-1",
+	}, "", lifecycleTestRunID, driver)
+	if err == nil || err.Error() != string(apperror.CodeRuntimePromptFailed) {
+		t.Fatalf("schedule error text = %q, want exactly %q", err, apperror.CodeRuntimePromptFailed)
+	}
+	if text := errs.Text(err); !strings.Contains(text, "SECRET") {
+		t.Fatalf("result record text = %q, want it to keep the agent's words", text)
 	}
 }
 

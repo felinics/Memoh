@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 
 	adapters "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models/modelretry"
 )
 
 const (
@@ -28,6 +30,8 @@ type Config struct {
 	ChatCompletionsCompat string
 	Timeout               time.Duration
 	PromptCacheTTL        string
+	// Logger, when set, records the failed calls that are made again.
+	Logger *slog.Logger
 	// OnUsage, when set, receives the token usage of every successful call.
 	// Memory calls never produce a chat message, so this is the only place
 	// their cost becomes visible.
@@ -70,10 +74,12 @@ func (c *Client) generate(ctx context.Context, operation, systemPrompt, userText
 		model, c.cfg.PromptCacheTTL,
 		systemPrompt, []sdk.Message{sdk.UserMessage(userText)}, nil,
 	)
-	result, err := model.Generate(ctx, sdk.Request{
+	request := sdk.Request{
 		System:   system,
 		Messages: messages,
-	})
+	}
+	result, err := modelretry.Do(ctx, c.cfg.Logger, "agent.memory", modelretry.Config{}, modelretry.Retryable,
+		func(ctx context.Context) (sdk.ModelResult, error) { return model.Generate(ctx, request) })
 	if err == nil && c.cfg.OnUsage != nil {
 		c.cfg.OnUsage(ctx, operation, result.Usage)
 	}

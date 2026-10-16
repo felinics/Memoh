@@ -78,6 +78,15 @@ func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMes
 	if !strings.EqualFold(requestMessage.Role, "user") {
 		return RunOutcome{}, errors.New("retry target request is not a user message")
 	}
+	assistantMessage, err := s.messageService.GetByIDBySession(ctx, sessionID, strings.TrimSpace(turn.AssistantMessageID))
+	if err != nil {
+		return RunOutcome{}, err
+	}
+	retryUserMessageHook := isPreflightUserMessageHookFailure(assistantMessage)
+	persistedUserMessageID := requestMessage.ID
+	if retryUserMessageHook {
+		persistedUserMessageID = ""
+	}
 
 	req := ChatRequest{
 		BotID:                        strings.TrimSpace(input.BotID),
@@ -103,14 +112,19 @@ func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMes
 		ToolHTTPURL:                  strings.TrimSpace(input.ToolHTTPURL),
 		InjectCh:                     input.InjectCh,
 		QueueSteerEnabled:            input.InjectCh != nil,
-		ReusePersistedUserMessage:    true,
-		PersistedUserMessageID:       requestMessage.ID,
+		ReusePersistedUserMessage:    !retryUserMessageHook,
+		PersistedUserMessageID:       persistedUserMessageID,
 		SkipHistoryTurn:              true,
 		HistoryCutoffBeforeMessageID: cutoffMessageID,
 		RequiredHistoryMessageID:     requestMessage.ID,
 		OnModelPreferenceSettled:     input.OnModelPreferenceSettled,
 	}
 	return s.streamReplacementWS(ctx, req, turn.ID, requestMessage.ID, "retry", eventCh, abortCh)
+}
+
+func isPreflightUserMessageHookFailure(message messagepkg.Message) bool {
+	return message.Metadata != nil &&
+		message.Metadata[messagepkg.HistoryFailureOriginMetadataKey] == messagepkg.HistoryFailureOriginUserMessageHook
 }
 
 func (s *Service) EditLatestMessageWS(ctx context.Context, input EditLatestMessageInput, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) (RunOutcome, error) {

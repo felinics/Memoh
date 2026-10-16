@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { CalloutBanner, ConfirmPopover, InlineLoadingRow, MetricReadout, PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
+import { until } from '@vueuse/core'
 import { Play, AlertCircle, ChevronRight } from 'lucide-vue-next'
 import {
   deleteBotsByBotIdContainer,
@@ -10,6 +11,7 @@ import {
   getBotsByBotIdContainerMetrics,
   getBotsByBotIdContainerSnapshots,
   postBotsByBotIdContainerDataRestore,
+  postBotsByBotIdContainerRemovalCancel,
   postBotsByBotIdContainerSnapshots,
   postBotsByBotIdContainerSnapshotsRollback,
   postBotsByBotIdContainerStart,
@@ -49,7 +51,8 @@ import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { formatDateTime, formatRelativeTime } from '@/utils/date-time'
 import { shortenImageRef } from '@/utils/image-ref'
-import { formatMetricBytes, formatMetricPercent } from '@/utils/format-bytes'
+import { resolveRuntimeStatusKey, runtimeStatusLabelKey } from '@/utils/bot-workspace'
+import { buildRuntimeMetricCards } from '@/utils/format-bytes'
 import { UserFacingError, resolveApiErrorMessage } from '@/utils/api-error'
 
 const route = useRoute()
@@ -61,6 +64,7 @@ type ContainerAction =
   | 'stop'
   | 'delete'
   | 'delete-preserve'
+  | 'cancel-removal'
   | 'snapshot'
   | 'restore'
   | 'rollback'
@@ -117,7 +121,6 @@ const createProgressPercent = computed(() => {
 const capabilitiesStore = useCapabilitiesStore()
 const routeIdentifier = computed(() => route.params.botName as string)
 const botId = computed(() => bot.value?.id ?? '')
-const containerBusy = computed(() => containerLoading.value || containerAction.value !== '')
 
 type BotContainerInfo = HandlersGetContainerResponse
 type BotContainerMetrics = HandlersGetContainerMetricsResponse
@@ -130,6 +133,18 @@ const containerInfo = ref<BotContainerInfo | null>(null)
 const containerMetrics = ref<BotContainerMetrics | null>(null)
 const resourceLimits = computed(() => containerMetrics.value?.resource_limits ?? null)
 const containerMissing = ref(false)
+const removal = computed(() => containerInfo.value?.removal ?? null)
+const removalPending = computed(() => removal.value?.state === 'removing')
+const containerBusy = computed(() => containerLoading.value || containerAction.value !== '' || removalPending.value)
+const removalDescription = computed(() => {
+  const current = removal.value
+  if (current?.state === 'failed') {
+    return t('bots.container.removal.failedHint', { time: formatDate(current.updated_at) })
+  }
+  return current?.preserve_data
+    ? t('bots.container.removal.removingKeepHint')
+    : t('bots.container.removal.removingHint')
+})
 const snapshots = ref<BotContainerSnapshot[]>([])
 const metricsLoading = ref(false)
 const resourceLimitsLoading = computed(() => metricsLoading.value)
@@ -167,33 +182,55 @@ async function runContainerAction<T>(
   }
 }
 
+// If the panel showed a removal in progress, that removal has just finished.
+// A rebuild keeps the panel and only learns that the removal is over.
+function containerGone() {
+  if (containerAction.value === 'recreate') {
+    if (containerInfo.value) containerInfo.value = { ...containerInfo.value, removal: undefined }
+    return
+  }
+  const finished = removalPending.value ? removal.value : null
+  const lastImage = shortenImageRef(containerInfo.value?.image)
+  containerInfo.value = null
+  containerMetrics.value = null
+  containerMissing.value = true
+  snapshots.value = []
+  if (!finished) return
+
+  createRestoreData.value = !!finished.preserve_data
+  createImage.value = lastImage
+  createImagePrefilled.value = !!lastImage
+  toast.success(finished.preserve_data ? t('bots.container.deletePreserveSuccess') : t('bots.container.deleteSuccess'))
+}
+
+// The latest read wins: an answer overtaken by a newer read, or by a switch
+// to another bot, never lands on the panel.
+let containerReads = 0
+
+async function loadContainer() {
+  const read = ++containerReads
+  const result = await getBotsByBotIdContainer({ path: { bot_id: botId.value } })
+  if (read !== containerReads) return
+  if (result.error === undefined) {
+    containerInfo.value = result.data
+    containerMissing.value = false
+  } else if (result.response?.status === 404) {
+    containerGone()
+  } else {
+    throw result.error
+  }
+}
+
 async function loadContainerData(showLoadingToast: boolean) {
   await capabilitiesStore.load()
   containerLoading.value = true
   try {
-    const result = await getBotsByBotIdContainer({ path: { bot_id: botId.value } })
-    if (result.error !== undefined) {
-      if (result.response?.status === 404) {
-        containerInfo.value = null
-        containerMetrics.value = null
-        containerMissing.value = true
-        snapshots.value = []
-        await loadContainerMetrics(showLoadingToast)
-        return
-      }
-      throw result.error
-    }
-
-    containerInfo.value = result.data
-    containerMissing.value = false
-
-    const metricsPromise = loadContainerMetrics(showLoadingToast)
-
-    if (capabilitiesStore.snapshotSupported) {
-      await Promise.all([metricsPromise, loadSnapshots(true)])
+    await loadContainer()
+    if (containerInfo.value && capabilitiesStore.snapshotSupported) {
+      await Promise.all([loadContainerMetrics(showLoadingToast), loadSnapshots(true)])
     } else {
       snapshots.value = []
-      await metricsPromise
+      await loadContainerMetrics(showLoadingToast)
     }
   } catch (error) {
     if (showLoadingToast) {
@@ -328,31 +365,17 @@ const displayedCDIDevices = computed(() => containerInfo.value?.cdi_devices ?? [
 const { isPending: botLifecyclePending } = useBotStatusMeta(bot, t)
 
 // Runtime status as a Badge variant (like bot-overview), not a loose pulse dot
-const runtimeStatusKey = computed(() => {
-  const status = (containerInfo.value?.status ?? '').trim().toLowerCase()
-  if (status === 'running') return 'running'
-  if (status === 'created') return 'created'
-  if (status === 'stopped' || status === 'exited') return 'stopped'
-  return 'unknown'
-})
+const runtimeStatusKey = computed(() => resolveRuntimeStatusKey(containerInfo.value?.status))
 
 const runtimeStatusVariant = computed<'success' | 'secondary' | 'default'>(() => {
   switch (runtimeStatusKey.value) {
     case 'running': return 'success'
     case 'created': return 'default'
-    case 'stopped': return 'secondary'
     default: return 'secondary'
   }
 })
 
-const runtimeStatusLabel = computed(() => {
-  switch (runtimeStatusKey.value) {
-    case 'running': return t('bots.container.statusRunning')
-    case 'created': return t('bots.container.statusCreated')
-    case 'stopped': return t('bots.container.statusStopped')
-    default: return t('bots.container.statusUnknown')
-  }
-})
+const runtimeStatusLabel = computed(() => t(runtimeStatusLabelKey(runtimeStatusKey.value)))
 
 const isContainerTaskRunning = computed(() => {
   const info = containerInfo.value
@@ -464,14 +487,17 @@ async function handleCreateContainer() {
 async function handleRecreateContainer(): Promise<boolean> {
   if (botLifecyclePending.value || !containerInfo.value) return false
 
+  const rebuiltBotId = botId.value
   containerAction.value = 'recreate'
   try {
     createProgress.value = { phase: 'preserving' }
-    await deleteBotsByBotIdContainer({
-      path: { bot_id: botId.value },
-      query: { preserve_data: true },
-      throwOnError: true,
-    })
+    await requestRemoval(true)
+    await until(removalPending).toBe(false)
+    // Left for another page or bot: there is nothing to do or report here.
+    if (botId.value !== rebuiltBotId) return false
+    if (removal.value?.state === 'failed') {
+      throw new UserFacingError(t('bots.container.removal.recreateStopped'))
+    }
 
     createProgress.value = { phase: 'pulling' }
     await createContainerSSE({ restore_data: true })
@@ -578,13 +604,6 @@ async function handleApplyResourceLimitsNow() {
   }
 }
 
-function formatLimitCPU(value?: number): string {
-  if (!value || value <= 0) return t('bots.container.resourceLimits.unlimited')
-  return t('bots.container.resourceLimits.cpuCoresValue', {
-    value: trimTrailingZeros((value / 1000).toFixed(3)),
-  })
-}
-
 const storageHardLimitSupported = computed(() =>
   resourceLimits.value?.capabilities?.storage?.hard_limit_supported === true,
 )
@@ -602,50 +621,12 @@ const metricsTaskRunning = computed(() => containerMetricsStatus.value?.task_run
 const hasAnyMetric = computed(() =>
   !!cpuMetrics.value || !!memoryMetrics.value || !!storageMetrics.value,
 )
-const cpuMetricValueText = computed(() => formatMetricPercent(cpuMetrics.value?.usage_percent))
-const memoryMetricValueText = computed(() => formatMetricBytes(memoryMetrics.value?.usage_bytes))
-const storageMetricValueText = computed(() => formatMetricBytes(storageMetrics.value?.used_bytes))
-// Like CPU, storage has no live ceiling in the payload, so the cap comes from the
-// configured limit — never the mount path, which is diagnostic (it lives in Details)
-// and renders as a bare "/" that says nothing about capacity.
-const storageMetricHintText = computed(() => {
-  if (!storageMetrics.value) return ''
-  const limit = resourceLimits.value?.desired?.storage_bytes
-  if (limit && limit > 0) {
-    return `${formatMetricBytes(storageMetrics.value?.used_bytes)} / ${formatMetricBytes(limit)}`
-  }
-  return t('bots.container.metricsUnlimited')
-})
 const sampledAtText = computed(() =>
   formatRelativeTime(containerMetrics.value?.sampled_at, { locale: locale.value, fallback: '' }),
 )
-const memoryMetricHintText = computed(() => {
-  const limit = memoryMetrics.value?.limit_bytes
-  if (limit && limit > 0) {
-    const usagePercent = formatMetricPercent(memoryMetrics.value?.usage_percent)
-    return `${formatMetricBytes(memoryMetrics.value?.usage_bytes)} / ${formatMetricBytes(limit)}${usagePercent === '--' ? '' : ` (${usagePercent})`}`
-  }
-  if (memoryMetrics.value) {
-    return t('bots.container.metricsUnlimited')
-  }
-  return t('bots.container.metricsUnavailable')
-})
 
-// CPU has no live cgroup ceiling in the metrics payload, so the cap comes from the
-// configured limit. Mirrors Memory's tile so every gauge states its ceiling.
-const cpuMetricHintText = computed(() => {
-  if (!cpuMetrics.value) return ''
-  const cpuLimit = resourceLimits.value?.desired?.cpu_millicores
-  if (cpuLimit && cpuLimit > 0) return formatLimitCPU(cpuLimit)
-  return t('bots.container.metricsUnlimited')
-})
-
-// Runtime metric tiles for the overview-style tile grid
-const runtimeMetricCards = computed(() => [
-  { key: 'cpu', label: t('bots.container.metricsLabels.cpu'), value: cpuMetricValueText.value, sub: cpuMetricHintText.value },
-  { key: 'memory', label: t('bots.container.metricsLabels.memory'), value: memoryMetricValueText.value, sub: memoryMetricHintText.value },
-  { key: 'storage', label: t('bots.container.metricsLabels.storage'), value: storageMetricValueText.value, sub: storageMetricHintText.value },
-])
+// Runtime metric tiles, shared with the Overview runtime block
+const runtimeMetricCards = computed(() => buildRuntimeMetricCards(containerMetrics.value, t))
 
 const runtimeMetricsNote = computed(() => {
   if (metricsBackendUnsupported.value) return t('bots.container.metricsUnsupported')
@@ -695,33 +676,55 @@ function openDeleteDialog() {
   deleteDialogOpen.value = true
 }
 
+// The server only records a removal; its outcome is read back from the
+// workspace, so a dropped request or a reload cannot lose it.
+async function requestRemoval(preserveData: boolean) {
+  const requestedBotId = botId.value
+  await deleteBotsByBotIdContainer({
+    path: { bot_id: requestedBotId },
+    query: preserveData ? { preserve_data: true } : undefined,
+    throwOnError: true,
+  })
+  if (botId.value !== requestedBotId || !containerInfo.value) return
+  containerReads++
+  containerInfo.value = {
+    ...containerInfo.value,
+    removal: { state: 'removing', preserve_data: preserveData },
+  }
+}
+
+const REMOVAL_POLL_INTERVAL_MS = 1500
+let followingRemoval = false
+
+// Covers a removal started here and one found in progress on arrival.
+watch(removalPending, async (pending) => {
+  if (!pending || followingRemoval) return
+  followingRemoval = true
+  while (removalPending.value) {
+    await new Promise(resolve => setTimeout(resolve, REMOVAL_POLL_INTERVAL_MS))
+    // A failed read says nothing about the removal; the next one asks again.
+    if (removalPending.value) await loadContainer().catch(() => {})
+  }
+  followingRemoval = false
+  if (containerMissing.value) await loadContainerMetrics(false)
+})
+
 async function handleDeleteContainer(preserveData: boolean) {
   if (botLifecyclePending.value || !containerInfo.value) return
-
-  const action: ContainerAction = preserveData ? 'delete-preserve' : 'delete'
-  const successMessage = preserveData
-    ? t('bots.container.deletePreserveSuccess')
-    : t('bots.container.deleteSuccess')
-  const lastImage = shortenImageRef(containerInfo.value.image)
-
   await runContainerAction(
-    action,
+    preserveData ? 'delete-preserve' : 'delete',
+    () => requestRemoval(preserveData),
+  )
+}
+
+async function handleCancelRemoval() {
+  await runContainerAction(
+    'cancel-removal',
     async () => {
-      await deleteBotsByBotIdContainer({
-        path: { bot_id: botId.value },
-        query: preserveData ? { preserve_data: true } : undefined,
-        throwOnError: true,
-      })
-      containerInfo.value = null
-      containerMetrics.value = null
-      containerMissing.value = true
-      snapshots.value = []
-      createRestoreData.value = preserveData
-      createImage.value = lastImage
-      createImagePrefilled.value = !!lastImage
-      await loadContainerMetrics(false)
+      await postBotsByBotIdContainerRemovalCancel({ path: { bot_id: botId.value }, throwOnError: true })
+      await loadContainerData(false)
     },
-    successMessage,
+    t('bots.container.removal.cancelSuccess'),
   )
 }
 
@@ -746,19 +749,6 @@ async function handleRestorePreservedData() {
     t('bots.container.restoreSuccess'),
   )
 }
-
-const statusKeyMap: Record<string, string> = {
-  created: 'statusCreated',
-  running: 'statusRunning',
-  stopped: 'statusStopped',
-  exited: 'statusExited',
-}
-
-const containerStatusText = computed(() => {
-  const status = (containerInfo.value?.status ?? '').trim().toLowerCase()
-  const key = statusKeyMap[status] ?? 'statusUnknown'
-  return t(`bots.container.${key}`)
-})
 
 const containerTaskText = computed(() => {
   const info = containerInfo.value
@@ -941,6 +931,16 @@ onBeforeUnmount(() => {
   stopMetricsPoll()
 })
 
+// This page instance is kept alive across bots: without the reset, a removal
+// still shown from the previous bot would be followed and finished on this one.
+watch(botId, () => {
+  containerReads++
+  containerInfo.value = null
+  containerMetrics.value = null
+  containerMissing.value = false
+  snapshots.value = []
+}, { flush: 'sync' })
+
 watch([activeTab, botId], ([tab]) => {
   if (!botId.value) {
     stopMetricsPoll()
@@ -1022,9 +1022,38 @@ watch([activeTab, botId], ([tab]) => {
         <!-- Issue banners: visible only when there IS a problem (a healthy
              workspace shows none of these). -->
         <div
-          v-if="isLegacy || (createProgress && containerAction === 'recreate') || resourceLimitApplyPromptVisible || storageSoftLimitExceeded"
+          v-if="removal || isLegacy || (createProgress && containerAction === 'recreate') || resourceLimitApplyPromptVisible || storageSoftLimitExceeded"
           class="space-y-3"
         >
+          <!-- A rebuild shows its own progress while it removes. -->
+          <CalloutBanner
+            v-if="removal && !(removalPending && containerAction === 'recreate')"
+            :tone="removal.state === 'failed' ? 'destructive' : 'neutral'"
+            :title="$t(removal.state === 'failed' ? 'bots.container.removal.failedTitle' : 'bots.container.removal.removingTitle')"
+            :description="removalDescription"
+          >
+            <template v-if="removal.state === 'failed'">
+              <Button
+                variant="ghost"
+                size="sm"
+                :disabled="containerBusy || botLifecyclePending"
+                :loading="containerAction === 'cancel-removal'"
+                @click="handleCancelRemoval"
+              >
+                {{ $t('bots.container.removal.cancel') }}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                :disabled="containerBusy || botLifecyclePending"
+                :loading="containerAction === (removal.preserve_data ? 'delete-preserve' : 'delete')"
+                @click="handleDeleteContainer(!!removal.preserve_data)"
+              >
+                {{ $t('bots.container.removal.retry') }}
+              </Button>
+            </template>
+          </CalloutBanner>
+
           <!-- Legacy architecture -->
           <CalloutBanner
             v-if="isLegacy"
@@ -1130,7 +1159,6 @@ watch([activeTab, botId], ([tab]) => {
               :key="m.key"
               :label="m.label"
               :value="m.value"
-              :sub="m.sub"
             />
           </div>
           <SettingsSection v-else>
@@ -1563,7 +1591,7 @@ watch([activeTab, botId], ([tab]) => {
           </div>
           <div class="mx-4 flex items-start justify-between gap-4 border-b border-border py-3 last:border-b-0">
             <span class="shrink-0 text-sm text-muted-foreground">{{ $t('bots.container.fields.status') }}</span>
-            <span class="text-right text-sm text-foreground">{{ containerStatusText }}</span>
+            <span class="text-right text-sm text-foreground">{{ runtimeStatusLabel }}</span>
           </div>
           <div class="mx-4 flex items-start justify-between gap-4 border-b border-border py-3 last:border-b-0">
             <span class="shrink-0 text-sm text-muted-foreground">{{ $t('bots.container.fields.task') }}</span>

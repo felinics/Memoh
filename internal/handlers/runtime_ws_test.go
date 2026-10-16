@@ -455,14 +455,13 @@ func TestRuntimeSubscribeRequiresSessionID(t *testing.T) {
 		t.Fatal("runtime_subscribe without a session created a subscription")
 	}
 	frame := harness.next(t)
-	if frame["type"] != "error" || frame["code"] != "http.bad_request" || frame["message"] != "The request is invalid." {
-		t.Fatalf("frame = %#v, want http.bad_request with catalog detail", frame)
+	if frame["type"] != "error" || frame["code"] != "request.field_required" || frame["message"] != "A required field is missing." || frame["args"].(map[string]any)["field"] != "session_id" {
+		t.Fatalf("frame = %#v, want request.field_required for session_id", frame)
 	}
 	if !strings.Contains(harness.logs.String(), `"msg":"ws request"`) ||
 		!strings.Contains(harness.logs.String(), `"operation":"ws.runtime_subscribe"`) ||
 		!strings.Contains(harness.logs.String(), `"fault":"client"`) ||
-		!strings.Contains(harness.logs.String(), `"level":"INFO"`) ||
-		!strings.Contains(harness.logs.String(), `session_id is required`) {
+		!strings.Contains(harness.logs.String(), `"level":"INFO"`) {
 		t.Fatalf("records = %s, want runtime_subscribe client result", harness.logs.String())
 	}
 }
@@ -477,14 +476,13 @@ func TestRuntimeUnsubscribeRequiresSessionID(t *testing.T) {
 		t.Fatal("runtime_unsubscribe was not handled")
 	}
 	frame := harness.next(t)
-	if frame["type"] != "error" || frame["code"] != "http.bad_request" || frame["message"] != "The request is invalid." {
-		t.Fatalf("frame = %#v, want http.bad_request with catalog detail", frame)
+	if frame["type"] != "error" || frame["code"] != "request.field_required" || frame["message"] != "A required field is missing." || frame["args"].(map[string]any)["field"] != "session_id" {
+		t.Fatalf("frame = %#v, want request.field_required for session_id", frame)
 	}
 	if !strings.Contains(harness.logs.String(), `"msg":"ws request"`) ||
 		!strings.Contains(harness.logs.String(), `"operation":"ws.runtime_unsubscribe"`) ||
 		!strings.Contains(harness.logs.String(), `"fault":"client"`) ||
-		!strings.Contains(harness.logs.String(), `"level":"INFO"`) ||
-		!strings.Contains(harness.logs.String(), `session_id is required`) {
+		!strings.Contains(harness.logs.String(), `"level":"INFO"`) {
 		t.Fatalf("records = %s, want runtime_unsubscribe client result", harness.logs.String())
 	}
 }

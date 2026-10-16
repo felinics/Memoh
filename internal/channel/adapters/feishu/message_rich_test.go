@@ -119,12 +119,12 @@ func TestRenderFeishuMessagePartsLarkMD(t *testing.T) {
 			excludes: []string{"<at"},
 		},
 		{
-			name: "mention with ChannelIdentityID emits lark_md at-tag",
+			name: "mention with ChannelIdentityID emits card markdown at-tag",
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartText, Text: "ping "},
 				{Type: channel.MessagePartMention, Text: "@alice", ChannelIdentityID: "ou_alice_open_id"},
 			}},
-			want: "ping" + "\n\n" + `<at user_id="ou_alice_open_id"></at>`,
+			want: "ping" + "\n\n" + `<at id=ou_alice_open_id></at>`,
 		},
 		{
 			name: "mention with unsafe ChannelIdentityID falls back to text",
@@ -145,21 +145,21 @@ func TestRenderFeishuMessagePartsLarkMD(t *testing.T) {
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartHeading, Text: "Title [x]"},
 			}},
-			want: `**Title \[x\]**`,
+			want: `**Title &#91;x&#93;**`,
 		},
 		{
 			name: "blockquote quotes each line",
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartBlockquote, Text: "alpha [x]\nbeta"},
 			}},
-			want: "> alpha \\[x\\]\n> beta",
+			want: "> alpha &#91;x&#93;\n> beta",
 		},
 		{
 			name: "list item emits bullet line",
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartListItem, Text: "item [x]"},
 			}},
-			want: `- item \[x\]`,
+			want: `- item &#91;x&#93;`,
 		},
 		{
 			name: "mixed inline + code block + link",
@@ -183,7 +183,7 @@ func TestRenderFeishuMessagePartsLarkMD(t *testing.T) {
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartText, Text: "click [evil](https://evil.test)"},
 			}},
-			want:     `click \[evil\](https://evil.test)`,
+			want:     `click &#91;evil&#93;(https://evil.test)`,
 			excludes: []string{"[evil]("},
 		},
 		{
@@ -191,28 +191,28 @@ func TestRenderFeishuMessagePartsLarkMD(t *testing.T) {
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartText, Text: `ping <at id="all"></at>`},
 			}},
-			want: `ping \<at id="all"\>\</at\>`,
+			want: `ping &#60;at id="all"&#62;&#60;/at&#62;`,
 		},
 		{
 			name: "inline text escapes inline code marker",
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartText, Text: "use `code` here"},
 			}},
-			want: "use \\`code\\` here",
+			want: "use &#96;code&#96; here",
 		},
 		{
 			name: "styled inline text cannot break out of bold wrapper",
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartText, Text: "x**y", Styles: []channel.MessageTextStyle{channel.MessageStyleBold}},
 			}},
-			want: `**x\*\*y**`,
+			want: `**x&#42;&#42;y**`,
 		},
 		{
 			name: "styled italic escapes inner asterisks",
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartText, Text: "a*b", Styles: []channel.MessageTextStyle{channel.MessageStyleItalic}},
 			}},
-			want: `*a\*b*`,
+			want: `*a&#42;b*`,
 		},
 		{
 			name: "inline code style with backtick uses longer fence and padding",
@@ -240,7 +240,7 @@ func TestRenderFeishuMessagePartsLarkMD(t *testing.T) {
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartLink, Text: "see [docs", URL: "https://example.test"},
 			}},
-			want: `[see \[docs](https://example.test)`,
+			want: `[see &#91;docs](https://example.test)`,
 		},
 		{
 			name: "link text newline collapses to space",
@@ -275,7 +275,7 @@ func TestRenderFeishuMessagePartsLarkMD(t *testing.T) {
 			msg: channel.Message{Parts: []channel.MessagePart{
 				{Type: channel.MessagePartMention, Text: "@alice [extra]"},
 			}},
-			want: `@alice \[extra\]`,
+			want: `@alice &#91;extra&#93;`,
 		},
 		{
 			name: "empty parts returns empty",
@@ -316,7 +316,7 @@ func TestBuildFeishuCardContentWrapsLarkMDFromParts(t *testing.T) {
 		t.Fatalf("buildFeishuCardContent: %v", err)
 	}
 	for _, want := range []string{
-		`"tag":"lark_md"`,
+		`"tag":"markdown"`,
 		"**title**",
 		"[docs](https://example.test)",
 	} {

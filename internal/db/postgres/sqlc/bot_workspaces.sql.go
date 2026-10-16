@@ -11,6 +11,65 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cancelBotWorkspaceRemoval = `-- name: CancelBotWorkspaceRemoval :one
+UPDATE bot_workspaces
+SET
+  desired_state       = 'present',
+  desired_generation  = desired_generation + 1,
+  preserve_data       = false,
+  observed_state      = $1,
+  observed_generation = desired_generation + 1,
+  ever_ready          = ever_ready OR $1 = 'running',
+  last_error          = '',
+  last_error_phase    = '',
+  attempts            = 0,
+  next_attempt_at     = now(),
+  version             = version + 1,
+  updated_at          = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $2
+  AND desired_state = 'absent'
+  AND observed_state = 'failed'
+  AND observed_generation >= desired_generation
+RETURNING bot_id, team_id, desired_state, desired_generation, image, preserve_data, observed_state, observed_generation, ever_ready, last_error, last_error_code, last_error_phase, attempts, next_attempt_at, lease_owner, lease_until, version, created_at, updated_at
+`
+
+type CancelBotWorkspaceRemovalParams struct {
+	ObservedState string      `json:"observed_state"`
+	BotID         pgtype.UUID `json:"bot_id"`
+}
+
+// Withdraw a removal that failed: the workspace is desired again and recorded
+// as the backend reports it, in one write. Split in two, a pass in between
+// would see a present workspace observed as failed and provision over one that
+// is still there. Matches nothing unless a removal failed and is settled.
+func (q *Queries) CancelBotWorkspaceRemoval(ctx context.Context, arg CancelBotWorkspaceRemovalParams) (BotWorkspace, error) {
+	row := q.db.QueryRow(ctx, cancelBotWorkspaceRemoval, arg.ObservedState, arg.BotID)
+	var i BotWorkspace
+	err := row.Scan(
+		&i.BotID,
+		&i.TeamID,
+		&i.DesiredState,
+		&i.DesiredGeneration,
+		&i.Image,
+		&i.PreserveData,
+		&i.ObservedState,
+		&i.ObservedGeneration,
+		&i.EverReady,
+		&i.LastError,
+		&i.LastErrorCode,
+		&i.LastErrorPhase,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.LeaseOwner,
+		&i.LeaseUntil,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const claimBotWorkspace = `-- name: ClaimBotWorkspace :one
 UPDATE bot_workspaces
 SET
@@ -21,7 +80,7 @@ SET
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $3
   AND (lease_until IS NULL OR lease_until < now())
-RETURNING bot_id, team_id, desired_state, desired_generation, image, preserve_data, observed_state, observed_generation, ever_ready, last_error, last_error_phase, attempts, next_attempt_at, lease_owner, lease_until, version, created_at, updated_at
+RETURNING bot_id, team_id, desired_state, desired_generation, image, preserve_data, observed_state, observed_generation, ever_ready, last_error, last_error_code, last_error_phase, attempts, next_attempt_at, lease_owner, lease_until, version, created_at, updated_at
 `
 
 type ClaimBotWorkspaceParams struct {
@@ -46,6 +105,7 @@ func (q *Queries) ClaimBotWorkspace(ctx context.Context, arg ClaimBotWorkspacePa
 		&i.ObservedGeneration,
 		&i.EverReady,
 		&i.LastError,
+		&i.LastErrorCode,
 		&i.LastErrorPhase,
 		&i.Attempts,
 		&i.NextAttemptAt,
@@ -74,13 +134,13 @@ WHERE bot_id IN (
       observed_generation < desired_generation
       OR observed_state IN ('provisioning', 'removing')
       OR (desired_state = 'present' AND observed_state IN ('absent', 'failed'))
-      OR (desired_state = 'absent' AND observed_state <> 'absent')
+      OR (desired_state = 'absent' AND observed_state NOT IN ('absent', 'failed'))
     )
   ORDER BY next_attempt_at
   LIMIT $3::int
   FOR UPDATE SKIP LOCKED
 )
-RETURNING bot_id, team_id, desired_state, desired_generation, image, preserve_data, observed_state, observed_generation, ever_ready, last_error, last_error_phase, attempts, next_attempt_at, lease_owner, lease_until, version, created_at, updated_at
+RETURNING bot_id, team_id, desired_state, desired_generation, image, preserve_data, observed_state, observed_generation, ever_ready, last_error, last_error_code, last_error_phase, attempts, next_attempt_at, lease_owner, lease_until, version, created_at, updated_at
 `
 
 type ClaimBotWorkspacesParams struct {
@@ -91,9 +151,10 @@ type ClaimBotWorkspacesParams struct {
 
 // Claim due rows for one reconcile pass. A row is due when it has not yet
 // responded to its latest intent, is stuck in a transitional state whose lease
-// expired, or is a failed row whose backoff elapsed. SKIP LOCKED keeps
-// concurrent Server instances from claiming the same row; an expired lease
-// lets another instance take over a crashed pass.
+// expired, or is a failed provisioning whose backoff elapsed. A failed removal
+// is not due: it waits for a new intent. SKIP LOCKED keeps concurrent Server
+// instances from claiming the same row; an expired lease lets another instance
+// take over a crashed pass.
 func (q *Queries) ClaimBotWorkspaces(ctx context.Context, arg ClaimBotWorkspacesParams) ([]BotWorkspace, error) {
 	rows, err := q.db.Query(ctx, claimBotWorkspaces, arg.LeaseOwner, arg.LeaseSeconds, arg.Lim)
 	if err != nil {
@@ -114,6 +175,7 @@ func (q *Queries) ClaimBotWorkspaces(ctx context.Context, arg ClaimBotWorkspaces
 			&i.ObservedGeneration,
 			&i.EverReady,
 			&i.LastError,
+			&i.LastErrorCode,
 			&i.LastErrorPhase,
 			&i.Attempts,
 			&i.NextAttemptAt,
@@ -166,7 +228,7 @@ func (q *Queries) CountBotWorkspacesByObservedState(ctx context.Context) ([]Coun
 }
 
 const getBotWorkspace = `-- name: GetBotWorkspace :one
-SELECT bot_id, team_id, desired_state, desired_generation, image, preserve_data, observed_state, observed_generation, ever_ready, last_error, last_error_phase, attempts, next_attempt_at, lease_owner, lease_until, version, created_at, updated_at FROM bot_workspaces
+SELECT bot_id, team_id, desired_state, desired_generation, image, preserve_data, observed_state, observed_generation, ever_ready, last_error, last_error_code, last_error_phase, attempts, next_attempt_at, lease_owner, lease_until, version, created_at, updated_at FROM bot_workspaces
 WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 `
 
@@ -184,6 +246,7 @@ func (q *Queries) GetBotWorkspace(ctx context.Context, botID pgtype.UUID) (BotWo
 		&i.ObservedGeneration,
 		&i.EverReady,
 		&i.LastError,
+		&i.LastErrorCode,
 		&i.LastErrorPhase,
 		&i.Attempts,
 		&i.NextAttemptAt,
@@ -197,7 +260,7 @@ func (q *Queries) GetBotWorkspace(ctx context.Context, botID pgtype.UUID) (BotWo
 }
 
 const listBotWorkspacesByObservedState = `-- name: ListBotWorkspacesByObservedState :many
-SELECT bot_id, team_id, desired_state, desired_generation, image, preserve_data, observed_state, observed_generation, ever_ready, last_error, last_error_phase, attempts, next_attempt_at, lease_owner, lease_until, version, created_at, updated_at FROM bot_workspaces
+SELECT bot_id, team_id, desired_state, desired_generation, image, preserve_data, observed_state, observed_generation, ever_ready, last_error, last_error_code, last_error_phase, attempts, next_attempt_at, lease_owner, lease_until, version, created_at, updated_at FROM bot_workspaces
 WHERE team_id = public.memoh_current_team_id()
   AND observed_state = $1
 ORDER BY updated_at DESC
@@ -229,6 +292,7 @@ func (q *Queries) ListBotWorkspacesByObservedState(ctx context.Context, arg List
 			&i.ObservedGeneration,
 			&i.EverReady,
 			&i.LastError,
+			&i.LastErrorCode,
 			&i.LastErrorPhase,
 			&i.Attempts,
 			&i.NextAttemptAt,
@@ -303,18 +367,19 @@ SET
   observed_generation = $2,
   ever_ready          = ever_ready OR $3::boolean,
   last_error          = $4,
-  last_error_phase    = $5,
-  attempts            = $6,
-  next_attempt_at     = $7,
-  lease_owner         = CASE WHEN $8::boolean THEN '' ELSE lease_owner END,
-  lease_until         = CASE WHEN $8::boolean THEN NULL ELSE lease_until END,
+  last_error_code     = $5,
+  last_error_phase    = $6,
+  attempts            = $7,
+  next_attempt_at     = $8,
+  lease_owner         = CASE WHEN $9::boolean THEN '' ELSE lease_owner END,
+  lease_until         = CASE WHEN $9::boolean THEN NULL ELSE lease_until END,
   version             = version + 1,
   updated_at          = now()
 WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = $9
-  AND lease_owner = $10
-  AND version = $11
-RETURNING bot_id, team_id, desired_state, desired_generation, image, preserve_data, observed_state, observed_generation, ever_ready, last_error, last_error_phase, attempts, next_attempt_at, lease_owner, lease_until, version, created_at, updated_at
+  AND bot_id = $10
+  AND lease_owner = $11
+  AND version = $12
+RETURNING bot_id, team_id, desired_state, desired_generation, image, preserve_data, observed_state, observed_generation, ever_ready, last_error, last_error_code, last_error_phase, attempts, next_attempt_at, lease_owner, lease_until, version, created_at, updated_at
 `
 
 type UpdateBotWorkspaceObservedParams struct {
@@ -322,6 +387,7 @@ type UpdateBotWorkspaceObservedParams struct {
 	ObservedGeneration int64              `json:"observed_generation"`
 	MarkReady          bool               `json:"mark_ready"`
 	LastError          string             `json:"last_error"`
+	LastErrorCode      string             `json:"last_error_code"`
 	LastErrorPhase     string             `json:"last_error_phase"`
 	Attempts           int32              `json:"attempts"`
 	NextAttemptAt      pgtype.Timestamptz `json:"next_attempt_at"`
@@ -340,6 +406,7 @@ func (q *Queries) UpdateBotWorkspaceObserved(ctx context.Context, arg UpdateBotW
 		arg.ObservedGeneration,
 		arg.MarkReady,
 		arg.LastError,
+		arg.LastErrorCode,
 		arg.LastErrorPhase,
 		arg.Attempts,
 		arg.NextAttemptAt,
@@ -360,6 +427,7 @@ func (q *Queries) UpdateBotWorkspaceObserved(ctx context.Context, arg UpdateBotW
 		&i.ObservedGeneration,
 		&i.EverReady,
 		&i.LastError,
+		&i.LastErrorCode,
 		&i.LastErrorPhase,
 		&i.Attempts,
 		&i.NextAttemptAt,
@@ -385,7 +453,7 @@ ON CONFLICT (bot_id) DO UPDATE SET
   next_attempt_at    = now(),
   version            = bot_workspaces.version + 1,
   updated_at         = now()
-RETURNING bot_id, team_id, desired_state, desired_generation, image, preserve_data, observed_state, observed_generation, ever_ready, last_error, last_error_phase, attempts, next_attempt_at, lease_owner, lease_until, version, created_at, updated_at
+RETURNING bot_id, team_id, desired_state, desired_generation, image, preserve_data, observed_state, observed_generation, ever_ready, last_error, last_error_code, last_error_phase, attempts, next_attempt_at, lease_owner, lease_until, version, created_at, updated_at
 `
 
 type UpsertBotWorkspaceIntentParams struct {
@@ -419,6 +487,7 @@ func (q *Queries) UpsertBotWorkspaceIntent(ctx context.Context, arg UpsertBotWor
 		&i.ObservedGeneration,
 		&i.EverReady,
 		&i.LastError,
+		&i.LastErrorCode,
 		&i.LastErrorPhase,
 		&i.Attempts,
 		&i.NextAttemptAt,

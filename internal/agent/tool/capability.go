@@ -138,8 +138,10 @@ func (p *CapabilityProvider) Tools(_ context.Context, session SessionContext) ([
 			// Causes remain server-side. Even transport errors can include URLs or
 			// credential-bearing request data, so never echo them into tool history.
 			code := apperror.CodeCapabilityOperationFailed
-			if public, ok := apperror.PublicFrom(apps.RegistryError(err), ""); ok {
-				return toolexec.OutputFromValue(map[string]any{"ok": false, "code": public.Code, "detail": public.Detail, "message": public.Detail}), nil
+			if registryCode := apperror.CodeOf(apps.RegistryError(err)); registryCode != "" {
+				if definition, ok := apperror.Lookup(registryCode); ok {
+					return toolexec.OutputFromValue(map[string]any{"ok": false, "code": registryCode, "detail": definition.Detail, "message": definition.Detail}), nil
+				}
 			}
 			switch {
 			case errors.Is(err, apps.ErrInvalidRequest):
@@ -148,8 +150,8 @@ func (p *CapabilityProvider) Tools(_ context.Context, session SessionContext) ([
 				code = apperror.CodeCapabilityNotFound
 			}
 			p.logger.Warn("capability operation failed", slog.String("tool", spec.name), slog.String("action", StringArg(args, "action")))
-			public, _ := apperror.PublicFrom(apperror.New(code, nil), "")
-			return toolexec.OutputFromValue(map[string]any{"ok": false, "code": public.Code, "detail": public.Detail, "message": public.Detail}), nil
+			definition, _ := apperror.Lookup(code)
+			return toolexec.OutputFromValue(map[string]any{"ok": false, "code": code, "detail": definition.Detail, "message": definition.Detail}), nil
 		}}
 		switch spec.name {
 		case "mcp_manage":

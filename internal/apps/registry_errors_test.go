@@ -1,13 +1,18 @@
 package apps
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"strings"
+	"net/http"
 	"testing"
 
+	connectsdk "github.com/felinics/connect-it/sdk/go"
+
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/connectors"
 	"github.com/felinics/memoh/internal/supermarket"
+	"github.com/felinics/memoh/internal/workspacedeps"
 )
 
 func TestRegistryErrorTranslatesEachInstallerError(t *testing.T) {
@@ -39,16 +44,31 @@ func TestRegistryErrorLeavesOtherErrorsAlone(t *testing.T) {
 	}
 }
 
-func TestFailureShowsARegistryErrorByItsDetail(t *testing.T) {
+func TestFailureIsPublishedAsItsRegistryCode(t *testing.T) {
 	err := fail("publish Skills", fmt.Errorf("download Registry Skill Artifact: %w: %w", supermarket.ErrAppInvalid, errors.New("SHA-256 verification failed")))
-	var f *failure
-	if !errors.As(err, &f) {
-		t.Fatalf("fail() = %T, want *failure", err)
+	if got := publicCode(err); got != apperror.CodeRegistryAppInvalid {
+		t.Fatalf("publicCode(%v) = %s, want %s", err, got, apperror.CodeRegistryAppInvalid)
 	}
-	if got := f.Public(); got != "publish Skills: The App is invalid." {
-		t.Fatalf("Public() = %q, want the step and the registry detail", got)
-	}
-	if strings.Contains(publicMessage(err), "SHA-256") {
-		t.Fatalf("publicMessage(%v) repeats the cause", err)
+}
+
+func TestPublicCodeClassifiesCausesWithoutTheirText(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want apperror.Code
+	}{
+		{"sentinel", fail("remove dependency node", workspacedeps.ErrBusy), apperror.CodeWorkspaceDependencyBusy},
+		{"dependencies service missing", ErrDependenciesUnavailable, apperror.CodeAppDependenciesUnavailable},
+		{"canceled", fmt.Errorf("step: %w", context.Canceled), apperror.CodeCanceled},
+		{"unknown", errors.New("bridge dial 10.0.0.8 password=secret"), apperror.CodeAppOperationFailed},
+		{"upstream rejected the request", &connectsdk.APIError{StatusCode: http.StatusBadRequest, Message: "payload rejected"}, apperror.CodeConnectorRequestRejected},
+		{"upstream has no OAuth App", &connectsdk.APIError{StatusCode: http.StatusUnprocessableEntity, Code: "oauth_client_not_configured", Message: "client_secret=hidden"}, apperror.CodeConnectorOAuthClientNotConfigured},
+		{"upstream missing object", &connectsdk.APIError{StatusCode: http.StatusNotFound, Message: "no such connection"}, apperror.CodeConnectorNotFound},
+		{"upstream failure", &connectsdk.APIError{StatusCode: http.StatusInternalServerError, Message: "500"}, apperror.CodeConnectorUpstreamUnavailable},
+		{"transport failure", fmt.Errorf("call connect-it: %w", connectors.ErrUpstreamUnavailable), apperror.CodeConnectorUpstreamUnavailable},
+	} {
+		if got := publicCode(tc.err); got != tc.want {
+			t.Errorf("%s: publicCode = %s, want %s", tc.name, got, tc.want)
+		}
 	}
 }

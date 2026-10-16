@@ -289,6 +289,7 @@ export function createExternalAgentStaging(deps: ExternalAgentStagingDeps) {
     pendingACPCreating.value = true
     const request = requestCreateACPRuntime(snapshot.botId, {
       agentId: pending.agentId,
+      botAgentId: pending.botAgentId,
       projectPath: pending.projectPath,
     })
       .then((runtime) => {

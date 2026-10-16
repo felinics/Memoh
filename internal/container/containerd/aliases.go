@@ -8,6 +8,7 @@ var (
 	ErrNotFound        = containerapi.ErrNotFound
 	ErrAlreadyExists   = containerapi.ErrAlreadyExists
 	ErrRuntime         = containerapi.ErrRuntime
+	ErrUnavailable     = containerapi.ErrUnavailable
 )
 
 type (

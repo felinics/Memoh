@@ -10,7 +10,10 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/job"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/runtimekind"
 )
@@ -255,31 +258,43 @@ func (s *Service) effectiveMemorySearchTimeout() time.Duration {
 	return s.memorySearchTimeout
 }
 
+// storeMemory starts a background unit that hands a persisted round to the
+// bot's memory provider.
 func (s *Service) storeMemory(ctx context.Context, req ChatRequest, persisted []messagepkg.Message) {
 	botID := strings.TrimSpace(req.BotID)
-	if botID == "" {
+	if botID == "" || s.memoryRegistry == nil {
 		return
 	}
+	job.Go(ctx, s.logger, "agent.memory", job.Options{}, func(ctx context.Context) error {
+		return s.writeMemory(ctx, req, botID, persisted)
+	}, slog.String("bot_id", botID), slog.String("session_id", req.ThreadID))
+}
+
+// writeMemory is the body of one memory unit.
+func (s *Service) writeMemory(ctx context.Context, req ChatRequest, botID string, persisted []messagepkg.Message) error {
 	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
 		userMessage, err := s.messageService.GetByIDBySession(ctx, req.ThreadID, req.PersistedUserMessageID)
 		if err != nil {
-			s.logger.WarnContext(ctx, "load persisted user message for memory failed",
+			// The round is still written, without its user message.
+			dropped := errs.Wrap(err, "load persisted user message for memory",
 				slog.String("session_id", req.ThreadID),
 				slog.String("message_id", req.PersistedUserMessageID),
-				slog.Any("error", err),
 			)
+			result := errlog.Event(ctx, "agent.memory", dropped, errlog.Options{})
+			s.logger.LogAttrs(ctx, result.Level, "load persisted user message for memory failed", result.Attrs()...)
 		} else {
 			persisted = append([]messagepkg.Message{userMessage}, persisted...)
 		}
 	}
 	memMsgs := toProviderMessages(persisted)
 	if len(memMsgs) == 0 {
-		return
+		return nil
 	}
 
 	p := s.resolveMemoryProvider(ctx, botID)
 	if p == nil {
-		return
+		job.Annotate(ctx, slog.String("skipped", "no_provider"))
+		return nil
 	}
 	before, err := s.runChatHook(ctx, req, hooks.EventBeforeMemoryWrite, func(hreq *hooks.Request) {
 		hreq.Memory = map[string]any{
@@ -290,7 +305,8 @@ func (s *Service) storeMemory(ctx context.Context, req ChatRequest, persisted []
 	if err != nil {
 		s.logHookWarn(hooks.EventBeforeMemoryWrite, botID, req.ThreadID, err)
 		if before.Decision == hooks.DecisionDeny {
-			return
+			job.Annotate(ctx, slog.String("skipped", "hook_denied"))
+			return nil
 		}
 	}
 	_, tzLoc := s.resolveTimezone(ctx, req.BotID, req.UserID)
@@ -303,8 +319,7 @@ func (s *Service) storeMemory(ctx context.Context, req ChatRequest, persisted []
 		TimezoneLocation:  tzLoc,
 		SkipFormation:     runtimekind.IsExternal(req.RuntimeType),
 	}); err != nil {
-		s.logger.WarnContext(ctx, "memory provider OnAfterChat failed", slog.String("bot_id", botID), slog.Any("error", err))
-		return
+		return errs.Wrap(err, "memory provider after chat")
 	}
 	_, _ = s.runChatHook(ctx, req, hooks.EventMemoryExtracted, func(hreq *hooks.Request) {
 		hreq.Memory = map[string]any{
@@ -320,6 +335,7 @@ func (s *Service) storeMemory(ctx context.Context, req ChatRequest, persisted []
 	}); err != nil {
 		s.logHookWarn(hooks.EventAfterMemoryWrite, botID, req.ThreadID, err)
 	}
+	return nil
 }
 
 func toProviderMessages(persisted []messagepkg.Message) []memprovider.Message {

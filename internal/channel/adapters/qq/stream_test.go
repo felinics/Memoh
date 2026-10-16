@@ -1,9 +1,11 @@
 package qq
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -599,5 +601,33 @@ func TestQQOutboundStreamC2CResetRetiresStreamAndSendsRegeneratedReply(t *testin
 	}
 	if got := sent[0].Message.PlainText(); got != "重试后的回复" {
 		t.Fatalf("regenerated reply = %q, want only the surviving attempt's text", got)
+	}
+}
+
+func TestQQOutboundStreamShardFailureIsRecordedAsEventPerAttempt(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	stream := &qqOutboundStream{
+		target:         "c2c:user-openid",
+		streamInterval: 0,
+		now:            time.Now,
+		logger:         slog.New(slog.NewJSONHandler(&buf, nil)),
+		send:           func(context.Context, channel.PreparedOutboundMessage) error { return nil },
+		streamSend: func(context.Context, qqStreamShardRequest) (qqStreamShardResponse, error) {
+			return qqStreamShardResponse{}, errors.New("boom")
+		},
+	}
+
+	ctx := context.Background()
+	if err := stream.Push(ctx, preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "reply"})); err != nil {
+		t.Fatalf("push delta: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("records after one failed shard = %d, want 1: %s", len(lines), buf.String())
+	}
+	if !strings.Contains(lines[0], `"level":"WARN"`) || !strings.Contains(lines[0], `"fault"`) {
+		t.Fatalf("record = %s, want a WARN event with fault", lines[0])
 	}
 }

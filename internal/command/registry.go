@@ -23,6 +23,7 @@ type CommandContext struct {
 	ThreadID          string
 	RouteID           string
 	SessionID         string
+	SessionRuntime    string // SessionID's runtime type ("" when unknown)
 	Page              int    // zero-based page offset for paginated list commands
 	Prov              int    // provider index for the model picker (-1 if absent)
 	SelectID          string // stable model id for picker selection ("" if absent)

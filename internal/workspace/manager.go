@@ -21,6 +21,7 @@ import (
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/identity"
 	netctl "github.com/felinics/memoh/internal/network"
@@ -88,8 +89,10 @@ type ContainerMetricsStatus struct {
 }
 
 type ContainerStorageMetrics struct {
-	Path      string `json:"path"`
-	UsedBytes uint64 `json:"used_bytes"`
+	Path        string `json:"path"`
+	UsedBytes   uint64 `json:"used_bytes"`
+	LimitBytes  uint64 `json:"limit_bytes,omitempty"`
+	UsedUnknown bool   `json:"-"`
 }
 
 type ContainerMetricsResult struct {
@@ -523,8 +526,7 @@ func (m *Manager) Init(ctx context.Context) error {
 		StorageDriver: m.cfg.Snapshotter,
 	})
 	if err != nil {
-		m.logger.WarnContext(ctx, "base image preparation failed", slog.String("image", image), slog.Any("error", err))
-		return err
+		return errs.Wrap(err, "prepare base image", slog.String("image", image))
 	}
 	if result.Mode == ImagePrepareDelegated {
 		m.logger.InfoContext(ctx, "base image pull delegated to container backend", slog.String("image", image))
@@ -870,6 +872,9 @@ func (m *Manager) Stop(ctx context.Context, botID string, timeout time.Duration)
 	})
 }
 
+// errPreserveData marks a removal stopped by a failed export of /data.
+var errPreserveData = errors.New("preserve data")
+
 func (m *Manager) Delete(ctx context.Context, botID string, preserveData bool) error {
 	if err := validateBotID(botID); err != nil {
 		return err
@@ -879,7 +884,7 @@ func (m *Manager) Delete(ctx context.Context, botID string, preserveData bool) e
 
 	if preserveData {
 		if err := m.preserveDataBeforeDelete(ctx, botID); err != nil {
-			return fmt.Errorf("preserve data: %w", err)
+			return fmt.Errorf("%w: %w", errPreserveData, err)
 		}
 	}
 

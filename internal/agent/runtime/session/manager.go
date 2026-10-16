@@ -2,6 +2,8 @@ package sessionruntime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,6 +19,8 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agent/turn"
 	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -122,6 +126,9 @@ type runControl struct {
 	decisionMu        sync.Mutex
 	decisionReady     chan struct{}
 	decisionReadyOnce sync.Once
+
+	// Registered before a decision commits; drained when shutdown classifies waits.
+	decisionContinuations atomic.Int64
 	// stepMu guards the step cursor: the highest durable step index whose
 	// step_end marker this run has consumed into the live projection. Queue
 	// steer anchoring waits on it so the anchor never precedes output that the
@@ -580,7 +587,9 @@ func (m *Manager) reconcileAndObserveTerminalRun(ctx context.Context, run Termin
 	if m == nil || run.RunID == "" {
 		return
 	}
-	m.reconcileTerminalLive(context.WithoutCancel(ctx), run)
+	if err := m.reconcileTerminalLive(context.WithoutCancel(ctx), run); err != nil {
+		m.logger.WarnContext(ctx, "reconcile durable runtime terminal failed", slog.Any("error", err), slog.String("run_id", run.RunID))
+	}
 	m.observeTerminalRun(ctx, run)
 }
 
@@ -588,25 +597,36 @@ func (m *Manager) reconcileAndObserveTerminalRun(ctx context.Context, run Termin
 // outlived its owner. Unlike ordinary owner release, this path is allowed after
 // lease expiry. The backend atomically verifies the exact durable token against
 // the surviving snapshot (or the lease ref for older snapshots).
-func (m *Manager) reconcileTerminalLive(ctx context.Context, terminal TerminalRun) {
+func (m *Manager) reconcileTerminalLive(ctx context.Context, terminal TerminalRun) error {
 	if m == nil || m.distributed == nil || terminal.FencingToken <= 0 {
-		return
+		return nil
 	}
 	key := Key{BotID: terminal.BotID, SessionID: terminal.SessionID}
 	current, ok, err := m.backend.Load(ctx, key)
 	if err != nil {
-		m.logger.WarnContext(ctx, "load runtime snapshot for terminal reconciliation failed", slog.Any("error", err), slog.String("run_id", terminal.RunID))
-		return
+		return fmt.Errorf("load runtime snapshot for terminal reconciliation: %w", err)
 	}
 	if !ok || current.CurrentRunView == nil || current.CurrentRunView.RunID != terminal.RunID {
-		return
+		return nil
 	}
 	run := current.CurrentRunView
 	status := liveRunStatus(ledger.State(terminal.State))
-	if run.Status == status && run.OwnerLeaseExpiresAt == nil && run.ProposedTerminalStatus == "" {
-		return
+	pendingDecision := false
+	for _, message := range run.Messages {
+		pendingDecision = pendingDecision || message.UserInput != nil && (message.UserInput.Status == "pending" || message.UserInput.CanRespond) ||
+			message.Approval != nil && (message.Approval.Status == "pending" || message.Approval.CanApprove)
+	}
+	if run.Status == status && run.OwnerLeaseExpiresAt == nil && run.ProposedTerminalStatus == "" && !pendingDecision {
+		return nil
 	}
 	ref := RunRef{BotID: key.BotID, SessionID: key.SessionID, RunID: run.RunID, OwnerID: run.OwnerID, Generation: run.Generation, FencingToken: terminal.FencingToken}
+	if run.FencingToken > 0 && run.FencingToken < terminal.FencingToken {
+		// Graceful handoff advanced the DB fence without replacing this old
+		// receipt. A durable terminal outcome supersedes an older same-run
+		// projection. CAS against that exact receipt; a concurrent successor
+		// receipt or a different run still fails the backend's ownership check.
+		ref.FencingToken = run.FencingToken
+	}
 	snapshot, changed, err := m.distributed.ReconcileTerminalRun(ctx, key, ref, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
 		run := snapshot.CurrentRunView
 		if run == nil || run.RunID != ref.RunID || run.Generation != ref.Generation || run.OwnerID != ref.OwnerID {
@@ -615,24 +635,41 @@ func (m *Manager) reconcileTerminalLive(ctx context.Context, terminal TerminalRu
 		snapshot.Seq++
 		snapshot.UpdatedAt = now
 		run.Status = status
+		run.FencingToken = terminal.FencingToken
 		run.UpdatedAt = now
 		run.OwnerLeaseExpiresAt = nil
 		run.ProposedTerminalStatus = ""
 		run.FinishProposedAt = nil
+		run.Retry = nil
 		run.ErrorCode = strings.TrimSpace(terminal.ErrorCode)
 		if status == RunStatusCompleted || status == RunStatusAborted {
 			run.ErrorCode = ""
 		}
+		for i := range run.Messages {
+			message := &run.Messages[i]
+			if message.UserInput != nil {
+				message.UserInput.CanRespond = false
+				if message.UserInput.Status == "pending" {
+					message.UserInput.Status = "canceled"
+				}
+			}
+			if message.Approval != nil {
+				message.Approval.CanApprove = false
+				if message.Approval.Status == "pending" {
+					message.Approval.Status = "cancelled"
+				}
+			}
+		}
 		return snapshot, true, nil
 	})
 	if err != nil {
-		if !errors.Is(err, ErrRunOwnershipLost) {
-			m.logger.WarnContext(ctx, "reconcile durable runtime terminal to live state failed", slog.Any("error", err), slog.String("run_id", terminal.RunID))
+		if errors.Is(err, ErrRunOwnershipLost) {
+			return nil
 		}
-		return
+		return fmt.Errorf("reconcile durable runtime terminal to live state: %w", err)
 	}
 	if !changed {
-		return
+		return nil
 	}
 	delta := runtimeRunPatch(snapshot, true, true, true)
 	if err := m.publishRuntimeDelta(ctx, snapshot, terminal.RunID, delta); err != nil {
@@ -642,6 +679,7 @@ func (m *Manager) reconcileTerminalLive(ctx context.Context, terminal TerminalRu
 		BotID: terminal.BotID, SessionID: terminal.SessionID, RunID: terminal.RunID,
 		Generation: ref.Generation, FencingToken: terminal.FencingToken,
 	})
+	return nil
 }
 
 func (m *Manager) reconcileTerminalRuns(ctx context.Context) error {
@@ -704,7 +742,7 @@ func (m *Manager) reconcileLocalFinishHandoffs(ctx context.Context) error {
 			errs = append(errs, liveErr)
 			continue
 		}
-		if errors.Is(liveErr, ErrRunOwnershipLost) && !changed {
+		if errors.Is(liveErr, ErrRunOwnershipLost) && !changed && m.projectionHoldsActiveRun(ctx, handle) {
 			errs = append(errs, liveErr)
 			continue
 		}
@@ -718,6 +756,17 @@ func (m *Manager) reconcileLocalFinishHandoffs(ctx context.Context) error {
 		m.mu.Unlock()
 	}
 	return errors.Join(errs...)
+}
+
+// projectionHoldsActiveRun reports whether the live projection still shows
+// handle's run as active, the only state a durable terminal has to release.
+// A projection it cannot read is assumed to.
+func (m *Manager) projectionHoldsActiveRun(ctx context.Context, handle RunHandle) bool {
+	snapshot, ok, err := m.backend.Load(ctx, handle.key())
+	if err != nil {
+		return true
+	}
+	return ok && runMatchesHandle(snapshot.CurrentRunView, handle) && isActiveRunStatus(snapshot.CurrentRunView.Status)
 }
 
 func (m *Manager) Start(ctx context.Context) error {
@@ -848,7 +897,8 @@ func (m *Manager) startReaper(ctx context.Context) error {
 	}
 	reaper := NewReaper(m.runs, m.liveness, m.tuning, m.ownerID, m.logger)
 	reaper.SetWaitingDecisionRecoverer(m.recoverWaitingDecision)
-	reaper.SetTerminalObserver(m.reconcileAndObserveTerminalRun)
+	reaper.SetTerminalLiveReconciler(m.reconcileTerminalLive)
+	reaper.SetTerminalObserver(m.observeTerminalRun)
 	reaper.SetTerminalReconciler(m.reconcileTerminalRuns)
 	m.mu.Lock()
 	cancelLostRunDecisions := m.cancelLostRunDecisions
@@ -872,7 +922,7 @@ func (m *Manager) CloseContext(ctx context.Context) error {
 		return nil
 	}
 	if m.closeCh != nil {
-		m.closeOnce.Do(func() { close(m.closeCh) })
+		m.closeAdmission()
 	}
 	shutdownCtx := context.WithoutCancel(ctx)
 	m.shutdownOnce.Do(func() {
@@ -1362,6 +1412,9 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 		return TerminalRun{}, ErrRunOwnershipLost
 	}
 	ctrl := m.localControlForHandle(handle)
+	if ctrl == nil && m.isClosed() {
+		return TerminalRun{}, ErrRunOwnershipLost
+	}
 	if ctrl != nil && handle.FencingToken <= 0 {
 		handle.FencingToken = ctrl.fencingToken
 	}
@@ -1471,7 +1524,10 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 	}
 	if errors.Is(err, ErrRunOwnershipLost) {
 		snapshot, ok, loadErr := m.backend.Load(context.WithoutCancel(ctx), handle.key())
-		if loadErr == nil && ok && runMatchesHandle(snapshot.CurrentRunView, handle) && !isActiveRunStatus(snapshot.CurrentRunView.Status) {
+		// This owner's terminal write landed and then a history reset dropped
+		// the run from the projection: nothing is left to release.
+		released := terminal.Applied && loadErr == nil && (!ok || snapshot.CurrentRunView == nil)
+		if released || loadErr == nil && ok && runMatchesHandle(snapshot.CurrentRunView, handle) && !isActiveRunStatus(snapshot.CurrentRunView.Status) {
 			m.cleanupFinishedRun(context.WithoutCancel(ctx), handle)
 			return terminal, nil
 		}
@@ -1624,6 +1680,7 @@ func (m *Manager) finishRunState(ctx context.Context, handle RunHandle, status, 
 		snapshot.CurrentRunView.OwnerLeaseExpiresAt = nil
 		snapshot.CurrentRunView.ProposedTerminalStatus = ""
 		snapshot.CurrentRunView.FinishProposedAt = nil
+		snapshot.CurrentRunView.Retry = nil
 		return snapshot, true, nil
 	}, func(snapshot Snapshot) RuntimeDelta {
 		if admissionTerminal {
@@ -1872,6 +1929,7 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 	// sees the set it just shrank: the live projection may only leave
 	// waiting_decision when no sibling decision remains open.
 	resumeLiveOnTerminal := inlineDecision && !ctrl.decisionWaitActive()
+	retryCleared := false
 	snapshot, changed, err := m.updateActiveAndPublish(ctx, handle, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
 		run := snapshot.CurrentRunView
 		// Finalization may replay a durable decision after the run entered
@@ -1885,8 +1943,18 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 		snapshot.Seq++
 		snapshot.UpdatedAt = now
 		run.UpdatedAt = now
+		retryCleared = run.Retry != nil
+		run.Retry = nil
 		if event.Type == native.EventRetry {
 			run.Messages = []chatview.UIMessage{}
+			run.Retry = &RunRetryView{
+				Attempt:    event.Attempt,
+				MaxAttempt: event.MaxAttempt,
+				DelayMs:    event.RetryDelayMs,
+				Reason:     event.RetryReason,
+				RetryAt:    now.Add(time.Duration(event.RetryDelayMs) * time.Millisecond),
+			}
+			retryCleared = false
 		}
 		for _, msg := range messages {
 			run.Messages = upsertUIMessage(run.Messages, msg)
@@ -1943,6 +2011,15 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 			delta.Run = runtimeRunPatch(snapshot, true, false, false).Run
 		case native.EventError, native.EventRetry:
 			delta.Run = runtimeRunPatch(snapshot, false, true, false).Run
+		}
+		// Retry state rides every patch that follows an event changing it.
+		if event.Type == native.EventRetry || retryCleared {
+			if delta.Run == nil {
+				delta.Run = runtimeRunPatch(snapshot, false, false, false).Run
+			}
+			if delta.Run != nil {
+				delta.Run.setRetry(snapshot.CurrentRunView.Retry)
+			}
 		}
 		return delta
 	})
@@ -2013,6 +2090,27 @@ func (m *Manager) Snapshot(ctx context.Context, botID, sessionID string) (Snapsh
 		return Snapshot{}, err
 	}
 	return m.hydrateSnapshotFromLedger(ctx, snapshot), nil
+}
+
+// subscriberSnapshot is Snapshot as a subscriber is sent it. A run read from
+// the ledger is not part of the live sequence, and the ledger can change while
+// the live cursor stands still, as a history reset does to it. A client
+// discards a snapshot that does not move its cursor, so a snapshot with a run
+// from the ledger carries an epoch of its own that changes with that run.
+func (m *Manager) subscriberSnapshot(ctx context.Context, botID, sessionID string) (Snapshot, error) {
+	if m == nil || m.backend == nil {
+		return EmptySnapshot(botID, sessionID), nil
+	}
+	snapshot, err := m.liveSnapshot(ctx, botID, sessionID)
+	if err != nil || snapshot.CurrentRunView != nil {
+		return snapshot, err
+	}
+	snapshot = m.hydrateSnapshotFromLedger(ctx, snapshot)
+	if run := snapshot.CurrentRunView; run != nil && strings.TrimSpace(snapshot.Epoch) != "" {
+		sum := sha256.Sum256([]byte(strings.Join([]string{run.RunID, run.Status, run.ErrorCode, run.ProposedTerminalStatus}, "\x00")))
+		snapshot.Epoch = strings.TrimSpace(snapshot.Epoch) + ":ledger-" + hex.EncodeToString(sum[:8])
+	}
+	return snapshot, nil
 }
 
 func (m *Manager) liveSnapshot(ctx context.Context, botID, sessionID string) (Snapshot, error) {
@@ -2174,7 +2272,7 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 		cancel()
 		return Subscription{}, err
 	}
-	baseline, err := m.Snapshot(subCtx, key.BotID, key.SessionID)
+	baseline, err := m.subscriberSnapshot(subCtx, key.BotID, key.SessionID)
 	if err != nil {
 		backendSub.Close()
 		cancel()
@@ -2233,15 +2331,25 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 				Message:   message,
 			})
 		}
+		unreadable := false
 		reconcile := func(observedEpoch string, observedSeq int64, reason string) bool {
-			snapshot, err := m.Snapshot(subCtx, key.BotID, key.SessionID)
+			snapshot, err := m.subscriberSnapshot(subCtx, key.BotID, key.SessionID)
 			if err != nil {
-				if subCtx.Err() == nil {
-					m.logger.WarnContext(ctx, "reconcile runtime subscription failed", slog.Any("error", err), slog.String("session_id", key.SessionID), slog.String("reason", reason))
-					terminalDrop(reason + ": snapshot unavailable")
+				if subCtx.Err() != nil {
+					return false
 				}
-				return false
+				// The subscription stays and the next reconcile reads again. A
+				// client sent away to subscribe again can be refused, as for a
+				// session deleted meanwhile, and would keep what it shows.
+				if !unreadable {
+					result := errlog.Event(ctx, "session_runtime.subscription", errs.WrapDependency(err, "reconcile runtime subscription",
+						slog.String("session_id", key.SessionID), slog.String("reason", reason)), errlog.Options{})
+					m.logger.LogAttrs(ctx, result.Level, "reconcile runtime subscription failed", result.Attrs()...)
+				}
+				unreadable = true
+				return true
 			}
+			unreadable = false
 			snapshotEpoch := strings.TrimSpace(snapshot.Epoch)
 			observedEpoch = strings.TrimSpace(observedEpoch)
 			if snapshotEpoch == "" {

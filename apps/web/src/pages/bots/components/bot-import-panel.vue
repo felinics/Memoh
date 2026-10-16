@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { InlineLoadingRow, toast } from '@felinic/ui'
+import { CalloutBanner, InlineLoadingRow, toast } from '@felinic/ui'
 import {
   Avatar,
   AvatarFallback,
@@ -288,22 +288,22 @@ async function handleImport() {
       </InlineLoadingRow>
 
       <!-- Backup unreadable / unsupported -->
-      <div
+      <CalloutBanner
         v-else-if="selectedFile && previewError"
-        class="rounded-md border border-destructive-border bg-destructive-soft p-3 text-xs text-destructive"
-      >
-        {{ previewError }}
-      </div>
+        tone="destructive"
+        size="sm"
+        :description="previewError"
+      />
 
       <!-- Preview -->
       <template v-else-if="preview">
-        <div
+        <CalloutBanner
           v-for="conflict in preview.conflicts || []"
           :key="conflict"
-          class="rounded-md border border-destructive-border bg-destructive-soft p-2.5 text-[11px] text-destructive"
-        >
-          {{ conflict }}
-        </div>
+          tone="destructive"
+          size="sm"
+          :description="conflict"
+        />
 
         <!-- Encrypted bundle: prompt for the passphrase before anything else -->
         <div

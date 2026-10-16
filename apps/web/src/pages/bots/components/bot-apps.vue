@@ -23,21 +23,6 @@
 
       <div class="space-y-8">
         <CalloutBanner
-          v-if="data?.dependency_catalog_stale"
-          :title="t('bots.dependencies.catalogStaleTitle')"
-          :description="t('bots.dependencies.catalogStaleDescription')"
-        >
-          <Button
-            variant="outline"
-            size="sm"
-            :loading="retrying"
-            @click="retryDiscovery"
-          >
-            {{ t('common.retry') }}
-          </Button>
-        </CalloutBanner>
-
-        <CalloutBanner
           v-if="banner"
           tone="warning"
           :title="banner.title"
@@ -277,7 +262,6 @@ import {
   deleteBotsByBotIdConnectorsByConnectionId,
   getConnectorsCatalog,
   patchBotsByBotIdConnectorsByConnectionId,
-  postBotsByBotIdConnectorsByConnectionIdReauth,
   postBotsByBotIdContainerStart,
   type ConnectorsConnector,
 } from '@memohai/sdk'
@@ -318,14 +302,15 @@ import {
   type ScriptResponse,
 } from '@/composables/api/useWorkspaceDependencies'
 import {
-  connectorOAuthErrorKey,
-  openConnectorOAuthURL,
   prepareConnectorOAuthPopup,
-  waitForConnectorOAuth,
+  reauthorizeConnector,
+  reauthorizeFailureNotice,
 } from '@/composables/useConnectorOAuth'
+import { useComposerPrefill } from '@/composables/useComposerPrefill'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import { useCapabilitiesStore } from '@/store/capabilities'
+import { useUserStore } from '@/store/user'
 import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import {
   dependencyAllows,
@@ -340,10 +325,12 @@ import {
 const props = defineProps<{ botId: string }>()
 
 const { t, locale } = useI18n()
+const { prefillComposer } = useComposerPrefill()
 const route = useRoute()
 const router = useRouter()
 const queryCache = useQueryCache()
 const capabilitiesStore = useCapabilitiesStore()
+const userStore = useUserStore()
 const { run: runMutation } = useDialogMutation()
 const { dependencyName } = useWorkspaceDependencyText()
 const botIdRef = computed(() => props.botId) as Ref<string>
@@ -354,8 +341,7 @@ onMounted(() => {
 
 // ---- App list -----------------------------------------------------------
 
-const forceRefresh = ref(false)
-const { data, error, isLoading, refetch } = useBotAppsQuery(botIdRef, forceRefresh)
+const { data, error, isLoading, refetch } = useBotAppsQuery(botIdRef)
 
 // Pinia Colada's refetch ignores `enabled`, so manual refreshes must skip the
 // window before the bot id is known; otherwise they hit `/bots//apps`.
@@ -388,18 +374,6 @@ function openDetail(item: AppItem) {
 function closeDetail() {
   const { app: _drop, ...rest } = route.query
   void router.replace({ query: rest }).catch(() => {})
-}
-
-const retrying = ref(false)
-async function retryDiscovery() {
-  if (retrying.value) return
-  retrying.value = true
-  try {
-    forceRefresh.value = true
-    await refetchApps()
-  } finally {
-    retrying.value = false
-  }
 }
 
 const banner = computed(() => {
@@ -477,6 +451,9 @@ function onAppAction(item: AppItem, action: AppRowAction) {
       return
     case 'remove':
       void openRemove(item)
+      return
+    case 'tryIt':
+      void prefillComposer(t('apps.tryIt.prompt', { name: appDisplayName(item, locale.value) }), { botId: props.botId })
       return
     default:
       break
@@ -602,19 +579,13 @@ async function reauthorize(connector: AppConnectorItem) {
   const popup = prepareConnectorOAuthPopup(t('common.loading'))
   connectorPending.value.add(key)
   try {
-    const { data } = await postBotsByBotIdConnectorsByConnectionIdReauth({
-      path: { bot_id: props.botId, connection_id: connectionId },
-      throwOnError: true,
-    })
-    if (!data.authorization_url) throw new Error('oauth_failed')
-    await openConnectorOAuthURL(data.authorization_url, popup)
-    await waitForConnectorOAuth(props.botId, connectionId, popup)
+    await reauthorizeConnector(props.botId, connectionId, popup)
     await onConnectorAuthorized()
     toast.success(t('connectors.oauthSuccess'))
   } catch (err) {
     popup?.close()
-    const oauthKey = connectorOAuthErrorKey(err)
-    toast.error(oauthKey ? t(oauthKey) : resolveApiErrorMessage(err, t('connectors.oauthFailed')))
+    const notice = reauthorizeFailureNotice(err, t, userStore.userInfo.role, connector, connectorCatalog.value)
+    toast.error(notice.message, { duration: notice.duration })
   } finally {
     connectorPending.value.delete(key)
   }
@@ -812,7 +783,8 @@ async function checkUpdates() {
       onSuccess: async (refreshed) => {
         queryCache.setQueryData(['bot-apps', props.botId], refreshed)
         await Promise.all([invalidateBotApps(queryCache, props.botId), invalidateBotDependencies(queryCache, props.botId)])
-        toast.success(t('apps.checkUpdatesDone'))
+        if (refreshed.update_checks_incomplete) toast.warning(t('apps.checkUpdatesIncomplete'))
+        else toast.success(t('apps.checkUpdatesDone'))
       },
     })
   } finally {
@@ -848,12 +820,15 @@ function goToSupermarket() {
 }
 
 // ---- Polling for operations this client does not own ------------------------
+// Also while the server refreshes the dependency catalog in the background,
+// so a newer catalog shows up without the user asking for it.
 
 const POLL_MS = 5_000
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let tabActive = true
 
 const hasForeignProgress = computed(() => items.value.some(item => appInProgress(item) && !ownsAppStream(item.registry_id, item.app_id)))
+const catalogRefreshing = computed(() => data.value?.dependency_catalog_refreshing === true)
 
 function stopPolling() {
   if (pollTimer) {
@@ -863,7 +838,7 @@ function stopPolling() {
 }
 
 function syncPolling() {
-  const shouldPoll = tabActive && hasForeignProgress.value
+  const shouldPoll = tabActive && (hasForeignProgress.value || catalogRefreshing.value)
   if (shouldPoll && !pollTimer) {
     pollTimer = setInterval(() => {
       if (typeof document === 'undefined' || document.visibilityState === 'visible') void refetchApps()
@@ -873,7 +848,7 @@ function syncPolling() {
   }
 }
 
-watch(hasForeignProgress, syncPolling, { immediate: true })
+watch([hasForeignProgress, catalogRefreshing], syncPolling, { immediate: true })
 
 onActivated(() => {
   tabActive = true

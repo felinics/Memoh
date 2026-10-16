@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 
 	connectsdk "github.com/felinics/connect-it/sdk/go"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/connectors"
 	"github.com/felinics/memoh/internal/supermarket"
 	"github.com/felinics/memoh/internal/workspacedeps"
@@ -78,7 +80,8 @@ func (m *memoryStore) Upsert(_ context.Context, in UpsertInstallation) (Installa
 	defer m.mu.Unlock()
 	for id, inst := range m.installations {
 		if inst.BotID == in.BotID && inst.RegistryID == in.RegistryID && inst.AppID == in.AppID {
-			inst.Revision, inst.Version, inst.Status, inst.Release, inst.LastError = in.Revision, in.Version, in.Status, in.Release, ""
+			inst.Revision, inst.Version, inst.Status, inst.Release = in.Revision, in.Version, in.Status, in.Release
+			inst.LastError, inst.LastErrorCode = "", ""
 			if in.Reason == ReasonUser {
 				inst.Reason = ReasonUser
 			}
@@ -96,14 +99,14 @@ func (m *memoryStore) Upsert(_ context.Context, in UpsertInstallation) (Installa
 	return inst, nil
 }
 
-func (m *memoryStore) SetStatus(_ context.Context, botID, id string, status Status, lastError string) (Installation, error) {
+func (m *memoryStore) SetStatus(_ context.Context, botID, id string, status Status, lastErrorCode string) (Installation, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	inst, ok := m.installations[id]
 	if !ok || inst.BotID != botID {
 		return Installation{}, ErrNotInstalled
 	}
-	inst.Status, inst.LastError = status, lastError
+	inst.Status, inst.LastError, inst.LastErrorCode = status, "", lastErrorCode
 	m.installations[id] = inst
 	return inst, nil
 }
@@ -319,11 +322,12 @@ func (f *fakePublisher) RemoveSkills(_ context.Context, _, _, appID, _ string) (
 }
 
 type fakeDeps struct {
-	present    map[string]workspacedeps.Entry
-	installErr map[string]error
-	installed  []string
-	updated    []string
-	removed    []string
+	present          map[string]workspacedeps.Entry
+	installErr       map[string]error
+	checksIncomplete bool
+	installed        []string
+	updated          []string
+	removed          []string
 }
 
 func (f *fakeDeps) list() workspacedeps.ListResult {
@@ -343,7 +347,9 @@ func (f *fakeDeps) Refresh(context.Context, string) (workspacedeps.ListResult, e
 }
 
 func (f *fakeDeps) CheckUpdates(context.Context, string) (workspacedeps.ListResult, error) {
-	return f.list(), nil
+	result := f.list()
+	result.ChecksIncomplete = f.checksIncomplete
+	return result, nil
 }
 
 func (f *fakeDeps) Install(_ context.Context, _, depID, _ string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error) {
@@ -597,7 +603,7 @@ func TestInstallIsPartialWhenADependencyFailsAndResumeCompletesIt(t *testing.T) 
 	h.publish(pkg)
 
 	result, rec := h.install(t, pkg)
-	if result.Installation.Status != StatusPartial || !strings.Contains(result.Installation.LastError, "npm exploded") {
+	if result.Installation.Status != StatusPartial || result.Installation.LastErrorCode != string(apperror.CodeAppOperationFailed) || result.Installation.LastError != "" {
 		t.Fatalf("installation = %+v", result.Installation)
 	}
 	if !strings.Contains(rec.types(), "step_done:dependency:codex=failed") || !strings.HasSuffix(rec.types(), "done=partial") {
@@ -609,7 +615,7 @@ func TestInstallIsPartialWhenADependencyFailsAndResumeCompletesIt(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
-	if resumed.Installation.Status != StatusInstalled || resumed.Installation.LastError != "" {
+	if resumed.Installation.Status != StatusInstalled || resumed.Installation.LastErrorCode != "" {
 		t.Fatalf("resumed installation = %+v", resumed.Installation)
 	}
 	if len(h.publisher.published) != 2 {
@@ -844,6 +850,139 @@ func TestCheckUpdatesIgnoresAppMissingFromRealRegistry(t *testing.T) {
 	}
 	if live := items["live"]; live.AvailableRevision != liveRevision || live.AvailableVersion != "2.0.0" || live.LastCheckedAt == nil {
 		t.Fatalf("remaining App check = %+v", live)
+	}
+}
+
+// hookedRegistry runs fetch before answering FetchCurrentApp from the
+// wrapped registry.
+type hookedRegistry struct {
+	*fakeRegistry
+	fetch func(ctx context.Context, appID string) error
+}
+
+func (r *hookedRegistry) FetchCurrentApp(ctx context.Context, registryID, appID string) (supermarket.AppDescriptor, error) {
+	if err := r.fetch(ctx, appID); err != nil {
+		return supermarket.AppDescriptor{}, err
+	}
+	return r.fakeRegistry.FetchCurrentApp(ctx, registryID, appID)
+}
+
+func installApps(t *testing.T, h *harness, ids ...string) {
+	t.Helper()
+	for i, id := range ids {
+		pkg := release("memoh", id, strconv.Itoa(i), "1.0.0", nil, nil, nil)
+		h.publish(pkg)
+		h.install(t, pkg)
+	}
+}
+
+func checkedAt(result ListResult) map[string]*time.Time {
+	out := make(map[string]*time.Time, len(result.Items))
+	for _, item := range result.Items {
+		if item.Installation != nil {
+			out[item.AppID] = item.Installation.LastCheckedAt
+		}
+	}
+	return out
+}
+
+func TestCheckUpdatesQueriesTheRegistryConcurrently(t *testing.T) {
+	h := newHarness()
+	ids := make([]string, 0, 2*appCheckConcurrency)
+	for i := range 2 * appCheckConcurrency {
+		ids = append(ids, fmt.Sprintf("app-%d", i))
+	}
+	installApps(t, h, ids...)
+	var running, peak atomic.Int32
+	release := make(chan struct{})
+	go func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for running.Load() < appCheckConcurrency && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		close(release)
+	}()
+	h.service.registry = &hookedRegistry{fakeRegistry: h.registry, fetch: func(context.Context, string) error {
+		n := running.Add(1)
+		defer running.Add(-1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		<-release
+		return nil
+	}}
+
+	checked, err := h.service.CheckUpdates(context.Background(), testBotID)
+	if err != nil {
+		t.Fatalf("CheckUpdates: %v", err)
+	}
+	if got := peak.Load(); got != appCheckConcurrency {
+		t.Errorf("peak concurrent registry requests = %d, want %d", got, appCheckConcurrency)
+	}
+	if checked.UpdateChecksIncomplete {
+		t.Error("UpdateChecksIncomplete set although every check finished")
+	}
+	for id, at := range checkedAt(checked) {
+		if at == nil {
+			t.Errorf("%s was not checked", id)
+		}
+	}
+}
+
+func TestCheckUpdatesBudgetReportsUncheckedApps(t *testing.T) {
+	h := newHarness()
+	installApps(t, h, "fast", "slow")
+	h.service.updateCheckBudget = 50 * time.Millisecond
+	h.service.registry = &hookedRegistry{fakeRegistry: h.registry, fetch: func(ctx context.Context, appID string) error {
+		if appID == "slow" {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
+	}}
+
+	checked, err := h.service.CheckUpdates(context.Background(), testBotID)
+	if err != nil {
+		t.Fatalf("CheckUpdates: %v", err)
+	}
+	if !checked.UpdateChecksIncomplete {
+		t.Error("UpdateChecksIncomplete not set after the budget ran out")
+	}
+	at := checkedAt(checked)
+	if at["fast"] == nil || at["slow"] != nil {
+		t.Errorf("checked at = fast %v, slow %v; want only fast recorded", at["fast"], at["slow"])
+	}
+
+	// Dependency checks the budget cut short make the view incomplete too.
+	h.service.registry = h.registry
+	h.deps.checksIncomplete = true
+	checked, err = h.service.CheckUpdates(context.Background(), testBotID)
+	if err != nil || !checked.UpdateChecksIncomplete {
+		t.Errorf("CheckUpdates = incomplete %v, %v; want the dependency verdict carried", checked.UpdateChecksIncomplete, err)
+	}
+}
+
+func TestCheckUpdatesOutlivesTheRequestAndReportsRegistryFailures(t *testing.T) {
+	h := newHarness()
+	installApps(t, h, "only")
+	ctx, cancel := context.WithCancel(context.Background())
+	h.service.registry = &hookedRegistry{fakeRegistry: h.registry, fetch: func(context.Context, string) error {
+		// The proxy gives up while the registry answers.
+		cancel()
+		return nil
+	}}
+	checked, err := h.service.CheckUpdates(ctx, testBotID)
+	if err != nil || checkedAt(checked)["only"] == nil || checked.UpdateChecksIncomplete {
+		t.Fatalf("CheckUpdates = %+v, %v; want the check recorded", checked, err)
+	}
+
+	unavailable := errors.New("registry unavailable")
+	h.service.registry = &hookedRegistry{fakeRegistry: h.registry, fetch: func(context.Context, string) error { return unavailable }}
+	if _, err := h.service.CheckUpdates(context.Background(), testBotID); !errors.Is(err, unavailable) {
+		t.Fatalf("CheckUpdates with a failing registry = %v, want it reported", err)
 	}
 }
 

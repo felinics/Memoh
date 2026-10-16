@@ -71,5 +71,5 @@ func (r *runFailureReply) reply(t *i18n.Localizer, turnErr error) (channel.Strea
 	if turnErr != nil && apperror.CodeOf(turnErr) == code {
 		args = apperror.ArgsOf(turnErr)
 	}
-	return channel.RunFailureEvent(t, code, args), true
+	return channel.CodeEvent(t, code, args), true
 }

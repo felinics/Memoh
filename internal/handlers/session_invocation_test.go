@@ -21,6 +21,7 @@ import (
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/server"
 	"github.com/felinics/memoh/internal/testutil/sessionledger"
 )
 
@@ -291,13 +292,14 @@ func TestGetSessionInvocationRequiresSessionReadAccess(t *testing.T) {
 			handler := newInvocationTestHandler(queries, lookup)
 
 			_, err := callGetSessionInvocation(handler, tc.sessionID, invocationTestInvocation, invocationTestOwnerID)
-			var httpErr *echo.HTTPError
-			if !errors.As(err, &httpErr) || httpErr.Code != tc.wantStatus {
+			if got := invocationTestStatus(err); got != tc.wantStatus {
 				t.Fatalf("GetSessionInvocation() error = %v, want HTTP %d", err, tc.wantStatus)
 			}
+			if tc.wantStatus == http.StatusNotFound && apperror.CodeOf(err) != apperror.CodeSessionNotFound {
+				t.Fatalf("GetSessionInvocation() code = %q, want session.not_found", apperror.CodeOf(err))
+			}
 			_, getErr := callGetSession(handler, invocationTestBotID, tc.sessionID, invocationTestOwnerID)
-			var getHTTPErr *echo.HTTPError
-			if !errors.As(getErr, &getHTTPErr) || getHTTPErr.Code != httpErr.Code || getHTTPErr.Message != httpErr.Message {
+			if invocationTestStatus(getErr) != tc.wantStatus || apperror.CodeOf(getErr) != apperror.CodeOf(err) {
 				t.Fatalf("GetSession() error = %v, want the same error as the invocation lookup (%v)", getErr, err)
 			}
 			if len(lookup.calls) != 0 {
@@ -312,7 +314,7 @@ func TestGetSessionInvocationLedgerFailureIsServerError(t *testing.T) {
 	handler := newInvocationTestHandler(newInvocationTestQueries(invocationTestSession(invocationTestSessionA, invocationTestOwnerID)), lookup)
 
 	_, err := callGetSessionInvocation(handler, invocationTestSessionA, invocationTestInvocation, invocationTestOwnerID)
-	problem, ok := apperror.ProblemFrom(err, "invocation-request")
+	problem, ok := server.ProblemFrom(err, "invocation-request")
 	if !ok || problem.Status != http.StatusInternalServerError || problem.Code != string(apperror.CodeInternal) {
 		t.Fatalf("GetSessionInvocation() error = %v, want internal Problem with HTTP 500", err)
 	}
@@ -326,4 +328,15 @@ func TestGetSessionInvocationLedgerFailureIsServerError(t *testing.T) {
 	if strings.Contains(string(public), "database unavailable") {
 		t.Fatalf("internal error leaked to the client: %s", public)
 	}
+}
+
+// invocationTestStatus returns the HTTP status of a transport error or of a
+// public error, and 0 for any other error.
+func invocationTestStatus(err error) int {
+	var httpErr *echo.HTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.Code
+	}
+	def, _ := apperror.Lookup(apperror.CodeOf(err))
+	return def.HTTPStatus
 }

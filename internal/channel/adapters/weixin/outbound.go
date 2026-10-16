@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/media"
 )
 
@@ -129,7 +130,7 @@ func sendMediaBytes(ctx context.Context, client *Client, cfg adapterConfig, targ
 			},
 		}
 	default:
-		return fmt.Errorf("weixin: unsupported media item type %d", itemType)
+		return errs.New("weixin: unsupported media item type", slog.Int("item_type", itemType))
 	}
 
 	if logger != nil {

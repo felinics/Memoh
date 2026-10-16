@@ -69,7 +69,7 @@
                 role="button"
                 tabindex="0"
                 @click="openInstalled(app)"
-                @keydown.enter.prevent="openInstalled(app)"
+                @keydown.enter.exact.prevent="openInstalled(app)"
                 @keydown.space.prevent="openInstalled(app)"
               >
                 <div :class="appIconFrameClass">
@@ -142,7 +142,7 @@
             role="button"
             tabindex="0"
             @click="openCatalog(app)"
-            @keydown.enter.prevent="openCatalog(app)"
+            @keydown.enter.exact.prevent="openCatalog(app)"
             @keydown.space.prevent="openCatalog(app)"
           >
             <div :class="appIconFrameClass">
@@ -167,7 +167,8 @@
                   :disabled="!canInstall || !!pendingApp"
                   :loading="pendingApp === appKey(app)"
                   @click.stop="prepareInstall(app)"
-                  @keydown.stop
+                  @keydown.enter.exact.stop
+                  @keydown.space.stop
                 >
                   {{ t('supermarket.install') }}
                 </Button>

@@ -529,11 +529,13 @@ const file_internal_agent_turn_turnpb_turn_proto_rawDesc = "" +
 	"\x03seq\x18\x04 \x01(\x03R\x03seq\x12\x12\n" +
 	"\x04kind\x18\x05 \x01(\tR\x04kind\x12\x18\n" +
 	"\apayload\x18\x06 \x01(\fR\apayload\"\v\n" +
-	"\tCompleted2\xc2\x05\n" +
+	"\tCompleted2\xd7\x06\n" +
 	"\vTurnService\x12J\n" +
 	"\x0fRuntimeCommands\x12\x1a.memoh.turn.v1.JsonRequest\x1a\x1b.memoh.turn.v1.JsonResponse\x12J\n" +
 	"\x0fRuntimeControls\x12\x1a.memoh.turn.v1.JsonRequest\x1a\x1b.memoh.turn.v1.JsonResponse\x12I\n" +
-	"\x0eSetRuntimeMode\x12\x1a.memoh.turn.v1.JsonRequest\x1a\x1b.memoh.turn.v1.JsonResponse\x12P\n" +
+	"\x0eSetRuntimeMode\x12\x1a.memoh.turn.v1.JsonRequest\x1a\x1b.memoh.turn.v1.JsonResponse\x12G\n" +
+	"\fRuntimeModel\x12\x1a.memoh.turn.v1.JsonRequest\x1a\x1b.memoh.turn.v1.JsonResponse\x12J\n" +
+	"\x0fSetRuntimeModel\x12\x1a.memoh.turn.v1.JsonRequest\x1a\x1b.memoh.turn.v1.JsonResponse\x12P\n" +
 	"\x15ExecuteRuntimeCommand\x12\x1a.memoh.turn.v1.JsonRequest\x1a\x1b.memoh.turn.v1.JsonResponse\x12C\n" +
 	"\bStopTurn\x12\x1a.memoh.turn.v1.JsonRequest\x1a\x1b.memoh.turn.v1.JsonResponse\x12@\n" +
 	"\x03Run\x12\x19.memoh.turn.v1.RunRequest\x1a\x1a.memoh.turn.v1.RunResponse(\x010\x01\x12Q\n" +
@@ -570,23 +572,27 @@ var file_internal_agent_turn_turnpb_turn_proto_depIdxs = []int32{
 	0,  // 3: memoh.turn.v1.TurnService.RuntimeCommands:input_type -> memoh.turn.v1.JsonRequest
 	0,  // 4: memoh.turn.v1.TurnService.RuntimeControls:input_type -> memoh.turn.v1.JsonRequest
 	0,  // 5: memoh.turn.v1.TurnService.SetRuntimeMode:input_type -> memoh.turn.v1.JsonRequest
-	0,  // 6: memoh.turn.v1.TurnService.ExecuteRuntimeCommand:input_type -> memoh.turn.v1.JsonRequest
-	0,  // 7: memoh.turn.v1.TurnService.StopTurn:input_type -> memoh.turn.v1.JsonRequest
-	2,  // 8: memoh.turn.v1.TurnService.Run:input_type -> memoh.turn.v1.RunRequest
-	0,  // 9: memoh.turn.v1.TurnService.RespondToolApproval:input_type -> memoh.turn.v1.JsonRequest
-	0,  // 10: memoh.turn.v1.TurnService.RespondUserInput:input_type -> memoh.turn.v1.JsonRequest
-	0,  // 11: memoh.turn.v1.TurnService.AdvancePlainTextUserInput:input_type -> memoh.turn.v1.JsonRequest
-	1,  // 12: memoh.turn.v1.TurnService.RuntimeCommands:output_type -> memoh.turn.v1.JsonResponse
-	1,  // 13: memoh.turn.v1.TurnService.RuntimeControls:output_type -> memoh.turn.v1.JsonResponse
-	1,  // 14: memoh.turn.v1.TurnService.SetRuntimeMode:output_type -> memoh.turn.v1.JsonResponse
-	1,  // 15: memoh.turn.v1.TurnService.ExecuteRuntimeCommand:output_type -> memoh.turn.v1.JsonResponse
-	1,  // 16: memoh.turn.v1.TurnService.StopTurn:output_type -> memoh.turn.v1.JsonResponse
-	3,  // 17: memoh.turn.v1.TurnService.Run:output_type -> memoh.turn.v1.RunResponse
-	5,  // 18: memoh.turn.v1.TurnService.RespondToolApproval:output_type -> memoh.turn.v1.EventResponse
-	5,  // 19: memoh.turn.v1.TurnService.RespondUserInput:output_type -> memoh.turn.v1.EventResponse
-	1,  // 20: memoh.turn.v1.TurnService.AdvancePlainTextUserInput:output_type -> memoh.turn.v1.JsonResponse
-	12, // [12:21] is the sub-list for method output_type
-	3,  // [3:12] is the sub-list for method input_type
+	0,  // 6: memoh.turn.v1.TurnService.RuntimeModel:input_type -> memoh.turn.v1.JsonRequest
+	0,  // 7: memoh.turn.v1.TurnService.SetRuntimeModel:input_type -> memoh.turn.v1.JsonRequest
+	0,  // 8: memoh.turn.v1.TurnService.ExecuteRuntimeCommand:input_type -> memoh.turn.v1.JsonRequest
+	0,  // 9: memoh.turn.v1.TurnService.StopTurn:input_type -> memoh.turn.v1.JsonRequest
+	2,  // 10: memoh.turn.v1.TurnService.Run:input_type -> memoh.turn.v1.RunRequest
+	0,  // 11: memoh.turn.v1.TurnService.RespondToolApproval:input_type -> memoh.turn.v1.JsonRequest
+	0,  // 12: memoh.turn.v1.TurnService.RespondUserInput:input_type -> memoh.turn.v1.JsonRequest
+	0,  // 13: memoh.turn.v1.TurnService.AdvancePlainTextUserInput:input_type -> memoh.turn.v1.JsonRequest
+	1,  // 14: memoh.turn.v1.TurnService.RuntimeCommands:output_type -> memoh.turn.v1.JsonResponse
+	1,  // 15: memoh.turn.v1.TurnService.RuntimeControls:output_type -> memoh.turn.v1.JsonResponse
+	1,  // 16: memoh.turn.v1.TurnService.SetRuntimeMode:output_type -> memoh.turn.v1.JsonResponse
+	1,  // 17: memoh.turn.v1.TurnService.RuntimeModel:output_type -> memoh.turn.v1.JsonResponse
+	1,  // 18: memoh.turn.v1.TurnService.SetRuntimeModel:output_type -> memoh.turn.v1.JsonResponse
+	1,  // 19: memoh.turn.v1.TurnService.ExecuteRuntimeCommand:output_type -> memoh.turn.v1.JsonResponse
+	1,  // 20: memoh.turn.v1.TurnService.StopTurn:output_type -> memoh.turn.v1.JsonResponse
+	3,  // 21: memoh.turn.v1.TurnService.Run:output_type -> memoh.turn.v1.RunResponse
+	5,  // 22: memoh.turn.v1.TurnService.RespondToolApproval:output_type -> memoh.turn.v1.EventResponse
+	5,  // 23: memoh.turn.v1.TurnService.RespondUserInput:output_type -> memoh.turn.v1.EventResponse
+	1,  // 24: memoh.turn.v1.TurnService.AdvancePlainTextUserInput:output_type -> memoh.turn.v1.JsonResponse
+	14, // [14:25] is the sub-list for method output_type
+	3,  // [3:14] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
 	3,  // [3:3] is the sub-list for extension extendee
 	0,  // [0:3] is the sub-list for field type_name

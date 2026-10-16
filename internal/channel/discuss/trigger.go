@@ -21,30 +21,33 @@ type discussTurnPlan struct {
 // before materialization (CM-ADM-001); a ProtectedOverflow admission returns
 // ok=false so the caller fails closed instead of running the turn.
 func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.RenderedContext, trs []timeline.TurnResponseEntry, after timeline.DiscussCursorPosition, artifacts []timeline.CompactionArtifact, budget timeline.ComposeBudget) (discussTurnPlan, timeline.ComposeAdmission, bool) {
+	budget.After = &after
 	composed, admission := timeline.ComposeContextWithArtifactsBudgeted(rc, trs, artifacts, budget)
-	if composed == nil {
+	if composed == nil && !admission.ProtectedOverflow {
 		return discussTurnPlan{}, admission, false
 	}
+	if composed == nil {
+		composed = &timeline.ComposeContextResult{}
+	}
 
+	currentSources := make([]turn.ContextMessageSource, 0)
+	for _, segment := range rc {
+		if !segment.IsMyself && !segment.IsSelfSent && !after.Covers(segment) {
+			currentSources = append(currentSources, turn.ContextMessageSource{Kind: "external", ID: segment.MessageID, Current: true})
+		}
+	}
 	isMentioned := wasRecentlyMentioned(rc, after)
 	addressed := isMentioned || turn.IsPrivateConversationType(cfg.ConversationType)
 	msgs := make([]turn.DiscussMessage, 0, len(composed.Messages))
 	for _, message := range composed.Messages {
 		msgs = append(msgs, turn.DiscussMessage{
 			Role:                 message.Role,
+			Source:               message.Source,
 			Content:              message.Content,
 			RawContent:           message.RawContent,
 			CompactionArtifactID: message.CompactionArtifactID,
 		})
 	}
-	imageRefs := make([]turn.DiscussImageRef, 0)
-	for _, ref := range extractNewImageRefs(timeline.ActiveRenderedContext(rc, artifacts), after) {
-		imageRefs = append(imageRefs, turn.DiscussImageRef{
-			ContentHash: ref.ContentHash,
-			Mime:        ref.Mime,
-		})
-	}
-
 	return discussTurnPlan{
 		command: turn.StartTurnCommand{
 			SchemaVersion:           1,
@@ -62,22 +65,29 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			ChatToken:               cfg.ChatToken,
 			ToolHTTPURL:             cfg.ToolHTTPURL,
 			DiscussMessages:         msgs,
-			DiscussImageRefs:        imageRefs,
+			DiscussCurrentSources:   currentSources,
+			DiscussOmittedSources:   admission.OmittedSources,
+			DiscussImageRefs:        extractNewImageRefs(rc, after),
 			DiscussAddressed:        addressed,
+			DiscussContextTokens:    admission.EstimatedTokens,
+			DiscussContextOverflow:  admission.ProtectedOverflow,
+			DiscussCurrentTokens:    admission.CurrentTokens,
 		},
 		consumed:        timeline.ConsumedDiscussCursor(rc),
 		messageCount:    len(composed.Messages),
 		estimatedTokens: composed.EstimatedTokens,
-	}, admission, true
+	}, admission, !admission.ProtectedOverflow
 }
 
 // extractNewImageRefs collects image references from external RC segments
-// that arrived after the last consumed cursor.
-func extractNewImageRefs(rc timeline.RenderedContext, after timeline.DiscussCursorPosition) []timeline.ImageAttachmentRef {
-	var refs []timeline.ImageAttachmentRef
+// that arrived after the last consumed cursor, each naming its message.
+func extractNewImageRefs(rc timeline.RenderedContext, after timeline.DiscussCursorPosition) []turn.DiscussImageRef {
+	refs := make([]turn.DiscussImageRef, 0)
 	for _, segment := range rc {
 		if !after.Covers(segment) && !segment.IsMyself && !segment.IsSelfSent {
-			refs = append(refs, segment.ImageRefs...)
+			for _, ref := range segment.ImageRefs {
+				refs = append(refs, turn.DiscussImageRef{ContentHash: ref.ContentHash, Mime: ref.Mime, MessageID: segment.MessageID})
+			}
 		}
 	}
 	return refs

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/server"
 	"github.com/felinics/memoh/internal/settings"
 )
 
@@ -27,7 +28,7 @@ func TestSettingsRuntimeHTTPError(t *testing.T) {
 		t.Run(string(tc.code), func(t *testing.T) {
 			t.Parallel()
 			got := settingsRuntimeHTTPError(fmt.Errorf("update: %w", tc.err))
-			problem, _ := apperror.ProblemFrom(got, "")
+			problem, _ := server.ProblemFrom(got, "")
 			if apperror.CodeOf(got) != tc.code || problem.Status != tc.status {
 				t.Fatalf("error = %v (status %d), want %s %d", got, problem.Status, tc.code, tc.status)
 			}

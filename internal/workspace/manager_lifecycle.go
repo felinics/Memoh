@@ -15,6 +15,7 @@ import (
 	ctr "github.com/felinics/memoh/internal/container"
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/errs"
 	netctl "github.com/felinics/memoh/internal/network"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -86,8 +87,29 @@ func newestContainerID(containers []ctr.ContainerInfo) (string, bool) {
 // ---------------------------------------------------------------------------
 
 func (m *Manager) isTaskRunning(ctx context.Context, containerID string) bool {
+	return m.taskStatus(ctx, containerID) == ctr.TaskStatusRunning
+}
+
+func (m *Manager) taskStatus(ctx context.Context, containerID string) ctr.TaskStatus {
 	task, err := m.service.GetTaskInfo(ctx, containerID)
-	return err == nil && task.Status == ctr.TaskStatusRunning
+	if err != nil {
+		return ctr.TaskStatusUnknown
+	}
+	return task.Status
+}
+
+// displayStatus overrides the recorded status with the live task state when
+// it is running or paused. Paused is reported so the UI can label it instead
+// of falling back to "unknown".
+func displayStatus(recorded string, task ctr.TaskStatus) string {
+	switch task {
+	case ctr.TaskStatusRunning:
+		return "running"
+	case ctr.TaskStatusPaused:
+		return "paused"
+	default:
+		return recorded
+	}
 }
 
 func (m *Manager) networkAttachmentRequest(ctx context.Context, botID, containerID string) netctl.AttachmentRequest {
@@ -214,9 +236,7 @@ func (m *Manager) EnsureNativeRunning(ctx context.Context, botID string) error {
 		}
 		if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
 			if !ctr.IsNotFound(err) {
-				m.logger.WarnContext(ctx, "cleanup: delete task failed",
-					slog.String("container_id", containerID), slog.Any("error", err))
-				return err
+				return errs.Wrap(err, "delete stale task", slog.String("container_id", containerID))
 			}
 		}
 	} else if !ctr.IsNotFound(err) {
@@ -283,11 +303,9 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 				if row.UpdatedAt.Valid {
 					updatedAt = row.UpdatedAt.Time
 				}
-				taskRunning := m.isTaskRunning(ctx, row.ContainerID)
-				status := row.Status
-				if taskRunning {
-					status = "running"
-				}
+				task := m.taskStatus(ctx, row.ContainerID)
+				taskRunning := task == ctr.TaskStatusRunning
+				status := displayStatus(row.Status, task)
 				return &ContainerStatus{
 					ContainerID:      row.ContainerID,
 					WorkspaceBackend: workspaceBackendFromRecord(row.WorkspaceBackend),
@@ -319,11 +337,9 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 		}
 		return nil, err
 	}
-	taskRunning := m.isTaskRunning(ctx, containerID)
-	status := "unknown"
-	if taskRunning {
-		status = "running"
-	}
+	task := m.taskStatus(ctx, containerID)
+	taskRunning := task == ctr.TaskStatusRunning
+	status := displayStatus("unknown", task)
 	return &ContainerStatus{
 		ContainerID:      info.ID,
 		WorkspaceBackend: workspaceBackendFromRecord(""),
@@ -367,13 +383,9 @@ type ContainerSetupProgress func(ContainerSetupEvent)
 // When preserveData is true, /data is exported to a backup archive before deletion.
 func (m *Manager) CleanupBotContainer(ctx context.Context, botID string, preserveData bool) error {
 	if err := m.Delete(ctx, botID, preserveData); err != nil {
-		if preserveData {
-			// When preserving data, any error (including NotFound) must
-			// block the workflow — we cannot delete the DB record if we
-			// failed to preserve data.
-			return err
-		}
-		if !ctr.IsNotFound(err) {
+		// A failed export blocks the removal: the container holds the only
+		// copy of the data. A container already gone is a finished removal.
+		if errors.Is(err, errPreserveData) || !ctr.IsNotFound(err) {
 			return err
 		}
 		m.logger.WarnContext(ctx, "cleanup: container not found in containerd, continuing",

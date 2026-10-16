@@ -6,6 +6,7 @@ import {
   localizeSSEErrorEvent,
   normalizeSSEFailure,
 } from './sse-error'
+import { renderI18nMessage } from '@/utils/api-error'
 
 describe('SSE error boundary', () => {
   afterEach(() => {
@@ -42,6 +43,13 @@ describe('SSE error boundary', () => {
 
     expect(isSSEErrorEvent(event)).toBe(true)
     expect(localizeSSEErrorEvent(event).message).toBe('The workspace could not be reached.')
+  })
+
+  it('shows generic copy, not the server text, for a stream error without a code', () => {
+    const event = { type: 'error' as const, message: 'internal host db-7 refused' }
+    const localized = localizeSSEErrorEvent(event).message
+    expect(localized).not.toContain('db-7')
+    expect(localized).toBe(renderI18nMessage('errors.internal'))
   })
 
   it('preserves a structured failure instead of flattening it into Error.message', () => {

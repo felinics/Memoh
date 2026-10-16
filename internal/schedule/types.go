@@ -131,13 +131,16 @@ type ListResponse struct {
 }
 
 type Log struct {
-	ID           string     `json:"id"`
-	ScheduleID   string     `json:"schedule_id"`
-	BotID        string     `json:"bot_id"`
-	SessionID    string     `json:"session_id,omitempty"`
-	Status       string     `json:"status"`
-	ResultText   string     `json:"result_text"`
+	ID         string `json:"id"`
+	ScheduleID string `json:"schedule_id"`
+	BotID      string `json:"bot_id"`
+	SessionID  string `json:"session_id,omitempty"`
+	Status     string `json:"status"`
+	ResultText string `json:"result_text"`
+	// ErrorMessage is the text an earlier server stored; new failures set
+	// ErrorCode and leave it empty.
 	ErrorMessage string     `json:"error_message"`
+	ErrorCode    string     `json:"error_code,omitempty"`
 	Usage        any        `json:"usage,omitempty"`
 	StartedAt    time.Time  `json:"started_at"`
 	CompletedAt  *time.Time `json:"completed_at,omitempty"`

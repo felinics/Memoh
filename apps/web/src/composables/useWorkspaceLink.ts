@@ -11,7 +11,7 @@ export function useWorkspaceLink() {
   const { t } = useI18n()
   return (event: MouseEvent, href: string) => {
     const link = classifyWorkspaceLink(href)
-    if (!link || link.kind === 'external' || event.button > 1) return
+    if (event.button > 1 || (link?.kind !== 'file' && link?.kind !== 'browser')) return
     event.preventDefault()
     const opened = link.kind === 'file'
       ? tabs.openFile(link.path)

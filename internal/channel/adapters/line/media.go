@@ -11,6 +11,7 @@ import (
 
 	"github.com/felinics/memoh/internal/attachment"
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/media"
 )
 
@@ -39,13 +40,12 @@ func (a *Adapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConf
 	resp, err := client.GetMessageContent(messageID)
 	if err != nil {
 		cancel()
-		a.logWarn("line blob download failed",
+		return channel.AttachmentPayload{}, errs.Wrap(sanitizeLineError("line blob download failed", err), "download line blob",
 			slog.String("config_id", cfg.ID),
 			slog.String("bot_id", cfg.BotID),
 			slog.String("message_id_hash", hashValue(messageID)),
 			slog.String("reason", "blob_api_failed"),
 		)
-		return channel.AttachmentPayload{}, sanitizeLineError("line blob download failed", err)
 	}
 	if resp == nil || resp.Body == nil {
 		cancel()

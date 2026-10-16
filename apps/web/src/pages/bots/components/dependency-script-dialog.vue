@@ -9,9 +9,8 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronRight } from 'lucide-vue-next'
 import {
-  Alert,
-  AlertTitle,
   Button,
+  CalloutBanner,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -154,12 +153,11 @@ async function copyScript() {
           {{ t('common.loading') }}
         </InlineLoadingRow>
 
-        <Alert
+        <CalloutBanner
           v-else-if="error"
-          variant="destructive"
-        >
-          <AlertTitle>{{ error }}</AlertTitle>
-        </Alert>
+          tone="destructive"
+          :description="error"
+        />
 
         <template v-else-if="script">
           <DependencyKvList :rows="rows" />

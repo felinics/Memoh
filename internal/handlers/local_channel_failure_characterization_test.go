@@ -177,7 +177,7 @@ func TestCharacterizeWSMidStreamProviderFailure(t *testing.T) {
 
 	assertFrames(t, r.frames(t), []map[string]any{{
 		"type": "error", "run_id": r.admission.RunID, "session_id": failureCharSessionID,
-		"code": "agent.provider_overloaded", "message": providerOverloadedDetail,
+		"code": "agent.provider_overloaded", "message": providerOverloadedDetail, "fault": "dependency",
 	}})
 	if got, want := r.ledgerColumns(t), [3]string{"failed", "agent.provider_overloaded", ""}; got != want {
 		t.Fatalf("session_runs = %q, want %q", got, want)
@@ -221,7 +221,7 @@ func TestCharacterizeWSPlainRunnerError_CurrentBehavior(t *testing.T) {
 
 	assertFrames(t, r.frames(t), []map[string]any{{
 		"type": "error", "run_id": r.admission.RunID, "session_id": failureCharSessionID,
-		"code": "runtime_run_failed", "message": runFailedDetail,
+		"code": "runtime_run_failed", "message": runFailedDetail, "fault": "server",
 	}})
 	if got, want := r.ledgerColumns(t), [3]string{"failed", "runtime_run_failed", ""}; got != want {
 		t.Fatalf("session_runs = %q, want %q", got, want)
@@ -244,7 +244,7 @@ func TestCharacterizeWSCodedRunnerError(t *testing.T) {
 
 	assertFrames(t, r.frames(t), []map[string]any{{
 		"type": "error", "run_id": r.admission.RunID, "session_id": failureCharSessionID,
-		"code": "workspace.unreachable", "message": "The workspace could not be reached.",
+		"code": "workspace.unreachable", "message": "The workspace could not be reached.", "fault": "server",
 	}})
 	if got, want := r.ledgerColumns(t), [3]string{"failed", "workspace.unreachable", ""}; got != want {
 		t.Fatalf("session_runs = %q, want %q", got, want)
@@ -289,7 +289,7 @@ func TestCharacterizeWSUncodedStreamError_CurrentBehavior(t *testing.T) {
 
 	assertFrames(t, r.frames(t), []map[string]any{{
 		"type": "error", "run_id": r.admission.RunID, "session_id": failureCharSessionID,
-		"code": "runtime_run_failed", "message": runFailedDetail,
+		"code": "runtime_run_failed", "message": runFailedDetail, "fault": "server",
 	}})
 	if got, want := r.ledgerColumns(t), [3]string{"failed", "runtime_run_failed", ""}; got != want {
 		t.Fatalf("session_runs = %q, want %q", got, want)
@@ -342,7 +342,7 @@ func TestCharacterizeWSAdmissionRejectionFrames(t *testing.T) {
 			err: sessionruntime.ErrRunOwnershipLost,
 			want: map[string]any{
 				"type": "error", "invocation_id": "invocation-1", "session_id": failureCharSessionID,
-				"code": "internal", "message": "Something went wrong on the server. Please try again.",
+				"code": "internal", "message": "Something went wrong on the server. Please try again.", "fault": "server",
 			},
 		},
 	} {

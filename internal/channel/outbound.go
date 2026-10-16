@@ -9,6 +9,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // ChunkerMode selects the text chunking strategy.
@@ -640,12 +642,8 @@ func validateStreamEvent(registry *Registry, channelType ChannelType, event Stre
 		if err := validateMessageAgainstCapabilities(caps, ok, Message{Attachments: event.Attachments}); err != nil {
 			return err
 		}
-	case StreamEventAgentStart, StreamEventAgentEnd, StreamEventProcessingStarted, StreamEventProcessingCompleted, StreamEventReset:
+	case StreamEventAgentStart, StreamEventAgentEnd, StreamEventProcessingStarted, StreamEventProcessingCompleted, StreamEventReset, StreamEventSegmentEnd:
 		return nil
-	case StreamEventProcessingFailed:
-		if strings.TrimSpace(event.Error) == "" {
-			return errors.New("processing failure error is required")
-		}
 	case StreamEventFinal:
 		if event.Final == nil {
 			return errors.New("stream final payload is required")
@@ -826,9 +824,9 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) err
 	if event.Type == StreamEventDelta && event.Delta != "" && event.Phase != StreamPhaseReasoning {
 		return s.pushDelta(ctx, event)
 	}
-	if event.Type == StreamEventReset {
-		// The adapter drops its buffered text, so the split window restarts
-		// with it.
+	if event.Type == StreamEventReset || event.Type == StreamEventSegmentEnd {
+		// The adapter drops its buffered text, or commits it as its own
+		// message, so the split window restarts with it.
 		s.deltaRunes = 0
 		s.deltaText.Reset()
 	}
@@ -1151,33 +1149,25 @@ func (s *managerOutboundStream) sendChunkedFinal(ctx context.Context, msg Messag
 	return s.sendPreparedChunkedFinal(ctx, deliveries, startIndex, len(chunks), hasAttachments)
 }
 
+func (s *managerOutboundStream) overflowChunkError(err error, chunkIndex, totalChunks int) error {
+	return errs.WrapWithDepth(1, err, "send stream overflow chunk",
+		slog.String("channel", s.channelType.String()),
+		slog.Int("chunk_index", chunkIndex),
+		slog.Int("total_chunks", totalChunks),
+	)
+}
+
 func (s *managerOutboundStream) sendPreparedChunkedFinal(ctx context.Context, deliveries []preparedOutboundDelivery, startIndex int, totalChunks int, hasAttachments bool) error {
 	if s.sender != nil {
 		for idx, item := range deliveries {
 			if err := s.manager.sendPreparedWithConfig(ctx, s.sender, s.config, item, s.policy); err != nil {
-				if s.manager.logger != nil {
-					s.manager.logger.ErrorContext(ctx, "stream final overflow chunk send failed",
-						slog.String("channel", s.channelType.String()),
-						slog.Int("chunk_index", startIndex+idx+1),
-						slog.Int("total_chunks", totalChunks),
-						slog.Any("error", err),
-					)
-				}
-				return err
+				return s.overflowChunkError(err, startIndex+idx+1, totalChunks)
 			}
 		}
 	} else {
 		for idx, item := range deliveries {
 			if err := s.send(ctx, OutboundMessage{Message: item.message}); err != nil {
-				if s.manager.logger != nil {
-					s.manager.logger.ErrorContext(ctx, "stream final overflow chunk send failed",
-						slog.String("channel", s.channelType.String()),
-						slog.Int("chunk_index", startIndex+idx+1),
-						slog.Int("total_chunks", totalChunks),
-						slog.Any("error", err),
-					)
-				}
-				return err
+				return s.overflowChunkError(err, startIndex+idx+1, totalChunks)
 			}
 		}
 	}

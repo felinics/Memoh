@@ -15,7 +15,9 @@ import (
 
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/testutil/sessionledger"
 )
 
@@ -166,6 +168,46 @@ func TestRunResultRecordsHowTheRunEnded(t *testing.T) {
 	}
 }
 
+// A run nobody waits for (schedule, discuss, subagent) is asynchronous: a
+// client fault in it is this process's to fix, so it is an ERROR. The same
+// fault in a chat run is the user's, and the user sees it in the run's
+// terminal frame.
+func TestRunResultAttributesByTheAdmittedMode(t *testing.T) {
+	t.Parallel()
+	clientFailure := apperror.New(apperror.CodeACPModelUnavailable, nil)
+	tests := []struct {
+		mode      string
+		wantLevel slog.Level
+		wantFault string
+	}{
+		{mode: sessionmode.Chat, wantLevel: slog.LevelInfo, wantFault: "client"},
+		{mode: "", wantLevel: slog.LevelInfo, wantFault: "client"},
+		{mode: sessionmode.Schedule, wantLevel: slog.LevelError, wantFault: "server"},
+		{mode: sessionmode.Discuss, wantLevel: slog.LevelError, wantFault: "server"},
+		{mode: sessionmode.Subagent, wantLevel: slog.LevelError, wantFault: "server"},
+	}
+	for _, tt := range tests {
+		t.Run("mode="+tt.mode, func(t *testing.T) {
+			t.Parallel()
+			logger, logs := captureLogs()
+			service := &Service{logger: logger}
+			ctx := withRunOutcome(context.Background(), "run-1", RunOutcome{Cause: clientFailure}, tt.mode)
+
+			service.logRunResult(ctx, sessionruntime.TerminalRun{
+				RunID: "run-1", State: string(ledger.StateFailed), ErrorCode: string(apperror.CodeACPModelUnavailable), Applied: true,
+			})
+
+			records := logs.runResults()
+			if len(records) != 1 {
+				t.Fatalf("result records = %d, want 1", len(records))
+			}
+			if records[0].Level != tt.wantLevel || recordAttrs(records[0])["fault"] != tt.wantFault {
+				t.Fatalf("record = %v fault=%q, want %v fault=%q", records[0].Level, recordAttrs(records[0])["fault"], tt.wantLevel, tt.wantFault)
+			}
+		})
+	}
+}
+
 // Only the observation whose own write ended the run is recorded. A replay,
 // a durable retry that finds the run already terminal and a stale owner all
 // observe the run again without applying anything.
@@ -274,6 +316,15 @@ func TestRunResultOneErrorForARunWithSeveralFailureEvents(t *testing.T) {
 			messages = append(messages, record.Message)
 		}
 		t.Fatalf("ERROR records = %q, want only the run's result record", messages)
+	}
+	// The consumer of the turn (an inbound message, the turn RPC) finishes
+	// its own unit with the error the handle gave it; that record is a WARN
+	// pointing at the run's ERROR, not a second ERROR.
+	if len(got.errs) != 1 {
+		t.Fatalf("handle errors = %v, want the run's failure", got.errs)
+	}
+	if outer := errlog.Finish(context.Background(), "channel.inbound", got.errs[0], errlog.Options{}); outer.Level != slog.LevelWarn {
+		t.Fatalf("consumer record level = %v, want WARN", outer.Level)
 	}
 }
 

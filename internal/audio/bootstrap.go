@@ -27,12 +27,6 @@ func SyncRegistry(ctx context.Context, logger *slog.Logger, queries dbstore.Quer
 				}
 				continue
 			}
-			if logger != nil {
-				logger.WarnContext(ctx, "audio registry failed to load provider template",
-					slog.String("provider", string(def.ClientType)),
-					slog.String("display_name", def.DisplayName),
-					slog.Any("error", err))
-			}
 			return fmt.Errorf("get provider by client type %s: %w", def.ClientType, err)
 		}
 

@@ -27,6 +27,7 @@ describe('buildModelConfig', () => {
       description: '   ',
       compatibilities: ['vision', 'reasoning'],
       contextWindow: 128000,
+      maxOutputTokens: 8192,
       reasoningEfforts: ['high', 'low'],
       existing: {
         description: 'Old description',
@@ -37,6 +38,7 @@ describe('buildModelConfig', () => {
       description: '',
       compatibilities: ['vision', 'reasoning'],
       context_window: 128000,
+      max_output_tokens: 8192,
       thinking_mode: 'adaptive',
       reasoning_efforts: ['low', 'high'],
     })

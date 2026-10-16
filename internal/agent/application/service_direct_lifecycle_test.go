@@ -37,7 +37,8 @@ const (
 
 type directLifecycleQueries struct {
 	modelSelectionFakeQueries
-	modelID pgtype.UUID
+	modelID           pgtype.UUID
+	compactionEnabled bool
 }
 
 func (q *directLifecycleQueries) GetSettingsByBotID(
@@ -45,9 +46,10 @@ func (q *directLifecycleQueries) GetSettingsByBotID(
 	botID pgtype.UUID,
 ) (sqlc.GetSettingsByBotIDRow, error) {
 	return sqlc.GetSettingsByBotIDRow{
-		BotID:           botID,
-		ReasoningEffort: "medium",
-		ChatModelID:     q.modelID,
+		BotID:             botID,
+		ReasoningEffort:   "medium",
+		ChatModelID:       q.modelID,
+		CompactionEnabled: q.compactionEnabled,
 	}, nil
 }
 

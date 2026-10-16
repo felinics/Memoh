@@ -313,7 +313,11 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		}
 		applyToolExecutionMetadata(&state.Message, event.Metadata)
 		applyDiffMetadata(&state.Message, event.Metadata)
-		applyToolResultToUIMessage(&state.Message, event.Output)
+		output := event.Output
+		if output == nil && strings.TrimSpace(event.Error) != "" {
+			output = failedToolOutput(event.Error)
+		}
+		applyToolResultToUIMessage(&state.Message, output)
 		if state.Message.ToolCallID != "" && !isBackgroundToolStillRunning(state.Message) {
 			delete(c.tools, state.Message.ToolCallID)
 		}

@@ -53,13 +53,11 @@ export function composerLocalQuickActionID(
   usesExternalAgentComposer: boolean,
   planModeSupported = false,
   goalShortcutSupported = false,
-): '' | 'compact' | 'model' | 'plan' | 'goal' {
+): '' | 'model' | 'plan' | 'goal' {
   if (goalShortcutSupported && text.trim().toLowerCase() === '/goal') return 'goal'
   if (planModeSupported && text.trim().toLowerCase() === '/plan') return 'plan'
   if (usesExternalAgentComposer) return ''
   switch (text.trim().toLowerCase()) {
-    case '/compact':
-      return 'compact'
     case '/model':
     case '/models':
       return 'model'

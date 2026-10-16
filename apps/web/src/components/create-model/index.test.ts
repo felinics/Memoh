@@ -61,11 +61,12 @@ it('submits the typed context window as a number', async () => {
   })
   typeInto(document.querySelector<HTMLInputElement>('#create-model-model-id')!, 'glm-4.5')
   typeInto(contextWindow, '128000')
+  typeInto(document.querySelector<HTMLInputElement>('#create-model-max-output-tokens')!, '8192')
   await nextTick()
 
   document.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }))
   await vi.waitFor(() => expect(postModels).toHaveBeenCalledTimes(1))
   expect(postModels).toHaveBeenCalledWith(expect.objectContaining({
-    body: expect.objectContaining({ config: expect.objectContaining({ context_window: 128000 }) }),
+    body: expect.objectContaining({ config: expect.objectContaining({ context_window: 128000, max_output_tokens: 8192 }) }),
   }))
 })

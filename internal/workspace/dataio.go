@@ -343,6 +343,9 @@ func (m *Manager) preserveDataToBackup(ctx context.Context, botID string, mounts
 func (m *Manager) preserveDataBeforeDelete(ctx context.Context, botID string) error {
 	ref, err := m.loadLockedContainer(ctx, botID)
 	if err != nil {
+		if ctr.IsNotFound(err) {
+			return nil
+		}
 		return fmt.Errorf("get workspace runtime for preserve: %w", err)
 	}
 	defer ref.Close()

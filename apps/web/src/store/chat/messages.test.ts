@@ -3,7 +3,7 @@ import { createI18n } from 'vue-i18n'
 import en from '@/i18n/locales/en.json'
 import zh from '@/i18n/locales/zh.json'
 import ja from '@/i18n/locales/ja.json'
-import { commandActionErrorMessage, resolveCommandErrorMessage } from './messages'
+import { commandActionErrorMessage, commandErrorMessage, resolveCommandErrorMessage } from './messages'
 
 // The command panel's lookup: vue-i18n copy in the current locale or English.
 function panelLookup(locale: 'en' | 'zh' | 'ja') {
@@ -20,12 +20,17 @@ describe('command_error copy', () => {
     expect(commandActionErrorMessage(frame)).toBe(en.chat.slash.errorMessages.generic)
   })
 
-  it('reads slash-command copy before the catalog copy, in the panel and the store alike', () => {
+  it('reads the catalog copy for the code, in the panel and the store alike', () => {
     const { lookup } = panelLookup('en')
-    for (const frame of [{ code: 'permission_mode_unavailable', message: 'x' }, { code: 'runtime_control.failed', message: 'x' }]) {
-      expect(resolveCommandErrorMessage(frame, lookup)).toBe(commandActionErrorMessage(frame))
-      expect(resolveCommandErrorMessage(frame, lookup)).not.toBe(en.chat.slash.errorMessages.generic)
+    for (const [code, copy] of [['slash.unknown_command', en.errors.slash.unknown_command], ['runtime_control.failed', en.errors.runtime_control.failed]]) {
+      const frame = { code, message: 'x' }
+      expect(resolveCommandErrorMessage(frame, lookup)).toBe(copy)
+      expect(commandActionErrorMessage(frame)).toBe(copy)
     }
+  })
+
+  it('gives a client-side command error the copy for its catalog code', () => {
+    expect(commandErrorMessage('slash.attachments_unsupported')).toBe(en.errors.slash.attachments_unsupported)
   })
 
   it('follows a locale switch in the panel', () => {

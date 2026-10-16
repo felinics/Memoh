@@ -12,11 +12,16 @@ import (
 	"log/slog"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/identities"
 	"github.com/felinics/memoh/internal/channel/route"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // scriptedFailureGateway replays raw turn event payloads and then an optional
@@ -106,6 +111,29 @@ func TestCharacterizeIMStartFailureText_CurrentBehavior(t *testing.T) {
 	}), "workspace.unreachable", true, "The workspace could not be reached.")
 }
 
+// A turn the server refused for a client reason, at start or during the run,
+// is the sender's fault: the inbound message record keeps it a client fault.
+func TestIMClientFailureIsNotRecordedAsAnError(t *testing.T) {
+	t.Parallel()
+	refusal := apperror.New(apperror.CodeACPAgentNotEnabled, nil)
+	for name, gateway := range map[string]*scriptedFailureGateway{
+		"start refused": {fakeChatGateway: fakeChatGateway{startErr: refusal}},
+		"run failed":    {tailErr: refusal},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got := runIMFailure(t, gateway)
+			if len(got.errorTexts) != 1 || apperror.CodeOf(got.err) != apperror.CodeACPAgentNotEnabled {
+				t.Fatalf("HandleInbound error = %v, replies = %q; want the refusal answered once", got.err, got.errorTexts)
+			}
+			record := errlog.Finish(context.Background(), "channel.inbound", got.err, errlog.Options{})
+			if record.Level != slog.LevelInfo || record.Report.Fault != apperror.FaultClient {
+				t.Fatalf("inbound record level=%v fault=%q, want INFO client", record.Level, record.Report.Fault)
+			}
+		})
+	}
+}
+
 // Scenario 1 and 10 after output started: a turn-port error is shown the same way.
 //
 // Generic copy for a plain cause, the code's copy for a coded one.
@@ -162,5 +190,63 @@ func TestCharacterizeIMContinuationNotAccepted(t *testing.T) {
 	}
 	if len(texts) != 1 || texts[0] != "Your answer could not be submitted. Please try again." {
 		t.Fatalf("IM error texts = %q", texts)
+	}
+}
+
+// stoppedTurnGateway holds a turn until its caller's context ends, then
+// reports what the server returns for a run ended that way: a Canceled status,
+// received from another process.
+type stoppedTurnGateway struct {
+	fakeChatGateway
+	atStart bool
+	started chan struct{}
+}
+
+func (g *stoppedTurnGateway) StartTurn(ctx context.Context, _ turn.StartTurnCommand) (turn.RunHandle, error) {
+	received := errs.Remote(status.Error(codes.Canceled, "context canceled"))
+	close(g.started)
+	if g.atStart {
+		<-ctx.Done()
+		return nil, received
+	}
+	events := make(chan turn.Event)
+	runErrs := make(chan error, 1)
+	go func() {
+		<-ctx.Done()
+		runErrs <- received
+		close(runErrs)
+		close(events)
+	}()
+	return &fakeTurnRun{events: events, errs: runErrs}, nil
+}
+
+// A turn /new or /stop ended is not a failure of the message that started it:
+// the stream's context is the turn's caller, and that caller ended it. The
+// message gets no error reply and its record is not an error, whether the
+// turn was still starting or already running.
+func TestIMTurnStoppedByACommandIsNotAFailure(t *testing.T) {
+	t.Parallel()
+	for name, atStart := range map[string]bool{"while starting": true, "while running": false} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			gateway := &stoppedTurnGateway{atStart: atStart, started: make(chan struct{})}
+			processor, sender, cfg, msg := newIMFailureProcessor(gateway)
+			done := make(chan error, 1)
+			go func() { done <- processor.HandleInbound(context.Background(), cfg, msg, sender) }()
+			<-gateway.started
+			if !processor.cancelActiveStreamForRoute(cfg.BotID, "route-1", "new session created") {
+				t.Fatal("no active stream to end")
+			}
+			err := <-done
+			for _, event := range sender.events {
+				if event.Type == channel.StreamEventError {
+					t.Fatalf("error reply %q for a turn a command ended", event.Error)
+				}
+			}
+			record := errlog.Finish(context.Background(), "channel.inbound", err, errlog.Options{})
+			if err != nil || record.Level != slog.LevelInfo {
+				t.Fatalf("HandleInbound error = %v, record level %v; want nil at INFO", err, record.Level)
+			}
+		})
 	}
 }

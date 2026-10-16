@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/felinics/memoh/internal/job"
 )
 
 // DefaultReapInterval is how often the stale reaper runs after its initial
@@ -42,18 +44,17 @@ func startReaper(ctx context.Context, reapPass func(context.Context) (int, error
 		defer close(done)
 		defer stopTicks()
 		reap := func() {
-			reaped, err := reapPass(loopCtx)
-			switch {
-			case err != nil && loopCtx.Err() != nil:
-				// Shutting down; the interrupted pass is not a fault.
-			case err != nil:
-				logger.WarnContext(ctx, "stale dependency reaper pass finished with errors",
-					slog.Int("reaped", reaped),
-					slog.Any("error", err),
-				)
-			case reaped > 0:
-				logger.InfoContext(ctx, "interrupted dependency operations reconciled", slog.Int("reaped", reaped))
-			}
+			// A pass has no object of its own, but its outcome is the one
+			// record an operator reads for the reaper, so it runs as a unit.
+			_ = job.Run(ctx, logger, "workspacedeps.reap", job.Options{OwnRequestID: true}, func(unitCtx context.Context) error {
+				reaped, err := reapPass(loopCtx)
+				job.Annotate(unitCtx, slog.Int("reaped", reaped))
+				if err != nil && loopCtx.Err() != nil {
+					// Shutting down; the interrupted pass is not a fault.
+					return nil
+				}
+				return err
+			})
 		}
 		reap()
 		for loopCtx.Err() == nil {

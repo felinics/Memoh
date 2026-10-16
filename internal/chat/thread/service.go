@@ -336,15 +336,17 @@ type Service struct {
 // ACPSetupValidation is the channel- and runtime-independent policy result
 // needed before a thread can persist an ACP runtime descriptor.
 type ACPSetupValidation struct {
-	Known                 bool
 	Enabled               bool
 	MissingManagedFieldID string
 }
 
 // ACPSetupValidator is implemented by an Agent adapter. Thread owns this port
-// so chat persistence never imports an Agent runtime implementation.
+// so chat persistence never imports an Agent runtime implementation. The
+// adapter resolves which Agent instance's setup applies: botAgentID when the
+// thread is bound to one, otherwise the instance the provider falls back to.
 type ACPSetupValidator interface {
-	ValidateACPSetup(agentID string, botMetadata map[string]any) ACPSetupValidation
+	KnownACPAgent(agentID string) bool
+	ValidateACPSetup(ctx context.Context, botID, botAgentID, agentID string, botMetadata map[string]any) (ACPSetupValidation, error)
 }
 
 // NewService creates a thread service. publisher may be nil — thread
@@ -449,7 +451,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Thread, error)
 		if err := validateACPMetadata(meta); err != nil {
 			return Thread{}, err
 		}
-		if err := s.validateACPCreatePolicy(ctx, pgBotID, meta, strings.TrimSpace(input.BotAgentID) == ""); err != nil {
+		if err := s.validateACPCreatePolicy(ctx, pgBotID, input.BotAgentID, meta); err != nil {
 			return Thread{}, err
 		}
 	} else if IsDirectRuntimeType(desc.RuntimeType) {
@@ -1021,7 +1023,7 @@ func (s *Service) updateDescriptorAndMetadata(ctx context.Context, queries Queri
 		if err := validateACPMetadata(metadata); err != nil {
 			return Thread{}, err
 		}
-		if err := s.validateACPCreatePolicyWithQueries(ctx, queries, existing.BotID, metadata, !pgBotAgentID.Valid); err != nil {
+		if err := s.validateACPCreatePolicyWithQueries(ctx, queries, existing.BotID, pgBotAgentID.String(), metadata); err != nil {
 			return Thread{}, err
 		}
 	case IsDirectRuntimeType(desc.RuntimeType):
@@ -1718,6 +1720,16 @@ type descriptor struct {
 	RuntimeMetadata map[string]any
 }
 
+// DescriptorError is a session descriptor the caller can fix by changing
+// the request field named Field (wire name).
+type DescriptorError struct {
+	Field string
+	Err   error
+}
+
+func (e *DescriptorError) Error() string { return e.Err.Error() }
+func (e *DescriptorError) Unwrap() error { return e.Err }
+
 // ResolveDescriptor returns the normalized compatibility type plus split
 // session-mode/runtime descriptor without applying metadata side effects.
 func ResolveDescriptor(legacyType, sessionMode, runtimeType string) (string, string, string, error) {
@@ -1726,7 +1738,7 @@ func ResolveDescriptor(legacyType, sessionMode, runtimeType string) (string, str
 	// alongside it must fail loudly rather than silently degrade to a plain
 	// model chat session.
 	if rt := strings.TrimSpace(runtimeType); strings.TrimSpace(legacyType) == TypeACPAgent && rt != "" && rt != RuntimeACPAgent {
-		return "", "", "", fmt.Errorf("session type %q conflicts with runtime_type %q", TypeACPAgent, rt)
+		return "", "", "", &DescriptorError{Field: "runtime_type", Err: fmt.Errorf("session type %q conflicts with runtime_type %q", TypeACPAgent, rt)}
 	}
 	desc, err := normalizeDescriptor(legacyType, sessionMode, runtimeType, nil, nil)
 	if err != nil {
@@ -1752,15 +1764,15 @@ func normalizeDescriptor(legacyType, sessionMode, runtimeType string, metadata, 
 		}
 	}
 	if !IsKnownSessionMode(sessionMode) {
-		return descriptor{}, fmt.Errorf("unknown session mode %q", sessionMode)
+		return descriptor{}, &DescriptorError{Field: "session_mode", Err: fmt.Errorf("unknown session mode %q", sessionMode)}
 	}
 	if !IsKnownRuntimeType(runtimeType) {
-		return descriptor{}, fmt.Errorf("unknown runtime type %q", runtimeType)
+		return descriptor{}, &DescriptorError{Field: "runtime_type", Err: fmt.Errorf("unknown runtime type %q", runtimeType)}
 	}
 	// The runtime capability table owns which modes each runtime can host
 	// (e.g. agent runtimes never back subagent loops).
 	if !runtimekind.SupportsSessionMode(runtimeType, sessionMode) {
-		return descriptor{}, fmt.Errorf("runtime type %q is only supported for %s session modes", runtimeType, strings.Join(runtimekind.SupportedSessionModes(runtimeType), ", "))
+		return descriptor{}, &DescriptorError{Field: "session_mode", Err: fmt.Errorf("runtime type %q is only supported for %s session modes", runtimeType, strings.Join(runtimekind.SupportedSessionModes(runtimeType), ", "))}
 	}
 	out := descriptor{
 		LegacyType:      legacyTypeForDescriptor(sessionMode, runtimeType),
@@ -1888,28 +1900,31 @@ func nonNilMap(in map[string]any) map[string]any {
 	return out
 }
 
-func (s *Service) validateACPCreatePolicy(ctx context.Context, botID pgtype.UUID, meta map[string]any, requireLegacyEnabledOption ...bool) error {
-	requireLegacyEnabled := true
-	if len(requireLegacyEnabledOption) > 0 {
-		requireLegacyEnabled = requireLegacyEnabledOption[0]
-	}
-	return s.validateACPCreatePolicyWithQueries(ctx, s.queries, botID, meta, requireLegacyEnabled)
+// validateACPCreatePolicy checks the setup the thread would launch with.
+// botAgentID is the bound Agent instance; a thread that names only the
+// provider additionally needs the legacy enabled flag.
+func (s *Service) validateACPCreatePolicy(ctx context.Context, botID pgtype.UUID, botAgentID string, meta map[string]any) error {
+	return s.validateACPCreatePolicyWithQueries(ctx, s.queries, botID, botAgentID, meta)
 }
 
-func (s *Service) validateACPCreatePolicyWithQueries(ctx context.Context, queries Queries, botID pgtype.UUID, meta map[string]any, requireLegacyEnabled bool) error {
+func (s *Service) validateACPCreatePolicyWithQueries(ctx context.Context, queries Queries, botID pgtype.UUID, botAgentID string, meta map[string]any) error {
 	agentID := metadataString(meta, "acp_agent_id")
+	botAgentID = strings.TrimSpace(botAgentID)
+	requireLegacyEnabled := botAgentID == ""
 	if s.acpSetupValidator == nil {
 		return fmt.Errorf("%w: ACP setup validator unavailable", ErrACPAgentNotConfigured)
 	}
-	if validation := s.acpSetupValidator.ValidateACPSetup(agentID, nil); !validation.Known {
+	if !s.acpSetupValidator.KnownACPAgent(agentID) {
 		return fmt.Errorf("%w: %s", ErrACPUnknownAgent, agentID)
 	}
 	bot, err := queries.GetBotByID(ctx, botID)
 	if err != nil {
 		return err
 	}
-	botMeta := parseJSONMap(bot.Metadata)
-	validation := s.acpSetupValidator.ValidateACPSetup(agentID, botMeta)
+	validation, err := s.acpSetupValidator.ValidateACPSetup(ctx, botID.String(), botAgentID, agentID, parseJSONMap(bot.Metadata))
+	if err != nil {
+		return err
+	}
 	if requireLegacyEnabled && !validation.Enabled {
 		return fmt.Errorf("%w: %s", ErrACPAgentNotEnabled, agentID)
 	}

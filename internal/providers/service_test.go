@@ -20,6 +20,7 @@ import (
 
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/models"
 )
 
@@ -539,9 +540,7 @@ func TestOpenAICodexACPDeviceAuthorizationSanitizesNon404FailureBody(t *testing.
 	if strings.Contains(err.Error(), "sensitive-body") {
 		t.Fatalf("error should not expose upstream body: %v", err)
 	}
-	if !strings.Contains(err.Error(), "status 401") {
-		t.Fatalf("error should keep status code context: %v", err)
-	}
+	requireStatusAttr(t, err, http.StatusUnauthorized)
 }
 
 func TestOpenAICodexACPDevicePollPendingAndSuccess(t *testing.T) {
@@ -659,9 +658,7 @@ func TestOpenAICodexACPDevicePollSanitizesHardFailureBody(t *testing.T) {
 	if strings.Contains(err.Error(), "sensitive-body") {
 		t.Fatalf("error should not expose upstream body: %v", err)
 	}
-	if !strings.Contains(err.Error(), "status 401") {
-		t.Fatalf("error should keep status code context: %v", err)
-	}
+	requireStatusAttr(t, err, http.StatusUnauthorized)
 }
 
 func TestCodexAccountIDFromTokensPrefersIDToken(t *testing.T) {
@@ -1368,5 +1365,74 @@ func TestTestUnreachableStaysHardError(t *testing.T) {
 	var urlErr *url.Error
 	if !errors.As(resp.Cause, &urlErr) {
 		t.Fatalf("cause = %v, want a *url.Error in the chain", resp.Cause)
+	}
+}
+
+// requireStatusAttr checks that the status code travels as an attribute of
+// the error rather than as part of its text.
+func requireStatusAttr(t *testing.T, err error, want int) {
+	t.Helper()
+	for _, attr := range errs.Analyze(context.Background(), err).Attrs {
+		if attr.Key == "status" {
+			if got := int(attr.Value.Int64()); got != want {
+				t.Fatalf("status attr = %d, want %d", got, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("error has no status attr: %v", err)
+}
+
+func TestFetchRemoteModelsViaSDKReadsMaxOutputTokens(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "gateway.yaml"), []byte(`
+name: Gateway
+client_type: openai-completions
+base_url: https://example.invalid/v1
+
+models:
+  - model_id: templated
+    name: Templated
+    type: chat
+    config:
+      max_output_tokens: 4096
+`), 0o600); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": "declared", "object": "model", "max_output_tokens": 64000},
+				{"id": "undeclared", "object": "model"},
+				{"id": "invalid", "object": "model", "max_output_tokens": 0},
+				{"id": "templated", "object": "model", "max_output_tokens": 8192},
+			},
+		})
+	}))
+	defer server.Close()
+
+	svc := NewService(nil, nil, "", dir)
+	remoteModels, err := svc.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+		ClientType: string(models.ClientTypeOpenAICompletions),
+		Config:     []byte(`{"base_url":"` + server.URL + `","api_key":"sk-test"}`),
+		Metadata:   []byte(`{"preset":{"source":"gateway.yaml"}}`),
+	})
+	if err != nil {
+		t.Fatalf("fetch remote models: %v", err)
+	}
+	got := map[string]*int{}
+	for _, m := range remoteModels {
+		got[m.ID] = m.MaxOutputTokens
+	}
+	if got["declared"] == nil || *got["declared"] != 64000 {
+		t.Fatalf("declared = %v, want 64000", got["declared"])
+	}
+	if got["undeclared"] != nil || got["invalid"] != nil {
+		t.Fatalf("undeclared = %v, invalid = %v, want unknown", got["undeclared"], got["invalid"])
+	}
+	if got["templated"] == nil || *got["templated"] != 8192 {
+		t.Fatalf("templated = %v, want the endpoint's 8192 over the template's 4096", got["templated"])
 	}
 }

@@ -3,15 +3,12 @@ package inbound
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"strings"
 
 	"github.com/felinics/memoh/internal/acl"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/channel"
-	"github.com/felinics/memoh/internal/channel/route"
-	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/slash"
 )
@@ -29,33 +26,29 @@ func (p *ChannelInboundProcessor) runtimeSlash(ctx context.Context, cfg channel.
 		return decision, false, nil
 	}
 	service, ok := p.turnSvc.(turn.RuntimeControlService)
-	if !ok || p.sessionEnsurer == nil {
-		return decision, false, nil
-	}
-	finder, ok := p.routeResolver.(interface {
-		Find(context.Context, string, string, string, string) (route.Route, error)
-	})
 	if !ok {
 		return decision, false, nil
 	}
-	existing, err := finder.Find(ctx, identity.BotID, msg.Channel.String(), msg.Conversation.ID, extractThreadID(msg))
-	if err != nil {
-		return decision, false, nil
-	}
-	sess, err := p.sessionEnsurer.GetActiveSession(ctx, existing.ID)
-	if err != nil || !sessionUsesExternalRuntime(sess) {
+	_, sess, found := p.existingActiveSession(ctx, identity, msg)
+	if !found || !sessionUsesExternalRuntime(sess) {
 		return decision, false, nil
 	}
 	if p.acl != nil {
 		allowed, err := p.acl.Evaluate(ctx, acl.EvaluateRequest{BotID: identity.BotID, ChannelIdentityID: identity.ChannelIdentityID, ChannelType: msg.Channel.String(), SourceScope: acl.SourceScope{ConversationType: channel.NormalizeConversationType(msg.Conversation.Type), ConversationID: strings.TrimSpace(msg.Conversation.ID), ThreadID: extractThreadID(msg)}})
 		if err != nil || !allowed {
-			return decision, true, p.sendSlashError(ctx, sender, msg, slash.CodePermissionDenied)
+			return decision, true, p.sendSlashError(ctx, sender, msg, apperror.New(slash.CodePermissionDenied, nil))
 		}
 	}
 	request := turn.RuntimeControlRequest{TeamID: cfg.TeamID, BotID: identity.BotID, ThreadID: sess.ID, ActorID: identity.UserID, Command: selector}
+	if resource := runtimeModelResource(selector); resource != "" {
+		if hasSlashControlAttachments(msg) {
+			return decision, true, p.sendSlashError(ctx, sender, msg, apperror.New(slash.CodeSlashAttachmentsUnsupported, nil))
+		}
+		return decision, true, p.runtimeModelSlash(ctx, msg, sender, identity, service, request, resource, invocation.Parsed)
+	}
 	if selector == "permission" {
 		if hasSlashControlAttachments(msg) {
-			return decision, true, p.sendSlashError(ctx, sender, msg, slash.CodeSlashAttachmentsUnsupported)
+			return decision, true, p.sendSlashError(ctx, sender, msg, apperror.New(slash.CodeSlashAttachmentsUnsupported, nil))
 		}
 		controls, err := service.RuntimeControls(ctx, request)
 		if err != nil {
@@ -63,7 +56,7 @@ func (p *ChannelInboundProcessor) runtimeSlash(ctx context.Context, cfg channel.
 		}
 		modes := controls.Modes
 		if !modes.Supported {
-			return decision, true, p.sendSlashError(ctx, sender, msg, slash.CodePermissionModeUnsupported)
+			return decision, true, p.sendSlashError(ctx, sender, msg, apperror.New(apperror.CodeRuntimeControlUnsupported, nil))
 		}
 		if strings.TrimSpace(invocation.Rest) != "" {
 			request.ModeID = strings.TrimSpace(invocation.Rest)
@@ -100,7 +93,7 @@ func (p *ChannelInboundProcessor) runtimeSlash(ctx context.Context, cfg channel.
 		if decision.Kind == slash.DecisionNormalChat && strings.Contains(selector, "/") {
 			return decision, false, nil
 		}
-		return decision, true, p.sendSlashError(ctx, sender, msg, slash.CodeUnknownSlash)
+		return decision, true, p.sendSlashError(ctx, sender, msg, apperror.New(slash.CodeUnknownSlash, nil))
 	}
 	if command.Kind == turn.RuntimeCommandTurn {
 		decision.Kind = slash.DecisionNormalChat
@@ -109,7 +102,7 @@ func (p *ChannelInboundProcessor) runtimeSlash(ctx context.Context, cfg channel.
 		return decision, false, nil
 	}
 	if hasSlashControlAttachments(msg) {
-		return decision, true, p.sendSlashError(ctx, sender, msg, slash.CodeSlashAttachmentsUnsupported)
+		return decision, true, p.sendSlashError(ctx, sender, msg, apperror.New(slash.CodeSlashAttachmentsUnsupported, nil))
 	}
 	loc := p.localizer(ctx, identity.BotID)
 	running := runtimeControlCopy(loc, command.I18nKey, "running_text", command.RunningText, "")
@@ -154,29 +147,12 @@ func (p *ChannelInboundProcessor) sendRuntimeControlText(ctx context.Context, se
 	return sender.Send(ctx, channel.OutboundMessage{Target: strings.TrimSpace(msg.ReplyTarget), Message: out})
 }
 
+// sendRuntimeControlError answers a runtime control that failed. The service
+// translates its failures with application.RuntimeControlError, whose default
+// is runtime_control.failed, so the reply is the copy for the error's code;
+// an error that reaches here without one gets the generic copy.
 func (p *ChannelInboundProcessor) sendRuntimeControlError(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, identity InboundIdentity, err error) error {
-	if externalAgentError(err) != nil {
-		return p.sendExternalAgentError(ctx, sender, msg, identity, err)
-	}
-	code := apperror.CodeOf(err)
-	if code == "" {
-		code = apperror.CodeRuntimeControlFailed
-		// The reply carries only the generic copy and the message is answered,
-		// so this is where the cause is recorded.
-		if p.logger != nil {
-			result := errlog.Event(ctx, "channel.runtime_control", err, errlog.Options{})
-			p.logger.LogAttrs(ctx, result.Level, "runtime control failed", append([]slog.Attr{
-				slog.String("bot_id", identity.BotID), slog.String("channel", msg.Channel.String()),
-			}, result.Attrs()...)...)
-		}
-	}
-	loc := p.localizer(ctx, identity.BotID)
-	key := "errors." + string(code)
-	text := loc.T(key)
-	if text == key {
-		text = loc.T("errors.runtime_control.failed")
-	}
-	return p.sendRuntimeControlText(ctx, sender, msg, text)
+	return p.replyFailure(ctx, sender, msg, identity, err, "")
 }
 
 // Native copy wins. Only host-declared keys are looked up in the channel catalog.

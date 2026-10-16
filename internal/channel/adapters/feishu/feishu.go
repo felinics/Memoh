@@ -19,6 +19,7 @@ import (
 
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/adapters/feishu/wsclient"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/media"
 )
 
@@ -28,8 +29,9 @@ type assetOpener interface {
 
 // FeishuAdapter implements the channel.Adapter, channel.Sender, and channel.Receiver interfaces for Feishu.
 type FeishuAdapter struct {
-	logger *slog.Logger
-	assets assetOpener
+	logger  *slog.Logger
+	assets  assetOpener
+	cardKit feishuCardKitAvailability
 }
 
 const (
@@ -398,9 +400,6 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 	}
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.ErrorContext(ctx, "decode config failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
 		return nil, err
 	}
 	if feishuCfg.InboundMode == inboundModeWebhook {
@@ -431,13 +430,7 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 			// Return the error so Manager.ensureConnection won't
 			// start a replacement while the old goroutine may
 			// still hold a websocket.
-			if a.logger != nil {
-				a.logger.WarnContext(ctx, "stop timed out waiting for goroutine to exit",
-					slog.String("config_id", cfg.ID),
-					slog.Any("error", stopCtx.Err()),
-				)
-			}
-			return stopCtx.Err()
+			return errs.Wrap(stopCtx.Err(), "stop timed out waiting for goroutine to exit", slog.String("config_id", cfg.ID))
 		}
 	}
 	conn := channel.NewConnection(cfg, stop)
@@ -587,9 +580,6 @@ func (a *FeishuAdapter) buildEventDispatcher(
 func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg channel.PreparedOutboundMessage) error {
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.ErrorContext(ctx, "decode config failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
 		return err
 	}
 
@@ -713,16 +703,14 @@ func (a *FeishuAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfi
 		client:        client,
 		receiveID:     receiveID,
 		receiveType:   receiveType,
+		useCardKit:    a.cardKit.available(cfg.ID),
 		patchInterval: feishuStreamPatchInterval,
 	}, nil
 }
 
 func (a *FeishuAdapter) handleReplyResponse(configID string, resp *larkim.ReplyMessageResp, err error) error {
 	if err != nil {
-		if a.logger != nil {
-			a.logger.Error("reply failed", slog.String("config_id", configID), slog.Any("error", err))
-		}
-		return err
+		return errs.Wrap(err, "reply to feishu message", slog.String("config_id", configID))
 	}
 	if resp == nil || !resp.Success() {
 		code := 0
@@ -744,10 +732,7 @@ func (a *FeishuAdapter) handleReplyResponse(configID string, resp *larkim.ReplyM
 
 func (a *FeishuAdapter) handleResponse(configID string, resp *larkim.CreateMessageResp, err error) error {
 	if err != nil {
-		if a.logger != nil {
-			a.logger.Error("send failed", slog.String("config_id", configID), slog.Any("error", err))
-		}
-		return err
+		return errs.Wrap(err, "send feishu message", slog.String("config_id", configID))
 	}
 	if resp == nil || !resp.Success() {
 		code := 0
@@ -793,7 +778,7 @@ func (a *FeishuAdapter) sendAttachment(ctx context.Context, client *lark.Client,
 		if isFeishuImageAttachment(typeProbe) {
 			uploadReq := larkim.NewCreateImageReqBuilder().
 				Body(larkim.NewCreateImageReqBodyBuilder().
-					ImageType(larkim.ImageTypeMessage).
+					ImageType(larkim.CreateImageImageTypeMessage).
 					Image(reader).
 					Build()).
 				Build()
@@ -947,20 +932,20 @@ func resolveFeishuFileType(name, mime string) string {
 	lowerName := strings.ToLower(strings.TrimSpace(name))
 	switch {
 	case strings.Contains(lower, "mp4") || strings.Contains(lower, "video"):
-		return larkim.FileTypeMp4
+		return larkim.CreateFileFileTypeMp4
 	case strings.Contains(lower, "pdf"):
-		return larkim.FileTypePdf
+		return larkim.CreateFileFileTypePdf
 	case strings.Contains(lower, "word") || strings.Contains(lower, "msword") || strings.HasSuffix(lowerName, ".doc") || strings.HasSuffix(lowerName, ".docx"):
-		return larkim.FileTypeDoc
+		return larkim.CreateFileFileTypeDoc
 	case strings.Contains(lower, "excel") || strings.Contains(lower, "spreadsheet") || strings.HasSuffix(lowerName, ".xls") || strings.HasSuffix(lowerName, ".xlsx"):
-		return larkim.FileTypeXls
+		return larkim.CreateFileFileTypeXls
 	case strings.Contains(lower, "powerpoint") || strings.Contains(lower, "presentation") || strings.HasSuffix(lowerName, ".ppt") || strings.HasSuffix(lowerName, ".pptx"):
-		return larkim.FileTypePpt
+		return larkim.CreateFileFileTypePpt
 	case strings.Contains(lower, "zip") || strings.Contains(lower, "compressed") || strings.Contains(lower, "archive"):
-		return larkim.FileTypeStream
+		return larkim.CreateFileFileTypeStream
 	case strings.HasSuffix(lowerName, ".zip") || strings.HasSuffix(lowerName, ".tar") || strings.HasSuffix(lowerName, ".tgz") || strings.HasSuffix(lowerName, ".tar.gz") || strings.HasSuffix(lowerName, ".rar") || strings.HasSuffix(lowerName, ".7z") || strings.HasSuffix(lowerName, ".gz") || strings.HasSuffix(lowerName, ".bz2") || strings.HasSuffix(lowerName, ".xz"):
-		return larkim.FileTypeStream
+		return larkim.CreateFileFileTypeStream
 	default:
-		return larkim.FileTypeStream
+		return larkim.CreateFileFileTypeStream
 	}
 }

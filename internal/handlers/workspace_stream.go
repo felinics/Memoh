@@ -18,6 +18,8 @@ import (
 type workspaceIntents interface {
 	EnsurePresent(ctx context.Context, botID, image string) (botworkspace.Workspace, error)
 	RequestAbsent(ctx context.Context, botID string, preserve bool) (botworkspace.Workspace, error)
+	CancelRemoval(ctx context.Context, botID string) error
+	Get(ctx context.Context, botID string) (botworkspace.Workspace, error)
 	Subscribe(botID string) (<-chan botworkspace.ProgressEvent, func())
 	Kick()
 	Await(ctx context.Context, botID string, generation int64) (botworkspace.Workspace, error)
@@ -135,13 +137,13 @@ func streamWorkspaceProvisioning(
 				if errors.Is(res.err, context.DeadlineExceeded) || errors.Is(res.err, context.Canceled) {
 					code = apperror.CodeWorkspaceSetupTimeout
 				}
-				return workspaceStreamOutcome{Workspace: res.w, Err: sendWorkspaceStreamFailure(send, code, res.err, requestID)}
+				return workspaceStreamOutcome{Workspace: res.w, Err: sendWorkspaceStreamFailure(ctx, send, code, res.err, requestID)}
 			}
 			w := res.w
 			if w.Observed != botworkspace.ObservedFailed {
 				return workspaceStreamOutcome{Workspace: w, Progress: progress}
 			}
-			return workspaceStreamOutcome{Workspace: w, Err: sendWorkspaceFailure(send, w, requestID)}
+			return workspaceStreamOutcome{Workspace: w, Err: sendWorkspaceFailure(ctx, send, w, requestID)}
 		}
 	}
 }
@@ -201,15 +203,24 @@ func workspaceCompleteEvent(ctx context.Context, log *slog.Logger, status worksp
 	return createContainerCompleteEvent{Type: "complete", Container: response}, true
 }
 
-// sendWorkspaceFailure reports a failed observation. Template bootstrap
-// failures keep their dedicated code; everything else is the generic setup
-// failure. The backend's error text goes to the result record only.
-func sendWorkspaceFailure(send func(payload any) bool, w botworkspace.Workspace, requestID string) error {
-	code := apperror.CodeWorkspaceSetupFailed
-	if w.LastErrorPhase == botworkspace.PhaseBootstrap {
-		code = apperror.CodeWorkspaceTemplateBootstrapFailed
+// sendWorkspaceFailure reports a failed observation with the code the
+// reconciler recorded. A row written by an earlier server has no code: its
+// template bootstrap failures keep their dedicated code and everything else is
+// the generic setup failure. The backend's error text goes to the result
+// record only.
+func sendWorkspaceFailure(ctx context.Context, send func(payload any) bool, w botworkspace.Workspace, requestID string) error {
+	code := apperror.Code(w.LastErrorCode)
+	if code == "" {
+		code = apperror.CodeWorkspaceSetupFailed
+		if w.LastErrorPhase == botworkspace.PhaseBootstrap {
+			code = apperror.CodeWorkspaceTemplateBootstrapFailed
+		}
 	}
-	return sendWorkspaceStreamFailure(send, code, errs.New(w.LastError), requestID)
+	cause := errs.New("workspace provisioning failed", slog.String("phase", w.LastErrorPhase), slog.String("code", w.LastErrorCode))
+	if w.LastError != "" {
+		cause = errs.New(w.LastError)
+	}
+	return sendWorkspaceStreamFailure(ctx, send, code, cause, requestID)
 }
 
 // workspaceStreamBudget bounds how long an SSE stream follows a provisioning

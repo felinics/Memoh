@@ -444,6 +444,42 @@ func TestPersistTerminalSnapshotSkipsAbortedSnapshotBeforeVisibleOutput(t *testi
 	}
 }
 
+func TestPersistPreflightFailureTurnUsesAdmittedIdentityAndAtomicRound(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	service := &Service{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	position := int64(7)
+	err := service.persistPreflightFailureTurn(context.Background(), ChatRequest{
+		BotID:        "bot-1",
+		ThreadID:     "session-1",
+		RunID:        "run-1",
+		TurnID:       "turn-1",
+		TurnPosition: &position,
+		Query:        "hello",
+	}, apperror.CodeHookUserMessageFailed)
+	if err != nil {
+		t.Fatalf("persistPreflightFailureTurn: %v", err)
+	}
+	if len(messages.persisted) != 2 {
+		t.Fatalf("persisted %d messages, want user + assistant", len(messages.persisted))
+	}
+	for i, input := range messages.persisted {
+		if i == 0 && (input.TurnID != "turn-1" || input.TurnPosition == nil || *input.TurnPosition != position) {
+			t.Fatalf("user identity = (%q, %v), want (turn-1, %d)", input.TurnID, input.TurnPosition, position)
+		}
+		if input.Metadata[messagepkg.HistoryFailureOriginMetadataKey] != messagepkg.HistoryFailureOriginUserMessageHook {
+			t.Fatalf("message %d metadata = %#v, want Hook failure origin", i, input.Metadata)
+		}
+		if i == 1 && input.Metadata[messagepkg.HistoryErrorCodeMetadataKey] != string(apperror.CodeHookUserMessageFailed) {
+			t.Fatalf("assistant metadata = %#v, want Hook failure code", input.Metadata)
+		}
+	}
+	if len(messages.roundOptions) != 1 {
+		t.Fatalf("round options = %d, want one atomic write", len(messages.roundOptions))
+	}
+}
+
 func TestPersistTerminalSnapshotStoresTimeoutBeforeVisibleOutput(t *testing.T) {
 	t.Parallel()
 

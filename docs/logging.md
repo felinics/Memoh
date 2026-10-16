@@ -7,7 +7,7 @@ decisions a linter cannot make.
 ## The shape of a record
 
 ```json
-{"time":"2026-09-18T18:54:53.830Z","level":"INFO","msg":"request","method":"GET","uri":"/api/bots","status":200,"latency":"12ms","request_id":"aeOSIBuu…","trace_id":"4bf92f35…"}
+{"time":"2026-09-18T18:54:53.830Z","level":"INFO","msg":"request","method":"GET","uri":"/api/bots","status":200,"latency":"12ms","request_id":"3f2b9c1e-…","trace_id":"4bf92f35…"}
 ```
 
 `time`, `level`, `msg` and `source` belong to slog and must never be used as
@@ -73,7 +73,7 @@ Added by the handler, never by the call site:
 
 | Key | Source |
 | --- | --- |
-| `request_id` | The id echo's `RequestID` middleware assigns, put into the context by `httpx.RequestIDContext`. The same id the client receives, in the response header and in `apperror.Problem`. |
+| `request_id` | The id echo's `RequestID` middleware assigns, put into the context by `httpx.RequestIDContext`. The same id the client receives, in the response header and in `server.Problem`. |
 | | Work that does not arrive over HTTP gets its own id from `httpx.NewRequestID`: each inbound IM message and each discuss trigger. The internal RPC carries the caller's id in `x-request-id` metadata, so the callee's records report it too. |
 | `trace_id`, `span_id` | The span context, when tracing is configured — see [observability.md](observability.md). |
 
@@ -89,7 +89,7 @@ to `group.request_id` and breaks queries written against the top level.
 | Level | Meaning |
 | --- | --- |
 | `ERROR` | This process failed at something it was asked to do. |
-| `WARN` | Something is wrong but the operation continued, or a caller was refused. |
+| `WARN` | Something is wrong but the operation continued. |
 | `INFO` | A thing happened that an operator would want in the record. |
 | `DEBUG` | Detail useful while working on this code. |
 

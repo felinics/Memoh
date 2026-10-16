@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: Create or update Memoh workspace skills under /data/skills, including SKILL.md, scripts, references, assets, and validation. Use when the user asks to create, scaffold, revise, audit, or explain a workspace skill.
+description: Create or update Memoh workspace skills under /data/skills/user/personal, including SKILL.md, scripts, references, assets, and validation. Use when the user asks to create, scaffold, revise, audit, or explain a workspace skill.
 ---
 
 # Skill Creator
@@ -9,7 +9,7 @@ Use this skill to create or maintain Memoh workspace skills.
 
 ## Location Policy
 
-- Store user-created workspace skills under `/data/skills/<skill-name>/SKILL.md`.
+- Store user-created workspace skills under `/data/skills/user/personal/<skill-name>/SKILL.md`. Memoh only discovers user skills in this directory.
 - Treat `/data/.memoh/skills` as Memoh-managed built-in skill space. Do not create user skills there unless the user explicitly asks to maintain built-in templates.
 - Prefer lowercase hyphen-case names, for example `docs-publisher` or `gh-review-helper`.
 
@@ -20,7 +20,7 @@ Use this skill to create or maintain Memoh workspace skills.
 3. For a new skill, initialize it with the bundled script when available:
 
 ```bash
-python3 /data/.memoh/skills/skill-creator/scripts/init_skill.py my-skill --path /data/skills --resources scripts,references
+python3 /data/.memoh/skills/skill-creator/scripts/init_skill.py my-skill --path /data/skills/user/personal --resources scripts,references
 ```
 
 4. Edit `SKILL.md` and add only the resource files that directly support the skill.
@@ -28,7 +28,7 @@ python3 /data/.memoh/skills/skill-creator/scripts/init_skill.py my-skill --path 
 6. Validate the skill:
 
 ```bash
-python3 /data/.memoh/skills/skill-creator/scripts/quick_validate.py /data/skills/my-skill
+python3 /data/.memoh/skills/skill-creator/scripts/quick_validate.py /data/skills/user/personal/my-skill
 ```
 
 ## Core Shape

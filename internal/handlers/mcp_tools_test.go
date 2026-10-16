@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/felinics/memoh/internal/apperror"
 	mcpgw "github.com/felinics/memoh/internal/mcp"
 )
 
@@ -257,9 +258,8 @@ func TestHandleMCPToolsRuntimeIDRequiresRuntimeToolToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("runtime tool request without token should fail")
 	}
-	httpErr := &echo.HTTPError{}
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
-		t.Fatalf("runtime tool request without token error = %v, want 404", err)
+	if apperror.CodeOf(err) != apperror.CodeACPRuntimeNotFound {
+		t.Fatalf("runtime tool request without token error = %v, want acp.runtime_not_found", err)
 	}
 }
 

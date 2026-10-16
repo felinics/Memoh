@@ -89,10 +89,12 @@ func (s *Service) PendingRuntimeDecisions(ctx context.Context, runID string) ([]
 	// Recovery decides by session runtime whether the parked run is
 	// resumable at all; every pending decision here shares one session.
 	if len(out) > 0 && s.sessionService != nil {
-		if sess, sessErr := s.sessionService.Get(ctx, out[0].SessionID); sessErr == nil {
-			for i := range out {
-				out[i].SessionRuntime = sess.RuntimeType
-			}
+		sess, sessErr := s.sessionService.Get(ctx, out[0].SessionID)
+		if sessErr != nil {
+			return nil, fmt.Errorf("read waiting-decision session runtime: %w", sessErr)
+		}
+		for i := range out {
+			out[i].SessionRuntime = sess.RuntimeType
 		}
 	}
 	return out, nil

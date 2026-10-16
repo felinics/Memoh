@@ -121,15 +121,15 @@ func (h *Handler) findModelByProviderAndName(cc CommandContext, providerName, mo
 			return m, nil
 		}
 	}
-	return models.GetResponse{}, fmt.Errorf("%s", cc.T("cmd.model.notFoundUnderProvider", map[string]any{"name": fmt.Sprintf("%q", modelName), "provider": fmt.Sprintf("%q", providerName), "command": CmdRef("model list")}))
+	return models.GetResponse{}, newReplyError("cmd.model.notFoundUnderProvider", map[string]any{"name": fmt.Sprintf("%q", modelName), "provider": fmt.Sprintf("%q", providerName), "command": CmdRef("model list")})
 }
 
 func (h *Handler) findModelForSelection(cc CommandContext, args []string) (models.GetResponse, error) {
 	if h.modelsService == nil {
-		return models.GetResponse{}, fmt.Errorf("%s", cc.T("cmd.model.serviceUnavailable"))
+		return models.GetResponse{}, newReplyError("cmd.model.serviceUnavailable", nil)
 	}
 	if len(args) == 0 {
-		return models.GetResponse{}, fmt.Errorf("%s", cc.T("cmd.model.idRequired"))
+		return models.GetResponse{}, newReplyError("cmd.model.idRequired", nil)
 	}
 	if len(args) == 1 {
 		return h.findModelByIDOrName(cc, args[0])
@@ -144,7 +144,7 @@ func (h *Handler) findModelByIDOrName(cc CommandContext, target string) (models.
 	}
 	target = strings.TrimSpace(target)
 	if target == "" {
-		return models.GetResponse{}, fmt.Errorf("%s", cc.T("cmd.model.idRequired"))
+		return models.GetResponse{}, newReplyError("cmd.model.idRequired", nil)
 	}
 	for _, item := range items {
 		if strings.EqualFold(item.ModelID, target) {
@@ -159,7 +159,7 @@ func (h *Handler) findModelByIDOrName(cc CommandContext, target string) (models.
 	}
 	switch len(matches) {
 	case 0:
-		return models.GetResponse{}, fmt.Errorf("%s", cc.T("cmd.model.notFound", map[string]any{"name": fmt.Sprintf("%q", target), "command": CmdRef("model list")}))
+		return models.GetResponse{}, newReplyError("cmd.model.notFound", map[string]any{"name": fmt.Sprintf("%q", target), "command": CmdRef("model list")})
 	case 1:
 		return matches[0], nil
 	default:
@@ -167,16 +167,16 @@ func (h *Handler) findModelByIDOrName(cc CommandContext, target string) (models.
 		for _, item := range matches {
 			choices = append(choices, fmt.Sprintf("%s/%s", h.resolveProviderName(cc, item.ProviderID), item.ModelID))
 		}
-		return models.GetResponse{}, fmt.Errorf("%s", cc.T("cmd.model.ambiguous", map[string]any{
+		return models.GetResponse{}, newReplyError("cmd.model.ambiguous", map[string]any{
 			"name":       fmt.Sprintf("%q", target),
 			"candidates": strings.Join(choices, ", "),
-		}))
+		})
 	}
 }
 
 func (h *Handler) selectableChatModels(cc CommandContext) ([]models.GetResponse, error) {
 	if h.modelsService == nil {
-		return nil, fmt.Errorf("%s", cc.T("cmd.model.serviceUnavailable"))
+		return nil, newReplyError("cmd.model.serviceUnavailable", nil)
 	}
 	return h.modelsService.ListEnabledByType(cc.Ctx, models.ModelTypeChat)
 }

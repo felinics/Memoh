@@ -292,6 +292,7 @@ import { useI18n } from 'vue-i18n'
 import LoadingButton from '@/components/loading-button/index.vue'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 interface SpeechFieldSchema {
   key: string
@@ -433,7 +434,7 @@ async function handleTest() {
       transcriptionLanguage.value = payload.language ?? ''
     }
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : t(mode.value === 'transcription' ? 'transcription.test.failed' : 'speech.test.failed')
+    const msg = resolveApiErrorMessage(error, t(mode.value === 'transcription' ? 'transcription.test.failed' : 'speech.test.failed'))
     testError.value = msg
     toast.error(msg)
   } finally {

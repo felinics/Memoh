@@ -83,8 +83,11 @@ func captureProviderAttemptPrefix(cfg RunConfig) RunConfig {
 // users retain the legacy refresh path.
 func (a *Agent) applyContextView(ctx context.Context, cfg RunConfig) (RunConfig, error) {
 	if a != nil && a.contextViewApplier != nil {
-		return a.contextViewApplier(ctx, cfg)
+		prepared, err := a.contextViewApplier(ctx, cfg)
+		prepared.RecoverContextBudget = nil
+		return prepared, err
 	}
+	cfg.RecoverContextBudget = nil
 	return cfg.RefreshContextFrag(), nil
 }
 
@@ -903,18 +906,6 @@ func prepareMidStreamRetryConfigWithMessages(
 	cfg.ContextMutations.Record(contextfrag.MutationMidStreamRetry,
 		fmt.Sprintf("attempt=%d accumulated=%d error_sha256=%x", attempt, accumulatedCount, errorHash))
 	return cfg
-}
-
-// sleepWithContext sleeps for the given duration or returns context error.
-func sleepWithContext(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
 
 func detectGenerateLoopAbort(ctx context.Context, err error) error {

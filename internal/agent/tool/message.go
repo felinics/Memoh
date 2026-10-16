@@ -39,6 +39,7 @@ func (*MessageProvider) Usage(_ context.Context, session SessionContext, availab
 		switch session.SessionType {
 		case sessionmode.Discuss:
 			parts = append(parts, "Use "+sendRef+" to speak in the observed conversation; if you do not call it, you stay silent.")
+			parts = append(parts, "When you are addressed with a task that needs several tool steps or noticeable time, first call "+sendRef+" with one short acknowledgement, then send progress only when you hit a blocker, change direction, or finish a meaningful stage, and end with the result. Do not narrate each tool call, repeat earlier messages, or add a preamble to simple answers.")
 		case sessionmode.Schedule:
 			parts = append(parts, "Use "+sendRef+" only when the background task needs to notify a person or channel; specify `platform` and `target`.")
 		default:

@@ -279,6 +279,34 @@ func ParseAgentSetup(metadata map[string]any, agentID string) AgentSetup {
 	return setup
 }
 
+// InstanceManagedKey holds an agent instance's own managed fields in
+// bot_agents.metadata.
+const InstanceManagedKey = "managed"
+
+// ParseInstanceSetup resolves the setup one agent instance launches with.
+// Setups used to live on the bot keyed by profile, so every instance of the
+// generic profile launched the same command. An instance now owns its managed
+// fields; only instances that predate that still read the bot's profile slot.
+func ParseInstanceSetup(botMetadata, agentMetadata map[string]any, agentID string) AgentSetup {
+	managed, owns := metadataRecord(agentMetadata[InstanceManagedKey])
+	if !owns {
+		return ParseAgentSetup(botMetadata, agentID)
+	}
+	setup := AgentSetup{
+		AgentID: NormalizeAgentID(agentID),
+		Enabled: true,
+		Mode:    setupModeAPIKey,
+		ModeSet: true,
+		Managed: make(map[string]string, len(managed)),
+	}
+	for key, value := range managed {
+		if s, ok := value.(string); ok {
+			setup.Managed[key] = s
+		}
+	}
+	return setup
+}
+
 func normalizeSetupMode(mode string, managed map[string]string) string {
 	mode = NormalizeAgentID(mode)
 	switch mode {

@@ -27,6 +27,8 @@ type HistoryTurn struct {
 // Domain-specific stores should replace this broad interface module by module.
 type Queries interface {
 	SaveSessionRunResumeContext(context.Context, dbsqlc.SaveSessionRunResumeContextParams) (int64, error)
+	AcceptSessionRunDecisionContinuation(context.Context, dbsqlc.AcceptSessionRunDecisionContinuationParams) (dbsqlc.SessionRun, error)
+	MarkSessionRunDecisionExecuting(context.Context, dbsqlc.MarkSessionRunDecisionExecutingParams) (int64, error)
 	ListInterruptedSessionRuns(context.Context, pgtype.UUID) ([]dbsqlc.SessionRun, error)
 	RetireSupersededInterruptedSessionRuns(context.Context) (int64, error)
 	RetireInterruptedSessionRun(context.Context, pgtype.UUID) (int64, error)
@@ -41,6 +43,7 @@ type Queries interface {
 	LockAgentAuthorizationOwner(context.Context, string) error
 
 	ClaimBotDependencyOperation(ctx context.Context, arg dbsqlc.ClaimBotDependencyOperationParams) (dbsqlc.BotDependencyInstallation, error)
+	CancelBotWorkspaceRemoval(ctx context.Context, arg dbsqlc.CancelBotWorkspaceRemovalParams) (dbsqlc.BotWorkspace, error)
 	ClaimBotWorkspace(ctx context.Context, arg dbsqlc.ClaimBotWorkspaceParams) (dbsqlc.BotWorkspace, error)
 	ClaimBotWorkspaces(ctx context.Context, arg dbsqlc.ClaimBotWorkspacesParams) ([]dbsqlc.BotWorkspace, error)
 	CountBotWorkspacesByObservedState(ctx context.Context) ([]dbsqlc.CountBotWorkspacesByObservedStateRow, error)

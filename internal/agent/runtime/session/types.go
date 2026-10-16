@@ -50,6 +50,7 @@ var (
 	ErrCommandTargetNotActive  = errors.New("runtime command target is not active")
 	ErrCommandTargetMismatch   = errors.New("run does not belong to this session")
 	ErrCommandExpired          = errors.New("runtime command expired before acknowledgement")
+	ErrCommandNotAcknowledged  = errors.New("runtime command was not acknowledged")
 	ErrCommandBusy             = errors.New("runtime command executor is busy")
 	ErrCommandPayloadConflict  = errors.New("runtime command payload conflicts with an earlier request")
 	ErrDecisionNotFound        = errors.New("runtime decision was not found")
@@ -311,6 +312,20 @@ type CurrentRunView struct {
 	ProposedTerminalStatus string            `json:"proposed_terminal_status,omitempty"`
 	FinishProposedAt       *time.Time        `json:"finish_proposed_at,omitempty"`
 	Operation              *RunOperationView `json:"operation,omitempty"`
+	// Retry is set while the model call is waiting to be retried and cleared
+	// by the next visible output or by the run leaving execution.
+	Retry *RunRetryView `json:"retry,omitempty"`
+}
+
+// RunRetryView describes the model-call retry the run is waiting on. It
+// carries the retry event's values and no provider text.
+type RunRetryView struct {
+	Attempt    int    `json:"attempt"`
+	MaxAttempt int    `json:"max_attempt"`
+	DelayMs    int64  `json:"delay_ms"`
+	Reason     string `json:"reason,omitempty" enums:"rate_limited,server_error,stream_incomplete,network"`
+	// RetryAt is the server time the next attempt is planned for.
+	RetryAt time.Time `json:"retry_at"`
 }
 
 type SteerTurnView struct {
@@ -375,6 +390,10 @@ type CurrentRunPatch struct {
 	ErrorCode           *string    `json:"error_code,omitempty"`
 	UpdatedAt           *time.Time `json:"updated_at,omitempty"`
 	OwnerLeaseExpiresAt *time.Time `json:"owner_lease_expires_at,omitempty"`
+	// Retry replaces the run's retry state; ClearRetry removes it. Both absent
+	// means the retry state is unchanged. A status patch always carries one.
+	Retry      *RunRetryView `json:"retry,omitempty"`
+	ClearRetry bool          `json:"clear_retry,omitempty"`
 }
 
 type RuntimeMessageAppend struct {
@@ -412,6 +431,9 @@ type Command struct {
 
 	// ErrorArgs are the catalog args of a failure whose ErrorCode is a catalog code.
 	ErrorArgs map[string]string `json:"error_args,omitempty"`
+	// ErrorFault is "dependency" for a failure of a service the executor
+	// called, which its code alone does not tell.
+	ErrorFault string `json:"error_fault,omitempty"`
 
 	// StreamOutput is fixed at admission and travels to the owner with the command.
 	// It must not depend on subscriber liveness: disconnecting cannot change a run.

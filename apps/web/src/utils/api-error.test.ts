@@ -93,8 +93,9 @@ describe('resolveApiErrorMessage', () => {
   it.each([
     [404, 'The requested resource was not found.'],
     [422, 'The request is invalid.'],
+    [429, 'Too many requests. Please wait a moment and try again.'],
     [502, 'Something went wrong on the server. Please try again.'],
-  ])('describes an error without a code or fault by its status %d', (status, expected) => {
+  ])('describes an error without a code by its status %d', (status, expected) => {
     const error = { status, message: 'raw gateway text' }
 
     expect(resolveApiErrorMessage(error, 'fallback')).toBe(expected)
@@ -200,6 +201,21 @@ describe('resolveApiErrorMessage', () => {
   })
 
   it.each([
+    ['en', 'request.field_required', 'session_id is required.'],
+    ['zh', 'request.field_required', '缺少 session_id。'],
+    ['ja', 'request.field_required', 'session_id は必須です。'],
+    ['en', 'request.field_invalid', 'session_id is invalid.'],
+    ['zh', 'request.field_invalid', 'session_id 的值无效。'],
+    ['ja', 'request.field_invalid', 'session_id の値が無効です。'],
+  ])('names the field of a %s %s error', (language, code, expected) => {
+    locale = language
+
+    const error = { code, args: { field: 'session_id' }, detail: 'A field problem.', request_id: 'req-1', status: 400 }
+
+    expect(resolveApiErrorMessage(error, 'fallback')).toBe(expected)
+  })
+
+  it.each([
     ['en', 'skill.builtin_read_only', 'Built-in Skills are managed by Memoh and cannot be edited or deleted.'],
     ['zh', 'skill.builtin_read_only', 'Memoh 自带 Skill 由系统管理，无法编辑或删除。'],
     ['ja', 'skill.builtin_read_only', 'Memoh 組み込みの Skill はシステムによって管理されているため、編集または削除できません。'],
@@ -255,12 +271,12 @@ describe('resolveApiErrorMessage', () => {
   })
 
   it.each([
-    ['context.budget_unsatisfied', 'en', 'The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window.'],
-    ['context.budget_unsatisfied', 'zh', '模型上下文窗口不足，无法处理当前请求。可尝试 /compact 压缩较早的历史、缩短请求，或改用上下文窗口更大的模型。'],
-    ['context.budget_unsatisfied', 'ja', 'モデルのコンテキストウィンドウが不足しているため、このリクエストを処理できません。/compact で古い履歴を要約するか、リクエストを短くするか、より大きなコンテキストウィンドウのモデルをお試しください。'],
-    ['context.protected_overflow', 'en', 'Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window.'],
-    ['context.protected_overflow', 'zh', '必要的上下文内容超出了模型上下文预算。可尝试 /compact 压缩较早的历史，或改用上下文窗口更大的模型。'],
-    ['context.protected_overflow', 'ja', '必須コンテキストがモデルのコンテキスト予算を超えています。/compact で古い履歴を要約するか、より大きなコンテキストウィンドウのモデルをお試しください。'],
+    ['context.budget_unsatisfied', 'en', 'The model context window is too small for this request. Shorten the request, or switch to a model with a larger context window.'],
+    ['context.budget_unsatisfied', 'zh', '模型上下文窗口不足，无法处理当前请求。可尝试缩短请求，或改用上下文窗口更大的模型。'],
+    ['context.budget_unsatisfied', 'ja', 'モデルのコンテキストウィンドウが不足しているため、このリクエストを処理できません。リクエストを短くするか、より大きなコンテキストウィンドウのモデルをお試しください。'],
+    ['context.protected_overflow', 'en', 'Required context exceeds the model context budget. Switch to a model with a larger context window.'],
+    ['context.protected_overflow', 'zh', '必要的上下文内容超出了模型上下文预算。可尝试改用上下文窗口更大的模型。'],
+    ['context.protected_overflow', 'ja', '必須コンテキストがモデルのコンテキスト予算を超えています。より大きなコンテキストウィンドウのモデルをお試しください。'],
   ])('localizes %s for %s', (code, language, expected) => {
     locale = language
 
@@ -315,19 +331,33 @@ describe('resolveApiErrorMessage', () => {
   it.each([
     ['client', 409, 'The request conflicts with the current state. Refresh and try again.'],
     ['client', 422, 'The request is invalid.'],
-    ['server', 500, 'Something went wrong on the server. Please try again.'],
+    ['dependency', 429, 'Too many requests. Please wait a moment and try again.'],
+    ['client', 500, 'Something went wrong on the server. Please try again.'],
     ['dependency', 502, 'Something went wrong on the server. Please try again.'],
-  ])('describes an unrecognized code with a %s fault and status %d by its fault', (fault, status, expected) => {
+  ])('describes an unrecognized code with a %s fault and status %d by its status', (fault, status, expected) => {
     const problem = { code: 'future.new_condition', status, fault, args: {}, detail: 'raw server detail' }
 
     expect(resolveApiErrorMessage(problem, 'fallback')).toBe(expected)
     expect(resolveApiErrorMessage(problem, 'Save failed', { prefixFallback: true })).toBe(`Save failed: ${expected}`)
   })
 
-  it('shows nothing for an unrecognized code of a canceled request', () => {
-    const problem = { code: 'future.new_condition', status: 499, fault: 'canceled', args: {}, detail: 'raw server detail' }
-
+  it.each([
+    ['a canceled fault', { code: 'future.new_condition', status: 499, fault: 'canceled', args: {} }],
+    ['no fault', { code: 'future.new_condition', status: 499, args: {} }],
+  ])('shows nothing for an unrecognized code of a canceled request with %s', (_case, problem) => {
     expect(resolveApiErrorMessage(problem, 'fallback', { prefixFallback: true })).toBe('')
+  })
+
+  it.each([
+    ['client', { type: 'error', code: 'future.new_condition', fault: 'client', args: {}, message: 'raw server detail' }],
+    ['dependency', { type: 'error', code: 'future.new_condition', fault: 'dependency', args: {}, message: 'raw server detail' }],
+    ['no', { type: 'error', code: 'future.new_condition', args: {}, message: 'raw server detail' }],
+  ])('describes a stream error event with an unrecognized code and %s fault as a failure', (_case, event) => {
+    expect(resolveApiErrorMessage(event, 'raw server detail')).toBe('Something went wrong on the server. Please try again.')
+  })
+
+  it('shows nothing for a stream error event of a canceled run', () => {
+    expect(resolveApiErrorMessage({ type: 'error', code: 'future.new_condition', fault: 'canceled', args: {}, message: 'raw server detail' }, 'fallback')).toBe('')
   })
 
   it('prefers the copy of a recognized code over its fault', () => {

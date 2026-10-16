@@ -12,6 +12,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
@@ -20,15 +21,15 @@ import (
 // bot_history_messages. This gives chat mode the same event-driven context
 // that discuss mode uses, replacing the legacy loadMessages path. The second
 // return value is the raw (compactable) token pressure measured before
-// trimming — what admission drops is exactly what compaction must cover.
-func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest, contextTokenBudget int) ([]ModelMessage, int) {
+// trimming; the third also includes active summaries.
+func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest, contextTokenBudget int) ([]ModelMessage, int, int) {
 	sessionID := strings.TrimSpace(req.ThreadID)
 	if s.pipeline == nil || sessionID == "" {
-		return nil, 0
+		return nil, 0, 0
 	}
 	rc := s.pipeline.GetRC(sessionID)
 	if len(rc) == 0 {
-		return nil, 0
+		return nil, 0, 0
 	}
 
 	trs := s.loadTurnResponses(ctx, sessionID, contextTokenBudget)
@@ -36,13 +37,16 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 
 	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts)
 	if composed == nil {
-		return nil, 0
+		return nil, 0, 0
 	}
 
 	messages := make([]ModelMessage, 0, len(composed.Messages))
 	pinned := make([]bool, 0, len(composed.Messages))
-	compactable := 0
+	compactable, pressure := 0, 0
 	for _, m := range composed.Messages {
+		if m.Source != nil && req.ExternalMessageID != "" {
+			m.Source.Current = m.Source.Kind == "external" && m.Source.ID == req.ExternalMessageID
+		}
 		contentJSON := m.RawContent
 		if len(contentJSON) == 0 {
 			var err error
@@ -52,13 +56,16 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 			}
 		}
 		messages = append(messages, ModelMessage{
-			Role:    m.Role,
-			Content: contentJSON,
+			Role:          m.Role,
+			ContextSource: m.Source,
+			Content:       contentJSON,
 		})
 		isPinned := m.CompactionArtifactID != ""
 		pinned = append(pinned, isPinned)
+		cost := estimateMessageTokens(messages[len(messages)-1])
+		pressure += cost
 		if !isPinned {
-			compactable += estimateMessageTokens(messages[len(messages)-1])
+			compactable += cost
 		}
 	}
 
@@ -67,7 +74,7 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 		messages = trimPipelineMessagesByTokens(s.logger, messages, pinned, contextTokenBudget)
 	}
 
-	return messages, compactable
+	return messages, compactable, pressure
 }
 
 // loadTimelineArtifacts projects the session's active compaction frontier for
@@ -94,37 +101,26 @@ func (s *Service) loadTimelineArtifacts(ctx context.Context, botID, sessionID st
 // the context token budget using character-based estimation. Pinned messages
 // (compaction summaries) survive the dropped prefix.
 func trimPipelineMessagesByTokens(log *slog.Logger, messages []ModelMessage, pinned []bool, maxTokens int) []ModelMessage {
-	totalTokens := 0
-	cutoff := 0
-	for i := len(messages) - 1; i >= 0; i-- {
-		totalTokens += estimateMessageTokens(messages[i])
-		if totalTokens > maxTokens {
-			cutoff = i + 1
-			break
-		}
+	entries := make([]turn.AdmissionEntry, len(messages))
+	for i, message := range messages {
+		entries[i] = turn.AdmissionEntry{Source: message.ContextSource, Cost: estimateMessageTokens(message), Pinned: i < len(pinned) && pinned[i], ToolResponse: strings.EqualFold(strings.TrimSpace(message.Role), "tool")}
 	}
-
-	// Avoid orphaned tool messages at the cutoff boundary.
-	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].Role), "tool") {
-		cutoff++
-	}
-
-	if cutoff == 0 {
+	decision := turn.AdmitContextEntries(entries, maxTokens)
+	if decision.ProtectedOverflow || decision.DroppedEntries == 0 {
+		// Keep irreducible input intact for the final provider admission.
 		return messages
 	}
-
-	kept := make([]ModelMessage, 0, len(messages)-cutoff)
-	for i := 0; i < cutoff; i++ {
-		if i < len(pinned) && pinned[i] {
-			kept = append(kept, messages[i])
+	kept := make([]ModelMessage, 0, len(messages)-decision.DroppedEntries)
+	for i, message := range messages {
+		if decision.Selected[i] {
+			kept = append(kept, message)
 		}
 	}
-	kept = append(kept, messages[cutoff:]...)
 
 	if log != nil {
 		log.Info("trimPipelineMessagesByTokens: context trimmed",
 			slog.Int("total_messages", len(messages)),
-			slog.Int("estimated_tokens", totalTokens),
+			slog.Int("estimated_tokens", decision.EstimatedTokens),
 			slog.Int("max_tokens", maxTokens),
 			slog.Int("kept_messages", len(kept)),
 		)

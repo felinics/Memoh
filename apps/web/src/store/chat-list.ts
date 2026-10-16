@@ -26,7 +26,7 @@ import {
   commandErrorMessage,
   forkFailedMessage,
   sendFailedMessage,
-  userInputConnectionLostMessage,
+  userInputConnectionLostMessage, workdirMismatchMessage, sendOutcomeUnknownMessage,
 } from './chat/messages'
 import {
   createBackgroundTaskTracker,
@@ -82,8 +82,9 @@ export const useChatStore = defineStore('chat', () => {
   })
   const {
     focusedViewId: focusedChatViewId,
+    draftPromoted,
     projectionVersion: runtimeProjectionVersion,
-    chatViews, assistantStreams, draftSessionCreations,
+    chatViews, assistantStreams, firstSend, draftSessionCreations,
     draftCreationKey: draftSessionCreationKey,
     isCreatingDraft: isChatViewCreatingSession,
     normalizeTarget: normalizedChatViewTarget,
@@ -129,7 +130,7 @@ export const useChatStore = defineStore('chat', () => {
     replaceSessions, appendSessions, upsertSession, rememberSession,
     knownSessionSummary, hasListedSession, patchSessionInList,
     updateKnownSessionTitle, removeSessionFromList, touchSessionInList,
-    touchKnownSession, fallbackSessionAfterDelete, markSessionDeleted,
+    touchKnownSession, markSessionDeleted,
     clearDeletedSessionIds, clearRememberedSessions,
   } = sessionList
   const {
@@ -191,6 +192,7 @@ export const useChatStore = defineStore('chat', () => {
   } = createChatBots({
     currentBotId,
     userScopeGeneration: () => userScopeGeneration,
+    selectBot: botId => selectBot(botId),
   })
   const {
     activeFailure: startupSendFailure,
@@ -229,7 +231,9 @@ export const useChatStore = defineStore('chat', () => {
     createChatRuntimeLayer({
     currentBotId,
     sessionId,
+    explicitSessionSelection, draftIntent,
     focusedViewId: focusedChatViewId,
+    firstSend, workdirMismatchMessage,
     assistantStreams,
     sessionList,
     chatViews,
@@ -254,6 +258,7 @@ export const useChatStore = defineStore('chat', () => {
     transcriptForTarget,
     createControlId: createInvocationId,
     connectionLostMessage: userInputConnectionLostMessage,
+    sendOutcomeUnknownMessage,
     resolveErrorMessage: resolveApiErrorMessage,
     showError: message => toast.error(message),
     onBotSessionsActivityEvent: handleBotSessionsActivityEvent,
@@ -275,9 +280,9 @@ export const useChatStore = defineStore('chat', () => {
     reset: resetDecisions,
   } = decisions
   const {
-    guiToolUseRequested,
     abort,
     abortAllAssistantStreams,
+    watchFirstSendConfirmation,
   } = runtimeIntegration
 
   const hasExplicitSessionSelection = computed(() => explicitSessionSelection.value)
@@ -401,13 +406,11 @@ export const useChatStore = defineStore('chat', () => {
     clearStreamHistory()
     resetDecisions()
     backgroundTasks.clearBackgroundTasks()
-    guiToolUseRequested.value = null
   }
 
   const {
     loadingChats,
     initialize,
-    switchActiveSession,
     selectBot,
     selectSession,
     createNewSession,
@@ -456,8 +459,7 @@ export const useChatStore = defineStore('chat', () => {
     deletedSession,
     forkedSessionRequested,
     cleanupFailedDeferredSession,
-    removeSession,
-    removeSessions,
+    removeSession, removeSessions,
     renameSession,
     forkTurn,
     reset: resetSessionActions,
@@ -484,8 +486,6 @@ export const useChatStore = defineStore('chat', () => {
     clearHistoryView,
     markSessionDeleted,
     removeSessionFromList,
-    fallbackSessionAfterDelete,
-    switchActiveSession,
     patchSessionInList,
     upsertSession,
     rememberSession,
@@ -574,6 +574,9 @@ export const useChatStore = defineStore('chat', () => {
     cleanupFailedDeferredSession,
     discardAssistantStream,
     rememberStartupSendFailure,
+    draftWorkdirIdFor: botId => workdirsStore.sessionWorkdirIdFor(botId, { externalAgent: false }),
+    firstSend,
+    watchFirstSendConfirmation,
     sendFailedMessage,
     updateForkAnchorForReplacedMessage,
     restoreTailFromOptimistic,
@@ -605,12 +608,13 @@ export const useChatStore = defineStore('chat', () => {
     _hasLoadedOlder: hasLoadedOlder,
 
     startupSendFailure, startupSendFailureFor,
+    firstSendFor: firstSend.entryFor, isSessionTentative: firstSend.isSessionTentative,
     commandEvent, commandEventForScope, rememberCommandEvent, beginCommandEvent, showCommandError,
     fsChangedAt, markFsChanged, affectsPath, fsEventForPath,
     backgroundTaskFor,
     initialize, initializeWithRecovery, refreshBots, selectBot, selectSession, createNewSession,
-    selectDraft, userSentInSession, draftViewRequested, applyDraftViewRequest,
-    forkedSessionRequested, guiToolUseRequested, deletedSession,
+    selectDraft, userSentInSession, draftPromoted, draftViewRequested, applyDraftViewRequest,
+    forkedSessionRequested, deletedSession,
     stageExternalAgentSession, stageDefaultExternalAgentSession, cacheDefaultExternalAgentSession,
     resetToEmptyComposer, ensurePendingACPRuntime,
     setPendingACPModel, setPendingACPMode, setPendingRuntimeMode, setPendingACPReasoning, clearPendingExternalAgentSession,

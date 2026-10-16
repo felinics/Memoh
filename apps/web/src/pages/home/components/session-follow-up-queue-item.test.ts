@@ -15,7 +15,7 @@ const uiStubs = vi.hoisted(() => ({
     name: 'UiInputStub',
     inheritAttrs: false,
     setup(_: unknown, context: { attrs: Record<string, unknown> }) {
-      return () => h('input', context.attrs)
+      return () => h('input', { ...context.attrs, value: context.attrs.modelValue })
     },
   },
 }))
@@ -25,6 +25,9 @@ const uiStubs = vi.hoisted(() => ({
 vi.mock('@felinic/ui', () => ({ Button: uiStubs.ButtonStub, Input: uiStubs.InputStub }))
 
 import SessionFollowUpQueueItem from './session-follow-up-queue-item.vue'
+import { handleBrowserKeyboardShortcut } from '@/lib/browser-keyboard-shortcuts'
+import { keyboardBindings, resolveKeyboardBinding } from '@/lib/keyboard-bindings'
+import { appKeyboardCommands, createKeyboardCommandRegistry } from '@/lib/keyboard-commands'
 import type { EditableFollowUpQueueItem } from './use-session-follow-up-queue'
 
 const baseItem: Omit<EditableFollowUpQueueItem, 'queueKind'> = {
@@ -45,12 +48,12 @@ describe('SessionFollowUpQueueItem', () => {
     root = undefined
   })
 
-  async function mount(item: EditableFollowUpQueueItem) {
+  async function mount(item: EditableFollowUpQueueItem, onSave?: (text: string) => void) {
     root = document.createElement('div')
     document.body.append(root)
     const harness = defineComponent({
       setup() {
-        return () => h(SessionFollowUpQueueItem, { item, busy: false })
+        return () => h(SessionFollowUpQueueItem, { item, busy: false, onSave })
       },
     })
     app = createApp(harness)
@@ -75,5 +78,46 @@ describe('SessionFollowUpQueueItem', () => {
     expect(status).not.toBeNull()
     expect(status?.getAttribute('aria-label')).toBe('chat.queue.steerQueued')
     expect(status?.getAttribute('title')).toBe('chat.queue.steerQueued')
+  })
+
+  it.each(['mac', 'win', 'linux'] as const)('lets the %s focus-input shortcut leave the field instead of saving from the key', async (platform) => {
+    const save = vi.fn()
+    const el = await mount({ ...baseItem, queueKind: 'follow-up' }, save)
+    const composer = document.createElement('textarea')
+    document.body.append(composer)
+    let savesWhenFocusRan = -1
+    const registry = createKeyboardCommandRegistry()
+    registry.register(appKeyboardCommands.focusChatInput, () => {
+      savesWhenFocusRan = save.mock.calls.length
+      composer.focus()
+      return true
+    })
+    const bindings = keyboardBindings.map(binding => resolveKeyboardBinding(binding, platform))
+    const dispatch = (event: KeyboardEvent) => { handleBrowserKeyboardShortcut(event, registry, bindings, platform) }
+    window.addEventListener('keydown', dispatch)
+    try {
+      const input = el.querySelector('input')!
+      input.focus()
+      const chord = bindings.find(binding => binding.command === appKeyboardCommands.focusChatInput)!
+      input.dispatchEvent(new KeyboardEvent('keydown', {
+        key: chord.key,
+        metaKey: platform === 'mac' && !!chord.mod,
+        ctrlKey: platform !== 'mac' && !!chord.mod,
+        altKey: !!chord.alt,
+        shiftKey: !!chord.shift,
+        bubbles: true,
+        cancelable: true,
+      }))
+      expect(savesWhenFocusRan).toBe(0)
+      expect(document.activeElement).toBe(composer)
+
+      input.focus()
+      save.mockClear()
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+      expect(save).toHaveBeenCalledWith('queued input')
+    } finally {
+      window.removeEventListener('keydown', dispatch)
+      composer.remove()
+    }
   })
 })

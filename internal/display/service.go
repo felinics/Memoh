@@ -83,6 +83,12 @@ var (
 	ErrDisplayUnavailable = errors.New("display server not reachable")
 	ErrEncoderUnavailable = errors.New("gstreamer unavailable")
 	ErrCodecUnsupported   = errors.New("no compatible video codec offered")
+	// ErrOfferRequired, ErrOfferTypeUnsupported and ErrOfferInvalid are the
+	// ways a viewer's WebRTC offer can be refused: missing, not an offer, or
+	// not a description the peer connection accepts.
+	ErrOfferRequired        = errors.New("offer sdp is required")
+	ErrOfferTypeUnsupported = errors.New("unsupported session description type")
+	ErrOfferInvalid         = errors.New("invalid offer sdp")
 )
 
 var screenshotJPEGCandidates = []screenshotJPEGCandidate{
@@ -291,10 +297,10 @@ func (s *Service) Answer(ctx context.Context, botID string, req OfferRequest) (O
 		return OfferResponse{}, ErrDisplayDisabled
 	}
 	if strings.TrimSpace(req.SDP) == "" {
-		return OfferResponse{}, errors.New("offer sdp is required")
+		return OfferResponse{}, ErrOfferRequired
 	}
 	if req.Type != "" && req.Type != "offer" {
-		return OfferResponse{}, fmt.Errorf("unsupported session description type %q", req.Type)
+		return OfferResponse{}, fmt.Errorf("%w %q", ErrOfferTypeUnsupported, req.Type)
 	}
 
 	if !s.displayReachable(ctx, botID) {
@@ -812,7 +818,7 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 		SDP:  req.SDP,
 	}); err != nil {
 		cleanup(true)
-		return OfferResponse{}, err
+		return OfferResponse{}, fmt.Errorf("%w: %w", ErrOfferInvalid, err)
 	}
 
 	answer, err := pc.CreateAnswer(nil)

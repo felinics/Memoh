@@ -18,6 +18,7 @@ import (
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/schedule"
 )
@@ -594,10 +595,14 @@ func TestConsumeTriggeredStreamWithStepCommitterDoesNotDoublePersist(t *testing.
 // admission hook exactly the way the runtime manager would at activation.
 type fakeTriggeredAdmitter struct {
 	admitInput sessionruntime.AdmitInput
+	admitErr   error
 }
 
 func (f *fakeTriggeredAdmitter) Admit(_ context.Context, input sessionruntime.AdmitInput) (sessionruntime.Admission, error) {
 	f.admitInput = input
+	if f.admitErr != nil {
+		return sessionruntime.Admission{}, f.admitErr
+	}
 	return sessionruntime.Admission{
 		Started:      true,
 		RunID:        "run-1",
@@ -634,7 +639,7 @@ func TestAdmitTriggeredRunInjectsAdmissionView(t *testing.T) {
 		}
 	}
 
-	ctx, admission, _, err := svc.admitTriggeredRun(context.Background(), "bot-1", "session-1", "inv-1", []byte(`{}`), viewFn)
+	ctx, admission, _, err := svc.admitTriggeredRun(context.Background(), sessionmode.Schedule, "bot-1", "session-1", "inv-1", []byte(`{}`), viewFn)
 	if err != nil {
 		t.Fatalf("admitTriggeredRun() error = %v", err)
 	}
@@ -662,7 +667,7 @@ func TestAdmitTriggeredRunWithoutViewKeepsEmptyProjection(t *testing.T) {
 	admitter := &fakeTriggeredAdmitter{}
 	svc := &Service{logger: slog.New(slog.DiscardHandler), sessionRuntime: admitter}
 
-	ctx, admission, _, err := svc.admitTriggeredRun(context.Background(), "bot-1", "session-1", "inv-1", []byte(`{}`), nil)
+	ctx, admission, _, err := svc.admitTriggeredRun(context.Background(), sessionmode.Schedule, "bot-1", "session-1", "inv-1", []byte(`{}`), nil)
 	if err != nil {
 		t.Fatalf("admitTriggeredRun() error = %v", err)
 	}
@@ -685,5 +690,38 @@ func TestScheduleInvocationUsesFireIdentity(t *testing.T) {
 	}
 	if a != scheduleInvocationID(schedule.TriggerPayload{ID: "schedule", SessionID: "shared", FireID: "fire-a"}) {
 		t.Fatal("same fire lost retry identity")
+	}
+}
+
+// A fire that finds the session busy reports the schedule's busy sentinel,
+// which its unit treats as a skip. A failure before admission has no run
+// record, so it is not marked recorded.
+func TestTriggerScheduleBusyIsTheScheduleSentinel(t *testing.T) {
+	t.Parallel()
+	svc := &Service{logger: slog.New(slog.DiscardHandler), sessionRuntime: &fakeTriggeredAdmitter{admitErr: sessionruntime.ErrSessionBusy}}
+
+	_, err := svc.TriggerSchedule(context.Background(), "bot-1", schedule.TriggerPayload{FireID: "fire-1", ID: "schedule-1", SessionID: "session-1", Command: "run"}, "token")
+
+	if !errors.Is(err, schedule.ErrSessionBusy) || !errors.Is(err, sessionruntime.ErrSessionBusy) {
+		t.Fatalf("err = %v, want the schedule busy sentinel over the runtime's", err)
+	}
+	if errs.Analyze(context.Background(), err).Recorded {
+		t.Fatal("a fire refused before admission must not be marked recorded")
+	}
+}
+
+// A failure after admission ends the run, whose result record carries it at
+// its level; the fire returns it marked recorded so its own record is a WARN.
+func TestTriggerScheduleFailureAfterAdmissionIsRecorded(t *testing.T) {
+	t.Parallel()
+	svc := &Service{logger: slog.New(slog.DiscardHandler), sessionRuntime: &fakeTriggeredAdmitter{}}
+
+	_, err := svc.TriggerSchedule(context.Background(), "bot-1", schedule.TriggerPayload{FireID: "fire-1", ID: "schedule-1", SessionID: "session-1", Command: "run"}, "token")
+
+	if err == nil {
+		t.Fatal("TriggerSchedule() error = nil, want the run's failure")
+	}
+	if !errs.Analyze(context.Background(), err).Recorded {
+		t.Fatalf("err = %v, want it marked recorded", err)
 	}
 }

@@ -2,11 +2,16 @@ package botbackup
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/mcp"
 )
 
 func TestSanitizeRestoredEventData(t *testing.T) {
@@ -66,5 +71,20 @@ func TestRestoredDiscussCursorParamsDropsEventWatermark(t *testing.T) {
 	}
 	if params.ConsumedCursor != 1700000000000 || params.ScopeKey != "route:r1" {
 		t.Fatalf("source-time watermark and scope must survive, got %+v", params)
+	}
+}
+
+func TestMCPImportErrorAttributesDuplicateNameToClient(t *testing.T) {
+	cause := fmt.Errorf("%w: %w", mcp.ErrNameTaken, errors.New("ERROR: duplicate key value (SQLSTATE 23505)"))
+	err := mcpImportError(cause)
+	if got := apperror.CodeOf(err); got != apperror.CodeMCPNameTaken {
+		t.Fatalf("code = %q, want %q", got, apperror.CodeMCPNameTaken)
+	}
+	if got := errs.FaultOf(err); got != apperror.FaultClient {
+		t.Fatalf("fault = %q, want client", got)
+	}
+	other := errors.New("connection reset")
+	if got := mcpImportError(other); !errors.Is(got, other) {
+		t.Fatalf("other error rewritten: %v", got)
 	}
 }

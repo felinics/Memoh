@@ -1,6 +1,7 @@
 package workspacedeps
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,10 +15,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
@@ -211,7 +214,7 @@ func (f *fakeStore) ClaimOperation(_ context.Context, in UpsertInstallation, ope
 		f.nextID++
 		rec = Installation{ID: "rec-" + strconv.Itoa(f.nextID), BotID: in.BotID, DependencyID: in.DependencyID, Source: in.Source, SourceURL: in.SourceURL, RegistryID: in.RegistryID, DefinitionRevision: in.DefinitionRevision, CreatedAt: f.now()}
 	}
-	rec.Status, rec.LastError, rec.OperationID = in.Status, "", operationID
+	rec.Status, rec.LastError, rec.LastErrorCode, rec.OperationID = in.Status, "", "", operationID
 	rec.UpdatedAt = f.now()
 	f.records[in.InstallationKey] = rec
 	f.writes++
@@ -262,7 +265,7 @@ func (f *fakeStore) Upsert(_ context.Context, in UpsertInstallation) (Installati
 	return rec, nil
 }
 
-func (f *fakeStore) SetStatus(_ context.Context, key InstallationKey, status Status, lastError string) (Installation, error) {
+func (f *fakeStore) SetStatus(_ context.Context, key InstallationKey, status Status, lastErrorCode string) (Installation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	rec, ok := f.records[key]
@@ -274,7 +277,7 @@ func (f *fakeStore) SetStatus(_ context.Context, key InstallationKey, status Sta
 	}
 	f.writes++
 	rec.Status = status
-	rec.LastError = lastError
+	rec.LastError, rec.LastErrorCode = "", lastErrorCode
 	rec.UpdatedAt = f.now()
 	f.records[key] = rec
 	f.history[key] = append(f.history[key], status)
@@ -307,6 +310,9 @@ func (f *fakeStore) UpdateObserved(_ context.Context, key InstallationKey, upd O
 	}
 	if upd.LastError != nil {
 		rec.LastError = *upd.LastError
+	}
+	if upd.LastErrorCode != nil {
+		rec.LastErrorCode = *upd.LastErrorCode
 	}
 	if upd.ManifestDigest != nil {
 		rec.ManifestDigest = *upd.ManifestDigest
@@ -1007,8 +1013,8 @@ func TestInstallFailureRecordsError(t *testing.T) {
 		t.Errorf("status history = %v", got)
 	}
 	rec, _ := f.store.get(f.key("tool-y"))
-	if !strings.Contains(rec.LastError, "boom") || len(rec.LastError) > lastErrorLimit {
-		t.Errorf("last_error = %d bytes %q", len(rec.LastError), rec.LastError[:40])
+	if rec.LastError != "" || rec.LastErrorCode != string(apperror.CodeWorkspaceDependencyOperationFailed) {
+		t.Errorf("failure record = %q/%q, want the operation-failed code and no text", rec.LastErrorCode, rec.LastError)
 	}
 	if _, err := os.Stat(StatePath(f.home("tool-y"))); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("state.json must not be written on failure (stat err = %v)", err)
@@ -1183,8 +1189,10 @@ func TestCancelledOperationRecordsFailure(t *testing.T) {
 	if !ok || rec.Status != StatusFailed {
 		t.Fatalf("record after cancelled install = %+v (found %v), want failed", rec, ok)
 	}
-	if !strings.HasPrefix(rec.LastError, cancelledMessagePrefix) || !strings.Contains(rec.LastError, "context canceled") {
-		t.Errorf("last_error = %q, want %q followed by the cause", rec.LastError, cancelledMessagePrefix)
+	// The row outlives the request that started it: what it records is that
+	// the operation was cut short, not that some caller went away.
+	if rec.LastError != "" || rec.LastErrorCode != string(apperror.CodeWorkspaceDependencyOperationInterrupted) {
+		t.Errorf("record = %q/%q, want the interrupted code and no text", rec.LastErrorCode, rec.LastError)
 	}
 	if got := f.store.statuses(f.key("tool-y")); !statusesEqual(got, StatusInstalling, StatusFailed) {
 		t.Errorf("status history = %v", got)
@@ -1291,7 +1299,7 @@ func TestListReclaimsInterruptedOperations(t *testing.T) {
 				t.Fatalf("entry status = %s, record status = %s, want %s", entry.Status, rec.Status, tc.want)
 			}
 			if tc.want == StatusFailed {
-				if rec.LastError != interruptedMessage || actionsOf(entry) != "install,remove" {
+				if rec.LastErrorCode != string(apperror.CodeWorkspaceDependencyOperationInterrupted) || actionsOf(entry) != "install,remove" {
 					t.Errorf("reclaimed record = %+v, actions = %s", rec, actionsOf(entry))
 				}
 				return
@@ -1329,7 +1337,7 @@ func TestListReclaimOnlyTrustsSnapshotsTakenAfterTheOperation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
-	if entry := f.entry(t, result, "tool-y"); entry.Status != StatusFailed || entry.Installation.LastError != interruptedMessage {
+	if entry := f.entry(t, result, "tool-y"); entry.Status != StatusFailed || entry.Installation.LastErrorCode != string(apperror.CodeWorkspaceDependencyOperationInterrupted) {
 		t.Errorf("entry after a fresh discovery = %+v, want interrupted → failed", entry)
 	}
 }
@@ -1349,11 +1357,17 @@ func TestListDegradesWhenDiscoveryFails(t *testing.T) {
 		return nil, errors.New("workspacedeps: discovery script exited 137 before finishing: ")
 	}
 
+	var logs bytes.Buffer
+	f.svc.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+
 	result, err := f.svc.List(f.ctx(), testBot)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if result.Workspace != WorkspaceRunning || !strings.Contains(result.DiscoveryError, "exited 137") || len(result.Entries) != len(f.cat.List()) {
+	if got := strings.Count(logs.String(), "exited 137"); got != 1 || strings.Count(logs.String(), "workspace dependency discovery failed") != 1 {
+		t.Errorf("discovery cause recorded %d times, want one event: %s", got, logs.String())
+	}
+	if result.Workspace != WorkspaceRunning || !result.DiscoveryFailed || len(result.Entries) != len(f.cat.List()) {
 		t.Fatalf("result = %+v", result)
 	}
 	tool := f.entry(t, result, "tool-y")
@@ -1378,8 +1392,8 @@ func TestListDegradesWhenDiscoveryFails(t *testing.T) {
 		t.Error("Preflight must not answer without discovery facts")
 	}
 	checked, err := f.svc.CheckUpdates(f.ctx(), testBot)
-	if err != nil || checked.DiscoveryError == "" || len(f.runSpecs()) != 0 {
-		t.Errorf("CheckUpdates = %+v, %v (runs = %d); want the degraded list and no checks", checked.DiscoveryError, err, len(f.runSpecs()))
+	if err != nil || !checked.DiscoveryFailed || len(f.runSpecs()) != 0 {
+		t.Errorf("CheckUpdates = %+v, %v (runs = %d); want the degraded list and no checks", checked.DiscoveryFailed, err, len(f.runSpecs()))
 	}
 
 	// A request that went away is not a discovery failure to report.
@@ -1770,7 +1784,7 @@ func TestCheckUpdates(t *testing.T) {
 		t.Fatalf("CheckUpdates: %v", err)
 	}
 	tool = f.entry(t, result, "tool-y")
-	if tool.Status != StatusInstalled || tool.LatestVersion != "1.2.0" || !strings.Contains(tool.Installation.LastError, "registry unreachable") || !tool.Installation.LastCheckedAt.Equal(f.now) {
+	if tool.Status != StatusInstalled || tool.LatestVersion != "1.2.0" || tool.Installation.LastErrorCode != string(apperror.CodeWorkspaceDependencyOperationFailed) || !tool.Installation.LastCheckedAt.Equal(f.now) {
 		t.Errorf("tool-y entry after failed check = %+v / %+v", tool, tool.Installation)
 	}
 
@@ -1791,6 +1805,167 @@ func TestCheckUpdates(t *testing.T) {
 	result, err = f.svc.CheckUpdates(f.ctx(), testBot)
 	if err != nil || result.Workspace != WorkspaceNotRunning || len(f.runSpecs()) != 3 {
 		t.Errorf("CheckUpdates on stopped workspace = %+v, %v (runs = %d)", result.Workspace, err, len(f.runSpecs()))
+	}
+}
+
+// checkableCatalog is a catalog of n tools that each have a check_update
+// script, for exercising checks that run side by side.
+func checkableCatalog(t *testing.T, n int) (*catalog.Catalog, []string) {
+	t.Helper()
+	fsys := fstest.MapFS{}
+	ids := make([]string, 0, n)
+	for i := range n {
+		id := fmt.Sprintf("tool-%d", i)
+		ids = append(ids, id)
+		fsys[id+"/dependency.yaml"] = &fstest.MapFile{Data: []byte(strings.ReplaceAll(strings.ReplaceAll(svcToolYAML, "tool-y", id), "Tool Y", "Tool "+strconv.Itoa(i)))}
+		fsys[id+"/install.sh"] = &fstest.MapFile{Data: []byte(svcToolInstallScript)}
+		fsys[id+"/remove.sh"] = &fstest.MapFile{Data: []byte(svcToolRemoveScript)}
+		fsys[id+"/check-update.sh"] = &fstest.MapFile{Data: []byte(svcToolCheckScript)}
+	}
+	cat, err := catalog.LoadFS(fsys)
+	if err != nil {
+		t.Fatalf("LoadFS: %v", err)
+	}
+	return cat, ids
+}
+
+func TestCheckUpdatesRunsChecksConcurrently(t *testing.T) {
+	f := newServiceFixture(t)
+	cat, ids := checkableCatalog(t, 3*updateCheckConcurrency)
+	f.svc.catalog = cat
+	for _, id := range ids {
+		f.seed(id, StatusInstalled, "1.0.0")
+		f.present(id, SourceManaged, "1.0.0", &State{Version: "1.0.0"})
+	}
+	var running, peak atomic.Int32
+	release := make(chan struct{})
+	go func() {
+		// Hold every check until the pool is full, then let them all finish.
+		deadline := time.Now().Add(5 * time.Second)
+		for running.Load() < updateCheckConcurrency && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		close(release)
+	}()
+	f.setRun(func(RunSpec) (Result, error) {
+		n := running.Add(1)
+		defer running.Add(-1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		<-release
+		return Result{Raw: json.RawMessage(checkPayload)}, nil
+	})
+
+	result, err := f.svc.CheckUpdates(f.ctx(), testBot)
+	if err != nil {
+		t.Fatalf("CheckUpdates: %v", err)
+	}
+	if got := peak.Load(); got != updateCheckConcurrency {
+		t.Errorf("peak concurrent checks = %d, want %d", got, updateCheckConcurrency)
+	}
+	if result.ChecksIncomplete {
+		t.Error("ChecksIncomplete set although every check finished")
+	}
+	for _, id := range ids {
+		if entry := f.entry(t, result, id); entry.LatestVersion != "1.2.0" {
+			t.Errorf("%s entry = %+v, want the recorded check", id, entry)
+		}
+	}
+}
+
+func TestCheckUpdatesBudgetLeavesUnfinishedRecordsUntouched(t *testing.T) {
+	f := newServiceFixture(t)
+	cat, ids := checkableCatalog(t, 2)
+	f.svc.catalog = cat
+	f.svc.updateCheckBudget = 50 * time.Millisecond
+	fast, slow := ids[0], ids[1]
+	for _, id := range ids {
+		f.seed(id, StatusInstalled, "1.0.0")
+		f.present(id, SourceManaged, "1.0.0", &State{Version: "1.0.0"})
+	}
+	run := f.svc.run
+	f.svc.run = func(ctx context.Context, client *bridge.Client, spec RunSpec, sink LogSink) (Result, error) {
+		if spec.DepID == slow {
+			<-ctx.Done()
+			return Result{}, ctx.Err()
+		}
+		return run(ctx, client, spec, sink)
+	}
+	f.setRun(func(RunSpec) (Result, error) { return Result{Raw: json.RawMessage(checkPayload)}, nil })
+
+	result, err := f.svc.CheckUpdates(f.ctx(), testBot)
+	if err != nil {
+		t.Fatalf("CheckUpdates: %v", err)
+	}
+	if !result.ChecksIncomplete {
+		t.Error("ChecksIncomplete not set after the budget ran out")
+	}
+	if entry := f.entry(t, result, fast); entry.LatestVersion != "1.2.0" {
+		t.Errorf("%s entry = %+v, want its finished check recorded", fast, entry)
+	}
+	rec, _ := f.store.get(f.key(slow))
+	if rec.LastCheckedAt != nil || rec.LastError != "" || rec.LatestVersion != "" {
+		t.Errorf("%s record = %+v, want it untouched by a check the budget cut short", slow, rec)
+	}
+}
+
+func TestCheckUpdatesOutlivesTheRequest(t *testing.T) {
+	f := newServiceFixture(t)
+	f.seed("tool-y", StatusInstalled, "1.0.0")
+	f.present("tool-y", SourceManaged, "1.0.0", &State{Version: "1.0.0"})
+	ctx, cancel := context.WithCancel(f.ctx())
+	f.setRun(func(RunSpec) (Result, error) {
+		// The proxy gives up while the check runs.
+		cancel()
+		return Result{Raw: json.RawMessage(checkPayload)}, nil
+	})
+
+	result, err := f.svc.CheckUpdates(ctx, testBot)
+	if err != nil {
+		t.Fatalf("CheckUpdates: %v", err)
+	}
+	if tool := f.entry(t, result, "tool-y"); tool.LatestVersion != "1.2.0" || result.ChecksIncomplete {
+		t.Errorf("tool-y entry = %+v (incomplete %v), want the check recorded", tool, result.ChecksIncomplete)
+	}
+}
+
+// refreshRecordingCatalog serves a fixed catalog and remembers whether any
+// caller asked for a registry refresh.
+type refreshRecordingCatalog struct {
+	snapshotCatalog
+	refreshed atomic.Bool
+}
+
+func (p *refreshRecordingCatalog) Snapshot(ctx context.Context, refresh bool) (CatalogResult, error) {
+	if refresh {
+		p.refreshed.Store(true)
+	}
+	return p.snapshotCatalog.Snapshot(ctx, refresh)
+}
+
+// The background refresher keeps the catalog current; a manual check must not
+// wait on, or report the availability of, the registry.
+func TestCheckUpdatesReadsTheCachedCatalog(t *testing.T) {
+	f := newServiceFixture(t)
+	provider := &refreshRecordingCatalog{snapshotCatalog: snapshotCatalog{cat: f.cat}}
+	f.svc.provider, f.svc.catalog = provider, catalog.Empty()
+	f.seed("tool-y", StatusInstalled, "1.0.0")
+	f.present("tool-y", SourceManaged, "1.0.0", &State{Version: "1.0.0"})
+	f.setRun(func(RunSpec) (Result, error) { return Result{Raw: json.RawMessage(checkPayload)}, nil })
+
+	result, err := f.svc.CheckUpdates(f.ctx(), testBot)
+	if err != nil {
+		t.Fatalf("CheckUpdates: %v", err)
+	}
+	if provider.refreshed.Load() {
+		t.Error("CheckUpdates forced a catalog refresh")
+	}
+	if tool := f.entry(t, result, "tool-y"); tool.LatestVersion != "1.2.0" {
+		t.Errorf("tool-y entry = %+v", tool)
 	}
 }
 

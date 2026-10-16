@@ -149,6 +149,17 @@
       />
     </div>
 
+    <!-- Usage-example entry on the sidebar floor, directly above the account
+         row, so it stays reachable whichever panel is active. It copies the
+         footer's px-2.5 inset and surface, so its row, tile and label line up
+         with the account row's. -->
+    <div
+      class="relative z-1 shrink-0 bg-sidebar px-2.5 pt-1"
+      data-native-sidebar-surface
+    >
+      <SidebarExamplesEntry beside-account />
+    </div>
+
     <!-- Footer: account menu + update chip, pinned below the scrollable panel.
          The user block is min-w-0/flex-1 so the chip's hover expansion eats its
          slack instead of overlapping it. px-2.5/pb-2.5 keep the row's hover
@@ -194,6 +205,7 @@ import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore, type SidebarView } from '@/store/workspace-tabs'
 import { hasBotPermission } from '@/utils/bot-permissions'
 import BotSwitcher from './bot-switcher.vue'
+import SidebarExamplesEntry from './examples-entry.vue'
 import UserMenu from './user-menu.vue'
 import UpdateChip from './update-chip.vue'
 import PanelSessions from './panel-sessions.vue'

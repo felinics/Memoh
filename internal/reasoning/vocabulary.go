@@ -45,12 +45,6 @@ const EffortEnabled = "enabled"
 // selectable tokens.
 const EffortNone = "none"
 
-// EffortAdaptive is a legacy per-message override value. Adaptive is a thinking
-// mode resolved from the model, not a tier a caller selects, but settings written
-// before that distinction existed still carry it, so ResolveConfig accepts it as
-// "on, at the default tier".
-const EffortAdaptive = "adaptive"
-
 // orderedEfforts lists the active tiers weakest to strongest. Order is what
 // NearestToMedium walks, so it must stay monotonic. EffortDisable is absent on
 // purpose: it is not a tier, and including it would let the nearest-tier fallback

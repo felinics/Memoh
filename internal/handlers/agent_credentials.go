@@ -49,7 +49,7 @@ type agentCredentialPutRequest struct {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Bot Agent ID"
 // @Success 200 {object} agentcredential.PublicCredential
-// @Failure 404 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/agents/{id}/credential [get].
 func (h *AgentCredentialHandler) Get(c echo.Context) error {
 	botID, botAgentID, err := h.requireBotManage(c)
@@ -74,10 +74,10 @@ func (h *AgentCredentialHandler) Get(c echo.Context) error {
 // @Param id path string true "Bot Agent ID"
 // @Param payload body agentCredentialPutRequest true "Secret"
 // @Success 200 {object} agentcredential.PublicCredential
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 422 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 422 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/agents/{id}/credential [put].
 func (h *AgentCredentialHandler) Put(c echo.Context) error {
 	botID, botAgentID, err := h.requireBotManage(c)
@@ -117,7 +117,7 @@ func (h *AgentCredentialHandler) Put(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Bot Agent ID"
 // @Success 204
-// @Failure 404 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/agents/{id}/credential [delete].
 func (h *AgentCredentialHandler) Delete(c echo.Context) error {
 	botID, botAgentID, err := h.requireBotManage(c)

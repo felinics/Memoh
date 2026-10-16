@@ -379,7 +379,7 @@ func TestNewSDKChatModelMiniMaxChatCompletionsCompatEnablesThinking(t *testing.T
 	}
 }
 
-func TestNewSDKChatModelOpenAIWireMapsMaxEffortToXHigh(t *testing.T) {
+func TestNewSDKChatModelOpenAIWireSendsMaxEffort(t *testing.T) {
 	t.Parallel()
 
 	var body struct {
@@ -420,19 +420,8 @@ func TestNewSDKChatModelOpenAIWireMapsMaxEffortToXHigh(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 
-	if body.ReasoningEffort == nil || *body.ReasoningEffort != ReasoningEffortXHigh {
-		t.Fatalf("reasoning_effort: got %v, want xhigh", body.ReasoningEffort)
-	}
-}
-
-func TestOpenAIWireEffortPreservesMaxForCodex(t *testing.T) {
-	t.Parallel()
-
-	if got := openAIWireEffort(ClientTypeOpenAICodex, ReasoningEffortMax); got != ReasoningEffortMax {
-		t.Fatalf("openAIWireEffort() = %q, want %q", got, ReasoningEffortMax)
-	}
-	if got := openAIWireEffort(ClientTypeOpenAIResponses, ReasoningEffortMax); got != ReasoningEffortXHigh {
-		t.Fatalf("openAIWireEffort() = %q, want %q", got, ReasoningEffortXHigh)
+	if body.ReasoningEffort == nil || *body.ReasoningEffort != ReasoningEffortMax {
+		t.Fatalf("reasoning_effort: got %v, want max", body.ReasoningEffort)
 	}
 }
 

@@ -3,6 +3,7 @@ package thread
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -15,13 +16,13 @@ import (
 
 type testACPSetupValidator struct{}
 
-func (testACPSetupValidator) ValidateACPSetup(agentID string, metadata map[string]any) ACPSetupValidation {
-	agentID = strings.ToLower(strings.TrimSpace(agentID))
-	if agentID != "custom-agent" {
-		return ACPSetupValidation{}
-	}
+func (testACPSetupValidator) KnownACPAgent(agentID string) bool {
+	return strings.ToLower(strings.TrimSpace(agentID)) == "custom-agent"
+}
 
-	result := ACPSetupValidation{Known: true}
+func (testACPSetupValidator) ValidateACPSetup(_ context.Context, _, _, agentID string, metadata map[string]any) (ACPSetupValidation, error) {
+	agentID = strings.ToLower(strings.TrimSpace(agentID))
+	result := ACPSetupValidation{}
 	acp, _ := metadata["acp"].(map[string]any)
 	agents, _ := acp["agents"].(map[string]any)
 	config, _ := agents[agentID].(map[string]any)
@@ -30,14 +31,14 @@ func (testACPSetupValidator) ValidateACPSetup(agentID string, metadata map[strin
 	setupMode, _ := config["setup_mode"].(string)
 	setupMode = strings.ToLower(strings.TrimSpace(setupMode))
 	if setupMode != "api_key" {
-		return result
+		return result, nil
 	}
 	managed, _ := config["managed"].(map[string]any)
 	apiKey, _ := managed["api_key"].(string)
 	if strings.TrimSpace(apiKey) == "" {
 		result.MissingManagedFieldID = "api_key"
 	}
-	return result
+	return result, nil
 }
 
 func newACPTestService(queries dbstore.Queries) *Service {
@@ -61,6 +62,11 @@ func TestResolveDescriptorRejectsConflictingACPRuntime(t *testing.T) {
 	// type=acp_agent unambiguously means an ACP runtime, so an explicit non-ACP
 	// runtime_type is contradictory and must error rather than silently
 	// downgrade to a plain model chat session.
+	_, _, _, conflictErr := ResolveDescriptor(TypeACPAgent, "", RuntimeModel)
+	var descErr *DescriptorError
+	if !errors.As(conflictErr, &descErr) || descErr.Field != "runtime_type" {
+		t.Fatalf("ResolveDescriptor(acp_agent, model) error = %v, want DescriptorError on runtime_type", conflictErr)
+	}
 	if _, _, _, err := ResolveDescriptor(TypeACPAgent, "", RuntimeModel); err == nil {
 		t.Fatal("ResolveDescriptor(acp_agent, model) = nil error, want a conflict error")
 	} else if !strings.Contains(err.Error(), "conflicts with runtime_type") {
@@ -202,7 +208,7 @@ func TestValidateACPCreatePolicy(t *testing.T) {
 				bot:      tt.bot,
 				sessions: tt.sessions,
 			})
-			err := svc.validateACPCreatePolicy(context.Background(), botID, tt.meta)
+			err := svc.validateACPCreatePolicy(context.Background(), botID, "", tt.meta)
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("validateACPCreatePolicy() error = %v", err)

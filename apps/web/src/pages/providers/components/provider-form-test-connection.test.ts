@@ -44,7 +44,6 @@ vi.mock('@/composables/useProviderModelCatalog', () => ({
 }))
 
 vi.mock('lucide-vue-next', () => ({
-  AlertCircle: () => h('span'),
   KeyRound: () => h('span'),
   RefreshCw: () => h('span'),
 }))

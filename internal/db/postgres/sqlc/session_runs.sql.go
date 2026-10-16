@@ -11,6 +11,70 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acceptSessionRunDecisionContinuation = `-- name: AcceptSessionRunDecisionContinuation :one
+UPDATE session_runs
+SET state = 'running',
+    input_json = jsonb_set(input_json, '{decision_continuations}',
+      COALESCE(input_json->'decision_continuations', '{}'::jsonb) ||
+      jsonb_build_object($1::text,
+        jsonb_build_object('kind', $2::text, 'phase', 'accepted')), true),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $3 AND session_id = $4
+  AND run_id = $5 AND fencing_token = $6
+  AND state IN ('running', 'waiting_decision') AND abort_requested_at IS NULL
+RETURNING run_id, team_id, bot_id, session_id, invocation_id, turn_id, turn_position, state, input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation, abort_requested_at, proposed_terminal_state, proposed_error_code, proposed_error_message, finish_proposed_at, error_code, error_message, created_at, updated_at
+`
+
+type AcceptSessionRunDecisionContinuationParams struct {
+	DecisionID   string      `json:"decision_id"`
+	DecisionKind string      `json:"decision_kind"`
+	BotID        pgtype.UUID `json:"bot_id"`
+	SessionID    pgtype.UUID `json:"session_id"`
+	RunID        pgtype.UUID `json:"run_id"`
+	FencingToken int64       `json:"fencing_token"`
+}
+
+// Called in the same fenced transaction that accepts the decision. A committed
+// answer is executing work, even before the resumed producer's agent_start.
+func (q *Queries) AcceptSessionRunDecisionContinuation(ctx context.Context, arg AcceptSessionRunDecisionContinuationParams) (SessionRun, error) {
+	row := q.db.QueryRow(ctx, acceptSessionRunDecisionContinuation,
+		arg.DecisionID,
+		arg.DecisionKind,
+		arg.BotID,
+		arg.SessionID,
+		arg.RunID,
+		arg.FencingToken,
+	)
+	var i SessionRun
+	err := row.Scan(
+		&i.RunID,
+		&i.TeamID,
+		&i.BotID,
+		&i.SessionID,
+		&i.InvocationID,
+		&i.TurnID,
+		&i.TurnPosition,
+		&i.State,
+		&i.InputJson,
+		&i.InputFingerprint,
+		&i.OwnerID,
+		&i.FencingToken,
+		&i.OwnerSince,
+		&i.LiveGeneration,
+		&i.AbortRequestedAt,
+		&i.ProposedTerminalState,
+		&i.ProposedErrorCode,
+		&i.ProposedErrorMessage,
+		&i.FinishProposedAt,
+		&i.ErrorCode,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const admitLockedSessionRun = `-- name: AdmitLockedSessionRun :one
 WITH target_session AS MATERIALIZED (
   SELECT s.id AS session_id
@@ -248,15 +312,17 @@ WHERE team_id = public.memoh_current_team_id()
   AND run_id = $4
   AND fencing_token = $5
   AND state IN ('accepted', 'running', 'waiting_decision', 'finishing')
+  AND ($6::text IS NULL OR state = $6::text)
 RETURNING run_id, team_id, bot_id, session_id, invocation_id, turn_id, turn_position, state, input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation, abort_requested_at, proposed_terminal_state, proposed_error_code, proposed_error_message, finish_proposed_at, error_code, error_message, created_at, updated_at
 `
 
 type FinalizeSessionRunParams struct {
-	State        string      `json:"state"`
-	ErrorCode    pgtype.Text `json:"error_code"`
-	ErrorMessage pgtype.Text `json:"error_message"`
-	RunID        pgtype.UUID `json:"run_id"`
-	FencingToken int64       `json:"fencing_token"`
+	State         string      `json:"state"`
+	ErrorCode     pgtype.Text `json:"error_code"`
+	ErrorMessage  pgtype.Text `json:"error_message"`
+	RunID         pgtype.UUID `json:"run_id"`
+	FencingToken  int64       `json:"fencing_token"`
+	ExpectedState pgtype.Text `json:"expected_state"`
 }
 
 // Fenced idempotent terminal write, shared by the owner (completed / aborted /
@@ -269,6 +335,7 @@ func (q *Queries) FinalizeSessionRun(ctx context.Context, arg FinalizeSessionRun
 		arg.ErrorMessage,
 		arg.RunID,
 		arg.FencingToken,
+		arg.ExpectedState,
 	)
 	var i SessionRun
 	err := row.Scan(
@@ -340,13 +407,37 @@ func (q *Queries) GetActiveSessionRun(ctx context.Context, sessionID pgtype.UUID
 
 const getLatestSessionRun = `-- name: GetLatestSessionRun :one
 SELECT run_id, team_id, bot_id, session_id, invocation_id, turn_id, turn_position, state, input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation, abort_requested_at, proposed_terminal_state, proposed_error_code, proposed_error_message, finish_proposed_at, error_code, error_message, created_at, updated_at
-FROM session_runs
-WHERE team_id = public.memoh_current_team_id()
-  AND session_id = $1
-ORDER BY created_at DESC, run_id DESC
-LIMIT 1
+FROM session_runs run
+WHERE run.team_id = public.memoh_current_team_id()
+  AND run.session_id = $1
+  AND run.run_id = (
+    SELECT latest.run_id
+    FROM session_runs latest
+    WHERE latest.team_id = public.memoh_current_team_id()
+      AND latest.session_id = $1
+    ORDER BY latest.created_at DESC, latest.run_id DESC
+    LIMIT 1
+  )
+  AND run.error_code IS DISTINCT FROM 'history_reset'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_sessions session
+    WHERE session.team_id = run.team_id
+      AND session.id = run.session_id
+      AND (
+        session.deleted_at IS NOT NULL
+        OR run.fencing_token > 0 AND session.runtime_fencing_token > run.fencing_token
+      )
+  )
 `
 
+// The latest run, reported only while it belongs to the session's current
+// runtime generation. Clearing history and deleting the session move
+// bot_sessions.runtime_fencing_token past the token of every run claimed
+// before them, and a run a history reset ended, or retired before it was
+// ever claimed, carries history_reset. Such a run has nothing left to
+// report, and no older run stands in for it; nor has any run of a deleted
+// session.
 func (q *Queries) GetLatestSessionRun(ctx context.Context, sessionID pgtype.UUID) (SessionRun, error) {
 	row := q.db.QueryRow(ctx, getLatestSessionRun, sessionID)
 	var i SessionRun
@@ -849,6 +940,43 @@ func (q *Queries) LockSessionRunForAgentStepCommit(ctx context.Context, arg Lock
 	return run_id, err
 }
 
+const markSessionRunDecisionExecuting = `-- name: MarkSessionRunDecisionExecuting :execrows
+UPDATE session_runs
+SET input_json = jsonb_set(input_json,
+      ARRAY['decision_continuations', $1::text, 'phase'],
+      '"executing"'::jsonb, false),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $2 AND session_id = $3
+  AND run_id = $4 AND fencing_token = $5
+  AND state = 'running' AND abort_requested_at IS NULL
+  AND input_json->'decision_continuations'->($1::text)->>'phase' = 'accepted'
+`
+
+type MarkSessionRunDecisionExecutingParams struct {
+	DecisionID   string      `json:"decision_id"`
+	BotID        pgtype.UUID `json:"bot_id"`
+	SessionID    pgtype.UUID `json:"session_id"`
+	RunID        pgtype.UUID `json:"run_id"`
+	FencingToken int64       `json:"fencing_token"`
+}
+
+// Checkpoint before invoking an approved tool; interruption is an uncertain
+// result, never authorization to execute the approved operation a second time.
+func (q *Queries) MarkSessionRunDecisionExecuting(ctx context.Context, arg MarkSessionRunDecisionExecutingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markSessionRunDecisionExecuting,
+		arg.DecisionID,
+		arg.BotID,
+		arg.SessionID,
+		arg.RunID,
+		arg.FencingToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const nextSessionRunFencingToken = `-- name: NextSessionRunFencingToken :one
 SELECT nextval('session_runtime_fencing_token_seq')::bigint AS token
 `
@@ -952,6 +1080,7 @@ SET owner_id = $1,
 WHERE team_id = public.memoh_current_team_id()
   AND run_id = $4
   AND state = 'waiting_decision'
+  AND abort_requested_at IS NULL
   AND fencing_token = $5
   AND fencing_token < $2
 RETURNING run_id, team_id, bot_id, session_id, invocation_id, turn_id, turn_position, state, input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation, abort_requested_at, proposed_terminal_state, proposed_error_code, proposed_error_message, finish_proposed_at, error_code, error_message, created_at, updated_at

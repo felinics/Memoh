@@ -98,16 +98,21 @@ func (m *Manager) prepareLedgerFinish(
 // Backend-only reservation tests use zero fencing tokens and have no durable
 // row to transition. Production admission always supplies a positive token.
 func (m *Manager) finalizeLedgerRun(ctx context.Context, handle RunHandle, status, errorCode string) (TerminalRun, error) {
+	return m.finalizeLedgerRunFromState(ctx, handle, status, errorCode, "")
+}
+
+func (m *Manager) finalizeLedgerRunFromState(ctx context.Context, handle RunHandle, status, errorCode string, expected ledger.State) (TerminalRun, error) {
 	if m.runs == nil || handle.FencingToken <= 0 {
 		return TerminalRun{}, nil
 	}
 	state := terminalLedgerState(status, errorCode)
 	errorCode = ledgerFailureCode(state, errorCode)
 	run, applied, err := m.runs.Finalize(ctx, ledger.FinalizeParams{
-		RunID:        handle.RunID,
-		FencingToken: handle.FencingToken,
-		State:        state,
-		ErrorCode:    errorCode,
+		RunID:         handle.RunID,
+		FencingToken:  handle.FencingToken,
+		State:         state,
+		ErrorCode:     errorCode,
+		ExpectedState: expected,
 	})
 	if err != nil {
 		return TerminalRun{}, fmt.Errorf("finalize runtime run: %w", err)

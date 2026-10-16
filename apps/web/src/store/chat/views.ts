@@ -6,6 +6,7 @@ import {
 import type { RuntimeProjectionState } from './runtime-projection'
 import { isRuntimeRunStreaming, runOwnsTurn } from './runtime-projection'
 import { createAssistantStreamRegistry } from './assistant-streams'
+import { createFirstSendTracker } from './first-send'
 import type { createTranscriptController } from './transcript'
 import { createChatViewRegistry, type ChatViewEntry } from './view-registry'
 import type {
@@ -27,6 +28,16 @@ export interface ChatViewsDeps {
 
 export function createChatViews(deps: ChatViewsDeps) {
   const focusedViewId = ref('chat')
+  // Emitted the moment a draft view becomes a session view. The workspace
+  // repoints that panel's session param synchronously, because the send that
+  // created the session resumes right after and matches the pane against it.
+  const draftPromoted = ref<{
+    botId: string
+    viewId: string
+    sessionId: string
+    seq: number
+  } | null>(null)
+  let draftPromotedSeq = 0
   let runtimeProjectionProbe: (sessionId: string) => RuntimeProjectionState | undefined =
     () => undefined
   let refreshAppliedHook: (
@@ -167,9 +178,15 @@ export function createChatViews(deps: ChatViewsDeps) {
     // A populated, untouched cache can render immediately only while the bot's
     // activity stream covers changes. Otherwise keep the #933 behavior: mask
     // until fresh history and the initial runtime snapshot commit together.
-    const mask = view.transcript.messages.length === 0
+    // A client-born session (see ChatViewEntry.clientBorn) is never masked:
+    // its turns were created here, and hiding them would undo the send.
+    const clientBorn = view.clientBorn
+    view.clientBorn = false
+    const mask = !clientBorn && (
+      view.transcript.messages.length === 0
       || view.staleWhileHidden
       || !chatViews.isActivityStreamCovered(botId)
+    )
     await view.transcript.loadInitialMessages(botId, sessionId, commitInitialHistory, { mask })
     view.initialized = true
   }
@@ -189,6 +206,8 @@ export function createChatViews(deps: ChatViewsDeps) {
   const assistantStreams = createAssistantStreamRegistry({
     finishAssistantTurn: turn => { transcriptForTurn(turn)?.finishAssistantTurn(turn) },
   })
+  // Per-view first-send phases (see first-send.ts), keyed like draft views.
+  const firstSend = createFirstSendTracker()
 
   function isSessionStreaming(
     botId: string | null | undefined,
@@ -249,6 +268,10 @@ export function createChatViews(deps: ChatViewsDeps) {
 
   function isChatViewStreaming(target: ChatViewTarget, composerScope?: string) {
     const resolved = normalizeTarget(target)
+    // A first send is in flight from Enter until it settles. Its new session's
+    // runtime projection only arrives a round trip after session_created, and
+    // the view must not read as idle (stop -> send -> stop) in between.
+    if (firstSend.entryFor(resolved)) return true
     return resolved.sessionId
       ? isSessionStreaming(resolved.botId, resolved.sessionId)
       : assistantStreams.isUnboundComposerStreaming(
@@ -366,6 +389,12 @@ export function createChatViews(deps: ChatViewsDeps) {
     if (promoted.visiblePanelIds.size > 0 && promoted.sessionId) {
       startSessionRuntime(promoted.botId, promoted.sessionId)
     }
+    draftPromoted.value = {
+      botId: promoted.botId,
+      viewId: target.viewId,
+      sessionId: promoted.sessionId ?? sessionId,
+      seq: ++draftPromotedSeq,
+    }
     return promoted
   }
 
@@ -393,9 +422,11 @@ export function createChatViews(deps: ChatViewsDeps) {
 
   return {
     focusedViewId,
+    draftPromoted,
     projectionVersion,
     chatViews,
     assistantStreams,
+    firstSend,
     draftSessionCreations,
     draftCreationKey,
     isCreatingDraft,
@@ -437,6 +468,10 @@ export function createChatViews(deps: ChatViewsDeps) {
     focusChatView,
     promoteDraftChatView,
     configure,
-    reset: () => chatViews.resetAll(),
+    reset: () => {
+      draftPromoted.value = null
+      chatViews.resetAll()
+      firstSend.reset()
+    },
   }
 }

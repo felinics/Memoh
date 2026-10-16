@@ -127,8 +127,8 @@ func TestPrepareRunConfigDoesNotDoubleCountPipelineInlineImages(t *testing.T) {
 		t.Fatalf("memory index = %#v, want 1", got.ContextMemoryMessageIndex)
 	}
 	wantMessages := []sdk.Message{
-		sdk.UserMessage("pipeline current user"),
-		sdk.UserMessage("memory recall", image),
+		sdk.UserMessage("pipeline current user", image),
+		sdk.UserMessage("memory recall"),
 	}
 	if !reflect.DeepEqual(got.Messages, wantMessages) {
 		t.Fatalf("provider messages changed: got %#v want %#v", got.Messages, wantMessages)

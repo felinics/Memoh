@@ -27,7 +27,10 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
         if key not in ALLOWED_FRONTMATTER:
             allowed = ", ".join(sorted(ALLOWED_FRONTMATTER))
             raise ValueError(f"unexpected frontmatter key {key!r}; allowed: {allowed}")
-        data[key] = value.strip().strip('"').strip("'")
+        value = value.strip()
+        if ": " in value and value[:1] not in {'"', "'"}:
+            raise ValueError(f"frontmatter {key!r} contains ': '; wrap the value in quotes so it stays valid YAML")
+        data[key] = value.strip('"').strip("'")
     body = text[match.end() :]
     return data, body
 

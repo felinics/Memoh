@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
@@ -127,20 +128,22 @@ func TestRequestedVersionRejectsPathsOptionsAndShellTokens(t *testing.T) {
 	}
 }
 
-func TestOperationErrorDetailsRedactOperatorSecrets(t *testing.T) {
+// TestOperationFailureKeepsScriptOutputOutOfTheRow covers what a failed
+// install records: the catalog code, and none of the script's output. The
+// output still reaches the caller and the request's result record, which is
+// where a diagnostic belongs.
+func TestOperationFailureKeepsScriptOutputOutOfTheRow(t *testing.T) {
 	f := newServiceFixture(t)
 	f.env = []string{"NPM_TOKEN=opaque-secret"}
 	f.setRun(func(RunSpec) (Result, error) {
 		return Result{}, errors.New("download failed: opaque-secret; https://user:pass@example.test/file?token=query-secret\x00")
 	})
-	_, _ = f.svc.Install(f.ctx(), testBot, "tool-y", "", nil)
-	rec, _ := f.store.get(f.key("tool-y"))
-	for _, secret := range []string{"opaque-secret", "user:pass", "query-secret", "\x00"} {
-		if strings.Contains(rec.LastError, secret) {
-			t.Errorf("persisted secret %q: %s", secret, rec.LastError)
-		}
+	_, err := f.svc.Install(f.ctx(), testBot, "tool-y", "", nil)
+	if err == nil || !strings.Contains(err.Error(), "download failed") {
+		t.Fatalf("Install error = %v, want the cause kept for the caller", err)
 	}
-	if !strings.Contains(rec.LastError, "download failed") || !strings.Contains(rec.LastError, "example.test") {
-		t.Fatalf("lost useful diagnostic: %s", rec.LastError)
+	rec, _ := f.store.get(f.key("tool-y"))
+	if rec.LastError != "" || rec.LastErrorCode != string(apperror.CodeWorkspaceDependencyOperationFailed) {
+		t.Fatalf("row = %q/%q, want the operation-failed code and no text", rec.LastErrorCode, rec.LastError)
 	}
 }

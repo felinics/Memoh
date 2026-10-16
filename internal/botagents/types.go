@@ -17,6 +17,14 @@ const (
 	MetadataProviderKey = "provider"
 )
 
+// SessionRuntime is the session runtime type an agent's turns dispatch to.
+func SessionRuntime(runtime string) string {
+	if runtime == RuntimeACP {
+		return string(runtimekind.ACPAgent)
+	}
+	return runtime
+}
+
 // BotAgent is a user-managed Agent entry attached to a bot. Native is the
 // built-in fallback and is intentionally represented by the absence of a row.
 type BotAgent struct {

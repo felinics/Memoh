@@ -26,10 +26,17 @@ type fakeResetLedger struct {
 	renews          int
 	released        []ledger.ResetLease
 	releaseCtx      context.Context
+	// releaseCtxErr is the release context's error when ReleaseReset ran.
+	releaseCtxErr error
 	// activeRunsByBot is consumed one call at a time; when exhausted the bot
 	// has no active runs left.
 	activeRunsByBot [][]ledger.Run
 	orphanLeases    []ledger.ResetLease
+	orphanErr       error
+	botSessionIDs   []string
+	botSessionsErr  error
+	// botSessionsWait makes SessionIDsByBot wait until the reset ends.
+	botSessionsWait bool
 }
 
 type fakeRenewResult struct {
@@ -77,6 +84,7 @@ func (f *fakeResetLedger) ReleaseReset(ctx context.Context, lease ledger.ResetLe
 	f.resetMu.Lock()
 	defer f.resetMu.Unlock()
 	f.releaseCtx = ctx
+	f.releaseCtxErr = ctx.Err()
 	f.released = append(f.released, lease)
 	return true, nil
 }
@@ -96,10 +104,23 @@ func (f *fakeResetLedger) ActiveRunsByBot(context.Context, string) ([]ledger.Run
 	return runs, nil
 }
 
+func (f *fakeResetLedger) SessionIDsByBot(ctx context.Context, _ string) ([]string, error) {
+	if f.botSessionsWait {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	f.resetMu.Lock()
+	defer f.resetMu.Unlock()
+	return append([]string(nil), f.botSessionIDs...), f.botSessionsErr
+}
+
 func (f *fakeResetLedger) FenceAndFinalizeOrphan(_ context.Context, reset ledger.ResetLease, run ledger.Run) (ledger.Run, bool, error) {
 	f.resetMu.Lock()
 	defer f.resetMu.Unlock()
 	f.orphanLeases = append(f.orphanLeases, reset)
+	if f.orphanErr != nil {
+		return ledger.Run{}, false, f.orphanErr
+	}
 	return run, true, nil
 }
 

@@ -20,6 +20,7 @@ type idleCancel struct {
 	mu          sync.Mutex
 	fired       bool
 	stopped     bool
+	paused      bool
 	baseTimeout time.Duration
 	maxTimeout  time.Duration
 	toolTimeout time.Duration
@@ -86,7 +87,7 @@ func (ic *idleCancel) Observe(ev native.StreamEvent) {
 }
 
 func (ic *idleCancel) rearmLocked(now time.Time) {
-	if ic.fired || ic.stopped {
+	if ic.fired || ic.stopped || ic.paused {
 		return
 	}
 	ic.timer.Stop()
@@ -133,6 +134,24 @@ func (ic *idleCancel) expire() {
 		code = apperror.CodeAgentToolTimeout
 	}
 	ic.cancel(apperror.Wrap(code, context.DeadlineExceeded, nil))
+}
+
+// Pause suspends the watchdog for preflight work that owns its own bound, such
+// as context recovery before the first model call. Resume starts a fresh model
+// window; neither revives a stopped or fired watchdog.
+func (ic *idleCancel) Pause() {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	ic.paused = true
+	ic.timer.Stop()
+	ic.deadline = time.Time{}
+}
+
+func (ic *idleCancel) Resume() {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	ic.paused = false
+	ic.rearmLocked(time.Now())
 }
 
 func (ic *idleCancel) Stop() {

@@ -14,6 +14,7 @@ import (
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models/modelretry"
 )
 
 type capabilityRefreshProvider struct {
@@ -40,7 +41,16 @@ func TestCapabilityChangeRefreshesExecutableToolsInSameRun(t *testing.T) {
 	for _, streaming := range []bool{false, true} {
 		t.Run(strconv.FormatBool(streaming), func(t *testing.T) {
 			capability := &capabilityRefreshProvider{}
-			a := New(Deps{})
+			preflights, recoveries := 0, 0
+			a := New(Deps{ContextViewApplier: func(ctx context.Context, cfg RunConfig) (RunConfig, error) {
+				preflights++
+				if cfg.RecoverContextBudget != nil {
+					var err error
+					cfg, _, err = cfg.RecoverContextBudget(ctx, cfg)
+					return cfg, err
+				}
+				return cfg, nil
+			}})
 			a.SetToolProviders([]tools.ToolProvider{capability})
 			calls := 0
 			next := func(params sdk.Request) (sdk.ModelResult, error) {
@@ -67,6 +77,13 @@ func TestCapabilityChangeRefreshesExecutableToolsInSameRun(t *testing.T) {
 				}
 			}
 			cfg := RunConfig{SupportsToolCall: true, Messages: []sdk.Message{sdk.UserMessage("install and use")}}
+			cfg.RecoverContextBudget = func(_ context.Context, cfg RunConfig) (RunConfig, bool, error) {
+				recoveries++
+				if recoveries > 1 {
+					return cfg, false, ErrContextRecompose
+				}
+				return cfg, false, nil
+			}
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			var committed []int
@@ -104,6 +121,9 @@ func TestCapabilityChangeRefreshesExecutableToolsInSameRun(t *testing.T) {
 			}
 			if capability.used != 1 || calls != 3 {
 				t.Fatalf("used=%d calls=%d", capability.used, calls)
+			}
+			if preflights != 1 || recoveries != 1 {
+				t.Fatalf("old history recovery crossed a completed tool: preflights=%d recoveries=%d", preflights, recoveries)
 			}
 			if fmt.Sprint(committed) != "[0 1 2]" {
 				t.Fatalf("step commits=%v", committed)
@@ -152,7 +172,7 @@ func TestCapabilityRefreshSurvivesMidStreamRetry(t *testing.T) {
 		SupportsToolCall: true,
 		Messages:         []sdk.Message{sdk.UserMessage("install, survive a retry, then use")},
 		Model:            &sdk.Model{ID: "test", Provider: provider},
-		Retry:            RetryConfig{MaxAttempts: 3, FastAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond},
+		Retry:            modelretry.Config{MaxAttempts: 3, FastAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond},
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()

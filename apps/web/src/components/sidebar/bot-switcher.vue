@@ -168,6 +168,8 @@ import { Check, ChevronsUpDown, GripVertical, Plus, Settings2 } from 'lucide-vue
 import { useChatStore } from '@/store/chat-list'
 import { firstAvatarCharacter } from '@/composables/useAvatarInitials'
 import { usePinnedBots } from '@/composables/usePinnedBots'
+import { usePendingBotsRefresh } from '@/composables/usePendingBotsRefresh'
+import { switcherBots } from './bot-switcher-list'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -183,18 +185,16 @@ const menuOpen = ref(false)
 
 const { data: botData, isLoading } = useQuery(getBotsQuery())
 
-// Manual drag order persisted to localStorage; bots not present in the saved
-// order keep their default (pinned) order at the end.
+// The switcher stays mounted beside the chat, so it keeps the shared list
+// fresh while a bot is mid-create/delete (the Bots page stops polling once
+// the user leaves it).
+usePendingBotsRefresh(() => botData.value?.items ?? [])
+
+// Manual drag order persisted to localStorage.
 const botOrder = useLocalStorage<string[]>('bot-order', [])
-const bots = computed<BotsBot[]>(() => {
-  const base = sortBots(botData.value?.items ?? [])
-  if (botOrder.value.length === 0) return base
-  const rank = new Map(botOrder.value.map((id, index) => [id, index]))
-  return [...base].sort((a, b) =>
-    (rank.get(a.id ?? '') ?? Number.MAX_SAFE_INTEGER)
-    - (rank.get(b.id ?? '') ?? Number.MAX_SAFE_INTEGER),
-  )
-})
+const bots = computed<BotsBot[]>(() =>
+  switcherBots(botData.value?.items ?? [], sortBots, botOrder.value),
+)
 
 const currentBot = computed(() =>
   bots.value.find((bot) => bot.id === currentBotId.value) ?? null,

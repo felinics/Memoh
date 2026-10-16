@@ -34,8 +34,4 @@ export const variantSpecs = {
     axis: 'orientation',
     variants: ['horizontal', 'vertical'],
   },
-  alert: {
-    axis: 'variant',
-    variants: ['default', 'destructive'],
-  },
 } satisfies Record<string, VariantSpec>

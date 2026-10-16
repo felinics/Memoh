@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strings"
 	"testing"
 	"time"
 
@@ -171,9 +170,8 @@ func TestImportEncryptedWithoutPassphraseErrors(t *testing.T) {
 		t.Fatalf("Encrypt() error = %v", err)
 	}
 	svc := &Service{}
-	if _, err := svc.Import(context.Background(), "user", enc.Bytes(), ImportOptions{}, ""); err == nil ||
-		!strings.Contains(err.Error(), "encrypted") {
-		t.Fatalf("Import(no passphrase) error = %v, want an 'encrypted' error", err)
+	if _, err := svc.Import(context.Background(), "user", enc.Bytes(), ImportOptions{}, ""); !errors.Is(err, secure.ErrPassphraseRequired) {
+		t.Fatalf("Import(no passphrase) error = %v, want ErrPassphraseRequired", err)
 	}
 }
 

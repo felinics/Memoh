@@ -30,13 +30,21 @@ func classifyRuntimeFailure(cause error) apperror.Code {
 	return apperror.CodeRuntimePromptFailed
 }
 
+// hasCatalogCode reports whether err carries an apperror whose code is in the
+// catalog.
+func hasCatalogCode(err error) bool {
+	_, ok := apperror.Lookup(apperror.CodeOf(err))
+	return ok
+}
+
 // publicFailureCode is the catalogued code a cause carries, or the code
 // ExternalAgentError gives it. It is empty when the cause has neither.
 func publicFailureCode(cause error) apperror.Code {
-	if public, ok := apperror.PublicFrom(ExternalAgentError(cause), ""); ok {
-		return public.Code
+	public := ExternalAgentError(cause)
+	if !hasCatalogCode(public) {
+		return ""
 	}
-	return ""
+	return apperror.CodeOf(public)
 }
 
 // outcomeRecorder holds what a stream loop has learned about how its run ended.
@@ -46,8 +54,8 @@ func publicFailureCode(cause error) apperror.Code {
 // ended the run. reported is the error the turn port reports to its caller; it
 // follows the same first-error rule and is cleared by the same AgentEnd, but
 // persistence failures and the idle timeout set it separately. deferred means
-// the terminal event parked the run on a decision, so no lifecycle terminal is
-// written for it yet.
+// no lifecycle terminal is written for the run yet: the terminal event parked it
+// on a decision, or it handed its context back for recomposition.
 type outcomeRecorder struct {
 	runCtx  context.Context
 	idleCtx context.Context
@@ -119,6 +127,12 @@ func (r *outcomeRecorder) observe(event native.StreamEvent) error {
 		}
 	}
 	return eventErr
+}
+
+// handOff ends a run that returned its context to the driver for
+// recomposition before any model call; the resubmitted turn owns the outcome.
+func (r *outcomeRecorder) handOff() {
+	r.deferred = true
 }
 
 // observeSnapshot records the terminal snapshot decoded from a terminal event.

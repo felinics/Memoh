@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"strings"
 
 	"github.com/felinics/memoh/internal/errs"
@@ -99,7 +98,7 @@ func (i *Installer) FetchRelease(ctx context.Context, registryID, appID, revisio
 	}
 	revision = strings.TrimSpace(revision)
 	if !isCanonicalSHA256(revision) {
-		return AppDescriptor{}, &StatusError{Status: http.StatusBadRequest, Message: "revision is invalid"}
+		return AppDescriptor{}, ErrRevisionInvalid
 	}
 	pkg, err := i.fetchAppRelease(ctx, registryID, appID, revision)
 	if err != nil {
@@ -219,11 +218,11 @@ func (i *Installer) RemoveSkills(ctx context.Context, botID, registryID, appID, 
 func validateAppIdentity(registryID, appID string) (string, string, error) {
 	registryID = strings.TrimSpace(registryID)
 	if !skillset.IsValidRegistryID(registryID) {
-		return "", "", &StatusError{Status: http.StatusBadRequest, Message: "registry_id is invalid"}
+		return "", "", ErrRegistryIDInvalid
 	}
 	appID = strings.TrimSpace(appID)
 	if !skillset.IsValidRegistryComponent(appID) {
-		return "", "", &StatusError{Status: http.StatusBadRequest, Message: "app_id is invalid"}
+		return "", "", ErrAppIDInvalid
 	}
 	return registryID, appID, nil
 }

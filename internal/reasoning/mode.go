@@ -17,25 +17,22 @@ import (
 //     no off switch (deepseek-reasoner, MiniMax M2.x). Distinct from toggle: a
 //     toggle model with an empty tier list can still be turned off, while this
 //     one cannot be influenced in any way.
-//   - only_adaptive: legacy alias for adaptive retained for branch-local imports.
 //   - none:          model has no thinking concept.
 //
 // An empty value means "unknown" and is treated as a transitional state that falls
 // back to the legacy reasoning compatibility flag (see ResolveMode).
 const (
-	ModeAdaptive     = "adaptive"
-	ModeToggle       = "toggle"
-	ModeAlways       = "always"
-	ModeOnlyAdaptive = "only_adaptive"
-	ModeNone         = "none"
+	ModeAdaptive = "adaptive"
+	ModeToggle   = "toggle"
+	ModeAlways   = "always"
+	ModeNone     = "none"
 )
 
 var validModes = map[string]struct{}{
-	ModeAdaptive:     {},
-	ModeToggle:       {},
-	ModeAlways:       {},
-	ModeOnlyAdaptive: {},
-	ModeNone:         {},
+	ModeAdaptive: {},
+	ModeToggle:   {},
+	ModeAlways:   {},
+	ModeNone:     {},
 }
 
 // IsValidMode reports whether mode can be stored in a model config.
@@ -44,8 +41,8 @@ func IsValidMode(mode string) bool {
 	return ok
 }
 
-// ResolveMode returns the effective thinking mode, bridging legacy data. The
-// declared mode wins when it is known; only_adaptive collapses onto adaptive.
+// ResolveMode returns the effective thinking mode, bridging legacy data. A
+// declared mode wins when it is known.
 //
 // When the mode is empty — a model imported before the thinking-mode schema
 // existed, or synced from a gateway that carries no capability metadata — the
@@ -61,8 +58,6 @@ func ResolveMode(declared string, hasReasoningCompat bool, modelID string) strin
 	switch declared {
 	case ModeToggle, ModeAdaptive, ModeAlways, ModeNone:
 		return declared
-	case ModeOnlyAdaptive:
-		return ModeAdaptive
 	default:
 		if !hasReasoningCompat {
 			return ModeNone

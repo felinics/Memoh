@@ -61,6 +61,18 @@ declare module '@memohai/web/lib/keyboard-commands' {
     readonly saveActiveFile: 'save-active-file'
     readonly toggleSidebar: 'toggle-sidebar'
     readonly openSettings: 'open-settings'
+    readonly newChatSession: 'new-chat-session'
+    readonly focusChatInput: 'focus-chat-input'
+    readonly showSessions: 'show-sessions'
+    readonly showFiles: 'show-files'
+    readonly showSchedule: 'show-schedule'
+    readonly showSupermarket: 'show-supermarket'
+    readonly nextWorkspaceTab: 'next-workspace-tab'
+    readonly previousWorkspaceTab: 'previous-workspace-tab'
+    readonly splitWorkspaceRight: 'split-workspace-right'
+    readonly splitWorkspaceBelow: 'split-workspace-below'
+    readonly newTerminal: 'new-terminal'
+    readonly newBrowser: 'new-browser'
     readonly closeMediaLightbox: 'close-media-lightbox'
     readonly mediaLightboxPrev: 'media-lightbox-prev'
     readonly mediaLightboxNext: 'media-lightbox-next'
@@ -78,31 +90,37 @@ declare module '@memohai/web/lib/keyboard-commands' {
     connect(api: KeyboardCommandApi, onUnhandled?: UnhandledKeyboardCommandCallback): () => void
   }
   export function isAppKeyboardCommand(value: unknown): value is AppKeyboardCommand
-  export function createKeyboardCommandRegistry(): KeyboardCommandRegistry
+  export function createKeyboardCommandRegistry(canDispatch?: (command: AppKeyboardCommand) => boolean): KeyboardCommandRegistry
+}
+
+declare module '@memohai/web/lib/keyboard-context' {
+  export function selectActiveKeyboardBindings<T extends { scope: string }>(bindings: T[], root?: Document): T[]
+  import type { AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
+  export function canDispatchKeyboardCommand(command: AppKeyboardCommand, route: { name?: unknown; path: string }, root?: Document, hasWorkspace?: boolean): boolean
 }
 
 declare module '@memohai/web/lib/keyboard-bindings' {
   import type { AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
-  export type DesktopDelivery = 'menu' | 'keydown'
+  export type DesktopDelivery = 'menu'
   export type BrowserBehavior = 'intercept' | 'passthrough'
-  export type KeyboardScope = 'global' | 'mediaLightbox'
+  export type KeyboardScope = 'global' | 'workspace' | 'mediaLightbox'
   export interface KeyboardBinding {
     command: AppKeyboardCommand
     key: string
     mod?: boolean
     alt?: boolean
     shift?: boolean
-    desktop: DesktopDelivery
+    repeat?: boolean
+    desktop?: DesktopDelivery
     browser: BrowserBehavior
     scope: KeyboardScope
     i18nKey: string
   }
   export const keyboardBindings: KeyboardBinding[]
   export const RESERVED_BROWSER_COMBOS: Set<string>
-  export function toElectronAccelerator(binding: KeyboardBinding): string
+  export function toElectronAccelerator(binding: Pick<KeyboardBinding, 'key' | 'mod' | 'alt' | 'shift'>): string
   export function acceleratorForCommand(command: AppKeyboardCommand): string | undefined
   export function selectWebBindings(bindings: KeyboardBinding[]): KeyboardBinding[]
-  export function selectDesktopKeydownBindings(bindings: KeyboardBinding[]): KeyboardBinding[]
 }
 
 declare module '@memohai/web/lib/browser-keyboard-shortcuts' {
@@ -113,6 +131,7 @@ declare module '@memohai/web/lib/browser-keyboard-shortcuts' {
     mod?: boolean
     alt?: boolean
     shift?: boolean
+    repeat?: boolean
   }
   export function handleBrowserKeyboardShortcut(
     event: {
@@ -172,7 +191,7 @@ declare module '@memohai/web/pages/home/commands/workspace-tab-commands' {
   import type { AppKeyboardCommand, KeyboardCommandRegistry } from '@memohai/web/lib/keyboard-commands'
   export interface WorkspaceTabCommandStore {
     activeId: string | null
-    closeTab(id: string): void
+    requestCloseTab(id: string): void
   }
   export function handleWorkspaceKeyboardCommand(
     command: AppKeyboardCommand,
@@ -194,7 +213,7 @@ declare module '@memohai/web/store/settings' {
 declare module '@memohai/web/store/workspace-tabs' {
   export function useWorkspaceTabsStore(pinia?: unknown): {
     activeId: string | null
-    closeTab: (id: string) => void
+    requestCloseTab: (id: string) => void
   }
 }
 
@@ -276,6 +295,7 @@ declare module '@memohai/web/lib/desktop-shell' {
   export interface DesktopWindowBridge {
     isFullScreen(): Promise<boolean>
     onFullScreenChanged(listener: (fullScreen: boolean) => void): () => void
+    setIgnoreMenuShortcuts?(ignore: boolean): Promise<void>
   }
   export const DesktopWindowKey: InjectionKey<DesktopWindowBridge | undefined>
   export type DesktopUpdateStatus =

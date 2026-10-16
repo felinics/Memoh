@@ -29,54 +29,27 @@ func NewHTTPErrorHandler(log *slog.Logger) echo.HTTPErrorHandler {
 			return
 		}
 		ctx := c.Request().Context()
-		answer := answerFor(ctx, err)
-		c.Set(resultErrorKey, answer.err)
-		problem, _ := apperror.ProblemFrom(answer.public, httpx.RequestID(c))
-		problem.Fault = string(answer.fault)
+		err = transportError(err)
+		public, fault := errs.Answer(ctx, err)
+		c.Set(resultErrorKey, err)
+		problem, _ := ProblemFrom(public, httpx.RequestID(c))
+		problem.Fault = fault
 		problem.TraceID = traceID(ctx)
 		writeProblem(ctx, log, c, problem)
 	}
 }
 
-// PublicError is the public error a transport answers err with, and the error
-// its result record attributes, chosen by the rule the HTTP error handler
-// applies. A WebSocket handler renders its error frames from it, so a request
-// is answered with the same code whichever transport carried it.
-func PublicError(ctx context.Context, err error) (public *apperror.Error, recorded error) {
-	answer := answerFor(ctx, err)
-	return answer.public, answer.err
-}
-
-// answer is what the boundary makes of the error a request ended with.
-type answer struct {
-	// err is the error the result record attributes. It differs from the
-	// returned error only for an *echo.HTTPError, which is attributed as the
-	// framework code it is answered with.
-	err error
-	// public is the catalog error the Problem is rendered from.
-	public *apperror.Error
-	fault  errs.Fault
-}
-
-// answerFor chooses the public error for err: a cancellation by the caller
-// is canceled; an *echo.HTTPError is the framework code for its status; a
-// public error in the chain is answered as it is; anything else, including a
-// remote failure attributed to this process, is internal.
-func answerFor(ctx context.Context, err error) answer {
-	report := errs.Analyze(ctx, err)
-	if report.Fault == errs.FaultCanceled {
-		return answer{err: err, public: apperror.Wrap(apperror.CodeCanceled, err, nil), fault: report.Fault}
-	}
+// transportError is err as a boundary answers and records it: an
+// *echo.HTTPError, which the transport produces itself, is the framework code
+// for its status with err as the cause; any other error is unchanged. The
+// cause keeps a cancellation on the chain, so a canceled request is still
+// answered canceled.
+func transportError(err error) error {
 	var httpErr *echo.HTTPError
 	if errors.As(err, &httpErr) {
-		public := apperror.Wrap(frameworkCode(httpErr.Code), err, nil)
-		return answer{err: public, public: public, fault: errs.Analyze(ctx, public).Fault}
+		return apperror.Wrap(frameworkCode(httpErr.Code), err, nil)
 	}
-	var public *apperror.Error
-	if report.Public != nil && errors.As(report.Public.Err, &public) {
-		return answer{err: err, public: public, fault: report.Fault}
-	}
-	return answer{err: err, public: apperror.Wrap(apperror.CodeInternal, err, nil), fault: report.Fault}
+	return err
 }
 
 // frameworkCodes are the codes for the statuses Echo and the handlers answer
@@ -121,7 +94,7 @@ func traceID(ctx context.Context) string {
 	return sc.TraceID().String()
 }
 
-func writeProblem(ctx context.Context, log *slog.Logger, c echo.Context, problem apperror.Problem) {
+func writeProblem(ctx context.Context, log *slog.Logger, c echo.Context, problem Problem) {
 	response := c.Response()
 	response.Header().Set(echo.HeaderContentType, "application/problem+json")
 	response.Header().Set("Content-Language", "en")

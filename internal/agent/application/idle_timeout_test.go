@@ -177,6 +177,36 @@ func TestIdleTimeoutStopCannotBeRearmed(t *testing.T) {
 	})
 }
 
+func TestIdleTimeoutPauseSuspendsUntilResume(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, idle := withIdleTimeout(t.Context(), time.Second)
+		defer idle.Stop()
+		idle.Pause()
+		idle.Observe(native.StreamEvent{Type: native.EventProgress})
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		if ctx.Err() != nil {
+			t.Fatal("paused watchdog fired")
+		}
+		idle.Resume()
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		if !idle.DidFire() || apperror.CodeOf(context.Cause(ctx)) != apperror.CodeAgentResponseTimeout {
+			t.Fatalf("resumed watchdog did not own the model window: %v", context.Cause(ctx))
+		}
+	})
+	synctest.Test(t, func(t *testing.T) {
+		ctx, idle := withIdleTimeout(t.Context(), time.Second)
+		idle.Pause()
+		idle.Stop()
+		idle.Resume()
+		time.Sleep(2 * time.Second)
+		if ctx.Err() != nil {
+			t.Fatal("resume rearmed a stopped watchdog")
+		}
+	})
+}
+
 func TestScheduleBudgetHasDistinctCause(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
 	cancel(schedule.ErrExecutionTimeout)

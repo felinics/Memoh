@@ -190,6 +190,9 @@ type FinalizeParams struct {
 	FencingToken int64
 	State        State
 	ErrorCode    string
+	// ExpectedState is optional. Shutdown uses it to avoid terminalizing a
+	// decision that parked after its classification read.
+	ExpectedState State
 }
 
 // PrepareFinishParams records the fenced, recoverable terminal proposal. A
@@ -279,6 +282,9 @@ type ResetStore interface {
 	ReleaseReset(ctx context.Context, lease ResetLease) (bool, error)
 	EffectiveReset(ctx context.Context, botID, sessionID string) (ResetLease, bool, error)
 	ActiveRunsByBot(ctx context.Context, botID string) ([]Run, error)
+	// SessionIDsByBot lists every session a bot-wide reset covers, so the
+	// live projections of all of them can be invalidated with the history.
+	SessionIDsByBot(ctx context.Context, botID string) ([]string, error)
 }
 
 // OrphanResetStore atomically invalidates a disappeared owner's persistence

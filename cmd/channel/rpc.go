@@ -16,11 +16,13 @@ import (
 	turntransport "github.com/felinics/memoh/internal/agent/turn/grpctransport"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/media"
 	intrpc "github.com/felinics/memoh/internal/rpc"
 	"github.com/felinics/memoh/internal/rpc/channelruntime"
 	runtimeRpc "github.com/felinics/memoh/internal/rpc/runtime"
 	"github.com/felinics/memoh/internal/rpc/runtimepb"
 	"github.com/felinics/memoh/internal/rpc/serverruntime"
+	"github.com/felinics/memoh/internal/rpc/storageruntime"
 	"github.com/felinics/memoh/internal/webhooktunnel"
 )
 
@@ -40,6 +42,10 @@ func provideServerRPCConn(lc fx.Lifecycle, cfg config.Config) (*grpc.ClientConn,
 
 func provideTurnClient(conn *grpc.ClientConn, log *slog.Logger) turn.Service {
 	return turntransport.NewClient(conn, turntransport.WithClientLogger(log))
+}
+
+func provideRemoteMediaService(conn *grpc.ClientConn, log *slog.Logger) *media.Service {
+	return media.NewService(log, storageruntime.NewProvider(conn))
 }
 
 func provideRuntimeRPCClient(conn *grpc.ClientConn) *runtimeRpc.Client {

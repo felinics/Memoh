@@ -224,7 +224,7 @@ func TestStreamWorkspaceProvisioningReportsAnAwaitThatFailed(t *testing.T) {
 			if len(sent) != 1 {
 				t.Fatalf("sent = %#v, want one error event", sent)
 			}
-			event, _ := sent[0].(createContainerErrorEvent)
+			event, _ := sent[0].(server.StreamError)
 			if event.Code != string(tc.code) || event.Detail != definition.Detail || event.Message != definition.Detail || event.RequestID != "req-await" {
 				t.Fatalf("event = %#v, want %s with detail and message %q", event, tc.code, definition.Detail)
 			}

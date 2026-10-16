@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -334,5 +335,62 @@ func TestMatrixStreamErrorReply(t *testing.T) {
 				t.Fatalf("sent messages = %q, want %q", sent, tc.want)
 			}
 		})
+	}
+}
+
+func TestMatrixStreamSegmentEndKeepsPreToolText(t *testing.T) {
+	type sentEvent struct {
+		Body       string         `json:"body"`
+		NewContent map[string]any `json:"m.new_content"`
+	}
+	var sent []sentEvent
+	adapter := NewMatrixAdapter(nil)
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var event sentEvent
+		payload, _ := io.ReadAll(req.Body)
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Errorf("decode sent event: %v (body=%q)", err, payload)
+		}
+		sent = append(sent, event)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"event_id":"$evt` + strconv.Itoa(len(sent)) + `"}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	stream := &matrixOutboundStream{
+		adapter: adapter,
+		cfg: Config{
+			HomeserverURL: "https://matrix.example.com",
+			AccessToken:   "tok",
+		},
+		target: "!room:example.com",
+	}
+
+	ctx := context.Background()
+	for _, event := range []channel.StreamEvent{
+		{Type: channel.StreamEventPhaseStart, Phase: channel.StreamPhaseText},
+		{Type: channel.StreamEventDelta, Delta: "Let me check.", Phase: channel.StreamPhaseText},
+		{Type: channel.StreamEventPhaseEnd, Phase: channel.StreamPhaseText},
+		{Type: channel.StreamEventSegmentEnd},
+		{Type: channel.StreamEventSegmentEnd},
+		{Type: channel.StreamEventPhaseStart, Phase: channel.StreamPhaseText},
+		{Type: channel.StreamEventDelta, Delta: "Here is the answer.", Phase: channel.StreamPhaseText},
+		{Type: channel.StreamEventPhaseEnd, Phase: channel.StreamPhaseText},
+		{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{Message: channel.Message{Text: "Here is the answer."}}},
+	} {
+		if err := stream.Push(ctx, mustPreparedMatrixEvent(t, event)); err != nil {
+			t.Fatalf("push %s: %v", event.Type, err)
+		}
+	}
+
+	if len(sent) != 2 {
+		t.Fatalf("expected two separate messages, got %d: %+v", len(sent), sent)
+	}
+	for i, want := range []string{"Let me check.", "Here is the answer."} {
+		if sent[i].Body != want || sent[i].NewContent != nil {
+			t.Fatalf("event %d = %+v, want a new message %q", i, sent[i], want)
+		}
 	}
 }

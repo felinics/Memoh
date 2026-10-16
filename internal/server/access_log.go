@@ -31,8 +31,16 @@ func AccessLog(log *slog.Logger) echo.MiddlewareFunc {
 		return func(c echo.Context) error {
 			start := time.Now()
 			err := serveRecovered(next, c)
-			if err != nil && !c.Response().Committed {
+			switch {
+			case err != nil && !c.Response().Committed:
+				// The error handler answers it and hands back the error it
+				// attributes under resultErrorKey.
 				c.Error(err)
+			case err != nil:
+				// A handler that wrote its own body, such as an SSE error
+				// frame, returns the error the body was rendered from. It is
+				// not answered again, only attributed by the same rule.
+				err = transportError(err)
 			}
 			req := c.Request()
 			ctx := req.Context()

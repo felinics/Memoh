@@ -138,8 +138,7 @@ func TestCapabilityAppDoesNotExecuteChangedPlanAfterApproval(t *testing.T) {
 				}
 			}
 			_, err := p.manageApp(&toolexec.ToolExecContext{Context: t.Context()}, session, map[string]any{"action": action, "installation_id": "installation"})
-			public, ok := apperror.PublicFrom(err, "")
-			if !ok || public.Code != apperror.CodeCapabilityRequestInvalid || service.removed || service.resumed {
+			if apperror.CodeOf(err) != apperror.CodeCapabilityRequestInvalid || service.removed || service.resumed {
 				t.Fatalf("changed plan executed: err=%v removed=%v resumed=%v", err, service.removed, service.resumed)
 			}
 		})

@@ -92,7 +92,7 @@
           @select="handleSelect"
           @open-new-tab="handleOpenNewTab"
           @rename="sessionDialogs?.openRename($event)"
-          @delete="sessionDialogs?.openDelete($event, { fallbackMode: 'recent' })"
+          @delete="sessionDialogs?.openDelete($event)"
         />
       </template>
     </div>

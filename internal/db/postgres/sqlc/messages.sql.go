@@ -338,6 +338,21 @@ deleted_acp_publications AS (
     AND publication.session_id = invalidated.id
   RETURNING publication.session_id
 ),
+retired_runs AS (
+  UPDATE session_runs run
+  SET input_json = run.input_json - 'resume',
+      error_code = CASE WHEN run.fencing_token = 0 THEN 'history_reset' ELSE run.error_code END
+  FROM invalidated_sessions invalidated
+  WHERE run.team_id = public.memoh_current_team_id()
+    AND run.session_id = invalidated.id
+    AND (
+      run.state = 'lost' AND run.error_code = 'session_runtime.interrupted' AND run.input_json ? 'resume'
+      OR run.fencing_token = 0
+        AND run.state IN ('completed', 'aborted', 'failed', 'lost')
+        AND run.error_code IS DISTINCT FROM 'history_reset'
+    )
+  RETURNING run.run_id
+),
 target_compaction_artifacts AS MATERIALIZED (
   SELECT compact.id
   FROM bot_history_message_compacts compact
@@ -371,6 +386,12 @@ WHERE message.team_id = public.memoh_current_team_id()
   AND message.id = target.id
 `
 
+// Runs go with the history they belong to. A turn interrupted by a graceful
+// shutdown loses its resume intent. A run that ended before it was ever
+// claimed has no fencing token to order against the reset, so it is marked
+// history_reset; the reset holds new admissions out, so every such run here
+// predates it. One statement does both, as a row updated twice in a
+// statement keeps only one of the updates.
 func (q *Queries) ClearHistoryByBot(ctx context.Context, targetBotID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, clearHistoryByBot, targetBotID)
 	return err
@@ -407,6 +428,21 @@ deleted_acp_publications AS (
     AND publication.session_id = invalidated.id
   RETURNING publication.session_id
 ),
+retired_runs AS (
+  UPDATE session_runs run
+  SET input_json = run.input_json - 'resume',
+      error_code = CASE WHEN run.fencing_token = 0 THEN 'history_reset' ELSE run.error_code END
+  FROM invalidated_session invalidated
+  WHERE run.team_id = public.memoh_current_team_id()
+    AND run.session_id = invalidated.id
+    AND (
+      run.state = 'lost' AND run.error_code = 'session_runtime.interrupted' AND run.input_json ? 'resume'
+      OR run.fencing_token = 0
+        AND run.state IN ('completed', 'aborted', 'failed', 'lost')
+        AND run.error_code IS DISTINCT FROM 'history_reset'
+    )
+  RETURNING run.run_id
+),
 target_compaction_artifacts AS MATERIALIZED (
   SELECT compact.id
   FROM bot_history_message_compacts compact
@@ -440,6 +476,12 @@ WHERE message.team_id = public.memoh_current_team_id()
   AND message.id = target.id
 `
 
+// Runs go with the history they belong to. A turn interrupted by a graceful
+// shutdown loses its resume intent. A run that ended before it was ever
+// claimed has no fencing token to order against the reset, so it is marked
+// history_reset; the reset holds new admissions out, so every such run here
+// predates it. One statement does both, as a row updated twice in a
+// statement keeps only one of the updates.
 func (q *Queries) ClearHistoryBySession(ctx context.Context, targetSessionID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, clearHistoryBySession, targetSessionID)
 	return err

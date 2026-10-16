@@ -1,8 +1,10 @@
 package channel
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -157,8 +159,8 @@ func TestValidateStreamEventSupportedTypes(t *testing.T) {
 		{name: "agent end", event: StreamEvent{Type: StreamEventAgentEnd}},
 		{name: "processing started", event: StreamEvent{Type: StreamEventProcessingStarted}},
 		{name: "processing completed", event: StreamEvent{Type: StreamEventProcessingCompleted}},
-		{name: "processing failed", event: StreamEvent{Type: StreamEventProcessingFailed, Error: "failed"}},
 		{name: "reset", event: StreamEvent{Type: StreamEventReset}},
+		{name: "segment end", event: StreamEvent{Type: StreamEventSegmentEnd}},
 		{name: "final", event: StreamEvent{Type: StreamEventFinal, Final: &StreamFinalizePayload{Message: Message{Text: "done"}}}},
 		{name: "error", event: StreamEvent{Type: StreamEventError, Error: "boom"}},
 	}
@@ -185,7 +187,7 @@ func TestValidateStreamEventInvalidPayload(t *testing.T) {
 		{name: "missing status", event: StreamEvent{Type: StreamEventStatus}},
 		{name: "missing tool call payload", event: StreamEvent{Type: StreamEventToolCallStart}},
 		{name: "empty attachment payload", event: StreamEvent{Type: StreamEventAttachment}},
-		{name: "processing failed missing error", event: StreamEvent{Type: StreamEventProcessingFailed}},
+		{name: "processing failed", event: StreamEvent{Type: StreamEventType("processing_failed"), Error: "failed"}},
 		{name: "missing final payload", event: StreamEvent{Type: StreamEventFinal}},
 		{name: "unsupported type", event: StreamEvent{Type: StreamEventType("unknown")}},
 	}
@@ -1850,6 +1852,35 @@ func TestPushDelta_ResetRestartsSplitWindow(t *testing.T) {
 	}
 }
 
+func TestPushDelta_SegmentEndRestartsSplitWindow(t *testing.T) {
+	t.Parallel()
+	stream, reo, _ := newDeltaSplitTestStream(t, 100, 2)
+
+	push := func(event StreamEvent) {
+		t.Helper()
+		if err := stream.Push(context.Background(), event); err != nil {
+			t.Fatalf("Push %s failed: %v", event.Type, err)
+		}
+	}
+	for range 6 {
+		push(StreamEvent{Type: StreamEventDelta, Delta: strings.Repeat("x", 10)})
+	}
+	push(StreamEvent{Type: StreamEventSegmentEnd})
+	for range 6 {
+		push(StreamEvent{Type: StreamEventDelta, Delta: strings.Repeat("x", 10)})
+	}
+
+	// The adapter committed the first 60 runes as their own message and only
+	// holds the next 60, so nothing is split.
+	if stream.splitCount != 0 {
+		t.Fatalf("expected no split after segment end, got %d", stream.splitCount)
+	}
+	events := reo.streams[0].Events()
+	if len(events) != 13 || events[6].Type != StreamEventSegmentEnd {
+		t.Fatalf("expected the segment end forwarded between the deltas, got %+v", events)
+	}
+}
+
 func TestPushDelta_MultipleSplits(t *testing.T) {
 	t.Parallel()
 	stream, reo, _ := newDeltaSplitTestStream(t, 50, 5)
@@ -2583,5 +2614,44 @@ func TestCoerceFormatForCaps_PreservesPlainEverywhere(t *testing.T) {
 				t.Fatalf("plain must stay plain on %s, got %q", name, coerced.Format)
 			}
 		})
+	}
+}
+
+type failingSendAdapter struct {
+	*targetResolvingAdapter
+	err error
+}
+
+func (a *failingSendAdapter) Send(context.Context, ChannelConfig, PreparedOutboundMessage) error {
+	return a.err
+}
+
+func TestManagerSendFailureIsReturnedWithoutASecondRecord(t *testing.T) {
+	t.Parallel()
+
+	channelType := ChannelType("failing-send")
+	cause := errors.New("platform down")
+	adapter := &failingSendAdapter{
+		targetResolvingAdapter: &targetResolvingAdapter{
+			channelType:    channelType,
+			outboundPolicy: OutboundPolicy{RetryMax: 1},
+		},
+		err: cause,
+	}
+	registry := NewRegistry()
+	if err := registry.Register(adapter); err != nil {
+		t.Fatalf("register adapter failed: %v", err)
+	}
+	var buf bytes.Buffer
+	manager := NewManager(slog.New(slog.NewJSONHandler(&buf, nil)), registry, &fakeConfigStore{
+		effectiveConfig: ChannelConfig{BotID: "bot-1", ChannelType: channelType},
+	}, nil)
+
+	err := manager.Send(context.Background(), "bot-1", channelType, SendRequest{Target: "t", Message: Message{Text: "hi"}})
+	if !errors.Is(err, cause) {
+		t.Fatalf("Send error = %v, want the adapter's error in the chain", err)
+	}
+	if strings.Contains(buf.String(), "send outbound failed") {
+		t.Fatalf("manager logged the failure it returns: %s", buf.String())
 	}
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/toolcontext"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -104,7 +105,7 @@ func NewRunner(log *slog.Logger, workspace Workspace) *Runner {
 		log = slog.Default()
 	}
 	return &Runner{
-		logger:    log.With(slog.String("component", "acpclient")),
+		logger:    log.With(slog.String("component", "acpclient"), slog.String("runtime", string(runtimekind.ACPAgent))),
 		workspace: workspace,
 		timeout:   DefaultRunTimeout,
 	}

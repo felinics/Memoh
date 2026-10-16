@@ -94,7 +94,7 @@ func (s *Service) storeRoundWithOptionsResult(ctx context.Context, req ChatReque
 		return persisted, nil
 	}
 	if !opts.SkipMemory && !req.SkipMemoryExtraction {
-		go s.storeMemory(context.WithoutCancel(ctx), req, persisted)
+		s.storeMemory(context.WithoutCancel(ctx), req, persisted)
 	}
 
 	return persisted, nil

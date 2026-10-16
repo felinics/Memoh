@@ -121,6 +121,7 @@ func eventTypes(t *testing.T, payloads []json.RawMessage) []string {
 type turnRun struct {
 	types     []string
 	errCodes  []string
+	errs      []error
 	proposals [][2]string
 	ledger    [3]string
 }
@@ -165,6 +166,7 @@ func runNativeTurnWith(t *testing.T, fixture directLifecycleFixture, runs *propo
 		}
 		for err := range handle.Errs() {
 			out.errCodes = append(out.errCodes, string(apperror.CodeOf(err)))
+			out.errs = append(out.errs, err)
 		}
 	}()
 	select {
@@ -281,8 +283,9 @@ func TestStreamChatWSRetryFailureReportsOutcome(t *testing.T) {
 }
 
 // X4, WebSocket path: the same retry -> AgentEnd sequence. The socket gets no
-// error frame, the retry frame carries its counters and nothing about the
-// failure, and the function returns nil.
+// error frame, the retry frame carries its counters, its wait and the
+// failure's class but none of the provider's text, and the function returns
+// nil.
 func TestStreamChatWSRetrySuccessReportsNoError_X4(t *testing.T) {
 	fixture, transport := newScriptedFailureFixture(t, http.StatusServiceUnavailable)
 	eventCh := make(chan WSStreamEvent)
@@ -319,9 +322,14 @@ func TestStreamChatWSRetrySuccessReportsNoError_X4(t *testing.T) {
 			continue
 		}
 		for key := range fields {
-			if key != "type" && key != "attempt" && key != "maxAttempt" {
-				t.Fatalf("retry frame = %s, want only its counters", payload)
+			switch key {
+			case "type", "attempt", "maxAttempt", "retryDelayMs", "retryReason":
+			default:
+				t.Fatalf("retry frame = %s, want only its counters, wait and class", payload)
 			}
+		}
+		if string(fields["retryReason"]) != `"server_error"` {
+			t.Fatalf("retry frame = %s, want the 503's class server_error", payload)
 		}
 	}
 	if err != nil {

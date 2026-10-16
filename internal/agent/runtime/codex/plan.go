@@ -28,22 +28,28 @@ func codexPlanMode(mode string) (external.ModeState, error) {
 	}, nil
 }
 
-// The preset overrides model and effort, so carry the actual thread settings
+// The preset overrides model and effort, so carry the actual thread model
 // along with the switch. Never substitute a hard-coded model or plan prompt.
+//
+// The effort is this turn's alone. turn/start keeps a thread's earlier level
+// when none is sent, and only a preset can drop it, so a turn that selects no
+// level on a thread still holding one sends the preset even without a mode
+// switch. Otherwise "endpoint default" would keep running the old level.
 func applyCollaborationMode(params *protocol.TurnStartParams, input external.PromptInput, settings protocol.Settings) error {
 	mode := metadataString(input.RuntimeMetadata, "collaboration_mode")
+	if params.Model != nil {
+		settings.Model = *params.Model
+	}
 	if mode == "" {
-		return nil
+		if params.Effort != nil || settings.ReasoningEffort == nil || settings.Model == "" {
+			return nil
+		}
+		mode = "default"
 	}
 	if _, err := codexPlanMode(mode); err != nil {
 		return err
 	}
-	if params.Model != nil {
-		settings.Model = *params.Model
-	}
-	if params.Effort != nil {
-		settings.ReasoningEffort = params.Effort
-	}
+	settings.ReasoningEffort = params.Effort
 	if settings.Model == "" {
 		return errs.NewDependency("codex thread did not report its model for collaboration mode")
 	}

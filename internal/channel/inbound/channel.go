@@ -32,6 +32,8 @@ import (
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/runtimekind"
@@ -42,12 +44,11 @@ import (
 var base64Std = base64.StdEncoding
 
 const (
-	silentReplyToken        = "NO_REPLY"
-	minDuplicateTextLength  = 10
-	processingStatusTimeout = 60 * time.Second
-	turnBusyRetryWindow     = 30 * time.Second
-	turnBusyRetryInitial    = 100 * time.Millisecond
-	turnBusyRetryMax        = time.Second
+	silentReplyToken       = "NO_REPLY"
+	minDuplicateTextLength = 10
+	turnBusyRetryWindow    = 30 * time.Second
+	turnBusyRetryInitial   = 100 * time.Millisecond
+	turnBusyRetryMax       = time.Second
 )
 
 var whitespacePattern = regexp.MustCompile(`\s+`)
@@ -142,6 +143,19 @@ type ACPAgentSetupReader interface {
 	ACPAgentSetupMetadata(ctx context.Context, botID string) (map[string]any, error)
 }
 
+// BotAgent is a user-added Agent as /new addresses it.
+type BotAgent struct {
+	ID         string
+	Name       string
+	Runtime    string
+	ACPAgentID string
+	Enabled    bool
+}
+
+type BotAgentReader interface {
+	BotAgents(ctx context.Context, botID string) ([]BotAgent, error)
+}
+
 type BotPermissionChecker interface {
 	HasBotPermission(ctx context.Context, botID, accountID, permission string) (bool, error)
 }
@@ -173,7 +187,9 @@ type SessionResult struct {
 }
 
 type NewSessionSpec struct {
-	BotAgentID            string
+	BotAgentID string
+	// AgentName is set only when /new named the Agent; it labels the replies.
+	AgentName             string
 	Mode                  string
 	Runtime               string
 	Type                  string
@@ -211,6 +227,7 @@ type ChannelInboundProcessor struct {
 	imDisplayOptions    IMDisplayOptionsReader
 	defaultChatRuntime  DefaultChatRuntimeReader
 	acpAgentSetup       ACPAgentSetupReader
+	botAgents           BotAgentReader
 	acpProfiles         turn.ACPProfileResolver
 	permissionChecker   BotPermissionChecker
 	skillResolver       RequestedSkillResolver
@@ -379,6 +396,13 @@ func (p *ChannelInboundProcessor) SetACPAgentSetupReader(reader ACPAgentSetupRea
 	p.acpAgentSetup = reader
 }
 
+func (p *ChannelInboundProcessor) SetBotAgentReader(reader BotAgentReader) {
+	if p == nil {
+		return
+	}
+	p.botAgents = reader
+}
+
 func (p *ChannelInboundProcessor) SetACPProfileResolver(resolver turn.ACPProfileResolver) {
 	if p == nil {
 		return
@@ -445,7 +469,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		return nil
 	}
 	if err := channel.RejectReservedSkillMetadata(msg.Message); err != nil {
-		return p.sendSlashError(ctx, sender, msg, slash.CodeReservedSkillMetadata)
+		return p.sendSlashError(ctx, sender, msg, err)
 	}
 	state, err := p.requireIdentity(ctx, cfg, msg)
 	if err != nil {
@@ -512,7 +536,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		if code == "" {
 			code = slash.CodeUnknownSlash
 		}
-		return p.sendSlashError(ctx, sender, msg, code)
+		return p.sendSlashError(ctx, sender, msg, apperror.New(code, nil))
 	}
 
 	// /start, /new, /stop, and /status require channel-layer handling outside
@@ -546,7 +570,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 					slog.Any("error", accErr),
 				)
 			}
-			return p.sendSlashError(ctx, sender, msg, slash.CodePermissionDenied)
+			return p.sendSlashError(ctx, sender, msg, apperror.New(slash.CodePermissionDenied, nil))
 		}
 	}
 	if isStartCommand && (isDirectedAtBot(msg) || slashDirected) {
@@ -564,6 +588,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 
 	if pendingSkillIntent == nil && slashDecision.Kind == slash.DecisionCommandAction && p.commandHandler != nil && !isToolApprovalCommand && !isUserInputResponseCommand && !isQueueCommand && invocation != nil && (isDirectedAtBot(msg) || slashDirected) {
 		loc := p.localizer(ctx, identity.BotID)
+		// /model and /reasoning clear the Web's remembered session pick, and
+		// /compact compacts the conversation's own session, not the bot's latest.
+		routeID, sess, _ := p.existingActiveSession(ctx, identity, msg)
 		result, err := p.commandHandler.ExecuteResult(ctx, command.ExecuteInput{
 			BotID:             strings.TrimSpace(identity.BotID),
 			ChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
@@ -574,6 +601,8 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
 			ConversationID:    strings.TrimSpace(msg.Conversation.ID),
 			ThreadID:          extractThreadID(msg),
+			RouteID:           routeID,
+			SessionID:         strings.TrimSpace(sess.ID),
 			CommandTarget:     telegramGroupBotUsername(msg),
 			Locale:            loc.Locale(),
 		})
@@ -583,9 +612,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 		var outMsg channel.Message
 		if err != nil {
-			if p.logger != nil {
-				p.logger.WarnContext(ctx, "command execution failed", slog.Any("error", err))
-			}
+			p.recordCommandFailure(ctx, msg, identity, err)
 			outMsg = plainTextMessage(friendlyOps(loc, "ops.verb.completeCommand"), caps)
 		} else {
 			outMsg = renderResult(result, RenderContext{Caps: caps, T: loc})
@@ -682,7 +709,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if !aclAllowed {
 		if pendingSkillIntent != nil {
 			if isDirectedAtBot(msg) || slashDirected {
-				return p.sendSlashError(ctx, sender, msg, slash.CodePermissionDenied)
+				return p.sendSlashError(ctx, sender, msg, apperror.New(slash.CodePermissionDenied, nil))
 			}
 			return nil
 		}
@@ -745,33 +772,29 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	var defaultSpecResolved bool
 	if pendingSkillIntent != nil {
 		if sessionID != "" && !sessionSupportsRequestedSkills(SessionResult{Type: sessionType, Runtime: sessionRuntime}) {
-			return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
+			return p.sendSlashError(ctx, sender, msg, apperror.New(slash.CodeUnsupportedSkillSlashContext, nil))
 		}
 		if sessionID == "" {
 			if p.sessionEnsurer == nil {
-				return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
+				return p.sendSlashError(ctx, sender, msg, apperror.New(slash.CodeUnsupportedSkillSlashContext, nil))
 			}
 			spec, shouldCreate, specErr := p.defaultSessionSpecForInbound(ctx, identity, msg)
 			if specErr != nil {
-				if p.logger != nil {
-					p.logger.WarnContext(ctx, "resolve default session spec failed", slog.Any("error", specErr))
-				}
-				return p.sendExternalAgentError(ctx, sender, msg, identity, specErr)
+				return p.replyFailure(ctx, sender, msg, identity, specErr, friendlyOps(p.localizer(ctx, identity.BotID), "ops.verb.startSession"))
 			}
 			defaultSpec = spec
 			defaultSpecShouldCreate = shouldCreate
 			defaultSpecResolved = true
 			if !shouldCreate || !newSessionSpecSupportsRequestedSkills(spec) {
-				return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
+				return p.sendSlashError(ctx, sender, msg, apperror.New(slash.CodeUnsupportedSkillSlashContext, nil))
 			}
 		}
 		resolvedSkills, resolveErr := p.resolveChannelRequestedSkills(ctx, identity.BotID, pendingSkillIntent.Names)
 		if resolveErr != nil {
-			code := slashErrorCode(resolveErr)
-			if code == "" {
-				code = slash.CodeUnsupportedSkillSlashContext
+			if apperror.CodeOf(resolveErr) == "" {
+				return p.replyFailure(ctx, sender, msg, identity, resolveErr, "")
 			}
-			return p.sendSlashError(ctx, sender, msg, code)
+			return p.sendSlashError(ctx, sender, msg, resolveErr)
 		}
 		resolvedSkillContexts := skillset.RequestedSkillContexts(resolvedSkills)
 		requestedSkillContexts = make([]turn.RequestedSkillContext, len(resolvedSkillContexts))
@@ -806,22 +829,16 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			var specErr error
 			spec, shouldCreate, specErr = p.defaultSessionSpecForInbound(ctx, identity, msg)
 			if specErr != nil {
-				if p.logger != nil {
-					p.logger.WarnContext(ctx, "resolve default session spec failed", slog.Any("error", specErr))
-				}
-				return p.sendExternalAgentError(ctx, sender, msg, identity, specErr)
+				return p.replyFailure(ctx, sender, msg, identity, specErr, friendlyOps(p.localizer(ctx, identity.BotID), "ops.verb.startSession"))
 			}
 		}
 		if shouldCreate {
 			if pendingSkillIntent != nil && !newSessionSpecSupportsRequestedSkills(spec) {
-				return p.sendSlashError(ctx, sender, msg, slash.CodeUnsupportedSkillSlashContext)
+				return p.sendSlashError(ctx, sender, msg, apperror.New(slash.CodeUnsupportedSkillSlashContext, nil))
 			}
 			sess, createErr := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec)
 			if createErr != nil {
-				if p.logger != nil {
-					p.logger.WarnContext(ctx, "auto-create session failed", slog.Any("error", createErr))
-				}
-				return p.sendExternalAgentError(ctx, sender, msg, identity, createErr)
+				return p.replyFailure(ctx, sender, msg, identity, createErr, friendlyOps(p.localizer(ctx, identity.BotID), "ops.verb.startSession"))
 			}
 			sessionID = sess.ID
 			sessionType = sess.Type
@@ -845,7 +862,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		if err != nil {
 			p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "")
 			if shouldTrigger || isDirectedAtBot(msg) {
-				return p.sendExternalAgentError(ctx, sender, msg, identity, err)
+				return p.replyFailure(ctx, sender, msg, identity, err, "")
 			}
 			return nil
 		}
@@ -870,11 +887,27 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		eventID, latestRC = persistAndProjectEvent(ctx, store, p.pipeline, p.logger, identity.BotID, sessionID, event)
 	}
 
+	// Bot-centric history container:
+	// always persist channel traffic under bot_id so WebUI can view unified cross-platform history.
+	activeChatID := strings.TrimSpace(identity.BotID)
+	if activeChatID == "" {
+		activeChatID = strings.TrimSpace(resolved.BotID)
+	}
+
 	// Discuss mode: dispatch to the discuss driver and return.
 	// The discuss driver autonomously decides whether to call the LLM.
 	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && latestRC != nil && slashDecision.AgentCommand == "" {
 		chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
 		sessionToken := p.issueSessionBearerToken(ctx, identity, runtimeSession, sessionRuntimeOwner, chatToken)
+		statusInfo := channel.ProcessingStatusInfo{
+			BotID:             identity.BotID,
+			ChatID:            activeChatID,
+			RouteID:           resolved.RouteID,
+			ChannelIdentityID: identity.ChannelIdentityID,
+			UserID:            identity.UserID,
+			ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
+			SourceMessageID:   strings.TrimSpace(msg.Message.ID),
+		}
 		p.discussDriver.NotifyRC(ctx, sessionID, latestRC, discuss.DiscussSessionConfig{
 			TeamID:            cfg.TeamID,
 			BotID:             identity.BotID,
@@ -888,16 +921,10 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			SessionToken:      sessionToken,
 			ChatToken:         chatToken,
 			ToolHTTPURL:       acpMCPToolsURLFromEnv(identity.BotID),
+			StartProcessing:   p.discussProcessingStarter(cfg, msg, identity, statusInfo),
 		})
 		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID)
 		return nil
-	}
-
-	// Bot-centric history container:
-	// always persist channel traffic under bot_id so WebUI can view unified cross-platform history.
-	activeChatID := strings.TrimSpace(identity.BotID)
-	if activeChatID == "" {
-		activeChatID = strings.TrimSpace(resolved.BotID)
 	}
 
 	if sessionType == sessionpkg.TypeDiscuss || shouldTrigger {
@@ -976,24 +1003,21 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		ReplyTarget:       strings.TrimSpace(msg.ReplyTarget),
 		SourceMessageID:   strings.TrimSpace(msg.Message.ID),
 	}
-	statusNotifier := p.resolveProcessingStatusNotifier(msg.Channel)
-	statusHandle := channel.ProcessingStatusHandle{}
-	if statusNotifier != nil {
-		handle, notifyErr := p.notifyProcessingStarted(ctx, statusNotifier, cfg, msg, statusInfo)
-		if notifyErr != nil {
-			p.logProcessingStatusError("processing_started", msg, identity, notifyErr)
-		} else {
-			statusHandle = handle
+	status := channel.StartProcessingStatus(ctx, p.resolveProcessingStatusNotifier(msg.Channel), cfg, msg, statusInfo, p.processingStatusErrorLogger(msg, identity))
+	// Exit paths report Completed or Failed explicitly; this only finishes a
+	// path that does not, so the refresh loop never outlives the turn. It runs
+	// after the reply stream is closed.
+	defer func() {
+		if retErr != nil {
+			status.Fail(ctx, retErr)
+			return
 		}
-	}
+		status.Complete(ctx)
+	}()
 	target := strings.TrimSpace(msg.ReplyTarget)
 	if target == "" {
 		err := errors.New("reply target missing")
-		if statusNotifier != nil {
-			if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, err); notifyErr != nil {
-				p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
-			}
-		}
+		status.Fail(ctx, err)
 		return err
 	}
 	sourceMessageID := strings.TrimSpace(msg.Message.ID)
@@ -1010,11 +1034,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		},
 	})
 	if err != nil {
-		if statusNotifier != nil {
-			if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, err); notifyErr != nil {
-				p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
-			}
-		}
+		status.Fail(ctx, err)
 		return err
 	}
 	streamClosed := false
@@ -1069,11 +1089,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		Type:   channel.StreamEventStatus,
 		Status: channel.StreamStatusStarted,
 	}); err != nil {
-		if statusNotifier != nil {
-			if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, err); notifyErr != nil {
-				p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
-			}
-		}
+		status.Fail(ctx, err)
 		return err
 	}
 
@@ -1152,11 +1168,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 					slog.String("external_message_id", sourceMessageID),
 				)
 			}
-			if statusNotifier != nil {
-				if notifyErr := p.notifyProcessingCompleted(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle); notifyErr != nil {
-					p.logProcessingStatusError("processing_completed", msg, identity, notifyErr)
-				}
-			}
+			status.Complete(ctx)
 			return nil
 		}
 		if errors.Is(startErr, turn.ErrSessionBusy) {
@@ -1171,11 +1183,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 					slog.String("external_message_id", sourceMessageID),
 				)
 			}
-			if statusNotifier != nil {
-				if notifyErr := p.notifyProcessingCompleted(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle); notifyErr != nil {
-					p.logProcessingStatusError("processing_completed", msg, identity, notifyErr)
-				}
-			}
+			status.Complete(ctx)
 			if msg.Channel == channel.ChannelType("telegram") {
 				return sender.Send(ctx, channel.OutboundMessage{
 					Target:  target,
@@ -1185,18 +1193,17 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			return startErr
 		}
 		if errors.Is(startErr, turn.ErrTurnDeferred) {
-			if statusNotifier != nil {
-				if notifyErr := p.notifyProcessingCompleted(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle); notifyErr != nil {
-					p.logProcessingStatusError("processing_completed", msg, identity, notifyErr)
-				}
-			}
+			status.Complete(ctx)
 			return nil
 		}
-		_ = stream.Push(ctx, channel.ErrorEvent(p.localizer(ctx, identity.BotID), startErr))
-		if statusNotifier != nil {
-			if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, startErr); notifyErr != nil {
-				p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
-			}
+		// The stream's context is the turn's caller: /new and /stop end it,
+		// and a turn they ended gets no reply.
+		if event, ok := channel.ErrorEvent(streamCtx, p.localizer(ctx, identity.BotID), threadError(startErr)); ok {
+			_ = stream.Push(ctx, event)
+		}
+		status.Fail(ctx, startErr)
+		if stoppedByCommand(ctx, streamCtx) {
+			return nil
 		}
 		return startErr
 	}
@@ -1225,6 +1232,12 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}
 			if failures.observeTerminal(turnEvent) {
 				continue
+			}
+			// No typing while the turn waits on the user's approval or answer.
+			if awaitsUserDecision(turnEvent.Payload) {
+				status.PauseRefresh()
+			} else {
+				status.ResumeRefresh()
 			}
 			events, messages, parseErr := mapStreamChunkToChannelEvents(turnEvent.Payload, loc)
 			if parseErr != nil {
@@ -1288,6 +1301,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			break
 		}
 	}
+	// The run is over: stop re-sending the typing indicator before any final
+	// output goes out, so it cannot reappear after the reply.
+	status.StopRefresh()
 
 	if !pushBroken {
 		for _, held := range failures.release() {
@@ -1301,30 +1317,15 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 	failureReply, hasFailureReply := failures.reply(loc, streamErr)
 	if streamErr != nil {
-		if public := externalAgentError(streamErr); public != nil {
-			if !hasFailureReply {
-				failureReply = channel.StreamEvent{
-					Type:      channel.StreamEventError,
-					Error:     externalAgentErrorText(public, loc),
-					ErrorCode: string(apperror.CodeOf(public)),
-				}
-			}
-			_ = stream.Push(ctx, failureReply)
-			if statusNotifier != nil {
-				if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, streamErr); notifyErr != nil {
-					p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
-				}
-			}
-			return streamErr
-		}
 		if !hasFailureReply {
-			failureReply = channel.ErrorEvent(loc, streamErr)
+			failureReply, hasFailureReply = channel.ErrorEvent(streamCtx, loc, threadError(streamErr))
 		}
-		_ = stream.Push(ctx, failureReply)
-		if statusNotifier != nil {
-			if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, streamErr); notifyErr != nil {
-				p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
-			}
+		if hasFailureReply {
+			_ = stream.Push(ctx, failureReply)
+		}
+		status.Fail(ctx, streamErr)
+		if stoppedByCommand(ctx, streamCtx) {
+			return nil
 		}
 		return streamErr
 	}
@@ -1343,18 +1344,10 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			return err
 		}
 		if err := closeStream(); err != nil {
-			if statusNotifier != nil {
-				if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, err); notifyErr != nil {
-					p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
-				}
-			}
+			status.Fail(ctx, err)
 			return err
 		}
-		if statusNotifier != nil {
-			if notifyErr := p.notifyProcessingCompleted(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle); notifyErr != nil {
-				p.logProcessingStatusError("processing_completed", msg, identity, notifyErr)
-			}
-		}
+		status.Complete(ctx)
 		return nil
 	}
 
@@ -1393,18 +1386,10 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		return err
 	}
 	if err := closeStream(); err != nil {
-		if statusNotifier != nil {
-			if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, err); notifyErr != nil {
-				p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
-			}
-		}
+		status.Fail(ctx, err)
 		return err
 	}
-	if statusNotifier != nil {
-		if notifyErr := p.notifyProcessingCompleted(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle); notifyErr != nil {
-			p.logProcessingStatusError("processing_completed", msg, identity, notifyErr)
-		}
-	}
+	status.Complete(ctx)
 	return nil
 }
 
@@ -1496,19 +1481,19 @@ func (p *ChannelInboundProcessor) handleQueueCommand(
 ) error {
 	resource := strings.ToLower(strings.TrimSpace(invocation.Parsed.Resource))
 	if p == nil || p.queueCommandHandler == nil {
-		return p.sendSlashError(ctx, sender, msg, QueueCommandCodeUnavailable)
+		return p.sendSlashError(ctx, sender, msg, apperror.New(apperror.CodeQueueAdmissionUnavailable, nil))
 	}
 	if strings.TrimSpace(sessionID) == "" {
-		return p.sendSlashError(ctx, sender, msg, QueueCommandCodeNoActiveRun)
+		return p.sendSlashError(ctx, sender, msg, apperror.New(apperror.CodeQueueNoActiveRun, nil))
 	}
 	if strings.TrimSpace(sessionType) == sessionpkg.TypeDiscuss {
-		return p.sendSlashError(ctx, sender, msg, QueueCommandCodeUnsupported)
+		return p.sendSlashError(ctx, sender, msg, apperror.New(apperror.CodeQueueUnsupportedSession, nil))
 	}
 	// A follow-up starts a run that the server owns; only local channels see
 	// that run's output through the session runtime subscription. A steer
 	// joins the run this channel is already streaming, so it stays available.
 	if resource == "queue" && !isLocalChannelType(msg.Channel) {
-		return p.sendSlashError(ctx, sender, msg, QueueCommandCodeFollowUpUnsupportedChannel)
+		return p.sendSlashError(ctx, sender, msg, apperror.New(apperror.CodeQueueFollowUpUnsupportedChannel, nil))
 	}
 	invocationID := queueCommandIdempotencyKey(msg.Channel, routeID, msg.Message.ID, resource)
 	input := QueueCommandInput{
@@ -1527,21 +1512,21 @@ func (p *ChannelInboundProcessor) handleQueueCommand(
 	case "queue":
 		err = p.queueCommandHandler.EnqueueFollowUp(ctx, input)
 	default:
-		return p.sendSlashError(ctx, sender, msg, QueueCommandCodeInvalid)
+		return p.sendSlashError(ctx, sender, msg, apperror.New(apperror.CodeQueueRequestInvalid, nil))
 	}
 	if err != nil {
-		code := QueueCommandErrorCode(err)
-		if code == "" {
-			code = QueueCommandCodeUnavailable
+		if apperror.CodeOf(err) == "" {
+			// A queue command that failed for any other reason was not admitted.
+			// The reply does not carry the cause, so it is recorded here.
 			if p.logger != nil {
-				p.logger.WarnContext(ctx, "queue command admission failed",
+				result := errlog.Event(ctx, "channel.queue_command", errs.Wrap(err, "admit queue command", slog.String("route_id", strings.TrimSpace(routeID)), slog.String("operation", resource)), errlog.Options{})
+				p.logger.LogAttrs(ctx, result.Level, "queue command admission failed", append([]slog.Attr{
 					slog.String("bot_id", strings.TrimSpace(identity.BotID)),
-					slog.String("route_id", strings.TrimSpace(routeID)),
-					slog.String("operation", resource),
-					slog.Any("error", err))
+				}, result.Attrs()...)...)
 			}
+			err = apperror.Wrap(apperror.CodeQueueAdmissionUnavailable, err, nil)
 		}
-		return p.sendSlashError(ctx, sender, msg, code)
+		return p.sendSlashError(ctx, sender, msg, err)
 	}
 	if resource == "steer" {
 		return p.sendSlashNotice(ctx, sender, msg, "queue.steerAccepted")
@@ -1700,11 +1685,28 @@ func channelSlashAliases(msg channel.InboundMessage, identity InboundIdentity) [
 	return out
 }
 
-func (p *ChannelInboundProcessor) sendSlashError(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, code string) error {
-	if code == "" {
-		code = slash.CodeUnknownSlash
+// recordCommandFailure records the cause of a command call that failed. The
+// reply carries only the generic copy and the message is answered, so this is
+// where the cause is recorded.
+func (p *ChannelInboundProcessor) recordCommandFailure(ctx context.Context, msg channel.InboundMessage, identity InboundIdentity, err error) {
+	if p.logger == nil {
+		return
 	}
-	out := applyMessageFormat(channel.Message{Text: slashChannelMessage(p.localizer(ctx, msg.BotID), code)}, p.channelCaps(msg.Channel))
+	result := errlog.Event(ctx, "channel.command", err, errlog.Options{})
+	p.logger.LogAttrs(ctx, result.Level, "command failed", append([]slog.Attr{
+		slog.String("bot_id", strings.TrimSpace(identity.BotID)), slog.String("channel", msg.Channel.String()),
+	}, result.Attrs()...)...)
+}
+
+// sendSlashError replies to a slash request that err refused with the copy for
+// the public error err is answered with. A caller that has canceled gets no
+// reply.
+func (p *ChannelInboundProcessor) sendSlashError(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, err error) error {
+	text := channel.ReplyText(ctx, p.localizer(ctx, msg.BotID), err, "")
+	if text == "" {
+		return nil
+	}
+	out := applyMessageFormat(channel.Message{Text: text}, p.channelCaps(msg.Channel))
 	if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
 		out.Reply = &channel.ReplyRef{MessageID: mid}
 	}
@@ -1725,88 +1727,9 @@ func (p *ChannelInboundProcessor) sendSlashNotice(ctx context.Context, sender ch
 	})
 }
 
-func slashChannelMessage(t *i18n.Localizer, code string) string {
-	if key := slashChannelMessageKey(code); key != "" {
-		return t.T(key)
-	}
-	return t.T("slash.error.generic")
-}
-
-func slashChannelMessageKey(code string) string {
-	switch code {
-	case slash.CodeUnknownSlash:
-		return "slash.error.unknownSlash"
-	case slash.CodeUnsupportedWebCommand:
-		return "slash.error.unsupportedWebCommand"
-	case slash.CodeInvalidSkillSlashSyntax:
-		return "slash.error.invalidSkillSlashSyntax"
-	case slash.CodeRequestedSkillNotFound:
-		return "slash.error.requestedSkillNotFound"
-	case slash.CodeRequestedSkillAmbiguous:
-		return "slash.error.requestedSkillAmbiguous"
-	case slash.CodeRequestedSkillDisabled:
-		return "slash.error.requestedSkillDisabled"
-	case slash.CodeRequestedSkillNotRuntimeUsable:
-		return "slash.error.requestedSkillNotRuntimeUsable"
-	case slash.CodeTooManyRequestedSkills:
-		return "slash.error.tooManyRequestedSkills"
-	case slash.CodeRequestedSkillContextTooLarge:
-		return "slash.error.requestedSkillContextTooLarge"
-	case slash.CodeSlashAttachmentsUnsupported:
-		return "slash.error.slashAttachmentsUnsupported"
-	case slash.CodeUnsupportedSkillSlashContext:
-		return "slash.error.unsupportedSkillSlashContext"
-	case slash.CodeUnsupportedLegacyEndpoint:
-		return "slash.error.unsupportedLegacyEndpoint"
-	case slash.CodeInvalidQuickActionScope:
-		return "slash.error.invalidQuickActionScope"
-	case slash.CodePermissionDenied:
-		return "slash.error.permissionDenied"
-	case slash.CodePermissionSessionRequired:
-		return "slash.error.permissionSessionRequired"
-	case slash.CodePermissionModeUnsupported:
-		return "slash.error.permissionModeUnsupported"
-	case slash.CodePermissionModeUnavailable:
-		return "slash.error.permissionModeUnavailable"
-	case slash.CodePermissionModeFailed:
-		return "slash.error.permissionModeFailed"
-	case slash.CodeReservedSkillMetadata:
-		return "slash.error.reservedSkillMetadata"
-	case QueueCommandCodeNoActiveRun:
-		return "queue.noActiveRun"
-	case QueueCommandCodeOverloaded:
-		return "queue.overloaded"
-	case QueueCommandCodeUnavailable:
-		return "queue.unavailable"
-	case QueueCommandCodeConflict:
-		return "queue.conflict"
-	case QueueCommandCodeInvalid:
-		return "queue.invalid"
-	case QueueCommandCodeUnsupported:
-		return "queue.unsupported"
-	case QueueCommandCodeCapacity:
-		return "queue.capacity"
-	case QueueCommandCodeFollowUpUnsupportedChannel:
-		return "queue.followUpUnsupportedChannel"
-	default:
-		return ""
-	}
-}
-
-func slashErrorCode(err error) string {
-	if err == nil {
-		return ""
-	}
-	var slashErr slash.Error
-	if errors.As(err, &slashErr) {
-		return slashErr.Code
-	}
-	return ""
-}
-
 func (p *ChannelInboundProcessor) resolveChannelRequestedSkills(ctx context.Context, botID string, names []string) ([]skillset.ResolvedSkill, error) {
 	if p.skillResolver == nil {
-		return nil, slash.NewError(slash.CodeRequestedSkillNotRuntimeUsable)
+		return nil, errs.New("skill resolver not configured")
 	}
 	return p.skillResolver.ResolveTextRequestedSkills(ctx, botID, names)
 }
@@ -2215,6 +2138,25 @@ type agentStreamEnvelope struct {
 	Speeches    json.RawMessage `json:"speeches"`
 }
 
+// awaitsUserDecision reports whether a stream chunk announces a tool approval
+// or ask_user request that blocks the turn until the user responds.
+func awaitsUserDecision(chunk json.RawMessage) bool {
+	var envelope struct {
+		Type   string `json:"type"`
+		Status string `json:"status"`
+	}
+	if json.Unmarshal(chunk, &envelope) != nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(envelope.Type)) {
+	case "tool_approval_request", "user_input_request":
+		status := strings.ToLower(strings.TrimSpace(envelope.Status))
+		return status == "" || status == "pending"
+	default:
+		return false
+	}
+}
+
 // mapStreamChunkToChannelEvents converts one agent stream chunk. An error
 // event whose code has copy in t is shown with that copy; any other error keeps
 // its own text.
@@ -2391,31 +2333,10 @@ func mapStreamChunkToChannelEvents(chunk json.RawMessage, t *i18n.Localizer) ([]
 		return []channel.StreamEvent{
 			{Type: channel.StreamEventProcessingCompleted},
 		}, finalMessages, nil
-	case "processing_failed":
-		streamError := strings.TrimSpace(envelope.Error)
-		if streamError == "" {
-			streamError = strings.TrimSpace(envelope.Message)
-		}
-		return []channel.StreamEvent{
-			{
-				Type:  channel.StreamEventProcessingFailed,
-				Error: streamError,
-			},
-		}, finalMessages, nil
 	case "error":
-		code := apperror.Code(strings.TrimSpace(envelope.Code))
-		if text, ok := channel.ErrorCodeText(t, code, nil); ok {
-			return []channel.StreamEvent{
-				{
-					Type:      channel.StreamEventError,
-					Error:     text,
-					ErrorCode: string(code),
-				},
-			}, finalMessages, nil
-		}
 		// Without a catalogued code the event is a failed run; its own text is
 		// never shown.
-		return []channel.StreamEvent{channel.RunFailureEvent(t, apperror.CodeRuntimeRunFailed, nil)}, finalMessages, nil
+		return []channel.StreamEvent{channel.CodeEvent(t, apperror.Code(envelope.Code), nil)}, finalMessages, nil
 	default:
 		return nil, finalMessages, nil
 	}
@@ -2689,71 +2610,44 @@ func (p *ChannelInboundProcessor) resolveProcessingStatusNotifier(channelType ch
 	return notifier
 }
 
-func (*ChannelInboundProcessor) notifyProcessingStarted(
-	ctx context.Context,
-	notifier channel.ProcessingStatusNotifier,
-	cfg channel.ChannelConfig,
-	msg channel.InboundMessage,
-	info channel.ProcessingStatusInfo,
-) (channel.ProcessingStatusHandle, error) {
-	if notifier == nil {
-		return channel.ProcessingStatusHandle{}, nil
-	}
-	statusCtx, cancel := context.WithTimeout(ctx, processingStatusTimeout)
-	defer cancel()
-	return notifier.ProcessingStarted(statusCtx, cfg, msg, info)
-}
-
-func (*ChannelInboundProcessor) notifyProcessingCompleted(
-	ctx context.Context,
-	notifier channel.ProcessingStatusNotifier,
-	cfg channel.ChannelConfig,
-	msg channel.InboundMessage,
-	info channel.ProcessingStatusInfo,
-	handle channel.ProcessingStatusHandle,
-) error {
+// discussProcessingStarter binds the platform processing indicator to the
+// inbound message that last woke a discuss session. The discuss worker holds
+// no registry; it calls the returned function around each addressed run. Nil
+// when the channel has no indicator.
+func (p *ChannelInboundProcessor) discussProcessingStarter(cfg channel.ChannelConfig, msg channel.InboundMessage, identity InboundIdentity, info channel.ProcessingStatusInfo) discuss.StartProcessingFunc {
+	notifier := p.resolveProcessingStatusNotifier(msg.Channel)
 	if notifier == nil {
 		return nil
 	}
-	statusCtx, cancel := context.WithTimeout(ctx, processingStatusTimeout)
-	defer cancel()
-	return notifier.ProcessingCompleted(statusCtx, cfg, msg, info, handle)
+	onError := p.processingStatusErrorLogger(msg, identity)
+	return func(ctx context.Context) func(error) {
+		status := channel.StartProcessingStatus(ctx, notifier, cfg, msg, info, onError)
+		return func(cause error) {
+			if cause != nil {
+				status.Fail(ctx, cause)
+				return
+			}
+			status.Complete(ctx)
+		}
+	}
 }
 
-func (*ChannelInboundProcessor) notifyProcessingFailed(
-	ctx context.Context,
-	notifier channel.ProcessingStatusNotifier,
-	cfg channel.ChannelConfig,
-	msg channel.InboundMessage,
-	info channel.ProcessingStatusInfo,
-	handle channel.ProcessingStatusHandle,
-	cause error,
-) error {
-	if notifier == nil {
-		return nil
+// processingStatusErrorLogger logs the best-effort processing status
+// failures of one inbound message.
+func (p *ChannelInboundProcessor) processingStatusErrorLogger(msg channel.InboundMessage, identity InboundIdentity) channel.ProcessingStatusErrorFunc {
+	return func(ctx context.Context, stage string, err error) {
+		if p == nil || p.logger == nil || err == nil {
+			return
+		}
+		p.logger.WarnContext(ctx,
+			"processing status notify failed",
+			slog.String("stage", stage),
+			slog.String("channel", msg.Channel.String()),
+			slog.String("channel_identity_id", identity.ChannelIdentityID),
+			slog.String("user_id", identity.UserID),
+			slog.Any("error", err),
+		)
 	}
-	statusCtx, cancel := context.WithTimeout(ctx, processingStatusTimeout)
-	defer cancel()
-	return notifier.ProcessingFailed(statusCtx, cfg, msg, info, handle, cause)
-}
-
-func (p *ChannelInboundProcessor) logProcessingStatusError(
-	stage string,
-	msg channel.InboundMessage,
-	identity InboundIdentity,
-	err error,
-) {
-	if p == nil || p.logger == nil || err == nil {
-		return
-	}
-	p.logger.Warn(
-		"processing status notify failed",
-		slog.String("stage", stage),
-		slog.String("channel", msg.Channel.String()),
-		slog.String("channel_identity_id", identity.ChannelIdentityID),
-		slog.String("user_id", identity.UserID),
-		slog.Any("error", err),
-	)
 }
 
 // parseRawJSON converts raw JSON bytes to a typed value for StreamToolCall fields.
@@ -3942,9 +3836,13 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 				// Approval continuations should not flash transient "running"
 				// tool messages in IM. If tool visibility is enabled, the
 				// completed tool state may still be shown on tool_call_end.
+				// The hidden start still ends the IM text segment before it.
 				if event.Type == channel.StreamEventToolCallStart &&
 					(event.ToolCall == nil || (strings.TrimSpace(event.ToolCall.ApprovalID) == "" && !hasUserInputAction(event.ToolCall.Actions))) {
-					continue
+					if isLocalChannelType(msg.Channel) {
+						continue
+					}
+					event = channel.StreamEvent{Type: channel.StreamEventSegmentEnd}
 				}
 				if event.Type == channel.StreamEventReaction && len(event.Reactions) > 0 {
 					p.dispatchReactions(ctx, identity.BotID, msg.Channel, target, sourceMessageID, event.Reactions)
@@ -3973,7 +3871,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 		if p.logger != nil {
 			p.logger.WarnContext(ctx, "accepted decision delivery interrupted", slog.Any("error", continuationErr))
 		}
-		if err := stream.Push(ctx, channel.RunFailureEvent(loc, apperror.CodeAgentResponseInterrupted, nil)); err != nil {
+		if err := stream.Push(ctx, channel.CodeEvent(loc, apperror.CodeAgentResponseInterrupted, nil)); err != nil {
 			return err
 		}
 		return closeStream()
@@ -4129,99 +4027,109 @@ func looksLikeApprovalID(value string) bool {
 	return true
 }
 
-// resolveNewSessionSpecParsed determines the session mode/runtime for /new.
-// /new chat → chat+model; a named Agent selects either its direct runtime or
-// the generic ACP runtime while the explicit/default channel mode stays intact.
-func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.InboundMessage, profiles turn.ACPProfileResolver) (NewSessionSpec, error) {
-	operands := newSessionOperands(parsed)
-	explicit := ""
-	var args []string
-	if len(operands) > 0 {
-		explicit = strings.ToLower(strings.TrimSpace(operands[0]))
-		args = operands[1:]
-	}
-	mode := ""
-	agentID := ""
-	switch explicit {
-	case "chat":
-		mode = sessionpkg.TypeChat
-		agentID = firstNewSessionAgentArg(args)
-		if agentID != "" && isGroupConversation(msg) {
+var errNewSessionAgentNotFound = errors.New("no agent with that name")
+
+// resolveNewSessionSpecParsed determines the session mode and Agent for /new:
+// an optional mode word, then the name of one of the bot's Agents. Without a
+// name the spec is native and the bot's default Agent applies later.
+func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.InboundMessage, agents []BotAgent) (NewSessionSpec, error) {
+	mode, name := newSessionModeAndName(newSessionOperands(parsed), agents)
+	named := name != "" || parsed.SelectID != ""
+	switch mode {
+	case sessionpkg.TypeChat:
+		if named && isGroupConversation(msg) {
 			return NewSessionSpec{}, apperror.New(apperror.CodeGroupChatACPUnsupported, nil)
 		}
-	case "discuss":
+	case sessionpkg.TypeDiscuss:
 		if isLocalChannelType(msg.Channel) {
 			return NewSessionSpec{}, errors.New("discuss mode is not supported via WebUI — use a channel adapter (Telegram, Discord, etc.)")
 		}
-		mode = sessionpkg.TypeDiscuss
-		agentID = firstNewSessionAgentArg(args)
-	case "":
-		// Default: local → chat, group → discuss, DM → chat.
-		switch {
-		case isLocalChannelType(msg.Channel), channel.IsPrivateConversationType(msg.Conversation.Type):
-			mode = sessionpkg.TypeChat
-		default:
-			mode = sessionpkg.TypeDiscuss
-		}
 	default:
-		if direct := normalizeACPAgentID(explicit); sessionpkg.IsDirectRuntimeType(direct) {
-			// A bare direct external agent name ("/new codex") is a valid
-			// operand even though it has no ACP profile.
-			agentID = direct
-			switch {
-			case isLocalChannelType(msg.Channel), channel.IsPrivateConversationType(msg.Conversation.Type):
-				mode = sessionpkg.TypeChat
-			default:
-				mode = sessionpkg.TypeDiscuss
-			}
-			break
-		}
-		profile := resolveACPProfile(profiles, explicit)
-		if !profile.Known {
-			return NewSessionSpec{}, fmt.Errorf("unknown session type %q — use /new, /new chat, or /new discuss", explicit)
-		}
-		agentID = profile.ID
-		switch {
-		case isLocalChannelType(msg.Channel), channel.IsPrivateConversationType(msg.Conversation.Type):
+		// Default: local → chat, group → discuss, DM → chat.
+		mode = sessionpkg.TypeDiscuss
+		if isLocalChannelType(msg.Channel) || channel.IsPrivateConversationType(msg.Conversation.Type) {
 			mode = sessionpkg.TypeChat
-		default:
-			mode = sessionpkg.TypeDiscuss
 		}
-	}
-	if mode == "" {
-		mode = sessionpkg.TypeChat
 	}
 	spec := NewSessionSpec{
 		Mode:    mode,
 		Runtime: sessionpkg.RuntimeModel,
 		Type:    mode,
 	}
-	agentID = normalizeACPAgentID(agentID)
-	if agentID == "" {
+	if !named {
 		return spec, nil
 	}
-	// Direct external agents (codex, claude-code) are addressed by their
-	// runtime name and never live in the ACP profile registry.
-	if sessionpkg.IsDirectRuntimeType(agentID) {
-		spec.Runtime = agentID
-		if mode != sessionpkg.TypeChat {
-			spec.Type = sessionpkg.TypeDiscuss
-		}
+	agent, ok := findBotAgent(agents, parsed.SelectID, name)
+	if !ok {
+		return NewSessionSpec{}, errNewSessionAgentNotFound
+	}
+	if !agent.Enabled {
+		return NewSessionSpec{}, apperror.New(apperror.CodeACPAgentNotEnabled, nil)
+	}
+	spec.BotAgentID = agent.ID
+	spec.AgentName = agent.Name
+	if sessionpkg.IsDirectRuntimeType(agent.Runtime) {
+		spec.Runtime = agent.Runtime
 		return spec, nil
 	}
-	profile := resolveACPProfile(profiles, agentID)
-	if !profile.Known {
-		return NewSessionSpec{}, apperror.New(apperror.CodeACPAgentNotFound, nil)
-	}
-	agentID = profile.ID
 	spec.Runtime = sessionpkg.RuntimeACPAgent
-	spec.Metadata = sessionpkg.ApplyACPMetadataDefaults(map[string]any{"acp_agent_id": agentID})
+	spec.Metadata = sessionpkg.ApplyACPMetadataDefaults(map[string]any{"acp_agent_id": agent.ACPAgentID})
 	if mode == sessionpkg.TypeChat {
 		spec.Type = sessionpkg.TypeACPAgent
-	} else {
-		spec.Type = sessionpkg.TypeDiscuss
 	}
 	return spec, nil
+}
+
+// newSessionModeAndName splits /new's operands into an optional leading mode
+// word and an Agent name. The words are tried as one name first, so an Agent
+// called "Chat GPT" is not read as chat mode plus "GPT"; a mode word on its
+// own is always the mode.
+func newSessionModeAndName(operands []string, agents []BotAgent) (mode, name string) {
+	name = strings.Join(operands, " ")
+	if len(operands) == 0 {
+		return "", ""
+	}
+	mode = strings.ToLower(operands[0])
+	if mode != sessionpkg.TypeChat && mode != sessionpkg.TypeDiscuss {
+		return "", name
+	}
+	if len(operands) > 1 {
+		if _, ok := findBotAgent(agents, "", name); ok {
+			return "", name
+		}
+	}
+	return mode, strings.Join(operands[1:], " ")
+}
+
+// newSessionNamesAgent reports a /new that asks for an Agent, by name or by
+// the id the Confirm button carries, before the bot's Agents are known.
+func newSessionNamesAgent(parsed command.ParsedCommand) bool {
+	_, name := newSessionModeAndName(newSessionOperands(parsed), nil)
+	return name != "" || parsed.SelectID != ""
+}
+
+// findBotAgent matches the id the Confirm button carries, else the typed name.
+func findBotAgent(agents []BotAgent, id, name string) (BotAgent, bool) {
+	key := botAgentNameKey(name)
+	for _, agent := range agents {
+		if id != "" {
+			if agent.ID == id {
+				return agent, true
+			}
+			continue
+		}
+		if botAgentNameKey(agent.Name) == key {
+			return agent, true
+		}
+	}
+	return BotAgent{}, false
+}
+
+// botAgentNameKey compares names as the unique index does, lower(btrim(name)),
+// and takes inner runs of whitespace as one space because typed words arrive
+// split on it.
+func botAgentNameKey(name string) string {
+	return strings.ToLower(strings.Join(strings.Fields(name), " "))
 }
 
 // newSessionOperands applies /new's grammar after the shared syntax parser.
@@ -4248,21 +4156,11 @@ func isMentionArgument(value string) bool {
 		(strings.HasPrefix(value, "<@") && strings.HasSuffix(value, ">"))
 }
 
-func firstNewSessionAgentArg(args []string) string {
-	for _, arg := range args {
-		arg = strings.TrimSpace(arg)
-		if arg == "" || strings.HasPrefix(arg, "-") {
-			continue
-		}
-		return normalizeACPAgentID(arg)
-	}
-	return ""
-}
-
 // handleNewSessionCommand resolves the route for the current message and
 // creates a brand-new active session, effectively starting a fresh
 // conversation in the same IM thread/chat.
-// Supports: /new (default), /new chat, /new discuss.
+// Supports: /new (default), /new chat, /new discuss, each optionally followed
+// by the name of one of the bot's Agents.
 func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	ctx context.Context,
 	cfg channel.ChannelConfig,
@@ -4279,37 +4177,39 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	caps := p.channelCaps(msg.Channel)
 
 	parsed := invocation.Parsed
-	spec, err := resolveNewSessionSpecParsed(parsed, msg, p.acpProfiles)
-	if err != nil {
-		if public := externalAgentError(err); public != nil {
-			return p.sendExternalAgentError(ctx, sender, msg, identity, public)
+	startFailed := friendlyOps(loc, "ops.verb.startSession")
+	var agents []BotAgent
+	if newSessionNamesAgent(parsed) {
+		// What /new says about the bot's Agents is for senders who may run
+		// one, so the refusal comes before anything is looked up.
+		if err := p.requireWorkspaceExecForExternalAgent(ctx, identity); err != nil {
+			return p.replyFailure(ctx, sender, msg, identity, err, startFailed)
 		}
-		return sender.Send(ctx, channel.OutboundMessage{
-			Target:  target,
-			Message: plainTextMessage(loc.T("newSession.usage"), caps),
-		})
+		if p.botAgents != nil {
+			var err error
+			if agents, err = p.botAgents.BotAgents(ctx, identity.BotID); err != nil {
+				return p.replyFailure(ctx, sender, msg, identity, err, startFailed)
+			}
+		}
+	}
+	spec, err := resolveNewSessionSpecParsed(parsed, msg, agents)
+	if err != nil {
+		// An operand /new cannot use is answered and is not a failure: the
+		// reply is the copy for its code, the Agents to choose from, or the
+		// usage.
+		fallback := loc.T("newSession.usage")
+		if errors.Is(err, errNewSessionAgentNotFound) {
+			fallback = newSessionAgentNotFoundText(loc, agents)
+		}
+		return p.sendFailureReply(ctx, sender, msg, identity, err, fallback)
 	}
 	spec, err = p.applyDefaultChatRuntimeToNewSessionSpec(ctx, identity, msg, spec)
 	if err != nil {
-		if public := externalAgentError(err); public != nil {
-			return p.sendExternalAgentError(ctx, sender, msg, identity, public)
-		}
-		return err
+		return p.replyFailure(ctx, sender, msg, identity, err, startFailed)
 	}
 	if spec.Runtime == sessionpkg.RuntimeACPAgent {
 		if err := p.validateACPNewSessionSpec(ctx, identity, spec); err != nil {
-			if public := externalAgentError(err); public != nil {
-				return p.sendExternalAgentError(ctx, sender, msg, identity, public)
-			}
-			return err
-		}
-	}
-	if spec.Runtime == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(spec.Runtime) {
-		if err := p.requireWorkspaceExecForExternalAgent(ctx, identity); err != nil {
-			if public := externalAgentError(err); public != nil {
-				return p.sendExternalAgentError(ctx, sender, msg, identity, public)
-			}
-			return err
+			return p.replyFailure(ctx, sender, msg, identity, err, startFailed)
 		}
 	}
 
@@ -4318,7 +4218,8 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	// --confirm" which lands back here with newCommandConfirmed == true and
 	// performs the reset. Non-button channels reset immediately (unchanged).
 	modeText := newSessionConfirmModeText(spec)
-	modeLabel := newSessionDisplayModeLabel(loc, spec, p.acpProfiles)
+	harness := newSessionHarnessName(spec, p.newSessionAgentName(ctx, identity.BotID, spec), p.acpProfiles)
+	modeLabel := newSessionDisplayModeLabel(loc, spec, harness)
 	if caps.Buttons && !newCommandConfirmedParsed(parsed) {
 		return p.sendNewConfirmation(ctx, msg, sender, loc, modeText, modeLabel, caps)
 	}
@@ -4350,13 +4251,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		Metadata:               routeMetadata,
 	})
 	if err != nil {
-		if p.logger != nil {
-			p.logger.WarnContext(ctx, "resolve route for /new command failed", slog.Any("error", err))
-		}
-		return sender.Send(ctx, channel.OutboundMessage{
-			Target:  target,
-			Message: plainTextMessage(friendlyOps(loc, "ops.verb.startSession"), caps),
-		})
+		return p.replyFailure(ctx, sender, msg, identity, errs.Wrap(err, "resolve route for /new command"), startFailed)
 	}
 
 	if spec.Runtime == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(spec.Runtime) {
@@ -4369,20 +4264,10 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	}
 	sess, err := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec)
 	if err != nil {
-		if p.logger != nil {
-			p.logger.WarnContext(ctx, "create new session via /new command failed", slog.Any("error", err))
-		}
-		if public := externalAgentError(err); public != nil {
-			return p.sendExternalAgentError(ctx, sender, msg, identity, public)
-		}
-		return sender.Send(ctx, channel.OutboundMessage{
-			Target:  target,
-			Message: plainTextMessage(friendlyOps(loc, "ops.verb.startSession"), caps),
-		})
+		return p.replyFailure(ctx, sender, msg, identity, errs.Wrap(err, "create new session via /new command"), startFailed)
 	}
 	p.cancelActiveStreamForRoute(identity.BotID, resolved.RouteID, "new session created")
 
-	modeLabel = newSessionDisplayModeLabel(loc, spec, p.acpProfiles)
 	if p.logger != nil {
 		p.logger.InfoContext(ctx, "new session created via /new command",
 			slog.String("bot_id", strings.TrimSpace(identity.BotID)),
@@ -4397,12 +4282,9 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	text := loc.T("newSession.title", map[string]any{"mode": modeLabel})
 	botUsername := telegramGroupBotUsername(msg)
 	renderedSessionDetails := false
-	if p.commandHandler != nil {
-		if cc, err := p.commandHandler.CurrentContext(ctx, identity.BotID); err == nil {
-			cc = currentContextForNewSessionSpec(cc, spec, p.acpProfiles)
-			text = formatNewSessionMessage(loc, modeLabel, cc, botUsername)
-			renderedSessionDetails = true
-		}
+	if card, ok := p.newSessionCard(ctx, cfg, identity, sess, harness); ok {
+		text = formatNewSessionMessage(loc, modeLabel, card, botUsername)
+		renderedSessionDetails = true
 	}
 	if botUsername != "" && !renderedSessionDetails {
 		var b strings.Builder
@@ -4419,6 +4301,14 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		out.Reply = &channel.ReplyRef{MessageID: mid}
 	}
 	return sender.Send(ctx, channel.OutboundMessage{Target: target, Message: out})
+}
+
+// stoppedByCommand reports that /new or /stop ended a turn: its stream's
+// context, the turn's caller, has ended while the message's own context is
+// live. The message was handled, so its record is not a failure; a turn ended
+// because the message's own context ended is still returned as canceled.
+func stoppedByCommand(ctx, streamCtx context.Context) bool {
+	return errs.CallerEnded(streamCtx) && !errs.CallerEnded(ctx)
 }
 
 func (p *ChannelInboundProcessor) cancelActiveStreamForRoute(botID, routeID, reason string) bool {
@@ -4442,20 +4332,31 @@ func (p *ChannelInboundProcessor) cancelActiveStreamForRoute(botID, routeID, rea
 	return true
 }
 
+// newSessionConfirmModeText is what the Confirm button re-dispatches after
+// /new. A named Agent travels as its id, which fits the callback limit
+// whatever the name is; the bot's default Agent is resolved again on confirm.
 func newSessionConfirmModeText(spec NewSessionSpec) string {
 	mode := strings.TrimSpace(spec.Mode)
 	if mode == "" {
 		mode = sessionpkg.TypeChat
 	}
-	if spec.Runtime == sessionpkg.RuntimeACPAgent {
-		if agentID := acpNewSessionAgentID(spec); agentID != "" {
-			return mode + " " + agentID
-		}
-	}
-	if sessionpkg.IsDirectRuntimeType(spec.Runtime) {
-		return mode + " " + spec.Runtime
+	if spec.AgentName != "" {
+		return mode + " --id " + spec.BotAgentID
 	}
 	return mode
+}
+
+func newSessionAgentNotFoundText(loc *i18n.Localizer, agents []BotAgent) string {
+	var names []string
+	for _, agent := range agents {
+		if agent.Enabled {
+			names = append(names, "- "+command.MdCode(agent.Name))
+		}
+	}
+	if len(names) == 0 {
+		return loc.T("newSession.noAgents")
+	}
+	return loc.T("newSession.agentNotFound", map[string]any{"agents": strings.Join(names, "\n")})
 }
 
 func newSessionModeKey(spec NewSessionSpec) string {
@@ -4465,24 +4366,138 @@ func newSessionModeKey(spec NewSessionSpec) string {
 	return "newSession.modeChat"
 }
 
-func newSessionDisplayModeLabel(loc *i18n.Localizer, spec NewSessionSpec, profiles turn.ACPProfileResolver) string {
+// existingActiveSession is the conversation's route and active session. It
+// only reads: a conversation with no route yet has neither, so command
+// discovery never creates a thread. ok is false when there is no active
+// session; routeID may still be set.
+func (p *ChannelInboundProcessor) existingActiveSession(ctx context.Context, identity InboundIdentity, msg channel.InboundMessage) (string, SessionResult, bool) {
+	if p.sessionEnsurer == nil {
+		return "", SessionResult{}, false
+	}
+	finder, ok := p.routeResolver.(interface {
+		Find(context.Context, string, string, string, string) (route.Route, error)
+	})
+	if !ok {
+		return "", SessionResult{}, false
+	}
+	existing, err := finder.Find(ctx, identity.BotID, msg.Channel.String(), msg.Conversation.ID, extractThreadID(msg))
+	if err != nil {
+		return "", SessionResult{}, false
+	}
+	routeID := strings.TrimSpace(existing.ID)
+	sess, err := p.sessionEnsurer.GetActiveSession(ctx, existing.ID)
+	if err != nil {
+		return routeID, SessionResult{}, false
+	}
+	return routeID, sess, true
+}
+
+// newSessionDisplayModeLabel names the session /new starts: the mode, and the
+// harness when the session does not run on Memoh's own.
+func newSessionDisplayModeLabel(loc *i18n.Localizer, spec NewSessionSpec, harness string) string {
 	mode := loc.T(newSessionModeKey(spec))
-	runtime := ""
-	switch {
-	case spec.Runtime == sessionpkg.RuntimeACPAgent:
-		runtime = newSessionACPRuntimeLabel(spec, profiles)
-		if runtime == "" {
-			runtime = "ACP"
-		}
-	case sessionpkg.IsDirectRuntimeType(spec.Runtime):
-		runtime = spec.Runtime
-	default:
+	if harness == "" {
 		return mode
 	}
 	return loc.T("newSession.modeWithRuntime", map[string]any{
 		"mode":    mode,
-		"runtime": runtime,
+		"runtime": harness,
 	})
+}
+
+// newSessionCard reads what the /new confirmation reports. A native session
+// shows the bot's model settings. An Agent session shows the model its
+// runtime will use, read through the runtime controls; the card still goes
+// out without it when the runtime cannot answer yet, since the session exists.
+func (p *ChannelInboundProcessor) newSessionCard(ctx context.Context, cfg channel.ChannelConfig, identity InboundIdentity, sess SessionResult, harness string) (newSessionCard, bool) {
+	card := newSessionCard{Harness: harness}
+	if !sessionUsesExternalRuntime(sess) {
+		if p.commandHandler == nil {
+			return card, false
+		}
+		cc, err := p.commandHandler.CurrentContext(ctx, identity.BotID)
+		if err != nil {
+			return card, false
+		}
+		card.Context = cc
+		return card, true
+	}
+	card.Agent = true
+	service, ok := p.turnSvc.(turn.RuntimeControlService)
+	if !ok {
+		return card, true
+	}
+	state, err := service.RuntimeModel(ctx, turn.RuntimeControlRequest{TeamID: cfg.TeamID, BotID: identity.BotID, ThreadID: sess.ID, ActorID: identity.UserID})
+	if err != nil {
+		if p.logger != nil {
+			p.logger.DebugContext(ctx, "resolve agent model for /new reply failed", slog.Any("error", err))
+		}
+		return card, true
+	}
+	if model, ok := state.Model(); ok {
+		card.Context.ChatModel = model.Name
+	} else {
+		card.Context.ChatModel = state.ModelID
+	}
+	card.Context.ReasoningEffort = state.ReasoningEffort
+	return card, true
+}
+
+// newSessionHarnessName is the harness a /new session runs on, "" for Memoh's
+// own. An Agent is named by its required Name, which is what the user created
+// and picks it by; a session with no Agent row falls back to the runtime's
+// product name or the ACP profile's display name.
+func newSessionHarnessName(spec NewSessionSpec, agentName string, profiles turn.ACPProfileResolver) string {
+	if name := strings.TrimSpace(agentName); name != "" {
+		return name
+	}
+	switch {
+	case spec.Runtime == sessionpkg.RuntimeACPAgent:
+		agentID := acpNewSessionAgentID(spec)
+		if profile := resolveACPProfile(profiles, agentID); profile.Known && strings.TrimSpace(profile.DisplayName) != "" {
+			return strings.TrimSpace(profile.DisplayName)
+		}
+		if agentID != "" {
+			return agentID
+		}
+		return "ACP"
+	case sessionpkg.IsDirectRuntimeType(spec.Runtime):
+		if name, ok := directRuntimeNames[spec.Runtime]; ok {
+			return name
+		}
+		return spec.Runtime
+	}
+	return ""
+}
+
+var directRuntimeNames = map[string]string{
+	string(runtimekind.Codex):      "Codex",
+	string(runtimekind.ClaudeCode): "Claude Code",
+}
+
+// newSessionAgentName is the Name of the Agent a /new session runs on. /new
+// that named the Agent carries it; the bot's default Agent is found by id.
+// A failed read only costs the label its Agent name.
+func (p *ChannelInboundProcessor) newSessionAgentName(ctx context.Context, botID string, spec NewSessionSpec) string {
+	if spec.AgentName != "" {
+		return spec.AgentName
+	}
+	if spec.BotAgentID == "" || p.botAgents == nil {
+		return ""
+	}
+	agents, err := p.botAgents.BotAgents(ctx, botID)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.DebugContext(ctx, "read agents for /new reply failed", slog.Any("error", err))
+		}
+		return ""
+	}
+	for _, agent := range agents {
+		if agent.ID == spec.BotAgentID {
+			return agent.Name
+		}
+	}
+	return ""
 }
 
 func (p *ChannelInboundProcessor) defaultSessionSpecForInbound(ctx context.Context, identity InboundIdentity, msg channel.InboundMessage) (NewSessionSpec, bool, error) {
@@ -4507,8 +4522,9 @@ func (p *ChannelInboundProcessor) defaultSessionSpecForInbound(ctx context.Conte
 }
 
 func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx context.Context, identity InboundIdentity, msg channel.InboundMessage, spec NewSessionSpec) (NewSessionSpec, error) {
-	if spec.Runtime == sessionpkg.RuntimeACPAgent {
-		return p.applyDefaultACPProjectToExplicitSpec(ctx, identity, spec)
+	// A named Agent is the user's choice; the bot's default must not replace it.
+	if spec.BotAgentID != "" {
+		return p.applyDefaultProjectToNamedAgent(ctx, identity, spec)
 	}
 	if spec.Mode != sessionpkg.TypeChat || isGroupConversation(msg) {
 		return spec, nil
@@ -4578,44 +4594,28 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 	return spec, nil
 }
 
-func (p *ChannelInboundProcessor) applyDefaultACPProjectToExplicitSpec(ctx context.Context, identity InboundIdentity, spec NewSessionSpec) (NewSessionSpec, error) {
-	if p == nil || p.defaultChatRuntime == nil || spec.Runtime != sessionpkg.RuntimeACPAgent {
+// applyDefaultProjectToNamedAgent gives a named Agent the project the bot's
+// settings hold, which they hold for the default Agent only.
+func (p *ChannelInboundProcessor) applyDefaultProjectToNamedAgent(ctx context.Context, identity InboundIdentity, spec NewSessionSpec) (NewSessionSpec, error) {
+	if p.defaultChatRuntime == nil {
 		return spec, nil
 	}
 	defaults, err := p.defaultChatRuntime.DefaultChatRuntime(ctx, identity.BotID)
 	if err != nil {
 		return NewSessionSpec{}, err
 	}
-	if strings.TrimSpace(defaults.Runtime) != sessionpkg.RuntimeACPAgent {
+	if strings.TrimSpace(defaults.BotAgentID) != spec.BotAgentID {
 		return spec, nil
 	}
-	agentID := acpNewSessionAgentID(spec)
-	defaultAgentID := normalizeACPAgentID(defaults.ACPAgentID)
-	if agentID == "" || agentID != defaultAgentID {
-		return spec, nil
+	if spec.Metadata == nil {
+		spec.Metadata = map[string]any{}
 	}
-	metadata := make(map[string]any, len(spec.Metadata)+3)
-	for key, value := range spec.Metadata {
-		metadata[key] = value
+	if projectPath := strings.TrimSpace(defaults.ProjectPath); projectPath != "" {
+		spec.Metadata["project_path"] = projectPath
 	}
-	metadata["acp_agent_id"] = agentID
-	currentProjectPath := strings.TrimSpace(metadataString(metadata, "project_path"))
-	if currentProjectPath == "" || currentProjectPath == sessionpkg.DefaultACPProjectPath {
-		projectPath := strings.TrimSpace(defaults.ProjectPath)
-		if projectPath == "" {
-			projectPath = sessionpkg.DefaultACPProjectPath
-		}
-		metadata["project_path"] = projectPath
+	if projectMode := strings.TrimSpace(defaults.ProjectMode); projectMode != "" && spec.Runtime == sessionpkg.RuntimeACPAgent {
+		spec.Metadata["acp_project_mode"] = projectMode
 	}
-	currentProjectMode := strings.TrimSpace(metadataString(metadata, "acp_project_mode"))
-	if currentProjectMode == "" || currentProjectMode == sessionpkg.DefaultACPProjectMode {
-		projectMode := strings.TrimSpace(defaults.ProjectMode)
-		if projectMode == "" {
-			projectMode = sessionpkg.DefaultACPProjectMode
-		}
-		metadata["acp_project_mode"] = projectMode
-	}
-	spec.Metadata = metadata
 	return spec, nil
 }
 
@@ -4667,7 +4667,10 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	setup := p.acpProfiles.ResolveACPSetupPreflight(profile.ID, metadata)
+	setup, err := p.acpProfiles.ResolveACPSetupPreflight(ctx, identity.BotID, spec.BotAgentID, profile.ID, metadata)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(spec.BotAgentID) == "" && !setup.Enabled {
 		return apperror.New(apperror.CodeACPAgentNotEnabled, nil)
 	}
@@ -4712,6 +4715,15 @@ func requireExternalRuntimeActor(identity InboundIdentity, runtimeOwnerAccountID
 		return nil
 	}
 	return externalAgentExecDenied("runtime_owner_mismatch")
+}
+
+// externalSessionRuntime is the session's runtime type as the command layer
+// branches on it: an ACP session may carry its runtime only in its type.
+func externalSessionRuntime(sess SessionResult) string {
+	if strings.TrimSpace(sess.Type) == sessionpkg.TypeACPAgent {
+		return sessionpkg.RuntimeACPAgent
+	}
+	return strings.TrimSpace(sess.Runtime)
 }
 
 // sessionUsesExternalRuntime reports a session that runs on an agent runtime with
@@ -4765,38 +4777,43 @@ func externalAgentExecDenied(reason string) error {
 	return apperror.Wrap(apperror.CodeNoWorkspaceExec, cause, nil)
 }
 
-// sendExternalAgentError replies with the External Agent error err carries,
-// rendered from the channel copy for its code. Any other error is returned
-// unchanged.
-func (p *ChannelInboundProcessor) sendExternalAgentError(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, identity InboundIdentity, err error) error {
-	public := externalAgentError(err)
-	if public == nil {
-		return err
+// replyFailure answers a flow that failed with err by sendFailureReply and
+// returns err for the message's result record. A reply that could not be sent
+// is a failure of its own and is recorded as an event, so the result record
+// keeps the attribution of the flow's failure.
+func (p *ChannelInboundProcessor) replyFailure(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, identity InboundIdentity, err error, fallback string) error {
+	if sendErr := p.sendFailureReply(ctx, sender, msg, identity, err, fallback); sendErr != nil && p.logger != nil {
+		result := errlog.Event(ctx, "channel.failure_reply", errs.Wrap(sendErr, "send failure reply"), errlog.Options{})
+		p.logger.LogAttrs(ctx, result.Level, "failure reply not sent", append([]slog.Attr{
+			slog.String("bot_id", strings.TrimSpace(identity.BotID)), slog.String("channel", msg.Channel.String()),
+		}, result.Attrs()...)...)
 	}
+	return err
+}
+
+// sendFailureReply replies to err with the copy for its public error, or with
+// fallback, the flow's own failure copy, when err has no specific one. Nothing
+// is sent when the caller has canceled. It returns the failure to send.
+func (p *ChannelInboundProcessor) sendFailureReply(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, identity InboundIdentity, err error, fallback string) error {
+	text := channel.ReplyText(ctx, p.localizer(ctx, identity.BotID), threadError(err), fallback)
 	target := strings.TrimSpace(msg.ReplyTarget)
-	if target == "" {
-		return err
+	if text == "" || target == "" {
+		return nil
 	}
-	loc := p.localizer(ctx, identity.BotID)
-	out := applyMessageFormat(channel.Message{Text: externalAgentErrorText(public, loc)}, p.channelCaps(msg.Channel))
+	out := applyMessageFormat(channel.Message{Text: text}, p.channelCaps(msg.Channel))
 	if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
 		out.Reply = &channel.ReplyRef{MessageID: mid}
 	}
 	return sender.Send(ctx, channel.OutboundMessage{Target: target, Message: out})
 }
 
-// externalAgentError returns err as an External Agent error, translating the
-// thread errors a session create or lookup ends with, or nil when err is not
-// one.
-func externalAgentError(err error) error {
-	if code := apperror.CodeOf(err); code != "" {
-		if apperror.IsExternalAgentCode(code) {
-			return err
-		}
-		return nil
-	}
+// threadError translates the thread errors a session create or lookup ends
+// with to their public errors. Any other error is returned unchanged.
+func threadError(err error) error {
 	var code apperror.Code
 	switch {
+	case apperror.CodeOf(err) != "":
+		return err
 	case errors.Is(err, sessionpkg.ErrACPAgentIDRequired),
 		errors.Is(err, sessionpkg.ErrACPAgentNotConfigured):
 		code = apperror.CodeACPAgentNotConfigured
@@ -4807,37 +4824,9 @@ func externalAgentError(err error) error {
 	case errors.Is(err, sessionpkg.ErrACPRuntimeOwnerMissing):
 		code = apperror.CodeACPRuntimeOwnerMissing
 	default:
-		return nil
+		return err
 	}
 	return apperror.Wrap(code, err, nil)
-}
-
-func currentContextForNewSessionSpec(cc command.CurrentContext, spec NewSessionSpec, profiles turn.ACPProfileResolver) command.CurrentContext {
-	if sessionpkg.IsDirectRuntimeType(spec.Runtime) {
-		cc.ChatModel = spec.Runtime
-		return cc
-	}
-	if spec.Runtime != sessionpkg.RuntimeACPAgent {
-		return cc
-	}
-	label := newSessionACPRuntimeLabel(spec, profiles)
-	if label == "" {
-		cc.ChatModel = "ACP agent"
-		return cc
-	}
-	cc.ChatModel = label
-	return cc
-}
-
-func newSessionACPRuntimeLabel(spec NewSessionSpec, profiles turn.ACPProfileResolver) string {
-	agentID := acpNewSessionAgentID(spec)
-	if agentID == "" {
-		return ""
-	}
-	if profile := resolveACPProfile(profiles, agentID); profile.Known && strings.TrimSpace(profile.DisplayName) != "" {
-		return profile.DisplayName + " / ACP"
-	}
-	return agentID + " / ACP"
 }
 
 func acpNewSessionAgentID(spec NewSessionSpec) string {
@@ -4956,11 +4945,11 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 		})
 	}
 
-	sessionID := ""
+	sessionID, sessionRuntime := "", ""
 	if p.sessionEnsurer != nil {
 		sess, sessErr := p.sessionEnsurer.GetActiveSession(ctx, resolved.RouteID)
 		if sessErr == nil {
-			sessionID = strings.TrimSpace(sess.ID)
+			sessionID, sessionRuntime = strings.TrimSpace(sess.ID), externalSessionRuntime(sess)
 		} else if p.logger != nil {
 			p.logger.DebugContext(ctx, "resolve active session for /status command failed", slog.Any("error", sessErr))
 		}
@@ -4978,11 +4967,10 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 		ThreadID:          threadID,
 		RouteID:           strings.TrimSpace(resolved.RouteID),
 		SessionID:         sessionID,
+		SessionRuntime:    sessionRuntime,
 	})
 	if execErr != nil {
-		if p.logger != nil {
-			p.logger.WarnContext(ctx, "execute /status command failed", slog.Any("error", execErr))
-		}
+		p.recordCommandFailure(ctx, msg, identity, execErr)
 		reply = friendlyOps(loc, "ops.verb.loadStatus")
 	}
 

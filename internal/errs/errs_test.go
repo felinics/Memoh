@@ -54,7 +54,7 @@ func TestWrapAndFrame(t *testing.T) {
 	if r.Attrs[0].Value.String() != "inner" || r.Attrs[0].Key != "id" {
 		t.Fatalf("attrs=%v", r.Attrs)
 	}
-	if r.Fault != FaultServer || r.Unlocated {
+	if r.Fault != apperror.FaultServer || r.Unlocated {
 		t.Fatalf("report=%+v", r)
 	}
 }
@@ -63,7 +63,7 @@ func TestWithTimeout(t *testing.T) {
 	ctx, cancel := WithTimeout(context.Background(), time.Millisecond)
 	defer cancel()
 	<-ctx.Done()
-	if got := Analyze(ctx, context.DeadlineExceeded); got.Fault == FaultCanceled {
+	if got := Analyze(ctx, context.DeadlineExceeded); got.Fault == apperror.FaultCanceled {
 		t.Fatalf("got canceled: %+v", got)
 	}
 }
@@ -75,7 +75,7 @@ func TestJoinAndAs(t *testing.T) {
 	if !stderrors.As(err, &got) || got != pub {
 		t.Fatal("errors.As failed")
 	}
-	if Analyze(context.Background(), err).Public.Err != pub {
+	if Analyze(context.Background(), err).answer != pub {
 		t.Fatal("analysis failed")
 	}
 }

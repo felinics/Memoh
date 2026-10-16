@@ -2,12 +2,13 @@
 package errs
 
 import (
-	"net/http"
 	"strings"
 
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 // Remote marks an error received from an internal RPC. The error value is
@@ -16,7 +17,7 @@ func Remote(err error) error {
 	if err == nil {
 		return nil
 	}
-	return &marker{kind: "remote", err: err}
+	return &marker{kind: markerRemote, err: err}
 }
 
 // Forwarded declares that the caller deliberately passed end-user input to
@@ -25,11 +26,31 @@ func Forwarded(err error) error {
 	if err == nil {
 		return nil
 	}
-	return &marker{kind: "forwarded", err: err}
+	return &marker{kind: markerForwarded, err: err}
 }
 
+// Recorded marks a failure another result record in this process has already
+// recorded: a nested unit that wrote its own record when it ended. An outer
+// boundary still records it, at no more than WARN. The error value is
+// unchanged.
+func Recorded(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &marker{kind: markerRecorded, err: err}
+}
+
+// markerKind is what a marker declares about the error it wraps.
+type markerKind int
+
+const (
+	markerRemote markerKind = iota + 1
+	markerForwarded
+	markerRecorded
+)
+
 type marker struct {
-	kind string
+	kind markerKind
 	err  error
 }
 
@@ -55,7 +76,7 @@ func (m *marker) GRPCStatus() *status.Status {
 // ends and are not public. A remote-marked status whose ErrorInfo carries no
 // fault was produced by the gRPC client itself, or by a peer that does not
 // write the envelope; its text may name internal addresses and is not public.
-func grpcPublic(n node) (*Public, bool) {
+func grpcPublic(n node) (*public, bool) {
 	if _, ok := n.err.(*marker); ok {
 		return nil, false
 	}
@@ -82,7 +103,7 @@ func grpcPublic(n node) (*Public, bool) {
 	if reason == "" {
 		reason = codeReason(st.Code())
 	}
-	return &Public{Code: httpCode(st.Code()), Reason: reason, Message: st.Message(), Metadata: metadata, Err: n.err}, true
+	return &public{class: faultOfCode(st.Code()), reason: reason, metadata: metadata}, true
 }
 
 func errorInfo(st *status.Status) *errdetails.ErrorInfo {
@@ -99,11 +120,17 @@ func errorInfo(st *status.Status) *errdetails.ErrorInfo {
 // the client keeps the received status on the chain under the same Remote
 // marker, and the fault is read from there. Statuses outside the marker
 // belong to other calls and are not read.
-func remoteFaultOf(public *Public, below []node) string {
-	if f, ok := validFault(public.Metadata["fault"]); ok {
-		return string(f)
+func remoteFaultOf(p *public, below []node) apperror.Fault {
+	if f, ok := apperror.ParseFault(p.metadata["fault"]); ok {
+		return f
 	}
-	for _, n := range below {
+	return reportedFault(below)
+}
+
+// reportedFault is the fault written on the first received status among
+// nodes that carries one, or empty.
+func reportedFault(nodes []node) apperror.Fault {
+	for _, n := range nodes {
 		if !n.remote {
 			continue
 		}
@@ -116,42 +143,25 @@ func remoteFaultOf(public *Public, below []node) string {
 			continue
 		}
 		if info := errorInfo(st); info != nil {
-			if f, ok := validFault(info.GetMetadata()["fault"]); ok {
-				return string(f)
+			if f, ok := apperror.ParseFault(info.GetMetadata()["fault"]); ok {
+				return f
 			}
 		}
 	}
 	return ""
 }
 
-// httpCode maps a gRPC code to an HTTP status, following the HTTP Mapping
-// notes in google/rpc/code.proto.
-func httpCode(code codes.Code) int {
+// faultOfCode is the fault a gRPC code alone gives: client for the codes that
+// refuse the request, the ones google/rpc/code.proto maps to a 4xx HTTP
+// status, and server for the rest.
+func faultOfCode(code codes.Code) apperror.Fault {
 	switch code {
-	case codes.OK:
-		return http.StatusOK
-	case codes.Canceled:
-		return 499
-	case codes.InvalidArgument, codes.FailedPrecondition, codes.OutOfRange:
-		return http.StatusBadRequest
-	case codes.DeadlineExceeded:
-		return http.StatusGatewayTimeout
-	case codes.NotFound:
-		return http.StatusNotFound
-	case codes.AlreadyExists, codes.Aborted:
-		return http.StatusConflict
-	case codes.PermissionDenied:
-		return http.StatusForbidden
-	case codes.Unauthenticated:
-		return http.StatusUnauthorized
-	case codes.ResourceExhausted:
-		return http.StatusTooManyRequests
-	case codes.Unimplemented:
-		return http.StatusNotImplemented
-	case codes.Unavailable:
-		return http.StatusServiceUnavailable
+	case codes.InvalidArgument, codes.FailedPrecondition, codes.OutOfRange,
+		codes.NotFound, codes.AlreadyExists, codes.Aborted,
+		codes.PermissionDenied, codes.Unauthenticated, codes.ResourceExhausted:
+		return apperror.FaultClient
 	default:
-		return http.StatusInternalServerError
+		return apperror.FaultServer
 	}
 }
 
@@ -170,12 +180,12 @@ func codeReason(code codes.Code) string {
 	return strings.ToLower(b.String())
 }
 
-func remoteFault(metadataFault string, forwarded bool) Fault {
-	if f, ok := validFault(metadataFault); ok && f == FaultClient {
+func remoteFault(reported apperror.Fault, forwarded bool) apperror.Fault {
+	if reported == apperror.FaultClient {
 		if forwarded {
-			return FaultClient
+			return apperror.FaultClient
 		}
-		return FaultServer
+		return apperror.FaultServer
 	}
-	return FaultDependency
+	return apperror.FaultDependency
 }

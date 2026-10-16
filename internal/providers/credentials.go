@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -92,7 +93,7 @@ func codexAccountIDFromToken(token string) (string, error) {
 	}
 	accountID := strings.TrimSpace(claims.OpenAIAuth.ChatGPTAccountID)
 	if accountID == "" {
-		return "", errs.New(fmt.Sprintf("oauth access token missing %s.chatgpt_account_id", openAIAuthClaimPath))
+		return "", errs.New("oauth access token missing chatgpt_account_id claim", slog.String("claim_path", openAIAuthClaimPath))
 	}
 	return accountID, nil
 }

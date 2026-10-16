@@ -136,14 +136,6 @@ func (e *Executor) sendWithMode(
 		Target:  plan.target,
 		Message: plan.message,
 	}); err != nil {
-		if e.Logger != nil {
-			e.Logger.Warn("outbound send failed",
-				slog.String("mode", mode.name),
-				slog.Any("error", err),
-				slog.String("bot_id", plan.botID),
-				slog.String("platform", string(plan.channelType)),
-			)
-		}
 		return nil, err
 	}
 
@@ -529,9 +521,6 @@ func (e *Executor) React(ctx context.Context, session SessionContext, args map[s
 	if err := e.Reactor.React(ctx, botID, channelType, ReactRequest{
 		Target: target, MessageID: messageID, Emoji: emoji, Remove: remove,
 	}); err != nil {
-		if e.Logger != nil {
-			e.Logger.Warn("react failed", slog.Any("error", err), slog.String("bot_id", botID), slog.String("platform", string(channelType)))
-		}
 		return nil, err
 	}
 	action := "added"

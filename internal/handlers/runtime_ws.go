@@ -4,16 +4,14 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"net/http"
 	"strings"
 	"sync"
-
-	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
 	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/errs"
 )
 
@@ -291,7 +289,7 @@ func (r *runtimeSubscriptions) handle(ctx context.Context, botID string, msg run
 func (r *runtimeSubscriptions) subscribe(ctx context.Context, botID string, msg runtimeClientMessage, authorize runtimeSubscribeAuthorizer) {
 	sessionID := strings.TrimSpace(msg.SessionID)
 	if sessionID == "" {
-		failWSRequest(ctx, r.logger, r.writer, botID, wsTurn("", ""), "ws."+runtimeSubscribeMessageType, echo.NewHTTPError(http.StatusBadRequest, "session_id is required"))
+		failWSRequest(ctx, r.logger, r.writer, botID, wsTurn("", ""), "ws."+runtimeSubscribeMessageType, apperror.FieldRequired("session_id"))
 		return
 	}
 	if r.source == nil {
@@ -344,7 +342,7 @@ func (r *runtimeSubscriptions) subscribe(ctx context.Context, botID string, msg 
 func (r *runtimeSubscriptions) unsubscribe(ctx context.Context, botID, sessionID string) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		failWSRequest(ctx, r.logger, r.writer, botID, wsTurn("", ""), "ws."+runtimeUnsubscribeMessageType, echo.NewHTTPError(http.StatusBadRequest, "session_id is required"))
+		failWSRequest(ctx, r.logger, r.writer, botID, wsTurn("", ""), "ws."+runtimeUnsubscribeMessageType, apperror.FieldRequired("session_id"))
 		return
 	}
 	r.mu.Lock()

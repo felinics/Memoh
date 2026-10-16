@@ -27,10 +27,27 @@ var (
 
 const CatalogRefreshInterval = 10 * time.Minute
 
+// catalogStaleRefreshes is how many refresh intervals a cached catalog may age
+// before reads report it stale. Refreshes run late under upstream latency and
+// may fail once; reporting stale only after missed refreshes keeps a healthy
+// registry from looking unavailable.
+const catalogStaleRefreshes = 3
+
+const (
+	// catalogRefreshTimeout bounds one refresh of the whole catalog.
+	catalogRefreshTimeout = 2 * time.Minute
+	// catalogRevalidateBackoff spaces out the refreshes reads start, so an
+	// unreachable registry is not asked again on every page view.
+	catalogRevalidateBackoff = time.Minute
+)
+
 type CatalogResult struct {
 	Catalog   *catalog.Catalog
 	Stale     bool
 	FetchedAt time.Time
+	// Refreshing reports a background refresh of this catalog in progress:
+	// a reader may look again shortly for a newer generation.
+	Refreshing bool
 }
 
 type CatalogProvider interface {
@@ -89,6 +106,14 @@ type RemoteCatalog struct {
 	snapshotMu       sync.Mutex
 	snapshotEntry    CachedCatalog
 	snapshotCatalog  *catalog.Catalog
+
+	// revalidateMu guards lifetime and revalidatedAt. lifetime ends the
+	// refreshes reads start once Start's worker stops; revalidatedAt holds,
+	// per team, when a read last started one.
+	revalidateMu  sync.Mutex
+	lifetime      context.Context
+	revalidatedAt map[string]time.Time
+	revalidations sync.WaitGroup
 }
 
 // Configure sets operator policy before the catalog worker starts. Offline mode
@@ -164,7 +189,12 @@ func (p *RemoteCatalog) Snapshot(ctx context.Context, refresh bool) (CatalogResu
 	// Reads use the last validated generation immediately, including while the
 	// background publisher is fetching a new catalog. Explicit refreshes may wait.
 	if !refresh && len(previous.Data) > 0 {
-		return p.hydrate(ctx, previous)
+		result, err := p.hydrate(ctx, previous)
+		if err != nil {
+			return CatalogResult{}, err
+		}
+		result.Refreshing = p.revalidate(ctx, previous)
+		return result, nil
 	}
 	select {
 	case p.refreshGate <- struct{}{}:
@@ -306,8 +336,66 @@ func (p *RemoteCatalog) refresh(ctx context.Context, previous CachedCatalog) (Ca
 	return p.catalogResult(updated, validatedCatalog), nil
 }
 
+// revalidate starts a background refresh when a read finds the cached catalog
+// due, so the reader keeps the cached generation and never waits on the
+// registry. It reports whether a refresh is running. Only one refresh runs at
+// a time, and a read starts one at most once per catalogRevalidateBackoff.
+func (p *RemoteCatalog) revalidate(ctx context.Context, entry CachedCatalog) bool {
+	if p.offline || p.now().Sub(entry.FetchedAt) < p.refreshInterval {
+		return false
+	}
+	select {
+	case p.refreshGate <- struct{}{}:
+	default:
+		// A refresh is already running.
+		return true
+	}
+	p.revalidateMu.Lock()
+	last, tried := p.revalidatedAt[entry.TeamID]
+	stopped := p.lifetime != nil && p.lifetime.Err() != nil
+	if stopped || (tried && p.now().Sub(last) < catalogRevalidateBackoff) {
+		p.revalidateMu.Unlock()
+		<-p.refreshGate
+		return false
+	}
+	if p.revalidatedAt == nil {
+		p.revalidatedAt = make(map[string]time.Time)
+	}
+	p.revalidatedAt[entry.TeamID] = p.now()
+	lifetime := p.lifetime
+	p.revalidations.Add(1)
+	p.revalidateMu.Unlock()
+
+	// Detached from the request, which ends before the refresh does; the
+	// context keeps its values so the refresh writes the reader's catalog.
+	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), catalogRefreshTimeout)
+	stop := func() bool { return false }
+	if lifetime != nil {
+		stop = context.AfterFunc(lifetime, cancel) //nolint:contextcheck // Stopping the catalog worker must end refreshes reads started.
+	}
+	go func() {
+		defer p.revalidations.Done()
+		defer func() { <-p.refreshGate }()
+		defer cancel()
+		defer stop()
+		previous, err := p.store.GetCatalog(runCtx, p.sourceURL)
+		if err != nil && !errors.Is(err, ErrCatalogCacheMiss) {
+			p.logger.WarnContext(runCtx, "revalidate dependency catalog", slog.Any("error", err))
+			return
+		}
+		if err == nil && p.now().Sub(previous.FetchedAt) < p.refreshInterval {
+			// Another publisher refreshed it meanwhile.
+			return
+		}
+		if _, err := p.refresh(runCtx, previous); err != nil {
+			p.logger.WarnContext(runCtx, "revalidate dependency catalog", slog.Any("error", err))
+		}
+	}()
+	return true
+}
+
 func (p *RemoteCatalog) catalogResult(entry CachedCatalog, cat *catalog.Catalog) CatalogResult {
-	return CatalogResult{Catalog: cat, FetchedAt: entry.FetchedAt, Stale: p.now().Sub(entry.FetchedAt) >= p.refreshInterval}
+	return CatalogResult{Catalog: cat, FetchedAt: entry.FetchedAt, Stale: p.now().Sub(entry.FetchedAt) >= catalogStaleRefreshes*p.refreshInterval}
 }
 
 func (p *RemoteCatalog) hydrate(ctx context.Context, entry CachedCatalog) (CatalogResult, error) {
@@ -482,13 +570,16 @@ func (p *RemoteCatalog) Start(ctx context.Context) func() {
 		return func() {}
 	}
 	ctx, cancel := context.WithCancel(ctx)
+	p.revalidateMu.Lock()
+	p.lifetime = ctx
+	p.revalidateMu.Unlock()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		ticker := time.NewTicker(p.refreshInterval)
 		defer ticker.Stop()
 		for {
-			runCtx, stop := context.WithTimeout(ctx, 2*time.Minute)
+			runCtx, stop := context.WithTimeout(ctx, catalogRefreshTimeout)
 			_, err := p.Snapshot(runCtx, true)
 			stop()
 			if err != nil && ctx.Err() == nil {
@@ -501,5 +592,13 @@ func (p *RemoteCatalog) Start(ctx context.Context) func() {
 			}
 		}
 	}()
-	return func() { cancel(); <-done }
+	return func() {
+		cancel()
+		<-done
+		// Reads check the cancelled lifetime under this lock before they add
+		// to revalidations, so none is added once Wait begins.
+		p.revalidateMu.Lock()
+		p.revalidateMu.Unlock() //nolint:staticcheck // Empty critical section is the barrier.
+		p.revalidations.Wait()
+	}
 }

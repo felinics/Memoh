@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/textutil"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
@@ -41,19 +43,18 @@ const (
 	lastErrorLimit = 2048
 	// rollbackTimeout bounds the symlink switch; it touches no network.
 	rollbackTimeout = 2 * time.Minute
-	// interruptedMessage is written to last_error when List finds an
-	// in-progress record whose operation is provably gone.
-	interruptedMessage = "operation interrupted"
-	// cancelledMessagePrefix marks a last_error caused by the request going
-	// away (closed dialog, dropped connection, shutdown) rather than by the
-	// script.
-	cancelledMessagePrefix = "operation cancelled: "
 	// finalizeTimeout bounds the writes that record an operation's outcome
 	// once its script has finished or failed. They run on a context detached
 	// from the request so a closed dialog, a dropped connection, or the
 	// shutdown window still leaves a terminal record behind instead of an
 	// installing/updating/removing row nobody owns.
 	finalizeTimeout = 10 * time.Second
+	// UpdateCheckBudget bounds a manual update check so it answers well within
+	// the 30-second response timeout common to reverse proxies.
+	UpdateCheckBudget = 20 * time.Second
+	// updateCheckConcurrency bounds the check_update scripts one manual check
+	// runs at once in a workspace. Each holds its own dependency's lock.
+	updateCheckConcurrency = 4
 	// staleOperationAge is how long an in-progress record must have gone
 	// untouched before List may treat it as interrupted. An operation that
 	// is running has taken its workspace lock well within that time.
@@ -93,6 +94,8 @@ type Service struct {
 	logger    *slog.Logger
 	now       func() time.Time
 	scriptEnv func(ctx context.Context) []string
+	// updateCheckBudget is UpdateCheckBudget; tests shorten it.
+	updateCheckBudget time.Duration
 
 	// Package functions behind fields so tests can replace them.
 	probe    func(ctx context.Context, client *bridge.Client) (Platform, error)
@@ -147,9 +150,11 @@ func NewService(opts Options) *Service {
 		now:       opts.Now,
 		scriptEnv: opts.ScriptEnv,
 		probe:     ProbePlatform,
-		discover:  Discover,
-		run:       Run,
-		locks:     operationLocks{held: make(map[InstallationKey]struct{})},
+
+		updateCheckBudget: UpdateCheckBudget,
+		discover:          Discover,
+		run:               Run,
+		locks:             operationLocks{held: make(map[InstallationKey]struct{})},
 
 		background:                opts.Background,
 		operationSessionValidator: opts.OperationSessionValidator,
@@ -210,6 +215,13 @@ type Entry struct {
 type ListResult struct {
 	CatalogStale     bool
 	CatalogFetchedAt time.Time
+	// CatalogRefreshing is set while a background refresh of the catalog
+	// runs; listing again shortly may show a newer catalog.
+	CatalogRefreshing bool
+	// ChecksIncomplete is set by CheckUpdates when its budget ran out before
+	// every update check finished; the unfinished records keep their last
+	// check.
+	ChecksIncomplete bool
 	// Platform is zero when the workspace is not running and was never
 	// probed.
 	Platform Platform
@@ -220,11 +232,12 @@ type ListResult struct {
 	// below, inside the isolated workspace.
 	DataRoot string
 	Entries  []Entry
-	// DiscoveryError is set when the workspace is running but could not be
+	// DiscoveryFailed is set when the workspace is running but could not be
 	// inspected (the discovery exec was killed or timed out, the bridge did
 	// not answer). Entries then reflect the records alone, carry no
-	// discovery facts, and offer no actions.
-	DiscoveryError string
+	// discovery facts, and offer no actions. The cause is recorded once as
+	// an event and is not part of the result.
+	DiscoveryFailed bool
 }
 
 // PreflightItem is the verdict for one required dependency.
@@ -297,7 +310,7 @@ func (s *Service) list(ctx context.Context, botID string, force bool) (ListResul
 		records[i].LastError = s.errorDetail(ctx, records[i].LastError)
 	}
 	byDep := indexRecords(records)
-	result := ListResult{Workspace: state, CatalogStale: catalogResult.Stale, CatalogFetchedAt: catalogResult.FetchedAt}
+	result := ListResult{Workspace: state, CatalogStale: catalogResult.Stale, CatalogFetchedAt: catalogResult.FetchedAt, CatalogRefreshing: catalogResult.Refreshing}
 	// The data root always belongs to the isolated workspace.
 	if dataRoot, err := s.workspace.DataRoot(ctx, botID); err == nil {
 		result.DataRoot = dataRoot
@@ -326,11 +339,10 @@ func (s *Service) list(ctx context.Context, botID string, force bool) (ListResul
 		// still say what the user asked for, so report them with the problem
 		// instead of failing the whole list. A stopped workspace never gets
 		// here; it keeps its own semantics above.
-		s.logger.WarnContext(ctx, "workspace dependency discovery failed; listing records only",
-			slog.String("bot_id", botID),
-			slog.Any("error", err),
-		)
-		result.DiscoveryError = truncateMessage(err.Error())
+		event := errlog.Event(ctx, "workspacedeps.discover", errs.Wrap(err, "discover workspace dependencies"), errlog.Options{})
+		s.logger.LogAttrs(ctx, event.Level, "workspace dependency discovery failed; listing records only",
+			append([]slog.Attr{slog.String("bot_id", botID)}, event.Attrs()...)...)
+		result.DiscoveryFailed = true
 		if snap, ok := s.cache.Get(botID); ok {
 			result.Platform = snap.Platform
 		}
@@ -956,17 +968,35 @@ func (s *Service) Rollback(ctx context.Context, botID, depID string) (OperationR
 	return s.record(finalCtx, op, ActionRollback, state)
 }
 
-// CheckUpdates is the manual refresh: it re-discovers the
-// workspace, then runs check_update for every present, unpinned dependency with
-// a check_update script and writes the result to its record.
+// CheckUpdates is the manual refresh: it re-discovers the workspace, then runs
+// check_update for every present, unpinned dependency with a check_update
+// script and writes the result to its record.
+//
+// It answers within UpdateCheckBudget so a reverse proxy's response timeout
+// does not cut the request off. The checks run concurrently on a context
+// detached from the request: a dropped connection does not abandon them
+// halfway. A check the budget cuts short leaves its record as it was and
+// marks the result ChecksIncomplete. It reads the catalog the background
+// refresher keeps; Supermarket availability is not part of the check.
 func (s *Service) CheckUpdates(ctx context.Context, botID string) (ListResult, error) {
-	ctx, _, err := s.prepareCatalog(ctx, true, false)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.updateCheckBudget)
+	defer cancel()
+	defer s.cancelOnShutdown(cancel)()
+	ctx, _, err := s.prepareCatalog(ctx, false, false)
 	if err != nil {
 		return ListResult{}, err
 	}
 
 	result, err := s.list(ctx, botID, true)
-	if err != nil || result.Workspace != WorkspaceRunning || result.DiscoveryError != "" {
+	if err != nil && ctx.Err() != nil {
+		// Discovery alone spent the budget: answer with what is recorded.
+		listCtx, cancel := finalizeContext(ctx)
+		defer cancel()
+		result, err = s.list(listCtx, botID, false)
+		result.ChecksIncomplete = err == nil
+		return result, err
+	}
+	if err != nil || result.Workspace != WorkspaceRunning || result.DiscoveryFailed {
 		// Without discovery facts there is nothing to check against.
 		return result, err
 	}
@@ -974,7 +1004,14 @@ func (s *Service) CheckUpdates(ctx context.Context, botID string) (ListResult, e
 	if err != nil {
 		return ListResult{}, err
 	}
-	checked := false
+	var (
+		wg         sync.WaitGroup
+		mu         sync.Mutex
+		checked    bool
+		incomplete bool
+		recordErr  error
+	)
+	slots := make(chan struct{}, updateCheckConcurrency)
 	for _, entry := range result.Entries {
 		if !upstreamCheckable(entry.Dependency) || !entry.Observed.Present || entry.Installation == nil {
 			continue
@@ -983,18 +1020,53 @@ func (s *Service) CheckUpdates(ctx context.Context, botID string) (ListResult, e
 		if !s.locks.tryLock(key) {
 			continue
 		}
-		check, checkErr := s.checkUpdate(ctx, client, dataRoot, result.Platform, entry.Dependency, entry.InstalledVersion)
-		recordErr := s.recordCheck(ctx, key, check, checkErr)
-		s.locks.unlock(key)
-		if err := recordErr; err != nil {
+		select {
+		case slots <- struct{}{}:
+		case <-ctx.Done():
+			s.locks.unlock(key)
+			mu.Lock()
+			incomplete = true
+			mu.Unlock()
+			continue
+		}
+		wg.Add(1)
+		go func(entry Entry) {
+			defer wg.Done()
+			defer func() { <-slots }()
+			defer s.locks.unlock(key)
+			check, checkErr := s.checkUpdate(ctx, client, dataRoot, result.Platform, entry.Dependency, entry.InstalledVersion)
+			if checkErr != nil && ctx.Err() != nil {
+				// Cut short by the budget: no verdict to record.
+				mu.Lock()
+				incomplete = true
+				mu.Unlock()
+				return
+			}
+			err := s.recordCheck(ctx, key, check, checkErr)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				recordErr = errors.Join(recordErr, err)
+				return
+			}
+			checked = true
+		}(entry)
+	}
+	wg.Wait()
+	if recordErr != nil {
+		return ListResult{}, recordErr
+	}
+	if checked {
+		// The budget may be spent; listing the recorded results reuses the
+		// discovery above and gets its own short deadline.
+		listCtx, cancel := finalizeContext(ctx)
+		defer cancel()
+		if result, err = s.list(listCtx, botID, false); err != nil {
 			return ListResult{}, err
 		}
-		checked = true
 	}
-	if !checked {
-		return result, nil
-	}
-	return s.list(ctx, botID, false)
+	result.ChecksIncomplete = incomplete
+	return result, nil
 }
 
 // ScriptPreview returns the exact stdin text the runner would feed to `sh -s`
@@ -1310,7 +1382,7 @@ func (s *Service) record(ctx context.Context, op *operation, action catalog.Acti
 	terminal.Source, terminal.Status = InstallationSourceManaged, StatusInstalled
 	terminal.InstalledVersion, terminal.ManifestDigest = state.Version, state.ManifestDigest
 	terminal.SourceURL, terminal.RegistryID, terminal.DefinitionRevision = state.SourceURL, state.RegistryID, state.DefinitionRevision
-	terminal.LastError = ""
+	terminal.LastError, terminal.LastErrorCode = "", ""
 	rec, err := s.store.FinishOperation(storeCtx, op.key, op.operationID, &terminal)
 	if err != nil {
 		return OperationResult{}, s.fail(ctx, op, fmt.Errorf("workspacedeps: record %s %s: %w", action, op.dep.ID, err))
@@ -1417,10 +1489,6 @@ func (s *Service) fail(ctx context.Context, op *operation, cause error) error {
 		s.cache.Invalidate(op.key.BotID)
 		return cause
 	}
-	message := cause.Error()
-	if ctx.Err() != nil || errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
-		message = cancelledMessagePrefix + message
-	}
 	storeCtx, cancel := finalizeContext(ctx)
 	defer cancel()
 	terminal, err := s.store.Get(
@@ -1436,7 +1504,7 @@ func (s *Service) fail(ctx context.Context, op *operation, cause error) error {
 		// readState decodes the dependency's state.json; nil when there is none.
 		op.key)
 	if err == nil {
-		terminal.Status, terminal.LastError = StatusFailed, s.errorDetail(ctx, message)
+		terminal.Status, terminal.LastError, terminal.LastErrorCode = StatusFailed, "", failureCode(cause)
 		_, err = s.store.FinishOperation(storeCtx, op.key, op.operationID, &terminal)
 	}
 	if err != nil {
@@ -1597,13 +1665,12 @@ func (s *Service) recordCheck(ctx context.Context, key InstallationKey, check up
 	now := s.now().UTC()
 	upd := ObservedUpdate{LastCheckedAt: &now}
 	if checkErr != nil {
-		msg := s.errorDetail(ctx, checkErr.Error())
-		upd.LastError = &msg
+		code := failureCode(checkErr)
+		upd.LastErrorCode = &code
 	} else {
-		latest := check.Latest
-		cleared := ""
+		latest, cleared := check.Latest, ""
 		upd.LatestVersion = &latest
-		upd.LastError = &cleared
+		upd.LastErrorCode = &cleared
 	}
 	storeCtx, cancel := finalizeContext(ctx)
 	defer cancel()

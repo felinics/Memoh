@@ -2,12 +2,27 @@ package botbackup
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
 // ErrHistoryResetUnavailable means an overwrite that can invalidate ACP state
 // could not acquire the mandatory distributed runtime-reset boundary.
 var ErrHistoryResetUnavailable = errors.New("bot backup: ACP history reset coordination is unavailable")
+
+// ErrInvalidBundle means the uploaded file is not a backup this version can
+// read: not a zip, a missing or malformed manifest, an unsafe entry path,
+// malformed entry JSON, a damaged encrypted stream or an unsupported schema
+// version.
+var ErrInvalidBundle = errors.New("bot backup: invalid backup bundle")
+
+// ErrTargetBotRequired means an overwrite import named no target bot.
+var ErrTargetBotRequired = errors.New("bot backup: target bot is required for overwrite import")
+
+// invalidBundle marks cause as a problem with the uploaded file.
+func invalidBundle(cause error) error {
+	return fmt.Errorf("%w: %w", ErrInvalidBundle, cause)
+}
 
 const (
 	BackupSchemaVersion = 1

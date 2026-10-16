@@ -13,9 +13,6 @@ const pageBotCreateProgress = () => import('@/pages/bots/new-progress.vue')
 const pageBotDetail = () => import('@/pages/bots/detail.vue')
 const pageProviders = () => import('@/pages/providers/index.vue')
 const pageRuntimes = () => import('@/pages/runtimes/index.vue')
-const pageWebSearch = () => import('@/pages/web-search/index.vue')
-const pageVoice = () => import('@/pages/voice/index.vue')
-const pageVideo = () => import('@/pages/video/index.vue')
 const pageUsage = () => import('@/pages/usage/index.vue')
 const pagePeople = () => import('@/pages/people/index.vue')
 const pageAppearance = () => import('@/pages/appearance/index.vue')
@@ -35,8 +32,8 @@ const pageAbout = () => import('@/pages/about/index.vue')
  */
 export const settingsPageLoaders = [
   pageSettings,
-  pageBots, pageProviders, pageRuntimes, pageWebSearch, pageVoice,
-  pageVideo, pageUsage, pagePeople, pageAppearance, pageKeyboard,
+  pageBots, pageProviders, pageRuntimes,
+  pageUsage, pagePeople, pageAppearance, pageKeyboard,
   pageProfile, pageSupermarket, pageAbout,
   pageBotNew, pageBotCreateProgress, pageBotDetail,
   pageSupermarketCategory, pageSupermarketAppDetail,
@@ -194,36 +191,26 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
         {
           name: 'web-search',
           path: 'web-search',
-          component: pageWebSearch,
-          meta: {
-            breadcrumb: i18nRef('sidebar.webSearch'),
-          },
+          redirect: to => ({ name: 'providers', query: { ...to.query, tab: 'web-search' }, hash: to.hash }),
         },
         {
           name: 'voice',
           path: 'voice',
-          component: pageVoice,
-          meta: {
-            breadcrumb: i18nRef('sidebar.voice'),
-          },
+          redirect: to => ({ name: 'providers', query: { ...to.query, tab: 'voice' }, hash: to.hash }),
         },
         {
           name: 'video',
           path: 'video',
-          component: pageVideo,
-          meta: {
-            breadcrumb: i18nRef('sidebar.video'),
-          },
+          redirect: to => ({ name: 'providers', query: { ...to.query, tab: 'video' }, hash: to.hash }),
         },
-        // Speech and transcription merged into the Voice page; keep the old paths
-        // working for existing links/bookmarks.
+        // Preserve legacy voice links, including their provider detail query.
         {
           path: 'speech',
-          redirect: { name: 'voice' },
+          redirect: to => ({ name: 'providers', query: { ...to.query, tab: 'voice' }, hash: to.hash }),
         },
         {
           path: 'transcription',
-          redirect: { name: 'voice' },
+          redirect: to => ({ name: 'providers', query: { ...to.query, tab: 'voice' }, hash: to.hash }),
         },
         // The Memory page was removed — its settings now live in each bot's
         // Memories tab — so old links and desktop deep links land on Bots.

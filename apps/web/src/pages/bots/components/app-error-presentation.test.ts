@@ -40,11 +40,22 @@ describe('App error presentation', () => {
     const actions: string[] = []
     await mount(BotAppCard, { app_id: 'bun', installation_id: 'bun-install', status, last_error: diagnostic }, action => actions.push(action))
     expect(root.textContent).not.toContain(diagnostic)
+    // The primary action carries the state; an extra status line would make
+    // these cards taller than their neighbours in the grid.
+    expect(root.textContent).not.toContain(en.apps.diagnostics[status])
     const details = Array.from(root.querySelectorAll('button')).find(button => button.textContent?.trim() === 'View details')
     expect(details).toBeUndefined()
     root.querySelector<HTMLElement>('[role="button"]')!.click()
     await nextTick()
     expect(actions).toEqual(['open'])
+  })
+
+  it('renders errors.<code> in the detail panel and prefers it over recorded text', async () => {
+    const item = reactive<AppItem>({ app_id: 'bun', installation_id: 'bun-install', status: 'failed', last_error: diagnostic, last_error_code: 'app.operation_failed' })
+    await mount(AppDetailPanel, item)
+    root.querySelector<HTMLButtonElement>('button[aria-expanded]:not([aria-haspopup])')!.click()
+    await nextTick()
+    expect(root.querySelector('pre')?.textContent).toBe(en.errors.app.operation_failed)
   })
 
   it('discloses the full diagnostic only on demand and resets when the app changes', async () => {

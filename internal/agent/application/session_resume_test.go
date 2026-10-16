@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -23,12 +24,14 @@ import (
 
 type resumeSaveQueries struct {
 	dbstore.Queries
-	saved sqlc.SaveSessionRunResumeContextParams
-	calls int
+	saved   sqlc.SaveSessionRunResumeContextParams
+	history []sqlc.SaveSessionRunResumeContextParams
+	calls   int
 }
 
 func (q *resumeSaveQueries) SaveSessionRunResumeContext(_ context.Context, arg sqlc.SaveSessionRunResumeContextParams) (int64, error) {
 	q.saved = arg
+	q.history = append(q.history, arg)
 	q.calls++
 	return 1, nil
 }
@@ -68,6 +71,31 @@ func TestResumeContextPreservesDeadlineAndScopesWithoutCredentials(t *testing.T)
 	}
 	if q.calls != 1 {
 		t.Fatal("resume rewrote the original recovery intent")
+	}
+}
+
+// A Discuss run saves its admission-time context before any prompt exists.
+// A shutdown before a later save replaces it must retire the intent, never
+// resume a task with no prompt, whatever the command carried.
+func TestDiscussAdmissionResumeContextIsRetired(t *testing.T) {
+	q := &resumeSaveQueries{}
+	runner := &fakeRunner{chunks: []string{`{"type":"agent_end"}`}}
+	s, admitter := newAdmittedTurnTestService(runner)
+	s.SetAllowedTeam("00000000-0000-0000-0000-000000000001")
+	s.queries, s.resumeSecret = q, "resume-test-secret"
+	ctx := runtimefence.WithContext(t.Context(), runtimefence.Fence{BotID: "bot", SessionID: "session", Token: 7})
+	req := chatRequestFromCommand(turn.StartTurnCommand{Mode: turn.ModeDiscuss, BotID: "bot", ChatID: "chat", ThreadID: "session", DiscussMessages: []turn.DiscussMessage{{Role: "user", Content: "hi"}}})
+	req.RunID, req.SessionType = uuid.NewString(), "discuss"
+	if err := s.recordRunResumeContext(ctx, req); err != nil || q.calls != 1 {
+		t.Fatalf("save err=%v calls=%d", err, q.calls)
+	}
+	raw, err := json.Marshal(map[string]json.RawMessage{"resume": q.saved.ResumeContext})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := sqlc.SessionRun{TeamID: db.ParseUUIDOrEmpty("00000000-0000-0000-0000-000000000001"), RunID: db.ParseUUIDOrEmpty(req.RunID), BotID: db.ParseUUIDOrEmpty(uuid.NewString()), SessionID: db.ParseUUIDOrEmpty(uuid.NewString()), InputJson: raw}
+	if done, err := s.resumeInterruptedSession(t.Context(), row); !errors.Is(err, errResumeUnrecoverable) || done != nil || len(admitter.admitted()) != 0 {
+		t.Fatalf("discuss admission context: done=%v err=%v admissions=%d, want a retired intent", done, err, len(admitter.admitted()))
 	}
 }
 

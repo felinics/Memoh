@@ -15,6 +15,7 @@ import (
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models/modelretry"
 )
 
 // SessionContext carries request-scoped identity and routing information.
@@ -184,27 +185,30 @@ type RunConfig struct {
 	ContextToolDefsResolved        bool
 	ContextToolExchangePolicy      *contextfrag.ToolExchangePolicy
 	ContextBudgetMaxTokens         int
-	ContextRecentProtectTokens     *int
-	ContextHistoryTokenEstimates   []int
-	ContextTrimmableMessages       int
-	ContextCachePlan               contextfrag.CachePlan
-	ContextMutations               *contextfrag.MutationLedger
-	ContextDynamicMutators         []contextfrag.DynamicMutator
-	ContextLifecycle               *contextfrag.LifecycleHolder
-	ContextStepReselector          ContextStepReselector
-	initialProviderMessageCount    int
-	initialProviderPrefixSet       bool
-	providerAttemptState           *providerAttemptState
-	retryDynamicRefs               []dynamicSourceRef
-	dynamicInputs                  *loopDynamicInputs
-	contextStepFailure             func(error)
-	SessionType                    string
-	LiveToolStream                 bool
-	CanRequestUserInput            bool
-	SupportsImageInput             bool
-	SupportsFileInput              bool
-	SupportsToolCall               bool
-	InlineImages                   []sdk.ImagePart
+	// ModelMaxOutputTokens is the model's configured output cap; zero means unknown.
+	ModelMaxOutputTokens         int
+	RecoverContextBudget         func(context.Context, RunConfig) (RunConfig, bool, error)
+	ContextRecentProtectTokens   *int
+	ContextHistoryTokenEstimates []int
+	ContextTrimmableMessages     int
+	ContextCachePlan             contextfrag.CachePlan
+	ContextMutations             *contextfrag.MutationLedger
+	ContextDynamicMutators       []contextfrag.DynamicMutator
+	ContextLifecycle             *contextfrag.LifecycleHolder
+	ContextStepReselector        ContextStepReselector
+	initialProviderMessageCount  int
+	initialProviderPrefixSet     bool
+	providerAttemptState         *providerAttemptState
+	retryDynamicRefs             []dynamicSourceRef
+	dynamicInputs                *loopDynamicInputs
+	contextStepFailure           func(error)
+	SessionType                  string
+	LiveToolStream               bool
+	CanRequestUserInput          bool
+	SupportsImageInput           bool
+	SupportsFileInput            bool
+	SupportsToolCall             bool
+	InlineImages                 []sdk.ImagePart
 	// InlineAttachments carries non-image native attachment parts (documents
 	// as sdk.FilePart, small text files as wrapped sdk.TextPart) appended to
 	// the current user message. Images stay in InlineImages, which also feeds
@@ -215,7 +219,7 @@ type RunConfig struct {
 	Bot               BotInfo
 	Skills            []SkillEntry
 	LoopDetection     LoopDetectionConfig
-	Retry             RetryConfig
+	Retry             modelretry.Config
 	// StepIndexOffset lets an application-owned continuation of the same run
 	// keep durable step indexes monotonic when the step loop is restarted
 	// after a parked decision.

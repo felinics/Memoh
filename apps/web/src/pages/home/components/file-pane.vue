@@ -6,6 +6,7 @@
       :bot-id="botId"
       :file="fileInfo"
       :readonly="!canWrite"
+      :keyboard-active="workspaceTabs.activeId === tabId"
       @update:dirty="handleDirty"
     />
   </div>

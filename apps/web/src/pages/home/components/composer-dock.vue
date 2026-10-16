@@ -1,6 +1,7 @@
 <template>
-  <section>
+  <section class="chat-composer-dock">
     <Transition
+      :css="stackFades"
       enter-active-class="transition-all duration-150 ease-out"
       enter-from-class="opacity-0 translate-y-1"
       enter-to-class="opacity-100 translate-y-0"
@@ -14,12 +15,12 @@
         :approvals="approvals"
         :command-panel="commandPanel"
         :error-message="errorMessage"
-        :compacting="compacting"
         :usage-notice="usageNotice"
         class="mb-2"
         @select-command-item="emit('selectCommandItem', $event)"
         @dismiss-command="emit('dismissCommand')"
         @dismiss-usage="emit('dismissUsage')"
+        @dismiss-error="emit('dismissError')"
       />
     </Transition>
     <ChatUserInputForm
@@ -94,7 +95,6 @@ const props = defineProps<{
   commandPanel: CommandPanelData | null
   errorMessage: string
   pendingUserInput: UIUserInput | null
-  compacting?: boolean
   usageNotice?: UsageNotice | null
 }>()
 
@@ -102,12 +102,27 @@ const emit = defineEmits<{
   (e: 'selectCommandItem', item: CommandActionListItem): void
   (e: 'dismissCommand'): void
   (e: 'dismissUsage'): void
+  (e: 'dismissError'): void
   (e: 'revealComposer', opts: { focus?: boolean }): void
 }>()
 
 const stackVisible = computed(() => Boolean(
-  props.usageNotice || props.errorMessage || props.commandPanel || props.approvals.length || props.compacting,
+  props.usageNotice || props.errorMessage || props.commandPanel || props.approvals.length,
 ))
+
+// An error lands with the state change that produced it (a rolled-back first
+// send restores the welcome, the input and the error in one frame) and clears
+// the moment the next send starts, when the composer is already moving. A
+// stack holding only an error therefore appears and leaves as a plain cut.
+// Captured while the stack is shown, so its leave follows what it showed
+// rather than the props that just emptied it.
+const stackFades = ref(true)
+watch(() => [
+  stackVisible.value,
+  Boolean(props.errorMessage) && !props.commandPanel && !props.approvals.length && !props.compacting,
+] as const, ([visible, errorOnly]) => {
+  if (visible) stackFades.value = !errorOnly
+}, { immediate: true })
 
 // Box-tier mutex: while an ask_user request is pending the capsule owns the
 // slot and the composer hides (v-show so its textarea state survives); the

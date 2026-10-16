@@ -471,3 +471,20 @@ func TestDefaultTeamIDReferences(t *testing.T) {
 		}
 	}
 }
+
+// TestStandaloneChannelDoesNotOwnStorageBackends keeps the split Channel
+// process independent from Server's workspace and media filesystem. Channel
+// may use the storage port through internal RPC, but it must not assemble a
+// concrete local/container storage provider of its own.
+func TestStandaloneChannelDoesNotOwnStorageBackends(t *testing.T) {
+	root := repoRoot(t)
+	for _, dir := range []string{"cmd/channel", "cmd/internal/channel"} {
+		for _, file := range goFiles(t, root, dir) {
+			for _, imp := range imports(t, root, file) {
+				if isPackageOrChild(imp, modulePrefix+"internal/storage/providers") {
+					t.Errorf("%s imports %s: standalone Channel storage must go through the Server RPC", file, imp)
+				}
+			}
+		}
+	}
+}

@@ -80,7 +80,7 @@ func TestTurnSentinelsSurviveEnvelope(t *testing.T) {
 
 func TestTurnCatalogCodeSurvivesEnvelope(t *testing.T) {
 	sent := apperror.New(apperror.CodeBotNameTaken, map[string]string{"field": "name"})
-	wire := rpc.AppErrorStatus(sent)
+	wire := rpc.AnswerStatus(context.Background(), sent)
 	if wire == nil {
 		t.Fatal("catalog apperror not encoded")
 	}

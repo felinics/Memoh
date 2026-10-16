@@ -6,6 +6,10 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/context/compaction"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/job"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
@@ -71,25 +75,54 @@ func syncCompactionShouldRun(pressure, contextTokenBudget int) bool {
 
 func asyncCompactionInputTokens(rc resolvedContext, providerInputTokens int) int {
 	if rc.compactableTokensKnown {
-		return rc.compactableTokens
+		return max(rc.compactableTokens, rc.historyPressureTokens)
 	}
 	return providerInputTokens
 }
 
+// maybeCompact decides on the caller's goroutine whether this turn's pressure
+// calls for compaction, so a turn below the threshold starts no unit, and runs
+// the compaction as a background unit when it does.
 func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolvedContext, inputTokens int) {
+	plan, ok := s.planCompaction(ctx, req, rc, inputTokens)
+	if !ok {
+		return
+	}
+	job.Go(ctx, s.logger, "agent.compaction", job.Options{}, func(ctx context.Context) error {
+		return s.runCompaction(ctx, plan)
+	},
+		slog.String("bot_id", req.BotID),
+		slog.String("session_id", req.ThreadID),
+		slog.Int("input_tokens", plan.inputTokens),
+		slog.Int("threshold", plan.threshold),
+	)
+}
+
+// compactionPlan is what an automatic compaction trigger runs with.
+type compactionPlan struct {
+	req         ChatRequest
+	rc          resolvedContext
+	settings    settings.Settings
+	inputTokens int
+	threshold   int
+}
+
+// planCompaction reports whether the pressure crosses the automatic trigger.
+func (s *Service) planCompaction(ctx context.Context, req ChatRequest, rc resolvedContext, inputTokens int) (compactionPlan, bool) {
 	inputTokens = asyncCompactionInputTokens(rc, inputTokens)
 	if s.compactionService == nil || s.settingsService == nil {
 		s.logger.InfoContext(ctx, "compaction: skipped, service or settings nil")
-		return
+		return compactionPlan{}, false
 	}
 	botSettings, err := s.settingsService.GetBot(ctx, req.BotID)
 	if err != nil {
-		s.logger.WarnContext(ctx, "compaction: failed to load settings", slog.Any("error", err))
-		return
+		result := errlog.Event(ctx, "agent.compaction", errs.Wrap(err, "load compaction settings", slog.String("bot_id", req.BotID)), errlog.Options{})
+		s.logger.LogAttrs(ctx, result.Level, "compaction: failed to load settings", result.Attrs()...)
+		return compactionPlan{}, false
 	}
 	if !botSettings.CompactionEnabled {
 		s.logger.InfoContext(ctx, "compaction: skipped, disabled")
-		return
+		return compactionPlan{}, false
 	}
 	threshold := AutoCompactionThreshold(botSettings.CompactionThreshold, rc.contextTokenBudget)
 	if threshold <= 0 {
@@ -97,41 +130,37 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 			slog.Int("configured_threshold", botSettings.CompactionThreshold),
 			slog.Int("context_token_budget", rc.contextTokenBudget),
 		)
-		return
+		return compactionPlan{}, false
 	}
 	if !compaction.ShouldCompact(inputTokens, threshold) {
 		s.logger.InfoContext(ctx, "compaction: skipped, below threshold",
 			slog.Int("input_tokens", inputTokens),
 			slog.Int("threshold", threshold),
 		)
-		return
+		return compactionPlan{}, false
 	}
+	return compactionPlan{req: req, rc: rc, settings: botSettings, inputTokens: inputTokens, threshold: threshold}, true
+}
 
-	s.logger.InfoContext(ctx, "compaction: triggering",
-		slog.String("bot_id", req.BotID),
-		slog.String("session_id", req.ThreadID),
-		slog.Int("input_tokens", inputTokens),
-		slog.Int("threshold", threshold),
-	)
-
-	cfg, err := s.buildCompactionConfig(ctx, req, botSettings, inputTokens, rc.model.ID)
+// runCompaction is the body of one automatic compaction unit.
+func (s *Service) runCompaction(ctx context.Context, plan compactionPlan) error {
+	cfg, err := s.buildCompactionConfig(ctx, plan.req, plan.settings, plan.inputTokens, plan.rc.model.ID)
 	if err != nil {
-		s.logger.WarnContext(ctx, "compaction: failed to build config", slog.Any("error", err))
-		return
+		return errs.Wrap(err, "build compaction config")
 	}
 	if cfg.ModelID == "" {
 		// buildCompactionConfig returns an empty cfg when no compaction model
 		// is configured or the configured one is disabled. Skip the trigger
 		// so the compaction service doesn't run hooks + fail on empty UUIDs.
-		return
+		job.Annotate(ctx, slog.String("skipped", "no_compaction_model"))
+		return nil
 	}
-	cfg.TargetTokens = compactionTargetTokens(botSettings.CompactionTargetPercent, rc.contextTokenBudget)
+	cfg.TargetTokens = compactionTargetTokens(plan.settings.CompactionTargetPercent, plan.rc.contextTokenBudget)
+	cfg.ProtectedSources = compactionProtectedSources(plan.req)
 	cfg.AllowFrontierFusion = true
-	cfg.ContextWindowTokens = rc.contextTokenBudget
-	cfg.HardPressure = syncCompactionShouldRun(inputTokens, rc.contextTokenBudget)
-	if err := s.drainCompactionBacklog(ctx, cfg); err != nil {
-		s.logger.ErrorContext(ctx, "compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.Any("error", err))
-	}
+	cfg.ContextWindowTokens = plan.rc.contextTokenBudget
+	cfg.HardPressure = syncCompactionShouldRun(plan.inputTokens, plan.rc.contextTokenBudget)
+	return s.drainCompactionBacklog(ctx, cfg)
 }
 
 // drainCompactionBacklog runs bounded consecutive passes until the backlog is
@@ -169,6 +198,17 @@ func (s *Service) runCompactionPass(ctx context.Context, cfg compaction.TriggerC
 // compact) leaves this turn's context untouched: the request proceeds as-is,
 // possibly still above the threshold, and the next turn re-evaluates.
 func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputTokens, contextTokenBudget int, turnModelID string) compaction.Result {
+	return s.runSyncCompaction(ctx, req, inputTokens, contextTokenBudget, turnModelID, syncCompactionShouldRun(inputTokens, contextTokenBudget), 0)
+}
+
+func (s *Service) runBudgetCompactionSync(ctx context.Context, req ChatRequest, inputTokens, historyBudget int, modelID string) compaction.Result {
+	return s.runSyncCompaction(ctx, req, inputTokens, historyBudget, modelID, true, historyBudget)
+}
+
+func (s *Service) runSyncCompaction(ctx context.Context, req ChatRequest, inputTokens, contextTokenBudget int, turnModelID string, hardPressure bool, historyBudget int) compaction.Result {
+	if ctx.Err() != nil {
+		return compaction.Result{}
+	}
 	if s.compactionService == nil || s.settingsService == nil {
 		s.logger.WarnContext(ctx, "compaction sync: skipped, service or settings nil")
 		return compaction.Result{}
@@ -192,9 +232,12 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 		// disabled means there is nothing to compact.
 		return compaction.Result{}
 	}
+	cfg.ProtectedSources = compactionProtectedSources(req)
+	cfg.AllowFrontierFusion = true
 	cfg.TargetTokens = syncBackstopTargetTokens(botSettings.CompactionTargetPercent, contextTokenBudget)
 	cfg.ContextWindowTokens = contextTokenBudget
-	cfg.HardPressure = syncCompactionShouldRun(inputTokens, contextTokenBudget)
+	cfg.HardPressure = hardPressure
+	cfg.HistoryBudgetTokens = historyBudget
 
 	s.logger.InfoContext(ctx, "compaction sync: running synchronously",
 		slog.String("bot_id", req.BotID),
@@ -270,4 +313,18 @@ func (s *Service) buildCompactionConfig(ctx context.Context, req ChatRequest, bo
 	cfg.TotalInputTokens = inputTokens
 	cfg.HTTPClient = s.compactionHTTPClient
 	return cfg, nil
+}
+
+// compactionProtectedSources is the current input a compaction must keep raw.
+// Discuss callers pass the protected suffix their admission chose, so older
+// unconsumed input stays compactable.
+func compactionProtectedSources(req ChatRequest) []turn.ContextMessageSource {
+	sources := append([]turn.ContextMessageSource(nil), req.discussCurrentSources...)
+	if req.ExternalMessageID != "" {
+		sources = append(sources, turn.ContextMessageSource{Kind: "external", ID: req.ExternalMessageID, Current: true})
+	}
+	if req.RequiredHistoryMessageID != "" {
+		sources = append(sources, turn.ContextMessageSource{Kind: "history", ID: req.RequiredHistoryMessageID, Current: true})
+	}
+	return sources
 }

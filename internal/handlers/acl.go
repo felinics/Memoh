@@ -10,8 +10,11 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/acl"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel/identities"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	identitypkg "github.com/felinics/memoh/internal/identity"
 )
 
@@ -50,9 +53,9 @@ func (h *ACLHandler) Register(e *echo.Echo) {
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} acl.ListRulesResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/acl/rules [get].
 func (h *ACLHandler) ListRules(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -61,7 +64,7 @@ func (h *ACLHandler) ListRules(c echo.Context) error {
 	}
 	items, err := h.service.ListRules(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list rules")
 	}
 	return c.JSON(http.StatusOK, acl.ListRulesResponse{Items: items})
 }
@@ -73,9 +76,9 @@ func (h *ACLHandler) ListRules(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body acl.CreateRuleRequest true "Rule payload"
 // @Success 201 {object} acl.Rule
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/acl/rules [post].
 func (h *ACLHandler) CreateRule(c echo.Context) error {
 	botID, actorID, err := h.requireManageAccess(c)
@@ -84,7 +87,7 @@ func (h *ACLHandler) CreateRule(c echo.Context) error {
 	}
 	var req acl.CreateRuleRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	item, err := h.service.CreateRule(c.Request().Context(), botID, actorID, req)
 	if err != nil {
@@ -101,21 +104,21 @@ func (h *ACLHandler) CreateRule(c echo.Context) error {
 // @Param rule_id path string true "Rule ID"
 // @Param payload body acl.UpdateRuleRequest true "Rule payload"
 // @Success 200 {object} acl.Rule
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/acl/rules/{rule_id} [put].
 func (h *ACLHandler) UpdateRule(c echo.Context) error {
 	if _, _, err := h.requireManageAccess(c); err != nil {
 		return err
 	}
-	ruleID := strings.TrimSpace(c.Param("rule_id"))
-	if ruleID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "rule_id is required")
+	ruleID, err := httpx.RequiredParam(c, "rule_id")
+	if err != nil {
+		return err
 	}
 	var req acl.UpdateRuleRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	item, err := h.service.UpdateRule(c.Request().Context(), ruleID, req)
 	if err != nil {
@@ -131,20 +134,20 @@ func (h *ACLHandler) UpdateRule(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param rule_id path string true "Rule ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/acl/rules/{rule_id} [delete].
 func (h *ACLHandler) DeleteRule(c echo.Context) error {
 	if _, _, err := h.requireManageAccess(c); err != nil {
 		return err
 	}
-	ruleID := strings.TrimSpace(c.Param("rule_id"))
-	if ruleID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "rule_id is required")
+	ruleID, err := httpx.RequiredParam(c, "rule_id")
+	if err != nil {
+		return err
 	}
 	if err := h.service.DeleteRule(c.Request().Context(), ruleID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "delete rule")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -155,9 +158,9 @@ func (h *ACLHandler) DeleteRule(c echo.Context) error {
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} acl.DefaultEffectResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/acl/default-effect [get].
 func (h *ACLHandler) GetDefaultEffect(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -166,7 +169,7 @@ func (h *ACLHandler) GetDefaultEffect(c echo.Context) error {
 	}
 	effect, err := h.service.GetDefaultEffect(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "get default effect")
 	}
 	return c.JSON(http.StatusOK, acl.DefaultEffectResponse{DefaultEffect: effect})
 }
@@ -178,9 +181,9 @@ func (h *ACLHandler) GetDefaultEffect(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body acl.DefaultEffectResponse true "Default effect payload"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/acl/default-effect [put].
 func (h *ACLHandler) SetDefaultEffect(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -189,13 +192,13 @@ func (h *ACLHandler) SetDefaultEffect(c echo.Context) error {
 	}
 	var req acl.DefaultEffectResponse
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if err := h.service.SetDefaultEffect(c.Request().Context(), botID, req.DefaultEffect); err != nil {
 		if errors.Is(err, acl.ErrInvalidEffect) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return apperror.FieldInvalid("default_effect", err)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "set default effect")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -208,9 +211,9 @@ func (h *ACLHandler) SetDefaultEffect(c echo.Context) error {
 // @Param q query string false "Search query"
 // @Param limit query int false "Max results"
 // @Success 200 {object} acl.ChannelIdentityCandidateListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/acl/channel-identities [get].
 func (h *ACLHandler) SearchChannelIdentities(c echo.Context) error {
 	if _, _, err := h.requireManageAccess(c); err != nil {
@@ -218,7 +221,7 @@ func (h *ACLHandler) SearchChannelIdentities(c echo.Context) error {
 	}
 	items, err := h.identityService.Search(c.Request().Context(), strings.TrimSpace(c.QueryParam("q")), parseLimit(c.QueryParam("limit")))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "search channel identities")
 	}
 	result := make([]acl.ChannelIdentityCandidate, 0, len(items))
 	for _, item := range items {
@@ -240,9 +243,9 @@ func (h *ACLHandler) SearchChannelIdentities(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param channel_identity_id path string true "Channel Identity ID"
 // @Success 200 {object} acl.ObservedConversationCandidateListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/acl/channel-identities/{channel_identity_id}/conversations [get].
 func (h *ACLHandler) ListObservedConversations(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -251,11 +254,11 @@ func (h *ACLHandler) ListObservedConversations(c echo.Context) error {
 	}
 	channelIdentityID := strings.TrimSpace(c.Param("channel_identity_id"))
 	if err := identitypkg.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("channel_identity_id", err)
 	}
 	items, err := h.service.ListObservedConversationsByChannelIdentity(c.Request().Context(), botID, channelIdentityID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list observed conversations by channel identity")
 	}
 	return c.JSON(http.StatusOK, acl.ObservedConversationCandidateListResponse{Items: items})
 }
@@ -267,22 +270,22 @@ func (h *ACLHandler) ListObservedConversations(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param channel_type path string true "Channel type (e.g. telegram, discord)"
 // @Success 200 {object} acl.ObservedConversationCandidateListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/acl/channel-types/{channel_type}/conversations [get].
 func (h *ACLHandler) ListObservedConversationsByChannelType(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
 	if err != nil {
 		return err
 	}
-	channelType := strings.TrimSpace(c.Param("channel_type"))
-	if channelType == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "channel_type is required")
+	channelType, err := httpx.RequiredParam(c, "channel_type")
+	if err != nil {
+		return err
 	}
 	items, err := h.service.ListObservedConversationsByChannelType(c.Request().Context(), botID, channelType)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list observed conversations by channel type")
 	}
 	return c.JSON(http.StatusOK, acl.ObservedConversationCandidateListResponse{Items: items})
 }
@@ -292,9 +295,9 @@ func (h *ACLHandler) requireManageAccess(c echo.Context) (string, string, error)
 	if err != nil {
 		return "", "", err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", "", err
 	}
 	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, actorID, botID); err != nil {
 		return "", "", err
@@ -303,12 +306,15 @@ func (h *ACLHandler) requireManageAccess(c echo.Context) (string, string, error)
 }
 
 func (*ACLHandler) mapRuleError(err error) error {
-	if errors.Is(err, acl.ErrInvalidRuleSubject) ||
-		errors.Is(err, acl.ErrInvalidSourceScope) ||
-		errors.Is(err, acl.ErrInvalidEffect) {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	switch {
+	case errors.Is(err, acl.ErrInvalidRuleSubject):
+		return apperror.FieldInvalid("channel_identity_id", err)
+	case errors.Is(err, acl.ErrInvalidSourceScope):
+		return apperror.FieldInvalid("source_scope", err)
+	case errors.Is(err, acl.ErrInvalidEffect):
+		return apperror.FieldInvalid("effect", err)
 	}
-	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	return errs.Wrap(err, "map rule error")
 }
 
 func parseLimit(raw string) int {

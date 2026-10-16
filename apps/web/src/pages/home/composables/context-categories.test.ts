@@ -41,14 +41,14 @@ describe('computeContextComposition', () => {
 
     expect(computeContextComposition(input)).toEqual({
       categories: [
-        { id: 'system', tokens: 110, colorClass: 'bg-accent-gray' },
-        { id: 'rules', tokens: 40, colorClass: 'bg-accent-green' },
-        { id: 'tools', tokens: 60, colorClass: 'bg-accent-purple' },
-        { id: 'skills', tokens: 110, colorClass: 'bg-accent-yellow' },
-        { id: 'memory', tokens: 160, colorClass: 'bg-accent-teal' },
-        { id: 'summary', tokens: 170, colorClass: 'bg-accent-brown' },
-        { id: 'conversation', tokens: 490, colorClass: 'bg-accent-orange' },
-        { id: 'other', tokens: 395, colorClass: 'bg-accent-blue' },
+        { id: 'system', tokens: 110 },
+        { id: 'rules', tokens: 40 },
+        { id: 'tools', tokens: 60 },
+        { id: 'skills', tokens: 110 },
+        { id: 'memory', tokens: 160 },
+        { id: 'summary', tokens: 170 },
+        { id: 'conversation', tokens: 490 },
+        { id: 'other', tokens: 395 },
       ],
       totalTokens: 1535,
     })
@@ -59,8 +59,8 @@ describe('computeContextComposition', () => {
 
     expect(computeContextComposition(input)).toEqual({
       categories: [
-        { id: 'system', tokens: 10, colorClass: 'bg-accent-gray' },
-        { id: 'other', tokens: 7, colorClass: 'bg-accent-blue' },
+        { id: 'system', tokens: 10 },
+        { id: 'other', tokens: 7 },
       ],
       totalTokens: 17,
     })
@@ -73,7 +73,7 @@ describe('computeContextComposition', () => {
     })
 
     expect(computeContextComposition(input)).toEqual({
-      categories: [{ id: 'tools', tokens: 80, colorClass: 'bg-accent-purple' }],
+      categories: [{ id: 'tools', tokens: 80 }],
       totalTokens: 80,
     })
   })
@@ -82,7 +82,7 @@ describe('computeContextComposition', () => {
     const input = usage({ tool_defs: [toolDef('anthropic', 30)] })
 
     expect(computeContextComposition(input)).toEqual({
-      categories: [{ id: 'tools', tokens: 30, colorClass: 'bg-accent-purple' }],
+      categories: [{ id: 'tools', tokens: 30 }],
       totalTokens: 30,
     })
   })
@@ -123,7 +123,7 @@ describe('computeContextComposition', () => {
     })
 
     expect(computeContextComposition(input)?.categories).toEqual([
-      { id: 'memory', tokens: 25, colorClass: 'bg-accent-teal' },
+      { id: 'memory', tokens: 25 },
     ])
   })
 

@@ -167,7 +167,6 @@ func (a *DiscordAdapter) getOrCreateSession(token, configID string) (*discordgo.
 
 	session, err := discordgo.New("Bot " + token)
 	if err != nil {
-		a.logger.Error("create session failed", slog.String("config_id", configID), slog.Any("error", err))
 		return nil, err
 	}
 
@@ -613,25 +612,44 @@ func (a *DiscordAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig
 	}, nil
 }
 
-func (a *DiscordAdapter) ProcessingStarted(_ context.Context, cfg channel.ChannelConfig, _ channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
+// discordTypingRefreshInterval re-sends the typing indicator before Discord
+// clears it, about ten seconds after it was sent.
+const discordTypingRefreshInterval = 8 * time.Second
+
+var _ channel.ProcessingStatusRefresher = (*DiscordAdapter)(nil)
+
+func (a *DiscordAdapter) ProcessingStarted(ctx context.Context, cfg channel.ChannelConfig, _ channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
+	return channel.ProcessingStatusHandle{}, a.sendTyping(ctx, cfg, info)
+}
+
+// ProcessingRefreshInterval implements channel.ProcessingStatusRefresher.
+func (*DiscordAdapter) ProcessingRefreshInterval() time.Duration {
+	return discordTypingRefreshInterval
+}
+
+// ProcessingRefresh re-sends the typing indicator so it stays visible for
+// the whole turn.
+func (a *DiscordAdapter) ProcessingRefresh(ctx context.Context, cfg channel.ChannelConfig, _ channel.InboundMessage, info channel.ProcessingStatusInfo, _ channel.ProcessingStatusHandle) error {
+	return a.sendTyping(ctx, cfg, info)
+}
+
+func (a *DiscordAdapter) sendTyping(ctx context.Context, cfg channel.ChannelConfig, info channel.ProcessingStatusInfo) error {
 	chatID := strings.TrimSpace(info.ReplyTarget)
 	if chatID == "" {
-		return channel.ProcessingStatusHandle{}, nil
+		return nil
 	}
 
 	discordCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
-		return channel.ProcessingStatusHandle{}, err
+		return err
 	}
 
 	session, err := a.getOrCreateSession(discordCfg.BotToken, cfg.ID)
 	if err != nil {
-		return channel.ProcessingStatusHandle{}, err
+		return err
 	}
 
-	// Discord typing indicator
-	err = session.ChannelTyping(chatID)
-	return channel.ProcessingStatusHandle{}, err
+	return session.ChannelTyping(chatID, discordgo.WithContext(ctx))
 }
 
 func (*DiscordAdapter) ProcessingCompleted(_ context.Context, _ channel.ChannelConfig, _ channel.InboundMessage, _ channel.ProcessingStatusInfo, _ channel.ProcessingStatusHandle) error {

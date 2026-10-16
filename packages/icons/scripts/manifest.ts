@@ -102,6 +102,15 @@ const channelPlatforms: string[] = [
 ]
 
 // ---------------------------------------------------------------------------
+// Social Platforms
+// ---------------------------------------------------------------------------
+
+const socialPlatforms: string[] = [
+  // x: Simple Icons "x" (https://simpleicons.org), CC0-1.0
+  'x',
+]
+
+// ---------------------------------------------------------------------------
 // Export
 // ---------------------------------------------------------------------------
 
@@ -109,4 +118,5 @@ export const manifest: string[] = [
   ...llmProviders,
   ...searchProviders,
   ...channelPlatforms,
+  ...socialPlatforms,
 ]

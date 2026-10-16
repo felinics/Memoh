@@ -36,6 +36,14 @@ func (f *failingControls) SetRuntimeMode(context.Context, turn.RuntimeControlReq
 	return turn.RuntimeModeState{}, f.err
 }
 
+func (f *failingControls) RuntimeModel(context.Context, turn.RuntimeControlRequest) (turn.RuntimeModelState, error) {
+	return turn.RuntimeModelState{}, f.err
+}
+
+func (f *failingControls) SetRuntimeModel(context.Context, turn.RuntimeControlRequest) (turn.RuntimeModelState, error) {
+	return turn.RuntimeModelState{}, f.err
+}
+
 func (f *failingControls) ExecuteRuntimeCommand(context.Context, turn.RuntimeControlRequest) (turn.RuntimeCommandResult, error) {
 	return turn.RuntimeCommandResult{}, f.err
 }
