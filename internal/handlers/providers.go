@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -352,7 +353,7 @@ func (h *ProvidersHandler) Test(c echo.Context) error {
 // @Accept json
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
-// @Param request body providers.ImportModelsRequest false "Explicit defaults for unknown custom chat models"
+// @Param request body providers.ImportModelsRequest false "Explicit defaults for unknown custom chat models, or the catalog models to import"
 // @Success 200 {object} providers.ImportModelsResponse
 // @Failure 400 {object} server.Problem
 // @Failure 404 {object} server.Problem
@@ -382,6 +383,9 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	}
 	if !models.IsLLMClientType(models.ClientType(provider.ClientType)) {
 		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("import models is not supported for speech providers"))
+	}
+	if len(req.Models) > 0 {
+		return c.JSON(http.StatusOK, h.importCatalogModels(ctx, id, req.Models))
 	}
 
 	remoteModels, err := h.service.FetchRemoteModels(ctx, id)
@@ -449,6 +453,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 				continue
 			}
 			h.logger.WarnContext(c.Request().Context(), "failed to import model", slog.String("model_id", m.ID), slog.Any("error", err))
+			resp.Skipped++
 			continue
 		}
 
@@ -460,6 +465,88 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, resp)
+}
+
+// importCatalogModels creates the catalog models a provider lacks, disabled,
+// and refreshes what the catalog describes on the ones it already has. The
+// user's choices stay: whether a model is enabled, its name and description.
+func (h *ProvidersHandler) importCatalogModels(ctx context.Context, providerID string, catalog []providers.CatalogModel) providers.ImportModelsResponse {
+	resp := providers.ImportModelsResponse{Models: make([]string, 0)}
+	disabled := false
+	for _, m := range catalog {
+		modelID := strings.TrimSpace(m.ModelID)
+		if modelID == "" {
+			resp.Skipped++
+			continue
+		}
+		name := strings.TrimSpace(m.Name)
+		_, err := h.modelsService.Create(ctx, models.AddRequest{
+			ModelID:    modelID,
+			Name:       name,
+			ProviderID: providerID,
+			Type:       models.ModelTypeChat,
+			Enable:     &disabled,
+			Config:     m.Config,
+		})
+		switch {
+		case err == nil:
+			resp.Created++
+			resp.Models = append(resp.Models, modelID)
+		case errors.Is(err, models.ErrModelIDAlreadyExists):
+			if h.refreshCatalogModel(ctx, providerID, modelID, m.Config) {
+				resp.Updated++
+			} else {
+				resp.Skipped++
+			}
+		default:
+			h.logger.WarnContext(ctx, "failed to import catalog model", slog.String("model_id", modelID), slog.Any("error", err))
+			resp.Skipped++
+		}
+	}
+	return resp
+}
+
+func (h *ProvidersHandler) refreshCatalogModel(ctx context.Context, providerID, modelID string, catalog models.ModelConfig) bool {
+	existing, err := h.modelsService.GetByProviderAndModelID(ctx, providerID, modelID)
+	if err != nil || existing.Type != models.ModelTypeChat {
+		return false
+	}
+	refreshed, changed := refreshFromCatalog(modelID, existing.Config, catalog)
+	if !changed {
+		return false
+	}
+	if _, err := h.modelsService.UpdateByProviderAndModelID(ctx, providerID, modelID, models.UpdateRequest{
+		ModelID:    existing.ModelID,
+		Name:       existing.Name,
+		ProviderID: existing.ProviderID,
+		Type:       existing.Type,
+		Config:     refreshed,
+	}); err != nil {
+		h.logger.WarnContext(ctx, "failed to refresh catalog model", slog.String("model_id", modelID), slog.Any("error", err))
+		return false
+	}
+	return true
+}
+
+// refreshFromCatalog replaces what the catalog describes: modalities, limits,
+// tool calling, structured output and reasoning. A description is filled in
+// only when the model has none. The result is compared in its stored form,
+// since that is what the row holds and what an update would write.
+func refreshFromCatalog(modelID string, existing, catalog models.ModelConfig) (models.ModelConfig, bool) {
+	out := existing
+	out.Modalities = catalog.Modalities
+	out.ContextWindow = catalog.ContextWindow
+	out.MaxOutputTokens = catalog.MaxOutputTokens
+	out.ToolCall = catalog.ToolCall
+	out.StructuredOutput = catalog.StructuredOutput
+	out.Reasoning = catalog.Reasoning
+	if out.Description == nil || strings.TrimSpace(*out.Description) == "" {
+		out.Description = catalog.Description
+	}
+	out = out.StoredForm(modelID)
+	before, _ := json.Marshal(existing)
+	after, _ := json.Marshal(out)
+	return out, string(before) != string(after)
 }
 
 func allowCustomModelCapabilityDefaults(provider providers.GetResponse) bool {
@@ -477,6 +564,14 @@ func allowCustomModelCapabilityDefaults(provider providers.GetResponse) bool {
 		}
 		source, _ := metadata["source"].(string)
 		if strings.TrimSpace(source) != "" {
+			return false
+		}
+	}
+	// A provider created from the gallery records its catalog entry and its
+	// models.dev source. Its endpoint-only models are as unknown as a template
+	// provider's: the catalog did not list them, so nothing says what they do.
+	for _, key := range []string{"catalog", "source"} {
+		if value, _ := provider.Metadata[key].(string); strings.TrimSpace(value) != "" {
 			return false
 		}
 	}

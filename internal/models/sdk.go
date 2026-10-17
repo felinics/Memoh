@@ -301,6 +301,14 @@ func openAIEffortParam(rc *ReasoningConfig) (string, bool) {
 		if effort == "" {
 			effort = ReasoningEffortMedium
 		}
+		if effort == reasoning.EffortEnabled {
+			// A switch without tiers resolves to the enabled token, which has no
+			// OpenAI spelling: the enum holds tiers and, from gpt-5.1 on, "none".
+			// Leaving the field out lets the provider's default stand, which for
+			// such a model is thinking on; the token itself is rejected by every
+			// OpenAI-shaped endpoint.
+			return "", false
+		}
 		return effort, true
 	case rc.Disabled:
 		// OffEffort is "none" when the model advertised that it can be turned off,

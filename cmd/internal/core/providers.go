@@ -1265,8 +1265,8 @@ func startBackgroundTaskCleanup(lc fx.Lifecycle, mgr *background.Manager) {
 
 // inboundTranscriptionResult moved to the shared Channel module.
 
-func provideProvidersService(log *slog.Logger, queries dbstore.Queries, cfg config.Config) *providers.Service {
-	return providers.NewService(log, queries, defaultProviderOAuthCallbackURL(), cfg.Registry.ProvidersPath())
+func provideProvidersService(log *slog.Logger, queries dbstore.Queries) *providers.Service {
+	return providers.NewService(log, queries, defaultProviderOAuthCallbackURL())
 }
 
 func defaultProviderOAuthCallbackURL() string {

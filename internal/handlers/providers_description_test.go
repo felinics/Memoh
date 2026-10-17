@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"slices"
 	"testing"
 
@@ -223,5 +224,99 @@ func TestMergeDiscoveredConfigLeavesNonReasoningModelsAlone(t *testing.T) {
 	}
 	if _, changed := mergeManagedDiscoveredConfig(existing, discovered); changed {
 		t.Fatal("a managed non-reasoning model changed on a refresh that discovered nothing new")
+	}
+}
+
+func TestRefreshFromCatalogKeepsTheUsersChoices(t *testing.T) {
+	t.Parallel()
+
+	own := "My notes"
+	window := 200000
+	existing := models.ModelConfig{
+		Description: &own,
+		ToolCall:    false,
+		Reasoning:   &models.ModelReasoning{Efforts: []string{"low"}},
+	}
+	catalogDescription := "Catalog text"
+	catalog := models.ModelConfig{
+		Description:   &catalogDescription,
+		ToolCall:      true,
+		ContextWindow: &window,
+		Modalities:    &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityImage}},
+		Reasoning:     &models.ModelReasoning{Efforts: []string{"low", "high"}, Dialect: reasoning.DialectAdaptive},
+	}
+
+	got, changed := refreshFromCatalog("m", existing, catalog)
+	if !changed || !got.ToolCall || got.ContextWindow == nil || *got.ContextWindow != window || !got.Accepts(models.ModalityImage) {
+		t.Fatalf("refreshed = %+v, changed %v", got, changed)
+	}
+	if got.Description == nil || *got.Description != own {
+		t.Fatalf("description = %v, want the user's", got.Description)
+	}
+	if _, again := refreshFromCatalog("m", got, catalog); again {
+		t.Fatal("a second refresh with the same catalog reported a change")
+	}
+
+	empty, _ := refreshFromCatalog("m", models.ModelConfig{}, catalog)
+	if empty.Description == nil || *empty.Description != catalogDescription {
+		t.Fatalf("description = %v, want the catalog's when the model has none", empty.Description)
+	}
+}
+
+// A provider created from the gallery records its catalog entry and its
+// models.dev source in its metadata. Its endpoint-only models are as unknown
+// as a template provider's and must not receive protocol-wide capability
+// guesses.
+func TestCatalogMetadataDisablesImplicitCapabilityDefaults(t *testing.T) {
+	t.Parallel()
+
+	for _, metadata := range []map[string]any{
+		{"catalog": "openai", "source": "openai"},
+		{"catalog": "ollama"},
+		{"source": "deepinfra"},
+	} {
+		if allowCustomModelCapabilityDefaults(providers.GetResponse{Metadata: metadata}) {
+			t.Fatalf("provider with metadata %v must not receive implicit capability defaults", metadata)
+		}
+	}
+	if !allowCustomModelCapabilityDefaults(providers.GetResponse{Metadata: map[string]any{"catalog": " ", "other": "x"}}) {
+		t.Fatal("blank catalog metadata must not count as a catalog")
+	}
+}
+
+// A catalog refresh compares the stored row with what the request carried.
+// Both go through the same decoding, so a catalog entry with blank or repeated
+// values reads as the row it produced and a second refresh changes nothing.
+func TestRefreshFromCatalogIsStableAcrossNormalization(t *testing.T) {
+	t.Parallel()
+
+	var req providers.ImportModelsRequest
+	raw := `{"models":[{"model_id":"m","config":{"schema_version":2,"tool_call":true,"reasoning":{"efforts":["","low","low","high"]}}}]}`
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		t.Fatal(err)
+	}
+	catalog := req.Models[0].Config
+	stored, changed := refreshFromCatalog("m", models.ModelConfig{}, catalog)
+	if !changed || stored.Reasoning == nil || !slices.Equal(stored.Reasoning.Efforts, []string{"low", "high"}) {
+		t.Fatalf("first refresh = %+v changed %v", stored, changed)
+	}
+	if _, again := refreshFromCatalog("m", stored, catalog); again {
+		t.Fatal("a second refresh with the same catalog entry reported a change")
+	}
+}
+
+// Create and Update store a config with the dialect its model id implies when
+// the catalog declares none. A refresh must compare against that stored form,
+// or every Claude thinking row reads as changed on every refresh.
+func TestRefreshFromCatalogComparesTheStoredForm(t *testing.T) {
+	t.Parallel()
+
+	catalog := models.ModelConfig{ToolCall: true, Reasoning: &models.ModelReasoning{}}
+	stored := catalog.StoredForm("claude-opus-5-thinking")
+	if stored.Reasoning == nil || stored.Reasoning.Dialect != reasoning.DialectAdaptive {
+		t.Fatalf("stored form = %+v, want the adaptive dialect inferred", stored.Reasoning)
+	}
+	if _, changed := refreshFromCatalog("claude-opus-5-thinking", stored, catalog); changed {
+		t.Fatal("a refresh with the catalog entry the row was created from reported a change")
 	}
 }

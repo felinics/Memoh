@@ -93,7 +93,6 @@
 # Domain-specific repository scripts. Unlisted setup and release scripts keep
 # the maintainers default declared above.
 /scripts/db-*.sh                          @felinics/backend
-/scripts/sync-openrouter-models.sh        @felinics/backend
 /scripts/display-*                        @felinics/runtime
 /scripts/gen-bridge-mtls.sh                @felinics/runtime
 /scripts/prepare-dev-workspace-image.sh    @felinics/runtime

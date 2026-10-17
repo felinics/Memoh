@@ -98,7 +98,6 @@ tmp/
 /bridge
 /channel
 /gen-bridge-mtls
-/synccaps
 # `go build` run inside a cmd/<name>/ package drops the binary next to the
 # sources; the 65MB cmd/agent/agent blob still in history (#583) was
 # accidentally committed that way.
@@ -106,7 +105,6 @@ tmp/
 /cmd/bridge/bridge
 /cmd/channel/channel
 /cmd/gen-bridge-mtls/gen-bridge-mtls
-/cmd/synccaps/synccaps
 
 # Rust build artifacts (Cargo workspace at the repo root)
 /target/

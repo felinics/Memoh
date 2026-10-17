@@ -31,6 +31,7 @@
           size="sm"
           :mode="(models?.length ?? 0) > 0 ? 'refresh' : 'import'"
           :client-type="clientType"
+          :source="source"
         />
         <CreateModel
           v-if="!managed"
@@ -41,7 +42,14 @@
       </div>
     </div>
 
-    <template v-if="models && models.length > 0">
+    <InlineLoadingRow
+      v-if="previewLoading"
+      surface="card-row"
+    >
+      {{ $t('models.sourcePreviewLoading') }}
+    </InlineLoadingRow>
+
+    <template v-if="!previewLoading && models && models.length > 0">
       <div
         v-if="displayedModels.length > 0"
         class="pb-2"
@@ -53,6 +61,7 @@
           :delete-loading="deleteModelLoading"
           :search-aligned="searchVisible"
           :managed="managed"
+          :preview="preview"
           @edit="(model) => $emit('edit', model)"
           @delete="(id) => $emit('delete', id)"
         />
@@ -110,7 +119,7 @@
     </template>
 
     <Empty
-      v-else
+      v-else-if="!previewLoading"
       class="flex flex-col items-center justify-center px-4 py-10"
     >
       <EmptyHeader>
@@ -133,6 +142,7 @@ import { ref, computed, watch } from 'vue'
 import {
   Empty,
   EmptyDescription,
+  InlineLoadingRow,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
@@ -163,6 +173,11 @@ const props = defineProps<{
   deleteModelLoading: boolean
   managed?: boolean
   clientType?: string
+  // models.dev provider the models are imported from.
+  source?: string
+  // The models are a read-only preview of the source's catalog.
+  preview?: boolean
+  previewLoading?: boolean
   ensureProviderId?: () => Promise<string>
 }>()
 

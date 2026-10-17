@@ -41,7 +41,7 @@
                 <ProviderIcon
                   v-if="getPresetById(option.value)?.icon"
                   :icon="getPresetById(option.value)?.icon ?? ''"
-                  size="1em"
+                  :monochrome="isMonochromeLogo(getPresetById(option.value)?.icon)"
                   class="size-4 shrink-0"
                 />
                 <span
@@ -203,6 +203,8 @@ import { providerPresets } from '@/constants/provider-presets'
 import type { ProviderPreset } from '@/constants/provider-presets'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { templateConfigFields, templateDefaultConfig } from '@/utils/provider-template'
+import { findModelSource, isMonochromeLogo, modelSourceLogo, modelSourceLogoForKey, modelSourceNeedsApiKey, providerSourceMetadata, TEMPLATE_SOURCES, type ModelSource } from '@/constants/model-sources'
+import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
 import { suggestProviderName } from './provider-presets'
 
 const open = defineModel<boolean>('open')
@@ -212,6 +214,10 @@ const props = withDefaults(defineProps<{
   presetDomain?: 'llm' | 'video' | 'speech' | 'transcription'
   templates?: ProvidertemplatesGetResponse[]
   initialTemplateId?: string
+  // models.dev providers to offer alongside the templates; a template one of them
+  // replaces is left out. initialSource preselects one by its source id.
+  sources?: readonly ModelSource[]
+  initialSource?: string
   importModels?: (providerId: string, defaultCompatibilities?: string[]) => Promise<{ created?: number, skipped?: number } | null | undefined>
 }>(), {
   providers: () => [],
@@ -220,44 +226,75 @@ const props = withDefaults(defineProps<{
 })
 const { t } = useI18n()
 const { run } = useDialogMutation()
+const { importProviderModels } = useProviderModelCatalog()
 
 type SelectablePreset = ProviderPreset & {
   templateId?: string
   templateFieldKeys?: string[]
+  // Gallery entry id, for a preset taken from the source list.
+  modelSource?: string
+}
+
+function sourcePresetId(source: string) {
+  return `source:${source}`
+}
+
+const sourcePresets = computed<SelectablePreset[]>(() => (props.sources ?? []).map(item => ({
+  id: sourcePresetId(item.id),
+  name: item.name,
+  clientType: item.client_type,
+  baseUrl: item.base_url,
+  icon: modelSourceLogo(item),
+  source: item.source ?? item.id,
+  modelSource: item.id,
+  requiresApiKey: modelSourceNeedsApiKey(item),
+  requiresBaseUrl: true,
+  domain: 'llm',
+})))
+
+function templatePreset(template: ProvidertemplatesGetResponse): SelectablePreset {
+  const uiPreset = providerPresets.find(preset => preset.source === template.source)
+  const fields = templateConfigFields(template)
+  const defaults = templateDefaultConfig(template)
+  const apiKeyField = fields.find(field => field.key === 'api_key')
+  const baseUrlField = fields.find(field => field.key === 'base_url')
+  return {
+    id: template.id!,
+    templateId: template.id!,
+    name: template.name ?? template.key ?? '',
+    registryName: uiPreset?.registryName,
+    clientType: template.driver ?? uiPreset?.clientType ?? '',
+    baseUrl: typeof defaults.base_url === 'string' ? defaults.base_url : (uiPreset?.baseUrl ?? ''),
+    // A model provider shows its models.dev logo; the other domains keep their own.
+    icon: props.presetDomain === 'llm' ? modelSourceLogoForKey(template.key ?? '') : (template.icon ?? uiPreset?.icon),
+    source: template.source ?? uiPreset?.source ?? '',
+    requiresApiKey: apiKeyField?.required ?? false,
+    requiresBaseUrl: baseUrlField?.required ?? false,
+    templateFieldKeys: fields.map(field => field.key),
+    domain: props.presetDomain,
+  }
 }
 
 const customPresetId = 'custom'
+// The gallery list when given, with any template it has not replaced; the
+// domain's templates otherwise (voice, video); the built-in presets last.
 const availablePresets = computed<SelectablePreset[]>(() => {
-  if (props.templates) {
-    return props.templates
-      .filter(template => template.id && template.domain === props.presetDomain)
-      .map((template) => {
-        const uiPreset = providerPresets.find(preset => preset.source === template.source)
-        const fields = templateConfigFields(template)
-        const defaults = templateDefaultConfig(template)
-        const apiKeyField = fields.find(field => field.key === 'api_key')
-        const baseUrlField = fields.find(field => field.key === 'base_url')
-        return {
-          id: template.id!,
-          templateId: template.id!,
-          name: template.name ?? template.key ?? '',
-          registryName: uiPreset?.registryName,
-          clientType: template.driver ?? uiPreset?.clientType ?? '',
-          baseUrl: typeof defaults.base_url === 'string' ? defaults.base_url : (uiPreset?.baseUrl ?? ''),
-          icon: template.icon ?? uiPreset?.icon,
-          source: template.source ?? uiPreset?.source ?? '',
-          requiresApiKey: apiKeyField?.required ?? false,
-          requiresBaseUrl: baseUrlField?.required ?? false,
-          templateFieldKeys: fields.map(field => field.key),
-          domain: props.presetDomain,
-        }
-      })
+  const templates = (props.templates ?? []).filter(template => template.id && template.domain === props.presetDomain)
+  if (props.sources) {
+    const kept = templates.filter(template => !TEMPLATE_SOURCES[template.key ?? ''])
+    return [...kept.map(templatePreset), ...sourcePresets.value].sort((a, b) => a.name.localeCompare(b.name))
   }
-  return providerPresets.filter(preset => (preset.domain ?? 'llm') === props.presetDomain)
+  if (props.templates) return templates.map(templatePreset)
+  return providerPresets
+    .filter(preset => (preset.domain ?? 'llm') === props.presetDomain)
+    .map(preset => props.presetDomain === 'llm' ? { ...preset, icon: modelSourceLogoForKey(preset.id) } : preset)
 })
 // Only the LLM domain offers a free-form "custom" entry; the others (video,
 // speech, transcription) always start on a concrete preset.
 const defaultPresetId = computed(() => {
+  if (props.initialSource && availablePresets.value.some(preset => preset.modelSource === props.initialSource)) {
+    return sourcePresetId(props.initialSource)
+  }
   if (props.initialTemplateId && availablePresets.value.some(preset => preset.templateId === props.initialTemplateId)) {
     return props.initialTemplateId
   }
@@ -342,30 +379,35 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
         if (preset.icon) {
           payload.icon = preset.icon
         }
-        payload.metadata = {
-          preset: {
-            id: preset.id,
-            source: preset.source,
-          },
-        }
+        const entry = preset.modelSource ? findModelSource(preset.modelSource) : undefined
+        payload.metadata = entry
+          ? providerSourceMetadata(entry)
+          : {
+              preset: {
+                id: preset.id,
+                source: preset.source,
+              },
+            }
       }
       const response = await postProviders({ body: payload, throwOnError: true })
       result = response.data
     }
     if (data.auto_import && result?.id) {
       try {
-        const defaultCompatibilities = preset
-          ? undefined
-          : suggestedModelCompatibilities(data.client_type)
-        const importResult = props.importModels
-          ? await props.importModels(result.id, defaultCompatibilities)
-          : (await postProvidersByIdImportModels({
-              path: { id: result.id },
-              ...(defaultCompatibilities !== undefined && {
-                body: { default_compatibilities: defaultCompatibilities },
-              }),
-              throwOnError: true,
-            })).data
+        // A preset taken from the gallery list imports through its source; any
+        // other preset keeps the template catalog and a custom provider gets
+        // the protocol's defaults.
+        const importResult = preset?.modelSource
+          ? await importProviderModels(result)
+          : props.importModels
+            ? await props.importModels(result.id, preset ? undefined : suggestedModelCompatibilities(data.client_type))
+            : (await postProvidersByIdImportModels({
+                path: { id: result.id },
+                ...(!preset && {
+                  body: { default_compatibilities: suggestedModelCompatibilities(data.client_type) },
+                }),
+                throwOnError: true,
+              })).data
         if (importResult) {
           toast.success(t('models.importSuccess', {
             created: importResult.created,

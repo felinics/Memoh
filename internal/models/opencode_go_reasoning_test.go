@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -15,39 +15,47 @@ import (
 
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/reasoning"
-	"github.com/felinics/memoh/internal/registry"
 )
 
-// Exercise the shipped catalog, capability projection, resolver and real SDK
-// serialization together: a selectable control must reach the advertised wire.
+// formerTemplate is a chat model of a provider template Memoh shipped before
+// models.dev, as kept in testdata.
+type formerTemplate struct {
+	Provider   string          `json:"provider"`
+	ClientType string          `json:"client_type"`
+	ModelID    string          `json:"model_id"`
+	Config     json.RawMessage `json:"config"`
+}
+
+// Exercise the former OpenCode Go catalog, capability projection, resolver and
+// real SDK serialization together: a selectable control must reach the
+// advertised wire.
 func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
-	defs, err := registry.Load(slog.Default(), "../../conf/providers")
+	raw, err := os.ReadFile("testdata/v1_chat_templates.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var catalog registry.ProviderDefinition
-	for _, def := range defs {
-		if def.ClientType == "opencode-go" {
-			catalog = def
-		}
+	var all []formerTemplate
+	if err := json.Unmarshal(raw, &all); err != nil {
+		t.Fatal(err)
 	}
-	if len(catalog.Models) != 29 {
-		t.Fatalf("catalog models = %d", len(catalog.Models))
+	const clientType = "opencode-go"
+	catalog := slices.DeleteFunc(all, func(entry formerTemplate) bool {
+		return entry.ClientType != clientType
+	})
+	if len(catalog) != 29 {
+		t.Fatalf("catalog models = %d", len(catalog))
 	}
-	for _, entry := range catalog.Models {
+	for _, entry := range catalog {
 		t.Run(entry.ModelID, func(t *testing.T) {
-			raw, err := json.Marshal(entry.Config)
-			if err != nil {
-				t.Fatal(err)
-			}
-			// Shipped templates are version 1 configs; read them the way a stored
+			raw := entry.Config
+			// Former templates are version 1 configs; read them the way a stored
 			// row is read.
 			config, err := models.DecodeModelConfig(raw, models.ConfigContext{ModelID: entry.ModelID, Type: models.ModelTypeChat})
 			if err != nil {
 				t.Fatal(err)
 			}
 			model := models.Model{ModelID: entry.ModelID, Config: config}
-			opts := model.ReasoningOptions(catalog.ClientType)
+			opts := model.ReasoningOptions(clientType)
 			if !opts.Supported {
 				t.Fatal("reasoning capability missing")
 			}
@@ -73,7 +81,7 @@ func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
 							output, _ := body["output_config"].(map[string]any)
 							responseReasoning, _ := body["reasoning"].(map[string]any)
 							wireEffort := body["reasoning_effort"]
-							switch models.ResolveModelClientType(catalog.ClientType, entry.ModelID) {
+							switch models.ResolveModelClientType(clientType, entry.ModelID) {
 							case "openai-responses":
 								if r.URL.Path != "/responses" {
 									t.Errorf("path = %s", r.URL.Path)
@@ -125,7 +133,7 @@ func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
 						}))
 						defer server.Close()
 						cfg := models.SDKModelConfig{
-							ModelID: entry.ModelID, ClientType: catalog.ClientType, BaseURL: server.URL, HTTPClient: server.Client(),
+							ModelID: entry.ModelID, ClientType: clientType, BaseURL: server.URL, HTTPClient: server.Client(),
 							ReasoningConfig:  reasoning.ResolveConfig(model.ResolveThinkingMode(), model.Config.ReasoningEfforts(), opts, "", effort),
 							ReasoningDialect: model.Config.ReasoningDialect(), ReasoningOffSupport: model.Config.ReasoningOffSupport(),
 							ThinkingBudgetMin: model.Config.ThinkingBudgetMin(), ThinkingBudgetMax: model.Config.ThinkingBudgetMax(),

@@ -43,7 +43,7 @@ func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 // Create adds a new model to the database.
 func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, error) {
 	model := req.toModel(ResolveEnable(req.Enable, true))
-	model.Config = inferUndeclaredDialect(normalizeModelConfig(model.Config), model.ModelID)
+	model.Config = model.Config.StoredForm(model.ModelID)
 	if err := s.fillEmbeddingDimensions(ctx, &model); err != nil {
 		return AddResponse{}, err
 	}
@@ -293,7 +293,7 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 	}
 
 	model := req.toModel(ResolveEnable(req.Enable, current.Enable))
-	model.Config = inferUndeclaredDialect(normalizeModelConfig(model.Config), model.ModelID)
+	model.Config = model.Config.StoredForm(model.ModelID)
 	if err := s.fillEmbeddingDimensions(ctx, &model); err != nil {
 		return GetResponse{}, err
 	}
@@ -355,7 +355,7 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 	}
 
 	model := req.toModel(ResolveEnable(req.Enable, current.Enable))
-	model.Config = inferUndeclaredDialect(normalizeModelConfig(model.Config), model.ModelID)
+	model.Config = model.Config.StoredForm(model.ModelID)
 	if err := s.fillEmbeddingDimensions(ctx, &model); err != nil {
 		return GetResponse{}, err
 	}
