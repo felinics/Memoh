@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 func TestCompleteAgentTaskStoresResultAndWakesWaiter(t *testing.T) {
@@ -180,5 +183,24 @@ func TestDetachedAgentRetainsExplicitExecutionBudget(t *testing.T) {
 	cancel()
 	if ctx.Err() != nil {
 		t.Fatal("transient caller cancellation leaked into detached task")
+	}
+}
+
+// A detached task opens an auxiliary turn scope of its own: a workspace
+// verdict reached by the task does not reach the turn that started it, and
+// the task does not inherit the turn's verdict.
+func TestDetachedTaskContextStartsItsOwnAuxiliaryTurn(t *testing.T) {
+	turn := hooks.WithAuxiliaryTurn(context.Background())
+	taskCtx, cancel := detachedTaskContext(turn)
+	defer cancel()
+	bridge.MarkWorkspaceUnavailable(taskCtx)
+	if bridge.WorkspaceUnavailableFromContext(turn) {
+		t.Fatal("the task's workspace verdict reached the parent turn")
+	}
+	bridge.MarkWorkspaceUnavailable(turn)
+	laterCtx, laterCancel := detachedTaskContext(turn)
+	defer laterCancel()
+	if bridge.WorkspaceUnavailableFromContext(laterCtx) {
+		t.Fatal("a detached task inherited the parent turn's verdict")
 	}
 }

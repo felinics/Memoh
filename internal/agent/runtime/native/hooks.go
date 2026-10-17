@@ -14,7 +14,6 @@ import (
 	"github.com/felinics/memoh/internal/agent/step"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/hooks"
-	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 type hookToolRunner struct {
@@ -210,6 +209,18 @@ func (a *Agent) applyBeforeModelCallHook(ctx context.Context, cfg RunConfig, ste
 		if errors.Is(err, hooks.ErrDenied) || res.Decision == hooks.DecisionDeny {
 			return cfg, fmt.Errorf("%w: %s", hooks.ErrDenied, firstHookText(res.Reason, err.Error()))
 		}
+		if errors.Is(err, hooks.ErrConfigUnavailable) {
+			// The turn runs without tools and its prompt says hooks did not
+			// run; a configuration that cannot be read does not block it.
+			if a.logger != nil {
+				a.logger.WarnContext(ctx, "before model call hook skipped: hooks configuration unavailable",
+					slog.String("bot_id", cfg.Identity.BotID),
+					slog.String("session_id", cfg.Identity.SessionID),
+					slog.Any("error", err),
+				)
+			}
+			return cfg, nil
+		}
 		return cfg, fmt.Errorf("before model call hook failed: %w", err)
 	}
 	if strings.TrimSpace(res.AppendContext) != "" {
@@ -296,28 +307,10 @@ func (a *Agent) runAfterModelCallHook(ctx context.Context, cfg RunConfig, record
 }
 
 func (a *Agent) hookWorkspace(ctx context.Context, botID string) hooks.WorkspaceInfo {
-	info := hooks.WorkspaceInfo{
-		CWD:     hooks.DefaultWorkDir,
-		Runtime: bridge.WorkspaceBackendContainer,
+	if a == nil {
+		return hooks.TurnWorkspaceInfo(ctx, nil, botID)
 	}
-	if a == nil || a.bridgeProvider == nil {
-		return info
-	}
-	provider, ok := a.bridgeProvider.(bridge.WorkspaceInfoProvider)
-	if !ok {
-		return info
-	}
-	workspaceInfo, err := provider.WorkspaceInfo(ctx, botID)
-	if err != nil {
-		return info
-	}
-	if strings.TrimSpace(workspaceInfo.DefaultWorkDir) != "" {
-		info.CWD = workspaceInfo.DefaultWorkDir
-	}
-	if strings.TrimSpace(workspaceInfo.Backend) != "" {
-		info.Runtime = workspaceInfo.Backend
-	}
-	return info
+	return hooks.TurnWorkspaceInfo(ctx, a.bridgeProvider, botID)
 }
 
 func execContext(fallback context.Context, execCtx *toolexec.ToolExecContext) context.Context {

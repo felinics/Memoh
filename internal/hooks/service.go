@@ -48,6 +48,9 @@ func NewService(log *slog.Logger, provider bridge.Provider) *Service {
 	}
 }
 
+// Load reads the hooks configuration of the bot's current workspace. A
+// missing file is no configuration: Load reports it with exists=false and
+// does not create one, so reading hooks never depends on writing them.
 func (s *Service) Load(ctx context.Context, botID string) (Config, bool, error) {
 	if s == nil || s.provider == nil {
 		return Config{Version: 1, Enabled: boolPtr(false)}, false, nil
@@ -59,14 +62,8 @@ func (s *Service) Load(ctx context.Context, botID string) (Config, bool, error) 
 	rc, err := client.ReadRaw(ctx, DefaultConfigPath)
 	if err != nil {
 		if errors.Is(err, bridge.ErrNotFound) {
-			if err := client.WriteFile(ctx, DefaultConfigPath, emptyConfigFile); err != nil {
-				return Config{}, false, err
-			}
 			cfg, err := ParseConfig(emptyConfigFile)
-			if err != nil {
-				return Config{}, false, err
-			}
-			return cfg, true, nil
+			return cfg, false, err
 		}
 		return Config{}, false, err
 	}
@@ -82,15 +79,37 @@ func (s *Service) Load(ctx context.Context, botID string) (Config, bool, error) 
 	return cfg, true, nil
 }
 
+// LoadEffective returns the configuration hooks run with. Failing to read or
+// parse it is ErrConfigUnavailable; failing to identify the bot's workspace
+// target (a database error, for example) is returned as is, since that is not
+// a workspace fault a turn may continue without. Within a turn scoped by
+// WithTurnSnapshot the first result is reused, so every hook event of the
+// turn sees the same configuration and a stalled workspace is waited on at
+// most once.
 func (s *Service) LoadEffective(ctx context.Context, botID string) (Config, bool, error) {
 	targetID, err := s.currentWorkspaceTargetID(ctx, botID)
 	if err != nil {
 		return Config{}, false, err
 	}
 	ctx = bridge.WithWorkspaceTarget(ctx, targetID)
-	userCfg, exists, err := s.Load(ctx, botID)
+	if snapshot := turnSnapshotFrom(ctx); snapshot != nil {
+		return snapshot.load(strings.TrimSpace(botID)+"\x00"+targetID, func() (Config, bool, error) {
+			return s.loadEffective(ctx, botID)
+		})
+	}
+	return s.loadEffective(ctx, botID)
+}
+
+func (s *Service) loadEffective(ctx context.Context, botID string) (Config, bool, error) {
+	if bridge.WorkspaceUnavailableFromContext(ctx) {
+		return Config{}, false, fmt.Errorf("%w: %w", ErrConfigUnavailable, bridge.ErrUnavailable)
+	}
+	loadCtx, cancel := bridge.AuxiliaryContext(ctx)
+	userCfg, exists, err := s.Load(loadCtx, botID)
+	cancel()
 	if err != nil {
-		return Config{}, exists, err
+		bridge.MarkWorkspaceUnavailableOn(ctx, err)
+		return Config{}, exists, fmt.Errorf("%w: %w", ErrConfigUnavailable, err)
 	}
 	userCfg.applyDefaults()
 

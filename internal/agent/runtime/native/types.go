@@ -218,8 +218,11 @@ type RunConfig struct {
 	Identity          SessionContext
 	Bot               BotInfo
 	Skills            []SkillEntry
-	LoopDetection     LoopDetectionConfig
-	Retry             modelretry.Config
+	// LoadNotices are service-authored notices about auxiliary context the
+	// turn could not load, rendered into the system prompt.
+	LoadNotices   []string
+	LoopDetection LoopDetectionConfig
+	Retry         modelretry.Config
 	// StepIndexOffset lets an application-owned continuation of the same run
 	// keep durable step indexes monotonic when the step loop is restarted
 	// after a parked decision.
@@ -301,6 +304,9 @@ type (
 type SystemFile struct {
 	Filename string
 	Content  string
+	// LoadStatus is SystemFileUnavailable when the file could not be read;
+	// empty otherwise, including for a missing file.
+	LoadStatus string
 }
 
 func mustMarshal(v any) json.RawMessage {

@@ -7,6 +7,8 @@ import (
 
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 // ApplyUserMessageHookAndPersistUserTurn applies the normal user-message hook
@@ -19,6 +21,11 @@ func (s *Service) ApplyUserMessageHookAndPersistUserTurn(ctx context.Context, re
 		if err != nil {
 			return req, messagepkg.Message{}, err
 		}
+	} else {
+		// The caller resolved the target already; the hook read below still
+		// belongs to a turn scope so it is bounded and recorded like any
+		// other auxiliary read.
+		ctx = hooks.WithAuxiliaryTurn(workspace.WithWorkspaceTarget(ctx, req.WorkspaceTarget.TargetID))
 	}
 	if req.RawQuery == "" {
 		req.RawQuery = strings.TrimSpace(req.Query)

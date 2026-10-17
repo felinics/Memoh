@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/felinics/memoh/internal/hooks"
 )
 
 // TaskKind identifies what kind of work a background task tracks.
@@ -315,8 +317,11 @@ func (m *Manager) StartSpawnTask(parentCtx context.Context, botID, sessionID, de
 
 // Detaching a child removes transient caller cancellation, but an explicit
 // execution deadline (for example a schedule budget) still bounds descendants.
+// The task also gets an auxiliary turn scope of its own: a workspace verdict
+// or hooks snapshot must not travel between the parent turn and a task that
+// outlives it.
 func detachedTaskContext(parent context.Context) (context.Context, context.CancelFunc) {
-	base := context.WithoutCancel(parent)
+	base := hooks.WithNewAuxiliaryTurn(context.WithoutCancel(parent))
 	if deadline, ok := parent.Deadline(); ok {
 		return context.WithDeadline(base, deadline)
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/bots"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/workspace"
 )
@@ -57,6 +58,9 @@ type UserInputResponseInput struct {
 }
 
 func (s *Service) respondUserInput(ctx context.Context, input UserInputResponseInput, eventCh chan<- WSStreamEvent) error {
+	// Executing, storing and continuing the resumed turn share one auxiliary
+	// scope: a workspace found unavailable by one stage is not waited on again.
+	ctx = hooks.WithAuxiliaryTurn(ctx)
 	committed, err := s.CommitUserInputResponse(ctx, input)
 	if err != nil {
 		return err
@@ -352,7 +356,9 @@ func (s *Service) storeUserInputResultAndContinue(
 	eventCh chan<- WSStreamEvent,
 ) error {
 	req = withLocalWebUserInputReplyTarget(req)
-	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
+	// The stored result and the continuation that follows share one
+	// auxiliary scope, so the workspace is resolved and waited on once.
+	ctx = hooks.WithAuxiliaryTurn(workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID))
 	target, err := s.resolveWorkspaceTargetSnapshot(ctx, input.BotID, req.WorkspaceTargetID)
 	if err != nil {
 		return err
@@ -396,7 +402,9 @@ func (s *Service) continueUserInputSession(
 	eventCh chan<- WSStreamEvent,
 ) error {
 	req = withLocalWebUserInputReplyTarget(req)
-	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
+	// One scope for resolving, preparing and running the continuation, so a
+	// workspace found unavailable while resolving is not waited on again.
+	ctx = hooks.WithAuxiliaryTurn(workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID))
 	resolved, err := s.ResolveRunConfig(ctx,
 		input.BotID,
 		req.SessionID,

@@ -1048,7 +1048,7 @@ func TestRunPinsWorkspaceTargetAcrossLoadAndExecution(t *testing.T) {
 	}
 }
 
-func TestLoadCreatesEmptyConfigWhenMissing(t *testing.T) {
+func TestLoadDoesNotCreateConfigWhenMissing(t *testing.T) {
 	t.Parallel()
 
 	server := &hookBridgeTestServer{files: map[string][]byte{}}
@@ -1059,41 +1059,17 @@ func TestLoadCreatesEmptyConfigWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if !exists {
-		t.Fatal("Load exists = false, want true after creating default config")
+	if exists {
+		t.Fatal("Load exists = true, want false for a missing config")
 	}
-	if cfg.Version != 1 {
-		t.Fatalf("version = %d, want 1", cfg.Version)
+	if cfg.Version != 1 || len(cfg.Hooks) != 0 {
+		t.Fatalf("cfg = %+v, want an empty version 1 config", cfg)
 	}
-	if cfg.Enabled == nil || !*cfg.Enabled {
-		t.Fatalf("enabled = %v, want true", cfg.Enabled)
-	}
-	if len(cfg.Hooks) != 0 {
-		t.Fatalf("hooks len = %d, want 0", len(cfg.Hooks))
-	}
-
 	server.mu.Lock()
-	raw := append([]byte(nil), server.files[DefaultConfigPath]...)
+	_, written := server.files[DefaultConfigPath]
 	server.mu.Unlock()
-	if len(raw) == 0 {
-		t.Fatalf("default hooks file was not written at %s", DefaultConfigPath)
-	}
-	var written struct {
-		Version int   `json:"version"`
-		Enabled bool  `json:"enabled"`
-		Hooks   []any `json:"hooks"`
-	}
-	if err := json.Unmarshal(raw, &written); err != nil {
-		t.Fatalf("written config is not JSON: %v", err)
-	}
-	if written.Version != 1 || !written.Enabled {
-		t.Fatalf("written config = %+v, want version 1 and enabled true", written)
-	}
-	if written.Hooks == nil {
-		t.Fatal("written config omitted hooks field, want empty hooks array")
-	}
-	if len(written.Hooks) != 0 {
-		t.Fatalf("written hooks len = %d, want 0", len(written.Hooks))
+	if written {
+		t.Fatal("Load wrote a hooks config; reading hooks must not depend on writing them")
 	}
 }
 

@@ -93,6 +93,9 @@ const (
 var (
 	ErrDenied      = errors.New("hook denied action")
 	ErrUnsupported = errors.New("unsupported hook action")
+	// ErrConfigUnavailable means the hooks configuration could not be read
+	// or parsed, so which hooks apply is unknown.
+	ErrConfigUnavailable = errors.New("hooks configuration unavailable")
 )
 
 var supportedEvents = map[string]struct{}{
