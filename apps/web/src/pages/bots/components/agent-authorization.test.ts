@@ -73,3 +73,20 @@ it('keeps manual OAuth token entry as a separate choice', async () => {
   expect(root.querySelector('[data-manual-token]')).not.toBeNull()
   expect(actions.start).not.toHaveBeenCalled()
 })
+
+it('offers Grok Build an account that signs in after creation by default and an API key as the other choice', async () => {
+  app.unmount()
+  mount('grok-build')
+  const select = root.querySelector('select')!
+  expect(Array.from(select.options).map(option => option.value)).toEqual(['grok_account', 'api_key'])
+  // Only Grok writes its login, on the Agent's own process: nothing to stage,
+  // nothing to wait for before the Bot can be created.
+  expect(root.querySelector('[data-device-login]')).toBeNull()
+  expect(actions.start).not.toHaveBeenCalled()
+  expect(status).toHaveBeenLastCalledWith({ ready: true, busy: false, id: '', auth: 'grok_account' })
+  select.value = 'api_key'; select.dispatchEvent(new Event('change'))
+  await nextTick()
+  root.querySelector('[data-manual-token]')!.dispatchEvent(new Event('save'))
+  expect(actions.start).toHaveBeenLastCalledWith('xai_api_key', '')
+  expect(status).toHaveBeenLastCalledWith({ ready: false, busy: false, id: '', auth: 'api_key' })
+})

@@ -141,7 +141,7 @@ func TestStoreRoundPassesSourceRefsToMemory(t *testing.T) {
 func TestPersistRuntimeRoundSkipsMemoryFormation(t *testing.T) {
 	t.Parallel()
 
-	for _, kind := range []runtimekind.Kind{runtimekind.Codex, runtimekind.ClaudeCode, runtimekind.ACPAgent} {
+	for _, kind := range []runtimekind.Kind{runtimekind.Codex, runtimekind.ClaudeCode, runtimekind.GrokBuild, runtimekind.ACPAgent} {
 		for _, eagerUser := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/eager_user=%t", kind, eagerUser), func(t *testing.T) {
 				memory := &storeRoundMemoryProvider{afterChat: make(chan memprovider.AfterChatRequest, 1)}

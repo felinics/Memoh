@@ -41,6 +41,19 @@ func memohToolsHTTPMCPServer(rawURL string, session mcpgw.ToolSessionContext) ac
 	}
 }
 
+// MemohToolsMCPServer names the Memoh tool gateway for a session whose route
+// resolves the caller's identity itself, so no identity headers travel with
+// it. It carries the identifier form of the name: an agent that qualifies
+// tool names by server (`server__tool`) drops every tool of a server whose
+// name is not an identifier. Permission preflight recognizes both forms.
+func MemohToolsMCPServer(url string) acp.McpServer {
+	return acp.McpServer{Http: &acp.McpServerHttpInline{
+		Name:    memohToolsMCPServerSlug,
+		Url:     strings.TrimSpace(url),
+		Headers: []acp.HttpHeader{},
+	}}
+}
+
 func memohToolsHTTPHeaders(session mcpgw.ToolSessionContext) []acp.HttpHeader {
 	headers := make([]acp.HttpHeader, 0, 11)
 	add := func(name, value string) {
@@ -71,6 +84,11 @@ func memohToolsHTTPHeaders(session mcpgw.ToolSessionContext) []acp.HttpHeader {
 	}
 	return headers
 }
+
+// IsMemohToolsMCPServerName reports a name an agent may use for the Memoh
+// tool gateway, in either of the forms MemohToolsMCPServer and the
+// identity-header variant give it.
+func IsMemohToolsMCPServerName(name string) bool { return isMemohToolsMCPServerName(name) }
 
 func isMemohToolsMCPServerName(name string) bool {
 	name = strings.TrimSpace(name)

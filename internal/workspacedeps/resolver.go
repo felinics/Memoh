@@ -17,7 +17,7 @@ var (
 // BuiltinLauncherCommands is the command binding of the built-in direct runtimes.
 // It contains no recipes and remains available when the remote catalog is empty.
 func BuiltinLauncherCommands() map[string]string {
-	return map[string]string{"codex": "codex", "claude-code": "claude"}
+	return map[string]string{"codex": "codex", "claude-code": "claude", "grok": "grok"}
 }
 
 // ResolveLauncher is read-only. Missing dependencies require an administrator

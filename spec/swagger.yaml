@@ -582,6 +582,7 @@ definitions:
         enum:
         - codex
         - claude-code
+        - grok-build
         type: string
       secret:
         additionalProperties:
@@ -7589,10 +7590,11 @@ paths:
     post:
       consumes:
       - application/json
-      description: Starts Codex device authorization or Claude browser authorization,
-        or encrypts a supplied API key or Claude OAuth token. No Bot or workspace
-        is created. Ready means the credential has been staged; API keys and manually
-        supplied tokens are not probed against the provider.
+      description: 'Starts Codex device authorization or Claude browser authorization,
+        or encrypts a supplied API key or Claude OAuth token. A Grok account cannot
+        be staged: it signs in on the Agent itself. No Bot or workspace is created.
+        Ready means the credential has been staged; API keys and manually supplied
+        tokens are not probed against the provider.'
       parameters:
       - description: Authorization request
         in: body
@@ -7627,7 +7629,7 @@ paths:
           description: Service Unavailable
           schema:
             $ref: '#/definitions/server.Problem'
-      summary: Authorize an Agent account before creating a Bot
+      summary: Authorize an Agent account independently of a Bot
       tags:
       - agent-authorizations
   /agent-authorizations/{id}:
@@ -8828,8 +8830,8 @@ paths:
   /bots/{bot_id}/agents/{id}/login/device/authorize:
     post:
       description: The Agent's own process obtains the device code; the user opens
-        the URL and confirms the code there. Only runtimes that sign in this way (Codex)
-        accept it.
+        the URL and confirms the code there. Only runtimes that sign in this way (Codex,
+        Grok Build) accept it.
       parameters:
       - description: Bot ID
         in: path

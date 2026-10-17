@@ -14,11 +14,12 @@ import (
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/runtimekind"
 	sessiontest "github.com/felinics/memoh/internal/testutil/sessionruntime"
 )
 
 func TestInlineRuntimeDecisionClosesOutputWithoutFinishingProducer(t *testing.T) {
-	for _, runtimeType := range []string{session.RuntimeClaudeCode, session.RuntimeCodex, session.RuntimeACPAgent} {
+	for _, runtimeType := range []string{session.RuntimeClaudeCode, session.RuntimeCodex, string(runtimekind.GrokBuild), session.RuntimeACPAgent} {
 		for _, canceled := range []bool{false, true} {
 			t.Run(runtimeType+map[bool]string{false: "/submit", true: "/cancel"}[canceled], func(t *testing.T) {
 				ctx := context.Background()

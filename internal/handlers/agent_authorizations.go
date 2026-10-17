@@ -37,8 +37,8 @@ func (h *AgentAuthorizationHandler) Register(e *echo.Echo) {
 }
 
 // Create godoc
-// @Summary Authorize an Agent account before creating a Bot
-// @Description Starts Codex device authorization or Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.
+// @Summary Authorize an Agent account independently of a Bot
+// @Description Starts Codex device authorization or Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. A Grok account cannot be staged: it signs in on the Agent itself. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.
 // @Tags agent-authorizations
 // @Accept json
 // @Produce json

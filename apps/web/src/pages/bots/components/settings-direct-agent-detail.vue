@@ -100,9 +100,9 @@
       </SettingsRow>
     </SettingsSection>
 
-    <!-- An account that signs in on the Agent's own process: the runtime
-         obtains the device code and writes its login, which Memoh then keeps
-         in the credential store. -->
+    <!-- Codex and Grok Build sign their account in on the Agent's own
+         process: the runtime obtains the device code and writes its login,
+         which Memoh then keeps in the credential store. -->
     <SettingsSection
       v-if="deviceLoginAuth"
       :title="$t('bots.agent.account')"

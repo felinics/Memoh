@@ -310,6 +310,23 @@ const { data: agentData, isLoading: agentsLoading } = useQuery({
 })
 const agents = computed<BotagentsBotAgent[]>(() => agentData.value?.items ?? [])
 
+// `openAgent=<id>` lands on one Agent's detail, as the create flow does for
+// an Agent that still has to sign in; the query is consumed once the list
+// holds the Agent.
+const openRequested = computed(() => route.name === 'bot-detail' && route.query.tab === 'agents'
+  ? String(route.query.openAgent ?? '')
+  : '')
+watch([openRequested, agents], async ([agentId, list]) => {
+  const agent = agentId ? list.find(item => item.id === agentId) : undefined
+  if (!agent) return
+  await nextTick()
+  if (openRequested.value !== agentId) return
+  openAgent(agent)
+  const query = { ...route.query }
+  delete query.openAgent
+  await router.replace({ query })
+}, { immediate: true, flush: 'post' })
+
 const selectedAgent = computed(() => agents.value.find(agent => agent.id === selectedID.value) ?? null)
 const selectedProfile = computed(() => {
   const provider = botAgentProvider(selectedAgent.value)

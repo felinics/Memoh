@@ -104,8 +104,9 @@ func RunFlow(ctx context.Context, svc FlowService, flow FlowRequest) (FlowResult
 // RunRuntimeFlow delivers a runtime-owned approval to the user. The runtime
 // has already decided to ask: Memoh policy must never silently grant it.
 // Codex and Claude Code call this directly, and the ACP client does for an
-// agent that owns approval; Native and other ACP agents keep RunFlow policy
-// evaluation. Pending delivery, timeout and cancellation share the lifecycle.
+// agent that owns approval, such as Grok Build; Native and other ACP agents
+// keep RunFlow policy evaluation. Pending delivery, timeout and cancellation
+// share the lifecycle.
 func RunRuntimeFlow(ctx context.Context, svc FlowService, flow FlowRequest) (FlowResult, error) {
 	waitTimeout := flow.WaitTimeout
 	if waitTimeout <= 0 {

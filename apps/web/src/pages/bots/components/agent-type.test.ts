@@ -12,6 +12,6 @@ describe('agentTypeItems', () => {
   // would duplicate that segment — both are skipped, never rendered.
   it('skips profiles that collide with the reserved Memoh segment or a direct runtime', () => {
     const items = agentTypeItems([profile('Memoh'), profile('Claude-Code'), profile('gemini')])
-    expect(items.map(item => item.value)).toEqual([MEMOH_AGENT_VALUE, 'codex', 'claude-code', 'gemini'])
+    expect(items.map(item => item.value)).toEqual([MEMOH_AGENT_VALUE, 'codex', 'claude-code', 'grok-build', 'gemini'])
   })
 })

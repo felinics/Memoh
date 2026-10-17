@@ -91,6 +91,16 @@ it('cancels a pending sign-in through the Agent', async () => {
   expect(api.poll).toHaveBeenCalledTimes(polls)
 })
 
+it('signs a Grok account in through the same flow with Grok Build\'s own copy', async () => {
+  mount('grok-build', 'grok_account')
+  expect(panel()!.dataset.auth).toBe('grok_account')
+  connect()
+  await vi.advanceTimersByTimeAsync(0)
+  api.poll.mockResolvedValueOnce({ data: { status: 'success' } })
+  await vi.advanceTimersByTimeAsync(2000)
+  expect(api.toastSuccess).toHaveBeenCalledWith('bots.agent.grokLoginSuccess')
+})
+
 it('keeps the Codex account on the same sign-in and shows its usage once connected', () => {
   mount('codex', 'chatgpt', true)
   expect(panel()!.dataset.auth).toBe('chatgpt')

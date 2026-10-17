@@ -34,7 +34,7 @@ const docTemplate = `{
         },
         "/agent-authorizations": {
             "post": {
-                "description": "Starts Codex device authorization or Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.",
+                "description": "Starts Codex device authorization or Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. A Grok account cannot be staged: it signs in on the Agent itself. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.",
                 "consumes": [
                     "application/json"
                 ],
@@ -44,7 +44,7 @@ const docTemplate = `{
                 "tags": [
                     "agent-authorizations"
                 ],
-                "summary": "Authorize an Agent account before creating a Bot",
+                "summary": "Authorize an Agent account independently of a Bot",
                 "parameters": [
                     {
                         "description": "Authorization request",
@@ -2104,7 +2104,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/agents/{id}/login/device/authorize": {
             "post": {
-                "description": "The Agent's own process obtains the device code; the user opens the URL and confirms the code there. Only runtimes that sign in this way (Codex) accept it.",
+                "description": "The Agent's own process obtains the device code; the user opens the URL and confirms the code there. Only runtimes that sign in this way (Codex, Grok Build) accept it.",
                 "tags": [
                     "external-agents"
                 ],
@@ -18075,7 +18075,8 @@ const docTemplate = `{
                     "type": "string",
                     "enum": [
                         "codex",
-                        "claude-code"
+                        "claude-code",
+                        "grok-build"
                     ]
                 },
                 "secret": {

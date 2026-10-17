@@ -247,6 +247,9 @@ func TestDirectRuntimeCredentialContract(t *testing.T) {
 		{RuntimeClaudeCode, map[string]any{"auth": "api_key"}, agentcredential.AuthKindAnthropicAPIKey, true},
 		{RuntimeClaudeCode, map[string]any{"auth": "oauth_token"}, agentcredential.AuthKindClaudeCodeOAuth, true},
 		{RuntimeClaudeCode, map[string]any{"auth": "workspace"}, "", true},
+		{RuntimeGrokBuild, map[string]any{"auth": "api_key", "permission_mode": "always-approve"}, agentcredential.AuthKindXAIAPIKey, true},
+		{RuntimeGrokBuild, map[string]any{"auth": "grok_account"}, agentcredential.AuthKindXAIGrokOAuth, true},
+		{RuntimeGrokBuild, map[string]any{"auth": "oauth"}, "", false},
 		{RuntimeCodex, map[string]any{"auth": "oauth"}, "", false},
 	}
 	for runtime := range directRuntimes {

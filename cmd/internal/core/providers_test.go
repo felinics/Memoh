@@ -14,6 +14,7 @@ import (
 	claudecoderuntime "github.com/felinics/memoh/internal/agent/runtime/claudecode"
 	codexruntime "github.com/felinics/memoh/internal/agent/runtime/codex"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	grokruntime "github.com/felinics/memoh/internal/agent/runtime/grok"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/config"
@@ -292,12 +293,12 @@ func TestValidateDriverDependencies(t *testing.T) {
 		}
 		// The assembly path with the real drivers' declarations (methods on a
 		// nil receiver, no constructor needed) is what FX runs at start-up.
-		assembled, err := provideDirectAgentDrivers((*codexruntime.Driver)(nil), (*claudecoderuntime.Driver)(nil))
+		assembled, err := provideDirectAgentDrivers((*codexruntime.Driver)(nil), (*claudecoderuntime.Driver)(nil), (*grokruntime.Driver)(nil))
 		if err != nil {
 			t.Fatalf("provideDirectAgentDrivers() error = %v", err)
 		}
-		if len(assembled) != 2 {
-			t.Fatalf("provideDirectAgentDrivers() = %d drivers, want 2", len(assembled))
+		if len(assembled) != 3 {
+			t.Fatalf("provideDirectAgentDrivers() = %d drivers, want 3", len(assembled))
 		}
 	})
 

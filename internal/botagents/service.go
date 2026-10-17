@@ -15,6 +15,7 @@ import (
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 	"github.com/felinics/memoh/internal/agent/runtime/claudecode/claudecfg"
 	"github.com/felinics/memoh/internal/agent/runtime/codex/codexcfg"
+	"github.com/felinics/memoh/internal/agent/runtime/grok/grokcfg"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -89,6 +90,19 @@ var directRuntimes = map[string]directRuntime{
 			default:
 				return "", nil
 			}
+		},
+	},
+	RuntimeGrokBuild: {
+		validPermissionMode: grokcfg.ValidPermissionMode,
+		credentialAuthKind: func(metadata map[string]any) (string, error) {
+			cfg, err := grokcfg.ParseAgentConfig(metadata)
+			if err != nil {
+				return "", err
+			}
+			if cfg.Auth == grokcfg.AuthGrokAccount {
+				return agentcredential.AuthKindXAIGrokOAuth, nil
+			}
+			return agentcredential.AuthKindXAIAPIKey, nil
 		},
 	},
 }

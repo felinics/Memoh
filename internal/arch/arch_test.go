@@ -256,6 +256,22 @@ func TestDirectExternalRuntimesDoNotDependOnACP(t *testing.T) {
 	}
 }
 
+// TestACPNativeDirectRuntimesUseOnlyTheACPClient covers built-in agents whose
+// own wire protocol is ACP. They share the protocol client, but the pool and
+// the profile registry serve user-supplied agents only: a built-in agent that
+// reached them would be configured by agent id inside the generic runtime.
+func TestACPNativeDirectRuntimesUseOnlyTheACPClient(t *testing.T) {
+	root := repoRoot(t)
+	client := modulePrefix + "internal/agent/runtime/acp/client"
+	for _, file := range allGoFiles(t, root, "internal/agent/runtime/grok") {
+		for _, imp := range imports(t, root, file) {
+			if isPackageOrChild(imp, modulePrefix+"internal/agent/runtime/acp") && imp != client {
+				t.Errorf("%s imports %s: an ACP-native direct runtime may use only the ACP client", file, imp)
+			}
+		}
+	}
+}
+
 // TestThreadStorageDoesNotReachRouteDB pins the ownership split: Thread may
 // carry an opaque route_id, while Channel owns active-thread selection and
 // route metadata projection.

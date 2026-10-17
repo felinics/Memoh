@@ -2349,7 +2349,7 @@
   "bots": {
     "toolApproval": {
       "title": "工具调用审核",
-      "intro": "分别设置这个 Bot 在工作区和每台已连接电脑上可以执行的操作。这些规则只约束 Memoh 提供的工具；Claude Code 与 Codex 的内置工具遵循各自的权限模式，它们发来的询问会以卡片展示，由持有对应工作区权限的用户决定。",
+      "intro": "分别设置这个 Bot 在工作区和每台已连接电脑上可以执行的操作。这些规则只约束 Memoh 提供的工具；Claude Code、Codex 与 Grok Build 的内置工具遵循各自的权限模式，它们发来的询问会以卡片展示，由持有对应工作区权限的用户决定。",
       "loading": "正在加载审核规则...",
       "loadFailed": "无法加载工具审核",
       "loadFailedDescription": "请检查服务器连接后重试。",
@@ -2460,6 +2460,7 @@
     "createBot": "新建 Bot",
     "createBotWaitHint": "首次创建可能需要拉取基础镜像，请耐心等待。",
     "createBotSuccess": "Bot 创建成功。",
+    "createBotSignInFirst": "Bot 已创建。先登录账号，Agent 才能开始回复。",
     "createBotSettingUp": "正在准备...",
     "createBotSetupTitle": "正在准备 Bot",
     "createBotSetupDesc": "正在创建 Bot 及其工作区。工作区准备完成后会自动打开这个 Bot。",
@@ -2741,7 +2742,7 @@
       "namePlaceholder": "输入 Agent 名称",
       "nameRequired": "请输入 Agent 名称。",
       "emptyTitle": "还没有 Agent",
-      "emptyDescription": "添加 Agent 后，这个 Bot 就可以使用 Codex、Claude Code 或自定义 ACP Agent。",
+      "emptyDescription": "添加 Agent 后，这个 Bot 就可以使用 Codex、Claude Code、Grok Build 或自定义 ACP Agent。",
       "statusNeedsConfig": "需要配置",
       "statusOff": "已停用",
       "deleteTitle": "删除 Agent？",
@@ -2772,6 +2773,14 @@
       "codexDeviceHint": "打开验证页面并输入这个一次性代码。只在页面显示的 OpenAI 验证地址输入此代码。Memoh 会自动完成授权。",
       "codexLoginSuccess": "Codex 已连接 ChatGPT 账号",
       "codexLoginFailed": "Codex 账号授权失败，请重试",
+      "authGrokAccountDescription": "使用 Grok 账号登录 Grok Build。",
+      "grokAccount": "Grok 账号",
+      "grokAccountDescription": "Memoh 会加密保存此 Agent 的 Grok 凭据，并仅在运行时提供给 Grok Build。",
+      "grokAccountConnectedDescription": "此 Agent 的 Grok 凭据已加密保存。",
+      "grokDeviceHint": "打开验证页面并确认这个一次性代码。只在页面显示的 accounts.x.ai 地址上确认。Memoh 会自动完成授权。",
+      "grokLoginSuccess": "Grok Build 已连接 Grok 账号",
+      "grokLoginFailed": "Grok 账号登录失败，请重试",
+      "signInAfterCreate": "Bot 创建完成后在 Agent 设置里登录：账号在 Agent 自己的工作区内完成登录。",
       "usage": {
         "window": {
           "weekly": "每周额度",
@@ -4401,6 +4410,32 @@
         "goal": {
           "description": "设置持续执行的目标",
           "input_hint": "描述你的目标"
+        }
+      }
+    },
+    "grokBuild": {
+      "modes": {
+        "ask": {
+          "name": "每次询问",
+          "description": "执行有副作用的操作前先由你确认。"
+        },
+        "auto": {
+          "name": "自动判断",
+          "description": "由 Grok 判断哪些操作可以安全执行，不再逐一询问。"
+        },
+        "alwaysApprove": {
+          "name": "全部批准",
+          "description": "所有操作直接批准，不再询问；Memoh 工具权限仍然生效。"
+        }
+      },
+      "commands": {
+        "status": {
+          "description": "查看会话的模型和上下文用量"
+        },
+        "compact": {
+          "description": "压缩 Grok 会话上下文",
+          "running_text": "压缩中",
+          "completed_text": "压缩已完成"
         }
       }
     },

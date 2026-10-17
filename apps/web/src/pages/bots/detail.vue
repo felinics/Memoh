@@ -468,7 +468,7 @@ const searchIndex = computed(() => {
     { tab: 'general', key: 'bots.settings.dangerZone', keywords: ['delete', 'remove'] },
     { tab: 'container', key: 'bots.container.dataTitle', keywords: ['docker', 'image', 'gpu', 'volume'] },
     { tab: 'container', key: 'bots.container.metricsTitle', keywords: ['cpu', 'ram', 'storage'] },
-    { tab: 'apps', key: 'bots.tabs.apps', keywords: ['codex', 'claude code', 'node', 'python', 'uv', 'install', 'version', 'connector', 'oauth', 'dependency', 'supermarket', '依赖', '安装', '版本', '连接器', '扩展包', '依存', 'インストール', 'コネクター', 'パッケージ'] },
+    { tab: 'apps', key: 'bots.tabs.apps', keywords: ['codex', 'claude code', 'grok', 'node', 'python', 'uv', 'install', 'version', 'connector', 'oauth', 'dependency', 'supermarket', '依赖', '安装', '版本', '连接器', '扩展包', '依存', 'インストール', 'コネクター', 'パッケージ'] },
     { tab: 'remote-runtime', key: 'bots.remoteRuntime.title', keywords: ['files', 'commands', 'computer', 'server', '文件', '命令', '电脑', '服务器', 'ファイル', 'コマンド'] },
     { tab: 'memory', key: 'bots.memory.title', keywords: ['vector', 'database', 'pgvector', 'embed'] },
     { tab: 'channels', key: 'bots.channels.configured', keywords: ['telegram', 'discord', 'wechat', 'slack'] },
@@ -477,7 +477,7 @@ const searchIndex = computed(() => {
     { tab: 'advanced', section: 'desktop', key: 'bots.tabs.desktop', keywords: ['desktop', 'display', 'browser', '桌面', 'デスクトップ'] },
     { tab: 'advanced', section: 'network', key: 'bots.tabs.network', keywords: ['network', 'proxy', 'vpn', '网络', 'ネットワーク'] },
     { tab: 'advanced', section: 'hooks', key: 'bots.hooks.title', keywords: ['hooks', 'events', 'tool calls', 'approval', 'workspace'] },
-    { tab: 'agents', key: 'bots.tabs.agents', keywords: ['codex', 'claude code', 'external agent', 'acp'] },
+    { tab: 'agents', key: 'bots.tabs.agents', keywords: ['codex', 'claude code', 'grok', 'external agent', 'acp'] },
     { tab: 'mcp', key: 'bots.tabs.mcp', keywords: ['servers', 'connect', 'custom mcp'] },
     { tab: 'advanced', section: 'compaction', key: 'bots.tabs.compaction', keywords: ['compaction', 'compress', 'summarize', 'context window'] },
   ].filter(item => botWorkspaceBackend.value !== 'remote'

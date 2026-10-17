@@ -178,6 +178,18 @@ func (f *testCodexAuthorizer) ExchangeOpenAICodexACPDeviceCode(context.Context, 
 	return providers.OpenAICodexOAuthCredentials{AccessToken: "SECRET-access", RefreshToken: "SECRET-refresh", IDToken: "SECRET-id", AccountID: "account"}, nil
 }
 
+// A Grok account signs in on the Agent itself; nothing stages it beforehand.
+func TestGrokAccountCannotBeStaged(t *testing.T) {
+	q := &authorizationQueries{}
+	creds := NewService(q, config.Config{Auth: config.AuthConfig{AgentCredentialsEncryptionKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))}})
+	svc := &AuthorizationService{credentials: creds, oauth: &testCodexAuthorizer{}}
+	for _, secret := range []map[string]string{nil, {"auth_json": "{}"}} {
+		if _, err := svc.Create(context.Background(), uuid.NewString(), AuthorizationRequest{Runtime: "grok-build", AuthKind: AuthKindXAIGrokOAuth, Secret: secret}); !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("Create(xai_grok_oauth, %v) error = %v, want ErrInvalidRequest", secret, err)
+		}
+	}
+}
+
 func TestAuthorizationPollSerializesAndRedacts(t *testing.T) {
 	q := &authorizationQueries{}
 	creds := NewService(q, config.Config{Auth: config.AuthConfig{AgentCredentialsEncryptionKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))}})
