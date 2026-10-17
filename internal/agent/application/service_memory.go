@@ -272,7 +272,15 @@ func (s *Service) storeMemory(ctx context.Context, req ChatRequest, persisted []
 
 // writeMemory is the body of one memory unit.
 func (s *Service) writeMemory(ctx context.Context, req ChatRequest, botID string, persisted []messagepkg.Message) error {
-	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
+	requestIncluded := false
+	for _, message := range persisted {
+		if strings.EqualFold(strings.TrimSpace(message.Role), "user") && !messagepkg.IsInternalFeedback(message.Metadata) &&
+			((req.PersistedUserMessageID != "" && message.ID == req.PersistedUserMessageID) || (req.TurnID != "" && message.TurnID == req.TurnID)) {
+			requestIncluded = true
+			break
+		}
+	}
+	if (req.UserMessagePersisted || req.ReusePersistedUserMessage) && !requestIncluded {
 		userMessage, err := s.messageService.GetByIDBySession(ctx, req.ThreadID, req.PersistedUserMessageID)
 		if err != nil {
 			// The round is still written, without its user message.

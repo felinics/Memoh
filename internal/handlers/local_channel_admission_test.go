@@ -275,17 +275,33 @@ func TestAdmitWSTurnPublishesReplacementOperation(t *testing.T) {
 		wantKind        string
 		wantReplaceFrom string
 		wantReplacement bool
+		wantText        string
+		wantAttachment  string
 	}{
 		{
 			name: "retry",
 			admission: &wsReplacementAdmission{
 				kind: sessionruntime.RunOperationRetry,
 				prepareAnchor: func(context.Context) (string, error) {
-					return "assistant-first", nil
+					return "user-request", nil
+				},
+				prepareUser: func(_ context.Context, requestMessageID string) (*chatview.UITurn, error) {
+					if requestMessageID != "user-request" {
+						return nil, errors.New("retry did not load its validated user anchor")
+					}
+					oldPosition := int64(1)
+					return &chatview.UITurn{
+						ID: "user-request", TurnID: "old-turn", TurnPosition: &oldPosition,
+						Role: "user", Text: "original request", RuntimeForkable: true,
+						Attachments: []chatview.UIAttachment{{ContentHash: "existing-asset", StorageKey: "stored-file"}},
+					}, nil
 				},
 			},
 			wantKind:        sessionruntime.RunOperationRetry,
-			wantReplaceFrom: "assistant-first",
+			wantReplaceFrom: "user-request",
+			wantReplacement: true,
+			wantText:        "original request",
+			wantAttachment:  "existing-asset",
 		},
 		{
 			name: "edit",
@@ -300,6 +316,7 @@ func TestAdmitWSTurnPublishesReplacementOperation(t *testing.T) {
 			wantKind:        sessionruntime.RunOperationEdit,
 			wantReplaceFrom: "user-request",
 			wantReplacement: true,
+			wantText:        "edited",
 		},
 	}
 
@@ -333,8 +350,17 @@ func TestAdmitWSTurnPublishesReplacementOperation(t *testing.T) {
 			if test.wantReplacement {
 				if view.Operation.ReplacementUserTurn == nil ||
 					view.Operation.ReplacementUserTurn.TurnID != "turn-1" ||
-					view.Operation.ReplacementUserTurn.Text != "edited" {
+					view.Operation.ReplacementUserTurn.Text != test.wantText ||
+					view.Operation.ReplacementUserTurn.ID != "" ||
+					view.Operation.ReplacementUserTurn.TurnPosition != nil ||
+					view.Operation.ReplacementUserTurn.RuntimeForkable {
 					t.Fatalf("replacement user turn = %#v", view.Operation.ReplacementUserTurn)
+				}
+				if test.wantAttachment != "" {
+					attachments := view.Operation.ReplacementUserTurn.Attachments
+					if len(attachments) != 1 || attachments[0].ContentHash != test.wantAttachment || attachments[0].StorageKey != "stored-file" {
+						t.Fatalf("retry changed persisted attachments: %#v", attachments)
+					}
 				}
 			} else if view.Operation.ReplacementUserTurn != nil {
 				t.Fatalf("replacement user turn = %#v, want nil", view.Operation.ReplacementUserTurn)

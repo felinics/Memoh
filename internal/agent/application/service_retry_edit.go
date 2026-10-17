@@ -10,8 +10,8 @@ import (
 
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	turnpkg "github.com/felinics/memoh/internal/agent/turn"
+	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/apperror"
-	messageevent "github.com/felinics/memoh/internal/chat/event"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
@@ -114,12 +114,11 @@ func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMes
 		QueueSteerEnabled:            input.InjectCh != nil,
 		ReusePersistedUserMessage:    !retryUserMessageHook,
 		PersistedUserMessageID:       persistedUserMessageID,
-		SkipHistoryTurn:              true,
 		HistoryCutoffBeforeMessageID: cutoffMessageID,
 		RequiredHistoryMessageID:     requestMessage.ID,
 		OnModelPreferenceSettled:     input.OnModelPreferenceSettled,
 	}
-	return s.streamReplacementWS(ctx, req, turn.ID, requestMessage.ID, "retry", eventCh, abortCh)
+	return s.streamReplacementWS(ctx, req, turn.ID, persistedUserMessageID, "retry", eventCh, abortCh)
 }
 
 func isPreflightUserMessageHookFailure(message messagepkg.Message) bool {
@@ -164,7 +163,6 @@ func (s *Service) EditLatestMessageWS(ctx context.Context, input EditLatestMessa
 		ToolHTTPURL:                  strings.TrimSpace(input.ToolHTTPURL),
 		InjectCh:                     input.InjectCh,
 		QueueSteerEnabled:            input.InjectCh != nil,
-		SkipHistoryTurn:              true,
 		HistoryCutoffBeforeMessageID: strings.TrimSpace(turn.RequestMessageID),
 		OnModelPreferenceSettled:     input.OnModelPreferenceSettled,
 	}
@@ -173,10 +171,27 @@ func (s *Service) EditLatestMessageWS(ctx context.Context, input EditLatestMessa
 
 // PrepareRetryLatestTurnOperation validates the replacement target before
 // Session Runtime publishes it to subscribers and returns the exact persisted
-// message where the old assistant tail begins.
+// user message where the replaced turn begins. A retry now has its own user
+// row, so the live projection replaces the old request as well as its output.
 func (s *Service) PrepareRetryLatestTurnOperation(ctx context.Context, sessionID, turnID string) (string, error) {
-	_, replaceFromMessageID, err := s.prepareRetryLatestTurnOperation(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(turnID))
-	return replaceFromMessageID, err
+	turn, _, err := s.prepareRetryLatestTurnOperation(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(turnID))
+	return strings.TrimSpace(turn.RequestMessageID), err
+}
+
+// PrepareRetryRequestUserTurn projects the validated request for admission.
+// Its assets already belong to history and must not be ingested a second time.
+// Admission assigns the new turn identity; the first committed step assigns
+// the retry's durable request identity.
+func (s *Service) PrepareRetryRequestUserTurn(ctx context.Context, sessionID, requestMessageID string) (*chatview.UITurn, error) {
+	request, err := s.messageService.GetByIDBySession(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(requestMessageID))
+	if err != nil {
+		return nil, err
+	}
+	turns := chatview.ConvertMessagesToUITurns([]messagepkg.Message{request})
+	if len(turns) != 1 || !strings.EqualFold(strings.TrimSpace(turns[0].Role), "user") {
+		return nil, errors.New("retry target request is not a visible user message")
+	}
+	return &turns[0], nil
 }
 
 func (s *Service) prepareRetryLatestTurnOperation(ctx context.Context, sessionID, turnID string) (messagepkg.HistoryTurn, string, error) {
@@ -329,82 +344,9 @@ func (s *Service) streamReplacementWS(
 		func(ctx context.Context) error {
 			return s.ensureLatestVisibleTurn(ctx, req.ThreadID, oldTurnID)
 		},
-		func(ctx context.Context, persisted []messagepkg.Message) error {
-			return s.replacePersistedTurn(ctx, req, oldTurnID, requestMessageID, reason, persisted)
-		},
+		nil,
 	)
 	return outcome, err
-}
-
-func (s *Service) replacePersistedTurn(
-	ctx context.Context,
-	req ChatRequest,
-	oldTurnID string,
-	requestMessageID string,
-	reason string,
-	persisted []messagepkg.Message,
-) error {
-	replacementID := firstAssistantID(persisted)
-	if replacementID == "" {
-		replacementID = latestPersistedID(persisted)
-	}
-	if replacementID == "" {
-		return errors.New("replacement message was not persisted")
-	}
-	if strings.TrimSpace(requestMessageID) == "" {
-		requestMessageID = firstUserID(persisted)
-	}
-	forkAnchorUpdate := s.prepareForkAnchorUpdate(ctx, req.ThreadID, req.HistoryCutoffBeforeMessageID)
-	if _, err := s.messageService.ReplaceTurn(
-		context.WithoutCancel(ctx),
-		req.ThreadID,
-		oldTurnID,
-		req.TurnID,
-		req.TurnPosition,
-		requestMessageID,
-		replacementID,
-		reason,
-	); err != nil {
-		s.logger.ErrorContext(ctx, "replace history turn failed", slog.String("reason", reason), slog.Any("error", err))
-		s.cleanupReplacementMessages(ctx, persisted)
-		return fmt.Errorf("replace history turn: %w", err)
-	}
-	s.applyForkAnchorUpdate(context.WithoutCancel(ctx), req.ThreadID, forkAnchorUpdate)
-	s.publishReplacementMessageCreated(req.BotID, persisted)
-	return nil
-}
-
-func (s *Service) publishReplacementMessageCreated(botID string, persisted []messagepkg.Message) {
-	if s == nil || s.eventPublisher == nil || len(persisted) == 0 {
-		return
-	}
-	var latest messagepkg.Message
-	for i := len(persisted) - 1; i >= 0; i-- {
-		if strings.TrimSpace(persisted[i].ID) == "" {
-			continue
-		}
-		latest = persisted[i]
-		break
-	}
-	if strings.TrimSpace(latest.ID) == "" {
-		return
-	}
-	eventBotID := strings.TrimSpace(botID)
-	if eventBotID == "" {
-		eventBotID = strings.TrimSpace(latest.BotID)
-	}
-	data, err := json.Marshal(latest)
-	if err != nil {
-		if s.logger != nil {
-			s.logger.Warn("marshal replacement message event failed", slog.Any("error", err))
-		}
-		return
-	}
-	s.eventPublisher.Publish(messageevent.Event{
-		Type:  messageevent.EventTypeMessageCreated,
-		BotID: eventBotID,
-		Data:  data,
-	})
 }
 
 type forkAnchorUpdate struct {
@@ -456,16 +398,6 @@ func (s *Service) prepareForkAnchorUpdate(ctx context.Context, sessionID string,
 	nextMetadata := cloneMetadataMap(sess.Metadata)
 	nextMetadata["forked_from"] = nextFork
 	return &forkAnchorUpdate{metadata: nextMetadata}
-}
-
-func (s *Service) applyForkAnchorUpdate(ctx context.Context, sessionID string, update *forkAnchorUpdate) {
-	sessionID = strings.TrimSpace(sessionID)
-	if s == nil || s.sessionService == nil || update == nil || sessionID == "" {
-		return
-	}
-	if _, err := s.sessionService.UpdateMetadata(ctx, sessionID, update.metadata); err != nil {
-		s.logForkAnchorUpdateWarning("persist fork anchor update failed", sessionID, err)
-	}
 }
 
 func (s *Service) latestInheritedAssistantBefore(ctx context.Context, sessionID string, beforeMessageID string) string {
@@ -576,31 +508,4 @@ func visibleMessageText(msg messagepkg.Message) string {
 		}
 	}
 	return strings.TrimSpace(string(msg.Content))
-}
-
-func firstAssistantID(messages []messagepkg.Message) string {
-	for _, msg := range messages {
-		if strings.EqualFold(strings.TrimSpace(msg.Role), "assistant") {
-			return strings.TrimSpace(msg.ID)
-		}
-	}
-	return ""
-}
-
-func firstUserID(messages []messagepkg.Message) string {
-	for _, msg := range messages {
-		if strings.EqualFold(strings.TrimSpace(msg.Role), "user") {
-			return strings.TrimSpace(msg.ID)
-		}
-	}
-	return ""
-}
-
-func latestPersistedID(messages []messagepkg.Message) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if id := strings.TrimSpace(messages[i].ID); id != "" {
-			return id
-		}
-	}
-	return ""
 }

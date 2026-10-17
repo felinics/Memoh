@@ -14,7 +14,6 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/step"
-	"github.com/felinics/memoh/internal/agent/toolexec"
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
@@ -37,11 +36,11 @@ type agentStepCommitter struct {
 	turnRequestMessageID string
 	persisted            []messagepkg.Message
 	memoryPersisted      []messagepkg.Message
-	messages             []ModelMessage
+	memoryExpectedRows   int
 	nextStep             int // In-process ordering guard, not a durable replay cursor.
 	commitErr            error
 	finalized            bool
-	replacementFinalized bool
+	replacementStarted   bool
 	// checkpointed means an interrupted step was written: the run already has
 	// a history row for the model call it stopped in.
 	checkpointed bool
@@ -50,7 +49,7 @@ type agentStepCommitter struct {
 func (s *Service) newAgentStepCommitter(ctx context.Context, req ChatRequest, rc resolvedContext) *agentStepCommitter {
 	if s == nil || s.messageService == nil || strings.TrimSpace(req.RunID) == "" ||
 		strings.TrimSpace(req.BotID) == "" || strings.TrimSpace(req.ThreadID) == "" ||
-		((req.SkipHistoryTurn || req.ReusePersistedUserMessage) && req.TurnReplacement == nil) {
+		(req.ReusePersistedUserMessage && req.TurnReplacement == nil) {
 		return nil
 	}
 	if _, ok := runtimefence.FromContext(ctx); !ok {
@@ -68,9 +67,6 @@ func (s *Service) newAgentStepCommitter(ctx context.Context, req ChatRequest, rc
 				s.logger.WarnContext(ctx, "steer consumer could not be published", slog.String("run_id", req.RunID), slog.Any("error", err))
 			}
 		}
-	}
-	if req.TurnReplacement != nil && queueStep == nil {
-		return nil
 	}
 	requestMessageID := ""
 	switch {
@@ -204,11 +200,11 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 	// provider result: final handoff and queue reconciliation are keyed to the
 	// step, not to whether the provider emitted a message. Legacy/non-durable
 	// paths retain the old cheap no-op behavior.
-	if !hasAssistantOutput && mode != stepSteered && (c.queueStep == nil || interrupted) {
+	if !hasAssistantOutput && failureCode == "" && mode != stepSteered && (c.queueStep == nil || interrupted) {
 		c.nextStep++
 		return native.StepDirective{}, nil
 	}
-	if (hasAssistantOutput || mode == stepSteered) && stepIndex == 0 && !c.req.UserMessagePersisted && !c.req.ReusePersistedUserMessage {
+	if (hasAssistantOutput || failureCode != "" || mode == stepSteered) && len(c.persisted) == 0 && !c.req.UserMessagePersisted && !c.req.ReusePersistedUserMessage {
 		messages = prependTurnUserMessage(c.req, messages)
 	}
 	storeReq := c.req
@@ -248,6 +244,9 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 	}
 	c.stampSteerTurn(inputs)
 	agentStep := messagepkg.AgentStep{RunID: c.req.RunID, Messages: inputs, Interrupted: interrupted}
+	if !c.replacementStarted && len(inputs) > 0 {
+		agentStep.Replacement = c.req.TurnReplacement
+	}
 	var persisted []messagepkg.Message
 	var queueErr error
 	if c.queueStep != nil && mode != stepInterrupted {
@@ -257,7 +256,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 			kind = queueStepSteered
 		}
 		outcome, commitErr := c.queueStep.commit(
-			stepCtx, kind, agentStep, c.persisted,
+			stepCtx, kind, agentStep,
 		)
 		if !outcome.historyCommitted {
 			return fail(commitErr)
@@ -267,7 +266,6 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 		// not lose it or write the same step again.
 		queueErr = commitErr
 		persisted = outcome.persisted
-		c.replacementFinalized = outcome.replacementFinalized
 		if queueErr == nil {
 			c.publishQueueUserTurns(context.WithoutCancel(ctx), stepIndex, outcome)
 			if outcome.claimedSteer != nil {
@@ -285,6 +283,9 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 	if err != nil {
 		return fail(err)
 	}
+	if agentStep.Replacement != nil {
+		c.replacementStarted = true
+	}
 	if len(persisted) > 0 {
 		c.rc.runConfig.ContextLifecycle.SetAssistantMessageID(lastPersistedAssistantMessageID(persisted))
 	}
@@ -298,14 +299,24 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 	if mode == stepInterrupted && len(persisted) > 0 {
 		c.checkpointed = true
 	}
-	if c.replacementFinalized {
-		c.service.publishReplacementMessageCreated(c.req.BotID, c.persisted)
-	}
 	if !interrupted {
 		// Unfinished reasoning/text is history context, not a fact source for
 		// asynchronous long-term memory extraction.
 		c.memoryPersisted = append(c.memoryPersisted, persisted...)
-		c.messages = append(c.messages, messages...)
+		c.memoryExpectedRows += len(inputs)
+		if agentStep.Replacement != nil && strings.TrimSpace(agentStep.Replacement.RequestMessageID) != "" {
+			c.memoryExpectedRows++ // The retry transaction also writes its own request.
+		}
+	} else {
+		// A checkpoint can be the first transaction of a replacement. Its
+		// user inputs are complete facts even when its assistant output is
+		// partial; retain their durable identities for a later successful run.
+		for _, message := range persisted {
+			if strings.EqualFold(strings.TrimSpace(message.Role), "user") && !messagepkg.IsInternalFeedback(message.Metadata) {
+				c.memoryPersisted = append(c.memoryPersisted, message)
+				c.memoryExpectedRows++
+			}
+		}
 	}
 	if queueErr != nil {
 		return fail(queueErr)
@@ -403,12 +414,10 @@ func (c *agentStepCommitter) err() error {
 // recordFailure writes the history of a run that failed with code, a failure
 // the history shows (see wsFailureCode), before the run is finished. Text
 // the stream showed for the model call that failed is written as an
-// interrupted step carrying the code. Without such text, a run that wrote
-// nothing gets the user message and failure row persistTurnFailure writes for
-// a turn without step commits, and a run with committed steps keeps them as
-// they are. A model call the runtime already checkpointed is not written
-// again. It returns the rows persistTurnFailure wrote; a checkpoint joins the
-// committed steps.
+// interrupted step carrying the code. An empty failure still records an
+// assistant row through the same transaction, including a replacement's first
+// user clone and turn binding. A model call the runtime already checkpointed
+// is not written again.
 func (c *agentStepCommitter) recordFailure(ctx context.Context, partialText string, code apperror.Code) ([]messagepkg.Message, error) {
 	if c == nil || code == "" {
 		return nil, nil
@@ -416,25 +425,13 @@ func (c *agentStepCommitter) recordFailure(ctx context.Context, partialText stri
 	c.mu.Lock()
 	skip := c.finalized || c.checkpointed
 	stepIndex := c.nextStep
-	persistedSteps := len(c.persisted)
 	c.mu.Unlock()
 	if skip {
 		return nil, nil
 	}
-	if strings.TrimSpace(partialText) != "" {
-		record := &step.Record{Messages: toolexec.BuildStepMessages(partialText, nil, nil, nil, nil, nil)}
-		_, err := c.persist(ctx, stepIndex, record, stepInterrupted, code)
-		return nil, err
-	}
-	// A replacement turn finalizes through its coordinator, which only a
-	// committed step reaches.
-	if persistedSteps > 0 || c.req.TurnReplacement != nil {
-		return nil, nil
-	}
-	if _, err := stepPersistenceContext(ctx, c.ownerContext); err != nil {
-		return nil, err
-	}
-	return c.service.persistTurnFailure(context.WithoutCancel(ctx), c.req, c.rc, code)
+	record := &step.Record{Messages: []sdk.Message{sdk.AssistantMessage(partialText)}}
+	_, err := c.persist(ctx, stepIndex, record, stepInterrupted, code)
+	return nil, err
 }
 
 func (c *agentStepCommitter) finish(ctx context.Context, inputTokens int) error {
@@ -448,7 +445,7 @@ func (c *agentStepCommitter) finish(ctx context.Context, inputTokens int) error 
 	}
 	persisted := append([]messagepkg.Message(nil), c.persisted...)
 	memoryPersisted := append([]messagepkg.Message(nil), c.memoryPersisted...)
-	messages := append([]ModelMessage(nil), c.messages...)
+	memoryExpectedRows := c.memoryExpectedRows
 	if len(persisted) == 0 {
 		c.finalized = true
 	}
@@ -466,7 +463,7 @@ func (c *agentStepCommitter) finish(ctx context.Context, inputTokens int) error 
 	if c.req.OutboundAssetCollector != nil {
 		c.service.LinkOutboundAssets(ctx, c.req.BotID, c.req.ThreadID, outboundAssetRefsToMessageRefs(c.req.OutboundAssetCollector()))
 	}
-	if !c.req.SkipMemoryExtraction && len(memoryPersisted) == len(messages) && len(memoryPersisted) > 0 {
+	if !c.req.SkipMemoryExtraction && len(memoryPersisted) == memoryExpectedRows && len(memoryPersisted) > 0 {
 		c.service.storeMemory(ctx, c.req, memoryPersisted)
 	}
 	if inputTokens > 0 {

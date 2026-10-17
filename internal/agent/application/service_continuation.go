@@ -11,7 +11,7 @@ import (
 )
 
 type continuationTurnRequestMessageResolver interface {
-	GetVisibleHistoryTurnRequestMessageIDByTurn(context.Context, string, string) (string, error)
+	GetRunTurnRequestMessageID(context.Context, string, string, string) (string, error)
 }
 
 func (s *Service) continuationTurnRequestMessageID(ctx context.Context, sessionID string, runHandle sessionruntime.RunHandle) (string, error) {
@@ -23,7 +23,10 @@ func (s *Service) continuationTurnRequestMessageID(ctx context.Context, sessionI
 	if !ok {
 		return "", nil
 	}
-	return resolver.GetVisibleHistoryTurnRequestMessageIDByTurn(ctx, sessionID, turnID)
+	// An applied steer opens a later turn within this run. Its next tool
+	// result and resumed model output belong there, even though admission's
+	// run handle still names the original request turn.
+	return resolver.GetRunTurnRequestMessageID(ctx, sessionID, strings.TrimSpace(runHandle.RunID), turnID)
 }
 
 func (s *Service) prepareContinuationRunConfig(

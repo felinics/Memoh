@@ -2522,6 +2522,9 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				prepareAnchor: func(ctx context.Context) (string, error) {
 					return h.agentService.PrepareRetryLatestTurnOperation(ctx, sessionID, targetTurnID)
 				},
+				prepareUser: func(ctx context.Context, requestMessageID string) (*chatview.UITurn, error) {
+					return h.agentService.PrepareRetryRequestUserTurn(ctx, sessionID, requestMessageID)
+				},
 			}
 			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws.retry_message", retrySubmission, retryAdmission.build, nil,
 				func(ctx context.Context, runRef wsTurnRef, admittedTurn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) (application.RunOutcome, error) {

@@ -49,7 +49,7 @@ func TestStepCommitSeparatesHistoryFailureFromQueueFailure(t *testing.T) {
 			if committer == nil {
 				t.Fatal("missing fenced step committer")
 			}
-			if _, err := committer.queueStep.commit(ctx, queueStepToolLoop, messagepkg.AgentStep{}, nil); err != nil {
+			if _, err := committer.queueStep.commit(ctx, queueStepToolLoop, messagepkg.AgentStep{}); err != nil {
 				t.Fatal(err)
 			}
 			store := service.messageService.(*recordingStepPersister)

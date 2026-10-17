@@ -19,28 +19,36 @@ import (
 type continuationTurnRequestResolverService struct {
 	messagepkg.Service
 	requestMessageID string
+	sessionID        string
+	runID            string
+	rootTurnID       string
 }
 
-func (s *continuationTurnRequestResolverService) GetVisibleHistoryTurnRequestMessageIDByTurn(context.Context, string, string) (string, error) {
+func (s *continuationTurnRequestResolverService) GetRunTurnRequestMessageID(_ context.Context, sessionID, runID, rootTurnID string) (string, error) {
+	s.sessionID, s.runID, s.rootTurnID = sessionID, runID, rootTurnID
 	return s.requestMessageID, nil
 }
 
 func TestContinuationTurnRequestMessageIDUsesAdmittedTurn(t *testing.T) {
 	t.Parallel()
 
-	service := &Service{messageService: &continuationTurnRequestResolverService{
+	messages := &continuationTurnRequestResolverService{
 		requestMessageID: "request-message-id",
-	}}
+	}
+	service := &Service{messageService: messages}
 	got, err := service.continuationTurnRequestMessageID(
 		context.Background(),
 		"session-id",
-		sessionruntime.RunHandle{TurnID: "turn-id"},
+		sessionruntime.RunHandle{RunID: "run-id", TurnID: "turn-id"},
 	)
 	if err != nil {
 		t.Fatalf("continuationTurnRequestMessageID() error = %v", err)
 	}
 	if got != "request-message-id" {
 		t.Fatalf("continuation request message ID = %q, want %q", got, "request-message-id")
+	}
+	if messages.sessionID != "session-id" || messages.runID != "run-id" || messages.rootTurnID != "turn-id" {
+		t.Fatalf("continuation lookup omitted run/turn identity: %#v", messages)
 	}
 }
 

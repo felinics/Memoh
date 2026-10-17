@@ -25,39 +25,27 @@ type agentStepQueries interface {
 // Complete steps precede abort intent; interrupted checkpoints remain writable
 // until terminal finalization for cancellation paths without recorded intent.
 func (s *DBService) PersistAgentStep(ctx context.Context, step AgentStep) ([]Message, error) {
-	return s.persistAgentStep(ctx, step, false)
-}
-
-// PersistAgentReplacementStep keeps retry/edit output hidden until the true
-// final boundary. Both step kinds use the same fenced persistence transaction.
-func (s *DBService) PersistAgentReplacementStep(ctx context.Context, step AgentStep) ([]Message, error) {
-	return s.persistAgentStep(ctx, step, true)
-}
-
-func (s *DBService) persistAgentStep(ctx context.Context, step AgentStep, replacement bool) ([]Message, error) {
-	botID, sessionID, err := validateAgentStepMode(ctx, s, step, replacement)
+	botID, sessionID, err := validateAgentStep(ctx, s, step)
 	if err != nil {
 		return nil, err
 	}
 	var persisted []Message
 	err = runtimefence.InTransaction(ctx, s.queries, botID, sessionID, func(queries dbstore.Queries) error {
 		var txErr error
-		persisted, txErr = s.persistAgentStepTx(ctx, queries, step, replacement)
+		persisted, txErr = s.persistAgentStepTx(ctx, queries, step)
 		return txErr
 	})
 	if err != nil {
 		return nil, err
 	}
-	if !replacement {
-		for _, message := range persisted {
-			s.publishMessageCreated(message)
-		}
+	for _, message := range persisted {
+		s.publishMessageCreated(message)
 	}
 	return persisted, nil
 }
 
-func (s *DBService) persistAgentStepTx(ctx context.Context, queries dbstore.Queries, step AgentStep, replacement bool) ([]Message, error) {
-	if _, _, err := validateAgentStepMode(ctx, s, step, replacement); err != nil {
+func (s *DBService) persistAgentStepTx(ctx context.Context, queries dbstore.Queries, step AgentStep) ([]Message, error) {
+	if _, _, err := validateAgentStep(ctx, s, step); err != nil {
 		return nil, err
 	}
 	if queries == nil {
@@ -97,51 +85,10 @@ func (s *DBService) persistAgentStepTx(ctx context.Context, queries dbstore.Quer
 	txService := *s
 	txService.queries = queries
 	txService.publisher = nil
-	turnRequestMessageID := strings.TrimSpace(step.Messages[0].TurnRequestMessageID)
-	persisted := make([]Message, 0, len(step.Messages))
-	for _, original := range step.Messages {
-		input := original
-		input.TurnRequestMessageID = turnRequestMessageID
-		message, err := txService.persist(ctx, input)
-		if err != nil {
-			return nil, err
-		}
-		if strings.EqualFold(strings.TrimSpace(input.Role), "user") && !IsInternalFeedback(input.Metadata) {
-			turnRequestMessageID = message.ID
-		}
-		persisted = append(persisted, message)
-	}
-	return persisted, nil
+	return txService.persistBoundMessages(ctx, step.Messages, step.Replacement)
 }
 
-// FinalizeAgentReplacement atomically selects the completed replacement turn.
-// Queue coordination is transient and does not own this database transaction.
-func (s *DBService) FinalizeAgentReplacement(ctx context.Context, sessionID string, replacement TurnReplacement, requestMessageID, assistantMessageID string) error {
-	if s == nil || s.queries == nil {
-		return errors.New("replacement persistence is not configured")
-	}
-	fence, ok := runtimefence.FromContext(ctx)
-	if !ok {
-		return errors.New("agent replacement requires a runtime persistence fence")
-	}
-	return runtimefence.InTransaction(ctx, s.queries, fence.BotID, sessionID, func(queries dbstore.Queries) error {
-		requestMessageID = strings.TrimSpace(requestMessageID)
-		assistantMessageID = strings.TrimSpace(assistantMessageID)
-		if requestMessageID == "" || assistantMessageID == "" {
-			return errors.New("agent replacement requires request and assistant message ids")
-		}
-		txService := *s
-		txService.queries = queries
-		txService.publisher = nil
-		replacement.RequestMessageID = requestMessageID
-		return txService.replacePersistedRound(ctx, strings.TrimSpace(sessionID), []Message{
-			{ID: requestMessageID, Role: "user"},
-			{ID: assistantMessageID, Role: "assistant"},
-		}, replacement)
-	})
-}
-
-func validateAgentStepMode(ctx context.Context, s *DBService, step AgentStep, replacement bool) (string, string, error) {
+func validateAgentStep(ctx context.Context, s *DBService, step AgentStep) (string, string, error) {
 	if s == nil || s.queries == nil {
 		return "", "", errors.New("message service is not configured")
 	}
@@ -155,9 +102,9 @@ func validateAgentStepMode(ctx context.Context, s *DBService, step AgentStep, re
 		return "", "", errors.New("agent step requires run, bot, and session ids")
 	}
 	for _, input := range step.Messages {
-		if input.SkipHistoryTurn != replacement || strings.TrimSpace(input.RunID) != runID ||
+		if input.SkipHistoryTurn || strings.TrimSpace(input.RunID) != runID ||
 			strings.TrimSpace(input.BotID) != botID || strings.TrimSpace(input.SessionID) != sessionID {
-			return "", "", errors.New("agent step messages must share one run, session, and history visibility mode")
+			return "", "", errors.New("agent step messages must be turn-bound and share one run and session")
 		}
 	}
 	if _, ok := runtimefence.FromContext(ctx); !ok {

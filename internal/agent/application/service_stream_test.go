@@ -167,6 +167,9 @@ func (s *recordingMessageService) PersistRound(_ context.Context, inputs []messa
 		return nil, true, s.persistErr
 	}
 	persisted := make([]messagepkg.Message, 0, len(inputs))
+	if options.Replacement != nil && options.Replacement.RequestMessageID != "" {
+		persisted = append(persisted, messagepkg.Message{ID: "cloned-request", Role: "user"})
+	}
 	for _, input := range inputs {
 		s.persisted = append(s.persisted, input)
 		persisted = append(persisted, messagepkg.Message{
@@ -519,7 +522,7 @@ func TestPersistTerminalSnapshotStoresTimeoutBeforeVisibleOutput(t *testing.T) {
 	}
 }
 
-func TestPersistTurnFailureSkipsRetryReplacement(t *testing.T) {
+func TestPersistTurnFailureStartsRetryReplacementAtomically(t *testing.T) {
 	t.Parallel()
 
 	messages := &recordingMessageService{}
@@ -531,10 +534,9 @@ func TestPersistTurnFailureSkipsRetryReplacement(t *testing.T) {
 	persisted, err := resolver.persistTurnFailure(
 		context.Background(),
 		ChatRequest{
-			BotID:           "bot-1",
-			ThreadID:        "session-1",
-			Query:           "hello",
-			SkipHistoryTurn: true,
+			BotID: "bot-1", ThreadID: "session-1", Query: "hello",
+			ReusePersistedUserMessage: true, PersistedUserMessageID: "old-request",
+			TurnReplacement: &messagepkg.TurnReplacement{OldTurnID: "old-turn", ReplacementTurnID: "new-turn", ReplacementTurnPosition: int64Pointer(2), RequestMessageID: "old-request"},
 		},
 		resolvedContext{},
 		apperror.CodeAgentResponseTimeout,
@@ -542,8 +544,11 @@ func TestPersistTurnFailureSkipsRetryReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("persistTurnFailure returned error: %v", err)
 	}
-	if persisted != nil || len(messages.persisted) != 0 {
-		t.Fatalf("expected retry replacement not to persist a failure turn, got %#v", messages.persisted)
+	if len(persisted) != 2 || len(messages.persisted) != 1 || len(messages.roundOptions) != 1 || messages.roundOptions[0].Replacement == nil {
+		t.Fatalf("retry failure was not persisted atomically with its cloned user: %#v %#v", persisted, messages.roundOptions)
+	}
+	if got := messages.persisted[0]; got.SkipHistoryTurn || got.Metadata[messagepkg.HistoryErrorCodeMetadataKey] != string(apperror.CodeAgentResponseTimeout) {
+		t.Fatalf("retry failure lost binding or stable code: %#v", got)
 	}
 }
 
@@ -780,30 +785,5 @@ func TestPersistTerminalSnapshotSkillActivationWithoutPromptDoesNotStoreModelMar
 	}
 	if user.Metadata["user_message_kind"] != UserMessageKindSkillActivation {
 		t.Fatalf("metadata kind = %#v, want skill_activation", user.Metadata["user_message_kind"])
-	}
-}
-
-func TestReplacePersistedTurnErrorsWhenNoReplacementPersisted(t *testing.T) {
-	t.Parallel()
-
-	messages := &recordingMessageService{}
-	resolver := &Service{
-		messageService: messages,
-		logger:         slog.New(slog.DiscardHandler),
-	}
-
-	err := resolver.replacePersistedTurn(
-		context.Background(),
-		ChatRequest{ThreadID: "session-1"},
-		"turn-1",
-		"request-1",
-		"retry",
-		nil,
-	)
-	if err == nil {
-		t.Fatal("expected replacement error, got nil")
-	}
-	if messages.replaced != 0 {
-		t.Fatalf("ReplaceTurn called %d times, want 0", messages.replaced)
 	}
 }

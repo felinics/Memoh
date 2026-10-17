@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
 
@@ -18,13 +17,11 @@ import (
 // session runtime backend (memory or Redis). Queue state is transient and is
 // never included in the history transaction.
 type queueStepCoordinator struct {
-	service              *Service
-	req                  ChatRequest
-	persister            messagepkg.AgentStepPersister
-	replacementPersister messagepkg.AgentReplacementPersister
-	run                  sessionruntime.RunHandle
-	steerEnabled         bool
-	pendingSteer         *sessionruntime.SteerClaimRef
+	service      *Service
+	persister    messagepkg.AgentStepPersister
+	run          sessionruntime.RunHandle
+	steerEnabled bool
+	pendingSteer *sessionruntime.SteerClaimRef
 	// pendingSteerTurn is the slot drawn for pendingSteer. The step that
 	// consumes the input files its user row under this turn instead of minting
 	// one at commit, so the name the client was shown at claim time is the name
@@ -33,12 +30,11 @@ type queueStepCoordinator struct {
 }
 
 type queueStepOutcome struct {
-	historyCommitted     bool
-	persisted            []messagepkg.Message
-	appliedSteerItemID   string
-	claimedSteer         *sessionruntime.SteerItem
-	claimedSteerTurn     *messagepkg.TurnSlot
-	replacementFinalized bool
+	historyCommitted   bool
+	persisted          []messagepkg.Message
+	appliedSteerItemID string
+	claimedSteer       *sessionruntime.SteerItem
+	claimedSteerTurn   *messagepkg.TurnSlot
 }
 
 func newQueueStepCoordinator(s *Service, req ChatRequest) *queueStepCoordinator {
@@ -52,15 +48,10 @@ func newQueueStepCoordinator(s *Service, req ChatRequest) *queueStepCoordinator 
 	if !ok {
 		return nil
 	}
-	replacementPersister, _ := s.messageService.(messagepkg.AgentReplacementPersister)
-	if req.TurnReplacement != nil && replacementPersister == nil {
-		return nil
-	}
 	q := &queueStepCoordinator{
-		service: s, req: req, persister: persister,
-		replacementPersister: replacementPersister,
-		run:                  req.RunHandle,
-		steerEnabled:         req.QueueSteerEnabled,
+		service: s, persister: persister,
+		run:          req.RunHandle,
+		steerEnabled: req.QueueSteerEnabled,
 	}
 	return q
 }
@@ -68,9 +59,6 @@ func newQueueStepCoordinator(s *Service, req ChatRequest) *queueStepCoordinator 
 func (q *queueStepCoordinator) persistHistory(ctx context.Context, step messagepkg.AgentStep) ([]messagepkg.Message, error) {
 	if len(step.Messages) == 0 {
 		return nil, nil
-	}
-	if q.req.TurnReplacement != nil {
-		return q.replacementPersister.PersistAgentReplacementStep(ctx, step)
 	}
 	return q.persister.PersistAgentStep(ctx, step)
 }
@@ -118,7 +106,6 @@ func (q *queueStepCoordinator) commit(
 	ctx context.Context,
 	kind queueStepKind,
 	agentStep messagepkg.AgentStep,
-	previouslyPersisted []messagepkg.Message,
 ) (queueStepOutcome, error) {
 	var outcome queueStepOutcome
 	if q == nil || q.service == nil || q.service.sessionManager == nil {
@@ -165,22 +152,6 @@ func (q *queueStepCoordinator) commit(
 		q.pendingSteerTurn = q.allocateSteerTurn(ctx)
 		outcome.claimedSteer = &item
 		outcome.claimedSteerTurn = q.pendingSteerTurn
-	} else if q.req.TurnReplacement != nil && kind == queueStepFinal {
-		allPersisted := append([]messagepkg.Message(nil), previouslyPersisted...)
-		allPersisted = append(allPersisted, persisted...)
-		requestID := strings.TrimSpace(q.req.TurnReplacement.RequestMessageID)
-		if requestID == "" {
-			requestID = firstUserID(allPersisted)
-		}
-		assistantID := firstAssistantID(allPersisted)
-		if assistantID == "" {
-			return outcome, errors.New("replacement assistant message was not persisted")
-		}
-		err = q.replacementPersister.FinalizeAgentReplacement(ctx, q.req.ThreadID, *q.req.TurnReplacement, requestID, assistantID)
-		if err != nil {
-			return outcome, err
-		}
-		outcome.replacementFinalized = true
 	}
 	return outcome, nil
 }

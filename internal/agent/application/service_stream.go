@@ -77,15 +77,10 @@ func historyFailureCode(code apperror.Code) apperror.Code {
 // when it records none. A new send the server admitted is recorded whatever it
 // failed with, under the code its run ends with, so the history row and
 // session_runs name the same failure and the sent message is never left
-// outside the history. A stop is not a failure and records nothing. A retry or
-// edit replaces a turn the history already has, and keeps it unless the
-// failure is one historyFailureCode lists.
-func wsFailureCode(req ChatRequest, outcome *outcomeRecorder) apperror.Code {
-	code := outcome.failureCode()
-	if req.TurnReplacement != nil {
-		return historyFailureCode(code)
-	}
-	return code
+// outside the history. A retry or edit records its own failed attempt under
+// the new turn as well. A stop is not a failure and records nothing.
+func wsFailureCode(_ ChatRequest, outcome *outcomeRecorder) apperror.Code {
+	return outcome.failureCode()
 }
 
 func classifyUserMessageHookError(err error) error {
@@ -100,7 +95,7 @@ func classifyUserMessageHookError(err error) error {
 // context. The user row is visible for the UI, while both rows carry the
 // origin marker so normal model history can exclude the rejected input.
 func (s *Service) persistPreflightFailureTurn(ctx context.Context, req ChatRequest, code apperror.Code) error {
-	if code == "" || s == nil || s.messageService == nil || req.SkipHistoryTurn ||
+	if code == "" || s == nil || s.messageService == nil ||
 		req.UserMessagePersisted || req.ReusePersistedUserMessage ||
 		strings.TrimSpace(req.TurnID) == "" || req.TurnPosition == nil {
 		return nil
@@ -1089,7 +1084,7 @@ func (s *Service) persistPartialResult(
 }
 
 func (s *Service) persistTurnFailure(ctx context.Context, req ChatRequest, rc resolvedContext, code apperror.Code) ([]messagepkg.Message, error) {
-	if code == "" || req.SkipHistoryTurn {
+	if code == "" {
 		return nil, nil
 	}
 	storeReq := req

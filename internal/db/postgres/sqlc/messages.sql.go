@@ -487,6 +487,71 @@ func (q *Queries) ClearHistoryBySession(ctx context.Context, targetSessionID pgt
 	return err
 }
 
+const cloneHistoryTurnRequestForRetry = `-- name: CloneHistoryTurnRequestForRetry :one
+WITH cloned AS (
+  INSERT INTO bot_history_messages (
+    bot_id, session_id, sender_channel_identity_id, sender_account_user_id,
+    source_message_id, source_reply_to_message_id, role, content, metadata,
+    usage, session_mode, runtime_type, model_id, event_id, display_text, run_id,
+    turn_id, turn_position, turn_message_seq, turn_visible
+  )
+  SELECT original.bot_id, original.session_id,
+    original.sender_channel_identity_id, original.sender_account_user_id,
+    original.source_message_id, original.source_reply_to_message_id,
+    original.role, original.content, original.metadata, original.usage,
+    original.session_mode, original.runtime_type, original.model_id,
+    original.event_id, original.display_text, $1::uuid,
+    $2::uuid, $3::bigint, 1, true
+  FROM bot_history_messages original
+  WHERE original.team_id = public.memoh_current_team_id()
+    AND original.session_id = $4
+    AND original.bot_id = $5
+    AND original.id = $6
+    AND original.turn_id = $7
+    AND original.turn_visible = true
+    AND original.role = 'user' AND original.turn_message_seq = 1
+  RETURNING id
+), copied_assets AS (
+  INSERT INTO bot_history_message_assets (
+    message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata
+  )
+  SELECT cloned.id, asset.role, asset.ordinal, asset.content_hash, asset.mime,
+    asset.size_bytes, asset.storage_key, asset.name, asset.metadata
+  FROM cloned
+  JOIN bot_history_message_assets asset ON asset.message_id = $6
+    AND asset.team_id = public.memoh_current_team_id()
+  RETURNING id
+)
+SELECT cloned.id FROM cloned
+`
+
+type CloneHistoryTurnRequestForRetryParams struct {
+	RunID            pgtype.UUID `json:"run_id"`
+	TurnID           pgtype.UUID `json:"turn_id"`
+	TurnPosition     int64       `json:"turn_position"`
+	SessionID        pgtype.UUID `json:"session_id"`
+	BotID            pgtype.UUID `json:"bot_id"`
+	RequestMessageID pgtype.UUID `json:"request_message_id"`
+	OldTurnID        pgtype.UUID `json:"old_turn_id"`
+}
+
+// A request row belongs to exactly one attempt. Copy its payload and attachment
+// links instead of moving the original row out of the superseded turn.
+func (q *Queries) CloneHistoryTurnRequestForRetry(ctx context.Context, arg CloneHistoryTurnRequestForRetryParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, cloneHistoryTurnRequestForRetry,
+		arg.RunID,
+		arg.TurnID,
+		arg.TurnPosition,
+		arg.SessionID,
+		arg.BotID,
+		arg.RequestMessageID,
+		arg.OldTurnID,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const countMessagesByBot = `-- name: CountMessagesByBot :one
 SELECT COUNT(*) FROM bot_visible_history_messages
 WHERE team_id = public.memoh_current_team_id()
@@ -2331,6 +2396,8 @@ SELECT
   m.session_mode,
   m.runtime_type,
   m.event_id,
+  m.turn_id,
+  m.turn_position,
   m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
@@ -2365,6 +2432,8 @@ type GetMessageByIDBySessionRow struct {
 	SessionMode             string             `json:"session_mode"`
 	RuntimeType             string             `json:"runtime_type"`
 	EventID                 pgtype.UUID        `json:"event_id"`
+	TurnID                  pgtype.UUID        `json:"turn_id"`
+	TurnPosition            pgtype.Int8        `json:"turn_position"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
@@ -2390,6 +2459,8 @@ func (q *Queries) GetMessageByIDBySession(ctx context.Context, arg GetMessageByI
 		&i.SessionMode,
 		&i.RuntimeType,
 		&i.EventID,
+		&i.TurnID,
+		&i.TurnPosition,
 		&i.DisplayText,
 		&i.CreatedAt,
 		&i.SenderDisplayName,
@@ -2397,6 +2468,32 @@ func (q *Queries) GetMessageByIDBySession(ctx context.Context, arg GetMessageByI
 		&i.Platform,
 	)
 	return i, err
+}
+
+const getRunHistoryTurnRequestMessageID = `-- name: GetRunHistoryTurnRequestMessageID :one
+SELECT request.id
+FROM bot_history_messages request
+WHERE request.team_id = public.memoh_current_team_id()
+  AND request.session_id = $1
+  AND (request.run_id = $2 OR request.turn_id = $3)
+  AND request.role = 'user' AND request.turn_message_seq = 1
+  AND request.turn_visible = true
+ORDER BY request.turn_position DESC
+LIMIT 1
+`
+
+type GetRunHistoryTurnRequestMessageIDParams struct {
+	SessionID  pgtype.UUID `json:"session_id"`
+	RunID      pgtype.UUID `json:"run_id"`
+	RootTurnID pgtype.UUID `json:"root_turn_id"`
+}
+
+// Resolve the most recent applied input of this run, including steer turns.
+func (q *Queries) GetRunHistoryTurnRequestMessageID(ctx context.Context, arg GetRunHistoryTurnRequestMessageIDParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getRunHistoryTurnRequestMessageID, arg.SessionID, arg.RunID, arg.RootTurnID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const getTurnAgentTurnID = `-- name: GetTurnAgentTurnID :one
@@ -5818,6 +5915,29 @@ func (q *Queries) LockHistoryTurnAppendByRequest(ctx context.Context, arg LockHi
 	return err
 }
 
+const lockHistoryTurnReplacementSession = `-- name: LockHistoryTurnReplacementSession :one
+SELECT id
+FROM bot_sessions
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $1 AND bot_id = $2
+  AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type LockHistoryTurnReplacementSessionParams struct {
+	SessionID pgtype.UUID `json:"session_id"`
+	BotID     pgtype.UUID `json:"bot_id"`
+}
+
+// Serialize target validation and first replacement writes with other history
+// mutations. Deleted sessions cannot accept a new attempt.
+func (q *Queries) LockHistoryTurnReplacementSession(ctx context.Context, arg LockHistoryTurnReplacementSessionParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockHistoryTurnReplacementSession, arg.SessionID, arg.BotID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const markMessagesCompacted = `-- name: MarkMessagesCompacted :execrows
 WITH expected_claims AS MATERIALIZED (
   SELECT ids.message_id, claims.expected_compact_id
@@ -6491,6 +6611,81 @@ func (q *Queries) SearchMessages(ctx context.Context, arg SearchMessagesParams) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const selectBoundHistoryTurnReplacement = `-- name: SelectBoundHistoryTurnReplacement :one
+WITH replacement AS MATERIALIZED (
+  SELECT request.turn_id, request.session_id
+  FROM bot_history_messages request
+  WHERE request.team_id = public.memoh_current_team_id()
+    AND request.bot_id = $1
+    AND request.session_id = $2
+    AND request.turn_id = $3
+    AND request.turn_position = $4::bigint
+    AND request.role = 'user' AND request.turn_message_seq = 1
+    AND request.turn_visible = true
+    AND request.run_id IS NOT DISTINCT FROM $5::uuid
+), affected_compaction AS MATERIALIZED (
+  SELECT old.session_id
+  FROM bot_history_messages old
+  JOIN replacement ON replacement.session_id = old.session_id
+  JOIN bot_history_message_compacts compact ON compact.id = old.compact_id
+    AND compact.team_id = public.memoh_current_team_id()
+  JOIN bot_sessions session ON session.id = old.session_id
+    AND session.team_id = public.memoh_current_team_id()
+  WHERE old.team_id = public.memoh_current_team_id()
+    AND old.turn_id = $6
+    AND compact.bot_id = old.bot_id AND compact.session_id = old.session_id
+    AND compact.compaction_epoch = session.compaction_epoch
+), hidden AS (
+  UPDATE bot_history_messages old
+  SET turn_visible = false,
+      turn_superseded_by_turn_id = replacement.turn_id,
+      turn_superseded_at = now(),
+      turn_superseded_reason = $7
+  FROM replacement
+  WHERE old.team_id = public.memoh_current_team_id()
+    AND old.session_id = replacement.session_id
+    AND old.turn_id = $6
+    AND old.turn_visible = true
+  RETURNING old.id
+), epoch_update AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = compaction_epoch + 1
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id IN (SELECT affected_compaction.session_id FROM affected_compaction)
+    AND EXISTS (SELECT 1 FROM hidden)
+  RETURNING session.id
+)
+SELECT replacement.turn_id FROM replacement
+WHERE EXISTS (SELECT 1 FROM hidden)
+`
+
+type SelectBoundHistoryTurnReplacementParams struct {
+	BotID               pgtype.UUID `json:"bot_id"`
+	SessionID           pgtype.UUID `json:"session_id"`
+	ReplacementTurnID   pgtype.UUID `json:"replacement_turn_id"`
+	ReplacementPosition int64       `json:"replacement_position"`
+	RunID               pgtype.UUID `json:"run_id"`
+	OldTurnID           pgtype.UUID `json:"old_turn_id"`
+	Reason              pgtype.Text `json:"reason"`
+}
+
+// Both attempts already own their messages. Selection never reassigns rows
+// or infers execution order from timestamps or random UUIDs.
+func (q *Queries) SelectBoundHistoryTurnReplacement(ctx context.Context, arg SelectBoundHistoryTurnReplacementParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, selectBoundHistoryTurnReplacement,
+		arg.BotID,
+		arg.SessionID,
+		arg.ReplacementTurnID,
+		arg.ReplacementPosition,
+		arg.RunID,
+		arg.OldTurnID,
+		arg.Reason,
+	)
+	var turn_id pgtype.UUID
+	err := row.Scan(&turn_id)
+	return turn_id, err
 }
 
 const setRoundAgentTurnID = `-- name: SetRoundAgentTurnID :execrows

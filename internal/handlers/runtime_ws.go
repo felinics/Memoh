@@ -136,6 +136,7 @@ type wsReplacementAdmission struct {
 	botID               string
 	kind                string
 	prepareAnchor       func(context.Context) (string, error)
+	prepareUser         func(context.Context, string) (*chatview.UITurn, error)
 	replacementUserTurn *chatview.UITurn
 	attachments         []turn.Attachment
 	attachmentsPrepared bool
@@ -153,14 +154,29 @@ func (a *wsReplacementAdmission) build(ctx context.Context, handle sessionruntim
 		Kind:                 a.kind,
 		ReplaceFromMessageID: replaceFromMessageID,
 	}
-	if a.replacementUserTurn != nil {
-		if !a.attachmentsPrepared {
-			a.attachments = a.handler.ingestWSInboundAttachments(ctx, a.botID, a.attachments)
-			a.attachmentsPrepared = true
+	userTurn := a.replacementUserTurn
+	if a.prepareUser != nil {
+		userTurn, err = a.prepareUser(ctx, replaceFromMessageID)
+		if err != nil {
+			return sessionruntime.RunAdmissionView{}, err
 		}
-		replacement := *a.replacementUserTurn
+	}
+	if userTurn != nil {
+		replacement := *userTurn
+		// The old row belongs to the replaced turn. This projection carries
+		// the new turn until its own request row commits, then runtime swaps
+		// in that durable identity through the step's user-turn update.
+		replacement.ID = ""
 		replacement.TurnID = handle.TurnID
-		replacement.Attachments = chatview.UIAttachmentsFromTurnAttachments(a.botID, a.attachments)
+		replacement.TurnPosition = nil // The runtime stamps its reserved position.
+		replacement.RuntimeForkable = false
+		if a.prepareUser == nil {
+			if !a.attachmentsPrepared {
+				a.attachments = a.handler.ingestWSInboundAttachments(ctx, a.botID, a.attachments)
+				a.attachmentsPrepared = true
+			}
+			replacement.Attachments = chatview.UIAttachmentsFromTurnAttachments(a.botID, a.attachments)
+		}
 		operation.ReplacementUserTurn = &replacement
 	}
 	return sessionruntime.RunAdmissionView{Operation: operation}, nil

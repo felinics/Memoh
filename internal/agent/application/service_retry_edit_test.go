@@ -2,13 +2,11 @@ package application
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/felinics/memoh/internal/apperror"
-	messageevent "github.com/felinics/memoh/internal/chat/event"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	session "github.com/felinics/memoh/internal/chat/thread"
 )
@@ -85,7 +83,7 @@ func TestResolveTurnIDForMessageRejectsAMessageWithoutAVisibleTurn(t *testing.T)
 }
 
 func TestPrepareReplacementOperationUsesPersistedTurnBoundary(t *testing.T) {
-	t.Run("retry begins at the turn's own assistant anchor", func(t *testing.T) {
+	t.Run("retry replaces the original request and output", func(t *testing.T) {
 		messages := &replacementOperationMessageService{
 			latest: messagepkg.HistoryTurn{
 				ID:                 "turn-old",
@@ -99,8 +97,8 @@ func TestPrepareReplacementOperationUsesPersistedTurnBoundary(t *testing.T) {
 		if err != nil {
 			t.Fatalf("prepare retry operation: %v", err)
 		}
-		if got != "assistant-first" {
-			t.Fatalf("replace from message = %q, want assistant-first", got)
+		if got != "user-request" {
+			t.Fatalf("replace from message = %q, want user-request", got)
 		}
 	})
 
@@ -190,7 +188,7 @@ func (s *forkAnchorMessageService) ListBeforeMessageBySession(context.Context, s
 	return append([]messagepkg.Message(nil), s.before...), nil
 }
 
-func TestReplacePersistedTurnMovesForkAnchorMetadata(t *testing.T) {
+func TestPrepareReplacementMovesForkAnchorMetadata(t *testing.T) {
 	t.Parallel()
 
 	createdAt := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
@@ -230,16 +228,11 @@ func TestReplacePersistedTurnMovesForkAnchorMetadata(t *testing.T) {
 		logger: slog.New(slog.DiscardHandler),
 	}
 
-	if err := resolver.replacePersistedTurn(
-		context.Background(),
-		ChatRequest{ThreadID: "fork-session", TurnID: "turn-new", TurnPosition: int64Pointer(2), HistoryCutoffBeforeMessageID: "assistant-old"},
-		"old-turn",
-		"request-2",
-		"retry",
-		[]messagepkg.Message{{ID: "assistant-new", Role: "assistant"}},
-	); err != nil {
-		t.Fatalf("replacePersistedTurn() error = %v", err)
+	update := resolver.prepareForkAnchorUpdate(context.Background(), "fork-session", "assistant-old")
+	if update == nil {
+		t.Fatal("missing prepared fork metadata")
 	}
+	updated = update.metadata
 
 	fork, ok := updated["forked_from"].(map[string]any)
 	if !ok {
@@ -253,60 +246,7 @@ func TestReplacePersistedTurnMovesForkAnchorMetadata(t *testing.T) {
 	}
 }
 
-type recordingEventPublisher struct {
-	events []messageevent.Event
-}
-
-func (p *recordingEventPublisher) Publish(event messageevent.Event) {
-	p.events = append(p.events, event)
-}
-
-func TestReplacePersistedTurnPublishesReplacementMessageEvent(t *testing.T) {
-	t.Parallel()
-
-	messages := &recordingMessageService{}
-	events := &recordingEventPublisher{}
-	resolver := &Service{
-		messageService: messages,
-		eventPublisher: events,
-		logger:         slog.Default(),
-	}
-
-	err := resolver.replacePersistedTurn(context.Background(), ChatRequest{
-		BotID:        "bot-1",
-		ThreadID:     "session-1",
-		TurnID:       "turn-new",
-		TurnPosition: int64Pointer(2),
-	}, "old-turn", "user-new", "retry", []messagepkg.Message{
-		{ID: "user-new", BotID: "bot-1", SessionID: "session-1", Role: "user"},
-		{ID: "assistant-new", BotID: "bot-1", SessionID: "session-1", Role: "assistant", CreatedAt: time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)},
-	})
-	if err != nil {
-		t.Fatalf("replace persisted turn: %v", err)
-	}
-	if messages.replacementTurnID != "turn-new" || messages.replacementTurnPosition == nil || *messages.replacementTurnPosition != 2 {
-		t.Fatalf("replacement identity = (%q, %v), want (turn-new, 2)", messages.replacementTurnID, messages.replacementTurnPosition)
-	}
-	if len(events.events) != 1 {
-		t.Fatalf("published events = %d, want 1", len(events.events))
-	}
-	event := events.events[0]
-	if event.Type != messageevent.EventTypeMessageCreated {
-		t.Fatalf("event type = %q, want %q", event.Type, messageevent.EventTypeMessageCreated)
-	}
-	if event.BotID != "bot-1" {
-		t.Fatalf("event bot id = %q, want bot-1", event.BotID)
-	}
-	var payload messagepkg.Message
-	if err := json.Unmarshal(event.Data, &payload); err != nil {
-		t.Fatalf("unmarshal event payload: %v", err)
-	}
-	if payload.ID != "assistant-new" || payload.SessionID != "session-1" {
-		t.Fatalf("payload = %#v, want assistant-new in session-1", payload)
-	}
-}
-
-func TestReplacePersistedTurnClearsForkAnchorWhenNoInheritedAssistantRemains(t *testing.T) {
+func TestPrepareReplacementClearsForkAnchorWhenNoInheritedAssistantRemains(t *testing.T) {
 	t.Parallel()
 
 	createdAt := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
@@ -343,16 +283,11 @@ func TestReplacePersistedTurnClearsForkAnchorWhenNoInheritedAssistantRemains(t *
 		logger: slog.New(slog.DiscardHandler),
 	}
 
-	if err := resolver.replacePersistedTurn(
-		context.Background(),
-		ChatRequest{ThreadID: "fork-session", TurnID: "turn-new", TurnPosition: int64Pointer(2), HistoryCutoffBeforeMessageID: "assistant-old"},
-		"old-turn",
-		"request-1",
-		"retry",
-		[]messagepkg.Message{{ID: "assistant-new", Role: "assistant"}},
-	); err != nil {
-		t.Fatalf("replacePersistedTurn() error = %v", err)
+	update := resolver.prepareForkAnchorUpdate(context.Background(), "fork-session", "assistant-old")
+	if update == nil {
+		t.Fatal("missing prepared fork metadata")
 	}
+	updated = update.metadata
 
 	fork, ok := updated["forked_from"].(map[string]any)
 	if !ok {

@@ -70,7 +70,7 @@ func TestDeferredStepDoesNotClaimSteerAndContinuationDeliversIt(t *testing.T) {
 	if original == nil {
 		t.Fatal("queue step transaction unavailable")
 	}
-	outcome, err := original.commit(ctx, queueStepDeferredDecision, messagepkg.AgentStep{RunID: handle.RunID}, nil)
+	outcome, err := original.commit(ctx, queueStepDeferredDecision, messagepkg.AgentStep{RunID: handle.RunID})
 	if err != nil {
 		t.Fatalf("deferred commit: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestDeferredStepDoesNotClaimSteerAndContinuationDeliversIt(t *testing.T) {
 
 	// Step N+1: the model call that consumed the approved tool result. Its
 	// commit claims the steer for step N+2.
-	outcome, err = continuation.commit(ctx, queueStepToolLoop, messagepkg.AgentStep{RunID: handle.RunID}, nil)
+	outcome, err = continuation.commit(ctx, queueStepToolLoop, messagepkg.AgentStep{RunID: handle.RunID})
 	if err != nil {
 		t.Fatalf("continuation commit: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestDeferredStepDoesNotClaimSteerAndContinuationDeliversIt(t *testing.T) {
 	}
 
 	// Step N+2 saw the steer; its commit applies the claim exactly once.
-	outcome, err = continuation.commit(ctx, queueStepFinal, messagepkg.AgentStep{RunID: handle.RunID}, nil)
+	outcome, err = continuation.commit(ctx, queueStepFinal, messagepkg.AgentStep{RunID: handle.RunID})
 	if err != nil {
 		t.Fatalf("final commit: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestFinalStepClaimsSteerForLoopContinuation(t *testing.T) {
 	if coordinator == nil {
 		t.Fatal("queue step coordinator unavailable")
 	}
-	outcome, err := coordinator.commit(ctx, queueStepFinal, messagepkg.AgentStep{RunID: handle.RunID}, nil)
+	outcome, err := coordinator.commit(ctx, queueStepFinal, messagepkg.AgentStep{RunID: handle.RunID})
 	if err != nil {
 		t.Fatalf("final commit: %v", err)
 	}

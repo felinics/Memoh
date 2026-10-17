@@ -1125,6 +1125,116 @@ JOIN bot_history_messages m
  AND m.session_id = target.session_id
 GROUP BY target.turn_id, target.session_id, target.turn_position;
 
+-- name: LockHistoryTurnReplacementSession :one
+-- Serialize target validation and first replacement writes with other history
+-- mutations. Deleted sessions cannot accept a new attempt.
+SELECT id
+FROM bot_sessions
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(session_id) AND bot_id = sqlc.arg(bot_id)
+  AND deleted_at IS NULL
+FOR UPDATE;
+
+-- name: CloneHistoryTurnRequestForRetry :one
+-- A request row belongs to exactly one attempt. Copy its payload and attachment
+-- links instead of moving the original row out of the superseded turn.
+WITH cloned AS (
+  INSERT INTO bot_history_messages (
+    bot_id, session_id, sender_channel_identity_id, sender_account_user_id,
+    source_message_id, source_reply_to_message_id, role, content, metadata,
+    usage, session_mode, runtime_type, model_id, event_id, display_text, run_id,
+    turn_id, turn_position, turn_message_seq, turn_visible
+  )
+  SELECT original.bot_id, original.session_id,
+    original.sender_channel_identity_id, original.sender_account_user_id,
+    original.source_message_id, original.source_reply_to_message_id,
+    original.role, original.content, original.metadata, original.usage,
+    original.session_mode, original.runtime_type, original.model_id,
+    original.event_id, original.display_text, sqlc.narg(run_id)::uuid,
+    sqlc.arg(turn_id)::uuid, sqlc.arg(turn_position)::bigint, 1, true
+  FROM bot_history_messages original
+  WHERE original.team_id = public.memoh_current_team_id()
+    AND original.session_id = sqlc.arg(session_id)
+    AND original.bot_id = sqlc.arg(bot_id)
+    AND original.id = sqlc.arg(request_message_id)
+    AND original.turn_id = sqlc.arg(old_turn_id)
+    AND original.turn_visible = true
+    AND original.role = 'user' AND original.turn_message_seq = 1
+  RETURNING id
+), copied_assets AS (
+  INSERT INTO bot_history_message_assets (
+    message_id, role, ordinal, content_hash, mime, size_bytes, storage_key, name, metadata
+  )
+  SELECT cloned.id, asset.role, asset.ordinal, asset.content_hash, asset.mime,
+    asset.size_bytes, asset.storage_key, asset.name, asset.metadata
+  FROM cloned
+  JOIN bot_history_message_assets asset ON asset.message_id = sqlc.arg(request_message_id)
+    AND asset.team_id = public.memoh_current_team_id()
+  RETURNING id
+)
+SELECT cloned.id FROM cloned;
+
+-- name: SelectBoundHistoryTurnReplacement :one
+-- Both attempts already own their messages. Selection never reassigns rows
+-- or infers execution order from timestamps or random UUIDs.
+WITH replacement AS MATERIALIZED (
+  SELECT request.turn_id, request.session_id
+  FROM bot_history_messages request
+  WHERE request.team_id = public.memoh_current_team_id()
+    AND request.bot_id = sqlc.arg(bot_id)
+    AND request.session_id = sqlc.arg(session_id)
+    AND request.turn_id = sqlc.arg(replacement_turn_id)
+    AND request.turn_position = sqlc.arg(replacement_position)::bigint
+    AND request.role = 'user' AND request.turn_message_seq = 1
+    AND request.turn_visible = true
+    AND request.run_id IS NOT DISTINCT FROM sqlc.narg(run_id)::uuid
+), affected_compaction AS MATERIALIZED (
+  SELECT old.session_id
+  FROM bot_history_messages old
+  JOIN replacement ON replacement.session_id = old.session_id
+  JOIN bot_history_message_compacts compact ON compact.id = old.compact_id
+    AND compact.team_id = public.memoh_current_team_id()
+  JOIN bot_sessions session ON session.id = old.session_id
+    AND session.team_id = public.memoh_current_team_id()
+  WHERE old.team_id = public.memoh_current_team_id()
+    AND old.turn_id = sqlc.arg(old_turn_id)
+    AND compact.bot_id = old.bot_id AND compact.session_id = old.session_id
+    AND compact.compaction_epoch = session.compaction_epoch
+), hidden AS (
+  UPDATE bot_history_messages old
+  SET turn_visible = false,
+      turn_superseded_by_turn_id = replacement.turn_id,
+      turn_superseded_at = now(),
+      turn_superseded_reason = sqlc.arg(reason)
+  FROM replacement
+  WHERE old.team_id = public.memoh_current_team_id()
+    AND old.session_id = replacement.session_id
+    AND old.turn_id = sqlc.arg(old_turn_id)
+    AND old.turn_visible = true
+  RETURNING old.id
+), epoch_update AS (
+  UPDATE bot_sessions session
+  SET compaction_epoch = compaction_epoch + 1
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id IN (SELECT affected_compaction.session_id FROM affected_compaction)
+    AND EXISTS (SELECT 1 FROM hidden)
+  RETURNING session.id
+)
+SELECT replacement.turn_id FROM replacement
+WHERE EXISTS (SELECT 1 FROM hidden);
+
+-- name: GetRunHistoryTurnRequestMessageID :one
+-- Resolve the most recent applied input of this run, including steer turns.
+SELECT request.id
+FROM bot_history_messages request
+WHERE request.team_id = public.memoh_current_team_id()
+  AND request.session_id = sqlc.arg(session_id)
+  AND (request.run_id = sqlc.arg(run_id) OR request.turn_id = sqlc.arg(root_turn_id))
+  AND request.role = 'user' AND request.turn_message_seq = 1
+  AND request.turn_visible = true
+ORDER BY request.turn_position DESC
+LIMIT 1;
+
 -- name: ReplaceHistoryTurn :one
 WITH owner_session AS MATERIALIZED (
   SELECT session.id
@@ -2110,6 +2220,8 @@ SELECT
   m.session_mode,
   m.runtime_type,
   m.event_id,
+  m.turn_id,
+  m.turn_position,
   m.display_text,
   m.created_at,
   ci.display_name AS sender_display_name,
