@@ -41,6 +41,26 @@ func TestTranscriptCommandOutputKeepsFallbackText(t *testing.T) {
 	}
 }
 
+func TestTranscriptKeepsReasoningBlocksSeparate(t *testing.T) {
+	messages := TranscriptFromEvents([]event.StreamEvent{
+		{Type: event.ReasoningStart},
+		{Type: event.ReasoningDelta, Delta: "A"},
+		{Type: event.ReasoningEnd},
+		{Type: event.ReasoningStart},
+		{Type: event.ReasoningDelta, Delta: "B"},
+		{Type: event.ReasoningEnd},
+		{Type: event.TextDelta, Delta: "answer"},
+	}, "")
+	if len(messages) != 1 || len(messages[0].Content) != 3 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	first, _ := messages[0].Content[0].(sdk.ReasoningPart)
+	second, _ := messages[0].Content[1].(sdk.ReasoningPart)
+	if first.Text != "A" || second.Text != "B" {
+		t.Fatalf("reasoning parts = %#v", messages[0].Content)
+	}
+}
+
 func TestTranscriptKeepsNativeToolFailure(t *testing.T) {
 	messages := TranscriptFromEvents([]event.StreamEvent{
 		{Type: event.ToolCallStart, ToolCallID: "read", ToolName: "read"},

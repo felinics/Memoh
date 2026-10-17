@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
@@ -145,7 +147,7 @@ func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalog
 	if err != nil {
 		return external.ModelCatalog{}, err
 	}
-	proc, err := startCLI(ctx, client, projectPath, cliArgs(cfg, external.PromptInput{}, "", ""), cliEnv(cfg), launcher.Path)
+	proc, err := startCLI(ctx, client, projectPath, cliArgs(cfg, external.PromptInput{}, "", "", launcher.Version), cliEnv(cfg), launcher.Path)
 	if err != nil {
 		return external.ModelCatalog{}, err
 	}
@@ -327,7 +329,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		return external.PromptResult{}, external.Unavailable(err)
 	}
 	defer toolsMount.Stop()
-	args := cliArgs(cfg, input, storedSessionID, mcpConfig)
+	args := cliArgs(cfg, input, storedSessionID, mcpConfig, launcher.Version)
 	env := cliEnv(cfg)
 
 	// The process must survive a caller disconnect long enough for the
@@ -465,14 +467,26 @@ func (d *Driver) ensureResumableSession(ctx context.Context, client transcriptFS
 	return ""
 }
 
-// cliArgs builds the pinned stream-json invocation.
-func cliArgs(cfg claudecfg.Config, input external.PromptInput, sessionID, mcpConfig string) []string {
+// thinkingDisplaySince is the first CLI that accepts --thinking-display; older
+// ones exit on the unknown option before the handshake.
+const thinkingDisplaySince = "v2.1.94"
+
+// cliArgs builds the pinned stream-json invocation for the CLI at cliVersion
+// (empty when unknown).
+func cliArgs(cfg claudecfg.Config, input external.PromptInput, sessionID, mcpConfig, cliVersion string) []string {
 	args := []string{
 		"--output-format", "stream-json",
 		"--verbose",
 		"--input-format", "stream-json",
 		"--include-partial-messages",
 		"--permission-prompt-tool", "stdio",
+	}
+	// Without it the CLI leaves the display to the API (or asks for progress
+	// updates only), and current models then stream thinking blocks with empty
+	// text. An unknown version goes without: hidden thinking beats a CLI that
+	// exits, and the handshake reports the version for the next launch.
+	if v := "v" + strings.TrimPrefix(cliVersion, "v"); semver.IsValid(v) && semver.Compare(v, thinkingDisplaySince) >= 0 {
+		args = append(args, "--thinking-display", "summarized")
 	}
 	if firstNonEmpty(metadataString(input.RuntimeMetadata, "permission_mode"), cfg.PermissionMode) == "bypassPermissions" {
 		args = append(args, "--allow-dangerously-skip-permissions")

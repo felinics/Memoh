@@ -149,7 +149,8 @@ type resultUsage struct {
 type contentBlock struct {
 	Type string `json:"type"`
 
-	Text string `json:"text,omitempty"`
+	Text     string `json:"text,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
 
 	// tool_use fields.
 	ID    string          `json:"id,omitempty"`
@@ -180,8 +181,12 @@ func decodeChatMessage(raw json.RawMessage) (*chatMessage, bool) {
 
 // streamEvent is the raw Anthropic streaming event inside a stream_event line.
 type streamEvent struct {
-	Type  string `json:"type"`
-	Delta struct {
+	Type string `json:"type"`
+	// ContentBlock is set on content_block_start. Some gateways put the whole
+	// thinking text here and send no thinking_delta; the CLI's own assistant
+	// message then carries an empty thinking block.
+	ContentBlock contentBlock `json:"content_block"`
+	Delta        struct {
 		Type     string `json:"type"`
 		Text     string `json:"text,omitempty"`
 		Thinking string `json:"thinking,omitempty"`

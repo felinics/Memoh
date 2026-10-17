@@ -46,6 +46,8 @@ func (b *TranscriptRecorder) Add(ev event.StreamEvent) {
 	switch ev.Type {
 	case event.ReasoningDelta:
 		b.appendReasoning(ev.Delta)
+	case event.ReasoningEnd:
+		b.flushReasoning()
 	case event.TextDelta:
 		b.appendText(ev.Delta)
 	case event.CommandOutput:

@@ -67,10 +67,11 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		return nil
 
 	case "text_start":
+		c.reasoning = nil
 		c.text = &uiTextStreamState{ID: c.allocBlockID(UIMessageText, "")}
 		return nil
 	case "command_output":
-		c.finalizeTextBlock()
+		c.endBlocks()
 		return []UIMessage{{ID: c.allocBlockID(UIMessageCommand, ""), Type: UIMessageCommand, Name: event.ToolName, Content: event.Delta}}
 	case "runtime_status":
 		if c.status == nil {
@@ -84,6 +85,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		return []UIMessage{*c.status}
 
 	case "text_delta":
+		c.reasoning = nil
 		if c.text == nil {
 			c.text = &uiTextStreamState{ID: c.allocBlockID(UIMessageText, "")}
 		}
@@ -99,11 +101,18 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		return nil
 
 	case "reasoning_start":
-		c.reasoning = &uiTextStreamState{ID: c.allocBlockID(UIMessageReasoning, "")}
+		c.reasoning = nil
 		return nil
 
 	case "reasoning_delta":
 		if c.reasoning == nil {
+			// The block gets its ID with its first visible content: the terminal
+			// snapshot drops blank reasoning, so a block that is still blank
+			// (hidden thinking, a lone paragraph break) must not take part in
+			// positional matching.
+			if strings.TrimSpace(event.Delta) == "" {
+				return nil
+			}
 			c.reasoning = &uiTextStreamState{ID: c.allocBlockID(UIMessageReasoning, "")}
 		}
 		c.reasoning.Content += event.Delta
@@ -173,7 +182,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			c.tools[trimmed] = state
 		}
 		state.Message.Running = uiBoolPtr(true)
-		c.finalizeTextBlock()
+		c.endBlocks()
 		return []UIMessage{cloneToolStreamMessage(state.Message)}
 
 	case "tool_call_progress":
@@ -249,7 +258,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		return []UIMessage{cloneToolStreamMessage(state.Message)}
 
 	case "user_input_request":
-		c.finalizeTextBlock()
+		c.endBlocks()
 		state := c.findToolState(event.ToolCallID, event.ToolName)
 		if state == nil {
 			state = &uiToolStreamState{
@@ -369,6 +378,14 @@ func (c *UIMessageStreamConverter) finalizeTextBlock() {
 		}
 	}
 	c.text = nil
+}
+
+// endBlocks closes the open text and reasoning blocks when another block
+// starts, the same boundary the runtime transcript records. Runtimes that
+// stream reasoning without reasoning_end rely on it.
+func (c *UIMessageStreamConverter) endBlocks() {
+	c.finalizeTextBlock()
+	c.reasoning = nil
 }
 
 // ConvertTerminalMessages converts the terminal snapshot into UI messages whose
