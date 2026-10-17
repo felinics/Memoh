@@ -222,6 +222,14 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 						Required:    true,
 						Example:     "http://localhost:8080/search",
 					},
+					"headers": {
+						Type:        "object",
+						Title:       "HTTP headers",
+						Description: "Custom request headers, such as Authorization: Bearer <key>.",
+						// No Example: draft configs are seeded from non-secret
+						// examples, which would send a placeholder credential.
+						Required: false,
+					},
 					"language": {
 						Type:        "string",
 						Title:       "Language",
