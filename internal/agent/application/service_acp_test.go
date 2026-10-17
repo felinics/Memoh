@@ -362,9 +362,6 @@ func TestStreamChatWSRoutesACPRuntimeSessionToACPPool(t *testing.T) {
 	if pool.input.ContextBudgetMaxTokens != 0 {
 		t.Fatalf("ContextBudgetMaxTokens = %d, want 0 when models/settings services are not configured", pool.input.ContextBudgetMaxTokens)
 	}
-	if pool.input.ContextToolExchangePolicy == nil || pool.input.ContextToolExchangePolicy.MinMessages != 10 {
-		t.Fatalf("ContextToolExchangePolicy = %#v, want default MinMessages=10", pool.input.ContextToolExchangePolicy)
-	}
 	if len(pool.input.Images) != 1 ||
 		pool.input.Images[0].Data != base64.StdEncoding.EncodeToString(rasterPNG(t)) ||
 		pool.input.Images[0].MimeType != "image/png" {
@@ -1242,9 +1239,6 @@ func TestStreamACPAgentWSPropagatesContextBudgetDefaults(t *testing.T) {
 
 	if pool.input.ContextBudgetMaxTokens != 128000 {
 		t.Fatalf("ContextBudgetMaxTokens = %d, want 128000", pool.input.ContextBudgetMaxTokens)
-	}
-	if pool.input.ContextToolExchangePolicy == nil || pool.input.ContextToolExchangePolicy.MinMessages != 10 {
-		t.Fatalf("ContextToolExchangePolicy = %#v, want default MinMessages=10", pool.input.ContextToolExchangePolicy)
 	}
 }
 

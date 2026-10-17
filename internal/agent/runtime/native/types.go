@@ -183,7 +183,6 @@ type RunConfig struct {
 	ContextHookText                string
 	ContextToolDefs                []contextfrag.ToolDefAccounting
 	ContextToolDefsResolved        bool
-	ContextToolExchangePolicy      *contextfrag.ToolExchangePolicy
 	ContextBudgetMaxTokens         int
 	// ModelMaxOutputTokens is the model's configured output cap; zero means unknown.
 	ModelMaxOutputTokens         int

@@ -63,9 +63,6 @@ func (s *Service) prepareContinuationRunConfig(
 	base.Messages = modelMessagesToSDKMessages(repairToolCallClosures(nonNilModelMessages(messages), syntheticToolClosureError))
 	base.ContextCurrentUserMessageIndex = nil
 	base.ContextMemoryMessageIndex = nil
-	if base.ContextToolExchangePolicy == nil {
-		base.ContextToolExchangePolicy = defaultToolExchangePolicy()
-	}
 	base.Query = ""
 	base.LiveToolStream = eventCh != nil
 	base.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)

@@ -1,13 +1,11 @@
 package application
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
-	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 )
 
 func intPtr(v int) *int { return &v }
@@ -284,118 +282,5 @@ func TestTrimMessagesByTokens_PreservesRequiredMessage(t *testing.T) {
 	}
 	if trimmed[0].Role != "user" || trimmed[0].TextContent() != "retry this exact prompt" {
 		t.Fatalf("required message was not preserved: %+v", trimmed)
-	}
-}
-
-func TestStripToolMessages_RemovesAssistantToolCallContentParts(t *testing.T) {
-	t.Parallel()
-
-	content, err := json.Marshal([]map[string]any{
-		{"type": "reasoning", "text": "thinking"},
-		{"type": "tool-call", "toolName": "read", "toolCallId": "call-1", "input": map[string]any{"path": "/tmp/a.txt"}},
-	})
-	if err != nil {
-		t.Fatalf("marshal content: %v", err)
-	}
-
-	filtered := stripToolMessages([]ModelMessage{
-		{
-			Role:    "assistant",
-			Content: content,
-		},
-		{
-			Role:    "assistant",
-			Content: newTextContent("保留这条消息"),
-		},
-	})
-
-	if len(filtered) != 1 {
-		t.Fatalf("expected 1 message after filtering, got %d", len(filtered))
-	}
-	if filtered[0].TextContent() != "保留这条消息" {
-		t.Fatalf("unexpected remaining message: %+v", filtered[0])
-	}
-}
-
-func TestStripToolMessages_PreservesAskUserInteraction(t *testing.T) {
-	t.Parallel()
-
-	callContent, err := json.Marshal([]map[string]any{
-		{"type": "text", "text": "请回答这一题："},
-		{
-			"type":       "tool-call",
-			"toolName":   userinput.ToolNameAskUser,
-			"toolCallId": "ask-1",
-			"input": map[string]any{
-				"questions": []any{
-					map[string]any{
-						"text": "选哪一个？",
-						"kind": "single_select",
-						"options": []any{
-							map[string]any{"label": "A"},
-							map[string]any{"label": "B"},
-						},
-					},
-				},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal call content: %v", err)
-	}
-	resultContent, err := json.Marshal([]map[string]any{
-		{
-			"type":       "tool-result",
-			"toolName":   userinput.ToolNameAskUser,
-			"toolCallId": "ask-1",
-			"result": map[string]any{
-				"status": "submitted",
-				"answers": []any{
-					map[string]any{
-						"question": "选哪一个？",
-						"selected": []any{map[string]any{"label": "B"}},
-					},
-				},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal result content: %v", err)
-	}
-	readContent, err := json.Marshal([]map[string]any{
-		{"type": "tool-call", "toolName": "read", "toolCallId": "read-1", "input": map[string]any{"path": "/tmp/a.txt"}},
-	})
-	if err != nil {
-		t.Fatalf("marshal read content: %v", err)
-	}
-
-	filtered := stripToolMessages([]ModelMessage{
-		{Role: "assistant", Content: callContent},
-		{Role: "tool", Content: resultContent},
-		{Role: "assistant", Content: readContent},
-		{Role: "tool", Content: newTextContent("large output")},
-	})
-
-	if len(filtered) != 2 {
-		t.Fatalf("expected ask_user call and result to remain, got %d messages: %+v", len(filtered), filtered)
-	}
-	if filtered[0].Role != "assistant" || filtered[1].Role != "tool" {
-		t.Fatalf("unexpected roles after filtering: %+v", filtered)
-	}
-
-	var callParts []map[string]any
-	if err := json.Unmarshal(filtered[0].Content, &callParts); err != nil {
-		t.Fatalf("unmarshal preserved call content: %v", err)
-	}
-	if len(callParts) != 2 || callParts[1]["toolName"] != userinput.ToolNameAskUser {
-		t.Fatalf("ask_user tool call was not preserved: %#v", callParts)
-	}
-
-	var resultParts []map[string]any
-	if err := json.Unmarshal(filtered[1].Content, &resultParts); err != nil {
-		t.Fatalf("unmarshal preserved result content: %v", err)
-	}
-	if len(resultParts) != 1 || resultParts[0]["toolName"] != userinput.ToolNameAskUser {
-		t.Fatalf("ask_user tool result was not preserved: %#v", resultParts)
 	}
 }

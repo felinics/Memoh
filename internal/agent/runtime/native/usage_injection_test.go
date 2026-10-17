@@ -8,7 +8,6 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
@@ -344,24 +343,19 @@ func TestAssembleToolsInjectsUsageWhenProviderEmitsTools(t *testing.T) {
 	}
 }
 
-func TestAssembleToolsPassesContextBudgetAndToolExchangePolicyToSession(t *testing.T) {
+func TestAssembleToolsPassesContextBudgetToSession(t *testing.T) {
 	t.Parallel()
 	var captured tools.SessionContext
 	a := newTestAgent(&usageTestProvider{emitTool: true, sessionSeen: &captured})
-	policy := &contextfrag.ToolExchangePolicy{MinMessages: 10}
 
 	if _, _, _, _, err := a.assembleTools(context.Background(), RunConfig{
-		ContextBudgetMaxTokens:    128000,
-		ContextToolExchangePolicy: policy,
+		ContextBudgetMaxTokens: 128000,
 	}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true); err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
 
 	if captured.ContextBudgetMaxTokens != 128000 {
 		t.Fatalf("ContextBudgetMaxTokens = %d, want 128000", captured.ContextBudgetMaxTokens)
-	}
-	if captured.ContextToolExchangePolicy != policy {
-		t.Fatalf("ContextToolExchangePolicy = %p, want same pointer %p", captured.ContextToolExchangePolicy, policy)
 	}
 }
 

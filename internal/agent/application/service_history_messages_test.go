@@ -112,7 +112,7 @@ func TestProjectInterruptedHistoryReasoningKeepsOpaqueBlock(t *testing.T) {
 	}
 }
 
-func TestProjectInterruptedHistoryReasoningSkipsSupersededCheckpoint(t *testing.T) {
+func TestProjectInterruptedHistoryReasoningProjectsSupersededCheckpoint(t *testing.T) {
 	checkpoint := historyfrag.HistoryRecord{
 		ModelMessage: sdkMessagesToModelMessages([]sdk.Message{{
 			Role:    sdk.MessageRoleAssistant,
@@ -129,10 +129,10 @@ func TestProjectInterruptedHistoryReasoningSkipsSupersededCheckpoint(t *testing.
 	projected := projectInterruptedHistoryReasoning([]historyfrag.HistoryRecord{checkpoint, answer})
 	got := modelMessageToSDKMessage(projected[0].ModelMessage)
 	if len(got.Content) != 1 {
-		t.Fatalf("projected content = %#v, want the reasoning part untouched", got.Content)
+		t.Fatalf("projected content = %#v, want one text part", got.Content)
 	}
-	if _, ok := got.Content[0].(sdk.ReasoningPart); !ok {
-		t.Fatalf("superseded checkpoint was projected into prompt text: %#v", got.Content[0])
+	if text, ok := got.Content[0].(sdk.TextPart); !ok || !strings.Contains(text.Text, "partial reasoning") {
+		t.Fatalf("superseded checkpoint must keep the projection it had while live: %#v", got.Content[0])
 	}
 }
 

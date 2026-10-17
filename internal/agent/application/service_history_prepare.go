@@ -59,11 +59,6 @@ func (s *Service) prepareHistoryContext(
 	}, nil
 }
 
-// projectInterruptedHistoryReasoning turns still-live interrupted reasoning
-// into assistant text for the next model call. Durable history keeps the typed
-// reasoning part; this projection covers the non-DCP fallback and providers that
-// ignore reasoning_content in prior messages. Checkpoints a completed answer
-// already superseded stay hidden, same as on the DCP path.
 func historyErrorCode(meta map[string]any) string {
 	if meta == nil {
 		return ""
@@ -108,15 +103,24 @@ func dropEmptyHistoryFailures(records []historyfrag.HistoryRecord) []historyfrag
 	return out
 }
 
+// projectInterruptedHistoryReasoning turns interrupted reasoning into assistant
+// text. Durable history keeps the typed reasoning part; every checkpoint is
+// projected the same way on every turn, so a superseded one neither rewrites
+// the replayed prefix nor reaches the provider as unsigned reasoning.
 func projectInterruptedHistoryReasoning(records []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
-	checkpoint := messagepkg.LatestInterruptedCheckpoint(len(records), func(i int) (bool, bool) {
-		return strings.EqualFold(strings.TrimSpace(records[i].ModelMessage.Role), "assistant"),
-			records[i].Metadata[messagepkg.AgentStepInterruptedMetadataKey] == true
-	})
-	if checkpoint < 0 {
+	var projected []historyfrag.HistoryRecord
+	for i, record := range records {
+		if !strings.EqualFold(strings.TrimSpace(record.ModelMessage.Role), "assistant") ||
+			record.Metadata[messagepkg.AgentStepInterruptedMetadataKey] != true {
+			continue
+		}
+		if projected == nil {
+			projected = append([]historyfrag.HistoryRecord(nil), records...)
+		}
+		projected[i].ModelMessage = timeline.ProjectInterruptedReasoning(record.ModelMessage)
+	}
+	if projected == nil {
 		return records
 	}
-	projected := append([]historyfrag.HistoryRecord(nil), records...)
-	projected[checkpoint].ModelMessage = timeline.ProjectInterruptedReasoning(records[checkpoint].ModelMessage)
 	return projected
 }

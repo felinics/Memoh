@@ -147,7 +147,6 @@ func (s *appServer) toolSessionForThread(threadID string) mcp.ToolSessionContext
 	session.RuntimeActive = true
 	session.SupportsImageInput = true
 	session.ContextBudgetMaxTokens = in.ContextBudgetMaxTokens
-	session.ContextToolExchangePolicy = in.ContextToolExchangePolicy
 	if fence, ok := runtimefence.FromContext(turn.ctx); ok {
 		session.RuntimeFence = fence
 	}

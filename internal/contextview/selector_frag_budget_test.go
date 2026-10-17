@@ -249,3 +249,10 @@ func TestFragBudgetOverflowKeepIgnoresConfiguredLimits(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 }
+
+func historyMessageFrag(id string, msg sdk.Message) contextfrag.ContextFrag {
+	return contextfrag.MessageFrag(contextfrag.MessageFragInput{
+		ID: id, Message: msg, Kind: contextfrag.KindConversationEvent, Slot: contextfrag.SlotHistory,
+		Scope: contextfrag.Scope{BotID: "bot-1"}, Source: "run_config_fields", Collector: "history_messages",
+	})
+}

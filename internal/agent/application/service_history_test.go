@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
@@ -179,4 +182,22 @@ func equalStrings(a []string, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestEstimateMessageTokensCountsReplayedReasoningAndToolInput(t *testing.T) {
+	t.Parallel()
+
+	reasoning := strings.Repeat("r", 4000)
+	input := strings.Repeat("i", 4000)
+	message := sdkMessagesToModelMessages([]sdk.Message{{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{
+			sdk.ReasoningPart{Text: reasoning, Format: sdk.ReasoningFormatOpenAIChat},
+			sdk.TextPart{Text: "short answer"},
+			sdk.ToolCallPart{ToolCallID: "call-1", ToolName: "write", Input: toolexec.ArgumentsFromValue(map[string]any{"body": input})},
+		},
+	}})[0]
+	if got, floor := estimateMessageTokens(message), contextfrag.TokensFromBytes(len(reasoning)+len(input)); got < floor {
+		t.Fatalf("estimateMessageTokens = %d, want at least %d for the replayed reasoning and tool input", got, floor)
+	}
 }
