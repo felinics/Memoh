@@ -55,6 +55,7 @@ class ResizeObserverMock {
 const harnesses: Harness[] = []
 let nextAnimationFrameId = 1
 const animationFrameTimers = new Map<number, ReturnType<typeof setTimeout>>()
+const animationFrameCallbacks = new Map<number, FrameRequestCallback>()
 
 function userMessage(id: string, text = id): ChatMessage {
   return {
@@ -177,6 +178,19 @@ async function flushDom() {
   await nextTick()
 }
 
+// The follow-write guard lives until the frame scheduled with it. Tests that
+// order a gesture against that frame flush the queued callbacks directly.
+function flushAnimationFrames() {
+  const queued = [...animationFrameCallbacks.entries()]
+  for (const [id, callback] of queued) {
+    const timer = animationFrameTimers.get(id)
+    if (timer) clearTimeout(timer)
+    animationFrameTimers.delete(id)
+    animationFrameCallbacks.delete(id)
+    callback(performance.now())
+  }
+}
+
 function startBottomJump(): Harness {
   const reply = assistantMessage('assistant-1')
   reply.streaming = true
@@ -207,9 +221,12 @@ beforeEach(() => {
   })
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
     const id = nextAnimationFrameId++
+    animationFrameCallbacks.set(id, callback)
     const timer = setTimeout(() => {
+      const queued = animationFrameCallbacks.get(id)
+      animationFrameCallbacks.delete(id)
       animationFrameTimers.delete(id)
-      callback(performance.now())
+      queued?.(performance.now())
     }, 16)
     animationFrameTimers.set(id, timer)
     return id
@@ -218,6 +235,7 @@ beforeEach(() => {
     const timer = animationFrameTimers.get(id)
     if (timer) clearTimeout(timer)
     animationFrameTimers.delete(id)
+    animationFrameCallbacks.delete(id)
   })
 })
 
@@ -229,6 +247,7 @@ afterEach(() => {
   }
   for (const timer of animationFrameTimers.values()) clearTimeout(timer)
   animationFrameTimers.clear()
+  animationFrameCallbacks.clear()
   vi.unstubAllGlobals()
 })
 
@@ -249,6 +268,199 @@ describe('useChatScroll gesture and layout handling', () => {
 
     harness.geometry.scrollHeight = 1_100
     ResizeObserverMock.instances[0]?.trigger(harness.content)
+    expect(harness.scrollTo).not.toHaveBeenCalled()
+  })
+
+  it('parks a touch escape that arrives before the follow write clears its guard', async () => {
+    const harness = mountHarness([userMessage('user-1')])
+    harness.scrollTo.mockClear()
+
+    harness.viewport.dispatchEvent(new Event('touchstart', { bubbles: true }))
+    harness.geometry.scrollHeight = 1_100
+    ResizeObserverMock.instances[0]?.trigger(harness.content)
+    expect(harness.viewport.scrollTop).toBe(900)
+
+    // The write's scroll event has already run; its guard is still armed.
+    harness.viewport.scrollTop = 680
+    harness.viewport.dispatchEvent(new Event('scroll'))
+    expect(harness.viewport.scrollTop).toBe(680)
+    flushAnimationFrames()
+
+    harness.scrollTo.mockClear()
+    harness.geometry.scrollHeight = 1_300
+    ResizeObserverMock.instances[0]?.trigger(harness.content)
+    harness.content.append(document.createTextNode('more tokens'))
+    await flushDom()
+
+    expect(harness.viewport.scrollTop).toBe(680)
+    expect(harness.scrollTo).not.toHaveBeenCalled()
+  })
+
+  it.each(['touchend', 'touchcancel', 'pointercancel'] as const)(
+    'parks a short momentum escape after %s across frames',
+    async (ending) => {
+      const harness = mountHarness([userMessage('user-1')])
+      harness.viewport.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+      harness.viewport.dispatchEvent(new Event('touchstart', { bubbles: true }))
+      if (ending === 'pointercancel') {
+        window.dispatchEvent(new Event('pointercancel'))
+        window.dispatchEvent(new Event('touchcancel'))
+      } else {
+        window.dispatchEvent(new Event('pointerup'))
+        window.dispatchEvent(new Event(ending))
+      }
+
+      harness.geometry.scrollHeight = 1_100
+      ResizeObserverMock.instances[0]?.trigger(harness.content)
+      // 10px above the new bottom is still inside the 30px near-bottom band.
+      harness.viewport.scrollTop = 890
+      harness.viewport.dispatchEvent(new Event('scroll'))
+      expect(harness.viewport.scrollTop).toBe(890)
+      flushAnimationFrames()
+
+      harness.scrollTo.mockClear()
+      harness.geometry.scrollHeight = 1_250
+      ResizeObserverMock.instances[0]?.trigger(harness.content)
+      harness.content.append(document.createTextNode('next frame'))
+      await flushDom()
+      expect(harness.viewport.scrollTop).toBe(890)
+      expect(harness.scrollTo).not.toHaveBeenCalled()
+
+      harness.viewport.scrollTop = 820
+      harness.viewport.dispatchEvent(new Event('scroll'))
+      harness.geometry.scrollHeight = 1_400
+      ResizeObserverMock.instances[0]?.trigger(harness.content)
+      expect(harness.viewport.scrollTop).toBe(820)
+      expect(harness.scrollTo).not.toHaveBeenCalled()
+    },
+  )
+
+  it('does not let a delayed follow-write scroll escape or re-arm during touch', async () => {
+    const harness = mountHarness([userMessage('user-1')])
+    const queued: Array<() => void> = []
+    harness.scrollTo.mockImplementation((options: ScrollToOptions | number) => {
+      const top = typeof options === 'number' ? options : (options.top ?? harness.viewport.scrollTop)
+      harness.viewport.scrollTop = top
+      queued.push(() => harness.viewport.dispatchEvent(new Event('scroll')))
+    })
+
+    harness.viewport.dispatchEvent(new Event('touchstart', { bubbles: true }))
+    harness.geometry.scrollHeight = 1_100
+    ResizeObserverMock.instances[0]?.trigger(harness.content)
+    expect(queued).toHaveLength(1)
+    expect(harness.viewport.scrollTop).toBe(900)
+    // Stationary delivery of the write, while the finger is down.
+    queued.shift()?.()
+
+    harness.geometry.scrollHeight = 1_200
+    ResizeObserverMock.instances[0]?.trigger(harness.content)
+    expect(harness.viewport.scrollTop).toBe(1_000)
+    expect(queued).toHaveLength(1)
+
+    // Move away before either the frame or the write's scroll event.
+    harness.viewport.scrollTop = 980
+    flushAnimationFrames()
+    harness.viewport.dispatchEvent(new Event('scroll'))
+    queued.shift()?.()
+
+    const callsAfterEscape = harness.scrollTo.mock.calls.length
+    harness.geometry.scrollHeight = 1_400
+    ResizeObserverMock.instances[0]?.trigger(harness.content)
+    harness.content.append(document.createTextNode('still streaming'))
+    await flushDom()
+
+    expect(harness.viewport.scrollTop).toBe(980)
+    expect(harness.scrollTo).toHaveBeenCalledTimes(callsAfterEscape)
+  })
+
+  it('keeps following through a tap and resumes only at the bottom', async () => {
+    const harness = mountHarness([userMessage('user-1')])
+    let now = 10_000
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    try {
+      harness.viewport.dispatchEvent(new Event('touchstart', { bubbles: true }))
+      window.dispatchEvent(new Event('touchend'))
+      // Follow writes every 200ms must not keep the finished tap inside the
+      // 250ms momentum window, or a later layout shove would look like a flick.
+      for (let step = 0; step < 4; step++) {
+        now += 200
+        harness.geometry.scrollHeight += 100
+        ResizeObserverMock.instances[0]?.trigger(harness.content)
+      }
+      expect(harness.viewport.scrollTop).toBe(1_200)
+      flushAnimationFrames()
+
+      now += 10
+      harness.viewport.scrollTop = 1_140
+      harness.viewport.dispatchEvent(new Event('scroll'))
+      expect(harness.viewport.scrollTop).toBe(1_200)
+      flushAnimationFrames()
+
+      harness.scroll.markEscaped()
+      harness.viewport.scrollTop = 400
+      harness.viewport.dispatchEvent(new Event('scroll'))
+      harness.viewport.dispatchEvent(new Event('touchstart', { bubbles: true }))
+      harness.viewport.scrollTop = 560
+      harness.viewport.dispatchEvent(new Event('scroll'))
+      harness.scrollTo.mockClear()
+      harness.geometry.scrollHeight = 1_600
+      ResizeObserverMock.instances[0]?.trigger(harness.content)
+      expect(harness.viewport.scrollTop).toBe(560)
+      expect(harness.scrollTo).not.toHaveBeenCalled()
+
+      harness.viewport.scrollTop = 1_400
+      harness.viewport.dispatchEvent(new Event('scroll'))
+      harness.scrollTo.mockClear()
+      harness.geometry.scrollHeight = 1_800
+      ResizeObserverMock.instances[0]?.trigger(harness.content)
+      expect(harness.scrollTo).toHaveBeenCalledWith({ top: 1_600, behavior: 'auto' })
+    } finally {
+      nowSpy.mockRestore()
+    }
+  })
+
+  it('resumes following from the jump button after a touch escape', async () => {
+    const harness = mountHarness([userMessage('user-1')])
+    harness.viewport.dispatchEvent(new Event('touchstart', { bubbles: true }))
+    harness.geometry.scrollHeight = 1_100
+    ResizeObserverMock.instances[0]?.trigger(harness.content)
+    harness.viewport.scrollTop = 680
+    harness.viewport.dispatchEvent(new Event('scroll'))
+    expect(harness.scroll.showJumpToBottom.value).toBe(true)
+
+    Object.defineProperty(harness.viewport, 'onscrollend', { configurable: true, value: null })
+    harness.scrollTo.mockImplementation((options: ScrollToOptions | number) => {
+      if (typeof options !== 'number' && options.behavior === 'smooth') return
+      harness.viewport.scrollTop = typeof options === 'number' ? options : (options.top ?? harness.viewport.scrollTop)
+      harness.viewport.dispatchEvent(new Event('scroll'))
+    })
+    harness.scroll.scrollToBottom()
+    harness.viewport.scrollTop = 900
+    harness.viewport.dispatchEvent(new Event('scroll'))
+    harness.viewport.dispatchEvent(new Event('scrollend'))
+    await flushDom()
+
+    harness.scrollTo.mockClear()
+    harness.geometry.scrollHeight = 1_300
+    ResizeObserverMock.instances[0]?.trigger(harness.content)
+    expect(harness.viewport.scrollTop).toBe(1_100)
+    expect(harness.scrollTo).toHaveBeenCalledWith({ top: 1_100, behavior: 'auto' })
+  })
+
+  it('parks keyboard paging that arrives before the follow write clears its guard', () => {
+    const harness = mountHarness([userMessage('user-1')])
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp' }))
+    harness.geometry.scrollHeight = 1_100
+    ResizeObserverMock.instances[0]?.trigger(harness.content)
+
+    harness.viewport.scrollTop = 680
+    harness.viewport.dispatchEvent(new Event('scroll'))
+    flushAnimationFrames()
+    harness.scrollTo.mockClear()
+    harness.geometry.scrollHeight = 1_300
+    ResizeObserverMock.instances[0]?.trigger(harness.content)
+
+    expect(harness.viewport.scrollTop).toBe(680)
     expect(harness.scrollTo).not.toHaveBeenCalled()
   })
 
