@@ -279,7 +279,7 @@ Delete a file:
 - Use this tool to run shell commands for installing packages, running scripts, building code, running tests, and other system operations.
 - If your command will take a long time (package installs, builds, test suites), set run_in_background to true. The call returns a task ID immediately. You do not need to add '&' at the end of the command when using this parameter.
 - If waiting for a background task, use wait_until(task_id): it returns with a reason (completed/failed/killed/stalled/idle/timeout) and the latest output_tail. Then use get_background_status(task_id) to inspect result.
-- For processes that never exit on their own (dev servers, watch mode), use run_in_background, then wait_until(task_id): once output settles it returns with reason 'idle' — check output_tail for the ready message (e.g. a local URL) and proceed. Do not wait for such processes to complete.
+- For processes that never exit on their own (dev servers, watch mode), use run_in_background, then wait_until(task_id, mode="idle"): once output settles it returns with reason 'idle' — check output_tail for the ready message (e.g. a local URL) and proceed. Do not wait for such processes to complete.
 - You may specify a custom timeout (up to %d seconds) for commands you know will take longer than the default %d seconds. If a foreground command times out, it will be automatically moved to the background; use wait_until(task_id), then get_background_status(task_id).
 - Avoid unnecessary delay commands:
   - Do not sleep between commands that can run immediately — just run them.
@@ -1464,7 +1464,7 @@ func (p *ContainerProvider) flipToBackground(
 		"message": fmt.Sprintf(
 			"Command moved to the background after %s of foreground waiting with task ID: %s. "+
 				"The process is still running — no work was lost; output collected so far is in output_tail. "+
-				"Use wait_until(task_id) to keep observing: it returns when the task finishes, stalls, or goes quiet (reason 'idle') — for servers, a ready message in output_tail means it is up. "+
+				"Use wait_until(task_id) to wait for completion; output silence does not end the wait. A wait timeout does not cancel the task or extend its execution deadline. For servers/watchers, explicitly use mode=idle and verify a ready message in output_tail. "+
 				"The full log is written to %s after the task ends. "+
 				"For long-running commands, use run_in_background: true from the start to avoid this delay.",
 			foregroundWait.Round(time.Second), taskID, outputFile,
@@ -1527,7 +1527,7 @@ func (p *ContainerProvider) execExecBackground(
 		"output_file": outputFile,
 		"message": fmt.Sprintf(
 			"Command started in background with task ID: %s. "+
-				"Use wait_until(task_id) to observe it: it returns when the task finishes, stalls on a prompt, or output goes quiet (reason 'idle'), always with the latest output_tail — for servers, a ready message there means it is up. "+
+				"Use wait_until(task_id) to wait for completion; output silence does not end the wait. A wait timeout does not cancel the task or extend its execution deadline. For servers/watchers, explicitly use mode=idle and verify a ready message in output_tail. "+
 				"get_background_status(task_id) also shows output_tail while running. The full log is written to %s after the task ends.",
 			taskID, outputFile,
 		),
