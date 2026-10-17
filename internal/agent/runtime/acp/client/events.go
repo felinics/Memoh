@@ -261,6 +261,9 @@ type acpToolState struct {
 	nativeIn  map[string]any
 	started   bool
 	done      bool
+	// refusal is why Memoh refused the call's permission. The agent only
+	// learns it was refused, so its own wording cannot say why.
+	refusal string
 }
 
 func newACPToolEventMapper(quirks acpprofile.ToolQuirks) *acpToolEventMapper {
@@ -494,6 +497,19 @@ func (m *acpToolEventMapper) permissionStateLocked(session, id string, tc acp.To
 	}
 	mergePermissionToolUpdate(state, tc)
 	return cloneACPToolState(state)
+}
+
+// refuse records why Memoh refused a call's permission, for its result.
+func (m *acpToolEventMapper) refuse(sessionID acp.SessionId, toolCallID acp.ToolCallId, reason string) {
+	if m == nil || strings.TrimSpace(reason) == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := acpToolStateKey{sessionID: strings.TrimSpace(string(sessionID)), toolCallID: strings.TrimSpace(string(toolCallID))}
+	if state := m.tools[key]; state != nil {
+		state.refusal = "Memoh refused this call: " + reason
+	}
 }
 
 func (m *acpToolEventMapper) notifyChangedLocked() {
@@ -738,65 +754,79 @@ func editToolFromACPState(state *acpToolState) (string, map[string]any, bool) {
 	return "edit", map[string]any{"path": path}, true
 }
 
+// nativeToolResultFromACPState gives a finished call the result shape of the
+// native tool it maps to, so history and the chat UI read one shape per tool
+// however the agent reported it. rawOutput is agent-defined; content is what
+// ACP defines for display, so it supplies the text rawOutput does not carry.
 func nativeToolResultFromACPState(state *acpToolState) any {
 	if state == nil {
 		return nil
 	}
-	result := normalizeACPToolOutput(state.output)
-	if result == nil {
-		if text := toolContentText(state.content); text != "" {
-			result = map[string]any{"stdout": text}
+	raw, _ := state.output.(map[string]any)
+	text := toolContentText(state.content)
+	failed := isFailedACPToolStatus(state.status)
+	// A failed call's content explains the failure; it is not the output.
+	output := text
+	if failed {
+		output = ""
+	}
+	// What the agent reported beyond the native shape stays with the result:
+	// nothing reads it today, and history must not quietly lose it.
+	result := map[string]any{}
+	for key, value := range raw {
+		if !nativeToolInputKeys[state.name][key] {
+			result[key] = value
 		}
 	}
-	if result == nil {
-		result = map[string]any{}
-	}
-	if isFailedACPToolStatus(state.status) {
-		if m, ok := result.(map[string]any); ok {
-			m["isError"] = true
-			if _, ok := m["content"]; !ok {
-				text := firstNonEmptyString(
-					stringFromAny(m["stderr"]),
-					stringFromAny(m["stdout"]),
-					strings.TrimSpace(state.status),
-				)
-				m["content"] = []map[string]any{{"type": "text", "text": text}}
-			}
+	switch state.name {
+	case "exec":
+		if stdout := firstNonEmptyRawString(rawOutputText(state.output, raw, "stdout", "output", "text"), output); stdout != "" {
+			result["stdout"] = stdout
 		}
+		if stderr := rawStringFromAny(firstPresent(raw, "stderr", "error")); strings.TrimSpace(stderr) != "" {
+			result["stderr"] = stderr
+		}
+		if code, ok := numberFromAny(firstPresent(raw, "exit_code", "exitCode", "code")); ok {
+			result["exit_code"] = code
+		}
+	case "read":
+		if content := firstNonEmptyRawString(rawOutputText(state.output, raw, "content", "text", "output"), output); content != "" {
+			result["content"] = content
+		}
+	default:
+		// write and edit: the chat UI renders the change from the input.
+		result["ok"] = true
+	}
+	if failed {
+		delete(result, "ok")
+		result["isError"] = true
+		// The agent's own words for the failure, wherever it put them; the
+		// bare status only when it gave none.
+		result["content"] = []map[string]any{{"type": "text", "text": firstNonEmptyString(
+			state.refusal,
+			stringFromAny(result["stderr"]),
+			strings.TrimSpace(text),
+			rawOutputText(state.output, raw, "message", "error", "stdout", "output", "text"),
+			strings.TrimSpace(state.status),
+		)}}
 	}
 	return result
 }
 
-func normalizeACPToolOutput(value any) any {
-	switch v := value.(type) {
-	case nil:
-		return nil
-	case map[string]any:
-		out := make(map[string]any, len(v))
-		for k, val := range v {
-			out[k] = val
-		}
-		if code, ok := numberFromAny(firstPresent(v, "exit_code", "exitCode", "code")); ok {
-			out["exit_code"] = code
-		}
-		if stdout := firstNonEmptyRawString(
-			rawStringFromAny(firstPresent(v, "stdout", "output", "text")),
-			toolTextFromContentValue(v["content"]),
-		); stdout != "" {
-			out["stdout"] = stdout
-		}
-		if stderr := rawStringFromAny(firstPresent(v, "stderr", "error")); strings.TrimSpace(stderr) != "" {
-			out["stderr"] = stderr
-		}
-		return out
-	case string:
-		if strings.TrimSpace(v) == "" {
-			return nil
-		}
-		return map[string]any{"stdout": v}
-	default:
-		return value
+// nativeToolInputKeys are the rawOutput keys each native shape is read from;
+// they are folded into the shape rather than carried beside it.
+var nativeToolInputKeys = map[string]map[string]bool{
+	"exec": {"stdout": true, "output": true, "text": true, "content": true, "stderr": true, "error": true, "exit_code": true, "exitCode": true, "code": true},
+	"read": {"content": true, "text": true, "output": true},
+}
+
+// rawOutputText reads a string rawOutput, or the first present key of an
+// object one, falling back to its MCP-style content text.
+func rawOutputText(output any, raw map[string]any, keys ...string) string {
+	if s, ok := output.(string); ok {
+		return s
 	}
+	return firstNonEmptyRawString(rawStringFromAny(firstPresent(raw, keys...)), toolTextFromContentValue(raw["content"]))
 }
 
 func commandFromACPInput(value any) string {
@@ -866,9 +896,6 @@ func firstACPToolDiff(contents []acp.ToolCallContent) *acp.ToolCallContentDiff {
 }
 
 func toolContentText(contents []acp.ToolCallContent) string {
-	if len(contents) == 0 {
-		return ""
-	}
 	lines := make([]string, 0, len(contents))
 	for _, item := range contents {
 		if item.Content != nil {
@@ -876,13 +903,8 @@ func toolContentText(contents []acp.ToolCallContent) string {
 				lines = append(lines, text)
 			}
 		}
-		if item.Diff != nil {
-			if item.Diff.Path != "" {
-				lines = append(lines, item.Diff.Path)
-			}
-		}
 	}
-	return strings.TrimSpace(strings.Join(lines, "\n"))
+	return strings.Join(lines, "\n")
 }
 
 func toolTextFromContentValue(value any) string {

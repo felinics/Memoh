@@ -1,6 +1,10 @@
 package agentcredential
 
-import "time"
+import (
+	"time"
+
+	"github.com/felinics/memoh/internal/runtimekind"
+)
 
 const ( //nolint:gosec // Stable authentication-kind identifiers, not credential values.
 	ProviderOpenAI    = "openai"
@@ -11,6 +15,22 @@ const ( //nolint:gosec // Stable authentication-kind identifiers, not credential
 	AuthKindAnthropicAPIKey  = "anthropic_api_key" //nolint:gosec // Stable authentication-kind identifier.
 	AuthKindClaudeCodeOAuth  = "claude_code_oauth"
 )
+
+// authKinds keeps what an auth kind means in one table so a new credential
+// kind is one row, not an edit to every switch over kinds.
+type authKindSpec struct {
+	provider string
+	runtime  runtimekind.Kind
+	secret   []string
+	label    string
+}
+
+var authKinds = map[string]authKindSpec{
+	AuthKindOpenAIAPIKey:     {provider: ProviderOpenAI, runtime: runtimekind.Codex, secret: []string{"api_key"}, label: "API key"},
+	AuthKindOpenAICodexOAuth: {provider: ProviderOpenAI, runtime: runtimekind.Codex, secret: []string{"access_token", "id_token", "refresh_token", "account_id"}, label: "ChatGPT"},
+	AuthKindAnthropicAPIKey:  {provider: ProviderAnthropic, runtime: runtimekind.ClaudeCode, secret: []string{"api_key"}, label: "API key"},
+	AuthKindClaudeCodeOAuth:  {provider: ProviderAnthropic, runtime: runtimekind.ClaudeCode, secret: []string{"oauth_token"}, label: "Claude Code"},
+}
 
 // PublicCredential is the redacted view of a stored credential. The secret
 // never leaves the service; only labels and account metadata do.

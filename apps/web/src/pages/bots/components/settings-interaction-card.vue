@@ -100,7 +100,7 @@ import ModelSelect from './model-select.vue'
 import { reconcileStoredEffort } from './reasoning-effort'
 import type { AcpprofilePublicProfile, BotagentsBotAgent, SettingsSettings, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
 import { isACPAgentConfigured } from '@/utils/acp'
-import { BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, botAgentIcon, botAgentName, botAgentProvider, isDirectBotAgentConfigured, normalizeBotAgentRuntime } from '@/utils/bot-agent'
+import { botAgentIcon, botAgentName, botAgentProvider, isDirectBotAgentConfigured, isDirectBotAgentRuntime, normalizeBotAgentRuntime } from '@/utils/bot-agent'
 
 type InteractionSettingsForm = SettingsSettings & {
   chat_runtime: string
@@ -193,7 +193,7 @@ function setDefaultAgent(value: string) {
 
   setDefaultBotAgent(agent)
   const runtime = normalizeBotAgentRuntime(agent.runtime)
-  const direct = runtime === BOT_AGENT_RUNTIME_CODEX || runtime === BOT_AGENT_RUNTIME_CLAUDE_CODE
+  const direct = isDirectBotAgentRuntime(runtime)
   // eslint-disable-next-line vue/no-mutating-props
   props.form.chat_runtime = direct ? runtime : 'acp_agent'
   if (direct) {

@@ -1427,12 +1427,9 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		if sessionMode == "" {
 			sessionMode = sessionpkg.TypeChat
 		}
-		runtimeType := strings.TrimSpace(item.RuntimeType)
-		if runtimeType == "" {
-			runtimeType = descriptor.runtimeType
-		}
-		if runtimeType == "" {
-			runtimeType = sessionpkg.RuntimeModel
+		runtimeType := restoredMessageRuntimeType(item.RuntimeType, descriptor.runtimeType)
+		if raw := strings.TrimSpace(item.RuntimeType); raw != "" && raw != runtimeType {
+			state.warnings = appendWarningOnce(state.warnings, "history from a runtime this server does not know was restored under its session's runtime")
 		}
 		metadata := item.Metadata
 		eventID := pgtype.UUID{}
@@ -2097,6 +2094,20 @@ func restoredSessionDescriptor(legacyType, sessionMode, runtimeType string) (str
 		}
 	}
 	return sessionpkg.ResolveDescriptor(legacyType, sessionMode, runtimeType)
+}
+
+// restoredMessageRuntimeType falls back to the restored session's runtime for
+// a kind this server does not know, the same way restoredSessionDescriptor
+// treats the session's own.
+func restoredMessageRuntimeType(raw, sessionRuntime string) string {
+	runtimeType := strings.TrimSpace(raw)
+	if !sessionpkg.IsKnownRuntimeType(runtimeType) {
+		runtimeType = sessionRuntime
+	}
+	if runtimeType == "" {
+		runtimeType = sessionpkg.RuntimeModel
+	}
+	return runtimeType
 }
 
 func isRetiredAutomationSession(legacyType, sessionMode string) bool {

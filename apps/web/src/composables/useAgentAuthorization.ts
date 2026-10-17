@@ -5,16 +5,17 @@ import {
   postAgentAuthorizationsByIdPoll, postAgentAuthorizationsByIdExchange, type AgentcredentialAuthorization,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { isDeviceLoginAuthKind, isDirectBotAgentRuntime, type DirectBotAgentRuntime } from '@/utils/bot-agent'
 import { safeSessionGet, safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
 
 export function readAgentAuthorizationDraft(key: string): { id: string, runtime: string } | null {
   try {
     const value = JSON.parse(safeSessionGet(key) || 'null')
-    return typeof value?.id === 'string' && ['codex', 'claude-code'].includes(value.runtime) ? value : null
+    return typeof value?.id === 'string' && isDirectBotAgentRuntime(value.runtime) ? value : null
   } catch { return null }
 }
 
-export function useAgentAuthorization(getRuntime: () => string, storageKey: string) {
+export function useAgentAuthorization(getRuntime: () => DirectBotAgentRuntime, storageKey: string) {
   const { t } = useI18n()
   const session = ref<AgentcredentialAuthorization | null>(null)
   const loading = ref(false)
@@ -27,6 +28,10 @@ export function useAgentAuthorization(getRuntime: () => string, storageKey: stri
   const ready = computed(() => session.value?.status === 'ready'
     && session.value.runtime === getRuntime() && Date.parse(session.value.expires_at) > now.value)
   const busy = computed(() => loading.value || pending.value)
+  // The server sends the code only while a device-code authorization is pending.
+  const deviceLogin = computed(() => session.value?.user_code && session.value.verification_url
+    ? { user_code: session.value.user_code, verification_url: session.value.verification_url }
+    : null)
 
   function clearTimer() { clearTimeout(timer); timer = undefined }
   async function discard(id: string) {
@@ -49,7 +54,7 @@ export function useAgentAuthorization(getRuntime: () => string, storageKey: stri
     clearTimer()
     const current = generation
     const remaining = Date.parse(value.expires_at) - now.value
-    const devicePending = value.status === 'pending' && value.auth_kind === 'openai_codex_oauth'
+    const devicePending = value.status === 'pending' && isDeviceLoginAuthKind(value.auth_kind)
     if (remaining <= 0) { cancel(); error.value = t('errors.agent_authorization.expired'); return }
     timer = setTimeout(() => {
       now.value = Date.now()
@@ -80,7 +85,7 @@ export function useAgentAuthorization(getRuntime: () => string, storageKey: stri
     loading.value = true
     try {
       const { data } = await postAgentAuthorizations({
-        body: { runtime: getRuntime() as 'codex' | 'claude-code', auth_kind: authKind,
+        body: { runtime: getRuntime(), auth_kind: authKind,
           ...(secret && { secret: { [authKind === 'claude_code_oauth' ? 'oauth_token' : 'api_key']: secret } }) },
         throwOnError: true,
       })
@@ -135,5 +140,5 @@ export function useAgentAuthorization(getRuntime: () => string, storageKey: stri
   onDeactivated(dispose)
   onUnmounted(dispose)
   void restore()
-  return { session, ready, pending, busy, loading, error, start, exchange, cancel, handoff, resume }
+  return { session, ready, pending, busy, loading, error, deviceLogin, start, exchange, cancel, handoff, resume }
 }

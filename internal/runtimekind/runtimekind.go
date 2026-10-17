@@ -6,6 +6,9 @@
 // forks, deletion, permissions, backups, and recovery all branch on it.
 // Consumers share this table instead of copying the vocabulary and rules.
 //
+// The CHECK constraints on the runtime columns enumerate the same kinds, so
+// adding a kind here also takes a migration that admits it (0144).
+//
 // This is deliberately a leaf package (stdlib-only) so that packages which
 // cannot import the session domain (chat/message, schedule) still share the
 // vocabulary instead of copying it.
@@ -48,6 +51,10 @@ type capabilities struct {
 	// Direct kinds double as the agent's provider identity (the runtime name
 	// IS the agent id in commands, settings, and BotAgent rows).
 	Direct bool
+	// DisplayName is the product name users see for a direct runtime. The
+	// other kinds leave it empty: an ACP agent is named by its profile, and the
+	// model runtime is Memoh's own.
+	DisplayName string
 	// DecisionWaiter: tool approvals and user inputs are answered by waking
 	// an in-process waiter blocked inside the running turn. The model
 	// runtime instead parks and re-enters the native loop with a tool
@@ -80,6 +87,7 @@ var capabilityByKind = map[Kind]capabilities{
 	Codex: {
 		External:       true,
 		Direct:         true,
+		DisplayName:    "Codex",
 		DecisionWaiter: true,
 		WorkspaceExec:  true,
 		AgentModel:     true,
@@ -88,6 +96,7 @@ var capabilityByKind = map[Kind]capabilities{
 	ClaudeCode: {
 		External:       true,
 		Direct:         true,
+		DisplayName:    "Claude Code",
 		DecisionWaiter: true,
 		WorkspaceExec:  true,
 		AgentModel:     true,
@@ -107,18 +116,11 @@ func capabilitiesFor(raw string) (capabilities, bool) {
 // rejects unknown vocabulary; the empty string is unknown (legacy-row
 // derivation is the session domain's job, not vocabulary's).
 func Normalize(raw string) (Kind, bool) {
-	switch Kind(strings.TrimSpace(raw)) {
-	case Model:
-		return Model, true
-	case ACPAgent:
-		return ACPAgent, true
-	case Codex:
-		return Codex, true
-	case ClaudeCode:
-		return ClaudeCode, true
-	default:
+	kind := Kind(strings.TrimSpace(raw))
+	if _, ok := capabilityByKind[kind]; !ok {
 		return "", false
 	}
+	return kind, true
 }
 
 // Valid reports whether raw names a known runtime kind.
@@ -127,10 +129,17 @@ func Valid(raw string) bool {
 	return ok
 }
 
-// IsDirect reports a direct external agent runtime (codex, claude-code).
+// IsDirect reports a direct external agent runtime.
 func IsDirect(raw string) bool {
 	caps, ok := capabilitiesFor(raw)
 	return ok && caps.Direct
+}
+
+// DisplayName is the product name of a direct runtime, empty for any other
+// kind.
+func DisplayName(raw string) string {
+	caps, _ := capabilitiesFor(raw)
+	return caps.DisplayName
 }
 
 // IsExternal reports any runtime dispatched through the external.Driver

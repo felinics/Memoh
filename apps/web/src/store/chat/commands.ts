@@ -5,7 +5,7 @@ import type {
 } from '@/composables/api/useChat'
 import { executeQuickAction } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX } from '@/utils/bot-agent'
+import { DIRECT_BOT_AGENT_RUNTIMES, isDirectBotAgentRuntime } from '@/utils/bot-agent'
 import { createInvocationId } from '../chat-list.normalize'
 import { commandActionErrorMessage } from './messages'
 import type { ExternalAgentSessionInput, ActiveChatTarget, ChatViewTarget } from './types'
@@ -102,8 +102,9 @@ export function createChatCommands(deps: ChatCommandDeps) {
       command.finish()
       return { kind: 'handled' }
     }
-    if (agentId !== BOT_AGENT_RUNTIME_CODEX && agentId !== BOT_AGENT_RUNTIME_CLAUDE_CODE) {
-      return { kind: 'error', message: `Unknown agent "${agentId}" — use /new codex or /new claude-code, or pick an agent from the composer` }
+    if (!isDirectBotAgentRuntime(agentId)) {
+      const usage = DIRECT_BOT_AGENT_RUNTIMES.map(runtime => `/new ${runtime}`).join(', ')
+      return { kind: 'error', message: `Unknown agent "${agentId}" — use one of ${usage}, or pick an agent from the composer` }
     }
 
     const command = deps.beginDraftCommand(target)
@@ -125,10 +126,9 @@ export function createChatCommands(deps: ChatCommandDeps) {
         agentId,
         sessionMode: parsed.mode === 'discuss' ? 'discuss' : 'chat',
         ...defaults,
-        // codex / claude-code are direct runtimes, not ACP profiles; without
-        // the explicit runtime the draft would create an acp_agent session
-        // the server refuses.
-        runtime: agentId === BOT_AGENT_RUNTIME_CODEX ? BOT_AGENT_RUNTIME_CODEX : BOT_AGENT_RUNTIME_CLAUDE_CODE,
+        // Direct runtimes are not ACP profiles; without the explicit runtime
+        // the draft would create an acp_agent session the server refuses.
+        runtime: agentId,
       }, activate)
       return { kind: 'handled' }
     } finally {

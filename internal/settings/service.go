@@ -262,14 +262,14 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		if err != nil {
 			return Settings{}, err
 		}
-		switch descriptor.Runtime {
-		case botagents.RuntimeACP:
+		switch {
+		case descriptor.Runtime == botagents.RuntimeACP:
 			if err := s.botAgents.ValidateConfiguration(ctx, agent, normalizeJSONObject(botRow.Metadata)); err != nil {
 				return Settings{}, err
 			}
 			current.ChatRuntime = ChatRuntimeACPAgent
 			current.ChatACPAgentID = descriptor.Provider
-		case botagents.RuntimeCodex, botagents.RuntimeClaudeCode:
+		case runtimekind.IsDirect(descriptor.Runtime):
 			// The stored default names the real runtime; direct agents need
 			// no ACP agent id (their identity IS the runtime).
 			current.ChatRuntime = descriptor.Runtime

@@ -1820,159 +1820,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/agents/{id}/codex/login/device/authorize": {
-            "post": {
-                "tags": [
-                    "external-agents"
-                ],
-                "summary": "Start a ChatGPT device-code login for the direct codex runtime",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Bot Agent ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/externalagent.CodexDeviceLoginAuthorizeResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/agents/{id}/codex/login/device/cancel": {
-            "post": {
-                "tags": [
-                    "external-agents"
-                ],
-                "summary": "Cancel a pending codex device-code login",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Login reference",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/externalagent.CodexDeviceLoginPollRequest"
-                        }
-                    },
-                    {
-                        "type": "string",
-                        "description": "Bot Agent ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/agents/{id}/codex/login/device/poll": {
-            "post": {
-                "tags": [
-                    "external-agents"
-                ],
-                "summary": "Poll a pending codex device-code login",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Login reference",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/externalagent.CodexDeviceLoginPollRequest"
-                        }
-                    },
-                    {
-                        "type": "string",
-                        "description": "Bot Agent ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/externalagent.CodexDeviceLoginPollResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/agents/{id}/codex/usage": {
             "get": {
                 "description": "Available to anyone who can chat with the Bot, so the composer",
@@ -2248,6 +2095,179 @@ const docTemplate = `{
                     },
                     "503": {
                         "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents/{id}/login/device/authorize": {
+            "post": {
+                "description": "The Agent's own process obtains the device code; the user opens the URL and confirms the code there. Only runtimes that sign in this way (Codex) accept it.",
+                "tags": [
+                    "external-agents"
+                ],
+                "summary": "Start a device-code account sign-in on a direct runtime Agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/externalagent.DeviceLoginAuthorizeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents/{id}/login/device/cancel": {
+            "post": {
+                "tags": [
+                    "external-agents"
+                ],
+                "summary": "Cancel a pending device-code sign-in",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Sign-in reference",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/externalagent.DeviceLoginPollRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents/{id}/login/device/poll": {
+            "post": {
+                "description": "A successful sign-in has already been stored as the Agent's credential when this answers success.",
+                "tags": [
+                    "external-agents"
+                ],
+                "summary": "Poll a pending device-code sign-in",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Sign-in reference",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/externalagent.DeviceLoginPollRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/externalagent.DeviceLoginPollResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
@@ -21260,53 +21280,6 @@ const docTemplate = `{
                 }
             }
         },
-        "externalagent.CodexDeviceLoginAuthorizeResponse": {
-            "type": "object",
-            "required": [
-                "login_id",
-                "user_code",
-                "verification_url"
-            ],
-            "properties": {
-                "login_id": {
-                    "type": "string"
-                },
-                "user_code": {
-                    "type": "string"
-                },
-                "verification_url": {
-                    "type": "string"
-                }
-            }
-        },
-        "externalagent.CodexDeviceLoginPollRequest": {
-            "type": "object",
-            "required": [
-                "login_id"
-            ],
-            "properties": {
-                "login_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "externalagent.CodexDeviceLoginPollResponse": {
-            "type": "object",
-            "required": [
-                "status"
-            ],
-            "properties": {
-                "status": {
-                    "type": "string",
-                    "enum": [
-                        "pending",
-                        "success",
-                        "error",
-                        "unknown"
-                    ]
-                }
-            }
-        },
         "externalagent.CodexUsageResponse": {
             "type": "object",
             "required": [
@@ -21341,6 +21314,53 @@ const docTemplate = `{
                 "window_minutes": {
                     "description": "WindowMinutes is 0 when the backend does not report the window length.",
                     "type": "integer"
+                }
+            }
+        },
+        "externalagent.DeviceLoginAuthorizeResponse": {
+            "type": "object",
+            "required": [
+                "login_id",
+                "user_code",
+                "verification_url"
+            ],
+            "properties": {
+                "login_id": {
+                    "type": "string"
+                },
+                "user_code": {
+                    "type": "string"
+                },
+                "verification_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "externalagent.DeviceLoginPollRequest": {
+            "type": "object",
+            "required": [
+                "login_id"
+            ],
+            "properties": {
+                "login_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "externalagent.DeviceLoginPollResponse": {
+            "type": "object",
+            "required": [
+                "status"
+            ],
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "pending",
+                        "success",
+                        "error",
+                        "unknown"
+                    ]
                 }
             }
         },

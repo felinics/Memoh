@@ -359,6 +359,7 @@ import { useChatSelectionStore } from '@/store/chat-selection'
 import type { HandlersDailyTokenUsage, HandlersModelTokenUsage, HandlersTokenUsageRecord } from '@memohai/sdk'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { formatDateTimeShort } from '@/utils/date-time'
+import { externalAgentDisplayName } from '@/utils/external-agent'
 
 use([CanvasRenderer, LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent])
 
@@ -573,10 +574,8 @@ function setRecordsPage(page: number) {
 function harnessLabel(type: string | undefined): string {
   switch (type) {
     case 'model': return 'Memoh'
-    case 'codex': return 'Codex'
-    case 'claude-code': return 'Claude Code'
     case 'acp_agent': return 'ACP'
-    default: return type || t('usage.unknown')
+    default: return externalAgentDisplayName(type, t('usage.unknown'))
   }
 }
 

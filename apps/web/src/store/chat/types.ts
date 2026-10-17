@@ -17,6 +17,7 @@ import type {
   UIToolMessage,
   UIUserInput,
 } from '@/composables/api/useChat.types'
+import type { BotAgentRuntime, DirectBotAgentRuntime } from '@/utils/bot-agent'
 
 /**
  * Prefix of the synthetic turn_id the runtime projection assigns to a live
@@ -87,7 +88,7 @@ export type ActiveChatTarget =
       kind: 'draft-external-agent'
       sessionId: null
       session: null
-      runtimeType: 'acp_agent' | 'codex' | 'claude-code'
+      runtimeType: 'acp_agent' | DirectBotAgentRuntime
       isExternalAgent: true
       isPendingExternalAgent: true
       metadata: Record<string, unknown>
@@ -269,7 +270,7 @@ export interface ExternalAgentSessionInput {
   /** Persisted Agent instance selected for this session. */
   botAgentId?: string
   /** Runtime owned by the selected Agent. Omitted by legacy ACP callers. */
-  runtime?: 'acp' | 'codex' | 'claude-code'
+  runtime?: BotAgentRuntime
   /** Temporary ACP provider identity stored in BotAgent metadata. */
   agentId: string
   sessionMode?: 'chat' | 'discuss'

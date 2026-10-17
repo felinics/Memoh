@@ -13,6 +13,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/agent/runtime/servertable"
 	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/agentcredential"
@@ -50,7 +51,7 @@ type Driver struct {
 
 	// servers owns the shared per-Agent app-server lifecycle: reference
 	// counting for concurrent users, drain-on-recycle instead of kill-by-bot.
-	servers *serverTable
+	servers *servertable.Table
 }
 
 // NewDriver constructs the codex runtime driver.
@@ -72,7 +73,7 @@ func NewDriver(
 		toolGateway: toolGateway,
 		logger:      logger.With(slog.String("runtime", RuntimeType)),
 	}
-	d.servers = newServerTable(d.startServer, d.logger)
+	d.servers = servertable.New(d.startServer, d.logger)
 	return d
 }
 
@@ -99,7 +100,7 @@ func (d *Driver) SetLauncherResolver(r external.LauncherResolver) {
 func (d *Driver) ResetBot(botID string) { d.CloseBot(botID) }
 
 func (d *Driver) ResetBotAgent(botID, botAgentID string) {
-	d.servers.recycle(serverKey(botID, botAgentID))
+	d.servers.Recycle(serverKey(botID, botAgentID))
 }
 
 func serverKey(botID, botAgentID string) string {
@@ -579,7 +580,7 @@ func (d *Driver) botGatewayToolLookup(botID string) func(context.Context, string
 }
 
 // startServer is the server table's start hook.
-func (d *Driver) startServer(ctx context.Context, key string) (recyclable, error) {
+func (d *Driver) startServer(ctx context.Context, key string) (servertable.Resource, error) {
 	botID, botAgentID := splitServerKey(key)
 	cfg, credential, err := d.resolveAgentConfig(ctx, botID, botAgentID, false)
 	if err != nil {
@@ -695,7 +696,7 @@ func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*
 		return nil, nil, err
 	}
 	key := serverKey(botID, botAgentID)
-	if current := d.servers.peek(key); current != nil && d.launchers != nil {
+	if current := d.servers.Peek(key); current != nil && d.launchers != nil {
 		launcher, err := d.resolveLauncher(ctx, botID)
 		if err != nil {
 			return nil, nil, err
@@ -703,10 +704,10 @@ func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*
 		if !current.(*appServer).matchesLauncher(launcher) {
 			// A dependency update takes effect on new work. References held by
 			// existing turns keep their process alive until they finish.
-			d.servers.recycleResource(key, current)
+			d.servers.RecycleResource(key, current)
 		}
 	}
-	resource, release, err := d.servers.acquire(ctx, key)
+	resource, release, err := d.servers.Acquire(ctx, key)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -715,7 +716,7 @@ func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*
 
 // CloseAll tears down every app-server (server shutdown).
 func (d *Driver) CloseAll() {
-	d.servers.closeAll()
+	d.servers.CloseAll()
 }
 
 // CloseBot recycles the bot's app-server: new work builds a fresh server on
@@ -723,7 +724,7 @@ func (d *Driver) CloseAll() {
 // which dies at their last release.
 func (d *Driver) CloseBot(botID string) {
 	prefix := botID + "\x00"
-	d.servers.recycleWhere(func(key string) bool { return strings.HasPrefix(key, prefix) })
+	d.servers.RecycleWhere(func(key string) bool { return strings.HasPrefix(key, prefix) })
 }
 
 // ForkThread implements external.ThreadForker: it derives a new codex thread
@@ -795,35 +796,22 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// DeviceLoginStart describes a pending ChatGPT device-code login.
-type DeviceLoginStart struct {
-	LoginID         string
-	UserCode        string
-	VerificationURL string
-}
+var _ external.DeviceLoginProvider = (*Driver)(nil)
 
-// DeviceLoginStatus is the poll answer for a pending device-code login.
-type DeviceLoginStatus struct {
-	// Status is pending, success, error, or unknown (login not tracked, e.g.
-	// the app-server restarted).
-	Status string
-	Error  string
-}
-
-// StartChatGPTDeviceLogin begins a device-code login on the bot's codex,
+// StartDeviceLogin begins a ChatGPT device-code login on the bot's codex,
 // returning the code the user must enter. Completion lands in CODEX_HOME and
 // is observable via PollDeviceLogin.
-func (d *Driver) StartChatGPTDeviceLogin(ctx context.Context, botID, botAgentID string) (DeviceLoginStart, error) {
+func (d *Driver) StartDeviceLogin(ctx context.Context, botID, botAgentID string) (external.DeviceLoginStart, error) {
 	cfg, _, err := d.resolveAgentConfig(ctx, botID, botAgentID, false)
 	if err != nil {
-		return DeviceLoginStart{}, err
+		return external.DeviceLoginStart{}, err
 	}
 	if cfg.Auth != AuthChatGPT {
-		return DeviceLoginStart{}, external.CredentialError(agentcredential.ErrIncompatible)
+		return external.DeviceLoginStart{}, external.CredentialError(agentcredential.ErrIncompatible)
 	}
 	srv, releaseServer, err := d.acquireServer(ctx, botID, botAgentID)
 	if err != nil {
-		return DeviceLoginStart{}, err
+		return external.DeviceLoginStart{}, err
 	}
 	defer releaseServer()
 	var resp protocol.LoginAccountResponse
@@ -831,46 +819,57 @@ func (d *Driver) StartChatGPTDeviceLogin(ctx context.Context, botID, botAgentID 
 		ChatgptDeviceCode: &protocol.ChatgptDeviceCodeLoginAccountParams{},
 	}, &resp)
 	if err != nil {
-		return DeviceLoginStart{}, err
+		return external.DeviceLoginStart{}, err
 	}
 	device := resp.ChatgptDeviceCode
 	if device == nil || device.LoginID == "" || device.UserCode == "" || device.VerificationURL == "" {
-		return DeviceLoginStart{}, errs.NewDependency("codex device login response is incomplete")
+		return external.DeviceLoginStart{}, errs.NewDependency("codex device login response is incomplete")
 	}
 	srv.trackLogin(device.LoginID)
-	return DeviceLoginStart{
+	return external.DeviceLoginStart{
 		LoginID:         device.LoginID,
 		UserCode:        device.UserCode,
 		VerificationURL: device.VerificationURL,
 	}, nil
 }
 
-// PollDeviceLogin reports a tracked login's state.
-func (d *Driver) PollDeviceLogin(botID, botAgentID, loginID string) DeviceLoginStatus {
-	resource := d.servers.peek(serverKey(botID, botAgentID))
+// PollDeviceLogin reports a tracked login's state and stores the credential
+// of one that succeeded.
+func (d *Driver) PollDeviceLogin(ctx context.Context, ownerUserID, botID, botAgentID, loginID string) (external.DeviceLoginStatus, error) {
+	status := d.loginStatus(botID, botAgentID, loginID)
+	if status.Status == "success" {
+		if err := d.completeDeviceLogin(ctx, ownerUserID, botID, botAgentID, loginID); err != nil {
+			return external.DeviceLoginStatus{}, err
+		}
+	}
+	return status, nil
+}
+
+func (d *Driver) loginStatus(botID, botAgentID, loginID string) external.DeviceLoginStatus {
+	resource := d.servers.Peek(serverKey(botID, botAgentID))
 	if resource == nil {
-		return DeviceLoginStatus{Status: "unknown"}
+		return external.DeviceLoginStatus{Status: "unknown"}
 	}
 	srv := resource.(*appServer)
 	outcome, ok := srv.loginStatus(loginID)
 	switch {
 	case !ok:
-		return DeviceLoginStatus{Status: "unknown"}
+		return external.DeviceLoginStatus{Status: "unknown"}
 	case !outcome.Done:
-		return DeviceLoginStatus{Status: "pending"}
+		return external.DeviceLoginStatus{Status: "pending"}
 	case outcome.Success:
-		return DeviceLoginStatus{Status: "success"}
+		return external.DeviceLoginStatus{Status: "success"}
 	default:
 		srv.forgetLogin(loginID)
 		message := outcome.Error
 		if message == "" {
 			message = "codex login failed"
 		}
-		return DeviceLoginStatus{Status: "error", Error: message}
+		return external.DeviceLoginStatus{Status: "error", Error: message}
 	}
 }
 
-func (d *Driver) CompleteChatGPTDeviceLogin(ctx context.Context, ownerUserID, botID, botAgentID, loginID string) error {
+func (d *Driver) completeDeviceLogin(ctx context.Context, ownerUserID, botID, botAgentID, loginID string) error {
 	srv, releaseServer, err := d.acquireServer(ctx, botID, botAgentID)
 	if err != nil {
 		return err
@@ -906,7 +905,7 @@ func (d *Driver) CompleteChatGPTDeviceLogin(ctx context.Context, ownerUserID, bo
 }
 
 func (d *Driver) PurgeBotAgentAuth(ctx context.Context, botID, botAgentID string) error {
-	if resource := d.servers.peek(serverKey(botID, botAgentID)); resource != nil && resource.(*appServer).hasActiveTurns() {
+	if resource := d.servers.Peek(serverKey(botID, botAgentID)); resource != nil && resource.(*appServer).hasActiveTurns() {
 		return external.Fail(external.FailureCredentialBusy, nil)
 	}
 	d.ResetBotAgent(botID, botAgentID)
@@ -923,7 +922,7 @@ func (d *Driver) PurgeBotAgentAuth(ctx context.Context, botID, botAgentID string
 
 // CancelDeviceLogin aborts a pending device-code login.
 func (d *Driver) CancelDeviceLogin(ctx context.Context, botID, botAgentID, loginID string) error {
-	resource := d.servers.peek(serverKey(botID, botAgentID))
+	resource := d.servers.Peek(serverKey(botID, botAgentID))
 	if resource == nil {
 		return nil
 	}

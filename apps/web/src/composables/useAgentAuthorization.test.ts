@@ -6,9 +6,10 @@ vi.mock('@memohai/sdk', () => ({ postAgentAuthorizations: api.create, getAgentAu
   postAgentAuthorizationsByIdPoll: api.poll, postAgentAuthorizationsByIdExchange: api.exchange, deleteAgentAuthorizationsById: api.cancel }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 import { useAgentAuthorization } from './useAgentAuthorization'
+import type { DirectBotAgentRuntime } from '@/utils/bot-agent'
 let app: App
 let state: ReturnType<typeof useAgentAuthorization>
-const runtime = ref('codex')
+const runtime = ref<DirectBotAgentRuntime>('codex')
 const key = 'authorization-test'
 function session(status = 'pending') {
   return { id: 'session', runtime: 'codex', auth_kind: 'openai_codex_oauth', status,

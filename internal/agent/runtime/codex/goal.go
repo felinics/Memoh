@@ -42,7 +42,7 @@ func (d *Driver) Goal(ctx context.Context, input external.PromptInput) (*externa
 		return nil, nil
 	}
 	if metadataString(input.RuntimeMetadata, metadataThreadIDKey) == "" &&
-		(d.servers == nil || d.servers.peek(serverKey(input.BotID, input.BotAgentID)) == nil) {
+		(d.servers == nil || d.servers.Peek(serverKey(input.BotID, input.BotAgentID)) == nil) {
 		return nil, nil
 	}
 	srv, release, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)

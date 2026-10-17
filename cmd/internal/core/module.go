@@ -100,6 +100,7 @@ func ServerModule() fx.Option {
 			provideClaudeCodeDriver,
 			provideDirectAgentDrivers,
 			provideExternalAgentCodexHandler,
+			provideExternalAgentLoginHandler,
 			provideHooksService,
 			provideProvidersService,
 			providertemplates.NewService,

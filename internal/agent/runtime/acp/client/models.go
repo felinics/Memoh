@@ -22,8 +22,11 @@ var (
 	// its pre-response notification watermark drained) before the grace period.
 	// A runtime in this state must not be reused for another prompt.
 	ErrPromptCancellationUnconfirmed = errors.New("ACP prompt cancellation was not confirmed")
-	ErrImagePromptUnsupported        = errors.New("ACP agent does not support image prompts")
-	ErrInvalidPromptImage            = errors.New("invalid ACP prompt image")
+	// ErrSessionResumeUnsupported means the agent does not advertise
+	// session/resume.
+	ErrSessionResumeUnsupported = errors.New("ACP agent does not support resuming sessions")
+	ErrImagePromptUnsupported   = errors.New("ACP agent does not support image prompts")
+	ErrInvalidPromptImage       = errors.New("invalid ACP prompt image")
 )
 
 type ModelInfo struct {

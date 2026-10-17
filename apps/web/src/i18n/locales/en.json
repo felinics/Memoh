@@ -274,7 +274,7 @@
       "turn_replacement_unsupported": "Retry and edit are unavailable for external agent sessions. Send a new message instead."
     },
     "external_runtime": {
-      "auth_required": "Codex is not connected, or its sign-in has expired. Open Agent settings to connect ChatGPT or configure an API key.",
+      "auth_required": "This Agent is not signed in, or its credential was rejected. Open Agent settings to sign in again or update the API key.",
       "context_window_exceeded": "This conversation no longer fits in the model's context window. Compact the context or start a new conversation.",
       "overloaded": "The external Agent's model service is unavailable or overloaded right now. Try again in a moment, or switch to another model.",
       "rate_limited": "The external Agent was rate limited by its model service. Please wait a moment before sending again.",
@@ -2766,7 +2766,6 @@
       "defaultModelDescription": "Optional. Leave blank to use the external Agent's default; conversations can still override it.",
       "defaultModelPlaceholder": "Use runtime default",
       "account": "Account",
-      "chatgptAccount": "ChatGPT account",
       "chatgptAccountDescription": "Memoh encrypts this Agent's ChatGPT credentials and provides them to Codex only at runtime.",
       "chatgptAccountConnectedDescription": "This Agent's ChatGPT credentials are encrypted at rest.",
       "reconnect": "Reconnect",

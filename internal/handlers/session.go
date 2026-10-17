@@ -267,17 +267,8 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 		botAgentDescriptor = descriptor
 		// The persisted BotAgent descriptor is authoritative for the runtime:
 		// ACP rows keep their provider identity in metadata, direct runtimes
-		// (codex) map straight to their session runtime type.
-		switch descriptor.Runtime {
-		case botagents.RuntimeACP:
-			req.RuntimeType = session.RuntimeACPAgent
-		case botagents.RuntimeCodex:
-			req.RuntimeType = session.RuntimeCodex
-		case botagents.RuntimeClaudeCode:
-			req.RuntimeType = session.RuntimeClaudeCode
-		default:
-			return apperror.New(apperror.CodeBotAgentInvalidRuntime, nil)
-		}
+		// map straight to their session runtime type.
+		req.RuntimeType = botagents.SessionRuntime(descriptor.Runtime)
 	}
 	targetType, targetMode, targetRuntimeType, err := session.ResolveDescriptor(sessionType, req.SessionMode, req.RuntimeType)
 	if err != nil {
@@ -918,16 +909,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			}
 			targetAgentDescriptor = descriptor
 			// The persisted BotAgent descriptor is authoritative for the runtime.
-			switch descriptor.Runtime {
-			case botagents.RuntimeACP:
-				targetRuntime = session.RuntimeACPAgent
-			case botagents.RuntimeCodex:
-				targetRuntime = session.RuntimeCodex
-			case botagents.RuntimeClaudeCode:
-				targetRuntime = session.RuntimeClaudeCode
-			default:
-				return apperror.New(apperror.CodeBotAgentInvalidRuntime, nil)
-			}
+			targetRuntime = botagents.SessionRuntime(descriptor.Runtime)
 		} else if botAgentSelectionExplicit {
 			targetRuntime = session.RuntimeModel
 			if targetType == session.TypeACPAgent {

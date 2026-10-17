@@ -77,6 +77,7 @@ import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import { readCreatedBotSession, writeCreatedBotSession } from './created-bot-session'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { readOnboardingBotResult, writeOnboardingBotResult } from '@/pages/onboarding/session'
+import { isDirectBotAgentRuntime } from '@/utils/bot-agent'
 import BotCreateTerminal from './components/bot-create-terminal.vue'
 
 const props = defineProps<{ onboarding?: boolean }>()
@@ -92,9 +93,9 @@ if (store.status === 'idle') {
   const saved = readCreatedBotSession(props.onboarding)
   const previous = props.onboarding ? readOnboardingBotResult() : null
   if (saved) void store.restore(saved, props.onboarding)
-  else if (previous?.agent && ['codex', 'claude-code'].includes(previous.agent.agentId)) {
+  else if (previous?.agent && isDirectBotAgentRuntime(previous.agent.agentId)) {
     void store.restore({ botId: previous.botId, botName: '', displayName: '', agentId: previous.agent.botAgentId,
-      runtime: previous.agent.agentId as 'codex' | 'claude-code', authorizationId: previous.agent.authorizationId, setupError: null }, true)
+      runtime: previous.agent.agentId, authorizationId: previous.agent.authorizationId, setupError: null }, true)
   } else if (previous) {
     store.bot = { id: previous.botId }
     store.modelConfigured = previous.modelConfigured
@@ -129,7 +130,7 @@ async function goToBot() {
   if (props.onboarding && bot.value?.id) {
     const runtime = createdAgent.value?.runtime
     writeOnboardingBotResult({ botId: bot.value.id, modelConfigured: modelConfigured.value,
-      ...((runtime === 'codex' || runtime === 'claude-code') && { agent: {
+      ...(isDirectBotAgentRuntime(runtime) && { agent: {
         agentId: runtime, botAgentId: createdAgent.value?.id ?? '', authorizationId: authorizationId.value,
       } }),
     })

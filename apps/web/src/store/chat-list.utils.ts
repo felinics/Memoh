@@ -1,3 +1,5 @@
+import { isDirectBotAgentRuntime, type DirectBotAgentRuntime } from '@/utils/bot-agent'
+
 export function assignInPlace<T extends object>(target: T, source: T): void {
   for (const key of Object.keys(target)) {
     if (!(key in source)) delete (target as Record<string, unknown>)[key]
@@ -73,10 +75,8 @@ export function normalizedRuntimeType(session: SessionDescriptorShape): string {
   return (session.type ?? '').trim() === 'acp_agent' ? 'acp_agent' : 'model'
 }
 
-export function isAgentRuntimeType(runtimeType: string): boolean {
-  return runtimeType === 'acp_agent'
-    || runtimeType === 'codex'
-    || runtimeType === 'claude-code'
+export function isAgentRuntimeType(runtimeType: string | undefined): runtimeType is 'acp_agent' | DirectBotAgentRuntime {
+  return runtimeType === 'acp_agent' || isDirectBotAgentRuntime(runtimeType)
 }
 
 // Default visible label for a channel-bound session that has no title: a group

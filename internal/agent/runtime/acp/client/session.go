@@ -70,6 +70,9 @@ type PromptResult struct {
 	Usage      *sdk.Usage          `json:"usage,omitempty"`
 	// Output is the in-process transcript used for persistence.
 	Output []sdk.Message `json:"-"`
+	// Meta is the prompt response's _meta, where agents report what ACP has
+	// no field for.
+	Meta map[string]any `json:"-"`
 }
 
 // PromptResource is an embedded text resource sent alongside an ACP prompt.
@@ -117,6 +120,9 @@ type Session struct {
 	lifecycleCtx              context.Context
 	cancel                    context.CancelFunc
 	reverseHTTPStop           func()
+	// release detaches a session from a shared Conn, whose process it does
+	// not own.
+	release func()
 
 	promptMu     sync.Mutex
 	mu           sync.Mutex
@@ -712,6 +718,7 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 		Events:     collected.Events,
 		Usage:      usage,
 		Output:     attachUsageToLastAssistant(collected.Output, usage),
+		Meta:       resp.Meta,
 	}
 	if err != nil {
 		if proc != nil {
@@ -922,7 +929,11 @@ func (s *Session) close(force bool) error {
 	lifecycleCtx := s.lifecycleCtx
 	promptCancel := s.promptCancel
 	promptDone := s.promptDone
+	release := s.release
 	s.mu.Unlock()
+	if release != nil {
+		defer release()
+	}
 
 	if promptCancel != nil {
 		promptCancel()

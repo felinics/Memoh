@@ -18,18 +18,14 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 )
 
-// codexLoginService is the slice of the codex driver the handler drives.
+// codexService is the slice of the codex driver the handler drives. The
+// ChatGPT sign-in itself is served by ExternalAgentLoginHandler.
 type codexService interface {
-	StartChatGPTDeviceLogin(ctx context.Context, botID, botAgentID string) (codexruntime.DeviceLoginStart, error)
-	PollDeviceLogin(botID, botAgentID, loginID string) codexruntime.DeviceLoginStatus
-	CompleteChatGPTDeviceLogin(ctx context.Context, ownerUserID, botID, botAgentID, loginID string) error
-	CancelDeviceLogin(ctx context.Context, botID, botAgentID, loginID string) error
 	AccountUsage(ctx context.Context, botID, botAgentID string) (codexruntime.AccountUsage, error)
 }
 
-// ExternalAgentCodexHandler exposes the direct codex runtime's login flow: the
-// ChatGPT subscription device-code login runs through the app-server protocol
-// and its credentials are copied into the encrypted Agent credential store.
+// ExternalAgentCodexHandler exposes what is Codex's own: the usage limits of
+// the Agent's ChatGPT account.
 type ExternalAgentCodexHandler struct {
 	driver         codexService
 	agents         *botagents.Service
@@ -51,151 +47,25 @@ func NewExternalAgentCodexHandler(log *slog.Logger, driver codexService, agents 
 
 // Register registers codex runtime routes.
 func (h *ExternalAgentCodexHandler) Register(e *echo.Echo) {
-	g := e.Group("/bots/:bot_id/agents/:id/codex")
-	g.POST("/login/device/authorize", h.AuthorizeDevice)
-	g.POST("/login/device/poll", h.PollDevice)
-	g.POST("/login/device/cancel", h.CancelDevice)
-	g.GET("/usage", h.Usage)
+	e.GET("/bots/:bot_id/agents/:id/codex/usage", h.Usage)
 }
 
-func (h *ExternalAgentCodexHandler) requireAgentAccess(c echo.Context) (string, string, string, error) {
-	return h.requireAgentPermission(c, bots.PermissionManage)
-}
-
-func (h *ExternalAgentCodexHandler) requireAgentPermission(c echo.Context, permission string) (string, string, string, error) {
+func (h *ExternalAgentCodexHandler) requireAgentPermission(c echo.Context, permission string) (string, string, error) {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	botAgentID := strings.TrimSpace(c.Param("id"))
 	channelIdentityID, err := RequireChannelIdentityID(c)
 	if err != nil {
-		return "", "", "", err
+		return "", "", err
 	}
 	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, permission)
 	if err != nil {
-		return "", "", "", err
+		return "", "", err
 	}
 	agent, err := h.agents.GetActive(c.Request().Context(), bot.ID, botAgentID)
 	if err != nil || agent.Runtime != botagents.RuntimeCodex {
-		return "", "", "", apperror.New(apperror.CodeBotAgentNotFound, nil)
+		return "", "", apperror.New(apperror.CodeBotAgentNotFound, nil)
 	}
-	return bot.ID, agent.ID, channelIdentityID, nil
-}
-
-// CodexDeviceLoginAuthorizeResponse starts a device-code login.
-type CodexDeviceLoginAuthorizeResponse struct {
-	LoginID         string `json:"login_id" validate:"required"`
-	UserCode        string `json:"user_code" validate:"required"`
-	VerificationURL string `json:"verification_url" validate:"required"`
-} // @name externalagent.CodexDeviceLoginAuthorizeResponse
-
-// CodexDeviceLoginPollRequest identifies the login being polled or cancelled.
-type CodexDeviceLoginPollRequest struct {
-	LoginID string `json:"login_id" validate:"required"`
-} // @name externalagent.CodexDeviceLoginPollRequest
-
-// CodexDeviceLoginPollResponse reports the login state.
-type CodexDeviceLoginPollResponse struct {
-	Status string `json:"status" validate:"required" enums:"pending,success,error,unknown"`
-} // @name externalagent.CodexDeviceLoginPollResponse
-
-// AuthorizeDevice godoc
-// @Summary Start a ChatGPT device-code login for the direct codex runtime
-// @Tags external-agents
-// @Param bot_id path string true "Bot ID"
-// @Success 200 {object} CodexDeviceLoginAuthorizeResponse
-// @Failure 400 {object} server.Problem
-// @Failure 403 {object} server.Problem
-// @Failure 503 {object} server.Problem
-// @Param id path string true "Bot Agent ID"
-// @Router /bots/{bot_id}/agents/{id}/codex/login/device/authorize [post].
-func (h *ExternalAgentCodexHandler) AuthorizeDevice(c echo.Context) error {
-	botID, botAgentID, _, err := h.requireAgentAccess(c)
-	if err != nil {
-		return err
-	}
-	start, err := h.driver.StartChatGPTDeviceLogin(c.Request().Context(), botID, botAgentID)
-	if err != nil {
-		if translated := application.ExternalAgentError(err); apperror.CodeOf(translated) != "" {
-			return translated
-		}
-		return apperror.Wrap(
-			apperror.CodeExternalRuntimeUnavailable,
-			err,
-			map[string]string{"runtime": codexruntime.RuntimeType},
-		)
-	}
-	return c.JSON(http.StatusOK, CodexDeviceLoginAuthorizeResponse{
-		LoginID:         start.LoginID,
-		UserCode:        start.UserCode,
-		VerificationURL: start.VerificationURL,
-	})
-}
-
-// PollDevice godoc
-// @Summary Poll a pending codex device-code login
-// @Tags external-agents
-// @Param bot_id path string true "Bot ID"
-// @Param body body CodexDeviceLoginPollRequest true "Login reference"
-// @Success 200 {object} CodexDeviceLoginPollResponse
-// @Failure 400 {object} server.Problem
-// @Failure 403 {object} server.Problem
-// @Param id path string true "Bot Agent ID"
-// @Router /bots/{bot_id}/agents/{id}/codex/login/device/poll [post].
-func (h *ExternalAgentCodexHandler) PollDevice(c echo.Context) error {
-	botID, botAgentID, ownerUserID, err := h.requireAgentAccess(c)
-	if err != nil {
-		return err
-	}
-	var req CodexDeviceLoginPollRequest
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	if strings.TrimSpace(req.LoginID) == "" {
-		return apperror.FieldRequired("login_id")
-	}
-	loginID := strings.TrimSpace(req.LoginID)
-	status := h.driver.PollDeviceLogin(botID, botAgentID, loginID)
-	if status.Status == "success" {
-		if err := h.driver.CompleteChatGPTDeviceLogin(c.Request().Context(), ownerUserID, botID, botAgentID, loginID); err != nil {
-			err = application.ExternalRuntimeError(err)
-			if apperror.CodeOf(err) != "" {
-				return err
-			}
-			return apperror.Wrap(apperror.CodeAgentCredentialMaterializationFailed, err, nil)
-		}
-	}
-	return c.JSON(http.StatusOK, CodexDeviceLoginPollResponse{Status: status.Status})
-}
-
-// CancelDevice godoc
-// @Summary Cancel a pending codex device-code login
-// @Tags external-agents
-// @Param bot_id path string true "Bot ID"
-// @Param body body CodexDeviceLoginPollRequest true "Login reference"
-// @Success 204
-// @Failure 400 {object} server.Problem
-// @Failure 403 {object} server.Problem
-// @Param id path string true "Bot Agent ID"
-// @Router /bots/{bot_id}/agents/{id}/codex/login/device/cancel [post].
-func (h *ExternalAgentCodexHandler) CancelDevice(c echo.Context) error {
-	botID, botAgentID, _, err := h.requireAgentAccess(c)
-	if err != nil {
-		return err
-	}
-	var req CodexDeviceLoginPollRequest
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	if strings.TrimSpace(req.LoginID) == "" {
-		return apperror.FieldRequired("login_id")
-	}
-	if err := h.driver.CancelDeviceLogin(c.Request().Context(), botID, botAgentID, strings.TrimSpace(req.LoginID)); err != nil {
-		return apperror.Wrap(
-			apperror.CodeExternalRuntimeUnavailable,
-			err,
-			map[string]string{"runtime": codexruntime.RuntimeType},
-		)
-	}
-	return c.NoContent(http.StatusNoContent)
+	return bot.ID, agent.ID, nil
 }
 
 // CodexUsageWindow is one rolling usage window of the ChatGPT account.
@@ -227,7 +97,7 @@ type CodexUsageResponse struct {
 // @Failure 502 {object} server.Problem
 // @Router /bots/{bot_id}/agents/{id}/codex/usage [get].
 func (h *ExternalAgentCodexHandler) Usage(c echo.Context) error {
-	botID, botAgentID, _, err := h.requireAgentPermission(c, bots.PermissionChat)
+	botID, botAgentID, err := h.requireAgentPermission(c, bots.PermissionChat)
 	if err != nil {
 		return err
 	}

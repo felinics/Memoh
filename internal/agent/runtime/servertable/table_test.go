@@ -1,4 +1,4 @@
-package codex
+package servertable
 
 import (
 	"context"
@@ -38,7 +38,7 @@ type fakeStarter struct {
 	err   error
 }
 
-func (s *fakeStarter) start(context.Context, string) (recyclable, error) {
+func (s *fakeStarter) start(context.Context, string) (Resource, error) {
 	s.mu.Lock()
 	block := s.block
 	err := s.err
@@ -59,13 +59,13 @@ func (s *fakeStarter) start(context.Context, string) (recyclable, error) {
 
 func TestServerTableSharesOneServerAcrossAcquires(t *testing.T) {
 	starter := &fakeStarter{}
-	table := newServerTable(starter.start, slog.Default())
+	table := New(starter.start, slog.Default())
 
-	a, releaseA, err := table.acquire(context.Background(), "bot")
+	a, releaseA, err := table.Acquire(context.Background(), "bot")
 	if err != nil {
 		t.Fatalf("acquire a: %v", err)
 	}
-	b, releaseB, err := table.acquire(context.Background(), "bot")
+	b, releaseB, err := table.Acquire(context.Background(), "bot")
 	if err != nil {
 		t.Fatalf("acquire b: %v", err)
 	}
@@ -84,18 +84,18 @@ func TestServerTableSharesOneServerAcrossAcquires(t *testing.T) {
 // while a new acquire gets a fresh generation immediately.
 func TestServerTableRecycleDrainsInsteadOfKilling(t *testing.T) {
 	starter := &fakeStarter{}
-	table := newServerTable(starter.start, slog.Default())
+	table := New(starter.start, slog.Default())
 
-	old, releaseOld, err := table.acquire(context.Background(), "bot")
+	old, releaseOld, err := table.Acquire(context.Background(), "bot")
 	if err != nil {
 		t.Fatalf("acquire old: %v", err)
 	}
-	table.recycle("bot")
+	table.Recycle("bot")
 	if old.(*fakeResource).closed.Load() {
 		t.Fatal("recycle killed a server a sibling still holds")
 	}
 
-	fresh, releaseFresh, err := table.acquire(context.Background(), "bot")
+	fresh, releaseFresh, err := table.Acquire(context.Background(), "bot")
 	if err != nil {
 		t.Fatalf("acquire fresh: %v", err)
 	}
@@ -114,13 +114,13 @@ func TestServerTableRecycleDrainsInsteadOfKilling(t *testing.T) {
 
 func TestServerTableRecycleClosesIdleServerImmediately(t *testing.T) {
 	starter := &fakeStarter{}
-	table := newServerTable(starter.start, slog.Default())
-	srv, release, err := table.acquire(context.Background(), "bot")
+	table := New(starter.start, slog.Default())
+	srv, release, err := table.Acquire(context.Background(), "bot")
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
 	release()
-	table.recycle("bot")
+	table.Recycle("bot")
 	if !srv.(*fakeResource).closed.Load() {
 		t.Fatal("recycle left an idle server running")
 	}
@@ -131,11 +131,11 @@ func TestServerTableRecycleClosesIdleServerImmediately(t *testing.T) {
 // escape hatch this table exists to close.
 func TestServerTableDisplacesServerStillStarting(t *testing.T) {
 	starter := &fakeStarter{block: make(chan struct{})}
-	table := newServerTable(starter.start, slog.Default())
+	table := New(starter.start, slog.Default())
 
-	got := make(chan recyclable, 1)
+	got := make(chan Resource, 1)
 	go func() {
-		srv, release, err := table.acquire(context.Background(), "bot")
+		srv, release, err := table.Acquire(context.Background(), "bot")
 		if err != nil {
 			got <- nil
 			return
@@ -159,7 +159,7 @@ func TestServerTableDisplacesServerStillStarting(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	table.recycle("bot")
+	table.Recycle("bot")
 	close(starter.block)
 
 	srv := <-got
@@ -183,14 +183,14 @@ func TestServerTableDisplacesServerStillStarting(t *testing.T) {
 
 func TestServerTableStartFailureIsReturnedAndClearsPlaceholder(t *testing.T) {
 	starter := &fakeStarter{err: errors.New("bridge unavailable")}
-	table := newServerTable(starter.start, slog.Default())
-	if _, _, err := table.acquire(context.Background(), "bot"); err == nil {
+	table := New(starter.start, slog.Default())
+	if _, _, err := table.Acquire(context.Background(), "bot"); err == nil {
 		t.Fatal("acquire swallowed a startup failure")
 	}
 	starter.mu.Lock()
 	starter.err = nil
 	starter.mu.Unlock()
-	if _, release, err := table.acquire(context.Background(), "bot"); err != nil {
+	if _, release, err := table.Acquire(context.Background(), "bot"); err != nil {
 		t.Fatalf("acquire after failure: %v", err)
 	} else {
 		release()
@@ -199,8 +199,8 @@ func TestServerTableStartFailureIsReturnedAndClearsPlaceholder(t *testing.T) {
 
 func TestServerTableReapsExitedProcess(t *testing.T) {
 	starter := &fakeStarter{}
-	table := newServerTable(starter.start, slog.Default())
-	srv, release, err := table.acquire(context.Background(), "bot")
+	table := New(starter.start, slog.Default())
+	srv, release, err := table.Acquire(context.Background(), "bot")
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestServerTableReapsExitedProcess(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	fresh, releaseFresh, err := table.acquire(context.Background(), "bot")
+	fresh, releaseFresh, err := table.Acquire(context.Background(), "bot")
 	if err != nil {
 		t.Fatalf("acquire after death: %v", err)
 	}
@@ -231,18 +231,18 @@ func TestServerTableReapsExitedProcess(t *testing.T) {
 
 func TestLauncherRefreshDrainsOnlyTheObservedServer(t *testing.T) {
 	starter := &fakeStarter{}
-	table := newServerTable(starter.start, slog.Default())
-	t.Cleanup(table.closeAll)
-	old, releaseOld, err := table.acquire(t.Context(), "bot")
+	table := New(starter.start, slog.Default())
+	t.Cleanup(table.CloseAll)
+	old, releaseOld, err := table.Acquire(t.Context(), "bot")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer releaseOld()
-	table.recycleResource("bot", old)
+	table.RecycleResource("bot", old)
 	if old.(*fakeResource).closed.Load() {
 		t.Fatal("launcher refresh interrupted the active turn")
 	}
-	fresh, releaseFresh, err := table.acquire(t.Context(), "bot")
+	fresh, releaseFresh, err := table.Acquire(t.Context(), "bot")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,8 +250,8 @@ func TestLauncherRefreshDrainsOnlyTheObservedServer(t *testing.T) {
 	if fresh == old {
 		t.Fatal("next turn reused the obsolete launcher")
 	}
-	table.recycleResource("bot", old)
-	subsequent, releaseSubsequent, err := table.acquire(t.Context(), "bot")
+	table.RecycleResource("bot", old)
+	subsequent, releaseSubsequent, err := table.Acquire(t.Context(), "bot")
 	if err != nil {
 		t.Fatal(err)
 	}

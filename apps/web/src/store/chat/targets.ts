@@ -1,5 +1,6 @@
 import { computed, type Ref } from 'vue'
 import type { SessionSummary } from '@/composables/api/useChat'
+import { isDirectBotAgentRuntime, type BotAgentRuntime } from '@/utils/bot-agent'
 import { isAgentRuntimeType, normalizedRuntimeType } from '../chat-list.utils'
 import type {
   ActiveChatTarget,
@@ -14,7 +15,7 @@ export function createChatTargets(deps: {
   knownSession: (sessionId: string) => SessionSummary | null | undefined
   pendingExternalAgentState: (target: ChatViewTarget) => {
     input: {
-      runtime?: 'acp' | 'codex' | 'claude-code'
+      runtime?: BotAgentRuntime
     }
     metadata: Record<string, unknown>
   } | null | undefined
@@ -56,8 +57,7 @@ export function createChatTargets(deps: {
 
     const pendingState = deps.pendingExternalAgentState(resolved)
     if (pendingState) {
-      const runtimeType = pendingState.input.runtime === 'codex'
-        || pendingState.input.runtime === 'claude-code'
+      const runtimeType = isDirectBotAgentRuntime(pendingState.input.runtime)
         ? pendingState.input.runtime
         : 'acp_agent'
       return {

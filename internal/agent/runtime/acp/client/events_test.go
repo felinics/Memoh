@@ -1,6 +1,7 @@
 package client
 
 import (
+	"reflect"
 	"strconv"
 	"testing"
 
@@ -84,6 +85,129 @@ func TestACPGenericExecuteCompletionWithoutStartEmitsStartThenEnd(t *testing.T) 
 	result, ok := events[1].Result.(map[string]any)
 	if !ok || result["stdout"] != "workspace\n" {
 		t.Fatalf("end result = %#v", events[1].Result)
+	}
+}
+
+// rawOutput is the agent's own shape: here the output bytes come as a number
+// array and only content carries the text.
+func TestACPToolResultTakesTheNativeToolShape(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		kind    acp.ToolKind
+		input   map[string]any
+		status  acp.ToolCallStatus
+		content string
+		output  any
+		refusal string
+		want    map[string]any
+	}{
+		{
+			name: "exec", kind: acp.ToolKindExecute, input: map[string]any{"command": "pwd"},
+			status: acp.ToolCallStatusCompleted, content: "/data\n",
+			output: map[string]any{"type": "Bash", "output": []any{47, 100, 97, 116, 97, 10}, "exit_code": 0},
+			want:   map[string]any{"stdout": "/data\n", "exit_code": 0},
+		},
+		{
+			name: "read", kind: acp.ToolKindRead, input: map[string]any{"path": "/data/a.txt"},
+			status: acp.ToolCallStatusCompleted, content: "1→alpha\n",
+			output: map[string]any{"type": "ReadFile", "FileContent": map[string]any{"raw_output": "alpha\n"}},
+			want:   map[string]any{"content": "1→alpha\n"},
+		},
+		{
+			name: "edit", kind: acp.ToolKindEdit, input: map[string]any{"path": "/data/a.txt"},
+			status: acp.ToolCallStatusCompleted,
+			output: map[string]any{"type": "SearchReplace"},
+			want:   map[string]any{"ok": true},
+		},
+		{
+			name: "rejected exec", kind: acp.ToolKindExecute, input: map[string]any{"command": "rm a.txt"},
+			status: acp.ToolCallStatusFailed, content: "User rejected the execution for tool `run_terminal_command`",
+			want: map[string]any{"isError": true, "content": []map[string]any{{
+				"type": "text", "text": "User rejected the execution for tool `run_terminal_command`",
+			}}},
+		},
+		{
+			name: "failure told only in rawOutput", kind: acp.ToolKindRead, input: map[string]any{"path": "/data/a.txt"},
+			status: acp.ToolCallStatusFailed, output: "file does not exist",
+			want: map[string]any{"isError": true, "content": []map[string]any{{"type": "text", "text": "file does not exist"}}},
+		},
+		{
+			name: "failure told only in a rawOutput object", kind: acp.ToolKindEdit, input: map[string]any{"path": "/data/a.txt"},
+			status: acp.ToolCallStatusFailed, output: map[string]any{"error": "tool_execution_failed", "message": "permission denied"},
+			want: map[string]any{"isError": true, "content": []map[string]any{{"type": "text", "text": "permission denied"}}},
+		},
+		{
+			name: "refused write", kind: acp.ToolKindEdit, input: map[string]any{"path": "/tmp/a.txt"},
+			status: acp.ToolCallStatusFailed, content: "User rejected the execution for tool `write`",
+			refusal: `path "/tmp/a.txt" escapes workspace root "/data"`,
+			want: map[string]any{"isError": true, "content": []map[string]any{{
+				"type": "text", "text": `Memoh refused this call: path "/tmp/a.txt" escapes workspace root "/data"`,
+			}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			mapper := newACPToolEventMapper(acpprofile.DefaultToolQuirks())
+			mapper.eventsFromNotification(acp.SessionNotification{Update: acp.UpdateToolCall(
+				acp.ToolCallId("call-1"),
+				acp.WithUpdateKind(tt.kind),
+				acp.WithUpdateStatus(acp.ToolCallStatusInProgress),
+				acp.WithUpdateRawInput(tt.input),
+			)})
+			if tt.refusal != "" {
+				mapper.refuse("", "call-1", tt.refusal)
+			}
+			opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(tt.status)}
+			if tt.content != "" {
+				opts = append(opts, acp.WithUpdateContent([]acp.ToolCallContent{acp.ToolContent(acp.TextBlock(tt.content))}))
+			}
+			if tt.output != nil {
+				opts = append(opts, acp.WithUpdateRawOutput(tt.output))
+			}
+			events := mapper.eventsFromNotification(acp.SessionNotification{Update: acp.UpdateToolCall(acp.ToolCallId("call-1"), opts...)})
+			if len(events) != 1 || events[0].Type != event.ToolCallEnd {
+				t.Fatalf("events = %#v, want one end", events)
+			}
+			if !resultHas(events[0].Result, tt.want) {
+				t.Fatalf("result = %#v, want it to carry %#v", events[0].Result, tt.want)
+			}
+		})
+	}
+}
+
+// resultHas reports that the native shape is present in a tool result. What
+// the agent reported beyond it travels alongside and is not pinned here.
+func resultHas(result any, want map[string]any) bool {
+	got, ok := result.(map[string]any)
+	if !ok {
+		return false
+	}
+	for key, value := range want {
+		if !reflect.DeepEqual(got[key], value) {
+			return false
+		}
+	}
+	return true
+}
+
+// The agent's own fields stay with the result: nothing reads them today, and
+// history must not quietly lose them.
+func TestACPToolResultKeepsWhatTheAgentReportedBeyondTheNativeShape(t *testing.T) {
+	t.Parallel()
+	mapper := newACPToolEventMapper(acpprofile.ToolQuirks{})
+	mapper.eventsFromNotification(acp.SessionNotification{Update: acp.StartToolCall(acp.ToolCallId("call-1"), "pwd",
+		acp.WithStartKind(acp.ToolKindExecute), acp.WithStartStatus(acp.ToolCallStatusInProgress), acp.WithStartRawInput(map[string]any{"command": "pwd"}),
+	)})
+	events := mapper.eventsFromNotification(acp.SessionNotification{Update: acp.UpdateToolCall(acp.ToolCallId("call-1"),
+		acp.WithUpdateStatus(acp.ToolCallStatusCompleted),
+		acp.WithUpdateRawOutput(map[string]any{"output": "/data\n", "exit_code": 0, "duration_ms": 12, "truncated": false}),
+	)})
+	want := map[string]any{"stdout": "/data\n", "exit_code": 0, "duration_ms": 12, "truncated": false}
+	if len(events) != 1 || !reflect.DeepEqual(events[0].Result, want) {
+		t.Fatalf("result = %#v, want %#v", events[0].Result, want)
 	}
 }
 

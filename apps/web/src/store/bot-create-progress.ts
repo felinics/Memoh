@@ -19,9 +19,9 @@ import {
 import { markOnboardingCompleted } from '@/composables/useOnboarding'
 import { apiErrorStatus, parseMemohError, renderI18nMessage, resolveApiErrorMessage } from '@/utils/api-error'
 import { botCheckDetail } from '@/utils/bot-check'
-import { botAgentRuntimeForProvider, directBotAgentMetadata } from '@/utils/bot-agent'
+import { agentAuthForCredentialKind, botAgentRuntimeForProvider, directBotAgentMetadata, isDirectBotAgentRuntime, type DirectBotAgentRuntime } from '@/utils/bot-agent'
 import { externalAgentDisplayName } from '@/utils/external-agent'
-import { writeCreatedBotSession, type CreatedBotSession, type CreatedBotSessionRuntime } from '@/pages/bots/created-bot-session'
+import { writeCreatedBotSession, type CreatedBotSession } from '@/pages/bots/created-bot-session'
 import { randomUUID } from '@/utils/uuid'
 import { installCreatedAgent } from './install-created-agent'
 
@@ -100,10 +100,10 @@ function settingsBody(settings: BotCreateSettings) {
   }
 }
 
-function directRuntimeOf(agent?: BotCreateAgent): CreatedBotSessionRuntime | undefined {
+function directRuntimeOf(agent?: BotCreateAgent): DirectBotAgentRuntime | undefined {
   if (!agent) return undefined
   const runtime = botAgentRuntimeForProvider(agent.provider)
-  return runtime === 'codex' || runtime === 'claude-code' ? runtime : undefined
+  return isDirectBotAgentRuntime(runtime) ? runtime : undefined
 }
 
 function sleep(ms: number): Promise<void> {
@@ -292,7 +292,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
           }
           if (authorizationId.value && !createdAgent.value?.agent_credential_id) {
             const { data } = await getAgentAuthorizationsById({ path: { id: authorizationId.value }, throwOnError: true })
-            metadata = { ...metadata, auth: data.auth_kind === 'openai_codex_oauth' ? 'chatgpt' : data.auth_kind === 'claude_code_oauth' ? 'oauth_token' : 'api_key' }
+            metadata = { ...metadata, auth: agentAuthForCredentialKind(data.auth_kind) }
           }
         }
         if (!createdAgent.value?.id) {

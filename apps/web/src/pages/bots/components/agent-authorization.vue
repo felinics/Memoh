@@ -3,32 +3,58 @@ import { computed, ref, watch } from 'vue'
 import { Button, Dialog, DialogBody, DialogFooter, DialogHeader, DialogPanel, DialogTitle, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SettingsRow } from '@felinic/ui'
 import { ExternalLink, KeyRound } from 'lucide-vue-next'
 import { useAgentAuthorization } from '@/composables/useAgentAuthorization'
-import CodexAccountPanel from './codex-account-panel.vue'
+import {
+  AGENT_AUTH_MODE_COPY,
+  BOT_AGENT_RUNTIME_CLAUDE_CODE,
+  DEVICE_LOGINS,
+  DIRECT_BOT_AGENT_API_KEY_AUTH_KIND,
+  DIRECT_BOT_AGENT_AUTH_MODES,
+  agentAuthForCredentialKind,
+  isDeviceLoginAuthMode,
+  type AgentAuthMode,
+  type DirectBotAgentRuntime,
+} from '@/utils/bot-agent'
+import DeviceLoginPanel from './device-login-panel.vue'
 import AgentCredentialInput from './agent-credential-input.vue'
 
-const props = defineProps<{ runtime: string, storageKey: string }>()
+type Mode = AgentAuthMode | 'claude_account'
+
+const props = defineProps<{ runtime: DirectBotAgentRuntime, storageKey: string }>()
 const emit = defineEmits<{ status: [value: { ready: boolean, busy: boolean, id: string, auth: string }] }>()
-const mode = ref(props.runtime === 'codex' ? 'chatgpt' : 'claude_account')
+// Before the Bot exists there is no workspace login to reuse, so Claude Code
+// signs in through the browser instead (`claude_account`, stored as an
+// `oauth_token` credential). The other runtimes offer what an Agent does.
+const modes: readonly [Mode, ...Mode[]] = props.runtime === BOT_AGENT_RUNTIME_CLAUDE_CODE
+  ? ['claude_account', 'oauth_token', 'api_key']
+  : DIRECT_BOT_AGENT_AUTH_MODES[props.runtime]
+const mode = ref(modes[0])
 const secret = ref('')
 const authorizationCode = ref('')
-const { session, ready, pending, busy, loading, error, start, exchange, cancel, handoff, resume } = useAgentAuthorization(() => props.runtime, props.storageKey)
+const { session, ready, pending, busy, loading, error, deviceLogin, start, exchange, cancel, handoff, resume } = useAgentAuthorization(() => props.runtime, props.storageKey)
 const agentAuth = computed(() => mode.value === 'claude_account' ? 'oauth_token' : mode.value)
-const authKind = computed(() => mode.value === 'chatgpt' ? 'openai_codex_oauth'
-  : agentAuth.value === 'oauth_token' ? 'claude_code_oauth'
-    : props.runtime === 'codex' ? 'openai_api_key' : 'anthropic_api_key')
+const deviceLoginAuth = computed(() => isDeviceLoginAuthMode(mode.value) ? mode.value : undefined)
+const authKind = computed(() => deviceLoginAuth.value
+  ? DEVICE_LOGINS[deviceLoginAuth.value].authKind
+  : agentAuth.value === 'oauth_token' ? 'claude_code_oauth' : DIRECT_BOT_AGENT_API_KEY_AUTH_KIND[props.runtime])
+function modeLabel(value: Mode): string {
+  return value === 'claude_account' ? 'bots.agent.claudeAccount' : AGENT_AUTH_MODE_COPY[value].label
+}
 watch(() => session.value?.auth_kind, (kind) => {
-  if (kind) mode.value = kind === 'openai_codex_oauth' ? 'chatgpt'
-    : kind === 'claude_code_oauth' ? mode.value === 'oauth_token' ? 'oauth_token' : 'claude_account' : 'api_key'
+  if (!kind) return
+  const auth = agentAuthForCredentialKind(kind)
+  // Both Claude choices store the same credential kind; keep the one in use.
+  mode.value = auth === 'oauth_token' && mode.value !== 'oauth_token' ? 'claude_account' : auth
 })
 watch([ready, busy, agentAuth, () => session.value?.id], () => {
   emit('status', { ready: ready.value, busy: busy.value, id: session.value?.id ?? '', auth: agentAuth.value })
 }, { immediate: true })
 watch([ready, () => session.value?.id], () => { authorizationCode.value = '' })
 function changeMode(value: unknown) {
-  if (typeof value !== 'string' || value === mode.value) return
+  const next = modes.find(option => option === value)
+  if (!next || next === mode.value) return
   cancel()
   secret.value = ''
-  mode.value = value
+  mode.value = next
 }
 async function save() {
   await start(authKind.value, secret.value.trim())
@@ -53,36 +79,22 @@ defineExpose({ handoff, resume })
       </SelectTrigger>
       <SelectContent>
         <SelectItem
-          v-if="runtime === 'codex'"
-          value="chatgpt"
+          v-for="option in modes"
+          :key="option"
+          :value="option"
         >
-          {{ $t('bots.agent.authChatGPT') }}
-        </SelectItem>
-        <SelectItem
-          v-else
-          value="claude_account"
-        >
-          {{ $t('bots.agent.claudeAccount') }}
-        </SelectItem>
-        <SelectItem
-          v-if="runtime === 'claude-code'"
-          value="oauth_token"
-        >
-          {{ $t('bots.agent.authOAuthToken') }}
-        </SelectItem>
-        <SelectItem value="api_key">
-          {{ $t('bots.agent.apiKey') }}
+          {{ $t(modeLabel(option)) }}
         </SelectItem>
       </SelectContent>
     </Select>
   </SettingsRow>
-  <CodexAccountPanel
-    v-if="mode === 'chatgpt'"
+  <DeviceLoginPanel
+    v-if="deviceLoginAuth"
+    :auth="deviceLoginAuth"
     :authorized="ready"
     :authorizing="loading"
-    :device-pending="pending"
     :expires-at="session?.expires_at"
-    :device-login="session?.user_code && session.verification_url ? { user_code: session.user_code, verification_url: session.verification_url } : null"
+    :device-login="deviceLogin"
     :error="error"
     @connect="start(authKind)"
     @cancel="cancel"

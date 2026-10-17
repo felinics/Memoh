@@ -165,19 +165,19 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 			}
 			out = resolved
 		}
-		switch out.RuntimeType {
-		case "", RuntimeModel:
+		switch {
+		case out.RuntimeType == "" || out.RuntimeType == RuntimeModel:
 			if out.ACPAgentID != "" || out.ACPModelID != "" {
 				return ExecutionConfig{}, ruleViolation(RuleRunTargetConflict, "acp_agent_id", "acp_agent_id and acp_model_id require runtime_type acp_agent")
 			}
-		case RuntimeACPAgent:
+		case out.RuntimeType == RuntimeACPAgent:
 			if out.ACPAgentID == "" {
 				return ExecutionConfig{}, requiredField("acp_agent_id", "acp_agent_id is required for runtime_type acp_agent")
 			}
 			if out.ModelID != "" {
 				return ExecutionConfig{}, ruleViolation(RuleModelConflict, "model_id", "ACP schedules use acp_model_id; model_id is only valid for the native model runtime")
 			}
-		case botagents.RuntimeCodex, botagents.RuntimeClaudeCode:
+		case runtimekind.IsDirect(out.RuntimeType):
 			if out.BotAgentID == "" {
 				return ExecutionConfig{}, requiredFieldf("bot_agent_id", "runtime_type %q requires bot_agent_id", out.RuntimeType)
 			}
@@ -248,11 +248,11 @@ func (s *Service) resolveBotAgentExecution(ctx context.Context, botID string, ex
 	}
 	declared := strings.TrimSpace(exec.RuntimeType)
 	exec.BotAgentID = agent.ID
-	switch descriptor.Runtime {
-	case botagents.RuntimeACP:
+	switch {
+	case descriptor.Runtime == botagents.RuntimeACP:
 		exec.RuntimeType = RuntimeACPAgent
 		exec.ACPAgentID = descriptor.Provider
-	case botagents.RuntimeCodex, botagents.RuntimeClaudeCode:
+	case runtimekind.IsDirect(descriptor.Runtime):
 		// Direct external agents carry the runtime type on the schedule row
 		// itself; the fire dispatches through the external driver with no
 		// acp_agent_id and no native model.

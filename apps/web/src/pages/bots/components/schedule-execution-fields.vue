@@ -173,7 +173,7 @@ import type {
   SessionSession,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, botAgentName, botAgentProvider, normalizeBotAgentRuntime } from '@/utils/bot-agent'
+import { botAgentName, botAgentProvider, isDirectBotAgentRuntime, normalizeBotAgentRuntime, type DirectBotAgentRuntime } from '@/utils/bot-agent'
 import { isAgentRuntimeType, normalizedRuntimeType } from '@/store/chat-list.utils'
 import { useWorkdirsStore } from '@/store/workdirs'
 import SessionSelect from '@/components/session-select/index.vue'
@@ -190,7 +190,7 @@ import {
 export interface ScheduleExecutionForm {
   runTarget: 'new_session' | 'existing_session'
   targetSessionId: string
-  runtimeType: '' | 'acp_agent' | 'codex' | 'claude-code'
+  runtimeType: '' | 'acp_agent' | DirectBotAgentRuntime
   botAgentId: string
   acpAgentId: string
   modelId: string
@@ -245,10 +245,9 @@ const chatModels = computed(() =>
 
 const enabledAgents = computed(() => botAgents.value.filter(agent => agent.enabled !== false && !!agent.id))
 
-function sessionRuntimeForAgent(agent: BotagentsBotAgent | undefined): 'acp_agent' | 'codex' | 'claude-code' {
+function sessionRuntimeForAgent(agent: BotagentsBotAgent | undefined): 'acp_agent' | DirectBotAgentRuntime {
   const runtime = normalizeBotAgentRuntime(agent?.runtime)
-  if (runtime === BOT_AGENT_RUNTIME_CODEX || runtime === BOT_AGENT_RUNTIME_CLAUDE_CODE) return runtime
-  return 'acp_agent'
+  return isDirectBotAgentRuntime(runtime) ? runtime : 'acp_agent'
 }
 
 const selectableWorkdirs = computed(() => {

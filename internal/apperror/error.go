@@ -527,7 +527,7 @@ var catalog = map[Code]Definition{
 	},
 	CodeBotAgentProviderDirectRuntime: {
 		HTTPStatus:  http.StatusBadRequest,
-		Detail:      "This provider runs as a direct runtime. Create the Agent with the codex or claude-code runtime instead.",
+		Detail:      "This provider runs as a direct runtime. Create the Agent with that runtime instead.",
 		AllowedArgs: []string{"runtime"},
 	},
 	CodeChannelRuntimeUnavailable: {

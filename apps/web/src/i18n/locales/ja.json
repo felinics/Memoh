@@ -271,7 +271,7 @@
       "turn_replacement_unsupported": "外部 Agent のセッションでは再試行とメッセージの編集は利用できません。代わりに新しいメッセージを送信してください。"
     },
     "external_runtime": {
-      "auth_required": "Codex のアカウントが未接続か、ログインの有効期限が切れています。Agent の設定で ChatGPT に接続するか、API Key を設定してください。",
+      "auth_required": "この Agent はログインしていないか、認証情報が拒否されました。Agent の設定で再度ログインするか、API Key を更新してください。",
       "context_window_exceeded": "この会話はモデルのコンテキストウィンドウを超えました。コンテキストを圧縮するか、新しい会話を開始してください。",
       "overloaded": "外部 Agent のモデルサービスが一時的に利用できないか、過負荷になっています。しばらくしてからもう一度お試しいただくか、別のモデルに切り替えてください。",
       "rate_limited": "外部 Agent がモデルサービスのレート制限に達しました。しばらく待ってからもう一度送信してください。",
@@ -2764,7 +2764,6 @@
       "defaultModelDescription": "任意項目です。空欄の場合は External Agent のデフォルトを使用し、会話中に一時的に変更できます。",
       "defaultModelPlaceholder": "Runtime のデフォルトを使用",
       "account": "アカウント",
-      "chatgptAccount": "ChatGPT アカウント",
       "chatgptAccountDescription": "Memoh はこの Agent の ChatGPT 認証情報を暗号化して保存し、Runtime でのみ Codex に渡します。",
       "chatgptAccountConnectedDescription": "この Agent の ChatGPT 認証情報は暗号化して保存されています。",
       "reconnect": "再接続",

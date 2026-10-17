@@ -143,6 +143,10 @@ func provideExternalAgentCodexServerHandler(handler *handlers.ExternalAgentCodex
 	return handler
 }
 
+func provideExternalAgentLoginServerHandler(handler *handlers.ExternalAgentLoginHandler) *handlers.ExternalAgentLoginHandler {
+	return handler
+}
+
 func provideProviderOAuthHandler(providersService *providers.Service) *handlers.ProviderOAuthHandler {
 	return handlers.NewProviderOAuthHandler(providersService)
 }

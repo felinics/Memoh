@@ -119,9 +119,7 @@ func (h *AgentAuthorizationHandler) status(c echo.Context, poll bool) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 30*time.Second)
-	defer cancel()
-	result, err := h.service.Get(ctx, owner, c.Param("id"), poll)
+	result, err := h.service.Get(c.Request().Context(), owner, c.Param("id"), poll)
 	if err != nil {
 		return mapAuthorizationError(err)
 	}

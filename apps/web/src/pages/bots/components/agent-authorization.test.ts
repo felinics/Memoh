@@ -9,7 +9,7 @@ const loading = ref(false)
 vi.mock('@/composables/useAgentAuthorization', () => ({ useAgentAuthorization: () => ({
   session, ready, pending, busy: loading, loading, error: ref(''), ...actions,
 }) }))
-vi.mock('./codex-account-panel.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('./device-login-panel.vue', () => ({ default: { template: '<div data-device-login />' } }))
 vi.mock('./agent-credential-input.vue', () => ({ default: { template: '<input data-manual-token />' } }))
 vi.mock('@felinic/ui', () => {
   const slot = { template: '<div><slot /></div>' }
@@ -28,13 +28,16 @@ import AgentAuthorization from './agent-authorization.vue'
 let app: App
 let root: HTMLDivElement
 const status = vi.fn()
+function mount(runtime: string) {
+  app = createApp(AgentAuthorization, { runtime, storageKey: 'test', onStatus: status })
+  app.config.globalProperties.$t = (key: string) => key
+  app.mount(root)
+}
 beforeEach(() => {
   vi.resetAllMocks()
   session.value = null; ready.value = false; pending.value = false; loading.value = false
   root = document.createElement('div')
-  app = createApp(AgentAuthorization, { runtime: 'claude-code', storageKey: 'test', onStatus: status })
-  app.config.globalProperties.$t = (key: string) => key
-  app.mount(root)
+  mount('claude-code')
 })
 afterEach(() => { app.unmount(); vi.restoreAllMocks() })
 function button(label: string) {

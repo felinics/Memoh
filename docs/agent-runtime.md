@@ -74,6 +74,18 @@ processes; it contains no conversation state. Downgrading restores the old table
 structure, not deleted snapshot data.
 
 
+## Account sign-in of direct runtimes
+
+A direct runtime that signs its account in inside the Agent's own process
+implements `external.DeviceLoginProvider`, served at
+`POST /bots/{bot_id}/agents/{id}/login/device/{authorize,poll,cancel}`. The
+runtime obtains the device code, the user opens the URL and confirms it, and
+the runtime writes its own login file in the Agent's home; Memoh then copies
+the result into the encrypted Agent credential store and restarts the Agent's
+process from it. Codex signs in this way and stores the tokens it finds in
+`auth.json`. The staged authorizations (`/agent-authorizations`) cover API
+keys, the ChatGPT device login and the Claude browser login.
+
 ## Execution timeouts and budgets
 
 Model silence, tool silence, human decisions, and total execution budgets have

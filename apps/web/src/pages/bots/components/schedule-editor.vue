@@ -343,6 +343,7 @@ import {
 import type { ScheduleCreateRequest, ScheduleSchedule, ScheduleUpdateRequest } from '@memohai/sdk'
 import ScheduleExecutionFields, { type ScheduleExecutionForm } from './schedule-execution-fields.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { isAgentRuntimeType } from '@/store/chat-list.utils'
 import {
   describeCron,
   defaultScheduleFormState,
@@ -501,11 +502,7 @@ function defaultExecutionForm(): ScheduleExecutionForm {
 function hydrateExecution(schedule: ScheduleSchedule) {
   execution.runTarget = schedule.run_target === 'existing_session' ? 'existing_session' : 'new_session'
   execution.targetSessionId = schedule.target_session_id ?? ''
-  execution.runtimeType = schedule.runtime_type === 'acp_agent'
-    || schedule.runtime_type === 'codex'
-    || schedule.runtime_type === 'claude-code'
-    ? schedule.runtime_type
-    : ''
+  execution.runtimeType = isAgentRuntimeType(schedule.runtime_type) ? schedule.runtime_type : ''
   execution.botAgentId = schedule.bot_agent_id ?? ''
   execution.acpAgentId = schedule.acp_agent_id ?? ''
   execution.modelId = schedule.model_id ?? ''

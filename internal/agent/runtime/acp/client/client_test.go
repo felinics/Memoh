@@ -1319,6 +1319,40 @@ func TestRequestPermissionUsesMemohToolApproval(t *testing.T) {
 	}
 }
 
+func TestRuntimeOwnedPermissionReachesTheUserPastAPermissivePolicy(t *testing.T) {
+	t.Parallel()
+
+	approval := &fakeACPToolApproval{
+		evaluation: toolapproval.Evaluation{Decision: toolapproval.DecisionBypass},
+		decision:   toolapproval.Request{ID: "approval-1", Status: toolapproval.StatusApproved},
+	}
+	callbacks := &clientCallbacks{
+		root:                "/data",
+		approval:            approval,
+		runtimeOwnsApproval: true,
+		baseSession:         ToolSessionContext{BotID: "bot-1", SessionID: "session-1", RunID: "run-1"},
+		events:              &toolEventEmitter{},
+	}
+	callbacks.setPromptState(newEventCollector(), nil, callbacks.baseSession)
+
+	_, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
+		ToolCall: acp.ToolCallUpdate{
+			ToolCallId: acp.ToolCallId("exec-1"),
+			Kind:       acp.Ptr(acp.ToolKindExecute),
+			RawInput:   map[string]any{"command": "uname -m"},
+		},
+		Options: []acp.PermissionOption{
+			{Kind: acp.PermissionOptionKindAllowOnce, Name: "Allow", OptionId: acp.PermissionOptionId("allow")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestPermission error = %v", err)
+	}
+	if approval.createCount != 1 {
+		t.Fatalf("approvals created = %d, want the user asked once", approval.createCount)
+	}
+}
+
 func TestReadTextFileUsesPromptToolOutputLimit(t *testing.T) {
 	t.Parallel()
 

@@ -28,7 +28,6 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
-	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 var (
@@ -220,14 +219,8 @@ func (s *Service) UpdateSecretCAS(ctx context.Context, credentialID string, expe
 
 // Compatible reports whether an auth kind can drive the Agent runtime.
 func Compatible(agentRuntime, authKind string) bool {
-	switch strings.ToLower(strings.TrimSpace(agentRuntime)) {
-	case string(runtimekind.Codex):
-		return authKind == AuthKindOpenAIAPIKey || authKind == AuthKindOpenAICodexOAuth
-	case string(runtimekind.ClaudeCode):
-		return authKind == AuthKindAnthropicAPIKey || authKind == AuthKindClaudeCodeOAuth
-	default:
-		return false
-	}
+	spec, ok := authKinds[authKind]
+	return ok && string(spec.runtime) == normalize(agentRuntime)
 }
 
 func (s *Service) botAgentRow(ctx context.Context, botID, botAgentID string) (dbsqlc.GetBotAgentCredentialRow, error) {
@@ -298,24 +291,20 @@ func (s *Service) decrypt(ciphertext, nonce []byte, keyVersion int32) (map[strin
 // ProviderForAuthKind maps an auth kind to its provider so API callers only
 // submit the kind.
 func ProviderForAuthKind(kind string) string {
-	want := map[string]string{AuthKindOpenAIAPIKey: ProviderOpenAI, AuthKindOpenAICodexOAuth: ProviderOpenAI, AuthKindAnthropicAPIKey: ProviderAnthropic, AuthKindClaudeCodeOAuth: ProviderAnthropic}
-	return want[normalize(kind)]
+	return authKinds[normalize(kind)].provider
 }
 
 func validProviderKind(provider, kind string) bool {
-	want := map[string]string{AuthKindOpenAIAPIKey: ProviderOpenAI, AuthKindOpenAICodexOAuth: ProviderOpenAI, AuthKindAnthropicAPIKey: ProviderAnthropic, AuthKindClaudeCodeOAuth: ProviderAnthropic}
-	return want[kind] == provider
+	spec, ok := authKinds[kind]
+	return ok && spec.provider == provider
 }
 
 func validSecret(kind string, secret map[string]string) bool {
-	required := []string{"api_key"}
-	if kind == AuthKindOpenAICodexOAuth {
-		required = []string{"access_token", "id_token", "refresh_token", "account_id"}
+	spec, ok := authKinds[kind]
+	if !ok {
+		return false
 	}
-	if kind == AuthKindClaudeCodeOAuth {
-		required = []string{"oauth_token"}
-	}
-	for _, key := range required {
+	for _, key := range spec.secret {
 		if strings.TrimSpace(secret[key]) == "" {
 			return false
 		}
@@ -324,17 +313,11 @@ func validSecret(kind string, secret map[string]string) bool {
 }
 
 func defaultLabel(kind string, meta map[string]any) string {
-	switch kind {
-	case AuthKindOpenAICodexOAuth:
-		if account, ok := meta["account_id"].(string); ok && account != "" {
-			return "ChatGPT " + account
-		}
-		return "ChatGPT"
-	case AuthKindClaudeCodeOAuth:
-		return "Claude Code"
-	default:
-		return "API key"
+	label := authKinds[kind].label
+	if account, ok := meta["account_id"].(string); ok && account != "" {
+		return label + " " + account
 	}
+	return label
 }
 
 func normalize(v string) string { return strings.ToLower(strings.TrimSpace(v)) }

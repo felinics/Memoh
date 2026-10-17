@@ -154,7 +154,7 @@ func (d *Driver) cachedStatus(input external.PromptInput) map[string]any {
 	window := input.RuntimeMetadata["codex_context_window"]
 	var limits any
 	if d.servers != nil {
-		if resource := d.servers.peek(serverKey(input.BotID, input.BotAgentID)); resource != nil {
+		if resource := d.servers.Peek(serverKey(input.BotID, input.BotAgentID)); resource != nil {
 			srv := resource.(*appServer)
 			srv.mu.Lock()
 			if status, ok := srv.threadStatus[threadID]; ok {

@@ -4462,17 +4462,9 @@ func newSessionHarnessName(spec NewSessionSpec, agentName string, profiles turn.
 		}
 		return "ACP"
 	case sessionpkg.IsDirectRuntimeType(spec.Runtime):
-		if name, ok := directRuntimeNames[spec.Runtime]; ok {
-			return name
-		}
-		return spec.Runtime
+		return runtimekind.DisplayName(spec.Runtime)
 	}
 	return ""
-}
-
-var directRuntimeNames = map[string]string{
-	string(runtimekind.Codex):      "Codex",
-	string(runtimekind.ClaudeCode): "Claude Code",
 }
 
 // newSessionAgentName is the Name of the Agent a /new session runs on. /new

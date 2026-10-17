@@ -219,6 +219,19 @@ func TestImportStateItemErr(t *testing.T) {
 	}
 }
 
+func TestRestoredMessageRuntimeTypeNeverStoresUnknownKind(t *testing.T) {
+	for _, tc := range []struct{ raw, sessionRuntime, want string }{
+		{" claude-code ", "model", "claude-code"},
+		{"from-a-newer-server", "codex", "codex"},
+		{"", "acp_agent", "acp_agent"},
+		{"from-a-newer-server", "", "model"},
+	} {
+		if got := restoredMessageRuntimeType(tc.raw, tc.sessionRuntime); got != tc.want {
+			t.Fatalf("restoredMessageRuntimeType(%q, %q) = %q, want %q", tc.raw, tc.sessionRuntime, got, tc.want)
+		}
+	}
+}
+
 func TestRestoredSessionDescriptorRejectsSystemACPRuntime(t *testing.T) {
 	// Schedule sessions may run through an ACP agent, while retired automation
 	// sessions are filtered before descriptor restoration.

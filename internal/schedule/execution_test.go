@@ -233,6 +233,12 @@ func TestNormalizeExecutionNewSessionRules(t *testing.T) {
 	if _, err := svc.normalizeExecution(ctx, execTestBotID, ExecutionConfig{ReasoningEffort: "extreme"}); err == nil {
 		t.Fatal("expected error: unknown native reasoning effort")
 	}
+	if _, err := svc.normalizeExecution(ctx, execTestBotID, ExecutionConfig{RuntimeType: "claude-code"}); err == nil {
+		t.Fatal("expected error: direct runtime claude-code without bot_agent_id")
+	}
+	if _, err := svc.normalizeExecution(ctx, execTestBotID, ExecutionConfig{RuntimeType: "unknown-kind"}); err == nil || !strings.Contains(err.Error(), "unknown runtime_type") {
+		t.Fatalf("error = %v, want unknown runtime_type rejection", err)
+	}
 	// "disable" is not a wire tier, so it is absent from the tier list, but it
 	// is the stored on/off value everywhere else reasoning is configured.
 	disabled, err := svc.normalizeExecution(ctx, execTestBotID, ExecutionConfig{ReasoningEffort: "disable"})

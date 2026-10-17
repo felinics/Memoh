@@ -243,12 +243,11 @@ import {
   type ACPAgentForm,
 } from '@/utils/acp'
 import {
-  BOT_AGENT_RUNTIME_CLAUDE_CODE,
-  BOT_AGENT_RUNTIME_CODEX,
   botAgentIcon,
   botAgentName,
   botAgentProvider,
   isDirectBotAgentConfigured,
+  isDirectBotAgentRuntime,
   normalizeBotAgentRuntime,
 } from '@/utils/bot-agent'
 
@@ -318,7 +317,7 @@ const selectedProfile = computed(() => {
 })
 const selectedDirectRuntime = computed(() => {
   const runtime = normalizeBotAgentRuntime(selectedAgent.value?.runtime)
-  return runtime === BOT_AGENT_RUNTIME_CODEX || runtime === BOT_AGENT_RUNTIME_CLAUDE_CODE ? runtime : ''
+  return isDirectBotAgentRuntime(runtime) ? runtime : ''
 })
 
 const selectedSetup = computed(() => setups[selectedID.value] ?? null)

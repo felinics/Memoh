@@ -1,15 +1,14 @@
 import { safeSessionGet, safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
 import type { BotCreateSettings } from '@/store/bot-create-progress'
+import { isDirectBotAgentRuntime, type DirectBotAgentRuntime } from '@/utils/bot-agent'
 
 const KEY = 'memoh:new-bot:authorization'
 const ONBOARDING_KEY = 'memoh:onboarding:creation'
 
-export type CreatedBotSessionRuntime = 'codex' | 'claude-code'
-
 // The Bot a create flow already produced. The bot row exists on the server as
 // soon as `bot_created` streams, so a refresh must resume on that Bot instead of
 // posting a second create (which would take another Bot slot or collide on the
-// name). Agent fields are only present for the direct Codex / Claude Code flows.
+// name). Agent fields are only present for the direct runtime flows.
 export interface CreatedBotSession {
   botId: string
   botName: string
@@ -17,13 +16,9 @@ export interface CreatedBotSession {
   avatarUrl?: string
   authorizationId?: string
   agentId?: string
-  runtime?: CreatedBotSessionRuntime
+  runtime?: DirectBotAgentRuntime
   setupError: string | null
   settings?: BotCreateSettings
-}
-
-function isRuntime(value: unknown): value is CreatedBotSessionRuntime {
-  return value === 'codex' || value === 'claude-code'
 }
 
 function optionalString(value: unknown): string | undefined {
@@ -37,7 +32,7 @@ export function readCreatedBotSession(onboarding = false): CreatedBotSession | n
     if (!value || typeof value.botId !== 'string' || !value.botId.trim()) return null
     // A saved Agent must name a supported direct runtime; anything else is a
     // stale shape from an older client and is dropped as a whole.
-    if (value.runtime !== undefined && !isRuntime(value.runtime)) return null
+    if (value.runtime !== undefined && !isDirectBotAgentRuntime(value.runtime)) return null
     if (value.agentId !== undefined && typeof value.agentId !== 'string') return null
     return {
       botId: value.botId,

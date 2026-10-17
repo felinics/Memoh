@@ -1,4 +1,5 @@
 import { normalizeAgentID } from '@/utils/external-agent'
+import { isDirectBotAgentRuntime } from '@/utils/bot-agent'
 import { safeSessionGet, safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from './constants'
 
@@ -42,7 +43,7 @@ function normalizeBotResult(value: unknown): OnboardingBotResult | null {
   return {
     botId,
     modelConfigured: candidate.modelConfigured === true,
-    ...(agentId && (botAgentId || agentId === 'codex' || agentId === 'claude-code') && {
+    ...(agentId && (botAgentId || isDirectBotAgentRuntime(agentId)) && {
       agent: {
         agentId,
         botAgentId,

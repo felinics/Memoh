@@ -35,6 +35,7 @@ Memoh/
 │   │   │   ├── external/       #       Neutral Driver port between the application layer and external runtimes
 │   │   │   ├── native/         #       Twilight AI native runtime, prompts, streaming, hooks, and guards
 │   │   │   ├── agentstate/     #       External Agent session publication heads and state storage port
+│   │   │   ├── servertable/    #       Shared agent-process table for direct runtimes
 │   │   │   ├── session/        #       Per-thread runtime state and control
 │   │   │   └── toolmount/      #       Memoh tool gateway mounts for direct runtimes
 │   │   ├── sessionmode/        #     Session mode resolution

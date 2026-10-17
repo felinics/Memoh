@@ -12,8 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 const (
@@ -229,6 +231,64 @@ func TestACPRejectsDirectRuntimeProviders(t *testing.T) {
 			t.Fatalf("DescriptorFor(%s) error = %v, want ErrProviderDirectRuntime", provider, err)
 		}
 	}
+}
+
+func TestDirectRuntimeCredentialContract(t *testing.T) {
+	tests := []struct {
+		runtime  string
+		metadata map[string]any
+		// authKind is the credential the configuration needs; empty with
+		// configured=true means it runs without a stored credential.
+		authKind   string
+		configured bool
+	}{
+		{RuntimeCodex, map[string]any{"auth": "api_key"}, agentcredential.AuthKindOpenAIAPIKey, true},
+		{RuntimeCodex, map[string]any{"auth": "chatgpt"}, agentcredential.AuthKindOpenAICodexOAuth, true},
+		{RuntimeClaudeCode, map[string]any{"auth": "api_key"}, agentcredential.AuthKindAnthropicAPIKey, true},
+		{RuntimeClaudeCode, map[string]any{"auth": "oauth_token"}, agentcredential.AuthKindClaudeCodeOAuth, true},
+		{RuntimeClaudeCode, map[string]any{"auth": "workspace"}, "", true},
+		{RuntimeCodex, map[string]any{"auth": "oauth"}, "", false},
+	}
+	for runtime := range directRuntimes {
+		if !runtimekind.IsDirect(runtime) {
+			t.Fatalf("directRuntimes has %q, which is not a direct runtime kind", runtime)
+		}
+	}
+	for _, tc := range tests {
+		agent := BotAgent{ID: testAgentID, Runtime: tc.runtime, Metadata: tc.metadata}
+		name := tc.runtime + "/" + tc.metadata["auth"].(string)
+		if got, want := AcceptsCredential(agent, tc.authKind), tc.configured && tc.authKind != ""; got != want {
+			t.Fatalf("%s: AcceptsCredential(%q) = %t, want %t", name, tc.authKind, got, want)
+		}
+		if AcceptsCredential(agent, "other_kind") {
+			t.Fatalf("%s: accepted a foreign credential kind", name)
+		}
+		wantField := map[bool]string{true: "", false: "auth"}[tc.configured]
+		if got := configurationErrorField(ValidateConfigurationWithStore(agent, nil, tc.authKind)); got != wantField {
+			t.Fatalf("%s: configuration error field = %q, want %q", name, got, wantField)
+		}
+		if tc.configured {
+			if got := configurationErrorField(ValidateConfigurationWithStore(agent, nil, "other_kind")); got != "agent_credential_id" {
+				t.Fatalf("%s: foreign credential error field = %q, want agent_credential_id", name, got)
+			}
+		}
+	}
+
+	_, err := DescriptorFor(BotAgent{Runtime: RuntimeClaudeCode, Metadata: map[string]any{"permission_mode": "yolo"}})
+	if !errors.Is(err, ErrInvalidMetadata) {
+		t.Fatalf("DescriptorFor(claude-code, codex permission mode) error = %v, want ErrInvalidMetadata", err)
+	}
+}
+
+func configurationErrorField(err error) string {
+	var configErr *ConfigurationError
+	if errors.As(err, &configErr) {
+		return configErr.Field
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 func testRow(enabled bool) sqlc.BotAgent {

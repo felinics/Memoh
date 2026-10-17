@@ -32,7 +32,7 @@ import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { defaultAclPreset } from '@/constants/acl-presets'
 import { randomCatName } from '@/constants/bot-name-presets'
 import { externalAgentDisplayName } from '@/utils/external-agent'
-import { BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, directBotAgentMetadata } from '@/utils/bot-agent'
+import { directBotAgentMetadata, isDirectBotAgentRuntime } from '@/utils/bot-agent'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
@@ -126,7 +126,7 @@ const account = ref({ ready: false, busy: false, id: '', auth: '' })
 const accountPanel = ref<InstanceType<typeof AgentAuthorization> | null>(null)
 const selectedDirectRuntime = computed(() => {
   const value = agentType.value
-  return value === BOT_AGENT_RUNTIME_CODEX || value === BOT_AGENT_RUNTIME_CLAUDE_CODE ? value : ''
+  return isDirectBotAgentRuntime(value) ? value : ''
 })
 const onboardingProviderId = readOnboardingProviderId()
 

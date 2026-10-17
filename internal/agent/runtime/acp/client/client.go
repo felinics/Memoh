@@ -209,6 +209,15 @@ type clientCallbacks struct {
 	// quirks carries the per-agent title heuristics (profile owns them);
 	// the zero value behaves like the defaults.
 	quirks acpprofile.ToolQuirks
+	// mcpToolCall decodes the MCP server and tool from a permission request's
+	// raw input when the agent encodes them its own way.
+	mcpToolCall func(rawInput any) (serverName, toolName string, ok bool)
+	// runtimeOwnsApproval sends approvals straight to the user, skipping
+	// Memoh's policy (SessionConfig.RuntimeOwnsApproval).
+	runtimeOwnsApproval bool
+	// userQuestions answers the agent's own question requests
+	// (SessionConfig.UserQuestions).
+	userQuestions *UserQuestionCodec
 	// decisions counts in-flight permission/Form callbacks. ACP dispatches
 	// inbound requests on connection-scoped goroutines that survive prompt
 	// cancellation, so a cancelled turn waits on this gauge before the runtime
@@ -679,13 +688,17 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		state = c.toolMapper.waitForPermissionState(waitCtx, p.SessionId, p.ToolCall, genericPermissionStateReady)
 		cancelWait()
 	}
-	if err := c.validatePermissionScope(state); err != nil {
+	// An agent that owns approval acts outside the workspace unasked in its
+	// other modes, so refusing only what it asks about would not keep it in;
+	// what it does ask, the user decides.
+	if err := c.validatePermissionScope(state); err != nil && !c.runtimeOwnsApproval {
 		// Security-relevant rejection: an agent asked to act outside the
 		// workspace root. Log it (an agent probing the boundary is exactly what
 		// we want visibility into) before refusing.
 		if c.logger != nil {
 			c.logger.WarnContext(ctx, "rejecting out-of-scope ACP permission request", slog.Any("error", err))
 		}
+		c.toolMapper.refuse(p.SessionId, p.ToolCall.ToolCallId, err.Error())
 		return rejectOncePermission(p), nil
 	}
 	// Consent is never a policy shortcut. ACP adapters encode fallback
@@ -696,7 +709,7 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 	consentShaped := isConsentShapedPermission(state)
 	forceReview := consentShaped
 	mcpShaped := false
-	if preflight, ok := mcpPermissionPreflightFromState(state); ok {
+	if preflight, ok := c.mcpPreflight(state); ok {
 		mcpShaped = true
 		if !forceReview && c.allowsMemohMCPToolPreflight(ctx, preflight) {
 			return allowWithGuard()
@@ -781,6 +794,7 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		// was no user decision to report, and answering with reject_once
 		// would invite an unattended agent to retry-loop against
 		// auto-rejections no user made.
+		c.toolMapper.refuse(p.SessionId, p.ToolCall.ToolCallId, firstNonEmptyString(result.DecisionReason, result.Status))
 		return cancelledPermission(), nil
 	}
 	resp := allowOncePermission(p)
@@ -917,7 +931,11 @@ func (c *clientCallbacks) requireToolApproval(ctx context.Context, toolCallID, t
 		return c.cancelApprovalOnAbort(ctx, req, reason)
 	}
 	ctx = runtimefence.WithContext(ctx, session.RuntimeFence)
-	return toolapproval.RunFlow(ctx, c.approval, toolapproval.FlowRequest{
+	run := toolapproval.RunFlow
+	if c.runtimeOwnsApproval {
+		run = toolapproval.RunRuntimeFlow
+	}
+	return run(ctx, c.approval, toolapproval.FlowRequest{
 		Input: toolapproval.CreatePendingInput{
 			BotID:                        session.BotID,
 			SessionID:                    session.SessionID,
@@ -1238,7 +1256,26 @@ const (
 	// Codex ACP reports MCP calls as execute-kind tool updates with a title of
 	// "mcp.<server>.<tool>" and structured server/tool/arguments raw input.
 	mcpPermissionShapeStructuredState = "structured_state"
+	// The session supplied its own decoder (SessionConfig.MCPToolCall).
+	mcpPermissionShapeSessionDecoder = "session_decoder"
 )
+
+// mcpPreflight asks the session's own decoder first: an agent may name the
+// MCP server and tool of a permission request in a way no shared shape covers.
+func (c *clientCallbacks) mcpPreflight(state *acpToolState) (mcpPermissionPreflight, bool) {
+	if c.mcpToolCall != nil && state != nil {
+		if serverName, toolName, ok := c.mcpToolCall(state.input); ok {
+			return mcpPermissionPreflight{
+				toolName:        toolName,
+				serverName:      serverName,
+				hasToolName:     true,
+				supportedMethod: true,
+				shape:           mcpPermissionShapeSessionDecoder,
+			}, true
+		}
+	}
+	return mcpPermissionPreflightFromState(state)
+}
 
 func mcpPermissionPreflightFromState(state *acpToolState) (mcpPermissionPreflight, bool) {
 	if state == nil {

@@ -13,7 +13,7 @@ import {
 } from '@memohai/sdk'
 import {
   BOT_AGENT_RUNTIME_CLAUDE_CODE,
-  BOT_AGENT_RUNTIME_CODEX,
+  isDirectBotAgentRuntime,
 } from '@/utils/bot-agent'
 
 const ACP_SESSION_RUNTIME = 'acp_agent'
@@ -104,11 +104,10 @@ export function useAgentModelCatalog(options: UseAgentModelCatalogOptions) {
   const botId = computed(() => toValue(options.botId)?.trim() ?? '')
   const botAgentId = computed(() => toValue(options.botAgentId)?.trim() ?? '')
   const projectPath = computed(() => runtime.value === BOT_AGENT_RUNTIME_CLAUDE_CODE ? toValue(options.projectPath)?.trim() ?? '' : '')
-  const isNative = computed(() => ![
-    ACP_SESSION_RUNTIME,
-    BOT_AGENT_RUNTIME_CODEX,
-    BOT_AGENT_RUNTIME_CLAUDE_CODE,
-  ].includes(runtime.value))
+  const source = computed(() => runtime.value === ACP_SESSION_RUNTIME
+    ? 'acp'
+    : isDirectBotAgentRuntime(runtime.value) ? 'direct' : 'native')
+  const isNative = computed(() => source.value === 'native')
 
   const nativeModelsQuery = useQuery({
     key: ['models'],
@@ -141,7 +140,7 @@ export function useAgentModelCatalog(options: UseAgentModelCatalogOptions) {
       })
       return { target, catalog: data }
     },
-    enabled: () => [BOT_AGENT_RUNTIME_CODEX, BOT_AGENT_RUNTIME_CLAUDE_CODE].includes(runtime.value) && !!botId.value && !!botAgentId.value,
+    enabled: () => source.value === 'direct' && !!botId.value && !!botAgentId.value,
     refetchOnWindowFocus: false,
     // Keep the same Agent's capabilities visible while resolving another
     // model's defaults; never carry a catalog across workspaces or Agents.
@@ -150,8 +149,8 @@ export function useAgentModelCatalog(options: UseAgentModelCatalogOptions) {
 
   const nativeModels = computed<ModelsGetResponse[]>(() => nativeModelsQuery.data.value ?? [])
   const catalog = computed<AgentModelCatalog>(() => {
-    switch (runtime.value) {
-      case ACP_SESSION_RUNTIME:
+    switch (source.value) {
+      case 'acp':
         return {
           models: normalizePickerModels(toValue(options.acpModels)),
           providers: [],
@@ -161,8 +160,7 @@ export function useAgentModelCatalog(options: UseAgentModelCatalogOptions) {
           defaultReasoningEffort: '',
           reasoningEfforts: toValue(options.acpReasoningEfforts),
         }
-      case BOT_AGENT_RUNTIME_CODEX:
-      case BOT_AGENT_RUNTIME_CLAUDE_CODE:
+      case 'direct':
         return externalCatalog(directQuery.data.value?.target === directScope.value ? directQuery.data.value.catalog : undefined, selectedModelId.value)
       default:
         return {
@@ -177,22 +175,20 @@ export function useAgentModelCatalog(options: UseAgentModelCatalogOptions) {
   })
 
   const isLoading = computed(() => {
-    switch (runtime.value) {
-      case ACP_SESSION_RUNTIME:
+    switch (source.value) {
+      case 'acp':
         return toValue(options.acpLoading)
-      case BOT_AGENT_RUNTIME_CODEX:
-      case BOT_AGENT_RUNTIME_CLAUDE_CODE:
+      case 'direct':
         return directQuery.isLoading.value
       default:
         return nativeModelsQuery.isLoading.value || nativeProvidersQuery.isLoading.value
     }
   })
   const error = computed(() => {
-    switch (runtime.value) {
-      case BOT_AGENT_RUNTIME_CODEX:
-      case BOT_AGENT_RUNTIME_CLAUDE_CODE:
+    switch (source.value) {
+      case 'direct':
         return directQuery.error.value
-      case ACP_SESSION_RUNTIME:
+      case 'acp':
         return null
       default:
         return nativeModelsQuery.error.value ?? nativeProvidersQuery.error.value
@@ -200,12 +196,11 @@ export function useAgentModelCatalog(options: UseAgentModelCatalogOptions) {
   })
 
   async function refresh() {
-    switch (runtime.value) {
-      case ACP_SESSION_RUNTIME:
+    switch (source.value) {
+      case 'acp':
         await options.refreshACP?.()
         return
-      case BOT_AGENT_RUNTIME_CODEX:
-      case BOT_AGENT_RUNTIME_CLAUDE_CODE:
+      case 'direct':
         await directQuery.refetch()
         return
       default:

@@ -52,6 +52,47 @@ func directRuntimeForProvider(provider string) (string, bool) {
 	return "", false
 }
 
+// directRuntime keeps the per-runtime rules in one table so a new direct
+// runtime adds an entry instead of a case in every switch; an empty
+// credentialAuthKind means the auth mode needs no stored credential.
+type directRuntime struct {
+	validPermissionMode func(string) bool
+	credentialAuthKind  func(metadata map[string]any) (string, error)
+}
+
+var directRuntimes = map[string]directRuntime{
+	RuntimeCodex: {
+		validPermissionMode: codexcfg.ValidPermissionMode,
+		credentialAuthKind: func(metadata map[string]any) (string, error) {
+			cfg, err := codexcfg.ParseAgentConfig(metadata)
+			if err != nil {
+				return "", err
+			}
+			if cfg.Auth == codexcfg.AuthAPIKey {
+				return agentcredential.AuthKindOpenAIAPIKey, nil
+			}
+			return agentcredential.AuthKindOpenAICodexOAuth, nil
+		},
+	},
+	RuntimeClaudeCode: {
+		validPermissionMode: claudecfg.ValidPermissionMode,
+		credentialAuthKind: func(metadata map[string]any) (string, error) {
+			cfg, err := claudecfg.ParseAgentConfig(metadata)
+			if err != nil {
+				return "", err
+			}
+			switch cfg.Auth {
+			case claudecfg.AuthAPIKey:
+				return agentcredential.AuthKindAnthropicAPIKey, nil
+			case claudecfg.AuthOAuthToken:
+				return agentcredential.AuthKindClaudeCodeOAuth, nil
+			default:
+				return "", nil
+			}
+		},
+	},
+}
+
 type ConfigurationError struct {
 	Field string
 }
@@ -462,32 +503,12 @@ func DescriptorFor(agent BotAgent) (Descriptor, error) {
 }
 
 func AcceptsCredential(agent BotAgent, authKind string) bool {
-	switch agent.Runtime {
-	case RuntimeCodex:
-		cfg, err := codexcfg.ParseAgentConfig(agent.Metadata)
-		if err != nil {
-			return false
-		}
-		if cfg.Auth == codexcfg.AuthAPIKey {
-			return authKind == agentcredential.AuthKindOpenAIAPIKey
-		}
-		return authKind == agentcredential.AuthKindOpenAICodexOAuth
-	case RuntimeClaudeCode:
-		cfg, err := claudecfg.ParseAgentConfig(agent.Metadata)
-		if err != nil {
-			return false
-		}
-		switch cfg.Auth {
-		case claudecfg.AuthAPIKey:
-			return authKind == agentcredential.AuthKindAnthropicAPIKey
-		case claudecfg.AuthOAuthToken:
-			return authKind == agentcredential.AuthKindClaudeCodeOAuth
-		default:
-			return false
-		}
-	default:
+	direct, ok := directRuntimes[agent.Runtime]
+	if !ok {
 		return false
 	}
+	expected, err := direct.credentialAuthKind(agent.Metadata)
+	return err == nil && expected != "" && authKind == expected
 }
 
 // ValidateConfigurationWithStore validates the instance's configuration
@@ -498,8 +519,7 @@ func ValidateConfigurationWithStore(agent BotAgent, botMetadata map[string]any, 
 	if err != nil {
 		return err
 	}
-	switch descriptor.Runtime {
-	case RuntimeACP:
+	if descriptor.Runtime == RuntimeACP {
 		profile, ok := acpprofile.Lookup(descriptor.Provider)
 		if !ok {
 			return ErrInvalidMetadata
@@ -509,37 +529,19 @@ func ValidateConfigurationWithStore(agent BotAgent, botMetadata map[string]any, 
 			return &ConfigurationError{Field: field.ID}
 		}
 		return nil
-	case RuntimeCodex:
-		if _, err := codexcfg.ParseAgentConfig(agent.Metadata); err != nil {
-			return &ConfigurationError{Field: "auth"}
-		}
-		expected := agentcredential.AuthKindOpenAICodexOAuth
-		if cfg, _ := codexcfg.ParseAgentConfig(agent.Metadata); cfg.Auth == codexcfg.AuthAPIKey {
-			expected = agentcredential.AuthKindOpenAIAPIKey
-		}
-		if credentialAuthKind != expected {
-			return &ConfigurationError{Field: "agent_credential_id"}
-		}
-		return nil
-	case RuntimeClaudeCode:
-		cfg, err := claudecfg.ParseAgentConfig(agent.Metadata)
-		if err != nil {
-			return &ConfigurationError{Field: "auth"}
-		}
-		expected := ""
-		switch cfg.Auth {
-		case claudecfg.AuthAPIKey:
-			expected = agentcredential.AuthKindAnthropicAPIKey
-		case claudecfg.AuthOAuthToken:
-			expected = agentcredential.AuthKindClaudeCodeOAuth
-		}
-		if credentialAuthKind != expected {
-			return &ConfigurationError{Field: "agent_credential_id"}
-		}
-		return nil
-	default:
+	}
+	direct, ok := directRuntimes[descriptor.Runtime]
+	if !ok {
 		return ErrInvalidRuntime
 	}
+	expected, err := direct.credentialAuthKind(agent.Metadata)
+	if err != nil {
+		return &ConfigurationError{Field: "auth"}
+	}
+	if credentialAuthKind != expected {
+		return &ConfigurationError{Field: "agent_credential_id"}
+	}
+	return nil
 }
 
 func normalizeDescriptor(runtime string, metadata map[string]any) (string, map[string]any, error) {
@@ -577,21 +579,15 @@ func normalizeDescriptor(runtime string, metadata map[string]any) (string, map[s
 			}
 		}
 		return runtime, normalized, nil
-	case RuntimeCodex, RuntimeClaudeCode:
-		if runtime == RuntimeClaudeCode {
-			if value, exists := metadata["permission_mode"]; exists {
-				mode, ok := value.(string)
-				if !ok || !claudecfg.ValidPermissionMode(mode) {
-					return "", nil, ErrInvalidMetadata
-				}
-			}
+	default:
+		direct, ok := directRuntimes[runtime]
+		if !ok {
+			return "", nil, ErrInvalidRuntime
 		}
-		if runtime == RuntimeCodex {
-			if value, exists := metadata["permission_mode"]; exists {
-				mode, ok := value.(string)
-				if !ok || !codexcfg.ValidPermissionMode(mode) {
-					return "", nil, ErrInvalidMetadata
-				}
+		if value, exists := metadata["permission_mode"]; exists {
+			mode, ok := value.(string)
+			if !ok || !direct.validPermissionMode(mode) {
+				return "", nil, ErrInvalidMetadata
 			}
 		}
 		normalized := make(map[string]any, len(metadata)+1)
@@ -607,8 +603,6 @@ func normalizeDescriptor(runtime string, metadata map[string]any) (string, map[s
 		// provider lookup) — migrated rows already carry the same value.
 		normalized[MetadataProviderKey] = runtime
 		return runtime, normalized, nil
-	default:
-		return "", nil, ErrInvalidRuntime
 	}
 }
 

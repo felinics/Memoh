@@ -142,7 +142,7 @@
                         :can-retry-latest-assistant="isRetryableTurn(msg)"
                         :can-edit-latest-user="isEditableTurn(msg)"
                         :can-fork-assistant="isForkableTurn(msg)"
-                        :inline-actions="activeChatTarget.runtimeType === BOT_AGENT_RUNTIME_CODEX"
+                        :inline-actions="isDirectBotAgentRuntime(activeChatTarget.runtimeType)"
                         :goal-runtime="activeChatTarget.runtimeType"
                         :is-scrolling="isScrolling"
                         :is-last-message="msg.id === lastMessageId"
@@ -1320,6 +1320,7 @@ import { useComposerPlacementMotion } from '../composables/useComposerPlacementM
 import { useQueueTurnAnchors } from '../composables/useQueueTurnAnchors'
 import { isRuntimeContinuationUserTurn, isRuntimeSteerUserTurn } from '@/store/chat/types'
 import { resolveCommandErrorMessage } from '@/store/chat/messages'
+import { isAgentRuntimeType } from '@/store/chat-list.utils'
 import BgTaskPill from './bg-task-pill.vue'
 import ForkSourceDivider from './fork-source-divider.vue'
 import ChatForkDialog from './chat-fork-dialog.vue'
@@ -1358,7 +1359,7 @@ import { useACPRuntime } from '@/composables/useACPRuntime'
 import { useAgentModelCatalog } from '@/composables/useAgentModelCatalog'
 import { useVirtualKeyboard } from '@/composables/useVirtualKeyboard'
 import { isACPAgentConfigured } from '@/utils/acp'
-import { BOT_AGENT_RUNTIME_ACP, BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, botAgentIcon, botAgentName, botAgentProvider, isDirectBotAgentConfigured, normalizeBotAgentRuntime } from '@/utils/bot-agent'
+import { BOT_AGENT_RUNTIME_ACP, BOT_AGENT_RUNTIME_CODEX, botAgentIcon, botAgentName, botAgentProvider, isDirectBotAgentConfigured, isDirectBotAgentRuntime, normalizeBotAgentRuntime } from '@/utils/bot-agent'
 import { UserFacingError, isApiErrorCode, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
 import { workspaceTargetAvailable } from '@/utils/workspace-target'
@@ -1575,13 +1576,15 @@ const { items: pendingApprovals } = usePendingApprovals(messages)
 
 const hasPendingToolApproval = computed(() => pendingApprovals.value.length > 0)
 
+// A direct runtime's turn says itself whether it can anchor a fork
+// (runtimeForkable, below): only turns whose runtime recorded an anchor can.
 const canForkAssistant = computed(() =>
   !streaming.value
   && !loadingMessages.value
   && !activeChatReadOnly.value
   && activeChatCanFork.value
   && (activeChatTarget.value.runtimeType === 'model'
-    || activeChatTarget.value.runtimeType === BOT_AGENT_RUNTIME_CODEX),
+    || isDirectBotAgentRuntime(activeChatTarget.value.runtimeType)),
 )
 
 function isForkableTurn(message: ChatMessage): boolean {
@@ -1947,8 +1950,7 @@ const activeUsesACPRuntime = computed(() => (
 const activeDirectRuntime = computed(() => {
   if (!activeUsesExternalAgentComposer.value) return ''
   const runtime = activeChatTarget.value.runtimeType
-  if (runtime === BOT_AGENT_RUNTIME_CODEX || runtime === BOT_AGENT_RUNTIME_CLAUDE_CODE) return runtime
-  return ''
+  return isDirectBotAgentRuntime(runtime) ? runtime : ''
 })
 const activeUsesDirectRuntime = computed(() => activeDirectRuntime.value !== '')
 // For external agents Memoh only sees the part of the context it injects, so
@@ -2801,7 +2803,7 @@ const defaultExternalAgentAvailability = computed<DefaultExternalAgentAvailabili
   if (!settings) {
     return { input: null, messageKey: '', loading: !!currentBotId.value && botSettingsLoading.value }
   }
-  if (settings.chat_runtime !== 'acp_agent' && settings.chat_runtime !== 'codex' && settings.chat_runtime !== 'claude-code') return { input: null, messageKey: '', loading: false }
+  if (!isAgentRuntimeType(settings.chat_runtime)) return { input: null, messageKey: '', loading: false }
   if (!hasBotPermission(currentBot.value?.current_user_permissions, 'workspace_exec')) {
     return { input: null, messageKey: 'chat.defaultAgentNoWorkspaceExec', loading: false }
   }

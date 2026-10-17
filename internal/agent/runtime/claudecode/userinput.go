@@ -3,23 +3,12 @@ package claudecode
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
 )
-
-type claudeQuestion struct {
-	Question    string `json:"question"`
-	MultiSelect bool   `json:"multiSelect"`
-	Options     []struct {
-		Label       string `json:"label"`
-		Description string `json:"description"`
-	} `json:"options"`
-}
 
 func (t *turnRunner) answerQuestions(ctx context.Context, requestID string, payload *controlRequestPayload) {
 	input, ok := t.collectAnswers(ctx, requestID, payload)
@@ -45,43 +34,22 @@ func (t *turnRunner) collectAnswers(ctx context.Context, requestID string, paylo
 		return nil, false
 	}
 	var input struct {
-		Questions []claudeQuestion `json:"questions"`
+		Questions []userinput.ChoiceQuestion `json:"questions"`
 	}
 	if json.Unmarshal(raw, &input) != nil || len(input.Questions) == 0 || len(input.Questions) > userinput.MaxQuestionsPerRequest {
 		return nil, false
 	}
-	questions := make([]any, 0, len(input.Questions))
-	for _, question := range input.Questions {
-		questions = append(questions, claudeQuestionPayload(question))
-	}
-	request, err := t.requestUserInput(ctx, firstNonEmpty(payload.ToolUseID, requestID), map[string]any{"questions": questions}, map[string]any{"source": "claude_request_user_input", "request_id": requestID})
+	request, err := t.requestUserInput(ctx, firstNonEmpty(payload.ToolUseID, requestID), userinput.ChoiceQuestionsInput(input.Questions), map[string]any{"source": "claude_request_user_input", "request_id": requestID})
 	if err != nil || request.Status != userinput.StatusSubmitted {
 		return nil, false
 	}
-	byID := map[string]userinput.UIAnswer{}
-	for _, answer := range userinput.AnswersFromResult(request.Result) {
-		byID[answer.QuestionID] = answer
+	picked, ok := userinput.ChoiceAnswers(request.Result, len(input.Questions))
+	if !ok {
+		return nil, false
 	}
 	answers := make(map[string]string, len(input.Questions))
 	for i, question := range input.Questions {
-		answer, ok := byID[fmt.Sprintf("q%d", i+1)]
-		if !ok || answer.Skipped {
-			return nil, false
-		}
-		var values []string
-		for _, selected := range answer.Selected {
-			values = append(values, selected.Label)
-		}
-		if text := strings.TrimSpace(answer.CustomText); text != "" {
-			values = append(values, text)
-		}
-		if text := strings.TrimSpace(answer.Text); text != "" {
-			values = append(values, text)
-		}
-		if len(values) == 0 {
-			return nil, false
-		}
-		answers[question.Question] = strings.Join(values, ", ")
+		answers[question.Text] = picked[i]
 	}
 	updated := make(map[string]any, len(payload.Input)+1)
 	for key, value := range payload.Input {
@@ -112,24 +80,6 @@ func (t *turnRunner) requestUserInput(ctx context.Context, callID string, input 
 		t.logger.ErrorContext(ctx, "claude user input failed", slog.Any("error", err))
 	}
 	return flow.Request, err
-}
-
-func claudeQuestionPayload(question claudeQuestion) map[string]any {
-	out := map[string]any{"text": question.Question, "kind": userinput.QuestionKindText}
-	if len(question.Options) < userinput.MinOptionsPerQuestion {
-		return out
-	}
-	options := make([]any, 0, len(question.Options))
-	for _, option := range question.Options[:min(len(question.Options), userinput.MaxOptionsPerQuestion)] {
-		options = append(options, map[string]any{"label": option.Label, "description": option.Description})
-	}
-	out["options"] = options
-	out["allow_custom"] = true
-	out["kind"] = userinput.QuestionKindSingleSelect
-	if question.MultiSelect {
-		out["kind"] = userinput.QuestionKindMultiSelect
-	}
-	return out
 }
 
 func (t *turnRunner) emitUserInputRequest(req userinput.Request) bool {

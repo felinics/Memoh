@@ -6,6 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"reflect"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -74,6 +77,33 @@ func (f *testCodexAuthorizer) ExchangeClaudeCodeAuthorization(ctx context.Contex
 
 func (*testCodexAuthorizer) StartOpenAICodexACPDeviceAuthorization(context.Context) (providers.OpenAICodexACPDeviceAuthorization, error) {
 	return providers.OpenAICodexACPDeviceAuthorization{DeviceAuthID: "PRIVATE-DEVICE-ID", UserCode: "123456", VerificationURL: "https://auth.openai.com/codex/device", IntervalSeconds: 5}, nil
+}
+
+func TestAuthorizationRuntimeEnumMatchesAuthKinds(t *testing.T) {
+	field, _ := reflect.TypeOf(AuthorizationRequest{}).FieldByName("Runtime")
+	advertised := strings.Split(field.Tag.Get("enums"), ",")
+	var known []string
+	for _, spec := range authKinds {
+		if runtime := string(spec.runtime); !slices.Contains(known, runtime) {
+			known = append(known, runtime)
+		}
+	}
+	slices.Sort(advertised)
+	slices.Sort(known)
+	if !slices.Equal(advertised, known) {
+		t.Fatalf("AuthorizationRequest.Runtime enums = %v, authKinds runtimes = %v", advertised, known)
+	}
+}
+
+func TestAPIKeyAuthorizationStagesTheNormalizedRuntime(t *testing.T) {
+	q := &authorizationQueries{}
+	creds := NewService(q, config.Config{Auth: config.AuthConfig{AgentCredentialsEncryptionKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))}})
+	svc := &AuthorizationService{credentials: creds}
+
+	session, err := svc.Create(context.Background(), uuid.NewString(), AuthorizationRequest{Runtime: " Claude-Code ", AuthKind: AuthKindAnthropicAPIKey, Secret: map[string]string{"api_key": "SECRET"}})
+	if err != nil || session.Status != "ready" || q.row.Runtime != "claude-code" {
+		t.Fatalf("Claude Code API key staging = %+v, stored runtime %q, err %v", session, q.row.Runtime, err)
+	}
 }
 
 func TestClaudeAuthorizationExchangeOwnershipRetryAndRedaction(t *testing.T) {

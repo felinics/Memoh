@@ -15,6 +15,7 @@ const (
 	// runtime (runtimekind.UsesDecisionWaiter), the same as tool approvals.
 	ProviderSourceACPMCP           = "acp_mcp"
 	ProviderSourceACPElicitation   = "acp_elicitation"
+	ProviderSourceACPAgentQuestion = "acp_agent_question"
 	ProviderSourceCodexUserInput   = "codex_request_user_input"
 	ProviderSourceCodexElicitation = "codex_mcp_elicitation"
 

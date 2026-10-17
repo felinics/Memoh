@@ -274,7 +274,7 @@
       "turn_replacement_unsupported": "外部 Agent 会话不支持重试或编辑，请改为发送一条新消息。"
     },
     "external_runtime": {
-      "auth_required": "Codex 账号未连接或登录已失效。请前往 Agent 设置连接 ChatGPT，或配置 API Key。",
+      "auth_required": "这个 Agent 尚未登录，或它的凭据被拒绝。请前往 Agent 设置重新登录，或更新 API Key。",
       "context_window_exceeded": "这个会话已超出模型的上下文长度上限。请压缩上下文，或新开一个会话。",
       "overloaded": "外部 Agent 的模型服务暂时不可用或过载。请稍后重试，或换一个模型。",
       "rate_limited": "外部 Agent 已达到模型服务的速率上限，请稍后再发送。",
@@ -2766,7 +2766,6 @@
       "defaultModelDescription": "可选。留空时由外部 Agent 选择默认模型；对话中仍可临时切换。",
       "defaultModelPlaceholder": "使用运行时默认模型",
       "account": "账号",
-      "chatgptAccount": "ChatGPT 账号",
       "chatgptAccountDescription": "Memoh 会加密保存此 Agent 的 ChatGPT 凭据，并仅在运行时提供给 Codex。",
       "chatgptAccountConnectedDescription": "此 Agent 的 ChatGPT 凭据已加密保存。",
       "reconnect": "重新连接",
