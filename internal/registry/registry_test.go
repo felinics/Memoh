@@ -527,3 +527,7 @@ func assertRegistrySource(t *testing.T, raw []byte, want string) {
 		t.Fatalf("registry source = %#v, want %q", registryMeta["source"], want)
 	}
 }
+
+func (*fakeQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
+}

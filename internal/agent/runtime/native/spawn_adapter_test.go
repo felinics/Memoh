@@ -76,7 +76,6 @@ func TestSpawnAdapterGenerateWithWatchdogFailsOnStreamError(t *testing.T) {
 		Model: &sdk.Model{
 			ID:       "spawn-preflight-error",
 			Provider: provider,
-			Type:     sdk.ModelTypeChat,
 		},
 		Query: "do the task",
 	}, func() {})
@@ -113,7 +112,6 @@ func TestSpawnAdapterGenerateFailureCarriesContextLifecycle(t *testing.T) {
 		Model: &sdk.Model{
 			ID:       "spawn-generate-preflight-error",
 			Provider: provider,
-			Type:     sdk.ModelTypeChat,
 		},
 		Query: "do the task",
 	})

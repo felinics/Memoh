@@ -27,14 +27,16 @@ func TestModel_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "valid chat model with compatibilities",
+			name: "valid chat model with capabilities",
 			model: models.Model{
 				ModelID:    "gpt-4o",
 				Name:       "GPT-4o",
 				ProviderID: "11111111-1111-1111-1111-111111111111",
 				Type:       models.ModelTypeChat,
 				Config: models.ModelConfig{
-					Compatibilities: []string{"vision", "tool-call", "reasoning"},
+					Modalities: &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityImage}, Output: []models.Modality{models.ModalityText}},
+					ToolCall:   true,
+					Reasoning:  &models.ModelReasoning{Efforts: []string{"low", "medium", "high"}},
 				},
 			},
 			wantErr: false,
@@ -47,7 +49,7 @@ func TestModel_Validate(t *testing.T) {
 				ProviderID: "11111111-1111-1111-1111-111111111111",
 				Type:       models.ModelTypeChat,
 				Config: models.ModelConfig{
-					ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max", "ultra"},
+					Reasoning: &models.ModelReasoning{Efforts: []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
 				},
 			},
 			wantErr: true,
@@ -107,13 +109,13 @@ func TestModel_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "invalid compatibility",
+			name: "invalid modality",
 			model: models.Model{
 				ModelID:    "gpt-4",
 				ProviderID: "11111111-1111-1111-1111-111111111111",
 				Type:       models.ModelTypeChat,
 				Config: models.ModelConfig{
-					Compatibilities: []string{"vision", "smell"},
+					Modalities: &models.ModelModalities{Input: []models.Modality{models.ModalityImage, "smell"}},
 				},
 			},
 			wantErr: true,
@@ -135,7 +137,9 @@ func TestModel_Validate(t *testing.T) {
 func TestModel_HasCompatibility(t *testing.T) {
 	m := models.Model{
 		Config: models.ModelConfig{
-			Compatibilities: []string{"vision", "tool-call", "reasoning"},
+			Modalities: &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityImage}, Output: []models.Modality{models.ModalityText}},
+			ToolCall:   true,
+			Reasoning:  &models.ModelReasoning{Efforts: []string{"low", "medium", "high"}},
 		},
 	}
 	assert.True(t, m.HasCompatibility("vision"))

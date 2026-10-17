@@ -236,3 +236,7 @@ func TestBuildCompactionConfigUsesTurnModelWhenNoOverride(t *testing.T) {
 		t.Fatalf("ModelID = %q, want the turn model slug", cfg.ModelID)
 	}
 }
+
+func (*compactionConfigQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
+}

@@ -293,3 +293,7 @@ func TestCompactionRunFailureShapes(t *testing.T) {
 	cause := errors.New("window=512 output_reserve=51 fixed_prompt=180")
 	assertInternalFailure(t, compactionRunFailure(cause), cause)
 }
+
+func (*compactionCapabilityQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
+}

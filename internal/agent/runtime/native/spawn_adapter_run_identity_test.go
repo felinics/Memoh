@@ -92,7 +92,6 @@ func TestSpawnAdapterGenerateWithWatchdogCarriesLifecycleSnapshot(t *testing.T) 
 			Model: &sdk.Model{
 				ID:       "spawn-lifecycle-model",
 				Provider: provider,
-				Type:     sdk.ModelTypeChat,
 			},
 			Query:       "do the task",
 			SessionType: sessionmode.Subagent,
@@ -145,7 +144,6 @@ func TestSpawnAdapterGenerateWithWatchdogClearsRecoveredStreamError(t *testing.T
 			Model: &sdk.Model{
 				ID:       "spawn-retry-model",
 				Provider: provider,
-				Type:     sdk.ModelTypeChat,
 			},
 			Query:       "recover the task",
 			SessionType: sessionmode.Subagent,
@@ -230,7 +228,7 @@ func TestSpawnAdapterGenerateWithWatchdogRejectsTextLoopAbort(t *testing.T) {
 	result, err := adapter.GenerateWithWatchdog(
 		outerCtx,
 		tools.SpawnRunConfig{
-			Model:         &sdk.Model{ID: "spawn-loop-model", Provider: provider, Type: sdk.ModelTypeChat},
+			Model:         &sdk.Model{ID: "spawn-loop-model", Provider: provider},
 			Query:         "loop the task",
 			SessionType:   sessionmode.Subagent,
 			LoopDetection: tools.SpawnLoopConfig{Enabled: true},
@@ -292,7 +290,7 @@ func TestSpawnAdapterGenerateWithWatchdogPreservesOwningCancellationCause(t *tes
 	_, err := adapter.GenerateWithWatchdog(
 		ctx,
 		tools.SpawnRunConfig{
-			Model:       &sdk.Model{ID: "spawn-canceled-model", Provider: provider, Type: sdk.ModelTypeChat},
+			Model:       &sdk.Model{ID: "spawn-canceled-model", Provider: provider},
 			Query:       "stop the task",
 			SessionType: sessionmode.Subagent,
 			Identity:    tools.SpawnIdentity{BotID: "bot-1", SessionID: "session-1", IsSubagent: true},
@@ -335,7 +333,7 @@ func TestSpawnAdapterGenerateWithWatchdogTreatsOtherContextCausesAsFailures(t *t
 	_, err := adapter.GenerateWithWatchdog(
 		ctx,
 		tools.SpawnRunConfig{
-			Model:       &sdk.Model{ID: "spawn-failed-model", Provider: provider, Type: sdk.ModelTypeChat},
+			Model:       &sdk.Model{ID: "spawn-failed-model", Provider: provider},
 			Query:       "fail the task",
 			SessionType: sessionmode.Subagent,
 			Identity:    tools.SpawnIdentity{BotID: "bot-1", SessionID: "session-1", IsSubagent: true},
@@ -361,7 +359,6 @@ func TestSpawnAdapterGenerateFailureCarriesLifecycleSnapshot(t *testing.T) {
 			Model: &sdk.Model{
 				ID:       "spawn-failure-model",
 				Provider: provider,
-				Type:     sdk.ModelTypeChat,
 			},
 			Query:       "do the task",
 			SessionType: sessionmode.Subagent,

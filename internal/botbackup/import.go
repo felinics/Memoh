@@ -761,6 +761,26 @@ type modelDependency struct {
 	Config     modelpkg.ModelConfig `json:"config"`
 }
 
+// UnmarshalJSON upgrades a config exported by an older version; see
+// modelpkg.DecodeModelConfig.
+func (d *modelDependency) UnmarshalJSON(data []byte) error {
+	type plain modelDependency
+	var body struct {
+		plain
+		Config json.RawMessage `json:"config"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		return err
+	}
+	*d = modelDependency(body.plain)
+	config, err := modelpkg.DecodeModelConfig(body.Config, modelpkg.ConfigContext{ModelID: d.ModelID, Type: d.Type})
+	if err != nil {
+		return err
+	}
+	d.Config = config
+	return nil
+}
+
 func (s *Service) importDependencies(ctx context.Context, state *importState) (dependencyMap, error) {
 	deps := newDependencyMap()
 	providers, _ := readEntry[[]providerpkg.GetResponse](state, "dependencies/providers.json")

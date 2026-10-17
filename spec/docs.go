@@ -25883,58 +25883,131 @@ const docTemplate = `{
                 }
             }
         },
+        "models.Modality": {
+            "type": "string",
+            "enum": [
+                "text",
+                "image",
+                "audio",
+                "video",
+                "pdf"
+            ],
+            "x-enum-varnames": [
+                "ModalityText",
+                "ModalityImage",
+                "ModalityAudio",
+                "ModalityVideo",
+                "ModalityPDF"
+            ]
+        },
         "models.ModelConfig": {
             "type": "object",
             "properties": {
                 "catalog_available": {
+                    "description": "CatalogAvailable is false when a managed catalog stopped listing the model.",
                     "type": "boolean"
                 },
-                "compatibilities": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
                 "context_window": {
+                    "description": "ContextWindow is the context window in tokens, input and output together.",
                     "type": "integer"
                 },
                 "description": {
                     "type": "string"
                 },
                 "dimensions": {
+                    "description": "Dimensions is the embedding vector size.",
                     "type": "integer"
                 },
                 "max_output_tokens": {
                     "description": "MaxOutputTokens is the most output tokens the model can produce in one\nresponse; nil means unknown. When set, every turn requests an explicit\nlimit within it.",
                     "type": "integer"
                 },
-                "reasoning_default_on": {
-                    "description": "ReasoningDefaultOn reports whether omitting the thinking field leaves the\nmodel thinking. Separate from off-ability: Claude 4.6 can be turned off *and*\ndefaults to off, while Opus 5 can be turned off but defaults to on, so\nomitting the field there keeps thinking running — billed, and invisible to a\nuser who believes they turned it off. nil means unknown.",
+                "modalities": {
+                    "$ref": "#/definitions/models.ModelModalities"
+                },
+                "reasoning": {
+                    "description": "Reasoning is nil when the model does not reason.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.ModelReasoning"
+                        }
+                    ]
+                },
+                "schema_version": {
+                    "description": "SchemaVersion is ModelConfigSchemaVersion on every config this version\nwrites.",
+                    "type": "integer"
+                },
+                "structured_output": {
+                    "description": "StructuredOutput reports support for a JSON schema response format.",
                     "type": "boolean"
                 },
-                "reasoning_dialect": {
-                    "description": "ReasoningDialect declares the wire shape of this model's thinking control,\nwhich cannot be inferred from the tiers it advertises: Gemini 2.5 takes a\ntoken budget while 3.x takes a named level, and the two are mutually\nexclusive on the same request. Declared per model because the alternative is\nsniffing the model id, and an id is not a capability. Empty leaves provider\npolicy in charge; Google's adaptor deliberately sends no thinking control so\npre-dialect rows retain their safe pre-upgrade request shape.",
+                "tool_call": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "models.ModelModalities": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Modality"
+                    }
+                },
+                "output": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Modality"
+                    }
+                }
+            }
+        },
+        "models.ModelReasoning": {
+            "type": "object",
+            "properties": {
+                "budget": {
+                    "description": "Budget is the reasoning token budget range; nil means no budget control.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.ReasoningBudget"
+                        }
+                    ]
+                },
+                "default": {
+                    "description": "Default is what the model does when a request sets no reasoning control.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.ReasoningDefault"
+                        }
+                    ]
+                },
+                "dialect": {
+                    "description": "Dialect is the request shape that carries the controls: tier, budget,\ntoggle, adaptive, or empty when not stated.",
                     "type": "string"
                 },
-                "reasoning_efforts": {
+                "efforts": {
+                    "description": "Efforts lists the effort levels the model accepts, weakest to strongest.\nTurning reasoning off is Off, not an effort.",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
-                "reasoning_off_support": {
-                    "description": "ReasoningOffSupport declares how the model answers an explicit request to\nstop thinking. Anthropic's per-model table splits models that share a\nthinking mode and an identical tier list, so this cannot be derived — see the\nreasoning package's OffSupport constants.",
+                "off": {
+                    "description": "Off is how the model answers a request to stop reasoning: accepted,\nlow_effort_only, rejected, or empty when not stated.",
                     "type": "string"
                 },
-                "thinking_budget_max": {
-                    "type": "integer"
+                "replay": {
+                    "description": "Replay is how a Chat Completions host reads reasoning back on replayed\nmessages; nil leaves the provider's compatibility mode in charge.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.ReasoningReplay"
+                        }
+                    ]
                 },
-                "thinking_budget_min": {
-                    "description": "ThinkingBudgetMin/Max bound the budget dialect. The range is per model\nfamily, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned\noff, while Flash starts at 0 and can.",
-                    "type": "integer"
-                },
-                "thinking_mode": {
-                    "type": "string"
+                "toggle": {
+                    "description": "Toggle reports a request field that turns reasoning on and off, separate\nfrom any effort level.",
+                    "type": "boolean"
                 }
             }
         },
@@ -25954,6 +26027,42 @@ const docTemplate = `{
                 "ModelTypeTranscription",
                 "ModelTypeVideo"
             ]
+        },
+        "models.ReasoningBudget": {
+            "type": "object",
+            "properties": {
+                "max": {
+                    "type": "integer"
+                },
+                "min": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.ReasoningDefault": {
+            "type": "object",
+            "properties": {
+                "budget": {
+                    "type": "integer"
+                },
+                "effort": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "models.ReasoningReplay": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string"
+                },
+                "required": {
+                    "type": "boolean"
+                }
+            }
         },
         "models.TestResponse": {
             "type": "object",

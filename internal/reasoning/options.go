@@ -38,6 +38,13 @@ func expressesOffByOmission(clientType string) bool {
 	return clientType == ClientTypeAnthropicMessages
 }
 
+// OffByOmission reports whether a protocol turns reasoning off by leaving the
+// thinking field out, so a switch advertised without a disable token can still
+// be turned off there.
+func OffByOmission(clientType string) bool {
+	return expressesOffByOmission(clientType)
+}
+
 // OptionsFor reports what a caller may select for a model.
 //
 // It shares effectiveEfforts and pickEffort with ResolveConfig on purpose: the

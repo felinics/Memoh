@@ -4,7 +4,7 @@ interface CompactionModelLike {
   enable?: boolean
   config?: {
     context_window?: number | null
-    compatibilities?: string[] | null
+    tool_call?: boolean | null
   } | null
 }
 
@@ -43,7 +43,7 @@ const IMAGE_MODEL_PREFIXES = [
 ]
 
 function isImageOnlyModel(model: CompactionModelLike): boolean {
-  if ((model.config?.compatibilities ?? []).includes('tool-call')) {
+  if (model.config?.tool_call) {
     return false
   }
   // The family name lives in the last path segment for namespaced IDs like

@@ -57,7 +57,6 @@ func TestAgentGeneratePreservesDeepSeekReasoningDisabled(t *testing.T) {
 		Model: &sdk.Model{
 			ID:       "deepseek-v4-flash",
 			Provider: provider,
-			Type:     sdk.ModelTypeChat,
 		},
 		ReasoningConfig:       &models.ReasoningConfig{Disabled: true},
 		ChatCompletionsCompat: models.ChatCompletionsCompatDeepSeek,

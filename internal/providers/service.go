@@ -477,6 +477,13 @@ func remoteModelsFromTemplate(def registry.ProviderDefinition) []RemoteModel {
 	return out
 }
 
+// listedModel is one entry of an endpoint's model listing.
+type listedModel struct {
+	ID          string
+	DisplayName string
+	Type        string
+}
+
 func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {
 	cfg := providerConfig(provider.Config)
 	baseURL := strings.TrimRight(configString(cfg, "base_url"), "/")
@@ -500,6 +507,20 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 	if err != nil {
 		return nil, errs.WrapDependency(err, "list models")
 	}
+	listed := make([]listedModel, 0, len(sdkModels))
+	for _, m := range sdkModels {
+		listed = append(listed, listedModel{ID: m.ID, DisplayName: m.DisplayName, Type: string(models.ModelTypeChat)})
+	}
+	// Google lists embedding models apart from chat models.
+	if clientType == models.ClientTypeGoogleGenerativeAI {
+		embeddingModels, err := models.ListGoogleEmbeddingModels(ctx, baseURL, creds.APIKey, probeTimeout, nil)
+		if err != nil {
+			return nil, errs.WrapDependency(err, "list embedding models")
+		}
+		for _, m := range embeddingModels {
+			listed = append(listed, listedModel{ID: m.ID, DisplayName: m.DisplayName, Type: string(models.ModelTypeEmbedding)})
+		}
+	}
 
 	// Best-effort capability lookup: template/catalog entries keyed by model ID
 	// enrich the models the endpoint actually serves; they never add, remove,
@@ -513,32 +534,27 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 
 	liveMaxOutput := fetchMaxOutputTokens(ctx, clientType, baseURL, creds.APIKey)
 
-	remoteModels := make([]RemoteModel, 0, len(sdkModels))
-	for _, m := range sdkModels {
+	remoteModels := make([]RemoteModel, 0, len(listed))
+	for _, m := range listed {
 		template, found := templatesByID[m.ID]
-		modelType := m.Type
+		modelType := models.ModelType(m.Type)
 		if found {
-			switch template.Type {
-			case string(sdk.ModelTypeChat), string(sdk.ModelTypeEmbedding):
+			switch models.ModelType(template.Type) {
+			case models.ModelTypeChat, models.ModelTypeEmbedding:
 				// List endpoints often lack real per-model types (the OpenAI
-				// protocol has none, so completions/responses hardcode chat);
-				// the curated template type wins for a known model ID, e.g.
-				// text-embedding-* must survive as embedding with dimensions.
-				modelType = sdk.ModelType(template.Type)
+				// protocol has none, so completions/responses list everything
+				// as chat); the curated template type wins for a known model
+				// ID, e.g. text-embedding-* must survive as embedding with
+				// dimensions.
+				modelType = models.ModelType(template.Type)
 			}
-		}
-		if modelType == "" {
-			modelType = sdk.ModelTypeChat
-		}
-		if modelType != sdk.ModelTypeChat && modelType != sdk.ModelTypeEmbedding {
-			continue
 		}
 		name := m.DisplayName
 		if name == "" {
 			name = m.ID
 		}
 		var dimensions *int
-		if modelType == sdk.ModelTypeEmbedding {
+		if modelType == models.ModelTypeEmbedding {
 			switch {
 			case found && template.Dimensions != nil:
 				// The template already curates this model's dimensions; a live

@@ -169,12 +169,17 @@ const (
 	// DialectBudget sends a token budget: Anthropic <=4.5 budget_tokens, Gemini
 	// 2.5 thinkingBudget.
 	DialectBudget = "budget"
+	// DialectAdaptive turns on adaptive thinking and steers depth with an effort
+	// level: Anthropic thinking.type "adaptive" on Claude 4.6 and later. A stored
+	// model declares it in place of the adaptive thinking mode.
+	DialectAdaptive = "adaptive"
 )
 
 var validDialects = map[string]struct{}{
-	DialectTier:   {},
-	DialectToggle: {},
-	DialectBudget: {},
+	DialectTier:     {},
+	DialectToggle:   {},
+	DialectBudget:   {},
+	DialectAdaptive: {},
 }
 
 // IsValidDialect reports whether a dialect token can be stored. An empty dialect

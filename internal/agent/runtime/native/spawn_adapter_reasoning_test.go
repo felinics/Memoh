@@ -71,7 +71,6 @@ func runSpawnReasoning(t *testing.T, providerName string, cfg tools.SpawnRunConf
 	cfg.Model = &sdk.Model{
 		ID:       "test-model",
 		Provider: provider,
-		Type:     sdk.ModelTypeChat,
 	}
 
 	rc := runConfigFromSpawnRunConfig(cfg)
@@ -179,7 +178,6 @@ func TestParentTurnSendsReasoningForSameDecision(t *testing.T) {
 		Model: &sdk.Model{
 			ID:       "test-model",
 			Provider: provider,
-			Type:     sdk.ModelTypeChat,
 		},
 		ReasoningConfig: &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
 	}

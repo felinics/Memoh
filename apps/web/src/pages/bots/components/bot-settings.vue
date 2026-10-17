@@ -141,6 +141,7 @@ import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils
 import { useChatStore } from '@/store/chat-list'
 import { useAutosaveQueue, type AutosaveJob } from '@/composables/use-autosave-queue'
 import { saveQueryCacheToDiskNow } from '@/lib/query-cache-persistence'
+import { modelProduces } from '@/utils/model-capabilities'
 
 const props = defineProps<{
   botId: string
@@ -307,7 +308,7 @@ const providers = computed(() => providerData.value ?? [])
 const botAgents = computed<BotagentsBotAgent[]>(() => botAgentData.value?.items ?? [])
 const acpProfiles = computed<AcpprofilePublicProfile[]>(() => acpProfileData.value?.items ?? [])
 const imageCapableModels = computed(() =>
-  models.value.filter((m) => m.config?.compatibilities?.includes('image-output')),
+  models.value.filter((m) => modelProduces(m.config, 'image')),
 )
 const searchProviders = computed(() => (searchProviderData.value ?? []).filter((p) => p.enable !== false))
 const fetchProviders = computed(() => (fetchProviderData.value ?? []).filter((p) => p.enable !== false || p.provider === 'native' || p.id === form.fetch_provider_id))

@@ -228,3 +228,7 @@ func TestReasoningSetUsageFollowsResolvedModel(t *testing.T) {
 		t.Fatalf("usage request entered persistence path %d time(s)", queries.upsertAttempts)
 	}
 }
+
+func (*reasoningCommandQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
+}

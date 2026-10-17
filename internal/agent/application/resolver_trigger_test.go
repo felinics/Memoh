@@ -89,7 +89,7 @@ func triggerResolvedRunConfig(provider sdk.Provider, rawQuery string, now time.T
 		Time:        now,
 	}, rawQuery)
 	return agentpkg.RunConfig{
-		Model:                     &sdk.Model{ID: "trigger-model", Provider: provider, Type: sdk.ModelTypeChat},
+		Model:                     &sdk.Model{ID: "trigger-model", Provider: provider},
 		Query:                     headerified,
 		ContextScope:              contextfrag.Scope{BotID: "bot-1", ChatID: "bot-1"},
 		ContextToolExchangePolicy: &contextfrag.ToolExchangePolicy{MinMessages: 10},

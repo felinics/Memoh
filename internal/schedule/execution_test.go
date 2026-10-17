@@ -437,3 +437,7 @@ func TestScheduleBudgetValidation(t *testing.T) {
 		t.Fatalf("budget=%v", got)
 	}
 }
+
+func (*executionQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
+}

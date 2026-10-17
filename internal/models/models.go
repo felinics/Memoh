@@ -43,7 +43,7 @@ func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 // Create adds a new model to the database.
 func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, error) {
 	model := req.toModel(ResolveEnable(req.Enable, true))
-	model.Config = normalizeModelConfig(model.Config)
+	model.Config = inferUndeclaredDialect(normalizeModelConfig(model.Config), model.ModelID)
 	if err := s.fillEmbeddingDimensions(ctx, &model); err != nil {
 		return AddResponse{}, err
 	}
@@ -108,7 +108,7 @@ func (s *Service) GetByID(ctx context.Context, id string) (GetResponse, error) {
 		return GetResponse{}, fmt.Errorf("failed to get model: %w", err)
 	}
 
-	return s.convertToGetResponse(dbModel), nil
+	return s.convertToGetResponse(ctx, dbModel), nil
 }
 
 // ResolveReasoningOptions returns the selectable reasoning contract for a model
@@ -145,7 +145,7 @@ func (s *Service) GetByModelID(ctx context.Context, modelID string) (GetResponse
 		return GetResponse{}, fmt.Errorf("failed to get model: %w", err)
 	}
 
-	return s.convertToGetResponse(dbModel), nil
+	return s.convertToGetResponse(ctx, dbModel), nil
 }
 
 // List returns all models.
@@ -155,7 +155,7 @@ func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
 		return nil, fmt.Errorf("failed to list models: %w", err)
 	}
 
-	return s.convertToGetResponseList(dbModels), nil
+	return s.convertToGetResponseList(ctx, dbModels), nil
 }
 
 // ListByType returns models filtered by type.
@@ -169,7 +169,7 @@ func (s *Service) ListByType(ctx context.Context, modelType ModelType) ([]GetRes
 		return nil, fmt.Errorf("failed to list models by type: %w", err)
 	}
 
-	return s.convertToGetResponseList(dbModels), nil
+	return s.convertToGetResponseList(ctx, dbModels), nil
 }
 
 // ListByProviderClientType returns models whose provider has the given client_type.
@@ -183,7 +183,7 @@ func (s *Service) ListByProviderClientType(ctx context.Context, clientType Clien
 		return nil, fmt.Errorf("failed to list models by provider client type: %w", err)
 	}
 
-	return s.convertToGetResponseList(dbModels), nil
+	return s.convertToGetResponseList(ctx, dbModels), nil
 }
 
 // ListEnabled returns all models from enabled providers.
@@ -192,7 +192,7 @@ func (s *Service) ListEnabled(ctx context.Context) ([]GetResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list enabled models: %w", err)
 	}
-	return s.convertToEnabledGetResponseList(dbModels), nil
+	return s.convertToEnabledGetResponseList(ctx, dbModels), nil
 }
 
 // ListEnabledByType returns models from enabled providers filtered by type.
@@ -204,7 +204,7 @@ func (s *Service) ListEnabledByType(ctx context.Context, modelType ModelType) ([
 	if err != nil {
 		return nil, fmt.Errorf("failed to list enabled models by type: %w", err)
 	}
-	return s.convertToEnabledGetResponseList(dbModels), nil
+	return s.convertToEnabledGetResponseList(ctx, dbModels), nil
 }
 
 // ListEnabledByProviderClientType returns models from enabled providers with
@@ -217,7 +217,7 @@ func (s *Service) ListEnabledByProviderClientType(ctx context.Context, clientTyp
 	if err != nil {
 		return nil, fmt.Errorf("failed to list enabled models by provider client type: %w", err)
 	}
-	return s.convertToEnabledGetResponseList(dbModels), nil
+	return s.convertToEnabledGetResponseList(ctx, dbModels), nil
 }
 
 // ListByProviderID returns models filtered by provider ID.
@@ -233,7 +233,7 @@ func (s *Service) ListByProviderID(ctx context.Context, providerID string) ([]Ge
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models by provider: %w", err)
 	}
-	return s.convertToGetResponseList(dbModels), nil
+	return s.convertToGetResponseList(ctx, dbModels), nil
 }
 
 // ListByProviderIDAndType returns models filtered by provider ID and type.
@@ -255,7 +255,7 @@ func (s *Service) ListByProviderIDAndType(ctx context.Context, providerID string
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models by provider and type: %w", err)
 	}
-	return s.convertToGetResponseList(dbModels), nil
+	return s.convertToGetResponseList(ctx, dbModels), nil
 }
 
 // GetByProviderAndModelID retrieves a model by provider and model_id.
@@ -277,7 +277,7 @@ func (s *Service) GetByProviderAndModelID(ctx context.Context, providerID, model
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("failed to get model by provider and model_id: %w", err)
 	}
-	return s.convertToGetResponse(dbModel), nil
+	return s.convertToGetResponse(ctx, dbModel), nil
 }
 
 // UpdateByID updates a model by its internal UUID.
@@ -293,7 +293,7 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 	}
 
 	model := req.toModel(ResolveEnable(req.Enable, current.Enable))
-	model.Config = normalizeModelConfig(model.Config)
+	model.Config = inferUndeclaredDialect(normalizeModelConfig(model.Config), model.ModelID)
 	if err := s.fillEmbeddingDimensions(ctx, &model); err != nil {
 		return GetResponse{}, err
 	}
@@ -332,7 +332,7 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 		return GetResponse{}, fmt.Errorf("failed to update model: %w", err)
 	}
 
-	return s.convertToGetResponse(updated), nil
+	return s.convertToGetResponse(ctx, updated), nil
 }
 
 // UpdateByProviderAndModelID updates a model within one provider namespace.
@@ -355,7 +355,7 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 	}
 
 	model := req.toModel(ResolveEnable(req.Enable, current.Enable))
-	model.Config = normalizeModelConfig(model.Config)
+	model.Config = inferUndeclaredDialect(normalizeModelConfig(model.Config), model.ModelID)
 	if err := s.fillEmbeddingDimensions(ctx, &model); err != nil {
 		return GetResponse{}, err
 	}
@@ -394,7 +394,7 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 		return GetResponse{}, fmt.Errorf("failed to update model: %w", err)
 	}
 
-	return s.convertToGetResponse(updated), nil
+	return s.convertToGetResponse(ctx, updated), nil
 }
 
 // DeleteByID deletes a model by its internal UUID.
@@ -450,7 +450,7 @@ func (s *Service) CountByType(ctx context.Context, modelType ModelType) (int64, 
 	return count, nil
 }
 
-func (s *Service) convertToGetResponse(dbModel sqlc.Model) GetResponse {
+func (s *Service) convertToGetResponse(ctx context.Context, dbModel sqlc.Model) GetResponse {
 	resp := GetResponse{
 		ID:      dbModel.ID.String(),
 		ModelID: dbModel.ModelID,
@@ -469,29 +469,77 @@ func (s *Service) convertToGetResponse(dbModel sqlc.Model) GetResponse {
 		resp.Name = dbModel.Name.String
 	}
 
-	if len(dbModel.Config) > 0 {
-		if err := json.Unmarshal(dbModel.Config, &resp.Config); err != nil {
-			s.logger.Warn("failed to unmarshal model config", slog.String("model_id", dbModel.ModelID), slog.Any("error", err))
-		}
-		// Rows written before "off" was unified still advertise the legacy spelling.
-		resp.Config = normalizeModelConfig(resp.Config)
+	configContext, complete := s.storedConfigContext(ctx, dbModel)
+	config, err := DecodeModelConfig(dbModel.Config, configContext)
+	if err != nil {
+		s.logger.Warn("failed to decode model config", slog.String("model_id", dbModel.ModelID), slog.Any("error", err))
+		config = normalizeModelConfig(ModelConfig{})
+	} else if complete {
+		s.writeBackUpgradedConfig(ctx, dbModel, config)
 	}
+	resp.Config = config
 
 	return resp
 }
 
-func (s *Service) convertToGetResponseList(dbModels []sqlc.Model) []GetResponse {
+// storedConfigContext describes a stored row to DecodeModelConfig. A version 1
+// row whose upgrade depends on the protocol also carries its provider's client
+// type, so a switch keeps resolving as it did; every other row skips the
+// lookup. complete is false when that lookup was needed but failed: the
+// upgrade is then served without it and must not be written back, so the next
+// read tries again instead of storing a lossy answer for good.
+func (s *Service) storedConfigContext(ctx context.Context, dbModel sqlc.Model) (ConfigContext, bool) {
+	out := ConfigContext{ModelID: dbModel.ModelID, Type: ModelType(dbModel.Type)}
+	if !configNeedsWriteBack(dbModel.Config, out.Type) || !upgradeNeedsClientType(dbModel.Config) {
+		return out, true
+	}
+	if !dbModel.ProviderID.Valid {
+		return out, false
+	}
+	provider, err := s.queries.GetProviderByID(ctx, dbModel.ProviderID)
+	if err != nil {
+		s.logger.WarnContext(ctx, "failed to read the provider of a model config being upgraded", slog.String("model_id", dbModel.ModelID), slog.Any("error", err))
+		return out, false
+	}
+	out.ClientType = provider.ClientType
+	return out, true
+}
+
+// writeBackUpgradedConfig stores a config read in an older schema version in
+// the current one, so a row converts the first time anything uses it and the
+// older readers can eventually be removed. It is best effort: the caller
+// already holds the upgraded config, and a failed or lost write only means the
+// next read upgrades again.
+func (s *Service) writeBackUpgradedConfig(ctx context.Context, dbModel sqlc.Model, config ModelConfig) {
+	if !configNeedsWriteBack(dbModel.Config, ModelType(dbModel.Type)) {
+		return
+	}
+	upgraded, err := encodeUpgradedConfig(dbModel.Config, config)
+	if err != nil {
+		s.logger.WarnContext(ctx, "failed to encode upgraded model config", slog.String("model_id", dbModel.ModelID), slog.Any("error", err))
+		return
+	}
+	if _, err := s.queries.UpgradeModelConfig(ctx, sqlc.UpgradeModelConfigParams{
+		Config:         upgraded,
+		ID:             dbModel.ID,
+		PreviousConfig: dbModel.Config,
+	}); err != nil {
+		s.logger.WarnContext(ctx, "failed to write back upgraded model config", slog.String("model_id", dbModel.ModelID), slog.Any("error", err))
+	}
+}
+
+func (s *Service) convertToGetResponseList(ctx context.Context, dbModels []sqlc.Model) []GetResponse {
 	responses := make([]GetResponse, 0, len(dbModels))
 	for _, dbModel := range dbModels {
-		responses = append(responses, s.convertToGetResponse(dbModel))
+		responses = append(responses, s.convertToGetResponse(ctx, dbModel))
 	}
 	return responses
 }
 
-func (s *Service) convertToEnabledGetResponseList(dbModels []sqlc.Model) []GetResponse {
+func (s *Service) convertToEnabledGetResponseList(ctx context.Context, dbModels []sqlc.Model) []GetResponse {
 	responses := make([]GetResponse, 0, len(dbModels))
 	for _, dbModel := range dbModels {
-		response := s.convertToGetResponse(dbModel)
+		response := s.convertToGetResponse(ctx, dbModel)
 		// Catalog availability is independent from the user's enable choice. Keeping
 		// that choice stored lets a temporarily removed model return enabled later.
 		if response.Config.CatalogAvailable != nil && !*response.Config.CatalogAvailable {

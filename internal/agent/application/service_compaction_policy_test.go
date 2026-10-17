@@ -342,3 +342,7 @@ func runAutomaticCompaction(t *testing.T, service *Service, req ChatRequest, rc 
 		t.Fatalf("runCompaction() error = %v", err)
 	}
 }
+
+func (*controllerQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
+}

@@ -1553,6 +1553,31 @@ func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) 
 	return i, err
 }
 
+const upgradeModelConfig = `-- name: UpgradeModelConfig :execrows
+UPDATE models
+SET config = $1
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $2
+  AND config = $3::jsonb
+`
+
+type UpgradeModelConfigParams struct {
+	Config         []byte      `json:"config"`
+	ID             pgtype.UUID `json:"id"`
+	PreviousConfig []byte      `json:"previous_config"`
+}
+
+// Writes back a config upgraded to the current schema version. It only
+// replaces the exact config that was read, so a write made in between wins,
+// and it leaves updated_at alone because nobody edited the model.
+func (q *Queries) UpgradeModelConfig(ctx context.Context, arg UpgradeModelConfigParams) (int64, error) {
+	result, err := q.db.Exec(ctx, upgradeModelConfig, arg.Config, arg.ID, arg.PreviousConfig)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertRegistryModel = `-- name: UpsertRegistryModel :one
 INSERT INTO models (model_id, name, provider_id, type, enable, config)
 VALUES ($1, $2, $3, $4, false, $5)

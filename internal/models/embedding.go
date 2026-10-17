@@ -47,6 +47,25 @@ func NewSDKEmbeddingModel(clientType, baseURL, apiKey, modelID string, timeout t
 	}
 }
 
+// ListGoogleEmbeddingModels lists the models a Google Generative AI endpoint
+// serves for embedContent. The chat provider's model list leaves them out.
+func ListGoogleEmbeddingModels(ctx context.Context, baseURL, apiKey string, timeout time.Duration, httpClient *http.Client) ([]sdk.EmbeddingModel, error) {
+	if timeout <= 0 {
+		timeout = DefaultProviderRequestTimeout
+	}
+	if httpClient == nil {
+		httpClient = NewProviderHTTPClient(timeout)
+	}
+	opts := []googleembedding.Option{
+		googleembedding.WithAPIKey(apiKey),
+		googleembedding.WithHTTPClient(httpClient),
+	}
+	if baseURL != "" {
+		opts = append(opts, googleembedding.WithBaseURL(baseURL))
+	}
+	return googleembedding.New(opts...).ListModels(ctx)
+}
+
 // ErrEmptyEmbeddingVector reports that the provider returned an empty vector.
 var ErrEmptyEmbeddingVector = errors.New("embedding provider returned no vector values")
 

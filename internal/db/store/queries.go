@@ -479,6 +479,7 @@ type Queries interface {
 	UpdateMCPOAuthTokens(ctx context.Context, arg dbsqlc.UpdateMCPOAuthTokensParams) error
 	UpdateMemoryProvider(ctx context.Context, arg dbsqlc.UpdateMemoryProviderParams) (dbsqlc.MemoryProvider, error)
 	UpdateModel(ctx context.Context, arg dbsqlc.UpdateModelParams) (dbsqlc.Model, error)
+	UpgradeModelConfig(ctx context.Context, arg dbsqlc.UpgradeModelConfigParams) (int64, error)
 	UpdateProvider(ctx context.Context, arg dbsqlc.UpdateProviderParams) (dbsqlc.Provider, error)
 	SetProviderTemplateActive(ctx context.Context, arg dbsqlc.SetProviderTemplateActiveParams) error
 	SetProviderTemplateModelActive(ctx context.Context, arg dbsqlc.SetProviderTemplateModelActiveParams) error

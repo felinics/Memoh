@@ -565,7 +565,6 @@ func TestAdmittedDiscussBudgetFailurePersistsFailedBudgetLifecycle(t *testing.T)
 			RunConfig: native.RunConfig{
 				Model: &sdk.Model{
 					ID:       "discuss-budget-model",
-					Type:     sdk.ModelTypeChat,
 					Provider: provider,
 				},
 				System:           "required discuss policy",

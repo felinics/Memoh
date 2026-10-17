@@ -40,10 +40,13 @@ func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			model := models.Model{ModelID: entry.ModelID}
-			if err := json.Unmarshal(raw, &model.Config); err != nil {
+			// Shipped templates are version 1 configs; read them the way a stored
+			// row is read.
+			config, err := models.DecodeModelConfig(raw, models.ConfigContext{ModelID: entry.ModelID, Type: models.ModelTypeChat})
+			if err != nil {
 				t.Fatal(err)
 			}
+			model := models.Model{ModelID: entry.ModelID, Config: config}
 			opts := model.ReasoningOptions(catalog.ClientType)
 			if !opts.Supported {
 				t.Fatal("reasoning capability missing")
@@ -87,10 +90,10 @@ func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
 								}
 							}
 							var wantEffort any
-							if effort != "" && model.Config.ReasoningDialect == reasoning.DialectTier {
+							if effort != "" && model.Config.ReasoningDialect() == reasoning.DialectTier {
 								wantEffort = effort
 								if effort == reasoning.EffortDisable {
-									if model.Config.ReasoningOffSupport == reasoning.OffSupportAccepted {
+									if model.Config.ReasoningOffSupport() == reasoning.OffSupportAccepted {
 										wantEffort = nil
 									} else {
 										wantEffort = "none"
@@ -100,7 +103,7 @@ func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
 							if wireEffort != wantEffort {
 								t.Errorf("wire effort = %v, want %v", wireEffort, wantEffort)
 							}
-							if model.Config.ReasoningOffSupport == reasoning.OffSupportAccepted {
+							if model.Config.ReasoningOffSupport() == reasoning.OffSupportAccepted {
 								wantType := "enabled"
 								if effort == reasoning.EffortDisable {
 									wantType = "disabled"
@@ -109,7 +112,7 @@ func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
 									t.Errorf("thinking = %v, want %s", thinking, wantType)
 								}
 								var wantBudget any
-								if model.Config.ReasoningDialect == reasoning.DialectBudget && effort != reasoning.EffortDisable {
+								if model.Config.ReasoningDialect() == reasoning.DialectBudget && effort != reasoning.EffortDisable {
 									wantBudget = map[string]float64{"low": 5000, "medium": 16000, "high": 50000}[effort]
 								}
 								if thinking["budget_tokens"] != wantBudget {
@@ -123,9 +126,9 @@ func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
 						defer server.Close()
 						cfg := models.SDKModelConfig{
 							ModelID: entry.ModelID, ClientType: catalog.ClientType, BaseURL: server.URL, HTTPClient: server.Client(),
-							ReasoningConfig:  reasoning.ResolveConfig(model.ResolveThinkingMode(), model.Config.ReasoningEfforts, opts, "", effort),
-							ReasoningDialect: model.Config.ReasoningDialect, ReasoningOffSupport: model.Config.ReasoningOffSupport,
-							ThinkingBudgetMin: model.Config.ThinkingBudgetMin, ThinkingBudgetMax: model.Config.ThinkingBudgetMax,
+							ReasoningConfig:  reasoning.ResolveConfig(model.ResolveThinkingMode(), model.Config.ReasoningEfforts(), opts, "", effort),
+							ReasoningDialect: model.Config.ReasoningDialect(), ReasoningOffSupport: model.Config.ReasoningOffSupport(),
+							ThinkingBudgetMin: model.Config.ThinkingBudgetMin(), ThinkingBudgetMax: model.Config.ThinkingBudgetMax(),
 						}
 						req := sdk.Request{Messages: []sdk.Message{sdk.UserMessage("hi")}}
 						models.ApplyReasoningToRequest(&req, cfg)
