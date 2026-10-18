@@ -1971,6 +1971,11 @@
   "provider": {
     "add": "プロバイダーを追加",
     "addBtn": "追加",
+    "gallery": {
+      "configured": "設定済み",
+      "subscriptions": "サブスクリプション",
+      "others": "その他の LLM プロバイダー"
+    },
     "searchPlaceholder": "プロバイダーを検索...",
     "preset": "プリセット",
     "presetPlaceholder": "プリセットまたはカスタムプロバイダーを選択してください",

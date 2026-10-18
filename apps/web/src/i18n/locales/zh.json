@@ -2002,6 +2002,11 @@
   "provider": {
     "add": "添加服务商",
     "addBtn": "添加",
+    "gallery": {
+      "configured": "已配置",
+      "subscriptions": "订阅",
+      "others": "其他 LLM 服务商"
+    },
     "searchPlaceholder": "搜索服务商…",
     "preset": "预设",
     "presetPlaceholder": "选择预设或自定义服务商",

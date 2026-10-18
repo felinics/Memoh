@@ -242,6 +242,22 @@ export function findModelSourceBySource(source: string | null | undefined): Mode
   return source ? bySource.get(source) : undefined
 }
 
+// Entries a user signs into with a subscription they already pay for, in the
+// order the gallery lists them.
+const SUBSCRIPTION_SOURCE_IDS: readonly string[] = ['codex', 'github-copilot', 'opencode-go']
+
+// Splits gallery entries into subscriptions, in their own order, and every
+// other provider, in the order given.
+export function groupModelSources(items: readonly ModelSource[]) {
+  const subscriptions: ModelSource[] = []
+  const others: ModelSource[] = []
+  for (const item of items) {
+    (SUBSCRIPTION_SOURCE_IDS.includes(item.id) ? subscriptions : others).push(item)
+  }
+  subscriptions.sort((a, b) => SUBSCRIPTION_SOURCE_IDS.indexOf(a.id) - SUBSCRIPTION_SOURCE_IDS.indexOf(b.id))
+  return { subscriptions, others }
+}
+
 // The logo models.dev serves for an entry; an id without a logo of its own gets
 // models.dev's generic one.
 export function modelSourceLogo(item: ModelSource): string {

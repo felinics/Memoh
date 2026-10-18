@@ -80,8 +80,15 @@ vi.mock('@felinic/ui', () => {
   }
   const SwapTransition = (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', slots.default?.())
   const PageShell = (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', [slots.actions?.(), slots.default?.()])
+  const SectionGroup = {
+    props: ['title'],
+    setup(props: { title: string }, { slots }: { slots: Slots }) {
+      return () => h('section', { 'data-section': props.title }, slots.default?.())
+    },
+  }
   return {
     BackendCard,
+    SectionGroup,
     DetailPane,
     SwapTransition,
     PageShell,
@@ -179,6 +186,10 @@ async function mountPage(searchQuery = '') {
 
 function cardNames(root: Element) {
   return [...root.querySelectorAll('[data-provider]')].map(card => card.getAttribute('data-provider'))
+}
+
+function sectionTitles(root: Element) {
+  return [...root.querySelectorAll('[data-section]')].map(section => section.getAttribute('data-section'))
 }
 
 describe('models panel route state', () => {
@@ -339,8 +350,13 @@ describe('models panel route state', () => {
 
     const names = cardNames(root)
     expect(names).toHaveLength(20)
-    expect(names.slice(0, 2)).toEqual(['One', 'Two'])
+    expect(names.slice(0, 5)).toEqual(['One', 'Two', 'OpenAI Codex', 'GitHub Copilot', 'OpenCode Go'])
     expect(names).toContain('above.dev')
+    expect(sectionTitles(root)).toEqual([
+      'provider.gallery.configured',
+      'provider.gallery.subscriptions',
+      'provider.gallery.others',
+    ])
     const pagination = root.querySelector('[data-testid="pagination"]')
     expect(Number(pagination?.getAttribute('data-pages'))).toBeGreaterThan(5)
 
@@ -348,6 +364,8 @@ describe('models panel route state', () => {
     await nextTick()
     expect(cardNames(root)).not.toContain('One')
     expect(cardNames(root)).toHaveLength(20)
+    // The second page continues the other providers under their title again.
+    expect(sectionTitles(root)).toEqual(['provider.gallery.others'])
     app.unmount()
   })
 
@@ -382,7 +400,14 @@ describe('models panel route state', () => {
     query.value = 'deepseek'
     await nextTick()
     expect(cardNames(root)).toEqual(['DeepSeek'])
+    expect(sectionTitles(root)).toEqual(['provider.gallery.others'])
     expect(root.querySelector('[data-testid="pagination"]')).toBeNull()
+
+    // A section shows only while the search leaves it a card.
+    query.value = 'copilot'
+    await nextTick()
+    expect(cardNames(root)).toEqual(['GitHub Copilot'])
+    expect(sectionTitles(root)).toEqual(['provider.gallery.subscriptions'])
     app.unmount()
   })
 })

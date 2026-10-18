@@ -2002,6 +2002,11 @@
   "provider": {
     "add": "Add Provider",
     "addBtn": "Add",
+    "gallery": {
+      "configured": "Configured",
+      "subscriptions": "Subscriptions",
+      "others": "Other LLM providers"
+    },
     "searchPlaceholder": "Search providers...",
     "preset": "Preset",
     "presetPlaceholder": "Select preset or custom provider",

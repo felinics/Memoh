@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   findModelSource,
   findModelSourceBySource,
+  groupModelSources,
   isMonochromeLogo,
   MODEL_SOURCES,
   modelSourceLogo,
@@ -20,6 +21,15 @@ const CLIENT_TYPES = new Set([
 ])
 
 describe('model sources', () => {
+  it('groups the subscriptions first, in their own order, and keeps the rest in order', () => {
+    const { subscriptions, others } = groupModelSources(MODEL_SOURCES)
+    expect(subscriptions.map(item => item.id)).toEqual(['codex', 'github-copilot', 'opencode-go'])
+    expect(others).toEqual(MODEL_SOURCES.filter(item => !subscriptions.includes(item)))
+
+    const configuredCodex = groupModelSources(MODEL_SOURCES.filter(item => item.id !== 'codex'))
+    expect(configuredCodex.subscriptions.map(item => item.id)).toEqual(['github-copilot', 'opencode-go'])
+  })
+
   it('lists each entry once, sorted by id, and each source once', () => {
     const ids = MODEL_SOURCES.map(item => item.id)
     expect(new Set(ids).size).toBe(ids.length)
