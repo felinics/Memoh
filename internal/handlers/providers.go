@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -545,17 +546,38 @@ func (h *ProvidersHandler) fillExistingModel(ctx context.Context, clientType, pr
 	if !changed {
 		return false
 	}
+	// The version 1 reading is lossy in places that do not matter, such as the
+	// position of the disable token, so whether anything changed is decided on
+	// the config that would be stored.
+	config := models.MergeLegacyConfig(existing.Config, merged, models.ConfigContext{ModelID: existing.ModelID, Type: existing.Type, ClientType: clientType})
+	if sameStoredConfig(existing.ModelID, existing.Config, config) {
+		return false
+	}
 	if _, err := h.modelsService.UpdateByProviderAndModelID(ctx, providerID, modelID, models.UpdateRequest{
 		ModelID:    existing.ModelID,
 		Name:       existing.Name,
 		ProviderID: existing.ProviderID,
 		Type:       existing.Type,
-		Config:     models.MergeLegacyConfig(existing.Config, merged, models.ConfigContext{ModelID: existing.ModelID, Type: existing.Type, ClientType: clientType}),
+		Config:     config,
 	}); err != nil {
 		h.logger.WarnContext(ctx, "failed to fill model capabilities", slog.String("model_id", modelID), slog.Any("error", err))
 		return false
 	}
 	return true
+}
+
+// sameStoredConfig reports whether writing next over a model's stored config
+// would store what is already there.
+func sameStoredConfig(modelID string, stored, next models.ModelConfig) bool {
+	before, err := json.Marshal(stored.StoredForm(modelID))
+	if err != nil {
+		return false
+	}
+	after, err := json.Marshal(next.StoredForm(modelID))
+	if err != nil {
+		return false
+	}
+	return string(before) == string(after)
 }
 
 // modelConfigFromRemote builds the stored config for an imported model. It exists

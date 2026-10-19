@@ -225,3 +225,35 @@ func TestMergeDiscoveredConfigLeavesNonReasoningModelsAlone(t *testing.T) {
 		t.Fatal("a managed non-reasoning model changed on a refresh that discovered nothing new")
 	}
 }
+
+// Discovery lists the disable token first, while the version 1 reading of a
+// stored model puts it last, so the version 1 merge reports a change on every
+// refresh of such a model. Whether the refresh writes is decided on the config
+// it would store, which is the same.
+func TestRefreshOfAnUnchangedDisableFirstModelStoresNothingNew(t *testing.T) {
+	t.Parallel()
+
+	discovered := models.LegacyModelConfig{
+		Compatibilities:  []string{models.CompatToolCall, models.CompatReasoning},
+		ThinkingMode:     reasoning.ModeToggle,
+		ReasoningEfforts: []string{reasoning.EffortDisable, reasoning.EffortLow, reasoning.EffortHigh, reasoning.EffortMax},
+	}
+	ctx := models.ConfigContext{ModelID: "m", Type: models.ModelTypeChat, ClientType: string(models.ClientTypeOpenAICompletions)}
+	existing := discovered.Upgrade(ctx).StoredForm(ctx.ModelID)
+	for name, merge := range map[string]func(existing, discovered models.LegacyModelConfig) (models.LegacyModelConfig, bool){
+		"discovered": mergeDiscoveredConfig,
+		"managed":    mergeManagedDiscoveredConfig,
+	} {
+		merged, _ := merge(existing.Legacy(), discovered)
+		next := models.MergeLegacyConfig(existing, merged, ctx)
+		if !sameStoredConfig(ctx.ModelID, existing, next) {
+			t.Errorf("%s: an unchanged model would be rewritten:\nstored %+v\nnext   %+v", name, existing.Reasoning, next.Reasoning)
+		}
+	}
+	changed := discovered
+	changed.ReasoningEfforts = []string{reasoning.EffortDisable, reasoning.EffortLow}
+	merged, _ := mergeManagedDiscoveredConfig(existing.Legacy(), changed)
+	if sameStoredConfig(ctx.ModelID, existing, models.MergeLegacyConfig(existing, merged, ctx)) {
+		t.Fatal("a changed effort list read as the same stored config")
+	}
+}

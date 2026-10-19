@@ -500,6 +500,10 @@ type AddRequest struct {
 	Type       ModelType   `json:"type"`
 	Enable     *bool       `json:"enable,omitempty"`
 	Config     ModelConfig `json:"config"`
+	// rawConfig is the config as the client sent it. Its decode cannot see the
+	// provider, so the service reads it again when the upgrade needs the
+	// provider's client type; see RequestConfigNeedsClientType.
+	rawConfig json.RawMessage
 }
 
 type AddResponse struct {
@@ -532,6 +536,8 @@ type UpdateRequest struct {
 	Type       ModelType   `json:"type"`
 	Enable     *bool       `json:"enable,omitempty"`
 	Config     ModelConfig `json:"config"`
+	// rawConfig is the config as the client sent it; see AddRequest.rawConfig.
+	rawConfig json.RawMessage
 }
 
 // UnmarshalJSON reads config in any schema version; see
@@ -551,6 +557,7 @@ func (r *AddRequest) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	r.Config = config
+	r.rawConfig = body.Config
 	return nil
 }
 
@@ -571,6 +578,7 @@ func (r *UpdateRequest) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	r.Config = config
+	r.rawConfig = body.Config
 	return nil
 }
 

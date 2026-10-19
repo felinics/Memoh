@@ -99,6 +99,23 @@ describe('buildModelConfig', () => {
     })
   })
 
+  it('keeps what the form has no field for when an edit is saved', () => {
+    const existing = {
+      schema_version: 2,
+      modalities: { input: ['text' as const], output: ['text' as const, 'video' as const] },
+      reasoning: { efforts: ['low', 'high'], default: { effort: 'high', budget: 4096 } },
+    }
+    const config = buildModelConfig({
+      type: 'chat',
+      description: 'Edited',
+      capabilities: capabilityFormFrom(existing),
+      reasoning: reasoningFormFrom(existing),
+      existing,
+    })
+    expect(config.modalities).toEqual({ input: ['text'], output: ['text', 'video'] })
+    expect(config.reasoning?.default).toEqual({ effort: 'high', budget: 4096 })
+  })
+
   it('writes only dimensions for an embedding model', () => {
     expect(buildModelConfig({
       type: 'embedding',

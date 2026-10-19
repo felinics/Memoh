@@ -371,25 +371,139 @@ func TestLegacyReadsNoneWithoutReasoning(t *testing.T) {
 	}
 }
 
-// Only a switch advertised by the enabled token alone needs the provider's
+// Only a switch advertised by the enabled token alone, and a toggle declared
+// for a Claude id that is otherwise written as adaptive, need the provider's
 // client type to upgrade; the stored-row reader looks the provider up for
 // those rows and no others.
-func TestUpgradeNeedsClientTypeOnlyForEnabledOnlySwitches(t *testing.T) {
+func TestUpgradeNeedsClientTypeOnlyForProtocolDependentRows(t *testing.T) {
 	t.Parallel()
 
-	for raw, want := range map[string]bool{
-		`{"thinking_mode":"toggle","reasoning_efforts":["enabled"]}`:           true,
-		`{"thinking_mode":"toggle","reasoning_efforts":["enabled","disable"]}`: false,
-		`{"thinking_mode":"toggle","reasoning_efforts":["disable"]}`:           false,
-		`{"thinking_mode":"toggle","reasoning_efforts":["low","high"]}`:        false,
-		`{"compatibilities":["tool-call"]}`:                                    false,
-		`{"schema_version":2,"reasoning":{"toggle":true}}`:                     false,
-		``: false,
+	for _, tc := range []struct {
+		raw, modelID string
+		want         bool
+	}{
+		{`{"thinking_mode":"toggle","reasoning_efforts":["enabled"]}`, "m", true},
+		{`{"thinking_mode":"toggle","reasoning_efforts":["enabled","disable"]}`, "m", false},
+		{`{"thinking_mode":"toggle","reasoning_efforts":["disable"]}`, "m", false},
+		{`{"thinking_mode":"toggle","reasoning_efforts":["low","high"]}`, "m", false},
+		{`{"thinking_mode":"toggle","reasoning_efforts":["low","high"]}`, "claude-opus-4-7", true},
+		{`{"thinking_mode":"toggle","reasoning_dialect":"tier","reasoning_efforts":["low"]}`, "claude-opus-4-7", false},
+		{`{"thinking_mode":"toggle","reasoning_efforts":["low","high"]}`, "claude-sonnet-4-5", false},
+		{`{"compatibilities":["reasoning"],"reasoning_efforts":["low"]}`, "claude-opus-4-7", false},
+		{`{"compatibilities":["tool-call"]}`, "m", false},
+		{`{"schema_version":2,"reasoning":{"toggle":true}}`, "claude-opus-4-7", false},
+		{``, "m", false},
 	} {
-		if got := upgradeNeedsClientType([]byte(raw)); got != want {
-			t.Errorf("upgradeNeedsClientType(%s) = %v, want %v", raw, got, want)
+		if got := upgradeNeedsClientType([]byte(tc.raw), tc.modelID); got != tc.want {
+			t.Errorf("upgradeNeedsClientType(%s, %s) = %v, want %v", tc.raw, tc.modelID, got, tc.want)
 		}
 	}
+}
+
+// A toggle declared for a Claude 4.6+ id keeps reading as a toggle once it is
+// written: the upgrade records the wire it took on the protocol, so the
+// write-time dialect inference, which version 1 made only for an undeclared
+// mode, leaves it alone. Without a known protocol nothing is recorded.
+func TestUpgradeKeepsADeclaredClaudeToggleAToggle(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{"compatibilities":["reasoning"],"thinking_mode":"toggle","reasoning_efforts":["low","high"]}`)
+	for clientType, want := range map[string]string{
+		string(ClientTypeAnthropicMessages): reasoning.DialectBudget,
+		string(ClientTypeGitHubCopilot):     reasoning.DialectTier,
+		string(ClientTypeOpenAICodex):       reasoning.DialectTier,
+		string(ClientTypeOpenCodeGo):        "",
+		"":                                  "",
+	} {
+		ctx := ConfigContext{ModelID: "claude-opus-4-7", Type: ModelTypeChat, ClientType: clientType}
+		config, err := DecodeModelConfig(raw, ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := config.Reasoning.Dialect; got != want {
+			t.Errorf("%q: dialect = %q, want %q", clientType, got, want)
+		}
+		if got := config.ThinkingMode(); got != reasoning.ModeToggle {
+			t.Errorf("%q: read mode = %q, want toggle", clientType, got)
+		}
+		if want != "" {
+			if got := config.StoredForm(ctx.ModelID).ThinkingMode(); got != reasoning.ModeToggle {
+				t.Errorf("%q: stored mode = %q, want toggle", clientType, got)
+			}
+		}
+	}
+
+	undeclared, err := DecodeModelConfig([]byte(`{"compatibilities":["reasoning"],"reasoning_efforts":["low","high"]}`),
+		ConfigContext{ModelID: "claude-opus-4-7", Type: ModelTypeChat, ClientType: string(ClientTypeAnthropicMessages)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := undeclared.ThinkingMode(); got != reasoning.ModeAdaptive {
+		t.Fatalf("undeclared mode = %q, want adaptive", got)
+	}
+}
+
+// An older client copies the current config it was served and writes its
+// edits in version 1 keys. It was served no version 1 keys, so its form opened
+// with nothing checked: what it sends is added on top, and what it leaves out
+// is kept.
+func TestDecodeRequestAppliesAnOlderClientsEditOnTop(t *testing.T) {
+	t.Parallel()
+
+	current := `"schema_version":2,"modalities":{"input":["text","image"],"output":["text","audio"]},"tool_call":true,"structured_output":true,` +
+		`"reasoning":{"efforts":["low","high"],"dialect":"tier","off":"accepted","replay":{"field":"reasoning_content","required":true}}`
+	ctx := ConfigContext{ModelID: "m", Type: ModelTypeChat, ClientType: string(ClientTypeOpenAICompletions)}
+	decode := func(t *testing.T, raw string) ModelConfig {
+		t.Helper()
+		config, err := DecodeRequestModelConfig([]byte(raw), ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return config
+	}
+
+	t.Run("a description edit keeps everything", func(t *testing.T) {
+		got := decode(t, `{`+current+`,"description":"Edited","compatibilities":[]}`)
+		if got.Description == nil || *got.Description != "Edited" || !got.ToolCall || !got.StructuredOutput ||
+			!got.Accepts(ModalityImage) || !got.Produces(ModalityAudio) {
+			t.Fatalf("config = %+v", got)
+		}
+		r := got.Reasoning
+		if r == nil || !slices.Equal(r.Efforts, []string{"low", "high"}) || r.Dialect != reasoning.DialectTier ||
+			r.Off != reasoning.OffSupportAccepted || r.Replay == nil || r.Replay.Field != ReasoningReplayContent {
+			t.Fatalf("reasoning = %+v", r)
+		}
+	})
+
+	t.Run("a checked capability is added", func(t *testing.T) {
+		got := decode(t, `{`+current+`,"compatibilities":["file-input","image-output"]}`)
+		if !got.Accepts(ModalityPDF) || !got.Produces(ModalityImage) || !got.Accepts(ModalityImage) || !got.ToolCall {
+			t.Fatalf("modalities = %+v, tool call = %v", got.Modalities, got.ToolCall)
+		}
+	})
+
+	t.Run("chosen efforts replace the levels and keep the rest", func(t *testing.T) {
+		got := decode(t, `{`+current+`,"compatibilities":["reasoning"],"reasoning_efforts":["disable","minimal","high"]}`)
+		r := got.Reasoning
+		if r == nil || !slices.Equal(r.Efforts, []string{"minimal", "high"}) || !r.Toggle ||
+			r.Dialect != reasoning.DialectTier || r.Replay == nil {
+			t.Fatalf("reasoning = %+v", r)
+		}
+	})
+
+	t.Run("reasoning checked on a model without it", func(t *testing.T) {
+		got := decode(t, `{"schema_version":2,"tool_call":true,"compatibilities":["reasoning"],"reasoning_efforts":["enabled"]}`)
+		if got.Reasoning == nil || !got.Reasoning.Toggle || got.Reasoning.Off != reasoning.OffSupportRejected {
+			t.Fatalf("reasoning = %+v", got.Reasoning)
+		}
+	})
+
+	t.Run("a current client is read as sent", func(t *testing.T) {
+		got := decode(t, `{"schema_version":2,"tool_call":false}`)
+		if got.ToolCall || got.Reasoning != nil {
+			t.Fatalf("config = %+v", got)
+		}
+	})
 }
 
 // Legacy and Upgrade are inverses for every reasoning shape version 2 stores,

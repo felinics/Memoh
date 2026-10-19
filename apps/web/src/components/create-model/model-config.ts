@@ -120,8 +120,8 @@ export function buildModelConfig(input: BuildModelConfigInput): ModelsModelConfi
 
   delete config.dimensions
   config.modalities = {
-    input: ordered(INPUT_MODALITIES, ['text', ...input.capabilities.input]),
-    output: ordered(OUTPUT_MODALITIES, input.capabilities.output),
+    input: withUnlisted(ordered(INPUT_MODALITIES, ['text', ...input.capabilities.input]), INPUT_MODALITIES, input.capabilities.input),
+    output: withUnlisted(ordered(OUTPUT_MODALITIES, input.capabilities.output), OUTPUT_MODALITIES, input.capabilities.output),
   }
   setFlag(config, 'tool_call', input.capabilities.toolCall)
   setFlag(config, 'structured_output', input.capabilities.structuredOutput)
@@ -131,6 +131,9 @@ export function buildModelConfig(input: BuildModelConfigInput): ModelsModelConfi
   else delete config.max_output_tokens
 
   const reasoning = buildReasoning(input.reasoning)
+  // The form has no field for the default budget, so a saved one is kept.
+  const defaultBudget = input.existing?.reasoning?.default?.budget
+  if (reasoning && defaultBudget !== undefined) reasoning.default = { ...reasoning.default, budget: defaultBudget }
   if (reasoning) config.reasoning = reasoning
   else delete config.reasoning
   return config
@@ -175,6 +178,12 @@ export function reasoningIsUncontrollable(form: ReasoningForm): boolean {
 
 function ordered<T extends string>(order: readonly T[], values: readonly string[]): T[] {
   return order.filter(value => values.includes(value))
+}
+
+// withUnlisted appends the modalities the form has no checkbox for, so saving
+// keeps a video or PDF output the server stored rather than dropping it.
+function withUnlisted<T extends string>(listed: T[], order: readonly T[], values: readonly T[]): T[] {
+  return [...listed, ...values.filter(value => !order.includes(value) && !listed.includes(value))]
 }
 
 function setFlag(config: ModelsModelConfig, key: 'tool_call' | 'structured_output', value: boolean) {

@@ -754,6 +754,8 @@ type modelDependency struct {
 	Type       modelpkg.ModelType   `json:"type"`
 	Enable     *bool                `json:"enable,omitempty"`
 	Config     modelpkg.ModelConfig `json:"config"`
+	// rawConfig is the config as exported; see withClientType.
+	rawConfig json.RawMessage
 }
 
 // UnmarshalJSON upgrades a config exported by an older version; see
@@ -773,13 +775,31 @@ func (d *modelDependency) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	d.Config = config
+	d.rawConfig = body.Config
+	return nil
+}
+
+// withClientType reads the exported config again with its provider's client
+// type. A version 1 switch that only the protocol could turn off upgrades by
+// it, and the backup's provider list is the only place that names it.
+func (d *modelDependency) withClientType(clientType string) error {
+	if clientType == "" || len(d.rawConfig) == 0 {
+		return nil
+	}
+	config, err := modelpkg.DecodeModelConfig(d.rawConfig, modelpkg.ConfigContext{ModelID: d.ModelID, Type: d.Type, ClientType: clientType})
+	if err != nil {
+		return err
+	}
+	d.Config = config
 	return nil
 }
 
 func (s *Service) importDependencies(ctx context.Context, state *importState) (dependencyMap, error) {
 	deps := newDependencyMap()
 	providers, _ := readEntry[[]providerpkg.GetResponse](state, "dependencies/providers.json")
+	clientTypes := map[string]string{}
 	for _, item := range providers {
+		clientTypes[item.ID] = item.ClientType
 		id, err := s.ensureProvider(ctx, item)
 		if err != nil {
 			s.skipImport(ctx, state, "provider_dependency", "provider dependency skipped", err)
@@ -789,6 +809,10 @@ func (s *Service) importDependencies(ctx context.Context, state *importState) (d
 	}
 	models, _ := readEntry[[]modelDependency](state, "dependencies/models.json")
 	for _, item := range models {
+		if err := item.withClientType(clientTypes[item.ProviderID]); err != nil {
+			s.skipImport(ctx, state, "model_dependency", "model dependency skipped", err)
+			continue
+		}
 		id, err := s.ensureModel(ctx, item, deps)
 		if err != nil {
 			s.skipImport(ctx, state, "model_dependency", "model dependency skipped", err)

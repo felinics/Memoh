@@ -128,3 +128,45 @@ func TestReadSkipsWriteBackWhenTheProviderLookupFails(t *testing.T) {
 		t.Fatalf("writes = %d, want the upgrade written back once the provider is known", len(working.writes))
 	}
 }
+
+type createQueries struct {
+	providerLookupQueries
+	created []sqlc.CreateModelParams
+}
+
+func (q *createQueries) CreateModel(_ context.Context, arg sqlc.CreateModelParams) (sqlc.Model, error) {
+	q.created = append(q.created, arg)
+	return sqlc.Model{ModelID: arg.ModelID}, nil
+}
+
+// A request decode cannot see the provider, so a version 1 switch an older
+// client sends is read again with the provider's client type before it is
+// stored; otherwise the switch would be stored with its off answer unstated for
+// good.
+func TestCreateReadsAnOlderClientsSwitchWithTheProviderClientType(t *testing.T) {
+	t.Parallel()
+
+	var req AddRequest
+	if err := json.Unmarshal([]byte(`{"model_id":"m","provider_id":"00000000-0000-0000-0000-000000000001","type":"chat",`+
+		`"config":{"compatibilities":["reasoning"],"thinking_mode":"toggle","reasoning_efforts":["enabled"]}}`), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Config.Reasoning == nil || req.Config.Reasoning.Off != "" {
+		t.Fatalf("decoded without the provider: %+v", req.Config.Reasoning)
+	}
+	queries := &createQueries{}
+	service := &Service{queries: queries, logger: slog.Default()}
+	if _, err := service.Create(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if len(queries.created) != 1 {
+		t.Fatalf("created = %d, want 1", len(queries.created))
+	}
+	stored, err := DecodeModelConfig(queries.created[0].Config, ConfigContext{ModelID: "m", Type: ModelTypeChat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Reasoning == nil || stored.Reasoning.Off != reasoning.OffSupportRejected {
+		t.Fatalf("stored reasoning = %+v, want off rejected on OpenAI", stored.Reasoning)
+	}
+}

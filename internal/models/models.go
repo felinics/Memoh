@@ -43,7 +43,11 @@ func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 // Create adds a new model to the database.
 func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, error) {
 	model := req.toModel(ResolveEnable(req.Enable, true))
-	model.Config = inferUndeclaredDialect(normalizeModelConfig(model.Config), model.ModelID)
+	config, err := s.requestConfig(ctx, req.rawConfig, model)
+	if err != nil {
+		return AddResponse{}, err
+	}
+	model.Config = config.StoredForm(model.ModelID)
 	if err := s.fillEmbeddingDimensions(ctx, &model); err != nil {
 		return AddResponse{}, err
 	}
@@ -293,7 +297,11 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 	}
 
 	model := req.toModel(ResolveEnable(req.Enable, current.Enable))
-	model.Config = inferUndeclaredDialect(normalizeModelConfig(model.Config), model.ModelID)
+	config, err := s.requestConfig(ctx, req.rawConfig, model)
+	if err != nil {
+		return GetResponse{}, err
+	}
+	model.Config = config.StoredForm(model.ModelID)
 	if err := s.fillEmbeddingDimensions(ctx, &model); err != nil {
 		return GetResponse{}, err
 	}
@@ -355,7 +363,11 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 	}
 
 	model := req.toModel(ResolveEnable(req.Enable, current.Enable))
-	model.Config = inferUndeclaredDialect(normalizeModelConfig(model.Config), model.ModelID)
+	config, err := s.requestConfig(ctx, req.rawConfig, model)
+	if err != nil {
+		return GetResponse{}, err
+	}
+	model.Config = config.StoredForm(model.ModelID)
 	if err := s.fillEmbeddingDimensions(ctx, &model); err != nil {
 		return GetResponse{}, err
 	}
@@ -482,6 +494,26 @@ func (s *Service) convertToGetResponse(ctx context.Context, dbModel sqlc.Model) 
 	return resp
 }
 
+// requestConfig returns a request's config, read again with its provider's
+// client type when the version 1 upgrade it went through depends on the
+// protocol. The request decode could not see the provider; see
+// RequestConfigNeedsClientType. A config built in Go carries no raw form and is
+// returned as it is.
+func (s *Service) requestConfig(ctx context.Context, raw json.RawMessage, model Model) (ModelConfig, error) {
+	if len(raw) == 0 || !RequestConfigNeedsClientType(raw, model.ModelID) {
+		return model.Config, nil
+	}
+	providerID, err := db.ParseUUID(model.ProviderID)
+	if err != nil {
+		return ModelConfig{}, fmt.Errorf("invalid provider ID: %w", err)
+	}
+	provider, err := s.queries.GetProviderByID(ctx, providerID)
+	if err != nil {
+		return ModelConfig{}, fmt.Errorf("read the provider of a model config: %w", err)
+	}
+	return DecodeRequestModelConfig(raw, ConfigContext{ModelID: model.ModelID, Type: model.Type, ClientType: provider.ClientType})
+}
+
 // storedConfigContext describes a stored row to DecodeModelConfig. A version 1
 // row whose upgrade depends on the protocol also carries its provider's client
 // type, so a switch keeps resolving as it did; every other row skips the
@@ -490,7 +522,7 @@ func (s *Service) convertToGetResponse(ctx context.Context, dbModel sqlc.Model) 
 // read tries again instead of storing a lossy answer for good.
 func (s *Service) storedConfigContext(ctx context.Context, dbModel sqlc.Model) (ConfigContext, bool) {
 	out := ConfigContext{ModelID: dbModel.ModelID, Type: ModelType(dbModel.Type)}
-	if !configNeedsWriteBack(dbModel.Config, out.Type) || !upgradeNeedsClientType(dbModel.Config) {
+	if !configNeedsWriteBack(dbModel.Config, out.Type) || !upgradeNeedsClientType(dbModel.Config, dbModel.ModelID) {
 		return out, true
 	}
 	if !dbModel.ProviderID.Valid {

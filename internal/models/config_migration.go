@@ -83,21 +83,32 @@ func storedConfigVersion(raw []byte) int {
 }
 
 // upgradeNeedsClientType reports whether the version 1 upgrade of a stored
-// config reads the provider's client type: only a switch advertised by the
-// enabled token alone, whose off answer depends on the protocol. Every other
-// row upgrades the same on every protocol, so callers skip the lookup.
-func upgradeNeedsClientType(raw []byte) bool {
-	if storedConfigVersion(raw) >= ModelConfigSchemaVersion {
-		return false
-	}
+// config reads the provider's client type; see legacyNeedsClientType.
+func upgradeNeedsClientType(raw []byte, modelID string) bool {
+	return storedConfigVersion(raw) < ModelConfigSchemaVersion && legacyNeedsClientType(raw, modelID)
+}
+
+// legacyNeedsClientType reports whether upgrading version 1 fields reads the
+// provider's client type: a switch advertised by the enabled token alone, whose
+// off answer depends on the protocol, and a toggle declared for a Claude id
+// that would otherwise be written as adaptive (see declaredToggleDialect).
+// Every other config upgrades the same on every protocol, so callers skip the
+// lookup.
+func legacyNeedsClientType(raw []byte, modelID string) bool {
 	var head struct {
 		ReasoningEfforts []string `json:"reasoning_efforts"`
+		ThinkingMode     string   `json:"thinking_mode"`
+		ReasoningDialect string   `json:"reasoning_dialect"`
 	}
 	if err := json.Unmarshal(raw, &head); err != nil {
 		return false
 	}
 	advertised := reasoning.NormalizeAdvertised(head.ReasoningEfforts)
-	return slices.Contains(advertised, reasoning.EffortEnabled) && !slices.Contains(advertised, reasoning.EffortDisable)
+	if slices.Contains(advertised, reasoning.EffortEnabled) && !slices.Contains(advertised, reasoning.EffortDisable) {
+		return true
+	}
+	return head.ThinkingMode == reasoning.ModeToggle && head.ReasoningDialect == "" &&
+		reasoning.ResolveMode("", true, modelID) == reasoning.ModeAdaptive
 }
 
 // configNeedsWriteBack reports whether a stored config is older than the
@@ -148,31 +159,144 @@ var legacyOnlyKeys = []string{
 	"reasoning_off_support", "reasoning_default_on", "thinking_budget_min", "thinking_budget_max",
 }
 
+// requestShape is how DecodeRequestModelConfig reads a request's config.
+type requestShape int
+
+const (
+	// requestVersioned is read by its schema_version, as a stored config is.
+	requestVersioned requestShape = iota
+	// requestCurrent is the current shape sent without a schema_version.
+	requestCurrent
+	// requestLegacy is version 1: no schema_version, and version 1 keys.
+	requestLegacy
+	// requestLegacyEdit is an older client's edit of a current config; see
+	// mergeLegacyEdit.
+	requestLegacyEdit
+)
+
+func requestConfigShape(raw []byte) requestShape {
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &keys); err != nil || keys == nil {
+		return requestVersioned
+	}
+	_, versioned := keys["schema_version"]
+	legacy := false
+	for _, key := range legacyOnlyKeys {
+		if _, ok := keys[key]; ok {
+			legacy = true
+			break
+		}
+	}
+	switch {
+	case versioned && legacy && storedConfigVersion(raw) >= ModelConfigSchemaVersion:
+		return requestLegacyEdit
+	case versioned:
+		return requestVersioned
+	case legacy:
+		return requestLegacy
+	default:
+		return requestCurrent
+	}
+}
+
 // DecodeRequestModelConfig reads a config sent by an API client. A stored
 // config without schema_version is version 1, but a client may send the
 // current shape and leave the version out, so a request without one is read as
-// version 1 only when it uses a key that only version 1 has.
+// version 1 only when it uses a key that only version 1 has. A request with
+// both the current version and version 1 keys comes from an older client
+// editing a current config; see mergeLegacyEdit.
 func DecodeRequestModelConfig(raw []byte, ctx ConfigContext) (ModelConfig, error) {
-	var keys map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &keys); err == nil && keys != nil {
-		if _, ok := keys["schema_version"]; !ok {
-			legacy := false
-			for _, key := range legacyOnlyKeys {
-				if _, ok := keys[key]; ok {
-					legacy = true
-					break
-				}
+	switch requestConfigShape(raw) {
+	case requestCurrent:
+		var config ModelConfig
+		if err := json.Unmarshal(raw, &config); err != nil {
+			return ModelConfig{}, fmt.Errorf("decode model config: %w", err)
+		}
+		return normalizeModelConfig(config), nil
+	case requestLegacyEdit:
+		return mergeLegacyEdit(raw, ctx)
+	default:
+		return DecodeModelConfig(raw, ctx)
+	}
+}
+
+// RequestConfigNeedsClientType reports whether DecodeRequestModelConfig reads
+// the provider's client type for this request: it goes through the version 1
+// upgrade, and that upgrade depends on the protocol.
+func RequestConfigNeedsClientType(raw []byte, modelID string) bool {
+	switch requestConfigShape(raw) {
+	case requestLegacy, requestLegacyEdit:
+		return legacyNeedsClientType(raw, modelID)
+	case requestVersioned:
+		return upgradeNeedsClientType(raw, modelID)
+	default:
+		return false
+	}
+}
+
+// mergeLegacyEdit reads an older client's edit of a current config. That
+// client copies the config it was served, schema_version included, and writes
+// its edits in version 1 keys. It was served no version 1 keys, so its form
+// opened with every capability and effort unset: a capability it sends is one
+// the user checked, and one it leaves out was never shown as on. The edit is
+// therefore applied on top of the current config and only adds: capabilities
+// it names are turned on, its effort list replaces the levels, and nothing it
+// omits is removed. Keys the two versions share, such as the description and
+// the limits, are already the client's values.
+func mergeLegacyEdit(raw []byte, ctx ConfigContext) (ModelConfig, error) {
+	var current ModelConfig
+	if err := json.Unmarshal(raw, &current); err != nil {
+		return ModelConfig{}, fmt.Errorf("decode model config: %w", err)
+	}
+	var v1 LegacyModelConfig
+	if err := json.Unmarshal(raw, &v1); err != nil {
+		return ModelConfig{}, fmt.Errorf("decode model config: %w", err)
+	}
+	out := normalizeModelConfig(current)
+	if ctx.Type != "" && ctx.Type != ModelTypeChat {
+		return out, nil
+	}
+	edit := v1.Upgrade(ctx)
+	has := func(token string) bool { return slices.Contains(v1.Compatibilities, token) }
+	addModality := func(list []Modality, m Modality) []Modality {
+		if slices.Contains(list, m) {
+			return list
+		}
+		return append(list, m)
+	}
+	if has(CompatVision) || has(CompatFileInput) || has(CompatImageOutput) {
+		if out.Modalities == nil {
+			out.Modalities = &ModelModalities{Input: []Modality{ModalityText}, Output: []Modality{ModalityText}}
+		}
+		modalities := *out.Modalities
+		if has(CompatVision) {
+			modalities.Input = addModality(modalities.Input, ModalityImage)
+		}
+		if has(CompatFileInput) {
+			modalities.Input = addModality(modalities.Input, ModalityPDF)
+		}
+		if has(CompatImageOutput) {
+			modalities.Output = addModality(modalities.Output, ModalityImage)
+		}
+		out.Modalities = &modalities
+	}
+	out.ToolCall = out.ToolCall || edit.ToolCall
+	if edit.Reasoning != nil {
+		if out.Reasoning == nil {
+			out.Reasoning = edit.Reasoning
+		} else if len(v1.ReasoningEfforts) > 0 {
+			// The effort list is the version 1 switch as well as the levels; an
+			// off it implies (see upgradeReasoningV1) comes along with them.
+			r := *out.Reasoning
+			r.Efforts = edit.Reasoning.Efforts
+			r.Toggle = edit.Reasoning.Toggle
+			if edit.Reasoning.Off != "" {
+				r.Off = edit.Reasoning.Off
 			}
-			if !legacy {
-				var config ModelConfig
-				if err := json.Unmarshal(raw, &config); err != nil {
-					return ModelConfig{}, fmt.Errorf("decode model config: %w", err)
-				}
-				return normalizeModelConfig(config), nil
-			}
+			out.Reasoning = &r
 		}
 	}
-	return DecodeModelConfig(raw, ctx)
+	return normalizeModelConfig(out), nil
 }
 
 // LegacyModelConfig is the version 1 shape. Capabilities were a token list,
@@ -297,7 +421,31 @@ func upgradeReasoningV1(v1 LegacyModelConfig, hasReasoning bool, ctx ConfigConte
 	if v1.ThinkingBudgetMin != nil || v1.ThinkingBudgetMax != nil {
 		r.Budget = &ReasoningBudget{Min: v1.ThinkingBudgetMin, Max: v1.ThinkingBudgetMax}
 	}
+	if r.Dialect == "" && v1.ThinkingMode == reasoning.ModeToggle &&
+		reasoning.ResolveMode("", true, ctx.ModelID) == reasoning.ModeAdaptive {
+		r.Dialect = declaredToggleDialect(ctx.ClientType, len(r.Efforts) > 0)
+	}
 	return r
+}
+
+// declaredToggleDialect names the wire a toggle declared for a Claude 4.6+ id
+// took in version 1 on a protocol. Create and Update give such an id the
+// adaptive dialect when none is stated (see inferUndeclaredDialect), the
+// inference version 1 made only for an undeclared thinking mode; recording the
+// wire keeps a declared toggle a toggle once it is written. Anthropic Messages
+// sent thinking{type:"enabled"} with a token budget, and the OpenAI protocols
+// send a tier as the reasoning effort, where the dialect is not read. Elsewhere
+// the dialect changes the request, so it stays unstated.
+func declaredToggleDialect(clientType string, hasEfforts bool) string {
+	switch ClientType(clientType) {
+	case ClientTypeAnthropicMessages:
+		return reasoning.DialectBudget
+	case ClientTypeOpenAICompletions, ClientTypeOpenAIResponses, ClientTypeOpenAICodex, ClientTypeGitHubCopilot:
+		if hasEfforts {
+			return reasoning.DialectTier
+		}
+	}
+	return ""
 }
 
 // Legacy reads the config back in the version 1 vocabulary, as the version 1

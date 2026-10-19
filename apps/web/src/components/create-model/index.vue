@@ -637,7 +637,8 @@ function toggleModality(direction: 'input' | 'output', modality: CapabilityForm[
 
 // The server refuses a budget whose maximum is not positive or below the
 // minimum; the form says so inline and holds the submit until it is fixed.
-const budgetError = computed(() => reasoningBudgetError(reasoning.value))
+// Only a chat model saves reasoning, so another type is never held by it.
+const budgetError = computed(() => selectedType.value === 'chat' ? reasoningBudgetError(reasoning.value) : undefined)
 
 const canSubmit = computed(() => {
   if (budgetError.value) return false
