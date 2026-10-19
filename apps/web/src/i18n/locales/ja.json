@@ -1876,7 +1876,7 @@
     "sourcePreviewLoading": "models.dev からモデル一覧を読み込んでいます…",
     "importFromCatalog": "models.dev のカタログからインポート",
     "importFromEndpoint": "プロバイダーのエンドポイントから取得",
-    "importFromCatalogHint": "カタログにあって未登録のモデルを無効の状態で追加し、既存のモデルは機能情報だけを更新します。有効・無効と説明はそのままです。",
+    "importFromCatalogHint": "カタログにあって未登録のモデルを無効の状態で追加します。既存のモデルはカタログに合わせて更新しますが、手動で有効にした機能や調整した推論設定は元に戻しません。有効・無効と説明はそのままです。",
     "clientType": "クライアントの種類",
     "clientTypePlaceholder": "クライアントの種類を選択してください",
     "typeRequired": "種類を選択してください",

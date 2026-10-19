@@ -1907,7 +1907,7 @@
     "sourcePreviewLoading": "Loading the model list from models.dev…",
     "importFromCatalog": "Import from the models.dev catalog",
     "importFromEndpoint": "List the provider's endpoint",
-    "importFromCatalogHint": "Adds the catalog models you do not have, disabled, and updates what the catalog says about the rest. Whether a model is enabled and its description stay as they are.",
+    "importFromCatalogHint": "Adds the catalog models you do not have, disabled. Existing models are updated from the catalog without taking away capabilities you turned on or reasoning settings you adjusted; whether they are enabled and their descriptions stay as they are.",
     "clientType": "Client Type",
     "clientTypePlaceholder": "Select client type",
     "typeRequired": "Type is required",
