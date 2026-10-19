@@ -356,3 +356,71 @@ func TestSectionSplitHelpersRejectMissingAnchors(t *testing.T) {
 		t.Fatal("expected cutModeContractTmpl error")
 	}
 }
+
+func TestGenerateSystemSectionsOutputFormattingFollowsPlatform(t *testing.T) {
+	t.Parallel()
+
+	findSection := func(sections []SystemSection) *SystemSection {
+		for i := range sections {
+			if sections[i].ID == sectionIDOutputFormatting {
+				return &sections[i]
+			}
+		}
+		return nil
+	}
+
+	for _, platform := range []string{"web", "local", "telegram", "Telegram "} {
+		t.Run("present/"+platform, func(t *testing.T) {
+			t.Parallel()
+			sections := GenerateSystemSections(SystemPromptParams{
+				SessionType: sessionmode.Chat,
+				Timezone:    "UTC",
+				Platform:    platform,
+			})
+			section := findSection(sections)
+			if section == nil {
+				t.Fatalf("missing %s section for platform %q", sectionIDOutputFormatting, platform)
+			}
+			if section.Kind != contextfrag.KindSystemPrompt || section.Priority != priorityOutputFormatting ||
+				section.RetentionTier != contextfrag.RetentionPreferred {
+				t.Fatalf("section = %#v", *section)
+			}
+			if !strings.Contains(section.Text, "Output formatting") || !strings.Contains(section.Text, "\\(...\\)") {
+				t.Fatalf("section text = %q", section.Text)
+			}
+			params := SystemPromptParams{SessionType: sessionmode.Chat, Timezone: "UTC", Platform: platform}
+			if got := GenerateSystemPrompt(params); got != renderSystemSections(GenerateSystemSections(params)) {
+				t.Fatalf("GenerateSystemPrompt/renderSystemSections diverged for platform %q", platform)
+			}
+			if !strings.Contains(GenerateSystemPrompt(params), section.Text) {
+				t.Fatalf("rendered prompt missing output formatting section for platform %q", platform)
+			}
+		})
+	}
+
+	for _, platform := range []string{"", "discord", "feishu", "cli"} {
+		t.Run("absent/"+platform, func(t *testing.T) {
+			t.Parallel()
+			sections := GenerateSystemSections(SystemPromptParams{
+				SessionType: sessionmode.Chat,
+				Timezone:    "UTC",
+				Platform:    platform,
+			})
+			if findSection(sections) != nil {
+				t.Fatalf("unexpected %s section for platform %q", sectionIDOutputFormatting, platform)
+			}
+		})
+	}
+
+	t.Run("absent/subagent", func(t *testing.T) {
+		t.Parallel()
+		sections := GenerateSystemSections(SystemPromptParams{
+			SessionType: sessionmode.Subagent,
+			Timezone:    "UTC",
+			Platform:    "web",
+		})
+		if findSection(sections) != nil {
+			t.Fatalf("unexpected %s section for subagent session", sectionIDOutputFormatting)
+		}
+	})
+}

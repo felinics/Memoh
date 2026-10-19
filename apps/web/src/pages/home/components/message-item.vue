@@ -244,6 +244,7 @@
                      not long documents. -->
                 <MarkdownRender
                   :content="node.block.content"
+                  :custom-markdown-it="withLiteralSingleDollars"
                   :is-dark="isDark"
                   mode="chat"
                   :smooth-streaming="isBlockStreaming(node.index)"
@@ -433,6 +434,7 @@ import type {
 } from '@/store/chat-list'
 import { structuredToolResult } from '@/store/chat-list.normalize'
 import { runtimeGoalObjective } from '@/utils/runtime-slash-commands'
+import { withLiteralSingleDollars } from '@/utils/markdown-dollar'
 
 import { resolveUrl } from '../composables/useMediaGallery'
 import { useElementVisibility } from '@vueuse/core'

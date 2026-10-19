@@ -32,6 +32,7 @@ const (
 	sectionIDBody             = "system.prompt.body"
 	sectionIDTail             = "system.prompt.tail"
 	sectionIDPlatformIdentity = "system.platform_identity"
+	sectionIDOutputFormatting = "system.output_formatting"
 	sectionIDSkills           = "system.skills"
 	sectionIDSkill            = "system.skill"
 	sectionIDWorkspaceFile    = "system.workspace_file"
@@ -45,6 +46,7 @@ const (
 	priorityBotIdentity           = 20
 	priorityBody                  = 30
 	priorityTail                  = 50
+	priorityOutputFormatting      = 55
 	priorityPlatformIdentity      = 60
 	prioritySkills                = 65
 	priorityWorkspaceInstructions = 70
@@ -97,6 +99,13 @@ func GenerateSystemSections(params SystemPromptParams) []SystemSection {
 
 	if isSubagent {
 		return sections
+	}
+
+	if tools.PlatformRendersMarkdownMath(params.Platform) {
+		sections = append(sections, SystemSection{
+			ID: sectionIDOutputFormatting, Kind: contextfrag.KindSystemPrompt, Priority: priorityOutputFormatting,
+			RetentionTier: contextfrag.RetentionPreferred, Text: strings.TrimSpace(includes["_output_formatting"]),
+		})
 	}
 
 	if items := buildSkillPromptItems(params.Skills); len(items) > 0 {

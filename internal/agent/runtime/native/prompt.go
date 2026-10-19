@@ -39,8 +39,9 @@ func init() {
 	scheduleTmpl = mustReadPrompt("prompts/schedule.md")
 
 	includes = map[string]string{
-		"_memory":     mustReadPrompt("prompts/_memory.md"),
-		"_identities": mustReadPrompt("prompts/_identities.md"),
+		"_memory":            mustReadPrompt("prompts/_memory.md"),
+		"_identities":        mustReadPrompt("prompts/_identities.md"),
+		"_output_formatting": mustReadPrompt("prompts/_output_formatting.md"),
 	}
 
 	systemCommonTmpl = resolveIncludes(systemCommonTmpl)
@@ -103,6 +104,7 @@ func GenerateSystemPrompt(params SystemPromptParams) string {
 // SystemPromptParams holds all inputs for system prompt generation.
 type SystemPromptParams struct {
 	SessionType               string
+	Platform                  string
 	Bot                       BotInfo
 	Skills                    []SkillEntry
 	Files                     []SystemFile
