@@ -9,6 +9,17 @@
          the hint — there the lift comes from useVirtualKeyboard instead. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
     <title>Memoh</title>
+    <!-- Home-screen install on mobile. Icons are generated from logo.svg by
+         `pnpm --filter @memohai/web icons`. The theme-color pair is the initial
+         guess from the OS preference (memoh scheme --background); the settings
+         store replaces it with the resolved app background once the app boots. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Memoh" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#faf8f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#060606" media="(prefers-color-scheme: dark)" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" />

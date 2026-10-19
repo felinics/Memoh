@@ -5,6 +5,7 @@ import { useColorMode, useStorage } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import type { BundledTheme } from 'shiki'
 import { isColorSchemeId, type ColorSchemeId } from '@/constants/color-schemes'
+import { syncThemeColorWithBackground } from '@/utils/theme-color'
 import {
   applyTypographyVariables,
   cssFontFamilyDeclaration,
@@ -120,6 +121,14 @@ export const useSettingsStore = defineStore('settings', () => {
       return
     }
     applyColorScheme(value)
+  }, { immediate: true })
+
+  // The light/dark class (useColorMode) and data-color-scheme both change the
+  // page background. Read it a frame later so both have been applied, including
+  // on the first run during store setup.
+  watch([resolvedColorMode, colorScheme], () => {
+    if (typeof requestAnimationFrame === 'undefined') return
+    requestAnimationFrame(syncThemeColorWithBackground)
   }, { immediate: true })
 
   watch([uiFontFamily, codeFontFamily, uiFontSizePx, codeFontSizePx], () => {
