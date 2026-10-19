@@ -1,6 +1,6 @@
 import { h } from 'vue'
 import type { LucideIcon } from 'lucide-vue-next'
-import { createLucideIcon, Paperclip, SquareArrowOutUpRight, Plus, ChevronDown, ChevronLeft, ChevronRight, PanelLeftOpen, PanelLeftClose, Terminal, Globe, Columns2, Rows2, ChartNoAxesColumn, Info, Users } from 'lucide-vue-next'
+import { createLucideIcon, Paperclip, SquareArrowOutUpRight, Plus, ChevronDown, ChevronLeft, ChevronRight, PanelLeftOpen, PanelLeftClose, Terminal, Globe, Columns2, Rows2, Gauge, Info, Users } from 'lucide-vue-next'
 
 // Keep the default visual weight consistent across authored and Lucide glyphs.
 function withUiStroke(icon: LucideIcon): LucideIcon {
@@ -78,7 +78,9 @@ export const OpenInTabIcon = withUiStroke(SquareArrowOutUpRight)
 
 // Account-menu set (sidebar footer): plain lucide glyphs lifted to the shared
 // 1.75 stroke so the menu matches surfaces built from this module.
-export const UsageIcon = withUiStroke(ChartNoAxesColumn)
+// Usage is the same gauge the settings sidebar uses for its Usage page, so the
+// menu entry and the page it leads to carry one mark.
+export const UsageIcon = withUiStroke(Gauge)
 export const InfoIcon = withUiStroke(Info)
 export const UsersIcon = withUiStroke(Users)
 // Lucide LogOut (ISC): coordinates scaled 0.875 about the frame center
