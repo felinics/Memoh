@@ -15,7 +15,7 @@ import {
 import { MANUAL_LLM_CLIENT_TYPE_LIST } from '@/constants/client-types'
 import type { ProviderPreset } from '@/constants/provider-presets'
 import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
-import { modelSourceLogo, providerSourceMetadata } from '@/constants/model-sources'
+import { modelSourceLogo, providerCatalogEntry, providerSourceMetadata } from '@/constants/model-sources'
 import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
 import { findPresetEntry } from './provider-setup'
 
@@ -198,12 +198,15 @@ export function useProviderSetup(options: {
           if (!isApiErrorCode(error, 'provider.name_taken')) throw error
 
           // Retrying onboarding reuses the provider it created, recognised by
-          // its protocol; another provider with the name is not overwritten.
+          // the gallery entry it was made from (or the former template that
+          // entry replaced). Another provider with the name, such as one the
+          // user made by hand with the same protocol, is not overwritten.
           const { data: existing } = await getProvidersNameByName({
             path: { name },
             throwOnError: true,
           })
-          if (!existing?.id || existing.client_type !== clientType) throw error
+          if (!existing?.id || !entry || providerCatalogEntry(existing)?.id !== entry.id
+            || existing.client_type !== clientType) throw error
 
           await putProvidersById({
             path: { id: existing.id },

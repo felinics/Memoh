@@ -616,6 +616,11 @@ const props = withDefaults(defineProps<{
   size: 'default',
 })
 
+const emit = defineEmits<{
+  // A model was added; editing one does not emit.
+  created: []
+}>()
+
 const form = useForm({
   validationSchema: formSchema,
   initialValues: {
@@ -761,6 +766,7 @@ async function addModel() {
       fallbackMessage: t('common.saveFailed'),
       onSuccess: () => {
         open.value = false
+        if (!isEdit) emit('created')
       },
     },
   )

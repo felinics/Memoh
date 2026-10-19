@@ -143,6 +143,35 @@ describe('useProviderSetup', () => {
     app.unmount()
   })
 
+  it('never reuses a same-name provider of the same protocol made by hand', async () => {
+    mocks.postProvider.mockRejectedValue({ code: 'provider.name_taken' })
+    mocks.getProviderByName.mockResolvedValue({ data: { id: 'custom-provider-id', client_type: 'openai-completions', metadata: {} } })
+    const { app, ready, setup } = mountSetup(preset)
+    setup.formValues.value.api_key = 'sk-test'
+
+    await setup.saveAndNext()
+
+    expect(mocks.updateProvider).not.toHaveBeenCalled()
+    expect(ready).not.toHaveBeenCalled()
+    app.unmount()
+  })
+
+  it('reuses the provider an earlier run made from the same entry', async () => {
+    mocks.postProvider.mockRejectedValue({ code: 'provider.name_taken' })
+    mocks.getProviderByName.mockResolvedValue({
+      data: { id: 'earlier-id', client_type: 'openai-completions', metadata: { catalog: 'deepseek', source: 'deepseek' } },
+    })
+    mocks.updateProvider.mockResolvedValue({ data: { id: 'earlier-id' } })
+    const { app, ready, setup } = mountSetup(preset)
+    setup.formValues.value.api_key = 'sk-test'
+
+    await setup.saveAndNext()
+
+    expect(mocks.updateProvider).toHaveBeenCalledWith(expect.objectContaining({ path: { id: 'earlier-id' } }))
+    expect(ready).toHaveBeenCalledWith({ providerId: 'earlier-id' })
+    app.unmount()
+  })
+
   it.each([
     'openai-responses',
     'openai-completions',

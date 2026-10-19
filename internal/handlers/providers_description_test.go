@@ -263,24 +263,71 @@ func TestRefreshFromCatalogKeepsTheUsersChoices(t *testing.T) {
 	}
 }
 
-// A provider created from the gallery records its catalog entry and its
-// models.dev source in its metadata. Its endpoint-only models are as unknown
-// as a template provider's and must not receive protocol-wide capability
-// guesses.
-func TestCatalogMetadataDisablesImplicitCapabilityDefaults(t *testing.T) {
+// A gallery provider with a models.dev source imports that source's models, so
+// the models its endpoint lists beyond them are as unknown as a template
+// provider's and must not receive protocol-wide capability guesses. An entry
+// without a source has only its endpoint, and its models get the defaults the
+// gallery sends, as a custom provider's do.
+func TestCatalogSourceDisablesImplicitCapabilityDefaults(t *testing.T) {
 	t.Parallel()
 
 	for _, metadata := range []map[string]any{
 		{"catalog": "openai", "source": "openai"},
-		{"catalog": "ollama"},
 		{"source": "deepinfra"},
 	} {
 		if allowCustomModelCapabilityDefaults(providers.GetResponse{Metadata: metadata}) {
 			t.Fatalf("provider with metadata %v must not receive implicit capability defaults", metadata)
 		}
 	}
-	if !allowCustomModelCapabilityDefaults(providers.GetResponse{Metadata: map[string]any{"catalog": " ", "other": "x"}}) {
-		t.Fatal("blank catalog metadata must not count as a catalog")
+	for _, metadata := range []map[string]any{
+		{"catalog": "ollama"},
+		{"catalog": "new-api"},
+		{"source": " ", "other": "x"},
+	} {
+		if !allowCustomModelCapabilityDefaults(providers.GetResponse{Metadata: metadata}) {
+			t.Fatalf("provider with metadata %v must receive the capability defaults", metadata)
+		}
+	}
+}
+
+// A refresh cannot tell the user's edits from what an earlier import wrote, so
+// it never takes a capability away, and keeps what the edit form tunes: the
+// budget range, the defaults and the replay field.
+func TestRefreshFromCatalogKeepsTheUsersEdits(t *testing.T) {
+	t.Parallel()
+
+	minBudget, maxBudget, window := 1024, 8192, 400000
+	enabled := true
+	existing := models.ModelConfig{
+		ToolCall:   true,
+		Modalities: &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityAudio}, Output: []models.Modality{models.ModalityText}},
+		Reasoning: &models.ModelReasoning{
+			Efforts: []string{"low"},
+			Budget:  &models.ReasoningBudget{Min: &minBudget, Max: &maxBudget},
+			Default: &models.ReasoningDefault{Enabled: &enabled},
+			Replay:  &models.ReasoningReplay{Field: models.ReasoningReplayDetails},
+		},
+	}
+	catalog := models.ModelConfig{
+		ContextWindow: &window,
+		Modalities:    &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityImage}, Output: []models.Modality{models.ModalityText}},
+		Reasoning:     &models.ModelReasoning{Efforts: []string{"low", "high"}, Toggle: true, Off: reasoning.OffSupportAccepted, Dialect: reasoning.DialectTier},
+	}
+
+	got, changed := refreshFromCatalog("m", existing, catalog)
+	if !changed || !got.ToolCall || !got.Accepts(models.ModalityAudio) || !got.Accepts(models.ModalityImage) ||
+		got.ContextWindow == nil || *got.ContextWindow != window {
+		t.Fatalf("refreshed = %+v, changed %v", got, changed)
+	}
+	r := got.Reasoning
+	if r == nil || !slices.Equal(r.Efforts, []string{"low", "high"}) || !r.Toggle || r.Off != reasoning.OffSupportAccepted ||
+		r.Budget == nil || *r.Budget.Max != maxBudget || r.Default == nil || r.Replay == nil || r.Replay.Field != models.ReasoningReplayDetails {
+		t.Fatalf("reasoning = %+v", r)
+	}
+
+	kept, _ := refreshFromCatalog("m", existing, models.ModelConfig{ContextWindow: &window})
+	if kept.Reasoning == nil || !kept.ToolCall {
+		t.Fatalf("a catalog without reasoning or tool calling took them away: %+v", kept)
 	}
 }
 

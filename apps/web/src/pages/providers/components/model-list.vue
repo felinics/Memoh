@@ -39,6 +39,7 @@
           :ensure-provider-id="ensureProviderId"
           :client-type="clientType"
           size="sm"
+          @created="$emit('created')"
         />
       </div>
     </div>
@@ -185,6 +186,7 @@ const props = defineProps<{
 defineEmits<{
   edit: [model: ModelsGetResponse]
   delete: [id: string]
+  created: []
 }>()
 
 const searchQuery = ref('')

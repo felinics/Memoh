@@ -72,6 +72,7 @@
         :delete-model-loading="deleteModelLoading"
         @edit="handleEditModel"
         @delete="deleteModel"
+        @created="importCatalogAfterAdd"
       />
     </div>
   </SettingsShell>
@@ -248,15 +249,17 @@ async function ensureOAuthProvider(): Promise<ProvidersGetResponse> {
 const providerForm = useTemplateRef('providerForm')
 
 // Adding a model to a draft creates the provider first, from the
-// form's current (possibly unsaved) values. Models are not imported here:
-// without an API key the endpoint cannot be listed.
+// form's current (possibly unsaved) values. A source's catalog needs no API
+// key, so it comes along, but only once the user's model exists: importing it
+// first would create that model from the catalog and refuse the user's as a
+// duplicate. An endpoint is listed later, once the key is saved.
+let catalogPendingAdd: ProvidersGetResponse | null = null
+
 async function ensureProviderId(): Promise<string> {
   const provider = curProvider.value
   if (!provider) throw new Error('provider is missing')
   if (provider.id) return provider.id
 
-  // A source's catalog needs no API key, so its models come along; listing an
-  // endpoint's models has to wait for the key.
   const created = await materializeProvider(
     providerForm.value?.draftPayload() ?? {
       name: provider.name,
@@ -264,10 +267,24 @@ async function ensureProviderId(): Promise<string> {
       metadata: provider.metadata ?? {},
     },
     provider.enable !== false,
-    !!providerSource(provider),
+    false,
   )
   if (!created.id) throw new Error('provider creation returned no id')
+  catalogPendingAdd = providerSource(provider) ? created : null
   return created.id
+}
+
+// The catalog import refreshes the user's model like any it already has,
+// which only adds what the catalog says it can do.
+async function importCatalogAfterAdd() {
+  const provider = catalogPendingAdd
+  catalogPendingAdd = null
+  if (!provider) return
+  try {
+    await importProviderModels(provider)
+  } catch {
+    toast.error(t('models.importFailed'))
+  }
 }
 
 async function handleToggleEnable(value: boolean) {

@@ -118,7 +118,14 @@ describe('providers and entries', () => {
     expect(providerCatalogEntry({ metadata: { registry: { source: 'qwen.yaml' } } })?.id).toBe('alibaba-cn')
     expect(providerCatalogEntry({ metadata: { preset: { source: 'codex.yaml' } } })?.id).toBe('codex')
     expect(providerCatalogEntry({ metadata: {} })).toBeUndefined()
+    // An entry id a later release dropped falls through to what else is recorded.
+    expect(providerCatalogEntry({ metadata: { catalog: 'gone', source: 'deepinfra' } })?.id).toBe('deepinfra')
+    expect(providerCatalogEntry({ metadata: { catalog: 'gone', registry: { source: 'qwen.yaml' } } })?.id).toBe('alibaba-cn')
+    expect(providerCatalogEntry({ metadata: { catalog: 'gone' } })).toBeUndefined()
     expect(providerSource({ metadata: { source: 'xai' } })).toBe('xai')
+    // A local server lists the models the user loaded, so it imports from its endpoint.
+    expect(providerSource({ metadata: { catalog: 'lmstudio' } })).toBeUndefined()
+    expect(modelSourceLogo(findModelSource('lmstudio')!)).toBe('https://models.dev/logos/lmstudio.svg')
     expect(providerSource({ metadata: { catalog: 'ollama' } })).toBeUndefined()
     // A provider from a former template imports through its entry's source.
     expect(providerSource({ metadata: { registry: { source: 'qwen.yaml' } } })).toBe('alibaba-cn')

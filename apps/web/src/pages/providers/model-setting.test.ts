@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   importProviderModels: vi.fn(),
   draftPayload: vi.fn(),
   canListModels: vi.fn(),
+  modelList: {} as { ensureProviderId?: () => Promise<string>, created?: () => void },
 }))
 
 async function flushPromises() {
@@ -73,8 +74,16 @@ vi.mock('./components/provider-form.vue', () => ({
 vi.mock('./components/model-list.vue', () => ({
   // eslint-disable-next-line vue/one-component-per-file -- Test double for the child list.
   default: defineComponent({
-    props: { providerId: { type: String, default: undefined } },
-    setup: () => () => h('div', { 'data-testid': 'model-list' }),
+    props: {
+      providerId: { type: String, default: undefined },
+      ensureProviderId: { type: Function, default: undefined },
+    },
+    emits: ['created'],
+    setup: (props, { emit }) => {
+      mocks.modelList.ensureProviderId = props.ensureProviderId as (() => Promise<string>) | undefined
+      mocks.modelList.created = () => emit('created')
+      return () => h('div', { 'data-testid': 'model-list' })
+    },
   }),
 }))
 vi.mock('lucide-vue-next', () => ({
@@ -207,6 +216,25 @@ describe('provider draft enable', () => {
     expect(view.provider.value.enable).toBe(true)
 
     view.unmount()
+  })
+
+  it('imports a source draft\'s catalog only after a hand-added model exists', async () => {
+    const setting = await mountSetting(sourceDraft())
+
+    await expect(mocks.modelList.ensureProviderId?.()).resolves.toBe('created-provider')
+    await flushPromises()
+    expect(mocks.postProviders).toHaveBeenCalledOnce()
+    expect(mocks.importProviderModels).not.toHaveBeenCalled()
+
+    mocks.modelList.created?.()
+    await flushPromises()
+    expect(mocks.importProviderModels).toHaveBeenCalledOnce()
+    expect(mocks.importProviderModels.mock.calls[0]![0]).toMatchObject({ id: 'created-provider' })
+
+    mocks.modelList.created?.()
+    await flushPromises()
+    expect(mocks.importProviderModels).toHaveBeenCalledOnce()
+    setting.unmount()
   })
 
   it('creates an endpoint draft without importing when the form cannot list models', async () => {

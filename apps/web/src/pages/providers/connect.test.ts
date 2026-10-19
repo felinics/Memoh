@@ -206,4 +206,23 @@ describe('provider connect page', () => {
     expect(mocks.postProviders.mock.calls[0]![0].body.metadata).toBeUndefined()
     app.unmount()
   })
+
+  it('lists an unknown endpoint\'s models without capability guesses', async () => {
+    const { app, root } = await mountPage(linkFor({ name: 'Gateway A' }))
+    root.querySelectorAll('button')[1]?.click()
+    await vi.waitFor(() => expect(mocks.replace).toHaveBeenCalled())
+
+    expect(mocks.postProvidersByIdImportModels.mock.calls[0]![0].body).toBeUndefined()
+    app.unmount()
+  })
+
+  it('imports a gallery entry without a source with the protocol defaults', async () => {
+    mocks.postProviders.mockResolvedValue({ data: { id: 'created-id', client_type: 'openai-completions', metadata: { catalog: 'newapi' } } })
+    const { app, root } = await mountPage(linkFor({ name: 'Gateway A', template: 'newapi' }))
+    root.querySelectorAll('button')[1]?.click()
+    await vi.waitFor(() => expect(mocks.replace).toHaveBeenCalled())
+
+    expect(mocks.postProvidersByIdImportModels.mock.calls[0]![0].body).toEqual({ default_compatibilities: ['tool-call', 'reasoning'] })
+    app.unmount()
+  })
 })

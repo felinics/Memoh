@@ -9,6 +9,8 @@
 // did not answer like an API when checked are left out until someone verifies
 // them. The integrations Memoh implements itself (Codex, GitHub Copilot,
 // OpenCode Go) and self-hosted gateways come from the former provider templates.
+// A local server (Ollama, LM Studio) has no source even where models.dev lists
+// one: it serves the models the user loaded, which only its endpoint knows.
 export type ModelSourceClientType =
   | 'openai-completions'
   | 'openai-responses'
@@ -121,7 +123,7 @@ export const MODEL_SOURCES: readonly ModelSource[] = [
   { id: 'llmgateway-providers', source: 'llmgateway-providers', name: 'LLM Gateway', client_type: 'openai-completions', base_url: 'https://api.llmgateway.io/v1' },
   { id: 'llmtech', source: 'llmtech', name: 'LLM Tech', client_type: 'openai-completions', base_url: 'https://api.llmtech.eu/v1' },
   { id: 'llmtr', source: 'llmtr', name: 'LLMTR', client_type: 'openai-completions', base_url: 'https://llmtr.com/v1' },
-  { id: 'lmstudio', source: 'lmstudio', name: 'LM Studio', client_type: 'openai-completions', base_url: 'http://127.0.0.1:1234/v1' },
+  { id: 'lmstudio', name: 'LM Studio', client_type: 'openai-completions', base_url: 'http://127.0.0.1:1234/v1', logo: 'lmstudio' },
   { id: 'longcat', source: 'longcat', name: 'LongCat', client_type: 'openai-completions', base_url: 'https://api.longcat.chat/openai' },
   { id: 'lowrouter', source: 'lowrouter', name: 'LowRouter', client_type: 'openai-completions', base_url: 'https://api.lowrouter.ai/v1' },
   { id: 'lucidquery', source: 'lucidquery', name: 'LucidQuery', client_type: 'openai-completions', base_url: 'https://api.lucidquery.com/v1' },
@@ -352,11 +354,14 @@ export function providerSource(provider: ProviderLike | null | undefined): strin
 
 // The entry a provider was created from: recorded on the provider, or the
 // former template or preset it came from.
+// An entry id a later release dropped falls through to the source and the
+// former template, so the provider keeps its logo and stays configured.
 export function providerCatalogEntry(provider: ProviderLike | null | undefined): ModelSource | undefined {
   const metadata = provider?.metadata ?? {}
-  if (typeof metadata.catalog === 'string') return findModelSource(metadata.catalog)
-  const source = recordedSource(provider)
-  if (source) return findModelSourceBySource(source)
+  const recorded = typeof metadata.catalog === 'string' ? findModelSource(metadata.catalog) : undefined
+  if (recorded) return recorded
+  const bySource = findModelSourceBySource(recordedSource(provider))
+  if (bySource) return bySource
   for (const section of ['preset', 'registry']) {
     const legacy = (metadata[section] as { source?: unknown } | undefined)?.source
     if (typeof legacy === 'string') {

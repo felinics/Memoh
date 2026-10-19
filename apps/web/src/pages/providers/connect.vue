@@ -117,7 +117,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 const router = useRouter()
 const { t } = useI18n()
 const queryCache = useQueryCache()
-const { importProviderModels } = useProviderModelCatalog()
+const { importProviderModels, syncProviderModelCatalog } = useProviderModelCatalog()
 
 const payload = ref<ProviderConnectPayload>()
 const errorReason = ref<ProviderConnectError>()
@@ -190,8 +190,12 @@ async function confirm() {
     if (!created?.id) throw new Error('provider creation returned no id')
 
     // Best-effort: the model list can always be refreshed from the detail page.
+    // A gallery entry imports as the gallery does. An unknown endpoint lists its
+    // models as they are, without the protocol's capability guesses, since the
+    // link says nothing about what they can do.
     try {
-      await importProviderModels(created)
+      if (entry) await importProviderModels(created)
+      else await syncProviderModelCatalog(created.id)
     } catch {
       toast.error(t('models.importFailed'))
     }

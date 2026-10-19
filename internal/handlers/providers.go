@@ -401,6 +401,18 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	}
 	managedCatalog := providers.IsManagedModelCatalogClientType(models.ClientType(provider.ClientType))
 	availableModelIDs := make(map[string]struct{}, len(remoteModels))
+	// A model the provider already has is refreshed in place. Sending it through
+	// Create first would probe an embedding model's dimensions, a billed
+	// request, on every refresh before the duplicate is refused, and a failed
+	// probe would skip the refresh altogether.
+	existingModelIDs := map[string]struct{}{}
+	if existing, err := h.modelsService.ListByProviderID(ctx, id); err != nil {
+		h.logger.WarnContext(ctx, "failed to list provider models before import", slog.Any("error", err))
+	} else {
+		for _, m := range existing {
+			existingModelIDs[m.ModelID] = struct{}{}
+		}
+	}
 
 	// Bulk import lands disabled — the user picks which ones to expose in
 	// model pickers afterward, to avoid flooding bot config with dozens of
@@ -424,6 +436,14 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 		if managedCatalog {
 			available := true
 			discoveredConfig.CatalogAvailable = &available
+		}
+		if _, ok := existingModelIDs[m.ID]; ok {
+			if h.fillExistingModel(ctx, provider.ClientType, id, m.ID, discoveredConfig, managedCatalog && m.CapabilitiesKnown) {
+				resp.Updated++
+			} else {
+				resp.Skipped++
+			}
+			continue
 		}
 		createConfig := discoveredConfig
 		createConfig.Compatibilities = importedCompatibilities(
@@ -528,25 +548,73 @@ func (h *ProvidersHandler) refreshCatalogModel(ctx context.Context, providerID, 
 	return true
 }
 
-// refreshFromCatalog replaces what the catalog describes: modalities, limits,
-// tool calling, structured output and reasoning. A description is filled in
-// only when the model has none. The result is compared in its stored form,
-// since that is what the row holds and what an update would write.
+// refreshFromCatalog brings what the catalog describes up to date without
+// undoing the user's edits, which the row cannot tell apart from what an
+// earlier import wrote. Limits follow the catalog where it states them.
+// Capabilities only grow: a modality, tool calling or structured output that is
+// on stays on, and reasoning the catalog does not list is kept. When both
+// reason, the catalog's controls (levels, toggle, off answer and dialect)
+// replace the stored ones, and the budget range, the defaults and the replay
+// field are kept when set, since those are what the edit form tunes. A
+// description is filled in only when the model has none. The result is compared
+// in its stored form, since that is what the row holds and what an update
+// would write.
 func refreshFromCatalog(modelID string, existing, catalog models.ModelConfig) (models.ModelConfig, bool) {
 	out := existing
-	out.Modalities = catalog.Modalities
-	out.ContextWindow = catalog.ContextWindow
-	out.MaxOutputTokens = catalog.MaxOutputTokens
-	out.ToolCall = catalog.ToolCall
-	out.StructuredOutput = catalog.StructuredOutput
-	out.Reasoning = catalog.Reasoning
+	out.Modalities = unionModalities(existing.Modalities, catalog.Modalities)
+	if catalog.ContextWindow != nil {
+		out.ContextWindow = catalog.ContextWindow
+	}
+	if catalog.MaxOutputTokens != nil {
+		out.MaxOutputTokens = catalog.MaxOutputTokens
+	}
+	out.ToolCall = existing.ToolCall || catalog.ToolCall
+	out.StructuredOutput = existing.StructuredOutput || catalog.StructuredOutput
+	out.Reasoning = refreshedReasoning(existing.Reasoning, catalog.Reasoning)
 	if out.Description == nil || strings.TrimSpace(*out.Description) == "" {
 		out.Description = catalog.Description
 	}
 	out = out.StoredForm(modelID)
-	before, _ := json.Marshal(existing)
-	after, _ := json.Marshal(out)
-	return out, string(before) != string(after)
+	return out, !sameStoredConfig(modelID, existing, out)
+}
+
+func unionModalities(existing, catalog *models.ModelModalities) *models.ModelModalities {
+	if catalog == nil {
+		return existing
+	}
+	if existing == nil {
+		return catalog
+	}
+	union := func(have, add []models.Modality) []models.Modality {
+		out := slices.Clone(have)
+		for _, m := range add {
+			if !slices.Contains(out, m) {
+				out = append(out, m)
+			}
+		}
+		return out
+	}
+	return &models.ModelModalities{Input: union(existing.Input, catalog.Input), Output: union(existing.Output, catalog.Output)}
+}
+
+func refreshedReasoning(existing, catalog *models.ModelReasoning) *models.ModelReasoning {
+	switch {
+	case catalog == nil:
+		return existing
+	case existing == nil:
+		return catalog
+	}
+	r := *catalog
+	if existing.Budget != nil {
+		r.Budget = existing.Budget
+	}
+	if existing.Default != nil {
+		r.Default = existing.Default
+	}
+	if existing.Replay != nil {
+		r.Replay = existing.Replay
+	}
+	return &r
 }
 
 func allowCustomModelCapabilityDefaults(provider providers.GetResponse) bool {
@@ -567,13 +635,13 @@ func allowCustomModelCapabilityDefaults(provider providers.GetResponse) bool {
 			return false
 		}
 	}
-	// A provider created from the gallery records its catalog entry and its
-	// models.dev source. Its endpoint-only models are as unknown as a template
-	// provider's: the catalog did not list them, so nothing says what they do.
-	for _, key := range []string{"catalog", "source"} {
-		if value, _ := provider.Metadata[key].(string); strings.TrimSpace(value) != "" {
-			return false
-		}
+	// A gallery provider with a models.dev source imports that source's models;
+	// one its endpoint lists beyond them is as unknown as a template provider's,
+	// since the catalog did not list it. An entry without a source (Ollama, New
+	// API) has only its endpoint, so its models get the protocol's defaults as a
+	// custom provider's do; the gallery sends them for exactly those.
+	if value, _ := provider.Metadata["source"].(string); strings.TrimSpace(value) != "" {
+		return false
 	}
 	return true
 }
