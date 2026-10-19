@@ -170,6 +170,8 @@ describe('add provider dialog', () => {
     expect(labels).toContain('OpenAI Codex')
     expect(labels).not.toContain('OpenRouter Template')
     expect(labels).toContain('OpenRouter')
+    // The custom entry, then the subscriptions, as in the gallery, then the rest.
+    expect(labels.slice(1, 4)).toEqual(['OpenAI Codex', 'GitHub Copilot', 'OpenCode Go'])
     presetSelect.value = 'source:openrouter'
     presetSelect.dispatchEvent(new Event('change', { bubbles: true }))
     await flushPromises()

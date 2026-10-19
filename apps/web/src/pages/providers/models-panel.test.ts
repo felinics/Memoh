@@ -408,6 +408,21 @@ describe('models panel route state', () => {
     await nextTick()
     expect(cardNames(root)).toEqual(['GitHub Copilot'])
     expect(sectionTitles(root)).toEqual(['provider.gallery.subscriptions'])
+
+    query.value = 'zzzz'
+    await nextTick()
+    expect(cardNames(root)).toEqual([])
+    expect(root.textContent).toContain('provider.searchNoResults')
+    app.unmount()
+  })
+
+  it('counts a subscription as configured when its client type was used in the custom form', async () => {
+    mocks.providerData.value = [
+      { id: 'custom-codex', name: 'My Codex', enable: true, client_type: 'openai-codex', metadata: {} },
+    ]
+    const { app, root } = await mountPage('')
+    expect(sectionTitles(root).slice(0, 2)).toEqual(['provider.gallery.configured', 'provider.gallery.subscriptions'])
+    expect(cardNames(root).slice(0, 3)).toEqual(['My Codex', 'GitHub Copilot', 'OpenCode Go'])
     app.unmount()
   })
 })

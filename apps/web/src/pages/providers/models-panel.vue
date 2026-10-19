@@ -20,7 +20,7 @@ import {
 } from '@felinic/ui'
 import { getModels, getProviders } from '@memohai/sdk'
 import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
-import { Boxes, Box, ChevronRight, Plus } from 'lucide-vue-next'
+import { Boxes, Box, ChevronRight, Plus, Search } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { BackendCard, DetailPane, PageShell, SectionGroup, SwapTransition } from '@felinic/ui'
 import AddProvider from '@/components/add-provider/index.vue'
@@ -34,8 +34,8 @@ import {
   providerLogo,
   MODEL_SOURCES,
   modelSourceLogo,
-  providerCatalogEntry,
   providerDraftFromSource,
+  providerGalleryEntry,
   type ModelSource,
 } from '@/constants/model-sources'
 import ModelSetting from './model-setting.vue'
@@ -91,12 +91,13 @@ watch(providers, (items) => {
   }
 })
 
-// Entries already behind a provider: one created from the entry, or from the
-// provider template or preset the entry replaced.
+// Entries already behind a provider: one created from the entry, from the
+// provider template or preset the entry replaced, or for a subscription, with
+// its client type in the custom form.
 const configuredEntries = computed(() => {
   const configured = new Set<string>()
   for (const provider of catalogProviders.value) {
-    const entry = providerCatalogEntry(provider as { metadata?: Record<string, unknown> })
+    const entry = providerGalleryEntry(provider as { metadata?: Record<string, unknown> })
     if (entry) configured.add(entry.id)
   }
   return configured
@@ -114,7 +115,7 @@ type ProviderDetail =
 // provider answers for the draft's route so the detail stays open.
 const materializedAlias = computed<ProviderDetail | undefined>(() => {
   const provider = optimisticProvider.value
-  const entry = providerCatalogEntry(provider as { metadata?: Record<string, unknown> } | undefined)
+  const entry = providerGalleryEntry(provider as { metadata?: Record<string, unknown> } | undefined)
   return provider && entry ? { kind: 'provider', provider, routeAlias: `source:${entry.id}` } : undefined
 })
 
@@ -189,20 +190,26 @@ type GalleryCard =
   | { kind: 'provider', key: string, provider: ProvidersGetResponse }
   | { kind: 'source', key: string, source: ModelSource }
 
-type GallerySectionKey = 'configured' | 'subscriptions' | 'others'
-
 function sourceCards(items: ModelSource[]): GalleryCard[] {
   return items.map(source => ({ kind: 'source' as const, key: `source:${source.id}`, source }))
 }
 
+interface CardSection extends GallerySection<GalleryCard> {
+  title: string
+}
+
 // Configured providers come first, then the entries still on offer:
 // subscriptions, then every other provider. The sections share one pagination.
-const gallerySections = computed<GallerySection<GalleryCard>[]>(() => {
+const gallerySections = computed<CardSection[]>(() => {
   const { subscriptions, others } = groupModelSources(filteredSources.value)
   return [
-    { key: 'configured', items: filteredProviders.value.map(provider => ({ kind: 'provider' as const, key: provider.id ?? '', provider })) },
-    { key: 'subscriptions', items: sourceCards(subscriptions) },
-    { key: 'others', items: sourceCards(others) },
+    {
+      key: 'configured',
+      title: t('provider.gallery.configured'),
+      items: filteredProviders.value.map(provider => ({ kind: 'provider' as const, key: provider.id ?? '', provider })),
+    },
+    { key: 'subscriptions', title: t('provider.gallery.subscriptions'), items: sourceCards(subscriptions) },
+    { key: 'others', title: t('provider.gallery.others'), items: sourceCards(others) },
   ]
 })
 
@@ -212,16 +219,6 @@ const PAGE_SIZE = 20
 const currentPage = ref(1)
 const pageCount = computed(() => Math.max(1, Math.ceil(cardCount.value / PAGE_SIZE)))
 const pagedSections = computed(() => pageSections(gallerySections.value, currentPage.value, PAGE_SIZE))
-
-const SECTION_TITLES: Record<GallerySectionKey, string> = {
-  configured: 'provider.gallery.configured',
-  subscriptions: 'provider.gallery.subscriptions',
-  others: 'provider.gallery.others',
-}
-
-function sectionTitle(key: string) {
-  return t(SECTION_TITLES[key as GallerySectionKey])
-}
 
 watch(() => props.searchQuery, () => {
   currentPage.value = 1
@@ -281,11 +278,26 @@ function openAddProvider() {
         v-else-if="catalogProviders.length + availableSources.length > 0"
         class="flex flex-col gap-4"
       >
-        <div class="space-y-8">
+        <Empty
+          v-if="cardCount === 0"
+          class="flex flex-col items-center justify-center px-4 py-16"
+        >
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Search />
+            </EmptyMedia>
+          </EmptyHeader>
+          <EmptyTitle>{{ t('provider.searchNoResults') }}</EmptyTitle>
+        </Empty>
+
+        <div
+          v-else
+          class="space-y-8"
+        >
           <SectionGroup
             v-for="section in pagedSections"
             :key="section.key"
-            :title="sectionTitle(section.key)"
+            :title="section.title"
           >
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <template

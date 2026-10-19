@@ -9,6 +9,7 @@ import {
   modelSourceLogoForKey,
   modelSourceNeedsApiKey,
   providerCatalogEntry,
+  providerGalleryEntry,
   providerDraftFromSource,
   providerLogo,
   providerSource,
@@ -24,10 +25,23 @@ describe('model sources', () => {
   it('groups the subscriptions first, in their own order, and keeps the rest in order', () => {
     const { subscriptions, others } = groupModelSources(MODEL_SOURCES)
     expect(subscriptions.map(item => item.id)).toEqual(['codex', 'github-copilot', 'opencode-go'])
-    expect(others).toEqual(MODEL_SOURCES.filter(item => !subscriptions.includes(item)))
+    expect(others.map(item => item.id)).not.toContain('codex')
+    expect(others.some(item => item.subscription)).toBe(false)
+    expect(others.length + subscriptions.length).toBe(MODEL_SOURCES.length)
+    expect(others.map(item => item.id)).toEqual(MODEL_SOURCES.map(item => item.id).filter(id => !['codex', 'github-copilot', 'opencode-go'].includes(id)))
 
     const configuredCodex = groupModelSources(MODEL_SOURCES.filter(item => item.id !== 'codex'))
     expect(configuredCodex.subscriptions.map(item => item.id)).toEqual(['github-copilot', 'opencode-go'])
+  })
+
+  it('counts a subscription by its client type only for the gallery', () => {
+    const custom = { client_type: 'opencode-go', metadata: {} }
+    expect(providerGalleryEntry(custom)?.id).toBe('opencode-go')
+    expect(providerGalleryEntry({ client_type: 'openai-codex' })?.id).toBe('codex')
+    expect(providerGalleryEntry({ client_type: 'openai-completions' })).toBeUndefined()
+    // What a provider imports from stays its own record.
+    expect(providerCatalogEntry(custom)).toBeUndefined()
+    expect(providerSource(custom)).toBeUndefined()
   })
 
   it('lists each entry once, sorted by id, and each source once', () => {

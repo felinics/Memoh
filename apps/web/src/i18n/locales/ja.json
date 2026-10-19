@@ -1981,6 +1981,7 @@
     "presetPlaceholder": "プリセットまたはカスタムプロバイダーを選択してください",
     "presetSearchPlaceholder": "プリセットを検索...",
     "presetNoResults": "一致するプリセットがありません",
+    "searchNoResults": "一致するプロバイダーがありません",
     "presetGroupCustom": "カスタム",
     "presetGroupBuiltIn": "プリセット",
     "customProvider": "カスタムプロバイダー",

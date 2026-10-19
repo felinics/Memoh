@@ -2012,6 +2012,7 @@
     "presetPlaceholder": "选择预设或自定义服务商",
     "presetSearchPlaceholder": "搜索预设…",
     "presetNoResults": "没有匹配的预设",
+    "searchNoResults": "没有匹配的服务商",
     "presetGroupCustom": "自定义",
     "presetGroupBuiltIn": "预设",
     "customProvider": "自定义服务商",

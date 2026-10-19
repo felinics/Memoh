@@ -312,15 +312,28 @@ const providerPresetOptions = computed(() => [
     groupLabel: t('provider.presetGroupCustom'),
     keywords: ['custom', 'provider'],
   }] : []),
-  ...availablePresets.value.map(preset => ({
+  // Subscriptions come first and in the gallery's order; the picker lists
+  // groups in the order their first option appears.
+  ...subscriptionPresets.value.map(preset => presetOption(preset, 'subscriptions', t('provider.gallery.subscriptions'))),
+  ...availablePresets.value
+    .filter(preset => !subscriptionPresets.value.includes(preset))
+    .map(preset => presetOption(preset, 'preset', t('provider.presetGroupBuiltIn'))),
+])
+
+const subscriptionPresets = computed(() => (props.sources ?? [])
+  .filter(item => item.subscription)
+  .flatMap(item => availablePresets.value.filter(preset => preset.modelSource === item.id)))
+
+function presetOption(preset: SelectablePreset, group: string, groupLabel: string) {
+  return {
     value: preset.id,
     label: preset.name,
     description: CLIENT_TYPE_META[preset.clientType]?.label ?? preset.clientType,
-    group: 'preset',
-    groupLabel: t('provider.presetGroupBuiltIn'),
+    group,
+    groupLabel,
     keywords: [preset.name, preset.id, preset.clientType, preset.registryName ?? '', preset.source],
-  })),
-])
+  }
+}
 
 function getPresetById(id: string | undefined): SelectablePreset | null {
   if (!id || id === customPresetId) return null

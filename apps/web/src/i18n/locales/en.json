@@ -2012,6 +2012,7 @@
     "presetPlaceholder": "Select preset or custom provider",
     "presetSearchPlaceholder": "Search presets...",
     "presetNoResults": "No matching presets",
+    "searchNoResults": "No matching providers",
     "presetGroupCustom": "Custom",
     "presetGroupBuiltIn": "Presets",
     "customProvider": "Custom Provider",
