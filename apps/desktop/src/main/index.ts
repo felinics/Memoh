@@ -16,13 +16,14 @@ import {
 import { join } from 'node:path'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
-import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { electronApp, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
 import trayIconPng from '../../resources/tray-icon.png?asset'
 import { acceleratorForCommand, appKeyboardCommands, type AppKeyboardCommand } from '../shared/keyboard-commands'
 import { attachMenuShortcutOwnership } from './menu-shortcuts'
 import { dispatchFocusedWindowCommand } from './window-commands'
 import { dispatchRendererNavigate } from './window-navigation'
+import { attachDevelopmentWindowShortcuts } from './window-shortcuts'
 import { macWindowChromeOptions } from './window-chrome'
 import { maybeSelfInstallMacOS } from './self-install'
 import { maybePromptAppleSiliconBuild } from './arch-check'
@@ -636,6 +637,13 @@ async function rebuildAppMenu(): Promise<void> {
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },
+        // The zoomIn role defaults to CommandOrControl+Plus. On US layouts Plus
+        // is Shift+=, and Windows/Linux match accelerator modifiers exactly, so
+        // Ctrl+= would not zoom in. macOS already re-dispatches Cmd+= to the
+        // menu (electron/electron#27701), so only add the alias elsewhere.
+        ...(process.platform === 'darwin'
+          ? []
+          : [{ role: 'zoomIn', accelerator: 'CommandOrControl+=', visible: false } satisfies MenuItemConstructorOptions]),
         { role: 'zoomOut' },
         { type: 'separator' },
         { role: 'togglefullscreen' },
@@ -671,7 +679,7 @@ app.whenReady().then(async () => {
   }
 
   app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
+    attachDevelopmentWindowShortcuts(window)
     attachExternalLinkGuards(window.webContents)
   })
 
