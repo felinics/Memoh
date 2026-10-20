@@ -33,13 +33,18 @@
               {{ avatarFallback }}
             </AvatarFallback>
           </Avatar>
-          <StatusDot
-            v-if="otherBotUnread"
-            status="error"
-            class="absolute -right-0.5 -top-0.5"
+          <span
+            v-if="otherBotKind"
+            class="absolute -right-0.5 -top-0.5 flex"
             role="img"
             :aria-label="t('notifications.otherBots')"
-          />
+          >
+            <AttentionDot
+              :kind="otherBotKind"
+              :pulse-key="otherBotPulse"
+              cutout
+            />
+          </span>
         </span>
         <span
           class="min-w-0 truncate text-[13px] font-[550] tracking-[0.015em] text-foreground dark:text-[color:oklch(0.97_0_0)]"
@@ -178,11 +183,11 @@ import {
   DropdownMenuSeparator,
   Spinner,
   BadgeCount,
-  StatusDot,
 } from '@felinic/ui'
 import { Check, ChevronsUpDown, GripVertical, Plus, Settings2 } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat-list'
 import { useUnreadStore } from '@/store/unread'
+import AttentionDot from './attention-dot.vue'
 import { firstAvatarCharacter } from '@/composables/useAvatarInitials'
 import { usePinnedBots } from '@/composables/usePinnedBots'
 import { usePendingBotsRefresh } from '@/composables/usePendingBotsRefresh'
@@ -193,7 +198,13 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
 const unread = useUnreadStore()
-const otherBotUnread = computed(() => unread.total > (unread.countByBot[currentBotId.value ?? ''] ?? 0))
+/** Elsewhere is yellow when any other bot is blocked on the user, red otherwise; the newest arrival replays the pulse. */
+const otherBotEntries = computed(() => unread.inbox.filter(entry => entry.botId !== currentBotId.value))
+const otherBotKind = computed(() => {
+  if (!otherBotEntries.value.length) return null
+  return otherBotEntries.value.some(entry => entry.kind === 'needs_input') ? 'needs_input' : 'reply'
+})
+const otherBotPulse = computed(() => otherBotEntries.value[0]?.attentionAt)
 const { sortBots } = usePinnedBots()
 
 // Full-width shape for web / Windows (no traffic lights); mac desktop passes

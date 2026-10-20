@@ -4540,6 +4540,7 @@
   },
   "notifications": {
     "inbox": "需要你",
+    "justNow": "刚刚",
     "showAll": "显示全部 ({count})",
     "showLess": "收起",
     "otherBots": "其他 Bot 有未读会话",

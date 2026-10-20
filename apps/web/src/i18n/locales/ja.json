@@ -4536,6 +4536,7 @@
   },
   "notifications": {
     "inbox": "確認が必要",
+    "justNow": "たった今",
     "showAll": "すべて表示 ({count})",
     "showLess": "折りたたむ",
     "otherBots": "他の Bot に未読のセッションがあります",

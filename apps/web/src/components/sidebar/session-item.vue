@@ -118,7 +118,10 @@
               role="img"
               :aria-label="t(`notifications.kind.${unread.kindOf(session.id)}`)"
             >
-              <StatusDot :status="unread.kindOf(session.id) === 'needs_input' ? 'warning' : 'error'" />
+              <AttentionDot
+                :kind="unread.kindOf(session.id) ?? 'reply'"
+                :pulse-key="unread.entries[session.id]?.attentionAt"
+              />
             </div>
 
             <DropdownMenu
@@ -211,7 +214,6 @@ import { OpenInTabIcon } from '@memohai/icon/ui'
 import type { SessionSummary } from '@/composables/api/useChat'
 import {
   Checkbox,
-  StatusDot,
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -228,6 +230,7 @@ import { isAgentRuntimeType, normalizedRuntimeType, normalizedSessionMode, route
 import MarqueeText from './marquee-text.vue'
 import { SessionSelectionKey } from './session-selection'
 import { useUnreadStore } from '@/store/unread'
+import AttentionDot from './attention-dot.vue'
 
 const props = defineProps<{
   session: SessionSummary
