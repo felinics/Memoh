@@ -10,7 +10,7 @@ import {
   modelSourceNeedsApiKey,
   providerCatalogEntry,
   providerGalleryEntry,
-  subscriptionForClientType,
+  subscriptionForProvider,
   providerDraftFromSource,
   providerLogo,
   providerSource,
@@ -38,10 +38,18 @@ describe('model sources', () => {
   it('gives each subscription a client type no other subscription uses', () => {
     const types = MODEL_SOURCES.filter(item => item.subscription).map(item => item.client_type)
     expect(new Set(types).size).toBe(types.length)
-    expect(subscriptionForClientType('openai-codex')?.id).toBe('codex')
-    expect(subscriptionForClientType('opencode-go')?.id).toBe('opencode-go')
-    expect(subscriptionForClientType('openai-completions')).toBeUndefined()
-    expect(subscriptionForClientType(undefined)).toBeUndefined()
+    expect(subscriptionForProvider('openai-completions', '')).toBeUndefined()
+    expect(subscriptionForProvider(undefined, '')).toBeUndefined()
+  })
+
+  it('counts a provider as a subscription only on that subscription\'s endpoint', () => {
+    expect(subscriptionForProvider('openai-codex', '')?.id).toBe('codex')
+    expect(subscriptionForProvider('openai-codex', 'https://chatgpt.com/backend-api/')?.id).toBe('codex')
+    expect(subscriptionForProvider('opencode-go', 'https://OpenCode.ai/zen/go/v1')?.id).toBe('opencode-go')
+    expect(subscriptionForProvider('opencode-go', 'https://proxy.example.com/v1')).toBeUndefined()
+    // Copilot has no fixed base URL, so any provider of its type is it.
+    expect(subscriptionForProvider('github-copilot', 'https://anything.example.com')?.id).toBe('github-copilot')
+    expect(providerGalleryEntry({ client_type: 'opencode-go', config: { base_url: 'https://proxy.example.com/v1' } })).toBeUndefined()
   })
 
   it('counts a subscription by its client type only for the gallery', () => {

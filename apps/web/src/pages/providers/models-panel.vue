@@ -98,7 +98,7 @@ watch(providers, (items) => {
 const configuredEntries = computed(() => {
   const configured = new Set<string>()
   for (const provider of catalogProviders.value) {
-    const entry = providerGalleryEntry(provider as { metadata?: Record<string, unknown> })
+    const entry = providerGalleryEntry(provider)
     if (entry) configured.add(entry.id)
   }
   return configured
@@ -116,7 +116,7 @@ type ProviderDetail =
 // provider answers for the draft's route so the detail stays open.
 const materializedAlias = computed<ProviderDetail | undefined>(() => {
   const provider = optimisticProvider.value
-  const entry = providerCatalogEntry(provider as { metadata?: Record<string, unknown> } | undefined)
+  const entry = providerCatalogEntry(provider)
   return provider && entry ? { kind: 'provider', provider, routeAlias: `source:${entry.id}` } : undefined
 })
 
@@ -214,7 +214,7 @@ const gallerySections = computed<CardSection[]>(() => {
   ]
 })
 
-const cardCount = computed(() => gallerySections.value.reduce((sum, section) => sum + section.items.length, 0))
+const cardCount = computed(() => filteredProviders.value.length + filteredSources.value.length)
 
 const PAGE_SIZE = 20
 const currentPage = ref(1)

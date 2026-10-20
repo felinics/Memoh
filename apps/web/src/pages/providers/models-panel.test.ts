@@ -416,6 +416,16 @@ describe('models panel route state', () => {
     app.unmount()
   })
 
+  it('keeps offering a subscription when a provider of its type points elsewhere', async () => {
+    mocks.providerData.value = [
+      { id: 'proxy-go', name: 'Go Proxy', enable: true, client_type: 'opencode-go', config: { base_url: 'https://proxy.example.com/v1' }, metadata: {} },
+    ]
+    const { app, root } = await mountPage('')
+    expect(sectionTitles(root).slice(0, 2)).toEqual(['provider.gallery.configured', 'provider.gallery.subscriptions'])
+    expect(cardNames(root).slice(0, 4)).toEqual(['Go Proxy', 'OpenAI Codex', 'GitHub Copilot', 'OpenCode Go'])
+    app.unmount()
+  })
+
   it('counts a subscription as configured when its client type was used in the custom form', async () => {
     mocks.providerData.value = [
       { id: 'custom-codex', name: 'My Codex', enable: true, client_type: 'openai-codex', metadata: {} },

@@ -259,9 +259,19 @@ export function groupModelSources(items: readonly ModelSource[]) {
 // Each subscription's client type belongs to it alone (a test holds this).
 const subscriptionByClientType = new Map(MODEL_SOURCES.filter(item => item.subscription).map(item => [item.client_type as string, item]))
 
-// The subscription whose own client type this is, if any.
-export function subscriptionForClientType(clientType: string | null | undefined): ModelSource | undefined {
-  return subscriptionByClientType.get(clientType ?? '')
+// The subscription a provider made with a subscription's client type is, when
+// it also points at that subscription: no base URL (the integration's fixed
+// endpoint) or the entry's own. One aimed at a proxy or another gateway is a
+// custom provider that happens to speak the protocol.
+export function subscriptionForProvider(clientType: string | null | undefined, baseUrl: unknown): ModelSource | undefined {
+  const entry = subscriptionByClientType.get(clientType ?? '')
+  if (!entry) return undefined
+  const base = normalizedBaseUrl(baseUrl)
+  return !entry.base_url || !base || base === normalizedBaseUrl(entry.base_url) ? entry : undefined
+}
+
+function normalizedBaseUrl(value: unknown): string {
+  return typeof value === 'string' ? value.trim().replace(/\/+$/, '').toLowerCase() : ''
 }
 
 // The logo models.dev serves for an entry; an id without a logo of its own gets
@@ -334,6 +344,7 @@ interface ProviderLike {
   id?: string
   client_type?: string
   icon?: string
+  config?: Record<string, unknown>
   metadata?: Record<string, unknown>
 }
 
@@ -397,10 +408,11 @@ export function providerCatalogEntry(provider: ProviderLike | null | undefined):
 }
 
 // The entry the gallery counts a provider as: the one it records, or for a
-// provider made in the custom form with a subscription's client type before
-// that form recorded the entry, that subscription, so it is not offered again.
+// provider made in the custom form with a subscription's client type and
+// endpoint before that form recorded the entry, that subscription, so it is not
+// offered again.
 // Only the gallery and the logo read this; what such an older provider
 // imports from stays its own record.
 export function providerGalleryEntry(provider: ProviderLike | null | undefined): ModelSource | undefined {
-  return providerCatalogEntry(provider) ?? subscriptionForClientType(provider?.client_type)
+  return providerCatalogEntry(provider) ?? subscriptionForProvider(provider?.client_type, provider?.config?.base_url)
 }

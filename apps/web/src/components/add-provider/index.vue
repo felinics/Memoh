@@ -207,7 +207,7 @@ import { providerPresets } from '@/constants/provider-presets'
 import type { ProviderPreset } from '@/constants/provider-presets'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { templateConfigFields, templateDefaultConfig } from '@/utils/provider-template'
-import { findModelSource, groupModelSources, isMonochromeLogo, modelSourceLogo, modelSourceLogoForKey, modelSourceNeedsApiKey, providerSourceMetadata, subscriptionForClientType, TEMPLATE_SOURCES, type ModelSource } from '@/constants/model-sources'
+import { findModelSource, groupModelSources, isMonochromeLogo, modelSourceLogo, modelSourceLogoForKey, modelSourceNeedsApiKey, providerSourceMetadata, subscriptionForProvider, TEMPLATE_SOURCES, type ModelSource } from '@/constants/model-sources'
 import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
 import { suggestProviderName } from './provider-presets'
 
@@ -314,18 +314,21 @@ const providerPresetOptions = computed(() => [
   }] : []),
   // Subscriptions come first and in the gallery's order; the picker lists
   // groups in the order their first option appears.
-  ...subscriptionPresets.value.map(preset => presetOption(preset, 'subscriptions', t('provider.presetGroupSubscriptions'))),
-  ...availablePresets.value
-    .filter(preset => !subscriptionIDs.value.has(preset.id))
-    .map(preset => presetOption(preset, 'preset', t('provider.presetGroupBuiltIn'))),
+  ...presetGroups.value.subscriptions.map(preset => presetOption(preset, 'subscriptions', t('provider.presetGroupSubscriptions'))),
+  ...presetGroups.value.others.map(preset => presetOption(preset, 'preset', t('provider.presetGroupBuiltIn'))),
 ])
 
-const subscriptionPresets = computed(() => {
-  const presets = new Map(availablePresets.value.flatMap(preset => preset.modelSource ? [[preset.modelSource, preset] as const] : []))
-  return groupModelSources(props.sources ?? []).subscriptions.flatMap(item => presets.get(item.id) ?? [])
+// One pass over the presets, keeping the gallery's order for the subscriptions.
+const presetGroups = computed(() => {
+  const order = new Map(groupModelSources(props.sources ?? []).subscriptions.map((item, index) => [item.id, index]))
+  const subscriptions: SelectablePreset[] = []
+  const others: SelectablePreset[] = []
+  for (const preset of availablePresets.value) {
+    (preset.modelSource && order.has(preset.modelSource) ? subscriptions : others).push(preset)
+  }
+  subscriptions.sort((a, b) => order.get(a.modelSource!)! - order.get(b.modelSource!)!)
+  return { subscriptions, others }
 })
-
-const subscriptionIDs = computed(() => new Set(subscriptionPresets.value.map(preset => preset.id)))
 
 function presetOption(preset: SelectablePreset, group: string, groupLabel: string) {
   return {
@@ -374,7 +377,7 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
     }
     const preset = selectedPreset.value
     let result
-    const subscription = preset ? undefined : subscriptionForClientType(String(data.client_type ?? ''))
+    const subscription = preset ? undefined : subscriptionForProvider(String(data.client_type ?? ''), config.base_url)
     if (preset?.templateId) {
       const response = await postProvidersFromTemplate({
         body: {
@@ -392,9 +395,9 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
         client_type: String(data.client_type ?? ''),
         config,
       }
-      // A custom provider made with a subscription's own client type is that
-      // subscription, so it records the entry the gallery would.
-      if (!preset && subscription) {
+      // A custom provider made with a subscription's client type and endpoint
+      // is that subscription, so it records the entry the gallery would.
+      if (subscription) {
         payload.icon = modelSourceLogo(subscription)
         payload.metadata = providerSourceMetadata(subscription)
       }
