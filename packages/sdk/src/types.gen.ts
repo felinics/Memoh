@@ -51,6 +51,11 @@ export type AccountsUpdatePasswordRequest = {
 };
 
 export type AccountsUpdateProfileMetadata = {
+    /**
+     * ChatExamplesSidebarEntryHidden hides the Web sidebar's usage-example
+     * entry for this account, on every device.
+     */
+    chat_examples_sidebar_entry_hidden?: boolean;
     onboarding_completed?: boolean;
 };
 

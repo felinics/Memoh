@@ -17314,6 +17314,10 @@ const docTemplate = `{
         "accounts.UpdateProfileMetadata": {
             "type": "object",
             "properties": {
+                "chat_examples_sidebar_entry_hidden": {
+                    "description": "ChatExamplesSidebarEntryHidden hides the Web sidebar's usage-example\nentry for this account, on every device.",
+                    "type": "boolean"
+                },
                 "onboarding_completed": {
                     "type": "boolean"
                 }

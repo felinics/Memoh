@@ -162,3 +162,32 @@ func TestUpdateProfileRejectsInvalidTitleModel(t *testing.T) {
 		t.Fatalf("UpdateProfile() error = %v, want ErrInvalidTitleModel", err)
 	}
 }
+
+func TestUpdateProfileMergesChatExamplesSidebarEntryHidden(t *testing.T) {
+	store := &testAccountStore{record: dbstore.AccountRecord{
+		ID: "user-1", Username: "alice", Timezone: "UTC",
+		Metadata: `{"onboarding_completed":true}`,
+	}}
+	svc := NewService(nil, store)
+
+	hidden := true
+	if _, err := svc.UpdateProfile(context.Background(), "user-1", UpdateProfileRequest{
+		Metadata: &UpdateProfileMetadata{ChatExamplesSidebarEntryHidden: &hidden},
+	}); err != nil {
+		t.Fatalf("UpdateProfile() error = %v", err)
+	}
+	if got, want := store.profileUpdated.Metadata, `{"chat_examples_sidebar_entry_hidden":true,"onboarding_completed":true}`; got != want {
+		t.Fatalf("metadata = %s, want %s", got, want)
+	}
+
+	store.record.Metadata = store.profileUpdated.Metadata
+	shown := false
+	if _, err := svc.UpdateProfile(context.Background(), "user-1", UpdateProfileRequest{
+		Metadata: &UpdateProfileMetadata{ChatExamplesSidebarEntryHidden: &shown},
+	}); err != nil {
+		t.Fatalf("UpdateProfile() error = %v", err)
+	}
+	if got, want := store.profileUpdated.Metadata, `{"chat_examples_sidebar_entry_hidden":false,"onboarding_completed":true}`; got != want {
+		t.Fatalf("metadata = %s, want %s", got, want)
+	}
+}

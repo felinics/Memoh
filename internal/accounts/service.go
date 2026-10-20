@@ -442,6 +442,9 @@ func (s *Service) mergeMetadata(existing string, incoming *UpdateProfileMetadata
 	if incoming.OnboardingCompleted != nil {
 		base["onboarding_completed"] = *incoming.OnboardingCompleted
 	}
+	if incoming.ChatExamplesSidebarEntryHidden != nil {
+		base["chat_examples_sidebar_entry_hidden"] = *incoming.ChatExamplesSidebarEntryHidden
+	}
 	result, err := json.Marshal(base)
 	if err != nil {
 		return "{}"

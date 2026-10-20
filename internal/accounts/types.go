@@ -58,6 +58,9 @@ type UpdateProfileRequest struct {
 // allowlist.
 type UpdateProfileMetadata struct {
 	OnboardingCompleted *bool `json:"onboarding_completed,omitempty"`
+	// ChatExamplesSidebarEntryHidden hides the Web sidebar's usage-example
+	// entry for this account, on every device.
+	ChatExamplesSidebarEntryHidden *bool `json:"chat_examples_sidebar_entry_hidden,omitempty"`
 }
 
 // UpdatePasswordRequest is the input for password change.
