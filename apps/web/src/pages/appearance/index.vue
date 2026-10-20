@@ -85,6 +85,16 @@
             </SelectContent>
           </Select>
         </SettingsRow>
+
+        <SettingsRow
+          :label="t('settings.appearance.showExamplesEntry')"
+          :description="t('settings.appearance.showExamplesEntryDescription')"
+        >
+          <Switch
+            :model-value="!sidebarEntryHidden"
+            @update:model-value="(value) => sidebarEntryHidden = !value"
+          />
+        </SettingsRow>
       </SettingsSection>
 
       <SettingsSection :title="t('settings.appearance.typography')">
@@ -357,6 +367,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Switch,
 } from '@felinic/ui'
 import { Monitor, Moon, SlidersHorizontal, Sun } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
@@ -364,6 +375,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MarkdownRender, { enableMermaid, setCustomComponents } from 'markstream-vue'
 import { PageShell, SettingsRow, SettingsSection, SectionGroup } from '@felinic/ui'
+import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-ui'
 import { useShikiHighlighter } from '@/composables/useShikiHighlighter'
 import { LOCALE_OPTIONS, type Locale } from '@/i18n'
 import type { BundledTheme } from 'shiki'
@@ -405,6 +417,7 @@ const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const { language, theme, colorScheme, uiFontFamily, codeFontFamily, uiFontSizePx, codeFontSizePx, shikiThemeLight, shikiThemeDark, mermaidTheme, defaultUiFontFamily, defaultCodeFontFamily, isDark } = storeToRefs(settingsStore)
 const { setLanguage, setTheme, setColorScheme, setUiFontFamily, setCodeFontFamily, setUiFontSizePx, setCodeFontSizePx, setShikiTheme, setMermaidTheme } = settingsStore
+const { sidebarEntryHidden } = useChatExamplesUi()
 
 // Code & diagrams dialog visibility. The two preview blocks live in the dialog
 // but share this component's script (highlighter instances, draft state), so
