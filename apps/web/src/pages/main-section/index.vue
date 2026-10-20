@@ -60,6 +60,7 @@ import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useChatStore } from '@/store/chat-list'
 import { useUnreadStore } from '@/store/unread'
+import { useSessionNotifications } from '@/composables/useSessionNotifications'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import ChatExampleGalleryDialog from '@/components/chat-examples/chat-example-gallery-dialog.vue'
 import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-ui'
@@ -118,6 +119,7 @@ const { currentBotId } = storeToRefs(useChatStore())
 // Unread state lives as long as the authenticated app area does: MainSection is
 // mounted for chat and settings alike and unmounts at the auth boundary.
 const unread = useUnreadStore()
+useSessionNotifications()
 onMounted(() => unread.start())
 onScopeDispose(onAuthSessionCleared(() => unread.reset()))
 onScopeDispose(() => unread.stop())

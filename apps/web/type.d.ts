@@ -4,6 +4,8 @@ interface Window {
   api?: {
     desktop?: {
       openExternalUrl?: (url: string) => Promise<void>
+      notify?: (payload: { botId: string, sessionId: string, attentionAt: string, title: string, body: string }) => Promise<void>
+      setBadgeCount?: (count: number) => Promise<void>
     }
   }
 }

@@ -3,6 +3,7 @@ import {
   getUsersMeUnread,
   putBotsByBotIdSessionsBySessionIdRead,
 } from '@memohai/sdk'
+import { fetchSSEProblem } from './sse-error'
 
 export type AttentionKind = 'reply' | 'failed' | 'needs_input'
 
@@ -40,7 +41,7 @@ export async function streamUserAttentionEvents(
   signal: AbortSignal,
   onEvent: (event: UserAttentionEvent) => void,
 ): Promise<void> {
-  const { stream } = await getUsersMeAttentionEvents({ signal, sseMaxRetryAttempts: 1 })
+  const { stream } = await getUsersMeAttentionEvents({ signal, fetch: fetchSSEProblem, sseMaxRetryAttempts: 1 })
   for await (const payload of stream) {
     if (payload && typeof payload === 'object' && typeof (payload as { type?: unknown }).type === 'string') {
       onEvent(payload as UserAttentionEvent)
