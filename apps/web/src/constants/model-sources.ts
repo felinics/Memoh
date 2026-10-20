@@ -11,6 +11,8 @@
 // OpenCode Go) and self-hosted gateways come from the former provider templates.
 // A local server (Ollama, LM Studio) has no source even where models.dev lists
 // one: it serves the models the user loaded, which only its endpoint knows.
+// Azure OpenAI has none either: it is called by deployment name, which no
+// catalog of model ids can supply.
 export type ModelSourceClientType =
   | 'openai-completions'
   | 'openai-responses'
@@ -64,7 +66,7 @@ export const MODEL_SOURCES: readonly ModelSource[] = [
   { id: 'anyapi', source: 'anyapi', name: 'AnyAPI', client_type: 'openai-completions', base_url: 'https://api.anyapi.ai/v1' },
   { id: 'arcee', source: 'arcee', name: 'Arcee', client_type: 'openai-completions', base_url: 'https://api.arcee.ai/api/v1' },
   { id: 'auriko', source: 'auriko', name: 'Auriko', client_type: 'openai-completions', base_url: 'https://api.auriko.ai/v1' },
-  { id: 'azure-openai', source: 'azure', name: 'Azure OpenAI', client_type: 'openai-completions', base_url: 'https://<resource>.openai.azure.com/openai/v1' },
+  { id: 'azure-openai', name: 'Azure OpenAI', client_type: 'openai-completions', base_url: 'https://<resource>.openai.azure.com/openai/v1', logo: 'azure' },
   { id: 'bailing', source: 'bailing', name: 'Bailing', client_type: 'openai-completions', base_url: 'https://api.tbox.cn/api/llm/v1' },
   { id: 'baseten', source: 'baseten', name: 'Baseten', client_type: 'openai-completions', base_url: 'https://inference.baseten.co/v1' },
   { id: 'bee', source: 'bee', name: 'Bee by HEOSSI', client_type: 'openai-completions', base_url: 'https://api.bee.heossi.com/bee' },

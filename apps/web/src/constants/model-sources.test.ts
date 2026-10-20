@@ -64,8 +64,9 @@ describe('model sources', () => {
 
   it('finds entries and their logos', () => {
     expect(findModelSource('openai')?.client_type).toBe('openai-responses')
-    expect(findModelSource('azure-openai')?.source).toBe('azure')
-    expect(findModelSourceBySource('azure')?.id).toBe('azure-openai')
+    // Azure is called by deployment name, so it imports from its endpoint.
+    expect(findModelSource('azure-openai')?.source).toBeUndefined()
+    expect(findModelSourceBySource('azure')).toBeUndefined()
     expect(findModelSource(undefined)).toBeUndefined()
     expect(modelSourceLogo(findModelSource('anthropic')!)).toBe('https://models.dev/logos/anthropic.svg')
     expect(modelSourceLogo(findModelSource('baseten')!)).toBe('https://models.dev/logos/baseten.svg')
@@ -106,7 +107,7 @@ describe('providers and entries', () => {
       name: 'Azure OpenAI',
       client_type: 'openai-completions',
       enable: false,
-      metadata: { catalog: 'azure-openai', source: 'azure' },
+      metadata: { catalog: 'azure-openai' },
     })
     expect(providerDraftFromSource(findModelSource('ollama')!).metadata).toEqual({ catalog: 'ollama' })
     expect(providerDraftFromSource(findModelSource('github-copilot')!).config).toEqual({})

@@ -11,10 +11,11 @@ vi.mock('@pinia/colada', () => ({
   useQuery: vi.fn(),
   useQueryCache: () => ({
     invalidateQueries: vi.fn(),
-    ensure: (options: { query: () => Promise<unknown> }) => options,
-    refresh: async (entry: { query: () => Promise<unknown> }) => {
+    ensure: (options: { query: (context: { signal: AbortSignal }) => Promise<unknown> }) => options,
+    // Pinia Colada hands every query its abort signal.
+    refresh: async (entry: { query: (context: { signal: AbortSignal }) => Promise<unknown> }) => {
       try {
-        return { status: 'success', data: await entry.query() }
+        return { status: 'success', data: await entry.query({ signal: new AbortController().signal }) }
       } catch (error) {
         return { status: 'error', error }
       }

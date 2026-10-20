@@ -76,12 +76,15 @@ export function catalogModelsFor(catalog: ModelsDevCatalog | undefined, source: 
     .sort((a, b) => (a.name ?? a.model_id).localeCompare(b.name ?? b.model_id))
 }
 
-// An id in which "embed" starts a word names an embedding model, by the same
-// rule the server applies to a provider's own model list.
-const EMBEDDING_MODEL_ID = /(?:^|[^a-z])embed/i
+// An id in which "embed" starts a word, or that starts a part with an embedding
+// family whose names do not say so (bge, gte, e5, m3e, voyage, jina-clip), names
+// an embedding model unless it is a reranker, by the same rule the server
+// applies to a provider's own model list.
+const EMBEDDING_MODEL_ID = /(?:^|[^a-z])embed|(?:^|[/_.:-])(?:bge|gte|e5|m3e|voyage|jina-clip)(?:[-_.:]|$)/i
+const RERANKER_MODEL_ID = /rerank/i
 
 function looksLikeEmbeddingModel(modelID: string): boolean {
-  return EMBEDDING_MODEL_ID.test(modelID)
+  return EMBEDDING_MODEL_ID.test(modelID) && !RERANKER_MODEL_ID.test(modelID)
 }
 
 const NPM_PROTOCOLS: Record<string, string> = {
@@ -95,7 +98,7 @@ const NPM_PROTOCOLS: Record<string, string> = {
 // to its own protocol (OpenCode Go, GitHub Copilot) name it on the model; every
 // other provider speaks its client type.
 function modelProtocol(model: ModelsDevModel, provider: ModelsDevProvider, clientType: string): string {
-  if (clientType !== 'opencode-go' && clientType !== 'github-copilot') return clientType
+  if (clientType !== 'opencode-go') return clientType
   const shape = model.provider?.shape
   if (shape === 'responses') return 'openai-responses'
   if (shape === 'completions') return 'openai-completions'

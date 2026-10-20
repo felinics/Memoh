@@ -252,6 +252,52 @@ describe('provider draft enable', () => {
     setting.unmount()
   })
 
+  it('imports once the create settles when the dialog closed before it did', async () => {
+    let settle: (value: unknown) => void = () => {}
+    mocks.postProviders.mockReturnValueOnce(new Promise((resolve) => { settle = resolve }))
+    const setting = await mountSetting(sourceDraft())
+
+    const id = mocks.modelList.ensureProviderId?.()
+    mocks.modelList.closed?.()
+    await flushPromises()
+    expect(mocks.importProviderModels).not.toHaveBeenCalled()
+
+    settle({ data: { id: 'created-provider', name: 'AIHubMix', client_type: 'openai-completions', enable: true, config: {} } })
+    await expect(id).resolves.toBe('created-provider')
+    await flushPromises()
+    expect(mocks.importProviderModels).toHaveBeenCalledOnce()
+    setting.unmount()
+  })
+
+  it('leaves the import to a create the switch already started', async () => {
+    let settle: (value: unknown) => void = () => {}
+    mocks.postProviders.mockReturnValueOnce(new Promise((resolve) => { settle = resolve }))
+    const setting = await mountSetting(sourceDraft())
+
+    const toggled = setting.toggle()
+    const id = mocks.modelList.ensureProviderId?.()
+    settle({ data: { id: 'created-provider', name: 'AIHubMix', client_type: 'openai-completions', enable: true, config: {} } })
+    await toggled
+    await expect(id).resolves.toBe('created-provider')
+    mocks.modelList.closed?.()
+    await flushPromises()
+    expect(mocks.postProviders).toHaveBeenCalledOnce()
+    expect(mocks.importProviderModels).toHaveBeenCalledOnce()
+    setting.unmount()
+  })
+
+  it('keeps the created provider when switching it off fails', async () => {
+    mocks.putProvidersById.mockRejectedValueOnce(new Error('network'))
+    const setting = await mountSetting(sourceDraft())
+
+    await expect(mocks.modelList.ensureProviderId?.()).resolves.toBe('created-provider')
+    await flushPromises()
+    expect(setting.provider.value.id).toBe('created-provider')
+    await expect(mocks.modelList.ensureProviderId?.()).resolves.toBe('created-provider')
+    expect(mocks.postProviders).toHaveBeenCalledOnce()
+    setting.unmount()
+  })
+
   it('creates an endpoint draft without importing when the form cannot list models', async () => {
     const view = await mountSetting(endpointDraft())
 

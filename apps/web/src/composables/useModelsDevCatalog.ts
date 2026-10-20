@@ -6,7 +6,8 @@ import { fetchModelsDevCatalog, type ModelsDevCatalog } from '@/lib/models-dev'
 // kept.
 export const modelsDevCatalogQuery = defineQueryOptions({
   key: ['models-dev-catalog'],
-  query: () => fetchModelsDevCatalog(),
+  // A superseded request is aborted rather than left to download and parse.
+  query: ({ signal }) => fetchModelsDevCatalog(signal),
   staleTime: 30 * 60 * 1000,
 })
 

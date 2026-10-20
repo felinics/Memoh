@@ -68,6 +68,7 @@
         :source="providerSource(curProvider)"
         :preview="isSourcePreview"
         :preview-loading="isSourcePreview && catalogLoading"
+        :preview-error="isSourcePreview && !catalogLoading && !!catalogError"
         :ensure-provider-id="curProvider?.id ? undefined : ensureProviderId"
         :delete-model-loading="deleteModelLoading"
         @edit="handleEditModel"
@@ -203,18 +204,26 @@ async function materializeProvider(
     })
     if (!created?.id) throw new Error('provider creation returned no id')
 
+    // The provider exists from here on: holding it before the disable below
+    // means a failed disable leaves no draft behind to be created twice.
     let result = created
-    if (!enable) {
-      const response = await putProvidersById({
-        path: { id: created.id },
-        body: { enable: false },
-        throwOnError: true,
-      })
-      result = response.data ?? { ...created, enable: false }
-    }
-
     curProvider.value = result
     emit('materialized', result)
+    if (!enable) {
+      // Create takes no enable flag, so a disabled draft is created and then
+      // switched off. If that fails the provider stays on, and the user is told.
+      try {
+        const response = await putProvidersById({
+          path: { id: created.id },
+          body: { enable: false },
+          throwOnError: true,
+        })
+        result = response.data ?? { ...created, enable: false }
+        curProvider.value = result
+      } catch {
+        toast.error(t('common.saveFailed'))
+      }
+    }
 
     if (importModels) {
       try {
@@ -255,14 +264,18 @@ const providerForm = useTemplateRef('providerForm')
 // added or not. Models the user added there are left out of that import: they
 // already exist, and the catalog would overwrite what the user just set. An
 // endpoint is listed later, once the key is saved.
-let catalogPendingAdd: { provider: ProvidersGetResponse, added: string[] } | null = null
+// The pending import is recorded when the create starts, so a dialog closed
+// before the create settles still imports once it does. A create the switch
+// already started imports the catalog itself, so joining it records nothing.
+let catalogPendingAdd: { ready: Promise<ProvidersGetResponse | null>, added: string[] } | null = null
 
 async function ensureProviderId(): Promise<string> {
   const provider = curProvider.value
   if (!provider) throw new Error('provider is missing')
   if (provider.id) return provider.id
 
-  const created = await materializeProvider(
+  const joining = materializePromise !== null
+  const creating = materializeProvider(
     providerForm.value?.draftPayload() ?? {
       name: provider.name,
       config: provider.config ?? {},
@@ -271,8 +284,11 @@ async function ensureProviderId(): Promise<string> {
     provider.enable !== false,
     false,
   )
+  if (!joining && providerSource(provider)) {
+    catalogPendingAdd = { ready: creating.catch(() => null), added: [] }
+  }
+  const created = await creating
   if (!created.id) throw new Error('provider creation returned no id')
-  catalogPendingAdd = providerSource(provider) ? { provider: created, added: [] } : null
   return created.id
 }
 
@@ -283,9 +299,10 @@ function noteModelAdded(modelId: string) {
 async function importCatalogAfterAdd() {
   const pending = catalogPendingAdd
   catalogPendingAdd = null
-  if (!pending) return
+  const provider = await pending?.ready
+  if (!pending || !provider?.id) return
   try {
-    await importProviderModels(pending.provider, { skipModelIds: pending.added })
+    await importProviderModels(provider, { skipModelIds: pending.added })
   } catch {
     toast.error(t('models.importFailed'))
   }
@@ -360,7 +377,7 @@ const { data: modelDataList } = useQuery({
 // A draft from a models.dev source previews the source's models, read-only;
 // creating the provider imports them.
 const isSourcePreview = computed(() => !curProviderId.value && !!providerSource(curProvider.value))
-const { data: catalog, isLoading: catalogLoading } = useModelsDevCatalog(() => isSourcePreview.value)
+const { data: catalog, isLoading: catalogLoading, error: catalogError } = useModelsDevCatalog(() => isSourcePreview.value)
 const previewModels = computed<ModelsGetResponse[]>(() =>
   catalogModelsFor(catalog.value, providerSource(curProvider.value), curProvider.value?.client_type ?? '')
     .map(model => ({

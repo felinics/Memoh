@@ -72,46 +72,26 @@ func TestImportedCompatibilitiesRequireExplicitDefaultsForUnknownModels(t *testi
 	}
 }
 
-func TestPresetMetadataDisablesImplicitCapabilityDefaults(t *testing.T) {
+// A provider made from a former template or preset receives the defaults the
+// caller sends: the template that described its models is gone. The web client
+// sends them only for entries without a models.dev source.
+func TestFormerTemplateProvidersReceiveExplicitDefaults(t *testing.T) {
 	t.Parallel()
 
 	unknown := providers.RemoteModel{ID: "provider-only-model"}
-	provider := providers.GetResponse{
-		Metadata: map[string]any{
-			"preset": map[string]any{"source": "openai.yaml"},
-		},
-	}
-	if got := importedCompatibilities(
-		unknown,
-		models.ModelTypeChat,
-		[]string{models.CompatToolCall, models.CompatReasoning},
-		allowCustomModelCapabilityDefaults(provider),
-	); len(got) != 0 {
-		t.Fatalf("preset mismatch capabilities = %#v, want none", got)
-	}
-
-	custom := providers.GetResponse{}
-	if got := importedCompatibilities(
-		unknown,
-		models.ModelTypeChat,
-		[]string{models.CompatToolCall},
-		allowCustomModelCapabilityDefaults(custom),
-	); len(got) != 1 || got[0] != models.CompatToolCall {
-		t.Fatalf("custom provider defaults = %#v, want explicit default", got)
-	}
-}
-
-func TestProviderTemplateIDDisablesImplicitCapabilityDefaults(t *testing.T) {
-	t.Parallel()
-
-	providersWithTemplates := []providers.GetResponse{
+	for _, provider := range []providers.GetResponse{
 		{ProviderTemplateID: "template-id"},
-		{Metadata: map[string]any{"registry": map[string]any{"source": "deepseek.yaml"}}},
-	}
-	for _, provider := range providersWithTemplates {
-		if allowCustomModelCapabilityDefaults(provider) {
-			t.Fatal("template provider must not receive implicit capability defaults")
+		{Metadata: map[string]any{"preset": map[string]any{"source": "ollama.yaml"}}},
+		{Metadata: map[string]any{"registry": map[string]any{"source": "newapi.yaml"}}},
+		{},
+	} {
+		got := importedCompatibilities(unknown, models.ModelTypeChat, []string{models.CompatToolCall}, allowCustomModelCapabilityDefaults(provider))
+		if len(got) != 1 || got[0] != models.CompatToolCall {
+			t.Fatalf("provider %+v capabilities = %#v, want the explicit default", provider, got)
 		}
+	}
+	if got := importedCompatibilities(unknown, models.ModelTypeChat, nil, true); len(got) != 0 {
+		t.Fatalf("no defaults sent = %#v, want none", got)
 	}
 }
 

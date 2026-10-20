@@ -488,7 +488,11 @@ func (h *ProvidersHandler) importCatalogModels(ctx context.Context, provider pro
 	resp := providers.ImportModelsResponse{Models: make([]string, 0)}
 	// A model the provider already has goes straight to the refresh, so it is
 	// refreshed even when its catalog config would not pass Create's checks.
-	_, existing := h.providerModels(ctx, providerID)
+	rows, _ := h.providerModels(ctx, providerID)
+	existing := make(map[string]models.GetResponse, len(rows))
+	for _, row := range rows {
+		existing[row.ModelID] = row
+	}
 	disabled := false
 	for _, m := range catalog {
 		modelID := strings.TrimSpace(m.ModelID)
@@ -502,8 +506,8 @@ func (h *ProvidersHandler) importCatalogModels(ctx context.Context, provider pro
 			resp.Skipped++
 			continue
 		}
-		if _, ok := existing[modelID]; ok {
-			if h.refreshCatalogModel(ctx, providerID, modelID, config) {
+		if row, ok := existing[modelID]; ok {
+			if h.refreshCatalogModel(ctx, providerID, modelID, &row, config) {
 				resp.Updated++
 			} else {
 				resp.Skipped++
@@ -529,7 +533,7 @@ func (h *ProvidersHandler) importCatalogModels(ctx context.Context, provider pro
 			resp.Created++
 			resp.Models = append(resp.Models, modelID)
 		case errors.Is(err, models.ErrModelIDAlreadyExists):
-			if h.refreshCatalogModel(ctx, providerID, modelID, config) {
+			if h.refreshCatalogModel(ctx, providerID, modelID, nil, config) {
 				resp.Updated++
 			} else {
 				resp.Skipped++
@@ -558,9 +562,18 @@ func (h *ProvidersHandler) providerModels(ctx context.Context, providerID string
 	return rows, ids
 }
 
-func (h *ProvidersHandler) refreshCatalogModel(ctx context.Context, providerID, modelID string, catalog models.ModelConfig) bool {
-	existing, err := h.modelsService.GetByProviderAndModelID(ctx, providerID, modelID)
-	if err != nil || existing.Type != models.ModelTypeChat {
+// refreshCatalogModel refreshes one existing model from its catalog entry.
+// known is the row the import already listed, or nil to read it.
+func (h *ProvidersHandler) refreshCatalogModel(ctx context.Context, providerID, modelID string, known *models.GetResponse, catalog models.ModelConfig) bool {
+	if known == nil {
+		row, err := h.modelsService.GetByProviderAndModelID(ctx, providerID, modelID)
+		if err != nil {
+			return false
+		}
+		known = &row
+	}
+	existing := *known
+	if existing.Type != models.ModelTypeChat {
 		return false
 	}
 	refreshed, changed := refreshFromCatalog(modelID, existing.Config, catalog)
@@ -675,23 +688,11 @@ func refreshedDefault(existing, catalog *models.ReasoningDefault, r models.Model
 }
 
 func allowCustomModelCapabilityDefaults(provider providers.GetResponse) bool {
-	if strings.TrimSpace(provider.ProviderTemplateID) != "" {
-		return false
-	}
-	// Providers created from an older preset/registry flow may not have a
-	// provider_template_id, but their metadata still says that a template is
-	// authoritative. An endpoint-only model from such a provider must not
-	// receive protocol-wide capability guesses.
-	for _, section := range []string{"preset", "registry"} {
-		metadata, ok := provider.Metadata[section].(map[string]any)
-		if !ok {
-			continue
-		}
-		source, _ := metadata["source"].(string)
-		if strings.TrimSpace(source) != "" {
-			return false
-		}
-	}
+	// A provider made from a former template or preset gets the defaults like
+	// any other: the template that described its models is gone, so nothing
+	// else will. The web client sends them only for entries without a
+	// models.dev source, which covers the former templates the same way.
+	//
 	// A gallery provider with a models.dev source imports that source's models;
 	// one its endpoint lists beyond them is as unknown as a template provider's,
 	// since the catalog did not list it. An entry without a source (Ollama, New

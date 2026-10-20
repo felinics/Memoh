@@ -191,21 +191,24 @@ export function useProviderSetup(options: {
             name,
             client_type: clientType,
             config,
-            metadata: entry ? providerSourceMetadata(entry) : {},
+            // onboarding marks the provider it made, so a retry can tell it from
+            // one the user made with the same entry.
+            metadata: { ...(entry ? providerSourceMetadata(entry) : {}), onboarding: true },
             ...(entry && { icon: modelSourceLogo(entry) }),
           } as ProvidersCreateRequest)
         } catch (error) {
           if (!isApiErrorCode(error, 'provider.name_taken')) throw error
 
-          // Retrying onboarding reuses the provider it created, recognised by
-          // the gallery entry it was made from (or the former template that
-          // entry replaced). Another provider with the name, such as one the
-          // user made by hand with the same protocol, is not overwritten.
+          // Retrying onboarding reuses only the provider it created: marked as
+          // onboarding's, from the same gallery entry and protocol. Another
+          // provider with the name, even one the user made from the same entry,
+          // is not overwritten.
           const { data: existing } = await getProvidersNameByName({
             path: { name },
             throwOnError: true,
           })
-          if (!existing?.id || !entry || providerCatalogEntry(existing)?.id !== entry.id
+          if (!existing?.id || !entry || existing.metadata?.onboarding !== true
+            || providerCatalogEntry(existing)?.id !== entry.id
             || existing.client_type !== clientType) throw error
 
           await putProvidersById({

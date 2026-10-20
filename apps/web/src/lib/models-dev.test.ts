@@ -130,10 +130,13 @@ describe('catalogModelsFor', () => {
           'text-embedding-3-small': { id: 'text-embedding-3-small' },
           'embeddinggemma-300m': { id: 'embeddinggemma-300m' },
           'typed': { id: 'typed', type: 'embedding' },
+          'BAAI/bge-m3': { id: 'BAAI/bge-m3' },
+          'voyage-3': { id: 'voyage-3' },
+          'bge-reranker-v2-m3': { id: 'bge-reranker-v2-m3' },
         },
       },
     }, 'openai', 'openai-responses')
-    expect(models.map(model => model.model_id)).toEqual(['gpt-5'])
+    expect(models.map(model => model.model_id).sort()).toEqual(['bge-reranker-v2-m3', 'gpt-5'])
   })
 
   it('returns nothing for an unknown or missing source', () => {

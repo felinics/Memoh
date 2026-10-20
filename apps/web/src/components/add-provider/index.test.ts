@@ -147,7 +147,7 @@ describe('add provider dialog', () => {
     root.remove()
   })
 
-  it('offers sources in place of the templates they replace and preselects one', async () => {
+  it('offers sources in place of the templates they replace and fills a picked one', async () => {
     const AddProvider = (await import('./index.vue')).default
     const { MODEL_SOURCES } = await import('@/constants/model-sources')
     const root = document.createElement('div')
@@ -159,7 +159,6 @@ describe('add provider dialog', () => {
         { id: 'template-gateway', key: 'internal-gateway', domain: 'llm', name: 'Gateway Template', driver: 'openai-completions' },
       ],
       sources: MODEL_SOURCES,
-      initialSource: 'openrouter',
     })
     app.config.globalProperties.$t = translate
     app.mount(root)
@@ -171,7 +170,9 @@ describe('add provider dialog', () => {
     expect(labels).toContain('OpenAI Codex')
     expect(labels).not.toContain('OpenRouter Template')
     expect(labels).toContain('OpenRouter')
-    expect(presetSelect.value).toBe('source:openrouter')
+    presetSelect.value = 'source:openrouter'
+    presetSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    await flushPromises()
     await vi.waitFor(() => {
       expect((root.querySelector('#provider-create-base-url') as HTMLInputElement).value).toBe('https://openrouter.ai/api/v1')
     })

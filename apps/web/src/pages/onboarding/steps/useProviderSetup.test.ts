@@ -31,19 +31,20 @@ vi.mock('@pinia/colada', async () => {
       mutateAsync: options.mutation,
       isLoading: ref(false),
     }),
-    useQuery: (options: { query: () => Promise<unknown> }) => {
+    useQuery: (options: { query: (context: { signal: AbortSignal }) => Promise<unknown> }) => {
       const state = ref({ data: [] })
       return {
         state,
         refresh: async () => {
-          state.value.data = await options.query() as never[]
+          state.value.data = await options.query({ signal: new AbortController().signal }) as never[]
         },
       }
     },
     useQueryCache: () => ({
       invalidateQueries: mocks.invalidateQueries,
-      ensure: (options: { query: () => Promise<unknown> }) => options,
-      refresh: async (entry: { query: () => Promise<unknown> }) => ({ status: 'success', data: await entry.query() }),
+      ensure: (options: { query: (context: { signal: AbortSignal }) => Promise<unknown> }) => options,
+      // Pinia Colada hands every query its abort signal.
+      refresh: async (entry: { query: (context: { signal: AbortSignal }) => Promise<unknown> }) => ({ status: 'success', data: await entry.query({ signal: new AbortController().signal }) }),
     }),
     defineQueryOptions: (options: unknown) => options,
   }
@@ -117,7 +118,7 @@ describe('useProviderSetup', () => {
         name: 'DeepSeek',
         client_type: 'openai-completions',
         config: { base_url: preset.baseUrl, api_key: 'sk-test' },
-        metadata: { catalog: 'deepseek', source: 'deepseek' },
+        metadata: { catalog: 'deepseek', source: 'deepseek', onboarding: true },
         icon: 'https://models.dev/logos/deepseek.svg',
       },
       throwOnError: true,
@@ -156,10 +157,25 @@ describe('useProviderSetup', () => {
     app.unmount()
   })
 
+  it('never reuses a same-name provider the user made from the same entry', async () => {
+    mocks.postProvider.mockRejectedValue({ code: 'provider.name_taken' })
+    mocks.getProviderByName.mockResolvedValue({
+      data: { id: 'hand-made-id', client_type: 'openai-completions', metadata: { catalog: 'deepseek', source: 'deepseek' } },
+    })
+    const { app, ready, setup } = mountSetup(preset)
+    setup.formValues.value.api_key = 'sk-test'
+
+    await setup.saveAndNext()
+
+    expect(mocks.updateProvider).not.toHaveBeenCalled()
+    expect(ready).not.toHaveBeenCalled()
+    app.unmount()
+  })
+
   it('reuses the provider an earlier run made from the same entry', async () => {
     mocks.postProvider.mockRejectedValue({ code: 'provider.name_taken' })
     mocks.getProviderByName.mockResolvedValue({
-      data: { id: 'earlier-id', client_type: 'openai-completions', metadata: { catalog: 'deepseek', source: 'deepseek' } },
+      data: { id: 'earlier-id', client_type: 'openai-completions', metadata: { catalog: 'deepseek', source: 'deepseek', onboarding: true } },
     })
     mocks.updateProvider.mockResolvedValue({ data: { id: 'earlier-id' } })
     const { app, ready, setup } = mountSetup(preset)

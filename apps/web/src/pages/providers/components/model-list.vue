@@ -130,12 +130,18 @@
           <List />
         </EmptyMedia>
       </EmptyHeader>
-      <EmptyTitle>{{ $t('models.emptyTitle') }}</EmptyTitle>
-      <EmptyDescription>
-        {{ $t(managed
-          ? 'models.managedEmptyDescription'
-          : providerId ? 'models.emptyDescription' : 'models.draftEmptyDescription') }}
-      </EmptyDescription>
+      <template v-if="previewError">
+        <EmptyTitle>{{ $t('models.sourcePreviewFailed') }}</EmptyTitle>
+        <EmptyDescription>{{ $t('models.sourcePreviewFailedDescription') }}</EmptyDescription>
+      </template>
+      <template v-else>
+        <EmptyTitle>{{ $t('models.emptyTitle') }}</EmptyTitle>
+        <EmptyDescription>
+          {{ $t(managed
+            ? 'models.managedEmptyDescription'
+            : providerId ? 'models.emptyDescription' : 'models.draftEmptyDescription') }}
+        </EmptyDescription>
+      </template>
     </Empty>
   </SettingsSection>
 </template>
@@ -181,6 +187,8 @@ const props = defineProps<{
   // The models are a read-only preview of the source's catalog.
   preview?: boolean
   previewLoading?: boolean
+  // The preview could not be read from models.dev.
+  previewError?: boolean
   ensureProviderId?: () => Promise<string>
 }>()
 

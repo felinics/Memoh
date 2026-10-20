@@ -219,9 +219,8 @@ const props = withDefaults(defineProps<{
   templates?: ProvidertemplatesGetResponse[]
   initialTemplateId?: string
   // models.dev providers to offer alongside the templates; a template one of them
-  // replaces is left out. initialSource preselects one by its source id.
+  // replaces is left out.
   sources?: readonly ModelSource[]
-  initialSource?: string
   importModels?: (providerId: string, defaultCompatibilities?: string[]) => Promise<{ created?: number, skipped?: number } | null | undefined>
 }>(), {
   providers: () => [],
@@ -296,9 +295,6 @@ const availablePresets = computed<SelectablePreset[]>(() => {
 // Only the LLM domain offers a free-form "custom" entry; the others (video,
 // speech, transcription) always start on a concrete preset.
 const defaultPresetId = computed(() => {
-  if (props.initialSource && availablePresets.value.some(preset => preset.modelSource === props.initialSource)) {
-    return sourcePresetId(props.initialSource)
-  }
   if (props.initialTemplateId && availablePresets.value.some(preset => preset.templateId === props.initialTemplateId)) {
     return props.initialTemplateId
   }

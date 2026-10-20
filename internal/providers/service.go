@@ -383,13 +383,19 @@ type listedModel struct {
 	Type        string
 }
 
-// embeddingModelID matches an id in which "embed" starts a word: text-embedding-3,
-// nomic-embed-text, embeddinggemma-300m, but not an id that merely contains it.
-var embeddingModelID = regexp.MustCompile(`(?i)(?:^|[^a-z])embed`)
+// embeddingModelID matches an id in which "embed" starts a word (text-embedding-3,
+// nomic-embed-text, embeddinggemma-300m, but not an id that merely contains it),
+// or that starts a part with an embedding family whose names do not say so:
+// bge-m3, gte-Qwen2, e5-mistral, multilingual-e5, m3e-base, voyage-3,
+// jina-clip-v2. A reranker of those families is not an embedding model.
+var (
+	embeddingModelID = regexp.MustCompile(`(?i)(?:^|[^a-z])embed|(?:^|[/_.:-])(?:bge|gte|e5|m3e|voyage|jina-clip)(?:[-_.:]|$)`)
+	rerankerModelID  = regexp.MustCompile(`(?i)rerank`)
+)
 
 // looksLikeEmbeddingModel reports whether a model id names an embedding model.
 func looksLikeEmbeddingModel(modelID string) bool {
-	return embeddingModelID.MatchString(modelID)
+	return embeddingModelID.MatchString(modelID) && !rerankerModelID.MatchString(modelID)
 }
 
 // listGoogleEmbeddingModels lists the embedding models of a Google provider
