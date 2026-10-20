@@ -153,9 +153,15 @@ func (h *MessageHandler) StreamAttentionEvents(c echo.Context) error {
 		return nil
 	}
 
-	// Bot access is resolved once per bot for the stream's lifetime; the
-	// client reconnects regularly, which re-runs it, as the activity SSE does.
-	access := h.botAccessCache(c, userID)
+	// A healthy stream can live indefinitely. Recheck each attention so a
+	// revoked grant cannot keep leaking session titles over an old connection.
+	access := func(botID string) bool {
+		if strings.TrimSpace(botID) == "" {
+			return false
+		}
+		_, _, err := h.authorizeBotMessageAccess(c, userID, botID)
+		return err == nil
+	}
 	heartbeat := time.NewTicker(sseHeartbeatInterval)
 	defer heartbeat.Stop()
 	for {

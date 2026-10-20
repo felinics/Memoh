@@ -182,16 +182,50 @@ func streamAttention(t *testing.T, h *MessageHandler, hub *messageevent.Hub, use
 
 type countingFlushRecorder struct {
 	*httptest.ResponseRecorder
-	flushes   int
-	stopAfter int
-	cancel    context.CancelFunc
+	flushes    int
+	stopAfter  int
+	cancel     context.CancelFunc
+	afterFlush func(int)
 }
 
 func (r *countingFlushRecorder) Flush() {
 	r.ResponseRecorder.Flush()
 	r.flushes++
+	if r.afterFlush != nil {
+		r.afterFlush(r.flushes)
+	}
 	if r.flushes >= r.stopAfter {
 		r.cancel()
+	}
+}
+
+func TestAttentionStreamStopsAfterAccessRevoked(t *testing.T) {
+	queries := attentionTestQueriesFor(attentionOwnerID)
+	hub := messageevent.NewHub()
+	h := NewMessageHandler(slog.Default(), nil, session.NewService(nil, queries, hub),
+		bots.NewService(nil, queries), newTestAdminAccountService("member"), hub)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	rec := &countingFlushRecorder{
+		ResponseRecorder: httptest.NewRecorder(), cancel: cancel, stopAfter: 3,
+		afterFlush: func(count int) {
+			if count == 2 {
+				queries.bot.OwnerUserID = testUUID(attentionOutsiderID)
+			}
+		},
+	}
+	h.messageEvents = publishOnSubscribe{hub: hub, publish: func() {
+		publishAttention(hub, attentionOwnerID)
+		publishAttention(hub, attentionOwnerID)
+		data, _ := json.Marshal(attention.Read{SessionID: activityTestSessionID, ReadAt: time.Now()})
+		hub.Publish(messageevent.Event{Type: messageevent.EventTypeSessionRead, BotID: messageevent.UserTopic(attentionOwnerID), Data: data})
+	}}
+	req := httptest.NewRequest(http.MethodGet, "/users/me/attention/events", nil).WithContext(ctx)
+	if err := h.StreamAttentionEvents(testAuthContext(echo.New(), req, rec, attentionOwnerID)); err != nil {
+		t.Fatal(err)
+	}
+	if count := strings.Count(rec.Body.String(), `"type":"session_attention"`); count != 1 {
+		t.Fatalf("delivered %d attention frames, want only the one before access was revoked", count)
 	}
 }
 
