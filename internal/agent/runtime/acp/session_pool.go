@@ -21,11 +21,11 @@ import (
 
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
-	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 	"github.com/felinics/memoh/internal/agent/runtime/agentstate"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/errs"
@@ -946,9 +946,10 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 
 	p.persistModelPreference(ctx, h)
 
-	toolSink := newPromptToolEventSink(input.Sink, input.ToolOutputLimit)
-	unregisterToolSink := p.registerToolEventSink(input, toolSink)
-	defer unregisterToolSink()
+	turn := client.NewTurnSink(input.Sink, input.ToolOutputLimit)
+	defer turn.Finish()
+	unregisterToolEvents := toolmount.RegisterTurnSink(p.contexts, input.BotID, input.SessionID, input.RunID, turn.EmitStreamEvent)
+	defer unregisterToolEvents()
 
 	// An aborted turn triggers the ACP cancellation handshake, but the agent
 	// cannot finish a cancelled prompt while one of its permission requests is
@@ -981,15 +982,16 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 		AllowResourceOnly: len(input.AttachmentReferences) > 0 && len(resources) > 0,
 		RequiredCommand:   input.RequiredCommand,
 	}
-	result, err := sess.PromptWithToolContextOptions(ctx, input.Prompt, resources, toolCtx, options, toolSink)
+	result, err := sess.PromptWithToolContextOptions(ctx, input.Prompt, resources, toolCtx, options, turn)
 	if errors.Is(err, client.ErrImagePromptUnsupported) && len(options.Images) > 0 && input.CanFallbackImagesToFiles {
 		options.Images = nil
-		result, err = sess.PromptWithToolContextOptions(ctx, input.Prompt, resources, toolCtx, options, toolSink)
+		result, err = sess.PromptWithToolContextOptions(ctx, input.Prompt, resources, toolCtx, options, turn)
 	}
 	// Stop MCP deliveries and wait for any event already inside the store's
 	// read-side critical section before taking the durable result snapshot.
-	unregisterToolSink()
-	toolSink.ApplyToResult(&result)
+	unregisterToolEvents()
+	// The turn sink's record also holds the gateway's tool events.
+	result.Output = turn.Transcript(result.Text)
 	if err != nil {
 		if errors.Is(err, client.ErrImagePromptUnsupported) ||
 			errors.Is(err, client.ErrInvalidPromptImage) ||
@@ -2502,17 +2504,6 @@ func promptResources(input PromptInput) []client.PromptResource {
 	}}
 }
 
-func (p *SessionPool) registerToolEventSink(input PromptInput, sink *promptToolEventSink) func() {
-	if p == nil || p.contexts == nil || sink == nil {
-		return func() {}
-	}
-	return p.contexts.RegisterToolEventSink(client.ToolSessionContext{
-		BotID:     input.BotID,
-		SessionID: input.SessionID,
-		RunID:     input.RunID,
-	}, sink.EmitToolStreamEvent)
-}
-
 func (p *SessionPool) resolveToolHTTPURL(inputURL string, workspaceInfo bridge.WorkspaceInfo) (string, error) {
 	if p == nil || p.tools == nil {
 		return "", nil
@@ -2545,103 +2536,6 @@ func (p *SessionPool) runtimeSyncGuard(botID string, expectedBotEpoch int64) cli
 		return p.stateStore.GuardRuntimeSync(ctx, botID, expectedBotEpoch, fn)
 	}
 }
-
-type promptToolEventSink struct {
-	mu         sync.Mutex
-	next       client.EventSink
-	events     []event.StreamEvent
-	transcript *client.TranscriptRecorder
-	limit      client.ToolOutputLimit
-}
-
-func newPromptToolEventSink(next client.EventSink, limits ...client.ToolOutputLimit) *promptToolEventSink {
-	var limit client.ToolOutputLimit
-	if len(limits) > 0 {
-		limit = limits[0]
-	}
-	return &promptToolEventSink{
-		next:       next,
-		transcript: client.NewTranscriptRecorder(limit),
-		limit:      limit,
-	}
-}
-
-func (s *promptToolEventSink) EmitStreamEvent(ev event.StreamEvent) {
-	if s == nil {
-		return
-	}
-	ev = client.LimitStreamEvent(ev, s.limit)
-	s.mu.Lock()
-	s.events = appendBoundedPromptEvents(s.events, ev)
-	if s.transcript != nil {
-		s.transcript.Add(ev)
-	}
-	s.mu.Unlock()
-	if s.next != nil {
-		s.next.EmitStreamEvent(ev)
-	}
-}
-
-// RecordTerminalDecision updates the prompt's final snapshot without
-// forwarding a late frame to the cancelled live stream. EventAbort will carry
-// this corrected transcript as the one authoritative terminal event.
-func (s *promptToolEventSink) RecordTerminalDecision(ev event.StreamEvent) {
-	if s == nil {
-		return
-	}
-	ev = client.LimitStreamEvent(ev, s.limit)
-	s.mu.Lock()
-	s.events = appendBoundedPromptEvents(s.events, ev)
-	if s.transcript != nil {
-		s.transcript.Add(ev)
-	}
-	s.mu.Unlock()
-}
-
-func (s *promptToolEventSink) EmitToolStreamEvent(toolEvent mcp.ToolStreamEvent) {
-	if s == nil {
-		return
-	}
-	if ev, ok := toolEvent.ToAgentStreamEvent(); ok {
-		s.EmitStreamEvent(ev)
-	}
-}
-
-func (s *promptToolEventSink) Events() []event.StreamEvent {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]event.StreamEvent(nil), s.events...)
-}
-
-func (s *promptToolEventSink) ApplyToResult(result *client.PromptResult) {
-	if s == nil || result == nil {
-		return
-	}
-	events := s.Events()
-	if len(events) == 0 {
-		return
-	}
-	result.Events = events
-	if s.transcript != nil {
-		result.Output = s.transcript.Messages(result.Text)
-	}
-}
-
-func appendBoundedPromptEvents(events []event.StreamEvent, incoming ...event.StreamEvent) []event.StreamEvent {
-	if len(incoming) == 0 {
-		return events
-	}
-	events = append(events, incoming...)
-	if len(events) <= maxCollectedPromptToolEvents {
-		return events
-	}
-	return append([]event.StreamEvent(nil), events[len(events)-maxCollectedPromptToolEvents:]...)
-}
-
-const maxCollectedPromptToolEvents = 4096
 
 func profileSupportsSetupMode(profile acpprofile.Profile, mode client.SetupMode) bool {
 	if len(profile.SetupModes) == 0 {

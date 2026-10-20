@@ -12,18 +12,19 @@ import (
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 )
 
-const (
-	maxCollectedStreamEvents = 4096
-	maxTrackedACPToolStates  = 1024
-)
+const maxTrackedACPToolStates = 1024
 
+// EventSink receives a session's stream events. A sink handed to Session is
+// called on acp-go-sdk's only notification goroutine, and reading from the
+// Agent stops while that goroutine falls behind, so it must return without
+// waiting on its consumer: put a TurnSink in front of a live stream.
 type EventSink interface {
 	EmitStreamEvent(event.StreamEvent)
 }
 
 // TerminalDecisionSink records a late durable approval/Form terminal state
-// without publishing another live frame. The pool's prompt snapshot sink uses
-// it so EventAbort remains the single authoritative terminal UI event.
+// without publishing another live frame. TurnSink implements it so EventAbort
+// remains the single authoritative terminal UI event.
 type TerminalDecisionSink interface {
 	RecordTerminalDecision(event.StreamEvent)
 }
@@ -117,11 +118,9 @@ func isTerminalDecisionEvent(ev event.StreamEvent) bool {
 }
 
 type eventCollector struct {
-	mu     sync.Mutex
-	ctx    context.Context
-	text   strings.Builder
-	events []event.StreamEvent
-	// transcript is kept separately from the capped UI event buffer.
+	mu         sync.Mutex
+	ctx        context.Context
+	text       strings.Builder
 	transcript *TranscriptRecorder
 	limit      ToolOutputLimit
 }
@@ -157,7 +156,6 @@ func (c *eventCollector) record(ev event.StreamEvent) bool {
 	if !c.acceptingLocked() {
 		return false
 	}
-	c.events = appendBoundedStreamEvents(c.events, ev)
 	c.transcript.Add(ev)
 	return true
 }
@@ -169,7 +167,6 @@ func (c *eventCollector) recordTerminalDecision(ev event.StreamEvent) {
 	ev = LimitStreamEvent(ev, c.limit)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.events = appendBoundedStreamEvents(c.events, ev)
 	c.transcript.Add(ev)
 }
 
@@ -182,7 +179,6 @@ func (c *eventCollector) apply(n acp.SessionNotification, events []event.StreamE
 
 	update := n.Update
 	events = limitStreamEvents(events, c.limit)
-	c.events = appendBoundedStreamEvents(c.events, events...)
 	for _, ev := range events {
 		c.transcript.Add(ev)
 	}
@@ -207,11 +203,9 @@ func (c *eventCollector) result() RunResult {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	events := append([]event.StreamEvent(nil), c.events...)
 	text := strings.TrimSpace(c.text.String())
 	return RunResult{
 		Text:   text,
-		Events: events,
 		Output: c.transcript.Messages(text),
 	}
 }
@@ -620,17 +614,6 @@ func (m *acpToolEventMapper) ensureTool(sessionID, id string) *acpToolState {
 		m.tools[key] = state
 	}
 	return state
-}
-
-func appendBoundedStreamEvents(events []event.StreamEvent, incoming ...event.StreamEvent) []event.StreamEvent {
-	if len(incoming) == 0 {
-		return events
-	}
-	events = append(events, incoming...)
-	if len(events) <= maxCollectedStreamEvents {
-		return events
-	}
-	return append([]event.StreamEvent(nil), events[len(events)-maxCollectedStreamEvents:]...)
 }
 
 func (m *acpToolEventMapper) eventsForState(state *acpToolState) []event.StreamEvent {

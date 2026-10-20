@@ -129,13 +129,10 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	return out, nil
 }
 
-// DriverPromptResult maps a pool result onto the port result: transcript
-// fallback from events, publication request, and round provenance. Exported
-// so tests can hold the mapping fixed while exercising the unified flow.
+// DriverPromptResult maps a pool result onto the port result: publication
+// request and round provenance. Exported so tests can hold the mapping fixed
+// while exercising the unified flow.
 func DriverPromptResult(result client.PromptResult, agentID string) external.PromptResult {
-	if len(result.Output) == 0 {
-		result.Output = external.TranscriptFromEvents(result.Events, result.Text)
-	}
 	out := external.PromptResult{
 		Output:     result.Output,
 		Text:       result.Text,

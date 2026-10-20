@@ -2,7 +2,6 @@ package client
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -13,36 +12,6 @@ import (
 	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 )
-
-// TestTranscriptSurvivesEventBufferCap ensures transcript persistence is not
-// limited by the capped UI event buffer.
-func TestTranscriptSurvivesEventBufferCap(t *testing.T) {
-	t.Parallel()
-
-	collector := newEventCollector()
-	total := maxCollectedStreamEvents + 100
-	for i := 0; i < total; i++ {
-		collector.record(event.StreamEvent{Type: event.TextDelta, Delta: fmt.Sprintf("[%d]", i)})
-	}
-	result := collector.result()
-
-	if len(result.Events) != maxCollectedStreamEvents {
-		t.Fatalf("UI event buffer = %d events, want capped at %d", len(result.Events), maxCollectedStreamEvents)
-	}
-	if len(result.Output) != 1 {
-		t.Fatalf("transcript = %d messages, want 1 assistant message", len(result.Output))
-	}
-	text, ok := result.Output[0].Content[0].(sdk.TextPart)
-	if !ok {
-		t.Fatalf("transcript content = %#v, want text part", result.Output[0].Content[0])
-	}
-	if !strings.HasPrefix(text.Text, "[0]") {
-		t.Fatalf("transcript lost its beginning: starts with %q", text.Text[:20])
-	}
-	if !strings.HasSuffix(text.Text, fmt.Sprintf("[%d]", total-1)) {
-		t.Fatalf("transcript lost its end")
-	}
-}
 
 func TestTranscriptMCPErrorResultSetsToolResultError(t *testing.T) {
 	t.Parallel()
@@ -154,34 +123,5 @@ func TestTranscriptLimitsToolResultOutput(t *testing.T) {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout)
 		}
-	}
-}
-
-func TestEventCollectorLimitsToolResultEvents(t *testing.T) {
-	t.Parallel()
-
-	large := "HEAD\n" + strings.Repeat("tool output ", 300) + "\nTAIL"
-	collector := newEventCollector(ToolOutputLimit{MaxBytes: 512, MaxLines: 80})
-	collector.record(event.StreamEvent{
-		Type:       event.ToolCallEnd,
-		ToolCallID: "call-1",
-		ToolName:   "exec",
-		Result:     map[string]any{"stdout": large},
-	})
-
-	result := collector.result()
-	if len(result.Events) != 1 {
-		t.Fatalf("events = %d, want 1", len(result.Events))
-	}
-	output, ok := result.Events[0].Result.(map[string]any)
-	if !ok {
-		t.Fatalf("event result = %#v, want map", result.Events[0].Result)
-	}
-	stdout, ok := output["stdout"].(string)
-	if !ok {
-		t.Fatalf("stdout = %#v, want string", output["stdout"])
-	}
-	if len(stdout) >= len(large) || !strings.Contains(stdout, "[memoh pruned]") {
-		t.Fatalf("event stdout was not limited:\n%s", stdout)
 	}
 }

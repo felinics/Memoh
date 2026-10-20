@@ -62,7 +62,7 @@ func acpProducedEvents(t *testing.T) []event.StreamEvent {
 	events := make([]event.StreamEvent, 0, 6)
 
 	// Approval card events come from the Memoh side of the boundary.
-	callbacks, collector := parityCallbacks(&parityApproval{}, "run-1")
+	callbacks, delivered := parityCallbacks(&parityApproval{}, "run-1")
 	pending := toolapproval.Request{
 		ID:         "approval-1",
 		ShortID:    1,
@@ -75,7 +75,7 @@ func acpProducedEvents(t *testing.T) []event.StreamEvent {
 	approved := pending
 	approved.Status = toolapproval.StatusApproved
 	callbacks.emitToolApprovalRequest(approved)
-	events = append(events, collector.result().Events...)
+	events = append(events, delivered.all()...)
 
 	// Tool lifecycle and text come from the agent side of the boundary - the
 	// notification mapper.

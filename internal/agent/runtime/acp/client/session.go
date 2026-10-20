@@ -64,10 +64,9 @@ type StartRequest struct {
 }
 
 type PromptResult struct {
-	StopReason string              `json:"stop_reason,omitempty"`
-	Text       string              `json:"text,omitempty"`
-	Events     []event.StreamEvent `json:"events,omitempty"`
-	Usage      *sdk.Usage          `json:"usage,omitempty"`
+	StopReason string     `json:"stop_reason,omitempty"`
+	Text       string     `json:"text,omitempty"`
+	Usage      *sdk.Usage `json:"usage,omitempty"`
 	// Output is the in-process transcript used for persistence.
 	Output []sdk.Message `json:"-"`
 	// Meta is the prompt response's _meta, where agents report what ACP has
@@ -715,7 +714,6 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 	result := PromptResult{
 		StopReason: string(resp.StopReason),
 		Text:       collected.Text,
-		Events:     collected.Events,
 		Usage:      usage,
 		Output:     attachUsageToLastAssistant(collected.Output, usage),
 		Meta:       resp.Meta,

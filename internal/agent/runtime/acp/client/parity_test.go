@@ -130,7 +130,7 @@ func parityNativeSession(runID string) mcp.ToolSessionContext {
 	}
 }
 
-func parityCallbacks(approval ToolApprovalService, runID string, nativeTools ...string) (*clientCallbacks, *eventCollector) {
+func parityCallbacks(approval ToolApprovalService, runID string, nativeTools ...string) (*clientCallbacks, *eventLog) {
 	callbacks := &clientCallbacks{
 		root:     "/data",
 		approval: approval,
@@ -145,9 +145,9 @@ func parityCallbacks(approval ToolApprovalService, runID string, nativeTools ...
 	if len(nativeTools) > 0 {
 		callbacks.toolGateway = testACPToolGateway(nativeTools...)
 	}
-	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
-	return callbacks, collector
+	delivered := &eventLog{}
+	callbacks.setPromptState(newEventCollector(), delivered, callbacks.baseSession)
+	return callbacks, delivered
 }
 
 func parityNativeSource(approval tools.NativeToolApprovalService, toolEvents tools.NativeToolEventSink, toolName string, executed *bool) *tools.NativeToolSource {
@@ -430,7 +430,7 @@ func TestParityApprovalStreamPayloadIdentical(t *testing.T) {
 	}
 
 	acpApproval := &parityApproval{decision: decision}
-	callbacks, collector := parityCallbacks(acpApproval, "stream-1")
+	callbacks, delivered := parityCallbacks(acpApproval, "stream-1")
 	if _, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 		ToolCall: acp.ToolCallUpdate{
 			ToolCallId: acp.ToolCallId("call-1"),
@@ -445,7 +445,7 @@ func TestParityApprovalStreamPayloadIdentical(t *testing.T) {
 		t.Fatalf("ACP RequestPermission error = %v", err)
 	}
 	var acpPayloads []map[string]any
-	for _, ev := range collector.result().Events {
+	for _, ev := range delivered.all() {
 		if ev.Type != event.ToolApprovalRequest {
 			continue
 		}

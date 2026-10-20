@@ -192,9 +192,9 @@ func TestTerminalEndEventUsesPromptToolOutputLimit(t *testing.T) {
 
 	large := "HEAD\n" + strings.Repeat("terminal output ", 300) + "\nTAIL"
 	limit := ToolOutputLimit{MaxBytes: 512, MaxLines: 80}
-	collector := newEventCollector(limit)
+	delivered := &eventLog{}
 	emitter := &toolEventEmitter{}
-	emitter.setPromptState(collector, nil, limit)
+	emitter.setPromptState(newEventCollector(limit), delivered, limit)
 	manager := &terminalManager{
 		limit:  limit,
 		events: emitter,
@@ -207,13 +207,13 @@ func TestTerminalEndEventUsesPromptToolOutputLimit(t *testing.T) {
 	}
 
 	manager.emitTerminalEnd(term)
-	result := collector.result()
-	if len(result.Events) != 1 {
-		t.Fatalf("events = %d, want 1", len(result.Events))
+	events := delivered.all()
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
 	}
-	output, ok := result.Events[0].Result.(map[string]any)
+	output, ok := events[0].Result.(map[string]any)
 	if !ok {
-		t.Fatalf("event result = %#v, want map", result.Events[0].Result)
+		t.Fatalf("event result = %#v, want map", events[0].Result)
 	}
 	stdout, ok := output["stdout"].(string)
 	if !ok {

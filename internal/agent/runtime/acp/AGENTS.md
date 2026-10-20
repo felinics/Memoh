@@ -24,14 +24,18 @@ permission handling. It has two entry points.
   any number of sessions, delivers each inbound call to the session it names,
   and can resume a session the agent persisted. Updates are applied in the
   connection's order, so a request returns once the updates sent before its
-  response have been applied. A prompt's sink is called on the loop every
-  session shares, so it must not wait on its consumer; the caller queues.
-  It advertises no client file
-  or terminal capability and looks nothing up: everything agent-specific
-  (`_meta`, MCP servers, how the agent names an MCP tool call) arrives in
-  `SessionConfig`, and the agent's own methods go through `Call`,
-  `Authenticate` and `Subscribe`, whose method names and shapes the caller
-  owns.
+  response have been applied. It advertises no client file or terminal
+  capability and looks nothing up: everything agent-specific (`_meta`, MCP
+  servers, how the agent names an MCP tool call) arrives in `SessionConfig`,
+  and the agent's own methods go through `Call`, `Authenticate` and
+  `Subscribe`, whose method names and shapes the caller owns.
+
+On both, acp-go-sdk handles notifications on one goroutine and closes the
+connection once 1024 are queued behind it. The client therefore stops reading
+the agent's output while 512 updates wait, and the agent waits with it. Every
+message behind a held update waits too, so a notification handler must never
+wait, neither on the agent nor on a consumer: put a `TurnSink` in front of a
+prompt's live stream.
 
 A built-in agent whose own protocol is ACP (Grok Build) is a direct runtime
 that uses `Connect`. It must not import the pool or `profile/`

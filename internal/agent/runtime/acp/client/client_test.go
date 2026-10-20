@@ -157,11 +157,6 @@ func TestRunnerStartSessionStreamsEvents(t *testing.T) {
 			t.Fatalf("streamed events missing %s tool end: %#v", want, streamedEventsSnapshot)
 		}
 	}
-	for _, want := range []string{"read", "write", "exec"} {
-		if !hasStreamedToolEvent(result.Events, event.ToolCallEnd, want) {
-			t.Fatalf("result events missing %s tool end: %#v", want, result.Events)
-		}
-	}
 	writeEvent := findStreamedToolEvent(streamedEventsSnapshot, event.ToolCallEnd, "write")
 	if writeEvent == nil {
 		t.Fatalf("streamed events missing write tool end: %#v", streamedEventsSnapshot)
@@ -1267,8 +1262,8 @@ func TestRequestPermissionUsesMemohToolApproval(t *testing.T) {
 		},
 		events: &toolEventEmitter{},
 	}
-	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	delivered := &eventLog{}
+	callbacks.setPromptState(newEventCollector(), delivered, callbacks.baseSession)
 
 	resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 		ToolCall: acp.ToolCallUpdate{
@@ -1301,7 +1296,7 @@ func TestRequestPermissionUsesMemohToolApproval(t *testing.T) {
 	if approval.created.BotID != "bot-1" || approval.created.SessionID != "session-1" || approval.created.ChannelIdentityID != "channel-1" {
 		t.Fatalf("approval context = %#v", approval.created)
 	}
-	events := collector.result().Events
+	events := delivered.all()
 	if len(events) != 2 {
 		t.Fatalf("events = %#v, want pending and approved approval events", events)
 	}
@@ -1625,8 +1620,8 @@ func TestRequestPermissionCorrelatesSparseCodexMCPUpdate(t *testing.T) {
 		events:     &toolEventEmitter{},
 		toolMapper: newACPToolEventMapper(acpprofile.DefaultToolQuirks()),
 	}
-	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	delivered := &eventLog{}
+	callbacks.setPromptState(newEventCollector(), delivered, callbacks.baseSession)
 
 	request := acp.RequestPermissionRequest{
 		Meta:      map[string]any{"is_mcp_tool_approval": true},
@@ -1692,7 +1687,7 @@ func TestRequestPermissionCorrelatesSparseCodexMCPUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SessionUpdate error = %v", err)
 	}
-	if events := collector.result().Events; len(events) != 0 {
+	if events := delivered.all(); len(events) != 0 {
 		t.Fatalf("MCP wrapper events = %#v, want none; the gateway owns the real tool event", events)
 	}
 
@@ -2252,8 +2247,8 @@ func TestRequestPermissionRejectedByMemohToolApprovalSelectsRejectOption(t *test
 		},
 		events: &toolEventEmitter{},
 	}
-	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	delivered := &eventLog{}
+	callbacks.setPromptState(newEventCollector(), delivered, callbacks.baseSession)
 
 	resp, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 		ToolCall: acp.ToolCallUpdate{
@@ -2277,7 +2272,7 @@ func TestRequestPermissionRejectedByMemohToolApprovalSelectsRejectOption(t *test
 		t.Fatalf("approval input = %#v", approval.created)
 	}
 	var sawRejected bool
-	for _, ev := range collector.result().Events {
+	for _, ev := range delivered.all() {
 		if ev.Type == event.ToolApprovalRequest &&
 			ev.ToolCallID == "exec-1" &&
 			ev.ApprovalID == "approval-2" &&
@@ -2286,7 +2281,7 @@ func TestRequestPermissionRejectedByMemohToolApprovalSelectsRejectOption(t *test
 		}
 	}
 	if !sawRejected {
-		t.Fatalf("events = %#v, want rejected approval update", collector.result().Events)
+		t.Fatalf("events = %#v, want rejected approval update", delivered.all())
 	}
 }
 
@@ -2321,8 +2316,8 @@ func TestCreateTerminalUsesMemohToolApproval(t *testing.T) {
 		},
 		acpprofile.DefaultToolQuirks(),
 	)
-	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	delivered := &eventLog{}
+	callbacks.setPromptState(newEventCollector(), delivered, callbacks.baseSession)
 
 	term, err := callbacks.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
 		Command: "printf",
@@ -2342,7 +2337,7 @@ func TestCreateTerminalUsesMemohToolApproval(t *testing.T) {
 	if _, err := callbacks.WaitForTerminalExit(context.Background(), acp.WaitForTerminalExitRequest{TerminalId: term.TerminalId}); err != nil {
 		t.Fatalf("WaitForTerminalExit error = %v", err)
 	}
-	events := collector.result().Events
+	events := delivered.all()
 	var sawStart, sawApproval, sawEnd bool
 	for _, ev := range events {
 		if ev.ToolCallID != "terminal-term-1" {
@@ -2394,7 +2389,8 @@ func TestCreateTerminalRejectedByMemohToolApprovalDoesNotStartTerminal(t *testin
 		acpprofile.DefaultToolQuirks(),
 	)
 	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	delivered := &eventLog{}
+	callbacks.setPromptState(collector, delivered, callbacks.baseSession)
 
 	_, err := callbacks.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
 		Command: "pwd",
@@ -2403,7 +2399,7 @@ func TestCreateTerminalRejectedByMemohToolApprovalDoesNotStartTerminal(t *testin
 		t.Fatalf("CreateTerminal error = %v, want rejected", err)
 	}
 	result := collector.result()
-	events := result.Events
+	events := delivered.all()
 	startIdx, endIdx := -1, -1
 	for idx, ev := range events {
 		if ev.ToolCallID != "terminal-term-1" {
@@ -2468,8 +2464,8 @@ func TestWriteTextFileUsesMemohToolApproval(t *testing.T) {
 		},
 		acpprofile.DefaultToolQuirks(),
 	)
-	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	delivered := &eventLog{}
+	callbacks.setPromptState(newEventCollector(), delivered, callbacks.baseSession)
 
 	if _, err := callbacks.WriteTextFile(context.Background(), acp.WriteTextFileRequest{
 		Path:    "/data/review.txt",
@@ -2491,7 +2487,7 @@ func TestWriteTextFileUsesMemohToolApproval(t *testing.T) {
 	if string(written) != "review me\n" {
 		t.Fatalf("written content = %q", written)
 	}
-	assertSingleApprovalWithStartEnd(t, collector.result().Events, approval.created.ToolCallID, "write", "approval-write")
+	assertSingleApprovalWithStartEnd(t, delivered.all(), approval.created.ToolCallID, "write", "approval-write")
 }
 
 func TestACPFileCallbacksRecheckRuntimeGuardAfterApproval(t *testing.T) {
@@ -2711,8 +2707,8 @@ func TestWriteTextFileWithoutToolSessionIsRejectedWhenApprovalEnabled(t *testing
 		ToolSessionContext{BotID: "bot-1"},
 		acpprofile.DefaultToolQuirks(),
 	)
-	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	delivered := &eventLog{}
+	callbacks.setPromptState(newEventCollector(), delivered, callbacks.baseSession)
 
 	_, err := callbacks.WriteTextFile(context.Background(), acp.WriteTextFileRequest{
 		Path:    "/data/review.txt",
@@ -2726,7 +2722,7 @@ func TestWriteTextFileWithoutToolSessionIsRejectedWhenApprovalEnabled(t *testing
 	if _, err := os.Stat(filepath.Join(root, "review.txt")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("written file stat error = %v, want not exist", err)
 	}
-	events := collector.result().Events
+	events := delivered.all()
 	var sawRejectedEnd bool
 	for _, ev := range events {
 		if ev.Type == event.ToolCallEnd && ev.ToolName == "write" && strings.Contains(ev.Error, "not approved") {
@@ -2926,8 +2922,8 @@ func TestRequestPermissionGrantDedupesWriteTextFileApproval(t *testing.T) {
 		},
 		acpprofile.DefaultToolQuirks(),
 	)
-	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	delivered := &eventLog{}
+	callbacks.setPromptState(newEventCollector(), delivered, callbacks.baseSession)
 
 	permission, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 		ToolCall: acp.ToolCallUpdate{
@@ -2959,7 +2955,7 @@ func TestRequestPermissionGrantDedupesWriteTextFileApproval(t *testing.T) {
 	if got := approval.createdCount(); got != 1 {
 		t.Fatalf("approval create count = %d, want 1", got)
 	}
-	assertSingleApprovalWithStartEnd(t, collector.result().Events, "write-1", "write", "approval-write")
+	assertSingleApprovalWithStartEnd(t, delivered.all(), "write-1", "write", "approval-write")
 }
 
 func TestRequestPermissionGrantDedupesCreateTerminalApproval(t *testing.T) {
@@ -2993,8 +2989,8 @@ func TestRequestPermissionGrantDedupesCreateTerminalApproval(t *testing.T) {
 		},
 		acpprofile.DefaultToolQuirks(),
 	)
-	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	delivered := &eventLog{}
+	callbacks.setPromptState(newEventCollector(), delivered, callbacks.baseSession)
 
 	if _, err := callbacks.RequestPermission(context.Background(), acp.RequestPermissionRequest{
 		ToolCall: acp.ToolCallUpdate{
@@ -3020,7 +3016,7 @@ func TestRequestPermissionGrantDedupesCreateTerminalApproval(t *testing.T) {
 	if got := approval.createdCount(); got != 1 {
 		t.Fatalf("approval create count = %d, want 1", got)
 	}
-	assertSingleApprovalWithStartEnd(t, collector.result().Events, "exec-1", "exec", "approval-exec")
+	assertSingleApprovalWithStartEnd(t, delivered.all(), "exec-1", "exec", "approval-exec")
 }
 
 func TestRequestPermissionGrantDedupesTerminalWithCwdAndArgs(t *testing.T) {
@@ -3054,8 +3050,8 @@ func TestRequestPermissionGrantDedupesTerminalWithCwdAndArgs(t *testing.T) {
 		},
 		acpprofile.DefaultToolQuirks(),
 	)
-	collector := newEventCollector()
-	callbacks.setPromptState(collector, nil, callbacks.baseSession)
+	delivered := &eventLog{}
+	callbacks.setPromptState(newEventCollector(), delivered, callbacks.baseSession)
 
 	// The permission request carries the raw command with loose spacing and no
 	// cwd; the terminal create rebuilds it from Command+Args and adds a cwd.
@@ -3088,7 +3084,7 @@ func TestRequestPermissionGrantDedupesTerminalWithCwdAndArgs(t *testing.T) {
 	if got := approval.createdCount(); got != 1 {
 		t.Fatalf("approval create count = %d, want 1 (grant should dedupe despite cwd/spacing)", got)
 	}
-	assertSingleApprovalWithStartEnd(t, collector.result().Events, "exec-cwd-1", "exec", "approval-exec-cwd")
+	assertSingleApprovalWithStartEnd(t, delivered.all(), "exec-cwd-1", "exec", "approval-exec-cwd")
 }
 
 func TestPermissionNativeToolMapsClaudeCodeShapes(t *testing.T) {
@@ -3492,6 +3488,9 @@ func (a *fakeACPAgent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.Pro
 	}
 	if os.Getenv("MEMOH_ACP_FAKE_AGENT_RELEASE_TERMINAL_WITHOUT_WAIT") == "1" {
 		return a.promptReleaseTerminalAfterOutput(ctx, p)
+	}
+	if raw := os.Getenv("MEMOH_ACP_FAKE_AGENT_BURST_CHUNKS"); raw != "" {
+		return a.promptBurst(p, raw)
 	}
 	if raw := os.Getenv("MEMOH_ACP_FAKE_AGENT_USAGE"); raw != "" {
 		var usage acp.Usage

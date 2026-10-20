@@ -28,6 +28,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 	"github.com/felinics/memoh/internal/agent/runtime/agentstate"
+	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/config"
@@ -1757,16 +1758,24 @@ func TestSessionPoolResolveRuntimeToolContext(t *testing.T) {
 	}
 }
 
-func TestPromptToolEventSinkPreservesACPAndHTTPToolEventOrder(t *testing.T) {
-	sink := newPromptToolEventSink(nil)
+func TestTurnRecordPreservesACPAndGatewayToolEventOrder(t *testing.T) {
+	sink := client.NewTurnSink(nil, client.ToolOutputLimit{})
+	store := mcp.NewToolSessionContextStore()
+	run := mcp.ToolSessionContext{BotID: "bot-1", SessionID: "session-1", RunID: "run-1"}
+	defer toolmount.RegisterTurnSink(store, run.BotID, run.SessionID, run.RunID, sink.EmitStreamEvent)()
+	gateway := func(ev mcp.ToolStreamEvent) {
+		if !store.AppendToolEvent(run, ev) {
+			t.Fatalf("gateway event %s was not delivered", ev.Type)
+		}
+	}
 	sink.EmitStreamEvent(event.StreamEvent{Type: event.TextDelta, Delta: "before"})
-	sink.EmitToolStreamEvent(mcp.ToolStreamEvent{
+	gateway(mcp.ToolStreamEvent{
 		Type:       "tool_call_start",
 		ToolCallID: "call-1",
 		ToolName:   "write",
 		Input:      map[string]any{"path": "notes.txt"},
 	})
-	sink.EmitToolStreamEvent(mcp.ToolStreamEvent{
+	gateway(mcp.ToolStreamEvent{
 		Type:       "tool_approval_request",
 		ToolCallID: "call-1",
 		ToolName:   "write",
@@ -1782,7 +1791,7 @@ func TestPromptToolEventSinkPreservesACPAndHTTPToolEventOrder(t *testing.T) {
 			}),
 		},
 	})
-	sink.EmitToolStreamEvent(mcp.ToolStreamEvent{
+	gateway(mcp.ToolStreamEvent{
 		Type:       "tool_call_end",
 		ToolCallID: "call-1",
 		ToolName:   "write",
@@ -1790,36 +1799,27 @@ func TestPromptToolEventSinkPreservesACPAndHTTPToolEventOrder(t *testing.T) {
 	})
 	sink.EmitStreamEvent(event.StreamEvent{Type: event.TextDelta, Delta: "after"})
 
-	events := sink.Events()
-	if len(events) != 5 {
-		t.Fatalf("events = %#v", events)
+	output := sink.Transcript("")
+	if len(output) != 3 {
+		t.Fatalf("output = %#v, want assistant text+tool call/tool result/after", output)
 	}
-	if events[0].Type != event.TextDelta || events[1].Type != event.ToolCallStart || events[2].Type != event.ToolApprovalRequest || events[3].Type != event.ToolCallEnd || events[4].Type != event.TextDelta {
-		t.Fatalf("events order = %#v", events)
+	if len(output[0].Content) != 2 {
+		t.Fatalf("output[0] = %#v, want text plus tool call", output[0])
 	}
-
-	result := client.PromptResult{}
-	sink.ApplyToResult(&result)
-	if len(result.Events) != 5 {
-		t.Fatalf("result events = %#v, want sink events", result.Events)
-	}
-	if len(result.Output) != 3 {
-		t.Fatalf("output = %#v, want assistant text+tool call/tool result/after", result.Output)
-	}
-	if len(result.Output[0].Content) != 2 {
-		t.Fatalf("output[0] = %#v, want text plus tool call", result.Output[0])
-	}
-	toolCall, ok := result.Output[0].Content[1].(sdk.ToolCallPart)
+	toolCall, ok := output[0].Content[1].(sdk.ToolCallPart)
 	if !ok {
-		t.Fatalf("output[0] = %#v, want tool call", result.Output[0])
+		t.Fatalf("output[0] = %#v, want tool call", output[0])
 	}
 	approval, ok := partmeta.Object(toolCall.ProviderMetadata, partmeta.KeyApproval)
 	if !ok || approval["approval_id"] != "approval-1" || approval["status"] != toolapproval.StatusPending {
 		t.Fatalf("tool call approval metadata = %#v", toolCall.ProviderMetadata)
 	}
-	toolResult, ok := result.Output[1].Content[0].(sdk.ToolResultPart)
+	toolResult, ok := output[1].Content[0].(sdk.ToolResultPart)
 	if !ok || toolResult.ToolCallID != "call-1" || toolResult.IsError {
-		t.Fatalf("output[1] = %#v, want successful tool result", result.Output[1])
+		t.Fatalf("output[1] = %#v, want successful tool result", output[1])
+	}
+	if text, ok := output[2].Content[0].(sdk.TextPart); !ok || text.Text != "after" {
+		t.Fatalf("output[2] = %#v, want the text that followed the tool", output[2])
 	}
 }
 

@@ -289,11 +289,11 @@ func TestStreamChatWSRoutesACPRuntimeSessionToACPPool(t *testing.T) {
 
 	messages := &recordingMessageService{}
 	pool := &recordingACPPrompter{
-		result: acpclient.PromptResult{
+		result: withTranscriptOutput(acpclient.PromptResult{
 			Text:       "done from codex",
 			StopReason: "end_turn",
 			Usage:      &sdk.Usage{InputTokens: 3, OutputTokens: 5, TotalTokens: 8},
-		},
+		}),
 	}
 	resolver := &Service{
 		messageService: messages,
@@ -469,10 +469,10 @@ func TestStreamChatRoutesACPRuntimeSessionToACPPool(t *testing.T) {
 	t.Parallel()
 
 	pool := &recordingACPPrompter{
-		result: acpclient.PromptResult{
+		result: withTranscriptOutput(acpclient.PromptResult{
 			Text:       "done from codex",
 			StopReason: "end_turn",
-		},
+		}),
 	}
 	resolver := &Service{
 		messageService: &recordingMessageService{},
@@ -530,10 +530,10 @@ func TestStreamChatRoutesDiscussACPAgentSessionToACPPool(t *testing.T) {
 	t.Parallel()
 
 	pool := &recordingACPPrompter{
-		result: acpclient.PromptResult{
+		result: withTranscriptOutput(acpclient.PromptResult{
 			Text:       "done from codex",
 			StopReason: "end_turn",
-		},
+		}),
 	}
 	resolver := &Service{
 		messageService: &recordingMessageService{},
@@ -585,13 +585,12 @@ func TestStreamChatRoutesDiscussACPAgentSessionToACPPool(t *testing.T) {
 	}
 }
 
-func TestACPTerminalStreamEventFallsBackToTranscriptEvents(t *testing.T) {
+func TestACPTerminalStreamEventCarriesTranscriptAndUsage(t *testing.T) {
 	t.Parallel()
 
-	ev := runtimeTerminalStreamEvent(native.EventEnd, acpagent.DriverPromptResult(acpclient.PromptResult{
-		Events: []event.StreamEvent{{Type: event.TextDelta, Delta: "from transcript"}},
-		Usage:  &sdk.Usage{InputTokens: 2, OutputTokens: 4, TotalTokens: 6},
-	}, "codex"))
+	ev := runtimeTerminalStreamEvent(native.EventEnd, acpagent.DriverPromptResult(withTranscriptOutput(acpclient.PromptResult{
+		Usage: &sdk.Usage{InputTokens: 2, OutputTokens: 4, TotalTokens: 6},
+	}, event.StreamEvent{Type: event.TextDelta, Delta: "from transcript"}), "codex"))
 
 	if ev.Type != native.EventEnd {
 		t.Fatalf("terminal event type = %s, want %s", ev.Type, native.EventEnd)
@@ -744,9 +743,7 @@ func TestStreamChatWSPersistsACPUserInputProjectionOnceBeforePromptReturns(t *te
 	}
 	messages := &recordingMessageService{}
 	pool := &recordingACPPrompter{
-		result: withTranscriptOutput(acpclient.PromptResult{
-			Events: streamed,
-		}),
+		result:       withTranscriptOutput(acpclient.PromptResult{}, streamed...),
 		streamEvents: streamed,
 		afterEvents: func() {
 			if len(messages.persisted) != 2 {
@@ -926,7 +923,7 @@ func TestStreamChatWSPersistsACPSubmittedUserInputResult(t *testing.T) {
 	}
 	messages := &recordingMessageService{}
 	pool := &recordingACPPrompter{
-		result:       withTranscriptOutput(acpclient.PromptResult{Events: streamed}),
+		result:       withTranscriptOutput(acpclient.PromptResult{}, streamed...),
 		streamEvents: streamed,
 	}
 	resolver := &Service{
@@ -1056,7 +1053,7 @@ func TestStreamChatWSPersistsACPApprovalProjectionOnce(t *testing.T) {
 	}
 	messages := &recordingMessageService{}
 	pool := &recordingACPPrompter{
-		result:       withTranscriptOutput(acpclient.PromptResult{Events: streamed}),
+		result:       withTranscriptOutput(acpclient.PromptResult{}, streamed...),
 		streamEvents: streamed,
 	}
 	resolver := &Service{
@@ -1336,25 +1333,22 @@ func TestPersistACPRoundStoresACPEventsAsNativeToolMessages(t *testing.T) {
 		ChatRequest{BotID: "bot-1", ThreadID: "session-1", Query: "inspect"},
 		"codex",
 		"/data/app",
-		withTranscriptOutput(acpclient.PromptResult{
-			Events: []event.StreamEvent{
-				{Type: event.TextDelta, Delta: "Before"},
-				{
-					Type:       event.ToolCallStart,
-					ToolCallID: "read-1",
-					ToolName:   "read",
-					Input:      map[string]any{"path": "README.md"},
-				},
-				{
-					Type:       event.ToolCallEnd,
-					ToolCallID: "read-1",
-					ToolName:   "read",
-					Result:     map[string]any{"ok": true},
-				},
-				{Type: event.TextDelta, Delta: "After"},
+		withTranscriptOutput(acpclient.PromptResult{StopReason: "end_turn"},
+			event.StreamEvent{Type: event.TextDelta, Delta: "Before"},
+			event.StreamEvent{
+				Type:       event.ToolCallStart,
+				ToolCallID: "read-1",
+				ToolName:   "read",
+				Input:      map[string]any{"path": "README.md"},
 			},
-			StopReason: "end_turn",
-		}),
+			event.StreamEvent{
+				Type:       event.ToolCallEnd,
+				ToolCallID: "read-1",
+				ToolName:   "read",
+				Result:     map[string]any{"ok": true},
+			},
+			event.StreamEvent{Type: event.TextDelta, Delta: "After"},
+		),
 		nil,
 		true,
 		nil,
@@ -1423,14 +1417,12 @@ func TestPersistACPRoundAttachesLifecycleOnlyToFinalAssistant(t *testing.T) {
 		ChatRequest{BotID: "bot-1", ThreadID: "session-1", Query: "inspect"},
 		"codex",
 		"/data/app",
-		withTranscriptOutput(acpclient.PromptResult{
-			Events: []event.StreamEvent{
-				{Type: event.TextDelta, Delta: "Before"},
-				{Type: event.ToolCallStart, ToolCallID: "read-1", ToolName: "read"},
-				{Type: event.ToolCallEnd, ToolCallID: "read-1", ToolName: "read", Result: map[string]any{"ok": true}},
-				{Type: event.TextDelta, Delta: "After"},
-			},
-		}),
+		withTranscriptOutput(acpclient.PromptResult{},
+			event.StreamEvent{Type: event.TextDelta, Delta: "Before"},
+			event.StreamEvent{Type: event.ToolCallStart, ToolCallID: "read-1", ToolName: "read"},
+			event.StreamEvent{Type: event.ToolCallEnd, ToolCallID: "read-1", ToolName: "read", Result: map[string]any{"ok": true}},
+			event.StreamEvent{Type: event.TextDelta, Delta: "After"},
+		),
 		nil,
 		true,
 		holder,
@@ -1464,13 +1456,10 @@ func TestPersistACPRoundStoresACPThoughtsAsReasoningParts(t *testing.T) {
 		ChatRequest{BotID: "bot-1", ThreadID: "session-1", Query: "inspect"},
 		"codex",
 		"/data/app",
-		withTranscriptOutput(acpclient.PromptResult{
-			Events: []event.StreamEvent{
-				{Type: event.ReasoningDelta, Delta: "I should inspect first."},
-				{Type: event.TextDelta, Delta: "Done"},
-			},
-			StopReason: "end_turn",
-		}),
+		withTranscriptOutput(acpclient.PromptResult{StopReason: "end_turn"},
+			event.StreamEvent{Type: event.ReasoningDelta, Delta: "I should inspect first."},
+			event.StreamEvent{Type: event.TextDelta, Delta: "Done"},
+		),
 		nil,
 		true,
 		nil,
@@ -1654,10 +1643,8 @@ func TestStreamACPAgentWSUserStopKeepsPartialOutputWithoutFailureOrMemory(t *tes
 
 	messages := &recordingMessageService{}
 	pool := &recordingACPPrompter{
-		result: withTranscriptOutput(acpclient.PromptResult{
-			Events: []event.StreamEvent{{Type: event.TextDelta, Delta: "partial answer"}},
-		}),
-		err: context.Canceled,
+		result: withTranscriptOutput(acpclient.PromptResult{}, event.StreamEvent{Type: event.TextDelta, Delta: "partial answer"}),
+		err:    context.Canceled,
 	}
 	resolver := &Service{
 		messageService:  messages,
@@ -1711,9 +1698,7 @@ func TestStreamACPAgentWSStopRacingCompletionPersistsAsAbort(t *testing.T) {
 	registry := memprovider.NewRegistry(slog.New(slog.DiscardHandler))
 	registry.Register(storeRoundMemoryProviderID, memory)
 	pool := &recordingACPPrompter{
-		result: withTranscriptOutput(acpclient.PromptResult{
-			Events: []event.StreamEvent{{Type: event.TextDelta, Delta: "done"}},
-		}),
+		result: withTranscriptOutput(acpclient.PromptResult{}, event.StreamEvent{Type: event.TextDelta, Delta: "done"}),
 	}
 	resolver := &Service{
 		messageService:  messages,
@@ -1880,9 +1865,7 @@ func TestStreamACPAgentWSSuccessStoresMemory(t *testing.T) {
 	registry := memprovider.NewRegistry(slog.New(slog.DiscardHandler))
 	registry.Register(storeRoundMemoryProviderID, memory)
 	pool := &recordingACPPrompter{
-		result: withTranscriptOutput(acpclient.PromptResult{
-			Events: []event.StreamEvent{{Type: event.TextDelta, Delta: "done"}},
-		}),
+		result: withTranscriptOutput(acpclient.PromptResult{}, event.StreamEvent{Type: event.TextDelta, Delta: "done"}),
 	}
 	resolver := &Service{
 		messageService:  messages,
@@ -1959,27 +1942,25 @@ func TestStreamACPAgentWSSuccessStoresMemory(t *testing.T) {
 func TestACPResultOutputMessagesPersistsUserInputMetadata(t *testing.T) {
 	t.Parallel()
 
-	output := transcriptModelMessages(acpclient.PromptResult{
-		Events: []event.StreamEvent{
-			{
-				Type:       event.ToolCallStart,
-				ToolCallID: "mcp-http-call-1",
-				ToolName:   "ask_user",
-				Input:      map[string]any{"questions": []any{map[string]any{"text": "Which plan?", "kind": "single_select"}}},
-			},
-			{
-				Type:        event.UserInputRequest,
-				ToolCallID:  "mcp-http-call-1",
-				ToolName:    "ask_user",
-				UserInputID: "input-1",
-				ShortID:     3,
-				Status:      "pending",
-				Metadata: map[string]any{
-					"ui_payload": map[string]any{
-						"version": 2,
-						"questions": []any{
-							map[string]any{"id": "q1", "text": "Which plan?", "kind": "single_select"},
-						},
+	output := transcriptModelMessages([]event.StreamEvent{
+		{
+			Type:       event.ToolCallStart,
+			ToolCallID: "mcp-http-call-1",
+			ToolName:   "ask_user",
+			Input:      map[string]any{"questions": []any{map[string]any{"text": "Which plan?", "kind": "single_select"}}},
+		},
+		{
+			Type:        event.UserInputRequest,
+			ToolCallID:  "mcp-http-call-1",
+			ToolName:    "ask_user",
+			UserInputID: "input-1",
+			ShortID:     3,
+			Status:      "pending",
+			Metadata: map[string]any{
+				"ui_payload": map[string]any{
+					"version": 2,
+					"questions": []any{
+						map[string]any{"id": "q1", "text": "Which plan?", "kind": "single_select"},
 					},
 				},
 			},
@@ -2014,22 +1995,20 @@ func TestACPResultOutputMessagesPersistsUserInputMetadata(t *testing.T) {
 func TestACPResultOutputMessagesPersistsToolApprovalMetadata(t *testing.T) {
 	t.Parallel()
 
-	output := transcriptModelMessages(acpclient.PromptResult{
-		Events: []event.StreamEvent{
-			{
-				Type:       event.ToolCallStart,
-				ToolCallID: "write-1",
-				ToolName:   "write",
-				Input:      map[string]any{"path": "/data/review.txt"},
-			},
-			{
-				Type:       event.ToolApprovalRequest,
-				ToolCallID: "write-1",
-				ToolName:   "write",
-				ApprovalID: "approval-1",
-				ShortID:    4,
-				Status:     toolapproval.StatusPending,
-			},
+	output := transcriptModelMessages([]event.StreamEvent{
+		{
+			Type:       event.ToolCallStart,
+			ToolCallID: "write-1",
+			ToolName:   "write",
+			Input:      map[string]any{"path": "/data/review.txt"},
+		},
+		{
+			Type:       event.ToolApprovalRequest,
+			ToolCallID: "write-1",
+			ToolName:   "write",
+			ApprovalID: "approval-1",
+			ShortID:    4,
+			Status:     toolapproval.StatusPending,
 		},
 	})
 	if len(output) != 1 || output[0].Role != "assistant" {
@@ -2061,30 +2040,28 @@ func TestACPResultOutputMessagesPersistsToolApprovalMetadata(t *testing.T) {
 func TestACPResultOutputMessagesPersistsResolvedToolApprovalMetadata(t *testing.T) {
 	t.Parallel()
 
-	output := transcriptModelMessages(acpclient.PromptResult{
-		Events: []event.StreamEvent{
-			{
-				Type:       event.ToolCallStart,
-				ToolCallID: "write-1",
-				ToolName:   "write",
-				Input:      map[string]any{"path": "/data/review.txt"},
-			},
-			{
-				Type:       event.ToolApprovalRequest,
-				ToolCallID: "write-1",
-				ToolName:   "write",
-				ApprovalID: "approval-1",
-				ShortID:    4,
-				Status:     toolapproval.StatusPending,
-			},
-			{
-				Type:       event.ToolApprovalRequest,
-				ToolCallID: "write-1",
-				ToolName:   "write",
-				ApprovalID: "approval-1",
-				ShortID:    4,
-				Status:     toolapproval.StatusApproved,
-			},
+	output := transcriptModelMessages([]event.StreamEvent{
+		{
+			Type:       event.ToolCallStart,
+			ToolCallID: "write-1",
+			ToolName:   "write",
+			Input:      map[string]any{"path": "/data/review.txt"},
+		},
+		{
+			Type:       event.ToolApprovalRequest,
+			ToolCallID: "write-1",
+			ToolName:   "write",
+			ApprovalID: "approval-1",
+			ShortID:    4,
+			Status:     toolapproval.StatusPending,
+		},
+		{
+			Type:       event.ToolApprovalRequest,
+			ToolCallID: "write-1",
+			ToolName:   "write",
+			ApprovalID: "approval-1",
+			ShortID:    4,
+			Status:     toolapproval.StatusApproved,
 		},
 	})
 	if len(output) != 1 || output[0].Role != "assistant" {
@@ -2113,23 +2090,21 @@ func TestACPResultOutputMessagesPersistsResolvedToolApprovalMetadata(t *testing.
 func TestACPResultOutputMessagesMergesApprovalBeforeToolStart(t *testing.T) {
 	t.Parallel()
 
-	output := transcriptModelMessages(acpclient.PromptResult{
-		Events: []event.StreamEvent{
-			{
-				Type:       event.ToolApprovalRequest,
-				ToolCallID: "exec-1",
-				ToolName:   "exec",
-				Input:      map[string]any{"command": "pwd"},
-				ApprovalID: "approval-1",
-				ShortID:    1,
-				Status:     toolapproval.StatusPending,
-			},
-			{
-				Type:       event.ToolCallStart,
-				ToolCallID: "exec-1",
-				ToolName:   "exec",
-				Input:      map[string]any{"command": "pwd"},
-			},
+	output := transcriptModelMessages([]event.StreamEvent{
+		{
+			Type:       event.ToolApprovalRequest,
+			ToolCallID: "exec-1",
+			ToolName:   "exec",
+			Input:      map[string]any{"command": "pwd"},
+			ApprovalID: "approval-1",
+			ShortID:    1,
+			Status:     toolapproval.StatusPending,
+		},
+		{
+			Type:       event.ToolCallStart,
+			ToolCallID: "exec-1",
+			ToolName:   "exec",
+			Input:      map[string]any{"command": "pwd"},
 		},
 	})
 	if len(output) != 1 || output[0].Role != "assistant" {
@@ -2456,8 +2431,8 @@ func recordedMessages(inputs []messagepkg.PersistInput) []messagepkg.Message {
 }
 
 // transcriptModelMessages builds model messages from streamed ACP events.
-func transcriptModelMessages(result acpclient.PromptResult) []ModelMessage {
-	output := sdkMessagesToModelMessages(acpclient.TranscriptFromEvents(result.Events, result.Text))
+func transcriptModelMessages(events []event.StreamEvent) []ModelMessage {
+	output := sdkMessagesToModelMessages(acpclient.TranscriptFromEvents(events, ""))
 	if len(output) == 0 {
 		return []ModelMessage{{Role: "assistant", Content: newTextContent("")}}
 	}
@@ -2465,8 +2440,8 @@ func transcriptModelMessages(result acpclient.PromptResult) []ModelMessage {
 }
 
 // withTranscriptOutput fills PromptResult.Output from streamed events.
-func withTranscriptOutput(result acpclient.PromptResult) acpclient.PromptResult {
-	result.Output = acpclient.TranscriptFromEvents(result.Events, result.Text)
+func withTranscriptOutput(result acpclient.PromptResult, events ...event.StreamEvent) acpclient.PromptResult {
+	result.Output = acpclient.TranscriptFromEvents(events, result.Text)
 	return result
 }
 

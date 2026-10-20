@@ -91,11 +91,10 @@ type RunRequest struct {
 }
 
 type RunResult struct {
-	SessionID   string              `json:"session_id,omitempty"`
-	ProjectPath string              `json:"project_path,omitempty"`
-	Text        string              `json:"text,omitempty"`
-	StopReason  string              `json:"stop_reason,omitempty"`
-	Events      []event.StreamEvent `json:"events,omitempty"`
+	SessionID   string `json:"session_id,omitempty"`
+	ProjectPath string `json:"project_path,omitempty"`
+	Text        string `json:"text,omitempty"`
+	StopReason  string `json:"stop_reason,omitempty"`
 	// Output is the in-process transcript used for persistence.
 	Output []sdk.Message `json:"-"`
 }
@@ -170,7 +169,6 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		ProjectPath: sess.ProjectPath(),
 		Text:        prompt.Text,
 		StopReason:  prompt.StopReason,
-		Events:      prompt.Events,
 		Output:      prompt.Output,
 	}
 	if err != nil {
@@ -1525,11 +1523,9 @@ func (c *clientCallbacks) SessionUpdate(_ context.Context, p acp.SessionNotifica
 		events = append(events, c.toolMapper.eventsFromNotification(p)...)
 	}
 	// Keep the read lock through delivery. Clearing prompt state takes the
-	// write lock, so Prompt cannot return and let its owner close the sink
+	// write lock, so Prompt cannot return and let its owner finish the sink
 	// while a callback that already observed that sink is still emitting.
-	// Delivery is bounded: a sink whose consumer stops draining cancels its
-	// own stream after runtimeSinkStallTimeout (application layer), so this lock
-	// cannot pin the prompt's runtime slot indefinitely.
+	// Delivery does not wait on the consumer (see EventSink).
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	collector := c.collector

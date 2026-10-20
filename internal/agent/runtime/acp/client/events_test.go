@@ -6,6 +6,7 @@ import (
 	"os"
 	"reflect"
 	"strconv"
+	"sync"
 	"testing"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -13,6 +14,27 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 )
+
+// eventLog is a prompt sink that keeps every event the session hands it,
+// including terminal decisions recorded after the prompt was stopped.
+type eventLog struct {
+	mu     sync.Mutex
+	events []event.StreamEvent
+}
+
+func (l *eventLog) EmitStreamEvent(ev event.StreamEvent) {
+	l.mu.Lock()
+	l.events = append(l.events, ev)
+	l.mu.Unlock()
+}
+
+func (l *eventLog) RecordTerminalDecision(ev event.StreamEvent) { l.EmitStreamEvent(ev) }
+
+func (l *eventLog) all() []event.StreamEvent {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]event.StreamEvent(nil), l.events...)
+}
 
 func TestACPGenericExecuteToolMapsToNativeExecEvents(t *testing.T) {
 	t.Parallel()
@@ -481,24 +503,6 @@ func TestACPPlanMapsToReasoningDelta(t *testing.T) {
 	})
 	if len(repeated) != 0 {
 		t.Fatalf("repeated plan events = %#v, want none", repeated)
-	}
-}
-
-func TestEventCollectorBoundsStoredEvents(t *testing.T) {
-	t.Parallel()
-
-	collector := newEventCollector()
-	for i := 0; i < maxCollectedStreamEvents+10; i++ {
-		collector.record(event.StreamEvent{
-			Type:       event.ToolCallStart,
-			ToolCallID: string(rune('a' + (i % 26))),
-			ToolName:   "exec",
-		})
-	}
-
-	result := collector.result()
-	if len(result.Events) != maxCollectedStreamEvents {
-		t.Fatalf("stored events = %d, want %d", len(result.Events), maxCollectedStreamEvents)
 	}
 }
 

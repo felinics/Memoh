@@ -17,8 +17,9 @@ import (
 const promptCancellationDrainTimeout = 3 * time.Second
 
 type clientConnection struct {
-	conn   *acp.Connection
-	logger *slog.Logger
+	conn    *acp.Connection
+	updates *updateGate
+	logger  *slog.Logger
 
 	// ACP lets one connection host several sessions, and every inbound call
 	// names the session it belongs to. sole is the single-session form: it
@@ -58,14 +59,15 @@ func newClientConnection(client *clientCallbacks, peerInput io.Writer, peerOutpu
 	if client != nil {
 		c.logger = client.logger
 	}
-	c.conn = acp.NewConnection(c.handle, peerInput, peerOutput)
+	c.updates = newUpdateGate(c.logger, peerOutput)
+	c.conn = acp.NewConnection(c.handle, peerInput, c.updates)
 	return c
 }
 
 // newSharedClientConnection serves a connection whose sessions register by ID.
 func newSharedClientConnection(logger *slog.Logger, peerInput io.Writer, peerOutput io.Reader) *clientConnection {
-	c := &clientConnection{logger: logger, sessions: map[acp.SessionId]*clientCallbacks{}}
-	c.conn = acp.NewConnection(c.handle, peerInput, peerOutput)
+	c := &clientConnection{logger: logger, sessions: map[acp.SessionId]*clientCallbacks{}, updates: newUpdateGate(logger, peerOutput)}
+	c.conn = acp.NewConnection(c.handle, peerInput, c.updates)
 	return c
 }
 
@@ -291,7 +293,13 @@ func (c *clientConnection) SetLegacySessionModel(ctx context.Context, params leg
 }
 
 func (c *clientConnection) handle(ctx context.Context, method string, params json.RawMessage) (any, *acp.RequestError) {
-	if c == nil || (c.sole == nil && c.sessions == nil) {
+	if c == nil {
+		return nil, acp.NewInternalError(map[string]any{"error": "ACP client callbacks not configured"})
+	}
+	if method == acp.ClientMethodSessionUpdate {
+		c.updates.release()
+	}
+	if c.sole == nil && c.sessions == nil {
 		return nil, acp.NewInternalError(map[string]any{"error": "ACP client callbacks not configured"})
 	}
 	if c.logger != nil && method != acp.ClientMethodSessionUpdate {

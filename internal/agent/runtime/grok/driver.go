@@ -414,8 +414,8 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 
 	th.turn.Store(&turnContext{ctx: ctx, input: input})
 	defer th.turn.Store(nil)
-	sink := newTurnSink(input.Sink, input.ToolOutputLimit)
-	defer sink.finish()
+	sink := acpclient.NewTurnSink(input.Sink, input.ToolOutputLimit)
+	defer sink.Finish()
 	unregisterToolEvents := toolmount.RegisterTurnSink(d.toolGateway.Contexts, input.BotID, input.ThreadID, input.RunID, sink.EmitStreamEvent)
 	defer unregisterToolEvents()
 
@@ -448,7 +448,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		out.AgentTurnID = promptID
 		out.RuntimeMetadata[metadataLastPromptIDKey] = promptID
 	}
-	out.Output = sink.transcript(result.Text)
+	out.Output = sink.Transcript(result.Text)
 
 	if err != nil {
 		if ctx.Err() != nil {
