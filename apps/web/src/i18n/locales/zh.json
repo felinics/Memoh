@@ -1864,6 +1864,14 @@
     "galleryDescription": "选一个示例填进输入框，发送前可以修改。",
     "refresh": "换一批",
     "refreshFailed": "没能换一批，请稍后再试。",
+    "titleModelMissing": {
+      "title": "设置标题模型",
+      "description": "这里的推荐由你的标题模型生成，在账户设置中选择一个即可。"
+    },
+    "ownerTitleModelMissing": {
+      "title": "尚未设置标题模型",
+      "description": "这里的推荐由 Bot 所有者的标题模型生成，请联系所有者设置。"
+    },
     "fillIn": "填入",
     "dismiss": "隐藏推荐",
     "replaceDraft": {

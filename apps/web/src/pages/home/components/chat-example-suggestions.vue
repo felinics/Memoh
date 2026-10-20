@@ -8,14 +8,17 @@ import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-
 import { useStarterPromptsQuery } from '@/composables/api/useStarterPrompts'
 import { useComposerPrefill } from '@/composables/useComposerPrefill'
 import { COMPOSER_PREVIEW_LANDING_MS, type ComposerPreview } from '../composables/useComposerPreview'
-import StarterPromptList, { type StarterPromptRow } from './starter-prompt-list.vue'
+import StarterPromptList, { type StarterPromptNotice, type StarterPromptRow } from './starter-prompt-list.vue'
 
 /**
  * The bot's own starter prompts for this user, under the welcome composer.
  * They are always generated, from the bot's name alone when it has nothing
  * else yet; while a set is on its way (the first one, or a refresh) the rows
  * show a skeleton, and when none could be generated the section stays
- * folded away. "Refresh" asks for a different set. Hiding the section is
+ * folded away. When none can be generated because the bot owner has no title
+ * model, a notice takes the rows' place instead: the owner gets a link to the
+ * setting on their profile, anyone else is told to ask the owner (their own
+ * title model would not be used). "Refresh" asks for a different set. Hiding the section is
  * remembered on this device; while hidden, the composer's context row shows
  * the entry that brings it back. Hidden by the welcome column's height tiers
  * (style.css) before anything else yields.
@@ -55,10 +58,29 @@ const rows = computed<StarterPromptRow[] | null>(() => {
   }))
 })
 
+/** Why there are no suggestions, when it is something a person can fix. */
+const notice = computed<StarterPromptNotice | null>(() => {
+  switch (starterSet.value?.reason) {
+    case 'title_model_missing':
+      return {
+        title: t('chatExamples.titleModelMissing.title'),
+        description: t('chatExamples.titleModelMissing.description'),
+        to: { name: 'profile' },
+      }
+    case 'owner_title_model_missing':
+      return {
+        title: t('chatExamples.ownerTitleModelMissing.title'),
+        description: t('chatExamples.ownerTitleModelMissing.description'),
+      }
+    default:
+      return null
+  }
+})
+
 /** Whether the composer is currently showing the preview. */
 const previewShown = computed(() => props.composerReplaceable && preview.value !== null)
 
-const visible = computed(() => !welcomeDismissed.value && (rows.value === null || rows.value.length > 0))
+const visible = computed(() => !welcomeDismissed.value && (notice.value !== null || rows.value === null || rows.value.length > 0))
 
 async function refresh() {
   preview.value = null
@@ -121,6 +143,7 @@ async function select(row: StarterPromptRow) {
         <!-- Same type as the composer's session controls one row up
              (text-label, regular weight), not TextButton's 14px medium. -->
         <TextButton
+          v-if="!notice"
           type="button"
           class="text-label font-normal"
           :disabled="rows === null"
@@ -143,6 +166,7 @@ async function select(row: StarterPromptRow) {
     </div>
     <StarterPromptList
       :rows="rows"
+      :notice="notice"
       :enter-hint="composerReplaceable"
       @select="select"
       @preview="setPreview"

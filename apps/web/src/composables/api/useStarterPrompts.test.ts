@@ -27,4 +27,20 @@ describe('resolveStarterPromptSet', () => {
     expect(resolveStarterPromptSet(undefined, { unchanged: true, hash: 'x', items: [] }))
       .toEqual({ hash: '', items: [] })
   })
+
+  it('carries the reason when nothing can be generated until a setting changes', () => {
+    expect(resolveStarterPromptSet(undefined, { unchanged: false, hash: '', items: [], reason: 'title_model_missing' }))
+      .toEqual({ hash: '', items: [], reason: 'title_model_missing' })
+  })
+
+  it('keeps a held set over a reason, since its suggestions still work', () => {
+    expect(resolveStarterPromptSet(held, { unchanged: false, hash: '', items: [], reason: 'owner_title_model_missing' }))
+      .toBe(held)
+  })
+
+  it('drops a held reason once the server stops reporting it', () => {
+    const blocked: StarterPromptSet = { hash: '', items: [], reason: 'title_model_missing' }
+    expect(resolveStarterPromptSet(blocked, { unchanged: false, hash: '', items: [] }))
+      .toEqual({ hash: '', items: [] })
+  })
 })

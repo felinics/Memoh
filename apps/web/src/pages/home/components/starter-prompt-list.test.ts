@@ -13,8 +13,8 @@ const uiStubs = vi.hoisted(() => {
   return {
     Item: {
       inheritAttrs: false,
-      props: { as: { type: String, default: 'div' }, size: String },
-      setup(props: { as: string }, context: { attrs: Record<string, unknown>; slots: { default?: () => VNode[] } }) {
+      props: { as: { type: [String, Object], default: 'div' }, size: String },
+      setup(props: { as: string | object }, context: { attrs: Record<string, unknown>; slots: { default?: () => VNode[] } }) {
         return () => h(props.as, context.attrs, context.slots.default?.())
       },
     },
@@ -26,8 +26,17 @@ const uiStubs = vi.hoisted(() => {
 
 // Native elements keep the assertions about rows, focus and events explicit.
 vi.mock('@felinic/ui', () => uiStubs)
+vi.mock('lucide-vue-next', () => ({ ChevronRight: { render: () => h('svg', { 'data-chevron': '' }) } }))
+vi.mock('vue-router', () => ({
+  RouterLink: {
+    props: { to: { type: [String, Object], required: true } },
+    setup(props: { to: unknown }, context: { slots: { default?: () => VNode[] } }) {
+      return () => h('a', { 'data-to': JSON.stringify(props.to) }, context.slots.default?.())
+    },
+  },
+}))
 
-import StarterPromptList, { type StarterPromptRow } from './starter-prompt-list.vue'
+import StarterPromptList, { type StarterPromptNotice, type StarterPromptRow } from './starter-prompt-list.vue'
 
 const rows: StarterPromptRow[] = [
   { key: 'a', title: 'Shrine route', prompt: 'Plan a shrine route' },
@@ -46,12 +55,12 @@ describe('StarterPromptList', () => {
     root = undefined
   })
 
-  function mount(list: StarterPromptRow[] | null, enterHint = true) {
+  function mount(list: StarterPromptRow[] | null, enterHint = true, notice?: StarterPromptNotice) {
     const select = vi.fn()
     const preview = vi.fn()
     root = document.createElement('div')
     document.body.append(root)
-    app = createApp({ render: () => h(StarterPromptList, { rows: list, enterHint, onSelect: select, onPreview: preview }) })
+    app = createApp({ render: () => h(StarterPromptList, { rows: list, enterHint, notice, onSelect: select, onPreview: preview }) })
     app.config.globalProperties.$t = (key: string) => key
     app.mount(root)
     const buttons = () => [...root!.querySelectorAll<HTMLButtonElement>('button[data-starter-prompt]')]
@@ -106,5 +115,29 @@ describe('StarterPromptList', () => {
     expect(document.activeElement).toBe(buttons()[2])
     press('Home')
     expect(document.activeElement).toBe(buttons()[0])
+  })
+  it('renders a notice with a destination as a link row in place of the rows', () => {
+    mount([], true, { title: 'Set a title model', description: 'Pick one on your profile.', to: { name: 'profile' } })
+    const link = root!.querySelector<HTMLAnchorElement>('a[data-starter-prompt-notice]')
+    expect(link?.dataset.to).toBe(JSON.stringify({ name: 'profile' }))
+    expect(link?.textContent).toContain('Set a title model')
+    expect(link?.textContent).toContain('Pick one on your profile.')
+    expect(link?.querySelector('[data-chevron]')).not.toBeNull()
+    expect(root!.querySelectorAll('button')).toHaveLength(0)
+  })
+
+  it('renders a notice without a destination as plain text', () => {
+    mount([], true, { title: 'No title model', description: 'Ask the owner to set one.' })
+    const notice = root!.querySelector('[data-starter-prompt-notice]')
+    expect(notice?.tagName).toBe('DIV')
+    expect(notice?.textContent).toContain('Ask the owner to set one.')
+    expect(root!.querySelector('a')).toBeNull()
+    expect(root!.querySelector('[data-chevron]')).toBeNull()
+  })
+
+  it('shows the notice even while a set would be loading', () => {
+    mount(null, true, { title: 'No title model', description: 'Ask the owner to set one.' })
+    expect(root!.querySelector('[data-starter-prompt-notice]')).not.toBeNull()
+    expect(root!.querySelector('[aria-busy="true"]')).toBeNull()
   })
 })

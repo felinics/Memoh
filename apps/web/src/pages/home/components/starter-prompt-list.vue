@@ -1,10 +1,20 @@
 <script setup lang="ts">
+import { RouterLink, type RouteLocationRaw } from 'vue-router'
+import { ChevronRight } from 'lucide-vue-next'
 import { Item, ItemGroup, Kbd, Skeleton } from '@felinic/ui'
 
 export interface StarterPromptRow {
   key: string
   title: string
   prompt: string
+}
+
+/** One row explaining why there are no suggestions, shown in their place. */
+export interface StarterPromptNotice {
+  title: string
+  description: string
+  /** Where the user can fix it; without it the row is plain text. */
+  to?: RouteLocationRaw
 }
 
 /**
@@ -17,11 +27,14 @@ export interface StarterPromptRow {
  * The rest (inset hairlines that step aside around the active row, the
  * revealed "Use" hint, the prompt brightening) lives in style.css under
  * [data-starter-prompt]. `rows === null` renders the skeleton of three rows.
+ * A `notice` replaces the rows with a single row on the same columns: a link
+ * row (with a forward chevron) when it has a destination, text otherwise.
  */
 const props = defineProps<{
   rows: StarterPromptRow[] | null
   /** Show the "↵ Use" hint on the active row: only when Enter would pick it. */
   enterHint?: boolean
+  notice?: StarterPromptNotice | null
 }>()
 
 const emit = defineEmits<{
@@ -49,10 +62,35 @@ function moveFocus(event: KeyboardEvent) {
   <ItemGroup
     role="group"
     class="grid grid-cols-[minmax(0,1fr)] gap-x-4 @lg:grid-cols-[fit-content(40%)_minmax(0,1fr)_auto]"
-    :aria-busy="props.rows === null || undefined"
+    :aria-busy="(!props.notice && props.rows === null) || undefined"
     @keydown="moveFocus"
   >
-    <template v-if="props.rows">
+    <template v-if="props.notice">
+      <Item
+        :as="props.notice.to ? RouterLink : 'div'"
+        :to="props.notice.to"
+        size="sm"
+        data-starter-prompt
+        data-starter-prompt-notice
+        class="relative col-span-full grid grid-cols-subgrid items-start gap-x-4 gap-y-0.5"
+      >
+        <span class="truncate text-label font-medium text-foreground">{{ props.notice.title }}</span>
+        <!-- A link row's text is muted by [data-starter-prompt-text] so it can
+             brighten on hover like the prompt rows; a utility color would win
+             over that rule, so only the plain row carries one. -->
+        <span
+          :data-starter-prompt-text="props.notice.to ? '' : undefined"
+          class="text-body @lg:text-label"
+          :class="props.notice.to ? undefined : 'text-muted-foreground'"
+        >{{ props.notice.description }}</span>
+        <ChevronRight
+          v-if="props.notice.to"
+          aria-hidden="true"
+          class="hidden size-4 self-center text-muted-foreground @lg:block"
+        />
+      </Item>
+    </template>
+    <template v-else-if="props.rows">
       <Item
         v-for="row in props.rows"
         :key="row.key"

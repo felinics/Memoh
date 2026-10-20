@@ -125,7 +125,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useQuery } from '@pinia/colada'
+import { useQuery, useQueryCache } from '@pinia/colada'
 import { useRouter } from 'vue-router'
 import { ConfirmPopover, PageShell, SettingsRow, SettingsSection, toast, useClipboard } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
@@ -143,12 +143,14 @@ import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePassw
 import { useUserStore } from '@/store/user'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
+import { STARTER_PROMPTS_QUERY_KEY } from '@/composables/api/useStarterPrompts'
 
 type UserAccount = AccountsAccount
 
 const { t } = useI18n()
 const { copyText } = useClipboard()
 const router = useRouter()
+const queryCache = useQueryCache()
 const userStore = useUserStore()
 const { userInfo, exitLogin, patchUserInfo } = userStore
 
@@ -312,6 +314,11 @@ async function autoSaveProfile() {
     originalProfile.display_name = dName
     originalProfile.avatar_url = aUrl
     originalProfile.timezone = tZone
+    // The title model also writes every owned bot's new-chat suggestions:
+    // ask again, so a set (or a "no title model" notice) follows the change.
+    if (titleModelID !== originalProfile.title_model_id) {
+      void queryCache.invalidateQueries({ key: [STARTER_PROMPTS_QUERY_KEY] })
+    }
     originalProfile.title_model_id = titleModelID
 
     patchUserInfo({
