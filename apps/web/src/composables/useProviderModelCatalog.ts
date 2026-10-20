@@ -45,12 +45,18 @@ export function useProviderModelCatalog() {
   // fromEndpoint asks for it. A provider with a source never receives the
   // protocol's capability guesses for its endpoint's models: the catalog did
   // not list them, so nothing says what they do.
-  async function importProviderModels(provider: ImportableProvider, options: { fromEndpoint?: boolean } = {}) {
+  // skipModelIds leaves those catalog models out, for models the caller has
+  // just created and whose settings the catalog must not overwrite.
+  async function importProviderModels(provider: ImportableProvider, options: { fromEndpoint?: boolean, skipModelIds?: string[] } = {}) {
     if (!provider.id) throw new Error('provider is missing')
     const source = providerSource(provider)
     if (source && !options.fromEndpoint) {
-      const models = await catalogModels(source, provider.client_type ?? '')
-      if (models.length) return syncProviderModelCatalog(provider.id, undefined, models)
+      const catalog = await catalogModels(source, provider.client_type ?? '')
+      if (catalog.length) {
+        const skipped = new Set(options.skipModelIds ?? [])
+        const models = catalog.filter(model => !skipped.has(model.model_id))
+        return models.length ? syncProviderModelCatalog(provider.id, undefined, models) : null
+      }
     }
     return syncProviderModelCatalog(provider.id, source ? undefined : suggestedModelCompatibilities(provider.client_type))
   }

@@ -74,7 +74,30 @@ describe('reasoningFromCatalog', () => {
   })
 })
 
+describe('reasoningFromCatalog on other models', () => {
+  it('reads a model behind an Anthropic endpoint that is not Claude like any other', () => {
+    expect(reasoningFromCatalog({ id: 'MiniMax-M3.1-Flash', reasoning: true, reasoning_options: [{ type: 'effort', values: ['low', 'high', 'max'] }] }, 'anthropic-messages'))
+      .toEqual({ efforts: ['low', 'high', 'max'], dialect: 'tier' })
+    expect(reasoningFromCatalog({ id: 'kimi-k3', reasoning: true, reasoning_options: [{ type: 'toggle' }] }, 'anthropic-messages'))
+      .toMatchObject({ toggle: true, off: 'accepted', dialect: 'toggle' })
+  })
+
+  it('leaves out a dynamic or empty budget bound', () => {
+    expect(reasoningFromCatalog({ id: 'nemotron-reasoning', reasoning: true, reasoning_options: [{ type: 'budget_tokens', min: -1, max: 32768 }] }, 'openai-completions'))
+      .toEqual({ budget: { max: 32768 }, dialect: 'budget' })
+    expect(reasoningFromCatalog({ id: 'zero-max', reasoning: true, reasoning_options: [{ type: 'budget_tokens', min: 0, max: 0 }] }, 'openai-completions'))
+      .toEqual({ budget: { min: 0 }, dialect: 'budget' })
+  })
+})
+
 describe('catalogModelsFor', () => {
+  it('stores a model without a name of its own without one', () => {
+    const catalog = { p: { id: 'p', models: { 'bare-id': { id: 'bare-id' }, 'named': { id: 'named', name: 'Named Model' } } } } as unknown as ModelsDevCatalog
+    const models = catalogModelsFor(catalog, 'p', 'openai-completions')
+    expect(models.find(m => m.model_id === 'bare-id')).not.toHaveProperty('name')
+    expect(models.find(m => m.model_id === 'named')?.name).toBe('Named Model')
+  })
+
   it('builds stored configs from a provider\'s chat models', () => {
     const models = catalogModelsFor(catalog, 'anthropic', 'anthropic-messages')
     const opus = models.find(model => model.model_id === 'claude-opus-4-7')!
@@ -83,7 +106,8 @@ describe('catalogModelsFor', () => {
     expect(opus.config.tool_call).toBe(true)
     expect(opus.config.modalities?.input).toContain('image')
     expect(opus.config.context_window).toBeGreaterThan(0)
-    expect(models.map(model => model.name)).toEqual([...models.map(model => model.name)].sort((a, b) => a.localeCompare(b)))
+    const labels = models.map(model => model.name ?? model.model_id)
+    expect(labels).toEqual([...labels].sort((a, b) => a.localeCompare(b)))
   })
 
   it('reads each OpenCode Go model on the protocol it routes to', () => {

@@ -291,44 +291,59 @@ func TestCatalogSourceDisablesImplicitCapabilityDefaults(t *testing.T) {
 }
 
 // A refresh cannot tell the user's edits from what an earlier import wrote, so
-// it never takes a capability away, and keeps what the edit form tunes: the
-// budget range, the defaults and the replay field.
+// it never takes a capability away, and keeps what the edit form tunes while
+// the catalog's controls still use it.
 func TestRefreshFromCatalogKeepsTheUsersEdits(t *testing.T) {
 	t.Parallel()
 
-	minBudget, maxBudget, window := 1024, 8192, 400000
+	minBudget, maxBudget, catalogMax, window := 1024, 8192, 32000, 400000
 	enabled := true
 	existing := models.ModelConfig{
 		ToolCall:   true,
 		Modalities: &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityAudio}, Output: []models.Modality{models.ModalityText}},
 		Reasoning: &models.ModelReasoning{
-			Efforts: []string{"low"},
+			Toggle:  true,
+			Efforts: []string{"low", "medium"},
 			Budget:  &models.ReasoningBudget{Min: &minBudget, Max: &maxBudget},
-			Default: &models.ReasoningDefault{Enabled: &enabled},
+			Default: &models.ReasoningDefault{Enabled: &enabled, Effort: "medium"},
 			Replay:  &models.ReasoningReplay{Field: models.ReasoningReplayDetails},
 		},
 	}
-	catalog := models.ModelConfig{
-		ContextWindow: &window,
-		Modalities:    &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityImage}, Output: []models.Modality{models.ModalityText}},
-		Reasoning:     &models.ModelReasoning{Efforts: []string{"low", "high"}, Toggle: true, Off: reasoning.OffSupportAccepted, Dialect: reasoning.DialectTier},
-	}
 
-	got, changed := refreshFromCatalog("m", existing, catalog)
-	if !changed || !got.ToolCall || !got.Accepts(models.ModalityAudio) || !got.Accepts(models.ModalityImage) ||
-		got.ContextWindow == nil || *got.ContextWindow != window {
-		t.Fatalf("refreshed = %+v, changed %v", got, changed)
-	}
-	r := got.Reasoning
-	if r == nil || !slices.Equal(r.Efforts, []string{"low", "high"}) || !r.Toggle || r.Off != reasoning.OffSupportAccepted ||
-		r.Budget == nil || *r.Budget.Max != maxBudget || r.Default == nil || r.Replay == nil || r.Replay.Field != models.ReasoningReplayDetails {
-		t.Fatalf("reasoning = %+v", r)
-	}
+	t.Run("budget catalog keeps the user's range", func(t *testing.T) {
+		catalog := models.ModelConfig{
+			ContextWindow: &window,
+			Modalities:    &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityImage}, Output: []models.Modality{models.ModalityText}},
+			Reasoning:     &models.ModelReasoning{Toggle: true, Off: reasoning.OffSupportAccepted, Dialect: reasoning.DialectBudget, Budget: &models.ReasoningBudget{Max: &catalogMax}},
+		}
+		got, changed := refreshFromCatalog("m", existing, catalog)
+		if !changed || !got.ToolCall || !got.Accepts(models.ModalityAudio) || !got.Accepts(models.ModalityImage) ||
+			got.ContextWindow == nil || *got.ContextWindow != window {
+			t.Fatalf("refreshed = %+v, changed %v", got, changed)
+		}
+		r := got.Reasoning
+		if r == nil || r.Dialect != reasoning.DialectBudget || r.Budget == nil || *r.Budget.Max != maxBudget ||
+			r.Default == nil || r.Default.Enabled == nil || r.Default.Effort != "" ||
+			r.Replay == nil || r.Replay.Field != models.ReasoningReplayDetails {
+			t.Fatalf("reasoning = %+v, default %+v", r, r.Default)
+		}
+	})
 
-	kept, _ := refreshFromCatalog("m", existing, models.ModelConfig{ContextWindow: &window})
-	if kept.Reasoning == nil || !kept.ToolCall {
-		t.Fatalf("a catalog without reasoning or tool calling took them away: %+v", kept)
-	}
+	t.Run("tier catalog drops what its controls cannot use", func(t *testing.T) {
+		catalog := models.ModelConfig{Reasoning: &models.ModelReasoning{Efforts: []string{"low", "high"}, Dialect: reasoning.DialectTier}}
+		got, _ := refreshFromCatalog("m", existing, catalog)
+		r := got.Reasoning
+		if r == nil || r.Budget != nil || r.Default != nil || !slices.Equal(r.Efforts, []string{"low", "high"}) || r.Replay == nil {
+			t.Fatalf("reasoning = %+v, default %+v", r, r.Default)
+		}
+	})
+
+	t.Run("a catalog without reasoning or tool calling takes nothing away", func(t *testing.T) {
+		kept, _ := refreshFromCatalog("m", existing, models.ModelConfig{ContextWindow: &window})
+		if kept.Reasoning == nil || !kept.ToolCall {
+			t.Fatalf("refreshed = %+v", kept)
+		}
+	})
 }
 
 // A catalog refresh compares the stored row with what the request carried.

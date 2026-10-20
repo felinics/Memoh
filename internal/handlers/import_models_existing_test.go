@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/models"
@@ -85,5 +86,73 @@ func TestImportModelsRefreshesAnExistingEmbeddingModelWithoutProbing(t *testing.
 	}
 	if n := q.created.Load(); n != 0 {
 		t.Fatalf("creates = %d, want none for a model that exists", n)
+	}
+}
+
+type catalogImportQueries struct {
+	testHandlerQueries
+	existing sqlc.Model
+	created  []sqlc.CreateModelParams
+	updated  []sqlc.UpdateModelParams
+}
+
+func (q *catalogImportQueries) ListModelsByProviderID(context.Context, pgtype.UUID) ([]sqlc.Model, error) {
+	return []sqlc.Model{q.existing}, nil
+}
+
+func (q *catalogImportQueries) GetModelByProviderAndModelID(context.Context, sqlc.GetModelByProviderAndModelIDParams) (sqlc.Model, error) {
+	return q.existing, nil
+}
+
+func (q *catalogImportQueries) GetModelByID(context.Context, pgtype.UUID) (sqlc.Model, error) {
+	return q.existing, nil
+}
+
+func (q *catalogImportQueries) UpdateModel(_ context.Context, arg sqlc.UpdateModelParams) (sqlc.Model, error) {
+	q.updated = append(q.updated, arg)
+	return sqlc.Model{ID: arg.ID, ModelID: arg.ModelID, ProviderID: arg.ProviderID, Type: arg.Type, Config: arg.Config}, nil
+}
+
+func (q *catalogImportQueries) CreateModel(_ context.Context, arg sqlc.CreateModelParams) (sqlc.Model, error) {
+	q.created = append(q.created, arg)
+	return sqlc.Model{ModelID: arg.ModelID}, nil
+}
+
+// A catalog import sends a model the provider already has straight to the
+// refresh instead of a failing Create, and stores no name that only repeats a
+// new model's id.
+func TestImportCatalogModelsRefreshesKnownModelsAndOmitsIDNames(t *testing.T) {
+	providerID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	q := &catalogImportQueries{
+		testHandlerQueries: testHandlerQueries{provider: sqlc.Provider{ID: providerID, ClientType: string(models.ClientTypeOpenAICompletions), Config: []byte(`{}`)}},
+		existing: sqlc.Model{
+			ID: pgtype.UUID{Bytes: [16]byte{2}, Valid: true}, ProviderID: providerID,
+			ModelID: "known", Type: string(models.ModelTypeChat), Config: []byte(`{"schema_version":2}`),
+		},
+	}
+	logger := slog.New(slog.DiscardHandler)
+	h := NewProvidersHandler(logger, providers.NewService(nil, q, ""), models.NewService(logger, q))
+	e := echo.New()
+	h.Register(e)
+	body := `{"models":[{"model_id":"known","config":{"schema_version":2,"tool_call":true}},{"model_id":"fresh","name":"fresh","config":{"schema_version":2}}]}`
+	req := httptest.NewRequest(http.MethodPost, "/providers/00000000-0000-0000-0000-000000000001/import-models", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	var resp providers.ImportModelsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Created != 1 || resp.Updated != 1 {
+		t.Fatalf("response = %+v, want one created and one refreshed", resp)
+	}
+	if len(q.created) != 1 || q.created[0].ModelID != "fresh" || q.created[0].Name.Valid {
+		t.Fatalf("created = %+v, want only fresh, without a name", q.created)
+	}
+	if len(q.updated) != 1 || q.updated[0].ModelID != "known" {
+		t.Fatalf("updated = %+v, want known refreshed", q.updated)
 	}
 }

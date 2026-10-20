@@ -39,7 +39,8 @@
           :ensure-provider-id="ensureProviderId"
           :client-type="clientType"
           size="sm"
-          @created="$emit('created')"
+          @created="(modelId: string) => $emit('created', modelId)"
+          @closed="$emit('add-closed')"
         />
       </div>
     </div>
@@ -186,7 +187,8 @@ const props = defineProps<{
 defineEmits<{
   edit: [model: ModelsGetResponse]
   delete: [id: string]
-  created: []
+  created: [modelId: string]
+  'add-closed': []
 }>()
 
 const searchQuery = ref('')

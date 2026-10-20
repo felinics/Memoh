@@ -385,7 +385,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("import models is not supported for speech providers"))
 	}
 	if len(req.Models) > 0 {
-		return c.JSON(http.StatusOK, h.importCatalogModels(ctx, id, req.Models))
+		return c.JSON(http.StatusOK, h.importCatalogModels(ctx, provider, req.Models))
 	}
 
 	remoteModels, err := h.service.FetchRemoteModels(ctx, id)
@@ -405,14 +405,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	// Create first would probe an embedding model's dimensions, a billed
 	// request, on every refresh before the duplicate is refused, and a failed
 	// probe would skip the refresh altogether.
-	existingModelIDs := map[string]struct{}{}
-	if existing, err := h.modelsService.ListByProviderID(ctx, id); err != nil {
-		h.logger.WarnContext(ctx, "failed to list provider models before import", slog.Any("error", err))
-	} else {
-		for _, m := range existing {
-			existingModelIDs[m.ModelID] = struct{}{}
-		}
-	}
+	existingModels, existingModelIDs := h.providerModels(ctx, id)
 
 	// Bulk import lands disabled — the user picks which ones to expose in
 	// model pickers afterward, to avoid flooding bot config with dozens of
@@ -481,7 +474,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 		resp.Models = append(resp.Models, m.ID)
 	}
 	if managedCatalog {
-		h.markUnavailableManagedModels(ctx, id, availableModelIDs)
+		h.markUnavailableManagedModels(ctx, id, availableModelIDs, existingModels)
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -490,8 +483,12 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 // importCatalogModels creates the catalog models a provider lacks, disabled,
 // and refreshes what the catalog describes on the ones it already has. The
 // user's choices stay: whether a model is enabled, its name and description.
-func (h *ProvidersHandler) importCatalogModels(ctx context.Context, providerID string, catalog []providers.CatalogModel) providers.ImportModelsResponse {
+func (h *ProvidersHandler) importCatalogModels(ctx context.Context, provider providers.GetResponse, catalog []providers.CatalogModel) providers.ImportModelsResponse {
+	providerID := provider.ID
 	resp := providers.ImportModelsResponse{Models: make([]string, 0)}
+	// A model the provider already has goes straight to the refresh, so it is
+	// refreshed even when its catalog config would not pass Create's checks.
+	_, existing := h.providerModels(ctx, providerID)
 	disabled := false
 	for _, m := range catalog {
 		modelID := strings.TrimSpace(m.ModelID)
@@ -499,21 +496,40 @@ func (h *ProvidersHandler) importCatalogModels(ctx context.Context, providerID s
 			resp.Skipped++
 			continue
 		}
+		config, err := m.ConfigFor(provider.ClientType)
+		if err != nil {
+			h.logger.WarnContext(ctx, "failed to read catalog model config", slog.String("model_id", modelID), slog.Any("error", err))
+			resp.Skipped++
+			continue
+		}
+		if _, ok := existing[modelID]; ok {
+			if h.refreshCatalogModel(ctx, providerID, modelID, config) {
+				resp.Updated++
+			} else {
+				resp.Skipped++
+			}
+			continue
+		}
+		// A name that only repeats the id is not stored, as a hand-added
+		// model's is not.
 		name := strings.TrimSpace(m.Name)
-		_, err := h.modelsService.Create(ctx, models.AddRequest{
+		if name == modelID {
+			name = ""
+		}
+		_, err = h.modelsService.Create(ctx, models.AddRequest{
 			ModelID:    modelID,
 			Name:       name,
 			ProviderID: providerID,
 			Type:       models.ModelTypeChat,
 			Enable:     &disabled,
-			Config:     m.Config,
+			Config:     config,
 		})
 		switch {
 		case err == nil:
 			resp.Created++
 			resp.Models = append(resp.Models, modelID)
 		case errors.Is(err, models.ErrModelIDAlreadyExists):
-			if h.refreshCatalogModel(ctx, providerID, modelID, m.Config) {
+			if h.refreshCatalogModel(ctx, providerID, modelID, config) {
 				resp.Updated++
 			} else {
 				resp.Skipped++
@@ -524,6 +540,22 @@ func (h *ProvidersHandler) importCatalogModels(ctx context.Context, providerID s
 		}
 	}
 	return resp
+}
+
+// providerModels lists a provider's models once per import, by row and by
+// model id. A failed listing is logged and reads as none, so the import falls
+// back to telling existing models apart by Create's duplicate error.
+func (h *ProvidersHandler) providerModels(ctx context.Context, providerID string) ([]models.GetResponse, map[string]struct{}) {
+	ids := map[string]struct{}{}
+	rows, err := h.modelsService.ListByProviderID(ctx, providerID)
+	if err != nil {
+		h.logger.WarnContext(ctx, "failed to list provider models before import", slog.Any("error", err))
+		return nil, ids
+	}
+	for _, m := range rows {
+		ids[m.ModelID] = struct{}{}
+	}
+	return rows, ids
 }
 
 func (h *ProvidersHandler) refreshCatalogModel(ctx context.Context, providerID, modelID string, catalog models.ModelConfig) bool {
@@ -554,9 +586,8 @@ func (h *ProvidersHandler) refreshCatalogModel(ctx context.Context, providerID, 
 // Capabilities only grow: a modality, tool calling or structured output that is
 // on stays on, and reasoning the catalog does not list is kept. When both
 // reason, the catalog's controls (levels, toggle, off answer and dialect)
-// replace the stored ones, and the budget range, the defaults and the replay
-// field are kept when set, since those are what the edit form tunes. A
-// description is filled in only when the model has none. The result is compared
+// replace the stored ones; see refreshedReasoning for what of the user's is
+// kept. A description is filled in only when the model has none. The result is compared
 // in its stored form, since that is what the row holds and what an update
 // would write.
 func refreshFromCatalog(modelID string, existing, catalog models.ModelConfig) (models.ModelConfig, bool) {
@@ -597,6 +628,11 @@ func unionModalities(existing, catalog *models.ModelModalities) *models.ModelMod
 	return &models.ModelModalities{Input: union(existing.Input, catalog.Input), Output: union(existing.Output, catalog.Output)}
 }
 
+// refreshedReasoning takes the catalog's controls and keeps what the edit form
+// tunes while those controls still use it: the budget range under a budget,
+// the default effort among the levels, the default switch on a model that has
+// one, and the default budget under a budget. The replay field does not depend
+// on the controls and is always kept.
 func refreshedReasoning(existing, catalog *models.ModelReasoning) *models.ModelReasoning {
 	switch {
 	case catalog == nil:
@@ -605,16 +641,37 @@ func refreshedReasoning(existing, catalog *models.ModelReasoning) *models.ModelR
 		return catalog
 	}
 	r := *catalog
-	if existing.Budget != nil {
+	if existing.Budget != nil && catalog.Budget != nil {
 		r.Budget = existing.Budget
 	}
-	if existing.Default != nil {
-		r.Default = existing.Default
-	}
+	r.Default = refreshedDefault(existing.Default, catalog.Default, r)
 	if existing.Replay != nil {
 		r.Replay = existing.Replay
 	}
 	return &r
+}
+
+func refreshedDefault(existing, catalog *models.ReasoningDefault, r models.ModelReasoning) *models.ReasoningDefault {
+	if existing == nil {
+		return catalog
+	}
+	var out models.ReasoningDefault
+	if catalog != nil {
+		out = *catalog
+	}
+	if existing.Enabled != nil && r.Toggle {
+		out.Enabled = existing.Enabled
+	}
+	if existing.Effort != "" && slices.Contains(r.Efforts, existing.Effort) {
+		out.Effort = existing.Effort
+	}
+	if existing.Budget != nil && r.Budget != nil {
+		out.Budget = existing.Budget
+	}
+	if out == (models.ReasoningDefault{}) {
+		return nil
+	}
+	return &out
 }
 
 func allowCustomModelCapabilityDefaults(provider providers.GetResponse) bool {
@@ -655,12 +712,10 @@ func importedCompatibilities(remote providers.RemoteModel, modelType models.Mode
 	return append([]string(nil), defaults...)
 }
 
-func (h *ProvidersHandler) markUnavailableManagedModels(ctx context.Context, providerID string, available map[string]struct{}) {
-	existingModels, err := h.modelsService.ListByProviderID(ctx, providerID)
-	if err != nil {
-		h.logger.WarnContext(ctx, "failed to list managed models for catalog reconciliation", slog.Any("error", err))
-		return
-	}
+// markUnavailableManagedModels marks the models the catalog no longer lists.
+// existingModels is the listing the import started from: a model it created is
+// available, and one it refreshed is listed, so neither needs reading again.
+func (h *ProvidersHandler) markUnavailableManagedModels(ctx context.Context, providerID string, available map[string]struct{}, existingModels []models.GetResponse) {
 	for _, existing := range existingModels {
 		if _, ok := available[existing.ModelID]; ok {
 			continue

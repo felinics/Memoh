@@ -1907,7 +1907,7 @@
     "sourcePreviewLoading": "正在从 models.dev 读取模型列表…",
     "importFromCatalog": "从 models.dev 目录导入",
     "importFromEndpoint": "从服务商接口拉取",
-    "importFromCatalogHint": "新增目录中缺少的模型并设为停用。已有模型按目录更新能力信息，但不会撤销你开启的能力和调整过的推理设置；启用状态与描述保持不变。",
+    "importFromCatalogHint": "新增目录中缺少的模型并设为停用。已有模型的上下文、最大输出与推理档位按目录更新；已开启的能力不会被移除，推理预算、默认值与回传字段在仍适用时保留。启用状态与描述保持不变。",
     "clientType": "客户端类型",
     "clientTypePlaceholder": "选择客户端类型",
     "typeRequired": "请选择类型",

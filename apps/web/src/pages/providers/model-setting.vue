@@ -72,7 +72,8 @@
         :delete-model-loading="deleteModelLoading"
         @edit="handleEditModel"
         @delete="deleteModel"
-        @created="importCatalogAfterAdd"
+        @created="noteModelAdded"
+        @add-closed="importCatalogAfterAdd"
       />
     </div>
   </SettingsShell>
@@ -250,10 +251,11 @@ const providerForm = useTemplateRef('providerForm')
 
 // Adding a model to a draft creates the provider first, from the
 // form's current (possibly unsaved) values. A source's catalog needs no API
-// key, so it comes along, but only once the user's model exists: importing it
-// first would create that model from the catalog and refuse the user's as a
-// duplicate. An endpoint is listed later, once the key is saved.
-let catalogPendingAdd: ProvidersGetResponse | null = null
+// key, so it comes along once the add dialog closes, whether the model was
+// added or not. Models the user added there are left out of that import: they
+// already exist, and the catalog would overwrite what the user just set. An
+// endpoint is listed later, once the key is saved.
+let catalogPendingAdd: { provider: ProvidersGetResponse, added: string[] } | null = null
 
 async function ensureProviderId(): Promise<string> {
   const provider = curProvider.value
@@ -270,18 +272,20 @@ async function ensureProviderId(): Promise<string> {
     false,
   )
   if (!created.id) throw new Error('provider creation returned no id')
-  catalogPendingAdd = providerSource(provider) ? created : null
+  catalogPendingAdd = providerSource(provider) ? { provider: created, added: [] } : null
   return created.id
 }
 
-// The catalog import refreshes the user's model like any it already has,
-// which only adds what the catalog says it can do.
+function noteModelAdded(modelId: string) {
+  catalogPendingAdd?.added.push(modelId)
+}
+
 async function importCatalogAfterAdd() {
-  const provider = catalogPendingAdd
+  const pending = catalogPendingAdd
   catalogPendingAdd = null
-  if (!provider) return
+  if (!pending) return
   try {
-    await importProviderModels(provider)
+    await importProviderModels(pending.provider, { skipModelIds: pending.added })
   } catch {
     toast.error(t('models.importFailed'))
   }

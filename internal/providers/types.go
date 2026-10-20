@@ -166,6 +166,8 @@ type CatalogModel struct {
 	ModelID string             `json:"model_id"`
 	Name    string             `json:"name,omitempty"`
 	Config  models.ModelConfig `json:"config"`
+	// rawConfig is the config as sent; see ConfigFor.
+	rawConfig json.RawMessage
 }
 
 // UnmarshalJSON reads config in any schema version, as a single model's
@@ -192,7 +194,19 @@ func (m *CatalogModel) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	m.Config = config
+	m.rawConfig = body.Config
 	return nil
+}
+
+// ConfigFor returns the model's config, read again with the provider's client
+// type when the version 1 upgrade it went through depends on the protocol; the
+// request decode could not see the provider. See
+// models.RequestConfigNeedsClientType.
+func (m CatalogModel) ConfigFor(clientType string) (models.ModelConfig, error) {
+	if len(m.rawConfig) == 0 || clientType == "" || !models.RequestConfigNeedsClientType(m.rawConfig, m.ModelID) {
+		return m.Config, nil
+	}
+	return models.DecodeRequestModelConfig(m.rawConfig, models.ConfigContext{ModelID: m.ModelID, Type: models.ModelTypeChat, ClientType: clientType})
 }
 
 // ImportModelsResponse represents the response for importing models.

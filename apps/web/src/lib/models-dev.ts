@@ -47,7 +47,8 @@ export async function fetchModelsDevCatalog(signal?: AbortSignal): Promise<Model
 // A model as Memoh imports it: the catalog row turned into a model config.
 export interface CatalogModel {
   model_id: string
-  name: string
+  // Absent when models.dev gives no name other than the id.
+  name?: string
   type: 'chat'
   config: ModelsModelConfig
 }
@@ -61,13 +62,18 @@ export function catalogModelsFor(catalog: ModelsDevCatalog | undefined, source: 
   if (!provider?.models) return []
   return Object.values(provider.models)
     .filter(model => model.id && (!model.type || model.type === 'chat') && model.status !== 'deprecated' && !looksLikeEmbeddingModel(model.id))
-    .map(model => ({
-      model_id: model.id,
-      name: model.name?.trim() || model.id,
-      type: 'chat' as const,
-      config: modelConfigFromCatalog(model, modelProtocol(model, provider, clientType)),
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((model) => {
+      // A model without a name of its own is stored without one, so the list
+      // does not show its id twice.
+      const name = model.name?.trim()
+      return {
+        model_id: model.id,
+        ...(name && name !== model.id && { name }),
+        type: 'chat' as const,
+        config: modelConfigFromCatalog(model, modelProtocol(model, provider, clientType)),
+      }
+    })
+    .sort((a, b) => (a.name ?? a.model_id).localeCompare(b.name ?? b.model_id))
 }
 
 // An id in which "embed" starts a word names an embedding model, by the same
@@ -142,7 +148,8 @@ export function reasoningFromCatalog(model: ModelsDevModel, protocol: string): M
   for (const option of options) {
     if (option.type === 'effort') efforts = (option.values ?? []).filter((value): value is string => typeof value === 'string' && value !== '')
     else if (option.type === 'toggle') toggle = true
-    else if (option.type === 'budget_tokens') budget = { min: option.min, max: option.max }
+    // models.dev writes a dynamic budget as -1, which no bound can express.
+    else if (option.type === 'budget_tokens') budget = { min: atLeast(option.min, 0), max: atLeast(option.max, 1) }
   }
   // OpenAI spells off as the effort "none"; Memoh declares it as a toggle.
   const offByEffort = efforts.includes('none')
@@ -155,7 +162,9 @@ export function reasoningFromCatalog(model: ModelsDevModel, protocol: string): M
     : undefined
   if (bounds) reasoning.budget = bounds
 
-  if (protocol === 'anthropic-messages') {
+  // Claude's rules are Claude's: another model behind an Anthropic Messages
+  // endpoint (MiniMax, Kimi) is read like any other protocol's.
+  if (protocol === 'anthropic-messages' && claudeVersion(model.id)) {
     if (efforts.length && !budget) reasoning.dialect = 'adaptive'
     else if (budget && !efforts.length) reasoning.dialect = 'budget'
     else if (efforts.length && budget) reasoning.dialect = claudeReadsAdaptive(model.id) ? 'adaptive' : 'budget'
@@ -199,6 +208,10 @@ function withReplay(reasoning: ModelsModelReasoning, model: ModelsDevModel): Mod
 }
 
 const CLAUDE_VERSION = /claude-(?:[a-z]+-)?(\d+)(?:[.-](\d{1,2}))?(?:[.:@-]|$)/
+
+function atLeast(value: number | undefined, floor: number): number | undefined {
+  return typeof value === 'number' && value >= floor ? value : undefined
+}
 
 function claudeVersion(modelID: string): [number, number] | null {
   const id = modelID.toLowerCase()

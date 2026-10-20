@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   importProviderModels: vi.fn(),
   draftPayload: vi.fn(),
   canListModels: vi.fn(),
-  modelList: {} as { ensureProviderId?: () => Promise<string>, created?: () => void },
+  modelList: {} as { ensureProviderId?: () => Promise<string>, created?: (modelId: string) => void, closed?: () => void },
 }))
 
 async function flushPromises() {
@@ -78,10 +78,11 @@ vi.mock('./components/model-list.vue', () => ({
       providerId: { type: String, default: undefined },
       ensureProviderId: { type: Function, default: undefined },
     },
-    emits: ['created'],
+    emits: ['created', 'add-closed'],
     setup: (props, { emit }) => {
       mocks.modelList.ensureProviderId = props.ensureProviderId as (() => Promise<string>) | undefined
-      mocks.modelList.created = () => emit('created')
+      mocks.modelList.created = (modelId: string) => emit('created', modelId)
+      mocks.modelList.closed = () => emit('add-closed')
       return () => h('div', { 'data-testid': 'model-list' })
     },
   }),
@@ -218,22 +219,36 @@ describe('provider draft enable', () => {
     view.unmount()
   })
 
-  it('imports a source draft\'s catalog only after a hand-added model exists', async () => {
+  it('imports a source draft\'s catalog once the add dialog closes, leaving the added model out', async () => {
     const setting = await mountSetting(sourceDraft())
 
     await expect(mocks.modelList.ensureProviderId?.()).resolves.toBe('created-provider')
     await flushPromises()
     expect(mocks.postProviders).toHaveBeenCalledOnce()
+    mocks.modelList.created?.('my-model')
+    await flushPromises()
     expect(mocks.importProviderModels).not.toHaveBeenCalled()
 
-    mocks.modelList.created?.()
+    mocks.modelList.closed?.()
     await flushPromises()
     expect(mocks.importProviderModels).toHaveBeenCalledOnce()
     expect(mocks.importProviderModels.mock.calls[0]![0]).toMatchObject({ id: 'created-provider' })
+    expect(mocks.importProviderModels.mock.calls[0]![1]).toEqual({ skipModelIds: ['my-model'] })
 
-    mocks.modelList.created?.()
+    mocks.modelList.closed?.()
     await flushPromises()
     expect(mocks.importProviderModels).toHaveBeenCalledOnce()
+    setting.unmount()
+  })
+
+  it('still imports a source draft\'s catalog when the hand-added model failed', async () => {
+    const setting = await mountSetting(sourceDraft())
+
+    await mocks.modelList.ensureProviderId?.()
+    mocks.modelList.closed?.()
+    await flushPromises()
+    expect(mocks.importProviderModels).toHaveBeenCalledOnce()
+    expect(mocks.importProviderModels.mock.calls[0]![1]).toEqual({ skipModelIds: [] })
     setting.unmount()
   })
 
