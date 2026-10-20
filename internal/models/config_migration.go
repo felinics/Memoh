@@ -116,13 +116,18 @@ func legacyNeedsClientType(raw []byte, modelID string) bool {
 // transcription and video models keep their own settings in the same column,
 // which ModelConfig does not describe, so they are never rewritten.
 func configNeedsWriteBack(raw []byte, modelType ModelType) bool {
-	if modelType != ModelTypeChat && modelType != ModelTypeEmbedding {
+	if !holdsModelConfig(modelType) {
 		return false
 	}
 	if len(strings.TrimSpace(string(raw))) == 0 || string(raw) == "null" {
 		return false
 	}
 	return storedConfigVersion(raw) < ModelConfigSchemaVersion
+}
+
+// holdsModelConfig reports whether a model's config column is a ModelConfig.
+func holdsModelConfig(modelType ModelType) bool {
+	return modelType == ModelTypeChat || modelType == ModelTypeEmbedding
 }
 
 // encodeUpgradedConfig writes config over the stored object: version 1 keys
@@ -285,12 +290,14 @@ func mergeLegacyEdit(raw []byte, ctx ConfigContext) (ModelConfig, error) {
 		if out.Reasoning == nil {
 			out.Reasoning = edit.Reasoning
 		} else if len(v1.ReasoningEfforts) > 0 {
-			// The effort list is the version 1 switch as well as the levels; an
-			// off it implies (see upgradeReasoningV1) comes along with them.
+			// The chosen levels replace the stored ones. The switch and the off
+			// answer ride on the same list in version 1, but the form showed
+			// them unset too, so they only add: a switch stays a switch, and an
+			// off answer the config states is kept.
 			r := *out.Reasoning
 			r.Efforts = edit.Reasoning.Efforts
-			r.Toggle = edit.Reasoning.Toggle
-			if edit.Reasoning.Off != "" {
+			r.Toggle = r.Toggle || edit.Reasoning.Toggle
+			if r.Off == "" {
 				r.Off = edit.Reasoning.Off
 			}
 			out.Reasoning = &r
@@ -434,8 +441,8 @@ func upgradeReasoningV1(v1 LegacyModelConfig, hasReasoning bool, ctx ConfigConte
 // inference version 1 made only for an undeclared thinking mode; recording the
 // wire keeps a declared toggle a toggle once it is written. Anthropic Messages
 // sent thinking{type:"enabled"} with a token budget, and the OpenAI protocols
-// send a tier as the reasoning effort, where the dialect is not read. Elsewhere
-// the dialect changes the request, so it stays unstated.
+// send a tier or a bare switch as the reasoning effort, where the dialect is
+// not read. Elsewhere the dialect changes the request, so it stays unstated.
 func declaredToggleDialect(clientType string, hasEfforts bool) string {
 	switch ClientType(clientType) {
 	case ClientTypeAnthropicMessages:
@@ -444,6 +451,7 @@ func declaredToggleDialect(clientType string, hasEfforts bool) string {
 		if hasEfforts {
 			return reasoning.DialectTier
 		}
+		return reasoning.DialectToggle
 	}
 	return ""
 }
@@ -482,14 +490,27 @@ func (c ModelConfig) Legacy() LegacyModelConfig {
 // keeps what version 1 cannot express from existing: structured output,
 // modalities other than text, image and PDF, the reasoning replay, and the
 // default effort and budget.
+//
+// The version 1 reading of a config is lossy for shapes only version 2 can
+// state, such as an off answer without a switch, or a switch with a budget
+// that cannot be turned off; upgrading that reading back would rewrite them.
+// So the parts the merge did not change keep the existing config's version 2
+// form: its reasoning when the thinking fields came out the same, and its
+// modalities and tool calling when the capability tokens did.
 func MergeLegacyConfig(existing ModelConfig, merged LegacyModelConfig, ctx ConfigContext) ModelConfig {
 	out := merged.Upgrade(ctx)
+	before := existing.Legacy()
 	out.StructuredOutput = existing.StructuredOutput
-	if existing.Modalities != nil && out.Modalities != nil {
+	if sameLegacyCapabilities(before, merged) {
+		out.Modalities = existing.Modalities
+		out.ToolCall = existing.ToolCall
+	} else if existing.Modalities != nil && out.Modalities != nil {
 		out.Modalities.Input = append(out.Modalities.Input, modalitiesBeyondV1(existing.Modalities.Input)...)
 		out.Modalities.Output = append(out.Modalities.Output, modalitiesBeyondV1(existing.Modalities.Output)...)
 	}
-	if existing.Reasoning != nil && out.Reasoning != nil {
+	if sameLegacyReasoning(before, merged) {
+		out.Reasoning = existing.Reasoning
+	} else if existing.Reasoning != nil && out.Reasoning != nil {
 		out.Reasoning.Replay = existing.Reasoning.Replay
 		if d := existing.Reasoning.Default; d != nil && (d.Effort != "" || d.Budget != nil) {
 			if out.Reasoning.Default == nil {
@@ -500,6 +521,39 @@ func MergeLegacyConfig(existing ModelConfig, merged LegacyModelConfig, ctx Confi
 		}
 	}
 	return normalizeModelConfig(out)
+}
+
+func sameLegacyCapabilities(a, b LegacyModelConfig) bool {
+	return sameStringSet(a.Compatibilities, b.Compatibilities)
+}
+
+// sameLegacyReasoning compares the thinking fields of two version 1 readings.
+// The effort list is a set: discovery and Legacy order the disable token
+// differently.
+func sameLegacyReasoning(a, b LegacyModelConfig) bool {
+	return slices.Contains(a.Compatibilities, CompatReasoning) == slices.Contains(b.Compatibilities, CompatReasoning) &&
+		a.ThinkingMode == b.ThinkingMode &&
+		sameStringSet(reasoning.NormalizeAdvertised(a.ReasoningEfforts), reasoning.NormalizeAdvertised(b.ReasoningEfforts)) &&
+		a.ReasoningDialect == b.ReasoningDialect &&
+		a.ReasoningOffSupport == b.ReasoningOffSupport &&
+		sameBool(a.ReasoningDefaultOn, b.ReasoningDefaultOn) &&
+		sameInt(a.ThinkingBudgetMin, b.ThinkingBudgetMin) &&
+		sameInt(a.ThinkingBudgetMax, b.ThinkingBudgetMax)
+}
+
+func sameStringSet(a, b []string) bool {
+	x, y := slices.Clone(a), slices.Clone(b)
+	slices.Sort(x)
+	slices.Sort(y)
+	return slices.Equal(slices.Compact(x), slices.Compact(y))
+}
+
+func sameBool(a, b *bool) bool {
+	return (a == nil) == (b == nil) && (a == nil || *a == *b)
+}
+
+func sameInt(a, b *int) bool {
+	return (a == nil) == (b == nil) && (a == nil || *a == *b)
 }
 
 func modalitiesBeyondV1(in []Modality) []Modality {

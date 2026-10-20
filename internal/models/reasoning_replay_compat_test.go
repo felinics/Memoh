@@ -22,10 +22,15 @@ func TestChatCompletionsCompatReasoningReplay(t *testing.T) {
 		name        string
 		compat      string
 		reasoning   []sdk.ReasoningPart
+		replay      *ReasoningReplay
 		wantContent *string
 		wantDetails bool
 	}{
 		{name: "deepseek pads a bare tool call", compat: ChatCompletionsCompatDeepSeek, wantContent: strPtr("")},
+		// A model that only names the field DeepSeek needs keeps it required.
+		{name: "deepseek stays required under a model field", compat: ChatCompletionsCompatDeepSeek, replay: &ReasoningReplay{Field: ReasoningReplayContent}, wantContent: strPtr("")},
+		{name: "a model field alone is not required", compat: "none", replay: &ReasoningReplay{Field: ReasoningReplayContent}},
+		{name: "a model can require the replay", compat: "none", replay: &ReasoningReplay{Field: ReasoningReplayContent, Required: true}, wantContent: strPtr("")},
 		{name: "kimi pads a bare tool call", compat: ChatCompletionsCompatKimi, wantContent: strPtr("")},
 		{name: "plain endpoint sends nothing", compat: "none"},
 		{
@@ -67,6 +72,7 @@ func TestChatCompletionsCompatReasoningReplay(t *testing.T) {
 				APIKey:                "k",
 				BaseURL:               srv.URL,
 				ChatCompletionsCompat: tc.compat,
+				ReasoningReplay:       tc.replay,
 			})
 			parts := make([]sdk.MessagePart, 0, len(tc.reasoning)+1)
 			for _, r := range tc.reasoning {

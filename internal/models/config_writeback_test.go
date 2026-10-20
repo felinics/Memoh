@@ -170,3 +170,26 @@ func TestCreateReadsAnOlderClientsSwitchWithTheProviderClientType(t *testing.T) 
 		t.Fatalf("stored reasoning = %+v, want off rejected on OpenAI", stored.Reasoning)
 	}
 }
+
+// Speech, transcription and video rows hold the provider's own settings, which
+// the audio and video services merge into their request options, so a model of
+// those types is created without the schema version a ModelConfig carries.
+func TestCreateWritesNoSchemaVersionForSpeechModels(t *testing.T) {
+	t.Parallel()
+
+	queries := &createQueries{}
+	service := &Service{queries: queries, logger: slog.Default()}
+	for _, modelType := range []ModelType{ModelTypeSpeech, ModelTypeChat} {
+		if _, err := service.Create(context.Background(), AddRequest{
+			ModelID: "m-" + string(modelType), ProviderID: "00000000-0000-0000-0000-000000000001", Type: modelType,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := string(queries.created[0].Config); got != `{}` {
+		t.Fatalf("speech config = %s, want {}", got)
+	}
+	if got := string(queries.created[1].Config); got != `{"schema_version":2}` {
+		t.Fatalf("chat config = %s", got)
+	}
+}

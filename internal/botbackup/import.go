@@ -797,9 +797,7 @@ func (d *modelDependency) withClientType(clientType string) error {
 func (s *Service) importDependencies(ctx context.Context, state *importState) (dependencyMap, error) {
 	deps := newDependencyMap()
 	providers, _ := readEntry[[]providerpkg.GetResponse](state, "dependencies/providers.json")
-	clientTypes := map[string]string{}
 	for _, item := range providers {
-		clientTypes[item.ID] = item.ClientType
 		id, err := s.ensureProvider(ctx, item)
 		if err != nil {
 			s.skipImport(ctx, state, "provider_dependency", "provider dependency skipped", err)
@@ -807,9 +805,29 @@ func (s *Service) importDependencies(ctx context.Context, state *importState) (d
 		}
 		deps.providers[item.ID] = id
 	}
+	// The client type is the one of the provider the model lands on, which may
+	// be an existing provider the backup's was matched to by name.
+	clientTypes := map[string]string{}
+	clientTypeOf := func(providerID string) string {
+		if clientType, ok := clientTypes[providerID]; ok {
+			return clientType
+		}
+		clientType := ""
+		if s.providers != nil && providerID != "" {
+			if provider, err := s.providers.Get(ctx, providerID); err == nil {
+				clientType = provider.ClientType
+			}
+		}
+		clientTypes[providerID] = clientType
+		return clientType
+	}
 	models, _ := readEntry[[]modelDependency](state, "dependencies/models.json")
 	for _, item := range models {
-		if err := item.withClientType(clientTypes[item.ProviderID]); err != nil {
+		target := deps.providers[item.ProviderID]
+		if target == "" {
+			target = item.ProviderID
+		}
+		if err := item.withClientType(clientTypeOf(target)); err != nil {
 			s.skipImport(ctx, state, "model_dependency", "model dependency skipped", err)
 			continue
 		}

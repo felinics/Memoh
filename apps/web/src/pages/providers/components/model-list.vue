@@ -36,6 +36,7 @@
           v-if="!managed"
           :id="providerId"
           :ensure-provider-id="ensureProviderId"
+          :client-type="clientType"
           size="sm"
         />
       </div>

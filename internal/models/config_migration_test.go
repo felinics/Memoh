@@ -443,6 +443,59 @@ func TestUpgradeKeepsADeclaredClaudeToggleAToggle(t *testing.T) {
 	}
 }
 
+// A switch without levels on an OpenAI protocol records the toggle wire, so it
+// stays a toggle once written like the leveled one does.
+func TestUpgradeKeepsADeclaredClaudeSwitchOnOpenAIAToggle(t *testing.T) {
+	t.Parallel()
+
+	ctx := ConfigContext{ModelID: "claude-sonnet-4-6", Type: ModelTypeChat, ClientType: string(ClientTypeOpenAICompletions)}
+	config, err := DecodeModelConfig([]byte(`{"compatibilities":["reasoning"],"thinking_mode":"toggle","reasoning_efforts":["enabled","disable"]}`), ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := config.Reasoning.Dialect; got != reasoning.DialectToggle {
+		t.Fatalf("dialect = %q, want toggle", got)
+	}
+	if got := config.StoredForm(ctx.ModelID).ThinkingMode(); got != reasoning.ModeToggle {
+		t.Fatalf("stored mode = %q, want toggle", got)
+	}
+}
+
+// Shapes only version 2 can state do not survive the version 1 reading, so a
+// merge that left the thinking fields alone keeps the stored reasoning rather
+// than upgrading that reading back.
+func TestMergeLegacyConfigKeepsShapesVersion1CannotState(t *testing.T) {
+	t.Parallel()
+
+	maxBudget, window := 100, 128000
+	ctx := ConfigContext{ModelID: "m", Type: ModelTypeChat, ClientType: string(ClientTypeOpenAICompletions)}
+	for name, r := range map[string]*ModelReasoning{
+		"off only":              {Off: reasoning.OffSupportAccepted},
+		"adaptive only":         {Dialect: reasoning.DialectAdaptive},
+		"budget switch, no off": {Toggle: true, Budget: &ReasoningBudget{Max: &maxBudget}, Off: reasoning.OffSupportRejected},
+		"levels with a replay":  {Efforts: []string{"low", "high"}, Replay: &ReasoningReplay{Field: ReasoningReplayDetails}},
+	} {
+		existing := ModelConfig{ToolCall: true, Modalities: &ModelModalities{Input: []Modality{ModalityText, ModalityAudio}, Output: []Modality{ModalityText}}, Reasoning: r}
+		merged := existing.Legacy()
+		merged.ContextWindow = &window
+		got := MergeLegacyConfig(existing, merged, ctx)
+		if !reflect.DeepEqual(got.Reasoning, normalizeModelConfig(existing).Reasoning) {
+			t.Errorf("%s: reasoning = %+v, want %+v", name, got.Reasoning, r)
+		}
+		if !got.Accepts(ModalityAudio) || got.ContextWindow == nil || *got.ContextWindow != window {
+			t.Errorf("%s: config = %+v", name, got)
+		}
+	}
+
+	// A merge that changed the thinking fields still applies them.
+	existing := ModelConfig{Reasoning: &ModelReasoning{Off: reasoning.OffSupportAccepted}}
+	merged := existing.Legacy()
+	merged.ReasoningEfforts = []string{reasoning.EffortLow, reasoning.EffortHigh}
+	if got := MergeLegacyConfig(existing, merged, ctx); got.Reasoning == nil || !slices.Equal(got.Reasoning.Efforts, []string{"low", "high"}) {
+		t.Fatalf("reasoning = %+v, want the discovered levels", got.Reasoning)
+	}
+}
+
 // An older client copies the current config it was served and writes its
 // edits in version 1 keys. It was served no version 1 keys, so its form opened
 // with nothing checked: what it sends is added on top, and what it leaves out
@@ -495,6 +548,19 @@ func TestDecodeRequestAppliesAnOlderClientsEditOnTop(t *testing.T) {
 		got := decode(t, `{"schema_version":2,"tool_call":true,"compatibilities":["reasoning"],"reasoning_efforts":["enabled"]}`)
 		if got.Reasoning == nil || !got.Reasoning.Toggle || got.Reasoning.Off != reasoning.OffSupportRejected {
 			t.Fatalf("reasoning = %+v", got.Reasoning)
+		}
+	})
+
+	t.Run("chosen levels keep the switch and the off answer", func(t *testing.T) {
+		switchable := `{"schema_version":2,"reasoning":{"toggle":true,"off":"accepted","efforts":["low","medium","high"]}`
+		got := decode(t, switchable+`,"compatibilities":["reasoning"],"reasoning_efforts":["low","high"]}`)
+		r := got.Reasoning
+		if r == nil || !slices.Equal(r.Efforts, []string{"low", "high"}) || !r.Toggle || r.Off != reasoning.OffSupportAccepted {
+			t.Fatalf("reasoning = %+v", r)
+		}
+		got = decode(t, switchable+`,"compatibilities":["reasoning"],"reasoning_efforts":["enabled"]}`)
+		if r := got.Reasoning; r == nil || !r.Toggle || r.Off != reasoning.OffSupportAccepted {
+			t.Fatalf("an enabled-only edit took the off answer away: %+v", r)
 		}
 	})
 

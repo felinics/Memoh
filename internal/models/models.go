@@ -60,7 +60,7 @@ func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, erro
 		return AddResponse{}, fmt.Errorf("invalid provider ID: %w", err)
 	}
 
-	configJSON, err := json.Marshal(model.Config)
+	configJSON, err := encodeStoredConfig(model)
 	if err != nil {
 		return AddResponse{}, fmt.Errorf("marshal config: %w", err)
 	}
@@ -314,7 +314,7 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 		return GetResponse{}, fmt.Errorf("invalid provider ID: %w", err)
 	}
 
-	configJSON, err := json.Marshal(model.Config)
+	configJSON, err := encodeStoredConfig(model)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("marshal config: %w", err)
 	}
@@ -380,7 +380,7 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 		return GetResponse{}, fmt.Errorf("invalid provider ID: %w", err)
 	}
 
-	configJSON, err := json.Marshal(model.Config)
+	configJSON, err := encodeStoredConfig(model)
 	if err != nil {
 		return GetResponse{}, fmt.Errorf("marshal config: %w", err)
 	}
@@ -492,6 +492,27 @@ func (s *Service) convertToGetResponse(ctx context.Context, dbModel sqlc.Model) 
 	resp.Config = config
 
 	return resp
+}
+
+// encodeStoredConfig writes a model's config for its row. Only chat and
+// embedding models keep a ModelConfig there; speech, transcription and video
+// rows hold the provider's own settings, which are read back as plain options,
+// so they are written without the schema version.
+func encodeStoredConfig(model Model) ([]byte, error) {
+	if holdsModelConfig(model.Type) {
+		return json.Marshal(model.Config)
+	}
+	type plain ModelConfig
+	raw, err := json.Marshal(plain(model.Config))
+	if err != nil {
+		return nil, err
+	}
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	delete(fields, "schema_version")
+	return json.Marshal(fields)
 }
 
 // requestConfig returns a request's config, read again with its provider's
