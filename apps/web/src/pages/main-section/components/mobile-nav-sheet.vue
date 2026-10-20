@@ -62,7 +62,7 @@
         </div>
 
         <div class="relative z-1 shrink-0 bg-sidebar px-2 pt-1 pb-2">
-          <SidebarExamplesEntry />
+          <SidebarExamplesEntry v-if="!sidebarEntryHidden" />
           <SidebarNavButton
             :aria-label="t('sidebar.settings')"
             @click="goSettings"
@@ -97,6 +97,7 @@ import { useChatStore } from '@/store/chat-list'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { useWorkspaceTabsStore, type SidebarView } from '@/store/workspace-tabs'
 import { hasBotPermission } from '@/utils/bot-permissions'
+import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-ui'
 import BotSwitcher from '@/components/sidebar/bot-switcher.vue'
 import SidebarExamplesEntry from '@/components/sidebar/examples-entry.vue'
 import SidebarNavButton from '@/components/sidebar/nav-button.vue'
@@ -117,6 +118,7 @@ const workspaceTabs = useWorkspaceTabsStore()
 const { mobileNavOpen, sidebarView, activeId } = storeToRefs(workspaceTabs)
 const chatStore = useChatStore()
 const { currentBotId, bots } = storeToRefs(chatStore)
+const { sidebarEntryHidden } = useChatExamplesUi()
 const selectionStore = useChatSelectionStore()
 
 const currentBot = computed(() =>

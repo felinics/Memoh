@@ -154,6 +154,7 @@
          footer's px-2.5 inset and surface, so its row, tile and label line up
          with the account row's. -->
     <div
+      v-if="!sidebarEntryHidden"
       class="relative z-1 shrink-0 bg-sidebar px-2.5 pt-1"
       data-native-sidebar-surface
     >
@@ -204,6 +205,7 @@ import { useSettingsStore } from '@/store/settings'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore, type SidebarView } from '@/store/workspace-tabs'
 import { hasBotPermission } from '@/utils/bot-permissions'
+import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-ui'
 import BotSwitcher from './bot-switcher.vue'
 import SidebarExamplesEntry from './examples-entry.vue'
 import UserMenu from './user-menu.vue'
@@ -230,6 +232,7 @@ const { sidebarView, sidebarWidth, workbenchOpen, dirtyFileCount } = storeToRefs
 const settingsStore = useSettingsStore()
 const chatStore = useChatStore()
 const { currentBotId, bots } = storeToRefs(chatStore)
+const { sidebarEntryHidden } = useChatExamplesUi()
 
 // 按当前语言最长的导航标签保留最小空间，避免所有语言都为日文标签预留宽度。
 // 同一语言下切换选项不改变下限；放大界面字号时同步扩大。

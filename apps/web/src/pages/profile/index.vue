@@ -71,10 +71,23 @@
           </SettingsRow>
         </SettingsSection>
 
+        <!-- Card 3 · Interface: device-local display preferences -->
+        <SettingsSection :title="$t('settings.interfaceSection')">
+          <SettingsRow
+            :label="$t('settings.showExamplesEntry')"
+            :description="$t('settings.showExamplesEntryDescription')"
+          >
+            <Switch
+              :model-value="!sidebarEntryHidden"
+              @update:model-value="(val) => sidebarEntryHidden = !val"
+            />
+          </SettingsRow>
+        </SettingsSection>
+
         <!-- Connected IM Accounts -->
         <ConnectedAccountsSection />
 
-        <!-- Card 3 · Session: user id + sign out (low-frequency, kept at the bottom). -->
+        <!-- Card 4 · Session: user id + sign out (low-frequency, kept at the bottom). -->
         <SettingsSection :title="$t('settings.sessionSection')">
           <SettingsRow :label="$t('settings.userID')">
             <div class="flex items-center gap-1 text-sm text-muted-foreground">
@@ -129,7 +142,7 @@ import { useQuery } from '@pinia/colada'
 import { useRouter } from 'vue-router'
 import { ConfirmPopover, PageShell, SettingsRow, SettingsSection, toast, useClipboard } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
-import { Button, Skeleton } from '@felinic/ui'
+import { Button, Skeleton, Switch } from '@felinic/ui'
 import { Check, Copy } from 'lucide-vue-next'
 
 import TimezoneSelect from '@/components/timezone-select/index.vue'
@@ -143,6 +156,7 @@ import type { AccountsAccount, AccountsUpdateProfileRequest, AccountsUpdatePassw
 import { useUserStore } from '@/store/user'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
+import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-ui'
 
 type UserAccount = AccountsAccount
 
@@ -153,6 +167,7 @@ const userStore = useUserStore()
 const { userInfo, exitLogin, patchUserInfo } = userStore
 
 const canSignOut = true
+const { sidebarEntryHidden } = useChatExamplesUi()
 
 // ---- User data ----
 const account = ref<UserAccount | null>(null)

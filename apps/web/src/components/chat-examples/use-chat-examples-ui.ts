@@ -6,14 +6,17 @@ import { createGlobalState, useStorage } from '@vueuse/core'
  * mounted once in the app shell (MainSection), and any entry point opens it
  * through `openGallery`. Hiding the welcome suggestions is remembered on this
  * device; the composer's context row offers the way back while they are hidden.
+ * Hiding the sidebar entry is also remembered on this device; the account
+ * page's switch is the way back.
  */
 export const useChatExamplesUi = createGlobalState(() => {
   const galleryOpen = ref(false)
   const welcomeDismissed = useStorage('chat-examples-welcome-dismissed', false)
+  const sidebarEntryHidden = useStorage('chat-examples-sidebar-entry-hidden', false)
 
   function openGallery() {
     galleryOpen.value = true
   }
 
-  return { galleryOpen, welcomeDismissed, openGallery }
+  return { galleryOpen, welcomeDismissed, sidebarEntryHidden, openGallery }
 })
