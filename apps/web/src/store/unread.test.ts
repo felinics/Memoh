@@ -155,4 +155,46 @@ describe('unread store', () => {
 
     expect(store.total).toBe(0)
   })
+
+  it('preserves live attention while the initial snapshot is in flight', async () => {
+    let resolveSnapshot!: (items: typeof reply[]) => void
+    api.fetchUnreadSessions.mockImplementation(() => new Promise(resolve => { resolveSnapshot = resolve }))
+    const stream = captureStream()
+    const store = useUnreadStore()
+    store.start()
+    stream.emit({ type: 'session_attention', ...reply })
+    resolveSnapshot([])
+    await flush()
+    expect(store.isUnread('s1')).toBe(true)
+  })
+
+  it('does not resurrect a read session from an in-flight snapshot or replay', async () => {
+    let resolveSnapshot!: (items: typeof reply[]) => void
+    api.fetchUnreadSessions.mockImplementation(() => new Promise(resolve => { resolveSnapshot = resolve }))
+    const stream = captureStream()
+    const store = useUnreadStore()
+    const live = vi.fn()
+    store.onAttention(live)
+    store.start()
+    stream.emit({ type: 'session_read', session_id: 's1', read_at: reply.attention_at })
+    resolveSnapshot([reply])
+    await flush()
+    stream.emit({ type: 'session_attention', ...reply })
+    expect(store.total).toBe(0)
+    expect(live).not.toHaveBeenCalled()
+  })
+
+  it('ignores duplicate and older attention instead of notifying twice', async () => {
+    const stream = captureStream()
+    const store = useUnreadStore()
+    const live = vi.fn()
+    store.onAttention(live)
+    store.start()
+    await flush()
+    stream.emit({ type: 'session_attention', ...reply })
+    stream.emit({ type: 'session_attention', ...reply })
+    stream.emit({ type: 'session_attention', ...reply, attention_at: '2026-10-16T07:59:00Z' })
+    expect(live).toHaveBeenCalledTimes(1)
+    expect(store.inbox[0]?.attentionAt).toBe(reply.attention_at)
+  })
 })
