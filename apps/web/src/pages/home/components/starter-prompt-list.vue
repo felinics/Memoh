@@ -83,11 +83,18 @@ function moveFocus(event: KeyboardEvent) {
           class="text-body @lg:text-label"
           :class="props.notice.to ? undefined : 'text-muted-foreground'"
         >{{ props.notice.description }}</span>
-        <ChevronRight
-          v-if="props.notice.to"
+        <!-- A line box as tall as the rows' Kbd hint (and the skeleton's
+             bars), kept even without a chevron, so swapping the notice for
+             rows keeps the height. -->
+        <span
           aria-hidden="true"
-          class="hidden size-4 self-center text-muted-foreground @lg:block"
-        />
+          class="hidden h-5 items-center text-muted-foreground @lg:flex"
+        >
+          <ChevronRight
+            v-if="props.notice.to"
+            class="size-4"
+          />
+        </span>
       </Item>
     </template>
     <template v-else-if="props.rows">
