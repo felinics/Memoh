@@ -3,7 +3,7 @@ import { reactive, ref, watch } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { useQueryCache } from '@pinia/colada'
-import { getUsersMe } from '@memohai/sdk'
+import { getUsersMe, putUsersMe } from '@memohai/sdk'
 import { notifyAuthSessionCleared, onAuthSessionCleared, type AuthSessionClearReason } from '@/lib/auth-session'
 import { cancelPendingQueryCacheSave, removeQueryCacheFromDisk } from '@/lib/query-cache-persistence'
 import { resetOnboardingState } from '@/composables/useOnboarding'
@@ -34,6 +34,7 @@ export const useUserStore = defineStore(
 
     const localToken = useLocalStorage('token', '')
     const onboardingCompleted = ref(false)
+    const chatExamplesSidebarEntryHidden = ref(false)
 
     let _meChecked = false
     let _pendingFetch: Promise<boolean> | null = null
@@ -58,6 +59,7 @@ export const useUserStore = defineStore(
           userInfo.avatarUrl = data.avatar_url ?? ''
           userInfo.timezone = data.timezone || 'UTC'
           onboardingCompleted.value = data.metadata?.onboarding_completed === true
+          chatExamplesSidebarEntryHidden.value = data.metadata?.chat_examples_sidebar_entry_hidden === true
           _meChecked = true
           return true
         } catch (error) {
@@ -73,6 +75,29 @@ export const useUserStore = defineStore(
     const resetUserInfo = () => {
       for (const key of Object.keys(userInfo) as (keyof UserInfo)[]) {
         userInfo[key] = key === 'timezone' ? 'UTC' : ''
+      }
+      chatExamplesSidebarEntryHidden.value = false
+    }
+
+    let sidebarEntrySaveToken = 0
+
+    /**
+     * Hides or shows the sidebar's usage-example entry for this account, on
+     * every device. Applies at once and rolls back if the save fails, unless a
+     * newer call has taken over; the error is rethrown for the caller to report.
+     */
+    async function setChatExamplesSidebarEntryHidden(hidden: boolean): Promise<void> {
+      const previous = chatExamplesSidebarEntryHidden.value
+      const token = ++sidebarEntrySaveToken
+      chatExamplesSidebarEntryHidden.value = hidden
+      try {
+        await putUsersMe({
+          body: { metadata: { chat_examples_sidebar_entry_hidden: hidden } },
+          throwOnError: true,
+        })
+      } catch (error) {
+        if (token === sidebarEntrySaveToken) chatExamplesSidebarEntryHidden.value = previous
+        throw error
       }
     }
 
@@ -102,6 +127,7 @@ export const useUserStore = defineStore(
       // could otherwise leak across a switch that skips logout — force a fresh
       // server check.
       resetOnboarding()
+      chatExamplesSidebarEntryHidden.value = false
       localToken.value = token
       for (const key of Object.keys(userData) as (keyof UserInfo)[]) {
         userInfo[key] = userData[key]
@@ -160,6 +186,8 @@ export const useUserStore = defineStore(
     return {
       userInfo,
       onboardingCompleted,
+      chatExamplesSidebarEntryHidden,
+      setChatExamplesSidebarEntryHidden,
       fetchMe,
       login,
       patchUserInfo,

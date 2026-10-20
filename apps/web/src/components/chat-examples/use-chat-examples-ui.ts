@@ -1,18 +1,30 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { createGlobalState, useStorage } from '@vueuse/core'
+import { toast } from '@felinic/ui'
+import i18n from '@/i18n'
+import { useUserStore } from '@/store/user'
 
 /**
  * UI state shared by every usage-example surface. The gallery dialog is
  * mounted once in the app shell (MainSection), and any entry point opens it
  * through `openGallery`. Hiding the welcome suggestions is remembered on this
  * device; the composer's context row offers the way back while they are hidden.
- * Hiding the sidebar entry is also remembered on this device; the account
- * page's switch is the way back.
+ * Hiding the sidebar entry is saved on the account, so it stays hidden on every
+ * device; the Appearance page's switch is the way back. A failed save puts the
+ * entry back and says so.
  */
 export const useChatExamplesUi = createGlobalState(() => {
+  const userStore = useUserStore()
   const galleryOpen = ref(false)
   const welcomeDismissed = useStorage('chat-examples-welcome-dismissed', false)
-  const sidebarEntryHidden = useStorage('chat-examples-sidebar-entry-hidden', false)
+  const sidebarEntryHidden = computed({
+    get: () => userStore.chatExamplesSidebarEntryHidden,
+    set: (hidden: boolean) => {
+      userStore.setChatExamplesSidebarEntryHidden(hidden).catch(() => {
+        toast.error(i18n.global.t('chatExamples.sidebarEntrySaveFailed'))
+      })
+    },
+  })
 
   function openGallery() {
     galleryOpen.value = true

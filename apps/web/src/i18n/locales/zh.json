@@ -1865,6 +1865,7 @@
     "hideSidebarEntry": "隐藏此入口",
     "sidebarEntryHidden": "已隐藏，可在外观设置中恢复",
     "undoHideSidebarEntry": "撤销",
+    "sidebarEntrySaveFailed": "没能保存，请稍后再试。",
     "galleryTitle": "看看 Memoh 能做什么",
     "galleryDescription": "选一个示例填进输入框，发送前可以修改。",
     "refresh": "换一批",

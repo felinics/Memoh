@@ -1865,6 +1865,7 @@
     "hideSidebarEntry": "Hide this entry",
     "sidebarEntryHidden": "Hidden. Restore it in Appearance settings.",
     "undoHideSidebarEntry": "Undo",
+    "sidebarEntrySaveFailed": "Couldn’t save. Please try again later.",
     "galleryTitle": "See what Memoh can do",
     "galleryDescription": "Pick an example to put it in the chat box. You can edit it before sending.",
     "refresh": "Refresh",

@@ -1834,6 +1834,7 @@
     "hideSidebarEntry": "この入口を非表示",
     "sidebarEntryHidden": "非表示にしました。外観設定で戻せます",
     "undoHideSidebarEntry": "元に戻す",
+    "sidebarEntrySaveFailed": "保存できませんでした。しばらくしてからもう一度お試しください。",
     "galleryTitle": "Memoh でできること",
     "galleryDescription": "例を選ぶと入力欄に入ります。送信前に編集できます。",
     "refresh": "他の候補",
