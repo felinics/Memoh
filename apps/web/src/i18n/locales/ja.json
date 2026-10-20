@@ -1984,6 +1984,7 @@
     "searchNoResults": "一致するプロバイダーがありません",
     "presetGroupCustom": "カスタム",
     "presetGroupBuiltIn": "プリセット",
+    "presetGroupSubscriptions": "サブスクリプション",
     "customProvider": "カスタムプロバイダー",
     "apiKey": "APIキー",
     "apiKeyPlaceholder": "APIキーを入力",

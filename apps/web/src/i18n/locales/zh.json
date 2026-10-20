@@ -2015,6 +2015,7 @@
     "searchNoResults": "没有匹配的服务商",
     "presetGroupCustom": "自定义",
     "presetGroupBuiltIn": "预设",
+    "presetGroupSubscriptions": "订阅",
     "customProvider": "自定义服务商",
     "apiKey": "API 密钥",
     "apiKeyPlaceholder": "输入 API 密钥",

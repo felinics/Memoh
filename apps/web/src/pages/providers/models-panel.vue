@@ -34,6 +34,7 @@ import {
   providerLogo,
   MODEL_SOURCES,
   modelSourceLogo,
+  providerCatalogEntry,
   providerDraftFromSource,
   providerGalleryEntry,
   type ModelSource,
@@ -115,7 +116,7 @@ type ProviderDetail =
 // provider answers for the draft's route so the detail stays open.
 const materializedAlias = computed<ProviderDetail | undefined>(() => {
   const provider = optimisticProvider.value
-  const entry = providerGalleryEntry(provider as { metadata?: Record<string, unknown> } | undefined)
+  const entry = providerCatalogEntry(provider as { metadata?: Record<string, unknown> } | undefined)
   return provider && entry ? { kind: 'provider', provider, routeAlias: `source:${entry.id}` } : undefined
 })
 

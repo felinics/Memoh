@@ -2015,6 +2015,7 @@
     "searchNoResults": "No matching providers",
     "presetGroupCustom": "Custom",
     "presetGroupBuiltIn": "Presets",
+    "presetGroupSubscriptions": "Subscriptions",
     "customProvider": "Custom Provider",
     "apiKey": "API Key",
     "apiKeyPlaceholder": "Enter API key",

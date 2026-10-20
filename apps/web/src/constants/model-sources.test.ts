@@ -10,6 +10,7 @@ import {
   modelSourceNeedsApiKey,
   providerCatalogEntry,
   providerGalleryEntry,
+  subscriptionForClientType,
   providerDraftFromSource,
   providerLogo,
   providerSource,
@@ -32,6 +33,15 @@ describe('model sources', () => {
 
     const configuredCodex = groupModelSources(MODEL_SOURCES.filter(item => item.id !== 'codex'))
     expect(configuredCodex.subscriptions.map(item => item.id)).toEqual(['github-copilot', 'opencode-go'])
+  })
+
+  it('gives each subscription a client type no other subscription uses', () => {
+    const types = MODEL_SOURCES.filter(item => item.subscription).map(item => item.client_type)
+    expect(new Set(types).size).toBe(types.length)
+    expect(subscriptionForClientType('openai-codex')?.id).toBe('codex')
+    expect(subscriptionForClientType('opencode-go')?.id).toBe('opencode-go')
+    expect(subscriptionForClientType('openai-completions')).toBeUndefined()
+    expect(subscriptionForClientType(undefined)).toBeUndefined()
   })
 
   it('counts a subscription by its client type only for the gallery', () => {
