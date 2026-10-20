@@ -52,6 +52,11 @@ type StarterPromptsResponse struct {
 	Unchanged bool            `json:"unchanged" validate:"required"`
 	Hash      string          `json:"hash" validate:"required"`
 	Items     []StarterPrompt `json:"items" validate:"required"`
+	// Reason is present when no set can be generated until a setting changes:
+	// `title_model_missing` when the bot owner has no title model and the
+	// caller is that owner, `owner_title_model_missing` when the caller is
+	// someone else and only the owner can set it.
+	Reason string `json:"reason,omitempty" enums:"title_model_missing,owner_title_model_missing"`
 }
 
 // Get godoc
@@ -127,5 +132,5 @@ func (h *StarterPromptsHandler) respond(c echo.Context, build func(botID, userID
 	for _, item := range result.Items {
 		items = append(items, StarterPrompt{Title: item.Title, Prompt: item.Prompt})
 	}
-	return c.JSON(http.StatusOK, StarterPromptsResponse{Unchanged: result.Unchanged, Hash: result.Hash, Items: items})
+	return c.JSON(http.StatusOK, StarterPromptsResponse{Unchanged: result.Unchanged, Hash: result.Hash, Items: items, Reason: string(result.Reason)})
 }

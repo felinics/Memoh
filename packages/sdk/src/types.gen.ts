@@ -2459,6 +2459,13 @@ export type HandlersStarterPromptsRefreshRequest = {
 export type HandlersStarterPromptsResponse = {
     hash: string;
     items: Array<HandlersStarterPrompt>;
+    /**
+     * Reason is present when no set can be generated until a setting changes:
+     * `title_model_missing` when the bot owner has no title model and the
+     * caller is that owner, `owner_title_model_missing` when the caller is
+     * someone else and only the owner can set it.
+     */
+    reason?: 'title_model_missing' | 'owner_title_model_missing';
     unchanged: boolean;
 };
 

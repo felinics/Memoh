@@ -69,14 +69,30 @@ type StarterPromptsRequest struct {
 	Avoid     []string
 }
 
+// StarterPromptsReason says why no set came back when the cause is something
+// a person can fix, as opposed to a generation that failed this time.
+type StarterPromptsReason string
+
+const (
+	// StarterPromptsTitleModelMissing: the bot owner has no title model, and
+	// the caller is that owner, so they can set one on their profile.
+	StarterPromptsTitleModelMissing StarterPromptsReason = "title_model_missing"
+	// StarterPromptsOwnerTitleModelMissing: the bot owner has no title model,
+	// and the caller is someone else. Their own title model is never used for
+	// this bot, so only the owner can fix it.
+	StarterPromptsOwnerTitleModelMissing StarterPromptsReason = "owner_title_model_missing"
+)
+
 // StarterPromptsResult is either Unchanged (the client's set still matches
 // the material) or a fresh set with its Hash. A set the model could not
-// produce comes back with an empty Hash and no Items; the client shows its
-// generic examples and asks again next time.
+// produce comes back with an empty Hash and no Items; the client asks again
+// next time. Reason is set only when nothing can be generated until someone
+// changes a setting.
 type StarterPromptsResult struct {
 	Unchanged bool
 	Hash      string
 	Items     []StarterPrompt
+	Reason    StarterPromptsReason
 }
 
 type starterPromptMaterial struct {
@@ -103,7 +119,9 @@ type starterPromptApp struct {
 // from req.Avoid; the hash still describes the material, so the refreshed set
 // is as current as the one it replaces. Nothing is stored server-side: the
 // client keeps the set and its hash. Concurrent calls for the same material
-// share one generation, which outlives a caller that goes away.
+// share one generation, which outlives a caller that goes away. When the owner
+// has no title model nothing is generated, and the result says so through
+// Reason, phrased for whether the caller is the owner.
 //
 // The caller must have authorized req.UserID to chat with the bot.
 func (s *Service) StarterPrompts(ctx context.Context, req StarterPromptsRequest) (StarterPromptsResult, error) {
@@ -120,6 +138,18 @@ func (s *Service) StarterPrompts(ctx context.Context, req StarterPromptsRequest)
 		return StarterPromptsResult{Unchanged: true, Hash: hash, Items: []StarterPrompt{}}, nil
 	}
 
+	modelID, ok := s.starterPromptTitleModel(ctx, req.BotID, ownerUserID)
+	if !ok {
+		return StarterPromptsResult{Items: []StarterPrompt{}}, nil
+	}
+	if modelID == "" {
+		reason := StarterPromptsOwnerTitleModelMissing
+		if req.UserID == ownerUserID {
+			reason = StarterPromptsTitleModelMissing
+		}
+		return StarterPromptsResult{Items: []StarterPrompt{}, Reason: reason}, nil
+	}
+
 	key := req.BotID + "\x00" + req.UserID + "\x00" + hash
 	if req.Refresh {
 		avoid := starterPromptAvoidList(req.Avoid)
@@ -127,7 +157,7 @@ func (s *Service) StarterPrompts(ctx context.Context, req StarterPromptsRequest)
 		key += "\x00refresh\x00" + strings.Join(avoid, "\x00")
 	}
 	value, _, _ := s.starterPromptFlights.Do(key, func() (any, error) {
-		return s.generateStarterPrompts(context.WithoutCancel(ctx), req.BotID, ownerUserID, prompt), nil
+		return s.generateStarterPrompts(context.WithoutCancel(ctx), req.BotID, ownerUserID, modelID, prompt), nil
 	})
 	items, _ := value.([]StarterPrompt)
 	if len(items) == 0 {
@@ -136,21 +166,23 @@ func (s *Service) StarterPrompts(ctx context.Context, req StarterPromptsRequest)
 	return StarterPromptsResult{Hash: hash, Items: items}, nil
 }
 
-// generateStarterPrompts runs the title model on prompt. Every failure, from
-// a missing title model to unparsable output, yields nil: the caller treats
-// that as "no suggestions this time".
-func (s *Service) generateStarterPrompts(ctx context.Context, botID, ownerUserID, prompt string) []StarterPrompt {
-	logger := s.logger.With(slog.String("bot_id", botID))
+// starterPromptTitleModel reads the owner's title model, which writes the
+// suggestions for everyone who chats with the bot. It is empty when the owner
+// has none; ok is false when the owner's account could not be read.
+func (s *Service) starterPromptTitleModel(ctx context.Context, botID, ownerUserID string) (modelID string, ok bool) {
 	account, err := s.accountService.Get(ctx, ownerUserID)
 	if err != nil {
-		logger.WarnContext(ctx, "starter prompts: load owner account failed", slog.Any("error", err))
-		return nil
+		s.logger.WarnContext(ctx, "starter prompts: load owner account failed", slog.String("bot_id", botID), slog.Any("error", err))
+		return "", false
 	}
-	modelID := strings.TrimSpace(account.TitleModelID)
-	if modelID == "" {
-		logger.DebugContext(ctx, "starter prompts: no title model configured")
-		return nil
-	}
+	return strings.TrimSpace(account.TitleModelID), true
+}
+
+// generateStarterPrompts runs the title model on prompt. Every failure, from
+// an unresolvable model to unparsable output, yields nil: the caller treats
+// that as "no suggestions this time".
+func (s *Service) generateStarterPrompts(ctx context.Context, botID, ownerUserID, modelID, prompt string) []StarterPrompt {
+	logger := s.logger.With(slog.String("bot_id", botID))
 	model, provider, err := s.fetchChatModel(ctx, modelID)
 	if err != nil {
 		logger.WarnContext(ctx, "starter prompts: resolve title model failed", slog.Any("error", err))

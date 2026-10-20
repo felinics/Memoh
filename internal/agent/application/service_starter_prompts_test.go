@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -39,6 +40,12 @@ func (q *starterPromptQueries) GetBotByID(context.Context, pgtype.UUID) (sqlc.Ge
 func (q *starterPromptQueries) ListSessionsByBotAndCreatedByUserPaged(_ context.Context, arg sqlc.ListSessionsByBotAndCreatedByUserPagedParams) ([]sqlc.ListSessionsByBotAndCreatedByUserPagedRow, error) {
 	q.sessionParams = &arg
 	return q.sessions, nil
+}
+
+// GetModelByID fails the way an unreachable database does, so a configured
+// title model cannot be resolved and generation fails.
+func (*starterPromptQueries) GetModelByID(context.Context, pgtype.UUID) (sqlc.Model, error) {
+	return sqlc.Model{}, errors.New("database unavailable")
 }
 
 func (q *starterPromptQueries) ListBotAppInstallations(context.Context, pgtype.UUID) ([]sqlc.BotAppInstallation, error) {
@@ -95,16 +102,62 @@ func TestStarterPromptsReportsUnchangedForKnownHash(t *testing.T) {
 	}
 }
 
-func TestStarterPromptsWithoutTitleModelReturnsNoSet(t *testing.T) {
+func TestStarterPromptsWithoutTitleModelReportsWhy(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		userID string
+		want   StarterPromptsReason
+	}{
+		{name: "owner", userID: starterOwnerID, want: StarterPromptsTitleModelMissing},
+		{name: "member", userID: starterUserID, want: StarterPromptsOwnerTitleModelMissing},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			svc, _ := newStarterPromptService(t, "")
+			req := starterRequest("stale")
+			req.UserID = tc.userID
+
+			got, err := svc.StarterPrompts(context.Background(), req)
+			if err != nil {
+				t.Fatalf("StarterPrompts() error = %v", err)
+			}
+			if got.Reason != tc.want || got.Unchanged || got.Hash != "" || got.Items == nil || len(got.Items) != 0 {
+				t.Fatalf("StarterPrompts() = %+v, want reason %q, no hash and an empty item list", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStarterPromptsRefreshWithoutTitleModelReportsWhy(t *testing.T) {
 	t.Parallel()
 	svc, _ := newStarterPromptService(t, "")
+	req := starterRequest("")
+	req.Refresh = true
 
-	got, err := svc.StarterPrompts(context.Background(), starterRequest("stale"))
+	got, err := svc.StarterPrompts(context.Background(), req)
 	if err != nil {
 		t.Fatalf("StarterPrompts() error = %v", err)
 	}
-	if got.Unchanged || got.Hash != "" || got.Items == nil || len(got.Items) != 0 {
-		t.Fatalf("StarterPrompts() = %+v, want no hash and an empty item list", got)
+	if got.Reason != StarterPromptsOwnerTitleModelMissing || len(got.Items) != 0 {
+		t.Fatalf("StarterPrompts() with Refresh = %+v, want reason %q", got, StarterPromptsOwnerTitleModelMissing)
+	}
+}
+
+func TestStarterPromptsGenerationFailureCarriesNoReason(t *testing.T) {
+	t.Parallel()
+	svc, queries := newStarterPromptService(t, "33333333-3333-3333-3333-333333333333")
+	svc.modelsService = models.NewService(slog.New(slog.DiscardHandler), queries)
+	req := starterRequest("")
+	req.UserID = starterOwnerID
+
+	got, err := svc.StarterPrompts(context.Background(), req)
+	if err != nil {
+		t.Fatalf("StarterPrompts() error = %v", err)
+	}
+	if got.Reason != "" || got.Unchanged || got.Hash != "" || got.Items == nil || len(got.Items) != 0 {
+		t.Fatalf("StarterPrompts() = %+v, want an empty set without a reason", got)
 	}
 }
 

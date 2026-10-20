@@ -23425,6 +23425,14 @@
                         "$ref": "#/definitions/handlers.StarterPrompt"
                     }
                 },
+                "reason": {
+                    "description": "Reason is present when no set can be generated until a setting changes:\n`title_model_missing` when the bot owner has no title model and the\ncaller is that owner, `owner_title_model_missing` when the caller is\nsomeone else and only the owner can set it.",
+                    "type": "string",
+                    "enum": [
+                        "title_model_missing",
+                        "owner_title_model_missing"
+                    ]
+                },
                 "unchanged": {
                     "type": "boolean"
                 }
