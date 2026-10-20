@@ -446,6 +446,9 @@ func validateModelReasoning(r *ModelReasoning) error {
 	if r.Default != nil && r.Default.Effort != "" && !slices.Contains(reasoning.OrderedEfforts(), r.Default.Effort) {
 		return fieldInvalid("config.reasoning.default.effort", errors.New("invalid reasoning effort: "+r.Default.Effort))
 	}
+	if r.Default != nil && r.Default.Budget != nil && *r.Default.Budget < 0 {
+		return fieldInvalid("config.reasoning.default.budget", errors.New("must not be negative"))
+	}
 	if r.Replay != nil {
 		switch r.Replay.Field {
 		case "", ReasoningReplayContent, ReasoningReplayDetails, ReasoningReplayReasoning:
@@ -483,12 +486,29 @@ func (m *Model) ReasoningOptions(clientType string) reasoning.Options {
 		// but uncontrollable instead of advertising a picker the adaptor ignores.
 		return reasoning.Options{Supported: true}
 	}
-	return reasoning.OptionsFor(
+	return withDeclaredDefaults(reasoning.OptionsFor(
 		mode,
 		m.Config.ReasoningEfforts(),
 		clientType,
 		m.Config.ReasoningOffSupport(),
-	)
+	), m.Config.Reasoning)
+}
+
+// withDeclaredDefaults makes the model's declared defaults the options'
+// default selection: the tier a client starts on when the model is picked, and
+// whether it starts off. A default the options cannot reach, a tier not
+// offered or off on a model that cannot turn off, is ignored.
+func withDeclaredDefaults(opts reasoning.Options, r *ModelReasoning) reasoning.Options {
+	if r == nil || r.Default == nil || !opts.Supported {
+		return opts
+	}
+	if effort := r.Default.Effort; effort != "" && slices.Contains(opts.Efforts, effort) {
+		opts.DefaultEffort = effort
+	}
+	if enabled := r.Default.Enabled; enabled != nil && !*enabled && opts.CanDisable {
+		opts.DefaultOff = true
+	}
+	return opts
 }
 
 // AddRequest is the payload for creating a new model. Enable is a pointer so
@@ -524,6 +544,45 @@ type GetResponse struct {
 	// deriving their own answer from ThinkingMode and ReasoningEfforts — the
 	// duplication that let the web picker and the wire disagree.
 	Reasoning *reasoning.Options `json:"reasoning,omitempty"`
+}
+
+// MarshalJSON adds the version 1 reading of a chat model's config next to its
+// current fields. Clients built before version 2 (an older desktop build, a
+// cached web bundle) read capabilities and efforts only from those keys, and
+// copy them back when they save, which DecodeRequestModelConfig reads as their
+// edit (see mergeLegacyEdit). Current clients ignore the keys and drop them
+// before saving. The keys exist only in API responses, never in the row.
+func (r GetResponse) MarshalJSON() ([]byte, error) {
+	type plain GetResponse
+	raw, err := json.Marshal(plain(r))
+	if err != nil || r.Type != ModelTypeChat {
+		return raw, err
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return nil, err
+	}
+	config := map[string]json.RawMessage{}
+	if err := json.Unmarshal(body["config"], &config); err != nil {
+		return nil, err
+	}
+	legacy, err := json.Marshal(r.Config.Legacy())
+	if err != nil {
+		return nil, err
+	}
+	view := map[string]json.RawMessage{}
+	if err := json.Unmarshal(legacy, &view); err != nil {
+		return nil, err
+	}
+	for _, key := range legacyOnlyKeys {
+		if value, ok := view[key]; ok {
+			config[key] = value
+		}
+	}
+	if body["config"], err = json.Marshal(config); err != nil {
+		return nil, err
+	}
+	return json.Marshal(body)
 }
 
 // UpdateRequest is the payload for updating an existing model. Enable is a

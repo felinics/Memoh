@@ -7,6 +7,7 @@ import {
   reasoningFormFrom,
   reasoningBudgetError,
   reasoningIsUncontrollable,
+  withoutLegacyKeys,
 } from './model-config'
 
 describe('buildModelConfig', () => {
@@ -114,6 +115,21 @@ describe('buildModelConfig', () => {
     })
     expect(config.modalities).toEqual({ input: ['text'], output: ['text', 'video'] })
     expect(config.reasoning?.default).toEqual({ effort: 'high', budget: 4096 })
+  })
+
+  it('drops the version 1 keys the server serves for older clients', () => {
+    const existing = { schema_version: 2, tool_call: true, compatibilities: ['tool-call'], reasoning_efforts: ['low'], thinking_mode: 'toggle' } as Record<string, unknown>
+    const config = buildModelConfig({
+      type: 'chat',
+      capabilities: { ...defaultCapabilityForm(), toolCall: false },
+      reasoning: defaultReasoningForm(),
+      existing,
+    }) as Record<string, unknown>
+    expect(config).not.toHaveProperty('compatibilities')
+    expect(config).not.toHaveProperty('reasoning_efforts')
+    expect(config).not.toHaveProperty('thinking_mode')
+    expect(config.tool_call).toBeUndefined()
+    expect(withoutLegacyKeys(existing)).toEqual({ schema_version: 2, tool_call: true })
   })
 
   it('writes only dimensions for an embedding model', () => {

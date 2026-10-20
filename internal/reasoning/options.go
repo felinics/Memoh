@@ -26,6 +26,20 @@ type Options struct {
 	// Opus 5 accepts an explicit disable only at effort high or below, so a client
 	// that lets a user hold both must know which tiers conflict.
 	EffortsWithoutOff []string `json:"efforts_without_off,omitempty"`
+	// DefaultOff reports that the model is declared to start with reasoning off:
+	// a client picking the model, or reconciling a value it no longer offers,
+	// starts it off instead of on DefaultEffort. Only set when CanDisable is.
+	DefaultOff bool `json:"default_off,omitempty"`
+}
+
+// DefaultSelection is the value a caller holds for the model when nothing
+// usable is stored: off when the model is declared to start off, its default
+// tier otherwise.
+func (o Options) DefaultSelection() string {
+	if o.DefaultOff && o.CanDisable {
+		return EffortDisable
+	}
+	return o.DefaultEffort
 }
 
 // Client types whose wire expresses "off" by omitting the field rather than by
@@ -34,15 +48,11 @@ type Options struct {
 // toggle model. No catalog advertises the disable token for Claude either — the
 // capability registry never marks an Anthropic entry as supporting the off effort
 // — so gating on the declaration alone would hide a control that works.
-func expressesOffByOmission(clientType string) bool {
-	return clientType == ClientTypeAnthropicMessages
-}
-
-// OffByOmission reports whether a protocol turns reasoning off by leaving the
-// thinking field out, so a switch advertised without a disable token can still
-// be turned off there.
+//
+// OffByOmission reports whether clientType is such a protocol, where a switch
+// advertised without a disable token can still be turned off.
 func OffByOmission(clientType string) bool {
-	return expressesOffByOmission(clientType)
+	return clientType == ClientTypeAnthropicMessages
 }
 
 // OptionsFor reports what a caller may select for a model.
@@ -127,7 +137,7 @@ func canDisable(mode string, levels []string, clientType, offSupport string) boo
 	if hasEffort(levels, EffortDisable) {
 		return true
 	}
-	return mode == ModeToggle && expressesOffByOmission(clientType)
+	return mode == ModeToggle && OffByOmission(clientType)
 }
 
 // ReconcileStored returns the effort a caller should hold after the model changed.
@@ -160,5 +170,5 @@ func ReconcileStored(stored string, opts Options) string {
 	if hasEffort(opts.Efforts, stored) {
 		return stored
 	}
-	return opts.DefaultEffort
+	return opts.DefaultSelection()
 }

@@ -193,3 +193,29 @@ func TestCreateWritesNoSchemaVersionForSpeechModels(t *testing.T) {
 		t.Fatalf("chat config = %s", got)
 	}
 }
+
+// A model's declared defaults become the options' default selection when the
+// options can reach them: a tier the model offers, off on a model that turns off.
+func TestReasoningOptionsCarryTheDeclaredDefaults(t *testing.T) {
+	t.Parallel()
+
+	off := false
+	model := Model{Config: ModelConfig{Reasoning: &ModelReasoning{
+		Toggle: true, Efforts: []string{"low", "medium", "high"},
+		Default: &ReasoningDefault{Enabled: &off, Effort: "high"},
+	}}}
+	opts := model.ReasoningOptions(string(ClientTypeOpenAICompletions))
+	if opts.DefaultEffort != "high" || !opts.DefaultOff {
+		t.Fatalf("options = %+v, want default high and off", opts)
+	}
+
+	model.Config.Reasoning.Default = &ReasoningDefault{Effort: "xhigh"}
+	if opts := model.ReasoningOptions(string(ClientTypeOpenAICompletions)); opts.DefaultEffort != "medium" || opts.DefaultOff {
+		t.Fatalf("an unreachable default changed the options: %+v", opts)
+	}
+
+	model.Config.Reasoning = &ModelReasoning{Efforts: []string{"low", "high"}, Off: "rejected", Default: &ReasoningDefault{Enabled: &off}}
+	if opts := model.ReasoningOptions(string(ClientTypeOpenAICompletions)); opts.DefaultOff {
+		t.Fatalf("a model that cannot turn off was set to start off: %+v", opts)
+	}
+}

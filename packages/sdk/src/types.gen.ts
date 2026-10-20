@@ -3750,6 +3750,12 @@ export type ReasoningOptions = {
      */
     default_effort?: string;
     /**
+     * DefaultOff reports that the model is declared to start with reasoning off:
+     * a client picking the model, or reconciling a value it no longer offers,
+     * starts it off instead of on DefaultEffort. Only set when CanDisable is.
+     */
+    default_off?: boolean;
+    /**
      * Efforts are the selectable active tiers, weakest to strongest as advertised.
      */
     efforts?: Array<string>;

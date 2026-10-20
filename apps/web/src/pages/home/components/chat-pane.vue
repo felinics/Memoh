@@ -1329,7 +1329,7 @@ import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import ComposerModelMenu from './composer-model-menu.vue'
-import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, displayedEffort, reconcileStoredEffort } from '@/pages/bots/components/reasoning-effort'
+import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, defaultEffortSelection, displayedEffort, reconcileStoredEffort } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
@@ -3147,12 +3147,13 @@ function selectMemohAgent() {
 
 function onModelSelected() {
   // Switching models replaces the WHOLE pair (spec v2 P6′): the effort lands
-  // on the new model's default tier and is never carried across models.
+  // on the new model's default selection, which honours the model's declared
+  // default effort and default off, and is never carried across models.
   if (!activeModelSupportsReasoning.value) {
     overrideReasoningEffort.value = REASONING_EFFORT_DISABLE
     return
   }
-  overrideReasoningEffort.value = activeModelReasoning.value?.default_effort?.trim() ?? ''
+  overrideReasoningEffort.value = defaultEffortSelection(activeModelReasoning.value).trim()
 }
 
 async function onComposerModelValueSelected(value: string) {

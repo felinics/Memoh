@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/felinics/memoh/internal/reasoning"
@@ -409,11 +410,12 @@ func TestUpgradeKeepsADeclaredClaudeToggleAToggle(t *testing.T) {
 
 	raw := []byte(`{"compatibilities":["reasoning"],"thinking_mode":"toggle","reasoning_efforts":["low","high"]}`)
 	for clientType, want := range map[string]string{
-		string(ClientTypeAnthropicMessages): reasoning.DialectBudget,
-		string(ClientTypeGitHubCopilot):     reasoning.DialectTier,
-		string(ClientTypeOpenAICodex):       reasoning.DialectTier,
-		string(ClientTypeOpenCodeGo):        "",
-		"":                                  "",
+		string(ClientTypeAnthropicMessages):  reasoning.DialectBudget,
+		string(ClientTypeGitHubCopilot):      reasoning.DialectTier,
+		string(ClientTypeOpenAICodex):        reasoning.DialectTier,
+		string(ClientTypeOpenCodeGo):         reasoning.DialectTier,
+		string(ClientTypeGoogleGenerativeAI): "",
+		"":                                   "",
 	} {
 		ctx := ConfigContext{ModelID: "claude-opus-4-7", Type: ModelTypeChat, ClientType: clientType}
 		config, err := DecodeModelConfig(raw, ctx)
@@ -496,80 +498,147 @@ func TestMergeLegacyConfigKeepsShapesVersion1CannotState(t *testing.T) {
 	}
 }
 
-// An older client copies the current config it was served and writes its
-// edits in version 1 keys. It was served no version 1 keys, so its form opened
-// with nothing checked: what it sends is added on top, and what it leaves out
+// An older client is served the current config with its version 1 reading
+// alongside, copies it all back and edits the version 1 keys. The edit applies
+// as version 1 meant it, unchecking included, and what only version 2 states
 // is kept.
-func TestDecodeRequestAppliesAnOlderClientsEditOnTop(t *testing.T) {
+func TestDecodeRequestAppliesAnOlderClientsEdit(t *testing.T) {
 	t.Parallel()
 
-	current := `"schema_version":2,"modalities":{"input":["text","image"],"output":["text","audio"]},"tool_call":true,"structured_output":true,` +
-		`"reasoning":{"efforts":["low","high"],"dialect":"tier","off":"accepted","replay":{"field":"reasoning_content","required":true}}`
 	ctx := ConfigContext{ModelID: "m", Type: ModelTypeChat, ClientType: string(ClientTypeOpenAICompletions)}
-	decode := func(t *testing.T, raw string) ModelConfig {
+	current := ModelConfig{
+		Modalities:       &ModelModalities{Input: []Modality{ModalityText, ModalityImage}, Output: []Modality{ModalityText, ModalityAudio}},
+		ToolCall:         true,
+		StructuredOutput: true,
+		Reasoning: &ModelReasoning{
+			Toggle: true, Efforts: []string{"low", "high"}, Dialect: reasoning.DialectTier, Off: reasoning.OffSupportAccepted,
+			Replay: &ReasoningReplay{Field: ReasoningReplayContent, Required: true},
+		},
+	}
+	// served is what the older client received for the model.
+	served := func(t *testing.T) map[string]any {
 		t.Helper()
-		config, err := DecodeRequestModelConfig([]byte(raw), ctx)
+		raw, err := json.Marshal(GetResponse{Model: Model{ModelID: "m", Type: ModelTypeChat, Config: current}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return config
+		var body map[string]any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatal(err)
+		}
+		return body["config"].(map[string]any)
+	}
+	decode := func(t *testing.T, config map[string]any) ModelConfig {
+		t.Helper()
+		raw, err := json.Marshal(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := DecodeRequestModelConfig(raw, ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
 	}
 
-	t.Run("a description edit keeps everything", func(t *testing.T) {
-		got := decode(t, `{`+current+`,"description":"Edited","compatibilities":[]}`)
-		if got.Description == nil || *got.Description != "Edited" || !got.ToolCall || !got.StructuredOutput ||
-			!got.Accepts(ModalityImage) || !got.Produces(ModalityAudio) {
+	t.Run("the served config carries the version 1 reading", func(t *testing.T) {
+		config := served(t)
+		if !slices.Equal(toStrings(config["compatibilities"]), []string{CompatVision, CompatToolCall, CompatReasoning}) ||
+			!slices.Equal(toStrings(config["reasoning_efforts"]), []string{"low", "high", "disable"}) || config["thinking_mode"] != reasoning.ModeToggle {
+			t.Fatalf("served config = %v", config)
+		}
+	})
+
+	t.Run("a description edit changes nothing else", func(t *testing.T) {
+		config := served(t)
+		config["description"] = "Edited"
+		got := decode(t, config)
+		if got.Description == nil || *got.Description != "Edited" {
+			t.Fatalf("description = %v", got.Description)
+		}
+		got.Description = nil
+		if !reflect.DeepEqual(got, normalizeModelConfig(current)) {
+			t.Fatalf("config = %+v\nwant  %+v", got, normalizeModelConfig(current))
+		}
+	})
+
+	t.Run("unchecking vision and reasoning applies", func(t *testing.T) {
+		config := served(t)
+		config["compatibilities"] = []string{CompatToolCall}
+		delete(config, "reasoning_efforts")
+		delete(config, "thinking_mode")
+		got := decode(t, config)
+		if got.Accepts(ModalityImage) || got.Reasoning != nil || !got.ToolCall || !got.Produces(ModalityAudio) || !got.StructuredOutput {
 			t.Fatalf("config = %+v", got)
 		}
+	})
+
+	t.Run("dropping the disable token turns the switch off and keeps the replay", func(t *testing.T) {
+		config := served(t)
+		config["reasoning_efforts"] = []string{"low", "high"}
+		got := decode(t, config)
 		r := got.Reasoning
-		if r == nil || !slices.Equal(r.Efforts, []string{"low", "high"}) || r.Dialect != reasoning.DialectTier ||
-			r.Off != reasoning.OffSupportAccepted || r.Replay == nil || r.Replay.Field != ReasoningReplayContent {
+		if r == nil || r.Toggle || !slices.Equal(r.Efforts, []string{"low", "high"}) || r.Replay == nil || !r.Replay.Required {
 			t.Fatalf("reasoning = %+v", r)
 		}
 	})
 
 	t.Run("a checked capability is added", func(t *testing.T) {
-		got := decode(t, `{`+current+`,"compatibilities":["file-input","image-output"]}`)
-		if !got.Accepts(ModalityPDF) || !got.Produces(ModalityImage) || !got.Accepts(ModalityImage) || !got.ToolCall {
-			t.Fatalf("modalities = %+v, tool call = %v", got.Modalities, got.ToolCall)
-		}
-	})
-
-	t.Run("chosen efforts replace the levels and keep the rest", func(t *testing.T) {
-		got := decode(t, `{`+current+`,"compatibilities":["reasoning"],"reasoning_efforts":["disable","minimal","high"]}`)
-		r := got.Reasoning
-		if r == nil || !slices.Equal(r.Efforts, []string{"minimal", "high"}) || !r.Toggle ||
-			r.Dialect != reasoning.DialectTier || r.Replay == nil {
-			t.Fatalf("reasoning = %+v", r)
-		}
-	})
-
-	t.Run("reasoning checked on a model without it", func(t *testing.T) {
-		got := decode(t, `{"schema_version":2,"tool_call":true,"compatibilities":["reasoning"],"reasoning_efforts":["enabled"]}`)
-		if got.Reasoning == nil || !got.Reasoning.Toggle || got.Reasoning.Off != reasoning.OffSupportRejected {
-			t.Fatalf("reasoning = %+v", got.Reasoning)
-		}
-	})
-
-	t.Run("chosen levels keep the switch and the off answer", func(t *testing.T) {
-		switchable := `{"schema_version":2,"reasoning":{"toggle":true,"off":"accepted","efforts":["low","medium","high"]}`
-		got := decode(t, switchable+`,"compatibilities":["reasoning"],"reasoning_efforts":["low","high"]}`)
-		r := got.Reasoning
-		if r == nil || !slices.Equal(r.Efforts, []string{"low", "high"}) || !r.Toggle || r.Off != reasoning.OffSupportAccepted {
-			t.Fatalf("reasoning = %+v", r)
-		}
-		got = decode(t, switchable+`,"compatibilities":["reasoning"],"reasoning_efforts":["enabled"]}`)
-		if r := got.Reasoning; r == nil || !r.Toggle || r.Off != reasoning.OffSupportAccepted {
-			t.Fatalf("an enabled-only edit took the off answer away: %+v", r)
+		config := served(t)
+		config["compatibilities"] = []string{CompatVision, CompatToolCall, CompatReasoning, CompatFileInput}
+		got := decode(t, config)
+		if !got.Accepts(ModalityPDF) || !got.Accepts(ModalityImage) || !got.Produces(ModalityAudio) {
+			t.Fatalf("modalities = %+v", got.Modalities)
 		}
 	})
 
 	t.Run("a current client is read as sent", func(t *testing.T) {
-		got := decode(t, `{"schema_version":2,"tool_call":false}`)
+		got := decode(t, map[string]any{"schema_version": 2, "tool_call": false})
 		if got.ToolCall || got.Reasoning != nil {
 			t.Fatalf("config = %+v", got)
 		}
 	})
+}
+
+func toStrings(v any) []string {
+	items, _ := v.([]any)
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		s, _ := item.(string)
+		out = append(out, s)
+	}
+	return out
+}
+
+// Only a chat model's response carries the version 1 reading, and it never
+// reaches the stored row.
+func TestGetResponseAddsTheVersion1ReadingForChatModels(t *testing.T) {
+	t.Parallel()
+
+	config := ModelConfig{ToolCall: true}
+	for modelType, want := range map[ModelType]bool{ModelTypeChat: true, ModelTypeEmbedding: false} {
+		raw, err := json.Marshal(GetResponse{ID: "id", Model: Model{ModelID: "m", Type: modelType, Config: config}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body struct {
+			ID     string         `json:"id"`
+			Config map[string]any `json:"config"`
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := body.Config["compatibilities"]; ok != want || body.ID != "id" || body.Config["tool_call"] != true {
+			t.Errorf("%s response = %s", modelType, raw)
+		}
+	}
+	stored, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stored), "compatibilities") {
+		t.Fatalf("stored config carries version 1 keys: %s", stored)
+	}
 }
 
 // Legacy and Upgrade are inverses for every reasoning shape version 2 stores,
@@ -599,5 +668,19 @@ func TestLegacyUpgradeRoundTripKeepsReasoning(t *testing.T) {
 				t.Fatalf("round trip = %+v, want %+v", got.Reasoning, tt.reasoning)
 			}
 		})
+	}
+}
+
+func TestValidateRejectsANegativeDefaultBudget(t *testing.T) {
+	t.Parallel()
+
+	negative := -5
+	model := Model{ModelID: "m", ProviderID: "00000000-0000-0000-0000-000000000001", Type: ModelTypeChat, Config: ModelConfig{Reasoning: &ModelReasoning{Default: &ReasoningDefault{Budget: &negative}}}}
+	if err := model.Validate(); err == nil || !strings.Contains(err.Error(), "default.budget") {
+		t.Fatalf("Validate() = %v, want the default budget refused", err)
+	}
+	model.Config.Reasoning.Default.Budget = nil
+	if err := model.Validate(); err != nil {
+		t.Fatalf("Validate() without the budget = %v", err)
 	}
 }

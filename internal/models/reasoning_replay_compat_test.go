@@ -110,3 +110,26 @@ func TestChatCompletionsCompatReasoningReplay(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// OpenRouter returns each step's signed reasoning as reasoning_details and needs
+// it back, which an unconfigured provider no longer does, so its origin selects
+// that replay; a lookalike host does not.
+func TestHostReasoningReplayNamesOpenRouter(t *testing.T) {
+	t.Parallel()
+
+	for baseURL, want := range map[string]*sdk.ReasoningReplay{
+		"https://openrouter.ai/api/v1":         {Field: sdk.ReasoningReplayDetails},
+		"https://OpenRouter.ai/api/v1/":        {Field: sdk.ReasoningReplayDetails},
+		"https://openrouter.ai.example.com/v1": nil,
+		"https://proxy.example.com/openrouter": nil,
+		"https://api.example.com/v1":           nil,
+	} {
+		got := hostReasoningReplay("", baseURL)
+		if (got == nil) != (want == nil) || (got != nil && *got != *want) {
+			t.Errorf("hostReasoningReplay(%q) = %+v, want %+v", baseURL, got, want)
+		}
+	}
+	if got := hostReasoningReplay(ChatCompletionsCompatDeepSeek, "https://openrouter.ai/api/v1"); got == nil || !got.Required {
+		t.Fatalf("an explicit compat lost to the origin: %+v", got)
+	}
+}

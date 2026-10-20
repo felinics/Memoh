@@ -1921,6 +1921,7 @@
       "rejected": "拒否する"
     },
     "reasoningDefault": "デフォルトの推論",
+    "reasoningDefaultHint": "既定の推論と強度はモデルを初めて選んだときに使われ、その後は会話や Bot の設定が優先されます。",
     "reasoningDefaultEffort": "デフォルトの強度",
     "reasoningBudget": "推論予算の範囲",
     "reasoningBudgetMin": "最小 Token",

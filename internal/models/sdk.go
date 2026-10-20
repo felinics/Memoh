@@ -76,7 +76,7 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 			opts = append(opts, openaicompletions.WithBaseURL(cfg.BaseURL))
 		}
 		opts = appendChatCompletionsCompat(opts, chatCompletionsCompat)
-		opts = appendModelReasoningReplay(opts, chatCompletionsCompatReplay(chatCompletionsCompat), cfg.ReasoningReplay)
+		opts = appendReasoningReplay(opts, hostReasoningReplay(chatCompletionsCompat, cfg.BaseURL), cfg.ReasoningReplay)
 		p := openaicompletions.New(opts...)
 		return p.ChatModel(cfg.ModelID)
 
@@ -171,26 +171,30 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 			opts = append(opts, openaicompletions.WithBaseURL(cfg.BaseURL))
 		}
 		opts = appendChatCompletionsCompat(opts, chatCompletionsCompat)
-		opts = appendModelReasoningReplay(opts, chatCompletionsCompatReplay(chatCompletionsCompat), cfg.ReasoningReplay)
+		opts = appendReasoningReplay(opts, hostReasoningReplay(chatCompletionsCompat, cfg.BaseURL), cfg.ReasoningReplay)
 		p := openaicompletions.New(opts...)
 		return p.ChatModel(cfg.ModelID)
 	}
 }
 
-// appendModelReasoningReplay applies a model's declared replay after the
-// compatibility options, so the model's declaration wins, except that a host
-// whose compat requires the replay keeps requiring it on that field: DeepSeek
-// and Kimi reject a thinking-mode tool call replayed without its reasoning, so
-// a model that only names the field must not switch that off.
-func appendModelReasoningReplay(opts []openaicompletions.Option, compat *sdk.ReasoningReplay, replay *ReasoningReplay) []openaicompletions.Option {
+// appendReasoningReplay applies the replay the host needs with the model's
+// declaration on top, so the model's declaration wins, except that a host that
+// requires the replay keeps requiring it on that field: DeepSeek and Kimi
+// reject a thinking-mode tool call replayed without its reasoning, so a model
+// that only names the field must not switch that off.
+func appendReasoningReplay(opts []openaicompletions.Option, host *sdk.ReasoningReplay, model *ReasoningReplay) []openaicompletions.Option {
+	replay := host
+	if model != nil {
+		declared := sdk.ReasoningReplay{Field: sdk.ReasoningReplayField(model.Field), Required: model.Required}
+		if host != nil && host.Required && replayField(declared.Field) == replayField(host.Field) {
+			declared.Required = true
+		}
+		replay = &declared
+	}
 	if replay == nil {
 		return opts
 	}
-	out := sdk.ReasoningReplay{Field: sdk.ReasoningReplayField(replay.Field), Required: replay.Required}
-	if compat != nil && compat.Required && replayField(out.Field) == replayField(compat.Field) {
-		out.Required = true
-	}
-	return append(opts, openaicompletions.WithReasoningReplay(out))
+	return append(opts, openaicompletions.WithReasoningReplay(*replay))
 }
 
 // replayField reads an unset replay field as the one it means.
@@ -201,14 +205,18 @@ func replayField(field sdk.ReasoningReplayField) sdk.ReasoningReplayField {
 	return field
 }
 
-// chatCompletionsCompatReplay is the replay a compat host needs: DeepSeek and
-// Kimi reject a thinking-mode tool call replayed without reasoning_content, and
-// MiniMax reads its reasoning back from reasoning_details.
-func chatCompletionsCompatReplay(compat string) *sdk.ReasoningReplay {
+// hostReasoningReplay is the replay a Chat Completions host needs before any
+// model declaration. Since twilight v0.8 an unconfigured provider replays only
+// reasoning_content and drops reasoning_details, so a host that reads the
+// details back has to be named: DeepSeek and Kimi reject a thinking-mode tool
+// call replayed without reasoning_content; MiniMax and OpenRouter read their
+// reasoning back from reasoning_details, which on OpenRouter carries the signed
+// thinking Gemini and Claude need with tool calls.
+func hostReasoningReplay(compat, baseURL string) *sdk.ReasoningReplay {
 	switch {
 	case isDeepSeekChatCompletionsCompat(compat), isKimiChatCompletionsCompat(compat):
 		return &sdk.ReasoningReplay{Required: true}
-	case isMiniMaxChatCompletionsCompat(compat):
+	case isMiniMaxChatCompletionsCompat(compat), isOpenRouterBaseURL(baseURL):
 		return &sdk.ReasoningReplay{Field: sdk.ReasoningReplayDetails}
 	default:
 		return nil
@@ -219,19 +227,18 @@ func appendChatCompletionsCompat(
 	opts []openaicompletions.Option,
 	compat string,
 ) []openaicompletions.Option {
-	// The compat options no longer imply how reasoning is replayed, so the
-	// replay each vendor needs is set alongside; see chatCompletionsCompatReplay.
+	// The compat options no longer imply how reasoning is replayed; the replay
+	// each vendor needs is set by appendReasoningReplay.
 	switch {
 	case isDeepSeekChatCompletionsCompat(compat):
-		opts = append(opts, openaicompletions.WithDeepSeekChatCompletionsCompat())
+		return append(opts, openaicompletions.WithDeepSeekChatCompletionsCompat())
 	case isMiniMaxChatCompletionsCompat(compat):
-		opts = append(opts, openaicompletions.WithMiniMaxChatCompletionsCompat())
+		return append(opts, openaicompletions.WithMiniMaxChatCompletionsCompat())
 	case isKimiChatCompletionsCompat(compat):
-		opts = append(opts, openaicompletions.WithKimiChatCompletionsCompat())
+		return append(opts, openaicompletions.WithKimiChatCompletionsCompat())
 	default:
 		return opts
 	}
-	return append(opts, openaicompletions.WithReasoningReplay(*chatCompletionsCompatReplay(compat)))
 }
 
 // ApplyReasoningToRequest translates the resolved decision into the provider

@@ -99,8 +99,29 @@ interface BuildModelConfigInput {
   existing?: ModelsModelConfig
 }
 
+// Keys only the version 1 schema has. The server serves them next to a chat
+// model's current config for clients built before version 2, and reads them
+// back as such a client's edit; this client drops them before it saves, or a
+// stale copy would undo what the user just changed.
+export const LEGACY_CONFIG_KEYS = [
+  'compatibilities',
+  'reasoning_efforts',
+  'thinking_mode',
+  'reasoning_dialect',
+  'reasoning_off_support',
+  'reasoning_default_on',
+  'thinking_budget_min',
+  'thinking_budget_max',
+] as const
+
+export function withoutLegacyKeys(config?: ModelsModelConfig | null): ModelsModelConfig {
+  const out: Record<string, unknown> = { ...(config ?? {}) }
+  for (const key of LEGACY_CONFIG_KEYS) delete out[key]
+  return out as ModelsModelConfig
+}
+
 export function buildModelConfig(input: BuildModelConfigInput): ModelsModelConfig {
-  const config: ModelsModelConfig = { ...(input.existing ?? {}), schema_version: MODEL_CONFIG_SCHEMA_VERSION }
+  const config: ModelsModelConfig = { ...withoutLegacyKeys(input.existing), schema_version: MODEL_CONFIG_SCHEMA_VERSION }
   const description = input.description?.trim() ?? ''
 
   if (input.existing) config.description = description

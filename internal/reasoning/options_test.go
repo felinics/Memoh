@@ -375,3 +375,20 @@ func TestResolveConfigHonorsProjectedOffDeclarations(t *testing.T) {
 		})
 	}
 }
+
+// A model declared to start off lands an unset or stranded value off when it
+// can be turned off, and on its default tier when it cannot.
+func TestReconcileStoredHonoursADeclaredDefaultOff(t *testing.T) {
+	t.Parallel()
+
+	opts := Options{Supported: true, CanDisable: true, Efforts: []string{EffortLow, EffortHigh}, DefaultEffort: EffortHigh, DefaultOff: true}
+	for stored, want := range map[string]string{"": EffortDisable, EffortMax: EffortDisable, EffortLow: EffortLow, EffortDisable: EffortDisable} {
+		if got := ReconcileStored(stored, opts); got != want {
+			t.Errorf("ReconcileStored(%q) = %q, want %q", stored, got, want)
+		}
+	}
+	opts.CanDisable = false
+	if got := ReconcileStored("", opts); got != EffortHigh {
+		t.Fatalf("ReconcileStored on a model that cannot turn off = %q, want the default tier", got)
+	}
+}

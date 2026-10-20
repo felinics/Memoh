@@ -1952,6 +1952,7 @@
       "rejected": "拒绝"
     },
     "reasoningDefault": "默认推理",
+    "reasoningDefaultHint": "默认推理与默认强度在首次选择该模型时使用，之后以对话或 Bot 的设置为准。",
     "reasoningDefaultEffort": "默认强度",
     "reasoningBudget": "推理预算范围",
     "reasoningBudgetMin": "最小 Token",

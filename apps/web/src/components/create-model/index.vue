@@ -309,7 +309,10 @@
                     </Select>
                   </FieldStack>
 
-                  <FieldStack :label="$t('models.reasoningDefault')">
+                  <FieldStack
+                    :label="$t('models.reasoningDefault')"
+                    :help="$t('models.reasoningDefaultHint')"
+                  >
                     <Select
                       :model-value="reasoning.defaultEnabled || UNSET"
                       @update:model-value="(val: unknown) => reasoning.defaultEnabled = fromSelect(val) as ReasoningForm['defaultEnabled']"

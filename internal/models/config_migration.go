@@ -240,14 +240,13 @@ func RequestConfigNeedsClientType(raw []byte, modelID string) bool {
 }
 
 // mergeLegacyEdit reads an older client's edit of a current config. That
-// client copies the config it was served, schema_version included, and writes
-// its edits in version 1 keys. It was served no version 1 keys, so its form
-// opened with every capability and effort unset: a capability it sends is one
-// the user checked, and one it leaves out was never shown as on. The edit is
-// therefore applied on top of the current config and only adds: capabilities
-// it names are turned on, its effort list replaces the levels, and nothing it
-// omits is removed. Keys the two versions share, such as the description and
-// the limits, are already the client's values.
+// client was served the config with its version 1 reading alongside (see
+// GetResponse.MarshalJSON), copies all of it back, and writes its edits in the
+// version 1 keys. Those keys are therefore the client's whole view of what it
+// could edit, and MergeLegacyConfig applies them onto the current config: a
+// part the client left as served keeps its current form, and a part it
+// changed, unchecked included, takes the edit. What only version 2 states
+// (structured output, other modalities, the replay, the defaults) is kept.
 func mergeLegacyEdit(raw []byte, ctx ConfigContext) (ModelConfig, error) {
 	var current ModelConfig
 	if err := json.Unmarshal(raw, &current); err != nil {
@@ -261,49 +260,7 @@ func mergeLegacyEdit(raw []byte, ctx ConfigContext) (ModelConfig, error) {
 	if ctx.Type != "" && ctx.Type != ModelTypeChat {
 		return out, nil
 	}
-	edit := v1.Upgrade(ctx)
-	has := func(token string) bool { return slices.Contains(v1.Compatibilities, token) }
-	addModality := func(list []Modality, m Modality) []Modality {
-		if slices.Contains(list, m) {
-			return list
-		}
-		return append(list, m)
-	}
-	if has(CompatVision) || has(CompatFileInput) || has(CompatImageOutput) {
-		if out.Modalities == nil {
-			out.Modalities = &ModelModalities{Input: []Modality{ModalityText}, Output: []Modality{ModalityText}}
-		}
-		modalities := *out.Modalities
-		if has(CompatVision) {
-			modalities.Input = addModality(modalities.Input, ModalityImage)
-		}
-		if has(CompatFileInput) {
-			modalities.Input = addModality(modalities.Input, ModalityPDF)
-		}
-		if has(CompatImageOutput) {
-			modalities.Output = addModality(modalities.Output, ModalityImage)
-		}
-		out.Modalities = &modalities
-	}
-	out.ToolCall = out.ToolCall || edit.ToolCall
-	if edit.Reasoning != nil {
-		if out.Reasoning == nil {
-			out.Reasoning = edit.Reasoning
-		} else if len(v1.ReasoningEfforts) > 0 {
-			// The chosen levels replace the stored ones. The switch and the off
-			// answer ride on the same list in version 1, but the form showed
-			// them unset too, so they only add: a switch stays a switch, and an
-			// off answer the config states is kept.
-			r := *out.Reasoning
-			r.Efforts = edit.Reasoning.Efforts
-			r.Toggle = r.Toggle || edit.Reasoning.Toggle
-			if r.Off == "" {
-				r.Off = edit.Reasoning.Off
-			}
-			out.Reasoning = &r
-		}
-	}
-	return normalizeModelConfig(out), nil
+	return MergeLegacyConfig(out, v1, ctx), nil
 }
 
 // LegacyModelConfig is the version 1 shape. Capabilities were a token list,
@@ -430,7 +387,7 @@ func upgradeReasoningV1(v1 LegacyModelConfig, hasReasoning bool, ctx ConfigConte
 	}
 	if r.Dialect == "" && v1.ThinkingMode == reasoning.ModeToggle &&
 		reasoning.ResolveMode("", true, ctx.ModelID) == reasoning.ModeAdaptive {
-		r.Dialect = declaredToggleDialect(ctx.ClientType, len(r.Efforts) > 0)
+		r.Dialect = declaredToggleDialect(ctx.ClientType, ctx.ModelID, len(r.Efforts) > 0)
 	}
 	return r
 }
@@ -441,12 +398,21 @@ func upgradeReasoningV1(v1 LegacyModelConfig, hasReasoning bool, ctx ConfigConte
 // inference version 1 made only for an undeclared thinking mode; recording the
 // wire keeps a declared toggle a toggle once it is written. Anthropic Messages
 // sent thinking{type:"enabled"} with a token budget, and the OpenAI protocols
-// send a tier or a bare switch as the reasoning effort, where the dialect is
-// not read. Elsewhere the dialect changes the request, so it stays unstated.
-func declaredToggleDialect(clientType string, hasEfforts bool) string {
+// (and OpenCode Go's Completions route) send a tier or a bare switch as the
+// reasoning effort, where the dialect does not change the request. Elsewhere it
+// does, so it stays unstated.
+func declaredToggleDialect(clientType, modelID string, hasEfforts bool) string {
 	switch ClientType(clientType) {
 	case ClientTypeAnthropicMessages:
 		return reasoning.DialectBudget
+	case ClientTypeOpenCodeGo:
+		// Go routes a Claude id to Completions, where a tier is sent as the
+		// effort and a bare switch sends none, as with no dialect; on any other
+		// route the dialect changes the request.
+		if ResolveModelClientType(clientType, modelID) != string(ClientTypeOpenAICompletions) {
+			return ""
+		}
+		fallthrough
 	case ClientTypeOpenAICompletions, ClientTypeOpenAIResponses, ClientTypeOpenAICodex, ClientTypeGitHubCopilot:
 		if hasEfforts {
 			return reasoning.DialectTier

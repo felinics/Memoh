@@ -26534,6 +26534,10 @@
                     "description": "DefaultEffort is the tier to use when nothing is stored, and the tier to fall\nback to when a stored value is no longer offered by the model.",
                     "type": "string"
                 },
+                "default_off": {
+                    "description": "DefaultOff reports that the model is declared to start with reasoning off:\na client picking the model, or reconciling a value it no longer offers,\nstarts it off instead of on DefaultEffort. Only set when CanDisable is.",
+                    "type": "boolean"
+                },
                 "efforts": {
                     "description": "Efforts are the selectable active tiers, weakest to strongest as advertised.",
                     "type": "array",

@@ -1952,6 +1952,7 @@
       "rejected": "Rejected"
     },
     "reasoningDefault": "Reasoning by default",
+    "reasoningDefaultHint": "The default reasoning and effort apply when the model is first picked; after that the chat or bot setting is used.",
     "reasoningDefaultEffort": "Default effort",
     "reasoningBudget": "Reasoning budget range",
     "reasoningBudgetMin": "Minimum tokens",
