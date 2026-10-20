@@ -10,8 +10,9 @@ import SidebarNavButton from './nav-button.vue'
  * rail and the mobile nav sheet. It stays enabled without a bot: picking an
  * example then explains that a bot is needed and offers to create one.
  *
- * The trailing × hides the entry on this device; the toast it raises names
- * the Appearance switch that brings it back, and offers an undo.
+ * The trailing × hides the entry for the account; the toast it raises names
+ * the Appearance switch that brings it back and offers an undo. It is taken
+ * down again if the save fails, so it never contradicts the failure toast.
  *
  * `besideAccount` mirrors the account row it sits on top of (user-menu.vue):
  * the same h-10 row, a 26px avatar-shaped tile on the avatar's column, and the
@@ -21,16 +22,16 @@ import SidebarNavButton from './nav-button.vue'
 withDefaults(defineProps<{ besideAccount?: boolean }>(), { besideAccount: false })
 
 const { t } = useI18n()
-const { openGallery, sidebarEntryHidden } = useChatExamplesUi()
+const { openGallery, setSidebarEntryHidden } = useChatExamplesUi()
 
-function hideEntry() {
-  sidebarEntryHidden.value = true
-  toast(t('chatExamples.sidebarEntryHidden'), {
+async function hideEntry() {
+  const hiddenToast = toast(t('chatExamples.sidebarEntryHidden'), {
     action: {
       label: t('chatExamples.undoHideSidebarEntry'),
-      onClick: () => { sidebarEntryHidden.value = false },
+      onClick: () => { void setSidebarEntryHidden(false) },
     },
   })
+  if (!(await setSidebarEntryHidden(true))) toast.dismiss(hiddenToast)
 }
 </script>
 

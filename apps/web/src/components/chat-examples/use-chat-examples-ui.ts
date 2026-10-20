@@ -11,24 +11,32 @@ import { useUserStore } from '@/store/user'
  * device; the composer's context row offers the way back while they are hidden.
  * Hiding the sidebar entry is saved on the account, so it stays hidden on every
  * device; the Appearance page's switch is the way back. A failed save puts the
- * entry back and says so.
+ * entry back and says so; `setSidebarEntryHidden` also resolves to whether the
+ * save went through, for callers that announced the change optimistically.
  */
 export const useChatExamplesUi = createGlobalState(() => {
   const userStore = useUserStore()
   const galleryOpen = ref(false)
   const welcomeDismissed = useStorage('chat-examples-welcome-dismissed', false)
+
+  async function setSidebarEntryHidden(hidden: boolean): Promise<boolean> {
+    try {
+      await userStore.setChatExamplesSidebarEntryHidden(hidden)
+      return true
+    } catch {
+      toast.error(i18n.global.t('chatExamples.sidebarEntrySaveFailed'))
+      return false
+    }
+  }
+
   const sidebarEntryHidden = computed({
     get: () => userStore.chatExamplesSidebarEntryHidden,
-    set: (hidden: boolean) => {
-      userStore.setChatExamplesSidebarEntryHidden(hidden).catch(() => {
-        toast.error(i18n.global.t('chatExamples.sidebarEntrySaveFailed'))
-      })
-    },
+    set: (hidden: boolean) => { void setSidebarEntryHidden(hidden) },
   })
 
   function openGallery() {
     galleryOpen.value = true
   }
 
-  return { galleryOpen, welcomeDismissed, sidebarEntryHidden, openGallery }
+  return { galleryOpen, welcomeDismissed, sidebarEntryHidden, setSidebarEntryHidden, openGallery }
 })

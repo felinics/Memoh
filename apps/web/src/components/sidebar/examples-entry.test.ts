@@ -3,7 +3,10 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, type App } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 
-const mocks = vi.hoisted(() => ({ toast: vi.fn(), putUsersMe: vi.fn() }))
+const mocks = vi.hoisted(() => {
+  const toast = Object.assign(vi.fn(() => 'hidden-toast'), { dismiss: vi.fn(), error: vi.fn() })
+  return { toast, putUsersMe: vi.fn() }
+})
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ currentRoute: { value: { name: 'Home' } }, replace: vi.fn() }) }))
@@ -35,7 +38,9 @@ let app: App | undefined
 
 afterEach(() => {
   app?.unmount()
-  mocks.toast.mockReset()
+  mocks.toast.mockClear()
+  mocks.toast.dismiss.mockClear()
+  mocks.toast.error.mockClear()
   mocks.putUsersMe.mockReset()
 })
 
@@ -60,9 +65,27 @@ it('hides the entry from its × and offers an undo that brings it back', async (
     action: expect.objectContaining({ label: 'chatExamples.undoHideSidebarEntry' }),
   }))
 
-  mocks.toast.mock.calls[0]![1].action.onClick()
+  expect(mocks.toast.dismiss).not.toHaveBeenCalled()
+
+  ;(mocks.toast.mock.calls[0] as unknown as [string, { action: { onClick: () => void } }])[1].action.onClick()
   expect(sidebarEntryHidden.value).toBe(false)
   expect(mocks.putUsersMe).toHaveBeenLastCalledWith(expect.objectContaining({
     body: { metadata: { chat_examples_sidebar_entry_hidden: false } },
   }))
+})
+
+it('takes the hidden toast down when the save fails', async () => {
+  const root = document.createElement('div')
+  mocks.putUsersMe.mockRejectedValue(new Error('offline'))
+  app = createApp(ExamplesEntry)
+  app.use(pinia)
+  app.mount(root)
+  const { sidebarEntryHidden } = useChatExamplesUi()
+
+  root.querySelector<HTMLButtonElement>('[aria-label="chatExamples.hideSidebarEntry"]')!.click()
+  await new Promise(resolve => setTimeout(resolve, 0))
+
+  expect(sidebarEntryHidden.value).toBe(false)
+  expect(mocks.toast.error).toHaveBeenCalledWith('chatExamples.sidebarEntrySaveFailed')
+  expect(mocks.toast.dismiss).toHaveBeenCalledWith('hidden-toast')
 })
