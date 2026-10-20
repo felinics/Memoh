@@ -1,4 +1,4 @@
--- 0167_session_attention
+-- 0169_session_attention
 -- Remove session unread state: the read cursors table and the attention
 -- columns on bot_sessions.
 
