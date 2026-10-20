@@ -1862,6 +1862,9 @@
       "channel": "渠道"
     },
     "sidebarEntry": "看看 Memoh 能做什么",
+    "hideSidebarEntry": "隐藏此入口",
+    "sidebarEntryHidden": "已隐藏，可在外观设置中恢复",
+    "undoHideSidebarEntry": "撤销",
     "galleryTitle": "看看 Memoh 能做什么",
     "galleryDescription": "选一个示例填进输入框，发送前可以修改。",
     "refresh": "换一批",
