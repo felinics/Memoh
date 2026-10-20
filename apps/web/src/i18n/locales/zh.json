@@ -4537,5 +4537,20 @@
   "elicitation": {
     "done": "已完成",
     "cancel": "取消"
+  },
+  "notifications": {
+    "inbox": "需要你",
+    "showAll": "显示全部 ({count})",
+    "showLess": "收起",
+    "otherBots": "其他 Bot 有未读会话",
+    "settingsTitle": "系统通知",
+    "settingsDescription": "收到回复、运行失败或需要你确认时提醒。",
+    "denied": "通知已被浏览器阻止。请在浏览器设置中允许通知后开启。",
+    "unsupported": "此浏览器不支持系统通知，未读红点仍然可用。",
+    "kind": {
+      "reply": "已回复",
+      "failed": "运行失败",
+      "needs_input": "等待你确认"
+    }
   }
 }

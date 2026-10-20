@@ -88,6 +88,7 @@
       class="sidebar-scroll min-h-0 flex-1"
       :scroll-hide-delay="300"
     >
+      <NeedsYouInbox />
       <FoldersSection />
 
       <Recents :scroll-el="listScrollEl" />
@@ -107,6 +108,7 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import SidebarPanelHeader from './panel-header.vue'
 import SidebarNavButton from './nav-button.vue'
 import FoldersSection from './folders-section.vue'
+import NeedsYouInbox from './needs-you-inbox.vue'
 import Recents from './recents.vue'
 import SessionSelectionBar from './session-selection-bar.vue'
 import { createSessionSelection, SessionSelectionKey } from './session-selection'

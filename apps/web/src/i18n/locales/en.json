@@ -4537,5 +4537,20 @@
   "elicitation": {
     "done": "Done",
     "cancel": "Cancel"
+  },
+  "notifications": {
+    "inbox": "Needs you",
+    "showAll": "Show all ({count})",
+    "showLess": "Show less",
+    "otherBots": "Unread sessions in other bots",
+    "settingsTitle": "System notifications",
+    "settingsDescription": "Notify me when a reply is ready, a run fails, or a decision needs my attention.",
+    "denied": "Notifications are blocked. Allow them in your browser settings, then turn this on.",
+    "unsupported": "System notifications are not supported in this browser. Unread indicators remain available.",
+    "kind": {
+      "reply": "Reply ready",
+      "failed": "Run failed",
+      "needs_input": "Waiting for your input"
+    }
   }
 }
