@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { effectScope, nextTick, reactive, ref } from 'vue'
+import { createApp, defineComponent, effectScope, h, KeepAlive, nextTick, reactive, ref } from 'vue'
 import { isSessionViewed, useSessionViewing } from './useSessionViewing'
 
 const unread = reactive({ entries: {} as Record<string, { attentionAt: string }>, markRead: vi.fn() })
@@ -66,5 +66,34 @@ describe('session viewing', () => {
     active.value = false
     expect(isSessionViewed('s2')).toBe(false)
     scope.stop()
+  })
+
+  it('stops reading while its pane is cached by KeepAlive with stale props', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    const Pane = defineComponent({
+      setup() {
+        useSessionViewing(ref('s1'), ref(true))
+        return () => null
+      },
+    })
+    const shown = ref(true)
+    const root = document.createElement('div')
+    const app = createApp({ render: () => h(KeepAlive, null, shown.value ? [h(Pane)] : []) })
+    app.mount(root)
+    expect(isSessionViewed('s1')).toBe(true)
+
+    shown.value = false
+    await nextTick()
+    unread.entries.s1 = { attentionAt: 'while-hidden' }
+    await nextTick()
+    expect(isSessionViewed('s1')).toBe(false)
+    expect(unread.markRead).not.toHaveBeenCalled()
+
+    shown.value = true
+    await nextTick()
+    await nextTick()
+    expect(unread.markRead).toHaveBeenCalledWith('s1')
+    app.unmount()
   })
 })

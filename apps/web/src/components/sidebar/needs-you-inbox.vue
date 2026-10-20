@@ -7,7 +7,7 @@
   >
     <SidebarPanelHeader
       :label="t('notifications.inbox')"
-      label-class="pl-[11px]"
+      :label-class="labelClass"
       class="pb-1 pr-3"
     >
       <span class="text-xs tabular-nums text-muted-foreground">{{ unread.total }}</span>
@@ -75,6 +75,7 @@ const unread = useUnreadStore()
 const chat = useChatStore()
 const router = useRouter()
 const expanded = ref(false)
+const labelClass = 'pl-[11px]' /* ui-allow-px: the sidebar row gutter (session-item.vue), so the header starts on the session titles' x */
 const visibleEntries = computed(() => expanded.value ? unread.inbox : unread.inbox.slice(0, 5))
 watch(() => unread.total, (total) => { if (!total) expanded.value = false })
 const botFor = (id: string) => chat.bots.find(bot => bot.id === id)

@@ -1,4 +1,4 @@
-import { computed, onScopeDispose, ref, watch, type Ref } from 'vue'
+import { computed, getCurrentInstance, onActivated, onDeactivated, onScopeDispose, ref, watch, type Ref } from 'vue'
 import { useUnreadStore } from '@/store/unread'
 
 const viewers = new Set<(sessionId: string) => boolean>()
@@ -8,12 +8,20 @@ export function isSessionViewed(sessionId: string): boolean {
   return [...viewers].some(viewer => viewer(sessionId))
 }
 
-/** The caller gates activity on route, pane selection, visibility and transcript readiness. */
+/**
+ * The caller gates activity on route, pane selection, visibility and transcript readiness.
+ * A component cached by KeepAlive keeps its last props, so deactivation alone stops it reading.
+ */
 export function useSessionViewing(sessionId: Ref<string | null>, active: Ref<boolean>) {
   const unread = useUnreadStore()
   const focusRevision = ref(0)
   const refresh = () => { focusRevision.value += 1 }
-  const viewing = (id: string) => active.value && sessionId.value === id
+  const attached = ref(true)
+  if (getCurrentInstance()) {
+    onActivated(() => { attached.value = true })
+    onDeactivated(() => { attached.value = false })
+  }
+  const viewing = (id: string) => attached.value && active.value && sessionId.value === id
     && document.visibilityState === 'visible' && document.hasFocus()
   viewers.add(viewing)
   window.addEventListener('focus', refresh)
