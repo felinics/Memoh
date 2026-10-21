@@ -385,33 +385,33 @@
                         </span>
                       </CommandItem>
                     </CommandGroup>
-                    <CommandSeparator
-                      v-if="visibleSlashQuickActions.length && (visibleRuntimeAgentCommands.length || visibleSlashSkills.length)"
-                    />
-                    <CommandGroup
-                      v-if="visibleRuntimeAgentCommands.length"
-                      :heading="$t('chat.slash.agentCommands')"
+                    <template
+                      v-for="(group, index) in runtimeCommandGroups"
+                      :key="group.id"
                     >
-                      <CommandItem
-                        v-for="command in visibleRuntimeAgentCommands"
-                        :key="command.name"
-                        :value="`/${command.name}`"
-                        @select="selectRuntimeCommand(command)"
-                      >
-                        <span class="min-w-0 flex-1">
-                          <span class="block truncate text-control">/{{ command.name }}</span>
-                          <span
-                            v-if="command.description"
-                            class="block truncate text-caption text-muted-foreground"
-                          >{{ command.description }}</span>
-                          <span
-                            v-if="command.input_hint"
-                            class="block truncate text-caption text-muted-foreground"
-                          >{{ $t('chat.slash.agentCommandInputHint', { hint: command.input_hint }) }}</span>
-                        </span>
-                      </CommandItem>
-                    </CommandGroup>
-                    <CommandSeparator v-if="visibleRuntimeAgentCommands.length && visibleSlashSkills.length" />
+                      <CommandSeparator v-if="index > 0 || visibleSlashQuickActions.length" />
+                      <CommandGroup :heading="group.heading">
+                        <CommandItem
+                          v-for="command in group.commands"
+                          :key="command.name"
+                          :value="`/${command.name}`"
+                          @select="selectRuntimeCommand(command)"
+                        >
+                          <span class="min-w-0 flex-1">
+                            <span class="block truncate text-control">/{{ command.name }}</span>
+                            <span
+                              v-if="command.description"
+                              class="block truncate text-caption text-muted-foreground"
+                            >{{ command.description }}</span>
+                            <span
+                              v-if="command.input_hint"
+                              class="block truncate text-caption text-muted-foreground"
+                            >{{ $t('chat.slash.agentCommandInputHint', { hint: command.input_hint }) }}</span>
+                          </span>
+                        </CommandItem>
+                      </CommandGroup>
+                    </template>
+                    <CommandSeparator v-if="visibleSlashSkills.length && (visibleSlashQuickActions.length || runtimeCommandGroups.length)" />
                     <CommandGroup
                       v-if="visibleSlashSkills.length"
                       :heading="$t('chat.slash.skills')"
@@ -2172,6 +2172,7 @@ const runtimeControls = useRuntimeControls({
   sessionId: computed(() => paneTarget.value.sessionId),
   visible: computed(() => isVisible.value && activeUsesExternalAgentComposer.value),
   draftAgentId: computed(() => activeIsPendingExternalAgent.value && !activeUsesACPRuntime.value ? activeBotAgentID.value : ''),
+  draftWorkdirId: computed(() => activeIsPendingExternalAgent.value && !activeUsesACPRuntime.value ? runtimeProject.value?.id ?? '' : ''),
 })
 // Only a ChatGPT sign-in has usage windows; an API-key Codex Agent is billed per token.
 const codexUsageAgentId = computed(() => {
@@ -2215,9 +2216,11 @@ function dismissCodexUsageNotice() {
 }
 const rawRuntimeControlSnapshot = computed(() => activeIsPendingExternalAgent.value && activeUsesACPRuntime.value ? pendingRuntimeControls.value : runtimeControls.controls.value)
 const runtimeControlSnapshot = computed(() => localizeRuntimeControls(rawRuntimeControlSnapshot.value, runtimeText))
-const composerRuntimeCommands = computed(() =>
-  activeIsPendingExternalAgent.value && !activeUsesACPRuntime.value ? [] : runtimeControlSnapshot.value?.commands ?? [],
-)
+// A draft creates its session on send; read and operation commands need one first.
+const composerRuntimeCommands = computed(() => {
+  const commands = runtimeControlSnapshot.value?.commands ?? []
+  return activeIsPendingExternalAgent.value && !activeUsesACPRuntime.value ? commands.filter(command => command.kind === 'turn') : commands
+})
 const runtimeModes = computed(() => runtimeControlSnapshot.value?.modes?.available_modes ?? [])
 const runtimeModeLabel = computed(() => t(runtimeControlSnapshot.value?.modes?.kind === 'permission' ? 'chat.permissionMode' : 'chat.sessionMode'))
 const currentRuntimeModeId = computed(() =>
@@ -2292,6 +2295,10 @@ const runtimeModeDisabled = computed(() => activeChatReadOnly.value || streaming
 const visibleRuntimeAgentCommands = computed(() =>
   visibleRuntimeCommands(composerRuntimeCommands.value, slashQuery.value).filter(command => command.name !== 'goal' || !goalCommandAvailable.value),
 )
+const runtimeCommandGroups = computed(() => [
+  { id: 'commands', heading: t('chat.slash.agentCommands'), commands: visibleRuntimeAgentCommands.value.filter(command => !command.skill) },
+  { id: 'skills', heading: t('chat.slash.skills'), commands: visibleRuntimeAgentCommands.value.filter(command => command.skill) },
+].filter(group => group.commands.length))
 const slashPanelHasResults = computed(() =>
   visibleSlashQuickActions.value.length > 0
   || visibleRuntimeAgentCommands.value.length > 0

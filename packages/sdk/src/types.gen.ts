@@ -4216,6 +4216,10 @@ export type TurnRuntimeCommand = {
     kind?: TurnRuntimeCommandKind;
     name?: string;
     running_text?: string;
+    /**
+     * Skill marks a prompt skill, which clients list apart from the runtime's own commands.
+     */
+    skill?: boolean;
 };
 
 export type TurnRuntimeCommandKind = 'turn' | 'read' | 'operation';
@@ -6338,7 +6342,12 @@ export type GetBotsByBotIdAgentsByIdRuntimeControlsData = {
          */
         id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Folder a draft would run in, which decides its project commands
+         */
+        workdir_id?: string;
+    };
     url: '/bots/{bot_id}/agents/{id}/runtime-controls';
 };
 

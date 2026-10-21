@@ -88,6 +88,10 @@ type turnRunner struct {
 	hasUsage        bool
 	resultIDs       map[string]struct{}
 
+	// result.result repeats the last assistant message; when that message
+	// was a native command's receipt, the result is the receipt, not a reply.
+	lastIsCommandOutput bool
+
 	// The open thinking block and the deltas it received, and whether a model
 	// text block is open (closed by endText); read loop only.
 	thinkingOpen     bool
@@ -204,6 +208,16 @@ func (t *turnRunner) processError(operation string) error {
 	)
 }
 
+func (t *turnRunner) initialize(ctx context.Context) (initializeResponse, error) {
+	raw, err := t.callControl(ctx, "initialize", nil)
+	if err != nil {
+		return initializeResponse{}, err
+	}
+	var response initializeResponse
+	err = json.Unmarshal(raw, &response)
+	return response, errs.WrapDependency(err, "decode claude initialize response")
+}
+
 func (t *turnRunner) getSettings(ctx context.Context) (settingsResponse, error) {
 	raw, err := t.callControl(ctx, "get_settings", nil)
 	if err != nil {
@@ -278,8 +292,7 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 		if msg.Subtype == "local_command_output" && msg.Content != "" {
 			// Command receipts keep their own identity in the transcript; they
 			// never join the model prose that result.result may replace.
-			t.endText()
-			t.emit(event.StreamEvent{Type: event.CommandOutput, ToolName: t.input.Command, Delta: msg.Content})
+			t.emitCommandOutput(msg.Content)
 		}
 		if msg.Subtype == "compact_boundary" && msg.CompactMetadata != nil && msg.CompactMetadata.Trigger == "manual" {
 			t.mu.Lock()
@@ -350,8 +363,7 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 				t.completeThinking(block.Thinking)
 			case "text":
 				if msg.LocalCommandSource != "" {
-					t.endText()
-					t.emit(event.StreamEvent{Type: event.CommandOutput, ToolName: t.input.Command, Delta: block.Text})
+					t.emitCommandOutput(block.Text)
 					continue
 				}
 				// Complete each native message at its own boundary. A full
@@ -446,9 +458,10 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 			}
 		}
 		hasText := t.turnHasText
+		repeatsCommand := t.lastIsCommandOutput
 		t.mu.Unlock()
 		t.closeThinking()
-		if !hasText && !msg.IsError {
+		if !hasText && !msg.IsError && !repeatsCommand {
 			t.emitModelText(msg.Result)
 		}
 		t.mu.Lock()
@@ -742,6 +755,14 @@ func (t *turnRunner) interrupt() {
 	}
 }
 
+func (t *turnRunner) emitCommandOutput(text string) {
+	t.endText()
+	t.mu.Lock()
+	t.lastIsCommandOutput = true
+	t.mu.Unlock()
+	t.emit(event.StreamEvent{Type: event.CommandOutput, ToolName: t.input.Command, Delta: text})
+}
+
 func (t *turnRunner) emitModelText(text string) {
 	if text == "" || strings.TrimSpace(text) == noResponseRequested {
 		return
@@ -749,6 +770,7 @@ func (t *turnRunner) emitModelText(text string) {
 	t.mu.Lock()
 	t.assistantTxt.WriteString(text)
 	t.turnHasText = true
+	t.lastIsCommandOutput = false
 	t.mu.Unlock()
 	t.closeThinking()
 	t.textOpen = true
@@ -814,7 +836,7 @@ func (t *turnRunner) buildResult(storedSessionID string) (external.PromptResult,
 	finalText := t.assistantTxt.String()
 	if t.result != nil && !t.result.IsError {
 		reported := strings.TrimSpace(t.result.Result)
-		if reported != "" && reported != noResponseRequested {
+		if reported != "" && reported != noResponseRequested && !t.lastIsCommandOutput {
 			finalText = t.result.Result
 		}
 	}

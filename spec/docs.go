@@ -2357,6 +2357,12 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Folder a draft would run in, which decides its project commands",
+                        "name": "workdir_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -27374,6 +27380,10 @@ const docTemplate = `{
                 },
                 "running_text": {
                     "type": "string"
+                },
+                "skill": {
+                    "description": "Skill marks a prompt skill, which clients list apart from the runtime's own commands.",
+                    "type": "boolean"
                 }
             }
         },

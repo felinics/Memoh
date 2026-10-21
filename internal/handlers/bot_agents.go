@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -14,7 +16,10 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
+	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 type BotAgentsHandler struct {
@@ -23,6 +28,11 @@ type BotAgentsHandler struct {
 	accountService *accounts.Service
 	logger         *slog.Logger
 	runtimes       external.Drivers
+	workdirs       botAgentWorkdirService
+}
+
+type botAgentWorkdirService interface {
+	RequireActive(ctx context.Context, botID, workdirID string) (workdir.Workdir, error)
 }
 
 func NewBotAgentsHandler(log *slog.Logger, service *botagents.Service, botService *bots.Service, accountService *accounts.Service, runtimes external.Drivers) *BotAgentsHandler {
@@ -34,6 +44,8 @@ func NewBotAgentsHandler(log *slog.Logger, service *botagents.Service, botServic
 		runtimes:       runtimes,
 	}
 }
+
+func (h *BotAgentsHandler) SetWorkdirService(service botAgentWorkdirService) { h.workdirs = service }
 
 func (h *BotAgentsHandler) Register(e *echo.Echo) {
 	group := e.Group("/bots/:bot_id/agents")
@@ -303,11 +315,34 @@ func dependencyFor(requirements map[string]external.DependencyRequirement, runti
 	return &botagents.DependencyRequirement{DependencyID: requirement.DependencyID}
 }
 
+// draftWorkdirContext pins the workspace target and path a draft's first turn
+// in the requested folder would run with, so the CLI that lists its commands
+// sees the same project.
+func (h *BotAgentsHandler) draftWorkdirContext(c echo.Context, botID, runtime string) (context.Context, string, error) {
+	ctx := c.Request().Context()
+	workdirID := strings.TrimSpace(c.QueryParam("workdir_id"))
+	if workdirID == "" {
+		return ctx, "", nil
+	}
+	if h.workdirs == nil {
+		return ctx, "", echo.NewHTTPError(http.StatusInternalServerError, "workdir service not configured")
+	}
+	bound, err := h.workdirs.RequireActive(ctx, botID, workdirID)
+	if err != nil {
+		return ctx, "", workdirHTTPError(err)
+	}
+	if session.IsDirectRuntimeType(runtime) && bound.TargetKind == workdir.TargetKindRemote {
+		return ctx, "", apperror.New(apperror.CodeWorkdirRemoteUnsupportedForAgent, nil)
+	}
+	return workspace.WithWorkspaceTarget(ctx, bound.WorkspaceTargetID), bound.Path, nil
+}
+
 // RuntimeControls godoc
 // @Summary Get bot Agent default runtime controls
 // @Tags bot-agents
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Agent ID"
+// @Param workdir_id query string false "Folder a draft would run in, which decides its project commands"
 // @Success 200 {object} external.Controls
 // @Failure 403 {object} server.Problem
 // @Failure 404 {object} server.Problem
@@ -329,7 +364,16 @@ func (h *BotAgentsHandler) RuntimeControls(c echo.Context) error {
 			break
 		}
 	}
-	controls, err := external.ReadControls(c.Request().Context(), driver, external.PromptInput{BotID: botID, BotAgentID: agent.ID, RuntimeMetadata: agent.Metadata})
+	ctx, projectPath, err := h.draftWorkdirContext(c, botID, agent.Runtime)
+	if err != nil {
+		return err
+	}
+	metadata := map[string]any{}
+	maps.Copy(metadata, agent.Metadata)
+	if projectPath != "" {
+		metadata["project_path"] = projectPath
+	}
+	controls, err := external.ReadControls(ctx, driver, external.PromptInput{BotID: botID, BotAgentID: agent.ID, RuntimeMetadata: metadata})
 	if err != nil {
 		return runtimeControlError(err)
 	}

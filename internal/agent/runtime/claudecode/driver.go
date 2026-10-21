@@ -36,6 +36,8 @@ const (
 	// interruptGraceTimeout bounds how long an interrupted turn waits for the
 	// CLI to flush its result before the process is terminated.
 	interruptGraceTimeout = 10 * time.Second
+
+	controlCLIDrainTimeout = 5 * time.Second
 )
 
 // BridgeSource resolves the workspace bridge client for a bot.
@@ -63,6 +65,8 @@ type Driver struct {
 	// launchers picks the CLI copy each turn executes. Nil
 	// means the toolkit launcher, unconditionally.
 	launchers external.LauncherResolver
+
+	commands *commandCatalog
 }
 
 // NewDriver constructs the Claude Code runtime driver.
@@ -74,7 +78,7 @@ func NewDriver(
 	toolGateway toolmount.Gateway,
 	logger *slog.Logger,
 ) *Driver {
-	return &Driver{
+	d := &Driver{
 		bridges:     bridges,
 		agents:      agents,
 		credentials: credentials,
@@ -82,6 +86,8 @@ func NewDriver(
 		toolGateway: toolGateway,
 		logger:      logger.With(slog.String("runtime", RuntimeType)),
 	}
+	d.commands = newCommandCatalog(d.discoverCommands, d.logger)
+	return d
 }
 
 // RuntimeType implements external.Driver.
@@ -123,52 +129,16 @@ func (d *Driver) resolveAgentConfig(ctx context.Context, botID, botAgentID strin
 // ModelCatalog returns the model vocabulary advertised by Claude Code's
 // control-channel initialize response under this Agent's actual configuration.
 func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalogRequest) (external.ModelCatalog, error) {
-	botID, botAgentID, projectPath := request.BotID, request.BotAgentID, request.ProjectPath
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	cfg, err := d.resolveAgentConfig(ctx, botID, botAgentID)
+	cfg, turn, stop, err := d.startControlCLI(ctx, request.BotID, request.BotAgentID, request.ProjectPath)
 	if err != nil {
 		return external.ModelCatalog{}, err
 	}
-	client, err := d.bridges.MCPClient(ctx, botID)
+	defer stop()
+	response, err := turn.initialize(ctx)
 	if err != nil {
 		return external.ModelCatalog{}, err
-	}
-	workspaceInfo, err := d.bridges.WorkspaceInfo(ctx, botID)
-	if err != nil {
-		return external.ModelCatalog{}, err
-	}
-	if err := external.RequireContainerWorkspace(workspaceInfo, RuntimeType); err != nil {
-		return external.ModelCatalog{}, err
-	}
-	// A missing dependency returns as external.DependencyMissingError; it
-	// must not be re-wrapped into a generic runtime error.
-	launcher, err := d.resolveLauncher(ctx, botID)
-	if err != nil {
-		return external.ModelCatalog{}, err
-	}
-	proc, err := startCLI(ctx, client, projectPath, cliArgs(cfg, external.PromptInput{}, "", "", launcher.Version), cliEnv(cfg), launcher.Path)
-	if err != nil {
-		return external.ModelCatalog{}, err
-	}
-	defer func() { _ = proc.Close() }()
-
-	input := external.PromptInput{
-		BotID:      botID,
-		BotAgentID: botAgentID,
-		Sink:       external.EventSinkFunc(func(event.StreamEvent) {}),
-	}
-	turn := newTurnRunner(ctx, input, proc, d.approval, d.approval.RegisterWaiter, d.logger)
-	turn.onCLIVersion = d.versionObserver(botID)
-	defer turn.close()
-	go turn.readLoop() //nolint:contextcheck // turnRunner owns the control-channel lifetime
-	raw, err := turn.callControl(ctx, "initialize", nil)
-	if err != nil {
-		return external.ModelCatalog{}, err
-	}
-	var response initializeResponse
-	if err := json.Unmarshal(raw, &response); err != nil {
-		return external.ModelCatalog{}, errs.WrapDependency(err, "decode claude initialize response")
 	}
 	catalog := modelCatalogFromInitialize(cfg.Model, response)
 	if request.ResolveDefaults {
@@ -184,8 +154,56 @@ func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalog
 			}
 		}
 	}
-	proc.CloseStdin()
 	return catalog, nil
+}
+
+// startControlCLI starts a CLI that only answers control requests. It is
+// never given a prompt, so it reaches no model and writes no session.
+func (d *Driver) startControlCLI(ctx context.Context, botID, botAgentID, projectPath string) (claudecfg.Config, *turnRunner, func(), error) {
+	cfg, err := d.resolveAgentConfig(ctx, botID, botAgentID)
+	if err != nil {
+		return cfg, nil, nil, err
+	}
+	client, err := d.bridges.MCPClient(ctx, botID)
+	if err != nil {
+		return cfg, nil, nil, err
+	}
+	workspaceInfo, err := d.bridges.WorkspaceInfo(ctx, botID)
+	if err != nil {
+		return cfg, nil, nil, err
+	}
+	if err := external.RequireContainerWorkspace(workspaceInfo, RuntimeType); err != nil {
+		return cfg, nil, nil, err
+	}
+	// A missing dependency returns as external.DependencyMissingError; it
+	// must not be re-wrapped into a generic runtime error.
+	launcher, err := d.resolveLauncher(ctx, botID)
+	if err != nil {
+		return cfg, nil, nil, err
+	}
+	// The stop func ends the process, after the caller has returned.
+	proc, err := startCLI(context.WithoutCancel(ctx), client, projectPath, controlCLIArgs(cfg, launcher.Version), cliEnv(cfg), launcher.Path)
+	if err != nil {
+		return cfg, nil, nil, err
+	}
+	input := external.PromptInput{
+		BotID:      botID,
+		BotAgentID: botAgentID,
+		Sink:       external.EventSinkFunc(func(event.StreamEvent) {}),
+	}
+	turn := newTurnRunner(ctx, input, proc, d.approval, d.approval.RegisterWaiter, d.logger)
+	turn.onCLIVersion = d.versionObserver(botID)
+	go turn.readLoop() //nolint:contextcheck // turnRunner owns the control-channel lifetime
+	return cfg, turn, func() {
+		// EOF lets the CLI exit on its own: a killed CLI leaves its session
+		// registry behind. Exiting takes longer than the reads, so nobody waits.
+		go func() {
+			turn.observeExit(drainCLI(proc, controlCLIDrainTimeout))
+			<-turn.readDone
+			turn.close()
+			_ = proc.Close()
+		}()
+	}, nil
 }
 
 // Resolve only the selected model. Other models already carry initialize's
@@ -428,6 +446,9 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	turn.close()
 
 	result, resultErr := turn.buildResult(storedSessionID)
+	if input.Command == "reload-skills" && resultErr == nil && ctx.Err() == nil {
+		d.commands.forget(input.BotID)
+	}
 	if ctx.Err() != nil {
 		// The application layer distinguishes stop from failure by context
 		// state; an interrupted turn is not an error, and its partial output
@@ -504,6 +525,13 @@ func cliArgs(cfg claudecfg.Config, input external.PromptInput, sessionID, mcpCon
 		args = append(args, "--mcp-config", shellQuote(mcpConfig))
 	}
 	return args
+}
+
+// Startup alone runs the workspace's hooks and starts its MCP servers. They
+// belong to sessions; a catalog read must not run the user's scripts.
+func controlCLIArgs(cfg claudecfg.Config, cliVersion string) []string {
+	return append(cliArgs(cfg, external.PromptInput{}, "", "", cliVersion),
+		"--settings", shellQuote(`{"disableAllHooks":true}`), "--strict-mcp-config")
 }
 
 // cliEnv builds the process environment: durable state under the bot volume

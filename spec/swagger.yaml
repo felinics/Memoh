@@ -7137,6 +7137,10 @@ definitions:
         type: string
       running_text:
         type: string
+      skill:
+        description: Skill marks a prompt skill, which clients list apart from the
+          runtime's own commands.
+        type: boolean
     type: object
   turn.RuntimeCommandKind:
     enum:
@@ -9005,6 +9009,10 @@ paths:
         in: path
         name: id
         required: true
+        type: string
+      - description: Folder a draft would run in, which decides its project commands
+        in: query
+        name: workdir_id
         type: string
       responses:
         "200":

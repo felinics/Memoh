@@ -86,6 +86,11 @@ func (s *Service) RuntimeControls(ctx context.Context, request RuntimeControlReq
 	if err != nil {
 		return external.Controls{}, err
 	}
+	// Command discovery runs a CLI in the workspace the session's turns use.
+	ctx, err = s.runtimeControlContext(ctx, request)
+	if err != nil {
+		return external.Controls{}, err
+	}
 	return external.ReadControls(ctx, driver, input)
 }
 
@@ -106,6 +111,10 @@ func (s *Service) RuntimeCommands(ctx context.Context, request RuntimeControlReq
 		return nil, approval.ErrForbidden
 	}
 	if provider, ok := s.externalDrivers[sess.RuntimeType].(external.CommandProvider); ok {
+		ctx, err = s.runtimeControlContext(ctx, request)
+		if err != nil {
+			return nil, err
+		}
 		return provider.Commands(ctx, runtimeControlInput(sess, request))
 	}
 	return []external.Command{}, nil
@@ -198,7 +207,11 @@ func (s *Service) ExecuteRuntimeCommand(ctx context.Context, request RuntimeCont
 	if !ok {
 		return turn.RuntimeCommandResult{}, external.ErrCommandUnavailable
 	}
-	commands, err := provider.Commands(ctx, input)
+	controlCtx, err := s.runtimeControlContext(ctx, request)
+	if err != nil {
+		return turn.RuntimeCommandResult{}, err
+	}
+	commands, err := provider.Commands(controlCtx, input)
 	if err != nil {
 		return turn.RuntimeCommandResult{}, err
 	}
@@ -207,10 +220,6 @@ func (s *Service) ExecuteRuntimeCommand(ctx context.Context, request RuntimeCont
 		return turn.RuntimeCommandResult{}, external.ErrCommandUnavailable
 	}
 	if command.Kind == external.CommandRead && !runtimekind.ReadCommandsRequireIdle(driver.RuntimeType()) {
-		controlCtx, err := s.runtimeControlContext(ctx, request)
-		if err != nil {
-			return turn.RuntimeCommandResult{}, err
-		}
 		return provider.ReadCommand(controlCtx, input)
 	}
 	if command.Kind != external.CommandOperation && command.Kind != external.CommandRead {

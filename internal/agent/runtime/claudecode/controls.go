@@ -24,7 +24,7 @@ func (d *Driver) Modes(ctx context.Context, input external.PromptInput) (externa
 	return claudeModes(firstNonEmpty(metadataString(input.RuntimeMetadata, "permission_mode"), metadataString(agent.Metadata, "permission_mode"), "inherit"))
 }
 
-func (*Driver) Commands(_ context.Context, input external.PromptInput) ([]external.Command, error) {
+func (d *Driver) Commands(ctx context.Context, input external.PromptInput) ([]external.Command, error) {
 	commands := []external.Command{
 		{Name: "status", I18nKey: "runtime.claudeCode.commands.status", Kind: external.CommandRead},
 		{Name: "skills", I18nKey: "runtime.claudeCode.commands.skills", Kind: external.CommandRead},
@@ -32,7 +32,11 @@ func (*Driver) Commands(_ context.Context, input external.PromptInput) ([]extern
 		{Name: "compact", I18nKey: "runtime.claudeCode.commands.compact", Kind: external.CommandOperation},
 		{Name: "goal", I18nKey: "runtime.claudeCode.commands.goal", Kind: external.CommandTurn},
 	}
-	for _, command := range claudeTurnCommands(recordedClaudeCommands(input.RuntimeMetadata), recordedClaudeSkillNames(input.RuntimeMetadata)) {
+	observed, ok := d.commands.lookup(ctx, input)
+	if !ok {
+		observed = observedCommands{commands: recordedClaudeCommands(input.RuntimeMetadata), skills: recordedClaudeSkillNames(input.RuntimeMetadata)}
+	}
+	for _, command := range claudeTurnCommands(observed.commands, observed.skills) {
 		if i := slices.IndexFunc(commands, func(existing external.Command) bool { return existing.Name == command.Name }); i >= 0 {
 			if commands[i].Kind == external.CommandTurn {
 				commands[i].Description = command.Description
@@ -40,7 +44,7 @@ func (*Driver) Commands(_ context.Context, input external.PromptInput) ([]extern
 			}
 			continue
 		}
-		commands = append(commands, external.Command{Name: command.Name, Description: command.Description, InputHint: command.ArgumentHint, Kind: external.CommandTurn})
+		commands = append(commands, external.Command{Name: command.Name, Description: command.Description, InputHint: command.ArgumentHint, Kind: external.CommandTurn, Skill: command.skill})
 	}
 	return commands, nil
 }
@@ -59,6 +63,9 @@ func claudeTurnCommands(commands []initializeCommand, skills []string) []initial
 		if !known && !slices.Contains(skills, command.Name) {
 			continue
 		}
+		// The skill list also names built-in commands, and only newer CLIs
+		// mark them builtin, so the allowlist is what tells them apart.
+		command.skill = !known
 		out = append(out, command)
 		for _, alias := range command.Aliases {
 			aliased := command

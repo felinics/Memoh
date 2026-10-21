@@ -109,8 +109,10 @@ func provideACPRuntimeHandler(pool *acpagent.SessionPool, sessionService *sessio
 	return handler
 }
 
-func provideBotAgentsHandler(log *slog.Logger, service *botagents.Service, botService *bots.Service, accountService *accounts.Service, runtimes external.Drivers) *handlers.BotAgentsHandler {
-	return handlers.NewBotAgentsHandler(log, service, botService, accountService, runtimes)
+func provideBotAgentsHandler(log *slog.Logger, service *botagents.Service, botService *bots.Service, accountService *accounts.Service, runtimes external.Drivers, workdirService *workdir.Service) *handlers.BotAgentsHandler {
+	handler := handlers.NewBotAgentsHandler(log, service, botService, accountService, runtimes)
+	handler.SetWorkdirService(workdirService)
+	return handler
 }
 
 func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaces *botworkspace.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool, agentDrivers external.Drivers, credentialService *agentcredential.Service) *handlers.UsersHandler {

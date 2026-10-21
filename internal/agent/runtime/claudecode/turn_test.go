@@ -466,6 +466,30 @@ func TestClaudeCommandOutputKeepsModelReply(t *testing.T) {
 	}
 }
 
+// A command that reaches no model reports its receipt again as the result.
+func TestClaudeLocalCommandResultIsNotAReply(t *testing.T) {
+	for _, receipt := range []string{
+		`{"type":"system","subtype":"local_command_output","content":"Reloaded skills: 2 skills available."}`,
+		`{"type":"assistant","local_command_source":"<local-command-stdout>Reloaded skills: 2 skills available.</local-command-stdout>","message":{"content":[{"type":"text","text":"Reloaded skills: 2 skills available."}]}}`,
+	} {
+		sink := &recordingSink{}
+		r := newTestRunner(sink)
+		r.input.Command = "reload-skills"
+		feed(t, r, receipt)
+		feed(t, r, `{"type":"result","subtype":"success","result":"Reloaded skills: 2 skills available."}`)
+		result, err := r.buildResult("")
+		r.close()
+		if err != nil || result.Text != "" || len(result.Output) != 1 {
+			t.Fatalf("the receipt was repeated as a reply: %q %#v, %v", result.Text, result.Output, err)
+		}
+		for _, ev := range sink.snapshot() {
+			if ev.Type == event.TextDelta {
+				t.Fatalf("streamed the receipt as model text: %q", ev.Delta)
+			}
+		}
+	}
+}
+
 func TestClaudeTurnDropsNoResponseSentinel(t *testing.T) {
 	sink := &recordingSink{}
 	r := newTestRunner(sink)
@@ -665,6 +689,16 @@ func TestClaudeCLIArgsIncludeTurnOverrides(t *testing.T) {
 	args = strings.Join(cliArgs(claudecfg.Config{}, external.PromptInput{}, "", "", ""), " ")
 	if strings.Contains(args, "--thinking ") || strings.Contains(args, "--effort") {
 		t.Fatalf("an inherited default must stay unset: %q", args)
+	}
+}
+
+func TestClaudeControlCLIRunsNoWorkspaceHooksOrMCPServers(t *testing.T) {
+	args := strings.Join(controlCLIArgs(claudecfg.Config{}, ""), " ")
+	if !strings.Contains(args, `--settings '{"disableAllHooks":true}'`) || !strings.Contains(args, "--strict-mcp-config") {
+		t.Fatalf("args = %q", args)
+	}
+	if args := strings.Join(cliArgs(claudecfg.Config{}, external.PromptInput{}, "", "", ""), " "); strings.Contains(args, "disableAllHooks") || strings.Contains(args, "--strict-mcp-config") {
+		t.Fatalf("a turn must keep the workspace's hooks and MCP servers: %q", args)
 	}
 }
 

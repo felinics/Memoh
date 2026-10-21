@@ -263,7 +263,10 @@ func TestClaudeModesAndCommandBoundary(t *testing.T) {
 			t.Fatalf("accepted %q", mode)
 		}
 	}
-	d := &Driver{}
+	// An unreachable workspace leaves the session's own observation.
+	d := &Driver{commands: newCommandCatalog(func(context.Context, external.PromptInput) (observedCommands, error) {
+		return observedCommands{}, errors.New("workspace unreachable")
+	}, slog.Default())}
 	commands, err := d.Commands(context.Background(), external.PromptInput{})
 	if err != nil {
 		t.Fatal(err)
@@ -285,11 +288,11 @@ func TestClaudeModesAndCommandBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := external.FindCommand(commands, "code-review"); !ok {
-		t.Fatal("missing advertised review")
+	if command, ok := external.FindCommand(commands, "code-review"); !ok || command.Skill {
+		t.Fatal("built-in review is missing or listed as a skill")
 	}
 	for _, name := range []string{"project:review", "pr-review", "legacy-check"} {
-		if command, ok := external.FindCommand(commands, name); !ok || command.Kind != external.CommandTurn {
+		if command, ok := external.FindCommand(commands, name); !ok || command.Kind != external.CommandTurn || !command.Skill {
 			t.Fatalf("missing native skill %q", name)
 		}
 	}

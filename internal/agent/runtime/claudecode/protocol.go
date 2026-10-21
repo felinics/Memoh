@@ -104,6 +104,7 @@ type initializeCommand struct {
 	Description  string   `json:"description"`
 	ArgumentHint string   `json:"argumentHint"`
 	Aliases      []string `json:"aliases,omitempty"`
+	skill        bool     // set by claudeTurnCommands
 }
 
 type initializeModel struct {
