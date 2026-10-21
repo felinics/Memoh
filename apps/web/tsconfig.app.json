@@ -14,9 +14,12 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
-    "rootDir": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      // @felinic/ui is consumed as source and imports its own files through
+      // `#/`; mirror the `#` alias from vite.config.ts so those imports
+      // resolve when this program type-checks them.
+      "#/*": ["../../packages/ui/src/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue", "type.d.ts"],

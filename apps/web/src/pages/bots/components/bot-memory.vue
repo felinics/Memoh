@@ -381,10 +381,10 @@
 
 <script setup lang="ts">
 import { Brain, CalendarDays, Plus, RefreshCw, Search, Trash2, X } from 'lucide-vue-next'
-import type { DateRange } from 'reka-ui'
+import type { DateRange } from '@felinic/ui'
 import { DateFormatter, getLocalTimeZone, today } from '@internationalized/date'
 import { useIntersectionObserver } from '@vueuse/core'
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, type Ref } from 'vue'
 import {
   Button,
   Textarea,
@@ -472,7 +472,9 @@ const graphRef = ref<InstanceType<typeof MemoryGraph> | null>(null)
 
 const compactPopoverOpen = ref(false)
 const compactRatio = ref('0.5')
-const compactDecayRange = ref<DateRange | undefined>({ start: today(getLocalTimeZone()), end: today(getLocalTimeZone()) })
+// Without the cast, ref() types the value as UnwrapRef<DateRange>, which drops
+// CalendarDate's private field, so RangeCalendar's v-model no longer accepts it.
+const compactDecayRange = ref<DateRange | undefined>({ start: today(getLocalTimeZone()), end: today(getLocalTimeZone()) }) as Ref<DateRange | undefined>
 const compactDecayFormatter = new DateFormatter(locale.value, { dateStyle: 'medium' })
 const compactDecayLabel = computed(() => {
   if (!compactDecayRange.value?.start) return ''

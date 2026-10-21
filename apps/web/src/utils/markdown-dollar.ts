@@ -13,7 +13,7 @@
 // This is chat-only (message-item.vue). File preview deliberately keeps
 // `$...$` math because user-authored .md notes use it.
 
-import type MarkdownIt from 'markdown-it'
+import type { MarkdownIt } from 'markstream-vue'
 
 // Private-use placeholder swapped in for every single `$` before inline rules
 // run, then swapped back after. Chosen from the PUA so it cannot collide with
@@ -23,16 +23,20 @@ const PH = '\uE000'
 const MASK_RULE = 'memoh_dollar_mask'
 const RESTORE_RULE = 'memoh_dollar_restore'
 
+type MarkdownItToken = ReturnType<MarkdownIt['parse']>[number]
+
+type CoreRule = (state: MarkdownItCoreState) => boolean
+
 interface MarkdownItCoreRuler {
-  before: (beforeName: string, ruleName: string, rule: MarkdownIt.RuleCore) => void
-  after: (afterName: string, ruleName: string, rule: MarkdownIt.RuleCore) => void
+  before: (beforeName: string, ruleName: string, rule: CoreRule) => void
+  after: (afterName: string, ruleName: string, rule: CoreRule) => void
   // markdown-it's Ruler exposes __rules__; markstream's fork exposes rules.
   __rules__?: { name: string }[]
   rules?: { name: string }[]
 }
 
 interface MarkdownItCoreState {
-  tokens: MarkdownIt.Token[]
+  tokens: MarkdownItToken[]
 }
 
 /**
@@ -95,10 +99,11 @@ export function maskSingleDollars(content: string): string {
   return out.join('')
 }
 
-function restoreToken(token: MarkdownIt.Token, replacement: string): void {
+function restoreToken(token: MarkdownItToken, replacement: string): void {
   if (token.content) token.content = token.content.split(PH).join(replacement)
-  if (typeof (token as { raw?: unknown }).raw === 'string') {
-    ;(token as { raw: string }).raw = (token as { raw: string }).raw.split(PH).join(replacement)
+  const raw = (token as { raw?: unknown }).raw
+  if (typeof raw === 'string') {
+    ;(token as { raw?: string }).raw = raw.split(PH).join(replacement)
   }
   if (token.attrs) {
     for (let i = 0; i < token.attrs.length; i++) {
@@ -108,7 +113,7 @@ function restoreToken(token: MarkdownIt.Token, replacement: string): void {
   }
 }
 
-function walkTokens(tokens: MarkdownIt.Token[], visit: (token: MarkdownIt.Token) => void): void {
+function walkTokens(tokens: MarkdownItToken[], visit: (token: MarkdownItToken) => void): void {
   for (const token of tokens) {
     visit(token)
     if (token.children?.length) walkTokens(token.children, visit)

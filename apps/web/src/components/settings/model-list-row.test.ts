@@ -3,7 +3,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick } from 'vue'
 
-vi.mock('lucide-vue-next', () => ({
+// @memohai/icon builds its icons with lucide's createLucideIcon, so keep
+// the real module and stub only the icons this test renders.
+vi.mock('lucide-vue-next', async importOriginal => ({
+  ...await importOriginal<typeof import('lucide-vue-next')>(),
   Settings: () => h('span', { 'data-testid': 'settings-icon' }),
 }))
 

@@ -41,7 +41,10 @@ vi.mock('@/composables/useProviderModelCatalog', () => ({
   useProviderModelCatalog: () => ({ syncProviderModelCatalog: mocks.syncCatalog }),
 }))
 
-vi.mock('lucide-vue-next', () => ({
+// @memohai/icon builds its icons with lucide's createLucideIcon, so keep
+// the real module and stub only the icons this test renders.
+vi.mock('lucide-vue-next', async importOriginal => ({
+  ...await importOriginal<typeof import('lucide-vue-next')>(),
   KeyRound: () => h('span'),
   RefreshCw: () => h('span'),
 }))
