@@ -136,10 +136,6 @@
                           :class="statusVariant === 'destructive' ? 'text-destructive' : 'text-muted-foreground'"
                           :title="hasIssue ? issueTitle : undefined"
                         >{{ statusLabel }}</span>
-                        <span
-                          v-if="bot.type"
-                          class="text-muted-foreground/60"
-                        >· {{ botTypeLabel }}</span>
                       </template>
                     </div>
                   </div>
@@ -434,13 +430,13 @@ const tabList = computed(() => {
   const bot_id = toValue(botId)
   const tabs = [
     { value: 'overview', label: 'bots.tabs.overview', icon: LayoutDashboard, component: BotOverview, params: {} },
-    { value: 'general', label: 'bots.tabs.general', icon: Settings, component: BotSettings, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
+    { value: 'general', label: 'bots.tabs.general', icon: Settings, component: BotSettings, params: { 'bot-id': bot_id } },
     { value: 'remote-runtime', label: 'bots.tabs.remoteRuntime', icon: Laptop, component: BotRemoteRuntime, params: { 'bot-id': bot_id } },
     { value: 'container', label: 'bots.tabs.container', icon: Server, component: BotContainer, params: {}, containerWorkspaceOnly: true },
     { value: 'memory', label: 'bots.tabs.memory', icon: Database, component: BotMemory, params: { 'bot-id': bot_id } },
     { value: 'channels', label: 'bots.tabs.channels', icon: MessageSquare, component: BotChannels, params: { 'bot-id': bot_id } },
     { value: 'advanced', label: 'bots.tabs.advanced', icon: SlidersHorizontal, component: BotAdvanced, params: { 'bot-id': bot_id, 'workspace-backend': botWorkspaceBackend.value } },
-    { value: 'access', label: 'bots.tabs.access', icon: ShieldAlert, component: BotAccess, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
+    { value: 'access', label: 'bots.tabs.access', icon: ShieldAlert, component: BotAccess, params: { 'bot-id': bot_id } },
     { value: 'agents', label: 'bots.tabs.agents', icon: BotIcon, component: BotAgents, params: { 'bot-id': bot_id } },
     { value: 'mcp', label: 'bots.tabs.mcp', icon: Link, component: BotMcp, params: { 'bot-id': bot_id } },
     { value: 'apps', label: 'bots.tabs.apps', icon: App, component: BotApps, params: { 'bot-id': bot_id } },
@@ -677,12 +673,6 @@ const {
   statusLabel,
   statusVariant,
 } = useBotStatusMeta(bot, t)
-
-const botTypeLabel = computed(() => {
-  const type = bot.value?.type
-  if (type === 'personal' || type === 'public') return t('bots.types.' + type)
-  return type ?? ''
-})
 
 const checks = ref<BotCheck[]>([])
 const checksLoading = ref(false)

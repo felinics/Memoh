@@ -83,7 +83,7 @@ const compareStale = ref(false)
 let compareController: AbortController | null = null
 const observedExternalRevision = ref('')
 const imageMetadataFingerprint = ref('')
-let externalPollTimer: ReturnType<typeof setInterval> | null = null
+let externalPollTimer: number | null = null
 let externalPollController: AbortController | null = null
 let externalPollingActive = false
 // Stable ids so the chip buttons can aria-describedby the relevant inline

@@ -2588,10 +2588,6 @@
     "avatarUpdateSuccess": "Avatar updated",
     "avatarUpdateFailed": "Failed to update avatar",
     "typePlaceholder": "Select bot type",
-    "types": {
-      "personal": "Personal",
-      "public": "Public"
-    },
     "active": "Active",
     "inactive": "Inactive",
     "lifecycle": {

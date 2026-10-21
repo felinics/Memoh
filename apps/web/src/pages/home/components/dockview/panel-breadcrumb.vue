@@ -51,10 +51,7 @@ const pathSegments = computed(() => {
   return display.split('/').filter(Boolean)
 })
 
-const fileName = computed(() => {
-  const segs = pathSegments.value
-  return segs.length ? segs[segs.length - 1] : ''
-})
+const fileName = computed(() => pathSegments.value.at(-1) ?? '')
 
 const fileIcon = computed(() => resolveFileIcon(fileName.value, isDark.value))
 </script>

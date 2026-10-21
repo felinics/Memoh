@@ -188,7 +188,9 @@ function addHeader() {
 }
 
 function updateHeader(index: number, field: keyof HeaderBinding, value: string) {
-  localConfig.headers[index] = { ...localConfig.headers[index], [field]: value }
+  const header = localConfig.headers[index]
+  if (!header) return
+  localConfig.headers[index] = { ...header, [field]: value }
 }
 
 function removeHeader(index: number) {

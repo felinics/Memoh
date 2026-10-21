@@ -1758,14 +1758,14 @@ export const postBotsByBotIdHooksTestMutation = (options?: Partial<Options<PostB
     }
 });
 
-export const getBotsByBotIdMcpQueryKey = (options?: Options<GetBotsByBotIdMcpData>) => createQueryKey('getBotsByBotIdMcp', options);
+export const getBotsByBotIdMcpQueryKey = (options: Options<GetBotsByBotIdMcpData>) => createQueryKey('getBotsByBotIdMcp', options);
 
 /**
  * List MCP connections
  *
  * List MCP connections for a bot
  */
-export const getBotsByBotIdMcpQuery = defineQueryOptions<Options<GetBotsByBotIdMcpData>, GetBotsByBotIdMcpResponse, GetBotsByBotIdMcpError>((options?: Options<GetBotsByBotIdMcpData>) => ({
+export const getBotsByBotIdMcpQuery = defineQueryOptions<Options<GetBotsByBotIdMcpData>, GetBotsByBotIdMcpResponse, GetBotsByBotIdMcpError>((options: Options<GetBotsByBotIdMcpData>) => ({
     key: getBotsByBotIdMcpQueryKey(options),
     query: async (context) => {
         const { data } = await getBotsByBotIdMcp({
@@ -1809,14 +1809,14 @@ export const postBotsByBotIdMcpOpsBatchDeleteMutation = (options?: Partial<Optio
     }
 });
 
-export const getBotsByBotIdMcpOpsExportQueryKey = (options?: Options<GetBotsByBotIdMcpOpsExportData>) => createQueryKey('getBotsByBotIdMcpOpsExport', options);
+export const getBotsByBotIdMcpOpsExportQueryKey = (options: Options<GetBotsByBotIdMcpOpsExportData>) => createQueryKey('getBotsByBotIdMcpOpsExport', options);
 
 /**
  * Export MCP connections
  *
  * Export all MCP connections for a bot in standard mcpServers format.
  */
-export const getBotsByBotIdMcpOpsExportQuery = defineQueryOptions<Options<GetBotsByBotIdMcpOpsExportData>, GetBotsByBotIdMcpOpsExportResponse, GetBotsByBotIdMcpOpsExportError>((options?: Options<GetBotsByBotIdMcpOpsExportData>) => ({
+export const getBotsByBotIdMcpOpsExportQuery = defineQueryOptions<Options<GetBotsByBotIdMcpOpsExportData>, GetBotsByBotIdMcpOpsExportResponse, GetBotsByBotIdMcpOpsExportError>((options: Options<GetBotsByBotIdMcpOpsExportData>) => ({
     key: getBotsByBotIdMcpOpsExportQueryKey(options),
     query: async (context) => {
         const { data } = await getBotsByBotIdMcpOpsExport({

@@ -268,7 +268,7 @@
 
 <script setup lang="ts">
 import { computed, ref, onActivated, onDeactivated, onBeforeUnmount, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery } from '@pinia/colada'
 import { use } from 'echarts/core'
@@ -682,7 +682,7 @@ function readColor(token: string, fallback: string): string {
     colorCanvas.fillStyle = '#000'
     colorCanvas.fillStyle = resolved
     colorCanvas.fillRect(0, 0, 1, 1)
-    const [r, g, b, a] = colorCanvas.getImageData(0, 0, 1, 1).data
+    const [r = 0, g = 0, b = 0, a = 0] = colorCanvas.getImageData(0, 0, 1, 1).data
     return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`
   }
   catch {
@@ -812,7 +812,7 @@ function go(tab: string, section?: string) {
   // route.query and the second can clobber the first. The target tab reads
   // `section` on mount and scrolls to it. activeTab's own param watcher syncs
   // this back into its model, so the tab still switches.
-  const query = { ...route.query, tab }
+  const query: LocationQueryRaw = { ...route.query, tab }
   if (section) query.section = section
   else delete query.section
   void router.replace({ query })

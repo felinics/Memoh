@@ -55,6 +55,7 @@ type oauthDiscoverRequest struct {
 // @Summary Discover OAuth configuration for MCP server
 // @Description Probe MCP server URL for OAuth requirements and discover authorization server metadata
 // @Tags mcp
+// @Param bot_id path string true "Bot ID"
 // @Param id path string true "MCP connection ID"
 // @Param payload body oauthDiscoverRequest false "Optional URL override"
 // @Success 200 {object} mcp.DiscoveryResult
@@ -121,6 +122,7 @@ type oauthAuthorizeRequest struct {
 // @Summary Start OAuth authorization flow
 // @Description Generate PKCE and return authorization URL for the user to authorize
 // @Tags mcp
+// @Param bot_id path string true "Bot ID"
 // @Param id path string true "MCP connection ID"
 // @Param payload body oauthAuthorizeRequest false "Optional client_id"
 // @Success 200 {object} mcp.AuthorizeResult
@@ -164,6 +166,8 @@ type oauthExchangeRequest struct {
 // @Summary Exchange OAuth authorization code for tokens
 // @Description Frontend callback page calls this to exchange the authorization code for access/refresh tokens
 // @Tags mcp
+// @Param bot_id path string true "Bot ID"
+// @Param id path string true "MCP connection ID"
 // @Param payload body oauthExchangeRequest true "Authorization code and state"
 // @Success 200 {object} map[string]bool
 // @Failure 400 {object} server.Problem
@@ -243,6 +247,7 @@ func (h *MCPOAuthHandler) Callback(c echo.Context) error {
 // @Summary Get OAuth status for MCP connection
 // @Description Returns the current OAuth status including whether tokens are available
 // @Tags mcp
+// @Param bot_id path string true "Bot ID"
 // @Param id path string true "MCP connection ID"
 // @Success 200 {object} mcp.OAuthStatus
 // @Failure 400 {object} server.Problem
@@ -277,6 +282,7 @@ func (h *MCPOAuthHandler) Status(c echo.Context) error {
 // @Summary Revoke OAuth tokens for MCP connection
 // @Description Clears stored OAuth tokens
 // @Tags mcp
+// @Param bot_id path string true "Bot ID"
 // @Param id path string true "MCP connection ID"
 // @Success 204 "No Content"
 // @Failure 400 {object} server.Problem

@@ -13,7 +13,8 @@ export interface AccentPair {
   disk: string
 }
 
-export interface ChartNodeData extends GraphNode {
+// The chart's label is ECharts styling, replacing the API's text label.
+export interface ChartNodeData extends Omit<GraphNode, 'label'> {
   id: string
   name: string
   caption: string

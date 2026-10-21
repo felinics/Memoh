@@ -98,8 +98,8 @@ function languageFor(name: string): string | undefined {
   if (FILENAME_LANGUAGE[name]) return FILENAME_LANGUAGE[name]
   if (name === 'dockerfile' || name.startsWith('dockerfile.')) return 'dockerfile'
   if (name === '.env' || name.startsWith('.env.')) return 'dotenv'
-  const parts = name.split('.')
-  return EXTENSION_LANGUAGE[parts[parts.length - 1]]
+  const ext = name.split('.').pop()
+  return ext === undefined ? undefined : EXTENSION_LANGUAGE[ext]
 }
 
 function iconKey(name: string, light: Partial<IconMaps> | undefined): string {
@@ -133,6 +133,7 @@ function glyph(fontCharacter: string): string {
 export function resolveFileIcon(filename: string, isDark: boolean): FileIcon {
   const name = (filename ?? '').toLowerCase()
   const key = iconKey(name, isDark ? undefined : seti.light)
-  const def = seti.iconDefinitions[key] ?? seti.iconDefinitions[seti.file]
+  // The vendored theme always defines its default `file` icon.
+  const def = seti.iconDefinitions[key] ?? seti.iconDefinitions[seti.file]!
   return { char: glyph(def.fontCharacter), color: def.fontColor ?? 'currentColor' }
 }

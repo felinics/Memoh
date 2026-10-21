@@ -9,6 +9,7 @@ import {
   Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemSeparator, ItemTitle,
   ScrollArea, ScrollBar,
   Table, TableBody, TableCell, TableEmpty, TableFooter, TableHead, TableHeader, TableRow,
+  type ButtonGroupVariants,
 } from '@felinic/ui'
 import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'
@@ -245,7 +246,7 @@ const invoices = [
           axis-label="orientation"
         >
           <template #default="{ variant }">
-            <ButtonGroup :orientation="variant">
+            <ButtonGroup :orientation="variant as ButtonGroupVariants['orientation']">
               <Button variant="outline">
                 One
               </Button>

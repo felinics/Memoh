@@ -109,7 +109,8 @@ function updateValue(path: string, value: unknown) {
   emit('update:modelValue', next)
 }
 
-function updateNumber(path: string, value: string) {
+// A type="number" Input emits a number, or '' once the field is cleared.
+function updateNumber(path: string, value: string | number) {
   const nextValue = value === '' ? undefined : Number(value)
   updateValue(path, nextValue)
 }
@@ -142,7 +143,7 @@ const FieldContent = defineComponent({
               placeholder: placeholderOf(field),
               disabled: fieldProps.disabled,
               readonly: field.readonly,
-              'onUpdate:modelValue': (val: string) => updateValue(field.key, val),
+              'onUpdate:modelValue': (val: string | number) => updateValue(field.key, val),
             }),
             h('button', {
               type: 'button',
@@ -172,7 +173,7 @@ const FieldContent = defineComponent({
             min: field.constraint?.min,
             max: field.constraint?.max,
             step: field.constraint?.step ?? 1,
-            'onUpdate:modelValue': (val: string) => updateNumber(field.key, val),
+            'onUpdate:modelValue': (val: string | number) => updateNumber(field.key, val),
           }),
         )
       } else if (field.type === 'enum' && field.enum) {
@@ -180,7 +181,7 @@ const FieldContent = defineComponent({
           h(Select, {
             modelValue: stringValue(field.key),
             disabled: fieldProps.disabled || field.readonly,
-            'onUpdate:modelValue': (val: string) => updateValue(field.key, val),
+            'onUpdate:modelValue': (val: unknown) => updateValue(field.key, val),
           }, () => [
             h(SelectTrigger, null, () => [
               h(SelectValue, { placeholder: field.title || field.key }),
@@ -201,7 +202,7 @@ const FieldContent = defineComponent({
             disabled: fieldProps.disabled,
             readonly: field.readonly,
             rows: 4,
-            'onUpdate:modelValue': (val: string) => updateValue(field.key, val),
+            'onUpdate:modelValue': (val: string | number) => updateValue(field.key, val),
           }),
         )
       } else {
@@ -213,7 +214,7 @@ const FieldContent = defineComponent({
             placeholder: placeholderOf(field),
             disabled: fieldProps.disabled,
             readonly: field.readonly,
-            'onUpdate:modelValue': (val: string) => updateValue(field.key, val),
+            'onUpdate:modelValue': (val: string | number) => updateValue(field.key, val),
           }),
         )
       }

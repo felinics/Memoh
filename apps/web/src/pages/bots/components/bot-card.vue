@@ -1,6 +1,6 @@
 <template>
   <PersonaTile
-    :name="bot.display_name || bot.id"
+    :name="bot.display_name || bot.id || ''"
     :disabled="isPending"
     :aria-label="`${bot.display_name || bot.id}`"
     @click="onOpenDetail"

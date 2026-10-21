@@ -98,8 +98,6 @@ describe('chat workspace initialization', () => {
   })
 
   it('leaves a restored non-empty workspace unchanged when it has no chat panel', async () => {
-    // The repository's test tsconfig does not load Vue's ambient module shim.
-    // @ts-expect-error Vitest's Vue plugin resolves this SFC at runtime.
     const ChatWorkspace = (await import('./chat-workspace.vue')).default
     root = document.createElement('div')
     Object.defineProperties(root, {

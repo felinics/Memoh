@@ -878,19 +878,16 @@
                         class="size-full"
                         @click="handleVoiceInput"
                       >
-                        <Spinner
-                          v-if="voiceInputState === 'transcribing'"
-                          class="size-4 max-md:size-5"
-                        />
+                        <!-- Rendered only while idle (the v-else of the
+                             recording/transcribing bar), so the glyph has no
+                             busy states of its own. -->
                         <svg
-                          v-else
                           viewBox="0 0 24 24"
                           fill="none"
                           stroke="currentColor"
                           stroke-width="2.5"
                           stroke-linecap="round"
                           class="size-4.5 max-md:size-5"
-                          :class="voiceInputState === 'recording' ? 'motion-safe:animate-pulse' : undefined"
                           aria-hidden="true"
                         >
                           <!-- Relaxed envelope: the center bar spans only 14 of
@@ -3289,7 +3286,6 @@ watch(inputText, (text) => {
 })
 const {
   textareaEl,
-  composerEl,
   focusTextarea,
   modelTriggerMaxWidth,
 } = useComposerLayout()
@@ -3483,7 +3479,7 @@ function startVoiceMeters(stream: MediaStream) {
     if (now - lastSample >= 80) {
       lastSample = now
       let sum = 0
-      for (let i = 0; i < dataArray.length; i++) sum += dataArray[i] ** 2
+      for (const sample of dataArray) sum += sample ** 2
       const rms = Math.sqrt(sum / dataArray.length)
       voiceBars.value = [...voiceBars.value.slice(1), Math.min(1, rms * 8)]
     }

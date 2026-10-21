@@ -3,7 +3,6 @@
     <Transition name="lightbox">
       <div
         v-if="isOpen"
-        ref="dialogRef"
         class="fixed inset-0 z-(--z-top) flex items-center justify-center"
         :class="overlayClass"
         role="dialog"
@@ -134,7 +133,6 @@ const emit = defineEmits<{
 
 const isOpen = computed(() => props.openIndex !== null && props.items.length > 0)
 const closeButtonRef = ref<HTMLButtonElement | null>(null)
-const dialogRef = ref<HTMLElement | null>(null)
 let previousFocusedElement: HTMLElement | null = null
 
 const currentItem = computed(() => {

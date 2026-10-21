@@ -122,7 +122,7 @@
 
       <!-- Credentials + optional parameters; optional fields collapse behind one toggle -->
       <SettingsSection
-        v-if="requiredFieldsKeys.length > 0 || optionalFieldsKeys.length > 0"
+        v-if="requiredFields.length > 0 || optionalFields.length > 0"
         :title="$t('bots.channels.credentials')"
       >
         <p
@@ -133,10 +133,10 @@
         </p>
 
         <ChannelField
-          v-for="key in requiredFieldsKeys"
+          v-for="[key, field] in requiredFields"
           :key="key"
           v-model="form.credentials[key]"
-          :field="orderedFields[key]"
+          :field="field"
           :field-key="key"
         />
       </SettingsSection>
@@ -146,7 +146,7 @@
            "Expand all" row. Slim single-line entry per the ActionCard
            contract. -->
       <ActionCard
-        v-if="optionalFieldsKeys.length > 0"
+        v-if="optionalFields.length > 0"
         :title="$t('bots.channels.advancedTitle')"
         @click="isAdvancedExpanded = true"
       >
@@ -162,10 +162,10 @@
           </DialogHeader>
           <DialogBody>
             <ChannelField
-              v-for="key in optionalFieldsKeys"
+              v-for="[key, field] in optionalFields"
               :key="key"
               v-model="form.credentials[key]"
-              :field="orderedFields[key]"
+              :field="field"
               :field-key="key"
             />
           </DialogBody>
@@ -288,8 +288,8 @@ const orderedFields = computed(() => {
   return Object.fromEntries(entries) as Record<string, ChannelFieldSchema>
 })
 
-const requiredFieldsKeys = computed(() => Object.keys(orderedFields.value).filter(k => orderedFields.value[k].required))
-const optionalFieldsKeys = computed(() => Object.keys(orderedFields.value).filter(k => !orderedFields.value[k].required))
+const requiredFields = computed(() => Object.entries(orderedFields.value).filter(([, field]) => field.required))
+const optionalFields = computed(() => Object.entries(orderedFields.value).filter(([, field]) => !field.required))
 
 const currentInboundMode = computed(() => String(form.credentials.inboundMode ?? form.credentials.inbound_mode ?? '').trim().toLowerCase())
 const isFeishuWebhook = computed(() => platformType.value === 'feishu' && currentInboundMode.value === 'webhook')
@@ -348,10 +348,10 @@ const isFormDirty = computed(() => JSON.stringify(form.credentials) !== JSON.str
 watch(isFormDirty, (val) => emit('update:dirty', val))
 
 function validateRequired(): boolean {
-  for (const key of requiredFieldsKeys.value) {
+  for (const [key, field] of requiredFields.value) {
     const val = form.credentials[key]
     if (!val || (typeof val === 'string' && val.trim() === '')) {
-      toast.error(t('bots.channels.requiredField', { field: orderedFields.value[key].title || key }))
+      toast.error(t('bots.channels.requiredField', { field: field.title || key }))
       return false
     }
   }

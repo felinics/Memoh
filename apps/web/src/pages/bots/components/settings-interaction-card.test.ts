@@ -221,7 +221,7 @@ describe('settings interaction default Agent selector', () => {
 		const { app, root } = await mountCard(form, {
 			botAgents: [
 				{ ...botAgents[0], agent_credential_id: undefined },
-				botAgents[1],
+				botAgents[1]!,
 				{ ...botAgents[2], metadata: { provider: 'custom-agent', managed: {} } },
 			],
 		})

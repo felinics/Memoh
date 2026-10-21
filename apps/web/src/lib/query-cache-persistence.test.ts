@@ -18,12 +18,13 @@ function entryWith(
 }
 
 function memoryStorage(initial?: Record<string, string>) {
-  return {
+  const storage = {
     data: new Map<string, string>(Object.entries(initial ?? {})),
     setItem(k: string, v: string) { this.data.set(k, v) },
     removeItem(k: string) { this.data.delete(k) },
     getItem(k: string) { return this.data.get(k) ?? null },
-  } as unknown as Storage
+  }
+  return storage as unknown as Storage
 }
 
 function cacheWith(entries: UseQueryEntry[]) {

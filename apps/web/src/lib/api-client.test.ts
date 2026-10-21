@@ -59,7 +59,7 @@ describe('setupApiClient auth handling', () => {
   it('runs the same unauthorized flow for SSE 401 responses', async () => {
     localStorage.setItem('token', 'stale-token')
     const onUnauthorized = vi.fn()
-    const fetchMock = vi.fn(async () => new Response('', {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('', {
       status: 401,
       statusText: 'Unauthorized',
     }))
@@ -156,7 +156,7 @@ describe('setupApiClient auth handling', () => {
   it('normalizes stored token whitespace before comparing 401 request tokens', async () => {
     localStorage.setItem('token', '  stale-token  ')
     const onUnauthorized = vi.fn()
-    const fetchMock = vi.fn(async () => new Response('', {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('', {
       status: 401,
       statusText: 'Unauthorized',
     }))
@@ -178,7 +178,7 @@ describe('setupApiClient auth handling', () => {
   it('does not let a stale request 401 clear a newer login token', async () => {
     localStorage.setItem('token', 'old-token')
     const onUnauthorized = vi.fn()
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
       localStorage.setItem('token', 'new-token')
       return new Response('', {
         status: 401,
@@ -204,7 +204,7 @@ describe('setupApiClient auth handling', () => {
   it('handles a 401 when the current session has a token but the request has no bearer token', async () => {
     localStorage.setItem('token', 'current-token')
     const onUnauthorized = vi.fn()
-    const fetchMock = vi.fn(async () => new Response('', {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('', {
       status: 401,
       statusText: 'Unauthorized',
     }))
@@ -267,7 +267,7 @@ describe('setupApiClient auth handling', () => {
 
   it('does not add duplicate request interceptors across repeated setup calls', async () => {
     localStorage.setItem('token', 'valid-token')
-    const fetchMock = vi.fn(async () => new Response('', { status: 204 }))
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('', { status: 204 }))
 
     setupApiClient({
       baseUrl: 'http://example.test',
@@ -287,7 +287,7 @@ describe('setupApiClient auth handling', () => {
 
   it('still injects the bearer token through request interceptors', async () => {
     localStorage.setItem('token', 'valid-token')
-    const fetchMock = vi.fn(async () => new Response('', { status: 204 }))
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('', { status: 204 }))
 
     setupApiClient({
       baseUrl: 'http://example.test',

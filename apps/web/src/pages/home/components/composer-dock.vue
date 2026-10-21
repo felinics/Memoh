@@ -119,7 +119,7 @@ const stackVisible = computed(() => Boolean(
 const stackFades = ref(true)
 watch(() => [
   stackVisible.value,
-  Boolean(props.errorMessage) && !props.commandPanel && !props.approvals.length && !props.compacting,
+  Boolean(props.errorMessage) && !props.commandPanel && !props.approvals.length,
 ] as const, ([visible, errorOnly]) => {
   if (visible) stackFades.value = !errorOnly
 }, { immediate: true })

@@ -55,7 +55,7 @@
       <Select
         v-else-if="field.type === 'enum' && field.enum"
         :model-value="String(modelValue ?? '')"
-        @update:model-value="(v: string) => emit('update:modelValue', v)"
+        @update:model-value="(v) => emit('update:modelValue', v)"
       >
         <SelectTrigger
           class="w-full"
@@ -90,7 +90,7 @@
         type="text"
         :placeholder="placeholder"
         class="w-full"
-        @update:model-value="(v: string) => emit('update:modelValue', v)"
+        @update:model-value="(v) => emit('update:modelValue', v)"
       />
     </div>
   </SettingsRow>

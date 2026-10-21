@@ -25,6 +25,9 @@ const stepComponents = [
   { component: Step5Complete, props: {} },
 ]
 
+// useOnboarding keeps currentStep within [0, LAST_STEP_INDEX], one entry per step.
+const activeStep = computed(() => stepComponents[currentStep.value]!)
+
 
 
 function readStepFromQuery(): number | null {
@@ -65,8 +68,8 @@ watch(() => route.query.step, (val) => {
         :class="currentStep === LAST_STEP_INDEX ? 'max-w-3xl' : currentStep === 4 ? 'max-w-2xl' : 'max-w-lg'"
       >
         <component
-          :is="stepComponents[currentStep].component"
-          v-bind="stepComponents[currentStep].props"
+          :is="activeStep.component"
+          v-bind="activeStep.props"
         />
       </div>
     </div>

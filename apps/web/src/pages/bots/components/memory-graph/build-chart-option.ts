@@ -1,4 +1,5 @@
-import type { EChartsType } from 'echarts/core'
+import type { GraphSeriesOption } from 'echarts/charts'
+import type { EChartsType, SeriesModel } from 'echarts/core'
 import { MEMORY_GRAPH_SERIES_ID } from './constants'
 import type { ChartNodeData, ChartTheme, GraphEdgeCandidate, GraphNode, PinnedNodePosition } from './types'
 import { neighborIdsFor } from './graph-data'
@@ -144,11 +145,26 @@ export function buildMemoryGraphOption(input: MemoryGraphOptionInput) {
   }
 }
 
+// The part of ECharts' GlobalModel read here. The package does not export
+// GlobalModel and declares the accessor below without a type. The chart built
+// above holds a single graph series, so its series models are typed as graph.
+interface MemoryGraphChartModel {
+  getSeries(): SeriesModel<GraphSeriesOption>[]
+  getSeriesByIndex(seriesIndex: number): SeriesModel<GraphSeriesOption> | undefined
+}
+
+// ECharts types its model accessor as private, yet the model is the only
+// source for a graph series' live zoom, center and node layout. Element access
+// is TypeScript's sanctioned way to reach a `private` member.
+export function chartModel(chart: EChartsType): MemoryGraphChartModel {
+  return chart['getModel']()
+}
+
 export function readSeriesZoom(chart: EChartsType): number {
   try {
-    const seriesModel = chart.getModel().getSeries().find(series => (
+    const seriesModel = chartModel(chart).getSeries().find(series => (
       series.id === MEMORY_GRAPH_SERIES_ID || series.subType === 'graph'
-    )) ?? chart.getModel().getSeriesByIndex(0)
+    )) ?? chartModel(chart).getSeriesByIndex(0)
     const coord = seriesModel?.coordinateSystem as { getZoom?: () => number } | undefined
     const fromCoord = coord?.getZoom?.()
     if (typeof fromCoord === 'number' && Number.isFinite(fromCoord) && fromCoord > 0) return fromCoord
@@ -163,9 +179,9 @@ export function readSeriesZoom(chart: EChartsType): number {
 
 export function readSeriesCenter(chart: EChartsType): [number, number] | null {
   try {
-    const seriesModel = chart.getModel().getSeries().find(series => (
+    const seriesModel = chartModel(chart).getSeries().find(series => (
       series.id === MEMORY_GRAPH_SERIES_ID || series.subType === 'graph'
-    )) ?? chart.getModel().getSeriesByIndex(0)
+    )) ?? chartModel(chart).getSeriesByIndex(0)
     const center = seriesModel?.get('center')
     if (Array.isArray(center) && center.length >= 2) {
       const x = Number(center[0])
@@ -181,9 +197,9 @@ export function readSeriesCenter(chart: EChartsType): [number, number] | null {
 
 export function nodeDataIndex(chart: EChartsType, nodeId: string): number | null {
   try {
-    const seriesModel = chart.getModel().getSeries().find(series => (
+    const seriesModel = chartModel(chart).getSeries().find(series => (
       series.id === MEMORY_GRAPH_SERIES_ID || series.subType === 'graph'
-    )) ?? chart.getModel().getSeriesByIndex(0)
+    )) ?? chartModel(chart).getSeriesByIndex(0)
     const data = seriesModel?.getData()
     if (!data) return null
     let found: number | null = null
@@ -207,9 +223,9 @@ export function tooltipPositionForNode(
   if (params.dataType !== 'node' || params.dataIndex == null || !chart) return null
 
   try {
-    const seriesModel = chart.getModel().getSeries().find(series => (
+    const seriesModel = chartModel(chart).getSeries().find(series => (
       series.id === MEMORY_GRAPH_SERIES_ID || series.subType === 'graph'
-    )) ?? chart.getModel().getSeriesByIndex(params.seriesIndex ?? 0)
+    )) ?? chartModel(chart).getSeriesByIndex(params.seriesIndex ?? 0)
     const layout = seriesModel?.getData().getItemLayout(params.dataIndex) as [number, number] | undefined
     if (!layout || !Number.isFinite(layout[0]) || !Number.isFinite(layout[1])) return null
 

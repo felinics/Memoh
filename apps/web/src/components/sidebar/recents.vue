@@ -52,7 +52,7 @@
 
       <div
         v-if="showSentinel"
-        ref="loadMoreSentinel"
+        :ref="el => (loadMoreSentinel = el as HTMLElement | null)"
         data-testid="load-more-sentinel"
         class="h-px w-full"
       />

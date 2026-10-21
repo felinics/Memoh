@@ -360,7 +360,7 @@ watch(menuOpen, async (open) => {
           from.insertBefore(item, from.children[oldIndex] ?? null)
           const next = [...displayBots.value]
           const [moved] = next.splice(oldIndex, 1)
-          next.splice(newIndex, 0, moved)
+          if (moved) next.splice(newIndex, 0, moved)
           displayBots.value = next
           botOrder.value = next.map(bot => bot.id ?? '').filter(Boolean)
         },

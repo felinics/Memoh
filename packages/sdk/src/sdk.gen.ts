@@ -1063,7 +1063,7 @@ export const postBotsByBotIdHooksTest = <ThrowOnError extends boolean = false>(o
  *
  * List MCP connections for a bot
  */
-export const getBotsByBotIdMcp = <ThrowOnError extends boolean = false>(options?: Options<GetBotsByBotIdMcpData, ThrowOnError>): RequestResult<GetBotsByBotIdMcpResponses, GetBotsByBotIdMcpErrors, ThrowOnError> => (options?.client ?? client).get<GetBotsByBotIdMcpResponses, GetBotsByBotIdMcpErrors, ThrowOnError>({ url: '/bots/{bot_id}/mcp', ...options });
+export const getBotsByBotIdMcp = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdMcpData, ThrowOnError>): RequestResult<GetBotsByBotIdMcpResponses, GetBotsByBotIdMcpErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdMcpResponses, GetBotsByBotIdMcpErrors, ThrowOnError>({ url: '/bots/{bot_id}/mcp', ...options });
 
 /**
  * Create MCP connection
@@ -1098,7 +1098,7 @@ export const postBotsByBotIdMcpOpsBatchDelete = <ThrowOnError extends boolean = 
  *
  * Export all MCP connections for a bot in standard mcpServers format.
  */
-export const getBotsByBotIdMcpOpsExport = <ThrowOnError extends boolean = false>(options?: Options<GetBotsByBotIdMcpOpsExportData, ThrowOnError>): RequestResult<GetBotsByBotIdMcpOpsExportResponses, GetBotsByBotIdMcpOpsExportErrors, ThrowOnError> => (options?.client ?? client).get<GetBotsByBotIdMcpOpsExportResponses, GetBotsByBotIdMcpOpsExportErrors, ThrowOnError>({ url: '/bots/{bot_id}/mcp-ops/export', ...options });
+export const getBotsByBotIdMcpOpsExport = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdMcpOpsExportData, ThrowOnError>): RequestResult<GetBotsByBotIdMcpOpsExportResponses, GetBotsByBotIdMcpOpsExportErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdMcpOpsExportResponses, GetBotsByBotIdMcpOpsExportErrors, ThrowOnError>({ url: '/bots/{bot_id}/mcp-ops/export', ...options });
 
 /**
  * Import MCP connections

@@ -65,7 +65,7 @@ import {
   getBotsByBotIdSettings,
   putBotsByBotIdSettings,
   type HandlersDisplayInfoResponse,
-  type SettingsSettings,
+  type SettingsUpsertRequest,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import DisplayPane from '@/pages/home/components/display-pane.vue'
@@ -108,7 +108,7 @@ const { data: displayInfo, refetch: refetchDisplay } = useQuery({
 })
 
 const { mutateAsync: updateSettings, isLoading: isSaving } = useMutation({
-  mutation: async (body: Partial<SettingsSettings>) => {
+  mutation: async (body: SettingsUpsertRequest) => {
     const { data } = await putBotsByBotIdSettings({
       path: { bot_id: props.botId },
       body,

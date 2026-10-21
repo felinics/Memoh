@@ -63,7 +63,6 @@ const {
   graphData,
   visibleGraphEdges,
   layoutReady,
-  chartRef,
   chartOption,
   chartAutoresize,
   chartUpdateOptions,

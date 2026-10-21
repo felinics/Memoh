@@ -82,7 +82,7 @@ const loaded = ref(false)
 // One in-flight load at a time; a new load aborts the old one so stale
 // fast-fire responses can't clobber newer content.
 let activeLoadController: AbortController | null = null
-let previewPollTimer: ReturnType<typeof setInterval> | null = null
+let previewPollTimer: number | null = null
 
 function isDocumentVisible(): boolean {
   return typeof document === 'undefined' || document.visibilityState === 'visible'

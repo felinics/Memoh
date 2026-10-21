@@ -15,6 +15,7 @@ import {
   TextButton,
   TextGenerateEffect,
   Toggle,
+  type BadgeVariants,
 } from '@felinic/ui'
 import {
   ArrowRight,
@@ -511,8 +512,8 @@ const fmtTint = ref({ bold: true, italic: false, underline: false, strike: false
         >
           <template #default="{ variant, size }">
             <Badge
-              :variant="variant"
-              :size="size"
+              :variant="variant as BadgeVariants['variant']"
+              :size="size as BadgeVariants['size']"
             >
               {{ variant }}
             </Badge>

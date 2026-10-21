@@ -6,7 +6,7 @@ import {
 } from './constants'
 import { isLayoutCaptureReady } from './graph-data'
 import { fitGraphToView } from './graph-layout'
-import { readSeriesCenter, readSeriesZoom } from './build-chart-option'
+import { chartModel, readSeriesCenter, readSeriesZoom } from './build-chart-option'
 import type { GraphData, PinnedNodePosition } from './types'
 
 export function useMemoryGraphLayout(graphData: Ref<GraphData | null>) {
@@ -36,7 +36,7 @@ export function useMemoryGraphLayout(graphData: Ref<GraphData | null>) {
     if (nodes.length === 0) return false
 
     try {
-      const seriesModel = chart.getModel().getSeriesByIndex(0)
+      const seriesModel = chartModel(chart).getSeriesByIndex(0)
       if (!seriesModel) return false
 
       const data = seriesModel.getData()

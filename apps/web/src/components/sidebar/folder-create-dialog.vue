@@ -137,8 +137,9 @@ const { data: targetsResponse } = useQuery({
   },
   enabled: () => !!props.botId && open.value,
 })
-const selectableTargets = computed<WorkspaceWorkspaceTarget[]>(() => (
-  (targetsResponse.value?.targets ?? []).filter(target => (target.target_id ?? '').trim())
+type SelectableTarget = WorkspaceWorkspaceTarget & { target_id: string }
+const selectableTargets = computed<SelectableTarget[]>(() => (
+  (targetsResponse.value?.targets ?? []).filter((target): target is SelectableTarget => !!(target.target_id ?? '').trim())
 ))
 
 function targetDisplayName(target: WorkspaceWorkspaceTarget): string {

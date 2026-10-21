@@ -538,7 +538,7 @@ function reloadAndBroadcast() {
   chatStore.markFsChanged()
 }
 
-let treePollTimer: ReturnType<typeof setInterval> | null = null
+let treePollTimer: number | null = null
 
 function isDocumentVisible(): boolean {
   return typeof document === 'undefined' || document.visibilityState === 'visible'

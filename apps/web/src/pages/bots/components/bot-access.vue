@@ -1219,7 +1219,7 @@ const memberCandidateOptions = computed<MemberCandidateOption[]>(() => {
   const present = new Set(members.value.map(m => m.channelIdentityId))
   const identityOptions = (identityCandidates.value?.items ?? [])
     .filter(i => i.id && !present.has(i.id) && !aclExcludedChannelTypes.value.has(i.channel ?? ''))
-    .map(i => ({
+    .map((i): MemberCandidateOption => ({
       value: i.id ?? '',
       label: i.display_name || i.channel_subject_id || i.id || '',
       group: 'identities',
@@ -1229,7 +1229,7 @@ const memberCandidateOptions = computed<MemberCandidateOption[]>(() => {
     }))
   const groupOptions = (groupCandidates.value ?? [])
     .filter(g => g.conversation_id && g.channel && !aclExcludedChannelTypes.value.has(g.channel))
-    .flatMap((g) => {
+    .flatMap((g): MemberCandidateOption[] => {
       const key = groupRowKey(g.channel ?? '', g.conversation_id ?? '')
       if (present.has(key)) return []
       return [{

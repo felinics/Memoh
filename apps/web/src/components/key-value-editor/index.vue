@@ -24,7 +24,9 @@ const emit = defineEmits<{
 
 function updateRow(index: number, field: 'key' | 'value', val: string) {
   const list = [...props.modelValue]
-  list[index] = { ...list[index], [field]: val }
+  const current = list[index]
+  if (!current) return
+  list[index] = { ...current, [field]: val }
   emit('update:modelValue', list)
 }
 

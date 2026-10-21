@@ -234,12 +234,15 @@ type HookActionConfig = {
   type?: string
   command?: string
   tool?: string
+  on_error?: 'ignore' | 'fail' | 'block'
 }
 
 type HookConfigEntry = {
   name?: string
   event?: string
+  matcher?: string
   enabled?: boolean
+  priority?: number
   actions?: HookActionConfig[]
 }
 
@@ -328,12 +331,15 @@ const { mutateAsync: testHooks, isLoading: testing } = useMutation({
   },
 })
 
-const eventItems = computed<HandlersHookEventInfo[]>(() => eventsData.value?.events ?? [])
+// The server always fills `name`; the generated type marks every field optional.
+const eventItems = computed(() => (eventsData.value?.events ?? [])
+  .filter((event): event is HandlersHookEventInfo & { name: string } => !!event.name))
 
 watch(eventItems, (items) => {
-  if (!items.length) return
+  const first = items[0]
+  if (!first) return
   if (!items.some(item => item.name === testEvent.value)) {
-    testEvent.value = items[0].name
+    testEvent.value = first.name
   }
 }, { immediate: true })
 

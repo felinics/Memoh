@@ -2,12 +2,12 @@ import { computed } from 'vue'
 import type { ComputedRef } from 'vue'
 import type { AdaptersMemoryItem } from '@memohai/sdk'
 
-export interface MemoryGroup {
+export interface MemoryGroup<T extends AdaptersMemoryItem = AdaptersMemoryItem> {
   /** ISO date string: yyyy-MM-dd */
   date: string
   /** Human-readable relative label, e.g. "Today", "Yesterday", "Jun 14" */
   label: string
-  items: AdaptersMemoryItem[]
+  items: T[]
 }
 
 export interface MemoryGroupStats {
@@ -16,8 +16,8 @@ export interface MemoryGroupStats {
   lastUpdatedAt: string | null
 }
 
-export interface UseMemoryGroupsResult {
-  groups: ComputedRef<MemoryGroup[]>
+export interface UseMemoryGroupsResult<T extends AdaptersMemoryItem = AdaptersMemoryItem> {
+  groups: ComputedRef<MemoryGroup<T>[]>
   stats: ComputedRef<MemoryGroupStats>
 }
 
@@ -27,15 +27,15 @@ export interface UseMemoryGroupsResult {
  * day label (Today / Yesterday / calendar date) so the page reads as a natural
  * timeline without a second column.
  */
-export function useMemoryGroups(
-  memories: ComputedRef<AdaptersMemoryItem[]> | ComputedRef<Array<AdaptersMemoryItem & { id: string; memory: string }>>,
+export function useMemoryGroups<T extends AdaptersMemoryItem>(
+  memories: ComputedRef<T[]>,
   locale: ComputedRef<string>,
-): UseMemoryGroupsResult {
-  const groups = computed<MemoryGroup[]>(() => {
+): UseMemoryGroupsResult<T> {
+  const groups = computed<MemoryGroup<T>[]>(() => {
     const list = memories.value
     if (list.length === 0) return []
 
-    const bucketMap = new Map<string, AdaptersMemoryItem[]>()
+    const bucketMap = new Map<string, T[]>()
 
     for (const item of list) {
       const dateKey = dateKeyFromISO(item.created_at)

@@ -45,7 +45,7 @@ export function useQueueTurnAnchors(
   watchQueueTurn(
     messages,
     isRuntimeSteerUserTurn,
-    message => `${message.id}\u0000${message.role}\u0000${message.turnId ?? ''}\u0000${message.runtimeSteer ? 'steer' : ''}`,
+    message => `${message.id}\u0000${message.role}\u0000${message.turnId ?? ''}\u0000${'runtimeSteer' in message && message.runtimeSteer ? 'steer' : ''}`,
     pinAfterSteer,
   )
   watchQueueTurn(

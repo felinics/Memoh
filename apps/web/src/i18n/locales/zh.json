@@ -2588,10 +2588,6 @@
     "avatarUpdateSuccess": "头像已更新",
     "avatarUpdateFailed": "更新头像失败",
     "typePlaceholder": "选择 Bot 类型",
-    "types": {
-      "personal": "个人",
-      "public": "公开"
-    },
     "active": "运行中",
     "inactive": "未启用",
     "lifecycle": {

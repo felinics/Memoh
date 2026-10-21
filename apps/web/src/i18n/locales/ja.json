@@ -2586,10 +2586,6 @@
     "avatarUpdateSuccess": "アバターが更新されました",
     "avatarUpdateFailed": "アバターの更新に失敗しました",
     "typePlaceholder": "Botの種類を選択してください",
-    "types": {
-      "personal": "個人的",
-      "public": "公共"
-    },
     "active": "アクティブ",
     "inactive": "非アクティブ",
     "lifecycle": {

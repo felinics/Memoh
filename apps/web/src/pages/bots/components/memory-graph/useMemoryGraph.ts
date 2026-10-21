@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, ref, toRef, watch, type Ref } from 'vue'
+import { computed, onBeforeUnmount, ref, toRef, useTemplateRef, watch, type Ref } from 'vue'
 import type { EChartsType } from 'echarts/core'
 import { buildMemoryGraphOption } from './build-chart-option'
 import { useMemoryGraphData } from './useMemoryGraphData'
@@ -10,7 +10,8 @@ import type { GraphEdgeCandidate } from './types'
 export function useMemoryGraph(botId: Ref<string> | (() => string)) {
   const botIdRef = typeof botId === 'function' ? computed(botId) : botId
 
-  const chartRef = ref<{ chart?: EChartsType } | null>(null)
+  // The VChart instance behind the component's `ref="chartRef"`.
+  const chartRef = useTemplateRef<{ chart?: EChartsType }>('chartRef')
   const hoveredNodeId = ref<string | null>(null)
 
   const { chartTheme } = useMemoryGraphTheme()
@@ -98,7 +99,6 @@ export function useMemoryGraph(botId: Ref<string> | (() => string)) {
     graphData,
     visibleGraphEdges,
     layoutReady,
-    chartRef,
     chartOption,
     chartAutoresize,
     chartUpdateOptions,

@@ -865,7 +865,7 @@ function noticeBlockContent(block: { name?: string; content: string; args?: Reco
 // Consecutive tools and reasoning form one process, regardless of tool kind.
 // Text, errors, attachments and completed questions retain their own positions.
 type ProcessNode = { kind: 'process'; key: string; items: ContentBlock[]; lastIndex: number }
-type AnswersNode = { kind: 'answers'; key: string; block: ContentBlock; index: number }
+type AnswersNode = { kind: 'answers'; key: string; block: ToolCallBlockType; index: number }
 type BlockNode = { kind: 'block'; key: string; block: ContentBlock; index: number }
 type RenderNode = ProcessNode | AnswersNode | BlockNode
 
@@ -879,9 +879,7 @@ type RenderNode = ProcessNode | AnswersNode | BlockNode
 // history where userInput is absent.
 const ASK_USER_TERMINAL_STATUSES = new Set(['submitted', 'canceled', 'expired', 'failed'])
 
-function isCompletedAskUser(block: ContentBlock): boolean {
-  if (block.type !== 'tool') return false
-  const b = block as ToolCallBlockType
+function isCompletedAskUser(b: ToolCallBlockType): boolean {
   if (b.toolName !== 'ask_user') return false
   const result = structuredToolResult(b.result)
   if (Array.isArray(result.answers)) return true
@@ -896,7 +894,7 @@ const renderNodes = computed<RenderNode[]>(() => {
   let run: ProcessNode | null = null
   props.message.messages.forEach((block, index) => {
     if (!isVisibleAssistantBlock(block)) return
-    if (isCompletedAskUser(block)) {
+    if (block.type === 'tool' && isCompletedAskUser(block)) {
       run = null
       nodes.push({ kind: 'answers', key: `a${block.id}`, block, index })
       return

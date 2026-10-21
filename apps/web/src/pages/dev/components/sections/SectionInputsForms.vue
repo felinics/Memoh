@@ -522,7 +522,7 @@ const formSchema = {
           <template #default="{ slots }">
             <InputOTPGroup>
               <InputOTPSlot
-                v-for="(slot, i) in slots.slice(0, 3)"
+                v-for="(_slot, i) in slots.slice(0, 3)"
                 :key="i"
                 :index="i"
               />
@@ -530,7 +530,7 @@ const formSchema = {
             <InputOTPSeparator />
             <InputOTPGroup>
               <InputOTPSlot
-                v-for="(slot, i) in slots.slice(3, 6)"
+                v-for="(_slot, i) in slots.slice(3, 6)"
                 :key="i + 3"
                 :index="i + 3"
               />

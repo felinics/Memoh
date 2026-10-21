@@ -460,8 +460,9 @@ const shikiThemeDarkSelection = computed<string>({
   set: (value) => setShikiTheme('dark', value as BundledTheme),
 })
 
+// colorSchemes is a static, non-empty list, so the fallback always exists.
 const currentColorScheme = computed(() =>
-  colorSchemes.find(scheme => scheme.id === colorScheme.value) ?? colorSchemes[0],
+  colorSchemes.find(scheme => scheme.id === colorScheme.value) ?? colorSchemes[0]!,
 )
 
 function previewSwatches(scheme: ColorSchemeOption) {

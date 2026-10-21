@@ -39,7 +39,7 @@ export function useListboxKeyboard<TRow extends ListboxRow>(params: {
     const next = pos === -1
       ? (delta === 1 ? 0 : items.length - 1)
       : Math.min(items.length - 1, Math.max(0, pos + delta))
-    activate(items[next])
+    activate(items[next]!)
   }
 
   function reset() {
@@ -59,13 +59,13 @@ export function useListboxKeyboard<TRow extends ListboxRow>(params: {
       case 'Home':
         if (itemIndexes.value.length) {
           event.preventDefault()
-          activate(itemIndexes.value[0])
+          activate(itemIndexes.value[0]!)
         }
         break
       case 'End':
         if (itemIndexes.value.length) {
           event.preventDefault()
-          activate(itemIndexes.value[itemIndexes.value.length - 1])
+          activate(itemIndexes.value[itemIndexes.value.length - 1]!)
         }
         break
       case 'Enter': {

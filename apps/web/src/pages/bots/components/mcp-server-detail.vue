@@ -859,7 +859,7 @@ async function handleSave() {
       && savedSnapshot.value !== null && connectionFieldsChanged(savedSnapshot.value, draft)
     const body = buildBody(draft, form.value.active)
     if (wasNew) {
-      const { data } = await postBotsByBotIdMcp({ path: { bot_id: props.botId } as unknown as { bot_id: string }, body, throwOnError: true })
+      const { data } = await postBotsByBotIdMcp({ path: { bot_id: props.botId }, body, throwOnError: true })
       const id = data?.id ?? ''
       toast.success(t('mcp.createSuccess'))
       // Clean the draft for the brief window before the parent's redirect
@@ -868,7 +868,7 @@ async function handleSave() {
       if (id) emit('created', id)
       emit('changed')
     } else {
-      await putBotsByBotIdMcpById({ path: { bot_id: props.botId, id: serverId.value } as unknown as { bot_id: string, id: string }, body, throwOnError: true })
+      await putBotsByBotIdMcpById({ path: { bot_id: props.botId, id: serverId.value }, body, throwOnError: true })
       toast.success(t('mcp.updateSuccess'))
       savedSnapshot.value = draft
       emit('changed')
@@ -900,7 +900,7 @@ async function handleToggleActive(value: boolean) {
   activeSaving.value = true
   try {
     await putBotsByBotIdMcpById({
-      path: { bot_id: props.botId, id: serverId.value } as unknown as { bot_id: string, id: string },
+      path: { bot_id: props.botId, id: serverId.value },
       body: buildBody(snap, value),
       throwOnError: true,
     })
@@ -924,7 +924,7 @@ async function handleProbe(id: string) {
   const controller = new AbortController()
   probeAbortController = controller
   try {
-    const { data } = await postBotsByBotIdMcpByIdProbe({ path: { bot_id: props.botId, id } as unknown as { bot_id: string, id: string }, signal: controller.signal, throwOnError: true })
+    const { data } = await postBotsByBotIdMcpByIdProbe({ path: { bot_id: props.botId, id }, signal: controller.signal, throwOnError: true })
     if (data) {
       status.value = data.status ?? status.value
       tools.value = data.tools ?? []
@@ -951,7 +951,7 @@ async function handleDelete() {
   if (!serverId.value) return
   deleting.value = true
   try {
-    await deleteBotsByBotIdMcpById({ path: { bot_id: props.botId, id: serverId.value } as unknown as { bot_id: string, id: string }, throwOnError: true })
+    await deleteBotsByBotIdMcpById({ path: { bot_id: props.botId, id: serverId.value }, throwOnError: true })
     toast.success(t('mcp.deleteSuccess'))
     emit('deleted')
   } catch {
@@ -978,7 +978,7 @@ async function loadOAuthStatus() {
   }
   oauthStatusLoading.value = true
   try {
-    const { data } = await getBotsByBotIdMcpByIdOauthStatus({ path: { bot_id: props.botId, id: serverId.value } as unknown as { bot_id: string, id: string }, throwOnError: true })
+    const { data } = await getBotsByBotIdMcpByIdOauthStatus({ path: { bot_id: props.botId, id: serverId.value }, throwOnError: true })
     oauthStatus.value = data ?? null
   } catch {
     oauthStatus.value = null
@@ -992,7 +992,7 @@ async function handleOAuthDiscover(): Promise<boolean> {
   oauthDiscovering.value = true
   oauthNeedsClientId.value = false
   try {
-    const { data } = await postBotsByBotIdMcpByIdOauthDiscover({ path: { bot_id: props.botId, id: serverId.value } as unknown as { bot_id: string, id: string }, throwOnError: true })
+    const { data } = await postBotsByBotIdMcpByIdOauthDiscover({ path: { bot_id: props.botId, id: serverId.value }, throwOnError: true })
     if (!data?.registration_endpoint) oauthNeedsClientId.value = true
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('mcp.oauth.discoverFailed')))
@@ -1019,7 +1019,7 @@ async function handleOAuthFlow() {
   oauthAuthorizing.value = true
   try {
     const { data } = await postBotsByBotIdMcpByIdOauthAuthorize({
-      path: { bot_id: props.botId, id: serverId.value } as unknown as { bot_id: string, id: string },
+      path: { bot_id: props.botId, id: serverId.value },
       body: {
         client_id: oauthClientId.value.trim() || undefined,
         client_secret: oauthClientSecret.value.trim() || undefined,
@@ -1078,7 +1078,7 @@ async function handleOAuthFlow() {
     const startedAt = Date.now()
     pollTimer = setInterval(() => {
       if (completed || !serverId.value) return
-      getBotsByBotIdMcpByIdOauthStatus({ path: { bot_id: props.botId, id: serverId.value } as unknown as { bot_id: string, id: string }, throwOnError: true })
+      getBotsByBotIdMcpByIdOauthStatus({ path: { bot_id: props.botId, id: serverId.value }, throwOnError: true })
         .then(async ({ data: next }) => {
           if (completed) return
           // Completion means the TOKEN LANDED — `configured` is already true
@@ -1115,7 +1115,7 @@ async function handleOAuthRevoke() {
   if (!serverId.value || oauthRevoking.value) return
   oauthRevoking.value = true
   try {
-    await deleteBotsByBotIdMcpByIdOauthToken({ path: { bot_id: props.botId, id: serverId.value } as unknown as { bot_id: string, id: string }, throwOnError: true })
+    await deleteBotsByBotIdMcpByIdOauthToken({ path: { bot_id: props.botId, id: serverId.value }, throwOnError: true })
     toast.success(t('mcp.oauth.revokeSuccess'))
     oauthDiscovered.value = false
     oauthNeedsClientId.value = false

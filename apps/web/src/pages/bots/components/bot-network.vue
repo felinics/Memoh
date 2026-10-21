@@ -140,7 +140,7 @@
                     :readonly="field.readonly"
                     rows="4"
                     class="min-h-24 resize-none"
-                    @update:model-value="(val: string) => updateValue(field.key, val)"
+                    @update:model-value="(val) => updateValue(field.key, val)"
                   />
 
                   <Switch
@@ -154,7 +154,7 @@
                     v-else-if="field.type === 'enum' && field.enum"
                     :model-value="stringValue(field)"
                     :disabled="field.readonly"
-                    @update:model-value="(val: string) => updateValue(field.key, val)"
+                    @update:model-value="(val) => updateValue(field.key, val)"
                   >
                     <SelectTrigger
                       class="w-full"
@@ -215,7 +215,7 @@
                     :placeholder="placeholderOf(field)"
                     :readonly="field.readonly"
                     class="h-8 w-full"
-                    @update:model-value="(val: string) => updateValue(field.key, val)"
+                    @update:model-value="(val) => updateValue(field.key, val)"
                   />
                 </div>
               </SettingsRow>
@@ -338,7 +338,7 @@
                   :readonly="field.readonly"
                   rows="4"
                   class="min-h-24 resize-none"
-                  @update:model-value="(val: string) => updateValue(field.key, val)"
+                  @update:model-value="(val) => updateValue(field.key, val)"
                 />
 
                 <Switch
@@ -352,7 +352,7 @@
                   v-else-if="field.type === 'enum' && field.enum"
                   :model-value="stringValue(field)"
                   :disabled="field.readonly"
-                  @update:model-value="(val: string) => updateValue(field.key, val)"
+                  @update:model-value="(val) => updateValue(field.key, val)"
                 >
                   <SelectTrigger
                     class="w-full"
@@ -413,7 +413,7 @@
                   :placeholder="placeholderOf(field)"
                   :readonly="field.readonly"
                   class="h-8 w-full"
-                  @update:model-value="(val: string) => updateValue(field.key, val)"
+                  @update:model-value="(val) => updateValue(field.key, val)"
                 />
               </div>
             </SettingsRow>
@@ -568,7 +568,7 @@ import { ConfirmPopover, InlineLoadingRow, SectionGroup, SettingsRow, SettingsSe
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import { getBotsByBotIdSettings, putBotsByBotIdSettings } from '@memohai/sdk'
-import type { SettingsSettings } from '@memohai/sdk'
+import type { SettingsUpsertRequest } from '@memohai/sdk'
 import { cloneConfig, getPathValue, setPathValue } from '@/components/config-schema-form/utils'
 import type { ConfigSchema, ConfigSchemaField } from '@/components/config-schema-form/types'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -806,7 +806,7 @@ const {
 })
 
 const { mutateAsync: updateSettings, isLoading: isSaving } = useMutation({
-  mutation: async (body: Partial<SettingsSettings>) => {
+  mutation: async (body: SettingsUpsertRequest) => {
     const { data } = await putBotsByBotIdSettings({
       path: { bot_id: props.botId },
       body,

@@ -8,8 +8,11 @@ import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 const routerReplace = vi.fn()
 const invalidateQueries = vi.fn()
 
-function translate(key: string, params?: Record<string, string>) {
-  return params?.name ? `${key}:${params.name}` : key
+// Also installed as the global $t, whose overloads pass a plural count or a
+// default message in the second slot, so only a named-params object is read.
+function translate(key: string, params?: unknown) {
+  const name = params && typeof params === 'object' && 'name' in params ? params.name : undefined
+  return name ? `${key}:${name}` : key
 }
 
 vi.mock('vue-router', () => ({

@@ -381,7 +381,7 @@ function onDetailDeleted() {
 async function loadList() {
   loading.value = true
   try {
-    const { data } = await getBotsByBotIdMcp({ path: { bot_id: props.botId } as unknown as { bot_id: string }, throwOnError: true })
+    const { data } = await getBotsByBotIdMcp({ path: { bot_id: props.botId }, throwOnError: true })
     items.value = (data.items ?? []).map((item: Record<string, unknown>) => ({
       ...(item as unknown as McpItem),
       status: (item.status as string) ?? 'unknown',
@@ -426,7 +426,7 @@ async function executeImport() {
     if (!parsed.mcpServers && typeof parsed === 'object') {
       parsed = { mcpServers: parsed as McpImportRequest['mcpServers'] }
     }
-    await putBotsByBotIdMcpOpsImport({ path: { bot_id: props.botId } as unknown as { bot_id: string }, body: parsed, throwOnError: true })
+    await putBotsByBotIdMcpOpsImport({ path: { bot_id: props.botId }, body: parsed, throwOnError: true })
     importOpen.value = false
     await loadList()
     toast.success(t('mcp.importSuccess'))

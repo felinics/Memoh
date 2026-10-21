@@ -47,7 +47,7 @@ export function maskSingleDollars(content: string): string {
   const out: string[] = []
   let i = 0
   while (i < content.length) {
-    const ch = content[i]
+    const ch = content.charAt(i)
     if (ch === '`') {
       let n = 1
       while (content[i + n] === '`') n++

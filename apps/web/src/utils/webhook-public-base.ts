@@ -40,13 +40,13 @@ function rawHost(raw: string): string {
   const authority = rawAuthority(raw)
   const host = authority.includes('@') ? authority.slice(authority.lastIndexOf('@') + 1) : authority
   if (host.startsWith('[')) return host.replace(/^\[(.*)\](?::\d+)?$/, '$1').toLowerCase()
-  return host.split(':', 1)[0].trim().toLowerCase().replace(/\.+$/, '')
+  return (host.split(':', 1)[0] ?? '').trim().toLowerCase().replace(/\.+$/, '')
 }
 
 function rawAuthority(raw: string): string {
   return raw.trim()
     .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
-    .split(/[/?#]/, 1)[0]
+    .split(/[/?#]/, 1)[0] ?? ''
 }
 
 function isSpecialUseDNSName(host: string): boolean {
@@ -67,7 +67,7 @@ function isIPv4Literal(host: string): boolean {
 function isPublicIPv4(host: string): boolean {
   const parts = host.split('.').map(part => Number(part))
   if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return false
-  const [a, b, c] = parts
+  const [a, b, c] = parts as [number, number, number, number]
   return !(a === 0 ||
     a === 10 ||
     a === 127 ||

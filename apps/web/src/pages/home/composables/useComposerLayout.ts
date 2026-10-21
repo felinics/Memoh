@@ -1,4 +1,4 @@
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef } from 'vue'
 
 // Composer layout: element refs, textarea focus, and the width clamp for the
 // model trigger. Pure measurement of the input surface, independent of chat state.
@@ -23,7 +23,9 @@ const CLUSTER_GAP = 8 // gap-2 between controls-row children
 
 export function useComposerLayout() {
   const textareaEl = ref<HTMLTextAreaElement | null>(null)
-  const composerEl = ref<HTMLElement | null>(null)
+  // Read straight from the caller's `ref="composerEl"`: only this composable
+  // measures the card, so the component keeps no binding of its own.
+  const composerEl = useTemplateRef<HTMLElement>('composerEl')
 
   const composerInnerWidth = ref(0)
 
@@ -67,7 +69,6 @@ export function useComposerLayout() {
 
   return {
     textareaEl,
-    composerEl,
     focusTextarea,
     modelTriggerMaxWidth,
   }

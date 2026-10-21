@@ -4,7 +4,7 @@
 // reads back the computed size / line-height / tracking on mount so the bench
 // always reflects the source of truth. Tune a token → the whole app + this
 // wall move together.
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, type ComponentPublicInstance } from 'vue'
 import { Button } from '@felinic/ui'
 import { RefreshCw } from 'lucide-vue-next'
 import SectionShell from '../components/SectionShell.vue'
@@ -57,7 +57,7 @@ const specs = ref<Record<string, string>>({})
 const sampleRefs = ref<Record<string, HTMLElement | null>>({})
 
 function setRef(name: string) {
-  return (el: Element | null) => {
+  return (el: Element | ComponentPublicInstance | null) => {
     sampleRefs.value[name] = el as HTMLElement | null
   }
 }
