@@ -108,6 +108,7 @@
     "restore": "接続を復元",
     "existingDescription": "「{name}」でコマンドを実行し、元の認証情報でバックグラウンド接続を復元してください。コンピューターの記録と Bot の権限は保持されます。",
     "commandLabel": "接続コマンド",
+    "platformLabel": "OS",
     "commandDescription": "接続先に Node.js 20+ を入れ、ターミナルで次のコマンドを実行してください。",
     "waiting": "コンピューターの接続を待っています…",
     "finish": "完了"

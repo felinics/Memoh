@@ -111,6 +111,7 @@
     "restore": "恢复连接",
     "existingDescription": "在「{name}」上运行命令，沿用原凭证恢复后台连接。电脑记录和 Bot 权限会保留。",
     "commandLabel": "连接命令",
+    "platformLabel": "操作系统",
     "commandDescription": "在要连接的电脑上安装 Node.js 20+，然后在终端运行下方命令。",
     "waiting": "等待电脑连接…",
     "finish": "完成"

@@ -111,6 +111,7 @@
     "restore": "Reconnect",
     "existingDescription": "Run the command on “{name}” to restore its background connection with its original credentials. Its computer record and Bot permissions are preserved.",
     "commandLabel": "Connection command",
+    "platformLabel": "Operating system",
     "commandDescription": "Install Node.js 20+ on that computer and run this in a terminal.",
     "waiting": "Waiting for the computer to connect…",
     "finish": "Done"

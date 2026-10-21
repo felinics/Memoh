@@ -22,7 +22,7 @@ vi.mock('@felinic/ui', () => {
   const Wrapper = (_props: unknown, { slots }: { slots: Slots }) => h('div', slots.default?.())
   const Button = (_props: unknown, { slots, attrs }: { slots: Slots, attrs: Record<string, unknown> }) => h('button', attrs, slots.default?.())
   return {
-    Button, SettingsSection: Wrapper,
+    Button, SettingsSection: Wrapper, SegmentedControl: Wrapper,
     SettingsRow: (props: { label: string, description: string }, { slots }: { slots: Slots }) => h('div', [props.label, props.description, slots.default?.()]),
     Switch: defineComponent({
       props: { modelValue: Boolean },
