@@ -3417,3 +3417,102 @@ WHERE message.team_id = public.memoh_current_team_id()
   AND btrim(COALESCE(message.metadata->>'agent_turn_id', '')) <> ''
 ORDER BY message.created_at DESC, message.id DESC
 LIMIT 1;
+
+-- name: ListRecentActiveUserMessagesBySession :many
+-- Memory-query building needs only the newest few user messages, not a
+-- time-windowed history load (Context Epoch D1: bookmarks and counts, never a
+-- wall clock). Newest-first with a hard LIMIT keeps the load bounded
+-- (CM-ADM-001); the caller reverses into ascending order.
+SELECT
+  m.id,
+  m.content,
+  m.created_at
+FROM bot_visible_history_messages m
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = sqlc.arg(session_id)
+  AND m.role = 'user'
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+LIMIT sqlc.arg(max_messages);
+
+-- name: ListVisibleMessagesFromBySessionWithinBytes :many
+-- Byte-budgeted variant of ListVisibleMessagesFromBySession (CM-ADM-001). The
+-- caller's anchor message must always load, so rows are admitted oldest-first
+-- starting AT the cursor until their running content byte total crosses
+-- max_bytes (the crossing row is kept). Only content is budgeted: full rows
+-- still load, and callers decode metadata one row at a time like the other
+-- WithinBytes variants.
+WITH cursor_message AS (
+  SELECT m.turn_position
+  FROM bot_history_messages m
+  WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = sqlc.arg(session_id)
+    AND m.turn_visible = true
+    AND m.turn_id IS NOT NULL
+    AND m.turn_position IS NOT NULL
+    AND m.id = sqlc.arg(message_id)
+  LIMIT 1
+),
+ranked AS (
+  SELECT
+    m.id,
+    m.bot_id,
+    m.session_id,
+    m.sender_channel_identity_id,
+    m.sender_account_user_id AS sender_user_id,
+    m.source_message_id AS external_message_id,
+    m.source_reply_to_message_id,
+    m.role,
+    m.content,
+    m.metadata,
+    m.turn_id,
+    m.usage,
+    m.session_mode,
+    m.runtime_type,
+    m.event_id,
+    m.display_text,
+    m.compact_id,
+    m.created_at,
+    m.turn_position,
+    m.turn_message_seq,
+    ci.display_name AS sender_display_name,
+    ci.avatar_url AS sender_avatar_url,
+    s.channel_type AS platform,
+    (SUM(octet_length(m.content::text)) OVER (
+      ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+    ) - octet_length(m.content::text))::BIGINT AS preceding_bytes
+  FROM bot_history_messages m
+  CROSS JOIN cursor_message cursor
+  LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+  LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+  WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = sqlc.arg(session_id)
+    AND m.turn_visible = true
+    AND m.turn_id IS NOT NULL
+    AND m.turn_position IS NOT NULL
+    AND m.turn_message_seq IS NOT NULL
+    AND m.turn_position >= cursor.turn_position
+)
+SELECT
+  ranked.id,
+  ranked.bot_id,
+  ranked.session_id,
+  ranked.sender_channel_identity_id,
+  ranked.sender_user_id,
+  ranked.external_message_id,
+  ranked.source_reply_to_message_id,
+  ranked.role,
+  ranked.content,
+  ranked.metadata,
+  ranked.turn_id,
+  ranked.usage,
+  ranked.session_mode,
+  ranked.runtime_type,
+  ranked.event_id,
+  ranked.display_text,
+  ranked.compact_id,
+  ranked.created_at,
+  ranked.sender_display_name,
+  ranked.sender_avatar_url,
+  ranked.platform
+FROM ranked
+WHERE ranked.preceding_bytes < sqlc.arg(max_bytes)::BIGINT
+ORDER BY ranked.turn_position ASC, ranked.turn_message_seq ASC, ranked.created_at ASC, ranked.id ASC;

@@ -5237,6 +5237,55 @@ func (q *Queries) ListObservedConversationsByChannelType(ctx context.Context, ar
 	return items, nil
 }
 
+const listRecentActiveUserMessagesBySession = `-- name: ListRecentActiveUserMessagesBySession :many
+SELECT
+  m.id,
+  m.content,
+  m.created_at
+FROM bot_visible_history_messages m
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
+  AND m.role = 'user'
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+LIMIT $2
+`
+
+type ListRecentActiveUserMessagesBySessionParams struct {
+	SessionID   pgtype.UUID `json:"session_id"`
+	MaxMessages int32       `json:"max_messages"`
+}
+
+type ListRecentActiveUserMessagesBySessionRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	Content   []byte             `json:"content"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// Memory-query building needs only the newest few user messages, not a
+// time-windowed history load (Context Epoch D1: bookmarks and counts, never a
+// wall clock). Newest-first with a hard LIMIT keeps the load bounded
+// (CM-ADM-001); the caller reverses into ascending order.
+func (q *Queries) ListRecentActiveUserMessagesBySession(ctx context.Context, arg ListRecentActiveUserMessagesBySessionParams) ([]ListRecentActiveUserMessagesBySessionRow, error) {
+	rows, err := q.db.Query(ctx, listRecentActiveUserMessagesBySession, arg.SessionID, arg.MaxMessages)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRecentActiveUserMessagesBySessionRow
+	for rows.Next() {
+		var i ListRecentActiveUserMessagesBySessionRow
+		if err := rows.Scan(&i.ID, &i.Content, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTurnResponseSourcesSinceBySessionWithinBytes = `-- name: ListTurnResponseSourcesSinceBySessionWithinBytes :many
 SELECT
   ranked.id,
@@ -5695,6 +5744,161 @@ func (q *Queries) ListVisibleMessagesFromBySession(ctx context.Context, arg List
 	var items []ListVisibleMessagesFromBySessionRow
 	for rows.Next() {
 		var i ListVisibleMessagesFromBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.TurnID,
+			&i.Usage,
+			&i.SessionMode,
+			&i.RuntimeType,
+			&i.EventID,
+			&i.DisplayText,
+			&i.CompactID,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVisibleMessagesFromBySessionWithinBytes = `-- name: ListVisibleMessagesFromBySessionWithinBytes :many
+WITH cursor_message AS (
+  SELECT m.turn_position
+  FROM bot_history_messages m
+  WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $2
+    AND m.turn_visible = true
+    AND m.turn_id IS NOT NULL
+    AND m.turn_position IS NOT NULL
+    AND m.id = $3
+  LIMIT 1
+),
+ranked AS (
+  SELECT
+    m.id,
+    m.bot_id,
+    m.session_id,
+    m.sender_channel_identity_id,
+    m.sender_account_user_id AS sender_user_id,
+    m.source_message_id AS external_message_id,
+    m.source_reply_to_message_id,
+    m.role,
+    m.content,
+    m.metadata,
+    m.turn_id,
+    m.usage,
+    m.session_mode,
+    m.runtime_type,
+    m.event_id,
+    m.display_text,
+    m.compact_id,
+    m.created_at,
+    m.turn_position,
+    m.turn_message_seq,
+    ci.display_name AS sender_display_name,
+    ci.avatar_url AS sender_avatar_url,
+    s.channel_type AS platform,
+    (SUM(octet_length(m.content::text)) OVER (
+      ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+    ) - octet_length(m.content::text))::BIGINT AS preceding_bytes
+  FROM bot_history_messages m
+  CROSS JOIN cursor_message cursor
+  LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+  LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+  WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $2
+    AND m.turn_visible = true
+    AND m.turn_id IS NOT NULL
+    AND m.turn_position IS NOT NULL
+    AND m.turn_message_seq IS NOT NULL
+    AND m.turn_position >= cursor.turn_position
+)
+SELECT
+  ranked.id,
+  ranked.bot_id,
+  ranked.session_id,
+  ranked.sender_channel_identity_id,
+  ranked.sender_user_id,
+  ranked.external_message_id,
+  ranked.source_reply_to_message_id,
+  ranked.role,
+  ranked.content,
+  ranked.metadata,
+  ranked.turn_id,
+  ranked.usage,
+  ranked.session_mode,
+  ranked.runtime_type,
+  ranked.event_id,
+  ranked.display_text,
+  ranked.compact_id,
+  ranked.created_at,
+  ranked.sender_display_name,
+  ranked.sender_avatar_url,
+  ranked.platform
+FROM ranked
+WHERE ranked.preceding_bytes < $1::BIGINT
+ORDER BY ranked.turn_position ASC, ranked.turn_message_seq ASC, ranked.created_at ASC, ranked.id ASC
+`
+
+type ListVisibleMessagesFromBySessionWithinBytesParams struct {
+	MaxBytes  int64       `json:"max_bytes"`
+	SessionID pgtype.UUID `json:"session_id"`
+	MessageID pgtype.UUID `json:"message_id"`
+}
+
+type ListVisibleMessagesFromBySessionWithinBytesRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
+	Role                    string             `json:"role"`
+	Content                 []byte             `json:"content"`
+	Metadata                []byte             `json:"metadata"`
+	TurnID                  pgtype.UUID        `json:"turn_id"`
+	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
+	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
+	CompactID               pgtype.UUID        `json:"compact_id"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
+}
+
+// Byte-budgeted variant of ListVisibleMessagesFromBySession (CM-ADM-001). The
+// caller's anchor message must always load, so rows are admitted oldest-first
+// starting AT the cursor until their running content byte total crosses
+// max_bytes (the crossing row is kept). Only content is budgeted: full rows
+// still load, and callers decode metadata one row at a time like the other
+// WithinBytes variants.
+func (q *Queries) ListVisibleMessagesFromBySessionWithinBytes(ctx context.Context, arg ListVisibleMessagesFromBySessionWithinBytesParams) ([]ListVisibleMessagesFromBySessionWithinBytesRow, error) {
+	rows, err := q.db.Query(ctx, listVisibleMessagesFromBySessionWithinBytes, arg.MaxBytes, arg.SessionID, arg.MessageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVisibleMessagesFromBySessionWithinBytesRow
+	for rows.Next() {
+		var i ListVisibleMessagesFromBySessionWithinBytesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,

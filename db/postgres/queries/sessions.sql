@@ -670,3 +670,26 @@ WHERE team_id = public.memoh_current_team_id()
   AND runtime_type = sqlc.arg(runtime_type)
   AND model_preference_revision IS NOT DISTINCT FROM sqlc.narg(expected_revision)::uuid
   AND deleted_at IS NULL;
+
+-- name: GetSessionContextEpoch :one
+-- Context Epoch state lives in session metadata (no new table): the epoch
+-- counter and the history anchor the session loads from (Context Epoch D1).
+-- Empty means the session has no epoch state yet.
+SELECT COALESCE((metadata->'context_epoch')::text, '')::text AS state
+FROM bot_sessions
+WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(session_id) AND deleted_at IS NULL;
+
+-- name: AdvanceSessionContextEpoch :one
+-- Monotonic guarded write: the epoch and the anchor may only move forward, so
+-- a stale or racing writer can never slide history loading backwards. The
+-- guards compare against the incoming values, making a lost update a no-op
+-- (zero rows) instead of a regression.
+UPDATE bot_sessions
+SET metadata = jsonb_set(metadata, '{context_epoch}', sqlc.arg(state)::jsonb, true),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(session_id)
+  AND deleted_at IS NULL
+  AND COALESCE((metadata->'context_epoch'->>'epoch')::bigint, 0) <= sqlc.arg(epoch)::bigint
+  AND COALESCE((metadata->'context_epoch'->>'anchor_created_at_ms')::bigint, 0) <= sqlc.arg(anchor_created_at_ms)::bigint
+RETURNING (metadata->'context_epoch')::text AS state;

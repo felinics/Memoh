@@ -35,6 +35,41 @@ func (q *Queries) ActivateSessionRuntimeFence(ctx context.Context, arg ActivateS
 	return runtime_fencing_token, err
 }
 
+const advanceSessionContextEpoch = `-- name: AdvanceSessionContextEpoch :one
+UPDATE bot_sessions
+SET metadata = jsonb_set(metadata, '{context_epoch}', $1::jsonb, true),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $2
+  AND deleted_at IS NULL
+  AND COALESCE((metadata->'context_epoch'->>'epoch')::bigint, 0) <= $3::bigint
+  AND COALESCE((metadata->'context_epoch'->>'anchor_created_at_ms')::bigint, 0) <= $4::bigint
+RETURNING (metadata->'context_epoch')::text AS state
+`
+
+type AdvanceSessionContextEpochParams struct {
+	State             []byte      `json:"state"`
+	SessionID         pgtype.UUID `json:"session_id"`
+	Epoch             int64       `json:"epoch"`
+	AnchorCreatedAtMs int64       `json:"anchor_created_at_ms"`
+}
+
+// Monotonic guarded write: the epoch and the anchor may only move forward, so
+// a stale or racing writer can never slide history loading backwards. The
+// guards compare against the incoming values, making a lost update a no-op
+// (zero rows) instead of a regression.
+func (q *Queries) AdvanceSessionContextEpoch(ctx context.Context, arg AdvanceSessionContextEpochParams) (string, error) {
+	row := q.db.QueryRow(ctx, advanceSessionContextEpoch,
+		arg.State,
+		arg.SessionID,
+		arg.Epoch,
+		arg.AnchorCreatedAtMs,
+	)
+	var state string
+	err := row.Scan(&state)
+	return state, err
+}
+
 const compareAndSetSessionModelPreference = `-- name: CompareAndSetSessionModelPreference :execrows
 UPDATE bot_sessions
 SET preferred_chat_model_id = $1::uuid,
@@ -584,6 +619,22 @@ func (q *Queries) GetSessionByID(ctx context.Context, id pgtype.UUID) (BotSessio
 		&i.BotAgentID,
 	)
 	return i, err
+}
+
+const getSessionContextEpoch = `-- name: GetSessionContextEpoch :one
+SELECT COALESCE((metadata->'context_epoch')::text, '')::text AS state
+FROM bot_sessions
+WHERE team_id = public.memoh_current_team_id() AND id = $1 AND deleted_at IS NULL
+`
+
+// Context Epoch state lives in session metadata (no new table): the epoch
+// counter and the history anchor the session loads from (Context Epoch D1).
+// Empty means the session has no epoch state yet.
+func (q *Queries) GetSessionContextEpoch(ctx context.Context, sessionID pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getSessionContextEpoch, sessionID)
+	var state string
+	err := row.Scan(&state)
+	return state, err
 }
 
 const getSessionDiscussCursor = `-- name: GetSessionDiscussCursor :one
