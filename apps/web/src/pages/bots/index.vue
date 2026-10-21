@@ -122,7 +122,9 @@ const searchText = ref('')
 
 const { data: botData, status } = useQuery(getBotsQuery())
 
-const isLoading = computed(() => status.value === 'loading')
+// Colada's status is 'pending' until the first result arrives; background
+// refetches keep 'success', so the skeleton only covers the initial load.
+const isLoading = computed(() => status.value === 'pending')
 
 const realBots = computed(() => botData.value?.items ?? [])
 

@@ -786,7 +786,8 @@ const isTransientState = computed(() =>
 const {
   data: networkStatusData,
   refetch: refetchNetworkStatus,
-  isFetching: isNetworkStatusFetching,
+  // Pinia Colada's isLoading tracks every in-flight fetch, refetches included
+  // (it is asyncStatus === 'loading'), so it also gates the poll below.
   isLoading: isNetworkStatusLoading,
 } = useQuery({
   key: () => ['bot-network-status', props.botId],
@@ -1034,7 +1035,7 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 watch(isTransientState, (shouldPoll) => {
   if (shouldPoll && !pollTimer) {
     pollTimer = setInterval(() => {
-      if (isTransientState.value && !isNetworkStatusFetching.value) {
+      if (isTransientState.value && !isNetworkStatusLoading.value) {
         refetchNetworkStatus()
       }
     }, 5000)

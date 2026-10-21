@@ -370,7 +370,9 @@ const emit = defineEmits<{
 const { t, locale } = useI18n()
 const durationForm = useForm({
   validationSchema: computed(() => toTypedSchema(z.object({
-    maxRunMinutes: z.number({ required_error: t('bots.schedule.form.invalidMaxRunMinutes'), invalid_type_error: t('bots.schedule.form.invalidMaxRunMinutes') }).int(t('bots.schedule.form.invalidMaxRunMinutes')).min(5, t('bots.schedule.form.invalidMaxRunMinutes')).max(1440, t('bots.schedule.form.invalidMaxRunMinutes')),
+    // zod 4 dropped required_error / invalid_type_error; `error` now covers
+    // the missing and non-number cases that a cleared field produces.
+    maxRunMinutes: z.number({ error: t('bots.schedule.form.invalidMaxRunMinutes') }).int(t('bots.schedule.form.invalidMaxRunMinutes')).min(5, t('bots.schedule.form.invalidMaxRunMinutes')).max(1440, t('bots.schedule.form.invalidMaxRunMinutes')),
   }))),
   initialValues: { maxRunMinutes: 60 },
 })
