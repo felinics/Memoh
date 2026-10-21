@@ -48,6 +48,7 @@ import (
 	"github.com/felinics/memoh/internal/channel/publicmedia"
 	"github.com/felinics/memoh/internal/channel/route"
 	"github.com/felinics/memoh/internal/channelaccess"
+	"github.com/felinics/memoh/internal/chat/contextepoch"
 	"github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
@@ -86,6 +87,7 @@ func provideDiscussDriver(log *slog.Logger, eventStore *timeline.EventStore, msg
 		CursorStore:        eventStore,
 		Artifacts:          compaction.NewTimelineArtifactSource(queries),
 		Logger:             log,
+		Epochs:             contextepoch.NewStore(queries, log),
 		AdmissionMaxTokens: cfg.Agent.EffectiveContextAbsoluteMaxTokens(),
 	})
 }

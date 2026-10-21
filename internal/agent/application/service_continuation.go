@@ -36,7 +36,7 @@ func (s *Service) prepareContinuationRunConfig(
 	summaryScope contextfrag.Scope,
 	eventCh chan<- WSStreamEvent,
 ) (native.RunConfig, error) {
-	loaded, err := s.loadHistoryRecords(ctx, fallback, summaryScope.SessionID, defaultMaxContextMinutes, 0)
+	loaded, err := s.loadHistoryRecords(ctx, fallback, summaryScope.SessionID, 0)
 	if err != nil {
 		return native.RunConfig{}, err
 	}

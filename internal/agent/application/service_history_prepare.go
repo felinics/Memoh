@@ -23,7 +23,7 @@ func (s *Service) prepareHistoryContext(
 	fallback historyfrag.ScopeFallback,
 	contextTokenBudget int,
 ) (preparedHistoryContext, error) {
-	loaded, err := s.loadHistoryRecords(ctx, fallback, req.ThreadID, defaultMaxContextMinutes, contextTokenBudget)
+	loaded, err := s.loadHistoryRecords(ctx, fallback, req.ThreadID, contextTokenBudget)
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
@@ -31,9 +31,12 @@ func (s *Service) prepareHistoryContext(
 	loaded = dropPreflightFailureTurns(loaded)
 	loaded = dropEmptyHistoryFailures(loaded)
 	boundary := s.loadCompactionArtifactBoundary(ctx, loaded, req.ThreadID, req.HistoryCutoffBeforeMessageID)
-	loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
+	loaded, err = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
+	if err != nil {
+		return preparedHistoryContext{}, err
+	}
 	loaded = dedupePersistedCurrentUserMessage(loaded, req)
-	loaded, err = s.ensureRequiredHistoryMessage(ctx, loaded, req)
+	loaded, err = s.ensureRequiredHistoryMessage(ctx, loaded, req, contextTokenBudget)
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}

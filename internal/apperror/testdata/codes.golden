@@ -104,6 +104,7 @@ connector.request_invalid	400
 connector.request_rejected	400
 connector.upstream_unavailable	502
 context.budget_unsatisfied	422
+context.history_cutoff_missing	409
 context.protected_overflow	422
 context_lifecycle.access_denied	403
 context_lifecycle.authentication_required	401

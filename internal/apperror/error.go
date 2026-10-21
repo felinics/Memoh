@@ -43,6 +43,7 @@ const (
 	CodeContextBudgetUnsatisfied                 Code = "context.budget_unsatisfied"
 	CodeContextProtectedOverflow                 Code = "context.protected_overflow"
 	CodeMediaReferenceUnavailable                Code = "media.reference_unavailable"
+	CodeContextHistoryCutoffMissing              Code = "context.history_cutoff_missing"
 	CodeWorkspaceUnreachable                     Code = "workspace.unreachable"
 	CodeWorkspaceTemplateBootstrapFailed         Code = "workspace.template_bootstrap_failed"
 	CodeWorkspaceDisplayClipboardFailed          Code = "workspace.display_clipboard_failed"
@@ -586,6 +587,12 @@ var catalog = map[Code]Definition{
 		Detail:     "Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window.",
 	},
 	CodeMediaReferenceUnavailable: {HTTPStatus: http.StatusUnprocessableEntity, Detail: "This file could not be shared. Ask the agent to recreate or share it again."},
+	CodeContextHistoryCutoffMissing: {
+		// The history the caller named is gone (reset, fork, or an expired
+		// window): re-anchor and retry, like a stale edit target.
+		HTTPStatus: http.StatusConflict,
+		Detail:     "The conversation history changed while this request was being prepared. Send the request again.",
+	},
 	CodeWorkspaceUnreachable: {
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The workspace could not be reached.",

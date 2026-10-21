@@ -14,6 +14,7 @@ import (
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
@@ -61,7 +62,7 @@ func TestEnsureRequiredHistoryMessageMergesVisibleWindowInOrder(t *testing.T) {
 		ThreadID:                     "session-1",
 		RequiredHistoryMessageID:     "user-1",
 		HistoryCutoffBeforeMessageID: "assistant-final-1",
-	})
+	}, 0)
 	if err != nil {
 		t.Fatalf("ensureRequiredHistoryMessage() error = %v", err)
 	}
@@ -79,8 +80,39 @@ func TestFilterMessagesBeforeIDFailsClosedWhenCutoffIsMissing(t *testing.T) {
 	records := []historyfrag.HistoryRecord{
 		historyRecord("later-user", ModelMessage{Role: "user", Content: newTextContent("later")}, nil),
 	}
-	if got := filterMessagesBeforeID(records, "missing-cutoff"); len(got) != 0 {
-		t.Fatalf("missing cutoff retained history: %#v", got)
+	// Fail-closed (docs/design/context-epoch-spec.md): a missing cutoff used
+	// to silently return an EMPTY history, wiping the conversation from the
+	// request. Now the turn is rejected so the caller re-anchors and retries.
+	got, err := filterMessagesBeforeID(records, "missing-cutoff")
+	if err == nil {
+		t.Fatalf("missing cutoff must fail closed, got messages %#v", got)
+	}
+	if got != nil {
+		t.Fatalf("missing cutoff must not return a partial history: %#v", got)
+	}
+	if code := apperror.CodeOf(err); code != apperror.CodeContextHistoryCutoffMissing {
+		t.Fatalf("error = %v, want code %s", err, apperror.CodeContextHistoryCutoffMissing)
+	}
+}
+
+func TestFilterMessagesBeforeIDKeepsPrefixBeforeCutoff(t *testing.T) {
+	t.Parallel()
+
+	records := []historyfrag.HistoryRecord{
+		historyRecord("first", ModelMessage{Role: "user", Content: newTextContent("first")}, nil),
+		historyRecord("cutoff", ModelMessage{Role: "assistant", Content: newTextContent("cut")}, nil),
+		historyRecord("after", ModelMessage{Role: "user", Content: newTextContent("after")}, nil),
+	}
+	got, err := filterMessagesBeforeID(records, "cutoff")
+	if err != nil {
+		t.Fatalf("filterMessagesBeforeID() error = %v", err)
+	}
+	if len(got) != 1 || got[0].DBMessageID != "first" {
+		t.Fatalf("got %v, want only the message before the cutoff", historyRecordIDs(got))
+	}
+	noCutoff, err := filterMessagesBeforeID(records, "")
+	if err != nil || len(noCutoff) != len(records) {
+		t.Fatalf("empty cutoff = (%v, %v), want full history and no error", noCutoff, err)
 	}
 }
 

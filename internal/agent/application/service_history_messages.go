@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
@@ -126,18 +125,20 @@ func trimPipelineMessagesByTokens(log *slog.Logger, messages []ModelMessage, pin
 	return kept
 }
 
-// loadTurnResponses loads recent assistant/tool messages from bot_history_messages
-// for use as the TR stream in pipeline-based context assembly. The load is
-// byte-budgeted on the database side (CM-ADM-001): rows are admitted
-// newest-first within the context budget and projected to content, so a
-// dense 24-hour window, or legacy lifecycle metadata on its rows, can never
-// materialize more than the budget's worth of payload.
+// loadTurnResponses loads assistant/tool messages from bot_history_messages
+// for use as the TR stream in pipeline-based context assembly, starting from
+// the session's persisted Context Epoch anchor — never a wall-clock window
+// (docs/design/context-epoch-spec.md, rule 2). The load is byte-budgeted on
+// the database side (CM-ADM-001): rows are admitted newest-first within the
+// context budget and projected to content, so a dense window, or legacy
+// lifecycle metadata on its rows, can never materialize more than the
+// budget's worth of payload. A budget-bound load records an explicit anchor
+// advance (reason "budget") through the epoch store.
 func (s *Service) loadTurnResponses(ctx context.Context, sessionID string, contextTokenBudget int) []timeline.TurnResponseEntry {
 	if s.messageService == nil {
 		return nil
 	}
-	since := time.Now().UTC().Add(-24 * time.Hour)
-	msgs, err := s.messageService.ListTurnResponseSourcesSinceBySessionWithinBytes(ctx, sessionID, since, s.historyLoadMaxBytes(contextTokenBudget))
+	msgs, err := s.loadAnchoredSessionMessages(ctx, sessionID, "pipeline_chat_tr", s.historyLoadMaxBytes(contextTokenBudget), s.messageService.ListTurnResponseSourcesSinceBySessionWithinBytes)
 	if err != nil {
 		s.logger.WarnContext(ctx, "load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
 		return nil

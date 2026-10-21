@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -131,6 +132,88 @@ func TestBuildMemoryQueryRespectsRetryCutoffForRawAndCompactedHistory(t *testing
 	for _, excluded := range []string{"edited-away request", "edited-away compacted context"} {
 		if strings.Contains(query.Query, excluded) {
 			t.Fatalf("memory query resurrected %q across retry cutoff: %q", excluded, query.Query)
+		}
+	}
+}
+
+type recentUserQueryService struct {
+	recordingMessageService
+	recent []messagepkg.Message
+	limit  int32
+	byID   map[string]messagepkg.Message
+}
+
+func (s *recentUserQueryService) ListRecentUserMessagesBySession(_ context.Context, _ string, maxMessages int32) ([]messagepkg.Message, error) {
+	s.limit = maxMessages
+	return append([]messagepkg.Message(nil), s.recent...), nil
+}
+
+func (s *recentUserQueryService) GetByIDBySession(_ context.Context, _ string, messageID string) (messagepkg.Message, error) {
+	msg, ok := s.byID[messageID]
+	if !ok {
+		return messagepkg.Message{}, errMemoryQueryTestNotFound
+	}
+	return msg, nil
+}
+
+var errMemoryQueryTestNotFound = errors.New("message not found")
+
+func TestBuildMemoryQueryUsesRecentUserMessages(t *testing.T) {
+	t.Parallel()
+
+	// The store answers newest first, like the SQL projection.
+	service := &recentUserQueryService{recent: []messagepkg.Message{
+		persistedHistoryMessage(t, "recent-2", "user", "I prefer tea over coffee"),
+		persistedHistoryMessage(t, "recent-1", "user", "I am visiting Berlin next week"),
+	}}
+	svc := &Service{messageService: service}
+
+	query := svc.buildMemoryQuery(context.Background(), ChatRequest{
+		Query:    "What should I pack?",
+		ThreadID: "session-1",
+	})
+	if query.Source != "current_query_with_history" {
+		t.Fatalf("Source = %q, want current_query_with_history", query.Source)
+	}
+	for _, want := range []string{"What should I pack?", "I prefer tea", "I am visiting Berlin"} {
+		if !strings.Contains(query.Query, want) {
+			t.Fatalf("query missing %q: %s", want, query.Query)
+		}
+	}
+	if service.limit != defaultMemoryQueryRecentMessages*memoryQueryRecentFetchFactor {
+		t.Fatalf("fetch limit = %d, want %d", service.limit, defaultMemoryQueryRecentMessages*memoryQueryRecentFetchFactor)
+	}
+}
+
+func TestBuildMemoryQueryHonorsHistoryCutoff(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC)
+	oldest := persistedHistoryMessage(t, "recent-1", "user", "before the reset")
+	oldest.CreatedAt = base
+	cutoff := persistedHistoryMessage(t, "recent-2", "user", "the reset point")
+	cutoff.CreatedAt = base.Add(time.Hour)
+	newest := persistedHistoryMessage(t, "recent-3", "user", "after the reset")
+	newest.CreatedAt = base.Add(2 * time.Hour)
+	service := &recentUserQueryService{
+		recent: []messagepkg.Message{newest, cutoff, oldest},
+		byID:   map[string]messagepkg.Message{cutoff.ID: cutoff},
+	}
+	svc := &Service{messageService: service}
+
+	query := svc.buildMemoryQuery(context.Background(), ChatRequest{
+		Query:                        "current question",
+		ThreadID:                     "session-1",
+		HistoryCutoffBeforeMessageID: cutoff.ID,
+	})
+	// filterMessagesBeforeID semantics: only messages strictly before the
+	// cutoff survive.
+	if !strings.Contains(query.Query, "before the reset") {
+		t.Fatalf("cutoff must keep earlier user messages: %s", query.Query)
+	}
+	for _, excluded := range []string{"the reset point", "after the reset"} {
+		if strings.Contains(query.Query, excluded) {
+			t.Fatalf("cutoff must exclude %q: %s", excluded, query.Query)
 		}
 	}
 }

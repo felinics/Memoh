@@ -7,6 +7,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/chat/contextepoch"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
@@ -35,6 +36,10 @@ type DiscussDriverDeps struct {
 	Artifacts      DiscussArtifactProvider
 	Broadcaster    DiscussStreamBroadcaster
 	Logger         *slog.Logger
+	// Epochs anchors discuss history loads at the session's persisted Context
+	// Epoch state (docs/design/context-epoch-spec.md, rule 2). Nil keeps the
+	// constant beginning-of-session anchor.
+	Epochs *contextepoch.Store
 	// AdmissionMaxTokens is the server-wide context admission cap applied
 	// before composition materializes anything (CM-ADM-001). Zero selects
 	// the shared default; the cap is never disabled.
@@ -117,6 +122,7 @@ func NewDiscussDriver(deps DiscussDriverDeps) *DiscussDriver {
 		sessions: make(map[string]*discussSession),
 		history: discussHistoryReader{
 			messages: deps.MessageService,
+			epochs:   deps.Epochs,
 			maxBytes: int64(capTokens) * turn.ContextBytesPerToken,
 			logger:   logger,
 		},

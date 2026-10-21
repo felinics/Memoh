@@ -633,6 +633,7 @@
     },
     "context": {
       "budget_unsatisfied": "模型上下文窗口不足，无法处理当前请求。可尝试 /compact 压缩较早的历史、缩短请求，或改用上下文窗口更大的模型。",
+      "history_cutoff_missing": "准备本次请求时会话历史发生了变化，请重新发送请求。",
       "protected_overflow": "必要的上下文内容超出了模型上下文预算。可尝试 /compact 压缩较早的历史，或改用上下文窗口更大的模型。"
     },
     "context_lifecycle": {

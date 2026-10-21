@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/chat/contextepoch"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
@@ -113,22 +114,28 @@ func (s *Service) currentWorkspaceContextMessage(ctx context.Context, req ChatRe
 	return &message
 }
 
-// loadHistoryRecords loads the recent history window. The load is
-// byte-budgeted on the database side (CM-ADM-001): rows are admitted
-// newest-first within contextTokenBudget (the absolute cap when the budget
-// is unset), so the time window alone never bounds process memory.
-func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.ScopeFallback, sessionID string, maxContextMinutes, contextTokenBudget int) ([]historyfrag.HistoryRecord, error) {
+// loadHistoryRecords loads the session's history from its persisted Context
+// Epoch anchor (docs/design/context-epoch-spec.md, rule 2) — never from a
+// wall-clock window, so the request prefix cannot drift as time passes. The
+// load is byte-budgeted on the database side (CM-ADM-001): rows are admitted
+// newest-first within contextTokenBudget (the absolute cap when the budget is
+// unset), so history size alone never bounds process memory. When the budget
+// admits fewer rows than the session holds, the epoch store records an
+// explicit anchor advance with reason "budget".
+func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.ScopeFallback, sessionID string, contextTokenBudget int) ([]historyfrag.HistoryRecord, error) {
 	if s.messageService == nil {
 		return nil, nil
 	}
-	since := time.Now().UTC().Add(-time.Duration(maxContextMinutes) * time.Minute)
 	maxBytes := s.historyLoadMaxBytes(contextTokenBudget)
 	var msgs []messagepkg.Message
 	var err error
 	if strings.TrimSpace(sessionID) != "" {
-		msgs, err = s.messageService.ListActiveSinceBySessionWithinBytes(ctx, sessionID, since, maxBytes)
+		msgs, err = s.loadAnchoredSessionMessages(ctx, sessionID, "legacy_chat", maxBytes, s.messageService.ListActiveSinceBySessionWithinBytes)
 	} else {
-		msgs, err = s.messageService.ListActiveSinceWithinBytes(ctx, fallback.ChatID, since, maxBytes)
+		// Sessionless (chat-scoped) loads have no per-session epoch state to
+		// persist; the beginning of the chat is their fixed anchor and the
+		// byte budget is their only bound.
+		msgs, err = s.messageService.ListActiveSinceWithinBytes(ctx, fallback.ChatID, contextepoch.Beginning, maxBytes)
 	}
 	if err != nil {
 		return nil, err
@@ -170,7 +177,7 @@ func historyScopeFallbackFromToolApprovalRequest(req toolapproval.Request) histo
 	}
 }
 
-func (s *Service) ensureRequiredHistoryMessage(ctx context.Context, messages []historyfrag.HistoryRecord, req ChatRequest) ([]historyfrag.HistoryRecord, error) {
+func (s *Service) ensureRequiredHistoryMessage(ctx context.Context, messages []historyfrag.HistoryRecord, req ChatRequest, contextTokenBudget int) ([]historyfrag.HistoryRecord, error) {
 	messageID := strings.TrimSpace(req.RequiredHistoryMessageID)
 	if messageID == "" || s.messageService == nil || strings.TrimSpace(req.ThreadID) == "" {
 		return messages, nil
@@ -181,7 +188,10 @@ func (s *Service) ensureRequiredHistoryMessage(ctx context.Context, messages []h
 			return messages, nil
 		}
 	}
-	window, err := s.messageService.ListVisibleFromBySession(ctx, req.ThreadID, messageID)
+	// CM-ADM-001: the required window loads under the same byte budget as
+	// the rest of the history, admitted oldest-first from the required
+	// message so the anchor itself always fits.
+	window, err := s.listVisibleWindowFrom(ctx, req.ThreadID, messageID, s.historyLoadMaxBytes(contextTokenBudget))
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +205,10 @@ func (s *Service) ensureRequiredHistoryMessage(ctx context.Context, messages []h
 		required = append(required, record)
 	}
 	required = pruneHistoryForGateway(required)
-	required = filterMessagesBeforeID(required, req.HistoryCutoffBeforeMessageID)
+	required, err = filterMessagesBeforeID(required, req.HistoryCutoffBeforeMessageID)
+	if err != nil {
+		return nil, err
+	}
 	if !containsHistoryRecord(required, messageID) {
 		return nil, errors.New("required history message is not visible")
 	}
@@ -205,6 +218,22 @@ func (s *Service) ensureRequiredHistoryMessage(ctx context.Context, messages []h
 		}
 	}
 	return mergeRequiredHistoryWindow(messages, required), nil
+}
+
+// listVisibleWindowFrom loads the visible window starting at messageID under
+// the byte budget when the message service supports it; stores without the
+// budgeted variant (test doubles) keep the unbudgeted read.
+func (s *Service) listVisibleWindowFrom(ctx context.Context, sessionID, messageID string, maxBytes int64) ([]messagepkg.Message, error) {
+	if budgeted, ok := s.messageService.(visibleWindowLister); ok {
+		return budgeted.ListVisibleFromBySessionWithinBytes(ctx, sessionID, messageID, maxBytes)
+	}
+	return s.messageService.ListVisibleFromBySession(ctx, sessionID, messageID)
+}
+
+// visibleWindowLister is the byte-budgeted required-window read
+// (CM-ADM-001). *message.DBService implements it.
+type visibleWindowLister interface {
+	ListVisibleFromBySessionWithinBytes(ctx context.Context, sessionID, messageID string, maxBytes int64) ([]messagepkg.Message, error)
 }
 
 func containsHistoryRecord(messages []historyfrag.HistoryRecord, messageID string) bool {
@@ -240,17 +269,27 @@ func mergeRequiredHistoryWindow(messages []historyfrag.HistoryRecord, required [
 	return append(merged, required...)
 }
 
-func filterMessagesBeforeID(messages []historyfrag.HistoryRecord, messageID string) []historyfrag.HistoryRecord {
+// filterMessagesBeforeID drops the cutoff message and everything after it.
+// It is fail-closed (docs/design/context-epoch-spec.md): a cutoff missing from
+// the loaded history used to silently return an EMPTY history, wiping the
+// whole conversation from the request; now it refuses the turn so the caller
+// (e.g. the retry path) re-anchors and retries instead of talking to the
+// model with no history.
+func filterMessagesBeforeID(messages []historyfrag.HistoryRecord, messageID string) ([]historyfrag.HistoryRecord, error) {
 	messageID = strings.TrimSpace(messageID)
 	if messageID == "" {
-		return messages
+		return messages, nil
 	}
 	for i, item := range messages {
 		if strings.TrimSpace(item.DBMessageID) == messageID {
-			return messages[:i]
+			return messages[:i], nil
 		}
 	}
-	return nil
+	return nil, apperror.Wrap(
+		apperror.CodeContextHistoryCutoffMissing,
+		fmt.Errorf("history cutoff message %s is not in the loaded history window", messageID),
+		nil,
+	)
 }
 
 func compactionSummaryScope(botID, chatID, sessionID, conversationType, conversationName, replyTarget string) contextfrag.Scope {

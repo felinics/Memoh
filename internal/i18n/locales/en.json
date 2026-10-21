@@ -633,6 +633,7 @@
     },
     "context": {
       "budget_unsatisfied": "The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window.",
+      "history_cutoff_missing": "The conversation history changed while this request was being prepared. Send the request again.",
       "protected_overflow": "Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window."
     },
     "context_lifecycle": {

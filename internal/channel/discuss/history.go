@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/felinics/memoh/internal/chat/contextepoch"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
@@ -18,6 +19,10 @@ type HistoryReader interface {
 
 type discussHistoryReader struct {
 	messages HistoryReader
+	// epochs anchors the load at the session's persisted Context Epoch state
+	// (docs/design/context-epoch-spec.md, rule 2). Nil keeps the constant
+	// beginning-of-session anchor, which is what the zero state resolves to.
+	epochs *contextepoch.Store
 	// maxBytes selects the newest content window (CM-ADM-001). The query
 	// retains the crossing row and only projects the interrupted flag from
 	// metadata, so legacy lifecycle audits stay outside the loaded window.
@@ -33,23 +38,41 @@ type discussHistoryMeasure struct {
 	Loaded        int
 }
 
-// Load reads the byte-budgeted recent window of persisted assistant/tool
-// responses for timeline composition, measuring the full extent with a
-// metadata-only aggregate first. Older responses beyond the budget stay in
-// the database; compaction artifacts represent them in composition.
+// Load reads the byte-budgeted window of persisted assistant/tool responses
+// for timeline composition, starting from the session's Context Epoch anchor,
+// and measures the anchored extent with a metadata-only aggregate for
+// admission observability (CM-ADM-001, CM-OBS-001). A budget-bound load
+// records an explicit anchor advance (reason "budget") through the epoch
+// store instead of silently sliding. Older responses beyond the budget stay
+// in the database; compaction artifacts represent them in composition.
 func (r discussHistoryReader) Load(ctx context.Context, sessionID string) ([]timeline.TurnResponseEntry, discussHistoryMeasure) {
-	if r.messages == nil {
-		return nil, discussHistoryMeasure{}
-	}
-	since := time.Unix(0, 0).UTC()
 	measure := discussHistoryMeasure{}
-	if agg, err := r.messages.MeasureActiveBySession(ctx, sessionID, since); err == nil {
+	if r.messages == nil {
+		return nil, measure
+	}
+	measureFn := func(ctx context.Context, since time.Time) (int64, error) {
+		agg, err := r.messages.MeasureActiveBySession(ctx, sessionID, since)
+		if err != nil {
+			return 0, err
+		}
 		measure.TotalMessages = agg.MessageCount
 		measure.TotalBytes = agg.ContentBytes
-	} else {
-		r.logger.WarnContext(ctx, "measure TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		return agg.MessageCount, nil
 	}
-	messages, err := r.messages.ListTurnResponseSourcesSinceBySessionWithinBytes(ctx, sessionID, since, r.maxBytes)
+	loadFn := func(ctx context.Context, since time.Time) ([]messagepkg.Message, error) {
+		return r.messages.ListTurnResponseSourcesSinceBySessionWithinBytes(ctx, sessionID, since, r.maxBytes)
+	}
+	var messages []messagepkg.Message
+	var err error
+	if r.epochs != nil {
+		messages, err = r.epochs.LoadWindow(ctx, sessionID, "discuss", measureFn, loadFn)
+	} else {
+		since := contextepoch.Beginning
+		if _, mErr := measureFn(ctx, since); mErr != nil {
+			r.logger.WarnContext(ctx, "measure TRs failed", slog.String("session_id", sessionID), slog.Any("error", mErr))
+		}
+		messages, err = loadFn(ctx, since)
+	}
 	if err != nil {
 		r.logger.WarnContext(ctx, "load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
 		return nil, measure

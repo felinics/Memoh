@@ -38,6 +38,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	turnpkg "github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/chat/contextepoch"
 	messageevent "github.com/felinics/memoh/internal/chat/event"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
@@ -54,9 +55,11 @@ import (
 	"github.com/felinics/memoh/internal/workspace"
 )
 
-const (
-	defaultMaxContextMinutes = 24 * 60
-)
+// The 24-hour wall-clock history window (now − maxContextMinutes) was
+// retired by the Context Epoch work: every history load starts from the
+// session's persisted anchor instead (docs/design/context-epoch-spec.md,
+// rule 2), so the request prefix stops drifting as time passes.
+// See internal/chat/contextepoch.
 
 // SkillEntry represents a skill loaded from the container.
 type SkillEntry struct {
@@ -119,6 +122,7 @@ type Service struct {
 	memoryRegistry          *memprovider.Registry
 	memoryOverviewActivity  sessionActivity
 	messageService          messagepkg.Service
+	contextEpochs           *contextepoch.Store
 	settingsService         *settings.Service
 	accountService          *accounts.Service
 	sessionService          SessionService
@@ -239,6 +243,9 @@ func NewService(
 		memorySearchTimeout:    defaultMemorySearchTimeout,
 		clockLocation:          clockLocation,
 		logger:                 log.With(slog.String("service", "agent/application")),
+	}
+	if queries != nil {
+		service.contextEpochs = contextepoch.NewStore(queries, log)
 	}
 	return service
 }

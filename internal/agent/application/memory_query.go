@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/prune"
 	"github.com/felinics/memoh/internal/textutil"
 )
@@ -49,7 +50,7 @@ func (s *Service) buildMemoryQuery(ctx context.Context, req ChatRequest) memoryQ
 	if s == nil || s.messageService == nil {
 		return builder.Build(req, nil)
 	}
-	loaded, err := s.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), req.ThreadID, defaultMaxContextMinutes, 0)
+	loaded, err := s.loadRecentUserHistoryForMemoryQuery(ctx, req)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.WarnContext(ctx, "memory query history load failed",
@@ -61,18 +62,93 @@ func (s *Service) buildMemoryQuery(ctx context.Context, req ChatRequest) memoryQ
 		}
 		return builder.Build(req, nil)
 	}
+	return builder.Build(req, loaded)
+}
+
+// recentUserMessageLister is the projection memory-query building reads: the
+// newest few user messages, straight from the store. *message.DBService
+// implements it.
+type recentUserMessageLister interface {
+	ListRecentUserMessagesBySession(ctx context.Context, sessionID string, maxMessages int32) ([]messagepkg.Message, error)
+}
+
+// memoryQueryRecentFetchFactor over-fetches user rows so current-message
+// dedupe and history-cutoff filtering still leave enough distinct messages.
+const memoryQueryRecentFetchFactor = 4
+
+// loadRecentUserHistoryForMemoryQuery reads the newest user messages directly
+// (Context Epoch D1: a count, not a wall-clock window), honoring the history
+// cutoff. Stores without the projection — and sessionless requests, whose
+// cutoff cannot be resolved without a session — keep the legacy anchored load.
+func (s *Service) loadRecentUserHistoryForMemoryQuery(ctx context.Context, req ChatRequest) ([]historyfrag.HistoryRecord, error) {
+	sessionID := strings.TrimSpace(req.ThreadID)
+	lister, ok := s.messageService.(recentUserMessageLister)
+	if !ok || sessionID == "" {
+		return s.legacyMemoryQueryHistory(ctx, req)
+	}
+	msgs, err := lister.ListRecentUserMessagesBySession(ctx, sessionID, defaultMemoryQueryRecentMessages*memoryQueryRecentFetchFactor)
+	if err != nil {
+		return nil, err
+	}
+	msgs = memoryQueryApplyCutoff(ctx, s, sessionID, req.HistoryCutoffBeforeMessageID, msgs)
+	records := make([]historyfrag.HistoryRecord, 0, len(msgs))
+	// The store returns newest first; history records run oldest first.
+	for i := len(msgs) - 1; i >= 0; i-- {
+		records = append(records, historyfrag.HistoryRecord{
+			ModelMessage: historyfrag.DecodeStoredModelMessage(s.logger, msgs[i].ID, msgs[i].Role, msgs[i].Content),
+		})
+	}
+	return records, nil
+}
+
+// memoryQueryApplyCutoff drops messages at or after the history-cutoff
+// message. A memory query degrades instead of failing the turn: an
+// unresolvable cutoff leaves the window untouched, just as a load failure
+// falls back to the current query alone.
+func memoryQueryApplyCutoff(ctx context.Context, s *Service, sessionID, cutoffMessageID string, msgs []messagepkg.Message) []messagepkg.Message {
+	cutoffMessageID = strings.TrimSpace(cutoffMessageID)
+	if cutoffMessageID == "" || len(msgs) == 0 {
+		return msgs
+	}
+	cutoff, err := s.messageService.GetByIDBySession(ctx, sessionID, cutoffMessageID)
+	if err != nil || cutoff.CreatedAt.IsZero() {
+		if err != nil && s.logger != nil {
+			s.logger.WarnContext(ctx, "memory query cutoff resolution failed",
+				slog.String("session_id", sessionID),
+				slog.String("cutoff_message_id", cutoffMessageID),
+				slog.Any("error", err))
+		}
+		return msgs
+	}
+	kept := msgs[:0]
+	for _, msg := range msgs {
+		if msg.CreatedAt.Before(cutoff.CreatedAt) {
+			kept = append(kept, msg)
+		}
+	}
+	return kept
+}
+
+// legacyMemoryQueryHistory is the pre-projection memory-query history load,
+// kept for stores without ListRecentUserMessagesBySession and for sessionless
+// requests. It reads the anchored, byte-budgeted history window.
+func (s *Service) legacyMemoryQueryHistory(ctx context.Context, req ChatRequest) ([]historyfrag.HistoryRecord, error) {
+	loaded, err := s.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), req.ThreadID, 0)
+	if err != nil {
+		return nil, err
+	}
 	loaded = pruneHistoryForGateway(loaded)
 	artifactBoundary := s.loadCompactionArtifactBoundary(ctx, loaded, req.ThreadID, req.HistoryCutoffBeforeMessageID)
-	loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
+	loaded, err = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
+	if err != nil {
+		return nil, err
+	}
 	loaded, err = s.replaceCompactedMessages(ctx, req.ThreadID, compactionSummaryScope(req.BotID, req.ChatID, req.ThreadID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded, artifactBoundary)
 	if err != nil {
-		if s.logger != nil {
-			s.logger.WarnContext(ctx, "memory query compaction frontier load failed", slog.String("session_id", req.ThreadID), slog.Any("error", err))
-		}
-		return builder.Build(req, nil)
+		return nil, err
 	}
 	loaded = dedupePersistedCurrentUserMessage(loaded, req)
-	return builder.Build(req, loaded)
+	return loaded, nil
 }
 
 func (b memoryQueryBuilder) Build(req ChatRequest, history []historyfrag.HistoryRecord) memoryQuery {

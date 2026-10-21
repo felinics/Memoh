@@ -96,11 +96,15 @@ func TestReplaceCompactedMessagesOnlyRestoresArtifactsWhollyBeforeIntentionalCut
 	}
 	boundary := compactionArtifactBoundaryBeforeMessage(loaded, "cutoff-assistant")
 
+	cut, err := filterMessagesBeforeID(loaded, "cutoff-assistant")
+	if err != nil {
+		t.Fatalf("filterMessagesBeforeID() error = %v", err)
+	}
 	got, err := resolver.replaceCompactedMessages(
 		context.Background(),
 		sessionID,
 		contextfrag.Scope{SessionID: sessionID},
-		filterMessagesBeforeID(loaded, "cutoff-assistant"),
+		cut,
 		boundary,
 	)
 	if err != nil {
