@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/chat/contextepoch"
 	messageevent "github.com/felinics/memoh/internal/chat/event"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -71,11 +72,12 @@ type inflightRun struct {
 
 // Service manages context compaction for bot conversations.
 type Service struct {
-	queries     dbstore.Queries
-	hookService *hooks.Service
-	logger      *slog.Logger
-	nowFn       func() time.Time
-	events      messageevent.Publisher
+	queries       dbstore.Queries
+	hookService   *hooks.Service
+	logger        *slog.Logger
+	nowFn         func() time.Time
+	events        messageevent.Publisher
+	contextEpochs *contextepoch.Store
 
 	inflightMu sync.Mutex
 	inflight   map[string]*inflightRun
@@ -193,6 +195,14 @@ func (s *Service) SetHookService(h *hooks.Service) {
 // SetEventPublisher wires lightweight activity notifications at startup.
 func (s *Service) SetEventPublisher(p messageevent.Publisher) {
 	s.events = p
+}
+
+// SetContextEpochs wires the Context Epoch store used to book segment merges
+// (spec: a merge rewrites the stable part, so it must advance the epoch).
+// Without it the merge pass stays off: merging without bookkeeping is worse
+// than a longer chain.
+func (s *Service) SetContextEpochs(store *contextepoch.Store) {
+	s.contextEpochs = store
 }
 
 // ActiveSessions is a process-local activity snapshot, not an admission gate.

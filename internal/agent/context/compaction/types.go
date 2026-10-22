@@ -70,7 +70,9 @@ type TriggerConfig struct {
 	HistoryBudgetTokens int
 	ContextWindowTokens int
 	PromptCacheTTL      string
-	AllowFrontierFusion bool
+	// SegmentCap bounds the summary-segment chain (Context Epoch spec: merge
+	// old segments when the chain exceeds K). Zero selects the spec default.
+	SegmentCap int
 
 	// Manual marks a user-initiated compaction (slash command, HTTP endpoint).
 	// Such a request bypasses the per-session failure cooldown so a user who

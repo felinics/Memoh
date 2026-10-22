@@ -90,6 +90,13 @@ RETURNING compact.id, compact.bot_id, compact.session_id, compact.status, compac
           compact.compaction_epoch, compact.started_at, compact.completed_at, compact.team_id;
 
 -- name: CompleteCompactionRollup :one
+-- Rollup completion doubles as the Context Epoch segment-merge record (spec
+-- rules 3+6: merging old segments rewrites the stable part, so the epoch must
+-- advance with reason segment-merge in the SAME statement as the supersession).
+-- The advanced_epoch CTE applies ALL merge eligibility fences plus the strict
+-- epoch guard, so a fenced-out merge cannot leave the epoch moved without the
+-- supersession; a lost epoch race no-ops the whole statement and the caller
+-- retries the merge from fresh state.
 WITH target_compact AS MATERIALIZED (
   SELECT compact.id, compact.session_id, compact.team_id
   FROM bot_history_message_compacts compact
@@ -141,30 +148,39 @@ locked_parents AS MATERIALIZED (
   ORDER BY parent.id
   FOR UPDATE OF parent
 ),
+advanced_epoch AS (
+  UPDATE bot_sessions session
+  SET metadata = jsonb_set(session.metadata, '{context_epoch}', sqlc.arg(context_epoch_state)::jsonb, true),
+      updated_at = now()
+  WHERE sqlc.arg(status)::text = 'ok'
+    AND session.team_id = public.memoh_current_team_id()
+    AND session.id = (SELECT owner.id FROM owner_session owner)
+    AND EXISTS (
+      SELECT 1
+      FROM owner_session owner
+      JOIN locked_compact target
+        ON target.team_id = owner.team_id
+      WHERE owner.id = target.session_id
+        AND owner.bot_id = target.bot_id
+        AND owner.compaction_epoch = target.compaction_epoch
+    )
+    AND (
+      SELECT count(*)
+      FROM bot_history_messages source_message
+      JOIN locked_compact target ON target.team_id = source_message.team_id
+      WHERE source_message.team_id = public.memoh_current_team_id()
+        AND source_message.compact_id = target.id
+    ) = sqlc.arg(message_count)
+    AND (SELECT count(*) FROM locked_parents) = CARDINALITY(sqlc.arg(parents)::uuid[])
+    AND COALESCE((session.metadata->'context_epoch'->>'epoch')::bigint, 0) < sqlc.arg(context_epoch)::bigint
+    AND COALESCE((session.metadata->'context_epoch'->>'anchor_created_at_ms')::bigint, 0) <= sqlc.arg(context_epoch_anchor_ms)::bigint
+  RETURNING session.id
+),
 eligible_completion AS MATERIALIZED (
   SELECT target.id, target.bot_id, target.session_id, target.compaction_epoch, target.team_id
   FROM locked_compact target
   WHERE sqlc.arg(status)::text <> 'ok'
-     OR (
-       EXISTS (
-         SELECT 1
-         FROM owner_session owner
-         WHERE owner.team_id = target.team_id
-           AND owner.id = target.session_id
-           AND owner.bot_id = target.bot_id
-           AND owner.compaction_epoch = target.compaction_epoch
-       )
-       AND (
-         SELECT count(*)
-         FROM bot_history_messages source_message
-         WHERE source_message.team_id = target.team_id
-           AND source_message.compact_id = target.id
-       ) = sqlc.arg(message_count)
-       AND (
-         SELECT count(*)
-         FROM locked_parents
-       ) = CARDINALITY(sqlc.arg(parents)::uuid[])
-     )
+     OR EXISTS (SELECT 1 FROM advanced_epoch)
 ),
 superseded_parents AS (
   UPDATE bot_history_message_compacts parent

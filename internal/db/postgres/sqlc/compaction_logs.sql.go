@@ -191,30 +191,39 @@ locked_parents AS MATERIALIZED (
   ORDER BY parent.id
   FOR UPDATE OF parent
 ),
+advanced_epoch AS (
+  UPDATE bot_sessions session
+  SET metadata = jsonb_set(session.metadata, '{context_epoch}', $13::jsonb, true),
+      updated_at = now()
+  WHERE $1::text = 'ok'
+    AND session.team_id = public.memoh_current_team_id()
+    AND session.id = (SELECT owner.id FROM owner_session owner)
+    AND EXISTS (
+      SELECT 1
+      FROM owner_session owner
+      JOIN locked_compact target
+        ON target.team_id = owner.team_id
+      WHERE owner.id = target.session_id
+        AND owner.bot_id = target.bot_id
+        AND owner.compaction_epoch = target.compaction_epoch
+    )
+    AND (
+      SELECT count(*)
+      FROM bot_history_messages source_message
+      JOIN locked_compact target ON target.team_id = source_message.team_id
+      WHERE source_message.team_id = public.memoh_current_team_id()
+        AND source_message.compact_id = target.id
+    ) = $3
+    AND (SELECT count(*) FROM locked_parents) = CARDINALITY($11::uuid[])
+    AND COALESCE((session.metadata->'context_epoch'->>'epoch')::bigint, 0) < $14::bigint
+    AND COALESCE((session.metadata->'context_epoch'->>'anchor_created_at_ms')::bigint, 0) <= $15::bigint
+  RETURNING session.id
+),
 eligible_completion AS MATERIALIZED (
   SELECT target.id, target.bot_id, target.session_id, target.compaction_epoch, target.team_id
   FROM locked_compact target
   WHERE $1::text <> 'ok'
-     OR (
-       EXISTS (
-         SELECT 1
-         FROM owner_session owner
-         WHERE owner.team_id = target.team_id
-           AND owner.id = target.session_id
-           AND owner.bot_id = target.bot_id
-           AND owner.compaction_epoch = target.compaction_epoch
-       )
-       AND (
-         SELECT count(*)
-         FROM bot_history_messages source_message
-         WHERE source_message.team_id = target.team_id
-           AND source_message.compact_id = target.id
-       ) = $3
-       AND (
-         SELECT count(*)
-         FROM locked_parents
-       ) = CARDINALITY($11::uuid[])
-     )
+     OR EXISTS (SELECT 1 FROM advanced_epoch)
 ),
 superseded_parents AS (
   UPDATE bot_history_message_compacts parent
@@ -269,20 +278,30 @@ RETURNING compact.id, compact.bot_id, compact.session_id, compact.status, compac
 `
 
 type CompleteCompactionRollupParams struct {
-	Status        string        `json:"status"`
-	Summary       string        `json:"summary"`
-	MessageCount  int32         `json:"message_count"`
-	ErrorMessage  string        `json:"error_message"`
-	Usage         []byte        `json:"usage"`
-	ModelID       pgtype.UUID   `json:"model_id"`
-	Coverage      []byte        `json:"coverage"`
-	AnchorStartMs int64         `json:"anchor_start_ms"`
-	AnchorEndMs   int64         `json:"anchor_end_ms"`
-	Level         int32         `json:"level"`
-	Parents       []pgtype.UUID `json:"parents"`
-	ID            pgtype.UUID   `json:"id"`
+	Status               string        `json:"status"`
+	Summary              string        `json:"summary"`
+	MessageCount         int32         `json:"message_count"`
+	ErrorMessage         string        `json:"error_message"`
+	Usage                []byte        `json:"usage"`
+	ModelID              pgtype.UUID   `json:"model_id"`
+	Coverage             []byte        `json:"coverage"`
+	AnchorStartMs        int64         `json:"anchor_start_ms"`
+	AnchorEndMs          int64         `json:"anchor_end_ms"`
+	Level                int32         `json:"level"`
+	Parents              []pgtype.UUID `json:"parents"`
+	ID                   pgtype.UUID   `json:"id"`
+	ContextEpochState    []byte        `json:"context_epoch_state"`
+	ContextEpoch         int64         `json:"context_epoch"`
+	ContextEpochAnchorMs int64         `json:"context_epoch_anchor_ms"`
 }
 
+// Rollup completion doubles as the Context Epoch segment-merge record (spec
+// rules 3+6: merging old segments rewrites the stable part, so the epoch must
+// advance with reason segment-merge in the SAME statement as the supersession).
+// The advanced_epoch CTE applies ALL merge eligibility fences plus the strict
+// epoch guard, so a fenced-out merge cannot leave the epoch moved without the
+// supersession; a lost epoch race no-ops the whole statement and the caller
+// retries the merge from fresh state.
 func (q *Queries) CompleteCompactionRollup(ctx context.Context, arg CompleteCompactionRollupParams) (BotHistoryMessageCompact, error) {
 	row := q.db.QueryRow(ctx, completeCompactionRollup,
 		arg.Status,
@@ -297,6 +316,9 @@ func (q *Queries) CompleteCompactionRollup(ctx context.Context, arg CompleteComp
 		arg.Level,
 		arg.Parents,
 		arg.ID,
+		arg.ContextEpochState,
+		arg.ContextEpoch,
+		arg.ContextEpochAnchorMs,
 	)
 	var i BotHistoryMessageCompact
 	err := row.Scan(

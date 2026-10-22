@@ -17,32 +17,12 @@ const (
 	absorbedSourceEarlierSummary absorbedSegmentSource = "earlier_summary"
 )
 
-const frontierRetainOverheadTokens = 1024
-
 type absorbedSegment struct {
 	Source  absorbedSegmentSource
 	Content string
 }
 
 type absorbedRowsLoader func(context.Context, Artifact) ([]sqlc.ListUncompactedMessagesBySessionRow, error)
-
-func shouldFuseFrontier(cfg TriggerConfig, artifacts []Artifact, maxCompactTokens int) bool {
-	if !cfg.AllowFrontierFusion || len(artifacts) == 0 {
-		return false
-	}
-	tokens := frontierSummaryTokens(artifacts)
-	if cfg.TargetTokens > 0 && tokens > cfg.TargetTokens {
-		return true
-	}
-	return len(artifacts) > 1 && tokens > frontierRetainBudget(cfg, maxCompactTokens)
-}
-
-func frontierRetainBudget(cfg TriggerConfig, maxCompactTokens int) int {
-	if cfg.ContextWindowTokens > 0 {
-		return max(512, cfg.ContextWindowTokens*60/100-frontierRetainOverheadTokens)
-	}
-	return maxCompactTokens / 4
-}
 
 func frontierHasPersistedCoverage(artifacts []Artifact) bool {
 	for _, artifact := range artifacts {
