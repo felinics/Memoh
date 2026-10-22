@@ -60,8 +60,10 @@ The Discuss native chain:
 
    > Update (2026-10, Context Epoch PR series): the chat pipeline's 24-hour sliding
    > window is retired — history loads are anchored to the session's Context Epoch
-   > bookmark and byte-budgeted (`context-epoch-spec.md`, rules 1-2); the Discuss
-   > side already loads by its `discuss_since` bookmark. The CM-ADM-001 byte-budget
+   > bookmark and byte-budgeted (`context-epoch-spec.md`, rules 1-2). The Discuss
+   > side is on the same mechanism now: `discussHistoryReader.Load` loads through
+   > `contextepoch.Store.LoadWindow` (path "discuss") and only falls back to the
+   > session beginning when no epoch store is wired. The CM-ADM-001 byte-budget
    > rules below are unchanged.
 2. `internal/channel/discuss/trigger.go` `Build` →
    `timeline.ComposeContextWithArtifacts` (`internal/chat/timeline/context.go:235`)

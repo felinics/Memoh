@@ -97,7 +97,7 @@
 | 2 | 摘要段链：新压缩停止融合，加段数上限和合并 | 中：写路径核心 | 老融合数据兼容测试；段数有界测试；读路径顺序端到端测试 | ✅ [#1656](https://github.com/felinics/Memoh/pull/1656) |
 | 3 | 预算钉死在 epoch 内：移除逐轮反馈和摘要截断 | 低 | 长会话逐轮请求字节一致性测试 | ✅ [#1657](https://github.com/felinics/Memoh/pull/1657) |
 | 4 | 统一入口 `AdvanceContextEpoch` + 工具列表失败沿用旧版 + 按 epoch 记账的监控 | 低 | 同 epoch 指纹漂移告警测试；MCP 故障注入测试 | ✅ [#1658](https://github.com/felinics/Memoh/pull/1658) |
-| 5 | 文档收尾：`context-memory-scheduling.md` 更新，本 RFC 转验收基线 | — | — | 本 PR |
+| 5 | 文档收尾：`context-memory-scheduling.md` 更新，本 RFC 转验收基线 | — | — | ✅ [#1659](https://github.com/felinics/Memoh/pull/1659) |
 
 ## 后续方向：轮内上下文（不在本 RFC 范围，先记下结论）
 

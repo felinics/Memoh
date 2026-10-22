@@ -35,10 +35,11 @@ ContextEpochState {
 实现对照（Context Epoch PR 系列落地形态）：
 
 - `Epoch`/`Anchor`：`bot_sessions.metadata.context_epoch`（`epoch`、`anchor_created_at_ms`、`anchor_message_id`、`last_reason`），守卫式 SQL 单调推进。
-- `Budget`：`budget_tokens` 钉在同一状态里（首钉赢，跨推进存续）。
+- `Budget`：`budget_tokens` 钉在同一状态里（首钉赢）。钉值是否跨推进存续按原因区分：簿记类推进（`budget` 滑窗、`budget-recovery`、`segment-merge`）与 `user-cut` 携带全部钉值；`toolset-change` 只重置 `prefix_hash`（工具文档在系统区，预算钉值携带，选择时由 envelope 护栏 `min(pin, Window-OutputReserve-ToolDefsCost)` 钳制可行性——钳制而非拒绝，否则钉值失效后会退回逐轮重算、规则 4 被悄悄打破）；`model-change` 重置全部钉值，新 epoch 重建基线。
+- 另有 `model_identity`（首钉赢）：格式 `uuid/modelID/window=W/reserve=R`。UUID 区分同名模型的不同 provider；窗口与输出预留是钉值护栏的全部剩余输入（预留随思考开关变，模型记录可原地改窗口），任一变化即改变身份、在渲染前记 `model-change` 翻篇。
 - `SegmentCount`：不落库为字段，由压缩层按活跃段链长度实时计数，超过上限 K=8 触发合并。
-- `ToolsetHash`：不落库为字段；工具列表的稳定性由网关兜底保证（刷新失败沿用上次成功列表，降级列表不缓存）。
-- 另有 `prefix_hash`（规范"怎么监控"一节的规则 1 记账）：钉住 epoch 内首次观测的监控哈希，口径 = 渲染后的系统区 + 模型身份；不一致触发 `context_epoch_prefix_drift` 告警。
+- `ToolsetHash`：不落库为字段。工具列表稳定性由两层机制保证：(1) federation Source 按连接缓存最后成功列表（含路由、按连接 UpdatedAt 代际隔离），列举失败回退旧列表，连接列表查询失败回退该 bot 最后完整列表，无快照才报 `ErrToolListingDegraded`（degraded 结果带标记短缓存，不会污染上层 lastGood）；(2) FederationProvider 按会话对工具集（名字+描述+schema）计算指纹，变化时触发 hook 记 `toolset-change` 翻篇，hook 失败保留旧基线下轮重试。明示边界：指纹基线是进程内的，重启后首个观测仅重建基线，重启窗口内的 schema-only 变化没有 prefix_hash 告警兜底。
+- 另有 `prefix_hash`（规范"怎么监控"一节的规则 1 记账）：钉住 epoch 内首次观测的监控哈希，口径 = 渲染后的系统区 + 模型身份（含窗口与预留）；不一致触发 `context_epoch_prefix_drift` 告警（Error 日志 + OTel counter）。上报时重新读取状态，轮内预算恢复推进 epoch 后比较与归属都用新 epoch。
 
 几条规矩：
 
@@ -112,8 +113,12 @@ ContextEpochState {
 // internal/chat/contextepoch
 
 // 按书签读历史，取代按"24 小时前"读：字节预算 + 书签锚定，预算挤压到
-// 更老行时记录一次 reason="budget" 的显式推进。锚点定位失败必须报错，
-// 不许悄悄返回空历史。
+// 更老行时记录一次 reason="budget" 的显式推进。锚点定位失败（锚点消息
+// 已不存在于可见历史）必须报错，不许悄悄返回空历史。
+//
+// 已接受的可用性取舍（瞬时单查询故障下，锚点与记账保证可能不成立）：
+// 状态读取失败时降级到会话开头加载；预算推进的守卫写失败时仍返回已
+// 截断的历史（推进下轮重试）。
 func (s *Store) LoadWindow(ctx context.Context, sessionID, path string, measure, load ...) ([]message.Message, error)
 
 // 原地翻篇的统一入口。原因必须属于审计词表（ValidAdvanceReason），每次
@@ -121,8 +126,9 @@ func (s *Store) LoadWindow(ctx context.Context, sessionID, path string, measure,
 // （budget 滑窗、segment-merge）走各自的原子 SQL 写。
 func (s *Store) AdvanceContextEpoch(ctx context.Context, sessionID, path, reason string) (State, error)
 
-// 首钉赢的记账写入：epoch 内历史预算（规则 4）与监控哈希（规则 1）。
+// 首钉赢的记账写入：epoch 内历史预算（规则 4）、模型身份与监控哈希（规则 1）。
 func (s *Store) PinBudget(ctx context.Context, sessionID string, budgetTokens int64) (State, error)
+func (s *Store) PinModelIdentity(ctx context.Context, sessionID, identity string) (State, error)
 func (s *Store) PinPrefixHash(ctx context.Context, sessionID, prefixHash string) (State, error)
 ```
 
