@@ -249,9 +249,10 @@ func TestLoadWindowSkipsNoOpBudgetAdvance(t *testing.T) {
 
 	// Batch-persisted rows share one database now(); a budget cut inside such
 	// a batch admits the oldest row whose timestamp already equals the stored
-	// anchor (modulo millisecond persistence).
+	// anchor (modulo millisecond persistence). The stored anchor names m2,
+	// the oldest row the previous budget admitted.
 	anchor := time.Date(2026, 10, 20, 8, 0, 0, 123456789, time.UTC)
-	advanced, err := state.AdvancedBy(anchor, "m1", ReasonBudget, time.Now())
+	advanced, err := state.AdvancedBy(anchor, "m2", ReasonBudget, time.Now())
 	if err != nil {
 		t.Fatalf("AdvancedBy() error = %v", err)
 	}
@@ -286,6 +287,70 @@ func TestLoadWindowSkipsNoOpBudgetAdvance(t *testing.T) {
 	if state2.Epoch != advanced.Epoch {
 		t.Fatalf("epoch = %d, want %d (no no-op advance)", state2.Epoch, advanced.Epoch)
 	}
+
+	// A REAL slide at the same millisecond — the oldest admitted message is
+	// now a different row of the shared-timestamp batch — must still be
+	// booked: the boundary changed even though the anchor millisecond did not.
+	loaded2 := []messagepkg.Message{
+		epochTestMessage("m3", anchor),
+		epochTestMessage("m4", anchor),
+	}
+	if _, err := store.LoadWindow(ctx, epochTestSessionID, "test",
+		func(context.Context, time.Time) (int64, error) { return int64(len(loaded2) + 1), nil },
+		func(context.Context, time.Time) ([]messagepkg.Message, error) { return loaded2, nil }); err != nil {
+		t.Fatalf("second LoadWindow() error = %v", err)
+	}
+	state3, err := store.Load(ctx, epochTestSessionID)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if state3.Epoch != advanced.Epoch+1 || state3.AnchorMessageID != "m3" ||
+		state3.AnchorCreatedAtMs != anchor.UnixMilli() {
+		t.Fatalf("state = %+v, want epoch %d re-anchored at m3 (same ms)", state3, advanced.Epoch+1)
+	}
+}
+
+func TestAdvanceInPlaceRetriesOnStale(t *testing.T) {
+	t.Parallel()
+	store, queries := newFakeStore(time.Now())
+	_ = store
+	ctx := context.Background()
+
+	// A concurrent writer holds epoch 5; the first load of this process fails
+	// transiently, degrading ensureInitialized to the initial state. The
+	// budget-recovery booking must land on top of the stored state, not be
+	// reported as booked while nothing was written.
+	winner := State{Epoch: 5, AnchorCreatedAtMs: 1000, AnchorMessageID: "m1", LastReason: ReasonBudget}
+	raw, err := winner.encode()
+	if err != nil {
+		t.Fatalf("encode winner: %v", err)
+	}
+	queries.states[epochTestSessionID] = string(raw)
+	flaky := &flakyEpochQueries{fakeSessionQueries: queries, failLoads: 1}
+	flakyStore := NewStore(flaky, nil)
+	flakyStore.SetClock(time.Now)
+
+	state, err := flakyStore.AdvanceInPlace(ctx, epochTestSessionID, "test", ReasonBudgetRecovery)
+	if err != nil {
+		t.Fatalf("AdvanceInPlace() error = %v", err)
+	}
+	if state.Epoch != 6 || state.LastReason != ReasonBudgetRecovery ||
+		state.AnchorCreatedAtMs != 1000 || state.AnchorMessageID != "m1" {
+		t.Fatalf("state = %+v, want the booking retried on top of epoch 5 with its anchor", state)
+	}
+}
+
+type flakyEpochQueries struct {
+	*fakeSessionQueries
+	failLoads int
+}
+
+func (f *flakyEpochQueries) GetSessionContextEpoch(ctx context.Context, sessionID pgtype.UUID) (string, error) {
+	if f.failLoads > 0 {
+		f.failLoads--
+		return "", errors.New("transient connection failure")
+	}
+	return f.fakeSessionQueries.GetSessionContextEpoch(ctx, sessionID)
 }
 
 func TestAdvanceInPlaceRecordsBudgetRecovery(t *testing.T) {

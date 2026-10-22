@@ -47,9 +47,15 @@ func (s *Service) chatBudgetRecovery(req ChatRequest, layout chatHistoryLayout) 
 		}
 		compactionReq := req
 		compactionReq.RunID = cfg.RunID
-		if result := s.runBudgetCompactionSync(ctx, compactionReq, pressure, budget, cfg.CurrentModelUUID); result.Status != compaction.StatusOK && result.Status != compaction.StatusProgress {
+		result := s.runBudgetCompactionSync(ctx, compactionReq, pressure, budget, cfg.CurrentModelUUID)
+		if result.Status != compaction.StatusOK && result.Status != compaction.StatusProgress {
 			return cfg, false, nil
 		}
+		// Turn-boundary rule 1: the compaction commit already rewrote the
+		// session's durable history (and persisted it with WithoutCancel), so
+		// the epoch advance is booked here — bound to the commit, not to the
+		// in-turn reload below, which may still fail or be canceled.
+		s.recordBudgetRecoveryAdvance(context.WithoutCancel(ctx), req.ThreadID)
 		var messages []ModelMessage
 		var records []historyfrag.HistoryRecord
 		if layout.usePipeline {
@@ -68,10 +74,6 @@ func (s *Service) chatBudgetRecovery(req ChatRequest, layout chatHistoryLayout) 
 		if reflect.DeepEqual(recovered.Messages, cfg.Messages) {
 			return cfg, false, nil
 		}
-		// Turn-boundary rule 1: budget recovery rewrote the history region of
-		// the stable part, so the change is booked as an epoch advance
-		// (reason budget-recovery) instead of a silent rewrite.
-		s.recordBudgetRecoveryAdvance(ctx, req.ThreadID)
 		layout.historyCount = recovered.ContextTrimmableMessages
 		layout.pressureTokens = 0
 		return recovered, true, nil
@@ -297,9 +299,10 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 	if result.Status != compaction.StatusOK && result.Status != compaction.StatusProgress {
 		return cfg, shed, nil
 	}
-	// Same booking as the chat recovery path: the recompose rewrites the
-	// history region, so the epoch records a budget-recovery advance.
-	s.recordBudgetRecoveryAdvance(ctx, cmd.ThreadID)
+	// Same booking as the chat recovery path, bound to the compaction commit:
+	// the recompose rewrites the history region, so the epoch records a
+	// budget-recovery advance.
+	s.recordBudgetRecoveryAdvance(context.WithoutCancel(ctx), cmd.ThreadID)
 	return cfg, false, native.ErrContextRecompose
 }
 

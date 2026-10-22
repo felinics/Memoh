@@ -177,9 +177,15 @@ func (s *Store) AdvanceInPlace(ctx context.Context, sessionID, path, reason stri
 	}
 	persisted, err := s.Advance(ctx, sessionID, next)
 	if errors.Is(err, ErrAdvanceStale) {
-		// A concurrent writer moved first; the record of a change exists,
-		// which is what the bookkeeping requires.
-		return persisted, nil
+		// Lost the race — possibly because a transient load failure degraded
+		// the read to the initial state while the stored epoch is ahead. The
+		// winner's record does not prove THIS event was booked, so retry once
+		// on top of the winning state instead of reporting success.
+		next, err = persisted.AdvancedBy(persisted.AnchorTime(), persisted.AnchorMessageID, reason, s.now())
+		if err != nil {
+			return State{}, err
+		}
+		persisted, err = s.Advance(ctx, sessionID, next)
 	}
 	if err != nil {
 		return State{}, err
@@ -227,11 +233,19 @@ func (s *Store) recordBudgetAdvance(
 		}
 	}
 	// Compare at the persisted millisecond granularity: batch-persisted rows
-	// share one PostgreSQL now(), so a budget cut inside such a batch always
-	// leaves rows at the anchor's microsecond timestamp. Advancing to the same
-	// millisecond anchor would record a new epoch without moving the window —
-	// and repeat every turn.
-	if oldest.CreatedAt.IsZero() || oldest.CreatedAt.UnixMilli() <= state.AnchorCreatedAtMs {
+	// share one PostgreSQL now(), so a budget cut inside such a batch can
+	// leave the oldest admitted row at the anchor's millisecond. Skip only
+	// when the admitted boundary is unchanged — same anchor millisecond AND
+	// same boundary message; a different oldest admitted message at the same
+	// millisecond is a real slide and must be recorded.
+	if oldest.CreatedAt.IsZero() {
+		return
+	}
+	oldestMs := oldest.CreatedAt.UnixMilli()
+	if oldestMs < state.AnchorCreatedAtMs {
+		return
+	}
+	if oldestMs == state.AnchorCreatedAtMs && oldest.ID == state.AnchorMessageID {
 		return
 	}
 	next, err := state.AdvancedBy(oldest.CreatedAt, oldest.ID, ReasonBudget, s.now())
