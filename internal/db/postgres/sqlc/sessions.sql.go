@@ -1447,6 +1447,34 @@ func (q *Queries) PinSessionContextEpochBudget(ctx context.Context, arg PinSessi
 	return state, err
 }
 
+const pinSessionContextEpochModelIdentity = `-- name: PinSessionContextEpochModelIdentity :one
+UPDATE bot_sessions
+SET metadata = jsonb_set(metadata, '{context_epoch,model_identity}', to_jsonb($1::text), true),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $2
+  AND deleted_at IS NULL
+  AND metadata ? 'context_epoch'
+  AND (metadata #>> '{context_epoch,model_identity}') IS NULL
+RETURNING (metadata->'context_epoch')::text AS state
+`
+
+type PinSessionContextEpochModelIdentityParams struct {
+	ModelIdentity string      `json:"model_identity"`
+	SessionID     pgtype.UUID `json:"session_id"`
+}
+
+// Pins the model identity into the epoch state. The guard only fires while
+// the identity is unset, so the first model of an epoch wins; a turn that
+// observes a different identity books a model-change advance (which resets
+// the pin) instead of overwriting it in place.
+func (q *Queries) PinSessionContextEpochModelIdentity(ctx context.Context, arg PinSessionContextEpochModelIdentityParams) (string, error) {
+	row := q.db.QueryRow(ctx, pinSessionContextEpochModelIdentity, arg.ModelIdentity, arg.SessionID)
+	var state string
+	err := row.Scan(&state)
+	return state, err
+}
+
 const pinSessionContextEpochPrefixHash = `-- name: PinSessionContextEpochPrefixHash :one
 UPDATE bot_sessions
 SET metadata = jsonb_set(metadata, '{context_epoch,prefix_hash}', to_jsonb($1::text), true),

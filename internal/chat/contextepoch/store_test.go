@@ -92,6 +92,26 @@ func (f *fakeSessionQueries) PinSessionContextEpochPrefixHash(_ context.Context,
 	return string(raw), nil
 }
 
+func (f *fakeSessionQueries) PinSessionContextEpochModelIdentity(_ context.Context, arg sqlc.PinSessionContextEpochModelIdentityParams) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := arg.SessionID.String()
+	current, err := decodeState(f.states[key])
+	if err != nil {
+		return "", err
+	}
+	if current.IsZero() || current.ModelIdentity != "" {
+		return "", pgx.ErrNoRows
+	}
+	current.ModelIdentity = arg.ModelIdentity
+	raw, err := current.Encode()
+	if err != nil {
+		return "", err
+	}
+	f.states[key] = string(raw)
+	return string(raw), nil
+}
+
 const epochTestSessionID = "33333333-3333-4333-8333-333333333333"
 
 func newFakeStore(now time.Time) (*Store, *fakeSessionQueries) {
@@ -504,13 +524,29 @@ func TestPinPrefixHashSetsOnceAndSurvivesAdvances(t *testing.T) {
 		t.Fatalf("second pin = %+v, %v; want the original hash-a", state, err)
 	}
 
-	// Epoch advances carry the pin forward.
-	next, err := store.AdvanceContextEpoch(context.Background(), epochTestSessionID, "test", ReasonToolsetChange)
+	// Bookkeeping advances (budget slide, in-turn recovery, segment merge)
+	// carry the pin forward: the baseline they describe did not change.
+	next, err := store.AdvanceContextEpoch(context.Background(), epochTestSessionID, "test", ReasonBudgetRecovery)
 	if err != nil {
 		t.Fatalf("advance: %v", err)
 	}
 	if next.PrefixHash != "hash-a" {
-		t.Fatalf("advance dropped the pin: %+v", next)
+		t.Fatalf("bookkeeping advance dropped the pin: %+v", next)
+	}
+
+	// An explicit chapter turn resets the pin: the new epoch must build its
+	// own baseline instead of inheriting — and forever disagreeing with — the
+	// old chapter's hash.
+	next, err = store.AdvanceContextEpoch(context.Background(), epochTestSessionID, "test", ReasonModelChange)
+	if err != nil {
+		t.Fatalf("model-change advance: %v", err)
+	}
+	if next.PrefixHash != "" {
+		t.Fatalf("model-change advance carried the old baseline: %+v", next)
+	}
+	next, err = store.PinPrefixHash(context.Background(), epochTestSessionID, "hash-b")
+	if err != nil || next.PrefixHash != "hash-b" {
+		t.Fatalf("re-pin after model-change = %+v, %v; want hash-b", next, err)
 	}
 }
 

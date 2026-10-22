@@ -25,6 +25,7 @@ type Queries interface {
 	AdvanceSessionContextEpoch(ctx context.Context, arg sqlc.AdvanceSessionContextEpochParams) (string, error)
 	PinSessionContextEpochBudget(ctx context.Context, arg sqlc.PinSessionContextEpochBudgetParams) (string, error)
 	PinSessionContextEpochPrefixHash(ctx context.Context, arg sqlc.PinSessionContextEpochPrefixHashParams) (string, error)
+	PinSessionContextEpochModelIdentity(ctx context.Context, arg sqlc.PinSessionContextEpochModelIdentityParams) (string, error)
 }
 
 // Store persists and applies Context Epoch state. A nil Store (or one without
@@ -190,6 +191,31 @@ func (s *Store) PinPrefixHash(ctx context.Context, sessionID, prefixHash string)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// No state yet (the history load initializes it first) or another turn
 		// already pinned: either way the stored state is authoritative.
+		return s.Load(ctx, sessionID)
+	}
+	if err != nil {
+		return State{}, err
+	}
+	return decodeState(stored)
+}
+
+// PinModelIdentity records the model this epoch renders with. First
+// observation wins (the SQL guard only fires while the identity is unset);
+// a turn that observes a different identity must book a model-change advance
+// — which resets the pin — rather than overwriting it in place.
+func (s *Store) PinModelIdentity(ctx context.Context, sessionID, identity string) (State, error) {
+	if !s.available() || identity == "" {
+		return State{}, nil
+	}
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return State{}, err
+	}
+	stored, err := s.queries.PinSessionContextEpochModelIdentity(ctx, sqlc.PinSessionContextEpochModelIdentityParams{
+		SessionID:     pgSessionID,
+		ModelIdentity: identity,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
 		return s.Load(ctx, sessionID)
 	}
 	if err != nil {

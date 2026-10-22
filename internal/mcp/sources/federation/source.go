@@ -2,6 +2,7 @@ package federation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -13,6 +14,15 @@ import (
 	mcpgw "github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/toolcontext"
 )
+
+// ErrToolListingDegraded marks a listing that is missing tools: at least one
+// connection failed and had no last-good snapshot to fall back to. The
+// returned descriptors are still the source's best effort (failed
+// connections that previously succeeded keep serving their last successful
+// list), but callers that cache registries must treat the error as "do not
+// cache, serve your own fallback" so a partial listing never becomes the new
+// baseline.
+var ErrToolListingDegraded = errors.New("federation tool listing degraded")
 
 const cacheTTL = 5 * time.Second
 
@@ -45,6 +55,15 @@ type cacheEntry struct {
 	expiresAt time.Time
 	routes    map[string]toolRoute
 	tools     []mcpgw.ToolDescriptor
+	degraded  bool
+}
+
+// fallbackTool is one tool of a connection's last successful listing: the
+// final (prefixed, de-duplicated) descriptor plus the remote name the route
+// needs to call it.
+type fallbackTool struct {
+	descriptor   mcpgw.ToolDescriptor
+	originalName string
 }
 
 type Source struct {
@@ -55,6 +74,11 @@ type Source struct {
 
 	mu    sync.Mutex
 	cache map[string]cacheEntry
+	// fallback holds each connection's last successful tool listing, keyed by
+	// connection ID. A connection that fails to list keeps contributing its
+	// last known tools so one unreachable MCP server never rewrites the
+	// agent's tool documentation (Context Epoch: 工具列表失败沿用旧版).
+	fallback map[string][]fallbackTool
 }
 
 type SourceOption func(*Source)
@@ -74,6 +98,7 @@ func NewSource(log *slog.Logger, gateway Gateway, connections ConnectionLister, 
 		gateway:     gateway,
 		connections: connections,
 		cache:       map[string]cacheEntry{},
+		fallback:    map[string][]fallbackTool{},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -92,14 +117,21 @@ func (s *Source) ListTools(ctx context.Context, session mcpgw.ToolSessionContext
 		return []mcpgw.ToolDescriptor{}, nil
 	}
 	if cached, ok := s.getCache(botID); ok {
+		if cached.degraded {
+			return cloneTools(cached.tools), ErrToolListingDegraded
+		}
 		return cloneTools(cached.tools), nil
 	}
-	tools, routes := s.buildToolsAndRoutes(ctx, botID)
+	tools, routes, degraded := s.buildToolsAndRoutes(ctx, botID)
 	s.setCache(botID, cacheEntry{
 		expiresAt: time.Now().Add(cacheTTL),
 		routes:    routes,
 		tools:     tools,
+		degraded:  degraded,
 	})
+	if degraded {
+		return cloneTools(tools), ErrToolListingDegraded
+	}
 	return cloneTools(tools), nil
 }
 
@@ -175,14 +207,16 @@ func (s *Source) CallTool(ctx context.Context, session mcpgw.ToolSessionContext,
 	return mcpgw.BuildToolSuccessResult(payload), nil
 }
 
-func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw.ToolDescriptor, map[string]toolRoute) {
+func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw.ToolDescriptor, map[string]toolRoute, bool) {
 	routes := map[string]toolRoute{}
 	tools := make([]mcpgw.ToolDescriptor, 0, 16)
+	degraded := false
+	fallbackUpdates := map[string][]fallbackTool{}
 
-	addTool := func(descriptor mcpgw.ToolDescriptor, route toolRoute) {
+	addTool := func(descriptor mcpgw.ToolDescriptor, route toolRoute) (string, bool) {
 		name := strings.TrimSpace(descriptor.Name)
 		if name == "" {
-			return
+			return "", false
 		}
 		finalName := name
 		if _, exists := routes[finalName]; exists || s.isReservedToolName(finalName) {
@@ -202,62 +236,120 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 		descriptor.Name = finalName
 		routes[finalName] = route
 		tools = append(tools, descriptor)
+		return finalName, true
 	}
 
-	if s.connections != nil {
-		items, err := s.connections.ListActiveByBot(ctx, botID)
-		if err != nil {
-			s.logger.WarnContext(ctx, "list mcp connections failed", slog.String("bot_id", botID), slog.Any("error", err))
-		} else {
-			sort.Slice(items, func(i, j int) bool {
-				if items[i].Name == items[j].Name {
-					return items[i].ID < items[j].ID
-				}
-				return items[i].Name < items[j].Name
-			})
-			for _, connection := range items {
-				var connTools []mcpgw.ToolDescriptor
-				listCtx, listCancel := context.WithTimeout(ctx, mcpCallTimeout)
-				switch strings.ToLower(strings.TrimSpace(connection.Type)) {
-				case "http":
-					connTools, err = s.gateway.ListHTTPConnectionTools(listCtx, connection)
-				case "sse":
-					connTools, err = s.gateway.ListSSEConnectionTools(listCtx, connection)
-				case "stdio":
-					connTools, err = s.gateway.ListStdioConnectionTools(listCtx, botID, connection)
-				default:
-					listCancel()
-					s.logger.WarnContext(ctx, "unsupported mcp connection type", slog.String("connection_id", connection.ID), slog.String("type", connection.Type))
-					continue
-				}
-				listCancel()
-				if err != nil {
-					s.logger.WarnContext(ctx, "list tools from connection failed", slog.String("connection_id", connection.ID), slog.String("name", connection.Name), slog.Any("error", err))
-					continue
-				}
-				prefix := sanitizePrefix(connection.Name)
-				for _, tool := range connTools {
-					origin := strings.TrimSpace(tool.Name)
-					alias := origin
-					if prefix != "" {
-						alias = prefix + "_" + origin
-					}
-					tool.Name = alias
-					if strings.TrimSpace(tool.Description) != "" {
-						tool.Description = "[" + strings.TrimSpace(connection.Name) + "] " + tool.Description
-					} else {
-						tool.Description = "[" + strings.TrimSpace(connection.Name) + "] " + origin
-					}
-					addTool(tool, toolRoute{
+	if s.connections == nil {
+		return tools, routes, false
+	}
+	items, err := s.connections.ListActiveByBot(ctx, botID)
+	if err != nil {
+		// Without the connection list nothing can be rebuilt — not even the
+		// fallback snapshot, because deleted connections must not resurrect.
+		// Report degraded so callers serve their own last-good registry.
+		s.logger.WarnContext(ctx, "list mcp connections failed", slog.String("bot_id", botID), slog.Any("error", err))
+		return tools, routes, true
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Name == items[j].Name {
+			return items[i].ID < items[j].ID
+		}
+		return items[i].Name < items[j].Name
+	})
+	for _, connection := range items {
+		var connTools []mcpgw.ToolDescriptor
+		listCtx, listCancel := context.WithTimeout(ctx, mcpCallTimeout)
+		var listErr error
+		switch strings.ToLower(strings.TrimSpace(connection.Type)) {
+		case "http":
+			connTools, listErr = s.gateway.ListHTTPConnectionTools(listCtx, connection)
+		case "sse":
+			connTools, listErr = s.gateway.ListSSEConnectionTools(listCtx, connection)
+		case "stdio":
+			connTools, listErr = s.gateway.ListStdioConnectionTools(listCtx, botID, connection)
+		default:
+			listCancel()
+			s.logger.WarnContext(ctx, "unsupported mcp connection type", slog.String("connection_id", connection.ID), slog.String("type", connection.Type))
+			continue
+		}
+		listCancel()
+		if listErr != nil {
+			// One unreachable connection must not blank its tools: serve the
+			// last successful listing (spec: 工具列表失败沿用旧版). A
+			// connection that never listed successfully has no snapshot, so
+			// the listing is degraded and callers must not cache it as their
+			// new baseline.
+			if snapshot, ok := s.getFallback(connection.ID); ok {
+				s.logger.WarnContext(ctx, "list tools from connection failed; serving last successful listing", slog.String("connection_id", connection.ID), slog.String("name", connection.Name), slog.Int("tools", len(snapshot)), slog.Any("error", listErr))
+				for _, entry := range snapshot {
+					// The fallback descriptor carries its previous final
+					// (prefixed, de-duplicated) name; addTool keeps it while
+					// the slot is free, so the rendered tool documentation
+					// stays byte stable across the outage.
+					addTool(entry.descriptor, toolRoute{
 						sourceType:   strings.ToLower(strings.TrimSpace(connection.Type)),
-						originalName: origin,
+						originalName: entry.originalName,
 						connection:   connection,
 					})
 				}
+				continue
 			}
+			degraded = true
+			s.logger.WarnContext(ctx, "list tools from connection failed", slog.String("connection_id", connection.ID), slog.String("name", connection.Name), slog.Any("error", listErr))
+			continue
 		}
+		prefix := sanitizePrefix(connection.Name)
+		snapshot := make([]fallbackTool, 0, len(connTools))
+		for _, tool := range connTools {
+			origin := strings.TrimSpace(tool.Name)
+			alias := origin
+			if prefix != "" {
+				alias = prefix + "_" + origin
+			}
+			tool.Name = alias
+			if strings.TrimSpace(tool.Description) != "" {
+				tool.Description = "[" + strings.TrimSpace(connection.Name) + "] " + tool.Description
+			} else {
+				tool.Description = "[" + strings.TrimSpace(connection.Name) + "] " + origin
+			}
+			finalName, added := addTool(tool, toolRoute{
+				sourceType:   strings.ToLower(strings.TrimSpace(connection.Type)),
+				originalName: origin,
+				connection:   connection,
+			})
+			if !added {
+				continue
+			}
+			tool.Name = finalName
+			snapshot = append(snapshot, fallbackTool{descriptor: tool, originalName: origin})
+		}
+		fallbackUpdates[connection.ID] = snapshot
 	}
-	return tools, routes
+	s.mergeFallback(fallbackUpdates)
+	return tools, routes, degraded
+}
+
+// getFallback returns a connection's last successful listing.
+func (s *Source) getFallback(connectionID string) ([]fallbackTool, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snapshot, ok := s.fallback[connectionID]
+	return snapshot, ok
+}
+
+// mergeFallback records the successful listings of one rebuild. Connections
+// that failed keep their previous snapshot; connections that disappeared
+// (deleted or deactivated) keep theirs until restart, which is harmless —
+// they only serve if the connection reappears and fails.
+func (s *Source) mergeFallback(updates map[string][]fallbackTool) {
+	if len(updates) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for connectionID, snapshot := range updates {
+		s.fallback[connectionID] = snapshot
+	}
 }
 
 func (s *Source) isReservedToolName(name string) bool {

@@ -110,6 +110,30 @@ func (f *fakeContextEpochQueries) PinSessionContextEpochPrefixHash(_ context.Con
 	return string(out), nil
 }
 
+func (f *fakeContextEpochQueries) PinSessionContextEpochModelIdentity(_ context.Context, arg sqlc.PinSessionContextEpochModelIdentityParams) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := arg.SessionID.String()
+	existing := f.states[key]
+	if existing == "" {
+		return "", pgx.ErrNoRows
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(existing), &raw); err != nil {
+		return "", err
+	}
+	if pinned, _ := raw["model_identity"].(string); pinned != "" {
+		return "", pgx.ErrNoRows
+	}
+	raw["model_identity"] = arg.ModelIdentity
+	out, err := json.Marshal(raw)
+	if err != nil {
+		return "", err
+	}
+	f.states[key] = string(out)
+	return string(out), nil
+}
+
 func (f *fakeContextEpochQueries) setState(sessionID string, state contextepoch.State) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

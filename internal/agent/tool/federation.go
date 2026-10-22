@@ -2,9 +2,13 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"sort"
 	"strings"
+	"sync"
 
 	sdk "github.com/felinics/twilight/sdk"
 
@@ -18,16 +22,45 @@ import (
 type FederationProvider struct {
 	source mcp.ToolSource
 	logger *slog.Logger
+	// onToolsetChange, when set, is invoked once per observed toolset change
+	// of a session (spec: 工具集变了记 toolset-change 翻篇). lastHashes holds
+	// the last toolset hash per (bot, session) so a change books exactly one
+	// advance; the map is process-local, so a restart re-baselines silently
+	// and relies on the prefix-hash drift alarm as the backstop.
+	onToolsetChange func(ctx context.Context, sessionID string)
+	mu              sync.Mutex
+	lastHashes      map[string]string
 }
 
-func NewFederationProvider(log *slog.Logger, source mcp.ToolSource) *FederationProvider {
+// FederationProviderOption customizes a FederationProvider.
+type FederationProviderOption func(*FederationProvider)
+
+// WithToolsetChangeHook registers a callback fired when a session's federated
+// toolset changes between turns. The callback must be cheap and must not
+// fail the turn; wiring it to a Context Epoch advance books the change.
+func WithToolsetChangeHook(hook func(ctx context.Context, sessionID string)) FederationProviderOption {
+	return func(f *FederationProvider) {
+		f.onToolsetChange = hook
+		if hook != nil {
+			f.lastHashes = map[string]string{}
+		}
+	}
+}
+
+func NewFederationProvider(log *slog.Logger, source mcp.ToolSource, opts ...FederationProviderOption) *FederationProvider {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &FederationProvider{
+	provider := &FederationProvider{
 		source: source,
 		logger: log.With(slog.String("tool", "federation")),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(provider)
+		}
+	}
+	return provider
 }
 
 func (*FederationProvider) ProviderLabel() string { return "mcp" }
@@ -58,8 +91,19 @@ func (f *FederationProvider) Tools(ctx context.Context, session SessionContext) 
 	if err != nil {
 		// Not fatal for the turn: the agent keeps its other tools. The gap is
 		// reported to the model through ToolNotice instead of being hidden.
-		f.logger.WarnContext(ctx, "federation list tools failed", slog.Any("error", err))
-		return nil, nil
+		// Sources may still return a best-effort listing alongside the error
+		// (e.g. the federation source's per-connection last-good snapshot);
+		// those tools remain usable, only the uncovered gap is reported.
+		f.logger.WarnContext(ctx, "federation list tools degraded", slog.Any("error", err))
+		if len(descriptors) == 0 {
+			return nil, nil
+		}
+		// A degraded listing is never tracked for toolset changes: the gap is
+		// an outage, not a toolset change, and fallback-filled bytes are
+		// identical to the last successful listing anyway. Booking here would
+		// flap the epoch on every failure/recovery cycle.
+	} else {
+		f.trackToolsetChange(ctx, mcpSession, descriptors)
 	}
 	tools := make([]toolexec.Tool, 0, len(descriptors))
 	for _, desc := range descriptors {
@@ -92,6 +136,56 @@ func (f *FederationProvider) Tools(ctx context.Context, session SessionContext) 
 		})
 	}
 	return tools, nil
+}
+
+// trackToolsetChange compares the session's federated toolset with the last
+// one observed this process and fires the change hook on a mismatch. It runs
+// only on successful listings — a failed refresh (tools served from the
+// source's fallback or dropped) must never book an advance, because the
+// rendered tool documentation did not change.
+func (f *FederationProvider) trackToolsetChange(ctx context.Context, session mcp.ToolSessionContext, descriptors []mcp.ToolDescriptor) {
+	if f.onToolsetChange == nil {
+		return
+	}
+	sessionID := strings.TrimSpace(session.SessionID)
+	if sessionID == "" {
+		return
+	}
+	hash := toolsetHash(descriptors)
+	key := strings.TrimSpace(session.BotID) + "|" + sessionID
+	f.mu.Lock()
+	previous, seen := f.lastHashes[key]
+	if !seen || previous != hash {
+		f.lastHashes[key] = hash
+	}
+	f.mu.Unlock()
+	// The first observation only establishes the baseline; a change books one
+	// advance.
+	if seen && previous != hash {
+		f.onToolsetChange(ctx, sessionID)
+	}
+}
+
+// toolsetHash fingerprints the advertised toolset: names, descriptions, and
+// input schemas. json.Marshal sorts map keys, so equal toolsets hash equal
+// regardless of object key order.
+func toolsetHash(descriptors []mcp.ToolDescriptor) string {
+	type toolPrint struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Schema      any    `json:"schema,omitempty"`
+	}
+	prints := make([]toolPrint, 0, len(descriptors))
+	for _, desc := range descriptors {
+		prints = append(prints, toolPrint{Name: strings.TrimSpace(desc.Name), Description: desc.Description, Schema: desc.InputSchema})
+	}
+	sort.Slice(prints, func(i, j int) bool { return prints[i].Name < prints[j].Name })
+	raw, err := json.Marshal(prints)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 func normalizeMCPResult(result map[string]any) any {

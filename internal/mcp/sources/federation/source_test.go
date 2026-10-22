@@ -218,3 +218,117 @@ func TestCachedRouteCannotCallRemovedOrReconfiguredConnection(t *testing.T) {
 		})
 	}
 }
+
+// flakyListGateway fails SSE tool listings on demand.
+type flakyListGateway struct {
+	testGateway
+	failSSE bool
+}
+
+func (g *flakyListGateway) ListSSEConnectionTools(ctx context.Context, conn mcpgw.Connection) ([]mcpgw.ToolDescriptor, error) {
+	if g.failSSE {
+		return nil, errors.New("connection refused")
+	}
+	return g.testGateway.ListSSEConnectionTools(ctx, conn)
+}
+
+func sseTestConnection() mcpgw.Connection {
+	return mcpgw.Connection{
+		ID:     "conn-1",
+		Name:   "Remote SSE",
+		Type:   "sse",
+		Active: true,
+		Config: map[string]any{"url": "http://example.com/sse"},
+	}
+}
+
+// A connection that listed successfully before keeps contributing its last
+// successful tool listing while it is unreachable: one MCP server outage must
+// not rewrite the agent's tool documentation (Context Epoch: 工具列表失败沿用
+// 旧版).
+func TestSourceListToolsFallsBackToLastSuccessfulListing(t *testing.T) {
+	gateway := &flakyListGateway{testGateway: testGateway{
+		listSSE: []mcpgw.ToolDescriptor{{Name: "search", Description: "search remote data", InputSchema: map[string]any{"type": "object"}}},
+	}}
+	lister := &testConnectionLister{items: []mcpgw.Connection{sseTestConnection()}}
+	source := NewSource(slog.Default(), gateway, lister)
+	session := mcpgw.ToolSessionContext{BotID: "bot-1"}
+
+	tools, err := source.ListTools(context.Background(), session)
+	if err != nil || len(tools) != 1 || tools[0].Name != "remote_sse_search" {
+		t.Fatalf("initial listing = %+v, %v", tools, err)
+	}
+
+	gateway.failSSE = true
+	source.Invalidate("bot-1")
+	tools, err = source.ListTools(context.Background(), session)
+	if err != nil {
+		t.Fatalf("a covered outage must not degrade the listing: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "remote_sse_search" || tools[0].Description != "[Remote SSE] search remote data" {
+		t.Fatalf("fallback tools = %+v; want the last successful listing byte for byte", tools)
+	}
+
+	// The fallback tools remain callable through their cached routes.
+	result, err := source.CallTool(context.Background(), session, "remote_sse_search", nil)
+	if err != nil {
+		t.Fatalf("call through fallback route: %v", err)
+	}
+	if result["route"] != "sse" {
+		t.Fatalf("fallback call routed to %v", result)
+	}
+}
+
+// A connection that never listed successfully has no snapshot: the listing is
+// degraded so registry-caching callers (the tool gateway) serve their own
+// last-good registry instead of caching the partial list.
+func TestSourceListToolsDegradedWhenConnectionNeverListed(t *testing.T) {
+	gateway := &flakyListGateway{
+		testGateway: testGateway{listSSE: []mcpgw.ToolDescriptor{{Name: "search"}}},
+		failSSE:     true,
+	}
+	lister := &testConnectionLister{items: []mcpgw.Connection{sseTestConnection()}}
+	source := NewSource(slog.Default(), gateway, lister)
+	session := mcpgw.ToolSessionContext{BotID: "bot-1"}
+
+	_, err := source.ListTools(context.Background(), session)
+	if !errors.Is(err, ErrToolListingDegraded) {
+		t.Fatalf("uncovered outage err = %v, want ErrToolListingDegraded", err)
+	}
+
+	// The degraded marker survives the short-TTL cache: a cached partial
+	// listing must not turn into a cacheable success.
+	_, err = source.ListTools(context.Background(), session)
+	if !errors.Is(err, ErrToolListingDegraded) {
+		t.Fatalf("cached degraded listing err = %v, want ErrToolListingDegraded", err)
+	}
+
+	// Once the connection recovers, the listing is complete again.
+	gateway.failSSE = false
+	source.Invalidate("bot-1")
+	tools, err := source.ListTools(context.Background(), session)
+	if err != nil || len(tools) != 1 {
+		t.Fatalf("recovered listing = %+v, %v", tools, err)
+	}
+}
+
+// Losing the connection list itself is always degraded: no rebuild is
+// possible and deleted connections must not resurrect from the fallback.
+func TestSourceListToolsConnectionsListFailureIsDegraded(t *testing.T) {
+	gateway := &flakyListGateway{testGateway: testGateway{
+		listSSE: []mcpgw.ToolDescriptor{{Name: "search"}},
+	}}
+	lister := &testConnectionLister{items: []mcpgw.Connection{sseTestConnection()}}
+	source := NewSource(slog.Default(), gateway, lister)
+	session := mcpgw.ToolSessionContext{BotID: "bot-1"}
+	if _, err := source.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("initial listing: %v", err)
+	}
+
+	lister.err = errors.New("db down")
+	lister.items = nil
+	source.Invalidate("bot-1")
+	if _, err := source.ListTools(context.Background(), session); !errors.Is(err, ErrToolListingDegraded) {
+		t.Fatalf("connection list failure err = %v, want ErrToolListingDegraded", err)
+	}
+}

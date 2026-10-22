@@ -490,7 +490,7 @@ func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg
 	if cfg.RecordStablePrefixHash != nil {
 		// Rule 1 accounting: the epoch pins its first observed stable-prefix
 		// hash; a later turn rendering a different one trips the drift alarm.
-		if hash := monitoringStablePrefixHash(view.Selected, cfg.CurrentModelID); hash != "" {
+		if hash := monitoringStablePrefixHash(view.Selected, StableModelIdentity(cfg)); hash != "" {
 			cfg.RecordStablePrefixHash(ctx, hash)
 		}
 	}
@@ -504,13 +504,27 @@ func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg
 // hashing the whole rendered prefix would alarm on every turn — the spec's
 // hash-hygiene warning. A model switch must advance the epoch (显式翻篇);
 // folding it into the hash turns a silent switch into drift.
-func monitoringStablePrefixHash(selected []contextfrag.ContextFrag, modelID string) string {
+func monitoringStablePrefixHash(selected []contextfrag.ContextFrag, modelIdentity string) string {
 	system := renderSDKPayloadFromFrags(selected).System
-	if system == "" && strings.TrimSpace(modelID) == "" {
+	if system == "" && modelIdentity == "" {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(system + "\x00" + strings.TrimSpace(modelID)))
+	sum := sha256.Sum256([]byte(system + "\x00" + modelIdentity))
 	return hex.EncodeToString(sum[:])
+}
+
+// StableModelIdentity identifies the model a turn renders with strongly
+// enough for epoch accounting: the configured model UUID distinguishes two
+// providers serving the same remote model name, while the remote ID keeps
+// the identity meaningful when no UUID is configured (tests, ad-hoc
+// configs).
+func StableModelIdentity(cfg agentpkg.RunConfig) string {
+	uuid := strings.TrimSpace(cfg.CurrentModelUUID)
+	id := strings.TrimSpace(cfg.CurrentModelID)
+	if uuid == "" {
+		return id
+	}
+	return uuid + "/" + id
 }
 
 func isContextBudgetError(err error) bool {

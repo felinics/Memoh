@@ -40,6 +40,10 @@ func (*mergeEpochQueries) PinSessionContextEpochBudget(_ context.Context, _ sqlc
 	panic("merge must not pin the budget outside the rollup statement")
 }
 
+func (*mergeEpochQueries) PinSessionContextEpochModelIdentity(_ context.Context, _ sqlc.PinSessionContextEpochModelIdentityParams) (string, error) {
+	panic("merge must not pin the model identity")
+}
+
 func newMergeFixture(t *testing.T, segments int, cfg TriggerConfig) (*Service, *fakeQueries, *stubModel, *mergeEpochQueries) {
 	t.Helper()
 	stub := &stubModel{summary: "merged segment"}

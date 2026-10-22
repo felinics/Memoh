@@ -65,6 +65,19 @@ var validAdvanceReasons = map[string]struct{}{
 	ReasonUserCut:        {},
 }
 
+// bookkeepingReasons carry the epoch pins (history budget, model identity,
+// monitoring hash) across an advance: a budget slide, an in-turn recovery,
+// or a segment merge only move the anchor or rewrite history bytes — the
+// baseline they pin did not change. Explicit chapter turns (model-change,
+// toolset-change, user-cut) reset the pins so the new epoch builds its own
+// baseline instead of inheriting — and forever disagreeing with — the old
+// one.
+var bookkeepingReasons = map[string]bool{
+	ReasonBudget:         true,
+	ReasonBudgetRecovery: true,
+	ReasonSegmentMerge:   true,
+}
+
 // ValidAdvanceReason reports whether reason is part of the rule-6 audit
 // vocabulary.
 func ValidAdvanceReason(reason string) bool {
@@ -91,6 +104,10 @@ type State struct {
 	// (spec rule 4): a longer current request may never shrink it. Zero means
 	// not pinned yet — the first turn's computed budget becomes the pin.
 	BudgetTokens int64 `json:"budget_tokens,omitempty"`
+	// ModelIdentity pins the model this epoch's baseline is rendered with
+	// (contextview.StableModelIdentity). A turn observing a different
+	// identity books an explicit model-change advance before rendering.
+	ModelIdentity string `json:"model_identity,omitempty"`
 
 	// PrefixHash is the rule-1 monitoring hash observed at this epoch's first
 	// turn — the rendered system region plus model identity (history and
@@ -135,15 +152,26 @@ func (s State) AdvancedBy(anchorAt time.Time, anchorMessageID, reason string, no
 	if anchorMs < s.AnchorCreatedAtMs {
 		return State{}, fmt.Errorf("context epoch anchor cannot move backward: %d < %d", anchorMs, s.AnchorCreatedAtMs)
 	}
-	return State{
+	next := State{
 		Epoch:             s.Epoch + 1,
 		AnchorCreatedAtMs: anchorMs,
 		AnchorMessageID:   anchorMessageID,
 		LastReason:        reason,
 		BudgetTokens:      s.BudgetTokens,
+		ModelIdentity:     s.ModelIdentity,
 		PrefixHash:        s.PrefixHash,
 		UpdatedAtMs:       now.UnixMilli(),
-	}, nil
+	}
+	if !bookkeepingReasons[reason] {
+		// An explicit chapter turn establishes a new baseline: the pins
+		// (budget, model identity, monitoring hash) describe the old
+		// chapter and must be re-observed and re-pinned by the next turn
+		// instead of being inherited into the new epoch.
+		next.BudgetTokens = 0
+		next.ModelIdentity = ""
+		next.PrefixHash = ""
+	}
+	return next, nil
 }
 
 // decodeState parses the stored JSON; empty input means "no state recorded".

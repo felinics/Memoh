@@ -723,3 +723,18 @@ WHERE team_id = public.memoh_current_team_id()
   AND metadata ? 'context_epoch'
   AND (metadata #>> '{context_epoch,prefix_hash}') IS NULL
 RETURNING (metadata->'context_epoch')::text AS state;
+
+-- name: PinSessionContextEpochModelIdentity :one
+-- Pins the model identity into the epoch state. The guard only fires while
+-- the identity is unset, so the first model of an epoch wins; a turn that
+-- observes a different identity books a model-change advance (which resets
+-- the pin) instead of overwriting it in place.
+UPDATE bot_sessions
+SET metadata = jsonb_set(metadata, '{context_epoch,model_identity}', to_jsonb(sqlc.arg(model_identity)::text), true),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(session_id)
+  AND deleted_at IS NULL
+  AND metadata ? 'context_epoch'
+  AND (metadata #>> '{context_epoch,model_identity}') IS NULL
+RETURNING (metadata->'context_epoch')::text AS state;

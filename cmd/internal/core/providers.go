@@ -1139,6 +1139,12 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 	channelMessaging := channelmessagingadapter.New(channelRuntime, registry, assetResolver)
 	historySessions := channelthreadadapter.NewLister(sessionService, routeService)
 	fedGateway.SetOAuthService(oauthService)
+	toolsetChangeEpochs := contextepoch.NewStore(queries, log)
+	toolsetChangeHook := func(ctx context.Context, sessionID string) {
+		if _, err := toolsetChangeEpochs.AdvanceContextEpoch(ctx, sessionID, "toolset-change", contextepoch.ReasonToolsetChange); err != nil {
+			log.WarnContext(ctx, "toolset-change epoch advance failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		}
+	}
 	return []agenttools.ToolProvider{
 		agenttools.NewCapabilityProvider(log, agenttools.CapabilityOptions{
 			Connections: mcpConnService, OAuth: oauthService, Apps: appService, PublicURL: cfg.Server.PublicURL,
@@ -1198,8 +1204,13 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewTranscriptionProvider(log, settingsService, audioService, mediaService),
 		agenttools.NewImageGenProvider(log, settingsService, modelsService, queries, manager, config.DefaultDataMount),
 		agenttools.NewVideoGenProvider(log, settingsService, videoService, bgManager, manager, config.DefaultDataMount),
-		agenttools.NewFederationProvider(log, connectorSource),
-		agenttools.NewFederationProvider(log, fedSource),
+		// Toolset changes rewrite the tool documentation in the rendered
+		// prefix; each observed change books an explicit toolset-change epoch
+		// advance (spec: 工具集变了记 toolset-change 翻篇) instead of showing
+		// up as unexplained prefix drift. The tracker store is stateless — all
+		// epoch state lives in the sessions table.
+		agenttools.NewFederationProvider(log, connectorSource, agenttools.WithToolsetChangeHook(toolsetChangeHook)),
+		agenttools.NewFederationProvider(log, fedSource, agenttools.WithToolsetChangeHook(toolsetChangeHook)),
 		agenttools.NewHistoryProvider(log, historySessions, messageService, queries),
 	}
 }

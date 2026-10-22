@@ -290,6 +290,7 @@ type Queries interface {
 	AdvanceSessionContextEpoch(ctx context.Context, arg dbsqlc.AdvanceSessionContextEpochParams) (string, error)
 	PinSessionContextEpochBudget(ctx context.Context, arg dbsqlc.PinSessionContextEpochBudgetParams) (string, error)
 	PinSessionContextEpochPrefixHash(ctx context.Context, arg dbsqlc.PinSessionContextEpochPrefixHashParams) (string, error)
+	PinSessionContextEpochModelIdentity(ctx context.Context, arg dbsqlc.PinSessionContextEpochModelIdentityParams) (string, error)
 	GetSessionCacheStats(ctx context.Context, sessionID pgtype.UUID) (dbsqlc.GetSessionCacheStatsRow, error)
 	GetSessionUsedSkills(ctx context.Context, sessionID pgtype.UUID) ([]string, error)
 	GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (dbsqlc.GetSettingsByBotIDRow, error)
