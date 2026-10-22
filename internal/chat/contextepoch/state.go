@@ -37,6 +37,11 @@ const (
 	// but the stable part changed, so the change is booked as an epoch
 	// advance instead of silently rewritten.
 	ReasonBudgetRecovery = "budget-recovery"
+	// ReasonSegmentMerge records the merging of the oldest summary segments
+	// into one when the segment chain exceeds its cap (spec: 合并旧段). The
+	// merge rewrites the stable part, so it always advances the epoch; the
+	// anchor moves to the merged coverage end when that lies ahead of it.
+	ReasonSegmentMerge = "segment-merge"
 )
 
 // Beginning is the zero anchor: history loads from the start of the session.
@@ -109,8 +114,8 @@ func decodeState(raw string) (State, error) {
 	return state, nil
 }
 
-// encode serializes the state for the guarded SQL write.
-func (s State) encode() ([]byte, error) {
+// Encode serializes the state for the guarded SQL write.
+func (s State) Encode() ([]byte, error) {
 	raw, err := json.Marshal(s)
 	if err != nil {
 		return nil, fmt.Errorf("encode context epoch state: %w", err)

@@ -324,7 +324,7 @@ func TestAdvanceInPlaceRetriesOnStale(t *testing.T) {
 	// budget-recovery booking must land on top of the stored state, not be
 	// reported as booked while nothing was written.
 	winner := State{Epoch: 5, AnchorCreatedAtMs: 1000, AnchorMessageID: "m1", LastReason: ReasonBudget}
-	raw, err := winner.encode()
+	raw, err := winner.Encode()
 	if err != nil {
 		t.Fatalf("encode winner: %v", err)
 	}

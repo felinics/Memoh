@@ -116,7 +116,7 @@ func (s *Store) Advance(ctx context.Context, sessionID string, next State) (Stat
 	if err != nil {
 		return State{}, err
 	}
-	encoded, err := next.encode()
+	encoded, err := next.Encode()
 	if err != nil {
 		return State{}, err
 	}
