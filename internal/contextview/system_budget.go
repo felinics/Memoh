@@ -162,6 +162,11 @@ func systemBudgetPlanActive(profile IntentProfile, plan *contextfrag.ContextBudg
 
 func finishSystemBudgetPlan(plan *contextfrag.ContextBudgetPlan, actual int) {
 	plan.ActualSystemCost = actual
+	if plan.HistoryBudgetPinned {
+		// Spec rule 4: within an epoch the history budget is pinned; a larger
+		// current request or system-cost drift may not shrink it here.
+		return
+	}
 	plan.HistoryBudget = max(plan.SystemBudget-actual, 0)
 }
 

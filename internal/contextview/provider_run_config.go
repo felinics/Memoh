@@ -347,6 +347,21 @@ func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg
 		cfg = materializeLegacyQuery(cfg, false)
 	}
 	budgetPlan, budgetErr := providerContextBudgetPlan(ctx, cfg)
+	if budgetPlan != nil && budgetErr == nil && cfg.PinnedHistoryBudgetTokens > 0 {
+		// The pin is validated against the part of the window that never feeds
+		// back from the current request (spec rule 4): window minus the output
+		// reserve and tool definitions. A pin that no longer fits (e.g. after a
+		// model switch — an explicit epoch transition the runtime does not
+		// detect yet) is refused rather than overflowing every turn.
+		if ceiling := budgetPlan.Window - budgetPlan.OutputReserve - budgetPlan.ToolDefsCost; cfg.PinnedHistoryBudgetTokens <= ceiling {
+			budgetPlan.HistoryBudget = cfg.PinnedHistoryBudgetTokens
+			budgetPlan.HistoryBudgetPinned = true
+		} else if logger != nil {
+			logger.WarnContext(ctx, "pinned history budget exceeds the window ceiling; using computed budget",
+				slog.Int("pinned_history_budget", cfg.PinnedHistoryBudgetTokens),
+				slog.Int("window_ceiling", ceiling))
+		}
+	}
 	if cfg.ContextBudgetMaxTokens == 0 {
 		recordMutationOnce(ledger, contextfrag.MutationContextBudgetDisabled, "missing_context_window")
 		warnMissingContextWindow(ctx, logger, cfg)
@@ -380,7 +395,20 @@ func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg
 		},
 		DynamicMutators: cfg.ContextDynamicMutators,
 	})
-	if (recoveryAttempts == 0 || (budgetPlan != nil && providerHistoryCost(cfg.ContextSourceFrags) > budgetPlan.HistoryBudget)) && budgetErr == nil && (err == nil || errors.Is(err, contextfrag.ErrProtectedContextOverflow)) &&
+	var payload *SDKRenderedPayload
+	payloadOK := false
+	var envelopeErr error
+	if err == nil {
+		payload, payloadOK = view.Rendered[contextfrag.RenderSDKMessages].Data.(*SDKRenderedPayload)
+		if payloadOK {
+			// The pinned history budget no longer shrinks with the current
+			// request, so the rendered envelope itself is the overflow signal
+			// that sends the turn into budget recovery.
+			envelopeErr = validateProviderRenderedEnvelope(payload, cfg.ContextToolDefs, budgetPlan)
+		}
+	}
+	envelopeUnsatisfied := errors.Is(envelopeErr, contextfrag.ErrBudgetUnsatisfied)
+	if (recoveryAttempts == 0 || envelopeUnsatisfied || (budgetPlan != nil && providerHistoryCost(cfg.ContextSourceFrags) > budgetPlan.HistoryBudget)) && budgetErr == nil && (err == nil || errors.Is(err, contextfrag.ErrProtectedContextOverflow)) &&
 		recoveryAttempts < 3 && cfg.RecoverContextBudget != nil && budgetPlan != nil && budgetPlan.HistoryBudget > 0 &&
 		budgetPlan.ActualSystemCost <= budgetPlan.SystemBudget && ctx.Err() == nil {
 		recovery := cfg
@@ -410,13 +438,12 @@ func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg
 		}
 		return providerViewFallback(logger, fallbackCfg, ledger, budgetPlan, "build_error", "context view build failed", err), nil
 	}
-	payload, ok := view.Rendered[contextfrag.RenderSDKMessages].Data.(*SDKRenderedPayload)
-	if !ok {
+	if !payloadOK {
 		return providerViewFallback(logger, fallbackCfg, ledger, budgetPlan, "unexpected_payload", "context view rendered unexpected payload", nil), nil
 	}
-	if err := validateProviderRenderedEnvelope(payload, cfg.ContextToolDefs, budgetPlan); err != nil {
-		recordContextBudgetFailure(ledger, err)
-		return providerBudgetAuditConfig(cfg, view, ledger, budgetPlan), err
+	if envelopeErr != nil {
+		recordContextBudgetFailure(ledger, envelopeErr)
+		return providerBudgetAuditConfig(cfg, view, ledger, budgetPlan), envelopeErr
 	}
 
 	plan := cachePlanFromPlacement(view.Placement)
@@ -453,6 +480,10 @@ func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg
 	cfg.ContextStepReselector = SelectProviderStepMessages
 	if cfg.ContextLifecycle != nil {
 		cfg.ContextLifecycle.SetManifest(manifest)
+	}
+	if budgetPlan != nil && !budgetPlan.HistoryBudgetPinned && budgetPlan.HistoryBudget > 0 && cfg.RecordHistoryBudgetPin != nil {
+		// First computed budget of the epoch becomes the pin (spec rule 4).
+		cfg.RecordHistoryBudgetPin(ctx, budgetPlan.HistoryBudget)
 	}
 	return cfg, nil
 }

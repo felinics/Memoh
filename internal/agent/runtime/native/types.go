@@ -184,6 +184,13 @@ type RunConfig struct {
 	ContextToolDefs                []contextfrag.ToolDefAccounting
 	ContextToolDefsResolved        bool
 	ContextBudgetMaxTokens         int
+	// PinnedHistoryBudgetTokens, when > 0, pins the selection-time history
+	// budget for the session's current Context Epoch (spec rule 4): the
+	// per-turn feedback from the current request's size may not shrink it.
+	PinnedHistoryBudgetTokens int
+	// RecordHistoryBudgetPin persists the first computed history budget as
+	// the epoch's pin; called once after a successful unpinned selection.
+	RecordHistoryBudgetPin func(context.Context, int)
 	// ModelMaxOutputTokens is the model's configured output cap; zero means unknown.
 	ModelMaxOutputTokens         int
 	RecoverContextBudget         func(context.Context, RunConfig) (RunConfig, bool, error)

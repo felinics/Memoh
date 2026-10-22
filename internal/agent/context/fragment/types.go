@@ -437,6 +437,10 @@ type ContextBudgetPlan struct {
 	SystemBudget                 int    `json:"system_budget"`
 	ActualSystemCost             int    `json:"actual_system_cost"`
 	HistoryBudget                int    `json:"history_budget"`
+	// HistoryBudgetPinned marks the history budget as pinned by the session's
+	// Context Epoch (spec rule 4): system-cost bookkeeping must not recompute
+	// it within the epoch.
+	HistoryBudgetPinned bool `json:"history_budget_pinned,omitempty"`
 }
 
 type SelectionTrace struct {
