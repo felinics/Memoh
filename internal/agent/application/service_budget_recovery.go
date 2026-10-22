@@ -253,7 +253,15 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 			newestTokens = discussMessageTokens(message)
 		}
 	}
-	cfg, shed := shedOlderBatchImages(cfg, batch, plan.HistoryBudget)
+	// The pinned budget is a ceiling, not the feasible room: image shedding
+	// must work with the same envelope-feasible clamp as the compaction below,
+	// or an image batch that exceeds the turn's actual space (but not the pin)
+	// skips shedding and the recovery fails closed.
+	available := plan.HistoryBudget
+	if plan.HistoryBudgetPinned {
+		available = min(available, max(plan.SystemBudget-plan.ActualSystemCost, 0))
+	}
+	cfg, shed := shedOlderBatchImages(cfg, batch, available)
 	if *compacted || s.effectiveSyncCompactionMode() == syncCompactionModeOff {
 		return cfg, shed, nil
 	}
@@ -263,12 +271,7 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 	}
 	var protected []turn.ContextMessageSource
 	var older []batchInput
-	available, pressure := plan.HistoryBudget, 0
-	if plan.HistoryBudgetPinned {
-		// Same envelope-feasible clamp as the chat recovery: the pinned ceiling
-		// ignores the current batch's size; the feasible room does not.
-		available = min(available, max(plan.SystemBudget-plan.ActualSystemCost, 0))
-	}
+	pressure := 0
 	for _, frag := range cfg.ContextSourceFrags {
 		source, inBatch := batch[frag.Provenance.SourceID]
 		switch {

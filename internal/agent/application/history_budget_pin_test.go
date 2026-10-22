@@ -112,6 +112,13 @@ func TestChatHistoryBudgetPinnedAcrossTurnsWithGrowingInput(t *testing.T) {
 	if state.BudgetTokens != pinned {
 		t.Fatalf("pinned budget moved within the epoch: %d -> %d", pinned, state.BudgetTokens)
 	}
+	// The selector records the pin exactly once: turn 1 computed and pinned
+	// the budget, turn 2 applied it. A second record attempt would prove the
+	// pin was ignored and the budget recomputed per turn (the SQL guard would
+	// reject the write, but the regression would stay invisible).
+	if queries.pinBudgetCalls != 1 {
+		t.Fatalf("pin record calls = %d, want 1 (turn 2 must reuse the pin, not recompute)", queries.pinBudgetCalls)
+	}
 	if state.Epoch != 1 || state.LastReason != contextepoch.ReasonInit {
 		t.Fatalf("epoch advanced on a quiet turn: %+v", state)
 	}

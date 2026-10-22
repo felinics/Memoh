@@ -660,3 +660,43 @@ func TestShedOlderBatchImagesShedsOnlyTheImagesNeeded(t *testing.T) {
 		t.Fatalf("mutations = %+v", records)
 	}
 }
+
+// With a pinned history budget, image shedding must work with the turn's
+// envelope-feasible room (pin clamped by the actual system cost), not the
+// full pin: an image that fits the pin but not the feasible room must shed,
+// or the recovery fails closed on context.budget_unsatisfied.
+func TestRecoverDiscussContextBudgetShedsImagesAgainstTheFeasibleClamp(t *testing.T) {
+	t.Parallel()
+
+	s := &Service{}
+	s.SetSyncCompactionMode(syncCompactionModeOff)
+	older := sdk.UserMessage("older input", sdk.ImagePart{Image: "data:image/png;base64,YQ=="})
+	newest := sdk.UserMessage("newest input")
+	cfg := native.RunConfig{
+		Messages: []sdk.Message{older, newest},
+		ContextSourceFrags: []contextfrag.ContextFrag{
+			discussHistoryFrag(0, "older", contextfrag.KindConversationEvent, older),
+			discussHistoryFrag(1, "newest", contextfrag.KindCurrentUserMessage, newest),
+		},
+		ContextMutations: contextfrag.NewMutationLedger(),
+		ContextManifest: contextfrag.Manifest{BudgetPlan: &contextfrag.ContextBudgetPlan{
+			// Pinned ceiling 2000 fits the image (1500); the feasible room is
+			// clamped to 2200-1500=700, which does not.
+			HistoryBudget: 2000, HistoryBudgetPinned: true, SystemBudget: 2200, ActualSystemCost: 1500,
+		}},
+	}
+	admitted := []turn.DiscussMessage{
+		{Source: &turn.ContextMessageSource{Kind: "external", ID: "older", Current: true}},
+		{Source: &turn.ContextMessageSource{Kind: "external", ID: "newest", Current: true}, Content: "newest input"},
+	}
+	got, shed, err := s.recoverDiscussContextBudget(t.Context(), turn.StartTurnCommand{BotID: syncCompactBotID, ThreadID: syncCompactThreadID}, admitted, "", cfg, new(bool))
+	if err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if !shed {
+		t.Fatal("the image fits the pinned budget but not the feasible room: it must shed")
+	}
+	if len(got.Messages) == 0 || len(got.Messages[0].Content) != 1 {
+		t.Fatalf("the older message kept its image: %+v", got.Messages)
+	}
+}

@@ -12,6 +12,7 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/chat/contextepoch"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 )
@@ -138,5 +139,37 @@ func TestPendingRuntimeDecisionsFailsClosedOnRuntimeLookupFailure(t *testing.T) 
 	got, err := service.PendingRuntimeDecisions(t.Context(), "00000000-0000-0000-0000-000000000001")
 	if !errors.Is(err, sentinel) || got != nil {
 		t.Fatalf("runtime lookup error treated as native: %v %v", got, err)
+	}
+}
+
+// Continuations (ask_user answers, tool approvals) rebuild the run config
+// inside the same epoch: the pinned history budget must apply there exactly
+// as at turn start (spec rule 4).
+func TestPrepareContinuationRunConfigAppliesPinnedEpochBudget(t *testing.T) {
+	t.Parallel()
+
+	const sessionID = "33333333-3333-4333-8333-333333333333"
+	queries := &fakeContextEpochQueries{states: map[string]string{}}
+	queries.setState(sessionID, contextepoch.State{Epoch: 2, LastReason: contextepoch.ReasonBudget, BudgetTokens: 4000})
+	resolver := &Service{
+		userInput:     &userinput.Service{},
+		contextEpochs: contextepoch.NewStore(queries, nil),
+	}
+
+	got, err := resolver.prepareContinuationRunConfig(
+		context.Background(),
+		native.RunConfig{},
+		historyfrag.ScopeFallback{},
+		contextfrag.Scope{SessionID: sessionID},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("prepareContinuationRunConfig() error = %v", err)
+	}
+	if got.PinnedHistoryBudgetTokens != 4000 {
+		t.Fatalf("continuation PinnedHistoryBudgetTokens = %d, want the pinned 4000", got.PinnedHistoryBudgetTokens)
+	}
+	if got.RecordHistoryBudgetPin == nil {
+		t.Fatal("continuation lost the pin-recording callback")
 	}
 }

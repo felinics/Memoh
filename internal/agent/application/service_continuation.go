@@ -69,5 +69,10 @@ func (s *Service) prepareContinuationRunConfig(
 	base.Query = ""
 	base.LiveToolStream = eventCh != nil
 	base.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)
+	// Continuations (ask_user answers, tool approvals) rebuild the run config
+	// inside the same epoch: the pinned history budget and prefix-hash
+	// accounting apply here exactly as at turn start (spec rule 4 — a resumed
+	// turn must not recompute the budget from its own payload).
+	s.pinHistoryBudget(ctx, summaryScope.SessionID, &base)
 	return s.prepareRunConfig(ctx, base), nil
 }
