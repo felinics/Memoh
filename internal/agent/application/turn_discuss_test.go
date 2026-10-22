@@ -546,6 +546,61 @@ func TestAdmittedDiscussSilencePublishesStableTimeoutFailure(t *testing.T) {
 	}
 }
 
+// slowStopDiscussAgentStreamer emits one event, then takes longer than the
+// idle timeout to stop once cancelled, as a tool that ignores cancellation
+// would.
+type slowStopDiscussAgentStreamer struct{ stopAfter time.Duration }
+
+func (f *slowStopDiscussAgentStreamer) Stream(ctx context.Context, _ native.RunConfig) <-chan native.StreamEvent {
+	ch := make(chan native.StreamEvent, 1)
+	go func() {
+		defer close(ch)
+		ch <- native.StreamEvent{Type: native.EventTextDelta, Delta: "partial"}
+		<-ctx.Done()
+		time.Sleep(f.stopAfter)
+		ch <- native.StreamEvent{Type: native.EventAgentAbort, Messages: json.RawMessage(`[]`)}
+	}()
+	return ch
+}
+
+// A run whose events can no longer be published ends on that failure, once,
+// even when the engine outlasts the idle timeout while it stops.
+func TestAdmittedDiscussPublishFailureOutlastingIdleTimeoutIsNotATimeout(t *testing.T) {
+	resolver := &fakeDiscussService{resolveResult: ResolveRunConfigResult{ModelID: "model-1"}}
+	service := newDiscussTestService(&fakeRunner{}, &slowStopDiscussAgentStreamer{stopAfter: 100 * time.Millisecond}, resolver)
+	service.streamIdleTimeout = 10 * time.Millisecond
+	runtime, _ := configureDiscussLifecycle(service)
+	var published []native.StreamEventType
+	service.publishTurnEvent = func(_ context.Context, _ sessionruntime.RunHandle, event native.StreamEvent) error {
+		published = append(published, event.Type)
+		if event.Type == native.EventTextDelta {
+			return errors.New("consumer gone")
+		}
+		return nil
+	}
+
+	handle, err := service.StartTurn(context.Background(), lifecycleDiscussCommand())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range handle.Events() {
+	}
+	var handleErrs []error
+	for err := range handle.Errs() {
+		handleErrs = append(handleErrs, err)
+	}
+
+	if len(handleErrs) != 1 || apperror.CodeOf(handleErrs[0]) == apperror.CodeAgentResponseTimeout {
+		t.Fatalf("handle errors = %v, want the publish failure once", handleErrs)
+	}
+	if len(published) != 1 {
+		t.Fatalf("published = %v, want nothing after the failed publish", published)
+	}
+	if len(runtime.finishes) != 1 || runtime.finishes[0].message == string(apperror.CodeAgentResponseTimeout) {
+		t.Fatalf("runtime finishes = %#v, want one finish that is not a timeout", runtime.finishes)
+	}
+}
+
 func TestAdmittedDiscussBudgetFailurePersistsFailedBudgetLifecycle(t *testing.T) {
 	const admittedRunID = "00000000-0000-4000-8000-000000000919"
 	logger := slog.New(slog.DiscardHandler)

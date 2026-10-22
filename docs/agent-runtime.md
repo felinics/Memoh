@@ -42,10 +42,11 @@ stored reply or summary Channel rendered it from, at the version it rendered;
 the version crosses the internal RPC with the command. The inputs of the batch
 the run answers are anchors, so a fold reads only what the run's request
 renders: a message that arrives during the run is the next batch's input, not
-part of the summary. A Discuss step marks its rows as such: they are context for
-later runs but do not prove the batch consumed, so a worker that comes back
-without a durable cursor still answers the input of a run that failed after
-committing steps.
+part of the summary. The steps before the run's answer mark their rows as such:
+they are context for later runs but do not prove the batch consumed, so a worker
+that comes back without a durable cursor still answers the input of a run that
+failed after committing steps. The answer, the completed step that calls no
+tool, is that proof.
 
 `compaction.Service.Compact` executes one event that folds the rendered active
 summary and every eligible source into one rolling summary. A pass folds what one

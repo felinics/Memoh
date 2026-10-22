@@ -559,8 +559,8 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
       (MEMOH-132, MEMOH-133) — CM-ADM-002
 - [x] In-run compaction for Discuss: a native Discuss run writes each step as it
       commits, folds against the version of each source Channel rendered, keeps
-      the batch inputs in place, and its steps never prove the batch consumed
-      — CM-CMP-001
+      the batch inputs in place, and only its answer, never a step before it,
+      proves the batch consumed — CM-CMP-001
 - [x] In-run compaction for retried and edited turns: the attempt folds the
       history before its cutoff and its own steps, a retry's input follows the
       copy its first step writes, and a replaced turn's summary is retired by

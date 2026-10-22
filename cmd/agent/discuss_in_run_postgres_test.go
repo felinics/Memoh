@@ -9,6 +9,39 @@ import (
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
+// A clean Discuss run's answer is what proves its batch consumed: the steps
+// before it carry the step mark and the answer does not. A worker that comes
+// back without the durable position, because the run's advance never landed,
+// starts after the answer instead of answering the batch again.
+func TestPostgresDiscussAnswerProvesItsBatchConsumed(t *testing.T) {
+	const steps = 14
+	entry := runEntries[slices.IndexFunc(runEntries, func(e runEntry) bool { return e.name == "discuss" })]
+	s := newEffectLoop(t, entry)
+	f := s.f
+	if code, _ := s.run(entry, loopInput, steps); code != "" || f.summaries.Load() == 0 || len(s.effects) != steps {
+		t.Fatalf("code=%q summaries=%d effects=%v, want the run to fold and answer", code, f.summaries.Load(), s.effects)
+	}
+	sources, err := f.messages.ListTurnResponseSourcesSinceBySessionWithinBytes(f.ctx, f.sessionID, time.Unix(0, 0).UTC(), 1<<24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	responses := timeline.DecodeTurnResponseEntries(sources)
+	var anchor int64
+	var answers int
+	for _, response := range responses {
+		if !response.DiscussStep {
+			answers++
+			anchor = max(anchor, response.RequestedAtMs)
+		}
+	}
+	if len(responses) < 2 || answers != 1 || responses[len(responses)-1].DiscussStep {
+		t.Fatalf("%d replies with %d unmarked, want the steps marked and only the answer, last, unmarked", len(responses), answers)
+	}
+	if timeline.HasUncoveredExternalEvent(f.rc, timeline.DiscussCursorPosition{SourceCursor: anchor}) {
+		t.Fatal("a worker without the durable position would answer the batch again")
+	}
+}
+
 // A Discuss message that arrives while a run folds in place is not part of
 // what the run read, so the run's summary does not cover it. When the run
 // then fails, its committed steps stay, once, and prove nothing consumed: a

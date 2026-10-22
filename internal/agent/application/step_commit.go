@@ -278,11 +278,13 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 			return fail(err)
 		}
 	}
+	// Rows a Discuss run writes before its answer are context for later runs,
+	// not proof that it consumed the batch it answers: the run can still fail
+	// after them. The answer, a completed step that calls no tool, is.
+	discussStep := c.req.SessionType == sessionpkg.TypeDiscuss && (mode != stepCompleted || classifyQueueStep(record) != queueStepFinal)
 	for i := range inputs {
 		inputs[i].TurnRequestMessageID = c.turnRequestMessageID
-		if c.req.SessionType == sessionpkg.TypeDiscuss {
-			// A Discuss step is context for later runs; only the run's end
-			// proves the batch it answers consumed.
+		if discussStep {
 			metadata := maps.Clone(inputs[i].Metadata)
 			if metadata == nil {
 				metadata = make(map[string]any, 1)
