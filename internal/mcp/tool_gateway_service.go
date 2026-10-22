@@ -32,6 +32,11 @@ type ToolGatewayService struct {
 
 	mu    sync.Mutex
 	cache map[string]cachedToolRegistry
+	// lastGood holds the most recent fully successful registry per
+	// run-independent key: a failed refresh keeps serving it (Context Epoch
+	// spec: 工具列表刷新失败时沿用上次成功的那份), and a degraded registry is
+	// never written here.
+	lastGood map[string]cachedToolRegistry
 }
 
 type ToolGatewayOption func(*ToolGatewayService)
@@ -57,6 +62,7 @@ func NewToolGatewayService(log *slog.Logger, sources []ToolSource, opts ...ToolG
 		sources:  filteredSources,
 		cacheTTL: defaultToolRegistryCacheTTL,
 		cache:    map[string]cachedToolRegistry{},
+		lastGood: map[string]cachedToolRegistry{},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -164,10 +170,12 @@ func (s *ToolGatewayService) getRegistry(ctx context.Context, session ToolSessio
 	}
 
 	registry := NewToolRegistry()
+	failed := false
 	for _, source := range s.sources {
 		tools, err := source.ListTools(ctx, session)
 		if err != nil {
 			s.logger.WarnContext(ctx, "list tools from source failed", slog.Any("error", err))
+			failed = true
 			continue
 		}
 		for _, tool := range tools {
@@ -177,13 +185,45 @@ func (s *ToolGatewayService) getRegistry(ctx context.Context, session ToolSessio
 		}
 	}
 
+	if failed {
+		// Context Epoch spec: a failed tool-list refresh must not swap the
+		// stable prefix mid-session — keep serving the last fully successful
+		// registry, even past its TTL. The fallback key ignores the per-turn
+		// RunID so a later turn of the same session still finds it.
+		s.mu.Lock()
+		cached, ok := s.lastGood[toolRegistryFallbackKey(session)]
+		s.mu.Unlock()
+		if ok && cached.registry != nil {
+			s.logger.WarnContext(ctx, "tool registry refresh failed; keeping the last successful registry",
+				slog.String("cache_key", cacheKey))
+			return cached.registry, nil
+		}
+		// No prior success: serve the partial registry but never cache it, so
+		// the next call retries a full refresh instead of pinning a degraded
+		// tool list.
+		return registry, nil
+	}
+
 	s.mu.Lock()
 	s.cache[cacheKey] = cachedToolRegistry{
 		expiresAt: time.Now().Add(s.cacheTTL),
 		registry:  registry,
 	}
+	s.lastGood[toolRegistryFallbackKey(session)] = cachedToolRegistry{
+		expiresAt: time.Now().Add(s.cacheTTL),
+		registry:  registry,
+	}
 	s.mu.Unlock()
 	return registry, nil
+}
+
+// toolRegistryFallbackKey keys the last-successful registry independently of
+// the per-turn RunID: the tool list never depends on the run, so a failed
+// refresh in a later turn of the same session still falls back correctly.
+func toolRegistryFallbackKey(session ToolSessionContext) string {
+	stripped := session
+	stripped.RunID = ""
+	return toolRegistryCacheKey(stripped)
 }
 
 func toolRegistryCacheKey(session ToolSessionContext) string {
