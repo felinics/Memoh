@@ -70,7 +70,7 @@ var runEntries = []runEntry{
 	{name: "ask-user", folds: true, extra: 1, send: (*effectLoop).decision},
 	{name: "retry", folds: true, send: (*effectLoop).retry},
 	{name: "edit", folds: true, send: (*effectLoop).edit},
-	{name: "discuss", send: (*effectLoop).discuss},
+	{name: "discuss", folds: true, send: (*effectLoop).discuss},
 }
 
 // effectLoop scripts the provider for one native run at a time: the run whose
@@ -99,7 +99,12 @@ type effectLoop struct {
 	// resultBytes sizes each effect's result; zero keeps the default.
 	resultBytes int
 	// userID is the account the runs act for; empty sends them for none.
-	userID   string
+	userID string
+	// arrival is a Discuss message delivered during effect arriveAt; arrived
+	// holds the segments delivered so, for the caller to render.
+	arrival  string
+	arriveAt int
+	arrived  []timeline.RenderedSegment
 	effects  []int
 	requests []string
 }
@@ -165,7 +170,7 @@ func (s *effectLoop) Tools(context.Context, tools.SessionContext) ([]toolexec.To
 		toolexec.Define("numbered_effect", "Record a numbered effect and return its findings.", func(tc *toolexec.ToolExecContext, input effectInput) (sdk.ToolOutput, error) {
 			s.mu.Lock()
 			s.effects = append(s.effects, input.Index)
-			size, foreign := cmp.Or(s.resultBytes, 4200), input.Index == s.foreignAt
+			size, foreign, arrive := cmp.Or(s.resultBytes, 4200), input.Index == s.foreignAt, input.Index == s.arriveAt
 			if input.Index == s.downAt {
 				s.downFrom = s.f.summaries.Load()
 				s.f.failStatus.Store(http.StatusServiceUnavailable)
@@ -176,6 +181,15 @@ func (s *effectLoop) Tools(context.Context, tools.SessionContext) ([]toolexec.To
 				if err := s.writeForeignRow(context.WithoutCancel(tc.Context)); err != nil {
 					return sdk.ToolOutput{}, err
 				}
+			}
+			if arrive {
+				segment, err := s.f.deliver(context.WithoutCancel(tc.Context), uuid.NewString(), s.arrival, time.Now().Truncate(time.Millisecond))
+				if err != nil {
+					return sdk.ToolOutput{}, err
+				}
+				s.mu.Lock()
+				s.arrived = append(s.arrived, segment)
+				s.mu.Unlock()
 			}
 			return toolexec.OutputFromValue(effectResult(input.Index, size)), nil
 		}),
@@ -514,10 +528,10 @@ func (s *effectLoop) replaceLatest(start replaceTurn) string {
 	return outcome.ErrorCode()
 }
 
-// discuss delivers text as an unanswered Discuss message and lets the driver
-// answer it.
+// discuss delivers text as an unanswered Discuss message, received now so
+// the steps that answer it follow it, and lets the driver answer it.
 func (s *effectLoop) discuss(text string) string {
-	s.f.appendMessage(uuid.NewString(), text)
+	s.f.appendMessageAt(uuid.NewString(), text, time.Now().Truncate(time.Millisecond))
 	return s.f.trigger()
 }
 

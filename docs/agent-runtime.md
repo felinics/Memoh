@@ -26,15 +26,26 @@
 
 All durable native entries bind step persistence and continuation through
 `bindNativeRun`. Web, pipeline IM, trigger, follow-up, decision continuations,
-retry and edit can recover context at a committed step boundary and continue the
-same run. An empty initial history does not disable recovery. A retry or edit
+retry, edit and native Discuss can recover context at a committed step boundary
+and continue the same run. An empty initial history does not disable recovery. A retry or edit
 folds what its request renders: the history before its cutoff and the steps of
 the attempt its first step selected. A retry renders its input from the request
 it replaces, which that step hides; from then on the copy the step wrote is the
 input the event keeps in place. When the replaced turn had compacted in place,
 the same step moves the session to a new compaction epoch, so the attempt folds
-the history before the cutoff into a summary of its own. Discuss, subagent and
-external runtimes have separate ownership and remain outside this capability.
+the history before the cutoff into a summary of its own. Subagent and external
+runtimes have separate ownership and remain outside this capability.
+
+A native Discuss run writes each step as it commits, under the rows ingress
+already wrote for its input. Each composed message names the inbound message,
+stored reply or summary Channel rendered it from, at the version it rendered;
+the version crosses the internal RPC with the command. The inputs of the batch
+the run answers are anchors, so a fold reads only what the run's request
+renders: a message that arrives during the run is the next batch's input, not
+part of the summary. A Discuss step marks its rows as such: they are context for
+later runs but do not prove the batch consumed, so a worker that comes back
+without a durable cursor still answers the input of a run that failed after
+committing steps.
 
 `compaction.Service.Compact` executes one event that folds the rendered active
 summary and every eligible source into one rolling summary. A pass folds what one

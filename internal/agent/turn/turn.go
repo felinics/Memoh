@@ -138,12 +138,16 @@ type StartTurnCommand struct {
 	DiscussAddressed bool
 }
 
+// ContextMessageSource names the stored message a context message renders.
+// ContentHash and EventCursor name the version rendered, so a compaction that
+// reads the source back refuses one that changed since; Channel composes
+// Discuss context in another process, so they cross the wire with it.
 type ContextMessageSource struct {
 	Kind        string `json:"kind"`
 	ID          string `json:"id,omitempty"`
 	Current     bool   `json:"current,omitempty"`
-	ContentHash string `json:"-"`
-	EventCursor int64  `json:"-"`
+	ContentHash string `json:"content_hash,omitempty"`
+	EventCursor int64  `json:"event_cursor,omitempty"`
 }
 
 // DiscussMessage is one composed context message for a discuss turn.

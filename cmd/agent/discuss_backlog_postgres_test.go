@@ -186,20 +186,45 @@ func newBacklogFixture(t *testing.T) *backlogFixture {
 
 func (f *backlogFixture) appendMessage(id, text string) {
 	f.t.Helper()
-	created := f.base.Add(time.Duration(len(f.rc)+1) * time.Second)
-	eventID, event, err := f.cursor.PersistEvent(f.ctx, f.botID, f.sessionID, timeline.MessageEvent{SessionID: f.sessionID, MessageID: id, ReceivedAtMs: created.UnixMilli(), Content: []timeline.ContentNode{{Type: "text", Text: text}}})
+	f.appendMessageAt(id, text, f.base.Add(time.Duration(len(f.rc)+1)*time.Second))
+}
+
+// appendMessageAt delivers text as received at created.
+func (f *backlogFixture) appendMessageAt(id, text string, created time.Time) {
+	f.t.Helper()
+	segment, err := f.deliver(f.ctx, id, text, created)
 	if err != nil {
 		f.t.Fatal(err)
+	}
+	f.rc = append(f.rc, segment)
+}
+
+// deliver writes text as the message ingress stores, received at created,
+// and returns the segment the timeline renders for it. It does not touch the
+// fixture's rendered context, so a tool may call it while a run reads it.
+func (f *backlogFixture) deliver(ctx context.Context, id, text string, created time.Time) (timeline.RenderedSegment, error) {
+	eventID, event, err := f.cursor.PersistEvent(ctx, f.botID, f.sessionID, timeline.MessageEvent{SessionID: f.sessionID, MessageID: id, ReceivedAtMs: created.UnixMilli(), Content: []timeline.ContentNode{{Type: "text", Text: text}}})
+	if err != nil {
+		return timeline.RenderedSegment{}, err
 	}
 	content, _ := json.Marshal(text)
-	msg, err := f.messages.Persist(f.ctx, messagepkg.PersistInput{BotID: f.botID, SessionID: f.sessionID, ExternalMessageID: id, EventID: eventID, Role: "user", Content: content, SessionMode: "discuss"})
+	msg, err := f.messages.Persist(ctx, messagepkg.PersistInput{BotID: f.botID, SessionID: f.sessionID, ExternalMessageID: id, EventID: eventID, Role: "user", Content: content, SessionMode: "discuss"})
 	if err != nil {
-		f.t.Fatal(err)
+		return timeline.RenderedSegment{}, err
 	}
-	if _, err := f.pool.Exec(f.ctx, `UPDATE bot_history_messages SET created_at=$2 WHERE id=$1`, msg.ID, created); err != nil {
-		f.t.Fatal(err)
+	if _, err := f.pool.Exec(ctx, `UPDATE bot_history_messages SET created_at=$2 WHERE id=$1`, msg.ID, created); err != nil {
+		return timeline.RenderedSegment{}, err
 	}
-	f.rc = append(f.rc, timeline.RenderedSegment{MessageID: id, LastEventCursor: event.(timeline.MessageEvent).EventCursor, ReceivedAtMs: created.UnixMilli(), Content: []timeline.RenderedContentPiece{{Type: "text", Text: text}}})
+	return timeline.RenderedSegment{MessageID: id, LastEventCursor: event.(timeline.MessageEvent).EventCursor, ReceivedAtMs: created.UnixMilli(), Content: []timeline.RenderedContentPiece{{Type: "text", Text: text}}}, nil
+}
+
+// restartDriver replaces the Discuss driver with a fresh one, the way a
+// worker comes back after a restart or an idle eviction: it knows only what
+// the cursor store and the history hold.
+func (f *backlogFixture) restartDriver() {
+	f.driver.StopAll()
+	f.driver = discuss.NewDiscussDriver(discuss.DiscussDriverDeps{Turn: f.service, CursorStore: f.cursor, MessageService: f.messages, Artifacts: compaction.NewTimelineArtifactSource(postgresstore.NewQueriesWithPool(f.pool, sqlc.New(f.pool))), Broadcaster: f.broadcaster, AdmissionMaxTokens: 16000, Logger: slog.Default()})
+	f.t.Cleanup(f.driver.StopAll)
 }
 
 // trigger notifies the driver and reports the failure code, or "" when the

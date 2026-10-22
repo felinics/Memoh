@@ -20,6 +20,7 @@ import (
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/contextview"
 	"github.com/felinics/memoh/internal/messageconv"
+	"github.com/felinics/memoh/internal/models"
 )
 
 // turnRuntimeHooks are test seams for the transport-facing turn lifecycle.
@@ -276,13 +277,18 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 			}
 		}
 	}
+	runConfig.ContextProvenance = discussContextProvenance(admitted, runConfig.Messages)
 	runConfig = runConfig.RefreshContextFrag()
 	terminal := s.contextLifecycleTerminal(ctx, runConfig)
 	outcome := newOutcomeRecorder(ctx)
+	// A failure without a catalogued code is named on the terminal event, so
+	// the run's record and its failure row name the same failure.
+	outcome.defaultCode = apperror.CodeAgentResponseInterrupted
 	defer outcome.finishLifecycle(terminal)
 
 	reasoningTiming := newReasoningTimingTracker(nil)
-	configureNativeReasoningTiming(&runConfig, reasoningTiming, nil)
+	rc := resolvedContext{runConfig: runConfig, model: models.GetResponse{ID: resolved.ModelID}}
+	committer := s.bindNativeRun(ctx, discussRunRequest(cmd, h, admitted), rc, &runConfig, reasoningTiming)
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(runConfig))
 	defer idleCancel.Stop()
 	outcome.watchIdle(idleCtx, idleCancel)
@@ -293,12 +299,16 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		return s.recoverDiscussContextBudget(ctx, cmd, admitted, resolved.ModelID, cfg, &compacted)
 	}
 	runConfig = pauseIdleDuringBudgetRecovery(runConfig, idleCancel)
-	eventCh := s.streamDiscussAgent(idleCtx, runConfig)
+	streamCtx, cancelStream := context.WithCancelCause(idleCtx)
+	defer cancelStream(nil)
+	eventCh := s.streamDiscussAgent(streamCtx, runConfig)
 
 	var finalMessages json.RawMessage
 	var finalReasoningTiming []messagepkg.ReasoningTimingSegment
 	var terminalEvent native.StreamEvent
 	var terminalPayload []byte
+	var uncommittedText uncommittedStepText
+events:
 	for event := range eventCh {
 		if event.Type == native.EventContextRecompose {
 			if h.emit(turn.DiscussEventRecompose, nil) {
@@ -311,6 +321,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		}
 		idleCancel.Observe(event)
 		_ = outcome.observe(event)
+		uncommittedText.observe(event)
 		if event.IsTerminal() {
 			finalMessages = event.Messages
 			finalReasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
@@ -321,8 +332,8 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		if h.publishAgentEvent != nil {
 			if publishErr := h.publishAgentEvent(ctx, publicAgentStreamEvent(event)); publishErr != nil {
 				outcome.setCause(publishErr)
-				h.emitErr(publishErr)
-				return
+				cancelStream(publishErr)
+				break events
 			}
 		}
 		payload, marshalErr := json.Marshal(publicAgentStreamEvent(event))
@@ -331,8 +342,14 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		}
 		if !h.emit(string(event.Type), payload) {
 			outcome.recordCause(context.Cause(ctx))
-			return
+			cancelStream(context.Cause(ctx))
+			break events
 		}
+	}
+	// The engine may still be committing a step; history is written once it
+	// has stopped.
+	for event := range eventCh {
+		uncommittedText.observe(event)
 	}
 	hasTerminalEvent := outcome.terminalSeen
 	timedOut := idleCancel.DidFire()
@@ -345,10 +362,6 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		} else {
 			outcome.recordCause(errors.New("native discuss stream ended without a terminal event"))
 		}
-		if ctx.Err() == nil {
-			h.emitErr(outcome.cause)
-		}
-		return
 	}
 
 	// The native stream deliberately drains to a terminal event after external
@@ -356,7 +369,24 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	// detaching cancellation so that terminal history and runtime publication
 	// can cross the same durable boundary as the main chat stream.
 	terminalCtx := context.WithoutCancel(ctx)
-	if hasTerminalEvent || timedOut {
+	// Steps are already history. A failure is written after them before the
+	// terminal event proposes the run's end, after which no row can be written.
+	if committer != nil && !runOwnershipLost(ctx) {
+		s.recordStepRunFailure(terminalCtx, committer, uncommittedText.String(), outcome.failureCode())
+		if storeErr := committer.finish(terminalCtx); storeErr != nil {
+			historyErr := runtimeHistoryError(storeErr)
+			outcome.setCause(historyErr)
+			h.emitErr(historyErr)
+			return
+		}
+	}
+	if !hasTerminalEvent && !timedOut {
+		if ctx.Err() == nil {
+			h.emitErr(outcome.cause)
+		}
+		return
+	}
+	if committer == nil {
 		var failureCode apperror.Code
 		if timedOut {
 			failureCode = snapshotFailureCode(true, outcome.cause)
@@ -458,6 +488,54 @@ func (s *Service) persistDiscussTerminalSnapshot(
 		ContextLifecycle: runConfig.ContextLifecycle,
 		ReasoningTiming:  reasoningTiming,
 	})
+}
+
+// discussRunRequest is the request a Discuss run writes its steps under. Its
+// input is the rows ingress already wrote, so its steps join the history as
+// replies without a request row of their own; the inputs of the batch it
+// answers are what a fold keeps in place.
+func discussRunRequest(cmd turn.StartTurnCommand, h *discussHandle, admitted []turn.DiscussMessage) ChatRequest {
+	req := ChatRequest{
+		RunID:                   h.id,
+		BotID:                   cmd.BotID,
+		ChatID:                  cmd.BotID,
+		ThreadID:                cmd.ThreadID,
+		SourceChannelIdentityID: cmd.SourceChannelIdentityID,
+		CurrentChannel:          cmd.CurrentChannel,
+		SessionType:             sessionpkg.TypeDiscuss,
+		UserMessagePersisted:    true,
+	}
+	for _, message := range admitted {
+		if source := message.Source; source != nil && source.Current {
+			req.discussCurrentSources = append(req.discussCurrentSources, turn.ContextMessageSource{Kind: source.Kind, ID: source.ID})
+		}
+	}
+	return req
+}
+
+// discussContextProvenance names what each composed message renders: the
+// inbound message or stored reply Channel read it from, at the version it
+// read, or the summary it renders. The inputs of the batch are anchors.
+func discussContextProvenance(admitted []turn.DiscussMessage, messages []sdk.Message) []native.MessageProvenance {
+	var out []native.MessageProvenance
+	for i, message := range admitted {
+		if i >= len(messages) {
+			break
+		}
+		var source turn.ContextMessageSource
+		switch {
+		case message.CompactionArtifactID != "":
+			source = turn.ContextMessageSource{Kind: "summary", ID: message.CompactionArtifactID}
+		case message.Source != nil && message.Source.ID != "":
+			source = *message.Source
+		default:
+			continue
+		}
+		anchor := source.Current
+		source.Current = false
+		out = append(out, native.MessageProvenance{Message: messages[i], Sources: []turn.ContextMessageSource{source}, Anchor: anchor})
+	}
+	return out
 }
 
 // discussContextCollector names the collector of composed discuss messages.

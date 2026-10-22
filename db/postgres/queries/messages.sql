@@ -1847,15 +1847,17 @@ WHERE m.team_id = public.memoh_current_team_id()
 
 -- name: ListTurnResponseSourcesSinceBySessionWithinBytes :many
 -- Turn-response (TR) composition, in Discuss and in pipeline chat, only needs
--- content and the interrupted-checkpoint flag. Never return full metadata:
--- legacy context_lifecycle snapshots can dwarf the content budget. Preserve
--- the active-history window, including its crossing row and turn order.
+-- content, the interrupted-checkpoint flag and the Discuss step flag. Never
+-- return full metadata: legacy context_lifecycle snapshots can dwarf the
+-- content budget. Preserve the active-history window, including its crossing
+-- row and turn order.
 SELECT
   ranked.id,
   ranked.role,
   ranked.content,
   ranked.created_at,
-  ranked.interrupted
+  ranked.interrupted,
+  ranked.discuss_step
 FROM (
   SELECT
     m.id,
@@ -1865,6 +1867,7 @@ FROM (
     m.turn_position,
     m.turn_message_seq,
     COALESCE(m.metadata->'agent_step_interrupted' = 'true'::jsonb, false)::boolean AS interrupted,
+    COALESCE(m.metadata->'discuss_step' = 'true'::jsonb, false)::boolean AS discuss_step,
     (SUM(octet_length(m.content::text)) OVER (
       ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
     ) - octet_length(m.content::text))::BIGINT AS preceding_bytes

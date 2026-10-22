@@ -26,13 +26,14 @@ func TestPostgresTurnResponseSourcesProjectMetadataAndPreserveWindow(t *testing.
 	svc := NewService(nil, postgresstore.NewQueries(queries))
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	// Keep content tiny while the audit, usage and display fields are large.
-	// Only a JSON boolean true is an interrupted checkpoint, not the string "true".
+	// Only a JSON boolean true is an interrupted checkpoint or a Discuss step,
+	// not the string "true".
 	flags := []string{`true`, `false`, `"true"`, `null`}
 	for i, flag := range flags {
 		_, err := tx.Exec(ctx, `INSERT INTO bot_history_messages
    (id, bot_id, session_id, role, content, metadata, usage, display_text, created_at, turn_position, turn_message_seq, turn_id, turn_visible)
    VALUES ($1, $2, $3, 'assistant', $4::jsonb,
-    jsonb_build_object('agent_step_interrupted', $5::jsonb,
+    jsonb_build_object('agent_step_interrupted', $5::jsonb, 'discuss_step', $5::jsonb,
       'context_lifecycle', jsonb_build_object('selection_decisions', repeat('x', 2*1024*1024))),
     jsonb_build_object('unused', repeat('u', 1024)), repeat('d', 1024), $6, $7, 0, gen_random_uuid(), true)`,
 			uuid.NewString(), postgresMessageTestBotID, postgresMessageTestSessionID,
@@ -87,7 +88,15 @@ func TestPostgresTurnResponseSourcesProjectMetadataAndPreserveWindow(t *testing.
 					if m.Metadata[AgentStepInterruptedMetadataKey] != (metadata[AgentStepInterruptedMetadataKey] == true) {
 						t.Fatalf("interrupted checkpoint changed at row %d", i)
 					}
-					if len(m.Metadata) != 1 || len(m.RawMetadata) != 0 || len(m.Usage) != 0 || m.DisplayContent != "" || m.Assets != nil {
+					step := metadata[DiscussStepMetadataKey] == true
+					if _, marked := m.Metadata[DiscussStepMetadataKey]; marked != step {
+						t.Fatalf("discuss step mark changed at row %d", i)
+					}
+					projected := 1
+					if step {
+						projected++
+					}
+					if len(m.Metadata) != projected || len(m.RawMetadata) != 0 || len(m.Usage) != 0 || m.DisplayContent != "" || m.Assets != nil {
 						t.Fatalf("row %d retained unused metadata/display/assets", i)
 					}
 				}

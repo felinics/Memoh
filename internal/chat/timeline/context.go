@@ -20,6 +20,9 @@ type TurnResponseEntry struct {
 	// ContentHash names the stored version the entry renders. The Agent
 	// loader sets it; a compaction refuses a source whose version changed.
 	ContentHash string `json:"-"`
+	// DiscussStep reports a row a Discuss run wrote at a step boundary,
+	// before the run ended: context, not proof the run consumed its input.
+	DiscussStep bool `json:"-"`
 }
 
 // ContextMessage is a unified message for LLM context, produced by MergeContext.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -278,6 +280,16 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 	}
 	for i := range inputs {
 		inputs[i].TurnRequestMessageID = c.turnRequestMessageID
+		if c.req.SessionType == sessionpkg.TypeDiscuss {
+			// A Discuss step is context for later runs; only the run's end
+			// proves the batch it answers consumed.
+			metadata := maps.Clone(inputs[i].Metadata)
+			if metadata == nil {
+				metadata = make(map[string]any, 1)
+			}
+			metadata[messagepkg.DiscussStepMetadataKey] = true
+			inputs[i].Metadata = metadata
+		}
 	}
 	steerIndex := c.stampSteerTurn(inputs)
 	agentStep := messagepkg.AgentStep{RunID: c.req.RunID, Messages: inputs, Interrupted: interrupted}
@@ -401,14 +413,15 @@ func stepProvenance(rows []messagepkg.Message, inputs []string) []native.Message
 	return provenance
 }
 
-// inputSources names the run's input and the steers its steps persisted.
+// inputSources names the run's input and the steers its steps persisted, or
+// the inputs of the batch a Discuss run answers.
 func (c *agentStepCommitter) inputSources() []turn.ContextMessageSource {
 	if c == nil {
 		return nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var sources []turn.ContextMessageSource
+	sources := slices.Clone(c.req.discussCurrentSources)
 	for _, id := range c.inputSourceIDs {
 		sources = append(sources, turn.ContextMessageSource{Kind: "history", ID: id})
 	}

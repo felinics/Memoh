@@ -5443,7 +5443,8 @@ SELECT
   ranked.role,
   ranked.content,
   ranked.created_at,
-  ranked.interrupted
+  ranked.interrupted,
+  ranked.discuss_step
 FROM (
   SELECT
     m.id,
@@ -5453,6 +5454,7 @@ FROM (
     m.turn_position,
     m.turn_message_seq,
     COALESCE(m.metadata->'agent_step_interrupted' = 'true'::jsonb, false)::boolean AS interrupted,
+    COALESCE(m.metadata->'discuss_step' = 'true'::jsonb, false)::boolean AS discuss_step,
     (SUM(octet_length(m.content::text)) OVER (
       ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
     ) - octet_length(m.content::text))::BIGINT AS preceding_bytes
@@ -5478,12 +5480,14 @@ type ListTurnResponseSourcesSinceBySessionWithinBytesRow struct {
 	Content     []byte             `json:"content"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	Interrupted bool               `json:"interrupted"`
+	DiscussStep bool               `json:"discuss_step"`
 }
 
 // Turn-response (TR) composition, in Discuss and in pipeline chat, only needs
-// content and the interrupted-checkpoint flag. Never return full metadata:
-// legacy context_lifecycle snapshots can dwarf the content budget. Preserve
-// the active-history window, including its crossing row and turn order.
+// content, the interrupted-checkpoint flag and the Discuss step flag. Never
+// return full metadata: legacy context_lifecycle snapshots can dwarf the
+// content budget. Preserve the active-history window, including its crossing
+// row and turn order.
 func (q *Queries) ListTurnResponseSourcesSinceBySessionWithinBytes(ctx context.Context, arg ListTurnResponseSourcesSinceBySessionWithinBytesParams) ([]ListTurnResponseSourcesSinceBySessionWithinBytesRow, error) {
 	rows, err := q.db.Query(ctx, listTurnResponseSourcesSinceBySessionWithinBytes, arg.SessionID, arg.CreatedAt, arg.MaxBytes)
 	if err != nil {
@@ -5499,6 +5503,7 @@ func (q *Queries) ListTurnResponseSourcesSinceBySessionWithinBytes(ctx context.C
 			&i.Content,
 			&i.CreatedAt,
 			&i.Interrupted,
+			&i.DiscussStep,
 		); err != nil {
 			return nil, err
 		}

@@ -8,7 +8,11 @@ import (
 
 const (
 	AgentStepInterruptedMetadataKey = "agent_step_interrupted"
-	HistoryErrorCodeMetadataKey     = "error_code"
+	// DiscussStepMetadataKey marks a row a Discuss run wrote at a step
+	// boundary. The row is context for later runs, not proof that its run
+	// consumed the input it answered: the run can still fail after it.
+	DiscussStepMetadataKey      = "discuss_step"
+	HistoryErrorCodeMetadataKey = "error_code"
 	// HistoryErrorArgsMetadataKey holds the catalog args of the failure named
 	// by error_code: only the args its catalog entry allows, as strings.
 	HistoryErrorArgsMetadataKey         = "error_args"

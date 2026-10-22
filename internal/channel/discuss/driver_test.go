@@ -380,6 +380,15 @@ func TestAnchorFromTRs(t *testing.T) {
 	if got != 500 {
 		t.Fatalf("anchor = %d, want 500", got)
 	}
+	// A Discuss step may belong to a run that failed after it; the durable
+	// cursor, not the step, records what a run consumed.
+	got = anchorFromTRs([]timeline.TurnResponseEntry{
+		{RequestedAtMs: 100},
+		{RequestedAtMs: 500, DiscussStep: true},
+	})
+	if got != 100 {
+		t.Fatalf("anchor = %d, want 100: a Discuss step proves nothing consumed", got)
+	}
 }
 
 // TestHandleReplyWithTurn_ColdStartAnchoredByTR simulates idle-timeout

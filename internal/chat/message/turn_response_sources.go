@@ -30,12 +30,16 @@ func (s *DBService) ListTurnResponseSourcesSinceBySessionWithinBytes(ctx context
 	}
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
+		metadata := map[string]any{AgentStepInterruptedMetadataKey: row.Interrupted}
+		if row.DiscussStep {
+			metadata[DiscussStepMetadataKey] = true
+		}
 		messages = append(messages, Message{
 			ID:        row.ID.String(),
 			Role:      row.Role,
 			Content:   row.Content,
 			CreatedAt: row.CreatedAt.Time,
-			Metadata:  map[string]any{AgentStepInterruptedMetadataKey: row.Interrupted},
+			Metadata:  metadata,
 		})
 	}
 	return messages, nil
