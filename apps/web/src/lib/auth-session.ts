@@ -15,6 +15,7 @@ export const AUTH_SESSION_CLEARED_EVENT = 'memoh:auth-session-cleared'
 // `chat-input-drafts` and `pinned-bot-ids` remain localStorage-only.
 const USER_SCOPED_STORAGE_KEYS = [
   'chat-bot-id',
+  'chat-bot-route',
   'chat-session-id',
   'chat-explicit-selection',
   'chat-draft-intent',

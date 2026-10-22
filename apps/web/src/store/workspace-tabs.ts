@@ -94,6 +94,14 @@ function panelComponentOf(id: string): WorkspacePanelComponent | null {
   return null
 }
 
+// Menus and dialogs a conversation can be entered from; how long (in frames,
+// about two seconds) to wait for one to give focus back before the entry gives
+// up on moving the caret; and how long, once one has unmounted, to wait for the
+// focus it returns to its trigger to land.
+const ENTRY_OVERLAY = '[role="menu"], [role="menubar"], [role="dialog"], [role="alertdialog"], [role="listbox"]'
+const ENTRY_OVERLAY_MAX_FRAMES = 120
+const ENTRY_FOCUS_RETURN_MAX_FRAMES = 6
+
 export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   const selection = useChatSelectionStore()
   const { currentBotId } = storeToRefs(selection)
@@ -627,16 +635,53 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   // Desktop: entering a conversation — cold start, a bot switch, New Chat, a
-  // session opened from the sidebar or search — leaves the caret in its
+  // session opened from the sidebar, a menu or search — leaves the caret in its
   // composer. Requested a tick later, once the activation and selection changes
   // it rides on (which drop pending requests) have settled. It never takes
   // focus from another input, never switches away from a non-chat tab, and
   // never runs on phones, where focusing would raise a keyboard the user did
   // not ask for.
+  let entryFocusRun = 0
   function focusChatInputAfterEntry() {
     if (isMobile.value) return
+    const run = ++entryFocusRun
     void nextTick(() => {
-      if (isMobile.value || focusIsInTextInput()) return
+      if (isMobile.value || run !== entryFocusRun) return
+      // Entered from a menu or dialog: it still holds focus and hands it back
+      // to its trigger as it closes, which would undo an earlier request.
+      // Wait until focus has left it.
+      const overlay = document.activeElement?.closest<HTMLElement>(ENTRY_OVERLAY)
+      if (overlay) {
+        afterOverlayReleasesFocus(overlay, run)
+        return
+      }
+      if (focusIsInTextInput()) return
+      requestActiveChatInputFocus()
+    })
+  }
+
+  function afterOverlayReleasesFocus(
+    overlay: HTMLElement,
+    run: number,
+    framesLeft = ENTRY_OVERLAY_MAX_FRAMES,
+    returnFramesLeft = ENTRY_FOCUS_RETURN_MAX_FRAMES,
+  ) {
+    requestAnimationFrame(() => {
+      if (run !== entryFocusRun || isMobile.value) return
+      const active = document.activeElement
+      if (overlay.isConnected && active && overlay.contains(active)) {
+        if (framesLeft > 0) afterOverlayReleasesFocus(overlay, run, framesLeft - 1, returnFramesLeft)
+        return
+      }
+      // Unmounted while it held focus: focus fell to the page, and the
+      // overlay's focus scope gives it back to the trigger in a task queued
+      // after unmounting (reka-ui FocusScope). A request made before that
+      // lands would be undone by it.
+      if (!overlay.isConnected && (!active || active === document.body) && returnFramesLeft > 0) {
+        afterOverlayReleasesFocus(overlay, run, framesLeft, returnFramesLeft - 1)
+        return
+      }
+      if (focusIsInTextInput()) return
       requestActiveChatInputFocus()
     })
   }
@@ -921,6 +966,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     // the sidebar, so refuse to (re)open a session being deleted for this bot.
     if (isDeletedSessionForCurrentBot(sid)) return
     const title = opts.title?.trim() || chatTitleFallbackFor(sid)
+    focusChatInputAfterEntry()
     const existing = chatPanelForSession(sid)
     if (existing) {
       existing.api.setTitle(title)
