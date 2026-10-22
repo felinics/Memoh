@@ -92,6 +92,13 @@ func (l chatHistoryLayout) availableHistoryBudget(cfg native.RunConfig) (int, in
 		return 0, 0
 	}
 	available, raw, summaries := plan.HistoryBudget, 0, 0
+	if plan.HistoryBudgetPinned {
+		// The pinned budget (spec rule 4) is a ceiling that ignores the current
+		// request's size; the envelope-feasible room does not. When the pin
+		// exceeds what fits this turn, recovery compacts down to the feasible
+		// bound and books the budget-recovery epoch advance.
+		available = min(available, max(plan.SystemBudget-plan.ActualSystemCost, 0))
+	}
 	for _, frag := range cfg.ContextSourceFrags {
 		if frag.Slot == contextfrag.SlotSystem || frag.Slot == contextfrag.SlotCurrentUser || frag.Kind == contextfrag.KindCurrentUserMessage {
 			continue
@@ -257,6 +264,11 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 	var protected []turn.ContextMessageSource
 	var older []batchInput
 	available, pressure := plan.HistoryBudget, 0
+	if plan.HistoryBudgetPinned {
+		// Same envelope-feasible clamp as the chat recovery: the pinned ceiling
+		// ignores the current batch's size; the feasible room does not.
+		available = min(available, max(plan.SystemBudget-plan.ActualSystemCost, 0))
+	}
 	for _, frag := range cfg.ContextSourceFrags {
 		source, inBatch := batch[frag.Provenance.SourceID]
 		switch {

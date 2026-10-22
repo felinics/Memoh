@@ -749,6 +749,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		historyLayout.pressureTokens = max(0, historyLayout.pressureTokens-estimateMessageTokens(messages[*index]))
 	}
 	runCfg.RecoverContextBudget = s.chatBudgetRecovery(req, historyLayout)
+	s.pinHistoryBudget(ctx, req.ThreadID, &runCfg)
 
 	var injectedRecords *[]InjectedMessageRecord
 	if req.InjectCh != nil {

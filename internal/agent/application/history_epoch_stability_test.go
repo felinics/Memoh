@@ -54,6 +54,36 @@ func (f *fakeContextEpochQueries) AdvanceSessionContextEpoch(_ context.Context, 
 	return string(arg.State), nil
 }
 
+func (f *fakeContextEpochQueries) PinSessionContextEpochBudget(_ context.Context, arg sqlc.PinSessionContextEpochBudgetParams) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := arg.SessionID.String()
+	existing := f.states[key]
+	if existing == "" {
+		return "", pgx.ErrNoRows
+	}
+	var stored struct {
+		BudgetTokens int64 `json:"budget_tokens"`
+	}
+	if err := json.Unmarshal([]byte(existing), &stored); err != nil {
+		return "", err
+	}
+	if stored.BudgetTokens > 0 {
+		return "", pgx.ErrNoRows
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(existing), &raw); err != nil {
+		return "", err
+	}
+	raw["budget_tokens"] = arg.BudgetTokens
+	out, err := json.Marshal(raw)
+	if err != nil {
+		return "", err
+	}
+	f.states[key] = string(out)
+	return string(out), nil
+}
+
 func (f *fakeContextEpochQueries) state(sessionID string) contextepoch.State {
 	f.mu.Lock()
 	defer f.mu.Unlock()

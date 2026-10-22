@@ -277,6 +277,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	runConfig.RecoverContextBudget = func(ctx context.Context, cfg native.RunConfig) (native.RunConfig, bool, error) {
 		return s.recoverDiscussContextBudget(ctx, cmd, admitted, resolved.ModelID, cfg, &compacted)
 	}
+	s.pinHistoryBudget(ctx, cmd.ThreadID, &runConfig)
 	runConfig = pauseIdleDuringBudgetRecovery(runConfig, idleCancel)
 	eventCh := s.streamDiscussAgent(idleCtx, runConfig)
 
