@@ -110,6 +110,8 @@ type fakeQueries struct {
 	claims           map[pgtype.UUID]pgtype.UUID
 	logStatuses      map[pgtype.UUID]string
 	parentSuccessors map[pgtype.UUID]pgtype.UUID
+	activeRangeRows  []sqlc.ListActiveSessionMessageIDsInRangeRow
+	activeRangeErr   error
 
 	created         bool
 	createArg       sqlc.CreateCompactionLogParams
@@ -150,6 +152,10 @@ func (f *fakeQueries) ListUncompactedMessagesBySession(_ context.Context, _ pgty
 		<-f.listRelease
 	}
 	return f.uncompacted, nil
+}
+
+func (f *fakeQueries) ListActiveSessionMessageIDsInRange(_ context.Context, _ sqlc.ListActiveSessionMessageIDsInRangeParams) ([]sqlc.ListActiveSessionMessageIDsInRangeRow, error) {
+	return f.activeRangeRows, f.activeRangeErr
 }
 
 func (f *fakeQueries) MeasureUncompactedMessagesBySession(_ context.Context, _ pgtype.UUID) (sqlc.MeasureUncompactedMessagesBySessionRow, error) {

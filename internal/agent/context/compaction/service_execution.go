@@ -23,6 +23,10 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	}
 	// New compactions only ever APPEND a segment to the summary chain (Context
 	// Epoch spec, rule 3); merging old segments is the separate merge pass.
+	// Run that pass first so an over-cap chain left by an earlier merge
+	// failure retries on every trigger, even when this run has nothing new to
+	// append and would otherwise noop below.
+	s.maybeMergeSegments(ctx, botUUID, sessionUUID, cfg)
 	if measure.CandidateCount == 0 {
 		return Result{Status: StatusNoop}, nil
 	}
@@ -348,8 +352,11 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	}
 	// The append succeeded; the chain may now exceed the segment cap, so run
 	// the merge pass (spec: merging old segments advances the epoch with
-	// reason segment-merge in the same write as the supersession).
-	s.maybeMergeSegments(persistCtx, botUUID, sessionUUID, cfg)
+	// reason segment-merge in the same write as the supersession). Keep the
+	// caller's context so the merge's model call honors cancellation and
+	// deadlines; the pass detaches only its bookkeeping writes internally,
+	// and a cancelled merge retries on the next trigger.
+	s.maybeMergeSegments(ctx, botUUID, sessionUUID, cfg)
 	return Result{Status: status, Summary: summary, MessageCount: len(compactedMessageIDs)}, nil
 }
 

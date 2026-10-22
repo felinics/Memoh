@@ -96,6 +96,11 @@ func DBMessageIdentityRef(id string) (contextfrag.ContextRef, error) {
 	}, nil
 }
 
+// IsDBMessageRef reports whether ref names a persisted history message row.
+func IsDBMessageRef(ref contextfrag.ContextRef) bool {
+	return ref.Namespace == namespaceDBHistoryMessage
+}
+
 func DBMessageSourceHash(msg messagepkg.Message) contextfrag.FragmentHash {
 	return dbMessageSourceHash(msg, dbMessageMetadata(msg))
 }

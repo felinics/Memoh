@@ -3278,6 +3278,58 @@ func (q *Queries) ListActiveMessagesSinceWithinBytes(ctx context.Context, arg Li
 	return items, nil
 }
 
+const listActiveSessionMessageIDsInRange = `-- name: ListActiveSessionMessageIDsInRange :many
+SELECT
+  m.id,
+  m.created_at
+FROM bot_visible_history_messages m
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
+  AND m.created_at > $2
+  AND m.created_at <= $3
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+  AND m.compact_id IS NULL
+ORDER BY m.created_at ASC, m.id ASC
+`
+
+type ListActiveSessionMessageIDsInRangeParams struct {
+	SessionID pgtype.UUID        `json:"session_id"`
+	After     pgtype.Timestamptz `json:"after"`
+	Until     pgtype.Timestamptz `json:"until"`
+}
+
+type ListActiveSessionMessageIDsInRangeRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// Minimal id+timestamp scan of the session's active history window in
+// (after, until], mirroring the anchored load filters. The segment-merge pass
+// uses it to find visible messages no active summary covers before sliding
+// the Context Epoch anchor: an uncovered message must stay inside the
+// anchored window, so the anchor clamps to the earliest one. Rows claimed by
+// a compaction (compact_id set) are replaced by their summary on read, so
+// they never block the slide.
+func (q *Queries) ListActiveSessionMessageIDsInRange(ctx context.Context, arg ListActiveSessionMessageIDsInRangeParams) ([]ListActiveSessionMessageIDsInRangeRow, error) {
+	rows, err := q.db.Query(ctx, listActiveSessionMessageIDsInRange, arg.SessionID, arg.After, arg.Until)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveSessionMessageIDsInRangeRow
+	for rows.Next() {
+		var i ListActiveSessionMessageIDsInRangeRow
+		if err := rows.Scan(&i.ID, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAllMessagesForBackup = `-- name: ListAllMessagesForBackup :many
 SELECT
   m.id,

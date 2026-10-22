@@ -1832,6 +1832,26 @@ WHERE m.team_id = public.memoh_current_team_id()
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
 
+-- name: ListActiveSessionMessageIDsInRange :many
+-- Minimal id+timestamp scan of the session's active history window in
+-- (after, until], mirroring the anchored load filters. The segment-merge pass
+-- uses it to find visible messages no active summary covers before sliding
+-- the Context Epoch anchor: an uncovered message must stay inside the
+-- anchored window, so the anchor clamps to the earliest one. Rows claimed by
+-- a compaction (compact_id set) are replaced by their summary on read, so
+-- they never block the slide.
+SELECT
+  m.id,
+  m.created_at
+FROM bot_visible_history_messages m
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = sqlc.arg(session_id)
+  AND m.created_at > sqlc.arg(after)
+  AND m.created_at <= sqlc.arg(until)
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+  AND m.compact_id IS NULL
+ORDER BY m.created_at ASC, m.id ASC;
+
 -- name: MeasureActiveMessagesBySession :one
 -- Metadata-only context admission measure (CM-ADM-001): counts and content
 -- bytes aggregate on the database side, so admission can size a session's

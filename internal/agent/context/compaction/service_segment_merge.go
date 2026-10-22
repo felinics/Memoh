@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/chat/contextepoch"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -64,7 +65,7 @@ func (s *Service) maybeMergeSegments(ctx context.Context, botUUID, sessionUUID p
 			slog.String("session_id", cfg.SessionID))
 		return
 	}
-	if err := s.mergeSegments(ctx, botUUID, sessionUUID, cfg, parents); err != nil {
+	if err := s.mergeSegments(ctx, botUUID, sessionUUID, cfg, parents, coveredMessageIDs(frontier.Artifacts)); err != nil {
 		s.logger.WarnContext(ctx, "segment merge: failed",
 			slog.String("session_id", cfg.SessionID),
 			slog.Int("parents", len(parents)),
@@ -75,7 +76,7 @@ func (s *Service) maybeMergeSegments(ctx context.Context, botUUID, sessionUUID p
 // mergeSegments runs one merge pass over parents: a summarizer call folds the
 // segments into a single replacement segment, then the rollup completion
 // supersedes the parents and advances the context epoch atomically.
-func (s *Service) mergeSegments(ctx context.Context, botUUID, sessionUUID pgtype.UUID, cfg TriggerConfig, parents []Artifact) error {
+func (s *Service) mergeSegments(ctx context.Context, botUUID, sessionUUID pgtype.UUID, cfg TriggerConfig, parents []Artifact, coveredIDs map[string]struct{}) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -157,6 +158,20 @@ func (s *Service) mergeSegments(ctx context.Context, botUUID, sessionUUID pgtype
 	if artifact.AnchorEndMs > state.AnchorCreatedAtMs {
 		anchorAt = time.UnixMilli(artifact.AnchorEndMs).UTC()
 		anchorID = lastCoverageMessageID(parents)
+		// Never slide the anchor past a visible message no active summary
+		// covers: the selector may retain an early raw message (e.g. the
+		// window's first user turn) while newer rows compact, and sliding past
+		// it would drop it from every later anchored load with no summary to
+		// stand in. Clamp the anchor to the earliest such message instead; the
+		// anchored window query is inclusive at the anchor timestamp.
+		earliest, found, err := s.earliestUncoveredActiveMessage(ctx, sessionUUID, state.AnchorTime(), anchorAt, coveredIDs)
+		if err != nil {
+			return fmt.Errorf("segment merge: scan uncovered messages: %w", err)
+		}
+		if found {
+			anchorAt = earliest.createdAt
+			anchorID = earliest.id
+		}
 	}
 	next, err := state.AdvancedBy(anchorAt, anchorID, contextepoch.ReasonSegmentMerge, s.nowFn())
 	if err != nil {
@@ -253,4 +268,56 @@ func lastCoverageMessageID(parents []Artifact) string {
 		}
 	}
 	return best
+}
+
+// coveredMessageIDs indexes every persisted history message an active artifact
+// covers. The merge's rollup absorbs exactly the parents' coverage, so the
+// union over the active frontier is unchanged by the merge and stays the
+// authoritative "replaced by a summary" set for the anchor clamp.
+func coveredMessageIDs(artifacts []Artifact) map[string]struct{} {
+	covered := make(map[string]struct{})
+	for _, artifact := range artifacts {
+		for _, source := range artifact.Coverage {
+			if historyfrag.IsDBMessageRef(source.Ref) && source.Ref.ID != "" {
+				covered[source.Ref.ID] = struct{}{}
+			}
+		}
+	}
+	return covered
+}
+
+type uncoveredActiveMessage struct {
+	id        string
+	createdAt time.Time
+}
+
+// earliestUncoveredActiveMessage finds the oldest active history message in
+// (after, until] that no active summary covers. The SQL pre-filters rows a
+// compaction claimed (compact_id); the coverage set guards the gap where a
+// covered row was never marked.
+func (s *Service) earliestUncoveredActiveMessage(
+	ctx context.Context,
+	sessionUUID pgtype.UUID,
+	after, until time.Time,
+	coveredIDs map[string]struct{},
+) (uncoveredActiveMessage, bool, error) {
+	rows, err := s.queries.ListActiveSessionMessageIDsInRange(ctx, sqlc.ListActiveSessionMessageIDsInRangeParams{
+		SessionID: sessionUUID,
+		After:     pgtype.Timestamptz{Time: after, Valid: true},
+		Until:     pgtype.Timestamptz{Time: until, Valid: true},
+	})
+	if err != nil {
+		return uncoveredActiveMessage{}, false, err
+	}
+	for _, row := range rows {
+		if !row.ID.Valid || !row.CreatedAt.Valid {
+			continue
+		}
+		id := formatUUID(row.ID)
+		if _, covered := coveredIDs[id]; covered {
+			continue
+		}
+		return uncoveredActiveMessage{id: id, createdAt: row.CreatedAt.Time}, true, nil
+	}
+	return uncoveredActiveMessage{}, false, nil
 }

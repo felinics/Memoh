@@ -3,9 +3,11 @@ package compaction
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -332,5 +334,132 @@ func TestSegmentMergeFailureMatrixKeepsParentsActive(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSegmentMergeAnchorClampsToEarliestUncoveredMessage(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubModel{summary: "merged segment"}
+	cfg := machineryConfig(stub, 200)
+	svc, q, _, epochs := newMergeFixture(t, defaultSegmentCap+1, cfg)
+	epochs.stored = seedEpochState(t, 3, 1000)
+
+	// A retained raw message (e.g. the window's preserved first user turn)
+	// sits at 2000ms: older than the merged coverage end (8000ms) and covered
+	// by no segment. Sliding the anchor to the coverage end would drop it
+	// from every later anchored load, so the anchor must clamp to it.
+	rawID := uuid.New()
+	q.activeRangeRows = []sqlc.ListActiveSessionMessageIDsInRangeRow{{
+		ID:        pgtype.UUID{Bytes: rawID, Valid: true},
+		CreatedAt: pgtype.Timestamptz{Time: time.UnixMilli(2000).UTC(), Valid: true},
+	}}
+
+	botUUID := pgtype.UUID{Bytes: uuid.MustParse(cfg.BotID), Valid: true}
+	sessionUUID := pgtype.UUID{Bytes: uuid.MustParse(cfg.SessionID), Valid: true}
+	svc.maybeMergeSegments(context.Background(), botUUID, sessionUUID, cfg)
+
+	if len(q.rollupCalls) != 1 {
+		t.Fatalf("merge did not complete: rollups=%d", len(q.rollupCalls))
+	}
+	rollup := q.rollupCalls[0]
+	if rollup.ContextEpoch != 4 || rollup.ContextEpochAnchorMs != 2000 {
+		t.Fatalf("epoch advance = (%d, %d), want (4, 2000): anchor must clamp to the uncovered message", rollup.ContextEpoch, rollup.ContextEpochAnchorMs)
+	}
+	var state map[string]any
+	if err := json.Unmarshal(rollup.ContextEpochState, &state); err != nil {
+		t.Fatalf("decode epoch state: %v", err)
+	}
+	if state["anchor_message_id"] != rawID.String() {
+		t.Fatalf("anchor message = %v, want the uncovered message %s", state["anchor_message_id"], rawID)
+	}
+	if state["last_reason"] != contextepoch.ReasonSegmentMerge {
+		t.Fatalf("epoch reason = %v, want segment-merge", state["last_reason"])
+	}
+}
+
+func TestSegmentMergeAnchorSkipsCoveredMessages(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubModel{summary: "merged segment"}
+	cfg := machineryConfig(stub, 200)
+	svc, q, _, epochs := newMergeFixture(t, defaultSegmentCap+1, cfg)
+	epochs.stored = seedEpochState(t, 3, 1000)
+
+	// The first in-range row is covered by an active segment; only the later
+	// uncovered row may hold the anchor back.
+	coveredID := uuid.New()
+	var coverage []CoveredSource
+	if err := json.Unmarshal(q.priorLogs[0].Coverage, &coverage); err != nil {
+		t.Fatalf("decode parent coverage: %v", err)
+	}
+	coverage = append(coverage, strictTestCoveredSource(coveredID.String(), 1500))
+	q.priorLogs[0].Coverage = mustMarshalCoverage(t, coverage...)
+	q.priorLogs[0].AnchorEndMs = 1500 // keep the anchor range consistent with the widened coverage
+
+	uncoveredID := uuid.New()
+	q.activeRangeRows = []sqlc.ListActiveSessionMessageIDsInRangeRow{
+		{ID: pgtype.UUID{Bytes: coveredID, Valid: true}, CreatedAt: pgtype.Timestamptz{Time: time.UnixMilli(1500).UTC(), Valid: true}},
+		{ID: pgtype.UUID{Bytes: uncoveredID, Valid: true}, CreatedAt: pgtype.Timestamptz{Time: time.UnixMilli(2500).UTC(), Valid: true}},
+	}
+
+	botUUID := pgtype.UUID{Bytes: uuid.MustParse(cfg.BotID), Valid: true}
+	sessionUUID := pgtype.UUID{Bytes: uuid.MustParse(cfg.SessionID), Valid: true}
+	svc.maybeMergeSegments(context.Background(), botUUID, sessionUUID, cfg)
+
+	if len(q.rollupCalls) != 1 {
+		t.Fatalf("merge did not complete: rollups=%d", len(q.rollupCalls))
+	}
+	rollup := q.rollupCalls[0]
+	if rollup.ContextEpochAnchorMs != 2500 {
+		t.Fatalf("anchor = %d, want 2500: covered rows must not hold the anchor back", rollup.ContextEpochAnchorMs)
+	}
+}
+
+func TestSegmentMergeFailsClosedWhenUncoveredScanFails(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubModel{summary: "merged segment"}
+	cfg := machineryConfig(stub, 200)
+	svc, q, _, epochs := newMergeFixture(t, defaultSegmentCap+1, cfg)
+	epochs.stored = seedEpochState(t, 3, 1000)
+	q.activeRangeErr = errors.New("range scan unavailable")
+
+	botUUID := pgtype.UUID{Bytes: uuid.MustParse(cfg.BotID), Valid: true}
+	sessionUUID := pgtype.UUID{Bytes: uuid.MustParse(cfg.SessionID), Valid: true}
+	svc.maybeMergeSegments(context.Background(), botUUID, sessionUUID, cfg)
+
+	// Without the scan the merge cannot prove the slide is lossless, so it
+	// fails before booking anything; the next trigger retries.
+	if stub.calls != 1 {
+		t.Fatalf("summarizer calls = %d, want 1 (the merge attempted the fold)", stub.calls)
+	}
+	if q.created || len(q.rollupCalls) != 0 {
+		t.Fatalf("merge must fail before booking: created=%v rollups=%d", q.created, len(q.rollupCalls))
+	}
+}
+
+func TestCompactionRunRetriesOverCapMergeOnNoop(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubModel{summary: "merged segment"}
+	cfg := machineryConfig(stub, 200)
+	svc, q, _, epochs := newMergeFixture(t, defaultSegmentCap+1, cfg)
+	epochs.stored = seedEpochState(t, 3, 1000)
+	q.uncompacted = nil // nothing new to append: the append pass noops
+
+	botUUID := pgtype.UUID{Bytes: uuid.MustParse(cfg.BotID), Valid: true}
+	sessionUUID := pgtype.UUID{Bytes: uuid.MustParse(cfg.SessionID), Valid: true}
+	res, err := svc.doCompaction(context.Background(), botUUID, sessionUUID, cfg)
+	if err != nil {
+		t.Fatalf("doCompaction: %v", err)
+	}
+	if res.Status != StatusNoop {
+		t.Fatalf("status = %v, want noop (nothing to append)", res.Status)
+	}
+	// The over-cap chain still merges: a merge failure must not wait for the
+	// next successful append to retry.
+	if len(q.rollupCalls) != 1 {
+		t.Fatalf("over-cap merge did not retry on a noop run: rollups=%d", len(q.rollupCalls))
 	}
 }
