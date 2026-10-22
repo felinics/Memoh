@@ -42,7 +42,7 @@ SET metadata = jsonb_set(metadata, '{context_epoch}', $1::jsonb, true),
 WHERE team_id = public.memoh_current_team_id()
   AND id = $2
   AND deleted_at IS NULL
-  AND COALESCE((metadata->'context_epoch'->>'epoch')::bigint, 0) <= $3::bigint
+  AND COALESCE((metadata->'context_epoch'->>'epoch')::bigint, 0) < $3::bigint
   AND COALESCE((metadata->'context_epoch'->>'anchor_created_at_ms')::bigint, 0) <= $4::bigint
 RETURNING (metadata->'context_epoch')::text AS state
 `
@@ -56,8 +56,9 @@ type AdvanceSessionContextEpochParams struct {
 
 // Monotonic guarded write: the epoch and the anchor may only move forward, so
 // a stale or racing writer can never slide history loading backwards. The
-// guards compare against the incoming values, making a lost update a no-op
-// (zero rows) instead of a regression.
+// epoch guard is strict: every advance increments the epoch, so a writer that
+// lost the race (same target epoch as the stored state) gets zero rows and
+// resolves to ErrAdvanceStale instead of silently re-anchoring the epoch.
 func (q *Queries) AdvanceSessionContextEpoch(ctx context.Context, arg AdvanceSessionContextEpochParams) (string, error) {
 	row := q.db.QueryRow(ctx, advanceSessionContextEpoch,
 		arg.State,

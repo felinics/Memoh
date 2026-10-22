@@ -18,7 +18,8 @@ import (
 )
 
 // fakeContextEpochQueries is an in-memory contextepoch.Queries with the same
-// monotonic guard as the SQL write: a stale epoch or anchor is a no-op.
+// monotonic guard as the SQL write: the epoch must strictly increase and the
+// anchor may not move backward, otherwise the write is a stale no-op.
 type fakeContextEpochQueries struct {
 	mu     sync.Mutex
 	states map[string]string
@@ -45,7 +46,7 @@ func (f *fakeContextEpochQueries) AdvanceSessionContextEpoch(_ context.Context, 
 		if err := json.Unmarshal(arg.State, &next); err != nil {
 			return "", err
 		}
-		if stored.Epoch > next.Epoch || stored.AnchorCreatedAtMs > next.AnchorCreatedAtMs {
+		if stored.Epoch >= next.Epoch || stored.AnchorCreatedAtMs > next.AnchorCreatedAtMs {
 			return "", pgx.ErrNoRows
 		}
 	}

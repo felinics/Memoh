@@ -27,14 +27,18 @@ func (s *Service) prepareHistoryContext(
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
-	loaded = pruneHistoryForGateway(loaded)
-	loaded = dropPreflightFailureTurns(loaded)
-	loaded = dropEmptyHistoryFailures(loaded)
+	// Resolve the cutoff against the raw loaded window, before any cleanup pass
+	// drops rows: the retry cutoff typically names the empty failed assistant
+	// row that dropEmptyHistoryFailures removes, so filtering after the drops
+	// would always report the cutoff as missing and make retries impossible.
 	boundary := s.loadCompactionArtifactBoundary(ctx, loaded, req.ThreadID, req.HistoryCutoffBeforeMessageID)
 	loaded, err = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
+	loaded = pruneHistoryForGateway(loaded)
+	loaded = dropPreflightFailureTurns(loaded)
+	loaded = dropEmptyHistoryFailures(loaded)
 	loaded = dedupePersistedCurrentUserMessage(loaded, req)
 	loaded, err = s.ensureRequiredHistoryMessage(ctx, loaded, req, contextTokenBudget)
 	if err != nil {

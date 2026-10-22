@@ -69,12 +69,17 @@ func (s *Service) buildMemoryQuery(ctx context.Context, req ChatRequest) memoryQ
 // newest few user messages, straight from the store. *message.DBService
 // implements it.
 type recentUserMessageLister interface {
-	ListRecentUserMessagesBySession(ctx context.Context, sessionID string, maxMessages int32) ([]messagepkg.Message, error)
+	ListRecentUserMessagesBySession(ctx context.Context, sessionID string, maxMessages int32, maxBytes int64) ([]messagepkg.Message, error)
 }
 
 // memoryQueryRecentFetchFactor over-fetches user rows so current-message
 // dedupe and history-cutoff filtering still leave enough distinct messages.
 const memoryQueryRecentFetchFactor = 4
+
+// memoryQueryHistoryMaxBytes bounds the cumulative content bytes the memory
+// query reads (CM-ADM-001). The builder truncates its query text to a few
+// hundred bytes, so a handful of average user turns is plenty.
+const memoryQueryHistoryMaxBytes = 64 * 1024
 
 // loadRecentUserHistoryForMemoryQuery reads the newest user messages directly
 // (Context Epoch D1: a count, not a wall-clock window), honoring the history
@@ -86,7 +91,7 @@ func (s *Service) loadRecentUserHistoryForMemoryQuery(ctx context.Context, req C
 	if !ok || sessionID == "" {
 		return s.legacyMemoryQueryHistory(ctx, req)
 	}
-	msgs, err := lister.ListRecentUserMessagesBySession(ctx, sessionID, defaultMemoryQueryRecentMessages*memoryQueryRecentFetchFactor)
+	msgs, err := lister.ListRecentUserMessagesBySession(ctx, sessionID, defaultMemoryQueryRecentMessages*memoryQueryRecentFetchFactor, memoryQueryHistoryMaxBytes)
 	if err != nil {
 		return nil, err
 	}

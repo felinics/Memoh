@@ -92,6 +92,11 @@ func (s *Store) ensureInitialized(ctx context.Context, sessionID, path string) S
 	initial := Initial(s.now())
 	persisted, err := s.Advance(ctx, sessionID, initial)
 	if err != nil {
+		if errors.Is(err, ErrAdvanceStale) && !persisted.IsZero() {
+			// Lost the init race: Advance resolved to the state the winner
+			// committed — use it instead of the never-persisted initial one.
+			return persisted
+		}
 		s.logger.WarnContext(ctx, "context_epoch_init_failed",
 			slog.String("path", path),
 			slog.String("session_id", sessionID),
@@ -157,6 +162,37 @@ func (s *Store) LoadWindow(
 	return msgs, nil
 }
 
+// AdvanceInPlace records an explicit epoch advance that leaves the anchor
+// untouched: the stable part changed without a history-window slide (e.g. an
+// in-turn budget recovery rewrote the history region), and rule 6 requires a
+// record. The session is initialized first when it has no state yet.
+func (s *Store) AdvanceInPlace(ctx context.Context, sessionID, path, reason string) (State, error) {
+	if !s.available() {
+		return State{}, nil
+	}
+	state := s.ensureInitialized(ctx, sessionID, path)
+	next, err := state.AdvancedBy(state.AnchorTime(), state.AnchorMessageID, reason, s.now())
+	if err != nil {
+		return State{}, err
+	}
+	persisted, err := s.Advance(ctx, sessionID, next)
+	if errors.Is(err, ErrAdvanceStale) {
+		// A concurrent writer moved first; the record of a change exists,
+		// which is what the bookkeeping requires.
+		return persisted, nil
+	}
+	if err != nil {
+		return State{}, err
+	}
+	s.logger.InfoContext(ctx, "context_epoch_advance",
+		slog.String("path", path),
+		slog.String("session_id", sessionID),
+		slog.String("reason", reason),
+		slog.Int64("from_epoch", state.Epoch),
+		slog.Int64("to_epoch", persisted.Epoch))
+	return persisted, nil
+}
+
 // recordBudgetAdvance detects a budget-bound load — the session holds more
 // rows since the anchor than the byte budget admitted — and turns the silent
 // slide into an explicit, recorded anchor advance (reason "budget"). The new
@@ -190,7 +226,12 @@ func (s *Store) recordBudgetAdvance(
 			oldest = msg
 		}
 	}
-	if oldest.CreatedAt.IsZero() || !oldest.CreatedAt.After(state.AnchorTime()) {
+	// Compare at the persisted millisecond granularity: batch-persisted rows
+	// share one PostgreSQL now(), so a budget cut inside such a batch always
+	// leaves rows at the anchor's microsecond timestamp. Advancing to the same
+	// millisecond anchor would record a new epoch without moving the window —
+	// and repeat every turn.
+	if oldest.CreatedAt.IsZero() || oldest.CreatedAt.UnixMilli() <= state.AnchorCreatedAtMs {
 		return
 	}
 	next, err := state.AdvancedBy(oldest.CreatedAt, oldest.ID, ReasonBudget, s.now())

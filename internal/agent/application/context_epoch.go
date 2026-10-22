@@ -2,11 +2,28 @@ package application
 
 import (
 	"context"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/felinics/memoh/internal/chat/contextepoch"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
+
+// recordBudgetRecoveryAdvance books the spec's turn-boundary rule 1: an
+// in-turn budget recovery rewrote the history region, so the epoch advances
+// in place (anchor unchanged) with reason "budget-recovery". Failures are
+// logged, never fatal: the recovery already happened and the turn must go on.
+func (s *Service) recordBudgetRecoveryAdvance(ctx context.Context, sessionID string) {
+	if s == nil || s.contextEpochs == nil || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	if _, err := s.contextEpochs.AdvanceInPlace(ctx, sessionID, "budget-recovery", contextepoch.ReasonBudgetRecovery); err != nil {
+		s.logger.WarnContext(ctx, "context_epoch_budget_recovery_advance_failed",
+			slog.String("session_id", sessionID),
+			slog.Any("error", err))
+	}
+}
 
 // loadAnchoredSessionMessages loads the session's byte-budgeted history
 // window starting from the session's persisted Context Epoch anchor instead

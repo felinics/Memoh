@@ -5239,21 +5239,35 @@ func (q *Queries) ListObservedConversationsByChannelType(ctx context.Context, ar
 
 const listRecentActiveUserMessagesBySession = `-- name: ListRecentActiveUserMessagesBySession :many
 SELECT
-  m.id,
-  m.content,
-  m.created_at
-FROM bot_visible_history_messages m
-WHERE m.team_id = public.memoh_current_team_id()
-  AND m.session_id = $1
-  AND m.role = 'user'
-  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
-ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
-LIMIT $2
+  ranked.id,
+  ranked.content,
+  ranked.created_at
+FROM (
+  SELECT
+    m.id,
+    m.content,
+    m.created_at,
+    m.turn_position,
+    m.turn_message_seq,
+    (SUM(octet_length(m.content::text)) OVER (
+      ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+    ) - octet_length(m.content::text))::BIGINT AS preceding_bytes
+  FROM bot_visible_history_messages m
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.session_id = $1
+    AND m.role = 'user'
+    AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+  ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+  LIMIT $2
+) ranked
+WHERE ranked.preceding_bytes < $3::BIGINT
+ORDER BY ranked.turn_position DESC, ranked.turn_message_seq DESC, ranked.created_at DESC, ranked.id DESC
 `
 
 type ListRecentActiveUserMessagesBySessionParams struct {
 	SessionID   pgtype.UUID `json:"session_id"`
 	MaxMessages int32       `json:"max_messages"`
+	MaxBytes    int64       `json:"max_bytes"`
 }
 
 type ListRecentActiveUserMessagesBySessionRow struct {
@@ -5264,10 +5278,13 @@ type ListRecentActiveUserMessagesBySessionRow struct {
 
 // Memory-query building needs only the newest few user messages, not a
 // time-windowed history load (Context Epoch D1: bookmarks and counts, never a
-// wall clock). Newest-first with a hard LIMIT keeps the load bounded
-// (CM-ADM-001); the caller reverses into ascending order.
+// wall clock). Newest-first with a hard LIMIT plus a cumulative content-byte
+// budget keeps the load bounded in count AND bytes (CM-ADM-001): rows are
+// admitted newest-first until their running content byte total crosses
+// max_bytes (the crossing row is kept, so the newest row always loads). The
+// caller reverses into ascending order.
 func (q *Queries) ListRecentActiveUserMessagesBySession(ctx context.Context, arg ListRecentActiveUserMessagesBySessionParams) ([]ListRecentActiveUserMessagesBySessionRow, error) {
-	rows, err := q.db.Query(ctx, listRecentActiveUserMessagesBySession, arg.SessionID, arg.MaxMessages)
+	rows, err := q.db.Query(ctx, listRecentActiveUserMessagesBySession, arg.SessionID, arg.MaxMessages, arg.MaxBytes)
 	if err != nil {
 		return nil, err
 	}

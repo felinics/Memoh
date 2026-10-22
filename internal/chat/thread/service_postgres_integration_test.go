@@ -22,6 +22,16 @@ func TestPostgresForkFromAssistantTurnCopiesVisibleTurns(t *testing.T) {
 	setupPostgresSessionForkFixtures(t, ctx, tx)
 
 	svc := NewService(nil, postgresstore.NewQueries(dbsqlc.New(tx)), nil)
+	// A source session that already advanced its Context Epoch must not pass
+	// the anchor on: the fork's copied history is a prefix of the source's
+	// and an inherited anchor past the fork point would exclude all of it.
+	if _, err := tx.Exec(ctx, `
+		UPDATE bot_sessions
+		SET metadata = metadata || '{"context_epoch":{"epoch":7,"anchor_created_at_ms":1892160000000,"last_reason":"budget"}}'::jsonb
+		WHERE id = $1
+	`, postgresSessionTestSessionID); err != nil {
+		t.Fatalf("seed source context epoch: %v", err)
+	}
 	fork, err := svc.ForkFromAssistantTurn(ctx, ForkFromAssistantInput{
 		BotID:           postgresSessionTestBotID,
 		ThreadID:        postgresSessionTestSessionID,
@@ -42,6 +52,9 @@ func TestPostgresForkFromAssistantTurnCopiesVisibleTurns(t *testing.T) {
 	}
 	if got := forkedFrom["message_id"]; got != postgresSessionTestAssistant2ID {
 		t.Fatalf("fork source message_id = %#v, want %s", got, postgresSessionTestAssistant2ID)
+	}
+	if _, inherited := fork.Metadata["context_epoch"]; inherited {
+		t.Fatalf("fork must not inherit the source context epoch: %#v", fork.Metadata["context_epoch"])
 	}
 	forkMessageID, _ := forkedFrom["fork_message_id"].(string)
 	if forkMessageID == "" || forkMessageID == postgresSessionTestAssistant2ID {
@@ -1066,5 +1079,56 @@ func TestPostgresListHidesScheduleRunSessionsButKeepsPinnedTargets(t *testing.T)
 	}
 	if !hidden[pinnedRunID] || !hidden[pinnedChatID] || !hidden[postgresSessionTestSessionID] {
 		t.Fatalf("pinned targets and chats must stay listed, got %v", hidden)
+	}
+}
+
+// The Context Epoch SQL guard must reject a racing writer that computed the
+// SAME target epoch from the same stored state: both writers advancing N→N+1
+// with different anchors is exactly the lost-update the strict epoch guard
+// exists to fence (spec, rule 6 auditability).
+func TestPostgresAdvanceSessionContextEpochRejectsSameEpochRace(t *testing.T) {
+	ctx := context.Background()
+	tx := beginPostgresSessionTestTx(t, ctx)
+	setupPostgresSessionForkFixtures(t, ctx, tx)
+
+	queries := postgresstore.NewQueries(dbsqlc.New(tx))
+	sessionID := dbpkg.ParseUUIDOrEmpty(postgresSessionTestSessionID)
+
+	mkState := func(epoch int64, anchorMs int64) []byte {
+		return []byte(fmt.Sprintf(`{"epoch":%d,"anchor_created_at_ms":%d,"last_reason":"budget"}`, epoch, anchorMs))
+	}
+	// First writer commits epoch 2 anchored at 1000.
+	if _, err := queries.AdvanceSessionContextEpoch(ctx, dbsqlc.AdvanceSessionContextEpochParams{
+		SessionID: sessionID, State: mkState(1, 0), Epoch: 1, AnchorCreatedAtMs: 0,
+	}); err != nil {
+		t.Fatalf("init advance: %v", err)
+	}
+	if _, err := queries.AdvanceSessionContextEpoch(ctx, dbsqlc.AdvanceSessionContextEpochParams{
+		SessionID: sessionID, State: mkState(2, 1000), Epoch: 2, AnchorCreatedAtMs: 1000,
+	}); err != nil {
+		t.Fatalf("first epoch-2 advance: %v", err)
+	}
+	// The racing writer also targets epoch 2 with a LATER anchor; the strict
+	// guard must reject it even though the anchor would move forward.
+	if _, err := queries.AdvanceSessionContextEpoch(ctx, dbsqlc.AdvanceSessionContextEpochParams{
+		SessionID: sessionID, State: mkState(2, 2000), Epoch: 2, AnchorCreatedAtMs: 2000,
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("same-epoch racing advance error = %v, want pgx.ErrNoRows", err)
+	}
+	// A backward anchor at a higher epoch is still rejected too.
+	if _, err := queries.AdvanceSessionContextEpoch(ctx, dbsqlc.AdvanceSessionContextEpochParams{
+		SessionID: sessionID, State: mkState(3, 500), Epoch: 3, AnchorCreatedAtMs: 500,
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("backward-anchor advance error = %v, want pgx.ErrNoRows", err)
+	}
+	// A legitimate forward advance still lands.
+	stored, err := queries.AdvanceSessionContextEpoch(ctx, dbsqlc.AdvanceSessionContextEpochParams{
+		SessionID: sessionID, State: mkState(3, 2000), Epoch: 3, AnchorCreatedAtMs: 2000,
+	})
+	if err != nil {
+		t.Fatalf("forward advance: %v", err)
+	}
+	if stored == "" {
+		t.Fatal("forward advance returned no state")
 	}
 }

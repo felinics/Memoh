@@ -138,13 +138,15 @@ func TestBuildMemoryQueryRespectsRetryCutoffForRawAndCompactedHistory(t *testing
 
 type recentUserQueryService struct {
 	recordingMessageService
-	recent []messagepkg.Message
-	limit  int32
-	byID   map[string]messagepkg.Message
+	recent  []messagepkg.Message
+	limit   int32
+	byteCap int64
+	byID    map[string]messagepkg.Message
 }
 
-func (s *recentUserQueryService) ListRecentUserMessagesBySession(_ context.Context, _ string, maxMessages int32) ([]messagepkg.Message, error) {
+func (s *recentUserQueryService) ListRecentUserMessagesBySession(_ context.Context, _ string, maxMessages int32, maxBytes int64) ([]messagepkg.Message, error) {
 	s.limit = maxMessages
+	s.byteCap = maxBytes
 	return append([]messagepkg.Message(nil), s.recent...), nil
 }
 

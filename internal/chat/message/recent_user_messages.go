@@ -10,11 +10,13 @@ import (
 )
 
 // ListRecentUserMessagesBySession returns the newest user messages of a
-// session, newest first, capped by maxMessages. It backs memory-query
-// building, which needs the latest few user turns rather than a windowed
-// history load (Context Epoch D1). The query projects id/content/created_at
-// only and is bounded by its LIMIT (CM-ADM-001).
-func (s *DBService) ListRecentUserMessagesBySession(ctx context.Context, sessionID string, maxMessages int32) ([]Message, error) {
+// session, newest first, capped by maxMessages and by a cumulative
+// content-byte budget (CM-ADM-001): rows are admitted newest-first until the
+// running content byte total crosses maxBytes (the crossing row is kept, so
+// the newest message always loads). It backs memory-query building, which
+// needs the latest few user turns rather than a windowed history load
+// (Context Epoch D1). The query projects id/content/created_at only.
+func (s *DBService) ListRecentUserMessagesBySession(ctx context.Context, sessionID string, maxMessages int32, maxBytes int64) ([]Message, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return nil, err
@@ -22,6 +24,7 @@ func (s *DBService) ListRecentUserMessagesBySession(ctx context.Context, session
 	rows, err := s.queries.ListRecentActiveUserMessagesBySession(ctx, sqlc.ListRecentActiveUserMessagesBySessionParams{
 		SessionID:   pgSessionID,
 		MaxMessages: maxMessages,
+		MaxBytes:    maxBytes,
 	})
 	if err != nil {
 		return nil, err

@@ -3421,19 +3421,35 @@ LIMIT 1;
 -- name: ListRecentActiveUserMessagesBySession :many
 -- Memory-query building needs only the newest few user messages, not a
 -- time-windowed history load (Context Epoch D1: bookmarks and counts, never a
--- wall clock). Newest-first with a hard LIMIT keeps the load bounded
--- (CM-ADM-001); the caller reverses into ascending order.
+-- wall clock). Newest-first with a hard LIMIT plus a cumulative content-byte
+-- budget keeps the load bounded in count AND bytes (CM-ADM-001): rows are
+-- admitted newest-first until their running content byte total crosses
+-- max_bytes (the crossing row is kept, so the newest row always loads). The
+-- caller reverses into ascending order.
 SELECT
-  m.id,
-  m.content,
-  m.created_at
-FROM bot_visible_history_messages m
-WHERE m.team_id = public.memoh_current_team_id()
-  AND m.session_id = sqlc.arg(session_id)
-  AND m.role = 'user'
-  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
-ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
-LIMIT sqlc.arg(max_messages);
+  ranked.id,
+  ranked.content,
+  ranked.created_at
+FROM (
+  SELECT
+    m.id,
+    m.content,
+    m.created_at,
+    m.turn_position,
+    m.turn_message_seq,
+    (SUM(octet_length(m.content::text)) OVER (
+      ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+    ) - octet_length(m.content::text))::BIGINT AS preceding_bytes
+  FROM bot_visible_history_messages m
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.session_id = sqlc.arg(session_id)
+    AND m.role = 'user'
+    AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+  ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+  LIMIT sqlc.arg(max_messages)
+) ranked
+WHERE ranked.preceding_bytes < sqlc.arg(max_bytes)::BIGINT
+ORDER BY ranked.turn_position DESC, ranked.turn_message_seq DESC, ranked.created_at DESC, ranked.id DESC;
 
 -- name: ListVisibleMessagesFromBySessionWithinBytes :many
 -- Byte-budgeted variant of ListVisibleMessagesFromBySession (CM-ADM-001). The

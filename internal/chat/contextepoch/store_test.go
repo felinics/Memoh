@@ -2,6 +2,7 @@ package contextepoch
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -13,8 +14,9 @@ import (
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
-// fakeSessionQueries mirrors the SQL-side monotonic guard: a write whose epoch
-// or anchor is behind the stored state affects no row and reports "not found".
+// fakeSessionQueries mirrors the SQL-side monotonic guard: a write whose
+// epoch does not strictly increase, or whose anchor moves backward, affects
+// no row and reports "not found".
 type fakeSessionQueries struct {
 	mu     sync.Mutex
 	states map[string]string
@@ -39,7 +41,7 @@ func (f *fakeSessionQueries) AdvanceSessionContextEpoch(_ context.Context, arg s
 	if err != nil {
 		return "", err
 	}
-	if current.Epoch > next.Epoch || current.AnchorCreatedAtMs > next.AnchorCreatedAtMs {
+	if current.Epoch >= next.Epoch || current.AnchorCreatedAtMs > next.AnchorCreatedAtMs {
 		return "", pgx.ErrNoRows
 	}
 	f.states[key] = string(arg.State)
@@ -206,5 +208,112 @@ func TestNilStoreDegradesToBeginningAnchor(t *testing.T) {
 	}
 	if !gotSince.Equal(Beginning) {
 		t.Fatalf("nil store since = %v, want the beginning anchor", gotSince)
+	}
+}
+
+func TestAdvanceRejectsSameEpochRace(t *testing.T) {
+	t.Parallel()
+	store, _ := newFakeStore(time.Now())
+	ctx := context.Background()
+	state := store.ensureInitialized(ctx, epochTestSessionID, "test")
+
+	base := time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC)
+	// Two writers both compute epoch N+1 from the same stored state N but
+	// pick different anchors; the loser must observe a stale advance instead
+	// of silently re-anchoring epoch N+1.
+	writerA, err := state.AdvancedBy(base, "m1", ReasonBudget, time.Now())
+	if err != nil {
+		t.Fatalf("AdvancedBy() error = %v", err)
+	}
+	writerB, err := state.AdvancedBy(base.Add(time.Hour), "m2", ReasonBudget, time.Now())
+	if err != nil {
+		t.Fatalf("AdvancedBy() error = %v", err)
+	}
+	if _, err := store.Advance(ctx, epochTestSessionID, writerA); err != nil {
+		t.Fatalf("first Advance() error = %v", err)
+	}
+	current, err := store.Advance(ctx, epochTestSessionID, writerB)
+	if !errors.Is(err, ErrAdvanceStale) {
+		t.Fatalf("second Advance() error = %v, want ErrAdvanceStale", err)
+	}
+	if current.AnchorMessageID != "m1" {
+		t.Fatalf("losing writer resolved to %+v, want the winner's state (anchor m1)", current)
+	}
+}
+
+func TestLoadWindowSkipsNoOpBudgetAdvance(t *testing.T) {
+	t.Parallel()
+	store, queries := newFakeStore(time.Now())
+	ctx := context.Background()
+	state := store.ensureInitialized(ctx, epochTestSessionID, "test")
+
+	// Batch-persisted rows share one database now(); a budget cut inside such
+	// a batch admits the oldest row whose timestamp already equals the stored
+	// anchor (modulo millisecond persistence).
+	anchor := time.Date(2026, 10, 20, 8, 0, 0, 123456789, time.UTC)
+	advanced, err := state.AdvancedBy(anchor, "m1", ReasonBudget, time.Now())
+	if err != nil {
+		t.Fatalf("AdvancedBy() error = %v", err)
+	}
+	if _, err := store.Advance(ctx, epochTestSessionID, advanced); err != nil {
+		t.Fatalf("Advance() error = %v", err)
+	}
+	writesBefore := len(queries.writes)
+
+	// The load still measures more rows than it admitted (siblings share the
+	// anchor timestamp), but the oldest admitted row sits at the anchor, so
+	// no advance may be recorded.
+	loaded := []messagepkg.Message{
+		epochTestMessage("m2", anchor),
+		epochTestMessage("m3", anchor),
+	}
+	msgs, err := store.LoadWindow(ctx, epochTestSessionID, "test",
+		func(context.Context, time.Time) (int64, error) { return int64(len(loaded) + 1), nil },
+		func(context.Context, time.Time) ([]messagepkg.Message, error) { return loaded, nil })
+	if err != nil {
+		t.Fatalf("LoadWindow() error = %v", err)
+	}
+	if len(msgs) != len(loaded) {
+		t.Fatalf("loaded %d messages, want %d", len(msgs), len(loaded))
+	}
+	if len(queries.writes) != writesBefore {
+		t.Fatalf("writes = %d, want no no-op advance at the same anchor", len(queries.writes))
+	}
+	state2, err := store.Load(ctx, epochTestSessionID)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if state2.Epoch != advanced.Epoch {
+		t.Fatalf("epoch = %d, want %d (no no-op advance)", state2.Epoch, advanced.Epoch)
+	}
+}
+
+func TestAdvanceInPlaceRecordsBudgetRecovery(t *testing.T) {
+	t.Parallel()
+	store, _ := newFakeStore(time.Now())
+	ctx := context.Background()
+
+	state, err := store.AdvanceInPlace(ctx, epochTestSessionID, "test", ReasonBudgetRecovery)
+	if err != nil {
+		t.Fatalf("AdvanceInPlace() error = %v", err)
+	}
+	if state.Epoch != 2 || state.LastReason != ReasonBudgetRecovery {
+		t.Fatalf("state = %+v, want epoch 2 with reason budget-recovery", state)
+	}
+	if state.AnchorCreatedAtMs != 0 {
+		t.Fatalf("anchor moved to %d, want the initial zero anchor", state.AnchorCreatedAtMs)
+	}
+
+	// A second in-place advance increments the epoch again without moving the
+	// anchor; a missing reason is rejected.
+	state, err = store.AdvanceInPlace(ctx, epochTestSessionID, "test", ReasonBudgetRecovery)
+	if err != nil {
+		t.Fatalf("second AdvanceInPlace() error = %v", err)
+	}
+	if state.Epoch != 3 {
+		t.Fatalf("epoch = %d, want 3", state.Epoch)
+	}
+	if _, err := store.AdvanceInPlace(ctx, epochTestSessionID, "test", ""); err == nil {
+		t.Fatal("an in-place advance without a reason must be rejected")
 	}
 }

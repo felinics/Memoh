@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/chat/contextepoch"
 	"github.com/felinics/memoh/internal/chat/event"
 	dbpkg "github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -731,6 +732,11 @@ func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssis
 	// carrying the source thread's last request-scoped target.
 	delete(meta, "workspace_target_id")
 	delete(meta, "workspace_target")
+	// The copied history is a prefix of the source thread's, so the source's
+	// Context Epoch anchor may sit past every copied message and would exclude
+	// the entire forked history. Drop it: the fork initializes its own epoch
+	// on first anchored load.
+	delete(meta, contextepoch.MetadataKey)
 	meta["forked_from"] = map[string]any{
 		"session_id": source.ID,
 		"title":      title,

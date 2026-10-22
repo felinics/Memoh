@@ -32,6 +32,11 @@ const (
 	// admitting fewer rows than the session holds since the previous anchor.
 	// The budget — never the wall clock — is what may move the anchor.
 	ReasonBudget = "budget"
+	// ReasonBudgetRecovery records an in-turn budget recovery that rewrote
+	// the history region (spec, turn boundary rule 1): the anchor stays put,
+	// but the stable part changed, so the change is booked as an epoch
+	// advance instead of silently rewritten.
+	ReasonBudgetRecovery = "budget-recovery"
 )
 
 // Beginning is the zero anchor: history loads from the start of the session.

@@ -68,6 +68,10 @@ func (s *Service) chatBudgetRecovery(req ChatRequest, layout chatHistoryLayout) 
 		if reflect.DeepEqual(recovered.Messages, cfg.Messages) {
 			return cfg, false, nil
 		}
+		// Turn-boundary rule 1: budget recovery rewrote the history region of
+		// the stable part, so the change is booked as an epoch advance
+		// (reason budget-recovery) instead of a silent rewrite.
+		s.recordBudgetRecoveryAdvance(ctx, req.ThreadID)
 		layout.historyCount = recovered.ContextTrimmableMessages
 		layout.pressureTokens = 0
 		return recovered, true, nil
@@ -293,6 +297,9 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 	if result.Status != compaction.StatusOK && result.Status != compaction.StatusProgress {
 		return cfg, shed, nil
 	}
+	// Same booking as the chat recovery path: the recompose rewrites the
+	// history region, so the epoch records a budget-recovery advance.
+	s.recordBudgetRecoveryAdvance(ctx, cmd.ThreadID)
 	return cfg, false, native.ErrContextRecompose
 }
 

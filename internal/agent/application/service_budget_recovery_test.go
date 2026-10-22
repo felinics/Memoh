@@ -24,6 +24,7 @@ import (
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/chat/contextepoch"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/contextview"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -102,6 +103,34 @@ func chatRecoveryFixture(t *testing.T) (*Service, *recoveryHistoryService, *reco
 	cfg.ContextSourceFrags = buildProviderSourceFrags(t.Context(), cfg, []native.SystemSection{{ID: "system", Kind: contextfrag.KindSystemPrompt, Text: strings.Repeat("s", 3200)}}, nil)
 	cfg.RecoverContextBudget = s.chatBudgetRecovery(ChatRequest{BotID: syncCompactBotID, ChatID: syncCompactBotID, ThreadID: syncCompactThreadID}, chatHistoryLayout{forkCount: 1, historyCount: 22, pressureTokens: 2500})
 	return s, history, runner, cfg
+}
+
+type measuringRecoveryHistoryService struct {
+	*recoveryHistoryService
+}
+
+func (s *measuringRecoveryHistoryService) MeasureActiveBySession(_ context.Context, _ string, _ time.Time) (messagepkg.ActiveMessagesMeasure, error) {
+	return messagepkg.ActiveMessagesMeasure{MessageCount: int64(len(s.messages))}, nil
+}
+
+// Turn-boundary rule 1: a budget recovery that rewrote the history region
+// books an in-place epoch advance (reason budget-recovery) instead of
+// silently changing the stable part.
+func TestChatBudgetRecoveryRecordsBudgetRecoveryEpochAdvance(t *testing.T) {
+	s, history, _, cfg := chatRecoveryFixture(t)
+	s.messageService = &measuringRecoveryHistoryService{history}
+	queries := &fakeContextEpochQueries{states: map[string]string{}}
+	s.contextEpochs = contextepoch.NewStore(queries, nil)
+	if _, err := contextview.ProviderRunConfigApplier(nil)(t.Context(), cfg); err != nil {
+		t.Fatalf("history recovery failed: %v", err)
+	}
+	state := queries.state(syncCompactThreadID)
+	if state.Epoch != 2 || state.LastReason != contextepoch.ReasonBudgetRecovery {
+		t.Fatalf("state = %+v, want epoch 2 with reason budget-recovery", state)
+	}
+	if state.AnchorCreatedAtMs != 0 {
+		t.Fatalf("anchor moved to %d, want an in-place advance", state.AnchorCreatedAtMs)
+	}
 }
 
 func TestChatBudgetRecoveryReloadsOnlyHistory(t *testing.T) {

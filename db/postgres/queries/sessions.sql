@@ -682,14 +682,15 @@ WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(session_id) AND
 -- name: AdvanceSessionContextEpoch :one
 -- Monotonic guarded write: the epoch and the anchor may only move forward, so
 -- a stale or racing writer can never slide history loading backwards. The
--- guards compare against the incoming values, making a lost update a no-op
--- (zero rows) instead of a regression.
+-- epoch guard is strict: every advance increments the epoch, so a writer that
+-- lost the race (same target epoch as the stored state) gets zero rows and
+-- resolves to ErrAdvanceStale instead of silently re-anchoring the epoch.
 UPDATE bot_sessions
 SET metadata = jsonb_set(metadata, '{context_epoch}', sqlc.arg(state)::jsonb, true),
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
   AND id = sqlc.arg(session_id)
   AND deleted_at IS NULL
-  AND COALESCE((metadata->'context_epoch'->>'epoch')::bigint, 0) <= sqlc.arg(epoch)::bigint
+  AND COALESCE((metadata->'context_epoch'->>'epoch')::bigint, 0) < sqlc.arg(epoch)::bigint
   AND COALESCE((metadata->'context_epoch'->>'anchor_created_at_ms')::bigint, 0) <= sqlc.arg(anchor_created_at_ms)::bigint
 RETURNING (metadata->'context_epoch')::text AS state;
