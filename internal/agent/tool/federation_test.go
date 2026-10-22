@@ -125,8 +125,9 @@ func TestFederationProviderToolsetChangeHook(t *testing.T) {
 		{Name: "search", Description: "v1", InputSchema: map[string]any{"type": "object"}},
 	}}
 	var fired []string
-	provider := NewFederationProvider(nil, source, WithToolsetChangeHook(func(_ context.Context, sessionID string) {
+	provider := NewFederationProvider(nil, source, WithToolsetChangeHook(func(_ context.Context, sessionID string) error {
 		fired = append(fired, sessionID)
+		return nil
 	}))
 	session := SessionContext{BotID: "bot-1", SessionID: "sess-1"}
 
@@ -160,8 +161,9 @@ func TestFederationProviderToolsetChangeHook(t *testing.T) {
 	// Degraded listings never fire: an outage is not a toolset change.
 	degraded := &failingFederationSource{err: errors.New("connection refused")}
 	degraded.tools = source.tools
-	provider = NewFederationProvider(nil, degraded, WithToolsetChangeHook(func(_ context.Context, sessionID string) {
+	provider = NewFederationProvider(nil, degraded, WithToolsetChangeHook(func(_ context.Context, sessionID string) error {
 		fired = append(fired, sessionID)
+		return nil
 	}))
 	if _, err := provider.Tools(context.Background(), session); err != nil {
 		t.Fatalf("tools: %v", err)
@@ -184,7 +186,7 @@ func TestFederationProviderKeepsBestEffortToolsOnDegradedListing(t *testing.T) {
 		err: federation.ErrToolListingDegraded,
 	}
 	fired := 0
-	provider := NewFederationProvider(nil, source, WithToolsetChangeHook(func(context.Context, string) { fired++ }))
+	provider := NewFederationProvider(nil, source, WithToolsetChangeHook(func(context.Context, string) error { fired++; return nil }))
 	session := SessionContext{BotID: "bot-1", SessionID: "sess-1"}
 
 	tools, err := provider.Tools(context.Background(), session)
@@ -196,5 +198,57 @@ func TestFederationProviderKeepsBestEffortToolsOnDegradedListing(t *testing.T) {
 	}
 	if fired != 0 {
 		t.Fatalf("a degraded listing must not fire the toolset hook (%d)", fired)
+	}
+}
+
+// A failed booking keeps the old baseline: the next turn observes the same
+// mismatch and retries the advance instead of silently absorbing the change.
+func TestFederationProviderToolsetChangeHookRetriesAfterFailure(t *testing.T) {
+	t.Parallel()
+
+	source := &federationTestSource{tools: []mcp.ToolDescriptor{
+		{Name: "search", Description: "v1"},
+	}}
+	fail := true
+	fired := 0
+	provider := NewFederationProvider(nil, source, WithToolsetChangeHook(func(context.Context, string) error {
+		fired++
+		if fail {
+			return errors.New("transient epoch store failure")
+		}
+		return nil
+	}))
+	session := SessionContext{BotID: "bot-1", SessionID: "sess-1"}
+
+	if _, err := provider.Tools(context.Background(), session); err != nil {
+		t.Fatalf("tools: %v", err)
+	}
+	source.tools = []mcp.ToolDescriptor{{Name: "search", Description: "v2"}}
+	if _, err := provider.Tools(context.Background(), session); err != nil {
+		t.Fatalf("tools: %v", err)
+	}
+	if fired != 1 {
+		t.Fatalf("hook calls = %d, want 1", fired)
+	}
+
+	// The booking failed, so the baseline did not move: the next turn with
+	// the same (changed) toolset retries the hook.
+	if _, err := provider.Tools(context.Background(), session); err != nil {
+		t.Fatalf("tools: %v", err)
+	}
+	if fired != 2 {
+		t.Fatalf("a failed booking must retry: hook calls = %d, want 2", fired)
+	}
+
+	// Once the booking succeeds the baseline moves and the hook goes quiet.
+	fail = false
+	if _, err := provider.Tools(context.Background(), session); err != nil {
+		t.Fatalf("tools: %v", err)
+	}
+	if _, err := provider.Tools(context.Background(), session); err != nil {
+		t.Fatalf("tools: %v", err)
+	}
+	if fired != 3 {
+		t.Fatalf("hook calls after a successful booking = %d, want 3 (one retry, then quiet)", fired)
 	}
 }

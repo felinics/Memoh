@@ -65,18 +65,23 @@ var validAdvanceReasons = map[string]struct{}{
 	ReasonUserCut:        {},
 }
 
-// bookkeepingReasons carry the epoch pins (history budget, model identity,
-// monitoring hash) across an advance: a budget slide, an in-turn recovery,
-// or a segment merge only move the anchor or rewrite history bytes — the
-// baseline they pin did not change. Explicit chapter turns (model-change,
-// toolset-change, user-cut) reset the pins so the new epoch builds its own
-// baseline instead of inheriting — and forever disagreeing with — the old
-// one.
-var bookkeepingReasons = map[string]bool{
-	ReasonBudget:         true,
-	ReasonBudgetRecovery: true,
-	ReasonSegmentMerge:   true,
-}
+// pinResetReasons name, per pin, the advance reasons that invalidate it:
+//   - BudgetTokens resets only on model-change: a different model means a
+//     different context window, so the old ceiling may not fit. A toolset
+//     change alters the system cost, but the envelope guard re-clamps
+//     feasibility at selection time, and carrying the pin keeps a mid-turn
+//     toolset advance consistent with the run config wired at turn start.
+//   - PrefixHash resets on model-change and toolset-change: both rewrite the
+//     rendered system region, so the old monitoring baseline would alarm on
+//     every turn of the new chapter. A user cut or a bookkeeping advance
+//     leaves the system region untouched, so the hash carries.
+//   - ModelIdentity resets only on model-change (the only reason that
+//     changes the model).
+var (
+	budgetResetReasons   = map[string]bool{ReasonModelChange: true}
+	hashResetReasons     = map[string]bool{ReasonModelChange: true, ReasonToolsetChange: true}
+	identityResetReasons = map[string]bool{ReasonModelChange: true}
+)
 
 // ValidAdvanceReason reports whether reason is part of the rule-6 audit
 // vocabulary.
@@ -162,13 +167,13 @@ func (s State) AdvancedBy(anchorAt time.Time, anchorMessageID, reason string, no
 		PrefixHash:        s.PrefixHash,
 		UpdatedAtMs:       now.UnixMilli(),
 	}
-	if !bookkeepingReasons[reason] {
-		// An explicit chapter turn establishes a new baseline: the pins
-		// (budget, model identity, monitoring hash) describe the old
-		// chapter and must be re-observed and re-pinned by the next turn
-		// instead of being inherited into the new epoch.
+	if budgetResetReasons[reason] {
 		next.BudgetTokens = 0
+	}
+	if identityResetReasons[reason] {
 		next.ModelIdentity = ""
+	}
+	if hashResetReasons[reason] {
 		next.PrefixHash = ""
 	}
 	return next, nil

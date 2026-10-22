@@ -1140,10 +1140,12 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 	historySessions := channelthreadadapter.NewLister(sessionService, routeService)
 	fedGateway.SetOAuthService(oauthService)
 	toolsetChangeEpochs := contextepoch.NewStore(queries, log)
-	toolsetChangeHook := func(ctx context.Context, sessionID string) {
+	toolsetChangeHook := func(ctx context.Context, sessionID string) error {
 		if _, err := toolsetChangeEpochs.AdvanceContextEpoch(ctx, sessionID, "toolset-change", contextepoch.ReasonToolsetChange); err != nil {
 			log.WarnContext(ctx, "toolset-change epoch advance failed", slog.String("session_id", sessionID), slog.Any("error", err))
+			return err
 		}
+		return nil
 	}
 	return []agenttools.ToolProvider{
 		agenttools.NewCapabilityProvider(log, agenttools.CapabilityOptions{

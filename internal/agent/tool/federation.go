@@ -24,10 +24,12 @@ type FederationProvider struct {
 	logger *slog.Logger
 	// onToolsetChange, when set, is invoked once per observed toolset change
 	// of a session (spec: 工具集变了记 toolset-change 翻篇). lastHashes holds
-	// the last toolset hash per (bot, session) so a change books exactly one
-	// advance; the map is process-local, so a restart re-baselines silently
-	// and relies on the prefix-hash drift alarm as the backstop.
-	onToolsetChange func(ctx context.Context, sessionID string)
+	// the last successfully BOOKED toolset hash per (bot, session): when the
+	// hook fails, the old baseline stays so the next turn retries the booking
+	// instead of silently absorbing the change. The map is process-local, so
+	// a restart re-baselines silently and relies on the prefix-hash drift
+	// alarm as the backstop.
+	onToolsetChange func(ctx context.Context, sessionID string) error
 	mu              sync.Mutex
 	lastHashes      map[string]string
 }
@@ -35,10 +37,12 @@ type FederationProvider struct {
 // FederationProviderOption customizes a FederationProvider.
 type FederationProviderOption func(*FederationProvider)
 
-// WithToolsetChangeHook registers a callback fired when a session's federated
-// toolset changes between turns. The callback must be cheap and must not
-// fail the turn; wiring it to a Context Epoch advance books the change.
-func WithToolsetChangeHook(hook func(ctx context.Context, sessionID string)) FederationProviderOption {
+// WithToolsetChangeHook registers a callback fired when a session's
+// federated toolset changes between turns. The callback must be cheap and
+// must not fail the turn; wiring it to a Context Epoch advance books the
+// change. A callback error keeps the old baseline so the booking retries on
+// the next turn.
+func WithToolsetChangeHook(hook func(ctx context.Context, sessionID string) error) FederationProviderOption {
 	return func(f *FederationProvider) {
 		f.onToolsetChange = hook
 		if hook != nil {
@@ -155,15 +159,27 @@ func (f *FederationProvider) trackToolsetChange(ctx context.Context, session mcp
 	key := strings.TrimSpace(session.BotID) + "|" + sessionID
 	f.mu.Lock()
 	previous, seen := f.lastHashes[key]
-	if !seen || previous != hash {
-		f.lastHashes[key] = hash
-	}
 	f.mu.Unlock()
-	// The first observation only establishes the baseline; a change books one
-	// advance.
-	if seen && previous != hash {
-		f.onToolsetChange(ctx, sessionID)
+	if !seen {
+		// The first observation only establishes the baseline.
+		f.mu.Lock()
+		f.lastHashes[key] = hash
+		f.mu.Unlock()
+		return
 	}
+	if previous == hash {
+		return
+	}
+	// A change must be booked before it becomes the baseline: only a
+	// successful hook moves the fingerprint, so a failed booking retries on
+	// the next turn.
+	if err := f.onToolsetChange(ctx, sessionID); err != nil {
+		f.logger.WarnContext(ctx, "toolset change booking failed; will retry", slog.String("session_id", sessionID), slog.Any("error", err))
+		return
+	}
+	f.mu.Lock()
+	f.lastHashes[key] = hash
+	f.mu.Unlock()
 }
 
 // toolsetHash fingerprints the advertised toolset: names, descriptions, and

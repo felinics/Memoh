@@ -312,11 +312,14 @@ func TestSourceListToolsDegradedWhenConnectionNeverListed(t *testing.T) {
 	}
 }
 
-// Losing the connection list itself is always degraded: no rebuild is
-// possible and deleted connections must not resurrect from the fallback.
+// Losing the connection list cannot rebuild anything — deleted connections
+// must not resurrect — so the bot's last COMPLETE listing is served instead:
+// its bytes are stable, and CallTool's connection revalidation fails closed
+// while the lister is down. With no complete listing on record the result is
+// degraded.
 func TestSourceListToolsConnectionsListFailureIsDegraded(t *testing.T) {
 	gateway := &flakyListGateway{testGateway: testGateway{
-		listSSE: []mcpgw.ToolDescriptor{{Name: "search"}},
+		listSSE: []mcpgw.ToolDescriptor{{Name: "search", Description: "search remote data"}},
 	}}
 	lister := &testConnectionLister{items: []mcpgw.Connection{sseTestConnection()}}
 	source := NewSource(slog.Default(), gateway, lister)
@@ -328,7 +331,52 @@ func TestSourceListToolsConnectionsListFailureIsDegraded(t *testing.T) {
 	lister.err = errors.New("db down")
 	lister.items = nil
 	source.Invalidate("bot-1")
-	if _, err := source.ListTools(context.Background(), session); !errors.Is(err, ErrToolListingDegraded) {
-		t.Fatalf("connection list failure err = %v, want ErrToolListingDegraded", err)
+	tools, err := source.ListTools(context.Background(), session)
+	if err != nil {
+		t.Fatalf("a bot with a complete last-good listing must not degrade: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "remote_sse_search" {
+		t.Fatalf("last-good tools = %+v", tools)
+	}
+
+	// A bot that never completed a listing has nothing to fall back to.
+	fresh := NewSource(slog.Default(), gateway, &testConnectionLister{err: errors.New("db down")})
+	if _, err := fresh.ListTools(context.Background(), mcpgw.ToolSessionContext{BotID: "bot-2"}); !errors.Is(err, ErrToolListingDegraded) {
+		t.Fatalf("no last-good listing err = %v, want ErrToolListingDegraded", err)
+	}
+}
+
+// A reconfigured connection (UpdatedAt changed) invalidates its fallback
+// snapshot: the old tools may belong to a different endpoint and must not be
+// served — let alone routed — against the new configuration.
+func TestSourceFallbackDoesNotSurviveReconfiguration(t *testing.T) {
+	gateway := &flakyListGateway{testGateway: testGateway{
+		listSSE: []mcpgw.ToolDescriptor{{Name: "search", Description: "search remote data"}},
+	}}
+	connection := sseTestConnection()
+	connection.UpdatedAt = time.UnixMilli(1000)
+	lister := &testConnectionLister{items: []mcpgw.Connection{connection}}
+	source := NewSource(slog.Default(), gateway, lister)
+	session := mcpgw.ToolSessionContext{BotID: "bot-1"}
+	if _, err := source.ListTools(context.Background(), session); err != nil {
+		t.Fatalf("initial listing: %v", err)
+	}
+
+	// Reconfigure the connection (new endpoint bumps UpdatedAt), then fail
+	// the next listing: the old snapshot must NOT bind to the new endpoint.
+	connection.Config = map[string]any{"url": "http://evil.example.com/sse"}
+	connection.UpdatedAt = time.UnixMilli(2000)
+	lister.items = []mcpgw.Connection{connection}
+	gateway.failSSE = true
+	source.Invalidate("bot-1")
+	tools, err := source.ListTools(context.Background(), session)
+	if !errors.Is(err, ErrToolListingDegraded) {
+		t.Fatalf("reconfigured+failed listing err = %v, want ErrToolListingDegraded", err)
+	}
+	if len(tools) != 0 {
+		t.Fatalf("stale snapshot bound to the new endpoint: %+v", tools)
+	}
+	if _, err := source.CallTool(context.Background(), session, "remote_sse_search", nil); !errors.Is(err, mcpgw.ErrToolNotFound) {
+		t.Fatalf("stale tool must not be callable against the new endpoint: %v", err)
 	}
 }

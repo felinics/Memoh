@@ -560,3 +560,35 @@ func TestPinBudgetIgnoresNonPositiveValues(t *testing.T) {
 		t.Fatalf("zero pin wrote state: %v", queries.states)
 	}
 }
+
+// The pin-carry policy is per reason: a toolset change resets only the
+// monitoring hash (tool documentation lives in the system region), while the
+// budget and model identity carry — the envelope guard re-clamps feasibility
+// and the model did not change.
+func TestAdvanceCarriesPinsPerReason(t *testing.T) {
+	t.Parallel()
+	store, queries := newFakeStore(time.UnixMilli(1_700_000_000_000))
+	ctx := context.Background()
+
+	queries.states[epochTestSessionID] = `{"epoch":3,"budget_tokens":4000,"model_identity":"uuid-a/model","prefix_hash":"hash-a","last_reason":"init"}`
+
+	next, err := store.AdvanceContextEpoch(ctx, epochTestSessionID, "test", ReasonToolsetChange)
+	if err != nil {
+		t.Fatalf("toolset-change advance: %v", err)
+	}
+	if next.BudgetTokens != 4000 || next.ModelIdentity != "uuid-a/model" {
+		t.Fatalf("toolset-change must carry budget and identity: %+v", next)
+	}
+	if next.PrefixHash != "" {
+		t.Fatalf("toolset-change must reset the monitoring baseline: %+v", next)
+	}
+
+	queries.states[epochTestSessionID] = `{"epoch":3,"budget_tokens":4000,"model_identity":"uuid-a/model","prefix_hash":"hash-a","last_reason":"init"}`
+	next, err = store.AdvanceContextEpoch(ctx, epochTestSessionID, "test", ReasonUserCut)
+	if err != nil {
+		t.Fatalf("user-cut advance: %v", err)
+	}
+	if next.BudgetTokens != 4000 || next.ModelIdentity != "uuid-a/model" || next.PrefixHash != "hash-a" {
+		t.Fatalf("user-cut touches neither the system region nor the window; all pins carry: %+v", next)
+	}
+}

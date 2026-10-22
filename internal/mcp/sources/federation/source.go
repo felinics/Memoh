@@ -66,6 +66,16 @@ type fallbackTool struct {
 	originalName string
 }
 
+// fallbackSnapshot is a connection's last successful listing plus the
+// connection generation (UpdatedAt) it was taken from. A reconfigured
+// connection (new endpoint, new credentials) invalidates the snapshot —
+// serving the old tools against the new endpoint would silently bind stale
+// schemas to a different server.
+type fallbackSnapshot struct {
+	updatedAt time.Time
+	tools     []fallbackTool
+}
+
 type Source struct {
 	logger      *slog.Logger
 	gateway     Gateway
@@ -75,10 +85,15 @@ type Source struct {
 	mu    sync.Mutex
 	cache map[string]cacheEntry
 	// fallback holds each connection's last successful tool listing, keyed by
-	// connection ID. A connection that fails to list keeps contributing its
-	// last known tools so one unreachable MCP server never rewrites the
-	// agent's tool documentation (Context Epoch: 工具列表失败沿用旧版).
-	fallback map[string][]fallbackTool
+	// connection ID and guarded by the connection generation. A connection
+	// that fails to list keeps contributing its last known tools so one
+	// unreachable MCP server never rewrites the agent's tool documentation
+	// (Context Epoch: 工具列表失败沿用旧版).
+	fallback map[string]fallbackSnapshot
+	// lastGood holds each bot's last COMPLETE listing. When the connection
+	// list itself cannot be read, the whole snapshot is served so the native
+	// agent path (which has no registry-level fallback) keeps its tools.
+	lastGood map[string]cacheEntry
 }
 
 type SourceOption func(*Source)
@@ -98,7 +113,8 @@ func NewSource(log *slog.Logger, gateway Gateway, connections ConnectionLister, 
 		gateway:     gateway,
 		connections: connections,
 		cache:       map[string]cacheEntry{},
-		fallback:    map[string][]fallbackTool{},
+		fallback:    map[string]fallbackSnapshot{},
+		lastGood:    map[string]cacheEntry{},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -123,12 +139,16 @@ func (s *Source) ListTools(ctx context.Context, session mcpgw.ToolSessionContext
 		return cloneTools(cached.tools), nil
 	}
 	tools, routes, degraded := s.buildToolsAndRoutes(ctx, botID)
-	s.setCache(botID, cacheEntry{
+	entry := cacheEntry{
 		expiresAt: time.Now().Add(cacheTTL),
 		routes:    routes,
 		tools:     tools,
 		degraded:  degraded,
-	})
+	}
+	s.setCache(botID, entry)
+	if !degraded {
+		s.setLastGood(botID, entry)
+	}
 	if degraded {
 		return cloneTools(tools), ErrToolListingDegraded
 	}
@@ -211,7 +231,7 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 	routes := map[string]toolRoute{}
 	tools := make([]mcpgw.ToolDescriptor, 0, 16)
 	degraded := false
-	fallbackUpdates := map[string][]fallbackTool{}
+	fallbackUpdates := map[string]fallbackSnapshot{}
 
 	addTool := func(descriptor mcpgw.ToolDescriptor, route toolRoute) (string, bool) {
 		name := strings.TrimSpace(descriptor.Name)
@@ -245,8 +265,17 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 	items, err := s.connections.ListActiveByBot(ctx, botID)
 	if err != nil {
 		// Without the connection list nothing can be rebuilt — not even the
-		// fallback snapshot, because deleted connections must not resurrect.
-		// Report degraded so callers serve their own last-good registry.
+		// per-connection fallback, because deleted connections must not
+		// resurrect. Serve the bot's last complete listing instead: its bytes
+		// are stable, and CallTool's connection revalidation still fails
+		// closed while the lister is down.
+		if lastGood, ok := s.getLastGood(botID); ok {
+			s.logger.WarnContext(ctx, "list mcp connections failed; serving last complete listing", slog.String("bot_id", botID), slog.Int("tools", len(lastGood.tools)), slog.Any("error", err))
+			for name, route := range lastGood.routes {
+				routes[name] = route
+			}
+			return cloneTools(lastGood.tools), routes, false
+		}
 		s.logger.WarnContext(ctx, "list mcp connections failed", slog.String("bot_id", botID), slog.Any("error", err))
 		return tools, routes, true
 	}
@@ -279,9 +308,9 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 			// connection that never listed successfully has no snapshot, so
 			// the listing is degraded and callers must not cache it as their
 			// new baseline.
-			if snapshot, ok := s.getFallback(connection.ID); ok {
-				s.logger.WarnContext(ctx, "list tools from connection failed; serving last successful listing", slog.String("connection_id", connection.ID), slog.String("name", connection.Name), slog.Int("tools", len(snapshot)), slog.Any("error", listErr))
-				for _, entry := range snapshot {
+			if snapshot, ok := s.getFallback(connection); ok {
+				s.logger.WarnContext(ctx, "list tools from connection failed; serving last successful listing", slog.String("connection_id", connection.ID), slog.String("name", connection.Name), slog.Int("tools", len(snapshot.tools)), slog.Any("error", listErr))
+				for _, entry := range snapshot.tools {
 					// The fallback descriptor carries its previous final
 					// (prefixed, de-duplicated) name; addTool keeps it while
 					// the slot is free, so the rendered tool documentation
@@ -323,25 +352,31 @@ func (s *Source) buildToolsAndRoutes(ctx context.Context, botID string) ([]mcpgw
 			tool.Name = finalName
 			snapshot = append(snapshot, fallbackTool{descriptor: tool, originalName: origin})
 		}
-		fallbackUpdates[connection.ID] = snapshot
+		fallbackUpdates[connection.ID] = fallbackSnapshot{updatedAt: connection.UpdatedAt, tools: snapshot}
 	}
 	s.mergeFallback(fallbackUpdates)
 	return tools, routes, degraded
 }
 
-// getFallback returns a connection's last successful listing.
-func (s *Source) getFallback(connectionID string) ([]fallbackTool, bool) {
+// getFallback returns a connection's last successful listing, but only while
+// the snapshot's generation matches: a reconfigured connection (UpdatedAt
+// changed) must not resurrect tools that may belong to a different endpoint.
+func (s *Source) getFallback(connection mcpgw.Connection) (fallbackSnapshot, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	snapshot, ok := s.fallback[connectionID]
-	return snapshot, ok
+	snapshot, ok := s.fallback[connection.ID]
+	if !ok || !connection.UpdatedAt.Equal(snapshot.updatedAt) {
+		return fallbackSnapshot{}, false
+	}
+	return snapshot, true
 }
 
 // mergeFallback records the successful listings of one rebuild. Connections
 // that failed keep their previous snapshot; connections that disappeared
 // (deleted or deactivated) keep theirs until restart, which is harmless —
-// they only serve if the connection reappears and fails.
-func (s *Source) mergeFallback(updates map[string][]fallbackTool) {
+// they only serve if the connection reappears with the same generation and
+// fails.
+func (s *Source) mergeFallback(updates map[string]fallbackSnapshot) {
 	if len(updates) == 0 {
 		return
 	}
@@ -350,6 +385,19 @@ func (s *Source) mergeFallback(updates map[string][]fallbackTool) {
 	for connectionID, snapshot := range updates {
 		s.fallback[connectionID] = snapshot
 	}
+}
+
+func (s *Source) getLastGood(botID string) (cacheEntry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.lastGood[botID]
+	return entry, ok
+}
+
+func (s *Source) setLastGood(botID string, entry cacheEntry) {
+	s.mu.Lock()
+	s.lastGood[botID] = entry
+	s.mu.Unlock()
 }
 
 func (s *Source) isReservedToolName(name string) bool {
