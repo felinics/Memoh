@@ -4,9 +4,10 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <!-- interactive-widget=resizes-content: Android Chrome shrinks the layout
-         viewport itself when the software keyboard opens, so the h-dvh shell
-         chain (and with it the composer) rises natively. iOS Safari ignores
-         the hint — there the lift comes from useVirtualKeyboard instead. -->
+         viewport itself when the software keyboard opens, so the h-dvh app
+         frames (and with them the composer) end at the keyboard natively. iOS
+         Safari ignores the hint and pans the page up instead. Both are left
+         to the browser: the app adds no keyboard offset of its own. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
     <title>Memoh</title>
     <!-- Home-screen install on mobile. Icons are generated from logo.svg by

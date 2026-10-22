@@ -230,7 +230,6 @@
             : 'inset-x-0 bottom-0 pt-2',
           { invisible: composerPlacementPending },
         ]"
-        :style="composerLiftPx > 0 ? { bottom: `${composerLiftPx}px` } : undefined"
       >
         <!-- Opaque backdrop, bottom-anchored, rising only to the box's widest point
              (its vertical centre). The box is solid and sits above the messages, so
@@ -1355,7 +1354,6 @@ import { captureChatPaneSendContext, clearComposerPairDraft, composerRestoreForS
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { useAgentModelCatalog } from '@/composables/useAgentModelCatalog'
-import { useVirtualKeyboard } from '@/composables/useVirtualKeyboard'
 import { isACPAgentConfigured } from '@/utils/acp'
 import { BOT_AGENT_RUNTIME_ACP, BOT_AGENT_RUNTIME_CODEX, botAgentIcon, botAgentName, botAgentProvider, isDirectBotAgentConfigured, isDirectBotAgentRuntime, normalizeBotAgentRuntime } from '@/utils/bot-agent'
 import { UserFacingError, isApiErrorCode, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
@@ -3767,18 +3765,10 @@ const composerPreviewBox = useComposerPreviewBox(textareaEl, () => composerPrevi
 const dockEl = useTemplateRef<InstanceType<typeof ComposerDock>>('dockEl')
 const { height: dockHeight } = useElementSize(() => dockEl.value?.$el ?? null)
 const dockMaskHeight = computed(() => dockEl.value?.maskHeight ?? `${COMPOSER_MASK_BELOW_PX}px`)
-
-// Virtual-keyboard lift (iOS Safari; Android lifts via the resized layout
-// viewport instead — see useVirtualKeyboard). The whole dock container rises
-// by the keyboard height, and the message column's bottom padding grows by
-// the same amount so follow-mode keeps the last message clear of the lifted
-// composer. While the model picker is open its search field may itself hold
-// focus: lifting then would yank the trigger out from under the popover and
-// fight iOS's own scroll-to-caret, so the lift is suppressed until the picker
-// closes (the plus menu has no focusable input and never hits this).
-const virtualKeyboardHeight = useVirtualKeyboard()
-const composerLiftPx = computed(() => (modelPopoverOpen.value ? 0 : virtualKeyboardHeight.value))
-const messagesBottomPad = computed(() => `${dockHeight.value + COMPOSER_MASK_BELOW_PX + 24 + composerLiftPx.value}px`)
+// No software-keyboard term: the browser itself moves the app out from under
+// the keyboard (Android resizes the page, iOS pans it), so the dock stays at
+// the pane's bottom and this padding only has to clear the dock.
+const messagesBottomPad = computed(() => `${dockHeight.value + COMPOSER_MASK_BELOW_PX + 24}px`)
 
 // The textarea belongs to the pane, so when the dock hands the input slot
 // back after ask_user is resolved or canceled, it emits and we focus here.
