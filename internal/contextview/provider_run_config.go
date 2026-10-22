@@ -528,25 +528,24 @@ func monitoringStablePrefixHash(selected []contextfrag.ContextFrag, modelIdentit
 // the identity meaningful when no UUID is configured (tests, ad-hoc
 // configs).
 //
-// The resolved output allowance (GenerationLimits().MaxOutputTokens) is part
-// of the identity: it feeds the pinned-budget ceiling, and it moves with
-// per-turn inputs the UUID cannot see — most notably the thinking decision
-// (reasoning output reserves 32000 tokens instead of 8192). Without it, a
-// thinking toggle would change the clamped history budget inside one epoch
-// (rule 4 violation) without booking an advance. A change books a
-// model-change advance: the generation configuration the epoch renders
-// against changed, which is exactly what that reason means.
+// The resolved output allowance (GenerationLimits().MaxOutputTokens) and the
+// effective context window are part of the identity: both feed the
+// pinned-budget ceiling, and both move with inputs the UUID cannot see — the
+// thinking decision changes the reserve (32000 instead of 8192 tokens), and
+// a model record can be edited in place (same UUID, new context_window)
+// without touching the reserve. Without them, either change would move the
+// clamped history budget inside one epoch (rule 4 violation) without booking
+// an advance. A change books a model-change advance: the generation
+// configuration the epoch renders against changed, which is exactly what
+// that reason means.
 func StableModelIdentity(cfg agentpkg.RunConfig) string {
 	uuid := strings.TrimSpace(cfg.CurrentModelUUID)
 	id := strings.TrimSpace(cfg.CurrentModelID)
 	if uuid != "" {
 		id = uuid + "/" + id
 	}
-	reserve := cfg.GenerationLimits().MaxOutputTokens
-	if reserve > 0 {
-		id += "/reserve=" + strconv.Itoa(reserve)
-	}
-	return id
+	return id + "/window=" + strconv.Itoa(cfg.ContextBudgetMaxTokens) +
+		"/reserve=" + strconv.Itoa(cfg.GenerationLimits().MaxOutputTokens)
 }
 
 func isContextBudgetError(err error) bool {

@@ -29,7 +29,7 @@ func TestWireEpochStabilityBooksModelChange(t *testing.T) {
 		t.Parallel()
 		svc, queries := newService(t, contextepoch.State{
 			Epoch: 1, LastReason: contextepoch.ReasonInit,
-			ModelIdentity: "uuid-a/gpt-old/reserve=8192", BudgetTokens: 4000, PrefixHash: "hash-a",
+			ModelIdentity: "uuid-a/gpt-old/window=0/reserve=8192", BudgetTokens: 4000, PrefixHash: "hash-a",
 		})
 		cfg := native.RunConfig{CurrentModelUUID: "uuid-b", CurrentModelID: "gpt-new"}
 		svc.wireEpochStability(context.Background(), sessionID, &cfg)
@@ -38,7 +38,7 @@ func TestWireEpochStabilityBooksModelChange(t *testing.T) {
 		if state.Epoch != 2 || state.LastReason != contextepoch.ReasonModelChange {
 			t.Fatalf("state after model change = %+v; want epoch 2 with reason model-change", state)
 		}
-		if state.ModelIdentity != "uuid-b/gpt-new/reserve=8192" {
+		if state.ModelIdentity != "uuid-b/gpt-new/window=0/reserve=8192" {
 			t.Fatalf("new epoch identity = %q, want uuid-b/gpt-new", state.ModelIdentity)
 		}
 		if state.BudgetTokens != 0 || state.PrefixHash != "" {
@@ -53,7 +53,7 @@ func TestWireEpochStabilityBooksModelChange(t *testing.T) {
 		t.Parallel()
 		svc, queries := newService(t, contextepoch.State{
 			Epoch: 1, LastReason: contextepoch.ReasonInit,
-			ModelIdentity: "uuid-a/gpt-old/reserve=8192", BudgetTokens: 4000,
+			ModelIdentity: "uuid-a/gpt-old/window=0/reserve=8192", BudgetTokens: 4000,
 		})
 		cfg := native.RunConfig{CurrentModelUUID: "uuid-a", CurrentModelID: "gpt-old"}
 		svc.wireEpochStability(context.Background(), sessionID, &cfg)
@@ -74,7 +74,7 @@ func TestWireEpochStabilityBooksModelChange(t *testing.T) {
 		svc.wireEpochStability(context.Background(), sessionID, &cfg)
 
 		state := queries.state(sessionID)
-		if state.Epoch != 1 || state.ModelIdentity != "uuid-a/gpt-old/reserve=8192" {
+		if state.Epoch != 1 || state.ModelIdentity != "uuid-a/gpt-old/window=0/reserve=8192" {
 			t.Fatalf("first observation = %+v; want epoch 1 with the pinned identity", state)
 		}
 		if cfg.PinnedHistoryBudgetTokens != 4000 {
@@ -88,14 +88,32 @@ func TestWireEpochStabilityBooksModelChange(t *testing.T) {
 	t.Run("thinking toggle books a change through the output reserve", func(t *testing.T) {
 		t.Parallel()
 		svc, queries := newService(t, contextepoch.State{
-			Epoch: 1, LastReason: contextepoch.ReasonInit, ModelIdentity: "uuid-a/gpt-old/reserve=8192",
+			Epoch: 1, LastReason: contextepoch.ReasonInit, ModelIdentity: "uuid-a/gpt-old/window=0/reserve=8192",
 		})
 		cfg := native.RunConfig{CurrentModelUUID: "uuid-a", CurrentModelID: "gpt-old", ReasoningConfig: &models.ReasoningConfig{Active: true}}
 		svc.wireEpochStability(context.Background(), sessionID, &cfg)
 
 		state := queries.state(sessionID)
-		if state.Epoch != 2 || state.ModelIdentity != "uuid-a/gpt-old/reserve=32000" {
+		if state.Epoch != 2 || state.ModelIdentity != "uuid-a/gpt-old/window=0/reserve=32000" {
 			t.Fatalf("a thinking toggle must book a model-change advance: %+v", state)
+		}
+	})
+
+	// Editing the model record in place (same UUID, smaller context window)
+	// changes the pinned-budget ceiling without touching the reserve: the
+	// window is part of the identity, so the edit books an advance instead
+	// of shrinking the budget inside the epoch.
+	t.Run("in-place window edit books a change through the window", func(t *testing.T) {
+		t.Parallel()
+		svc, queries := newService(t, contextepoch.State{
+			Epoch: 1, LastReason: contextepoch.ReasonInit, ModelIdentity: "uuid-a/gpt-old/window=128000/reserve=8192",
+		})
+		cfg := native.RunConfig{CurrentModelUUID: "uuid-a", CurrentModelID: "gpt-old", ContextBudgetMaxTokens: 64000}
+		svc.wireEpochStability(context.Background(), sessionID, &cfg)
+
+		state := queries.state(sessionID)
+		if state.Epoch != 2 || state.ModelIdentity != "uuid-a/gpt-old/window=64000/reserve=8192" {
+			t.Fatalf("an in-place window edit must book a model-change advance: %+v", state)
 		}
 	})
 
@@ -104,12 +122,12 @@ func TestWireEpochStabilityBooksModelChange(t *testing.T) {
 	t.Run("same model name on another provider books a change", func(t *testing.T) {
 		t.Parallel()
 		svc, queries := newService(t, contextepoch.State{
-			Epoch: 1, LastReason: contextepoch.ReasonInit, ModelIdentity: "uuid-a/gpt-same/reserve=8192",
+			Epoch: 1, LastReason: contextepoch.ReasonInit, ModelIdentity: "uuid-a/gpt-same/window=0/reserve=8192",
 		})
 		cfg := native.RunConfig{CurrentModelUUID: "uuid-b", CurrentModelID: "gpt-same"}
 		svc.wireEpochStability(context.Background(), sessionID, &cfg)
 
-		if state := queries.state(sessionID); state.Epoch != 2 || state.ModelIdentity != "uuid-b/gpt-same/reserve=8192" {
+		if state := queries.state(sessionID); state.Epoch != 2 || state.ModelIdentity != "uuid-b/gpt-same/window=0/reserve=8192" {
 			t.Fatalf("provider switch with the same model name must book a change: %+v", state)
 		}
 	})
