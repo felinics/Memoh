@@ -157,7 +157,6 @@ func (s *Service) runCompaction(ctx context.Context, plan compactionPlan) error 
 	}
 	cfg.TargetTokens = compactionTargetTokens(plan.settings.CompactionTargetPercent, plan.rc.contextTokenBudget)
 	cfg.ProtectedSources = compactionProtectedSources(plan.req)
-	cfg.AllowFrontierFusion = true
 	cfg.ContextWindowTokens = plan.rc.contextTokenBudget
 	cfg.HardPressure = syncCompactionShouldRun(plan.inputTokens, plan.rc.contextTokenBudget)
 	return s.drainCompactionBacklog(ctx, cfg)
@@ -233,7 +232,6 @@ func (s *Service) runSyncCompaction(ctx context.Context, req ChatRequest, inputT
 		return compaction.Result{}
 	}
 	cfg.ProtectedSources = compactionProtectedSources(req)
-	cfg.AllowFrontierFusion = true
 	cfg.TargetTokens = syncBackstopTargetTokens(botSettings.CompactionTargetPercent, contextTokenBudget)
 	cfg.ContextWindowTokens = contextTokenBudget
 	cfg.HardPressure = hardPressure

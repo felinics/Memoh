@@ -132,7 +132,7 @@ func TestBuildCompactConfigUsesChatModelContextWindow(t *testing.T) {
 	if cfg.ContextWindowTokens != 200000 {
 		t.Fatalf("ContextWindowTokens = %d, want chat window 200000", cfg.ContextWindowTokens)
 	}
-	if cfg.Ratio != 100 || cfg.TotalInputTokens != 1 || !cfg.Manual || !cfg.AllowFrontierFusion {
+	if cfg.Ratio != 100 || cfg.TotalInputTokens != 1 || !cfg.Manual {
 		t.Fatalf("manual config semantics changed: %#v", cfg)
 	}
 }

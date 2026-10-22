@@ -56,6 +56,7 @@ import (
 	"github.com/felinics/memoh/internal/botworkspace"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/route"
+	"github.com/felinics/memoh/internal/chat/contextepoch"
 	"github.com/felinics/memoh/internal/chat/event"
 	"github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
@@ -860,6 +861,9 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 	if compactionService != nil {
 		compactionService.SetHookService(hookService)
 		compactionService.SetEventPublisher(eventHub)
+		// Segment merges rewrite the stable prefix, so they must book a
+		// context-epoch advance in the same write as the supersession.
+		compactionService.SetContextEpochs(contextepoch.NewStore(queries, log))
 	}
 	if workspaceManager != nil {
 		workspaceManager.SetHookService(hookService)
