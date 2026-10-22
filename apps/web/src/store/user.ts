@@ -1,9 +1,10 @@
 import { defineStore } from 'pinia'
-import { reactive, ref, watch } from 'vue'
-import { useLocalStorage } from '@vueuse/core'
+import { nextTick, reactive, ref, watch } from 'vue'
+import { StorageSerializers, useLocalStorage } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { useQueryCache } from '@pinia/colada'
 import { getUsersMe, putUsersMe } from '@memohai/sdk'
+import { useChatSelectionStore } from '@/store/chat-selection'
 import { notifyAuthSessionCleared, onAuthSessionCleared, type AuthSessionClearReason } from '@/lib/auth-session'
 import { cancelPendingQueryCacheSave, removeQueryCacheFromDisk } from '@/lib/query-cache-persistence'
 import { resetOnboardingState } from '@/composables/useOnboarding'
@@ -36,6 +37,9 @@ function tokenUserId(token: string): string {
   }
 }
 
+// Accounts whose completed onboarding this browser keeps; older ones drop off.
+const REMEMBERED_ACCOUNTS = 5
+
 export const useUserStore = defineStore(
   'user',
   () => {
@@ -50,16 +54,33 @@ export const useUserStore = defineStore(
 
     const localToken = useLocalStorage('token', '')
     const onboardingCompleted = ref(false)
-    // Id of the account whose completed onboarding this browser has seen. It
-    // sits next to the token rather than in the persisted store state so it is
-    // readable while the store is still being set up, and it only counts while
-    // it matches the token's account — another account signing in here never
-    // inherits it. Cleared with the rest of the onboarding state.
-    const onboardingCompletedUser = useLocalStorage(ONBOARDING_KEYS.completedUser, '')
+    // Ids of the accounts (most recent first, a few at most) whose completed
+    // onboarding this browser has seen. They sit next to the token rather than
+    // in the persisted store state so they are readable while the store is
+    // still being set up, and one only counts for the token's own account —
+    // another account signing in here never inherits it. For the same reason
+    // signing out keeps them, so signing back in does not wait on the server
+    // either. An id is dropped only when the server reports onboarding
+    // incomplete for that account (loadMe).
+    const onboardingCompletedUsers = useLocalStorage<string[]>(
+      ONBOARDING_KEYS.completedUsers,
+      [],
+      { serializer: StorageSerializers.object },
+    )
+    const rememberedCompletedUsers = () => (Array.isArray(onboardingCompletedUsers.value) ? onboardingCompletedUsers.value : [])
+    const onboardingRememberedFor = (userId: string) => !!userId && rememberedCompletedUsers().includes(userId)
     const chatExamplesSidebarEntryHidden = ref(false)
 
     watch(onboardingCompleted, (completed) => {
-      onboardingCompletedUser.value = completed ? tokenUserId(localToken.value) : ''
+      const userId = tokenUserId(localToken.value)
+      if (!completed || !userId || rememberedCompletedUsers()[0] === userId) return
+      onboardingCompletedUsers.value = [userId, ...rememberedCompletedUsers().filter(id => id !== userId)]
+        .slice(0, REMEMBERED_ACCOUNTS)
+    })
+
+    const chatSelection = useChatSelectionStore()
+    watch(() => chatSelection.currentBotId, (botId) => {
+      if (botId) chatSelection.rememberBot(tokenUserId(localToken.value), botId)
     })
 
     let _meChecked = false
@@ -89,7 +110,11 @@ export const useUserStore = defineStore(
           userInfo.displayName = data.display_name ?? ''
           userInfo.avatarUrl = data.avatar_url ?? ''
           userInfo.timezone = data.timezone || 'UTC'
-          onboardingCompleted.value = data.metadata?.onboarding_completed === true
+          const completed = data.metadata?.onboarding_completed === true
+          onboardingCompleted.value = completed
+          if (!completed && data.id && onboardingRememberedFor(data.id)) {
+            onboardingCompletedUsers.value = rememberedCompletedUsers().filter(id => id !== data.id)
+          }
           chatExamplesSidebarEntryHidden.value = data.metadata?.chat_examples_sidebar_entry_hidden === true
           _meChecked = true
           return true
@@ -153,16 +178,23 @@ export const useUserStore = defineStore(
 
     const login = (userData: UserInfo, token: string) => {
       clearFrontendSessionState('login')
-      // A new login must not inherit the previous user's onboarding state. The
-      // remembered completion is keyed by account, but an in-memory value from
-      // a prior user could otherwise leak across a switch that skips logout —
-      // force a fresh server check.
+      // A new login must not inherit the previous user's in-memory onboarding
+      // state, even across a switch that skips logout. Only what this browser
+      // remembers for the signing-in account carries over.
       resetOnboarding()
       chatExamplesSidebarEntryHidden.value = false
       localToken.value = token
       for (const key of Object.keys(userData) as (keyof UserInfo)[]) {
         userInfo[key] = userData[key]
       }
+      trustRememberedOnboarding()
+      // Open the account's last bot so the chat renders without waiting for
+      // the bot list. Deferred one tick so the cleared selection is seen as
+      // cleared first; restoring the same bot within the same tick would look
+      // like no change and skip the chat store's re-initialization.
+      void nextTick(() => {
+        if (localToken.value === token) chatSelection.restoreBot(tokenUserId(token))
+      })
     }
 
     const patchUserInfo = (patch: Partial<UserInfo>) => {
@@ -176,8 +208,6 @@ export const useUserStore = defineStore(
 
     const resetOnboarding = () => {
       onboardingCompleted.value = false
-      // The watcher above only clears it on a true → false change.
-      onboardingCompletedUser.value = ''
       _meChecked = false
       _pendingFetch = null
       safeLocalRemove(ONBOARDING_KEYS.introSeen)
@@ -218,12 +248,14 @@ export const useUserStore = defineStore(
     })
 
     // A returning account whose completion this browser has already seen opens
-    // the app at once instead of waiting on /users/me before the first render.
-    // The server is still asked; only its confirmed "not completed" sends the
-    // user to onboarding. A failed request keeps the remembered answer, the same
-    // way an unreachable server never blocks the app below.
-    const signedInUserId = tokenUserId(localToken.value)
-    if (signedInUserId && onboardingCompletedUser.value === signedInUserId) {
+    // the app at once, on a cold start or right after signing in, instead of
+    // waiting on /users/me before the first render. The server is still asked;
+    // only its confirmed "not completed" sends the user to onboarding. A failed
+    // request keeps the remembered answer, the same way an unreachable server
+    // never blocks the app below.
+    function trustRememberedOnboarding() {
+      const signedInUserId = tokenUserId(localToken.value)
+      if (!onboardingRememberedFor(signedInUserId)) return
       onboardingCompleted.value = true
       void loadMe().then((fetched) => {
         if (!fetched || onboardingCompleted.value) return
@@ -233,6 +265,7 @@ export const useUserStore = defineStore(
         }
       })
     }
+    trustRememberedOnboarding()
 
     return {
       userInfo,
@@ -249,7 +282,7 @@ export const useUserStore = defineStore(
     persist: {
       // `onboardingCompleted` stays out: a bare boolean says nothing about
       // which account it belongs to. The remembered completion is the
-      // account-keyed `onboardingCompletedUser` above.
+      // account-keyed `onboardingCompletedUsers` above.
       pick: ['userInfo'],
     },
   },
