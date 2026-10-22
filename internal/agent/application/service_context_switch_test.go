@@ -209,3 +209,32 @@ func TestSwitchContextFoldsTheRequestView(t *testing.T) {
 		})
 	}
 }
+
+// A retry renders its input from the request it replaces, which its first
+// step hides; the event reads and keeps in place the copy that step wrote,
+// with the same content.
+func TestSwitchContextReadsARetriedRequestFromItsCopy(t *testing.T) {
+	t.Parallel()
+
+	service, _ := newControllerPolicyService(t)
+	runner := &switchRunner{passes: []compaction.Pass{{ArtifactID: "a1", Summary: "s"}}}
+	service.compactionService = runner
+	committer := &agentStepCommitter{inputSourceIDs: []string{"copy"}, retriedRequest: "request", requestCopy: "copy"}
+	request := turn.ContextMessageSource{Kind: "history", ID: "request", ContentHash: "h"}
+	older := turn.ContextMessageSource{Kind: "history", ID: "older"}
+	sw := native.ContextSwitch{
+		View: []turn.ContextMessageSource{older, request}, Anchors: []turn.ContextMessageSource{request},
+		Tail: []turn.ContextMessageSource{{Kind: "history", ID: "latest"}}, HistoryBudgetTokens: 900, UsageTokens: 3000, AllowanceTokens: 2000,
+		Fold: func(native.ContextFold) int { return 1000 },
+	}
+	req := ChatRequest{BotID: syncCompactBotID, ChatID: syncCompactBotID, ThreadID: syncCompactThreadID, RunID: "run"}
+	if _, err := service.switchContext(req, committer, "")(t.Context(), sw); err != nil {
+		t.Fatal(err)
+	}
+	copied := turn.ContextMessageSource{Kind: "history", ID: "copy", ContentHash: "h"}
+	if !reflect.DeepEqual(runner.cfg.View, []turn.ContextMessageSource{older, copied}) ||
+		!reflect.DeepEqual(runner.cfg.Anchors, []turn.ContextMessageSource{copied, {Kind: "history", ID: "copy"}}) ||
+		!reflect.DeepEqual(sw.View, []turn.ContextMessageSource{older, request}) {
+		t.Fatalf("view=%v anchors=%v run view=%v, want the copy read and kept in place of the hidden request", runner.cfg.View, runner.cfg.Anchors, sw.View)
+	}
+}

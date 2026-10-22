@@ -68,7 +68,8 @@ var runEntries = []runEntry{
 	{name: "follow-up", folds: true, send: (*effectLoop).followUp},
 	{name: "approval", folds: true, extra: 1, send: (*effectLoop).decision},
 	{name: "ask-user", folds: true, extra: 1, send: (*effectLoop).decision},
-	{name: "retry", send: (*effectLoop).retry},
+	{name: "retry", folds: true, send: (*effectLoop).retry},
+	{name: "edit", folds: true, send: (*effectLoop).edit},
 	{name: "discuss", send: (*effectLoop).discuss},
 }
 
@@ -409,22 +410,61 @@ func (s *effectLoop) lastRunCode(runs int) string {
 	}
 }
 
-// retry answers text from the web UI, then replaces that turn the way the
-// Web client does: the new run is admitted, streamed over the WS surface and
-// finished in the session runtime by the caller.
+// retry answers text from the web UI, then retries that turn the way the
+// Web client does.
 func (s *effectLoop) retry(text string) string {
+	return s.replace(text, s.retryLatest)
+}
+
+// edit answers a draft from the web UI, then edits that turn into text.
+func (s *effectLoop) edit(text string) string {
+	return s.replace("DRAFT_BEFORE_EDIT", s.editLatest(text))
+}
+
+func (s *effectLoop) retryLatest(ctx context.Context, admission sessionruntime.Admission, target string, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) (application.RunOutcome, error) {
+	f, position := s.f, admission.TurnPosition
+	return f.service.RetryLatestMessageWS(ctx, application.RetryLatestMessageInput{
+		BotID: f.botID, SessionID: f.sessionID, RunID: admission.RunID, TurnID: admission.TurnID, TurnPosition: &position,
+		TargetTurnID: target, ActorChannelIdentityID: f.ownerUserID, ActorUserID: f.ownerUserID, RunHandle: admission.Handle,
+	}, eventCh, abortCh)
+}
+
+func (s *effectLoop) editLatest(text string) replaceTurn {
+	return func(ctx context.Context, admission sessionruntime.Admission, target string, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) (application.RunOutcome, error) {
+		f, position := s.f, admission.TurnPosition
+		return f.service.EditLatestMessageWS(ctx, application.EditLatestMessageInput{
+			BotID: f.botID, SessionID: f.sessionID, RunID: admission.RunID, TurnID: admission.TurnID, TurnPosition: &position,
+			TargetTurnID: target, Text: text, ActorChannelIdentityID: f.ownerUserID, ActorUserID: f.ownerUserID, RunHandle: admission.Handle,
+		}, eventCh, abortCh)
+	}
+}
+
+type replaceTurn func(context.Context, sessionruntime.Admission, string, chan<- application.WSStreamEvent, <-chan struct{}) (application.RunOutcome, error)
+
+// replace answers first from the web UI, then replaces that turn through
+// start.
+func (s *effectLoop) replace(first string, start replaceTurn) string {
 	f := s.f
 	f.t.Helper()
 	s.mu.Lock()
 	steps := s.steps
 	s.steps = 0
 	s.mu.Unlock()
-	if code := s.chat(text); code != "" {
-		f.t.Fatalf("the turn to retry failed with %s", code)
+	if code := s.chat(first); code != "" {
+		f.t.Fatalf("the turn to replace failed with %s", code)
 	}
 	s.mu.Lock()
 	s.steps, s.calls, s.start = steps, 0, len(s.requests)
 	s.mu.Unlock()
+	return s.replaceLatest(start)
+}
+
+// replaceLatest replaces the latest turn through start: the new run is
+// admitted, streamed over the WS surface and finished in the session runtime
+// by the caller.
+func (s *effectLoop) replaceLatest(start replaceTurn) string {
+	f := s.f
+	f.t.Helper()
 	var targetTurnID string
 	if err := f.pool.QueryRow(f.ctx, `SELECT turn_id FROM bot_history_messages WHERE session_id=$1 AND turn_id IS NOT NULL ORDER BY created_at DESC, id DESC LIMIT 1`, f.sessionID).Scan(&targetTurnID); err != nil {
 		f.t.Fatal(err)
@@ -442,11 +482,10 @@ func (s *effectLoop) retry(text string) string {
 		},
 	})
 	if err != nil || !admission.Started {
-		f.t.Fatalf("admit retry: started=%v err=%v", admission.Started, err)
+		f.t.Fatalf("admit replacement: started=%v err=%v", admission.Started, err)
 	}
 	handle := admission.Handle
 	ctx = runtimefence.WithContext(ctx, runtimefence.Fence{BotID: handle.BotID, SessionID: handle.SessionID, Token: handle.FencingToken})
-	position := admission.TurnPosition
 	eventCh := make(chan application.WSStreamEvent, 256)
 	forwarded := make(chan struct{})
 	go func() {
@@ -458,10 +497,7 @@ func (s *effectLoop) retry(text string) string {
 			}
 		}
 	}()
-	outcome, runErr := f.service.RetryLatestMessageWS(ctx, application.RetryLatestMessageInput{
-		BotID: f.botID, SessionID: f.sessionID, RunID: admission.RunID, TurnID: admission.TurnID, TurnPosition: &position,
-		TargetTurnID: targetTurnID, ActorChannelIdentityID: f.ownerUserID, ActorUserID: f.ownerUserID, RunHandle: handle,
-	}, eventCh, abortCh)
+	outcome, runErr := start(ctx, admission, targetTurnID, eventCh, abortCh)
 	close(eventCh)
 	<-forwarded
 	switch {
@@ -516,6 +552,68 @@ func TestPostgresInRunCompactionByEntry(t *testing.T) {
 				scenario.run(t, entry, newEffectLoop(t, entry))
 			})
 		}
+	}
+}
+
+// Replacing a turn that compacted in place leaves its summary behind: the
+// replacement's first step hides the turn and moves the session to a new
+// compaction epoch, so the attempt renders the history before the turn raw
+// and folds it, with its own steps, into a summary of its own. Every effect
+// of the attempt runs once, no summary of the current epoch covers a row of
+// the replaced turn, and the next turn renders the attempt's summary without
+// compacting.
+func TestPostgresReplacingACompactedTurnFoldsAgain(t *testing.T) {
+	const steps = 14
+	web := runEntries[0]
+	for name, replace := range map[string]func(*effectLoop) replaceTurn{
+		"retry": func(s *effectLoop) replaceTurn { return s.retryLatest },
+		"edit":  func(s *effectLoop) replaceTurn { return s.editLatest(loopInput) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newEffectLoop(t, web)
+			f := s.f
+			if code, _ := s.run(web, "EARLIER_TURN_KEEP", 0); code != "" {
+				t.Fatalf("earlier turn failed with %s", code)
+			}
+			if code, _ := s.run(web, loopInput, steps); code != "" || f.summaries.Load() == 0 {
+				t.Fatalf("the turn to replace: code=%q summary_calls=%d, want it answered after compacting in place", code, f.summaries.Load())
+			}
+			epoch := func() (epoch int64) {
+				if err := f.pool.QueryRow(f.ctx, `SELECT compaction_epoch FROM bot_sessions WHERE id=$1`, f.sessionID).Scan(&epoch); err != nil {
+					t.Fatal(err)
+				}
+				return epoch
+			}
+			before, summaries := epoch(), f.summaries.Load()
+			s.mu.Lock()
+			s.marker, s.steps, s.calls, s.effects, s.start = loopInput, steps, 0, nil, len(s.requests)
+			s.mu.Unlock()
+			want := make([]int, steps)
+			for i := range want {
+				want[i] = i + 1
+			}
+			if code := s.replaceLatest(replace(s)); code != "" || !slices.Equal(s.effects, want) || f.summaries.Load() == summaries {
+				t.Fatalf("replacement: code=%q effects=%v summary_calls=%d, want every effect once on a summary of its own", code, s.effects, f.summaries.Load()-summaries)
+			}
+			var active, coveredHidden int
+			if err := f.pool.QueryRow(f.ctx, `SELECT count(DISTINCT c.id), count(h.id) FILTER (WHERE NOT h.turn_visible)
+				FROM bot_history_message_compacts c JOIN bot_sessions s ON s.id=c.session_id AND s.compaction_epoch=c.compaction_epoch
+				LEFT JOIN bot_history_messages h ON h.compact_id=c.id
+				WHERE c.session_id=$1 AND c.status='ok' AND c.superseded_by IS NULL`, f.sessionID).Scan(&active, &coveredHidden); err != nil {
+				t.Fatal(err)
+			}
+			if epoch() == before || active != 1 || coveredHidden != 0 {
+				t.Fatalf("epoch moved=%v active summaries=%d covering %d hidden rows, want the replaced turn's summary retired and one summary covering none of it", epoch() != before, active, coveredHidden)
+			}
+			s.window(16000)
+			summaries = f.summaries.Load()
+			code, requests := s.run(web, "NEXT_ROUND_QUESTION", 0)
+			if code != "" || len(requests) != 1 || f.summaries.Load() != summaries ||
+				strings.Count(requests[0], loopSummary) != 1 || strings.Count(requests[0], loopInput) != 1 {
+				t.Fatalf("next turn: code=%q provider_calls=%d summary_calls=%d summaries=%d inputs=%d, want one call rendering the attempt's summary and input once",
+					code, len(requests), f.summaries.Load()-summaries, strings.Count(requests[0], loopSummary), strings.Count(requests[0], loopInput))
+			}
+		})
 	}
 }
 
@@ -685,9 +783,9 @@ func prefixFullScenario(t *testing.T, entry runEntry, s *effectLoop) {
 
 // A tool loop that outgrows the model window keeps going on one rolling
 // summary in every entry of the coverage set: each effect runs once, each
-// event folds everything before the latest step in one summarizer call,
-// requests between events only grow, the input and the latest results stay
-// verbatim, a row written into the session by someone else is left alone,
+// event folds everything before the latest step in one summarizer call that
+// is told the run's input, requests between events only grow, the input and
+// the latest results stay verbatim, a row written into the session by someone else is left alone,
 // and the next turn renders the summary the run sent at the same place
 // without compacting again. When the summarizer is down the
 // loop ends visibly with budget_unsatisfied after one retry, keeps the steps
@@ -702,7 +800,10 @@ func longLoopScenario(t *testing.T, entry runEntry, s *effectLoop) {
 	}
 	summaries := f.summaries.Load()
 	s.foreignAt = 3
+	var summarized []string
+	f.onSummary = func(body []byte) { summarized = append(summarized, string(body)) }
 	code, requests := s.run(entry, loopInput, steps)
+	f.onSummary = nil
 	s.foreignAt = 0
 	if !entry.folds {
 		if f.summaries.Load() != summaries || code != "context.budget_unsatisfied" || len(s.effects) == 0 || !slices.IsSorted(s.effects) || len(slices.Compact(slices.Clone(s.effects))) != len(s.effects) || len(s.effects) >= steps {
@@ -766,6 +867,11 @@ func longLoopScenario(t *testing.T, entry runEntry, s *effectLoop) {
 	}
 	if events < 2 || int(f.summaries.Load()-summaries) != events {
 		t.Fatalf("events=%d summary_calls=%d, want the loop to fold at least twice, one summarizer call each", events, f.summaries.Load()-summaries)
+	}
+	for i, body := range summarized {
+		if !strings.Contains(body, loopInput) {
+			t.Fatalf("summarizer call %d was not told the run's input", i+1)
+		}
 	}
 	var running, toolRows, foldedRows, foreign int
 	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FILTER (WHERE state <> 'completed') FROM session_runs WHERE session_id=$1`, f.sessionID).Scan(&running); err != nil {

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"slices"
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/context/compaction"
@@ -31,8 +30,8 @@ func (s *Service) switchContext(req ChatRequest, committer *agentStepCommitter, 
 		if err != nil {
 			return "", err
 		}
-		cfg.View = sw.View
-		cfg.Anchors = append(slices.Clone(sw.Anchors), committer.inputSources()...)
+		cfg.View = committer.currentSources(sw.View)
+		cfg.Anchors = append(committer.currentSources(sw.Anchors), committer.inputSources()...)
 		for _, source := range sw.Tail {
 			source.Current = true
 			cfg.ProtectedSources = append(cfg.ProtectedSources, source)

@@ -25,10 +25,16 @@
 ## Native context recovery
 
 All durable native entries bind step persistence and continuation through
-`bindNativeRun`. Web, pipeline IM, trigger, follow-up and decision continuations
-can recover context at a committed step boundary and continue the same run. An
-empty initial history does not disable recovery. Retry/edit, Discuss, subagent
-and external runtimes have separate ownership and remain outside this capability.
+`bindNativeRun`. Web, pipeline IM, trigger, follow-up, decision continuations,
+retry and edit can recover context at a committed step boundary and continue the
+same run. An empty initial history does not disable recovery. A retry or edit
+folds what its request renders: the history before its cutoff and the steps of
+the attempt its first step selected. A retry renders its input from the request
+it replaces, which that step hides; from then on the copy the step wrote is the
+input the event keeps in place. When the replaced turn had compacted in place,
+the same step moves the session to a new compaction epoch, so the attempt folds
+the history before the cutoff into a summary of its own. Discuss, subagent and
+external runtimes have separate ownership and remain outside this capability.
 
 `compaction.Service.Compact` executes one event that folds the rendered active
 summary and every eligible source into one rolling summary. A pass folds what one
