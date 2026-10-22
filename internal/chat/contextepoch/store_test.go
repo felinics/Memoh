@@ -1,8 +1,11 @@
 package contextepoch
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -327,7 +330,8 @@ func TestAdvanceInPlaceRetriesOnStale(t *testing.T) {
 	}
 	queries.states[epochTestSessionID] = string(raw)
 	flaky := &flakyEpochQueries{fakeSessionQueries: queries, failLoads: 1}
-	flakyStore := NewStore(flaky, nil)
+	var logs bytes.Buffer
+	flakyStore := NewStore(flaky, slog.New(slog.NewTextHandler(&logs, nil)))
 	flakyStore.SetClock(time.Now)
 
 	state, err := flakyStore.AdvanceInPlace(ctx, epochTestSessionID, "test", ReasonBudgetRecovery)
@@ -337,6 +341,11 @@ func TestAdvanceInPlaceRetriesOnStale(t *testing.T) {
 	if state.Epoch != 6 || state.LastReason != ReasonBudgetRecovery ||
 		state.AnchorCreatedAtMs != 1000 || state.AnchorMessageID != "m1" {
 		t.Fatalf("state = %+v, want the booking retried on top of epoch 5 with its anchor", state)
+	}
+	// The audit log must describe the committed transition 5→6, not the
+	// degraded read the first attempt started from.
+	if !strings.Contains(logs.String(), "from_epoch=5") || !strings.Contains(logs.String(), "to_epoch=6") {
+		t.Fatalf("audit log = %q, want from_epoch=5 to_epoch=6", logs.String())
 	}
 }
 

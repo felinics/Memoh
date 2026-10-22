@@ -171,6 +171,7 @@ func (s *Store) AdvanceInPlace(ctx context.Context, sessionID, path, reason stri
 		return State{}, nil
 	}
 	state := s.ensureInitialized(ctx, sessionID, path)
+	from := state
 	next, err := state.AdvancedBy(state.AnchorTime(), state.AnchorMessageID, reason, s.now())
 	if err != nil {
 		return State{}, err
@@ -181,6 +182,7 @@ func (s *Store) AdvanceInPlace(ctx context.Context, sessionID, path, reason stri
 		// the read to the initial state while the stored epoch is ahead. The
 		// winner's record does not prove THIS event was booked, so retry once
 		// on top of the winning state instead of reporting success.
+		from = persisted
 		next, err = persisted.AdvancedBy(persisted.AnchorTime(), persisted.AnchorMessageID, reason, s.now())
 		if err != nil {
 			return State{}, err
@@ -194,7 +196,7 @@ func (s *Store) AdvanceInPlace(ctx context.Context, sessionID, path, reason stri
 		slog.String("path", path),
 		slog.String("session_id", sessionID),
 		slog.String("reason", reason),
-		slog.Int64("from_epoch", state.Epoch),
+		slog.Int64("from_epoch", from.Epoch),
 		slog.Int64("to_epoch", persisted.Epoch))
 	return persisted, nil
 }
