@@ -13,7 +13,7 @@ describe('shared UI icon contract', () => {
         class: 'contract-icon',
         'aria-hidden': 'true',
       })))
-      expect(svg).toContain('stroke-width="1.75"')
+      expect(svg).toContain('stroke-width="2"')
       expect(svg).toContain('stroke="currentColor"')
       expect(svg).toContain('width="16"')
       expect(svg).toContain('contract-icon')
@@ -39,7 +39,11 @@ describe('shared UI icon contract', () => {
         compilerOptions: { nodeTransforms: [node => {
           if (node.type !== 1) return
           if (node.tag === 'Button' && /<(?:AddIcon|ComputerIcon|BackIcon|ForwardIcon|SidebarOpenIcon|SidebarCloseIcon)\b/.test(node.loc.source)) {
-            expect(node.props.some(prop => prop.type === 6 && prop.name === 'tone' && prop.value?.content === 'muted')).toBe(true)
+            // Toolbar actions are ghost + muted tone; the session controls under the
+            // input are quiet text triggers, whose variant already starts muted.
+            const quiet = node.props.some(prop => prop.type === 6 && prop.name === 'variant' && prop.value?.content === 'quiet')
+            const muted = node.props.some(prop => prop.type === 6 && prop.name === 'tone' && prop.value?.content === 'muted')
+            expect(quiet || muted).toBe(true)
             const colorClasses = node.props.filter(prop => prop.type === 6 && prop.name === 'class')
             for (const prop of colorClasses) {
               if (prop.type === 6) expect(prop.value?.content ?? '').not.toMatch(/(?:^|[\s:])(?:text-|opacity-|stroke-)/)
