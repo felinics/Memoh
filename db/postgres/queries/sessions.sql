@@ -694,3 +694,17 @@ WHERE team_id = public.memoh_current_team_id()
   AND COALESCE((metadata->'context_epoch'->>'epoch')::bigint, 0) < sqlc.arg(epoch)::bigint
   AND COALESCE((metadata->'context_epoch'->>'anchor_created_at_ms')::bigint, 0) <= sqlc.arg(anchor_created_at_ms)::bigint
 RETURNING (metadata->'context_epoch')::text AS state;
+
+-- name: PinSessionContextEpochBudget :one
+-- Pins the selection-time history budget into the epoch state (spec rule 4).
+-- The guard only fires while the budget is unset, so the first computed
+-- budget wins for the whole epoch and racing turns converge on one value.
+UPDATE bot_sessions
+SET metadata = jsonb_set(metadata, '{context_epoch,budget_tokens}', to_jsonb(sqlc.arg(budget_tokens)::bigint), true),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(session_id)
+  AND deleted_at IS NULL
+  AND metadata ? 'context_epoch'
+  AND (metadata #>> '{context_epoch,budget_tokens}') IS NULL
+RETURNING (metadata->'context_epoch')::text AS state;

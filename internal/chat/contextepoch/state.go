@@ -59,6 +59,10 @@ type State struct {
 	AnchorMessageID string `json:"anchor_message_id,omitempty"`
 	// LastReason is why the anchor last moved (or who initialized the state).
 	LastReason string `json:"last_reason,omitempty"`
+	// BudgetTokens pins the selection-time history budget for the whole epoch
+	// (spec rule 4): a longer current request may never shrink it. Zero means
+	// not pinned yet — the first turn's computed budget becomes the pin.
+	BudgetTokens int64 `json:"budget_tokens,omitempty"`
 	// UpdatedAtMs is when the state was last written.
 	UpdatedAtMs int64 `json:"updated_at_ms,omitempty"`
 }
@@ -98,6 +102,7 @@ func (s State) AdvancedBy(anchorAt time.Time, anchorMessageID, reason string, no
 		AnchorCreatedAtMs: anchorMs,
 		AnchorMessageID:   anchorMessageID,
 		LastReason:        reason,
+		BudgetTokens:      s.BudgetTokens,
 		UpdatedAtMs:       now.UnixMilli(),
 	}, nil
 }

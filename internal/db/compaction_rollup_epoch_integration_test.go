@@ -150,3 +150,92 @@ func TestCompleteCompactionRollupAdvancesContextEpochAtomically(t *testing.T) {
 		t.Fatalf("epoch state = %+v, want (4, 8000, segment-merge)", state)
 	}
 }
+
+// The budget pin write (spec rule 4) fires only while the budget is unset:
+// the first computed budget wins for the whole epoch, and racing turns
+// converge on one value.
+func TestPinSessionContextEpochBudgetSetsOnce(t *testing.T) {
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect postgres: %v", err)
+	}
+	defer pool.Close()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	bindTeamQueryFixture(t, ctx, tx)
+
+	userID := uuid.New()
+	if _, err := tx.Exec(ctx, `
+		WITH created_user AS (
+			INSERT INTO users (id, username, is_active) VALUES ($1, $2, true) RETURNING id
+		)
+		INSERT INTO team_members (user_id, role) SELECT id, 'admin' FROM created_user
+	`, userID, "budget-pin-"+uuid.NewString()); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	botID := uuid.New()
+	if _, err := tx.Exec(ctx, `INSERT INTO bots (id, owner_user_id, name) VALUES ($1, $2, $3)`, botID, userID, "budget-pin-bot"); err != nil {
+		t.Fatalf("insert bot: %v", err)
+	}
+	sessionID := uuid.New()
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO bot_sessions (id, bot_id, channel_type, title, metadata)
+		VALUES ($1, $2, 'local', 'pin', '{}'::jsonb)
+	`, sessionID, botID); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+
+	pgSession := pgtype.UUID{Bytes: sessionID, Valid: true}
+	q := sqlc.New(tx)
+
+	// No epoch state yet: the pin must no-op.
+	if _, err := q.PinSessionContextEpochBudget(ctx, sqlc.PinSessionContextEpochBudgetParams{SessionID: pgSession, BudgetTokens: 4000}); err == nil {
+		t.Fatal("pin without an epoch state must be a no-op miss")
+	}
+
+	// Initialize the epoch, then pin.
+	if _, err := q.AdvanceSessionContextEpoch(ctx, sqlc.AdvanceSessionContextEpochParams{
+		SessionID: pgSession,
+		State:     []byte(`{"epoch":1,"last_reason":"init"}`),
+		Epoch:     1,
+	}); err != nil {
+		t.Fatalf("init epoch: %v", err)
+	}
+	raw, err := q.PinSessionContextEpochBudget(ctx, sqlc.PinSessionContextEpochBudgetParams{SessionID: pgSession, BudgetTokens: 4000})
+	if err != nil {
+		t.Fatalf("first pin: %v", err)
+	}
+	var state struct {
+		Epoch        int64 `json:"epoch"`
+		BudgetTokens int64 `json:"budget_tokens"`
+	}
+	if err := json.Unmarshal([]byte(raw), &state); err != nil {
+		t.Fatalf("decode pinned state: %v", err)
+	}
+	if state.BudgetTokens != 4000 || state.Epoch != 1 {
+		t.Fatalf("pinned state = %+v, want budget 4000 on epoch 1 (no advance)", state)
+	}
+
+	// A second pin with a different value must lose to the first.
+	if _, err := q.PinSessionContextEpochBudget(ctx, sqlc.PinSessionContextEpochBudgetParams{SessionID: pgSession, BudgetTokens: 9999}); err == nil {
+		t.Fatal("second pin must be fenced out")
+	}
+	stored, err := q.GetSessionContextEpoch(ctx, pgSession)
+	if err != nil {
+		t.Fatalf("reload state: %v", err)
+	}
+	if err := json.Unmarshal([]byte(stored), &state); err != nil {
+		t.Fatalf("decode stored state: %v", err)
+	}
+	if state.BudgetTokens != 4000 {
+		t.Fatalf("stored budget = %d, want the first pin 4000", state.BudgetTokens)
+	}
+}

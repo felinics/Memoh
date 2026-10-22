@@ -288,6 +288,7 @@ type Queries interface {
 	GetSessionDiscussCursor(ctx context.Context, arg dbsqlc.GetSessionDiscussCursorParams) (dbsqlc.BotSessionDiscussCursor, error)
 	GetSessionContextEpoch(ctx context.Context, sessionID pgtype.UUID) (string, error)
 	AdvanceSessionContextEpoch(ctx context.Context, arg dbsqlc.AdvanceSessionContextEpochParams) (string, error)
+	PinSessionContextEpochBudget(ctx context.Context, arg dbsqlc.PinSessionContextEpochBudgetParams) (string, error)
 	GetSessionCacheStats(ctx context.Context, sessionID pgtype.UUID) (dbsqlc.GetSessionCacheStatsRow, error)
 	GetSessionUsedSkills(ctx context.Context, sessionID pgtype.UUID) ([]string, error)
 	GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (dbsqlc.GetSettingsByBotIDRow, error)

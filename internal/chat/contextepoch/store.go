@@ -23,6 +23,7 @@ var ErrAdvanceStale = errors.New("context epoch state already advanced")
 type Queries interface {
 	GetSessionContextEpoch(ctx context.Context, sessionID pgtype.UUID) (string, error)
 	AdvanceSessionContextEpoch(ctx context.Context, arg sqlc.AdvanceSessionContextEpochParams) (string, error)
+	PinSessionContextEpochBudget(ctx context.Context, arg sqlc.PinSessionContextEpochBudgetParams) (string, error)
 }
 
 // Store persists and applies Context Epoch state. A nil Store (or one without
@@ -132,6 +133,34 @@ func (s *Store) Advance(ctx context.Context, sessionID string, next State) (Stat
 			return State{}, errors.Join(ErrAdvanceStale, loadErr)
 		}
 		return current, ErrAdvanceStale
+	}
+	if err != nil {
+		return State{}, err
+	}
+	return decodeState(stored)
+}
+
+// PinBudget records the session's selection-time history budget the first
+// time it is computed (spec rule 4): the guarded write only fires while the
+// budget is unset, so racing turns converge on the first computed value and
+// later turns keep it for the rest of the epoch. Epoch advances carry the
+// pin forward; a no-op store or a missing state pins nothing.
+func (s *Store) PinBudget(ctx context.Context, sessionID string, budgetTokens int64) (State, error) {
+	if !s.available() || budgetTokens <= 0 {
+		return State{}, nil
+	}
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return State{}, err
+	}
+	stored, err := s.queries.PinSessionContextEpochBudget(ctx, sqlc.PinSessionContextEpochBudgetParams{
+		SessionID:    pgSessionID,
+		BudgetTokens: budgetTokens,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No state yet (the history load initializes it first) or another turn
+		// already pinned: either way the stored state is authoritative.
+		return s.Load(ctx, sessionID)
 	}
 	if err != nil {
 		return State{}, err

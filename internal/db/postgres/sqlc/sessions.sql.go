@@ -1420,6 +1420,33 @@ func (q *Queries) NextSessionRuntimeFenceToken(ctx context.Context) (int64, erro
 	return column_1, err
 }
 
+const pinSessionContextEpochBudget = `-- name: PinSessionContextEpochBudget :one
+UPDATE bot_sessions
+SET metadata = jsonb_set(metadata, '{context_epoch,budget_tokens}', to_jsonb($1::bigint), true),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $2
+  AND deleted_at IS NULL
+  AND metadata ? 'context_epoch'
+  AND (metadata #>> '{context_epoch,budget_tokens}') IS NULL
+RETURNING (metadata->'context_epoch')::text AS state
+`
+
+type PinSessionContextEpochBudgetParams struct {
+	BudgetTokens int64       `json:"budget_tokens"`
+	SessionID    pgtype.UUID `json:"session_id"`
+}
+
+// Pins the selection-time history budget into the epoch state (spec rule 4).
+// The guard only fires while the budget is unset, so the first computed
+// budget wins for the whole epoch and racing turns converge on one value.
+func (q *Queries) PinSessionContextEpochBudget(ctx context.Context, arg PinSessionContextEpochBudgetParams) (string, error) {
+	row := q.db.QueryRow(ctx, pinSessionContextEpochBudget, arg.BudgetTokens, arg.SessionID)
+	var state string
+	err := row.Scan(&state)
+	return state, err
+}
+
 const setSessionNextTurnPosition = `-- name: SetSessionNextTurnPosition :exec
 UPDATE bot_sessions
 SET next_turn_position = $1::bigint

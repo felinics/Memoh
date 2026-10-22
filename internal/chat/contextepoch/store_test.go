@@ -52,6 +52,26 @@ func (f *fakeSessionQueries) AdvanceSessionContextEpoch(_ context.Context, arg s
 	return string(arg.State), nil
 }
 
+func (f *fakeSessionQueries) PinSessionContextEpochBudget(_ context.Context, arg sqlc.PinSessionContextEpochBudgetParams) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := arg.SessionID.String()
+	current, err := decodeState(f.states[key])
+	if err != nil {
+		return "", err
+	}
+	if current.IsZero() || current.BudgetTokens > 0 {
+		return "", pgx.ErrNoRows
+	}
+	current.BudgetTokens = arg.BudgetTokens
+	raw, err := current.Encode()
+	if err != nil {
+		return "", err
+	}
+	f.states[key] = string(raw)
+	return string(raw), nil
+}
+
 const epochTestSessionID = "33333333-3333-4333-8333-333333333333"
 
 func newFakeStore(now time.Time) (*Store, *fakeSessionQueries) {
@@ -389,5 +409,57 @@ func TestAdvanceInPlaceRecordsBudgetRecovery(t *testing.T) {
 	}
 	if _, err := store.AdvanceInPlace(ctx, epochTestSessionID, "test", ""); err == nil {
 		t.Fatal("an in-place advance without a reason must be rejected")
+	}
+}
+
+func TestPinBudgetSetsOnceAndSurvivesAdvances(t *testing.T) {
+	t.Parallel()
+	now := time.UnixMilli(1_700_000_000_000)
+	store, queries := newFakeStore(now)
+
+	// No state yet: the pin write no-ops (the history load initializes the
+	// state first, then the first selection's budget pins).
+	if state, err := store.PinBudget(context.Background(), epochTestSessionID, 4_000); err != nil || !state.IsZero() {
+		t.Fatalf("pin without state = %+v, %v; want a zero-state no-op", state, err)
+	}
+
+	// The epoch initializes on the first anchored load.
+	_, _ = store.LoadWindow(context.Background(), epochTestSessionID, "test",
+		func(context.Context, time.Time) (int64, error) { return 0, nil },
+		func(context.Context, time.Time) ([]messagepkg.Message, error) { return nil, nil })
+
+	state, err := store.PinBudget(context.Background(), epochTestSessionID, 4_000)
+	if err != nil || state.BudgetTokens != 4_000 {
+		t.Fatalf("first pin = %+v, %v; want budget 4000", state, err)
+	}
+
+	// A racing or later turn with a different computed budget loses: the
+	// first pin stands for the rest of the epoch.
+	state, err = store.PinBudget(context.Background(), epochTestSessionID, 9_999)
+	if err != nil || state.BudgetTokens != 4_000 {
+		t.Fatalf("second pin = %+v, %v; want the original 4000", state, err)
+	}
+
+	// Epoch advances carry the pin forward.
+	next, err := store.AdvanceInPlace(context.Background(), epochTestSessionID, "test", ReasonBudgetRecovery)
+	if err != nil {
+		t.Fatalf("advance: %v", err)
+	}
+	if next.BudgetTokens != 4_000 {
+		t.Fatalf("advance dropped the pin: %+v", next)
+	}
+	if got := queries.states[epochTestSessionID]; got == "" {
+		t.Fatal("state missing after advance")
+	}
+}
+
+func TestPinBudgetIgnoresNonPositiveValues(t *testing.T) {
+	t.Parallel()
+	store, queries := newFakeStore(time.UnixMilli(1_700_000_000_000))
+	if _, err := store.PinBudget(context.Background(), epochTestSessionID, 0); err != nil {
+		t.Fatalf("zero pin: %v", err)
+	}
+	if len(queries.states) != 0 {
+		t.Fatalf("zero pin wrote state: %v", queries.states)
 	}
 }
