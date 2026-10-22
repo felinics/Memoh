@@ -73,6 +73,6 @@ func (s *Service) prepareContinuationRunConfig(
 	// inside the same epoch: the pinned history budget and prefix-hash
 	// accounting apply here exactly as at turn start (spec rule 4 — a resumed
 	// turn must not recompute the budget from its own payload).
-	s.pinHistoryBudget(ctx, summaryScope.SessionID, &base)
+	s.wireEpochStability(ctx, summaryScope.SessionID, &base)
 	return s.prepareRunConfig(ctx, base), nil
 }

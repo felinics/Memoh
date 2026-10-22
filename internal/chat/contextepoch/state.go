@@ -42,7 +42,35 @@ const (
 	// merge rewrites the stable part, so it always advances the epoch; the
 	// anchor moves to the merged coverage end when that lies ahead of it.
 	ReasonSegmentMerge = "segment-merge"
+	// ReasonModelChange records a switch of the session's model: the stable
+	// prefix is rebuilt for a different provider, so the change is booked.
+	ReasonModelChange = "model-change"
+	// ReasonToolsetChange records a change of the session's tool list: the
+	// tool definitions live in the stable prefix, so the change is booked.
+	ReasonToolsetChange = "toolset-change"
+	// ReasonUserCut records a user-requested history cut (切断历史): the
+	// anchor moves to the cut point and the stable part rebuilds.
+	ReasonUserCut = "user-cut"
 )
+
+// validAdvanceReasons is the audit vocabulary of spec rule 6: an advance with
+// a reason outside this set fails instead of writing an unclassifiable record.
+var validAdvanceReasons = map[string]struct{}{
+	ReasonInit:           {},
+	ReasonBudget:         {},
+	ReasonBudgetRecovery: {},
+	ReasonSegmentMerge:   {},
+	ReasonModelChange:    {},
+	ReasonToolsetChange:  {},
+	ReasonUserCut:        {},
+}
+
+// ValidAdvanceReason reports whether reason is part of the rule-6 audit
+// vocabulary.
+func ValidAdvanceReason(reason string) bool {
+	_, ok := validAdvanceReasons[reason]
+	return ok
+}
 
 // Beginning is the zero anchor: history loads from the start of the session.
 var Beginning = time.Unix(0, 0).UTC()
@@ -92,6 +120,9 @@ func (s State) AnchorTime() time.Time {
 func (s State) AdvancedBy(anchorAt time.Time, anchorMessageID, reason string, now time.Time) (State, error) {
 	if reason == "" {
 		return State{}, errors.New("context epoch advance requires a reason")
+	}
+	if !ValidAdvanceReason(reason) {
+		return State{}, fmt.Errorf("context epoch advance reason %q is not in the audit vocabulary", reason)
 	}
 	anchorMs := anchorAt.UnixMilli()
 	if anchorMs < s.AnchorCreatedAtMs {

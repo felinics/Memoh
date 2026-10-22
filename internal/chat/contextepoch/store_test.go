@@ -333,7 +333,7 @@ func TestLoadWindowSkipsNoOpBudgetAdvance(t *testing.T) {
 	}
 }
 
-func TestAdvanceInPlaceRetriesOnStale(t *testing.T) {
+func TestAdvanceContextEpochRetriesOnStale(t *testing.T) {
 	t.Parallel()
 	store, queries := newFakeStore(time.Now())
 	_ = store
@@ -354,9 +354,9 @@ func TestAdvanceInPlaceRetriesOnStale(t *testing.T) {
 	flakyStore := NewStore(flaky, slog.New(slog.NewTextHandler(&logs, nil)))
 	flakyStore.SetClock(time.Now)
 
-	state, err := flakyStore.AdvanceInPlace(ctx, epochTestSessionID, "test", ReasonBudgetRecovery)
+	state, err := flakyStore.AdvanceContextEpoch(ctx, epochTestSessionID, "test", ReasonBudgetRecovery)
 	if err != nil {
-		t.Fatalf("AdvanceInPlace() error = %v", err)
+		t.Fatalf("AdvanceContextEpoch() error = %v", err)
 	}
 	if state.Epoch != 6 || state.LastReason != ReasonBudgetRecovery ||
 		state.AnchorCreatedAtMs != 1000 || state.AnchorMessageID != "m1" {
@@ -382,14 +382,14 @@ func (f *flakyEpochQueries) GetSessionContextEpoch(ctx context.Context, sessionI
 	return f.fakeSessionQueries.GetSessionContextEpoch(ctx, sessionID)
 }
 
-func TestAdvanceInPlaceRecordsBudgetRecovery(t *testing.T) {
+func TestAdvanceContextEpochRecordsBudgetRecovery(t *testing.T) {
 	t.Parallel()
 	store, _ := newFakeStore(time.Now())
 	ctx := context.Background()
 
-	state, err := store.AdvanceInPlace(ctx, epochTestSessionID, "test", ReasonBudgetRecovery)
+	state, err := store.AdvanceContextEpoch(ctx, epochTestSessionID, "test", ReasonBudgetRecovery)
 	if err != nil {
-		t.Fatalf("AdvanceInPlace() error = %v", err)
+		t.Fatalf("AdvanceContextEpoch() error = %v", err)
 	}
 	if state.Epoch != 2 || state.LastReason != ReasonBudgetRecovery {
 		t.Fatalf("state = %+v, want epoch 2 with reason budget-recovery", state)
@@ -400,15 +400,18 @@ func TestAdvanceInPlaceRecordsBudgetRecovery(t *testing.T) {
 
 	// A second in-place advance increments the epoch again without moving the
 	// anchor; a missing reason is rejected.
-	state, err = store.AdvanceInPlace(ctx, epochTestSessionID, "test", ReasonBudgetRecovery)
+	state, err = store.AdvanceContextEpoch(ctx, epochTestSessionID, "test", ReasonBudgetRecovery)
 	if err != nil {
-		t.Fatalf("second AdvanceInPlace() error = %v", err)
+		t.Fatalf("second AdvanceContextEpoch() error = %v", err)
 	}
 	if state.Epoch != 3 {
 		t.Fatalf("epoch = %d, want 3", state.Epoch)
 	}
-	if _, err := store.AdvanceInPlace(ctx, epochTestSessionID, "test", ""); err == nil {
+	if _, err := store.AdvanceContextEpoch(ctx, epochTestSessionID, "test", ""); err == nil {
 		t.Fatal("an in-place advance without a reason must be rejected")
+	}
+	if _, err := store.AdvanceContextEpoch(ctx, epochTestSessionID, "test", "typo-reason"); err == nil {
+		t.Fatal("an advance with a reason outside the audit vocabulary must be rejected")
 	}
 }
 
@@ -441,7 +444,7 @@ func TestPinBudgetSetsOnceAndSurvivesAdvances(t *testing.T) {
 	}
 
 	// Epoch advances carry the pin forward.
-	next, err := store.AdvanceInPlace(context.Background(), epochTestSessionID, "test", ReasonBudgetRecovery)
+	next, err := store.AdvanceContextEpoch(context.Background(), epochTestSessionID, "test", ReasonBudgetRecovery)
 	if err != nil {
 		t.Fatalf("advance: %v", err)
 	}

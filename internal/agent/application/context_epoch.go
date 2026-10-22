@@ -18,7 +18,7 @@ func (s *Service) recordBudgetRecoveryAdvance(ctx context.Context, sessionID str
 	if s == nil || s.contextEpochs == nil || strings.TrimSpace(sessionID) == "" {
 		return
 	}
-	if _, err := s.contextEpochs.AdvanceInPlace(ctx, sessionID, "budget-recovery", contextepoch.ReasonBudgetRecovery); err != nil {
+	if _, err := s.contextEpochs.AdvanceContextEpoch(ctx, sessionID, "budget-recovery", contextepoch.ReasonBudgetRecovery); err != nil {
 		s.logger.WarnContext(ctx, "context_epoch_budget_recovery_advance_failed",
 			slog.String("session_id", sessionID),
 			slog.Any("error", err))

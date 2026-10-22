@@ -191,11 +191,20 @@ func (s *Store) LoadWindow(
 	return msgs, nil
 }
 
-// AdvanceInPlace records an explicit epoch advance that leaves the anchor
-// untouched: the stable part changed without a history-window slide (e.g. an
-// in-turn budget recovery rewrote the history region), and rule 6 requires a
-// record. The session is initialized first when it has no state yet.
-func (s *Store) AdvanceInPlace(ctx context.Context, sessionID, path, reason string) (State, error) {
+// AdvanceContextEpoch is the unified entry for explicit epoch advances that
+// leave the anchor untouched: the stable part changed without a history-
+// window slide (e.g. an in-turn budget recovery rewrote the history region),
+// and rule 6 requires a record. The reason must belong to the audit
+// vocabulary (ValidAdvanceReason); unknown reasons fail instead of writing an
+// unclassifiable record. The session is initialized first when it has no
+// state yet.
+//
+// Anchor-moving advances do NOT flow through here: the budget slide
+// (recordBudgetAdvance) and the segment merge ride their own guarded SQL
+// writes because the anchor must commit atomically with the data it
+// describes. Every path still ends in the same guarded Advance write and
+// emits the same audit log.
+func (s *Store) AdvanceContextEpoch(ctx context.Context, sessionID, path, reason string) (State, error) {
 	if !s.available() {
 		return State{}, nil
 	}
