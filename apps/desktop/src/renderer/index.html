@@ -4,6 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Memoh</title>
+    <!-- Theme before the first paint. The settings store sets the dark class and
+         the color scheme on <html> only once the app script has run; until then
+         the page paints the default light background, a bright flash before a
+         dark theme. This reads the same saved preferences (store/settings:
+         `theme`, `color-scheme`; no saved theme means follow the system) so the
+         first frame already has the right background. The store takes over once
+         the app starts. -->
+    <script>
+      (function () {
+        try {
+          var root = document.documentElement
+          var theme = localStorage.getItem('theme')
+          if (theme === 'dark' || (theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)) {
+            root.classList.add('dark')
+          }
+          var colorScheme = localStorage.getItem('color-scheme')
+          if (colorScheme) root.dataset.colorScheme = colorScheme
+        } catch (e) {}
+      })()
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" />
