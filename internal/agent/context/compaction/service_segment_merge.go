@@ -41,36 +41,40 @@ func segmentCap(cfg TriggerConfig) int {
 // The merge is bookkeeping-critical: the rollup completion and the epoch
 // advance commit in ONE SQL statement (CompleteCompactionRollup). Failures
 // only log — the next compaction trigger retries the merge.
-func (s *Service) maybeMergeSegments(ctx context.Context, botUUID, sessionUUID pgtype.UUID, cfg TriggerConfig) {
+// maybeMergeSegments reports whether a merge committed: callers use it to
+// propagate "history changed" to runs that otherwise have nothing to append.
+func (s *Service) maybeMergeSegments(ctx context.Context, botUUID, sessionUUID pgtype.UUID, cfg TriggerConfig) bool {
 	limit := segmentCap(cfg)
 	frontier, err := NewArtifactProjection(s.queries).LoadActiveSession(ctx, ArtifactOwner{BotID: cfg.BotID, SessionID: cfg.SessionID, SessionIDKnown: true})
 	if err != nil {
 		s.logger.WarnContext(ctx, "segment merge: frontier load failed", slog.String("session_id", cfg.SessionID), slog.Any("error", err))
-		return
+		return false
 	}
 	if len(frontier.Artifacts) <= limit {
-		return
+		return false
 	}
 	if s.contextEpochs == nil {
 		s.logger.WarnContext(ctx, "segment merge: skipped, no context epoch store (bookkeeping would be lost)",
 			slog.String("session_id", cfg.SessionID),
 			slog.Int("segments", len(frontier.Artifacts)),
 			slog.Int("cap", limit))
-		return
+		return false
 	}
 	// frontier.Artifacts is ordered oldest first; merge the oldest cap.
 	parents := append([]Artifact(nil), frontier.Artifacts[:limit]...)
 	if !frontierHasPersistedCoverage(parents) {
 		s.logger.WarnContext(ctx, "segment merge: skipped, legacy segment without persisted coverage",
 			slog.String("session_id", cfg.SessionID))
-		return
+		return false
 	}
 	if err := s.mergeSegments(ctx, botUUID, sessionUUID, cfg, parents, coveredMessageIDs(frontier.Artifacts)); err != nil {
 		s.logger.WarnContext(ctx, "segment merge: failed",
 			slog.String("session_id", cfg.SessionID),
 			slog.Int("parents", len(parents)),
 			slog.Any("error", err))
+		return false
 	}
+	return true
 }
 
 // mergeSegments runs one merge pass over parents: a summarizer call folds the
@@ -163,7 +167,9 @@ func (s *Service) mergeSegments(ctx context.Context, botUUID, sessionUUID pgtype
 		// window's first user turn) while newer rows compact, and sliding past
 		// it would drop it from every later anchored load with no summary to
 		// stand in. Clamp the anchor to the earliest such message instead; the
-		// anchored window query is inclusive at the anchor timestamp.
+		// anchored window query is inclusive at the anchor timestamp, and the
+		// scan includes the old anchor row so a clamped anchor keeps holding
+		// across later merges.
 		earliest, found, err := s.earliestUncoveredActiveMessage(ctx, sessionUUID, state.AnchorTime(), anchorAt, coveredIDs)
 		if err != nil {
 			return fmt.Errorf("segment merge: scan uncovered messages: %w", err)
@@ -292,9 +298,9 @@ type uncoveredActiveMessage struct {
 }
 
 // earliestUncoveredActiveMessage finds the oldest active history message in
-// (after, until] that no active summary covers. The SQL pre-filters rows a
-// compaction claimed (compact_id); the coverage set guards the gap where a
-// covered row was never marked.
+// [after, until] that no active summary covers. Only the coverage union may
+// exclude a row: a compact_id claim proves nothing about replacement on read
+// (a failed compaction's rows still render as raw history).
 func (s *Service) earliestUncoveredActiveMessage(
 	ctx context.Context,
 	sessionUUID pgtype.UUID,

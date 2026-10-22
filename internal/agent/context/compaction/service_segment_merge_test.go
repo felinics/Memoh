@@ -454,12 +454,52 @@ func TestCompactionRunRetriesOverCapMergeOnNoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("doCompaction: %v", err)
 	}
-	if res.Status != StatusNoop {
-		t.Fatalf("status = %v, want noop (nothing to append)", res.Status)
+	// Nothing was appended, but the merge committed: the run must report a
+	// history-changing success so budget recovery reloads the rewritten
+	// summaries instead of reusing the pre-merge selection.
+	if res.Status != StatusOK {
+		t.Fatalf("status = %v, want ok (merge rewrote history)", res.Status)
 	}
 	// The over-cap chain still merges: a merge failure must not wait for the
 	// next successful append to retry.
 	if len(q.rollupCalls) != 1 {
 		t.Fatalf("over-cap merge did not retry on a noop run: rollups=%d", len(q.rollupCalls))
+	}
+}
+
+func TestSegmentMergeClampHoldsAcrossConsecutiveMerges(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubModel{summary: "merged segment"}
+	cfg := machineryConfig(stub, 200)
+	svc, q, _, epochs := newMergeFixture(t, defaultSegmentCap+1, cfg)
+	// As if a previous merge already clamped the anchor onto the uncovered
+	// message at 2000ms: the next merge must keep it there instead of
+	// scanning strictly after the anchor and sliding past the message.
+	epochs.stored = seedEpochState(t, 4, 2000)
+
+	rawID := uuid.New()
+	q.activeRangeRows = []sqlc.ListActiveSessionMessageIDsInRangeRow{{
+		ID:        pgtype.UUID{Bytes: rawID, Valid: true},
+		CreatedAt: pgtype.Timestamptz{Time: time.UnixMilli(2000).UTC(), Valid: true},
+	}}
+
+	botUUID := pgtype.UUID{Bytes: uuid.MustParse(cfg.BotID), Valid: true}
+	sessionUUID := pgtype.UUID{Bytes: uuid.MustParse(cfg.SessionID), Valid: true}
+	svc.maybeMergeSegments(context.Background(), botUUID, sessionUUID, cfg)
+
+	if len(q.rollupCalls) != 1 {
+		t.Fatalf("merge did not complete: rollups=%d", len(q.rollupCalls))
+	}
+	rollup := q.rollupCalls[0]
+	if rollup.ContextEpoch != 5 || rollup.ContextEpochAnchorMs != 2000 {
+		t.Fatalf("epoch advance = (%d, %d), want (5, 2000): a clamped anchor must keep holding", rollup.ContextEpoch, rollup.ContextEpochAnchorMs)
+	}
+	var state map[string]any
+	if err := json.Unmarshal(rollup.ContextEpochState, &state); err != nil {
+		t.Fatalf("decode epoch state: %v", err)
+	}
+	if state["anchor_message_id"] != rawID.String() {
+		t.Fatalf("anchor message = %v, want the uncovered message %s", state["anchor_message_id"], rawID)
 	}
 }

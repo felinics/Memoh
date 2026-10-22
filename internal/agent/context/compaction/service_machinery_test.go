@@ -154,8 +154,23 @@ func (f *fakeQueries) ListUncompactedMessagesBySession(_ context.Context, _ pgty
 	return f.uncompacted, nil
 }
 
-func (f *fakeQueries) ListActiveSessionMessageIDsInRange(_ context.Context, _ sqlc.ListActiveSessionMessageIDsInRangeParams) ([]sqlc.ListActiveSessionMessageIDsInRangeRow, error) {
-	return f.activeRangeRows, f.activeRangeErr
+func (f *fakeQueries) ListActiveSessionMessageIDsInRange(_ context.Context, arg sqlc.ListActiveSessionMessageIDsInRangeParams) ([]sqlc.ListActiveSessionMessageIDsInRangeRow, error) {
+	if f.activeRangeErr != nil {
+		return nil, f.activeRangeErr
+	}
+	// Mirror the SQL bounds: [after, until] inclusive, matching the anchored
+	// load's >= anchor semantics.
+	rows := make([]sqlc.ListActiveSessionMessageIDsInRangeRow, 0, len(f.activeRangeRows))
+	for _, row := range f.activeRangeRows {
+		if arg.After.Valid && row.CreatedAt.Valid && row.CreatedAt.Time.Before(arg.After.Time) {
+			continue
+		}
+		if arg.Until.Valid && row.CreatedAt.Valid && row.CreatedAt.Time.After(arg.Until.Time) {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }
 
 func (f *fakeQueries) MeasureUncompactedMessagesBySession(_ context.Context, _ pgtype.UUID) (sqlc.MeasureUncompactedMessagesBySessionRow, error) {

@@ -1834,22 +1834,23 @@ ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 
 -- name: ListActiveSessionMessageIDsInRange :many
 -- Minimal id+timestamp scan of the session's active history window in
--- (after, until], mirroring the anchored load filters. The segment-merge pass
+-- [after, until], mirroring the anchored load filters. The segment-merge pass
 -- uses it to find visible messages no active summary covers before sliding
 -- the Context Epoch anchor: an uncovered message must stay inside the
--- anchored window, so the anchor clamps to the earliest one. Rows claimed by
--- a compaction (compact_id set) are replaced by their summary on read, so
--- they never block the slide.
+-- anchored window, so the anchor clamps to the earliest one. The lower bound
+-- is inclusive because the anchored load is inclusive — the message holding
+-- the current anchor must keep holding it. Coverage decides exclusion, never
+-- the compact_id claim: rows claimed by a failed compaction still render as
+-- raw history, so they must block the slide until a summary covers them.
 SELECT
   m.id,
   m.created_at
 FROM bot_visible_history_messages m
 WHERE m.team_id = public.memoh_current_team_id()
   AND m.session_id = sqlc.arg(session_id)
-  AND m.created_at > sqlc.arg(after)
+  AND m.created_at >= sqlc.arg(after)
   AND m.created_at <= sqlc.arg(until)
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
-  AND m.compact_id IS NULL
 ORDER BY m.created_at ASC, m.id ASC;
 
 -- name: MeasureActiveMessagesBySession :one

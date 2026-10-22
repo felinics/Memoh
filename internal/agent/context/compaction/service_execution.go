@@ -16,6 +16,16 @@ import (
 	"github.com/felinics/memoh/internal/models/modelretry"
 )
 
+// noopStatus reports a run that appended nothing: StatusOK when the merge
+// pass still rewrote the summary chain (history changed, callers must
+// reload), StatusNoop when nothing changed at all.
+func noopStatus(merged bool) string {
+	if merged {
+		return StatusOK
+	}
+	return StatusNoop
+}
+
 func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) (Result, error) {
 	measure, err := s.queries.MeasureUncompactedMessagesBySession(ctx, sessionUUID)
 	if err != nil {
@@ -26,9 +36,9 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	// Run that pass first so an over-cap chain left by an earlier merge
 	// failure retries on every trigger, even when this run has nothing new to
 	// append and would otherwise noop below.
-	s.maybeMergeSegments(ctx, botUUID, sessionUUID, cfg)
+	merged := s.maybeMergeSegments(ctx, botUUID, sessionUUID, cfg)
 	if measure.CandidateCount == 0 {
-		return Result{Status: StatusNoop}, nil
+		return Result{Status: noopStatus(merged)}, nil
 	}
 	readMaxBytes := compactionReadMaxBytes(cfg)
 	boundedRows, err := s.queries.ListUncompactedMessagesBySessionWithinBytes(ctx, sqlc.ListUncompactedMessagesBySessionWithinBytesParams{
@@ -46,7 +56,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 			slog.Int64("candidate_bytes", measure.CandidateBytes),
 			slog.Int64("largest_candidate_bytes", measure.LargestCandidateBytes),
 			slog.Int64("read_max_bytes", readMaxBytes))
-		return Result{Status: StatusNoop}, nil
+		return Result{Status: noopStatus(merged)}, nil
 	}
 	// Use the count captured by the same SQL statement as the payload rows for
 	// the selection decision. The metadata-only measure above is observability
@@ -76,7 +86,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		)
 	}
 	if len(messages) == 0 {
-		return Result{Status: StatusNoop}, nil
+		return Result{Status: noopStatus(merged)}, nil
 	}
 
 	// Cap the compaction input to avoid exceeding the compaction model's
@@ -106,7 +116,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		}
 		summaryLimit = summaryOutputLimit(outputBudget, maxOutputTokens)
 		if summaryLimit <= 0 {
-			return Result{Status: StatusNoop}, nil
+			return Result{Status: noopStatus(merged)}, nil
 		}
 	}
 	maxCompactTokens, err := boundedCompactionInputTokens(cfg, baseMaxCompactTokens, maxOutputTokens, systemPrompt)
@@ -144,7 +154,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		toCompact = splitByRatio(messages, cfg.TotalInputTokens, cfg.Ratio)
 	}
 	if len(toCompact) == 0 {
-		return Result{Status: StatusNoop}, nil
+		return Result{Status: noopStatus(merged)}, nil
 	}
 
 	var priorSummaries []string
@@ -188,7 +198,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		// Every selectable run renders nothing (reasoning-only messages, empty
 		// tool results), so there is nothing to summarize. Leave them in raw
 		// history.
-		return Result{Status: StatusNoop}, nil
+		return Result{Status: noopStatus(merged)}, nil
 	}
 	// Cap the rendered entries and verify the final prompt cost before any
 	// row is claimed: a selection that cannot fit (an unsplittable tool
@@ -213,7 +223,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		}
 		summaryLimit = summaryOutputLimit(replayBudget, maxOutputTokens)
 		if summaryLimit <= 0 {
-			return Result{Status: StatusNoop}, nil
+			return Result{Status: noopStatus(merged)}, nil
 		}
 	}
 
