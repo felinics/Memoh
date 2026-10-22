@@ -350,19 +350,27 @@ func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg
 	}
 	budgetPlan, budgetErr := providerContextBudgetPlan(ctx, cfg)
 	if budgetPlan != nil && budgetErr == nil && cfg.PinnedHistoryBudgetTokens > 0 {
-		// The pin is validated against the part of the window that never feeds
+		// The pin is clamped against the part of the window that never feeds
 		// back from the current request (spec rule 4): window minus the output
-		// reserve and tool definitions. A pin that no longer fits (e.g. after a
-		// model switch — an explicit epoch transition the runtime does not
-		// detect yet) is refused rather than overflowing every turn.
-		if ceiling := budgetPlan.Window - budgetPlan.OutputReserve - budgetPlan.ToolDefsCost; cfg.PinnedHistoryBudgetTokens <= ceiling {
-			budgetPlan.HistoryBudget = cfg.PinnedHistoryBudgetTokens
-			budgetPlan.HistoryBudgetPinned = true
-		} else if logger != nil {
-			logger.WarnContext(ctx, "pinned history budget exceeds the window ceiling; using computed budget",
-				slog.Int("pinned_history_budget", cfg.PinnedHistoryBudgetTokens),
-				slog.Int("window_ceiling", ceiling))
+		// reserve and tool definitions. Clamping — not refusing — keeps the
+		// budget deterministic inside the epoch: a toolset change that shrank
+		// the ceiling books its own epoch and carries the pin, and the clamped
+		// value is then stable for every turn of that epoch. Refusing would
+		// fall back to per-turn recomputation, which varies with the current
+		// request and silently breaks rule 4 while the stored pin blocks
+		// re-pinning.
+		ceiling := budgetPlan.Window - budgetPlan.OutputReserve - budgetPlan.ToolDefsCost
+		effective := cfg.PinnedHistoryBudgetTokens
+		if effective > ceiling {
+			effective = max(ceiling, 0)
+			if logger != nil {
+				logger.WarnContext(ctx, "pinned history budget exceeds the window ceiling; clamping to the ceiling",
+					slog.Int("pinned_history_budget", cfg.PinnedHistoryBudgetTokens),
+					slog.Int("window_ceiling", ceiling))
+			}
 		}
+		budgetPlan.HistoryBudget = effective
+		budgetPlan.HistoryBudgetPinned = true
 	}
 	if cfg.ContextBudgetMaxTokens == 0 {
 		recordMutationOnce(ledger, contextfrag.MutationContextBudgetDisabled, "missing_context_window")

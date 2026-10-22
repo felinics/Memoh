@@ -115,7 +115,14 @@ func TestPinnedHistoryBudgetStabilizesSelectionAcrossTurns(t *testing.T) {
 // A pinned budget that no longer fits the shrunken window (e.g. after a
 // model switch) must not overflow every turn: the computed budget takes over
 // until the next explicit epoch transition re-pins.
-func TestPinnedHistoryBudgetExceededFallsBackToComputed(t *testing.T) {
+// A pin above the current window ceiling (e.g. a toolset change grew the
+// tool definitions after the pin was recorded) is clamped to the ceiling,
+// not refused: refusing would fall back to per-turn recomputation, which
+// varies with the current request and silently breaks rule 4 while the
+// stored pin blocks re-pinning. The clamped value is deterministic because
+// the ceiling's inputs (window, reserve, tool definitions) are stable within
+// an epoch.
+func TestPinnedHistoryBudgetExceededClampsToTheCeiling(t *testing.T) {
 	t.Parallel()
 
 	out, err := applyProviderRunConfig(context.Background(), nil, agentpkg.RunConfig{
@@ -127,11 +134,26 @@ func TestPinnedHistoryBudgetExceededFallsBackToComputed(t *testing.T) {
 		t.Fatalf("apply: %v", err)
 	}
 	plan := out.ContextManifest.BudgetPlan
-	if plan == nil || plan.HistoryBudgetPinned {
-		t.Fatalf("plan = %#v, want the pin refused", plan)
+	if plan == nil || !plan.HistoryBudgetPinned {
+		t.Fatalf("plan = %#v, want the clamped pin applied", plan)
 	}
-	if plan.HistoryBudget >= 9000 {
-		t.Fatalf("history budget = %d, want the computed budget below the refused pin", plan.HistoryBudget)
+	want := 3000 - 750 // window - output reserve (no tool definitions here)
+	if plan.HistoryBudget != want {
+		t.Fatalf("history budget = %d, want the clamped ceiling %d", plan.HistoryBudget, want)
+	}
+
+	// The clamp is turn-stable: a larger current request yields the same
+	// history budget.
+	bigger, err := applyProviderRunConfig(context.Background(), nil, agentpkg.RunConfig{
+		ContextSourceFrags:        pinnedBudgetTestFrags(400),
+		ContextBudgetMaxTokens:    3000,
+		PinnedHistoryBudgetTokens: 9000,
+	})
+	if err != nil {
+		t.Fatalf("apply bigger: %v", err)
+	}
+	if bigger.ContextManifest.BudgetPlan.HistoryBudget != want {
+		t.Fatalf("history budget with a bigger request = %d, want the stable clamp %d", bigger.ContextManifest.BudgetPlan.HistoryBudget, want)
 	}
 }
 
