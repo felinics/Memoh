@@ -72,6 +72,26 @@ func (f *fakeSessionQueries) PinSessionContextEpochBudget(_ context.Context, arg
 	return string(raw), nil
 }
 
+func (f *fakeSessionQueries) PinSessionContextEpochPrefixHash(_ context.Context, arg sqlc.PinSessionContextEpochPrefixHashParams) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := arg.SessionID.String()
+	current, err := decodeState(f.states[key])
+	if err != nil {
+		return "", err
+	}
+	if current.IsZero() || current.PrefixHash != "" {
+		return "", pgx.ErrNoRows
+	}
+	current.PrefixHash = arg.PrefixHash
+	raw, err := current.Encode()
+	if err != nil {
+		return "", err
+	}
+	f.states[key] = string(raw)
+	return string(raw), nil
+}
+
 const epochTestSessionID = "33333333-3333-4333-8333-333333333333"
 
 func newFakeStore(now time.Time) (*Store, *fakeSessionQueries) {
@@ -453,6 +473,44 @@ func TestPinBudgetSetsOnceAndSurvivesAdvances(t *testing.T) {
 	}
 	if got := queries.states[epochTestSessionID]; got == "" {
 		t.Fatal("state missing after advance")
+	}
+}
+
+func TestPinPrefixHashSetsOnceAndSurvivesAdvances(t *testing.T) {
+	t.Parallel()
+	now := time.UnixMilli(1_700_000_000_000)
+	store, _ := newFakeStore(now)
+
+	// No state yet: the pin write no-ops (the history load initializes the
+	// state first, then the first rendered turn pins its hash).
+	if state, err := store.PinPrefixHash(context.Background(), epochTestSessionID, "hash-a"); err != nil || !state.IsZero() {
+		t.Fatalf("pin without state = %+v, %v; want a zero-state no-op", state, err)
+	}
+
+	// The epoch initializes on the first anchored load.
+	_, _ = store.LoadWindow(context.Background(), epochTestSessionID, "test",
+		func(context.Context, time.Time) (int64, error) { return 0, nil },
+		func(context.Context, time.Time) ([]messagepkg.Message, error) { return nil, nil })
+
+	state, err := store.PinPrefixHash(context.Background(), epochTestSessionID, "hash-a")
+	if err != nil || state.PrefixHash != "hash-a" {
+		t.Fatalf("first pin = %+v, %v; want hash-a", state, err)
+	}
+
+	// A racing or later turn with a different rendered hash loses: the first
+	// pin stands for the rest of the epoch.
+	state, err = store.PinPrefixHash(context.Background(), epochTestSessionID, "hash-b")
+	if err != nil || state.PrefixHash != "hash-a" {
+		t.Fatalf("second pin = %+v, %v; want the original hash-a", state, err)
+	}
+
+	// Epoch advances carry the pin forward.
+	next, err := store.AdvanceContextEpoch(context.Background(), epochTestSessionID, "test", ReasonToolsetChange)
+	if err != nil {
+		t.Fatalf("advance: %v", err)
+	}
+	if next.PrefixHash != "hash-a" {
+		t.Fatalf("advance dropped the pin: %+v", next)
 	}
 }
 

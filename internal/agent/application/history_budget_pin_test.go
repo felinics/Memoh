@@ -119,6 +119,9 @@ func TestChatHistoryBudgetPinnedAcrossTurnsWithGrowingInput(t *testing.T) {
 	if queries.pinBudgetCalls != 1 {
 		t.Fatalf("pin record calls = %d, want 1 (turn 2 must reuse the pin, not recompute)", queries.pinBudgetCalls)
 	}
+	if state.PrefixHash == "" {
+		t.Fatalf("epoch state after turn 2 lost the prefix hash: %+v", state)
+	}
 	if state.Epoch != 1 || state.LastReason != contextepoch.ReasonInit {
 		t.Fatalf("epoch advanced on a quiet turn: %+v", state)
 	}

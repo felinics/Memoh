@@ -191,6 +191,12 @@ type RunConfig struct {
 	// RecordHistoryBudgetPin persists the first computed history budget as
 	// the epoch's pin; called once after a successful unpinned selection.
 	RecordHistoryBudgetPin func(context.Context, int)
+	// RecordStablePrefixHash reports the rule-1 monitoring hash after a
+	// successful selection: the rendered system region plus model identity
+	// (the part an epoch freezes; history and summaries legitimately grow
+	// within an epoch and are excluded). The first observation of an epoch is
+	// pinned, a later mismatch raises the drift alarm.
+	RecordStablePrefixHash func(context.Context, string)
 	// ModelMaxOutputTokens is the model's configured output cap; zero means unknown.
 	ModelMaxOutputTokens         int
 	RecoverContextBudget         func(context.Context, RunConfig) (RunConfig, bool, error)

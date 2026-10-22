@@ -1447,6 +1447,34 @@ func (q *Queries) PinSessionContextEpochBudget(ctx context.Context, arg PinSessi
 	return state, err
 }
 
+const pinSessionContextEpochPrefixHash = `-- name: PinSessionContextEpochPrefixHash :one
+UPDATE bot_sessions
+SET metadata = jsonb_set(metadata, '{context_epoch,prefix_hash}', to_jsonb($1::text), true),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $2
+  AND deleted_at IS NULL
+  AND metadata ? 'context_epoch'
+  AND (metadata #>> '{context_epoch,prefix_hash}') IS NULL
+RETURNING (metadata->'context_epoch')::text AS state
+`
+
+type PinSessionContextEpochPrefixHashParams struct {
+	PrefixHash string      `json:"prefix_hash"`
+	SessionID  pgtype.UUID `json:"session_id"`
+}
+
+// Pins the rendered stable-prefix hash into the epoch state (spec rule 1
+// accounting). The guard only fires while the hash is unset, so the first
+// observed hash of an epoch wins and later turns can only agree with it or
+// trip the drift alarm — never silently overwrite it.
+func (q *Queries) PinSessionContextEpochPrefixHash(ctx context.Context, arg PinSessionContextEpochPrefixHashParams) (string, error) {
+	row := q.db.QueryRow(ctx, pinSessionContextEpochPrefixHash, arg.PrefixHash, arg.SessionID)
+	var state string
+	err := row.Scan(&state)
+	return state, err
+}
+
 const setSessionNextTurnPosition = `-- name: SetSessionNextTurnPosition :exec
 UPDATE bot_sessions
 SET next_turn_position = $1::bigint

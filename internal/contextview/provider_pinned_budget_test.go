@@ -134,3 +134,63 @@ func TestPinnedHistoryBudgetExceededFallsBackToComputed(t *testing.T) {
 		t.Fatalf("history budget = %d, want the computed budget below the refused pin", plan.HistoryBudget)
 	}
 }
+
+// Spec rule 1 accounting: every successful selection reports the rendered
+// stable-prefix hash, the same input reproduces it, and a changed stable frag
+// changes it (that change is what the epoch-level drift alarm detects).
+func TestStablePrefixHashReportedOnSuccessfulSelection(t *testing.T) {
+	t.Parallel()
+
+	report := func(frags []contextfrag.ContextFrag) string {
+		t.Helper()
+		var reported string
+		if _, err := applyProviderRunConfig(context.Background(), nil, agentpkg.RunConfig{
+			ContextSourceFrags:     frags,
+			ContextBudgetMaxTokens: 10000,
+			RecordStablePrefixHash: func(_ context.Context, hash string) { reported = hash },
+		}); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if reported == "" {
+			t.Fatal("no stable-prefix hash reported")
+		}
+		return reported
+	}
+
+	first := report(pinnedBudgetTestFrags(100))
+	second := report(pinnedBudgetTestFrags(600)) // a bigger current request...
+	if first != second {
+		t.Fatalf("stable hash moved with the volatile tail: %q -> %q", first, second)
+	}
+
+	// History growth inside an epoch is legitimate (appends, compaction): it
+	// must not move the monitoring hash — only the system region counts.
+	grownHistory := pinnedBudgetTestFrags(100)
+	grownHistory[1] = contextfrag.TextFrag(contextfrag.TextFragInput{
+		ID:    "history.a",
+		Kind:  contextfrag.KindConversationEvent,
+		Role:  sdk.MessageRoleUser,
+		Slot:  contextfrag.SlotHistory,
+		Text:  "history row, rewritten",
+		Trust: contextfrag.TrustExternal,
+	})
+	grownHistory[1].TokenEstimate = 1000
+	if got := report(grownHistory); got != first {
+		t.Fatalf("stable hash moved with history content: %q -> %q", first, got)
+	}
+
+	changed := pinnedBudgetTestFrags(100)
+	changed[0] = contextfrag.TextFrag(contextfrag.TextFragInput{
+		ID:            "system.required",
+		Kind:          contextfrag.KindSystemPrompt,
+		Role:          sdk.MessageRoleSystem,
+		Slot:          contextfrag.SlotSystem,
+		Text:          "required system, edited",
+		RetentionTier: contextfrag.RetentionRequired,
+		Trust:         contextfrag.TrustSystem,
+	})
+	changed[0].TokenEstimate = 100
+	if third := report(changed); third == first {
+		t.Fatalf("stable hash ignored a system-prompt change: %q", third)
+	}
+}

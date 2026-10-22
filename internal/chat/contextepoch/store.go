@@ -24,6 +24,7 @@ type Queries interface {
 	GetSessionContextEpoch(ctx context.Context, sessionID pgtype.UUID) (string, error)
 	AdvanceSessionContextEpoch(ctx context.Context, arg sqlc.AdvanceSessionContextEpochParams) (string, error)
 	PinSessionContextEpochBudget(ctx context.Context, arg sqlc.PinSessionContextEpochBudgetParams) (string, error)
+	PinSessionContextEpochPrefixHash(ctx context.Context, arg sqlc.PinSessionContextEpochPrefixHashParams) (string, error)
 }
 
 // Store persists and applies Context Epoch state. A nil Store (or one without
@@ -156,6 +157,35 @@ func (s *Store) PinBudget(ctx context.Context, sessionID string, budgetTokens in
 	stored, err := s.queries.PinSessionContextEpochBudget(ctx, sqlc.PinSessionContextEpochBudgetParams{
 		SessionID:    pgSessionID,
 		BudgetTokens: budgetTokens,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No state yet (the history load initializes it first) or another turn
+		// already pinned: either way the stored state is authoritative.
+		return s.Load(ctx, sessionID)
+	}
+	if err != nil {
+		return State{}, err
+	}
+	return decodeState(stored)
+}
+
+// PinPrefixHash records the epoch's first observed stable-prefix hash (rule 1
+// accounting). The SQL guard only fires while the hash is unset, so racing
+// turns converge on the first observed value and later turns can only agree
+// with it or trip the drift alarm — never silently overwrite it. Epoch
+// advances carry the pin forward; a no-op store or a missing state pins
+// nothing.
+func (s *Store) PinPrefixHash(ctx context.Context, sessionID, prefixHash string) (State, error) {
+	if !s.available() || prefixHash == "" {
+		return State{}, nil
+	}
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return State{}, err
+	}
+	stored, err := s.queries.PinSessionContextEpochPrefixHash(ctx, sqlc.PinSessionContextEpochPrefixHashParams{
+		SessionID:  pgSessionID,
+		PrefixHash: prefixHash,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		// No state yet (the history load initializes it first) or another turn

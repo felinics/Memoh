@@ -2,6 +2,8 @@ package contextview
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -485,7 +487,30 @@ func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg
 		// First computed budget of the epoch becomes the pin (spec rule 4).
 		cfg.RecordHistoryBudgetPin(ctx, budgetPlan.HistoryBudget)
 	}
+	if cfg.RecordStablePrefixHash != nil {
+		// Rule 1 accounting: the epoch pins its first observed stable-prefix
+		// hash; a later turn rendering a different one trips the drift alarm.
+		if hash := monitoringStablePrefixHash(view.Selected, cfg.CurrentModelID); hash != "" {
+			cfg.RecordStablePrefixHash(ctx, hash)
+		}
+	}
 	return cfg, nil
+}
+
+// monitoringStablePrefixHash hashes the part rule 1 freezes inside an epoch:
+// the rendered system region (template, persona, skills, memory overview,
+// tool documentation) plus the model identity. History rows and summary
+// segments legitimately grow within an epoch (appends, compaction), so
+// hashing the whole rendered prefix would alarm on every turn — the spec's
+// hash-hygiene warning. A model switch must advance the epoch (显式翻篇);
+// folding it into the hash turns a silent switch into drift.
+func monitoringStablePrefixHash(selected []contextfrag.ContextFrag, modelID string) string {
+	system := renderSDKPayloadFromFrags(selected).System
+	if system == "" && strings.TrimSpace(modelID) == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(system + "\x00" + strings.TrimSpace(modelID)))
+	return hex.EncodeToString(sum[:])
 }
 
 func isContextBudgetError(err error) bool {

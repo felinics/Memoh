@@ -32,6 +32,10 @@ func (*mergeEpochQueries) AdvanceSessionContextEpoch(_ context.Context, _ sqlc.A
 	panic("merge must not advance the epoch outside the rollup statement")
 }
 
+func (*mergeEpochQueries) PinSessionContextEpochPrefixHash(_ context.Context, _ sqlc.PinSessionContextEpochPrefixHashParams) (string, error) {
+	panic("merge must not pin the prefix hash")
+}
+
 func (*mergeEpochQueries) PinSessionContextEpochBudget(_ context.Context, _ sqlc.PinSessionContextEpochBudgetParams) (string, error) {
 	panic("merge must not pin the budget outside the rollup statement")
 }

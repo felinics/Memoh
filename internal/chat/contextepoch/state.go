@@ -91,6 +91,13 @@ type State struct {
 	// (spec rule 4): a longer current request may never shrink it. Zero means
 	// not pinned yet — the first turn's computed budget becomes the pin.
 	BudgetTokens int64 `json:"budget_tokens,omitempty"`
+
+	// PrefixHash is the rule-1 monitoring hash observed at this epoch's first
+	// turn — the rendered system region plus model identity (history and
+	// summaries legitimately grow within an epoch and are excluded). Later
+	// turns of the same epoch must reproduce it; a mismatch raises the drift
+	// alarm.
+	PrefixHash string `json:"prefix_hash,omitempty"`
 	// UpdatedAtMs is when the state was last written.
 	UpdatedAtMs int64 `json:"updated_at_ms,omitempty"`
 }
@@ -134,6 +141,7 @@ func (s State) AdvancedBy(anchorAt time.Time, anchorMessageID, reason string, no
 		AnchorMessageID:   anchorMessageID,
 		LastReason:        reason,
 		BudgetTokens:      s.BudgetTokens,
+		PrefixHash:        s.PrefixHash,
 		UpdatedAtMs:       now.UnixMilli(),
 	}, nil
 }

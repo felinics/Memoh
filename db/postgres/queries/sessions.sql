@@ -708,3 +708,18 @@ WHERE team_id = public.memoh_current_team_id()
   AND metadata ? 'context_epoch'
   AND (metadata #>> '{context_epoch,budget_tokens}') IS NULL
 RETURNING (metadata->'context_epoch')::text AS state;
+
+-- name: PinSessionContextEpochPrefixHash :one
+-- Pins the rendered stable-prefix hash into the epoch state (spec rule 1
+-- accounting). The guard only fires while the hash is unset, so the first
+-- observed hash of an epoch wins and later turns can only agree with it or
+-- trip the drift alarm — never silently overwrite it.
+UPDATE bot_sessions
+SET metadata = jsonb_set(metadata, '{context_epoch,prefix_hash}', to_jsonb(sqlc.arg(prefix_hash)::text), true),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(session_id)
+  AND deleted_at IS NULL
+  AND metadata ? 'context_epoch'
+  AND (metadata #>> '{context_epoch,prefix_hash}') IS NULL
+RETURNING (metadata->'context_epoch')::text AS state;
