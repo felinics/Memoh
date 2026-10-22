@@ -62,9 +62,10 @@ The Discuss native chain:
    > window is retired — history loads are anchored to the session's Context Epoch
    > bookmark and byte-budgeted (`context-epoch-spec.md`, rules 1-2). The Discuss
    > side is on the same mechanism now: `discussHistoryReader.Load` loads through
-   > `contextepoch.Store.LoadWindow` (path "discuss") and only falls back to the
-   > session beginning when no epoch store is wired. The CM-ADM-001 byte-budget
-   > rules below are unchanged.
+   > `contextepoch.Store.LoadWindow` (path "discuss"), falling back to the session
+   > beginning when no epoch store is wired or when a transient state read/init
+   > failure degrades the load (the accepted availability trade-off noted in the
+   > spec). The CM-ADM-001 byte-budget rules below are unchanged.
 2. `internal/channel/discuss/trigger.go` `Build` →
    `timeline.ComposeContextWithArtifacts` (`internal/chat/timeline/context.go:235`)
    fully materializes `[]ContextMessage` with **no admission check of any kind**. The
