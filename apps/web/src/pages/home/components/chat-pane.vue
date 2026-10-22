@@ -228,7 +228,6 @@
           isWelcome
             ? 'inset-0 flex flex-col items-center justify-start'
             : 'inset-x-0 bottom-0 pt-2',
-          { invisible: composerPlacementPending },
         ]"
         :style="composerLiftPx > 0 ? { bottom: `${composerLiftPx}px` } : undefined"
       >
@@ -628,13 +627,16 @@
                   >{{ formattedVoiceSeconds }}</span>
                   <span class="sr-only">{{ voiceInputState === 'transcribing' ? $t('chat.voiceInput.transcribing') : $t('chat.voiceInput.barLabel') }}</span>
                 </div>
+                <!-- Loading history never locks the textarea: the user can type
+                     the moment the pane appears, and handleSend holds the send
+                     until the history has loaded. -->
                 <textarea
                   v-else
                   ref="textareaEl"
                   v-model="inputText"
                   rows="1"
                   :placeholder="composerPreviewShown ? '' : composerPlaceholder"
-                  :disabled="!currentBotId || activeChatReadOnly || loadingMessages || firstSendAwaiting"
+                  :disabled="!currentBotId || activeChatReadOnly || firstSendAwaiting"
                   class="order-none max-h-52 w-full basis-full field-sizing-content resize-none break-words bg-transparent pl-2 pr-1 pt-2 pb-1.5 text-base leading-[var(--chat-leading)] outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
                   :class="[isWelcome ? 'min-h-12' : 'min-h-10', composerPreviewShown ? 'text-transparent' : 'text-foreground']"
                   @keydown="handleComposerKeydown"
@@ -1510,22 +1512,15 @@ const draftSetupEditable = computed(() => !hasRenderedSession.value && !firstSen
 // entirely, so they never reach this state. A first send stays on welcome
 // until the server confirms it; from then on the pane is a chat even before
 // a turn has rendered (a skill activation appends none of its own).
+// Decided from the pane alone, never from the session list: a draft stays a
+// draft (only an explicit selection fills it, and that happens before the
+// first render), so the composer is drawn in its final place on the first
+// frame instead of waiting for the list or moving once it arrives.
 const isWelcome = computed(() => {
-  if (!currentBotId.value || activeChatReadOnly.value || loadingChats.value) return false
+  if (!currentBotId.value || activeChatReadOnly.value) return false
   if (firstSendEntry.value?.revealed) return false
   return !hasRenderedSession.value && messages.value.length === 0
 })
-
-// During boot, "a draft that stays a draft" and "a draft about to be
-// repointed to the most recent session" are indistinguishable until
-// fetchSessions returns (bootstrap auto-picks at the END of the load).
-// isWelcome waits out that window via !loadingChats — but rendering the
-// docked posture meanwhile made a hard refresh of the welcome page flash
-// bottom → center. While placement is undecidable, hide the composer
-// instead: `invisible` keeps layout and the dock measurements alive,
-// where v-if would unmount them. A session panel carries its sessionId
-// from the first frame, so this gate never engages on session routes.
-const composerPlacementPending = computed(() => loadingChats.value && !hasRenderedSession.value)
 const composerPlacementEl = useTemplateRef<HTMLElement>('composerPlacementEl')
 // Only a first send moves the composer, out of welcome when the server
 // confirms it, together with the turns appearing. Any other flip is
@@ -3394,7 +3389,9 @@ useComposerKeyboardFocus({
   available: () => (router.currentRoute.value.name === 'home' || router.currentRoute.value.name === 'bot')
     && !!currentBotId.value && !activeChatReadOnly.value
     && voiceInputState.value === 'idle',
-  ready: () => !loadingMessages.value && !composerPlacementPending.value,
+  // Nothing holds the composer back while history loads; a disabled
+  // textarea (first send in flight) is retried when it re-enables.
+  ready: () => true,
   owner: () => `${paneTarget.value.botId}:${paneTarget.value.viewId}:${paneTarget.value.sessionId ?? ''}`,
   request: () => workspaceTabs.pendingChatInputFocus?.panelId === props.tabId
     && workspaceTabs.pendingChatInputFocus.botId === paneTarget.value.botId
