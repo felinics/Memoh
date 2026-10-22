@@ -71,20 +71,10 @@ func (*FragmentSelector) Select(frags []contextfrag.ContextFrag, profile IntentP
 			tagged[i].Tokens = contextfrag.ResolveProviderBudgetFragTokens(tagged[i].Frag)
 		}
 		protectedCost := protectedHistoryTokenCost(tagged)
-		// Protected content must leave room for the trim notice exactly when
-		// trimming will happen: droppable rows that cannot all fit force
-		// spatial drops, and the notice they require is charged against the
-		// summary's ceiling instead of failing the selection afterwards.
-		summaryCeiling := historyBudget
-		if droppable := droppableHistoryTokenCost(tagged); droppable > 0 && droppable > historyBudget-protectedCost {
-			summaryCeiling -= contextfrag.ResolveProviderBudgetFragTokens(TrimNoticeFrag(contextfrag.Scope{}))
-		}
-		if protectedCost > summaryCeiling {
-			if edits := shrinkOversizedProtectedSummaries(tagged, protectedCost, summaryCeiling); len(edits) > 0 {
-				fragBudgetEdits = append(fragBudgetEdits, edits...)
-				protectedCost = protectedHistoryTokenCost(tagged)
-			}
-		}
+		// Spec rule 3: persisted summaries are immutable — they are never
+		// truncated to fit. Protected content that exceeds the budget fails
+		// closed into the recovery path, which rewrites history through an
+		// epoch-recorded compaction instead of silently editing the prefix.
 		if protectedCost > historyBudget {
 			result := selectionResultFromTaggedReasons(tagged, allSelectedIndexes(tagged), nil)
 			result.FatalError = contextfrag.ErrProtectedContextOverflow
