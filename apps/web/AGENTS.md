@@ -305,7 +305,7 @@ Chat routes register **null stub components** in the router. The real UI (`MainS
 
 - All routes except `/login` and `/oauth/*` require `localStorage.getItem('token')`.
 - Logged-in users accessing `/login` are redirected to `/`.
-- Incomplete onboarding redirects authenticated users to `/onboarding` (`router-guards/onboarding.ts`).
+- Incomplete onboarding redirects authenticated users to `/onboarding` (`router-guards/onboarding.ts`). A completion this browser has already seen is remembered per account (`store/user.ts`), so a returning user's first render does not wait on `/users/me`; the server check then runs in the background and redirects only if it reports onboarding incomplete.
 - Routes with `meta.adminOnly` (e.g. `/settings/people`) require `user.role === 'admin'`.
 - Chunk load errors (dynamic import failures) trigger an automatic page reload.
 - `/dev/*` is registered only in dev builds and requires `localStorage.setItem('memoh:dev-tools', '1')`.

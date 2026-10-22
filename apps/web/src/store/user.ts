@@ -20,6 +20,22 @@ export interface UserInfo {
   timezone: string;
 }
 
+// The account an access token was issued to, read from its payload (the server
+// resolves `user_id` before `sub`, see internal/auth/jwt.go). Only used to match
+// locally remembered facts to the signed-in account; the server still verifies
+// the token on every request. Empty when the token cannot be read.
+function tokenUserId(token: string): string {
+  const payload = token.split('.')[1]
+  if (!payload) return ''
+  try {
+    const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))) as Record<string, unknown>
+    const id = claims.user_id || claims.sub
+    return typeof id === 'string' ? id.trim() : ''
+  } catch {
+    return ''
+  }
+}
+
 export const useUserStore = defineStore(
   'user',
   () => {
@@ -34,7 +50,17 @@ export const useUserStore = defineStore(
 
     const localToken = useLocalStorage('token', '')
     const onboardingCompleted = ref(false)
+    // Id of the account whose completed onboarding this browser has seen. It
+    // sits next to the token rather than in the persisted store state so it is
+    // readable while the store is still being set up, and it only counts while
+    // it matches the token's account — another account signing in here never
+    // inherits it. Cleared with the rest of the onboarding state.
+    const onboardingCompletedUser = useLocalStorage(ONBOARDING_KEYS.completedUser, '')
     const chatExamplesSidebarEntryHidden = ref(false)
+
+    watch(onboardingCompleted, (completed) => {
+      onboardingCompletedUser.value = completed ? tokenUserId(localToken.value) : ''
+    })
 
     let _meChecked = false
     let _pendingFetch: Promise<boolean> | null = null
@@ -45,7 +71,12 @@ export const useUserStore = defineStore(
         _meChecked = true
         return true
       }
-      if (_pendingFetch) return await _pendingFetch
+      return await loadMe()
+    }
+
+    // Always asks the server; concurrent callers share one request.
+    function loadMe(): Promise<boolean> {
+      if (_pendingFetch) return _pendingFetch
       _pendingFetch = (async (): Promise<boolean> => {
         try {
           const { data } = await getUsersMe({ throwOnError: true })
@@ -69,7 +100,7 @@ export const useUserStore = defineStore(
           _pendingFetch = null
         }
       })()
-      return await _pendingFetch
+      return _pendingFetch
     }
 
     const resetUserInfo = () => {
@@ -123,9 +154,9 @@ export const useUserStore = defineStore(
     const login = (userData: UserInfo, token: string) => {
       clearFrontendSessionState('login')
       // A new login must not inherit the previous user's onboarding state. The
-      // flag is no longer persisted, but an in-memory value from a prior user
-      // could otherwise leak across a switch that skips logout — force a fresh
-      // server check.
+      // remembered completion is keyed by account, but an in-memory value from
+      // a prior user could otherwise leak across a switch that skips logout —
+      // force a fresh server check.
       resetOnboarding()
       chatExamplesSidebarEntryHidden.value = false
       localToken.value = token
@@ -145,6 +176,8 @@ export const useUserStore = defineStore(
 
     const resetOnboarding = () => {
       onboardingCompleted.value = false
+      // The watcher above only clears it on a true → false change.
+      onboardingCompletedUser.value = ''
       _meChecked = false
       _pendingFetch = null
       safeLocalRemove(ONBOARDING_KEYS.introSeen)
@@ -183,6 +216,24 @@ export const useUserStore = defineStore(
       resetOnboarding()
       resetUserInfo()
     })
+
+    // A returning account whose completion this browser has already seen opens
+    // the app at once instead of waiting on /users/me before the first render.
+    // The server is still asked; only its confirmed "not completed" sends the
+    // user to onboarding. A failed request keeps the remembered answer, the same
+    // way an unreachable server never blocks the app below.
+    const signedInUserId = tokenUserId(localToken.value)
+    if (signedInUserId && onboardingCompletedUser.value === signedInUserId) {
+      onboardingCompleted.value = true
+      void loadMe().then((fetched) => {
+        if (!fetched || onboardingCompleted.value) return
+        if (tokenUserId(localToken.value) !== signedInUserId) return
+        if (router.currentRoute.value.path !== '/onboarding') {
+          void router.replace({ path: '/onboarding' })
+        }
+      })
+    }
+
     return {
       userInfo,
       onboardingCompleted,
@@ -196,10 +247,9 @@ export const useUserStore = defineStore(
   },
   {
     persist: {
-      // Do NOT persist `onboardingCompleted`: a localStorage value can be stale
-      // across user switches or pushed between machines by browser sync, which
-      // would skip onboarding for the wrong user. It is verified against the
-      // server once per session via fetchMe() and cached in memory (_meChecked).
+      // `onboardingCompleted` stays out: a bare boolean says nothing about
+      // which account it belongs to. The remembered completion is the
+      // account-keyed `onboardingCompletedUser` above.
       pick: ['userInfo'],
     },
   },
