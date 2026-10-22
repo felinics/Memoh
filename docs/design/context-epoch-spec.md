@@ -32,6 +32,14 @@ ContextEpochState {
 }
 ```
 
+实现对照（Context Epoch PR 系列落地形态）：
+
+- `Epoch`/`Anchor`：`bot_sessions.metadata.context_epoch`（`epoch`、`anchor_created_at_ms`、`anchor_message_id`、`last_reason`），守卫式 SQL 单调推进。
+- `Budget`：`budget_tokens` 钉在同一状态里（首钉赢，跨推进存续）。
+- `SegmentCount`：不落库为字段，由压缩层按活跃段链长度实时计数，超过上限 K=8 触发合并。
+- `ToolsetHash`：不落库为字段；工具列表的稳定性由网关兜底保证（刷新失败沿用上次成功列表，降级列表不缓存）。
+- 另有 `prefix_hash`（规范"怎么监控"一节的规则 1 记账）：钉住 epoch 内首次观测的监控哈希，口径 = 渲染后的系统区 + 模型身份；不一致触发 `context_epoch_prefix_drift` 告警。
+
 几条规矩：
 
 - 状态按（线程 × 机器人）分开存。多个机器人在同一个讨论线程里时，各管各的，互不干扰。
@@ -98,17 +106,24 @@ ContextEpochState {
 
 统计时要按"相邻两轮的时间间隔"分开看：服务商缓存本身有过期时间（几分钟到几小时），隔太久的对话本来就会失效，这部分不该算在我们头上（见"已知局限"第 1 条）。
 
-## 代码接口（草案）
+## 代码接口（已实现）
 
 ```go
-// internal/agent/application
+// internal/chat/contextepoch
 
-// 按书签读历史，取代按"24 小时前"读。
-// 找不到书签位置时必须报错，不许悄悄返回空历史。
-func (s *Service) LoadAnchoredHistory(ctx context.Context, st ContextEpochState) ([]types.AgentMessage, error)
+// 按书签读历史，取代按"24 小时前"读：字节预算 + 书签锚定，预算挤压到
+// 更老行时记录一次 reason="budget" 的显式推进。锚点定位失败必须报错，
+// 不许悄悄返回空历史。
+func (s *Store) LoadWindow(ctx context.Context, sessionID, path string, measure, load ...) ([]message.Message, error)
 
-// 改动稳定部分的唯一入口。每次调用都会写一条审计记录。
-func (s *Service) AdvanceContextEpoch(ctx context.Context, sessionID string, reason EpochAdvanceReason) (ContextEpochState, error)
+// 原地翻篇的统一入口。原因必须属于审计词表（ValidAdvanceReason），每次
+// 调用都留下 (from_epoch, to_epoch, reason) 审计日志。移动锚点的推进
+// （budget 滑窗、segment-merge）走各自的原子 SQL 写。
+func (s *Store) AdvanceContextEpoch(ctx context.Context, sessionID, path, reason string) (State, error)
+
+// 首钉赢的记账写入：epoch 内历史预算（规则 4）与监控哈希（规则 1）。
+func (s *Store) PinBudget(ctx context.Context, sessionID string, budgetTokens int64) (State, error)
+func (s *Store) PinPrefixHash(ctx context.Context, sessionID, prefixHash string) (State, error)
 ```
 
 装配层（`internal/contextview` 的 `RunConfigProvider`）是拼稳定部分的唯一地方。像"MEMORY.md 该重写了"这类开关，允许在一个 epoch 里决定"渲染还是不渲染"，但不许在一个 epoch 里改写已经渲染过的字节；开关翻转本身按翻篇记账。

@@ -1,6 +1,6 @@
 # RFC：Context Epoch —— 修好提示词缓存的架构方案
 
-状态：草案，待评审。
+状态：**验收基线（已落地）**。五个落地 PR 已全部实现并经 review 收敛（见"落地计划"逐条验收状态）；本文保留事故背景与决策过程作为设计档案，行为规范以 [context-epoch-spec.md](context-epoch-spec.md) 为准。
 配套文档：[context-epoch-spec.md](context-epoch-spec.md) 是规范，规定系统必须遵守的行为；本文讲背景、方案本身和落地计划。两份冲突时以规范为准。
 范围：`internal/agent/application/`（历史加载、压缩读路径）、`internal/agent/context/compaction/`（压缩写路径）、`internal/contextview/`（预算与拼装）、`internal/agent/runtime/native/`（对话循环）。
 
@@ -91,13 +91,13 @@
 
 五个 PR，各自独立可回滚。PR 1+2 消灭事故的两个主因，PR 3+4 收敛长尾。
 
-| PR | 内容 | 风险 | 验收 |
-|----|------|------|------|
-| 1 | 书签式加载，下线 24 小时窗口；`filterMessagesBeforeID` 改成报错；`ensureRequiredHistoryMessage` 补上字节预算 | 中：四条调用路径切换 | 用注入时钟模拟跨 24 小时，断言请求开头不变；现有内存安全测试全绿 |
-| 2 | 摘要段链：新压缩停止融合，加段数上限和合并 | 中：写路径核心 | 老融合数据兼容测试；段数有界测试；读路径顺序端到端测试 |
-| 3 | 预算钉死在 epoch 内：移除逐轮反馈和摘要截断 | 低 | 长会话逐轮请求字节一致性测试 |
-| 4 | 统一入口 `AdvanceContextEpoch` + 工具列表失败沿用旧版 + 按 epoch 记账的监控 | 低 | 同 epoch 指纹漂移告警测试；MCP 故障注入测试 |
-| 5 | 文档收尾：`context-memory-scheduling.md` 更新，本 RFC 转验收基线 | — | — |
+| PR | 内容 | 风险 | 验收 | 状态 |
+|----|------|------|------|------|
+| 1 | 书签式加载，下线 24 小时窗口；`filterMessagesBeforeID` 改成报错；`ensureRequiredHistoryMessage` 补上字节预算 | 中：四条调用路径切换 | 用注入时钟模拟跨 24 小时，断言请求开头不变；现有内存安全测试全绿 | ✅ [#1652](https://github.com/felinics/Memoh/pull/1652) |
+| 2 | 摘要段链：新压缩停止融合，加段数上限和合并 | 中：写路径核心 | 老融合数据兼容测试；段数有界测试；读路径顺序端到端测试 | ✅ [#1656](https://github.com/felinics/Memoh/pull/1656) |
+| 3 | 预算钉死在 epoch 内：移除逐轮反馈和摘要截断 | 低 | 长会话逐轮请求字节一致性测试 | ✅ [#1657](https://github.com/felinics/Memoh/pull/1657) |
+| 4 | 统一入口 `AdvanceContextEpoch` + 工具列表失败沿用旧版 + 按 epoch 记账的监控 | 低 | 同 epoch 指纹漂移告警测试；MCP 故障注入测试 | ✅ [#1658](https://github.com/felinics/Memoh/pull/1658) |
+| 5 | 文档收尾：`context-memory-scheduling.md` 更新，本 RFC 转验收基线 | — | — | 本 PR |
 
 ## 后续方向：轮内上下文（不在本 RFC 范围，先记下结论）
 

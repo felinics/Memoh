@@ -57,6 +57,12 @@ The Discuss native chain:
    responses (`history.Load` → `ListActiveSinceBySession` since the Unix epoch — the
    Discuss history adapter is explicitly unbounded, unlike the chat pipeline's 24-hour
    window in `service_history_messages.go`).
+
+   > Update (2026-10, Context Epoch PR series): the chat pipeline's 24-hour sliding
+   > window is retired — history loads are anchored to the session's Context Epoch
+   > bookmark and byte-budgeted (`context-epoch-spec.md`, rules 1-2); the Discuss
+   > side already loads by its `discuss_since` bookmark. The CM-ADM-001 byte-budget
+   > rules below are unchanged.
 2. `internal/channel/discuss/trigger.go` `Build` →
    `timeline.ComposeContextWithArtifacts` (`internal/chat/timeline/context.go:235`)
    fully materializes `[]ContextMessage` with **no admission check of any kind**. The
