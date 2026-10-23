@@ -19,19 +19,33 @@
           : 'max-w-full gap-2 rounded-md px-1.5'"
         :aria-label="t('sidebar.switchBot')"
       >
-        <Avatar
-          class="shrink-0 ring-1 ring-[color-mix(in_oklab,var(--foreground)_10%,transparent)]"
-          :class="fullWidth ? 'size-[22px]' : 'size-5'"
-        >
-          <AvatarImage
-            v-if="currentBot?.avatar_url"
-            :src="currentBot.avatar_url"
-            :alt="currentLabel"
-          />
-          <AvatarFallback class="text-[9px]">
-            {{ avatarFallback }}
-          </AvatarFallback>
-        </Avatar>
+        <span class="relative shrink-0">
+          <Avatar
+            class="shrink-0 ring-1 ring-[color-mix(in_oklab,var(--foreground)_10%,transparent)]"
+            :class="fullWidth ? 'size-[22px]' : 'size-5'"
+          >
+            <AvatarImage
+              v-if="currentBot?.avatar_url"
+              :src="currentBot.avatar_url"
+              :alt="currentLabel"
+            />
+            <AvatarFallback class="text-[9px]">
+              {{ avatarFallback }}
+            </AvatarFallback>
+          </Avatar>
+          <span
+            v-if="otherBotKind"
+            class="absolute -right-0.5 -top-0.5 flex"
+            role="img"
+            :aria-label="t('notifications.otherBots')"
+          >
+            <AttentionDot
+              :kind="otherBotKind"
+              :pulse-key="otherBotPulse"
+              cutout
+            />
+          </span>
+        </span>
         <span
           class="min-w-0 truncate text-[13px] font-[550] tracking-[0.015em] text-foreground dark:text-[color:oklch(0.97_0_0)]"
           :class="fullWidth && 'flex-1 text-left'"
@@ -107,6 +121,11 @@
             v-if="bot.id === currentBotId"
             class="size-3.5 shrink-0 text-muted-foreground"
           />
+          <BadgeCount
+            v-if="bot.id && unread.countByBot[bot.id]"
+            :count="unread.countByBot[bot.id] ?? 0"
+            variant="destructive"
+          />
         </div>
       </div>
 
@@ -163,9 +182,12 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   Spinner,
+  BadgeCount,
 } from '@felinic/ui'
 import { Check, ChevronsUpDown, GripVertical, Plus, Settings2 } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat-list'
+import { useUnreadStore } from '@/store/unread'
+import AttentionDot from './attention-dot.vue'
 import { firstAvatarCharacter } from '@/composables/useAvatarInitials'
 import { usePinnedBots } from '@/composables/usePinnedBots'
 import { usePendingBotsRefresh } from '@/composables/usePendingBotsRefresh'
@@ -175,6 +197,14 @@ const router = useRouter()
 const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
+const unread = useUnreadStore()
+/** Elsewhere is yellow when any other bot is blocked on the user, red otherwise; the newest arrival replays the pulse. */
+const otherBotEntries = computed(() => unread.inbox.filter(entry => entry.botId !== currentBotId.value))
+const otherBotKind = computed(() => {
+  if (!otherBotEntries.value.length) return null
+  return otherBotEntries.value.some(entry => entry.kind === 'needs_input') ? 'needs_input' : 'reply'
+})
+const otherBotPulse = computed(() => otherBotEntries.value[0]?.attentionAt)
 const { sortBots } = usePinnedBots()
 
 // Full-width shape for web / Windows (no traffic lights); mac desktop passes

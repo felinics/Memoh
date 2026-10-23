@@ -2,6 +2,7 @@ import { loadRemoteIcon } from './remote-icon'
 import {
   app,
   Menu,
+  Notification,
   shell,
   BrowserWindow,
   ipcMain,
@@ -23,6 +24,7 @@ import { acceleratorForCommand, appKeyboardCommands, type AppKeyboardCommand } f
 import { attachMenuShortcutOwnership } from './menu-shortcuts'
 import { dispatchFocusedWindowCommand } from './window-commands'
 import { dispatchRendererNavigate } from './window-navigation'
+import { createAttentionNotifications } from './attention-notifications'
 import { attachDevelopmentWindowShortcuts } from './window-shortcuts'
 import { macWindowChromeOptions } from './window-chrome'
 import { maybeSelfInstallMacOS } from './self-install'
@@ -72,6 +74,22 @@ type TraySettingsItem = {
 }
 
 let chatWindow: BrowserWindow | null = null
+const attentionNotifications = createAttentionNotifications({
+  show(payload, onClick) {
+    if (!Notification.isSupported()) return null
+    const notification = new Notification({ title: payload.title, body: payload.body })
+    notification.on('click', onClick)
+    notification.show()
+    return () => notification.close()
+  },
+  navigate(path) {
+    if (!chatWindow || chatWindow.isDestroyed()) chatWindow = createChatWindow()
+    if (chatWindow.isMinimized()) chatWindow.restore()
+    chatWindow.show()
+    chatWindow.focus()
+    dispatchRendererNavigate(chatWindow, path)
+  },
+})
 let menuShortcuts: ReturnType<typeof attachMenuShortcutOwnership> | null = null
 let appTray: Tray | null = null
 let isQuitting = false
@@ -781,6 +799,15 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:open-external-url', (event, rawURL: unknown) => {
     assertTrustedRenderer(event)
     return openExternalUrl(rawURL)
+  })
+  ipcMain.handle('desktop:notify', (event, payload: unknown) => {
+    assertTrustedRenderer(event)
+    attentionNotifications.notify(payload)
+  })
+  ipcMain.handle('desktop:set-badge-count', (event, count: unknown) => {
+    assertTrustedRenderer(event)
+    if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) return
+    app.setBadgeCount(count)
   })
   ipcMain.handle('desktop:set-tray-bots', (event, payload: unknown) => {
     assertTrustedRenderer(event)

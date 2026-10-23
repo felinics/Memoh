@@ -23,7 +23,8 @@
         class="group relative flex items-center min-h-[2.125rem] w-full rounded-[9px] px-[11px] text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         :data-ui-selected="isActive ? '' : undefined"
         :data-menu-open="menuOpen || undefined"
-        :data-streaming="streaming || undefined"
+        :data-streaming="streaming || unread.isUnread(session.id) || undefined"
+        :data-unread="unread.isUnread(session.id) || undefined"
         :data-selecting="selecting || undefined"
         :title="hoverTitle"
         @click="activate"
@@ -108,6 +109,18 @@
               <LoaderCircle
                 class="size-3 animate-spin text-muted-foreground"
                 :aria-label="t('chat.sessionStreaming')"
+              />
+            </div>
+            <div
+              v-else-if="unread.isUnread(session.id)"
+              data-slot="sidebar-session-spinner"
+              class="flex h-6 w-6 items-center justify-center transition-opacity duration-150"
+              role="img"
+              :aria-label="t(`notifications.kind.${unread.kindOf(session.id)}`)"
+            >
+              <AttentionDot
+                :kind="unread.kindOf(session.id) ?? 'reply'"
+                :pulse-key="unread.entries[session.id]?.attentionAt"
               />
             </div>
 
@@ -216,6 +229,8 @@ import { splitScriptRuns } from '@/utils/script-runs'
 import { isAgentRuntimeType, normalizedRuntimeType, normalizedSessionMode, routeConversationLabel } from '@/store/chat-list.utils'
 import MarqueeText from './marquee-text.vue'
 import { SessionSelectionKey } from './session-selection'
+import { useUnreadStore } from '@/store/unread'
+import AttentionDot from './attention-dot.vue'
 
 const props = defineProps<{
   session: SessionSummary
@@ -231,6 +246,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const unread = useUnreadStore()
 
 const injectedSelection = inject(SessionSelectionKey)
 if (!injectedSelection) throw new Error('SessionItem must be used within the sessions panel')
@@ -304,3 +320,9 @@ const hoverTitle = computed(() => {
   return handle ? `${title} — @${handle.replace(/^@/, '')}` : title
 })
 </script>
+
+<style scoped>
+[data-unread] :is(.sidebar-cjk, .sidebar-latin) {
+  font-weight: 600;
+}
+</style>

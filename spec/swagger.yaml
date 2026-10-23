@@ -635,6 +635,29 @@ definitions:
     - FaultServer
     - FaultDependency
     - FaultCanceled
+  attention.Attention:
+    properties:
+      attention_at:
+        type: string
+      attention_kind:
+        $ref: '#/definitions/attention.Kind'
+      bot_id:
+        type: string
+      session_id:
+        type: string
+      title:
+        type: string
+    type: object
+  attention.Kind:
+    enum:
+    - reply
+    - failed
+    - needs_input
+    type: string
+    x-enum-varnames:
+    - KindReply
+    - KindFailed
+    - KindNeedsInput
   audio.ConfigSchema:
     properties:
       fields:
@@ -4016,6 +4039,19 @@ definitions:
       url:
         type: string
     type: object
+  handlers.MarkSessionReadRequest:
+    properties:
+      through:
+        description: |-
+          Through is the attention time the client displayed; the cursor never
+          moves past what the user actually saw.
+        type: string
+    type: object
+  handlers.MarkSessionReadResponse:
+    properties:
+      read_at:
+        type: string
+    type: object
   handlers.ModelTokenUsage:
     properties:
       input_tokens:
@@ -4857,6 +4893,13 @@ definitions:
         type: array
     required:
     - items
+    type: object
+  handlers.UnreadSessionsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/attention.Attention'
+        type: array
     type: object
   handlers.UpdateContainerMetricsRequest:
     properties:
@@ -6832,6 +6875,13 @@ definitions:
     type: object
   session.Session:
     properties:
+      attention_at:
+        type: string
+      attention_kind:
+        description: |-
+          AttentionKind and Unread describe the requesting user's unread state.
+          They are filled by the attention service for list responses only.
+        type: string
       bot_agent_id:
         type: string
       bot_id:
@@ -6878,6 +6928,8 @@ definitions:
         type: string
       type:
         type: string
+      unread:
+        type: boolean
       updated_at:
         type: string
       workdir_id:
@@ -13975,6 +14027,52 @@ paths:
       summary: List pending steer and follow-up inputs in one response
       tags:
       - sessions
+  /bots/{bot_id}/sessions/{session_id}/read:
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Moves the caller's read cursor for a session they created. The
+        cursor only moves forward.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Read cursor
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.MarkSessionReadRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.MarkSessionReadResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Mark a session as read
+      tags:
+      - sessions
   /bots/{bot_id}/sessions/{session_id}/runtime-controls:
     get:
       parameters:
@@ -18701,6 +18799,26 @@ paths:
       summary: Update current user profile
       tags:
       - users
+  /users/me/attention/events:
+    get:
+      description: |-
+        SSE addressed to the caller: session_attention when one of
+        their sessions needs them, session_read when their read cursor
+        moves. Starts with attention_ready; never carries message bodies.
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Stream the caller's attention events
+      tags:
+      - sessions
   /users/me/channel-identities:
     get:
       description: List the IM channel identities bound to the current user's account
@@ -18947,6 +19065,25 @@ paths:
       summary: Revoke a Remote Runtime credential
       tags:
       - user-runtimes
+  /users/me/unread:
+    get:
+      description: |-
+        Sessions the caller created that need their attention, across
+        every bot they can still access, newest first. No message bodies.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.UnreadSessionsResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: List the caller's unread sessions
+      tags:
+      - sessions
   /video-models:
     get:
       produces:

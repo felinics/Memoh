@@ -68,7 +68,12 @@ type Thread struct {
 	PreferredReasoningEffort string         `json:"preferred_reasoning_effort,omitempty"`
 	RouteMetadata            map[string]any `json:"route_metadata,omitempty"`
 	RouteConversationType    string         `json:"route_conversation_type,omitempty"`
-	Visibility               Visibility     `json:"-"`
+	// AttentionKind and Unread describe the requesting user's unread state.
+	// They are filled by the attention service for list responses only.
+	AttentionKind string     `json:"attention_kind,omitempty"`
+	AttentionAt   *time.Time `json:"attention_at,omitempty"`
+	Unread        bool       `json:"unread,omitempty"`
+	Visibility    Visibility `json:"-"`
 } // @name session.Session
 
 // The runtime vocabulary is owned by runtimekind (a leaf package shared with

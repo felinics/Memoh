@@ -142,6 +142,7 @@ type Service struct {
 	bgManager               *background.Manager
 	toolApproval            *toolapproval.Service
 	userInput               userInputService
+	attention               attentionMarker
 	hookService             *hooks.Service
 	memoryContextMu         sync.Mutex
 	memoryContextCache      *memprovider.MemoryContextCache

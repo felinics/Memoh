@@ -9786,6 +9786,72 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/sessions/{session_id}/read": {
+            "put": {
+                "description": "Moves the caller's read cursor for a session they created. The\ncursor only moves forward.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Mark a session as read",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Read cursor",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MarkSessionReadRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MarkSessionReadResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/sessions/{session_id}/runtime-controls": {
             "get": {
                 "tags": [
@@ -16390,6 +16456,32 @@ const docTemplate = `{
                 }
             }
         },
+        "/users/me/attention/events": {
+            "get": {
+                "description": "SSE addressed to the caller: session_attention when one of\ntheir sessions needs them, session_read when their read cursor\nmoves. Starts with attention_ready; never carries message bodies.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Stream the caller's attention events",
+                "responses": {
+                    "200": {
+                        "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/users/me/channel-identities": {
             "get": {
                 "description": "List the IM channel identities bound to the current user's account",
@@ -16752,6 +16844,32 @@ const docTemplate = `{
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/me/unread": {
+            "get": {
+                "description": "Sessions the caller created that need their attention, across\nevery bot they can still access, newest first. No message bodies.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "List the caller's unread sessions",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.UnreadSessionsResponse"
                         }
                     },
                     "500": {
@@ -18258,6 +18376,39 @@ const docTemplate = `{
                 "FaultServer",
                 "FaultDependency",
                 "FaultCanceled"
+            ]
+        },
+        "attention.Attention": {
+            "type": "object",
+            "properties": {
+                "attention_at": {
+                    "type": "string"
+                },
+                "attention_kind": {
+                    "$ref": "#/definitions/attention.Kind"
+                },
+                "bot_id": {
+                    "type": "string"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "attention.Kind": {
+            "type": "string",
+            "enum": [
+                "reply",
+                "failed",
+                "needs_input"
+            ],
+            "x-enum-varnames": [
+                "KindReply",
+                "KindFailed",
+                "KindNeedsInput"
             ]
         },
         "audio.ConfigSchema": {
@@ -23145,6 +23296,23 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.MarkSessionReadRequest": {
+            "type": "object",
+            "properties": {
+                "through": {
+                    "description": "Through is the attention time the client displayed; the cursor never\nmoves past what the user actually saw.",
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.MarkSessionReadResponse": {
+            "type": "object",
+            "properties": {
+                "read_at": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.ModelTokenUsage": {
             "type": "object",
             "properties": {
@@ -24360,6 +24528,17 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/conversation.UITurn"
+                    }
+                }
+            }
+        },
+        "handlers.UnreadSessionsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/attention.Attention"
                     }
                 }
             }
@@ -27064,6 +27243,13 @@ const docTemplate = `{
         "session.Session": {
             "type": "object",
             "properties": {
+                "attention_at": {
+                    "type": "string"
+                },
+                "attention_kind": {
+                    "description": "AttentionKind and Unread describe the requesting user's unread state.\nThey are filled by the attention service for list responses only.",
+                    "type": "string"
+                },
                 "bot_agent_id": {
                     "type": "string"
                 },
@@ -27127,6 +27313,9 @@ const docTemplate = `{
                 },
                 "type": {
                     "type": "string"
+                },
+                "unread": {
+                    "type": "boolean"
                 },
                 "updated_at": {
                     "type": "string"
