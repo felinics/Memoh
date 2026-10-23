@@ -8,13 +8,16 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
@@ -56,6 +59,59 @@ func TestStartTurnRoundTrip(t *testing.T) {
 	}
 }
 
+// The start frame carries what the command carries, requested skill bodies
+// and discuss context included, even though the turn contract types keep the
+// skill body out of their own JSON.
+func TestStartTurnCarriesSkillsAndDiscussContext(t *testing.T) {
+	fake := &fakeService{}
+	client, cleanup := newTestClient(t, fake, "secret")
+	defer cleanup()
+
+	cmd := turn.StartTurnCommand{
+		SchemaVersion: 1,
+		TeamID:        "team-1",
+		Mode:          turn.ModeDiscuss,
+		BotID:         "bot-1",
+		ThreadID:      "session-1",
+		Query:         "use the skill",
+		RequestedSkills: []turn.RequestedSkillContext{{
+			Name: "alpha", Description: "desc", Content: "SKILL BODY", SourceKind: "registry",
+			OpaqueSourceID: "opaque", ContentHash: "hash", Identity: "identity",
+		}},
+		SessionToken:     "session-token",
+		ToolHTTPURL:      "http://tools.invalid",
+		DiscussMessages:  []turn.DiscussMessage{{Role: "user", Content: "hi", RawContent: json.RawMessage(`{"k":"v"}`), CompactionArtifactID: "artifact"}},
+		DiscussImageRefs: []turn.DiscussImageRef{{ContentHash: "img", Mime: "image/png"}},
+		DiscussAddressed: true,
+	}
+	handle, err := client.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatalf("start turn: %v", err)
+	}
+	for range handle.Events() {
+	}
+	if !reflect.DeepEqual(fake.started, cmd) {
+		t.Fatalf("server received\n%#v\nwant\n%#v", fake.started, cmd)
+	}
+}
+
+// A start frame whose producer did not declare a schema version this binary
+// reads is refused before it reaches the service.
+func TestStartTurnRejectsUnknownSchemaVersion(t *testing.T) {
+	for _, version := range []int{0, 2} {
+		fake := &fakeService{}
+		client, cleanup := newTestClient(t, fake, "secret")
+		_, err := client.StartTurn(context.Background(), turn.StartTurnCommand{SchemaVersion: version, TeamID: "team-1", ThreadID: "session-1"})
+		cleanup()
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatalf("version %d: start error = %v, want InvalidArgument", version, err)
+		}
+		if fake.started.TeamID != "" {
+			t.Fatalf("version %d: service started %#v", version, fake.started)
+		}
+	}
+}
+
 func TestLegacySessionIDJSONWireCompatibility(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -66,12 +122,23 @@ func TestLegacySessionIDJSONWireCompatibility(t *testing.T) {
 			name: "start",
 			marshal: func() ([]byte, error) {
 				return marshalStartTurnCommand(turn.StartTurnCommand{
-					TeamID: "team-1", ThreadID: "thread-1", Query: "hello",
+					SchemaVersion: 1, TeamID: "team-1", ThreadID: "thread-1", Query: "hello",
 				})
 			},
 			unmarshal: func(data []byte) (string, error) {
+				// The thread keys are under test here; a start frame is read
+				// only at a known schema version, so declare it.
+				var fields map[string]json.RawMessage
+				if err := json.Unmarshal(data, &fields); err != nil {
+					return "", err
+				}
+				fields["SchemaVersion"] = json.RawMessage(`1`)
+				versioned, err := json.Marshal(fields)
+				if err != nil {
+					return "", err
+				}
 				var value turn.StartTurnCommand
-				err := unmarshalStartTurnCommand(data, &value)
+				err = unmarshalStartTurnCommand(versioned, &value)
 				return value.ThreadID, err
 			},
 		},
@@ -181,7 +248,7 @@ func TestAuthenticationRejectsWrongSecret(t *testing.T) {
 	fake := &fakeService{}
 	client, cleanup := newTestClient(t, fake, "wrong")
 	defer cleanup()
-	_, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
+	_, err := client.StartTurn(context.Background(), turn.StartTurnCommand{SchemaVersion: 1, TeamID: "team-1"})
 	if err == nil {
 		t.Fatal("expected authentication failure")
 	}
@@ -192,7 +259,7 @@ func TestCancelUnblocksFullClientEventBuffer(t *testing.T) {
 	client, cleanup := newTestClient(t, fake, "secret")
 	defer cleanup()
 
-	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
+	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{SchemaVersion: 1, TeamID: "team-1"})
 	if err != nil {
 		t.Fatalf("start turn: %v", err)
 	}
@@ -361,7 +428,7 @@ func TestRunErrorDeliversTailEventsFirst(t *testing.T) {
 
 	client, cleanup := newTestClient(t, &scriptedService{handle: &scriptedHandle{events: events, errs: errs}}, "secret")
 	defer cleanup()
-	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
+	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{SchemaVersion: 1, TeamID: "team-1"})
 	if err != nil {
 		t.Fatalf("start turn: %v", err)
 	}
@@ -390,7 +457,7 @@ func TestInjectFailureKeepsStreamAlive(t *testing.T) {
 	h := &scriptedHandle{events: events, errs: errs, injectErr: errors.New("inject exploded"), injectCalled: make(chan struct{}, 1)}
 	client, cleanup := newTestClient(t, &scriptedService{handle: h}, "secret")
 	defer cleanup()
-	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
+	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{SchemaVersion: 1, TeamID: "team-1"})
 	if err != nil {
 		t.Fatalf("start turn: %v", err)
 	}
@@ -455,7 +522,7 @@ func TestUnknownControlFrameIgnored(t *testing.T) {
 	h := &scriptedHandle{events: events, errs: errs}
 	client, cleanup := newTestClient(t, &scriptedService{handle: h}, "secret")
 	defer cleanup()
-	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
+	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{SchemaVersion: 1, TeamID: "team-1"})
 	if err != nil {
 		t.Fatalf("start turn: %v", err)
 	}
@@ -486,7 +553,7 @@ func TestUnknownControlFrameIgnored(t *testing.T) {
 func TestSessionBusySurvivesTransport(t *testing.T) {
 	client, cleanup := newTestClient(t, &scriptedService{startErr: fmt.Errorf("private diagnostic: %w", turn.ErrSessionBusy)}, "secret")
 	defer cleanup()
-	_, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
+	_, err := client.StartTurn(context.Background(), turn.StartTurnCommand{SchemaVersion: 1, TeamID: "team-1"})
 	if !errors.Is(err, turn.ErrSessionBusy) {
 		t.Fatalf("got %v, want busy sentinel", err)
 	}
@@ -541,7 +608,7 @@ func TestInternalTurnErrorHasOneResultLine(t *testing.T) {
 	var logs bytes.Buffer
 	client, cleanup := newLoggedTestClient(t, logger.New(&logs, "debug", "json"),
 		&scriptedService{startErr: errors.New("private diagnostic")}, "secret")
-	_, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
+	_, err := client.StartTurn(context.Background(), turn.StartTurnCommand{SchemaVersion: 1, TeamID: "team-1"})
 	if err == nil {
 		t.Fatal("start turn succeeded")
 	}

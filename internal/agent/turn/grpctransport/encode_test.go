@@ -62,7 +62,7 @@ func TestServerCatalogErrorRoundTrip(t *testing.T) {
 	client, cleanup := newTestClient(t, &failingControls{scriptedService: scriptedService{startErr: sent}, err: sent}, "secret")
 	t.Cleanup(cleanup)
 
-	_, startErr := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
+	_, startErr := client.StartTurn(context.Background(), turn.StartTurnCommand{SchemaVersion: 1, TeamID: "team-1"})
 	_, controlErr := client.RuntimeCommands(context.Background(), turn.RuntimeControlRequest{TeamID: "team-1"})
 	for name, err := range map[string]error{"start": startErr, "runtime control": controlErr} {
 		if apperror.CodeOf(err) != apperror.CodeBotNameTaken || apperror.ArgsOf(err)["field"] != "name" {

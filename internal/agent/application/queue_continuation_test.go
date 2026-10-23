@@ -11,6 +11,7 @@ import (
 
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/turn/turnwire"
 )
 
 // newFollowUpTestService wires a Service whose live queue lives in a memory
@@ -67,10 +68,15 @@ func TestEnqueueDeferredTurnStartsFollowUpWithOriginalCommand(t *testing.T) {
 			service, admitter, backend, key := newFollowUpTestService(t, runner)
 			ctx := context.Background()
 			cmd := turn.StartTurnCommand{
-				TeamID: "team1", Mode: turn.ModeChat, BotID: key.BotID, ThreadID: key.SessionID,
+				SchemaVersion: 1,
+				TeamID:        "team1", Mode: turn.ModeChat, BotID: key.BotID, ThreadID: key.SessionID,
 				ChatID: "chat-42", RouteID: "route-7", ReplyTarget: "tg:1", UserID: "user-1",
 				Query: "later", UserVisibleText: "later", IdempotencyKey: "msg-1",
 				Attachments: []turn.Attachment{{Type: "image", URL: "https://example.invalid/image.png"}},
+				RequestedSkills: []turn.RequestedSkillContext{{
+					Name: "alpha", Description: "desc", Content: "SKILL BODY", SourceKind: "registry",
+					OpaqueSourceID: "opaque", ContentHash: "hash", Identity: "identity",
+				}},
 			}
 			if err := service.EnqueueDeferredTurn(ctx, cmd); err != nil {
 				t.Fatalf("enqueue deferred turn: %v", err)
@@ -99,6 +105,9 @@ func TestEnqueueDeferredTurnStartsFollowUpWithOriginalCommand(t *testing.T) {
 			if runner.gotReq.ReplyTarget != "tg:1" || runner.gotReq.RouteID != "route-7" || runner.gotReq.ChatID != "chat-42" || runner.gotReq.Query != text ||
 				!reflect.DeepEqual(runner.gotReq.Attachments, cmd.Attachments) {
 				t.Fatalf("continuation lost the original routing: %+v", runner.gotReq)
+			}
+			if !reflect.DeepEqual(runner.gotReq.RequestedSkills, cmd.RequestedSkills) {
+				t.Fatalf("continuation requested skills = %+v, want %+v", runner.gotReq.RequestedSkills, cmd.RequestedSkills)
 			}
 			admitter.mu.Lock()
 			inputs := append([]sessionruntime.AdmitInput(nil), admitter.inputs...)
@@ -263,7 +272,7 @@ func TestFollowUpCommandReportsWhatAnItemIsMissing(t *testing.T) {
 		}
 		return payload
 	}
-	cmd, err := followUpCommand(item("f1", encode(turn.StartTurnCommand{TeamID: "team1", BotID: "bot", ThreadID: "session", Query: "hello"})))
+	cmd, err := followUpCommand(item("f1", encode(turn.StartTurnCommand{SchemaVersion: 1, TeamID: "team1", BotID: "bot", ThreadID: "session", Query: "hello"})))
 	if err != nil || !cmd.NoDefer || cmd.IdempotencyKey != "follow-up:f1" || cmd.TeamID != "team1" || cmd.Query != "hello" {
 		t.Fatalf("follow-up command = %+v, %v", cmd, err)
 	}
@@ -274,9 +283,11 @@ func TestFollowUpCommandReportsWhatAnItemIsMissing(t *testing.T) {
 	}{
 		{"text-only payload from an earlier release", []byte(`{"text":"hello"}`), errFollowUpPayloadWithoutCommand},
 		{"unparseable payload", []byte(`{"text":`), errFollowUpPayloadWithoutCommand},
-		{"command for another session", encode(turn.StartTurnCommand{TeamID: "team1", BotID: "bot", ThreadID: "other", Query: "x"}), errFollowUpCommandForeignSession},
-		{"command without team", encode(turn.StartTurnCommand{BotID: "bot", ThreadID: "session", Query: "x"}), errFollowUpCommandWithoutTeam},
-		{"command without input", encode(turn.StartTurnCommand{TeamID: "team1", BotID: "bot", ThreadID: "session"}), errFollowUpCommandWithoutInput},
+		{"command for another session", encode(turn.StartTurnCommand{SchemaVersion: 1, TeamID: "team1", BotID: "bot", ThreadID: "other", Query: "x"}), errFollowUpCommandForeignSession},
+		{"command without team", encode(turn.StartTurnCommand{SchemaVersion: 1, BotID: "bot", ThreadID: "session", Query: "x"}), errFollowUpCommandWithoutTeam},
+		{"command without input", encode(turn.StartTurnCommand{SchemaVersion: 1, TeamID: "team1", BotID: "bot", ThreadID: "session"}), errFollowUpCommandWithoutInput},
+		{"command without a schema version", encode(turn.StartTurnCommand{TeamID: "team1", BotID: "bot", ThreadID: "session", Query: "x"}), turnwire.ErrUnsupportedVersion},
+		{"command from a newer schema version", encode(turn.StartTurnCommand{SchemaVersion: 2, TeamID: "team1", BotID: "bot", ThreadID: "session", Query: "x"}), turnwire.ErrUnsupportedVersion},
 	} {
 		if _, err := followUpCommand(item("f2", tc.payload)); !errors.Is(err, tc.want) {
 			t.Fatalf("%s: err = %v, want %v", tc.name, err, tc.want)

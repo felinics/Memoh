@@ -23,7 +23,7 @@ func runErrorOverTransport(t *testing.T, runErr error) error {
 	close(errs)
 	client, cleanup := newTestClient(t, &scriptedService{handle: &scriptedHandle{events: events, errs: errs}}, "secret")
 	t.Cleanup(cleanup)
-	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
+	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{SchemaVersion: 1, TeamID: "team-1"})
 	if err != nil {
 		t.Fatalf("start turn: %v", err)
 	}
@@ -40,7 +40,7 @@ func startErrorOverTransport(t *testing.T, startErr error) error {
 	t.Helper()
 	client, cleanup := newTestClient(t, &scriptedService{startErr: startErr}, "secret")
 	t.Cleanup(cleanup)
-	_, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
+	_, err := client.StartTurn(context.Background(), turn.StartTurnCommand{SchemaVersion: 1, TeamID: "team-1"})
 	return err
 }
 

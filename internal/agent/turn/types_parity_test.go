@@ -74,7 +74,10 @@ func TestContractWireJSONShapes(t *testing.T) {
 			want: `{"name":"skill","display_name":"Skill","description":"desc","source_kind":"registry","state":"effective"}`,
 		},
 		{
-			name: "requested skill context remains internal",
+			// The skill body never enters a payload built from the contract
+			// type. Commands that cross a process carry it through
+			// turnwire.RequestedSkill, whose shape turnwire's tests pin.
+			name: "requested skill context has no JSON of its own",
 			value: turn.RequestedSkillContext{
 				Name: "skill", Description: "desc", Content: "body", SourceKind: "registry",
 				OpaqueSourceID: "opaque", ContentHash: "hash", Identity: "identity",
