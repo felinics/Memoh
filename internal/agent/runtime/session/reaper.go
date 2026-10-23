@@ -25,8 +25,8 @@ const (
 // Reaper is the single cluster-wide janitor for the session run ledger. Exactly
 // one instance acts at a time, elected through a TTL lease in the live backend.
 //
-// One leader rather than many workers is a deliberate simplification. The three
-// duties below are all idempotent fenced transitions, so the only thing extra
+// One leader rather than many workers is a deliberate simplification. Its
+// duties are all idempotent fenced transitions, so the only thing extra
 // reapers would add is duplicate PostgreSQL traffic and a second way for a
 // candidate to be consumed and then dropped by a crash. Failover costs at most
 // one lease period and repeats at most one transition, which changes nothing.
@@ -57,10 +57,25 @@ type Reaper struct {
 	// worked through in bounded slices instead of restarted every tick. Only the
 	// reaper goroutine touches it.
 	sweepCursor ledger.Cursor
+	// claimCursor carries the unreserved-claim pass across ticks for the same
+	// reason. Only the reaper goroutine touches it.
+	claimCursor string
+	// decisionCleanups holds lost runs whose decision cleanup failed after the
+	// terminal transition committed. Sweeps never list a terminal row again,
+	// so without this the cleanup would get exactly one attempt. Only the
+	// reaper goroutine touches it.
+	decisionCleanups map[string]lostRunCleanup
 
 	startOnce sync.Once
 	stop      context.CancelFunc
 	done      chan struct{}
+}
+
+// lostRunCleanup is one pending retry of decision cleanup for a run the
+// reaper has already terminalized.
+type lostRunCleanup struct {
+	run       ledger.Run
+	errorCode string
 }
 
 // SetLostRunDecisionCanceller installs the application-owned cleanup for
@@ -121,6 +136,8 @@ func NewReaper(runs ledger.Store, liveness LivenessBackend, tune tuning, ownerID
 		ownerID:  strings.TrimSpace(ownerID),
 		logger:   logger.With(slog.String("component", "session_runtime_reaper")),
 		done:     make(chan struct{}),
+
+		decisionCleanups: make(map[string]lostRunCleanup),
 	}
 }
 
@@ -207,6 +224,12 @@ func (r *Reaper) tick(ctx context.Context) {
 	}
 	if err := r.repairOrphanedAdmissions(ctx); err != nil {
 		r.logger.WarnContext(ctx, "repair orphaned session runtime admissions failed", slog.Any("error", err))
+	}
+	if err := r.repairUnreservedClaims(ctx); err != nil {
+		r.logger.WarnContext(ctx, "repair unreserved session runtime claims failed", slog.Any("error", err))
+	}
+	if err := r.retryDecisionCleanups(ctx); err != nil {
+		r.logger.WarnContext(ctx, "retry lost run decision cleanup failed", slog.Any("error", err))
 	}
 	if r.terminalReconciler != nil {
 		if err := r.terminalReconciler(context.WithoutCancel(ctx)); err != nil {
@@ -387,6 +410,84 @@ func (r *Reaper) repairOrphanedAdmissions(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
+// repairUnreservedClaims covers the gap the orphan pass leaves one step later:
+// a run whose claim committed but whose live reservation never happened. The
+// claiming process died, or lost the claim's response, before reserving it,
+// or it could not release a run it failed to start. The row is running under
+// an owner and the current generation, and nothing in the live backend names
+// it, so no other duty would ever see it and its session would stay busy.
+//
+// Age alone cannot condemn a row, since healthy runs grow old too; the live
+// backend is asked about each one. The grace only has to clear the latency
+// between a claim and its reservation, which is the same window the orphan
+// pass waits out. waiting_decision is left alone: a graceful handoff
+// deliberately keeps such a run under an index entry with an older token.
+func (r *Reaper) repairUnreservedClaims(ctx context.Context) error {
+	var errs []error
+	for range r.tuning.maxScanBatchesPerTick {
+		runs, err := r.runs.ClaimedRuns(ctx, ledger.ClaimedRunQuery{
+			CurrentGeneration: r.generation,
+			MinAge:            r.tuning.orphanGrace,
+			After:             r.claimCursor,
+			Limit:             r.tuning.scanBatchSize,
+		})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("list claimed session runs: %w", err))
+			break
+		}
+		for _, run := range runs {
+			held, err := r.liveness.HoldsRunReservation(ctx, Key{BotID: run.BotID, SessionID: run.SessionID}, run.RunID, run.FencingToken)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("read session runtime reservation: %w", err))
+				continue
+			}
+			if held {
+				continue
+			}
+			// The state CAS keeps a run that moved on since the read, for
+			// example into waiting_decision, out of this pass's decision.
+			if _, err := r.markLost(ctx, run.RunID, run.FencingToken, runErrorAdmissionOrphaned, ledger.StateRunning); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		if len(runs) < int(r.tuning.scanBatchSize) {
+			r.claimCursor = ""
+			break
+		}
+		r.claimCursor = runs[len(runs)-1].RunID
+	}
+	return errors.Join(errs...)
+}
+
+// retryDecisionCleanups repeats decision cleanup for runs already terminal.
+// Cleanup is idempotent, so a run the expiry pass also retries is harmless.
+func (r *Reaper) retryDecisionCleanups(ctx context.Context) error {
+	var errs []error
+	for _, pending := range r.decisionCleanups {
+		if err := r.cancelRunDecisions(ctx, pending.run, pending.errorCode); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// cancelRunDecisions cancels the decisions a terminal run left pending and
+// remembers a failure for the next tick.
+func (r *Reaper) cancelRunDecisions(ctx context.Context, run ledger.Run, errorCode string) error {
+	if r.cancelLostRunDecisions == nil || run.BotID == "" || run.SessionID == "" {
+		return nil
+	}
+	cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	err := r.cancelLostRunDecisions(cancelCtx, run.BotID, run.SessionID, run.RunID, run.FencingToken, errorCode)
+	cancel()
+	if err != nil {
+		r.decisionCleanups[run.RunID] = lostRunCleanup{run: run, errorCode: errorCode}
+		return fmt.Errorf("cancel lost run decisions: %w", err)
+	}
+	delete(r.decisionCleanups, run.RunID)
+	return nil
+}
+
 // A graceful handoff can leave an index with the previous DB token. If the
 // decision expires before recovery, retire the authoritative run only after
 // checking that no live successor owns it. The state/token CAS arbitrates a
@@ -451,17 +552,10 @@ func (r *Reaper) markLost(ctx context.Context, runID string, fencingToken int64,
 			return false, nil
 		}
 	}
-	if r.cancelLostRunDecisions != nil && run.BotID != "" && run.SessionID != "" {
-		cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		cancelErr := r.cancelLostRunDecisions(cancelCtx, run.BotID, run.SessionID, run.RunID, run.FencingToken, errorCode)
-		cancel()
-		if cancelErr != nil {
-			// The run transition is authoritative and must not be rolled back.
-			// A later terminal reconciliation/reaper pass can retry decision
-			// cleanup without changing the lost outcome.
-			r.logger.WarnContext(ctx, "cancel lost run decisions failed", slog.String("run_id", run.RunID), slog.Any("error", cancelErr))
-		}
-	}
+	// The run transition is authoritative and is not rolled back when cleanup
+	// fails. The failure keeps the recovery pointer like a failed live repair
+	// does, and the cleanup is retried on later ticks either way.
+	cleanupErr := r.cancelRunDecisions(ctx, run, errorCode)
 	terminal := terminalRunFromLedger(run)
 	terminal.Applied = applied
 	var reconcileErr error
@@ -471,8 +565,8 @@ func (r *Reaper) markLost(ctx context.Context, runID string, fencingToken int64,
 	if r.terminalObserver != nil {
 		r.terminalObserver(context.WithoutCancel(ctx), terminal)
 	}
-	if reconcileErr != nil {
-		return false, reconcileErr
+	if err := errors.Join(cleanupErr, reconcileErr); err != nil {
+		return false, err
 	}
 	if !applied {
 		return true, nil

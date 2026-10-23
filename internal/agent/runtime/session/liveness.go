@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -48,6 +49,12 @@ type LivenessBackend interface {
 	// between read and release keeps its new entry.
 	ReleaseLeaseCandidate(ctx context.Context, candidate LeaseCandidate) (bool, error)
 
+	// HoldsRunReservation reports whether the backend still holds anything
+	// that keeps a run reachable: a live reservation, or a lease index entry
+	// under fencingToken that the expiry pass will consume. A claimed run for
+	// which this is false has no owner the reaper could ever hear from again.
+	HoldsRunReservation(ctx context.Context, key Key, runID string, fencingToken int64) (bool, error)
+
 	// AcquireLeaderLease elects the single cluster-wide reaper. Renewal is the
 	// same call: an existing holder re-acquires its own lease. Failover is safe
 	// because every reaper duty is an idempotent fenced transition, so a new
@@ -79,6 +86,18 @@ func (*MemoryBackend) ExpiredLeaseCandidates(context.Context, int64) ([]LeaseCan
 
 func (*MemoryBackend) ReleaseLeaseCandidate(context.Context, LeaseCandidate) (bool, error) {
 	return false, nil
+}
+
+// HoldsRunReservation reads the projection itself, because a memory backend
+// has no lease index: the run is held exactly while it is the session's active
+// run.
+func (b *MemoryBackend) HoldsRunReservation(ctx context.Context, key Key, runID string, _ int64) (bool, error) {
+	snapshot, ok, err := b.Load(ctx, key)
+	if err != nil || !ok {
+		return false, err
+	}
+	run := snapshot.CurrentRunView
+	return run != nil && run.RunID == strings.TrimSpace(runID) && isActiveRunStatus(run.Status), nil
 }
 
 // AcquireLeaderLease always succeeds: a single process is trivially the leader.

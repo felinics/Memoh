@@ -161,6 +161,42 @@ func (b *RedisBackend) ReleaseLeaseCandidate(ctx context.Context, candidate Leas
 	return removed > 0, nil
 }
 
+// HoldsRunReservation checks the routing reference and the lease index in one
+// round trip. The reference expires with the lease; the index entry outlives
+// it until the expiry pass has decided the run, so either one means some
+// existing path still owns the decision.
+func (b *RedisBackend) HoldsRunReservation(ctx context.Context, key Key, runID string, fencingToken int64) (bool, error) {
+	if b == nil || b.client == nil {
+		return false, errRedisBackendClosed
+	}
+	runID = strings.TrimSpace(runID)
+	var (
+		ref   *redis.IntCmd
+		index *redis.FloatCmd
+	)
+	// The pipeline's own error repeats the first command error, including the
+	// expected redis.Nil of an absent index member, so each command is read on
+	// its own instead.
+	_, _ = b.client.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+		ref = pipe.Exists(ctx, b.runKey(key, runID))
+		index = pipe.ZScore(ctx, b.leaseIndexKey(), encodeLeaseIndexMember(key, runID, fencingToken))
+		return nil
+	})
+	if err := ref.Err(); err != nil {
+		return false, fmt.Errorf("read session runtime reservation: %w", err)
+	}
+	if ref.Val() > 0 {
+		return true, nil
+	}
+	if indexErr := index.Err(); indexErr != nil {
+		if errors.Is(indexErr, redis.Nil) {
+			return false, nil
+		}
+		return false, fmt.Errorf("read session runtime lease index: %w", indexErr)
+	}
+	return true, nil
+}
+
 func (b *RedisBackend) AcquireLeaderLease(ctx context.Context, ownerID string, ttl time.Duration) (bool, error) {
 	if b == nil || b.client == nil {
 		return false, errRedisBackendClosed

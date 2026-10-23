@@ -86,6 +86,8 @@ owner 身份必须有跨实例可验证的租约或等价机制。owner 更换�
 
 进程内互斥只能优化单实例执行，不能作为多实例正确性的唯一依据。
 
+每个 active 状态都必须有不依赖 owner 进程存活的退出条件。claim 已提交、live 预留却从未写入（claim 后、预留前退出，claim 响应丢失，或放弃 claim 的终态写入本身失败）的 `running` run 既没有租约索引，generation 也仍是当前值；reaper 必须在超过 claim 到预留的正常时延后，向 live backend 确认它既无路由引用也无租约索引，再把它记为 `lost`。
+
 ### SR-OBS-001：重连后的权威快照
 
 客户端连接或重连到任意 Server 实例后，必须能够获得该 session 当前 run 的权威快照。快照至少包含：
@@ -164,6 +166,7 @@ run 进入终态时，终态、最终输出和 turn 投影必须形成一个一�
 - 新的输入、abort、steer 和 decision response 不能覆盖已接受的终态提案；
 - 第一次终态提案胜出，重试只能重放同一个结果；
 - owner 对持久化终态失败的本地重试必须有总预算；预算耗尽后，Redis/Valkey 部署停止续租并由 lease reaper 收敛，memory 部署把同一 fenced handle 交给本地 reaper 的共享重试队列，不能为每个 run 永久保留重试 goroutine；
+- ledger 已是终态而 live 释放失败时，owner 的重试同样有总预算，交接方式与上一条相同；reaper 以 durable outcome 修复 live 投影；
 - owner 进程退出、租约到期、live backend 更换或优雅关机时，reaper/关闭流程必须把提案收敛为其原始 `completed`、`aborted` 或 `failed`，不能改写为 `lost`；
 - 只有从未跨过终态提案边界的 active run 才能因 owner 消失进入 `lost`。
 

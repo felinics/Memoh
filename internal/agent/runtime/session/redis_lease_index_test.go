@@ -243,6 +243,51 @@ func runRedisLeaseIndexContract(t *testing.T, redisURL string) {
 		}
 	})
 
+	// The unreserved-claim pass may condemn a running row only when Redis holds
+	// nothing for it: neither a routing reference nor an index entry the
+	// expiry pass would still consume.
+	t.Run("reservation is held by its reference or its index entry", func(t *testing.T) {
+		ref := RunRef{
+			BotID: testBotID, SessionID: "session-lease-held", RunID: "run-lease-held",
+			OwnerID: "owner-lease-held", Generation: "gen-held", FencingToken: 21,
+		}
+		key := Key{BotID: ref.BotID, SessionID: ref.SessionID}
+		holds := func(token int64) bool {
+			t.Helper()
+			held, err := backend.HoldsRunReservation(ctx, key, ref.RunID, token)
+			if err != nil {
+				t.Fatalf("read reservation: %v", err)
+			}
+			return held
+		}
+		if holds(ref.FencingToken) {
+			t.Fatal("a run that was never reserved is held")
+		}
+		reserveRuntimeRun(ctx, t, backend, ref, time.Now().Add(200*time.Millisecond))
+		if !holds(ref.FencingToken) {
+			t.Fatal("a live reservation is not held")
+		}
+		// The reference expires with the lease; the index entry stays until the
+		// expiry pass decides the run.
+		time.Sleep(300 * time.Millisecond)
+		if !holds(ref.FencingToken) {
+			t.Fatal("an expired lease awaiting the expiry pass is not held")
+		}
+		if holds(ref.FencingToken + 1) {
+			t.Fatal("an index entry under another token holds a newer claim")
+		}
+		candidate, found := leaseCandidateFor(ctx, t, backend, ref.RunID)
+		if !found {
+			t.Fatal("expired reservation is not a lease candidate")
+		}
+		if _, err := backend.ReleaseLeaseCandidate(ctx, candidate); err != nil {
+			t.Fatalf("release lease candidate: %v", err)
+		}
+		if holds(ref.FencingToken) {
+			t.Fatal("a run with neither reference nor index entry is held")
+		}
+	})
+
 	// The whole point of the index is that a reaper can act on it. This is the
 	// one case that exercises both halves against a real backend: the member
 	// written by a reservation must decode into a candidate whose token matches

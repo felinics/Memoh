@@ -745,6 +745,9 @@ func (s *PostgresStore) Finalize(ctx context.Context, params FinalizeParams) (Ru
 	if err != nil {
 		return Run{}, false, fmt.Errorf("ledger(postgres): invalid run id: %w", err)
 	}
+	if params.State == StateLost {
+		return s.finalizeLost(ctx, params, runID)
+	}
 	row, err := s.q.FinalizeSessionRun(ctx, dbsqlc.FinalizeSessionRunParams{
 		RunID:         runID,
 		FencingToken:  params.FencingToken,
@@ -753,6 +756,77 @@ func (s *PostgresStore) Finalize(ctx context.Context, params FinalizeParams) (Ru
 		ExpectedState: textOrNull(string(params.ExpectedState)),
 	})
 	return applyResult("finalize run", row, err)
+}
+
+// finalizeLost advances the session persistence fence in the same transaction
+// as the lost transition. The owner of a lost run may still be alive — its lease
+// lapsed under a partition, not a crash — and until the fence moves its history
+// writes still pass the session check. The fence moves only while this run still
+// holds it: a successor that has already activated is never fenced out by a late
+// reaper decision.
+func (s *PostgresStore) finalizeLost(ctx context.Context, params FinalizeParams, runID pgtype.UUID) (Run, bool, error) {
+	if s.pool == nil {
+		return Run{}, false, errors.New("ledger(postgres): lost finalization requires a transaction pool")
+	}
+	current, err := s.Get(ctx, params.RunID)
+	if errors.Is(err, ErrRunNotFound) {
+		return Run{}, false, nil
+	}
+	if err != nil {
+		return Run{}, false, err
+	}
+	botID, err := dbpkg.ParseUUID(current.BotID)
+	if err != nil {
+		return Run{}, false, fmt.Errorf("ledger(postgres): invalid run bot id: %w", err)
+	}
+	sessionID, err := dbpkg.ParseUUID(current.SessionID)
+	if err != nil {
+		return Run{}, false, fmt.Errorf("ledger(postgres): invalid run session id: %w", err)
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Run{}, false, fmt.Errorf("ledger(postgres): begin lost finalization: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	txq := s.q.WithTx(tx)
+	holder, err := txq.LockSessionRuntimeFenceForActivation(ctx, dbsqlc.LockSessionRuntimeFenceForActivationParams{
+		BotID: botID, SessionID: sessionID,
+	})
+	sessionLocked := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return Run{}, false, fmt.Errorf("ledger(postgres): lock lost run session fence: %w", err)
+	}
+	row, err := txq.FinalizeSessionRun(ctx, dbsqlc.FinalizeSessionRunParams{
+		RunID:         runID,
+		FencingToken:  params.FencingToken,
+		State:         string(params.State),
+		ErrorCode:     textOrNull(params.ErrorCode),
+		ExpectedState: textOrNull(string(params.ExpectedState)),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Run{}, false, nil
+	}
+	if err != nil {
+		return Run{}, false, fmt.Errorf("ledger(postgres): finalize run: %w", err)
+	}
+	// Orphaned admissions carry token 0 and never held the fence; a finishing run
+	// that landed in its proposed state is not lost and must not move the fence.
+	if sessionLocked && params.FencingToken > 0 && row.State == string(StateLost) && holder == params.FencingToken {
+		// A successor that already drew its token but has not activated holds a
+		// value above params.FencingToken, so FencingToken+1 cannot shut it out:
+		// its activation requires fence <= its token. The old owner's token is
+		// below the new fence and therefore rejected.
+		if _, err := txq.ActivateSessionRuntimeFence(ctx, dbsqlc.ActivateSessionRuntimeFenceParams{
+			BotID: botID, SessionID: sessionID, RuntimeFencingToken: params.FencingToken + 1,
+		}); err != nil {
+			return Run{}, false, fmt.Errorf("ledger(postgres): advance fence for lost run: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Run{}, false, fmt.Errorf("ledger(postgres): commit lost finalization: %w", err)
+	}
+	return runFromRow(row), true, nil
 }
 
 func (s *PostgresStore) RequestAbort(ctx context.Context, runID string) (Run, bool, error) {
@@ -793,6 +867,32 @@ func (s *PostgresStore) OrphanedRuns(ctx context.Context, query OrphanQuery) ([]
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ledger(postgres): list orphaned runs: %w", err)
+	}
+	return runsFromRows(rows), nil
+}
+
+func (s *PostgresStore) ClaimedRuns(ctx context.Context, query ClaimedRunQuery) ([]Run, error) {
+	if err := s.ready(); err != nil {
+		return nil, err
+	}
+	// The zero UUID sorts before every run ID, so an empty cursor starts the
+	// keyset; a NULL one would match nothing.
+	after := pgtype.UUID{Valid: true}
+	if strings.TrimSpace(query.After) != "" {
+		parsed, err := dbpkg.ParseUUID(query.After)
+		if err != nil {
+			return nil, fmt.Errorf("ledger(postgres): invalid claimed run cursor: %w", err)
+		}
+		after = parsed
+	}
+	rows, err := s.q.ListClaimedSessionRuns(ctx, dbsqlc.ListClaimedSessionRunsParams{
+		CurrentGeneration: textOrNull(query.CurrentGeneration),
+		GraceSeconds:      query.MinAge.Seconds(),
+		AfterRunID:        after,
+		BatchSize:         query.Limit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ledger(postgres): list claimed runs: %w", err)
 	}
 	return runsFromRows(rows), nil
 }
