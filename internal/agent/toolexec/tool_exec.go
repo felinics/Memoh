@@ -3,6 +3,7 @@ package toolexec
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"unicode/utf8"
 
@@ -167,15 +168,35 @@ func runPendingTools(ctx context.Context, pending []pendingToolExec, results []s
 	case len(pending) == 1:
 		results[pending[0].idx] = runTool(ctx, &pending[0].tc, pending[0].tool, onPart)
 	case len(pending) > 1:
-		var wg sync.WaitGroup
+		var (
+			wg       sync.WaitGroup
+			panicMu  sync.Mutex
+			panicked bool
+			panicVal any
+		)
 		wg.Add(len(pending))
 		for _, p := range pending {
 			go func(p pendingToolExec) {
 				defer wg.Done()
+				// A tool goroutine has no recover above it. The panic is
+				// raised again on the calling goroutine, which belongs to the
+				// run and answers for it.
+				defer func() {
+					if r := recover(); r != nil {
+						panicMu.Lock()
+						defer panicMu.Unlock()
+						if !panicked {
+							panicked, panicVal = true, fmt.Errorf("tool goroutine panicked: %v\n%s", r, debug.Stack())
+						}
+					}
+				}()
 				results[p.idx] = runTool(ctx, &p.tc, p.tool, onPart)
 			}(p)
 		}
 		wg.Wait()
+		if panicked {
+			panic(panicVal)
+		}
 	}
 }
 

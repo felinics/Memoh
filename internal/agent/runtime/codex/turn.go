@@ -58,7 +58,10 @@ type turnState struct {
 	contextWindow *int64
 	turn          *protocol.Turn
 	turnErr       *protocol.TurnError
-	toolNames     map[string]string // item id → emitted tool name
+	// failure ends the turn with an error of Memoh's own making, such as a
+	// panic in a goroutine this turn started.
+	failure   error
+	toolNames map[string]string // item id → emitted tool name
 	// inflight tracks decision goroutines by server-request id so a
 	// serverRequest/resolved notification can withdraw them.
 	inflight map[string]context.CancelFunc
@@ -134,6 +137,11 @@ func (t *turnState) emit(ev event.StreamEvent) {
 // pump delivers queued events to the sink on its own goroutine.
 func (t *turnState) pump(ctx context.Context) {
 	defer close(t.pumpDone)
+	defer func() {
+		if r := recover(); r != nil {
+			t.fail("codex event delivery", r)
+		}
+	}()
 	for {
 		t.mu.Lock()
 		for len(t.queue) == 0 && !t.closed {
@@ -154,6 +162,19 @@ func (t *turnState) pump(ctx context.Context) {
 			t.input.Sink.EmitStreamEvent(ev)
 		}
 	}
+}
+
+// fail ends the turn with the internal failure a recovered panic becomes. The
+// caller recovers, since recover only takes effect in the deferred function
+// itself.
+func (t *turnState) fail(where string, r any) {
+	err := external.RecoveredPanic(t.ctx, t.logger, where, r, slog.String("thread_id", t.threadID))
+	t.mu.Lock()
+	if t.failure == nil {
+		t.failure = err
+	}
+	t.mu.Unlock()
+	t.finish()
 }
 
 func (t *turnState) finish() {
@@ -435,6 +456,12 @@ func (t *turnState) toolName(itemID string) string {
 // flow and answers the app-server. Runs on its own goroutine, bounded by the
 // turn-scoped context and cancellable via serverRequest/resolved.
 func (t *turnState) handleServerRequest(c *conn, req *protocol.Inbound, decoded any) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.fail("codex server request", r)
+			_ = c.RespondError(req.ID, -32000, "memoh failed while deciding this request")
+		}
+	}()
 	ctx, cancel := context.WithCancel(t.ctx)
 	defer cancel()
 	key := req.ID.Key()
@@ -684,6 +711,9 @@ func (t *turnState) result() (external.PromptResult, error) {
 		}
 	}
 
+	if t.failure != nil {
+		return out, t.failure
+	}
 	var turnErr *protocol.TurnError
 	status := protocol.TurnStatusFailed
 	if t.turn != nil {

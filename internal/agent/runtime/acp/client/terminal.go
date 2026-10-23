@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +13,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
@@ -25,6 +27,8 @@ const (
 )
 
 type terminalManager struct {
+	fail       func(error)
+	logger     *slog.Logger
 	ctx        context.Context
 	client     *bridge.Client
 	root       string
@@ -58,6 +62,9 @@ type terminalApprovalResult struct {
 }
 
 type terminal struct {
+	ctx            context.Context
+	logger         *slog.Logger
+	fail           func(error)
 	stream         *bridge.ExecStream
 	outputLimit    ToolOutputLimit
 	id             string
@@ -212,7 +219,7 @@ func (m *terminalManager) CreateTerminal(ctx context.Context, p acp.CreateTermin
 		return acp.CreateTerminalResponse{}, err
 	}
 
-	term := &terminal{stream: stream, outputLimit: outputLimit, id: toolCallID, input: input, releaseContext: releaseExecContext, done: make(chan struct{}), endReported: make(chan struct{}), onDone: m.emitTerminalEnd}
+	term := &terminal{ctx: m.ctx, logger: m.logger, fail: m.fail, stream: stream, outputLimit: outputLimit, id: toolCallID, input: input, releaseContext: releaseExecContext, done: make(chan struct{}), endReported: make(chan struct{}), onDone: m.emitTerminalEnd}
 	m.mu.Lock()
 	m.terminals[id] = term
 	m.mu.Unlock()
@@ -405,6 +412,15 @@ func (m *terminalManager) remove(id string) (*terminal, error) {
 
 func (t *terminal) readLoop() {
 	defer func() {
+		if r := recover(); r != nil {
+			err := external.RecoveredPanic(t.ctx, t.logger, "acp terminal", r)
+			t.kill("internal_error")
+			if t.fail != nil {
+				t.fail(err)
+			}
+		}
+	}()
+	defer func() {
 		if t.onDone != nil {
 			t.onDone(t)
 		}
@@ -513,7 +529,9 @@ func (t *terminal) markReported() bool {
 }
 
 func (t *terminal) kill(signal string) {
-	_ = t.stream.Close()
+	if t.stream != nil {
+		_ = t.stream.Close()
+	}
 	t.finish(nil, &signal)
 }
 

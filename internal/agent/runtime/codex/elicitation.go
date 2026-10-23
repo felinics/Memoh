@@ -57,6 +57,12 @@ func (s *appServer) soleActiveTurn() *turnState {
 // turn context, registered in inflight so serverRequest/resolved can cancel
 // it, and refused outright once the turn has closed.
 func (t *turnState) handleElicitation(c *conn, req *protocol.Inbound, params *protocol.McpServerElicitationRequestParams) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.fail("codex elicitation", r)
+			_ = c.RespondError(req.ID, -32000, "memoh failed while deciding this request")
+		}
+	}()
 	ctx, cancel := context.WithCancel(t.ctx)
 	defer cancel()
 	key := req.ID.Key()

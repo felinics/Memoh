@@ -32,6 +32,11 @@ func startSteering(ctx context.Context, client *conn, turn *turnState) func() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		defer func() {
+			if r := recover(); r != nil {
+				turn.fail("codex steering", r)
+			}
+		}()
 		defer func() { _ = source.Close(ctx) }()
 		if err := source.Enable(workerCtx); err != nil {
 			return

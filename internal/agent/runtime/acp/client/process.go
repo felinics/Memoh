@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
@@ -154,38 +155,49 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 		}
 	}()
 
-	go func() {
-		defer close(proc.done)
-		for {
-			output, recvErr := execStream.Recv()
-			if recvErr != nil {
-				if !errors.Is(recvErr, io.EOF) {
-					_ = stdoutW.CloseWithError(errs.WrapDependency(recvErr, ""))
-				} else {
-					_ = stdoutW.Close()
-				}
-				return
-			}
-			switch output.GetStream() {
-			case pb.ExecOutput_STDOUT:
-				if _, err := stdoutW.Write(output.GetData()); err != nil {
-					_ = stdoutW.CloseWithError(err)
-					return
-				}
-			case pb.ExecOutput_STDERR:
-				proc.tail.append(output.GetData())
-			case pb.ExecOutput_EXIT:
-				_ = stdoutW.Close()
-				return
-			}
-		}
-	}()
+	go proc.readOutput(ctx, stdoutW)
 	go func(parent context.Context) {
 		<-proc.done
 		proc.finalizeAfterExit(parent)
 	}(ctx)
 
 	return proc, nil
+}
+
+func (proc *bridgeProcess) readOutput(ctx context.Context, stdoutW *io.PipeWriter) {
+	defer close(proc.done)
+	defer func() {
+		if r := recover(); r != nil {
+			err := external.RecoveredPanic(ctx, proc.logger, "acp process reader", r)
+			_ = stdoutW.CloseWithError(err)
+			if proc.stream != nil {
+				_ = proc.stream.Close()
+			}
+		}
+	}()
+	for {
+		output, recvErr := proc.stream.Recv()
+		if recvErr != nil {
+			if !errors.Is(recvErr, io.EOF) {
+				_ = stdoutW.CloseWithError(errs.WrapDependency(recvErr, ""))
+			} else {
+				_ = stdoutW.Close()
+			}
+			return
+		}
+		switch output.GetStream() {
+		case pb.ExecOutput_STDOUT:
+			if _, err := stdoutW.Write(output.GetData()); err != nil {
+				_ = stdoutW.CloseWithError(err)
+				return
+			}
+		case pb.ExecOutput_STDERR:
+			proc.tail.append(output.GetData())
+		case pb.ExecOutput_EXIT:
+			_ = stdoutW.Close()
+			return
+		}
+	}
 }
 
 func normalizeSetupMode(mode SetupMode) SetupMode {
@@ -354,6 +366,11 @@ func (p *bridgeProcess) finalizeAfterExit(parent context.Context) {
 	}
 	p.finalizeOnce.Do(func() {
 		defer close(p.finalizeDone)
+		defer func() {
+			if r := recover(); r != nil {
+				p.finalizeErr = external.RecoveredPanic(parent, p.logger, "acp process finalizer", r)
+			}
+		}()
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 15*time.Second)
 		defer cancel()
 		p.finalizeErr = p.lease.finalize(ctx)

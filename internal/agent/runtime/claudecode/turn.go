@@ -146,6 +146,14 @@ func (t *turnRunner) finish() {
 	t.doneOnce.Do(func() { close(t.done) })
 }
 
+func (t *turnRunner) failPanic(where string, recovered any) {
+	err := external.RecoveredPanic(t.ctx, t.logger, where, recovered)
+	t.mu.Lock()
+	t.protocolErr = errors.Join(t.protocolErr, err)
+	t.mu.Unlock()
+	t.finish()
+}
+
 func (t *turnRunner) writeLine(line []byte) error {
 	t.writeMu.Lock()
 	defer t.writeMu.Unlock()
@@ -198,13 +206,25 @@ func (t *turnRunner) callControl(ctx context.Context, subtype string, extra map[
 	}
 }
 
+func (t *turnRunner) runError(err error) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.protocolErr != nil {
+		return t.protocolErr
+	}
+	return err
+}
+
 func (t *turnRunner) processError(operation string) error {
 	t.mu.Lock()
 	protocolErr := t.protocolErr
 	t.mu.Unlock()
+	if protocolErr != nil {
+		return protocolErr
+	}
 	return errors.Join(
 		errs.NewDependency(fmt.Sprintf("claude %s: stream ended; stderr: %s", operation, t.proc.StderrTail())),
-		t.proc.Err(), protocolErr,
+		t.proc.Err(),
 	)
 }
 
@@ -231,6 +251,12 @@ func (t *turnRunner) getSettings(ctx context.Context) (settingsResponse, error) 
 // readLoop consumes the CLI's NDJSON stream until the process exits.
 func (t *turnRunner) readLoop() {
 	defer close(t.readDone)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.failPanic("claudecode read loop", recovered)
+		}
+		t.finish()
+	}()
 	scanner := bufio.NewScanner(t.proc)
 	scanner.Buffer(make([]byte, 64*1024), maxLineBytes)
 	for scanner.Scan() {
@@ -480,12 +506,22 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 			requestCtx, done := t.beginInboundControl(msg.RequestID)
 			go func() {
 				defer done()
+				defer func() {
+					if recovered := recover(); recovered != nil {
+						t.failPanic("claudecode elicitation handler", recovered)
+					}
+				}()
 				t.handleElicitation(requestCtx, msg.RequestID, msg.Request)
 			}()
 		case "can_use_tool":
 			requestCtx, done := t.beginInboundControl(msg.RequestID)
 			go func() {
 				defer done()
+				defer func() {
+					if recovered := recover(); recovered != nil {
+						t.failPanic("claudecode can-use-tool handler", recovered)
+					}
+				}()
 				t.handleCanUseTool(requestCtx, msg.RequestID, &payload)
 			}()
 		default:

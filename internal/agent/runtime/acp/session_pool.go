@@ -24,6 +24,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 	"github.com/felinics/memoh/internal/agent/runtime/agentstate"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
@@ -946,7 +947,9 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 
 	p.persistModelPreference(ctx, h)
 
-	turn := client.NewTurnSink(input.Sink, input.ToolOutputLimit)
+	ctx, failPrompt := context.WithCancelCause(ctx)
+	defer failPrompt(nil)
+	turn := client.NewTurnSinkWithFailure(ctx, p.logger, input.Sink, input.ToolOutputLimit, failPrompt)
 	defer turn.Finish()
 	unregisterToolEvents := toolmount.RegisterTurnSink(p.contexts, input.BotID, input.SessionID, input.RunID, turn.EmitStreamEvent)
 	defer unregisterToolEvents()
@@ -958,8 +961,12 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 	// outcome once the turn is cancelled), letting the handshake complete
 	// inside its grace window so the runtime survives the Stop.
 	promptDone := make(chan struct{})
-	defer close(promptDone)
+	var finishPromptOnce sync.Once
+	finishPrompt := func() { finishPromptOnce.Do(func() { close(promptDone) }) }
+	defer finishPrompt()
+	cleanupDone := make(chan struct{})
 	go func() {
+		defer close(cleanupDone)
 		select {
 		case <-ctx.Done():
 		case <-promptDone:
@@ -971,8 +978,10 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 				return
 			}
 		}
-		p.cancelPendingDecisions(context.WithoutCancel(ctx), toolCtx.BotID, toolCtx.SessionID,
-			"decision cancelled: the turn was aborted before a response arrived")
+		if err := p.cancelPendingDecisions(context.WithoutCancel(ctx), toolCtx.BotID, toolCtx.SessionID,
+			"decision cancelled: the turn was aborted before a response arrived"); err != nil {
+			failPrompt(err)
+		}
 	}()
 
 	resources := promptResources(input)
@@ -987,11 +996,19 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 		options.Images = nil
 		result, err = sess.PromptWithToolContextOptions(ctx, input.Prompt, resources, toolCtx, options, turn)
 	}
+	finishPrompt()
+	<-cleanupDone
 	// Stop MCP deliveries and wait for any event already inside the store's
 	// read-side critical section before taking the durable result snapshot.
 	unregisterToolEvents()
 	// The turn sink's record also holds the gateway's tool events.
 	result.Output = turn.Transcript(result.Text)
+	if sinkErr := turn.Err(); sinkErr != nil {
+		err = sinkErr
+	}
+	if cause := context.Cause(ctx); cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) {
+		err = cause
+	}
 	if err != nil {
 		if errors.Is(err, client.ErrImagePromptUnsupported) ||
 			errors.Is(err, client.ErrInvalidPromptImage) ||
@@ -1023,7 +1040,7 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 				// blocked in the connection write lock. Break the transport first;
 				// graceful teardown would otherwise block trying session/close behind
 				// that same writer and never reach the process close.
-				_ = sess.ForceClose() //nolint:contextcheck // forced lifecycle teardown must outlive the cancelled turn.
+				_ = sess.ForceClose() //nolint:contextcheck // recovery closes the affected owned process. //nolint:contextcheck // forced lifecycle teardown must outlive the cancelled turn.
 				_ = p.teardown(h)     //nolint:contextcheck // lifecycle close uses the handle owner context.
 			}
 			return result, false, err
@@ -1984,6 +2001,21 @@ func (p *SessionPool) tryCloseIdle(h *runtimeHandle, minIdle time.Duration) bool
 	}
 	defer h.op.Unlock()
 	h.state.Lock()
+	sess := h.session
+	owner := h.ownerCtx
+	h.state.Unlock()
+	if owner == nil {
+		owner = context.Background()
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			_ = external.RecoveredPanic(owner, p.logger, "acp idle reaper", r)
+			if sess != nil {
+				_ = sess.ForceClose() //nolint:contextcheck // recovery closes the affected owned process.
+			}
+		}
+	}()
+	h.state.Lock()
 	eligible := !h.closed && h.status == stateIdle &&
 		(minIdle <= 0 || time.Since(h.lastActive) > minIdle)
 	h.state.Unlock()
@@ -2114,29 +2146,35 @@ func (p *SessionPool) cancelHandlePendingDecisions(parent context.Context, h *ru
 		cleanupCtx = runtimefence.WithContext(cleanupCtx, fence)
 	}
 	once.Do(func() {
-		p.cancelPendingDecisions(cleanupCtx, h.botID, sessionID, reason)
+		_ = p.cancelPendingDecisions(cleanupCtx, h.botID, sessionID, reason)
 	})
 }
 
 //nolint:contextcheck // lifecycle cleanup is detached from the closed prompt but retains its fence value.
-func (p *SessionPool) cancelPendingDecisions(parent context.Context, botID, sessionID, reason string) {
+func (p *SessionPool) cancelPendingDecisions(parent context.Context, botID, sessionID, reason string) error {
 	botID = strings.TrimSpace(botID)
 	sessionID = strings.TrimSpace(sessionID)
 	if p == nil || botID == "" || sessionID == "" {
-		return
+		return nil
 	}
 	if parent == nil {
 		p.logger.ErrorContext(parent, "skip pending ACP decision cleanup without normalized parent context",
 			slog.String("bot_id", botID), slog.String("session_id", sessionID))
-		return
+		return nil
 	}
 	var cleanup sync.WaitGroup
+	failures := make(chan error, 2)
 	if approval, ok := p.approval.(interface {
 		CancelPendingForSession(context.Context, string, string, string) ([]toolapproval.Request, error)
 	}); ok {
 		cleanup.Add(1)
 		go func() {
 			defer cleanup.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					failures <- external.RecoveredPanic(parent, p.logger, "acp pending decision cleanup", r)
+				}
+			}()
 			ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
 			defer cancel()
 			if _, err := approval.CancelPendingForSession(ctx, botID, sessionID, reason); err != nil && !errors.Is(err, runtimefence.ErrStale) {
@@ -2151,6 +2189,11 @@ func (p *SessionPool) cancelPendingDecisions(parent context.Context, botID, sess
 		cleanup.Add(1)
 		go func() {
 			defer cleanup.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					failures <- external.RecoveredPanic(parent, p.logger, "acp pending decision cleanup", r)
+				}
+			}()
 			ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
 			defer cancel()
 			if _, err := p.userInput.CancelPendingForSession(ctx, botID, sessionID, reason); err != nil && !errors.Is(err, runtimefence.ErrStale) {
@@ -2162,6 +2205,12 @@ func (p *SessionPool) cancelPendingDecisions(parent context.Context, botID, sess
 		}()
 	}
 	cleanup.Wait()
+	close(failures)
+	var result error
+	for err := range failures {
+		result = errors.Join(result, err)
+	}
+	return result
 }
 
 func (p *SessionPool) CloseAll() {

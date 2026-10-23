@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -71,6 +72,7 @@ func (s *recordingContextLifecycleStore) CreateContextLifecycle(
 }
 
 type lifecycleTurnAdmitter struct {
+	mu        sync.Mutex
 	admission sessionruntime.Admission
 	cancel    context.CancelFunc
 	finishes  []recordedFinish
@@ -90,6 +92,8 @@ func (a *lifecycleTurnAdmitter) FinishRunWithErrorCode(
 	handle sessionruntime.RunHandle,
 	status, code string,
 ) (sessionruntime.TerminalRun, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.finishes = append(a.finishes, recordedFinish{handle: handle, status: status, message: code})
 	return sessionruntime.TerminalRun{}, a.finishErr
 }

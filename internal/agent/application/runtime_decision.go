@@ -443,8 +443,10 @@ func (s *Service) continueRuntimeDecision(
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
-		runDone <- continueRun(runCtx, lifecycle, eventCh)
-		close(eventCh)
+		defer close(eventCh)
+		runDone <- s.containedRun(runCtx, "decision continuation", nil, func() error {
+			return continueRun(runCtx, lifecycle, eventCh)
+		})
 	}()
 
 	var (

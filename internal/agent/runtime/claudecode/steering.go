@@ -30,6 +30,11 @@ func (t *turnRunner) startSteering(ctx context.Context) func() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				t.failPanic("claudecode steering worker", recovered)
+			}
+		}()
 		defer func() { _ = source.Close(ctx) }()
 		select {
 		case <-t.ready:

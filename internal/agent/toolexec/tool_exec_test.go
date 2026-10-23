@@ -438,3 +438,40 @@ func TestBuildStepMessages_InvalidArgumentsReplayAsEmptyObject(t *testing.T) {
 		t.Fatalf("valid call changed: %#v", second.Input)
 	}
 }
+
+// Parallel tools run on goroutines of their own. A panic in one is raised again
+// on the goroutine that called ExecuteTools, where the run's recover can see
+// it, after the other tools have finished.
+func TestExecuteTools_ParallelToolPanicReachesTheCaller(t *testing.T) {
+	var finished bool
+	panicTool := toolexec.Tool{
+		Name:       "panics",
+		Parameters: objSchema(),
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			panic("tool boom")
+		},
+	}
+	slowTool := toolexec.Tool{
+		Name:       "finishes",
+		Parameters: objSchema(),
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			finished = true
+			return sdk.TextOutput("ok"), nil
+		},
+	}
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("ExecuteTools returned normally, want the tool's panic raised on the caller")
+		}
+		if err, ok := r.(error); !ok || !strings.Contains(err.Error(), "tool boom") {
+			t.Fatalf("recovered %v, want an error naming the tool's panic", r)
+		}
+	}()
+	_, _ = toolexec.ExecuteTools(context.Background(), []sdk.ToolCall{
+		{ToolCallID: "c1", ToolName: "panics", Input: sdk.ParseToolArguments(`{}`)},
+		{ToolCallID: "c2", ToolName: "finishes", Input: sdk.ParseToolArguments(`{}`)},
+	}, toolexec.ToolExecOptions{Tools: []toolexec.Tool{panicTool, slowTool}})
+	_ = finished
+}

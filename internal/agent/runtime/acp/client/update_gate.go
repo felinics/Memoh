@@ -3,13 +3,17 @@ package client
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"sync"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 )
 
 const (
@@ -41,20 +45,44 @@ var errUpdatesStalled = errors.New("ACP session/update handling stalled")
 // update wait with it, which is why no notification handler may wait on the
 // Agent or on anything that does.
 type updateGate struct {
-	logger  *slog.Logger
-	lines   *bufio.Scanner
-	slots   chan struct{}
-	line    []byte
-	pending []byte
+	stop     chan struct{}
+	stopOnce sync.Once
+	reader   io.Reader
+	logger   *slog.Logger
+	lines    *bufio.Scanner
+	slots    chan struct{}
+	line     []byte
+	pending  []byte
 }
 
 func newUpdateGate(logger *slog.Logger, r io.Reader) *updateGate {
 	lines := bufio.NewScanner(r)
 	lines.Buffer(nil, maxAgentLineSize)
-	return &updateGate{logger: logger, lines: lines, slots: make(chan struct{}, maxQueuedUpdates)}
+	return &updateGate{reader: r, stop: make(chan struct{}), logger: logger, lines: lines, slots: make(chan struct{}, maxQueuedUpdates)}
 }
 
-func (g *updateGate) Read(p []byte) (int, error) {
+func (g *updateGate) fail(_ error) {
+	g.stopOnce.Do(func() {
+		close(g.stop)
+		if closer, ok := g.reader.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	})
+}
+
+func (g *updateGate) Read(p []byte) (n int, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = external.RecoveredPanic(context.Background(), g.logger, "acp reader", r)
+			g.fail(err)
+			n = 0
+		}
+	}()
+	select {
+	case <-g.stop:
+		return 0, io.ErrClosedPipe
+	default:
+	}
 	for len(g.pending) == 0 {
 		if !g.lines.Scan() {
 			if err := g.lines.Err(); err != nil {
@@ -70,7 +98,7 @@ func (g *updateGate) Read(p []byte) (int, error) {
 		g.line = append(append(g.line[:0], g.lines.Bytes()...), '\n')
 		g.pending = g.line
 	}
-	n := copy(p, g.pending)
+	n = copy(p, g.pending)
 	g.pending = g.pending[n:]
 	return n, nil
 }
@@ -86,6 +114,8 @@ func (g *updateGate) acquire() error {
 	select {
 	case g.slots <- struct{}{}:
 		return nil
+	case <-g.stop:
+		return io.ErrClosedPipe
 	case <-stall.C:
 		if g.logger != nil {
 			g.logger.Error("ACP session/update handling stalled; closing connection",

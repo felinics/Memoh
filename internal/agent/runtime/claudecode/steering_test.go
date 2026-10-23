@@ -279,3 +279,34 @@ func TestClaudeSteeringStopDoesNotReportUndeliveredInput(t *testing.T) {
 		}
 	}
 }
+
+type panicSteering struct {
+	steerRecorder
+	onClose bool
+}
+
+func (s *panicSteering) Next(context.Context) (external.SteerInput, bool, error) {
+	if !s.onClose {
+		panic("steering callback")
+	}
+	return external.SteerInput{}, false, nil
+}
+func (*panicSteering) Close(context.Context) error { panic("steering close callback") }
+
+func TestClaudeSteeringRecoversPanic(t *testing.T) {
+	for _, onClose := range []bool{false, true} {
+		t.Run(strconv.FormatBool(onClose), func(t *testing.T) {
+			r := newTestRunner(&recordingSink{})
+			defer r.close()
+			r.input.Steering = &panicSteering{onClose: onClose}
+			r.steerSupported = true
+			close(r.ready)
+			stop := r.startSteering(context.Background())
+			if onClose {
+				stop()
+			}
+			assertClaudePanicFailure(t, r)
+			stop()
+		})
+	}
+}

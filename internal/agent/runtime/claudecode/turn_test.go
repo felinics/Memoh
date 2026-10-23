@@ -17,6 +17,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/runtime/claudecode/claudecfg"
@@ -98,6 +99,33 @@ func feed(t *testing.T, r *turnRunner, line string) {
 		t.Fatalf("decode: %v", err)
 	}
 	r.handleMessage(msg)
+}
+
+type panickingSink struct{}
+
+func (panickingSink) EmitStreamEvent(event.StreamEvent) { panic("sink failure") }
+
+func TestClaudeReadLoopRecoversSinkPanic(t *testing.T) {
+	r := newTurnRunner(context.Background(), external.PromptInput{Sink: panickingSink{}}, &testCLIProcess{done: make(chan struct{})}, nil, nil, slog.Default())
+	if _, err := r.proc.(*testCLIProcess).WriteString(`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"panic"}}}` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	go r.readLoop()
+	select {
+	case <-r.readDone:
+	case <-time.After(time.Second):
+		t.Fatal("read loop hung after sink panic")
+	}
+	select {
+	case <-r.done:
+	default:
+		t.Fatal("turn did not finish after sink panic")
+	}
+	_, err := r.buildResult("")
+	if !external.IsPanic(err) {
+		t.Fatalf("error = %v, want a recovered panic", err)
+	}
 }
 
 func TestClaudeTurnMapping(t *testing.T) {
@@ -741,3 +769,69 @@ func TestClaudeCatalogKeepsResolvedAlias(t *testing.T) {
 }
 
 func (*testCLIProcess) Err() error { return nil }
+
+type panicUserInput struct{ testUserInputService }
+
+func (*panicUserInput) CreatePending(context.Context, userinput.CreatePendingInput) (userinput.Request, error) {
+	panic("user input callback")
+}
+
+type panicApproval struct{ cancelAwareApproval }
+
+func (*panicApproval) CreatePending(context.Context, approval.CreatePendingInput) (approval.Request, error) {
+	panic("approval callback")
+}
+
+func TestClaudeControlHandlersRecoverPanic(t *testing.T) {
+	for _, tc := range []struct{ name, line string }{
+		{"elicitation", `{"type":"control_request","request_id":"elicitation","request":{"subtype":"elicitation","mode":"url","url":"https://example.com"}}`},
+		{"can_use_tool", `{"type":"control_request","request_id":"approval","request":{"subtype":"can_use_tool","tool_name":"Bash","tool_use_id":"tool-1","input":{"command":"pwd"}}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := controlTestRunner()
+			defer r.close()
+			r.input.CanRequestUserInput = true
+			r.approval = &panicApproval{}
+			r.userInput = &panicUserInput{}
+			feed(t, r, tc.line)
+			assertClaudePanicFailure(t, r)
+		})
+	}
+}
+
+func assertClaudePanicFailure(t *testing.T, r *turnRunner) {
+	t.Helper()
+	select {
+	case <-r.done:
+	case <-time.After(time.Second):
+		t.Fatal("turn hung after panic")
+	}
+	result, err := r.buildResult("")
+	if !external.IsPanic(err) || result.TurnCompleted {
+		t.Fatalf("result = %+v, error = %v", result, err)
+	}
+	if got := r.runError(external.Unavailable(errors.New("initialize failed"))); !external.IsPanic(got) {
+		t.Fatalf("startup error lost panic code: %v", got)
+	}
+}
+
+func TestClaudeControlReadLoopRecoversVersionCallbackPanic(t *testing.T) {
+	r := newTestRunner(&recordingSink{})
+	defer r.close()
+	proc := r.proc.(*testCLIProcess)
+	if _, err := proc.WriteString(`{"type":"system","subtype":"init","claude_code_version":"2.1.269"}` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	r.onCLIVersion = func(context.Context, string) { panic("version callback") }
+	go r.readLoop()
+	select {
+	case <-r.readDone:
+	case <-time.After(time.Second):
+		t.Fatal("control read loop hung")
+	}
+	assertClaudePanicFailure(t, r)
+	_, err := r.callControl(context.Background(), "initialize", nil)
+	if !external.IsPanic(err) {
+		t.Fatalf("control failure = %v", err)
+	}
+}

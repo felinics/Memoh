@@ -532,6 +532,7 @@ func (e *streamEngine) emit(evt StreamEvent) bool {
 func (e *streamEngine) run() {
 	defer close(e.done)
 	defer close(e.events)
+	defer e.containEnginePanic()
 	defer func() {
 		// The trailing probe flush mirrors the legacy post-loop flush: a loop
 		// detected in the final unflushed window still marks the run aborted.

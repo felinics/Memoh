@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/servertable"
 	"github.com/felinics/memoh/internal/agentcredential"
@@ -20,6 +21,42 @@ import (
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
+
+type panicTextSink struct{}
+
+func (panicTextSink) EmitStreamEvent(ev event.StreamEvent) {
+	if ev.Type == event.TextDelta {
+		panic("grok stream consumer panic")
+	}
+}
+
+type promptBridges struct{ unreachableBridges }
+
+func (promptBridges) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
+	return bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer}, nil
+}
+
+func TestPromptReportsSinkPanicAsInternal(t *testing.T) {
+	botID, agentID := uuid.New(), uuid.New()
+	srv := newTestServer(t, &fakeGrok{})
+	srv.done = make(chan struct{})
+	q := &signInQueries{agent: sqlc.BotAgent{
+		ID: pgtype.UUID{Bytes: agentID, Valid: true}, BotID: pgtype.UUID{Bytes: botID, Valid: true},
+		Runtime: RuntimeType, Enabled: true, Metadata: []byte(`{"auth":"api_key","provider":"grok-build"}`),
+	}}
+	d := &Driver{
+		bridges: promptBridges{}, agents: botagents.NewService(slog.Default(), q), logger: slog.Default(),
+		servers: servertable.New(func(context.Context, string) (servertable.Resource, error) { return srv, nil }, slog.Default()),
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	result, err := d.Prompt(ctx, external.PromptInput{
+		BotID: botID.String(), BotAgentID: agentID.String(), ThreadID: "thread", Prompt: "hello", Sink: panicTextSink{},
+	})
+	if !external.IsPanic(err) || result.TurnCompleted {
+		t.Fatalf("Prompt() = %+v, %v; want failed internal run", result, err)
+	}
+}
 
 func TestSignInHandsOutTheDeviceURLWhileGrokWaits(t *testing.T) {
 	grok := &fakeGrok{approve: make(chan struct{})}
@@ -48,6 +85,21 @@ func TestSignInHandsOutTheDeviceURLWhileGrokWaits(t *testing.T) {
 	}
 	if s.err != nil || s.meta["email"] != "dev@example.test" {
 		t.Fatalf("sign-in ended with err=%v meta=%v", s.err, s.meta)
+	}
+}
+
+func TestSignInRecoversAuthenticatePanic(t *testing.T) {
+	s := &signIn{id: "login-panic", done: make(chan struct{}), logger: slog.Default()}
+	go s.authenticateAsync(t.Context(), func(context.Context) (map[string]any, error) {
+		panic("decoder panic")
+	})
+	select {
+	case <-s.done:
+	case <-time.After(time.Second):
+		t.Fatal("authenticate goroutine did not finish")
+	}
+	if !external.IsPanic(s.err) {
+		t.Fatalf("authenticate error = %v, want internal error", s.err)
 	}
 }
 

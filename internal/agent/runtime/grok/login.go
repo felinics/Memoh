@@ -59,6 +59,7 @@ type signIn struct {
 	client     *bridge.Client
 	proc       *agentprocess.Process
 	conn       *acpclient.Conn
+	logger     *slog.Logger
 	cancel     context.CancelFunc
 	// expiry ends the sign-in at signInTTL; endSignIn stops it.
 	expiry *time.Timer
@@ -119,7 +120,7 @@ func (d *Driver) launchSignIn(ctx context.Context, botID, botAgentID string) (*s
 	if err != nil {
 		return nil, err
 	}
-	s := &signIn{id: uuid.NewString(), botID: botID, botAgentID: botAgentID, client: client, done: make(chan struct{})}
+	s := &signIn{id: uuid.NewString(), botID: botID, botAgentID: botAgentID, client: client, logger: d.logger, done: make(chan struct{})}
 	s.home = signInHomePrefix + s.id
 	if err := client.Mkdir(ctx, s.home); err != nil {
 		return nil, errs.WrapDependency(err, "")
@@ -256,11 +257,21 @@ func (d *Driver) closeSignIns() {
 func (s *signIn) begin(ctx context.Context) (external.DeviceLoginStart, error) {
 	authCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	s.cancel = cancel
-	go func() {
-		defer close(s.done)
-		s.meta, s.err = s.conn.Authenticate(authCtx, authMethodID)
-	}()
+	go s.authenticateAsync(authCtx, func(ctx context.Context) (map[string]any, error) {
+		return s.conn.Authenticate(ctx, authMethodID)
+	})
+
 	return s.awaitURL(ctx)
+}
+
+func (s *signIn) authenticateAsync(ctx context.Context, authenticate func(context.Context) (map[string]any, error)) {
+	defer close(s.done)
+	defer func() {
+		if r := recover(); r != nil {
+			s.err = external.RecoveredPanic(ctx, s.logger, "grok sign-in authenticate", r)
+		}
+	}()
+	s.meta, s.err = authenticate(ctx)
 }
 
 // awaitURL waits for Grok to publish the device URL of the sign-in that has

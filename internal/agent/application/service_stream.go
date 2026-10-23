@@ -308,6 +308,14 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			default:
 			}
 		}
+		// Registered after fail so the span and errCh agree on the outcome.
+		// Before the run's outcome recorder exists a panic has no lifecycle to
+		// settle, only the caller to answer.
+		defer func() {
+			if r := recover(); r != nil {
+				settlePanickedRun(ctx, s.logger, "stream", runIDs(req.BotID, req.ThreadID, req.RunID), r, fail)
+			}
+		}()
 		if err := s.recordRunResumeContext(ctx, req); err != nil {
 			fail(err)
 			return
@@ -381,10 +389,30 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
 		idleCtx, idleCancel := s.withStreamIdleTimeout(streamCtx, reasoningEffortForIdle(cfg))
 		defer idleCancel.Stop()
+		// Registered after finishLifecycle so it runs first: the lifecycle
+		// terminal must see the panic as the run's cause. The producer is
+		// cancelled and drained, since it would otherwise keep running and then
+		// wait for events nobody reads.
+		var eventCh <-chan native.StreamEvent
+		defer func() {
+			if r := recover(); r != nil {
+				settlePanickedRun(ctx, s.logger, "stream consumer", runIDs(streamReq.BotID, streamReq.ThreadID, streamReq.RunID), r, func(cause error) {
+					outcome.setCause(cause)
+					idleCancel.Cancel(cause)
+					if eventCh != nil {
+						go func() {
+							for range eventCh { //nolint:revive // discarding is the point
+							}
+						}()
+					}
+					fail(cause)
+				})
+			}
+		}()
 		outcome.watchIdle(idleCtx, idleCancel)
 		cfg = pauseIdleDuringBudgetRecovery(cfg, idleCancel)
 
-		eventCh := s.agent.Stream(idleCtx, cfg)
+		eventCh = s.agent.Stream(idleCtx, cfg)
 		stored := false
 		clientGone := false
 		var lastSnapshot terminalSnapshot
