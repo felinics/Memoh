@@ -22,7 +22,7 @@ type persistedHistoryMessageService struct {
 	history []messagepkg.Message
 }
 
-func (s *persistedHistoryMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64, bool) ([]messagepkg.Message, error) {
+func (s *persistedHistoryMessageService) ListActiveBySessionWithinBytes(context.Context, string, messagepkg.HistoryWindow) ([]messagepkg.Message, error) {
 	return append([]messagepkg.Message(nil), s.history...), nil
 }
 
@@ -208,9 +208,9 @@ type foldingHistoryMessageService struct {
 	folds        []bool
 }
 
-func (s *foldingHistoryMessageService) ListActiveSinceBySessionWithinBytes(_ context.Context, _ string, _ time.Time, _ int64, fold bool) ([]messagepkg.Message, error) {
-	s.folds = append(s.folds, fold)
-	if fold {
+func (s *foldingHistoryMessageService) ListActiveBySessionWithinBytes(_ context.Context, _ string, window messagepkg.HistoryWindow) ([]messagepkg.Message, error) {
+	s.folds = append(s.folds, window.FoldSummarized)
+	if window.FoldSummarized {
 		return s.folded, nil
 	}
 	return s.full, nil

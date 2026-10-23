@@ -63,7 +63,7 @@ func (s *Service) chatBudgetRecovery(req ChatRequest, layout chatHistoryLayout) 
 		var records []historyfrag.HistoryRecord
 		if layout.usePipeline {
 			var err error
-			if messages, _, _, err = s.buildMessagesFromPipeline(ctx, req, cfg.ContextBudgetMaxTokens); err != nil {
+			if messages, _, err = s.buildMessagesFromPipeline(ctx, req, cfg.ContextBudgetMaxTokens); err != nil {
 				return cfg, false, fmt.Errorf("%w: reload compacted history: %w", contextfrag.ErrBudgetUnsatisfied, err)
 			}
 		} else {
@@ -321,7 +321,6 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 	}
 	*compacted = true
 	recovery := ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: cfg.RunID, discussCurrentSources: protected}
-	recovery.historyViewFrom = discussViewFrom(cmd)
 	if err := s.compactForBudget(ctx, recovery, pressure, historyBudget, modelID); err != nil {
 		return cfg, false, fmt.Errorf("%w: %s", contextfrag.ErrBudgetUnsatisfied, err.Error())
 	}

@@ -230,7 +230,7 @@ func TestBuildMessagesFromPipelineInsertsArtifactSummary(t *testing.T) {
 		logger:   slog.New(slog.DiscardHandler),
 	}
 
-	messages, pressure, _, err := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
+	messages, pressure, err := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
 		BotID:    pipelineTestBotID,
 		ThreadID: pipelineTestSessionID,
 	}, 0)
@@ -286,7 +286,7 @@ func TestBuildMessagesFromPipelineKeepsHistoryOverBudget(t *testing.T) {
 		logger:   slog.New(slog.DiscardHandler),
 	}
 
-	messages, pressure, _, err := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
+	messages, pressure, err := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
 		BotID:    pipelineTestBotID,
 		ThreadID: pipelineTestSessionID,
 	}, 200)
@@ -312,7 +312,7 @@ func TestPipelineCurrentIdentitySurvivesLaterExternalAndSelfMessages(t *testing.
 	echo.IsSelfSent = true
 	pipeline.PushEvent(pipelineTestSessionID, echo)
 	svc := &Service{pipeline: pipeline, logger: slog.New(slog.DiscardHandler)}
-	messages, _, _, err := svc.buildMessagesFromPipeline(t.Context(), ChatRequest{ThreadID: pipelineTestSessionID, ExternalMessageID: "current"}, 500)
+	messages, _, err := svc.buildMessagesFromPipeline(t.Context(), ChatRequest{ThreadID: pipelineTestSessionID, ExternalMessageID: "current"}, 500)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestBuildMessagesFromPipelineFailsWhenASourceCannotLoad(t *testing.T) {
 		pipeline := timeline.NewPipeline(timeline.RenderParams{})
 		pipeline.PushEvent(pipelineTestSessionID, pipelineTextEvent("m1", 1000, "current question"))
 		svc.pipeline, svc.logger = pipeline, slog.New(slog.DiscardHandler)
-		messages, _, _, err := svc.buildMessagesFromPipeline(t.Context(), ChatRequest{BotID: pipelineTestBotID, ThreadID: pipelineTestSessionID}, 1000)
+		messages, _, err := svc.buildMessagesFromPipeline(t.Context(), ChatRequest{BotID: pipelineTestBotID, ThreadID: pipelineTestSessionID}, 1000)
 		if err == nil || messages != nil {
 			t.Fatalf("%s: messages=%s err=%v, want the request failed instead of composed without the source", name, messagesDebug(messages), err)
 		}

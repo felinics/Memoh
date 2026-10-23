@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
@@ -112,25 +111,30 @@ func (s *Service) currentWorkspaceContextMessage(ctx context.Context, req ChatRe
 	return &message
 }
 
-// loadHistoryRecords loads the recent history window. The load is
-// byte-budgeted on the database side (CM-ADM-001): rows are admitted
-// newest-first within contextTokenBudget (the absolute cap when the budget
-// is unset), so the time window alone never bounds process memory. A folded
-// session window spends no budget on rows a summary replaced and loads one
-// Summarized row per compact group to place it.
-func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.ScopeFallback, sessionID string, maxContextMinutes, contextTokenBudget int, fold bool) ([]historyfrag.HistoryRecord, error) {
-	if s.messageService == nil {
+// loadHistoryRecords loads the thread's history from its compaction anchor:
+// the active summary stands for every row before it and later rows load raw,
+// so what a load reads follows what is unsummarized, never the thread's
+// length or age. The load is byte-budgeted on the database side
+// (CM-ADM-001): rows are admitted newest-first within contextTokenBudget
+// (the absolute cap when the budget is unset), and the rows it leaves out
+// stay compaction candidates. A folded load spends no budget on rows a
+// summary replaced and loads one Summarized row per compact group to place
+// it. A cutoff loads the history as it stood at an edited or retried turn.
+// A request without a thread has no history.
+func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.ScopeFallback, sessionID string, contextTokenBudget int, fold bool, cutoff compactionArtifactBoundary) ([]historyfrag.HistoryRecord, error) {
+	if s.messageService == nil || strings.TrimSpace(sessionID) == "" {
 		return nil, nil
 	}
-	since := time.Now().UTC().Add(-time.Duration(maxContextMinutes) * time.Minute)
-	maxBytes := s.historyLoadMaxBytes(contextTokenBudget)
-	var msgs []messagepkg.Message
-	var err error
-	if strings.TrimSpace(sessionID) != "" {
-		msgs, err = s.messageService.ListActiveSinceBySessionWithinBytes(ctx, sessionID, since, maxBytes, fold)
-	} else {
-		msgs, err = s.messageService.ListActiveSinceWithinBytes(ctx, fallback.ChatID, since, maxBytes)
+	anchor, err := s.messageService.HistoryAnchorBySession(ctx, sessionID, cutoff.before())
+	if err != nil {
+		return nil, fmt.Errorf("load history anchor: %w", err)
 	}
+	msgs, err := s.messageService.ListActiveBySessionWithinBytes(ctx, sessionID, messagepkg.HistoryWindow{
+		Since:          anchor,
+		Before:         cutoff.before(),
+		MaxBytes:       s.historyLoadMaxBytes(contextTokenBudget),
+		FoldSummarized: fold,
+	})
 	if err != nil {
 		return nil, err
 	}

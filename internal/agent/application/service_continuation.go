@@ -44,12 +44,11 @@ func (s *Service) prepareContinuationRunConfig(
 	eventCh chan<- WSStreamEvent,
 	req ChatRequest,
 ) (native.RunConfig, error) {
-	loaded, err := s.loadHistoryRecords(ctx, fallback, summaryScope.SessionID, defaultMaxContextMinutes, 0, false)
+	loaded, err := s.loadHistoryRecords(ctx, fallback, summaryScope.SessionID, 0, false, compactionArtifactBoundary{})
 	if err != nil {
 		return native.RunConfig{}, err
 	}
 	loaded = pruneHistoryForGateway(loaded)
-	req.historyViewFrom = historyRecordsViewFrom(loaded)
 	req.inputInHistory = true
 	loaded, err = s.replaceCompactedMessages(ctx, summaryScope.SessionID, summaryScope, loaded, compactionArtifactBoundary{})
 	if err != nil {

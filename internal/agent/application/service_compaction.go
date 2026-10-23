@@ -43,12 +43,10 @@ func (s *Service) compactForBudget(ctx context.Context, req ChatRequest, inputTo
 		cfg.Anchors, cfg.ProtectedSources = cfg.ProtectedSources, nil
 	}
 	cfg.CurrentRequest = cmp.Or(req.ModelQuery, req.Query)
-	// The byte budget bounds what a request loads, not what its history is:
-	// rows inside the time window stay candidates after the view slides past.
-	cfg.CandidatesFrom = time.Now().UTC().Add(-time.Duration(defaultMaxContextMinutes) * time.Minute)
-	if !req.historyViewFrom.IsZero() && req.historyViewFrom.Before(cfg.CandidatesFrom) {
-		cfg.CandidatesFrom = req.historyViewFrom
-	}
+	// Every row of the thread the summaries have not replaced is a
+	// candidate, however far a request's view reaches: the summary absorbs
+	// the oldest of them and the anchor moves on. An edit or retry compacts
+	// only the history before its cutoff.
 	if cutoff := strings.TrimSpace(req.HistoryCutoffBeforeMessageID); cutoff != "" {
 		message, err := s.messageService.GetByIDBySession(ctx, req.ThreadID, cutoff)
 		if err != nil {

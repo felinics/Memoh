@@ -2289,6 +2289,65 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_messages_run
     ON public.bot_history_messages (team_id, run_id)
     WHERE run_id IS NOT NULL;
 
+-- Visible rows no compaction has claimed, by session and age: a history load
+-- finds the oldest one it must read without walking the summarized rows.
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_uncompacted
+    ON public.bot_history_messages (team_id, session_id, created_at)
+    WHERE compact_id IS NULL
+      AND turn_visible = true
+      AND turn_id IS NOT NULL
+      AND turn_position IS NOT NULL
+      AND turn_message_seq IS NOT NULL;
+
+-- memoh_rewind_compaction moves a session's compaction anchor back before
+-- p_from, once history from there on changed (a turn replaced or hidden).
+-- A summary that ends before p_from still stands for exactly the rows it
+-- covered, so it is carried into the session's next epoch and becomes the
+-- active summary again; every later summary, and any compaction still in
+-- flight, stays in the old epoch and no longer counts. The rows those later
+-- summaries covered read raw again, as they did when the anchor was there, so
+-- nothing older than the anchor is ever folded a second time. The caller
+-- holds the session row lock.
+CREATE OR REPLACE FUNCTION public.memoh_rewind_compaction(p_session_id uuid, p_from timestamptz)
+RETURNS boolean
+LANGUAGE plpgsql
+VOLATILE
+SECURITY INVOKER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+  previous_epoch bigint;
+  from_ms bigint := pg_catalog.floor(pg_catalog.date_part('epoch', p_from) * 1000)::bigint;
+BEGIN
+  UPDATE public.bot_sessions session
+  SET compaction_epoch = session.compaction_epoch + 1
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = p_session_id
+  RETURNING session.compaction_epoch - 1 INTO previous_epoch;
+  IF previous_epoch IS NULL THEN
+    RETURN false;
+  END IF;
+  WITH kept AS MATERIALIZED (
+    SELECT compact.id
+    FROM public.bot_history_message_compacts compact
+    WHERE compact.team_id = public.memoh_current_team_id()
+      AND compact.session_id = p_session_id
+      AND compact.compaction_epoch = previous_epoch
+      AND compact.status = 'ok'
+      AND compact.anchor_start_ms > 0
+      AND compact.anchor_start_ms <= compact.anchor_end_ms
+      AND compact.anchor_end_ms < from_ms
+  )
+  UPDATE public.bot_history_message_compacts compact
+  SET compaction_epoch = previous_epoch + 1,
+      superseded_by = CASE WHEN compact.superseded_by IN (SELECT kept.id FROM kept) THEN compact.superseded_by END,
+      superseded_at = CASE WHEN compact.superseded_by IN (SELECT kept.id FROM kept) THEN compact.superseded_at END
+  WHERE compact.team_id = public.memoh_current_team_id()
+    AND compact.id IN (SELECT kept.id FROM kept);
+  RETURN true;
+END;
+$$;
+
 -- Bot-scoped Connect-It bindings. Provider credentials and short-lived MCP
 -- session tokens remain in Connect-It; Memoh stores only the durable
 -- connection reference and whether the bot currently exposes it. A co-hosted

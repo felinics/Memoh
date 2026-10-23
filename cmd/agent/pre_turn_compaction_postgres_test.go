@@ -13,8 +13,8 @@ import (
 )
 
 // History that does not fit the model window is summarized before the turn,
-// from the history inside its time window, into one active summary that the
-// next compaction folds again. A summary as long as the prompt allows is
+// from the oldest row no summary replaces however old it is, into one active
+// summary that the next compaction folds again. A summary as long as the prompt allows is
 // answered without another compaction. When the summarizer fails, the turn
 // fails before any provider call and leaves history whole; once the
 // summarizer is back, the next turn runs on a summary that also covers the
@@ -30,7 +30,7 @@ func TestPostgresPreTurnCompaction(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			f.persistHistory("hidden-", 4, 400, time.Now().Add(-48*time.Hour))
+			f.persistHistory("old-", 4, 400, time.Now().Add(-48*time.Hour))
 			for round := range 2 {
 				prefix := fmt.Sprintf("round%d-", round)
 				// The second summary is as long as the prompt allows: it must
@@ -51,8 +51,8 @@ func TestPostgresPreTurnCompaction(t *testing.T) {
 				}
 			}
 			f.longSummary.Store(false)
-			if raw, compacted := f.backlogRowsPrefixed("hidden-"); raw != 4 || compacted != 0 {
-				t.Fatalf("history older than the time window: raw=%d compacted=%d, want it left raw", raw, compacted)
+			if raw, compacted := f.backlogRowsPrefixed("old-"); raw != 0 || compacted != 4 {
+				t.Fatalf("history older than a day: raw=%d compacted=%d, want it summarized", raw, compacted)
 			}
 			f.failSummary.Store(true)
 			f.appendRound(entry, "failed-")

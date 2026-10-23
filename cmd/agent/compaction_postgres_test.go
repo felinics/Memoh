@@ -94,10 +94,10 @@ func TestPostgresCompactionFoldsALegacySummaryIntoOne(t *testing.T) {
 	}
 }
 
-// Compaction only summarizes rows inside the caller's history range: an older
-// backlog, and rows after an edit or retry cutoff, stay raw instead of being
-// folded into a summary the request then carries.
-func TestPostgresCompactionLeavesRowsOutsideTheViewRaw(t *testing.T) {
+// Compaction summarizes the thread's history however old it is, but an edit
+// or retry compacts only the history before its cutoff: rows after it stay
+// raw instead of being folded into a summary the request then carries.
+func TestPostgresCompactionStopsAtTheCutoff(t *testing.T) {
 	f := newBacklogFixture(t)
 	f.appendBacklog(3, 400)
 	if _, err := f.pool.Exec(f.ctx, `UPDATE bot_history_messages SET created_at=created_at - interval '2 days' WHERE session_id=$1`, f.sessionID); err != nil {
@@ -111,11 +111,11 @@ func TestPostgresCompactionLeavesRowsOutsideTheViewRaw(t *testing.T) {
 		f.appendMessage(fmt.Sprintf("after-%d", i), fmt.Sprintf("after-%d ", i)+strings.Repeat("z", 400))
 	}
 
-	if passes, err := f.fold(f.ctx, compaction.TriggerConfig{CandidatesFrom: f.base, CandidatesBefore: cutoff}); err != nil || len(passes) != 1 {
+	if passes, err := f.fold(f.ctx, compaction.TriggerConfig{CandidatesBefore: cutoff}); err != nil || len(passes) != 1 {
 		t.Fatalf("passes=%+v err=%v", passes, err)
 	}
-	if raw, compacted := f.backlogRows(); raw != 3 || compacted != 0 {
-		t.Fatalf("backlog outside the view: raw=%d compacted=%d, want all 3 left raw", raw, compacted)
+	if raw, compacted := f.backlogRows(); raw != 0 || compacted != 3 {
+		t.Fatalf("backlog days old: raw=%d compacted=%d, want all 3 summarized", raw, compacted)
 	}
 	if raw, compacted := f.backlogRowsPrefixed("after-"); raw != 2 || compacted != 0 {
 		t.Fatalf("rows after the cutoff: raw=%d compacted=%d, want both left raw", raw, compacted)

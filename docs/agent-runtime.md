@@ -66,6 +66,26 @@ RC versions are checked against their persisted event cursors. Restart replay ke
 the complete event chain for newer edits, including edits received before compaction
 started. Artifact commit additionally verifies the full durable source hash.
 
+A thread's history has no time window. Its compaction anchor is the oldest
+visible row no usable summary of the current epoch replaces: everything before
+it reaches a request as the active summary, everything from it on stays raw.
+Compaction folds the summary and the oldest raw rows into a new summary, which
+moves the anchor forward; a pass that cannot read everything at once repeats
+that step. Chat and turn-response loads read newest-first within the byte
+budget from the anchor (`GetSessionHistoryAnchor`), so a load costs what is
+unsummarized, not the thread's length. A thread whose history predates this has
+no summary yet, so its first over-budget turn folds its whole backlog once.
+
+An edit or retry renders the history as it stood at its cutoff: rows before the
+cutoff, folded only by the summaries that end before it, with the summary a
+later one superseded active again (`ArtifactProjection.LoadSessionBefore`).
+That is the frontier the replacement leaves: hiding or replacing a turn whose
+rows a summary of the current epoch covers calls `memoh_rewind_compaction`,
+which moves the session to a new epoch and carries every summary that ends
+before the turn into it. Only the summaries that reach the turn are retired,
+so a retry after in-run compaction refolds from the previous summary rather
+than from the start of the thread.
+
 Rendered artifacts, candidate payloads and claim verification use bounded reads.
 In-run recovery does not load the raw history span or reread ancestor summaries;
 legacy artifacts without exact coverage fail explicitly. Owner fencing, claim

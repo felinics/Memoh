@@ -300,12 +300,12 @@ func (*fakeAgentMessageService) ListActiveSinceBySession(context.Context, string
 	return nil, nil
 }
 
-func (*fakeAgentMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64, bool) ([]messagepkg.Message, error) {
+func (*fakeAgentMessageService) ListActiveBySessionWithinBytes(context.Context, string, messagepkg.HistoryWindow) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
-func (*fakeAgentMessageService) ListActiveSinceWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
-	return nil, nil
+func (*fakeAgentMessageService) HistoryAnchorBySession(context.Context, string, time.Time) (time.Time, error) {
+	return time.Time{}, nil
 }
 
 func (*fakeAgentMessageService) ListTurnResponseSourcesSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {

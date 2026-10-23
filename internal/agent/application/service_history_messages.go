@@ -19,31 +19,30 @@ import (
 // RenderedContext (RC) merged with assistant/tool turns (TR) from
 // bot_history_messages. This gives chat mode the same event-driven context
 // that discuss mode uses, replacing the legacy loadMessages path. The second
-// return value is the token pressure of raw history and active summaries;
-// the third is the creation time of the oldest loaded row. A history or
-// frontier load failure fails the request (CM-ADM-003).
-func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest, contextTokenBudget int) ([]ModelMessage, int, time.Time, error) {
+// return value is the token pressure of raw history and active summaries.
+// A history or frontier load failure fails the request (CM-ADM-003).
+func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest, contextTokenBudget int) ([]ModelMessage, int, error) {
 	sessionID := strings.TrimSpace(req.ThreadID)
 	if s.pipeline == nil || sessionID == "" {
-		return nil, 0, time.Time{}, nil
+		return nil, 0, nil
 	}
 	rc := s.pipeline.GetRC(sessionID)
 	if len(rc) == 0 {
-		return nil, 0, time.Time{}, nil
+		return nil, 0, nil
 	}
 
 	trs, err := s.loadTurnResponses(ctx, sessionID, contextTokenBudget)
 	if err != nil {
-		return nil, 0, time.Time{}, fmt.Errorf("load turn history: %w", err)
+		return nil, 0, fmt.Errorf("load turn history: %w", err)
 	}
 	artifacts, err := s.loadTimelineArtifacts(ctx, req.BotID, sessionID)
 	if err != nil {
-		return nil, 0, time.Time{}, fmt.Errorf("load compaction frontier: %w", err)
+		return nil, 0, fmt.Errorf("load compaction frontier: %w", err)
 	}
 
 	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts)
 	if composed == nil {
-		return nil, 0, time.Time{}, nil
+		return nil, 0, nil
 	}
 
 	messages := make([]ModelMessage, 0, len(composed.Messages))
@@ -71,7 +70,7 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 		pressure += estimateMessageTokens(messages[len(messages)-1])
 	}
 
-	return messages, pressure, time.UnixMilli(timeline.ViewFromMs(rc, trs)).UTC(), nil
+	return messages, pressure, nil
 }
 
 // loadTimelineArtifacts projects the session's active compaction frontier for
@@ -83,18 +82,22 @@ func (s *Service) loadTimelineArtifacts(ctx context.Context, botID, sessionID st
 	return compaction.NewTimelineArtifactSource(s.queries).ActiveCompactionArtifacts(ctx, botID, sessionID)
 }
 
-// loadTurnResponses loads recent assistant/tool messages from bot_history_messages
-// for use as the TR stream in pipeline-based context assembly. The load is
-// byte-budgeted on the database side (CM-ADM-001): rows are admitted
-// newest-first within the context budget and projected to content, so a
-// dense 24-hour window, or legacy lifecycle metadata on its rows, can never
-// materialize more than the budget's worth of payload.
+// loadTurnResponses loads assistant/tool messages of the thread's history,
+// from its compaction anchor on, for use as the TR stream in pipeline-based context assembly; the frontier's
+// artifacts stand for the older ones. The load is byte-budgeted on the
+// database side (CM-ADM-001): rows are admitted newest-first within the
+// context budget and projected to content, so a long history, or legacy
+// lifecycle metadata on its rows, can never materialize more than the
+// budget's worth of payload.
 func (s *Service) loadTurnResponses(ctx context.Context, sessionID string, contextTokenBudget int) ([]timeline.TurnResponseEntry, error) {
 	if s.messageService == nil {
 		return nil, nil
 	}
-	since := time.Now().UTC().Add(-24 * time.Hour)
-	msgs, err := s.messageService.ListTurnResponseSourcesSinceBySessionWithinBytes(ctx, sessionID, since, s.historyLoadMaxBytes(contextTokenBudget))
+	anchor, err := s.messageService.HistoryAnchorBySession(ctx, sessionID, time.Time{})
+	if err != nil {
+		return nil, fmt.Errorf("load history anchor: %w", err)
+	}
+	msgs, err := s.messageService.ListTurnResponseSourcesSinceBySessionWithinBytes(ctx, sessionID, anchor, s.historyLoadMaxBytes(contextTokenBudget))
 	if err != nil {
 		return nil, err
 	}

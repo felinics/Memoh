@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"time"
 
 	"github.com/felinics/memoh/internal/agent/turn"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
@@ -40,16 +39,8 @@ func (s *Service) maybeSyncCompactDiscuss(ctx context.Context, cmd turn.StartTur
 		return false, nil
 	}
 	req := ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: runID, discussCurrentSources: protected}
-	req.historyViewFrom = discussViewFrom(cmd)
 	if err := s.compactForBudget(ctx, req, discussContextPressure(cmd), budget, resolved.ModelID); err != nil {
 		return false, err
 	}
 	return true, nil
-}
-
-func discussViewFrom(cmd turn.StartTurnCommand) time.Time {
-	if cmd.DiscussViewFromMs <= 0 {
-		return time.Time{}
-	}
-	return time.UnixMilli(cmd.DiscussViewFromMs).UTC()
 }

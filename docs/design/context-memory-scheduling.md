@@ -208,10 +208,12 @@ result is bounded once, when the tool returns, and no later request prunes, stub
 or drops it. Input that composition cannot carry (Channel admission
 records it as omitted) MUST be compacted by that request, or the run fails; it is
 never silently skipped. Bounded reads (CM-ADM-001) still limit what a request loads,
-but a compaction reads every uncompacted row inside the request's time window, loaded
-or not: rows that slid out of a byte-bounded view while turns failed are folded,
-never skipped. Only history older than both the loaded view and the time window is
-outside that request.
+but a compaction reads every uncompacted row of the thread, loaded or not: rows that
+slid out of a byte-bounded view are folded, never skipped. History does not age out
+by time. Rows older than the compaction anchor, the oldest row no usable summary
+replaces, reach a request as that summary; rows from it on stay raw, and each
+compaction moves the anchor forward by folding the summary with the oldest of them.
+An edit or retry compacts and renders only the history before its cutoff.
 
 ### CM-ADM-003: A missing source fails the request
 
@@ -550,8 +552,8 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
       active modes, the compaction barrier, `/compact`, the HTTP endpoint, and the
       four per-bot compaction settings — CM-CMP-002/003
 - [x] Compaction logs outcome, passes, and duration — CM-CMP-003, CM-OBS-001
-- [x] Rows inside the time window stay candidates when a byte-bounded view
-      slides past them — CM-ADM-002
+- [x] Rows of the thread stay candidates when a byte-bounded view slides past
+      them — CM-ADM-002
 - [x] In-run compaction for durable native tool loops under the same rule — CM-CMP-001
 - [x] Remove the step selector's in-run pruning, dropping, and rescue, and the
       `context_loop_reselect` rollout switch: a step request only grows, and a
@@ -563,11 +565,15 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
       proves the batch consumed — CM-CMP-001
 - [x] In-run compaction for retried and edited turns: the attempt folds the
       history before its cutoff and its own steps, a retry's input follows the
-      copy its first step writes, and a replaced turn's summary is retired by
-      the compaction epoch that step moves — CM-CMP-001
+      copy its first step writes, and that step rewinds the compaction to
+      before the replaced turn: the summaries that end before it carry into the
+      new epoch, the ones that reach it are retired — CM-CMP-001
 - [ ] In-run compaction for subagents, which keep their own committer —
       CM-CMP-001
-- [ ] Candidate view beyond the 24-hour pipeline window — CM-ADM-002
+- [x] Thread history has no time window: compaction candidates are every
+      uncompacted row, so history is summarized rather than dropped, and chat
+      loads start at the compaction anchor, so their cost follows what is
+      unsummarized — CM-ADM-001/002
 
 ### PR 3 (P1) — Bounded replay + pipeline cache eviction
 

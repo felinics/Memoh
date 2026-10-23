@@ -50,12 +50,10 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	if err != nil {
 		return Pass{}, false, err
 	}
-	createdFrom := pgtype.Timestamptz{Time: cfg.CandidatesFrom, Valid: !cfg.CandidatesFrom.IsZero()}
 	createdBefore := pgtype.Timestamptz{Time: cfg.CandidatesBefore, Valid: !cfg.CandidatesBefore.IsZero()}
 	viewIDs, viewExternalIDs := viewFilter(cfg)
 	measure, err := s.queries.MeasureUncompactedMessagesBySession(ctx, sqlc.MeasureUncompactedMessagesBySessionParams{
 		SessionID:          sessionUUID,
-		CreatedFrom:        createdFrom,
 		CreatedBefore:      createdBefore,
 		MessageIds:         viewIDs,
 		ExternalMessageIds: viewExternalIDs,
@@ -68,7 +66,6 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	}
 	boundedRows, err := s.queries.ListUncompactedMessagesBySessionWithinBytes(ctx, sqlc.ListUncompactedMessagesBySessionWithinBytesParams{
 		SessionID:          sessionUUID,
-		CreatedFrom:        createdFrom,
 		CreatedBefore:      createdBefore,
 		MessageIds:         viewIDs,
 		ExternalMessageIds: viewExternalIDs,

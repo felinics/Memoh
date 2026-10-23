@@ -133,7 +133,7 @@ func TestNormalizedContextPrefixLengthTracksSanitizedHistory(t *testing.T) {
 	}
 }
 
-func TestLoadCompactionArtifactBoundaryFetchesCutoffOutsideLoadedWindow(t *testing.T) {
+func TestLoadCompactionArtifactBoundaryResolvesTheCutoffMessage(t *testing.T) {
 	t.Parallel()
 
 	cutoff := persistedHistoryMessage(t, "old-cutoff", "assistant", "old answer")
@@ -142,9 +142,12 @@ func TestLoadCompactionArtifactBoundaryFetchesCutoffOutsideLoadedWindow(t *testi
 		byID: map[string]messagepkg.Message{cutoff.ID: cutoff},
 	}}
 
-	boundary := resolver.loadCompactionArtifactBoundary(context.Background(), nil, "session-1", cutoff.ID)
-	if !boundary.hasCutoff || boundary.cutoffMs != cutoff.CreatedAt.UnixMilli() {
-		t.Fatalf("boundary = %+v, want cutoff at %d", boundary, cutoff.CreatedAt.UnixMilli())
+	boundary, err := resolver.loadCompactionArtifactBoundary(context.Background(), "session-1", cutoff.ID)
+	if err != nil || !boundary.hasCutoff || !boundary.before().Equal(cutoff.CreatedAt) {
+		t.Fatalf("boundary = %+v err = %v, want cutoff at %v", boundary, err, cutoff.CreatedAt)
+	}
+	if _, err := resolver.loadCompactionArtifactBoundary(context.Background(), "session-1", "missing"); err == nil {
+		t.Fatal("a cutoff that does not resolve loaded no error")
 	}
 }
 
