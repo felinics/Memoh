@@ -1,0 +1,155 @@
+[
+  {
+    "tool": "exec",
+    "input": {
+      "command": "/bin/bash -lc \"TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S %Z'\"",
+      "cwd": "/data"
+    },
+    "result": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "2026-10-24 01:24:46 CST\n"
+    }
+  },
+  {
+    "tool": "exec",
+    "input": {
+      "command": "/bin/bash -lc \"ls /nonexistent-dir\"",
+      "cwd": "/data"
+    },
+    "result": {
+      "exit_code": 2,
+      "stderr": "",
+      "stdout": "ls: cannot access '/nonexistent-dir': No such file or directory\n"
+    }
+  },
+  {
+    "tool": "exec",
+    "input": {
+      "command": "/bin/bash -lc true",
+      "cwd": "/data"
+    },
+    "result": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": ""
+    }
+  },
+  {
+    "tool": "exec",
+    "input": {
+      "command": "/bin/bash -lc pwd",
+      "cwd": "/data"
+    },
+    "result": {
+      "stderr": "",
+      "stdout": "/data\n"
+    }
+  },
+  {
+    "tool": "exec",
+    "input": {
+      "command": "/bin/bash -lc \"rm -rf /data/x\"",
+      "cwd": "/data"
+    },
+    "result": {
+      "content": [
+        {
+          "text": "the command was declined",
+          "type": "text"
+        }
+      ],
+      "isError": true
+    },
+    "status": "failed"
+  },
+  {
+    "tool": "apply_patch",
+    "input": {
+      "changes": [
+        {
+          "diff": "hello\n",
+          "kind": {
+            "type": "add"
+          },
+          "path": "/data/a.txt"
+        },
+        {
+          "diff": "@@ -1 +1 @@\n-x\n+y\n",
+          "kind": {
+            "type": "update"
+          },
+          "path": "/data/b.txt"
+        },
+        {
+          "diff": "gone\n",
+          "kind": {
+            "type": "delete"
+          },
+          "path": "/data/c.txt"
+        }
+      ]
+    },
+    "result": {
+      "added": [
+        "/data/a.txt"
+      ],
+      "deleted": [
+        "/data/c.txt"
+      ],
+      "files": [
+        {
+          "operation": "add",
+          "path": "/data/a.txt"
+        },
+        {
+          "operation": "modify",
+          "path": "/data/b.txt"
+        },
+        {
+          "operation": "delete",
+          "path": "/data/c.txt"
+        }
+      ],
+      "modified": [
+        "/data/b.txt"
+      ],
+      "ok": true,
+      "summary": "Success. Updated the following files:\nA /data/a.txt\nM /data/b.txt\nD /data/c.txt"
+    }
+  },
+  {
+    "tool": "apply_patch",
+    "input": {
+      "changes": [
+        {
+          "diff": "hello\n",
+          "kind": {
+            "type": "add"
+          },
+          "path": "/data/a.txt"
+        }
+      ]
+    },
+    "result": {
+      "content": [
+        {
+          "text": "the file changes were declined",
+          "type": "text"
+        }
+      ],
+      "isError": true
+    },
+    "status": "failed"
+  },
+  {
+    "tool": "web_search",
+    "input": {
+      "query": ""
+    },
+    "result": {
+      "query": "example domain iana",
+      "results": []
+    }
+  }
+]
