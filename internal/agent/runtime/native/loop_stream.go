@@ -89,6 +89,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		cfg.ForkContext = tools.NewMessageSnapshotWithSources(cfg.Messages, cfg.ForkContextSourceMessageIDs)
 	}
 
+	a.withholdToolsIfHooksUnavailable(streamCtx, &cfg)
 	var sdkTools []toolexec.Tool
 	cfg.ContextToolDefsResolved = true
 	if cfg.SupportsToolCall {

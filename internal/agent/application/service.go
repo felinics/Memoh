@@ -52,6 +52,7 @@ import (
 	"github.com/felinics/memoh/internal/reasoning"
 	"github.com/felinics/memoh/internal/settings"
 	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -979,23 +980,6 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		MaxOutputTokens:       chatModel.Config.MaxOutputTokensLimit(),
 	})
 
-	var agentSkills []native.SkillEntry
-	if s.skillLoader != nil {
-		entries, skillErr := s.skillLoader.LoadSkills(ctx, p.BotID)
-		if skillErr != nil {
-			s.logger.WarnContext(ctx, "failed to load skills", slog.String("bot_id", p.BotID), slog.Any("error", skillErr))
-		} else {
-			for _, e := range entries {
-				if skill, ok := normalizeGatewaySkill(e); ok {
-					agentSkills = append(agentSkills, skill)
-				}
-			}
-		}
-	}
-	if agentSkills == nil {
-		agentSkills = []native.SkillEntry{}
-	}
-
 	cfg := native.RunConfig{
 		Model:                    sdkModel,
 		CurrentModelUUID:         chatModel.ID,
@@ -1026,7 +1010,6 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 			SessionToken:      p.SessionToken,
 		},
 		Bot:               botInfo,
-		Skills:            agentSkills,
 		LoopDetection:     native.LoopDetectionConfig{Enabled: loopDetectionEnabled},
 		BackgroundManager: s.bgManager,
 		ContextLifecycle:  contextfrag.NewLifecycleHolder(),
@@ -1051,8 +1034,14 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		// including its error path when the target is unreachable.
 		ctx = workspace.WithWorkspaceTarget(ctx, bound.TargetID)
 	}
-	if s.workspaceTargets != nil {
-		if target, targetErr := s.workspaceTargets.ResolveWorkspaceTarget(ctx, p.BotID, ""); targetErr == nil {
+	if prepared, ok := preparedWorkspaceTargetFromContext(ctx, p.BotID, p.SessionID); ok {
+		// The turn already resolved its target; resolving again would wait
+		// on a workspace the turn has found unavailable.
+		cfg.Identity.WorkspaceTargetID = prepared.TargetID
+		cfg.Identity.WorkspaceTargetKind = prepared.Kind
+		cfg.Identity.WorkspaceTargetName = prepared.Name
+	} else if s.workspaceTargets != nil {
+		if target, targetErr := s.resolveTurnWorkspaceTarget(ctx, p.BotID, ""); targetErr == nil {
 			cfg.Identity.WorkspaceTargetID = strings.TrimSpace(target.TargetID)
 			cfg.Identity.WorkspaceTargetKind = strings.TrimSpace(target.Kind)
 			cfg.Identity.WorkspaceTargetName = strings.TrimSpace(target.Name)
@@ -1060,8 +1049,33 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 			return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, targetErr
 		}
 	}
+	cfg.Skills, cfg.LoadNotices = s.loadTurnSkills(ctx, p.BotID)
 
 	return cfg, chatModel, provider, nil
+}
+
+// loadTurnSkills lists the bot's skills. When the listing fails the turn
+// continues with no skills and a notice that the installed set is unknown.
+func (s *Service) loadTurnSkills(ctx context.Context, botID string) ([]native.SkillEntry, []string) {
+	agentSkills := []native.SkillEntry{}
+	if s.skillLoader == nil {
+		return agentSkills, nil
+	}
+	if bridge.WorkspaceUnavailableFromContext(ctx) {
+		return agentSkills, []string{native.SkillsUnavailableNotice}
+	}
+	entries, err := s.skillLoader.LoadSkills(ctx, botID)
+	if err != nil {
+		s.logger.WarnContext(ctx, "failed to load skills", slog.String("bot_id", botID), slog.Any("error", err))
+		bridge.MarkWorkspaceUnavailableOn(ctx, err)
+		return agentSkills, []string{native.SkillsUnavailableNotice}
+	}
+	for _, e := range entries {
+		if skill, ok := normalizeGatewaySkill(e); ok {
+			agentSkills = append(agentSkills, skill)
+		}
+	}
+	return agentSkills, nil
 }
 
 func (s *Service) canDeliverUserInputStream() bool {
@@ -1369,6 +1383,10 @@ func buildModelSelectionRequest(p baseRunConfigParams, chatID string) ChatReques
 // The caller is responsible for filling RunConfig.Messages.
 // Used by discuss turns to reuse the service's model, tools, and prompt pipeline.
 func (s *Service) ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error) {
+	// Callers that go on to prepare and run the turn open this scope
+	// themselves so the verdict reached here carries into the run; opening
+	// it again is a no-op.
+	ctx = hooks.WithAuxiliaryTurn(ctx)
 	if strings.TrimSpace(botID) == "" {
 		return ResolveRunConfigResult{}, errors.New("bot id is required")
 	}
@@ -1432,7 +1450,7 @@ func (s *Service) ResolveRunConfig(ctx context.Context, botID, sessionID, channe
 // prepareRunConfig generates the system prompt and appends the user message.
 func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) native.RunConfig {
 	cfg.ContextHookText = ""
-	beforePromptResult := s.runPromptHook(ctx, agentRunConfigView{
+	beforePromptResult, hooksUnavailable := s.runPromptHook(ctx, agentRunConfigView{
 		BotID:        cfg.Identity.BotID,
 		SessionID:    cfg.Identity.SessionID,
 		ChatID:       cfg.Identity.ChatID,
@@ -1467,12 +1485,27 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 			platformIdentitiesSection = buildPlatformIdentitiesSectionFromItems(platformIdentityItems)
 		}
 	}
+	loadNotices := append([]string(nil), cfg.LoadNotices...)
+	if bridge.WorkspaceUnavailableFromContext(ctx) {
+		// One notice covers everything the workspace would have provided.
+		loadNotices = []string{native.WorkspaceUnavailableNotice}
+		for i := range files {
+			files[i].LoadStatus = ""
+		}
+		native.WithholdTools(ctx, &cfg, native.ToolsWithheldWorkspaceUnavailable)
+	} else if hooksUnavailable {
+		// The prompt hook above already found the configuration unreadable;
+		// the policy it would enforce is unknown, so the turn runs no tools.
+		loadNotices = append(loadNotices, native.HooksUnavailableNotice)
+		native.WithholdTools(ctx, &cfg, native.ToolsWithheldHooksUnavailable)
+	}
 	systemParams := native.SystemPromptParams{
 		SessionType:               cfg.SessionType,
 		Platform:                  cfg.Identity.CurrentPlatform,
 		Bot:                       cfg.Bot,
 		Skills:                    cfg.Skills,
 		Files:                     files,
+		LoadNotices:               loadNotices,
 		MaxFilesBytes:             limits.SystemFilesMaxBytes,
 		Timezone:                  cfg.Identity.Timezone,
 		PlatformIdentitiesSection: platformIdentitiesSection,
@@ -1486,7 +1519,7 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 	}
 	beforePromptObservedTexts := append([]string(nil), promptHookTexts...)
 	beforePromptObservedTexts = append(beforePromptObservedTexts, hookSystemSectionTexts(beforePromptResult)...)
-	afterPromptResult := s.runPromptHook(ctx, agentRunConfigView{
+	afterPromptResult, _ := s.runPromptHook(ctx, agentRunConfigView{
 		BotID:        cfg.Identity.BotID,
 		SessionID:    cfg.Identity.SessionID,
 		ChatID:       cfg.Identity.ChatID,

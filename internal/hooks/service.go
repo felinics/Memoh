@@ -48,6 +48,9 @@ func NewService(log *slog.Logger, provider bridge.Provider) *Service {
 	}
 }
 
+// Load reads the hooks configuration of the bot's current workspace. A
+// missing file is no configuration: Load reports it with exists=false and
+// does not create one, so reading hooks never depends on writing them.
 func (s *Service) Load(ctx context.Context, botID string) (Config, bool, error) {
 	if s == nil || s.provider == nil {
 		return Config{Version: 1, Enabled: boolPtr(false)}, false, nil
@@ -59,14 +62,8 @@ func (s *Service) Load(ctx context.Context, botID string) (Config, bool, error) 
 	rc, err := client.ReadRaw(ctx, DefaultConfigPath)
 	if err != nil {
 		if errors.Is(err, bridge.ErrNotFound) {
-			if err := client.WriteFile(ctx, DefaultConfigPath, emptyConfigFile); err != nil {
-				return Config{}, false, err
-			}
 			cfg, err := ParseConfig(emptyConfigFile)
-			if err != nil {
-				return Config{}, false, err
-			}
-			return cfg, true, nil
+			return cfg, false, err
 		}
 		return Config{}, false, err
 	}
@@ -82,15 +79,43 @@ func (s *Service) Load(ctx context.Context, botID string) (Config, bool, error) 
 	return cfg, true, nil
 }
 
+// LoadEffective returns the configuration hooks run with. A file that cannot
+// be parsed or read, or a workspace that cannot be reached, is
+// ErrConfigUnavailable. Any other failure is returned as is, so the turn fails with its cause: failing to
+// identify the bot's workspace target (a database error, for example), or a
+// workspace runtime that refused the request for a reason of its own, such as
+// one that was removed or is over quota. Within a turn scoped by
+// WithTurnSnapshot the first result is reused, so every hook event of the
+// turn sees the same configuration and an unreachable workspace is asked at
+// most once.
 func (s *Service) LoadEffective(ctx context.Context, botID string) (Config, bool, error) {
 	targetID, err := s.currentWorkspaceTargetID(ctx, botID)
 	if err != nil {
 		return Config{}, false, err
 	}
 	ctx = bridge.WithWorkspaceTarget(ctx, targetID)
+	if snapshot := turnSnapshotFrom(ctx); snapshot != nil {
+		return snapshot.load(strings.TrimSpace(botID)+"\x00"+targetID, func() (Config, bool, error) {
+			return s.loadEffective(ctx, botID)
+		})
+	}
+	return s.loadEffective(ctx, botID)
+}
+
+func (s *Service) loadEffective(ctx context.Context, botID string) (Config, bool, error) {
+	if bridge.WorkspaceUnavailableFromContext(ctx) {
+		return Config{}, false, fmt.Errorf("%w: %w", ErrConfigUnavailable, bridge.ErrUnavailable)
+	}
 	userCfg, exists, err := s.Load(ctx, botID)
 	if err != nil {
-		return Config{}, exists, err
+		// Load reports exists only for a file it read but could not parse. A
+		// read that failed counts only when the workspace itself could not be
+		// reached, as for every other auxiliary read of the turn, and never
+		// when the caller's own context ended it.
+		if ctx.Err() != nil || (!exists && !bridge.MarkWorkspaceUnavailableOn(ctx, err)) {
+			return Config{}, exists, err
+		}
+		return Config{}, exists, fmt.Errorf("%w: %w", ErrConfigUnavailable, err)
 	}
 	userCfg.applyDefaults()
 

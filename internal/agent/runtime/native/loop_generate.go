@@ -63,6 +63,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 		cfg.ForkContext = tools.NewMessageSnapshotWithSources(cfg.Messages, cfg.ForkContextSourceMessageIDs)
 	}
 
+	a.withholdToolsIfHooksUnavailable(genCtx, &cfg)
 	var sdkTools []toolexec.Tool
 	cfg.ContextToolDefsResolved = true
 	if cfg.SupportsToolCall {

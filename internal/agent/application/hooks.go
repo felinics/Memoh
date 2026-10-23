@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/hooks"
-	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 func (s *Service) applyUserMessageHook(ctx context.Context, req ChatRequest) (ChatRequest, error) {
@@ -28,6 +27,12 @@ func (s *Service) applyUserMessageHook(ctx context.Context, req ChatRequest) (Ch
 	if err != nil {
 		if errors.Is(err, hooks.ErrDenied) || res.Decision == hooks.DecisionDeny {
 			return req, fmt.Errorf("%w: %s", hooks.ErrDenied, firstHookText(res.Reason, err.Error()))
+		}
+		if errors.Is(err, hooks.ErrConfigUnavailable) {
+			// The turn continues without tools; prepareRunConfig tells the
+			// model the hooks did not run.
+			s.logHookWarn(hooks.EventUserMessageReceived, req.BotID, req.ThreadID, err)
+			return req, nil
 		}
 		return req, err
 	}
@@ -49,7 +54,10 @@ func (s *Service) applyUserMessageHook(ctx context.Context, req ChatRequest) (Ch
 	return req, nil
 }
 
-func (s *Service) runPromptHook(ctx context.Context, cfg agentRunConfigView, eventName string) hooks.Result {
+// runPromptHook runs a prompt-build hook event. A failure never blocks the
+// turn; the second result reports that the hooks configuration could not be
+// loaded, so the caller knows the turn must run without tools.
+func (s *Service) runPromptHook(ctx context.Context, cfg agentRunConfigView, eventName string) (hooks.Result, bool) {
 	res, err := s.runBaseHook(ctx, cfg.BotID, cfg.SessionID, cfg.ChatID, eventName, func(req *hooks.Request) {
 		req.Turn = map[string]any{
 			"session_type":  cfg.SessionType,
@@ -59,10 +67,10 @@ func (s *Service) runPromptHook(ctx context.Context, cfg agentRunConfigView, eve
 	})
 	if err != nil {
 		s.logHookWarn(eventName, cfg.BotID, cfg.SessionID, err)
-		return hooks.Result{}
+		return hooks.Result{}, errors.Is(err, hooks.ErrConfigUnavailable)
 	}
 	res.AppendContext = strings.TrimSpace(res.AppendContext)
-	return res
+	return res, false
 }
 
 type agentRunConfigView struct {
@@ -97,28 +105,10 @@ func (s *Service) runBaseHook(ctx context.Context, botID, sessionID, chatID, eve
 }
 
 func (s *Service) hookWorkspace(ctx context.Context, botID string) hooks.WorkspaceInfo {
-	info := hooks.WorkspaceInfo{
-		CWD:     hooks.DefaultWorkDir,
-		Runtime: bridge.WorkspaceBackendContainer,
-	}
 	if s == nil || s.agent == nil {
-		return info
+		return hooks.TurnWorkspaceInfo(ctx, nil, botID)
 	}
-	provider, ok := s.agent.BridgeProvider().(bridge.WorkspaceInfoProvider)
-	if !ok {
-		return info
-	}
-	workspaceInfo, err := provider.WorkspaceInfo(ctx, botID)
-	if err != nil {
-		return info
-	}
-	if strings.TrimSpace(workspaceInfo.DefaultWorkDir) != "" {
-		info.CWD = workspaceInfo.DefaultWorkDir
-	}
-	if strings.TrimSpace(workspaceInfo.Backend) != "" {
-		info.Runtime = workspaceInfo.Backend
-	}
-	return info
+	return hooks.TurnWorkspaceInfo(ctx, s.agent.BridgeProvider(), botID)
 }
 
 func (s *Service) logHookWarn(eventName, botID, sessionID string, err error) {

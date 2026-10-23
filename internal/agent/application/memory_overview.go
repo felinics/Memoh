@@ -12,6 +12,7 @@ import (
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 // memoryOverviewNow is the clock refreshMemoryOverview measures idle
@@ -48,7 +49,9 @@ const (
 // index. Subagents never trigger a refresh: a subagent session is new by
 // construction while its parent is warm, so the rewrite would break the
 // parent's next request instead. New memories remain available through recall
-// and memory tools while the shared index lags.
+// and memory tools while the shared index lags. A turn that already found its
+// workspace unavailable does not refresh: the rewrite would only wait on the
+// same workspace again.
 //
 // TODO(memory): pin a MEMORY.md snapshot per session instead of deferring the
 // shared file. The system prompt would carry the snapshot the session took at
@@ -67,7 +70,8 @@ const (
 func (s *Service) refreshMemoryOverview(ctx context.Context, botID, sessionID, sessionType, promptCacheTTL string) {
 	botID = strings.TrimSpace(botID)
 	sessionID = strings.TrimSpace(sessionID)
-	if s == nil || botID == "" || strings.EqualFold(strings.TrimSpace(sessionType), sessionmode.Subagent) {
+	if s == nil || botID == "" || strings.EqualFold(strings.TrimSpace(sessionType), sessionmode.Subagent) ||
+		bridge.WorkspaceUnavailableFromContext(ctx) {
 		return
 	}
 	refresher, ok := s.resolveMemoryProvider(ctx, botID).(memprovider.OverviewRefresher)
@@ -103,6 +107,7 @@ func (s *Service) refreshMemoryOverview(ctx context.Context, botID, sessionID, s
 		}
 	}
 	if err := refresher.RefreshOverview(ctx, botID); err != nil {
+		bridge.MarkWorkspaceUnavailableOn(ctx, err)
 		if s.logger != nil {
 			s.logger.WarnContext(ctx, "memory overview refresh failed",
 				slog.String("bot_id", botID),

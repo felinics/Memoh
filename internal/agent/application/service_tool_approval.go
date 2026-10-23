@@ -20,6 +20,7 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/workspace"
 )
@@ -53,6 +54,9 @@ type CommittedToolApprovalResponse struct {
 }
 
 func (s *Service) respondToolApproval(ctx context.Context, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
+	// Executing, storing and continuing the resumed turn share one auxiliary
+	// scope: a workspace found unavailable by one stage is not waited on again.
+	ctx = hooks.WithAuxiliaryTurn(ctx)
 	committed, err := s.CommitToolApprovalResponse(ctx, input)
 	if err != nil {
 		return err
@@ -389,7 +393,7 @@ func emitApprovalAck(ctx context.Context, eventCh chan<- WSStreamEvent) error {
 }
 
 func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Request, input ToolApprovalResponseInput, runID string) (sdk.ToolResultPart, map[string]any, error) {
-	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
+	ctx = hooks.WithAuxiliaryTurn(workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID))
 	req = withLocalWebReplyTarget(req)
 	resolved, err := s.ResolveRunConfig(ctx,
 		input.BotID,
@@ -402,6 +406,11 @@ func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Requ
 	)
 	if err != nil {
 		return sdk.ToolResultPart{}, nil, err
+	}
+	if reason := resolved.RunConfig.ToolsWithheld; reason != "" {
+		// The turn runs no tools while its workspace or its hooks policy is
+		// unavailable; an approval does not override that.
+		return sdk.ToolResultPart{}, nil, toolsWithheldError("approved tool cannot run", reason)
 	}
 	resolved.RunConfig.RunID = runIDForChatRequest(runID)
 	if fence, ok := runtimefence.FromContext(ctx); ok {
@@ -441,7 +450,9 @@ func (s *Service) storeToolResultAndContinue(
 	eventCh chan<- WSStreamEvent,
 ) error {
 	approval = withLocalWebReplyTarget(approval)
-	ctx = workspace.WithWorkspaceTarget(ctx, approval.WorkspaceTargetID)
+	// The stored result and the continuation that follows share one
+	// auxiliary scope, so the workspace is resolved and waited on once.
+	ctx = hooks.WithAuxiliaryTurn(workspace.WithWorkspaceTarget(ctx, approval.WorkspaceTargetID))
 	target, err := s.resolveWorkspaceTargetSnapshot(ctx, input.BotID, approval.WorkspaceTargetID)
 	if err != nil {
 		return err
@@ -487,7 +498,9 @@ func (s *Service) continueToolApprovalSession(
 	eventCh chan<- WSStreamEvent,
 ) error {
 	approval = withLocalWebReplyTarget(approval)
-	ctx = workspace.WithWorkspaceTarget(ctx, approval.WorkspaceTargetID)
+	// One scope for resolving, preparing and running the continuation, so a
+	// workspace found unavailable while resolving is not waited on again.
+	ctx = hooks.WithAuxiliaryTurn(workspace.WithWorkspaceTarget(ctx, approval.WorkspaceTargetID))
 	resolved, err := s.ResolveRunConfig(ctx,
 		input.BotID,
 		approval.SessionID,
@@ -497,6 +510,9 @@ func (s *Service) continueToolApprovalSession(
 		approval.ConversationType,
 		input.ChatToken,
 	)
+	if err == nil {
+		err = requireToolsFor(resolved.RunConfig.SessionType, resolved.RunConfig)
+	}
 	if err != nil {
 		return err
 	}

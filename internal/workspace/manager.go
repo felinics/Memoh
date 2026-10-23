@@ -65,6 +65,25 @@ func IsNotReady(err error) bool {
 	return errors.Is(err, ErrContainerNotFound) || ctr.IsNotFound(err) || errors.Is(err, bridge.ErrUnavailable)
 }
 
+// ErrCapabilityUnavailable means the workspace target is known but its runtime
+// cannot serve this request: it is not ready or stopped responding. A chat
+// turn can continue without the workspace; identity, permission and database
+// failures are never reported this way.
+var ErrCapabilityUnavailable = errors.New("workspace capability unavailable")
+
+// nativeTargetFailure keeps the native target's identity when its runtime is
+// not ready or cannot be reached, so a caller can continue without the
+// workspace. Every other failure is returned unchanged: a caller's own
+// expired deadline (a database query, for example), or a runtime that
+// refused the request for a reason of its own, such as one that was removed
+// or is over quota.
+func nativeTargetFailure(target ResolvedWorkspaceTarget, err error) (ResolvedWorkspaceTarget, error) {
+	if IsNotReady(err) || bridge.IsUnreachable(err) || errors.Is(err, ctr.ErrUnavailable) {
+		return target, fmt.Errorf("%w: %w", ErrCapabilityUnavailable, err)
+	}
+	return ResolvedWorkspaceTarget{}, err
+}
+
 // ContainerStatus combines DB records with live containerd state.
 type ContainerStatus struct {
 	ContainerID      string    `json:"container_id"`
@@ -341,27 +360,26 @@ func (m *Manager) ResolveWorkspaceTarget(ctx context.Context, botID, targetID st
 				primary = true
 			}
 		}
+		target := ResolvedWorkspaceTarget{
+			TargetID: WorkspaceTargetNative,
+			Kind:     WorkspaceTargetNative,
+			Name:     "Server Workspace",
+			Primary:  primary,
+		}
 		client, err := m.nativeMCPClient(ctx, botID)
 		if err != nil {
-			return ResolvedWorkspaceTarget{}, err
+			return nativeTargetFailure(target, err)
 		}
 		info, err := m.nativeWorkspaceInfo(ctx, botID)
 		if err != nil {
-			return ResolvedWorkspaceTarget{}, err
+			return nativeTargetFailure(target, err)
 		}
 		approval, err := m.nativeToolApprovalConfig(ctx, botID)
 		if err != nil {
 			return ResolvedWorkspaceTarget{}, err
 		}
-		return ResolvedWorkspaceTarget{
-			TargetID: WorkspaceTargetNative,
-			Kind:     WorkspaceTargetNative,
-			Name:     "Server Workspace",
-			Primary:  primary,
-			Client:   client,
-			Info:     info,
-			Approval: approval,
-		}, nil
+		target.Client, target.Info, target.Approval = client, info, approval
+		return target, nil
 	}
 	if _, ok := canonicalWorkspaceUUID(targetID); !ok || m.remote == nil {
 		return ResolvedWorkspaceTarget{}, ErrWorkspaceTargetNotFound

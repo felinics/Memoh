@@ -158,6 +158,7 @@ func (a *Agent) SetToolProviders(providers []tools.ToolProvider) {
 
 // Stream runs the agent in streaming mode, emitting events to the returned channel.
 func (a *Agent) Stream(ctx context.Context, cfg RunConfig) <-chan StreamEvent {
+	ctx = hooks.WithAuxiliaryTurn(ctx)
 	ch := make(chan StreamEvent)
 	go func() {
 		defer close(ch)
@@ -168,7 +169,7 @@ func (a *Agent) Stream(ctx context.Context, cfg RunConfig) <-chan StreamEvent {
 
 // Generate runs the agent in non-streaming mode, returning the complete result.
 func (a *Agent) Generate(ctx context.Context, cfg RunConfig) (*GenerateResult, error) {
-	return a.runGenerate(ctx, cfg)
+	return a.runGenerate(hooks.WithAuxiliaryTurn(ctx), cfg)
 }
 
 func (a *Agent) ExecuteTool(ctx context.Context, cfg RunConfig, call sdk.ToolCall) (sdk.ToolResultPart, error) {

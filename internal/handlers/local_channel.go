@@ -43,6 +43,7 @@ import (
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/runtimefence"
@@ -2343,6 +2344,10 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			persistedUserMessageID := ""
 			externalMessageID := ""
 			var preparedActivationReq *application.ChatRequest
+			// Persisting the activation and streaming the turn share one
+			// auxiliary scope, so a workspace found unavailable while
+			// persisting is not waited on again by the stream.
+			messageCtx := hooks.WithAuxiliaryTurn(streamBaseCtx)
 			if hasSkillActivation {
 				// The persisted user turn is deduplicated by the client's
 				// invocation id: it exists before any run does, and the
@@ -2369,7 +2374,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					RequestedSkills:         requestedSkillContexts,
 					WorkspaceTargetID:       workspaceTargetID,
 				}
-				preparedReq, persisted, persistErr := h.agentService.ApplyUserMessageHookAndPersistUserTurn(streamBaseCtx, userReq)
+				preparedReq, persisted, persistErr := h.agentService.ApplyUserMessageHookAndPersistUserTurn(messageCtx, userReq)
 				if persistErr != nil {
 					failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.message", persistErr)
 					releaseActiveWSTurnNow()
@@ -2404,7 +2409,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				messageAdmission.attachments = ingestedActivationAttachments
 				messageAdmission.attachmentsPrepared = true
 			}
-			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws.message", submission, messageAdmission.build, releaseActiveWSTurn,
+			h.startWSStream(messageCtx, connCtx, writer, botID, ref, "ws.message", submission, messageAdmission.build, releaseActiveWSTurn,
 				func(ctx context.Context, runRef wsTurnRef, admittedTurn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) (application.RunOutcome, error) {
 					req := application.ChatRequest{
 						OnModelPreferenceSettled: func() {

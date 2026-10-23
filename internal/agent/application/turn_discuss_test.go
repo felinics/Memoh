@@ -23,6 +23,7 @@ import (
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/contextview"
+	"github.com/felinics/memoh/internal/hooks"
 )
 
 type fakeAgentStreamer struct {
@@ -1171,4 +1172,37 @@ func messageContentTextForTest(message sdk.Message) string {
 		}
 	}
 	return b.String()
+}
+
+// A discuss bot speaks only through its tools, so a discuss turn that would
+// have to withhold them is rejected instead of running silently.
+func TestDiscussTurnWithWithheldToolsIsRejected(t *testing.T) {
+	for reason, want := range map[native.ToolsWithheldReason]func(error) bool{
+		native.ToolsWithheldWorkspaceUnavailable: func(err error) bool {
+			return apperror.CodeOf(err) == apperror.CodeWorkspaceUnreachable
+		},
+		native.ToolsWithheldHooksUnavailable: func(err error) bool { return errors.Is(err, hooks.ErrConfigUnavailable) },
+	} {
+		agent := &fakeAgentStreamer{}
+		resolver := &fakeDiscussService{resolveResult: ResolveRunConfigResult{
+			RunConfig: native.RunConfig{ToolsWithheld: reason},
+			ModelID:   "model-1",
+		}}
+		h, err := newDiscussTestService(&fakeRunner{}, agent, resolver).StartTurn(context.Background(), discussCommand())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range h.Events() {
+		}
+		var errs []error
+		for err := range h.Errs() {
+			errs = append(errs, err)
+		}
+		if agent.lastConfig != nil {
+			t.Fatalf("%s: the agent ran without its tools", reason)
+		}
+		if len(errs) != 1 || !want(errs[0]) {
+			t.Fatalf("%s: errors = %v", reason, errs)
+		}
+	}
 }

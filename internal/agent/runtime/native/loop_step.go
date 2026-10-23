@@ -83,7 +83,7 @@ func (t *stepThread) advance(cfg RunConfig, dynamic *loopDynamicInputs, boundary
 	}
 	request := t.params
 	request.Messages = t.messages
-	return request
+	return withheldToolsRequest(cfg, request)
 }
 
 // extend appends a committed step's messages to the conversation.

@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -13,9 +14,11 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/hooks"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/memory/storefs"
 	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -265,6 +268,29 @@ func TestRefreshMemoryOverviewSurvivesRefreshFailure(t *testing.T) {
 
 	if provider.refreshes != 1 || !provider.stale {
 		t.Fatalf("refreshes = %d stale = %v, want one failed attempt that leaves the overview stale", provider.refreshes, provider.stale)
+	}
+}
+
+// A turn that already found its workspace unavailable does not rewrite
+// MEMORY.md: the refresh would only wait on the same workspace again. A
+// refresh that finds the workspace unreachable records that for the turn.
+func TestRefreshMemoryOverviewSkipsAnUnavailableWorkspace(t *testing.T) {
+	t.Parallel()
+
+	provider := &overviewRefreshProvider{stale: true}
+	service := overviewRefreshService(provider, &lastRunQueries{})
+	unavailable := hooks.WithAuxiliaryTurn(context.Background())
+	bridge.MarkWorkspaceUnavailable(unavailable)
+	service.refreshMemoryOverview(unavailable, storeRoundBotID, overviewTestSessionID, "", "")
+	if provider.refreshes != 0 {
+		t.Fatalf("refreshes = %d, want none for a turn whose workspace is unavailable", provider.refreshes)
+	}
+
+	provider.refreshErr = fmt.Errorf("read memory files: %w", bridge.ErrUnavailable)
+	turn := hooks.WithAuxiliaryTurn(context.Background())
+	service.refreshMemoryOverview(turn, storeRoundBotID, overviewTestSessionID, "", "")
+	if provider.refreshes != 1 || !bridge.WorkspaceUnavailableFromContext(turn) {
+		t.Fatalf("refreshes = %d, unavailable = %v; want one attempt that marks the workspace unavailable", provider.refreshes, bridge.WorkspaceUnavailableFromContext(turn))
 	}
 }
 

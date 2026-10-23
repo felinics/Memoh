@@ -96,6 +96,7 @@ func GenerateSystemSections(params SystemPromptParams) []SystemSection {
 	}
 
 	sections = append(sections, buildPlatformIdentitySections(params)...)
+	sections = append(sections, loadStatusSections(params)...)
 
 	if isSubagent {
 		return sections
@@ -202,13 +203,14 @@ func degradedSystemSections(params SystemPromptParams, home, timezone string, ca
 	if params.SessionType != sessionmode.Subagent {
 		text += "\n\n" + strings.TrimSpace(includes["_memory"])
 	}
-	return []SystemSection{{
+	sections := []SystemSection{{
 		ID:            sectionIDFallback,
 		Kind:          contextfrag.KindSystemPrompt,
 		Priority:      priorityBody,
 		RetentionTier: contextfrag.RetentionRequired,
 		Text:          text,
 	}}
+	return append(sections, loadStatusSections(params)...)
 }
 
 // SystemSectionFrags converts typed system prompt sections into context

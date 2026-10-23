@@ -14,6 +14,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/schedule"
 )
 
@@ -80,7 +81,9 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		// fire that returns it does not record it again.
 		err = errs.Recorded(err)
 	}()
-	ctx = runCtx
+	// The scheduled turn resolves, prepares and runs under one auxiliary
+	// scope, like a chat turn.
+	ctx = hooks.WithAuxiliaryTurn(runCtx)
 
 	// Runtime sessions (ACP, codex, claude-code) must never silently degrade
 	// to the built-in model: resolve the driver and run the scheduled turn
@@ -134,6 +137,9 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 	})
 	cfg = attachCurrentTurnPrompt(cfg, schedulePrompt)
 	cfg = s.prepareRunConfig(ctx, cfg)
+	if err := requireToolsFor(sessionmode.Schedule, cfg); err != nil {
+		return schedule.TriggerResult{}, err
+	}
 	terminal := s.contextLifecycleTerminal(ctx, cfg)
 	var lifecycleCause error
 	defer func() { terminal(lifecycleCause) }()

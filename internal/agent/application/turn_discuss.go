@@ -19,6 +19,7 @@ import (
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/contextview"
+	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/messageconv"
 )
 
@@ -149,9 +150,17 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		h.cancel()
 	}()
 
+	// The resolved config and the agent run share one auxiliary scope, so a
+	// workspace found unavailable while resolving is not waited on again.
+	ctx = hooks.WithAuxiliaryTurn(ctx)
 	resolved, err := s.resolveDiscussRunConfig(ctx,
 		cmd.BotID, cmd.ThreadID, cmd.SourceChannelIdentityID,
 		cmd.CurrentChannel, cmd.ReplyTarget, cmd.ConversationType, cmd.SessionToken)
+	if err == nil {
+		// Checked before compaction, so a turn that is going to be refused
+		// does not pay for a summarizer call first.
+		err = requireToolsFor(sessionpkg.TypeDiscuss, resolved.RunConfig)
+	}
 	if err != nil {
 		h.emitErr(err)
 		return

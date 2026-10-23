@@ -14,7 +14,6 @@ import (
 	"github.com/felinics/memoh/internal/agent/step"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/hooks"
-	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 type hookToolRunner struct {
@@ -199,6 +198,25 @@ func (a *Agent) runTurnHook(ctx context.Context, cfg RunConfig, eventName, errMs
 	}
 }
 
+// withholdToolsIfHooksUnavailable withholds a run's tools before they are
+// assembled when its hooks configuration cannot be loaded, and tells the model
+// why. A chat turn has decided that while preparing its prompt; a run that
+// reads the configuration on its own, such as a background task, decides it
+// here. The configuration is read through the run's scope, so the hook events
+// that follow reuse the result.
+func (a *Agent) withholdToolsIfHooksUnavailable(ctx context.Context, cfg *RunConfig) {
+	if a == nil || a.hookService == nil || !cfg.SupportsToolCall || cfg.ToolsWithheld != "" {
+		return
+	}
+	if _, _, err := a.hookService.LoadEffective(ctx, cfg.Identity.BotID); !errors.Is(err, hooks.ErrConfigUnavailable) {
+		return
+	}
+	WithholdTools(ctx, cfg, ToolsWithheldHooksUnavailable)
+	if notice := buildLoadStatusText(SystemPromptParams{LoadNotices: []string{HooksUnavailableNotice}}); !strings.Contains(cfg.System, HooksUnavailableNotice) {
+		cfg.System = strings.TrimSpace(strings.TrimSpace(cfg.System) + "\n\n" + notice)
+	}
+}
+
 func (a *Agent) applyBeforeModelCallHook(ctx context.Context, cfg RunConfig, step int) (RunConfig, error) {
 	if a == nil || a.hookService == nil {
 		return cfg, nil
@@ -209,6 +227,20 @@ func (a *Agent) applyBeforeModelCallHook(ctx context.Context, cfg RunConfig, ste
 	if err != nil {
 		if errors.Is(err, hooks.ErrDenied) || res.Decision == hooks.DecisionDeny {
 			return cfg, fmt.Errorf("%w: %s", hooks.ErrDenied, firstHookText(res.Reason, err.Error()))
+		}
+		if errors.Is(err, hooks.ErrConfigUnavailable) {
+			// A configuration that cannot be read does not block the call.
+			// The run's tools were withheld before they were assembled
+			// (withholdToolsIfHooksUnavailable); this only makes sure.
+			WithholdTools(ctx, &cfg, ToolsWithheldHooksUnavailable)
+			if a.logger != nil {
+				a.logger.WarnContext(ctx, "before model call hook skipped: hooks configuration unavailable",
+					slog.String("bot_id", cfg.Identity.BotID),
+					slog.String("session_id", cfg.Identity.SessionID),
+					slog.Any("error", err),
+				)
+			}
+			return cfg, nil
 		}
 		return cfg, fmt.Errorf("before model call hook failed: %w", err)
 	}
@@ -296,28 +328,10 @@ func (a *Agent) runAfterModelCallHook(ctx context.Context, cfg RunConfig, record
 }
 
 func (a *Agent) hookWorkspace(ctx context.Context, botID string) hooks.WorkspaceInfo {
-	info := hooks.WorkspaceInfo{
-		CWD:     hooks.DefaultWorkDir,
-		Runtime: bridge.WorkspaceBackendContainer,
+	if a == nil {
+		return hooks.TurnWorkspaceInfo(ctx, nil, botID)
 	}
-	if a == nil || a.bridgeProvider == nil {
-		return info
-	}
-	provider, ok := a.bridgeProvider.(bridge.WorkspaceInfoProvider)
-	if !ok {
-		return info
-	}
-	workspaceInfo, err := provider.WorkspaceInfo(ctx, botID)
-	if err != nil {
-		return info
-	}
-	if strings.TrimSpace(workspaceInfo.DefaultWorkDir) != "" {
-		info.CWD = workspaceInfo.DefaultWorkDir
-	}
-	if strings.TrimSpace(workspaceInfo.Backend) != "" {
-		info.Runtime = workspaceInfo.Backend
-	}
-	return info
+	return hooks.TurnWorkspaceInfo(ctx, a.bridgeProvider, botID)
 }
 
 func execContext(fallback context.Context, execCtx *toolexec.ToolExecContext) context.Context {
