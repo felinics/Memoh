@@ -58,16 +58,7 @@ func (s *Service) SetSessionRuntime(manager *sessionruntime.Manager) {
 		return err
 	}
 	manager.SetDecisionStore(s)
-	manager.SetLostRunDecisionCanceller(func(ctx context.Context, botID, sessionID, runID string, fencingToken int64, reason string) error {
-		canceller, ok := s.userInput.(interface {
-			CancelPendingForRun(context.Context, string, string, string, int64, string) ([]userinput.Request, error)
-		})
-		if !ok {
-			return nil
-		}
-		_, err := canceller.CancelPendingForRun(ctx, botID, sessionID, runID, fencingToken, reason)
-		return err
-	})
+	manager.SetLostRunDecisionCanceller(s.cancelLostRunDecisions)
 	manager.SetCommandHandler(s.handleRuntimeDecisionCommand)
 	manager.SetDecisionFinalizer(s.finalizeRuntimeDecisions)
 	manager.SetTerminalObserver(func(ctx context.Context, terminal sessionruntime.TerminalRun) {
@@ -80,6 +71,24 @@ func (s *Service) SetSessionRuntime(manager *sessionruntime.Manager) {
 		s.startFollowUpAfterTerminal(ctx, terminal)
 	})
 	manager.SetTerminalReconciler(s.reconcileTerminalContextLifecycles)
+}
+
+// cancelLostRunDecisions closes the decisions a lost run left parked. Both
+// kinds are attempted even when one fails: a lost run has no waiter left, and
+// a stranded pending row would stay answerable.
+func (s *Service) cancelLostRunDecisions(ctx context.Context, botID, sessionID, runID string, fencingToken int64, reason string) error {
+	var errs []error
+	if canceller, ok := s.userInput.(interface {
+		CancelPendingForRun(context.Context, string, string, string, int64, string) ([]userinput.Request, error)
+	}); ok {
+		_, err := canceller.CancelPendingForRun(ctx, botID, sessionID, runID, fencingToken, reason)
+		errs = append(errs, err)
+	}
+	if s.toolApproval != nil {
+		_, err := s.toolApproval.CancelPendingForRun(ctx, botID, sessionID, runID, fencingToken, reason)
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
 }
 
 func drainDeferredTurn(handle turn.RunHandle) {

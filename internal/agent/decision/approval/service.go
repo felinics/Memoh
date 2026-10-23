@@ -130,6 +130,28 @@ func (s *Service) policyEvaluation(ctx context.Context, input CreatePendingInput
 }
 
 func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (Request, error) {
+	return s.create(ctx, input, "")
+}
+
+// CreateSystemRejected records a refusal the system made without asking
+// anyone. The row is written already rejected and carries no deciding
+// identity, so it is neither a pending request nor a user's decision.
+func (s *Service) CreateSystemRejected(ctx context.Context, input CreatePendingInput, reason string) (Request, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return Request{}, errors.New("system rejection requires a reason")
+	}
+	req, err := s.create(ctx, input, reason)
+	if err != nil {
+		return Request{}, err
+	}
+	_ = s.runApprovalHook(ctx, hooks.EventApprovalResolved, CreatePendingInput{}, req, false)
+	return req, nil
+}
+
+// create inserts the request; a non-empty systemRejectReason inserts it
+// already rejected instead of pending.
+func (s *Service) create(ctx context.Context, input CreatePendingInput, systemRejectReason string) (Request, error) {
 	if s == nil || s.queries == nil {
 		return Request{}, errors.New("tool approval queries not configured")
 	}
@@ -189,6 +211,7 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 		SourcePlatform:               strings.TrimSpace(input.SourcePlatform),
 		ReplyTarget:                  strings.TrimSpace(input.ReplyTarget),
 		ConversationType:             strings.TrimSpace(input.ConversationType),
+		SystemRejectReason:           pgtype.Text{String: systemRejectReason, Valid: systemRejectReason != ""},
 	}
 	var row sqlc.ToolApprovalRequest
 	err = decision.InCreateTransaction(ctx, s.queries, input.BotID, input.SessionID, func(queries dbstore.Queries) error {
@@ -204,6 +227,12 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	}
 	req := requestFromRow(row)
 	req.ExecutionLocation = cloneExecutionLocation(input.ExecutionLocation)
+	if systemRejectReason != "" {
+		if req.Status != StatusRejected {
+			return Request{}, ErrAlreadyDecided
+		}
+		return req, nil
+	}
 	if req.Status != StatusPending {
 		return Request{}, ErrAlreadyDecided
 	}
@@ -417,6 +446,42 @@ func (s *Service) CancelPendingForSession(ctx context.Context, botID, sessionID,
 		var cancelErr error
 		rows, cancelErr = queries.CancelPendingToolApprovalsBySession(ctx, params)
 		return cancelErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	requests := make([]Request, 0, len(rows))
+	for _, row := range rows {
+		req := requestFromRow(row)
+		requests = append(requests, req)
+		s.notifyResolved(req)
+	}
+	return requests, nil
+}
+
+// CancelPendingForRun cancels the pending approvals owned by one exact run.
+// Recovery uses it when a run is declared lost: nothing is left to resume the
+// request, and a session-wide cancel would also cancel a newer run's.
+func (s *Service) CancelPendingForRun(ctx context.Context, botID, sessionID, runID string, fencingToken int64, reason string) ([]Request, error) {
+	if s == nil || s.queries == nil {
+		return nil, errors.New("tool approval queries not configured")
+	}
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return nil, err
+	}
+	pgSessionID, err := db.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	pgRunID, err := db.ParseUUID(runID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.CancelPendingToolApprovalsByRun(ctx, sqlc.CancelPendingToolApprovalsByRunParams{
+		BotID: pgBotID, SessionID: pgSessionID, RunID: pgRunID,
+		Reason:              strings.TrimSpace(reason),
+		RuntimeFencingToken: pgtype.Int8{Int64: fencingToken, Valid: fencingToken > 0},
 	})
 	if err != nil {
 		return nil, err

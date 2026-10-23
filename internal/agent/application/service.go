@@ -1252,12 +1252,8 @@ func (s *Service) buildToolApprovalHandler(p baseRunConfigParams) func(context.C
 			}, nil
 		}
 		if !isInteractiveApprovalSession(p.SessionType) {
-			req, err := s.toolApproval.CreatePending(ctx, input)
-			if err != nil {
-				return toolexec.ToolApprovalResult{}, err
-			}
 			reason := "tool execution requires approval, but this session type cannot request approval"
-			rejected, err := s.toolApproval.Reject(ctx, req.ID, p.ChannelIdentityID, reason)
+			rejected, err := s.toolApproval.CreateSystemRejected(ctx, input, reason)
 			if err != nil {
 				return toolexec.ToolApprovalResult{}, err
 			}
