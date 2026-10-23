@@ -26,7 +26,7 @@ vi.mock('./message-actions.vue', () => ({
   }),
 }))
 vi.mock('@felinic/ui', () => ({
-  Avatar: Stub, AvatarImage: Stub, AvatarFallback: Stub, Button: Stub, CalloutBanner: Stub,
+  Avatar: Stub, AvatarImage: Stub, AvatarFallback: Stub, Button: Stub, CalloutBanner: Stub, InfoHint: Stub,
   Textarea: defineComponent({
     inheritAttrs: false,
     props: { modelValue: String },
