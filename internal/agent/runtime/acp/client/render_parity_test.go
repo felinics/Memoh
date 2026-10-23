@@ -10,6 +10,7 @@ import (
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	"github.com/felinics/memoh/internal/agent/event"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agent/toolresult"
 	chatview "github.com/felinics/memoh/internal/agent/view"
 )
 
@@ -146,7 +147,7 @@ func nativeShapedEvents() []event.StreamEvent {
 			ToolName:   "exec",
 			ToolCallID: "call-1",
 			Input:      map[string]any{"command": "make test"},
-			Result:     map[string]any{"stdout": "ok\n", "exit_code": 0},
+			Result:     toolresult.Exec{Stdout: "ok\n", ExitCode: toolresult.Ptr(0)}.Map(),
 		},
 		{Type: event.TextDelta, Delta: "Done."},
 	}

@@ -12,6 +12,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/toolresult"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
@@ -318,6 +319,7 @@ func (m *terminalManager) emitToolCallEnd(id, name string, input map[string]any,
 	}
 	if err != nil {
 		ev.Error = err.Error()
+		ev.Status = "failed"
 	}
 	m.events.emit(ev)
 }
@@ -343,19 +345,17 @@ func (m *terminalManager) emitTerminalEnd(term *terminal) {
 		truncated = true
 	}
 	output = limitedOutput
-	result := map[string]any{
-		"stdout":    output,
-		"truncated": truncated,
-	}
+	exec := toolresult.Exec{Stdout: output}
+	extra := map[string]any{"truncated": truncated}
 	if status != nil {
 		if status.ExitCode != nil {
-			result["exit_code"] = *status.ExitCode
+			exec.ExitCode = status.ExitCode
 		}
 		if status.Signal != nil {
-			result["signal"] = *status.Signal
+			extra["signal"] = *status.Signal
 		}
 	}
-	m.emitToolCallEnd(term.id, "exec", term.input, result, nil)
+	m.emitToolCallEnd(term.id, "exec", term.input, toolresult.Merge(exec, extra), nil)
 }
 
 func (m *terminalManager) toolOutputLimit() ToolOutputLimit {

@@ -1,0 +1,62 @@
+[
+  {
+    "tool": "exec",
+    "input": {
+      "command": "pwd"
+    },
+    "result": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "/data\n"
+    }
+  },
+  {
+    "tool": "exec",
+    "input": {
+      "command": "grep x a.txt"
+    },
+    "result": {
+      "exit_code": 2,
+      "stderr": "grep: a.txt: No such file or directory\n",
+      "stdout": ""
+    }
+  },
+  {
+    "tool": "exec",
+    "input": {
+      "command": "rm a.txt"
+    },
+    "result": {
+      "content": [
+        {
+          "text": "User rejected the execution",
+          "type": "text"
+        }
+      ],
+      "isError": true
+    },
+    "status": "failed"
+  },
+  {
+    "tool": "read",
+    "input": {
+      "path": "/data/a.txt"
+    },
+    "result": {
+      "content": "alpha\nbeta\n",
+      "total_lines": 3
+    }
+  },
+  {
+    "tool": "exec",
+    "input": {
+      "command": "date"
+    },
+    "result": {
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "Sat Oct 24 01:24:46 CST 2026\n",
+      "truncated": false
+    }
+  }
+]

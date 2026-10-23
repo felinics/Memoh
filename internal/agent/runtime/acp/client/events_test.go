@@ -13,6 +13,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/event"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agent/toolresult"
 )
 
 // eventLog is a prompt sink that keeps every event the session hands it,
@@ -76,11 +77,11 @@ func TestACPGenericExecuteToolMapsToNativeExecEvents(t *testing.T) {
 	if end[0].Type != event.ToolCallEnd || end[0].ToolName != "exec" || end[0].Error != "" {
 		t.Fatalf("end event = %#v, want native exec end", end[0])
 	}
-	result, ok := end[0].Result.(map[string]any)
-	if !ok {
-		t.Fatalf("end result = %#v, want object", end[0].Result)
+	result, err := toolresult.DecodeStrict[toolresult.Exec](end[0].Result)
+	if err != nil {
+		t.Fatalf("end result = %#v: %v", end[0].Result, err)
 	}
-	if result["stdout"] != "2026-05-28 14:51:39 UTC\n" || result["exit_code"] != 0 {
+	if result.Stdout != "2026-05-28 14:51:39 UTC\n" || result.ExitCode == nil || *result.ExitCode != 0 {
 		t.Fatalf("end result = %#v", result)
 	}
 }
@@ -126,50 +127,46 @@ func TestACPToolResultTakesTheNativeToolShape(t *testing.T) {
 		content string
 		output  any
 		refusal string
-		want    map[string]any
+		want    toolresult.Record
 	}{
 		{
 			name: "exec", kind: acp.ToolKindExecute, input: map[string]any{"command": "pwd"},
 			status: acp.ToolCallStatusCompleted, content: "/data\n",
 			output: map[string]any{"type": "Bash", "output": []any{47, 100, 97, 116, 97, 10}, "exit_code": 0},
-			want:   map[string]any{"stdout": "/data\n", "exit_code": 0},
+			want:   toolresult.Exec{Stdout: "/data\n"},
 		},
 		{
 			name: "read", kind: acp.ToolKindRead, input: map[string]any{"path": "/data/a.txt"},
 			status: acp.ToolCallStatusCompleted, content: "1→alpha\n",
 			output: map[string]any{"type": "ReadFile", "FileContent": map[string]any{"raw_output": "alpha\n"}},
-			want:   map[string]any{"content": "1→alpha\n"},
+			want:   toolresult.Read{Content: "1→alpha\n", TotalLines: 2},
 		},
 		{
 			name: "edit", kind: acp.ToolKindEdit, input: map[string]any{"path": "/data/a.txt"},
 			status: acp.ToolCallStatusCompleted,
 			output: map[string]any{"type": "SearchReplace"},
-			want:   map[string]any{"ok": true},
+			want:   toolresult.Write{OK: true},
 		},
 		{
 			name: "rejected exec", kind: acp.ToolKindExecute, input: map[string]any{"command": "rm a.txt"},
 			status: acp.ToolCallStatusFailed, content: "User rejected the execution for tool `run_terminal_command`",
-			want: map[string]any{"isError": true, "content": []map[string]any{{
-				"type": "text", "text": "User rejected the execution for tool `run_terminal_command`",
-			}}},
+			want: toolresult.NewFailure("User rejected the execution for tool `run_terminal_command`"),
 		},
 		{
 			name: "failure told only in rawOutput", kind: acp.ToolKindRead, input: map[string]any{"path": "/data/a.txt"},
 			status: acp.ToolCallStatusFailed, output: "file does not exist",
-			want: map[string]any{"isError": true, "content": []map[string]any{{"type": "text", "text": "file does not exist"}}},
+			want: toolresult.NewFailure("file does not exist"),
 		},
 		{
 			name: "failure told only in a rawOutput object", kind: acp.ToolKindEdit, input: map[string]any{"path": "/data/a.txt"},
 			status: acp.ToolCallStatusFailed, output: map[string]any{"error": "tool_execution_failed", "message": "permission denied"},
-			want: map[string]any{"isError": true, "content": []map[string]any{{"type": "text", "text": "permission denied"}}},
+			want: toolresult.NewFailure("permission denied"),
 		},
 		{
 			name: "refused write", kind: acp.ToolKindEdit, input: map[string]any{"path": "/tmp/a.txt"},
 			status: acp.ToolCallStatusFailed, content: "User rejected the execution for tool `write`",
 			refusal: `path "/tmp/a.txt" escapes workspace root "/data"`,
-			want: map[string]any{"isError": true, "content": []map[string]any{{
-				"type": "text", "text": `Memoh refused this call: path "/tmp/a.txt" escapes workspace root "/data"`,
-			}}},
+			want:    toolresult.NewFailure(`Memoh refused this call: path "/tmp/a.txt" escapes workspace root "/data"`),
 		},
 	}
 	for _, tt := range tests {
@@ -205,12 +202,12 @@ func TestACPToolResultTakesTheNativeToolShape(t *testing.T) {
 
 // resultHas reports that the native shape is present in a tool result. What
 // the agent reported beyond it travels alongside and is not pinned here.
-func resultHas(result any, want map[string]any) bool {
+func resultHas(result any, want toolresult.Record) bool {
 	got, ok := result.(map[string]any)
 	if !ok {
 		return false
 	}
-	for key, value := range want {
+	for key, value := range want.Map() {
 		if !reflect.DeepEqual(got[key], value) {
 			return false
 		}
@@ -230,7 +227,7 @@ func TestACPToolResultKeepsWhatTheAgentReportedBeyondTheNativeShape(t *testing.T
 		acp.WithUpdateStatus(acp.ToolCallStatusCompleted),
 		acp.WithUpdateRawOutput(map[string]any{"output": "/data\n", "exit_code": 0, "duration_ms": 12, "truncated": false}),
 	)})
-	want := map[string]any{"stdout": "/data\n", "exit_code": 0, "duration_ms": 12, "truncated": false}
+	want := toolresult.Merge(toolresult.Exec{Stdout: "/data\n", ExitCode: toolresult.Ptr(0)}, map[string]any{"duration_ms": 12, "truncated": false})
 	if len(events) != 1 || !reflect.DeepEqual(events[0].Result, want) {
 		t.Fatalf("result = %#v, want %#v", events[0].Result, want)
 	}
@@ -245,16 +242,14 @@ func TestACPToolResultsOfARecordedGrokTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	failure := func(text string) map[string]any {
-		return map[string]any{"isError": true, "content": []map[string]any{{"type": "text", "text": text}}}
-	}
-	want := []any{
-		map[string]any{"stdout": "hello\n", "exit_code": 0},
-		map[string]any{"stdout": "ls: cannot access '/nonexistent-dir': No such file or directory\n", "exit_code": 2},
-		map[string]any{"content": "1→round3\n"},
+	failure := func(text string) toolresult.Record { return toolresult.NewFailure(text) }
+	want := []toolresult.Record{
+		toolresult.Exec{Stdout: "hello\n"},
+		toolresult.Exec{Stdout: "ls: cannot access '/nonexistent-dir': No such file or directory\n", ExitCode: toolresult.Ptr(2)},
+		toolresult.Read{Content: "1→round3\n", TotalLines: 2},
 		failure("Error: /data/no-such-file.txt does not exist.\nNote: your current working directory is /data"),
-		map[string]any{"ok": true},
-		map[string]any{"ok": true},
+		toolresult.Write{OK: true},
+		toolresult.Write{OK: true},
 		failure("The string to replace was not found in the file, use the read_file tool to see the correct string. The user may have changed the file since you last read it."),
 		failure("Tool `write` failed: IO Error: No such file or directory (os error 2)"),
 	}
@@ -276,7 +271,7 @@ func TestACPToolResultsOfARecordedGrokTurn(t *testing.T) {
 		t.Fatalf("results =\n%#v\nwant %d results", got, len(want))
 	}
 	for i := range want {
-		if !resultHas(got[i], want[i].(map[string]any)) {
+		if !resultHas(got[i], want[i]) {
 			t.Fatalf("result %d = %#v, want it to carry %#v", i, got[i], want[i])
 		}
 	}

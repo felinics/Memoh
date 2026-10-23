@@ -1,0 +1,82 @@
+[
+  {
+    "tool": "exec",
+    "input": {
+      "command": "echo hello"
+    },
+    "result": {
+      "command": "echo hello",
+      "current_dir": "/data",
+      "description": "Run echo hello",
+      "exit_code": 0,
+      "output_file": "/data/.grok/agents/07ad9e7d-e52b-454d-bcd9-5fd4a592b629/sessions/%2Fdata/01a1408a-00bd-7bf1-80bf-a13ebf535153/terminal/call-283ef0e1-9180-43b9-857c-04816f449f1d-0.log",
+      "output_for_prompt": "exit: 0\nhello\n",
+      "signal": null,
+      "stderr": "",
+      "stdout": "hello\n",
+      "timed_out": false,
+      "total_bytes": 6,
+      "truncated": false,
+      "type": "Bash",
+      "was_bare_echo": true
+    }
+  },
+  {
+    "tool": "exec",
+    "input": {
+      "command": "ls /nonexistent-dir"
+    },
+    "result": {
+      "command": "ls /nonexistent-dir",
+      "current_dir": "/data",
+      "description": "List nonexistent directory",
+      "exit_code": 2,
+      "output_file": "/data/.grok/agents/07ad9e7d-e52b-454d-bcd9-5fd4a592b629/sessions/%2Fdata/01a1408a-00bd-7bf1-80bf-a13ebf535153/terminal/call-4c547764-4541-487f-97e2-e6bd13c845f3-1.log",
+      "output_for_prompt": "exit: 2\nls: cannot access '/nonexistent-dir': No such file or directory\n",
+      "signal": null,
+      "stderr": "",
+      "stdout": "ls: cannot access '/nonexistent-dir': No such file or directory\n",
+      "timed_out": false,
+      "total_bytes": 64,
+      "truncated": false,
+      "type": "Bash"
+    }
+  },
+  {
+    "tool": "read",
+    "input": {
+      "path": "/data/qa-round3.txt"
+    },
+    "result": {
+      "FileContent": {
+        "absolute_path": "/data/qa-round3.txt",
+        "content": "1→round3\n",
+        "content_concise": "1→round3\n",
+        "offset": null,
+        "raw_output": "round3\n",
+        "total_lines": 2
+      },
+      "content": "1→round3\n",
+      "total_lines": 2,
+      "type": "ReadFile"
+    }
+  },
+  {
+    "tool": "read",
+    "input": {
+      "path": "/data/no-such-file.txt"
+    },
+    "result": {
+      "FileNotFound": "Error: /data/no-such-file.txt does not exist.\nNote: your current working directory is /data",
+      "content": [
+        {
+          "text": "Error: /data/no-such-file.txt does not exist.\nNote: your current working directory is /data",
+          "type": "text"
+        }
+      ],
+      "isError": true,
+      "type": "ReadFile"
+    },
+    "status": "failed"
+  }
+]
