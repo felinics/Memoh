@@ -399,6 +399,8 @@
       "windowTooSmall": "The compaction model's context window is too small to produce a summary. Choose a compaction model with a larger context window."
     },
     "toolApproval": {
+      "hint": "Approval required. Use /approve {id} to allow, or /reject {id} [reason] to reject. You can also reply to this message with /approve or /reject.",
+      "hintNoID": "Approval required. Reply to this message with /approve or /reject.",
       "unavailable": "⚠️ Approvals aren't available here right now.",
       "parseFailed": "Couldn't read that. Reply to the request with /approve or /reject, or tap a button."
     },

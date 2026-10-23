@@ -239,6 +239,7 @@ func (*TelegramAdapter) Descriptor() channel.Descriptor {
 			Attachments:     true,
 			Media:           true,
 			Streaming:       true,
+			NativeApproval:  true,
 			BlockStreaming:  true,
 			Edit:            true,
 			Unsend:          true,

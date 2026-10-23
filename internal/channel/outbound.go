@@ -857,10 +857,15 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) (er
 			}
 		}
 	}
-	if event.Type == StreamEventToolCallStart && event.ToolCall != nil && hasUserInputAction(event.ToolCall.Actions) {
-		caps, _ := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, s.target)
-		if !caps.NativeUserInput {
-			return s.pushPlainTextUserInput(ctx, event.ToolCall)
+	if event.Type == StreamEventToolCallStart && event.ToolCall != nil {
+		tc := event.ToolCall
+		isInput := hasUserInputAction(tc.Actions)
+		isApproval := tc.ApprovalID != ""
+		if isInput || isApproval {
+			caps, _ := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, s.target)
+			if (isInput && !caps.NativeUserInput) || (!isInput && !caps.NativeApproval) {
+				return s.pushPlainTextPrompt(ctx, tc)
+			}
 		}
 	}
 
@@ -902,10 +907,11 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) (er
 	return s.pushPrepared(ctx, event)
 }
 
-// pushPlainTextUserInput closes any buffered assistant preamble, then sends the
-// pending question as a normal message. This keeps ask_user usable even when a
-// block-streaming adapter ignores tool lifecycle events entirely.
-func (s *managerOutboundStream) pushPlainTextUserInput(ctx context.Context, tc *StreamToolCall) error {
+// pushPlainTextPrompt closes any buffered assistant preamble, then sends the
+// pending question or approval request as a normal message. This keeps both
+// usable even when a block-streaming adapter ignores tool lifecycle events
+// entirely.
+func (s *managerOutboundStream) pushPlainTextPrompt(ctx context.Context, tc *StreamToolCall) error {
 	text := strings.TrimSpace(RenderToolCallMessage(BuildToolCallStart(tc)))
 	if text == "" {
 		return nil
@@ -916,7 +922,7 @@ func (s *managerOutboundStream) pushPlainTextUserInput(ctx context.Context, tc *
 		}
 	}
 	if s.send == nil {
-		return errors.New("plain-text user input sender is not configured")
+		return errors.New("plain-text prompt sender is not configured")
 	}
 	return s.send(ctx, OutboundMessage{Message: Message{
 		Format: MessageFormatPlain,

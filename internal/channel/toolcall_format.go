@@ -2,6 +2,8 @@ package channel
 
 import (
 	"strings"
+
+	"github.com/felinics/memoh/internal/i18n"
 )
 
 // ToolCallStatus is the lifecycle state of a single tool call as surfaced in IM.
@@ -187,34 +189,11 @@ func BuildToolCallEnd(tc *StreamToolCall) ToolCallPresentation {
 }
 
 func approvalHintText(tc *StreamToolCall) string {
-	id := tc.ShortID
-	if id > 0 {
-		return strings.TrimSpace(
-			"Approval required. Use /approve " + intString(id) +
-				" to allow, or /reject " + intString(id) + " [reason] to reject. You can also reply to this message with /approve or /reject.",
-		)
+	loc := i18n.New(tc.Locale)
+	if tc.ShortID > 0 {
+		return loc.T("cmd.toolApproval.hint", map[string]any{"id": tc.ShortID})
 	}
-	return "Approval required. Reply to this message with /approve or /reject."
-}
-
-func intString(v int) string {
-	var b strings.Builder
-	if v == 0 {
-		return "0"
-	}
-	if v < 0 {
-		b.WriteByte('-')
-		v = -v
-	}
-	var digits [20]byte
-	i := len(digits)
-	for v > 0 {
-		i--
-		digits[i] = byte('0' + v%10)
-		v /= 10
-	}
-	b.Write(digits[i:])
-	return b.String()
+	return loc.T("cmd.toolApproval.hintNoID")
 }
 
 // fillBaseIdentity fills emoji / tool name / status after a per-tool

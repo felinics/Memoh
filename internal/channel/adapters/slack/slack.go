@@ -140,6 +140,7 @@ func (*SlackAdapter) Descriptor() channel.Descriptor {
 			Attachments:    true,
 			Media:          true,
 			Streaming:      true,
+			NativeApproval: true,
 			BlockStreaming: true,
 			Reactions:      true,
 			Threads:        true,

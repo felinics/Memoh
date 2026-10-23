@@ -399,6 +399,8 @@
       "windowTooSmall": "圧縮Modelのコンテキストウィンドウが小さすぎるため、要約を生成できません。より大きなコンテキストウィンドウを持つModelを選択してください。"
     },
     "toolApproval": {
+      "hint": "承認が必要です。/approve {id} で許可、/reject {id} [理由] で拒否します。このメッセージに /approve または /reject で返信することもできます。",
+      "hintNoID": "承認が必要です。このメッセージに /approve または /reject で返信してください。",
       "unavailable": "⚠️ 現在、ここでは承認を取得できません。",
       "parseFailed": "それは読めませんでした。 /approve または /reject を使用してリクエストに返信するか、ボタンをタップします。"
     },

@@ -36,6 +36,7 @@ func (*WebAdapter) Descriptor() channel.Descriptor {
 			Attachments:     true,
 			Streaming:       true,
 			NativeUserInput: true,
+			NativeApproval:  true,
 			BlockStreaming:  true,
 		},
 		TargetSpec: channel.TargetSpec{
