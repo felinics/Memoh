@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/felinics/memoh/internal/agent/toolresult"
 )
 
 func TestWebFetchProviderNativeTextIncludesProvider(t *testing.T) {
@@ -30,11 +32,14 @@ func TestWebFetchProviderNativeTextIncludesProvider(t *testing.T) {
 		t.Fatalf("callFetchProvider() error = %v", err)
 	}
 
-	body := result.(map[string]any)
-	if got := body["provider"]; got != "native" {
+	body, ok := result.(toolresult.WebFetch)
+	if !ok {
+		t.Fatalf("result type = %T", result)
+	}
+	if got := body.Provider; got != "native" {
 		t.Fatalf("provider = %v, want native", got)
 	}
-	if got := body["content"]; got != "hello native" {
+	if got := body.Content; got == nil || *got != "hello native" {
 		t.Fatalf("content = %v, want hello native", got)
 	}
 }
@@ -68,11 +73,14 @@ func TestWebFetchProviderJinaReader(t *testing.T) {
 		t.Fatalf("callFetchProvider() error = %v", err)
 	}
 
-	body := result.(map[string]any)
-	if got := body["provider"]; got != "jina" {
+	body, ok := result.(toolresult.WebFetch)
+	if !ok {
+		t.Fatalf("result type = %T", result)
+	}
+	if got := body.Provider; got != "jina" {
 		t.Fatalf("provider = %v, want jina", got)
 	}
-	if got := body["content"]; got != "# Reader result" {
+	if got := body.Content; got == nil || *got != "# Reader result" {
 		t.Fatalf("content = %v, want trimmed markdown", got)
 	}
 }
@@ -118,11 +126,14 @@ func TestWebFetchProviderCloudflareMarkdown(t *testing.T) {
 		t.Fatalf("callFetchProvider() error = %v", err)
 	}
 
-	body := result.(map[string]any)
-	if got := body["provider"]; got != "cloudflare_markdown" {
+	body, ok := result.(toolresult.WebFetch)
+	if !ok {
+		t.Fatalf("result type = %T", result)
+	}
+	if got := body.Provider; got != "cloudflare_markdown" {
 		t.Fatalf("provider = %v, want cloudflare_markdown", got)
 	}
-	if got := body["content"]; got != "## Markdown result" {
+	if got := body.Content; got == nil || *got != "## Markdown result" {
 		t.Fatalf("content = %v, want trimmed markdown", got)
 	}
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/background"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/agent/toolresult"
 )
 
 const (
@@ -357,12 +358,12 @@ func backgroundStatusMap(session SessionContext, s background.TaskSnapshot) map[
 		// The tail is live while the task runs — it is how the agent sees a
 		// server's ready banner without waiting for the process to exit.
 		result["output_tail"] = s.OutputTail
-		execResult := map[string]any{"output_file": s.OutputFile, "output_tail": s.OutputTail}
+		execResult := toolresult.ExecTask{OutputFile: s.OutputFile, OutputTail: s.OutputTail}
 		if s.Status != background.TaskRunning && s.Status != background.TaskQueued {
 			result["exit_code"] = s.ExitCode
-			execResult["exit_code"] = s.ExitCode
+			execResult.ExitCode = toolresult.Ptr(int(s.ExitCode))
 		}
-		result["result"] = execResult
+		result["result"] = execResult.Map()
 	}
 	return result
 }

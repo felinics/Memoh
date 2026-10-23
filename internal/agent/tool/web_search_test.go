@@ -106,7 +106,7 @@ func TestCallSearXNGSearchLive(t *testing.T) {
 	if !ok {
 		t.Fatalf("live result type = %T", result)
 	}
-	results, ok := resultMap["results"].([]map[string]any)
+	results, ok := resultMap["results"].([]any)
 	if !ok || len(results) == 0 {
 		t.Fatal("live SearXNG search returned no results")
 	}

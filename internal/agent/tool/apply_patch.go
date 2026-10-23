@@ -12,6 +12,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/agent/toolresult"
 	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -126,38 +127,6 @@ func (p applyPatchPlan) uiDiff() string {
 	return b.String()
 }
 
-func (p applyPatchPlan) files() []map[string]any {
-	files := make([]map[string]any, 0, len(p.added)+len(p.modified)+len(p.deleted))
-	for _, path := range p.added {
-		files = append(files, map[string]any{"operation": "add", "path": path})
-	}
-	for _, path := range p.modified {
-		files = append(files, map[string]any{"operation": "modify", "path": path})
-	}
-	for _, path := range p.deleted {
-		files = append(files, map[string]any{"operation": "delete", "path": path})
-	}
-	return files
-}
-
-func (p applyPatchPlan) summary() string {
-	var b strings.Builder
-	b.WriteString("Success. Updated the following files:")
-	for _, path := range p.added {
-		b.WriteString("\nA ")
-		b.WriteString(path)
-	}
-	for _, path := range p.modified {
-		b.WriteString("\nM ")
-		b.WriteString(path)
-	}
-	for _, path := range p.deleted {
-		b.WriteString("\nD ")
-		b.WriteString(path)
-	}
-	return b.String()
-}
-
 type applyPatchFileInfo struct {
 	exists bool
 	isDir  bool
@@ -258,10 +227,11 @@ func (p *ContainerProvider) execApplyPatch(ctx context.Context, session SessionC
 	if err != nil {
 		return nil, err
 	}
+	patchResult := toolresult.NewApplyPatch(plan.added, plan.modified, plan.deleted)
 	if res, err := p.runWorkspaceToolHook(ctx, session, target.hookWorkspaceInfo(p.execWorkDir), hooks.EventBeforeFileWrite, map[string]any{
 		"operation": "apply_patch",
-		"summary":   plan.summary(),
-		"files":     plan.files(),
+		"summary":   patchResult.Summary,
+		"files":     patchResult.Files,
 	}); err != nil {
 		if res.Decision == hooks.DecisionDeny {
 			return nil, err
@@ -273,20 +243,13 @@ func (p *ContainerProvider) execApplyPatch(ctx context.Context, session SessionC
 	}
 	if _, err := p.runWorkspaceToolHook(context.WithoutCancel(ctx), session, target.hookWorkspaceInfo(p.execWorkDir), hooks.EventAfterFileWrite, map[string]any{
 		"operation": "apply_patch",
-		"summary":   plan.summary(),
-		"files":     plan.files(),
+		"summary":   patchResult.Summary,
+		"files":     patchResult.Files,
 	}); err != nil {
 		p.logWorkspaceToolHookError(hooks.EventAfterFileWrite, session.BotID, session.SessionID, err)
 	}
 
-	result := map[string]any{
-		"ok":       true,
-		"summary":  plan.summary(),
-		"added":    plan.added,
-		"modified": plan.modified,
-		"deleted":  plan.deleted,
-		"files":    plan.files(),
-	}
+	result := patchResult.Map()
 	// Same UI-only diff channel as edit and write (see execEdit), computed
 	// from the plan's real before/after content rather than the model's patch
 	// text, and stripped before the model sees the tool result.
