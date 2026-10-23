@@ -1,6 +1,7 @@
 package timeline
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -114,5 +115,42 @@ func TestRenderDeletedMessagePopulatesSlotIdentityAndEditTime(t *testing.T) {
 
 	if seg.MessageID != "msg-deleted" || seg.EditedAtMs != 9000 || seg.LastEventCursor != 5150 {
 		t.Fatalf("deleted segment lost slot metadata: %+v", seg)
+	}
+}
+
+func TestRenderMessage_ReplyAttachmentsVisibleAndReferenced(t *testing.T) {
+	t.Parallel()
+	pipeline := NewPipeline(RenderParams{})
+	rc := pipeline.PushEvent("s", MessageEvent{
+		SessionID: "s", MessageID: "m2", ReceivedAtMs: 2, TimestampSec: 2,
+		Content:          []ContentNode{{Type: "text", Text: "what is this"}},
+		ReplyToMessageID: "m1",
+		ReplyToPreview:   "look",
+		ReplyToAttachments: []Attachment{
+			{Type: "image", ContentHash: "reply-hash", MimeType: "image/png", FilePath: "/data/reply.png"},
+		},
+		Conversation: ConversationMeta{Channel: "telegram", ConversationType: "private"},
+	})
+	if len(rc) != 1 {
+		t.Fatalf("segments = %d", len(rc))
+	}
+	text := rc[0].Content[0].Text
+	if !strings.Contains(text, `<in-reply-to id="m1">look`+"\n"+`<attachment type="image"`) || !strings.Contains(text, "reply.png") {
+		t.Fatalf("reply attachment not rendered inside in-reply-to: %s", text)
+	}
+	if len(rc[0].ImageRefs) != 1 || rc[0].ImageRefs[0].ContentHash != "reply-hash" {
+		t.Fatalf("image refs = %+v", rc[0].ImageRefs)
+	}
+}
+
+func TestMessageEvent_LegacyJSONWithoutReplyAttachments(t *testing.T) {
+	t.Parallel()
+	var ev MessageEvent
+	raw := `{"session_id":"s","message_id":"m","content":[],"reply_to_message_id":"m0","attachments":[],"conversation":{"channel":"x","conversation_type":"private"}}`
+	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		t.Fatal(err)
+	}
+	if ev.ReplyToMessageID != "m0" || len(ev.ReplyToAttachments) != 0 {
+		t.Fatalf("unexpected decode: %+v", ev)
 	}
 }

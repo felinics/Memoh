@@ -4,26 +4,27 @@ import "strings"
 
 // ICMessage represents a message node in the IntermediateContext.
 type ICMessage struct {
-	Type             string           `json:"type"` // always "message"
-	MessageID        string           `json:"message_id"`
-	Sender           *CanonicalUser   `json:"sender,omitempty"`
-	ReceivedAtMs     int64            `json:"received_at_ms"`
-	LastEventCursor  int64            `json:"last_event_cursor,omitempty"`
-	TimestampSec     int64            `json:"timestamp_sec"`
-	UTCOffsetMin     int              `json:"utc_offset_min"`
-	Content          []ContentNode    `json:"content"`
-	ReplyToMessageID string           `json:"reply_to_message_id,omitempty"`
-	ReplyToSender    *CanonicalUser   `json:"reply_to_sender,omitempty"`
-	ReplyToPreview   string           `json:"reply_to_preview,omitempty"`
-	ForwardInfo      *ForwardInfo     `json:"forward_info,omitempty"`
-	Attachments      []Attachment     `json:"attachments"`
-	EditedAtSec      int64            `json:"edited_at_sec,omitempty"`
-	EditUTCOffsetMin int              `json:"edit_utc_offset_min,omitempty"`
-	Deleted          bool             `json:"deleted,omitempty"`
-	IsSelfSent       bool             `json:"is_self_sent,omitempty"`
-	MentionsMe       bool             `json:"mentions_me,omitempty"`
-	RepliesToMe      bool             `json:"replies_to_me,omitempty"`
-	Conversation     ConversationMeta `json:"conversation"`
+	Type               string           `json:"type"` // always "message"
+	MessageID          string           `json:"message_id"`
+	Sender             *CanonicalUser   `json:"sender,omitempty"`
+	ReceivedAtMs       int64            `json:"received_at_ms"`
+	LastEventCursor    int64            `json:"last_event_cursor,omitempty"`
+	TimestampSec       int64            `json:"timestamp_sec"`
+	UTCOffsetMin       int              `json:"utc_offset_min"`
+	Content            []ContentNode    `json:"content"`
+	ReplyToMessageID   string           `json:"reply_to_message_id,omitempty"`
+	ReplyToSender      *CanonicalUser   `json:"reply_to_sender,omitempty"`
+	ReplyToPreview     string           `json:"reply_to_preview,omitempty"`
+	ReplyToAttachments []Attachment     `json:"reply_to_attachments,omitempty"`
+	ForwardInfo        *ForwardInfo     `json:"forward_info,omitempty"`
+	Attachments        []Attachment     `json:"attachments"`
+	EditedAtSec        int64            `json:"edited_at_sec,omitempty"`
+	EditUTCOffsetMin   int              `json:"edit_utc_offset_min,omitempty"`
+	Deleted            bool             `json:"deleted,omitempty"`
+	IsSelfSent         bool             `json:"is_self_sent,omitempty"`
+	MentionsMe         bool             `json:"mentions_me,omitempty"`
+	RepliesToMe        bool             `json:"replies_to_me,omitempty"`
+	Conversation       ConversationMeta `json:"conversation"`
 }
 
 // ICSystemEvent represents a group lifecycle event in the IC.
@@ -251,6 +252,7 @@ func reduceMessage(ic *IntermediateContext, event MessageEvent) {
 
 	if event.ReplyToMessageID != "" {
 		msg.ReplyToMessageID = event.ReplyToMessageID
+		msg.ReplyToAttachments = event.ReplyToAttachments
 		targetIdx := findMessageIndex(ic.Nodes, event.ReplyToMessageID)
 		if targetIdx != -1 {
 			target := ic.Nodes[targetIdx].Message

@@ -4423,3 +4423,83 @@ func TestNativeQuestionAuthorizationUsesSenderAndSource(t *testing.T) {
 		}
 	}
 }
+
+type fakeTranscriber struct{ text string }
+
+func (f *fakeTranscriber) Transcribe(context.Context, string, []byte, string, string, map[string]any) (TranscriptionResult, error) {
+	return fakeTranscription(f.text), nil
+}
+
+type fakeTranscription string
+
+func (f fakeTranscription) GetText() string { return string(f) }
+
+type fakeSTTResolver struct{}
+
+func (fakeSTTResolver) ResolveTranscriptionModelID(context.Context, string) (string, error) {
+	return "stt-model", nil
+}
+
+func TestChannelInboundProcessorDiscussTimelineHoldsTranscribedVoice(t *testing.T) {
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-discuss", RouteID: "route-discuss"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway,
+		&fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "ci-voice"}}, &fakePolicyService{}, "", 0)
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "discuss-voice", Type: sessionpkg.TypeDiscuss, Runtime: sessionpkg.RuntimeModel}})
+	processor.SetMediaService(&fakeMediaIngestor{})
+	processor.SetTranscriptionService(&fakeTranscriber{text: "hello from voice"}, fakeSTTResolver{})
+	pipeline := timeline.NewPipeline(timeline.RenderParams{})
+	driver := discuss.NewDiscussDriver(discuss.DiscussDriverDeps{})
+	defer driver.StopAll()
+	processor.SetPipeline(pipeline, nil, driver)
+
+	cfg := channel.ChannelConfig{TeamID: "team-test", ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}
+	msg := channel.InboundMessage{
+		BotID:   "bot-1",
+		Channel: channel.ChannelType("telegram"),
+		Message: channel.Message{ID: "voice-1", Attachments: []channel.Attachment{
+			{Type: channel.AttachmentVoice, ContentHash: "voice-hash"},
+		}},
+		ReplyTarget:  "group-target",
+		Sender:       channel.Identity{SubjectID: "ext-1", DisplayName: "A"},
+		Conversation: channel.Conversation{ID: "g", Type: channel.ConversationTypeGroup},
+	}
+	if err := processor.HandleInbound(context.Background(), cfg, msg, &fakeReplySender{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !driver.HasSession("discuss-voice") {
+		t.Fatal("discuss driver did not receive the session")
+	}
+	if got := timeline.RCToXML(pipeline.GetRC("discuss-voice")); !strings.Contains(got, "hello from voice") {
+		t.Fatalf("timeline lacks transcript: %s", got)
+	}
+}
+
+func TestChannelInboundProcessorPassiveChatVoiceNotTranscribed(t *testing.T) {
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-passive", RouteID: "route-passive"}}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, &fakeChatGateway{},
+		&fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "ci-voice"}}, &fakePolicyService{}, "", 0)
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "chat-passive", Type: sessionpkg.TypeChat, Runtime: sessionpkg.RuntimeModel}})
+	processor.SetMediaService(&fakeMediaIngestor{})
+	processor.SetTranscriptionService(&fakeTranscriber{text: "hello from voice"}, fakeSTTResolver{})
+	pipeline := timeline.NewPipeline(timeline.RenderParams{})
+	processor.SetPipeline(pipeline, nil, nil)
+
+	cfg := channel.ChannelConfig{TeamID: "team-test", ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}
+	msg := channel.InboundMessage{
+		BotID:   "bot-1",
+		Channel: channel.ChannelType("telegram"),
+		Message: channel.Message{ID: "voice-2", Attachments: []channel.Attachment{
+			{Type: channel.AttachmentVoice, ContentHash: "voice-hash"},
+		}},
+		ReplyTarget:  "group-target",
+		Sender:       channel.Identity{SubjectID: "ext-1", DisplayName: "A"},
+		Conversation: channel.Conversation{ID: "g", Type: channel.ConversationTypeGroup},
+	}
+	if err := processor.HandleInbound(context.Background(), cfg, msg, &fakeReplySender{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := timeline.RCToXML(pipeline.GetRC("chat-passive")); strings.Contains(got, "hello from voice") {
+		t.Fatalf("passive message must not be transcribed: %s", got)
+	}
+}
