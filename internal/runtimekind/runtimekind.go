@@ -14,7 +14,10 @@
 // vocabulary instead of copying it.
 package runtimekind
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // Kind names one session runtime: the engine that executes a session's turns.
 type Kind string
@@ -120,6 +123,19 @@ var capabilityByKind = map[Kind]capabilities{
 		AgentModel:              true,
 		SessionModes:            []string{ModeChat, ModeDiscuss, ModeSchedule},
 	},
+}
+
+// ExternalKinds lists every kind served by an external.Driver, sorted. A new
+// external runtime appears here as soon as its table row is added.
+func ExternalKinds() []Kind {
+	kinds := make([]Kind, 0, len(capabilityByKind))
+	for kind, caps := range capabilityByKind {
+		if caps.External {
+			kinds = append(kinds, kind)
+		}
+	}
+	slices.Sort(kinds)
+	return kinds
 }
 
 func capabilitiesFor(raw string) (capabilities, bool) {
