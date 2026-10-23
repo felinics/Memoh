@@ -3,22 +3,33 @@ import { describe, expect, it } from 'vitest'
 import { createSSRApp, h } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { compileTemplate } from 'vue/compiler-sfc'
+import { Plus } from 'lucide-vue-next'
 import * as icons from '@memohai/icon/ui'
+
+const { uiIconStrokeWidth, ...glyphs } = icons
 
 describe('shared UI icon contract', () => {
   it('uses one default stroke and forwards SVG attributes for every UI glyph', async () => {
-    for (const icon of Object.values(icons)) {
+    for (const icon of Object.values(glyphs)) {
       const svg = await renderToString(createSSRApp(() => h(icon, {
         size: 16,
         class: 'contract-icon',
         'aria-hidden': 'true',
       })))
-      expect(svg).toContain('stroke-width="2"')
+      expect(svg).toContain(`stroke-width="${uiIconStrokeWidth}"`)
       expect(svg).toContain('stroke="currentColor"')
       expect(svg).toContain('width="16"')
       expect(svg).toContain('contract-icon')
       expect(svg).toContain('aria-hidden="true"')
     }
+  })
+
+  it('keeps icons imported straight from lucide on the shared stroke', async () => {
+    // lucide-vue-next 0.562 has no app-wide default, so icons imported from it
+    // directly render lucide's built-in stroke. They match the icon layer only
+    // while that built-in equals uiIconStrokeWidth.
+    const svg = await renderToString(createSSRApp(() => h(Plus)))
+    expect(svg).toContain(`stroke-width="${uiIconStrokeWidth}"`)
   })
 
   it('keeps composer and panel action icon styling out of call sites', () => {
@@ -28,7 +39,7 @@ describe('shared UI icon contract', () => {
       '../pages/home/components/dockview/header-add-actions.vue',
       '../pages/home/components/dockview/prefix-header-actions.vue',
     ]
-    const names = new Set(Object.keys(icons))
+    const names = new Set(Object.keys(glyphs))
     for (const file of files) {
       const source = readFileSync(new URL(file, import.meta.url), 'utf8')
       const template = source.slice(source.indexOf('<template>') + 10, source.lastIndexOf('</template>'))

@@ -110,10 +110,7 @@
         :aria-label="t('chat.searchSessions')"
         @click="searchOpen = true"
       >
-        <Search
-          :stroke-width="2"
-          class="size-[18px]"
-        />
+        <Search class="size-[18px]" />
       </Button>
     </nav>
 
