@@ -1,0 +1,267 @@
+{
+ "bashOk": [
+  {
+   "type": "assistant",
+   "message": {
+    "role": "assistant",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_01PJ5khdSPFRCssZvaMewvBT",
+      "name": "Bash",
+      "input": {
+       "command": "echo out; echo err 1>&2",
+       "description": "Print to stdout and stderr"
+      }
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "<session>",
+   "uuid": "<uuid>"
+  },
+  {
+   "type": "user",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "tool_use_id": "toolu_01PJ5khdSPFRCssZvaMewvBT",
+      "type": "tool_result",
+      "content": "out\nerr",
+      "is_error": false
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "<session>",
+   "uuid": "<uuid>",
+   "tool_use_result": {
+    "stdout": "out\nerr",
+    "stderr": "",
+    "interrupted": false,
+    "isImage": false,
+    "noOutputExpected": false
+   }
+  }
+ ],
+ "bashFail": [
+  {
+   "type": "assistant",
+   "message": {
+    "role": "assistant",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_01GrQdNPgauh9WeYwhkSMUdT",
+      "name": "Bash",
+      "input": {
+       "command": "echo out; echo err 1>&2; exit 3",
+       "description": "Print to stdout and stderr, exit with code 3"
+      }
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "<session>",
+   "uuid": "<uuid>"
+  },
+  {
+   "type": "user",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "type": "tool_result",
+      "content": "Exit code 3\nout\nerr",
+      "is_error": true,
+      "tool_use_id": "toolu_01GrQdNPgauh9WeYwhkSMUdT"
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "<session>",
+   "uuid": "<uuid>",
+   "tool_use_result": "Error: Exit code 3\nout\nerr"
+  }
+ ],
+ "read": [
+  {
+   "type": "assistant",
+   "message": {
+    "role": "assistant",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_01L8pEnmk38pKmHKQmWDUnRG",
+      "name": "Read",
+      "input": {
+       "file_path": "/workspace/a.txt"
+      }
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "<session>",
+   "uuid": "<uuid>"
+  },
+  {
+   "type": "user",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "tool_use_id": "toolu_01L8pEnmk38pKmHKQmWDUnRG",
+      "type": "tool_result",
+      "content": "1\thello file\n2\tline2\n3\t"
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "<session>",
+   "uuid": "<uuid>",
+   "tool_use_result": {
+    "type": "text",
+    "file": {
+     "filePath": "/workspace/a.txt",
+     "content": "hello file\nline2\n",
+     "numLines": 3,
+     "startLine": 1,
+     "totalLines": 3
+    }
+   }
+  }
+ ],
+ "webFetch": [
+  {
+   "type": "assistant",
+   "message": {
+    "role": "assistant",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_01GyFG4dXmRJHq2LJbafYiwq",
+      "name": "WebFetch",
+      "input": {
+       "url": "https://example.com",
+       "prompt": "What is the page title?"
+      }
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "<session>",
+   "uuid": "<uuid>"
+  },
+  {
+   "type": "user",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "tool_use_id": "toolu_01GyFG4dXmRJHq2LJbafYiwq",
+      "type": "tool_result",
+      "content": "The page title is \"Example Domain.\""
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "<session>",
+   "uuid": "<uuid>",
+   "tool_use_result": {
+    "bytes": 577,
+    "code": 200,
+    "codeText": "OK",
+    "result": "The page title is \"Example Domain.\"",
+    "durationMs": 3277,
+    "url": "https://example.com"
+   }
+  }
+ ],
+ "webSearch": [
+  {
+   "type": "assistant",
+   "message": {
+    "role": "assistant",
+    "content": [
+     {
+      "type": "tool_use",
+      "id": "toolu_01H298S47AQBbyGX8voZpLA5",
+      "name": "WebSearch",
+      "input": {
+       "query": "example domain iana"
+      }
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "<session>",
+   "uuid": "<uuid>"
+  },
+  {
+   "type": "user",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "tool_use_id": "toolu_01H298S47AQBbyGX8voZpLA5",
+      "type": "tool_result",
+      "content": "Web search results for query: \"example domain iana\"\n\nLinks: [{\"title\":\"Example Domains\",\"url\":\"https://www.iana.org/help/example-domains\"},{\"title\":\"IANA Reserved Example Domain\",\"url\":\"https://www.facebook.com/fb-answers/iana-reserved-example-domain/\"},{\"title\":\"IANA-managed Reserved Domains\",\"url\""
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "<session>",
+   "uuid": "<uuid>",
+   "tool_use_result": {
+    "query": "example domain iana",
+    "results": [
+     {
+      "tool_use_id": "srvtoolu_01VdTPC9bA2t8sEitHAyxF1h",
+      "content": [
+       {
+        "title": "Example Domains",
+        "url": "https://www.iana.org/help/example-domains"
+       },
+       {
+        "title": "IANA Reserved Example Domain",
+        "url": "https://www.facebook.com/fb-answers/iana-reserved-example-domain/"
+       },
+       {
+        "title": "IANA-managed Reserved Domains",
+        "url": "https://www.iana.org/domains/reserved"
+       },
+       {
+        "title": "Example.com",
+        "url": "https://en.wikipedia.org/wiki/Example.com"
+       },
+       {
+        "title": "Example Domain",
+        "url": "https://news.ycombinator.com/item?id=29623646"
+       },
+       {
+        "title": "Domain name registry",
+        "url": "https://en.wikipedia.org/wiki/Domain_name_registry"
+       },
+       {
+        "title": ".example",
+        "url": "https://en.wikipedia.org/wiki/.example"
+       },
+       {
+        "title": "Sponsored top-level domain",
+        "url": "https://en.wikipedia.org/wiki/Sponsored_top-level_domain"
+       },
+       {
+        "title": "What's the example.com domain? - PlotHost",
+        "url": "https://www.plothost.com/kb/example-com-domain/"
+       }
+      ]
+     },
+     "Here's what I found on IANA's example domains:\n\n**What they are**\nIANA says that a number of domains such as example.com and example.org are maintained for documentation purposes. These domains may be used as illustrative examples in documents without prior coordination with us. They are not availab"
+    ],
+    "durationSeconds": 10.959522084,
+    "searchCount": 1
+   }
+  }
+ ]
+}
