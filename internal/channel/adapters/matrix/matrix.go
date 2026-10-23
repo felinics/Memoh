@@ -269,6 +269,7 @@ func (*MatrixAdapter) SelfIdentityPolicy() channel.SelfIdentityPolicy {
 		RefreshOnCredentialsChange: true,
 		RequireDiscoveryOnEnable:   true,
 		RequiredSelfIdentityKey:    "user_id",
+		SenderSubjectKey:           "user_id",
 		DiscoveryErrorMessage:      "matrix identity discovery failed",
 		MissingIdentityMessage:     "matrix identity discovery returned no user id",
 	}

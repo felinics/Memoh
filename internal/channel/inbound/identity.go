@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -120,6 +121,8 @@ func (r *IdentityResolver) Middleware() channel.Middleware {
 // Resolve performs two-phase identity resolution:
 //  1. Global identity: (channel, channel_subject_id) -> channel_identity_id (unconditional)
 //  2. Authorization: owner/member checks plus public bot guest passthrough
+//
+// A message sent by the bot's own account stops before either phase.
 func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage) (IdentityState, error) {
 	if r.channelIdentities == nil {
 		return IdentityState{}, errors.New("identity resolver not configured")
@@ -135,7 +138,6 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 		channelConfigID = ""
 	}
 	subjectID := extractSubjectIdentity(msg)
-	displayName, avatarURL := r.resolveProfile(ctx, cfg, msg, subjectID)
 
 	state := IdentityState{
 		Identity: InboundIdentity{
@@ -150,6 +152,19 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 		return state, errors.New("cannot resolve identity: no channel_subject_id")
 	}
 
+	// The bot's own message is already in history as the reply that produced
+	// it, so it is neither external input nor worth an identity of its own.
+	if r.sentByBot(cfg, msg, subjectID) {
+		r.logger.DebugContext(ctx, "inbound dropped: sent by the bot's own account",
+			slog.String("channel", msg.Channel.String()),
+			slog.String("bot_id", botID),
+			slog.String("message_id", strings.TrimSpace(msg.Message.ID)),
+		)
+		state.Decision = &IdentityDecision{Stop: true}
+		return state, nil
+	}
+
+	displayName, avatarURL := r.resolveProfile(ctx, cfg, msg, subjectID)
 	channelIdentityID, err := r.resolveIdentity(ctx, msg, subjectID, displayName, avatarURL)
 	if err != nil {
 		return state, err
@@ -186,6 +201,24 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 
 	// Non-owner messages pass identity resolution; downstream ACL decides allow/deny.
 	return state, nil
+}
+
+// sentByBot reports whether the message's sender is the bot's own platform
+// account, by the id the adapter's policy says the platform reports it under.
+// A platform without such an id, or a config that has not recorded one, never
+// matches: the sender cannot be told apart from anyone else.
+func (r *IdentityResolver) sentByBot(cfg channel.ChannelConfig, msg channel.InboundMessage, subjectID string) bool {
+	if r.registry == nil {
+		return false
+	}
+	key := r.registry.SelfIdentityPolicy(msg.Channel).SenderSubjectKey
+	if key == "" {
+		return false
+	}
+	// Candidates are never empty, so an id the config has not recorded
+	// matches no sender.
+	self := strings.TrimSpace(channel.ReadString(cfg.SelfIdentity, key))
+	return slices.Contains(identitySubjectCandidates(msg, subjectID), self)
 }
 
 func (r *IdentityResolver) accountUserIDForChannelIdentity(ctx context.Context, channelIdentityID string) (string, error) {

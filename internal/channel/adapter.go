@@ -177,6 +177,14 @@ type SelfIdentityPolicy struct {
 	DiscoveryErrorMessage            string
 	MissingIdentityMessage           string
 	DuplicateExternalIdentityMessage string
+	// SenderSubjectKey names the self_identity entry holding the id under which
+	// the platform reports this bot as a message sender, the same kind of id as
+	// the inbound sender's subject. It stays empty when the platform shows the
+	// bot's own messages under no id comparable with anything discovered (the
+	// app id of QQ or DingTalk is not a sender id); inbound then cannot tell
+	// the bot's own messages apart and relies on the platform not delivering
+	// them.
+	SenderSubjectKey string
 }
 
 // SelfIdentityPolicyProvider lets adapters opt into stricter self-identity
