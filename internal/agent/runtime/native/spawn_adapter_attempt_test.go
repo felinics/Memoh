@@ -57,7 +57,7 @@ func TestSpawnAdapterGenerateWithWatchdogKeepsRetryableAttemptNonTerminal(t *tes
 				}
 			})
 			_, err := adapter.GenerateWithWatchdog(ctx, tools.SpawnRunConfig{
-				Model:       &sdk.Model{ID: "spawn-retry-model", Provider: provider, Type: sdk.ModelTypeChat},
+				Model:       &sdk.Model{ID: "spawn-retry-model", Provider: provider},
 				Query:       "retry the task",
 				SessionType: sessionmode.Subagent,
 				Identity:    tools.SpawnIdentity{BotID: "bot-1", SessionID: "session-1", IsSubagent: true},
@@ -96,7 +96,7 @@ func TestSpawnAdapterGenerateWithWatchdogMakesFinalWatchdogAttemptTerminal(t *te
 		}
 	})
 	_, err := adapter.GenerateWithWatchdog(ctx, tools.SpawnRunConfig{
-		Model:       &sdk.Model{ID: "spawn-final-watchdog-model", Provider: provider, Type: sdk.ModelTypeChat},
+		Model:       &sdk.Model{ID: "spawn-final-watchdog-model", Provider: provider},
 		Query:       "finish the task",
 		SessionType: sessionmode.Subagent,
 		Identity:    tools.SpawnIdentity{BotID: "bot-1", SessionID: "session-1", IsSubagent: true},
@@ -176,7 +176,7 @@ func TestSpawnAdapterGenerateWithWatchdogDoesNotRetryPersistedInterruptedCheckpo
 	})
 	var touches atomic.Int32
 	_, err := adapter.GenerateWithWatchdog(ctx, tools.SpawnRunConfig{
-		Model:       &sdk.Model{ID: "spawn-interrupted-model", Provider: provider, Type: sdk.ModelTypeChat},
+		Model:       &sdk.Model{ID: "spawn-interrupted-model", Provider: provider},
 		Query:       "preserve interrupted output",
 		SessionType: sessionmode.Subagent,
 		Identity:    tools.SpawnIdentity{BotID: "bot-1", SessionID: "session-1", IsSubagent: true},
@@ -375,7 +375,7 @@ func TestSpawnAdapterArbitratesCleanEndBeforePublishingTerminal(t *testing.T) {
 			})
 			var resolutionCalls int
 			_, err := adapter.GenerateWithWatchdog(context.Background(), tools.SpawnRunConfig{
-				Model:       &sdk.Model{ID: "spawn-terminal-model", Provider: provider, Type: sdk.ModelTypeChat},
+				Model:       &sdk.Model{ID: "spawn-terminal-model", Provider: provider},
 				Query:       "finish the task",
 				SessionType: sessionmode.Subagent,
 				Identity:    tools.SpawnIdentity{BotID: "bot-1", SessionID: "session-1", IsSubagent: true},
@@ -422,7 +422,7 @@ func TestSpawnAdapterPersistsFallbackBeforePublishingTerminal(t *testing.T) {
 	})
 
 	result, err := adapter.GenerateWithWatchdog(context.Background(), tools.SpawnRunConfig{
-		Model:       &sdk.Model{ID: "spawn-terminal-barrier", Provider: provider, Type: sdk.ModelTypeChat},
+		Model:       &sdk.Model{ID: "spawn-terminal-barrier", Provider: provider},
 		Query:       "finish the task",
 		SessionType: sessionmode.Subagent,
 		Identity:    tools.SpawnIdentity{BotID: "bot-1", SessionID: "session-1", IsSubagent: true},
@@ -463,7 +463,7 @@ func TestSpawnAdapterWithholdsTerminalWhenFallbackPersistenceFails(t *testing.T)
 	var reconciled tools.SpawnAttemptDisposition
 
 	_, err := adapter.GenerateWithWatchdog(context.Background(), tools.SpawnRunConfig{
-		Model:       &sdk.Model{ID: "spawn-terminal-barrier-failure", Provider: provider, Type: sdk.ModelTypeChat},
+		Model:       &sdk.Model{ID: "spawn-terminal-barrier-failure", Provider: provider},
 		Query:       "finish the task",
 		SessionType: sessionmode.Subagent,
 		Identity:    tools.SpawnIdentity{BotID: "bot-1", SessionID: "session-1", IsSubagent: true},

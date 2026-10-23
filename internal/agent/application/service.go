@@ -970,11 +970,11 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		ChatCompletionsCompat: chatCompletionsCompat,
 		HTTPClient:            modelHTTPClient,
 		ReasoningConfig:       reasoningConfig,
-		ReasoningDialect:      chatModel.Config.ReasoningDialect,
-		ReasoningOffSupport:   chatModel.Config.ReasoningOffSupport,
-		ReasoningDefaultOn:    chatModel.Config.ReasoningDefaultOn,
-		ThinkingBudgetMin:     chatModel.Config.ThinkingBudgetMin,
-		ThinkingBudgetMax:     chatModel.Config.ThinkingBudgetMax,
+		ReasoningDialect:      chatModel.Config.ReasoningDialect(),
+		ReasoningOffSupport:   chatModel.Config.ReasoningOffSupport(),
+		ReasoningReplay:       chatModel.Config.ReasoningReplay(),
+		ThinkingBudgetMin:     chatModel.Config.ThinkingBudgetMin(),
+		ThinkingBudgetMax:     chatModel.Config.ThinkingBudgetMax(),
 		ContextWindow:         contextBudgetFromChatModel(chatModel),
 		MaxOutputTokens:       chatModel.Config.MaxOutputTokensLimit(),
 	})
@@ -1116,7 +1116,7 @@ func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.S
 	}
 	return reasoning.ResolveConfig(
 		chatModel.ResolveThinkingMode(),
-		chatModel.Config.ReasoningEfforts,
+		chatModel.Config.ReasoningEfforts(),
 		chatModel.ReasoningOptions(clientType),
 		stored,
 		requestedEffort,

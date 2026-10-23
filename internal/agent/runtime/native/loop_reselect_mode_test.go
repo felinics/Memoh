@@ -34,7 +34,7 @@ func TestBuildGenerateDispatchOffModeSetsLegacyPruneLoopSelectionMode(t *testing
 	t.Parallel()
 
 	ledger := contextfrag.NewMutationLedger()
-	model := &sdk.Model{ID: "mock-model", Provider: &usageRecordingProvider{}, Type: sdk.ModelTypeChat}
+	model := &sdk.Model{ID: "mock-model", Provider: &usageRecordingProvider{}}
 	a := New(Deps{LoopReselectMode: LoopReselectOff})
 	cfg := RunConfig{
 		Model:            model,
@@ -59,7 +59,7 @@ func TestBuildGenerateDispatchShadowModeSetsSuffixOnlyShadowLoopSelectionMode(t 
 	t.Parallel()
 
 	ledger := contextfrag.NewMutationLedger()
-	model := &sdk.Model{ID: "mock-model", Provider: &usageRecordingProvider{}, Type: sdk.ModelTypeChat}
+	model := &sdk.Model{ID: "mock-model", Provider: &usageRecordingProvider{}}
 	a := New(Deps{LoopReselectMode: LoopReselectShadow})
 	cfg := RunConfig{
 		Model:            model,

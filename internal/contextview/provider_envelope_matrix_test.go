@@ -85,7 +85,7 @@ func TestProviderEnvelopeAuthorityMatrix(t *testing.T) {
 				provider := namedEnvelopeProbeProvider{envelopeProbeProvider: probe, name: client.provider}
 				run := func(messages []sdk.Message) (*contextfrag.LifecycleSnapshot, []contextfrag.MutationRecord, error) {
 					cfg := path.config(messages, window)
-					cfg.Model = &sdk.Model{ID: "model", Provider: provider, Type: sdk.ModelTypeChat}
+					cfg.Model = &sdk.Model{ID: "model", Provider: provider}
 					cfg.ReasoningConfig = client.reasoning
 					cfg.Identity = agentpkg.SessionContext{BotID: "bot-1"}
 					cfg.ContextMutations = contextfrag.NewMutationLedger()

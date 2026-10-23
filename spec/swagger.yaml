@@ -6036,19 +6036,34 @@ definitions:
       type:
         $ref: '#/definitions/models.ModelType'
     type: object
+  models.Modality:
+    enum:
+    - text
+    - image
+    - audio
+    - video
+    - pdf
+    type: string
+    x-enum-varnames:
+    - ModalityText
+    - ModalityImage
+    - ModalityAudio
+    - ModalityVideo
+    - ModalityPDF
   models.ModelConfig:
     properties:
       catalog_available:
+        description: CatalogAvailable is false when a managed catalog stopped listing
+          the model.
         type: boolean
-      compatibilities:
-        items:
-          type: string
-        type: array
       context_window:
+        description: ContextWindow is the context window in tokens, input and output
+          together.
         type: integer
       description:
         type: string
       dimensions:
+        description: Dimensions is the embedding vector size.
         type: integer
       max_output_tokens:
         description: |-
@@ -6056,45 +6071,74 @@ definitions:
           response; nil means unknown. When set, every turn requests an explicit
           limit within it.
         type: integer
-      reasoning_default_on:
+      modalities:
+        $ref: '#/definitions/models.ModelModalities'
+      reasoning:
+        allOf:
+        - $ref: '#/definitions/models.ModelReasoning'
+        description: Reasoning is nil when the model does not reason.
+      schema_version:
         description: |-
-          ReasoningDefaultOn reports whether omitting the thinking field leaves the
-          model thinking. Separate from off-ability: Claude 4.6 can be turned off *and*
-          defaults to off, while Opus 5 can be turned off but defaults to on, so
-          omitting the field there keeps thinking running — billed, and invisible to a
-          user who believes they turned it off. nil means unknown.
+          SchemaVersion is ModelConfigSchemaVersion on every config this version
+          writes.
+        type: integer
+      structured_output:
+        description: StructuredOutput reports support for a JSON schema response format.
         type: boolean
-      reasoning_dialect:
+      tool_call:
+        type: boolean
+    type: object
+  models.ModelModalities:
+    properties:
+      input:
+        items:
+          $ref: '#/definitions/models.Modality'
+        type: array
+      output:
+        items:
+          $ref: '#/definitions/models.Modality'
+        type: array
+    type: object
+  models.ModelReasoning:
+    properties:
+      budget:
+        allOf:
+        - $ref: '#/definitions/models.ReasoningBudget'
+        description: Budget is the reasoning token budget range; nil means no budget
+          control.
+      default:
+        allOf:
+        - $ref: '#/definitions/models.ReasoningDefault'
+        description: Default is what the model does when a request sets no reasoning
+          control.
+      dialect:
         description: |-
-          ReasoningDialect declares the wire shape of this model's thinking control,
-          which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
-          token budget while 3.x takes a named level, and the two are mutually
-          exclusive on the same request. Declared per model because the alternative is
-          sniffing the model id, and an id is not a capability. Empty leaves provider
-          policy in charge; Google's adaptor deliberately sends no thinking control so
-          pre-dialect rows retain their safe pre-upgrade request shape.
+          Dialect is the request shape that carries the controls: tier, budget,
+          toggle, adaptive, or empty when not stated.
         type: string
-      reasoning_efforts:
+      efforts:
+        description: |-
+          Efforts lists the effort levels the model accepts, weakest to strongest.
+          Turning reasoning off is Off, not an effort.
         items:
           type: string
         type: array
-      reasoning_off_support:
+      "off":
         description: |-
-          ReasoningOffSupport declares how the model answers an explicit request to
-          stop thinking. Anthropic's per-model table splits models that share a
-          thinking mode and an identical tier list, so this cannot be derived — see the
-          reasoning package's OffSupport constants.
+          Off is how the model answers a request to stop reasoning: accepted,
+          low_effort_only, rejected, or empty when not stated.
         type: string
-      thinking_budget_max:
-        type: integer
-      thinking_budget_min:
+      replay:
+        allOf:
+        - $ref: '#/definitions/models.ReasoningReplay'
         description: |-
-          ThinkingBudgetMin/Max bound the budget dialect. The range is per model
-          family, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned
-          off, while Flash starts at 0 and can.
-        type: integer
-      thinking_mode:
-        type: string
+          Replay is how a Chat Completions host reads reasoning back on replayed
+          messages; nil leaves the provider's compatibility mode in charge.
+      toggle:
+        description: |-
+          Toggle reports a request field that turns reasoning on and off, separate
+          from any effort level.
+        type: boolean
     type: object
   models.ModelType:
     enum:
@@ -6110,6 +6154,29 @@ definitions:
     - ModelTypeSpeech
     - ModelTypeTranscription
     - ModelTypeVideo
+  models.ReasoningBudget:
+    properties:
+      max:
+        type: integer
+      min:
+        type: integer
+    type: object
+  models.ReasoningDefault:
+    properties:
+      budget:
+        type: integer
+      effort:
+        type: string
+      enabled:
+        type: boolean
+    type: object
+  models.ReasoningReplay:
+    properties:
+      field:
+        type: string
+      required:
+        type: boolean
+    type: object
   models.TestResponse:
     properties:
       code:
@@ -6405,6 +6472,12 @@ definitions:
           DefaultEffort is the tier to use when nothing is stored, and the tier to fall
           back to when a stored value is no longer offered by the model.
         type: string
+      default_off:
+        description: |-
+          DefaultOff reports that the model is declared to start with reasoning off:
+          a client picking the model, or reconciling a value it no longer offers,
+          starts it off instead of on DefaultEffort. Only set when CanDisable is.
+        type: boolean
       efforts:
         description: Efforts are the selectable active tiers, weakest to strongest
           as advertised.

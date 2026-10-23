@@ -759,6 +759,44 @@ type modelDependency struct {
 	Type       modelpkg.ModelType   `json:"type"`
 	Enable     *bool                `json:"enable,omitempty"`
 	Config     modelpkg.ModelConfig `json:"config"`
+	// rawConfig is the config as exported; see withClientType.
+	rawConfig json.RawMessage
+}
+
+// UnmarshalJSON upgrades a config exported by an older version; see
+// modelpkg.DecodeModelConfig.
+func (d *modelDependency) UnmarshalJSON(data []byte) error {
+	type plain modelDependency
+	var body struct {
+		plain
+		Config json.RawMessage `json:"config"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		return err
+	}
+	*d = modelDependency(body.plain)
+	config, err := modelpkg.DecodeModelConfig(body.Config, modelpkg.ConfigContext{ModelID: d.ModelID, Type: d.Type})
+	if err != nil {
+		return err
+	}
+	d.Config = config
+	d.rawConfig = body.Config
+	return nil
+}
+
+// withClientType reads the exported config again with its provider's client
+// type. A version 1 switch that only the protocol could turn off upgrades by
+// it, and the backup's provider list is the only place that names it.
+func (d *modelDependency) withClientType(clientType string) error {
+	if clientType == "" || len(d.rawConfig) == 0 {
+		return nil
+	}
+	config, err := modelpkg.DecodeModelConfig(d.rawConfig, modelpkg.ConfigContext{ModelID: d.ModelID, Type: d.Type, ClientType: clientType})
+	if err != nil {
+		return err
+	}
+	d.Config = config
+	return nil
 }
 
 func (s *Service) importDependencies(ctx context.Context, state *importState) (dependencyMap, error) {
@@ -772,8 +810,32 @@ func (s *Service) importDependencies(ctx context.Context, state *importState) (d
 		}
 		deps.providers[item.ID] = id
 	}
+	// The client type is the one of the provider the model lands on, which may
+	// be an existing provider the backup's was matched to by name.
+	clientTypes := map[string]string{}
+	clientTypeOf := func(providerID string) string {
+		if clientType, ok := clientTypes[providerID]; ok {
+			return clientType
+		}
+		clientType := ""
+		if s.providers != nil && providerID != "" {
+			if provider, err := s.providers.Get(ctx, providerID); err == nil {
+				clientType = provider.ClientType
+			}
+		}
+		clientTypes[providerID] = clientType
+		return clientType
+	}
 	models, _ := readEntry[[]modelDependency](state, "dependencies/models.json")
 	for _, item := range models {
+		target := deps.providers[item.ProviderID]
+		if target == "" {
+			target = item.ProviderID
+		}
+		if err := item.withClientType(clientTypeOf(target)); err != nil {
+			s.skipImport(ctx, state, "model_dependency", "model dependency skipped", err)
+			continue
+		}
 		id, err := s.ensureModel(ctx, item, deps)
 		if err != nil {
 			s.skipImport(ctx, state, "model_dependency", "model dependency skipped", err)

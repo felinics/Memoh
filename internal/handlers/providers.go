@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -428,19 +429,20 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 			req.DefaultCompatibilities,
 			allowCustomModelCapabilityDefaults(provider),
 		)
+		configContext := models.ConfigContext{ModelID: m.ID, Type: modelType, ClientType: provider.ClientType}
 		_, err := h.modelsService.Create(ctx, models.AddRequest{
 			ModelID:    m.ID,
 			Name:       name,
 			ProviderID: id,
 			Type:       modelType,
 			Enable:     &disabled,
-			Config:     createConfig,
+			Config:     createConfig.Upgrade(configContext),
 		})
 		if err != nil {
 			if errors.Is(err, models.ErrModelIDAlreadyExists) {
 				// Upsert/assert: re-importing fills in newly discovered
 				// capabilities on existing models without clobbering user config.
-				if h.fillExistingModel(ctx, id, m.ID, discoveredConfig, managedCatalog && m.CapabilitiesKnown) {
+				if h.fillExistingModel(ctx, provider.ClientType, id, m.ID, discoveredConfig, managedCatalog && m.CapabilitiesKnown) {
 					resp.Updated++
 				} else {
 					resp.Skipped++
@@ -527,19 +529,28 @@ func (h *ProvidersHandler) markUnavailableManagedModels(ctx context.Context, pro
 //
 // The lookup is provider-scoped because model_id is only unique per provider;
 // same-named models under other providers must not affect this refresh.
-func (h *ProvidersHandler) fillExistingModel(ctx context.Context, providerID, modelID string, discovered models.ModelConfig, replaceCapabilities bool) bool {
+func (h *ProvidersHandler) fillExistingModel(ctx context.Context, clientType, providerID, modelID string, discovered models.LegacyModelConfig, replaceCapabilities bool) bool {
 	existing, err := h.modelsService.GetByProviderAndModelID(ctx, providerID, modelID)
 	if err != nil {
 		return false
 	}
-	var merged models.ModelConfig
+	// Discovery still reports capabilities in the version 1 vocabulary, so the
+	// merge runs there and the result is upgraded back.
+	var merged models.LegacyModelConfig
 	var changed bool
 	if replaceCapabilities {
-		merged, changed = mergeManagedDiscoveredConfig(existing.Config, discovered)
+		merged, changed = mergeManagedDiscoveredConfig(existing.Config.Legacy(), discovered)
 	} else {
-		merged, changed = mergeDiscoveredConfig(existing.Config, discovered)
+		merged, changed = mergeDiscoveredConfig(existing.Config.Legacy(), discovered)
 	}
 	if !changed {
+		return false
+	}
+	// The version 1 reading is lossy in places that do not matter, such as the
+	// position of the disable token, so whether anything changed is decided on
+	// the config that would be stored.
+	config := models.MergeLegacyConfig(existing.Config, merged, models.ConfigContext{ModelID: existing.ModelID, Type: existing.Type, ClientType: clientType})
+	if sameStoredConfig(existing.ModelID, existing.Config, config) {
 		return false
 	}
 	if _, err := h.modelsService.UpdateByProviderAndModelID(ctx, providerID, modelID, models.UpdateRequest{
@@ -547,7 +558,7 @@ func (h *ProvidersHandler) fillExistingModel(ctx context.Context, providerID, mo
 		Name:       existing.Name,
 		ProviderID: existing.ProviderID,
 		Type:       existing.Type,
-		Config:     merged,
+		Config:     config,
 	}); err != nil {
 		h.logger.WarnContext(ctx, "failed to fill model capabilities", slog.String("model_id", modelID), slog.Any("error", err))
 		return false
@@ -555,13 +566,27 @@ func (h *ProvidersHandler) fillExistingModel(ctx context.Context, providerID, mo
 	return true
 }
 
+// sameStoredConfig reports whether writing next over a model's stored config
+// would store what is already there.
+func sameStoredConfig(modelID string, stored, next models.ModelConfig) bool {
+	before, err := json.Marshal(stored.StoredForm(modelID))
+	if err != nil {
+		return false
+	}
+	after, err := json.Marshal(next.StoredForm(modelID))
+	if err != nil {
+		return false
+	}
+	return string(before) == string(after)
+}
+
 // modelConfigFromRemote builds the stored config for an imported model. It exists
 // as a named function so a test can assert that every wire declaration survives
 // the import path: a dialect or off-support token lost here is lost for every row
 // this path creates, and the resulting model resolves onto the wrong wire — which
 // is how these fields came to be missing from RemoteModel in the first place.
-func modelConfigFromRemote(m providers.RemoteModel, compatibilities []string) models.ModelConfig {
-	return models.ModelConfig{
+func modelConfigFromRemote(m providers.RemoteModel, compatibilities []string) models.LegacyModelConfig {
+	return models.LegacyModelConfig{
 		Description:         m.Description,
 		Compatibilities:     compatibilities,
 		ReasoningEfforts:    m.ReasoningEfforts,
@@ -577,7 +602,7 @@ func modelConfigFromRemote(m providers.RemoteModel, compatibilities []string) mo
 	}
 }
 
-func mergeManagedDiscoveredConfig(existing, discovered models.ModelConfig) (models.ModelConfig, bool) {
+func mergeManagedDiscoveredConfig(existing, discovered models.LegacyModelConfig) (models.LegacyModelConfig, bool) {
 	out, changed := mergeDiscoveredConfig(existing, discovered)
 	if !slices.Equal(out.Compatibilities, discovered.Compatibilities) {
 		out.Compatibilities = append([]string(nil), discovered.Compatibilities...)
@@ -614,7 +639,7 @@ func mergeManagedDiscoveredConfig(existing, discovered models.ModelConfig) (mode
 	return out, changed
 }
 
-func mergeDiscoveredConfig(existing, discovered models.ModelConfig) (models.ModelConfig, bool) {
+func mergeDiscoveredConfig(existing, discovered models.LegacyModelConfig) (models.LegacyModelConfig, bool) {
 	out := existing
 	changed := false
 	if out.Description == nil && discovered.Description != nil {

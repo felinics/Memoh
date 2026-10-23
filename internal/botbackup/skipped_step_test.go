@@ -380,3 +380,7 @@ func TestRestoreWorkdirArchiveFlagWarningOmitsCause(t *testing.T) {
 	assertNoCause(t, state.warnings)
 	assertSkippedEvent(t, logs, importOperation, "workdir_archive_flag")
 }
+
+func (failingQueries) UpgradeModelConfig(context.Context, dbsqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
+}

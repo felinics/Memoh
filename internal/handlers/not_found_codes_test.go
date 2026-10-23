@@ -317,3 +317,7 @@ func TestSendChatAnswersChannelRouteNotFound(t *testing.T) {
 	c.SetParamValues(invocationTestBotID)
 	requireNotFoundCode(t, h.SendBotMessageSession(c), apperror.CodeChannelRouteNotFound, true)
 }
+
+func (lookupQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
+}

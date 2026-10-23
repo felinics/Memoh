@@ -52,7 +52,6 @@ func newOpenCodeGoModel(cfg SDKModelConfig) *sdk.Model {
 	return &sdk.Model{
 		ID:       cfg.ModelID,
 		Provider: provider,
-		Type:     sdk.ModelTypeChat,
 	}
 }
 

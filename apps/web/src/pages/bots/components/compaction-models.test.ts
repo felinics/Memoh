@@ -19,7 +19,7 @@ describe('filterCompactionModels', () => {
         model_id: 'wan2.7-omni',
         provider_id: 'chat-provider',
         enable: true,
-        config: { context_window: 128000, compatibilities: ['tool-call'] },
+        config: { context_window: 128000, tool_call: true },
       },
     ]
     const providers = [

@@ -91,7 +91,7 @@ func TestContextFailureHandsTheTurnHookItsCode(t *testing.T) {
 			deps, requests := newTurnErrorHook(t)
 			deps.ContextViewApplier = budgetErrorApplier(tt.err)
 			for range New(deps).Stream(context.Background(), RunConfig{
-				Model:    &sdk.Model{ID: "hook-stream", Provider: &preflightCountingProvider{}, Type: sdk.ModelTypeChat},
+				Model:    &sdk.Model{ID: "hook-stream", Provider: &preflightCountingProvider{}},
 				Identity: SessionContext{BotID: "bot-1"},
 			}) {
 			}
@@ -110,7 +110,7 @@ func TestGenerateContextFailureHandsTheTurnHookItsCode(t *testing.T) {
 	deps, requests := newTurnErrorHook(t)
 	deps.ContextViewApplier = budgetErrorApplier(fmt.Errorf("%w: private window", contextfrag.ErrBudgetUnsatisfied))
 	if _, err := New(deps).Generate(context.Background(), RunConfig{
-		Model:    &sdk.Model{ID: "hook-generate", Provider: &preflightCountingProvider{}, Type: sdk.ModelTypeChat},
+		Model:    &sdk.Model{ID: "hook-generate", Provider: &preflightCountingProvider{}},
 		Identity: SessionContext{BotID: "bot-1"},
 	}); err == nil {
 		t.Fatal("Generate() error = nil, want the budget failure")

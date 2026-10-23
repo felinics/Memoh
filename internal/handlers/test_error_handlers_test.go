@@ -91,3 +91,7 @@ func TestProviderAndModelTestClassifyServiceErrors(t *testing.T) {
 		})
 	}
 }
+
+func (testHandlerQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
+}

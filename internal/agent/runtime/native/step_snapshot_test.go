@@ -21,7 +21,7 @@ func TestBuildGenerateDispatchSetsModelInfoAndLegacyPruneLoopSelectionModeWithou
 	t.Parallel()
 
 	ledger := contextfrag.NewMutationLedger()
-	model := &sdk.Model{ID: "mock-model", Provider: &usageRecordingProvider{}, Type: sdk.ModelTypeChat}
+	model := &sdk.Model{ID: "mock-model", Provider: &usageRecordingProvider{}}
 	cfg := RunConfig{
 		Model:            model,
 		System:           "sys",
@@ -49,7 +49,7 @@ func TestBuildGenerateDispatchSetsSuffixOnlyLoopSelectionModeWithReselector(t *t
 	t.Parallel()
 
 	ledger := contextfrag.NewMutationLedger()
-	model := &sdk.Model{ID: "mock-model", Provider: &usageRecordingProvider{}, Type: sdk.ModelTypeChat}
+	model := &sdk.Model{ID: "mock-model", Provider: &usageRecordingProvider{}}
 	cfg := RunConfig{
 		Model:            model,
 		System:           "sys",
@@ -112,7 +112,7 @@ func TestAgentGenerateStepReselectionAppliedPreservesDecoratedPrefix(t *testing.
 			}
 		},
 	}
-	model := &sdk.Model{ID: "claude-test", Provider: anthropicNameMockProvider{atomicMockProvider: modelProvider}, Type: sdk.ModelTypeChat}
+	model := &sdk.Model{ID: "claude-test", Provider: anthropicNameMockProvider{atomicMockProvider: modelProvider}}
 
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{
@@ -217,7 +217,7 @@ func TestAgentGenerateStepReselectionRejectedKeepsDecoratedPrefixUnchanged(t *te
 			}
 		},
 	}
-	model := &sdk.Model{ID: "claude-test", Provider: anthropicNameMockProvider{atomicMockProvider: modelProvider}, Type: sdk.ModelTypeChat}
+	model := &sdk.Model{ID: "claude-test", Provider: anthropicNameMockProvider{atomicMockProvider: modelProvider}}
 
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{

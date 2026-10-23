@@ -71,7 +71,7 @@ func TestFallbackDispatchFailsClosedWhenLegacyPayloadExceedsAllowance(t *testing
 	if cost := contextfrag.ProviderEnvelopeTokens(cfg.System, cfg.Messages, nil); cost <= window-limits.MaxOutputTokens || cost >= window {
 		t.Fatalf("legacy payload costs %d tokens, want strictly between allowance %d and window %d", cost, window-limits.MaxOutputTokens, window)
 	}
-	cfg.Model = &sdk.Model{ID: "model", Provider: provider, Type: sdk.ModelTypeChat}
+	cfg.Model = &sdk.Model{ID: "model", Provider: provider}
 	cfg.Identity = agentpkg.SessionContext{BotID: "bot-1"}
 	cfg.ContextMutations = contextfrag.NewMutationLedger()
 	cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()

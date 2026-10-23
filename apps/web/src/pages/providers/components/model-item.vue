@@ -148,6 +148,7 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getModelDescription } from '@/utils/model-description'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { withoutLegacyKeys } from '@/components/create-model/model-config'
 
 const props = withDefaults(defineProps<{
   model: ModelsGetResponse
@@ -237,7 +238,7 @@ async function handleToggleEnable(value: boolean) {
       name: props.model.name,
       provider_id: props.model.provider_id,
       type: props.model.type,
-      config: props.model.config,
+      config: withoutLegacyKeys(props.model.config),
       enable: value,
     }
     await putModelsById({ path: { id: props.model.id }, body, throwOnError: true })

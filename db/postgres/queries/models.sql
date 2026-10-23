@@ -163,6 +163,16 @@ SET
 WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id)
 RETURNING *;
 
+-- name: UpgradeModelConfig :execrows
+-- Writes back a config upgraded to the current schema version. It only
+-- replaces the exact config that was read, so a write made in between wins,
+-- and it leaves updated_at alone because nobody edited the model.
+UPDATE models
+SET config = sqlc.arg(config)
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(id)
+  AND config = sqlc.arg(previous_config)::jsonb;
+
 -- name: DeleteModel :exec
 DELETE FROM models WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id);
 

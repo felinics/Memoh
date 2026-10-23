@@ -264,3 +264,7 @@ func TestProbeResponsesCarryNoUpstreamText(t *testing.T) {
 		})
 	}
 }
+
+func (probeQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
+}

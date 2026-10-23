@@ -43,7 +43,7 @@ func (s *Service) routeAndMergeAttachments(ctx context.Context, model models.Get
 		return []any{}
 	}
 	typed := s.prepareGatewayAttachments(ctx, req, modelAcceptsImages(model))
-	routed := routeAttachmentsByCapability(model.Config.Compatibilities, typed)
+	routed := routeAttachmentsByCapability(modelInputModalities(model), typed)
 	for i := range routed.Fallback {
 		fallbackPath := strings.TrimSpace(routed.Fallback[i].FallbackPath)
 		if fallbackPath == "" {

@@ -178,9 +178,7 @@ func TestGatewayStickerBytesRouteToFileFallback(t *testing.T) {
 		BotID:       "bot-1",
 		Attachments: []ChatAttachment{{Type: "image", ContentHash: "video-sticker", Mime: "image/png"}},
 	}
-	model := models.GetResponse{Model: models.Model{Config: models.ModelConfig{
-		Compatibilities: []string{models.CompatVision},
-	}}}
+	model := models.GetResponse{Model: models.Model{Config: models.ModelConfig{Modalities: &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityImage}, Output: []models.Modality{models.ModalityText}}}}}
 
 	merged := s.routeAndMergeAttachments(context.Background(), model, req)
 	if len(merged) != 1 {

@@ -1,7 +1,9 @@
 package models
 
 import (
+	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -148,60 +150,192 @@ func IsValidReasoningEffort(effort string) bool {
 	return reasoning.IsDeclarable(effort)
 }
 
-// ModelConfig holds the JSONB config stored per model.
-//
-// ReasoningEfforts is the model's effort-level list (a.k.a. effort_levels in the
-// design doc); the JSON key stays "reasoning_efforts" for backward compatibility.
-// ThinkingMode is the discovered thinking behavior; empty = unknown (legacy data),
-// resolved via SupportsReasoning / ResolveThinkingMode.
+// ModelConfigSchemaVersion is the shape every ModelConfig is written in. A
+// stored config without schema_version is version 1; config_migration.go turns
+// older versions into this one when a row is read, and the next write persists
+// the result. There is no database migration.
+const ModelConfigSchemaVersion = 2
+
+// Modality is a kind of content a model accepts or produces. The values match
+// Twilight's sdk.Modality.
+type Modality string
+
+const (
+	ModalityText  Modality = "text"
+	ModalityImage Modality = "image"
+	ModalityAudio Modality = "audio"
+	ModalityVideo Modality = "video"
+	ModalityPDF   Modality = "pdf"
+)
+
+var validModalities = map[Modality]struct{}{
+	ModalityText: {}, ModalityImage: {}, ModalityAudio: {}, ModalityVideo: {}, ModalityPDF: {},
+}
+
+// ModelModalities lists what a model accepts and produces.
+type ModelModalities struct {
+	Input  []Modality `json:"input,omitempty"`
+	Output []Modality `json:"output,omitempty"`
+}
+
+// ModelReasoning mirrors Twilight's sdk.ModelReasoning: the reasoning controls
+// a model exposes (Toggle, Efforts, Budget, Off), the request shape that
+// carries them (Dialect), what the model does when asked for nothing
+// (Default), and how a Chat Completions host reads reasoning back (Replay).
+type ModelReasoning struct {
+	// Toggle reports a request field that turns reasoning on and off, separate
+	// from any effort level.
+	Toggle bool `json:"toggle,omitempty"`
+	// Efforts lists the effort levels the model accepts, weakest to strongest.
+	// Turning reasoning off is Off, not an effort.
+	Efforts []string `json:"efforts,omitempty"`
+	// Budget is the reasoning token budget range; nil means no budget control.
+	Budget *ReasoningBudget `json:"budget,omitempty"`
+	// Off is how the model answers a request to stop reasoning: accepted,
+	// low_effort_only, rejected, or empty when not stated.
+	Off string `json:"off,omitempty"`
+	// Dialect is the request shape that carries the controls: tier, budget,
+	// toggle, adaptive, or empty when not stated.
+	Dialect string `json:"dialect,omitempty"`
+	// Default is what the model does when a request sets no reasoning control.
+	Default *ReasoningDefault `json:"default,omitempty"`
+	// Replay is how a Chat Completions host reads reasoning back on replayed
+	// messages; nil leaves the provider's compatibility mode in charge.
+	Replay *ReasoningReplay `json:"replay,omitempty"`
+}
+
+// ReasoningBudget bounds a reasoning token budget. A nil bound is not stated.
+type ReasoningBudget struct {
+	Min *int `json:"min,omitempty"`
+	Max *int `json:"max,omitempty"`
+}
+
+// ReasoningDefault is what a model does when a request sets no reasoning
+// control. A zero field is not stated.
+type ReasoningDefault struct {
+	Enabled *bool  `json:"enabled,omitempty"`
+	Effort  string `json:"effort,omitempty"`
+	Budget  *int   `json:"budget,omitempty"`
+}
+
+// ReasoningReplay is the assistant message field that carries a step's
+// reasoning back to a Chat Completions host, and whether every tool call
+// replay must carry it.
+type ReasoningReplay struct {
+	Field    string `json:"field,omitempty"`
+	Required bool   `json:"required,omitempty"`
+}
+
+// Reasoning replay fields, matching Twilight's sdk.ReasoningReplayField.
+const (
+	ReasoningReplayContent   = "reasoning_content"
+	ReasoningReplayDetails   = "reasoning_details"
+	ReasoningReplayReasoning = "reasoning"
+)
+
+// ModelConfig holds the JSONB config stored per model, in the shape of
+// Twilight's sdk.Model and sdk.EmbeddingModel. Chat models use Modalities,
+// ContextWindow, MaxOutputTokens, ToolCall, StructuredOutput and Reasoning;
+// embedding models use Dimensions.
 type ModelConfig struct {
-	Description      *string  `json:"description,omitempty"`
-	Dimensions       *int     `json:"dimensions,omitempty"`
-	Compatibilities  []string `json:"compatibilities,omitempty"`
-	ContextWindow    *int     `json:"context_window,omitempty"`
-	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
-	ThinkingMode     string   `json:"thinking_mode,omitempty"`
-	CatalogAvailable *bool    `json:"catalog_available,omitempty"`
-	// ReasoningDialect declares the wire shape of this model's thinking control,
-	// which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
-	// token budget while 3.x takes a named level, and the two are mutually
-	// exclusive on the same request. Declared per model because the alternative is
-	// sniffing the model id, and an id is not a capability. Empty leaves provider
-	// policy in charge; Google's adaptor deliberately sends no thinking control so
-	// pre-dialect rows retain their safe pre-upgrade request shape.
-	ReasoningDialect string `json:"reasoning_dialect,omitempty"`
-	// ReasoningOffSupport declares how the model answers an explicit request to
-	// stop thinking. Anthropic's per-model table splits models that share a
-	// thinking mode and an identical tier list, so this cannot be derived — see the
-	// reasoning package's OffSupport constants.
-	ReasoningOffSupport string `json:"reasoning_off_support,omitempty"`
-	// ReasoningDefaultOn reports whether omitting the thinking field leaves the
-	// model thinking. Separate from off-ability: Claude 4.6 can be turned off *and*
-	// defaults to off, while Opus 5 can be turned off but defaults to on, so
-	// omitting the field there keeps thinking running — billed, and invisible to a
-	// user who believes they turned it off. nil means unknown.
-	ReasoningDefaultOn *bool `json:"reasoning_default_on,omitempty"`
-	// ThinkingBudgetMin/Max bound the budget dialect. The range is per model
-	// family, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned
-	// off, while Flash starts at 0 and can.
-	ThinkingBudgetMin *int `json:"thinking_budget_min,omitempty"`
-	ThinkingBudgetMax *int `json:"thinking_budget_max,omitempty"`
+	// SchemaVersion is ModelConfigSchemaVersion on every config this version
+	// writes.
+	SchemaVersion int     `json:"schema_version"`
+	Description   *string `json:"description,omitempty"`
+
+	Modalities *ModelModalities `json:"modalities,omitempty"`
+	// ContextWindow is the context window in tokens, input and output together.
+	ContextWindow *int `json:"context_window,omitempty"`
 	// MaxOutputTokens is the most output tokens the model can produce in one
 	// response; nil means unknown. When set, every turn requests an explicit
 	// limit within it.
 	MaxOutputTokens *int `json:"max_output_tokens,omitempty"`
+	ToolCall        bool `json:"tool_call,omitempty"`
+	// StructuredOutput reports support for a JSON schema response format.
+	StructuredOutput bool `json:"structured_output,omitempty"`
+	// Reasoning is nil when the model does not reason.
+	Reasoning *ModelReasoning `json:"reasoning,omitempty"`
+
+	// Dimensions is the embedding vector size.
+	Dimensions *int `json:"dimensions,omitempty"`
+
+	// CatalogAvailable is false when a managed catalog stopped listing the model.
+	CatalogAvailable *bool `json:"catalog_available,omitempty"`
+}
+
+// MarshalJSON always writes the current schema version, so a config built
+// without one is never read back as version 1.
+func (c ModelConfig) MarshalJSON() ([]byte, error) {
+	type plain ModelConfig
+	c.SchemaVersion = ModelConfigSchemaVersion
+	return json.Marshal(plain(c))
+}
+
+// Accepts reports whether the model takes the modality as input.
+func (c ModelConfig) Accepts(modality Modality) bool {
+	return c.Modalities != nil && slices.Contains(c.Modalities.Input, modality)
+}
+
+// Produces reports whether the model returns the modality as output.
+func (c ModelConfig) Produces(modality Modality) bool {
+	return c.Modalities != nil && slices.Contains(c.Modalities.Output, modality)
 }
 
 func normalizeModelConfig(config ModelConfig) ModelConfig {
+	config.SchemaVersion = ModelConfigSchemaVersion
 	if config.Description != nil {
 		description := strings.TrimSpace(*config.Description)
 		config.Description = &description
 	}
-	// Rewrites the legacy "none" spelling of off on both ModelConfig boundaries —
-	// before a write is validated and after a row is read back — so nothing
-	// downstream has to know that "none" was ever declarable.
-	config.ReasoningEfforts = reasoning.NormalizeAdvertised(config.ReasoningEfforts)
+	if config.Modalities != nil {
+		config.Modalities = &ModelModalities{
+			Input:  dedupeModalities(config.Modalities.Input),
+			Output: dedupeModalities(config.Modalities.Output),
+		}
+		if len(config.Modalities.Input) == 0 && len(config.Modalities.Output) == 0 {
+			config.Modalities = nil
+		}
+	}
+	if config.Reasoning != nil {
+		r := *config.Reasoning
+		r.Efforts = dedupeStrings(r.Efforts)
+		if r.Budget != nil && r.Budget.Min == nil && r.Budget.Max == nil {
+			r.Budget = nil
+		}
+		if r.Default != nil && r.Default.Enabled == nil && r.Default.Effort == "" && r.Default.Budget == nil {
+			r.Default = nil
+		}
+		config.Reasoning = &r
+	}
 	return config
+}
+
+func dedupeModalities(in []Modality) []Modality {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]Modality, 0, len(in))
+	for _, m := range in {
+		m = Modality(strings.TrimSpace(string(m)))
+		if m != "" && !slices.Contains(out, m) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func dedupeStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		v = strings.TrimSpace(v)
+		if v != "" && !slices.Contains(out, v) {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // NormalizeAdvertisedEfforts forwards the catalog-boundary normalizer while
@@ -270,40 +404,70 @@ func (m *Model) Validate() error {
 			return fieldRequired("config.dimensions")
 		}
 	}
-	if err := ValidateCompatibilities(m.Config.Compatibilities); err != nil {
-		return fieldInvalid("config.compatibilities", err)
-	}
-	for _, effort := range m.Config.ReasoningEfforts {
-		if !IsValidReasoningEffort(effort) {
-			return fieldInvalid("config.reasoning_efforts", errors.New("invalid reasoning effort: "+effort))
+	if m.Config.Modalities != nil {
+		for _, modality := range append(slices.Clone(m.Config.Modalities.Input), m.Config.Modalities.Output...) {
+			if _, ok := validModalities[modality]; !ok {
+				return fieldInvalid("config.modalities", errors.New("invalid modality: "+string(modality)))
+			}
 		}
 	}
-	if m.Config.ThinkingMode != "" && !reasoning.IsValidMode(m.Config.ThinkingMode) {
-		return fieldInvalid("config.thinking_mode", errors.New("invalid thinking mode: "+m.Config.ThinkingMode))
-	}
-	if !reasoning.IsValidDialect(m.Config.ReasoningDialect) {
-		return fieldInvalid("config.reasoning_dialect", errors.New("invalid reasoning dialect: "+m.Config.ReasoningDialect))
-	}
-	if !reasoning.IsValidOffSupport(m.Config.ReasoningOffSupport) {
-		return fieldInvalid("config.reasoning_off_support", errors.New("invalid reasoning off support: "+m.Config.ReasoningOffSupport))
+	if err := validateModelReasoning(m.Config.Reasoning); err != nil {
+		return err
 	}
 	return nil
 }
 
-// HasCompatibility checks whether the model config includes the given capability.
-func (m *Model) HasCompatibility(c string) bool {
-	for _, v := range m.Config.Compatibilities {
-		if v == c {
-			return true
+func validateModelReasoning(r *ModelReasoning) error {
+	if r == nil {
+		return nil
+	}
+	for _, effort := range r.Efforts {
+		if !slices.Contains(reasoning.OrderedEfforts(), effort) {
+			return fieldInvalid("config.reasoning.efforts", errors.New("invalid reasoning effort: "+effort))
 		}
 	}
-	return false
+	if !reasoning.IsValidDialect(r.Dialect) {
+		return fieldInvalid("config.reasoning.dialect", errors.New("invalid reasoning dialect: "+r.Dialect))
+	}
+	if !reasoning.IsValidOffSupport(r.Off) {
+		return fieldInvalid("config.reasoning.off", errors.New("invalid reasoning off support: "+r.Off))
+	}
+	if r.Budget != nil {
+		if r.Budget.Min != nil && *r.Budget.Min < 0 {
+			return fieldInvalid("config.reasoning.budget.min", errors.New("must not be negative"))
+		}
+		if r.Budget.Max != nil && *r.Budget.Max <= 0 {
+			return fieldInvalid("config.reasoning.budget.max", errors.New("must be greater than 0"))
+		}
+		if r.Budget.Min != nil && r.Budget.Max != nil && *r.Budget.Min > *r.Budget.Max {
+			return fieldInvalid("config.reasoning.budget", errors.New("min must not exceed max"))
+		}
+	}
+	if r.Default != nil && r.Default.Effort != "" && !slices.Contains(reasoning.OrderedEfforts(), r.Default.Effort) {
+		return fieldInvalid("config.reasoning.default.effort", errors.New("invalid reasoning effort: "+r.Default.Effort))
+	}
+	if r.Default != nil && r.Default.Budget != nil && *r.Default.Budget < 0 {
+		return fieldInvalid("config.reasoning.default.budget", errors.New("must not be negative"))
+	}
+	if r.Replay != nil {
+		switch r.Replay.Field {
+		case "", ReasoningReplayContent, ReasoningReplayDetails, ReasoningReplayReasoning:
+		default:
+			return fieldInvalid("config.reasoning.replay.field", errors.New("invalid reasoning replay field: "+r.Replay.Field))
+		}
+	}
+	return nil
 }
 
-// ResolveThinkingMode returns the effective ThinkingMode, bridging legacy data:
-// unknown + reasoning compat → toggle; unknown without it → none.
+// HasCompatibility reports whether the model has a capability; see
+// ModelConfig.Supports.
+func (m *Model) HasCompatibility(c string) bool {
+	return m.Config.Supports(c)
+}
+
+// ResolveThinkingMode returns the model's thinking mode.
 func (m *Model) ResolveThinkingMode() string {
-	return reasoning.ResolveMode(m.Config.ThinkingMode, m.HasCompatibility(CompatReasoning), m.ModelID)
+	return m.Config.ThinkingMode()
 }
 
 // ReasoningOptions reports what a caller may select for this model on the given
@@ -315,19 +479,36 @@ func (m *Model) ReasoningOptions(clientType string) reasoning.Options {
 	if clientType == string(ClientTypeGoogleGenerativeAI) &&
 		mode != reasoning.ModeAlways &&
 		mode != reasoning.ModeNone &&
-		m.Config.ReasoningDialect == "" {
+		m.Config.ReasoningDialect() == "" {
 		// Google generations use mutually exclusive wire fields. An imported row
 		// from before the dialect schema has no safe selectable control until a
 		// trusted catalog refresh backfills it, so project the model as supported
 		// but uncontrollable instead of advertising a picker the adaptor ignores.
 		return reasoning.Options{Supported: true}
 	}
-	return reasoning.OptionsFor(
+	return withDeclaredDefaults(reasoning.OptionsFor(
 		mode,
-		m.Config.ReasoningEfforts,
+		m.Config.ReasoningEfforts(),
 		clientType,
-		m.Config.ReasoningOffSupport,
-	)
+		m.Config.ReasoningOffSupport(),
+	), m.Config.Reasoning)
+}
+
+// withDeclaredDefaults makes the model's declared defaults the options'
+// default selection: the tier a client starts on when the model is picked, and
+// whether it starts off. A default the options cannot reach, a tier not
+// offered or off on a model that cannot turn off, is ignored.
+func withDeclaredDefaults(opts reasoning.Options, r *ModelReasoning) reasoning.Options {
+	if r == nil || r.Default == nil || !opts.Supported {
+		return opts
+	}
+	if effort := r.Default.Effort; effort != "" && slices.Contains(opts.Efforts, effort) {
+		opts.DefaultEffort = effort
+	}
+	if enabled := r.Default.Enabled; enabled != nil && !*enabled && opts.CanDisable {
+		opts.DefaultOff = true
+	}
+	return opts
 }
 
 // AddRequest is the payload for creating a new model. Enable is a pointer so
@@ -339,6 +520,10 @@ type AddRequest struct {
 	Type       ModelType   `json:"type"`
 	Enable     *bool       `json:"enable,omitempty"`
 	Config     ModelConfig `json:"config"`
+	// rawConfig is the config as the client sent it. Its decode cannot see the
+	// provider, so the service reads it again when the upgrade needs the
+	// provider's client type; see RequestConfigNeedsClientType.
+	rawConfig json.RawMessage
 }
 
 type AddResponse struct {
@@ -361,6 +546,45 @@ type GetResponse struct {
 	Reasoning *reasoning.Options `json:"reasoning,omitempty"`
 }
 
+// MarshalJSON adds the version 1 reading of a chat model's config next to its
+// current fields. Clients built before version 2 (an older desktop build, a
+// cached web bundle) read capabilities and efforts only from those keys, and
+// copy them back when they save, which DecodeRequestModelConfig reads as their
+// edit (see mergeLegacyEdit). Current clients ignore the keys and drop them
+// before saving. The keys exist only in API responses, never in the row.
+func (r GetResponse) MarshalJSON() ([]byte, error) {
+	type plain GetResponse
+	raw, err := json.Marshal(plain(r))
+	if err != nil || r.Type != ModelTypeChat {
+		return raw, err
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return nil, err
+	}
+	config := map[string]json.RawMessage{}
+	if err := json.Unmarshal(body["config"], &config); err != nil {
+		return nil, err
+	}
+	legacy, err := json.Marshal(r.Config.Legacy())
+	if err != nil {
+		return nil, err
+	}
+	view := map[string]json.RawMessage{}
+	if err := json.Unmarshal(legacy, &view); err != nil {
+		return nil, err
+	}
+	for _, key := range legacyOnlyKeys {
+		if value, ok := view[key]; ok {
+			config[key] = value
+		}
+	}
+	if body["config"], err = json.Marshal(config); err != nil {
+		return nil, err
+	}
+	return json.Marshal(body)
+}
+
 // UpdateRequest is the payload for updating an existing model. Enable is a
 // pointer so callers can omit it to preserve the current enable state while
 // still rewriting the other fields.
@@ -371,6 +595,57 @@ type UpdateRequest struct {
 	Type       ModelType   `json:"type"`
 	Enable     *bool       `json:"enable,omitempty"`
 	Config     ModelConfig `json:"config"`
+	// rawConfig is the config as the client sent it; see AddRequest.rawConfig.
+	rawConfig json.RawMessage
+}
+
+// UnmarshalJSON reads config in any schema version; see
+// DecodeRequestModelConfig.
+func (r *AddRequest) UnmarshalJSON(data []byte) error {
+	type plain AddRequest
+	var body struct {
+		plain
+		Config json.RawMessage `json:"config"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		return err
+	}
+	*r = AddRequest(body.plain)
+	config, err := decodeRequestConfig(body.Config, r.ModelID, r.Type)
+	if err != nil {
+		return err
+	}
+	r.Config = config
+	r.rawConfig = body.Config
+	return nil
+}
+
+// UnmarshalJSON reads config in any schema version; see
+// DecodeRequestModelConfig.
+func (r *UpdateRequest) UnmarshalJSON(data []byte) error {
+	type plain UpdateRequest
+	var body struct {
+		plain
+		Config json.RawMessage `json:"config"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		return err
+	}
+	*r = UpdateRequest(body.plain)
+	config, err := decodeRequestConfig(body.Config, r.ModelID, r.Type)
+	if err != nil {
+		return err
+	}
+	r.Config = config
+	r.rawConfig = body.Config
+	return nil
+}
+
+func decodeRequestConfig(raw json.RawMessage, modelID string, modelType ModelType) (ModelConfig, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ModelConfig{}, nil
+	}
+	return DecodeRequestModelConfig(raw, ConfigContext{ModelID: modelID, Type: modelType})
 }
 
 // toModel builds a Model from an AddRequest using the given enable value.

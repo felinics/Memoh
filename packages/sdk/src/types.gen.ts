@@ -3478,11 +3478,21 @@ export type ModelsGetResponse = {
     type?: ModelsModelType;
 };
 
+export type ModelsModality = 'text' | 'image' | 'audio' | 'video' | 'pdf';
+
 export type ModelsModelConfig = {
+    /**
+     * CatalogAvailable is false when a managed catalog stopped listing the model.
+     */
     catalog_available?: boolean;
-    compatibilities?: Array<string>;
+    /**
+     * ContextWindow is the context window in tokens, input and output together.
+     */
     context_window?: number;
     description?: string;
+    /**
+     * Dimensions is the embedding vector size.
+     */
     dimensions?: number;
     /**
      * MaxOutputTokens is the most output tokens the model can produce in one
@@ -3490,43 +3500,81 @@ export type ModelsModelConfig = {
      * limit within it.
      */
     max_output_tokens?: number;
+    modalities?: ModelsModelModalities;
     /**
-     * ReasoningDefaultOn reports whether omitting the thinking field leaves the
-     * model thinking. Separate from off-ability: Claude 4.6 can be turned off *and*
-     * defaults to off, while Opus 5 can be turned off but defaults to on, so
-     * omitting the field there keeps thinking running — billed, and invisible to a
-     * user who believes they turned it off. nil means unknown.
+     * Reasoning is nil when the model does not reason.
      */
-    reasoning_default_on?: boolean;
+    reasoning?: ModelsModelReasoning;
     /**
-     * ReasoningDialect declares the wire shape of this model's thinking control,
-     * which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
-     * token budget while 3.x takes a named level, and the two are mutually
-     * exclusive on the same request. Declared per model because the alternative is
-     * sniffing the model id, and an id is not a capability. Empty leaves provider
-     * policy in charge; Google's adaptor deliberately sends no thinking control so
-     * pre-dialect rows retain their safe pre-upgrade request shape.
+     * SchemaVersion is ModelConfigSchemaVersion on every config this version
+     * writes.
      */
-    reasoning_dialect?: string;
-    reasoning_efforts?: Array<string>;
+    schema_version?: number;
     /**
-     * ReasoningOffSupport declares how the model answers an explicit request to
-     * stop thinking. Anthropic's per-model table splits models that share a
-     * thinking mode and an identical tier list, so this cannot be derived — see the
-     * reasoning package's OffSupport constants.
+     * StructuredOutput reports support for a JSON schema response format.
      */
-    reasoning_off_support?: string;
-    thinking_budget_max?: number;
+    structured_output?: boolean;
+    tool_call?: boolean;
+};
+
+export type ModelsModelModalities = {
+    input?: Array<ModelsModality>;
+    output?: Array<ModelsModality>;
+};
+
+export type ModelsModelReasoning = {
     /**
-     * ThinkingBudgetMin/Max bound the budget dialect. The range is per model
-     * family, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned
-     * off, while Flash starts at 0 and can.
+     * Budget is the reasoning token budget range; nil means no budget control.
      */
-    thinking_budget_min?: number;
-    thinking_mode?: string;
+    budget?: ModelsReasoningBudget;
+    /**
+     * Default is what the model does when a request sets no reasoning control.
+     */
+    default?: ModelsReasoningDefault;
+    /**
+     * Dialect is the request shape that carries the controls: tier, budget,
+     * toggle, adaptive, or empty when not stated.
+     */
+    dialect?: string;
+    /**
+     * Efforts lists the effort levels the model accepts, weakest to strongest.
+     * Turning reasoning off is Off, not an effort.
+     */
+    efforts?: Array<string>;
+    /**
+     * Off is how the model answers a request to stop reasoning: accepted,
+     * low_effort_only, rejected, or empty when not stated.
+     */
+    off?: string;
+    /**
+     * Replay is how a Chat Completions host reads reasoning back on replayed
+     * messages; nil leaves the provider's compatibility mode in charge.
+     */
+    replay?: ModelsReasoningReplay;
+    /**
+     * Toggle reports a request field that turns reasoning on and off, separate
+     * from any effort level.
+     */
+    toggle?: boolean;
 };
 
 export type ModelsModelType = 'chat' | 'embedding' | 'speech' | 'transcription' | 'video';
+
+export type ModelsReasoningBudget = {
+    max?: number;
+    min?: number;
+};
+
+export type ModelsReasoningDefault = {
+    budget?: number;
+    effort?: string;
+    enabled?: boolean;
+};
+
+export type ModelsReasoningReplay = {
+    field?: string;
+    required?: boolean;
+};
 
 export type ModelsTestResponse = {
     /**
@@ -3715,6 +3763,12 @@ export type ReasoningOptions = {
      * back to when a stored value is no longer offered by the model.
      */
     default_effort?: string;
+    /**
+     * DefaultOff reports that the model is declared to start with reasoning off:
+     * a client picking the model, or reconciling a value it no longer offers,
+     * starts it off instead of on DefaultEffort. Only set when CanDisable is.
+     */
+    default_off?: boolean;
     /**
      * Efforts are the selectable active tiers, weakest to strongest as advertised.
      */
