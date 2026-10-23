@@ -35,6 +35,23 @@ Use a stable code, public fallback text, and public string arguments; never put
 private diagnostics in a notice. A round that cannot commit still follows the
 normal persistence failure/rollback contract.
 
+## Tool results of external runtimes
+
+A tool call that an adapter reports under a native tool name (`exec`, `read`,
+`web_fetch`, `web_search`, `apply_patch`) carries that tool's input and result
+format, because the web client, IM cards and history read only that format. The
+result records live in `internal/agent/toolresult`; native tools and every
+adapter build their results from them. An adapter that cannot produce a native
+format reports the call under its own name, which uses the generic display.
+Translation happens in the adapter before `ToolCallEnd`, so the live stream, IM
+and persistence share one event.
+
+A command that ran and exited non-zero is an ordinary `exec` result with
+`exit_code` set. A call that did not run (declined, failed to start, cancelled)
+has status `failed` and a `toolresult.Failure` result. Each runtime's tests
+translate recorded protocol samples and write the results under
+`internal/agent/toolresult/testdata/golden`; the web tests render those files.
+
 ## Native session state of direct runtimes
 
 Codex, Claude Code and Grok Build keep their own conversation record on the
