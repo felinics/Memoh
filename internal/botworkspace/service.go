@@ -546,7 +546,8 @@ func (s *Service) unmarkRunning(botID string) {
 }
 
 // reconcileOne acts on a claimed row. touched is false when nothing was
-// written or run: the row was only released, or its catch-up write failed.
+// written or run: the row was only released, or its catch-up write failed
+// for a reason other than a concurrent change.
 func (s *Service) reconcileOne(ctx context.Context, w Workspace) (touched bool) {
 	switch Decide(w, s.now()) {
 	case ActionNone:
@@ -555,6 +556,14 @@ func (s *Service) reconcileOne(ctx context.Context, w Workspace) (touched bool) 
 				Observed: w.Observed, ObservedGeneration: w.DesiredGeneration,
 				Attempts: 0, NextAttemptAt: s.now(), ReleaseLease: true,
 			}); err != nil {
+				// The failed write did not release the row. Release checks the
+				// owner, so a row another instance took over is left alone.
+				s.release(ctx, w.BotID)
+				if superseded(ctx, err) {
+					// A new intent changed the row under the write: wake the
+					// loop so it is served now, not after the next tick.
+					return true
+				}
 				s.event(ctx, "catch up generation failed", errs.Wrap(err, "catch up observed generation"), slog.String("bot_id", w.BotID))
 				return false
 			}

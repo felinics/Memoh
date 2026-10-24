@@ -1107,6 +1107,41 @@ func TestRowReleasedUntouchedDoesNotSpinTheLoop(t *testing.T) {
 	}
 }
 
+func TestCatchUpLostToARemovalReleasesTheRowAndWakesTheLoop(t *testing.T) {
+	// The pass only had to catch up the observed generation of a running
+	// workspace, and the bot was deleted before that write landed, so the
+	// write loses the version check. The row must be released and the loop
+	// woken so the removal starts now: the clock never advances here, so a
+	// row left leased would wait forever, and the interval never ticks.
+	clk := &clock{t: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}
+	repo := newMemRepo(clk.now)
+	repo.rows[bot] = &Workspace{
+		BotID: bot, Desired: DesiredPresent, DesiredGeneration: 2, Image: "img:1",
+		Observed: ObservedRunning, ObservedGeneration: 1, EverReady: true,
+		NextAttemptAt: clk.now(), Version: 1,
+	}
+	var removal sync.Once
+	repo.beforeWrite = func(w *Workspace) {
+		removal.Do(func() {
+			// What Upsert records for the removal intent.
+			w.Desired, w.DesiredGeneration = DesiredAbsent, w.DesiredGeneration+1
+			w.NextAttemptAt = clk.now()
+			w.Version++
+		})
+	}
+	backend := &fakeBackend{exists: true, running: true, image: "img:1"}
+	svc := New(repo, backend, nil, Options{Owner: "test", Interval: time.Hour})
+	svc.now = clk.now
+	svc.rnd = func() float64 { return 0.5 }
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer stopService(t, svc)
+
+	svc.Kick()
+	awaitObserved(t, repo, bot, ObservedAbsent)
+}
+
 // busyProvisioningThenRemoval provisions a bot, keeps the only provisioning
 // slot busy with another bot's creation, asks for the first bot's removal and
 // runs one more pass.
