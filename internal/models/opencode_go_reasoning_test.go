@@ -17,35 +17,23 @@ import (
 	"github.com/felinics/memoh/internal/reasoning"
 )
 
-// formerTemplate is a chat model of a provider template Memoh shipped before
-// models.dev, as kept in testdata.
-type formerTemplate struct {
-	Provider   string          `json:"provider"`
-	ClientType string          `json:"client_type"`
-	ModelID    string          `json:"model_id"`
-	Config     json.RawMessage `json:"config"`
-}
-
-// Exercise the former OpenCode Go catalog, capability projection, resolver and
-// real SDK serialization together: a selectable control must reach the
-// advertised wire.
-func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
-	raw, err := os.ReadFile("testdata/v1_chat_templates.json")
+// Fixed examples cover each protocol/control combination through the real SDK,
+// including streaming, without depending on the size of the provider catalog.
+func TestOpenCodeGoReasoningWireFixtures(t *testing.T) {
+	raw, err := os.ReadFile("testdata/opencode-go-reasoning.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var all []formerTemplate
-	if err := json.Unmarshal(raw, &all); err != nil {
+	var fixtures []struct {
+		ModelID string          `json:"model_id"`
+		Path    string          `json:"path"`
+		Config  json.RawMessage `json:"config"`
+	}
+	if err := json.Unmarshal(raw, &fixtures); err != nil {
 		t.Fatal(err)
 	}
 	const clientType = "opencode-go"
-	catalog := slices.DeleteFunc(all, func(entry formerTemplate) bool {
-		return entry.ClientType != clientType
-	})
-	if len(catalog) != 29 {
-		t.Fatalf("catalog models = %d", len(catalog))
-	}
-	for _, entry := range catalog {
+	for _, entry := range fixtures {
 		t.Run(entry.ModelID, func(t *testing.T) {
 			raw := entry.Config
 			// Former templates are version 1 configs; read them the way a stored
@@ -72,6 +60,9 @@ func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
 						called := false
 						server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 							called = true
+							if r.URL.Path != entry.Path {
+								t.Errorf("path = %s, want %s", r.URL.Path, entry.Path)
+							}
 							var body map[string]any
 							if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 								t.Error(err)
@@ -81,21 +72,11 @@ func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
 							output, _ := body["output_config"].(map[string]any)
 							responseReasoning, _ := body["reasoning"].(map[string]any)
 							wireEffort := body["reasoning_effort"]
-							switch models.ResolveModelClientType(clientType, entry.ModelID) {
-							case "openai-responses":
-								if r.URL.Path != "/responses" {
-									t.Errorf("path = %s", r.URL.Path)
-								}
+							switch entry.Path {
+							case "/responses":
 								wireEffort = responseReasoning["effort"]
-							case "anthropic-messages":
-								if r.URL.Path != "/messages" {
-									t.Errorf("path = %s", r.URL.Path)
-								}
+							case "/messages":
 								wireEffort = output["effort"]
-							default:
-								if r.URL.Path != "/chat/completions" {
-									t.Errorf("path = %s", r.URL.Path)
-								}
 							}
 							var wantEffort any
 							if effort != "" && model.Config.ReasoningDialect() == reasoning.DialectTier {

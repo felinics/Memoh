@@ -22,75 +22,61 @@ func legacyReasoningOptions(v1 LegacyModelConfig, modelID, clientType string) re
 	return reasoning.OptionsFor(mode, reasoning.NormalizeAdvertised(v1.ReasoningEfforts), clientType, v1.ReasoningOffSupport)
 }
 
-// v1Template is a chat model of a provider template Memoh shipped before the
-// templates were replaced by models.dev, with its version 1 config.
-type v1Template struct {
-	Provider   string          `json:"provider"`
-	ClientType string          `json:"client_type"`
-	ModelID    string          `json:"model_id"`
-	Config     json.RawMessage `json:"config"`
-}
+// Fixed examples cover the distinct legacy declarations and model-id inference
+// paths. Keep their behavior across protocols without tracking a live catalog.
+func TestUpgradeKeepsLegacyConfigBehavior(t *testing.T) {
+	t.Parallel()
 
-func loadV1Templates(t *testing.T) []v1Template {
-	t.Helper()
-	raw, err := os.ReadFile("testdata/v1_chat_templates.json")
+	raw, err := os.ReadFile("testdata/legacy-model-configs.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var templates []v1Template
-	if err := json.Unmarshal(raw, &templates); err != nil {
+	var fixtures []struct {
+		Name       string          `json:"name"`
+		ClientType string          `json:"client_type"`
+		ModelID    string          `json:"model_id"`
+		Config     json.RawMessage `json:"config"`
+	}
+	if err := json.Unmarshal(raw, &fixtures); err != nil {
 		t.Fatal(err)
 	}
-	return templates
-}
-
-// Every template Memoh shipped must resolve after the upgrade exactly as it did
-// before: same options for every protocol, same wire declarations, same
-// capabilities. Rows stored from those templates upgrade the first time they
-// are read, so a difference here changes a live model.
-func TestUpgradeKeepsShippedTemplatesResolvingTheSame(t *testing.T) {
-	t.Parallel()
 
 	clientTypes := []string{
 		string(ClientTypeOpenAICompletions), string(ClientTypeOpenAIResponses),
 		string(ClientTypeAnthropicMessages), string(ClientTypeGoogleGenerativeAI),
 	}
-	templates := loadV1Templates(t)
-	if len(templates) < 1000 {
-		t.Fatalf("loaded %d chat templates, want the full catalog", len(templates))
-	}
-	for _, entry := range templates {
+	for _, entry := range fixtures {
 		var v1 LegacyModelConfig
 		if err := json.Unmarshal(entry.Config, &v1); err != nil {
 			t.Fatal(err)
 		}
 		v2, err := DecodeModelConfig(entry.Config, ConfigContext{ModelID: entry.ModelID, Type: ModelTypeChat})
 		if err != nil {
-			t.Fatalf("%s/%s: %v", entry.Provider, entry.ModelID, err)
+			t.Fatalf("%s: %v", entry.Name, err)
 		}
 		if v2.SchemaVersion != ModelConfigSchemaVersion {
-			t.Fatalf("%s/%s: schema version %d", entry.Provider, entry.ModelID, v2.SchemaVersion)
+			t.Fatalf("%s: schema version %d", entry.Name, v2.SchemaVersion)
 		}
 		model := Model{ModelID: entry.ModelID, Type: ModelTypeChat, Config: v2}
 		for _, clientType := range append(clientTypes, entry.ClientType) {
 			want := legacyReasoningOptions(v1, entry.ModelID, clientType)
 			if got := model.ReasoningOptions(clientType); !reflect.DeepEqual(got, want) {
-				t.Errorf("%s/%s on %s: options %+v, want %+v", entry.Provider, entry.ModelID, clientType, got, want)
+				t.Errorf("%s on %s: options %+v, want %+v", entry.Name, clientType, got, want)
 			}
 		}
 		if v1.ReasoningDialect != v2.ReasoningDialect() || v1.ReasoningOffSupport != v2.ReasoningOffSupport() && v2.Reasoning != nil && v2.ThinkingMode() != reasoning.ModeAlways {
-			t.Errorf("%s/%s: dialect %q off %q, want %q %q", entry.Provider, entry.ModelID, v2.ReasoningDialect(), v2.ReasoningOffSupport(), v1.ReasoningDialect, v1.ReasoningOffSupport)
+			t.Errorf("%s: dialect %q off %q, want %q %q", entry.Name, v2.ReasoningDialect(), v2.ReasoningOffSupport(), v1.ReasoningDialect, v1.ReasoningOffSupport)
 		}
 		if !reflect.DeepEqual(v1.ThinkingBudgetMin, v2.ThinkingBudgetMin()) || !reflect.DeepEqual(v1.ThinkingBudgetMax, v2.ThinkingBudgetMax()) {
-			t.Errorf("%s/%s: budget changed", entry.Provider, entry.ModelID)
+			t.Errorf("%s: budget changed", entry.Name)
 		}
 		for _, token := range []string{CompatVision, CompatFileInput, CompatToolCall, CompatImageOutput} {
 			if slices.Contains(v1.Compatibilities, token) != v2.Supports(token) {
-				t.Errorf("%s/%s: capability %s changed", entry.Provider, entry.ModelID, token)
+				t.Errorf("%s: capability %s changed", entry.Name, token)
 			}
 		}
 		if !reflect.DeepEqual(v1.ContextWindow, v2.ContextWindow) || !reflect.DeepEqual(v1.MaxOutputTokens, v2.MaxOutputTokens) {
-			t.Errorf("%s/%s: limits changed", entry.Provider, entry.ModelID)
+			t.Errorf("%s: limits changed", entry.Name)
 		}
 	}
 }

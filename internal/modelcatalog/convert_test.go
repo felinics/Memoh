@@ -35,13 +35,10 @@ func TestFormerBrowserCatalogFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			index := func(items []Model) map[string]any {
-				result := map[string]any{}
+			index := func(items []Model) map[string]Model {
+				result := map[string]Model{}
 				for _, item := range items {
-					raw, _ := json.Marshal(item)
-					var value any
-					_ = json.Unmarshal(raw, &value)
-					result[item.ModelID] = value
+					result[item.ModelID] = item
 				}
 				return result
 			}
