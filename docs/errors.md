@@ -49,7 +49,9 @@ when the status would attribute the code wrongly (see
 - The status tells the client what to do about its own request. 401 is only
   for a missing or invalid Memoh session, because the Web app signs out on a
   401. A code for a dependency's failure answers 5xx, or 429 when the client
-  should back off.
+  should back off. `agent.provider_quota_exhausted` answers 402 because the
+  provider account needs balance or quota rather than a retry; its fault
+  remains `dependency`.
 - `internal/apperror/testdata/codes.golden` records the status each code was
   published with and only grows. It is sorted by code, and so are the keys
   under `errors` in the locale files; the guard test checks both, so codes

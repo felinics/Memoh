@@ -1160,13 +1160,12 @@ var catalog = map[Code]Definition{
 		Detail:     "The model provider rate limit was reached. Please wait a moment before sending again.",
 		Fault:      FaultDependency,
 	},
-	// A provider's rejected key or exhausted quota answers 502: a 401 would
-	// sign the Web client out, and RFC 9110 reserves 402.
 	CodeAgentProviderQuotaExhausted: {
-		HTTPStatus: http.StatusBadGateway,
+		HTTPStatus: http.StatusPaymentRequired,
 		Detail:     "The model provider account has no remaining balance or quota.",
 		Fault:      FaultDependency,
 	},
+	// A provider's rejected key answers 502: a 401 would sign the Web client out.
 	CodeAgentProviderAuthFailed: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The model provider rejected the credentials. Check the provider API key.",
