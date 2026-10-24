@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"os"
+	"slices"
 	"testing"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
@@ -46,5 +47,46 @@ func TestGeneratedContractsCarryEveryMutationKind(t *testing.T) {
 		if !declared[value] {
 			t.Errorf("generated enum carries %q which the Go vocabulary no longer declares", value)
 		}
+	}
+}
+
+func TestGeneratedProviderTestRequestsRequireInput(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile("../../spec/swagger.json")
+	if err != nil {
+		t.Fatalf("read generated swagger document: %v", err)
+	}
+	var doc struct {
+		Definitions map[string]struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+			Required   []string                   `json:"required"`
+		} `json:"definitions"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("decode swagger document: %v", err)
+	}
+	for _, tc := range []struct {
+		definition string
+		required   string
+	}{
+		{definition: "fetchproviders.TestRequest", required: "url"},
+		{definition: "searchproviders.TestRequest", required: "query"},
+	} {
+		t.Run(tc.definition, func(t *testing.T) {
+			definition, ok := doc.Definitions[tc.definition]
+			if !ok {
+				t.Fatalf("generated swagger document is missing %s", tc.definition)
+			}
+			if _, ok := definition.Properties[tc.required]; !ok {
+				t.Errorf("generated %s is missing property %q", tc.definition, tc.required)
+			}
+			if !slices.Equal(definition.Required, []string{tc.required}) {
+				t.Errorf("generated %s required = %v, want [%s]", tc.definition, definition.Required, tc.required)
+			}
+		})
+	}
+	if _, ok := doc.Definitions["searchproviders.TestRequest"].Properties["count"]; !ok {
+		t.Error("generated searchproviders.TestRequest is missing optional count property")
 	}
 }

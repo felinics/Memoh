@@ -72,6 +72,6 @@ type Searcher interface {
 }
 
 type TestRequest struct {
-	Query string `json:"query"`
+	Query string `json:"query" validate:"required"`
 	Count *int   `json:"count,omitempty"`
 }

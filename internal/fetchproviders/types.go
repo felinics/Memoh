@@ -41,7 +41,7 @@ type ProviderMeta struct {
 }
 
 type TestRequest struct {
-	URL string `json:"url"`
+	URL string `json:"url" validate:"required"`
 }
 
 type CreateRequest struct {

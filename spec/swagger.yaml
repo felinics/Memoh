@@ -2967,6 +2967,8 @@ definitions:
     properties:
       url:
         type: string
+    required:
+    - url
     type: object
   fetchproviders.UpdateRequest:
     properties:
@@ -6807,6 +6809,8 @@ definitions:
         type: integer
       query:
         type: string
+    required:
+    - query
     type: object
   searchproviders.UpdateRequest:
     properties:

@@ -1656,7 +1656,7 @@ export type FetchprovidersProviderMeta = {
 export type FetchprovidersProviderName = 'native' | 'jina' | 'deepseek' | 'cloudflare_markdown';
 
 export type FetchprovidersTestRequest = {
-    url?: string;
+    url: string;
 };
 
 export type FetchprovidersUpdateRequest = {
@@ -4025,7 +4025,7 @@ export type SearchprovidersProviderName = 'brave' | 'bing' | 'google' | 'tavily'
 
 export type SearchprovidersTestRequest = {
     count?: number;
-    query?: string;
+    query: string;
 };
 
 export type SearchprovidersUpdateRequest = {
