@@ -118,7 +118,7 @@ import { useDialogMutation } from '@/composables/useDialogMutation'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 
 const SEARCH_PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily', 'sogou', 'serper', 'searxng', 'jina', 'exa', 'bocha', 'duckduckgo', 'yandex'] as const
-const FETCH_PROVIDER_TYPES = ['jina', 'cloudflare_markdown'] as const
+const FETCH_PROVIDER_TYPES = ['jina', 'cloudflare_markdown', 'deepseek'] as const
 
 type ProviderKind = 'search' | 'fetch'
 

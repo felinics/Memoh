@@ -8,6 +8,7 @@ import (
 	"github.com/felinics/memoh/internal/acl"
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/apps"
 	audiopkg "github.com/felinics/memoh/internal/audio"
@@ -106,6 +107,7 @@ func ServerModule() fx.Option {
 			provideProvidersService,
 			providertemplates.NewService,
 			fetchproviders.NewService,
+			fx.Annotate(agenttools.NewWebFetchProvider, fx.As(new(fetchproviders.Fetcher)), fx.As(fx.Self())),
 			searchproviders.NewService,
 			mcp.NewConnectionService,
 			connectors.NewService,
@@ -140,6 +142,7 @@ func ServerModule() fx.Option {
 			provideACPToolSource,
 			provideToolGatewayService,
 			provideBackgroundManager,
+			fx.Annotate(agenttools.NewWebProvider, fx.As(new(searchproviders.Searcher)), fx.As(fx.Self())),
 			provideToolProviders,
 			provideOAuthService,
 		),

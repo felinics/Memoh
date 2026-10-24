@@ -85,8 +85,6 @@ func (p *WebProvider) execWebSearch(ctx context.Context, session SessionContext,
 	if !provider.Enable {
 		return nil, errors.New("search provider is disabled")
 	}
-	registerSearchProviderSecrets(provider)
-
 	query := strings.TrimSpace(args.Query)
 	if query == "" {
 		return nil, errors.New("query is required")
@@ -98,6 +96,12 @@ func (p *WebProvider) execWebSearch(ctx context.Context, session SessionContext,
 	if count > 20 {
 		count = 20
 	}
+	return p.Search(ctx, provider, query, count)
+}
+
+// Search executes a saved provider request for both web_search and connection tests.
+func (p *WebProvider) Search(ctx context.Context, provider sqlc.SearchProvider, query string, count int) (any, error) {
+	registerSearchProviderSecrets(provider)
 	return p.callSearch(ctx, provider.Provider, provider.Config, query, count)
 }
 

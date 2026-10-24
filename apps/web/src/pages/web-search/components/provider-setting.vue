@@ -128,6 +128,7 @@
           </template>
         </SettingsSection>
       </form>
+      <SearchProviderTest :provider-id="curProviderId" />
     </div>
   </SettingsShell>
 </template>
@@ -154,6 +155,7 @@ import ExaSettings from './exa-settings.vue'
 import BochaSettings from './bocha-settings.vue'
 import DuckduckgoSettings from './duckduckgo-settings.vue'
 import YandexSettings from './yandex-settings.vue'
+import SearchProviderTest from './search-provider-test.vue'
 import { Trash2 } from 'lucide-vue-next'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 import { computed, inject, ref, watch } from 'vue'

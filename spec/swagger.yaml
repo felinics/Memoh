@@ -1653,6 +1653,10 @@ definitions:
     properties:
       channel_identity_id:
         type: string
+      excluded_target:
+        description: ExcludedTarget is checked after platform target resolution, before
+          publication.
+        type: string
       message:
         $ref: '#/definitions/channel.Message'
       target:
@@ -2951,12 +2955,19 @@ definitions:
     enum:
     - native
     - jina
+    - deepseek
     - cloudflare_markdown
     type: string
     x-enum-varnames:
     - ProviderNative
     - ProviderJina
+    - ProviderDeepSeek
     - ProviderCloudflareMarkdown
+  fetchproviders.TestRequest:
+    properties:
+      url:
+        type: string
+    type: object
   fetchproviders.UpdateRequest:
     properties:
       config:
@@ -6790,6 +6801,13 @@ definitions:
     - ProviderBocha
     - ProviderDuckDuckGo
     - ProviderYandex
+  searchproviders.TestRequest:
+    properties:
+      count:
+        type: integer
+      query:
+        type: string
+    type: object
   searchproviders.UpdateRequest:
     properties:
       config:
@@ -16547,6 +16565,51 @@ paths:
       summary: Update a fetch provider
       tags:
       - fetch-providers
+  /fetch-providers/{id}/test:
+    post:
+      consumes:
+      - application/json
+      description: Fetch a URL using the saved configuration without saving changes
+        or enabling the provider.
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: URL to fetch
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/fetchproviders.TestRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Test a saved fetch provider
+      tags:
+      - fetch-providers
   /fetch-providers/meta:
     get:
       description: List available fetch provider types and config schemas
@@ -17608,6 +17671,47 @@ paths:
           schema:
             $ref: '#/definitions/server.Problem'
       summary: Update a search provider
+      tags:
+      - search-providers
+  /search-providers/{id}/test:
+    post:
+      consumes:
+      - application/json
+      description: Run a query with the saved provider configuration using the web_search
+        execution path. Disabled providers can be tested without enabling them.
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Search test query
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/searchproviders.TestRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Test a saved search provider
       tags:
       - search-providers
   /search-providers/meta:

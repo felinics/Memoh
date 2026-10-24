@@ -1,6 +1,11 @@
 package searchproviders
 
-import "time"
+import (
+	"context"
+	"time"
+
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+)
 
 type ProviderName string
 
@@ -59,4 +64,14 @@ type GetResponse struct {
 	Enable    bool           `json:"enable"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+// Searcher runs the same provider request used by the web_search tool.
+type Searcher interface {
+	Search(context.Context, sqlc.SearchProvider, string, int) (any, error)
+}
+
+type TestRequest struct {
+	Query string `json:"query"`
+	Count *int   `json:"count,omitempty"`
 }

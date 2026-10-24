@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
 	sdk "github.com/felinics/twilight/sdk"
@@ -97,6 +98,12 @@ func (p *WebFetchProvider) execWebFetch(ctx context.Context, session SessionCont
 	if provider.Provider != string(fetchproviders.ProviderNative) && !provider.Enable {
 		return nil, errors.New("fetch provider is disabled")
 	}
+	return p.Fetch(ctx, provider, rawURL, format)
+}
+
+// Fetch executes a provider already selected by the caller. Bot selection and
+// enablement belong to execWebFetch; explicit configuration tests use this same path.
+func (p *WebFetchProvider) Fetch(ctx context.Context, provider sqlc.FetchProvider, rawURL, format string) (any, error) {
 	registerFetchProviderSecrets(provider)
 	result, err := p.callFetchProvider(ctx, provider.Provider, provider.Config, rawURL, format)
 	if err != nil {
@@ -116,6 +123,8 @@ func (p *WebFetchProvider) callFetchProvider(ctx context.Context, providerName s
 		return p.callNativeWebFetch(ctx, rawURL, format)
 	case string(fetchproviders.ProviderJina):
 		return p.callJinaReaderFetch(ctx, configJSON, rawURL)
+	case string(fetchproviders.ProviderDeepSeek):
+		return p.callDeepSeekFetch(ctx, configJSON, rawURL)
 	case string(fetchproviders.ProviderCloudflareMarkdown):
 		return p.callCloudflareMarkdownFetch(ctx, configJSON, rawURL)
 	default:
@@ -192,6 +201,58 @@ func (*WebFetchProvider) callJinaReaderFetch(ctx context.Context, configJSON []b
 	return map[string]any{
 		"success": true, "url": rawURL, "provider": string(fetchproviders.ProviderJina),
 		"format": "markdown", "contentType": resp.Header.Get("Content-Type"),
+		"content": content, "length": len(content),
+	}, nil
+}
+
+func (*WebFetchProvider) callDeepSeekFetch(ctx context.Context, configJSON []byte, rawURL string) (any, error) {
+	cfg := parseFetchConfig(configJSON)
+	apiKey := stringValue(cfg["api_key"])
+	if apiKey == "" {
+		return nil, errors.New("deepseek fetch requires api_key")
+	}
+	if utf8.RuneCountInString(rawURL) > 8192 {
+		return nil, errors.New("deepseek fetch url exceeds 8192 characters")
+	}
+	target, err := url.Parse(rawURL)
+	if err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Hostname() == "" || target.User != nil {
+		return nil, errors.New("deepseek fetch requires an HTTP(S) URL with a host and no credentials")
+	}
+	baseURL := strings.TrimRight(firstNonEmpty(stringValue(cfg["base_url"]), "https://api.deepseek.com"), "/")
+	payload, _ := json.Marshal(map[string]string{"url": rawURL})
+	client := &http.Client{Timeout: parseFetchTimeout(configJSON, webFetchTimeout)}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/tools/fetch", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", bearerValue(apiKey))
+	resp, err := client.Do(req) //nolint:gosec // intentionally fetches user-specified URLs through configured provider
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, buildFetchHTTPError(resp.StatusCode, body)
+	}
+	var page struct {
+		Title   string `json:"title"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil {
+		return nil, errors.New("invalid fetch response")
+	}
+	content := strings.TrimSpace(page.Content)
+	if content == "" {
+		return nil, errors.New("deepseek fetch returned empty content")
+	}
+	return map[string]any{
+		"success": true, "url": rawURL, "provider": string(fetchproviders.ProviderDeepSeek),
+		"format": "markdown", "contentType": "text/markdown", "title": page.Title,
 		"content": content, "length": len(content),
 	}, nil
 }
@@ -393,6 +454,8 @@ func fetchProviderDisplayName(provider sqlc.FetchProvider) string {
 	switch provider.Provider {
 	case string(fetchproviders.ProviderJina):
 		return "Jina Reader"
+	case string(fetchproviders.ProviderDeepSeek):
+		return "DeepSeek Fetch"
 	case string(fetchproviders.ProviderCloudflareMarkdown):
 		return "Cloudflare Markdown"
 	default:

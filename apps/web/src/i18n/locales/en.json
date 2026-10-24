@@ -2053,6 +2053,18 @@
     }
   },
   "webSearch": {
+    "test": {
+      "title": "Test Search",
+      "query": "Query",
+      "queryPlaceholder": "e.g. Memoh documentation",
+      "savedConfig": "Uses the saved configuration. Save changes before testing.",
+      "saveFirst": "Save this provider before testing.",
+      "queryRequired": "Enter a search query.",
+      "queryTooLong": "Use 128 characters or fewer.",
+      "run": "Test Search",
+      "failed": "Search test failed. Check the saved configuration and try again.",
+      "results": "Results ({count})"
+    },
     "title": "Web Search",
     "add": "Add",
     "addSearch": "Add Web Search",
@@ -2077,6 +2089,13 @@
     "selectHint": "Select or create a web search provider",
     "unsupportedProvider": "This provider does not have a settings panel yet",
     "nativeManaged": "Native is managed by Memoh and is always enabled.",
+    "testFetchTitle": "Test fetch",
+    "testFetch": "Fetch URL",
+    "testUrl": "URL",
+    "testSavedConfig": "Uses the saved configuration. Save any changes before testing. Provider charges may apply.",
+    "testSaveFirst": "Save this provider before testing.",
+    "testSucceeded": "Fetched content",
+    "testFailed": "Fetch test failed. Check the saved configuration and try again.",
     "saveSuccess": "Web search provider saved",
     "deleteSuccess": "Web search provider deleted",
     "deleteFailed": "Failed to delete web search provider",
@@ -2104,7 +2123,8 @@
     "fetchProviderNames": {
       "native": "Native",
       "jina": "Jina Reader",
-      "cloudflare_markdown": "Cloudflare Markdown"
+      "cloudflare_markdown": "Cloudflare Markdown",
+      "deepseek": "DeepSeek Fetch"
     }
   },
   "memory": {

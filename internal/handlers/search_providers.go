@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
 
@@ -14,14 +17,16 @@ import (
 )
 
 type SearchProvidersHandler struct {
-	service *searchproviders.Service
-	logger  *slog.Logger
+	service  *searchproviders.Service
+	searcher searchproviders.Searcher
+	logger   *slog.Logger
 }
 
-func NewSearchProvidersHandler(log *slog.Logger, service *searchproviders.Service) *SearchProvidersHandler {
+func NewSearchProvidersHandler(log *slog.Logger, service *searchproviders.Service, searcher searchproviders.Searcher) *SearchProvidersHandler {
 	return &SearchProvidersHandler{
-		service: service,
-		logger:  log.With(slog.String("handler", "search_providers")),
+		service:  service,
+		searcher: searcher,
+		logger:   log.With(slog.String("handler", "search_providers")),
 	}
 }
 
@@ -33,6 +38,7 @@ func (h *SearchProvidersHandler) Register(e *echo.Echo) {
 	group.GET("/:id", h.Get)
 	group.PUT("/:id", h.Update)
 	group.DELETE("/:id", h.Delete)
+	group.POST("/:id/test", h.Test)
 }
 
 // ListMeta godoc
@@ -169,4 +175,57 @@ func (h *SearchProvidersHandler) Delete(c echo.Context) error {
 		return errs.Wrap(err, "delete search provider")
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// Test godoc
+// @Summary Test a saved search provider
+// @Description Run a query with the saved provider configuration using the web_search execution path. Disabled providers can be tested without enabling them.
+// @Tags search-providers
+// @Accept json
+// @Produce json
+// @Param id path string true "Provider ID"
+// @Param request body searchproviders.TestRequest true "Search test query"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 502 {object} server.Problem
+// @Router /search-providers/{id}/test [post].
+func (h *SearchProvidersHandler) Test(c echo.Context) error {
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
+	}
+	var req searchproviders.TestRequest
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	query := strings.TrimSpace(req.Query)
+	if query == "" {
+		return apperror.FieldRequired("query")
+	}
+	if utf8.RuneCountInString(query) > 128 {
+		return apperror.FieldInvalid("query", nil)
+	}
+	count := 5
+	if req.Count != nil {
+		count = *req.Count
+		if count < 1 || count > 20 {
+			return apperror.FieldInvalid("count", nil)
+		}
+	}
+	provider, err := h.service.GetRawByID(c.Request().Context(), id)
+	if err != nil {
+		return resourceLookupError(err, "id", apperror.CodeSearchProviderNotFound, "get search provider")
+	}
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 30*time.Second)
+	defer cancel()
+	result, err := h.searcher.Search(ctx, provider, query, count)
+	if err != nil {
+		translated := probeError(err, false)
+		if apperror.CodeOf(translated) != "" {
+			return translated
+		}
+		return apperror.New(apperror.CodeAgentProviderRequestRejected, nil)
+	}
+	return c.JSON(http.StatusOK, result)
 }

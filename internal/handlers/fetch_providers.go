@@ -1,10 +1,14 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
 
@@ -16,12 +20,14 @@ import (
 
 type FetchProvidersHandler struct {
 	service *fetchproviders.Service
+	fetcher fetchproviders.Fetcher
 	logger  *slog.Logger
 }
 
-func NewFetchProvidersHandler(log *slog.Logger, service *fetchproviders.Service) *FetchProvidersHandler {
+func NewFetchProvidersHandler(log *slog.Logger, service *fetchproviders.Service, fetcher fetchproviders.Fetcher) *FetchProvidersHandler {
 	return &FetchProvidersHandler{
 		service: service,
+		fetcher: fetcher,
 		logger:  log.With(slog.String("handler", "fetch_providers")),
 	}
 }
@@ -34,6 +40,54 @@ func (h *FetchProvidersHandler) Register(e *echo.Echo) {
 	group.GET("/:id", h.Get)
 	group.PUT("/:id", h.Update)
 	group.DELETE("/:id", h.Delete)
+	group.POST("/:id/test", h.Test)
+}
+
+// Test godoc
+// @Summary Test a saved fetch provider
+// @Description Fetch a URL using the saved configuration without saving changes or enabling the provider.
+// @Tags fetch-providers
+// @Accept json
+// @Produce json
+// @Param id path string true "Provider ID"
+// @Param request body fetchproviders.TestRequest true "URL to fetch"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 502 {object} server.Problem
+// @Router /fetch-providers/{id}/test [post].
+func (h *FetchProvidersHandler) Test(c echo.Context) error {
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
+	}
+	var req fetchproviders.TestRequest
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	rawURL := strings.TrimSpace(req.URL)
+	if rawURL == "" {
+		return apperror.FieldRequired("url")
+	}
+	target, err := url.Parse(rawURL)
+	if err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Hostname() == "" || target.User != nil || utf8.RuneCountInString(rawURL) > 8192 {
+		return apperror.FieldInvalid("url", err)
+	}
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 30*time.Second)
+	defer cancel()
+	provider, err := h.service.GetRawByID(ctx, id)
+	if err != nil {
+		return resourceLookupError(err, "id", apperror.CodeFetchProviderNotFound, "get fetch provider for test")
+	}
+	result, err := h.fetcher.Fetch(ctx, provider, rawURL, "auto")
+	if err != nil {
+		if translated := probeError(err, false); apperror.CodeOf(translated) != "" {
+			return translated
+		}
+		return apperror.Wrap(apperror.CodeAgentProviderRequestRejected, err, nil)
+	}
+	return c.JSON(http.StatusOK, result)
 }
 
 // ListMeta godoc
