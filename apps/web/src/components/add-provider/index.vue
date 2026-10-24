@@ -207,7 +207,7 @@ import { providerPresets } from '@/constants/provider-presets'
 import type { ProviderPreset } from '@/constants/provider-presets'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { templateConfigFields, templateDefaultConfig } from '@/utils/provider-template'
-import { findModelSource, isMonochromeLogo, modelSourceLogo, modelSourceLogoForKey, modelSourceNeedsApiKey, providerSourceMetadata, TEMPLATE_SOURCES, type ModelSource } from '@/constants/model-sources'
+import { findModelSource, groupModelSources, isMonochromeLogo, modelSourceLogo, modelSourceLogoForKey, modelSourceNeedsApiKey, providerSourceMetadata, subscriptionForProvider, TEMPLATE_SOURCES, type ModelSource } from '@/constants/model-sources'
 import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
 import { suggestProviderName } from './provider-presets'
 
@@ -312,15 +312,34 @@ const providerPresetOptions = computed(() => [
     groupLabel: t('provider.presetGroupCustom'),
     keywords: ['custom', 'provider'],
   }] : []),
-  ...availablePresets.value.map(preset => ({
+  // Subscriptions come first and in the gallery's order; the picker lists
+  // groups in the order their first option appears.
+  ...presetGroups.value.subscriptions.map(preset => presetOption(preset, 'subscriptions', t('provider.presetGroupSubscriptions'))),
+  ...presetGroups.value.others.map(preset => presetOption(preset, 'preset', t('provider.presetGroupBuiltIn'))),
+])
+
+// One pass over the presets, keeping the gallery's order for the subscriptions.
+const presetGroups = computed(() => {
+  const order = new Map(groupModelSources(props.sources ?? []).subscriptions.map((item, index) => [item.id, index]))
+  const subscriptions: SelectablePreset[] = []
+  const others: SelectablePreset[] = []
+  for (const preset of availablePresets.value) {
+    (preset.modelSource && order.has(preset.modelSource) ? subscriptions : others).push(preset)
+  }
+  subscriptions.sort((a, b) => order.get(a.modelSource!)! - order.get(b.modelSource!)!)
+  return { subscriptions, others }
+})
+
+function presetOption(preset: SelectablePreset, group: string, groupLabel: string) {
+  return {
     value: preset.id,
     label: preset.name,
     description: CLIENT_TYPE_META[preset.clientType]?.label ?? preset.clientType,
-    group: 'preset',
-    groupLabel: t('provider.presetGroupBuiltIn'),
+    group,
+    groupLabel,
     keywords: [preset.name, preset.id, preset.clientType, preset.registryName ?? '', preset.source],
-  })),
-])
+  }
+}
 
 function getPresetById(id: string | undefined): SelectablePreset | null {
   if (!id || id === customPresetId) return null
@@ -358,6 +377,7 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
     }
     const preset = selectedPreset.value
     let result
+    const subscription = preset ? undefined : subscriptionForProvider(String(data.client_type ?? ''), config.base_url)
     if (preset?.templateId) {
       const response = await postProvidersFromTemplate({
         body: {
@@ -374,6 +394,12 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
         name: String(data.name ?? ''),
         client_type: String(data.client_type ?? ''),
         config,
+      }
+      // A custom provider made with a subscription's client type and endpoint
+      // is that subscription, so it records the entry the gallery would.
+      if (subscription) {
+        payload.icon = modelSourceLogo(subscription)
+        payload.metadata = providerSourceMetadata(subscription)
       }
       if (preset) {
         if (preset.icon) {
@@ -397,7 +423,7 @@ const { mutateAsync: createProviderMutation, isLoading } = useMutation({
         // A preset taken from the gallery list imports through its source; any
         // other preset keeps the template catalog and a custom provider gets
         // the protocol's defaults.
-        const importResult = preset?.modelSource
+        const importResult = preset?.modelSource || subscription
           ? await importProviderModels(result)
           : props.importModels
             ? await props.importModels(result.id, preset ? undefined : suggestedModelCompatibilities(data.client_type))

@@ -2002,13 +2002,20 @@
   "provider": {
     "add": "Add Provider",
     "addBtn": "Add",
+    "gallery": {
+      "configured": "Configured",
+      "subscriptions": "Subscriptions",
+      "others": "Other LLM providers"
+    },
     "searchPlaceholder": "Search providers...",
     "preset": "Preset",
     "presetPlaceholder": "Select preset or custom provider",
     "presetSearchPlaceholder": "Search presets...",
     "presetNoResults": "No matching presets",
+    "searchNoResults": "No matching providers",
     "presetGroupCustom": "Custom",
     "presetGroupBuiltIn": "Presets",
+    "presetGroupSubscriptions": "Subscriptions",
     "customProvider": "Custom Provider",
     "apiKey": "API Key",
     "apiKeyPlaceholder": "Enter API key",

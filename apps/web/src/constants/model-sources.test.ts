@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest'
 import {
   findModelSource,
   findModelSourceBySource,
+  groupModelSources,
   isMonochromeLogo,
   MODEL_SOURCES,
   modelSourceLogo,
   modelSourceLogoForKey,
   modelSourceNeedsApiKey,
   providerCatalogEntry,
+  providerGalleryEntry,
+  subscriptionForProvider,
   providerDraftFromSource,
   providerLogo,
   providerSource,
@@ -20,6 +23,45 @@ const CLIENT_TYPES = new Set([
 ])
 
 describe('model sources', () => {
+  it('groups the subscriptions first, in their own order, and keeps the rest in order', () => {
+    const { subscriptions, others } = groupModelSources(MODEL_SOURCES)
+    expect(subscriptions.map(item => item.id)).toEqual(['codex', 'github-copilot', 'opencode-go'])
+    expect(others.map(item => item.id)).not.toContain('codex')
+    expect(others.some(item => item.subscription)).toBe(false)
+    expect(others.length + subscriptions.length).toBe(MODEL_SOURCES.length)
+    expect(others.map(item => item.id)).toEqual(MODEL_SOURCES.map(item => item.id).filter(id => !['codex', 'github-copilot', 'opencode-go'].includes(id)))
+
+    const configuredCodex = groupModelSources(MODEL_SOURCES.filter(item => item.id !== 'codex'))
+    expect(configuredCodex.subscriptions.map(item => item.id)).toEqual(['github-copilot', 'opencode-go'])
+  })
+
+  it('gives each subscription a client type no other subscription uses', () => {
+    const types = MODEL_SOURCES.filter(item => item.subscription).map(item => item.client_type)
+    expect(new Set(types).size).toBe(types.length)
+    expect(subscriptionForProvider('openai-completions', '')).toBeUndefined()
+    expect(subscriptionForProvider(undefined, '')).toBeUndefined()
+  })
+
+  it('counts a provider as a subscription only on that subscription\'s endpoint', () => {
+    expect(subscriptionForProvider('openai-codex', '')?.id).toBe('codex')
+    expect(subscriptionForProvider('openai-codex', 'https://chatgpt.com/backend-api/')?.id).toBe('codex')
+    expect(subscriptionForProvider('opencode-go', 'https://OpenCode.ai/zen/go/v1')?.id).toBe('opencode-go')
+    expect(subscriptionForProvider('opencode-go', 'https://proxy.example.com/v1')).toBeUndefined()
+    // Copilot has no fixed base URL, so any provider of its type is it.
+    expect(subscriptionForProvider('github-copilot', 'https://anything.example.com')?.id).toBe('github-copilot')
+    expect(providerGalleryEntry({ client_type: 'opencode-go', config: { base_url: 'https://proxy.example.com/v1' } })).toBeUndefined()
+  })
+
+  it('counts a subscription by its client type only for the gallery', () => {
+    const custom = { client_type: 'opencode-go', metadata: {} }
+    expect(providerGalleryEntry(custom)?.id).toBe('opencode-go')
+    expect(providerGalleryEntry({ client_type: 'openai-codex' })?.id).toBe('codex')
+    expect(providerGalleryEntry({ client_type: 'openai-completions' })).toBeUndefined()
+    // What a provider imports from stays its own record.
+    expect(providerCatalogEntry(custom)).toBeUndefined()
+    expect(providerSource(custom)).toBeUndefined()
+  })
+
   it('lists each entry once, sorted by id, and each source once', () => {
     const ids = MODEL_SOURCES.map(item => item.id)
     expect(new Set(ids).size).toBe(ids.length)

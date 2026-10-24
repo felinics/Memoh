@@ -80,8 +80,15 @@ vi.mock('@felinic/ui', () => {
   }
   const SwapTransition = (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', slots.default?.())
   const PageShell = (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', [slots.actions?.(), slots.default?.()])
+  const SectionGroup = {
+    props: ['title'],
+    setup(props: { title: string }, { slots }: { slots: Slots }) {
+      return () => h('section', { 'data-section': props.title }, slots.default?.())
+    },
+  }
   return {
     BackendCard,
+    SectionGroup,
     DetailPane,
     SwapTransition,
     PageShell,
@@ -179,6 +186,10 @@ async function mountPage(searchQuery = '') {
 
 function cardNames(root: Element) {
   return [...root.querySelectorAll('[data-provider]')].map(card => card.getAttribute('data-provider'))
+}
+
+function sectionTitles(root: Element) {
+  return [...root.querySelectorAll('[data-section]')].map(section => section.getAttribute('data-section'))
 }
 
 describe('models panel route state', () => {
@@ -339,8 +350,13 @@ describe('models panel route state', () => {
 
     const names = cardNames(root)
     expect(names).toHaveLength(20)
-    expect(names.slice(0, 2)).toEqual(['One', 'Two'])
+    expect(names.slice(0, 5)).toEqual(['One', 'Two', 'OpenAI Codex', 'GitHub Copilot', 'OpenCode Go'])
     expect(names).toContain('above.dev')
+    expect(sectionTitles(root)).toEqual([
+      'provider.gallery.configured',
+      'provider.gallery.subscriptions',
+      'provider.gallery.others',
+    ])
     const pagination = root.querySelector('[data-testid="pagination"]')
     expect(Number(pagination?.getAttribute('data-pages'))).toBeGreaterThan(5)
 
@@ -348,6 +364,8 @@ describe('models panel route state', () => {
     await nextTick()
     expect(cardNames(root)).not.toContain('One')
     expect(cardNames(root)).toHaveLength(20)
+    // The second page continues the other providers under their title again.
+    expect(sectionTitles(root)).toEqual(['provider.gallery.others'])
     app.unmount()
   })
 
@@ -382,7 +400,39 @@ describe('models panel route state', () => {
     query.value = 'deepseek'
     await nextTick()
     expect(cardNames(root)).toEqual(['DeepSeek'])
+    expect(sectionTitles(root)).toEqual(['provider.gallery.others'])
     expect(root.querySelector('[data-testid="pagination"]')).toBeNull()
+
+    // A section shows only while the search leaves it a card.
+    query.value = 'copilot'
+    await nextTick()
+    expect(cardNames(root)).toEqual(['GitHub Copilot'])
+    expect(sectionTitles(root)).toEqual(['provider.gallery.subscriptions'])
+
+    query.value = 'zzzz'
+    await nextTick()
+    expect(cardNames(root)).toEqual([])
+    expect(root.textContent).toContain('provider.searchNoResults')
+    app.unmount()
+  })
+
+  it('keeps offering a subscription when a provider of its type points elsewhere', async () => {
+    mocks.providerData.value = [
+      { id: 'proxy-go', name: 'Go Proxy', enable: true, client_type: 'opencode-go', config: { base_url: 'https://proxy.example.com/v1' }, metadata: {} },
+    ]
+    const { app, root } = await mountPage('')
+    expect(sectionTitles(root).slice(0, 2)).toEqual(['provider.gallery.configured', 'provider.gallery.subscriptions'])
+    expect(cardNames(root).slice(0, 4)).toEqual(['Go Proxy', 'OpenAI Codex', 'GitHub Copilot', 'OpenCode Go'])
+    app.unmount()
+  })
+
+  it('counts a subscription as configured when its client type was used in the custom form', async () => {
+    mocks.providerData.value = [
+      { id: 'custom-codex', name: 'My Codex', enable: true, client_type: 'openai-codex', metadata: {} },
+    ]
+    const { app, root } = await mountPage('')
+    expect(sectionTitles(root).slice(0, 2)).toEqual(['provider.gallery.configured', 'provider.gallery.subscriptions'])
+    expect(cardNames(root).slice(0, 3)).toEqual(['My Codex', 'GitHub Copilot', 'OpenCode Go'])
     app.unmount()
   })
 })

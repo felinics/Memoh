@@ -38,6 +38,9 @@ export interface ModelSource {
   // The models.dev logo carries its own colors; others are drawn in one color
   // and take the text color.
   colored_logo?: boolean
+  // A subscription the user signs into and already pays for. The gallery lists
+  // these first, and a provider made with its client type counts as it.
+  subscription?: boolean
 }
 
 export const MODEL_SOURCES: readonly ModelSource[] = [
@@ -77,7 +80,7 @@ export const MODEL_SOURCES: readonly ModelSource[] = [
   { id: 'claudinio', source: 'claudinio', name: 'Claudinio', client_type: 'openai-completions', base_url: 'https://api.claudin.io/v1' },
   { id: 'cline-pass', source: 'cline-pass', name: 'ClinePass', client_type: 'openai-completions', base_url: 'https://api.cline.bot/api/v1' },
   { id: 'cloudflare', source: 'cloudflare-workers-ai', name: 'Cloudflare Workers AI', client_type: 'openai-completions', base_url: 'https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1' },
-  { id: 'codex', name: 'OpenAI Codex', client_type: 'openai-codex', base_url: 'https://chatgpt.com/backend-api', logo: 'openai' },
+  { id: 'codex', name: 'OpenAI Codex', client_type: 'openai-codex', base_url: 'https://chatgpt.com/backend-api', logo: 'openai', subscription: true },
   { id: 'coralbricks', source: 'coralbricks', name: 'CoralBricks', client_type: 'openai-completions', base_url: 'https://inference.coralbricks.ai/v1' },
   { id: 'cortecs', source: 'cortecs', name: 'Cortecs', client_type: 'openai-completions', base_url: 'https://api.cortecs.ai/v1' },
   { id: 'crossmodel', source: 'crossmodel', name: 'CrossModel', client_type: 'openai-completions', base_url: 'https://api.crossmodel.ai/v1' },
@@ -98,7 +101,7 @@ export const MODEL_SOURCES: readonly ModelSource[] = [
   { id: 'fireworks-ai', source: 'fireworks-ai', name: 'Fireworks AI', client_type: 'openai-completions', base_url: 'https://api.fireworks.ai/inference/v1' },
   { id: 'friendli', source: 'friendli', name: 'Friendli', client_type: 'openai-completions', base_url: 'https://api.friendli.ai/serverless/v1' },
   { id: 'frogbot', source: 'frogbot', name: 'FrogBot', client_type: 'openai-completions', base_url: 'https://app.frogbot.ai/api/v1', colored_logo: true },
-  { id: 'github-copilot', name: 'GitHub Copilot', client_type: 'github-copilot', base_url: '', logo: 'github-copilot' },
+  { id: 'github-copilot', name: 'GitHub Copilot', client_type: 'github-copilot', base_url: '', logo: 'github-copilot', subscription: true },
   { id: 'gitlab', source: 'gitlab', name: 'GitLab Duo', client_type: 'openai-completions', base_url: 'https://gitlab.com/api/v4' },
   { id: 'google', source: 'google', name: 'Google', client_type: 'google-generative-ai', base_url: 'https://generativelanguage.googleapis.com/v1beta' },
   { id: 'groq', source: 'groq', name: 'Groq', client_type: 'openai-completions', base_url: 'https://api.groq.com/openai/v1' },
@@ -159,7 +162,7 @@ export const MODEL_SOURCES: readonly ModelSource[] = [
   { id: 'ollama', name: 'Ollama', client_type: 'openai-completions', base_url: 'http://127.0.0.1:11434/v1', logo: 'ollama-cloud' },
   { id: 'ollama-cloud', source: 'ollama-cloud', name: 'Ollama Cloud', client_type: 'openai-completions', base_url: 'https://ollama.com/v1' },
   { id: 'openai', source: 'openai', name: 'OpenAI', client_type: 'openai-responses', base_url: 'https://api.openai.com/v1' },
-  { id: 'opencode-go', source: 'opencode-go', name: 'OpenCode Go', client_type: 'opencode-go', base_url: 'https://opencode.ai/zen/go/v1' },
+  { id: 'opencode-go', source: 'opencode-go', name: 'OpenCode Go', client_type: 'opencode-go', base_url: 'https://opencode.ai/zen/go/v1', subscription: true },
   { id: 'openreason', source: 'openreason', name: 'OpenReason', client_type: 'openai-completions', base_url: 'https://api.openreason.app/v1' },
   { id: 'openrouter', source: 'openrouter', name: 'OpenRouter', client_type: 'openai-completions', base_url: 'https://openrouter.ai/api/v1' },
   { id: 'opper', source: 'opper', name: 'Opper', client_type: 'openai-completions', base_url: 'https://api.opper.ai/v3/compat' },
@@ -242,6 +245,35 @@ export function findModelSourceBySource(source: string | null | undefined): Mode
   return source ? bySource.get(source) : undefined
 }
 
+// Splits gallery entries into subscriptions and every other provider, each in
+// the order given.
+export function groupModelSources(items: readonly ModelSource[]) {
+  const subscriptions: ModelSource[] = []
+  const others: ModelSource[] = []
+  for (const item of items) {
+    (item.subscription ? subscriptions : others).push(item)
+  }
+  return { subscriptions, others }
+}
+
+// Each subscription's client type belongs to it alone (a test holds this).
+const subscriptionByClientType = new Map(MODEL_SOURCES.filter(item => item.subscription).map(item => [item.client_type as string, item]))
+
+// The subscription a provider made with a subscription's client type is, when
+// it also points at that subscription: no base URL (the integration's fixed
+// endpoint) or the entry's own. One aimed at a proxy or another gateway is a
+// custom provider that happens to speak the protocol.
+export function subscriptionForProvider(clientType: string | null | undefined, baseUrl: unknown): ModelSource | undefined {
+  const entry = subscriptionByClientType.get(clientType ?? '')
+  if (!entry) return undefined
+  const base = normalizedBaseUrl(baseUrl)
+  return !entry.base_url || !base || base === normalizedBaseUrl(entry.base_url) ? entry : undefined
+}
+
+function normalizedBaseUrl(value: unknown): string {
+  return typeof value === 'string' ? value.trim().replace(/\/+$/, '').toLowerCase() : ''
+}
+
 // The logo models.dev serves for an entry; an id without a logo of its own gets
 // models.dev's generic one.
 export function modelSourceLogo(item: ModelSource): string {
@@ -312,6 +344,7 @@ interface ProviderLike {
   id?: string
   client_type?: string
   icon?: string
+  config?: Record<string, unknown>
   metadata?: Record<string, unknown>
 }
 
@@ -319,7 +352,7 @@ interface ProviderLike {
 // created before the gallery may carry an icon from the former local icon set;
 // that is ignored so every provider is drawn the same way.
 export function providerLogo(provider: ProviderLike | null | undefined): string | undefined {
-  const entry = providerCatalogEntry(provider)
+  const entry = providerGalleryEntry(provider)
   if (entry) return modelSourceLogo(entry)
   const icon = provider?.icon
   return icon && MODELS_DEV_LOGO.test(icon) ? icon : undefined
@@ -372,4 +405,14 @@ export function providerCatalogEntry(provider: ProviderLike | null | undefined):
     }
   }
   return undefined
+}
+
+// The entry the gallery counts a provider as: the one it records, or for a
+// provider made in the custom form with a subscription's client type and
+// endpoint before that form recorded the entry, that subscription, so it is not
+// offered again.
+// Only the gallery and the logo read this; what such an older provider
+// imports from stays its own record.
+export function providerGalleryEntry(provider: ProviderLike | null | undefined): ModelSource | undefined {
+  return providerCatalogEntry(provider) ?? subscriptionForProvider(provider?.client_type, provider?.config?.base_url)
 }

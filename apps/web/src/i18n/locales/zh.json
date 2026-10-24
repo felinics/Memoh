@@ -2002,13 +2002,20 @@
   "provider": {
     "add": "添加服务商",
     "addBtn": "添加",
+    "gallery": {
+      "configured": "已配置",
+      "subscriptions": "订阅",
+      "others": "其他 LLM 服务商"
+    },
     "searchPlaceholder": "搜索服务商…",
     "preset": "预设",
     "presetPlaceholder": "选择预设或自定义服务商",
     "presetSearchPlaceholder": "搜索预设…",
     "presetNoResults": "没有匹配的预设",
+    "searchNoResults": "没有匹配的服务商",
     "presetGroupCustom": "自定义",
     "presetGroupBuiltIn": "预设",
+    "presetGroupSubscriptions": "订阅",
     "customProvider": "自定义服务商",
     "apiKey": "API 密钥",
     "apiKeyPlaceholder": "输入 API 密钥",
