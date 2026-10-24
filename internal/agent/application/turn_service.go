@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -106,6 +107,7 @@ func (s *Service) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 		},
 		finishRun:         s.turnRunFinisher(runCtx, admission, string(cmd.Mode)),
 		publishAgentEvent: s.turnAgentEventPublisher(admission.Handle),
+		logger:            s.logger,
 	}
 	go h.pump(cmd, chunkCh, errCh)
 	return h, nil
@@ -126,6 +128,7 @@ type runHandle struct {
 	cancel    context.CancelFunc
 	inject    chan turn.InjectMessage
 	addAssets func([]turn.OutboundAssetRef)
+	logger    *slog.Logger
 
 	// injectMu lets teardown stop direct injections before the durable finisher
 	// stops the session sender and the channel can be closed safely.
@@ -358,6 +361,26 @@ func (h *runHandle) AddOutboundAssets(refs []turn.OutboundAssetRef) {
 	h.addAssets(refs)
 }
 
+// containPanic is deferred by the goroutine that delivers a run. It must be
+// registered after the deferred finish and channel closes, so they still run
+// for the run that panicked. The failure goes out on the handle's error
+// channel, which holds one: when an earlier error already fills it, that error
+// is the cause and the panic is only logged.
+func (h *runHandle) containPanic(botID, threadID string) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	settlePanickedRun(h.ctx, h.logger, "turn delivery", runIDs(botID, threadID, h.id), r, func(cause error) {
+		if h.recordStreamFailure(cause) {
+			select {
+			case h.errs <- h.consumerErr(cause):
+			default:
+			}
+		}
+	})
+}
+
 // pump forwards the application's chunk/error pair into the handle's channels,
 // wrapping each chunk as a turn.Event with a monotonically increasing Seq.
 func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan StreamChunk, errCh <-chan error) {
@@ -378,6 +401,7 @@ func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan StreamChunk, 
 	defer h.closeInject()
 	defer h.finish()
 	defer h.stopInject()
+	defer h.containPanic(cmd.BotID, cmd.ThreadID)
 	defer func() {
 		// A canceled run may look like a clean completion here: the
 		// application reacts to ctx cancellation by closing both channels.

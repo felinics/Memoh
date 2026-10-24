@@ -369,7 +369,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	// Do not send input until the CLI has accepted the host control contract.
 	initialized, err := turn.callControl(ctx, "initialize", nil)
 	if err != nil {
-		return external.PromptResult{}, external.Unavailable(err)
+		return external.PromptResult{}, turn.runError(external.Unavailable(err))
 	}
 	var capabilities initializeResponse
 	if err := json.Unmarshal(initialized, &capabilities); err != nil {
@@ -385,7 +385,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		} else if !slices.ContainsFunc(available, func(command initializeCommand) bool { return command.Name == input.Command }) {
 			skills, err := turn.reloadSkillNames(ctx)
 			if err != nil {
-				return external.PromptResult{}, external.Fail(external.FailureControlFailed, err)
+				return external.PromptResult{}, turn.runError(external.Fail(external.FailureControlFailed, err))
 			}
 			available = claudeTurnCommands(capabilities.Commands, skills)
 		}
@@ -402,7 +402,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		if errors.Is(err, external.ErrModeUnavailable) {
 			return external.PromptResult{}, external.Fail(external.FailureModeUnavailable, err)
 		}
-		return external.PromptResult{}, external.Fail(external.FailureControlFailed, err)
+		return external.PromptResult{}, turn.runError(external.Fail(external.FailureControlFailed, err))
 	}
 
 	content := buildUserContent(input)

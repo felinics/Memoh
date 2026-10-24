@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/errs"
 )
 
@@ -211,7 +212,16 @@ func processExitDetail(proc exitReporter) string {
 	return strings.Join(parts, "; ")
 }
 
+// readLoop serves every thread on the app-server process. A panic while
+// decoding its output or dispatching to a turn takes the connection and the
+// process down, so each turn on it ends through the process-exit path rather
+// than waiting on a loop nobody runs.
 func (c *conn) readLoop() {
+	defer func() {
+		if r := recover(); r != nil {
+			c.shutdown(external.RecoveredPanic(context.Background(), c.logger, "codex app-server read loop", r))
+		}
+	}()
 	scanner := bufio.NewScanner(c.proc)
 	scanner.Buffer(make([]byte, 64*1024), maxLineBytes)
 	ctx := context.Background()

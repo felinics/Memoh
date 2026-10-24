@@ -23,6 +23,9 @@ func ExternalAgentError(err error) error {
 	if err == nil || apperror.CodeOf(err) != "" {
 		return err
 	}
+	if external.IsPanic(err) {
+		return apperror.Wrap(apperror.CodeInternal, err, nil)
+	}
 	if translated := externalRuntimeError(err); translated != nil {
 		return translated
 	}

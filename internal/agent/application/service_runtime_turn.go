@@ -100,7 +100,10 @@ func (s *Service) streamRuntimeChunks(ctx context.Context, driver external.Drive
 	done := make(chan error, 1)
 	go func() {
 		defer close(eventCh)
-		_, err := s.streamRuntimeWS(ctx, driver, req, eventCh, nil, false)
+		err := s.containedRun(ctx, "external runtime", runIDs(req.BotID, req.ThreadID, req.RunID), func() error {
+			_, err := s.streamRuntimeWS(ctx, driver, req, eventCh, nil, false)
+			return err
+		})
 		done <- err
 		close(done)
 	}()

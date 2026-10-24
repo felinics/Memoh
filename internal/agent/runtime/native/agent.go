@@ -161,6 +161,7 @@ func (a *Agent) Stream(ctx context.Context, cfg RunConfig) <-chan StreamEvent {
 	ch := make(chan StreamEvent)
 	go func() {
 		defer close(ch)
+		defer a.containStreamPanic(ctx, ch)
 		a.runStream(ctx, cfg, ch)
 	}()
 	return ch

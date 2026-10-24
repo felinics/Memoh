@@ -94,6 +94,15 @@ func (g *fakeGrok) handle(ctx context.Context, method string, params json.RawMes
 		return map[string]any{"protocolVersion": acp.ProtocolVersionNumber, "agentCapabilities": map[string]any{
 			"sessionCapabilities": map[string]any{"resume": map[string]any{}, "close": map[string]any{}},
 		}}, nil
+	case acp.AgentMethodSessionPrompt:
+		var request acp.PromptRequest
+		_ = json.Unmarshal(params, &request)
+		if err := g.conn.SendNotification(ctx, acp.ClientMethodSessionUpdate, acp.SessionNotification{
+			SessionId: request.SessionId, Update: acp.UpdateAgentMessageText("hello"),
+		}); err != nil {
+			return nil, &acp.RequestError{Code: -32603, Message: err.Error()}
+		}
+		return map[string]any{"stopReason": "end_turn"}, nil
 	case acp.AgentMethodSessionNew:
 		g.created++
 		return map[string]any{"sessionId": fmt.Sprintf("new-%d", g.created), "configOptions": g.configOptions()}, nil

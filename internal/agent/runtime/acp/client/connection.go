@@ -11,6 +11,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/errs"
 )
 
@@ -61,6 +62,10 @@ func newClientConnection(client *clientCallbacks, peerInput io.Writer, peerOutpu
 	}
 	c.updates = newUpdateGate(c.logger, peerOutput)
 	c.conn = acp.NewConnection(c.handle, peerInput, c.updates)
+	if client != nil && client.terminals != nil {
+		client.terminals.fail = c.updates.fail
+		client.terminals.logger = c.logger
+	}
 	return c
 }
 
@@ -146,6 +151,9 @@ func peerError(ctx context.Context, err error) error {
 	if err == nil {
 		return nil
 	}
+	if external.IsPanic(err) {
+		return err
+	}
 	if ctx.Err() != nil {
 		return errs.WrapWithDepth(1, err, "")
 	}
@@ -186,6 +194,11 @@ func (c *clientConnection) Prompt(ctx context.Context, params acp.PromptRequest)
 	defer cancelRequest(nil)
 	outcomes := make(chan promptOutcome, 1)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				outcomes <- promptOutcome{err: external.RecoveredPanic(ctx, c.logger, "acp prompt", r)}
+			}
+		}()
 		resp, err := acp.SendRequest[acp.PromptResponse](c.conn, requestCtx, acp.AgentMethodSessionPrompt, params)
 		outcomes <- promptOutcome{response: resp, err: err}
 	}()
@@ -210,6 +223,11 @@ func (c *clientConnection) Prompt(ctx context.Context, params acp.PromptRequest)
 		// closes the process/pipe if this best-effort notification cannot finish.
 		cancelDone := make(chan error, 1)
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					cancelDone <- external.RecoveredPanic(ctx, c.logger, "acp cancel", r)
+				}
+			}()
 			cancelDone <- c.Cancel(context.WithoutCancel(ctx), acp.CancelNotification{SessionId: params.SessionId})
 		}()
 
@@ -227,6 +245,10 @@ func (c *clientConnection) Prompt(ctx context.Context, params acp.PromptRequest)
 				haveOutcome = true
 			case cancelSendErr = <-cancelDone:
 				haveCancel = true
+				if external.IsPanic(cancelSendErr) {
+					cancelRequest(cancelSendErr)
+					return acp.PromptResponse{}, cancelSendErr
+				}
 			case <-timer.C:
 				cancelRequest(ErrPromptCancellationUnconfirmed)
 				return acp.PromptResponse{}, errors.Join(ctx.Err(), ErrPromptCancellationUnconfirmed)
@@ -292,7 +314,14 @@ func (c *clientConnection) SetLegacySessionModel(ctx context.Context, params leg
 	return resp, peerError(ctx, err)
 }
 
-func (c *clientConnection) handle(ctx context.Context, method string, params json.RawMessage) (any, *acp.RequestError) {
+func (c *clientConnection) handle(ctx context.Context, method string, params json.RawMessage) (result any, reqErr *acp.RequestError) {
+	defer func() {
+		if r := recover(); r != nil {
+			err := external.RecoveredPanic(ctx, c.logger, "acp dispatch", r)
+			c.updates.fail(err)
+			result, reqErr = nil, acp.NewInternalError(nil)
+		}
+	}()
 	if c == nil {
 		return nil, acp.NewInternalError(map[string]any{"error": "ACP client callbacks not configured"})
 	}

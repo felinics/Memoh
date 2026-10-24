@@ -161,6 +161,12 @@ func (ic *idleCancel) Stop() {
 	ic.timer.Stop()
 }
 
+// Cancel ends the watched run's context with cause, for a run that is being
+// abandoned by its own owner rather than timing out.
+func (ic *idleCancel) Cancel(cause error) {
+	ic.cancel(cause)
+}
+
 func (ic *idleCancel) DidFire() bool {
 	ic.mu.Lock()
 	defer ic.mu.Unlock()

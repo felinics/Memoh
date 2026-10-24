@@ -1,6 +1,8 @@
 package client
 
 import (
+	"context"
+	"log/slog"
 	"reflect"
 	"strings"
 	"sync"
@@ -8,6 +10,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 )
 
 // TurnSink is a turn's one event stream: it records the turn and forwards it
@@ -25,8 +28,12 @@ import (
 // with tokens, and a slow consumer receives fewer, larger deltas carrying the
 // same text. How the text is split into deltas is not preserved.
 type TurnSink struct {
-	next  EventSink
-	limit ToolOutputLimit
+	ctx    context.Context
+	logger *slog.Logger
+	failed func(error)
+	err    error
+	next   EventSink
+	limit  ToolOutputLimit
 
 	mu      sync.Mutex
 	wake    *sync.Cond
@@ -51,8 +58,12 @@ type turnSinkItem struct {
 var _ TerminalDecisionSink = (*TurnSink)(nil)
 
 func NewTurnSink(next EventSink, limit ToolOutputLimit) *TurnSink {
+	return NewTurnSinkWithFailure(context.Background(), slog.Default(), next, limit, nil)
+}
+
+func NewTurnSinkWithFailure(ctx context.Context, logger *slog.Logger, next EventSink, limit ToolOutputLimit, failed func(error)) *TurnSink {
 	// Events are limited as they queue, so the recorder needs no limit of its own.
-	s := &TurnSink{next: next, limit: limit, transcript: NewTranscriptRecorder(), done: make(chan struct{})}
+	s := &TurnSink{ctx: ctx, logger: logger, failed: failed, next: next, limit: limit, transcript: NewTranscriptRecorder(), done: make(chan struct{})}
 	s.wake = sync.NewCond(&s.mu)
 	go s.run()
 	return s
@@ -89,6 +100,19 @@ func (s *TurnSink) enqueue(item turnSinkItem) {
 
 func (s *TurnSink) run() {
 	defer close(s.done)
+	defer func() {
+		if r := recover(); r != nil {
+			err := external.RecoveredPanic(s.ctx, s.logger, "acp turn sink", r)
+			s.mu.Lock()
+			s.err = err
+			s.closed = true
+			s.pending = nil
+			s.mu.Unlock()
+			if s.failed != nil {
+				s.failed(err)
+			}
+		}
+	}()
 	for {
 		s.mu.Lock()
 		for len(s.pending) == 0 && !s.closed {
@@ -126,6 +150,9 @@ func (s *TurnSink) Finish() {
 	s.mu.Unlock()
 	<-s.done
 }
+
+// Err returns the delivery failure after the sink finishes.
+func (s *TurnSink) Err() error { s.Finish(); return s.err }
 
 // Transcript is the turn as persisted, once every event has been delivered.
 func (s *TurnSink) Transcript(finalText string) []sdk.Message {

@@ -47,6 +47,7 @@ func (s *Service) startDiscussTurn(runCtx context.Context, cmd turn.StartTurnCom
 	}
 	h := newDiscussHandle(runCtx, cmd, cancel, admission.RunID, s.turnRunFinisher(runCtx, admission, string(cmd.Mode)))
 	h.publishAgentEvent = s.turnAgentEventPublisher(admission.Handle)
+	h.logger = s.logger
 	go s.pumpDiscuss(runCtx, cmd, h)
 	return h, nil
 }
@@ -139,6 +140,7 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		}
 	}()
 	defer h.finish()
+	defer h.containPanic(cmd.BotID, cmd.ThreadID)
 	defer func() {
 		// External cancellation can surface as a cleanly closed agent
 		// stream; record it before cancel() masks the distinction.

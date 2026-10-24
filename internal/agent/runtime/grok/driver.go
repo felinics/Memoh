@@ -412,9 +412,11 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	}
 	out := external.PromptResult{RuntimeMetadata: map[string]any{metadataSessionIDKey: th.session.ID()}}
 
+	ctx, failPrompt := context.WithCancelCause(ctx)
+	defer failPrompt(nil)
 	th.turn.Store(&turnContext{ctx: ctx, input: input})
 	defer th.turn.Store(nil)
-	sink := acpclient.NewTurnSink(input.Sink, input.ToolOutputLimit)
+	sink := acpclient.NewTurnSinkWithFailure(ctx, d.logger, input.Sink, input.ToolOutputLimit, failPrompt)
 	defer sink.Finish()
 	unregisterToolEvents := toolmount.RegisterTurnSink(d.toolGateway.Contexts, input.BotID, input.ThreadID, input.RunID, sink.EmitStreamEvent)
 	defer unregisterToolEvents()
@@ -449,6 +451,12 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		out.RuntimeMetadata[metadataLastPromptIDKey] = promptID
 	}
 	out.Output = sink.Transcript(result.Text)
+	if sinkErr := sink.Err(); sinkErr != nil {
+		return out, sinkErr
+	}
+	if cause := context.Cause(ctx); cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) {
+		return out, cause
+	}
 
 	if err != nil {
 		if ctx.Err() != nil {

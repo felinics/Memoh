@@ -2041,7 +2041,7 @@ func TestPendingDecisionCleanupRunsServicesIndependently(t *testing.T) {
 	pool.SetUserInputService(userInput)
 	done := make(chan struct{})
 	go func() {
-		pool.cancelPendingDecisions(context.Background(), "bot-1", "session-1", "cleanup")
+		_ = pool.cancelPendingDecisions(context.Background(), "bot-1", "session-1", "cleanup")
 		close(done)
 	}()
 
