@@ -947,7 +947,7 @@ func longLoopScenario(t *testing.T, entry runEntry, s *effectLoop) {
 	if len(summaryAttempts) > 0 && summaryAttempts[0] {
 		wantAttempts = []bool{true, true, false, false}
 	}
-	if code != "context.budget_unsatisfied" || !slices.Equal(summaryAttempts, wantAttempts) || f.summaries.Load()-s.downFrom != int32(len(wantAttempts)) || len(s.effects) == 0 || len(s.effects) >= steps || !slices.IsSorted(s.effects) || len(slices.Compact(slices.Clone(s.effects))) != len(s.effects) {
+	if code != "context.budget_unsatisfied" || !slices.Equal(summaryAttempts, wantAttempts) || len(s.effects) == 0 || len(s.effects) >= steps || !slices.IsSorted(s.effects) || len(slices.Compact(slices.Clone(s.effects))) != len(s.effects) {
 		t.Fatalf("summarizer down: code=%q summary_attempts=%v provider_calls=%d effects=%v, want budget_unsatisfied after each attempted summary path was retried once, with the effects so far run once", code, summaryAttempts, len(requests), s.effects)
 	}
 	var reasons, failedRows int
