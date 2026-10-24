@@ -197,7 +197,6 @@
                         <component
                           :is="tab.icon"
                           v-if="tab.icon"
-                          :stroke-width="1.75"
                           class="size-4 shrink-0"
                         />
                         <span class="whitespace-nowrap">{{ $t(tab.label) }}</span>
