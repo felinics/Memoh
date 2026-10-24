@@ -352,6 +352,9 @@
       "update_failed": "The profile could not be updated."
     },
     "provider": {
+      "catalog_source_not_found": "This provider has no public model catalog. Import from its endpoint instead.",
+      "catalog_unavailable": "The model catalog is unavailable. Try again later or import from the provider endpoint.",
+      "managed_readonly": "This provider is managed by the platform. Use its managed catalog sync.",
       "name_taken": "A provider with this name already exists.",
       "not_found": "This provider no longer exists. Refresh the list and choose another one."
     },
@@ -1904,6 +1907,12 @@
     "emptyDescription": "Add one manually, or import the full list from this provider.",
     "managedEmptyDescription": "Authorize the provider, then refresh the managed model catalog.",
     "draftEmptyDescription": "Add one manually, or enter an API key to import the full list from this provider.",
+    "sourcePreviewLoading": "Loading the model list from models.dev…",
+    "sourcePreviewFailed": "models.dev could not be reached",
+    "sourcePreviewFailedDescription": "This provider's models cannot be previewed right now.",
+    "importFromCatalog": "Import from the models.dev catalog",
+    "importFromEndpoint": "List the provider's endpoint",
+    "importFromCatalogHint": "Adds the catalog models you do not have, disabled. Existing models take the catalog's context, output limit and reasoning levels; capabilities that are on stay on, and your reasoning budget, defaults and replay field stay where they still apply. Whether a model is enabled stays as it is, and an empty description is filled from the catalog.",
     "clientType": "Client Type",
     "clientTypePlaceholder": "Select client type",
     "typeRequired": "Type is required",
@@ -1957,8 +1966,6 @@
     "reasoningBudget": "Reasoning budget range",
     "reasoningBudgetMin": "Minimum tokens",
     "reasoningBudgetMax": "Maximum tokens",
-    "reasoningBudgetMaxMin": "The budget maximum must be greater than 0",
-    "reasoningBudgetRange": "The budget minimum must not exceed the maximum",
     "reasoningReplay": "Reasoning replay field",
     "reasoningReplayHint": "For Chat Completions endpoints that need earlier reasoning sent back with tool calls.",
     "reasoningReplayProvider": "Provider default",
@@ -1984,10 +1991,13 @@
     "importFailed": "Failed to import models",
     "refreshModels": "Refresh Models",
     "refreshSuccess": "Model catalog refreshed: {created} added, {updated} updated",
+    "reasoningBudgetMaxMin": "The budget maximum must be greater than 0",
+    "reasoningBudgetRange": "The budget minimum must not exceed the maximum",
     "refreshFailed": "Failed to refresh the model catalog",
     "refreshConfirmHint": "Fetch the latest models available to this account and remove unavailable models from model pickers.",
     "importConfirmHint": "Fetch and import the models currently available from this provider.",
-    "showingCount": "Showing {count} of {total}"
+    "showingCount": "Showing {count} of {total}",
+    "catalogStale": "The model catalog could not be refreshed. Cached model information was used."
   },
   "provider": {
     "add": "Add Provider",

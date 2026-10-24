@@ -19,10 +19,11 @@ The main configuration file is `config.toml` (copied from `conf/app.example.toml
 - `[channel]` — Channel service HTTP/RPC listen addresses (split mode)
 - `[internal_rpc]` — Server↔Channel internal RPC targets and shared secret; empty secret selects the embedded all-in-one mode
 - `[web]` — Web frontend address
-- `[registry]` — Provider registry (`providers_dir` pointing to `conf/providers/`)
+- `[registry]` — Provider registry (`providers_dir` pointing to `conf/providers/`; speech, transcription and video templates only)
+- `[model_catalog]` — Server-owned public model metadata (`url` and `cache_path`); see [Model catalog](model-catalog.md) for cache and Cloud compatibility behavior
 - `[supermarket]` — Supermarket integration (base_url)
 
-Provider YAML templates in `conf/providers/` define preset configurations for various LLM providers (OpenAI, Anthropic, GitHub Copilot, etc.).
+Provider YAML templates in `conf/providers/` define preset configurations for speech, transcription and video providers only. LLM providers come from the hand-written gallery in `apps/web/src/constants/model-sources.ts`; the server fetches, validates, converts and caches their [models.dev](https://models.dev) catalogs. Importing from the provider's own `/models` endpoint remains a separate action. Cloud managed providers retain their authenticated platform catalog.
 
 Configuration templates available in `conf/`:
 - `app.example.toml` — Default template

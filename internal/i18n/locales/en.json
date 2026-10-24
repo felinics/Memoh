@@ -729,6 +729,9 @@
       "update_failed": "The profile could not be updated."
     },
     "provider": {
+      "catalog_source_not_found": "This provider has no public model catalog. Import from its endpoint instead.",
+      "catalog_unavailable": "The model catalog is unavailable. Try again later or import from the provider endpoint.",
+      "managed_readonly": "This provider is managed by the platform. Use its managed catalog sync.",
       "name_taken": "A provider with this name already exists.",
       "not_found": "This provider no longer exists. Refresh the list and choose another one."
     },

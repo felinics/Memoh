@@ -147,7 +147,7 @@ func TestProviderModelListIncludesResolvedReasoning(t *testing.T) {
 	handler := NewProvidersHandler(
 		slog.Default(),
 		providers.NewService(slog.Default(), queries, ""),
-		models.NewService(slog.Default(), queries),
+		models.NewService(slog.Default(), queries), nil,
 	)
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/providers/"+providerID+"/models", nil)

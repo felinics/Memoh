@@ -396,22 +396,28 @@ func (m *Model) Validate() error {
 	if !IsValidModelType(m.Type) {
 		return fieldInvalid("type", ErrInvalidModelType)
 	}
-	if m.Config.MaxOutputTokens != nil && *m.Config.MaxOutputTokens <= 0 {
+	return m.Config.Validate(m.Type)
+}
+
+// Validate checks configuration values for a resolved model type. Catalogs can
+// validate configs before a tenant provider or database model exists.
+func (c ModelConfig) Validate(modelType ModelType) error {
+	if c.MaxOutputTokens != nil && *c.MaxOutputTokens <= 0 {
 		return errors.New("max output tokens must be greater than 0")
 	}
-	if m.Type == ModelTypeEmbedding {
-		if m.Config.Dimensions == nil || *m.Config.Dimensions <= 0 {
+	if modelType == ModelTypeEmbedding {
+		if c.Dimensions == nil || *c.Dimensions <= 0 {
 			return fieldRequired("config.dimensions")
 		}
 	}
-	if m.Config.Modalities != nil {
-		for _, modality := range append(slices.Clone(m.Config.Modalities.Input), m.Config.Modalities.Output...) {
+	if c.Modalities != nil {
+		for _, modality := range append(slices.Clone(c.Modalities.Input), c.Modalities.Output...) {
 			if _, ok := validModalities[modality]; !ok {
 				return fieldInvalid("config.modalities", errors.New("invalid modality: "+string(modality)))
 			}
 		}
 	}
-	if err := validateModelReasoning(m.Config.Reasoning); err != nil {
+	if err := validateModelReasoning(c.Reasoning); err != nil {
 		return err
 	}
 	return nil

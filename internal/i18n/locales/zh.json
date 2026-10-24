@@ -729,6 +729,9 @@
       "update_failed": "个人资料更新失败。"
     },
     "provider": {
+      "catalog_source_not_found": "此服务商没有公共模型目录，请从服务商接口导入。",
+      "catalog_unavailable": "模型目录暂不可用，请稍后重试，或选择从服务商接口导入。",
+      "managed_readonly": "此服务商由平台管理，请使用内置模型同步。",
       "name_taken": "已存在同名提供方。",
       "not_found": "这个服务商已不存在，请刷新列表后重新选择。"
     },

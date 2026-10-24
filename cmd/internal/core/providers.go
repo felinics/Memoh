@@ -85,6 +85,7 @@ import (
 	storefs "github.com/felinics/memoh/internal/memory/storefs"
 	"github.com/felinics/memoh/internal/memory/wikistore"
 	"github.com/felinics/memoh/internal/messaging"
+	"github.com/felinics/memoh/internal/modelcatalog"
 	"github.com/felinics/memoh/internal/models"
 	netctl "github.com/felinics/memoh/internal/network"
 	netoverlay "github.com/felinics/memoh/internal/network/overlay"
@@ -1296,8 +1297,14 @@ func startBackgroundTaskCleanup(lc fx.Lifecycle, mgr *background.Manager) {
 
 // inboundTranscriptionResult moved to the shared Channel module.
 
-func provideProvidersService(log *slog.Logger, queries dbstore.Queries, cfg config.Config) *providers.Service {
-	return providers.NewService(log, queries, defaultProviderOAuthCallbackURL(), cfg.Registry.ProvidersPath())
+func provideProvidersService(log *slog.Logger, queries dbstore.Queries) *providers.Service {
+	return providers.NewService(log, queries, defaultProviderOAuthCallbackURL())
+}
+
+func provideModelCatalog(log *slog.Logger, cfg config.Config) *modelcatalog.Service {
+	return modelcatalog.New(log, modelcatalog.Options{
+		URL: cfg.ModelCatalog.URL, CachePath: cfg.ModelCatalogCachePath(),
+	})
 }
 
 func defaultProviderOAuthCallbackURL() string {

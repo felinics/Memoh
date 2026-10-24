@@ -77,6 +77,7 @@ type Config struct {
 	Postgres              PostgresConfig              `toml:"postgres"`
 	PGVector              PGVectorConfig              `toml:"pgvector"`
 	Registry              RegistryConfig              `toml:"registry"`
+	ModelCatalog          ModelCatalogConfig          `toml:"model_catalog"`
 	Supermarket           SupermarketConfig           `toml:"supermarket"`
 	WorkspaceDependencies WorkspaceDependenciesConfig `toml:"workspace_dependencies"`
 	OAuthClients          OAuthClientsConfig          `toml:"oauth_clients"`
@@ -807,6 +808,21 @@ const DefaultProvidersDir = "conf/providers"
 
 type RegistryConfig struct {
 	ProvidersDir string `toml:"providers_dir"`
+}
+
+// ModelCatalogConfig controls the public metadata source, never a tenant's
+// authenticated model endpoint. Empty values use models.dev and a cache under
+// workspace.data_root/.cache; no credentials belong in this configuration.
+type ModelCatalogConfig struct {
+	URL       string `toml:"url"`
+	CachePath string `toml:"cache_path"`
+}
+
+func (c Config) ModelCatalogCachePath() string {
+	if c.ModelCatalog.CachePath != "" {
+		return absPath(c.ModelCatalog.CachePath)
+	}
+	return filepath.Join(c.Workspace.DataRootPath(), ".cache", "models-dev.json")
 }
 
 // ProvidersPath returns the configured providers directory or the default.

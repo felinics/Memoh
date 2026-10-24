@@ -71,46 +71,26 @@ func TestImportedCompatibilitiesRequireExplicitDefaultsForUnknownModels(t *testi
 	}
 }
 
-func TestPresetMetadataDisablesImplicitCapabilityDefaults(t *testing.T) {
+// A provider made from a former template or preset receives the defaults the
+// caller sends: the template that described its models is gone. The web client
+// sends them only for entries without a models.dev source.
+func TestFormerTemplateProvidersReceiveExplicitDefaults(t *testing.T) {
 	t.Parallel()
 
 	unknown := providers.RemoteModel{ID: "provider-only-model"}
-	provider := providers.GetResponse{
-		Metadata: map[string]any{
-			"preset": map[string]any{"source": "openai.yaml"},
-		},
-	}
-	if got := importedCompatibilities(
-		unknown,
-		models.ModelTypeChat,
-		[]string{models.CompatToolCall, models.CompatReasoning},
-		allowCustomModelCapabilityDefaults(provider),
-	); len(got) != 0 {
-		t.Fatalf("preset mismatch capabilities = %#v, want none", got)
-	}
-
-	custom := providers.GetResponse{}
-	if got := importedCompatibilities(
-		unknown,
-		models.ModelTypeChat,
-		[]string{models.CompatToolCall},
-		allowCustomModelCapabilityDefaults(custom),
-	); len(got) != 1 || got[0] != models.CompatToolCall {
-		t.Fatalf("custom provider defaults = %#v, want explicit default", got)
-	}
-}
-
-func TestProviderTemplateIDDisablesImplicitCapabilityDefaults(t *testing.T) {
-	t.Parallel()
-
-	providersWithTemplates := []providers.GetResponse{
+	for _, provider := range []providers.GetResponse{
 		{ProviderTemplateID: "template-id"},
-		{Metadata: map[string]any{"registry": map[string]any{"source": "deepseek.yaml"}}},
-	}
-	for _, provider := range providersWithTemplates {
-		if allowCustomModelCapabilityDefaults(provider) {
-			t.Fatal("template provider must not receive implicit capability defaults")
+		{Metadata: map[string]any{"preset": map[string]any{"source": "ollama.yaml"}}},
+		{Metadata: map[string]any{"registry": map[string]any{"source": "newapi.yaml"}}},
+		{},
+	} {
+		got := importedCompatibilities(unknown, models.ModelTypeChat, []string{models.CompatToolCall}, allowCustomModelCapabilityDefaults(provider))
+		if len(got) != 1 || got[0] != models.CompatToolCall {
+			t.Fatalf("provider %+v capabilities = %#v, want the explicit default", provider, got)
 		}
+	}
+	if got := importedCompatibilities(unknown, models.ModelTypeChat, nil, true); len(got) != 0 {
+		t.Fatalf("no defaults sent = %#v, want none", got)
 	}
 }
 
@@ -223,6 +203,155 @@ func TestMergeDiscoveredConfigLeavesNonReasoningModelsAlone(t *testing.T) {
 	}
 	if _, changed := mergeManagedDiscoveredConfig(existing, discovered); changed {
 		t.Fatal("a managed non-reasoning model changed on a refresh that discovered nothing new")
+	}
+}
+
+func TestRefreshFromCatalogKeepsTheUsersChoices(t *testing.T) {
+	t.Parallel()
+
+	own := "My notes"
+	window := 200000
+	existing := models.ModelConfig{
+		Description: &own,
+		ToolCall:    false,
+		Reasoning:   &models.ModelReasoning{Efforts: []string{"low"}},
+	}
+	catalogDescription := "Catalog text"
+	catalog := models.ModelConfig{
+		Description:   &catalogDescription,
+		ToolCall:      true,
+		ContextWindow: &window,
+		Modalities:    &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityImage}},
+		Reasoning:     &models.ModelReasoning{Efforts: []string{"low", "high"}, Dialect: reasoning.DialectAdaptive},
+	}
+
+	got, changed := refreshFromCatalog("m", existing, catalog)
+	if !changed || !got.ToolCall || got.ContextWindow == nil || *got.ContextWindow != window || !got.Accepts(models.ModalityImage) {
+		t.Fatalf("refreshed = %+v, changed %v", got, changed)
+	}
+	if got.Description == nil || *got.Description != own {
+		t.Fatalf("description = %v, want the user's", got.Description)
+	}
+	if _, again := refreshFromCatalog("m", got, catalog); again {
+		t.Fatal("a second refresh with the same catalog reported a change")
+	}
+
+	empty, _ := refreshFromCatalog("m", models.ModelConfig{}, catalog)
+	if empty.Description == nil || *empty.Description != catalogDescription {
+		t.Fatalf("description = %v, want the catalog's when the model has none", empty.Description)
+	}
+}
+
+// A gallery provider with a models.dev source imports that source's models, so
+// the models its endpoint lists beyond them are as unknown as a template
+// provider's and must not receive protocol-wide capability guesses. An entry
+// without a source has only its endpoint, and its models get the defaults the
+// gallery sends, as a custom provider's do.
+func TestCatalogSourceDisablesImplicitCapabilityDefaults(t *testing.T) {
+	t.Parallel()
+
+	for _, metadata := range []map[string]any{
+		{"catalog": "openai", "source": "openai"},
+		{"source": "deepinfra"},
+	} {
+		if allowCustomModelCapabilityDefaults(providers.GetResponse{Metadata: metadata}) {
+			t.Fatalf("provider with metadata %v must not receive implicit capability defaults", metadata)
+		}
+	}
+	for _, metadata := range []map[string]any{
+		{"catalog": "ollama"},
+		{"catalog": "new-api"},
+		{"source": " ", "other": "x"},
+	} {
+		if !allowCustomModelCapabilityDefaults(providers.GetResponse{Metadata: metadata}) {
+			t.Fatalf("provider with metadata %v must receive the capability defaults", metadata)
+		}
+	}
+}
+
+// A refresh cannot tell the user's edits from what an earlier import wrote, so
+// it never takes a capability away, and keeps what the edit form tunes while
+// the catalog's controls still use it.
+func TestRefreshFromCatalogKeepsTheUsersEdits(t *testing.T) {
+	t.Parallel()
+
+	minBudget, maxBudget, catalogMax, window := 1024, 8192, 32000, 400000
+	enabled := true
+	existing := models.ModelConfig{
+		ToolCall:   true,
+		Modalities: &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityAudio}, Output: []models.Modality{models.ModalityText}},
+		Reasoning: &models.ModelReasoning{
+			Toggle:  true,
+			Efforts: []string{"low", "medium"},
+			Budget:  &models.ReasoningBudget{Min: &minBudget, Max: &maxBudget},
+			Default: &models.ReasoningDefault{Enabled: &enabled, Effort: "medium"},
+			Replay:  &models.ReasoningReplay{Field: models.ReasoningReplayDetails},
+		},
+	}
+
+	t.Run("budget catalog keeps the user's range", func(t *testing.T) {
+		catalog := models.ModelConfig{
+			ContextWindow: &window,
+			Modalities:    &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityImage}, Output: []models.Modality{models.ModalityText}},
+			Reasoning:     &models.ModelReasoning{Toggle: true, Off: reasoning.OffSupportAccepted, Dialect: reasoning.DialectBudget, Budget: &models.ReasoningBudget{Max: &catalogMax}},
+		}
+		got, changed := refreshFromCatalog("m", existing, catalog)
+		if !changed || !got.ToolCall || !got.Accepts(models.ModalityAudio) || !got.Accepts(models.ModalityImage) ||
+			got.ContextWindow == nil || *got.ContextWindow != window {
+			t.Fatalf("refreshed = %+v, changed %v", got, changed)
+		}
+		r := got.Reasoning
+		if r == nil || r.Dialect != reasoning.DialectBudget || r.Budget == nil || *r.Budget.Max != maxBudget ||
+			r.Default == nil || r.Default.Enabled == nil || r.Default.Effort != "" ||
+			r.Replay == nil || r.Replay.Field != models.ReasoningReplayDetails {
+			t.Fatalf("reasoning = %+v, default %+v", r, r.Default)
+		}
+	})
+
+	t.Run("tier catalog drops what its controls cannot use", func(t *testing.T) {
+		catalog := models.ModelConfig{Reasoning: &models.ModelReasoning{Efforts: []string{"low", "high"}, Dialect: reasoning.DialectTier}}
+		got, _ := refreshFromCatalog("m", existing, catalog)
+		r := got.Reasoning
+		if r == nil || r.Budget != nil || r.Default != nil || !slices.Equal(r.Efforts, []string{"low", "high"}) || r.Replay == nil {
+			t.Fatalf("reasoning = %+v, default %+v", r, r.Default)
+		}
+	})
+
+	t.Run("a catalog without reasoning or tool calling takes nothing away", func(t *testing.T) {
+		kept, _ := refreshFromCatalog("m", existing, models.ModelConfig{ContextWindow: &window})
+		if kept.Reasoning == nil || !kept.ToolCall {
+			t.Fatalf("refreshed = %+v", kept)
+		}
+	})
+}
+
+// Repeated imports of a normalized catalog must not produce spurious updates.
+func TestRefreshFromCatalogIsStableAcrossNormalization(t *testing.T) {
+	t.Parallel()
+
+	catalog := (models.ModelConfig{ToolCall: true, Reasoning: &models.ModelReasoning{Efforts: []string{"", "low", "low", "high"}}}).StoredForm("m")
+	stored, changed := refreshFromCatalog("m", models.ModelConfig{}, catalog)
+	if !changed || stored.Reasoning == nil || !slices.Equal(stored.Reasoning.Efforts, []string{"low", "high"}) {
+		t.Fatalf("first refresh = %+v changed %v", stored, changed)
+	}
+	if _, again := refreshFromCatalog("m", stored, catalog); again {
+		t.Fatal("a second refresh with the same catalog entry reported a change")
+	}
+}
+
+// Create and Update store a config with the dialect its model id implies when
+// the catalog declares none. A refresh must compare against that stored form,
+// or every Claude thinking row reads as changed on every refresh.
+func TestRefreshFromCatalogComparesTheStoredForm(t *testing.T) {
+	t.Parallel()
+
+	catalog := models.ModelConfig{ToolCall: true, Reasoning: &models.ModelReasoning{}}
+	stored := catalog.StoredForm("claude-opus-5-thinking")
+	if stored.Reasoning == nil || stored.Reasoning.Dialect != reasoning.DialectAdaptive {
+		t.Fatalf("stored form = %+v, want the adaptive dialect inferred", stored.Reasoning)
+	}
+	if _, changed := refreshFromCatalog("claude-opus-5-thinking", stored, catalog); changed {
+		t.Fatal("a refresh with the catalog entry the row was created from reported a change")
 	}
 }
 

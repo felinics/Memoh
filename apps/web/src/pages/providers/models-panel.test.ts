@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createApp, h, nextTick } from 'vue'
+import { createApp, h, nextTick, ref } from 'vue'
 import type { Component, Ref, Slots } from 'vue'
 
 const mocks = vi.hoisted(() => ({
@@ -37,7 +37,6 @@ vi.mock('@pinia/colada', async () => {
 vi.mock('@memohai/sdk', () => ({
   getModels: vi.fn(),
   getProviders: vi.fn(),
-  getProviderTemplates: vi.fn(),
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -97,17 +96,42 @@ vi.mock('@felinic/ui', () => {
     InputGroupAddon: Passthrough,
     InputGroupInput: Passthrough,
     Skeleton: (props: { class?: string }) => h('div', { 'data-slot': 'skeleton', class: props.class }),
+    Pagination: {
+      props: ['page', 'total', 'itemsPerPage'],
+      emits: ['update:page'],
+      setup(
+        props: { page: number, total: number, itemsPerPage: number },
+        { slots, emit }: { slots: Slots, emit: (event: 'update:page', page: number) => void },
+      ) {
+        return () => h('nav', {
+          'data-testid': 'pagination',
+          'data-page': String(props.page),
+          'data-pages': String(Math.ceil(props.total / props.itemsPerPage)),
+        }, [
+          h('button', { 'data-testid': 'next-page', 'onClick': () => emit('update:page', props.page + 1) }, 'next'),
+          slots.default?.(),
+        ])
+      },
+    },
+    PaginationContent: (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', slots.default?.({ items: [] })),
+    PaginationEllipsis: Passthrough,
+    PaginationFirst: Passthrough,
+    PaginationItem: Passthrough,
+    PaginationLast: Passthrough,
+    PaginationNext: Passthrough,
+    PaginationPrevious: Passthrough,
   }
 })
 
 vi.mock('@/components/add-provider/index.vue', () => ({
   default: {
-    props: ['open'],
+    props: ['open', 'initialSource'],
     emits: ['update:open'],
-    setup(props: { open?: boolean }) {
+    setup(props: { open?: boolean, initialSource?: string }) {
       return () => h('div', {
         'data-testid': 'add-provider-dialog',
         'data-open': String(props.open ?? false),
+        'data-initial-source': props.initialSource ?? '',
       })
     },
   },
@@ -119,7 +143,7 @@ vi.mock('./model-setting.vue', () => ({
     props: ['provider'],
     emits: ['materialized'],
     setup(
-      props: { provider?: { id?: string, name?: string, provider_template_id?: string } },
+      props: { provider?: { id?: string, name?: string, provider_template_id?: string, metadata?: Record<string, unknown> } },
       { emit }: { emit: (event: 'materialized', provider: Record<string, unknown>) => void },
     ) {
       return () => h('div', { 'data-testid': 'provider-detail' }, [
@@ -130,6 +154,9 @@ vi.mock('./model-setting.vue', () => ({
             id: 'provider-anthropic',
             name: props.provider?.name,
             provider_template_id: props.provider?.provider_template_id,
+            // The created provider records the draft's entry, which takes the
+            // entry off the gallery before the route moves.
+            metadata: props.provider?.metadata,
           }),
         }),
       ])
@@ -139,14 +166,19 @@ vi.mock('./model-setting.vue', () => ({
 
 let ModelsPanel: Component
 
-async function mountPage() {
+async function mountPage(searchQuery = '') {
   const root = document.createElement('div')
   document.body.append(root)
   // The container page owns the search box; the panel only receives its query.
-  const app = createApp(ModelsPanel, { searchQuery: '' })
+  const query = ref(searchQuery)
+  const app = createApp({ render: () => h(ModelsPanel, { searchQuery: query.value }) })
   app.mount(root)
   await nextTick()
-  return { app, root }
+  return { app, root, query }
+}
+
+function cardNames(root: Element) {
+  return [...root.querySelectorAll('[data-provider]')].map(card => card.getAttribute('data-provider'))
 }
 
 describe('models panel route state', () => {
@@ -169,10 +201,10 @@ describe('models panel route state', () => {
     document.body.innerHTML = ''
   })
 
-  it.each(['providers', 'templates'] as const)('keeps cached cards mounted while %s refresh', async (source) => {
+  it.each(['providers'] as const)('keeps cached cards mounted while %s refresh', async (source) => {
     const { app, root } = await mountPage()
     const cards = [...root.querySelectorAll('[data-provider]')]
-    expect(cards).toHaveLength(2)
+    expect(cardNames(root).slice(0, 2)).toEqual(['One', 'Two'])
 
     const loading = source === 'providers' ? mocks.providersLoading : mocks.templatesLoading
     loading.value = true
@@ -186,7 +218,7 @@ describe('models panel route state', () => {
     app.unmount()
   })
 
-  it.each(['providers', 'templates'] as const)('waits for unresolved %s before showing cards', async (source) => {
+  it.each(['providers'] as const)('waits for unresolved %s before showing cards', async (source) => {
     const data = source === 'providers' ? mocks.providerData : mocks.templateData
     const loading = source === 'providers' ? mocks.providersLoading : mocks.templatesLoading
     data.value = undefined
@@ -204,16 +236,16 @@ describe('models panel route state', () => {
   })
 
   it('leaves the skeleton when an initial request fails without data', async () => {
-    mocks.templateData.value = undefined
-    mocks.templatesLoading.value = true
+    mocks.providerData.value = undefined
+    mocks.providersLoading.value = true
     const { app, root } = await mountPage()
     expect(root.querySelector('[data-slot="skeleton"]')).not.toBeNull()
 
     // A rejected query returns to idle and keeps its data undefined.
-    mocks.templatesLoading.value = false
+    mocks.providersLoading.value = false
     await nextTick()
     expect(root.querySelector('[data-slot="skeleton"]')).toBeNull()
-    expect(root.querySelectorAll('[data-provider]')).toHaveLength(2)
+    expect(cardNames(root)).toContain('302.AI')
     app.unmount()
   })
 
@@ -266,41 +298,28 @@ describe('models panel route state', () => {
     app.unmount()
   })
 
-  it('opens an unconfigured template as a draft detail without opening the add dialog', async () => {
-    mocks.templateData.value = [{
-      id: 'template-anthropic',
-      name: 'Anthropic',
-      driver: 'anthropic-messages',
-      default_config: { base_url: 'https://api.anthropic.com' },
-      configured: false,
-    }]
-    const { app, root } = await mountPage()
+  it('opens a source as a draft detail without opening the add dialog', async () => {
+    const { app, root } = await mountPage('anthropic')
 
     ;(root.querySelector('[data-provider="Anthropic"]') as HTMLButtonElement).click()
     await nextTick()
 
-    expect(mocks.replace).toHaveBeenCalledWith({ query: { provider: 'template:template-anthropic' } })
+    expect(mocks.replace).toHaveBeenCalledWith({ query: { provider: 'source:anthropic' } })
     expect(root.querySelector('[data-testid="provider-detail"]')?.textContent).toBe('undefined:Anthropic')
     expect(root.querySelector('[data-testid="add-provider-dialog"]')).toBeNull()
     app.unmount()
   })
 
-  it('keeps the template route and detail open after the draft is materialized', async () => {
-    mocks.templateData.value = [{
-      id: 'template-anthropic',
-      name: 'Anthropic',
-      driver: 'anthropic-messages',
-      default_config: { base_url: 'https://api.anthropic.com' },
-      configured: false,
-    }]
-    const { app, root } = await mountPage()
+  it('moves the route to the provider once a draft is created', async () => {
+    const { app, root } = await mountPage('anthropic')
 
     ;(root.querySelector('[data-provider="Anthropic"]') as HTMLButtonElement).click()
     await nextTick()
     ;(root.querySelector('[data-testid="materialize-provider"]') as HTMLButtonElement).click()
     await nextTick()
 
-    expect(mocks.replace).toHaveBeenLastCalledWith({ query: { provider: 'template:template-anthropic' } })
+    expect(mocks.replace).toHaveBeenLastCalledWith({ query: { provider: 'provider-anthropic' } })
+    expect(mocks.replace).not.toHaveBeenCalledWith({ query: {} })
     expect(root.querySelector('[data-testid="provider-detail"]')?.textContent).toContain('provider-anthropic:Anthropic')
     app.unmount()
   })
@@ -312,6 +331,58 @@ describe('models panel route state', () => {
 
     expect(mocks.replace).toHaveBeenCalledWith({ query: { tab: 'kept' } })
     expect(root.querySelector('[data-testid="provider-detail"]')).toBeNull()
+    app.unmount()
+  })
+
+  it('offers models.dev sources after the configured providers, a page at a time', async () => {
+    const { app, root } = await mountPage()
+
+    const names = cardNames(root)
+    expect(names).toHaveLength(20)
+    expect(names.slice(0, 2)).toEqual(['One', 'Two'])
+    expect(names).toContain('above.dev')
+    const pagination = root.querySelector('[data-testid="pagination"]')
+    expect(Number(pagination?.getAttribute('data-pages'))).toBeGreaterThan(5)
+
+    ;(root.querySelector('[data-testid="next-page"]') as HTMLButtonElement).click()
+    await nextTick()
+    expect(cardNames(root)).not.toContain('One')
+    expect(cardNames(root)).toHaveLength(20)
+    app.unmount()
+  })
+
+  it('leaves out entries a provider already uses, by any route it was made', async () => {
+    mocks.providerData.value = [
+      { id: 'from-source', name: 'My DeepSeek', enable: true, metadata: { catalog: 'deepseek', source: 'deepseek' } },
+      { id: 'from-template', name: 'My Groq', enable: true, metadata: { registry: { source: 'groq.yaml' } } },
+      { id: 'from-preset', name: 'My Mistral', enable: true, metadata: { preset: { source: 'mistral.yaml' } } },
+      { id: 'from-entry', name: 'My Ollama', enable: true, metadata: { catalog: 'ollama' } },
+    ]
+    const { app, root } = await mountPage('')
+    const all: string[] = []
+    let guard = 0
+    while (guard++ < 20) {
+      all.push(...cardNames(root).map(String))
+      const pagination = root.querySelector('[data-testid="pagination"]')
+      if (Number(pagination?.getAttribute('data-page')) >= Number(pagination?.getAttribute('data-pages'))) break
+      ;(root.querySelector('[data-testid="next-page"]') as HTMLButtonElement).click()
+      await nextTick()
+    }
+    for (const name of ['DeepSeek', 'Groq', 'Mistral', 'Ollama']) expect(all).not.toContain(name)
+    expect(all).toContain('OpenAI')
+    expect(all).toContain('OpenAI Codex')
+    app.unmount()
+  })
+
+  it('filters sources by search and returns to the first page', async () => {
+    const { app, root, query } = await mountPage()
+    ;(root.querySelector('[data-testid="next-page"]') as HTMLButtonElement).click()
+    await nextTick()
+
+    query.value = 'deepseek'
+    await nextTick()
+    expect(cardNames(root)).toEqual(['DeepSeek'])
+    expect(root.querySelector('[data-testid="pagination"]')).toBeNull()
     app.unmount()
   })
 })

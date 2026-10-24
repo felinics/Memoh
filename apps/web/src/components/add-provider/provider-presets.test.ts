@@ -28,9 +28,13 @@ describe('provider preset helpers', () => {
     expect(deepseek?.source).toBe('deepseek.yaml')
     expect(zai?.source).toBe('zai.yaml')
     expect(perplexity?.source).toBe('perplexity.yaml')
-    expect(perplexity?.icon).toBe('perplexity-color')
     expect(cerebras?.source).toBe('cerebras.yaml')
-    expect(cerebras?.icon).toBe('cerebras-color')
+  })
+
+  it('leaves model provider logos to models.dev', () => {
+    const llm = providerPresets.filter(preset => (preset.domain ?? 'llm') === 'llm')
+    expect(llm.length).toBeGreaterThan(0)
+    for (const preset of llm) expect(preset.icon, preset.id).toBeUndefined()
   })
 
   it('suggests a unique provider instance name for repeat preset accounts', () => {

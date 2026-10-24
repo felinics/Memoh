@@ -31,6 +31,7 @@
           size="sm"
           :mode="(models?.length ?? 0) > 0 ? 'refresh' : 'import'"
           :client-type="clientType"
+          :source="source"
         />
         <CreateModel
           v-if="!managed"
@@ -38,11 +39,20 @@
           :ensure-provider-id="ensureProviderId"
           :client-type="clientType"
           size="sm"
+          @created="(modelId: string) => $emit('created', modelId)"
+          @closed="$emit('add-closed')"
         />
       </div>
     </div>
 
-    <template v-if="models && models.length > 0">
+    <InlineLoadingRow
+      v-if="previewLoading"
+      surface="card-row"
+    >
+      {{ $t('models.sourcePreviewLoading') }}
+    </InlineLoadingRow>
+
+    <template v-if="!previewLoading && models && models.length > 0">
       <div
         v-if="displayedModels.length > 0"
         class="pb-2"
@@ -54,6 +64,7 @@
           :delete-loading="deleteModelLoading"
           :search-aligned="searchVisible"
           :managed="managed"
+          :preview="preview"
           @edit="(model) => $emit('edit', model)"
           @delete="(id) => $emit('delete', id)"
         />
@@ -111,7 +122,7 @@
     </template>
 
     <Empty
-      v-else
+      v-else-if="!previewLoading"
       class="flex flex-col items-center justify-center px-4 py-10"
     >
       <EmptyHeader>
@@ -119,12 +130,18 @@
           <List />
         </EmptyMedia>
       </EmptyHeader>
-      <EmptyTitle>{{ $t('models.emptyTitle') }}</EmptyTitle>
-      <EmptyDescription>
-        {{ $t(managed
-          ? 'models.managedEmptyDescription'
-          : providerId ? 'models.emptyDescription' : 'models.draftEmptyDescription') }}
-      </EmptyDescription>
+      <template v-if="previewError">
+        <EmptyTitle>{{ $t('models.sourcePreviewFailed') }}</EmptyTitle>
+        <EmptyDescription>{{ $t('models.sourcePreviewFailedDescription') }}</EmptyDescription>
+      </template>
+      <template v-else>
+        <EmptyTitle>{{ $t('models.emptyTitle') }}</EmptyTitle>
+        <EmptyDescription>
+          {{ $t(managed
+            ? 'models.managedEmptyDescription'
+            : providerId ? 'models.emptyDescription' : 'models.draftEmptyDescription') }}
+        </EmptyDescription>
+      </template>
     </Empty>
   </SettingsSection>
 </template>
@@ -134,6 +151,7 @@ import { ref, computed, watch } from 'vue'
 import {
   Empty,
   EmptyDescription,
+  InlineLoadingRow,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
@@ -164,12 +182,21 @@ const props = defineProps<{
   deleteModelLoading: boolean
   managed?: boolean
   clientType?: string
+  // models.dev provider the models are imported from.
+  source?: string
+  // The models are a read-only preview of the source's catalog.
+  preview?: boolean
+  previewLoading?: boolean
+  // The preview could not be read from models.dev.
+  previewError?: boolean
   ensureProviderId?: () => Promise<string>
 }>()
 
 defineEmits<{
   edit: [model: ModelsGetResponse]
   delete: [id: string]
+  created: [modelId: string]
+  'add-closed': []
 }>()
 
 const searchQuery = ref('')

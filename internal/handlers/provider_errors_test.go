@@ -66,7 +66,7 @@ func TestCreateProviderAnswersNameTakenForADuplicateName(t *testing.T) {
 		Config:   []byte(`{"api_key":"sk-configured"}`),
 		Metadata: []byte(`{}`),
 	}}
-	h := NewProvidersHandler(slog.New(slog.DiscardHandler), providers.NewService(nil, queries, ""), nil)
+	h := NewProvidersHandler(slog.New(slog.DiscardHandler), providers.NewService(nil, queries, ""), nil, nil)
 	status, problem := serveProblem(t, h.Register, http.MethodPost, "/providers", `{"name":"openai","client_type":"openai-completions"}`)
 	if status != http.StatusConflict || problem.Code != string(apperror.CodeProviderNameTaken) || problem.Fault != "client" {
 		t.Fatalf("answer = %d %+v, want 409 %s client", status, problem, apperror.CodeProviderNameTaken)
@@ -95,7 +95,7 @@ func TestUpdateProviderAnswersNameTakenForADuplicateName(t *testing.T) {
 		Config:     []byte(`{"api_key":"sk-configured"}`),
 		Metadata:   []byte(`{}`),
 	}}
-	h := NewProvidersHandler(slog.New(slog.DiscardHandler), providers.NewService(nil, queries, ""), nil)
+	h := NewProvidersHandler(slog.New(slog.DiscardHandler), providers.NewService(nil, queries, ""), nil, nil)
 	status, problem := serveProblem(t, h.Register, http.MethodPut, "/providers/00000000-0000-0000-0000-000000000001", `{"name":"openai"}`)
 	if status != http.StatusConflict || problem.Code != string(apperror.CodeProviderNameTaken) || problem.Fault != "client" {
 		t.Fatalf("answer = %d %+v, want 409 %s client", status, problem, apperror.CodeProviderNameTaken)
@@ -164,7 +164,7 @@ func TestProviderTemplateFailuresAnswerTheirCodes(t *testing.T) {
 			log := slog.New(slog.DiscardHandler)
 			register := func(e *echo.Echo) {
 				NewProviderTemplatesHandler(providertemplates.NewService(log, tc.queries)).Register(e)
-				NewProvidersHandler(log, providers.NewService(log, tc.queries, ""), nil).Register(e)
+				NewProvidersHandler(log, providers.NewService(log, tc.queries, ""), nil, nil).Register(e)
 			}
 			status, problem := serveProblem(t, register, tc.method, tc.target, tc.body)
 			if status != tc.status || problem.Code != string(tc.code) || problem.Fault != tc.fault {
