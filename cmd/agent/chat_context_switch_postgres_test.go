@@ -50,27 +50,30 @@ type execInput struct {
 	Command string `json:"command"`
 }
 
-// runEntry is one way a native run starts. The entries that fold are the
-// in-run compaction coverage set; the others are declared outside it and must
-// still end in a bounded, visible way. extra counts the provider calls a run
-// makes before its first effect besides the first one.
+// runEntry is one way a native run starts; every entry folds in place. extra
+// counts the provider calls a run makes before its first effect besides the
+// first one.
 type runEntry struct {
 	name  string
-	folds bool
 	extra int
 	send  func(s *effectLoop, text string) string
 }
 
 var runEntries = []runEntry{
-	{name: "web", folds: true, send: (*effectLoop).chat},
-	{name: "im", folds: true, send: (*effectLoop).chat},
-	{name: "trigger", folds: true, send: (*effectLoop).trigger},
-	{name: "follow-up", folds: true, send: (*effectLoop).followUp},
-	{name: "approval", folds: true, extra: 1, send: (*effectLoop).decision},
-	{name: "ask-user", folds: true, extra: 1, send: (*effectLoop).decision},
-	{name: "retry", folds: true, send: (*effectLoop).retry},
-	{name: "edit", folds: true, send: (*effectLoop).edit},
-	{name: "discuss", folds: true, send: (*effectLoop).discuss},
+	{name: "web", send: (*effectLoop).chat},
+	{name: "im", send: (*effectLoop).chat},
+	{name: "trigger", send: (*effectLoop).trigger},
+	{name: "follow-up", send: (*effectLoop).followUp},
+	{name: "approval", extra: 1, send: (*effectLoop).decision},
+	{name: "ask-user", extra: 1, send: (*effectLoop).decision},
+	{name: "retry", send: (*effectLoop).retry},
+	{name: "edit", send: (*effectLoop).edit},
+	{name: "discuss", send: (*effectLoop).discuss},
+}
+
+// runEntryNamed is the entry called name.
+func runEntryNamed(name string) runEntry {
+	return runEntries[slices.IndexFunc(runEntries, func(e runEntry) bool { return e.name == name })]
 }
 
 // effectLoop scripts the provider for one native run at a time: the run whose
@@ -427,33 +430,32 @@ func (s *effectLoop) lastRunCode(runs int) string {
 // retry answers text from the web UI, then retries that turn the way the
 // Web client does.
 func (s *effectLoop) retry(text string) string {
-	return s.replace(text, s.retryLatest)
+	return s.replace(text, s.replacement(""))
 }
 
 // edit answers a draft from the web UI, then edits that turn into text.
 func (s *effectLoop) edit(text string) string {
-	return s.replace("DRAFT_BEFORE_EDIT", s.editLatest(text))
+	return s.replace("DRAFT_BEFORE_EDIT", s.replacement(text))
 }
 
-func (s *effectLoop) retryLatest(ctx context.Context, admission sessionruntime.Admission, target string, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) (application.RunOutcome, error) {
-	f, position := s.f, admission.TurnPosition
-	return f.service.RetryLatestMessageWS(ctx, application.RetryLatestMessageInput{
-		BotID: f.botID, SessionID: f.sessionID, RunID: admission.RunID, TurnID: admission.TurnID, TurnPosition: &position,
-		TargetTurnID: target, ActorChannelIdentityID: f.ownerUserID, ActorUserID: f.ownerUserID, RunHandle: admission.Handle,
-	}, eventCh, abortCh)
-}
+type replaceTurn func(context.Context, sessionruntime.Admission, string, chan<- application.WSStreamEvent, <-chan struct{}) (application.RunOutcome, error)
 
-func (s *effectLoop) editLatest(text string) replaceTurn {
+// replacement retries the target turn, or edits it into text when text is set.
+func (s *effectLoop) replacement(text string) replaceTurn {
 	return func(ctx context.Context, admission sessionruntime.Admission, target string, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) (application.RunOutcome, error) {
 		f, position := s.f, admission.TurnPosition
+		if text == "" {
+			return f.service.RetryLatestMessageWS(ctx, application.RetryLatestMessageInput{
+				BotID: f.botID, SessionID: f.sessionID, RunID: admission.RunID, TurnID: admission.TurnID, TurnPosition: &position,
+				TargetTurnID: target, ActorChannelIdentityID: f.ownerUserID, ActorUserID: f.ownerUserID, RunHandle: admission.Handle,
+			}, eventCh, abortCh)
+		}
 		return f.service.EditLatestMessageWS(ctx, application.EditLatestMessageInput{
 			BotID: f.botID, SessionID: f.sessionID, RunID: admission.RunID, TurnID: admission.TurnID, TurnPosition: &position,
 			TargetTurnID: target, Text: text, ActorChannelIdentityID: f.ownerUserID, ActorUserID: f.ownerUserID, RunHandle: admission.Handle,
 		}, eventCh, abortCh)
 	}
 }
-
-type replaceTurn func(context.Context, sessionruntime.Admission, string, chan<- application.WSStreamEvent, <-chan struct{}) (application.RunOutcome, error)
 
 // replace answers first from the web UI, then replaces that turn through
 // start.
@@ -551,15 +553,11 @@ var inRunScenarios = []inRunScenario{
 }
 
 // TestPostgresInRunCompactionByEntry runs every headline scenario through
-// every entry that folds; the entries outside the coverage set run the long
-// loop only, to show they end bounded.
+// every entry; the decision scenarios need an entry that decides.
 func TestPostgresInRunCompactionByEntry(t *testing.T) {
 	for _, entry := range runEntries {
 		for _, scenario := range inRunScenarios {
 			if strings.HasPrefix(scenario.name, "decision-") && entry.name != "approval" && entry.name != "ask-user" {
-				continue
-			}
-			if !entry.folds && scenario.name != "long-loop" {
 				continue
 			}
 			t.Run(entry.name+"/"+scenario.name, func(t *testing.T) {
@@ -578,11 +576,8 @@ func TestPostgresInRunCompactionByEntry(t *testing.T) {
 // compacting.
 func TestPostgresReplacingACompactedTurnFoldsAgain(t *testing.T) {
 	const steps = 14
-	web := runEntries[0]
-	for name, replace := range map[string]func(*effectLoop) replaceTurn{
-		"retry": func(s *effectLoop) replaceTurn { return s.retryLatest },
-		"edit":  func(s *effectLoop) replaceTurn { return s.editLatest(loopInput) },
-	} {
+	web := runEntryNamed("web")
+	for name, edit := range map[string]string{"retry": "", "edit": loopInput} {
 		t.Run(name, func(t *testing.T) {
 			s := newEffectLoop(t, web)
 			f := s.f
@@ -606,7 +601,7 @@ func TestPostgresReplacingACompactedTurnFoldsAgain(t *testing.T) {
 			for i := range want {
 				want[i] = i + 1
 			}
-			if code := s.replaceLatest(replace(s)); code != "" || !slices.Equal(s.effects, want) || f.summaries.Load() == summaries {
+			if code := s.replaceLatest(s.replacement(edit)); code != "" || !slices.Equal(s.effects, want) || f.summaries.Load() == summaries {
 				t.Fatalf("replacement: code=%q effects=%v summary_calls=%d, want every effect once on a summary of its own", code, s.effects, f.summaries.Load()-summaries)
 			}
 			var active, coveredHidden int
@@ -796,16 +791,14 @@ func prefixFullScenario(t *testing.T, entry runEntry, s *effectLoop) {
 }
 
 // A tool loop that outgrows the model window keeps going on one rolling
-// summary in every entry of the coverage set: each effect runs once, each
-// event folds everything before the latest step in one summarizer call that
-// is told the run's input, requests between events only grow, the input and
-// the latest results stay verbatim, a row written into the session by someone else is left alone,
-// and the next turn renders the summary the run sent at the same place
-// without compacting again. When the summarizer is down the
-// loop ends visibly with budget_unsatisfied after one retry, keeps the steps
-// it committed, and the next turn is answered once the summarizer is back.
-// The entries outside the set never fold: they end bounded, without
-// replaying an effect, and the next turn is answered.
+// summary in every entry: each effect runs once, each event folds everything
+// before the latest step in one summarizer call that is told the run's input,
+// requests between events only grow, the input and the latest results stay
+// verbatim, a row written into the session by someone else is left alone, and
+// the next turn renders the summary the run sent at the same place without
+// compacting again. When the summarizer is down the loop ends visibly with
+// budget_unsatisfied after one retry, keeps the steps it committed, and the
+// next turn is answered once the summarizer is back.
 func longLoopScenario(t *testing.T, entry runEntry, s *effectLoop) {
 	const steps = 14
 	f := s.f
@@ -819,31 +812,6 @@ func longLoopScenario(t *testing.T, entry runEntry, s *effectLoop) {
 	code, requests := s.run(entry, loopInput, steps)
 	f.onSummary = nil
 	s.foreignAt = 0
-	if !entry.folds {
-		if f.summaries.Load() != summaries || code != "context.budget_unsatisfied" || len(s.effects) == 0 || !slices.IsSorted(s.effects) || len(slices.Compact(slices.Clone(s.effects))) != len(s.effects) || len(s.effects) >= steps {
-			t.Fatalf("outside the coverage set: code=%q summary_calls=%d effects=%v, want no fold, a bounded end and no replayed effect", code, f.summaries.Load()-summaries, s.effects)
-		}
-		var previous []string
-		for i, request := range requests {
-			messages := requestMessages(t, request)
-			if strings.Contains(request, "[tool result pruned") || len(messages) < len(previous) || !slices.Equal(previous, messages[:len(previous)]) {
-				t.Fatalf("request %d changed previously sent messages before failing closed", i+1)
-			}
-			previous = messages
-		}
-		t.Logf("code=%q provider_calls=%d effects=%d first_kept_in_last_request=%d", code, len(requests), len(s.effects), firstKept(requests[len(requests)-1], steps))
-		code, next := s.run(entry, "NEXT_ROUND_QUESTION", 0)
-		if code != "" {
-			t.Fatalf("next turn after the loop failed with %s", code)
-		}
-		if len(s.effects) != 0 || len(next) != 1 {
-			t.Fatalf("next turn: effects=%v requests=%d, want one answer without replaying effects", s.effects, len(next))
-		}
-		if entry.name == "discuss" && (f.summaries.Load() == summaries || strings.Count(next[0], loopInput) != 1 || strings.Count(next[0], "NEXT_ROUND_QUESTION") != 1) {
-			t.Fatal("Discuss must compact completed steps while retaining both unanswered inputs verbatim")
-		}
-		return
-	}
 	want := make([]int, steps)
 	for i := range want {
 		want[i] = i + 1

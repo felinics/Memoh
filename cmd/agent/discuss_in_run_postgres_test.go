@@ -1,7 +1,6 @@
 package main
 
 import (
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +14,7 @@ import (
 // starts after the answer instead of answering the batch again.
 func TestPostgresDiscussAnswerProvesItsBatchConsumed(t *testing.T) {
 	const steps = 14
-	entry := runEntries[slices.IndexFunc(runEntries, func(e runEntry) bool { return e.name == "discuss" })]
+	entry := runEntryNamed("discuss")
 	s := newEffectLoop(t, entry)
 	f := s.f
 	if code, _ := s.run(entry, loopInput, steps); code != "" || f.summaries.Load() == 0 || len(s.effects) != steps {
@@ -49,7 +48,7 @@ func TestPostgresDiscussAnswerProvesItsBatchConsumed(t *testing.T) {
 // input the run failed on together with the message that arrived during it.
 func TestPostgresDiscussRunFailingAfterAFoldLeavesLaterInputUnconsumed(t *testing.T) {
 	const steps, arrival = 14, "ARRIVED_DURING_THE_RUN"
-	entry := runEntries[slices.IndexFunc(runEntries, func(e runEntry) bool { return e.name == "discuss" })]
+	entry := runEntryNamed("discuss")
 	s := newEffectLoop(t, entry)
 	f := s.f
 	s.arrival, s.arriveAt, s.downAt = arrival, 2, 8
@@ -76,21 +75,7 @@ func TestPostgresDiscussRunFailingAfterAFoldLeavesLaterInputUnconsumed(t *testin
 	f.failSummary.Store(false)
 	s.arriveAt, s.downAt, s.marker, s.effects = 0, 0, "", nil
 	f.restartDriver()
-	calls := f.modelCalls.Load()
-	f.driver.NotifyRC(f.ctx, f.sessionID, f.rc, f.cfg)
-	select {
-	case position := <-f.cursor.advanced:
-		if position != timeline.ConsumedDiscussCursor(f.rc) {
-			t.Fatalf("cursor did not consume the batch: %+v", position)
-		}
-	case code := <-f.broadcaster.failures:
-		t.Fatalf("after the restart the batch failed with %s", code)
-	case <-time.After(15 * time.Second):
-		t.Fatal("after the restart no run answered the input the failed run left unconsumed")
-	}
-	request, _ := f.lastRequest.Load().(string)
-	if f.modelCalls.Load()-calls != 1 || strings.Count(request, loopInput) != 1 || strings.Count(request, arrival) != 1 || len(s.effects) != 0 {
-		t.Fatalf("provider calls=%d input=%d arrival=%d effects=%v, want one answer carrying both inputs once without replaying an effect",
-			f.modelCalls.Load()-calls, strings.Count(request, loopInput), strings.Count(request, arrival), s.effects)
+	if request := f.answer("after the restart", arrival); strings.Count(request, loopInput) != 1 || len(s.effects) != 0 {
+		t.Fatalf("input=%d effects=%v, want the answer to carry the failed run's input once without replaying an effect", strings.Count(request, loopInput), s.effects)
 	}
 }

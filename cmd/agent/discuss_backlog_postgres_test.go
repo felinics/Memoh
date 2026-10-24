@@ -178,8 +178,7 @@ func newBacklogFixture(t *testing.T) *backlogFixture {
 	f.service = service
 	f.cursor = &notifyingRecoveryCursor{EventStore: timeline.NewEventStore(logger, queries), advanced: make(chan timeline.DiscussCursorPosition, 4)}
 	f.broadcaster = &recordingFailureBroadcaster{failures: make(chan string, 16)}
-	f.driver = discuss.NewDiscussDriver(discuss.DiscussDriverDeps{Turn: service, CursorStore: f.cursor, MessageService: f.messages, Artifacts: compaction.NewTimelineArtifactSource(queries), Broadcaster: f.broadcaster, AdmissionMaxTokens: 16000, Logger: logger})
-	t.Cleanup(f.driver.StopAll)
+	f.startDriver()
 	f.cfg = discuss.DiscussSessionConfig{BotID: f.botID, ThreadID: f.sessionID, TeamID: teamID}
 	return f
 }
@@ -218,13 +217,18 @@ func (f *backlogFixture) deliver(ctx context.Context, id, text string, created t
 	return timeline.RenderedSegment{MessageID: id, LastEventCursor: event.(timeline.MessageEvent).EventCursor, ReceivedAtMs: created.UnixMilli(), Content: []timeline.RenderedContentPiece{{Type: "text", Text: text}}}, nil
 }
 
-// restartDriver replaces the Discuss driver with a fresh one, the way a
-// worker comes back after a restart or an idle eviction: it knows only what
-// the cursor store and the history hold.
-func (f *backlogFixture) restartDriver() {
-	f.driver.StopAll()
+// startDriver starts a Discuss driver that knows only what the cursor store
+// and the history hold.
+func (f *backlogFixture) startDriver() {
 	f.driver = discuss.NewDiscussDriver(discuss.DiscussDriverDeps{Turn: f.service, CursorStore: f.cursor, MessageService: f.messages, Artifacts: compaction.NewTimelineArtifactSource(postgresstore.NewQueriesWithPool(f.pool, sqlc.New(f.pool))), Broadcaster: f.broadcaster, AdmissionMaxTokens: 16000, Logger: slog.Default()})
 	f.t.Cleanup(f.driver.StopAll)
+}
+
+// restartDriver replaces the Discuss driver with a fresh one, the way a
+// worker comes back after a restart or an idle eviction.
+func (f *backlogFixture) restartDriver() {
+	f.driver.StopAll()
+	f.startDriver()
 }
 
 // trigger notifies the driver and reports the failure code, or "" when the

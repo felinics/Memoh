@@ -29,13 +29,23 @@ type fakeAgentStreamer struct {
 	lastConfig *native.RunConfig
 }
 
-type silentDiscussAgentStreamer struct{}
+// silentDiscussAgentStreamer waits to be cancelled, then aborts stopAfter
+// later, as a tool that ignores cancellation would. With partial it first
+// emits one text delta.
+type silentDiscussAgentStreamer struct {
+	partial   bool
+	stopAfter time.Duration
+}
 
-func (*silentDiscussAgentStreamer) Stream(ctx context.Context, _ native.RunConfig) <-chan native.StreamEvent {
-	ch := make(chan native.StreamEvent, 1)
+func (f *silentDiscussAgentStreamer) Stream(ctx context.Context, _ native.RunConfig) <-chan native.StreamEvent {
+	ch := make(chan native.StreamEvent, 2)
 	go func() {
 		defer close(ch)
+		if f.partial {
+			ch <- native.StreamEvent{Type: native.EventTextDelta, Delta: "partial"}
+		}
 		<-ctx.Done()
+		time.Sleep(f.stopAfter)
 		ch <- native.StreamEvent{Type: native.EventAgentAbort, Messages: json.RawMessage(`[]`)}
 	}()
 	return ch
@@ -546,28 +556,11 @@ func TestAdmittedDiscussSilencePublishesStableTimeoutFailure(t *testing.T) {
 	}
 }
 
-// slowStopDiscussAgentStreamer emits one event, then takes longer than the
-// idle timeout to stop once cancelled, as a tool that ignores cancellation
-// would.
-type slowStopDiscussAgentStreamer struct{ stopAfter time.Duration }
-
-func (f *slowStopDiscussAgentStreamer) Stream(ctx context.Context, _ native.RunConfig) <-chan native.StreamEvent {
-	ch := make(chan native.StreamEvent, 1)
-	go func() {
-		defer close(ch)
-		ch <- native.StreamEvent{Type: native.EventTextDelta, Delta: "partial"}
-		<-ctx.Done()
-		time.Sleep(f.stopAfter)
-		ch <- native.StreamEvent{Type: native.EventAgentAbort, Messages: json.RawMessage(`[]`)}
-	}()
-	return ch
-}
-
 // A run whose events can no longer be published ends on that failure, once,
 // even when the engine outlasts the idle timeout while it stops.
 func TestAdmittedDiscussPublishFailureOutlastingIdleTimeoutIsNotATimeout(t *testing.T) {
 	resolver := &fakeDiscussService{resolveResult: ResolveRunConfigResult{ModelID: "model-1"}}
-	service := newDiscussTestService(&fakeRunner{}, &slowStopDiscussAgentStreamer{stopAfter: 100 * time.Millisecond}, resolver)
+	service := newDiscussTestService(&fakeRunner{}, &silentDiscussAgentStreamer{partial: true, stopAfter: 100 * time.Millisecond}, resolver)
 	service.streamIdleTimeout = 10 * time.Millisecond
 	runtime, _ := configureDiscussLifecycle(service)
 	var published []native.StreamEventType
