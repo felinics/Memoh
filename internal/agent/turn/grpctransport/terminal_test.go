@@ -30,7 +30,7 @@ func TestRunTerminalCrossesTransport(t *testing.T) {
 	client, cleanup := newTestClient(t, &scriptedService{handle: &terminalHandle{scriptedHandle{events: events, errs: errs}}}, "secret")
 	defer cleanup()
 
-	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
+	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{SchemaVersion: 1, TeamID: "team-1"})
 	if err != nil {
 		t.Fatalf("start turn: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestRunTerminalCrossesTransport(t *testing.T) {
 func TestRunTerminalFlagDefaultsToFalse(t *testing.T) {
 	client, cleanup := newTestClient(t, &fakeService{}, "secret")
 	defer cleanup()
-	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
+	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{SchemaVersion: 1, TeamID: "team-1"})
 	if err != nil {
 		t.Fatalf("start turn: %v", err)
 	}

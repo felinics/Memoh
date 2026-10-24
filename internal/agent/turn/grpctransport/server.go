@@ -14,6 +14,7 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/agent/turn/turnpb"
+	"github.com/felinics/memoh/internal/agent/turn/turnwire"
 	"github.com/felinics/memoh/internal/rpc"
 )
 
@@ -49,6 +50,9 @@ func (s *Server) Run(stream turnpb.TurnService_RunServer) error {
 	}
 	var cmd turn.StartTurnCommand
 	if err := unmarshalStartTurnCommand(startJSON, &cmd); err != nil {
+		if errors.Is(err, turnwire.ErrUnsupportedVersion) {
+			return status.Error(codes.InvalidArgument, err.Error())
+		}
 		return status.Error(codes.InvalidArgument, "invalid start turn payload")
 	}
 	handle, err := s.service.StartTurn(stream.Context(), cmd)

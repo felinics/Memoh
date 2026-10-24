@@ -8,6 +8,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/agent/turn/turnpb"
+	"github.com/felinics/memoh/internal/agent/turn/turnwire"
 	"github.com/felinics/memoh/internal/rpc"
 )
 
@@ -29,8 +30,8 @@ var turnReasons = rpc.Reasons{
 // server and channel binaries remain compatible while the domain contract uses
 // ThreadID exclusively.
 // A tagged field at the same embedding depth shadows the domain ThreadID.
-// The output still contains SessionID only; the domain JSON used by queue
-// payloads is unchanged. Embedding avoids copying the command's field list.
+// The output still contains SessionID only. Embedding avoids copying the
+// decision responses' field lists.
 type outgoingThreadID struct {
 	SessionID string
 	ThreadID  *string `json:"ThreadID,omitempty"`
@@ -41,22 +42,38 @@ type incomingThreadID struct {
 	ThreadID  json.RawMessage `json:"ThreadID"`
 }
 
+// startTurnPayload is the start frame: the serialized command with the thread
+// under its legacy key. turnwire.StartTurn omits an empty ThreadID, so only
+// SessionID is sent.
+type startTurnPayload struct {
+	turnwire.StartTurn
+	SessionID string `json:"SessionID"`
+}
+
 func marshalStartTurnCommand(cmd turn.StartTurnCommand) ([]byte, error) {
-	return json.Marshal(struct {
-		turn.StartTurnCommand
-		outgoingThreadID
-	}{cmd, outgoingThreadID{SessionID: cmd.ThreadID}})
+	wire := turnwire.FromStartTurn(cmd)
+	wire.ThreadID = ""
+	return json.Marshal(startTurnPayload{StartTurn: wire, SessionID: cmd.ThreadID})
 }
 
 func unmarshalStartTurnCommand(data []byte, cmd *turn.StartTurnCommand) error {
-	if cmd == nil {
-		return json.Unmarshal(data, cmd)
+	var wire turnwire.StartTurn
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
 	}
-	wire := struct {
-		*turn.StartTurnCommand
-		incomingThreadID
-	}{StartTurnCommand: cmd}
-	return unmarshalLegacyThreadID(data, &wire, &wire.incomingThreadID, &cmd.ThreadID)
+	// The wire type tags ThreadID as well, so the legacy keys are read in a
+	// second pass rather than by embedding both at one depth, which would
+	// drop the key from each.
+	var ids incomingThreadID
+	if err := unmarshalLegacyThreadID(data, &ids, &ids, &wire.ThreadID); err != nil {
+		return err
+	}
+	decoded, err := wire.Command()
+	if err != nil {
+		return err
+	}
+	*cmd = decoded
+	return nil
 }
 
 func marshalToolApprovalResponse(input turn.ToolApprovalResponse) ([]byte, error) {

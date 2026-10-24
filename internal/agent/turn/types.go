@@ -56,8 +56,9 @@ func (a Attachment) Bundle() attachment.Bundle {
 }
 
 // RequestedSkillContext is the full skill material made available to one turn.
-// Its fields are internal execution context and are intentionally omitted from
-// JSON payloads.
+// Its fields are internal execution context and are omitted from every JSON
+// payload built from this type; a command that crosses a process or is stored
+// carries them through turnwire.RequestedSkill.
 type RequestedSkillContext struct {
 	Name           string `json:"-"`
 	Description    string `json:"-"`

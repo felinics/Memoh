@@ -48,8 +48,13 @@ const (
 // StartTurnCommand is a pure-data command. Field set mirrors exactly what
 // the channel inbound processor supplies today; function- and channel-typed fields are
 // intentionally excluded — injection goes through RunHandle.Inject and
-// outbound assets through RunHandle.AddOutboundAssets.
+// outbound assets through RunHandle.AddOutboundAssets. A command that crosses
+// a process or is stored travels as turnwire.StartTurn, not as this type's
+// JSON.
 type StartTurnCommand struct {
+	// SchemaVersion is the command shape its producer built. A producer whose
+	// command is sent or stored declares it; the reader refuses a version it
+	// does not know (turnwire.StartTurnVersion).
 	SchemaVersion int
 	// NoDefer is reserved for server-owned continuation attempts. A follow-up
 	// that is already being started must surface ErrSessionBusy instead of

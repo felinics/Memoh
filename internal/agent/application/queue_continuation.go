@@ -13,6 +13,7 @@ import (
 
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/turn/turnwire"
 	"github.com/felinics/memoh/internal/telemetry"
 )
 
@@ -22,11 +23,14 @@ import (
 // complete turn the item replays when it is consumed: for a deferred channel
 // message it preserves routing, attachments, and reply metadata; for a text
 // typed into the queue panel it carries the team and sender the ingress
-// authenticated. Items written by earlier releases may lack Command; they are
-// still listable but cannot be started, and the continuation rejects them.
+// authenticated. The command is stored in its serialized form, so material
+// the turn contract keeps out of public payloads, such as requested skill
+// bodies, survives the queue. Items written by earlier releases may lack
+// Command; they are still listable but cannot be started, and the
+// continuation rejects them.
 type queuePayload struct {
-	Text    string                 `json:"text"`
-	Command *turn.StartTurnCommand `json:"command,omitempty"`
+	Text    string              `json:"text"`
+	Command *turnwire.StartTurn `json:"command,omitempty"`
 }
 
 func encodeQueueCommand(cmd turn.StartTurnCommand) ([]byte, error) {
@@ -34,7 +38,8 @@ func encodeQueueCommand(cmd turn.StartTurnCommand) ([]byte, error) {
 	if text == "" {
 		text = strings.TrimSpace(cmd.Query)
 	}
-	return json.Marshal(queuePayload{Text: text, Command: &cmd})
+	wire := turnwire.FromStartTurn(cmd)
+	return json.Marshal(queuePayload{Text: text, Command: &wire})
 }
 
 func decodeQueuePayload(payload []byte) queuePayload {
@@ -299,14 +304,18 @@ var (
 // followUpCommand restores the StartTurnCommand stored with one follow-up
 // item. The command is the complete admission input the ingress recorded when
 // it accepted the text, so the continuation replays it rather than inferring
-// team or sender from process state. An item missing any of that cannot be
-// started; the error names what is missing so the caller can reject it.
+// team or sender from process state. An item missing any of that, or stored
+// under a schema version this binary does not read, cannot be started; the
+// error names why so the caller can reject it.
 func followUpCommand(item sessionruntime.FollowUpItem) (turn.StartTurnCommand, error) {
 	body := decodeQueuePayload(item.Payload)
 	if body.Command == nil {
 		return turn.StartTurnCommand{}, errFollowUpPayloadWithoutCommand
 	}
-	cmd := *body.Command
+	cmd, err := body.Command.Command()
+	if err != nil {
+		return turn.StartTurnCommand{}, err
+	}
 	if strings.TrimSpace(cmd.BotID) != item.BotID || strings.TrimSpace(cmd.ThreadID) != item.SessionID {
 		return turn.StartTurnCommand{}, errFollowUpCommandForeignSession
 	}
