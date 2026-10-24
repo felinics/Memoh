@@ -1,0 +1,112 @@
+[
+  {
+    "tool": "exec",
+    "input": {
+      "command": "echo out; echo err 1\u003e\u00262",
+      "description": "Print to stdout and stderr"
+    },
+    "result": {
+      "stderr": "",
+      "stdout": "out\nerr"
+    }
+  },
+  {
+    "tool": "exec",
+    "input": {
+      "command": "echo out; echo err 1\u003e\u00262; exit 3",
+      "description": "Print to stdout and stderr, exit with code 3"
+    },
+    "result": {
+      "content": [
+        {
+          "text": "Exit code 3\nout\nerr",
+          "type": "text"
+        }
+      ],
+      "isError": true
+    },
+    "status": "failed"
+  },
+  {
+    "tool": "read",
+    "input": {
+      "path": "/workspace/a.txt"
+    },
+    "result": {
+      "content": "hello file\nline2\n",
+      "total_lines": 3
+    }
+  },
+  {
+    "tool": "web_fetch",
+    "input": {
+      "prompt": "What is the page title?",
+      "url": "https://example.com"
+    },
+    "result": {
+      "content": "The page title is \"Example Domain.\"",
+      "contentType": "",
+      "format": "text",
+      "provider": "claude_code",
+      "providerName": "Claude Code",
+      "success": true,
+      "url": "https://example.com"
+    }
+  },
+  {
+    "tool": "web_search",
+    "input": {
+      "query": "example domain iana"
+    },
+    "result": {
+      "query": "example domain iana",
+      "results": [
+        {
+          "description": "",
+          "title": "Example Domains",
+          "url": "https://www.iana.org/help/example-domains"
+        },
+        {
+          "description": "",
+          "title": "IANA Reserved Example Domain",
+          "url": "https://www.facebook.com/fb-answers/iana-reserved-example-domain/"
+        },
+        {
+          "description": "",
+          "title": "IANA-managed Reserved Domains",
+          "url": "https://www.iana.org/domains/reserved"
+        },
+        {
+          "description": "",
+          "title": "Example.com",
+          "url": "https://en.wikipedia.org/wiki/Example.com"
+        },
+        {
+          "description": "",
+          "title": "Example Domain",
+          "url": "https://news.ycombinator.com/item?id=29623646"
+        },
+        {
+          "description": "",
+          "title": "Domain name registry",
+          "url": "https://en.wikipedia.org/wiki/Domain_name_registry"
+        },
+        {
+          "description": "",
+          "title": ".example",
+          "url": "https://en.wikipedia.org/wiki/.example"
+        },
+        {
+          "description": "",
+          "title": "Sponsored top-level domain",
+          "url": "https://en.wikipedia.org/wiki/Sponsored_top-level_domain"
+        },
+        {
+          "description": "",
+          "title": "What's the example.com domain? - PlotHost",
+          "url": "https://www.plothost.com/kb/example-com-domain/"
+        }
+      ]
+    }
+  }
+]

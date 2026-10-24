@@ -19,6 +19,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/background"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/agent/toolresult"
 	"github.com/felinics/memoh/internal/hooks"
 	workspacepkg "github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -854,7 +855,7 @@ func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext
 	}
 
 	content = addLineNumbers(content, lineOffset)
-	return map[string]any{"content": content, "total_lines": totalLines}, nil
+	return toolresult.Read{Content: content, TotalLines: totalLines}.Map(), nil
 }
 
 func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContext, args writeArgs) (any, error) {
@@ -918,7 +919,7 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 	}); err != nil {
 		p.logWorkspaceToolHookError(hooks.EventAfterFileWrite, session.BotID, session.SessionID, err)
 	}
-	result := map[string]any{"ok": true}
+	result := toolresult.Write{OK: true}.Map()
 	// Same UI-only diff channel as edit (see execEdit): computed from the
 	// content actually read and written, stripped before the model sees the
 	// tool result, and best effort — a diff failure must not fail the write
@@ -1183,7 +1184,7 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 		}
 		stdout := pruneToolOutputText(result.Stdout, "tool result (exec stdout)")
 		stderr := pruneToolOutputText(result.Stderr, "tool result (exec stderr)")
-		return map[string]any{"stdout": stdout, "stderr": stderr, "exit_code": result.ExitCode}, nil
+		return toolresult.Exec{Stdout: stdout, Stderr: stderr, ExitCode: toolresult.Ptr(int(result.ExitCode))}.Map(), nil
 	})
 	if err != nil {
 		return nil, err
@@ -1413,7 +1414,7 @@ func (p *ContainerProvider) execExecWithFlip(
 		}
 		stdout := pruneToolOutputText(r.Stdout, "tool result (exec stdout)")
 		stderr := pruneToolOutputText(r.Stderr, "tool result (exec stderr)")
-		return map[string]any{"stdout": stdout, "stderr": stderr, "exit_code": r.ExitCode}, nil
+		return toolresult.Exec{Stdout: stdout, Stderr: stderr, ExitCode: toolresult.Ptr(int(r.ExitCode))}.Map(), nil
 
 	case <-timer.C:
 		// Foreground waiting ended, possibly early to preserve the hard budget.
@@ -1457,11 +1458,11 @@ func (p *ContainerProvider) flipToBackground(
 		slog.Duration("foreground_wait", foregroundWait),
 	)
 
-	result := map[string]any{
-		"status":      "auto_backgrounded",
-		"task_id":     taskID,
-		"output_file": outputFile,
-		"message": fmt.Sprintf(
+	result := toolresult.ExecBackground{
+		Status:     toolresult.ExecStatusAutoBackgrounded,
+		TaskID:     taskID,
+		OutputFile: outputFile,
+		Message: fmt.Sprintf(
 			"Command moved to the background after %s of foreground waiting with task ID: %s. "+
 				"The process is still running — no work was lost; output collected so far is in output_tail. "+
 				"Use wait_until(task_id) to keep observing: it returns when the task finishes, stalls, or goes quiet (reason 'idle') — for servers, a ready message in output_tail means it is up. "+
@@ -1471,11 +1472,9 @@ func (p *ContainerProvider) flipToBackground(
 		),
 	}
 	if task := p.bgManager.Get(taskID); task != nil {
-		if tail := task.OutputTail(); tail != "" {
-			result["output_tail"] = tail
-		}
+		result.OutputTail = task.OutputTail()
 	}
-	return result, nil
+	return result.Map(), nil
 }
 
 // detectBlockedSleep checks if the command starts with `sleep N` where N >= 2.
@@ -1521,17 +1520,17 @@ func (p *ContainerProvider) execExecBackground(
 		p.bgManager.RecordOutput(taskID, stream, chunk)
 	})
 
-	return map[string]any{
-		"status":      "background_started",
-		"task_id":     taskID,
-		"output_file": outputFile,
-		"message": fmt.Sprintf(
+	return toolresult.ExecBackground{
+		Status:     toolresult.ExecStatusBackgroundStarted,
+		TaskID:     taskID,
+		OutputFile: outputFile,
+		Message: fmt.Sprintf(
 			"Command started in background with task ID: %s. "+
 				"Use wait_until(task_id) to observe it: it returns when the task finishes, stalls on a prompt, or output goes quiet (reason 'idle'), always with the latest output_tail — for servers, a ready message there means it is up. "+
 				"get_background_status(task_id) also shows output_tail while running. The full log is written to %s after the task ends.",
 			taskID, outputFile,
 		),
-	}, nil
+	}.Map(), nil
 }
 
 func truncateStr(s string, n int) string {

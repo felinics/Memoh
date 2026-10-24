@@ -80,6 +80,10 @@ type inboundMessage struct {
 	Message         json.RawMessage `json:"message,omitempty"`
 	ParentToolUseID *string         `json:"parent_tool_use_id,omitempty"`
 	Error           string          `json:"error,omitempty"`
+	// ToolUseResult is the structured result of the tool call a user line
+	// answers; its shape depends on the tool, and is a plain string when the
+	// call failed.
+	ToolUseResult json.RawMessage `json:"tool_use_result,omitempty"`
 
 	// stream_event payload.
 	Event json.RawMessage `json:"event,omitempty"`

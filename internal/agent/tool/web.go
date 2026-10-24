@@ -25,6 +25,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/agent/toolresult"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/redact"
 	"github.com/felinics/memoh/internal/searchproviders"
@@ -177,8 +178,8 @@ func callBraveSearch(ctx context.Context, configJSON []byte, query string, count
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, errors.New("invalid search response")
 	}
-	return buildSearchResults(query, raw.Web.Results, func(r struct{ Title, URL, Description string }) map[string]any {
-		return map[string]any{"title": r.Title, "url": r.URL, "description": r.Description}
+	return buildSearchResults(query, raw.Web.Results, func(r struct{ Title, URL, Description string }) toolresult.WebSearchItem {
+		return toolresult.WebSearchItem{Title: r.Title, URL: r.URL, Description: r.Description}
 	}), nil
 }
 
@@ -216,11 +217,11 @@ func callBingSearch(ctx context.Context, configJSON []byte, query string, count 
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, errors.New("invalid search response")
 	}
-	results := make([]map[string]any, 0, len(raw.WebPages.Value))
+	results := make([]toolresult.WebSearchItem, 0, len(raw.WebPages.Value))
 	for _, item := range raw.WebPages.Value {
-		results = append(results, map[string]any{"title": item.Name, "url": item.URL, "description": item.Snippet})
+		results = append(results, toolresult.WebSearchItem{Title: item.Name, URL: item.URL, Description: item.Snippet})
 	}
-	return map[string]any{"query": query, "results": results}, nil
+	return toolresult.WebSearch{Query: query, Results: results}.Map(), nil
 }
 
 func callGoogleSearch(ctx context.Context, configJSON []byte, query string, count int) (any, error) {
@@ -263,11 +264,11 @@ func callGoogleSearch(ctx context.Context, configJSON []byte, query string, coun
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, errors.New("invalid search response")
 	}
-	results := make([]map[string]any, 0, len(raw.Items))
+	results := make([]toolresult.WebSearchItem, 0, len(raw.Items))
 	for _, item := range raw.Items {
-		results = append(results, map[string]any{"title": item.Title, "url": item.Link, "description": item.Snippet})
+		results = append(results, toolresult.WebSearchItem{Title: item.Title, URL: item.Link, Description: item.Snippet})
 	}
-	return map[string]any{"query": query, "results": results}, nil
+	return toolresult.WebSearch{Query: query, Results: results}.Map(), nil
 }
 
 func callTavilySearch(ctx context.Context, configJSON []byte, query string, count int) (any, error) {
@@ -301,11 +302,11 @@ func callTavilySearch(ctx context.Context, configJSON []byte, query string, coun
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, errors.New("invalid search response")
 	}
-	results := make([]map[string]any, 0, len(raw.Results))
+	results := make([]toolresult.WebSearchItem, 0, len(raw.Results))
 	for _, item := range raw.Results {
-		results = append(results, map[string]any{"title": item.Title, "url": item.URL, "description": item.Content})
+		results = append(results, toolresult.WebSearchItem{Title: item.Title, URL: item.URL, Description: item.Content})
 	}
-	return map[string]any{"query": query, "results": results}, nil
+	return toolresult.WebSearch{Query: query, Results: results}.Map(), nil
 }
 
 func callSogouSearch(ctx context.Context, configJSON []byte, query string, count int) (any, error) {
@@ -384,14 +385,14 @@ func callSogouSearch(ctx context.Context, configJSON []byte, query string, count
 		}
 	}
 	sort.Slice(pages, func(i, j int) bool { return pages[i].Score > pages[j].Score })
-	results := make([]map[string]any, 0)
+	results := make([]toolresult.WebSearchItem, 0)
 	for i, page := range pages {
 		if i >= count {
 			break
 		}
-		results = append(results, map[string]any{"title": page.Title, "url": page.URL, "description": page.Passage})
+		results = append(results, toolresult.WebSearchItem{Title: page.Title, URL: page.URL, Description: page.Passage})
 	}
-	return map[string]any{"query": query, "results": results}, nil
+	return toolresult.WebSearch{Query: query, Results: results}.Map(), nil
 }
 
 func callSerperSearch(ctx context.Context, configJSON []byte, query string, count int) (any, error) {
@@ -427,14 +428,14 @@ func callSerperSearch(ctx context.Context, configJSON []byte, query string, coun
 		return nil, errors.New("invalid search response")
 	}
 	sort.Slice(raw.Organic, func(i, j int) bool { return raw.Organic[i].Position < raw.Organic[j].Position })
-	results := make([]map[string]any, 0)
+	results := make([]toolresult.WebSearchItem, 0)
 	for i, item := range raw.Organic {
 		if i >= count {
 			break
 		}
-		results = append(results, map[string]any{"title": item.Title, "url": item.Link, "description": item.Description})
+		results = append(results, toolresult.WebSearchItem{Title: item.Title, URL: item.Link, Description: item.Description})
 	}
-	return map[string]any{"query": query, "results": results}, nil
+	return toolresult.WebSearch{Query: query, Results: results}.Map(), nil
 }
 
 func callSearXNGSearch(ctx context.Context, configJSON []byte, query string, count int) (any, error) {
@@ -487,14 +488,14 @@ func callSearXNGSearch(ctx context.Context, configJSON []byte, query string, cou
 		return nil, errors.New("invalid search response")
 	}
 	sort.Slice(raw.Results, func(i, j int) bool { return raw.Results[i].Score > raw.Results[j].Score })
-	results := make([]map[string]any, 0)
+	results := make([]toolresult.WebSearchItem, 0)
 	for i, item := range raw.Results {
 		if i >= count {
 			break
 		}
-		results = append(results, map[string]any{"title": item.Title, "url": item.URL, "description": item.Content})
+		results = append(results, toolresult.WebSearchItem{Title: item.Title, URL: item.URL, Description: item.Content})
 	}
-	return map[string]any{"query": query, "results": results}, nil
+	return toolresult.WebSearch{Query: query, Results: results}.Map(), nil
 }
 
 func callJinaSearch(ctx context.Context, configJSON []byte, query string, count int) (any, error) {
@@ -530,11 +531,11 @@ func callJinaSearch(ctx context.Context, configJSON []byte, query string, count 
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, errors.New("invalid search response")
 	}
-	results := make([]map[string]any, 0, len(raw.Data))
+	results := make([]toolresult.WebSearchItem, 0, len(raw.Data))
 	for _, item := range raw.Data {
-		results = append(results, map[string]any{"title": item.Title, "url": item.URL, "description": item.Content})
+		results = append(results, toolresult.WebSearchItem{Title: item.Title, URL: item.URL, Description: item.Content})
 	}
-	return map[string]any{"query": query, "results": results}, nil
+	return toolresult.WebSearch{Query: query, Results: results}.Map(), nil
 }
 
 func callExaSearch(ctx context.Context, configJSON []byte, query string, count int) (any, error) {
@@ -566,11 +567,11 @@ func callExaSearch(ctx context.Context, configJSON []byte, query string, count i
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, errors.New("invalid search response")
 	}
-	results := make([]map[string]any, 0, len(raw.Results))
+	results := make([]toolresult.WebSearchItem, 0, len(raw.Results))
 	for _, item := range raw.Results {
-		results = append(results, map[string]any{"title": item.Title, "url": item.URL, "description": item.Text})
+		results = append(results, toolresult.WebSearchItem{Title: item.Title, URL: item.URL, Description: item.Text})
 	}
-	return map[string]any{"query": query, "results": results}, nil
+	return toolresult.WebSearch{Query: query, Results: results}.Map(), nil
 }
 
 func callBochaSearch(ctx context.Context, configJSON []byte, query string, count int) (any, error) {
@@ -606,11 +607,11 @@ func callBochaSearch(ctx context.Context, configJSON []byte, query string, count
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, errors.New("invalid search response")
 	}
-	results := make([]map[string]any, 0, len(raw.Data.WebPages.Value))
+	results := make([]toolresult.WebSearchItem, 0, len(raw.Data.WebPages.Value))
 	for _, item := range raw.Data.WebPages.Value {
-		results = append(results, map[string]any{"title": item.Name, "url": item.URL, "description": item.Summary})
+		results = append(results, toolresult.WebSearchItem{Title: item.Name, URL: item.URL, Description: item.Summary})
 	}
-	return map[string]any{"query": query, "results": results}, nil
+	return toolresult.WebSearch{Query: query, Results: results}.Map(), nil
 }
 
 func callDuckDuckGoSearch(ctx context.Context, configJSON []byte, query string, count int) (any, error) {
@@ -645,7 +646,7 @@ func callDuckDuckGoSearch(ctx context.Context, configJSON []byte, query string, 
 	if count < n {
 		n = count
 	}
-	results := make([]map[string]any, 0, n)
+	results := make([]toolresult.WebSearchItem, 0, n)
 	for i := 0; i < n; i++ {
 		rawURL := html.UnescapeString(links[i][1])
 		realURL := extractDDGURL(rawURL)
@@ -657,9 +658,9 @@ func callDuckDuckGoSearch(ctx context.Context, configJSON []byte, query string, 
 		if realURL == "" {
 			continue
 		}
-		results = append(results, map[string]any{"title": title, "url": realURL, "description": snippet})
+		results = append(results, toolresult.WebSearchItem{Title: title, URL: realURL, Description: snippet})
 	}
-	return map[string]any{"query": query, "results": results}, nil
+	return toolresult.WebSearch{Query: query, Results: results}.Map(), nil
 }
 
 func callYandexSearch(ctx context.Context, configJSON []byte, query string, count int) (any, error) {
@@ -702,17 +703,17 @@ func callYandexSearch(ctx context.Context, configJSON []byte, query string, coun
 	if err != nil {
 		return nil, errors.New("failed to parse Yandex XML response")
 	}
-	return map[string]any{"query": query, "results": results}, nil
+	return toolresult.WebSearch{Query: query, Results: results}.Map(), nil
 }
 
 // ---- helpers ----
 
-func buildSearchResults[T any](query string, items []T, mapper func(T) map[string]any) map[string]any {
-	results := make([]map[string]any, 0, len(items))
+func buildSearchResults[T any](query string, items []T, mapper func(T) toolresult.WebSearchItem) map[string]any {
+	results := make([]toolresult.WebSearchItem, 0, len(items))
 	for _, item := range items {
 		results = append(results, mapper(item))
 	}
-	return map[string]any{"query": query, "results": results}
+	return toolresult.WebSearch{Query: query, Results: results}.Map()
 }
 
 func buildSearchHTTPError(statusCode int, body []byte) error {
@@ -926,18 +927,18 @@ type yandexPassages struct {
 	Passage []xmlInnerText `xml:"passage"`
 }
 
-func parseYandexXML(data []byte) ([]map[string]any, error) {
+func parseYandexXML(data []byte) ([]toolresult.WebSearchItem, error) {
 	var resp yandexResponse
 	if err := xml.Unmarshal(data, &resp); err != nil {
 		return nil, err
 	}
-	results := make([]map[string]any, 0, len(resp.Results.Grouping.Groups))
+	results := make([]toolresult.WebSearchItem, 0, len(resp.Results.Grouping.Groups))
 	for _, group := range resp.Results.Grouping.Groups {
 		snippet := ""
 		if len(group.Doc.Passages.Passage) > 0 {
 			snippet = string(group.Doc.Passages.Passage[0])
 		}
-		results = append(results, map[string]any{"title": string(group.Doc.Title), "url": string(group.Doc.URL), "description": snippet})
+		results = append(results, toolresult.WebSearchItem{Title: string(group.Doc.Title), URL: string(group.Doc.URL), Description: snippet})
 	}
 	return results, nil
 }

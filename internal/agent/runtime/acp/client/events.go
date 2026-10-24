@@ -10,6 +10,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/event"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agent/toolresult"
 )
 
 const maxTrackedACPToolStates = 1024
@@ -645,6 +646,7 @@ func (m *acpToolEventMapper) eventsForState(state *acpToolState) []event.StreamE
 		}
 		if isFailedACPToolStatus(state.status) {
 			ev.Error = state.status
+			ev.Status = "failed"
 		}
 		events = append(events, ev)
 		delete(m.tools, acpToolStateKey{sessionID: state.sessionID, toolCallID: state.id})
@@ -755,45 +757,53 @@ func nativeToolResultFromACPState(state *acpToolState) any {
 	}
 	// What the agent reported beyond the native shape stays with the result:
 	// nothing reads it today, and history must not quietly lose it.
-	result := map[string]any{}
+	extra := map[string]any{}
 	for key, value := range raw {
 		if !nativeToolInputKeys[state.name][key] {
-			result[key] = value
+			extra[key] = value
 		}
 	}
+	var record toolresult.Record
 	switch state.name {
 	case "exec":
-		if stdout := firstNonEmptyRawString(rawOutputText(state.output, raw, "stdout", "output", "text"), output); stdout != "" {
-			result["stdout"] = stdout
+		exec := toolresult.Exec{
+			Stdout: firstNonEmptyRawString(rawOutputText(state.output, raw, "stdout", "output", "text"), output),
+			Stderr: rawStringFromAny(firstPresent(raw, "stderr", "error")),
 		}
-		if stderr := rawStringFromAny(firstPresent(raw, "stderr", "error")); strings.TrimSpace(stderr) != "" {
-			result["stderr"] = stderr
+		if strings.TrimSpace(exec.Stderr) == "" {
+			exec.Stderr = ""
 		}
 		if code, ok := numberFromAny(firstPresent(raw, "exit_code", "exitCode", "code")); ok {
-			result["exit_code"] = code
+			exec.ExitCode = &code
 		}
+		record = exec
 	case "read":
-		if content := firstNonEmptyRawString(rawOutputText(state.output, raw, "content", "text", "output"), output); content != "" {
-			result["content"] = content
-		}
+		content := firstNonEmptyRawString(rawOutputText(state.output, raw, "content", "text", "output"), output)
+		record = toolresult.Read{Content: content, TotalLines: toolresult.CountLines(content)}
 	default:
 		// write and edit: the chat UI renders the change from the input.
-		result["ok"] = true
+		record = toolresult.Write{OK: true}
 	}
 	if failed {
-		delete(result, "ok")
-		result["isError"] = true
 		// The agent's own words for the failure, wherever it put them; the
 		// bare status only when it gave none.
-		result["content"] = []map[string]any{{"type": "text", "text": firstNonEmptyString(
+		record = toolresult.NewFailure(firstNonEmptyString(
 			state.refusal,
-			stringFromAny(result["stderr"]),
+			failedStderr(record),
 			strings.TrimSpace(text),
 			rawOutputText(state.output, raw, "message", "error", "stdout", "output", "text"),
 			strings.TrimSpace(state.status),
-		)}}
+		))
 	}
-	return result
+	return toolresult.Merge(record, extra)
+}
+
+// failedStderr is the stderr of an exec result, the agent's own failure text.
+func failedStderr(record toolresult.Record) string {
+	if exec, ok := record.(toolresult.Exec); ok {
+		return exec.Stderr
+	}
+	return ""
 }
 
 // nativeToolInputKeys are the rawOutput keys each native shape is read from;

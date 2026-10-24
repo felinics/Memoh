@@ -23,6 +23,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agent/toolresult"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/runtimefence"
@@ -442,8 +443,8 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 	}
 	c.emitToolCallStart(toolID, "read", input)
 	var toolErr error
+	result := toolresult.Read{TotalLines: 1}.Map()
 	defer func() {
-		result := map[string]any{}
 		if toolErr != nil {
 			result = toolErrorResult(toolErr)
 		}
@@ -480,6 +481,7 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 	if limit := c.currentToolOutputLimit(); hasToolOutputLimit(limit) {
 		content = limitToolOutputString(content, "tool result (read.content)", limit)
 	}
+	result = toolresult.Read{Content: content, TotalLines: int(resp.GetTotalLines())}.Map()
 	if content == "" {
 		content = "\n"
 	}
@@ -522,7 +524,7 @@ func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFile
 	c.emitToolCallStart(toolID, "write", input)
 	var toolErr error
 	defer func() {
-		result := map[string]any{}
+		result := toolresult.Write{OK: true}.Map()
 		if toolErr != nil {
 			result = toolErrorResult(toolErr)
 		}
@@ -596,6 +598,7 @@ func (c *clientCallbacks) emitToolCallEnd(id, name string, input map[string]any,
 	}
 	if err != nil {
 		ev.Error = err.Error()
+		ev.Status = "failed"
 	}
 	c.events.emit(ev)
 }
@@ -605,13 +608,7 @@ func toolErrorResult(err error) map[string]any {
 	if err != nil {
 		message = err.Error()
 	}
-	return map[string]any{
-		"isError": true,
-		"content": []map[string]any{{
-			"type": "text",
-			"text": message,
-		}},
-	}
+	return toolresult.NewFailure(message).Map()
 }
 
 func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {

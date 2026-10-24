@@ -314,17 +314,17 @@ func (t *turnState) handleItemStarted(item *protocol.ThreadItem) {
 	switch {
 	case item.CommandExecution != nil:
 		cmd := item.CommandExecution
-		t.rememberTool(cmd.ID, "exec")
+		t.rememberTool(cmd.ID, toolExec)
 		t.emit(event.StreamEvent{
-			Type: event.ToolCallStart, ToolCallID: cmd.ID, ToolName: "exec",
+			Type: event.ToolCallStart, ToolCallID: cmd.ID, ToolName: toolExec,
 			Input: map[string]any{"command": cmd.Command, "cwd": cmd.Cwd},
 		})
 	case item.FileChange != nil:
 		fc := item.FileChange
-		t.rememberTool(fc.ID, "write")
+		t.rememberTool(fc.ID, toolApplyPatch)
 		t.emit(event.StreamEvent{
-			Type: event.ToolCallStart, ToolCallID: fc.ID, ToolName: "write",
-			Input: fileChangeInput(fc),
+			Type: event.ToolCallStart, ToolCallID: fc.ID, ToolName: toolApplyPatch,
+			Input: fileChangeToolInput(fc),
 		})
 	case item.MCPToolCall != nil:
 		mcpCall := item.MCPToolCall
@@ -339,9 +339,9 @@ func (t *turnState) handleItemStarted(item *protocol.ThreadItem) {
 		})
 	case item.WebSearch != nil:
 		search := item.WebSearch
-		t.rememberTool(search.ID, "web_search")
+		t.rememberTool(search.ID, toolWebSearch)
 		t.emit(event.StreamEvent{
-			Type: event.ToolCallStart, ToolCallID: search.ID, ToolName: "web_search",
+			Type: event.ToolCallStart, ToolCallID: search.ID, ToolName: toolWebSearch,
 			Input: map[string]any{"query": search.Query},
 		})
 	}
@@ -378,22 +378,9 @@ func (t *turnState) handleItemCompleted(item *protocol.ThreadItem) {
 		}
 		t.mu.Unlock()
 	case item.CommandExecution != nil:
-		cmd := item.CommandExecution
-		result := map[string]any{}
-		if cmd.ExitCode != nil {
-			result["exitCode"] = *cmd.ExitCode
-		}
-		if cmd.AggregatedOutput != nil {
-			result["output"] = *cmd.AggregatedOutput
-		}
-		ev := event.StreamEvent{Type: event.ToolCallEnd, ToolCallID: cmd.ID, ToolName: t.toolName(cmd.ID), Result: result}
-		if cmd.ExitCode != nil && *cmd.ExitCode != 0 {
-			ev.Status = "failed"
-		}
-		t.emit(ev)
+		t.emit(commandExecutionEnd(item.CommandExecution, t.toolName(item.CommandExecution.ID)))
 	case item.FileChange != nil:
-		fc := item.FileChange
-		t.emit(event.StreamEvent{Type: event.ToolCallEnd, ToolCallID: fc.ID, ToolName: t.toolName(fc.ID), Result: fileChangeInput(fc)})
+		t.emit(fileChangeEnd(item.FileChange, t.toolName(item.FileChange.ID)))
 	case item.MCPToolCall != nil:
 		mcpCall := item.MCPToolCall
 		if isMemohMCPToolCall(mcpCall) {
@@ -411,8 +398,7 @@ func (t *turnState) handleItemCompleted(item *protocol.ThreadItem) {
 		}
 		t.emit(ev)
 	case item.WebSearch != nil:
-		search := item.WebSearch
-		t.emit(event.StreamEvent{Type: event.ToolCallEnd, ToolCallID: search.ID, ToolName: t.toolName(search.ID)})
+		t.emit(webSearchEnd(item.WebSearch, t.toolName(item.WebSearch.ID)))
 	}
 }
 
@@ -428,7 +414,7 @@ func (t *turnState) toolName(itemID string) string {
 	if name := t.toolNames[itemID]; name != "" {
 		return name
 	}
-	return "exec"
+	return toolExec
 }
 
 // handleServerRequest decides one approval request through the Memoh approval
@@ -470,7 +456,7 @@ func (t *turnState) handleServerRequest(c *conn, req *protocol.Inbound, decoded 
 		if len(params.ProposedNetworkPolicyAmendments) > 0 {
 			input["proposed_network_policy_amendments"] = params.ProposedNetworkPolicyAmendments
 		}
-		result := t.decide(ctx, approvalCallID(params.ApprovalID, params.ItemID), "exec", input, commandApprovalOptions(params))
+		result := t.decide(ctx, approvalCallID(params.ApprovalID, params.ItemID), toolExec, input, commandApprovalOptions(params))
 		decision := commandApprovalDecision(params, result)
 		_ = c.Respond(req.ID, protocol.CommandExecutionRequestApprovalResponse{Decision: decision})
 	case *protocol.FileChangeRequestApprovalParams:
@@ -481,7 +467,7 @@ func (t *turnState) handleServerRequest(c *conn, req *protocol.Inbound, decoded 
 		if params.GrantRoot != nil {
 			input["grantRoot"] = *params.GrantRoot
 		}
-		result := t.decide(ctx, params.ItemID, "write", input, fileChangeApprovalOptions(params))
+		result := t.decide(ctx, params.ItemID, toolApplyPatch, input, fileChangeApprovalOptions(params))
 		decision := fileChangeApprovalDecision(result)
 		_ = c.Respond(req.ID, protocol.FileChangeRequestApprovalResponse{Decision: decision})
 	case *protocol.PermissionsRequestApprovalParams:
@@ -727,20 +713,6 @@ func buildTurnInput(input external.PromptInput) []protocol.UserInput {
 		items = append(items, protocol.UserInput{Image: &protocol.ImageUserInput{URL: url}})
 	}
 	return items
-}
-
-// fileChangeInput summarizes a file-change item for tool-event display.
-func fileChangeInput(fc *protocol.FileChangeThreadItem) map[string]any {
-	raw, err := json.Marshal(fc)
-	if err != nil {
-		return map[string]any{}
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return map[string]any{}
-	}
-	delete(out, "id")
-	return out
 }
 
 func mcpToolName(call *protocol.McpToolCallThreadItem) string {

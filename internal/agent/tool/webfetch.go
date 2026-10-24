@@ -18,6 +18,7 @@ import (
 	readability "github.com/go-shiori/go-readability"
 
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/agent/toolresult"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/fetchproviders"
 	"github.com/felinics/memoh/internal/redact"
@@ -102,12 +103,12 @@ func (p *WebFetchProvider) execWebFetch(ctx context.Context, session SessionCont
 	if err != nil {
 		return nil, err
 	}
-	if body, ok := result.(map[string]any); ok {
-		if _, exists := body["providerName"]; !exists {
-			body["providerName"] = fetchProviderDisplayName(provider)
-		}
+	fetched, ok := result.(toolresult.WebFetch)
+	if !ok {
+		return result, nil
 	}
-	return result, nil
+	fetched.ProviderName = fetchProviderDisplayName(provider)
+	return fetched.Map(), nil
 }
 
 func (p *WebFetchProvider) callFetchProvider(ctx context.Context, providerName string, configJSON []byte, rawURL, format string) (any, error) {
@@ -189,10 +190,10 @@ func (*WebFetchProvider) callJinaReaderFetch(ctx context.Context, configJSON []b
 		return nil, buildFetchHTTPError(resp.StatusCode, body)
 	}
 	content := strings.TrimSpace(string(body))
-	return map[string]any{
-		"success": true, "url": rawURL, "provider": string(fetchproviders.ProviderJina),
-		"format": "markdown", "contentType": resp.Header.Get("Content-Type"),
-		"content": content, "length": len(content),
+	return toolresult.WebFetch{
+		Success: true, URL: rawURL, Provider: string(fetchproviders.ProviderJina),
+		Format: "markdown", ContentType: resp.Header.Get("Content-Type"),
+		Content: toolresult.Ptr(content), Length: toolresult.Ptr(len(content)),
 	}, nil
 }
 
@@ -245,10 +246,10 @@ func (*WebFetchProvider) callCloudflareMarkdownFetch(ctx context.Context, config
 		return nil, errors.New(msg)
 	}
 	content := strings.TrimSpace(raw.Result)
-	return map[string]any{
-		"success": true, "url": rawURL, "provider": string(fetchproviders.ProviderCloudflareMarkdown),
-		"format": "markdown", "contentType": resp.Header.Get("Content-Type"),
-		"content": content, "length": len(content),
+	return toolresult.WebFetch{
+		Success: true, URL: rawURL, Provider: string(fetchproviders.ProviderCloudflareMarkdown),
+		Format: "markdown", ContentType: resp.Header.Get("Content-Type"),
+		Content: toolresult.Ptr(content), Length: toolresult.Ptr(len(content)),
 	}, nil
 }
 
@@ -271,7 +272,7 @@ func (*WebFetchProvider) processJSON(fetchedURL, contentType string, body []byte
 	if err := json.Unmarshal(body, &data); err != nil {
 		return nil, errors.New("failed to parse json")
 	}
-	return map[string]any{"success": true, "url": fetchedURL, "provider": string(fetchproviders.ProviderNative), "format": "json", "contentType": contentType, "data": data}, nil
+	return toolresult.WebFetch{Success: true, URL: fetchedURL, Provider: string(fetchproviders.ProviderNative), Format: "json", ContentType: contentType, Data: &data}, nil
 }
 
 func (*WebFetchProvider) processXML(fetchedURL, contentType string, body []byte) (any, error) {
@@ -279,7 +280,7 @@ func (*WebFetchProvider) processXML(fetchedURL, contentType string, body []byte)
 	if len(content) > webFetchMaxTextContent {
 		content = content[:webFetchMaxTextContent]
 	}
-	return map[string]any{"success": true, "url": fetchedURL, "provider": string(fetchproviders.ProviderNative), "format": "xml", "contentType": contentType, "content": content}, nil
+	return toolresult.WebFetch{Success: true, URL: fetchedURL, Provider: string(fetchproviders.ProviderNative), Format: "xml", ContentType: contentType, Content: &content}, nil
 }
 
 func (p *WebFetchProvider) processHTML(fetchedURL, contentType string, body []byte) (any, error) {
@@ -303,10 +304,10 @@ func (p *WebFetchProvider) processHTML(fetchedURL, contentType string, body []by
 	if len(textPreview) > 500 {
 		textPreview = textPreview[:500]
 	}
-	return map[string]any{
-		"success": true, "url": fetchedURL, "provider": string(fetchproviders.ProviderNative), "format": "markdown", "contentType": contentType,
-		"title": article.Title, "byline": article.Byline, "excerpt": article.Excerpt,
-		"content": markdown, "textContent": textPreview, "length": article.Length,
+	return toolresult.WebFetch{
+		Success: true, URL: fetchedURL, Provider: string(fetchproviders.ProviderNative), Format: "markdown", ContentType: contentType,
+		Title: &article.Title, Byline: &article.Byline, Excerpt: &article.Excerpt,
+		Content: &markdown, TextContent: &textPreview, Length: &article.Length,
 	}, nil
 }
 
@@ -316,7 +317,7 @@ func (*WebFetchProvider) processText(fetchedURL, contentType string, body []byte
 	if length > webFetchMaxTextContent {
 		content = content[:webFetchMaxTextContent]
 	}
-	return map[string]any{"success": true, "url": fetchedURL, "provider": string(fetchproviders.ProviderNative), "format": "text", "contentType": contentType, "content": content, "length": length}, nil
+	return toolresult.WebFetch{Success: true, URL: fetchedURL, Provider: string(fetchproviders.ProviderNative), Format: "text", ContentType: contentType, Content: &content, Length: &length}, nil
 }
 
 func buildFetchHTTPError(statusCode int, body []byte) error {

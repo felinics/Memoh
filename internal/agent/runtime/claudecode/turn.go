@@ -67,6 +67,7 @@ type turnRunner struct {
 	pendingCtrl     map[string]chan controlResult
 	inboundCancels  map[string]context.CancelFunc
 	memohMCPCallIDs map[string]struct{}
+	toolCalls       map[string]toolCall
 	doneOnce        sync.Once
 	permissionMode  string
 	runtimeMetadata map[string]any
@@ -114,6 +115,7 @@ func newTurnRunner(parent context.Context, input external.PromptInput, proc cliP
 		pendingCtrl:     map[string]chan controlResult{},
 		inboundCancels:  map[string]context.CancelFunc{},
 		memohMCPCallIDs: map[string]struct{}{},
+		toolCalls:       map[string]toolCall{},
 		runtimeMetadata: map[string]any{},
 		ready:           make(chan struct{}), steers: map[string]*pendingSteer{},
 		resultIDs: map[string]struct{}{},
@@ -358,6 +360,7 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 				}
 				toolName, input := canonicalDisplayToolCall(block.Name, input)
 				t.endText()
+				t.rememberToolCall(block.ID, toolName, input)
 				t.emit(event.StreamEvent{Type: event.ToolCallStart, ToolCallID: block.ID, ToolName: toolName, Input: input})
 			case "thinking":
 				t.completeThinking(block.Thinking)
@@ -385,6 +388,18 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 		if !ok {
 			return
 		}
+		// tool_use_result belongs to the whole line, so it can only be
+		// attributed to a result when the line carries just one.
+		results := 0
+		for _, block := range chat.Content {
+			if block.Type == "tool_result" {
+				results++
+			}
+		}
+		structured := msg.ToolUseResult
+		if results != 1 {
+			structured = nil
+		}
 		for _, block := range chat.Content {
 			if block.Type != "tool_result" {
 				continue
@@ -392,12 +407,10 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 			if t.isMemohMCPWrapper(block.ToolUseID, "") {
 				continue
 			}
-			var content any
-			if len(block.Content) > 0 {
-				_ = json.Unmarshal(block.Content, &content)
-			}
-			ev := event.StreamEvent{Type: event.ToolCallEnd, ToolCallID: block.ToolUseID, Result: content}
-			if block.IsError {
+			call := t.takeToolCall(block.ToolUseID)
+			result, failed := translateToolResult(call.name, call.input, block.Content, structured, block.IsError)
+			ev := event.StreamEvent{Type: event.ToolCallEnd, ToolCallID: block.ToolUseID, ToolName: call.name, Result: result}
+			if failed {
 				ev.Status = "failed"
 			}
 			t.emit(ev)
@@ -553,6 +566,28 @@ func (t *turnRunner) isMemohMCPWrapper(id, name string) bool {
 	}
 	_, ok := t.memohMCPCallIDs[id]
 	return ok
+}
+
+// toolCall is a started call, kept until its result arrives: the result line
+// names only the call id, and its translation depends on the tool.
+type toolCall struct {
+	name  string
+	input any
+}
+
+func (t *turnRunner) rememberToolCall(id, name string, input any) {
+	t.mu.Lock()
+	t.toolCalls[id] = toolCall{name: name, input: input}
+	t.mu.Unlock()
+}
+
+// takeToolCall returns the started call for a result and forgets it.
+func (t *turnRunner) takeToolCall(id string) toolCall {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	call := t.toolCalls[id]
+	delete(t.toolCalls, id)
+	return call
 }
 
 func (t *turnRunner) respondControlError(requestID, message string) {
