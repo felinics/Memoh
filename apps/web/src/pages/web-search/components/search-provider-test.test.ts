@@ -37,7 +37,7 @@ it('tests the saved provider with only the trimmed query and renders upstream te
   runSearch.mockResolvedValue({ data: { query: 'Memoh', results: [{ title: '<img src=x onerror=alert(1)>', url: 'javascript:alert(1)', description: 'Result' }] } })
   await mount('saved-id'); input('  Memoh  '); await flush()
   root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await flush()
-  await vi.waitFor(() => expect(runSearch).toHaveBeenCalledWith({ path: { id: 'saved-id' }, body: { query: 'Memoh' }, throwOnError: true }))
+  await vi.waitFor(() => expect(runSearch).toHaveBeenCalledWith({ path: { id: 'saved-id' }, body: { query: 'Memoh' }, signal: expect.any(AbortSignal), throwOnError: true }))
   expect(root.textContent).toContain('<img src=x onerror=alert(1)>')
   expect(root.querySelector('img')).toBeNull()
   expect(root.querySelector('a[href^="javascript:"]')).toBeNull()

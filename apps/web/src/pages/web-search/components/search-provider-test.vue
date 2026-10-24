@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { onScopeDispose, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
@@ -21,10 +21,12 @@ const form = useForm({
   })),
   initialValues: { query: '' },
 })
+let controller: AbortController | undefined
+onScopeDispose(() => controller?.abort())
 const { mutateAsync: runTest, isLoading } = useMutation({
-  mutation: async ({ id, query }: { id: string, query: string }) => {
+  mutation: async ({ id, query, signal }: { id: string, query: string, signal: AbortSignal }) => {
     const { data } = await postSearchProvidersByIdTest({
-      path: { id }, body: { query }, throwOnError: true,
+      path: { id }, body: { query }, signal, throwOnError: true,
     })
     return data
   },
@@ -32,16 +34,19 @@ const { mutateAsync: runTest, isLoading } = useMutation({
 const submit = form.handleSubmit(async ({ query }) => {
   if (!props.providerId || isLoading.value) return
   const id = props.providerId
+  controller = new AbortController()
+  const { signal } = controller
   result.value = undefined
   failure.value = ''
   try {
-    const data = await runTest({ id, query })
-    if (props.providerId === id) result.value = data
+    const data = await runTest({ id, query, signal })
+    if (!signal.aborted) result.value = data
   } catch (error) {
-    if (props.providerId === id) failure.value = resolveApiErrorMessage(error, t('webSearch.test.failed'))
+    if (!signal.aborted) failure.value = resolveApiErrorMessage(error, t('webSearch.test.failed'))
   }
 })
 watch(() => props.providerId, () => {
+  controller?.abort()
   result.value = undefined
   failure.value = ''
   form.resetForm()

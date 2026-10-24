@@ -225,7 +225,7 @@ func (h *SearchProvidersHandler) Test(c echo.Context) error {
 		if apperror.CodeOf(translated) != "" {
 			return translated
 		}
-		return apperror.New(apperror.CodeAgentProviderRequestRejected, nil)
+		return apperror.Wrap(apperror.CodeAgentProviderRequestRejected, err, nil)
 	}
 	return c.JSON(http.StatusOK, result)
 }

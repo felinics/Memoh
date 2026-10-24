@@ -153,21 +153,25 @@ func TestWebFetchProviderDeepSeek(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	config := mustJSON(t, map[string]any{"base_url": server.URL + "/", "api_key": "deepseek-key"})
-	provider := NewWebFetchProvider(slog.New(slog.DiscardHandler), nil, nil)
-	result, err := provider.callFetchProvider(context.Background(), "deepseek", config, targetURL, "auto")
-	if err != nil {
-		t.Fatalf("callFetchProvider() error = %v", err)
-	}
-	body := result.(map[string]any)
-	for key, want := range map[string]any{
-		"success": true, "url": targetURL, "provider": "deepseek", "format": "markdown",
-		"title": "Example article", "content": "# Example article\n\nArticle content.",
-		"length": len("# Example article\n\nArticle content."),
-	} {
-		if got := body[key]; got != want {
-			t.Errorf("%s = %v, want %v", key, got, want)
-		}
+	for _, suffix := range []string{"", "/", "/v1", "/v1/"} {
+		t.Run("base"+suffix, func(t *testing.T) {
+			config := mustJSON(t, map[string]any{"base_url": server.URL + suffix, "api_key": "deepseek-key"})
+			provider := NewWebFetchProvider(slog.New(slog.DiscardHandler), nil, nil)
+			result, err := provider.callFetchProvider(context.Background(), "deepseek", config, targetURL, "auto")
+			if err != nil {
+				t.Fatalf("callFetchProvider() error = %v", err)
+			}
+			body := result.(map[string]any)
+			for key, want := range map[string]any{
+				"success": true, "url": targetURL, "provider": "deepseek", "format": "markdown",
+				"title": "Example article", "content": "# Example article\n\nArticle content.",
+				"length": len("# Example article\n\nArticle content."),
+			} {
+				if got := body[key]; got != want {
+					t.Errorf("%s = %v, want %v", key, got, want)
+				}
+			}
+		})
 	}
 }
 
@@ -214,7 +218,7 @@ func TestWebFetchProviderDeepSeekRejectsInvalidResponses(t *testing.T) {
 		body   string
 		want   string
 	}{
-		{"upstream error", http.StatusPaymentRequired, `{"error":{"message":"Insufficient balance","type":"insufficient_balance"}}`, "fetch request failed (HTTP 402): Insufficient balance"},
+		{"upstream error", http.StatusPaymentRequired, `{"error":{"message":"Insufficient balance","type":"insufficient_balance"}}`, "web fetch: 402"},
 		{"malformed JSON", http.StatusOK, `<html>Not JSON</html>`, "invalid fetch response"},
 		{"missing content", http.StatusOK, `{"title":"No content"}`, "deepseek fetch returned empty content"},
 		{"empty content", http.StatusOK, `{"title":"No content","content":" \n "}`, "deepseek fetch returned empty content"},

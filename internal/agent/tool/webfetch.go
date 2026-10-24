@@ -219,6 +219,7 @@ func (*WebFetchProvider) callDeepSeekFetch(ctx context.Context, configJSON []byt
 		return nil, errors.New("deepseek fetch requires an HTTP(S) URL with a host and no credentials")
 	}
 	baseURL := strings.TrimRight(firstNonEmpty(stringValue(cfg["base_url"]), "https://api.deepseek.com"), "/")
+	baseURL = strings.TrimSuffix(baseURL, "/v1")
 	payload, _ := json.Marshal(map[string]string{"url": rawURL})
 	client := &http.Client{Timeout: parseFetchTimeout(configJSON, webFetchTimeout)}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/tools/fetch", bytes.NewReader(payload))
@@ -299,11 +300,7 @@ func (*WebFetchProvider) callCloudflareMarkdownFetch(ctx context.Context, config
 		return nil, errors.New("invalid fetch response")
 	}
 	if !raw.Success {
-		msg := "cloudflare markdown request failed"
-		if len(raw.Errors) > 0 && strings.TrimSpace(raw.Errors[0].Message) != "" {
-			msg = raw.Errors[0].Message
-		}
-		return nil, errors.New(msg)
+		return nil, webProviderHTTPError("cloudflare markdown", resp.StatusCode)
 	}
 	content := strings.TrimSpace(raw.Result)
 	return map[string]any{
@@ -380,18 +377,8 @@ func (*WebFetchProvider) processText(fetchedURL, contentType string, body []byte
 	return map[string]any{"success": true, "url": fetchedURL, "provider": string(fetchproviders.ProviderNative), "format": "text", "contentType": contentType, "content": content, "length": length}, nil
 }
 
-func buildFetchHTTPError(statusCode int, body []byte) error {
-	detail := extractJSONErrorMessage(body)
-	if detail == "" {
-		detail = strings.TrimSpace(string(body))
-	}
-	if len(detail) > 200 {
-		detail = detail[:200] + "..."
-	}
-	if detail != "" {
-		return fmt.Errorf("fetch request failed (HTTP %d): %s", statusCode, detail)
-	}
-	return fmt.Errorf("fetch request failed (HTTP %d)", statusCode)
+func buildFetchHTTPError(statusCode int, _ []byte) error {
+	return webProviderHTTPError("web fetch", statusCode)
 }
 
 func parseFetchTimeout(configJSON []byte, fallback time.Duration) time.Duration {

@@ -1,11 +1,13 @@
 package handlers_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -73,14 +75,44 @@ func TestFetchProviderTestRejectsUnsafeURLsBeforeCallingProvider(t *testing.T) {
 }
 
 func TestFetchProviderTestDoesNotExposeUpstreamErrors(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"error":{"message":"rejected saved-key private-provider-detail"}}`))
-	}))
-	defer upstream.Close()
-	rec := fetchTestRequest(fetchTestServer(t, upstream.URL), `{"url":"https://example.com"}`)
-	if rec.Code < 400 || rec.Code == http.StatusUnauthorized || strings.Contains(rec.Body.String(), "saved-key") || strings.Contains(rec.Body.String(), "private-provider-detail") {
-		t.Fatalf("unsafe error response: status = %d, body = %s", rec.Code, rec.Body.String())
+	for _, tc := range []struct {
+		provider string
+		status   int
+		body     string
+	}{
+		{"deepseek", http.StatusUnauthorized, `{"error":{"message":"rejected saved-key private-provider-detail"}}`},
+		{"cloudflare_markdown", http.StatusOK, `{"success":false,"errors":[{"message":"rejected saved-key private-provider-detail"}]}`},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer upstream.Close()
+			var logs bytes.Buffer
+			log := slog.New(slog.NewJSONHandler(&logs, nil))
+			config, err := json.Marshal(map[string]string{"base_url": upstream.URL, "api_key": "saved-key", "api_token": "saved-key", "account_id": "test-account"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			service := fetchproviders.NewService(log, &fetchTestQueries{row: sqlc.FetchProvider{Provider: tc.provider, Config: config}})
+			e := echo.New()
+			e.HTTPErrorHandler = server.NewHTTPErrorHandler(log)
+			e.Use(server.AccessLog(log))
+			handlers.NewFetchProvidersHandler(log, service, tools.NewWebFetchProvider(log, nil, service)).Register(e)
+			rec := fetchTestRequest(e, `{"url":"https://example.com"}`)
+			if rec.Code != http.StatusBadGateway {
+				t.Fatalf("unsafe error response: status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			for _, text := range []string{"saved-key", "private-provider-detail"} {
+				if strings.Contains(rec.Body.String()+logs.String(), text) {
+					t.Fatal("fetch test logged upstream credentials or response body")
+				}
+			}
+			if !strings.Contains(logs.String(), strconv.Itoa(tc.status)) {
+				t.Fatalf("fetch test lost upstream HTTP status: %s", logs.String())
+			}
+		})
 	}
 }
 
