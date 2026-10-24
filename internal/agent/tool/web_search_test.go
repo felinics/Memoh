@@ -50,6 +50,84 @@ func TestCallSearXNGSearchUsesCustomBearerHeader(t *testing.T) {
 	}
 }
 
+func TestCallSearchDeepSeek(t *testing.T) {
+	const apiKey = "sk-deepseek-test-key" //nolint:gosec // G101: test-only fixed credential.
+	var (
+		gotMethod      string
+		gotAuth        string
+		gotContentType string
+		gotBody        map[string]any
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotAuth = r.Header.Get("Authorization")
+		gotContentType = r.Header.Get("Content-Type")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"results":[` +
+			`{"title":"A","url":"https://a.example","snippet":"short a","summary":"long a","rerank_score":2.4},` +
+			`{"title":"B","url":"https://b.example","snippet":"short b","summary":""}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	config := []byte(`{"api_key":"` + apiKey + `","base_url":"` + server.URL + `"}`)
+	result, err := (&WebProvider{}).callSearch(t.Context(), string(searchproviders.ProviderDeepSeek), config, "deepseek search", 3)
+	if err != nil {
+		t.Fatalf("callSearch: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotAuth != "Bearer "+apiKey || gotContentType != "application/json" {
+		t.Fatalf("request = %s with Authorization %q, Content-Type %q", gotMethod, gotAuth, gotContentType)
+	}
+	if gotBody["query"] != "deepseek search" || gotBody["count"] != float64(3) {
+		t.Fatalf("request body = %v", gotBody)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	want := `{"query":"deepseek search","results":[` +
+		`{"description":"long a","title":"A","url":"https://a.example"},` +
+		`{"description":"short b","title":"B","url":"https://b.example"}]}`
+	if string(encoded) != want {
+		t.Fatalf("result = %s, want %s", encoded, want)
+	}
+}
+
+func TestCallSearchDeepSeekSurfacesAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"error":{"message":"Insufficient Balance","type":"invalid_request_error","param":null,"code":"invalid_request_error"}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	config := []byte(`{"api_key":"sk-test","base_url":"` + server.URL + `"}`)
+	_, err := (&WebProvider{}).callSearch(t.Context(), string(searchproviders.ProviderDeepSeek), config, "q", 1)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 402") || !strings.Contains(err.Error(), "Insufficient Balance") {
+		t.Fatalf("error = %v, want HTTP 402 with the API message", err)
+	}
+}
+
+func TestCallSearchDeepSeekLive(t *testing.T) {
+	apiKey := strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY"))
+	if apiKey == "" {
+		t.Skip("DEEPSEEK_API_KEY is required for the live test")
+	}
+	config, err := json.Marshal(map[string]any{"api_key": apiKey, "timeout_seconds": 30})
+	if err != nil {
+		t.Fatalf("marshal live config: %v", err)
+	}
+
+	result, err := (&WebProvider{}).callSearch(t.Context(), string(searchproviders.ProviderDeepSeek), config, "DeepSeek", 3)
+	if err != nil {
+		t.Fatalf("live DeepSeek search failed: %v", err)
+	}
+	results, _ := result.(map[string]any)["results"].([]map[string]any)
+	if len(results) == 0 || results[0]["url"] == "" || results[0]["description"] == "" {
+		t.Fatalf("live DeepSeek search returned unusable results: %v", results)
+	}
+}
+
 func TestRegisterSearchProviderSecretsIncludesSearXNGHeaders(t *testing.T) {
 	redact.ResetForTest()
 	t.Cleanup(redact.ResetForTest)

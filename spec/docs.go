@@ -26900,7 +26900,8 @@ const docTemplate = `{
                 "exa",
                 "bocha",
                 "duckduckgo",
-                "yandex"
+                "yandex",
+                "deepseek"
             ],
             "x-enum-varnames": [
                 "ProviderBrave",
@@ -26914,7 +26915,8 @@ const docTemplate = `{
                 "ProviderExa",
                 "ProviderBocha",
                 "ProviderDuckDuckGo",
-                "ProviderYandex"
+                "ProviderYandex",
+                "ProviderDeepSeek"
             ]
         },
         "searchproviders.UpdateRequest": {

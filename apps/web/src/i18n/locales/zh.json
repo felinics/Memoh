@@ -2099,7 +2099,8 @@
       "exa": "Exa",
       "bocha": "博查",
       "duckduckgo": "DuckDuckGo",
-      "yandex": "Yandex"
+      "yandex": "Yandex",
+      "deepseek": "DeepSeek"
     },
     "fetchProviderNames": {
       "native": "原生抓取",
