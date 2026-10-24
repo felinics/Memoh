@@ -68,6 +68,32 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 			},
 		},
 		{
+			Provider:    string(ProviderDeepSeek),
+			DisplayName: "DeepSeek Fetch",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"api_key": {
+						Type:        "secret",
+						Title:       "API Key",
+						Description: "DeepSeek API key",
+						Required:    true,
+					},
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "DeepSeek API base URL",
+						Example:     "https://api.deepseek.com",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "HTTP timeout in seconds",
+						Example:     30,
+					},
+				},
+			},
+		},
+		{
 			Provider:    string(ProviderCloudflareMarkdown),
 			DisplayName: "Cloudflare Markdown",
 			ConfigSchema: ProviderConfigSchema{
@@ -311,12 +337,13 @@ var defaultProviders = []struct {
 }{
 	{ProviderCloudflareMarkdown, "Cloudflare Markdown", false},
 	{ProviderJina, "Jina Reader", false},
+	{ProviderDeepSeek, "DeepSeek Fetch", false},
 	{ProviderNative, "Native", true},
 }
 
 func isValidProviderName(name ProviderName) bool {
 	switch name {
-	case ProviderNative, ProviderJina, ProviderCloudflareMarkdown:
+	case ProviderNative, ProviderJina, ProviderDeepSeek, ProviderCloudflareMarkdown:
 		return true
 	default:
 		return false

@@ -26,7 +26,7 @@ func (searchProviderRowQueries) GetSearchProviderByID(context.Context, pgtype.UU
 }
 
 func TestSearchProviderWritesAnswerInvalidProviderForAnUnknownType(t *testing.T) {
-	h := NewSearchProvidersHandler(slog.New(slog.DiscardHandler), searchproviders.NewService(slog.New(slog.DiscardHandler), searchProviderRowQueries{}))
+	h := NewSearchProvidersHandler(slog.New(slog.DiscardHandler), searchproviders.NewService(slog.New(slog.DiscardHandler), searchProviderRowQueries{}), nil)
 	cases := []struct {
 		name, method, target, body string
 	}{
@@ -70,7 +70,7 @@ func TestSearchProviderWritesAnswerTheConstraintTheyViolated(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			log := slog.New(slog.DiscardHandler)
-			h := NewSearchProvidersHandler(log, searchproviders.NewService(log, uniqueViolationQueries{constraint: tc.constraint}))
+			h := NewSearchProvidersHandler(log, searchproviders.NewService(log, uniqueViolationQueries{constraint: tc.constraint}), nil)
 			status, problem := serveProblem(t, h.Register, tc.method, tc.target, tc.body)
 			if status != http.StatusConflict || problem.Code != string(tc.code) || problem.Fault != "client" {
 				t.Fatalf("answer = %d %s %s, want 409 %s client", status, problem.Code, problem.Fault, tc.code)

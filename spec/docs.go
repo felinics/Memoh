@@ -13325,6 +13325,72 @@ const docTemplate = `{
                 }
             }
         },
+        "/fetch-providers/{id}/test": {
+            "post": {
+                "description": "Fetch a URL using the saved configuration without saving changes or enabling the provider.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "fetch-providers"
+                ],
+                "summary": "Test a saved fetch provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "URL to fetch",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/fetchproviders.TestRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/memory/config": {
             "get": {
                 "description": "Get the team-level Built-in Memory configuration",
@@ -14923,6 +14989,66 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/search-providers/{id}/test": {
+            "post": {
+                "description": "Run a query with the saved provider configuration using the web_search execution path. Disabled providers can be tested without enabling them.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "search-providers"
+                ],
+                "summary": "Test a saved search provider",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Search test query",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/searchproviders.TestRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
@@ -19727,6 +19853,10 @@ const docTemplate = `{
                 "channel_identity_id": {
                     "type": "string"
                 },
+                "excluded_target": {
+                    "description": "ExcludedTarget is checked after platform target resolution, before publication.",
+                    "type": "string"
+                },
                 "message": {
                     "$ref": "#/definitions/channel.Message"
                 },
@@ -21580,13 +21710,26 @@ const docTemplate = `{
             "enum": [
                 "native",
                 "jina",
+                "deepseek",
                 "cloudflare_markdown"
             ],
             "x-enum-varnames": [
                 "ProviderNative",
                 "ProviderJina",
+                "ProviderDeepSeek",
                 "ProviderCloudflareMarkdown"
             ]
+        },
+        "fetchproviders.TestRequest": {
+            "type": "object",
+            "required": [
+                "url"
+            ],
+            "properties": {
+                "url": {
+                    "type": "string"
+                }
+            }
         },
         "fetchproviders.UpdateRequest": {
             "type": "object",
@@ -27002,6 +27145,20 @@ const docTemplate = `{
                 "ProviderDuckDuckGo",
                 "ProviderYandex"
             ]
+        },
+        "searchproviders.TestRequest": {
+            "type": "object",
+            "required": [
+                "query"
+            ],
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "query": {
+                    "type": "string"
+                }
+            }
         },
         "searchproviders.UpdateRequest": {
             "type": "object",

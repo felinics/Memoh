@@ -1,12 +1,23 @@
 package fetchproviders
 
-import "time"
+import (
+	"context"
+	"time"
+
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+)
+
+// Fetcher executes the configured provider without selecting a bot or changing its configuration.
+type Fetcher interface {
+	Fetch(context.Context, sqlc.FetchProvider, string, string) (any, error)
+}
 
 type ProviderName string
 
 const (
 	ProviderNative             ProviderName = "native"
 	ProviderJina               ProviderName = "jina"
+	ProviderDeepSeek           ProviderName = "deepseek"
 	ProviderCloudflareMarkdown ProviderName = "cloudflare_markdown"
 )
 
@@ -27,6 +38,10 @@ type ProviderMeta struct {
 	Provider     string               `json:"provider"`
 	DisplayName  string               `json:"display_name"`
 	ConfigSchema ProviderConfigSchema `json:"config_schema"`
+}
+
+type TestRequest struct {
+	URL string `json:"url" validate:"required"`
 }
 
 type CreateRequest struct {

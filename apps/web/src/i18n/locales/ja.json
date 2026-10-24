@@ -2022,6 +2022,18 @@
     }
   },
   "webSearch": {
+    "test": {
+      "title": "検索テスト",
+      "query": "検索キーワード",
+      "queryPlaceholder": "例：Memoh ドキュメント",
+      "savedConfig": "保存済みの設定を使用します。変更後は保存してからテストしてください。",
+      "saveFirst": "このプロバイダーを保存してからテストしてください。",
+      "queryRequired": "検索キーワードを入力してください。",
+      "queryTooLong": "128 文字以内で入力してください。",
+      "run": "検索をテスト",
+      "failed": "検索テストに失敗しました。保存済みの設定を確認して再試行してください。",
+      "results": "結果（{count}）"
+    },
     "title": "ウェブ検索",
     "add": "追加",
     "addSearch": "Web検索の追加",
@@ -2046,6 +2058,13 @@
     "selectHint": "Web 検索プロバイダーを選択または作成します",
     "unsupportedProvider": "このプロバイダーには設定パネルがまだありません",
     "nativeManaged": "ネイティブは Memoh によって管理され、常に有効になります。",
+    "testFetchTitle": "取得テスト",
+    "testFetch": "URL を取得",
+    "testUrl": "URL",
+    "testSavedConfig": "保存済みの設定を使用します。変更は保存してからテストしてください。プロバイダーの料金が発生する場合があります。",
+    "testSaveFirst": "テストする前にプロバイダーの設定を保存してください。",
+    "testSucceeded": "取得した内容",
+    "testFailed": "取得テストに失敗しました。保存済みの設定を確認して再試行してください。",
     "saveSuccess": "Web 検索プロバイダーを保存しました",
     "deleteSuccess": "Web 検索プロバイダーを削除しました",
     "deleteFailed": "Web 検索プロバイダーの削除に失敗しました",
@@ -2073,7 +2092,8 @@
     "fetchProviderNames": {
       "native": "ネイティブ取得",
       "jina": "Jina Reader",
-      "cloudflare_markdown": "Cloudflare Markdown"
+      "cloudflare_markdown": "Cloudflare Markdown",
+      "deepseek": "DeepSeek Fetch"
     }
   },
   "memory": {

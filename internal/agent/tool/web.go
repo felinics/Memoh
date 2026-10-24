@@ -85,8 +85,6 @@ func (p *WebProvider) execWebSearch(ctx context.Context, session SessionContext,
 	if !provider.Enable {
 		return nil, errors.New("search provider is disabled")
 	}
-	registerSearchProviderSecrets(provider)
-
 	query := strings.TrimSpace(args.Query)
 	if query == "" {
 		return nil, errors.New("query is required")
@@ -98,6 +96,12 @@ func (p *WebProvider) execWebSearch(ctx context.Context, session SessionContext,
 	if count > 20 {
 		count = 20
 	}
+	return p.Search(ctx, provider, query, count)
+}
+
+// Search executes a saved provider request for both web_search and connection tests.
+func (p *WebProvider) Search(ctx context.Context, provider sqlc.SearchProvider, query string, count int) (any, error) {
+	registerSearchProviderSecrets(provider)
 	return p.callSearch(ctx, provider.Provider, provider.Config, query, count)
 }
 
@@ -362,7 +366,7 @@ func callSogouSearch(ctx context.Context, configJSON []byte, query string, count
 		return nil, errors.New("invalid search response")
 	}
 	if rawResp.Response.Error != nil {
-		return nil, fmt.Errorf("sogou search failed: %s", rawResp.Response.Error.Message)
+		return nil, webProviderHTTPError("sogou search", resp.StatusCode)
 	}
 	type sogouPage struct {
 		Title, URL, Passage string
@@ -715,41 +719,27 @@ func buildSearchResults[T any](query string, items []T, mapper func(T) map[strin
 	return map[string]any{"query": query, "results": results}
 }
 
-func buildSearchHTTPError(statusCode int, body []byte) error {
-	detail := extractJSONErrorMessage(body)
-	if detail == "" {
-		detail = strings.TrimSpace(string(body))
-	}
-	detail = redact.Text(detail)
-	if len(detail) > 200 {
-		detail = detail[:200] + "..."
-	}
-	if detail != "" {
-		return fmt.Errorf("search request failed (HTTP %d): %s", statusCode, detail)
-	}
-	return fmt.Errorf("search request failed (HTTP %d)", statusCode)
+func buildSearchHTTPError(statusCode int, _ []byte) error {
+	return webProviderHTTPError("web search", statusCode)
 }
 
-func extractJSONErrorMessage(body []byte) string {
-	var obj map[string]any
-	if json.Unmarshal(body, &obj) != nil {
-		return ""
+// Upstream bodies can echo credentials and submitted content. Keep only the
+// HTTP status and classification, including in diagnostic cause chains.
+func webProviderHTTPError(provider string, statusCode int) error {
+	kind := sdk.KindUnknown
+	switch {
+	case statusCode == http.StatusUnauthorized:
+		kind = sdk.KindAuthentication
+	case statusCode == http.StatusPaymentRequired:
+		kind = sdk.KindQuotaExhausted
+	case statusCode == http.StatusForbidden:
+		kind = sdk.KindPermissionDenied
+	case statusCode == http.StatusTooManyRequests:
+		kind = sdk.KindRateLimited
+	case statusCode >= 500 && statusCode <= 599 && statusCode != http.StatusNotImplemented && statusCode != http.StatusHTTPVersionNotSupported:
+		kind = sdk.KindServerError
 	}
-	for _, key := range []string{"error", "message", "detail", "error_message"} {
-		v, ok := obj[key]
-		if !ok {
-			continue
-		}
-		switch val := v.(type) {
-		case string:
-			return val
-		case map[string]any:
-			if msg, ok := val["message"].(string); ok {
-				return msg
-			}
-		}
-	}
-	return ""
+	return &sdk.APIError{Provider: provider, StatusCode: statusCode, Kind: kind}
 }
 
 func parseSearchTimeout(configJSON []byte, fallback time.Duration) time.Duration {
