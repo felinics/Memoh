@@ -7,7 +7,6 @@ import (
 
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/bots"
-	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/workspace"
 )
 
@@ -66,16 +65,10 @@ func TestInjectWorkspaceTransitionRecordsMarksComputerChanges(t *testing.T) {
 	}
 
 	got := injectWorkspaceTransitionRecords(records)
-	if len(got) != 5 {
-		t.Fatalf("record count = %d, want 5", len(got))
+	if len(got) != 4 || got[0].Synthetic || !got[2].Synthetic {
+		t.Fatalf("records = %#v, want one marker, at the switch", recordTexts(got))
 	}
-	if got[0].ModelMessage.Role != "system" || !strings.Contains(got[0].ModelMessage.TextContent(), "Computer B") {
-		t.Fatalf("initial marker = %#v", got[0].ModelMessage)
-	}
-	if got[3].ModelMessage.Role != "system" {
-		t.Fatalf("switch marker role = %q, want system", got[3].ModelMessage.Role)
-	}
-	switchText := got[3].ModelMessage.TextContent()
+	switchText := got[2].ModelMessage.TextContent()
 	for _, want := range []string{"Computer B", "Server Workspace", "do not transfer"} {
 		if !strings.Contains(switchText, want) {
 			t.Fatalf("switch marker %q does not contain %q", switchText, want)
@@ -89,91 +82,33 @@ func TestInjectWorkspaceTransitionRecordsIgnoresLegacyStartingFolderChanges(t *t
 		workspaceHistoryRecord("user", "second", "computer-a", "remote", "Computer A", "/work/two"),
 	}
 
-	got := injectWorkspaceTransitionRecords(records)
-	if len(got) != 3 {
-		t.Fatalf("record count = %d, want 3", len(got))
-	}
-	if strings.Contains(got[0].ModelMessage.TextContent(), "starting_folder") {
-		t.Fatalf("legacy workspace_path leaked into marker: %#v", got[0].ModelMessage)
+	if got := injectWorkspaceTransitionRecords(records); len(got) != 2 {
+		t.Fatalf("records = %#v, want no marker for a folder change", recordTexts(got))
 	}
 }
 
-func TestWorkspaceTransitionRendererMatchesLiveAndReplay(t *testing.T) {
-	current := &WorkspaceTarget{TargetID: "computer-b", Kind: "remote", Name: "Computer B"}
-	service := &Service{}
-	live := service.currentWorkspaceContextMessage(t.Context(), ChatRequest{WorkspaceTarget: current})
-	if live == nil {
-		t.Fatal("initial live context must include a workspace snapshot")
+// The marker a request sends is the one the next turn replays for its row,
+// and where the history window starts never adds one: a turn whose earlier
+// rows were compacted renders its rows exactly as it sent them.
+func TestWorkspaceTransitionMarkerMatchesLiveAndReplay(t *testing.T) {
+	a := workspaceHistoryRecord("user", "on a", "computer-a", "remote", "Computer A", "/a")
+	b := workspaceHistoryRecord("user", "to b", "computer-b", "remote", "Computer B", "/b")
+	targetB := &WorkspaceTarget{TargetID: "computer-b", Kind: "remote", Name: "Computer B"}
+
+	if got := currentWorkspaceTransitionMessage(nil, targetB); got != nil {
+		t.Fatalf("first request marker = %q, want none", got.TextContent())
+	}
+	if got := injectWorkspaceTransitionRecords([]historyfrag.HistoryRecord{b}); len(got) != 1 {
+		t.Fatalf("window starting at a located row = %#v, want no marker", recordTexts(got))
+	}
+	if got := currentWorkspaceTransitionMessage([]historyfrag.HistoryRecord{b}, targetB); got != nil {
+		t.Fatalf("unchanged target marker = %q, want none", got.TextContent())
 	}
 
-	replayed := injectWorkspaceTransitionRecords([]historyfrag.HistoryRecord{
-		workspaceHistoryRecord("user", "first", current.TargetID, current.Kind, current.Name, "/work/b"),
-	})
-	if len(replayed) != 2 {
-		t.Fatalf("replayed records = %d, want marker + message", len(replayed))
-	}
-	if got, want := live.TextContent(), replayed[0].ModelMessage.TextContent(); got != want {
-		t.Fatalf("initial live/replay marker mismatch:\nlive:   %s\nreplay: %s", got, want)
-	}
-}
-
-func TestCurrentWorkspaceContextMessageOmitsUnchangedTarget(t *testing.T) {
-	current := &WorkspaceTarget{TargetID: "computer-b", Kind: "remote", Name: "Computer B"}
-	service := &Service{
-		sessionService: &fakeBackgroundSessionService{
-			getFn: func(context.Context, string) (sessionpkg.Thread, error) {
-				return sessionpkg.Thread{Metadata: map[string]any{
-					"workspace_target": map[string]any{
-						"target_id": current.TargetID,
-						"kind":      current.Kind,
-						"name":      current.Name,
-					},
-				}}, nil
-			},
-		},
-	}
-
-	if got := service.currentWorkspaceContextMessage(t.Context(), ChatRequest{
-		ThreadID:        "session-1",
-		WorkspaceTarget: current,
-	}); got != nil {
-		t.Fatalf("unchanged workspace marker = %q, want nil", got.TextContent())
-	}
-}
-
-func TestWorkspaceTransitionRendererMatchesLiveAndReplayAfterChange(t *testing.T) {
-	previous := &WorkspaceTarget{TargetID: "computer-a", Kind: "remote", Name: "Computer A"}
-	current := &WorkspaceTarget{TargetID: "computer-b", Kind: "remote", Name: "Computer B"}
-	service := &Service{
-		sessionService: &fakeBackgroundSessionService{
-			getFn: func(context.Context, string) (sessionpkg.Thread, error) {
-				return sessionpkg.Thread{Metadata: map[string]any{
-					"workspace_target": map[string]any{
-						"target_id": previous.TargetID,
-						"kind":      previous.Kind,
-						"name":      previous.Name,
-					},
-				}}, nil
-			},
-		},
-	}
-	live := service.currentWorkspaceContextMessage(t.Context(), ChatRequest{
-		ThreadID:        "session-1",
-		WorkspaceTarget: current,
-	})
-	if live == nil {
-		t.Fatal("changed live context must include a workspace transition")
-	}
-
-	replayed := injectWorkspaceTransitionRecords([]historyfrag.HistoryRecord{
-		workspaceHistoryRecord("user", "first", previous.TargetID, previous.Kind, previous.Name, "/work/a"),
-		workspaceHistoryRecord("user", "second", current.TargetID, current.Kind, current.Name, "/work/b"),
-	})
-	if len(replayed) != 4 {
-		t.Fatalf("replayed records = %d, want two markers + two messages", len(replayed))
-	}
-	if got, want := live.TextContent(), replayed[2].ModelMessage.TextContent(); got != want {
-		t.Fatalf("changed live/replay marker mismatch:\nlive:   %s\nreplay: %s", got, want)
+	live := currentWorkspaceTransitionMessage(injectWorkspaceTransitionRecords([]historyfrag.HistoryRecord{a}), targetB)
+	replayed := injectWorkspaceTransitionRecords([]historyfrag.HistoryRecord{a, b})
+	if live == nil || len(replayed) != 3 || live.TextContent() != replayed[1].ModelMessage.TextContent() {
+		t.Fatalf("live %v and replay %#v disagree on the switch marker", live, recordTexts(replayed))
 	}
 }
 
@@ -199,35 +134,7 @@ func TestHistoryMessagesDeriveWorkspaceMarkers(t *testing.T) {
 		workspaceHistoryRecord("user", "to b", "computer-b", "remote", "Computer B", "/b"),
 	}
 	messages, retained := historyMessagesFromRecords(raw)
-	if len(retained) != 4 || len(messages) != 4 {
-		t.Fatalf("retained/messages = %d/%d, want two markers and two messages", len(retained), len(messages))
+	if len(retained) != 3 || len(messages) != 3 || !retained[1].Synthetic {
+		t.Fatalf("retained = %#v, want the switch marker between the two messages", recordTexts(retained))
 	}
-	assertGovernedWorkspaceRuns(t, retained)
-}
-
-// assertGovernedWorkspaceRuns fails when any kept message carrying an
-// execution location is not preceded by a marker for that location.
-func assertGovernedWorkspaceRuns(t *testing.T, retained []historyfrag.HistoryRecord) {
-	t.Helper()
-	current := ""
-	for index, record := range retained {
-		if record.Synthetic {
-			continue
-		}
-		target := workspaceTargetFromMetadata(record.Metadata)
-		if target == nil {
-			continue
-		}
-		governed := false
-		for _, earlier := range retained[:index] {
-			if earlier.Synthetic && strings.Contains(earlier.ModelMessage.TextContent(), "target_id=\""+target.TargetID+"\"") {
-				governed = true
-			}
-		}
-		if !governed {
-			t.Fatalf("record %d (%s) is not governed by a marker for %s: %#v", index, record.ModelMessage.TextContent(), target.TargetID, recordTexts(retained))
-		}
-		current = target.TargetID
-	}
-	_ = current
 }

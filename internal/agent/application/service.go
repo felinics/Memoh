@@ -566,7 +566,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		forkMessageCount = normalizedContextPrefixLength(messages, len(forkContext))
 	}
 	historyMessageCount := len(messages)
-	if notice := s.currentWorkspaceContextMessage(ctx, req); notice != nil {
+	if notice := currentWorkspaceTransitionMessage(historyRecords, req.WorkspaceTarget); notice != nil {
 		messages = append(messages, *notice)
 	}
 	var memoryMessageIndex *int

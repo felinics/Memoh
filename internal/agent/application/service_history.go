@@ -15,6 +15,11 @@ import (
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
+// injectWorkspaceTransitionRecords marks every switch of Computer between
+// consecutive located records. The first located record in the window gets
+// no marker: the turn's default Computer is stated by the tool usage, and a
+// marker derived from where the window happens to start would render a row
+// differently from the request that first sent it.
 func injectWorkspaceTransitionRecords(records []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
 	if len(records) == 0 {
 		return records
@@ -22,12 +27,13 @@ func injectWorkspaceTransitionRecords(records []historyfrag.HistoryRecord) []his
 	result := make([]historyfrag.HistoryRecord, 0, len(records)+2)
 	var previous *WorkspaceTarget
 	for _, record := range records {
-		if current := workspaceTargetFromMetadata(record.Metadata); current != nil && !sameWorkspaceTarget(previous, current) {
-			text := renderWorkspaceTransition(previous, current)
-			result = append(result, historyfrag.HistoryRecord{
-				ModelMessage: ModelMessage{Role: "system", Content: newTextContent(text)},
-				Synthetic:    true,
-			})
+		if current := workspaceTargetFromMetadata(record.Metadata); current != nil {
+			if text := renderWorkspaceTransition(previous, current); text != "" {
+				result = append(result, historyfrag.HistoryRecord{
+					ModelMessage: ModelMessage{Role: "system", Content: newTextContent(text)},
+					Synthetic:    true,
+				})
+			}
 			previous = current
 		}
 		result = append(result, record)
@@ -36,19 +42,8 @@ func injectWorkspaceTransitionRecords(records []historyfrag.HistoryRecord) []his
 }
 
 func renderWorkspaceTransition(previous, current *WorkspaceTarget) string {
-	if current == nil || strings.TrimSpace(current.TargetID) == "" {
+	if previous == nil || current == nil || sameWorkspaceTarget(previous, current) {
 		return ""
-	}
-	if previous != nil && sameWorkspaceTarget(previous, current) {
-		return ""
-	}
-	if previous == nil {
-		return fmt.Sprintf(
-			"[Execution location] The default Computer is %q (target_id=%q, kind=%q). Workspace tools that omit target_id run there.",
-			current.Name,
-			current.TargetID,
-			current.Kind,
-		)
 	}
 	return fmt.Sprintf(
 		"[Execution location changed] The default Computer changed from %q (target_id=%q, kind=%q) to %q (target_id=%q, kind=%q). Earlier file and command results belong to their recorded Computer. Files, processes, and working-directory state do not transfer between Computers; inspect the new Computer before continuing.",
@@ -91,18 +86,17 @@ func workspaceTargetFromMetadata(metadata map[string]any) *WorkspaceTarget {
 	return target
 }
 
-func (s *Service) currentWorkspaceContextMessage(ctx context.Context, req ChatRequest) *ModelMessage {
-	current := req.WorkspaceTarget
+// currentWorkspaceTransitionMessage marks a switch of Computer at the current
+// request, against the last located record of the history it is sent with —
+// the record a later replay compares the request row with, so the marker this
+// request sends is the one the next turn replays.
+func currentWorkspaceTransitionMessage(history []historyfrag.HistoryRecord, current *WorkspaceTarget) *ModelMessage {
 	if current == nil || strings.TrimSpace(current.TargetID) == "" {
 		return nil
 	}
 	var previous *WorkspaceTarget
-	if s != nil && s.sessionService != nil && strings.TrimSpace(req.ThreadID) != "" {
-		if sess, err := s.sessionService.Get(ctx, req.ThreadID); err == nil {
-			if raw, ok := sess.Metadata["workspace_target"].(map[string]any); ok {
-				previous = workspaceTargetFromMetadata(map[string]any{"execution_location": raw})
-			}
-		}
+	for i := len(history) - 1; i >= 0 && previous == nil; i-- {
+		previous = workspaceTargetFromMetadata(history[i].Metadata)
 	}
 	text := renderWorkspaceTransition(previous, current)
 	if text == "" {
