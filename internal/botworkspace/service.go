@@ -56,9 +56,15 @@ type Options struct {
 	SlowRetryInterval time.Duration
 	Batch             int32
 	Concurrency       int
-	ProvisionTimeout  time.Duration
-	TeardownTimeout   time.Duration
-	WriteTimeout      time.Duration
+	// TeardownConcurrency gives removals (rows whose desired state is absent)
+	// slots of their own beside Concurrency's, so a removal never waits
+	// behind provisionings. Zero, the default, keeps one pool of Concurrency
+	// slots for both: a removal that exports data competes with image pulls
+	// for the same host.
+	TeardownConcurrency int
+	ProvisionTimeout    time.Duration
+	TeardownTimeout     time.Duration
+	WriteTimeout        time.Duration
 }
 
 func (o Options) withDefaults() Options {
@@ -138,8 +144,10 @@ type Service struct {
 	kick      chan struct{}
 	lastDrift time.Time
 
-	runMu   sync.Mutex
-	running map[string]struct{}
+	runMu sync.Mutex
+	// running maps each row this process is reconciling to the slot pool it
+	// holds.
+	running map[string]pool
 
 	stop   chan struct{}
 	done   chan struct{}
@@ -161,7 +169,7 @@ func New(repo Repository, backend Backend, log *slog.Logger, opts Options) *Serv
 		rnd:     rand.Float64,
 		subs:    make(map[string]map[chan ProgressEvent]struct{}),
 		kick:    make(chan struct{}, 1),
-		running: make(map[string]struct{}),
+		running: make(map[string]pool),
 		stop:    make(chan struct{}),
 		done:    make(chan struct{}),
 	}
@@ -389,7 +397,7 @@ func (s *Service) loop(ctx context.Context) {
 		case <-ticker.C:
 		case <-s.kick:
 		}
-		if _, err := s.reconcileOnce(ctx, &wg); err != nil {
+		if _, _, _, err := s.reconcileOnce(ctx, &wg); err != nil {
 			s.event(ctx, "reconcile pass failed", errs.Wrap(err, "claim workspaces"))
 		}
 		if s.now().Sub(s.lastDrift) >= s.opts.DriftInterval {
@@ -402,25 +410,67 @@ func (s *Service) loop(ctx context.Context) {
 // ReconcileOnce runs a single pass synchronously (tests, admin tooling).
 func (s *Service) ReconcileOnce(ctx context.Context) (int, error) {
 	var wg sync.WaitGroup
-	n, err := s.reconcileOnce(ctx, &wg)
+	n, _, _, err := s.reconcileOnce(ctx, &wg)
 	wg.Wait()
 	return n, err
 }
 
-func (s *Service) reconcileOnce(ctx context.Context, wg *sync.WaitGroup) (int, error) {
-	limit := s.freeSlots()
+// pool names the slots a claimed row runs in: the desired state its rows are
+// claimed by, or poolShared when removals have no slots of their own.
+type pool string
+
+const (
+	poolShared    pool = ""
+	poolRemoval   pool = DesiredAbsent
+	poolProvision pool = DesiredPresent
+)
+
+// pools lists the pools a pass claims for, removals first.
+func (s *Service) pools() []pool {
+	if s.opts.TeardownConcurrency > 0 {
+		return []pool{poolRemoval, poolProvision}
+	}
+	return []pool{poolShared}
+}
+
+func (s *Service) poolSize(p pool) int {
+	if p == poolRemoval {
+		return s.opts.TeardownConcurrency
+	}
+	return s.opts.Concurrency
+}
+
+// reconcileOnce claims due rows for the free slots of every pool and starts
+// them. It reports what the pass may have left behind for want of a slot:
+// skipped, a pool had no free slot, so its rows were not looked at; more, a
+// pool's claim returned as many rows as it asked for.
+func (s *Service) reconcileOnce(ctx context.Context, wg *sync.WaitGroup) (started int, skipped, more bool, err error) {
+	for _, p := range s.pools() {
+		n, poolSkipped, poolMore, err := s.claimInto(ctx, wg, p)
+		started += n
+		skipped = skipped || poolSkipped
+		more = more || poolMore
+		if err != nil {
+			return started, skipped, more, err
+		}
+	}
+	return started, skipped, more, nil
+}
+
+// claimInto claims due rows for the free slots of one pool and starts them.
+func (s *Service) claimInto(ctx context.Context, wg *sync.WaitGroup, p pool) (started int, skipped, more bool, err error) {
+	limit := s.freeSlots(p)
 	if limit == 0 {
-		return 0, nil
+		return 0, true, false, nil
 	}
 	claimCtx, cancel := context.WithTimeout(ctx, s.opts.WriteTimeout)
-	rows, err := s.repo.Claim(claimCtx, s.opts.Owner, s.opts.Lease, limit)
+	rows, err := s.repo.Claim(claimCtx, s.opts.Owner, s.opts.Lease, string(p), limit)
 	cancel()
 	if err != nil {
-		return 0, err
+		return 0, false, false, err
 	}
-	started := 0
 	for _, w := range rows {
-		if !s.markRunning(w.BotID) {
+		if !s.markRunning(w.BotID, p) {
 			// This instance is still processing the row (its lease expired but
 			// the goroutine is alive). Do not release: Release matches by
 			// owner and would strip the lease from the running goroutine. The
@@ -432,20 +482,42 @@ func (s *Service) reconcileOnce(ctx context.Context, wg *sync.WaitGroup) (int, e
 		wg.Add(1)
 		go func(w Workspace) {
 			defer wg.Done()
-			defer s.unmarkRunning(w.BotID)
-			s.reconcileOne(ctx, w)
+			touched := false
+			defer func() {
+				s.unmarkRunning(w.BotID)
+				// The freed slot may be what a waiting row needs: an intent
+				// that arrived while every slot was busy, rows a pass had to
+				// leave behind, or this very row, released with an intent that
+				// arrived while it was leased (a removal requested
+				// mid-creation). The loop runs now rather than on the next
+				// tick. A row released untouched kicks nothing: the claim
+				// found it due where Decide did not (their clocks differ), and
+				// a kick would claim it again at once, over and over until the
+				// clocks agree. The price is small: work that found the only
+				// slot held by such a row for those few milliseconds waits for
+				// the next kick or tick, as all waiting work did before.
+				if touched {
+					s.Kick()
+				}
+			}()
+			touched = s.reconcileOne(ctx, w)
 		}(w)
 	}
-	return started, nil
+	return started, false, len(rows) >= int(limit), nil
 }
 
-// freeSlots is how many rows a pass may claim: a claimed row holds a lease,
-// so claiming more than can start immediately would park leased rows in a
-// queue until the lease expires and another instance takes them over.
-func (s *Service) freeSlots() int32 {
+// freeSlots is how many rows a pass may claim for a pool: a claimed row holds
+// a lease, so claiming more than can start immediately would park leased rows
+// in a queue until the lease expires and another instance takes them over.
+func (s *Service) freeSlots(p pool) int32 {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
-	free := s.opts.Concurrency - len(s.running)
+	free := s.poolSize(p)
+	for _, held := range s.running {
+		if held == p {
+			free--
+		}
+	}
 	if free <= 0 {
 		return 0
 	}
@@ -455,13 +527,15 @@ func (s *Service) freeSlots() int32 {
 	return int32(free) //nolint:gosec // free <= Batch, which is an int32
 }
 
-func (s *Service) markRunning(botID string) bool {
+// markRunning reserves a slot of pool p for the row. A row is processed once
+// per process whichever pool it was claimed for.
+func (s *Service) markRunning(botID string, p pool) bool {
 	s.runMu.Lock()
 	defer s.runMu.Unlock()
 	if _, ok := s.running[botID]; ok {
 		return false
 	}
-	s.running[botID] = struct{}{}
+	s.running[botID] = p
 	return true
 }
 
@@ -471,7 +545,9 @@ func (s *Service) unmarkRunning(botID string) {
 	delete(s.running, botID)
 }
 
-func (s *Service) reconcileOne(ctx context.Context, w Workspace) {
+// reconcileOne acts on a claimed row. touched is false when nothing was
+// written or run: the row was only released, or its catch-up write failed.
+func (s *Service) reconcileOne(ctx context.Context, w Workspace) (touched bool) {
 	switch Decide(w, s.now()) {
 	case ActionNone:
 		if w.ObservedGeneration < w.DesiredGeneration {
@@ -480,8 +556,9 @@ func (s *Service) reconcileOne(ctx context.Context, w Workspace) {
 				Attempts: 0, NextAttemptAt: s.now(), ReleaseLease: true,
 			}); err != nil {
 				s.event(ctx, "catch up generation failed", errs.Wrap(err, "catch up observed generation"), slog.String("bot_id", w.BotID))
+				return false
 			}
-			return
+			return true
 		}
 		s.release(ctx, w.BotID)
 	case ActionWait:
@@ -490,11 +567,14 @@ func (s *Service) reconcileOne(ctx context.Context, w Workspace) {
 		_ = job.Run(ctx, s.log, "workspace.provision", job.Options{}, func(ctx context.Context) error {
 			return s.provision(ctx, w)
 		}, workspaceAttrs(w)...)
+		return true
 	case ActionTeardown:
 		_ = job.Run(ctx, s.log, "workspace.teardown", job.Options{}, func(ctx context.Context) error {
 			return s.teardown(ctx, w)
 		}, workspaceAttrs(w)...)
+		return true
 	}
+	return false
 }
 
 func workspaceAttrs(w Workspace) []slog.Attr {

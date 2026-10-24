@@ -20,6 +20,13 @@ type memRepo struct {
 	// beforeWrite runs (under the lock) before every observed write; tests
 	// use it to simulate a concurrent takeover.
 	beforeWrite func(w *Workspace)
+	claims      int // Claim calls
+}
+
+func (r *memRepo) claimCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.claims
 }
 
 func newMemRepo(now func() time.Time) *memRepo {
@@ -105,15 +112,16 @@ func (r *memRepo) due(w *Workspace) bool {
 	return false
 }
 
-func (r *memRepo) Claim(_ context.Context, owner string, lease time.Duration, limit int32) ([]Workspace, error) {
+func (r *memRepo) Claim(_ context.Context, owner string, lease time.Duration, desired string, limit int32) ([]Workspace, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.claims++
 	var out []Workspace
 	for _, w := range r.rows {
 		if len(out) >= int(limit) {
 			break
 		}
-		if !r.due(w) {
+		if !r.due(w) || (desired != "" && w.Desired != desired) {
 			continue
 		}
 		w.LeaseOwner = owner
@@ -260,6 +268,76 @@ func (b *fakeBackend) HasPreservedData(string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.preserved
+}
+
+// gatedBackend holds the provisioning of one bot until the test opens its
+// gate, keeping a slot busy for as long as the test needs.
+type gatedBackend struct {
+	*fakeBackend
+	gated     string
+	entered   chan struct{}
+	gate      chan struct{}
+	enterOnce sync.Once
+	openOnce  sync.Once
+}
+
+func newGatedBackend(gated string) *gatedBackend {
+	return &gatedBackend{fakeBackend: &fakeBackend{}, gated: gated, entered: make(chan struct{}), gate: make(chan struct{})}
+}
+
+func (b *gatedBackend) Provision(ctx context.Context, botID, image string, progress func(ProgressEvent)) error {
+	if botID == b.gated {
+		b.enterOnce.Do(func() { close(b.entered) })
+		<-b.gate
+	}
+	return b.fakeBackend.Provision(ctx, botID, image, progress)
+}
+
+func (b *gatedBackend) open() { b.openOnce.Do(func() { close(b.gate) }) }
+
+// awaitEntered waits until the gated provisioning holds its slot.
+func (b *gatedBackend) awaitEntered(t *testing.T) {
+	t.Helper()
+	select {
+	case <-b.entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the gated provisioning never started")
+	}
+}
+
+// awaitKickTaken waits until the loop has taken the pending kick, then gives
+// it a moment to finish the pass that kick started.
+func awaitKickTaken(t *testing.T, svc *Service) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for len(svc.kick) > 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the loop never took the kick")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+}
+
+func awaitObserved(t *testing.T, repo *memRepo, botID, observed string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if repo.get(botID).Observed == observed {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("%s never reached %s: %+v", botID, observed, repo.get(botID))
+}
+
+func stopService(t *testing.T, svc *Service) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := svc.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 type statusRecorder struct {
@@ -967,6 +1045,122 @@ func TestClaimNeverExceedsFreeConcurrency(t *testing.T) {
 	if n, _ := svc.ReconcileOnce(ctx); n != 1 {
 		t.Fatalf("second pass claimed %d rows, want 1", n)
 	}
+}
+
+func TestFreedSlotStartsTheRowThatWaitedForIt(t *testing.T) {
+	const first, second = "00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002"
+	backend := newGatedBackend(first)
+	clk := &clock{t: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}
+	repo := newMemRepo(clk.now)
+	// One slot, and no tick within the test: only a kick starts a row.
+	svc := New(repo, backend, nil, Options{Owner: "test", Concurrency: 1, Interval: time.Hour})
+	svc.now = clk.now
+	svc.rnd = func() float64 { return 0.5 }
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer stopService(t, svc)
+	defer backend.open()
+
+	if _, err := svc.EnsurePresent(ctx, first, ""); err != nil {
+		t.Fatal(err)
+	}
+	backend.awaitEntered(t)
+	// The second intent's kick finds the only slot busy.
+	if _, err := svc.EnsurePresent(ctx, second, ""); err != nil {
+		t.Fatal(err)
+	}
+	awaitKickTaken(t, svc)
+	if w := repo.get(second); w.LeaseOwner != "" || w.Observed != ObservedAbsent {
+		t.Fatalf("second row started without a free slot: %+v", w)
+	}
+
+	// Freeing the slot starts the waiting row at once, not on the next tick.
+	backend.open()
+	awaitObserved(t, repo, first, ObservedRunning)
+	awaitObserved(t, repo, second, ObservedRunning)
+}
+
+func TestRowReleasedUntouchedDoesNotSpinTheLoop(t *testing.T) {
+	clk := &clock{t: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}
+	// The database clock runs ahead of the process clock: the failed row is
+	// due to the claim while Decide still sees its backoff running.
+	repo := newMemRepo(func() time.Time { return clk.now().Add(5 * time.Second) })
+	repo.rows[bot] = &Workspace{
+		BotID: bot, Desired: DesiredPresent, DesiredGeneration: 1,
+		Observed: ObservedFailed, ObservedGeneration: 1, Attempts: 1,
+		NextAttemptAt: clk.now().Add(2 * time.Second), Version: 1,
+	}
+	svc := New(repo, &fakeBackend{}, nil, Options{Owner: "test", Interval: time.Hour})
+	svc.now = clk.now
+	svc.rnd = func() float64 { return 0.5 }
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer stopService(t, svc)
+
+	svc.Kick()
+	time.Sleep(300 * time.Millisecond)
+	if n := repo.claimCount(); n > 2 {
+		t.Fatalf("a row released untouched kept the loop claiming: %d claims", n)
+	}
+}
+
+// busyProvisioningThenRemoval provisions a bot, keeps the only provisioning
+// slot busy with another bot's creation, asks for the first bot's removal and
+// runs one more pass.
+func busyProvisioningThenRemoval(t *testing.T, teardownSlots int) (*memRepo, string) {
+	t.Helper()
+	const busy, ready = "00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002"
+	backend := newGatedBackend(busy)
+	clk := &clock{t: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}
+	repo := newMemRepo(clk.now)
+	svc := New(repo, backend, nil, Options{Owner: "test", Concurrency: 1, TeardownConcurrency: teardownSlots})
+	svc.now = clk.now
+	svc.rnd = func() float64 { return 0.5 }
+	ctx := context.Background()
+	if _, err := svc.EnsurePresent(ctx, ready, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ReconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if w := repo.get(ready); w.Observed != ObservedRunning {
+		t.Fatalf("setup: the bot to remove is not running: %+v", w)
+	}
+
+	var wg sync.WaitGroup
+	t.Cleanup(func() {
+		backend.open()
+		wg.Wait()
+	})
+	if _, err := svc.EnsurePresent(ctx, busy, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := svc.reconcileOnce(ctx, &wg); err != nil {
+		t.Fatal(err)
+	}
+	backend.awaitEntered(t)
+	if _, err := svc.RequestAbsent(ctx, ready, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := svc.reconcileOnce(ctx, &wg); err != nil {
+		t.Fatal(err)
+	}
+	return repo, ready
+}
+
+func TestRemovalsShareTheProvisioningSlotsByDefault(t *testing.T) {
+	repo, ready := busyProvisioningThenRemoval(t, 0)
+	if w := repo.get(ready); w.LeaseOwner != "" || w.Observed != ObservedRunning {
+		t.Fatalf("removal claimed while the only shared slot was provisioning: %+v", w)
+	}
+}
+
+func TestRemovalSlotsLetARemovalPassBusyProvisioning(t *testing.T) {
+	repo, ready := busyProvisioningThenRemoval(t, 1)
+	awaitObserved(t, repo, ready, ObservedAbsent)
 }
 
 func TestStaleClaimantNeverTouchesBackend(t *testing.T) {
