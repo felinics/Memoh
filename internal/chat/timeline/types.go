@@ -72,24 +72,25 @@ type ConversationMeta struct {
 
 // MessageEvent represents a new message in a session.
 type MessageEvent struct {
-	SessionID        string           `json:"session_id"`
-	EventID          string           `json:"event_id,omitempty"`
-	EventCursor      int64            `json:"event_cursor,omitempty"`
-	MessageID        string           `json:"message_id"`
-	Sender           *CanonicalUser   `json:"sender,omitempty"`
-	ReceivedAtMs     int64            `json:"received_at_ms"`
-	TimestampSec     int64            `json:"timestamp_sec"`
-	UTCOffsetMin     int              `json:"utc_offset_min"`
-	Content          []ContentNode    `json:"content"`
-	ReplyToMessageID string           `json:"reply_to_message_id,omitempty"`
-	ReplyToSender    string           `json:"reply_to_sender,omitempty"`
-	ReplyToPreview   string           `json:"reply_to_preview,omitempty"`
-	ForwardInfo      *ForwardInfo     `json:"forward_info,omitempty"`
-	Attachments      []Attachment     `json:"attachments"`
-	IsSelfSent       bool             `json:"is_self_sent,omitempty"`
-	MentionsMe       bool             `json:"mentions_me,omitempty"`
-	RepliesToMe      bool             `json:"replies_to_me,omitempty"`
-	Conversation     ConversationMeta `json:"conversation"`
+	SessionID          string           `json:"session_id"`
+	EventID            string           `json:"event_id,omitempty"`
+	EventCursor        int64            `json:"event_cursor,omitempty"`
+	MessageID          string           `json:"message_id"`
+	Sender             *CanonicalUser   `json:"sender,omitempty"`
+	ReceivedAtMs       int64            `json:"received_at_ms"`
+	TimestampSec       int64            `json:"timestamp_sec"`
+	UTCOffsetMin       int              `json:"utc_offset_min"`
+	Content            []ContentNode    `json:"content"`
+	ReplyToMessageID   string           `json:"reply_to_message_id,omitempty"`
+	ReplyToSender      string           `json:"reply_to_sender,omitempty"`
+	ReplyToPreview     string           `json:"reply_to_preview,omitempty"`
+	ReplyToAttachments []Attachment     `json:"reply_to_attachments,omitempty"`
+	ForwardInfo        *ForwardInfo     `json:"forward_info,omitempty"`
+	Attachments        []Attachment     `json:"attachments"`
+	IsSelfSent         bool             `json:"is_self_sent,omitempty"`
+	MentionsMe         bool             `json:"mentions_me,omitempty"`
+	RepliesToMe        bool             `json:"replies_to_me,omitempty"`
+	Conversation       ConversationMeta `json:"conversation"`
 }
 
 func (MessageEvent) Kind() EventKind          { return EventMessage }

@@ -868,6 +868,27 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 	}
 
+	// Preprocess before the event is persisted so the timeline and the discuss
+	// driver see the transcribed message. Passive chat messages skip
+	// transcription to avoid the cost.
+	if sessionType == sessionpkg.TypeDiscuss || shouldTrigger {
+		if transcript := p.transcribeInboundAttachments(ctx, strings.TrimSpace(identity.BotID), resolvedAttachments); transcript != "" {
+			if msg.Message.Metadata == nil {
+				msg.Message.Metadata = make(map[string]any)
+			}
+			msg.Message.Metadata["transcript"] = transcript
+		} else if hadVoiceAttachment && strings.TrimSpace(msg.Message.PlainText()) == "" {
+			msg.Message.Text = formatVoiceTranscriptionUnavailableNotice(resolvedAttachments)
+		}
+		if pendingSkillIntent != nil {
+			text = strings.TrimSpace(userVisibleText)
+			modelText = strings.TrimSpace(turn.SkillActivationModelQuery(skillActivation))
+		} else {
+			text = modelPlainText(msg.Message)
+			modelText = text
+		}
+	}
+
 	// Push event into the DCP pipeline (persist + in-memory projection).
 	// On first access for a session, replay persisted events to warm the pipeline.
 	var latestRC timeline.RenderedContext
@@ -925,30 +946,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		})
 		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID)
 		return nil
-	}
-
-	if sessionType == sessionpkg.TypeDiscuss || shouldTrigger {
-		if transcript := p.transcribeInboundAttachments(ctx, strings.TrimSpace(identity.BotID), resolvedAttachments); transcript != "" {
-			labeledTranscript := formatInboundTranscript(transcript)
-			if msg.Message.Metadata == nil {
-				msg.Message.Metadata = make(map[string]any)
-			}
-			msg.Message.Metadata["transcript"] = transcript
-			if plain := strings.TrimSpace(msg.Message.PlainText()); plain == "" {
-				msg.Message.Text = labeledTranscript
-			} else if !strings.Contains(plain, transcript) {
-				msg.Message.Text = plain + "\n\n" + labeledTranscript
-			}
-		} else if hadVoiceAttachment && strings.TrimSpace(msg.Message.PlainText()) == "" {
-			msg.Message.Text = formatVoiceTranscriptionUnavailableNotice(resolvedAttachments)
-		}
-		if pendingSkillIntent != nil {
-			text = strings.TrimSpace(userVisibleText)
-			modelText = strings.TrimSpace(turn.SkillActivationModelQuery(skillActivation))
-		} else {
-			text = strings.TrimSpace(msg.Message.PlainText())
-			modelText = text
-		}
 	}
 
 	if !shouldTrigger {

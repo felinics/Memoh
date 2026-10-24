@@ -45,10 +45,12 @@ func adaptMessage(msg channel.InboundMessage, sessionID, channelIdentityID, disp
 	forwardInfo := adaptForward(msg.Message.Forward)
 
 	var replyToMessageID, replyToSender, replyToPreview string
+	var replyToAttachments []timeline.Attachment
 	if msg.Message.Reply != nil {
 		replyToMessageID = strings.TrimSpace(msg.Message.Reply.MessageID)
 		replyToSender = strings.TrimSpace(msg.Message.Reply.Sender)
 		replyToPreview = strings.TrimSpace(msg.Message.Reply.Preview)
+		replyToAttachments = adaptAttachments(msg.Message.Reply.Attachments)
 	}
 
 	_, offset := now.Zone()
@@ -57,20 +59,21 @@ func adaptMessage(msg channel.InboundMessage, sessionID, channelIdentityID, disp
 	convType := channel.NormalizeConversationType(msg.Conversation.Type)
 
 	return timeline.MessageEvent{
-		SessionID:        sessionID,
-		MessageID:        strings.TrimSpace(msg.Message.ID),
-		Sender:           sender,
-		ReceivedAtMs:     now.UnixMilli(),
-		TimestampSec:     now.Unix(),
-		UTCOffsetMin:     utcOffsetMin,
-		Content:          content,
-		ReplyToMessageID: replyToMessageID,
-		ReplyToSender:    replyToSender,
-		ReplyToPreview:   replyToPreview,
-		ForwardInfo:      forwardInfo,
-		Attachments:      attachments,
-		MentionsMe:       adaptMetadataBool(msg.Metadata, "is_mentioned"),
-		RepliesToMe:      adaptMetadataBool(msg.Metadata, "is_reply_to_bot"),
+		SessionID:          sessionID,
+		MessageID:          strings.TrimSpace(msg.Message.ID),
+		Sender:             sender,
+		ReceivedAtMs:       now.UnixMilli(),
+		TimestampSec:       now.Unix(),
+		UTCOffsetMin:       utcOffsetMin,
+		Content:            content,
+		ReplyToMessageID:   replyToMessageID,
+		ReplyToSender:      replyToSender,
+		ReplyToPreview:     replyToPreview,
+		ReplyToAttachments: replyToAttachments,
+		ForwardInfo:        forwardInfo,
+		Attachments:        attachments,
+		MentionsMe:         adaptMetadataBool(msg.Metadata, "is_mentioned"),
+		RepliesToMe:        adaptMetadataBool(msg.Metadata, "is_reply_to_bot"),
 		Conversation: timeline.ConversationMeta{
 			Channel:          msg.Channel.String(),
 			ConversationName: strings.TrimSpace(msg.Conversation.Name),
@@ -89,10 +92,40 @@ func adaptContent(text string) []timeline.ContentNode {
 }
 
 func adaptBody(m channel.Message) []timeline.ContentNode {
-	if nodes := adaptParts(m.Parts); len(nodes) > 0 {
-		return nodes
+	nodes := adaptParts(m.Parts)
+	if len(nodes) == 0 {
+		nodes = adaptContent(m.Text)
 	}
-	return adaptContent(m.Text)
+	if label := transcriptLabel(m); label != "" {
+		nodes = append(nodes, timeline.ContentNode{Type: "text", Text: label})
+	}
+	return nodes
+}
+
+// transcriptLabel returns the labeled voice transcription stored in the
+// message metadata, or "" when there is none or the body already carries it.
+func transcriptLabel(m channel.Message) string {
+	transcript, _ := m.Metadata["transcript"].(string)
+	transcript = strings.TrimSpace(transcript)
+	if transcript == "" || strings.Contains(m.PlainText(), transcript) {
+		return ""
+	}
+	return formatInboundTranscript(transcript)
+}
+
+// modelPlainText is the message body as the model sees it: the plain text
+// followed by the labeled transcription.
+func modelPlainText(m channel.Message) string {
+	plain := strings.TrimSpace(m.PlainText())
+	label := transcriptLabel(m)
+	switch {
+	case label == "":
+		return plain
+	case plain == "":
+		return label
+	default:
+		return plain + "\n\n" + label
+	}
 }
 
 func adaptParts(parts []channel.MessagePart) []timeline.ContentNode {

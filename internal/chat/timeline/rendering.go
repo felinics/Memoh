@@ -147,7 +147,14 @@ func renderMessage(msg *ICMessage, params RenderParams) RenderedSegment {
 		if msg.ReplyToPreview != "" {
 			preview = escapeXMLText(msg.ReplyToPreview)
 		}
-		parts = append(parts, fmt.Sprintf("<in-reply-to %s>%s</in-reply-to>", strings.Join(replyAttrs, " "), preview))
+		replyBody := []string{}
+		if preview != "" {
+			replyBody = append(replyBody, preview)
+		}
+		for _, att := range msg.ReplyToAttachments {
+			replyBody = append(replyBody, renderAttachment(att))
+		}
+		parts = append(parts, fmt.Sprintf("<in-reply-to %s>%s</in-reply-to>", strings.Join(replyAttrs, " "), strings.Join(replyBody, "\n")))
 	}
 
 	body := renderContentNodes(msg.Content)
@@ -164,7 +171,7 @@ func renderMessage(msg *ICMessage, params RenderParams) RenderedSegment {
 	pieces := []RenderedContentPiece{{Type: "text", Text: text}}
 
 	var imageRefs []ImageAttachmentRef
-	for _, att := range msg.Attachments {
+	for _, att := range append(append([]Attachment{}, msg.ReplyToAttachments...), msg.Attachments...) {
 		if strings.EqualFold(att.Type, "image") && att.ContentHash != "" {
 			imageRefs = append(imageRefs, ImageAttachmentRef{
 				ContentHash: att.ContentHash,
