@@ -127,6 +127,13 @@ func (b *retryingRecoveryBackend) ReleaseLeaseCandidate(_ context.Context, candi
 	return true, nil
 }
 
+func (b *retryingRecoveryBackend) HoldsRunReservation(_ context.Context, key Key, runID string, fencingToken int64) (bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	refHeld := b.ref.RunID == runID && b.ref.BotID == key.BotID && b.ref.SessionID == key.SessionID
+	return refHeld || b.indexed.RunID == runID && b.indexed.FencingToken == fencingToken, nil
+}
+
 func (*retryingRecoveryBackend) AcquireLeaderLease(context.Context, string, time.Duration) (bool, error) {
 	return true, nil
 }

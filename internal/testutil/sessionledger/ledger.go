@@ -203,6 +203,12 @@ func (f *Store) PrepareFinish(_ context.Context, params ledger.PrepareFinishPara
 		run.State = ledger.StateFinishing
 		run.ProposedState = params.State
 		run.ProposedErrorCode = params.ErrorCode
+		// Like PrepareSessionRunFinish, a recorded abort intent outranks the
+		// owner's proposal.
+		if !run.AbortRequestedAt.IsZero() {
+			run.ProposedState = ledger.StateAborted
+			run.ProposedErrorCode = ""
+		}
 		run.FinishProposedAt = time.Now()
 	}
 	return *run, true, nil
@@ -294,6 +300,28 @@ func (f *Store) OrphanedRuns(_ context.Context, query ledger.OrphanQuery) ([]led
 		}
 		matched = append(matched, run)
 	}
+	if query.Limit > 0 && len(matched) > int(query.Limit) {
+		matched = matched[:query.Limit]
+	}
+	return matched, nil
+}
+
+// ClaimedRuns mirrors the adapter's keyset over running rows claimed under the
+// current generation before the grace cutoff.
+func (f *Store) ClaimedRuns(_ context.Context, query ledger.ClaimedRunQuery) ([]ledger.Run, error) {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	cutoff := time.Now().Add(-query.MinAge)
+	var matched []ledger.Run
+	for _, id := range f.Order {
+		run := *f.Runs[id]
+		if run.State != ledger.StateRunning || run.OwnerID == "" || run.LiveGeneration != query.CurrentGeneration ||
+			!run.OwnerSince.Before(cutoff) || run.RunID <= query.After {
+			continue
+		}
+		matched = append(matched, run)
+	}
+	sort.Slice(matched, func(i, j int) bool { return matched[i].RunID < matched[j].RunID })
 	if query.Limit > 0 && len(matched) > int(query.Limit) {
 		matched = matched[:query.Limit]
 	}

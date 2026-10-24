@@ -402,6 +402,9 @@ type Options struct {
 	// durableFinishRetryBudget is a test hook. Production uses a one-minute
 	// budget before lease expiry hands convergence to the reaper.
 	durableFinishRetryBudget time.Duration
+	// liveFinishRetryBudget is a test hook. Production uses a one-minute
+	// budget before the reaper repairs the live projection.
+	liveFinishRetryBudget time.Duration
 	// ScanBatchSize and MaxScanBatchesPerTick exist so tests can watch recovery
 	// page rather than to be tuned in production; both default to package
 	// constants.
@@ -453,6 +456,9 @@ func NewManager(backend Backend, opts Options) *Manager {
 	tune := newTuning(leaseTTL, opts.BackendLossGrace, opts.ScanBatchSize, opts.MaxScanBatchesPerTick)
 	if opts.durableFinishRetryBudget > 0 {
 		tune.durableFinishRetryBudget = opts.durableFinishRetryBudget
+	}
+	if opts.liveFinishRetryBudget > 0 {
+		tune.liveFinishRetryBudget = opts.liveFinishRetryBudget
 	}
 	return &Manager{
 		tuning:                 tune,
@@ -782,8 +788,11 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 	}
 	// The reaper runs on both backends. A single memory instance still needs the
-	// generation sweep — its previous process owned runs that no live backend
-	// remembers — and still needs orphan repair.
+	// generation sweep, because its previous process owned runs that no live
+	// backend remembers, and it still needs orphan repair. The sweep treats every
+	// active run under another generation as dead, which is only correct when no
+	// other process can hold one: admission refuses cluster=true on a memory
+	// backend (see admit.go), so this process is the only owner.
 	if err := m.startReaper(ctx); err != nil {
 		return err
 	}
@@ -1421,6 +1430,10 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 	if strings.TrimSpace(status) == "" && strings.TrimSpace(errorCode) == "" {
 		snapshot, ok, err := m.backend.Load(ctx, handle.key())
 		if err != nil {
+			// Whether the run parked is unknown, so nothing may be released yet.
+			// The retry repeats this read; returning without one would keep the
+			// lease renewed and the session busy until this process exits.
+			m.scheduleDurableFinishRetry(context.WithoutCancel(ctx), ctrl, status, errorCode, cause)
 			return TerminalRun{}, err
 		}
 		if ok && runMatchesHandle(snapshot.CurrentRunView, handle) &&
@@ -1565,7 +1578,7 @@ func (m *Manager) retryDurableFinish(
 ) {
 	retryCtx, cancel := context.WithTimeout(ctx, m.durableFinishRetryBudget)
 	defer cancel()
-	delay := 100 * time.Millisecond
+	delay := finishRetryInitialDelay
 	for {
 		timer := time.NewTimer(delay)
 		select {
@@ -1599,13 +1612,12 @@ func (m *Manager) retryDurableFinish(
 			return
 		}
 		m.logger.WarnContext(ctx, "retry durable runtime finish failed", slog.Any("error", err), slog.String("run_id", ctrl.runID))
-		if delay < time.Second {
-			delay *= 2
-			if delay > time.Second {
-				delay = time.Second
-			}
-		}
+		delay = nextFinishRetryDelay(delay)
 	}
+}
+
+func nextFinishRetryDelay(delay time.Duration) time.Duration {
+	return min(2*delay, finishRetryMaxDelay)
 }
 
 // resolveTerminalStatus decides once, for both terminal writes, how a run ended.
@@ -1691,16 +1703,35 @@ func (m *Manager) finishRunState(ctx context.Context, handle RunHandle, status, 
 	return changed, err
 }
 
+// retryFinishRun retries the live release of a run whose durable outcome is
+// already committed. It is bounded like the durable retry: a live backend that
+// stays unavailable must not keep this owner renewing a finished run, because
+// renewal is what keeps the reaper from repairing the projection.
 func (m *Manager) retryFinishRun(ctx context.Context, ctrl *runControl, status, errorCode string) {
 	if ctrl == nil {
 		return
 	}
-	delay := 100 * time.Millisecond
+	budget := time.NewTimer(m.liveFinishRetryBudget)
+	defer budget.Stop()
+	delay := finishRetryInitialDelay
 	for {
+		timer := time.NewTimer(delay)
 		select {
 		case <-m.closeCh:
+			timer.Stop()
 			return
-		case <-time.After(delay):
+		case <-budget.C:
+			timer.Stop()
+			if m.localControlForHandle(ctrl.handle()) != ctrl {
+				return
+			}
+			m.logger.WarnContext(ctx, "live runtime finish retry budget exhausted; handing convergence to reaper",
+				slog.String("run_id", ctrl.runID),
+				slog.Duration("retry_budget", m.liveFinishRetryBudget))
+			m.forgetLocalControlForHandle(ctx, ctrl.handle())
+			m.handoffLocalDurableFinish(ctrl.handle())
+			return
+		case <-timer.C:
 		}
 		if m.localControlForHandle(ctrl.handle()) != ctrl {
 			return
@@ -1718,12 +1749,7 @@ func (m *Manager) retryFinishRun(ctx context.Context, ctrl *runControl, status, 
 			return
 		}
 		m.logger.WarnContext(ctx, "retry runtime finish failed", slog.Any("error", err), slog.String("run_id", ctrl.runID))
-		if delay < time.Second {
-			delay *= 2
-			if delay > time.Second {
-				delay = time.Second
-			}
-		}
+		delay = nextFinishRetryDelay(delay)
 	}
 }
 
@@ -1961,7 +1987,11 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 		}
 		switch event.Type {
 		case native.EventToolApprovalRequest, native.EventUserInputRequest:
-			if pendingDecisionEvent(event) {
+			if pendingDecisionEvent(event) && !strings.EqualFold(run.Status, RunStatusAborting) {
+				// A request raised while the abort is reaching the producer must
+				// not park the run: parking would retain ownership for an answer
+				// the recorded abort already refuses, and the finish would read
+				// waiting_decision instead of the abort.
 				run.Status = RunStatusWaitingDecision
 			} else if resumeLiveOnTerminal && strings.EqualFold(run.Status, RunStatusWaitingDecision) {
 				// The last terminal decision resumes inline runs only; a native

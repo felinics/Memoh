@@ -9,6 +9,12 @@ const (
 	defaultScanBatchSize            = 200
 	defaultMaxScanBatchesPerTick    = 5
 	defaultDurableFinishRetryBudget = time.Minute
+	defaultLiveFinishRetryBudget    = time.Minute
+	// Both owner finish retries back off between these bounds. The ceiling
+	// stays well under a lease period so one slow attempt cannot let the lease
+	// lapse while the owner still holds the run.
+	finishRetryInitialDelay = 100 * time.Millisecond
+	finishRetryMaxDelay     = time.Second
 )
 
 // tuning holds every session runtime timing that is derived rather than
@@ -39,6 +45,12 @@ type tuning struct {
 	// while PostgreSQL terminal writes fail. After it expires the owner drops
 	// local control so lease expiry hands convergence to the reaper.
 	durableFinishRetryBudget time.Duration
+	// liveFinishRetryBudget bounds how long an owner keeps retrying the live
+	// release of a run whose durable outcome is already committed. After it
+	// expires the owner drops local control, so lease expiry (or, on a memory
+	// backend, the local finish handoff) lets the reaper repair the live
+	// projection from the durable outcome.
+	liveFinishRetryBudget time.Duration
 
 	scanBatchSize         int32
 	maxScanBatchesPerTick int
@@ -64,6 +76,7 @@ func newTuning(ownerLeaseTTL, backendLossGrace time.Duration, scanBatchSize int3
 		reaperLeaderLeaseTTL:     ownerLeaseTTL,
 		orphanGrace:              orphanGraceFactor * ownerLeaseTTL,
 		durableFinishRetryBudget: defaultDurableFinishRetryBudget,
+		liveFinishRetryBudget:    defaultLiveFinishRetryBudget,
 		scanBatchSize:            scanBatchSize,
 		maxScanBatchesPerTick:    maxScanBatchesPerTick,
 	}

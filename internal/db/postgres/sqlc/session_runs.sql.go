@@ -426,7 +426,13 @@ WHERE run.team_id = public.memoh_current_team_id()
       AND session.id = run.session_id
       AND (
         session.deleted_at IS NOT NULL
-        OR run.fencing_token > 0 AND session.runtime_fencing_token > run.fencing_token
+        OR run.fencing_token > 0
+          AND session.runtime_fencing_token > run.fencing_token
+          AND NOT (
+            run.state = 'lost'
+            AND run.error_code IS DISTINCT FROM 'history_reset'
+            AND session.runtime_fencing_token = run.fencing_token + 1
+          )
       )
   )
 `
@@ -438,6 +444,13 @@ WHERE run.team_id = public.memoh_current_team_id()
 // ever claimed, carries history_reset. Such a run has nothing left to
 // report, and no older run stands in for it; nor has any run of a deleted
 // session.
+//
+// Ending a run in a way that leaves the session without a live owner is the
+// one move past a run's token that does not supersede it: the run is still
+// what the session last did, and its failure is what a subscriber or a
+// reload has to see. That move is exactly one step, so the exemption names
+// it; a reset, or any later activation, moves further and keeps the run
+// hidden.
 func (q *Queries) GetLatestSessionRun(ctx context.Context, sessionID pgtype.UUID) (SessionRun, error) {
 	row := q.db.QueryRow(ctx, getLatestSessionRun, sessionID)
 	var i SessionRun
@@ -582,6 +595,84 @@ ORDER BY session_id, run_id
 
 func (q *Queries) ListActiveSessionRunsByBot(ctx context.Context, botID pgtype.UUID) ([]SessionRun, error) {
 	rows, err := q.db.Query(ctx, listActiveSessionRunsByBot, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SessionRun
+	for rows.Next() {
+		var i SessionRun
+		if err := rows.Scan(
+			&i.RunID,
+			&i.TeamID,
+			&i.BotID,
+			&i.SessionID,
+			&i.InvocationID,
+			&i.TurnID,
+			&i.TurnPosition,
+			&i.State,
+			&i.InputJson,
+			&i.InputFingerprint,
+			&i.OwnerID,
+			&i.FencingToken,
+			&i.OwnerSince,
+			&i.LiveGeneration,
+			&i.AbortRequestedAt,
+			&i.ProposedTerminalState,
+			&i.ProposedErrorCode,
+			&i.ProposedErrorMessage,
+			&i.FinishProposedAt,
+			&i.ErrorCode,
+			&i.ErrorMessage,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listClaimedSessionRuns = `-- name: ListClaimedSessionRuns :many
+SELECT run_id, team_id, bot_id, session_id, invocation_id, turn_id, turn_position, state, input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation, abort_requested_at, proposed_terminal_state, proposed_error_code, proposed_error_message, finish_proposed_at, error_code, error_message, created_at, updated_at
+FROM session_runs
+WHERE team_id = public.memoh_current_team_id()
+  AND state = 'running'
+  AND owner_id IS NOT NULL
+  AND live_generation = $1
+  AND owner_since < now() - make_interval(secs => $2::double precision)
+  AND run_id > $3::uuid
+ORDER BY run_id
+LIMIT $4
+`
+
+type ListClaimedSessionRunsParams struct {
+	CurrentGeneration pgtype.Text `json:"current_generation"`
+	GraceSeconds      float64     `json:"grace_seconds"`
+	AfterRunID        pgtype.UUID `json:"after_run_id"`
+	BatchSize         int32       `json:"batch_size"`
+}
+
+// Claimed rows that might never have reached the live backend: the claiming
+// process died, or lost the claim's response, before reserving the run, or it
+// could not release a run it failed to start. Their owner and generation look
+// current and no lease was written, so neither the expiry pass nor the stale
+// generation sweep can find them. The ledger cannot tell them from healthy
+// long runs; the reaper asks the live backend about each row. Restricting to
+// the current generation leaves older incarnations to the stale sweep, and
+// lets idx_session_runs_recovery serve the keyset. The zero UUID cursor starts
+// a pass.
+func (q *Queries) ListClaimedSessionRuns(ctx context.Context, arg ListClaimedSessionRunsParams) ([]SessionRun, error) {
+	rows, err := q.db.Query(ctx, listClaimedSessionRuns,
+		arg.CurrentGeneration,
+		arg.GraceSeconds,
+		arg.AfterRunID,
+		arg.BatchSize,
+	)
 	if err != nil {
 		return nil, err
 	}

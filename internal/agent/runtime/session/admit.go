@@ -369,8 +369,9 @@ func (m *Manager) claimAndStart(ctx context.Context, in AdmitInput, admission Ad
 
 // abandonClaim releases a run this process owns but cannot execute. The write is
 // fenced by the same token the claim used, so it cannot disturb a successor, and
-// it is idempotent, so a caller that crashes here leaves the run to the reaper
-// with the same outcome. cause is returned unchanged: the reason the run could
+// it is idempotent. A caller that crashes here, or whose write fails, leaves a
+// claim with no live reservation, which the reaper's unreserved-claim pass ends
+// as lost. cause is returned unchanged: the reason the run could
 // not start is more useful to the caller than the bookkeeping that followed, and
 // the caller's result record is where it is reported. The run keeps only code.
 func (m *Manager) abandonClaim(ctx context.Context, runID string, token int64, code string, cause error) error {

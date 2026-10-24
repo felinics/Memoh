@@ -38,9 +38,10 @@ func provideRuntimeFenceActivator(queries dbstore.Queries) sessionruntime.FenceA
 //
 // Start is not optional bookkeeping. It health-probes the live backend (which is
 // what refuses a cluster deployment whose backend cannot arbitrate ownership),
-// elects the reaper leader, and begins the fail-closed generation sweep — for a
-// single OSS instance that sweep is what turns the previous process's runs into
-// `lost` instead of leaving them active forever.
+// elects the reaper leader, and begins the fail-closed generation sweep. With
+// cluster=false, a memory backend's generation changes on every process start,
+// so the sweep turns the previous process's runs into `lost` instead of leaving
+// them active forever.
 func provideSessionRuntimeManager(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, runs ledger.Store, fence sessionruntime.FenceActivator, hub *event.Hub) (*sessionruntime.Manager, error) {
 	manager, err := sessionruntime.NewManagerFromConfig(log, cfg.SessionRuntime, runs, fence)
 	if err != nil {

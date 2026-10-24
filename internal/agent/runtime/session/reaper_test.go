@@ -23,6 +23,11 @@ type fakeLiveness struct {
 	leaderErr  error
 	candErr    error
 	leaseCalls int
+	// reserved names runs that hold a live reservation without an expired
+	// index entry, which is what a healthy owner looks like.
+	reserved    map[string]bool
+	holdsErr    error
+	holdsChecks int
 }
 
 func newFakeLiveness(generation string) *fakeLiveness {
@@ -60,6 +65,33 @@ func (f *fakeLiveness) ReleaseLeaseCandidate(_ context.Context, candidate LeaseC
 		return true, nil
 	}
 	return false, nil
+}
+
+func (f *fakeLiveness) HoldsRunReservation(_ context.Context, _ Key, runID string, fencingToken int64) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.holdsChecks++
+	if f.holdsErr != nil {
+		return false, f.holdsErr
+	}
+	if f.reserved[runID] {
+		return true, nil
+	}
+	for _, candidate := range f.candidates {
+		if candidate.RunID == runID && candidate.FencingToken == fencingToken {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (f *fakeLiveness) reserve(runID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.reserved == nil {
+		f.reserved = make(map[string]bool)
+	}
+	f.reserved[runID] = true
 }
 
 func (f *fakeLiveness) AcquireLeaderLease(context.Context, string, time.Duration) (bool, error) {
@@ -248,6 +280,7 @@ func TestReaperDoesNotObserveNewerActiveOwner(t *testing.T) {
 	live.setCandidates(LeaseCandidate{
 		Key: Key{BotID: testBotID, SessionID: "session-newer-owner"}, RunID: "run-newer-owner", FencingToken: 5,
 	})
+	live.reserve("run-newer-owner")
 	reaper := newTestReaper(t, runs, live)
 	var observed []TerminalRun
 	reaper.SetTerminalObserver(func(_ context.Context, run TerminalRun) {
@@ -372,6 +405,7 @@ func TestReaperStaleTokenCannotCondemnReclaimedRun(t *testing.T) {
 		RunID:        "run-reclaimed",
 		FencingToken: 8,
 	})
+	live.reserve("run-reclaimed")
 	reaper := newTestReaper(t, runs, live)
 
 	reaper.tick(context.Background())
@@ -391,6 +425,7 @@ func TestReaperRecoversRunsFromLostBackendGeneration(t *testing.T) {
 	runs.InsertClaimed("run-stale-c", "session-stale-c", 3, "generation-old")
 	runs.InsertClaimed("run-current", "session-current", 4, "generation-new")
 	live := newFakeLiveness("generation-new")
+	live.reserve("run-current")
 	reaper := newTestReaper(t, runs, live)
 
 	reaper.tick(context.Background())

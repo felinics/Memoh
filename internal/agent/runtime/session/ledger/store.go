@@ -228,6 +228,16 @@ type OrphanQuery struct {
 	Limit  int32
 }
 
+// ClaimedRunQuery pages through running rows claimed under one live
+// generation at least MinAge ago. After is a run ID keyset cursor; empty
+// starts from the beginning.
+type ClaimedRunQuery struct {
+	CurrentGeneration string
+	MinAge            time.Duration
+	After             string
+	Limit             int32
+}
+
 // Store is the durable session run ledger.
 //
 // Every mutation after admission is a fenced idempotent statement: it applies
@@ -271,6 +281,10 @@ type Store interface {
 
 	StaleGenerationRuns(ctx context.Context, query StaleGenerationQuery) ([]Run, error)
 	OrphanedRuns(ctx context.Context, query OrphanQuery) ([]Run, error)
+	// ClaimedRuns lists candidates for a claim that never reached the live
+	// backend. The ledger cannot tell them from healthy long runs; only the
+	// live backend can, which is why the caller must ask it about each row.
+	ClaimedRuns(ctx context.Context, query ClaimedRunQuery) ([]Run, error)
 }
 
 // ResetStore is the durable admission/reset arbiter implemented by PostgreSQL.

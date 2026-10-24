@@ -116,6 +116,13 @@ ORDER BY session_id, run_id;
 -- ever claimed, carries history_reset. Such a run has nothing left to
 -- report, and no older run stands in for it; nor has any run of a deleted
 -- session.
+--
+-- Ending a run in a way that leaves the session without a live owner is the
+-- one move past a run's token that does not supersede it: the run is still
+-- what the session last did, and its failure is what a subscriber or a
+-- reload has to see. That move is exactly one step, so the exemption names
+-- it; a reset, or any later activation, moves further and keeps the run
+-- hidden.
 SELECT *
 FROM session_runs run
 WHERE run.team_id = public.memoh_current_team_id()
@@ -136,7 +143,13 @@ WHERE run.team_id = public.memoh_current_team_id()
       AND session.id = run.session_id
       AND (
         session.deleted_at IS NOT NULL
-        OR run.fencing_token > 0 AND session.runtime_fencing_token > run.fencing_token
+        OR run.fencing_token > 0
+          AND session.runtime_fencing_token > run.fencing_token
+          AND NOT (
+            run.state = 'lost'
+            AND run.error_code IS DISTINCT FROM 'history_reset'
+            AND session.runtime_fencing_token = run.fencing_token + 1
+          )
       )
   );
 
@@ -391,6 +404,27 @@ WHERE team_id = public.memoh_current_team_id()
   AND owner_id IS NULL
   AND created_at < now() - make_interval(secs => sqlc.arg(grace_seconds)::double precision)
 ORDER BY created_at, run_id
+LIMIT sqlc.arg(batch_size);
+
+-- name: ListClaimedSessionRuns :many
+-- Claimed rows that might never have reached the live backend: the claiming
+-- process died, or lost the claim's response, before reserving the run, or it
+-- could not release a run it failed to start. Their owner and generation look
+-- current and no lease was written, so neither the expiry pass nor the stale
+-- generation sweep can find them. The ledger cannot tell them from healthy
+-- long runs; the reaper asks the live backend about each row. Restricting to
+-- the current generation leaves older incarnations to the stale sweep, and
+-- lets idx_session_runs_recovery serve the keyset. The zero UUID cursor starts
+-- a pass.
+SELECT *
+FROM session_runs
+WHERE team_id = public.memoh_current_team_id()
+  AND state = 'running'
+  AND owner_id IS NOT NULL
+  AND live_generation = sqlc.arg(current_generation)
+  AND owner_since < now() - make_interval(secs => sqlc.arg(grace_seconds)::double precision)
+  AND run_id > sqlc.arg(after_run_id)::uuid
+ORDER BY run_id
 LIMIT sqlc.arg(batch_size);
 
 -- name: NextSessionRunFencingToken :one

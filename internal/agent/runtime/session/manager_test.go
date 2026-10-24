@@ -592,6 +592,21 @@ type toggledNowFailureBackend struct {
 	failing atomic.Bool
 }
 
+// failingReleaseDistributedBackend fails the owner's live release while set
+// and leaves the reaper's terminal repair path working.
+type failingReleaseDistributedBackend struct {
+	DistributedBackend
+	LivenessBackend
+	failing atomic.Bool
+}
+
+func (b *failingReleaseDistributedBackend) ReleaseRun(ctx context.Context, key Key, ref RunRef, update ActiveRunUpdate) (Snapshot, bool, error) {
+	if b.failing.Load() {
+		return Snapshot{}, false, errors.New("injected live release failure")
+	}
+	return b.DistributedBackend.ReleaseRun(ctx, key, ref, update)
+}
+
 type countCommandPublishBackend struct {
 	DistributedBackend
 	publishes atomic.Int64
@@ -1684,6 +1699,9 @@ func runDistributedRuntimeManagerContract(t *testing.T, suite distributedRuntime
 	t.Run("hands exhausted durable finish retries to the reaper", func(t *testing.T) {
 		runRuntimeManagerHandsExhaustedDurableFinishToReaper(t, suite)
 	})
+	t.Run("hands exhausted live finish retries to the reaper", func(t *testing.T) {
+		runRuntimeManagerHandsExhaustedLiveFinishToReaper(t, suite)
+	})
 	t.Run("does not reconcile released live state on owner happy path", func(t *testing.T) {
 		runRuntimeManagerSkipsHappyPathTerminalReconciliation(t, suite)
 	})
@@ -1759,6 +1777,67 @@ func runRuntimeManagerSkipsHappyPathTerminalReconciliation(t *testing.T, suite d
 	if got := backend.loads.Load(); got != loadsBeforeFinish {
 		t.Fatalf("LoadRunRef calls during owner happy-path finish = %d, want 0", got-loadsBeforeFinish)
 	}
+}
+
+// The durable outcome is committed but the live release keeps failing. The
+// owner's retry is bounded: it drops control so its lease expires, and the
+// reaper repairs the projection from the durable row.
+func runRuntimeManagerHandsExhaustedLiveFinishToReaper(t *testing.T, suite distributedRuntimeBackendContractSuite) {
+	t.Helper()
+	raw := suite.newBackend(t)
+	liveness, ok := raw.(LivenessBackend)
+	if !ok {
+		t.Fatal("distributed backend does not report liveness")
+	}
+	backend := &failingReleaseDistributedBackend{DistributedBackend: raw, LivenessBackend: liveness}
+	runs := newFakeLedger()
+	manager := NewManager(backend, Options{
+		OwnerID:               "owner-live-budget",
+		StateTTL:              time.Minute,
+		OwnerLeaseTTL:         150 * time.Millisecond,
+		liveFinishRetryBudget: 30 * time.Millisecond,
+		Ledger:                runs,
+		Fence:                 &fakeFence{},
+	})
+	if err := manager.Start(context.Background()); err != nil {
+		t.Fatalf("start manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	sessionID := "session-live-budget"
+	admission, err := manager.Admit(context.Background(), AdmitInput{
+		BotID: testBotID, SessionID: sessionID, InvocationID: "inv-live-budget",
+		Payload: []byte(`{"text":"hi"}`),
+		Execution: Execution{
+			Admission: func(context.Context, RunHandle) (RunAdmissionView, error) {
+				return RunAdmissionView{}, nil
+			},
+			AbortCh: make(chan struct{}, 1), Cancel: func() {}, InjectCh: make(chan turn.InjectMessage, 1),
+		},
+	})
+	if err != nil {
+		t.Fatalf("admit run: %v", err)
+	}
+
+	backend.failing.Store(true)
+	if _, err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted); err == nil {
+		t.Fatal("FinishRun() error = nil, want the injected live release failure")
+	}
+	if got := runs.State(admission.RunID); got != ledger.StateCompleted {
+		t.Fatalf("ledger state = %q, want completed before the live release", got)
+	}
+	controlDeadline := time.Now().Add(2 * time.Second)
+	for manager.localControlForHandle(admission.Handle) != nil && time.Now().Before(controlDeadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if manager.localControlForHandle(admission.Handle) != nil {
+		t.Fatal("owner kept retrying the live release past its budget")
+	}
+
+	backend.failing.Store(false)
+	waitRuntimeSnapshot(t, manager, testBotID, sessionID, func(snapshot Snapshot) bool {
+		return snapshot.CurrentRunView != nil && snapshot.CurrentRunView.Status == RunStatusCompleted &&
+			snapshot.CurrentRunView.OwnerLeaseExpiresAt == nil
+	})
 }
 
 func runRuntimeManagerHandsExhaustedDurableFinishToReaper(t *testing.T, suite distributedRuntimeBackendContractSuite) {
