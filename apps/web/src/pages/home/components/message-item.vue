@@ -67,45 +67,26 @@
           :block="userAttachmentBlock"
           :on-open-media="onOpenMedia"
         />
-        <div
+        <!-- Editing happens in place: the field takes the bubble's exact box
+             (padding, radius, content-sized width) and surface, and sets its
+             text with the same .chat-user-text rule as the bubble, so the prompt
+             stays where and how it was — only the edge turns into a field, which
+             is why it engages on hover as well as focus, with the edge meant for
+             a brand-tinted surface. Its actions replace the copy/edit row below. -->
+        <Textarea
           v-if="isEditingUserMessage"
-          class="w-[min(100%,42rem)] bg-muted px-4 py-3 text-foreground"
+          ref="editTextarea"
+          v-model="editDraft"
+          :lang="contentLang(editDraft)"
+          engage="hover"
+          surface="brand-tint"
+          class="chat-user-text chat-user-bubble-edit w-auto max-w-full min-h-0 max-h-80 px-4 py-3"
           :class="userBubbleRadiusClass"
-        >
-          <Textarea
-            ref="editTextarea"
-            v-model="editDraft"
-            size="lg"
-            class="max-h-52 min-h-20 resize-none rounded-none border-0 bg-transparent p-0 text-foreground shadow-none placeholder:text-muted-foreground focus-visible:ring-0"
-            :aria-label="t('chat.actions.edit')"
-            @keydown.enter.meta.exact.prevent="submitEdit"
-            @keydown.enter.ctrl.exact.prevent="submitEdit"
-            @keydown.escape.stop.prevent="cancelEdit"
-          />
-          <div class="mt-2 flex justify-end gap-1.5">
-            <Button
-              type="button"
-              variant="outline"
-              size="text"
-              class="px-1"
-              :disabled="editSubmitting"
-              @click="cancelEdit"
-            >
-              {{ t('common.cancel') }}
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              size="text"
-              class="px-1"
-              :loading="editSubmitting"
-              :disabled="!canSubmitEdit"
-              @click="submitEdit"
-            >
-              {{ t('chat.send') }}
-            </Button>
-          </div>
-        </div>
+          :aria-label="t('chat.actions.edit')"
+          @keydown.enter.meta.exact.prevent="submitEdit"
+          @keydown.enter.ctrl.exact.prevent="submitEdit"
+          @keydown.escape.stop.prevent="cancelEdit"
+        />
         <div
           v-else-if="isSkillActivationMessage || userBubbleText || message.forward || message.reply"
           :lang="contentLang(userBubbleText || skillActivationNames || skillActivationTitle)"
@@ -191,14 +172,59 @@
           <Target class="size-3.5" />
           {{ $t('chat.goal.sentAsGoal') }}
         </p>
-        <MessageActions
-          v-if="!isEditingUserMessage"
-          class="-mt-1"
-          role="user"
-          :copy-text="userCopyText"
-          :align="bubbleSelf ? 'end' : 'start'"
-          :on-edit="canEditUserMessage ? handleEdit : undefined"
-        />
+        <!-- The copy/edit row tucks up close to the bubble (4px) because its
+             glyphs carry no chrome at rest. The edit row swaps into the same h-8
+             slot but holds a filled Send, which crowds the field's focus edge at
+             that distance — so entering edit eases the row down to 12px (house
+             spring) instead of jumping, and its buttons fade in. Cancel is ghost:
+             an outlined button stacks a second edge right under the field's. -->
+        <div
+          class="transition-[margin] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
+          :class="isEditingUserMessage ? 'mt-1' : '-mt-1'"
+        >
+          <Transition
+            mode="out-in"
+            enter-active-class="transition-opacity duration-150 ease-out motion-reduce:transition-none"
+            enter-from-class="opacity-0"
+          >
+            <div
+              v-if="isEditingUserMessage"
+              class="flex h-8 items-center justify-end gap-1.5"
+            >
+              <!-- Saving reruns the turn, which a bare "Save" does not say. -->
+              <InfoHint :text="t('chat.actions.editHint')" />
+              <Button
+                type="button"
+                variant="ghost"
+                tone="muted"
+                size="sm"
+                @click="cancelEdit"
+              >
+                {{ t('common.cancel') }}
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                :disabled="!canSubmitEdit"
+                @click="submitEdit"
+              >
+                {{ t('common.save') }}
+              </Button>
+            </div>
+            <!-- Plain element wrapper: <Transition> can only animate an element
+                 root, and MessageActions' template leads with a comment, which
+                 dev builds keep, so its root is a fragment. -->
+            <div v-else>
+              <MessageActions
+                role="user"
+                :copy-text="userCopyText"
+                :align="bubbleSelf ? 'end' : 'start'"
+                :on-edit="canEditUserMessage ? handleEdit : undefined"
+              />
+            </div>
+          </Transition>
+        </div>
       </div>
 
       <!-- Assistant blocks and the live process preview share one vertical rhythm. -->
@@ -409,7 +435,7 @@ if (typeof document !== 'undefined') {
 import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
 import { Sparkles, Target } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
-import { Avatar, AvatarImage, AvatarFallback, Button, CalloutBanner, Textarea } from '@felinic/ui'
+import { Avatar, AvatarImage, AvatarFallback, Button, CalloutBanner, InfoHint, Textarea } from '@felinic/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
 import ToolCallGroup from './tool-call-group.vue'
@@ -499,7 +525,10 @@ const isVisible = useElementVisibility(messageEl, {
   threshold: 0.1
 })
 
-watch([isVisible, toRef(props, 'isScrolling')], () => { 
+// The id is a source too: an edit hands this instance a new message under the
+// same render key (chat-pane renderKeyOf), and the scroll anchors must learn
+// the new id as they would from a fresh mount.
+watch([isVisible, toRef(props, 'isScrolling'), () => props.message.id], () => {
   emit('active', isVisible.value, { id: props.message.id, top: ((messageEl.value?.getBoundingClientRect().top ?? 0) - 48) })
 }, {
   immediate: true,
@@ -515,7 +544,6 @@ const { t, te, locale } = useI18n()
 const editTextarea = ref<InstanceType<typeof Textarea> | null>(null)
 const isEditingUserMessage = ref(false)
 const editDraft = ref('')
-const editSubmitting = ref(false)
 
 // Retry, edit and fork all address a round, and a round is named by its turn
 // id — an identity the turn carries from admission onward. The message id is a
@@ -670,13 +698,16 @@ const canForkAssistantMessage = computed(() =>
 const canSubmitEdit = computed(() =>
   props.message.role === 'user'
   && props.canEditLatestUser === true
-  && editDraft.value.trim().length > 0
-  && !editSubmitting.value,
+  && editDraft.value.trim().length > 0,
 )
 
 function handleEdit() {
   if (!canEditUserMessage.value || props.message.role !== 'user') return
-  editDraft.value = cleanCurrentUserText.value
+  openEditor(cleanCurrentUserText.value)
+}
+
+function openEditor(draft: string) {
+  editDraft.value = draft
   isEditingUserMessage.value = true
   void nextTick(() => {
     const el = editTextarea.value?.$el
@@ -690,20 +721,21 @@ function handleEdit() {
 }
 
 function cancelEdit() {
-  if (editSubmitting.value) return
   isEditingUserMessage.value = false
   editDraft.value = ''
 }
 
-async function submitEdit() {
+// The field folds back into the bubble as soon as the edit is dispatched: the
+// chat swaps in the edited prompt in place (chat-pane keeps this component
+// mounted across the swap), and the callback only fires once the whole reply
+// has streamed. An edit that never starts restores the original prompt, so the
+// field reopens with the draft for another try.
+function submitEdit() {
   if (!canSubmitEdit.value || props.message.role !== 'user' || !turnId.value) return
-  editSubmitting.value = true
-  emit('editMessage', turnId.value, editDraft.value.trim(), (started) => {
-    editSubmitting.value = false
-    if (started) {
-      isEditingUserMessage.value = false
-      editDraft.value = ''
-    }
+  const draft = editDraft.value.trim()
+  cancelEdit()
+  emit('editMessage', turnId.value, draft, (started) => {
+    if (!started) openEditor(draft)
   })
 }
 
