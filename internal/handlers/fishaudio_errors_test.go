@@ -115,8 +115,9 @@ func testFishAudioQuotaAnswer(t *testing.T, mode string) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
 		t.Fatal(err)
 	}
-	if rec.Code != http.StatusBadGateway || problem.Code != string(apperror.CodeAgentProviderQuotaExhausted) || problem.Fault != apperror.FaultDependency {
-		t.Fatalf("answer = %d %s, want 502 agent.provider_quota_exhausted dependency", rec.Code, rec.Body.String())
+	quota, _ := apperror.Lookup(apperror.CodeAgentProviderQuotaExhausted)
+	if rec.Code != quota.HTTPStatus || problem.Code != string(apperror.CodeAgentProviderQuotaExhausted) || problem.Fault != apperror.FaultDependency {
+		t.Fatalf("answer = %d %s, want %d agent.provider_quota_exhausted dependency", rec.Code, rec.Body.String(), quota.HTTPStatus)
 	}
 	if problem.Detail != "The model provider account has no remaining balance or quota." {
 		t.Fatalf("detail = %q", problem.Detail)
