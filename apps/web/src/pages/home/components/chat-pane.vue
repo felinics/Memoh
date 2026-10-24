@@ -58,7 +58,7 @@
                    A fresh, writable chat instead gets the centered welcome
                    composer below, never a stray line in a blank pane. -->
               <div
-                v-else-if="messages.length === 0 && !loadingChats && !loadingMessages && activeChatReadOnly"
+                v-else-if="messages.length === 0 && !loadingChats && !loadingMessages && composerReadOnly"
                 class="flex items-center justify-center min-h-75"
               >
                 <p class="text-muted-foreground text-xs">
@@ -222,13 +222,12 @@
            so its inner padding is the ONLY horizontal inset — matching the message
            column edge-for-edge at every width. -->
       <div
-        v-if="!activeChatReadOnly"
+        v-if="!composerReadOnly"
         class="pointer-events-none absolute z-(--z-panel)"
         :class="[
           isWelcome
             ? 'inset-0 flex flex-col items-center justify-start'
             : 'inset-x-0 bottom-0 pt-2',
-          { invisible: composerPlacementPending },
         ]"
       >
         <!-- Opaque backdrop, bottom-anchored, rising only to the box's widest point
@@ -627,13 +626,16 @@
                   >{{ formattedVoiceSeconds }}</span>
                   <span class="sr-only">{{ voiceInputState === 'transcribing' ? $t('chat.voiceInput.transcribing') : $t('chat.voiceInput.barLabel') }}</span>
                 </div>
+                <!-- Loading history never locks the textarea: the user can type
+                     the moment the pane appears, and handleSend holds the send
+                     until the history has loaded. -->
                 <textarea
                   v-else
                   ref="textareaEl"
                   v-model="inputText"
                   rows="1"
                   :placeholder="composerPreviewShown ? '' : composerPlaceholder"
-                  :disabled="!currentBotId || activeChatReadOnly || loadingMessages || firstSendAwaiting"
+                  :disabled="!currentBotId || composerReadOnly || firstSendAwaiting"
                   class="order-none max-h-52 w-full basis-full field-sizing-content resize-none break-words bg-transparent pl-2 pr-1 pt-2 pb-1.5 text-base leading-[var(--chat-leading)] outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
                   :class="[isWelcome ? 'min-h-12' : 'min-h-10', composerPreviewShown ? 'text-transparent' : 'text-foreground']"
                   @keydown="handleComposerKeydown"
@@ -1459,6 +1461,15 @@ const creatingSession = computed(() => chatStore.isChatViewCreatingSession(paneT
 const activeChatTarget = computed(() => chatStore.chatTargetFor(paneTarget.value))
 const activeSession = computed(() => activeChatTarget.value.session)
 const activeChatReadOnly = computed(() => chatStore.chatReadOnlyFor(paneTarget.value))
+// The store treats a session whose summary has not loaded yet (a restored tab,
+// a deep link, before the session list arrives) as read-only, so no write
+// slips into what turns out to be a schedule or a synced channel. The composer
+// only cares whether it is KNOWN to be read-only: until the summary says so it
+// renders and takes typing, and the send waits for the summary.
+const activeSessionSummaryPending = computed(() =>
+  activeChatTarget.value.kind === 'session' && !activeChatTarget.value.session,
+)
+const composerReadOnly = computed(() => activeChatReadOnly.value && !activeSessionSummaryPending.value)
 const activeChatCanFork = computed(() => chatStore.chatCanForkFor(paneTarget.value))
 // The composer pair lives on the shared ChatViewEntry: same-session tabs share
 // one pair and repointing this pane swaps in the target view's own pair. Every
@@ -1508,22 +1519,15 @@ const draftSetupEditable = computed(() => !hasRenderedSession.value && !firstSen
 // entirely, so they never reach this state. A first send stays on welcome
 // until the server confirms it; from then on the pane is a chat even before
 // a turn has rendered (a skill activation appends none of its own).
+// Decided from the pane alone, never from the session list: a draft stays a
+// draft (only an explicit selection fills it, and that happens before the
+// first render), so the composer is drawn in its final place on the first
+// frame instead of waiting for the list or moving once it arrives.
 const isWelcome = computed(() => {
-  if (!currentBotId.value || activeChatReadOnly.value || loadingChats.value) return false
+  if (!currentBotId.value || activeChatReadOnly.value) return false
   if (firstSendEntry.value?.revealed) return false
   return !hasRenderedSession.value && messages.value.length === 0
 })
-
-// During boot, "a draft that stays a draft" and "a draft about to be
-// repointed to the most recent session" are indistinguishable until
-// fetchSessions returns (bootstrap auto-picks at the END of the load).
-// isWelcome waits out that window via !loadingChats — but rendering the
-// docked posture meanwhile made a hard refresh of the welcome page flash
-// bottom → center. While placement is undecidable, hide the composer
-// instead: `invisible` keeps layout and the dock measurements alive,
-// where v-if would unmount them. A session panel carries its sessionId
-// from the first frame, so this gate never engages on session routes.
-const composerPlacementPending = computed(() => loadingChats.value && !hasRenderedSession.value)
 const composerPlacementEl = useTemplateRef<HTMLElement>('composerPlacementEl')
 // Only a first send moves the composer, out of welcome when the server
 // confirms it, together with the turns appearing. Any other flip is
@@ -1639,7 +1643,7 @@ function isEditableTurn(message: ChatMessage): boolean {
   return message.role === 'user' && turnId !== '' && turnId === (message.turnId?.trim() ?? '')
 }
 
-const { data: botSettings, isLoading: botSettingsLoading } = useQuery({
+const { data: botSettings, isLoading: botSettingsLoading, status: botSettingsStatus } = useQuery({
   key: () => ['bot-settings', currentBotId.value],
   query: async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2862,6 +2866,13 @@ const activeModelSupportsReasoning = computed(() => activeModelReasoning.value?.
 const composerHasNoModel = computed(() =>
   hasNoComposerModel(activeUsesExternalAgentComposer.value, overrideModelId.value),
 )
+// While the bot's settings or this view's remembered pair are still loading,
+// an empty model is not known to be missing yet: the send waits instead of
+// reporting it, and the picker reads Loading rather than None.
+const composerModelResolving = computed(() =>
+  (!!currentBotId.value && botSettingsStatus.value === 'pending')
+  || paneView.value.pairSync.refreshing.value,
+)
 
 const selectedModelLabel = computed(() => {
   const current = composerModels.value.find(model => model.id === composerModelId.value)
@@ -2873,7 +2884,8 @@ const selectedModelLabel = computed(() => {
   if (activeDirectRuntime.value === BOT_AGENT_RUNTIME_CODEX) {
     return composerModelsLoading.value ? t('common.loading') : t('chat.modelOverride')
   }
-  return composerHasNoModel.value ? t('common.none') : composerDefaultModelLabel.value
+  if (composerHasNoModel.value) return composerModelResolving.value ? t('common.loading') : t('common.none')
+  return composerDefaultModelLabel.value
 })
 
 const nativeDisplayedEffort = computed(() => displayedEffort(overrideReasoningEffort.value, activeModelReasoning.value))
@@ -3280,7 +3292,7 @@ const {
 const queueSubmissionGate = shallowReactive(new SessionQueueSubmissionGate())
 const composerQueueCommand = computed(() => parseSessionQueueCommand(inputText.value, composerRuntimeCommands.value))
 const composerPlaceholder = computed(() => {
-  if (activeChatReadOnly.value) return t('chat.readonlyHint')
+  if (composerReadOnly.value) return t('chat.readonlyHint')
   if (!streaming.value) return t(goalDraftEnabled.value ? 'chat.goal.placeholder' : planModeEnabled.value ? 'chat.planMode.placeholder' : 'chat.inputPlaceholder')
   return t('chat.inputPlaceholder')
 })
@@ -3313,9 +3325,13 @@ const composerAction = computed(() => resolveComposerAction({
   active: isActive.value,
   hasBot: !!currentBotId.value,
   hasSession: !!activeSessionId.value,
-  readOnly: activeChatReadOnly.value,
-  loadingMessages: loadingMessages.value,
-  configPending: composerAgentConfigPending.value ? 'agent' : runtimeModeChanging.value ? 'mode' : false,
+  readOnly: composerReadOnly.value,
+  // A pending session summary holds the send the same way loading history does.
+  loadingMessages: loadingMessages.value || activeSessionSummaryPending.value,
+  configPending: composerAgentConfigPending.value ? 'agent'
+    : runtimeModeChanging.value ? 'mode'
+      : composerHasNoModel.value && composerModelResolving.value ? 'model'
+        : false,
   hasNoModel: composerHasNoModel.value,
   modeUnavailable: !!runtimeModeUnavailableReason.value,
   modeChangeDisabled: runtimeModeDisabled.value,
@@ -3397,9 +3413,11 @@ useComposerKeyboardFocus({
   textarea: textareaEl,
   enabled: () => isActive.value && isVisible.value,
   available: () => (router.currentRoute.value.name === 'home' || router.currentRoute.value.name === 'bot')
-    && !!currentBotId.value && !activeChatReadOnly.value
+    && !!currentBotId.value && !composerReadOnly.value
     && voiceInputState.value === 'idle',
-  ready: () => !loadingMessages.value && !composerPlacementPending.value,
+  // Nothing holds the composer back while history loads; a disabled
+  // textarea (first send in flight) is retried when it re-enables.
+  ready: () => true,
   owner: () => `${paneTarget.value.botId}:${paneTarget.value.viewId}:${paneTarget.value.sessionId ?? ''}`,
   request: () => workspaceTabs.pendingChatInputFocus?.panelId === props.tabId
     && workspaceTabs.pendingChatInputFocus.botId === paneTarget.value.botId
@@ -3734,7 +3752,7 @@ const replaceDraftConfirm = useAsyncConfirm()
 const { lastPrefilled } = useComposerPrefillConsumer({
   botId: () => paneTarget.value.botId,
   active: () => isActive.value,
-  writable: () => !activeChatReadOnly.value,
+  writable: () => !composerReadOnly.value,
   ready: () => !loadingChats.value,
   currentText: () => inputText.value,
   // Focus the composer first: the dialog returns focus to whatever held it

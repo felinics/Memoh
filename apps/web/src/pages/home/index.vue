@@ -1,6 +1,6 @@
 <template>
   <div class="flex h-full overflow-hidden">
-    <ChatWorkspace v-if="currentBotId" />
+    <ChatWorkspace v-if="currentBotId && !urlBotPending" />
     <div
       v-else
       class="flex-1 bg-card"
@@ -12,7 +12,7 @@
         {{ t('bots.notFoundDescription') }}
       </PanePlaceholder>
       <PanePlaceholder
-        v-else
+        v-else-if="!urlBotPending"
         :title="t('chat.selectBot')"
       >
         {{ t('chat.selectBotHint') }}
@@ -36,6 +36,7 @@ import { useChatStore } from '@/store/chat-list'
 import { routeConversationLabel } from '@/store/chat-list.utils'
 import { useComposerPrefillStore } from '@/store/composer-prefill'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { useTabScopedStorage } from '@/utils/tab-scoped-storage'
 import { ACP_NO_PROJECT_MODE, createACPNoProjectPath } from '@/utils/acp'
 import { botAgentProvider } from '@/utils/bot-agent'
 import ChatWorkspace from './components/chat-workspace.vue'
@@ -87,6 +88,32 @@ async function resolveBotNameFromId(botId: string): Promise<string | null> {
 }
 
 let suppressUrlSync = false
+
+// The URL name of the bot this tab last had open, as `<bot id>\n<name>`,
+// seeded across reloads like the bot id itself. On a cold start the bot list
+// is not loaded yet; this tells without a request whether `/bot/<name>` is the
+// remembered bot (its chat renders at once) or another one.
+const currentBotRoute = useTabScopedStorage<string>('chat-bot-route', '', { seed: true })
+watch([currentBotId, bots], ([botId, list]) => {
+  const id = (botId ?? '').trim()
+  const name = list.find(bot => bot.id === id)?.name?.trim()
+  if (id && name) currentBotRoute.value = `${id}\n${name}`
+}, { immediate: true })
+
+function currentBotUrlName(): string {
+  const id = (currentBotId.value ?? '').trim()
+  const listed = bots.value.find(bot => bot.id === id)?.name?.trim()
+  if (listed) return listed
+  const [rememberedId, rememberedName] = currentBotRoute.value.split('\n')
+  return rememberedId === id ? rememberedName ?? '' : ''
+}
+
+// Set while the URL names a bot other than the selected one and that bot is
+// still being looked up. The selected bot's chat is not shown meanwhile:
+// typing into it would land in the wrong bot's draft, and its composer would
+// be swapped out the moment the lookup returns.
+const urlBotPending = ref(false)
+let urlSyncRun = 0
 
 // The URL's bot identifier when the server has no such bot. While set, the
 // pane shows the not-found state and the URL is left as the user typed it.
@@ -167,18 +194,33 @@ async function maybeStartExternalAgentSession() {
 
 async function syncStoreFromUrl(rawName: string) {
   const urlName = rawName.trim()
+  const run = ++urlSyncRun
+  const selectedId = (currentBotId.value ?? '').trim()
+  urlBotPending.value = !!urlName && !!selectedId && urlName !== selectedId && urlName !== currentBotUrlName()
+  const settleUrlBot = () => { if (run === urlSyncRun) urlBotPending.value = false }
   if (!urlName) {
     missingBotName.value = ''
     if (!currentBotId.value) {
       await chatStore.initializeWithRecovery()
     }
     await maybeStartExternalAgentSession()
+    // A bot selected before this page mounted (remembered for the tab, or
+    // restored at sign-in) never reaches the currentBotId watcher below, so
+    // move `/` to that bot's URL here.
+    const selected = (currentBotId.value ?? '').trim()
+    const botName = selected ? await resolveBotNameFromId(selected) : null
+    if (botName && run === urlSyncRun && isChatRoute() && !((route.params.botName as string) ?? '').trim()
+      && (currentBotId.value ?? '').trim() === selected) {
+      void router.replace({ name: 'bot', params: { botName } })
+    }
     return
   }
   let resolvedId: string | null
   try {
     resolvedId = await resolveBotIdFromName(urlName)
   } catch {
+    // The lookup failed: keep showing the selected bot, as before.
+    settleUrlBot()
     return
   }
   if (!resolvedId) {
@@ -193,6 +235,7 @@ async function syncStoreFromUrl(rawName: string) {
       currentBotId.value = null
       await nextTick()
     }
+    settleUrlBot()
     void chatStore.refreshBots()
     return
   }
@@ -200,10 +243,16 @@ async function syncStoreFromUrl(rawName: string) {
   if (resolvedId !== (currentBotId.value ?? '').trim()) {
     suppressUrlSync = true
     try {
-      await chatStore.selectBot(resolvedId)
+      // selectBot switches the selection before it loads the bot, so the
+      // URL's bot can render as soon as the call starts.
+      const switching = chatStore.selectBot(resolvedId)
+      settleUrlBot()
+      await switching
     } finally {
       suppressUrlSync = false
     }
+  } else {
+    settleUrlBot()
   }
   await maybeStartExternalAgentSession()
   // Canonicalize the URL to the bot's name slug. This covers entry points that
