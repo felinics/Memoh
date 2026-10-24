@@ -56,11 +56,12 @@ func newClient(apiKey, baseURL string) (*client, error) {
 	}}, nil
 }
 
-func (c *client) post(ctx context.Context, path, model, contentType string, body io.Reader) (*http.Response, error) {
+func (c *client) post(ctx context.Context, path, model, contentType string, body io.Reader, contentLength int64) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, body)
 	if err != nil {
 		return nil, &requestError{cause: err}
 	}
+	req.ContentLength = contentLength
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("model", model)
 	req.Header.Set("Content-Type", contentType)

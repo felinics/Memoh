@@ -1,6 +1,7 @@
 package fishaudio_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -23,6 +24,15 @@ func TestTranscribeRequestAndAnnotatedResponse(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/asr" || r.Header.Get("model") != "transcribe-1-pro" || r.Header.Get("Authorization") != "Bearer secret" {
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if r.ContentLength != int64(len(body)) || len(r.TransferEncoding) != 0 {
+			t.Errorf("request framing = length %d, transfer encoding %v; body has %d bytes", r.ContentLength, r.TransferEncoding, len(body))
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
 		if err := r.ParseMultipartForm(1024); err != nil {
 			t.Error(err)
 			return
@@ -50,7 +60,6 @@ func TestTranscribeRequestAndAnnotatedResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var _ sdk.TranscriptionProvider = p
 	out, err := p.DoTranscribe(t.Context(), sdk.TranscriptionParams{Audio: []byte("original audio"), Filename: "conversation.webm", Config: map[string]any{"language": "zh", "ignore_timestamps": false, "tag_audio_events": true, "diarize": "auto", "num_speakers": 2.0, "api_key": "do-not-forward", "base_url": "do-not-forward"}})
 	if err != nil {
 		t.Fatal(err)
@@ -62,6 +71,37 @@ func TestTranscribeRequestAndAnnotatedResponse(t *testing.T) {
 	wantTurns := []any{map[string]any{"speaker": "speaker:0", "text": "你好。 [laughter]", "start": 0.32, "end": 0.88}}
 	if metadata["request_id"] != "req-1" || !reflect.DeepEqual(metadata["speaker_turns"], wantTurns) {
 		t.Fatalf("metadata = %#v", metadata)
+	}
+}
+
+func BenchmarkTranscribe(b *testing.B) {
+	for _, size := range []struct {
+		name  string
+		bytes int
+	}{{"1KiB", 1024}, {"64MiB", 64 * 1024 * 1024}} {
+		b.Run(size.name, func(b *testing.B) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				_, _ = io.WriteString(w, `{"text":"hello"}`)
+			}))
+			defer srv.Close()
+			p, err := fishaudio.NewTranscription("key", srv.URL)
+			if err != nil {
+				b.Fatal(err)
+			}
+			params := sdk.TranscriptionParams{Audio: make([]byte, size.bytes), Filename: "audio.wav", Config: map[string]any{"language": "en"}}
+			if _, err := p.DoTranscribe(b.Context(), params); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			b.SetBytes(int64(size.bytes))
+			b.ResetTimer()
+			for range b.N {
+				if _, err := p.DoTranscribe(b.Context(), params); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 

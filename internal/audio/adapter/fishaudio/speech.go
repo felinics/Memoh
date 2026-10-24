@@ -11,43 +11,46 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 )
 
-type Speech struct{ client *client }
+type speech struct{ client *client }
 
-var _ sdk.SpeechProvider = (*Speech)(nil)
-
-func NewSpeech(apiKey, baseURL string) (*Speech, error) {
+func NewSpeech(apiKey, baseURL string) (sdk.SpeechProvider, error) {
 	c, err := newClient(apiKey, baseURL)
 	if err != nil {
 		return nil, err
 	}
-	return &Speech{client: c}, nil
+	return &speech{client: c}, nil
 }
 
-func (p *Speech) ListModels(ctx context.Context) ([]*sdk.SpeechModel, error) {
+func (p *speech) ListModels(ctx context.Context) ([]*sdk.SpeechModel, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	return []*sdk.SpeechModel{{ID: DefaultSpeechModel, Provider: p}, {ID: "s2.1-pro-free", Provider: p}, {ID: "drama-3", Provider: p}}, nil
 }
 
-func (p *Speech) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechResult, error) {
-	stream, err := p.DoStream(ctx, params)
-	if err != nil {
-		return nil, err
-	}
-	audio, err := stream.Bytes()
-	if err != nil {
-		return nil, err
-	}
-	return &sdk.SpeechResult{Audio: audio, ContentType: stream.ContentType}, nil
-}
-
-func (p *Speech) DoStream(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechStreamResult, error) {
+func (p *speech) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechResult, error) {
 	body, model, contentType, err := speechRequest(ctx, params)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := p.client.post(ctx, "/tts", model, "application/json", bytes.NewReader(body)) //nolint:bodyclose // Ownership passes to the goroutine, which closes on every exit.
+	resp, err := p.client.post(ctx, "/tts", model, "application/json", bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	audio, err := readBounded(resp.Body, maxSpeechBytes)
+	if err != nil {
+		return nil, err
+	}
+	return &sdk.SpeechResult{Audio: audio, ContentType: contentType}, nil
+}
+
+func (p *speech) DoStream(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechStreamResult, error) {
+	body, model, contentType, err := speechRequest(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := p.client.post(ctx, "/tts", model, "application/json", bytes.NewReader(body), int64(len(body))) //nolint:bodyclose // Ownership passes to the goroutine, which closes on every exit.
 	if err != nil {
 		return nil, err
 	}

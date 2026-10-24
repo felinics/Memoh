@@ -1,6 +1,7 @@
 package fishaudio_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -41,13 +42,47 @@ func TestSynthesizeRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var _ sdk.SpeechProvider = p
 	result, err := p.DoSynthesize(t.Context(), sdk.SpeechParams{Text: " [happy] Hello ", Config: map[string]any{"reference_id": "voice-id", "speed": 1.2, "volume": -3, "sample_rate": 44100, "language": "en-US", "normalize": false, "api_key": "do-not-forward", "base_url": "do-not-forward"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(result.Audio) != "audio bytes" || result.ContentType != "audio/mpeg" {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func BenchmarkSynthesize(b *testing.B) {
+	for _, size := range []struct {
+		name  string
+		bytes int
+	}{{"1KiB", 1024}, {"4MiB", 4 * 1024 * 1024}, {"64MiB", 64 * 1024 * 1024}} {
+		b.Run(size.name, func(b *testing.B) {
+			audio := make([]byte, size.bytes)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.Copy(w, bytes.NewReader(audio))
+			}))
+			defer srv.Close()
+			p, err := fishaudio.NewSpeech("key", srv.URL)
+			if err != nil {
+				b.Fatal(err)
+			}
+			params := sdk.SpeechParams{Text: "hello"}
+			if _, err := p.DoSynthesize(b.Context(), params); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			b.SetBytes(int64(size.bytes))
+			b.ResetTimer()
+			for range b.N {
+				result, err := p.DoSynthesize(b.Context(), params)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(result.Audio) != size.bytes {
+					b.Fatalf("audio length = %d, want %d", len(result.Audio), size.bytes)
+				}
+			}
+		})
 	}
 }
 
@@ -111,34 +146,58 @@ func TestSpeechStreamReadFailure(t *testing.T) {
 	}
 }
 
-func TestSpeechStreamCancellationClosesResponse(t *testing.T) {
-	closed := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, "first")
-		w.(http.Flusher).Flush()
-		<-r.Context().Done()
-		close(closed)
-	}))
-	defer srv.Close()
-	p, err := fishaudio.NewSpeech("key", srv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	stream, err := p.DoStream(ctx, sdk.SpeechParams{Text: "hello"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cancel()
-	_, err = stream.Bytes()
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("Err = %v", err)
-	}
-	select {
-	case <-closed:
-	case <-time.After(2 * time.Second):
-		t.Fatal("response not closed")
+func TestSpeechCancellationClosesResponse(t *testing.T) {
+	for _, mode := range []string{"synthesize", "stream"} {
+		t.Run(mode, func(t *testing.T) {
+			started := make(chan struct{})
+			closed := make(chan struct{})
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.WriteString(w, "first")
+				w.(http.Flusher).Flush()
+				close(started)
+				<-r.Context().Done()
+				close(closed)
+			}))
+			defer srv.Close()
+			p, err := fishaudio.NewSpeech("key", srv.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			result := make(chan error, 1)
+			go func() {
+				if mode == "synthesize" {
+					_, err := p.DoSynthesize(ctx, sdk.SpeechParams{Text: "hello"})
+					result <- err
+					return
+				}
+				stream, err := p.DoStream(ctx, sdk.SpeechParams{Text: "hello"})
+				if err == nil {
+					_, err = stream.Bytes()
+				}
+				result <- err
+			}()
+			select {
+			case <-started:
+			case <-time.After(2 * time.Second):
+				t.Fatal("speech request not started")
+			}
+			cancel()
+			select {
+			case err := <-result:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("error = %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("speech request did not cancel")
+			}
+			select {
+			case <-closed:
+			case <-time.After(2 * time.Second):
+				t.Fatal("speech response not closed")
+			}
+		})
 	}
 }
 

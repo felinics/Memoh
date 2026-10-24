@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"mime/multipart"
 	"strconv"
@@ -15,26 +16,24 @@ import (
 	"github.com/felinics/memoh/internal/agent/partmeta"
 )
 
-type Transcription struct{ client *client }
+type transcription struct{ client *client }
 
-var _ sdk.TranscriptionProvider = (*Transcription)(nil)
-
-func NewTranscription(apiKey, baseURL string) (*Transcription, error) {
+func NewTranscription(apiKey, baseURL string) (sdk.TranscriptionProvider, error) {
 	c, err := newClient(apiKey, baseURL)
 	if err != nil {
 		return nil, err
 	}
-	return &Transcription{client: c}, nil
+	return &transcription{client: c}, nil
 }
 
-func (p *Transcription) ListModels(ctx context.Context) ([]*sdk.TranscriptionModel, error) {
+func (p *transcription) ListModels(ctx context.Context) ([]*sdk.TranscriptionModel, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	return []*sdk.TranscriptionModel{{ID: DefaultTranscriptionModel, Provider: p}, {ID: "transcribe-1", Provider: p}}, nil
 }
 
-func (p *Transcription) DoTranscribe(ctx context.Context, params sdk.TranscriptionParams) (*sdk.TranscriptionResult, error) {
+func (p *transcription) DoTranscribe(ctx context.Context, params sdk.TranscriptionParams) (*sdk.TranscriptionResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -63,17 +62,17 @@ func (p *Transcription) DoTranscribe(ctx context.Context, params sdk.Transcripti
 	if filename == "" {
 		filename = "audio"
 	}
-	file, err := writer.CreateFormFile("audio", filename)
-	if err != nil {
+	if _, err := writer.CreateFormFile("audio", filename); err != nil {
 		return nil, &requestError{cause: err}
 	}
-	if _, err := file.Write(params.Audio); err != nil {
-		return nil, &requestError{cause: err}
-	}
+	prefixLength := body.Len()
 	if err := writer.Close(); err != nil {
 		return nil, &requestError{cause: err}
 	}
-	resp, err := p.client.post(ctx, "/asr", model, writer.FormDataContentType(), &body)
+	// Insert the existing audio slice between the multipart headers and closing boundary.
+	framing := body.Bytes()
+	payload := io.MultiReader(bytes.NewReader(framing[:prefixLength]), bytes.NewReader(params.Audio), bytes.NewReader(framing[prefixLength:]))
+	resp, err := p.client.post(ctx, "/asr", model, writer.FormDataContentType(), payload, int64(len(framing))+int64(len(params.Audio)))
 	if err != nil {
 		return nil, err
 	}
