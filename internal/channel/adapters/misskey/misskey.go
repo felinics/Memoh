@@ -110,6 +110,7 @@ func (*MisskeyAdapter) SelfIdentityPolicy() channel.SelfIdentityPolicy {
 		RefreshOnCredentialsChange: true,
 		RequireDiscoveryOnEnable:   true,
 		RequiredSelfIdentityKey:    "user_id",
+		SenderSubjectKey:           "user_id",
 		DiscoveryErrorMessage:      "misskey identity discovery failed",
 		MissingIdentityMessage:     "misskey identity discovery returned no user id",
 	}

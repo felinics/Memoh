@@ -187,6 +187,7 @@ func (*SlackAdapter) SelfIdentityPolicy() channel.SelfIdentityPolicy {
 		RefreshOnCredentialsChange: true,
 		RequireDiscoveryOnEnable:   true,
 		RequiredSelfIdentityKey:    "user_id",
+		SenderSubjectKey:           "user_id",
 		DiscoveryErrorMessage:      "slack bot identity discovery failed",
 		MissingIdentityMessage:     "slack bot identity discovery returned no user id",
 	}

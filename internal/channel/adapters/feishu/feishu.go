@@ -200,6 +200,7 @@ func (*FeishuAdapter) SelfIdentityPolicy() channel.SelfIdentityPolicy {
 		RefreshOnCredentialsChange: true,
 		RequireDiscoveryOnEnable:   true,
 		RequiredSelfIdentityKey:    "open_id",
+		SenderSubjectKey:           "open_id",
 		DiscoveryErrorMessage:      "feishu bot identity discovery failed",
 		MissingIdentityMessage:     "feishu bot identity discovery returned no open id",
 	}

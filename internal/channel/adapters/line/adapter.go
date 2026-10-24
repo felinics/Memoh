@@ -77,6 +77,7 @@ func (*Adapter) SelfIdentityPolicy() channel.SelfIdentityPolicy {
 		RefreshOnCredentialsChange:       true,
 		RequireDiscoveryOnEnable:         true,
 		RequiredSelfIdentityKey:          "bot_user_id",
+		SenderSubjectKey:                 "bot_user_id",
 		DiscoveryErrorMessage:            "line bot identity discovery failed",
 		MissingIdentityMessage:           "line bot identity discovery returned no bot user id",
 		DuplicateExternalIdentityMessage: "line bot is already configured by another channel config",
