@@ -54,10 +54,6 @@ import (
 	"github.com/felinics/memoh/internal/workspace"
 )
 
-const (
-	defaultMaxContextMinutes = 24 * 60
-)
-
 // SkillEntry represents a skill loaded from the container.
 type SkillEntry struct {
 	Name        string
@@ -537,7 +533,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	var currentMessageIndex *int
 	if usePipeline {
 		var loadErr error
-		messages, historyPressureTokens, req.historyViewFrom, loadErr = s.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
+		messages, historyPressureTokens, loadErr = s.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
 		if loadErr != nil {
 			return resolvedContext{}, req, loadErr
 		}
@@ -556,7 +552,6 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		messages = prepared.messages
 		historyRecords = prepared.records
 		historyPressureTokens = prepared.pressureTokens
-		req.historyViewFrom = prepared.viewFrom
 	}
 	forkMessageCount := 0
 	if forkContext := s.subagentForkContextModelMessages(ctx, req); len(forkContext) > 0 {

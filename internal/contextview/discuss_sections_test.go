@@ -9,6 +9,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
@@ -25,7 +26,7 @@ func discussSectionsInputFixture() DiscussContextInput {
 	composed := timeline.ComposeContextWithArtifacts(rc, trs, []timeline.CompactionArtifact{{
 		ID:      "fixture-artifact",
 		Summary: "older summary",
-	}})
+	}}, messagepkg.HistoryOrigin{})
 	return DiscussContextInput{
 		ComposedMessages: composed.Messages,
 	}

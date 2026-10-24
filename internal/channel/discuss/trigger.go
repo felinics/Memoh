@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/turn"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
@@ -16,13 +17,14 @@ type discussTurnPlan struct {
 	estimatedTokens int
 }
 
-// Build composes the durable timeline and persisted turn responses into the
-// pure StartTurn command consumed by Agent. The admission budget is applied
-// before materialization (CM-ADM-001); a ProtectedOverflow admission returns
-// ok=false so the caller fails closed instead of running the turn.
-func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.RenderedContext, trs []timeline.TurnResponseEntry, after timeline.DiscussCursorPosition, artifacts []timeline.CompactionArtifact, budget timeline.ComposeBudget) (discussTurnPlan, timeline.ComposeAdmission, bool) {
+// Build composes the durable timeline and persisted turn responses from the
+// session's history origin on into the pure StartTurn command consumed by
+// Agent. The admission budget is applied before materialization
+// (CM-ADM-001); a ProtectedOverflow admission returns ok=false so the caller
+// fails closed instead of running the turn.
+func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.RenderedContext, trs []timeline.TurnResponseEntry, after timeline.DiscussCursorPosition, artifacts []timeline.CompactionArtifact, origin messagepkg.HistoryOrigin, budget timeline.ComposeBudget) (discussTurnPlan, timeline.ComposeAdmission, bool) {
 	budget.After = &after
-	composed, admission := timeline.ComposeContextWithArtifactsBudgeted(rc, trs, artifacts, budget)
+	composed, admission := timeline.ComposeContextWithArtifactsBudgeted(rc, trs, artifacts, origin, budget)
 	if composed == nil && !admission.ProtectedOverflow {
 		return discussTurnPlan{}, admission, false
 	}
@@ -70,7 +72,6 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			DiscussImageRefs:        extractNewImageRefs(rc, after),
 			DiscussAddressed:        addressed,
 			DiscussContextTokens:    admission.EstimatedTokens,
-			DiscussViewFromMs:       timeline.ViewFromMs(rc, trs),
 			DiscussContextOverflow:  admission.ProtectedOverflow,
 			DiscussCurrentTokens:    admission.CurrentTokens,
 		},

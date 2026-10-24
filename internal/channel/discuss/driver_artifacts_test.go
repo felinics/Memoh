@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
@@ -140,7 +141,7 @@ func TestBuildMentionGatesOnWatermarkNotCoverage(t *testing.T) {
 		Sources: []timeline.CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 100}},
 	}}
 
-	pending, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, artifacts, timeline.ComposeBudget{})
+	pending, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, artifacts, messagepkg.HistoryOrigin{}, timeline.ComposeBudget{})
 	if !ok {
 		t.Fatal("expected a composed plan")
 	}
@@ -148,7 +149,7 @@ func TestBuildMentionGatesOnWatermarkNotCoverage(t *testing.T) {
 		t.Fatal("a mention the watermark has not consumed must wake the session even when compaction covers it")
 	}
 
-	consumed, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{SourceCursor: 150}, artifacts, timeline.ComposeBudget{})
+	consumed, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{SourceCursor: 150}, artifacts, messagepkg.HistoryOrigin{}, timeline.ComposeBudget{})
 	if !ok {
 		t.Fatal("expected a composed plan past the mention")
 	}
@@ -181,7 +182,7 @@ func TestBuildKeepsCoveredImageRefsOutsideTheComposedMessages(t *testing.T) {
 		Sources: []timeline.CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 100}},
 	}}
 
-	plan, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, artifacts, timeline.ComposeBudget{})
+	plan, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, artifacts, messagepkg.HistoryOrigin{}, timeline.ComposeBudget{})
 	if !ok {
 		t.Fatal("expected a composed plan")
 	}
@@ -194,7 +195,7 @@ func TestBuildKeepsCoveredImageRefsOutsideTheComposedMessages(t *testing.T) {
 		}
 	}
 
-	planLive, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, nil, timeline.ComposeBudget{})
+	planLive, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, nil, messagepkg.HistoryOrigin{}, timeline.ComposeBudget{})
 	if !ok {
 		t.Fatal("expected a composed plan without artifacts")
 	}

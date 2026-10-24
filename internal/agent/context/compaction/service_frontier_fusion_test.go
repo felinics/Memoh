@@ -244,6 +244,34 @@ func TestDoCompactionRefusesASummaryPastTheRequestCutoff(t *testing.T) {
 	}
 }
 
+// An edit or retry's event first rewinds the session to before the turn it
+// replaces, as the replacement's first step will, so it folds onto the
+// summary that ends before the cutoff instead of refusing the one the
+// replaced run wrote past it.
+func TestCompactRewindsTheReplacedTurnBeforeFolding(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubModel{summary: "folded before the cutoff"}
+	cfg := machineryConfig(stub, 100000)
+	parents := fusionParentLogs(t, cfg, "earlier", "spans the cutoff")
+	cfg.CandidatesBefore = time.UnixMilli(parents[1].AnchorEndMs)
+	cfg.ReplacedTurnID = uuid.NewString()
+	q := &fakeQueries{uncompacted: fusionQualityRows(t, cfg), priorLogs: parents}
+	q.onRewind = func() { q.priorLogs = parents[:1] }
+
+	passes, err := newMachineryService(q).Compact(context.Background(), cfg)
+	if err != nil || len(passes) != 1 {
+		t.Fatalf("passes=%d err=%v, want one pass after the rewind", len(passes), err)
+	}
+	turnID := pgtype.UUID{Bytes: uuid.MustParse(cfg.ReplacedTurnID), Valid: true}
+	if len(q.rewinds) != 1 || q.rewinds[0].TurnID != turnID || q.rewinds[0].SessionID.String() != cfg.SessionID {
+		t.Fatalf("rewinds=%+v, want one before the replaced turn", q.rewinds)
+	}
+	if absorbed := passes[0].Absorbed; len(absorbed) != 1 || absorbed[0] != formatUUID(parents[0].ID) {
+		t.Fatalf("absorbed=%v, want only the summary that ends before the cutoff", absorbed)
+	}
+}
+
 func legacyParentQueries(t *testing.T, cfg TriggerConfig) (*fakeQueries, []sqlc.BotHistoryMessageCompact, []sqlc.ListUncompactedMessagesBySessionRow) {
 	t.Helper()
 	parents := fusionParentLogs(t, cfg, "legacy summary")

@@ -80,6 +80,7 @@ func (*HistoryProvider) Usage(_ context.Context, _ SessionContext, available Ava
 	}
 	if ref, ok := available.Ref(ToolSearchMessages()); ok {
 		parts = append(parts, ref+": Search past message history. All parameters are optional: `start_time` / `end_time`, `keyword`, `session_id`, `contact_id`, and `role`.")
+		parts = append(parts, "When a history notice says earlier messages of this conversation are not in the context, search them with "+ref+" by the time range it gives as `start_time` / `end_time`; without `start_time` it searches only the last 7 days.")
 		if listSessionsRef != "" {
 			parts = append(parts, "Use session IDs from "+listSessionsRef+" as `session_id` for "+ref+" when searching a specific conversation.")
 		}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
-	"time"
 
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
@@ -16,28 +15,30 @@ type preparedHistoryContext struct {
 	messages       []ModelMessage
 	records        []historyfrag.HistoryRecord
 	pressureTokens int
-	viewFrom       time.Time
 }
 
 // prepareHistoryContext loads the history a request renders. Its window
 // folds the rows a summary replaced, so the rows the summary does not cover,
 // such as an earlier input kept beside it, stay inside the budget. An edit or
-// retry renders history before its cutoff, where a summary that reaches past
-// the cutoff does not render, so its window does not fold; nor does a window
-// in which a folded group's summary turns out not to render.
+// retry renders the history as it stood at its cutoff, folded the same way
+// by the summaries that end before it. A window in which a folded group's
+// summary turns out not to render loads again without folding.
 func (s *Service) prepareHistoryContext(
 	ctx context.Context,
 	req ChatRequest,
 	fallback historyfrag.ScopeFallback,
 	contextTokenBudget int,
 ) (preparedHistoryContext, error) {
-	fold := strings.TrimSpace(req.HistoryCutoffBeforeMessageID) == ""
-	prepared, err := s.prepareHistoryWindow(ctx, req, fallback, contextTokenBudget, fold)
-	if fold && errors.Is(err, errSummaryNotRendered) {
+	boundary, err := s.loadCompactionArtifactBoundary(ctx, req.ThreadID, req.HistoryCutoffBeforeMessageID)
+	if err != nil {
+		return preparedHistoryContext{}, err
+	}
+	prepared, err := s.prepareHistoryWindow(ctx, req, fallback, contextTokenBudget, boundary, true)
+	if errors.Is(err, errSummaryNotRendered) {
 		if s.logger != nil {
 			s.logger.WarnContext(ctx, "history window reloaded without folding", slog.String("session_id", req.ThreadID), slog.Any("error", err))
 		}
-		return s.prepareHistoryWindow(ctx, req, fallback, contextTokenBudget, false)
+		return s.prepareHistoryWindow(ctx, req, fallback, contextTokenBudget, boundary, false)
 	}
 	return prepared, err
 }
@@ -47,23 +48,21 @@ func (s *Service) prepareHistoryWindow(
 	req ChatRequest,
 	fallback historyfrag.ScopeFallback,
 	contextTokenBudget int,
+	boundary compactionArtifactBoundary,
 	fold bool,
 ) (preparedHistoryContext, error) {
-	loaded, err := s.loadHistoryRecords(ctx, fallback, req.ThreadID, defaultMaxContextMinutes, contextTokenBudget, fold)
+	loaded, err := s.loadHistoryRecords(ctx, fallback, req.ThreadID, contextTokenBudget, fold, boundary)
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
 	loaded = pruneHistoryForGateway(loaded)
 	loaded = dropPreflightFailureTurns(loaded)
 	loaded = dropEmptyHistoryFailures(loaded)
-	boundary := s.loadCompactionArtifactBoundary(ctx, loaded, req.ThreadID, req.HistoryCutoffBeforeMessageID)
-	loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
 	loaded = dedupePersistedCurrentUserMessage(loaded, req)
 	loaded, err = s.ensureRequiredHistoryMessage(ctx, loaded, req)
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
-	viewFrom := historyRecordsViewFrom(loaded)
 	loaded, err = s.replaceCompactedMessages(
 		ctx,
 		req.ThreadID,
@@ -74,24 +73,16 @@ func (s *Service) prepareHistoryWindow(
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
+	if loaded, err = s.withHistoryNotice(ctx, req.ThreadID, loaded); err != nil {
+		return preparedHistoryContext{}, err
+	}
 	loaded = projectInterruptedHistoryReasoning(loaded)
 	messages, records := historyMessagesFromRecords(loaded)
 	return preparedHistoryContext{
 		messages:       messages,
 		records:        records,
 		pressureTokens: estimateMessagesTokens(loaded),
-		viewFrom:       viewFrom,
 	}, nil
-}
-
-func historyRecordsViewFrom(records []historyfrag.HistoryRecord) time.Time {
-	var from time.Time
-	for _, record := range records {
-		if record.DBMessageID != "" && !record.CreatedAt.IsZero() && (from.IsZero() || record.CreatedAt.Before(from)) {
-			from = record.CreatedAt
-		}
-	}
-	return from
 }
 
 func historyErrorCode(meta map[string]any) string {

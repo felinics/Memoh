@@ -1430,6 +1430,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			RuntimeType:            runtimeType,
 			EventID:                eventID,
 			DisplayText:            item.DisplayText,
+			CreatedAt:              item.CreatedAt,
 		})
 		if err != nil {
 			return fmt.Errorf("message: %w", err)
@@ -1475,6 +1476,22 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 				return fmt.Errorf("message asset: %w", err)
 			}
 			state.counts[SectionAssets]++
+		}
+	}
+
+	// A restored session brings its whole history. Like a session the
+	// upgrade to history origins found, its context starts where the newest
+	// history that fits its budget does; the import restores no summaries.
+	restoredSessionIDs := make([]pgtype.UUID, 0, len(sessionMap))
+	for _, sessionID := range sessionMap {
+		restoredSessionIDs = append(restoredSessionIDs, sessionID)
+	}
+	sort.Slice(restoredSessionIDs, func(i, j int) bool {
+		return restoredSessionIDs[i].String() < restoredSessionIDs[j].String()
+	})
+	for _, sessionID := range restoredSessionIDs {
+		if _, err := q.PlaceSessionHistoryOrigin(ctx, sqlc.PlaceSessionHistoryOriginParams{SessionID: sessionID, BudgetSessionID: sessionID}); err != nil {
+			return fmt.Errorf("place history origin: %w", err)
 		}
 	}
 

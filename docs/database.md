@@ -45,7 +45,7 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 
 **Bots & Sessions**
 - `bots` — Bot definitions with model references and settings
-- `bot_sessions` — Bot conversation sessions
+- `bot_sessions` — Bot conversation sessions; `history_origin_at` and the `history_omitted_*` columns hold where a session's context starts and what its history notice reports (`memoh_place_history_origin`, see `docs/agent-runtime.md`)
 - `bot_session_events` — Session event log
 - `bot_channel_configs` — Per-bot channel configurations
 - `bot_channel_routes` — Conversation route mapping (inbound thread → bot history)

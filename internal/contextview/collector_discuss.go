@@ -108,14 +108,23 @@ func discussComposedMessageFrag(message timeline.ContextMessage, index int, curr
 	if message.Source != nil {
 		input.SourceID = message.Source.ID
 	}
-	if message.CompactionArtifactID != "" {
+	switch {
+	case message.CompactionArtifactID != "":
 		input.Kind = contextfrag.KindConversationSummary
 		input.Slot = contextfrag.SlotBeforeHistory
 		input.Priority = 10
 		input.CacheClass = contextfrag.CacheDynamic
 		input.Trust = contextfrag.TrustSystem
 		input.Budget = contextfrag.BudgetPolicy{Overflow: contextfrag.OverflowKeep}
-	} else if currentUser {
+	case msg.Role == sdk.MessageRoleSystem:
+		// The history notice: it opens the history ahead of the summaries and
+		// stays the same on every request of the session.
+		input.Kind = contextfrag.KindSystemPolicy
+		input.Slot = contextfrag.SlotBeforeHistory
+		input.CacheClass = contextfrag.CacheStable
+		input.Trust = contextfrag.TrustSystem
+		input.Budget = contextfrag.BudgetPolicy{Overflow: contextfrag.OverflowKeep}
+	case currentUser:
 		// Keep the history slot so rendering preserves the authoritative
 		// composed order; kind and overflow carry current-request semantics.
 		input.Kind = contextfrag.KindCurrentUserMessage
@@ -167,10 +176,14 @@ func discussContextMessageToSDK(message timeline.ContextMessage) sdk.Message {
 			return msg
 		}
 	}
-	if message.Role == "assistant" {
+	switch message.Role {
+	case "assistant":
 		return sdk.AssistantMessage(message.Content)
+	case "system":
+		return sdk.SystemMessage(message.Content)
+	default:
+		return sdk.UserMessage(message.Content)
 	}
-	return sdk.UserMessage(message.Content)
 }
 
 func trustForDiscussRole(role string) contextfrag.TrustLevel {

@@ -25,6 +25,9 @@ RETURNING *;
 SELECT * FROM bot_storage_bindings WHERE team_id = public.memoh_current_team_id() AND bot_id = sqlc.arg(bot_id);
 
 -- name: CreateMessageAsset :one
+-- Linking a new or changed asset to a row a summary of the current epoch
+-- covers rewinds the session's compaction to that row: the summaries that end
+-- before it move to the new epoch, the ones that reach it retire.
 WITH message_locator AS MATERIALIZED (
   SELECT message.id, message.session_id
   FROM bot_history_messages message
@@ -40,7 +43,7 @@ owner_session AS MATERIALIZED (
   FOR UPDATE
 ),
 target_message AS MATERIALIZED (
-  SELECT message.id, message.session_id, message.compact_id
+  SELECT message.id, message.session_id, message.compact_id, message.created_at
   FROM bot_history_messages message
   JOIN message_locator locator ON locator.id = message.id
   LEFT JOIN owner_session owner ON owner.id = locator.session_id
@@ -49,7 +52,7 @@ target_message AS MATERIALIZED (
   FOR UPDATE OF message
 ),
 changed_asset AS MATERIALIZED (
-  SELECT target.id, target.session_id, target.compact_id
+  SELECT target.id, target.session_id, target.compact_id, target.created_at
   FROM target_message target
   LEFT JOIN bot_history_message_assets existing
     ON existing.message_id = target.id
@@ -61,21 +64,17 @@ changed_asset AS MATERIALIZED (
      OR existing.name IS DISTINCT FROM sqlc.arg(name)
      OR existing.metadata IS DISTINCT FROM sqlc.arg(metadata)
 ),
-invalidated_session AS (
-  UPDATE bot_sessions session
-  SET compaction_epoch = session.compaction_epoch + 1
+compaction_rewind AS (
+  SELECT public.memoh_rewind_compaction(owner.id, changed.created_at) AS done
   FROM changed_asset changed
   JOIN owner_session owner ON owner.id = changed.session_id
   JOIN bot_history_message_compacts compact
     ON compact.id = changed.compact_id
    AND compact.team_id = public.memoh_current_team_id()
-  WHERE session.team_id = public.memoh_current_team_id()
-    AND session.id = owner.id
-    AND compact.bot_id = owner.bot_id
+  WHERE compact.bot_id = owner.bot_id
     AND compact.session_id = owner.id
     AND compact.compaction_epoch = owner.compaction_epoch
     AND compact.status IN ('pending', 'ok')
-  RETURNING session.id
 ),
 upserted_asset AS (
   INSERT INTO bot_history_message_assets (
@@ -92,7 +91,7 @@ upserted_asset AS (
     sqlc.arg(name),
     sqlc.arg(metadata)
   FROM target_message target
-  CROSS JOIN (SELECT count(*) FROM invalidated_session) invalidation_done
+  CROSS JOIN (SELECT count(*) FROM compaction_rewind) rewind_done
   ON CONFLICT (team_id, message_id, content_hash) DO UPDATE SET
     role = EXCLUDED.role,
     ordinal = EXCLUDED.ordinal,

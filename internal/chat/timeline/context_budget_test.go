@@ -3,6 +3,8 @@ package timeline
 import (
 	"strings"
 	"testing"
+
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 func budgetTestRC(texts ...string) RenderedContext {
@@ -19,14 +21,14 @@ func budgetTestRC(texts ...string) RenderedContext {
 
 func TestComposeBudgetedUnderBudgetKeepsEverything(t *testing.T) {
 	rc := budgetTestRC("hello there", "how are you")
-	composed, admission := ComposeContextWithArtifactsBudgeted(rc, nil, nil, ComposeBudget{MaxTokens: 1000})
+	composed, admission := ComposeContextWithArtifactsBudgeted(rc, nil, nil, messagepkg.HistoryOrigin{}, ComposeBudget{MaxTokens: 1000})
 	if composed == nil {
 		t.Fatal("expected a composed result")
 	}
 	if admission.DroppedEntries != 0 || admission.ProtectedOverflow {
 		t.Fatalf("under-budget composition must not drop: %+v", admission)
 	}
-	full := ComposeContextWithArtifacts(rc, nil, nil)
+	full := ComposeContextWithArtifacts(rc, nil, nil, messagepkg.HistoryOrigin{})
 	if len(composed.Messages) != len(full.Messages) {
 		t.Fatalf("budgeted (under budget) diverged from unbudgeted: %d vs %d", len(composed.Messages), len(full.Messages))
 	}
@@ -34,7 +36,7 @@ func TestComposeBudgetedUnderBudgetKeepsEverything(t *testing.T) {
 
 func TestComposeBudgetedZeroBudgetDisables(t *testing.T) {
 	rc := budgetTestRC(strings.Repeat("x", 4096))
-	composed, admission := ComposeContextWithArtifactsBudgeted(rc, nil, nil, ComposeBudget{})
+	composed, admission := ComposeContextWithArtifactsBudgeted(rc, nil, nil, messagepkg.HistoryOrigin{}, ComposeBudget{})
 	if composed == nil || admission.DroppedEntries != 0 {
 		t.Fatalf("zero budget must keep legacy behavior: %+v", admission)
 	}
@@ -57,7 +59,7 @@ func TestComposeBudgetedDropsOldestKeepsNewestAndSummaries(t *testing.T) {
 	}}
 	artifacts := []CompactionArtifact{{ID: "a1", Summary: "earlier conversation summary"}}
 
-	composed, admission := ComposeContextWithArtifactsBudgeted(rc, trs, artifacts, ComposeBudget{MaxTokens: 1200})
+	composed, admission := ComposeContextWithArtifactsBudgeted(rc, trs, artifacts, messagepkg.HistoryOrigin{}, ComposeBudget{MaxTokens: 1200})
 	if composed == nil {
 		t.Fatalf("expected a composed result, admission %+v", admission)
 	}
@@ -86,7 +88,7 @@ func TestComposeBudgetedDropsOldestKeepsNewestAndSummaries(t *testing.T) {
 
 func TestComposeBudgetedProtectedOverflowFailsClosed(t *testing.T) {
 	rc := budgetTestRC(strings.Repeat("x", 40000)) // newest alone ~10k tokens
-	composed, admission := ComposeContextWithArtifactsBudgeted(rc, nil, nil, ComposeBudget{MaxTokens: 100})
+	composed, admission := ComposeContextWithArtifactsBudgeted(rc, nil, nil, messagepkg.HistoryOrigin{}, ComposeBudget{MaxTokens: 100})
 	if composed != nil {
 		t.Fatal("protected overflow must not materialize a result")
 	}
@@ -109,7 +111,7 @@ func TestComposeBudgetedNewestOrphanToolFailsClosed(t *testing.T) {
 		ReceivedAtMs: 300,
 		Content:      []RenderedContentPiece{{Type: "text", Text: strings.Repeat("c", 400)}},
 	}}
-	composed, admission := ComposeContextWithArtifactsBudgeted(rc, trs, nil, ComposeBudget{MaxTokens: 50})
+	composed, admission := ComposeContextWithArtifactsBudgeted(rc, trs, nil, messagepkg.HistoryOrigin{}, ComposeBudget{MaxTokens: 50})
 	if composed != nil {
 		t.Fatal("newest orphan tool response must not materialize a result")
 	}
@@ -130,7 +132,7 @@ func TestComposeBudgetedDropsLeadingOrphanToolResponse(t *testing.T) {
 		ReceivedAtMs: 400,
 		Content:      []RenderedContentPiece{{Type: "text", Text: strings.Repeat("c", 40)}},
 	}}
-	composed, admission := ComposeContextWithArtifactsBudgeted(rc, trs, nil, ComposeBudget{MaxTokens: 200})
+	composed, admission := ComposeContextWithArtifactsBudgeted(rc, trs, nil, messagepkg.HistoryOrigin{}, ComposeBudget{MaxTokens: 200})
 	if composed == nil {
 		t.Fatalf("expected a composed result, admission %+v", admission)
 	}
@@ -144,7 +146,7 @@ func TestComposeBudgetedDropsLeadingOrphanToolResponse(t *testing.T) {
 func TestComposeProtectsExternalInputBeforeSelfEcho(t *testing.T) {
 	rc := budgetTestRC(strings.Repeat("u", 4400), "echo")
 	rc[1].IsSelfSent = true
-	_, got := ComposeContextWithArtifactsBudgeted(rc, nil, nil, ComposeBudget{MaxTokens: 1000})
+	_, got := ComposeContextWithArtifactsBudgeted(rc, nil, nil, messagepkg.HistoryOrigin{}, ComposeBudget{MaxTokens: 1000})
 	if !got.ProtectedOverflow {
 		t.Fatalf("external input dropped for echo: %+v", got)
 	}
@@ -154,7 +156,7 @@ func TestComposeProtectsEveryUnconsumedExternalInput(t *testing.T) {
 	rc := budgetTestRC(strings.Repeat("h", 8000), strings.Repeat("a", 1600), strings.Repeat("b", 1600), "echo")
 	rc[3].IsMyself = true
 	after := DiscussCursorPosition{SourceCursor: 100}
-	composed, admission := ComposeContextWithArtifactsBudgeted(rc, nil, nil, ComposeBudget{MaxTokens: 810, After: &after})
+	composed, admission := ComposeContextWithArtifactsBudgeted(rc, nil, nil, messagepkg.HistoryOrigin{}, ComposeBudget{MaxTokens: 810, After: &after})
 	if composed == nil || admission.CurrentTokens != 800 || len(composed.Messages) != 3 {
 		t.Fatalf("batch selection=%+v result=%+v", admission, composed)
 	}
@@ -163,7 +165,7 @@ func TestComposeProtectsEveryUnconsumedExternalInput(t *testing.T) {
 			t.Fatalf("lost source: %+v", message)
 		}
 	}
-	composed, admission = ComposeContextWithArtifactsBudgeted(rc, nil, nil, ComposeBudget{MaxTokens: 700, After: &after})
+	composed, admission = ComposeContextWithArtifactsBudgeted(rc, nil, nil, messagepkg.HistoryOrigin{}, ComposeBudget{MaxTokens: 700, After: &after})
 	if composed == nil || admission.ProtectedOverflow || admission.CurrentTokens != 400 || len(composed.Messages) != 2 || composed.Messages[0].Source.ID != "m3" {
 		t.Fatalf("an oversized batch must keep its newest fitting suffix: admission=%+v result=%+v", admission, composed)
 	}

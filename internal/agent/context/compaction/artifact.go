@@ -44,6 +44,13 @@ type Artifact struct {
 	CoverageMalformed bool
 }
 
+// EndsBefore reports whether the summary covers only rows created before
+// the cutoff, so history cut there can still render it. It matches the rule
+// memoh_rewind_compaction keeps summaries by.
+func (a Artifact) EndsBefore(cutoff time.Time) bool {
+	return a.AnchorStartMs > 0 && a.AnchorStartMs <= a.AnchorEndMs && a.AnchorEndMs < cutoff.UnixMilli()
+}
+
 func (a Artifact) HistoryRecord(scope contextfrag.Scope) historyfrag.HistoryRecord {
 	if scope.BotID == "" {
 		scope.BotID = a.BotID

@@ -112,6 +112,10 @@ type fakeQueries struct {
 	claims           map[pgtype.UUID]pgtype.UUID
 	logStatuses      map[pgtype.UUID]string
 	parentSuccessors map[pgtype.UUID]pgtype.UUID
+	// onRewind applies a rewind before the replaced turn; rewinds records
+	// each one asked for.
+	onRewind func()
+	rewinds  []sqlc.RewindCompactionBeforeTurnParams
 
 	created         bool
 	createArg       sqlc.CreateCompactionLogParams
@@ -129,6 +133,15 @@ type fakeQueries struct {
 
 func (*fakeQueries) ListSessionEventCursors(context.Context, sqlc.ListSessionEventCursorsParams) ([]sqlc.ListSessionEventCursorsRow, error) {
 	return nil, nil
+}
+
+func (f *fakeQueries) RewindCompactionBeforeTurn(_ context.Context, arg sqlc.RewindCompactionBeforeTurnParams) (bool, error) {
+	f.rewinds = append(f.rewinds, arg)
+	if f.onRewind == nil {
+		return false, nil
+	}
+	f.onRewind()
+	return true, nil
 }
 
 func (f *fakeQueries) BackfillCompactionArtifactCoverage(_ context.Context, arg sqlc.BackfillCompactionArtifactCoverageParams) error {

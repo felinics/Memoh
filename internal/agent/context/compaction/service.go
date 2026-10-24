@@ -136,10 +136,11 @@ func (s *Service) publishActivity(botID string) {
 // active summary and every candidate the request does not keep raw into one
 // summary. A pass folds as much as one summarizer call can read and commits
 // it; the event passes again only while candidates are left that the call
-// could not read. It returns the passes it committed: none when there was
-// nothing to fold or the session's compaction was already in flight. A
-// failed pass ends the event with an *EventError and leaves the passes before
-// it committed.
+// could not read. An edit or retry's event first rewinds the session to
+// before the turn it replaces, as the replacement's first step does. It
+// returns the passes it committed: none when there was nothing to fold or the
+// session's compaction was already in flight. A failed pass ends the event
+// with an *EventError and leaves the passes before it committed.
 func (s *Service) Compact(ctx context.Context, cfg TriggerConfig) ([]Pass, error) {
 	run, ok := s.beginSessionCompaction(cfg.SessionID)
 	if !ok {
@@ -184,6 +185,12 @@ func (s *Service) Compact(ctx context.Context, cfg TriggerConfig) ([]Pass, error
 	if err != nil {
 		compactErr = err
 		return nil, err
+	}
+	if cfg.ReplacedTurnID != "" {
+		if err := s.rewindReplacedTurn(ctx, botUUID, sessionUUID, cfg); err != nil {
+			compactErr = err
+			return nil, err
+		}
 	}
 
 	var passes []Pass
@@ -292,15 +299,6 @@ func (s *Service) ListLogs(ctx context.Context, botID string, limit, offset int)
 		logs[i] = toLog(r)
 	}
 	return logs, total, nil
-}
-
-// DeleteLogs deletes all compaction logs for a bot.
-func (s *Service) DeleteLogs(ctx context.Context, botID string) error {
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return err
-	}
-	return s.queries.DeleteCompactionLogsByBot(ctx, botUUID)
 }
 
 func toLog(r sqlc.BotHistoryMessageCompact) Log {

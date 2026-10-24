@@ -159,6 +159,41 @@ type LocateResult struct {
 	TargetID string
 }
 
+// HistoryWindow selects what a byte-budgeted session history load reads.
+type HistoryWindow struct {
+	// Since is where the load starts: the session's compaction anchor.
+	Since time.Time
+	// Before, when set, loads the history as it stood then: rows created
+	// before it, with only the summaries that end before it replacing rows.
+	// That is what the session's summaries become once the history from
+	// Before on is replaced.
+	Before   time.Time
+	MaxBytes int64
+	// FoldSummarized spends no budget on rows a usable summary replaced and
+	// loads only the newest row of each compact group, Summarized, to place
+	// its summary.
+	FoldSummarized bool
+}
+
+// HistoryOrigin is where a session's context starts. History from before it
+// reaches a request only through the summaries that cover it, and a notice
+// opens the history to say what was left out: how many visible messages
+// precede the origin, and when the first and the last of them was created.
+// The zero value is a session whose whole history is context, which every
+// session is unless the upgrade that introduced origins, a fork or an import
+// placed one.
+type HistoryOrigin struct {
+	At           time.Time
+	OmittedCount int64
+	OmittedFirst time.Time
+	OmittedLast  time.Time
+}
+
+// Omits reports whether the origin leaves any history out.
+func (o HistoryOrigin) Omits() bool {
+	return !o.At.IsZero() && o.OmittedCount > 0
+}
+
 // ActiveMessagesMeasure is a database-side aggregate over a session's active
 // messages (CM-ADM-001): counts and raw content bytes, computed without
 // loading any payload into the process.
@@ -246,26 +281,31 @@ type Service interface {
 	List(ctx context.Context, botID string) ([]Message, error)
 	ListSince(ctx context.Context, botID string, since time.Time) ([]Message, error)
 	ListActiveSince(ctx context.Context, botID string, since time.Time) ([]Message, error)
-	// ListActiveSinceWithinBytes is the byte-budgeted variant of
-	// ListActiveSince (CM-ADM-001): rows are admitted newest-first until
-	// their content byte total crosses maxBytes. Only content is budgeted,
-	// so metadata is returned undecoded in RawMetadata (Metadata stays nil):
-	// callers decode one row at a time instead of holding every row's
-	// decoded metadata, which legacy lifecycle audits can inflate.
-	ListActiveSinceWithinBytes(ctx context.Context, botID string, since time.Time, maxBytes int64) ([]Message, error)
 	ListLatest(ctx context.Context, botID string, limit int32) ([]Message, error)
 	ListBefore(ctx context.Context, botID string, before time.Time, limit int32) ([]Message, error)
 	ListBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
 	ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
-	// ListActiveSinceBySessionWithinBytes is the byte-budgeted variant of
-	// ListActiveSinceBySession (CM-ADM-001), same admission semantics and
-	// undecoded metadata as ListActiveSinceWithinBytes, scoped to one session.
-	// With foldSummarized, rows a usable compaction summary replaced cost
-	// nothing and only the newest of each compact group loads, Summarized.
-	ListActiveSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64, foldSummarized bool) ([]Message, error)
+	// ListActiveBySessionWithinBytes is the byte-budgeted variant of
+	// ListActiveSinceBySession (CM-ADM-001) over a HistoryWindow: rows are
+	// admitted newest-first until their content byte total crosses
+	// window.MaxBytes. Only content is budgeted, so metadata is returned
+	// undecoded in RawMetadata (Metadata stays nil): callers decode one row at
+	// a time instead of holding every row's decoded metadata, which legacy
+	// lifecycle audits can inflate.
+	ListActiveBySessionWithinBytes(ctx context.Context, sessionID string, window HistoryWindow) ([]Message, error)
+	// HistoryAnchorBySession reports the session's compaction anchor: the
+	// creation time of the oldest row no usable summary replaces, or of the
+	// newest row when every row is summarized. Every older row reaches a
+	// request as its summary, so a history load starts here. With before set
+	// it is the anchor of the history as it stood then (HistoryWindow.Before).
+	// Zero for a session without rows.
+	HistoryAnchorBySession(ctx context.Context, sessionID string, before time.Time) (time.Time, error)
+	// HistoryOriginBySession reports where the session's context starts; the
+	// zero HistoryOrigin when its whole history is context.
+	HistoryOriginBySession(ctx context.Context, sessionID string) (HistoryOrigin, error)
 	// ListTurnResponseSourcesSinceBySessionWithinBytes is the same window as
-	// ListActiveSinceBySessionWithinBytes projected to what turn-response
+	// ListActiveBySessionWithinBytes projected to what turn-response
 	// composition reads: ID, role, content, created_at, and Metadata holding
 	// only AgentStepInterruptedMetadataKey. Nothing else is loaded.
 	ListTurnResponseSourcesSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64) ([]Message, error)

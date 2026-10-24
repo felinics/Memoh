@@ -131,6 +131,8 @@ type Queries interface {
 	CreateChannelIdentity(ctx context.Context, arg dbsqlc.CreateChannelIdentityParams) (dbsqlc.ChannelIdentity, error)
 	CreateChatRoute(ctx context.Context, arg dbsqlc.CreateChatRouteParams) (dbsqlc.CreateChatRouteRow, error)
 	CreateCompactionLog(ctx context.Context, arg dbsqlc.CreateCompactionLogParams) (dbsqlc.BotHistoryMessageCompact, error)
+	CreateForkedCompactionArtifact(ctx context.Context, arg dbsqlc.CreateForkedCompactionArtifactParams) (pgtype.UUID, error)
+	ClaimForkedMessagesForCompact(ctx context.Context, arg dbsqlc.ClaimForkedMessagesForCompactParams) (int64, error)
 	CreateContextLifecycle(ctx context.Context, arg dbsqlc.CreateContextLifecycleParams) (dbsqlc.CreateContextLifecycleRow, error)
 	CreateFetchProvider(ctx context.Context, arg dbsqlc.CreateFetchProviderParams) (dbsqlc.FetchProvider, error)
 	CreateMCPConnection(ctx context.Context, arg dbsqlc.CreateMCPConnectionParams) (dbsqlc.McpConnection, error)
@@ -151,6 +153,8 @@ type Queries interface {
 	CreateSearchProvider(ctx context.Context, arg dbsqlc.CreateSearchProviderParams) (dbsqlc.SearchProvider, error)
 	CreateSession(ctx context.Context, arg dbsqlc.CreateSessionParams) (dbsqlc.BotSession, error)
 	ForkSessionFromAssistantTurn(ctx context.Context, arg dbsqlc.ForkSessionFromAssistantTurnParams) (dbsqlc.ForkSessionFromAssistantTurnRow, error)
+	CopySessionHistoryOrigin(ctx context.Context, arg dbsqlc.CopySessionHistoryOriginParams) error
+	PlaceSessionHistoryOrigin(ctx context.Context, arg dbsqlc.PlaceSessionHistoryOriginParams) (pgtype.Timestamptz, error)
 	CreateSessionEvent(ctx context.Context, arg dbsqlc.CreateSessionEventParams) (pgtype.UUID, error)
 	CreateStorageProvider(ctx context.Context, arg dbsqlc.CreateStorageProviderParams) (dbsqlc.StorageProvider, error)
 	CreateSubagentConfig(ctx context.Context, arg dbsqlc.CreateSubagentConfigParams) (dbsqlc.SubagentConfig, error)
@@ -182,7 +186,6 @@ type Queries interface {
 	ClearAppConnectorRefConnection(ctx context.Context, connectionID string) (int64, error)
 	DeleteAppConnectorRef(ctx context.Context, arg dbsqlc.DeleteAppConnectorRefParams) (int64, error)
 	DeleteChatRoute(ctx context.Context, id pgtype.UUID) error
-	DeleteCompactionLogsByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteContainerByBotID(ctx context.Context, botID pgtype.UUID) error
 	DeleteFetchProvider(ctx context.Context, id pgtype.UUID) error
 	DeleteMCPConnection(ctx context.Context, arg dbsqlc.DeleteMCPConnectionParams) error
@@ -286,6 +289,8 @@ type Queries interface {
 	GetSearchProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.SearchProvider, error)
 	GetSearchProviderByName(ctx context.Context, name string) (dbsqlc.SearchProvider, error)
 	GetSessionByID(ctx context.Context, id pgtype.UUID) (dbsqlc.BotSession, error)
+	GetSessionHistoryAnchor(ctx context.Context, arg dbsqlc.GetSessionHistoryAnchorParams) (pgtype.Timestamptz, error)
+	GetSessionHistoryOrigin(ctx context.Context, sessionID pgtype.UUID) (dbsqlc.GetSessionHistoryOriginRow, error)
 	GetTurnAgentTurnID(ctx context.Context, arg dbsqlc.GetTurnAgentTurnIDParams) (string, error)
 	SetRoundAgentTurnID(ctx context.Context, arg dbsqlc.SetRoundAgentTurnIDParams) (int64, error)
 	LockSessionForCommitReconciliation(ctx context.Context, arg dbsqlc.LockSessionForCommitReconciliationParams) (pgtype.UUID, error)
@@ -327,7 +332,6 @@ type Queries interface {
 	ListCompactionArtifactParentIDsBySuccessor(ctx context.Context, arg dbsqlc.ListCompactionArtifactParentIDsBySuccessorParams) ([]pgtype.UUID, error)
 	ListActiveMessagesSince(ctx context.Context, arg dbsqlc.ListActiveMessagesSinceParams) ([]dbsqlc.ListActiveMessagesSinceRow, error)
 	ListActiveMessagesSinceBySession(ctx context.Context, arg dbsqlc.ListActiveMessagesSinceBySessionParams) ([]dbsqlc.ListActiveMessagesSinceBySessionRow, error)
-	ListActiveMessagesSinceWithinBytes(ctx context.Context, arg dbsqlc.ListActiveMessagesSinceWithinBytesParams) ([]dbsqlc.ListActiveMessagesSinceWithinBytesRow, error)
 	ListActiveMessagesSinceBySessionWithinBytes(ctx context.Context, arg dbsqlc.ListActiveMessagesSinceBySessionWithinBytesParams) ([]dbsqlc.ListActiveMessagesSinceBySessionWithinBytesRow, error)
 	ListTurnResponseSourcesSinceBySessionWithinBytes(ctx context.Context, arg dbsqlc.ListTurnResponseSourcesSinceBySessionWithinBytesParams) ([]dbsqlc.ListTurnResponseSourcesSinceBySessionWithinBytesRow, error)
 	MeasureActiveMessagesBySession(ctx context.Context, arg dbsqlc.MeasureActiveMessagesBySessionParams) (dbsqlc.MeasureActiveMessagesBySessionRow, error)
@@ -379,6 +383,7 @@ type Queries interface {
 	ListMessageRefsByCompactID(ctx context.Context, compactID pgtype.UUID) ([]dbsqlc.ListMessageRefsByCompactIDRow, error)
 	ListMessagesByCompactID(ctx context.Context, compactID pgtype.UUID) ([]dbsqlc.ListMessagesByCompactIDRow, error)
 	ListMessagesByCompactIDWithinBytes(ctx context.Context, arg dbsqlc.ListMessagesByCompactIDWithinBytesParams) ([]dbsqlc.ListMessagesByCompactIDWithinBytesRow, error)
+	ListMessagesByIDsForCoverage(ctx context.Context, arg dbsqlc.ListMessagesByIDsForCoverageParams) ([]dbsqlc.ListMessagesByIDsForCoverageRow, error)
 	ListRunHistoryTurnRequestMessageIDs(ctx context.Context, arg dbsqlc.ListRunHistoryTurnRequestMessageIDsParams) ([]pgtype.UUID, error)
 	ListMessagesBySession(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.ListMessagesBySessionRow, error)
 	ListSubagentForkContext(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.ListSubagentForkContextRow, error)
@@ -506,6 +511,7 @@ type Queries interface {
 	UpdateUserInputPromptMessage(ctx context.Context, arg dbsqlc.UpdateUserInputPromptMessageParams) (dbsqlc.UserInputRequest, error)
 	UpdateUserInputToolResultMessage(ctx context.Context, arg dbsqlc.UpdateUserInputToolResultMessageParams) (dbsqlc.UserInputRequest, error)
 	ReplaceHistoryTurn(ctx context.Context, arg dbsqlc.ReplaceHistoryTurnParams) (dbsqlc.ReplaceHistoryTurnRow, error)
+	RewindCompactionBeforeTurn(ctx context.Context, arg dbsqlc.RewindCompactionBeforeTurnParams) (bool, error)
 	SupersedeHistoryTurn(ctx context.Context, arg dbsqlc.SupersedeHistoryTurnParams) (HistoryTurn, error)
 	UpdateUserProviderOAuthState(ctx context.Context, arg dbsqlc.UpdateUserProviderOAuthStateParams) error
 	UpsertAccountByUsername(ctx context.Context, arg dbsqlc.UpsertAccountByUsernameParams) (dbsqlc.UpsertAccountByUsernameRow, error)

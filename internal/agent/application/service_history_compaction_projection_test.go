@@ -94,7 +94,7 @@ func TestReplaceCompactedMessagesOnlyRestoresArtifactsWhollyBeforeIntentionalCut
 			record.CompactID = unsafeCompactID
 		}),
 	}
-	boundary := compactionArtifactBoundaryBeforeMessage(loaded, "cutoff-assistant")
+	boundary := compactionArtifactBoundary{hasCutoff: true, cutoff: base.Add(20 * time.Minute)}
 
 	got, err := resolver.replaceCompactedMessages(
 		context.Background(),
@@ -109,6 +109,90 @@ func TestReplaceCompactedMessagesOnlyRestoresArtifactsWhollyBeforeIntentionalCut
 	want := []string{"<summary>\nolder condensed context\n</summary>", "prior"}
 	if gotTexts := recordTexts(got); !reflect.DeepEqual(gotTexts, want) {
 		t.Fatalf("cutoff projection = %#v, want %#v", gotTexts, want)
+	}
+}
+
+// A retry of a turn the run compacted renders the history as the rewind
+// leaves it: the rolling summary that absorbed the turn ends past the
+// cutoff, so the summary it superseded stands for the older rows again.
+func TestReplaceCompactedMessagesRendersTheSummaryThatStoodBeforeTheCutoff(t *testing.T) {
+	t.Parallel()
+
+	sessionID := "00000000-0000-0000-0000-00000000f016"
+	earlierID := "00000000-0000-0000-0000-00000000c016"
+	rollingID := "00000000-0000-0000-0000-00000000c017"
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	covered := func(at map[string]time.Duration, ids ...string) []byte {
+		sources := make([]compaction.CoveredSource, 0, len(ids))
+		for _, id := range ids {
+			var source compaction.CoveredSource
+			if err := json.Unmarshal(persistedCoverage(t, id), &[]*compaction.CoveredSource{&source}); err != nil {
+				t.Fatal(err)
+			}
+			source.CreatedAtMs = base.Add(at[id]).UnixMilli()
+			sources = append(sources, source)
+		}
+		raw, err := json.Marshal(sources)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	at := map[string]time.Duration{"row-old": time.Minute, "row-turn": 30 * time.Minute}
+	queries := &recordingCompactionLogQueries{
+		logs: []sqlc.BotHistoryMessageCompact{
+			{
+				ID:            mustPGUUID(t, earlierID),
+				SessionID:     mustPGUUID(t, sessionID),
+				Status:        "ok",
+				Summary:       "the summary before the turn",
+				Coverage:      covered(at, "row-old"),
+				AnchorStartMs: base.Add(time.Minute).UnixMilli(),
+				AnchorEndMs:   base.Add(time.Minute).UnixMilli(),
+				SupersededBy:  mustPGUUID(t, rollingID),
+				SupersededAt:  pgtype.Timestamptz{Time: base.Add(31 * time.Minute), Valid: true},
+			},
+			{
+				ID:            mustPGUUID(t, rollingID),
+				SessionID:     mustPGUUID(t, sessionID),
+				Status:        "ok",
+				Summary:       "the rolling summary through the turn",
+				Coverage:      covered(at, "row-old", "row-turn"),
+				AnchorStartMs: base.Add(time.Minute).UnixMilli(),
+				AnchorEndMs:   base.Add(30 * time.Minute).UnixMilli(),
+				ParentIds:     []pgtype.UUID{mustPGUUID(t, earlierID)},
+			},
+		},
+	}
+	resolver := &Service{queries: queries}
+	loaded := func() []historyfrag.HistoryRecord {
+		return []historyfrag.HistoryRecord{
+			historyRecord("row-old", ModelMessage{Role: "user", Content: newTextContent("old")}, func(record *historyfrag.HistoryRecord) {
+				record.CreatedAt = base.Add(time.Minute)
+				record.CompactID = earlierID
+				record.Summarized = true
+			}),
+			historyRecord("row-between", ModelMessage{Role: "assistant", Content: newTextContent("between")}, func(record *historyfrag.HistoryRecord) {
+				record.CreatedAt = base.Add(10 * time.Minute)
+			}),
+		}
+	}
+	scope := contextfrag.Scope{SessionID: sessionID}
+
+	cut, err := resolver.replaceCompactedMessages(context.Background(), sessionID, scope, loaded(), compactionArtifactBoundary{hasCutoff: true, cutoff: base.Add(20 * time.Minute)})
+	if err != nil {
+		t.Fatalf("cut history: %v", err)
+	}
+	if want := []string{"<summary>\nthe summary before the turn\n</summary>", "between"}; !reflect.DeepEqual(recordTexts(cut), want) {
+		t.Fatalf("cut history = %#v, want %#v", recordTexts(cut), want)
+	}
+
+	live, err := resolver.replaceCompactedMessages(context.Background(), sessionID, scope, loaded(), compactionArtifactBoundary{})
+	if err != nil {
+		t.Fatalf("live history: %v", err)
+	}
+	if got := recordTexts(live); len(got) == 0 || got[0] != "<summary>\nthe rolling summary through the turn\n</summary>" {
+		t.Fatalf("live history = %#v, want the rolling summary first", got)
 	}
 }
 

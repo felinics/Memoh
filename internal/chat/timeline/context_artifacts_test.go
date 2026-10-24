@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 func textSegment(id string, atMs int64, text string) RenderedSegment {
@@ -31,7 +33,7 @@ func TestComposeContextWithArtifactsNoArtifactsMatchesComposeContext(t *testing.
 	trs := []TurnResponseEntry{assistantTR(1500, "reply")}
 
 	plain := ComposeContext(rc, trs)
-	withArtifacts := ComposeContextWithArtifacts(rc, trs, nil)
+	withArtifacts := ComposeContextWithArtifacts(rc, trs, nil, messagepkg.HistoryOrigin{})
 
 	if plain == nil || withArtifacts == nil {
 		t.Fatalf("expected non-nil results, got %v and %v", plain, withArtifacts)
@@ -63,7 +65,7 @@ func TestComposeContextWithArtifactsReplacesCoveredSlot(t *testing.T) {
 		},
 	}}
 
-	composed := ComposeContextWithArtifacts(rc, trs, artifacts)
+	composed := ComposeContextWithArtifacts(rc, trs, artifacts, messagepkg.HistoryOrigin{})
 	if composed == nil {
 		t.Fatal("expected composed result")
 	}
@@ -97,7 +99,7 @@ func TestComposeContextWithArtifactsAnchorFallback(t *testing.T) {
 		Sources:     []CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 1000}},
 	}}
 
-	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
+	composed := ComposeContextWithArtifacts(rc, nil, artifacts, messagepkg.HistoryOrigin{})
 	if composed == nil || len(composed.Messages) != 2 {
 		t.Fatalf("expected summary + new message, got %+v", composed)
 	}
@@ -106,7 +108,7 @@ func TestComposeContextWithArtifactsAnchorFallback(t *testing.T) {
 	}
 
 	noAnchor := []CompactionArtifact{{ID: "a2", Summary: "no anchor"}}
-	composed = ComposeContextWithArtifacts(rc, nil, noAnchor)
+	composed = ComposeContextWithArtifacts(rc, nil, noAnchor, messagepkg.HistoryOrigin{})
 	if composed == nil || len(composed.Messages) != 2 || composed.Messages[0].CompactionArtifactID != "a2" {
 		t.Fatalf("expected anchorless summary first, got %+v", composed)
 	}
@@ -142,7 +144,7 @@ func TestComposeContextWithArtifactsPlacesSummaryAfterItsLastSource(t *testing.T
 		{name: "no source", rc: RenderedContext{input}, trs: []TurnResponseEntry{tail}},
 	} {
 		t.Run(loaded.name, func(t *testing.T) {
-			composed := ComposeContextWithArtifacts(loaded.rc, loaded.trs, artifacts)
+			composed := ComposeContextWithArtifacts(loaded.rc, loaded.trs, artifacts, messagepkg.HistoryOrigin{})
 			if composed == nil || !reflect.DeepEqual(messageTexts(composed.Messages), want) {
 				t.Fatalf("got %q, want %q", messageTexts(composed.Messages), want)
 			}
@@ -161,7 +163,7 @@ func TestComposeContextWithArtifactsFiltersCoveredTurnResponses(t *testing.T) {
 		Sources: []CompactionSource{{HistoryMessageID: "h1"}},
 	}}
 
-	composed := ComposeContextWithArtifacts(nil, []TurnResponseEntry{tr1, tr2}, artifacts)
+	composed := ComposeContextWithArtifacts(nil, []TurnResponseEntry{tr1, tr2}, artifacts, messagepkg.HistoryOrigin{})
 	if composed == nil || len(composed.Messages) != 2 {
 		t.Fatalf("expected summary + live reply, got %+v", composed)
 	}
@@ -189,7 +191,7 @@ func TestComposeContextWithArtifactsKeepsSegmentsEditedAfterCompletion(t *testin
 
 	// The edited segment is no longer what the summary replaced, so it stays
 	// and the summary renders after it, at the anchor of what it covered.
-	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
+	composed := ComposeContextWithArtifacts(rc, nil, artifacts, messagepkg.HistoryOrigin{})
 	if composed == nil || len(composed.Messages) != 3 {
 		t.Fatalf("expected summary and two independent sources, got %+v", composed)
 	}
@@ -216,7 +218,7 @@ func TestComposeContextWithArtifactsDropsSegmentsEditedBeforeCompletion(t *testi
 		Sources:        []CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 1000}},
 	}}
 
-	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
+	composed := ComposeContextWithArtifacts(rc, nil, artifacts, messagepkg.HistoryOrigin{})
 	if composed == nil {
 		t.Fatal("expected composed result")
 	}
@@ -237,7 +239,7 @@ func TestComposeContextWithArtifactsKeepsEditedSegmentWhenCompletionUnknown(t *t
 		Sources: []CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 1000}},
 	}}
 
-	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
+	composed := ComposeContextWithArtifacts(rc, nil, artifacts, messagepkg.HistoryOrigin{})
 	if composed == nil {
 		t.Fatal("expected composed result")
 	}
@@ -260,7 +262,7 @@ func TestComposeContextWithArtifactsIgnoresBlankSummary(t *testing.T) {
 		Sources: []CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 1000}},
 	}}
 
-	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
+	composed := ComposeContextWithArtifacts(rc, nil, artifacts, messagepkg.HistoryOrigin{})
 	if composed == nil || len(composed.Messages) != 1 {
 		t.Fatalf("expected original message only, got %+v", composed)
 	}
@@ -276,7 +278,7 @@ func TestComposeContextWithArtifactsOrdersMultipleArtifacts(t *testing.T) {
 		{ID: "a1", Summary: "first window", AnchorEndMs: 1000},
 	}
 
-	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
+	composed := ComposeContextWithArtifacts(rc, nil, artifacts, messagepkg.HistoryOrigin{})
 	if composed == nil || len(composed.Messages) != 3 {
 		t.Fatalf("expected 2 summaries + current, got %+v", composed)
 	}
@@ -286,7 +288,7 @@ func TestComposeContextWithArtifactsOrdersMultipleArtifacts(t *testing.T) {
 }
 
 func TestComposeContextWithArtifactsEmptyInputs(t *testing.T) {
-	if composed := ComposeContextWithArtifacts(nil, nil, nil); composed != nil {
+	if composed := ComposeContextWithArtifacts(nil, nil, nil, messagepkg.HistoryOrigin{}); composed != nil {
 		t.Fatalf("expected nil result for empty inputs, got %+v", composed)
 	}
 }
@@ -317,7 +319,7 @@ func TestComposeContextWithArtifactsKeepsSlotOrderWithinSameMs(t *testing.T) {
 		Sources:     []CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 1000}},
 	}}
 
-	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
+	composed := ComposeContextWithArtifacts(rc, nil, artifacts, messagepkg.HistoryOrigin{})
 	if composed == nil || len(composed.Messages) != 2 {
 		t.Fatalf("expected summary + uncovered message, got %+v", composed)
 	}
@@ -344,7 +346,7 @@ func TestComposeContextWithArtifactsPlacesSummaryOfAnEditedSlotAtItsAnchor(t *te
 		Sources:        []CompactionSource{{ExternalMessageID: "m2", CreatedAtMs: 1000}},
 	}}
 
-	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
+	composed := ComposeContextWithArtifacts(rc, nil, artifacts, messagepkg.HistoryOrigin{})
 	if composed == nil || len(composed.Messages) != 3 {
 		t.Fatalf("expected first + edited + summary, got %+v", composed)
 	}
@@ -371,7 +373,7 @@ func TestComposeContextWithArtifactsKeepsTurnResponseSlotOrderWithinSameMs(t *te
 		Sources:     []CompactionSource{{HistoryMessageID: "h2", CreatedAtMs: 1000}},
 	}}
 
-	composed := ComposeContextWithArtifacts(nil, []TurnResponseEntry{early, covered}, artifacts)
+	composed := ComposeContextWithArtifacts(nil, []TurnResponseEntry{early, covered}, artifacts, messagepkg.HistoryOrigin{})
 	if composed == nil || len(composed.Messages) != 2 {
 		t.Fatalf("expected early reply + summary, got %+v", composed)
 	}
@@ -405,7 +407,7 @@ func TestComposeContextWithArtifactsKeepsTurnResponseSlotAcrossMultipleCovered(t
 		},
 	}
 
-	composed := ComposeContextWithArtifacts(nil, []TurnResponseEntry{first, second, survivor}, artifacts)
+	composed := ComposeContextWithArtifacts(nil, []TurnResponseEntry{first, second, survivor}, artifacts, messagepkg.HistoryOrigin{})
 	if composed == nil || len(composed.Messages) != 3 {
 		t.Fatalf("expected two summaries + survivor, got %+v", composed)
 	}
@@ -433,7 +435,7 @@ func TestComposeContextWithArtifactsRendersUncoveredSourcesInsideTheSpanBeforeTh
 		Sources: []CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 1000}, {HistoryMessageID: "h1", CreatedAtMs: 2500}},
 	}}
 
-	composed := ComposeContextWithArtifacts(rc, []TurnResponseEntry{reply}, artifacts)
+	composed := ComposeContextWithArtifacts(rc, []TurnResponseEntry{reply}, artifacts, messagepkg.HistoryOrigin{})
 	got := messageTexts(composed.Messages)
 	want := []string{"user:passive chatter", "user:<summary>\nfolded\n</summary>", "user:current"}
 	if !reflect.DeepEqual(got, want) {

@@ -227,7 +227,12 @@ func (q *Queries) ListSessionEventsBySessionAfter(ctx context.Context, arg ListS
 }
 
 const listSessionEventsBySessionPageBeforeWithinBytes = `-- name: ListSessionEventsBySessionPageBeforeWithinBytes :many
-WITH post_coverage_ids AS MATERIALIZED (
+WITH session_origin AS MATERIALIZED (
+  SELECT COALESCE(FLOOR(EXTRACT(EPOCH FROM s.history_origin_at) * 1000)::bigint, 0) AS received_from_ms
+  FROM bot_sessions s
+  WHERE s.team_id = public.memoh_current_team_id()
+    AND s.id = $1
+), post_coverage_ids AS MATERIALIZED (
   SELECT DISTINCT changed.external_message_id
   FROM bot_session_events changed
   WHERE changed.team_id = public.memoh_current_team_id()
@@ -252,6 +257,7 @@ WITH post_coverage_ids AS MATERIALIZED (
     ON changed.external_message_id = event.external_message_id
   WHERE event.team_id = public.memoh_current_team_id()
     AND event.session_id = $1
+    AND event.received_at_ms >= (SELECT received_from_ms FROM session_origin)
     AND (
       NOT $4::boolean
       OR (event.received_at_ms, event.created_at, event.id) < (
@@ -328,6 +334,9 @@ type ListSessionEventsBySessionPageBeforeWithinBytesRow struct {
 // Covered message/edit payloads are excluded in SQL before event_data reaches
 // the process. If a covered message has a post-frontier mutation, its complete
 // event chain remains eligible so edit projection still has its base node.
+// Events received before the session's history origin reach no request, so
+// replay never reads them; an edit of a message from before the origin then
+// has no base node and projects nothing.
 func (q *Queries) ListSessionEventsBySessionPageBeforeWithinBytes(ctx context.Context, arg ListSessionEventsBySessionPageBeforeWithinBytesParams) ([]ListSessionEventsBySessionPageBeforeWithinBytesRow, error) {
 	rows, err := q.db.Query(ctx, listSessionEventsBySessionPageBeforeWithinBytes,
 		arg.SessionID,

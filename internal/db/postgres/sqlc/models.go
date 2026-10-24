@@ -370,6 +370,10 @@ type BotSession struct {
 	Metadata                 []byte             `json:"metadata"`
 	NextTurnPosition         int64              `json:"next_turn_position"`
 	CompactionEpoch          int64              `json:"compaction_epoch"`
+	HistoryOriginAt          pgtype.Timestamptz `json:"history_origin_at"`
+	HistoryOmittedCount      int64              `json:"history_omitted_count"`
+	HistoryOmittedFirstAt    pgtype.Timestamptz `json:"history_omitted_first_at"`
+	HistoryOmittedLastAt     pgtype.Timestamptz `json:"history_omitted_last_at"`
 	RuntimeFencingToken      int64              `json:"runtime_fencing_token"`
 	RuntimeResetToken        pgtype.UUID        `json:"runtime_reset_token"`
 	RuntimeResetExpiresAt    pgtype.Timestamptz `json:"runtime_reset_expires_at"`

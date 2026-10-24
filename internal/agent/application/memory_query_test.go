@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -16,16 +17,27 @@ type memoryQueryMessageService struct {
 	messages []messagepkg.Message
 }
 
+func (s *memoryQueryMessageService) GetByIDBySession(_ context.Context, _ string, messageID string) (messagepkg.Message, error) {
+	for _, message := range s.messages {
+		if message.ID == messageID {
+			return message, nil
+		}
+	}
+	return messagepkg.Message{}, errors.New("message not found")
+}
+
 func (s *memoryQueryMessageService) ListActiveSinceBySession(context.Context, string, time.Time) ([]messagepkg.Message, error) {
 	return append([]messagepkg.Message(nil), s.messages...), nil
 }
 
-func (s *memoryQueryMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64, bool) ([]messagepkg.Message, error) {
-	return append([]messagepkg.Message(nil), s.messages...), nil
-}
-
-func (s *memoryQueryMessageService) ListActiveSinceWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
-	return append([]messagepkg.Message(nil), s.messages...), nil
+func (s *memoryQueryMessageService) ListActiveBySessionWithinBytes(_ context.Context, _ string, window messagepkg.HistoryWindow) ([]messagepkg.Message, error) {
+	var out []messagepkg.Message
+	for _, message := range s.messages {
+		if window.Before.IsZero() || message.CreatedAt.Before(window.Before) {
+			out = append(out, message)
+		}
+	}
+	return out, nil
 }
 
 func (s *memoryQueryMessageService) ListTurnResponseSourcesSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {

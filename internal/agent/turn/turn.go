@@ -124,10 +124,7 @@ type StartTurnCommand struct {
 	DiscussImageRefs      []DiscussImageRef
 	// Pressure is measured before Channel selection. Overflow requests recovery
 	// without materializing or forwarding the rejected context.
-	DiscussContextTokens int
-	// DiscussViewFromMs is when the oldest context entry Channel loaded was
-	// received. Compaction reads from here or the time window, if earlier.
-	DiscussViewFromMs        int64
+	DiscussContextTokens     int
 	DiscussRecoveryExhausted bool
 	DiscussContextOverflow   bool
 	DiscussCurrentTokens     int
