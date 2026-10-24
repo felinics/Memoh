@@ -2,15 +2,19 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/contextview"
 )
 
 type unavailableContinuationMessageService struct {
@@ -211,6 +215,98 @@ func TestRuntimeOwnedDecisionContinuationsRetainLifecycleWithoutAssistantMetadat
 				contextLifecycleStatusFailedProvider,
 				"",
 			)
+		})
+	}
+}
+
+// A decision continuation goes on with the lifecycle its run persisted before
+// the pause, whichever decision resumed it: the run's earlier steps, cache
+// usage, compaction events and memory recall stay in the audit the run ends
+// with, and the continuation's own step follows them.
+func TestDecisionContinuationsResumeTheRunContextLifecycle(t *testing.T) {
+	prior := contextfrag.LifecycleSnapshot{
+		Version:         contextfrag.LifecycleSnapshotVersion,
+		View:            contextfrag.ViewRunConfigPreProvider,
+		Mutations:       []contextfrag.MutationRecord{{Kind: contextfrag.MutationContextSwitch, Detail: "trigger=in_run passes=1"}},
+		Steps:           []contextfrag.StepSnapshot{{StepIndex: 0}, {StepIndex: 1}},
+		CacheUsage:      []contextfrag.CacheUsageRecord{{StepIndex: 0, CacheReadTokens: 100}, {StepIndex: 1, CacheReadTokens: 200}},
+		CacheReadTokens: 300,
+		MemoryRecall:    &contextfrag.MemoryRecallTrace{ProviderID: "builtin", CacheState: "hit", Result: contextfrag.MemoryRecallResultTrace{Count: 1}},
+	}
+	metadata, err := json.Marshal(map[string]any{contextfrag.MetadataContextLifecycleKey: prior})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name        string
+		continueRun func(*Service, *continuationLifecycleResult) error
+	}{
+		{
+			name: "user input",
+			continueRun: func(service *Service, lifecycle *continuationLifecycleResult) error {
+				return service.continueUserInputSession(
+					context.Background(),
+					userinput.Request{
+						ID: "user-input", BotID: lifecycleTestBotID, SessionID: lifecycleTestSessionID,
+						ToolCallID: "ask-user-call", ToolName: "ask_user", SourcePlatform: "web",
+					},
+					UserInputResponseInput{BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID},
+					lifecycleTestRunID,
+					"",
+					sessionruntime.RunHandle{},
+					lifecycle,
+					nil,
+				)
+			},
+		},
+		{
+			name: "tool approval",
+			continueRun: func(service *Service, lifecycle *continuationLifecycleResult) error {
+				return service.continueToolApprovalSession(
+					context.Background(),
+					toolapproval.Request{
+						ID: "tool-approval", BotID: lifecycleTestBotID, SessionID: lifecycleTestSessionID,
+						ToolCallID: "approved-tool-call", ToolName: "container_exec", SourcePlatform: "web",
+					},
+					ToolApprovalResponseInput{BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID},
+					lifecycleTestRunID,
+					"",
+					sessionruntime.RunHandle{},
+					lifecycle,
+					nil,
+				)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := newDirectLifecycleFixture(t, directLifecycleModelSuccess)
+			fixture.service.agent = native.New(native.Deps{
+				Logger:             fixture.service.logger,
+				ContextViewApplier: contextview.ProviderRunConfigApplier(fixture.service.logger),
+			})
+			fixture.lifecycles.store.metadata = metadata
+			lifecycle := &continuationLifecycleResult{}
+
+			if err := tt.continueRun(fixture.service, lifecycle); err != nil {
+				t.Fatalf("continuation error = %v", err)
+			}
+			snapshot := lifecycle.snapshot
+			if snapshot == nil {
+				t.Fatal("continuation recorded no lifecycle")
+			}
+			if len(snapshot.Steps) != 3 || !reflect.DeepEqual(snapshot.Steps[:2], prior.Steps) {
+				t.Fatalf("steps = %#v, want the run's two steps before the decision, then the continuation's", snapshot.Steps)
+			}
+			if !reflect.DeepEqual(snapshot.CacheUsage, prior.CacheUsage) || snapshot.CacheReadTokens != prior.CacheReadTokens {
+				t.Fatalf("cache usage = %#v read=%d, want the run's earlier calls kept", snapshot.CacheUsage, snapshot.CacheReadTokens)
+			}
+			if len(snapshot.Mutations) == 0 || snapshot.Mutations[0] != prior.Mutations[0] {
+				t.Fatalf("mutations = %#v, want the run's compaction event first", snapshot.Mutations)
+			}
+			if !reflect.DeepEqual(snapshot.MemoryRecall, prior.MemoryRecall) {
+				t.Fatalf("memory recall = %#v, want the trace of the run's admission", snapshot.MemoryRecall)
+			}
 		})
 	}
 }

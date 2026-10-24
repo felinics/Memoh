@@ -47,8 +47,8 @@ func TestProviderAttemptHandoffRejectRevokesStagedAttempt(t *testing.T) {
 		providerAttemptState: attemptState,
 		dynamicInputs:        dynamic,
 	}
-	handoff := newProviderAttemptHandoff(cfg)
-	handoff.stage(contextfrag.StepSnapshot{StepIndex: 1}, false, refs)
+	handoff := newProviderAttemptHandoff(cfg, 0)
+	handoff.stage(1, contextfrag.StepSnapshot{StepIndex: 1}, false, refs)
 
 	// The loop's dispatch boundary refuses the attempt instead of publishing.
 	handoff.reject()
@@ -108,8 +108,8 @@ func TestProviderAttemptHandoffPublishAppliesAttemptState(t *testing.T) {
 		providerAttemptState: attemptState,
 		dynamicInputs:        dynamic,
 	}
-	handoff := newProviderAttemptHandoff(cfg)
-	handoff.stage(contextfrag.StepSnapshot{StepIndex: 1}, false, dynamic.pendingRefs())
+	handoff := newProviderAttemptHandoff(cfg, 0)
+	handoff.stage(1, contextfrag.StepSnapshot{StepIndex: 1}, false, dynamic.pendingRefs())
 
 	if err := handoff.publish(params); err != nil {
 		t.Fatalf("publish provider attempt: %v", err)

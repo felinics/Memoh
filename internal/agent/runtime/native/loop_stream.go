@@ -168,7 +168,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		return
 	}
 	installContextStepFailureHandler(&cfg, cancel)
-	dispatch, dispatchErr := a.buildGenerateDispatch(streamCtx, cfg, sdkTools, approvalTools, prepareStep)
+	dispatch, dispatchErr := a.buildGenerateDispatch(streamCtx, cfg, cfg.StepIndexOffset, sdkTools, approvalTools, prepareStep)
 	if dispatchErr != nil {
 		failure := localFailureEvent(fmt.Errorf("stream start: %w", dispatchErr))
 		turnError = turnHookError(failure)
@@ -565,7 +565,7 @@ func (e *streamEngine) run() {
 			e.baseCfg.ContextCachePlan = next.ContextCachePlan
 			e.baseCfg.initialProviderMessageCount = next.initialProviderMessageCount
 			e.cfg = next
-			dispatch, err := e.agent.buildGenerateDispatch(e.streamCtx, next, e.sdkTools, e.approvalTools, e.prepareStep)
+			dispatch, err := e.agent.buildGenerateDispatch(e.streamCtx, next, e.baseCfg.StepIndexOffset+len(e.steps), e.sdkTools, e.approvalTools, e.prepareStep)
 			if err != nil {
 				e.endWithFailure(localFailureEvent(err))
 				return
@@ -655,7 +655,7 @@ func (e *streamEngine) run() {
 			next = next.RefreshContextFrag()
 		}
 		e.cfg = next
-		dispatch, buildErr := e.agent.buildGenerateDispatch(e.streamCtx, next, e.sdkTools, e.approvalTools, e.prepareStep)
+		dispatch, buildErr := e.agent.buildGenerateDispatch(e.streamCtx, next, e.baseCfg.StepIndexOffset+len(e.steps), e.sdkTools, e.approvalTools, e.prepareStep)
 		if buildErr != nil {
 			e.endWithFailure(localFailureEvent(buildErr))
 			return
@@ -1005,6 +1005,7 @@ partLoop:
 		ToolCalls:            stepToolCalls,
 		Response:             stepResponse,
 	}
+	recordContextCacheUsage(e.cfg.ContextMutations, e.baseCfg.StepIndexOffset+len(e.steps), stepUsage)
 
 	// The tool batch's OnPart callback bridges approval, progress, result,
 	// and error parts onto the event channel.
@@ -1172,11 +1173,10 @@ func (e *streamEngine) drainInjectedMessages(boundary int, messages []sdk.Messag
 	return messages
 }
 
-// afterStep mirrors the legacy OnStep hook: cache-usage accounting and the
-// after-model-call hook run for every committed step, with the call-local step
-// index the previous per-invocation counter produced.
+// afterStep mirrors the legacy OnStep hook: the after-model-call hook runs
+// for every committed step, with the call-local step index the previous
+// per-invocation counter produced.
 func (e *streamEngine) afterStep(attemptStep int, sr *step.Record) {
-	recordContextCacheUsage(e.cfg.ContextMutations, attemptStep, sr)
 	e.agent.runAfterModelCallHook(e.streamCtx, e.cfg, sr, attemptStep)
 }
 

@@ -213,7 +213,7 @@ func TestPrepareProviderAttemptKeepsToolResultsWhole(t *testing.T) {
 	sent := cloneProviderMessages(messages)
 	ledger := contextfrag.NewMutationLedger()
 	cfg := RunConfig{ContextMutations: ledger}
-	handoff := newProviderAttemptHandoff(cfg)
+	handoff := newProviderAttemptHandoff(cfg, 0)
 	params := prepareProviderAttempt(
 		context.Background(),
 		cfg,

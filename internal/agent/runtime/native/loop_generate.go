@@ -121,7 +121,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 	// cancelled with the failure cause.
 	failure := &contextStepFailureCapture{}
 	installContextStepFailureHandler(&cfg, failure.capture)
-	dispatch, dispatchErr := a.buildGenerateDispatch(genCtx, cfg, sdkTools, approvalTools, prepareStep)
+	dispatch, dispatchErr := a.buildGenerateDispatch(genCtx, cfg, cfg.StepIndexOffset, sdkTools, approvalTools, prepareStep)
 	if dispatchErr != nil {
 		return nil, fmt.Errorf("generate: %w", dispatchErr)
 	}
@@ -161,11 +161,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 		}
 		return dir, nil
 	}
-	// afterStep mirrors the legacy OnStep hook: cache-usage accounting and the
-	// after-model-call hook run on every step, then loop detection decides
-	// whether the run aborts.
+	// afterStep mirrors the legacy OnStep hook: the after-model-call hook runs
+	// on every step, then loop detection decides whether the run aborts.
 	afterStep := func(sdkStep int, sr *step.Record) error {
-		recordContextCacheUsage(cfg.ContextMutations, sdkStep, sr)
 		a.runAfterModelCallHook(genCtx, cfg, sr, sdkStep)
 		if !cfg.LoopDetection.Enabled {
 			return nil
@@ -206,7 +204,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 		})
 		if next, ok := cfg.contextSwitch.redispatch(cfg, thread.dispatch, stepParams); ok {
 			cfg.ContextCachePlan = next.ContextCachePlan
-			dispatch, err := a.buildGenerateDispatch(genCtx, next, sdkTools, approvalTools, prepareStep)
+			dispatch, err := a.buildGenerateDispatch(genCtx, next, cfg.StepIndexOffset+sdkStep, sdkTools, approvalTools, prepareStep)
 			if err != nil {
 				return nil, fmt.Errorf("generate: %w", err)
 			}
@@ -232,6 +230,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 		if err != nil {
 			return nil, err
 		}
+		recordContextCacheUsage(cfg.ContextMutations, cfg.StepIndexOffset+sdkStep, result.Usage)
 		lastResult = result
 
 		sr, kind, err := settleStep(genCtx, thread.dispatch, result, result.TextProviderMetadata, nil)
@@ -370,9 +369,10 @@ type generateDispatch struct {
 // step loops: prompt-cache planning, provider-attempt staging, and
 // prepare-step composition, yielding the concrete sdk.Request and the composed
 // step-prepare function. The executable tool set stays local to the loop; the
-// request carries only the provider-bound definitions.
-func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkTools []toolexec.Tool, approvalTools []toolexec.Tool, prepareStep func(*sdk.Request) *sdk.Request) (generateDispatch, error) {
-	handoff := newProviderAttemptHandoff(cfg)
+// request carries only the provider-bound definitions. firstStep is the
+// durable index of the step the dispatch's first call produces.
+func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, firstStep int, sdkTools []toolexec.Tool, approvalTools []toolexec.Tool, prepareStep func(*sdk.Request) *sdk.Request) (generateDispatch, error) {
+	handoff := newProviderAttemptHandoff(cfg, firstStep)
 	sdkTools = canonicalizeProviderToolSchemas(sdkTools)
 	cfg.ContextMutations.SetModelInfo(modelID(cfg.Model), models.ResolveClientType(cfg.Model))
 	plan := cfg.ContextCachePlan

@@ -86,7 +86,7 @@ func armedRun(t *testing.T, messages []sdk.Message, provenance []MessageProvenan
 }
 
 func prepareArmed(cfg RunConfig, messages []sdk.Message) *sdk.Request {
-	return prepareProviderAttempt(context.Background(), cfg, newProviderAttemptHandoff(cfg), false, 6, 2, nil,
+	return prepareProviderAttempt(context.Background(), cfg, newProviderAttemptHandoff(cfg, 0), false, 6, 2, nil,
 		&sdk.Request{Messages: append([]sdk.Message(nil), messages...)})
 }
 

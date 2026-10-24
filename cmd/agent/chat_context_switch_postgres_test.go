@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/felinics/memoh/internal/agent/application"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
@@ -88,11 +89,16 @@ type effectLoop struct {
 	calls    int
 	start    int
 	hold     chan struct{}
-	// pendingDecision makes a run pause for approval or user input;
-	// foreignAt is the effect during which a row the run never
-	// renders is written into the session, and downAt the one after which
-	// the summarizer stops answering, downFrom summarizer calls in.
-	pendingDecision     bool
+	// pendingDecisions are the decisions a run still pauses for, one per
+	// call once decisionAfter effects ran; decisions is how many a run of
+	// effects pauses for, zero meaning one, and pausedAt the summarizer
+	// calls made before each pause. foreignAt is the effect during which a
+	// row the run never renders is written into the session, and downAt the
+	// one after which the summarizer stops answering, downFrom summarizer
+	// calls in.
+	pendingDecisions    int
+	decisions           int
+	pausedAt            []int32
 	askUser             bool
 	decisionAfter       int
 	decisionResultBytes int
@@ -101,6 +107,9 @@ type effectLoop struct {
 	downFrom            int32
 	// resultBytes sizes each effect's result; zero keeps the default.
 	resultBytes int
+	// cacheReads makes the provider report usage for every call of a run:
+	// the run's n-th call read 100*n tokens from the prompt cache.
+	cacheReads bool
 	// userID is the account the runs act for; empty sends them for none.
 	userID string
 	// arrival is a Discuss message delivered during effect arriveAt; arrived
@@ -226,8 +235,9 @@ func (s *effectLoop) serve(w http.ResponseWriter, body []byte) {
 	call, arguments := "", ""
 	if s.marker != "" && strings.Contains(request, s.marker) {
 		switch {
-		case s.pendingDecision && s.calls >= s.decisionAfter:
-			s.pendingDecision, call, arguments = false, "exec", `{"command":"ls"}`
+		case s.pendingDecisions > 0 && s.calls >= s.decisionAfter:
+			s.pendingDecisions, call, arguments = s.pendingDecisions-1, "exec", `{"command":"ls"}`
+			s.pausedAt = append(s.pausedAt, s.f.summaries.Load())
 			if s.askUser {
 				call, arguments = "ask_user", `{"questions":[{"text":"How should we proceed?","kind":"text"}]}`
 			}
@@ -237,6 +247,11 @@ func (s *effectLoop) serve(w http.ResponseWriter, body []byte) {
 		}
 	}
 	id := fmt.Sprintf("call_%03d", len(s.requests))
+	var usage map[string]any
+	if s.cacheReads {
+		cached := 100 * (len(s.requests) - s.start)
+		usage = map[string]any{"prompt_tokens": cached + 50, "completion_tokens": 1, "total_tokens": cached + 51, "prompt_tokens_details": map[string]any{"cached_tokens": cached}}
+	}
 	hold := s.hold
 	s.mu.Unlock()
 	if hold != nil && strings.Contains(request, busyInput) {
@@ -254,6 +269,10 @@ func (s *effectLoop) serve(w http.ResponseWriter, body []byte) {
 		chunk, _ := json.Marshal(map[string]any{"id": "loop", "object": "chat.completion.chunk", "choices": []any{choice}})
 		_, _ = fmt.Fprintf(w, "data: %s\n\n", chunk)
 	}
+	if usage != nil {
+		chunk, _ := json.Marshal(map[string]any{"id": "loop", "object": "chat.completion.chunk", "choices": []any{}, "usage": usage})
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", chunk)
+	}
 	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 }
 
@@ -261,7 +280,7 @@ func (s *effectLoop) serve(w http.ResponseWriter, body []byte) {
 // error code with the provider requests the run made.
 func (s *effectLoop) run(entry runEntry, text string, steps int) (string, []string) {
 	s.mu.Lock()
-	s.marker, s.steps, s.calls, s.effects, s.start = text, steps, 0, nil, len(s.requests)
+	s.marker, s.steps, s.calls, s.effects, s.start, s.pausedAt = text, steps, 0, nil, len(s.requests), nil
 	s.mu.Unlock()
 	code := entry.send(s, text)
 	s.mu.Lock()
@@ -363,21 +382,37 @@ func (s *effectLoop) followUp(text string) string {
 }
 
 // decision pauses a Web run for approval or user input, then resumes it
-// through the corresponding decision API.
+// through the corresponding decision API each time it pauses.
 func (s *effectLoop) decision(text string) string {
 	f := s.f
 	f.t.Helper()
 	s.mu.Lock()
-	s.pendingDecision = s.steps > 0
-	approve := s.pendingDecision
+	s.pendingDecisions = 0
+	if s.steps > 0 {
+		s.pendingDecisions = max(s.decisions, 1)
+	}
+	pauses := s.pendingDecisions
 	s.mu.Unlock()
 	var runs int
 	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM session_runs WHERE session_id=$1`, f.sessionID).Scan(&runs); err != nil {
 		f.t.Fatal(err)
 	}
-	if code := s.chat(text); code != "" || !approve {
+	if code := s.chat(text); code != "" || pauses == 0 {
 		return code
 	}
+	for range pauses {
+		if code := s.decide(); code != "" {
+			return code
+		}
+	}
+	return s.lastRunCode(runs + 1)
+}
+
+// decide answers the decision the session's run is paused on, and returns once
+// the run paused again or ended.
+func (s *effectLoop) decide() string {
+	f := s.f
+	f.t.Helper()
 	var id, question string
 	if s.askUser {
 		if err := f.pool.QueryRow(f.ctx, `SELECT id::text, ui_payload_json->'questions'->0->>'id' FROM user_input_requests WHERE session_id=$1 AND status='pending'`, f.sessionID).Scan(&id, &question); err != nil {
@@ -404,7 +439,7 @@ func (s *effectLoop) decision(text string) string {
 	if err != nil {
 		return string(apperror.CodeOf(err))
 	}
-	return s.lastRunCode(runs + 1)
+	return ""
 }
 
 // lastRunCode waits until the session has runs runs and the latest one ended,
@@ -550,6 +585,8 @@ var inRunScenarios = []inRunScenario{
 	{name: "decision-after-progress", run: decisionAfterProgressScenario},
 	{name: "decision-full-summary", run: decisionFullSummaryScenario},
 	{name: "decision-keeps-prompt", run: decisionKeepsPromptScenario},
+	{name: "decision-keeps-lifecycle", run: decisionKeepsLifecycleScenario},
+	{name: "decision-every-step", run: decisionEveryStepScenario},
 }
 
 // TestPostgresInRunCompactionByEntry runs every headline scenario through
@@ -664,6 +701,112 @@ func decisionKeepsPromptScenario(t *testing.T, entry runEntry, s *effectLoop) {
 	for i, request := range requests[1:] {
 		if got := requestMessages(t, request)[0]; got != system {
 			t.Fatalf("request %d rewrote the system prompt the run started with", i+2)
+		}
+	}
+}
+
+// A run a decision paused keeps one context lifecycle across the decision: the
+// lifecycle it ends with audits every call it made, before and after the
+// decision, with each call's cache usage and the folds made before the pause,
+// and each step's message carries the run's audit up to that step.
+func decisionKeepsLifecycleScenario(t *testing.T, entry runEntry, s *effectLoop) {
+	const steps = 12
+	s.decisionAfter, s.cacheReads = 7, true
+	code, requests := s.run(entry, loopInput, steps)
+	if code != "" || len(s.effects) != steps || len(requests) != steps+1+entry.extra {
+		t.Fatalf("resume: code=%q effects=%v calls=%d, want every effect around the decision and one call per step", code, s.effects, len(requests))
+	}
+	run, messages := s.runLifecycle()
+	checkRunAudit(t, run, messages, len(requests))
+	paused := messages[s.decisionAfter]
+	folds := func(snapshot contextfrag.LifecycleSnapshot) int {
+		return len(slices.DeleteFunc(slices.Clone(snapshot.Mutations), func(record contextfrag.MutationRecord) bool {
+			return record.Kind != contextfrag.MutationContextSwitch
+		}))
+	}
+	if folds(paused) == 0 || len(run.Mutations) < len(paused.Mutations) || !slices.Equal(run.Mutations[:len(paused.Mutations)], paused.Mutations) {
+		t.Fatalf("mutations: paused step %v, run %v, want the folds made before the decision first in the run's", paused.Mutations, run.Mutations)
+	}
+}
+
+// A run that pauses at every call before its last effect resumes each time
+// into the same lifecycle.
+func decisionEveryStepScenario(t *testing.T, entry runEntry, s *effectLoop) {
+	s.decisions, s.cacheReads = 3, true
+	code, requests := s.run(entry, loopInput, 1)
+	if code != "" || !slices.Equal(s.effects, []int{1}) || len(requests) != 5 {
+		t.Fatalf("resume: code=%q effects=%v calls=%d, want three decisions, the effect, then the answer", code, s.effects, len(requests))
+	}
+	run, messages := s.runLifecycle()
+	checkRunAudit(t, run, messages, len(requests))
+}
+
+// runLifecycle is the context lifecycle the session's latest run ended with,
+// and the one each of its assistant messages carries, in the order the run
+// committed them.
+func (s *effectLoop) runLifecycle() (contextfrag.LifecycleSnapshot, []contextfrag.LifecycleSnapshot) {
+	f := s.f
+	f.t.Helper()
+	var runID string
+	var raw []byte
+	if err := f.pool.QueryRow(f.ctx, `SELECT r.run_id::text, l.snapshot FROM session_runs r JOIN context_lifecycles l ON l.run_id=r.run_id WHERE r.session_id=$1 ORDER BY r.turn_position DESC LIMIT 1`, f.sessionID).Scan(&runID, &raw); err != nil {
+		f.t.Fatal(err)
+	}
+	run, err := contextfrag.DecodeLifecycleSnapshot(raw)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	rows, err := f.pool.Query(f.ctx, `SELECT metadata->'context_lifecycle' FROM bot_history_messages WHERE run_id=$1 AND role='assistant' AND metadata ? 'context_lifecycle' ORDER BY created_at, id`, runID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer rows.Close()
+	var messages []contextfrag.LifecycleSnapshot
+	for rows.Next() {
+		if err := rows.Scan(&raw); err != nil {
+			f.t.Fatal(err)
+		}
+		message, err := contextfrag.DecodeLifecycleSnapshot(raw)
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		messages = append(messages, message)
+	}
+	if err := rows.Err(); err != nil {
+		f.t.Fatal(err)
+	}
+	return run, messages
+}
+
+// checkRunAudit fails unless the lifecycle a run of calls provider calls
+// ended with audits each call once, in order, under the index of the step it
+// committed and with the cache usage it reported, and the message of each
+// step carries that audit up to and including the step.
+func checkRunAudit(t *testing.T, run contextfrag.LifecycleSnapshot, messages []contextfrag.LifecycleSnapshot, calls int) {
+	t.Helper()
+	audit := func(snapshot contextfrag.LifecycleSnapshot) (steps, usage, reads []int) {
+		for _, step := range snapshot.Steps {
+			steps = append(steps, step.StepIndex)
+		}
+		for _, record := range snapshot.CacheUsage {
+			usage, reads = append(usage, record.StepIndex), append(reads, record.CacheReadTokens)
+		}
+		return steps, usage, reads
+	}
+	want, wantReads, total := make([]int, calls), make([]int, calls), 0
+	for i := range want {
+		want[i], wantReads[i] = i, 100*(i+1)
+		total += wantReads[i]
+	}
+	if steps, usage, reads := audit(run); !slices.Equal(steps, want) || !slices.Equal(usage, want) || !slices.Equal(reads, wantReads) || run.CacheReadTokens != total {
+		t.Fatalf("run lifecycle: steps=%v cache usage of steps %v reading %v, %d in all; want steps %v reading %v, %d in all", steps, usage, reads, run.CacheReadTokens, want, wantReads, total)
+	}
+	if len(messages) != calls {
+		t.Fatalf("%d assistant messages carry a lifecycle, want one per call: %d", len(messages), calls)
+	}
+	for i, message := range messages {
+		if steps, usage, reads := audit(message); !slices.Equal(steps, want[:i+1]) || !slices.Equal(usage, want[:i+1]) || !slices.Equal(reads, wantReads[:i+1]) {
+			t.Fatalf("step %d message: steps=%v cache usage of steps %v reading %v, want the run's audit through the step", i, steps, usage, reads)
 		}
 	}
 }

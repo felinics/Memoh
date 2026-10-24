@@ -55,7 +55,8 @@ func countRound8MessageText(messages []sdk.Message, text string) int {
 // TestAgentStreamMidStreamRetryResendsTheAccumulatedRequest pins that the
 // rebuilt dispatch of a mid-stream retry sends the request the failed call
 // carried, its original prefix and earlier steps untouched and its partial
-// output gone, and records a step snapshot for the retry attempt.
+// output gone, and records a step snapshot for the retry attempt under the
+// index of the step the failed call targeted.
 func TestAgentStreamMidStreamRetryResendsTheAccumulatedRequest(t *testing.T) {
 	t.Parallel()
 
@@ -108,18 +109,13 @@ func TestAgentStreamMidStreamRetryResendsTheAccumulatedRequest(t *testing.T) {
 	}
 
 	steps := ledger.StepSnapshots()
-	var retrySnapshot *contextfrag.StepSnapshot
-	for i := range steps {
-		if steps[i].Attempt == 1 {
-			retrySnapshot = &steps[i]
-		}
+	if len(steps) != 3 || steps[0].StepIndex != 0 || steps[1].StepIndex != 1 || steps[1].Attempt != 0 {
+		t.Fatalf("step snapshots = %#v, want the tool step and the failed call of step 1 before the retry", steps)
 	}
-	if retrySnapshot == nil {
-		t.Fatalf("step snapshots = %#v, want one recorded for the retry attempt", steps)
-	}
+	retrySnapshot := steps[2]
 	wantHash := contextfrag.ProviderPayloadHash(retryParams.System, retryParams.Messages, retryParams.Tools)
-	if retrySnapshot.StepIndex != 0 || retrySnapshot.PostPrepareInputHash != wantHash {
-		t.Fatalf("retry step snapshot = %#v", retrySnapshot)
+	if retrySnapshot.Attempt != 1 || retrySnapshot.StepIndex != 1 || retrySnapshot.PostPrepareInputHash != wantHash {
+		t.Fatalf("retry step snapshot = %#v, want attempt 1 regenerating step 1", retrySnapshot)
 	}
 	if countProviderAttemptMutations(ledger.Records(), contextfrag.MutationContextBudgetFailure) != 0 {
 		t.Fatalf("window-zero retry recorded budget failure: %#v", ledger.Records())

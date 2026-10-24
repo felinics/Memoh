@@ -12,6 +12,9 @@ import (
 var errProviderAttemptNotPrepared = errors.New("provider attempt was not prepared")
 
 type preparedProviderAttempt struct {
+	// call is the attempt's position among its dispatch's calls, the index
+	// providerAttemptState resolves the dispatch's committed steps by.
+	call            int
 	snapshot        contextfrag.StepSnapshot
 	systemPrepended bool
 	// admitted are the loop-owned dynamic messages the prepared payload
@@ -24,16 +27,31 @@ type preparedProviderAttempt struct {
 // before that boundary, so it stages content-light metadata here instead of
 // advancing hash, fork, retry, or durable-input state early.
 type providerAttemptHandoff struct {
-	mu      sync.Mutex
-	cfg     RunConfig
-	pending *preparedProviderAttempt
+	mu  sync.Mutex
+	cfg RunConfig
+	// firstStep is the durable index of the step the dispatch's first call
+	// produces. A dispatch rebuilt mid-run (an in-run compaction event, a
+	// mid-stream retry) starts at the step it regenerates, and a decision
+	// continuation at the step the run paused before.
+	firstStep int
+	pending   *preparedProviderAttempt
 }
 
-func newProviderAttemptHandoff(cfg RunConfig) *providerAttemptHandoff {
-	return &providerAttemptHandoff{cfg: cfg}
+func newProviderAttemptHandoff(cfg RunConfig, firstStep int) *providerAttemptHandoff {
+	return &providerAttemptHandoff{cfg: cfg, firstStep: firstStep}
+}
+
+// stepIndex is the durable index of the step a call of this dispatch produces:
+// the index the step commits under and the one its audit is recorded with.
+func (h *providerAttemptHandoff) stepIndex(call int) int {
+	if h == nil {
+		return call
+	}
+	return h.firstStep + call
 }
 
 func (h *providerAttemptHandoff) stage(
+	call int,
 	snapshot contextfrag.StepSnapshot,
 	systemPrepended bool,
 	admitted []dynamicSourceRef,
@@ -43,6 +61,7 @@ func (h *providerAttemptHandoff) stage(
 	}
 	h.mu.Lock()
 	h.pending = &preparedProviderAttempt{
+		call:            call,
 		snapshot:        snapshot,
 		systemPrepended: systemPrepended,
 		admitted:        cloneDynamicSourceRefs(admitted),
@@ -100,7 +119,7 @@ func (h *providerAttemptHandoff) publish(params sdk.Request) error {
 
 	h.cfg.dynamicInputs.commit(pending.admitted)
 	hash := contextfrag.ProviderPayloadHash(params.System, params.Messages, params.Tools)
-	h.cfg.providerAttemptState.store(&params, pending.snapshot.StepIndex, pending.systemPrepended, pending.admitted)
+	h.cfg.providerAttemptState.store(&params, pending.call, pending.systemPrepended, pending.admitted)
 	h.cfg.ContextMutations.SetFinalInputHash(hash)
 	pending.snapshot.PostPrepareInputHash = hash
 	h.cfg.ContextMutations.AppendStepSnapshot(pending.snapshot)

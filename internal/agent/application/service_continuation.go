@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 
@@ -44,6 +45,41 @@ func (s *Service) runRequesterUserID(ctx context.Context, runID string) (string,
 		return "", nil
 	}
 	return strings.TrimSpace(admitted.Resume.UserID), nil
+}
+
+// resumeRunContextLifecycle continues the context lifecycle of the run a
+// decision resumes. Every step a run commits persists the run's lifecycle on
+// its assistant message, so the run's newest assistant message carries the
+// audit of everything the run did before it paused: the continuation's ledger
+// goes on from there, and the lifecycle the run ends with describes the whole
+// run rather than its last segment. A run with no such message has nothing to
+// continue; one whose audit cannot be read goes on with an audit of what
+// follows the decision only.
+func (s *Service) resumeRunContextLifecycle(ctx context.Context, cfg *native.RunConfig) {
+	runID := db.ParseUUIDOrEmpty(cfg.RunID)
+	if s == nil || s.contextLifecycles == nil || cfg.ContextLifecycle == nil || !runID.Valid {
+		return
+	}
+	raw, ready, err := s.assistantContextLifecycleSnapshot(ctx, runID)
+	if err == nil && !ready {
+		return
+	}
+	var prior contextfrag.LifecycleSnapshot
+	if err == nil {
+		prior, err = contextfrag.DecodeLifecycleSnapshot(raw)
+	}
+	if err != nil {
+		if s.logger != nil {
+			s.logger.WarnContext(ctx, "resume run context lifecycle failed",
+				slog.String("run_id", cfg.RunID),
+				slog.String("bot_id", cfg.Identity.BotID),
+				slog.String("session_id", cfg.Identity.SessionID),
+				slog.Any("error", err),
+			)
+		}
+		return
+	}
+	cfg.ContextMutations = cfg.ContextLifecycle.Resume(prior)
 }
 
 func (s *Service) continuationTurnRequestMessageID(ctx context.Context, sessionID string, runHandle sessionruntime.RunHandle) (string, error) {
@@ -132,5 +168,6 @@ func (s *Service) prepareContinuationRunConfig(
 	base.LiveToolStream = eventCh != nil
 	base.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)
 	base.RecoverContextBudget = s.chatBudgetRecovery(req, chatHistoryLayout{historyCount: len(messages), pressureTokens: pressure})
+	s.resumeRunContextLifecycle(ctx, &base)
 	return s.prepareRunConfig(ctx, base), nil
 }

@@ -3,6 +3,7 @@ package contextfrag_test
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -123,6 +124,61 @@ func TestLifecycleSnapshotIncludesAttemptAudit(t *testing.T) {
 		if !strings.Contains(string(raw), want) {
 			t.Fatalf("snapshot JSON missing %q: %s", want, raw)
 		}
+	}
+}
+
+// A decision continuation resumes the run's audit from the snapshot the run
+// persisted before it paused: the next context build replaces the build
+// fields, while the run's mutations, step audits, cache usage and memory
+// recall carry on, and the continuation's records follow them.
+func TestLifecycleHolderResumeContinuesTheRunAudit(t *testing.T) {
+	t.Parallel()
+
+	prior := contextfrag.LifecycleSnapshot{
+		Version:            contextfrag.LifecycleSnapshotVersion,
+		View:               contextfrag.ViewRunConfigPreProvider,
+		AssistantMessageID: "paused-step",
+		Mutations:          []contextfrag.MutationRecord{{Kind: contextfrag.MutationContextSwitch, Detail: "trigger=in_run passes=1"}},
+		Steps:              []contextfrag.StepSnapshot{{StepIndex: 0}, {StepIndex: 1, Attempt: 1}},
+		CacheUsage:         []contextfrag.CacheUsageRecord{{StepIndex: 0, CacheReadTokens: 100}, {StepIndex: 1, Attempt: 1, CacheReadTokens: 200}},
+		CacheReadTokens:    300,
+		Model:              "model-a",
+		MemoryRecall:       &contextfrag.MemoryRecallTrace{ProviderID: "builtin", CacheState: "miss", Result: contextfrag.MemoryRecallResultTrace{Count: 2, Refs: []string{"m1", "m2"}}},
+	}
+	holder := contextfrag.NewLifecycleHolder()
+	ledger := holder.Resume(prior)
+
+	resumed, ok := holder.Snapshot()
+	if !ok || !reflect.DeepEqual(resumed.Steps, prior.Steps) || resumed.CacheReadTokens != 300 || resumed.AssistantMessageID != "paused-step" {
+		t.Fatalf("resumed snapshot = %#v, ok = %v, want the run's audit before the continuation's first build", resumed, ok)
+	}
+
+	plan := contextfrag.ContextBudgetPlan{Window: 4096}
+	holder.SetManifest(contextfrag.Manifest{View: contextfrag.ViewRunConfigPreProvider, BudgetPlan: &plan, Mutations: ledger})
+	ledger.AppendStepSnapshot(contextfrag.StepSnapshot{StepIndex: 2})
+	ledger.RecordCacheUsage(contextfrag.CacheUsageRecord{StepIndex: 2, CacheReadTokens: 300})
+	ledger.Record(contextfrag.MutationContextSwitch, "trigger=in_run passes=1")
+	if attempt := ledger.AdvanceAttempt(); attempt != 2 {
+		t.Fatalf("continuation retry attempt = %d, want the attempt after the run's last", attempt)
+	}
+
+	snapshot, _ := holder.Snapshot()
+	var steps []int
+	for _, step := range snapshot.Steps {
+		steps = append(steps, step.StepIndex)
+	}
+	if !slices.Equal(steps, []int{0, 1, 2}) || snapshot.Steps[2].Attempt != 1 || len(snapshot.CacheUsage) != 3 || snapshot.CacheReadTokens != 600 {
+		t.Fatalf("steps=%v cache usage=%#v read=%d, want the continuation's step after the run's", steps, snapshot.CacheUsage, snapshot.CacheReadTokens)
+	}
+	if len(snapshot.Mutations) != 2 || snapshot.BudgetPlan == nil || snapshot.BudgetPlan.Window != 4096 {
+		t.Fatalf("mutations=%#v budget plan=%#v, want both events and the continuation's build", snapshot.Mutations, snapshot.BudgetPlan)
+	}
+	if snapshot.MemoryRecall == nil || snapshot.MemoryRecall.Result.Count != 2 || snapshot.AssistantMessageID != "paused-step" {
+		t.Fatalf("memory recall=%#v assistant=%q, want the admission's recall and the last written message", snapshot.MemoryRecall, snapshot.AssistantMessageID)
+	}
+	prior.Steps[0].StepIndex = 99
+	if again, _ := holder.Snapshot(); again.Steps[0].StepIndex != 0 {
+		t.Fatal("Resume kept a reference to the snapshot it resumed from")
 	}
 }
 

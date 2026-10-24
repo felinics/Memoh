@@ -86,6 +86,8 @@ type CacheComparison struct {
 	FirstStepCacheReadTokens int    `json:"first_step_cache_read_tokens,omitempty"`
 }
 
+// CacheUsageRecord is the cache usage of the model call that produced the
+// run's durable step StepIndex.
 type CacheUsageRecord struct {
 	Attempt            int `json:"attempt,omitempty"`
 	StepIndex          int `json:"step_index"`
@@ -97,6 +99,8 @@ type CacheUsageRecord struct {
 }
 
 // StepSnapshot records the content-light audit for one provider attempt.
+// StepIndex is the run's durable index of the step the attempt produces, the
+// index the step commits under.
 type StepSnapshot struct {
 	Attempt              int    `json:"attempt,omitempty"`
 	StepIndex            int    `json:"step_index"`
@@ -118,6 +122,28 @@ type MutationLedger struct {
 
 func NewMutationLedger() *MutationLedger {
 	return &MutationLedger{}
+}
+
+// ResumeMutationLedger continues the ledger of a run from the snapshot its
+// earlier segments persisted. A decision continuation is the same run going
+// on, so its records, cache usage and step audits extend the run's instead of
+// starting over, and a retry it makes counts after the run's earlier attempts.
+func ResumeMutationLedger(prior LifecycleSnapshot) *MutationLedger {
+	ledger := &MutationLedger{
+		records:        append([]MutationRecord(nil), prior.Mutations...),
+		cacheUsage:     append([]CacheUsageRecord(nil), prior.CacheUsage...),
+		finalInputHash: prior.FinalInputHash,
+		steps:          append([]StepSnapshot(nil), prior.Steps...),
+		model:          prior.Model,
+		clientType:     prior.ClientType,
+	}
+	for _, step := range ledger.steps {
+		ledger.attempt = max(ledger.attempt, step.Attempt)
+	}
+	for _, usage := range ledger.cacheUsage {
+		ledger.attempt = max(ledger.attempt, usage.Attempt)
+	}
+	return ledger
 }
 
 func (l *MutationLedger) Record(kind MutationKind, detail string) {

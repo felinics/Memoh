@@ -162,6 +162,25 @@ func (h *LifecycleHolder) SetManifest(manifest Manifest) {
 	h.mu.Unlock()
 }
 
+// Resume continues, in place, the audit of a run whose earlier segments
+// persisted prior, and returns the ledger the run goes on recording into. The
+// run's next context build replaces the build fields as usual; the memory
+// recall trace, which only the run's admission collects, and the assistant
+// message the run last wrote carry over until the run writes another.
+func (h *LifecycleHolder) Resume(prior LifecycleSnapshot) *MutationLedger {
+	ledger := ResumeMutationLedger(prior)
+	if h == nil {
+		return ledger
+	}
+	h.mu.Lock()
+	h.snapshot = cloneLifecycleSnapshot(prior)
+	h.snapshot.Version = LifecycleSnapshotVersion
+	h.ledger = ledger
+	h.set = true
+	h.mu.Unlock()
+	return ledger
+}
+
 func (h *LifecycleHolder) SetAssistantMessageID(messageID string) {
 	if h == nil {
 		return

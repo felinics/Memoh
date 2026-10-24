@@ -292,7 +292,7 @@ func prepareProviderAttempt(
 	handoff *providerAttemptHandoff,
 	systemPrepended bool,
 	prefixCount,
-	stepIndex int,
+	call int,
 	dynamicRefs []dynamicSourceRef,
 	params *sdk.Request,
 ) *sdk.Request {
@@ -301,7 +301,7 @@ func prepareProviderAttempt(
 	}
 	prefixCount = clampStableMessageCount(prefixCount, len(params.Messages))
 	dynamicRefs = verifyDynamicRefs(cfg.dynamicInputs, dynamicRefs, params.Messages)
-	snapshot := contextfrag.StepSnapshot{StepIndex: stepIndex}
+	snapshot := contextfrag.StepSnapshot{StepIndex: handoff.stepIndex(call)}
 	allowance := providerInputAllowance(cfg)
 	// A step request only grows between compaction events. A request that
 	// still does not fit after compaction ends the run without pruning.
@@ -325,13 +325,14 @@ func prepareProviderAttempt(
 			allowance,
 		))
 	}
-	stagePreparedProviderAttempt(ctx, handoff, snapshot, systemPrepended, dynamicRefs)
+	stagePreparedProviderAttempt(ctx, handoff, call, snapshot, systemPrepended, dynamicRefs)
 	return params
 }
 
 func stagePreparedProviderAttempt(
 	ctx context.Context,
 	handoff *providerAttemptHandoff,
+	call int,
 	snapshot contextfrag.StepSnapshot,
 	systemPrepended bool,
 	dynamicRefs []dynamicSourceRef,
@@ -340,7 +341,7 @@ func stagePreparedProviderAttempt(
 		handoff.reject()
 		return
 	}
-	handoff.stage(snapshot, systemPrepended, dynamicRefs)
+	handoff.stage(call, snapshot, systemPrepended, dynamicRefs)
 }
 
 func providerAttemptEnvelopeOverflow(params *sdk.Request, allowance int) int {
@@ -394,12 +395,16 @@ func publishContextCachePlan(cfg RunConfig, plan contextfrag.CachePlan) {
 	}
 }
 
-func recordContextCacheUsage(ledger *contextfrag.MutationLedger, stepIndex int, record *step.Record) {
-	if ledger == nil || record == nil {
+// recordContextCacheUsage records the cache usage of the model call that
+// produced durable step stepIndex. Loops record it when the call finishes,
+// before the step commits, so the lifecycle the step persists covers the call
+// that made it.
+func recordContextCacheUsage(ledger *contextfrag.MutationLedger, stepIndex int, usage sdk.Usage) {
+	if ledger == nil {
 		return
 	}
-	detail := record.Result.Usage.InputTokenDetails
-	if record.Result.Usage.CachedInputTokens == 0 && detail.NoCacheTokens == 0 && detail.CacheReadTokens == 0 &&
+	detail := usage.InputTokenDetails
+	if usage.CachedInputTokens == 0 && detail.NoCacheTokens == 0 && detail.CacheReadTokens == 0 &&
 		detail.CacheWriteTokens == 0 && detail.CacheWrite5mTokens == 0 && detail.CacheWrite1hTokens == 0 {
 		return
 	}

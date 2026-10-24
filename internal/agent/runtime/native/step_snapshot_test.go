@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/jsonschema-go/jsonschema"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/step"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/models"
@@ -28,7 +31,7 @@ func TestBuildGenerateDispatchSetsModelInfo(t *testing.T) {
 		ContextMutations: ledger,
 	}
 
-	if _, err := (*Agent)(nil).buildGenerateDispatch(context.Background(), cfg, nil, nil, nil); err != nil {
+	if _, err := (*Agent)(nil).buildGenerateDispatch(context.Background(), cfg, 0, nil, nil, nil); err != nil {
 		t.Fatalf("buildGenerateDispatch: %v", err)
 	}
 
@@ -205,6 +208,90 @@ func TestAgentGenerateRecordsOneStepSnapshotPerModelStepWithDistinctHashes(t *te
 	}
 	if got, want := ledger.FinalInputHash(), steps[len(steps)-1].PostPrepareInputHash; got != want {
 		t.Fatalf("FinalInputHash() = %q, want last step hash %q", got, want)
+	}
+}
+
+// The step audit a run records is keyed by durable step in both loops: a
+// continuation counts on from the step its run paused before, the dispatch an
+// in-run event rebuilds goes on from the step it regenerates, and each call's
+// cache usage is in the ledger before its step commits, so the lifecycle the
+// step persists covers the call that made it.
+func TestRunStepAuditUsesDurableStepIndexes(t *testing.T) {
+	t.Parallel()
+
+	const offset = 7
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			t.Parallel()
+			provider := &atomicMockProvider{handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
+				usage := sdk.Usage{InputTokens: 1000, InputTokenDetails: sdk.InputTokenDetail{CacheReadTokens: 100 * call, NoCacheTokens: 1000 - 100*call}}
+				if call <= 4 {
+					return sdk.ModelResult{FinishReason: sdk.FinishReasonToolCalls, Usage: usage, ToolCalls: []sdk.ToolCall{{
+						ToolCallID: fmt.Sprintf("c%d", call), ToolName: "effect", Input: toolexec.ArgumentsFromValue(map[string]any{"n": call}),
+					}}}, nil
+				}
+				return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop, Usage: usage}, nil
+			}}
+			a := New(Deps{})
+			a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
+				Name: "effect", Parameters: &jsonschema.Schema{Type: "object"},
+				Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+					return toolexec.OutputFromValue(strings.Repeat(" r", 2000)), nil
+				},
+			}}}})
+			input := sdk.UserMessage("INPUT")
+			ledger := contextfrag.NewMutationLedger()
+			var committed, unrecorded []int
+			cfg := RunConfig{
+				Model: &sdk.Model{ID: "mock-model", Provider: provider}, Messages: []sdk.Message{input}, SupportsToolCall: true,
+				Identity: SessionContext{BotID: "bot-1", SessionID: "sess-1"}, ContextMutations: ledger, StepIndexOffset: offset,
+				ContextManifest:   contextfrag.Manifest{BudgetPlan: &contextfrag.ContextBudgetPlan{Window: 2600}},
+				ContextProvenance: []MessageProvenance{{Message: input, Sources: rowSources("input"), Anchor: true}},
+				OnStepCommitted: func(_ context.Context, index int, record *step.Record) (StepDirective, error) {
+					committed = append(committed, index)
+					if !slices.ContainsFunc(ledger.CacheUsageRecords(), func(usage contextfrag.CacheUsageRecord) bool { return usage.StepIndex == index }) {
+						unrecorded = append(unrecorded, index)
+					}
+					provenance := make([]MessageProvenance, len(record.Messages))
+					for i := range provenance {
+						provenance[i].Sources = rowSources(fmt.Sprintf("s%d.%d", index, i))
+					}
+					return StepDirective{Provenance: provenance}, nil
+				},
+				SwitchContext: func(_ context.Context, sw ContextSwitch) (string, error) {
+					sw.Fold(ContextFold{Artifact: "a1", Summary: sdk.UserMessage("<summary>\nsteps\n"), Covered: rowSources("s7.0", "s7.1", "s8.0", "s8.1")})
+					return "trigger=in_run passes=1", nil
+				},
+			}
+			if stream {
+				for event := range a.Stream(context.Background(), cfg) {
+					if event.Type == EventError {
+						t.Fatalf("stream failed: %v", event.Cause)
+					}
+				}
+			} else if _, err := a.Generate(context.Background(), cfg); err != nil {
+				t.Fatal(err)
+			}
+
+			want := []int{7, 8, 9, 10, 11}
+			var stepIndexes, usageIndexes, cacheReads []int
+			for _, snapshot := range ledger.StepSnapshots() {
+				stepIndexes = append(stepIndexes, snapshot.StepIndex)
+			}
+			for _, usage := range ledger.CacheUsageRecords() {
+				usageIndexes = append(usageIndexes, usage.StepIndex)
+				cacheReads = append(cacheReads, usage.CacheReadTokens)
+			}
+			if !slices.Equal(committed, want) || !slices.Equal(stepIndexes, want) || !slices.Equal(usageIndexes, want) {
+				t.Fatalf("committed=%v step audits=%v cache usage=%v, want every one at durable steps %v", committed, stepIndexes, usageIndexes, want)
+			}
+			if !slices.Equal(cacheReads, []int{100, 200, 300, 400, 500}) || len(unrecorded) != 0 {
+				t.Fatalf("cache reads=%v, steps committed before their call's usage was recorded=%v", cacheReads, unrecorded)
+			}
+			if switches := countProviderAttemptMutations(ledger.Records(), contextfrag.MutationContextSwitch); switches != 1 {
+				t.Fatalf("context switches = %d, want the event that rebuilt the dispatch", switches)
+			}
+		})
 	}
 }
 
