@@ -213,3 +213,17 @@ func TestRenderToolCallMessageMarkdownCodeBlocks(t *testing.T) {
 		t.Fatalf("plain render should still include code body, got %q", plain)
 	}
 }
+
+func TestBuildToolCallStartApprovalHintFollowsLocale(t *testing.T) {
+	t.Parallel()
+
+	for locale, want := range map[string]string{
+		"en": "/approve 7 to allow",
+		"zh": "/approve 7 允许",
+	} {
+		p := BuildToolCallStart(&StreamToolCall{Name: "exec", Locale: locale, ApprovalID: "a-1", ShortID: 7})
+		if got := RenderToolCallMessage(p); !strings.Contains(got, want) {
+			t.Fatalf("locale %s: %q does not contain %q", locale, got, want)
+		}
+	}
+}

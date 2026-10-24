@@ -199,6 +199,7 @@ func (*MatrixAdapter) Descriptor() channel.Descriptor {
 			Media:          true,
 			Reply:          true,
 			Streaming:      true,
+			NativeApproval: true,
 			BlockStreaming: true,
 			Edit:           true,
 			ChatTypes:      []string{"direct", "group"},

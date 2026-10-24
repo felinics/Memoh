@@ -399,6 +399,8 @@
       "windowTooSmall": "压缩模型的上下文窗口太小，无法生成摘要。请更换上下文窗口更大的压缩模型。"
     },
     "toolApproval": {
+      "hint": "需要审批。发送 /approve {id} 允许，或 /reject {id} [原因] 拒绝。也可以回复本消息发送 /approve 或 /reject。",
+      "hintNoID": "需要审批。请回复本消息发送 /approve 或 /reject。",
       "unavailable": "⚠️ 当前无法审批工具调用。",
       "parseFailed": "无法识别。请回复对应请求发送 /approve 或 /reject，或点按下方按钮。"
     },

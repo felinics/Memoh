@@ -19347,6 +19347,10 @@ const docTemplate = `{
                 "media": {
                     "type": "boolean"
                 },
+                "native_approval": {
+                    "description": "NativeApproval means the adapter renders tool-approval requests itself;\nwithout it the outbound layer sends the prompt as a plain message.",
+                    "type": "boolean"
+                },
                 "native_commands": {
                     "type": "boolean"
                 },

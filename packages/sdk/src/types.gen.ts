@@ -822,6 +822,11 @@ export type ChannelChannelCapabilities = {
     edit?: boolean;
     markdown?: boolean;
     media?: boolean;
+    /**
+     * NativeApproval means the adapter renders tool-approval requests itself;
+     * without it the outbound layer sends the prompt as a plain message.
+     */
+    native_approval?: boolean;
     native_commands?: boolean;
     native_user_input?: boolean;
     polls?: boolean;
