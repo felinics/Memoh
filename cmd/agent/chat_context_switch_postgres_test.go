@@ -101,6 +101,10 @@ type effectLoop struct {
 	downFrom            int32
 	// resultBytes sizes each effect's result; zero keeps the default.
 	resultBytes int
+	// cacheRead makes every answer report half its input as read from the
+	// provider's prompt cache; prose fills each result with words, which the
+	// summarizer reads, instead of a run it treats as a media blob.
+	cacheRead, prose bool
 	// userID is the account the runs act for; empty sends them for none.
 	userID string
 	// arrival is a Discuss message delivered during effect arriveAt; arrived
@@ -194,7 +198,11 @@ func (s *effectLoop) Tools(context.Context, tools.SessionContext) ([]toolexec.To
 				s.arrived = append(s.arrived, segment)
 				s.mu.Unlock()
 			}
-			return toolexec.OutputFromValue(effectResult(input.Index, size)), nil
+			result := effectResult(input.Index, size)
+			if s.prose {
+				result = fmt.Sprintf("TOOL_RESULT_%03d ", input.Index) + strings.Repeat("finding ", size/8)
+			}
+			return toolexec.OutputFromValue(result), nil
 		}),
 		toolexec.Define("exec", "Run a command once it is approved.", func(_ *toolexec.ToolExecContext, _ execInput) (sdk.ToolOutput, error) {
 			return toolexec.OutputFromValue("DECISION_RESULT_KEEP" + strings.Repeat("x", s.decisionResultBytes)), nil
@@ -237,7 +245,7 @@ func (s *effectLoop) serve(w http.ResponseWriter, body []byte) {
 		}
 	}
 	id := fmt.Sprintf("call_%03d", len(s.requests))
-	hold := s.hold
+	hold, cacheRead := s.hold, s.cacheRead
 	s.mu.Unlock()
 	if hold != nil && strings.Contains(request, busyInput) {
 		<-hold
@@ -253,6 +261,14 @@ func (s *effectLoop) serve(w http.ResponseWriter, body []byte) {
 	for _, choice := range []map[string]any{{"index": 0, "delta": delta, "finish_reason": nil}, {"index": 0, "delta": map[string]any{}, "finish_reason": finish}} {
 		chunk, _ := json.Marshal(map[string]any{"id": "loop", "object": "chat.completion.chunk", "choices": []any{choice}})
 		_, _ = fmt.Fprintf(w, "data: %s\n\n", chunk)
+	}
+	if cacheRead {
+		prompt := len(body) / 4
+		usage, _ := json.Marshal(map[string]any{
+			"id": "loop", "object": "chat.completion.chunk", "choices": []any{},
+			"usage": map[string]any{"prompt_tokens": prompt, "completion_tokens": 1, "total_tokens": prompt + 1, "prompt_tokens_details": map[string]any{"cached_tokens": prompt / 2}},
+		})
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", usage)
 	}
 	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 }
@@ -623,6 +639,51 @@ func TestPostgresReplacingACompactedTurnFoldsAgain(t *testing.T) {
 					code, len(requests), f.summaries.Load()-summaries, strings.Count(requests[0], loopSummary), strings.Count(requests[0], loopInput))
 			}
 		})
+	}
+}
+
+// When the provider caches the run's requests, a fold asks for its summary
+// at the end of the request the run sent last instead of in a request of its
+// own: the same tools, cache key and messages, then the compaction request.
+func TestPostgresInRunFoldExtendsTheRunRequest(t *testing.T) {
+	const steps = 14
+	web := runEntryNamed("web")
+	s := newEffectLoop(t, web)
+	f := s.f
+	s.cacheRead, s.prose, s.resultBytes = true, true, 9000
+	var asked []string
+	f.onSummary = func(body []byte) { asked = append(asked, string(body)) }
+	code, requests := s.run(web, loopInput, steps)
+	f.onSummary = nil
+	if code != "" || len(asked) == 0 || len(s.effects) != steps {
+		t.Fatalf("code=%q summary_calls=%d effects=%v, want the run to fold and finish", code, len(asked), s.effects)
+	}
+	type request struct {
+		Messages       []json.RawMessage `json:"messages"`
+		Tools          json.RawMessage   `json:"tools"`
+		PromptCacheKey string            `json:"prompt_cache_key"`
+	}
+	sent := make([]request, len(requests))
+	for i, body := range requests {
+		if err := json.Unmarshal([]byte(body), &sent[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, body := range asked {
+		var ask request
+		if err := json.Unmarshal([]byte(body), &ask); err != nil {
+			t.Fatal(err)
+		}
+		if n := len(ask.Messages); n == 0 || !strings.Contains(string(ask.Messages[n-1]), "[Context compaction]") {
+			t.Fatalf("summary request %d does not end with the compaction request", i+1)
+		}
+		extends := slices.ContainsFunc(sent, func(r request) bool {
+			return string(r.Tools) == string(ask.Tools) && r.PromptCacheKey == ask.PromptCacheKey &&
+				slices.EqualFunc(r.Messages, ask.Messages[:len(ask.Messages)-1], func(a, b json.RawMessage) bool { return string(a) == string(b) })
+		})
+		if !extends {
+			t.Fatalf("summary request %d does not extend a request the run sent", i+1)
+		}
 	}
 }
 

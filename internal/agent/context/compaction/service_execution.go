@@ -161,6 +161,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		}
 	}
 	entries, keptAfter := keptAfterSummary(entries)
+	kept := append(keptInPlace(entries), keptAfter...)
 	current = append(keptAfter, current...)
 	readTokens := entriesPromptCost(entries) + earlierCost
 	if readTokens > inputTokens {
@@ -177,8 +178,15 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		return Pass{}, false, failed(ReasonIneffective, fmt.Errorf("%w: replaced_tokens=%d", errIneffectiveSummary, replacedTokens))
 	}
 	userPrompt := buildUserPrompt(earlier, entries, current, room)
-	if request := contextfrag.ProviderEnvelopeTokens(systemPrompt, []sdk.Message{sdk.UserMessage(userPrompt)}, nil); request+maxTokens > cfg.SummaryWindowTokens {
-		return Pass{}, false, failed(ReasonInputOverflow, fmt.Errorf("%w: request_tokens=%d max_tokens=%d window=%d", errCompactionInputOverflow, request, maxTokens, cfg.SummaryWindowTokens))
+	summarizerTokens := contextfrag.ProviderEnvelopeTokens(systemPrompt, []sdk.Message{sdk.UserMessage(userPrompt)}, nil)
+	if summarizerTokens+maxTokens > cfg.SummaryWindowTokens {
+		return Pass{}, false, failed(ReasonInputOverflow, fmt.Errorf("%w: request_tokens=%d max_tokens=%d window=%d", errCompactionInputOverflow, summarizerTokens, maxTokens, cfg.SummaryWindowTokens))
+	}
+	// A pass that folds everything the request renders may ask for the
+	// summary at the end of that request instead.
+	var extended *sdk.Request
+	if len(remaining) == 0 {
+		extended = continuationRequest(cfg, buildContinuationPrompt(kept, toolResultRefs(toCompact), room), room.SummaryTokens, capability, summarizerTokens)
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -249,11 +257,32 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		Messages:  sdkMessages,
 		MaxTokens: &maxTokens,
 	}
-	// A transient failure gets one immediate retry, or the wait the provider
-	// asks for; a rejected request is not made again.
-	result, err := modelretry.Do(models.WithModelSession(ctx, cfg.SessionID), s.logger, "agent.compaction",
-		modelretry.Config{MaxAttempts: 1, FastAttempts: 1}, modelretry.Retryable,
-		func(ctx context.Context) (sdk.ModelResult, error) { return model.Generate(ctx, request) })
+	generate := func(request sdk.Request) (sdk.ModelResult, error) {
+		// A transient failure gets one immediate retry, or the wait the
+		// provider asks for; a rejected request is not made again.
+		return modelretry.Do(models.WithModelSession(ctx, cfg.SessionID), s.logger, "agent.compaction",
+			modelretry.Config{MaxAttempts: 1, FastAttempts: 1}, modelretry.Retryable,
+			func(ctx context.Context) (sdk.ModelResult, error) { return model.Generate(ctx, request) })
+	}
+	var result sdk.ModelResult
+	if extended != nil {
+		s.logger.InfoContext(ctx, "compaction: summary asked at the end of the run's request",
+			slog.String("session_id", cfg.SessionID),
+			slog.Int("request_tokens", contextfrag.ProviderEnvelopeTokens(extended.System, extended.Messages, extended.Tools)),
+			slog.Int("summarizer_request_tokens", summarizerTokens))
+		result, err = generate(*extended)
+		if err == nil && (len(result.ToolCalls) > 0 || result.FinishReason != sdk.FinishReasonStop || strings.TrimSpace(result.Text) == "") {
+			err = fmt.Errorf("finish_reason=%s tool_calls=%d", result.FinishReason, len(result.ToolCalls))
+		}
+		if err != nil && ctx.Err() == nil {
+			s.logger.WarnContext(ctx, "compaction: extended request gave no summary, asking the summarizer",
+				slog.String("session_id", cfg.SessionID), slog.Any("error", err))
+			extended = nil
+		}
+	}
+	if extended == nil {
+		result, err = generate(request)
+	}
 	if err != nil {
 		return fail(failed(ReasonSummarizerFailed, err))
 	}
@@ -586,4 +615,40 @@ func (s *Service) completeRollupLog(
 		return err
 	}
 	return nil
+}
+
+// continuationCacheReadRatio bounds what a prompt-cache read costs against an
+// uncached input token. Providers charge between a tenth and a half, so the
+// run's request is extended only where that costs less even at half price.
+const continuationCacheReadRatio = 0.5
+
+// continuationRequest is the run's last request with prompt appended, used
+// when the provider likely still caches that request and reading it again
+// costs less than the summarizer's own request, which carries only what it
+// folds. It is nil when either does not hold or the summary would not fit.
+func continuationRequest(cfg TriggerConfig, prompt string, summaryTokens, capability, summarizerTokens int) *sdk.Request {
+	c := cfg.Continuation
+	if c == nil || !c.CacheRead || c.Request.Model != cfg.ModelID {
+		return nil
+	}
+	// Only automatic prefix caching keyed by the session is relied on; a
+	// provider with explicit breakpoints charges to write them.
+	switch models.ClientType(cfg.ClientType) {
+	case models.ClientTypeOpenAICompletions, models.ClientTypeOpenAIResponses:
+	default:
+		return nil
+	}
+	base := contextfrag.ProviderEnvelopeTokens(c.Request.System, c.Request.Messages, c.Request.Tools)
+	ask := contextfrag.ProviderEnvelopeTokens("", []sdk.Message{sdk.UserMessage(prompt)}, nil)
+	if float64(base)*continuationCacheReadRatio+float64(ask) >= float64(summarizerTokens) {
+		return nil
+	}
+	maxTokens := min(capability, cfg.SummaryWindowTokens-base-ask)
+	if maxTokens < summaryTokens {
+		return nil
+	}
+	request := c.Request
+	request.Messages = append(slices.Clip(c.Request.Messages), sdk.UserMessage(prompt))
+	request.MaxTokens = &maxTokens
+	return &request
 }

@@ -286,6 +286,17 @@ func keptAfterSummary(entries []messageEntry) ([]messageEntry, []messageEntry) {
 	return entries[:last], after
 }
 
+// keptInPlace are the kept entries a summary is written around.
+func keptInPlace(entries []messageEntry) []messageEntry {
+	var kept []messageEntry
+	for _, entry := range entries {
+		if entry.Kept {
+			kept = append(kept, entry)
+		}
+	}
+	return kept
+}
+
 // coveredEntries are the entries a summary replaces: all but the kept ones.
 func coveredEntries(entries []messageEntry) []messageEntry {
 	var covered []messageEntry

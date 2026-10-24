@@ -338,3 +338,20 @@ func truncateBytes(s string, maxBytes int) string {
 	}
 	return strings.TrimSpace(s[:cut]) + truncationMarker
 }
+
+// toolResultRefs names each tool result among items, in order, with the ref
+// get_messages reads it back by. Rows that are not stored history have none.
+func toolResultRefs(items []CompactionCandidate) []string {
+	var refs []string
+	for _, item := range items {
+		if item.Record.SourceKind != historyfrag.SourceDBMessage {
+			continue
+		}
+		for i, part := range historyfrag.StoredModelMessageToSDKMessage(item.Record.ModelMessage).Content {
+			if result, ok := part.(sdk.ToolResultPart); ok {
+				refs = append(refs, cleanEntryMetadataValue(result.ToolName)+" "+result.ToolCallID+" ref="+item.Record.Ref.ID+":"+strconv.Itoa(i))
+			}
+		}
+	}
+	return refs
+}

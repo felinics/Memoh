@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
+
 	"github.com/felinics/memoh/internal/agent/turn"
 )
 
@@ -120,4 +122,18 @@ type TriggerConfig struct {
 	// sources are not in it: the caller prices what it renders for them.
 	HistoryBudgetTokens int
 	PromptCacheTTL      string
+	// Continuation, when set, is the request the caller sent last. A pass
+	// that folds everything foldable may ask for its summary by extending
+	// that request, which the provider may still hold in its prompt cache,
+	// instead of sending the summarizer's own.
+	Continuation *Continuation
+}
+
+// Continuation is a request the caller has just sent and what the provider
+// reported for it.
+type Continuation struct {
+	Request sdk.Request
+	// CacheRead reports that the provider served part of the caller's last
+	// request from its prompt cache.
+	CacheRead bool
 }
