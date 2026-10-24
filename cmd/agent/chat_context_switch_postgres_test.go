@@ -101,10 +101,9 @@ type effectLoop struct {
 	downFrom            int32
 	// resultBytes sizes each effect's result; zero keeps the default.
 	resultBytes int
-	// cacheRead makes every answer report half its input as read from the
-	// provider's prompt cache; prose fills each result with words, which the
-	// summarizer reads, instead of a run it treats as a media blob.
-	cacheRead, prose bool
+	// prose fills each result with words the summarizer reads instead of a
+	// repeated character run it treats as a media blob.
+	prose bool
 	// userID is the account the runs act for; empty sends them for none.
 	userID string
 	// arrival is a Discuss message delivered during effect arriveAt; arrived
@@ -245,7 +244,7 @@ func (s *effectLoop) serve(w http.ResponseWriter, body []byte) {
 		}
 	}
 	id := fmt.Sprintf("call_%03d", len(s.requests))
-	hold, cacheRead := s.hold, s.cacheRead
+	hold := s.hold
 	s.mu.Unlock()
 	if hold != nil && strings.Contains(request, busyInput) {
 		<-hold
@@ -261,14 +260,6 @@ func (s *effectLoop) serve(w http.ResponseWriter, body []byte) {
 	for _, choice := range []map[string]any{{"index": 0, "delta": delta, "finish_reason": nil}, {"index": 0, "delta": map[string]any{}, "finish_reason": finish}} {
 		chunk, _ := json.Marshal(map[string]any{"id": "loop", "object": "chat.completion.chunk", "choices": []any{choice}})
 		_, _ = fmt.Fprintf(w, "data: %s\n\n", chunk)
-	}
-	if cacheRead {
-		prompt := len(body) / 4
-		usage, _ := json.Marshal(map[string]any{
-			"id": "loop", "object": "chat.completion.chunk", "choices": []any{},
-			"usage": map[string]any{"prompt_tokens": prompt, "completion_tokens": 1, "total_tokens": prompt + 1, "prompt_tokens_details": map[string]any{"cached_tokens": prompt / 2}},
-		})
-		_, _ = fmt.Fprintf(w, "data: %s\n\n", usage)
 	}
 	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 }
@@ -642,7 +633,7 @@ func TestPostgresReplacingACompactedTurnFoldsAgain(t *testing.T) {
 	}
 }
 
-// When the provider caches the run's requests, a fold asks for its summary
+// Even without provider cache usage, a fold asks for its summary
 // at the end of the request the run sent last instead of in a request of its
 // own: the same tools, cache key and messages, then the compaction request.
 func TestPostgresInRunFoldExtendsTheRunRequest(t *testing.T) {
@@ -650,7 +641,7 @@ func TestPostgresInRunFoldExtendsTheRunRequest(t *testing.T) {
 	web := runEntryNamed("web")
 	s := newEffectLoop(t, web)
 	f := s.f
-	s.cacheRead, s.prose, s.resultBytes = true, true, 9000
+	s.prose, s.resultBytes = true, 9000
 	var asked []string
 	f.onSummary = func(body []byte) { asked = append(asked, string(body)) }
 	code, requests := s.run(web, loopInput, steps)
@@ -858,8 +849,8 @@ func prefixFullScenario(t *testing.T, entry runEntry, s *effectLoop) {
 // verbatim, a row written into the session by someone else is left alone, and
 // the next turn renders the summary the run sent at the same place without
 // compacting again. When the summarizer is down the loop ends visibly with
-// budget_unsatisfied after one retry, keeps the steps it committed, and the
-// next turn is answered once the summarizer is back.
+// budget_unsatisfied after retrying each attempted summary path once, keeps
+// the steps it committed, and answers the next turn once the summarizer is back.
 func longLoopScenario(t *testing.T, entry runEntry, s *effectLoop) {
 	const steps = 14
 	f := s.f
@@ -944,9 +935,20 @@ func longLoopScenario(t *testing.T, entry runEntry, s *effectLoop) {
 	}
 
 	s.downAt = 1
+	var summaryAttempts []bool
+	f.onSummary = func(body []byte) {
+		if f.failSummary.Load() {
+			summaryAttempts = append(summaryAttempts, strings.Contains(string(body), "[Context compaction]"))
+		}
+	}
 	code, requests = s.run(entry, "SUMMARIZER_DOWN_INPUT", steps)
-	if code != "context.budget_unsatisfied" || f.summaries.Load()-s.downFrom != 2 || len(s.effects) == 0 || len(s.effects) >= steps || !slices.IsSorted(s.effects) || len(slices.Compact(slices.Clone(s.effects))) != len(s.effects) {
-		t.Fatalf("summarizer down: code=%q summary_attempts=%d provider_calls=%d effects=%v, want budget_unsatisfied after the summarizer was retried once, with the effects so far run once", code, f.summaries.Load()-s.downFrom, len(requests), s.effects)
+	f.onSummary = nil
+	wantAttempts := []bool{false, false}
+	if len(summaryAttempts) > 0 && summaryAttempts[0] {
+		wantAttempts = []bool{true, true, false, false}
+	}
+	if code != "context.budget_unsatisfied" || !slices.Equal(summaryAttempts, wantAttempts) || f.summaries.Load()-s.downFrom != int32(len(wantAttempts)) || len(s.effects) == 0 || len(s.effects) >= steps || !slices.IsSorted(s.effects) || len(slices.Compact(slices.Clone(s.effects))) != len(s.effects) {
+		t.Fatalf("summarizer down: code=%q summary_attempts=%v provider_calls=%d effects=%v, want budget_unsatisfied after each attempted summary path was retried once, with the effects so far run once", code, summaryAttempts, len(requests), s.effects)
 	}
 	var reasons, failedRows int
 	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM context_lifecycles, jsonb_array_elements(snapshot->'mutations') m WHERE session_id=$1 AND m->>'kind'='context_switch' AND m->>'detail' LIKE '%reason=summarizer_failed%'`, f.sessionID).Scan(&reasons); err != nil {

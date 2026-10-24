@@ -37,9 +37,7 @@ func (s *Service) switchContext(req ChatRequest, committer *agentStepCommitter, 
 			cfg.ProtectedSources = append(cfg.ProtectedSources, source)
 		}
 		cfg.HistoryBudgetTokens = sw.HistoryBudgetTokens
-		if sw.Previous != nil {
-			cfg.Continuation = &compaction.Continuation{Request: *sw.Previous, CacheRead: sw.PreviousCacheRead}
-		}
+		cfg.Continuation = sw.Previous
 
 		passes, err := s.compactionService.Compact(ctx, cfg)
 		tokens := sw.UsageTokens

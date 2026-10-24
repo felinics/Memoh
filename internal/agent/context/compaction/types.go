@@ -126,14 +126,5 @@ type TriggerConfig struct {
 	// that folds everything foldable may ask for its summary by extending
 	// that request, which the provider may still hold in its prompt cache,
 	// instead of sending the summarizer's own.
-	Continuation *Continuation
-}
-
-// Continuation is a request the caller has just sent and what the provider
-// reported for it.
-type Continuation struct {
-	Request sdk.Request
-	// CacheRead reports that the provider served part of the caller's last
-	// request from its prompt cache.
-	CacheRead bool
+	Continuation *sdk.Request
 }

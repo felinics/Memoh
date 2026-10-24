@@ -38,10 +38,8 @@ type ContextSwitch struct {
 	AllowanceTokens     int
 	Fold                func(ContextFold) int
 	// Previous is the request the run sent last: this one without the
-	// latest step. PreviousCacheRead reports that the provider served part
-	// of it from its prompt cache, so it likely still holds all of it.
-	Previous          *sdk.Request
-	PreviousCacheRead bool
+	// latest step.
+	Previous *sdk.Request
 }
 
 // ContextFold is one pass an event committed: the summary that replaces the
@@ -141,9 +139,6 @@ func (s *contextSwitchState) fold(ctx context.Context, cfg RunConfig, params *sd
 	previous := *params
 	previous.Messages = slices.Clone(params.Messages[:tailStart])
 	sw := ContextSwitch{Tail: slices.Clone(s.tail), UsageTokens: usage, AllowanceTokens: allowance, Previous: &previous}
-	if records := cfg.ContextMutations.CacheUsageRecords(); len(records) > 0 {
-		sw.PreviousCacheRead = records[len(records)-1].CacheReadTokens > 0
-	}
 	var kept []sdk.Message
 	for i, p := range provenance {
 		if p != nil {

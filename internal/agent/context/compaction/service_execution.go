@@ -186,7 +186,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	// summary at the end of that request instead.
 	var extended *sdk.Request
 	if len(remaining) == 0 {
-		extended = continuationRequest(cfg, buildContinuationPrompt(kept, toolResultRefs(toCompact), room), room.SummaryTokens, capability, summarizerTokens)
+		extended = continuationRequest(cfg, buildContinuationPrompt(kept, toolResultRefs(toCompact), room), room.SummaryTokens, capability)
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -617,38 +617,28 @@ func (s *Service) completeRollupLog(
 	return nil
 }
 
-// continuationCacheReadRatio bounds what a prompt-cache read costs against an
-// uncached input token. Providers charge between a tenth and a half, so the
-// run's request is extended only where that costs less even at half price.
-const continuationCacheReadRatio = 0.5
-
-// continuationRequest is the run's last request with prompt appended, used
-// when the provider likely still caches that request and reading it again
-// costs less than the summarizer's own request, which carries only what it
-// folds. It is nil when either does not hold or the summary would not fit.
-func continuationRequest(cfg TriggerConfig, prompt string, summaryTokens, capability, summarizerTokens int) *sdk.Request {
+// continuationRequest appends the summary instruction to the run's last
+// request. It preserves the prefix for supported clients when the model is
+// unchanged and the request leaves enough room for the summary.
+func continuationRequest(cfg TriggerConfig, prompt string, summaryTokens, capability int) *sdk.Request {
 	c := cfg.Continuation
-	if c == nil || !c.CacheRead || c.Request.Model != cfg.ModelID {
+	if c == nil || c.Model != cfg.ModelID {
 		return nil
 	}
-	// Only automatic prefix caching keyed by the session is relied on; a
-	// provider with explicit breakpoints charges to write them.
+	// Continuation requests currently support the OpenAI-compatible clients.
 	switch models.ClientType(cfg.ClientType) {
 	case models.ClientTypeOpenAICompletions, models.ClientTypeOpenAIResponses:
 	default:
 		return nil
 	}
-	base := contextfrag.ProviderEnvelopeTokens(c.Request.System, c.Request.Messages, c.Request.Tools)
+	base := contextfrag.ProviderEnvelopeTokens(c.System, c.Messages, c.Tools)
 	ask := contextfrag.ProviderEnvelopeTokens("", []sdk.Message{sdk.UserMessage(prompt)}, nil)
-	if float64(base)*continuationCacheReadRatio+float64(ask) >= float64(summarizerTokens) {
-		return nil
-	}
 	maxTokens := min(capability, cfg.SummaryWindowTokens-base-ask)
 	if maxTokens < summaryTokens {
 		return nil
 	}
-	request := c.Request
-	request.Messages = append(slices.Clip(c.Request.Messages), sdk.UserMessage(prompt))
+	request := *c
+	request.Messages = append(slices.Clip(c.Messages), sdk.UserMessage(prompt))
 	request.MaxTokens = &maxTokens
 	return &request
 }
