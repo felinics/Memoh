@@ -166,13 +166,8 @@ func TestListModelsReturnsEnabledCatalogAndMarksCurrent(t *testing.T) {
 			spawnDescription = tool.Description
 		}
 	}
-	for _, want := range []string{"worker-model | provider-b", "[current]", "list_models"} {
-		if !strings.Contains(spawnDescription, want) {
-			t.Fatalf("spawn description missing %q:\n%s", want, spawnDescription)
-		}
-	}
-	if strings.Contains(spawnDescription, "worker-model | provider-a") {
-		t.Fatalf("spawn description includes another provider's model: %s", spawnDescription)
+	if strings.Contains(spawnDescription, "worker-model") || !strings.Contains(spawnDescription, "list_models") {
+		t.Fatalf("spawn description must leave the catalog to list_models: %s", spawnDescription)
 	}
 
 	result, err := executeAgentTool(t, provider, session, ToolListModels().String(), map[string]any{})

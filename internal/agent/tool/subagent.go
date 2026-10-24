@@ -369,21 +369,19 @@ func (*SpawnProvider) Usage(_ context.Context, _ SessionContext, available Avail
 	return usageSection("Subagents", parts)
 }
 
-func (p *SpawnProvider) Tools(ctx context.Context, session SessionContext) ([]toolexec.Tool, error) {
+func (p *SpawnProvider) Tools(_ context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	if session.IsSubagent || p.agent == nil {
 		return nil, nil
 	}
 	sess := session
-	spawnDescription := "Create one managed subagent for an independent task. Returns a memorable agent_id."
-	if parent, err := p.parentModel(ctx, session); err == nil {
-		if catalog, err := p.listModelCatalog(ctx, parent.ProviderID); err == nil {
-			spawnDescription = appendModelCatalogToSpawnDescription(spawnDescription, catalog, session)
-		}
-	}
 	return []toolexec.Tool{
 		{
-			Name:        ToolSpawnAgent().String(),
-			Description: spawnDescription,
+			Name: ToolSpawnAgent().String(),
+			// The description stays fixed: tool definitions precede the
+			// conversation in every request, so the model catalog lives behind
+			// list_models instead of changing this prefix whenever a model is
+			// enabled, renamed or picked for the session.
+			Description: "Create one managed subagent for an independent task. Returns a memorable agent_id. Use list_models to see which model_id values it accepts.",
 			Parameters:  toolexec.SchemaFor[spawnAgentArgs](),
 			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args spawnAgentArgs) (sdk.ToolOutput, error) {
 				return toolexec.OutputPair(p.execSpawnAgent(ctx.Context, sess, args))
@@ -1718,27 +1716,6 @@ func (p *SpawnProvider) listModelCatalog(ctx context.Context, providerID string)
 		return items[i].UUID < items[j].UUID
 	})
 	return items, nil
-}
-
-func appendModelCatalogToSpawnDescription(base string, catalog []subagentModelCatalogItem, session SessionContext) string {
-	if len(catalog) == 0 {
-		return base + " No enabled chat models are currently available."
-	}
-	lines := make([]string, 0, len(catalog)+2)
-	lines = append(lines, base, "Enabled subagent models (model_id | provider | description):")
-	for _, item := range catalog {
-		marker := ""
-		if item.UUID == session.CurrentModelUUID {
-			marker = " [current]"
-		}
-		description := strings.Join(strings.Fields(item.Description), " ")
-		if description == "" {
-			description = "No description"
-		}
-		lines = append(lines, fmt.Sprintf("- %s | %s | %s%s", item.ModelID, item.ProviderName, description, marker))
-	}
-	lines = append(lines, "list_models includes models from all providers; subagents are limited to the current session's provider.")
-	return strings.Join(lines, "\n")
 }
 
 func (p *SpawnProvider) parentModel(ctx context.Context, session SessionContext) (models.GetResponse, error) {
