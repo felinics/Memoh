@@ -13,6 +13,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -344,6 +345,17 @@ func (s *Service) Pipeline() *timeline.Pipeline {
 	return s.pipeline
 }
 
+// pipelineHoldsMessage reports whether the session's rendered context carries
+// the message, which makes it the context of that message's turn.
+func (s *Service) pipelineHoldsMessage(sessionID, messageID string) bool {
+	if s.pipeline == nil || sessionID == "" || messageID == "" || !s.pipeline.HasSession(sessionID) {
+		return false
+	}
+	return slices.ContainsFunc(s.pipeline.GetRC(sessionID), func(segment timeline.RenderedSegment) bool {
+		return segment.MessageID == messageID
+	})
+}
+
 // InlineImageAttachments resolves image content hashes to sdk.ImagePart values
 // using the configured asset loader. Intended for the discuss driver to inline
 // images from new RC segments before calling the LLM. The result holds what
@@ -518,15 +530,14 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	// the rendered event stream (RC) + bot turn responses (TR) instead of
 	// loading raw history from bot_history_messages. The current inbound
 	// message is already in the RC, so it must not be appended again.
-	usePipeline := !req.ShutdownResume && s.pipeline != nil &&
-		strings.TrimSpace(req.ThreadID) != "" &&
+	// The pipeline is a request's context only when it holds the request's
+	// own message: an inbound channel projects the message before its turn
+	// starts, while a send from another surface into the same session reads
+	// history from its rows so that its query is still sent.
+	usePipeline := !req.ShutdownResume &&
 		strings.TrimSpace(req.HistoryCutoffBeforeMessageID) == "" &&
-		len(req.RequestedSkills) == 0
-	if usePipeline {
-		if !s.pipeline.HasSession(strings.TrimSpace(req.ThreadID)) {
-			usePipeline = false
-		}
-	}
+		len(req.RequestedSkills) == 0 &&
+		s.pipelineHoldsMessage(strings.TrimSpace(req.ThreadID), strings.TrimSpace(req.ExternalMessageID))
 
 	contextTokenBudget := s.effectiveContextTokenBudget(chatModel)
 	runCfg.ContextBudgetMaxTokens = contextTokenBudget
