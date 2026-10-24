@@ -43,7 +43,10 @@ INSERT INTO tool_approval_requests (
   requested_message_id,
   source_platform,
   reply_target,
-  conversation_type
+  conversation_type,
+  status,
+  decision_reason,
+  decided_at
 ) SELECT
   sqlc.arg(bot_id),
   sqlc.arg(session_id),
@@ -63,7 +66,12 @@ INSERT INTO tool_approval_requests (
   sqlc.narg(requested_message_id),
   sqlc.arg(source_platform),
   sqlc.arg(reply_target),
-  sqlc.arg(conversation_type)
+  sqlc.arg(conversation_type),
+  -- A non-null system_reject_reason writes the row already rejected with no
+  -- deciding identity, so a system refusal never exists as a pending row.
+  CASE WHEN sqlc.narg(system_reject_reason)::text IS NULL THEN 'pending' ELSE 'rejected' END,
+  COALESCE(sqlc.narg(system_reject_reason)::text, ''),
+  CASE WHEN sqlc.narg(system_reject_reason)::text IS NULL THEN NULL ELSE now() END
 FROM locked_session
 CROSS JOIN next_short_id
 CROSS JOIN runtime_scope
@@ -189,6 +197,22 @@ WHERE team_id = public.memoh_current_team_id()
   AND session_id = sqlc.arg(session_id)
   AND status = 'pending'
   AND (runtime_fencing_token IS NULL OR runtime_fencing_token = sqlc.narg(runtime_fencing_token)::bigint)
+RETURNING *;
+
+-- name: CancelPendingToolApprovalsByRun :many
+-- A lost run must only invalidate approvals it created; session-wide
+-- cancellation would also cancel a newer run's approval after a stale owner
+-- is reaped.
+UPDATE tool_approval_requests
+SET status = 'cancelled',
+    decision_reason = sqlc.arg(reason),
+    decided_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id)
+  AND session_id = sqlc.arg(session_id)
+  AND run_id = sqlc.arg(run_id)
+  AND status = 'pending'
+  AND runtime_fencing_token IS NOT DISTINCT FROM sqlc.narg(runtime_fencing_token)::bigint
 RETURNING *;
 
 -- name: SupersedePendingToolApprovalsBySession :many

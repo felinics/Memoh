@@ -84,6 +84,89 @@ func (q *Queries) ApproveToolApprovalRequest(ctx context.Context, arg ApproveToo
 	return i, err
 }
 
+const cancelPendingToolApprovalsByRun = `-- name: CancelPendingToolApprovalsByRun :many
+UPDATE tool_approval_requests
+SET status = 'cancelled',
+    decision_reason = $1,
+    decided_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $2
+  AND session_id = $3
+  AND run_id = $4
+  AND status = 'pending'
+  AND runtime_fencing_token IS NOT DISTINCT FROM $5::bigint
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+`
+
+type CancelPendingToolApprovalsByRunParams struct {
+	Reason              string      `json:"reason"`
+	BotID               pgtype.UUID `json:"bot_id"`
+	SessionID           pgtype.UUID `json:"session_id"`
+	RunID               pgtype.UUID `json:"run_id"`
+	RuntimeFencingToken pgtype.Int8 `json:"runtime_fencing_token"`
+}
+
+// A lost run must only invalidate approvals it created; session-wide
+// cancellation would also cancel a newer run's approval after a stale owner
+// is reaped.
+func (q *Queries) CancelPendingToolApprovalsByRun(ctx context.Context, arg CancelPendingToolApprovalsByRunParams) ([]ToolApprovalRequest, error) {
+	rows, err := q.db.Query(ctx, cancelPendingToolApprovalsByRun,
+		arg.Reason,
+		arg.BotID,
+		arg.SessionID,
+		arg.RunID,
+		arg.RuntimeFencingToken,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ToolApprovalRequest
+	for rows.Next() {
+		var i ToolApprovalRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.RouteID,
+			&i.ChannelIdentityID,
+			&i.WorkspaceTargetID,
+			&i.ToolCallID,
+			&i.ToolName,
+			&i.Operation,
+			&i.ToolInput,
+			&i.Options,
+			&i.SelectedOptionID,
+			&i.ShortID,
+			&i.Status,
+			&i.RuntimeFencingToken,
+			&i.ResponseControlID,
+			&i.ResponsePayloadHash,
+			&i.DecisionReason,
+			&i.RequestedByChannelIdentityID,
+			&i.DecidedByChannelIdentityID,
+			&i.RequestedMessageID,
+			&i.PromptMessageID,
+			&i.PromptExternalMessageID,
+			&i.SourcePlatform,
+			&i.ReplyTarget,
+			&i.ConversationType,
+			&i.CreatedAt,
+			&i.DecidedAt,
+			&i.TeamID,
+			&i.RunID,
+			&i.TurnID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const cancelPendingToolApprovalsBySession = `-- name: CancelPendingToolApprovalsBySession :many
 UPDATE tool_approval_requests
 SET status = 'cancelled',
@@ -269,7 +352,10 @@ INSERT INTO tool_approval_requests (
   requested_message_id,
   source_platform,
   reply_target,
-  conversation_type
+  conversation_type,
+  status,
+  decision_reason,
+  decided_at
 ) SELECT
   $1,
   $2,
@@ -289,7 +375,12 @@ INSERT INTO tool_approval_requests (
   $13,
   $14,
   $15,
-  $16
+  $16,
+  -- A non-null system_reject_reason writes the row already rejected with no
+  -- deciding identity, so a system refusal never exists as a pending row.
+  CASE WHEN $17::text IS NULL THEN 'pending' ELSE 'rejected' END,
+  COALESCE($17::text, ''),
+  CASE WHEN $17::text IS NULL THEN NULL ELSE now() END
 FROM locked_session
 CROSS JOIN next_short_id
 CROSS JOIN runtime_scope
@@ -324,6 +415,7 @@ type CreateToolApprovalRequestParams struct {
 	SourcePlatform               string      `json:"source_platform"`
 	ReplyTarget                  string      `json:"reply_target"`
 	ConversationType             string      `json:"conversation_type"`
+	SystemRejectReason           pgtype.Text `json:"system_reject_reason"`
 }
 
 func (q *Queries) CreateToolApprovalRequest(ctx context.Context, arg CreateToolApprovalRequestParams) (ToolApprovalRequest, error) {
@@ -344,6 +436,7 @@ func (q *Queries) CreateToolApprovalRequest(ctx context.Context, arg CreateToolA
 		arg.SourcePlatform,
 		arg.ReplyTarget,
 		arg.ConversationType,
+		arg.SystemRejectReason,
 	)
 	var i ToolApprovalRequest
 	err := row.Scan(
