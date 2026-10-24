@@ -297,6 +297,15 @@ export const providerPresets: ProviderPreset[] = [
     domain: 'speech',
   },
   {
+    id: 'fishaudio-speech',
+    name: 'Fish Audio Speech',
+    clientType: 'fishaudio-speech',
+    baseUrl: 'https://api.fish.audio/v1',
+    icon: '',
+    source: 'fishaudio-speech.yaml',
+    domain: 'speech',
+  },
+  {
     id: 'deepgram-speech',
     name: 'Deepgram Speech',
     clientType: 'deepgram-speech',
@@ -369,6 +378,15 @@ export const providerPresets: ProviderPreset[] = [
     baseUrl: 'https://api.elevenlabs.io',
     icon: 'elevenlabs',
     source: 'elevenlabs-transcription.yaml',
+    domain: 'transcription',
+  },
+  {
+    id: 'fishaudio-transcription',
+    name: 'Fish Audio Transcription',
+    clientType: 'fishaudio-transcription',
+    baseUrl: 'https://api.fish.audio/v1',
+    icon: '',
+    source: 'fishaudio-transcription.yaml',
     domain: 'transcription',
   },
   {
