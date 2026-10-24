@@ -1,0 +1,11 @@
+name: Fish Audio Transcription
+client_type: fishaudio-transcription
+base_url: https://api.fish.audio/v1
+
+models:
+  - model_id: transcribe-1-pro
+    name: Transcribe 1 Pro
+    type: transcription
+  - model_id: transcribe-1
+    name: Transcribe 1
+    type: transcription

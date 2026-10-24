@@ -109,6 +109,16 @@ export const CLIENT_TYPE_META: Record<string, ClientTypeMeta> = {
     label: 'ElevenLabs Transcription',
     hint: 'ElevenLabs speech-to-text',
   },
+  'fishaudio-speech': {
+    value: 'fishaudio-speech',
+    label: 'Fish Audio Speech',
+    hint: 'Fish Audio text-to-speech',
+  },
+  'fishaudio-transcription': {
+    value: 'fishaudio-transcription',
+    label: 'Fish Audio Transcription',
+    hint: 'Fish Audio speech-to-text',
+  },
   'deepgram-speech': {
     value: 'deepgram-speech',
     label: 'Deepgram Speech',

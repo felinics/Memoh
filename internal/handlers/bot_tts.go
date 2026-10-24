@@ -94,7 +94,7 @@ func (h *BotAudioHandler) Synthesize(c echo.Context) error {
 	closeErr := f.Close()
 	if streamErr != nil {
 		h.tempStore.Delete(tempID)
-		return errs.Wrap(streamErr, "synthesize speech", slog.String("bot_id", botID), slog.String("model_id", botSettings.TtsModelID))
+		return errs.Wrap(probeError(streamErr, false), "synthesize speech", slog.String("bot_id", botID), slog.String("model_id", botSettings.TtsModelID))
 	}
 	if closeErr != nil {
 		h.tempStore.Delete(tempID)
