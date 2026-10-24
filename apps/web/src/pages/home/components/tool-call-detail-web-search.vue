@@ -33,6 +33,10 @@
         </span>
       </div>
     </div>
+    <GenericDetail
+      v-else-if="hasContent"
+      :block="block"
+    />
     <EmptyRow v-else>
       {{ t('chat.tools.detail.noResults') }}
     </EmptyRow>
@@ -44,6 +48,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
 import EmptyRow from './tool-detail/empty-row.vue'
+import GenericDetail from './tool-call-detail-generic.vue'
 
 interface SearchResult {
   title: string
@@ -53,6 +58,15 @@ interface SearchResult {
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
+
+const hasContent = computed(() => {
+  const result = props.block.result
+  if (typeof result === 'string') return result.length > 0
+  if (!result || typeof result !== 'object') return false
+  const content = (result as Record<string, unknown>).content
+  return typeof content === 'string' ? content.length > 0
+    : Array.isArray(content) && content.some(item => item?.type === 'text' && item.text)
+})
 
 const results = computed<SearchResult[]>(() => {
   if (!props.block.done || !props.block.result) return []
