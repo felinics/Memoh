@@ -349,6 +349,9 @@
       "update_failed": "プロフィールを更新できませんでした。"
     },
     "provider": {
+      "catalog_source_not_found": "このプロバイダーには公開モデルカタログがありません。プロバイダーの API からインポートしてください。",
+      "catalog_unavailable": "モデルカタログを利用できません。後でもう一度試すか、プロバイダーの API からインポートしてください。",
+      "managed_readonly": "このプロバイダーはプラットフォームで管理されています。組み込みモデルの同期を使用してください。",
       "name_taken": "同じ名前のプロバイダーがすでに存在します。",
       "not_found": "このプロバイダーは存在しなくなりました。一覧を更新して選び直してください。"
     },
@@ -1932,8 +1935,6 @@
     "reasoningBudget": "推論予算の範囲",
     "reasoningBudgetMin": "最小 Token",
     "reasoningBudgetMax": "最大 Token",
-    "reasoningBudgetMaxMin": "Token 予算の上限は 0 より大きくしてください",
-    "reasoningBudgetRange": "Token 予算の下限は上限以下にしてください",
     "reasoningReplay": "推論の返送フィールド",
     "reasoningReplayHint": "ツール呼び出し時に以前の推論を返送する必要がある Chat Completions エンドポイント向けです。",
     "reasoningReplayProvider": "プロバイダーに従う",
@@ -1959,11 +1960,13 @@
     "importFailed": "モデルのインポートに失敗しました",
     "refreshModels": "Model を更新",
     "refreshSuccess": "Model カタログを更新しました: {created} 件追加、{updated} 件更新",
-    "catalogUnavailable": "models.dev に接続できなかったため、プロバイダーのエンドポイントから Model をインポートしました",
+    "reasoningBudgetMaxMin": "Token 予算の上限は 0 より大きくしてください",
+    "reasoningBudgetRange": "Token 予算の下限は上限以下にしてください",
     "refreshFailed": "Model カタログの更新に失敗しました",
     "refreshConfirmHint": "このアカウントで現在利用できる最新の Model を取得し、利用できない Model を選択肢から除外します。",
     "importConfirmHint": "このプロバイダーで現在利用できる Model を取得してインポートします。",
-    "showingCount": "{total} の {count} を表示中"
+    "showingCount": "{total} の {count} を表示中",
+    "catalogStale": "モデルカタログを更新できなかったため、キャッシュされたモデル情報を使用しました。"
   },
   "provider": {
     "add": "プロバイダーを追加",

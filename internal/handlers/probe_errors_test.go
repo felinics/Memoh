@@ -150,7 +150,7 @@ func TestProviderTestAnswersUnreachableWithoutErrorText(t *testing.T) {
 	queries := newProbeQueries(baseURL)
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
-	h := NewProvidersHandler(logger, providers.NewService(logger, queries, ""), nil)
+	h := NewProvidersHandler(logger, providers.NewService(logger, queries, ""), nil, nil)
 
 	status, body := serveProbe(t, h.Register, "/providers/"+queries.provider.ID.String()+"/test")
 	if status != http.StatusOK {
@@ -194,7 +194,7 @@ func TestProbeResponsesCarryNoUpstreamText(t *testing.T) {
 			name:       "provider test",
 			rejectPath: "/models",
 			endpoint: func(logger *slog.Logger, queries probeQueries) (func(*echo.Echo), string) {
-				h := NewProvidersHandler(logger, providers.NewService(logger, queries, ""), nil)
+				h := NewProvidersHandler(logger, providers.NewService(logger, queries, ""), nil, nil)
 				return h.Register, "/providers/" + queries.provider.ID.String() + "/test"
 			},
 			wantStatus: string(providers.TestStatusAuthError),

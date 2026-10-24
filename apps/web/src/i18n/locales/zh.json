@@ -352,6 +352,9 @@
       "update_failed": "个人资料更新失败。"
     },
     "provider": {
+      "catalog_source_not_found": "此服务商没有公共模型目录，请从服务商接口导入。",
+      "catalog_unavailable": "模型目录暂不可用，请稍后重试，或选择从服务商接口导入。",
+      "managed_readonly": "此服务商由平台管理，请使用内置模型同步。",
       "name_taken": "已存在同名提供方。",
       "not_found": "这个服务商已不存在，请刷新列表后重新选择。"
     },
@@ -1963,8 +1966,6 @@
     "reasoningBudget": "推理预算范围",
     "reasoningBudgetMin": "最小 Token",
     "reasoningBudgetMax": "最大 Token",
-    "reasoningBudgetMaxMin": "预算上限必须大于 0",
-    "reasoningBudgetRange": "预算下限不能大于上限",
     "reasoningReplay": "推理回传字段",
     "reasoningReplayHint": "适用于需要在工具调用时回传先前推理内容的 Chat Completions 接口。",
     "reasoningReplayProvider": "跟随提供商",
@@ -1990,11 +1991,13 @@
     "importFailed": "导入模型失败",
     "refreshModels": "刷新模型",
     "refreshSuccess": "模型目录已刷新：新增 {created} 个，更新 {updated} 个",
-    "catalogUnavailable": "无法访问 models.dev，已改为从服务商接口导入模型",
+    "reasoningBudgetMaxMin": "预算上限必须大于 0",
+    "reasoningBudgetRange": "预算下限不能大于上限",
     "refreshFailed": "刷新模型目录失败",
     "refreshConfirmHint": "获取此账号当前可用的最新模型，并从模型选择器中移除已不可用的模型。",
     "importConfirmHint": "获取并导入该服务商当前可用的模型。",
-    "showingCount": "显示 {count} / {total}"
+    "showingCount": "显示 {count} / {total}",
+    "catalogStale": "模型目录暂时无法更新，已使用缓存的模型信息。"
   },
   "provider": {
     "add": "添加服务商",

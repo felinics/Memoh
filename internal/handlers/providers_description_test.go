@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"slices"
 	"testing"
 
@@ -326,18 +325,11 @@ func TestRefreshFromCatalogKeepsTheUsersEdits(t *testing.T) {
 	})
 }
 
-// A catalog refresh compares the stored row with what the request carried.
-// Both go through the same decoding, so a catalog entry with blank or repeated
-// values reads as the row it produced and a second refresh changes nothing.
+// Repeated imports of a normalized catalog must not produce spurious updates.
 func TestRefreshFromCatalogIsStableAcrossNormalization(t *testing.T) {
 	t.Parallel()
 
-	var req providers.ImportModelsRequest
-	raw := `{"models":[{"model_id":"m","config":{"schema_version":2,"tool_call":true,"reasoning":{"efforts":["","low","low","high"]}}}]}`
-	if err := json.Unmarshal([]byte(raw), &req); err != nil {
-		t.Fatal(err)
-	}
-	catalog := req.Models[0].Config
+	catalog := (models.ModelConfig{ToolCall: true, Reasoning: &models.ModelReasoning{Efforts: []string{"", "low", "low", "high"}}}).StoredForm("m")
 	stored, changed := refreshFromCatalog("m", models.ModelConfig{}, catalog)
 	if !changed || stored.Reasoning == nil || !slices.Equal(stored.Reasoning.Efforts, []string{"low", "high"}) {
 		t.Fatalf("first refresh = %+v changed %v", stored, changed)

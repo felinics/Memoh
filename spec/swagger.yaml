@@ -1653,6 +1653,10 @@ definitions:
     properties:
       channel_identity_id:
         type: string
+      excluded_target:
+        description: ExcludedTarget is checked after platform target resolution, before
+          publication.
+        type: string
       message:
         $ref: '#/definitions/channel.Message'
       target:
@@ -5955,6 +5959,43 @@ definitions:
       url:
         type: string
     type: object
+  modelcatalog.Info:
+    properties:
+      checked_at:
+        type: string
+      revision:
+        type: string
+      source:
+        type: string
+      stale:
+        type: boolean
+    type: object
+  modelcatalog.Model:
+    properties:
+      config:
+        $ref: '#/definitions/models.ModelConfig'
+      model_id:
+        type: string
+      name:
+        type: string
+      type:
+        $ref: '#/definitions/models.ModelType'
+    type: object
+  modelcatalog.Response:
+    properties:
+      checked_at:
+        type: string
+      models:
+        items:
+          $ref: '#/definitions/modelcatalog.Model'
+        type: array
+      revision:
+        type: string
+      source:
+        type: string
+      stale:
+        type: boolean
+    type: object
   models.AddRequest:
     properties:
       config:
@@ -6189,15 +6230,6 @@ definitions:
       type:
         $ref: '#/definitions/models.ModelType'
     type: object
-  providers.CatalogModel:
-    properties:
-      config:
-        $ref: '#/definitions/models.ModelConfig'
-      model_id:
-        type: string
-      name:
-        type: string
-    type: object
   providers.CountResponse:
     properties:
       count:
@@ -6263,19 +6295,24 @@ definitions:
       updated_at:
         type: string
     type: object
+  providers.ImportCatalogModelsRequest:
+    properties:
+      skip_model_ids:
+        items:
+          type: string
+        type: array
+    type: object
   providers.ImportModelsRequest:
     properties:
       default_compatibilities:
         items:
           type: string
         type: array
-      models:
-        items:
-          $ref: '#/definitions/providers.CatalogModel'
-        type: array
     type: object
   providers.ImportModelsResponse:
     properties:
+      catalog:
+        $ref: '#/definitions/modelcatalog.Info'
       created:
         type: integer
       models:
@@ -17159,6 +17196,49 @@ paths:
       summary: Update provider
       tags:
       - providers
+  /providers/{id}/import-catalog-models:
+    post:
+      consumes:
+      - application/json
+      description: Resolve the stored provider's models.dev source and normalize its
+        catalog on the server
+      parameters:
+      - description: Provider ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Models to preserve from a preceding manual creation
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/providers.ImportCatalogModelsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/providers.ImportModelsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Import a provider's public model catalog
+      tags:
+      - providers
   /providers/{id}/import-models:
     post:
       consumes:
@@ -17170,8 +17250,7 @@ paths:
         name: id
         required: true
         type: string
-      - description: Explicit defaults for unknown custom chat models, or the catalog
-          models to import
+      - description: Explicit defaults for unknown custom chat models
         in: body
         name: request
         schema:
@@ -17359,6 +17438,43 @@ paths:
           schema:
             $ref: '#/definitions/server.Problem'
       summary: Test provider connectivity
+      tags:
+      - providers
+  /providers/catalog/models:
+    get:
+      description: Fetch, validate and normalize models.dev metadata on the server
+        without changing stored models
+      parameters:
+      - description: models.dev provider ID
+        in: query
+        name: source
+        required: true
+        type: string
+      - description: Memoh client protocol
+        in: query
+        name: client_type
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/modelcatalog.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Preview a public provider model catalog
       tags:
       - providers
   /providers/count:

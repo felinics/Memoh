@@ -942,6 +942,10 @@ export type ChannelReplyRef = {
 
 export type ChannelSendRequest = {
     channel_identity_id?: string;
+    /**
+     * ExcludedTarget is checked after platform target resolution, before publication.
+     */
+    excluded_target?: string;
     message?: ChannelMessage;
     target?: string;
 };
@@ -3429,6 +3433,28 @@ export type McpUpsertRequest = {
     url?: string;
 };
 
+export type ModelcatalogInfo = {
+    checked_at?: string;
+    revision?: string;
+    source?: string;
+    stale?: boolean;
+};
+
+export type ModelcatalogModel = {
+    config?: ModelsModelConfig;
+    model_id?: string;
+    name?: string;
+    type?: ModelsModelType;
+};
+
+export type ModelcatalogResponse = {
+    checked_at?: string;
+    models?: Array<ModelcatalogModel>;
+    revision?: string;
+    source?: string;
+    stale?: boolean;
+};
+
 export type ModelsAddRequest = {
     config?: ModelsModelConfig;
     enable?: boolean;
@@ -3584,12 +3610,6 @@ export type ModelsUpdateRequest = {
     type?: ModelsModelType;
 };
 
-export type ProvidersCatalogModel = {
-    config?: ModelsModelConfig;
-    model_id?: string;
-    name?: string;
-};
-
 export type ProvidersCountResponse = {
     count?: number;
 };
@@ -3635,12 +3655,16 @@ export type ProvidersGetResponse = {
     updated_at?: string;
 };
 
+export type ProvidersImportCatalogModelsRequest = {
+    skip_model_ids?: Array<string>;
+};
+
 export type ProvidersImportModelsRequest = {
     default_compatibilities?: Array<string>;
-    models?: Array<ProvidersCatalogModel>;
 };
 
 export type ProvidersImportModelsResponse = {
+    catalog?: ModelcatalogInfo;
     created?: number;
     models?: Array<string>;
     skipped?: number;
@@ -15607,6 +15631,48 @@ export type PostProvidersResponses = {
 
 export type PostProvidersResponse = PostProvidersResponses[keyof PostProvidersResponses];
 
+export type GetProvidersCatalogModelsData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * models.dev provider ID
+         */
+        source: string;
+        /**
+         * Memoh client protocol
+         */
+        client_type: string;
+    };
+    url: '/providers/catalog/models';
+};
+
+export type GetProvidersCatalogModelsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ServerProblem;
+};
+
+export type GetProvidersCatalogModelsError = GetProvidersCatalogModelsErrors[keyof GetProvidersCatalogModelsErrors];
+
+export type GetProvidersCatalogModelsResponses = {
+    /**
+     * OK
+     */
+    200: ModelcatalogResponse;
+};
+
+export type GetProvidersCatalogModelsResponse = GetProvidersCatalogModelsResponses[keyof GetProvidersCatalogModelsResponses];
+
 export type GetProvidersCountData = {
     body?: never;
     path?: never;
@@ -15859,9 +15925,54 @@ export type PutProvidersByIdResponses = {
 
 export type PutProvidersByIdResponse = PutProvidersByIdResponses[keyof PutProvidersByIdResponses];
 
+export type PostProvidersByIdImportCatalogModelsData = {
+    /**
+     * Models to preserve from a preceding manual creation
+     */
+    body?: ProvidersImportCatalogModelsRequest;
+    path: {
+        /**
+         * Provider ID (UUID)
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/providers/{id}/import-catalog-models';
+};
+
+export type PostProvidersByIdImportCatalogModelsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ServerProblem;
+};
+
+export type PostProvidersByIdImportCatalogModelsError = PostProvidersByIdImportCatalogModelsErrors[keyof PostProvidersByIdImportCatalogModelsErrors];
+
+export type PostProvidersByIdImportCatalogModelsResponses = {
+    /**
+     * OK
+     */
+    200: ProvidersImportModelsResponse;
+};
+
+export type PostProvidersByIdImportCatalogModelsResponse = PostProvidersByIdImportCatalogModelsResponses[keyof PostProvidersByIdImportCatalogModelsResponses];
+
 export type PostProvidersByIdImportModelsData = {
     /**
-     * Explicit defaults for unknown custom chat models, or the catalog models to import
+     * Explicit defaults for unknown custom chat models
      */
     body?: ProvidersImportModelsRequest;
     path: {

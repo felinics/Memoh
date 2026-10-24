@@ -1,86 +1,66 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  postProvidersByIdImportModels: vi.fn(),
-  fetchModelsDevCatalog: vi.fn(),
-  toastWarning: vi.fn(),
+  post: vi.fn(),
+  catalogPost: vi.fn(),
+  invalidate: vi.fn(),
+  warning: vi.fn(),
 }))
-
 vi.mock('@pinia/colada', () => ({
-  defineQueryOptions: (options: unknown) => options,
-  useQuery: vi.fn(),
-  useQueryCache: () => ({
-    invalidateQueries: vi.fn(),
-    ensure: (options: { query: (context: { signal: AbortSignal }) => Promise<unknown> }) => options,
-    // Pinia Colada hands every query its abort signal.
-    refresh: async (entry: { query: (context: { signal: AbortSignal }) => Promise<unknown> }) => {
-      try {
-        return { status: 'success', data: await entry.query({ signal: new AbortController().signal }) }
-      } catch (error) {
-        return { status: 'error', error }
-      }
-    },
-  }),
+  useQueryCache: () => ({ invalidateQueries: mocks.invalidate }),
 }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
-vi.mock('@felinic/ui', () => ({ toast: { warning: mocks.toastWarning } }))
-vi.mock('@memohai/sdk', () => ({ postProvidersByIdImportModels: mocks.postProvidersByIdImportModels }))
-vi.mock('@/lib/models-dev', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/models-dev')>()),
-  fetchModelsDevCatalog: mocks.fetchModelsDevCatalog,
-}))
+vi.mock('@felinic/ui', () => ({ toast: { warning: mocks.warning } }))
+vi.mock('@memohai/sdk', () => ({ postProvidersByIdImportModels: mocks.post, postProvidersByIdImportCatalogModels: mocks.catalogPost }))
 
 import { useProviderModelCatalog } from './useProviderModelCatalog'
 
-function importBody(call = 0) {
-  return mocks.postProvidersByIdImportModels.mock.calls[call]![0].body
-}
-
-describe('importProviderModels', () => {
+describe('server catalog imports', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.postProvidersByIdImportModels.mockResolvedValue({ data: { created: 1 } })
-    mocks.fetchModelsDevCatalog.mockResolvedValue({
-      deepinfra: { id: 'deepinfra', models: { 'm-1': { id: 'm-1', name: 'Model One', tool_call: true } } },
+    mocks.post.mockResolvedValue({ data: { created: 1, updated: 0, skipped: 0 } })
+    mocks.catalogPost.mockResolvedValue({ data: { created: 1, updated: 0, skipped: 0 } })
+  })
+
+  it('asks the server to resolve the source, without sending client-derived models', async () => {
+    await useProviderModelCatalog().importProviderModels({
+      id: 'p', client_type: 'openai-completions', metadata: { source: 'deepinfra' },
+    }, { skipModelIds: ['manually-added'] })
+    expect(mocks.catalogPost).toHaveBeenCalledWith({
+      path: { id: 'p' },
+      body: { skip_model_ids: ['manually-added'] },
+      throwOnError: true,
     })
+    expect(mocks.invalidate).toHaveBeenCalledWith({ key: ['provider-models'] })
   })
 
-  it('imports the catalog of a provider with a source', async () => {
-    const { importProviderModels } = useProviderModelCatalog()
-    await importProviderModels({ id: 'p', client_type: 'openai-completions', metadata: { source: 'deepinfra' } })
-    expect(importBody().models).toHaveLength(1)
-    expect(importBody().models[0]).toMatchObject({ model_id: 'm-1', name: 'Model One', type: 'chat', config: { tool_call: true } })
+  it('retains explicit endpoint imports without guessing capabilities for a catalog provider', async () => {
+    await useProviderModelCatalog().importProviderModels({
+      id: 'p', client_type: 'openai-completions', metadata: { source: 'deepinfra' },
+    }, { fromEndpoint: true })
+    expect(mocks.post.mock.calls[0]![0].body).toBeUndefined()
   })
 
-  // The protocol's capability guesses are for a provider nothing describes; a
-  // provider with a source has a catalog, and the models it does not list are
-  // unknown rather than assumed.
-  it('lists the endpoint without capability guesses when asked for a provider with a source', async () => {
-    const { importProviderModels } = useProviderModelCatalog()
-    await importProviderModels({ id: 'p', client_type: 'openai-completions', metadata: { source: 'deepinfra' } }, { fromEndpoint: true })
-    expect(importBody()).toBeUndefined()
-    expect(mocks.fetchModelsDevCatalog).not.toHaveBeenCalled()
+  it('retains endpoint defaults for providers without a public source', async () => {
+    await useProviderModelCatalog().importProviderModels({
+      id: 'p', client_type: 'openai-completions', metadata: {},
+    })
+    expect(mocks.post.mock.calls[0]![0].body).toEqual({ default_compatibilities: ['tool-call', 'reasoning'] })
   })
 
-  it('lists the endpoint with the protocol defaults when there is no source', async () => {
-    const { importProviderModels } = useProviderModelCatalog()
-    await importProviderModels({ id: 'q', client_type: 'openai-completions', metadata: {} })
-    expect(importBody()).toEqual({ default_compatibilities: ['tool-call', 'reasoning'] })
-    expect(mocks.fetchModelsDevCatalog).not.toHaveBeenCalled()
+  it('does not turn a failed catalog import into a different endpoint import', async () => {
+    const error = { code: 'provider.catalog_unavailable' }
+    mocks.catalogPost.mockRejectedValue(error)
+    await expect(useProviderModelCatalog().importProviderModels({
+      id: 'p', metadata: { source: 'deepseek' },
+    })).rejects.toBe(error)
+    expect(mocks.catalogPost).toHaveBeenCalledTimes(1)
+    expect(mocks.post).not.toHaveBeenCalled()
   })
 
-  it('falls back to the endpoint without capability guesses when the catalog has no models for the source', async () => {
-    const { importProviderModels } = useProviderModelCatalog()
-    await importProviderModels({ id: 'p', client_type: 'openai-completions', metadata: { source: 'nobody' } })
-    expect(importBody()).toBeUndefined()
-    expect(mocks.toastWarning).not.toHaveBeenCalled()
-  })
-
-  it('falls back to the endpoint and says so when models.dev cannot be reached', async () => {
-    mocks.fetchModelsDevCatalog.mockRejectedValue(new Error('network'))
-    const { importProviderModels } = useProviderModelCatalog()
-    await importProviderModels({ id: 'p', client_type: 'openai-completions', metadata: { source: 'deepinfra' } })
-    expect(importBody()).toBeUndefined()
-    expect(mocks.toastWarning).toHaveBeenCalledWith('models.catalogUnavailable')
+  it('discloses use of stale server metadata', async () => {
+    mocks.catalogPost.mockResolvedValue({ data: { created: 0, catalog: { stale: true } } })
+    await useProviderModelCatalog().importProviderModels({ id: 'p', metadata: { source: 'deepseek' } })
+    expect(mocks.warning).toHaveBeenCalledWith('models.catalogStale')
   })
 })

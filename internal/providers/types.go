@@ -1,9 +1,9 @@
 package providers
 
 import (
-	"encoding/json"
 	"time"
 
+	"github.com/felinics/memoh/internal/modelcatalog"
 	"github.com/felinics/memoh/internal/models"
 )
 
@@ -149,72 +149,25 @@ type RemoteModel struct {
 	CapabilitiesKnown   bool   `json:"-"`
 }
 
-// ImportModelsRequest carries caller-supplied capability defaults for chat
-// models whose provider cannot describe them. Templates and trusted discovery
-// remain authoritative.
-//
-// Models, when set, is the model list to import instead of the provider's
-// /models endpoint: the catalog of the provider's models.dev source, already
-// turned into model configs by the client.
+// ImportModelsRequest carries explicit defaults for unknown chat models listed
+// by the provider endpoint.
 type ImportModelsRequest struct {
-	DefaultCompatibilities []string       `json:"default_compatibilities,omitempty"`
-	Models                 []CatalogModel `json:"models,omitempty"`
+	DefaultCompatibilities []string `json:"default_compatibilities,omitempty"`
 }
 
-// CatalogModel is one chat model of a provider's catalog.
-type CatalogModel struct {
-	ModelID string             `json:"model_id"`
-	Name    string             `json:"name,omitempty"`
-	Config  models.ModelConfig `json:"config"`
-	// rawConfig is the config as sent; see ConfigFor.
-	rawConfig json.RawMessage
-}
-
-// UnmarshalJSON reads config in any schema version, as a single model's
-// AddRequest does; see models.DecodeRequestModelConfig. A version 1 shape sent
-// by an older client upgrades instead of losing its capabilities, and the
-// result is normalized so a refresh compares it with the stored row like for
-// like.
-func (m *CatalogModel) UnmarshalJSON(data []byte) error {
-	type plain CatalogModel
-	var body struct {
-		plain
-		Config json.RawMessage `json:"config"`
-	}
-	if err := json.Unmarshal(data, &body); err != nil {
-		return err
-	}
-	*m = CatalogModel(body.plain)
-	if len(body.Config) == 0 || string(body.Config) == "null" {
-		m.Config = models.ModelConfig{}
-		return nil
-	}
-	config, err := models.DecodeRequestModelConfig(body.Config, models.ConfigContext{ModelID: m.ModelID, Type: models.ModelTypeChat})
-	if err != nil {
-		return err
-	}
-	m.Config = config
-	m.rawConfig = body.Config
-	return nil
-}
-
-// ConfigFor returns the model's config, read again with the provider's client
-// type when the version 1 upgrade it went through depends on the protocol; the
-// request decode could not see the provider. See
-// models.RequestConfigNeedsClientType.
-func (m CatalogModel) ConfigFor(clientType string) (models.ModelConfig, error) {
-	if len(m.rawConfig) == 0 || clientType == "" || !models.RequestConfigNeedsClientType(m.rawConfig, m.ModelID) {
-		return m.Config, nil
-	}
-	return models.DecodeRequestModelConfig(m.rawConfig, models.ConfigContext{ModelID: m.ModelID, Type: models.ModelTypeChat, ClientType: clientType})
+// ImportCatalogModelsRequest selects the stored provider's server-side public
+// catalog. A distinct endpoint prevents older servers treating it as discovery.
+type ImportCatalogModelsRequest struct {
+	SkipModelIDs []string `json:"skip_model_ids,omitempty"`
 }
 
 // ImportModelsResponse represents the response for importing models.
 type ImportModelsResponse struct {
-	Created int      `json:"created"`
-	Updated int      `json:"updated"`
-	Skipped int      `json:"skipped"`
-	Models  []string `json:"models"`
+	Catalog *modelcatalog.Info `json:"catalog,omitempty"`
+	Created int                `json:"created"`
+	Updated int                `json:"updated"`
+	Skipped int                `json:"skipped"`
+	Models  []string           `json:"models"`
 }
 
 // IsManagedModelCatalogClientType reports whether model rows are reconciled

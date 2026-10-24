@@ -1,0 +1,551 @@
+{
+  "anthropic": {
+    "protocol": "anthropic-messages",
+    "models": [
+      {
+        "model_id": "claude-fable-5",
+        "name": "Claude Fable 5",
+        "type": "chat",
+        "config": {
+          "schema_version": 2,
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "description": "Claude model for creative writing, analysis, and controlled agent workflows",
+          "tool_call": true,
+          "structured_output": true,
+          "context_window": 1000000,
+          "max_output_tokens": 128000,
+          "reasoning": {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "dialect": "adaptive"
+          }
+        }
+      },
+      {
+        "model_id": "claude-haiku-4-5",
+        "name": "Claude Haiku 4.5 (latest)",
+        "type": "chat",
+        "config": {
+          "schema_version": 2,
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "description": "Fast Claude lane for lightweight agents, office tasks, and responsive chat",
+          "tool_call": true,
+          "structured_output": true,
+          "context_window": 200000,
+          "max_output_tokens": 64000,
+          "reasoning": {
+            "budget": {
+              "min": 1024
+            },
+            "dialect": "budget",
+            "off": "accepted"
+          }
+        }
+      },
+      {
+        "model_id": "claude-opus-4-5-20251101",
+        "name": "Claude Opus 4.5",
+        "type": "chat",
+        "config": {
+          "schema_version": 2,
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "description": "Flagship Claude model for deep reasoning, coding, and long-horizon agents",
+          "tool_call": true,
+          "structured_output": true,
+          "context_window": 200000,
+          "max_output_tokens": 64000,
+          "reasoning": {
+            "efforts": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "budget": {
+              "min": 1024
+            },
+            "dialect": "budget",
+            "off": "accepted"
+          }
+        }
+      },
+      {
+        "model_id": "claude-opus-4-6",
+        "name": "Claude Opus 4.6",
+        "type": "chat",
+        "config": {
+          "schema_version": 2,
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "description": "High-end Claude for difficult coding, planning, and slower expert reasoning",
+          "tool_call": true,
+          "structured_output": true,
+          "context_window": 1000000,
+          "max_output_tokens": 128000,
+          "reasoning": {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "max"
+            ],
+            "budget": {
+              "min": 1024
+            },
+            "dialect": "adaptive",
+            "off": "accepted"
+          }
+        }
+      },
+      {
+        "model_id": "claude-opus-4-7",
+        "name": "Claude Opus 4.7",
+        "type": "chat",
+        "config": {
+          "schema_version": 2,
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "description": "Stronger Opus tier for advanced software work and high-stakes reasoning",
+          "tool_call": true,
+          "structured_output": true,
+          "context_window": 1000000,
+          "max_output_tokens": 128000,
+          "reasoning": {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "dialect": "adaptive",
+            "off": "accepted"
+          }
+        }
+      },
+      {
+        "model_id": "claude-sonnet-5",
+        "name": "Claude Sonnet 5",
+        "type": "chat",
+        "config": {
+          "schema_version": 2,
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "description": "Everyday Claude agent model for coding, planning, browsing, and general work",
+          "tool_call": true,
+          "structured_output": true,
+          "context_window": 1000000,
+          "max_output_tokens": 128000,
+          "reasoning": {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "dialect": "adaptive",
+            "toggle": true,
+            "off": "accepted"
+          }
+        }
+      }
+    ]
+  },
+  "google": {
+    "protocol": "google-generative-ai",
+    "models": [
+      {
+        "model_id": "gemini-2.5-flash",
+        "name": "Gemini 2.5 Flash",
+        "type": "chat",
+        "config": {
+          "schema_version": 2,
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "audio",
+              "video",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "description": "Fast Gemini workhorse for multimodal apps where latency and price matter",
+          "tool_call": true,
+          "structured_output": true,
+          "context_window": 1048576,
+          "max_output_tokens": 65536,
+          "reasoning": {
+            "budget": {
+              "min": 0,
+              "max": 24576
+            },
+            "dialect": "budget",
+            "toggle": true,
+            "off": "accepted"
+          }
+        }
+      },
+      {
+        "model_id": "gemini-2.5-pro",
+        "name": "Gemini 2.5 Pro",
+        "type": "chat",
+        "config": {
+          "schema_version": 2,
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "audio",
+              "video",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "description": "Google's proven reasoning model for coding, math, and multimodal analysis",
+          "tool_call": true,
+          "structured_output": true,
+          "context_window": 1048576,
+          "max_output_tokens": 65536,
+          "reasoning": {
+            "budget": {
+              "min": 128,
+              "max": 32768
+            },
+            "dialect": "budget",
+            "off": "rejected"
+          }
+        }
+      },
+      {
+        "model_id": "gemini-3-flash-preview",
+        "name": "Gemini 3 Flash Preview",
+        "type": "chat",
+        "config": {
+          "schema_version": 2,
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "description": "New Gemini flash lane bringing frontier-style multimodal reasoning to cheaper runs",
+          "tool_call": true,
+          "structured_output": true,
+          "context_window": 1048576,
+          "max_output_tokens": 65536,
+          "reasoning": {
+            "efforts": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ],
+            "dialect": "tier",
+            "off": "rejected"
+          }
+        }
+      }
+    ]
+  },
+  "openai": {
+    "protocol": "openai-responses",
+    "models": [
+      {
+        "model_id": "gpt-5",
+        "name": "GPT-5",
+        "type": "chat",
+        "config": {
+          "schema_version": 2,
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "description": "Original GPT-5 workhorse for reasoning, coding, writing, and tool workflows",
+          "tool_call": true,
+          "structured_output": true,
+          "context_window": 400000,
+          "max_output_tokens": 128000,
+          "reasoning": {
+            "efforts": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ],
+            "dialect": "tier"
+          }
+        }
+      },
+      {
+        "model_id": "gpt-5.1",
+        "name": "GPT-5.1",
+        "type": "chat",
+        "config": {
+          "schema_version": 2,
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "description": "Sharper GPT-5 generation for coding, product work, and tool-assisted tasks",
+          "tool_call": true,
+          "structured_output": true,
+          "context_window": 400000,
+          "max_output_tokens": 128000,
+          "reasoning": {
+            "efforts": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "dialect": "tier",
+            "toggle": true
+          }
+        }
+      }
+    ]
+  },
+  "deepseek": {
+    "protocol": "openai-completions",
+    "models": [
+      {
+        "model_id": "deepseek-v4-pro",
+        "name": "DeepSeek V4 Pro",
+        "type": "chat",
+        "config": {
+          "schema_version": 2,
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "description": "DeepSeek V4 Pro snapshot with million-token context and support for thinking and non-thinking modes",
+          "tool_call": true,
+          "structured_output": true,
+          "context_window": 1000000,
+          "max_output_tokens": 393216,
+          "reasoning": {
+            "efforts": [
+              "low",
+              "high",
+              "max"
+            ],
+            "dialect": "tier",
+            "toggle": true,
+            "off": "accepted",
+            "replay": {
+              "field": "reasoning_content",
+              "required": true
+            }
+          }
+        }
+      }
+    ]
+  },
+  "moonshotai-cn": {
+    "protocol": "openai-completions",
+    "models": [
+      {
+        "model_id": "kimi-k2.6",
+        "name": "Kimi K2.6",
+        "type": "chat",
+        "config": {
+          "schema_version": 2,
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "video"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "description": "Multimodal Kimi workhorse for agent loops, coding tasks, and visual context",
+          "tool_call": true,
+          "structured_output": true,
+          "context_window": 262144,
+          "max_output_tokens": 262144,
+          "reasoning": {
+            "dialect": "toggle",
+            "toggle": true,
+            "off": "accepted",
+            "replay": {
+              "field": "reasoning_content",
+              "required": true
+            }
+          }
+        }
+      }
+    ]
+  },
+  "minimax": {
+    "protocol": "openai-completions",
+    "models": [
+      {
+        "model_id": "MiniMax-M2.7",
+        "type": "chat",
+        "config": {
+          "schema_version": 2,
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "description": "Open MiniMax flagship for coding agents, office automation, and complex environments",
+          "tool_call": true,
+          "context_window": 204800,
+          "max_output_tokens": 131072,
+          "reasoning": {}
+        }
+      }
+    ]
+  },
+  "opencode-go": {
+    "protocol": "opencode-go",
+    "models": [
+      {
+        "model_id": "grok-4.7",
+        "name": "Grok 4.7",
+        "type": "chat",
+        "config": {
+          "schema_version": 2,
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "description": "xAI's frontier model for long-running agents, coding, knowledge work, and visual projects",
+          "tool_call": true,
+          "structured_output": true,
+          "context_window": 500000,
+          "max_output_tokens": 500000,
+          "reasoning": {
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh"
+            ],
+            "dialect": "tier"
+          }
+        }
+      },
+      {
+        "model_id": "mimo-v2.5",
+        "name": "MiMo V2.5",
+        "type": "chat",
+        "config": {
+          "schema_version": 2,
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+              "audio",
+              "video"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "description": "MiMo omni model for text, image, video, audio, and agents",
+          "tool_call": true,
+          "context_window": 1000000,
+          "max_output_tokens": 128000,
+          "reasoning": {
+            "replay": {
+              "field": "reasoning_content"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

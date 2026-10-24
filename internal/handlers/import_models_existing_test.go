@@ -12,9 +12,9 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/modelcatalog"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/providers"
 )
@@ -69,7 +69,7 @@ func TestImportModelsRefreshesAnExistingEmbeddingModelWithoutProbing(t *testing.
 		},
 	}
 	logger := slog.New(slog.DiscardHandler)
-	h := NewProvidersHandler(logger, providers.NewService(nil, q, ""), models.NewService(logger, q))
+	h := NewProvidersHandler(logger, providers.NewService(nil, q, ""), models.NewService(logger, q), nil)
 	status, _, body := serveHandlerProblem(t, h.Register, "/providers/00000000-0000-0000-0000-000000000001/import-models")
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, body %s", status, body)
@@ -131,21 +131,11 @@ func TestImportCatalogModelsRefreshesKnownModelsAndOmitsIDNames(t *testing.T) {
 		},
 	}
 	logger := slog.New(slog.DiscardHandler)
-	h := NewProvidersHandler(logger, providers.NewService(nil, q, ""), models.NewService(logger, q))
-	e := echo.New()
-	h.Register(e)
-	body := `{"models":[{"model_id":"known","config":{"schema_version":2,"tool_call":true}},{"model_id":"fresh","name":"fresh","config":{"schema_version":2}}]}`
-	req := httptest.NewRequest(http.MethodPost, "/providers/00000000-0000-0000-0000-000000000001/import-models", strings.NewReader(body))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
-	}
-	var resp providers.ImportModelsResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
+	h := NewProvidersHandler(logger, providers.NewService(nil, q, ""), models.NewService(logger, q), nil)
+	resp := h.importCatalogModels(context.Background(), providers.GetResponse{ID: providerID.String(), ClientType: string(models.ClientTypeOpenAICompletions)}, []modelcatalog.Model{
+		{ModelID: "known", Config: models.ModelConfig{ToolCall: true}},
+		{ModelID: "fresh", Config: models.ModelConfig{}},
+	})
 	if resp.Created != 1 || resp.Updated != 1 {
 		t.Fatalf("response = %+v, want one created and one refreshed", resp)
 	}

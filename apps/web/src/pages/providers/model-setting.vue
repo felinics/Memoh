@@ -105,7 +105,6 @@ import { isManagedModelCatalogClientType } from '@/constants/client-types'
 import { isMonochromeLogo, providerLogo, providerSource } from '@/constants/model-sources'
 import { useModelsDevCatalog } from '@/composables/useModelsDevCatalog'
 import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
-import { catalogModelsFor } from '@/lib/models-dev'
 
 // ---- Model 编辑状态（provide 给 CreateModel） ----
 const openModel = reactive<{
@@ -377,9 +376,13 @@ const { data: modelDataList } = useQuery({
 // A draft from a models.dev source previews the source's models, read-only;
 // creating the provider imports them.
 const isSourcePreview = computed(() => !curProviderId.value && !!providerSource(curProvider.value))
-const { data: catalog, isLoading: catalogLoading, error: catalogError } = useModelsDevCatalog(() => isSourcePreview.value)
+const { data: catalog, isLoading: catalogLoading, error: catalogError } = useModelsDevCatalog(
+  () => providerSource(curProvider.value),
+  () => curProvider.value?.client_type ?? '',
+  () => isSourcePreview.value,
+)
 const previewModels = computed<ModelsGetResponse[]>(() =>
-  catalogModelsFor(catalog.value, providerSource(curProvider.value), curProvider.value?.client_type ?? '')
+  (catalog.value?.models ?? [])
     .map(model => ({
       model_id: model.model_id,
       name: model.name,

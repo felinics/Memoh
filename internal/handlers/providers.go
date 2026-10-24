@@ -19,6 +19,7 @@ import (
 	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/httpx"
+	"github.com/felinics/memoh/internal/modelcatalog"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
@@ -28,13 +29,15 @@ import (
 type ProvidersHandler struct {
 	service       *providers.Service
 	modelsService *models.Service
+	catalog       *modelcatalog.Service
 	logger        *slog.Logger
 }
 
-func NewProvidersHandler(log *slog.Logger, service *providers.Service, modelsService *models.Service) *ProvidersHandler {
+func NewProvidersHandler(log *slog.Logger, service *providers.Service, modelsService *models.Service, catalog *modelcatalog.Service) *ProvidersHandler {
 	return &ProvidersHandler{
 		service:       service,
 		modelsService: modelsService,
+		catalog:       catalog,
 		logger:        log.With(slog.String("handler", "providers")),
 	}
 }
@@ -44,6 +47,7 @@ func (h *ProvidersHandler) Register(e *echo.Echo) {
 	group.POST("", h.Create)
 	group.POST("/from-template", h.CreateFromTemplate)
 	group.GET("", h.List)
+	group.GET("/catalog/models", h.CatalogModels)
 	group.GET("/:id", h.Get)
 	group.GET("/:id/models", h.ListModelsByProvider)
 	group.GET("/name/:name", h.GetByName)
@@ -52,6 +56,7 @@ func (h *ProvidersHandler) Register(e *echo.Echo) {
 	group.GET("/count", h.Count)
 	group.POST("/:id/test", h.Test)
 	group.POST("/:id/import-models", h.ImportModels)
+	group.POST("/:id/import-catalog-models", h.ImportCatalogModels)
 }
 
 // CreateFromTemplate godoc
@@ -353,7 +358,7 @@ func (h *ProvidersHandler) Test(c echo.Context) error {
 // @Accept json
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
-// @Param request body providers.ImportModelsRequest false "Explicit defaults for unknown custom chat models, or the catalog models to import"
+// @Param request body providers.ImportModelsRequest false "Explicit defaults for unknown custom chat models"
 // @Success 200 {object} providers.ImportModelsResponse
 // @Failure 400 {object} server.Problem
 // @Failure 404 {object} server.Problem
@@ -384,8 +389,8 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	if !models.IsLLMClientType(models.ClientType(provider.ClientType)) {
 		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("import models is not supported for speech providers"))
 	}
-	if len(req.Models) > 0 {
-		return c.JSON(http.StatusOK, h.importCatalogModels(ctx, provider, req.Models))
+	if providers.PublicCatalogManaged(provider.Metadata) {
+		return apperror.New(apperror.CodeProviderManagedReadonly, nil)
 	}
 
 	remoteModels, err := h.service.FetchRemoteModels(ctx, id)
@@ -483,11 +488,13 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 // importCatalogModels creates the catalog models a provider lacks, disabled,
 // and refreshes what the catalog describes on the ones it already has. The
 // user's choices stay: whether a model is enabled, its name and description.
-func (h *ProvidersHandler) importCatalogModels(ctx context.Context, provider providers.GetResponse, catalog []providers.CatalogModel) providers.ImportModelsResponse {
+func (h *ProvidersHandler) importCatalogModels(ctx context.Context, provider providers.GetResponse, catalog []modelcatalog.Model) providers.ImportModelsResponse {
 	providerID := provider.ID
 	resp := providers.ImportModelsResponse{Models: make([]string, 0)}
-	// A model the provider already has goes straight to the refresh, so it is
-	// refreshed even when its catalog config would not pass Create's checks.
+	if len(catalog) == 0 {
+		return resp
+	}
+	// Entries have already been normalized and validated by the catalog service.
 	rows, _ := h.providerModels(ctx, providerID)
 	existing := make(map[string]models.GetResponse, len(rows))
 	for _, row := range rows {
@@ -495,17 +502,7 @@ func (h *ProvidersHandler) importCatalogModels(ctx context.Context, provider pro
 	}
 	disabled := false
 	for _, m := range catalog {
-		modelID := strings.TrimSpace(m.ModelID)
-		if modelID == "" {
-			resp.Skipped++
-			continue
-		}
-		config, err := m.ConfigFor(provider.ClientType)
-		if err != nil {
-			h.logger.WarnContext(ctx, "failed to read catalog model config", slog.String("model_id", modelID), slog.Any("error", err))
-			resp.Skipped++
-			continue
-		}
+		modelID, config := m.ModelID, m.Config
 		if row, ok := existing[modelID]; ok {
 			if h.refreshCatalogModel(ctx, providerID, modelID, &row, config) {
 				resp.Updated++
@@ -514,15 +511,9 @@ func (h *ProvidersHandler) importCatalogModels(ctx context.Context, provider pro
 			}
 			continue
 		}
-		// A name that only repeats the id is not stored, as a hand-added
-		// model's is not.
-		name := strings.TrimSpace(m.Name)
-		if name == modelID {
-			name = ""
-		}
-		_, err = h.modelsService.Create(ctx, models.AddRequest{
+		_, err := h.modelsService.Create(ctx, models.AddRequest{
 			ModelID:    modelID,
-			Name:       name,
+			Name:       m.Name,
 			ProviderID: providerID,
 			Type:       models.ModelTypeChat,
 			Enable:     &disabled,

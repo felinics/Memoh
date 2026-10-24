@@ -6,7 +6,6 @@ import type { ProviderPreset } from '@/constants/provider-presets'
 const mocks = vi.hoisted(() => ({
   deleteModel: vi.fn(),
   getProviderModels: vi.fn(),
-  fetchModelsDevCatalog: vi.fn(),
   getProviderByName: vi.fn(),
   importModels: vi.fn(),
   postProvider: vi.fn(),
@@ -56,14 +55,10 @@ vi.mock('@memohai/sdk', () => ({
   getProvidersNameByName: mocks.getProviderByName,
   postProviders: mocks.postProvider,
   postProvidersByIdImportModels: mocks.importModels,
+  postProvidersByIdImportCatalogModels: mocks.importModels,
   postProvidersByIdTest: mocks.testProvider,
   putModelsById: mocks.putModelsById,
   putProvidersById: mocks.updateProvider,
-}))
-
-vi.mock('@/lib/models-dev', async importOriginal => ({
-  ...(await importOriginal<typeof import('@/lib/models-dev')>()),
-  fetchModelsDevCatalog: mocks.fetchModelsDevCatalog,
 }))
 
 import { useProviderSetup } from './useProviderSetup'
@@ -95,9 +90,6 @@ describe('useProviderSetup', () => {
     vi.clearAllMocks()
     mocks.testProvider.mockResolvedValue({ data: { status: 'ok' } })
     mocks.importModels.mockResolvedValue({ data: { created: 2 } })
-    mocks.fetchModelsDevCatalog.mockResolvedValue({
-      deepseek: { id: 'deepseek', models: { 'deepseek-v4-pro': { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', tool_call: true } } },
-    })
     mocks.getProviderModels.mockResolvedValue({
       data: [
         { id: 'pro-id', model_id: 'deepseek-v4-pro', provider_id: 'provider-id', type: 'chat', enable: false },
@@ -125,7 +117,7 @@ describe('useProviderSetup', () => {
     })
     const importCall = mocks.importModels.mock.calls[0]![0]
     expect(importCall.path).toEqual({ id: 'provider-id' })
-    expect(importCall.body.models.map((model: { model_id: string }) => model.model_id)).toEqual(['deepseek-v4-pro'])
+    expect(importCall.body).toEqual({ skip_model_ids: undefined })
     expect(ready).toHaveBeenCalledWith({ providerId: 'provider-id' })
     expect(mocks.putModelsById).not.toHaveBeenCalled()
     app.unmount()

@@ -67,6 +67,9 @@ const (
 	CodeProviderTemplateDomainMismatch           Code = "provider_template.domain_mismatch"
 	CodeProviderTemplateOperationFailed          Code = "provider_template.operation_failed"
 	CodeProviderNameTaken                        Code = "provider.name_taken"
+	CodeProviderCatalogUnavailable               Code = "provider.catalog_unavailable"
+	CodeProviderCatalogSourceNotFound            Code = "provider.catalog_source_not_found"
+	CodeProviderManagedReadonly                  Code = "provider.managed_readonly"
 	CodeProviderTemplateRequestInvalid           Code = "provider_template.request_invalid"
 	CodeSearchProviderTypeConflict               Code = "search_provider.type_conflict"
 	CodeSearchProviderInvalidProvider            Code = "search_provider.invalid_provider"
@@ -699,6 +702,9 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusConflict,
 		Detail:     "This provider name is already taken.",
 	},
+	CodeProviderCatalogUnavailable:    {HTTPStatus: http.StatusServiceUnavailable, Detail: "The model catalog is unavailable. Try again later or import from the provider endpoint."},
+	CodeProviderCatalogSourceNotFound: {HTTPStatus: http.StatusNotFound, Detail: "This provider has no public model catalog. Import from its endpoint instead."},
+	CodeProviderManagedReadonly:       {HTTPStatus: http.StatusForbidden, Detail: "This provider is managed by the platform. Use its managed catalog sync."},
 	CodeProviderTemplateRequestInvalid: {
 		HTTPStatus: http.StatusBadRequest,
 		Detail:     "The provider template request is invalid.",

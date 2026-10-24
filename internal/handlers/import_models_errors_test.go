@@ -31,7 +31,7 @@ func TestImportModelsClassifiesGetFailures(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			q := testHandlerQueries{providerErr: tc.err}
-			h := NewProvidersHandler(slog.New(slog.DiscardHandler), providers.NewService(nil, q, ""), nil)
+			h := NewProvidersHandler(slog.New(slog.DiscardHandler), providers.NewService(nil, q, ""), nil, nil)
 			status, _, body := serveHandlerProblem(t, h.Register, "/providers/"+tc.id+"/import-models")
 			if status != tc.status {
 				t.Fatalf("status = %d, want %d (body %s)", status, tc.status, body)
@@ -53,7 +53,7 @@ func TestImportModelsTranslatesUpstreamRejection(t *testing.T) {
 		ID: pgtype.UUID{Bytes: [16]byte{1}, Valid: true}, ClientType: string(models.ClientTypeOpenAICompletions),
 		Config: []byte(`{"api_key":"sk-test","base_url":"` + upstream.URL + `"}`),
 	}}
-	h := NewProvidersHandler(slog.New(slog.DiscardHandler), providers.NewService(nil, q, ""), nil)
+	h := NewProvidersHandler(slog.New(slog.DiscardHandler), providers.NewService(nil, q, ""), nil, nil)
 	status, problem, body := serveHandlerProblem(t, h.Register, "/providers/00000000-0000-0000-0000-000000000001/import-models")
 	if status != http.StatusBadGateway || problem.Code != string(apperror.CodeAgentProviderRequestRejected) || problem.Fault != "dependency" {
 		t.Fatalf("answer = %d %+v body=%s, want provider request rejected dependency", status, problem, body)
