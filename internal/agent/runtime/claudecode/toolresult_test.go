@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 func TestToolResultTranslationPreservesDisplayContent(t *testing.T) {
@@ -54,7 +55,11 @@ func TestResultEventsKeepCallIdentityAndSeparateBatchedOutputs(t *testing.T) {
 func TestFailedToolKeepsDiagnostic(t *testing.T) {
 	result, failed := translateToolResult("exec", nil, json.RawMessage(`"Exit code 3: diagnostic"`), nil, true)
 	raw, err := json.Marshal(result)
-	if err != nil || !failed || string(raw) != `{"content":[{"text":"Exit code 3: diagnostic","type":"text"}],"isError":true}` {
+	if err != nil || !failed || string(raw) != `{"content":[{"text":"Exit code 3: diagnostic","type":"text"}],"error":"Exit code 3: diagnostic","isError":true}` {
 		t.Fatalf("result = %s, failed = %v, err = %v", raw, failed, err)
+	}
+	presentation := channel.BuildToolCallEnd(&channel.StreamToolCall{Name: "exec", Result: result})
+	if presentation.Status != channel.ToolCallStatusFailed || presentation.Footer != "error: Exit code 3: diagnostic" {
+		t.Fatalf("IM lost failure diagnostic: %+v", presentation)
 	}
 }

@@ -27,7 +27,7 @@ func translateToolResult(toolName string, input any, content, structured json.Ra
 	if isError {
 		// A failed Bash call has no structured exit code and the text is not
 		// parsed for one.
-		return map[string]any{"isError": true, "content": []map[string]any{{"type": "text", "text": text}}}, true
+		return map[string]any{"isError": true, "error": text, "content": []map[string]any{{"type": "text", "text": text}}}, true
 	}
 	var object map[string]any
 	if err := json.Unmarshal(structured, &object); err != nil {

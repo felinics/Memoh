@@ -241,6 +241,20 @@ func TestFormatWebSearchEmitsLinks(t *testing.T) {
 	}
 }
 
+func TestFormatWebSearchPreservesTextFallback(t *testing.T) {
+	p := BuildToolCallEnd(&StreamToolCall{
+		Name:  "web_search",
+		Input: map[string]any{"query": "golang"},
+		Result: map[string]any{
+			"results": []any{},
+			"content": "Search source text",
+		},
+	})
+	if p.Header != `"golang"` || len(p.Body) != 1 || p.Body[0].Text != "Search source text" {
+		t.Fatalf("IM lost search text: %+v", p)
+	}
+}
+
 func TestFormatSendCarriesTargetAndBody(t *testing.T) {
 	t.Parallel()
 

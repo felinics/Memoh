@@ -555,6 +555,12 @@ func formatWebSearch(tc *StreamToolCall, status ToolCallStatus) ToolCallPresenta
 	}
 	res := resultMap(tc)
 	results := asSliceOfMaps(res["results"])
+	if len(results) == 0 {
+		if text := pickStringField(res, "content"); text != "" {
+			p.Body = append(p.Body, ToolCallBlock{Type: ToolCallBlockText, Text: truncLine(text)})
+			return p
+		}
+	}
 	p.Header = fmt.Sprintf("%d results for %q", len(results), query)
 	preview := 5
 	for i, r := range results {
