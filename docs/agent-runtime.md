@@ -129,6 +129,22 @@ instead, since a retry may still resume the thread: as
 such as Grok rejecting its sign-in, as that failure. Nothing here can make a
 thread permanently unusable.
 
+Codex keeps a writer lock on every thread an app-server process has loaded
+until that process exits, and refuses `thread/resume` from any other process
+meanwhile. A refusal naming the session's own thread as held is not a lost
+session; Codex reports it without data and with varying codes, so the driver
+recognizes it by Codex's message (the same in Codex 0.154.0 and 0.163.0):
+the turn retries with backoff for up to 90 seconds, then fails with
+`external_runtime.busy`, keeping the stored thread. One naming another thread,
+which a stale path can lead to, is handled like any refused path.
+
+The driver never stops the holder itself. An app-server whose stream ended
+keeps its threads locked until the workspace runtime kills it; the bridge does
+once its keepalive notices, after roughly 60 to 75 seconds with the current
+settings, which the 90-second wait covers. A displaced server keeps even its
+idle threads until its last turn ends, and a session whose thread it holds
+answers busy until then.
+
 Grok Build drives the rest of its session through Grok's own ACP extension
 methods, read as Grok 1.0.62 defines them (`internal/agent/runtime/grok/config.go`
 lists them; a process of another version is logged at start): compaction is
