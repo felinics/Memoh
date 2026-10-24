@@ -23,6 +23,11 @@ VALUES (
 RETURNING *;
 
 -- name: ForkSessionFromAssistantTurn :one
+-- The fork copies the source's visible history through the target turn. It
+-- returns the fork's id, the ids of the source rows it copied beside the ids
+-- of their copies, in the same order, and fork_cutoff: when the first visible
+-- source row it did not copy was created, NULL when it copied every one. The
+-- caller carries the summaries and history origin that hold for the copy.
 WITH source_session AS (
   SELECT s.*
   FROM bot_sessions s
@@ -89,6 +94,14 @@ copy_turns AS (
 next_turn_position AS (
   SELECT COALESCE(MAX(new_position), 0) + 1 AS value
   FROM copy_turns
+),
+fork_cutoff AS (
+  SELECT MIN(later.created_at) AS created_at
+  FROM target_turn tt
+  JOIN bot_visible_history_messages later
+    ON later.team_id = public.memoh_current_team_id()
+   AND later.session_id = sqlc.arg(session_id)
+   AND later.turn_position > tt.position
 ),
 fork_anchor_message AS (
   SELECT assistant_message.new_message_id
@@ -245,10 +258,45 @@ copied_assets AS (
   WHERE a.team_id = public.memoh_current_team_id()
   RETURNING id
 )
-SELECT cs.*
+SELECT cs.id,
+  copied.source_message_ids,
+  copied.fork_message_ids,
+  cutoff.created_at::timestamptz AS fork_cutoff
 FROM created_session cs
-CROSS JOIN (SELECT count(*) AS copied_asset_count FROM copied_assets) copied_asset_counts;
+CROSS JOIN (SELECT count(*) AS copied_asset_count FROM copied_assets) copied_asset_counts
+CROSS JOIN fork_cutoff cutoff
+CROSS JOIN (
+  SELECT
+    COALESCE(array_agg(cm.old_message_id ORDER BY cm.old_message_id), '{}')::uuid[] AS source_message_ids,
+    COALESCE(array_agg(cm.new_message_id ORDER BY cm.old_message_id), '{}')::uuid[] AS fork_message_ids
+  FROM copy_messages cm
+  JOIN inserted_messages im ON im.id = cm.new_message_id
+) copied;
 
+
+-- name: CopySessionHistoryOrigin :exec
+-- A fork that copies its source's history from before the source's origin
+-- takes the origin too: the rows before it, and what the notice says about
+-- them, are the source's.
+UPDATE bot_sessions fork
+SET history_origin_at = source.history_origin_at,
+    history_omitted_count = source.history_omitted_count,
+    history_omitted_first_at = source.history_omitted_first_at,
+    history_omitted_last_at = source.history_omitted_last_at
+FROM bot_sessions source
+WHERE fork.team_id = public.memoh_current_team_id()
+  AND fork.id = sqlc.arg(session_id)
+  AND source.team_id = public.memoh_current_team_id()
+  AND source.id = sqlc.arg(source_session_id);
+
+-- name: PlaceSessionHistoryOrigin :one
+-- Places the session's history origin for the history budget of
+-- budget_session_id (see memoh_place_history_origin); NULL when the session
+-- needs none.
+SELECT public.memoh_place_history_origin(
+  sqlc.arg(session_id)::uuid,
+  public.memoh_session_history_budget(sqlc.arg(budget_session_id)::uuid)
+)::timestamptz AS history_origin_at;
 
 -- name: GetSessionByID :one
 SELECT *

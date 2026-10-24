@@ -727,7 +727,6 @@ func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnComman
 		discussCurrentSources:    cmd.DiscussCurrentSources,
 		discussOmittedSources:    cmd.DiscussOmittedSources,
 		discussContextTokens:     discussContextPressure(cmd),
-		historyViewFrom:          discussViewFrom(cmd),
 		discussRecoveryExhausted: cmd.DiscussRecoveryExhausted,
 	})
 	for chunks != nil || errs != nil {
@@ -851,6 +850,8 @@ func discussMessagesToSDK(messages []turn.DiscussMessage) []sdk.Message {
 		switch m.Role {
 		case "assistant":
 			result = append(result, sdk.AssistantMessage(m.Content))
+		case "system":
+			result = append(result, sdk.SystemMessage(m.Content))
 		default:
 			result = append(result, sdk.UserMessage(m.Content))
 		}

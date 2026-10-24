@@ -12,6 +12,7 @@ import (
 // HistoryReader is the lightweight history surface needed by Discuss. Keeping
 // it separate from the general message service prevents loading UI/audit data.
 type HistoryReader interface {
+	HistoryOriginBySession(context.Context, string) (messagepkg.HistoryOrigin, error)
 	MeasureActiveBySession(context.Context, string, time.Time) (messagepkg.ActiveMessagesMeasure, error)
 	ListTurnResponseSourcesSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error)
 }
@@ -33,15 +34,27 @@ type discussHistoryMeasure struct {
 	Loaded        int
 }
 
+// Origin reports where the session's context starts.
+func (r discussHistoryReader) Origin(ctx context.Context, sessionID string) (messagepkg.HistoryOrigin, error) {
+	if r.messages == nil {
+		return messagepkg.HistoryOrigin{}, nil
+	}
+	return r.messages.HistoryOriginBySession(ctx, sessionID)
+}
+
 // Load reads the byte-budgeted recent window of persisted assistant/tool
-// responses for timeline composition, measuring the full extent with a
-// metadata-only aggregate first. Older responses beyond the budget stay in
-// the database; compaction artifacts represent them in composition.
-func (r discussHistoryReader) Load(ctx context.Context, sessionID string) ([]timeline.TurnResponseEntry, discussHistoryMeasure, error) {
+// responses from the session's history origin on for timeline composition,
+// measuring the full extent with a metadata-only aggregate first. Older
+// responses beyond the budget stay in the database; compaction artifacts
+// represent them in composition.
+func (r discussHistoryReader) Load(ctx context.Context, sessionID string, origin messagepkg.HistoryOrigin) ([]timeline.TurnResponseEntry, discussHistoryMeasure, error) {
 	if r.messages == nil {
 		return nil, discussHistoryMeasure{}, nil
 	}
 	since := time.Unix(0, 0).UTC()
+	if !origin.At.IsZero() {
+		since = origin.At
+	}
 	measure := discussHistoryMeasure{}
 	if agg, err := r.messages.MeasureActiveBySession(ctx, sessionID, since); err == nil {
 		measure.TotalMessages = agg.MessageCount

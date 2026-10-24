@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
@@ -268,96 +266,6 @@ func TestRecordArtifactOwnerPreservesKnownNullSession(t *testing.T) {
 	owner := recordArtifactOwner(record, contextfrag.Scope{SessionID: "fallback-session"})
 	if !owner.SessionIDKnown || owner.SessionID != "" {
 		t.Fatalf("known-null session was replaced by fallback: %#v", owner)
-	}
-}
-
-func TestReplaceRecentCompactedMessagesKeepsArtifactResolutionOwnerBound(t *testing.T) {
-	t.Parallel()
-
-	botID := "00000000-0000-0000-0000-00000000b201"
-	session1 := "00000000-0000-0000-0000-00000000f201"
-	session2 := "00000000-0000-0000-0000-00000000f202"
-	artifactID := "00000000-0000-0000-0000-00000000c201"
-	corruptRawID := "00000000-0000-0000-0000-000000000201"
-	queries := &recordingCompactionLogQueries{
-		logs: []sqlc.BotHistoryMessageCompact{{
-			ID:        mustPGUUID(t, artifactID),
-			BotID:     mustPGUUID(t, botID),
-			SessionID: mustPGUUID(t, session2),
-			Status:    "ok",
-			Summary:   "session two summary",
-			Coverage:  persistedCoverage(t, corruptRawID),
-		}},
-	}
-	records := []historyfrag.HistoryRecord{
-		historyRecord(corruptRawID, ModelMessage{Role: "user", Content: newTextContent("session one raw")}, func(record *historyfrag.HistoryRecord) {
-			record.BotID = botID
-			record.SessionID = session1
-			record.SessionIDKnown = true
-			record.CompactID = artifactID
-		}),
-		historyRecord("session-two-trigger", ModelMessage{Role: "user", Content: newTextContent("session two raw")}, func(record *historyfrag.HistoryRecord) {
-			record.BotID = botID
-			record.SessionID = session2
-			record.SessionIDKnown = true
-		}),
-	}
-
-	got := mustReplaceCompactedMessages(t, &Service{queries: queries}, "", contextfrag.Scope{BotID: botID}, records)
-	want := []string{"session one raw", "session two raw"}
-	if gotTexts := recordTexts(got); !reflect.DeepEqual(gotTexts, want) {
-		t.Fatalf("cross-owner artifact replaced history: %#v, want %#v", gotTexts, want)
-	}
-}
-
-func TestReplaceRecentCompactedMessagesLoadsEveryKnownNullSessionGroup(t *testing.T) {
-	t.Parallel()
-
-	botID := "00000000-0000-0000-0000-00000000b301"
-	artifactAID := "00000000-0000-0000-0000-00000000c301"
-	artifactBID := "00000000-0000-0000-0000-00000000c302"
-	recordAID := "00000000-0000-0000-0000-000000000301"
-	recordBID := "00000000-0000-0000-0000-000000000302"
-	artifactA := sqlc.BotHistoryMessageCompact{
-		ID:       mustPGUUID(t, artifactAID),
-		BotID:    mustPGUUID(t, botID),
-		Status:   "ok",
-		Summary:  "summary a",
-		Coverage: persistedCoverage(t, recordAID),
-	}
-	artifactB := sqlc.BotHistoryMessageCompact{
-		ID:       mustPGUUID(t, artifactBID),
-		BotID:    mustPGUUID(t, botID),
-		Status:   "ok",
-		Summary:  "summary b",
-		Coverage: persistedCoverage(t, recordBID),
-	}
-	queries := &recordingCompactionLogQueries{
-		byID: map[pgtype.UUID]sqlc.BotHistoryMessageCompact{
-			artifactA.ID: artifactA,
-			artifactB.ID: artifactB,
-		},
-	}
-	records := []historyfrag.HistoryRecord{
-		historyRecord(recordAID, ModelMessage{Role: "user", Content: newTextContent("raw a")}, func(record *historyfrag.HistoryRecord) {
-			record.BotID = botID
-			record.SessionIDKnown = true
-			record.CompactID = artifactAID
-		}),
-		historyRecord(recordBID, ModelMessage{Role: "assistant", Content: newTextContent("raw b")}, func(record *historyfrag.HistoryRecord) {
-			record.BotID = botID
-			record.SessionIDKnown = true
-			record.CompactID = artifactBID
-		}),
-	}
-
-	got := mustReplaceCompactedMessages(t, &Service{queries: queries}, "", contextfrag.Scope{BotID: botID}, records)
-	want := []string{"<summary>\nsummary a\n</summary>", "<summary>\nsummary b\n</summary>"}
-	if gotTexts := recordTexts(got); !reflect.DeepEqual(gotTexts, want) {
-		t.Fatalf("known-null compact groups = %#v, want %#v", gotTexts, want)
-	}
-	if len(queries.getCalls) != 2 {
-		t.Fatalf("point-loaded compact groups = %d, want 2: %#v", len(queries.getCalls), queries.getCalls)
 	}
 }
 

@@ -418,41 +418,50 @@ func (q *Queries) CreateCompactionLog(ctx context.Context, arg CreateCompactionL
 	return i, err
 }
 
-const deleteCompactionLogsByBot = `-- name: DeleteCompactionLogsByBot :exec
-WITH target_sessions AS MATERIALIZED (
-  SELECT session.id
-  FROM bot_sessions session
-  WHERE session.team_id = public.memoh_current_team_id()
-    AND session.bot_id = $1
-  ORDER BY session.id
-  FOR UPDATE
-),
-invalidated_sessions AS (
-  UPDATE bot_sessions session
-  SET compaction_epoch = session.compaction_epoch + 1
-  FROM target_sessions target
-  WHERE session.team_id = public.memoh_current_team_id()
-    AND session.id = target.id
-  RETURNING session.id
-),
-target_compaction_logs AS MATERIALIZED (
-  SELECT compact.id
-  FROM bot_history_message_compacts compact
-  WHERE compact.team_id = public.memoh_current_team_id()
-    AND compact.bot_id = $1
-    AND (SELECT count(*) FROM target_sessions) >= 0
-  ORDER BY compact.id
-  FOR UPDATE
+const createForkedCompactionArtifact = `-- name: CreateForkedCompactionArtifact :one
+INSERT INTO bot_history_message_compacts (
+  bot_id, session_id, compaction_epoch, team_id, status, summary, message_count, model_id,
+  artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, started_at, completed_at
 )
-DELETE FROM bot_history_message_compacts AS compacts
-USING target_compaction_logs target
-WHERE compacts.team_id = public.memoh_current_team_id()
-  AND compacts.id = target.id
+SELECT fork.bot_id, fork.id, fork.compaction_epoch, fork.team_id, 'ok', source.summary, $1,
+  source.model_id, source.artifact_version, $2, $3, $4,
+  source.artifact_level, source.started_at, source.completed_at
+FROM bot_history_message_compacts source
+JOIN bot_sessions fork
+  ON fork.team_id = public.memoh_current_team_id()
+ AND fork.id = $5
+ AND fork.bot_id = source.bot_id
+WHERE source.team_id = public.memoh_current_team_id()
+  AND source.id = $6
+  AND source.status = 'ok'
+RETURNING id
 `
 
-func (q *Queries) DeleteCompactionLogsByBot(ctx context.Context, targetBotID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteCompactionLogsByBot, targetBotID)
-	return err
+type CreateForkedCompactionArtifactParams struct {
+	MessageCount    int32       `json:"message_count"`
+	Coverage        []byte      `json:"coverage"`
+	AnchorStartMs   int64       `json:"anchor_start_ms"`
+	AnchorEndMs     int64       `json:"anchor_end_ms"`
+	SessionID       pgtype.UUID `json:"session_id"`
+	SourceCompactID pgtype.UUID `json:"source_compact_id"`
+}
+
+// A fork carries a summary of its source as an active root of its own: the
+// same text, model, level and timing, coverage naming the fork's copies of
+// the rows, and no usage, so the summarizer call that wrote it is counted
+// once.
+func (q *Queries) CreateForkedCompactionArtifact(ctx context.Context, arg CreateForkedCompactionArtifactParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, createForkedCompactionArtifact,
+		arg.MessageCount,
+		arg.Coverage,
+		arg.AnchorStartMs,
+		arg.AnchorEndMs,
+		arg.SessionID,
+		arg.SourceCompactID,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const getActiveCompactionArtifactWithinBytes = `-- name: GetActiveCompactionArtifactWithinBytes :one

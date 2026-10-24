@@ -304,6 +304,30 @@ func (q *Queries) BindLatestHistoryTurnAssistant(ctx context.Context, arg BindLa
 	return i, err
 }
 
+const claimForkedMessagesForCompact = `-- name: ClaimForkedMessagesForCompact :execrows
+UPDATE bot_history_messages message
+SET compact_id = $1
+WHERE message.team_id = public.memoh_current_team_id()
+  AND message.session_id = $2
+  AND message.id = ANY($3::uuid[])
+  AND message.compact_id IS NULL
+`
+
+type ClaimForkedMessagesForCompactParams struct {
+	CompactID  pgtype.UUID   `json:"compact_id"`
+	SessionID  pgtype.UUID   `json:"session_id"`
+	MessageIds []pgtype.UUID `json:"message_ids"`
+}
+
+// A summary a fork carries claims the fork's copies of the rows it covers.
+func (q *Queries) ClaimForkedMessagesForCompact(ctx context.Context, arg ClaimForkedMessagesForCompactParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimForkedMessagesForCompact, arg.CompactID, arg.SessionID, arg.MessageIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const clearHistoryByBot = `-- name: ClearHistoryByBot :exec
 WITH target_sessions AS MATERIALIZED (
   SELECT session.id
@@ -316,6 +340,11 @@ WITH target_sessions AS MATERIALIZED (
 invalidated_sessions AS (
   UPDATE bot_sessions session
   SET compaction_epoch = session.compaction_epoch + 1,
+      -- A cleared history has nothing before an origin to leave out.
+      history_origin_at = NULL,
+      history_omitted_count = 0,
+      history_omitted_first_at = NULL,
+      history_omitted_last_at = NULL,
       runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint,
       -- Runtime continuity anchors (codex_thread_id, claude_session_id, and
       -- whatever future drivers store) must die with the history they resume,
@@ -408,9 +437,13 @@ WITH target_session AS MATERIALIZED (
 invalidated_session AS (
   UPDATE bot_sessions session
   SET compaction_epoch = session.compaction_epoch + 1,
+      history_origin_at = NULL,
+      history_omitted_count = 0,
+      history_omitted_first_at = NULL,
+      history_omitted_last_at = NULL,
       runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint,
-      -- Same anchor scrub as ClearHistoryByBot: continuity keys die with the
-      -- history, identity (acp_agent_id) survives.
+      -- Same anchor and origin scrub as ClearHistoryByBot: continuity keys
+      -- die with the history, identity (acp_agent_id) survives.
       runtime_metadata = CASE
         WHEN session.runtime_metadata ? 'acp_agent_id'
           THEN jsonb_build_object('acp_agent_id', session.runtime_metadata->'acp_agent_id')
@@ -917,7 +950,8 @@ INSERT INTO bot_history_messages (
   model_id,
   event_id,
   display_text,
-  run_id
+  run_id,
+  created_at
 )
 VALUES (
   $1,
@@ -935,7 +969,8 @@ VALUES (
   $13::uuid,
   $14::uuid,
   $15::text,
-  $16::uuid
+  $16::uuid,
+  COALESCE($17::timestamptz, now())
 )
 RETURNING
   id,
@@ -957,22 +992,23 @@ RETURNING
 `
 
 type CreateMessageParams struct {
-	BotID                   pgtype.UUID `json:"bot_id"`
-	SessionID               pgtype.UUID `json:"session_id"`
-	SenderChannelIdentityID pgtype.UUID `json:"sender_channel_identity_id"`
-	SenderUserID            pgtype.UUID `json:"sender_user_id"`
-	ExternalMessageID       pgtype.Text `json:"external_message_id"`
-	SourceReplyToMessageID  pgtype.Text `json:"source_reply_to_message_id"`
-	Role                    string      `json:"role"`
-	Content                 []byte      `json:"content"`
-	Metadata                []byte      `json:"metadata"`
-	Usage                   []byte      `json:"usage"`
-	SessionMode             string      `json:"session_mode"`
-	RuntimeType             string      `json:"runtime_type"`
-	ModelID                 pgtype.UUID `json:"model_id"`
-	EventID                 pgtype.UUID `json:"event_id"`
-	DisplayText             pgtype.Text `json:"display_text"`
-	RunID                   pgtype.UUID `json:"run_id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
+	Role                    string             `json:"role"`
+	Content                 []byte             `json:"content"`
+	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
+	SessionMode             string             `json:"session_mode"`
+	RuntimeType             string             `json:"runtime_type"`
+	ModelID                 pgtype.UUID        `json:"model_id"`
+	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
+	RunID                   pgtype.UUID        `json:"run_id"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
 type CreateMessageRow struct {
@@ -994,6 +1030,9 @@ type CreateMessageRow struct {
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 }
 
+// A message is created now unless created_at says otherwise: a restore keeps
+// each message's original time, in step with the session events restored
+// beside it.
 func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (CreateMessageRow, error) {
 	row := q.db.QueryRow(ctx, createMessage,
 		arg.BotID,
@@ -1012,6 +1051,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (C
 		arg.EventID,
 		arg.DisplayText,
 		arg.RunID,
+		arg.CreatedAt,
 	)
 	var i CreateMessageRow
 	err := row.Scan(
@@ -2039,28 +2079,31 @@ deleted AS (
   USING target_messages target
   WHERE message.team_id = public.memoh_current_team_id()
     AND message.id = target.id
-  RETURNING message.session_id, message.compact_id
+  RETURNING message.session_id, message.compact_id, message.created_at
 ),
-compaction_epoch_bump AS (
-  UPDATE bot_sessions session
-  SET compaction_epoch = session.compaction_epoch + 1
-  WHERE session.team_id = public.memoh_current_team_id()
-    AND EXISTS (
-    SELECT 1
+compaction_rewind AS (
+  SELECT public.memoh_rewind_compaction(covered.session_id, covered.created_at) AS done
+  FROM (
+    SELECT changed.session_id, MIN(changed.created_at) AS created_at
     FROM deleted changed
+    JOIN bot_sessions session
+      ON session.id = changed.session_id
+     AND session.team_id = public.memoh_current_team_id()
     JOIN bot_history_message_compacts compact
       ON compact.id = changed.compact_id
      AND compact.team_id = public.memoh_current_team_id()
-    WHERE changed.session_id = session.id
-      AND compact.bot_id = session.bot_id
+    WHERE compact.bot_id = session.bot_id
       AND compact.session_id = session.id
       AND compact.compaction_epoch = session.compaction_epoch
-  )
-  RETURNING session.id
+    GROUP BY changed.session_id
+  ) covered
 )
-SELECT (SELECT count(*) FROM deleted) + (SELECT count(*) * 0 FROM compaction_epoch_bump)
+SELECT (SELECT count(*) FROM deleted) + (SELECT count(*) * 0 FROM compaction_rewind)
 `
 
+// Deleting rows a summary of the current epoch covers rewinds the session's
+// compaction to the earliest of them: the summaries that end before it move
+// to the new epoch, the ones that reach it retire.
 func (q *Queries) DeleteMessagesByIDs(ctx context.Context, ids []pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteMessagesByIDs, ids)
 	return err
@@ -2496,6 +2539,125 @@ func (q *Queries) GetRunHistoryTurnRequestMessageID(ctx context.Context, arg Get
 	return id, err
 }
 
+const getSessionHistoryAnchor = `-- name: GetSessionHistoryAnchor :one
+WITH owner_session AS MATERIALIZED (
+  SELECT s.id, s.bot_id, s.compaction_epoch, s.history_origin_at,
+    COALESCE(s.history_origin_at, '-infinity'::timestamptz) AS reads_from
+  FROM bot_sessions s
+  WHERE s.team_id = public.memoh_current_team_id()
+    AND s.id = $1
+), unusable_compacts AS MATERIALIZED (
+  SELECT c.id
+  FROM owner_session s
+  JOIN bot_history_message_compacts c
+    ON c.team_id = public.memoh_current_team_id()
+   AND c.bot_id = s.bot_id
+   AND c.session_id = s.id
+  WHERE NOT (
+      c.compaction_epoch = s.compaction_epoch
+      AND c.status = 'ok'
+      AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
+      AND (
+        $2::timestamptz IS NULL
+        OR (
+          c.anchor_start_ms > 0
+          AND c.anchor_start_ms <= c.anchor_end_ms
+          AND c.anchor_end_ms < FLOOR(EXTRACT(EPOCH FROM $2::timestamptz) * 1000)::bigint
+        )
+      )
+    )
+)
+SELECT GREATEST(COALESCE(LEAST(
+  (
+    SELECT m.created_at
+    FROM bot_history_messages m
+    WHERE m.team_id = public.memoh_current_team_id()
+      AND m.session_id = $1
+      AND m.created_at >= (SELECT reads_from FROM owner_session)
+      AND m.compact_id IS NULL
+      AND m.turn_visible = true
+      AND m.turn_id IS NOT NULL
+      AND m.turn_position IS NOT NULL
+      AND m.turn_message_seq IS NOT NULL
+      AND ($2::timestamptz IS NULL OR m.created_at < $2::timestamptz)
+      AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+    ORDER BY m.created_at ASC
+    LIMIT 1
+  ),
+  (
+    SELECT MIN(m.created_at)
+    FROM unusable_compacts u
+    JOIN bot_visible_history_messages m
+      ON m.team_id = public.memoh_current_team_id()
+     AND m.compact_id = u.id
+    WHERE m.session_id = $1
+      AND m.created_at >= (SELECT reads_from FROM owner_session)
+      AND ($2::timestamptz IS NULL OR m.created_at < $2::timestamptz)
+      AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+  )
+), (
+  SELECT MAX(m.created_at)
+  FROM bot_visible_history_messages m
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.session_id = $1
+    AND m.created_at >= (SELECT reads_from FROM owner_session)
+    AND ($2::timestamptz IS NULL OR m.created_at < $2::timestamptz)
+)), (SELECT history_origin_at FROM owner_session))::timestamptz AS history_anchor
+`
+
+type GetSessionHistoryAnchorParams struct {
+	SessionID pgtype.UUID        `json:"session_id"`
+	Before    pgtype.Timestamptz `json:"before"`
+}
+
+// The session's compaction anchor: the creation time of the oldest visible
+// row no usable summary of its current epoch replaces, a row never compacted
+// or one whose compact is pending, failed, empty or from an earlier epoch.
+// Every older row is summarized, so a history load starts here and reads only
+// what is not. When every row is summarized it is the newest row, which
+// places the summary; NULL for a session without rows. Rows before the
+// session's history origin reach no request, so the anchor never precedes
+// the origin and only rows from it on count. With before, it is the anchor of
+// the history as it stood then (see
+// ListActiveMessagesSinceBySessionWithinBytes). The uncompacted branch walks
+// its partial index; the other reads only the rows of the compacts that do
+// not count, usually none.
+func (q *Queries) GetSessionHistoryAnchor(ctx context.Context, arg GetSessionHistoryAnchorParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getSessionHistoryAnchor, arg.SessionID, arg.Before)
+	var history_anchor pgtype.Timestamptz
+	err := row.Scan(&history_anchor)
+	return history_anchor, err
+}
+
+const getSessionHistoryOrigin = `-- name: GetSessionHistoryOrigin :one
+SELECT s.history_origin_at, s.history_omitted_count, s.history_omitted_first_at, s.history_omitted_last_at
+FROM bot_sessions s
+WHERE s.team_id = public.memoh_current_team_id()
+  AND s.id = $1
+`
+
+type GetSessionHistoryOriginRow struct {
+	HistoryOriginAt       pgtype.Timestamptz `json:"history_origin_at"`
+	HistoryOmittedCount   int64              `json:"history_omitted_count"`
+	HistoryOmittedFirstAt pgtype.Timestamptz `json:"history_omitted_first_at"`
+	HistoryOmittedLastAt  pgtype.Timestamptz `json:"history_omitted_last_at"`
+}
+
+// Where the session's context starts and what the history notice reports
+// about the visible rows before it; NULL and zero for a session whose whole
+// history is context.
+func (q *Queries) GetSessionHistoryOrigin(ctx context.Context, sessionID pgtype.UUID) (GetSessionHistoryOriginRow, error) {
+	row := q.db.QueryRow(ctx, getSessionHistoryOrigin, sessionID)
+	var i GetSessionHistoryOriginRow
+	err := row.Scan(
+		&i.HistoryOriginAt,
+		&i.HistoryOmittedCount,
+		&i.HistoryOmittedFirstAt,
+		&i.HistoryOmittedLastAt,
+	)
+	return i, err
+}
+
 const getTurnAgentTurnID = `-- name: GetTurnAgentTurnID :one
 SELECT COALESCE(message.metadata->>'agent_turn_id', '')::text AS agent_turn_id
 FROM bot_history_messages message
@@ -2698,11 +2860,16 @@ hidden AS (
     AND turn_id = $1
     AND turn_visible = true
     AND (SELECT count(*) FROM owner_sessions) >= 0
-  RETURNING session_id, compact_id
+  RETURNING session_id, compact_id, created_at
 ),
-compaction_epoch_bump AS (
-  UPDATE bot_sessions session
-  SET compaction_epoch = session.compaction_epoch + 1
+compaction_rewind AS (
+  SELECT public.memoh_rewind_compaction(session.id, turn.started_at) AS done
+  FROM bot_sessions session
+  JOIN (
+    SELECT changed.session_id, MIN(changed.created_at) AS started_at
+    FROM hidden changed
+    GROUP BY changed.session_id
+  ) turn ON turn.session_id = session.id
   WHERE session.team_id = public.memoh_current_team_id()
     AND EXISTS (
     SELECT 1
@@ -2715,9 +2882,8 @@ compaction_epoch_bump AS (
       AND compact.session_id = session.id
       AND compact.compaction_epoch = session.compaction_epoch
   )
-  RETURNING session.id
 )
-SELECT (SELECT count(*) FROM hidden) + (SELECT count(*) * 0 FROM compaction_epoch_bump)
+SELECT (SELECT count(*) FROM hidden) + (SELECT count(*) * 0 FROM compaction_rewind)
 `
 
 func (q *Queries) HideMessagesByHistoryTurn(ctx context.Context, turnID pgtype.UUID) error {
@@ -3077,18 +3243,28 @@ FROM (
    AND c.compaction_epoch = s.compaction_epoch
    AND c.status = 'ok'
    AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
+   AND (
+     $2::timestamptz IS NULL
+     OR (
+       c.anchor_start_ms > 0
+       AND c.anchor_start_ms <= c.anchor_end_ms
+       AND c.anchor_end_ms < FLOOR(EXTRACT(EPOCH FROM $2::timestamptz) * 1000)::bigint
+     )
+   )
   WHERE m.team_id = public.memoh_current_team_id()
-    AND m.session_id = $2
-    AND m.created_at >= $3
+    AND m.session_id = $3
+    AND m.created_at >= $4
+    AND ($2::timestamptz IS NULL OR m.created_at < $2::timestamptz)
     AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ) ranked
-WHERE ranked.preceding_bytes < $4::BIGINT
+WHERE ranked.preceding_bytes < $5::BIGINT
   AND (NOT ranked.summarized OR ranked.summarized_rank = 1)
 ORDER BY ranked.turn_position ASC, ranked.turn_message_seq ASC, ranked.created_at ASC, ranked.id ASC
 `
 
 type ListActiveMessagesSinceBySessionWithinBytesParams struct {
 	FoldSummarized bool               `json:"fold_summarized"`
+	Before         pgtype.Timestamptz `json:"before"`
 	SessionID      pgtype.UUID        `json:"session_id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	MaxBytes       int64              `json:"max_bytes"`
@@ -3124,12 +3300,16 @@ type ListActiveMessagesSinceBySessionWithinBytesRow struct {
 // loads), then returned in ascending order. With fold_summarized, rows a
 // usable summary of the session's current epoch replaced cost nothing, and
 // only the newest of each compact group loads, marked summarized, to place
-// that summary. Only content is budgeted: full rows, metadata included,
-// still load, so callers that need content alone use
+// that summary. With before, the load is the history as it stood then: only
+// rows created before it, and only summaries that end before it replace
+// rows, which is what the session's summaries become once the history from
+// before on is replaced. Only content is budgeted: full rows, metadata
+// included, still load, so callers that need content alone use
 // ListTurnResponseSourcesSinceBySessionWithinBytes.
 func (q *Queries) ListActiveMessagesSinceBySessionWithinBytes(ctx context.Context, arg ListActiveMessagesSinceBySessionWithinBytesParams) ([]ListActiveMessagesSinceBySessionWithinBytesRow, error) {
 	rows, err := q.db.Query(ctx, listActiveMessagesSinceBySessionWithinBytes,
 		arg.FoldSummarized,
+		arg.Before,
 		arg.SessionID,
 		arg.CreatedAt,
 		arg.MaxBytes,
@@ -3163,137 +3343,6 @@ func (q *Queries) ListActiveMessagesSinceBySessionWithinBytes(ctx context.Contex
 			&i.SenderAvatarUrl,
 			&i.Platform,
 			&i.Summarized,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listActiveMessagesSinceWithinBytes = `-- name: ListActiveMessagesSinceWithinBytes :many
-SELECT
-  ranked.id,
-  ranked.bot_id,
-  ranked.session_id,
-  ranked.sender_channel_identity_id,
-  ranked.sender_user_id,
-  ranked.external_message_id,
-  ranked.source_reply_to_message_id,
-  ranked.role,
-  ranked.content,
-  ranked.metadata,
-  ranked.usage,
-  ranked.session_mode,
-  ranked.runtime_type,
-  ranked.event_id,
-  ranked.display_text,
-  ranked.compact_id,
-  ranked.created_at,
-  ranked.sender_display_name,
-  ranked.sender_avatar_url,
-  ranked.platform
-FROM (
-  SELECT
-    m.id,
-    m.bot_id,
-    m.session_id,
-    m.sender_channel_identity_id,
-    m.sender_account_user_id AS sender_user_id,
-    m.source_message_id AS external_message_id,
-    m.source_reply_to_message_id,
-    m.role,
-    m.content,
-    m.metadata,
-    m.usage,
-    m.session_mode,
-    m.runtime_type,
-    m.event_id,
-    m.display_text,
-    m.compact_id,
-    m.created_at,
-    ci.display_name AS sender_display_name,
-    ci.avatar_url AS sender_avatar_url,
-    s.channel_type AS platform,
-    (SUM(octet_length(m.content::text)) OVER (
-      ORDER BY m.created_at DESC, m.id DESC
-    ) - octet_length(m.content::text))::BIGINT AS preceding_bytes
-  FROM bot_visible_history_messages m
-  LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
-  LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
-  WHERE m.team_id = public.memoh_current_team_id()
-    AND m.bot_id = $1
-    AND m.created_at >= $2
-    AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
-) ranked
-WHERE ranked.preceding_bytes < $3::BIGINT
-ORDER BY ranked.created_at ASC, ranked.id ASC
-`
-
-type ListActiveMessagesSinceWithinBytesParams struct {
-	BotID     pgtype.UUID        `json:"bot_id"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	MaxBytes  int64              `json:"max_bytes"`
-}
-
-type ListActiveMessagesSinceWithinBytesRow struct {
-	ID                      pgtype.UUID        `json:"id"`
-	BotID                   pgtype.UUID        `json:"bot_id"`
-	SessionID               pgtype.UUID        `json:"session_id"`
-	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
-	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
-	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
-	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
-	Role                    string             `json:"role"`
-	Content                 []byte             `json:"content"`
-	Metadata                []byte             `json:"metadata"`
-	Usage                   []byte             `json:"usage"`
-	SessionMode             string             `json:"session_mode"`
-	RuntimeType             string             `json:"runtime_type"`
-	EventID                 pgtype.UUID        `json:"event_id"`
-	DisplayText             pgtype.Text        `json:"display_text"`
-	CompactID               pgtype.UUID        `json:"compact_id"`
-	CreatedAt               pgtype.Timestamptz `json:"created_at"`
-	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
-	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
-	Platform                pgtype.Text        `json:"platform"`
-}
-
-// Byte-budgeted variant of ListActiveMessagesSince (CM-ADM-001), same
-// newest-first admission semantics scoped to a bot instead of a session.
-func (q *Queries) ListActiveMessagesSinceWithinBytes(ctx context.Context, arg ListActiveMessagesSinceWithinBytesParams) ([]ListActiveMessagesSinceWithinBytesRow, error) {
-	rows, err := q.db.Query(ctx, listActiveMessagesSinceWithinBytes, arg.BotID, arg.CreatedAt, arg.MaxBytes)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListActiveMessagesSinceWithinBytesRow
-	for rows.Next() {
-		var i ListActiveMessagesSinceWithinBytesRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.BotID,
-			&i.SessionID,
-			&i.SenderChannelIdentityID,
-			&i.SenderUserID,
-			&i.ExternalMessageID,
-			&i.SourceReplyToMessageID,
-			&i.Role,
-			&i.Content,
-			&i.Metadata,
-			&i.Usage,
-			&i.SessionMode,
-			&i.RuntimeType,
-			&i.EventID,
-			&i.DisplayText,
-			&i.CompactID,
-			&i.CreatedAt,
-			&i.SenderDisplayName,
-			&i.SenderAvatarUrl,
-			&i.Platform,
 		); err != nil {
 			return nil, err
 		}
@@ -4641,6 +4690,126 @@ func (q *Queries) ListMessagesByCompactIDWithinBytes(ctx context.Context, arg Li
 	return items, nil
 }
 
+const listMessagesByIDsForCoverage = `-- name: ListMessagesByIDsForCoverage :many
+SELECT
+  m.id,
+  m.bot_id,
+  m.session_id,
+  m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id,
+  m.role,
+  m.content,
+  m.metadata,
+  m.usage,
+  m.event_id,
+  m.display_text,
+  m.compact_id,
+  m.created_at,
+  ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url,
+  s.channel_type AS platform,
+  s.compaction_epoch,
+  r.conversation_type AS conversation_type,
+  COALESCE(
+    NULLIF(TRIM(COALESCE(r.metadata->>'conversation_name', '')), ''),
+    NULLIF(TRIM(COALESCE(r.metadata->>'conversation_handle', '')), ''),
+    ''
+  )::text AS conversation_name,
+  r.default_reply_target AS reply_target
+FROM bot_visible_history_messages m
+LEFT JOIN channel_identities ci
+  ON ci.id = m.sender_channel_identity_id
+ AND ci.team_id = public.memoh_current_team_id()
+JOIN bot_sessions s
+  ON s.id = m.session_id
+ AND s.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_channel_routes r
+  ON r.id = s.route_id
+ AND r.team_id = public.memoh_current_team_id()
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
+  AND m.id = ANY($2::uuid[])
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
+`
+
+type ListMessagesByIDsForCoverageParams struct {
+	SessionID pgtype.UUID   `json:"session_id"`
+	Ids       []pgtype.UUID `json:"ids"`
+}
+
+type ListMessagesByIDsForCoverageRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SourceReplyToMessageID  pgtype.Text        `json:"source_reply_to_message_id"`
+	Role                    string             `json:"role"`
+	Content                 []byte             `json:"content"`
+	Metadata                []byte             `json:"metadata"`
+	Usage                   []byte             `json:"usage"`
+	EventID                 pgtype.UUID        `json:"event_id"`
+	DisplayText             pgtype.Text        `json:"display_text"`
+	CompactID               pgtype.UUID        `json:"compact_id"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
+	SenderAvatarUrl         pgtype.Text        `json:"sender_avatar_url"`
+	Platform                pgtype.Text        `json:"platform"`
+	CompactionEpoch         int64              `json:"compaction_epoch"`
+	ConversationType        pgtype.Text        `json:"conversation_type"`
+	ConversationName        string             `json:"conversation_name"`
+	ReplyTarget             pgtype.Text        `json:"reply_target"`
+}
+
+// Rows of one session by id, in the shape compaction reads its candidates
+// in, so a fork hashes the coverage of the summaries it carries the way a
+// pass hashes it.
+func (q *Queries) ListMessagesByIDsForCoverage(ctx context.Context, arg ListMessagesByIDsForCoverageParams) ([]ListMessagesByIDsForCoverageRow, error) {
+	rows, err := q.db.Query(ctx, listMessagesByIDsForCoverage, arg.SessionID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMessagesByIDsForCoverageRow
+	for rows.Next() {
+		var i ListMessagesByIDsForCoverageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.SenderChannelIdentityID,
+			&i.SenderUserID,
+			&i.ExternalMessageID,
+			&i.SourceReplyToMessageID,
+			&i.Role,
+			&i.Content,
+			&i.Metadata,
+			&i.Usage,
+			&i.EventID,
+			&i.DisplayText,
+			&i.CompactID,
+			&i.CreatedAt,
+			&i.SenderDisplayName,
+			&i.SenderAvatarUrl,
+			&i.Platform,
+			&i.CompactionEpoch,
+			&i.ConversationType,
+			&i.ConversationName,
+			&i.ReplyTarget,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMessagesBySession = `-- name: ListMessagesBySession :many
 SELECT
   m.id,
@@ -5555,6 +5724,7 @@ LEFT JOIN bot_channel_routes r
  AND r.team_id = public.memoh_current_team_id()
 WHERE m.team_id = public.memoh_current_team_id()
   AND m.session_id = $1
+  AND m.created_at >= COALESCE(s.history_origin_at, '-infinity'::timestamptz)
   AND (m.compact_id IS NULL OR NOT EXISTS (
     SELECT 1 FROM bot_history_message_compacts c
     WHERE c.team_id = public.memoh_current_team_id()
@@ -5597,7 +5767,8 @@ type ListUncompactedMessagesBySessionRow struct {
 }
 
 // Compatibility query retained for diagnostics and integration tests. Runtime
-// compaction must use ListUncompactedMessagesBySessionWithinBytes.
+// compaction must use ListUncompactedMessagesBySessionWithinBytes, whose
+// candidates, from the session's history origin on, it lists.
 func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionID pgtype.UUID) ([]ListUncompactedMessagesBySessionRow, error) {
 	rows, err := q.db.Query(ctx, listUncompactedMessagesBySession, sessionID)
 	if err != nil {
@@ -5660,11 +5831,11 @@ WITH candidate_rows AS MATERIALIZED (
    AND candidate_session.team_id = public.memoh_current_team_id()
   WHERE m.team_id = public.memoh_current_team_id()
     AND m.session_id = $1
-    AND ($2::timestamptz IS NULL OR m.created_at >= $2::timestamptz)
-    AND ($3::timestamptz IS NULL OR m.created_at < $3::timestamptz)
-    AND ($4::uuid[] IS NULL
-      OR m.id = ANY($4::uuid[])
-      OR m.source_message_id = ANY($5::text[]))
+    AND m.created_at >= COALESCE(candidate_session.history_origin_at, '-infinity'::timestamptz)
+    AND ($2::timestamptz IS NULL OR m.created_at < $2::timestamptz)
+    AND ($3::uuid[] IS NULL
+      OR m.id = ANY($3::uuid[])
+      OR m.source_message_id = ANY($4::text[]))
     AND (m.compact_id IS NULL OR NOT EXISTS (
       SELECT 1 FROM bot_history_message_compacts c
       WHERE c.team_id = public.memoh_current_team_id()
@@ -5690,7 +5861,7 @@ WITH candidate_rows AS MATERIALIZED (
 ), admitted_candidates AS MATERIALIZED (
   SELECT id, turn_position, turn_message_seq, created_at, payload_bytes, candidate_count, candidate_bytes, cumulative_bytes
   FROM ranked_candidates
-  WHERE cumulative_bytes <= $6::BIGINT
+  WHERE cumulative_bytes <= $5::BIGINT
 )
 SELECT
   m.id,
@@ -5739,7 +5910,6 @@ ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 
 type ListUncompactedMessagesBySessionWithinBytesParams struct {
 	SessionID          pgtype.UUID        `json:"session_id"`
-	CreatedFrom        pgtype.Timestamptz `json:"created_from"`
 	CreatedBefore      pgtype.Timestamptz `json:"created_before"`
 	MessageIds         []pgtype.UUID      `json:"message_ids"`
 	ExternalMessageIds []string           `json:"external_message_ids"`
@@ -5780,11 +5950,11 @@ type ListUncompactedMessagesBySessionWithinBytesRow struct {
 // process-memory boundary. CandidateCount reports whether the prefix was
 // truncated and lets the service choose a progress-preserving selection.
 // message_ids, when set, restricts candidates to those rows and the rows of
-// external_message_ids: what the caller's request renders.
+// external_message_ids: what the caller's request renders. Rows before the
+// session's history origin are never candidates: no request reads them.
 func (q *Queries) ListUncompactedMessagesBySessionWithinBytes(ctx context.Context, arg ListUncompactedMessagesBySessionWithinBytesParams) ([]ListUncompactedMessagesBySessionWithinBytesRow, error) {
 	rows, err := q.db.Query(ctx, listUncompactedMessagesBySessionWithinBytes,
 		arg.SessionID,
-		arg.CreatedFrom,
 		arg.CreatedBefore,
 		arg.MessageIds,
 		arg.ExternalMessageIds,
@@ -6404,11 +6574,11 @@ JOIN bot_sessions s
  AND s.team_id = public.memoh_current_team_id()
 WHERE m.team_id = public.memoh_current_team_id()
   AND m.session_id = $1
-  AND ($2::timestamptz IS NULL OR m.created_at >= $2::timestamptz)
-  AND ($3::timestamptz IS NULL OR m.created_at < $3::timestamptz)
-  AND ($4::uuid[] IS NULL
-    OR m.id = ANY($4::uuid[])
-    OR m.source_message_id = ANY($5::text[]))
+  AND m.created_at >= COALESCE(s.history_origin_at, '-infinity'::timestamptz)
+  AND ($2::timestamptz IS NULL OR m.created_at < $2::timestamptz)
+  AND ($3::uuid[] IS NULL
+    OR m.id = ANY($3::uuid[])
+    OR m.source_message_id = ANY($4::text[]))
   AND (m.compact_id IS NULL OR NOT EXISTS (
     SELECT 1 FROM bot_history_message_compacts c
     WHERE c.team_id = public.memoh_current_team_id()
@@ -6426,7 +6596,6 @@ WHERE m.team_id = public.memoh_current_team_id()
 
 type MeasureUncompactedMessagesBySessionParams struct {
 	SessionID          pgtype.UUID        `json:"session_id"`
-	CreatedFrom        pgtype.Timestamptz `json:"created_from"`
 	CreatedBefore      pgtype.Timestamptz `json:"created_before"`
 	MessageIds         []pgtype.UUID      `json:"message_ids"`
 	ExternalMessageIds []string           `json:"external_message_ids"`
@@ -6439,11 +6608,11 @@ type MeasureUncompactedMessagesBySessionRow struct {
 }
 
 // Metadata-only companion for the bounded compaction read. It never returns
-// message payloads and exposes the oversized-head degradation explicitly.
+// message payloads and exposes the oversized-head degradation explicitly. It
+// measures the same candidates, from the session's history origin on.
 func (q *Queries) MeasureUncompactedMessagesBySession(ctx context.Context, arg MeasureUncompactedMessagesBySessionParams) (MeasureUncompactedMessagesBySessionRow, error) {
 	row := q.db.QueryRow(ctx, measureUncompactedMessagesBySession,
 		arg.SessionID,
-		arg.CreatedFrom,
 		arg.CreatedBefore,
 		arg.MessageIds,
 		arg.ExternalMessageIds,
@@ -6565,18 +6734,14 @@ affected_compaction_sessions AS MATERIALIZED (
     AND compact.compaction_epoch = session.compaction_epoch
 ),
 session_update AS (
-  UPDATE bot_sessions s
-  SET compaction_epoch = compaction_epoch + CASE
-        WHEN EXISTS (
-          SELECT 1
-          FROM affected_compaction_sessions affected
-          WHERE affected.session_id = s.id
-        ) THEN 1
-        ELSE 0
-      END
+  SELECT
+    replacement_input.session_id AS id,
+    CASE WHEN EXISTS (
+      SELECT 1
+      FROM affected_compaction_sessions affected
+      WHERE affected.session_id = replacement_input.session_id
+    ) THEN public.memoh_rewind_compaction(replacement_input.session_id, replacement_input.created_at) END AS rewound
   FROM replacement_input
-  WHERE s.team_id = public.memoh_current_team_id() AND s.id = replacement_input.session_id
-  RETURNING s.id
 ),
 replacement AS (
   SELECT
@@ -6754,6 +6919,54 @@ func (q *Queries) ReplaceHistoryTurn(ctx context.Context, arg ReplaceHistoryTurn
 	return i, err
 }
 
+const rewindCompactionBeforeTurn = `-- name: RewindCompactionBeforeTurn :one
+WITH owner_session AS MATERIALIZED (
+  SELECT session.id, session.bot_id, session.compaction_epoch
+  FROM bot_sessions session
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = $1
+    AND session.bot_id = $2
+  FOR UPDATE
+), replaced_turn AS MATERIALIZED (
+  SELECT MIN(message.created_at) AS started_at,
+    bool_or(compact.id IS NOT NULL) AS covered
+  FROM bot_history_messages message
+  JOIN owner_session owner ON owner.id = message.session_id
+  LEFT JOIN bot_history_message_compacts compact
+    ON compact.id = message.compact_id
+   AND compact.team_id = public.memoh_current_team_id()
+   AND compact.bot_id = owner.bot_id
+   AND compact.session_id = owner.id
+   AND compact.compaction_epoch = owner.compaction_epoch
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.turn_id = $3
+)
+SELECT COALESCE((
+  SELECT public.memoh_rewind_compaction(owner.id, turn.started_at)
+  FROM replaced_turn turn
+  WHERE turn.covered
+), false)::boolean AS rewound
+FROM owner_session owner
+`
+
+type RewindCompactionBeforeTurnParams struct {
+	SessionID pgtype.UUID `json:"session_id"`
+	BotID     pgtype.UUID `json:"bot_id"`
+	TurnID    pgtype.UUID `json:"turn_id"`
+}
+
+// A retry or edit that compacts before its first step commits rewinds the
+// session as SelectBoundHistoryTurnReplacement will when that step selects
+// it: once a summary of the current epoch covers a row of the replaced turn,
+// the summaries that end before the turn move to the new epoch and the ones
+// that reach it retire. It reports whether it rewound.
+func (q *Queries) RewindCompactionBeforeTurn(ctx context.Context, arg RewindCompactionBeforeTurnParams) (bool, error) {
+	row := q.db.QueryRow(ctx, rewindCompactionBeforeTurn, arg.SessionID, arg.BotID, arg.TurnID)
+	var rewound bool
+	err := row.Scan(&rewound)
+	return rewound, err
+}
+
 const searchMessages = `-- name: SearchMessages :many
 SELECT
   m.id,
@@ -6868,17 +7081,20 @@ WITH replacement AS MATERIALIZED (
     AND request.turn_visible = true
     AND request.run_id IS NOT DISTINCT FROM $5::uuid
 ), affected_compaction AS MATERIALIZED (
-  SELECT old.session_id
+  SELECT old.session_id, MIN(turn_start.created_at) AS turn_started_at
   FROM bot_history_messages old
   JOIN replacement ON replacement.session_id = old.session_id
   JOIN bot_history_message_compacts compact ON compact.id = old.compact_id
     AND compact.team_id = public.memoh_current_team_id()
   JOIN bot_sessions session ON session.id = old.session_id
     AND session.team_id = public.memoh_current_team_id()
+  JOIN bot_history_messages turn_start ON turn_start.team_id = public.memoh_current_team_id()
+    AND turn_start.turn_id = old.turn_id
   WHERE old.team_id = public.memoh_current_team_id()
     AND old.turn_id = $6
     AND compact.bot_id = old.bot_id AND compact.session_id = old.session_id
     AND compact.compaction_epoch = session.compaction_epoch
+  GROUP BY old.session_id
 ), hidden AS (
   UPDATE bot_history_messages old
   SET turn_visible = false,
@@ -6891,16 +7107,14 @@ WITH replacement AS MATERIALIZED (
     AND old.turn_id = $6
     AND old.turn_visible = true
   RETURNING old.id
-), epoch_update AS (
-  UPDATE bot_sessions session
-  SET compaction_epoch = compaction_epoch + 1
-  WHERE session.team_id = public.memoh_current_team_id()
-    AND session.id IN (SELECT affected_compaction.session_id FROM affected_compaction)
-    AND EXISTS (SELECT 1 FROM hidden)
-  RETURNING session.id
+), rewound AS (
+  SELECT public.memoh_rewind_compaction(affected.session_id, affected.turn_started_at) AS done
+  FROM affected_compaction affected
+  WHERE EXISTS (SELECT 1 FROM hidden)
 )
 SELECT replacement.turn_id FROM replacement
 WHERE EXISTS (SELECT 1 FROM hidden)
+  AND (SELECT COUNT(*) FROM rewound) >= 0
 `
 
 type SelectBoundHistoryTurnReplacementParams struct {
@@ -6999,9 +7213,14 @@ updated AS (
     m.compact_id,
     m.created_at
 ),
-compaction_epoch_bump AS (
-  UPDATE bot_sessions session
-  SET compaction_epoch = session.compaction_epoch + 1
+compaction_rewind AS (
+  SELECT public.memoh_rewind_compaction(session.id, turn.started_at) AS done
+  FROM bot_sessions session
+  JOIN (
+    SELECT changed.session_id, MIN(changed.created_at) AS started_at
+    FROM updated changed
+    GROUP BY changed.session_id
+  ) turn ON turn.session_id = session.id
   WHERE session.team_id = public.memoh_current_team_id()
     AND EXISTS (
     SELECT 1
@@ -7014,10 +7233,9 @@ compaction_epoch_bump AS (
       AND compact.session_id = session.id
       AND compact.compaction_epoch = session.compaction_epoch
   )
-  RETURNING session.id
 ),
-compaction_epoch_done AS (
-  SELECT COUNT(*) AS count FROM compaction_epoch_bump
+compaction_rewind_done AS (
+  SELECT COUNT(*) AS count FROM compaction_rewind
 )
 SELECT
   updated.turn_id AS id,
@@ -7032,7 +7250,7 @@ SELECT
   MIN(updated.created_at)::timestamptz AS created_at,
   COALESCE(MAX(updated.turn_superseded_at), MAX(updated.created_at))::timestamptz AS updated_at
 FROM updated
-CROSS JOIN compaction_epoch_done
+CROSS JOIN compaction_rewind_done
 GROUP BY updated.turn_id, updated.session_id, updated.turn_position
 `
 

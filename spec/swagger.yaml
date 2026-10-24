@@ -9576,28 +9576,6 @@ paths:
       tags:
       - bots
   /bots/{bot_id}/compaction/logs:
-    delete:
-      description: Delete all compaction logs for a bot
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Delete compaction logs
-      tags:
-      - compaction
     get:
       description: List compaction logs for a bot
       parameters:

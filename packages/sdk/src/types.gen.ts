@@ -7003,38 +7003,6 @@ export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdResponses = {
     204: unknown;
 };
 
-export type DeleteBotsByBotIdCompactionLogsData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/compaction/logs';
-};
-
-export type DeleteBotsByBotIdCompactionLogsErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-};
-
-export type DeleteBotsByBotIdCompactionLogsError = DeleteBotsByBotIdCompactionLogsErrors[keyof DeleteBotsByBotIdCompactionLogsErrors];
-
-export type DeleteBotsByBotIdCompactionLogsResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
 export type GetBotsByBotIdCompactionLogsData = {
     body?: never;
     path: {

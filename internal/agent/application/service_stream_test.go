@@ -215,12 +215,16 @@ func (*recordingMessageService) ListActiveSinceBySession(context.Context, string
 	return nil, nil
 }
 
-func (*recordingMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64, bool) ([]messagepkg.Message, error) {
+func (*recordingMessageService) ListActiveBySessionWithinBytes(context.Context, string, messagepkg.HistoryWindow) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
-func (*recordingMessageService) ListActiveSinceWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
-	return nil, nil
+func (*recordingMessageService) HistoryAnchorBySession(context.Context, string, time.Time) (time.Time, error) {
+	return time.Time{}, nil
+}
+
+func (*recordingMessageService) HistoryOriginBySession(context.Context, string) (messagepkg.HistoryOrigin, error) {
+	return messagepkg.HistoryOrigin{}, nil
 }
 
 func (*recordingMessageService) ListTurnResponseSourcesSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {

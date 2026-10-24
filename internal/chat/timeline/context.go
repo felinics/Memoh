@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/turn"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 // TurnResponseEntry represents an assistant or tool message from bot_history_messages,
@@ -73,7 +74,7 @@ const earliestMergeTime int64 = -1 << 63
 
 type mergeEntry struct {
 	source *turn.ContextMessageSource
-	kind   string // "rc", "summary", or "tr"
+	kind   string // "notice", "rc", "summary", or "tr"
 	time   int64
 	step   int
 	// artifact is one more than the index of the artifact that replaces
@@ -84,26 +85,12 @@ type mergeEntry struct {
 	// For summary entries
 	summaryContent    string
 	summaryArtifactID string
+	// For the history notice
+	noticeContent string
 	// For TR entries
 	trRole       string
 	trContent    string
 	trRawContent json.RawMessage
-}
-
-// ViewFromMs is the receive time of the oldest loaded RC segment or TR entry.
-func ViewFromMs(rc RenderedContext, trs []TurnResponseEntry) int64 {
-	var from int64
-	for _, segment := range rc {
-		if from == 0 || segment.ReceivedAtMs < from {
-			from = segment.ReceivedAtMs
-		}
-	}
-	for _, tr := range trs {
-		if from == 0 || tr.RequestedAtMs < from {
-			from = tr.RequestedAtMs
-		}
-	}
-	return from
 }
 
 // MergeContext interleaves RC segments and TR entries by timestamp.
@@ -166,6 +153,8 @@ func sortMergeEntries(entries []mergeEntry) {
 
 func mergeKindOrder(kind string) int {
 	switch kind {
+	case "notice":
+		return 0
 	case "rc":
 		return 1
 	case "summary":
@@ -182,6 +171,8 @@ func materializeMergeEntries(entries []mergeEntry) []ContextMessage {
 
 	for _, entry := range entries {
 		switch entry.kind {
+		case "notice":
+			messages = append(messages, ContextMessage{Role: "system", Content: entry.noticeContent})
 		case "rc":
 			var pendingText strings.Builder
 			for _, piece := range entry.rcContent {
@@ -216,14 +207,16 @@ func materializeMergeEntries(entries []mergeEntry) []ContextMessage {
 
 // ComposeContext merges un-compacted RC and TR streams.
 func ComposeContext(rc RenderedContext, trs []TurnResponseEntry) *ComposeContextResult {
-	return ComposeContextWithArtifacts(rc, trs, nil)
+	return ComposeContextWithArtifacts(rc, trs, nil, messagepkg.HistoryOrigin{})
 }
 
 // ComposeContextWithArtifacts replaces the RC/TR sources each active
 // artifact covers with its summary, placed by turn.PlaceSummary; an artifact
-// none of whose sources is loaded renders at its durable anchor.
-func ComposeContextWithArtifacts(rc RenderedContext, trs []TurnResponseEntry, artifacts []CompactionArtifact) *ComposeContextResult {
-	allMessages := mergeEntries(composeMergeEntries(rc, trs, artifacts))
+// none of whose sources is loaded renders at its durable anchor. Nothing
+// received or requested before the session's history origin is composed, and
+// the history notice opens a history whose origin left messages out.
+func ComposeContextWithArtifacts(rc RenderedContext, trs []TurnResponseEntry, artifacts []CompactionArtifact, origin messagepkg.HistoryOrigin) *ComposeContextResult {
+	allMessages := mergeEntries(composeMergeEntries(rc, trs, artifacts, origin))
 	if len(allMessages) == 0 {
 		return nil
 	}
@@ -237,7 +230,8 @@ func ComposeContextWithArtifacts(rc RenderedContext, trs []TurnResponseEntry, ar
 // composeMergeEntries builds the ordered merge-entry list for composition.
 // Entries hold references into rc/trs plus small summary strings; nothing
 // large is materialized here, so admission can measure before it selects.
-func composeMergeEntries(rc RenderedContext, trs []TurnResponseEntry, artifacts []CompactionArtifact) []mergeEntry {
+func composeMergeEntries(rc RenderedContext, trs []TurnResponseEntry, artifacts []CompactionArtifact, origin messagepkg.HistoryOrigin) []mergeEntry {
+	rc, trs = sinceHistoryOrigin(rc, trs, origin)
 	byExternal, byHistory := map[string]int{}, map[string]int{}
 	externalCoverage := make(map[string]externalMessageCoverage)
 	for i, artifact := range artifacts {
@@ -275,6 +269,9 @@ func composeMergeEntries(rc RenderedContext, trs []TurnResponseEntry, artifacts 
 			entries = append(entries, anchor)
 		}
 	}
+	if notice := HistoryNotice(origin); notice != "" && len(entries) > 0 {
+		entries = append(entries, mergeEntry{kind: "notice", time: earliestMergeTime, noticeContent: notice})
+	}
 	sortMergeEntries(entries)
 	for i, artifact := range artifacts {
 		if artifact.usable() {
@@ -282,6 +279,19 @@ func composeMergeEntries(rc RenderedContext, trs []TurnResponseEntry, artifacts 
 		}
 	}
 	return entries
+}
+
+// sinceHistoryOrigin leaves out the segments received, and the turn
+// responses requested, before the session's history origin: that history
+// reaches a request only through the summaries that cover it.
+func sinceHistoryOrigin(rc RenderedContext, trs []TurnResponseEntry, origin messagepkg.HistoryOrigin) (RenderedContext, []TurnResponseEntry) {
+	if origin.At.IsZero() {
+		return rc, trs
+	}
+	fromMs := origin.At.UnixMilli()
+	rc = slices.DeleteFunc(slices.Clone(rc), func(segment RenderedSegment) bool { return segment.ReceivedAtMs < fromMs })
+	trs = slices.DeleteFunc(slices.Clone(trs), func(tr TurnResponseEntry) bool { return tr.RequestedAtMs < fromMs })
+	return rc, trs
 }
 
 // anchorSourceLoaded reports whether the last source artifact covers is
@@ -346,16 +356,17 @@ type ComposeAdmission struct {
 // ComposeContextWithArtifactsBudgeted composes like
 // ComposeContextWithArtifacts but makes the admission decision on entry
 // metadata before materializing anything. Over budget it keeps every artifact
-// summary plus the newest contiguous window that fits, dropping older raw
-// entries deterministically. When even the protected set does not fit it
-// returns a nil result with ProtectedOverflow set.
+// summary and the history notice plus the newest contiguous window that fits,
+// dropping older raw entries deterministically. When even the protected set
+// does not fit it returns a nil result with ProtectedOverflow set.
 func ComposeContextWithArtifactsBudgeted(
 	rc RenderedContext,
 	trs []TurnResponseEntry,
 	artifacts []CompactionArtifact,
+	origin messagepkg.HistoryOrigin,
 	budget ComposeBudget,
 ) (*ComposeContextResult, ComposeAdmission) {
-	entries := composeMergeEntries(rc, trs, artifacts)
+	entries := composeMergeEntries(rc, trs, artifacts, origin)
 	if len(entries) == 0 {
 		return nil, ComposeAdmission{}
 	}
@@ -366,7 +377,7 @@ func ComposeContextWithArtifactsBudgeted(
 		admitted[i] = turn.AdmissionEntry{
 			Cost:   mergeEntryTokens(entries[i]),
 			Source: entries[i].source,
-			Pinned: entries[i].kind == "summary",
+			Pinned: entries[i].kind == "summary" || entries[i].kind == "notice",
 			ToolResponse: entries[i].kind == "tr" &&
 				strings.EqualFold(strings.TrimSpace(entries[i].trRole), "tool"),
 		}
@@ -428,6 +439,8 @@ func mergeEntryTokens(entry mergeEntry) int {
 			return turn.EstimateTokensFromBytes(len(entry.trRawContent))
 		}
 		return turn.EstimateTokensFromBytes(len(entry.trContent))
+	case "notice":
+		return turn.EstimateTokensFromBytes(len(entry.noticeContent))
 	default:
 		return turn.EstimateTokensFromBytes(len(entry.summaryContent))
 	}

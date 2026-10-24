@@ -1139,38 +1139,19 @@ func (s *DBService) ListSinceBySession(ctx context.Context, sessionID string, si
 	return msgs, nil
 }
 
-// ListActiveSinceWithinBytes returns bot messages since a given time,
-// admitted newest-first within the content byte budget (CM-ADM-001).
-func (s *DBService) ListActiveSinceWithinBytes(ctx context.Context, botID string, since time.Time, maxBytes int64) ([]Message, error) {
-	pgBotID, err := dbpkg.ParseUUID(botID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.queries.ListActiveMessagesSinceWithinBytes(ctx, sqlc.ListActiveMessagesSinceWithinBytesParams{
-		BotID:     pgBotID,
-		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
-		MaxBytes:  maxBytes,
-	})
-	if err != nil {
-		return nil, err
-	}
-	msgs := toMessagesFromActiveSinceWithinBytes(rows)
-	s.enrichAssets(ctx, msgs)
-	return msgs, nil
-}
-
-// ListActiveSinceBySessionWithinBytes returns session messages since a given
-// time, admitted newest-first within the content byte budget (CM-ADM-001).
-func (s *DBService) ListActiveSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64, foldSummarized bool) ([]Message, error) {
+// ListActiveBySessionWithinBytes returns a session's history window, admitted
+// newest-first within the content byte budget (CM-ADM-001).
+func (s *DBService) ListActiveBySessionWithinBytes(ctx context.Context, sessionID string, window HistoryWindow) ([]Message, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return nil, err
 	}
 	rows, err := s.queries.ListActiveMessagesSinceBySessionWithinBytes(ctx, sqlc.ListActiveMessagesSinceBySessionWithinBytesParams{
-		FoldSummarized: foldSummarized,
+		FoldSummarized: window.FoldSummarized,
 		SessionID:      pgSessionID,
-		CreatedAt:      pgtype.Timestamptz{Time: since, Valid: true},
-		MaxBytes:       maxBytes,
+		CreatedAt:      pgtype.Timestamptz{Time: window.Since, Valid: true},
+		Before:         pgtype.Timestamptz{Time: window.Before, Valid: !window.Before.IsZero()},
+		MaxBytes:       window.MaxBytes,
 	})
 	if err != nil {
 		return nil, err
@@ -1178,6 +1159,46 @@ func (s *DBService) ListActiveSinceBySessionWithinBytes(ctx context.Context, ses
 	msgs := toMessagesFromActiveSinceBySessionWithinBytes(rows)
 	s.enrichAssets(ctx, msgs)
 	return msgs, nil
+}
+
+// HistoryAnchorBySession reports the session's compaction anchor.
+func (s *DBService) HistoryAnchorBySession(ctx context.Context, sessionID string, before time.Time) (time.Time, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	anchor, err := s.queries.GetSessionHistoryAnchor(ctx, sqlc.GetSessionHistoryAnchorParams{
+		SessionID: pgSessionID,
+		Before:    pgtype.Timestamptz{Time: before, Valid: !before.IsZero()},
+	})
+	if err != nil {
+		return time.Time{}, err
+	}
+	return anchor.Time, nil
+}
+
+// HistoryOriginBySession reports where the session's context starts.
+func (s *DBService) HistoryOriginBySession(ctx context.Context, sessionID string) (HistoryOrigin, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return HistoryOrigin{}, err
+	}
+	row, err := s.queries.GetSessionHistoryOrigin(ctx, pgSessionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return HistoryOrigin{}, nil
+	}
+	if err != nil {
+		return HistoryOrigin{}, err
+	}
+	if !row.HistoryOriginAt.Valid {
+		return HistoryOrigin{}, nil
+	}
+	return HistoryOrigin{
+		At:           row.HistoryOriginAt.Time,
+		OmittedCount: row.HistoryOmittedCount,
+		OmittedFirst: row.HistoryOmittedFirstAt.Time,
+		OmittedLast:  row.HistoryOmittedLastAt.Time,
+	}, nil
 }
 
 // MeasureActiveBySession aggregates a session's active message count and
@@ -2332,14 +2353,6 @@ func toMessagesFromActiveSinceBySession(rows []sqlc.ListActiveMessagesSinceBySes
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
 		messages = append(messages, toMessageFromActiveSinceBySessionRow(row))
-	}
-	return messages
-}
-
-func toMessagesFromActiveSinceWithinBytes(rows []sqlc.ListActiveMessagesSinceWithinBytesRow) []Message {
-	messages := make([]Message, 0, len(rows))
-	for _, row := range rows {
-		messages = append(messages, toAdmissionMessage(sqlc.ListActiveMessagesSinceBySessionRow(row)))
 	}
 	return messages
 }

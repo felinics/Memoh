@@ -21,7 +21,7 @@ var toolCallDiffContentNeedle = []byte(`"diff"`)
 // message's tool-call parts. The runtime annotates ToolCallPart
 // ProviderMetadata with the diff so in-memory conversion can see it, but the
 // same JSON is what lands in the history row's content column — and
-// ListActiveSinceBySessionWithinBytes budgets by octet_length(content). The
+// ListActiveBySessionWithinBytes budgets by octet_length(content). The
 // diff is display sugar, not model context, so persist-time callers move it
 // onto the row's metadata column (message.ToolCallDiffsMetadataKey) instead.
 //

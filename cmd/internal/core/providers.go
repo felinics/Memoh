@@ -453,6 +453,7 @@ func provideSessionService(log *slog.Logger, queries dbstore.Queries, hub *event
 	// Foundation-level: the Server's Agent service is not in every graph that
 	// builds sessions, and setup resolution only reads Agent rows.
 	service.SetACPSetupValidator(acpprofileadapter.NewCatalog(botagents.NewService(log, queries)))
+	service.SetForkHistoryCarrier(compaction.ForkHistoryCarrier{})
 	return service
 }
 

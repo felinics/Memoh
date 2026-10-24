@@ -94,10 +94,10 @@ func TestPostgresCompactionFoldsALegacySummaryIntoOne(t *testing.T) {
 	}
 }
 
-// Compaction only summarizes rows inside the caller's history range: an older
-// backlog, and rows after an edit or retry cutoff, stay raw instead of being
-// folded into a summary the request then carries.
-func TestPostgresCompactionLeavesRowsOutsideTheViewRaw(t *testing.T) {
+// Compaction summarizes the thread's history however old it is, but an edit
+// or retry compacts only the history before its cutoff: rows after it stay
+// raw instead of being folded into a summary the request then carries.
+func TestPostgresCompactionStopsAtTheCutoff(t *testing.T) {
 	f := newBacklogFixture(t)
 	f.appendBacklog(3, 400)
 	if _, err := f.pool.Exec(f.ctx, `UPDATE bot_history_messages SET created_at=created_at - interval '2 days' WHERE session_id=$1`, f.sessionID); err != nil {
@@ -111,17 +111,64 @@ func TestPostgresCompactionLeavesRowsOutsideTheViewRaw(t *testing.T) {
 		f.appendMessage(fmt.Sprintf("after-%d", i), fmt.Sprintf("after-%d ", i)+strings.Repeat("z", 400))
 	}
 
-	if passes, err := f.fold(f.ctx, compaction.TriggerConfig{CandidatesFrom: f.base, CandidatesBefore: cutoff}); err != nil || len(passes) != 1 {
+	if passes, err := f.fold(f.ctx, compaction.TriggerConfig{CandidatesBefore: cutoff}); err != nil || len(passes) != 1 {
 		t.Fatalf("passes=%+v err=%v", passes, err)
 	}
-	if raw, compacted := f.backlogRows(); raw != 3 || compacted != 0 {
-		t.Fatalf("backlog outside the view: raw=%d compacted=%d, want all 3 left raw", raw, compacted)
+	if raw, compacted := f.backlogRows(); raw != 0 || compacted != 3 {
+		t.Fatalf("backlog days old: raw=%d compacted=%d, want all 3 summarized", raw, compacted)
 	}
 	if raw, compacted := f.backlogRowsPrefixed("after-"); raw != 2 || compacted != 0 {
 		t.Fatalf("rows after the cutoff: raw=%d compacted=%d, want both left raw", raw, compacted)
 	}
 	if _, compacted := f.backlogRowsPrefixed("view-"); compacted == 0 {
 		t.Fatal("rows inside the view were not compacted")
+	}
+}
+
+// An edit or retry that compacts before its first step commits folds onto the
+// summaries its replacement keeps. The replaced turn's run wrote a summary
+// that reaches past the cutoff; the event first rewinds the session to before
+// the turn, as the replacement will, so the summary that ends before it is
+// active again and the turn's rows are left raw for the attempt to replace.
+func TestPostgresCompactionRewindsTheReplacedTurnBeforeFolding(t *testing.T) {
+	f := newBacklogFixture(t)
+	base := time.Now().Add(-time.Hour)
+	f.persistHistory("early-", 4, 400, base)
+	early, err := f.fold(f.ctx, compaction.TriggerConfig{})
+	if err != nil || len(early) != 1 {
+		t.Fatalf("fold the early history: passes=%+v err=%v", early, err)
+	}
+	f.persistHistory("later-", 4, 400, base.Add(10*time.Second))
+	f.persistHistory("replaced-", 2, 400, base.Add(20*time.Second))
+	var turnID string
+	var turnStart time.Time
+	if err := f.pool.QueryRow(f.ctx, `SELECT turn_id::text, created_at FROM bot_history_messages WHERE session_id=$1 AND source_message_id='replaced-0'`, f.sessionID).Scan(&turnID, &turnStart); err != nil {
+		t.Fatal(err)
+	}
+	// The replaced turn's run folded its own rows with everything before them.
+	if spanning, err := f.fold(f.ctx, compaction.TriggerConfig{}); err != nil || len(spanning) != 1 {
+		t.Fatalf("fold the replaced turn: passes=%+v err=%v", spanning, err)
+	}
+
+	passes, err := f.fold(f.ctx, compaction.TriggerConfig{CandidatesBefore: turnStart, ReplacedTurnID: turnID})
+	if err != nil || len(passes) != 1 {
+		t.Fatalf("passes=%+v err=%v, want the edit's event to fold once the replaced turn is rewound", passes, err)
+	}
+	if absorbed := passes[0].Absorbed; len(absorbed) != 1 || absorbed[0] != early[0].ArtifactID {
+		t.Fatalf("absorbed=%v, want only the summary that ends before the turn (%s)", absorbed, early[0].ArtifactID)
+	}
+	if folded := foldedRows(passes...); len(folded) != 4 {
+		t.Fatalf("folded %d rows, want the 4 rows between the earlier summary and the turn", len(folded))
+	}
+	var raw int
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM bot_history_messages h
+		JOIN bot_sessions s ON s.id = h.session_id
+		LEFT JOIN bot_history_message_compacts c ON c.id = h.compact_id AND c.compaction_epoch = s.compaction_epoch AND c.status = 'ok'
+		WHERE h.session_id = $1 AND h.source_message_id LIKE 'replaced-%' AND c.id IS NULL`, f.sessionID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw != 2 {
+		t.Fatalf("replaced turn rows left raw = %d, want 2", raw)
 	}
 }
 

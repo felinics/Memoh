@@ -10,6 +10,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
@@ -214,7 +215,7 @@ func composeDiscussMessages(rc timeline.RenderedContext, trs []timeline.TurnResp
 	if strings.TrimSpace(summary) != "" {
 		artifacts = []timeline.CompactionArtifact{{ID: "equivalence-artifact", Summary: summary}}
 	}
-	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts)
+	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts, messagepkg.HistoryOrigin{})
 	if composed == nil {
 		return make([]timeline.ContextMessage, 0)
 	}

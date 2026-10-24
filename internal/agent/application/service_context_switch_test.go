@@ -192,9 +192,9 @@ func TestSwitchContextFoldsTheRequestView(t *testing.T) {
 			detail, err := service.switchContext(req, committer, "")(t.Context(), sw)
 			cfg := runner.cfg
 			tail := turn.ContextMessageSource{Kind: "history", ID: "latest", Current: true}
-			if !reflect.DeepEqual(cfg.View, sw.View) || !reflect.DeepEqual(cfg.Anchors, rows("request", "steer", "input")) || !cfg.CandidatesFrom.IsZero() ||
+			if !reflect.DeepEqual(cfg.View, sw.View) || !reflect.DeepEqual(cfg.Anchors, rows("request", "steer", "input")) ||
 				!reflect.DeepEqual(cfg.ProtectedSources, []turn.ContextMessageSource{tail}) || cfg.HistoryBudgetTokens != 900 {
-				t.Fatalf("event config view=%v anchors=%v from=%v protected=%v budget=%d", cfg.View, cfg.Anchors, cfg.CandidatesFrom, cfg.ProtectedSources, cfg.HistoryBudgetTokens)
+				t.Fatalf("event config view=%v anchors=%v protected=%v budget=%d", cfg.View, cfg.Anchors, cfg.ProtectedSources, cfg.HistoryBudgetTokens)
 			}
 			if tc.want == nil {
 				if err != nil || len(folds) != 2 || folds[1].Artifact != "a2" || !reflect.DeepEqual(folds[1].Summary, compaction.SummaryMessage("second")) ||

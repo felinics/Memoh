@@ -112,7 +112,7 @@ func TestPostgresTurnResponseSourcesProjectMetadataAndPreserveWindow(t *testing.
 				}
 				// Full-row admission keeps the same window but hands metadata
 				// over undecoded, for history records to decode row by row.
-				full, err := svc.ListActiveSinceBySessionWithinBytes(ctx, postgresMessageTestSessionID, since, budget, true)
+				full, err := svc.ListActiveBySessionWithinBytes(ctx, postgresMessageTestSessionID, HistoryWindow{Since: since, MaxBytes: budget, FoldSummarized: true})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -194,18 +194,40 @@ func TestPostgresHistoryWindowFoldsSummarizedRows(t *testing.T) {
 		}
 		return out
 	}
-	folded, err := svc.ListActiveSinceBySessionWithinBytes(ctx, postgresMessageTestSessionID, base, 3500, true)
+	folded, err := svc.ListActiveBySessionWithinBytes(ctx, postgresMessageTestSessionID, HistoryWindow{Since: base, MaxBytes: 3500, FoldSummarized: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, want := names(folded), []string{"input", "folded-2*", "failed", "stale", "newest"}; !slices.Equal(got, want) {
 		t.Fatalf("folded window = %v, want %v", got, want)
 	}
-	full, err := svc.ListActiveSinceBySessionWithinBytes(ctx, postgresMessageTestSessionID, base, 3500, false)
+	full, err := svc.ListActiveBySessionWithinBytes(ctx, postgresMessageTestSessionID, HistoryWindow{Since: base, MaxBytes: 3500})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, want := names(full), []string{"folded-2", "failed", "stale", "newest"}; !slices.Equal(got, want) {
 		t.Fatalf("unfolded window = %v, want %v", got, want)
+	}
+
+	// As of a cutoff, the window holds the rows before it, and a summary
+	// folds its rows only if it ends before the cutoff.
+	if _, err := tx.Exec(ctx, `UPDATE bot_history_message_compacts SET anchor_start_ms = $2, anchor_end_ms = $3 WHERE id = $1`,
+		compacts["ok"], base.Add(2*time.Second).UnixMilli(), base.Add(4*time.Second).UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		before time.Time
+		want   []string
+	}{
+		{base.Add(5 * time.Second), []string{"beyond", "input", "folded-2*"}},
+		{base.Add(4 * time.Second), []string{"beyond", "input", "folded-0", "folded-1"}},
+	} {
+		cut, err := svc.ListActiveBySessionWithinBytes(ctx, postgresMessageTestSessionID, HistoryWindow{Since: base, Before: tc.before, MaxBytes: 3500, FoldSummarized: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := names(cut); !slices.Equal(got, tc.want) {
+			t.Fatalf("window before %v = %v, want %v", tc.before, got, tc.want)
+		}
 	}
 }

@@ -32,7 +32,8 @@ folds what its request renders: the history before its cutoff and the steps of
 the attempt its first step selected. A retry renders its input from the request
 it replaces, which that step hides; from then on the copy the step wrote is the
 input the event keeps in place. When the replaced turn had compacted in place,
-the same step moves the session to a new compaction epoch, so the attempt folds
+the same step moves the session to a new compaction epoch, or the attempt's
+first compaction does when it needs one before that step, so the attempt folds
 the history before the cutoff into a summary of its own. Subagent and external
 runtimes have separate ownership and remain outside this capability.
 
@@ -65,6 +66,76 @@ cannot hide an edit it never read. Stored message hashes survive replay projecti
 RC versions are checked against their persisted event cursors. Restart replay keeps
 the complete event chain for newer edits, including edits received before compaction
 started. Artifact commit additionally verifies the full durable source hash.
+
+A thread's history has no time window. It is one rolling summary, a compaction
+frontier, and the raw rows kept before the frontier: what lies before the
+frontier reaches a request as the summary or as a kept row, and what lies after
+it stays raw. Kept rows are a run's inputs and steers, which the summarizer
+reads but never claims, so a run that folds its own earlier steps leaves
+`[input, summary, latest steps]`; once the run is over the input is an ordinary
+candidate and the next compaction folds it. Compaction folds the summary and
+the oldest complete foldable units into a new summary; committing it moves the
+frontier, and a pass that cannot read everything at once repeats that step.
+The frontier is not stored apart from the summaries: it is what the usable
+summaries of the current epoch cover, so it moves only when a summary commits,
+and neither a byte window nor a cutoff moves it.
+
+A load starts at the oldest visible row no usable summary replaces
+(`GetSessionHistoryAnchor`): the frontier, or the oldest kept row if one
+precedes it, or the newest row when every row is summarized. Chat and
+turn-response loads read newest-first within the byte budget from there; rows a
+summary replaced cost no budget, so a load costs what is unsummarized, not the
+thread's length.
+
+A session from before rolling summaries can hold months of unsummarized
+history, far more than any request read. Such a session has a history origin
+(`bot_sessions.history_origin_at`, 0172): where its context starts. History
+before it reaches a request only through the summaries that already cover it.
+The history anchor, compaction candidates, Discuss event replay and the record,
+pipeline and Discuss compositions all start there, and a history notice opens
+the history: a system message saying how many visible messages precede the
+origin, when the first and the last were sent, that only summaries carry them,
+and that the message history can be searched over that range
+(`timeline.HistoryNotice`; the history tools' usage says how). The notice
+renders no source, so no summary covers it and in-run compaction keeps it.
+`memoh_place_history_origin` places the origin at the start of the oldest turn
+for which every active summary plus the rows from there on fit nine tenths of
+a history budget, measured as the history load measures them, on a clean turn
+boundary that splits rows and session events alike; it always keeps the newest
+turn, and a session whose history fits gets none. The budget
+(`memoh_session_history_budget`) is the newest one the session's runs planned,
+else half its model's context window up to the default absolute cap. The
+migration places an origin for every live session it finds; afterwards only a
+fork or a bot import places one, and a session created later never has one.
+The first request after the upgrade fits without compacting, summaries from
+before the upgrade still render, and the first compaction that overflows folds
+them into the summary it writes. `memoh_rewind_compaction` rewinds nothing for
+a change before the origin that no usable summary reaches.
+
+A fork copies the source's visible history through its turn and carries what
+holds for the copy (`compaction.ForkHistoryCarrier`): each summary that ends
+before the fork point, as a rewind there would keep it, becomes an active root
+of the fork over the copies of its rows; a summary without persisted coverage
+stays behind and its copies read raw. A fork that copies history past the
+source's origin takes that origin. One cut before it, or from a session without
+one, gets an origin placed for the copy with the source's budget, so a fork's
+first request needs no summary either. An import restores each message at its
+original time and places origins for the sessions it restores; it restores no
+summaries.
+
+An edit or retry renders the history as it stood at its cutoff: rows before the
+cutoff, folded only by the summaries that end before it, with the summary a
+later one superseded active again (`ArtifactProjection.LoadSessionBefore`).
+That is the frontier the replacement leaves: hiding or replacing a turn whose
+rows a summary of the current epoch covers calls `memoh_rewind_compaction`,
+which moves the session to a new epoch and carries every summary that ends
+before the turn into it. Only the summaries that reach the turn are retired,
+so a retry after in-run compaction refolds from the previous summary rather
+than from the start of the thread. An edit or retry that must compact before
+its first step commits rewinds the same way first (`RewindCompactionBeforeTurn`),
+so its fold builds on the summaries the replacement keeps. Deleting a row, or
+adding an asset to one, that a summary of the current epoch covers rewinds from
+that row; only clearing history retires every summary of the epoch.
 
 Rendered artifacts, candidate payloads and claim verification use bounded reads.
 In-run recovery does not load the raw history span or reread ancestor summaries;

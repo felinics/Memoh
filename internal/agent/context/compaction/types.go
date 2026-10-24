@@ -97,11 +97,14 @@ type TriggerConfig struct {
 	// declared window and output cap; they size the summarizer call.
 	SummaryWindowTokens int
 	MaxOutputTokens     int
-	// CandidatesFrom is where the caller's history begins and
-	// CandidatesBefore the cutoff an edit or retry replays history before.
-	// Rows outside are not part of that request. Zero leaves that side open.
-	CandidatesFrom   time.Time
+	// CandidatesBefore is the cutoff an edit or retry replays history
+	// before: later rows are not part of that request. Zero leaves it open.
 	CandidatesBefore time.Time
+	// ReplacedTurnID is the turn an edit or retry replaces. The replacement
+	// rewinds the session to before that turn when its first step commits;
+	// an event the request needs earlier rewinds first, so it folds onto the
+	// summaries the replacement keeps rather than one that reaches the turn.
+	ReplacedTurnID string
 	// ProtectedSources stay raw, with everything after them. Current ones are
 	// the caller's current input, budgeted outside HistoryBudgetTokens; the
 	// rest are history it keeps.

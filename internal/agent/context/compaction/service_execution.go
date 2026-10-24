@@ -50,12 +50,10 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	if err != nil {
 		return Pass{}, false, err
 	}
-	createdFrom := pgtype.Timestamptz{Time: cfg.CandidatesFrom, Valid: !cfg.CandidatesFrom.IsZero()}
 	createdBefore := pgtype.Timestamptz{Time: cfg.CandidatesBefore, Valid: !cfg.CandidatesBefore.IsZero()}
 	viewIDs, viewExternalIDs := viewFilter(cfg)
 	measure, err := s.queries.MeasureUncompactedMessagesBySession(ctx, sqlc.MeasureUncompactedMessagesBySessionParams{
 		SessionID:          sessionUUID,
-		CreatedFrom:        createdFrom,
 		CreatedBefore:      createdBefore,
 		MessageIds:         viewIDs,
 		ExternalMessageIds: viewExternalIDs,
@@ -68,7 +66,6 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	}
 	boundedRows, err := s.queries.ListUncompactedMessagesBySessionWithinBytes(ctx, sqlc.ListUncompactedMessagesBySessionWithinBytesParams{
 		SessionID:          sessionUUID,
-		CreatedFrom:        createdFrom,
 		CreatedBefore:      createdBefore,
 		MessageIds:         viewIDs,
 		ExternalMessageIds: viewExternalIDs,
@@ -339,6 +336,35 @@ func viewFilter(cfg TriggerConfig) ([]pgtype.UUID, []string) {
 // failed names the reason a pass ends the event with.
 func failed(reason Reason, err error) error {
 	return &EventError{Reason: reason, Err: err}
+}
+
+// rewindReplacedTurn moves the session to where an edit or retry's
+// replacement leaves it, in a transaction fenced by the caller's runtime
+// ownership. The request renders the history before its cutoff, folded only
+// by the summaries that end before it; a summary the replaced run wrote
+// reaches past the cutoff, so a pass that read it as a parent could commit no
+// summary the request renders.
+func (s *Service) rewindReplacedTurn(ctx context.Context, botUUID, sessionUUID pgtype.UUID, cfg TriggerConfig) error {
+	turnUUID, err := db.ParseUUID(cfg.ReplacedTurnID)
+	if err != nil {
+		return err
+	}
+	var rewound bool
+	if _, err := s.inSession(ctx, cfg, func(q dbstore.Queries) error {
+		rewound, err = q.RewindCompactionBeforeTurn(ctx, sqlc.RewindCompactionBeforeTurnParams{
+			SessionID: sessionUUID, BotID: botUUID, TurnID: turnUUID,
+		})
+		return err
+	}); err != nil {
+		return staleSource(err)
+	}
+	if rewound {
+		s.logger.InfoContext(ctx, "compaction: rewound the summaries that reach the replaced turn",
+			slog.String("session_id", cfg.SessionID),
+			slog.String("turn_id", cfg.ReplacedTurnID),
+		)
+	}
+	return nil
 }
 
 // claim records the attempt and marks the rows it folds, in one fenced

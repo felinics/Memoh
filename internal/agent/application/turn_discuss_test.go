@@ -1168,7 +1168,8 @@ func (f *burstAgentStreamer) Stream(ctx context.Context, _ native.RunConfig) <-c
 
 // Discuss rows carry the stored content shape (argument objects, output
 // values, nested annotations). They are typed through the codec, never
-// decoded as SDK JSON.
+// decoded as SDK JSON. A plain message keeps its role, the history notice's
+// system role included.
 func TestDiscussMessagesToSDKTypesStoredShape(t *testing.T) {
 	t.Parallel()
 
@@ -1176,9 +1177,10 @@ func TestDiscussMessagesToSDKTypesStoredShape(t *testing.T) {
 		{Role: "assistant", Content: "fallback", RawContent: json.RawMessage(`[{"type":"tool-call","toolCallId":"call-1","toolName":"exec","input":{"command":"ls && pwd"},"providerMetadata":{"approval":{"approval_id":"a1","status":"approved"}}}]`)},
 		{Role: "tool", Content: "fallback", RawContent: json.RawMessage(`[{"type":"tool-result","toolCallId":"call-1","toolName":"exec","result":{"stdout":"ok"}}]`)},
 		{Role: "user", Content: "plain"},
+		{Role: "system", Content: "notice"},
 	})
-	if len(messages) != 3 {
-		t.Fatalf("messages = %d, want 3", len(messages))
+	if len(messages) != 4 {
+		t.Fatalf("messages = %d, want 4", len(messages))
 	}
 	call, ok := messages[0].Content[0].(sdk.ToolCallPart)
 	if !ok {
@@ -1199,6 +1201,9 @@ func TestDiscussMessagesToSDKTypesStoredShape(t *testing.T) {
 	}
 	if messages[2].Role != sdk.MessageRoleUser || messageContentTextForTest(messages[2]) != "plain" {
 		t.Fatalf("plain message = %#v", messages[2])
+	}
+	if messages[3].Role != sdk.MessageRoleSystem || messageContentTextForTest(messages[3]) != "notice" {
+		t.Fatalf("system message = %#v", messages[3])
 	}
 }
 

@@ -138,27 +138,11 @@ func TestPostgresBotDeleteAndBatchDeleteShareSessionLockOrder(t *testing.T) {
 	})
 }
 
-func TestPostgresCompactionLogDeleteAndBatchDeleteShareSessionLockOrder(t *testing.T) {
-	fixture := setupOrderedSessionFixture(t)
-	botID := mustTestUUID(t, fixture.botID)
-	assertBotMutationLockOrder(t, fixture, func(ctx context.Context, queries *dbsqlc.Queries) error {
-		return queries.DeleteCompactionLogsByBot(ctx, botID)
-	})
-}
-
 func TestPostgresSessionClearLocksCompactionArtifactsInIDOrder(t *testing.T) {
 	fixture := setupCommittedCompactionFixture(t)
 	sessionID := mustTestUUID(t, fixture.sessionID)
 	assertCompactionArtifactLockOrder(t, fixture, func(ctx context.Context, queries *dbsqlc.Queries) error {
 		return queries.ClearHistoryBySession(ctx, sessionID)
-	})
-}
-
-func TestPostgresCompactionLogDeleteLocksArtifactsInIDOrder(t *testing.T) {
-	fixture := setupCommittedCompactionFixture(t)
-	botID := mustTestUUID(t, fixture.botID)
-	assertCompactionArtifactLockOrder(t, fixture, func(ctx context.Context, queries *dbsqlc.Queries) error {
-		return queries.DeleteCompactionLogsByBot(ctx, botID)
 	})
 }
 

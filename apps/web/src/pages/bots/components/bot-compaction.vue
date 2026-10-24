@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onDeactivated, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ConfirmPopover, InlineLoadingRow, SectionGroup, SettingsRow, SettingsSection, toast } from '@felinic/ui'
+import { InlineLoadingRow, SectionGroup, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import {
   Button, Badge, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle,
   Empty, EmptyDescription, EmptyHeader, EmptyTitle, Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -9,7 +9,7 @@ import {
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,
 } from '@felinic/ui'
-import { getBotsByBotIdCompactionLogs, deleteBotsByBotIdCompactionLogs } from '@memohai/sdk'
+import { getBotsByBotIdCompactionLogs } from '@memohai/sdk'
 import type { CompactionLog } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatDateTime } from '@/utils/date-time'
@@ -25,7 +25,6 @@ const { t } = useI18n()
 
 // ---- Logs ----
 const isLoading = ref(false)
-const isClearing = ref(false)
 const logs = ref<CompactionLog[]>([])
 const totalCount = ref(0)
 const statusFilter = ref('all')
@@ -117,24 +116,6 @@ function tickPoll() {
 
 function onVisibilityChange() {
   if (logsOpen.value && !document.hidden) void fetchLogs(true)
-}
-
-async function handleClear() {
-  isClearing.value = true
-  try {
-    await deleteBotsByBotIdCompactionLogs({
-      path: { bot_id: props.botId },
-      throwOnError: true,
-    })
-    logs.value = []
-    totalCount.value = 0
-    expandedIds.value.clear()
-    toast.success(t('bots.compaction.clearSuccess'))
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('bots.compaction.clearFailed')))
-  } finally {
-    isClearing.value = false
-  }
 }
 
 onMounted(() => {
@@ -350,34 +331,6 @@ onBeforeUnmount(() => {
                     </Pagination>
                   </div>
                 </template>
-              </SettingsSection>
-
-              <SettingsSection
-                v-if="logs.length > 0"
-                :title="$t('common.dangerZone')"
-              >
-                <SettingsRow
-                  :label="$t('bots.compaction.clearLogs')"
-                  :description="$t('bots.compaction.clearConfirm')"
-                >
-                  <ConfirmPopover
-                    :message="$t('bots.compaction.clearConfirm')"
-                    :loading="isClearing"
-                    :cancel-text="$t('common.cancel')"
-                    :confirm-text="$t('bots.compaction.clearLogs')"
-                    @confirm="handleClear"
-                  >
-                    <template #trigger>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        :loading="isClearing"
-                      >
-                        {{ $t('bots.compaction.clearLogs') }}
-                      </Button>
-                    </template>
-                  </ConfirmPopover>
-                </SettingsRow>
               </SettingsSection>
             </div>
           </DialogBody>

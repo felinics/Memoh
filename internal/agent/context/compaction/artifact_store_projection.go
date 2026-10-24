@@ -29,26 +29,62 @@ func NewArtifactProjection(queries artifactProjectionQueries) ArtifactProjection
 }
 
 func (p ArtifactProjection) LoadActiveSession(ctx context.Context, owner ArtifactOwner) (ArtifactFrontier, error) {
+	artifacts, err := p.loadSessionLineage(ctx, owner)
+	if err != nil {
+		return ArtifactFrontier{}, err
+	}
+	return buildArtifactFrontierForOwner(artifacts, owner), nil
+}
+
+// LoadSessionBefore projects the session's frontier as it stood before a
+// cutoff: only the summaries that end before it, a summary whose successor
+// ends at or past it active again. It is the frontier the session keeps
+// once the turn at the cutoff is replaced and its compaction rewinds.
+func (p ArtifactProjection) LoadSessionBefore(ctx context.Context, owner ArtifactOwner, cutoff time.Time) (ArtifactFrontier, error) {
+	artifacts, err := p.loadSessionLineage(ctx, owner)
+	if err != nil {
+		return ArtifactFrontier{}, err
+	}
+	kept := make(map[string]struct{}, len(artifacts))
+	for _, artifact := range artifacts {
+		if artifact.EndsBefore(cutoff) {
+			kept[artifact.ID] = struct{}{}
+		}
+	}
+	before := make([]Artifact, 0, len(kept))
+	for _, artifact := range artifacts {
+		if _, ok := kept[artifact.ID]; !ok {
+			continue
+		}
+		if _, ok := kept[artifact.SupersededBy]; !ok {
+			artifact.SupersededBy, artifact.SupersededAt = "", time.Time{}
+		}
+		before = append(before, artifact)
+	}
+	return buildArtifactFrontierForOwner(before, owner), nil
+}
+
+func (p ArtifactProjection) loadSessionLineage(ctx context.Context, owner ArtifactOwner) ([]Artifact, error) {
 	if p.queries == nil {
-		return ArtifactFrontier{}, nil
+		return nil, nil
 	}
 	sessionUUID, err := db.ParseUUID(owner.SessionID)
 	if err != nil {
-		return ArtifactFrontier{}, err
+		return nil, err
 	}
 	rows, err := p.queries.ListCompactionArtifactLineageBySession(ctx, sessionUUID)
 	if err != nil {
-		return ArtifactFrontier{}, err
+		return nil, err
 	}
 	artifacts := make([]Artifact, 0, len(rows))
 	for _, row := range rows {
 		artifact, err := artifactFromDBRow(row)
 		if err != nil {
-			return ArtifactFrontier{}, err
+			return nil, err
 		}
 		artifacts = append(artifacts, artifact)
 	}
-	return buildArtifactFrontierForOwner(artifacts, owner), nil
+	return artifacts, nil
 }
 
 func (p ArtifactProjection) LoadActiveByID(ctx context.Context, id string, owner ArtifactOwner) (Artifact, error) {

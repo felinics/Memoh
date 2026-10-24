@@ -15,6 +15,28 @@ RETURNING id, bot_id, session_id, status, summary, message_count, error_message,
           artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
           superseded_by, superseded_at, compaction_epoch, started_at, completed_at, team_id;
 
+-- name: CreateForkedCompactionArtifact :one
+-- A fork carries a summary of its source as an active root of its own: the
+-- same text, model, level and timing, coverage naming the fork's copies of
+-- the rows, and no usage, so the summarizer call that wrote it is counted
+-- once.
+INSERT INTO bot_history_message_compacts (
+  bot_id, session_id, compaction_epoch, team_id, status, summary, message_count, model_id,
+  artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, started_at, completed_at
+)
+SELECT fork.bot_id, fork.id, fork.compaction_epoch, fork.team_id, 'ok', source.summary, sqlc.arg(message_count),
+  source.model_id, source.artifact_version, sqlc.arg(coverage), sqlc.arg(anchor_start_ms), sqlc.arg(anchor_end_ms),
+  source.artifact_level, source.started_at, source.completed_at
+FROM bot_history_message_compacts source
+JOIN bot_sessions fork
+  ON fork.team_id = public.memoh_current_team_id()
+ AND fork.id = sqlc.arg(session_id)
+ AND fork.bot_id = source.bot_id
+WHERE source.team_id = public.memoh_current_team_id()
+  AND source.id = sqlc.arg(source_compact_id)
+  AND source.status = 'ok'
+RETURNING id;
+
 -- name: CompleteCompactionLog :one
 WITH target_compact AS MATERIALIZED (
   SELECT compact.id, compact.session_id, compact.team_id
@@ -309,37 +331,6 @@ WHERE c.team_id = public.memoh_current_team_id()
     )
   )
 ORDER BY c.anchor_start_ms ASC, c.started_at ASC, c.id ASC;
-
--- name: DeleteCompactionLogsByBot :exec
-WITH target_sessions AS MATERIALIZED (
-  SELECT session.id
-  FROM bot_sessions session
-  WHERE session.team_id = public.memoh_current_team_id()
-    AND session.bot_id = sqlc.arg(target_bot_id)
-  ORDER BY session.id
-  FOR UPDATE
-),
-invalidated_sessions AS (
-  UPDATE bot_sessions session
-  SET compaction_epoch = session.compaction_epoch + 1
-  FROM target_sessions target
-  WHERE session.team_id = public.memoh_current_team_id()
-    AND session.id = target.id
-  RETURNING session.id
-),
-target_compaction_logs AS MATERIALIZED (
-  SELECT compact.id
-  FROM bot_history_message_compacts compact
-  WHERE compact.team_id = public.memoh_current_team_id()
-    AND compact.bot_id = sqlc.arg(target_bot_id)
-    AND (SELECT count(*) FROM target_sessions) >= 0
-  ORDER BY compact.id
-  FOR UPDATE
-)
-DELETE FROM bot_history_message_compacts AS compacts
-USING target_compaction_logs target
-WHERE compacts.team_id = public.memoh_current_team_id()
-  AND compacts.id = target.id;
 
 -- name: ReleasePendingCompactionClaimsBySession :exec
 -- A new runtime owner releases the compaction claims its predecessors left

@@ -49,7 +49,11 @@ func (s *Service) buildMemoryQuery(ctx context.Context, req ChatRequest) memoryQ
 	if s == nil || s.messageService == nil {
 		return builder.Build(req, nil)
 	}
-	loaded, err := s.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), req.ThreadID, defaultMaxContextMinutes, 0, false)
+	artifactBoundary, err := s.loadCompactionArtifactBoundary(ctx, req.ThreadID, req.HistoryCutoffBeforeMessageID)
+	var loaded []historyfrag.HistoryRecord
+	if err == nil {
+		loaded, err = s.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), req.ThreadID, 0, false, artifactBoundary)
+	}
 	if err != nil {
 		if s.logger != nil {
 			s.logger.WarnContext(ctx, "memory query history load failed",
@@ -62,8 +66,6 @@ func (s *Service) buildMemoryQuery(ctx context.Context, req ChatRequest) memoryQ
 		return builder.Build(req, nil)
 	}
 	loaded = pruneHistoryForGateway(loaded)
-	artifactBoundary := s.loadCompactionArtifactBoundary(ctx, loaded, req.ThreadID, req.HistoryCutoffBeforeMessageID)
-	loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
 	loaded, err = s.replaceCompactedMessages(ctx, req.ThreadID, compactionSummaryScope(req.BotID, req.ChatID, req.ThreadID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded, artifactBoundary)
 	if err != nil {
 		if s.logger != nil {

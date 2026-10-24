@@ -259,6 +259,10 @@ type subagentTransactionalQueries interface {
 	InTx(context.Context, func(dbstore.Queries) error) error
 }
 
+type forkTransactionalQueries interface {
+	InTx(context.Context, func(dbstore.Queries) error) error
+}
+
 type sessionDescriptorTransactionalQueries interface {
 	InTx(context.Context, func(dbstore.Queries) error) error
 	SupportsTransactions() bool
@@ -324,12 +328,36 @@ type ForkFromAssistantInput struct {
 	CreatedByUserID string
 }
 
+// ForkedHistory is the history a fork copied: the source's visible rows
+// through the fork turn, each beside its copy.
+type ForkedHistory struct {
+	BotID           string
+	SourceSessionID string
+	ForkSessionID   string
+	// SourceMessageIDs and ForkMessageIDs pair each copied source row with
+	// its copy.
+	SourceMessageIDs []pgtype.UUID
+	ForkMessageIDs   []pgtype.UUID
+	// Cutoff is when the first visible source row the fork did not copy was
+	// created; zero when it copied every one.
+	Cutoff time.Time
+}
+
+// ForkHistoryCarrier makes the source's summaries that still hold for a
+// fork's copied history the fork's own, in the transaction that creates the
+// fork. Thread owns this port so chat persistence never imports compaction;
+// the compaction package implements it.
+type ForkHistoryCarrier interface {
+	CarryForkSummaries(ctx context.Context, queries dbstore.Queries, fork ForkedHistory) error
+}
+
 // Service manages bot chat threads.
 type Service struct {
 	queries           Queries
 	hookService       *hooks.Service
 	publisher         event.Publisher
 	acpSetupValidator ACPSetupValidator
+	forkHistory       ForkHistoryCarrier
 	logger            *slog.Logger
 }
 
@@ -372,6 +400,15 @@ func (s *Service) SetACPSetupValidator(validator ACPSetupValidator) {
 		return
 	}
 	s.acpSetupValidator = validator
+}
+
+// SetForkHistoryCarrier wires what carries summaries into a fork. Without
+// one a fork copies only rows, and its history reads them raw.
+func (s *Service) SetForkHistoryCarrier(carrier ForkHistoryCarrier) {
+	if s == nil {
+		return
+	}
+	s.forkHistory = carrier
 }
 
 // canonicalChannelType maps the product's own inbound surfaces (web composer,
@@ -677,7 +714,9 @@ func (s *Service) ListSubagentForkContext(ctx context.Context, sessionID string)
 }
 
 // ForkFromAssistantTurn creates a new chat thread containing the source
-// thread's visible linear history through the selected assistant turn.
+// thread's visible linear history through the selected assistant turn, with
+// the summaries and history origin that hold for it, so the fork's first
+// request reads what the source read at that turn without compacting again.
 func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssistantInput) (Thread, error) {
 	pgBotID, err := dbpkg.ParseUUID(input.BotID)
 	if err != nil {
@@ -748,14 +787,41 @@ func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssis
 		}
 	}
 
-	row, err := s.queries.ForkSessionFromAssistantTurn(ctx, sqlc.ForkSessionFromAssistantTurnParams{
-		SessionID:               pgSessionID,
-		BotID:                   pgBotID,
-		TurnID:                  pgTurnID,
-		Title:                   forkTitle,
-		Metadata:                metaBytes,
-		RuntimeMetadataOverride: runtimeMetadataOverrideBytes,
-		CreatedByUserID:         pgCreatedByUserID,
+	txer, ok := s.queries.(forkTransactionalQueries)
+	if !ok {
+		return Thread{}, errors.New("fork thread: transactions unsupported")
+	}
+	var forkID pgtype.UUID
+	err = txer.InTx(ctx, func(queries dbstore.Queries) error {
+		row, err := queries.ForkSessionFromAssistantTurn(ctx, sqlc.ForkSessionFromAssistantTurnParams{
+			SessionID:               pgSessionID,
+			BotID:                   pgBotID,
+			TurnID:                  pgTurnID,
+			Title:                   forkTitle,
+			Metadata:                metaBytes,
+			RuntimeMetadataOverride: runtimeMetadataOverrideBytes,
+			CreatedByUserID:         pgCreatedByUserID,
+		})
+		if err != nil {
+			return err
+		}
+		forkID = row.ID
+		history := ForkedHistory{
+			BotID:            source.BotID,
+			SourceSessionID:  source.ID,
+			ForkSessionID:    row.ID.String(),
+			SourceMessageIDs: row.SourceMessageIds,
+			ForkMessageIDs:   row.ForkMessageIds,
+		}
+		if row.ForkCutoff.Valid {
+			history.Cutoff = row.ForkCutoff.Time
+		}
+		if s.forkHistory != nil {
+			if err := s.forkHistory.CarryForkSummaries(ctx, queries, history); err != nil {
+				return fmt.Errorf("carry fork summaries: %w", err)
+			}
+		}
+		return carryForkHistoryOrigin(ctx, queries, history, sourceRow.HistoryOriginAt)
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -763,10 +829,41 @@ func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssis
 		}
 		return Thread{}, err
 	}
-	thread := toThreadFromForkRow(row)
+	forkRow, err := s.queries.GetSessionByID(ctx, forkID)
+	if err != nil {
+		return Thread{}, err
+	}
+	thread := toThread(forkRow)
 	s.publishThreadCreated(thread)
 	s.runThreadStartHook(context.WithoutCancel(ctx), thread)
 	return thread, nil
+}
+
+// carryForkHistoryOrigin gives a fork the history origin that holds for its
+// copy. A copy that reaches past the source's origin, as one of the whole
+// visible history always does, has the same rows before it and takes the
+// source's origin. A copy cut before it, or from a session without one, gets
+// an origin placed for the copy with the source's history budget, so its
+// first request fits as the source's did.
+func carryForkHistoryOrigin(ctx context.Context, queries dbstore.Queries, fork ForkedHistory, sourceOrigin pgtype.Timestamptz) error {
+	forkID, err := dbpkg.ParseUUID(fork.ForkSessionID)
+	if err != nil {
+		return err
+	}
+	sourceID, err := dbpkg.ParseUUID(fork.SourceSessionID)
+	if err != nil {
+		return err
+	}
+	if fork.Cutoff.IsZero() || sourceOrigin.Valid && sourceOrigin.Time.Before(fork.Cutoff) {
+		if err := queries.CopySessionHistoryOrigin(ctx, sqlc.CopySessionHistoryOriginParams{SessionID: forkID, SourceSessionID: sourceID}); err != nil {
+			return fmt.Errorf("copy fork history origin: %w", err)
+		}
+		return nil
+	}
+	if _, err := queries.PlaceSessionHistoryOrigin(ctx, sqlc.PlaceSessionHistoryOriginParams{SessionID: forkID, BudgetSessionID: sourceID}); err != nil {
+		return fmt.Errorf("place fork history origin: %w", err)
+	}
+	return nil
 }
 
 // forkTargetTurnID settles which round the fork inherits through. The turn id
@@ -1647,10 +1744,6 @@ func toSubagentConfig(row sqlc.SubagentConfig) SubagentConfig {
 		CreatedAt:    row.CreatedAt.Time,
 		UpdatedAt:    row.UpdatedAt.Time,
 	}
-}
-
-func toThreadFromForkRow(row sqlc.ForkSessionFromAssistantTurnRow) Thread {
-	return toThread(sqlc.BotSession(row))
 }
 
 func validateACPMetadata(meta map[string]any) error {

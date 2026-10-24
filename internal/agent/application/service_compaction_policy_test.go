@@ -98,51 +98,25 @@ func (s *cutoffMessageService) GetByIDBySession(_ context.Context, _, messageID 
 	return messagepkg.Message{ID: messageID, CreatedAt: s.created}, nil
 }
 
-func TestCompactForBudgetStopsCandidatesAtTheRequestCutoff(t *testing.T) {
+func TestCompactForBudgetBoundsAnEditByItsCutoffAndReplacedTurn(t *testing.T) {
 	t.Parallel()
 
 	service, runner := newControllerPolicyService(t)
 	created := time.UnixMilli(1_700_000_000_000).UTC()
 	service.messageService = &cutoffMessageService{created: created}
-	req := ChatRequest{BotID: syncCompactBotID, ChatID: syncCompactBotID, ThreadID: syncCompactThreadID, HistoryCutoffBeforeMessageID: "edited"}
+	req := ChatRequest{
+		BotID: syncCompactBotID, ChatID: syncCompactBotID, ThreadID: syncCompactThreadID, HistoryCutoffBeforeMessageID: "edited",
+		TurnReplacement: &messagepkg.TurnReplacement{OldTurnID: "replaced-turn", ReplacementTurnID: "edit-turn"},
+	}
 
 	if err := service.compactForBudget(t.Context(), req, 2000, 1000, ""); err != nil || len(runner.configs) != 1 || !runner.configs[0].CandidatesBefore.Equal(created) {
 		t.Fatalf("err=%v configs=%+v, want candidates bounded by the edited message", err, runner.configs)
 	}
+	if got := runner.configs[0].ReplacedTurnID; got != "replaced-turn" {
+		t.Fatalf("replaced turn = %q, want the turn the edit replaces rewound before folding", got)
+	}
 	req.HistoryCutoffBeforeMessageID = "missing"
 	if err := service.compactForBudget(t.Context(), req, 2000, 1000, ""); err == nil || len(runner.configs) != 1 {
 		t.Fatalf("err=%v runs=%d, want an unknown cutoff to fail before compacting", err, len(runner.configs))
-	}
-}
-
-func TestCompactForBudgetReadsCandidatesFromTheContextWindow(t *testing.T) {
-	t.Parallel()
-
-	service, runner := newControllerPolicyService(t)
-	window := time.Duration(defaultMaxContextMinutes) * time.Minute
-	older := time.Now().UTC().Add(-2 * window)
-	for _, tc := range []struct {
-		name     string
-		viewFrom time.Time
-	}{
-		{"a view that slid inside the window", time.Now().UTC()},
-		{"a view older than the window", older},
-		{"no loaded view", time.Time{}},
-	} {
-		start := time.Now().UTC()
-		req := ChatRequest{BotID: syncCompactBotID, ChatID: syncCompactBotID, ThreadID: syncCompactThreadID, historyViewFrom: tc.viewFrom}
-		if err := service.compactForBudget(t.Context(), req, 2000, 1000, ""); err != nil {
-			t.Fatalf("%s: %v", tc.name, err)
-		}
-		from := runner.configs[len(runner.configs)-1].CandidatesFrom
-		if tc.viewFrom.Equal(older) {
-			if !from.Equal(older) {
-				t.Fatalf("%s: candidates_from=%v, want the view start", tc.name, from)
-			}
-			continue
-		}
-		if from.Before(start.Add(-window)) || from.After(time.Now().UTC().Add(-window)) {
-			t.Fatalf("%s: candidates_from=%v, want the window start", tc.name, from)
-		}
 	}
 }

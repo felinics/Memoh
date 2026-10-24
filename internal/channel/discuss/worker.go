@@ -94,7 +94,12 @@ func (d *DiscussDriver) loadArtifacts(ctx context.Context, cfg DiscussSessionCon
 // workers obtain the current service through turnServiceSnapshot.
 func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSession, rc timeline.RenderedContext, log *slog.Logger, turnSvc turn.Service) {
 	cfg := d.sessionConfigSnapshot(sess)
-	trs, historyMeasure, err := d.history.Load(ctx, cfg.ThreadID)
+	origin, err := d.history.Origin(ctx, cfg.ThreadID)
+	if err != nil {
+		d.failMissingSource(ctx, cfg, log, "history_load_failed", err)
+		return
+	}
+	trs, historyMeasure, err := d.history.Load(ctx, cfg.ThreadID, origin)
 	if err != nil {
 		d.failMissingSource(ctx, cfg, log, "history_load_failed", err)
 		return
@@ -130,7 +135,7 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 			d.failMissingSource(ctx, cfg, log, "artifact_load_failed", err)
 			return
 		}
-		plan, admission, ok := d.trigger.Build(cfg, rc, trs, sess.lastProcessed, artifacts, timeline.ComposeBudget{MaxTokens: d.admissionMaxTokens()})
+		plan, admission, ok := d.trigger.Build(cfg, rc, trs, sess.lastProcessed, artifacts, origin, timeline.ComposeBudget{MaxTokens: d.admissionMaxTokens()})
 		if !ok {
 			if admission.ProtectedOverflow {
 				log.ErrorContext(ctx, "context_admission_rejected",
