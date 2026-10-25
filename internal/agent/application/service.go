@@ -55,7 +55,7 @@ import (
 )
 
 const (
-	defaultMaxContextMinutes = 24 * 60
+	sessionlessMaxContextMinutes = 24 * 60
 )
 
 // SkillEntry represents a skill loaded from the container.

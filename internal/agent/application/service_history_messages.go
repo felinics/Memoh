@@ -83,17 +83,15 @@ func (s *Service) loadTimelineArtifacts(ctx context.Context, botID, sessionID st
 	return compaction.NewTimelineArtifactSource(s.queries).ActiveCompactionArtifacts(ctx, botID, sessionID)
 }
 
-// loadTurnResponses loads recent assistant/tool messages from bot_history_messages
-// for use as the TR stream in pipeline-based context assembly. The load is
-// byte-budgeted on the database side (CM-ADM-001): rows are admitted
-// newest-first within the context budget and projected to content, so a
-// dense 24-hour window, or legacy lifecycle metadata on its rows, can never
-// materialize more than the budget's worth of payload.
+// loadTurnResponses loads assistant/tool history regardless of age. The
+// database walks the existing session index newest-first until its byte
+// budget is crossed, without measuring the entire old backlog. The TR
+// projection excludes legacy lifecycle audits; final admission still applies.
 func (s *Service) loadTurnResponses(ctx context.Context, sessionID string, contextTokenBudget int) ([]timeline.TurnResponseEntry, error) {
 	if s.messageService == nil {
 		return nil, nil
 	}
-	since := time.Now().UTC().Add(-24 * time.Hour)
+	since := time.Unix(0, 0)
 	msgs, err := s.messageService.ListTurnResponseSourcesSinceBySessionWithinBytes(ctx, sessionID, since, s.historyLoadMaxBytes(contextTokenBudget))
 	if err != nil {
 		return nil, err

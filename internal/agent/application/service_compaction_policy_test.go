@@ -115,34 +115,16 @@ func TestCompactForBudgetStopsCandidatesAtTheRequestCutoff(t *testing.T) {
 	}
 }
 
-func TestCompactForBudgetReadsCandidatesFromTheContextWindow(t *testing.T) {
+func TestCompactForBudgetKeepsOldHistoryEligible(t *testing.T) {
 	t.Parallel()
-
 	service, runner := newControllerPolicyService(t)
-	window := time.Duration(defaultMaxContextMinutes) * time.Minute
-	older := time.Now().UTC().Add(-2 * window)
-	for _, tc := range []struct {
-		name     string
-		viewFrom time.Time
-	}{
-		{"a view that slid inside the window", time.Now().UTC()},
-		{"a view older than the window", older},
-		{"no loaded view", time.Time{}},
-	} {
-		start := time.Now().UTC()
-		req := ChatRequest{BotID: syncCompactBotID, ChatID: syncCompactBotID, ThreadID: syncCompactThreadID, historyViewFrom: tc.viewFrom}
+	for _, from := range []time.Time{time.Now(), time.Now().Add(-72 * time.Hour), {}} {
+		req := ChatRequest{BotID: syncCompactBotID, ChatID: syncCompactBotID, ThreadID: syncCompactThreadID, historyViewFrom: from}
 		if err := service.compactForBudget(t.Context(), req, 2000, 1000, ""); err != nil {
-			t.Fatalf("%s: %v", tc.name, err)
+			t.Fatal(err)
 		}
-		from := runner.configs[len(runner.configs)-1].CandidatesFrom
-		if tc.viewFrom.Equal(older) {
-			if !from.Equal(older) {
-				t.Fatalf("%s: candidates_from=%v, want the view start", tc.name, from)
-			}
-			continue
-		}
-		if from.Before(start.Add(-window)) || from.After(time.Now().UTC().Add(-window)) {
-			t.Fatalf("%s: candidates_from=%v, want the window start", tc.name, from)
+		if got := runner.configs[len(runner.configs)-1].CandidatesFrom; !got.IsZero() {
+			t.Fatalf("candidates_from=%v, want all historical candidates even after a byte-bounded load", got)
 		}
 	}
 }

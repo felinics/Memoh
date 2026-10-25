@@ -3011,85 +3011,115 @@ func (q *Queries) ListActiveMessagesSinceBySession(ctx context.Context, arg List
 }
 
 const listActiveMessagesSinceBySessionWithinBytes = `-- name: ListActiveMessagesSinceBySessionWithinBytes :many
+WITH RECURSIVE owner_session AS MATERIALIZED (
+  SELECT id, bot_id, compaction_epoch FROM bot_sessions
+  WHERE team_id = public.memoh_current_team_id() AND id = $1
+), usable_compacts AS MATERIALIZED (
+  SELECT c.id, c.bot_id FROM bot_history_message_compacts c
+  JOIN owner_session s ON c.session_id = s.id AND c.bot_id = s.bot_id
+    AND c.compaction_epoch = s.compaction_epoch
+  WHERE $2::boolean
+    AND c.team_id = public.memoh_current_team_id()
+    AND c.status = 'ok'
+    AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
+), history_window AS (
+  (
+    SELECT m.id, m.turn_position, m.turn_message_seq, m.created_at,
+      octet_length(m.content::text)::bigint AS total_bytes
+    FROM bot_history_messages m
+    WHERE m.team_id = public.memoh_current_team_id()
+      AND m.session_id = $1
+      AND m.turn_visible = true
+      AND m.turn_id IS NOT NULL
+      AND m.turn_position IS NOT NULL
+      AND m.turn_message_seq IS NOT NULL
+      AND m.created_at >= $3
+      AND NOT EXISTS (SELECT 1 FROM usable_compacts c WHERE c.id = m.compact_id AND c.bot_id = m.bot_id)
+      AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+      AND $4::bigint > 0
+    ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+    LIMIT 1
+  )
+  UNION ALL
+  SELECT older.id, older.turn_position, older.turn_message_seq, older.created_at,
+    previous.total_bytes + older.content_bytes AS total_bytes
+  FROM history_window previous
+  CROSS JOIN LATERAL (
+    SELECT m.id, m.turn_position, m.turn_message_seq, m.created_at,
+      octet_length(m.content::text)::bigint AS content_bytes
+    FROM bot_history_messages m
+    WHERE m.team_id = public.memoh_current_team_id()
+      AND m.session_id = $1
+      AND m.turn_visible = true
+      AND m.turn_id IS NOT NULL
+      AND m.turn_position IS NOT NULL
+      AND m.turn_message_seq IS NOT NULL
+      AND m.created_at >= $3
+      AND NOT EXISTS (SELECT 1 FROM usable_compacts c WHERE c.id = m.compact_id AND c.bot_id = m.bot_id)
+      AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+      AND (m.turn_position, m.turn_message_seq, m.created_at, m.id)
+        < (previous.turn_position, previous.turn_message_seq, previous.created_at, previous.id)
+    ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+    LIMIT 1
+  ) older
+  WHERE previous.total_bytes < $4::bigint
+), budget_boundary AS MATERIALIZED (
+  SELECT id, turn_position, turn_message_seq, created_at, total_bytes FROM history_window
+  ORDER BY turn_position, turn_message_seq, created_at, id LIMIT 1
+), admitted AS (
+  SELECT id, false AS summarized FROM history_window
+  UNION ALL
+  -- Folded payloads cost no budget. Find only the newest placement row of
+  -- each group, rather than walking every zero-cost row in its coverage.
+  SELECT latest.id, true AS summarized
+  FROM usable_compacts c
+  CROSS JOIN LATERAL (
+    SELECT m.id FROM bot_history_messages m
+    WHERE m.team_id = public.memoh_current_team_id()
+      AND m.session_id = $1
+      AND m.compact_id = c.id
+      AND m.bot_id = c.bot_id
+      AND m.turn_visible = true
+      AND m.turn_id IS NOT NULL
+      AND m.turn_position IS NOT NULL
+      AND m.turn_message_seq IS NOT NULL
+      AND m.created_at >= $3
+      AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+      AND m.turn_position >= COALESCE((
+        SELECT b.turn_position FROM budget_boundary b
+        WHERE b.total_bytes >= $4::bigint
+      ), '-9223372036854775808'::bigint)
+      AND NOT EXISTS (
+        SELECT 1 FROM budget_boundary b
+        WHERE b.total_bytes >= $4::bigint
+          AND (m.turn_position, m.turn_message_seq, m.created_at, m.id)
+            < (b.turn_position, b.turn_message_seq, b.created_at, b.id)
+      )
+    ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+    LIMIT 1
+  ) latest
+  WHERE $4::bigint > 0
+)
 SELECT
-  ranked.id,
-  ranked.bot_id,
-  ranked.session_id,
-  ranked.sender_channel_identity_id,
-  ranked.sender_user_id,
-  ranked.external_message_id,
-  ranked.source_reply_to_message_id,
-  ranked.role,
-  ranked.content,
-  ranked.metadata,
-  ranked.usage,
-  ranked.session_mode,
-  ranked.runtime_type,
-  ranked.event_id,
-  ranked.display_text,
-  ranked.compact_id,
-  ranked.created_at,
-  ranked.sender_display_name,
-  ranked.sender_avatar_url,
-  ranked.platform,
-  ranked.summarized
-FROM (
-  SELECT
-    m.id,
-    m.bot_id,
-    m.session_id,
-    m.sender_channel_identity_id,
-    m.sender_account_user_id AS sender_user_id,
-    m.source_message_id AS external_message_id,
-    m.source_reply_to_message_id,
-    m.role,
-    m.content,
-    m.metadata,
-    m.usage,
-    m.session_mode,
-    m.runtime_type,
-    m.event_id,
-    m.display_text,
-    m.compact_id,
-    m.created_at,
-    m.turn_position,
-    m.turn_message_seq,
-    ci.display_name AS sender_display_name,
-    ci.avatar_url AS sender_avatar_url,
-    s.channel_type AS platform,
-    (c.id IS NOT NULL)::boolean AS summarized,
-    ROW_NUMBER() OVER (
-      PARTITION BY c.id
-      ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
-    ) AS summarized_rank,
-    (SUM(CASE WHEN c.id IS NULL THEN octet_length(m.content::text) ELSE 0 END) OVER (
-      ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
-    ) - CASE WHEN c.id IS NULL THEN octet_length(m.content::text) ELSE 0 END)::BIGINT AS preceding_bytes
-  FROM bot_visible_history_messages m
-  LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
-  LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
-  LEFT JOIN bot_history_message_compacts c
-    ON $1::boolean
-   AND c.team_id = public.memoh_current_team_id()
-   AND c.id = m.compact_id
-   AND c.bot_id = m.bot_id
-   AND c.session_id = s.id
-   AND c.compaction_epoch = s.compaction_epoch
-   AND c.status = 'ok'
-   AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL
-  WHERE m.team_id = public.memoh_current_team_id()
-    AND m.session_id = $2
-    AND m.created_at >= $3
-    AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
-) ranked
-WHERE ranked.preceding_bytes < $4::BIGINT
-  AND (NOT ranked.summarized OR ranked.summarized_rank = 1)
-ORDER BY ranked.turn_position ASC, ranked.turn_message_seq ASC, ranked.created_at ASC, ranked.id ASC
+  m.id, m.bot_id, m.session_id, m.sender_channel_identity_id,
+  m.sender_account_user_id AS sender_user_id,
+  m.source_message_id AS external_message_id,
+  m.source_reply_to_message_id, m.role, m.content, m.metadata, m.usage,
+  m.session_mode, m.runtime_type, m.event_id, m.display_text, m.compact_id,
+  m.created_at, ci.display_name AS sender_display_name,
+  ci.avatar_url AS sender_avatar_url, s.channel_type AS platform, admitted.summarized
+FROM admitted
+JOIN bot_history_messages m ON m.id = admitted.id
+  AND m.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
+LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 `
 
 type ListActiveMessagesSinceBySessionWithinBytesParams struct {
-	FoldSummarized bool               `json:"fold_summarized"`
 	SessionID      pgtype.UUID        `json:"session_id"`
+	FoldSummarized bool               `json:"fold_summarized"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	MaxBytes       int64              `json:"max_bytes"`
 }
@@ -3118,19 +3148,14 @@ type ListActiveMessagesSinceBySessionWithinBytesRow struct {
 	Summarized              bool               `json:"summarized"`
 }
 
-// Byte-budgeted variant of ListActiveMessagesSinceBySession (CM-ADM-001):
-// rows are admitted newest-first until their running content byte total
-// crosses max_bytes (the crossing row is kept, so the newest row always
-// loads), then returned in ascending order. With fold_summarized, rows a
-// usable summary of the session's current epoch replaced cost nothing, and
-// only the newest of each compact group loads, marked summarized, to place
-// that summary. Only content is budgeted: full rows, metadata included,
-// still load, so callers that need content alone use
-// ListTurnResponseSourcesSinceBySessionWithinBytes.
+// Keep the existing byte window and folded-summary semantics without a SUM
+// over all historical payloads. Walk raw rows by the existing session index,
+// then load one placement row per usable compact within that window. As
+// before, the crossing row is retained and metadata is outside this budget.
 func (q *Queries) ListActiveMessagesSinceBySessionWithinBytes(ctx context.Context, arg ListActiveMessagesSinceBySessionWithinBytesParams) ([]ListActiveMessagesSinceBySessionWithinBytesRow, error) {
 	rows, err := q.db.Query(ctx, listActiveMessagesSinceBySessionWithinBytes,
-		arg.FoldSummarized,
 		arg.SessionID,
+		arg.FoldSummarized,
 		arg.CreatedAt,
 		arg.MaxBytes,
 	)
@@ -5438,34 +5463,54 @@ func (q *Queries) ListRunHistoryTurnRequestMessageIDs(ctx context.Context, arg L
 }
 
 const listTurnResponseSourcesSinceBySessionWithinBytes = `-- name: ListTurnResponseSourcesSinceBySessionWithinBytes :many
-SELECT
-  ranked.id,
-  ranked.role,
-  ranked.content,
-  ranked.created_at,
-  ranked.interrupted,
-  ranked.discuss_step
-FROM (
-  SELECT
-    m.id,
-    m.role,
-    m.content,
-    m.created_at,
-    m.turn_position,
-    m.turn_message_seq,
-    COALESCE(m.metadata->'agent_step_interrupted' = 'true'::jsonb, false)::boolean AS interrupted,
-    COALESCE(m.metadata->'discuss_step' = 'true'::jsonb, false)::boolean AS discuss_step,
-    (SUM(octet_length(m.content::text)) OVER (
-      ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
-    ) - octet_length(m.content::text))::BIGINT AS preceding_bytes
-  FROM bot_visible_history_messages m
-  WHERE m.team_id = public.memoh_current_team_id()
-    AND m.session_id = $1
-    AND m.created_at >= $2
-    AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
-) ranked
-WHERE ranked.preceding_bytes < $3::BIGINT
-ORDER BY ranked.turn_position ASC, ranked.turn_message_seq ASC, ranked.created_at ASC, ranked.id ASC
+WITH RECURSIVE history_window AS (
+  (
+    SELECT m.id, m.turn_position, m.turn_message_seq, m.created_at,
+      octet_length(m.content::text)::bigint AS total_bytes
+    FROM bot_history_messages m
+    WHERE m.team_id = public.memoh_current_team_id()
+      AND m.session_id = $1
+      AND m.turn_visible = true
+      AND m.turn_id IS NOT NULL
+      AND m.turn_position IS NOT NULL
+      AND m.turn_message_seq IS NOT NULL
+      AND m.created_at >= $2
+      AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+      AND $3::bigint > 0
+    ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+    LIMIT 1
+  )
+  UNION ALL
+  SELECT older.id, older.turn_position, older.turn_message_seq, older.created_at,
+    previous.total_bytes + older.content_bytes AS total_bytes
+  FROM history_window previous
+  CROSS JOIN LATERAL (
+    SELECT m.id, m.turn_position, m.turn_message_seq, m.created_at,
+      octet_length(m.content::text)::bigint AS content_bytes
+    FROM bot_history_messages m
+    WHERE m.team_id = public.memoh_current_team_id()
+      AND m.session_id = $1
+      AND m.turn_visible = true
+      AND m.turn_id IS NOT NULL
+      AND m.turn_position IS NOT NULL
+      AND m.turn_message_seq IS NOT NULL
+      AND m.created_at >= $2
+      AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+      AND (m.turn_position, m.turn_message_seq, m.created_at, m.id)
+        < (previous.turn_position, previous.turn_message_seq, previous.created_at, previous.id)
+    ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+    LIMIT 1
+  ) older
+  WHERE previous.total_bytes < $3::bigint
+)
+SELECT m.id, m.role, m.content, m.created_at,
+  COALESCE(m.metadata->'agent_step_interrupted' = 'true'::jsonb, false)::boolean AS interrupted,
+  COALESCE(m.metadata->'discuss_step' = 'true'::jsonb, false)::boolean AS discuss_step
+FROM history_window admitted
+JOIN bot_history_messages m ON m.id = admitted.id
+  AND m.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
+ORDER BY admitted.turn_position ASC, admitted.turn_message_seq ASC, admitted.created_at ASC, admitted.id ASC
 `
 
 type ListTurnResponseSourcesSinceBySessionWithinBytesParams struct {
@@ -5483,11 +5528,11 @@ type ListTurnResponseSourcesSinceBySessionWithinBytesRow struct {
 	DiscussStep bool               `json:"discuss_step"`
 }
 
-// Turn-response (TR) composition, in Discuss and in pipeline chat, only needs
-// content, the interrupted-checkpoint flag and the Discuss step flag. Never
-// return full metadata: legacy context_lifecycle snapshots can dwarf the
-// content budget. Preserve the active-history window, including its crossing
-// row and turn order.
+// Walk the existing visible-session-order index, stopping once the content
+// budget is crossed. Unlike a window SUM over the entire session, old payloads
+// beyond the admitted suffix are not measured or materialized. Preserve the
+// crossing row, turn order, visibility, team scope and passive-sync exclusion.
+// The TR projection never transfers legacy lifecycle metadata.
 func (q *Queries) ListTurnResponseSourcesSinceBySessionWithinBytes(ctx context.Context, arg ListTurnResponseSourcesSinceBySessionWithinBytesParams) ([]ListTurnResponseSourcesSinceBySessionWithinBytesRow, error) {
 	rows, err := q.db.Query(ctx, listTurnResponseSourcesSinceBySessionWithinBytes, arg.SessionID, arg.CreatedAt, arg.MaxBytes)
 	if err != nil {

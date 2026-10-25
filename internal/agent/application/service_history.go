@@ -106,23 +106,23 @@ func currentWorkspaceTransitionMessage(history []historyfrag.HistoryRecord, curr
 	return &message
 }
 
-// loadHistoryRecords loads the recent history window. The load is
-// byte-budgeted on the database side (CM-ADM-001): rows are admitted
-// newest-first within contextTokenBudget (the absolute cap when the budget
-// is unset), so the time window alone never bounds process memory. A folded
-// session window spends no budget on rows a summary replaced and loads one
-// Summarized row per compact group to place it.
-func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.ScopeFallback, sessionID string, maxContextMinutes, contextTokenBudget int, fold bool) ([]historyfrag.HistoryRecord, error) {
+// loadHistoryRecords loads session history by budget, not age. Raw rows are
+// read newest-first through the visible-history index; a folded load skips
+// summarized payloads and returns one placement row per usable compact group.
+// Bot-scoped legacy requests retain their time window rather than broadening
+// cross-session history. Final request admission still enforces token limits.
+func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.ScopeFallback, sessionID string, contextTokenBudget int, fold bool) ([]historyfrag.HistoryRecord, error) {
 	if s.messageService == nil {
 		return nil, nil
 	}
-	since := time.Now().UTC().Add(-time.Duration(maxContextMinutes) * time.Minute)
+	since := time.Unix(0, 0)
 	maxBytes := s.historyLoadMaxBytes(contextTokenBudget)
 	var msgs []messagepkg.Message
 	var err error
 	if strings.TrimSpace(sessionID) != "" {
 		msgs, err = s.messageService.ListActiveSinceBySessionWithinBytes(ctx, sessionID, since, maxBytes, fold)
 	} else {
+		since = time.Now().UTC().Add(-time.Duration(sessionlessMaxContextMinutes) * time.Minute)
 		msgs, err = s.messageService.ListActiveSinceWithinBytes(ctx, fallback.ChatID, since, maxBytes)
 	}
 	if err != nil {

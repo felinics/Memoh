@@ -49,7 +49,7 @@ func (s *Service) prepareHistoryWindow(
 	contextTokenBudget int,
 	fold bool,
 ) (preparedHistoryContext, error) {
-	loaded, err := s.loadHistoryRecords(ctx, fallback, req.ThreadID, defaultMaxContextMinutes, contextTokenBudget, fold)
+	loaded, err := s.loadHistoryRecords(ctx, fallback, req.ThreadID, contextTokenBudget, fold)
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}

@@ -13,7 +13,7 @@ import (
 )
 
 // History that does not fit the model window is summarized before the turn,
-// from the history inside its time window, into one active summary that the
+// including history older than 24 hours, into one active summary that the
 // next compaction folds again. A summary as long as the prompt allows is
 // answered without another compaction. When the summarizer fails, the turn
 // fails before any provider call and leaves history whole; once the
@@ -51,8 +51,8 @@ func TestPostgresPreTurnCompaction(t *testing.T) {
 				}
 			}
 			f.longSummary.Store(false)
-			if raw, compacted := f.backlogRowsPrefixed("hidden-"); raw != 4 || compacted != 0 {
-				t.Fatalf("history older than the time window: raw=%d compacted=%d, want it left raw", raw, compacted)
+			if raw, compacted := f.backlogRowsPrefixed("hidden-"); raw != 0 || compacted != 4 {
+				t.Fatalf("old history: raw=%d compacted=%d, want all four rows summarized", raw, compacted)
 			}
 			f.failSummary.Store(true)
 			f.appendRound(entry, "failed-")
