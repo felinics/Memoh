@@ -618,17 +618,11 @@ func (s *Service) completeRollupLog(
 }
 
 // continuationRequest appends the summary instruction to the run's last
-// request. It preserves the prefix for supported clients when the model is
+// request. It preserves the prefix when the model is
 // unchanged and the request leaves enough room for the summary.
 func continuationRequest(cfg TriggerConfig, prompt string, summaryTokens, capability int) *sdk.Request {
 	c := cfg.Continuation
 	if c == nil || c.Model != cfg.ModelID {
-		return nil
-	}
-	// Continuation requests currently support the OpenAI-compatible clients.
-	switch models.ClientType(cfg.ClientType) {
-	case models.ClientTypeOpenAICompletions, models.ClientTypeOpenAIResponses:
-	default:
 		return nil
 	}
 	base := contextfrag.ProviderEnvelopeTokens(c.System, c.Messages, c.Tools)

@@ -14,7 +14,7 @@ import (
 func TestContinuationRequestEligibility(t *testing.T) {
 	base := sdk.Request{Model: "m", System: "system", Messages: []sdk.Message{sdk.UserMessage(strings.Repeat("history ", 4000))}}
 	cfg := TriggerConfig{
-		ModelID: "m", ClientType: string(models.ClientTypeOpenAICompletions), SummaryWindowTokens: 64000,
+		ModelID: "m", ClientType: string(models.ClientTypeAnthropicMessages), SummaryWindowTokens: 64000,
 		Continuation: &base,
 	}
 	got := continuationRequest(cfg, "[Context compaction] summarize", 500, 4000)
@@ -24,7 +24,6 @@ func TestContinuationRequestEligibility(t *testing.T) {
 	for name, mutate := range map[string]func(*TriggerConfig){
 		"no previous request": func(c *TriggerConfig) { c.Continuation = nil },
 		"different model":     func(c *TriggerConfig) { c.ModelID = "other" },
-		"unsupported client":  func(c *TriggerConfig) { c.ClientType = string(models.ClientTypeAnthropicMessages) },
 		"input overflow":      func(c *TriggerConfig) { c.SummaryWindowTokens = 100 },
 	} {
 		c := cfg
