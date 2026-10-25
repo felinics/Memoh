@@ -2589,7 +2589,6 @@
       }
     },
     "editBot": "Edit Bot",
-    "deleteConfirm": "Are you sure you want to delete this bot?",
     "renameSuccess": "Bot name updated",
     "renameFailed": "Failed to update bot name",
     "deleteSuccess": "Bot deleted",
@@ -3471,6 +3470,7 @@
       "dangerZone": "Danger Zone",
       "deleteBotDescription": "Deleting this bot cannot be undone. Proceed with caution.",
       "deleteBot": "Delete Bot",
+      "deleteBotConfirmLabel": "To confirm, type \"{name}\" below",
       "agentCredentialSecret": "API Key",
       "agentCredentialSecretPlaceholder": "Enter the API Key",
       "agentCredentialSave": "Save",

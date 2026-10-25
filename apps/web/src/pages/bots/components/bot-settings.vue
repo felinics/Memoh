@@ -108,6 +108,7 @@
 
       <SettingsDangerZone
         :delete-loading="deleteLoading"
+        :bot-name="bot?.name ?? ''"
         @delete="handleDeleteBot"
       />
     </div>

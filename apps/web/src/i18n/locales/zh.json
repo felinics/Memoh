@@ -2589,7 +2589,6 @@
       }
     },
     "editBot": "编辑 Bot",
-    "deleteConfirm": "确定要删除这个 Bot 吗？",
     "renameSuccess": "Bot 名称已更新",
     "renameFailed": "更新 Bot 名称失败",
     "deleteSuccess": "Bot 已删除",
@@ -3471,6 +3470,7 @@
       "dangerZone": "危险操作",
       "deleteBotDescription": "此操作不可逆。删除后 Bot 将无法恢复。",
       "deleteBot": "删除 Bot",
+      "deleteBotConfirmLabel": "请在下方输入“{name}”以确认",
       "agentCredentialSecret": "API Key",
       "agentCredentialSecretPlaceholder": "输入 API Key",
       "agentCredentialSave": "保存",

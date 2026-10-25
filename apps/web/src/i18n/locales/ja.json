@@ -2587,7 +2587,6 @@
       }
     },
     "editBot": "Botの編集",
-    "deleteConfirm": "このBotを削除してもよろしいですか?",
     "renameSuccess": "Bot名が更新されました",
     "renameFailed": "Bot名の更新に失敗しました",
     "deleteSuccess": "Botが削除されました",
@@ -3477,6 +3476,7 @@
       "dangerZone": "危険な操作",
       "deleteBotDescription": "このBotを削除すると元に戻すことはできません。慎重に作業を進めてください。",
       "deleteBot": "Botの削除",
+      "deleteBotConfirmLabel": "確認のため、下に「{name}」と入力してください",
       "agentCredentialSecret": "API キー",
       "agentCredentialSecretPlaceholder": "API キーを入力",
       "agentCredentialSave": "保存",
