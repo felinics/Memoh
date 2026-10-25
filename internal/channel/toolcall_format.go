@@ -2,6 +2,8 @@ package channel
 
 import (
 	"strings"
+
+	"github.com/felinics/memoh/internal/agent/toolbridge"
 )
 
 // ToolCallStatus is the lifecycle state of a single tool call as surfaced in IM.
@@ -124,6 +126,7 @@ func BuildToolCallStart(tc *StreamToolCall) ToolCallPresentation {
 	if tc == nil {
 		return ToolCallPresentation{}
 	}
+	tc = unwrapBridgedToolCall(tc)
 	name := strings.TrimSpace(tc.Name)
 	if strings.TrimSpace(tc.ApprovalID) != "" {
 		summary := SummarizeToolInput(name, tc.Input)
@@ -163,6 +166,7 @@ func BuildToolCallEnd(tc *StreamToolCall) ToolCallPresentation {
 	if tc == nil {
 		return ToolCallPresentation{}
 	}
+	tc = unwrapBridgedToolCall(tc)
 	name := strings.TrimSpace(tc.Name)
 	status := ToolCallStatusCompleted
 	if isToolResultFailure(tc.Result) {
@@ -184,6 +188,18 @@ func BuildToolCallEnd(tc *StreamToolCall) ToolCallPresentation {
 		InputSummary:  inputSummary,
 		ResultSummary: resultSummary,
 	}
+}
+
+// unwrapBridgedToolCall presents a tool_call as the on-demand tool it runs,
+// so the progress message names and summarizes that tool.
+func unwrapBridgedToolCall(tc *StreamToolCall) *StreamToolCall {
+	name, input, ok := toolbridge.Unwrap(tc.Name, tc.Input)
+	if !ok {
+		return tc
+	}
+	unwrapped := *tc
+	unwrapped.Name, unwrapped.Input = name, input
+	return &unwrapped
 }
 
 func approvalHintText(tc *StreamToolCall) string {

@@ -1344,6 +1344,7 @@
       "clustered": "{count} 次工具调用",
       "use_skill": "使用技能",
       "list_skills": "列出技能",
+      "tool_describe": "加载工具",
       "list_models": "列出模型",
       "list_workdirs": "列出工作目录",
       "list_acp_agents": "列出 ACP Agent",

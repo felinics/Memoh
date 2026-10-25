@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/toolbridge"
 	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/markdownmedia"
@@ -885,10 +886,11 @@ func extractPersistedToolCalls(message *uiDecodedModelMessage) []uiExtractedTool
 		if !strings.EqualFold(strings.TrimSpace(part.Type), "tool-call") {
 			continue
 		}
+		name, input, _ := toolbridge.Unwrap(strings.TrimSpace(part.ToolName), part.Input)
 		calls = append(calls, uiExtractedToolCall{
 			ID:                strings.TrimSpace(part.ToolCallID),
-			Name:              strings.TrimSpace(part.ToolName),
-			Input:             part.Input,
+			Name:              name,
+			Input:             input,
 			Approval:          extractApprovalMetadata(part.ProviderMetadata),
 			ExecutionLocation: extractExecutionLocationMetadata(part.ProviderMetadata),
 			UserInput:         extractUserInputMetadata(part.ProviderMetadata),
@@ -906,9 +908,10 @@ func extractPersistedToolCalls(message *uiDecodedModelMessage) []uiExtractedTool
 				input = rawArgs
 			}
 		}
+		name, input, _ := toolbridge.Unwrap(strings.TrimSpace(toolCall.Function.Name), input)
 		calls = append(calls, uiExtractedToolCall{
 			ID:    strings.TrimSpace(toolCall.ID),
-			Name:  strings.TrimSpace(toolCall.Function.Name),
+			Name:  name,
 			Input: input,
 		})
 	}

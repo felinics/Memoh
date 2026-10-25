@@ -1332,6 +1332,7 @@
       "clustered": "{count} tool calls",
       "use_skill": "Use skill",
       "list_skills": "List skills",
+      "tool_describe": "Load tools",
       "list_models": "List models",
       "list_workdirs": "List workdirs",
       "list_acp_agents": "List ACP agents",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/hooks"
@@ -35,6 +36,28 @@ type Deps struct {
 	Logger             *slog.Logger
 	Limits             Limits
 	ContextViewApplier ContextViewApplier
+	// OnDemandTools selects whether rarely used tool groups load on demand
+	// (OnDemandToolsAuto, the default) or ride every request (OnDemandToolsOff).
+	OnDemandTools string
+}
+
+const (
+	// OnDemandToolsAuto loads rarely used tool groups through tool_describe /
+	// tool_call when that makes the request smaller.
+	OnDemandToolsAuto = "auto"
+	// OnDemandToolsOff sends every tool definition with every request.
+	OnDemandToolsOff = "off"
+)
+
+// NormalizeOnDemandTools maps a configured value to OnDemandToolsAuto or
+// OnDemandToolsOff; anything but an explicit off keeps the default.
+func NormalizeOnDemandTools(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case OnDemandToolsOff, "false", "disabled":
+		return OnDemandToolsOff
+	default:
+		return OnDemandToolsAuto
+	}
 }
 
 func DefaultLimits() Limits {

@@ -1313,6 +1313,7 @@
       "clustered": "{count}件のツール呼び出し",
       "use_skill": "スキルを使用",
       "list_skills": "スキルを一覧表示",
+      "tool_describe": "ツールを読み込む",
       "list_models": "モデルを一覧表示",
       "list_workdirs": "作業ディレクトリを一覧表示",
       "list_acp_agents": "ACP Agent を一覧表示",

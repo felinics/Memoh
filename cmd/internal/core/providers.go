@@ -539,6 +539,7 @@ func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hooks
 		Logger:             log,
 		Limits:             agentLimitsFromConfig(cfg.Agent),
 		ContextViewApplier: contextview.ProviderRunConfigApplier(log),
+		OnDemandTools:      cfg.Agent.OnDemandTools,
 	})
 }
 
