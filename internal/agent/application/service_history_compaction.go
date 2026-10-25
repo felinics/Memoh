@@ -193,13 +193,11 @@ func (b compactionArtifactBoundary) includes(artifact compaction.Artifact) bool 
 }
 
 func (s *Service) replaceCompactedMessages(ctx context.Context, sessionID string, scope contextfrag.Scope, messages []historyfrag.HistoryRecord, boundary compactionArtifactBoundary) ([]historyfrag.HistoryRecord, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, nil
+	}
 	if s.queries == nil {
 		return messages, nil
-	}
-	if strings.TrimSpace(sessionID) == "" {
-		// Sessionless (chat-scoped) loads have no session log list to draw from;
-		// resolve each in-window compact group individually.
-		return s.replaceRecentCompactedMessages(ctx, scope, messages, boundary)
 	}
 	frontier, err := s.loadActiveCompactionFrontier(ctx, scope.BotID, sessionID)
 	if err != nil {
@@ -277,80 +275,6 @@ func missingCompactionArtifacts(messages []historyfrag.HistoryRecord, artifacts 
 	return missing
 }
 
-func (s *Service) replaceRecentCompactedMessages(ctx context.Context, scope contextfrag.Scope, messages []historyfrag.HistoryRecord, boundary compactionArtifactBoundary) ([]historyfrag.HistoryRecord, error) {
-	if s.queries == nil {
-		return messages, nil
-	}
-
-	compactGroups := make(map[string][]int) // compact_id -> indices
-	for i, m := range messages {
-		if m.CompactID != "" {
-			compactGroups[m.CompactID] = append(compactGroups[m.CompactID], i)
-		}
-	}
-	catalog := compaction.NewArtifactCatalog()
-	loadedFrontiers := make(map[compaction.ArtifactOwner]struct{})
-	projection := compaction.NewArtifactProjection(s.queries)
-	for _, record := range messages {
-		owner := recordArtifactOwner(record, scope)
-		if owner.SessionID == "" {
-			continue
-		}
-		if _, loaded := loadedFrontiers[owner]; loaded {
-			continue
-		}
-		frontier, err := s.loadActiveCompactionFrontier(ctx, owner.BotID, owner.SessionID)
-		if err != nil {
-			return nil, err
-		}
-		catalog.Add(owner, frontier)
-		loadedFrontiers[owner] = struct{}{}
-	}
-	for compactID := range compactGroups {
-		owner, consistent := compactGroupOwner(messages, compactGroups[compactID], scope)
-		if !consistent {
-			if s.logger != nil {
-				s.logger.WarnContext(ctx, "replaceCompactedMessages: compact group spans owners", slog.String("compact_id", compactID))
-			}
-			continue
-		}
-		if _, loaded := loadedFrontiers[owner]; loaded {
-			continue
-		}
-		artifact, err := projection.LoadActiveByID(ctx, compactID, owner)
-		if err != nil {
-			var lineageErr *compaction.LineageError
-			if !errors.As(err, &lineageErr) {
-				return nil, err
-			}
-			if s.logger != nil {
-				s.logger.WarnContext(ctx, "replaceCompactedMessages: failed to load compaction artifact", slog.String("compact_id", compactID), slog.Any("error", err))
-			}
-			continue
-		}
-		merged := catalog.Add(owner, compaction.NewArtifactAliasFrontier(compactID, artifact))
-		for _, issue := range merged.Issues {
-			if s.logger != nil && (issue.Kind == compaction.LineageIssueCoverageOverlap || issue.Kind == compaction.LineageIssueAliasConflict) {
-				s.logger.WarnContext(ctx, "replaceCompactedMessages: owner frontier conflict", slog.String("issue", issue.Error()))
-			}
-		}
-	}
-	blocked := conflictingArtifactIDs(catalog, messages, scope)
-	resolve := func(record historyfrag.HistoryRecord) (compaction.Artifact, bool) {
-		artifact, ok := resolveCatalogArtifact(catalog, recordArtifactOwner(record, scope), record)
-		if !ok || !boundary.includes(artifact) {
-			return compaction.Artifact{}, false
-		}
-		if _, conflict := blocked[artifact.ID]; conflict {
-			return compaction.Artifact{}, false
-		}
-		return artifact, true
-	}
-
-	replaced := replaceCompactedHistoryRecordsWithService(messages, scope, resolve)
-	return s.refreshCompactedSummaryCoverage(ctx, replaced, resolve), nil
-}
-
 func resolveCatalogArtifact(catalog *compaction.ArtifactCatalog, owner compaction.ArtifactOwner, record historyfrag.HistoryRecord) (compaction.Artifact, bool) {
 	if compactID := strings.TrimSpace(record.CompactID); compactID != "" {
 		if artifact, ok := catalog.Resolve(owner, compactID); ok {
@@ -418,31 +342,6 @@ func recordArtifactOwner(record historyfrag.HistoryRecord, fallback contextfrag.
 		SessionID:      sessionID,
 		SessionIDKnown: sessionIDKnown,
 	}
-}
-
-func compactGroupOwner(messages []historyfrag.HistoryRecord, indices []int, fallback contextfrag.Scope) (compaction.ArtifactOwner, bool) {
-	owner := compaction.ArtifactOwner{
-		BotID:          strings.TrimSpace(fallback.BotID),
-		SessionID:      strings.TrimSpace(fallback.SessionID),
-		SessionIDKnown: strings.TrimSpace(fallback.SessionID) != "",
-	}
-	for _, index := range indices {
-		recordOwner := recordArtifactOwner(messages[index], contextfrag.Scope{})
-		if recordOwner.BotID != "" {
-			if owner.BotID != "" && owner.BotID != recordOwner.BotID {
-				return compaction.ArtifactOwner{}, false
-			}
-			owner.BotID = recordOwner.BotID
-		}
-		if recordOwner.SessionIDKnown {
-			if owner.SessionIDKnown && owner.SessionID != recordOwner.SessionID {
-				return compaction.ArtifactOwner{}, false
-			}
-			owner.SessionID = recordOwner.SessionID
-			owner.SessionIDKnown = true
-		}
-	}
-	return owner, true
 }
 
 func summaryRecordsFromArtifacts(artifacts []compaction.Artifact, scope contextfrag.Scope) []historyfrag.HistoryRecord {

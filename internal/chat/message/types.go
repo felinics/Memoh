@@ -245,22 +245,15 @@ type Service interface {
 	Writer
 	List(ctx context.Context, botID string) ([]Message, error)
 	ListSince(ctx context.Context, botID string, since time.Time) ([]Message, error)
-	ListActiveSince(ctx context.Context, botID string, since time.Time) ([]Message, error)
-	// ListActiveSinceWithinBytes is the byte-budgeted variant of
-	// ListActiveSince (CM-ADM-001): rows are admitted newest-first until
-	// their content byte total crosses maxBytes. Only content is budgeted,
-	// so metadata is returned undecoded in RawMetadata (Metadata stays nil):
-	// callers decode one row at a time instead of holding every row's
-	// decoded metadata, which legacy lifecycle audits can inflate.
-	ListActiveSinceWithinBytes(ctx context.Context, botID string, since time.Time, maxBytes int64) ([]Message, error)
 	ListLatest(ctx context.Context, botID string, limit int32) ([]Message, error)
 	ListBefore(ctx context.Context, botID string, before time.Time, limit int32) ([]Message, error)
 	ListBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
 	ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
 	// ListActiveSinceBySessionWithinBytes is the byte-budgeted variant of
-	// ListActiveSinceBySession (CM-ADM-001), same admission semantics and
-	// undecoded metadata as ListActiveSinceWithinBytes, scoped to one session.
+	// ListActiveSinceBySession (CM-ADM-001): rows are admitted newest-first
+	// including the crossing row. Only content is budgeted; metadata arrives
+	// undecoded in RawMetadata for the caller to process one row at a time.
 	// With foldSummarized, rows a usable compaction summary replaced cost
 	// nothing and only the newest of each compact group loads, Summarized.
 	ListActiveSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64, foldSummarized bool) ([]Message, error)

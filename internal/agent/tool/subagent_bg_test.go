@@ -280,10 +280,6 @@ func (*fakeAgentMessageService) ListSince(context.Context, string, time.Time) ([
 	return nil, nil
 }
 
-func (*fakeAgentMessageService) ListActiveSince(context.Context, string, time.Time) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
 func (*fakeAgentMessageService) ListLatest(context.Context, string, int32) ([]messagepkg.Message, error) {
 	return nil, nil
 }
@@ -301,10 +297,6 @@ func (*fakeAgentMessageService) ListActiveSinceBySession(context.Context, string
 }
 
 func (*fakeAgentMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64, bool) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*fakeAgentMessageService) ListActiveSinceWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 

@@ -24,10 +24,6 @@ func (s *memoryQueryMessageService) ListActiveSinceBySessionWithinBytes(context.
 	return append([]messagepkg.Message(nil), s.messages...), nil
 }
 
-func (s *memoryQueryMessageService) ListActiveSinceWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
-	return append([]messagepkg.Message(nil), s.messages...), nil
-}
-
 func (s *memoryQueryMessageService) ListTurnResponseSourcesSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
 	return append([]messagepkg.Message(nil), s.messages...), nil
 }

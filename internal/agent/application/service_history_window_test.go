@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 // Apply the actual time predicate in the fake: these tests fail when a caller
@@ -32,10 +34,6 @@ func (h *ageFilteredHistory) selectSince(since time.Time, budget int64) []messag
 }
 
 func (h *ageFilteredHistory) ListActiveSinceBySessionWithinBytes(_ context.Context, _ string, since time.Time, budget int64, _ bool) ([]messagepkg.Message, error) {
-	return h.selectSince(since, budget), nil
-}
-
-func (h *ageFilteredHistory) ListActiveSinceWithinBytes(_ context.Context, _ string, since time.Time, budget int64) ([]messagepkg.Message, error) {
 	return h.selectSince(since, budget), nil
 }
 
@@ -75,13 +73,34 @@ func TestSessionHistorySurvivesIdleDays(t *testing.T) {
 	if !strings.Contains(memory.Query, "BLUE_WHALE") {
 		t.Fatalf("memory query lost old context: %s", memory.Query)
 	}
-	// A request without a thread must not suddenly restore the whole bot's
-	// cross-session backlog. Keep that legacy fallback's original window.
-	records, err := svc.loadHistoryRecords(context.Background(), historyfrag.ScopeFallback{ChatID: "bot"}, "", 1000, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(records) != 0 {
-		t.Fatal("sessionless fallback broadened to old cross-session history")
+}
+
+// Embedded nil interfaces deliberately panic on any storage read. Missing
+// identity must not cause a bot-wide read or infer a session from source rows.
+func TestMissingSessionNeverLoadsHistoryOrSummaries(t *testing.T) {
+	for _, sessionID := range []string{"", "  "} {
+		svc := &Service{messageService: &struct{ messagepkg.Service }{}, queries: &struct{ dbstore.Queries }{}}
+		ctx := context.Background()
+		prepared, err := svc.prepareHistoryContext(ctx, ChatRequest{BotID: "bot", ThreadID: sessionID}, historyfrag.ScopeFallback{ChatID: "bot"}, 1000)
+		if err != nil || len(prepared.records) != 0 || len(prepared.messages) != 0 {
+			t.Fatalf("history=%+v err=%v", prepared, err)
+		}
+		records := []historyfrag.HistoryRecord{{SessionID: "other-session", CompactID: "summary"}}
+		got, err := svc.replaceCompactedMessages(ctx, sessionID, contextfrag.Scope{BotID: "bot", SessionID: "other-session"}, records, compactionArtifactBoundary{})
+		if err != nil || len(got) != 0 {
+			t.Fatalf("inferred history=%v err=%v", got, err)
+		}
+		trs, err := svc.loadTurnResponses(ctx, sessionID, 1000)
+		if err != nil || len(trs) != 0 {
+			t.Fatalf("TR=%v err=%v", trs, err)
+		}
+		artifacts, err := svc.loadTimelineArtifacts(ctx, "bot", sessionID)
+		if err != nil || len(artifacts) != 0 {
+			t.Fatalf("artifacts=%v err=%v", artifacts, err)
+		}
+		query := svc.buildMemoryQuery(ctx, ChatRequest{BotID: "bot", ThreadID: sessionID, Query: "current question"})
+		if query.Query != "current question" || query.RecentMessages != 0 {
+			t.Fatalf("memory query=%+v", query)
+		}
 	}
 }

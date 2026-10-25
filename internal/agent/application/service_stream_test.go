@@ -191,10 +191,6 @@ func (*recordingMessageService) ListSince(context.Context, string, time.Time) ([
 	return nil, nil
 }
 
-func (*recordingMessageService) ListActiveSince(context.Context, string, time.Time) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
 func (*recordingMessageService) ListLatest(context.Context, string, int32) ([]messagepkg.Message, error) {
 	return nil, nil
 }
@@ -216,10 +212,6 @@ func (*recordingMessageService) ListActiveSinceBySession(context.Context, string
 }
 
 func (*recordingMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64, bool) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) ListActiveSinceWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 

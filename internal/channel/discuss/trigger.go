@@ -70,7 +70,6 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			DiscussImageRefs:        extractNewImageRefs(rc, after),
 			DiscussAddressed:        addressed,
 			DiscussContextTokens:    admission.EstimatedTokens,
-			DiscussViewFromMs:       timeline.ViewFromMs(rc, trs),
 			DiscussContextOverflow:  admission.ProtectedOverflow,
 			DiscussCurrentTokens:    admission.CurrentTokens,
 		},

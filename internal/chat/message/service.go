@@ -1049,24 +1049,6 @@ func (s *DBService) ListSince(ctx context.Context, botID string, since time.Time
 	return msgs, nil
 }
 
-// ListActiveSince returns bot messages since a given time, excluding passive_sync messages.
-func (s *DBService) ListActiveSince(ctx context.Context, botID string, since time.Time) ([]Message, error) {
-	pgBotID, err := dbpkg.ParseUUID(botID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.queries.ListActiveMessagesSince(ctx, sqlc.ListActiveMessagesSinceParams{
-		BotID:     pgBotID,
-		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
-	})
-	if err != nil {
-		return nil, err
-	}
-	msgs := toMessagesFromActiveSince(rows)
-	s.enrichAssets(ctx, msgs)
-	return msgs, nil
-}
-
 // ListLatest returns the latest N bot messages (newest first in DB; caller may reverse for ASC).
 func (s *DBService) ListLatest(ctx context.Context, botID string, limit int32) ([]Message, error) {
 	pgBotID, err := dbpkg.ParseUUID(botID)
@@ -1139,26 +1121,7 @@ func (s *DBService) ListSinceBySession(ctx context.Context, sessionID string, si
 	return msgs, nil
 }
 
-// ListActiveSinceWithinBytes returns bot messages since a given time,
-// admitted newest-first within the content byte budget (CM-ADM-001).
-func (s *DBService) ListActiveSinceWithinBytes(ctx context.Context, botID string, since time.Time, maxBytes int64) ([]Message, error) {
-	pgBotID, err := dbpkg.ParseUUID(botID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.queries.ListActiveMessagesSinceWithinBytes(ctx, sqlc.ListActiveMessagesSinceWithinBytesParams{
-		BotID:     pgBotID,
-		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
-		MaxBytes:  maxBytes,
-	})
-	if err != nil {
-		return nil, err
-	}
-	msgs := toMessagesFromActiveSinceWithinBytes(rows)
-	s.enrichAssets(ctx, msgs)
-	return msgs, nil
-}
-
+// time, admitted newest-first within the content byte budget (CM-ADM-001).
 // ListActiveSinceBySessionWithinBytes returns session messages since a given
 // time, admitted newest-first within the content byte budget (CM-ADM-001).
 func (s *DBService) ListActiveSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64, foldSummarized bool) ([]Message, error) {
@@ -1197,7 +1160,8 @@ func (s *DBService) MeasureActiveBySession(ctx context.Context, sessionID string
 	return ActiveMessagesMeasure{MessageCount: row.MessageCount, ContentBytes: row.ContentBytes}, nil
 }
 
-// ListActiveSinceBySession returns session messages since a given time, excluding passive_sync messages.
+// ListActiveSinceBySessionWithinBytes returns session messages since a given
+// time, admitted newest-first within the content byte budget (CM-ADM-001).
 func (s *DBService) ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
@@ -1878,34 +1842,6 @@ func toMessageFromSinceBySessionRow(row sqlc.ListMessagesSinceBySessionRow) Mess
 	)
 }
 
-func toMessageFromActiveSinceRow(row sqlc.ListActiveMessagesSinceRow) Message {
-	m := toMessageFields(
-		row.ID,
-		row.BotID,
-		row.SessionID,
-		row.SenderChannelIdentityID,
-		row.SenderUserID,
-		row.SenderDisplayName,
-		row.SenderAvatarUrl,
-		row.Platform,
-		row.ExternalMessageID,
-		row.SourceReplyToMessageID,
-		row.Role,
-		row.Content,
-		row.Metadata,
-		row.Usage,
-		row.SessionMode,
-		row.RuntimeType,
-		row.EventID,
-		row.DisplayText,
-		row.CreatedAt,
-	)
-	if row.CompactID.Valid {
-		m.CompactID = row.CompactID.String()
-	}
-	return m
-}
-
 func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySessionRow) Message {
 	m := toMessageFields(
 		row.ID,
@@ -2320,26 +2256,10 @@ func toMessagesFromSinceBySession(rows []sqlc.ListMessagesSinceBySessionRow) []M
 	return messages
 }
 
-func toMessagesFromActiveSince(rows []sqlc.ListActiveMessagesSinceRow) []Message {
-	messages := make([]Message, 0, len(rows))
-	for _, row := range rows {
-		messages = append(messages, toMessageFromActiveSinceRow(row))
-	}
-	return messages
-}
-
 func toMessagesFromActiveSinceBySession(rows []sqlc.ListActiveMessagesSinceBySessionRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
 		messages = append(messages, toMessageFromActiveSinceBySessionRow(row))
-	}
-	return messages
-}
-
-func toMessagesFromActiveSinceWithinBytes(rows []sqlc.ListActiveMessagesSinceWithinBytesRow) []Message {
-	messages := make([]Message, 0, len(rows))
-	for _, row := range rows {
-		messages = append(messages, toAdmissionMessage(sqlc.ListActiveMessagesSinceBySessionRow(row)))
 	}
 	return messages
 }

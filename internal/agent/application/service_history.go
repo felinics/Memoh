@@ -109,22 +109,14 @@ func currentWorkspaceTransitionMessage(history []historyfrag.HistoryRecord, curr
 // loadHistoryRecords loads session history by budget, not age. Raw rows are
 // read newest-first through the visible-history index; a folded load skips
 // summarized payloads and returns one placement row per usable compact group.
-// Bot-scoped legacy requests retain their time window rather than broadening
-// cross-session history. Final request admission still enforces token limits.
+// Without a session there is no history; never widen the lookup to the bot.
+// Final request admission still enforces token limits.
 func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.ScopeFallback, sessionID string, contextTokenBudget int, fold bool) ([]historyfrag.HistoryRecord, error) {
-	if s.messageService == nil {
+	sessionID = strings.TrimSpace(sessionID)
+	if s.messageService == nil || sessionID == "" {
 		return nil, nil
 	}
-	since := time.Unix(0, 0)
-	maxBytes := s.historyLoadMaxBytes(contextTokenBudget)
-	var msgs []messagepkg.Message
-	var err error
-	if strings.TrimSpace(sessionID) != "" {
-		msgs, err = s.messageService.ListActiveSinceBySessionWithinBytes(ctx, sessionID, since, maxBytes, fold)
-	} else {
-		since = time.Now().UTC().Add(-time.Duration(sessionlessMaxContextMinutes) * time.Minute)
-		msgs, err = s.messageService.ListActiveSinceWithinBytes(ctx, fallback.ChatID, since, maxBytes)
-	}
+	msgs, err := s.messageService.ListActiveSinceBySessionWithinBytes(ctx, sessionID, time.Unix(0, 0), s.historyLoadMaxBytes(contextTokenBudget), fold)
 	if err != nil {
 		return nil, err
 	}

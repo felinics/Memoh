@@ -90,22 +90,6 @@ type mergeEntry struct {
 	trRawContent json.RawMessage
 }
 
-// ViewFromMs is the receive time of the oldest loaded RC segment or TR entry.
-func ViewFromMs(rc RenderedContext, trs []TurnResponseEntry) int64 {
-	var from int64
-	for _, segment := range rc {
-		if from == 0 || segment.ReceivedAtMs < from {
-			from = segment.ReceivedAtMs
-		}
-	}
-	for _, tr := range trs {
-		if from == 0 || tr.RequestedAtMs < from {
-			from = tr.RequestedAtMs
-		}
-	}
-	return from
-}
-
 // MergeContext interleaves RC segments and TR entries by timestamp.
 // RC entries use receivedAtMs; TR entries use requestedAtMs.
 // Tiebreaker: RC before TR on equal timestamp.

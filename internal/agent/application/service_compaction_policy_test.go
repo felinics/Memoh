@@ -118,14 +118,12 @@ func TestCompactForBudgetStopsCandidatesAtTheRequestCutoff(t *testing.T) {
 func TestCompactForBudgetKeepsOldHistoryEligible(t *testing.T) {
 	t.Parallel()
 	service, runner := newControllerPolicyService(t)
-	for _, from := range []time.Time{time.Now(), time.Now().Add(-72 * time.Hour), {}} {
-		req := ChatRequest{BotID: syncCompactBotID, ChatID: syncCompactBotID, ThreadID: syncCompactThreadID, historyViewFrom: from}
-		if err := service.compactForBudget(t.Context(), req, 2000, 1000, ""); err != nil {
-			t.Fatal(err)
-		}
-		if got := runner.configs[len(runner.configs)-1].CandidatesFrom; !got.IsZero() {
-			t.Fatalf("candidates_from=%v, want all historical candidates even after a byte-bounded load", got)
-		}
+	req := ChatRequest{BotID: syncCompactBotID, ChatID: syncCompactBotID, ThreadID: syncCompactThreadID}
+	if err := service.compactForBudget(t.Context(), req, 2000, 1000, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := runner.configs[len(runner.configs)-1].CandidatesFrom; !got.IsZero() {
+		t.Fatalf("candidates_from=%v, want all historical candidates", got)
 	}
 }
 

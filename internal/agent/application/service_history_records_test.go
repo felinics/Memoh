@@ -382,27 +382,10 @@ type recordingCompactionLogQueries struct {
 	dbstore.Queries
 	logs      []sqlc.BotHistoryMessageCompact
 	refs      map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow
-	byID      map[pgtype.UUID]sqlc.BotHistoryMessageCompact
 	sessionID pgtype.UUID
 	listCalls int
 	refCalls  []pgtype.UUID
-	getCalls  []pgtype.UUID
 	listErr   error
-}
-
-func (q *recordingCompactionLogQueries) GetCompactionLogByID(_ context.Context, compactID pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {
-	q.getCalls = append(q.getCalls, compactID)
-	return q.byID[compactID], nil
-}
-
-func (q *recordingCompactionLogQueries) ListCompactionArtifactParentIDsBySuccessor(_ context.Context, arg sqlc.ListCompactionArtifactParentIDsBySuccessorParams) ([]pgtype.UUID, error) {
-	var ids []pgtype.UUID
-	for _, row := range q.byID {
-		if row.Status == "ok" && row.SupersededBy == arg.SuccessorID && row.BotID == arg.BotID && row.SessionID == arg.SessionID {
-			ids = append(ids, row.ID)
-		}
-	}
-	return ids, nil
 }
 
 func (q *recordingCompactionLogQueries) ListCompactionArtifactLineageBySession(_ context.Context, sessionID pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {

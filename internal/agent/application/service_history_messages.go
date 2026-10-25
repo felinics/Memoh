@@ -20,30 +20,29 @@ import (
 // bot_history_messages. This gives chat mode the same event-driven context
 // that discuss mode uses, replacing the legacy loadMessages path. The second
 // return value is the token pressure of raw history and active summaries;
-// the third is the creation time of the oldest loaded row. A history or
-// frontier load failure fails the request (CM-ADM-003).
-func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest, contextTokenBudget int) ([]ModelMessage, int, time.Time, error) {
+// a history or frontier load failure fails the request (CM-ADM-003).
+func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest, contextTokenBudget int) ([]ModelMessage, int, error) {
 	sessionID := strings.TrimSpace(req.ThreadID)
 	if s.pipeline == nil || sessionID == "" {
-		return nil, 0, time.Time{}, nil
+		return nil, 0, nil
 	}
 	rc := s.pipeline.GetRC(sessionID)
 	if len(rc) == 0 {
-		return nil, 0, time.Time{}, nil
+		return nil, 0, nil
 	}
 
 	trs, err := s.loadTurnResponses(ctx, sessionID, contextTokenBudget)
 	if err != nil {
-		return nil, 0, time.Time{}, fmt.Errorf("load turn history: %w", err)
+		return nil, 0, fmt.Errorf("load turn history: %w", err)
 	}
 	artifacts, err := s.loadTimelineArtifacts(ctx, req.BotID, sessionID)
 	if err != nil {
-		return nil, 0, time.Time{}, fmt.Errorf("load compaction frontier: %w", err)
+		return nil, 0, fmt.Errorf("load compaction frontier: %w", err)
 	}
 
 	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts)
 	if composed == nil {
-		return nil, 0, time.Time{}, nil
+		return nil, 0, nil
 	}
 
 	messages := make([]ModelMessage, 0, len(composed.Messages))
@@ -71,13 +70,13 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 		pressure += estimateMessageTokens(messages[len(messages)-1])
 	}
 
-	return messages, pressure, time.UnixMilli(timeline.ViewFromMs(rc, trs)).UTC(), nil
+	return messages, pressure, nil
 }
 
 // loadTimelineArtifacts projects the session's active compaction frontier for
 // timeline composition.
 func (s *Service) loadTimelineArtifacts(ctx context.Context, botID, sessionID string) ([]timeline.CompactionArtifact, error) {
-	if s.queries == nil {
+	if s.queries == nil || strings.TrimSpace(sessionID) == "" {
 		return nil, nil
 	}
 	return compaction.NewTimelineArtifactSource(s.queries).ActiveCompactionArtifacts(ctx, botID, sessionID)
@@ -88,7 +87,7 @@ func (s *Service) loadTimelineArtifacts(ctx context.Context, botID, sessionID st
 // budget is crossed, without measuring the entire old backlog. The TR
 // projection excludes legacy lifecycle audits; final admission still applies.
 func (s *Service) loadTurnResponses(ctx context.Context, sessionID string, contextTokenBudget int) ([]timeline.TurnResponseEntry, error) {
-	if s.messageService == nil {
+	if s.messageService == nil || strings.TrimSpace(sessionID) == "" {
 		return nil, nil
 	}
 	since := time.Unix(0, 0)
