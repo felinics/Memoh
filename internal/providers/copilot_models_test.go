@@ -38,7 +38,7 @@ func TestListGitHubCopilotRemoteModels(t *testing.T) {
 						"supported_endpoints":  []string{"/chat/completions", "/responses"},
 						"capabilities": map[string]any{
 							"type":   "chat",
-							"limits": map[string]any{"max_context_window_tokens": 200000},
+							"limits": map[string]any{"max_context_window_tokens": 200000, "max_prompt_tokens": 160000, "max_output_tokens": 32000},
 							"supports": map[string]any{
 								"tool_calls":       true,
 								"vision":           true,
@@ -105,10 +105,16 @@ func TestListGitHubCopilotRemoteModels(t *testing.T) {
 		if model.ContextWindow == nil || *model.ContextWindow != 200000 {
 			t.Fatalf("context window = %#v", model.ContextWindow)
 		}
+		if model.MaxOutputTokens == nil || *model.MaxOutputTokens != 32000 {
+			t.Fatalf("output limit = %v, want the account catalog's 32000", model.MaxOutputTokens)
+		}
 		if !model.CapabilitiesKnown {
 			t.Fatal("Copilot catalog capabilities should be authoritative")
 		}
 		offOnlyModel := remoteModels[1]
+		if offOnlyModel.ContextWindow != nil || offOnlyModel.MaxOutputTokens != nil {
+			t.Fatal("missing catalog limits must stay unknown")
+		}
 		if got := strings.Join(offOnlyModel.ReasoningEfforts, ","); got != "disable" {
 			t.Fatalf("off-only reasoning efforts = %q", got)
 		}

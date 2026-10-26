@@ -30,7 +30,8 @@ the application with Memoh's normal User-Agent.
 
 The OpenCode Go entry in the Web provider gallery takes its model list and
 capabilities from the `opencode-go` provider on
-[models.dev](https://models.dev/api.json), fetched by the browser. Each model's
+[models.dev](https://models.dev/api.json), fetched and normalized by the server.
+Each model's
 reasoning request shape is read on the protocol Go routes it to: effort levels
 become tiers, a budget alone becomes the budget shape, and a model that offers
 no control reasons on its own and shows no manual reasoning control in the
@@ -42,6 +43,14 @@ Creating the provider from the gallery imports the catalog's models disabled.
 models are added, and existing ones get the catalog's capabilities while their
 enabled state and description stay. The refresh dialog can list the live
 endpoint instead, for models the catalog does not have.
+
+Older subscriptions created through the custom form may lack catalog source
+metadata. Provider reads recover `source: opencode-go` when the protocol is
+`opencode-go` and the base URL is the official `https://opencode.ai/zen/go/v1`
+(or empty, selecting the SDK default). Refresh Models can then fill their missing
+`context_window` and `max_output_tokens` from the public catalog. Reads alone do
+not write model rows. Custom proxies and explicitly selected sources are not
+reclassified. See [subscription model limits](subscription-model-limits.md).
 
 Migration `0160_opencode_go` extends the provider type constraint. The canonical
 initial schema includes the same type. Rollback refuses to proceed while Go

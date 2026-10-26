@@ -124,11 +124,12 @@ func (s *Service) listCodexRemoteModels(ctx context.Context, baseURL string, cre
 			compatibilities = append(compatibilities, models.CompatReasoning)
 			thinkingMode = models.ThinkingModeToggle
 		}
-		contextWindow := model.ContextWindow
-		if contextWindow == nil {
-			contextWindow = model.MaxContextWindow
-		}
+		// Prefer the account's default window, not an optional larger window.
+		// Missing/zero limits are unknown, not valid model configuration.
+		contextWindow := positiveModelLimit(model.ContextWindow, model.MaxContextWindow)
 
+		// The catalog has no maximum output limit. Tool truncation and auto-compact
+		// thresholds are not that limit; keep output unknown for this transport.
 		remoteModels = append(remoteModels, RemoteModel{
 			ID:                modelID,
 			Name:              name,
@@ -144,6 +145,16 @@ func (s *Service) listCodexRemoteModels(ctx context.Context, baseURL string, cre
 		})
 	}
 	return remoteModels, nil
+}
+
+func positiveModelLimit(values ...*int) *int {
+	for _, value := range values {
+		if value != nil && *value > 0 {
+			limit := *value
+			return &limit
+		}
+	}
+	return nil
 }
 
 func containsFold(values []string, target string) bool {

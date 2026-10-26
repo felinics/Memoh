@@ -47,6 +47,7 @@ type copilotModelCapabilities struct {
 
 type copilotModelLimits struct {
 	MaxContextWindowTokens *int `json:"max_context_window_tokens"`
+	MaxOutputTokens        *int `json:"max_output_tokens"`
 }
 
 type copilotModelSupports struct {
@@ -165,7 +166,8 @@ func (s *Service) listGitHubCopilotRemoteModels(ctx context.Context, baseURL, gi
 			Compatibilities:   compatibilities,
 			ReasoningEfforts:  reasoningEfforts,
 			ThinkingMode:      thinkingMode,
-			ContextWindow:     model.Capabilities.Limits.MaxContextWindowTokens,
+			ContextWindow:     positiveModelLimit(model.Capabilities.Limits.MaxContextWindowTokens),
+			MaxOutputTokens:   positiveModelLimit(model.Capabilities.Limits.MaxOutputTokens),
 			CapabilitiesKnown: true,
 		})
 	}
