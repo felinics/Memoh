@@ -56,9 +56,12 @@ type turnRunner struct {
 	done     chan struct{}
 	readDone chan struct{}
 
+	// stream delivers events off the read loop: a slow consumer must not
+	// hold up control responses the CLI waits for.
+	stream *external.TurnStream
+
 	mu              sync.Mutex
 	closed          bool
-	events          []event.StreamEvent
 	assistantTxt    strings.Builder
 	streamedText    strings.Builder // deltas for the current native assistant message
 	turnHasText     bool
@@ -119,6 +122,7 @@ func newTurnRunner(parent context.Context, input external.PromptInput, proc cliP
 		runtimeMetadata: map[string]any{},
 		ready:           make(chan struct{}), steers: map[string]*pendingSteer{},
 		resultIDs: map[string]struct{}{},
+		stream:    external.NewTurnStream(input.Sink, input.ToolOutputLimit),
 	}
 }
 
@@ -127,21 +131,18 @@ func (t *turnRunner) close() {
 	t.mu.Lock()
 	t.closed = true
 	t.mu.Unlock()
+	t.stream.Finish()
 	t.cancel()
 }
 
-// emit forwards one stream event to the sink and records it for the
-// transcript. After close it is a no-op so late decision outcomes cannot
-// crash a finished stream.
+// emit queues one stream event for the sink and the transcript. After close
+// it is a no-op so late decision outcomes cannot crash a finished stream.
 func (t *turnRunner) emit(ev event.StreamEvent) {
 	t.mu.Lock()
-	if t.closed {
-		t.mu.Unlock()
-		return
+	defer t.mu.Unlock()
+	if !t.closed {
+		t.stream.EmitStreamEvent(ev)
 	}
-	t.events = append(t.events, ev)
-	t.mu.Unlock()
-	t.input.Sink.EmitStreamEvent(ev)
 }
 
 func (t *turnRunner) finish() {
@@ -875,17 +876,7 @@ func (t *turnRunner) buildResult(storedSessionID string) (external.PromptResult,
 	if strings.TrimSpace(finalText) == noResponseRequested {
 		finalText = ""
 	}
-	recorder := external.NewTranscriptRecorder(t.input.ToolOutputLimit)
-	var steerIDs []string
-	for _, ev := range t.events {
-		if ev.Type == steerInputEvent {
-			recorder.AddUser(ev.Delta)
-			steerIDs = append(steerIDs, ev.ToolCallID)
-		} else {
-			recorder.Add(ev)
-		}
-	}
-	out := external.PromptResult{Output: withoutNoResponseSentinel(recorder.Messages(finalText)), Text: finalText, SteerInputIDs: steerIDs}
+	out := external.PromptResult{Output: withoutNoResponseSentinel(t.stream.Transcript(finalText)), Text: finalText, SteerInputIDs: t.stream.SteerInputIDs()}
 	if t.hasUsage {
 		usage := t.usage
 		out.Usage = &sdk.Usage{

@@ -14,6 +14,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 )
 
@@ -98,7 +99,7 @@ func TestPromptSurvivesUpdateBurst(t *testing.T) {
 	t.Cleanup(func() { _ = sess.Close() })
 
 	consumer := &slowConsumer{delay: time.Millisecond}
-	sink := NewTurnSink(consumer, ToolOutputLimit{})
+	sink := external.NewTurnStream(consumer, ToolOutputLimit{})
 	result, err := sess.Prompt(context.Background(), "burst", sink)
 	sink.Finish()
 	if err != nil {

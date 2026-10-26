@@ -11,9 +11,6 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 )
 
-// Private journal marker: never sent over the public event transport.
-const steerInputEvent event.StreamEventType = "codex_steer_input"
-
 type pendingSteer struct {
 	input    external.SteerInput
 	observed bool
@@ -141,18 +138,17 @@ func (t *turnState) recordSteerInput(id string) {
 		return
 	}
 	pending.observed = true
-	// Appending both markers under one lock places the input precisely between
-	// surrounding output. Started/completed repeats for the same client ID dedupe.
+	// Queueing the markers and the input under one lock places the input
+	// precisely between surrounding output. Started/completed repeats for the
+	// same client ID dedupe.
 	for _, ev := range []event.StreamEvent{
 		{Type: event.TextEnd},
 		{Type: event.ReasoningEnd},
 		{Type: event.StepEnd, StepNumber: pending.step},
-		{Type: steerInputEvent, ToolCallID: id, Delta: pending.input.Text},
 	} {
-		t.events = append(t.events, ev)
-		t.queue = append(t.queue, ev)
+		t.stream.EmitStreamEvent(ev)
 	}
-	t.queueCond.Signal()
+	t.stream.SteerInput(id, pending.input.Text, func() { t.deliverSteerInput(t.ctx, id) })
 }
 
 func (t *turnState) deliverSteerInput(parent context.Context, id string) {

@@ -22,6 +22,7 @@ import (
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/agentstate"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	"github.com/felinics/memoh/internal/agent/runtime/external/toolmount"
@@ -946,7 +947,7 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 
 	p.persistModelPreference(ctx, h)
 
-	turn := client.NewTurnSink(input.Sink, input.ToolOutputLimit)
+	turn := external.NewTurnStream(input.Sink, input.ToolOutputLimit)
 	defer turn.Finish()
 	unregisterToolEvents := toolmount.RegisterTurnSink(p.contexts, input.BotID, input.SessionID, input.RunID, turn.EmitStreamEvent)
 	defer unregisterToolEvents()

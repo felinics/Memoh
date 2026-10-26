@@ -11,8 +11,6 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 )
 
-const steerInputEvent event.StreamEventType = "claude_steer_input"
-
 type pendingSteer struct {
 	input    external.SteerInput
 	step     int
@@ -147,13 +145,11 @@ func (t *turnRunner) handleCommandLifecycle(msg *inboundMessage) {
 		t.endText()
 		t.closeThinking()
 		t.emit(event.StreamEvent{Type: event.StepEnd, StepNumber: pending.step})
-		t.mu.Lock()
-		t.events = append(t.events, event.StreamEvent{Type: steerInputEvent, ToolCallID: pending.input.ID, Delta: pending.input.Text})
-		t.mu.Unlock()
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.ctx), 5*time.Second)
-		err := t.input.Steering.Accepted(ctx, pending.input.ID, pending.step)
-		cancel()
-		pending.settled <- err
+		t.stream.SteerInput(pending.input.ID, pending.input.Text, func() {
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(t.ctx), 5*time.Second)
+			defer cancel()
+			pending.settled <- t.input.Steering.Accepted(ctx, pending.input.ID, pending.step)
+		})
 	}
 	if terminal && !observed {
 		select {

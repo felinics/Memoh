@@ -1,4 +1,4 @@
-package client
+package external
 
 import (
 	"fmt"
@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
 	"github.com/felinics/memoh/internal/agent/event"
 )
 
@@ -55,13 +56,13 @@ func reasoningDelta(delta string) event.StreamEvent {
 	return event.StreamEvent{Type: event.ReasoningDelta, Delta: delta}
 }
 
-func TestTurnSinkNeverWaitsAndKeepsTheTurnInOrder(t *testing.T) {
+func TestTurnStreamNeverWaitsAndKeepsTheTurnInOrder(t *testing.T) {
 	release := make(chan struct{})
 	var live []string
-	sink := NewTurnSink(EventSinkFunc(func(ev event.StreamEvent) {
+	sink := NewTurnStream(EventSinkFunc(func(ev event.StreamEvent) {
 		<-release
 		live = append(live, ev.Delta)
-	}), ToolOutputLimit{})
+	}), contextlimit.ToolOutputLimit{})
 
 	emitted := make(chan struct{})
 	go func() {
@@ -86,9 +87,9 @@ func TestTurnSinkNeverWaitsAndKeepsTheTurnInOrder(t *testing.T) {
 	}
 }
 
-func TestTurnSinkFoldsBacklogAndFinishDeliversIt(t *testing.T) {
+func TestTurnStreamFoldsBacklogAndFinishDeliversIt(t *testing.T) {
 	next := newGatedSink()
-	sink := NewTurnSink(next, ToolOutputLimit{})
+	sink := NewTurnStream(next, contextlimit.ToolOutputLimit{})
 	sink.EmitStreamEvent(textDelta("a"))
 	<-next.entered // "a" is being delivered; everything below queues behind it.
 

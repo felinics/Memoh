@@ -26,6 +26,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/runtime/agentstate"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	"github.com/felinics/memoh/internal/agent/runtime/external/toolmount"
@@ -1759,7 +1760,7 @@ func TestSessionPoolResolveRuntimeToolContext(t *testing.T) {
 }
 
 func TestTurnRecordPreservesACPAndGatewayToolEventOrder(t *testing.T) {
-	sink := client.NewTurnSink(nil, client.ToolOutputLimit{})
+	sink := external.NewTurnStream(nil, client.ToolOutputLimit{})
 	store := mcp.NewToolSessionContextStore()
 	run := mcp.ToolSessionContext{BotID: "bot-1", SessionID: "session-1", RunID: "run-1"}
 	defer toolmount.RegisterTurnSink(store, run.BotID, run.SessionID, run.RunID, sink.EmitStreamEvent)()

@@ -35,6 +35,7 @@ func TestResultEventsKeepCallIdentityAndSeparateBatchedOutputs(t *testing.T) {
 	runner := newTestRunner(sink)
 	feed(t, runner, `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"a","name":"Bash","input":{"command":"echo a"}},{"type":"tool_use","id":"b","name":"Read","input":{"file_path":"/data/b"}}]}}`)
 	feed(t, runner, `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"a","content":"a"},{"type":"tool_result","tool_use_id":"b","content":"b"}]},"tool_use_result":{"stdout":"must not be shared"}}`)
+	runner.stream.Finish()
 	ends := map[string]event.StreamEvent{}
 	for _, ev := range sink.snapshot() {
 		if ev.Type == event.ToolCallEnd {

@@ -253,6 +253,7 @@ func TestClaudeRecordedThinking(t *testing.T) {
 	for _, line := range fixture.Thinking.Events {
 		feed(t, r, string(line))
 	}
+	r.stream.Finish()
 	var reasoning strings.Builder
 	var starts, ends int
 	for _, ev := range sink.snapshot() {
@@ -315,14 +316,14 @@ func TestClaudeThinkingSurfacesOnce(t *testing.T) {
 		lines []string
 		want  []string
 	}{
-		{"deltas", []string{start(""), delta("A "), delta("B"), assistant("A B"), stop}, []string{"start", "A ", "B", "end"}},
+		{"deltas", []string{start(""), delta("A "), delta("B"), assistant("A B"), stop}, []string{"start", "A B", "end"}},
 		{"inline in content_block_start", []string{start("X"), assistant(""), stop}, []string{"start", "X", "end"}},
-		{"inline start then deltas", []string{start("A"), delta(" B"), assistant(" B"), stop}, []string{"start", "A", " B", "end"}},
+		{"inline start then deltas", []string{start("A"), delta(" B"), assistant(" B"), stop}, []string{"start", "A B", "end"}},
 		{"complete message only", []string{assistant("X")}, []string{"start", "X", "end"}},
 		// CLI 2.1.269 answers a broken stream with a non-streaming request and
 		// no content_block_stop; the new generation continues the cut block
 		// only when it repeats what was streamed.
-		{"non-streaming retry continuing the cut stream", []string{start(""), delta("CUT"), assistant("CUT MORE")}, []string{"start", "CUT", " MORE", "end"}},
+		{"non-streaming retry continuing the cut stream", []string{start(""), delta("CUT"), assistant("CUT MORE")}, []string{"start", "CUT MORE", "end"}},
 		{"non-streaming retry after a cut stream", []string{start(""), delta("CUT"), assistant("NEW")}, []string{"start", "CUT", "end", "start", "NEW", "end"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -333,13 +334,19 @@ func TestClaudeThinkingSurfacesOnce(t *testing.T) {
 				feed(t, r, line)
 			}
 			feed(t, r, `{"type":"result","subtype":"success","session_id":"s","is_error":false,"result":"ok"}`)
+			r.stream.Finish()
 
+			// A lagging consumer receives adjacent deltas folded together.
 			var got []string
 			for _, ev := range sink.snapshot() {
 				switch ev.Type {
 				case event.ReasoningStart:
 					got = append(got, "start")
 				case event.ReasoningDelta:
+					if n := len(got); n > 0 && got[n-1] != "start" && got[n-1] != "end" {
+						got[n-1] += ev.Delta
+						continue
+					}
 					got = append(got, ev.Delta)
 				case event.ReasoningEnd:
 					got = append(got, "end")

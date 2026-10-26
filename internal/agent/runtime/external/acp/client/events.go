@@ -17,13 +17,13 @@ const maxTrackedACPToolStates = 1024
 // EventSink receives a session's stream events. A sink handed to Session is
 // called on acp-go-sdk's only notification goroutine, and reading from the
 // Agent stops while that goroutine falls behind, so it must return without
-// waiting on its consumer: put a TurnSink in front of a live stream.
+// waiting on its consumer: put an external.TurnStream in front of a live stream.
 type EventSink interface {
 	EmitStreamEvent(event.StreamEvent)
 }
 
 // TerminalDecisionSink records a late durable approval/Form terminal state
-// without publishing another live frame. TurnSink implements it so EventAbort
+// without publishing another live frame. external.TurnStream implements it so EventAbort
 // remains the single authoritative terminal UI event.
 type TerminalDecisionSink interface {
 	RecordTerminalDecision(event.StreamEvent)

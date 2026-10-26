@@ -18,19 +18,18 @@ func TestToolResultsReachNativeDisplayFields(t *testing.T) {
 		{"file changes", `{"type":"fileChange","id":"patch","status":"completed","changes":[{"path":"/data/a","kind":{"type":"add"},"diff":"hello"}]}`, "apply_patch", "changes"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			turn := newTurnState(t.Context(), external.PromptInput{Sink: &captureSink{}}, "thread", nil, nil, nil, nil, slog.Default())
-			defer turn.close()
+			sink := &captureSink{}
+			turn := newTurnState(t.Context(), external.PromptInput{Sink: sink}, "thread", nil, nil, nil, nil, slog.Default())
 			var item protocol.ThreadItem
 			if err := json.Unmarshal([]byte(tc.raw), &item); err != nil {
 				t.Fatal(err)
 			}
 			turn.handleItemStarted(&item)
 			turn.handleItemCompleted(&item)
-			turn.mu.Lock()
-			defer turn.mu.Unlock()
+			turn.close()
 			var end *event.StreamEvent
-			for i := range turn.events {
-				ev := &turn.events[i]
+			for i := range sink.events {
+				ev := &sink.events[i]
 				if ev.Type == event.ToolCallStart && ev.ToolName != tc.tool {
 					t.Fatalf("start tool = %s", ev.ToolName)
 				}

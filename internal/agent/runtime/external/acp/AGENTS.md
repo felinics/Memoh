@@ -34,7 +34,7 @@ On both, acp-go-sdk handles notifications on one goroutine and closes the
 connection once 1024 are queued behind it. The client therefore stops reading
 the agent's output while 512 updates wait, and the agent waits with it. Every
 message behind a held update waits too, so a notification handler must never
-wait, neither on the agent nor on a consumer: put a `TurnSink` in front of a
+wait, neither on the agent nor on a consumer: put an `external.TurnStream` in front of a
 prompt's live stream.
 
 A built-in agent whose own protocol is ACP (Grok Build) is a direct runtime

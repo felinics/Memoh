@@ -51,7 +51,6 @@ type turnState struct {
 	goalStarting  bool
 	goalActive    bool
 	steers        map[string]*pendingSteer
-	events        []event.StreamEvent
 	finalText     string
 	usage         *sdk.Usage
 	threadTotals  *protocol.TokenUsageBreakdown
@@ -63,13 +62,11 @@ type turnState struct {
 	// serverRequest/resolved notification can withdraw them.
 	inflight map[string]context.CancelFunc
 	closed   bool
+	doneOnce sync.Once
 
-	// queue decouples the shared connection read loop from sink delivery: a
+	// stream decouples the shared connection read loop from sink delivery: a
 	// stalled consumer must not head-of-line block the bot's other threads.
-	queue     []event.StreamEvent
-	queueCond *sync.Cond
-	doneOnce  sync.Once
-	pumpDone  chan struct{}
+	stream *external.TurnStream
 }
 
 func newTurnState(parent context.Context, input external.PromptInput, threadID string, approvalSvc approval.FlowService, waiter func(string) func(), userInput UserInputService, toolLookup func(context.Context, string) bool, logger *slog.Logger) *turnState {
@@ -89,10 +86,8 @@ func newTurnState(parent context.Context, input external.PromptInput, threadID s
 		done:         make(chan struct{}),
 		toolNames:    map[string]string{},
 		inflight:     map[string]context.CancelFunc{},
-		pumpDone:     make(chan struct{}),
+		stream:       external.NewTurnStream(input.Sink, input.ToolOutputLimit),
 	}
-	t.queueCond = sync.NewCond(&t.mu)
-	go t.pump(ctx)
 	return t
 }
 
@@ -107,13 +102,12 @@ func (t *turnState) close() {
 	t.closed = true
 	inflight := t.inflight
 	t.inflight = map[string]context.CancelFunc{}
-	t.queueCond.Broadcast()
 	t.mu.Unlock()
+	t.stream.Finish()
 	for _, cancel := range inflight {
 		cancel()
 	}
 	t.cancel()
-	<-t.pumpDone
 }
 
 // emit records one stream event for the transcript and queues it for
@@ -121,38 +115,9 @@ func (t *turnState) close() {
 // be gone, and a late decision outcome must never crash the stream.
 func (t *turnState) emit(ev event.StreamEvent) {
 	t.mu.Lock()
-	if t.closed {
-		t.mu.Unlock()
-		return
-	}
-	t.events = append(t.events, ev)
-	t.queue = append(t.queue, ev)
-	t.queueCond.Signal()
-	t.mu.Unlock()
-}
-
-// pump delivers queued events to the sink on its own goroutine.
-func (t *turnState) pump(ctx context.Context) {
-	defer close(t.pumpDone)
-	for {
-		t.mu.Lock()
-		for len(t.queue) == 0 && !t.closed {
-			t.queueCond.Wait()
-		}
-		if len(t.queue) == 0 && t.closed {
-			t.mu.Unlock()
-			return
-		}
-		batch := t.queue
-		t.queue = nil
-		t.mu.Unlock()
-		for _, ev := range batch {
-			if ev.Type == steerInputEvent {
-				t.deliverSteerInput(ctx, ev.ToolCallID)
-				continue
-			}
-			t.input.Sink.EmitStreamEvent(ev)
-		}
+	defer t.mu.Unlock()
+	if !t.closed {
+		t.stream.EmitStreamEvent(ev)
 	}
 }
 
@@ -686,22 +651,18 @@ func (t *turnState) emitApprovalRequest(req approval.Request) bool {
 // result assembles the durable outcome after the turn settled.
 func (t *turnState) result() (external.PromptResult, error) {
 	t.mu.Lock()
+	finalText := t.finalText
+	t.mu.Unlock()
+	// Not under t.mu: the stream may still be delivering a steer, which takes it.
+	output := t.stream.Transcript(finalText)
+	steerIDs := t.stream.SteerInputIDs()
+	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	recorder := external.NewTranscriptRecorder(t.input.ToolOutputLimit)
-	var steerIDs []string
-	for _, ev := range t.events {
-		if ev.Type == steerInputEvent {
-			recorder.AddUser(ev.Delta)
-			steerIDs = append(steerIDs, ev.ToolCallID)
-		} else {
-			recorder.Add(ev)
-		}
-	}
 	out := external.PromptResult{
-		Output:        recorder.Messages(t.finalText),
+		Output:        output,
 		SteerInputIDs: steerIDs,
-		Text:          t.finalText,
+		Text:          finalText,
 	}
 	if t.usage != nil {
 		usage := *t.usage

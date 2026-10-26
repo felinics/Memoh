@@ -239,6 +239,7 @@ func TestClaudeSteeringWorkerUsesNativeCapabilitiesAndInputIdentity(t *testing.T
 			feed(t, r, `{"type":"result","subtype":"success"}`)
 			feed(t, r, `{"type":"command_lifecycle","command_uuid":"`+id+`","state":"completed"}`)
 			stop()
+			r.stream.Finish()
 			if len(source.ids) != 1 || source.ids[0] != id {
 				t.Fatalf("consumed %v", source.ids)
 			}
@@ -273,6 +274,7 @@ func TestClaudeSteeringStopDoesNotReportUndeliveredInput(t *testing.T) {
 	}
 	feed(t, r, `{"type":"result","subtype":"success"}`)
 	stop()
+	r.stream.Finish()
 	for _, ev := range sink.snapshot() {
 		if ev.Type == event.RuntimeNotice {
 			t.Fatalf("normal shutdown emitted %s", ev.NoticeKind)
