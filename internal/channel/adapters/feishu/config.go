@@ -16,6 +16,13 @@ const (
 
 	inboundModeWebsocket = "websocket"
 	inboundModeWebhook   = "webhook"
+
+	setupModeManual = "manual"
+	// SetupModeRegistration marks a channel whose app was created by QR
+	// registration. It is kept in the stored credentials but not in the config
+	// schema, so the management UI never renders it as a field; the UI reads
+	// it to show such a channel as configured without its credentials.
+	SetupModeRegistration = "registration"
 )
 
 // Config holds the Feishu app credentials extracted from a channel configuration.
@@ -26,6 +33,7 @@ type Config struct {
 	VerificationToken string
 	Region            string
 	InboundMode       string
+	SetupMode         string
 }
 
 // UserConfig holds the identifiers used to target a Feishu user.
@@ -50,6 +58,9 @@ func normalizeConfig(raw map[string]any) (map[string]any, error) {
 	}
 	if cfg.VerificationToken != "" {
 		result["verificationToken"] = cfg.VerificationToken
+	}
+	if cfg.SetupMode != setupModeManual {
+		result["setupMode"] = cfg.SetupMode
 	}
 	return result, nil
 }
@@ -126,6 +137,10 @@ func parseConfig(raw map[string]any) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	setupMode, err := normalizeSetupMode(channel.ReadString(raw, "setupMode", "setup_mode"))
+	if err != nil {
+		return Config{}, err
+	}
 	if appID == "" || appSecret == "" {
 		return Config{}, errors.New("feishu appId and appSecret are required")
 	}
@@ -139,6 +154,7 @@ func parseConfig(raw map[string]any) (Config, error) {
 		VerificationToken: verificationToken,
 		Region:            region,
 		InboundMode:       inboundMode,
+		SetupMode:         setupMode,
 	}, nil
 }
 
@@ -187,6 +203,17 @@ func normalizeInboundMode(raw string) (string, error) {
 		return inboundModeWebhook, nil
 	default:
 		return "", errors.New("feishu inbound_mode must be websocket or webhook")
+	}
+}
+
+func normalizeSetupMode(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", setupModeManual:
+		return setupModeManual, nil
+	case SetupModeRegistration:
+		return SetupModeRegistration, nil
+	default:
+		return "", errors.New("feishu setup_mode must be manual or registration")
 	}
 }
 

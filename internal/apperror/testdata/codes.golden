@@ -83,10 +83,13 @@ capability.approval_required	403
 capability.not_found	404
 capability.operation_failed	502
 capability.request_invalid	400
+channel.already_configured	409
 channel.binding_required	409
 channel.config_not_found	404
 channel.enable_failed	400
 channel.identity_config_not_found	404
+channel.registration_rate_limited	429
+channel.registration_unavailable	502
 channel.runtime_unavailable	503
 channel.verification_failed	502
 channel.webhook_endpoint_invalid	400

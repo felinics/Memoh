@@ -225,10 +225,13 @@
       "request_invalid": "The capability request is invalid. Check the action and its parameters."
     },
     "channel": {
+      "already_configured": "This channel is already set up for the bot. Delete the current connection before creating a new bot.",
       "binding_required": "The recipient has not linked this channel yet.",
       "config_not_found": "This channel is not configured for the bot. Set it up first, then try again.",
       "enable_failed": "The channel could not be enabled. Check its credentials, then try again.",
       "identity_config_not_found": "You have not set up this channel yet. Set it up first, then try again.",
+      "registration_rate_limited": "Too many QR codes were requested. Wait a few minutes, then try again.",
+      "registration_unavailable": "The platform couldn't create the bot right now. Try again later, or enter the app credentials manually.",
       "runtime_unavailable": "The channel service could not be reached. Please try again shortly.",
       "verification_failed": "The channel configuration could not be verified. Check the credentials, then try again.",
       "webhook_endpoint_invalid": "Use a public HTTPS URL without a port, credentials, query or fragment. Its path must be the webhook path shown for this channel."
@@ -3742,6 +3745,28 @@
         "verifyCodeSubmit": "Confirm",
         "verifyCodeBlocked": "Too many wrong attempts. Refresh the QR code and try again later.",
         "alreadyBound": "This WeChat account is already connected to this bot"
+      },
+      "feishuQr": {
+        "setupMode": "Setup",
+        "setupModeRegistration": "Create by scanning",
+        "setupModeManual": "Enter credentials",
+        "rowLabel": "Create the bot with Feishu",
+        "rowDescription": "Scan and confirm in Feishu. Memoh creates the app and connects it, with no Open Platform setup.",
+        "start": "Show QR code",
+        "startFailed": "Couldn't get a QR code. Try again, or enter the credentials manually.",
+        "hint": "Scan with Feishu or Lark, then confirm on your phone.",
+        "qrAlt": "QR code for creating a Feishu bot",
+        "openInFeishu": "Open in Feishu",
+        "expiresIn": "QR code expires in {time}",
+        "expired": "The QR code expired. Show a new one to continue.",
+        "denied": "Creation was canceled in Feishu.",
+        "failed": "Feishu didn't finish creating the bot. Show a new QR code, or enter the credentials manually.",
+        "retry": "Show new QR code",
+        "connected": "Feishu bot created and connected",
+        "needsActivation": "The bot was created, but Feishu hasn't enabled it yet. Ask an administrator to approve or enable the app in the Feishu admin console.",
+        "savedDisabled": "The bot was created but can't connect yet, so the connection was saved as inactive. Enable it here after an administrator enables the app in Feishu.",
+        "registeredLabel": "Set up by scanning",
+        "registeredDescription": "To use a different Feishu app, delete this connection first."
       },
       "types": {
         "feishu": "Feishu",

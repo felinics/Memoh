@@ -590,10 +590,13 @@
       "request_invalid": "能力管理请求无效，请检查操作和参数。"
     },
     "channel": {
+      "already_configured": "这个 Bot 已经配置了该渠道。如需创建新的机器人，请先删除当前连接。",
       "binding_required": "接收方尚未绑定该渠道。",
       "config_not_found": "这个 Bot 还没有配置该渠道，请先完成配置再重试。",
       "enable_failed": "渠道启用失败，请检查凭据后重试。",
       "identity_config_not_found": "你还没有配置该渠道，请先完成配置再重试。",
+      "registration_rate_limited": "请求二维码的次数过多，请过几分钟再试。",
+      "registration_unavailable": "平台暂时无法创建机器人，请稍后重试，或手动填写应用凭据。",
       "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试。",
       "verification_failed": "无法验证平台配置，请检查凭据后重试。",
       "webhook_endpoint_invalid": "请使用公网 HTTPS 地址，不带端口、凭据、查询串或片段，路径须为该渠道显示的 webhook 路径。"

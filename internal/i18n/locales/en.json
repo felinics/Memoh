@@ -590,10 +590,13 @@
       "request_invalid": "The capability request is invalid. Check the action and its parameters."
     },
     "channel": {
+      "already_configured": "This channel is already set up for the bot. Delete the current connection before creating a new bot.",
       "binding_required": "The recipient has not linked this channel yet.",
       "config_not_found": "This channel is not configured for the bot. Set it up first, then try again.",
       "enable_failed": "The channel could not be enabled. Check its credentials, then try again.",
       "identity_config_not_found": "You have not set up this channel yet. Set it up first, then try again.",
+      "registration_rate_limited": "Too many QR codes were requested. Wait a few minutes, then try again.",
+      "registration_unavailable": "The platform couldn't create the bot right now. Try again later, or enter the app credentials manually.",
       "runtime_unavailable": "The channel service could not be reached. Please try again shortly.",
       "verification_failed": "The channel configuration could not be verified. Check the credentials, then try again.",
       "webhook_endpoint_invalid": "Use a public HTTPS URL without a port, credentials, query or fragment. Its path must be the webhook path shown for this channel."

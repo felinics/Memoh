@@ -12346,6 +12346,109 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{id}/channel/feishu/registration/poll": {
+            "post": {
+                "description": "Advance a Feishu bot creation. When the user confirms in Feishu, the new app's credentials are saved as the bot's Feishu channel and never returned.",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Poll Feishu bot creation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Registration session",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.FeishuRegistrationPollRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.FeishuRegistrationPollResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{id}/channel/feishu/registration/start": {
+            "post": {
+                "description": "Begin creating a Feishu or Lark bot app for a bot that has no Feishu channel yet. Returns the URL to render as a QR code.",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Start Feishu bot creation by QR scan",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.FeishuRegistrationStartResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{id}/channel/{platform}": {
             "get": {
                 "description": "Get bot channel configuration",
@@ -22878,6 +22981,51 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "path": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.FeishuRegistrationPollRequest": {
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.FeishuRegistrationPollResponse": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "pending",
+                        "denied",
+                        "expired",
+                        "failed",
+                        "connected",
+                        "needs_activation",
+                        "saved_disabled"
+                    ]
+                }
+            }
+        },
+        "handlers.FeishuRegistrationStartResponse": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "type": "string"
+                },
+                "expires_in_seconds": {
+                    "type": "integer"
+                },
+                "interval_seconds": {
+                    "type": "integer"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "verification_url": {
                     "type": "string"
                 }
             }

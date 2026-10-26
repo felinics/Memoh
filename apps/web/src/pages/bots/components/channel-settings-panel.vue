@@ -41,6 +41,7 @@
             {{ form.disabled ? $t('bots.channels.actionEnable') : $t('bots.channels.actionDisable') }}
           </Button>
           <Button
+            v-if="!hideManualForm"
             size="sm"
             :disabled="(!isFormDirty && isEditMode) || isBusy"
             :loading="action === 'save'"
@@ -61,6 +62,45 @@
     </div>
 
     <template v-else>
+      <!-- Feishu is set up either by scanning, which creates the app, or by
+           entering an existing app's credentials. The choice is only offered
+           before the first save: a new app gives every user a new open_id, so
+           replacing a configured app would orphan the bot's Feishu bindings.
+           A scanned connection shows as configured, never its credentials. -->
+      <SettingsSection v-if="showFeishuSetup">
+        <SettingsRow
+          v-if="!isEditMode"
+          :label="$t('bots.channels.feishuQr.setupMode')"
+          stack="sm"
+        >
+          <div class="w-full sm:w-80">
+            <Select v-model="feishuSetupMode">
+              <SelectTrigger class="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent class="w-[--reka-select-trigger-width]">
+                <SelectItem value="registration">
+                  {{ $t('bots.channels.feishuQr.setupModeRegistration') }}
+                </SelectItem>
+                <SelectItem value="manual">
+                  {{ $t('bots.channels.feishuQr.setupModeManual') }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </SettingsRow>
+        <FeishuQrRegistration
+          v-if="showFeishuQrRegistration"
+          :bot-id="botId"
+          @saved="emit('saved')"
+        />
+        <SettingsRow
+          v-if="isFeishuRegistered"
+          :label="$t('bots.channels.feishuQr.registeredLabel')"
+          :description="$t('bots.channels.feishuQr.registeredDescription')"
+        />
+      </SettingsSection>
+
       <!-- Callback URL the platform console needs (Feishu webhook mode / WeChat OA) -->
       <SettingsSection
         v-if="showWebhookCallback"
@@ -122,7 +162,7 @@
 
       <!-- Credentials + optional parameters; optional fields collapse behind one toggle -->
       <SettingsSection
-        v-if="requiredFields.length > 0 || optionalFields.length > 0"
+        v-if="!hideManualForm && (requiredFields.length > 0 || optionalFields.length > 0)"
         :title="$t('bots.channels.credentials')"
       >
         <p
@@ -146,7 +186,7 @@
            "Expand all" row. Slim single-line entry per the ActionCard
            contract. -->
       <ActionCard
-        v-if="optionalFields.length > 0"
+        v-if="!hideManualForm && optionalFields.length > 0"
         :title="$t('bots.channels.advancedTitle')"
         @click="isAdvancedExpanded = true"
       >
@@ -208,7 +248,7 @@
 </template>
 
 <script setup lang="ts">
-import { ActionCard, Button, ConfirmPopover, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, Input, SettingsRow, SettingsSection, useClipboard } from '@felinic/ui'
+import { ActionCard, Button, ConfirmPopover, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SettingsRow, SettingsSection, useClipboard } from '@felinic/ui'
 import { SlidersHorizontal } from 'lucide-vue-next'
 import { reactive, watch, computed, ref } from 'vue'
 import { toast } from '@felinic/ui'
@@ -220,6 +260,7 @@ import { client } from '@memohai/sdk/client'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import ChannelField from './channel-field.vue'
 import WeixinQrLogin from './weixin-qr-login.vue'
+import FeishuQrRegistration from './feishu-qr-registration.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useServerSyncedRecord } from '@/composables/use-server-synced-form'
@@ -293,10 +334,19 @@ const optionalFields = computed(() => Object.entries(orderedFields.value).filter
 
 const currentInboundMode = computed(() => String(form.credentials.inboundMode ?? form.credentials.inbound_mode ?? '').trim().toLowerCase())
 const isFeishuWebhook = computed(() => platformType.value === 'feishu' && currentInboundMode.value === 'webhook')
+// How a Feishu connection is set up. Before the first save the user picks it;
+// afterwards it is read from the stored setupMode, which only scanning writes.
+const feishuSetupMode = ref<'registration' | 'manual'>('registration')
+const isFeishu = computed(() => platformType.value === 'feishu')
+const isFeishuRegistered = computed(() => isFeishu.value && isEditMode.value && props.channelItem.config?.credentials?.setupMode === 'registration')
+const showFeishuQrRegistration = computed(() => isFeishu.value && !isEditMode.value && feishuSetupMode.value === 'registration')
+const showFeishuSetup = computed(() => isFeishu.value && (!isEditMode.value || isFeishuRegistered.value))
+// Nothing to type or save while scanning, nor on a scanned connection.
+const hideManualForm = computed(() => showFeishuQrRegistration.value || isFeishuRegistered.value)
 const isWechatOA = computed(() => platformType.value === 'wechatoa')
 const isLineWebhook = computed(() => platformType.value === 'line')
 const { publicBase: lineWebhookPublicBase, warningKey: lineWebhookBaseWarningKey } = useLineWebhookPublicBase(isLineWebhook)
-const showWebhookCallback = computed(() => isFeishuWebhook.value || isWechatOA.value || isLineWebhook.value)
+const showWebhookCallback = computed(() => (isFeishuWebhook.value && !hideManualForm.value) || isWechatOA.value || isLineWebhook.value)
 const webhookCallbackHintKey = computed(() => {
   if (isLineWebhook.value) return 'bots.channels.lineWebhookCallbackHint'
   if (isWechatOA.value) return 'bots.channels.wechatOAWebhookCallbackHint'
@@ -337,14 +387,17 @@ const { synced: syncedCredentials, markClean: markCredentialsClean } = useServer
     // background refetch must not slam it shut while the user is editing
     // inside it. It also never auto-opens: popping a modal on init would be
     // hostile, and the always-visible ActionCard entry keeps it discoverable.
-    if (hardReset) isAdvancedExpanded.value = false
+    if (hardReset) {
+      isAdvancedExpanded.value = false
+      feishuSetupMode.value = 'registration'
+    }
     emit('update:dirty', JSON.stringify(form.credentials) !== JSON.stringify(synced))
   },
 })
 
 // Stringify the reactive proxy (not toRaw) so the computed actually tracks nested
 // credential edits — otherwise Save never re-enables after a field changes.
-const isFormDirty = computed(() => JSON.stringify(form.credentials) !== JSON.stringify(syncedCredentials.value))
+const isFormDirty = computed(() => !hideManualForm.value && JSON.stringify(form.credentials) !== JSON.stringify(syncedCredentials.value))
 watch(isFormDirty, (val) => emit('update:dirty', val))
 
 function validateRequired(): boolean {
