@@ -2164,6 +2164,22 @@ export type HandlersFsWriteRequest = {
     path?: string;
 };
 
+export type HandlersFeishuRegistrationPollRequest = {
+    session_id?: string;
+};
+
+export type HandlersFeishuRegistrationPollResponse = {
+    status?: 'pending' | 'denied' | 'expired' | 'failed' | 'connected' | 'needs_activation' | 'saved_disabled';
+};
+
+export type HandlersFeishuRegistrationStartResponse = {
+    expires_at?: string;
+    expires_in_seconds?: number;
+    interval_seconds?: number;
+    session_id?: string;
+    verification_url?: string;
+};
+
 export type HandlersGetContainerMetricsResponse = {
     backend?: string;
     metrics?: HandlersContainerMetricsPayloadResponse;
@@ -14291,6 +14307,89 @@ export type PutBotsByIdResponses = {
 };
 
 export type PutBotsByIdResponse = PutBotsByIdResponses[keyof PutBotsByIdResponses];
+
+export type PostBotsByIdChannelFeishuRegistrationPollData = {
+    /**
+     * Registration session
+     */
+    body: HandlersFeishuRegistrationPollRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{id}/channel/feishu/registration/poll';
+};
+
+export type PostBotsByIdChannelFeishuRegistrationPollErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Conflict
+     */
+    409: ServerProblem;
+};
+
+export type PostBotsByIdChannelFeishuRegistrationPollError = PostBotsByIdChannelFeishuRegistrationPollErrors[keyof PostBotsByIdChannelFeishuRegistrationPollErrors];
+
+export type PostBotsByIdChannelFeishuRegistrationPollResponses = {
+    /**
+     * OK
+     */
+    200: HandlersFeishuRegistrationPollResponse;
+};
+
+export type PostBotsByIdChannelFeishuRegistrationPollResponse = PostBotsByIdChannelFeishuRegistrationPollResponses[keyof PostBotsByIdChannelFeishuRegistrationPollResponses];
+
+export type PostBotsByIdChannelFeishuRegistrationStartData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{id}/channel/feishu/registration/start';
+};
+
+export type PostBotsByIdChannelFeishuRegistrationStartErrors = {
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Conflict
+     */
+    409: ServerProblem;
+    /**
+     * Too Many Requests
+     */
+    429: ServerProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ServerProblem;
+};
+
+export type PostBotsByIdChannelFeishuRegistrationStartError = PostBotsByIdChannelFeishuRegistrationStartErrors[keyof PostBotsByIdChannelFeishuRegistrationStartErrors];
+
+export type PostBotsByIdChannelFeishuRegistrationStartResponses = {
+    /**
+     * OK
+     */
+    200: HandlersFeishuRegistrationStartResponse;
+};
+
+export type PostBotsByIdChannelFeishuRegistrationStartResponse = PostBotsByIdChannelFeishuRegistrationStartResponses[keyof PostBotsByIdChannelFeishuRegistrationStartResponses];
 
 export type DeleteBotsByIdChannelByPlatformData = {
     body?: never;

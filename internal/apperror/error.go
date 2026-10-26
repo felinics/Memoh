@@ -35,6 +35,9 @@ const (
 	CodeChannelEnableFailed                      Code = "channel.enable_failed"
 	CodeChannelWebhookEndpointInvalid            Code = "channel.webhook_endpoint_invalid"
 	CodeChannelBindingRequired                   Code = "channel.binding_required"
+	CodeChannelAlreadyConfigured                 Code = "channel.already_configured"
+	CodeChannelRegistrationRateLimited           Code = "channel.registration_rate_limited"
+	CodeChannelRegistrationUnavailable           Code = "channel.registration_unavailable"
 	CodeNetworkProviderNotConfigured             Code = "network.provider_not_configured"
 	CodeUserCannotRemoveSelf                     Code = "user.cannot_remove_self"
 	CodeCompactionModelUnavailable               Code = "compaction.model_unavailable" // Deprecated: no longer returned; kept because it was published.
@@ -557,6 +560,20 @@ var catalog = map[Code]Definition{
 	CodeChannelBindingRequired: {
 		HTTPStatus: http.StatusConflict,
 		Detail:     "The recipient is not bound to this channel.",
+	},
+	CodeChannelAlreadyConfigured: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This channel is already set up for the bot. Delete the current connection before creating a new bot.",
+	},
+	CodeChannelRegistrationRateLimited: {
+		HTTPStatus: http.StatusTooManyRequests,
+		Detail:     "Too many QR codes were requested. Wait a few minutes, then try again.",
+	},
+	// The platform's app registration endpoint failed or refused the request.
+	CodeChannelRegistrationUnavailable: {
+		HTTPStatus: http.StatusBadGateway,
+		Fault:      FaultDependency,
+		Detail:     "The platform could not create the bot right now. Try again later, or enter the app credentials manually.",
 	},
 	CodeNetworkProviderNotConfigured: {
 		HTTPStatus: http.StatusConflict,

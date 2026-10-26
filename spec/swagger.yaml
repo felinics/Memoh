@@ -3794,6 +3794,37 @@ definitions:
       path:
         type: string
     type: object
+  handlers.FeishuRegistrationPollRequest:
+    properties:
+      session_id:
+        type: string
+    type: object
+  handlers.FeishuRegistrationPollResponse:
+    properties:
+      status:
+        enum:
+        - pending
+        - denied
+        - expired
+        - failed
+        - connected
+        - needs_activation
+        - saved_disabled
+        type: string
+    type: object
+  handlers.FeishuRegistrationStartResponse:
+    properties:
+      expires_at:
+        type: string
+      expires_in_seconds:
+        type: integer
+      interval_seconds:
+        type: integer
+      session_id:
+        type: string
+      verification_url:
+        type: string
+    type: object
   handlers.GetContainerMetricsResponse:
     properties:
       backend:
@@ -16157,6 +16188,77 @@ paths:
           schema:
             $ref: '#/definitions/server.Problem'
       summary: Set bot channel webhook endpoint
+      tags:
+      - bots
+  /bots/{id}/channel/feishu/registration/poll:
+    post:
+      description: Advance a Feishu bot creation. When the user confirms in Feishu,
+        the new app's credentials are saved as the bot's Feishu channel and never
+        returned.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Registration session
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.FeishuRegistrationPollRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.FeishuRegistrationPollResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Poll Feishu bot creation
+      tags:
+      - bots
+  /bots/{id}/channel/feishu/registration/start:
+    post:
+      description: Begin creating a Feishu or Lark bot app for a bot that has no Feishu
+        channel yet. Returns the URL to render as a QR code.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.FeishuRegistrationStartResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Start Feishu bot creation by QR scan
       tags:
       - bots
   /bots/{id}/checks:

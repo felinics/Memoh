@@ -225,10 +225,13 @@
       "request_invalid": "能力管理请求无效，请检查操作和参数。"
     },
     "channel": {
+      "already_configured": "这个 Bot 已经配置了该渠道。如需创建新的机器人，请先删除当前连接。",
       "binding_required": "接收方尚未绑定该渠道。",
       "config_not_found": "这个 Bot 还没有配置该渠道，请先完成配置再重试。",
       "enable_failed": "渠道启用失败，请检查凭据后重试。",
       "identity_config_not_found": "你还没有配置该渠道，请先完成配置再重试。",
+      "registration_rate_limited": "请求二维码的次数过多，请过几分钟再试。",
+      "registration_unavailable": "平台暂时无法创建机器人，请稍后重试，或手动填写应用凭据。",
       "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试。",
       "verification_failed": "无法验证平台配置，请检查凭据后重试。",
       "webhook_endpoint_invalid": "请使用公网 HTTPS 地址，不带端口、凭据、查询串或片段，路径须为该渠道显示的 webhook 路径。"
@@ -3742,6 +3745,28 @@
         "verifyCodeSubmit": "确认",
         "verifyCodeBlocked": "多次输入错误，请刷新二维码稍后再试",
         "alreadyBound": "该微信已连接到此 Bot"
+      },
+      "feishuQr": {
+        "setupMode": "配置方式",
+        "setupModeRegistration": "扫码创建",
+        "setupModeManual": "手动填写凭据",
+        "rowLabel": "用飞书创建机器人",
+        "rowDescription": "在飞书中扫码确认后，Memoh 会自动创建应用并完成连接，不用再去开放平台配置。",
+        "start": "显示二维码",
+        "startFailed": "无法获取二维码，请重试，或手动填写凭据。",
+        "hint": "用飞书或 Lark 扫码，并在手机上确认创建。",
+        "qrAlt": "创建飞书机器人的二维码",
+        "openInFeishu": "在飞书中打开",
+        "expiresIn": "二维码 {time} 后失效",
+        "expired": "二维码已失效，请重新显示后继续。",
+        "denied": "已在飞书中取消创建。",
+        "failed": "飞书没有完成创建。请重新显示二维码，或手动填写凭据。",
+        "retry": "重新显示二维码",
+        "connected": "飞书机器人已创建并连接",
+        "needsActivation": "机器人已创建，但飞书还没有启用它。请让管理员在飞书管理后台审核或启用该应用。",
+        "savedDisabled": "机器人已创建，但暂时无法连接，连接已保存为停用。管理员在飞书中启用应用后，在这里启用即可。",
+        "registeredLabel": "已通过扫码配置",
+        "registeredDescription": "如需更换飞书应用，请先删除此连接。"
       },
       "types": {
         "feishu": "飞书",

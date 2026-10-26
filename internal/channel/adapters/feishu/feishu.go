@@ -310,6 +310,66 @@ func (*FeishuAdapter) DiscoverSelf(ctx context.Context, credentials map[string]a
 	if err != nil {
 		return nil, "", err
 	}
+	info, err := fetchBotInfo(ctx, cfg)
+	if err != nil {
+		return nil, "", fmt.Errorf("feishu discover self: %w", err)
+	}
+	openID := strings.TrimSpace(info.OpenID)
+	if openID == "" {
+		return nil, "", errors.New("feishu discover self: empty open_id")
+	}
+	identity := map[string]any{
+		"open_id": openID,
+	}
+	if name := strings.TrimSpace(info.AppName); name != "" {
+		identity["name"] = name
+	}
+	if avatar := strings.TrimSpace(info.AvatarURL); avatar != "" {
+		identity["avatar_url"] = avatar
+	}
+	return identity, openID, nil
+}
+
+// botActivateStatusActive is the bot info API's activate_status for an app
+// the tenant has installed and enabled. Other values mean the app still waits
+// for installation, approval or enabling, or the tenant has stopped it.
+const botActivateStatusActive = 2
+
+// BotActivation is the platform's view of whether the bot can serve users.
+// Known is false when the platform did not report a status.
+type BotActivation struct {
+	Known  bool
+	Active bool
+}
+
+// FetchBotActivation reads whether the tenant has enabled the bot. A freshly
+// created app can hold valid credentials while an administrator still has to
+// approve or enable it, and only this status tells the two apart.
+func FetchBotActivation(ctx context.Context, credentials map[string]any) (BotActivation, error) {
+	cfg, err := parseConfig(credentials)
+	if err != nil {
+		return BotActivation{}, err
+	}
+	info, err := fetchBotInfo(ctx, cfg)
+	if err != nil {
+		return BotActivation{}, fmt.Errorf("feishu bot activation: %w", err)
+	}
+	if info.ActivateStatus == nil {
+		return BotActivation{}, nil
+	}
+	return BotActivation{Known: true, Active: *info.ActivateStatus == botActivateStatusActive}, nil
+}
+
+type botInfo struct {
+	OpenID         string `json:"open_id"`
+	AppName        string `json:"app_name"`
+	AvatarURL      string `json:"avatar_url"`
+	ActivateStatus *int   `json:"activate_status"`
+}
+
+// fetchBotInfo exchanges the configured credentials for a tenant token and
+// reads the bot info API with it.
+func fetchBotInfo(ctx context.Context, cfg Config) (botInfo, error) {
 	callCtx, cancel := context.WithTimeout(ctx, feishuDiscoveryTimeout)
 	defer cancel()
 	// The SDK caches tenant tokens by App ID, not App Secret. Verification must
@@ -319,48 +379,31 @@ func (*FeishuAdapter) DiscoverSelf(ctx context.Context, credentials map[string]a
 		AppID: cfg.AppID, AppSecret: cfg.AppSecret,
 	})
 	if err != nil {
-		return nil, "", fmt.Errorf("feishu discover self: verify credentials: %w", err)
+		return botInfo{}, fmt.Errorf("verify credentials: %w", err)
 	}
 	if !token.Success() {
-		return nil, "", fmt.Errorf("feishu discover self: verify credentials: %w", token.CodeError)
+		return botInfo{}, fmt.Errorf("verify credentials: %w", token.CodeError)
 	}
 	if strings.TrimSpace(token.TenantAccessToken) == "" {
-		return nil, "", errors.New("feishu discover self: empty tenant access token")
+		return botInfo{}, errors.New("empty tenant access token")
 	}
 	resp, err := client.Get(callCtx, "/open-apis/bot/v3/info", nil, larkcore.AccessTokenTypeTenant,
 		larkcore.WithTenantAccessToken(token.TenantAccessToken))
 	if err != nil {
-		return nil, "", fmt.Errorf("feishu discover self: %w", err)
+		return botInfo{}, err
 	}
 	var body struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
-		Bot  struct {
-			OpenID    string `json:"open_id"`
-			AppName   string `json:"app_name"`
-			AvatarURL string `json:"avatar_url"`
-		} `json:"bot"`
+		Code int     `json:"code"`
+		Msg  string  `json:"msg"`
+		Bot  botInfo `json:"bot"`
 	}
 	if err := json.Unmarshal(resp.RawBody, &body); err != nil {
-		return nil, "", fmt.Errorf("feishu discover self: parse response: %w", err)
+		return botInfo{}, fmt.Errorf("parse response: %w", err)
 	}
 	if body.Code != 0 {
-		return nil, "", fmt.Errorf("feishu discover self: %s (code: %d)", body.Msg, body.Code)
+		return botInfo{}, fmt.Errorf("%s (code: %d)", body.Msg, body.Code)
 	}
-	openID := strings.TrimSpace(body.Bot.OpenID)
-	if openID == "" {
-		return nil, "", errors.New("feishu discover self: empty open_id")
-	}
-	identity := map[string]any{
-		"open_id": openID,
-	}
-	if name := strings.TrimSpace(body.Bot.AppName); name != "" {
-		identity["name"] = name
-	}
-	if avatar := strings.TrimSpace(body.Bot.AvatarURL); avatar != "" {
-		identity["avatar_url"] = avatar
-	}
-	return identity, openID, nil
+	return body.Bot, nil
 }
 
 // NormalizeConfig validates and normalizes a Feishu channel configuration map.
