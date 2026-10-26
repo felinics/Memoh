@@ -6,14 +6,12 @@ package claudecode
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/external/toolmount"
-	"github.com/felinics/memoh/internal/agent/sessionmode"
-	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
-	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
@@ -28,19 +26,19 @@ const memohMCPServerName = "memoh"
 const MemohToolTimeoutMillis = 900_000
 
 // mountTurnTools serves the gateway for one turn and returns the
-// --mcp-config JSON naming it. An empty string means no gateway this turn;
-// the mount (when non-nil) must be stopped when the turn ends.
-func (d *Driver) mountTurnTools(ctx context.Context, client *bridge.Client, workspaceInfo bridge.WorkspaceInfo, input external.PromptInput) (string, *toolmount.Mount, error) {
-	baseURL := toolmount.ResolveBaseURL(workspaceInfo, input.ToolHTTPURL)
-	if baseURL == "" {
-		return "", nil, errs.New(fmt.Sprintf("resolve Memoh tool gateway URL for %s workspace", workspaceInfo.Backend))
-	}
-	session := turnToolSession(ctx, input)
-	mount, err := toolmount.Serve(ctx, client, baseURL, d.toolGateway, func() mcp.ToolSessionContext {
+// --mcp-config JSON naming it. A gateway that cannot be mounted leaves the
+// turn without Memoh tools, said in the conversation; the mount (when
+// non-nil) must be stopped when the turn ends.
+func (d *Driver) mountTurnTools(ctx context.Context, client *bridge.Client, workspaceInfo bridge.WorkspaceInfo, input external.PromptInput) (string, *toolmount.Mount) {
+	session := toolmount.TurnSession(ctx, input)
+	session.SupportsImageInput = true
+	mount, err := toolmount.Serve(ctx, client, workspaceInfo, input.ToolHTTPURL, d.toolGateway, func() mcp.ToolSessionContext {
 		return session
 	})
 	if err != nil {
-		return "", nil, fmt.Errorf("mount Memoh tool gateway: %w", err)
+		d.logger.WarnContext(ctx, "claude: Memoh tool gateway unavailable", slog.String("bot_id", input.BotID), slog.Any("error", err))
+		toolmount.EmitUnavailableNotice(input.Sink, "the tool gateway could not be mounted")
+		return "", nil
 	}
 	config := fmt.Sprintf(
 		`{"mcpServers":{"%s":{"type":"http","url":%s,"timeout":%d}}}`,
@@ -48,34 +46,5 @@ func (d *Driver) mountTurnTools(ctx context.Context, client *bridge.Client, work
 		strconv.Quote(mount.URL),
 		MemohToolTimeoutMillis,
 	)
-	return config, mount, nil
-}
-
-// turnToolSession builds the trusted tool identity for one turn. Everything
-// comes from the prompt input and the turn context, never from HTTP requests.
-func turnToolSession(ctx context.Context, input external.PromptInput) mcp.ToolSessionContext {
-	session := mcp.ToolSessionContext{
-		BotID:                  input.BotID,
-		ChatID:                 firstNonEmpty(input.ChatID, input.BotID),
-		SessionID:              input.ThreadID,
-		RunID:                  input.RunID,
-		SessionType:            firstNonEmpty(input.SessionMode, sessionmode.Chat),
-		RouteID:                input.RouteID,
-		CurrentPlatform:        input.CurrentPlatform,
-		ReplyTarget:            input.ReplyTarget,
-		ConversationType:       input.ConversationType,
-		ChannelIdentityID:      input.ChannelIdentityID,
-		SessionToken:           input.SessionToken,
-		CanRequestUserInput:    input.CanRequestUserInput,
-		CanListUserInput:       true,
-		RuntimeActive:          true,
-		RequireActiveRun:       true,
-		SupportsImageInput:     true,
-		ContextBudgetMaxTokens: input.ContextBudgetMaxTokens,
-	}
-	if fence, ok := runtimefence.FromContext(ctx); ok {
-		session.RuntimeFence = fence
-	}
-	session.RunContext = ctx
-	return session
+	return config, mount
 }

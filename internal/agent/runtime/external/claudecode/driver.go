@@ -329,11 +329,10 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	// process does (the interrupt handshake still runs tools).
 	mountCtx, cancelMount := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelMount()
-	mcpConfig, toolsMount, err := d.mountTurnTools(mountCtx, client, workspaceInfo, input)
-	if err != nil {
-		return external.PromptResult{}, external.Unavailable(err)
+	mcpConfig, toolsMount := d.mountTurnTools(mountCtx, client, workspaceInfo, input)
+	if toolsMount != nil {
+		defer toolsMount.Stop()
 	}
-	defer toolsMount.Stop()
 	args := cliArgs(cfg, input, storedSessionID, mcpConfig, launcher.Version)
 	env := cliEnv(cfg)
 

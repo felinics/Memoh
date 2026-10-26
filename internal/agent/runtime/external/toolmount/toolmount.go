@@ -65,11 +65,16 @@ func (m *Mount) Stop() {
 	}
 }
 
-// Serve mounts the gateway behind a freshly minted route under baseURL (the
-// workspace-local tools proxy address). session resolves the trusted tool
-// identity per request; it must never trust anything from the HTTP request.
-// The mount lives until Stop or until ctx ends.
-func Serve(ctx context.Context, client *bridge.Client, baseURL string, gateway Gateway, session func() mcp.ToolSessionContext) (*Mount, error) {
+// Serve mounts the gateway behind a freshly minted route in the workspace;
+// inputURL is the caller's externally reachable tools URL, used only by
+// non-container workspaces. session resolves the trusted tool identity per
+// request; it must never trust anything from the HTTP request. The mount
+// lives until Stop or until ctx ends.
+func Serve(ctx context.Context, client *bridge.Client, info bridge.WorkspaceInfo, inputURL string, gateway Gateway, session func() mcp.ToolSessionContext) (*Mount, error) {
+	baseURL := ResolveBaseURL(info, inputURL)
+	if baseURL == "" {
+		return nil, errs.New(fmt.Sprintf("resolve Memoh tool gateway URL for %s workspace", info.Backend))
+	}
 	guardedURL, guardedPath, err := mintRouteURL(baseURL)
 	if err != nil {
 		return nil, err
@@ -83,7 +88,7 @@ func Serve(ctx context.Context, client *bridge.Client, baseURL string, gateway G
 	})
 	stop, err := client.ServeReverseHTTPRoute(ctx, guardedPath, handler)
 	if err != nil {
-		return nil, errs.WrapDependency(err, "serve tool gateway route")
+		return nil, errs.WrapDependency(err, "mount Memoh tool gateway")
 	}
 	return &Mount{URL: guardedURL, stop: stop}, nil
 }
@@ -109,6 +114,9 @@ func mintRouteURL(rawURL string) (string, string, error) {
 // EmitUnavailableNotice makes a tool-plane degradation visible in the
 // conversation instead of only in server logs.
 func EmitUnavailableNotice(sink external.EventSink, reason string) {
+	if sink == nil {
+		return
+	}
 	sink.EmitStreamEvent(event.StreamEvent{
 		Type:       event.RuntimeNotice,
 		NoticeKind: event.NoticeToolsUnavailable,

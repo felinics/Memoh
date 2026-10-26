@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -62,7 +63,7 @@ func TestAppServerCommandQuotesTheLauncher(t *testing.T) {
 	}
 }
 
-func TestThreadNoticesOnlyReportToollessThreads(t *testing.T) {
+func TestThreadWithoutGatewayRunsToollessAndSaysSoEveryTurn(t *testing.T) {
 	srv := newTestAppServer(external.Launcher{Path: defaultLauncherPath, Version: "0.147.0", Source: external.LauncherSourceToolkit})
 	sink := &captureSink{}
 	emitThreadNotices(srv, "thread-a", sink)
@@ -70,8 +71,15 @@ func TestThreadNoticesOnlyReportToollessThreads(t *testing.T) {
 		t.Fatalf("a thread with tools emitted %+v", sink.events)
 	}
 
-	// Toolless threads keep their every-turn notice.
-	srv.setThreadToolless("thread-a", true)
+	// A workspace with no reachable tools URL cannot be mounted: the thread
+	// starts without the gateway instead of failing the turn.
+	srv.workspaceInfo = bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendRemote}
+	d := &Driver{logger: slog.Default()}
+	config, bind := d.prepareThreadTools(t.Context(), srv, external.PromptInput{BotID: "bot-1"})
+	if config != nil {
+		t.Fatalf("config = %v, want none", config)
+	}
+	bind("thread-a")
 	emitThreadNotices(srv, "thread-a", sink)
 	emitThreadNotices(srv, "thread-a", sink)
 	if len(sink.events) != 2 || sink.events[0].NoticeKind != event.NoticeToolsUnavailable || sink.events[1].NoticeKind != event.NoticeToolsUnavailable {

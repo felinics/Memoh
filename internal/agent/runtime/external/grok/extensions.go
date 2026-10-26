@@ -119,9 +119,9 @@ func (s *server) gatewayStatus(ctx context.Context, sessionID string, timeout ti
 
 // serveGateway opens the Memoh tool gateway route for a thread. A route
 // that cannot be served leaves the thread without Memoh tools.
-func (s *server) serveGateway(ctx context.Context, th *thread, gateway toolmount.Gateway, baseURL string) (*toolmount.Mount, bool) {
+func (s *server) serveGateway(ctx context.Context, th *thread, gateway toolmount.Gateway, inputURL string) (*toolmount.Mount, bool) {
 	//nolint:contextcheck // the route serves every later turn of the conversation, not only the one that opened it.
-	mount, err := toolmount.Serve(s.mountCtx, s.client, baseURL, gateway, func() mcp.ToolSessionContext {
+	mount, err := toolmount.Serve(s.mountCtx, s.client, s.workspaceInfo, inputURL, gateway, func() mcp.ToolSessionContext {
 		return s.toolSession(th)
 	})
 	if err != nil {

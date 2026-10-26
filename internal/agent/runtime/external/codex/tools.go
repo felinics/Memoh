@@ -6,16 +6,13 @@
 package codex
 
 import (
-	"fmt"
-	"strings"
+	"context"
+	"log/slog"
 	"sync"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/external/toolmount"
-	"github.com/felinics/memoh/internal/agent/sessionmode"
-	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
-	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 // memohMCPServerName is the config key codex shows in tool names
@@ -49,18 +46,17 @@ func (r *threadRef) get() string {
 
 // prepareThreadTools mounts the gateway for a thread about to start,
 // resume, or fork. The returned function binds the mount to the thread or
-// closes it when creation fails.
-func (d *Driver) prepareThreadTools(srv *appServer, input external.PromptInput) (map[string]any, func(threadID string), error) {
-	baseURL := toolmount.ResolveBaseURL(srv.workspaceInfo, input.ToolHTTPURL)
-	if baseURL == "" {
-		return nil, nil, errs.New(fmt.Sprintf("resolve Memoh tool gateway URL for %s workspace", srv.workspaceInfo.Backend))
-	}
+// closes it when creation fails. A gateway that cannot be mounted gives no
+// config: the thread runs without Memoh tools, and every turn says so.
+func (d *Driver) prepareThreadTools(ctx context.Context, srv *appServer, input external.PromptInput) (map[string]any, func(threadID string)) {
 	ref := &threadRef{}
-	mount, err := toolmount.Serve(srv.mountCtx, srv.client, baseURL, d.toolGateway, func() mcp.ToolSessionContext {
+	//nolint:contextcheck // the route serves every later turn of the thread, not only the one that opened it.
+	mount, err := toolmount.Serve(srv.mountCtx, srv.client, srv.workspaceInfo, input.ToolHTTPURL, d.toolGateway, func() mcp.ToolSessionContext {
 		return srv.toolSessionForThread(ref.get())
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("mount Memoh tool gateway: %w", err)
+		d.logger.WarnContext(ctx, "codex: Memoh tool gateway unavailable", slog.String("bot_id", srv.botID), slog.Any("error", err))
+		return nil, func(threadID string) { srv.setThreadToolless(threadID, threadID != "") }
 	}
 	config := map[string]any{
 		"features.default_mode_request_user_input": true,
@@ -77,8 +73,9 @@ func (d *Driver) prepareThreadTools(srv *appServer, input external.PromptInput) 
 			return
 		}
 		ref.set(threadID)
+		srv.setThreadToolless(threadID, false)
 		srv.registerToolMount(threadID, mount)
-	}, nil
+	}
 }
 
 // registerToolMount records a thread's live gateway mount, replacing (and
@@ -108,48 +105,13 @@ func (s *appServer) stopToolMounts() {
 }
 
 // toolSessionForThread resolves the trusted tool identity for a thread's MCP
-// requests: bot identity always, plus the live per-turn fields while a turn
-// runs. It never trusts anything from the HTTP request. The mount outlives
-// turns, so RequireActiveRun keeps the idle window to tools/list — a call
-// with no live turn has no run to own it and is refused at the gateway.
+// requests: the turn running on the thread, or the bot alone between turns.
 func (s *appServer) toolSessionForThread(threadID string) mcp.ToolSessionContext {
-	session := mcp.ToolSessionContext{
-		BotID:            s.botID,
-		ChatID:           s.botID,
-		SessionType:      sessionmode.Chat,
-		CanListUserInput: true,
-		RequireActiveRun: true,
-	}
-	if threadID == "" {
-		return session
-	}
 	turn := s.turnForThread(threadID)
-	if turn == nil {
-		return session
+	if threadID == "" || turn == nil {
+		return toolmount.IdleSession(s.botID)
 	}
-	in := turn.input
-	overlay := func(dst *string, value string) {
-		if value = strings.TrimSpace(value); value != "" {
-			*dst = value
-		}
-	}
-	overlay(&session.ChatID, in.ChatID)
-	overlay(&session.SessionID, in.ThreadID)
-	overlay(&session.RunID, in.RunID)
-	overlay(&session.SessionType, in.SessionMode)
-	overlay(&session.RouteID, in.RouteID)
-	overlay(&session.CurrentPlatform, in.CurrentPlatform)
-	overlay(&session.ReplyTarget, in.ReplyTarget)
-	overlay(&session.ConversationType, in.ConversationType)
-	overlay(&session.ChannelIdentityID, in.ChannelIdentityID)
-	overlay(&session.SessionToken, in.SessionToken)
-	session.CanRequestUserInput = in.CanRequestUserInput
-	session.RuntimeActive = true
+	session := toolmount.TurnSession(turn.ctx, turn.input)
 	session.SupportsImageInput = true
-	session.ContextBudgetMaxTokens = in.ContextBudgetMaxTokens
-	if fence, ok := runtimefence.FromContext(turn.ctx); ok {
-		session.RuntimeFence = fence
-	}
-	session.RunContext = turn.ctx
 	return session
 }

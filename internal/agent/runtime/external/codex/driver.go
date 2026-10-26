@@ -451,10 +451,7 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 	if srv.threadLoaded(threadID) {
 		return threadID, nil
 	}
-	toolsConfig, bindTools, err := d.prepareThreadTools(srv, input)
-	if err != nil {
-		return "", external.Unavailable(err)
-	}
+	toolsConfig, bindTools := d.prepareThreadTools(ctx, srv, input)
 	params := protocol.ThreadResumeParams{
 		ThreadID:          threadID,
 		Cwd:               &cwd,
@@ -474,7 +471,6 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 		srv.markThreadLoaded(threadID)
 		srv.rememberThreadPath(threadID, resp.Thread.Path)
 		srv.rememberThreadSettings(threadID, resp.Model, resp.ReasoningEffort)
-		srv.setThreadToolless(threadID, toolsConfig == nil)
 		return threadID, nil
 	}
 	bindTools("")
@@ -504,10 +500,7 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 }
 
 func (d *Driver) startThread(ctx context.Context, srv *appServer, cfg Config, input external.PromptInput, cwd string, preset permissionPreset) (string, error) {
-	toolsConfig, bindTools, err := d.prepareThreadTools(srv, input)
-	if err != nil {
-		return "", external.Unavailable(err)
-	}
+	toolsConfig, bindTools := d.prepareThreadTools(ctx, srv, input)
 	params := protocol.ThreadStartParams{
 		Cwd:               &cwd,
 		ApprovalPolicy:    &preset.approval,
@@ -531,7 +524,6 @@ func (d *Driver) startThread(ctx context.Context, srv *appServer, cfg Config, in
 	srv.markThreadLoaded(resp.Thread.ID)
 	srv.rememberThreadPath(resp.Thread.ID, resp.Thread.Path)
 	srv.rememberThreadSettings(resp.Thread.ID, resp.Model, resp.ReasoningEffort)
-	srv.setThreadToolless(resp.Thread.ID, toolsConfig == nil)
 	return resp.Thread.ID, nil
 }
 
@@ -662,10 +654,7 @@ func (d *Driver) ForkThread(ctx context.Context, botID, botAgentID string, runti
 		return nil, wrapServerError(err)
 	}
 	defer releaseServer()
-	toolsConfig, bindTools, err := d.prepareThreadTools(srv, external.PromptInput{BotID: botID, BotAgentID: botAgentID})
-	if err != nil {
-		return nil, external.Unavailable(err)
-	}
+	toolsConfig, bindTools := d.prepareThreadTools(ctx, srv, external.PromptInput{BotID: botID, BotAgentID: botAgentID})
 	cwd := strings.TrimSpace(metadataString(runtimeMetadata, "project_path"))
 	if cwd == "" {
 		cwd = defaultProjectPath
@@ -700,7 +689,6 @@ func (d *Driver) ForkThread(ctx context.Context, botID, botAgentID string, runti
 	srv.markThreadLoaded(resp.Thread.ID)
 	srv.rememberThreadPath(resp.Thread.ID, resp.Thread.Path)
 	srv.rememberThreadSettings(resp.Thread.ID, resp.Model, resp.ReasoningEffort)
-	srv.setThreadToolless(resp.Thread.ID, toolsConfig == nil)
 	// The fork overlays the source's metadata; its rollout path must not
 	// survive into the branch, or the branch would resume the source's file.
 	var delta map[string]any

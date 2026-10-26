@@ -13,10 +13,8 @@ import (
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/external/agentproc"
 	"github.com/felinics/memoh/internal/agent/runtime/external/toolmount"
-	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
-	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
@@ -287,7 +285,7 @@ func (s *server) openThread(ctx context.Context, gateway toolmount.Gateway, appr
 		UserQuestions:        userQuestions,
 	}
 	if baseURL != "" {
-		if mount, ok := s.serveGateway(ctx, th, gateway, baseURL); ok {
+		if mount, ok := s.serveGateway(ctx, th, gateway, input.ToolHTTPURL); ok {
 			th.mount = mount
 			cfg.McpServers = append(cfg.McpServers, acpclient.MemohToolsMCPServer(mount.URL))
 		}
@@ -325,39 +323,12 @@ func (s *server) openThread(ctx context.Context, gateway toolmount.Gateway, appr
 }
 
 // toolSession is the trusted identity of a thread's tool calls and approval
-// requests. Outside a turn it names only the bot, and the gateway refuses to
-// run tools for it.
+// requests: the turn running on it, or the bot alone between turns.
 func (s *server) toolSession(th *thread) mcp.ToolSessionContext {
-	session := mcp.ToolSessionContext{
-		BotID:            s.botID,
-		ChatID:           s.botID,
-		SessionType:      sessionmode.Chat,
-		CanListUserInput: true,
-		RequireActiveRun: true,
+	if turn := th.turn.Load(); turn != nil {
+		return toolmount.TurnSession(turn.ctx, turn.input)
 	}
-	turn := th.turn.Load()
-	if turn == nil {
-		return session
-	}
-	in := turn.input
-	session.ChatID = firstNonEmpty(in.ChatID, s.botID)
-	session.SessionID = strings.TrimSpace(in.ThreadID)
-	session.RunID = strings.TrimSpace(in.RunID)
-	session.SessionType = firstNonEmpty(in.SessionMode, sessionmode.Chat)
-	session.RouteID = in.RouteID
-	session.CurrentPlatform = in.CurrentPlatform
-	session.ReplyTarget = in.ReplyTarget
-	session.ConversationType = in.ConversationType
-	session.ChannelIdentityID = in.ChannelIdentityID
-	session.SessionToken = in.SessionToken
-	session.CanRequestUserInput = in.CanRequestUserInput
-	session.RuntimeActive = true
-	session.ContextBudgetMaxTokens = in.ContextBudgetMaxTokens
-	if fence, ok := runtimefence.FromContext(turn.ctx); ok {
-		session.RuntimeFence = fence
-	}
-	session.RunContext = turn.ctx
-	return session
+	return toolmount.IdleSession(s.botID)
 }
 
 func firstNonEmpty(values ...string) string {
