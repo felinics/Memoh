@@ -164,9 +164,11 @@ func (s *contextSwitchState) fold(ctx context.Context, cfg RunConfig, params *sd
 	}
 	detail, err := cfg.SwitchContext(ctx, sw)
 	if err == nil {
-		switch call := unansweredToolCall(splice.messages); {
+		switch call, result := unpairedToolParts(splice.messages); {
 		case call != "":
 			err, detail = fmt.Errorf("tool call %s lost its result", call), "trigger=in_run reason=postcondition"
+		case result != "":
+			err, detail = fmt.Errorf("tool result %s lost its call", result), "trigger=in_run reason=postcondition"
 		case tokens > allowance:
 			err = fmt.Errorf("request_tokens=%d allowance=%d", tokens, allowance)
 			detail = fmt.Sprintf("trigger=in_run reason=still_over request_tokens=%d allowance=%d", tokens, allowance)
@@ -332,23 +334,33 @@ func (s *contextSwitchState) movedCount(count int) int {
 	return len(s.moved)
 }
 
-// unansweredToolCall names a tool call in messages that no tool result
-// answers.
-func unansweredToolCall(messages []sdk.Message) string {
-	answered := map[string]bool{}
+// unpairedToolParts names a tool call in messages that no tool result
+// answers, and a tool result whose call no message makes.
+func unpairedToolParts(messages []sdk.Message) (call, result string) {
+	answered, called := map[string]bool{}, map[string]bool{}
 	for _, message := range messages {
 		for _, part := range message.Content {
-			if result, ok := part.(sdk.ToolResultPart); ok {
-				answered[result.ToolCallID] = true
+			switch part := part.(type) {
+			case sdk.ToolResultPart:
+				answered[part.ToolCallID] = true
+			case sdk.ToolCallPart:
+				called[part.ToolCallID] = true
 			}
 		}
 	}
 	for _, message := range messages {
 		for _, part := range message.Content {
-			if call, ok := part.(sdk.ToolCallPart); ok && !answered[call.ToolCallID] {
-				return call.ToolCallID
+			switch part := part.(type) {
+			case sdk.ToolCallPart:
+				if call == "" && !answered[part.ToolCallID] {
+					call = part.ToolCallID
+				}
+			case sdk.ToolResultPart:
+				if result == "" && !called[part.ToolCallID] {
+					result = part.ToolCallID
+				}
 			}
 		}
 	}
-	return ""
+	return call, result
 }

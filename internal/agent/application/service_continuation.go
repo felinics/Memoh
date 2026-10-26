@@ -112,15 +112,17 @@ func (s *Service) prepareContinuationRunConfig(
 	base.ContextTrimmableMessages = len(messages)
 
 	base.ContextFrags = historyContextFragsForMessages(messages, retained)
-	base.ContextProvenance = contextProvenance(messages, retained, append(compactionProtectedSources(req), req.continuationAnchors...))
 	// Close any tool call left open by an interrupted turn before the transcript
 	// reaches providers that enforce strict assistant-tool adjacency. A process
 	// restart can orphan a deferred ask_user / tool-approval call while a later
 	// request still completes normally; repairing here (not in ContextFrags)
 	// keeps the fragments faithful to history while the outgoing messages stay
 	// provider-valid. Applies to every continuation path that resumes after a
-	// deferred tool call.
-	base.Messages = modelMessagesToSDKMessages(repairToolCallClosures(nonNilModelMessages(messages), syntheticToolClosureError))
+	// deferred tool call. Provenance names the outgoing messages, closures
+	// included, so a fold removes each closure with its call.
+	outgoing := repairToolCallClosures(nonNilModelMessages(messages), syntheticToolClosureError)
+	base.ContextProvenance = contextProvenance(outgoing, retained, append(compactionProtectedSources(req), req.continuationAnchors...))
+	base.Messages = modelMessagesToSDKMessages(outgoing)
 	base.ContextCurrentUserMessageIndex = nil
 	base.ContextMemoryMessageIndex = nil
 	base.Query = ""

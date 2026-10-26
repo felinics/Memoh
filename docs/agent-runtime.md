@@ -62,10 +62,13 @@ sees anchors inline but never folds them.
 The native runtime applies each committed fold to its own request snapshot by
 `turn.PlaceSummary`: messages the fold does not cover keep their bytes, and
 those inside the folded span precede the summary, the order its checkpoint
-keeps them in. A pass refuses a request whose view no longer matches what it
-reads: stored message hashes survive replay projections, RC versions are
-checked against their persisted event cursors, and the summaries the request
-rendered must be the ones the active checkpoint holds.
+keeps them in. A result the read path writes for a deferred call whose decision
+ended without one renders from the call's row, so a fold that covers the call
+removes it too; a splice that leaves a call without its result, or a result
+without its call, fails the event. A pass refuses a request whose view no
+longer matches what it reads: stored message hashes survive replay projections,
+RC versions are checked against their persisted event cursors, and the
+summaries the request rendered must be the ones the active checkpoint holds.
 
 A thread's history has no time window. What stands in a request for the
 history before its context is the session's active history checkpoint
