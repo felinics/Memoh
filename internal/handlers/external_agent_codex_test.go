@@ -21,10 +21,6 @@ type codexUsageFailure struct {
 	err error
 }
 
-func (s codexUsageFailure) Account(context.Context, string, string) (codexruntime.Account, error) {
-	return codexruntime.Account{}, s.err
-}
-
 func (s codexUsageFailure) AccountUsage(context.Context, string, string) (codexruntime.AccountUsage, error) {
 	return codexruntime.AccountUsage{}, s.err
 }

@@ -1777,13 +1777,13 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/agents/{id}/codex/account": {
+        "/bots/{bot_id}/agents/{id}/account": {
             "get": {
-                "description": "Codex keeps its own sign-in in the Agent's workspace; this asks it, starting it when it is not running.",
+                "description": "For runtimes that keep their own sign-in in the Agent's workspace (Codex with a ChatGPT account). The runtime is asked directly, and started when it is not running.",
                 "tags": [
                     "external-agents"
                 ],
-                "summary": "Get the ChatGPT account the Agent's Codex is signed in to",
+                "summary": "Get the account a direct runtime Agent is signed in to",
                 "parameters": [
                     {
                         "type": "string",
@@ -1804,7 +1804,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/externalagent.CodexAccountResponse"
+                            "$ref": "#/definitions/externalagent.AgentAccountResponse"
                         }
                     },
                     "403": {
@@ -21422,7 +21422,7 @@ const docTemplate = `{
                 }
             }
         },
-        "externalagent.CodexAccountResponse": {
+        "externalagent.AgentAccountResponse": {
             "type": "object",
             "required": [
                 "signed_in"

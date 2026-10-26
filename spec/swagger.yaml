@@ -2807,7 +2807,7 @@ definitions:
       name:
         type: string
     type: object
-  externalagent.CodexAccountResponse:
+  externalagent.AgentAccountResponse:
     properties:
       email:
         type: string
@@ -8701,10 +8701,11 @@ paths:
       summary: Update a bot Agent
       tags:
       - bot-agents
-  /bots/{bot_id}/agents/{id}/codex/account:
+  /bots/{bot_id}/agents/{id}/account:
     get:
-      description: Codex keeps its own sign-in in the Agent's workspace; this asks
-        it, starting it when it is not running.
+      description: For runtimes that keep their own sign-in in the Agent's workspace
+        (Codex with a ChatGPT account). The runtime is asked directly, and started
+        when it is not running.
       parameters:
       - description: Bot ID
         in: path
@@ -8720,7 +8721,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/externalagent.CodexAccountResponse'
+            $ref: '#/definitions/externalagent.AgentAccountResponse'
         "403":
           description: Forbidden
           schema:
@@ -8737,7 +8738,7 @@ paths:
           description: Service Unavailable
           schema:
             $ref: '#/definitions/server.Problem'
-      summary: Get the ChatGPT account the Agent's Codex is signed in to
+      summary: Get the account a direct runtime Agent is signed in to
       tags:
       - external-agents
   /bots/{bot_id}/agents/{id}/codex/usage:

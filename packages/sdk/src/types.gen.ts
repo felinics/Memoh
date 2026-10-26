@@ -1573,7 +1573,7 @@ export type ExternalReasoningEffortOption = {
     name?: string;
 };
 
-export type ExternalagentCodexAccountResponse = {
+export type ExternalagentAgentAccountResponse = {
     email?: string;
     signed_in: boolean;
 };
@@ -5950,7 +5950,7 @@ export type PatchBotsByBotIdAgentsByIdResponses = {
 
 export type PatchBotsByBotIdAgentsByIdResponse = PatchBotsByBotIdAgentsByIdResponses[keyof PatchBotsByBotIdAgentsByIdResponses];
 
-export type GetBotsByBotIdAgentsByIdCodexAccountData = {
+export type GetBotsByBotIdAgentsByIdAccountData = {
     body?: never;
     path: {
         /**
@@ -5963,10 +5963,10 @@ export type GetBotsByBotIdAgentsByIdCodexAccountData = {
         id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/agents/{id}/codex/account';
+    url: '/bots/{bot_id}/agents/{id}/account';
 };
 
-export type GetBotsByBotIdAgentsByIdCodexAccountErrors = {
+export type GetBotsByBotIdAgentsByIdAccountErrors = {
     /**
      * Forbidden
      */
@@ -5985,16 +5985,16 @@ export type GetBotsByBotIdAgentsByIdCodexAccountErrors = {
     503: ServerProblem;
 };
 
-export type GetBotsByBotIdAgentsByIdCodexAccountError = GetBotsByBotIdAgentsByIdCodexAccountErrors[keyof GetBotsByBotIdAgentsByIdCodexAccountErrors];
+export type GetBotsByBotIdAgentsByIdAccountError = GetBotsByBotIdAgentsByIdAccountErrors[keyof GetBotsByBotIdAgentsByIdAccountErrors];
 
-export type GetBotsByBotIdAgentsByIdCodexAccountResponses = {
+export type GetBotsByBotIdAgentsByIdAccountResponses = {
     /**
      * OK
      */
-    200: ExternalagentCodexAccountResponse;
+    200: ExternalagentAgentAccountResponse;
 };
 
-export type GetBotsByBotIdAgentsByIdCodexAccountResponse = GetBotsByBotIdAgentsByIdCodexAccountResponses[keyof GetBotsByBotIdAgentsByIdCodexAccountResponses];
+export type GetBotsByBotIdAgentsByIdAccountResponse = GetBotsByBotIdAgentsByIdAccountResponses[keyof GetBotsByBotIdAgentsByIdAccountResponses];
 
 export type GetBotsByBotIdAgentsByIdCodexUsageData = {
     body?: never;

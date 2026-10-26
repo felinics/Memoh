@@ -14,11 +14,7 @@ import (
 // ErrUsageUnavailable: Codex could not read the account's usage limits.
 var ErrUsageUnavailable = errors.New("codex usage unavailable")
 
-// Account is the ChatGPT account Codex is signed in to for an Agent.
-type Account struct {
-	SignedIn bool
-	Email    string
-}
+var _ external.AccountReader = (*Driver)(nil)
 
 // AccountUsage is the ChatGPT account's Codex usage: one entry per rolling
 // window (the short window first, then the weekly one when the plan has it).
@@ -34,20 +30,20 @@ type UsageWindow struct {
 }
 
 // Account asks the Agent's Codex which ChatGPT account it is signed in to.
-func (d *Driver) Account(ctx context.Context, botID, botAgentID string) (Account, error) {
+func (d *Driver) Account(ctx context.Context, botID, botAgentID string) (external.Account, error) {
 	srv, release, err := d.chatGPTServer(ctx, botID, botAgentID)
 	if err != nil {
-		return Account{}, err
+		return external.Account{}, err
 	}
 	defer release()
 	var response protocol.GetAccountResponse
 	if err := srv.conn.Call(ctx, protocol.MethodAccountRead, protocol.GetAccountParams{}, &response); err != nil {
-		return Account{}, external.Unavailable(err)
+		return external.Account{}, external.Unavailable(err)
 	}
 	if response.Account == nil || response.Account.Chatgpt == nil {
-		return Account{}, nil
+		return external.Account{}, nil
 	}
-	account := Account{SignedIn: true}
+	account := external.Account{SignedIn: true}
 	if response.Account.Chatgpt.Email != nil {
 		account.Email = *response.Account.Chatgpt.Email
 	}

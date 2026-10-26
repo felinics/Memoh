@@ -111,7 +111,7 @@
       <DeviceLoginPanel
         :auth="deviceLoginAuth"
         :authorized="credentialConnected"
-        :account="codexSignIn ? codexAccount.data.value?.email : undefined"
+        :account="runtimeSignIn ? runtimeAccount.data.value?.email : undefined"
         :note="accountNote"
         :authorizing="authorizing"
         :device-login="deviceLogin"
@@ -152,7 +152,7 @@ import {
 } from '@felinic/ui'
 import {
   deleteBotsByBotIdAgentsByIdCredential,
-  getBotsByBotIdAgentsByIdCodexAccount,
+  getBotsByBotIdAgentsByIdAccount,
   getBotsByBotIdAgentsByIdRuntimeControls,
   patchBotsByBotIdAgentsById,
   postBotsByBotIdAgentsByIdLoginDeviceAuthorize,
@@ -233,29 +233,29 @@ async function setDefaultPermission(value: unknown) {
 }
 const credentialSecret = ref('')
 const savingCredential = ref(false)
-// Codex keeps its ChatGPT sign-in in the workspace, so only Codex can say
-// whether it is signed in.
-const codexSignIn = computed(() => isCodex.value && config.auth === 'chatgpt')
-const codexAccount = useQuery({
-  key: () => ['codex-account', props.botId, props.agent.id ?? ''],
-  enabled: () => codexSignIn.value && !!props.agent.id,
+// A runtime that keeps its own sign-in in the workspace (Codex with a ChatGPT
+// account) is the only one that can say whether it is signed in.
+const runtimeSignIn = computed(() => isCodex.value && config.auth === 'chatgpt')
+const runtimeAccount = useQuery({
+  key: () => ['agent-account', props.botId, props.agent.id ?? ''],
+  enabled: () => runtimeSignIn.value && !!props.agent.id,
   // Reading it starts Codex, so only opening the page and signing in or out do.
   refetchOnWindowFocus: false,
   refetchOnReconnect: false,
   query: async ({ signal }) => {
-    const { data } = await getBotsByBotIdAgentsByIdCodexAccount({
+    const { data } = await getBotsByBotIdAgentsByIdAccount({
       path: { bot_id: props.botId, id: props.agent.id! },
       signal, throwOnError: true,
     })
     return data
   },
 })
-const credentialConnected = computed(() => codexSignIn.value
-  ? !!codexAccount.data.value?.signed_in
+const credentialConnected = computed(() => runtimeSignIn.value
+  ? !!runtimeAccount.data.value?.signed_in
   : !!props.agent.agent_credential_id)
 const accountNote = computed(() => {
-  if (!codexSignIn.value || codexAccount.data.value) return undefined
-  if (codexAccount.error.value) return resolveApiErrorMessage(codexAccount.error.value, t('bots.agent.signInCheckFailed'))
+  if (!runtimeSignIn.value || runtimeAccount.data.value) return undefined
+  if (runtimeAccount.error.value) return resolveApiErrorMessage(runtimeAccount.error.value, t('bots.agent.signInCheckFailed'))
   return t('bots.agent.checkingSignIn')
 })
 
@@ -287,7 +287,7 @@ async function refreshAgent() {
   // and read it when they appear.
   await Promise.all([
     queryCache.invalidateQueries({ key: ['bot-agents', props.botId] }),
-    queryCache.invalidateQueries({ key: ['codex-account', props.botId, props.agent.id ?? ''] }),
+    queryCache.invalidateQueries({ key: ['agent-account', props.botId, props.agent.id ?? ''] }),
   ])
   emit('authorized')
 }

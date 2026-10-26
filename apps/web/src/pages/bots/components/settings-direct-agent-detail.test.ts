@@ -11,9 +11,9 @@ vi.mock('@memohai/sdk', () => ({
 }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, te: () => true }) }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
-const codexAccount = ref<{ signed_in: boolean, email?: string } | undefined>()
+const runtimeAccount = ref<{ signed_in: boolean, email?: string } | undefined>()
 vi.mock('@pinia/colada', () => ({
-  useQuery: (options: { key: () => string[] }) => ({ data: options.key()[0] === 'codex-account' ? codexAccount : ref(undefined), error: ref(null) }),
+  useQuery: (options: { key: () => string[] }) => ({ data: options.key()[0] === 'agent-account' ? runtimeAccount : ref(undefined), error: ref(null) }),
   useQueryCache: () => ({ invalidateQueries: api.invalidate }),
 }))
 vi.mock('./device-login-panel.vue', () => ({ default: {
@@ -50,7 +50,7 @@ function mount(runtime: string, auth: string, connected = false) {
 }
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks()
-  codexAccount.value = { signed_in: false }
+  runtimeAccount.value = { signed_in: false }
   api.authorize.mockResolvedValue({ data: login })
   api.poll.mockResolvedValue({ data: { status: 'pending' } })
   api.cancel.mockResolvedValue({}); api.patch.mockResolvedValue({ data: {} }); api.invalidate.mockResolvedValue(undefined)
@@ -69,7 +69,7 @@ it('signs a ChatGPT account in on the Agent itself and polls until Codex has sto
   api.poll.mockResolvedValueOnce({ data: { status: 'success' } })
   await vi.advanceTimersByTimeAsync(2000)
   expect(api.poll).toHaveBeenLastCalledWith(expect.objectContaining({ body: { login_id: 'login-1' } }))
-  expect(api.invalidate).toHaveBeenCalledWith({ key: ['codex-account', 'bot', 'agent'] })
+  expect(api.invalidate).toHaveBeenCalledWith({ key: ['agent-account', 'bot', 'agent'] })
   expect(api.toastSuccess).toHaveBeenCalledWith('bots.agent.codexLoginSuccess')
   expect(panel()!.dataset.code).toBeUndefined()
 })
@@ -109,7 +109,7 @@ it('signs a Grok account in through the same flow with Grok Build\'s own copy', 
 it('takes the ChatGPT sign-in from Codex itself, not from a stored credential', async () => {
   mount('codex', 'chatgpt', true)
   expect(root.querySelector('[data-codex-usage]')).toBeNull()
-  codexAccount.value = { signed_in: true, email: 'user@example.com' }
+  runtimeAccount.value = { signed_in: true, email: 'user@example.com' }
   await vi.advanceTimersByTimeAsync(0)
   expect(panel()!.dataset.auth).toBe('chatgpt')
   expect(root.querySelector('[data-codex-usage]')).not.toBeNull()

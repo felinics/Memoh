@@ -53,6 +53,51 @@ func (h *ExternalAgentLoginHandler) Register(e *echo.Echo) {
 		g.POST("/poll", h.PollDevice)
 		g.POST("/cancel", h.CancelDevice)
 	}
+	e.GET("/bots/:bot_id/agents/:id/account", h.Account)
+}
+
+// AgentAccountResponse reports the account an Agent's runtime is signed in to.
+type AgentAccountResponse struct {
+	SignedIn bool   `json:"signed_in" validate:"required"`
+	Email    string `json:"email,omitempty"`
+} // @name externalagent.AgentAccountResponse
+
+// Account godoc
+// @Summary Get the account a direct runtime Agent is signed in to
+// @Description For runtimes that keep their own sign-in in the Agent's workspace (Codex with a ChatGPT account). The runtime is asked directly, and started when it is not running.
+// @Tags external-agents
+// @Param bot_id path string true "Bot ID"
+// @Param id path string true "Bot Agent ID"
+// @Success 200 {object} AgentAccountResponse
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 422 {object} server.Problem
+// @Failure 503 {object} server.Problem
+// @Router /bots/{bot_id}/agents/{id}/account [get].
+func (h *ExternalAgentLoginHandler) Account(c echo.Context) error {
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	botAgentID := strings.TrimSpace(c.Param("id"))
+	channelIdentityID, err := RequireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, bots.PermissionManage)
+	if err != nil {
+		return err
+	}
+	agent, err := h.agents.GetActive(c.Request().Context(), bot.ID, botAgentID)
+	if err != nil {
+		return apperror.New(apperror.CodeBotAgentNotFound, nil)
+	}
+	reader, ok := h.runtimes.AccountReader(agent.Runtime)
+	if !ok {
+		return apperror.New(apperror.CodeBotAgentNotFound, nil)
+	}
+	account, err := reader.Account(c.Request().Context(), bot.ID, agent.ID)
+	if err != nil {
+		return h.runtimeError(c, err)
+	}
+	return c.JSON(http.StatusOK, AgentAccountResponse{SignedIn: account.SignedIn, Email: account.Email})
 }
 
 // requireLogin resolves the Agent the caller may manage and the sign-in flow
