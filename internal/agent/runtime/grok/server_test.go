@@ -305,49 +305,33 @@ func isRuntimeBusy(err error) bool {
 	return errors.As(err, &failure) && failure.Kind == external.FailureRuntimeBusy
 }
 
-func TestAwaitLoginHoldersWaitsOnlyWhereALoginIsShared(t *testing.T) {
-	// API key processes on both sides run side by side: a displaced one keeps
-	// finishing its turns, and the start does not wait for it.
+func TestAwaitLoginHoldersWaitsOnlyForAccountProcesses(t *testing.T) {
+	// API key processes run side by side: a displaced one keeps finishing its
+	// turns, and the start does not wait for it.
 	apiKey := &server{done: make(chan struct{})}
-	if err := awaitLoginHolders(t.Context(), []*server{apiKey}, false, time.Hour); err != nil {
+	if err := awaitLoginHolders(t.Context(), []*server{apiKey}, time.Hour); err != nil {
 		t.Fatalf("API key start waited on an API key predecessor: %v", err)
 	}
-	// A login on either side waits, held or not by a turn (a process can be
-	// held between Acquire and its turn starting), and answers busy once the
-	// timeout passes without stopping the predecessor.
-	for _, tc := range []struct {
-		name     string
-		previous *server
-		signedIn bool
-	}{
-		{"predecessor holds a login", &server{done: make(chan struct{}), login: &loginSync{}}, false},
-		{"start signs in", &server{done: make(chan struct{})}, true},
-	} {
-		if err := awaitLoginHolders(t.Context(), []*server{tc.previous}, tc.signedIn, 10*time.Millisecond); !isRuntimeBusy(err) {
-			t.Fatalf("%s: err = %v, want busy", tc.name, err)
-		}
-		select {
-		case <-tc.previous.Done():
-			t.Fatalf("%s: predecessor was stopped", tc.name)
-		default:
-		}
+	// A Grok account process could rewrite the login the start removes: the
+	// start waits for it, and answers busy once the timeout passes without
+	// stopping it.
+	account := &server{done: make(chan struct{}), account: true}
+	if err := awaitLoginHolders(t.Context(), []*server{account}, 10*time.Millisecond); !isRuntimeBusy(err) {
+		t.Fatalf("err = %v, want busy", err)
 	}
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if err := awaitLoginHolders(ctx, []*server{{done: make(chan struct{})}}, true, time.Hour); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled start: %v", err)
+	select {
+	case <-account.Done():
+		t.Fatal("predecessor was stopped")
+	default:
 	}
-	// Predecessors that end within the timeout let the start through once
-	// their teardown, login write-back included, has finished.
-	ended := &server{done: make(chan struct{}), login: &loginSync{}}
-	ended.closeOnce.Do(func() { close(ended.done) })
-	draining := &server{done: make(chan struct{}), login: &loginSync{}}
+	// One that ends within the timeout lets the start through.
+	draining := &server{done: make(chan struct{}), account: true}
 	go func() {
 		time.Sleep(20 * time.Millisecond)
 		draining.closeOnce.Do(func() { close(draining.done) })
 	}()
-	if err := awaitLoginHolders(t.Context(), []*server{ended, draining}, true, time.Minute); err != nil {
-		t.Fatalf("drained predecessors: %v", err)
+	if err := awaitLoginHolders(t.Context(), []*server{draining}, time.Minute); err != nil {
+		t.Fatalf("drained predecessor: %v", err)
 	}
 }
 

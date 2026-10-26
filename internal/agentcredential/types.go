@@ -15,7 +15,6 @@ const ( //nolint:gosec // Stable authentication-kind identifiers, not credential
 	AuthKindAnthropicAPIKey = "anthropic_api_key" //nolint:gosec // Stable authentication-kind identifier.
 	AuthKindClaudeCodeOAuth = "claude_code_oauth"
 	AuthKindXAIAPIKey       = "xai_api_key" //nolint:gosec // Stable authentication-kind identifier.
-	AuthKindXAIGrokOAuth    = "xai_grok_oauth"
 )
 
 // authKinds keeps what an auth kind means in one table so a new credential
@@ -32,10 +31,6 @@ var authKinds = map[string]authKindSpec{
 	AuthKindAnthropicAPIKey: {provider: ProviderAnthropic, runtime: runtimekind.ClaudeCode, secret: []string{"api_key"}, label: "API key"},
 	AuthKindClaudeCodeOAuth: {provider: ProviderAnthropic, runtime: runtimekind.ClaudeCode, secret: []string{"oauth_token"}, label: "Claude Code"},
 	AuthKindXAIAPIKey:       {provider: ProviderXAI, runtime: runtimekind.GrokBuild, secret: []string{"api_key"}, label: "API key"},
-	// Grok's login file is stored whole and only Grok writes it: the sign-in
-	// runs in the Agent's process, and Grok rewrites the file when it
-	// refreshes its tokens, so the stored copy has to take whatever it wrote.
-	AuthKindXAIGrokOAuth: {provider: ProviderXAI, runtime: runtimekind.GrokBuild, secret: []string{"auth_json"}, label: "Grok"},
 }
 
 // PublicCredential is the redacted view of a stored credential. The secret

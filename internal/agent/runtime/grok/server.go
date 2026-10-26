@@ -20,13 +20,8 @@ import (
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
-const (
-	// handshakeTimeout bounds the ACP initialize exchange on a fresh process.
-	handshakeTimeout = 60 * time.Second
-	// loginSyncTimeout bounds one write-back, so a workspace that is already
-	// gone cannot hold up a turn's end or a shutdown.
-	loginSyncTimeout = 5 * time.Second
-)
+// handshakeTimeout bounds the ACP initialize exchange on a fresh process.
+const handshakeTimeout = 60 * time.Second
 
 // server is one `grok agent stdio` process and the conversations it hosts.
 type server struct {
@@ -36,9 +31,10 @@ type server struct {
 	client        *bridge.Client
 	workspaceInfo bridge.WorkspaceInfo
 	launcher      external.Launcher
-	// login is nil for an API key Agent.
-	login  *loginSync
-	logger *slog.Logger
+	// account marks a process signed in with a Grok account, which reads and
+	// refreshes the login file in the Agent's home.
+	account bool
+	logger  *slog.Logger
 	// mountCtx bounds thread tool-gateway mounts to the process's lifetime.
 	mountCtx    context.Context
 	mountCancel context.CancelFunc
@@ -83,8 +79,8 @@ type turnContext struct {
 }
 
 // startServer launches Grok on a home already prepared for the Agent's auth
-// mode: apiKey for an API key Agent, login for a Grok account one.
-func startServer(ctx context.Context, botID, home string, client *bridge.Client, info bridge.WorkspaceInfo, apiKey string, login *loginSync, launcher external.Launcher, logger *slog.Logger) (*server, error) {
+// mode: apiKey for an API key Agent, empty for a Grok account one.
+func startServer(ctx context.Context, botID, home string, client *bridge.Client, info bridge.WorkspaceInfo, apiKey string, launcher external.Launcher, logger *slog.Logger) (*server, error) {
 	proc, conn, err := launch(ctx, client, home, apiKey, launcher, logger)
 	if err != nil {
 		return nil, err
@@ -97,7 +93,7 @@ func startServer(ctx context.Context, botID, home string, client *bridge.Client,
 		client:        client,
 		workspaceInfo: info,
 		launcher:      launcher,
-		login:         login,
+		account:       apiKey == "",
 		logger:        logger,
 		mountCtx:      mountCtx,
 		mountCancel:   mountCancel,
@@ -207,9 +203,6 @@ func (s *server) Close() error {
 			th.mount.Stop()
 		}
 		s.closeErr = s.proc.Close()
-		// With the process gone the login file is final: the last chance to
-		// keep a refresh Grok made outside a turn.
-		s.login.finish()
 	})
 	return s.closeErr
 }

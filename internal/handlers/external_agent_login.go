@@ -18,8 +18,7 @@ import (
 // ExternalAgentLoginHandler exposes the account sign-in of direct runtimes
 // that sign in inside the Agent's own process (Codex, Grok Build): the agent
 // obtains a device code, the user confirms it, and the agent writes the login
-// into its home. Codex keeps it there; Grok's is copied into the encrypted
-// Agent credential store.
+// into its home and keeps it there.
 type ExternalAgentLoginHandler struct {
 	runtimes       external.Drivers
 	agents         *botagents.Service
@@ -64,7 +63,7 @@ type AgentAccountResponse struct {
 
 // Account godoc
 // @Summary Get the account a direct runtime Agent is signed in to
-// @Description For runtimes that keep their own sign-in in the Agent's workspace (Codex with a ChatGPT account). The runtime is asked directly, and started when it is not running.
+// @Description For runtimes that keep their own sign-in in the Agent's workspace (Codex with a ChatGPT account, Grok Build with a Grok account). The runtime is asked directly, and started when it is not running.
 // @Tags external-agents
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Bot Agent ID"

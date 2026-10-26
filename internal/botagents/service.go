@@ -101,7 +101,8 @@ var directRuntimes = map[string]directRuntime{
 				return "", err
 			}
 			if cfg.Auth == grokcfg.AuthGrokAccount {
-				return agentcredential.AuthKindXAIGrokOAuth, nil
+				// Grok keeps its account login in the Agent's workspace.
+				return "", nil
 			}
 			return agentcredential.AuthKindXAIAPIKey, nil
 		},

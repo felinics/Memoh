@@ -163,8 +163,8 @@ func TestAgentSignedInAccountsCannotBeStaged(t *testing.T) {
 	creds := NewService(q, config.Config{Auth: config.AuthConfig{AgentCredentialsEncryptionKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))}})
 	svc := &AuthorizationService{credentials: creds, oauth: &testClaudeAuthorizer{}}
 	for _, req := range []AuthorizationRequest{
-		{Runtime: "grok-build", AuthKind: AuthKindXAIGrokOAuth},
-		{Runtime: "grok-build", AuthKind: AuthKindXAIGrokOAuth, Secret: map[string]string{"auth_json": "{}"}},
+		{Runtime: "grok-build", AuthKind: "xai_grok_oauth"},
+		{Runtime: "grok-build", AuthKind: "xai_grok_oauth", Secret: map[string]string{"auth_json": "{}"}},
 		{Runtime: "codex", AuthKind: "openai_codex_oauth"},
 	} {
 		if _, err := svc.Create(context.Background(), uuid.NewString(), req); !errors.Is(err, ErrInvalidRequest) {

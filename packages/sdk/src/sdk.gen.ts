@@ -344,7 +344,7 @@ export const patchBotsByBotIdAgentsById = <ThrowOnError extends boolean = false>
 /**
  * Get the account a direct runtime Agent is signed in to
  *
- * For runtimes that keep their own sign-in in the Agent's workspace (Codex with a ChatGPT account). The runtime is asked directly, and started when it is not running.
+ * For runtimes that keep their own sign-in in the Agent's workspace (Codex with a ChatGPT account, Grok Build with a Grok account). The runtime is asked directly, and started when it is not running.
  */
 export const getBotsByBotIdAgentsByIdAccount = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdAgentsByIdAccountData, ThrowOnError>): RequestResult<GetBotsByBotIdAgentsByIdAccountResponses, GetBotsByBotIdAgentsByIdAccountErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdAgentsByIdAccountResponses, GetBotsByBotIdAgentsByIdAccountErrors, ThrowOnError>({ url: '/bots/{bot_id}/agents/{id}/account', ...options });
 

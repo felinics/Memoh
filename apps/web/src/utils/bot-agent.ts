@@ -160,9 +160,10 @@ export function isDirectBotAgentConfigured(
   if (!isDirectBotAgentRuntime(runtime)) return null
   const auth = normalizeAgentID(objectValue(agent?.metadata)?.auth)
   if (!isAgentAuthMode(auth) || !DIRECT_BOT_AGENT_AUTH_MODES[runtime].includes(auth)) return false
-  // A Claude Code workspace login and a Codex ChatGPT login are kept by the
-  // CLI in the workspace; Memoh stores no credential for them.
-  return auth === 'workspace' || auth === 'chatgpt' || !!agent?.agent_credential_id
+  // A Claude Code workspace login and the device-code sign-ins (Codex's
+  // ChatGPT account, a Grok account) are kept by the CLI in the workspace;
+  // Memoh stores no credential for them.
+  return auth === 'workspace' || isDeviceLoginAuthMode(auth) || !!agent?.agent_credential_id
 }
 
 export function botAgentProvider(agent: Pick<BotagentsBotAgent, 'runtime' | 'metadata'> | null | undefined): string {

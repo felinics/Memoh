@@ -91,7 +91,6 @@ func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (exter
 		return external.CompactionResult{}, err
 	}
 	defer release()
-	defer srv.login.sync(ctx)
 	if err := srv.compact(ctx, th.session.ID()); err != nil {
 		if ctx.Err() != nil {
 			return external.CompactionResult{}, ctx.Err()
@@ -178,8 +177,6 @@ func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalog
 		return external.ModelCatalog{}, serverFailure(err)
 	}
 	defer release()
-	// Starting Grok may already have refreshed its login.
-	defer srv.login.sync(ctx)
 	models, err := catalogFromState(srv.modelState(ctx))
 	if err != nil {
 		return external.ModelCatalog{}, external.Unavailable(err)

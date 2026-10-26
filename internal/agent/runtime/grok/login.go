@@ -4,31 +4,23 @@ import (
 	"context"
 	"log/slog"
 	"net/url"
-	"path"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
-	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
-	"github.com/felinics/memoh/internal/agent/runtime/agentprocess"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/grok/grokcfg"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/errs"
-	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
-// A Grok account signs in inside the Agent's workspace: ACP authenticate runs
-// Grok's device-code flow and Grok writes its login file itself, so the file
-// is always in the shape Grok produces. Memoh copies the finished file into
-// the credential store and starts the Agent's next process from it.
-//
-// The sign-in runs on a process of its own with an empty home. On a home
-// that already holds a login, authenticate answers from that login without
-// asking anyone, and the Agent's current login must stay in place until the
-// new one is stored. authenticate returns only once the user has confirmed,
-// so the URL they must open is read through Grok's own request while it
-// waits.
+// A Grok account signs in on the Agent's own process, in the Agent's home:
+// ACP authenticate runs Grok's device-code flow, and Grok writes and keeps
+// its login file there. On a home that already holds a login, authenticate
+// answers from that login without asking anyone, so signing in again first
+// removes it. authenticate returns only once the user has confirmed, so the
+// URL they must open is read through Grok's own request while it waits.
 const (
 	// authMethodID is the interactive sign-in Grok advertises. The other
 	// method it may list, cached_token, names a login it already holds.
@@ -40,33 +32,27 @@ const (
 	signInURLTimeout = 20 * time.Second
 	signInURLPoll    = 500 * time.Millisecond
 	// signInTTL ends a sign-in nobody polled or cancelled to its end, with
-	// the process and login file it holds; Grok's device codes expire well
-	// within it.
+	// the process it holds; Grok's device codes expire well within it.
 	signInTTL = 30 * time.Minute
-	// signInHomePrefix is where a sign-in's throwaway home lives; it holds
-	// nothing but what Grok writes during the sign-in.
-	signInHomePrefix = "/tmp/memoh-grok-signin-"
 )
 
 var _ external.DeviceLoginProvider = (*Driver)(nil)
 
-// signIn is one account sign-in under way on its own Grok process.
+// signIn is one account sign-in under way on the Agent's process.
 type signIn struct {
 	id         string
 	botID      string
 	botAgentID string
-	home       string
-	client     *bridge.Client
-	proc       *agentprocess.Process
-	conn       *acpclient.Conn
+	srv        *server
+	release    func()
 	cancel     context.CancelFunc
 	// expiry ends the sign-in at signInTTL; endSignIn stops it.
 	expiry *time.Timer
 	// done closes when authenticate has answered.
 	done chan struct{}
-	// meta is the account Grok signed in, as authenticate reported it.
-	meta map[string]any
 	err  error
+	// ended makes endSignIn safe to repeat.
+	ended sync.Once
 }
 
 // StartDeviceLogin implements external.DeviceLoginProvider.
@@ -83,14 +69,18 @@ func (d *Driver) StartDeviceLogin(ctx context.Context, botID, botAgentID string)
 	if cfg.Auth != grokcfg.AuthGrokAccount {
 		return external.DeviceLoginStart{}, external.CredentialError(agentcredential.ErrIncompatible)
 	}
-	d.cancelAgentSignIns(ctx, botID, botAgentID)
-	s, err := d.launchSignIn(ctx, botID, botAgentID)
+	// A login already in the home would answer for the new one.
+	if err := d.PurgeBotAgentAuth(ctx, botID, botAgentID); err != nil {
+		return external.DeviceLoginStart{}, err
+	}
+	srv, releaseServer, err := d.acquireServer(ctx, botID, botAgentID)
 	if err != nil {
 		return external.DeviceLoginStart{}, serverFailure(err)
 	}
+	s := &signIn{id: uuid.NewString(), botID: botID, botAgentID: botAgentID, srv: srv, release: releaseServer, done: make(chan struct{})}
 	start, err := s.begin(ctx)
 	if err != nil {
-		d.endSignIn(ctx, s)
+		d.endSignIn(s)
 		return external.DeviceLoginStart{}, err
 	}
 	d.signInsMu.Lock()
@@ -102,39 +92,8 @@ func (d *Driver) StartDeviceLogin(ctx context.Context, botID, botAgentID string)
 	return start, nil
 }
 
-// launchSignIn starts a Grok process on an empty home of its own.
-func (d *Driver) launchSignIn(ctx context.Context, botID, botAgentID string) (*signIn, error) {
-	info, err := d.bridges.WorkspaceInfo(ctx, botID)
-	if err != nil {
-		return nil, err
-	}
-	if err := external.RequireContainerWorkspace(info, RuntimeType); err != nil {
-		return nil, err
-	}
-	client, err := d.bridges.MCPClient(ctx, botID)
-	if err != nil {
-		return nil, err
-	}
-	launcher, err := d.resolveLauncher(ctx, botID)
-	if err != nil {
-		return nil, err
-	}
-	s := &signIn{id: uuid.NewString(), botID: botID, botAgentID: botAgentID, client: client, done: make(chan struct{})}
-	s.home = signInHomePrefix + s.id
-	if err := client.Mkdir(ctx, s.home); err != nil {
-		return nil, errs.WrapDependency(err, "")
-	}
-	// The sign-in outlives the request that started it.
-	s.proc, s.conn, err = launch(context.WithoutCancel(ctx), client, s.home, "", launcher, d.logger)
-	if err != nil {
-		s.removeHome(ctx)
-		return nil, err
-	}
-	return s, nil
-}
-
 // PollDeviceLogin implements external.DeviceLoginProvider.
-func (d *Driver) PollDeviceLogin(ctx context.Context, ownerUserID, botID, botAgentID, loginID string) (external.DeviceLoginStatus, error) {
+func (d *Driver) PollDeviceLogin(ctx context.Context, _, botID, botAgentID, loginID string) (external.DeviceLoginStatus, error) {
 	release, err := d.lockSignIn(ctx, botID, botAgentID)
 	if err != nil {
 		return external.DeviceLoginStatus{}, err
@@ -149,62 +108,15 @@ func (d *Driver) PollDeviceLogin(ctx context.Context, ownerUserID, botID, botAge
 	default:
 		return external.DeviceLoginStatus{Status: "pending"}, nil
 	}
+	d.endSignIn(s)
 	if s.err != nil {
-		d.endSignIn(ctx, s)
 		d.logger.WarnContext(ctx, "grok sign-in failed", slog.String("bot_id", botID), slog.Any("error", s.err))
 		return external.DeviceLoginStatus{Status: "error", Error: s.err.Error()}, nil
 	}
-	// The Agent may have left Grok account sign-in since this one started.
-	// Storing it then would replace, and revoke, the credential its mode uses.
-	cfg, err := d.agentConfig(ctx, botID, botAgentID)
-	if err != nil {
-		return external.DeviceLoginStatus{}, external.Unavailable(err)
-	}
-	if cfg.Auth != grokcfg.AuthGrokAccount {
-		d.endSignIn(ctx, s)
-		return external.DeviceLoginStatus{}, external.CredentialError(agentcredential.ErrIncompatible)
-	}
-	// A store that failed on the way leaves the sign-in for the next poll.
-	if err := d.storeSignIn(ctx, ownerUserID, s); err != nil {
-		return external.DeviceLoginStatus{}, err
-	}
-	d.endSignIn(ctx, s)
-	// The Agent's process still runs on the login it was started from; the
-	// next turn starts one from the stored credential.
-	d.servers.Recycle(serverKey(botID, botAgentID))
 	return external.DeviceLoginStatus{Status: "success"}, nil
 }
 
-// storeSignIn copies the login Grok wrote into the credential store,
-// replacing the Agent's credential.
-func (d *Driver) storeSignIn(ctx context.Context, ownerUserID string, s *signIn) error {
-	content, err := readLoginFile(ctx, s.client, path.Join(s.home, authFileName))
-	if err != nil {
-		return err
-	}
-	meta := map[string]any{}
-	// The label reads "Grok <email>", as the Codex one reads the account.
-	if email, _ := s.meta["email"].(string); email != "" {
-		meta["account_id"] = email
-	}
-	if team, _ := s.meta["team_id"].(string); team != "" {
-		meta["team_id"] = team
-	}
-	_, err = d.credentials.AttachToBotAgent(ctx, ownerUserID, s.botID, s.botAgentID, agentcredential.CreateRequest{
-		Provider:        agentcredential.ProviderXAI,
-		AuthKind:        agentcredential.AuthKindXAIGrokOAuth,
-		Secret:          map[string]string{"auth_json": content},
-		AccountMetadata: meta,
-	})
-	if err != nil {
-		return external.CredentialError(err)
-	}
-	return nil
-}
-
-// CancelDeviceLogin implements external.DeviceLoginProvider. Grok keeps
-// polling the device code until it expires, so the process goes with the
-// sign-in; the Agent's own process is untouched.
+// CancelDeviceLogin implements external.DeviceLoginProvider.
 func (d *Driver) CancelDeviceLogin(ctx context.Context, botID, botAgentID, loginID string) error {
 	release, err := d.lockSignIn(ctx, botID, botAgentID)
 	if err != nil {
@@ -212,7 +124,7 @@ func (d *Driver) CancelDeviceLogin(ctx context.Context, botID, botAgentID, login
 	}
 	defer release()
 	if s := d.signIn(loginID, botAgentID); s != nil {
-		d.endSignIn(ctx, s)
+		d.endSignIn(s)
 	}
 	return nil
 }
@@ -227,16 +139,24 @@ func (d *Driver) signIn(loginID, botAgentID string) *signIn {
 	return s
 }
 
-// endSignIn forgets a sign-in and takes its process and home with it.
-func (d *Driver) endSignIn(ctx context.Context, s *signIn) {
-	d.signInsMu.Lock()
-	delete(d.signIns, s.id)
-	if s.expiry != nil {
-		s.expiry.Stop()
-	}
-	d.signInsMu.Unlock()
-	s.close()
-	s.removeHome(ctx)
+// endSignIn forgets a sign-in and lets its process go. Grok keeps polling a
+// device code until it expires, and a process that signed in still reports
+// the login state it started with, so either way the Agent's next work starts
+// a new one.
+func (d *Driver) endSignIn(s *signIn) {
+	s.ended.Do(func() {
+		d.signInsMu.Lock()
+		delete(d.signIns, s.id)
+		if s.expiry != nil {
+			s.expiry.Stop()
+		}
+		d.signInsMu.Unlock()
+		if s.cancel != nil {
+			s.cancel()
+		}
+		d.servers.RecycleResource(serverKey(s.botID, s.botAgentID), s.srv)
+		s.release()
+	})
 }
 
 // closeSignIns ends every sign-in for Server shutdown.
@@ -248,7 +168,7 @@ func (d *Driver) closeSignIns() {
 	}
 	d.signInsMu.Unlock()
 	for _, s := range all {
-		d.endSignIn(context.Background(), s) //nolint:contextcheck // shutdown has no request to cancel.
+		d.endSignIn(s)
 	}
 }
 
@@ -258,7 +178,7 @@ func (s *signIn) begin(ctx context.Context) (external.DeviceLoginStart, error) {
 	s.cancel = cancel
 	go func() {
 		defer close(s.done)
-		s.meta, s.err = s.conn.Authenticate(authCtx, authMethodID)
+		_, s.err = s.srv.conn.Authenticate(authCtx, authMethodID)
 	}()
 	return s.awaitURL(ctx)
 }
@@ -273,7 +193,7 @@ func (s *signIn) awaitURL(ctx context.Context) (external.DeviceLoginStart, error
 			ExternalProvider bool   `json:"external_provider"`
 			Mode             string `json:"mode"`
 		}
-		if err := s.conn.Call(ctx, signInURLMethod, map[string]any{"methodId": authMethodID}, &answer); err != nil {
+		if err := s.srv.conn.Call(ctx, signInURLMethod, map[string]any{"methodId": authMethodID}, &answer); err != nil {
 			return external.DeviceLoginStart{}, err
 		}
 		if answer.AuthURL != "" {
@@ -298,26 +218,6 @@ func (s *signIn) awaitURL(ctx context.Context) (external.DeviceLoginStart, error
 	}
 }
 
-func (s *signIn) close() {
-	if s.cancel != nil {
-		s.cancel()
-	}
-	if s.proc != nil {
-		_ = s.proc.Close()
-	}
-}
-
-// removeHome deletes the sign-in's home, login file included. A cancelled
-// request must still take it away: it holds a login.
-func (s *signIn) removeHome(ctx context.Context) {
-	if s.client == nil || s.home == "" {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), loginSyncTimeout)
-	defer cancel()
-	_ = s.client.DeleteFile(ctx, s.home, true)
-}
-
 func userCode(rawURL string) string {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -327,7 +227,7 @@ func userCode(rawURL string) string {
 }
 
 // lockSignIn covers the whole login lifecycle operation, not only map writes.
-// A canceled tab must not race a poll that is storing its completed credential.
+// A cancelled tab must not race a poll that is finishing the same sign-in.
 func (d *Driver) lockSignIn(ctx context.Context, botID, botAgentID string) (func(), error) {
 	gate := d.processes(serverKey(botID, botAgentID)).signingIn
 	select {
@@ -338,14 +238,10 @@ func (d *Driver) lockSignIn(ctx context.Context, botID, botAgentID string) (func
 	}
 }
 
-// cancelAgentSignIns ends every sign-in of the Agent, approved or not. A new
-// sign-in calls it under the Agent's sign-in gate; a purge calls it without
-// (see PurgeBotAgentAuth), and endSignIn is safe to repeat. A sign-in may set
-// the Agent's credential only while nothing has replaced it: one stored after
-// a newer sign-in or a disconnect would bring back a login the user moved
-// away from, and revoke the credential it displaced. Other Agents are
+// cancelAgentSignIns ends every sign-in of the Agent. A new sign-in and a
+// disconnect both call it; endSignIn is safe to repeat. Other Agents are
 // unaffected.
-func (d *Driver) cancelAgentSignIns(ctx context.Context, botID, botAgentID string) {
+func (d *Driver) cancelAgentSignIns(botID, botAgentID string) {
 	d.signInsMu.Lock()
 	var previous []*signIn
 	for _, s := range d.signIns {
@@ -355,6 +251,6 @@ func (d *Driver) cancelAgentSignIns(ctx context.Context, botID, botAgentID strin
 	}
 	d.signInsMu.Unlock()
 	for _, s := range previous {
-		d.endSignIn(ctx, s)
+		d.endSignIn(s)
 	}
 }

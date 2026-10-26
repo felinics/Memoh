@@ -1779,7 +1779,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/agents/{id}/account": {
             "get": {
-                "description": "For runtimes that keep their own sign-in in the Agent's workspace (Codex with a ChatGPT account). The runtime is asked directly, and started when it is not running.",
+                "description": "For runtimes that keep their own sign-in in the Agent's workspace (Codex with a ChatGPT account, Grok Build with a Grok account). The runtime is asked directly, and started when it is not running.",
                 "tags": [
                     "external-agents"
                 ],

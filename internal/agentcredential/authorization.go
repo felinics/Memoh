@@ -70,11 +70,6 @@ func (s *AuthorizationService) Create(ctx context.Context, owner string, req Aut
 	if !Compatible(req.Runtime, req.AuthKind) {
 		return Authorization{}, ErrInvalidRequest
 	}
-	// A Grok account signs in inside the Agent's own process, which does not
-	// exist before the Bot does; only Grok writes that credential.
-	if req.AuthKind == AuthKindXAIGrokOAuth {
-		return Authorization{}, ErrInvalidRequest
-	}
 	claudeBrowser := req.AuthKind == AuthKindClaudeCodeOAuth && len(req.Secret) == 0
 	if !claudeBrowser && !validSecret(req.AuthKind, req.Secret) {
 		return Authorization{}, ErrInvalidRequest

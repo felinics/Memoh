@@ -67,7 +67,6 @@ type Queries interface {
 	GetBotAgentRuntime(ctx context.Context, arg dbsqlc.GetBotAgentRuntimeParams) (string, error)
 	RevokeAgentCredentialByID(ctx context.Context, id pgtype.UUID) (dbsqlc.AgentCredential, error)
 	RevokeAgentCredentialsForBot(ctx context.Context, botID pgtype.UUID) error
-	UpdateAgentCredentialPayloadCAS(ctx context.Context, arg dbsqlc.UpdateAgentCredentialPayloadCASParams) (dbsqlc.AgentCredential, error)
 	FinalizeSessionRun(ctx context.Context, arg dbsqlc.FinalizeSessionRunParams) (dbsqlc.SessionRun, error)
 	AcquireProviderTemplateSyncLock(ctx context.Context) error
 	ApproveToolApprovalRequest(ctx context.Context, arg dbsqlc.ApproveToolApprovalRequestParams) (dbsqlc.ToolApprovalRequest, error)

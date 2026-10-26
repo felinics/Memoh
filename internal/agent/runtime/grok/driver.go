@@ -32,8 +32,8 @@ const contextURI = "memoh://context/current-turn"
 // permission callbacks to unwind before its session is given up.
 const decisionQuiesceTimeout = 3 * time.Second
 
-// predecessorDrainTimeout bounds how long a start waits for an earlier
-// process holding the Agent's login to finish its work (awaitLoginHolders).
+// predecessorDrainTimeout bounds how long an API key start waits for an
+// earlier Grok account process to finish its work (awaitLoginHolders).
 const predecessorDrainTimeout = 30 * time.Second
 
 // BridgeSource resolves the workspace bridge client for a bot.
@@ -72,18 +72,14 @@ type Driver struct {
 // file.
 type agentProcesses struct {
 	// starting admits one start at a time, and holds starts off while a
-	// disconnect cleans the home. It is a channel so a waiter can give up with
-	// its context.
+	// disconnect or a finished sign-in changes the login in the home. It is a
+	// channel so a waiter can give up with its context.
 	starting chan struct{}
 	// signingIn serializes creation, polling and cancellation per Agent.
 	signingIn chan struct{}
 	// servers lists every live process: the one the table hands out and the
 	// displaced ones still finishing their turns.
 	servers []*server
-	// purged names the credential a disconnect removed the login of. The
-	// Agent still holds it until the disconnect is stored, and a start in
-	// between would write the login back. Guarded by starting.
-	purged string
 }
 
 func NewDriver(
@@ -141,8 +137,8 @@ func (d *Driver) ResetBotAgent(botID, botAgentID string) {
 }
 
 // CloseAll tears every process down for Server shutdown, including displaced
-// ones still finishing turns: closing is what keeps a login Grok refreshed.
-// Each close waits for its process to exit, so they run side by side.
+// ones still finishing turns. Each close waits for its process to exit, so
+// they run side by side.
 func (d *Driver) CloseAll() {
 	var wg sync.WaitGroup
 	wg.Go(d.servers.CloseAll)
@@ -186,19 +182,12 @@ func (d *Driver) startServer(ctx context.Context, key string) (servertable.Resou
 	if err != nil {
 		return nil, err
 	}
-	// Before the credential is read: a process that held the login has
-	// written its last refresh back by the time it has closed.
-	if err := awaitLoginHolders(ctx, d.runningServers(key), cfg.Auth == grokcfg.AuthGrokAccount, predecessorDrainTimeout); err != nil {
-		return nil, err
+	if cfg.Auth != grokcfg.AuthGrokAccount {
+		if err := awaitLoginHolders(ctx, d.runningServers(key), predecessorDrainTimeout); err != nil {
+			return nil, err
+		}
 	}
-	credential, err := d.credentials.ResolveForBotAgent(ctx, botID, botAgentID)
-	if err != nil {
-		return nil, external.CredentialError(err)
-	}
-	if credential.ID == agent.purged {
-		return nil, external.CredentialError(agentcredential.ErrNotFound)
-	}
-	if cfg, err = credentialFor(cfg, credential); err != nil {
+	if cfg, err = d.apiKeyFor(ctx, botID, botAgentID, cfg); err != nil {
 		return nil, err
 	}
 	client, err := d.bridges.MCPClient(ctx, botID)
@@ -216,15 +205,8 @@ func (d *Driver) startServer(ctx context.Context, key string) (servertable.Resou
 	if err := prepareHome(ctx, client, botAgentID, cfg); err != nil {
 		return nil, err
 	}
-	var login *loginSync
-	if cfg.Auth == grokcfg.AuthGrokAccount {
-		login = &loginSync{
-			store: d.credentials, botID: botID, botAgentID: botAgentID, logger: d.logger, stored: credential,
-			read: func(ctx context.Context) (string, error) { return readLogin(ctx, client, botAgentID) },
-		}
-	}
 	// The process outlives the turn that happened to start it.
-	srv, err := startServer(context.WithoutCancel(ctx), botID, grokHome(botAgentID), client, info, cfg.APIKey, login, launcher, d.logger)
+	srv, err := startServer(context.WithoutCancel(ctx), botID, grokHome(botAgentID), client, info, cfg.APIKey, launcher, d.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -232,18 +214,18 @@ func (d *Driver) startServer(ctx context.Context, key string) (servertable.Resou
 	return srv, nil
 }
 
-// awaitLoginHolders waits until no earlier process of the Agent can touch
-// the login file a start is about to depend on. A Grok account process reads
-// and refreshes that file, and Grok prefers a stored login over XAI_API_KEY,
-// so a start waits whenever it or an earlier process holds a login. API key
-// processes share nothing a turn changes: they run side by side, and a
-// displaced one finishes its turns. A predecessor still busy when timeout
-// passes answers busy rather than holding the start for a whole turn.
-func awaitLoginHolders(ctx context.Context, running []*server, signedIn bool, timeout time.Duration) error {
+// awaitLoginHolders waits until no earlier Grok account process of the Agent
+// is running before an API key start removes the login file: such a process
+// refreshes, and so rewrites, that file, and Grok prefers a stored login over
+// XAI_API_KEY. API key processes share nothing a turn changes: they run side
+// by side, and a displaced one finishes its turns. A predecessor still busy
+// when timeout passes answers busy rather than holding the start for a whole
+// turn.
+func awaitLoginHolders(ctx context.Context, running []*server, timeout time.Duration) error {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	for _, other := range running {
-		if !signedIn && other.login == nil {
+		if !other.account {
 			continue
 		}
 		select {
@@ -253,9 +235,9 @@ func awaitLoginHolders(ctx context.Context, running []*server, signedIn bool, ti
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		// Done closes when teardown begins; the login is final only once Close
-		// has synced it back.
-		_ = other.Close() //nolint:contextcheck // predecessor teardown and credential sync outlive this request.
+		// Done closes when teardown begins; the process is gone only once
+		// Close has returned.
+		_ = other.Close() //nolint:contextcheck // predecessor teardown outlives this request.
 	}
 	return nil
 }
@@ -380,7 +362,6 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		return external.PromptResult{}, serverFailure(err)
 	}
 	defer release()
-	defer srv.login.sync(ctx)
 	if err := d.releaseOtherCopies(srv, input); err != nil { //nolint:contextcheck // an idle copy closes on the old process's own lifecycle.
 		return external.PromptResult{}, err
 	}

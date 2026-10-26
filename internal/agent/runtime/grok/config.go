@@ -10,12 +10,9 @@
 // so.
 //
 // An Agent authenticates with an xAI API key or a Grok account. The account
-// sign-in runs inside the Agent's own process (see login.go), and the login
-// file Grok writes is kept in the encrypted Agent credential store. The
-// driver puts that file into the Agent's home when a process starts, and
-// each process writes what Grok refreshed back to the credential it was
-// started from. Every process of an Agent shares that home, so a process
-// that holds a login finishes before another one starts.
+// sign-in runs inside the Agent's own process (see login.go); Grok writes the
+// login file into the Agent's home on the bot's data volume and keeps and
+// refreshes it there. Memoh stores no copy.
 package grok
 
 import (

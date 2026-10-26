@@ -101,9 +101,8 @@
     </SettingsSection>
 
     <!-- Codex and Grok Build sign their account in on the Agent's own
-         process: the runtime obtains the device code and writes its login.
-         Codex keeps it in the workspace; Grok's is copied into the
-         credential store. -->
+         process: the runtime obtains the device code, writes its login into
+         the workspace, and keeps it there. -->
     <SettingsSection
       v-if="deviceLoginAuth"
       :title="$t('bots.agent.account')"
@@ -233,9 +232,10 @@ async function setDefaultPermission(value: unknown) {
 }
 const credentialSecret = ref('')
 const savingCredential = ref(false)
-// A runtime that keeps its own sign-in in the workspace (Codex with a ChatGPT
-// account) is the only one that can say whether it is signed in.
-const runtimeSignIn = computed(() => isCodex.value && config.auth === 'chatgpt')
+// A device-code sign-in (Codex's ChatGPT account, a Grok account) is kept by
+// the runtime in the workspace, so only the runtime can say whether it is
+// signed in.
+const runtimeSignIn = computed(() => isDeviceLoginAuthMode(config.auth))
 const runtimeAccount = useQuery({
   key: () => ['agent-account', props.botId, props.agent.id ?? ''],
   enabled: () => runtimeSignIn.value && !!props.agent.id,
