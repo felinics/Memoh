@@ -2,7 +2,9 @@ package grok
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,9 +17,9 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/event"
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	"github.com/felinics/memoh/internal/agent/runtime/agentproc"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/grok/grokcfg"
-	"github.com/felinics/memoh/internal/agent/runtime/servertable"
 	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/botagents"
@@ -31,10 +33,6 @@ const contextURI = "memoh://context/current-turn"
 // decisionQuiesceTimeout bounds how long a stopped turn waits for its
 // permission callbacks to unwind before its session is given up.
 const decisionQuiesceTimeout = 3 * time.Second
-
-// predecessorDrainTimeout bounds how long an API key start waits for an
-// earlier Grok account process to finish its work (awaitLoginHolders).
-const predecessorDrainTimeout = 30 * time.Second
 
 // BridgeSource resolves the workspace bridge client for a bot.
 type BridgeSource interface {
@@ -55,31 +53,15 @@ type Driver struct {
 	// toolkit path.
 	launchers external.LauncherResolver
 
-	// servers shares one process between the conversations of a Bot Agent.
-	servers *servertable.Table
+	// procs owns the process lifecycle: one per Bot Agent, shared by its
+	// conversations.
+	procs *agentproc.Supervisor
 
-	// running holds one record per Agent that has run here; records are kept
-	// for the Server's lifetime.
-	runningMu sync.Mutex
-	running   map[string]*agentProcesses
-
-	// signIns are the account sign-ins under way, by login id.
-	signInsMu sync.Mutex
-	signIns   map[string]*signIn
-}
-
-// agentProcesses is what shares one Agent's home, and with it the one login
-// file.
-type agentProcesses struct {
-	// starting admits one start at a time, and holds starts off while a
-	// disconnect or a finished sign-in changes the login in the home. It is a
-	// channel so a waiter can give up with its context.
-	starting chan struct{}
-	// signingIn serializes creation, polling and cancellation per Agent.
-	signingIn chan struct{}
-	// servers lists every live process: the one the table hands out and the
-	// displaced ones still finishing their turns.
-	servers []*server
+	// signIns are the account sign-ins under way, by login id; signInGates
+	// serialize starting, polling, and cancelling them per Agent.
+	signInsMu   sync.Mutex
+	signIns     map[string]*signIn
+	signInGates map[string]chan struct{}
 }
 
 func NewDriver(
@@ -88,27 +70,25 @@ func NewDriver(
 	credentials *agentcredential.Service,
 	approval acpclient.ToolApprovalService,
 	toolGateway toolmount.Gateway,
+	procs *agentproc.Supervisor,
 	logger *slog.Logger,
 ) *Driver {
-	d := &Driver{
+	return &Driver{
 		bridges:     bridges,
 		agents:      agents,
 		credentials: credentials,
 		approval:    approval,
 		toolGateway: toolGateway,
+		procs:       procs,
 		logger:      logger.With(slog.String("runtime", RuntimeType)),
-		running:     map[string]*agentProcesses{},
 		signIns:     map[string]*signIn{},
+		signInGates: map[string]chan struct{}{},
 	}
-	d.servers = servertable.New(d.startServer, d.logger)
-	return d
 }
 
 var (
 	_ external.Driver             = (*Driver)(nil)
 	_ external.DependencyRequirer = (*Driver)(nil)
-	_ external.BotResetter        = (*Driver)(nil)
-	_ external.BotAgentResetter   = (*Driver)(nil)
 )
 
 // RuntimeType implements external.Driver.
@@ -125,35 +105,19 @@ func (d *Driver) SetLauncherResolver(r external.LauncherResolver) { d.launchers 
 // user. Without one, Grok is told every question went unanswered.
 func (d *Driver) SetUserInputService(s acpclient.UserInputService) { d.userInput = s }
 
-// ResetBot recycles the bot's processes: new work starts on current
-// configuration while running turns finish on the displaced process.
-func (d *Driver) ResetBot(botID string) {
-	prefix := botID + "\x00"
-	d.servers.RecycleWhere(func(key string) bool { return strings.HasPrefix(key, prefix) })
+func serverKey(botID, botAgentID string) string {
+	return agentproc.Key(RuntimeType, botID, botAgentID)
 }
 
-func (d *Driver) ResetBotAgent(botID, botAgentID string) {
-	d.servers.Recycle(serverKey(botID, botAgentID))
-}
-
-// CloseAll tears every process down for Server shutdown, including displaced
-// ones still finishing turns. Each close waits for its process to exit, so
-// they run side by side.
-func (d *Driver) CloseAll() {
-	var wg sync.WaitGroup
-	wg.Go(d.servers.CloseAll)
-	wg.Go(d.closeSignIns)
-	d.runningMu.Lock()
-	for _, agent := range d.running {
-		for _, srv := range agent.servers {
-			wg.Go(func() { _ = srv.Close() })
-		}
+// runningServers lists every live process of the Agent: the current one and
+// those retired but still finishing turns.
+func (d *Driver) runningServers(key string) []*server {
+	var servers []*server
+	for _, proc := range d.procs.Processes(key) {
+		servers = append(servers, proc.(*server))
 	}
-	d.runningMu.Unlock()
-	wg.Wait()
+	return servers
 }
-
-func serverKey(botID, botAgentID string) string { return botID + "\x00" + botAgentID }
 
 // agentConfig reads the Agent's configuration without its credential, which
 // only a starting process needs.
@@ -165,81 +129,72 @@ func (d *Driver) agentConfig(ctx context.Context, botID, botAgentID string) (Con
 	return grokcfg.ParseAgentConfig(agent.Metadata)
 }
 
-// startServer is the server table's start hook.
-func (d *Driver) startServer(ctx context.Context, key string) (servertable.Resource, error) {
-	botID, botAgentID, _ := strings.Cut(key, "\x00")
-	// The table runs two starts of one Agent at once when a reset displaces
-	// one that is still starting. Each would decide about the shared login
-	// file without seeing the other, so the second waits here.
-	agent := d.processes(key)
-	select {
-	case agent.starting <- struct{}{}:
-		defer func() { <-agent.starting }()
-	case <-ctx.Done():
-		return nil, ctx.Err()
+// fingerprint names what a Grok process is started from: a change to any of
+// it needs a new process. Model, effort, and mode travel with each session or
+// turn and are not part of it. The API key is hashed, never kept.
+func fingerprint(cfg Config, launcher external.Launcher) string {
+	key := sha256.Sum256([]byte(cfg.APIKey))
+	return strings.Join([]string{
+		string(cfg.Auth), hex.EncodeToString(key[:]), launcher.Path, string(launcher.Source), launcher.Version,
+	}, "\x00")
+}
+
+// acquireServer leases the Agent's process, starting one from the current
+// configuration when there is none or it was started from another. The
+// caller must call the returned release when done.
+func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*server, func(), error) {
+	info, err := d.bridges.WorkspaceInfo(ctx, botID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := external.RequireContainerWorkspace(info, RuntimeType); err != nil {
+		return nil, nil, err
 	}
 	cfg, err := d.agentConfig(ctx, botID, botAgentID)
 	if err != nil {
-		return nil, err
-	}
-	if cfg.Auth != grokcfg.AuthGrokAccount {
-		if err := awaitLoginHolders(ctx, d.runningServers(key), predecessorDrainTimeout); err != nil {
-			return nil, err
-		}
+		return nil, nil, err
 	}
 	if cfg, err = d.apiKeyFor(ctx, botID, botAgentID, cfg); err != nil {
-		return nil, err
-	}
-	client, err := d.bridges.MCPClient(ctx, botID)
-	if err != nil {
-		return nil, fmt.Errorf("workspace bridge for bot %s: %w", botID, err)
-	}
-	info, err := d.bridges.WorkspaceInfo(ctx, botID)
-	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	launcher, err := d.resolveLauncher(ctx, botID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := prepareHome(ctx, client, botAgentID, cfg); err != nil {
-		return nil, err
+	start := func(ctx context.Context) (agentproc.Process, string, error) {
+		client, err := d.bridges.MCPClient(ctx, botID)
+		if err != nil {
+			return nil, "", fmt.Errorf("workspace bridge for bot %s: %w", botID, err)
+		}
+		if err := prepareHome(ctx, client, botAgentID, cfg); err != nil {
+			return nil, "", err
+		}
+		// The process outlives the request that happened to start it.
+		srv, err := startServer(context.WithoutCancel(ctx), botID, grokHome(botAgentID), client, info, cfg.APIKey, launcher, d.logger)
+		if err != nil {
+			return nil, "", err
+		}
+		version, _ := srv.conn.AgentMeta()["agentVersion"].(string)
+		d.observeLauncherVersion(ctx, botID, version)
+		started := launcher
+		started.Version = firstNonEmpty(version, launcher.Version)
+		return srv, fingerprint(cfg, started), nil
 	}
-	// The process outlives the turn that happened to start it.
-	srv, err := startServer(context.WithoutCancel(ctx), botID, grokHome(botAgentID), client, info, cfg.APIKey, launcher, d.logger)
+	proc, release, err := d.procs.Lease(ctx, serverKey(botID, botAgentID), fingerprint(cfg, launcher), start)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	d.track(key, srv) //nolint:contextcheck // the process outlives the turn that started it.
-	return srv, nil
+	return proc.(*server), release, nil
 }
 
-// awaitLoginHolders waits until no earlier Grok account process of the Agent
-// is running before an API key start removes the login file: such a process
-// refreshes, and so rewrites, that file, and Grok prefers a stored login over
-// XAI_API_KEY. API key processes share nothing a turn changes: they run side
-// by side, and a displaced one finishes its turns. A predecessor still busy
-// when timeout passes answers busy rather than holding the start for a whole
-// turn.
-func awaitLoginHolders(ctx context.Context, running []*server, timeout time.Duration) error {
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	for _, other := range running {
-		if !other.account {
-			continue
-		}
-		select {
-		case <-other.Done():
-		case <-deadline.C:
-			return external.Fail(external.FailureRuntimeBusy, nil)
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-		// Done closes when teardown begins; the process is gone only once
-		// Close has returned.
-		_ = other.Close() //nolint:contextcheck // predecessor teardown outlives this request.
+// observeLauncherVersion reports the handshake version to the resolver when
+// it keeps a version cache.
+func (d *Driver) observeLauncherVersion(ctx context.Context, botID, version string) {
+	observer, ok := d.launchers.(external.VersionObserver)
+	if !ok || strings.TrimSpace(version) == "" {
+		return
 	}
-	return nil
+	observer.ObserveLauncherVersion(ctx, botID, dependencyID, strings.TrimSpace(version))
 }
 
 // releaseOtherCopies keeps one process per Grok session: a copy of the
@@ -261,71 +216,6 @@ func (d *Driver) releaseOtherCopies(srv *server, input external.PromptInput) err
 		other.dropThread(input.ThreadID, th, false)
 	}
 	return nil
-}
-
-func (d *Driver) processes(key string) *agentProcesses {
-	d.runningMu.Lock()
-	defer d.runningMu.Unlock()
-	agent := d.running[key]
-	if agent == nil {
-		agent = &agentProcesses{starting: make(chan struct{}, 1), signingIn: make(chan struct{}, 1)}
-		d.running[key] = agent
-	}
-	return agent
-}
-
-func (d *Driver) track(key string, srv *server) {
-	agent := d.processes(key)
-	d.runningMu.Lock()
-	agent.servers = append(agent.servers, srv)
-	d.runningMu.Unlock()
-	go func() {
-		<-srv.Done()
-		// Listed until teardown has finished, not merely begun: a starting
-		// process waits on this one through Close.
-		_ = srv.Close()
-		d.runningMu.Lock()
-		defer d.runningMu.Unlock()
-		agent.servers = slices.DeleteFunc(agent.servers, func(other *server) bool { return other == srv })
-	}()
-}
-
-func (d *Driver) runningServers(key string) []*server {
-	d.runningMu.Lock()
-	defer d.runningMu.Unlock()
-	if agent := d.running[key]; agent != nil {
-		return slices.Clone(agent.servers)
-	}
-	return nil
-}
-
-// acquireServer returns the Agent's live process plus a release the caller
-// must defer; the reference keeps it alive across a concurrent recycle.
-func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*server, func(), error) {
-	info, err := d.bridges.WorkspaceInfo(ctx, botID)
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := external.RequireContainerWorkspace(info, RuntimeType); err != nil {
-		return nil, nil, err
-	}
-	key := serverKey(botID, botAgentID)
-	if current := d.servers.Peek(key); current != nil && d.launchers != nil {
-		launcher, err := d.resolveLauncher(ctx, botID)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !current.(*server).matchesLauncher(launcher) {
-			// A dependency update takes effect on new work; turns holding the
-			// old process keep it alive until they finish.
-			d.servers.RecycleResource(key, current)
-		}
-	}
-	resource, release, err := d.servers.Acquire(ctx, key)
-	if err != nil {
-		return nil, nil, err
-	}
-	return resource.(*server), release, nil
 }
 
 // resolveLauncher discovers the grok CLI copy without installing it.
@@ -439,7 +329,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 			// moves to a fresh process and this one dies with its last turn.
 			if errors.Is(err, acpclient.ErrPromptCancellationUnconfirmed) || !th.session.WaitDecisionCallbacksIdle(decisionQuiesceTimeout) {
 				srv.dropThread(input.ThreadID, th, true) //nolint:contextcheck // teardown must outlive the stopped turn.
-				d.servers.RecycleResource(serverKey(input.BotID, input.BotAgentID), srv)
+				d.procs.MarkBroken(serverKey(input.BotID, input.BotAgentID), srv)
 			}
 			return out, nil
 		}

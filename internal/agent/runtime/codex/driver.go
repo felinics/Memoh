@@ -2,6 +2,8 @@ package codex
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,9 +13,9 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/runtime/agentproc"
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	"github.com/felinics/memoh/internal/agent/runtime/servertable"
 	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/agentcredential"
@@ -49,9 +51,9 @@ type Driver struct {
 	// falls back to the toolkit path.
 	launchers external.LauncherResolver
 
-	// servers owns the shared per-Agent app-server lifecycle: reference
-	// counting for concurrent users, drain-on-recycle instead of kill-by-bot.
-	servers *servertable.Table
+	// procs owns the app-server lifecycle: one per Bot Agent, shared by its
+	// conversations.
+	procs *agentproc.Supervisor
 }
 
 // NewDriver constructs the codex runtime driver.
@@ -62,19 +64,19 @@ func NewDriver(
 	approvalSvc ApprovalService,
 	userInput UserInputService,
 	toolGateway toolmount.Gateway,
+	procs *agentproc.Supervisor,
 	logger *slog.Logger,
 ) *Driver {
-	d := &Driver{
+	return &Driver{
 		bridges:     bridges,
 		agents:      agents,
 		credentials: credentials,
 		approval:    approvalSvc,
 		userInput:   userInput,
 		toolGateway: toolGateway,
+		procs:       procs,
 		logger:      logger.With(slog.String("runtime", RuntimeType)),
 	}
-	d.servers = servertable.New(d.startServer, d.logger)
-	return d
 }
 
 // RuntimeType implements external.Driver.
@@ -97,19 +99,24 @@ func (d *Driver) SetLauncherResolver(r external.LauncherResolver) {
 	d.launchers = r
 }
 
-func (d *Driver) ResetBot(botID string) { d.CloseBot(botID) }
-
-func (d *Driver) ResetBotAgent(botID, botAgentID string) {
-	d.servers.Recycle(serverKey(botID, botAgentID))
-}
-
 func serverKey(botID, botAgentID string) string {
-	return botID + "\x00" + botAgentID
+	return agentproc.Key(RuntimeType, botID, botAgentID)
 }
 
-func splitServerKey(key string) (string, string) {
-	botID, botAgentID, _ := strings.Cut(key, "\x00")
-	return botID, botAgentID
+// peekServer returns the Agent's running app-server, if any, without
+// starting one; callers may only read what it already holds.
+func (d *Driver) peekServer(botID, botAgentID string) *appServer {
+	if d.procs == nil {
+		return nil
+	}
+	srv, _ := d.procs.Peek(serverKey(botID, botAgentID)).(*appServer)
+	return srv
+}
+
+// markBroken takes a wedged app-server out of service: new work starts a
+// fresh one, and it closes once the turns holding it are done.
+func (d *Driver) markBroken(botID, botAgentID string, srv *appServer) {
+	d.procs.MarkBroken(serverKey(botID, botAgentID), srv)
 }
 
 func (d *Driver) resolveAgentConfig(ctx context.Context, botID, botAgentID string, credentialRequired bool) (Config, error) {
@@ -345,7 +352,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 			} else {
 				d.logger.WarnContext(ctx, "codex turn/start cancelled before a turn id arrived; draining app-server",
 					slog.String("thread_id", threadID))
-				d.ResetBotAgent(input.BotID, input.BotAgentID)
+				d.markBroken(input.BotID, input.BotAgentID, srv)
 			}
 		}
 		return srv.turnResultAfterError(turn, err)
@@ -383,7 +390,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 			// its last user releases it.
 			d.logger.WarnContext(ctx, "codex turn did not settle after interrupt; draining app-server",
 				slog.String("thread_id", threadID))
-			d.ResetBotAgent(input.BotID, input.BotAgentID)
+			d.markBroken(input.BotID, input.BotAgentID, srv)
 		case <-srv.proc.Done():
 		}
 	case <-srv.proc.Done():
@@ -574,38 +581,59 @@ func (d *Driver) botGatewayToolLookup(botID string) func(context.Context, string
 	}
 }
 
-// startServer is the server table's start hook.
-func (d *Driver) startServer(ctx context.Context, key string) (servertable.Resource, error) {
-	botID, botAgentID := splitServerKey(key)
-	cfg, err := d.resolveAgentConfig(ctx, botID, botAgentID, false)
-	if err != nil {
-		return nil, err
-	}
-	client, err := d.bridges.MCPClient(ctx, botID)
-	if err != nil {
-		return nil, fmt.Errorf("workspace bridge for bot %s: %w", botID, err)
-	}
+// fingerprint names what an app-server is started from: a change to any of
+// it needs a new process. Model, effort, and permission mode travel with each
+// turn and are not part of it. The API key is hashed, never kept.
+func fingerprint(cfg Config, launcher external.Launcher) string {
+	key := sha256.Sum256([]byte(cfg.APIKey))
+	return strings.Join([]string{
+		string(cfg.Auth), strings.TrimSpace(cfg.BaseURL), hex.EncodeToString(key[:]),
+		launcher.Path, string(launcher.Source), launcher.Version,
+	}, "\x00")
+}
+
+// acquireServer leases the Agent's app-server, starting one from the current
+// configuration when there is none or it was started from another. The
+// caller must call the returned release when done.
+func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*appServer, func(), error) {
 	info, err := d.bridges.WorkspaceInfo(ctx, botID)
 	if err != nil {
-		return nil, fmt.Errorf("workspace info for bot %s: %w", botID, err)
+		return nil, nil, err
 	}
 	if err := external.RequireContainerWorkspace(info, RuntimeType); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	cfg, err := d.resolveAgentConfig(ctx, botID, botAgentID, false)
+	if err != nil {
+		return nil, nil, err
 	}
 	launcher, err := d.resolveLauncher(ctx, botID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	srv, err := startAppServerSession(context.WithoutCancel(ctx), botID, botAgentID, client, cfg, launcher, d.logger)
+	start := func(ctx context.Context) (agentproc.Process, string, error) {
+		client, err := d.bridges.MCPClient(ctx, botID)
+		if err != nil {
+			return nil, "", fmt.Errorf("workspace bridge for bot %s: %w", botID, err)
+		}
+		srv, err := startAppServerSession(context.WithoutCancel(ctx), botID, botAgentID, client, cfg, launcher, d.logger)
+		if err != nil {
+			return nil, "", err
+		}
+		// The handshake reports the version actually running; feed it back so
+		// the resolver's discovery cache is corrected without a second probe.
+		d.observeLauncherVersion(ctx, botID, srv.codexVersion)
+		srv.workspaceInfo = info
+		srv.toolLookup = d.botGatewayToolLookup(botID)
+		started := launcher
+		started.Version = firstNonEmpty(srv.codexVersion, launcher.Version)
+		return srv, fingerprint(cfg, started), nil
+	}
+	proc, release, err := d.procs.Lease(ctx, serverKey(botID, botAgentID), fingerprint(cfg, launcher), start)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	// The handshake reports the version actually running; feed it back so the
-	// resolver's discovery cache is corrected without a second probe.
-	d.observeLauncherVersion(ctx, botID, srv.codexVersion)
-	srv.workspaceInfo = info
-	srv.toolLookup = d.botGatewayToolLookup(botID)
-	return srv, nil
+	return proc.(*appServer), release, nil
 }
 
 // resolveLauncher discovers the codex CLI copy without installing it. A
@@ -672,49 +700,6 @@ func emitThreadNotices(srv *appServer, threadID string, sink external.EventSink)
 	if srv.threadToolless(threadID) {
 		toolmount.EmitUnavailableNotice(sink, "this conversation started without Memoh tools; start a new session to restore them")
 	}
-}
-
-// acquireServer returns the bot's live app-server plus a release the caller
-// must defer; the reference keeps the server alive across a concurrent
-// recycle (which drains instead of killing).
-func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*appServer, func(), error) {
-	info, err := d.bridges.WorkspaceInfo(ctx, botID)
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := external.RequireContainerWorkspace(info, RuntimeType); err != nil {
-		return nil, nil, err
-	}
-	key := serverKey(botID, botAgentID)
-	if current := d.servers.Peek(key); current != nil && d.launchers != nil {
-		launcher, err := d.resolveLauncher(ctx, botID)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !current.(*appServer).matchesLauncher(launcher) {
-			// A dependency update takes effect on new work. References held by
-			// existing turns keep their process alive until they finish.
-			d.servers.RecycleResource(key, current)
-		}
-	}
-	resource, release, err := d.servers.Acquire(ctx, key)
-	if err != nil {
-		return nil, nil, err
-	}
-	return resource.(*appServer), release, nil
-}
-
-// CloseAll tears down every app-server (server shutdown).
-func (d *Driver) CloseAll() {
-	d.servers.CloseAll()
-}
-
-// CloseBot recycles the bot's app-server: new work builds a fresh server on
-// current configuration, while in-flight turns finish on the displaced one,
-// which dies at their last release.
-func (d *Driver) CloseBot(botID string) {
-	prefix := botID + "\x00"
-	d.servers.RecycleWhere(func(key string) bool { return strings.HasPrefix(key, prefix) })
 }
 
 // ForkThread implements external.ThreadForker: it derives a new codex thread
@@ -826,11 +811,10 @@ func (d *Driver) StartDeviceLogin(ctx context.Context, botID, botAgentID string)
 // PollDeviceLogin reports a tracked login's state. A login that succeeded is
 // already in CODEX_HOME, written there by Codex itself.
 func (d *Driver) PollDeviceLogin(_ context.Context, _, botID, botAgentID, loginID string) (external.DeviceLoginStatus, error) {
-	resource := d.servers.Peek(serverKey(botID, botAgentID))
-	if resource == nil {
+	srv := d.peekServer(botID, botAgentID)
+	if srv == nil {
 		return external.DeviceLoginStatus{Status: "unknown"}, nil
 	}
-	srv := resource.(*appServer)
 	outcome, ok := srv.loginStatus(loginID)
 	switch {
 	case !ok:
@@ -850,11 +834,20 @@ func (d *Driver) PollDeviceLogin(_ context.Context, _, botID, botAgentID, loginI
 	}
 }
 
+// PurgeBotAgentAuth signs the Agent's Codex out by deleting its login file.
+// Every app-server of the Agent goes first and none starts until the file is
+// gone: a running one could write a refreshed login back.
 func (d *Driver) PurgeBotAgentAuth(ctx context.Context, botID, botAgentID string) error {
-	if resource := d.servers.Peek(serverKey(botID, botAgentID)); resource != nil && resource.(*appServer).hasActiveTurns() {
+	unblock, err := d.procs.Drain(ctx, serverKey(botID, botAgentID), func(p agentproc.Process) bool {
+		return p.(*appServer).hasActiveTurns()
+	})
+	if errors.Is(err, agentproc.ErrBusy) {
 		return external.Fail(external.FailureCredentialBusy, nil)
 	}
-	d.ResetBotAgent(botID, botAgentID)
+	if err != nil {
+		return err
+	}
+	defer unblock()
 	client, err := d.bridges.MCPClient(ctx, botID)
 	if err != nil {
 		return err
@@ -868,11 +861,10 @@ func (d *Driver) PurgeBotAgentAuth(ctx context.Context, botID, botAgentID string
 
 // CancelDeviceLogin aborts a pending device-code login.
 func (d *Driver) CancelDeviceLogin(ctx context.Context, botID, botAgentID, loginID string) error {
-	resource := d.servers.Peek(serverKey(botID, botAgentID))
-	if resource == nil {
+	srv := d.peekServer(botID, botAgentID)
+	if srv == nil {
 		return nil
 	}
-	srv := resource.(*appServer)
 	// The cancel RPC needs the connection live for its duration; peek holds
 	// no reference, so pin one for the call.
 	pinned, releaseServer, err := d.acquireServer(ctx, botID, botAgentID)

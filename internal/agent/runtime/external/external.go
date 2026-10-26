@@ -33,14 +33,6 @@ type Driver interface {
 	Prompt(ctx context.Context, input PromptInput) (PromptResult, error)
 }
 
-type BotResetter interface {
-	ResetBot(botID string)
-}
-
-type BotAgentResetter interface {
-	ResetBotAgent(botID, botAgentID string)
-}
-
 type BotAgentAuthPurger interface {
 	PurgeBotAgentAuth(ctx context.Context, botID, botAgentID string) error
 }
@@ -63,26 +55,6 @@ type ModelCatalogProvider interface {
 var ErrModelCatalogUnavailable = errors.New("external agent model catalog unavailable")
 
 type Drivers []Driver
-
-func (drivers Drivers) ResetBot(botID string) {
-	for _, driver := range drivers {
-		if resetter, ok := driver.(BotResetter); ok {
-			resetter.ResetBot(botID)
-		}
-	}
-}
-
-func (drivers Drivers) ResetBotAgent(runtimeType, botID, botAgentID string) {
-	for _, driver := range drivers {
-		if driver == nil || driver.RuntimeType() != strings.TrimSpace(runtimeType) {
-			continue
-		}
-		if resetter, ok := driver.(BotAgentResetter); ok {
-			resetter.ResetBotAgent(botID, botAgentID)
-		}
-		return
-	}
-}
 
 func (drivers Drivers) PurgeBotAgentAuth(ctx context.Context, runtimeType, botID, botAgentID string) error {
 	for _, driver := range drivers {

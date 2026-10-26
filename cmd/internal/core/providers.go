@@ -37,6 +37,7 @@ import (
 	agentpayload "github.com/felinics/memoh/internal/agent/event/payload"
 	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	"github.com/felinics/memoh/internal/agent/runtime/agentproc"
 	claudecoderuntime "github.com/felinics/memoh/internal/agent/runtime/claudecode"
 	codexruntime "github.com/felinics/memoh/internal/agent/runtime/codex"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
@@ -681,7 +682,20 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 	return pool
 }
 
-func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *codexruntime.Driver {
+// provideAgentProcesses owns every long-lived external agent process; shutdown
+// closes them all at once.
+func provideAgentProcesses(lc fx.Lifecycle, log *slog.Logger) *agentproc.Supervisor {
+	procs := agentproc.New(agentproc.Options{Logger: log.With(slog.String("component", "agent_processes"))})
+	lc.Append(fx.Hook{
+		OnStop: func(ctx context.Context) error {
+			procs.Close(ctx)
+			return nil
+		},
+	})
+	return procs
+}
+
+func provideCodexDriver(log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service, procs *agentproc.Supervisor) *codexruntime.Driver {
 	driver := codexruntime.NewDriver(
 		workspaceManager,
 		botAgents,
@@ -689,6 +703,7 @@ func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *wor
 		toolApproval,
 		userInput,
 		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log},
+		procs,
 		log,
 	)
 	// The dependency service sits upstream of the drivers in the FX graph
@@ -696,12 +711,6 @@ func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *wor
 	// handed over here; the setter only keeps the driver constructible
 	// without a resolver (tests, toolkit fallback).
 	driver.SetLauncherResolver(workspaceDeps)
-	lc.Append(fx.Hook{
-		OnStop: func(context.Context) error {
-			driver.CloseAll()
-			return nil
-		},
-	})
 	return driver
 }
 
@@ -719,23 +728,18 @@ func provideClaudeCodeDriver(log *slog.Logger, workspaceManager *workspace.Manag
 	return driver
 }
 
-func provideGrokDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *grokruntime.Driver {
+func provideGrokDriver(log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service, procs *agentproc.Supervisor) *grokruntime.Driver {
 	driver := grokruntime.NewDriver(
 		workspaceManager,
 		botAgents,
 		credentials,
 		toolApproval,
 		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log},
+		procs,
 		log,
 	)
 	driver.SetLauncherResolver(workspaceDeps)
 	driver.SetUserInputService(userInput)
-	lc.Append(fx.Hook{
-		OnStop: func(context.Context) error {
-			driver.CloseAll() //nolint:contextcheck // shutdown must close every process and keep its login, whatever the lifecycle ctx.
-			return nil
-		},
-	})
 	return driver
 }
 

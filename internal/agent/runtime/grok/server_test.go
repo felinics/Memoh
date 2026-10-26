@@ -15,6 +15,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/event"
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	"github.com/felinics/memoh/internal/agent/runtime/agentproc"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/grok/grokcfg"
 	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
@@ -164,7 +165,7 @@ func newTestServer(t *testing.T, grok *fakeGrok) *server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := &server{conn: conn, logger: slog.Default(), threads: map[string]*thread{}, toolStatus: map[string]mcpStatus{}, statusWake: make(chan struct{})}
+	srv := &server{conn: conn, logger: slog.Default(), done: make(chan struct{}), mountCancel: func() {}, threads: map[string]*thread{}, toolStatus: map[string]mcpStatus{}, statusWake: make(chan struct{})}
 	srv.subscribe()
 	return srv
 }
@@ -305,40 +306,23 @@ func isRuntimeBusy(err error) bool {
 	return errors.As(err, &failure) && failure.Kind == external.FailureRuntimeBusy
 }
 
-func TestAwaitLoginHoldersWaitsOnlyForAccountProcesses(t *testing.T) {
-	// API key processes run side by side: a displaced one keeps finishing its
-	// turns, and the start does not wait for it.
-	apiKey := &server{done: make(chan struct{})}
-	if err := awaitLoginHolders(t.Context(), []*server{apiKey}, time.Hour); err != nil {
-		t.Fatalf("API key start waited on an API key predecessor: %v", err)
-	}
-	// A Grok account process could rewrite the login the start removes: the
-	// start waits for it, and answers busy once the timeout passes without
-	// stopping it.
-	account := &server{done: make(chan struct{}), account: true}
-	if err := awaitLoginHolders(t.Context(), []*server{account}, 10*time.Millisecond); !isRuntimeBusy(err) {
-		t.Fatalf("err = %v, want busy", err)
-	}
-	select {
-	case <-account.Done():
-		t.Fatal("predecessor was stopped")
-	default:
-	}
-	// One that ends within the timeout lets the start through.
-	draining := &server{done: make(chan struct{}), account: true}
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		draining.closeOnce.Do(func() { close(draining.done) })
-	}()
-	if err := awaitLoginHolders(t.Context(), []*server{draining}, time.Minute); err != nil {
-		t.Fatalf("drained predecessor: %v", err)
-	}
-}
-
 func TestReleaseOtherCopiesKeepsOneProcessPerSession(t *testing.T) {
 	oldAgent := &fakeGrok{}
 	previous, current := newTestServer(t, oldAgent), newTestServer(t, &fakeGrok{})
-	d := &Driver{running: map[string]*agentProcesses{serverKey("bot", "agent"): {servers: []*server{previous, current}}}}
+	// previous was displaced by a configuration change and is still leased.
+	d := &Driver{procs: agentproc.New(agentproc.Options{})}
+	t.Cleanup(func() { d.procs.Close(context.Background()) })
+	key := serverKey("bot", "agent")
+	_, releasePrevious, err := d.procs.Lease(t.Context(), key, "old", func(context.Context) (agentproc.Process, string, error) { return previous, "", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releasePrevious()
+	_, releaseCurrent, err := d.procs.Lease(t.Context(), key, "new", func(context.Context) (agentproc.Process, string, error) { return current, "", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseCurrent()
 	input := external.PromptInput{BotID: "bot", BotAgentID: "agent", ThreadID: "thread"}
 	th, _, err := previous.openThread(t.Context(), toolmount.Gateway{}, nil, nil, input, grokcfg.PermissionAsk, true)
 	if err != nil {

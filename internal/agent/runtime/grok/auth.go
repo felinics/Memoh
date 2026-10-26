@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path"
 
+	"github.com/felinics/memoh/internal/agent/runtime/agentproc"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/grok/grokcfg"
 	"github.com/felinics/memoh/internal/agentcredential"
@@ -72,30 +73,22 @@ func (d *Driver) Account(ctx context.Context, botID, botAgentID string) (externa
 }
 
 // PurgeBotAgentAuth implements external.BotAgentAuthPurger: disconnecting
-// removes the login Grok holds in the Agent's home.
+// removes the login Grok holds in the Agent's home. Every process of the
+// Agent goes first and none starts until the file is gone: a running one
+// could refresh, and so rewrite, the login.
 func (d *Driver) PurgeBotAgentAuth(ctx context.Context, botID, botAgentID string) error {
-	key := serverKey(botID, botAgentID)
-	agent := d.processes(key)
-	select {
-	case agent.starting <- struct{}{}:
-		defer func() { <-agent.starting }()
-	case <-ctx.Done():
-		return ctx.Err()
+	unblock, err := d.procs.Drain(ctx, serverKey(botID, botAgentID), func(p agentproc.Process) bool {
+		return p.(*server).hasActiveTurns()
+	})
+	if errors.Is(err, agentproc.ErrBusy) {
+		return external.Fail(external.FailureCredentialBusy, nil)
 	}
-	running := d.runningServers(key)
-	for _, srv := range running {
-		if srv.hasActiveTurns() {
-			return external.Fail(external.FailureCredentialBusy, nil)
-		}
+	if err != nil {
+		return err
 	}
-	// A sign-in under way would put a login back after the Agent let go of
-	// its own, so it ends here.
+	defer unblock()
+	// A sign-in under way would put a login back, so it ends here.
 	d.cancelAgentSignIns(botID, botAgentID)
-	d.servers.Recycle(key)
-	// A process left running could still refresh, and so rewrite, the login.
-	for _, srv := range running {
-		_ = srv.Close() //nolint:contextcheck // teardown is not the request's to cancel.
-	}
 	client, err := d.bridges.MCPClient(ctx, botID)
 	if err != nil {
 		return err

@@ -186,11 +186,9 @@ func (s *server) hasActiveTurns() bool {
 	return false
 }
 
-// Close implements servertable.Resource. Sessions die with the process, so
-// only the routes Memoh serves into the workspace need an explicit stop.
-//
-// A second caller returns only once the first has finished, which is what
-// lets a starting process wait out its predecessor.
+// Close implements agentproc.Process. Sessions die with the process, so only
+// the routes Memoh serves into the workspace need an explicit stop. A second
+// caller returns only once the first has finished.
 func (s *server) Close() error {
 	s.closeOnce.Do(func() {
 		close(s.done)
@@ -202,17 +200,19 @@ func (s *server) Close() error {
 		for _, th := range threads {
 			th.mount.Stop()
 		}
-		s.closeErr = s.proc.Close()
+		if s.proc != nil {
+			s.closeErr = s.proc.Close()
+		}
 	})
 	return s.closeErr
 }
 
-// Done implements servertable.Resource.
+// Done implements agentproc.Process.
 func (s *server) Done() <-chan struct{} { return s.done }
 
-func (s *server) matchesLauncher(launcher external.Launcher) bool {
-	return s.launcher.Path == launcher.Path && s.launcher.Version == launcher.Version
-}
+// Busy reports a turn under way, which keeps the process from being closed
+// for idleness even while no lease covers it.
+func (s *server) Busy() bool { return s.hasActiveTurns() }
 
 func (s *server) thread(threadID string) *thread {
 	s.mu.Lock()

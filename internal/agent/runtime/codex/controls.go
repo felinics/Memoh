@@ -153,22 +153,19 @@ func (d *Driver) cachedStatus(input external.PromptInput) map[string]any {
 	tokens := input.RuntimeMetadata["codex_thread_total_tokens"]
 	window := input.RuntimeMetadata["codex_context_window"]
 	var limits any
-	if d.servers != nil {
-		if resource := d.servers.Peek(serverKey(input.BotID, input.BotAgentID)); resource != nil {
-			srv := resource.(*appServer)
-			srv.mu.Lock()
-			if status, ok := srv.threadStatus[threadID]; ok {
-				state = status.Tag
-			}
-			if usage, ok := srv.threadUsage[threadID]; ok {
-				tokens = usage.Total.TotalTokens
-				window = usage.ModelContextWindow
-			}
-			if srv.rateLimits != nil {
-				limits = srv.rateLimits
-			}
-			srv.mu.Unlock()
+	if srv := d.peekServer(input.BotID, input.BotAgentID); srv != nil {
+		srv.mu.Lock()
+		if status, ok := srv.threadStatus[threadID]; ok {
+			state = status.Tag
 		}
+		if usage, ok := srv.threadUsage[threadID]; ok {
+			tokens = usage.Total.TotalTokens
+			window = usage.ModelContextWindow
+		}
+		if srv.rateLimits != nil {
+			limits = srv.rateLimits
+		}
+		srv.mu.Unlock()
 	}
 	return map[string]any{"thread_id": threadID, "status": state, "tokens": tokens, "context_window": window, "limits": limits}
 }

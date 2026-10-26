@@ -411,17 +411,9 @@ func (s *appServer) forgetLogin(loginID string) {
 	s.mu.Unlock()
 }
 
-// matchesLauncher compares the discovered executable with the process actually
-// running. Handshake versions fill in unknown discovery versions without
-// causing a spurious restart; a different known version also catches updates
-// whose launcher path is a stable current symlink.
-func (s *appServer) matchesLauncher(launcher external.Launcher) bool {
-	if s.launcher.Path != launcher.Path || s.launcher.Source != launcher.Source {
-		return false
-	}
-	runningVersion := firstNonEmpty(s.codexVersion, s.launcher.Version)
-	return launcher.Version == "" || runningVersion == "" || launcher.Version == runningVersion
-}
+// Busy reports a turn under way, which keeps the app-server from being closed
+// for idleness even while no lease covers it.
+func (s *appServer) Busy() bool { return s.hasActiveTurns() }
 
 // Done reports process exit; the server lifecycle table watches it.
 func (s *appServer) Done() <-chan struct{} { return s.proc.Done() }

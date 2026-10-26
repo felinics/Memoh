@@ -200,9 +200,6 @@ func (h *BotAgentsHandler) Update(c echo.Context) error {
 	if err != nil {
 		return h.publicError("update", err)
 	}
-	if req.Metadata != nil {
-		h.runtimes.ResetBotAgent(botagents.SessionRuntime(agent.Runtime), bot.ID, agent.ID)
-	}
 	return c.JSON(http.StatusOK, h.present(agent, bot))
 }
 

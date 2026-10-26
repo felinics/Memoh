@@ -154,22 +154,9 @@ func (d *Driver) endSignIn(s *signIn) {
 		if s.cancel != nil {
 			s.cancel()
 		}
-		d.servers.RecycleResource(serverKey(s.botID, s.botAgentID), s.srv)
+		d.procs.MarkBroken(serverKey(s.botID, s.botAgentID), s.srv)
 		s.release()
 	})
-}
-
-// closeSignIns ends every sign-in for Server shutdown.
-func (d *Driver) closeSignIns() {
-	d.signInsMu.Lock()
-	all := make([]*signIn, 0, len(d.signIns))
-	for _, s := range d.signIns {
-		all = append(all, s)
-	}
-	d.signInsMu.Unlock()
-	for _, s := range all {
-		d.endSignIn(s)
-	}
 }
 
 // begin starts the sign-in and returns what the user must open.
@@ -229,7 +216,14 @@ func userCode(rawURL string) string {
 // lockSignIn covers the whole login lifecycle operation, not only map writes.
 // A cancelled tab must not race a poll that is finishing the same sign-in.
 func (d *Driver) lockSignIn(ctx context.Context, botID, botAgentID string) (func(), error) {
-	gate := d.processes(serverKey(botID, botAgentID)).signingIn
+	key := serverKey(botID, botAgentID)
+	d.signInsMu.Lock()
+	gate := d.signInGates[key]
+	if gate == nil {
+		gate = make(chan struct{}, 1)
+		d.signInGates[key] = gate
+	}
+	d.signInsMu.Unlock()
 	select {
 	case gate <- struct{}{}:
 		return func() { <-gate }, nil

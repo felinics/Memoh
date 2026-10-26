@@ -17,6 +17,7 @@ import (
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
+	"github.com/felinics/memoh/internal/agent/runtime/agentproc"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
@@ -115,17 +116,17 @@ func provideBotAgentsHandler(log *slog.Logger, service *botagents.Service, botSe
 	return handler
 }
 
-func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaces *botworkspace.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool, agentDrivers external.Drivers, credentialService *agentcredential.Service) *handlers.UsersHandler {
+func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaces *botworkspace.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool, procs *agentproc.Supervisor, credentialService *agentcredential.Service) *handlers.UsersHandler {
 	handler := handlers.NewUsersHandler(log, accountService, botService, routeService, channelStore, channelRuntime, registry, workspaces)
 	handler.SetWorkspaceStatus(manager)
-	handler.SetRuntimeResetService(botRuntimeResets{pool: acpPool, agents: agentDrivers})
+	handler.SetRuntimeResetService(botRuntimeResets{pool: acpPool, procs: procs})
 	handler.SetCredentialService(credentialService)
 	return handler
 }
 
 type botRuntimeResets struct {
-	pool   *acpagent.SessionPool
-	agents external.Drivers
+	pool  *acpagent.SessionPool
+	procs *agentproc.Supervisor
 }
 
 func (r botRuntimeResets) BeginBotHistoryReset(ctx context.Context, botID string) (context.Context, func(), error) {
@@ -133,11 +134,10 @@ func (r botRuntimeResets) BeginBotHistoryReset(ctx context.Context, botID string
 	if err != nil {
 		return nil, nil, err
 	}
-	r.agents.ResetBot(botID)
 	return resetCtx, func() {
 		release()
-		// A catalog request can start a process during the metadata write.
-		r.agents.ResetBot(botID)
+		// After the reset, so a process started while it ran retires too.
+		r.procs.RetireBot(botID)
 	}, nil
 }
 

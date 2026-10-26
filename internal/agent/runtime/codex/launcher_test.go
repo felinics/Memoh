@@ -238,21 +238,33 @@ func TestMissingDependencyReportsAdministrativeOperation(t *testing.T) {
 	}
 }
 
-func TestRunningServerDetectsLauncherReplacement(t *testing.T) {
-	toolkit := external.Launcher{Path: defaultLauncherPath, Version: "0.149.0", Source: external.LauncherSourceToolkit}
-	srv := newTestAppServer(toolkit)
-	srv.codexVersion = "0.150.0"
-	if !srv.matchesLauncher(external.Launcher{Path: toolkit.Path, Source: toolkit.Source, Version: "0.150.0"}) {
-		t.Fatal("handshake version correction should preserve the running server")
-	}
+func TestFingerprintChangesOnlyWithWhatTheProcessStartsFrom(t *testing.T) {
+	cfg := Config{Auth: AuthAPIKey, APIKey: "sk-1", BaseURL: "https://relay.example", Model: "gpt-a", PermissionMode: "strict"}
 	managed := external.Launcher{Path: "/data/.memoh/deps/codex/current/bin/codex", Version: "0.150.0", Source: external.LauncherSourceManaged}
-	if srv.matchesLauncher(managed) {
-		t.Fatal("managed installation should replace the toolkit process")
+	base := fingerprint(cfg, managed)
+
+	perTurn := cfg
+	perTurn.Model, perTurn.PermissionMode, perTurn.ReasoningEffort = "gpt-b", "yolo", "high"
+	if fingerprint(perTurn, managed) != base {
+		t.Fatal("model, permission mode, or effort restarted the app-server")
 	}
-	srv.launcher = managed
-	managed.Version = "0.151.0"
-	if srv.matchesLauncher(managed) {
-		t.Fatal("updated CLI behind the same current symlink should replace the process")
+	if strings.Contains(base, "sk-1") {
+		t.Fatal("the fingerprint carries the API key")
+	}
+	rotated := cfg
+	rotated.APIKey = "sk-2"
+	updated := managed
+	updated.Version = "0.151.0"
+	toolkit := external.Launcher{Path: defaultLauncherPath, Source: external.LauncherSourceToolkit}
+	for name, other := range map[string]string{
+		"rotated key":     fingerprint(rotated, managed),
+		"updated CLI":     fingerprint(cfg, updated),
+		"toolkit CLI":     fingerprint(cfg, toolkit),
+		"ChatGPT sign-in": fingerprint(Config{Auth: AuthChatGPT}, managed),
+	} {
+		if other == base {
+			t.Fatalf("%s kept the app-server", name)
+		}
 	}
 }
 

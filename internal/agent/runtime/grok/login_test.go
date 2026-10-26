@@ -3,13 +3,12 @@ package grok
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
-	"github.com/felinics/memoh/internal/agent/runtime/servertable"
+	"github.com/felinics/memoh/internal/agent/runtime/agentproc"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
@@ -55,7 +54,7 @@ func TestSignInReportsWhatGrokRefused(t *testing.T) {
 }
 
 func TestSignInGateSerializesOnlyTheSameAgent(t *testing.T) {
-	d := &Driver{running: map[string]*agentProcesses{}}
+	d := &Driver{signInGates: map[string]chan struct{}{}}
 	release, err := d.lockSignIn(t.Context(), "bot", "agent-a")
 	if err != nil {
 		t.Fatal(err)
@@ -78,15 +77,15 @@ func TestSignInGateSerializesOnlyTheSameAgent(t *testing.T) {
 	again()
 }
 
-func testDriver(signIns ...*signIn) *Driver {
+func testDriver(t *testing.T, signIns ...*signIn) *Driver {
+	t.Helper()
 	d := &Driver{
-		running: map[string]*agentProcesses{},
-		signIns: map[string]*signIn{},
-		bridges: unreachableBridges{},
-		servers: servertable.New(func(context.Context, string) (servertable.Resource, error) {
-			return nil, errors.New("no process starts here")
-		}, slog.Default()),
+		signIns:     map[string]*signIn{},
+		signInGates: map[string]chan struct{}{},
+		bridges:     unreachableBridges{},
+		procs:       agentproc.New(agentproc.Options{}),
 	}
+	t.Cleanup(func() { d.procs.Close(context.Background()) })
 	for _, s := range signIns {
 		d.signIns[s.id] = s
 	}
@@ -105,7 +104,7 @@ func testSignIn(id, botID, botAgentID string, ended *int) *signIn {
 func TestEndingASignInLetsItsProcessGoOnce(t *testing.T) {
 	ended := 0
 	s := testSignIn("login", "bot", "agent", &ended)
-	d := testDriver(s)
+	d := testDriver(t, s)
 	d.endSignIn(s)
 	d.endSignIn(s)
 	if ended != 1 || d.signIn("login", "agent") != nil {
@@ -117,7 +116,7 @@ func TestReplacingSignInEndsOnlyThatAgentsAttempts(t *testing.T) {
 	ended := 0
 	old := testSignIn("old", "bot", "agent-a", &ended)
 	other := testSignIn("other", "bot", "agent-b", new(int))
-	d := testDriver(old, other)
+	d := testDriver(t, old, other)
 	d.cancelAgentSignIns("bot", "agent-a")
 	if ended != 1 || d.signIn("old", "agent-a") != nil || d.signIn("other", "agent-b") != other {
 		t.Fatal("replacement did not isolate and remove the old sign-in")
@@ -144,7 +143,7 @@ func TestDisconnectEndsSignInsUnderWayWithoutWaitingForTheGate(t *testing.T) {
 	// sign-in gate; a purge that waited for the gate could deadlock with it.
 	botID, botAgentID := uuid.NewString(), uuid.NewString()
 	ended := 0
-	d := testDriver(testSignIn("a", botID, botAgentID, &ended), testSignIn("b", botID, botAgentID, &ended))
+	d := testDriver(t, testSignIn("a", botID, botAgentID, &ended), testSignIn("b", botID, botAgentID, &ended))
 	polling, err := d.lockSignIn(t.Context(), botID, botAgentID)
 	if err != nil {
 		t.Fatal(err)

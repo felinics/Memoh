@@ -96,6 +96,7 @@ func ServerModule() fx.Option {
 			agentcredential.NewAuthorizationService,
 			provideACPRunner,
 			provideACPSessionPool,
+			provideAgentProcesses,
 			provideCodexDriver,
 			provideClaudeCodeDriver,
 			provideGrokDriver,

@@ -67,8 +67,8 @@ func (h *AgentCredentialHandler) Get(c echo.Context) error {
 // @Summary Attach a credential to a Bot Agent, replacing any previous one
 // @Description Creates an encrypted credential from the submitted secret and
 // points the Agent instance at it. The replaced credential is revoked once no
-// other instance references it. The Agent's warm runtimes are shut down so the
-// next session starts with the new credential.
+// other instance references it. The Agent's next use runs on a process started
+// with the new credential; turns under way finish on the old one.
 // @Tags agent-credentials
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Bot Agent ID"
@@ -107,7 +107,6 @@ func (h *AgentCredentialHandler) Put(c echo.Context) error {
 	if err != nil {
 		return mapAgentCredentialError(err)
 	}
-	h.closeRuntimes(agent.Runtime, botID, botAgentID)
 	return c.JSON(http.StatusOK, credential)
 }
 
@@ -139,7 +138,6 @@ func (h *AgentCredentialHandler) Delete(c echo.Context) error {
 	if err := h.service.DetachFromBotAgent(c.Request().Context(), botID, botAgentID); err != nil && !errors.Is(err, agentcredential.ErrNotFound) {
 		return mapAgentCredentialError(err)
 	}
-	h.closeRuntimes(agent.Runtime, botID, botAgentID)
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -157,10 +155,6 @@ func (h *AgentCredentialHandler) requireBotManage(c echo.Context) (string, strin
 		return "", "", err
 	}
 	return botID, botAgentID, nil
-}
-
-func (h *AgentCredentialHandler) closeRuntimes(runtimeType, botID, botAgentID string) {
-	h.runtimes.ResetBotAgent(runtimeType, botID, botAgentID)
 }
 
 func mapAgentCredentialError(err error) error {
