@@ -25,7 +25,7 @@ type continuationTurnRequestMessageResolver interface {
 // execution intent every fenced run records with its admission (the same
 // record a restart resumes from). A decision continuation rebuilds the run's
 // config for this account rather than for whoever decided, so user-scoped
-// prompt inputs such as the timezone stay those of the run's first request and
+// inputs such as model credentials stay those of the run's first request and
 // every request of the run keeps the same prefix. A run admitted for no
 // account, or one that recorded no intent, yields "".
 func (s *Service) runRequesterUserID(ctx context.Context, runID string) (string, error) {
