@@ -552,7 +552,7 @@ func (s *Service) toGetResponse(provider sqlc.Provider) GetResponse {
 	}
 
 	cfg := providerConfig(provider.Config)
-	metadata = subscriptionCatalogMetadata(provider.ClientType, cfg, metadata)
+	metadata = withLegacyGoSource(provider.ClientType, cfg, metadata)
 	maskedCfg := maskConfigSecrets(provider.ClientType, cfg)
 
 	var icon string

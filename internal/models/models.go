@@ -671,9 +671,8 @@ func IsLLMClientType(clientType ClientType) bool {
 }
 
 // EnforcesMaxOutputTokens reports whether the client honors the configured
-// maximum output token limit. Compaction relies on the cap to keep summaries
-// inside their output reserve, so clients that ignore it are not eligible
-// summarizers.
+// maximum output token limit. A client that does not gets no max_tokens; its
+// output reserve stays an estimate.
 func EnforcesMaxOutputTokens(clientType ClientType) bool {
 	return clientType != ClientTypeOpenAICodex
 }

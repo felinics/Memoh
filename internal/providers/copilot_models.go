@@ -47,6 +47,7 @@ type copilotModelCapabilities struct {
 
 type copilotModelLimits struct {
 	MaxContextWindowTokens *int `json:"max_context_window_tokens"`
+	MaxPromptTokens        *int `json:"max_prompt_tokens"`
 	MaxOutputTokens        *int `json:"max_output_tokens"`
 }
 
@@ -155,6 +156,13 @@ func (s *Service) listGitHubCopilotRemoteModels(ctx context.Context, baseURL, gi
 			compatibilities = append(compatibilities, models.CompatReasoning)
 			thinkingMode = models.ThinkingModeToggle
 		}
+		// Copilot rejects a prompt over max_prompt_tokens, which can be well
+		// below the model's window, and Memoh budgets the prompt by the window.
+		limits := model.Capabilities.Limits
+		contextWindow := limits.MaxContextWindowTokens
+		if limits.MaxPromptTokens != nil && (contextWindow == nil || *limits.MaxPromptTokens < *contextWindow) {
+			contextWindow = limits.MaxPromptTokens
+		}
 
 		remoteModels = append(remoteModels, RemoteModel{
 			ID:                modelID,
@@ -166,8 +174,8 @@ func (s *Service) listGitHubCopilotRemoteModels(ctx context.Context, baseURL, gi
 			Compatibilities:   compatibilities,
 			ReasoningEfforts:  reasoningEfforts,
 			ThinkingMode:      thinkingMode,
-			ContextWindow:     positiveModelLimit(model.Capabilities.Limits.MaxContextWindowTokens),
-			MaxOutputTokens:   positiveModelLimit(model.Capabilities.Limits.MaxOutputTokens),
+			ContextWindow:     contextWindow,
+			MaxOutputTokens:   limits.MaxOutputTokens,
 			CapabilitiesKnown: true,
 		})
 	}

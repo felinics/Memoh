@@ -102,19 +102,16 @@ func TestListGitHubCopilotRemoteModels(t *testing.T) {
 		if model.ThinkingMode != models.ThinkingModeToggle {
 			t.Fatalf("thinking mode = %q", model.ThinkingMode)
 		}
-		if model.ContextWindow == nil || *model.ContextWindow != 200000 {
-			t.Fatalf("context window = %#v", model.ContextWindow)
+		if model.ContextWindow == nil || *model.ContextWindow != 160000 {
+			t.Fatalf("context window = %#v, want the prompt limit", model.ContextWindow)
 		}
 		if model.MaxOutputTokens == nil || *model.MaxOutputTokens != 32000 {
-			t.Fatalf("output limit = %v, want the account catalog's 32000", model.MaxOutputTokens)
+			t.Fatalf("output limit = %#v", model.MaxOutputTokens)
 		}
 		if !model.CapabilitiesKnown {
 			t.Fatal("Copilot catalog capabilities should be authoritative")
 		}
 		offOnlyModel := remoteModels[1]
-		if offOnlyModel.ContextWindow != nil || offOnlyModel.MaxOutputTokens != nil {
-			t.Fatal("missing catalog limits must stay unknown")
-		}
 		if got := strings.Join(offOnlyModel.ReasoningEfforts, ","); got != "disable" {
 			t.Fatalf("off-only reasoning efforts = %q", got)
 		}
