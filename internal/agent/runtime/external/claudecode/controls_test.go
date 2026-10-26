@@ -406,7 +406,8 @@ func TestClaudeResultUsageAndMetadataAreStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Usage.InputTokens != 300 || result.Usage.OutputTokens != 40 || result.Usage.CachedInputTokens != 60 {
+	// Anthropic's input_tokens leaves cache reads out; the SDK total has them.
+	if result.Usage.InputTokens != 360 || result.Usage.InputTokenDetails.NoCacheTokens != 300 || result.Usage.OutputTokens != 40 || result.Usage.CachedInputTokens != 60 {
 		t.Fatalf("usage: %+v", result.Usage)
 	}
 	r.runtimeMetadata["model"] = "later"

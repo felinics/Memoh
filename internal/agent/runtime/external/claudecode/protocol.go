@@ -18,6 +18,8 @@ import (
 	"encoding/json"
 	"strings"
 
+	sdk "github.com/felinics/twilight/sdk"
+
 	"github.com/felinics/memoh/internal/errs"
 )
 
@@ -147,6 +149,23 @@ type resultUsage struct {
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	OutputTokens             int `json:"output_tokens"`
+}
+
+// sdkUsage normalizes Anthropic usage, whose input_tokens leaves out cache
+// reads and writes, to the SDK's total input.
+func (u resultUsage) sdkUsage() *sdk.Usage {
+	input := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+	return &sdk.Usage{
+		InputTokens:       input,
+		OutputTokens:      u.OutputTokens,
+		TotalTokens:       input + u.OutputTokens,
+		CachedInputTokens: u.CacheReadInputTokens,
+		InputTokenDetails: sdk.InputTokenDetail{
+			NoCacheTokens:    u.InputTokens,
+			CacheReadTokens:  u.CacheReadInputTokens,
+			CacheWriteTokens: u.CacheCreationInputTokens,
+		},
+	}
 }
 
 // contentBlock is one Anthropic message content block; only the fields the

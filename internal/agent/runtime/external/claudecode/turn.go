@@ -878,13 +878,7 @@ func (t *turnRunner) buildResult(storedSessionID string) (external.PromptResult,
 	}
 	out := external.PromptResult{Output: withoutNoResponseSentinel(t.stream.Transcript(finalText)), Text: finalText, SteerInputIDs: t.stream.SteerInputIDs()}
 	if t.hasUsage {
-		usage := t.usage
-		out.Usage = &sdk.Usage{
-			InputTokens:       usage.InputTokens,
-			OutputTokens:      usage.OutputTokens,
-			TotalTokens:       usage.InputTokens + usage.OutputTokens,
-			CachedInputTokens: usage.CacheReadInputTokens,
-		}
+		out.Usage = t.usage.sdkUsage()
 	}
 	if t.sessionID != "" && t.sessionID != storedSessionID {
 		t.runtimeMetadata[metadataSessionIDKey] = t.sessionID
