@@ -43,7 +43,7 @@ type runtimeContextRenderInput struct {
 }
 
 func (s *Service) buildRuntimeContextSections(ctx context.Context, req ChatRequest, agentID, projectPath string) ([]contextview.RuntimeSection, *contextfrag.MemoryRecallTrace) {
-	timezoneName, timezoneLocation := s.resolveTimezone(ctx, req.BotID, req.UserID)
+	timezoneName, timezoneLocation := s.resolveTimezone(ctx, req.BotID)
 
 	var files []native.SystemFile
 	limits := native.DefaultLimits()
