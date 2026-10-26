@@ -2,10 +2,10 @@ import { computed, onDeactivated, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   deleteAgentAuthorizationsById, getAgentAuthorizationsById, postAgentAuthorizations,
-  postAgentAuthorizationsByIdPoll, postAgentAuthorizationsByIdExchange, type AgentcredentialAuthorization,
+  postAgentAuthorizationsByIdExchange, type AgentcredentialAuthorization,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { isDeviceLoginAuthKind, isDirectBotAgentRuntime, type DirectBotAgentRuntime } from '@/utils/bot-agent'
+import { isDirectBotAgentRuntime, type DirectBotAgentRuntime } from '@/utils/bot-agent'
 import { safeSessionGet, safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
 
 export function readAgentAuthorizationDraft(key: string): { id: string, runtime: string } | null {
@@ -28,10 +28,6 @@ export function useAgentAuthorization(getRuntime: () => DirectBotAgentRuntime, s
   const ready = computed(() => session.value?.status === 'ready'
     && session.value.runtime === getRuntime() && Date.parse(session.value.expires_at) > now.value)
   const busy = computed(() => loading.value || pending.value)
-  // The server sends the code only while a device-code authorization is pending.
-  const deviceLogin = computed(() => session.value?.user_code && session.value.verification_url
-    ? { user_code: session.value.user_code, verification_url: session.value.verification_url }
-    : null)
 
   function clearTimer() { clearTimeout(timer); timer = undefined }
   async function discard(id: string) {
@@ -54,28 +50,13 @@ export function useAgentAuthorization(getRuntime: () => DirectBotAgentRuntime, s
     clearTimer()
     const current = generation
     const remaining = Date.parse(value.expires_at) - now.value
-    const devicePending = value.status === 'pending' && isDeviceLoginAuthKind(value.auth_kind)
     if (remaining <= 0) { cancel(); error.value = t('errors.agent_authorization.expired'); return }
     timer = setTimeout(() => {
       now.value = Date.now()
       if (current !== generation) return
-      if (Date.parse(value.expires_at) <= now.value) {
-        cancel()
-        error.value = t('errors.agent_authorization.expired')
-      } else if (devicePending) { void poll(current) }
-    }, devicePending ? Math.min(remaining, Math.max(5, value.interval_seconds ?? 5) * 1000) : remaining)
-  }
-  async function poll(current: number) {
-    const id = session.value?.id
-    if (!id) return
-    try {
-      const { data } = await postAgentAuthorizationsByIdPoll({ path: { id }, throwOnError: true })
-      if (current === generation) accept(data)
-    } catch (cause) {
-      if (current !== generation) return
       cancel()
-      error.value = resolveApiErrorMessage(cause, t('errors.agent_authorization.failed'))
-    }
+      error.value = t('errors.agent_authorization.expired')
+    }, remaining)
   }
   async function start(authKind: string, secret?: string) {
     if (loading.value) return
@@ -140,5 +121,5 @@ export function useAgentAuthorization(getRuntime: () => DirectBotAgentRuntime, s
   onDeactivated(dispose)
   onUnmounted(dispose)
   void restore()
-  return { session, ready, pending, busy, loading, error, deviceLogin, start, exchange, cancel, handoff, resume }
+  return { session, ready, pending, busy, loading, error, start, exchange, cancel, handoff, resume }
 }

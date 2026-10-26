@@ -134,7 +134,9 @@ func (h *AgentCredentialHandler) Delete(c echo.Context) error {
 		}
 		return apperror.Wrap(apperror.CodeAgentCredentialMaterializationFailed, err, nil)
 	}
-	if err := h.service.DetachFromBotAgent(c.Request().Context(), botID, botAgentID); err != nil {
+	// An Agent whose runtime keeps its own login (a Codex ChatGPT sign-in)
+	// has no stored credential to detach.
+	if err := h.service.DetachFromBotAgent(c.Request().Context(), botID, botAgentID); err != nil && !errors.Is(err, agentcredential.ErrNotFound) {
 		return mapAgentCredentialError(err)
 	}
 	h.closeRuntimes(agent.Runtime, botID, botAgentID)

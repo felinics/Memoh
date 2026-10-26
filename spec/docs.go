@@ -34,7 +34,7 @@ const docTemplate = `{
         },
         "/agent-authorizations": {
             "post": {
-                "description": "Starts Codex device authorization or Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. A Grok account cannot be staged: it signs in on the Agent itself. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.",
+                "description": "Starts Claude browser authorization, or encrypts a supplied API key or Claude OAuth token. A ChatGPT or Grok account cannot be staged: it signs in on the Agent itself. No Bot or workspace is created. Ready means the credential has been staged; API keys and manually supplied tokens are not probed against the provider.",
                 "consumes": [
                     "application/json"
                 ],
@@ -218,49 +218,6 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "410": {
-                        "description": "Gone",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/agent-authorizations/{id}/poll": {
-            "post": {
-                "tags": [
-                    "agent-authorizations"
-                ],
-                "summary": "Poll a pending Agent device authorization",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Authorization ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/agentcredential.Authorization"
                         }
                     },
                     "403": {
@@ -1820,6 +1777,63 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/agents/{id}/codex/account": {
+            "get": {
+                "description": "Codex keeps its own sign-in in the Agent's workspace; this asks it, starting it when it is not running.",
+                "tags": [
+                    "external-agents"
+                ],
+                "summary": "Get the ChatGPT account the Agent's Codex is signed in to",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/externalagent.CodexAccountResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/agents/{id}/codex/usage": {
             "get": {
                 "description": "Available to anyone who can chat with the Bot, so the composer",
@@ -2217,7 +2231,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/agents/{id}/login/device/poll": {
             "post": {
-                "description": "A successful sign-in has already been stored as the Agent's credential when this answers success.",
+                "description": "A successful sign-in has already been kept by the Agent's runtime when this answers success.",
                 "tags": [
                     "external-agents"
                 ],
@@ -18198,9 +18212,6 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
-                "interval_seconds": {
-                    "type": "integer"
-                },
                 "runtime": {
                     "type": "string"
                 },
@@ -18211,12 +18222,6 @@ const docTemplate = `{
                         "ready",
                         "claimed"
                     ]
-                },
-                "user_code": {
-                    "type": "string"
-                },
-                "verification_url": {
-                    "type": "string"
                 }
             }
         },
@@ -21414,6 +21419,20 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                }
+            }
+        },
+        "externalagent.CodexAccountResponse": {
+            "type": "object",
+            "required": [
+                "signed_in"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "signed_in": {
+                    "type": "boolean"
                 }
             }
         },

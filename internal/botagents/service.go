@@ -72,7 +72,8 @@ var directRuntimes = map[string]directRuntime{
 			if cfg.Auth == codexcfg.AuthAPIKey {
 				return agentcredential.AuthKindOpenAIAPIKey, nil
 			}
-			return agentcredential.AuthKindOpenAICodexOAuth, nil
+			// Codex keeps its ChatGPT login in the Agent's workspace.
+			return "", nil
 		},
 	},
 	RuntimeClaudeCode: {
@@ -552,7 +553,9 @@ func ValidateConfigurationWithStore(agent BotAgent, botMetadata map[string]any, 
 	if err != nil {
 		return &ConfigurationError{Field: "auth"}
 	}
-	if credentialAuthKind != expected {
+	// A mode that stores no credential has none to check, whatever an earlier
+	// mode left attached.
+	if expected != "" && credentialAuthKind != expected {
 		return &ConfigurationError{Field: "agent_credential_id"}
 	}
 	return nil

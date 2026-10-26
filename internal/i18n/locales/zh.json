@@ -545,7 +545,6 @@
       "request_invalid": "请检查 Agent 账号信息后重试。",
       "revoked": "这个 Agent 账号已断开，请重新连接或选择其他账号。",
       "runtime_busy": "请等待当前回复结束后再切换 Agent 账号。",
-      "usage_auth_expired": "账户登录已过期，下次对话后会自动续期；如果仍无法查看额度，请重新连接账户。",
       "usage_unavailable": "暂时无法获取额度，请稍后再试。"
     },
     "agent_dependency_missing": "{dep_id} 尚未安装在此工作区。请在 Bot 的「依赖」中安装，或等待正在进行的安装完成，然后重新发送消息。",

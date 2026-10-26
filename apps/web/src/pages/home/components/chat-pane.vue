@@ -2174,15 +2174,20 @@ const runtimeControls = useRuntimeControls({
 const codexUsageAgentId = computed(() => {
   if (activeDirectRuntime.value !== BOT_AGENT_RUNTIME_CODEX) return ''
   const agent = botAgents.value.find(item => item.id === activeBotAgentID.value)
-  return agent?.metadata?.auth === 'chatgpt' && agent.agent_credential_id ? agent.id ?? '' : ''
+  return agent?.metadata?.auth === 'chatgpt' ? agent.id ?? '' : ''
 })
+// Reading usage starts Codex when it is not running, so it is read only once a
+// turn of this Agent has ended here, while Codex is still up.
+const codexUsageTurnAgentId = ref('')
 const codexUsage = useCodexUsage({
   botId: computed(() => currentBotId.value ?? ''),
   botAgentId: codexUsageAgentId,
-  enabled: () => isVisible.value,
+  enabled: () => isVisible.value && codexUsageTurnAgentId.value === codexUsageAgentId.value,
 })
 watch(streaming, (now, was) => {
-  if (was && !now && codexUsageAgentId.value && isVisible.value) void codexUsage.refetch()
+  if (!was || now || !codexUsageAgentId.value || !isVisible.value) return
+  if (codexUsageTurnAgentId.value === codexUsageAgentId.value) void codexUsage.refetch()
+  else codexUsageTurnAgentId.value = codexUsageAgentId.value
 })
 // Dismissal holds until the window resets: a new reset time is a new key.
 const dismissedCodexUsageNotices = useLocalStorage<Record<string, string>>('memoh:codex-usage-dismissed', {})

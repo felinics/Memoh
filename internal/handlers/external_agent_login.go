@@ -17,8 +17,9 @@ import (
 
 // ExternalAgentLoginHandler exposes the account sign-in of direct runtimes
 // that sign in inside the Agent's own process (Codex, Grok Build): the agent
-// obtains a device code, the user confirms it, and the login the agent wrote
-// is copied into the encrypted Agent credential store.
+// obtains a device code, the user confirms it, and the agent writes the login
+// into its home. Codex keeps it there; Grok's is copied into the encrypted
+// Agent credential store.
 type ExternalAgentLoginHandler struct {
 	runtimes       external.Drivers
 	agents         *botagents.Service
@@ -125,7 +126,7 @@ func (h *ExternalAgentLoginHandler) AuthorizeDevice(c echo.Context) error {
 
 // PollDevice godoc
 // @Summary Poll a pending device-code sign-in
-// @Description A successful sign-in has already been stored as the Agent's credential when this answers success.
+// @Description A successful sign-in has already been kept by the Agent's runtime when this answers success.
 // @Tags external-agents
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Bot Agent ID"

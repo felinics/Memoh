@@ -60,15 +60,12 @@ export const DIRECT_BOT_AGENT_API_KEY_AUTH_KIND: Record<DirectBotAgentRuntime, s
   [BOT_AGENT_RUNTIME_GROK_BUILD]: 'xai_api_key',
 }
 
-// Account sign-ins completed with a device code, by auth mode: the credential
-// kind each one produces and the i18n keys its sign-in shows. An existing
-// Agent signs in on its own runtime process; `staged` marks a sign-in the
-// server can also run before the Bot exists. An existing Agent's settings
-// already explain the auth mode, so its account row says where the account
-// is kept instead (agentDescription).
+// Account sign-ins completed with a device code, by auth mode: the i18n keys
+// each one shows. The sign-in runs in the Agent's own runtime process, so it
+// happens after the Bot is created. An existing Agent's settings already
+// explain the auth mode, so its account row says where the account is kept
+// instead (agentDescription).
 export const DEVICE_LOGINS: Record<DeviceLoginAuthMode, {
-  authKind: string
-  staged: boolean
   agentDescription: string
   connectedDescription: string
   hint: string
@@ -76,19 +73,13 @@ export const DEVICE_LOGINS: Record<DeviceLoginAuthMode, {
   failed: string
 }> = {
   chatgpt: {
-    authKind: 'openai_codex_oauth',
-    staged: true,
     agentDescription: 'bots.agent.chatgptAccountDescription',
     connectedDescription: 'bots.agent.chatgptAccountConnectedDescription',
     hint: 'bots.agent.codexDeviceHint',
     success: 'bots.agent.codexLoginSuccess',
     failed: 'bots.agent.codexLoginFailed',
   },
-  // Only Grok writes its login file, so the sign-in needs the Agent's
-  // process: it happens after the Bot is created.
   grok_account: {
-    authKind: 'xai_grok_oauth',
-    staged: false,
     agentDescription: 'bots.agent.grokAccountDescription',
     connectedDescription: 'bots.agent.grokAccountConnectedDescription',
     hint: 'bots.agent.grokDeviceHint',
@@ -108,17 +99,9 @@ export function isDeviceLoginAuthMode(value: string): value is DeviceLoginAuthMo
   return Object.hasOwn(DEVICE_LOGINS, value)
 }
 
-function deviceLoginAuth(authKind: string): DeviceLoginAuthMode | undefined {
-  return (Object.keys(DEVICE_LOGINS) as DeviceLoginAuthMode[]).find(auth => DEVICE_LOGINS[auth].authKind === authKind)
-}
-
-export function isDeviceLoginAuthKind(authKind: string): boolean {
-  return deviceLoginAuth(authKind) !== undefined
-}
-
-// The auth mode an Agent needs for a credential of this kind to be accepted.
+// The auth mode an Agent needs for a staged credential of this kind to be accepted.
 export function agentAuthForCredentialKind(authKind: string): AgentAuthMode {
-  return deviceLoginAuth(authKind) ?? (authKind === 'claude_code_oauth' ? 'oauth_token' : 'api_key')
+  return authKind === 'claude_code_oauth' ? 'oauth_token' : 'api_key'
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {
@@ -177,8 +160,9 @@ export function isDirectBotAgentConfigured(
   if (!isDirectBotAgentRuntime(runtime)) return null
   const auth = normalizeAgentID(objectValue(agent?.metadata)?.auth)
   if (!isAgentAuthMode(auth) || !DIRECT_BOT_AGENT_AUTH_MODES[runtime].includes(auth)) return false
-  // The workspace's own login is the one mode that stores no credential.
-  return auth === 'workspace' || !!agent?.agent_credential_id
+  // A Claude Code workspace login and a Codex ChatGPT login are kept by the
+  // CLI in the workspace; Memoh stores no credential for them.
+  return auth === 'workspace' || auth === 'chatgpt' || !!agent?.agent_credential_id
 }
 
 export function botAgentProvider(agent: Pick<BotagentsBotAgent, 'runtime' | 'metadata'> | null | undefined): string {

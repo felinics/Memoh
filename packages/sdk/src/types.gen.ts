@@ -346,11 +346,8 @@ export type AgentcredentialAuthorization = {
     authorization_url?: string;
     expires_at: string;
     id: string;
-    interval_seconds?: number;
     runtime: string;
     status: 'pending' | 'ready' | 'claimed';
-    user_code?: string;
-    verification_url?: string;
 };
 
 export type AgentcredentialAuthorizationRequest = {
@@ -1574,6 +1571,11 @@ export type ExternalReasoningEffortOption = {
     description?: string;
     id?: string;
     name?: string;
+};
+
+export type ExternalagentCodexAccountResponse = {
+    email?: string;
+    signed_in: boolean;
 };
 
 export type ExternalagentCodexUsageResponse = {
@@ -4727,44 +4729,6 @@ export type PostAgentAuthorizationsByIdExchangeResponses = {
 
 export type PostAgentAuthorizationsByIdExchangeResponse = PostAgentAuthorizationsByIdExchangeResponses[keyof PostAgentAuthorizationsByIdExchangeResponses];
 
-export type PostAgentAuthorizationsByIdPollData = {
-    body?: never;
-    path: {
-        /**
-         * Authorization ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/agent-authorizations/{id}/poll';
-};
-
-export type PostAgentAuthorizationsByIdPollErrors = {
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Gone
-     */
-    410: ServerProblem;
-    /**
-     * Service Unavailable
-     */
-    503: ServerProblem;
-};
-
-export type PostAgentAuthorizationsByIdPollError = PostAgentAuthorizationsByIdPollErrors[keyof PostAgentAuthorizationsByIdPollErrors];
-
-export type PostAgentAuthorizationsByIdPollResponses = {
-    /**
-     * OK
-     */
-    200: AgentcredentialAuthorization;
-};
-
-export type PostAgentAuthorizationsByIdPollResponse = PostAgentAuthorizationsByIdPollResponses[keyof PostAgentAuthorizationsByIdPollResponses];
-
 export type PostAuthLoginData = {
     /**
      * Login request
@@ -5985,6 +5949,52 @@ export type PatchBotsByBotIdAgentsByIdResponses = {
 };
 
 export type PatchBotsByBotIdAgentsByIdResponse = PatchBotsByBotIdAgentsByIdResponses[keyof PatchBotsByBotIdAgentsByIdResponses];
+
+export type GetBotsByBotIdAgentsByIdCodexAccountData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}/codex/account';
+};
+
+export type GetBotsByBotIdAgentsByIdCodexAccountErrors = {
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ServerProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ServerProblem;
+};
+
+export type GetBotsByBotIdAgentsByIdCodexAccountError = GetBotsByBotIdAgentsByIdCodexAccountErrors[keyof GetBotsByBotIdAgentsByIdCodexAccountErrors];
+
+export type GetBotsByBotIdAgentsByIdCodexAccountResponses = {
+    /**
+     * OK
+     */
+    200: ExternalagentCodexAccountResponse;
+};
+
+export type GetBotsByBotIdAgentsByIdCodexAccountResponse = GetBotsByBotIdAgentsByIdCodexAccountResponses[keyof GetBotsByBotIdAgentsByIdCodexAccountResponses];
 
 export type GetBotsByBotIdAgentsByIdCodexUsageData = {
     body?: never;

@@ -21,11 +21,12 @@ import (
 // codexService is the slice of the codex driver the handler drives. The
 // ChatGPT sign-in itself is served by ExternalAgentLoginHandler.
 type codexService interface {
+	Account(ctx context.Context, botID, botAgentID string) (codexruntime.Account, error)
 	AccountUsage(ctx context.Context, botID, botAgentID string) (codexruntime.AccountUsage, error)
 }
 
-// ExternalAgentCodexHandler exposes what is Codex's own: the usage limits of
-// the Agent's ChatGPT account.
+// ExternalAgentCodexHandler exposes what is Codex's own: the ChatGPT account
+// it is signed in to and that account's usage limits.
 type ExternalAgentCodexHandler struct {
 	driver         codexService
 	agents         *botagents.Service
@@ -48,6 +49,7 @@ func NewExternalAgentCodexHandler(log *slog.Logger, driver codexService, agents 
 // Register registers codex runtime routes.
 func (h *ExternalAgentCodexHandler) Register(e *echo.Echo) {
 	e.GET("/bots/:bot_id/agents/:id/codex/usage", h.Usage)
+	e.GET("/bots/:bot_id/agents/:id/codex/account", h.Account)
 }
 
 func (h *ExternalAgentCodexHandler) requireAgentPermission(c echo.Context, permission string) (string, string, error) {
@@ -117,15 +119,41 @@ func (h *ExternalAgentCodexHandler) Usage(c echo.Context) error {
 }
 
 // codexUsageError translates a failed usage read: an Agent credential or
-// runtime failure by its kind, and a rejected sign-in or an unreadable usage
-// endpoint by its own code.
+// runtime failure by its kind, and usage Codex could not read by its own code.
 func codexUsageError(err error) error {
-	switch {
-	case errors.Is(err, codexruntime.ErrUsageSignInExpired):
-		return apperror.Wrap(apperror.CodeAgentCredentialUsageAuthExpired, err, nil)
-	case errors.Is(err, codexruntime.ErrUsageUnavailable):
+	if errors.Is(err, codexruntime.ErrUsageUnavailable) {
 		return apperror.Wrap(apperror.CodeAgentCredentialUsageUnavailable, err, nil)
-	default:
+	}
+	return application.ExternalRuntimeError(err)
+}
+
+// CodexAccountResponse reports the ChatGPT account the Agent's Codex is
+// signed in to.
+type CodexAccountResponse struct {
+	SignedIn bool   `json:"signed_in" validate:"required"`
+	Email    string `json:"email,omitempty"`
+} // @name externalagent.CodexAccountResponse
+
+// Account godoc
+// @Summary Get the ChatGPT account the Agent's Codex is signed in to
+// @Description Codex keeps its own sign-in in the Agent's workspace; this asks it, starting it when it is not running.
+// @Tags external-agents
+// @Param bot_id path string true "Bot ID"
+// @Param id path string true "Bot Agent ID"
+// @Success 200 {object} CodexAccountResponse
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 422 {object} server.Problem
+// @Failure 503 {object} server.Problem
+// @Router /bots/{bot_id}/agents/{id}/codex/account [get].
+func (h *ExternalAgentCodexHandler) Account(c echo.Context) error {
+	botID, botAgentID, err := h.requireAgentPermission(c, bots.PermissionManage)
+	if err != nil {
+		return err
+	}
+	account, err := h.driver.Account(c.Request().Context(), botID, botAgentID)
+	if err != nil {
 		return application.ExternalRuntimeError(err)
 	}
+	return c.JSON(http.StatusOK, CodexAccountResponse{SignedIn: account.SignedIn, Email: account.Email})
 }

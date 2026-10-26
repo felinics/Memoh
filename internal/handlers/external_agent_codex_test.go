@@ -21,6 +21,10 @@ type codexUsageFailure struct {
 	err error
 }
 
+func (s codexUsageFailure) Account(context.Context, string, string) (codexruntime.Account, error) {
+	return codexruntime.Account{}, s.err
+}
+
 func (s codexUsageFailure) AccountUsage(context.Context, string, string) (codexruntime.AccountUsage, error) {
 	return codexruntime.AccountUsage{}, s.err
 }
@@ -32,7 +36,6 @@ func TestCodexUsageAnswersFailuresWithTheirCodes(t *testing.T) {
 		code   apperror.Code
 		status int
 	}{
-		{"sign-in expired", codexruntime.ErrUsageSignInExpired, apperror.CodeAgentCredentialUsageAuthExpired, http.StatusConflict},
 		{"usage unavailable", fmt.Errorf("%w: status 500: body", codexruntime.ErrUsageUnavailable), apperror.CodeAgentCredentialUsageUnavailable, http.StatusBadGateway},
 		{"credential incompatible", external.CredentialError(agentcredential.ErrIncompatible), apperror.CodeAgentCredentialIncompatible, http.StatusUnprocessableEntity},
 		{"auth required", external.Fail(external.FailureAuthRequired, external.ErrAuthRequired), apperror.CodeExternalRuntimeAuthRequired, http.StatusConflict},

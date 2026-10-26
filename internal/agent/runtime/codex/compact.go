@@ -15,7 +15,7 @@ func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (exter
 	if metadataString(input.RuntimeMetadata, metadataThreadIDKey) == "" {
 		return external.CompactionResult{}, external.ErrThreadUnavailable
 	}
-	cfg, _, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID, true)
+	cfg, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID, true)
 	if err != nil {
 		return external.CompactionResult{}, err
 	}

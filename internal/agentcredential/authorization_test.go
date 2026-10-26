@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -61,22 +60,16 @@ func (q *authorizationQueries) UpdateAgentAuthorization(_ context.Context, p dbs
 	return q.row, nil
 }
 
-type testCodexAuthorizer struct {
-	polls, exchanges int
-	pending          bool
-	claudeExchange   func(context.Context, string, string, string) (string, error)
+type testClaudeAuthorizer struct {
+	claudeExchange func(context.Context, string, string, string) (string, error)
 }
 
-func (*testCodexAuthorizer) StartClaudeCodeAuthorization() (providers.ClaudeCodeAuthorization, error) {
+func (*testClaudeAuthorizer) StartClaudeCodeAuthorization() (providers.ClaudeCodeAuthorization, error) {
 	return (&providers.Service{}).StartClaudeCodeAuthorization()
 }
 
-func (f *testCodexAuthorizer) ExchangeClaudeCodeAuthorization(ctx context.Context, code, state, verifier string) (string, error) {
+func (f *testClaudeAuthorizer) ExchangeClaudeCodeAuthorization(ctx context.Context, code, state, verifier string) (string, error) {
 	return f.claudeExchange(ctx, code, state, verifier)
-}
-
-func (*testCodexAuthorizer) StartOpenAICodexACPDeviceAuthorization(context.Context) (providers.OpenAICodexACPDeviceAuthorization, error) {
-	return providers.OpenAICodexACPDeviceAuthorization{DeviceAuthID: "PRIVATE-DEVICE-ID", UserCode: "123456", VerificationURL: "https://auth.openai.com/codex/device", IntervalSeconds: 5}, nil
 }
 
 func TestAuthorizationRuntimeEnumMatchesAuthKinds(t *testing.T) {
@@ -110,7 +103,7 @@ func TestClaudeAuthorizationExchangeOwnershipRetryAndRedaction(t *testing.T) {
 	q := &authorizationQueries{}
 	creds := NewService(q, config.Config{Auth: config.AuthConfig{AgentCredentialsEncryptionKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))}})
 	calls := 0
-	oauth := &testCodexAuthorizer{claudeExchange: func(_ context.Context, code, state, verifier string) (string, error) {
+	oauth := &testClaudeAuthorizer{claudeExchange: func(_ context.Context, code, state, verifier string) (string, error) {
 		calls++
 		if state == "" || verifier == "" {
 			t.Error("PKCE material was not preserved")
@@ -134,10 +127,6 @@ func TestClaudeAuthorizationExchangeOwnershipRetryAndRedaction(t *testing.T) {
 	raw, _ := json.Marshal(session)
 	if bytes.Contains(raw, []byte(secret["code_verifier"])) || bytes.Contains(q.row.EncryptedPayload, []byte(secret["code_verifier"])) {
 		t.Fatal("PKCE verifier leaked")
-	}
-	q.row.PollAfter = timestamptz(timePtr(time.Now().Add(-time.Second)))
-	if _, err := svc.Get(ctx, owner, session.ID, true); err != nil || oauth.polls != 0 {
-		t.Fatal("Claude authorization used Codex polling")
 	}
 	if _, err := svc.Exchange(ctx, uuid.NewString(), session.ID, "code"); !errors.Is(err, ErrAuthorizationExpired) || calls != 0 {
 		t.Fatal("another user could exchange the session")
@@ -168,80 +157,18 @@ func TestClaudeAuthorizationExchangeOwnershipRetryAndRedaction(t *testing.T) {
 	}
 }
 
-func (f *testCodexAuthorizer) PollOpenAICodexACPDeviceAuthorization(context.Context, string, string) (providers.OpenAICodexACPDevicePollResult, error) {
-	f.polls++
-	return providers.OpenAICodexACPDevicePollResult{Pending: f.pending, AuthorizationCode: "CODE", CodeVerifier: "VERIFIER"}, nil
-}
-
-func (f *testCodexAuthorizer) ExchangeOpenAICodexACPDeviceCode(context.Context, string, string) (providers.OpenAICodexOAuthCredentials, error) {
-	f.exchanges++
-	return providers.OpenAICodexOAuthCredentials{AccessToken: "SECRET-access", RefreshToken: "SECRET-refresh", IDToken: "SECRET-id", AccountID: "account"}, nil
-}
-
-// A Grok account signs in on the Agent itself; nothing stages it beforehand.
-func TestGrokAccountCannotBeStaged(t *testing.T) {
+// ChatGPT and Grok accounts sign in on the Agent itself; nothing stages them beforehand.
+func TestAgentSignedInAccountsCannotBeStaged(t *testing.T) {
 	q := &authorizationQueries{}
 	creds := NewService(q, config.Config{Auth: config.AuthConfig{AgentCredentialsEncryptionKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))}})
-	svc := &AuthorizationService{credentials: creds, oauth: &testCodexAuthorizer{}}
-	for _, secret := range []map[string]string{nil, {"auth_json": "{}"}} {
-		if _, err := svc.Create(context.Background(), uuid.NewString(), AuthorizationRequest{Runtime: "grok-build", AuthKind: AuthKindXAIGrokOAuth, Secret: secret}); !errors.Is(err, ErrInvalidRequest) {
-			t.Fatalf("Create(xai_grok_oauth, %v) error = %v, want ErrInvalidRequest", secret, err)
+	svc := &AuthorizationService{credentials: creds, oauth: &testClaudeAuthorizer{}}
+	for _, req := range []AuthorizationRequest{
+		{Runtime: "grok-build", AuthKind: AuthKindXAIGrokOAuth},
+		{Runtime: "grok-build", AuthKind: AuthKindXAIGrokOAuth, Secret: map[string]string{"auth_json": "{}"}},
+		{Runtime: "codex", AuthKind: "openai_codex_oauth"},
+	} {
+		if _, err := svc.Create(context.Background(), uuid.NewString(), req); !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("Create(%+v) error = %v, want ErrInvalidRequest", req, err)
 		}
-	}
-}
-
-func TestAuthorizationPollSerializesAndRedacts(t *testing.T) {
-	q := &authorizationQueries{}
-	creds := NewService(q, config.Config{Auth: config.AuthConfig{AgentCredentialsEncryptionKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))}})
-	oauth := &testCodexAuthorizer{pending: true}
-	svc := &AuthorizationService{credentials: creds, oauth: oauth}
-	owner := uuid.NewString()
-	ctx := context.Background()
-	session, err := svc.Create(ctx, owner, AuthorizationRequest{Runtime: "codex", AuthKind: AuthKindOpenAICodexOAuth})
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := json.Marshal(session)
-	if bytes.Contains(raw, []byte("PRIVATE")) {
-		t.Fatal("provider device ID leaked")
-	}
-	if bytes.Contains(q.row.EncryptedPayload, []byte("PRIVATE")) {
-		t.Fatal("device session is not encrypted")
-	}
-	if _, err := svc.Get(ctx, owner, session.ID, true); err != nil {
-		t.Fatal(err)
-	}
-	if oauth.polls != 0 {
-		t.Fatal("ignored provider poll interval")
-	}
-	q.row.PollAfter = timestamptz(timePtr(time.Now().Add(-time.Second)))
-	pending, err := svc.Get(ctx, owner, session.ID, true)
-	if err != nil || pending.Status != "pending" {
-		t.Fatalf("pending: %v", err)
-	}
-	oauth.pending = false
-	q.row.PollAfter = timestamptz(timePtr(time.Now().Add(-time.Second)))
-	var wg sync.WaitGroup
-	for range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			got, err := svc.Get(ctx, owner, session.ID, true)
-			if err != nil || got.Status != "ready" {
-				t.Errorf("poll: %v", err)
-			}
-			raw, _ := json.Marshal(got)
-			if bytes.Contains(raw, []byte("SECRET")) || got.UserCode != "" {
-				t.Error("completed session leaked login material")
-			}
-		}()
-	}
-	wg.Wait()
-	if oauth.exchanges != 1 {
-		t.Fatalf("authorization code exchanged %d times", oauth.exchanges)
-	}
-	secret, err := creds.decrypt(q.row.EncryptedPayload, q.row.EncryptionNonce, 1)
-	if err != nil || secret["refresh_token"] != "SECRET-refresh" {
-		t.Fatal("refresh token not retained encrypted")
 	}
 }

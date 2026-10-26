@@ -112,34 +112,32 @@ func splitServerKey(key string) (string, string) {
 	return botID, botAgentID
 }
 
-func (d *Driver) resolveAgentConfig(ctx context.Context, botID, botAgentID string, credentialRequired bool) (Config, agentcredential.ResolvedCredential, error) {
+func (d *Driver) resolveAgentConfig(ctx context.Context, botID, botAgentID string, credentialRequired bool) (Config, error) {
 	agent, err := d.agents.Get(ctx, botID, botAgentID)
 	if err != nil {
-		return Config{}, agentcredential.ResolvedCredential{}, err
+		return Config{}, err
 	}
 	cfg, err := ParseAgentConfig(agent.Metadata)
 	if err != nil {
-		return Config{}, agentcredential.ResolvedCredential{}, external.Fail(external.FailureAuthRequired, err)
+		return Config{}, external.Fail(external.FailureAuthRequired, err)
+	}
+	// A ChatGPT login is Codex's own: it signs in, stores, and refreshes it
+	// in CODEX_HOME, and Memoh keeps no copy.
+	if cfg.Auth != AuthAPIKey {
+		return cfg, nil
 	}
 	credential, err := d.credentials.ResolveForBotAgent(ctx, botID, botAgentID)
 	if errors.Is(err, agentcredential.ErrNotFound) && !credentialRequired {
-		return cfg, agentcredential.ResolvedCredential{}, nil
+		return cfg, nil
 	}
 	if err != nil {
-		return Config{}, agentcredential.ResolvedCredential{}, external.CredentialError(err)
+		return Config{}, external.CredentialError(err)
 	}
-	switch cfg.Auth {
-	case AuthAPIKey:
-		if credential.AuthKind != agentcredential.AuthKindOpenAIAPIKey {
-			return Config{}, agentcredential.ResolvedCredential{}, external.CredentialError(agentcredential.ErrIncompatible)
-		}
-		cfg.APIKey = credential.Secret["api_key"]
-	case AuthChatGPT:
-		if credential.AuthKind != agentcredential.AuthKindOpenAICodexOAuth {
-			return Config{}, agentcredential.ResolvedCredential{}, external.CredentialError(agentcredential.ErrIncompatible)
-		}
+	if credential.AuthKind != agentcredential.AuthKindOpenAIAPIKey {
+		return Config{}, external.CredentialError(agentcredential.ErrIncompatible)
 	}
-	return cfg, credential, nil
+	cfg.APIKey = credential.Secret["api_key"]
+	return cfg, nil
 }
 
 // ModelCatalog returns the models available to this Agent. API-key Agents with
@@ -147,7 +145,7 @@ func (d *Driver) resolveAgentConfig(ctx context.Context, botID, botAgentID strin
 // ChatGPT and default-OpenAI Agents retain Codex's richer native catalog.
 func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalogRequest) (external.ModelCatalog, error) {
 	botID, botAgentID := request.BotID, request.BotAgentID
-	cfg, _, err := d.resolveAgentConfig(ctx, botID, botAgentID, true)
+	cfg, err := d.resolveAgentConfig(ctx, botID, botAgentID, true)
 	if err != nil {
 		return external.ModelCatalog{}, err
 	}
@@ -260,7 +258,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	if input.Command == "goal" && !goalExecutionAllowed(input) {
 		return external.PromptResult{}, external.Fail(external.FailureGoalRequiresDefaultMode, nil)
 	}
-	cfg, credential, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID, true)
+	cfg, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID, true)
 	if err != nil {
 		if external.IsFailure(err) {
 			return external.PromptResult{}, err
@@ -396,9 +394,6 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 
 	stopSteering()
 	result, resultErr := srv.turnResult(turn)
-	if cfg.Auth == AuthChatGPT {
-		d.persistChatGPTCredential(ctx, srv.client, input, credential)
-	}
 	if ctx.Err() != nil && resultErr == nil {
 		// The application layer distinguishes stop from failure by context
 		// state; an interrupted turn is not an error.
@@ -582,7 +577,7 @@ func (d *Driver) botGatewayToolLookup(botID string) func(context.Context, string
 // startServer is the server table's start hook.
 func (d *Driver) startServer(ctx context.Context, key string) (servertable.Resource, error) {
 	botID, botAgentID := splitServerKey(key)
-	cfg, credential, err := d.resolveAgentConfig(ctx, botID, botAgentID, false)
+	cfg, err := d.resolveAgentConfig(ctx, botID, botAgentID, false)
 	if err != nil {
 		return nil, err
 	}
@@ -596,11 +591,6 @@ func (d *Driver) startServer(ctx context.Context, key string) (servertable.Resou
 	}
 	if err := external.RequireContainerWorkspace(info, RuntimeType); err != nil {
 		return nil, err
-	}
-	if cfg.Auth == AuthChatGPT && credential.ID != "" {
-		if err := materializeChatGPTCredential(ctx, client, botAgentID, credential); err != nil {
-			return nil, external.CredentialError(err)
-		}
 	}
 	launcher, err := d.resolveLauncher(ctx, botID)
 	if err != nil {
@@ -802,7 +792,7 @@ var _ external.DeviceLoginProvider = (*Driver)(nil)
 // returning the code the user must enter. Completion lands in CODEX_HOME and
 // is observable via PollDeviceLogin.
 func (d *Driver) StartDeviceLogin(ctx context.Context, botID, botAgentID string) (external.DeviceLoginStart, error) {
-	cfg, _, err := d.resolveAgentConfig(ctx, botID, botAgentID, false)
+	cfg, err := d.resolveAgentConfig(ctx, botID, botAgentID, false)
 	if err != nil {
 		return external.DeviceLoginStart{}, err
 	}
@@ -833,75 +823,31 @@ func (d *Driver) StartDeviceLogin(ctx context.Context, botID, botAgentID string)
 	}, nil
 }
 
-// PollDeviceLogin reports a tracked login's state and stores the credential
-// of one that succeeded.
-func (d *Driver) PollDeviceLogin(ctx context.Context, ownerUserID, botID, botAgentID, loginID string) (external.DeviceLoginStatus, error) {
-	status := d.loginStatus(botID, botAgentID, loginID)
-	if status.Status == "success" {
-		if err := d.completeDeviceLogin(ctx, ownerUserID, botID, botAgentID, loginID); err != nil {
-			return external.DeviceLoginStatus{}, err
-		}
-	}
-	return status, nil
-}
-
-func (d *Driver) loginStatus(botID, botAgentID, loginID string) external.DeviceLoginStatus {
+// PollDeviceLogin reports a tracked login's state. A login that succeeded is
+// already in CODEX_HOME, written there by Codex itself.
+func (d *Driver) PollDeviceLogin(_ context.Context, _, botID, botAgentID, loginID string) (external.DeviceLoginStatus, error) {
 	resource := d.servers.Peek(serverKey(botID, botAgentID))
 	if resource == nil {
-		return external.DeviceLoginStatus{Status: "unknown"}
+		return external.DeviceLoginStatus{Status: "unknown"}, nil
 	}
 	srv := resource.(*appServer)
 	outcome, ok := srv.loginStatus(loginID)
 	switch {
 	case !ok:
-		return external.DeviceLoginStatus{Status: "unknown"}
+		return external.DeviceLoginStatus{Status: "unknown"}, nil
 	case !outcome.Done:
-		return external.DeviceLoginStatus{Status: "pending"}
+		return external.DeviceLoginStatus{Status: "pending"}, nil
 	case outcome.Success:
-		return external.DeviceLoginStatus{Status: "success"}
+		srv.forgetLogin(loginID)
+		return external.DeviceLoginStatus{Status: "success"}, nil
 	default:
 		srv.forgetLogin(loginID)
 		message := outcome.Error
 		if message == "" {
 			message = "codex login failed"
 		}
-		return external.DeviceLoginStatus{Status: "error", Error: message}
+		return external.DeviceLoginStatus{Status: "error", Error: message}, nil
 	}
-}
-
-func (d *Driver) completeDeviceLogin(ctx context.Context, ownerUserID, botID, botAgentID, loginID string) error {
-	srv, releaseServer, err := d.acquireServer(ctx, botID, botAgentID)
-	if err != nil {
-		return err
-	}
-	defer releaseServer()
-	outcome, ok := srv.loginStatus(loginID)
-	if !ok || !outcome.Done || !outcome.Success {
-		return errs.New("codex device login is not complete")
-	}
-	credential, err := readChatGPTCredential(ctx, srv.client, botAgentID)
-	if err != nil {
-		return err
-	}
-	_, err = d.credentials.AttachToBotAgent(ctx, ownerUserID, botID, botAgentID, agentcredential.CreateRequest{
-		Provider: agentcredential.ProviderOpenAI,
-		AuthKind: agentcredential.AuthKindOpenAICodexOAuth,
-		Secret: map[string]string{
-			"access_token":  credential.accessToken,
-			"id_token":      credential.idToken,
-			"refresh_token": credential.refreshToken,
-			"account_id":    credential.accountID,
-		},
-		AccountMetadata: map[string]any{
-			"account_id":   credential.accountID,
-			"last_refresh": credential.lastRefresh.UTC().Format(time.RFC3339Nano),
-		},
-	})
-	if err != nil {
-		return external.CredentialError(err)
-	}
-	srv.forgetLogin(loginID)
-	return nil
 }
 
 func (d *Driver) PurgeBotAgentAuth(ctx context.Context, botID, botAgentID string) error {

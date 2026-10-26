@@ -92,7 +92,7 @@ func (d *Driver) ReadCommand(ctx context.Context, input external.PromptInput) (e
 	}
 	// Reads must not enter account/login/start. Credentials are checked before
 	// acquisition; account/read below only observes the materialized login.
-	if _, _, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID, true); err != nil {
+	if _, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID, true); err != nil {
 		return external.CommandResult{}, err
 	}
 	srv, release, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)

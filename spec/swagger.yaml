@@ -558,8 +558,6 @@ definitions:
         type: string
       id:
         type: string
-      interval_seconds:
-        type: integer
       runtime:
         type: string
       status:
@@ -567,10 +565,6 @@ definitions:
         - pending
         - ready
         - claimed
-        type: string
-      user_code:
-        type: string
-      verification_url:
         type: string
     required:
     - auth_kind
@@ -2812,6 +2806,15 @@ definitions:
         type: string
       name:
         type: string
+    type: object
+  externalagent.CodexAccountResponse:
+    properties:
+      email:
+        type: string
+      signed_in:
+        type: boolean
+    required:
+    - signed_in
     type: object
   externalagent.CodexUsageResponse:
     properties:
@@ -7680,11 +7683,11 @@ paths:
     post:
       consumes:
       - application/json
-      description: 'Starts Codex device authorization or Claude browser authorization,
-        or encrypts a supplied API key or Claude OAuth token. A Grok account cannot
-        be staged: it signs in on the Agent itself. No Bot or workspace is created.
-        Ready means the credential has been staged; API keys and manually supplied
-        tokens are not probed against the provider.'
+      description: 'Starts Claude browser authorization, or encrypts a supplied API
+        key or Claude OAuth token. A ChatGPT or Grok account cannot be staged: it
+        signs in on the Agent itself. No Bot or workspace is created. Ready means
+        the credential has been staged; API keys and manually supplied tokens are
+        not probed against the provider.'
       parameters:
       - description: Authorization request
         in: body
@@ -7817,34 +7820,6 @@ paths:
             $ref: '#/definitions/server.Problem'
       summary: Complete Claude browser authorization with the returned authorization
         code
-      tags:
-      - agent-authorizations
-  /agent-authorizations/{id}/poll:
-    post:
-      parameters:
-      - description: Authorization ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/agentcredential.Authorization'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "410":
-          description: Gone
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "503":
-          description: Service Unavailable
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Poll a pending Agent device authorization
       tags:
       - agent-authorizations
   /auth/login:
@@ -8726,6 +8701,45 @@ paths:
       summary: Update a bot Agent
       tags:
       - bot-agents
+  /bots/{bot_id}/agents/{id}/codex/account:
+    get:
+      description: Codex keeps its own sign-in in the Agent's workspace; this asks
+        it, starting it when it is not running.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Bot Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/externalagent.CodexAccountResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Get the ChatGPT account the Agent's Codex is signed in to
+      tags:
+      - external-agents
   /bots/{bot_id}/agents/{id}/codex/usage:
     get:
       description: Available to anyone who can chat with the Bot, so the composer
@@ -8996,7 +9010,7 @@ paths:
       - external-agents
   /bots/{bot_id}/agents/{id}/login/device/poll:
     post:
-      description: A successful sign-in has already been stored as the Agent's credential
+      description: A successful sign-in has already been kept by the Agent's runtime
         when this answers success.
       parameters:
       - description: Bot ID

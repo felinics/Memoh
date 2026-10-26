@@ -243,7 +243,7 @@ func TestDirectRuntimeCredentialContract(t *testing.T) {
 		configured bool
 	}{
 		{RuntimeCodex, map[string]any{"auth": "api_key"}, agentcredential.AuthKindOpenAIAPIKey, true},
-		{RuntimeCodex, map[string]any{"auth": "chatgpt"}, agentcredential.AuthKindOpenAICodexOAuth, true},
+		{RuntimeCodex, map[string]any{"auth": "chatgpt"}, "", true},
 		{RuntimeClaudeCode, map[string]any{"auth": "api_key"}, agentcredential.AuthKindAnthropicAPIKey, true},
 		{RuntimeClaudeCode, map[string]any{"auth": "oauth_token"}, agentcredential.AuthKindClaudeCodeOAuth, true},
 		{RuntimeClaudeCode, map[string]any{"auth": "workspace"}, "", true},
@@ -271,8 +271,10 @@ func TestDirectRuntimeCredentialContract(t *testing.T) {
 			t.Fatalf("%s: configuration error field = %q, want %q", name, got, wantField)
 		}
 		if tc.configured {
-			if got := configurationErrorField(ValidateConfigurationWithStore(agent, nil, "other_kind")); got != "agent_credential_id" {
-				t.Fatalf("%s: foreign credential error field = %q, want agent_credential_id", name, got)
+			// A mode that stores no credential ignores one an earlier mode left attached.
+			want := map[bool]string{true: "agent_credential_id", false: ""}[tc.authKind != ""]
+			if got := configurationErrorField(ValidateConfigurationWithStore(agent, nil, "other_kind")); got != want {
+				t.Fatalf("%s: foreign credential error field = %q, want %q", name, got, want)
 			}
 		}
 	}

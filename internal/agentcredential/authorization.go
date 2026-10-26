@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -23,18 +22,9 @@ var (
 	ErrAuthorizationCodeInvalid = errors.New("authorization code is invalid")
 )
 
-const (
-	authorizationTTL = 30 * time.Minute
-	// devicePollTimeout bounds a poll while it holds the session's row lock.
-	// The poll runs detached from its request (see Get), so no caller deadline
-	// does.
-	devicePollTimeout = 45 * time.Second
-)
+const authorizationTTL = 30 * time.Minute
 
 type agentAuthorizer interface {
-	StartOpenAICodexACPDeviceAuthorization(context.Context) (providers.OpenAICodexACPDeviceAuthorization, error)
-	PollOpenAICodexACPDeviceAuthorization(context.Context, string, string) (providers.OpenAICodexACPDevicePollResult, error)
-	ExchangeOpenAICodexACPDeviceCode(context.Context, string, string) (providers.OpenAICodexOAuthCredentials, error)
 	StartClaudeCodeAuthorization() (providers.ClaudeCodeAuthorization, error)
 	ExchangeClaudeCodeAuthorization(context.Context, string, string, string) (string, error)
 }
@@ -65,10 +55,7 @@ type Authorization struct {
 	AuthKind         string    `json:"auth_kind" validate:"required"`
 	Status           string    `json:"status" validate:"required" enums:"pending,ready,claimed"`
 	ExpiresAt        time.Time `json:"expires_at" validate:"required"`
-	UserCode         string    `json:"user_code,omitempty"`
-	VerificationURL  string    `json:"verification_url,omitempty"`
 	AuthorizationURL string    `json:"authorization_url,omitempty"`
-	IntervalSeconds  int64     `json:"interval_seconds,omitempty"`
 }
 
 func (s *AuthorizationService) Create(ctx context.Context, owner string, req AuthorizationRequest) (Authorization, error) {
@@ -89,7 +76,7 @@ func (s *AuthorizationService) Create(ctx context.Context, owner string, req Aut
 		return Authorization{}, ErrInvalidRequest
 	}
 	claudeBrowser := req.AuthKind == AuthKindClaudeCodeOAuth && len(req.Secret) == 0
-	if !deviceCodeKind(req.AuthKind) && !claudeBrowser && !validSecret(req.AuthKind, req.Secret) {
+	if !claudeBrowser && !validSecret(req.AuthKind, req.Secret) {
 		return Authorization{}, ErrInvalidRequest
 	}
 	var result Authorization
@@ -111,19 +98,7 @@ func (s *AuthorizationService) Create(ctx context.Context, owner string, req Aut
 		payload := req.Secret
 		status := "ready"
 		expires := time.Now().Add(authorizationTTL)
-		switch {
-		case req.AuthKind == AuthKindOpenAICodexOAuth:
-			device, err := s.oauth.StartOpenAICodexACPDeviceAuthorization(ctx)
-			if err != nil {
-				return fmt.Errorf("%w: %w", ErrAuthorizationFailed, err)
-			}
-			status = "pending"
-			expires = time.Now().Add(15 * time.Minute)
-			payload = map[string]string{
-				"device_auth_id": device.DeviceAuthID, "user_code": device.UserCode,
-				"verification_url": device.VerificationURL, "interval": strconv.FormatInt(device.IntervalSeconds, 10),
-			}
-		case claudeBrowser:
+		if claudeBrowser {
 			auth, err := s.oauth.StartClaudeCodeAuthorization()
 			if err != nil {
 				return fmt.Errorf("%w: %w", ErrAuthorizationFailed, err)
@@ -138,7 +113,7 @@ func (s *AuthorizationService) Create(ctx context.Context, owner string, req Aut
 		row, err := q.CreateAgentAuthorization(ctx, dbsqlc.CreateAgentAuthorizationParams{
 			OwnerUserID: ownerID, Runtime: req.Runtime, AuthKind: req.AuthKind, Status: status,
 			EncryptedPayload: ciphertext, EncryptionNonce: nonce, ExpiresAt: timestamptz(&expires),
-			PollAfter: timestamptz(timePtr(time.Now().Add(pollInterval(payload)))),
+			PollAfter: timestamptz(timePtr(time.Now())),
 		})
 		if err != nil {
 			return err
@@ -149,17 +124,9 @@ func (s *AuthorizationService) Create(ctx context.Context, owner string, req Aut
 	return result, err
 }
 
-func (s *AuthorizationService) Get(ctx context.Context, owner, id string, poll bool) (Authorization, error) {
-	if poll {
-		// The provider spends the device code the moment it issues tokens. A
-		// poll the browser abandons right then must still store them, or the
-		// user's approval is gone with nothing to show for it.
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), devicePollTimeout)
-		defer cancel()
-	}
+func (s *AuthorizationService) Get(ctx context.Context, owner, id string) (Authorization, error) {
 	var result Authorization
-	err := s.withSession(ctx, owner, id, func(q dbstore.Queries, row dbsqlc.AgentAuthorization) error {
+	err := s.withSession(ctx, owner, id, func(_ dbstore.Queries, row dbsqlc.AgentAuthorization) error {
 		if row.Status == "claimed" {
 			result = authorizationView(row, nil)
 			return nil
@@ -168,56 +135,10 @@ func (s *AuthorizationService) Get(ctx context.Context, owner, id string, poll b
 		if err != nil {
 			return err
 		}
-		if poll && row.Status == "pending" && deviceCodeKind(row.AuthKind) && !time.Now().Before(row.PollAfter.Time) {
-			secret, err := s.pollDevice(ctx, payload)
-			if err != nil {
-				return fmt.Errorf("%w: %w", ErrAuthorizationFailed, err)
-			}
-			if secret != nil {
-				if !validSecret(row.AuthKind, secret) {
-					return ErrAuthorizationFailed
-				}
-				payload = secret
-				row.Status = "ready"
-				row.ExpiresAt = timestamptz(timePtr(time.Now().Add(authorizationTTL)))
-				row.EncryptedPayload, row.EncryptionNonce, err = s.credentials.encrypt(payload)
-				if err != nil {
-					return err
-				}
-			}
-			row.PollAfter = timestamptz(timePtr(time.Now().Add(pollInterval(payload))))
-			row, err = q.UpdateAgentAuthorization(ctx, authorizationUpdate(row))
-			if err != nil {
-				return err
-			}
-		}
 		result = authorizationView(row, payload)
 		return nil
 	})
 	return result, err
-}
-
-// pollDevice asks the provider whether the user approved the device code.
-// A nil secret means not yet.
-func (s *AuthorizationService) pollDevice(ctx context.Context, payload map[string]string) (map[string]string, error) {
-	response, err := s.oauth.PollOpenAICodexACPDeviceAuthorization(ctx, payload["device_auth_id"], payload["user_code"])
-	if err != nil || response.Pending {
-		return nil, err
-	}
-	token, err := s.oauth.ExchangeOpenAICodexACPDeviceCode(ctx, response.AuthorizationCode, response.CodeVerifier)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]string{
-		"access_token": token.AccessToken, "refresh_token": token.RefreshToken,
-		"id_token": token.IDToken, "account_id": token.AccountID,
-	}, nil
-}
-
-// deviceCodeKind reports a credential the server obtains itself through a
-// device-code sign-in, so its authorization starts without a secret.
-func deviceCodeKind(authKind string) bool {
-	return authKind == AuthKindOpenAICodexOAuth
 }
 
 // Exchange completes a pending Claude authorization. Failed exchanges remain
@@ -334,12 +255,7 @@ func (s *AuthorizationService) withSession(ctx context.Context, owner, id string
 func authorizationView(row dbsqlc.AgentAuthorization, payload map[string]string) Authorization {
 	result := Authorization{ID: row.ID.String(), Runtime: row.Runtime, AuthKind: row.AuthKind, Status: row.Status, ExpiresAt: row.ExpiresAt.Time}
 	if row.Status == "pending" {
-		if deviceCodeKind(row.AuthKind) {
-			result.UserCode, result.VerificationURL = payload["user_code"], payload["verification_url"]
-			result.IntervalSeconds = int64(pollInterval(payload) / time.Second)
-		} else {
-			result.AuthorizationURL = payload["authorization_url"]
-		}
+		result.AuthorizationURL = payload["authorization_url"]
 	}
 	return result
 }
@@ -352,8 +268,4 @@ func authorizationUpdate(row dbsqlc.AgentAuthorization) dbsqlc.UpdateAgentAuthor
 	}
 }
 
-func pollInterval(payload map[string]string) time.Duration {
-	seconds, _ := strconv.ParseInt(payload["interval"], 10, 64)
-	return time.Duration(max(5, min(seconds, 60))) * time.Second
-}
 func timePtr(t time.Time) *time.Time { return &t }
