@@ -1107,6 +1107,92 @@ func TestRowReleasedUntouchedDoesNotSpinTheLoop(t *testing.T) {
 	}
 }
 
+// refusingRepo refuses the observed writes refuse matches, for a reason other
+// than a concurrent change, while claims keep succeeding: the database takes
+// the claim but not the write a pass needs to record its step.
+type refusingRepo struct {
+	*memRepo
+	refuse func(ObservedWrite) bool
+}
+
+func (r refusingRepo) WriteObserved(ctx context.Context, u ObservedWrite) (Workspace, error) {
+	if r.refuse(u) {
+		return Workspace{}, errors.New("write refused")
+	}
+	return r.memRepo.WriteObserved(ctx, u)
+}
+
+func TestPassWhoseLastWriteFailedDoesNotSpinTheLoop(t *testing.T) {
+	// Each pass ends on a refused write and leaves the row released and due:
+	// waking the loop for it would claim it again at once and call the
+	// backend each time, for as long as the database refuses the write.
+	running := func() *Workspace {
+		return &Workspace{
+			BotID: bot, Desired: DesiredAbsent, DesiredGeneration: 2,
+			Observed: ObservedRunning, ObservedGeneration: 1, EverReady: true, Version: 1,
+		}
+	}
+	cases := []struct {
+		name    string
+		row     func() *Workspace
+		backend *fakeBackend
+		refuse  func(ObservedWrite) bool
+	}{
+		{
+			name:    "entering provisioning",
+			backend: &fakeBackend{},
+			refuse:  func(ObservedWrite) bool { return true },
+		},
+		{
+			name:    "recording a failed provisioning",
+			backend: &fakeBackend{provisionErr: errors.New("registry down")},
+			refuse:  func(u ObservedWrite) bool { return u.Observed == ObservedFailed },
+		},
+		{
+			name:    "recording a running workspace",
+			backend: &fakeBackend{},
+			refuse:  func(u ObservedWrite) bool { return u.Observed == ObservedRunning },
+		},
+		{
+			name:    "entering removing",
+			row:     running,
+			backend: &fakeBackend{exists: true, running: true},
+			refuse:  func(u ObservedWrite) bool { return u.Observed == ObservedRemoving },
+		},
+		{
+			name:    "recording a removed workspace",
+			row:     running,
+			backend: &fakeBackend{exists: true, running: true},
+			refuse:  func(u ObservedWrite) bool { return u.Observed == ObservedAbsent },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clk := &clock{t: time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)}
+			repo := newMemRepo(clk.now)
+			row := &Workspace{BotID: bot, Desired: DesiredPresent, DesiredGeneration: 1, Observed: ObservedAbsent, Version: 1}
+			if tc.row != nil {
+				row = tc.row()
+			}
+			row.NextAttemptAt = clk.now()
+			repo.rows[bot] = row
+			svc := New(refusingRepo{repo, tc.refuse}, tc.backend, nil, Options{Owner: "test", Interval: time.Hour})
+			svc.now = clk.now
+			svc.rnd = func() float64 { return 0.5 }
+			if err := svc.Start(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			defer stopService(t, svc)
+
+			svc.Kick()
+			time.Sleep(300 * time.Millisecond)
+			if n := repo.claimCount(); n > 2 {
+				t.Fatalf("a pass that recorded nothing kept the loop claiming: %d claims", n)
+			}
+		})
+	}
+}
+
 func TestCatchUpLostToARemovalReleasesTheRowAndWakesTheLoop(t *testing.T) {
 	// The pass only had to catch up the observed generation of a running
 	// workspace, and the bot was deleted before that write landed, so the

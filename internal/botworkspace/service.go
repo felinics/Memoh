@@ -482,7 +482,7 @@ func (s *Service) claimInto(ctx context.Context, wg *sync.WaitGroup, p pool) (st
 		wg.Add(1)
 		go func(w Workspace) {
 			defer wg.Done()
-			touched := false
+			rec := &passRecord{}
 			defer func() {
 				s.unmarkRunning(w.BotID)
 				// The freed slot may be what a waiting row needs: an intent
@@ -490,17 +490,13 @@ func (s *Service) claimInto(ctx context.Context, wg *sync.WaitGroup, p pool) (st
 				// leave behind, or this very row, released with an intent that
 				// arrived while it was leased (a removal requested
 				// mid-creation). The loop runs now rather than on the next
-				// tick. A row released untouched kicks nothing: the claim
-				// found it due where Decide did not (their clocks differ), and
-				// a kick would claim it again at once, over and over until the
-				// clocks agree. The price is small: work that found the only
-				// slot held by such a row for those few milliseconds waits for
-				// the next kick or tick, as all waiting work did before.
-				if touched {
+				// tick. A pass that left nothing recorded wakes nothing: see
+				// passRecord.
+				if rec.recorded {
 					s.Kick()
 				}
 			}()
-			touched = s.reconcileOne(ctx, w)
+			s.reconcileOne(context.WithValue(ctx, passRecordKey{}, rec), w)
 		}(w)
 	}
 	return started, false, len(rows) >= int(limit), nil
@@ -545,10 +541,22 @@ func (s *Service) unmarkRunning(botID string) {
 	delete(s.running, botID)
 }
 
-// reconcileOne acts on a claimed row. touched is false when nothing was
-// written or run: the row was only released, or its catch-up write failed
-// for a reason other than a concurrent change.
-func (s *Service) reconcileOne(ctx context.Context, w Workspace) (touched bool) {
+// passRecord tracks whether the last version-checked write of a claimed row's
+// pass left something recorded: the write landed, or it lost to a concurrent
+// change (a new intent, a takeover) that recorded something newer. Only then
+// does the freed slot wake the loop. Otherwise the row is as due as the pass
+// found it: the pass wrote nothing (the claim found the row due where Decide
+// did not, their clocks differ), or its last write failed for another reason
+// and left the row released mid-way, a provisioning whose outcome was never
+// written. A wake would claim it again at once and fail the same way, over
+// and over until the clocks agree or the database takes writes again, calling
+// the backend each time. Work that found the only slot held by such a row
+// waits for the next kick or tick, as all waiting work did before.
+type passRecord struct{ recorded bool }
+
+type passRecordKey struct{}
+
+func (s *Service) reconcileOne(ctx context.Context, w Workspace) {
 	switch Decide(w, s.now()) {
 	case ActionNone:
 		if w.ObservedGeneration < w.DesiredGeneration {
@@ -559,15 +567,11 @@ func (s *Service) reconcileOne(ctx context.Context, w Workspace) (touched bool) 
 				// The failed write did not release the row. Release checks the
 				// owner, so a row another instance took over is left alone.
 				s.release(ctx, w.BotID)
-				if superseded(ctx, err) {
-					// A new intent changed the row under the write: wake the
-					// loop so it is served now, not after the next tick.
-					return true
+				if !superseded(ctx, err) {
+					s.event(ctx, "catch up generation failed", errs.Wrap(err, "catch up observed generation"), slog.String("bot_id", w.BotID))
 				}
-				s.event(ctx, "catch up generation failed", errs.Wrap(err, "catch up observed generation"), slog.String("bot_id", w.BotID))
-				return false
 			}
-			return true
+			return
 		}
 		s.release(ctx, w.BotID)
 	case ActionWait:
@@ -576,14 +580,11 @@ func (s *Service) reconcileOne(ctx context.Context, w Workspace) (touched bool) 
 		_ = job.Run(ctx, s.log, "workspace.provision", job.Options{}, func(ctx context.Context) error {
 			return s.provision(ctx, w)
 		}, workspaceAttrs(w)...)
-		return true
 	case ActionTeardown:
 		_ = job.Run(ctx, s.log, "workspace.teardown", job.Options{}, func(ctx context.Context) error {
 			return s.teardown(ctx, w)
 		}, workspaceAttrs(w)...)
-		return true
 	}
-	return false
 }
 
 func workspaceAttrs(w Workspace) []slog.Attr {
@@ -849,7 +850,11 @@ func (s *Service) writeObserved(ctx context.Context, w Workspace, write Observed
 	write.ExpectedVersion = w.Version
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.opts.WriteTimeout)
 	defer cancel()
-	return s.repo.WriteObserved(wctx, write)
+	cur, err := s.repo.WriteObserved(wctx, write)
+	if rec, ok := ctx.Value(passRecordKey{}).(*passRecord); ok {
+		rec.recorded = err == nil || errors.Is(err, ErrVersionConflict)
+	}
+	return cur, err
 }
 
 func (s *Service) release(ctx context.Context, botID string) {
