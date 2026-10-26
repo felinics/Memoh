@@ -119,18 +119,8 @@ func runtimeFailureCode(failure *external.Failure) (apperror.Code, map[string]st
 		return apperror.CodeAgentCredentialRuntimeBusy, nil
 	case external.FailureCredential:
 		return agentCredentialCode(failure.Err), nil
-	case external.FailureUsageLimited:
-		return apperror.CodeExternalRuntimeUsageLimited, nil
-	case external.FailureRateLimited:
-		return apperror.CodeExternalRuntimeRateLimited, nil
-	case external.FailureContextWindowExceeded:
-		return apperror.CodeExternalRuntimeContextWindowExceeded, nil
-	case external.FailureOverloaded:
-		return apperror.CodeExternalRuntimeOverloaded, nil
-	case external.FailureUpstreamUnreachable:
-		return apperror.CodeExternalRuntimeUpstreamUnreachable, nil
-	case external.FailureRequestBlocked:
-		return apperror.CodeExternalRuntimeRequestBlocked, nil
+	case external.FailureReported:
+		return apperror.CodeExternalRuntimeReported, map[string]string{"message": failure.Message}
 	default:
 		return "", nil
 	}

@@ -41,7 +41,7 @@ func TestUsageFromMeta(t *testing.T) {
 	}
 }
 
-func TestTurnFailureNamesWhatTheUserCanFix(t *testing.T) {
+func TestTurnFailureReportsWhatGrokSaid(t *testing.T) {
 	apiError := func(status int, message string) error {
 		// The layers a JSON-RPC error crosses on its way out of the client.
 		return fmt.Errorf("send ACP prompt: %w", errs.WrapDependency(&acp.RequestError{
@@ -50,25 +50,25 @@ func TestTurnFailureNamesWhatTheUserCanFix(t *testing.T) {
 		}, ""))
 	}
 	cases := []struct {
-		name string
-		err  error
-		want external.FailureKind
+		name    string
+		err     error
+		kind    external.FailureKind
+		message string
 	}{
-		{"no credential", &acp.RequestError{Code: authRequiredCode, Message: "Authentication required"}, external.FailureAuthRequired},
-		{"rejected key", apiError(400, "API error (status 400 Bad Request): invalid-argument: Incorrect API key provided."), external.FailureAuthRequired},
-		{"unauthorized", apiError(401, "unauthorized"), external.FailureAuthRequired},
-		{"throttled", apiError(429, "slow down"), external.FailureRateLimited},
-		{"upstream down", apiError(503, "unavailable"), external.FailureOverloaded},
+		{"no credential", &acp.RequestError{Code: authRequiredCode, Message: "Authentication required"}, external.FailureAuthRequired, "Authentication required"},
+		{"unauthorized", apiError(401, "unauthorized"), external.FailureAuthRequired, "unauthorized"},
+		{"throttled", apiError(429, "slow down"), external.FailureReported, "slow down"},
+		{"rejected key", apiError(400, "Incorrect API key provided."), external.FailureReported, "Incorrect API key provided."},
 	}
 	for _, tc := range cases {
 		var failure *external.Failure
-		if got := turnFailure(tc.err, 0); !errors.As(got, &failure) || failure.Kind != tc.want {
-			t.Errorf("%s: turnFailure() = %v, want kind %d", tc.name, got, tc.want)
+		if got := turnFailure(tc.err, 0); !errors.As(got, &failure) || failure.Kind != tc.kind || failure.Message != tc.message {
+			t.Errorf("%s: turnFailure() = %+v, want kind %d with %q", tc.name, failure, tc.kind, tc.message)
 		}
 	}
-	plain := apiError(400, "bad request")
+	plain := errors.New("connection reset")
 	if got := turnFailure(plain, 0); !errors.Is(got, plain) || external.IsFailure(got) {
-		t.Errorf("an unclassified error must pass through unchanged, got %v", got)
+		t.Errorf("an error Grok did not answer must pass through unchanged, got %v", got)
 	}
 	var failure *external.Failure
 	if got := turnFailure(plain, external.FailureUnavailable); !errors.As(got, &failure) || failure.Kind != external.FailureUnavailable {

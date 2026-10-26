@@ -421,7 +421,7 @@ func (s *appServer) turnResultAfterError(turn *turnState, err error) (external.P
 	result, _ := s.turnResult(turn)
 	var rpcErr *protocol.RPCError
 	if errors.As(err, &rpcErr) {
-		return result, errs.NewDependency("codex turn/start rejected: " + rpcErr.Error())
+		return result, external.Reported(external.FailureReported, rpcErr.Message)
 	}
 	return result, err
 }

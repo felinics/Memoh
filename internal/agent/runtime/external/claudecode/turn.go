@@ -90,7 +90,10 @@ type turnRunner struct {
 	ending          bool
 	usage           resultUsage
 	hasUsage        bool
-	resultIDs       map[string]struct{}
+	// apiError is the category of the last failed API call, until a later
+	// reply recovered.
+	apiError  string
+	resultIDs map[string]struct{}
 
 	// result.result repeats the last assistant message; when that message
 	// was a native command's receipt, the result is the receipt, not a reply.
@@ -339,12 +342,18 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 			// API diagnostics are not model prose. The native result owns failure
 			// settlement; an error frame may be followed by a successful recovery.
 			t.logger.Warn("claude API error", slog.String("code", msg.Error), slog.String("message", truncateForLog(msg.Message)))
+			t.mu.Lock()
+			t.apiError = msg.Error
+			t.mu.Unlock()
 			return
 		}
 		chat, ok := decodeChatMessage(msg.Message)
 		if !ok {
 			return
 		}
+		t.mu.Lock()
+		t.apiError = ""
+		t.mu.Unlock()
 		streamed := t.streamedText.String()
 		if msg.LocalCommandSource == "" {
 			t.streamedText.Reset()
@@ -912,7 +921,7 @@ func (t *turnRunner) buildResult(storedSessionID string) (external.PromptResult,
 		if message == "" {
 			message = "claude turn failed (" + t.result.Subtype + ")"
 		}
-		return out, errs.NewDependency(message)
+		return out, failedResultError(message, t.apiError)
 	default:
 		out.StopReason = t.result.Subtype
 		out.TurnCompleted = true

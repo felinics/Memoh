@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 
 	acp "github.com/coder/acp-go-sdk"
 
@@ -26,23 +25,20 @@ func serverFailure(err error) error {
 	return external.Unavailable(err)
 }
 
-// turnFailure names what the user can do about a failed request to Grok.
-// Grok reports a rejected model call as a JSON-RPC error carrying the HTTP
-// status its API answered with. fallback is the kind of an error that says
-// nothing more specific; zero returns such an error unchanged.
+// turnFailure shapes a failed request to Grok. An error Grok answered with
+// is reported in Grok's words, told apart only when it is a sign-in problem:
+// no usable credential, or an API that refused it. fallback is the kind of an
+// error Grok did not answer; zero returns such an error unchanged.
 func turnFailure(err error, fallback external.FailureKind) error {
-	var failure *external.Failure
-	if errors.As(err, &failure) {
+	if external.IsFailure(err) {
 		return err
 	}
-	var reqErr *acp.RequestError
-	if errors.As(err, &reqErr) {
-		if reqErr.Code == authRequiredCode {
-			return external.Fail(external.FailureAuthRequired, err)
+	if reqErr, text, ok := acpclient.AgentError(err); ok {
+		kind := external.FailureReported
+		if signInFailure(reqErr) {
+			kind = external.FailureAuthRequired
 		}
-		if kind := apiFailureKind(reqErr.Data); kind != 0 {
-			return external.Fail(kind, err)
-		}
+		return external.Reported(kind, text)
 	}
 	if fallback == 0 {
 		return err
@@ -59,7 +55,11 @@ func resumeFailure(ctx context.Context, err error, replaceLost bool) error {
 	case ctx.Err() != nil:
 		return ctx.Err()
 	case !sessionGone(err):
-		return turnFailure(err, external.FailureSessionResumeFailed)
+		// A later turn may resume the session, whatever Grok said this time.
+		if reqErr, _, ok := acpclient.AgentError(err); ok && signInFailure(reqErr) {
+			return external.Fail(external.FailureAuthRequired, err)
+		}
+		return external.Fail(external.FailureSessionResumeFailed, err)
 	case !replaceLost:
 		return external.ErrThreadUnavailable
 	default:
@@ -84,20 +84,13 @@ func sessionGone(err error) bool {
 	return fields["code"] == "FS_NOT_FOUND"
 }
 
-func apiFailureKind(data any) external.FailureKind {
-	fields, _ := data.(map[string]any)
-	status, _ := fields["http_status"].(float64)
-	message, _ := fields["message"].(string)
-	switch {
-	case status == http.StatusUnauthorized, status == http.StatusForbidden,
-		// xAI answers a malformed or revoked key with 400, not 401.
-		strings.Contains(message, "Incorrect API key"):
-		return external.FailureAuthRequired
-	case status == http.StatusTooManyRequests:
-		return external.FailureRateLimited
-	case status >= http.StatusInternalServerError:
-		return external.FailureOverloaded
-	default:
-		return 0
+// signInFailure reports an error that Grok's account has to be signed in
+// again for: Grok holds no usable credential, or the API refused it.
+func signInFailure(reqErr *acp.RequestError) bool {
+	if reqErr.Code == authRequiredCode {
+		return true
 	}
+	fields, _ := reqErr.Data.(map[string]any)
+	status, _ := fields["http_status"].(float64)
+	return status == http.StatusUnauthorized || status == http.StatusForbidden
 }

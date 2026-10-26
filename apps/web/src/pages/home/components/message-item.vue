@@ -286,7 +286,18 @@
                 tone="destructive"
                 size="sm"
                 :description="errorBlockContent(node.block)"
-              />
+              >
+                <!-- The one failure the user fixes outside the chat: sign the
+                     Agent in again. -->
+                <Button
+                  v-if="node.block.code === AUTH_REQUIRED_CODE && (botName || botId)"
+                  size="sm"
+                  variant="outline"
+                  @click="openAgentSettings"
+                >
+                  {{ t('bots.agent.openSettings') }}
+                </Button>
+              </CalloutBanner>
 
               <!-- Runtime notice block: a degradation the runtime wants the
                    user to see (tools unavailable, an interaction declined).
@@ -425,6 +436,7 @@ import { errorBlockText } from './error-block'
 import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
 import { useUserStore } from '@/store/user'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import type {
   AttachmentItem,
   ChatMessage,
@@ -854,6 +866,15 @@ function isVisibleAssistantBlock(block: ContentBlock): boolean {
 
 function errorBlockContent(block: Pick<ErrorBlock, 'code' | 'content'> & { args?: Record<string, string> }): string {
   return errorBlockText(block, t, te)
+}
+
+const AUTH_REQUIRED_CODE = 'external_runtime.auth_required'
+const router = useRouter()
+
+function openAgentSettings() {
+  const botName = props.botName?.trim() || props.botId?.trim()
+  if (!botName) return
+  void router.push({ name: 'bot-detail', params: { botName }, query: { tab: 'agents' } }).catch(() => {})
 }
 
 // A notice's name may be a catalog code with copy; otherwise its own text stands.

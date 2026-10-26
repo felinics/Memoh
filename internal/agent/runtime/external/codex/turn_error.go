@@ -2,7 +2,6 @@ package codex
 
 import (
 	"log/slog"
-	"net/http"
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
@@ -10,32 +9,11 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 )
 
-// unitFailureKinds names the failure the user can act on for the
-// codexErrorInfo categories that have one. The rest (badRequest, sandboxError,
-// sessionBudgetExceeded, threadRollbackFailed, other) leave the user nothing
-// to do but retry, so they stay the plain failure.
-var unitFailureKinds = map[string]external.FailureKind{
-	// Codex also reports a plan without Codex access and an exhausted API
-	// billing quota under this category.
-	protocol.CodexErrorInfoUnitUsageLimitExceeded:    external.FailureUsageLimited,
-	protocol.CodexErrorInfoUnitRateLimitExceeded:     external.FailureRateLimited,
-	protocol.CodexErrorInfoUnitContextWindowExceeded: external.FailureContextWindowExceeded,
-	// Codex reports only a ChatGPT sign-in it could not refresh as
-	// unauthorized; a rejected API key arrives as other.
-	protocol.CodexErrorInfoUnitUnauthorized:                external.FailureAuthRequired,
-	protocol.CodexErrorInfoUnitServerOverloaded:            external.FailureOverloaded,
-	protocol.CodexErrorInfoUnitInternalServerError:         external.FailureOverloaded,
-	protocol.CodexErrorInfoUnitCyberPolicy:                 external.FailureRequestBlocked,
-	protocol.CodexErrorInfoUnitMisalignmentPolicyViolation: external.FailureRequestBlocked,
-}
-
-// errorInfoSummary is what a codexErrorInfo says about a failure: its
-// category, the upstream HTTP status when Codex forwarded one, and the failure
-// kind the category stands for, zero when it has none.
+// errorInfoSummary is what a codexErrorInfo says about a failure, for the
+// log: its category and the upstream HTTP status when Codex forwarded one.
 type errorInfoSummary struct {
 	category   string
 	httpStatus *uint64
-	kind       external.FailureKind
 }
 
 func summarizeErrorInfo(info *protocol.CodexErrorInfo) errorInfoSummary {
@@ -43,23 +21,15 @@ func summarizeErrorInfo(info *protocol.CodexErrorInfo) errorInfoSummary {
 	case info == nil:
 		return errorInfoSummary{}
 	case info.Unit != "":
-		return errorInfoSummary{category: info.Unit, kind: unitFailureKinds[info.Unit]}
+		return errorInfoSummary{category: info.Unit}
 	case info.HTTPConnectionFailed != nil:
-		return errorInfoSummary{category: "httpConnectionFailed", httpStatus: info.HTTPConnectionFailed.HTTPStatusCode, kind: external.FailureUpstreamUnreachable}
+		return errorInfoSummary{category: "httpConnectionFailed", httpStatus: info.HTTPConnectionFailed.HTTPStatusCode}
 	case info.ResponseStreamConnectionFailed != nil:
-		return errorInfoSummary{category: "responseStreamConnectionFailed", httpStatus: info.ResponseStreamConnectionFailed.HTTPStatusCode, kind: external.FailureUpstreamUnreachable}
+		return errorInfoSummary{category: "responseStreamConnectionFailed", httpStatus: info.ResponseStreamConnectionFailed.HTTPStatusCode}
 	case info.ResponseStreamDisconnected != nil:
-		return errorInfoSummary{category: "responseStreamDisconnected", httpStatus: info.ResponseStreamDisconnected.HTTPStatusCode, kind: external.FailureUpstreamUnreachable}
+		return errorInfoSummary{category: "responseStreamDisconnected", httpStatus: info.ResponseStreamDisconnected.HTTPStatusCode}
 	case info.ResponseTooManyFailedAttempts != nil:
-		// Codex gives up with the last status it saw: a 429 that is not a
-		// usage limit is the model service throttling the account, anything
-		// else is the service failing.
-		status := info.ResponseTooManyFailedAttempts.HTTPStatusCode
-		kind := external.FailureOverloaded
-		if status != nil && *status == http.StatusTooManyRequests {
-			kind = external.FailureRateLimited
-		}
-		return errorInfoSummary{category: "responseTooManyFailedAttempts", httpStatus: status, kind: kind}
+		return errorInfoSummary{category: "responseTooManyFailedAttempts", httpStatus: info.ResponseTooManyFailedAttempts.HTTPStatusCode}
 	case info.ActiveTurnNotSteerable != nil:
 		return errorInfoSummary{category: "activeTurnNotSteerable"}
 	default:
@@ -81,7 +51,7 @@ func (s errorInfoSummary) attrs() []slog.Attr {
 	return attrs
 }
 
-// turnErrorText is what Codex said about a turn error, for the log.
+// turnErrorText is what Codex said about a turn error.
 func turnErrorText(turnErr *protocol.TurnError) string {
 	message := strings.TrimSpace(turnErr.Message)
 	if turnErr.AdditionalDetails == nil {
@@ -98,21 +68,17 @@ func turnErrorText(turnErr *protocol.TurnError) string {
 	}
 }
 
-// failedTurnError is the error of a turn Codex ended as failed. The category
-// Codex gave stays on the error for the result record, and a category the
-// user can act on makes it that Failure.
+// failedTurnError is the error of a turn Codex ended as failed: what Codex
+// said, shown as it said it. Only a sign-in Codex could not refresh is told
+// apart, since the user acts on it in Agent settings.
 func failedTurnError(turnErr *protocol.TurnError) error {
 	if turnErr == nil {
-		return errs.NewDependency("codex turn failed")
+		return external.Reported(external.FailureReported, "codex turn failed")
 	}
-	summary := summarizeErrorInfo(turnErr.CodexErrorInfo)
-	message := turnErrorText(turnErr)
-	if message == "" {
-		message = "codex turn failed"
+	kind := external.FailureReported
+	if turnErr.CodexErrorInfo != nil && turnErr.CodexErrorInfo.Unit == protocol.CodexErrorInfoUnitUnauthorized {
+		kind = external.FailureAuthRequired
 	}
-	err := errs.NewDependency(message, summary.attrs()...)
-	if summary.kind == 0 {
-		return err
-	}
-	return external.Fail(summary.kind, err)
+	message := firstNonEmpty(turnErrorText(turnErr), "codex turn failed")
+	return external.Reported(kind, message, summarizeErrorInfo(turnErr.CodexErrorInfo).attrs()...)
 }

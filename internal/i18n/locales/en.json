@@ -639,11 +639,12 @@
       "turn_replacement_unsupported": "Retry and edit are unavailable for external agent sessions. Send a new message instead."
     },
     "external_runtime": {
-      "auth_required": "Codex is not connected, or its sign-in has expired. Open Agent settings to connect ChatGPT or configure an API key.",
+      "auth_required": "This Agent is not signed in, or its credential was rejected. Open Agent settings to sign in again or update the API key.",
       "busy": "This Agent is finishing an earlier operation. Try again when it has finished.",
       "context_window_exceeded": "This conversation no longer fits in the model's context window. Compact the context or start a new conversation.",
       "overloaded": "The external Agent's model service is unavailable or overloaded right now. Try again in a moment, or switch to another model.",
       "rate_limited": "The external Agent was rate limited by its model service. Please wait a moment before sending again.",
+      "reported": "The Agent reported an error: {message}",
       "request_blocked": "The model service's safety policy blocked this request. Change the request and send it again.",
       "session_resume_failed": "The session could not be resumed. Try again or start a new conversation.",
       "unavailable": "The external Agent runtime is unavailable. Check the Agent setup and workspace, then try again.",

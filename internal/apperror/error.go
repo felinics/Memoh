@@ -151,6 +151,7 @@ const (
 	CodeExternalRuntimeOverloaded                Code = "external_runtime.overloaded"
 	CodeExternalRuntimeUpstreamUnreachable       Code = "external_runtime.upstream_unreachable"
 	CodeExternalRuntimeRequestBlocked            Code = "external_runtime.request_blocked"
+	CodeExternalRuntimeReported                  Code = "external_runtime.reported"
 	CodeToolApprovalForbidden                    Code = "tool_approval.forbidden"
 	CodeToolApprovalNotFound                     Code = "tool_approval.not_found"
 	CodeToolApprovalExpired                      Code = "tool_approval.expired"
@@ -917,6 +918,22 @@ var catalog = map[Code]Definition{
 		Detail:     "The session could not be resumed. Try again or start a new conversation.",
 		Fault:      FaultDependency,
 	},
+	// The external agent failed the turn and said why. Its own words are the
+	// copy, as the user would read them in the agent's own client; mapping
+	// them onto categories of ours could never cover every agent and only
+	// hid what happened. They are redacted of URLs and bounded before they
+	// become the argument.
+	CodeExternalRuntimeReported: {
+		HTTPStatus:  http.StatusBadGateway,
+		Detail:      "The external agent reported an error.",
+		AllowedArgs: []string{"message"},
+		Fault:       FaultDependency,
+	},
+	// The usage_limited, rate_limited, context_window_exceeded, overloaded,
+	// upstream_unreachable and request_blocked codes are no longer produced:
+	// the agent's own message is shown instead. They stay registered for the
+	// runs and history written with them.
+	//
 	// The external agent's own account has no usage left: a plan allowance
 	// that resets, a billing quota that does not, or a plan that does not
 	// include the agent. The agent reports them as one condition, so the copy

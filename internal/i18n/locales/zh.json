@@ -639,11 +639,12 @@
       "turn_replacement_unsupported": "外部 Agent 会话不支持重试或编辑，请改为发送一条新消息。"
     },
     "external_runtime": {
-      "auth_required": "Codex 账号未连接或登录已失效。请前往 Agent 设置连接 ChatGPT，或配置 API Key。",
+      "auth_required": "这个 Agent 尚未登录，或它的凭据被拒绝。请前往 Agent 设置重新登录，或更新 API Key。",
       "busy": "此 Agent 仍在完成之前的操作，请等待操作结束后重试。",
       "context_window_exceeded": "这个会话已超出模型的上下文长度上限。请压缩上下文，或新开一个会话。",
       "overloaded": "外部 Agent 的模型服务暂时不可用或过载。请稍后重试，或换一个模型。",
       "rate_limited": "外部 Agent 已达到模型服务的速率上限，请稍后再发送。",
+      "reported": "Agent 报错：{message}",
       "request_blocked": "这次请求被模型服务的安全策略拦截，请调整内容后再发送。",
       "session_resume_failed": "会话无法恢复，请重试或新开会话。",
       "unavailable": "外部 Agent 运行时暂不可用。请检查 Agent 配置和工作区后重试。",

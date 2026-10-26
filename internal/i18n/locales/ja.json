@@ -639,11 +639,12 @@
       "turn_replacement_unsupported": "外部 Agent のセッションでは再試行とメッセージの編集は利用できません。代わりに新しいメッセージを送信してください。"
     },
     "external_runtime": {
-      "auth_required": "Codex のアカウントが未接続か、ログインの有効期限が切れています。Agent の設定で ChatGPT に接続するか、API Key を設定してください。",
+      "auth_required": "この Agent はログインしていないか、認証情報が拒否されました。Agent の設定で再度ログインするか、API Key を更新してください。",
       "busy": "この Agent は前の処理を実行中です。完了してから再試行してください。",
       "context_window_exceeded": "この会話はモデルのコンテキストウィンドウを超えました。コンテキストを圧縮するか、新しい会話を開始してください。",
       "overloaded": "外部 Agent のモデルサービスが一時的に利用できないか、過負荷になっています。しばらくしてからもう一度お試しいただくか、別のモデルに切り替えてください。",
       "rate_limited": "外部 Agent がモデルサービスのレート制限に達しました。しばらく待ってからもう一度送信してください。",
+      "reported": "Agent がエラーを報告しました：{message}",
       "request_blocked": "このリクエストはモデルサービスの安全ポリシーによりブロックされました。内容を変更してもう一度送信してください。",
       "session_resume_failed": "セッションを再開できませんでした。もう一度お試しいただくか、新しい会話を開始してください。",
       "unavailable": "External Agent の Runtime を利用できません。Agent の設定と Workspace を確認して、もう一度お試しください。",

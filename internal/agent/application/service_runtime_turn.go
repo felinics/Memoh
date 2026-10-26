@@ -916,7 +916,8 @@ func (s *Service) persistRuntimeRound(
 	}
 	if promptErr != nil {
 		// The failure is recorded by its code and catalog args, which the
-		// history view renders. The cause's text stays out of history.
+		// history view renders. The cause's text stays out of history; what an
+		// agent reported in its own words is one of the args.
 		meta["agent_turn_outcome"] = "failed"
 		meta[messagepkg.HistoryErrorCodeMetadataKey] = string(classifyRuntimeFailure(promptErr))
 		if args := runtimeFailureArgs(promptErr); len(args) > 0 {

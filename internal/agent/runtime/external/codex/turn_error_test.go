@@ -12,10 +12,10 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 )
 
-// A failed turn is the Failure its codexErrorInfo stands for, whether the
-// error arrived on the completed turn or in an error notification, and a
-// category the user cannot act on keeps the plain failure. Either way the
-// category and the upstream status stay on the error for the result record.
+// A failed turn reports what Codex said, whether the error arrived on the
+// completed turn or in an error notification; only a sign-in Codex could not
+// refresh is told apart. The category and the upstream status stay on the
+// error for the result record.
 func TestFailedTurnClassification(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
@@ -25,18 +25,11 @@ func TestFailedTurnClassification(t *testing.T) {
 		category     string
 		status       string
 	}{
-		{name: "usage limit on the turn", info: `"usageLimitExceeded"`, kind: external.FailureUsageLimited, category: "usageLimitExceeded"},
-		{name: "usage limit in a notification", info: `"usageLimitExceeded"`, notification: true, kind: external.FailureUsageLimited, category: "usageLimitExceeded"},
-		{name: "rate limit", info: `"rateLimitExceeded"`, kind: external.FailureRateLimited, category: "rateLimitExceeded"},
-		{name: "context window", info: `"contextWindowExceeded"`, kind: external.FailureContextWindowExceeded, category: "contextWindowExceeded"},
+		{name: "usage limit on the turn", info: `"usageLimitExceeded"`, kind: external.FailureReported, category: "usageLimitExceeded"},
+		{name: "usage limit in a notification", info: `"usageLimitExceeded"`, notification: true, kind: external.FailureReported, category: "usageLimitExceeded"},
 		{name: "sign-in expired", info: `"unauthorized"`, kind: external.FailureAuthRequired, category: "unauthorized"},
-		{name: "model at capacity", info: `"serverOverloaded"`, kind: external.FailureOverloaded, category: "serverOverloaded"},
-		{name: "policy", info: `"cyberPolicy"`, kind: external.FailureRequestBlocked, category: "cyberPolicy"},
-		{name: "connection failed", info: `{"httpConnectionFailed":{"httpStatusCode":502}}`, kind: external.FailureUpstreamUnreachable, category: "httpConnectionFailed", status: "502"},
-		{name: "retries exhausted on a throttle", info: `{"responseTooManyFailedAttempts":{"httpStatusCode":429}}`, kind: external.FailureRateLimited, category: "responseTooManyFailedAttempts", status: "429"},
-		{name: "retries exhausted on a server error", info: `{"responseTooManyFailedAttempts":{"httpStatusCode":500}}`, kind: external.FailureOverloaded, category: "responseTooManyFailedAttempts", status: "500"},
-		{name: "nothing the user can do", info: `"sandboxError"`, category: "sandboxError"},
-		{name: "no error info"},
+		{name: "connection failed", info: `{"httpConnectionFailed":{"httpStatusCode":502}}`, kind: external.FailureReported, category: "httpConnectionFailed", status: "502"},
+		{name: "no error info", kind: external.FailureReported},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := `{"message":"You've hit your usage limit. Try again at 5:00 PM."`
@@ -67,8 +60,8 @@ func TestFailedTurnClassification(t *testing.T) {
 			if errors.As(err, &failure) {
 				kind = failure.Kind
 			}
-			if kind != tc.kind {
-				t.Fatalf("failure kind = %d, want %d (err %v)", kind, tc.kind, err)
+			if kind != tc.kind || failure.Message != "You've hit your usage limit. Try again at 5:00 PM." {
+				t.Fatalf("failure = %+v, want kind %d with Codex's message", failure, tc.kind)
 			}
 			attrs := map[string]string{}
 			for _, attr := range errs.Analyze(t.Context(), err).Attrs {

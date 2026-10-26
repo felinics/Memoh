@@ -279,6 +279,7 @@
       "context_window_exceeded": "这个会话已超出模型的上下文长度上限。请压缩上下文，或新开一个会话。",
       "overloaded": "外部 Agent 的模型服务暂时不可用或过载。请稍后重试，或换一个模型。",
       "rate_limited": "外部 Agent 已达到模型服务的速率上限，请稍后再发送。",
+      "reported": "Agent 报错：{message}",
       "request_blocked": "这次请求被模型服务的安全策略拦截，请调整内容后再发送。",
       "session_resume_failed": "会话无法恢复，请重试或新开会话。",
       "unavailable": "外部 Agent 运行时暂不可用。请检查 Agent 配置和工作区后重试。",

@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"testing"
 
+	acp "github.com/coder/acp-go-sdk"
+
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
 )
 
@@ -24,5 +27,18 @@ func TestNormalizePromptErrorNamesTheMissingCommand(t *testing.T) {
 	}
 	if errors.As(err, &missing) {
 		t.Fatal("PromptError exposed its cause to errors.As")
+	}
+}
+
+func TestNormalizePromptErrorReportsWhatTheAgentSaid(t *testing.T) {
+	answer := &acp.RequestError{Code: -32603, Message: "Internal error", Data: map[string]any{"message": "model quota exhausted"}}
+	err := normalizePromptError(fmt.Errorf("prompt: %w", answer))
+	var failure *external.Failure
+	if !errors.As(err, &failure) || failure.Kind != external.FailureReported || failure.Message != "model quota exhausted" {
+		t.Fatalf("normalizePromptError() = %v, want the agent's own words", err)
+	}
+	plain := errors.New("connection reset")
+	if got := normalizePromptError(plain); !errors.Is(got, plain) || external.IsFailure(got) {
+		t.Fatalf("normalizePromptError() = %v, want an error the agent did not answer unchanged", got)
 	}
 }

@@ -1,6 +1,12 @@
 package external
 
-import "errors"
+import (
+	"errors"
+	"log/slog"
+	"strings"
+
+	"github.com/felinics/memoh/internal/errs"
+)
 
 // FailureKind names a runtime failure the user can act on. The application
 // chooses the public error for each kind.
@@ -28,24 +34,9 @@ const (
 	// FailureCredentialBusy: the credential cannot change while a turn runs
 	// on it.
 	FailureCredentialBusy
-	// FailureUsageLimited: the runtime's account has used up its usage
-	// allowance; a later turn may run once it resets.
-	FailureUsageLimited
-	// FailureRateLimited: the runtime's model service is throttling the
-	// account; a turn sent a moment later may run.
-	FailureRateLimited
-	// FailureContextWindowExceeded: the conversation no longer fits in the
-	// model's context window; it has to be compacted or started over.
-	FailureContextWindowExceeded
-	// FailureOverloaded: the runtime's model service is failing or at
-	// capacity; a later turn or another model may run.
-	FailureOverloaded
-	// FailureUpstreamUnreachable: the runtime could not reach its model
-	// service, or lost the connection to it.
-	FailureUpstreamUnreachable
-	// FailureRequestBlocked: the model service's policy refused the request;
-	// the same request will be refused again.
-	FailureRequestBlocked
+	// FailureReported: the agent failed the turn and said why; Message is
+	// what it said.
+	FailureReported
 	// FailureRuntimeBusy: the previous native process must finish before restart.
 	FailureRuntimeBusy
 	// FailureForkLatestOnly: the requested fork anchor is no longer the latest.
@@ -63,12 +54,7 @@ var failureText = map[FailureKind]string{ //nolint:gosec // G101 matches the cre
 	FailureControlFailed:           "runtime control failed",
 	FailureCredential:              "agent credential is unusable",
 	FailureCredentialBusy:          "agent credential is in use by a running turn",
-	FailureUsageLimited:            "external agent usage limit reached",
-	FailureRateLimited:             "external agent rate limit reached",
-	FailureContextWindowExceeded:   "external agent context window exceeded",
-	FailureOverloaded:              "external agent model service is overloaded",
-	FailureUpstreamUnreachable:     "external agent model service is unreachable",
-	FailureRequestBlocked:          "external agent request was blocked by policy",
+	FailureReported:                "external agent reported a failure",
 }
 
 // Failure is a runtime failure the user can act on. Like a public error it
@@ -78,6 +64,9 @@ var failureText = map[FailureKind]string{ //nolint:gosec // G101 matches the cre
 type Failure struct {
 	Kind FailureKind
 	Err  error
+	// Message is what the agent itself said about the failure, made fit to
+	// show and keep: users read it as they would in the agent's own client.
+	Message string
 }
 
 func (f *Failure) Error() string {
@@ -98,6 +87,23 @@ func Unavailable(err error) error {
 // Fail reports a failure of kind, caused by err when err is not nil.
 func Fail(kind FailureKind, err error) error {
 	return &Failure{Kind: kind, Err: err}
+}
+
+// maxMessageBytes bounds a reported message; an agent can attach a whole
+// response body.
+const maxMessageBytes = 2000
+
+// Reported is a failure the agent reported in its own words: kind is
+// FailureReported, or FailureAuthRequired when the agent's protocol marked it
+// as a sign-in problem. URLs in the message lose their credentials and
+// queries. attrs describe the failure to the result record.
+func Reported(kind FailureKind, message string, attrs ...slog.Attr) error {
+	message = strings.TrimSpace(message)
+	public := errs.RedactURLs(message)
+	if len(public) > maxMessageBytes {
+		public = strings.ToValidUTF8(public[:maxMessageBytes], "") + "…"
+	}
+	return &Failure{Kind: kind, Err: errs.NewDependency(message, attrs...), Message: public}
 }
 
 // IsFailure reports whether err carries a Failure.

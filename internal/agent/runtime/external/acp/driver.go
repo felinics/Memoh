@@ -165,9 +165,10 @@ func (e *PromptError) Error() string { return e.Err.Error() }
 func (e *PromptError) Cause() error { return e.Err }
 
 // normalizePromptError marks the pool failures that reject the turn's
-// configuration as a PromptError and returns any other error unchanged.
-// Input-class failures (a stale command, an image the agent cannot read) stay
-// package errors for the application to translate.
+// configuration as a PromptError, and an error the agent answered with as a
+// failure it reported in its own words. Any other error is returned
+// unchanged: input-class failures (a stale command, an image the agent cannot
+// read) stay package errors for the application to translate.
 func normalizePromptError(err error) error {
 	var commandNotFound *client.CommandNotFoundError
 	switch {
@@ -180,9 +181,11 @@ func normalizePromptError(err error) error {
 		errors.Is(err, client.ErrReasoningEffortUnavailable),
 		errors.Is(err, ErrRuntimeConfigUpdateFailed):
 		return &PromptError{Err: err}
-	default:
-		return err
 	}
+	if _, text, ok := client.AgentError(err); ok {
+		return external.Reported(external.FailureReported, text)
+	}
+	return err
 }
 
 func driverMetadataString(metadata map[string]any, key string) string {
