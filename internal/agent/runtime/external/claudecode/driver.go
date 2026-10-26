@@ -16,13 +16,13 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/agent/runtime/external/agentproc"
 	"github.com/felinics/memoh/internal/agent/runtime/external/claudecode/claudecfg"
 	"github.com/felinics/memoh/internal/agent/runtime/external/toolmount"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/runtimekind"
-	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -40,12 +40,6 @@ const (
 	controlCLIDrainTimeout = 5 * time.Second
 )
 
-// BridgeSource resolves the workspace bridge client for a bot.
-type BridgeSource interface {
-	MCPClient(ctx context.Context, botID string) (*bridge.Client, error)
-	WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error)
-}
-
 // ApprovalService is the decision flow the driver routes approvals through.
 type ApprovalService interface {
 	approval.FlowService
@@ -54,7 +48,7 @@ type ApprovalService interface {
 
 // Driver runs Claude Code turns over the stream-json wire protocol.
 type Driver struct {
-	bridges     BridgeSource
+	workspaces  external.Workspaces
 	agents      *botagents.Service
 	credentials *agentcredential.Service
 	approval    ApprovalService
@@ -71,7 +65,7 @@ type Driver struct {
 
 // NewDriver constructs the Claude Code runtime driver.
 func NewDriver(
-	bridges BridgeSource,
+	workspaces external.Workspaces,
 	agents *botagents.Service,
 	credentials *agentcredential.Service,
 	approvalSvc ApprovalService,
@@ -79,7 +73,7 @@ func NewDriver(
 	logger *slog.Logger,
 ) *Driver {
 	d := &Driver{
-		bridges:     bridges,
+		workspaces:  workspaces,
 		agents:      agents,
 		credentials: credentials,
 		approval:    approvalSvc,
@@ -164,20 +158,16 @@ func (d *Driver) startControlCLI(ctx context.Context, botID, botAgentID, project
 	if err != nil {
 		return cfg, nil, nil, err
 	}
-	client, err := d.bridges.MCPClient(ctx, botID)
-	if err != nil {
+	if _, err := external.ContainerWorkspace(ctx, d.workspaces, botID, RuntimeType); err != nil {
 		return cfg, nil, nil, err
 	}
-	workspaceInfo, err := d.bridges.WorkspaceInfo(ctx, botID)
+	client, err := d.workspaces.MCPClient(ctx, botID)
 	if err != nil {
-		return cfg, nil, nil, err
-	}
-	if err := external.RequireContainerWorkspace(workspaceInfo, RuntimeType); err != nil {
 		return cfg, nil, nil, err
 	}
 	// A missing dependency returns as external.DependencyMissingError; it
 	// must not be re-wrapped into a generic runtime error.
-	launcher, err := d.resolveLauncher(ctx, botID)
+	launcher, err := agentproc.ResolveLauncher(ctx, d.launchers, botID, dependencyID, defaultLauncherPath)
 	if err != nil {
 		return cfg, nil, nil, err
 	}
@@ -310,21 +300,18 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		}
 		return external.PromptResult{}, external.Unavailable(err)
 	}
-	client, err := d.bridges.MCPClient(ctx, input.BotID)
+	workspaceInfo, err := external.ContainerWorkspace(ctx, d.workspaces, input.BotID, RuntimeType)
 	if err != nil {
-		return external.PromptResult{}, external.Unavailable(err)
-	}
-	workspaceInfo, err := d.bridges.WorkspaceInfo(ctx, input.BotID)
-	if err != nil {
-		return external.PromptResult{}, external.Unavailable(err)
-	}
-	if err := external.RequireContainerWorkspace(workspaceInfo, RuntimeType); err != nil {
 		return external.PromptResult{}, err
+	}
+	client, err := d.workspaces.MCPClient(ctx, input.BotID)
+	if err != nil {
+		return external.PromptResult{}, external.Unavailable(err)
 	}
 	// Resolve the CLI copy before any session or tool work: a missing
 	// dependency ends the turn here with external.DependencyMissingError,
 	// which the application translates.
-	launcher, err := d.resolveLauncher(ctx, input.BotID)
+	launcher, err := agentproc.ResolveLauncher(ctx, d.launchers, input.BotID, dependencyID, defaultLauncherPath)
 	if err != nil {
 		return external.PromptResult{}, err
 	}
@@ -513,16 +500,16 @@ func cliArgs(cfg claudecfg.Config, input external.PromptInput, sessionID, mcpCon
 		args = append(args, "--allow-dangerously-skip-permissions")
 	}
 	if model := firstNonEmpty(input.ModelID, cfg.Model); model != "" {
-		args = append(args, "--model", shellQuote(model))
+		args = append(args, "--model", agentproc.ShellQuote(model))
 	}
 	if effort := strings.TrimSpace(input.ReasoningEffort); effort != "" {
-		args = append(args, "--effort", shellQuote(effort))
+		args = append(args, "--effort", agentproc.ShellQuote(effort))
 	}
 	if sessionID != "" {
-		args = append(args, "--resume", shellQuote(sessionID))
+		args = append(args, "--resume", agentproc.ShellQuote(sessionID))
 	}
 	if mcpConfig != "" {
-		args = append(args, "--mcp-config", shellQuote(mcpConfig))
+		args = append(args, "--mcp-config", agentproc.ShellQuote(mcpConfig))
 	}
 	return args
 }
@@ -531,21 +518,19 @@ func cliArgs(cfg claudecfg.Config, input external.PromptInput, sessionID, mcpCon
 // belong to sessions; a catalog read must not run the user's scripts.
 func controlCLIArgs(cfg claudecfg.Config, cliVersion string) []string {
 	return append(cliArgs(cfg, external.PromptInput{}, "", "", cliVersion),
-		"--settings", shellQuote(`{"disableAllHooks":true}`), "--strict-mcp-config")
+		"--settings", agentproc.ShellQuote(`{"disableAllHooks":true}`), "--strict-mcp-config")
 }
 
 // cliEnv builds the process environment: durable state under the bot volume
 // plus the configured credential.
 func cliEnv(cfg claudecfg.Config) []string {
-	env := []string{
-		"PATH=" + containerPath,
-		"HOME=" + defaultProjectPath,
-		"CLAUDE_CONFIG_DIR=" + configDir,
+	env := agentproc.BaseEnv(
+		"CLAUDE_CONFIG_DIR="+configDir,
 		"CLAUDE_CODE_ENTRYPOINT=sdk-go",
 		// Both callers require a container workspace. Declare that existing
 		// isolation so the CLI accepts bypass mode when the container runs as root.
 		"IS_SANDBOX=1",
-	}
+	)
 	switch cfg.Auth {
 	case claudecfg.AuthAPIKey:
 		if cfg.BaseURL == "" {
@@ -604,11 +589,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-// shellQuote wraps one argument for the bridge's shell command line.
-func shellQuote(arg string) string {
-	return "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
 }
 
 func base64Encode(data []byte) string {

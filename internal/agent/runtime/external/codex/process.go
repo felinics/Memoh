@@ -4,18 +4,12 @@ import (
 	"context"
 	"strings"
 
-	"github.com/felinics/memoh/internal/agent/runtime/external/agentprocess"
+	"github.com/felinics/memoh/internal/agent/runtime/external/agentproc"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
-	"github.com/felinics/memoh/internal/workspace/vpath"
 )
 
-// containerPath is the PATH the app-server and every command it spawns see.
-// The managed dependency shim directory comes first so a managed
-// overlay of an image runtime (node, python, uv) wins over the toolkit copy.
-const containerPath = vpath.DataMount + "/.memoh/deps/bin:/opt/memoh/toolkit/bin:/usr/local/bin:/usr/bin:/bin"
-
-type appServerProcess = agentprocess.Process
+type appServerProcess = agentproc.Child
 
 // startAppServer launches `codex app-server` from the resolved launcher path.
 func startAppServer(ctx context.Context, client *bridge.Client, workDir, home string, cfg Config, launcher string) (*appServerProcess, error) {
@@ -29,40 +23,24 @@ func startAppServer(ctx context.Context, client *bridge.Client, workDir, home st
 	if err := materializeCodexConfig(ctx, client, home, cfg); err != nil {
 		return nil, err
 	}
-	proc, err := agentprocess.Start(ctx, client, appServerCommand(launcher), workDir, codexAppServerEnv(home))
+	proc, err := agentproc.Spawn(ctx, client, appServerCommand(launcher), workDir, appServerEnv(home))
 	if err != nil {
 		return nil, errs.WrapDependency(err, "")
 	}
 	return proc, nil
 }
 
-func codexAppServerEnv(home string) []string {
-	return []string{
-		"CODEX_HOME=" + home,
-		"PATH=" + containerPath,
-		"RUST_LOG=error",
-	}
+// appServerEnv carries no provider configuration or credential: those reach
+// Codex through its home.
+func appServerEnv(home string) []string {
+	return agentproc.BaseEnv("CODEX_HOME="+home, "RUST_LOG=error")
 }
 
 // appServerCommand builds the shell command line that starts the app-server.
-// The launcher path is quoted: managed installs live under per-bot data
-// directories whose names are not under Memoh's control.
 func appServerCommand(launcher string) string {
 	launcher = strings.TrimSpace(launcher)
 	if launcher == "" {
 		launcher = defaultLauncherPath
 	}
-	return escapeShellArg(launcher) + " app-server -c features.goals=true"
-}
-
-// escapeShellArg single-quotes value for a POSIX shell when it carries any
-// character the shell would otherwise interpret; plain paths pass through.
-func escapeShellArg(value string) string {
-	if value == "" {
-		return "''"
-	}
-	if !strings.ContainsAny(value, " \t\n'\"\\$&;|<>*?()[]{}!`") {
-		return value
-	}
-	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+	return agentproc.ShellQuote(launcher) + " app-server -c features.goals=true"
 }

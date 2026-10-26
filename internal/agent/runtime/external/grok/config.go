@@ -49,10 +49,6 @@ const (
 	// defaultLauncherPath is used only when no LauncherResolver is installed.
 	defaultLauncherPath = "/opt/memoh/toolkit/bin/grok"
 	defaultProjectPath  = vpath.DataMount
-
-	// containerPath puts the managed dependency shims first so a managed
-	// runtime overlays the toolkit copy.
-	containerPath = vpath.DataMount + "/.memoh/deps/bin:/opt/memoh/toolkit/bin:/usr/local/bin:/usr/bin:/bin"
 )
 
 // Grok's own ACP extension methods, with the shapes Grok 1.0.62 answers.

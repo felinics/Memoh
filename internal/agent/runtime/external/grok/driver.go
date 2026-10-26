@@ -23,8 +23,6 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/external/toolmount"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/botagents"
-	"github.com/felinics/memoh/internal/errs"
-	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 // contextURI names the Memoh context document embedded in a prompt.
@@ -34,15 +32,9 @@ const contextURI = "memoh://context/current-turn"
 // permission callbacks to unwind before its session is given up.
 const decisionQuiesceTimeout = 3 * time.Second
 
-// BridgeSource resolves the workspace bridge client for a bot.
-type BridgeSource interface {
-	MCPClient(ctx context.Context, botID string) (*bridge.Client, error)
-	WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error)
-}
-
 // Driver runs Grok Build turns over ACP.
 type Driver struct {
-	bridges     BridgeSource
+	workspaces  external.Workspaces
 	agents      *botagents.Service
 	credentials *agentcredential.Service
 	approval    acpclient.ToolApprovalService
@@ -65,7 +57,7 @@ type Driver struct {
 }
 
 func NewDriver(
-	bridges BridgeSource,
+	workspaces external.Workspaces,
 	agents *botagents.Service,
 	credentials *agentcredential.Service,
 	approval acpclient.ToolApprovalService,
@@ -74,7 +66,7 @@ func NewDriver(
 	logger *slog.Logger,
 ) *Driver {
 	return &Driver{
-		bridges:     bridges,
+		workspaces:  workspaces,
 		agents:      agents,
 		credentials: credentials,
 		approval:    approval,
@@ -143,11 +135,8 @@ func fingerprint(cfg Config, launcher external.Launcher) string {
 // configuration when there is none or it was started from another. The
 // caller must call the returned release when done.
 func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*server, func(), error) {
-	info, err := d.bridges.WorkspaceInfo(ctx, botID)
+	info, err := external.ContainerWorkspace(ctx, d.workspaces, botID, RuntimeType)
 	if err != nil {
-		return nil, nil, err
-	}
-	if err := external.RequireContainerWorkspace(info, RuntimeType); err != nil {
 		return nil, nil, err
 	}
 	cfg, err := d.agentConfig(ctx, botID, botAgentID)
@@ -157,12 +146,12 @@ func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*
 	if cfg, err = d.apiKeyFor(ctx, botID, botAgentID, cfg); err != nil {
 		return nil, nil, err
 	}
-	launcher, err := d.resolveLauncher(ctx, botID)
+	launcher, err := agentproc.ResolveLauncher(ctx, d.launchers, botID, dependencyID, defaultLauncherPath)
 	if err != nil {
 		return nil, nil, err
 	}
 	start := func(ctx context.Context) (agentproc.Process, string, error) {
-		client, err := d.bridges.MCPClient(ctx, botID)
+		client, err := d.workspaces.MCPClient(ctx, botID)
 		if err != nil {
 			return nil, "", fmt.Errorf("workspace bridge for bot %s: %w", botID, err)
 		}
@@ -175,7 +164,7 @@ func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*
 			return nil, "", err
 		}
 		version, _ := srv.conn.AgentMeta()["agentVersion"].(string)
-		d.observeLauncherVersion(ctx, botID, version)
+		agentproc.ObserveVersion(ctx, d.launchers, botID, dependencyID, version)
 		started := launcher
 		started.Version = firstNonEmpty(version, launcher.Version)
 		return srv, fingerprint(cfg, started), nil
@@ -185,16 +174,6 @@ func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*
 		return nil, nil, err
 	}
 	return proc.(*server), release, nil
-}
-
-// observeLauncherVersion reports the handshake version to the resolver when
-// it keeps a version cache.
-func (d *Driver) observeLauncherVersion(ctx context.Context, botID, version string) {
-	observer, ok := d.launchers.(external.VersionObserver)
-	if !ok || strings.TrimSpace(version) == "" {
-		return
-	}
-	observer.ObserveLauncherVersion(ctx, botID, dependencyID, strings.TrimSpace(version))
 }
 
 // releaseOtherCopies keeps one process per Grok session: a copy of the
@@ -216,29 +195,6 @@ func (d *Driver) releaseOtherCopies(srv *server, input external.PromptInput) err
 		other.dropThread(input.ThreadID, th, false)
 	}
 	return nil
-}
-
-// resolveLauncher discovers the grok CLI copy without installing it.
-func (d *Driver) resolveLauncher(ctx context.Context, botID string) (external.Launcher, error) {
-	if d.launchers == nil {
-		return external.Launcher{Path: defaultLauncherPath, Source: external.LauncherSourceToolkit}, nil
-	}
-	launcher, err := d.launchers.ResolveLauncher(ctx, botID, dependencyID)
-	if err != nil {
-		var missing *external.DependencyMissingError
-		if errors.As(err, &missing) {
-			return external.Launcher{}, &external.DependencyMissingError{
-				DependencyID:        firstNonEmpty(missing.DependencyID, dependencyID),
-				TaskID:              strings.TrimSpace(missing.TaskID),
-				OperationInProgress: missing.OperationInProgress || strings.TrimSpace(missing.TaskID) != "",
-			}
-		}
-		return external.Launcher{}, fmt.Errorf("resolve grok launcher for bot %s: %w", botID, err)
-	}
-	if strings.TrimSpace(launcher.Path) == "" {
-		return external.Launcher{}, errs.New(fmt.Sprintf("resolve grok launcher for bot %s: resolver returned no path", botID))
-	}
-	return launcher, nil
 }
 
 // Prompt implements external.Driver: one turn on the conversation's session.

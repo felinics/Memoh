@@ -89,7 +89,7 @@ func (d *Driver) PurgeBotAgentAuth(ctx context.Context, botID, botAgentID string
 	defer unblock()
 	// A sign-in under way would put a login back, so it ends here.
 	d.cancelAgentSignIns(botID, botAgentID)
-	client, err := d.bridges.MCPClient(ctx, botID)
+	client, err := d.workspaces.MCPClient(ctx, botID)
 	if err != nil {
 		return err
 	}

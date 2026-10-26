@@ -25,13 +25,6 @@ import (
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
-// BridgeSource resolves the workspace bridge client for a bot; the workspace
-// manager implements it.
-type BridgeSource interface {
-	MCPClient(ctx context.Context, botID string) (*bridge.Client, error)
-	WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error)
-}
-
 // ApprovalService is the decision flow the driver routes approvals through.
 type ApprovalService interface {
 	approval.FlowService
@@ -40,7 +33,7 @@ type ApprovalService interface {
 
 // Driver runs codex turns over the app-server protocol.
 type Driver struct {
-	bridges     BridgeSource
+	workspaces  external.Workspaces
 	agents      *botagents.Service
 	credentials *agentcredential.Service
 	approval    ApprovalService
@@ -58,7 +51,7 @@ type Driver struct {
 
 // NewDriver constructs the codex runtime driver.
 func NewDriver(
-	bridges BridgeSource,
+	workspaces external.Workspaces,
 	agents *botagents.Service,
 	credentials *agentcredential.Service,
 	approvalSvc ApprovalService,
@@ -68,7 +61,7 @@ func NewDriver(
 	logger *slog.Logger,
 ) *Driver {
 	return &Driver{
-		bridges:     bridges,
+		workspaces:  workspaces,
 		agents:      agents,
 		credentials: credentials,
 		approval:    approvalSvc,
@@ -596,23 +589,20 @@ func fingerprint(cfg Config, launcher external.Launcher) string {
 // configuration when there is none or it was started from another. The
 // caller must call the returned release when done.
 func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*appServer, func(), error) {
-	info, err := d.bridges.WorkspaceInfo(ctx, botID)
+	info, err := external.ContainerWorkspace(ctx, d.workspaces, botID, RuntimeType)
 	if err != nil {
-		return nil, nil, err
-	}
-	if err := external.RequireContainerWorkspace(info, RuntimeType); err != nil {
 		return nil, nil, err
 	}
 	cfg, err := d.resolveAgentConfig(ctx, botID, botAgentID, false)
 	if err != nil {
 		return nil, nil, err
 	}
-	launcher, err := d.resolveLauncher(ctx, botID)
+	launcher, err := agentproc.ResolveLauncher(ctx, d.launchers, botID, dependencyID, defaultLauncherPath)
 	if err != nil {
 		return nil, nil, err
 	}
 	start := func(ctx context.Context) (agentproc.Process, string, error) {
-		client, err := d.bridges.MCPClient(ctx, botID)
+		client, err := d.workspaces.MCPClient(ctx, botID)
 		if err != nil {
 			return nil, "", fmt.Errorf("workspace bridge for bot %s: %w", botID, err)
 		}
@@ -620,9 +610,7 @@ func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*
 		if err != nil {
 			return nil, "", err
 		}
-		// The handshake reports the version actually running; feed it back so
-		// the resolver's discovery cache is corrected without a second probe.
-		d.observeLauncherVersion(ctx, botID, srv.codexVersion)
+		agentproc.ObserveVersion(ctx, d.launchers, botID, dependencyID, srv.codexVersion)
 		srv.workspaceInfo = info
 		srv.toolLookup = d.botGatewayToolLookup(botID)
 		started := launcher
@@ -634,48 +622,6 @@ func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*
 		return nil, nil, err
 	}
 	return proc.(*appServer), release, nil
-}
-
-// resolveLauncher discovers the codex CLI copy without installing it. A
-// missing dependency tells the user whether an administrator must act or an
-// existing operation is still in progress.
-func (d *Driver) resolveLauncher(ctx context.Context, botID string) (external.Launcher, error) {
-	if d.launchers == nil {
-		return external.Launcher{Path: defaultLauncherPath, Source: external.LauncherSourceToolkit}, nil
-	}
-	launcher, err := d.launchers.ResolveLauncher(ctx, botID, dependencyID)
-	if err != nil {
-		var missing *external.DependencyMissingError
-		if errors.As(err, &missing) {
-			return external.Launcher{}, dependencyMissing(missing)
-		}
-		return external.Launcher{}, fmt.Errorf("resolve codex launcher for bot %s: %w", botID, err)
-	}
-	if strings.TrimSpace(launcher.Path) == "" {
-		return external.Launcher{}, errs.New(fmt.Sprintf("resolve codex launcher for bot %s: resolver returned no path", botID))
-	}
-	return launcher, nil
-}
-
-// dependencyMissing blocks a turn until the dependency is available. It
-// names this driver's dependency when the resolver did not, and counts a
-// started installation task as an operation in progress.
-func dependencyMissing(missing *external.DependencyMissingError) *external.DependencyMissingError {
-	return &external.DependencyMissingError{
-		DependencyID:        firstNonEmpty(missing.DependencyID, dependencyID),
-		TaskID:              strings.TrimSpace(missing.TaskID),
-		OperationInProgress: missing.OperationInProgress || strings.TrimSpace(missing.TaskID) != "",
-	}
-}
-
-// observeLauncherVersion reports the handshake version to the resolver when
-// it keeps a version cache.
-func (d *Driver) observeLauncherVersion(ctx context.Context, botID, version string) {
-	observer, ok := d.launchers.(external.VersionObserver)
-	if !ok || strings.TrimSpace(version) == "" {
-		return
-	}
-	observer.ObserveLauncherVersion(ctx, botID, dependencyID, strings.TrimSpace(version))
 }
 
 // wrapServerError shapes an app-server acquisition failure for the caller.
@@ -848,7 +794,7 @@ func (d *Driver) PurgeBotAgentAuth(ctx context.Context, botID, botAgentID string
 		return err
 	}
 	defer unblock()
-	client, err := d.bridges.MCPClient(ctx, botID)
+	client, err := d.workspaces.MCPClient(ctx, botID)
 	if err != nil {
 		return err
 	}

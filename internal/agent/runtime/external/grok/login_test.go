@@ -82,7 +82,7 @@ func testDriver(t *testing.T, signIns ...*signIn) *Driver {
 	d := &Driver{
 		signIns:     map[string]*signIn{},
 		signInGates: map[string]chan struct{}{},
-		bridges:     unreachableBridges{},
+		workspaces:  unreachableBridges{},
 		procs:       agentproc.New(agentproc.Options{}),
 	}
 	t.Cleanup(func() { d.procs.Close(context.Background()) })

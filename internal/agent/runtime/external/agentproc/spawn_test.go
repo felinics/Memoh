@@ -1,4 +1,4 @@
-package agentprocess
+package agentproc
 
 import (
 	"context"
@@ -36,7 +36,7 @@ func TestProcessStdinEOFDrainsOutputAndReportsExit(t *testing.T) {
 		t.Run(code, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			proc, err := Start(ctx, client, "while read line; do :; done; printf flushed; exit "+code, "", nil)
+			proc, err := Spawn(ctx, client, "while read line; do :; done; printf flushed; exit "+code, "", nil)
 			if err != nil {
 				t.Fatal(err)
 			}

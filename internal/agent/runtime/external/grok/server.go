@@ -11,7 +11,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
-	"github.com/felinics/memoh/internal/agent/runtime/external/agentprocess"
+	"github.com/felinics/memoh/internal/agent/runtime/external/agentproc"
 	"github.com/felinics/memoh/internal/agent/runtime/external/toolmount"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/errs"
@@ -26,7 +26,7 @@ const handshakeTimeout = 60 * time.Second
 // server is one `grok agent stdio` process and the conversations it hosts.
 type server struct {
 	botID         string
-	proc          *agentprocess.Process
+	proc          *agentproc.Child
 	conn          *acpclient.Conn
 	client        *bridge.Client
 	workspaceInfo bridge.WorkspaceInfo
@@ -129,10 +129,10 @@ func startServer(ctx context.Context, botID, home string, client *bridge.Client,
 }
 
 // launch starts one grok process on home and completes the ACP handshake.
-func launch(ctx context.Context, client *bridge.Client, home, apiKey string, launcher external.Launcher, logger *slog.Logger) (*agentprocess.Process, *acpclient.Conn, error) {
+func launch(ctx context.Context, client *bridge.Client, home, apiKey string, launcher external.Launcher, logger *slog.Logger) (*agentproc.Child, *acpclient.Conn, error) {
 	// Grok can also serve through a shared leader process that outlives its
 	// stdio client; sessions and the login file must die with this process.
-	proc, err := agentprocess.Start(ctx, client, shellQuote(launcher.Path)+" agent --no-leader stdio", defaultProjectPath, processEnv(home, apiKey))
+	proc, err := agentproc.Spawn(ctx, client, agentproc.ShellQuote(launcher.Path)+" agent --no-leader stdio", defaultProjectPath, processEnv(home, apiKey))
 	if err != nil {
 		return nil, nil, errs.WrapDependency(err, "start grok agent")
 	}
@@ -153,10 +153,8 @@ func launch(ctx context.Context, client *bridge.Client, home, apiKey string, lau
 // processEnv is the whole environment of a grok process. apiKey is empty for
 // a Grok account login, which Grok reads from its home.
 func processEnv(home, apiKey string) []string {
-	env := []string{
-		"PATH=" + containerPath,
-		"HOME=" + defaultProjectPath,
-		"GROK_HOME=" + home,
+	env := agentproc.BaseEnv(
+		"GROK_HOME="+home,
 		// The managed dependency owns the CLI version.
 		"GROK_DISABLE_AUTOUPDATER=1",
 		// Memoh keeps the transcript: a stopped turn stays in Grok's history
@@ -168,7 +166,7 @@ func processEnv(home, apiKey string) []string {
 		// Memoh owns memory. Grok's would carry across every conversation of
 		// the Agent, which share its home.
 		"GROK_MEMORY=0",
-	}
+	)
 	if apiKey != "" {
 		env = append(env, "XAI_API_KEY="+apiKey)
 	}
@@ -360,11 +358,6 @@ func (s *server) toolSession(th *thread) mcp.ToolSessionContext {
 	}
 	session.RunContext = turn.ctx
 	return session
-}
-
-// shellQuote wraps one argument for the bridge's shell command line.
-func shellQuote(arg string) string {
-	return "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
 }
 
 func firstNonEmpty(values ...string) string {
