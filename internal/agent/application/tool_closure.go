@@ -8,6 +8,7 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 const syntheticToolClosureError = "tool execution interrupted before a response was recorded"
@@ -15,6 +16,10 @@ const syntheticToolClosureError = "tool execution interrupted before a response 
 type pendingToolCall struct {
 	ID       string
 	ToolName string
+	// Source is the stored message that made the call. The result that
+	// closes it renders from that message, so a fold that covers the call
+	// removes the closure with it.
+	Source *turn.ContextMessageSource
 }
 
 type projectedToolCallKey struct {
@@ -44,7 +49,9 @@ func repairToolCallClosures(messages []ModelMessage, reason string) []ModelMessa
 			if !ok {
 				continue
 			}
-			repaired = append(repaired, syntheticToolResultMessage(call.ID, call.ToolName, reason))
+			closure := syntheticToolResultMessage(call.ID, call.ToolName, reason)
+			closure.ContextSource = call.Source
+			repaired = append(repaired, closure)
 			delete(pending, callID)
 		}
 		pendingOrder = pendingOrder[:0]
@@ -69,6 +76,7 @@ func repairToolCallClosures(messages []ModelMessage, reason string) []ModelMessa
 				pending[callID] = pendingToolCall{
 					ID:       callID,
 					ToolName: strings.TrimSpace(call.ToolName),
+					Source:   closureSource(msg.ContextSource),
 				}
 				pendingOrder = append(pendingOrder, callID)
 			}
@@ -308,6 +316,18 @@ func modelMessageWithParts(original ModelMessage, sdkMsg sdk.Message, parts []sd
 	converted[0].Usage = original.Usage
 	converted[0].ContextSource = original.ContextSource
 	return &converted[0]
+}
+
+// closureSource is the source of a result the read path writes for a call
+// made by a message from source: the same stored message, never a current
+// input.
+func closureSource(source *turn.ContextMessageSource) *turn.ContextMessageSource {
+	if source == nil {
+		return nil
+	}
+	derived := *source
+	derived.Current = false
+	return &derived
 }
 
 func syntheticToolResultMessage(toolCallID, toolName, reason string) ModelMessage {
