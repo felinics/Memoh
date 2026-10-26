@@ -57,7 +57,7 @@ func (s *Service) chatBudgetRecovery(req ChatRequest, layout chatHistoryLayout) 
 		compactionReq := req
 		compactionReq.RunID = cfg.RunID
 		if err := s.compactForBudget(ctx, compactionReq, pressure, budget, cfg.CurrentModelUUID); err != nil {
-			return cfg, false, fmt.Errorf("%w: %s", contextfrag.ErrBudgetUnsatisfied, err.Error())
+			return cfg, false, fmt.Errorf("%w: %w", contextfrag.ErrBudgetUnsatisfied, err)
 		}
 		var messages []ModelMessage
 		var records []historyfrag.HistoryRecord
@@ -322,7 +322,7 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 	*compacted = true
 	recovery := ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: cfg.RunID, discussCurrentSources: protected}
 	if err := s.compactForBudget(ctx, recovery, pressure, historyBudget, modelID); err != nil {
-		return cfg, false, fmt.Errorf("%w: %s", contextfrag.ErrBudgetUnsatisfied, err.Error())
+		return cfg, false, fmt.Errorf("%w: %w", contextfrag.ErrBudgetUnsatisfied, err)
 	}
 	return cfg, false, native.ErrContextRecompose
 }

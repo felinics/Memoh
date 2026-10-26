@@ -33,7 +33,7 @@ func (s *Service) prepareExternalDiscussContext(ctx context.Context, req ChatReq
 				return req, native.ErrContextRecompose
 			}
 		}
-		return req, apperror.Wrap(apperror.CodeContextBudgetUnsatisfied, cause, nil)
+		return req, apperror.Wrap(budgetFailureCode(cause), cause, nil)
 	}
 	req.Query = req.discussPromptPrefix + discussAgentFullContextPrompt(admitted) + req.discussPromptSuffix
 	req.RawQuery = req.Query

@@ -182,7 +182,8 @@ func agentStreamFailure(event native.StreamEvent) error {
 
 // nativeFailureCode names the failure a native run ended with. A context the
 // budget cannot fit is named before anything else, since only compacting or
-// another model helps. A provider that named why it refused the request is
+// another model helps, unless the compaction failed on the provider's account
+// (budgetFailureCode). A provider that named why it refused the request is
 // reported with that reason: an exhausted balance and a rejected key both need
 // the user to go change something, and "the model response was interrupted,
 // please try again" sends them back into a call that cannot succeed. A model
@@ -193,7 +194,7 @@ func nativeFailureCode(cause error) apperror.Code {
 	case errors.Is(cause, contextfrag.ErrProtectedContextOverflow):
 		return apperror.CodeContextProtectedOverflow
 	case errors.Is(cause, contextfrag.ErrBudgetUnsatisfied):
-		return apperror.CodeContextBudgetUnsatisfied
+		return budgetFailureCode(cause)
 	}
 	if code := providerFailureCode(cause, native.IsModelCallFailure(cause)); code != "" {
 		return code

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,8 @@ import (
 // including history older than 24 hours, into one active summary that the
 // next compaction folds again. A summary as long as the prompt allows is
 // answered without another compaction. When the summarizer fails, the turn
-// fails before any provider call and leaves history whole; once the
+// fails before any provider call and leaves history whole, naming the quota
+// when the provider refused the summarizer for it; once the
 // summarizer is back, the next turn runs on a summary that also covers the
 // failed input a bounded chat view no longer loads.
 func TestPostgresPreTurnCompaction(t *testing.T) {
@@ -64,8 +66,9 @@ func TestPostgresPreTurnCompaction(t *testing.T) {
 				t.Fatalf("a failed summary changed history: raw=%d compacted=%d active=%d", raw, compacted, f.activeSummaries())
 			}
 			f.appendRound(entry, "failedb-")
-			if code := send("failedb-current", "failedb-current message"); code != "context.budget_unsatisfied" {
-				t.Fatalf("summarizer still down: code=%q", code)
+			f.failStatus.Store(http.StatusPaymentRequired)
+			if code := send("failedb-current", "failedb-current message"); code != "agent.provider_quota_exhausted" {
+				t.Fatalf("summarizer out of quota: code=%q, want the quota named", code)
 			}
 			f.failSummary.Store(false)
 			calls = f.modelCalls.Load()

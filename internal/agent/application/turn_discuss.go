@@ -190,7 +190,7 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 	if compactErr != nil || cmd.DiscussContextOverflow {
 		cause := apperror.New(apperror.CodeContextProtectedOverflow, nil)
 		if compactErr != nil {
-			cause = apperror.Wrap(apperror.CodeContextBudgetUnsatisfied, compactErr, nil)
+			cause = apperror.Wrap(budgetFailureCode(compactErr), compactErr, nil)
 		}
 		cfg := resolved.RunConfig
 		cfg.RunID = h.id
