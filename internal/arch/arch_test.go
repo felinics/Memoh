@@ -245,10 +245,10 @@ func TestAgentRuntimeDoesNotDependOnChat(t *testing.T) {
 
 func TestDirectExternalRuntimesDoNotDependOnACP(t *testing.T) {
 	root := repoRoot(t)
-	for _, dir := range []string{"internal/agent/runtime/codex", "internal/agent/runtime/claudecode"} {
+	for _, dir := range []string{"internal/agent/runtime/external/codex", "internal/agent/runtime/external/claudecode"} {
 		for _, file := range goFiles(t, root, dir) {
 			for _, imp := range imports(t, root, file) {
-				if isPackageOrChild(imp, modulePrefix+"internal/agent/runtime/acp") {
+				if isPackageOrChild(imp, modulePrefix+"internal/agent/runtime/external/acp") {
 					t.Errorf("%s imports %s: direct External Agent runtimes must not depend on ACP", file, imp)
 				}
 			}
@@ -262,10 +262,10 @@ func TestDirectExternalRuntimesDoNotDependOnACP(t *testing.T) {
 // reached them would be configured by agent id inside the generic runtime.
 func TestACPNativeDirectRuntimesUseOnlyTheACPClient(t *testing.T) {
 	root := repoRoot(t)
-	client := modulePrefix + "internal/agent/runtime/acp/client"
-	for _, file := range allGoFiles(t, root, "internal/agent/runtime/grok") {
+	client := modulePrefix + "internal/agent/runtime/external/acp/client"
+	for _, file := range allGoFiles(t, root, "internal/agent/runtime/external/grok") {
 		for _, imp := range imports(t, root, file) {
-			if isPackageOrChild(imp, modulePrefix+"internal/agent/runtime/acp") && imp != client {
+			if isPackageOrChild(imp, modulePrefix+"internal/agent/runtime/external/acp") && imp != client {
 				t.Errorf("%s imports %s: an ACP-native direct runtime may use only the ACP client", file, imp)
 			}
 		}

@@ -5,7 +5,7 @@ package acpprofile
 import (
 	"context"
 
-	runtimeprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	runtimeprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/chat/thread"
 )

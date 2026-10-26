@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	runtimeprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	runtimeprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 )
 
 func TestCatalogExposesOnlyChannelSafeProfileData(t *testing.T) {

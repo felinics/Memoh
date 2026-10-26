@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
-	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/external/acp"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agent/turn"

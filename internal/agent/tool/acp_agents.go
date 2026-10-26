@@ -10,7 +10,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/db"

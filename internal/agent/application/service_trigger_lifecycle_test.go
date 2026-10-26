@@ -13,9 +13,9 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
-	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
-	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/external/acp"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
 	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/apperror"

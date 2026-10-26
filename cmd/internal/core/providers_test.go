@@ -11,10 +11,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	claudecoderuntime "github.com/felinics/memoh/internal/agent/runtime/claudecode"
-	codexruntime "github.com/felinics/memoh/internal/agent/runtime/codex"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	grokruntime "github.com/felinics/memoh/internal/agent/runtime/grok"
+	claudecoderuntime "github.com/felinics/memoh/internal/agent/runtime/external/claudecode"
+	codexruntime "github.com/felinics/memoh/internal/agent/runtime/external/codex"
+	grokruntime "github.com/felinics/memoh/internal/agent/runtime/external/grok"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"

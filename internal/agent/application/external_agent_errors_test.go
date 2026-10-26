@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
-	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/external/acp"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/errs"

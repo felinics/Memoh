@@ -130,7 +130,7 @@ such as Grok rejecting its sign-in, as that failure. Nothing here can make a
 thread permanently unusable.
 
 Grok Build drives the rest of its session through Grok's own ACP extension
-methods, read as Grok 1.0.62 defines them (`internal/agent/runtime/grok/config.go`
+methods, read as Grok 1.0.62 defines them (`internal/agent/runtime/external/grok/config.go`
 lists them; a process of another version is logged at start): compaction is
 `_x.ai/compact_conversation` on the open session, the `status` command reads
 `_x.ai/session/info` for the model and context use, and the model catalog

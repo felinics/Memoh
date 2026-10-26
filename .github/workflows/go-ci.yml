@@ -207,7 +207,7 @@ jobs:
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
             -run '^TestPostgresRuntimeFence' ./internal/chat/message
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
-            -run '^TestPostgresRuntimeFence' ./internal/agent/runtime/acp
+            -run '^TestPostgresRuntimeFence' ./internal/agent/runtime/external/acp
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
             ./internal/agent/runtime/session/ledger
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \

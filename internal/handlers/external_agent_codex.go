@@ -12,7 +12,7 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/agent/application"
-	codexruntime "github.com/felinics/memoh/internal/agent/runtime/codex"
+	codexruntime "github.com/felinics/memoh/internal/agent/runtime/external/codex"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"

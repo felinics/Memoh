@@ -53,12 +53,12 @@ linters:
         # the translation function of the caller, see docs/errors.md.
         package-errors:
           files:
-            - "**/internal/agent/runtime/acp/**"
-            - "**/internal/agent/runtime/claudecode/**"
-            - "**/internal/agent/runtime/codex/**"
+            - "**/internal/agent/runtime/external/acp/**"
+            - "**/internal/agent/runtime/external/claudecode/**"
+            - "**/internal/agent/runtime/external/codex/**"
             - "**/internal/agent/runtime/external/**"
             - "**/internal/agent/runtime/native/**"
-            - "**/internal/agent/runtime/toolmount/**"
+            - "**/internal/agent/runtime/external/toolmount/**"
             - "**/internal/models/**"
             - "**/internal/providers/**"
             - "**/internal/providertemplates/**"

@@ -15,8 +15,8 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/acl"
-	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"

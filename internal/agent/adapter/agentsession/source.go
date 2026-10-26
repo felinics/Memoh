@@ -5,7 +5,7 @@ package agentsession
 import (
 	"context"
 
-	acp "github.com/felinics/memoh/internal/agent/runtime/acp"
+	acp "github.com/felinics/memoh/internal/agent/runtime/external/acp"
 	"github.com/felinics/memoh/internal/chat/thread"
 )
 

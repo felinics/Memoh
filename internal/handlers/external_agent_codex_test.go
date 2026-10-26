@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"testing"
 
-	codexruntime "github.com/felinics/memoh/internal/agent/runtime/codex"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	codexruntime "github.com/felinics/memoh/internal/agent/runtime/external/codex"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
