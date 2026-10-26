@@ -2169,6 +2169,10 @@ func (*fakeToolApprovalService) Reject(context.Context, string, string, string) 
 	return toolapproval.Request{}, nil
 }
 
+func (*fakeToolApprovalService) Cancel(context.Context, string, string) (toolapproval.Request, error) {
+	return toolapproval.Request{}, nil
+}
+
 func (*fakeToolApprovalService) WaitForDecision(context.Context, string) (toolapproval.Request, error) {
 	return toolapproval.Request{}, nil
 }

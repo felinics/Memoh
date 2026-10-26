@@ -71,6 +71,7 @@ type Queries interface {
 	AcquireProviderTemplateSyncLock(ctx context.Context) error
 	ApproveToolApprovalRequest(ctx context.Context, arg dbsqlc.ApproveToolApprovalRequestParams) (dbsqlc.ToolApprovalRequest, error)
 	BumpBotRuntimeConfigEpoch(ctx context.Context, botID pgtype.UUID) (int64, error)
+	CancelToolApprovalRequest(ctx context.Context, arg dbsqlc.CancelToolApprovalRequestParams) (dbsqlc.ToolApprovalRequest, error)
 	CancelPendingToolApprovalsBySession(ctx context.Context, arg dbsqlc.CancelPendingToolApprovalsBySessionParams) ([]dbsqlc.ToolApprovalRequest, error)
 	CancelPendingUserInputsBySession(ctx context.Context, arg dbsqlc.CancelPendingUserInputsBySessionParams) ([]dbsqlc.UserInputRequest, error)
 	CancelPendingUserInputsByRun(ctx context.Context, arg dbsqlc.CancelPendingUserInputsByRunParams) ([]dbsqlc.UserInputRequest, error)

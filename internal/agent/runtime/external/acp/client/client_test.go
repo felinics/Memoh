@@ -3800,6 +3800,10 @@ func (*fakeACPToolApproval) Reject(context.Context, string, string, string) (too
 	return toolapproval.Request{Status: toolapproval.StatusRejected}, nil
 }
 
+func (*fakeACPToolApproval) Cancel(context.Context, string, string) (toolapproval.Request, error) {
+	return toolapproval.Request{Status: toolapproval.StatusCancelled}, nil
+}
+
 func (f *fakeACPToolApproval) Get(_ context.Context, approvalID string) (toolapproval.Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

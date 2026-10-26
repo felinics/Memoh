@@ -46,6 +46,13 @@ func (f *closingApprovalFlow) Reject(context.Context, string, string, string) (a
 	return f.req, nil
 }
 
+func (f *closingApprovalFlow) Cancel(context.Context, string, string) (approval.Request, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.req.Status = approval.StatusCancelled
+	return f.req, nil
+}
+
 func (*closingApprovalFlow) WaitForDecision(ctx context.Context, _ string) (approval.Request, error) {
 	<-ctx.Done()
 	return approval.Request{}, ctx.Err()
@@ -105,7 +112,7 @@ func TestClosedApprovalDoesNotParkFinishedRun(t *testing.T) {
 				}
 			}
 			// Driver.Prompt defers turn.close on process exit. It marks the event pump
-			// closed before cancelling the inline approval, so its rejected event drops.
+			// closed before cancelling the inline approval, so its cancelled event drops.
 			st.close()
 			select {
 			case <-done:
@@ -113,7 +120,7 @@ func TestClosedApprovalDoesNotParkFinishedRun(t *testing.T) {
 				t.Fatal("approval did not stop")
 			}
 			stored, _ := flow.Get(ctx, "")
-			if stored.Status != approval.StatusRejected {
+			if stored.Status != approval.StatusCancelled {
 				t.Fatalf("durable decision=%s", stored.Status)
 			}
 			// The application has no pending rows left to cancel, and reports its

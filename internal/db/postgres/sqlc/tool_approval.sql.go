@@ -161,6 +161,63 @@ func (q *Queries) CancelPendingToolApprovalsBySession(ctx context.Context, arg C
 	return items, nil
 }
 
+const cancelToolApprovalRequest = `-- name: CancelToolApprovalRequest :one
+UPDATE tool_approval_requests
+SET status = 'cancelled',
+    decision_reason = $1,
+    decided_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $2
+  AND status = 'pending'
+  AND (runtime_fencing_token IS NULL OR runtime_fencing_token = $3::bigint)
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+`
+
+type CancelToolApprovalRequestParams struct {
+	Reason              string      `json:"reason"`
+	ID                  pgtype.UUID `json:"id"`
+	RuntimeFencingToken pgtype.Int8 `json:"runtime_fencing_token"`
+}
+
+func (q *Queries) CancelToolApprovalRequest(ctx context.Context, arg CancelToolApprovalRequestParams) (ToolApprovalRequest, error) {
+	row := q.db.QueryRow(ctx, cancelToolApprovalRequest, arg.Reason, arg.ID, arg.RuntimeFencingToken)
+	var i ToolApprovalRequest
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.SessionID,
+		&i.RouteID,
+		&i.ChannelIdentityID,
+		&i.WorkspaceTargetID,
+		&i.ToolCallID,
+		&i.ToolName,
+		&i.Operation,
+		&i.ToolInput,
+		&i.Options,
+		&i.SelectedOptionID,
+		&i.ShortID,
+		&i.Status,
+		&i.RuntimeFencingToken,
+		&i.ResponseControlID,
+		&i.ResponsePayloadHash,
+		&i.DecisionReason,
+		&i.RequestedByChannelIdentityID,
+		&i.DecidedByChannelIdentityID,
+		&i.RequestedMessageID,
+		&i.PromptMessageID,
+		&i.PromptExternalMessageID,
+		&i.SourcePlatform,
+		&i.ReplyTarget,
+		&i.ConversationType,
+		&i.CreatedAt,
+		&i.DecidedAt,
+		&i.TeamID,
+		&i.RunID,
+		&i.TurnID,
+	)
+	return i, err
+}
+
 const claimToolApprovalRequestForRuntime = `-- name: ClaimToolApprovalRequestForRuntime :one
 UPDATE tool_approval_requests
 SET runtime_fencing_token = $1

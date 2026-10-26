@@ -66,6 +66,10 @@ func (f *parityApproval) Reject(_ context.Context, approvalID, _, reason string)
 	return toolapproval.Request{ID: approvalID, Status: toolapproval.StatusRejected, DecisionReason: reason}, nil
 }
 
+func (*parityApproval) Cancel(_ context.Context, approvalID, reason string) (toolapproval.Request, error) {
+	return toolapproval.Request{ID: approvalID, Status: toolapproval.StatusCancelled, DecisionReason: reason}, nil
+}
+
 func (f *parityApproval) Get(context.Context, string) (toolapproval.Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

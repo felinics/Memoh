@@ -179,6 +179,17 @@ WHERE team_id = public.memoh_current_team_id()
   AND (runtime_fencing_token IS NULL OR runtime_fencing_token = sqlc.narg(runtime_fencing_token)::bigint)
 RETURNING *;
 
+-- name: CancelToolApprovalRequest :one
+UPDATE tool_approval_requests
+SET status = 'cancelled',
+    decision_reason = sqlc.arg(reason),
+    decided_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(id)
+  AND status = 'pending'
+  AND (runtime_fencing_token IS NULL OR runtime_fencing_token = sqlc.narg(runtime_fencing_token)::bigint)
+RETURNING *;
+
 -- name: CancelPendingToolApprovalsBySession :many
 UPDATE tool_approval_requests
 SET status = 'cancelled',

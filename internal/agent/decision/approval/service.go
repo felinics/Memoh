@@ -388,6 +388,33 @@ func decisionResponseIdentity(ctx context.Context) (pgtype.Text, pgtype.Text) {
 		pgtype.Text{String: identity.PayloadHash, Valid: true}
 }
 
+// Cancel closes a pending request nobody will decide any more: the turn that
+// asked for it stopped, or the runtime withdrew the request.
+func (s *Service) Cancel(ctx context.Context, approvalID, reason string) (Request, error) {
+	id, err := db.ParseUUID(approvalID)
+	if err != nil {
+		return Request{}, err
+	}
+	var row sqlc.ToolApprovalRequest
+	err = s.withRuntimeFence(ctx, "", "", func(queries dbstore.Queries) error {
+		if err := validateToolApprovalFence(ctx, queries, id); err != nil {
+			return err
+		}
+		var cancelErr error
+		row, cancelErr = queries.CancelToolApprovalRequest(ctx, sqlc.CancelToolApprovalRequestParams{
+			ID:                  id,
+			Reason:              strings.TrimSpace(reason),
+			RuntimeFencingToken: runtimeFencingToken(ctx),
+		})
+		return cancelErr
+	})
+	req, err := s.resolveAndNotify(ctx, approvalID, row, err)
+	if err == nil {
+		_ = s.runApprovalHook(ctx, hooks.EventApprovalResolved, CreatePendingInput{}, req, false)
+	}
+	return req, err
+}
+
 // CancelPendingForSession closes pending approvals that belonged to an ended
 // turn and wakes any in-process waiters.
 func (s *Service) CancelPendingForSession(ctx context.Context, botID, sessionID, reason string) ([]Request, error) {

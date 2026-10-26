@@ -32,6 +32,7 @@ type NativeToolApprovalService interface {
 	CreatePending(ctx context.Context, input toolapproval.CreatePendingInput) (toolapproval.Request, error)
 	Get(ctx context.Context, approvalID string) (toolapproval.Request, error)
 	Reject(ctx context.Context, approvalID, actorID, reason string) (toolapproval.Request, error)
+	Cancel(ctx context.Context, approvalID, reason string) (toolapproval.Request, error)
 	WaitForDecision(ctx context.Context, approvalID string) (toolapproval.Request, error)
 	RegisterWaiter(approvalID string) func()
 }

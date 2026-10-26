@@ -737,9 +737,6 @@ func (t *turnRunner) decide(ctx context.Context, callID, toolName string, input 
 		Interactive:    t.input.CanRequestUserInput,
 		RegisterWaiter: t.waiter,
 		Emit:           t.emitApprovalRequest,
-		CancelOnAbort: func(cancelCtx context.Context, req approval.Request, reason string) (approval.Request, error) {
-			return t.approval.Reject(cancelCtx, req.ID, "", reason)
-		},
 	})
 	if err != nil {
 		if ctx.Err() != nil {

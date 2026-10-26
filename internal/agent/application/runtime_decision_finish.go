@@ -84,7 +84,7 @@ func (s *Service) finalizeRuntimeDecisions(ctx context.Context, handle sessionru
 			var req toolapproval.Request
 			var err error
 			if strings.EqualFold(target.Status, toolapproval.StatusPending) {
-				req, err = s.toolApproval.Reject(ctx, target.ID, "", "run_ended")
+				req, err = s.toolApproval.Cancel(ctx, target.ID, "run_ended")
 			} else {
 				req, err = s.toolApproval.Get(ctx, target.ID)
 			}

@@ -40,8 +40,8 @@ type recordingSink struct {
 }
 
 type cancelAwareApproval struct {
-	waiting  chan struct{}
-	rejected chan struct{}
+	waiting   chan struct{}
+	cancelled chan struct{}
 }
 
 func (*cancelAwareApproval) EvaluatePolicy(context.Context, approval.CreatePendingInput) (approval.Evaluation, error) {
@@ -59,9 +59,13 @@ func (*cancelAwareApproval) Get(context.Context, string) (approval.Request, erro
 	return approval.Request{}, approval.ErrNotFound
 }
 
-func (a *cancelAwareApproval) Reject(context.Context, string, string, string) (approval.Request, error) {
-	close(a.rejected)
+func (*cancelAwareApproval) Reject(context.Context, string, string, string) (approval.Request, error) {
 	return approval.Request{ID: "approval-1", Status: approval.StatusRejected}, nil
+}
+
+func (a *cancelAwareApproval) Cancel(context.Context, string, string) (approval.Request, error) {
+	close(a.cancelled)
+	return approval.Request{ID: "approval-1", Status: approval.StatusCancelled}, nil
 }
 
 func (a *cancelAwareApproval) WaitForDecision(ctx context.Context, _ string) (approval.Request, error) {
@@ -525,7 +529,7 @@ func TestClaudeEmitAfterCloseIsDropped(t *testing.T) {
 
 func TestClaudeControlCancelStopsPendingApproval(t *testing.T) {
 	sink := &recordingSink{}
-	approvals := &cancelAwareApproval{waiting: make(chan struct{}), rejected: make(chan struct{})}
+	approvals := &cancelAwareApproval{waiting: make(chan struct{}), cancelled: make(chan struct{})}
 	proc := &testCLIProcess{done: make(chan struct{})}
 	r := newTurnRunner(context.Background(), external.PromptInput{
 		BotID: "bot-1", ThreadID: "session-1", Sink: sink, CanRequestUserInput: true,
@@ -539,9 +543,9 @@ func TestClaudeControlCancelStopsPendingApproval(t *testing.T) {
 	}
 	feed(t, r, `{"type":"control_cancel_request","request_id":"request-1"}`)
 	select {
-	case <-approvals.rejected:
+	case <-approvals.cancelled:
 	case <-time.After(time.Second):
-		t.Fatal("cancelled control request did not reject its pending approval")
+		t.Fatal("cancelled control request did not cancel its pending approval")
 	}
 	time.Sleep(10 * time.Millisecond)
 	if strings.Contains(proc.String(), `"type":"control_response"`) {
