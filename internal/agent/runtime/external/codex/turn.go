@@ -485,10 +485,7 @@ func (t *turnState) handleServerRequest(c *conn, req *protocol.Inbound, decoded 
 		decision := fileChangeApprovalDecision(result)
 		_ = c.Respond(req.ID, protocol.FileChangeRequestApprovalResponse{Decision: decision})
 	case *protocol.PermissionsRequestApprovalParams:
-		// Granting permission-profile escalations needs a dedicated surface;
-		// until then the request is declined, not silently granted.
-		t.logger.Warn("codex: declining permission-profile escalation", slog.String("thread_id", t.threadID))
-		_ = c.RespondError(req.ID, -32000, "memoh does not grant permission profile escalations yet")
+		_ = c.Respond(req.ID, t.decidePermissions(ctx, params))
 	case *protocol.ToolRequestUserInputParams:
 		_ = c.Respond(req.ID, t.requestUserInput(ctx, params))
 	default:
@@ -565,6 +562,45 @@ func commandApprovalDecision(params *protocol.CommandExecutionRequestApprovalPar
 		return protocol.CommandExecutionApprovalDecision{Unit: protocol.CommandExecutionApprovalDecisionUnitDecline}
 	}
 	return protocol.CommandExecutionApprovalDecision{Unit: protocol.CommandExecutionApprovalDecisionUnitCancel}
+}
+
+// decidePermissions puts a permission-profile escalation to the user as a
+// generic permission card, which shows only title and request: what Codex asks
+// for has to be in them for the decision to be an informed one.
+func (t *turnState) decidePermissions(ctx context.Context, params *protocol.PermissionsRequestApprovalParams) protocol.PermissionsRequestApprovalResponse {
+	input := map[string]any{"request_lang": "json"}
+	if params.Reason != nil {
+		input["title"] = *params.Reason
+	}
+	if request, err := json.MarshalIndent(map[string]any{"permissions": params.Permissions, "cwd": params.Cwd}, "", "  "); err == nil {
+		input["request"] = string(request)
+	}
+	result := t.decide(ctx, params.ItemID, "permission", input, permissionsApprovalOptions())
+	return permissionsApprovalResponse(params, result)
+}
+
+func permissionsApprovalOptions() []approval.PermissionOption {
+	return []approval.PermissionOption{
+		{ID: string(protocol.PermissionGrantScopeTurn), Name: "Allow for this turn", Kind: approval.OptionKindAllowOnce},
+		{ID: string(protocol.PermissionGrantScopeSession), Name: "Allow for session", Kind: approval.OptionKindAllowAlways},
+		{ID: "decline", Name: "Decline", Kind: approval.OptionKindRejectOnce},
+	}
+}
+
+// permissionsApprovalResponse grants what Codex asked for, or nothing: an
+// empty grant is how a declined escalation is answered.
+func permissionsApprovalResponse(params *protocol.PermissionsRequestApprovalParams, result approval.FlowResult) protocol.PermissionsRequestApprovalResponse {
+	scope := protocol.PermissionGrantScopeTurn
+	if !result.Approved || result.SelectedOptionID == "decline" {
+		return protocol.PermissionsRequestApprovalResponse{Scope: &scope}
+	}
+	if result.SelectedOptionID == string(protocol.PermissionGrantScopeSession) {
+		scope = protocol.PermissionGrantScopeSession
+	}
+	return protocol.PermissionsRequestApprovalResponse{
+		Permissions: protocol.GrantedPermissionProfile{FileSystem: params.Permissions.FileSystem, Network: params.Permissions.Network},
+		Scope:       &scope,
+	}
 }
 
 func fileChangeApprovalOptions(params *protocol.FileChangeRequestApprovalParams) []approval.PermissionOption {
