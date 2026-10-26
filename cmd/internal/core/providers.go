@@ -714,13 +714,14 @@ func provideCodexDriver(log *slog.Logger, workspaceManager *workspace.Manager, b
 	return driver
 }
 
-func provideClaudeCodeDriver(log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *claudecoderuntime.Driver {
+func provideClaudeCodeDriver(log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service, procs *agentproc.Supervisor) *claudecoderuntime.Driver {
 	driver := claudecoderuntime.NewDriver(
 		workspaceManager,
 		botAgents,
 		credentials,
 		toolApproval,
 		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log},
+		procs,
 		log,
 	)
 	driver.SetLauncherResolver(workspaceDeps)

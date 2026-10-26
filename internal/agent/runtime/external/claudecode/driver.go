@@ -2,11 +2,15 @@ package claudecode
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +27,7 @@ import (
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/runtimekind"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -54,9 +59,10 @@ type Driver struct {
 	approval    ApprovalService
 	userInput   userinput.FlowService
 	toolGateway toolmount.Gateway
+	procs       *agentproc.Supervisor
 	logger      *slog.Logger
 
-	// launchers picks the CLI copy each turn executes. Nil
+	// launchers picks the CLI copy a process executes. Nil
 	// means the toolkit launcher, unconditionally.
 	launchers external.LauncherResolver
 
@@ -70,6 +76,7 @@ func NewDriver(
 	credentials *agentcredential.Service,
 	approvalSvc ApprovalService,
 	toolGateway toolmount.Gateway,
+	procs *agentproc.Supervisor,
 	logger *slog.Logger,
 ) *Driver {
 	d := &Driver{
@@ -78,6 +85,7 @@ func NewDriver(
 		credentials: credentials,
 		approval:    approvalSvc,
 		toolGateway: toolGateway,
+		procs:       procs,
 		logger:      logger.With(slog.String("runtime", RuntimeType)),
 	}
 	d.commands = newCommandCatalog(d.discoverCommands, d.logger)
@@ -181,15 +189,16 @@ func (d *Driver) startControlCLI(ctx context.Context, botID, botAgentID, project
 		BotAgentID: botAgentID,
 		Sink:       external.EventSinkFunc(func(event.StreamEvent) {}),
 	}
-	turn := newTurnRunner(ctx, input, proc, d.approval, d.approval.RegisterWaiter, d.logger)
+	sess := newCLISession(proc, d.logger)
+	turn := sess.beginTurn(ctx, input, d.approval, d.approval.RegisterWaiter)
 	turn.onCLIVersion = d.versionObserver(botID)
-	go turn.readLoop() //nolint:contextcheck // turnRunner owns the control-channel lifetime
+	go sess.readLoop() //nolint:contextcheck // the session owns its read loop
 	return cfg, turn, func() {
 		// EOF lets the CLI exit on its own: a killed CLI leaves its session
 		// registry behind. Exiting takes longer than the reads, so nobody waits.
 		go func() {
 			turn.observeExit(drainCLI(proc, controlCLIDrainTimeout))
-			<-turn.readDone
+			<-sess.Done()
 			turn.close()
 			_ = proc.Close()
 		}()
@@ -290,8 +299,9 @@ func modelCatalogFromInitialize(configuredModel string, response initializeRespo
 	return external.ModelCatalog{Models: models, ConfiguredModelID: configuredModel}
 }
 
-// Prompt implements external.Driver: one CLI process serves one turn, resumed
-// from the session id in runtime metadata.
+// Prompt implements external.Driver. The conversation's CLI process stays
+// between turns and serves this one; a process holding another native
+// session, or none to resume, is replaced first.
 func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (external.PromptResult, error) {
 	cfg, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID)
 	if err != nil {
@@ -300,22 +310,6 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		}
 		return external.PromptResult{}, external.Unavailable(err)
 	}
-	workspaceInfo, err := external.ContainerWorkspace(ctx, d.workspaces, input.BotID, RuntimeType)
-	if err != nil {
-		return external.PromptResult{}, err
-	}
-	client, err := d.workspaces.MCPClient(ctx, input.BotID)
-	if err != nil {
-		return external.PromptResult{}, external.Unavailable(err)
-	}
-	// Resolve the CLI copy before any session or tool work: a missing
-	// dependency ends the turn here with external.DependencyMissingError,
-	// which the application translates.
-	launcher, err := agentproc.ResolveLauncher(ctx, d.launchers, input.BotID, dependencyID, defaultLauncherPath)
-	if err != nil {
-		return external.PromptResult{}, err
-	}
-
 	storedSessionID := strings.TrimSpace(metadataString(input.RuntimeMetadata, metadataSessionIDKey))
 	if input.ForceFreshRuntime {
 		// Discuss turns re-inject the full composed context every round;
@@ -323,44 +317,28 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		// CLI's own saved history.
 		storedSessionID = ""
 	}
-	workDir := strings.TrimSpace(metadataString(input.RuntimeMetadata, "project_path"))
-	storedSessionID = d.ensureResumableSession(ctx, client, input, storedSessionID)
-	// The mount must survive a caller disconnect exactly as long as the CLI
-	// process does (the interrupt handshake still runs tools).
-	mountCtx, cancelMount := context.WithCancel(context.WithoutCancel(ctx))
-	defer cancelMount()
-	mcpConfig, toolsMount := d.mountTurnTools(mountCtx, client, workspaceInfo, input)
-	if toolsMount != nil {
-		defer toolsMount.Stop()
-	}
-	args := cliArgs(cfg, input, storedSessionID, mcpConfig, launcher.Version)
-	env := cliEnv(cfg)
-
-	// The process must survive a caller disconnect long enough for the
-	// interrupt handshake below.
-	proc, err := startCLI(context.WithoutCancel(ctx), client, workDir, args, env, launcher.Path)
+	sess, release, err := d.acquireSession(ctx, cfg, input, storedSessionID)
 	if err != nil {
-		return external.PromptResult{}, external.Unavailable(err)
+		return external.PromptResult{}, err
 	}
-	defer func() { _ = proc.Close() }()
+	defer release()
+	key := sessionKey(input)
+	if input.ForceFreshRuntime {
+		// The next round must not find this one's history in the process.
+		defer d.procs.MarkBroken(key, sess)
+	}
 
-	turn := newTurnRunner(ctx, input, proc, d.approval, d.approval.RegisterWaiter, d.logger)
+	turn := sess.beginTurn(ctx, input, d.approval, d.approval.RegisterWaiter)
 	turn.onCLIVersion = d.versionObserver(input.BotID)
 	turn.userInput = d.userInput
 	defer turn.close()
-	go turn.readLoop() //nolint:contextcheck // turnRunner owns the control-channel lifetime
 	unregisterToolEvents := toolmount.RegisterTurnSink(d.toolGateway.Contexts, input.BotID, input.ThreadID, input.RunID, turn.emit)
 	defer unregisterToolEvents()
+	if sess.mount == nil {
+		toolmount.EmitUnavailableNotice(input.Sink, "the tool gateway could not be mounted")
+	}
 
-	// Do not send input until the CLI has accepted the host control contract.
-	initialized, err := turn.callControl(ctx, "initialize", nil)
-	if err != nil {
-		return external.PromptResult{}, external.Unavailable(err)
-	}
-	var capabilities initializeResponse
-	if err := json.Unmarshal(initialized, &capabilities); err != nil {
-		return external.PromptResult{}, errs.WrapDependency(err, "")
-	}
+	capabilities := sess.capabilities
 	turn.mu.Lock()
 	turn.runtimeMetadata["claude_commands"] = capabilities.Commands
 	turn.mu.Unlock()
@@ -384,6 +362,9 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		}
 		input.ContextMarkdown = ""
 	}
+	if err := turn.applySettings(ctx, firstNonEmpty(input.ModelID, cfg.Model), strings.TrimSpace(input.ReasoningEffort)); err != nil {
+		return external.PromptResult{}, external.Fail(external.FailureControlFailed, err)
+	}
 	if err := turn.configureModes(ctx, cfg, capabilities.Models); err != nil {
 		if errors.Is(err, external.ErrModeUnavailable) {
 			return external.PromptResult{}, external.Fail(external.FailureModeUnavailable, err)
@@ -391,44 +372,34 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		return external.PromptResult{}, external.Fail(external.FailureControlFailed, err)
 	}
 
-	content := buildUserContent(input)
-	line, err := userMessageLine(storedSessionID, content)
+	line, err := userMessageLine(firstNonEmpty(sess.heldSession(), storedSessionID), buildUserContent(input))
 	if err != nil {
 		return external.PromptResult{}, err
 	}
 	if err := turn.writeLine(line); err != nil {
+		d.procs.MarkBroken(key, sess)
 		return external.PromptResult{}, external.Unavailable(err)
 	}
 	stopSteering := turn.startSteering(ctx)
 	defer stopSteering()
 
-	drainTimeout := interruptGraceTimeout
 	select {
 	case <-turn.done:
 	case <-ctx.Done():
-		deadline := time.Now().Add(interruptGraceTimeout)
 		turn.interrupt()
-		// Grace window for the CLI to flush its result after the interrupt;
-		// a wedged process must not pin this turn (and the session's single
-		// active slot) forever, so terminate it when the window closes.
-		grace := time.NewTimer(time.Until(deadline))
+		// Grace window for the CLI to settle the interrupted turn; a wedged
+		// process must not pin this turn (and the session's single active
+		// slot) forever, so it is replaced when the window closes.
+		grace := time.NewTimer(interruptGraceTimeout)
 		select {
 		case <-turn.done:
-		case <-proc.Done():
 		case <-grace.C:
-			_ = proc.Close()
+			d.procs.MarkBroken(key, sess)
+			<-turn.done
 		}
 		grace.Stop()
-		drainTimeout = time.Until(deadline)
 	}
-	// End the input stream so the process exits cleanly. The CLI's durable
-	// writes may trail its result, so the teardown outcome is observed
-	// separately from the protocol outcome the CLI already reported.
 	stopSteering()
-	turn.observeExit(drainCLI(proc, drainTimeout))
-	// Process completion closes stdout; finish reading its buffered result and
-	// transport outcome before taking the immutable turn snapshot.
-	<-turn.readDone
 	turn.close()
 
 	result, resultErr := turn.buildResult(storedSessionID)
@@ -442,6 +413,116 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		return result, nil
 	}
 	return result, resultErr
+}
+
+func sessionKey(input external.PromptInput) string {
+	return agentproc.Key(RuntimeType, input.BotID, input.ThreadID)
+}
+
+// fingerprint names what a CLI process is started from: a change to any of
+// it needs a new process. Model, effort and permission mode change through
+// the control channel and are not part of it. Secrets are hashed, never kept.
+func fingerprint(cfg claudecfg.Config, launcher external.Launcher, workDir string, allowBypass bool) string {
+	secret := sha256.Sum256([]byte(cfg.APIKey + "\x00" + cfg.OAuthToken))
+	return strings.Join([]string{
+		string(cfg.Auth), strings.TrimSpace(cfg.BaseURL), hex.EncodeToString(secret[:]),
+		launcher.Path, string(launcher.Source), launcher.Version,
+		workDir, strconv.FormatBool(allowBypass),
+	}, "\x00")
+}
+
+// acquireSession leases the conversation's CLI process, starting one when
+// there is none, it was started from another configuration, or it holds
+// another native session than the stored one (history cleared, a fresh
+// discuss round). The caller must call the returned release when done.
+func (d *Driver) acquireSession(ctx context.Context, cfg claudecfg.Config, input external.PromptInput, storedSessionID string) (*cliSession, func(), error) {
+	info, err := external.ContainerWorkspace(ctx, d.workspaces, input.BotID, RuntimeType)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Resolve the CLI copy before any session or tool work: a missing
+	// dependency ends the turn here with external.DependencyMissingError,
+	// which the application translates.
+	launcher, err := agentproc.ResolveLauncher(ctx, d.launchers, input.BotID, dependencyID, defaultLauncherPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	workDir := strings.TrimSpace(metadataString(input.RuntimeMetadata, "project_path"))
+	allowBypass := firstNonEmpty(metadataString(input.RuntimeMetadata, "permission_mode"), cfg.PermissionMode) == "bypassPermissions"
+	key := sessionKey(input)
+	start := func(ctx context.Context) (agentproc.Process, string, error) {
+		client, err := d.workspaces.MCPClient(ctx, input.BotID)
+		if err != nil {
+			return nil, "", fmt.Errorf("workspace bridge for bot %s: %w", input.BotID, err)
+		}
+		resume := d.ensureResumableSession(ctx, client, input, storedSessionID)
+		sess, err := d.startSession(ctx, client, info, cfg, launcher, input, resume, workDir, allowBypass)
+		if err != nil {
+			return nil, "", err
+		}
+		started := launcher
+		started.Version = firstNonEmpty(sess.version, launcher.Version)
+		return sess, fingerprint(cfg, started, workDir, allowBypass), nil
+	}
+	for range 2 {
+		proc, release, err := d.procs.Lease(ctx, key, fingerprint(cfg, launcher, workDir, allowBypass), start)
+		if err != nil {
+			if external.IsFailure(err) || errors.Is(err, external.ErrDependencyMissing) {
+				return nil, nil, err
+			}
+			return nil, nil, external.Unavailable(err)
+		}
+		sess := proc.(*cliSession)
+		// A process holding no session yet starts one: the stored one was
+		// gone when it started, or there is none.
+		if held := sess.heldSession(); held == "" || held == storedSessionID {
+			return sess, release, nil
+		}
+		release()
+		d.procs.MarkBroken(key, sess)
+	}
+	return nil, nil, external.Unavailable(errs.New("claude process could not be replaced"))
+}
+
+// startSession starts a CLI process for the conversation, resuming resume
+// when set, with the Memoh tool route it keeps for its whole life.
+func (d *Driver) startSession(ctx context.Context, client *bridge.Client, info bridge.WorkspaceInfo, cfg claudecfg.Config, launcher external.Launcher, input external.PromptInput, resume, workDir string, allowBypass bool) (*cliSession, error) {
+	var sess *cliSession
+	mcpConfig, mount := d.mountSessionTools(ctx, client, info, input, func() *turnRunner { return sess.currentTurn() })
+	model, effort := firstNonEmpty(input.ModelID, cfg.Model), strings.TrimSpace(input.ReasoningEffort)
+	args := cliArgs(model, effort, resume, mcpConfig, launcher.Version, allowBypass)
+	// The process outlives the turn that started it.
+	proc, err := startCLI(context.WithoutCancel(ctx), client, workDir, args, cliEnv(cfg), launcher.Path)
+	if err != nil {
+		if mount != nil {
+			mount.Stop()
+		}
+		return nil, external.Unavailable(err)
+	}
+	sess = newCLISession(proc, d.logger)
+	sess.mount, sess.nativeID, sess.model, sess.effort = mount, resume, model, effort
+	go sess.readLoop() //nolint:contextcheck // the session owns its read loop
+	// Do not send input until the CLI has accepted the host control contract.
+	raw, err := sess.callControl(ctx, "initialize", nil)
+	if err == nil {
+		err = json.Unmarshal(raw, &sess.capabilities)
+	}
+	if err != nil {
+		_ = sess.Close()
+		return nil, external.Unavailable(err)
+	}
+	// The version decides whether a later turn may keep this process; the
+	// handshake that also reports it comes only with a turn.
+	if raw, err := sess.callControl(ctx, "get_binary_version", nil); err == nil {
+		var answer struct {
+			Version string `json:"version"`
+		}
+		if json.Unmarshal(raw, &answer) == nil {
+			sess.version = strings.TrimSpace(answer.Version)
+			agentproc.ObserveVersion(ctx, d.launchers, input.BotID, dependencyID, sess.version)
+		}
+	}
+	return sess, nil
 }
 
 // ensureResumableSession verifies the stored session's transcript still
@@ -479,8 +560,9 @@ func (d *Driver) ensureResumableSession(ctx context.Context, client transcriptFS
 const thinkingDisplaySince = "v2.1.94"
 
 // cliArgs builds the pinned stream-json invocation for the CLI at cliVersion
-// (empty when unknown).
-func cliArgs(cfg claudecfg.Config, input external.PromptInput, sessionID, mcpConfig, cliVersion string) []string {
+// (empty when unknown). model and effort are where the process starts; later
+// turns change them through the control channel.
+func cliArgs(model, effort, sessionID, mcpConfig, cliVersion string, allowBypass bool) []string {
 	args := []string{
 		"--output-format", "stream-json",
 		"--verbose",
@@ -495,13 +577,13 @@ func cliArgs(cfg claudecfg.Config, input external.PromptInput, sessionID, mcpCon
 	if v := "v" + strings.TrimPrefix(cliVersion, "v"); semver.IsValid(v) && semver.Compare(v, thinkingDisplaySince) >= 0 {
 		args = append(args, "--thinking-display", "summarized")
 	}
-	if firstNonEmpty(metadataString(input.RuntimeMetadata, "permission_mode"), cfg.PermissionMode) == "bypassPermissions" {
+	if allowBypass {
 		args = append(args, "--allow-dangerously-skip-permissions")
 	}
-	if model := firstNonEmpty(input.ModelID, cfg.Model); model != "" {
+	if model != "" {
 		args = append(args, "--model", agentproc.ShellQuote(model))
 	}
-	if effort := strings.TrimSpace(input.ReasoningEffort); effort != "" {
+	if effort != "" {
 		args = append(args, "--effort", agentproc.ShellQuote(effort))
 	}
 	if sessionID != "" {
@@ -516,7 +598,7 @@ func cliArgs(cfg claudecfg.Config, input external.PromptInput, sessionID, mcpCon
 // Startup alone runs the workspace's hooks and starts its MCP servers. They
 // belong to sessions; a catalog read must not run the user's scripts.
 func controlCLIArgs(cfg claudecfg.Config, cliVersion string) []string {
-	return append(cliArgs(cfg, external.PromptInput{}, "", "", cliVersion),
+	return append(cliArgs(cfg.Model, "", "", "", cliVersion, cfg.PermissionMode == "bypassPermissions"),
 		"--settings", agentproc.ShellQuote(`{"disableAllHooks":true}`), "--strict-mcp-config")
 }
 

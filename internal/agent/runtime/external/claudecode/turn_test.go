@@ -627,11 +627,10 @@ func TestClaudeExitFailureDoesNotOverrideResult(t *testing.T) {
 		`{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["Credit balance is too low"]}`,
 		"",
 	} {
-		r := newTestRunner(&recordingSink{})
 		p := &failingCLIProcess{testCLIProcess: testCLIProcess{done: make(chan struct{})}, err: exitErr}
 		_, _ = p.WriteString(line + "\n")
-		r.proc = p
-		r.readLoop()
+		r := newTurnRunner(context.Background(), external.PromptInput{Sink: &recordingSink{}}, p, nil, nil, slog.Default())
+		r.s.readLoop()
 		r.observeExit(exitErr)
 		r.close()
 		result, err := r.buildResult("")
@@ -689,15 +688,15 @@ func TestClaudeModelCatalogFromInitialize(t *testing.T) {
 	}
 }
 
-func TestClaudeCLIArgsIncludeTurnOverrides(t *testing.T) {
-	args := strings.Join(cliArgs(claudecfg.Config{}, external.PromptInput{ModelID: "model-a", ReasoningEffort: "high"}, "resumed-session", "", ""), " ")
+func TestClaudeCLIArgsIncludeStartingSettings(t *testing.T) {
+	args := strings.Join(cliArgs("model-a", "high", "resumed-session", "", "", false), " ")
 	if !strings.Contains(args, "--model 'model-a'") || !strings.Contains(args, "--effort 'high'") || !strings.Contains(args, "--resume 'resumed-session'") {
 		t.Fatalf("args = %q", args)
 	}
 	if strings.Contains(args, "--thinking ") {
 		t.Fatalf("effort must preserve native thinking settings: %q", args)
 	}
-	args = strings.Join(cliArgs(claudecfg.Config{}, external.PromptInput{}, "", "", ""), " ")
+	args = strings.Join(cliArgs("", "", "", "", "", false), " ")
 	if strings.Contains(args, "--thinking ") || strings.Contains(args, "--effort") {
 		t.Fatalf("an inherited default must stay unset: %q", args)
 	}
@@ -708,7 +707,7 @@ func TestClaudeControlCLIRunsNoWorkspaceHooksOrMCPServers(t *testing.T) {
 	if !strings.Contains(args, `--settings '{"disableAllHooks":true}'`) || !strings.Contains(args, "--strict-mcp-config") {
 		t.Fatalf("args = %q", args)
 	}
-	if args := strings.Join(cliArgs(claudecfg.Config{}, external.PromptInput{}, "", "", ""), " "); strings.Contains(args, "disableAllHooks") || strings.Contains(args, "--strict-mcp-config") {
+	if args := strings.Join(cliArgs("", "", "", "", "", false), " "); strings.Contains(args, "disableAllHooks") || strings.Contains(args, "--strict-mcp-config") {
 		t.Fatalf("a turn must keep the workspace's hooks and MCP servers: %q", args)
 	}
 }
@@ -717,7 +716,7 @@ func TestClaudeControlCLIRunsNoWorkspaceHooksOrMCPServers(t *testing.T) {
 // older CLI would exit on it.
 func TestClaudeCLIArgsRequestThinkingTextWhenSupported(t *testing.T) {
 	for version, want := range map[string]bool{"2.1.94": true, "2.1.269": true, "": false, "2.1.92": false, "2.0.5": false} {
-		args := strings.Join(cliArgs(claudecfg.Config{}, external.PromptInput{}, "", "", version), " ")
+		args := strings.Join(cliArgs("", "", "", "", version, false), " ")
 		if got := strings.Contains(args, "--thinking-display summarized"); got != want {
 			t.Fatalf("version %q: thinking display requested = %v, want %v (%q)", version, got, want, args)
 		}

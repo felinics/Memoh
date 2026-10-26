@@ -1,6 +1,6 @@
-// Memoh tool-gateway injection for Claude Code turns. Each turn's CLI
-// process gets its own reverse-HTTP route into the workspace tools proxy via
-// --mcp-config; the route lives exactly as long as the turn.
+// Memoh tool-gateway injection for Claude Code. Each CLI process gets its own
+// reverse-HTTP route into the workspace tools proxy via --mcp-config; the
+// route lives exactly as long as the process.
 package claudecode
 
 import (
@@ -25,19 +25,24 @@ const memohMCPServerName = "memoh"
 // windows; the toolmount timeout-ladder guard test pins this above them.
 const MemohToolTimeoutMillis = 900_000
 
-// mountTurnTools serves the gateway for one turn and returns the
-// --mcp-config JSON naming it. A gateway that cannot be mounted leaves the
-// turn without Memoh tools, said in the conversation; the mount (when
-// non-nil) must be stopped when the turn ends.
-func (d *Driver) mountTurnTools(ctx context.Context, client *bridge.Client, workspaceInfo bridge.WorkspaceInfo, input external.PromptInput) (string, *toolmount.Mount) {
-	session := toolmount.TurnSession(ctx, input)
-	session.SupportsImageInput = true
-	mount, err := toolmount.Serve(ctx, client, workspaceInfo, input.ToolHTTPURL, d.toolGateway, func() mcp.ToolSessionContext {
+// mountSessionTools serves the gateway for a CLI process's life and returns
+// the --mcp-config JSON naming it. Tool calls take the identity of the turn
+// running when they arrive; between turns the gateway refuses to run them. A
+// gateway that cannot be mounted leaves the process without Memoh tools, and
+// every turn on it says so.
+func (d *Driver) mountSessionTools(ctx context.Context, client *bridge.Client, workspaceInfo bridge.WorkspaceInfo, input external.PromptInput, current func() *turnRunner) (string, *toolmount.Mount) {
+	//nolint:contextcheck // the route serves every later turn of the process, not only the one that started it.
+	mount, err := toolmount.Serve(context.WithoutCancel(ctx), client, workspaceInfo, input.ToolHTTPURL, d.toolGateway, func() mcp.ToolSessionContext {
+		t := current()
+		if t == nil {
+			return toolmount.IdleSession(input.BotID)
+		}
+		session := toolmount.TurnSession(t.ctx, t.input)
+		session.SupportsImageInput = true
 		return session
 	})
 	if err != nil {
 		d.logger.WarnContext(ctx, "claude: Memoh tool gateway unavailable", slog.String("bot_id", input.BotID), slog.Any("error", err))
-		toolmount.EmitUnavailableNotice(input.Sink, "the tool gateway could not be mounted")
 		return "", nil
 	}
 	config := fmt.Sprintf(

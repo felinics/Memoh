@@ -1,7 +1,6 @@
 package claudecode
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,8 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
-	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/uuid"
@@ -37,8 +34,9 @@ type turnRunner struct {
 	approval  approval.FlowService
 	waiter    func(approvalID string) func()
 	logger    *slog.Logger
-	proc      cliProcess
 	userInput userinput.FlowService
+	// s is the process the turn runs on.
+	s *cliSession
 
 	// ctx is the turn-scoped context bounding approval decisions.
 	ctx    context.Context
@@ -49,12 +47,9 @@ type turnRunner struct {
 	// It runs on the read loop and must return quickly.
 	onCLIVersion func(ctx context.Context, version string)
 
-	writeMu      sync.Mutex
 	submissionMu sync.Mutex
-	nextID       atomic.Uint64
 
-	done     chan struct{}
-	readDone chan struct{}
+	done chan struct{}
 
 	// stream delivers events off the read loop: a slow consumer must not
 	// hold up control responses the CLI waits for.
@@ -67,7 +62,6 @@ type turnRunner struct {
 	turnHasText     bool
 	sessionID       string
 	result          *inboundMessage
-	pendingCtrl     map[string]chan controlResult
 	inboundCancels  map[string]context.CancelFunc
 	memohMCPCallIDs map[string]struct{}
 	toolCalls       map[string]toolCall
@@ -106,19 +100,22 @@ type turnRunner struct {
 	textOpen         bool
 }
 
+// newTurnRunner attaches a turn to a process of its own.
 func newTurnRunner(parent context.Context, input external.PromptInput, proc cliProcess, approvalSvc approval.FlowService, waiter func(string) func(), logger *slog.Logger) *turnRunner {
+	return newCLISession(proc, logger).beginTurn(parent, input, approvalSvc, waiter)
+}
+
+func newTurn(parent context.Context, s *cliSession, input external.PromptInput, approvalSvc approval.FlowService, waiter func(string) func()) *turnRunner {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	return &turnRunner{
 		input:           input,
 		approval:        approvalSvc,
 		waiter:          waiter,
-		logger:          logger,
-		proc:            proc,
+		logger:          s.logger,
+		s:               s,
 		ctx:             ctx,
 		cancel:          cancel,
 		done:            make(chan struct{}),
-		readDone:        make(chan struct{}),
-		pendingCtrl:     map[string]chan controlResult{},
 		inboundCancels:  map[string]context.CancelFunc{},
 		memohMCPCallIDs: map[string]struct{}{},
 		toolCalls:       map[string]toolCall{},
@@ -136,6 +133,7 @@ func (t *turnRunner) close() {
 	t.mu.Unlock()
 	t.stream.Finish()
 	t.cancel()
+	t.s.endTurn(t)
 }
 
 // emit queues one stream event for the sink and the transcript. After close
@@ -153,10 +151,7 @@ func (t *turnRunner) finish() {
 }
 
 func (t *turnRunner) writeLine(line []byte) error {
-	t.writeMu.Lock()
-	defer t.writeMu.Unlock()
-	_, err := t.proc.Write(append(line, '\n'))
-	return errs.WrapDependency(err, "")
+	return t.s.writeLine(line)
 }
 
 type controlResult struct {
@@ -168,39 +163,32 @@ type controlRejection struct{ diagnostic string }
 
 func (e *controlRejection) Error() string { return e.diagnostic }
 
-// callControl bounds every handshake and removes abandoned waiters. Wire
-// errors remain private diagnostics and are mapped at the application boundary.
+// callControl asks the process on the turn's behalf; the wait ends with the
+// turn.
 func (t *turnRunner) callControl(ctx context.Context, subtype string, extra map[string]any) (json.RawMessage, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	id := "memoh-" + strconv.FormatUint(t.nextID.Add(1), 10)
-	line, err := controlRequestLine(id, subtype, extra)
-	if err != nil {
-		return nil, err
-	}
-	ch := make(chan controlResult, 1)
-	t.mu.Lock()
-	t.pendingCtrl[id] = ch
-	t.mu.Unlock()
-	defer func() {
-		t.mu.Lock()
-		delete(t.pendingCtrl, id)
-		t.mu.Unlock()
+	go func() {
+		select {
+		case <-t.done:
+		case <-t.ctx.Done():
+		case <-ctx.Done():
+		}
+		cancel()
 	}()
-	if err := t.writeLine(line); err != nil {
-		return nil, err
+	raw, err := t.s.callControl(ctx, subtype, extra)
+	if err != nil && (t.ctx.Err() != nil || t.isDone()) {
+		return nil, t.processError(subtype)
 	}
+	return raw, err
+}
+
+func (t *turnRunner) isDone() bool {
 	select {
-	case result := <-ch:
-		return result.response, result.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-t.ctx.Done():
-		return nil, t.ctx.Err()
-	case <-t.proc.Done():
-		return nil, t.processError(subtype)
 	case <-t.done:
-		return nil, t.processError(subtype)
+		return true
+	default:
+		return false
 	}
 }
 
@@ -208,10 +196,7 @@ func (t *turnRunner) processError(operation string) error {
 	t.mu.Lock()
 	protocolErr := t.protocolErr
 	t.mu.Unlock()
-	return errors.Join(
-		errs.NewDependency(fmt.Sprintf("claude %s: stream ended; stderr: %s", operation, t.proc.StderrTail())),
-		t.proc.Err(), protocolErr,
-	)
+	return errors.Join(t.s.processError(operation), protocolErr)
 }
 
 func (t *turnRunner) initialize(ctx context.Context) (initializeResponse, error) {
@@ -232,30 +217,6 @@ func (t *turnRunner) getSettings(ctx context.Context) (settingsResponse, error) 
 	var settings settingsResponse
 	err = json.Unmarshal(raw, &settings)
 	return settings, errs.WrapDependency(err, "")
-}
-
-// readLoop consumes the CLI's NDJSON stream until the process exits.
-func (t *turnRunner) readLoop() {
-	defer close(t.readDone)
-	scanner := bufio.NewScanner(t.proc)
-	scanner.Buffer(make([]byte, 64*1024), maxLineBytes)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		msg, err := decodeInbound(line)
-		if err != nil {
-			// The CLI occasionally writes plain text on stdout; survivable.
-			t.logger.Warn("claude: undecodable line", slog.String("line", truncateForLog(line)))
-			continue
-		}
-		t.handleMessage(msg)
-	}
-	if err := scanner.Err(); err != nil {
-		t.observeExit(errs.WrapDependency(err, ""))
-	}
-	t.finish()
 }
 
 func (t *turnRunner) handleMessage(msg *inboundMessage) {
@@ -325,6 +286,9 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 			}
 			t.sessionID = msg.SessionID
 			t.mu.Unlock()
+			t.s.mu.Lock()
+			t.s.nativeID = msg.SessionID
+			t.s.mu.Unlock()
 			t.readyOnce.Do(func() { close(t.ready) })
 			if msg.ClaudeCodeVersion != "" && msg.ClaudeCodeVersion != PinnedCLIVersion {
 				t.logger.Warn("claude CLI version differs from the pinned wire contract",
@@ -518,26 +482,7 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 	case messageTypeControlCancel:
 		t.cancelInboundControl(msg.RequestID)
 	case messageTypeControlResponse:
-		var envelope struct {
-			Subtype   string          `json:"subtype"`
-			RequestID string          `json:"request_id"`
-			Response  json.RawMessage `json:"response"`
-			Error     string          `json:"error"`
-		}
-		if err := json.Unmarshal(msg.Response, &envelope); err != nil {
-			return
-		}
-		t.mu.Lock()
-		ch := t.pendingCtrl[envelope.RequestID]
-		delete(t.pendingCtrl, envelope.RequestID)
-		t.mu.Unlock()
-		if ch != nil {
-			result := controlResult{response: envelope.Response}
-			if envelope.Subtype != "success" {
-				result.err = errs.WrapDependency(&controlRejection{diagnostic: fmt.Sprintf("claude control %s: %s", envelope.Subtype, envelope.Error)}, "")
-			}
-			ch <- result
-		}
+		t.s.resolveControl(msg)
 	}
 }
 
@@ -782,7 +727,7 @@ func (t *turnRunner) observeExit(err error) {
 	t.mu.Lock()
 	t.exitErr = errors.Join(t.exitErr, err)
 	t.mu.Unlock()
-	t.logger.Warn("claude CLI did not exit cleanly", slog.Any("error", err), slog.String("stderr", t.proc.StderrTail()))
+	t.logger.Warn("claude CLI did not exit cleanly", slog.Any("error", err), slog.String("stderr", t.s.proc.StderrTail()))
 }
 
 // interrupt asks the CLI to stop the running turn.
@@ -909,9 +854,9 @@ func (t *turnRunner) buildResult(storedSessionID string) (external.PromptResult,
 	case t.result == nil:
 		out.StopReason = "process_exit"
 		if t.exitErr != nil {
-			return out, fmt.Errorf("claude CLI exited without a result: %w: %s", t.exitErr, t.proc.StderrTail())
+			return out, fmt.Errorf("claude CLI exited without a result: %w: %s", t.exitErr, t.s.proc.StderrTail())
 		}
-		return out, errs.NewDependency(fmt.Sprintf("claude CLI exited without a result: %s", t.proc.StderrTail()))
+		return out, errs.NewDependency(fmt.Sprintf("claude CLI exited without a result: %s", t.s.proc.StderrTail()))
 	case t.result.IsError:
 		out.StopReason = t.result.Subtype
 		message := strings.TrimSpace(t.result.Result)

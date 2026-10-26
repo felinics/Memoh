@@ -47,28 +47,69 @@ func (t *turnRunner) configureModes(ctx context.Context, cfg claudecfg.Config, m
 			}
 		}
 	}
-	if mode != "inherit" {
+	if mode == "inherit" {
+		return t.inheritNativeMode(ctx, plan)
+	}
+	if plan == "plan" && mode != "plan" {
 		// Let Claude remember the accepted ordinary mode when entering Plan;
 		// its ExitPlanMode tool restores that mode after the user's approval.
-		if err := t.setNativeMode(ctx, mode); err != nil {
+		if err := t.ensureNativeMode(ctx, mode); err != nil {
 			return err
 		}
-	} else if plan == "default" {
-		settings, err := t.getSettings(ctx)
-		if err != nil {
-			return err
+		mode = "plan"
+	}
+	return t.ensureNativeMode(ctx, mode)
+}
+
+// inheritNativeMode keeps the workspace's own permission mode. A process
+// still in the mode it started with already runs it; one that left it in an
+// earlier turn returns to it.
+func (t *turnRunner) inheritNativeMode(ctx context.Context, plan string) error {
+	t.s.mu.Lock()
+	current := t.s.mode
+	t.s.mu.Unlock()
+	if current == "" && plan != "default" {
+		if plan == "plan" {
+			return t.setNativeMode(ctx, "plan")
 		}
+		return nil
+	}
+	settings, err := t.getSettings(ctx)
+	if err != nil {
+		return err
+	}
+	inherited := settings.Effective.Permissions.DefaultMode
+	if !nativePermissionMode(inherited) {
+		inherited = "default"
+	}
+	target := inherited
+	switch {
+	case plan == "plan":
+		target = "plan"
+	case plan == "default" && target == "plan":
 		// An explicit Plan-off choice overrides a workspace that starts in
 		// Plan. Other inherited modes remain the CLI's decision: effective
 		// settings are raw configuration, not its accepted permission state.
-		if settings.Effective.Permissions.DefaultMode == "plan" {
-			return t.setNativeMode(ctx, "default")
-		}
+		target = "default"
 	}
-	if plan == "plan" {
-		return t.setNativeMode(ctx, "plan")
+	if current == "" {
+		current = inherited
 	}
-	return nil
+	if current == target {
+		return nil
+	}
+	return t.setNativeMode(ctx, target)
+}
+
+// ensureNativeMode puts the process in mode unless it already is.
+func (t *turnRunner) ensureNativeMode(ctx context.Context, mode string) error {
+	t.s.mu.Lock()
+	current := t.s.mode
+	t.s.mu.Unlock()
+	if current == mode {
+		return nil
+	}
+	return t.setNativeMode(ctx, mode)
 }
 
 func (t *turnRunner) setNativeMode(ctx context.Context, mode string) error {
@@ -97,6 +138,9 @@ func (t *turnRunner) observePermissionMode(mode string) {
 	if !nativePermissionMode(mode) {
 		return
 	}
+	t.s.mu.Lock()
+	t.s.mode = mode
+	t.s.mu.Unlock()
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.closed || t.permissionMode == mode {
@@ -115,4 +159,35 @@ func (t *turnRunner) observePermissionMode(mode string) {
 	// including interrupted turns. The protocol reader never waits on storage.
 	t.permissionMode = mode
 	t.runtimeMetadata["claude_effective_permission_mode"] = mode
+}
+
+// applySettings moves the process to the turn's model and effort when they
+// differ from what it runs with. Empty returns to the CLI's default.
+func (t *turnRunner) applySettings(ctx context.Context, model, effort string) error {
+	s := t.s
+	s.mu.Lock()
+	currentModel, currentEffort := s.model, s.effort
+	s.mu.Unlock()
+	if model != currentModel {
+		var value any
+		if model != "" {
+			value = model
+		}
+		if _, err := t.callControl(ctx, "set_model", map[string]any{"model": value}); err != nil {
+			return err
+		}
+	}
+	if effort != currentEffort {
+		var level any
+		if effort != "" {
+			level = effort
+		}
+		if _, err := t.callControl(ctx, "apply_flag_settings", map[string]any{"settings": map[string]any{"effortLevel": level}}); err != nil {
+			return err
+		}
+	}
+	s.mu.Lock()
+	s.model, s.effort = model, effort
+	s.mu.Unlock()
+	return nil
 }

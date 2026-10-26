@@ -9,9 +9,11 @@
 // events do not require version-specific adapters. Unsupported inbound
 // control requests receive an error response.
 //
-// One process serves one Memoh run and resumes its durable native session.
-// Steering may start several native turns before stdin closes. Token usage
-// belongs to each native result and is summed across distinct result UUIDs.
+// One process serves a conversation's turns one after another and stays
+// between them until it idles out; it resumes the durable native session when
+// it starts. Steering may start several native turns within one Memoh run.
+// Token usage belongs to each native result and is summed across distinct
+// result UUIDs.
 package claudecode
 
 import (

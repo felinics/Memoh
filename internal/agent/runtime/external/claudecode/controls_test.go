@@ -114,9 +114,9 @@ func TestClaudeControlErrorsAndCancellation(t *testing.T) {
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancel: %v", err)
 	}
-	r.mu.Lock()
-	pending := len(r.pendingCtrl)
-	r.mu.Unlock()
+	r.s.mu.Lock()
+	pending := len(r.s.pending)
+	r.s.mu.Unlock()
 	if pending != 0 {
 		t.Fatalf("abandoned control waiters: %d", pending)
 	}
@@ -466,5 +466,29 @@ func TestClaudeReadCommandsPreserveStructuredObservations(t *testing.T) {
 	}
 	if data["usage"].(map[string]any)["future_counter"] != 12 || data["model"] != "native-model" {
 		t.Fatalf("lost native observation: %+v", data)
+	}
+}
+
+// A process that left the workspace's mode in an earlier turn returns to it
+// when the next turn inherits.
+func TestInheritedPermissionsReturnAfterAnEarlierTurnChangedThem(t *testing.T) {
+	r, p := controlTestRunner()
+	defer r.close()
+	r.s.mode = "acceptEdits"
+	r.input.RuntimeMetadata["permission_mode"] = "inherit"
+	done := make(chan error, 1)
+	go func() { done <- r.configureModes(context.Background(), claudecfg.Config{}, nil) }()
+	id, request := receiveControl(t, p)
+	if request["subtype"] != "get_settings" {
+		t.Fatalf("request: %v", request)
+	}
+	replyControl(t, r, id, map[string]any{"effective": map[string]any{"permissions": map[string]any{"defaultMode": "default"}}})
+	id, request = receiveControl(t, p)
+	if request["subtype"] != "set_permission_mode" || request["mode"] != "default" {
+		t.Fatalf("request: %v", request)
+	}
+	replyControl(t, r, id, map[string]any{"mode": "default"})
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
