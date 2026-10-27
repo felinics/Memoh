@@ -66,6 +66,9 @@ export function reduceDesktopUpdateState(
   state: DesktopUpdateState,
   event: DesktopUpdateStateEvent,
 ): DesktopUpdateState {
+  // Once a restart is under way, only its own outcome may change the state;
+  // events from a background check that was already running are stale.
+  if (state.status === 'installing' && event.type !== 'error' && event.type !== 'preference') return state
   switch (event.type) {
     case 'preference':
       return { ...state, autoUpdate: event.autoUpdate }

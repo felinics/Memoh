@@ -48,6 +48,10 @@ let downloadStallTimer: ReturnType<typeof setTimeout> | null = null
 let downloadCancellationToken: DownloadCancellationToken | null = null
 let downloadCompletionSequence = 0
 let installRecoveryRequired = false
+// Becomes true only once the package is handed to the native installer. Before
+// that, an `error` event can only come from a background check that was already
+// in flight when the user chose to restart.
+let installHandedOff = false
 let consecutiveFailures = 0
 let handledFailure: unknown = null
 
@@ -126,6 +130,10 @@ async function checkForUpdate(automatic = false): Promise<DesktopUpdateState> {
   try {
     const completionAtStart = downloadCompletionSequence
     const result = await autoUpdater.checkForUpdates()
+    // A restart started while this check was in flight owns the state now.
+    // Background downloads are disabled during installation, so there is no
+    // download to track and the cached package being installed stays intact.
+    if (updateState.status === 'installing') return updateState
     if (!result) {
       return setUpdateState({
         type: 'unavailable',
@@ -164,6 +172,7 @@ function markUpdateSucceeded(): void {
 
 function failUpdate(error: unknown): void {
   clearDownloadWatchdog()
+  if (updateState.status === 'installing') return
   if (handledFailure === error || (updateState.status === 'error' && checkTimer)) return
   handledFailure = error
   // A feed error must not hide an already usable download. New-version download
@@ -176,7 +185,7 @@ function failUpdate(error: unknown): void {
 
 function failDownload(error: unknown): void {
   clearDownloadWatchdog()
-  // electron-updater clears its pending cache when a replacement download fails.
+  // electron-updater may have cleared its pending cache for this download.
   // Do not carry a stale manifest into the next launch's offline recovery.
   if (saved.pending) {
     try {
@@ -187,6 +196,20 @@ function failDownload(error: unknown): void {
     }
   }
   failUpdate(error)
+}
+
+// electron-updater keeps a single pending package and empties it before it
+// downloads a different release; there is no option to keep the previous one.
+// Drop the saved manifest at that point so a quit or crash mid-download cannot
+// make the next launch recover and install the replaced, older release.
+// An installation in progress disables background downloads, so its package stays.
+function forgetReplacedPending(version: string): void {
+  if (!saved.pending || saved.pending.version === version || updateState.status === 'installing') return
+  try {
+    persist({ ...saved, pending: null })
+  } catch (error) {
+    failUpdate(error)
+  }
 }
 
 function armDownloadWatchdog(token: DownloadCancellationToken): void {
@@ -232,6 +255,8 @@ function persist(next: SavedUpdates): void {
 }
 
 function failInstall(error: unknown): void {
+  installHandedOff = false
+  autoUpdater.autoDownload = true
   installRecoveryRequired = true
   cancelScheduledCheck()
   clearDownloadWatchdog()
@@ -247,11 +272,16 @@ async function installUpdate(options: DesktopUpdatesOptions, restart = true): Pr
   if (updateState.status !== 'downloaded') return updateState
   cancelScheduledCheck()
   setUpdateState({ type: 'installing' }) // Lock before the first await, including IPC double-clicks.
+  // electron-updater reads autoDownload when a check resolves. A check already
+  // in flight would otherwise download a newer release and delete the package
+  // this restart is about to install.
+  autoUpdater.autoDownload = false
   try {
     persist({ ...saved, attemptedVersion: updateState.latestVersion })
     await options.prepareToInstall()
     options.markQuitting()
     autoUpdater.autoRunAppAfterInstall = restart
+    installHandedOff = true
     // MacUpdater may still be preparing the ZIP in Squirrel. Its eventual quit
     // callback cannot be cancelled through the public API, so elapsed time alone
     // must not restore the session while that callback remains armed. Stay locked
@@ -349,9 +379,10 @@ function configureAutoUpdater(): void {
 
   if (updaterListenersRegistered) return
   autoUpdater.on('checking-for-update', () => setUpdateState({ type: 'checking' }))
-  autoUpdater.on('update-available', info => (
+  autoUpdater.on('update-available', info => {
+    forgetReplacedPending(updateVersion(info))
     setUpdateState({ type: 'available', latestVersion: updateVersion(info), releaseNotes: updateNotes(info) })
-  ))
+  })
   autoUpdater.on('update-not-available', info => (
     setUpdateState({ type: 'not-available', latestVersion: updateVersion(info) })
   ))
@@ -360,6 +391,8 @@ function configureAutoUpdater(): void {
     setUpdateState({ type: 'download-progress', percent: progressPercent(progress) })
   })
   autoUpdater.on('update-downloaded', info => {
+    // Keep the attempted version recorded for the installation in progress.
+    if (updateState.status === 'installing') return
     downloadCompletionSequence += 1
     clearDownloadWatchdog()
     try {
@@ -371,8 +404,8 @@ function configureAutoUpdater(): void {
     }
   })
   autoUpdater.on('error', error => {
-    if (updateState.status === 'installing') failInstall(error)
-    else failUpdate(error)
+    if (updateState.status !== 'installing') failUpdate(error)
+    else if (installHandedOff) failInstall(error)
   })
   updaterListenersRegistered = true
 }

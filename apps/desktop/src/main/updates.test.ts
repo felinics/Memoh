@@ -262,3 +262,65 @@ it('cancels a download that stops making progress', async () => {
   expect(cancel).toHaveBeenCalledOnce()
   expect(state().status).toBe('error')
 })
+
+it('keeps a restart locked when an in-flight check settles before handoff', async () => {
+  await start()
+  f.events.get('update-downloaded')!({ version: '2.0.0' })
+  let finishCheck!: () => void
+  let failCheck!: (error: Error) => void
+  f.updater.checkForUpdates.mockImplementation(() => new Promise((resolve, reject) => {
+    finishCheck = () => {
+      f.events.get('checking-for-update')!()
+      f.events.get('update-available')!({ version: '2.1.0' })
+      resolve({ isUpdateAvailable: true, updateInfo: { version: '2.1.0' }, downloadPromise: null })
+    }
+    failCheck = reject
+  }))
+  await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+  expect(f.updater.checkForUpdates).toHaveBeenCalledOnce()
+  expect(state().status).toBe('downloaded')
+
+  let prepared!: () => void
+  f.options.prepareToInstall.mockImplementation(() => new Promise<void>((resolve) => { prepared = resolve }))
+  const install = f.handlers.get('desktop:updates:install')!({})
+  expect(state().status).toBe('installing')
+  // The cached package is the one being installed; a late check must not
+  // start a download that replaces it.
+  expect(f.updater.autoDownload).toBe(false)
+
+  finishCheck()
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(state().status).toBe('installing')
+  expect(JSON.parse(f.persisted).pending.version).toBe('2.0.0')
+  f.events.get('error')!(new Error('feed offline'))
+  expect(state().status).toBe('installing')
+  expect(f.options.installFailed).not.toHaveBeenCalled()
+
+  prepared()
+  await install
+  expect(f.updater.quitAndInstall).toHaveBeenCalledOnce()
+  expect(JSON.parse(f.persisted).attemptedVersion).toBe('2.0.0')
+  void failCheck
+})
+
+it('re-enables background downloads after an installation failure', async () => {
+  await start()
+  f.events.get('update-downloaded')!({ version: '2.0.0' })
+  f.updater.quitAndInstall.mockImplementation(() => { throw new Error('native installation failed') })
+  await f.handlers.get('desktop:updates:install')!({})
+  expect(state().status).toBe('error')
+  expect(f.updater.autoDownload).toBe(true)
+})
+
+it('forgets a replaced package as soon as a newer release starts downloading', async () => {
+  await start()
+  f.events.get('update-downloaded')!({ version: '2.0.0' })
+  f.events.get('update-available')!({ version: '2.0.0' })
+  expect(JSON.parse(f.persisted).pending.version).toBe('2.0.0')
+
+  // electron-updater empties its pending cache before downloading 2.1.0, so a
+  // restart during this download must not try to recover 2.0.0 on next launch.
+  f.events.get('update-available')!({ version: '2.1.0' })
+  expect(JSON.parse(f.persisted).pending).toBeNull()
+})
