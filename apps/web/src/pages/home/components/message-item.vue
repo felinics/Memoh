@@ -83,88 +83,117 @@
           class="chat-user-text chat-user-bubble-edit w-auto max-w-full min-h-0 max-h-80 px-4 py-3"
           :class="userBubbleRadiusClass"
           :aria-label="t('chat.actions.edit')"
-          @keydown.enter.meta.exact.prevent="submitEdit"
-          @keydown.enter.ctrl.exact.prevent="submitEdit"
-          @keydown.escape.stop.prevent="cancelEdit"
+          @keydown.enter.meta.exact="onEditSubmitKey"
+          @keydown.enter.ctrl.exact="onEditSubmitKey"
+          @keydown.escape.stop="onEditCancelKey"
         />
-        <div
+        <!-- Touch has no hover, so the copy/edit row under the bubble never
+             shows there; a long press on the bubble opens the same actions
+             instead (the ContextMenu opens on a touch hold). Pointer devices
+             keep the native right-click menu and their text selection, so the
+             trigger is off for them. On touch the bubble opts out of text
+             selection and the system callout — otherwise the OS starts a
+             selection on the hold and cancels the press — which is why Copy
+             is in the menu. -->
+        <ContextMenu
           v-else-if="isSkillActivationMessage || userBubbleText || message.forward || message.reply"
-          :lang="contentLang(userBubbleText || skillActivationNames || skillActivationTitle)"
-          class="chat-user-bubble w-fit max-w-full bg-chat-user-bubble px-4 py-3 text-chat-user-bubble-fg whitespace-pre-wrap break-words"
-          :class="userBubbleRadiusClass"
         >
-          <div
-            v-if="isSkillActivationMessage"
-            class="flex min-w-0 items-start gap-2"
+          <ContextMenuTrigger
+            as-child
+            :disabled="!isTouchPointer"
           >
-            <Sparkles
-              aria-hidden="true"
-              class="mt-0.5 size-3.5 shrink-0"
-            />
-            <div class="min-w-0 space-y-0.5">
-              <p class="text-caption font-medium leading-snug">
-                {{ skillActivationTitle }}
-              </p>
-              <p
-                v-if="skillActivationNames"
-                class="text-body leading-snug break-words"
+            <div
+              :lang="contentLang(userBubbleText || skillActivationNames || skillActivationTitle)"
+              class="chat-user-bubble w-fit max-w-full bg-chat-user-bubble px-4 py-3 text-chat-user-bubble-fg whitespace-pre-wrap break-words"
+              :class="[userBubbleRadiusClass, isTouchPointer ? 'select-none [-webkit-touch-callout:none]' : '']"
+            >
+              <div
+                v-if="isSkillActivationMessage"
+                class="flex min-w-0 items-start gap-2"
               >
-                {{ skillActivationNames }}
-              </p>
-            </div>
-          </div>
-          <div
-            v-if="message.forward"
-            class="text-[11px] font-medium leading-snug text-muted-foreground"
-            :class="isSkillActivationMessage ? 'mt-2 mb-1' : 'mb-1'"
-          >
-            {{ t('chat.forwardedFrom', { sender: forwardSenderLabel }) }}
-          </div>
-          <button
-            v-if="message.reply"
-            type="button"
-            class="relative mb-1 min-w-0 overflow-hidden rounded-sm py-1 pl-3 pr-2 leading-snug break-normal"
-            :class="[
-              'bg-background/55 dark:bg-background/20',
-              canJumpReply ? 'block w-full text-left cursor-pointer hover:bg-background/70 dark:hover:bg-background/30 focus:outline-none focus:ring-1 focus:ring-primary/40' : 'block w-full text-left cursor-default',
-            ]"
-            :disabled="!canJumpReply"
-            @click.stop="handleReplyClick"
-          >
-            <span
-              class="absolute inset-y-0 left-0 w-[3px]"
-              :class="bubbleSelf ? 'bg-border' : 'bg-primary/70'"
-            />
-            <div class="flex min-w-0 items-start gap-2">
-              <div class="min-w-0 flex-1">
-                <div
-                  class="truncate text-[11px] font-semibold"
-                  :class="bubbleSelf ? 'text-foreground' : 'text-primary'"
-                >
-                  {{ replySenderLabel }}
-                </div>
-                <div
-                  v-if="replyPreviewLabel"
-                  class="mt-0.5 line-clamp-2 text-[11px] whitespace-pre-wrap break-words text-muted-foreground"
-                >
-                  {{ replyPreviewLabel }}
+                <Sparkles
+                  aria-hidden="true"
+                  class="mt-0.5 size-3.5 shrink-0"
+                />
+                <div class="min-w-0 space-y-0.5">
+                  <p class="text-caption font-medium leading-snug">
+                    {{ skillActivationTitle }}
+                  </p>
+                  <p
+                    v-if="skillActivationNames"
+                    class="text-body leading-snug break-words"
+                  >
+                    {{ skillActivationNames }}
+                  </p>
                 </div>
               </div>
-              <img
-                v-if="replyThumbnailSrc"
-                :src="replyThumbnailSrc"
-                :alt="replyPreviewLabel || replySenderLabel"
-                class="size-9 shrink-0 rounded-sm object-cover"
-                loading="lazy"
+              <div
+                v-if="message.forward"
+                class="text-[11px] font-medium leading-snug text-muted-foreground"
+                :class="isSkillActivationMessage ? 'mt-2 mb-1' : 'mb-1'"
               >
+                {{ t('chat.forwardedFrom', { sender: forwardSenderLabel }) }}
+              </div>
+              <button
+                v-if="message.reply"
+                type="button"
+                class="relative mb-1 min-w-0 overflow-hidden rounded-sm py-1 pl-3 pr-2 leading-snug break-normal"
+                :class="[
+                  'bg-background/55 dark:bg-background/20',
+                  canJumpReply ? 'block w-full text-left cursor-pointer hover:bg-background/70 dark:hover:bg-background/30 focus:outline-none focus:ring-1 focus:ring-primary/40' : 'block w-full text-left cursor-default',
+                ]"
+                :disabled="!canJumpReply"
+                @click.stop="handleReplyClick"
+              >
+                <span
+                  class="absolute inset-y-0 left-0 w-[3px]"
+                  :class="bubbleSelf ? 'bg-border' : 'bg-primary/70'"
+                />
+                <div class="flex min-w-0 items-start gap-2">
+                  <div class="min-w-0 flex-1">
+                    <div
+                      class="truncate text-[11px] font-semibold"
+                      :class="bubbleSelf ? 'text-foreground' : 'text-primary'"
+                    >
+                      {{ replySenderLabel }}
+                    </div>
+                    <div
+                      v-if="replyPreviewLabel"
+                      class="mt-0.5 line-clamp-2 text-[11px] whitespace-pre-wrap break-words text-muted-foreground"
+                    >
+                      {{ replyPreviewLabel }}
+                    </div>
+                  </div>
+                  <img
+                    v-if="replyThumbnailSrc"
+                    :src="replyThumbnailSrc"
+                    :alt="replyPreviewLabel || replySenderLabel"
+                    class="size-9 shrink-0 rounded-sm object-cover"
+                    loading="lazy"
+                  >
+                </div>
+              </button>
+              <CollapsibleUserText
+                v-if="userBubbleText"
+                :class="isSkillActivationMessage ? 'mt-2' : ''"
+                :text="userBubbleText"
+              />
             </div>
-          </button>
-          <CollapsibleUserText
-            v-if="userBubbleText"
-            :class="isSkillActivationMessage ? 'mt-2' : ''"
-            :text="userBubbleText"
-          />
-        </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem @select="copyUserText">
+              <Copy />
+              {{ t('chat.actions.copy') }}
+            </ContextMenuItem>
+            <ContextMenuItem
+              v-if="canEditUserMessage"
+              @select="handleEdit"
+            >
+              <Pencil />
+              {{ t('chat.actions.edit') }}
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
         <p
           v-if="isGoalMessage"
           class="flex items-center gap-1.5 text-caption text-muted-foreground"
@@ -191,8 +220,12 @@
               v-if="isEditingUserMessage"
               class="flex h-8 items-center justify-end gap-1.5"
             >
-              <!-- Saving reruns the turn, which a bare "Save" does not say. -->
-              <InfoHint :text="t('chat.actions.editHint')" />
+              <!-- Saving reruns the turn, which a bare "Save" does not say.
+                   Spelled out beside the buttons rather than behind a hover
+                   hint, which touch cannot open. -->
+              <span class="mr-1 min-w-0 text-caption text-muted-foreground">
+                {{ t('chat.actions.editReplaceNote') }}
+              </span>
               <Button
                 type="button"
                 variant="ghost"
@@ -433,9 +466,9 @@ if (typeof document !== 'undefined') {
 
 <script setup lang="ts">
 import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
-import { Sparkles, Target } from 'lucide-vue-next'
+import { Copy, Pencil, Sparkles, Target } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
-import { Avatar, AvatarImage, AvatarFallback, Button, CalloutBanner, InfoHint, Textarea } from '@felinic/ui'
+import { Avatar, AvatarImage, AvatarFallback, Button, CalloutBanner, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Textarea, toast, useClipboard } from '@felinic/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
 import ToolCallGroup from './tool-call-group.vue'
@@ -464,7 +497,7 @@ import { runtimeGoalObjective } from '@/utils/runtime-slash-commands'
 import { withLiteralSingleDollars } from '@/utils/markdown-dollar'
 
 import { resolveUrl } from '../composables/useMediaGallery'
-import { useElementVisibility } from '@vueuse/core'
+import { useElementVisibility, useMediaQuery } from '@vueuse/core'
 
 
 enableKatex()
@@ -720,6 +753,35 @@ function openEditor(draft: string) {
   })
 }
 
+// The edit shortcuts must not fire while an IME is composing: Enter (with or
+// without a modifier) and Escape belong to the IME then — committing or
+// dismissing the candidate — not to the edit. keyCode 229 covers browsers that
+// report the composing keydown without isComposing.
+function isComposingKey(event: KeyboardEvent) {
+  return event.isComposing || event.keyCode === 229
+}
+
+function onEditSubmitKey(event: KeyboardEvent) {
+  if (isComposingKey(event)) return
+  event.preventDefault()
+  submitEdit()
+}
+
+function onEditCancelKey(event: KeyboardEvent) {
+  if (isComposingKey(event)) return
+  event.preventDefault()
+  cancelEdit()
+}
+
+// Long press only exists on touch; see the bubble's ContextMenu.
+const isTouchPointer = useMediaQuery('(hover: none) and (pointer: coarse)')
+const { copyText } = useClipboard()
+
+async function copyUserText() {
+  if (await copyText(userCopyText.value)) toast.success(t('common.copied'))
+  else toast.error(t('common.copyFailed'))
+}
+
 function cancelEdit() {
   isEditingUserMessage.value = false
   editDraft.value = ''
@@ -742,7 +804,8 @@ function submitEdit() {
 // Element-level script tag for BLOCK typography only — leading (CJK packs
 // tighter, so it loosens) and the ~3% Latin size shave. Per-glyph WEIGHT in mixed
 // runs is NOT done here (one font-weight can't split a run); that lives in the
-// .chat-cjk / .chat-latin spans emitted by md-text and the user bubble. A block
+// .chat-cjk / .chat-latin spans emitted by md-text (the user prompt has no spans;
+// see .chat-user-text in style.css). A block
 // is 'zh' if it contains any CJK (its leading should breathe for the CJK lines).
 const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f]/
 function contentLang(content?: string): 'zh' | 'en' {

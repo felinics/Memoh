@@ -684,9 +684,10 @@
   }
 
   [data-chat-content] .chat-user-bubble {
-    /* Matches the assistant reading body exactly — same size and the same
-     * per-script run weights — so the prompt and its answer read as one voice;
-     * the tinted surface alone marks the turn. */
+    /* Container defaults for the bubble's chrome (forward/reply/skill rows).
+     * The prompt text itself is set by .chat-user-text below the layers, which
+     * matches the answer's size and per-script weights through a font rather
+     * than run spans. */
     font-size: 1rem;
     line-height: var(--chat-leading);
     font-weight: 400;

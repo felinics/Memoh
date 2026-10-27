@@ -1054,7 +1054,7 @@
     "actions": {
       "copy": "Copy",
       "edit": "Edit",
-      "editHint": "Saving replaces this message and the reply after it, then the conversation continues from here.",
+      "editReplaceNote": "Saving replaces the replies after it",
       "share": "Share",
       "retry": "Try again",
       "fork": "Fork",

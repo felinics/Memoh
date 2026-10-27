@@ -8,6 +8,7 @@ import { keyboardBindings, resolveKeyboardBinding } from '@/lib/keyboard-binding
 import { appKeyboardCommands, createKeyboardCommandRegistry } from '@/lib/keyboard-commands'
 
 const Stub = defineComponent({ inheritAttrs: false, setup: () => () => h('div') })
+const Passthrough = defineComponent({ inheritAttrs: false, setup: (_, { slots }) => () => slots.default?.() })
 
 vi.mock('markstream-vue', () => ({ default: Stub, setCustomComponents: vi.fn(), enableKatex: vi.fn(), enableMermaid: vi.fn() }))
 vi.mock('@/components/markdown', () => ({ registerSharedMarkdownComponents: vi.fn() }))
@@ -26,7 +27,9 @@ vi.mock('./message-actions.vue', () => ({
   }),
 }))
 vi.mock('@felinic/ui', () => ({
-  Avatar: Stub, AvatarImage: Stub, AvatarFallback: Stub, Button: Stub, CalloutBanner: Stub, InfoHint: Stub,
+  Avatar: Stub, AvatarImage: Stub, AvatarFallback: Stub, Button: Stub, CalloutBanner: Stub,
+  ContextMenu: Passthrough, ContextMenuTrigger: Passthrough, ContextMenuContent: Stub, ContextMenuItem: Stub,
+  toast: { success: vi.fn(), error: vi.fn() }, useClipboard: () => ({ copyText: vi.fn() }),
   Textarea: defineComponent({
     inheritAttrs: false,
     props: { modelValue: String },
