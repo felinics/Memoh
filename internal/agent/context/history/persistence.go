@@ -1,6 +1,8 @@
 package historyfrag
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -71,6 +73,20 @@ func DecodeStoredModelMessage(log *slog.Logger, messageID, role string, raw json
 // remain unaware of durable compatibility shapes.
 func StoredModelMessageToSDKMessage(message turn.ModelMessage) sdk.Message {
 	return restoreLegacyFields(message, messageconv.ModelMessageToSDKMessage(message))
+}
+
+// MessageContentHash identifies a stored message version independently of
+// encoding and usage accounting. Capture it before replay projections; durable
+// artifact coverage additionally validates the full source payload at commit.
+func MessageContentHash(message turn.ModelMessage) string {
+	sent := StoredModelMessageToSDKMessage(message)
+	sent.Usage = nil
+	encoded, err := json.Marshal(sent)
+	if err != nil {
+		return ""
+	}
+	hash := sha256.Sum256(encoded)
+	return hex.EncodeToString(hash[:])
 }
 
 func StoredModelMessagesToSDKMessages(messages []turn.ModelMessage) []sdk.Message {

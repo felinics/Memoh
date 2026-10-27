@@ -50,12 +50,12 @@ func (t *stepThread) reset(dispatch generateDispatch) {
 }
 
 // advance prepares the request for the next model call. A pending capability
-// refresh is installed first, before the prepare chain, so budgeting and
-// reselection price the request that is actually sent. At every boundary
-// after a dispatch's first call the loop-owned dynamic inputs (read-media
-// carriers, live injections, directive inputs) join the conversation, then
-// the prepare chain (before-model-call hook, background summary,
-// provider-attempt budgeting/reselection) runs.
+// refresh is installed first, before the prepare chain, so budgeting prices
+// the request that is actually sent. At every boundary after a dispatch's
+// first call the loop-owned dynamic inputs (read-media carriers, live
+// injections, directive inputs) join the conversation, then the prepare chain
+// (before-model-call hook, background summary, in-run compaction and the
+// provider envelope check) runs.
 func (t *stepThread) advance(cfg RunConfig, dynamic *loopDynamicInputs, boundary stepBoundary) sdk.Request {
 	if t.pendingRefresh != nil {
 		t.messages = t.pendingRefresh.apply(&t.dispatch, &t.params, t.messages)

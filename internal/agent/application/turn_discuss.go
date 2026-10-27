@@ -20,6 +20,7 @@ import (
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/contextview"
 	"github.com/felinics/memoh/internal/messageconv"
+	"github.com/felinics/memoh/internal/models"
 )
 
 // turnRuntimeHooks are test seams for the transport-facing turn lifecycle.
@@ -28,7 +29,7 @@ import (
 type turnRuntimeHooks struct {
 	streamChat       func(context.Context, ChatRequest) (<-chan StreamChunk, <-chan error)
 	streamAgent      func(context.Context, native.RunConfig) <-chan native.StreamEvent
-	resolveRunConfig func(context.Context, string, string, string, string, string, string, string) (ResolveRunConfigResult, error)
+	resolveRunConfig func(context.Context, RunConfigRequest) (ResolveRunConfigResult, error)
 	inlineImages     func(context.Context, string, []timeline.ImageAttachmentRef) [][]sdk.ImagePart
 	storeRound       func(context.Context, string, string, string, string, string, []sdk.Message, string, *contextfrag.LifecycleHolder) error
 }
@@ -149,9 +150,17 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		h.cancel()
 	}()
 
-	resolved, err := s.resolveDiscussRunConfig(ctx,
-		cmd.BotID, cmd.ThreadID, cmd.SourceChannelIdentityID,
-		cmd.CurrentChannel, cmd.ReplyTarget, cmd.ConversationType, cmd.SessionToken)
+	// A Discuss batch speaks for the group rather than one account, so no user
+	// scopes its config; every step of the turn resolves the same way.
+	resolved, err := s.resolveDiscussRunConfig(ctx, RunConfigRequest{
+		BotID:             cmd.BotID,
+		SessionID:         cmd.ThreadID,
+		ChannelIdentityID: cmd.SourceChannelIdentityID,
+		CurrentPlatform:   cmd.CurrentChannel,
+		ReplyTarget:       cmd.ReplyTarget,
+		ConversationType:  cmd.ConversationType,
+		ChatToken:         cmd.SessionToken,
+	})
 	if err != nil {
 		h.emitErr(err)
 		return
@@ -168,14 +177,21 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		}
 		return
 	}
-	if !cmd.DiscussRecoveryExhausted && s.maybeSyncCompactDiscuss(ctx, cmd, resolved, h.id) {
+	recompose, compactErr := s.maybeSyncCompactDiscuss(ctx, cmd, resolved, h.id)
+	if recompose {
 		if h.emit(turn.DiscussEventRecompose, nil) {
 			h.contentLightTerminal = true
 		}
 		return
 	}
-	if cmd.DiscussContextOverflow {
+	if cmd.DiscussRecoveryExhausted && len(cmd.DiscussOmittedSources) > 0 {
+		compactErr = errors.New("channel omitted input after compaction")
+	}
+	if compactErr != nil || cmd.DiscussContextOverflow {
 		cause := apperror.New(apperror.CodeContextProtectedOverflow, nil)
+		if compactErr != nil {
+			cause = apperror.Wrap(budgetFailureCode(compactErr), compactErr, nil)
+		}
 		cfg := resolved.RunConfig
 		cfg.RunID = h.id
 		cfg.Identity.BotID, cfg.Identity.SessionID = cmd.BotID, cmd.ThreadID
@@ -199,7 +215,15 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	if budgetTokens <= 0 {
 		budgetTokens = s.contextAbsoluteMaxTokens()
 	}
-	admitted, admission := admitDiscussMessages(cmd.DiscussMessages, budgetTokens)
+	// Summaries are compacted by the run's budget check like any history; only
+	// input that cannot fit on its own stops the turn here.
+	unpinned := make([]turn.DiscussMessage, 0, len(cmd.DiscussMessages))
+	for _, message := range cmd.DiscussMessages {
+		if message.CompactionArtifactID == "" {
+			unpinned = append(unpinned, message)
+		}
+	}
+	_, admission := admitDiscussMessages(unpinned, budgetTokens)
 	if admission.ProtectedOverflow {
 		s.logger.ErrorContext(ctx, "context_admission_rejected",
 			slog.String("path", "discuss_turn"),
@@ -219,18 +243,10 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	if runConfig.ContextMutations == nil {
 		runConfig.ContextMutations = contextfrag.NewMutationLedger()
 	}
-	recordOmittedCurrentInput(runConfig.ContextMutations, cmd.DiscussOmittedSources, admission.OmittedSources)
-	if admission.DroppedMessages > 0 {
-		cmd.DiscussContextTokens = max(cmd.DiscussContextTokens, admission.EstimatedTokens)
-		s.logger.InfoContext(ctx, "context_admission",
-			slog.String("path", "discuss_turn"),
-			slog.String("bot_id", cmd.BotID),
-			slog.String("session_id", cmd.ThreadID),
-			slog.Int("estimated_tokens", admission.EstimatedTokens),
-			slog.Int("selected_tokens", admission.SelectedTokens),
-			slog.Int("budget_tokens", admission.BudgetTokens),
-			slog.Int("dropped_messages", admission.DroppedMessages))
-	}
+	recordOmittedCurrentInput(runConfig.ContextMutations, cmd.DiscussOmittedSources)
+	// The whole batch runs; what does not fit is compacted by the run's
+	// budget check, never dropped here.
+	admitted := cmd.DiscussMessages
 	runConfig.Messages = discussMessagesToSDK(admitted)
 	runConfig.SessionType = sessionpkg.TypeDiscuss
 	runConfig.Query = ""
@@ -261,13 +277,18 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 			}
 		}
 	}
+	runConfig.ContextProvenance = discussContextProvenance(admitted, runConfig.Messages)
 	runConfig = runConfig.RefreshContextFrag()
 	terminal := s.contextLifecycleTerminal(ctx, runConfig)
 	outcome := newOutcomeRecorder(ctx)
+	// A failure without a catalogued code is named on the terminal event, so
+	// the run's record and its failure row name the same failure.
+	outcome.defaultCode = apperror.CodeAgentResponseInterrupted
 	defer outcome.finishLifecycle(terminal)
 
 	reasoningTiming := newReasoningTimingTracker(nil)
-	configureNativeReasoningTiming(&runConfig, reasoningTiming, nil)
+	rc := resolvedContext{runConfig: runConfig, model: models.GetResponse{ID: resolved.ModelID}}
+	committer := s.bindNativeRun(ctx, discussRunRequest(cmd, h, admitted), rc, &runConfig, reasoningTiming)
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(runConfig))
 	defer idleCancel.Stop()
 	outcome.watchIdle(idleCtx, idleCancel)
@@ -278,12 +299,22 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		return s.recoverDiscussContextBudget(ctx, cmd, admitted, resolved.ModelID, cfg, &compacted)
 	}
 	runConfig = pauseIdleDuringBudgetRecovery(runConfig, idleCancel)
-	eventCh := s.streamDiscussAgent(idleCtx, runConfig)
+	streamCtx, cancelStream := context.WithCancelCause(idleCtx)
+	defer cancelStream(nil)
+	// Stopping the stream decides how the run ends; the watchdog has nothing
+	// left to time while the engine winds down.
+	stopStream := func(cause error) {
+		idleCancel.Stop()
+		cancelStream(cause)
+	}
+	eventCh := s.streamDiscussAgent(streamCtx, runConfig)
 
 	var finalMessages json.RawMessage
 	var finalReasoningTiming []messagepkg.ReasoningTimingSegment
 	var terminalEvent native.StreamEvent
 	var terminalPayload []byte
+	var uncommittedText uncommittedStepText
+events:
 	for event := range eventCh {
 		if event.Type == native.EventContextRecompose {
 			if h.emit(turn.DiscussEventRecompose, nil) {
@@ -296,6 +327,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		}
 		idleCancel.Observe(event)
 		_ = outcome.observe(event)
+		uncommittedText.observe(event)
 		if event.IsTerminal() {
 			finalMessages = event.Messages
 			finalReasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
@@ -306,8 +338,8 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		if h.publishAgentEvent != nil {
 			if publishErr := h.publishAgentEvent(ctx, publicAgentStreamEvent(event)); publishErr != nil {
 				outcome.setCause(publishErr)
-				h.emitErr(publishErr)
-				return
+				stopStream(publishErr)
+				break events
 			}
 		}
 		payload, marshalErr := json.Marshal(publicAgentStreamEvent(event))
@@ -316,8 +348,14 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		}
 		if !h.emit(string(event.Type), payload) {
 			outcome.recordCause(context.Cause(ctx))
-			return
+			stopStream(context.Cause(ctx))
+			break events
 		}
+	}
+	// The engine may still be committing a step; history is written once it
+	// has stopped.
+	for event := range eventCh {
+		uncommittedText.observe(event)
 	}
 	hasTerminalEvent := outcome.terminalSeen
 	timedOut := idleCancel.DidFire()
@@ -330,10 +368,6 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		} else {
 			outcome.recordCause(errors.New("native discuss stream ended without a terminal event"))
 		}
-		if ctx.Err() == nil {
-			h.emitErr(outcome.cause)
-		}
-		return
 	}
 
 	// The native stream deliberately drains to a terminal event after external
@@ -341,7 +375,24 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	// detaching cancellation so that terminal history and runtime publication
 	// can cross the same durable boundary as the main chat stream.
 	terminalCtx := context.WithoutCancel(ctx)
-	if hasTerminalEvent || timedOut {
+	// Steps are already history. A failure is written after them before the
+	// terminal event proposes the run's end, after which no row can be written.
+	if committer != nil && !runOwnershipLost(ctx) {
+		s.recordStepRunFailure(terminalCtx, committer, uncommittedText.String(), outcome.failureCode())
+		if storeErr := committer.finish(terminalCtx); storeErr != nil {
+			historyErr := runtimeHistoryError(storeErr)
+			outcome.setCause(historyErr)
+			h.emitErr(historyErr)
+			return
+		}
+	}
+	if !hasTerminalEvent && !timedOut {
+		if ctx.Err() == nil {
+			h.emitErr(outcome.cause)
+		}
+		return
+	}
+	if committer == nil {
 		var failureCode apperror.Code
 		if timedOut {
 			failureCode = snapshotFailureCode(true, outcome.cause)
@@ -379,8 +430,6 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	if len(terminalPayload) > 0 && !h.emit(string(terminalEvent.Type), terminalPayload) {
 		return
 	}
-
-	s.scheduleDiscussCompaction(ctx, cmd, resolved.ModelID)
 }
 
 func (s *Service) persistDiscussTerminalSnapshot(
@@ -445,6 +494,54 @@ func (s *Service) persistDiscussTerminalSnapshot(
 		ContextLifecycle: runConfig.ContextLifecycle,
 		ReasoningTiming:  reasoningTiming,
 	})
+}
+
+// discussRunRequest is the request a Discuss run writes its steps under. Its
+// input is the rows ingress already wrote, so its steps join the history as
+// replies without a request row of their own; the inputs of the batch it
+// answers are what a fold keeps in place.
+func discussRunRequest(cmd turn.StartTurnCommand, h *discussHandle, admitted []turn.DiscussMessage) ChatRequest {
+	req := ChatRequest{
+		RunID:                   h.id,
+		BotID:                   cmd.BotID,
+		ChatID:                  cmd.BotID,
+		ThreadID:                cmd.ThreadID,
+		SourceChannelIdentityID: cmd.SourceChannelIdentityID,
+		CurrentChannel:          cmd.CurrentChannel,
+		SessionType:             sessionpkg.TypeDiscuss,
+		UserMessagePersisted:    true,
+	}
+	for _, message := range admitted {
+		if source := message.Source; source != nil && source.Current {
+			req.discussCurrentSources = append(req.discussCurrentSources, turn.ContextMessageSource{Kind: source.Kind, ID: source.ID})
+		}
+	}
+	return req
+}
+
+// discussContextProvenance names what each composed message renders: the
+// inbound message or stored reply Channel read it from, at the version it
+// read, or the summary it renders. The inputs of the batch are anchors.
+func discussContextProvenance(admitted []turn.DiscussMessage, messages []sdk.Message) []native.MessageProvenance {
+	var out []native.MessageProvenance
+	for i, message := range admitted {
+		if i >= len(messages) {
+			break
+		}
+		var source turn.ContextMessageSource
+		switch {
+		case message.CompactionArtifactID != "":
+			source = turn.ContextMessageSource{Kind: "summary", ID: message.CompactionArtifactID}
+		case message.Source != nil && message.Source.ID != "":
+			source = *message.Source
+		default:
+			continue
+		}
+		anchor := source.Current
+		source.Current = false
+		out = append(out, native.MessageProvenance{Message: messages[i], Sources: []turn.ContextMessageSource{source}, Anchor: anchor})
+	}
+	return out
 }
 
 // discussContextCollector names the collector of composed discuss messages.
@@ -667,9 +764,6 @@ func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnComman
 			return
 		}
 	}
-	if !h.failed.Load() {
-		s.scheduleDiscussCompaction(ctx, cmd, "")
-	}
 }
 
 func (s *Service) discussRuntimeConfigured() bool {
@@ -682,32 +776,11 @@ func (s *Service) discussRuntimeConfigured() bool {
 	return s.agent != nil
 }
 
-func (s *Service) resolveDiscussRunConfig(
-	ctx context.Context,
-	botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string,
-) (ResolveRunConfigResult, error) {
+func (s *Service) resolveDiscussRunConfig(ctx context.Context, req RunConfigRequest) (ResolveRunConfigResult, error) {
 	if s.turnHooks != nil && s.turnHooks.resolveRunConfig != nil {
-		return s.turnHooks.resolveRunConfig(
-			ctx,
-			botID,
-			sessionID,
-			channelIdentityID,
-			currentPlatform,
-			replyTarget,
-			conversationType,
-			chatToken,
-		)
+		return s.turnHooks.resolveRunConfig(ctx, req)
 	}
-	return s.ResolveRunConfig(
-		ctx,
-		botID,
-		sessionID,
-		channelIdentityID,
-		currentPlatform,
-		replyTarget,
-		conversationType,
-		chatToken,
-	)
+	return s.ResolveRunConfig(ctx, req)
 }
 
 func (s *Service) inlineDiscussImages(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) [][]sdk.ImagePart {

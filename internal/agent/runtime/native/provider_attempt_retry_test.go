@@ -40,52 +40,6 @@ func round8RetryToolCycles(cycles, resultBytes int) []sdk.Message {
 	return messages
 }
 
-func pruneRound8RetryOldToolResults(messages []sdk.Message, keepRecent int) ([]sdk.Message, int) {
-	out := append([]sdk.Message(nil), messages...)
-	toolResults := 0
-	for _, msg := range out {
-		if msg.Role == sdk.MessageRoleTool {
-			toolResults++
-		}
-	}
-	toPrune := toolResults - keepRecent
-	if toPrune < 1 {
-		return out, 0
-	}
-	pruned := 0
-	for i, msg := range out {
-		if msg.Role != sdk.MessageRoleTool || pruned >= toPrune || len(msg.Content) == 0 {
-			continue
-		}
-		result, ok := msg.Content[0].(sdk.ToolResultPart)
-		if !ok {
-			continue
-		}
-		result.Result = sdk.TextOutput("[tool result pruned for round8 retry]")
-		out[i] = sdk.ToolMessage(result)
-		pruned++
-	}
-	return out, pruned
-}
-
-func countRound8PrunedToolResults(messages []sdk.Message) int {
-	count := 0
-	for _, msg := range messages {
-		if msg.Role != sdk.MessageRoleTool || len(msg.Content) == 0 {
-			continue
-		}
-		result, ok := msg.Content[0].(sdk.ToolResultPart)
-		if !ok {
-			continue
-		}
-		text, _ := toolexec.OutputValue(result.Result).(string)
-		if strings.Contains(text, "pruned for round8 retry") {
-			count++
-		}
-	}
-	return count
-}
-
 func countRound8MessageText(messages []sdk.Message, text string) int {
 	count := 0
 	for _, msg := range messages {
@@ -98,13 +52,11 @@ func countRound8MessageText(messages []sdk.Message, text string) int {
 	return count
 }
 
-// TestAgentStreamMidStreamRetryAppliesAccumulatedSuffixHygiene pins that the
-// rebuilt dispatch of a mid-stream retry runs the same provider-attempt
-// preflight as every other call: with a zero budget window the step
-// reselector still sees the accumulated suffix (original prefix intact),
-// receives the hygiene knobs, and its applied selection is recorded on the
-// retry attempt's step snapshot.
-func TestAgentStreamMidStreamRetryAppliesAccumulatedSuffixHygiene(t *testing.T) {
+// TestAgentStreamMidStreamRetryResendsTheAccumulatedRequest pins that the
+// rebuilt dispatch of a mid-stream retry sends the request the failed call
+// carried, its original prefix and earlier steps untouched and its partial
+// output gone, and records a step snapshot for the retry attempt.
+func TestAgentStreamMidStreamRetryResendsTheAccumulatedRequest(t *testing.T) {
 	t.Parallel()
 
 	ledger := contextfrag.NewMutationLedger()
@@ -114,15 +66,14 @@ func TestAgentStreamMidStreamRetryAppliesAccumulatedSuffixHygiene(t *testing.T) 
 	provider.stream = func(ctx context.Context, params sdk.Request) (<-chan sdk.StreamPart, error) {
 		captured = append(captured, cloneGenerateParams(params))
 		return streamScript(&invocations,
-			scriptToolCall("hygiene-call-1", "lookup"),
-			scriptStreamError("hygiene-partial", rateLimitedErr()),
+			scriptToolCall("retry-call-1", "lookup"),
+			scriptStreamError("retry-partial", rateLimitedErr()),
 			scriptText("recovered"),
 		)(ctx, params)
 	}
 	a := New(Deps{})
 	a.SetToolProviders(mockToolLoopTools())
 
-	var selectorCalls atomic.Int32
 	var terminal StreamEvent
 	for ev := range a.Stream(context.Background(), RunConfig{
 		Model:                  &sdk.Model{ID: "mock-model", Provider: provider},
@@ -132,21 +83,6 @@ func TestAgentStreamMidStreamRetryAppliesAccumulatedSuffixHygiene(t *testing.T) 
 		ContextMutations:       ledger,
 		ContextBudgetMaxTokens: 0,
 		Retry:                  fastRetry,
-		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
-			selectorCalls.Add(1)
-			if input.InitialMessageCount != 1 {
-				t.Errorf("InitialMessageCount = %d, want original turn prefix 1", input.InitialMessageCount)
-			}
-			if input.BudgetMaxTokens != 0 {
-				t.Errorf("BudgetMaxTokens = %d, want 0 for a window-zero run", input.BudgetMaxTokens)
-			}
-			if input.KeepRecentToolResults != stepReselectKeepRecentToolResults ||
-				input.MinMessages != stepReselectMinMessages {
-				t.Errorf("hygiene settings = keep %d/min %d", input.KeepRecentToolResults, input.MinMessages)
-			}
-			selected, pruned := pruneRound8RetryOldToolResults(input.Messages, 0)
-			return ContextStepSelectionResult{Messages: selected, Truncated: pruned}
-		},
 	}) {
 		if ev.IsTerminal() {
 			terminal = ev
@@ -159,18 +95,15 @@ func TestAgentStreamMidStreamRetryAppliesAccumulatedSuffixHygiene(t *testing.T) 
 	if got := int(invocations.Load()); got != 3 {
 		t.Fatalf("provider invocations = %d, want 3 (tool step, failure, retry)", got)
 	}
-	if got := selectorCalls.Load(); got != 2 {
-		t.Fatalf("selector calls = %d, want 2 (failing step preflight plus retry rebuild)", got)
-	}
 
-	retryParams := captured[len(captured)-1]
-	if got := countRound8PrunedToolResults(retryParams.Messages); got != 1 {
-		t.Fatalf("pruned retry tool results = %d, want 1", got)
+	failedParams, retryParams := captured[1], captured[2]
+	if !providerMessagesEqual(failedParams.Messages, retryParams.Messages) {
+		t.Fatalf("retry input = %#v, want the failed call's input %#v", retryParams.Messages, failedParams.Messages)
 	}
 	if textOfMessage(retryParams.Messages[0]) != "original task" {
 		t.Fatalf("retry prefix = %#v, want original task", retryParams.Messages[0])
 	}
-	if got := countRound8MessageText(retryParams.Messages, "hygiene-partial"); got != 0 {
+	if got := countRound8MessageText(retryParams.Messages, "retry-partial"); got != 0 {
 		t.Fatalf("retry input contains poisoned partial output: %#v", retryParams.Messages)
 	}
 
@@ -184,81 +117,12 @@ func TestAgentStreamMidStreamRetryAppliesAccumulatedSuffixHygiene(t *testing.T) 
 	if retrySnapshot == nil {
 		t.Fatalf("step snapshots = %#v, want one recorded for the retry attempt", steps)
 	}
-	if retrySnapshot.StepIndex != 0 ||
-		retrySnapshot.ReselectionOutcome != contextfrag.ReselectionOutcomeApplied ||
-		retrySnapshot.Truncated != 1 {
+	wantHash := contextfrag.ProviderPayloadHash(retryParams.System, retryParams.Messages, retryParams.Tools)
+	if retrySnapshot.StepIndex != 0 || retrySnapshot.PostPrepareInputHash != wantHash {
 		t.Fatalf("retry step snapshot = %#v", retrySnapshot)
 	}
 	if countProviderAttemptMutations(ledger.Records(), contextfrag.MutationContextBudgetFailure) != 0 {
 		t.Fatalf("window-zero retry recorded budget failure: %#v", ledger.Records())
-	}
-}
-
-// TestAgentStreamMidStreamRetryProtectedOverflowFencesProvider pins that a
-// fatal reselection error raised while rebuilding the retry dispatch fences
-// the provider: no further provider call happens, the run aborts with the
-// budget cause, and the failed retry attempt is recorded on the ledger.
-func TestAgentStreamMidStreamRetryProtectedOverflowFencesProvider(t *testing.T) {
-	t.Parallel()
-
-	ledger := contextfrag.NewMutationLedger()
-	var invocations atomic.Int32
-	provider := &atomicMockProvider{}
-	provider.stream = streamScript(&invocations,
-		scriptToolCall("fence-call-1", "lookup"),
-		scriptStreamError("", rateLimitedErr()),
-	)
-	a := New(Deps{})
-	a.SetToolProviders(mockToolLoopTools())
-
-	var selectorCalls atomic.Int32
-	var terminal StreamEvent
-	for ev := range a.Stream(context.Background(), RunConfig{
-		Model:            &sdk.Model{ID: "mock-model", Provider: provider},
-		Messages:         []sdk.Message{sdk.UserMessage("original task")},
-		SupportsToolCall: true,
-		Identity:         SessionContext{BotID: "bot-1"},
-		ContextMutations: ledger,
-		Retry:            fastRetry,
-		ContextStepReselector: func(context.Context, ContextStepSelectionInput) ContextStepSelectionResult {
-			if selectorCalls.Add(1) == 1 {
-				// The failing step's own preflight passes untouched.
-				return ContextStepSelectionResult{}
-			}
-			// The retry rebuild's preflight overflows fatally.
-			return ContextStepSelectionResult{FatalError: contextfrag.ErrProtectedContextOverflow}
-		},
-	}) {
-		if ev.IsTerminal() {
-			terminal = ev
-		}
-	}
-
-	if terminal.Type != EventAgentAbort {
-		t.Fatalf("terminal event = %q, want %q on protected overflow", terminal.Type, EventAgentAbort)
-	}
-	if got := int(invocations.Load()); got != 2 {
-		t.Fatalf("provider invocations = %d, want 2 (the fenced retry never reaches the provider)", got)
-	}
-	if got := selectorCalls.Load(); got != 2 {
-		t.Fatalf("selector calls = %d, want 2", got)
-	}
-
-	steps := ledger.StepSnapshots()
-	if len(steps) == 0 {
-		t.Fatal("no step snapshots recorded")
-	}
-	failed := steps[len(steps)-1]
-	if failed.Attempt != 1 || failed.StepIndex != 0 ||
-		failed.ReselectionOutcome != contextfrag.ReselectionOutcomeFailed ||
-		failed.PostPrepareInputHash != "" {
-		t.Fatalf("failed retry snapshot = %#v", failed)
-	}
-	if got := countProviderAttemptMutations(ledger.Records(), contextfrag.MutationContextBudgetFailure); got != 1 {
-		t.Fatalf("budget failure mutations = %d, want 1", got)
-	}
-	if got := countProviderAttemptMutations(ledger.Records(), contextfrag.MutationMidStreamRetry); got != 1 {
-		t.Fatalf("mid-stream retry mutations = %d, want 1", got)
 	}
 }
 

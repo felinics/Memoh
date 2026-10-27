@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,13 +26,14 @@ func TestPostgresTurnResponseSourcesProjectMetadataAndPreserveWindow(t *testing.
 	svc := NewService(nil, postgresstore.NewQueries(queries))
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	// Keep content tiny while the audit, usage and display fields are large.
-	// Only a JSON boolean true is an interrupted checkpoint, not the string "true".
+	// Only a JSON boolean true is an interrupted checkpoint or a Discuss step,
+	// not the string "true".
 	flags := []string{`true`, `false`, `"true"`, `null`}
 	for i, flag := range flags {
 		_, err := tx.Exec(ctx, `INSERT INTO bot_history_messages
    (id, bot_id, session_id, role, content, metadata, usage, display_text, created_at, turn_position, turn_message_seq, turn_id, turn_visible)
    VALUES ($1, $2, $3, 'assistant', $4::jsonb,
-    jsonb_build_object('agent_step_interrupted', $5::jsonb,
+    jsonb_build_object('agent_step_interrupted', $5::jsonb, 'discuss_step', $5::jsonb,
       'context_lifecycle', jsonb_build_object('selection_decisions', repeat('x', 2*1024*1024))),
     jsonb_build_object('unused', repeat('u', 1024)), repeat('d', 1024), $6, $7, 0, gen_random_uuid(), true)`,
 			uuid.NewString(), postgresMessageTestBotID, postgresMessageTestSessionID,
@@ -85,7 +88,15 @@ func TestPostgresTurnResponseSourcesProjectMetadataAndPreserveWindow(t *testing.
 					if m.Metadata[AgentStepInterruptedMetadataKey] != (metadata[AgentStepInterruptedMetadataKey] == true) {
 						t.Fatalf("interrupted checkpoint changed at row %d", i)
 					}
-					if len(m.Metadata) != 1 || len(m.RawMetadata) != 0 || len(m.Usage) != 0 || m.DisplayContent != "" || m.Assets != nil {
+					step := metadata[DiscussStepMetadataKey] == true
+					if _, marked := m.Metadata[DiscussStepMetadataKey]; marked != step {
+						t.Fatalf("discuss step mark changed at row %d", i)
+					}
+					projected := 1
+					if step {
+						projected++
+					}
+					if len(m.Metadata) != projected || len(m.RawMetadata) != 0 || len(m.Usage) != 0 || m.DisplayContent != "" || m.Assets != nil {
 						t.Fatalf("row %d retained unused metadata/display/assets", i)
 					}
 				}
@@ -101,7 +112,7 @@ func TestPostgresTurnResponseSourcesProjectMetadataAndPreserveWindow(t *testing.
 				}
 				// Full-row admission keeps the same window but hands metadata
 				// over undecoded, for history records to decode row by row.
-				full, err := svc.ListActiveSinceBySessionWithinBytes(ctx, postgresMessageTestSessionID, since, budget)
+				full, err := svc.ListActiveSinceBySessionWithinBytes(ctx, postgresMessageTestSessionID, since, budget, true)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -126,5 +137,75 @@ func TestPostgresTurnResponseSourcesProjectMetadataAndPreserveWindow(t *testing.
 	}
 	if len(got) != 0 {
 		t.Fatalf("cross-team history leaked %d rows", len(got))
+	}
+}
+
+// A folded window spends nothing on rows a usable summary replaced and loads
+// the newest of each compact group, Summarized, to place the summary; rows of
+// a failed summary, or of an earlier epoch, still count. Unfolded, the same
+// rows fill the window and push the oldest input out.
+func TestPostgresHistoryWindowFoldsSummarizedRows(t *testing.T) {
+	ctx := context.Background()
+	tx := beginPostgresMessageTestTx(t, ctx)
+	setupPostgresMessageTestFixtures(t, ctx, tx)
+	svc := NewService(nil, postgresstore.NewQueries(dbsqlc.New(tx)))
+	if _, err := tx.Exec(ctx, `UPDATE bot_sessions SET compaction_epoch = 1 WHERE id = $1`, postgresMessageTestSessionID); err != nil {
+		t.Fatal(err)
+	}
+	compacts := map[string]string{}
+	for _, c := range []struct {
+		name, status string
+		epoch        int
+	}{{"ok", "ok", 1}, {"failed", "error", 1}, {"stale", "ok", 0}} {
+		var id string
+		if err := tx.QueryRow(ctx, `INSERT INTO bot_history_message_compacts (bot_id, session_id, status, summary, compaction_epoch) VALUES ($1, $2, $3, 'summary', $4) RETURNING id::text`,
+			postgresMessageTestBotID, postgresMessageTestSessionID, c.status, c.epoch).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		compacts[c.name] = id
+	}
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	rows := []struct{ name, compact string }{
+		{"beyond", ""}, {"input", ""}, {"folded-0", "ok"}, {"folded-1", "ok"}, {"folded-2", "ok"}, {"failed", "failed"}, {"stale", "stale"}, {"newest", ""},
+	}
+	for i, row := range rows {
+		var compactID any
+		if row.compact != "" {
+			compactID = compacts[row.compact]
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO bot_history_messages (id, bot_id, session_id, role, content, compact_id, created_at, turn_position, turn_message_seq, turn_id, turn_visible)
+   VALUES (gen_random_uuid(), $1, $2, 'assistant', jsonb_build_object('role', 'assistant', 'content', $3 || ' ' || repeat('x', 1000)), $4, $5, $6, 0, gen_random_uuid(), true)`,
+			postgresMessageTestBotID, postgresMessageTestSessionID, row.name, compactID, base.Add(time.Duration(i)*time.Second), i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	names := func(messages []Message) []string {
+		out := make([]string, 0, len(messages))
+		for _, m := range messages {
+			var content struct{ Content string }
+			if err := json.Unmarshal(m.Content, &content); err != nil {
+				t.Fatal(err)
+			}
+			name := strings.Fields(content.Content)[0]
+			if m.Summarized {
+				name += "*"
+			}
+			out = append(out, name)
+		}
+		return out
+	}
+	folded, err := svc.ListActiveSinceBySessionWithinBytes(ctx, postgresMessageTestSessionID, base, 3500, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := names(folded), []string{"input", "folded-2*", "failed", "stale", "newest"}; !slices.Equal(got, want) {
+		t.Fatalf("folded window = %v, want %v", got, want)
+	}
+	full, err := svc.ListActiveSinceBySessionWithinBytes(ctx, postgresMessageTestSessionID, base, 3500, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := names(full), []string{"folded-2", "failed", "stale", "newest"}; !slices.Equal(got, want) {
+		t.Fatalf("unfolded window = %v, want %v", got, want)
 	}
 }

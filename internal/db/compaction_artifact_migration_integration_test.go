@@ -112,12 +112,10 @@ CREATE TABLE bot_history_messages (
 	unlinkedID := "00000000-0000-0000-0000-00000000d004"
 	foreignArtifactID := "00000000-0000-0000-0000-00000000d101"
 	crossOwnerArtifactID := "00000000-0000-0000-0000-00000000d102"
-	logOnlyArtifactID := "00000000-0000-0000-0000-00000000d201"
 	botID := "00000000-0000-0000-0000-00000000b001"
 	repairBotID := "00000000-0000-0000-0000-00000000b002"
 	clearedBotID := "00000000-0000-0000-0000-00000000b003"
 	foreignBotID := "00000000-0000-0000-0000-00000000b101"
-	logOnlyBotID := "00000000-0000-0000-0000-00000000b201"
 	sessionID := "00000000-0000-0000-0000-00000000e001"
 	repairSessionID := "00000000-0000-0000-0000-00000000e002"
 	clearedSessionID := "00000000-0000-0000-0000-00000000e003"
@@ -264,12 +262,6 @@ VALUES ($1, $2, $3, 'ok', 'cross-owner artifact')
 		t.Fatalf("insert cross-owner artifact: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO bot_history_message_compacts (id, bot_id, status, summary)
-VALUES ($1, $2, 'ok', 'log-only artifact')
-	`, logOnlyArtifactID, logOnlyBotID); err != nil {
-		t.Fatalf("insert log-only artifact: %v", err)
-	}
-	if _, err := tx.Exec(ctx, `
 	INSERT INTO bot_history_messages (id, bot_id, session_id, compact_id)
 	VALUES ('00000000-0000-0000-0000-00000000a101', $1, $2, $3)
 		`, foreignBotID, foreignSessionID, foreignArtifactID); err != nil {
@@ -287,7 +279,7 @@ VALUES ($1, $2, 'ok', 'log-only artifact')
 		t.Fatalf("delete session history through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_messages", 2)
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 4)
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 3)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", sessionID, 1)
 	// The session clear must also drop that session's runtime publication while the
 	// foreign session's rows survive.
@@ -302,7 +294,7 @@ VALUES ($1, $2, 'ok', 'log-only artifact')
 		t.Fatalf("delete bot history through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_messages", 1)
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 3)
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 2)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", foreignSessionID, 1)
 	assertRowCount(t, ctx, tx, "agent_session_publications", 0)
 	assertResumeIntents(t, ctx, tx, 0)
@@ -315,31 +307,13 @@ VALUES ($1, $2, 'ok', 'log-only artifact')
 		t.Fatalf("delete repaired session history through generated query: %v", err)
 	}
 	assertRowCount(t, ctx, tx, "bot_history_messages", 0)
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 2)
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 1)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", repairSessionID, 2)
 	if err := queries.ClearHistoryBySession(ctx, parsedClearedSessionID); err != nil {
 		t.Fatalf("delete cleared session history through generated query: %v", err)
 	}
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 1)
-	assertCompactionEpoch(t, ctx, tx, "bot_sessions", clearedSessionID, 2)
-
-	parsedBotID, err := ParseUUID(botID)
-	if err != nil {
-		t.Fatalf("parse bot id: %v", err)
-	}
-	if err := queries.DeleteCompactionLogsByBot(ctx, parsedBotID); err != nil {
-		t.Fatalf("fence in-flight compaction before deleting logs: %v", err)
-	}
-	assertCompactionEpoch(t, ctx, tx, "bot_sessions", sessionID, 2)
-
-	parsedLogOnlyBotID, err := ParseUUID(logOnlyBotID)
-	if err != nil {
-		t.Fatalf("parse log-only bot id: %v", err)
-	}
-	if err := queries.DeleteCompactionLogsByBot(ctx, parsedLogOnlyBotID); err != nil {
-		t.Fatalf("delete artifacts through generated query: %v", err)
-	}
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 0)
+	assertCompactionEpoch(t, ctx, tx, "bot_sessions", clearedSessionID, 2)
 
 	down0109 := readEmbeddedMigration(t, "postgres/migrations/0109_compaction_epoch.down.sql")
 	if _, err := tx.Exec(ctx, down0109); err != nil {

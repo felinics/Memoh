@@ -167,6 +167,7 @@ func filterToolMessageToPendingCalls(msg ModelMessage, pending map[string]pendin
 	}
 	filteredMsg := converted[0]
 	filteredMsg.Usage = msg.Usage
+	filteredMsg.ContextSource = msg.ContextSource
 	return &filteredMsg
 }
 
@@ -305,6 +306,7 @@ func modelMessageWithParts(original ModelMessage, sdkMsg sdk.Message, parts []sd
 		return nil
 	}
 	converted[0].Usage = original.Usage
+	converted[0].ContextSource = original.ContextSource
 	return &converted[0]
 }
 

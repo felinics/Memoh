@@ -35,7 +35,7 @@ func TestDiscussExhaustedRecoveryOnlyAttemptsAdmission(t *testing.T) {
 }
 
 func TestExternalDiscussExhaustedRecoveryOnlyAttemptsAdmission(t *testing.T) {
-	service, compactor := newControllerPolicyService(t, nil)
+	service, compactor := newControllerPolicyService(t)
 	service.SetContextAbsoluteMaxTokens(1000)
 	_, err := service.prepareExternalDiscussContext(t.Context(), ChatRequest{
 		BotID: syncCompactBotID, ThreadID: syncCompactThreadID, discussRecoveryExhausted: true,

@@ -271,12 +271,12 @@ describe('resolveApiErrorMessage', () => {
   })
 
   it.each([
-    ['context.budget_unsatisfied', 'en', 'The model context window is too small for this request. Shorten the request, or switch to a model with a larger context window.'],
-    ['context.budget_unsatisfied', 'zh', '模型上下文窗口不足，无法处理当前请求。可尝试缩短请求，或改用上下文窗口更大的模型。'],
-    ['context.budget_unsatisfied', 'ja', 'モデルのコンテキストウィンドウが不足しているため、このリクエストを処理できません。リクエストを短くするか、より大きなコンテキストウィンドウのモデルをお試しください。'],
-    ['context.protected_overflow', 'en', 'Required context exceeds the model context budget. Switch to a model with a larger context window.'],
-    ['context.protected_overflow', 'zh', '必要的上下文内容超出了模型上下文预算。可尝试改用上下文窗口更大的模型。'],
-    ['context.protected_overflow', 'ja', '必須コンテキストがモデルのコンテキスト予算を超えています。より大きなコンテキストウィンドウのモデルをお試しください。'],
+    ['context.budget_unsatisfied', 'en', 'This request does not fit the model context window, so the run stopped. Try again, shorten the request, start a new conversation, or switch to a model with a larger context window.'],
+    ['context.budget_unsatisfied', 'zh', '当前请求放不进模型上下文窗口，本次运行已停止。可重试、缩短请求、开始新对话，或改用上下文窗口更大的模型。'],
+    ['context.budget_unsatisfied', 'ja', 'このリクエストがモデルのコンテキストウィンドウに収まらないため、実行を停止しました。再試行するか、リクエストを短くするか、新しい会話を始めるか、より大きなコンテキストウィンドウのモデルに切り替えてください。'],
+    ['context.protected_overflow', 'en', 'Required context exceeds the model context budget. Shorten the request, or switch to a model with a larger context window.'],
+    ['context.protected_overflow', 'zh', '必要的上下文内容超出了模型上下文预算。请缩短请求，或改用上下文窗口更大的模型。'],
+    ['context.protected_overflow', 'ja', '必須コンテキストがモデルのコンテキスト予算を超えています。リクエストを短くするか、より大きなコンテキストウィンドウのモデルに切り替えてください。'],
   ])('localizes %s for %s', (code, language, expected) => {
     locale = language
 

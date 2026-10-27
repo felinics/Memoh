@@ -33,7 +33,7 @@ var schemaGoldenTools = map[string]func(t *testing.T) []toolexec.Tool{
 	"acp_agents": providerTools(&ACPAgentsProvider{pool: goldenACPPool{}, queries: (*pgstore.Queries)(nil)}),
 	"workdir":    providerTools(NewWorkdirProvider(nil, goldenWorkdirLister{})),
 	"history": providerTools(
-		NewHistoryProvider(nil, fakeHistorySessionLister{}, &fakeHistoryMessageReader{}, (*pgstore.Queries)(nil)),
+		NewHistoryProvider(nil, fakeHistorySessionLister{}, &fakeHistoryMessageReader{}, (*pgstore.Queries)(nil), ToolOutputLimit{}),
 	),
 	"schedule": providerTools(NewScheduleProvider(nil, nativeSourceTestScheduler{})),
 	"subagent": func(t *testing.T) []toolexec.Tool {

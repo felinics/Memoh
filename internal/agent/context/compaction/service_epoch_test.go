@@ -17,9 +17,9 @@ func TestDoCompactionRejectsEpochChangeBeforeAttemptCreation(t *testing.T) {
 	stub := &stubModel{summary: "must not run"}
 	svc := newMachineryService(q)
 
-	_, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450))
+	_, err := svc.compactOnce(context.Background(), machineryConfig(stub, 450))
 	if !errors.Is(err, pgx.ErrNoRows) {
-		t.Fatalf("RunCompactionSync() error = %v, want pgx.ErrNoRows", err)
+		t.Fatalf("compact error = %v, want pgx.ErrNoRows", err)
 	}
 	if q.createArg.ExpectedEpoch != 7 {
 		t.Fatalf("CreateCompactionLog expected epoch = %d, want 7", q.createArg.ExpectedEpoch)
@@ -35,9 +35,9 @@ func TestDoCompactionRecordsErrorWhenSuccessCompletionIsFenced(t *testing.T) {
 	stub := &stubModel{summary: "stale summary"}
 	svc := newMachineryService(q)
 
-	_, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450))
+	_, err := svc.compactOnce(context.Background(), machineryConfig(stub, 450))
 	if !errors.Is(err, pgx.ErrNoRows) {
-		t.Fatalf("RunCompactionSync() error = %v, want pgx.ErrNoRows", err)
+		t.Fatalf("compact error = %v, want pgx.ErrNoRows", err)
 	}
 	if len(q.completeCalls) != 2 {
 		t.Fatalf("CompleteCompactionLog calls = %d, want success attempt plus terminal error", len(q.completeCalls))

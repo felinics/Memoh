@@ -74,6 +74,7 @@ func decodeTurnResponseEntry(msg messagepkg.Message, liveCheckpoint bool) (TurnR
 		Content:         debugContent(rawContent),
 		RawContent:      rawContent,
 		SourceMessageID: msg.ID,
+		DiscussStep:     msg.Metadata[messagepkg.DiscussStepMetadataKey] == true,
 	}, true
 }
 
@@ -122,6 +123,7 @@ func ProjectInterruptedReasoning(modelMsg turn.ModelMessage) turn.ModelMessage {
 	projected.ToolCalls = modelMsg.ToolCalls
 	projected.ToolCallID = modelMsg.ToolCallID
 	projected.Name = modelMsg.Name
+	projected.ContextSource = modelMsg.ContextSource
 	return projected
 }
 

@@ -13,11 +13,13 @@ import (
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
-// itemsFromRows classifies each uncompacted row into a typed CompactionCandidate.
-// A row that cannot be classified remains as a must-keep barrier rather than
-// aborting the whole compaction. Keeping its position prevents compact spans on
-// either side from sharing an ID and being reordered by the read path.
-func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]CompactionCandidate, int) {
+// candidatesFromRows classifies each uncompacted row into a typed
+// CompactionCandidate. A row that cannot be classified remains as a must-keep
+// barrier rather than aborting the whole compaction. Keeping its position
+// prevents compact spans on either side from sharing an ID and being
+// reordered by the read path. The current turn is named only through
+// ProtectedSources.
+func candidatesFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]CompactionCandidate, int) {
 	items := make([]CompactionCandidate, 0, len(rows))
 	barrierCount := 0
 	for _, row := range rows {
@@ -32,7 +34,6 @@ func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]Compactio
 			items = append(items, CompactionCandidate{
 				ID:           row.ID,
 				RawContent:   row.Content,
-				RawUsage:     row.Usage,
 				Policies:     policies,
 				IsToolResult: toolResult,
 			})
@@ -41,7 +42,6 @@ func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]Compactio
 		items = append(items, CompactionCandidate{
 			ID:           row.ID,
 			RawContent:   row.Content,
-			RawUsage:     row.Usage,
 			Record:       record,
 			Policies:     candidatePolicies(record),
 			IsToolResult: strings.EqualFold(strings.TrimSpace(record.ModelMessage.Role), "tool"),
@@ -50,7 +50,6 @@ func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]Compactio
 	if len(items) > 0 {
 		protectPendingUserInput(items)
 		propagateMustKeepAcrossToolExchanges(items)
-		markSelectionPolicies(items)
 	}
 	return items, barrierCount
 }
@@ -170,4 +169,13 @@ func metadataMap(raw []byte) map[string]any {
 		return nil
 	}
 	return out
+}
+
+// markAnchors marks the rows the caller keeps raw in place.
+func markAnchors(items []CompactionCandidate, anchors []turn.ContextMessageSource) {
+	for i := range items {
+		if isProtectedSource(items[i], anchors) {
+			items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyAnchor)
+		}
+	}
 }

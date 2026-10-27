@@ -38,9 +38,7 @@ func TestAnimatedStickerStaysOneAttachmentWithManyImages(t *testing.T) {
 		BotID:       "bot-1",
 		Attachments: []ChatAttachment{{Type: "image", ContentHash: "sticker", Mime: "image/webp", Name: "sticker.tgs"}},
 	}
-	model := models.GetResponse{Model: models.Model{Config: models.ModelConfig{
-		Compatibilities: []string{models.CompatVision},
-	}}}
+	model := models.GetResponse{Model: models.Model{Config: models.ModelConfig{Modalities: &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityImage}, Output: []models.Modality{models.ModalityText}}}}}
 
 	merged := s.routeAndMergeAttachments(context.Background(), model, req)
 	if len(merged) != 1 {
@@ -93,9 +91,7 @@ func TestAnimatedStickerIsIdenticalAcrossEntryPoints(t *testing.T) {
 		BotID:       "bot-1",
 		Attachments: []ChatAttachment{{Type: "image", ContentHash: "sticker", Mime: "application/x-gzip"}},
 	}
-	model := models.GetResponse{Model: models.Model{Config: models.ModelConfig{
-		Compatibilities: []string{models.CompatVision},
-	}}}
+	model := models.GetResponse{Model: models.Model{Config: models.ModelConfig{Modalities: &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityImage}, Output: []models.Modality{models.ModalityText}}}}}
 
 	gateway := extractNativeImageParts(s.routeAndMergeAttachments(context.Background(), model, req))
 	discuss := inlineImageParts(context.Background(), s, "bot-1",

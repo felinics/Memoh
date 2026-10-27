@@ -54,9 +54,9 @@ func TestComposeContextWithArtifactsReplacesCoveredSlot(t *testing.T) {
 	}
 	trs := []TurnResponseEntry{assistantTR(2500, "reply")}
 	artifacts := []CompactionArtifact{{
-		ID:            "a1",
-		Summary:       "summarized old",
-		AnchorStartMs: 1000,
+		ID:          "a1",
+		Summary:     "summarized old",
+		AnchorEndMs: 2000,
 		Sources: []CompactionSource{
 			{ExternalMessageID: "m1", CreatedAtMs: 1000},
 			{ExternalMessageID: "m2", CreatedAtMs: 2000},
@@ -91,10 +91,10 @@ func TestComposeContextWithArtifactsReplacesCoveredSlot(t *testing.T) {
 func TestComposeContextWithArtifactsAnchorFallback(t *testing.T) {
 	rc := RenderedContext{textSegment("m3", 3000, "new")}
 	artifacts := []CompactionArtifact{{
-		ID:            "a1",
-		Summary:       "aged out coverage",
-		AnchorStartMs: 1500,
-		Sources:       []CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 1000}},
+		ID:          "a1",
+		Summary:     "aged out coverage",
+		AnchorEndMs: 1000,
+		Sources:     []CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 1000}},
 	}}
 
 	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
@@ -109,6 +109,44 @@ func TestComposeContextWithArtifactsAnchorFallback(t *testing.T) {
 	composed = ComposeContextWithArtifacts(rc, nil, noAnchor)
 	if composed == nil || len(composed.Messages) != 2 || composed.Messages[0].CompactionArtifactID != "a2" {
 		t.Fatalf("expected anchorless summary first, got %+v", composed)
+	}
+}
+
+// A summary that folds work on both sides of an input it keeps renders right
+// after the last source it covers, whichever of its sources the next request
+// loads: the input stays before it, the uncovered tail after it.
+func TestComposeContextWithArtifactsPlacesSummaryAfterItsLastSource(t *testing.T) {
+	old, input := textSegment("m-old", 1000, "old history"), textSegment("m-input", 2000, "kept input")
+	work := assistantTR(3000, "covered work")
+	work.SourceMessageID = "h-work"
+	tail := assistantTR(4000, "uncovered tail")
+	tail.SourceMessageID = "h-tail"
+	artifacts := []CompactionArtifact{{
+		ID:          "a1",
+		Summary:     "old history and the work after the input",
+		AnchorEndMs: 3000,
+		Sources: []CompactionSource{
+			{ExternalMessageID: "m-old", HistoryMessageID: "h-old", CreatedAtMs: 1000},
+			{HistoryMessageID: "h-work", CreatedAtMs: 3000},
+		},
+	}}
+	want := []string{"user:kept input", "user:<summary>\nold history and the work after the input\n</summary>", "assistant:uncovered tail"}
+	for _, loaded := range []struct {
+		name string
+		rc   RenderedContext
+		trs  []TurnResponseEntry
+	}{
+		{name: "every source", rc: RenderedContext{old, input}, trs: []TurnResponseEntry{work, tail}},
+		{name: "the last source", rc: RenderedContext{input}, trs: []TurnResponseEntry{work, tail}},
+		{name: "an earlier source", rc: RenderedContext{old, input}, trs: []TurnResponseEntry{tail}},
+		{name: "no source", rc: RenderedContext{input}, trs: []TurnResponseEntry{tail}},
+	} {
+		t.Run(loaded.name, func(t *testing.T) {
+			composed := ComposeContextWithArtifacts(loaded.rc, loaded.trs, artifacts)
+			if composed == nil || !reflect.DeepEqual(messageTexts(composed.Messages), want) {
+				t.Fatalf("got %q, want %q", messageTexts(composed.Messages), want)
+			}
+		})
 	}
 }
 
@@ -144,20 +182,22 @@ func TestComposeContextWithArtifactsKeepsSegmentsEditedAfterCompletion(t *testin
 	artifacts := []CompactionArtifact{{
 		ID:             "a1",
 		Summary:        "stale coverage",
-		AnchorStartMs:  1000,
+		AnchorEndMs:    1000,
 		CoverageAsOfMs: 4000,
 		Sources:        []CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 1000}},
 	}}
 
+	// The edited segment is no longer what the summary replaced, so it stays
+	// and the summary renders after it, at the anchor of what it covered.
 	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
 	if composed == nil || len(composed.Messages) != 3 {
 		t.Fatalf("expected summary and two independent sources, got %+v", composed)
 	}
-	if composed.Messages[0].CompactionArtifactID != "a1" {
-		t.Fatalf("expected summary before edited segment, got %+v", composed.Messages[0])
+	if !strings.Contains(composed.Messages[0].Content, "edited later") {
+		t.Fatalf("edited segment must survive coverage, got %+v", composed.Messages[0])
 	}
-	if !strings.Contains(composed.Messages[1].Content, "edited later") {
-		t.Fatalf("edited segment must survive coverage, got %+v", composed.Messages[1])
+	if composed.Messages[1].CompactionArtifactID != "a1" {
+		t.Fatalf("expected summary after the edited segment, got %+v", composed.Messages[1])
 	}
 	if composed.Messages[2].Content != "tail" {
 		t.Fatalf("current source must exclude edited history: %+v", composed.Messages[2])
@@ -171,7 +211,7 @@ func TestComposeContextWithArtifactsDropsSegmentsEditedBeforeCompletion(t *testi
 	artifacts := []CompactionArtifact{{
 		ID:             "a1",
 		Summary:        "covers the edit",
-		AnchorStartMs:  1000,
+		AnchorEndMs:    1000,
 		CoverageAsOfMs: 4000,
 		Sources:        []CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 1000}},
 	}}
@@ -232,8 +272,8 @@ func TestComposeContextWithArtifactsIgnoresBlankSummary(t *testing.T) {
 func TestComposeContextWithArtifactsOrdersMultipleArtifacts(t *testing.T) {
 	rc := RenderedContext{textSegment("m5", 5000, "current")}
 	artifacts := []CompactionArtifact{
-		{ID: "a2", Summary: "second window", AnchorStartMs: 3000},
-		{ID: "a1", Summary: "first window", AnchorStartMs: 1000},
+		{ID: "a2", Summary: "second window", AnchorEndMs: 3000},
+		{ID: "a1", Summary: "first window", AnchorEndMs: 1000},
 	}
 
 	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
@@ -271,10 +311,10 @@ func TestComposeContextWithArtifactsKeepsSlotOrderWithinSameMs(t *testing.T) {
 		textSegment("m2", 1000, "uncovered second"),
 	}
 	artifacts := []CompactionArtifact{{
-		ID:            "a1",
-		Summary:       "first slot",
-		AnchorStartMs: 1000,
-		Sources:       []CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 1000}},
+		ID:          "a1",
+		Summary:     "first slot",
+		AnchorEndMs: 1000,
+		Sources:     []CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 1000}},
 	}}
 
 	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
@@ -289,7 +329,7 @@ func TestComposeContextWithArtifactsKeepsSlotOrderWithinSameMs(t *testing.T) {
 	}
 }
 
-func TestComposeContextWithArtifactsKeepsBeforeSlotOrderWithinSameMs(t *testing.T) {
+func TestComposeContextWithArtifactsPlacesSummaryOfAnEditedSlotAtItsAnchor(t *testing.T) {
 	edited := textSegment("m2", 1000, "edited survivor")
 	edited.EditedAtMs = 5000
 	rc := RenderedContext{
@@ -299,23 +339,23 @@ func TestComposeContextWithArtifactsKeepsBeforeSlotOrderWithinSameMs(t *testing.
 	artifacts := []CompactionArtifact{{
 		ID:             "a1",
 		Summary:        "covers the edited slot",
-		AnchorStartMs:  1000,
+		AnchorEndMs:    1000,
 		CoverageAsOfMs: 4000,
 		Sources:        []CompactionSource{{ExternalMessageID: "m2", CreatedAtMs: 1000}},
 	}}
 
 	composed := ComposeContextWithArtifacts(rc, nil, artifacts)
 	if composed == nil || len(composed.Messages) != 3 {
-		t.Fatalf("expected first + summary + edited, got %+v", composed)
+		t.Fatalf("expected first + edited + summary, got %+v", composed)
 	}
 	if !strings.Contains(composed.Messages[0].Content, "uncovered first") {
 		t.Fatalf("uncovered earlier slot must stay first, got %v", messageTexts(composed.Messages))
 	}
-	if composed.Messages[1].CompactionArtifactID != "a1" {
-		t.Fatalf("summary must sit immediately before its kept slot, got %v", messageTexts(composed.Messages))
+	if !strings.Contains(composed.Messages[1].Content, "edited survivor") {
+		t.Fatalf("the edited slot keeps its place, got %v", messageTexts(composed.Messages))
 	}
-	if !strings.Contains(composed.Messages[2].Content, "edited survivor") {
-		t.Fatalf("kept slot must follow its summary, got %v", messageTexts(composed.Messages))
+	if composed.Messages[2].CompactionArtifactID != "a1" {
+		t.Fatalf("summary of nothing it still replaces renders at its anchor, after that ms's segments, got %v", messageTexts(composed.Messages))
 	}
 }
 
@@ -325,10 +365,10 @@ func TestComposeContextWithArtifactsKeepsTurnResponseSlotOrderWithinSameMs(t *te
 	covered := assistantTR(1000, "covered later reply")
 	covered.SourceMessageID = "h2"
 	artifacts := []CompactionArtifact{{
-		ID:            "a1",
-		Summary:       "covers the later reply",
-		AnchorStartMs: 1000,
-		Sources:       []CompactionSource{{HistoryMessageID: "h2", CreatedAtMs: 1000}},
+		ID:          "a1",
+		Summary:     "covers the later reply",
+		AnchorEndMs: 1000,
+		Sources:     []CompactionSource{{HistoryMessageID: "h2", CreatedAtMs: 1000}},
 	}}
 
 	composed := ComposeContextWithArtifacts(nil, []TurnResponseEntry{early, covered}, artifacts)
@@ -374,5 +414,29 @@ func TestComposeContextWithArtifactsKeepsTurnResponseSlotAcrossMultipleCovered(t
 	}
 	if !strings.Contains(composed.Messages[2].Content, "surviving reply") {
 		t.Fatalf("survivor must follow both summaries, got %v", messageTexts(composed.Messages))
+	}
+}
+
+// A source the summary does not cover that lies between sources it does, such
+// as a passive message, renders before the summary instead of being dropped.
+func TestComposeContextWithArtifactsRendersUncoveredSourcesInsideTheSpanBeforeTheSummary(t *testing.T) {
+	reply := assistantTR(2500, "covered reply")
+	reply.SourceMessageID = "h1"
+	rc := RenderedContext{
+		textSegment("m1", 1000, "covered question"),
+		textSegment("m2", 2000, "passive chatter"),
+		textSegment("m3", 3000, "current"),
+	}
+	artifacts := []CompactionArtifact{{
+		ID:      "a1",
+		Summary: "folded",
+		Sources: []CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 1000}, {HistoryMessageID: "h1", CreatedAtMs: 2500}},
+	}}
+
+	composed := ComposeContextWithArtifacts(rc, []TurnResponseEntry{reply}, artifacts)
+	got := messageTexts(composed.Messages)
+	want := []string{"user:passive chatter", "user:<summary>\nfolded\n</summary>", "user:current"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("composed %q, want %q", got, want)
 	}
 }

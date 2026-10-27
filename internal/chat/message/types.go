@@ -8,7 +8,11 @@ import (
 
 const (
 	AgentStepInterruptedMetadataKey = "agent_step_interrupted"
-	HistoryErrorCodeMetadataKey     = "error_code"
+	// DiscussStepMetadataKey marks a row a Discuss run wrote before its
+	// answer. The row is context for later runs, not proof that its run
+	// consumed the input it answers: the run can still fail after it.
+	DiscussStepMetadataKey      = "discuss_step"
+	HistoryErrorCodeMetadataKey = "error_code"
 	// HistoryErrorArgsMetadataKey holds the catalog args of the failure named
 	// by error_code: only the args its catalog entry allows, as strings.
 	HistoryErrorArgsMetadataKey         = "error_args"
@@ -83,6 +87,9 @@ type Message struct {
 	EventID        string          `json:"event_id,omitempty"`
 	DisplayContent string          `json:"display_content,omitempty"`
 	CreatedAt      time.Time       `json:"created_at"`
+	// Summarized marks a row loaded to place the compaction summary that
+	// replaced it; the window left out the rest of its compact group.
+	Summarized bool `json:"-"`
 }
 
 type HistoryTurn struct {
@@ -238,23 +245,18 @@ type Service interface {
 	Writer
 	List(ctx context.Context, botID string) ([]Message, error)
 	ListSince(ctx context.Context, botID string, since time.Time) ([]Message, error)
-	ListActiveSince(ctx context.Context, botID string, since time.Time) ([]Message, error)
-	// ListActiveSinceWithinBytes is the byte-budgeted variant of
-	// ListActiveSince (CM-ADM-001): rows are admitted newest-first until
-	// their content byte total crosses maxBytes. Only content is budgeted,
-	// so metadata is returned undecoded in RawMetadata (Metadata stays nil):
-	// callers decode one row at a time instead of holding every row's
-	// decoded metadata, which legacy lifecycle audits can inflate.
-	ListActiveSinceWithinBytes(ctx context.Context, botID string, since time.Time, maxBytes int64) ([]Message, error)
 	ListLatest(ctx context.Context, botID string, limit int32) ([]Message, error)
 	ListBefore(ctx context.Context, botID string, before time.Time, limit int32) ([]Message, error)
 	ListBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
 	ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
 	// ListActiveSinceBySessionWithinBytes is the byte-budgeted variant of
-	// ListActiveSinceBySession (CM-ADM-001), same admission semantics and
-	// undecoded metadata as ListActiveSinceWithinBytes, scoped to one session.
-	ListActiveSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64) ([]Message, error)
+	// ListActiveSinceBySession (CM-ADM-001): rows are admitted newest-first
+	// including the crossing row. Only content is budgeted; metadata arrives
+	// undecoded in RawMetadata for the caller to process one row at a time.
+	// With foldSummarized, rows a usable compaction summary replaced cost
+	// nothing and only the newest of each compact group loads, Summarized.
+	ListActiveSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64, foldSummarized bool) ([]Message, error)
 	// ListTurnResponseSourcesSinceBySessionWithinBytes is the same window as
 	// ListActiveSinceBySessionWithinBytes projected to what turn-response
 	// composition reads: ID, role, content, created_at, and Metadata holding

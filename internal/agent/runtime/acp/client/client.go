@@ -442,8 +442,8 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 	}
 	c.emitToolCallStart(toolID, "read", input)
 	var toolErr error
+	result := map[string]any{}
 	defer func() {
-		result := map[string]any{}
 		if toolErr != nil {
 			result = toolErrorResult(toolErr)
 		}
@@ -477,6 +477,7 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 		return acp.ReadTextFileResponse{}, toolErr
 	}
 	content := resp.GetContent()
+	result = map[string]any{"content": content, "total_lines": resp.GetTotalLines()}
 	if limit := c.currentToolOutputLimit(); hasToolOutputLimit(limit) {
 		content = limitToolOutputString(content, "tool result (read.content)", limit)
 	}

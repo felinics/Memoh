@@ -39,6 +39,5 @@ func MenuCommands(t *i18n.Localizer) []MenuCommand {
 		{"skill", t.T("menu.skill")},
 		{"fs", t.T("menu.fs")},
 		{"access", t.T("menu.access")},
-		{"compact", t.T("menu.compact")},
 	}
 }

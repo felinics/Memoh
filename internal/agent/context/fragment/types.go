@@ -25,8 +25,6 @@ const (
 	KindNativeImage          Kind = "native_image"
 	KindSkillsCatalog        Kind = "skills_catalog"
 	KindHookContext          Kind = "hook_context"
-	KindInjectedMessage      Kind = "injected_message"
-	KindBackgroundSummary    Kind = "background_summary"
 	KindRuntimeContext       Kind = "runtime_context"
 
 	// Reserved for the memory/compaction rewrites. Phase 1 keeps their existing
@@ -36,17 +34,15 @@ const (
 )
 
 // BackgroundSummaryMessagePrefix marks the per-step user message that carries
-// KindBackgroundSummary content. The agent rebuilds that message between steps
+// the running background tasks. The agent rebuilds that message between steps
 // (remove by prefix, append the fresh summary) so running-task status never
-// rewrites the cached system prefix, and step reselection recognizes it as a
-// status notice rather than a conversation turn.
+// rewrites the cached system prefix.
 const BackgroundSummaryMessagePrefix = "[Background tasks]\n"
 
 // IsBackgroundSummaryCarrier reports whether msg is the per-step background
 // summary carrier: a user message holding exactly one unadorned text part that
 // starts with BackgroundSummaryMessagePrefix. The agent's between-step removal
-// and step reselection share this single contract so a message one side would
-// remove is never content the other side protects.
+// matches only this shape.
 func IsBackgroundSummaryCarrier(msg sdk.Message) bool {
 	if msg.Role != sdk.MessageRoleUser || len(msg.Content) != 1 {
 		return false

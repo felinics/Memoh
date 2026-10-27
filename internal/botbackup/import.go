@@ -345,11 +345,6 @@ func settingsLabels(raw []byte) []string {
 		out = append(out, "acl default: "+v)
 	}
 	out = append(out, "reasoning: "+reasoningStr())
-	compaction := "off"
-	if enabled, ok := m["compaction_enabled"].(bool); ok && enabled {
-		compaction = "on"
-	}
-	out = append(out, "compaction: "+compaction)
 	return out
 }
 
@@ -759,6 +754,44 @@ type modelDependency struct {
 	Type       modelpkg.ModelType   `json:"type"`
 	Enable     *bool                `json:"enable,omitempty"`
 	Config     modelpkg.ModelConfig `json:"config"`
+	// rawConfig is the config as exported; see withClientType.
+	rawConfig json.RawMessage
+}
+
+// UnmarshalJSON upgrades a config exported by an older version; see
+// modelpkg.DecodeModelConfig.
+func (d *modelDependency) UnmarshalJSON(data []byte) error {
+	type plain modelDependency
+	var body struct {
+		plain
+		Config json.RawMessage `json:"config"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		return err
+	}
+	*d = modelDependency(body.plain)
+	config, err := modelpkg.DecodeModelConfig(body.Config, modelpkg.ConfigContext{ModelID: d.ModelID, Type: d.Type})
+	if err != nil {
+		return err
+	}
+	d.Config = config
+	d.rawConfig = body.Config
+	return nil
+}
+
+// withClientType reads the exported config again with its provider's client
+// type. A version 1 switch that only the protocol could turn off upgrades by
+// it, and the backup's provider list is the only place that names it.
+func (d *modelDependency) withClientType(clientType string) error {
+	if clientType == "" || len(d.rawConfig) == 0 {
+		return nil
+	}
+	config, err := modelpkg.DecodeModelConfig(d.rawConfig, modelpkg.ConfigContext{ModelID: d.ModelID, Type: d.Type, ClientType: clientType})
+	if err != nil {
+		return err
+	}
+	d.Config = config
+	return nil
 }
 
 func (s *Service) importDependencies(ctx context.Context, state *importState) (dependencyMap, error) {
@@ -772,8 +805,32 @@ func (s *Service) importDependencies(ctx context.Context, state *importState) (d
 		}
 		deps.providers[item.ID] = id
 	}
+	// The client type is the one of the provider the model lands on, which may
+	// be an existing provider the backup's was matched to by name.
+	clientTypes := map[string]string{}
+	clientTypeOf := func(providerID string) string {
+		if clientType, ok := clientTypes[providerID]; ok {
+			return clientType
+		}
+		clientType := ""
+		if s.providers != nil && providerID != "" {
+			if provider, err := s.providers.Get(ctx, providerID); err == nil {
+				clientType = provider.ClientType
+			}
+		}
+		clientTypes[providerID] = clientType
+		return clientType
+	}
 	models, _ := readEntry[[]modelDependency](state, "dependencies/models.json")
 	for _, item := range models {
+		target := deps.providers[item.ProviderID]
+		if target == "" {
+			target = item.ProviderID
+		}
+		if err := item.withClientType(clientTypeOf(target)); err != nil {
+			s.skipImport(ctx, state, "model_dependency", "model dependency skipped", err)
+			continue
+		}
 		id, err := s.ensureModel(ctx, item, deps)
 		if err != nil {
 			s.skipImport(ctx, state, "model_dependency", "model dependency skipped", err)
@@ -878,7 +935,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 				eff.MemoryEnabled = current.MemoryEnabled
 				eff.TtsModelID = current.TtsModelID
 				eff.TranscriptionModelID = current.TranscriptionModelID
-				eff.CompactionModelID = current.CompactionModelID
 				eff.MemoryLLMModelID = current.MemoryLLMModelID
 				eff.DiscussProbeModelID = current.DiscussProbeModelID
 			}
@@ -890,9 +946,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 				eff.ChatACPProjectPath = current.ChatACPProjectPath
 				eff.ChatACPProjectMode = current.ChatACPProjectMode
 				eff.ReasoningEffort = current.ReasoningEffort
-				eff.CompactionEnabled = current.CompactionEnabled
-				eff.CompactionThreshold = current.CompactionThreshold
-				eff.CompactionTargetPercent = current.CompactionTargetPercent
 				eff.PersistFullToolResults = current.PersistFullToolResults
 				eff.ShowToolCallsInIM = current.ShowToolCallsInIM
 				eff.ToolApprovalConfig = current.ToolApprovalConfig
@@ -915,12 +968,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 
 	timezone := eff.Timezone
 	reasoningEffort := eff.ReasoningEffort
-	compactionEnabled := eff.CompactionEnabled
-	compactionThreshold := eff.CompactionThreshold
-	compactionTargetPercent := 0
-	if eff.CompactionTargetPercent != nil {
-		compactionTargetPercent = *eff.CompactionTargetPercent
-	}
 	persistFullToolResults := eff.PersistFullToolResults
 	showToolCalls := eff.ShowToolCallsInIM
 	toolApproval := eff.ToolApprovalConfig
@@ -930,33 +977,29 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 	fetchProviderID := modelID(eff.FetchProviderID, deps.fetchProviders)
 	memoryEnabled := eff.MemoryEnabled
 	_, err := s.settings.UpsertBot(ctx, botID, settings.UpsertRequest{
-		ChatModelID:             ptrStringAllowEmpty(modelID(eff.ChatModelID, deps.models)),
-		ChatRuntime:             ptrStringAllowEmpty(eff.ChatRuntime),
-		ChatACPAgentID:          ptrStringAllowEmpty(eff.ChatACPAgentID),
-		ChatACPProjectPath:      ptrStringAllowEmpty(eff.ChatACPProjectPath),
-		ChatACPProjectMode:      ptrStringAllowEmpty(eff.ChatACPProjectMode),
-		ImageModelID:            ptrStringAllowEmpty(modelID(eff.ImageModelID, deps.models)),
-		SearchProviderID:        ptrStringAllowEmpty(modelID(eff.SearchProviderID, deps.searchProviders)),
-		FetchProviderID:         &fetchProviderID,
-		MemoryEnabled:           &memoryEnabled,
-		TtsModelID:              ptrStringAllowEmpty(modelID(eff.TtsModelID, deps.models)),
-		TranscriptionModelID:    ptrStringAllowEmpty(modelID(eff.TranscriptionModelID, deps.models)),
-		AclDefaultEffect:        eff.AclDefaultEffect,
-		Timezone:                &timezone,
-		ReasoningEffort:         &reasoningEffort,
-		CompactionEnabled:       &compactionEnabled,
-		CompactionThreshold:     &compactionThreshold,
-		CompactionTargetPercent: &compactionTargetPercent,
-		CompactionModelID:       ptrString(modelID(eff.CompactionModelID, deps.models)),
-		MemoryLLMModelID:        ptrString(modelID(eff.MemoryLLMModelID, deps.models)),
-		DiscussProbeModelID:     modelID(eff.DiscussProbeModelID, deps.models),
-		PersistFullToolResults:  &persistFullToolResults,
-		ShowToolCallsInIM:       &showToolCalls,
-		ToolApprovalConfig:      &toolApproval,
-		DisplayEnabled:          &displayEnabled,
-		OverlayEnabled:          &overlayEnabled,
-		OverlayProvider:         &overlayProvider,
-		OverlayConfig:           eff.OverlayConfig,
+		ChatModelID:            ptrStringAllowEmpty(modelID(eff.ChatModelID, deps.models)),
+		ChatRuntime:            ptrStringAllowEmpty(eff.ChatRuntime),
+		ChatACPAgentID:         ptrStringAllowEmpty(eff.ChatACPAgentID),
+		ChatACPProjectPath:     ptrStringAllowEmpty(eff.ChatACPProjectPath),
+		ChatACPProjectMode:     ptrStringAllowEmpty(eff.ChatACPProjectMode),
+		ImageModelID:           ptrStringAllowEmpty(modelID(eff.ImageModelID, deps.models)),
+		SearchProviderID:       ptrStringAllowEmpty(modelID(eff.SearchProviderID, deps.searchProviders)),
+		FetchProviderID:        &fetchProviderID,
+		MemoryEnabled:          &memoryEnabled,
+		TtsModelID:             ptrStringAllowEmpty(modelID(eff.TtsModelID, deps.models)),
+		TranscriptionModelID:   ptrStringAllowEmpty(modelID(eff.TranscriptionModelID, deps.models)),
+		AclDefaultEffect:       eff.AclDefaultEffect,
+		Timezone:               &timezone,
+		ReasoningEffort:        &reasoningEffort,
+		MemoryLLMModelID:       ptrString(modelID(eff.MemoryLLMModelID, deps.models)),
+		DiscussProbeModelID:    modelID(eff.DiscussProbeModelID, deps.models),
+		PersistFullToolResults: &persistFullToolResults,
+		ShowToolCallsInIM:      &showToolCalls,
+		ToolApprovalConfig:     &toolApproval,
+		DisplayEnabled:         &displayEnabled,
+		OverlayEnabled:         &overlayEnabled,
+		OverlayProvider:        &overlayProvider,
+		OverlayConfig:          eff.OverlayConfig,
 	})
 	return err
 }

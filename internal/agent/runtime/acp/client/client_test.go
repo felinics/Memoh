@@ -1393,11 +1393,20 @@ func TestReadTextFileUsesPromptToolOutputLimit(t *testing.T) {
 					BotID: "bot-1", SessionID: "session-1",
 				},
 			}
-			callbacks.setPromptState(newEventCollector(limit), nil, ToolSessionContext{}, limit)
+			sink := &eventLog{}
+			callbacks.setPromptState(newEventCollector(limit), sink, ToolSessionContext{}, limit)
 
 			resp, err := callbacks.ReadTextFile(context.Background(), tc.request)
 			if err != nil {
 				t.Fatalf("ReadTextFile returned error: %v", err)
+			}
+			events := sink.all()
+			if len(events) != 2 {
+				t.Fatalf("missing file result: %#v", events)
+			}
+			displayed, _ := events[1].Result.(map[string]any)["content"].(string)
+			if displayed == "" || len(displayed) > limit.MaxBytes || !strings.Contains(displayed, "HEAD") || !strings.Contains(displayed, "TAIL") {
+				t.Fatalf("display result lost file output or bypassed its limit: %q", displayed)
 			}
 			if len(resp.Content) > limit.MaxBytes {
 				t.Fatalf("read content bytes = %d, want <= %d", len(resp.Content), limit.MaxBytes)

@@ -56,12 +56,14 @@ func (d *fakeDBTX) QueryRow(ctx context.Context, sql string, args ...any) pgx.Ro
 // Column order: id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status,
 // reasoning_effort,
 // chat_model_id, search_provider_id, memory_provider_id,
-// compaction_enabled, compaction_threshold, compaction_target_percent, compaction_model_id,
-// metadata, created_at, updated_at.
+// metadata, created_at, updated_at. Other 15-column rows scan as no rows.
 func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
-			if len(dest) < 19 {
+			if len(dest) != 15 {
+				return pgx.ErrNoRows
+			}
+			if _, ok := dest[3].(*pgtype.Text); !ok {
 				return pgx.ErrNoRows
 			}
 			*dest[0].(*pgtype.UUID) = botID
@@ -76,13 +78,9 @@ func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
 			*dest[9].(*pgtype.UUID) = pgtype.UUID{}  // ChatModelID
 			*dest[10].(*pgtype.UUID) = pgtype.UUID{} // SearchProviderID
 			*dest[11].(*pgtype.UUID) = pgtype.UUID{} // MemoryProviderID
-			*dest[12].(*bool) = false                // CompactionEnabled
-			*dest[13].(*int32) = 100000              // CompactionThreshold
-			*dest[14].(*pgtype.Int4) = pgtype.Int4{} // CompactionTargetPercent
-			*dest[15].(*pgtype.UUID) = pgtype.UUID{} // CompactionModelID
-			*dest[16].(*[]byte) = []byte(`{}`)
-			*dest[17].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[12].(*[]byte) = []byte(`{}`)
+			*dest[13].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[14].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}

@@ -17,7 +17,6 @@ func decodeBackupSettings(raw []byte) (settings.Settings, error) {
 		return settings.Settings{}, err
 	}
 	var legacy struct {
-		CompactionRatio  *int   `json:"compaction_ratio"`
 		ReasoningEnabled *bool  `json:"reasoning_enabled"`
 		MemoryEnabled    *bool  `json:"memory_enabled"`
 		MemoryProviderID string `json:"memory_provider_id"`
@@ -38,16 +37,6 @@ func decodeBackupSettings(raw []byte) (settings.Settings, error) {
 	// explicit false forces disable; a missing key leaves the archived tier alone.
 	if legacy.ReasoningEnabled != nil && !*legacy.ReasoningEnabled {
 		cfg.ReasoningEffort = models.ReasoningEffortDisable
-	}
-	if cfg.CompactionTargetPercent != nil || cfg.CompactionThreshold <= 0 {
-		return cfg, nil
-	}
-	if legacy.CompactionRatio == nil {
-		return cfg, nil
-	}
-	target := 100 - *legacy.CompactionRatio
-	if target >= 1 && target <= 99 {
-		cfg.CompactionTargetPercent = &target
 	}
 	return cfg, nil
 }

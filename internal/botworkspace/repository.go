@@ -38,7 +38,9 @@ type Repository interface {
 	// CancelRemoval returns ErrNotFound when the bot has no failed removal.
 	CancelRemoval(ctx context.Context, botID, observed string) (Workspace, error)
 	Get(ctx context.Context, botID string) (Workspace, error)
-	Claim(ctx context.Context, owner string, lease time.Duration, limit int32) ([]Workspace, error)
+	// Claim leases up to limit due rows. A non-empty desired state claims only
+	// the rows that want it.
+	Claim(ctx context.Context, owner string, lease time.Duration, desired string, limit int32) ([]Workspace, error)
 	ClaimOne(ctx context.Context, botID, owner string, lease time.Duration) (Workspace, error)
 	Renew(ctx context.Context, botID, owner string, lease time.Duration) error
 	WriteObserved(ctx context.Context, w ObservedWrite) (Workspace, error)
@@ -105,10 +107,11 @@ func (r *postgresRepository) Get(ctx context.Context, botID string) (Workspace, 
 	return fromRow(row), nil
 }
 
-func (r *postgresRepository) Claim(ctx context.Context, owner string, lease time.Duration, limit int32) ([]Workspace, error) {
+func (r *postgresRepository) Claim(ctx context.Context, owner string, lease time.Duration, desired string, limit int32) ([]Workspace, error) {
 	rows, err := r.queries.ClaimBotWorkspaces(ctx, dbsqlc.ClaimBotWorkspacesParams{
 		LeaseOwner:   owner,
 		LeaseSeconds: lease.Seconds(),
+		DesiredState: pgtype.Text{String: desired, Valid: desired != ""},
 		Lim:          limit,
 	})
 	if err != nil {

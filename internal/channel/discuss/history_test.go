@@ -41,7 +41,10 @@ func TestLightweightHistoryPreservesInterruptedReasoning(t *testing.T) {
 				})
 			}
 			reader := discussHistoryReader{messages: source, maxBytes: 4000000, logger: slog.New(slog.DiscardHandler)}
-			entries, measure := reader.Load(context.Background(), "session")
+			entries, measure, err := reader.Load(context.Background(), "session")
+			if err != nil {
+				t.Fatal(err)
+			}
 			if source.sessionID != "session" || source.maxBytes != 4000000 {
 				t.Fatal("history request lost session/budget")
 			}

@@ -50,6 +50,20 @@ type resumeContext struct {
 	DiscussOmittedSources []turn.ContextMessageSource `json:"discuss_omitted_sources,omitempty"`
 }
 
+// runAdmission is the server-authored part of a run's stored admission input:
+// the execution intent recorded when the run started and the decisions it
+// accepted since.
+type runAdmission struct {
+	Resume                *resumeContext                             `json:"resume"`
+	DecisionContinuations map[string]decision.ContinuationCheckpoint `json:"decision_continuations"`
+}
+
+func decodeRunAdmission(raw []byte) (runAdmission, error) {
+	var admitted runAdmission
+	err := json.Unmarshal(raw, &admitted)
+	return admitted, err
+}
+
 // errResumeUnrecoverable marks an interrupted intent that no later scan can
 // continue. The worker retires it instead of retrying it every pass; failures
 // that may clear (workspace readiness, database errors) stay unwrapped.
@@ -341,11 +355,8 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 	if row.TeamID.String() != s.sessionResumeScopes().CurrentScope(ctx) {
 		return nil, errResumeScopeMismatch
 	}
-	var input struct {
-		Resume                *resumeContext                             `json:"resume"`
-		DecisionContinuations map[string]decision.ContinuationCheckpoint `json:"decision_continuations"`
-	}
-	if err := json.Unmarshal(row.InputJson, &input); err != nil {
+	input, err := decodeRunAdmission(row.InputJson)
+	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errResumeUnrecoverable, err)
 	}
 	data := input.Resume

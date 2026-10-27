@@ -56,6 +56,29 @@ func TestStartTurnRoundTrip(t *testing.T) {
 	}
 }
 
+// Channel composes Discuss context in its own process; the version each
+// source was rendered at crosses the wire with it, so a compaction on the
+// server can refuse a source that changed since.
+func TestStartTurnCarriesDiscussSourceVersions(t *testing.T) {
+	fake := &fakeService{}
+	client, cleanup := newTestClient(t, fake, "secret")
+	defer cleanup()
+
+	external := turn.ContextMessageSource{Kind: "external", ID: "m1", Current: true, EventCursor: 42}
+	reply := turn.ContextMessageSource{Kind: "history", ID: "row-1", ContentHash: "hash-1"}
+	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{
+		SchemaVersion: 1, TeamID: "team-1", BotID: "bot-1", ThreadID: "session-1", Mode: turn.ModeDiscuss,
+		DiscussMessages: []turn.DiscussMessage{{Role: "user", Content: "hi", Source: &external}, {Role: "assistant", Content: "ok", Source: &reply}},
+	})
+	if err != nil {
+		t.Fatalf("start turn: %v", err)
+	}
+	<-handle.Events()
+	if got := fake.started.DiscussMessages; len(got) != 2 || *got[0].Source != external || *got[1].Source != reply {
+		t.Fatalf("discuss messages = %#v", got)
+	}
+}
+
 func TestLegacySessionIDJSONWireCompatibility(t *testing.T) {
 	tests := []struct {
 		name      string

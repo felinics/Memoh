@@ -72,22 +72,17 @@ func TestPostgresDiscussRecoveryPreservesBatchAcrossCompactorRestart(t *testing.
 		}
 	}))
 	defer server.Close()
-	chatModel, compactModel, providerID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	chatModel, providerID := uuid.NewString(), uuid.NewString()
 	providerConfig, _ := json.Marshal(map[string]string{"base_url": server.URL, "api_key": "test-key"})
 	if _, err := pool.Exec(ctx, `INSERT INTO providers(id,name,client_type,config) VALUES($1,$2,'openai-completions',$3)`, providerID, providerID, providerConfig); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM providers WHERE id=$1`, providerID) })
-	for _, model := range []struct {
-		id, slug string
-		window   int
-	}{{chatModel, "chat-model", 8000}, {compactModel, "compact-model", 6000}} {
-		config, _ := json.Marshal(map[string]any{"context_window": model.window, "compatibilities": []string{}})
-		if _, err := pool.Exec(ctx, `INSERT INTO models(id,model_id,provider_id,config) VALUES($1,$2,$3,$4)`, model.id, model.slug, providerID, config); err != nil {
-			t.Fatal(err)
-		}
+	config, _ := json.Marshal(map[string]any{"context_window": 8000, "compatibilities": []string{}})
+	if _, err := pool.Exec(ctx, `INSERT INTO models(id,model_id,provider_id,config) VALUES($1,'chat-model',$2,$3)`, chatModel, providerID, config); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE bots SET chat_model_id=$2,compaction_model_id=$3 WHERE id=$1`, botID, chatModel, compactModel); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE bots SET chat_model_id=$2 WHERE id=$1`, botID, chatModel); err != nil {
 		t.Fatal(err)
 	}
 	var rc timeline.RenderedContext
@@ -123,7 +118,7 @@ func TestPostgresDiscussRecoveryPreservesBatchAcrossCompactorRestart(t *testing.
 		nextRound := round == rounds
 		// Grow consumed history again so each round must make durable progress.
 		if round > 0 && !nextRound {
-			appendMessage(fmt.Sprintf("growth-%d", round), "assistant", strings.Repeat("old history ", 1500), true)
+			appendMessage(fmt.Sprintf("growth-%d", round), "assistant", strings.Repeat("old history ", 1200), true)
 		}
 		a, b := fmt.Sprintf("input-a-%d", round), fmt.Sprintf("input-b-%d", round)
 		textA, textB := a+strings.Repeat("a", 600), b+strings.Repeat("b", 600)
@@ -159,13 +154,15 @@ func TestPostgresDiscussRecoveryPreservesBatchAcrossCompactorRestart(t *testing.
 		if after != timeline.ConsumedDiscussCursor(rc) {
 			t.Fatalf("cursor did not commit the full current batch: %+v", after)
 		}
-		if round == 0 && summaries.Load()-before != 3 {
-			t.Fatalf("fixture must require exactly three recoveries, got %d", summaries.Load()-before)
+		switch passes := summaries.Load() - before; {
+		case round == 0 && passes < 2:
+			t.Fatalf("fixture must need a compaction of more than one summarizer pass, got %d", passes)
+		case !nextRound && passes == 0:
+			t.Fatalf("round %d grew history without compacting it", round)
+		case nextRound && passes != 0:
+			t.Fatalf("next round compacted again: summaries=%d", passes)
 		}
 		request, _ := lastRequest.Load().(string)
-		if nextRound && summaries.Load()-before > 3 {
-			t.Fatalf("next round exceeded the recovery bound: summaries=%d", summaries.Load()-before)
-		}
 		if modelCalls.Load()-callsBefore != 1 || strings.Count(request, textA) != 1 || strings.Count(request, textB) != 1 {
 			t.Fatalf("round %d: provider calls=%d, current input multiplicity=%d/%d", round, modelCalls.Load()-callsBefore, strings.Count(request, textA), strings.Count(request, textB))
 		}
@@ -183,9 +180,6 @@ func TestPostgresDiscussRecoveryPreservesBatchAcrossCompactorRestart(t *testing.
 		}
 		driver.StopAll()
 		_ = manager.Close()
-	}
-	if summaries.Load() < rounds || summaries.Load() > (rounds+1)*3 {
-		t.Fatalf("unexpected bounded recovery count=%d", summaries.Load())
 	}
 	var replies, pending int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM bot_history_messages WHERE session_id=$1 AND role='assistant' AND content::text LIKE '%DRIVER_RECOVERY_OK%'`, sessionID).Scan(&replies); err != nil {

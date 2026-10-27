@@ -4,24 +4,43 @@ import { useQuery } from '@pinia/colada'
 import {
   Button,
   Empty,
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationFirst,
+  PaginationItem,
+  PaginationLast,
+  PaginationNext,
+  PaginationPrevious,
   EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
 } from '@felinic/ui'
-import { getModels, getProviders, getProviderTemplates } from '@memohai/sdk'
-import type { ModelsGetResponse, ProvidersGetResponse, ProvidertemplatesGetResponse } from '@memohai/sdk'
-import { Boxes, Box, ChevronRight, Plus } from 'lucide-vue-next'
+import { getModels, getProviders } from '@memohai/sdk'
+import type { ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
+import { Boxes, Box, ChevronRight, Plus, Search } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
-import { BackendCard, DetailPane, PageShell, SwapTransition } from '@felinic/ui'
+import { BackendCard, DetailPane, PageShell, SectionGroup, SwapTransition } from '@felinic/ui'
 import AddProvider from '@/components/add-provider/index.vue'
 import BackendCardGridSkeleton from '@/components/backend-card-grid-skeleton/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import { avatarInitials } from '@/composables/useAvatarInitials'
-import { isTemplateConfigured, providerDraftFromTemplate, templateDefaultConfig } from '@/utils/provider-template'
+import {
+  groupModelSources,
+  isMonochromeLogo,
+  providerLogo,
+  MODEL_SOURCES,
+  modelSourceLogo,
+  providerCatalogEntry,
+  providerDraftFromSource,
+  providerGalleryEntry,
+  type ModelSource,
+} from '@/constants/model-sources'
 import ModelSetting from './model-setting.vue'
+import { pageSections, type GallerySection } from './gallery-sections'
 
 const { t } = useI18n()
 
@@ -41,19 +60,10 @@ const { data: modelData } = useQuery({
   },
 })
 
-const { data: templateData, isLoading: templatesLoading } = useQuery({
-  key: () => ['provider-templates', 'llm'],
-  query: async () => {
-    const { data } = await getProviderTemplates({ query: { domain: 'llm' }, throwOnError: true })
-    return data
-  },
-})
-
 const curProvider = ref<ProvidersGetResponse>()
-const curTemplate = ref<ProvidertemplatesGetResponse>()
+const curSource = ref<ModelSource>()
 const optimisticProvider = ref<ProvidersGetResponse>()
 const addOpen = ref(false)
-const initialTemplateId = ref('')
 
 // The search box + Add button live in the container page's fixed header (same
 // row for every scope); this panel receives the query and exposes its add
@@ -70,15 +80,6 @@ const providers = computed<ProvidersGetResponse[]>(() => {
   })
 })
 
-const templates = computed<ProvidertemplatesGetResponse[]>(() =>
-  Array.isArray(templateData.value) ? templateData.value : [],
-)
-
-const availableTemplates = computed(() => templates.value.filter(template =>
-  !isTemplateConfigured(template)
-  && template.id !== optimisticProvider.value?.provider_template_id,
-))
-
 const catalogProviders = computed(() => {
   const provider = optimisticProvider.value
   if (!provider?.id || providers.value.some(item => item.id === provider.id)) return providers.value
@@ -91,9 +92,33 @@ watch(providers, (items) => {
   }
 })
 
+// Entries already behind a provider: one created from the entry, from the
+// provider template or preset the entry replaced, or for a subscription, with
+// its client type in the custom form.
+const configuredEntries = computed(() => {
+  const configured = new Set<string>()
+  for (const provider of catalogProviders.value) {
+    const entry = providerGalleryEntry(provider)
+    if (entry) configured.add(entry.id)
+  }
+  return configured
+})
+
+const availableSources = computed(() => MODEL_SOURCES.filter(item => !configuredEntries.value.has(item.id)))
+
 type ProviderDetail =
-  | { kind: 'provider', provider: ProvidersGetResponse }
-  | { kind: 'template', template: ProvidertemplatesGetResponse }
+  // routeAlias lets a provider answer for another route value.
+  | { kind: 'provider', provider: ProvidersGetResponse, routeAlias?: string }
+  | { kind: 'source', source: ModelSource }
+
+// A provider just created from a draft drops its entry from the gallery before
+// the route has moved from the draft to the provider; until it moves, the
+// provider answers for the draft's route so the detail stays open.
+const materializedAlias = computed<ProviderDetail | undefined>(() => {
+  const provider = optimisticProvider.value
+  const entry = providerCatalogEntry(provider)
+  return provider && entry ? { kind: 'provider', provider, routeAlias: `source:${entry.id}` } : undefined
+})
 
 // Page-owned query key (unique under settings KeepAlive — see useViewSwap.ts).
 const {
@@ -106,31 +131,26 @@ const {
   key: 'provider',
   items: () => [
     ...catalogProviders.value.map(provider => ({ kind: 'provider' as const, provider })),
-    ...availableTemplates.value.map(template => ({ kind: 'template' as const, template })),
+    ...(materializedAlias.value ? [materializedAlias.value] : []),
+    ...availableSources.value.map(source => ({ kind: 'source' as const, source })),
   ],
   selected: () => {
-    if (curTemplate.value) return { kind: 'template', template: curTemplate.value }
+    if (curSource.value) return { kind: 'source', source: curSource.value }
     return curProvider.value ? { kind: 'provider', provider: curProvider.value } : undefined
   },
   select: (detail) => {
-    curTemplate.value = detail?.kind === 'template' ? detail.template : undefined
+    curSource.value = detail?.kind === 'source' ? detail.source : undefined
     curProvider.value = detail?.kind === 'provider'
       ? detail.provider
-      : detail?.kind === 'template'
-        ? providerDraftFromTemplate(detail.template)
+      : detail?.kind === 'source'
+        ? providerDraftFromSource(detail.source) as ProvidersGetResponse
         : undefined
   },
   getRouteValue: detail => detail.kind === 'provider'
-    ? detail.provider.provider_template_id
-      ? `template:${detail.provider.provider_template_id}`
-      : (detail.provider.id ?? '')
-    : `template:${detail.template.id}`,
-  isLoading: routeValue => routeValue.startsWith('template:')
-    ? templatesLoading.value || providersLoading.value
-    : providersLoading.value,
-  isReady: routeValue => routeValue.startsWith('template:')
-    ? templateData.value !== undefined && providerData.value !== undefined
-    : providerData.value !== undefined,
+    ? (detail.routeAlias ?? detail.provider.id ?? '')
+    : `source:${detail.source.id}`,
+  isLoading: () => providersLoading.value,
+  isReady: () => providerData.value !== undefined,
 })
 
 const modelCountByProvider = computed(() => {
@@ -143,12 +163,9 @@ const modelCountByProvider = computed(() => {
   return counts
 })
 
-// Keep cached cards mounted during background refreshes. Only unresolved
-// queries still fetching need a skeleton; failed queries must leave loading.
-const listLoading = computed(() =>
-  (providerData.value === undefined && providersLoading.value)
-  || (templateData.value === undefined && templatesLoading.value),
-)
+// Keep cached cards mounted during background refreshes. Only an unresolved
+// query still fetching needs a skeleton; a failed one must leave loading.
+const listLoading = computed(() => providerData.value === undefined && providersLoading.value)
 
 const filteredProviders = computed(() => {
   const keyword = props.searchQuery.trim().toLowerCase()
@@ -160,15 +177,60 @@ const filteredProviders = computed(() => {
   })
 })
 
-const filteredTemplates = computed(() => {
+const filteredSources = computed(() => {
   const keyword = props.searchQuery.trim().toLowerCase()
-  if (!keyword) return availableTemplates.value
-  return availableTemplates.value.filter(template =>
-    (template.name ?? '').toLowerCase().includes(keyword)
-    || (template.driver ?? '').toLowerCase().includes(keyword)
-    || (template.description ?? '').toLowerCase().includes(keyword),
+  if (!keyword) return availableSources.value
+  return availableSources.value.filter(item =>
+    item.name.toLowerCase().includes(keyword)
+    || item.id.toLowerCase().includes(keyword)
+    || item.base_url.toLowerCase().includes(keyword),
   )
 })
+
+type GalleryCard =
+  | { kind: 'provider', key: string, provider: ProvidersGetResponse }
+  | { kind: 'source', key: string, source: ModelSource }
+
+function sourceCards(items: ModelSource[]): GalleryCard[] {
+  return items.map(source => ({ kind: 'source' as const, key: `source:${source.id}`, source }))
+}
+
+interface CardSection extends GallerySection<GalleryCard> {
+  title: string
+}
+
+// Configured providers come first, then the entries still on offer:
+// subscriptions, then every other provider. The sections share one pagination.
+const gallerySections = computed<CardSection[]>(() => {
+  const { subscriptions, others } = groupModelSources(filteredSources.value)
+  return [
+    {
+      key: 'configured',
+      title: t('provider.gallery.configured'),
+      items: filteredProviders.value.map(provider => ({ kind: 'provider' as const, key: provider.id ?? '', provider })),
+    },
+    { key: 'subscriptions', title: t('provider.gallery.subscriptions'), items: sourceCards(subscriptions) },
+    { key: 'others', title: t('provider.gallery.others'), items: sourceCards(others) },
+  ]
+})
+
+const cardCount = computed(() => filteredProviders.value.length + filteredSources.value.length)
+
+const PAGE_SIZE = 20
+const currentPage = ref(1)
+const pageCount = computed(() => Math.max(1, Math.ceil(cardCount.value / PAGE_SIZE)))
+const pagedSections = computed(() => pageSections(gallerySections.value, currentPage.value, PAGE_SIZE))
+
+watch(() => props.searchQuery, () => {
+  currentPage.value = 1
+})
+watch(pageCount, (count) => {
+  if (currentPage.value > count) currentPage.value = count
+})
+
+function sourceSubtitle(item: ModelSource) {
+  return item.base_url.replace(/^https?:\/\//, '') || item.client_type
+}
 
 function providerSubtitle(provider: ProvidersGetResponse) {
   const baseUrl = (provider.config as Record<string, unknown> | undefined)?.base_url
@@ -182,16 +244,8 @@ function modelCount(id: string | undefined) {
   return id ? (modelCountByProvider.value[id] ?? 0) : 0
 }
 
-function templateSubtitle(template: ProvidertemplatesGetResponse) {
-  const baseUrl = templateDefaultConfig(template).base_url
-  if (typeof baseUrl === 'string' && baseUrl) {
-    return baseUrl.replace(/^https?:\/\//, '')
-  }
-  return template.driver ?? ''
-}
-
-function openTemplate(template: ProvidertemplatesGetResponse) {
-  openProvider({ kind: 'template', template })
+function openSource(item: ModelSource) {
+  openProvider({ kind: 'source', source: item })
 }
 
 function openProviderInstance(provider: ProvidersGetResponse) {
@@ -203,10 +257,10 @@ function handleMaterialized(provider: ProvidersGetResponse) {
   openProvider({ kind: 'provider', provider })
 }
 
-function openAddProvider(templateId?: string) {
-  initialTemplateId.value = templateId ?? ''
+function openAddProvider() {
   addOpen.value = true
 }
+
 </script>
 
 <template>
@@ -222,70 +276,132 @@ function openAddProvider(templateId?: string) {
       <BackendCardGridSkeleton v-if="listLoading" />
 
       <div
-        v-else-if="catalogProviders.length + availableTemplates.length > 0"
-        class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+        v-else-if="catalogProviders.length + availableSources.length > 0"
+        class="flex flex-col gap-4"
       >
-        <BackendCard
-          v-for="provider in filteredProviders"
-          :key="provider.id"
-          :name="provider.name ?? ''"
-          :subtitle="providerSubtitle(provider)"
-          :enabled="provider.enable !== false"
-          @click="openProviderInstance(provider)"
+        <Empty
+          v-if="cardCount === 0"
+          class="flex flex-col items-center justify-center px-4 py-16"
         >
-          <template #leading>
-            <span class="flex size-10 items-center justify-center rounded-full bg-muted">
-              <ProviderIcon
-                v-if="provider.icon"
-                :icon="provider.icon"
-                size="1.5em"
-              />
-              <span
-                v-else
-                class="text-xs font-medium text-muted-foreground"
-              >
-                {{ avatarInitials(provider.name, '?') }}
-              </span>
-            </span>
-          </template>
-          <template #trailing>
-            <span
-              v-if="modelCount(provider.id) > 0"
-              class="flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
-            >
-              <Boxes class="size-3.5" />
-              {{ modelCount(provider.id) }}
-            </span>
-            <ChevronRight
-              v-else
-              class="size-4 shrink-0 text-muted-foreground/60"
-            />
-          </template>
-        </BackendCard>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Search />
+            </EmptyMedia>
+          </EmptyHeader>
+          <EmptyTitle>{{ t('provider.searchNoResults') }}</EmptyTitle>
+        </Empty>
 
-        <BackendCard
-          v-for="template in filteredTemplates"
-          :key="`template:${template.id}`"
-          :name="template.name ?? ''"
-          :subtitle="templateSubtitle(template)"
-          @click="openTemplate(template)"
+        <div
+          v-else
+          class="space-y-8"
         >
-          <template #leading>
-            <span class="flex size-10 items-center justify-center rounded-full bg-muted">
-              <ProviderIcon
-                v-if="template.icon"
-                :icon="template.icon"
-                size="1.5em"
-              />
-              <span
-                v-else
-                class="text-xs font-medium text-muted-foreground"
+          <SectionGroup
+            v-for="section in pagedSections"
+            :key="section.key"
+            :title="section.title"
+          >
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <template
+                v-for="card in section.items"
+                :key="card.key"
               >
-                {{ avatarInitials(template.name, '?') }}
-              </span>
-            </span>
-          </template>
-        </BackendCard>
+                <BackendCard
+                  v-if="card.kind === 'provider'"
+                  :name="card.provider.name ?? ''"
+                  :subtitle="providerSubtitle(card.provider)"
+                  :enabled="card.provider.enable !== false"
+                  @click="openProviderInstance(card.provider)"
+                >
+                  <template #leading>
+                    <span class="flex size-10 items-center justify-center rounded-full bg-muted">
+                      <ProviderIcon
+                        v-if="providerLogo(card.provider)"
+                        :icon="providerLogo(card.provider)!"
+                        :monochrome="isMonochromeLogo(providerLogo(card.provider))"
+                        size="1.5em"
+                      >
+                        <span class="text-xs font-medium text-muted-foreground">
+                          {{ avatarInitials(card.provider.name, '?') }}
+                        </span>
+                      </ProviderIcon>
+                      <span
+                        v-else
+                        class="text-xs font-medium text-muted-foreground"
+                      >
+                        {{ avatarInitials(card.provider.name, '?') }}
+                      </span>
+                    </span>
+                  </template>
+                  <template #trailing>
+                    <span
+                      v-if="modelCount(card.provider.id) > 0"
+                      class="flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
+                    >
+                      <Boxes class="size-3.5" />
+                      {{ modelCount(card.provider.id) }}
+                    </span>
+                    <ChevronRight
+                      v-else
+                      class="size-4 shrink-0 text-muted-foreground/60"
+                    />
+                  </template>
+                </BackendCard>
+
+                <BackendCard
+                  v-else
+                  :name="card.source.name"
+                  :subtitle="sourceSubtitle(card.source)"
+                  @click="openSource(card.source)"
+                >
+                  <template #leading>
+                    <span class="flex size-10 items-center justify-center rounded-full bg-muted">
+                      <ProviderIcon
+                        :icon="modelSourceLogo(card.source)"
+                        :monochrome="isMonochromeLogo(modelSourceLogo(card.source))"
+                        size="1.5em"
+                      >
+                        <span class="text-xs font-medium text-muted-foreground">
+                          {{ avatarInitials(card.source.name, '?') }}
+                        </span>
+                      </ProviderIcon>
+                    </span>
+                  </template>
+                </BackendCard>
+              </template>
+            </div>
+          </SectionGroup>
+        </div>
+
+        <Pagination
+          v-if="pageCount > 1"
+          :total="cardCount"
+          :items-per-page="PAGE_SIZE"
+          :sibling-count="1"
+          :page="currentPage"
+          show-edges
+          @update:page="currentPage = $event"
+        >
+          <PaginationContent v-slot="{ items }">
+            <PaginationFirst />
+            <PaginationPrevious />
+            <template
+              v-for="(item, index) in items"
+              :key="index"
+            >
+              <PaginationEllipsis
+                v-if="item.type === 'ellipsis'"
+                :index="index"
+              />
+              <PaginationItem
+                v-else
+                :value="item.value"
+                :is-active="item.value === currentPage"
+              />
+            </template>
+            <PaginationNext />
+            <PaginationLast />
+          </PaginationContent>
+        </Pagination>
       </div>
 
       <Empty
@@ -313,8 +429,7 @@ function openAddProvider(templateId?: string) {
       <AddProvider
         v-model:open="addOpen"
         :providers="providers"
-        :templates="templates"
-        :initial-template-id="initialTemplateId"
+        :sources="MODEL_SOURCES"
         hide-trigger
       />
     </PageShell>

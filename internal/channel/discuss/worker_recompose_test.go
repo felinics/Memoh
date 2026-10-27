@@ -2,11 +2,15 @@ package discuss
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
@@ -113,21 +117,21 @@ func TestHandleReplyWithTurn_RecomposeLimitDefersToNextTrigger(t *testing.T) {
 	}
 }
 
-func TestHandleReplyWithTurnThirdRecoveryCompletesOriginalInput(t *testing.T) {
-	svc := &fakeTurnService{recomposeRuns: 3}
+func TestHandleReplyWithTurnRecoveryCompletesOriginalInput(t *testing.T) {
+	svc := &fakeTurnService{recomposeRuns: 1}
 	svc.onStart = func(cmd turn.StartTurnCommand) {
-		if cmd.DiscussRecoveryExhausted != (svc.calls == 4) {
+		if cmd.DiscussRecoveryExhausted != (svc.calls == 2) {
 			t.Errorf("attempt %d exhausted=%v", svc.calls, cmd.DiscussRecoveryExhausted)
 		}
 	}
 	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{config: DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1"}}
 	driver.handleReplyWithTurn(t.Context(), sess, recomposeTestRC(), driver.logger, svc)
-	if svc.calls != 4 || sess.lastProcessed.SourceCursor != 200 {
-		t.Fatalf("calls=%d cursor=%+v; third recovery must complete original input", svc.calls, sess.lastProcessed)
+	if svc.calls != 2 || sess.lastProcessed.SourceCursor != 200 {
+		t.Fatalf("calls=%d cursor=%+v; the attempt after recovery must complete original input", svc.calls, sess.lastProcessed)
 	}
 	driver.handleReplyWithTurn(t.Context(), sess, recomposeTestRC(), driver.logger, svc)
-	if svc.calls != 4 {
+	if svc.calls != 2 {
 		t.Fatal("same input processed twice")
 	}
 }
@@ -140,5 +144,37 @@ func TestDiscussSkippedAgentTurnConsumesOverflowingInput(t *testing.T) {
 	driver.handleReplyWithTurn(t.Context(), sess, rc, driver.logger, svc)
 	if svc.calls != 1 || !svc.lastCmd.DiscussContextOverflow || sess.lastProcessed.SourceCursor != 200 {
 		t.Fatalf("calls=%d overflow=%v cursor=%+v; an unaddressed agent turn must consume what it skips", svc.calls, svc.lastCmd.DiscussContextOverflow, sess.lastProcessed)
+	}
+}
+
+type failingArtifactProvider struct{}
+
+func (failingArtifactProvider) ActiveCompactionArtifacts(context.Context, string, string) ([]timeline.CompactionArtifact, error) {
+	return nil, errors.New("frontier unavailable")
+}
+
+type failingHistoryReader struct{ lightweightHistoryStub }
+
+func (failingHistoryReader) ListTurnResponseSourcesSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
+	return nil, errors.New("history unavailable")
+}
+
+func TestDiscussMissingSourceFailsWithoutRunningOrConsuming(t *testing.T) {
+	for name, deps := range map[string]DiscussDriverDeps{
+		"artifacts": {Artifacts: failingArtifactProvider{}},
+		"history":   {MessageService: &failingHistoryReader{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			broadcaster := &recordingBroadcaster{}
+			deps.Broadcaster = broadcaster
+			svc := &fakeTurnService{}
+			driver := NewDiscussDriver(deps)
+			sess := &discussSession{config: DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1"}}
+			driver.handleReplyWithTurn(t.Context(), sess, recomposeTestRC(), driver.logger, svc)
+			failures := broadcaster.errors()
+			if svc.calls != 0 || sess.lastProcessed.SourceCursor != 0 || len(failures) != 1 || failures[0].ErrorCode != string(apperror.CodeInternal) {
+				t.Fatalf("calls=%d cursor=%+v failures=%+v, want one internal failure and nothing run or consumed", svc.calls, sess.lastProcessed, failures)
+			}
+		})
 	}
 }

@@ -2,131 +2,19 @@ package application
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/agent/context/compaction"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/settings"
 )
-
-func TestUnifiedCompactionController(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name          string
-		threshold     int
-		targetPercent *int
-		budget        int
-		pressure      int
-		wantTrigger   int
-		wantTarget    int
-		wantSync      bool
-	}{
-		{
-			name:        "zero config uses 50 75 40",
-			budget:      200000,
-			pressure:    149999,
-			wantTrigger: 100000,
-			wantTarget:  80000,
-		},
-		{
-			name:        "hard gate fires at 75 percent",
-			budget:      200000,
-			pressure:    150000,
-			wantTrigger: 100000,
-			wantTarget:  80000,
-			wantSync:    true,
-		},
-		{
-			name:        "absolute threshold only moves async trigger",
-			threshold:   90000,
-			budget:      200000,
-			pressure:    149999,
-			wantTrigger: 90000,
-			wantTarget:  80000,
-		},
-		{
-			name:        "absolute threshold clamps to hard gate",
-			threshold:   500000,
-			budget:      200000,
-			pressure:    150000,
-			wantTrigger: 150000,
-			wantTarget:  80000,
-			wantSync:    true,
-		},
-		{
-			name:          "target override changes the configured target",
-			threshold:     90000,
-			targetPercent: targetPercentPointer(55),
-			budget:        200000,
-			pressure:      150000,
-			wantTrigger:   90000,
-			wantTarget:    110000,
-			wantSync:      true,
-		},
-		{
-			name:          "zero budget stands down",
-			threshold:     90000,
-			targetPercent: targetPercentPointer(55),
-			pressure:      150000,
-		},
-		{
-			name:          "small positive budget keeps controller active",
-			threshold:     100,
-			targetPercent: targetPercentPointer(1),
-			budget:        1,
-			pressure:      1,
-			wantTrigger:   1,
-			wantTarget:    1,
-			wantSync:      true,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			if got := AutoCompactionThreshold(tc.threshold, tc.budget); got != tc.wantTrigger {
-				t.Fatalf("AutoCompactionThreshold(%d, %d) = %d, want %d", tc.threshold, tc.budget, got, tc.wantTrigger)
-			}
-			if got := compactionTargetTokens(tc.targetPercent, tc.budget); got != tc.wantTarget {
-				t.Fatalf("compactionTargetTokens(%v, %d) = %d, want %d", tc.targetPercent, tc.budget, got, tc.wantTarget)
-			}
-			if got := syncCompactionShouldRun(tc.pressure, tc.budget); got != tc.wantSync {
-				t.Fatalf("syncCompactionShouldRun(%d, %d) = %t, want %t", tc.pressure, tc.budget, got, tc.wantSync)
-			}
-		})
-	}
-}
-
-func TestAutoCompactionThreshold(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name      string
-		threshold int
-		budget    int
-		want      int
-	}{
-		{name: "zero budget yields no mark", threshold: 90000},
-		{name: "negative budget yields no mark", threshold: 90000, budget: -1},
-		{name: "unset threshold uses the soft share", budget: 200000, want: 100000},
-		{name: "threshold below hard share is honored", threshold: 90000, budget: 200000, want: 90000},
-		{name: "threshold above hard share is capped", threshold: 500000, budget: 200000, want: 150000},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			if got := AutoCompactionThreshold(tc.threshold, tc.budget); got != tc.want {
-				t.Fatalf("AutoCompactionThreshold(%d, %d) = %d, want %d", tc.threshold, tc.budget, got, tc.want)
-			}
-		})
-	}
-}
 
 type controllerQueries struct {
 	*compactionConfigQueries
@@ -141,22 +29,18 @@ type recordingCompactionRunner struct {
 	configs []compaction.TriggerConfig
 }
 
-func (r *recordingCompactionRunner) RunCompactionSync(_ context.Context, cfg compaction.TriggerConfig) (compaction.Result, error) {
+func (r *recordingCompactionRunner) Compact(_ context.Context, cfg compaction.TriggerConfig) ([]compaction.Pass, error) {
 	r.configs = append(r.configs, cfg)
-	return compaction.Result{Status: compaction.StatusOK}, nil
+	return []compaction.Pass{{}}, nil
 }
 
-func newControllerPolicyService(t *testing.T, targetPercent *int) (*Service, *recordingCompactionRunner) {
+func newControllerPolicyService(t *testing.T) (*Service, *recordingCompactionRunner) {
 	t.Helper()
 	const (
 		modelUUID    = "00000000-0000-0000-0000-000000000451"
 		providerUUID = "00000000-0000-0000-0000-000000000452"
 		botUUID      = "00000000-0000-0000-0000-000000000453"
 	)
-	target := pgtype.Int4{}
-	if targetPercent != nil {
-		target = pgtype.Int4{Int32: int32(*targetPercent), Valid: true} //nolint:gosec // test values stay within 1..99
-	}
 	queries := &controllerQueries{
 		compactionConfigQueries: &compactionConfigQueries{
 			model: sqlc.Model{
@@ -176,11 +60,9 @@ func newControllerPolicyService(t *testing.T, targetPercent *int) (*Service, *re
 			},
 		},
 		settings: sqlc.GetSettingsByBotIDRow{
-			BotID:                   compactionConfigUUID(t, botUUID),
-			ReasoningEffort:         "medium",
-			CompactionEnabled:       true,
-			CompactionTargetPercent: target,
-			CompactionModelID:       compactionConfigUUID(t, modelUUID),
+			BotID:           compactionConfigUUID(t, botUUID),
+			ReasoningEffort: "medium",
+			ChatModelID:     compactionConfigUUID(t, modelUUID),
 		},
 	}
 	runner := &recordingCompactionRunner{}
@@ -194,128 +76,6 @@ func newControllerPolicyService(t *testing.T, targetPercent *int) (*Service, *re
 	return service, runner
 }
 
-func TestAutomaticCompactionPathsApplyTargetAndBoundAsyncDrain(t *testing.T) {
-	t.Parallel()
-
-	service, runner := newControllerPolicyService(t, targetPercentPointer(55))
-	req := ChatRequest{
-		BotID:    "00000000-0000-0000-0000-000000000453",
-		ThreadID: "00000000-0000-0000-0000-000000000454",
-	}
-	resolved := resolvedContext{
-		contextTokenBudget:     200000,
-		compactableTokens:      150000,
-		compactableTokensKnown: true,
-	}
-
-	runAutomaticCompaction(t, service, req, resolved, 150000)
-	if len(runner.configs) != 3 {
-		t.Fatalf("async compaction passes = %d, want 3", len(runner.configs))
-	}
-	for pass, cfg := range runner.configs {
-		if cfg.TargetTokens != 110000 {
-			t.Fatalf("async pass %d TargetTokens = %d, want 110000", pass+1, cfg.TargetTokens)
-		}
-		if !cfg.AllowFrontierFusion {
-			t.Fatalf("async pass %d AllowFrontierFusion = false, want true", pass+1)
-		}
-		if cfg.ContextWindowTokens != 200000 {
-			t.Fatalf("async pass %d ContextWindowTokens = %d, want 200000", pass+1, cfg.ContextWindowTokens)
-		}
-	}
-
-	runner.configs = nil
-	result := service.runCompactionSync(context.Background(), req, 150000, 200000, "")
-	if result.Status != compaction.StatusOK {
-		t.Fatalf("sync compaction status = %q, want %q", result.Status, compaction.StatusOK)
-	}
-	if len(runner.configs) != 1 {
-		t.Fatalf("sync compaction passes = %d, want 1", len(runner.configs))
-	}
-	if got := runner.configs[0].TargetTokens; got != 100000 {
-		t.Fatalf("sync TargetTokens = %d, want 100000 soft-share cap", got)
-	}
-	if !runner.configs[0].AllowFrontierFusion {
-		t.Fatal("sync recovery must be able to replace oversized summaries")
-	}
-	if got := runner.configs[0].ContextWindowTokens; got != 200000 {
-		t.Fatalf("sync ContextWindowTokens = %d, want 200000", got)
-	}
-}
-
-func TestSyncBackstopTargetCapsAtSoftShare(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name          string
-		targetPercent *int
-		wantAsync     int
-		wantSync      int
-	}{
-		{
-			name:          "target above hard backstop",
-			targetPercent: targetPercentPointer(90),
-			wantAsync:     7200,
-			wantSync:      4000,
-		},
-		{
-			name:      "default target remains below cap",
-			wantAsync: 3200,
-			wantSync:  3200,
-		},
-		{
-			name:          "target below soft share is honored",
-			targetPercent: targetPercentPointer(49),
-			wantAsync:     3920,
-			wantSync:      3920,
-		},
-		{
-			name:          "target at soft share boundary is honored",
-			targetPercent: targetPercentPointer(50),
-			wantAsync:     4000,
-			wantSync:      4000,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			service, runner := newControllerPolicyService(t, tc.targetPercent)
-			req := ChatRequest{
-				BotID:    "00000000-0000-0000-0000-000000000453",
-				ThreadID: "00000000-0000-0000-0000-000000000454",
-			}
-			resolved := resolvedContext{
-				contextTokenBudget:     8000,
-				compactableTokens:      4000,
-				compactableTokensKnown: true,
-			}
-
-			runAutomaticCompaction(t, service, req, resolved, 4000)
-			if len(runner.configs) != maxAsyncCompactionPasses {
-				t.Fatalf("async compaction passes = %d, want %d", len(runner.configs), maxAsyncCompactionPasses)
-			}
-			for pass, cfg := range runner.configs {
-				if cfg.TargetTokens != tc.wantAsync {
-					t.Fatalf("async pass %d TargetTokens = %d, want %d", pass+1, cfg.TargetTokens, tc.wantAsync)
-				}
-			}
-
-			runner.configs = nil
-			result := service.runCompactionSync(context.Background(), req, 6000, 8000, "")
-			if result.Status != compaction.StatusOK {
-				t.Fatalf("sync compaction status = %q, want %q", result.Status, compaction.StatusOK)
-			}
-			if len(runner.configs) != 1 {
-				t.Fatalf("sync compaction passes = %d, want 1", len(runner.configs))
-			}
-			if got := runner.configs[0].TargetTokens; got != tc.wantSync {
-				t.Fatalf("sync TargetTokens = %d, want %d", got, tc.wantSync)
-			}
-		})
-	}
-}
-
 func TestSetCompactionServicePreservesNil(t *testing.T) {
 	t.Parallel()
 
@@ -326,19 +86,47 @@ func TestSetCompactionServicePreservesNil(t *testing.T) {
 	}
 }
 
-func targetPercentPointer(value int) *int {
-	return &value
+type cutoffMessageService struct {
+	recordingMessageService
+	created time.Time
 }
 
-// runAutomaticCompaction runs what maybeCompact starts as a unit, on the
-// test's goroutine.
-func runAutomaticCompaction(t *testing.T, service *Service, req ChatRequest, rc resolvedContext, inputTokens int) {
-	t.Helper()
-	plan, ok := service.planCompaction(context.Background(), req, rc, inputTokens)
-	if !ok {
-		t.Fatal("planCompaction() = false, want a compaction to run")
+func (s *cutoffMessageService) GetByIDBySession(_ context.Context, _, messageID string) (messagepkg.Message, error) {
+	if messageID != "edited" {
+		return messagepkg.Message{}, errors.New("message not found")
 	}
-	if err := service.runCompaction(context.Background(), plan); err != nil {
-		t.Fatalf("runCompaction() error = %v", err)
+	return messagepkg.Message{ID: messageID, CreatedAt: s.created}, nil
+}
+
+func TestCompactForBudgetStopsCandidatesAtTheRequestCutoff(t *testing.T) {
+	t.Parallel()
+
+	service, runner := newControllerPolicyService(t)
+	created := time.UnixMilli(1_700_000_000_000).UTC()
+	service.messageService = &cutoffMessageService{created: created}
+	req := ChatRequest{BotID: syncCompactBotID, ChatID: syncCompactBotID, ThreadID: syncCompactThreadID, HistoryCutoffBeforeMessageID: "edited"}
+
+	if err := service.compactForBudget(t.Context(), req, 2000, 1000, ""); err != nil || len(runner.configs) != 1 || !runner.configs[0].CandidatesBefore.Equal(created) {
+		t.Fatalf("err=%v configs=%+v, want candidates bounded by the edited message", err, runner.configs)
 	}
+	req.HistoryCutoffBeforeMessageID = "missing"
+	if err := service.compactForBudget(t.Context(), req, 2000, 1000, ""); err == nil || len(runner.configs) != 1 {
+		t.Fatalf("err=%v runs=%d, want an unknown cutoff to fail before compacting", err, len(runner.configs))
+	}
+}
+
+func TestCompactForBudgetKeepsOldHistoryEligible(t *testing.T) {
+	t.Parallel()
+	service, runner := newControllerPolicyService(t)
+	req := ChatRequest{BotID: syncCompactBotID, ChatID: syncCompactBotID, ThreadID: syncCompactThreadID}
+	if err := service.compactForBudget(t.Context(), req, 2000, 1000, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := runner.configs[len(runner.configs)-1].CandidatesFrom; !got.IsZero() {
+		t.Fatalf("candidates_from=%v, want all historical candidates", got)
+	}
+}
+
+func (*controllerQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
 }

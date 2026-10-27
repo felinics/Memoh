@@ -5,17 +5,17 @@ RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active
 
 -- name: GetBotByCreateRequestKey :one
 -- The bot an earlier POST /bots with this Idempotency-Key created for the owner.
-SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, compaction_enabled, compaction_threshold, compaction_target_percent, compaction_model_id, metadata, created_at, updated_at
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at
 FROM bots
 WHERE team_id = public.memoh_current_team_id() AND owner_user_id = $1 AND create_request_key = $2;
 
 -- name: GetBotByID :one
-SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, compaction_enabled, compaction_threshold, compaction_target_percent, compaction_model_id, metadata, created_at, updated_at
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at
 FROM bots
 WHERE team_id = public.memoh_current_team_id() AND id = $1;
 
 -- name: GetBotByName :one
-SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, compaction_enabled, compaction_threshold, compaction_target_percent, compaction_model_id, metadata, created_at, updated_at
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at
 FROM bots
 WHERE team_id = public.memoh_current_team_id() AND name = $1;
 

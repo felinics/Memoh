@@ -7,7 +7,7 @@ func renderedMessageSource(segment RenderedSegment) *turn.ContextMessageSource {
 	if segment.IsMyself || segment.IsSelfSent {
 		kind = "self"
 	}
-	return &turn.ContextMessageSource{Kind: kind, ID: segment.MessageID}
+	return &turn.ContextMessageSource{Kind: kind, ID: segment.MessageID, EventCursor: segment.LastEventCursor}
 }
 
 func markCurrentEntries(entries []mergeEntry, rc RenderedContext, after *DiscussCursorPosition) {

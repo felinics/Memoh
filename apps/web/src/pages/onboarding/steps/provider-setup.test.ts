@@ -1,21 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import type { ModelsGetResponse, ProvidertemplatesGetResponse } from '@memohai/sdk'
+import type { ModelsGetResponse } from '@memohai/sdk'
 import type { ProviderPreset } from '@/constants/provider-presets'
 import {
-  findProviderTemplate,
+  findPresetEntry,
   mergeOnboardingModels,
 } from './provider-setup'
 
 describe('onboarding provider setup', () => {
-  it('matches a preset to an LLM template by stable key, not display name', () => {
-    const preset = { id: 'deepseek', name: 'DeepSeek' } as ProviderPreset
-    const templates: ProvidertemplatesGetResponse[] = [
-      { id: 'wrong-domain', domain: 'speech', key: 'deepseek', name: 'DeepSeek' },
-      { id: 'wrong-key', domain: 'llm', key: 'custom', name: 'DeepSeek' },
-      { id: 'deepseek-template', domain: 'llm', key: 'deepseek', name: 'Renamed DeepSeek' },
-    ]
-
-    expect(findProviderTemplate(templates, preset)?.id).toBe('deepseek-template')
+  it('matches a preset to a gallery entry by its stable key', () => {
+    expect(findPresetEntry({ id: 'deepseek', name: 'Renamed' } as ProviderPreset)?.id).toBe('deepseek')
+    expect(findPresetEntry({ id: 'qwen', name: 'Qwen' } as ProviderPreset)?.id).toBe('alibaba-cn')
+    expect(findPresetEntry({ id: 'nobody', name: 'Nobody' } as ProviderPreset)).toBeUndefined()
   })
 
   it('adds disabled onboarding provider models without duplicating enabled models', () => {

@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"strings"
 
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
@@ -10,28 +12,52 @@ import (
 )
 
 type preparedHistoryContext struct {
-	messages          []ModelMessage
-	records           []historyfrag.HistoryRecord
-	estimatedTokens   int
-	compactableTokens int
-	pressureTokens    int
+	messages       []ModelMessage
+	records        []historyfrag.HistoryRecord
+	pressureTokens int
 }
 
+// prepareHistoryContext loads the history a request renders. Its window
+// folds the rows a summary replaced, so the rows the summary does not cover,
+// such as an earlier input kept beside it, stay inside the budget. An edit or
+// retry renders history before its cutoff, where a summary that reaches past
+// the cutoff does not render, so its window does not fold; nor does a window
+// in which a folded group's summary turns out not to render.
 func (s *Service) prepareHistoryContext(
 	ctx context.Context,
 	req ChatRequest,
 	fallback historyfrag.ScopeFallback,
 	contextTokenBudget int,
 ) (preparedHistoryContext, error) {
-	loaded, err := s.loadHistoryRecords(ctx, fallback, req.ThreadID, defaultMaxContextMinutes, contextTokenBudget)
+	fold := strings.TrimSpace(req.HistoryCutoffBeforeMessageID) == ""
+	prepared, err := s.prepareHistoryWindow(ctx, req, fallback, contextTokenBudget, fold)
+	if fold && errors.Is(err, errSummaryNotRendered) {
+		if s.logger != nil {
+			s.logger.WarnContext(ctx, "history window reloaded without folding", slog.String("session_id", req.ThreadID), slog.Any("error", err))
+		}
+		return s.prepareHistoryWindow(ctx, req, fallback, contextTokenBudget, false)
+	}
+	return prepared, err
+}
+
+func (s *Service) prepareHistoryWindow(
+	ctx context.Context,
+	req ChatRequest,
+	fallback historyfrag.ScopeFallback,
+	contextTokenBudget int,
+	fold bool,
+) (preparedHistoryContext, error) {
+	loaded, err := s.loadHistoryRecords(ctx, fallback, req.ThreadID, contextTokenBudget, fold)
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
+	// A failed turn's empty assistant row may be the retry cutoff. Resolve
+	// and apply that boundary before cleanup removes the anchor itself.
+	boundary := s.loadCompactionArtifactBoundary(ctx, loaded, req.ThreadID, req.HistoryCutoffBeforeMessageID)
+	loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
 	loaded = pruneHistoryForGateway(loaded)
 	loaded = dropPreflightFailureTurns(loaded)
 	loaded = dropEmptyHistoryFailures(loaded)
-	boundary := s.loadCompactionArtifactBoundary(ctx, loaded, req.ThreadID, req.HistoryCutoffBeforeMessageID)
-	loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
 	loaded = dedupePersistedCurrentUserMessage(loaded, req)
 	loaded, err = s.ensureRequiredHistoryMessage(ctx, loaded, req)
 	if err != nil {
@@ -48,14 +74,11 @@ func (s *Service) prepareHistoryContext(
 		return preparedHistoryContext{}, err
 	}
 	loaded = projectInterruptedHistoryReasoning(loaded)
-	compactableTokens := totalCompactableHistoryTokens(loaded)
-	messages, records, estimatedTokens := trimMessagesAndRecordsByTokens(s.logger, loaded, contextTokenBudget)
+	messages, records := historyMessagesFromRecords(loaded)
 	return preparedHistoryContext{
-		messages:          messages,
-		records:           records,
-		estimatedTokens:   estimatedTokens,
-		compactableTokens: compactableTokens,
-		pressureTokens:    estimateMessagesTokens(loaded),
+		messages:       messages,
+		records:        records,
+		pressureTokens: estimateMessagesTokens(loaded),
 	}, nil
 }
 

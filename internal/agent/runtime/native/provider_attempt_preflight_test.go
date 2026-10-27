@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -86,54 +85,24 @@ func countProviderAttemptMutations(records []contextfrag.MutationRecord, kind co
 	return count
 }
 
-func TestAgentGenerateInitialHookProviderAttemptModes(t *testing.T) {
+func TestAgentGenerateInitialHookContextIsCheckedAgainstTheAllowance(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name             string
-		mode             LoopReselectMode
-		selection        ContextStepSelectionResult
-		wantOutcome      string
+		window           int
 		wantProviderCall int32
-		wantSelectorCall int32
 		wantError        error
 	}{
-		{
-			name:             "active within allowance",
-			mode:             LoopReselectActive,
-			wantOutcome:      contextfrag.ReselectionOutcomeUnchanged,
-			wantProviderCall: 1,
-			wantSelectorCall: 1,
-		},
-		{
-			name:             "active protected overflow",
-			mode:             LoopReselectActive,
-			selection:        ContextStepSelectionResult{FatalError: contextfrag.ErrProtectedContextOverflow},
-			wantOutcome:      contextfrag.ReselectionOutcomeFailed,
-			wantSelectorCall: 1,
-			wantError:        contextfrag.ErrProtectedContextOverflow,
-		},
-		{
-			name:             "shadow would fail",
-			mode:             LoopReselectShadow,
-			selection:        ContextStepSelectionResult{FatalError: contextfrag.ErrProtectedContextOverflow},
-			wantOutcome:      contextfrag.ReselectionOutcomeWouldFail,
-			wantProviderCall: 1,
-			wantSelectorCall: 1,
-		},
-		{
-			name:             "off stays legacy",
-			mode:             LoopReselectOff,
-			wantProviderCall: 1,
-		},
+		{name: "within allowance", window: 8192, wantProviderCall: 1},
+		{name: "outgrows allowance", window: 1024, wantError: contextfrag.ErrBudgetUnsatisfied},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			marker := "round8-step-zero-hook-" + strings.ReplaceAll(tc.name, " ", "-")
 			bridgeProvider, hookService := newBeforeModelCallHook(t, marker+"\n"+strings.Repeat("protected ", 400))
 			ledger := contextfrag.NewMutationLedger()
-			plan := contextfrag.ContextBudgetPlan{Window: 8192, OutputReserve: 256}
-			var selectorCalls atomic.Int32
+			plan := contextfrag.ContextBudgetPlan{Window: tc.window, OutputReserve: 256}
 			var providerParams sdk.Request
 			modelProvider := &atomicMockProvider{
 				handler: func(_ int, params sdk.Request) (sdk.ModelResult, error) {
@@ -141,13 +110,10 @@ func TestAgentGenerateInitialHookProviderAttemptModes(t *testing.T) {
 					return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 				},
 			}
-			applierMessageCount := 0
 			a := New(Deps{
-				BridgeProvider:   bridgeProvider,
-				HookService:      hookService,
-				LoopReselectMode: tc.mode,
+				BridgeProvider: bridgeProvider,
+				HookService:    hookService,
 				ContextViewApplier: func(_ context.Context, cfg RunConfig) (RunConfig, error) {
-					applierMessageCount = len(cfg.Messages)
 					return cfg, nil
 				},
 			})
@@ -158,19 +124,6 @@ func TestAgentGenerateInitialHookProviderAttemptModes(t *testing.T) {
 				Identity:         SessionContext{BotID: "bot-1"},
 				ContextMutations: ledger,
 				ContextManifest:  contextfrag.Manifest{BudgetPlan: &plan},
-				ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
-					selectorCalls.Add(1)
-					if input.InitialMessageCount != applierMessageCount {
-						t.Fatalf("InitialMessageCount = %d, want applier count %d", input.InitialMessageCount, applierMessageCount)
-					}
-					if !providerAttemptContainsText(input.Messages[input.InitialMessageCount:], marker) {
-						t.Fatalf("hook marker is not in governed suffix: %#v", input.Messages)
-					}
-					if input.BudgetMaxTokens <= 0 {
-						t.Fatalf("BudgetMaxTokens = %d, want active allowance", input.BudgetMaxTokens)
-					}
-					return tc.selection
-				},
 			})
 			if !errors.Is(err, tc.wantError) {
 				t.Fatalf("Generate() error = %v, want %v", err, tc.wantError)
@@ -178,16 +131,10 @@ func TestAgentGenerateInitialHookProviderAttemptModes(t *testing.T) {
 			if got := modelProvider.calls.Load(); got != tc.wantProviderCall {
 				t.Fatalf("provider calls = %d, want %d", got, tc.wantProviderCall)
 			}
-			if got := selectorCalls.Load(); got != tc.wantSelectorCall {
-				t.Fatalf("selector calls = %d, want %d", got, tc.wantSelectorCall)
-			}
 
 			steps := ledger.StepSnapshots()
 			if len(steps) != 1 || steps[0].Attempt != 0 || steps[0].StepIndex != 0 {
 				t.Fatalf("step snapshots = %#v, want exactly attempt 0 step 0", steps)
-			}
-			if steps[0].ReselectionOutcome != tc.wantOutcome {
-				t.Fatalf("reselection outcome = %q, want %q", steps[0].ReselectionOutcome, tc.wantOutcome)
 			}
 			if tc.wantError != nil {
 				if steps[0].PostPrepareInputHash != "" {
@@ -219,7 +166,6 @@ func TestAgentGenerateInitialHookWindowZeroRunsPreflightWithoutBudgetEnforcement
 	marker := "round8-window-zero-hook"
 	bridgeProvider, hookService := newBeforeModelCallHook(t, marker+"\n"+strings.Repeat("large ", 1000))
 	ledger := contextfrag.NewMutationLedger()
-	var selectorCalls atomic.Int32
 	var providerParams sdk.Request
 	modelProvider := &atomicMockProvider{
 		handler: func(_ int, params sdk.Request) (sdk.ModelResult, error) {
@@ -241,29 +187,15 @@ func TestAgentGenerateInitialHookWindowZeroRunsPreflightWithoutBudgetEnforcement
 		Identity:               SessionContext{BotID: "bot-1"},
 		ContextMutations:       ledger,
 		ContextBudgetMaxTokens: 0,
-		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
-			selectorCalls.Add(1)
-			if input.BudgetMaxTokens != 0 {
-				t.Fatalf("BudgetMaxTokens = %d, want 0", input.BudgetMaxTokens)
-			}
-			if input.KeepRecentToolResults != stepReselectKeepRecentToolResults || input.MinMessages != stepReselectMinMessages {
-				t.Fatalf("hygiene settings = keep %d/min %d", input.KeepRecentToolResults, input.MinMessages)
-			}
-			return ContextStepSelectionResult{}
-		},
 	})
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
-	}
-	if selectorCalls.Load() != 1 {
-		t.Fatalf("selector calls = %d, want 1", selectorCalls.Load())
 	}
 	if modelProvider.calls.Load() != 1 || !providerAttemptContainsText(providerParams.Messages, marker) {
 		t.Fatalf("provider payload = %#v, want unbudgeted hook context", providerParams.Messages)
 	}
 	steps := ledger.StepSnapshots()
-	if len(steps) != 1 || steps[0].ReselectionOutcome != contextfrag.ReselectionOutcomeUnchanged ||
-		steps[0].PostPrepareInputHash == "" {
+	if len(steps) != 1 || steps[0].PostPrepareInputHash == "" {
 		t.Fatalf("step snapshots = %#v, want one evaluated and hashed step", steps)
 	}
 	if countProviderAttemptMutations(ledger.Records(), contextfrag.MutationContextBudgetFailure) != 0 {
@@ -271,38 +203,21 @@ func TestAgentGenerateInitialHookWindowZeroRunsPreflightWithoutBudgetEnforcement
 	}
 }
 
-func TestPrepareProviderAttemptStepZeroWindowZeroAppliesSuffixHygiene(t *testing.T) {
+// Every tool result a request carries goes to the provider as it was
+// produced, however many there are and however large each is.
+func TestPrepareProviderAttemptKeepsToolResultsWhole(t *testing.T) {
 	t.Parallel()
 
 	prefix := []sdk.Message{sdk.UserMessage("original task")}
 	messages := append(append([]sdk.Message(nil), prefix...), round8RetryToolCycles(10, 2048)...)
+	sent := cloneProviderMessages(messages)
 	ledger := contextfrag.NewMutationLedger()
-	var selectorCalls atomic.Int32
-	cfg := RunConfig{
-		ContextMutations:       ledger,
-		ContextBudgetMaxTokens: 0,
-		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
-			selectorCalls.Add(1)
-			if input.InitialMessageCount != len(prefix) {
-				t.Fatalf("InitialMessageCount = %d, want %d", input.InitialMessageCount, len(prefix))
-			}
-			if input.BudgetMaxTokens != 0 {
-				t.Fatalf("BudgetMaxTokens = %d, want disabled budget", input.BudgetMaxTokens)
-			}
-			if input.KeepRecentToolResults != stepReselectKeepRecentToolResults ||
-				input.MinMessages != stepReselectMinMessages {
-				t.Fatalf("hygiene settings = keep %d/min %d", input.KeepRecentToolResults, input.MinMessages)
-			}
-			selected, pruned := pruneRound8RetryOldToolResults(input.Messages, input.KeepRecentToolResults)
-			return ContextStepSelectionResult{Messages: selected, Truncated: pruned}
-		},
-	}
+	cfg := RunConfig{ContextMutations: ledger}
 	handoff := newProviderAttemptHandoff(cfg)
 	params := prepareProviderAttempt(
 		context.Background(),
 		cfg,
 		handoff,
-		LoopReselectActive,
 		false,
 		len(prefix),
 		0,
@@ -313,21 +228,19 @@ func TestPrepareProviderAttemptStepZeroWindowZeroAppliesSuffixHygiene(t *testing
 		t.Fatalf("publish provider attempt: %v", err)
 	}
 
-	if selectorCalls.Load() != 1 {
-		t.Fatalf("selector calls = %d, want 1", selectorCalls.Load())
-	}
-	if got := countRound8PrunedToolResults(params.Messages); got != 6 {
-		t.Fatalf("pruned step-zero tool results = %d, want 6", got)
+	if !providerMessagesEqual(params.Messages, sent) {
+		t.Fatal("prepared request is not the request the loop built")
 	}
 	steps := ledger.StepSnapshots()
-	if len(steps) != 1 || steps[0].StepIndex != 0 ||
-		steps[0].ReselectionOutcome != contextfrag.ReselectionOutcomeApplied ||
-		steps[0].Truncated != 6 {
+	if len(steps) != 1 || steps[0].StepIndex != 0 {
 		t.Fatalf("step snapshots = %#v", steps)
 	}
 	wantHash := contextfrag.ProviderPayloadHash(params.System, params.Messages, params.Tools)
 	if steps[0].PostPrepareInputHash != wantHash || ledger.FinalInputHash() != wantHash {
 		t.Fatalf("step/final hashes = %q/%q, want %q", steps[0].PostPrepareInputHash, ledger.FinalInputHash(), wantHash)
+	}
+	if records := ledger.Records(); len(records) != 0 {
+		t.Fatalf("mutation records = %#v, want none", records)
 	}
 }
 
@@ -442,13 +355,11 @@ func TestAgentGenerateHookStaysGovernedAcrossAnthropicProviderSteps(t *testing.T
 		},
 	}}}})
 
-	var selectorCalls atomic.Int32
 	plan := contextfrag.ContextBudgetPlan{Window: 16384, OutputReserve: 256}
 	_, err := a.Generate(context.Background(), RunConfig{
 		Model: &sdk.Model{
 			ID:       "claude-round8",
 			Provider: anthropicNameMockProvider{atomicMockProvider: modelProvider},
-			Type:     sdk.ModelTypeChat,
 		},
 		System:           "stable system",
 		Messages:         []sdk.Message{sdk.UserMessage("task")},
@@ -458,30 +369,26 @@ func TestAgentGenerateHookStaysGovernedAcrossAnthropicProviderSteps(t *testing.T
 		Identity:         SessionContext{BotID: "bot-1"},
 		ContextMutations: ledger,
 		ContextManifest:  contextfrag.Manifest{BudgetPlan: &plan},
-		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
-			selectorCalls.Add(1)
-			if input.InitialMessageCount != 2 {
-				t.Fatalf("InitialMessageCount = %d, want promoted system + applier message", input.InitialMessageCount)
-			}
-			if !providerAttemptContainsText(input.Messages[input.InitialMessageCount:], marker) {
-				t.Fatalf("hook marker left governed suffix at call %d: %#v", selectorCalls.Load(), input.Messages)
-			}
-			return ContextStepSelectionResult{}
-		},
 	})
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
-	if selectorCalls.Load() != 2 || len(callParams) != 2 {
-		t.Fatalf("selector/provider calls = %d/%d, want 2/2", selectorCalls.Load(), len(callParams))
+	if len(callParams) != 2 {
+		t.Fatalf("provider calls = %d, want 2", len(callParams))
+	}
+	for i, params := range callParams {
+		// The promoted system message and the applier message lead; the
+		// hook context follows them on every step.
+		if len(params.Messages) < 3 || !providerAttemptContainsText(params.Messages[2:], marker) {
+			t.Fatalf("call %d lost the hook context after its prefix: %#v", i+1, params.Messages)
+		}
 	}
 	steps := ledger.StepSnapshots()
 	if len(steps) != 2 {
 		t.Fatalf("step snapshots = %#v, want exactly two", steps)
 	}
 	for i, step := range steps {
-		if step.Attempt != 0 || step.StepIndex != i ||
-			step.ReselectionOutcome != contextfrag.ReselectionOutcomeUnchanged {
+		if step.Attempt != 0 || step.StepIndex != i {
 			t.Fatalf("steps[%d] = %#v", i, step)
 		}
 		wantHash := contextfrag.ProviderPayloadHash(

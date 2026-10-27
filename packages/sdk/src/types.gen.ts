@@ -942,6 +942,10 @@ export type ChannelReplyRef = {
 
 export type ChannelSendRequest = {
     channel_identity_id?: string;
+    /**
+     * ExcludedTarget is checked after platform target resolution, before publication.
+     */
+    excluded_target?: string;
     message?: ChannelMessage;
     target?: string;
 };
@@ -1198,7 +1202,7 @@ export type ContextfragContextRef = {
     version?: number;
 };
 
-export type ContextfragKind = 'system_prompt' | 'system_policy' | 'bot_identity' | 'workspace_instruction' | 'platform_identity' | 'tool_usage' | 'conversation_event' | 'current_user_message' | 'attachment_ref' | 'native_image' | 'skills_catalog' | 'hook_context' | 'injected_message' | 'background_summary' | 'runtime_context' | 'memory_recall' | 'conversation_summary';
+export type ContextfragKind = 'system_prompt' | 'system_policy' | 'bot_identity' | 'workspace_instruction' | 'platform_identity' | 'tool_usage' | 'conversation_event' | 'current_user_message' | 'attachment_ref' | 'native_image' | 'skills_catalog' | 'hook_context' | 'runtime_context' | 'memory_recall' | 'conversation_summary';
 
 export type ContextfragKindBreakdown = {
     fragments?: number;
@@ -1219,7 +1223,6 @@ export type ContextfragLifecycleSnapshot = {
     client_type?: string;
     counts?: ContextfragManifestCounts;
     final_input_hash?: string;
-    loop_selection_mode?: string;
     memory_recall?: ContextfragMemoryRecallTrace;
     model?: string;
     mutations?: Array<ContextfragMutationRecord>;
@@ -1267,7 +1270,7 @@ export type ContextfragMemoryRecallTrace = {
     retrieval_mode?: string;
 };
 
-export type ContextfragMutationKind = 'before_model_call_hook' | 'background_summary' | 'mid_task_prune' | 'loop_step_reselection' | 'injected_message' | 'context_view_fallback' | 'context_budget_failure' | 'context_budget_disabled' | 'capability_gate' | 'read_media' | 'renderer_prune' | 'mid_stream_retry' | 'current_input_omitted' | 'current_input_images_omitted' | 'run_abort_observed';
+export type ContextfragMutationKind = 'before_model_call_hook' | 'background_summary' | 'injected_message' | 'context_view_fallback' | 'context_budget_failure' | 'context_budget_disabled' | 'capability_gate' | 'read_media' | 'renderer_prune' | 'mid_stream_retry' | 'current_input_omitted' | 'current_input_images_omitted' | 'run_abort_observed' | 'context_switch';
 
 export type ContextfragMutationRecord = {
     detail?: string;
@@ -1315,15 +1318,8 @@ export type ContextfragSlot = 'system' | 'before_history' | 'history' | 'after_h
 
 export type ContextfragStepSnapshot = {
     attempt?: number;
-    drop_reasons?: {
-        [key: string]: number;
-    };
-    dropped?: number;
     post_prepare_input_hash?: string;
-    reselection_applied?: boolean;
-    reselection_outcome?: string;
     step_index?: number;
-    truncated?: number;
 };
 
 export type ContextfragToolDefAccounting = {
@@ -2699,12 +2695,6 @@ export type HandlersToolDefBucket = {
     tools?: number;
 };
 
-export type HandlersTriggerCompactResponse = {
-    message_count?: number;
-    status?: string;
-    summary?: string;
-};
-
 export type HandlersUiLocateMessageResponse = {
     items: Array<ConversationUiTurn>;
     target_external_message_id: string;
@@ -3443,6 +3433,28 @@ export type McpUpsertRequest = {
     url?: string;
 };
 
+export type ModelcatalogInfo = {
+    checked_at?: string;
+    revision?: string;
+    source?: string;
+    stale?: boolean;
+};
+
+export type ModelcatalogModel = {
+    config?: ModelsModelConfig;
+    model_id?: string;
+    name?: string;
+    type?: ModelsModelType;
+};
+
+export type ModelcatalogResponse = {
+    checked_at?: string;
+    models?: Array<ModelcatalogModel>;
+    revision?: string;
+    source?: string;
+    stale?: boolean;
+};
+
 export type ModelsAddRequest = {
     config?: ModelsModelConfig;
     enable?: boolean;
@@ -3478,11 +3490,21 @@ export type ModelsGetResponse = {
     type?: ModelsModelType;
 };
 
+export type ModelsModality = 'text' | 'image' | 'audio' | 'video' | 'pdf';
+
 export type ModelsModelConfig = {
+    /**
+     * CatalogAvailable is false when a managed catalog stopped listing the model.
+     */
     catalog_available?: boolean;
-    compatibilities?: Array<string>;
+    /**
+     * ContextWindow is the context window in tokens, input and output together.
+     */
     context_window?: number;
     description?: string;
+    /**
+     * Dimensions is the embedding vector size.
+     */
     dimensions?: number;
     /**
      * MaxOutputTokens is the most output tokens the model can produce in one
@@ -3490,43 +3512,81 @@ export type ModelsModelConfig = {
      * limit within it.
      */
     max_output_tokens?: number;
+    modalities?: ModelsModelModalities;
     /**
-     * ReasoningDefaultOn reports whether omitting the thinking field leaves the
-     * model thinking. Separate from off-ability: Claude 4.6 can be turned off *and*
-     * defaults to off, while Opus 5 can be turned off but defaults to on, so
-     * omitting the field there keeps thinking running — billed, and invisible to a
-     * user who believes they turned it off. nil means unknown.
+     * Reasoning is nil when the model does not reason.
      */
-    reasoning_default_on?: boolean;
+    reasoning?: ModelsModelReasoning;
     /**
-     * ReasoningDialect declares the wire shape of this model's thinking control,
-     * which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
-     * token budget while 3.x takes a named level, and the two are mutually
-     * exclusive on the same request. Declared per model because the alternative is
-     * sniffing the model id, and an id is not a capability. Empty leaves provider
-     * policy in charge; Google's adaptor deliberately sends no thinking control so
-     * pre-dialect rows retain their safe pre-upgrade request shape.
+     * SchemaVersion is ModelConfigSchemaVersion on every config this version
+     * writes.
      */
-    reasoning_dialect?: string;
-    reasoning_efforts?: Array<string>;
+    schema_version?: number;
     /**
-     * ReasoningOffSupport declares how the model answers an explicit request to
-     * stop thinking. Anthropic's per-model table splits models that share a
-     * thinking mode and an identical tier list, so this cannot be derived — see the
-     * reasoning package's OffSupport constants.
+     * StructuredOutput reports support for a JSON schema response format.
      */
-    reasoning_off_support?: string;
-    thinking_budget_max?: number;
+    structured_output?: boolean;
+    tool_call?: boolean;
+};
+
+export type ModelsModelModalities = {
+    input?: Array<ModelsModality>;
+    output?: Array<ModelsModality>;
+};
+
+export type ModelsModelReasoning = {
     /**
-     * ThinkingBudgetMin/Max bound the budget dialect. The range is per model
-     * family, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned
-     * off, while Flash starts at 0 and can.
+     * Budget is the reasoning token budget range; nil means no budget control.
      */
-    thinking_budget_min?: number;
-    thinking_mode?: string;
+    budget?: ModelsReasoningBudget;
+    /**
+     * Default is what the model does when a request sets no reasoning control.
+     */
+    default?: ModelsReasoningDefault;
+    /**
+     * Dialect is the request shape that carries the controls: tier, budget,
+     * toggle, adaptive, or empty when not stated.
+     */
+    dialect?: string;
+    /**
+     * Efforts lists the effort levels the model accepts, weakest to strongest.
+     * Turning reasoning off is Off, not an effort.
+     */
+    efforts?: Array<string>;
+    /**
+     * Off is how the model answers a request to stop reasoning: accepted,
+     * low_effort_only, rejected, or empty when not stated.
+     */
+    off?: string;
+    /**
+     * Replay is how a Chat Completions host reads reasoning back on replayed
+     * messages; nil leaves the provider's compatibility mode in charge.
+     */
+    replay?: ModelsReasoningReplay;
+    /**
+     * Toggle reports a request field that turns reasoning on and off, separate
+     * from any effort level.
+     */
+    toggle?: boolean;
 };
 
 export type ModelsModelType = 'chat' | 'embedding' | 'speech' | 'transcription' | 'video';
+
+export type ModelsReasoningBudget = {
+    max?: number;
+    min?: number;
+};
+
+export type ModelsReasoningDefault = {
+    budget?: number;
+    effort?: string;
+    enabled?: boolean;
+};
+
+export type ModelsReasoningReplay = {
+    field?: string;
+    required?: boolean;
+};
 
 export type ModelsTestResponse = {
     /**
@@ -3595,11 +3655,16 @@ export type ProvidersGetResponse = {
     updated_at?: string;
 };
 
+export type ProvidersImportCatalogModelsRequest = {
+    skip_model_ids?: Array<string>;
+};
+
 export type ProvidersImportModelsRequest = {
     default_compatibilities?: Array<string>;
 };
 
 export type ProvidersImportModelsResponse = {
+    catalog?: ModelcatalogInfo;
     created?: number;
     models?: Array<string>;
     skipped?: number;
@@ -3715,6 +3780,12 @@ export type ReasoningOptions = {
      * back to when a stored value is no longer offered by the model.
      */
     default_effort?: string;
+    /**
+     * DefaultOff reports that the model is declared to start with reasoning off:
+     * a client picking the model, or reconciling a value it no longer offers,
+     * starts it off instead of on DefaultEffort. Only set when CanDisable is.
+     */
+    default_off?: boolean;
     /**
      * Efforts are the selectable active tiers, weakest to strongest as advertised.
      */
@@ -4090,10 +4161,6 @@ export type SettingsSettings = {
     chat_model_id?: string;
     chat_runtime?: string;
     command_ui_language?: string;
-    compaction_enabled?: boolean;
-    compaction_model_id?: string;
-    compaction_target_percent?: number | null;
-    compaction_threshold?: number;
     default_bot_agent_id?: string;
     discuss_probe_model_id?: string;
     display_enabled?: boolean;
@@ -4161,16 +4228,12 @@ export type SettingsUpsertRequest = {
      * Reference fields below use pointer semantics so autosaving clients can
      * clear a selection: nil = keep current, "" = clear, value = set. The
      * service mirrors each into a `<field>_set` SQL flag (same pattern as
-     * FetchProviderID / CompactionModelID); plain strings would make ""
+     * FetchProviderID / MemoryLLMModelID); plain strings would make ""
      * indistinguishable from "not sent".
      */
     chat_model_id?: string;
     chat_runtime?: string;
     command_ui_language?: string;
-    compaction_enabled?: boolean;
-    compaction_model_id?: string;
-    compaction_target_percent?: number;
-    compaction_threshold?: number;
     default_bot_agent_id?: string;
     discuss_probe_model_id?: string;
     display_enabled?: boolean;
@@ -7019,38 +7082,6 @@ export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors = {
 export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdError = DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors[keyof DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors];
 
 export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
-export type DeleteBotsByBotIdCompactionLogsData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/compaction/logs';
-};
-
-export type DeleteBotsByBotIdCompactionLogsErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-};
-
-export type DeleteBotsByBotIdCompactionLogsError = DeleteBotsByBotIdCompactionLogsErrors[keyof DeleteBotsByBotIdCompactionLogsErrors];
-
-export type DeleteBotsByBotIdCompactionLogsResponses = {
     /**
      * No Content
      */
@@ -11724,44 +11755,6 @@ export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningResponses = {
 
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningResponse = PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningResponses[keyof PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningResponses];
 
-export type PostBotsByBotIdSessionsBySessionIdCompactData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Session ID
-         */
-        session_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/sessions/{session_id}/compact';
-};
-
-export type PostBotsByBotIdSessionsBySessionIdCompactErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-};
-
-export type PostBotsByBotIdSessionsBySessionIdCompactError = PostBotsByBotIdSessionsBySessionIdCompactErrors[keyof PostBotsByBotIdSessionsBySessionIdCompactErrors];
-
-export type PostBotsByBotIdSessionsBySessionIdCompactResponses = {
-    /**
-     * OK
-     */
-    200: HandlersTriggerCompactResponse;
-};
-
-export type PostBotsByBotIdSessionsBySessionIdCompactResponse = PostBotsByBotIdSessionsBySessionIdCompactResponses[keyof PostBotsByBotIdSessionsBySessionIdCompactResponses];
-
 export type GetBotsByBotIdSessionsBySessionIdContextLifecycleData = {
     body?: never;
     path: {
@@ -15606,6 +15599,48 @@ export type PostProvidersResponses = {
 
 export type PostProvidersResponse = PostProvidersResponses[keyof PostProvidersResponses];
 
+export type GetProvidersCatalogModelsData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * models.dev provider ID
+         */
+        source: string;
+        /**
+         * Memoh client protocol
+         */
+        client_type: string;
+    };
+    url: '/providers/catalog/models';
+};
+
+export type GetProvidersCatalogModelsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ServerProblem;
+};
+
+export type GetProvidersCatalogModelsError = GetProvidersCatalogModelsErrors[keyof GetProvidersCatalogModelsErrors];
+
+export type GetProvidersCatalogModelsResponses = {
+    /**
+     * OK
+     */
+    200: ModelcatalogResponse;
+};
+
+export type GetProvidersCatalogModelsResponse = GetProvidersCatalogModelsResponses[keyof GetProvidersCatalogModelsResponses];
+
 export type GetProvidersCountData = {
     body?: never;
     path?: never;
@@ -15857,6 +15892,51 @@ export type PutProvidersByIdResponses = {
 };
 
 export type PutProvidersByIdResponse = PutProvidersByIdResponses[keyof PutProvidersByIdResponses];
+
+export type PostProvidersByIdImportCatalogModelsData = {
+    /**
+     * Models to preserve from a preceding manual creation
+     */
+    body?: ProvidersImportCatalogModelsRequest;
+    path: {
+        /**
+         * Provider ID (UUID)
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/providers/{id}/import-catalog-models';
+};
+
+export type PostProvidersByIdImportCatalogModelsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ServerProblem;
+};
+
+export type PostProvidersByIdImportCatalogModelsError = PostProvidersByIdImportCatalogModelsErrors[keyof PostProvidersByIdImportCatalogModelsErrors];
+
+export type PostProvidersByIdImportCatalogModelsResponses = {
+    /**
+     * OK
+     */
+    200: ProvidersImportModelsResponse;
+};
+
+export type PostProvidersByIdImportCatalogModelsResponse = PostProvidersByIdImportCatalogModelsResponses[keyof PostProvidersByIdImportCatalogModelsResponses];
 
 export type PostProvidersByIdImportModelsData = {
     /**

@@ -74,8 +74,8 @@ func newSubagentModelCatalog(t *testing.T) (*subagentModelQueries, string, strin
 	modelAID := "00000000-0000-0000-0000-000000000301"
 	modelBID := "00000000-0000-0000-0000-000000000302"
 	providerConfig, _ := json.Marshal(map[string]any{"api_key": "test-key"})
-	modelConfigA, _ := json.Marshal(models.ModelConfig{Description: ptr("Fast coding worker"), Compatibilities: []string{models.CompatToolCall}})
-	modelConfigB, _ := json.Marshal(models.ModelConfig{Description: ptr("Long-context worker"), Compatibilities: []string{models.CompatToolCall, models.CompatVision}})
+	modelConfigA, _ := json.Marshal(models.ModelConfig{Description: ptr("Fast coding worker"), ToolCall: true})
+	modelConfigB, _ := json.Marshal(models.ModelConfig{Description: ptr("Long-context worker"), Modalities: &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityImage}, Output: []models.Modality{models.ModalityText}}, ToolCall: true})
 	q := &subagentModelQueries{
 		models: []sqlc.Model{
 			{ID: mustSubagentUUID(t, modelAID), ModelID: "worker-model", ProviderID: mustSubagentUUID(t, providerAID), Type: string(models.ModelTypeChat), Enable: true, Config: modelConfigA},
@@ -166,13 +166,8 @@ func TestListModelsReturnsEnabledCatalogAndMarksCurrent(t *testing.T) {
 			spawnDescription = tool.Description
 		}
 	}
-	for _, want := range []string{"worker-model | provider-b", "[current]", "list_models"} {
-		if !strings.Contains(spawnDescription, want) {
-			t.Fatalf("spawn description missing %q:\n%s", want, spawnDescription)
-		}
-	}
-	if strings.Contains(spawnDescription, "worker-model | provider-a") {
-		t.Fatalf("spawn description includes another provider's model: %s", spawnDescription)
+	if strings.Contains(spawnDescription, "worker-model") || !strings.Contains(spawnDescription, "list_models") {
+		t.Fatalf("spawn description must leave the catalog to list_models: %s", spawnDescription)
 	}
 
 	result, err := executeAgentTool(t, provider, session, ToolListModels().String(), map[string]any{})
@@ -369,4 +364,8 @@ func TestQueuedSubagentRechecksProviderBeforeExecution(t *testing.T) {
 	if snapshot.Status != background.TaskFailed || len(agent.queries()) != 1 {
 		t.Fatalf("queued provider change must fail without executing: %+v", snapshot)
 	}
+}
+
+func (*subagentModelQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
 }

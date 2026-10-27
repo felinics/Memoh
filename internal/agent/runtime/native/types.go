@@ -72,56 +72,15 @@ type LoopDetectionConfig struct {
 	Enabled bool
 }
 
-type ContextStepSelectionInput struct {
-	Scope               contextfrag.Scope
-	InitialMessageCount int
-	Messages            []sdk.Message
-	BudgetMaxTokens     int
-	// ProviderSystem, ProviderTools, and ProviderInputAllowanceTokens carry
-	// the complete provider envelope into step reselection. A zero allowance
-	// keeps the unlimited-window contract and disables serialized enforcement.
-	ProviderSystem               string
-	ProviderTools                []sdk.ToolDefinition
-	ProviderInputAllowanceTokens int
-	// RecentProtectTokens carries the run's recent-protection window override
-	// so step reselection resolves the same window as the provider view. Nil
-	// uses the view default; a pointer to zero disables the window.
-	RecentProtectTokens *int
-	// KeepRecentToolResults keeps the newest N complete tool cycles intact
-	// and truncates older bulky tool results to a size summary; <= 0 disables
-	// content truncation.
-	KeepRecentToolResults int
-	// MinMessages gates content truncation on total provider message count.
-	MinMessages int
-}
-
-type ContextStepSelectionResult struct {
-	Messages []sdk.Message
-	// MessageSourceIndexes maps each returned message to its absolute index in
-	// ContextStepSelectionInput.Messages. Synthetic messages use -1. A
-	// normalized byte-identical unchanged output can inherit every input
-	// origin. Otherwise a missing or invalid vector preserves only verified
-	// protected-prefix origins and treats every suffix origin as unknown.
-	// Custom reselectors that need dynamic carriers to become durable must
-	// return a complete, exact source-index vector.
-	MessageSourceIndexes      []int
-	MessageSourceIndexesKnown bool
-	Dropped                   int
-	Truncated                 int
-	// ProtectedPruned counts the subset of Truncated stubbed to resolve a
-	// protected-budget overflow that would otherwise fail the run.
-	ProtectedPruned int
-	DropReasons     map[string]int
-	FatalError      error
-}
-
-type ContextStepReselector func(context.Context, ContextStepSelectionInput) ContextStepSelectionResult
-
 // StepDirective is returned by OnStepCommitted after a durable step lands.
 // NextInputs become the next model request; a would-be-final step continues
 // instead of ending the loop when this slice is non-empty.
 type StepDirective struct {
 	NextInputs []DirectiveInput
+	// Provenance is, for each message the step persisted, in order, the
+	// stored message it became. A run that compacts in place matches later
+	// requests against it.
+	Provenance []MessageProvenance
 }
 
 // DirectiveInput is one user input admitted at a step commit boundary.
@@ -194,7 +153,6 @@ type RunConfig struct {
 	ContextMutations             *contextfrag.MutationLedger
 	ContextDynamicMutators       []contextfrag.DynamicMutator
 	ContextLifecycle             *contextfrag.LifecycleHolder
-	ContextStepReselector        ContextStepReselector
 	initialProviderMessageCount  int
 	initialProviderPrefixSet     bool
 	providerAttemptState         *providerAttemptState
@@ -267,6 +225,14 @@ type RunConfig struct {
 	// use this path. It retains the original run cancellation cause so the
 	// persistence adapter can reject ownership loss before detaching for IO.
 	OnStepInterrupted func(ctx context.Context, stepIndex int, record *step.Record) error
+
+	// SwitchContext arms the run to compact in place: when the request before
+	// a step does not fit, it runs one compaction event and returns the
+	// event's description for the run's audit. ContextProvenance is what the
+	// messages the run starts with render; step commits return the rest.
+	SwitchContext     func(context.Context, ContextSwitch) (string, error)
+	ContextProvenance []MessageProvenance
+	contextSwitch     *contextSwitchState
 
 	// BackgroundManager provides access to the background task system.
 	// When non-nil, the agent loop refreshes running task summaries at step

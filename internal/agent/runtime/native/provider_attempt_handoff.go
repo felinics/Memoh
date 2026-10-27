@@ -2,7 +2,6 @@ package native
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -13,10 +12,8 @@ import (
 var errProviderAttemptNotPrepared = errors.New("provider attempt was not prepared")
 
 type preparedProviderAttempt struct {
-	snapshot          contextfrag.StepSnapshot
-	systemPrepended   bool
-	reselectionDetail string
-	protectedPruned   int
+	snapshot        contextfrag.StepSnapshot
+	systemPrepended bool
 	// admitted are the loop-owned dynamic messages the prepared payload
 	// carries, with their positions in that payload.
 	admitted []dynamicSourceRef
@@ -39,8 +36,6 @@ func newProviderAttemptHandoff(cfg RunConfig) *providerAttemptHandoff {
 func (h *providerAttemptHandoff) stage(
 	snapshot contextfrag.StepSnapshot,
 	systemPrepended bool,
-	reselectionDetail string,
-	protectedPruned int,
 	admitted []dynamicSourceRef,
 ) {
 	if h == nil {
@@ -48,13 +43,25 @@ func (h *providerAttemptHandoff) stage(
 	}
 	h.mu.Lock()
 	h.pending = &preparedProviderAttempt{
-		snapshot:          snapshot,
-		systemPrepended:   systemPrepended,
-		reselectionDetail: reselectionDetail,
-		protectedPruned:   protectedPruned,
-		admitted:          cloneDynamicSourceRefs(admitted),
+		snapshot:        snapshot,
+		systemPrepended: systemPrepended,
+		admitted:        cloneDynamicSourceRefs(admitted),
 	}
 	h.mu.Unlock()
+}
+
+// admitted is where the staged attempt carries the loop-owned dynamic
+// messages it admits.
+func (h *providerAttemptHandoff) admitted() []dynamicSourceRef {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.pending == nil {
+		return nil
+	}
+	return cloneDynamicSourceRefs(h.pending.admitted)
 }
 
 // reject drops the staged attempt and removes provider-visibility admission
@@ -97,15 +104,6 @@ func (h *providerAttemptHandoff) publish(params sdk.Request) error {
 	h.cfg.ContextMutations.SetFinalInputHash(hash)
 	pending.snapshot.PostPrepareInputHash = hash
 	h.cfg.ContextMutations.AppendStepSnapshot(pending.snapshot)
-	if pending.reselectionDetail != "" {
-		h.cfg.ContextMutations.Record(contextfrag.MutationLoopStepReselection, pending.reselectionDetail)
-	}
-	if pending.protectedPruned > 0 {
-		h.cfg.ContextMutations.Record(
-			contextfrag.MutationMidTaskPrune,
-			fmt.Sprintf("truncated=%d", pending.protectedPruned),
-		)
-	}
 	h.pending = nil
 	return nil
 }

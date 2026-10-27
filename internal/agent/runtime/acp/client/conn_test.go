@@ -19,11 +19,11 @@ import (
 // prompt.
 const failAfterOutputPrompt = "fail-after-output"
 
-// hangUpAfterOutputPrompt makes the agent send hangUpChunks chunks, answer
-// the prompt, and close the connection right after.
+// burstOutputPrompt makes the agent send burstOutputChunks chunks before
+// answering the prompt.
 const (
-	hangUpAfterOutputPrompt = "hang-up-after-output"
-	hangUpChunks            = 200
+	burstOutputPrompt = "burst-output"
+	burstOutputChunks = 200
 )
 
 // multiSessionAgent is an ACP agent that hosts several sessions on one
@@ -93,15 +93,13 @@ func (a *multiSessionAgent) handle(ctx context.Context, method string, params js
 			}
 			return nil, acp.NewInternalError("upstream failed")
 		}
-		if strings.Contains(string(params), hangUpAfterOutputPrompt) {
-			for range hangUpChunks {
+		if strings.Contains(string(params), burstOutputPrompt) {
+			for range burstOutputChunks {
 				a.notify(ctx, request.SessionId, map[string]any{
 					"sessionUpdate": "agent_message_chunk",
 					"content":       map[string]any{"type": "text", "text": "x"},
 				})
 			}
-			// The response goes out as this handler returns.
-			time.AfterFunc(20*time.Millisecond, a.hangUp)
 			return map[string]any{"stopReason": "end_turn"}, nil
 		}
 		a.notify(ctx, request.SessionId, map[string]any{
@@ -221,7 +219,7 @@ func TestConnFailedPromptKeepsTheOutputSentBeforeTheError(t *testing.T) {
 }
 
 func TestConnPromptKeepsItsOutputWhenTheAgentHangsUpRightAfter(t *testing.T) {
-	_, transport := startMultiSessionAgent(t)
+	agent, transport := startMultiSessionAgent(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -235,11 +233,24 @@ func TestConnPromptKeepsItsOutputWhenTheAgentHangsUpRightAfter(t *testing.T) {
 	}
 
 	delivered := 0
-	result, err := session.Prompt(ctx, hangUpAfterOutputPrompt, EventSinkFunc(func(event.StreamEvent) { delivered++ }))
+	result, err := session.Prompt(ctx, burstOutputPrompt, EventSinkFunc(func(event.StreamEvent) { delivered++ }))
 	if err != nil {
 		t.Fatalf("Prompt() error = %v, want the turn the agent answered", err)
 	}
-	if want := strings.Repeat("x", hangUpChunks); result.Text != want || delivered != hangUpChunks {
-		t.Fatalf("got %d chars and %d delivered events, want all %d", len(result.Text), delivered, hangUpChunks)
+	// Prompt returns after the response and its preceding notifications have
+	// been applied. Close at that boundary: a timer can disconnect while those
+	// notifications are still draining, which the SDK correctly reports as an
+	// incomplete request instead of a successful prompt.
+	agent.hangUp()
+	select {
+	case <-conn.Done():
+	case <-ctx.Done():
+		t.Fatal("connection did not close after the completed prompt")
+	}
+	if result.StopReason != "end_turn" {
+		t.Fatalf("stop reason = %q, want end_turn", result.StopReason)
+	}
+	if want := strings.Repeat("x", burstOutputChunks); result.Text != want || delivered != burstOutputChunks {
+		t.Fatalf("got %d chars and %d delivered events, want all %d", len(result.Text), delivered, burstOutputChunks)
 	}
 }

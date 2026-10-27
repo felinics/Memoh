@@ -8,62 +8,39 @@ import (
 	"github.com/felinics/memoh/internal/models"
 )
 
-func TestDecodeBackupSettingsCompactionRatioCompatibility(t *testing.T) {
+func TestDecodeBackupSettingsIgnoresRetiredCompaction(t *testing.T) {
 	t.Parallel()
-
-	cases := []struct {
-		name       string
-		raw        string
-		wantTarget *int
-	}{
-		{
-			name:       "legacy manual ratio maps to keep share",
-			raw:        `{"compaction_threshold":100000,"compaction_ratio":80}`,
-			wantTarget: backupIntPointer(20),
-		},
-		{
-			name:       "legacy minimum ratio maps to maximum target",
-			raw:        `{"compaction_threshold":100000,"compaction_ratio":1}`,
-			wantTarget: backupIntPointer(99),
-		},
-		{
-			name: "zero config ignores its legacy dead ratio",
-			raw:  `{"compaction_threshold":0,"compaction_ratio":80}`,
-		},
-		{
-			name: "legacy ratio producing invalid target keeps default",
-			raw:  `{"compaction_threshold":100000,"compaction_ratio":100}`,
-		},
-		{
-			name:       "new target wins",
-			raw:        `{"compaction_threshold":100000,"compaction_ratio":80,"compaction_target_percent":55}`,
-			wantTarget: backupIntPointer(55),
-		},
+	current := []byte(`{"chat_model_id":"chat-1","reasoning_effort":"high","timezone":"Asia/Tokyo"}`)
+	legacy := []byte(`{"chat_model_id":"chat-1","reasoning_effort":"high","timezone":"Asia/Tokyo",` +
+		`"compaction_enabled":true,"compaction_threshold":100000,"compaction_ratio":80,` +
+		`"compaction_target_percent":55,"compaction_model_id":"compact-1"}`)
+	want, err := decodeBackupSettings(current)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			got, err := decodeBackupSettings([]byte(tc.raw))
-			if err != nil {
-				t.Fatalf("decodeBackupSettings() error = %v", err)
-			}
-			if !equalBackupInt(got.CompactionTargetPercent, tc.wantTarget) {
-				t.Fatalf("CompactionTargetPercent = %v, want %v", got.CompactionTargetPercent, tc.wantTarget)
-			}
-		})
+	got, err := decodeBackupSettings(legacy)
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func backupIntPointer(value int) *int {
-	return &value
-}
-
-func equalBackupInt(left, right *int) bool {
-	if left == nil || right == nil {
-		return left == nil && right == nil
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("legacy archive changed retained settings: got %+v, want %+v", got, want)
 	}
-	return *left == *right
+	if !reflect.DeepEqual(settingsLabels(legacy), settingsLabels(current)) {
+		t.Fatal("legacy compaction settings change the import preview")
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, retired := range []string{"compaction_enabled", "compaction_threshold", "compaction_target_percent", "compaction_model_id"} {
+		if _, exists := fields[retired]; exists {
+			t.Fatalf("export reintroduced the retired %s setting", retired)
+		}
+	}
 }
 
 func TestDecodeBackupSettingsReasoningEnabledCompatibility(t *testing.T) {

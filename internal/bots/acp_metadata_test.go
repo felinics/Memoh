@@ -100,7 +100,7 @@ func mustJSON(value map[string]any) []byte {
 func makeGetBotRowWithMetadata(botID, ownerUserID pgtype.UUID, metadata []byte) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
-			if len(dest) != 19 {
+			if len(dest) != 15 {
 				return pgx.ErrNoRows
 			}
 			*dest[0].(*pgtype.UUID) = botID
@@ -115,13 +115,9 @@ func makeGetBotRowWithMetadata(botID, ownerUserID pgtype.UUID, metadata []byte) 
 			*dest[9].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[10].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[11].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[12].(*bool) = false
-			*dest[13].(*int32) = 100000
-			*dest[14].(*pgtype.Int4) = pgtype.Int4{}
-			*dest[15].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[16].(*[]byte) = append([]byte(nil), metadata...)
-			*dest[17].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[12].(*[]byte) = append([]byte(nil), metadata...)
+			*dest[13].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[14].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}

@@ -19,7 +19,7 @@ func TestBuildEntriesAndIDsCoversMiddleRowThatRendersNothing(t *testing.T) {
 		mkRow(t, "assistant", `[{"type":"reasoning","text":"thinking"}]`, 0),
 		mkRow(t, "assistant", `"the answer"`, 0),
 	}
-	items, _ := itemsFromRows(rows)
+	items, _ := candidatesFromRows(rows)
 
 	entries, ids := buildEntriesAndIDs(items)
 
@@ -46,7 +46,7 @@ func TestBuildEntriesAndIDsCoversWholeExchangeWhenResultRendersEmpty(t *testing.
 		// recognizable parts, so it renders empty.
 		mkRow(t, "tool", `[]`, 0),
 	}
-	items, _ := itemsFromRows(rows)
+	items, _ := candidatesFromRows(rows)
 
 	entries, ids := buildEntriesAndIDs(items)
 
@@ -70,7 +70,7 @@ func TestBuildEntriesAndIDsRendersLegacyToolResultEnvelopeExchange(t *testing.T)
 		toolCallRow(t, 0),
 		mkRow(t, "tool", `{"role":"tool","tool_call_id":"c1","content":{"output":"search results here"}}`, 0),
 	}
-	items, _ := itemsFromRows(rows)
+	items, _ := candidatesFromRows(rows)
 
 	entries, ids := buildEntriesAndIDs(items)
 
@@ -92,30 +92,30 @@ func TestBuildEntriesAndIDsKeepsToolExchangeAcrossUnparseableBarrier(t *testing.
 		name       string
 		breakIndex int
 	}{
-		{name: "call is unparseable", breakIndex: 0},
-		{name: "result is unparseable", breakIndex: 1},
+		{name: "call is unparseable", breakIndex: 2},
+		{name: "result is unparseable", breakIndex: 3},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rows := []sqlc.ListUncompactedMessagesBySessionRow{
-				toolCallRow(t, 100),
-				toolResultRow(t, 100),
 				mkRow(t, "user", `"old question"`, 100),
 				mkRow(t, "assistant", `"old answer"`, 100),
+				toolCallRow(t, 100),
+				toolResultRow(t, 100),
 				mkRow(t, "user", `"current question"`, 100),
 				mkRow(t, "assistant", `"current answer"`, 100),
 			}
 			rows[tt.breakIndex].ID = pgtype.UUID{Valid: false}
 
-			items, barrierCount := itemsFromRows(rows)
+			items, barrierCount := candidatesFromRows(rows)
 			if barrierCount != 1 {
 				t.Fatalf("barrier count = %d, want 1", barrierCount)
 			}
-			selected := splitByTarget(items, 200)
-			entries, ids := buildEntriesAndIDs(selected)
+			protectCurrentSources(items, historySources(rows[4]))
+			entries, ids := buildEntriesAndIDs(foldableItems(items))
 
-			if len(ids) != 2 || ids[0] != rows[2].ID || ids[1] != rows[3].ID {
-				t.Fatalf("ids = %#v, want only the complete run after the protected tool exchange", ids)
+			if len(ids) != 2 || ids[0] != rows[0].ID || ids[1] != rows[1].ID {
+				t.Fatalf("ids = %#v, want only the run before the protected tool exchange", ids)
 			}
 			if len(entries) != 2 {
 				t.Fatalf("entries = %#v, want the old question and answer", entries)
@@ -124,24 +124,43 @@ func TestBuildEntriesAndIDsKeepsToolExchangeAcrossUnparseableBarrier(t *testing.
 	}
 }
 
-func TestBuildUserPromptPriorContextBranch(t *testing.T) {
+// Selection prices a kept entry in its wrapper, as the prompt renders it, so
+// what it selects never costs more than the limit it was given.
+func TestTrimCompactMessagesPricesKeptEntriesAsRendered(t *testing.T) {
 	t.Parallel()
 
-	entries := []messageEntry{{Role: "user", Content: "hi"}}
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "assistant", `"old work"`, 0),
+		mkRow(t, "user", `"kept input"`, 0),
+		mkRow(t, "assistant", `"later work"`, 0),
+	}
+	items, _ := candidatesFromRows(rows)
+	markAnchors(items, historySources(rows[1]))
+	all, _ := buildEntriesAndIDs(items)
+	for limit := 0; limit <= entriesPromptCost(all); limit++ {
+		selected, _ := buildEntriesAndIDs(trimCompactMessages(items, limit))
+		if cost := entriesPromptCost(selected); cost > limit {
+			t.Fatalf("limit=%d: selected %d entries costing %d", limit, len(selected), cost)
+		}
+	}
+}
 
-	withPrior := buildUserPrompt([]string{"earlier summary"}, entries)
-	if !strings.Contains(withPrior, "<prior_context>") || !strings.Contains(withPrior, "earlier summary") {
-		t.Fatalf("prior-summary branch not rendered: %q", withPrior)
-	}
-	if !strings.Contains(withPrior, "user: hi") {
-		t.Fatalf("entries not included with prior context: %q", withPrior)
-	}
+// Kept entries after the last one a summary covers stay after the summary in
+// the request; the summarizer reads them there, unwrapped.
+func TestKeptAfterSummarySplitsTrailingKeptEntries(t *testing.T) {
+	t.Parallel()
 
-	without := buildUserPrompt(nil, entries)
-	if strings.Contains(without, "<prior_context>") {
-		t.Fatalf("no-prior branch should omit prior context: %q", without)
+	entries := []messageEntry{
+		{Role: "tool", Content: "first result"},
+		{Role: "user", Content: "steer", Kept: true},
+		{Role: "tool", Content: "second result"},
+		{Role: "user", Content: "later steer", Kept: true},
 	}
-	if !strings.Contains(without, "Summarize the following conversation:") {
-		t.Fatalf("no-prior branch missing lead-in: %q", without)
+	conversation, after := keptAfterSummary(entries)
+	if len(conversation) != 3 || !conversation[1].Kept || conversation[2].Content != "second result" {
+		t.Fatalf("conversation = %+v, want the entries through the last covered one", conversation)
+	}
+	if len(after) != 1 || after[0].Kept || after[0].Content != "later steer" {
+		t.Fatalf("after = %+v, want the trailing steer unwrapped", after)
 	}
 }

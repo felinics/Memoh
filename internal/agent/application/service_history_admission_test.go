@@ -21,15 +21,16 @@ type turnResponseSourceMessageService struct {
 	projected []messagepkg.Message
 	sessionID string
 	maxBytes  int64
+	err       error
 }
 
-func (s *turnResponseSourceMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
+func (s *turnResponseSourceMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64, bool) ([]messagepkg.Message, error) {
 	return s.full, nil
 }
 
 func (s *turnResponseSourceMessageService) ListTurnResponseSourcesSinceBySessionWithinBytes(_ context.Context, sessionID string, _ time.Time, maxBytes int64) ([]messagepkg.Message, error) {
 	s.sessionID, s.maxBytes = sessionID, maxBytes
-	return s.projected, nil
+	return s.projected, s.err
 }
 
 func TestLoadTurnResponsesReadsProjectedSources(t *testing.T) {
@@ -40,13 +41,20 @@ func TestLoadTurnResponsesReadsProjectedSources(t *testing.T) {
 		projected: []messagepkg.Message{persistedHistoryMessage(t, "projected", "assistant", "projected row")},
 	}
 	svc := &Service{messageService: source, logger: slog.New(slog.DiscardHandler)}
-	entries := svc.loadTurnResponses(context.Background(), "session-1", 1000)
+	entries, err := svc.loadTurnResponses(context.Background(), "session-1", 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if source.sessionID != "session-1" || source.maxBytes != 1000*contextfrag.EstimateBytesPerToken {
 		t.Fatalf("projected load got session=%q maxBytes=%d", source.sessionID, source.maxBytes)
 	}
 	if len(entries) != 1 || entries[0].SourceMessageID != "projected" {
 		t.Fatalf("turn responses = %#v, want the projected source only", entries)
+	}
+	projected := source.projected[0]
+	if want := historyfrag.MessageContentHash(historyfrag.DecodeStoredModelMessage(nil, projected.ID, projected.Role, projected.Content)); entries[0].ContentHash != want {
+		t.Fatalf("turn response content hash = %q, want the stored version %q", entries[0].ContentHash, want)
 	}
 }
 

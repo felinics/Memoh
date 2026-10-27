@@ -3,12 +3,16 @@ package native
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/jsonschema-go/jsonschema"
 
+	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/agent/step"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 )
@@ -143,4 +147,78 @@ func findToolResult(messages []sdk.Message, toolName string) (sdk.ToolResultPart
 		}
 	}
 	return sdk.ToolResultPart{}, false
+}
+
+// An exec result is bounded once, when the tool returns: at the default limit
+// its stdout keeps its head and tail under one marker, and every later request
+// carries the result exactly as the step stored it.
+func TestAgentGenerateBoundsExecOutputOnceAtTheDefaultLimit(t *testing.T) {
+	t.Parallel()
+
+	line := strings.Repeat("0123456789", 9) + "\n"
+	svc := newMockExecContainerService()
+	svc.setBehavior("cat build.log", execBehavior{stdout: "HEAD\n" + strings.Repeat(line, 1000) + "TAIL"})
+	bp, cleanup := setupExecTestInfra(t, svc)
+	defer cleanup()
+
+	var sent []sdk.ToolResultPart
+	modelProvider := &atomicMockProvider{
+		handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
+			if call > 1 {
+				result, ok := findToolResult(params.Messages, "exec")
+				if !ok {
+					t.Fatalf("model call %d missing the exec result", call)
+				}
+				sent = append(sent, result)
+			}
+			if call < 3 {
+				return sdk.ModelResult{
+					FinishReason: sdk.FinishReasonToolCalls,
+					ToolCalls: []sdk.ToolCall{{
+						ToolCallID: fmt.Sprintf("call-%d", call),
+						ToolName:   "exec",
+						Input:      toolexec.ArgumentsFromValue(map[string]any{"command": []string{"cat build.log", "echo hi"}[call-1]}),
+					}},
+				}, nil
+			}
+			return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+		},
+	}
+
+	a := New(Deps{})
+	a.SetToolProviders([]agenttools.ToolProvider{agenttools.NewContainerProvider(nil, bp, background.New(nil), "/data")})
+
+	var stored []sdk.ToolResultPart
+	_, err := a.Generate(context.Background(), RunConfig{
+		Model:            &sdk.Model{ID: "mock-model", Provider: modelProvider},
+		Messages:         []sdk.Message{sdk.UserMessage("show the build log")},
+		SupportsToolCall: true,
+		Identity:         SessionContext{BotID: "bot-1", SessionID: "sess-1"},
+		OnStepCommitted: func(_ context.Context, _ int, record *step.Record) (StepDirective, error) {
+			if result, ok := findToolResult(record.Messages, "exec"); ok {
+				stored = append(stored, result)
+			}
+			return StepDirective{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if len(stored) != 2 || len(sent) != 2 {
+		t.Fatalf("stored/sent exec results = %d/%d, want 2/2", len(stored), len(sent))
+	}
+	if size := len(stored[0].Result.String()); size > 32*1024 {
+		t.Fatalf("stored exec result = %d bytes, want at most 32 KiB", size)
+	}
+	output, _ := toolexec.OutputValue(stored[0].Result).(map[string]any)
+	stdout, _ := output["stdout"].(string)
+	if strings.Count(stdout, "[memoh pruned]") != 1 || !strings.HasPrefix(stdout, "[memoh pruned]") ||
+		!strings.Contains(stdout, "HEAD") || !strings.HasSuffix(stdout, "TAIL") {
+		t.Fatalf("stdout = %d bytes, want its head and tail under one marker", len(stdout))
+	}
+	for i, result := range sent {
+		if !reflect.DeepEqual(result, stored[0]) {
+			t.Fatalf("model call %d sent the exec result differently from how the step stored it", i+2)
+		}
+	}
 }

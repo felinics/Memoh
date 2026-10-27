@@ -1329,7 +1329,7 @@ import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import ComposerModelMenu from './composer-model-menu.vue'
-import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, displayedEffort, reconcileStoredEffort } from '@/pages/bots/components/reasoning-effort'
+import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, defaultEffortSelection, displayedEffort, reconcileStoredEffort } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
@@ -1359,6 +1359,7 @@ import { BOT_AGENT_RUNTIME_ACP, BOT_AGENT_RUNTIME_CODEX, botAgentIcon, botAgentN
 import { UserFacingError, isApiErrorCode, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
 import { workspaceTargetAvailable } from '@/utils/workspace-target'
+import { modelAccepts } from '@/utils/model-capabilities'
 import { findLatestPendingChatDecision } from './chat-pending-decision'
 import {
   runtimeCommandComposerText,
@@ -2716,7 +2717,7 @@ watch(() => pendingFiles.value.length, (len, prevLen) => {
   const model = activeModel.value
   if (!model) return
   const added = pendingFiles.value.slice(prevLen ?? 0)
-  if (!model.config?.compatibilities?.includes('file-input')) {
+  if (!modelAccepts(model.config, 'pdf')) {
     if (added.some(isPdfFile)) {
       toast.warning(t('chat.pdfUnsupportedByModel'))
     }
@@ -3146,12 +3147,13 @@ function selectMemohAgent() {
 
 function onModelSelected() {
   // Switching models replaces the WHOLE pair (spec v2 P6′): the effort lands
-  // on the new model's default tier and is never carried across models.
+  // on the new model's default selection, which honours the model's declared
+  // default effort and default off, and is never carried across models.
   if (!activeModelSupportsReasoning.value) {
     overrideReasoningEffort.value = REASONING_EFFORT_DISABLE
     return
   }
-  overrideReasoningEffort.value = activeModelReasoning.value?.default_effort?.trim() ?? ''
+  overrideReasoningEffort.value = defaultEffortSelection(activeModelReasoning.value).trim()
 }
 
 async function onComposerModelValueSelected(value: string) {

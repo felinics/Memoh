@@ -5,19 +5,24 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/step"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/agent/turn"
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -36,6 +41,7 @@ type agentStepCommitter struct {
 	mu                   sync.Mutex
 	turnRequestMessageID string
 	persisted            []messagepkg.Message
+	inputSourceIDs       []string
 	memoryPersisted      []messagepkg.Message
 	memoryExpectedRows   int
 	nextStep             int // In-process ordering guard, not a durable replay cursor.
@@ -45,6 +51,10 @@ type agentStepCommitter struct {
 	// checkpointed means an interrupted step was written: the run already has
 	// a history row for the model call it stopped in.
 	checkpointed bool
+	// retriedRequest is the request row a retry renders as its input, and
+	// requestCopy the row its first step copied it to.
+	retriedRequest string
+	requestCopy    string
 }
 
 func (s *Service) newAgentStepCommitter(ctx context.Context, req ChatRequest, rc resolvedContext) *agentStepCommitter {
@@ -81,7 +91,7 @@ func (s *Service) newAgentStepCommitter(ctx context.Context, req ChatRequest, rc
 	case strings.TrimSpace(req.TurnID) == "" || req.TurnPosition == nil:
 		return nil
 	}
-	return &agentStepCommitter{
+	committer := &agentStepCommitter{
 		service: s, req: req, rc: rc, persister: persister, ownerContext: ctx,
 		queueStep:            queueStep,
 		turnRequestMessageID: requestMessageID,
@@ -89,6 +99,33 @@ func (s *Service) newAgentStepCommitter(ctx context.Context, req ChatRequest, rc
 		// persisted; the loop numbers its commits from the same offset.
 		nextStep: req.StepIndexOffset,
 	}
+	if requestMessageID != "" {
+		committer.inputSourceIDs = []string{requestMessageID}
+	}
+	return committer
+}
+
+// bindNativeRun arms one native run: step persistence when the turn is
+// admitted and fenced, provider part timing for the drivers that sample it,
+// and the continuation hooks bindContinuation decides from the request. Every
+// native driver goes through it, so which hooks a run gets is declared in one
+// place instead of per driver.
+func (s *Service) bindNativeRun(ctx context.Context, req ChatRequest, rc resolvedContext, cfg *native.RunConfig, timing *reasoningTimingTracker) *agentStepCommitter {
+	committer := s.newAgentStepCommitter(ctx, req, rc)
+	if timing != nil {
+		configureNativeReasoningTiming(cfg, timing, committer)
+	} else if committer != nil {
+		cfg.OnStepCommitted = committer.commit
+	}
+	committer.bindContinuation(cfg)
+	// A run that persists its steps compacts in place when a step's request
+	// no longer fits. A retry or edit folds what its request renders like
+	// any other run: the history before its cutoff, and the steps of the
+	// attempt its first step selected.
+	if committer != nil && s.compactionService != nil && s.settingsService != nil {
+		cfg.SwitchContext = s.switchContext(req, committer, cfg.CurrentModelUUID)
+	}
+	return committer
 }
 
 func (c *agentStepCommitter) bindContinuation(cfg *native.RunConfig) {
@@ -205,6 +242,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 		c.nextStep++
 		return native.StepDirective{}, nil
 	}
+	stepMessages := len(messages)
 	if (hasAssistantOutput || failureCode != "" || mode == stepSteered) && len(c.persisted) == 0 && !c.req.UserMessagePersisted && !c.req.ReusePersistedUserMessage {
 		messages = prependTurnUserMessage(c.req, messages)
 	}
@@ -240,10 +278,22 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 			return fail(err)
 		}
 	}
+	// Rows a Discuss run writes before its answer are context for later runs,
+	// not proof that it consumed the batch it answers: the run can still fail
+	// after them. The answer, a completed step that calls no tool, is.
+	discussStep := c.req.SessionType == sessionpkg.TypeDiscuss && (mode != stepCompleted || classifyQueueStep(record) != queueStepFinal)
 	for i := range inputs {
 		inputs[i].TurnRequestMessageID = c.turnRequestMessageID
+		if discussStep {
+			metadata := maps.Clone(inputs[i].Metadata)
+			if metadata == nil {
+				metadata = make(map[string]any, 1)
+			}
+			metadata[messagepkg.DiscussStepMetadataKey] = true
+			inputs[i].Metadata = metadata
+		}
 	}
-	c.stampSteerTurn(inputs)
+	steerIndex := c.stampSteerTurn(inputs)
 	agentStep := messagepkg.AgentStep{RunID: c.req.RunID, Messages: inputs, Interrupted: interrupted}
 	if !c.replacementStarted && len(inputs) > 0 {
 		agentStep.Replacement = c.req.TurnReplacement
@@ -297,6 +347,30 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 		}
 	}
 	c.persisted = append(c.persisted, persisted...)
+	// A retry's first step writes the copy of its request ahead of the step's
+	// own rows. The run renders its input from the row it read, which the
+	// same transaction hid; the copy is the input from then on.
+	rows := persisted
+	if agentStep.Replacement != nil && len(persisted) > len(inputs) {
+		c.retriedRequest, c.requestCopy = strings.TrimSpace(agentStep.Replacement.RequestMessageID), persisted[0].ID
+		for i, id := range c.inputSourceIDs {
+			if id == c.retriedRequest {
+				c.inputSourceIDs[i] = c.requestCopy
+			}
+		}
+		rows = persisted[1:]
+	}
+	if len(rows) == len(inputs) {
+		if len(messages) > stepMessages {
+			c.inputSourceIDs = append(c.inputSourceIDs, rows[0].ID)
+		}
+		if steerIndex >= 0 {
+			c.inputSourceIDs = append(c.inputSourceIDs, rows[steerIndex].ID)
+		}
+	}
+	if len(rows) == len(messages) && stepMessages == len(record.Messages) {
+		dir.Provenance = stepProvenance(rows[len(messages)-stepMessages:], c.inputSourceIDs)
+	}
 	if mode == stepInterrupted && len(persisted) > 0 {
 		c.checkpointed = true
 	}
@@ -325,6 +399,55 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 	return dir, nil
 }
 
+// stepProvenance carries the request and queue claim's explicit input IDs.
+func stepProvenance(rows []messagepkg.Message, inputs []string) []native.MessageProvenance {
+	provenance := make([]native.MessageProvenance, len(rows))
+	for i, row := range rows {
+		source := turn.ContextMessageSource{Kind: "history", ID: row.ID}
+		if len(row.Content) > 0 {
+			source.ContentHash = historyfrag.MessageContentHash(historyfrag.DecodeStoredModelMessage(nil, row.ID, row.Role, row.Content))
+		}
+		provenance[i] = native.MessageProvenance{
+			Sources: []turn.ContextMessageSource{source},
+			Anchor:  slices.Contains(inputs, row.ID),
+		}
+	}
+	return provenance
+}
+
+// inputSources names the run's input and the steers its steps persisted, or
+// the inputs of the batch a Discuss run answers.
+func (c *agentStepCommitter) inputSources() []turn.ContextMessageSource {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	sources := slices.Clone(c.req.discussCurrentSources)
+	for _, id := range c.inputSourceIDs {
+		sources = append(sources, turn.ContextMessageSource{Kind: "history", ID: id})
+	}
+	return sources
+}
+
+// currentSources names sources the run rendered by the rows that hold them
+// now: a retry's request by the copy its first step wrote, with the same
+// content.
+func (c *agentStepCommitter) currentSources(sources []turn.ContextMessageSource) []turn.ContextMessageSource {
+	out := slices.Clone(sources)
+	if c == nil {
+		return out
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, source := range out {
+		if c.requestCopy != "" && source.Kind == "history" && source.ID == c.retriedRequest {
+			out[i].ID = c.requestCopy
+		}
+	}
+	return out
+}
+
 // stampSteerTurn files this step's injected steer input under the turn drawn
 // when the input was claimed, instead of letting persistence mint a second name
 // for it. The row is identified by position rather than by text, and the
@@ -336,13 +459,13 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 // take the last user row nobody named.
 // native.TestQueuedSteerIsAppendedAfterEveryOtherPreparedMessage pins the
 // ordering this depends on.
-func (c *agentStepCommitter) stampSteerTurn(inputs []messagepkg.PersistInput) {
+func (c *agentStepCommitter) stampSteerTurn(inputs []messagepkg.PersistInput) int {
 	if c == nil || c.queueStep == nil {
-		return
+		return -1
 	}
 	slot := c.queueStep.steerTurnForStep()
 	if slot == nil || strings.TrimSpace(slot.TurnID) == "" {
-		return
+		return -1
 	}
 	for i := len(inputs) - 1; i >= 0; i-- {
 		if !strings.EqualFold(strings.TrimSpace(inputs[i].Role), "user") || messagepkg.IsInternalFeedback(inputs[i].Metadata) {
@@ -354,8 +477,9 @@ func (c *agentStepCommitter) stampSteerTurn(inputs []messagepkg.PersistInput) {
 		position := slot.Position
 		inputs[i].TurnID = slot.TurnID
 		inputs[i].TurnPosition = &position
-		return
+		return i
 	}
+	return -1
 }
 
 func (c *agentStepCommitter) publishQueueUserTurns(ctx context.Context, stepIndex int, outcome queueStepOutcome) {
@@ -435,7 +559,7 @@ func (c *agentStepCommitter) recordFailure(ctx context.Context, partialText stri
 	return nil, err
 }
 
-func (c *agentStepCommitter) finish(ctx context.Context, inputTokens int) error {
+func (c *agentStepCommitter) finish(ctx context.Context) error {
 	if c == nil {
 		return nil
 	}
@@ -466,9 +590,6 @@ func (c *agentStepCommitter) finish(ctx context.Context, inputTokens int) error 
 	}
 	if !c.req.SkipMemoryExtraction && len(memoryPersisted) == memoryExpectedRows && len(memoryPersisted) > 0 {
 		c.service.storeMemory(ctx, c.req, memoryPersisted)
-	}
-	if inputTokens > 0 {
-		c.service.maybeCompact(ctx, c.req, c.rc, inputTokens)
 	}
 	return nil
 }

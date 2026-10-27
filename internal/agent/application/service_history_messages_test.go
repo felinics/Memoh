@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -149,10 +150,11 @@ const (
 type fakeArtifactLineageQueries struct {
 	dbstore.Queries
 	rows []sqlc.BotHistoryMessageCompact
+	err  error
 }
 
 func (f fakeArtifactLineageQueries) ListCompactionArtifactLineageBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
-	return f.rows, nil
+	return f.rows, f.err
 }
 
 func (fakeArtifactLineageQueries) GetCompactionLogByID(context.Context, pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {
@@ -228,13 +230,20 @@ func TestBuildMessagesFromPipelineInsertsArtifactSummary(t *testing.T) {
 		logger:   slog.New(slog.DiscardHandler),
 	}
 
-	messages, raw, pressure := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
+	messages, pressure, err := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
 		BotID:    pipelineTestBotID,
 		ThreadID: pipelineTestSessionID,
 	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	if pressure <= raw {
-		t.Fatalf("summary pressure missing: raw=%d pressure=%d", raw, pressure)
+	want := 0
+	for _, message := range messages {
+		want += estimateMessageTokens(message)
+	}
+	if pressure != want {
+		t.Fatalf("pressure = %d, want summary and raw history %d", pressure, want)
 	}
 	if len(messages) != 2 {
 		t.Fatalf("expected summary + current message, got %d: %s", len(messages), messagesDebug(messages))
@@ -263,42 +272,7 @@ func messagesDebug(messages []ModelMessage) string {
 	return strings.Join(parts, "|")
 }
 
-func TestTrimPipelineMessagesKeepsPinnedSummaries(t *testing.T) {
-	t.Parallel()
-
-	messages := []ModelMessage{
-		{Role: "user", Content: newTextContent("<summary>\nold window\n</summary>")},
-		{Role: "user", Content: newTextContent(strings.Repeat("a", 400))},
-		{Role: "assistant", Content: newTextContent(strings.Repeat("b", 400))},
-		{Role: "user", Content: newTextContent("recent")},
-	}
-	pinned := []bool{true, false, false, false}
-
-	trimmed := trimPipelineMessagesByTokens(nil, messages, pinned, 40)
-
-	if len(trimmed) != 2 {
-		t.Fatalf("expected pinned summary + recent, got %s", messagesDebug(trimmed))
-	}
-	if !strings.Contains(string(trimmed[0].Content), "old window") {
-		t.Fatalf("pinned summary must survive trim, got %s", messagesDebug(trimmed))
-	}
-	if !strings.Contains(string(trimmed[1].Content), "recent") {
-		t.Fatalf("recent message must survive trim, got %s", messagesDebug(trimmed))
-	}
-}
-
-func TestTrimPipelineMessagesNeverDropsOversizedCurrentSource(t *testing.T) {
-	messages := []ModelMessage{
-		{Role: "user", Content: newTextContent("summary")},
-		{Role: "user", Content: newTextContent(strings.Repeat("current", 1000))},
-	}
-	got := trimPipelineMessagesByTokens(nil, messages, []bool{true, false}, 100)
-	if len(got) != 2 || string(got[1].Content) != string(messages[1].Content) {
-		t.Fatal("oversized current input must reach fail-closed provider admission, not disappear")
-	}
-}
-
-func TestBuildMessagesFromPipelineKeepsSummaryUnderBudget(t *testing.T) {
+func TestBuildMessagesFromPipelineKeepsHistoryOverBudget(t *testing.T) {
 	t.Parallel()
 
 	pipeline := timeline.NewPipeline(timeline.RenderParams{})
@@ -312,23 +286,20 @@ func TestBuildMessagesFromPipelineKeepsSummaryUnderBudget(t *testing.T) {
 		logger:   slog.New(slog.DiscardHandler),
 	}
 
-	messages, raw, pressure := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
+	messages, pressure, err := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
 		BotID:    pipelineTestBotID,
 		ThreadID: pipelineTestSessionID,
 	}, 200)
-
-	if pressure <= raw || raw < 1000 {
-		t.Fatalf("pressure lost discarded history or summaries: raw=%d pressure=%d", raw, pressure)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(messages) == 0 {
-		t.Fatal("artifact summary must survive a budget that drops the whole tail")
+
+	if pressure < 1000 {
+		t.Fatalf("pressure lost history over budget: %d", pressure)
 	}
 	joined := messagesDebug(messages)
-	if !strings.Contains(joined, "compacted window") {
-		t.Fatalf("artifact summary must survive the dropped prefix, got %s", joined)
-	}
-	if strings.Contains(joined, strings.Repeat("x", 4000)) {
-		t.Fatalf("oversized tail should have been trimmed, got %d messages", len(messages))
+	if !strings.Contains(joined, "compacted window") || !strings.Contains(joined, strings.Repeat("x", 4000)) || !strings.Contains(joined, "current question") {
+		t.Fatalf("history over budget must reach provider admission whole, got %s", joined)
 	}
 }
 
@@ -341,9 +312,29 @@ func TestPipelineCurrentIdentitySurvivesLaterExternalAndSelfMessages(t *testing.
 	echo.IsSelfSent = true
 	pipeline.PushEvent(pipelineTestSessionID, echo)
 	svc := &Service{pipeline: pipeline, logger: slog.New(slog.DiscardHandler)}
-	messages, _, _ := svc.buildMessagesFromPipeline(t.Context(), ChatRequest{ThreadID: pipelineTestSessionID, ExternalMessageID: "current"}, 500)
+	messages, _, err := svc.buildMessagesFromPipeline(t.Context(), ChatRequest{ThreadID: pipelineTestSessionID, ExternalMessageID: "current"}, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
 	index := latestModelUserMessageIndex(messages)
 	if index == nil || !strings.Contains(messages[*index].TextContent(), "required input") {
 		t.Fatalf("wrong current source: index=%v messages=%s", index, messagesDebug(messages))
+	}
+}
+
+func TestBuildMessagesFromPipelineFailsWhenASourceCannotLoad(t *testing.T) {
+	t.Parallel()
+
+	for name, svc := range map[string]*Service{
+		"frontier": {queries: fakeArtifactLineageQueries{err: errors.New("frontier unavailable")}},
+		"history":  {messageService: &turnResponseSourceMessageService{err: errors.New("history unavailable")}},
+	} {
+		pipeline := timeline.NewPipeline(timeline.RenderParams{})
+		pipeline.PushEvent(pipelineTestSessionID, pipelineTextEvent("m1", 1000, "current question"))
+		svc.pipeline, svc.logger = pipeline, slog.New(slog.DiscardHandler)
+		messages, _, err := svc.buildMessagesFromPipeline(t.Context(), ChatRequest{BotID: pipelineTestBotID, ThreadID: pipelineTestSessionID}, 1000)
+		if err == nil || messages != nil {
+			t.Fatalf("%s: messages=%s err=%v, want the request failed instead of composed without the source", name, messagesDebug(messages), err)
+		}
 	}
 }

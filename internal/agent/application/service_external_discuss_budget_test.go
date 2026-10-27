@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
@@ -56,80 +57,65 @@ func FuzzExternalDiscussFinalEnvelope(f *testing.F) {
 func TestExternalDiscussAdmissionIncludesRuntimeContext(t *testing.T) {
 	service := &Service{}
 	service.SetContextAbsoluteMaxTokens(1000)
-	messages := make([]turn.DiscussMessage, 1000)
-	for i := range messages {
-		messages[i] = turn.DiscussMessage{Role: "user", Content: "abcd"}
-	}
+	messages := externalDiscuss(100)
 	messages[0] = turn.DiscussMessage{Role: "user", Content: "old summary", CompactionArtifactID: "summary"}
-	messages[len(messages)-1].Content = "CURRENT"
 	sections := buildRuntimeContextSections(runtimeContextRenderInput{})
 	markdown, _, _ := runtimeContextViaContextView(t.Context(), nil, sections, "")
 	got, err := service.prepareExternalDiscussContext(t.Context(), ChatRequest{discussMessages: messages}, markdown, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	actual := turn.EstimateTokensFromBytes(len(got.Query) + len(markdown))
-	if actual > 1000 {
-		t.Fatalf("final external envelope=%d, budget=1000", actual)
+	if actual := turn.EstimateTokensFromBytes(len(got.Query) + len(markdown)); actual > 1000 || !strings.Contains(got.Query, "old summary") || !strings.Contains(got.Query, "CURRENT") {
+		t.Fatalf("final external envelope=%d tokens, want every message within 1000", actual)
 	}
-	if !strings.Contains(got.Query, "old summary") || !strings.Contains(got.Query, "CURRENT") {
-		t.Fatal("lost protected sources")
+	_, err = service.prepareExternalDiscussContext(t.Context(), ChatRequest{discussMessages: messages}, markdown+strings.Repeat("runtime context\n", 125), 0)
+	if apperror.CodeOf(err) != apperror.CodeContextBudgetUnsatisfied {
+		t.Fatalf("runtime context crowding out history: err=%v, want budget_unsatisfied instead of dropping messages", err)
 	}
 }
 
-func TestExternalDiscussDriverReceivesBoundedFinalEnvelope(t *testing.T) {
+func TestExternalDiscussDriverFailsInsteadOfDroppingInput(t *testing.T) {
 	pool := &recordingACPPrompter{result: acpclient.PromptResult{Text: "done", StopReason: "end_turn"}}
 	messages := &recordingMessageService{}
 	service := newACPLifecycleService(t, pool, messages, nil)
 	service.SetACPSessionPool(pool)
 	service.SetContextAbsoluteMaxTokens(1000)
-	sources := make([]turn.DiscussMessage, 1000)
-	for i := range sources {
-		sources[i] = turn.DiscussMessage{Role: "user", Content: "abcd"}
-	}
-	sources[len(sources)-1].Content = "CURRENT"
 	chunks, errs := service.StreamChat(t.Context(), ChatRequest{
 		BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID, Query: "candidate", UserMessagePersisted: true,
-		discussMessages: sources,
+		discussMessages: externalDiscuss(1000),
 	})
 	drainStreamChunks(t, chunks)
+	var failure error
 	for err := range errs {
-		t.Fatal(err)
+		failure = err
 	}
-	actual := turn.EstimateTokensFromBytes(len(pool.input.Prompt) + len(pool.input.ContextMarkdown))
-	if pool.calls != 1 || actual > 1000 || !strings.Contains(pool.input.Prompt, "CURRENT") {
-		t.Fatalf("external dispatch escaped admission: calls=%d tokens=%d", pool.calls, actual)
+	if apperror.CodeOf(failure) != apperror.CodeContextBudgetUnsatisfied || pool.calls != 0 {
+		t.Fatalf("err=%v dispatches=%d, want budget_unsatisfied before dispatch", failure, pool.calls)
 	}
 }
 
-func TestExternalDiscussOversizedBatchCompactsOlderInputOrRecordsOmission(t *testing.T) {
+func TestExternalDiscussOversizedBatchCompactsOlderInputOrFails(t *testing.T) {
 	var messages []turn.DiscussMessage
 	for _, id := range []string{"a", "b", "c", "d"} {
 		messages = append(messages, turn.DiscussMessage{Role: "user", Content: id + strings.Repeat("x", 1200), Source: &turn.ContextMessageSource{Kind: "external", ID: id, Current: true}})
 	}
-	for _, mode := range []string{"shadow", "off"} {
-		service, compactor := newControllerPolicyService(t, nil)
+	for _, exhausted := range []bool{false, true} {
+		service, compactor := newControllerPolicyService(t)
 		service.SetContextAbsoluteMaxTokens(1000)
-		service.SetSyncCompactionMode(mode)
-		got, err := service.prepareExternalDiscussContext(t.Context(), ChatRequest{BotID: syncCompactBotID, ThreadID: syncCompactThreadID, discussMessages: messages}, "", 0)
-		if mode == "shadow" {
+		got, err := service.prepareExternalDiscussContext(t.Context(), ChatRequest{BotID: syncCompactBotID, ThreadID: syncCompactThreadID, discussMessages: messages, discussRecoveryExhausted: exhausted}, "", 0)
+		if !exhausted {
 			if !errors.Is(err, native.ErrContextRecompose) || len(compactor.configs) != 1 {
 				t.Fatalf("older input must be compacted: err=%v compactions=%d", err, len(compactor.configs))
 			}
-			for _, source := range compactor.configs[0].ProtectedSources {
+			for _, source := range compactor.configs[0].Anchors {
 				if source.ID == "a" {
-					t.Fatalf("the oldest input was protected from compaction: %+v", compactor.configs[0].ProtectedSources)
+					t.Fatalf("the oldest input was protected from compaction: %+v", compactor.configs[0].Anchors)
 				}
 			}
 			continue
 		}
-		if err != nil || len(got.discussOmittedSources) == 0 || got.discussOmittedSources[0].ID != "a" || !strings.Contains(got.Query, "d"+strings.Repeat("x", 1200)) {
-			t.Fatalf("without recovery the newest input must proceed and the omission must be recorded: err=%v omitted=%+v", err, got.discussOmittedSources)
-		}
-		ledger := contextfrag.NewMutationLedger()
-		recordOmittedCurrentInput(ledger, got.discussOmittedSources)
-		if records := ledger.Records(); len(records) != 1 || records[0].Kind != contextfrag.MutationCurrentInputOmitted || !strings.HasPrefix(records[0].Detail, "sources=a") {
-			t.Fatalf("omission record=%+v", records)
+		if apperror.CodeOf(err) != apperror.CodeContextBudgetUnsatisfied || len(compactor.configs) != 0 || got.Query != "" {
+			t.Fatalf("exhausted recovery must fail instead of omitting input: err=%v compactions=%d", err, len(compactor.configs))
 		}
 	}
 }
@@ -154,15 +140,15 @@ func externalResumeService(t *testing.T) (*Service, *recordingACPPrompter, *resu
 	service.SetACPSessionPool(pool)
 	service.SetContextAbsoluteMaxTokens(1000)
 	saved := &resumeSaveQueries{}
-	policy, _ := newControllerPolicyService(t, nil)
+	policy, _ := newControllerPolicyService(t)
 	service.queries = externalResumeQueries{externalDiscussQueries: &externalDiscussQueries{&recoveryHistoryQueries{policy.queries.(*controllerQueries)}}, saved: saved}
 	service.resumeSecret = "resume-test-secret"
 	ctx := runtimefence.WithContext(t.Context(), runtimefence.Fence{BotID: lifecycleTestBotID, SessionID: lifecycleTestSessionID, Token: 7})
 	return service, pool, saved, ctx
 }
 
-func externalOversizedDiscuss() []turn.DiscussMessage {
-	sources := make([]turn.DiscussMessage, 1000)
+func externalDiscuss(n int) []turn.DiscussMessage {
+	sources := make([]turn.DiscussMessage, n)
 	for i := range sources {
 		sources[i] = turn.DiscussMessage{Role: "user", Content: "abcd"}
 	}
@@ -202,7 +188,7 @@ func TestExternalDiscussResumeAdmitsEverySavedBatchAgain(t *testing.T) {
 	service, pool, saved, ctx := externalResumeService(t)
 	chunks, errs := service.StreamChat(ctx, ChatRequest{
 		BotID: lifecycleTestBotID, ChatID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID, RunID: uuid.NewString(),
-		Query: discussAgentFullContextPrompt(externalOversizedDiscuss()), UserMessagePersisted: true, discussMessages: externalOversizedDiscuss(),
+		Query: discussAgentFullContextPrompt(externalDiscuss(100)), UserMessagePersisted: true, discussMessages: externalDiscuss(100),
 	})
 	drainStreamChunks(t, chunks)
 	for err := range errs {
@@ -260,7 +246,7 @@ func TestExternalShutdownResumeBoundsInstructionPromptAndRuntimeContext(t *testi
 	service, pool, _, ctx := externalResumeService(t)
 	chunks, errs := service.StreamChat(ctx, ChatRequest{
 		BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID, RunID: uuid.NewString(), ShutdownResume: true,
-		Query: resumeInstruction + discussAgentFullContextPrompt(externalOversizedDiscuss()), UserMessagePersisted: true,
+		Query: resumeInstruction + discussAgentFullContextPrompt(externalDiscuss(1000)), UserMessagePersisted: true,
 	})
 	drainStreamChunks(t, chunks)
 	var failure error
@@ -274,7 +260,7 @@ func TestExternalShutdownResumeBoundsInstructionPromptAndRuntimeContext(t *testi
 
 func TestExternalDiscussFinalAdmissionRejectsIrreducibleContext(t *testing.T) {
 	for _, images := range []int{0, 1} {
-		service, compactor := newControllerPolicyService(t, nil)
+		service, compactor := newControllerPolicyService(t)
 		service.SetContextAbsoluteMaxTokens(1000)
 		_, err := service.prepareExternalDiscussContext(t.Context(), ChatRequest{
 			BotID: syncCompactBotID, ThreadID: syncCompactThreadID,
@@ -287,66 +273,58 @@ func TestExternalDiscussFinalAdmissionRejectsIrreducibleContext(t *testing.T) {
 }
 
 func TestExternalDiscussFinalAdmissionControlNeverReachesRuntimeOrHistory(t *testing.T) {
-	for _, mode := range []string{"shadow", "off"} {
-		t.Run(mode, func(t *testing.T) {
-			pool := &recordingACPPrompter{}
-			messages := &recordingMessageService{}
-			external := newACPLifecycleService(t, pool, messages, nil)
-			service := newDiscussTestService(&fakeRunner{}, &fakeAgentStreamer{}, &fakeDiscussService{
-				resolveResult: ResolveRunConfigResult{RuntimeType: sessionpkg.RuntimeACPAgent},
-			})
-			service.messageService = messages
-			service.botPermissions = external.botPermissions
-			service.sessionService = external.sessionService
-			service.SetACPSessionPool(pool)
-			service.turnHooks.streamChat = nil
-			service.SetContextAbsoluteMaxTokens(1000)
-			service.SetSyncCompactionMode(mode)
-			policy, compactor := newControllerPolicyService(t, nil)
-			service.settingsService, service.modelsService = policy.settingsService, policy.modelsService
-			service.queries = &externalDiscussQueries{recoveryHistoryQueries: &recoveryHistoryQueries{controllerQueries: policy.queries.(*controllerQueries)}}
-			service.compactionService = compactor
-			configureDiscussLifecycle(service)
-			published := 0
-			service.publishTurnEvent = func(context.Context, sessionruntime.RunHandle, native.StreamEvent) error { published++; return nil }
-			cmd := lifecycleDiscussCommand()
-			cmd.DiscussMessages = []turn.DiscussMessage{
-				{Role: "user", Content: strings.Repeat("s", 2000), CompactionArtifactID: "summary"},
-				{Role: "user", Content: strings.Repeat("c", 1400)},
-			}
-			handle, err := service.StartTurn(t.Context(), cmd)
-			if err != nil {
-				t.Fatal(err)
-			}
-			recomposed := false
-			for event := range handle.Events() {
-				recomposed = recomposed || event.Kind == turn.DiscussEventRecompose
-				if event.Kind == string(native.EventContextRecompose) {
-					t.Fatal("private runtime control leaked")
-				}
-			}
-			failures := 0
-			for err := range handle.Errs() {
-				failures++
-				if apperror.CodeOf(err) != apperror.CodeContextProtectedOverflow || errors.Is(err, native.ErrContextRecompose) {
-					t.Fatalf("unexpected failure: %v", err)
-				}
-			}
-			if mode == "shadow" && (!recomposed || failures != 0 || len(compactor.configs) != 1) {
-				t.Fatalf("recovery outcome: recompose=%v failures=%d compactions=%d", recomposed, failures, len(compactor.configs))
-			}
-			if mode == "off" && (recomposed || failures != 1 || len(compactor.configs) != 0) {
-				t.Fatal("explicit off did not fail closed")
-			}
-			if pool.calls != 0 || published != 0 || len(messages.persisted) != 0 || len(messages.roundOptions) != 0 || len(messages.deleted) != 0 {
-				t.Fatalf("rejected context had side effects: driver=%d public=%d history=%d rounds=%d deletes=%d", pool.calls, published, len(messages.persisted), len(messages.roundOptions), len(messages.deleted))
-			}
-		})
+	pool := &recordingACPPrompter{}
+	messages := &recordingMessageService{}
+	external := newACPLifecycleService(t, pool, messages, nil)
+	service := newDiscussTestService(&fakeRunner{}, &fakeAgentStreamer{}, &fakeDiscussService{
+		resolveResult: ResolveRunConfigResult{RuntimeType: sessionpkg.RuntimeACPAgent},
+	})
+	service.messageService = messages
+	service.botPermissions = external.botPermissions
+	service.sessionService = external.sessionService
+	service.SetACPSessionPool(pool)
+	service.turnHooks.streamChat = nil
+	service.SetContextAbsoluteMaxTokens(1000)
+	policy, compactor := newControllerPolicyService(t)
+	service.settingsService, service.modelsService = policy.settingsService, policy.modelsService
+	service.queries = &externalDiscussQueries{recoveryHistoryQueries: &recoveryHistoryQueries{controllerQueries: policy.queries.(*controllerQueries)}}
+	service.compactionService = compactor
+	configureDiscussLifecycle(service)
+	published := 0
+	service.publishTurnEvent = func(context.Context, sessionruntime.RunHandle, native.StreamEvent) error { published++; return nil }
+	cmd := lifecycleDiscussCommand()
+	cmd.DiscussMessages = []turn.DiscussMessage{
+		{Role: "user", Content: strings.Repeat("s", 2000), CompactionArtifactID: "summary"},
+		{Role: "user", Content: strings.Repeat("c", 1400)},
+	}
+	handle, err := service.StartTurn(t.Context(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recomposed := false
+	for event := range handle.Events() {
+		recomposed = recomposed || event.Kind == turn.DiscussEventRecompose
+		if event.Kind == string(native.EventContextRecompose) {
+			t.Fatal("private runtime control leaked")
+		}
+	}
+	failures := 0
+	for err := range handle.Errs() {
+		failures++
+		if apperror.CodeOf(err) != apperror.CodeContextProtectedOverflow || errors.Is(err, native.ErrContextRecompose) {
+			t.Fatalf("unexpected failure: %v", err)
+		}
+	}
+	if !recomposed || failures != 0 || len(compactor.configs) != 1 {
+		t.Fatalf("recovery outcome: recompose=%v failures=%d compactions=%d", recomposed, failures, len(compactor.configs))
+	}
+	if pool.calls != 0 || published != 0 || len(messages.persisted) != 0 || len(messages.roundOptions) != 0 || len(messages.deleted) != 0 {
+		t.Fatalf("rejected context had side effects: driver=%d public=%d history=%d rounds=%d deletes=%d", pool.calls, published, len(messages.persisted), len(messages.roundOptions), len(messages.deleted))
 	}
 }
 
 func TestExternalDiscussRecoversPretrimmedHistoryPressure(t *testing.T) {
-	service, runner := newControllerPolicyService(t, nil)
+	service, runner := newControllerPolicyService(t)
 	service.SetContextAbsoluteMaxTokens(1000)
 	req := ChatRequest{BotID: syncCompactBotID, ThreadID: syncCompactThreadID, discussContextTokens: 20000, discussMessages: []turn.DiscussMessage{{Role: "user", Content: "current"}}}
 	_, err := service.prepareExternalDiscussContext(t.Context(), req, "runtime context", 0)
@@ -356,11 +334,32 @@ func TestExternalDiscussRecoversPretrimmedHistoryPressure(t *testing.T) {
 }
 
 func TestExternalDiscussOriginalPressureUsesFinalHistoryAllowance(t *testing.T) {
-	service, runner := newControllerPolicyService(t, nil)
+	service, runner := newControllerPolicyService(t)
 	service.SetContextAbsoluteMaxTokens(1000)
 	req := ChatRequest{BotID: syncCompactBotID, ThreadID: syncCompactThreadID, discussContextTokens: 900, discussMessages: []turn.DiscussMessage{{Role: "user", Content: "current"}}}
 	_, err := service.prepareExternalDiscussContext(t.Context(), req, strings.Repeat("m", 2800), 0)
 	if !errors.Is(err, native.ErrContextRecompose) || len(runner.configs) != 1 {
 		t.Fatalf("ignored final fixed overhead: err=%v calls=%d", err, len(runner.configs))
+	}
+}
+
+// A context that compaction could have made fit is not reported as oversized
+// input when the compaction fails.
+func TestExternalDiscussFailedRecoveryReportsBudgetUnsatisfied(t *testing.T) {
+	service, _ := newControllerPolicyService(t)
+	runner := &recoveryCompactionRunner{run: func() ([]compaction.Pass, error) {
+		return nil, errors.New("summarizer down")
+	}}
+	service.compactionService = runner
+	service.SetContextAbsoluteMaxTokens(1000)
+	_, err := service.prepareExternalDiscussContext(t.Context(), ChatRequest{
+		BotID: syncCompactBotID, ThreadID: syncCompactThreadID,
+		discussMessages: []turn.DiscussMessage{
+			{Role: "user", Content: strings.Repeat("s", 3000), CompactionArtifactID: "summary"},
+			{Role: "user", Content: strings.Repeat("c", 1400), Source: &turn.ContextMessageSource{Kind: "external", ID: "current", Current: true}},
+		},
+	}, "", 0)
+	if apperror.CodeOf(err) != apperror.CodeContextBudgetUnsatisfied || len(runner.configs) != 1 {
+		t.Fatalf("failed recovery: err=%v compactions=%d, want budget_unsatisfied after one attempt", err, len(runner.configs))
 	}
 }

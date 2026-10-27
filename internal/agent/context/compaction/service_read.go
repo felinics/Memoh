@@ -7,12 +7,8 @@ const (
 	maxCompactionReadBytes = 8 << 20
 )
 
-func compactionReadMaxBytes(cfg TriggerConfig) int64 {
-	tokens := cfg.MaxCompactTokens
-	if tokens <= 0 {
-		tokens = 30000
-	}
-	bytes := int64(tokens) * 8
+func compactionReadMaxBytes(inputTokens int) int64 {
+	bytes := int64(inputTokens) * 8
 	if bytes < minCompactionReadBytes {
 		return minCompactionReadBytes
 	}

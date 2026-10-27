@@ -1,6 +1,13 @@
 -- name: NextSessionEventCursor :one
 SELECT nextval('bot_session_event_cursor_seq')::bigint;
 
+-- name: ListSessionEventCursors :many
+SELECT id, COALESCE((event_data->>'event_cursor')::bigint, 0)::bigint AS event_cursor
+FROM bot_session_events
+WHERE team_id = public.memoh_current_team_id()
+  AND session_id = sqlc.arg(session_id)
+  AND id = ANY(sqlc.arg(ids)::uuid[]);
+
 -- name: CreateSessionEvent :one
 INSERT INTO bot_session_events (
   bot_id,
@@ -36,10 +43,13 @@ WITH post_coverage_ids AS MATERIALIZED (
     AND changed.session_id = sqlc.arg(session_id)
     AND changed.external_message_id IS NOT NULL
     AND sqlc.arg(covered_external_messages)::jsonb ? changed.external_message_id
-    AND changed.received_at_ms > COALESCE(
-      (sqlc.arg(covered_external_messages)::jsonb ->> changed.external_message_id)::BIGINT,
-      0
-    )
+    AND CASE WHEN sqlc.arg(covered_event_cursors)::jsonb ? changed.external_message_id
+      THEN COALESCE((changed.event_data->>'event_cursor')::bigint, 0) = 0
+        OR (changed.event_data->>'event_cursor')::bigint >
+          (sqlc.arg(covered_event_cursors)::jsonb ->> changed.external_message_id)::bigint
+      ELSE changed.received_at_ms > COALESCE(
+        (sqlc.arg(covered_external_messages)::jsonb ->> changed.external_message_id)::BIGINT, 0)
+    END
 ), candidates AS MATERIALIZED (
   SELECT
     event.id,
@@ -62,10 +72,6 @@ WITH post_coverage_ids AS MATERIALIZED (
     AND (
       event.external_message_id IS NULL
       OR NOT (sqlc.arg(covered_external_messages)::jsonb ? event.external_message_id)
-      OR event.received_at_ms > COALESCE(
-        (sqlc.arg(covered_external_messages)::jsonb ->> event.external_message_id)::BIGINT,
-        0
-      )
       OR changed.external_message_id IS NOT NULL
     )
 ), ranked AS MATERIALIZED (

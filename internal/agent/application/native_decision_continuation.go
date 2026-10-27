@@ -33,14 +33,14 @@ func (s *Service) runNativeDecisionContinuation(ctx context.Context, req ChatReq
 	}()
 
 	continuationRC := resolvedContext{runConfig: cfg, model: models.GetResponse{ID: modelID}}
-	stepCommitter, err := s.bindQueueContinuation(ctx, &req, &cfg, continuationRC)
+	reasoningTiming := newReasoningTimingTracker(nil)
+	stepCommitter, err := s.bindQueueContinuation(ctx, &req, &cfg, continuationRC, reasoningTiming)
 	if err != nil {
 		return err
 	}
-	reasoningTiming := newReasoningTimingTracker(nil)
-	configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(cfg))
 	defer idleCancel.Stop()
+	cfg = pauseIdleDuringBudgetRecovery(cfg, idleCancel)
 	stream := s.agent.Stream(idleCtx, cfg)
 	stored := false
 	failureEventForwarded := false
@@ -101,7 +101,7 @@ func (s *Service) runNativeDecisionContinuation(ctx context.Context, req ChatReq
 				}
 				var storeErr error
 				if stepCommitter != nil {
-					storeErr = stepCommitter.finish(ctx, extractInputTokensFromUsage(snap.usage))
+					storeErr = stepCommitter.finish(ctx)
 				} else {
 					storeErr = s.persistTerminalSnapshot(
 						context.WithoutCancel(ctx),
@@ -128,7 +128,7 @@ func (s *Service) runNativeDecisionContinuation(ctx context.Context, req ChatReq
 		}
 	}
 	if !stored && stepCommitter != nil {
-		if storeErr := stepCommitter.finish(ctx, 0); storeErr != nil {
+		if storeErr := stepCommitter.finish(ctx); storeErr != nil {
 			lifecycleCause = storeErr
 			return storeErr
 		}

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
@@ -30,48 +31,27 @@ func mkRow(t *testing.T, role, content string, outputTokens int) sqlc.ListUncomp
 	return row
 }
 
-func itemTokens(items []CompactionCandidate) []int {
-	out := make([]int, len(items))
-	for i, it := range items {
-		out[i] = estimateItemTokens(it)
-	}
-	return out
+// foldBefore classifies rows and returns what a compaction may fold when
+// current names the caller's current input.
+func foldBefore(rows []sqlc.ListUncompactedMessagesBySessionRow, current ...sqlc.ListUncompactedMessagesBySessionRow) []CompactionCandidate {
+	items, _ := candidatesFromRows(rows)
+	protectCurrentSources(items, historySources(current...))
+	return foldableItems(items)
 }
 
-func TestEstimateItemTokensPrefersOutputTokensThenContentFallback(t *testing.T) {
-	t.Parallel()
-
-	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"hello"`, 50),
-		mkRow(t, "assistant", `"`+repeat("a", 400)+`"`, 0),
+func historySources(rows ...sqlc.ListUncompactedMessagesBySessionRow) []turn.ContextMessageSource {
+	sources := make([]turn.ContextMessageSource, 0, len(rows))
+	for _, row := range rows {
+		sources = append(sources, turn.ContextMessageSource{Kind: "history", ID: row.ID.String(), Current: true})
 	}
-	items, _ := itemsFromRows(rows)
-	got := itemTokens(items)
-	// First: persisted usage outputTokens. Second: len(content)/4 = 402/4 = 100.
-	if got[0] != 50 {
-		t.Fatalf("usage token estimate = %d, want 50", got[0])
-	}
-	if got[1] != len(items[1].RawContent)/4 {
-		t.Fatalf("content token estimate = %d, want %d", got[1], len(items[1].RawContent)/4)
-	}
+	return sources
 }
 
-func TestEstimateItemTokensAcceptsSnakeCaseUsage(t *testing.T) {
-	t.Parallel()
-
-	row := mkRow(t, "assistant", `"hello"`, 0)
-	row.Usage = json.RawMessage(`{"output_tokens":77}`)
-	items, _ := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{row})
-	if got := estimateItemTokens(items[0]); got != 77 {
-		t.Fatalf("snake-case usage token estimate = %d, want 77", got)
-	}
-}
-
-func TestItemsFromRowsPreservesIDContentAndClassifiesRecord(t *testing.T) {
+func TestCandidatesFromRowsPreservesIDContentAndClassifiesRecord(t *testing.T) {
 	t.Parallel()
 
 	row := mkRow(t, "user", `"hi there"`, 0)
-	items, _ := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{row})
+	items, _ := candidatesFromRows([]sqlc.ListUncompactedMessagesBySessionRow{row})
 	if len(items) != 1 {
 		t.Fatalf("items len = %d, want 1", len(items))
 	}
@@ -90,7 +70,7 @@ func TestItemsFromRowsPreservesIDContentAndClassifiesRecord(t *testing.T) {
 	}
 }
 
-func TestItemsFromRowsPreservesDirectedSignalMetadata(t *testing.T) {
+func TestCandidatesFromRowsPreservesDirectedSignalMetadata(t *testing.T) {
 	t.Parallel()
 
 	row := mkRow(t, "user", `"please check the reply"`, 0)
@@ -104,7 +84,7 @@ func TestItemsFromRowsPreservesDirectedSignalMetadata(t *testing.T) {
 	row.ConversationName = "Ops Room"
 	row.ReplyTarget = pgtype.Text{String: "thread-9", Valid: true}
 
-	items, barrierCount := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{row})
+	items, barrierCount := candidatesFromRows([]sqlc.ListUncompactedMessagesBySessionRow{row})
 	if barrierCount != 0 || len(items) != 1 {
 		t.Fatalf("items=%d barriers=%d, want one classified row", len(items), barrierCount)
 	}
@@ -120,7 +100,7 @@ func TestItemsFromRowsPreservesDirectedSignalMetadata(t *testing.T) {
 	}
 }
 
-func TestItemsFromRowsAnnotatesCompactionCandidatePolicy(t *testing.T) {
+func TestProtectCurrentSourcesKeepsCurrentInputAndWhatFollows(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
@@ -130,10 +110,11 @@ func TestItemsFromRowsAnnotatesCompactionCandidatePolicy(t *testing.T) {
 		toolCallRow(t, 100),
 		toolResultRow(t, 100),
 	}
-	items, barrierCount := itemsFromRows(rows)
+	items, barrierCount := candidatesFromRows(rows)
 	if barrierCount != 0 || len(items) != 5 {
 		t.Fatalf("items=%d barriers=%d, want five classified candidates", len(items), barrierCount)
 	}
+	protectCurrentSources(items, historySources(rows[2]))
 
 	assertNoPolicy(t, items[0], CompactPolicyPreserveRecent)
 	assertNoPolicy(t, items[0], CompactPolicyMustKeep)
@@ -144,87 +125,59 @@ func TestItemsFromRowsAnnotatesCompactionCandidatePolicy(t *testing.T) {
 	assertPolicy(t, items[3], CompactPolicyPreserveRecent)
 	assertPolicy(t, items[4], CompactPolicyPreserveToolClosure)
 	assertPolicy(t, items[4], CompactPolicyPreserveRecent)
+	if folded := foldableItems(items); len(folded) != 2 {
+		t.Fatalf("folded %d rows, want the two before the current input", len(folded))
+	}
 }
 
-func TestItemsFromRowsKeepsOnlyPendingAskUserCall(t *testing.T) {
+func TestCandidatesFromRowsKeepsOnlyPendingAskUserCall(t *testing.T) {
 	t.Parallel()
 
 	askCall := mkRow(t, "assistant", `[{"type":"tool-call","toolName":"`+userinput.ToolNameAskUser+`","toolCallId":"ask-1","input":{"questions":[]}}]`, 100)
 	askResult := mkRow(t, "tool", `[{"type":"tool-result","toolName":"`+userinput.ToolNameAskUser+`","toolCallId":"ask-1","result":{"status":"submitted"}}]`, 100)
-	answered, _ := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{askCall, askResult, mkRow(t, "user", `"current"`, 100)})
+	answered, _ := candidatesFromRows([]sqlc.ListUncompactedMessagesBySessionRow{askCall, askResult})
 	for _, idx := range []int{0, 1} {
 		assertNoPolicy(t, answered[idx], CompactPolicyMustKeep)
 		assertPolicy(t, answered[idx], CompactPolicyPreserveToolClosure)
 	}
-	pending, _ := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{askCall, mkRow(t, "user", `"current"`, 100)})
-	assertPolicy(t, pending[0], CompactPolicyMustKeep)
+	pending, _ := candidatesFromRows([]sqlc.ListUncompactedMessagesBySessionRow{mkRow(t, "user", `"question"`, 100), askCall})
+	assertPolicy(t, pending[1], CompactPolicyMustKeep)
+	closed, _ := candidatesFromRows([]sqlc.ListUncompactedMessagesBySessionRow{askCall, mkRow(t, "user", `"current"`, 100)})
+	assertNoPolicy(t, closed[0], CompactPolicyMustKeep)
 	twoCalls := mkRow(t, "assistant", `[{"type":"tool-call","toolName":"`+userinput.ToolNameAskUser+`","toolCallId":"ask-1","input":{}},{"type":"tool-call","toolName":"`+userinput.ToolNameAskUser+`","toolCallId":"ask-2","input":{}}]`, 100)
-	half, _ := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{twoCalls, askResult, mkRow(t, "user", `"current"`, 100)})
+	half, _ := candidatesFromRows([]sqlc.ListUncompactedMessagesBySessionRow{twoCalls, askResult})
 	for _, idx := range []int{0, 1} {
 		assertPolicy(t, half[idx], CompactPolicyMustKeep)
 	}
-}
-
-func TestGuardedSelectionCompactsAroundMustKeepAskExchange(t *testing.T) {
-	t.Parallel()
-
-	askCall := mkRow(t, "assistant", `[{"type":"tool-call","toolName":"`+userinput.ToolNameAskUser+`","toolCallId":"ask-1","input":{"questions":[]}}]`, 100)
-	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		askCall,
-		mkRow(t, "user", `"question 2"`, 100),
-		mkRow(t, "assistant", `"answer 2"`, 100),
-		mkRow(t, "user", `"question 3"`, 100),
-		mkRow(t, "assistant", `"answer 3"`, 100),
-		mkRow(t, "user", `"current question"`, 100),
-		mkRow(t, "assistant", `"current answer"`, 100),
-	}
-	items, _ := itemsFromRows(rows)
-
-	_, ids := buildEntriesAndIDs(splitByTarget(items, 200))
-	if len(ids) == 0 {
-		t.Fatal("a must-keep ask exchange at the window head must not starve compaction of newer history")
-	}
-	for _, id := range ids {
-		if id == askCall.ID {
-			t.Fatalf("must-keep ask_user row was marked for compaction")
-		}
-		for _, protected := range []pgtype.UUID{rows[5].ID, rows[6].ID} {
-			if id == protected {
-				t.Fatalf("current turn row was marked for compaction")
-			}
-		}
-	}
-
-	if _, ratioIDs := buildEntriesAndIDs(splitByRatio(items, 800, 80)); len(ratioIDs) == 0 {
-		t.Fatal("ratio-based selection must also compact around the must-keep island")
+	halfClosed, _ := candidatesFromRows([]sqlc.ListUncompactedMessagesBySessionRow{twoCalls, askResult, mkRow(t, "user", `"current"`, 100)})
+	for _, idx := range []int{0, 1} {
+		assertNoPolicy(t, halfClosed[idx], CompactPolicyMustKeep)
 	}
 }
 
 func TestParallelToolCallsPropagateMustKeepToSiblingResult(t *testing.T) {
 	t.Parallel()
 
-	// One assistant message carries two parallel tool calls (ask_user + calc).
-	// The row is must-keep because of ask_user, but the calc result is a
-	// separate row that only carries the tool-closure policy on its own.
+	// One assistant message carries two parallel tool calls (ask_user + calc)
+	// and the run waits on the ask_user one. The row is must-keep because of
+	// ask_user, but the calc result is a separate row that only carries the
+	// tool-closure policy on its own.
 	assistantCall := mkRow(t, "assistant", `[{"type":"tool-call","toolName":"`+userinput.ToolNameAskUser+`","toolCallId":"ask-1","input":{"questions":[]}},`+
 		`{"type":"tool-call","toolName":"calc","toolCallId":"calc-1","input":{}}]`, 100)
 	calcResult := mkRow(t, "tool", `[{"type":"tool-result","toolName":"calc","toolCallId":"calc-1","output":{"type":"text","value":"42"}}]`, 100)
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
 		mkRow(t, "user", `"question 1"`, 100),
+		mkRow(t, "assistant", `"answer 1"`, 100),
+		mkRow(t, "user", `"question 2"`, 100),
 		assistantCall,
 		calcResult,
-		mkRow(t, "user", `"question 2"`, 100),
-		mkRow(t, "assistant", `"answer 2"`, 100),
-		mkRow(t, "user", `"current question"`, 100),
-		mkRow(t, "assistant", `"current answer"`, 100),
 	}
-	items, _ := itemsFromRows(rows)
+	items, _ := candidatesFromRows(rows)
+	assertPolicy(t, items[4], CompactPolicyMustKeep)
 
-	assertPolicy(t, items[2], CompactPolicyMustKeep)
-
-	_, ids := buildEntriesAndIDs(splitByTarget(items, 200))
-	if len(ids) == 0 {
-		t.Fatal("compaction should still proceed around the must-keep exchange")
+	_, ids := buildEntriesAndIDs(foldBefore(rows))
+	if len(ids) != 3 {
+		t.Fatalf("marked %d rows, want the three before the exchange the run waits on", len(ids))
 	}
 	for _, id := range ids {
 		if id == assistantCall.ID {
@@ -236,72 +189,7 @@ func TestParallelToolCallsPropagateMustKeepToSiblingResult(t *testing.T) {
 	}
 }
 
-func TestGuardedSelectionKeepsCompactRunContiguousAcrossMustKeepIsland(t *testing.T) {
-	t.Parallel()
-
-	askCall := mkRow(t, "assistant", `[{"type":"tool-call","toolName":"`+userinput.ToolNameAskUser+`","toolCallId":"ask-1","input":{"questions":[]}}]`, 100)
-	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"old q"`, 100),          // 0 run before island
-		mkRow(t, "assistant", `"old a"`, 100),     // 1
-		askCall,                                   // 2 must-keep island: unanswered
-		mkRow(t, "user", `"mid q"`, 100),          // 3 run after island
-		mkRow(t, "assistant", `"mid a"`, 100),     // 4
-		mkRow(t, "user", `"current q"`, 100),      // 5 protected recent
-		mkRow(t, "assistant", `"current a"`, 100), // 6
-	}
-	items, _ := itemsFromRows(rows)
-
-	// One pass must select a single contiguous run so the read path can drop it
-	// in place. It may only be the rows before the first must-keep island, never
-	// straddling ask_user into "mid q"/"mid a" under a shared compact_id.
-	_, gotIDs := buildEntriesAndIDs(splitByTarget(items, 200))
-	wantIDs := []pgtype.UUID{rows[0].ID, rows[1].ID}
-	if len(gotIDs) != len(wantIDs) {
-		t.Fatalf("selected %d rows, want the contiguous pre-island run [old q, old a]", len(gotIDs))
-	}
-	for i := range wantIDs {
-		if gotIDs[i] != wantIDs[i] {
-			t.Fatalf("selected run must be the contiguous pre-island run, got id[%d]=%s", i, formatUUID(gotIDs[i]))
-		}
-	}
-
-	// The run after the island is not starved: once the pre-island run is
-	// compacted away, the next pass makes progress on "mid q"/"mid a".
-	nextItems, _ := itemsFromRows(rows[2:])
-	_, nextIDs := buildEntriesAndIDs(splitByTarget(nextItems, 200))
-	if len(nextIDs) == 0 {
-		t.Fatal("run after the must-keep island must be compactable on a later pass")
-	}
-	for _, id := range nextIDs {
-		if id == askCall.ID {
-			t.Fatalf("must-keep ask_user row was marked for compaction")
-		}
-	}
-}
-
-func TestItemsFromRowsAllowsCurrentTurnMiddleCompaction(t *testing.T) {
-	t.Parallel()
-
-	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"current instruction"`, 100),
-		mkRow(t, "assistant", `"loop step 1"`, 100),
-		mkRow(t, "assistant", `"loop step 2"`, 100),
-		mkRow(t, "assistant", `"latest tail"`, 100),
-	}
-	items, barrierCount := itemsFromRows(rows)
-	if barrierCount != 0 || len(items) != 4 {
-		t.Fatalf("items=%d barriers=%d, want four classified candidates", len(items), barrierCount)
-	}
-
-	assertPolicy(t, items[0], CompactPolicyPreserveRecent)
-	assertNoPolicy(t, items[1], CompactPolicyPreserveRecent)
-	assertNoPolicy(t, items[1], CompactPolicyMustKeep)
-	assertNoPolicy(t, items[2], CompactPolicyPreserveRecent)
-	assertNoPolicy(t, items[2], CompactPolicyMustKeep)
-	assertPolicy(t, items[3], CompactPolicyPreserveRecent)
-}
-
-func TestItemsFromRowsPreservesUnparseableRowsAsSelectionBarriers(t *testing.T) {
+func TestCandidatesFromRowsPreservesUnparseableRowsAsSelectionBarriers(t *testing.T) {
 	t.Parallel()
 
 	before := mkRow(t, "user", `"before"`, 100)
@@ -312,7 +200,7 @@ func TestItemsFromRowsPreservesUnparseableRowsAsSelectionBarriers(t *testing.T) 
 	}
 	after := mkRow(t, "assistant", `"after"`, 100)
 	current := mkRow(t, "user", `"current"`, 100)
-	items, barrierCount := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{before, bad, after, current})
+	items, barrierCount := candidatesFromRows([]sqlc.ListUncompactedMessagesBySessionRow{before, bad, after, current})
 	if barrierCount != 1 {
 		t.Fatalf("barrier count = %d, want 1", barrierCount)
 	}
@@ -320,7 +208,8 @@ func TestItemsFromRowsPreservesUnparseableRowsAsSelectionBarriers(t *testing.T) 
 		t.Fatalf("an unparseable row must remain as a selection barrier: %#v", items)
 	}
 
-	_, ids := buildEntriesAndIDs(splitByTarget(items, 100))
+	protectCurrentSources(items, historySources(current))
+	_, ids := buildEntriesAndIDs(foldableItems(items))
 	if len(ids) != 1 || ids[0] != before.ID {
 		t.Fatalf("marked = %#v, want only the contiguous run before the barrier", ids)
 	}
@@ -340,62 +229,6 @@ func assertNoPolicy(t *testing.T, item CompactionCandidate, policy CompactPolicy
 	}
 }
 
-func TestSplitByTargetCompactsOldestBeyondTarget(t *testing.T) {
-	t.Parallel()
-
-	// Tokens (oldest -> newest): 100, 100, 100. Target 150: newest fits (100),
-	// adding the next exceeds 150, so keep the newest one and compact the oldest two.
-	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"a"`, 100),
-		mkRow(t, "assistant", `"b"`, 100),
-		mkRow(t, "user", `"c"`, 100),
-	}
-	items, _ := itemsFromRows(rows)
-	toCompact := splitByTarget(items, 150)
-	if len(toCompact) != 2 {
-		t.Fatalf("compact count = %d, want 2", len(toCompact))
-	}
-	if toCompact[0].ID != rows[0].ID || toCompact[1].ID != rows[1].ID {
-		t.Fatalf("compacted the wrong (non-oldest) messages")
-	}
-}
-
-func TestSplitByRatioKeepsNewestByRatio(t *testing.T) {
-	t.Parallel()
-
-	// total=300, ratio=50 -> keepTokens=150 -> keep newest one, compact oldest two.
-	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"a"`, 100),
-		mkRow(t, "assistant", `"b"`, 100),
-		mkRow(t, "user", `"c"`, 100),
-	}
-	items, _ := itemsFromRows(rows)
-	toCompact := splitByRatio(items, 300, 50)
-	if len(toCompact) != 2 {
-		t.Fatalf("compact count = %d, want 2", len(toCompact))
-	}
-	if toCompact[0].ID != rows[0].ID || toCompact[1].ID != rows[1].ID {
-		t.Fatalf("compacted the wrong messages")
-	}
-}
-
-func TestSplitByRatioBoundaryConditions(t *testing.T) {
-	t.Parallel()
-
-	rows := []sqlc.ListUncompactedMessagesBySessionRow{mkRow(t, "user", `"a"`, 100)}
-	items, _ := itemsFromRows(rows)
-
-	if got := splitByRatio(items, 0, 50); got != nil {
-		t.Fatalf("zero total tokens should yield nil, got %d", len(got))
-	}
-	if got := splitByRatio(items, 100, 0); got != nil {
-		t.Fatalf("zero ratio should yield nil, got %d", len(got))
-	}
-	if got := splitByRatio(items, 100, 100); len(got) != 0 {
-		t.Fatalf("ratio 100 should preserve the only recent candidate, got %d", len(got))
-	}
-}
-
 func TestTrimCompactMessagesDefersNewestBeyondBudget(t *testing.T) {
 	t.Parallel()
 
@@ -404,7 +237,7 @@ func TestTrimCompactMessagesDefersNewestBeyondBudget(t *testing.T) {
 		textRow(t, "assistant", 100),
 		textRow(t, "user", 100),
 	}
-	items, _ := itemsFromRows(rows)
+	items, _ := candidatesFromRows(rows)
 	trimmed := trimCompactMessages(items, 150)
 	// Budget 150, accumulate rendered costs from oldest: ~102 (a) fits,
 	// +~102 (b) > 150 -> keep the oldest row and defer the newer overflow to
@@ -432,9 +265,9 @@ func TestTrimCompactMessagesAccountsForDirectedSignalHeaders(t *testing.T) {
 		rows[i].ExternalMessageID = pgtype.Text{String: longID, Valid: true}
 		rows[i].SenderDisplayName = pgtype.Text{String: longSender, Valid: true}
 	}
-	items, _ := itemsFromRows(rows)
+	items, _ := candidatesFromRows(rows)
 
-	trimmed := trimCompactMessages(items, 300)
+	trimmed := trimCompactMessages(items, 375)
 	if len(trimmed) != 2 {
 		t.Fatalf("trimmed count = %d, want 2 after accounting for header tokens", len(trimmed))
 	}

@@ -10,7 +10,6 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
@@ -26,6 +25,13 @@ type chatHistoryLayout struct {
 }
 
 func pauseIdleDuringBudgetRecovery(cfg native.RunConfig, idle *idleCancel) native.RunConfig {
+	if switchContext := cfg.SwitchContext; switchContext != nil {
+		cfg.SwitchContext = func(ctx context.Context, sw native.ContextSwitch) (string, error) {
+			idle.Pause()
+			defer idle.Resume()
+			return switchContext(ctx, sw)
+		}
+	}
 	if recoverBudget := cfg.RecoverContextBudget; recoverBudget != nil {
 		cfg.RecoverContextBudget = func(ctx context.Context, cfg native.RunConfig) (native.RunConfig, bool, error) {
 			idle.Pause()
@@ -38,26 +44,32 @@ func pauseIdleDuringBudgetRecovery(cfg native.RunConfig, idle *idleCancel) nativ
 
 func (s *Service) chatBudgetRecovery(req ChatRequest, layout chatHistoryLayout) func(context.Context, native.RunConfig) (native.RunConfig, bool, error) {
 	return func(ctx context.Context, cfg native.RunConfig) (native.RunConfig, bool, error) {
-		if s.effectiveSyncCompactionMode() == syncCompactionModeOff || ctx.Err() != nil {
+		if ctx.Err() != nil {
 			return cfg, false, nil
 		}
 		budget, pressure := layout.availableHistoryBudget(cfg)
 		if budget <= 0 {
 			return cfg, false, nil
 		}
+		// The summary shares the history budget with what compaction keeps
+		// raw in place, which it does not price.
+		budget -= anchoredTokens(cfg.ContextProvenance, req.compactionAnchors())
 		compactionReq := req
 		compactionReq.RunID = cfg.RunID
-		if result := s.runBudgetCompactionSync(ctx, compactionReq, pressure, budget, cfg.CurrentModelUUID); result.Status != compaction.StatusOK && result.Status != compaction.StatusProgress {
-			return cfg, false, nil
+		if err := s.compactForBudget(ctx, compactionReq, pressure, budget, cfg.CurrentModelUUID); err != nil {
+			return cfg, false, fmt.Errorf("%w: %w", contextfrag.ErrBudgetUnsatisfied, err)
 		}
 		var messages []ModelMessage
 		var records []historyfrag.HistoryRecord
 		if layout.usePipeline {
-			messages, _, _ = s.buildMessagesFromPipeline(ctx, req, cfg.ContextBudgetMaxTokens)
+			var err error
+			if messages, _, err = s.buildMessagesFromPipeline(ctx, req, cfg.ContextBudgetMaxTokens); err != nil {
+				return cfg, false, fmt.Errorf("%w: reload compacted history: %w", contextfrag.ErrBudgetUnsatisfied, err)
+			}
 		} else {
 			prepared, err := s.prepareHistoryContext(ctx, req, historyScopeFallbackFromChatRequest(req), cfg.ContextBudgetMaxTokens)
 			if err != nil {
-				return cfg, false, err
+				return cfg, false, fmt.Errorf("%w: reload compacted history: %w", contextfrag.ErrBudgetUnsatisfied, err)
 			}
 			messages, records = prepared.messages, prepared.records
 		}
@@ -66,12 +78,27 @@ func (s *Service) chatBudgetRecovery(req ChatRequest, layout chatHistoryLayout) 
 			return cfg, false, err
 		}
 		if reflect.DeepEqual(recovered.Messages, cfg.Messages) {
-			return cfg, false, nil
+			return cfg, false, fmt.Errorf("%w: compaction left the history unchanged", contextfrag.ErrBudgetUnsatisfied)
 		}
 		layout.historyCount = recovered.ContextTrimmableMessages
 		layout.pressureTokens = 0
 		return recovered, true, nil
 	}
+}
+
+// anchoredTokens is what the messages the request renders for anchors take.
+func anchoredTokens(provenance []native.MessageProvenance, anchors []turn.ContextMessageSource) int {
+	tokens := 0
+	for _, p := range provenance {
+		if slices.ContainsFunc(p.Sources, func(source turn.ContextMessageSource) bool {
+			return slices.ContainsFunc(anchors, func(anchor turn.ContextMessageSource) bool {
+				return anchor.Kind == source.Kind && anchor.ID == source.ID
+			})
+		}) {
+			tokens += contextfrag.ProviderEnvelopeTokens("", []sdk.Message{p.Message}, nil)
+		}
+	}
+	return tokens
 }
 
 func (l chatHistoryLayout) owns(frag contextfrag.ContextFrag) bool {
@@ -124,6 +151,7 @@ func (l chatHistoryLayout) replaceHistory(ctx context.Context, cfg native.RunCon
 	cfg.ContextMemoryMessageIndex = shiftRecoveryIndex(cfg.ContextMemoryMessageIndex, l.historyCount, delta)
 	cfg.ContextCurrentUserMessageIndex = shiftRecoveryIndex(cfg.ContextCurrentUserMessageIndex, l.historyCount, delta)
 	cfg.ContextFrags = historyContextFragsForMessages(messages, records)
+	cfg.ContextProvenance = contextProvenance(history, records, append(compactionProtectedSources(req), req.continuationAnchors...))
 	cfg.ForkContextSourceMessageIDs = make([]string, l.forkCount, len(cfg.Messages))
 	cfg.ForkContextSourceMessageIDs = append(cfg.ForkContextSourceMessageIDs, historySourceMessageIDsForMessages(history, records)...)
 	copy(cfg.ForkContextSourceMessageIDs[:l.forkCount], old.ForkContextSourceMessageIDs[:min(l.forkCount, len(old.ForkContextSourceMessageIDs))])
@@ -241,7 +269,7 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 		}
 	}
 	cfg, shed := shedOlderBatchImages(cfg, batch, plan.HistoryBudget)
-	if *compacted || s.effectiveSyncCompactionMode() == syncCompactionModeOff {
+	if *compacted {
 		return cfg, shed, nil
 	}
 	type batchInput struct {
@@ -274,7 +302,7 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 	}
 	originalHistory := max(0, cmd.DiscussContextTokens-newestTokens)
 	pressure = max(pressure, contextfrag.ProviderBudgetTokensFromBytes(int(contextfrag.BudgetBytesForTokens(originalHistory))))
-	if pressure <= available || available <= 0 {
+	if pressure <= available && len(cmd.DiscussOmittedSources) == 0 {
 		return cfg, shed, nil
 	}
 	// Older input of the batch stays raw while it fits, leaving a tenth of the
@@ -286,12 +314,15 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 		historyBudget -= older[i].cost
 	}
 	if historyBudget <= 0 {
+		if len(cmd.DiscussOmittedSources) > 0 {
+			return cfg, false, fmt.Errorf("%w: no history room for input Channel omitted", contextfrag.ErrBudgetUnsatisfied)
+		}
 		return cfg, shed, nil
 	}
 	*compacted = true
-	result := s.runBudgetCompactionSync(ctx, ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: cfg.RunID, discussCurrentSources: protected}, pressure, historyBudget, modelID)
-	if result.Status != compaction.StatusOK && result.Status != compaction.StatusProgress {
-		return cfg, shed, nil
+	recovery := ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: cfg.RunID, discussCurrentSources: protected}
+	if err := s.compactForBudget(ctx, recovery, pressure, historyBudget, modelID); err != nil {
+		return cfg, false, fmt.Errorf("%w: %w", contextfrag.ErrBudgetUnsatisfied, err)
 	}
 	return cfg, false, native.ErrContextRecompose
 }

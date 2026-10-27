@@ -1,11 +1,11 @@
 package compaction
 
 import (
-	"encoding/json"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 )
@@ -16,20 +16,22 @@ const (
 	CompactPolicyPreserveRecent      CompactPolicy = "preserve_recent"
 	CompactPolicyPreserveToolClosure CompactPolicy = "preserve_tool_closure"
 	CompactPolicyMustKeep            CompactPolicy = "must_keep"
+	// CompactPolicyAnchor keeps a row of the running turn raw where it is
+	// (its input, a steer) without ending what a pass folds around it.
+	CompactPolicyAnchor CompactPolicy = "anchor"
 )
 
 // CompactionCandidate is the typed view of one uncompacted history row used
-// during candidate selection. RawContent and RawUsage retain the raw row payload
-// so token estimation stays byte-identical to the legacy path; Record carries the
-// typed classifier output used for policies, tool-aware boundaries, and
-// summarizer rendering.
+// during candidate selection. RawContent retains the raw row payload; Record
+// carries the typed classifier output used for policies, tool-aware
+// boundaries, and summarizer rendering.
 type CompactionCandidate struct {
 	ID           pgtype.UUID
 	RawContent   []byte
-	RawUsage     []byte
 	Record       historyfrag.HistoryRecord
 	Policies     []CompactPolicy
 	IsToolResult bool
+	EventCursor  int64
 }
 
 func (c CompactionCandidate) HasPolicy(policy CompactPolicy) bool {
@@ -66,28 +68,34 @@ func toolExchangeGroups(items []CompactionCandidate) [][]int {
 	return groups
 }
 
-// protectPendingUserInput keeps an ask_user exchange in raw history while any
-// of its calls has no answer: the continuation still needs the open call. An
-// answered exchange is ordinary history the summary can cover.
+// protectPendingUserInput keeps the newest exchange in raw history while any
+// of its ask_user calls has no answer: the run waits on it, and the
+// continuation answers the open call. Any later row closes such a call — its
+// run ended or the conversation moved on — and every request renders it with
+// a synthetic result no answer replaces, so like an answered exchange it is
+// ordinary history the summary can cover.
 func protectPendingUserInput(items []CompactionCandidate) {
-	for _, group := range toolExchangeGroups(items) {
-		if isToolResultItem(items[group[0]]) {
-			continue
+	groups := toolExchangeGroups(items)
+	if len(groups) == 0 {
+		return
+	}
+	group := groups[len(groups)-1]
+	if isToolResultItem(items[group[0]]) {
+		return
+	}
+	pending := askUserCallIDs(items[group[0]].Record)
+	for _, idx := range group[1:] {
+		mm := items[idx].Record.ModelMessage
+		delete(pending, strings.TrimSpace(mm.ToolCallID))
+		for _, p := range parseEntryParts(mm.Content) {
+			delete(pending, strings.TrimSpace(p.ToolCallID))
 		}
-		pending := askUserCallIDs(items[group[0]].Record)
-		for _, idx := range group[1:] {
-			mm := items[idx].Record.ModelMessage
-			delete(pending, strings.TrimSpace(mm.ToolCallID))
-			for _, p := range parseEntryParts(mm.Content) {
-				delete(pending, strings.TrimSpace(p.ToolCallID))
-			}
-		}
-		if len(pending) == 0 {
-			continue
-		}
-		for _, idx := range group {
-			items[idx].Policies = appendPolicy(items[idx].Policies, CompactPolicyMustKeep)
-		}
+	}
+	if len(pending) == 0 {
+		return
+	}
+	for _, idx := range group {
+		items[idx].Policies = appendPolicy(items[idx].Policies, CompactPolicyMustKeep)
 	}
 }
 
@@ -129,50 +137,6 @@ func propagateMustKeepAcrossToolExchanges(items []CompactionCandidate) {
 			items[idx].Policies = appendPolicy(items[idx].Policies, CompactPolicyMustKeep)
 		}
 	}
-}
-
-func markSelectionPolicies(items []CompactionCandidate) {
-	if latestUser := latestUserIndex(items); latestUser == 0 && len(items) > 1 {
-		tailStart := recentTailProtectedStart(items, 1)
-		for i := range items {
-			if i == 0 || i >= tailStart {
-				items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyPreserveRecent)
-			}
-		}
-		return
-	}
-
-	start := recentProtectedStart(items)
-	for i := start; i < len(items); i++ {
-		items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyPreserveRecent)
-	}
-}
-
-func recentProtectedStart(items []CompactionCandidate) int {
-	if len(items) == 0 {
-		return 0
-	}
-	if latestUser := latestUserIndex(items); latestUser >= 0 {
-		return latestUser
-	}
-	return recentTailProtectedStart(items, 0)
-}
-
-func latestUserIndex(items []CompactionCandidate) int {
-	for i := len(items) - 1; i >= 0; i-- {
-		if strings.EqualFold(strings.TrimSpace(items[i].Record.ModelMessage.Role), "user") {
-			return i
-		}
-	}
-	return -1
-}
-
-func recentTailProtectedStart(items []CompactionCandidate, minStart int) int {
-	start := len(items) - 1
-	for start > minStart && isToolClosureResultItem(items[start]) {
-		start--
-	}
-	return start
 }
 
 func candidatePolicies(record historyfrag.HistoryRecord) []CompactPolicy {
@@ -233,139 +197,26 @@ func isAskUserToolName(name string) bool {
 	return strings.EqualFold(strings.TrimSpace(name), userinput.ToolNameAskUser)
 }
 
-type usagePayload struct {
-	OutputTokens      *int `json:"outputTokens"`
-	OutputTokensSnake *int `json:"output_tokens"`
-}
-
-func estimateItemTokens(item CompactionCandidate) int {
-	if len(item.RawUsage) > 0 {
-		var u usagePayload
-		if json.Unmarshal(item.RawUsage, &u) == nil {
-			if u.OutputTokens != nil && *u.OutputTokens > 0 {
-				return *u.OutputTokens
-			}
-			if u.OutputTokensSnake != nil && *u.OutputTokensSnake > 0 {
-				return *u.OutputTokensSnake
-			}
-		}
-	}
-	return len(item.RawContent) / 4
-}
-
+// estimateBytesAsTokens prices text the way every provider request is
+// priced, so a summarizer call is sized for the window it is sent to.
 func estimateBytesAsTokens(value string) int {
-	if value == "" {
-		return 0
-	}
-	return (len(value) + 3) / 4
+	return contextfrag.ProviderBudgetTokensFromBytes(len(value))
 }
 
-// splitByRatio splits items so that roughly the first ratio% (by token weight)
-// are returned for compaction, and the rest are kept as-is.
-func splitByRatio(items []CompactionCandidate, totalInputTokens, ratio int) []CompactionCandidate {
-	if ratio <= 0 || totalInputTokens <= 0 || len(items) == 0 {
-		return nil
-	}
-	if ratio >= 100 {
-		return guardedCompactionItems(items, len(items))
-	}
-
-	keepTokens := totalInputTokens * (100 - ratio) / 100
-	if keepTokens <= 0 {
-		return guardedCompactionItems(items, len(items))
-	}
-
-	accumulated := 0
-	cutoff := len(items)
-	for i := len(items) - 1; i >= 0; i-- {
-		accumulated += estimateItemTokens(items[i])
-		if accumulated >= keepTokens {
-			cutoff = i + 1
-			break
-		}
-	}
-
-	if cutoff <= 0 {
-		return nil
-	}
-	return guardedCompactionItems(items, cutoff)
-}
-
-// splitByTarget returns the oldest items to compact so that the remaining newest
-// items fit within targetTokens. Used by synchronous compaction.
-func splitByTarget(items []CompactionCandidate, targetTokens int) []CompactionCandidate {
-	if targetTokens <= 0 || len(items) == 0 {
-		return nil
-	}
-	accumulated := 0
-	cutoff := 0
-	for i := len(items) - 1; i >= 0; i-- {
-		accumulated += estimateItemTokens(items[i])
-		if accumulated > targetTokens {
-			cutoff = i + 1
-			break
-		}
-	}
-	if cutoff <= 0 {
-		return nil
-	}
-	return guardedCompactionItems(items, cutoff)
-}
-
-func guardedCompactionItems(items []CompactionCandidate, cutoff int) []CompactionCandidate {
-	if cutoff <= 0 || len(items) == 0 {
-		return nil
-	}
+// foldableItems is the history before the first row a compaction must keep,
+// extended over the tool results that answer a call it folds. A must-keep row
+// ends it too: no summary covers rows on both sides of one.
+func foldableItems(items []CompactionCandidate) []CompactionCandidate {
 	protectedStart := firstPolicyStart(items, CompactPolicyPreserveRecent)
-	if protectedStart <= 0 {
-		return guardedCurrentTurnCompactionItems(items, cutoff)
-	}
-	if cutoff > protectedStart {
-		cutoff = protectedStart
-	}
-	cutoff = adjustForToolBoundary(items, cutoff)
-	if cutoff > protectedStart {
+	cutoff := adjustForToolBoundary(items, protectedStart)
+	if cutoff <= 0 || cutoff > protectedStart {
 		return nil
 	}
-	if cutoff <= 0 {
-		return nil
-	}
-	return items[:cutoff]
-}
-
-func guardedCurrentTurnCompactionItems(items []CompactionCandidate, cutoff int) []CompactionCandidate {
-	if len(items) <= 1 {
-		return nil
-	}
-	protectedTailStart := firstPolicyStartAfter(items, CompactPolicyPreserveRecent, 1)
-	if protectedTailStart <= 1 {
-		return nil
-	}
-	if cutoff > protectedTailStart {
-		cutoff = protectedTailStart
-	}
-	if cutoff <= 1 {
-		return nil
-	}
-	cutoff = adjustForToolBoundary(items, cutoff)
-	if cutoff > protectedTailStart {
-		return nil
-	}
-	return items[1:cutoff]
+	return items[:min(cutoff, firstPolicyStart(items, CompactPolicyMustKeep))]
 }
 
 func firstPolicyStart(items []CompactionCandidate, policy CompactPolicy) int {
-	return firstPolicyStartAfter(items, policy, 0)
-}
-
-func firstPolicyStartAfter(items []CompactionCandidate, policy CompactPolicy, start int) int {
-	if start < 0 {
-		start = 0
-	}
 	for i, item := range items {
-		if i < start {
-			continue
-		}
 		if item.HasPolicy(policy) {
 			return i
 		}
@@ -393,120 +244,120 @@ func isToolResultItem(item CompactionCandidate) bool {
 }
 
 // buildEntriesAndIDs renders the summarizer entries and the ids to mark
-// compacted from one contiguous run of tool-exchange groups (see
-// toolExchangeGroups). Must-keep groups (a pending ask_user call, unparseable
-// barriers) stay in raw history and split the span into runs; the first run
-// that renders any entry wins and is covered whole. A row that renders
-// nothing (a reasoning-only message, an empty tool result) is covered with its
-// neighbours and contributes no entry: leaving it raw would split the run into
-// fragments too short to summarize. One run under one compact_id keeps the
-// marked ids a contiguous history range, which the read path
-// (replaceCompactedHistoryRecords) replaces in place.
+// compacted from foldable items. An anchor renders in place as a kept entry
+// and is not marked. A row that renders nothing (a reasoning-only message,
+// an empty tool result) is covered with its neighbours and contributes no
+// entry: leaving it raw would split the span into fragments too short to
+// summarize.
 func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.UUID) {
-	groups := toolExchangeGroups(items)
-	mustKeep := func(group []int) bool {
-		for _, idx := range group {
-			if items[idx].HasPolicy(CompactPolicyMustKeep) {
-				return true
-			}
+	var entries []messageEntry
+	var ids []pgtype.UUID
+	for _, item := range items {
+		if !item.HasPolicy(CompactPolicyAnchor) {
+			ids = append(ids, item.ID)
 		}
-		return false
+		if entry, ok := candidateEntry(item); ok {
+			entries = append(entries, entry)
+		}
 	}
-	for g := 0; g < len(groups); {
-		if mustKeep(groups[g]) {
-			g++
-			continue
-		}
-		runEnd := g
-		for runEnd < len(groups) && !mustKeep(groups[runEnd]) {
-			runEnd++
-		}
-		var entries []messageEntry
-		var ids []pgtype.UUID
-		for _, group := range groups[g:runEnd] {
-			for _, idx := range group {
-				ids = append(ids, items[idx].ID)
-				if content := renderCandidateEntry(items[idx].Record); strings.TrimSpace(content) != "" {
-					entries = append(entries, messageEntry{Role: items[idx].Record.ModelMessage.Role, Content: content})
-				}
-			}
-		}
-		if len(entries) > 0 {
-			return entries, ids
-		}
-		g = runEnd
+	if len(coveredEntries(entries)) == 0 {
+		return nil, nil
 	}
-	return nil, nil
+	return entries, ids
 }
 
-// trimCompactMessages caps one compaction call's input to maxTokens by keeping
-// the oldest tool-exchange groups and deferring the newest overflow to a later
-// pass. Chewing front-to-back reclaims the oldest raw rows first and keeps
-// summary coverage in chronological order across passes, so prior summaries
-// read in narrative order.
-//
-// The budget models exactly what buildEntriesAndIDs will feed the summarizer:
-// must-keep groups and rows that render nothing cost nothing. The first
-// group with a cost is always kept so an oversized one cannot stall progress,
-// and group-aligned cuts can never split a tool exchange.
+// candidateEntry is what the summarizer reads for item, kept when item is an
+// anchor. A row that renders nothing has no entry.
+func candidateEntry(item CompactionCandidate) (messageEntry, bool) {
+	content := renderCandidateEntry(item.Record)
+	if strings.TrimSpace(content) == "" {
+		return messageEntry{}, false
+	}
+	return messageEntry{Role: item.Record.ModelMessage.Role, Content: content, Kept: item.HasPolicy(CompactPolicyAnchor)}, true
+}
+
+// keptAfterSummary splits off the kept entries after the last one a summary
+// covers. The request keeps them after the summary, so the summarizer reads
+// them with what follows it rather than in place.
+func keptAfterSummary(entries []messageEntry) ([]messageEntry, []messageEntry) {
+	last := len(entries)
+	for last > 0 && entries[last-1].Kept {
+		last--
+	}
+	after := make([]messageEntry, 0, len(entries)-last)
+	for _, entry := range entries[last:] {
+		entry.Kept = false
+		after = append(after, entry)
+	}
+	return entries[:last], after
+}
+
+// keptInPlace are the kept entries a summary is written around.
+func keptInPlace(entries []messageEntry) []messageEntry {
+	var kept []messageEntry
+	for _, entry := range entries {
+		if entry.Kept {
+			kept = append(kept, entry)
+		}
+	}
+	return kept
+}
+
+// coveredEntries are the entries a summary replaces: all but the kept ones.
+func coveredEntries(entries []messageEntry) []messageEntry {
+	var covered []messageEntry
+	for _, entry := range entries {
+		if !entry.Kept {
+			covered = append(covered, entry)
+		}
+	}
+	return covered
+}
+
+// trimCompactMessages keeps the oldest tool-exchange groups whose rendered
+// entries fit maxTokens, deferring the rest to a later pass. Chewing
+// front-to-back reclaims the oldest raw rows first and keeps summary coverage
+// in chronological order. Rows that render nothing cost nothing, exactly as
+// buildEntriesAndIDs feeds the summarizer; group-aligned cuts never split a
+// tool exchange. A first group that does not fit leaves nothing: its content
+// is never cut to make it fit.
 func trimCompactMessages(items []CompactionCandidate, maxTokens int) []CompactionCandidate {
-	if len(items) == 0 || maxTokens <= 0 {
-		return items
-	}
-	groups := toolExchangeGroups(items)
-	total := 0
-	for _, group := range groups {
-		total += markableGroupCost(items, group)
-	}
-	if total <= maxTokens {
-		return items
-	}
-	accumulated := 0
-	end := 0
-	keptMarkableGroup := false
-	for _, group := range groups {
+	accumulated, end := 0, 0
+	for _, group := range toolExchangeGroups(items) {
 		cost := markableGroupCost(items, group)
-		if cost > 0 && keptMarkableGroup && accumulated+cost > maxTokens {
+		if accumulated+cost > maxTokens {
 			break
 		}
 		accumulated += cost
 		end = group[len(group)-1] + 1
-		if cost > 0 {
-			keptMarkableGroup = true
-		}
 	}
 	return items[:end]
 }
 
+// leadingGroupCost is what trimCompactMessages must admit before any entry
+// reaches the summarizer: the cost of the first group that renders one.
+func leadingGroupCost(items []CompactionCandidate) int {
+	for _, group := range toolExchangeGroups(items) {
+		if cost := markableGroupCost(items, group); cost > 0 {
+			return cost
+		}
+	}
+	return 0
+}
+
 // markableGroupCost is the summarizer-prompt cost of one tool-exchange group:
-// zero for a must-keep group, otherwise each rendered entry's text — what
-// buildUserPrompt actually emits, headers included — plus its role prefix,
-// with a floor of one token per entry so tiny-but-real entries can never ride
-// along for free. Rows that render nothing cost nothing. Costing the rendered
-// bytes rather than the raw usage estimate matters: a row whose generation
-// cost five tokens can still render a two-kilobyte tool outcome into the
-// prompt.
+// the line buildUserPrompt emits for each rendered entry, kept ones in their
+// wrapper, as entriesPromptCost prices it, so tiny-but-real entries can never
+// ride along for free. Rows that render nothing cost nothing. Costing the
+// rendered bytes rather than the raw usage estimate matters: a row whose
+// generation cost five tokens can still render a two-kilobyte tool outcome
+// into the prompt.
 func markableGroupCost(items []CompactionCandidate, group []int) int {
 	cost := 0
 	for _, idx := range group {
-		if items[idx].HasPolicy(CompactPolicyMustKeep) {
-			return 0
+		if entry, ok := candidateEntry(items[idx]); ok {
+			cost += entryPromptCost(entry)
 		}
-		rendered := strings.TrimSpace(renderCandidateEntry(items[idx].Record))
-		if rendered == "" {
-			continue
-		}
-		cost += estimateBytesAsTokens(rendered) + estimateBytesAsTokens(items[idx].Record.ModelMessage.Role) + 1
 	}
 	return cost
-}
-
-// markableCompactCost sums markableGroupCost across the span — the tokens its
-// entries will actually occupy in the summarizer prompt.
-func markableCompactCost(items []CompactionCandidate) int {
-	total := 0
-	for _, group := range toolExchangeGroups(items) {
-		total += markableGroupCost(items, group)
-	}
-	return total
 }

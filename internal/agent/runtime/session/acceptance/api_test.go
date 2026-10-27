@@ -173,10 +173,9 @@ func (c *apiClient) waitForBot(botID string) (string, error) {
 func (c *apiClient) configureBot(botID, modelID string) error {
 	var response any
 	return c.request(http.MethodPut, "/bots/"+url.PathEscape(botID)+"/settings", map[string]any{
-		"chat_model_id":      modelID,
-		"chat_runtime":       "model",
-		"compaction_enabled": false,
-		"reasoning_enabled":  false,
+		"chat_model_id":     modelID,
+		"chat_runtime":      "model",
+		"reasoning_enabled": false,
 		"tool_approval_config": map[string]any{
 			"enabled": false,
 			"read":    map[string]any{"mode": "allow"},

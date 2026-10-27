@@ -1,6 +1,8 @@
 package application
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -9,6 +11,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 func mergeMissingCompactionSummaries(messages []historyfrag.HistoryRecord, summaries []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
@@ -90,79 +93,72 @@ func replaceCompactedHistoryRecordsWithArtifacts(messages []historyfrag.HistoryR
 	})
 }
 
+// replaceCompactedHistoryRecordsWithService renders each resolved artifact in
+// place of the records it covers, placed by turn.PlaceSummary. A required
+// record stays raw beside its summary; an artifact that covers only required
+// records renders right before the first of them.
 func replaceCompactedHistoryRecordsWithService(
 	messages []historyfrag.HistoryRecord,
 	scope contextfrag.Scope,
 	resolve func(historyfrag.HistoryRecord) (compaction.Artifact, bool),
 ) []historyfrag.HistoryRecord {
-	type sourceGroupKey struct {
-		compactID string
-		index     int
-	}
-	type recordAssignment struct {
+	type placedRecord struct {
+		record     historyfrag.HistoryRecord
 		artifactID string
-		source     sourceGroupKey
+		removed    bool
 	}
-	type artifactGroup struct {
-		artifact compaction.Artifact
-		indices  []int
-	}
-	sourceGroupFor := func(record historyfrag.HistoryRecord, index int) sourceGroupKey {
+	sourceGroupFor := func(record historyfrag.HistoryRecord, index int) string {
 		if compactID := strings.TrimSpace(record.CompactID); compactID != "" {
-			return sourceGroupKey{compactID: compactID, index: -1}
+			return compactID
 		}
-		return sourceGroupKey{index: index}
+		return fmt.Sprintf("#%d", index)
 	}
-	requiredGroups := make(map[sourceGroupKey]struct{})
+	requiredGroups := make(map[string]struct{})
 	for i, record := range messages {
 		if record.Required {
 			requiredGroups[sourceGroupFor(record, i)] = struct{}{}
 		}
 	}
 
-	assignments := make([]recordAssignment, len(messages))
-	groups := make(map[string]*artifactGroup)
+	items := make([]placedRecord, len(messages))
+	artifacts := make(map[string]compaction.Artifact)
+	var order []string
 	for i, record := range messages {
+		items[i].record = record
 		artifact, ok := resolve(record)
 		if !ok || artifact.ID == "" || strings.TrimSpace(artifact.Summary) == "" {
 			continue
 		}
-		assignments[i] = recordAssignment{artifactID: artifact.ID, source: sourceGroupFor(record, i)}
-		group := groups[artifact.ID]
-		if group == nil {
-			group = &artifactGroup{artifact: artifact}
-			groups[artifact.ID] = group
+		_, required := requiredGroups[sourceGroupFor(record, i)]
+		items[i].artifactID, items[i].removed = artifact.ID, !required
+		if _, seen := artifacts[artifact.ID]; !seen {
+			order = append(order, artifact.ID)
+			artifacts[artifact.ID] = artifact
 		}
-		group.indices = append(group.indices, i)
 	}
-	if len(groups) == 0 {
+	if len(order) == 0 {
 		return messages
 	}
-
-	result := make([]historyfrag.HistoryRecord, 0, len(messages))
-	emitted := make(map[string]struct{}, len(groups))
-	for i, record := range messages {
-		assignment := assignments[i]
-		artifactID := assignment.artifactID
-		if artifactID == "" {
-			result = append(result, record)
-			continue
-		}
-		group := groups[artifactID]
-		if _, seen := emitted[artifactID]; !seen {
-			emitted[artifactID] = struct{}{}
-			artifact := group.artifact
-			if len(artifact.Coverage) == 0 {
-				artifact.Coverage = make([]compaction.CoveredSource, 0, len(group.indices))
-				for _, index := range group.indices {
-					artifact.Coverage = append(artifact.Coverage, compaction.CoveredSource{Ref: messages[index].Ref})
+	for _, id := range order {
+		artifact := artifacts[id]
+		if len(artifact.Coverage) == 0 {
+			for _, item := range items {
+				if item.artifactID == id {
+					artifact.Coverage = append(artifact.Coverage, compaction.CoveredSource{Ref: item.record.Ref})
 				}
 			}
-			result = append(result, artifact.HistoryRecord(scope))
 		}
-		if _, required := requiredGroups[assignment.source]; required {
-			result = append(result, record)
+		summary := placedRecord{record: artifact.HistoryRecord(scope)}
+		placed := false
+		items, placed = turn.PlaceSummary(items, summary, func(item placedRecord) bool { return item.removed && item.artifactID == id })
+		if !placed {
+			first := slices.IndexFunc(items, func(item placedRecord) bool { return item.artifactID == id })
+			items = slices.Insert(items, first, summary)
 		}
+	}
+	result := make([]historyfrag.HistoryRecord, len(items))
+	for i, item := range items {
+		result[i] = item.record
 	}
 	return result
 }

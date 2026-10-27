@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +24,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/agent/application"
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
@@ -38,6 +41,9 @@ import (
 	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/settings"
 )
+
+// summaryLimitPattern reads the summary bound the compaction prompt states.
+var summaryLimitPattern = regexp.MustCompile(`must stay under (\d+) tokens`)
 
 type recordingFailureBroadcaster struct {
 	failures chan string
@@ -60,6 +66,7 @@ type backlogFixture struct {
 	botID       string
 	sessionID   string
 	chatModel   string
+	providerURL string
 	rc          timeline.RenderedContext
 	base        time.Time
 	messages    messagepkg.Service
@@ -69,8 +76,19 @@ type backlogFixture struct {
 	broadcaster *recordingFailureBroadcaster
 	images      *backlogImageLoader
 	summaries   atomic.Int32
+	failSummary atomic.Bool
+	// failStatus is the status a failing summarizer answers with; zero is a
+	// rejected request, which is not retried.
+	failStatus  atomic.Int32
+	longSummary atomic.Bool
+	onSummary   func(body []byte)
 	modelCalls  atomic.Int32
 	lastRequest atomic.Value
+	// stream answers chat requests when set; the default answers at once.
+	stream      func(http.ResponseWriter, []byte)
+	agent       *native.Agent
+	manager     *sessionruntime.Manager
+	ownerUserID string
 }
 
 func newBacklogFixture(t *testing.T) *backlogFixture {
@@ -82,7 +100,7 @@ func newBacklogFixture(t *testing.T) *backlogFixture {
 	f.botID, f.sessionID = createDiscussRecoveryFixture(t, ctx, f.pool)
 	queries := postgresstore.NewQueriesWithPool(f.pool, sqlc.New(f.pool))
 	var teamID string
-	if err := f.pool.QueryRow(ctx, `SELECT team_id FROM bots WHERE id=$1`, f.botID).Scan(&teamID); err != nil {
+	if err := f.pool.QueryRow(ctx, `SELECT team_id, owner_user_id FROM bots WHERE id=$1`, f.botID).Scan(&teamID, &f.ownerUserID); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -101,32 +119,45 @@ func newBacklogFixture(t *testing.T) *backlogFixture {
 		if request.Stream {
 			f.modelCalls.Add(1)
 			f.lastRequest.Store(string(body))
+			if f.stream != nil {
+				f.stream(w, body)
+				return
+			}
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = fmt.Fprint(w, "data: {\"id\":\"reply\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"BACKLOG_OK\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"reply\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 			return
 		}
 		f.summaries.Add(1)
+		if f.onSummary != nil {
+			f.onSummary(body)
+		}
+		if f.failSummary.Load() {
+			http.Error(w, "summarizer down", cmp.Or(int(f.failStatus.Load()), http.StatusBadRequest))
+			return
+		}
+		summary := "Earlier backlog summarized."
+		if stated := summaryLimitPattern.FindSubmatch(body); stated != nil && f.longSummary.Load() {
+			limit, _ := strconv.Atoi(string(stated[1]))
+			summary += strings.Repeat(" kept", limit*4/5-len(summary)/5)
+		}
+		content, _ := json.Marshal(summary)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"id":"summary","object":"chat.completion","model":"compact-model","choices":[{"index":0,"message":{"role":"assistant","content":"Earlier backlog summarized."},"finish_reason":"stop"}]}`)
+		_, _ = fmt.Fprintf(w, `{"id":"summary","object":"chat.completion","model":"compact-model","choices":[{"index":0,"message":{"role":"assistant","content":%s},"finish_reason":"stop"}]}`, content)
 	}))
 	t.Cleanup(server.Close)
-	chatModel, compactModel, providerID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	f.providerURL = server.URL
+	chatModel, providerID := uuid.NewString(), uuid.NewString()
 	f.chatModel = chatModel
 	providerConfig, _ := json.Marshal(map[string]string{"base_url": server.URL, "api_key": "test-key"})
 	if _, err := f.pool.Exec(ctx, `INSERT INTO providers(id,name,client_type,config) VALUES($1,$2,'openai-completions',$3)`, providerID, providerID, providerConfig); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = f.pool.Exec(context.Background(), `DELETE FROM providers WHERE id=$1`, providerID) })
-	for _, model := range []struct {
-		id, slug string
-		window   int
-	}{{chatModel, "chat-model", 8000}, {compactModel, "compact-model", 6000}} {
-		config, _ := json.Marshal(map[string]any{"context_window": model.window, "compatibilities": []string{}})
-		if _, err := f.pool.Exec(ctx, `INSERT INTO models(id,model_id,provider_id,config) VALUES($1,$2,$3,$4)`, model.id, model.slug, providerID, config); err != nil {
-			t.Fatal(err)
-		}
+	config, _ := json.Marshal(map[string]any{"context_window": 8000, "compatibilities": []string{}})
+	if _, err := f.pool.Exec(ctx, `INSERT INTO models(id,model_id,provider_id,config) VALUES($1,'chat-model',$2,$3)`, chatModel, providerID, config); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := f.pool.Exec(ctx, `UPDATE bots SET chat_model_id=$2,compaction_model_id=$3 WHERE id=$1`, f.botID, chatModel, compactModel); err != nil {
+	if _, err := f.pool.Exec(ctx, `UPDATE bots SET chat_model_id=$2 WHERE id=$1`, f.botID, chatModel); err != nil {
 		t.Fatal(err)
 	}
 	logger := slog.Default()
@@ -134,31 +165,70 @@ func newBacklogFixture(t *testing.T) *backlogFixture {
 	f.base = time.Now().Add(time.Minute).Truncate(time.Millisecond)
 	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{OwnerID: uuid.NewString(), Ledger: ledger.NewPostgres(sqlc.New(f.pool), f.pool), Fence: runtimefence.NewActivator(queries)})
 	t.Cleanup(func() { _ = manager.Close() })
-	service := application.NewService(logger, models.NewService(logger, queries), queries, f.messages, settings.NewService(logger, queries, nil, nil), nil, native.New(native.Deps{Logger: logger, ContextViewApplier: contextview.ProviderRunConfigApplier(logger)}), time.UTC, time.Minute)
+	f.manager = manager
+	f.agent = native.New(native.Deps{Logger: logger, ContextViewApplier: contextview.ProviderRunConfigApplier(logger)})
+	accountStore, err := postgresstore.New(f.pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := application.NewService(logger, models.NewService(logger, queries), queries, f.messages, settings.NewService(logger, queries, nil, nil), accounts.NewService(logger, accountStore), f.agent, time.UTC, time.Minute)
 	service.SetSessionRuntime(manager)
 	service.SetCompactionService(compaction.NewService(logger, queries))
 	service.SetContextAbsoluteMaxTokens(16000)
 	f.service = service
 	f.cursor = &notifyingRecoveryCursor{EventStore: timeline.NewEventStore(logger, queries), advanced: make(chan timeline.DiscussCursorPosition, 4)}
 	f.broadcaster = &recordingFailureBroadcaster{failures: make(chan string, 16)}
-	f.driver = discuss.NewDiscussDriver(discuss.DiscussDriverDeps{Turn: service, CursorStore: f.cursor, MessageService: f.messages, Artifacts: compaction.NewTimelineArtifactSource(queries), Broadcaster: f.broadcaster, AdmissionMaxTokens: 16000, Logger: logger})
-	t.Cleanup(f.driver.StopAll)
+	f.startDriver()
 	f.cfg = discuss.DiscussSessionConfig{BotID: f.botID, ThreadID: f.sessionID, TeamID: teamID}
 	return f
 }
 
 func (f *backlogFixture) appendMessage(id, text string) {
 	f.t.Helper()
-	created := f.base.Add(time.Duration(len(f.rc)+1) * time.Second)
-	content, _ := json.Marshal(text)
-	msg, err := f.messages.Persist(f.ctx, messagepkg.PersistInput{BotID: f.botID, SessionID: f.sessionID, ExternalMessageID: id, Role: "user", Content: content, SessionMode: "discuss"})
+	f.appendMessageAt(id, text, f.base.Add(time.Duration(len(f.rc)+1)*time.Second))
+}
+
+// appendMessageAt delivers text as received at created.
+func (f *backlogFixture) appendMessageAt(id, text string, created time.Time) {
+	f.t.Helper()
+	segment, err := f.deliver(f.ctx, id, text, created)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if _, err := f.pool.Exec(f.ctx, `UPDATE bot_history_messages SET created_at=$2 WHERE id=$1`, msg.ID, created); err != nil {
-		f.t.Fatal(err)
+	f.rc = append(f.rc, segment)
+}
+
+// deliver writes text as the message ingress stores, received at created,
+// and returns the segment the timeline renders for it. It does not touch the
+// fixture's rendered context, so a tool may call it while a run reads it.
+func (f *backlogFixture) deliver(ctx context.Context, id, text string, created time.Time) (timeline.RenderedSegment, error) {
+	eventID, event, err := f.cursor.PersistEvent(ctx, f.botID, f.sessionID, timeline.MessageEvent{SessionID: f.sessionID, MessageID: id, ReceivedAtMs: created.UnixMilli(), Content: []timeline.ContentNode{{Type: "text", Text: text}}})
+	if err != nil {
+		return timeline.RenderedSegment{}, err
 	}
-	f.rc = append(f.rc, timeline.RenderedSegment{MessageID: id, ReceivedAtMs: created.UnixMilli(), Content: []timeline.RenderedContentPiece{{Type: "text", Text: text}}})
+	content, _ := json.Marshal(text)
+	msg, err := f.messages.Persist(ctx, messagepkg.PersistInput{BotID: f.botID, SessionID: f.sessionID, ExternalMessageID: id, EventID: eventID, Role: "user", Content: content, SessionMode: "discuss"})
+	if err != nil {
+		return timeline.RenderedSegment{}, err
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE bot_history_messages SET created_at=$2 WHERE id=$1`, msg.ID, created); err != nil {
+		return timeline.RenderedSegment{}, err
+	}
+	return timeline.RenderedSegment{MessageID: id, LastEventCursor: event.(timeline.MessageEvent).EventCursor, ReceivedAtMs: created.UnixMilli(), Content: []timeline.RenderedContentPiece{{Type: "text", Text: text}}}, nil
+}
+
+// startDriver starts a Discuss driver that knows only what the cursor store
+// and the history hold.
+func (f *backlogFixture) startDriver() {
+	f.driver = discuss.NewDiscussDriver(discuss.DiscussDriverDeps{Turn: f.service, CursorStore: f.cursor, MessageService: f.messages, Artifacts: compaction.NewTimelineArtifactSource(postgresstore.NewQueriesWithPool(f.pool, sqlc.New(f.pool))), Broadcaster: f.broadcaster, AdmissionMaxTokens: 16000, Logger: slog.Default()})
+	f.t.Cleanup(f.driver.StopAll)
+}
+
+// restartDriver replaces the Discuss driver with a fresh one, the way a
+// worker comes back after a restart or an idle eviction.
+func (f *backlogFixture) restartDriver() {
+	f.driver.StopAll()
+	f.startDriver()
 }
 
 // trigger notifies the driver and reports the failure code, or "" when the
@@ -207,56 +277,33 @@ func (f *backlogFixture) backlogRows() (raw, compacted int) {
 
 func (f *backlogFixture) backlogRowsPrefixed(prefix string) (raw, compacted int) {
 	f.t.Helper()
-	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FILTER (WHERE compact_id IS NULL), count(*) FILTER (WHERE compact_id IS NOT NULL) FROM bot_history_messages WHERE session_id=$1 AND source_message_id LIKE $2`, f.sessionID, prefix+"%").Scan(&raw, &compacted); err != nil {
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FILTER (WHERE c.status IS DISTINCT FROM 'ok'), count(*) FILTER (WHERE c.status = 'ok') FROM bot_history_messages h LEFT JOIN bot_history_message_compacts c ON c.id=h.compact_id WHERE h.session_id=$1 AND h.source_message_id LIKE $2`, f.sessionID, prefix+"%").Scan(&raw, &compacted); err != nil {
 		f.t.Fatal(err)
 	}
 	return raw, compacted
 }
 
-// omittedInput collects the current input runs recorded as left out of the
-// provider context: omission mutations and non-selected fragment decisions.
-func (f *backlogFixture) omittedInput() map[string]bool {
-	return f.recordedOmissions("current_input_omitted", true)
-}
-
 // omittedImages collects the inputs whose images runs recorded as shed.
 func (f *backlogFixture) omittedImages() map[string]bool {
-	return f.recordedOmissions("current_input_images_omitted", false)
-}
-
-func (f *backlogFixture) recordedOmissions(kind string, withSelections bool) map[string]bool {
 	f.t.Helper()
 	omitted := map[string]bool{}
-	rows, err := f.pool.Query(f.ctx, `SELECT coalesce(snapshot->'mutations','[]'::jsonb)::text, coalesce(selection_decisions,'[]'::jsonb)::text FROM context_lifecycles WHERE session_id=$1`, f.sessionID)
+	rows, err := f.pool.Query(f.ctx, `SELECT coalesce(snapshot->'mutations','[]'::jsonb)::text FROM context_lifecycles WHERE session_id=$1`, f.sessionID)
 	if err != nil {
 		f.t.Fatal(err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var mutations, decisions string
-		if err := rows.Scan(&mutations, &decisions); err != nil {
+		var mutations string
+		if err := rows.Scan(&mutations); err != nil {
 			f.t.Fatal(err)
 		}
 		var records []struct{ Kind, Detail string }
 		_ = json.Unmarshal([]byte(mutations), &records)
 		for _, record := range records {
-			if record.Kind == kind {
+			if record.Kind == "current_input_images_omitted" {
 				for _, id := range strings.Split(strings.TrimPrefix(record.Detail, "sources="), ",") {
 					omitted[id] = true
 				}
-			}
-		}
-		var selections []struct {
-			SourceID string `json:"source_id"`
-			Decision string
-		}
-		_ = json.Unmarshal([]byte(decisions), &selections)
-		for _, selection := range selections {
-			if !withSelections {
-				break
-			}
-			if selection.Decision != "selected" && selection.SourceID != "" {
-				omitted[selection.SourceID] = true
 			}
 		}
 	}
@@ -287,33 +334,31 @@ func TestPostgresDiscussBacklogOverBudgetIsAnsweredAndNextRoundContinues(t *test
 	t.Logf("summary_calls=%d provider_calls=%d backlog_raw=%d backlog_compacted=%d", f.summaries.Load(), f.modelCalls.Load(), raw, compacted)
 }
 
-// Without compaction the older input cannot be summarized; the session still
-// answers the newest input and records which input it proceeded without.
-func TestPostgresDiscussBacklogWithoutCompactionIsAnsweredAndRecordsOmission(t *testing.T) {
+// A backlog the summarizer cannot reduce fails explicitly without a provider
+// call or consuming the batch; once the summarizer is back, the next message
+// is answered.
+func TestPostgresDiscussBacklogSummarizerFailureFailsExplicitly(t *testing.T) {
 	f := newBacklogFixture(t)
-	if _, err := f.pool.Exec(f.ctx, `UPDATE bots SET compaction_enabled=false WHERE id=$1`, f.botID); err != nil {
-		t.Fatal(err)
-	}
+	f.failSummary.Store(true)
 	f.appendBacklog(12, 2800)
-	request := f.answer("backlog", "backlog-11 ")
-	if f.summaries.Load() != 0 || strings.Contains(request, "backlog-0 ") {
-		t.Fatalf("summaries=%d; the oldest input cannot fit without compaction", f.summaries.Load())
+	if code := f.trigger(); code != "context.budget_unsatisfied" || f.modelCalls.Load() != 0 {
+		t.Fatalf("code=%q provider_calls=%d, want budget_unsatisfied before any provider call", code, f.modelCalls.Load())
 	}
-	omitted := f.omittedInput()
-	for i := range 12 {
-		id := fmt.Sprintf("backlog-%d", i)
-		if !omitted[id] && !strings.Contains(request, id+" ") {
-			t.Fatalf("%s vanished from the provider context without a record; omitted=%v", id, omitted)
-		}
+	if raw, compacted := f.backlogRows(); raw != 12 || compacted != 0 {
+		t.Fatalf("failed summaries changed history: raw=%d compacted=%d", raw, compacted)
 	}
-	t.Logf("omitted_records=%v", omitted)
+	f.failSummary.Store(false)
 	f.appendMessage("next-round", "next-round small message")
-	f.answer("next round", "next-round small message")
+	request := f.answer("next round", "next-round small message")
+	if !strings.Contains(request, "Earlier backlog summarized.") {
+		t.Fatal("the recovered round did not summarize the backlog")
+	}
 }
 
 // A newest input that cannot fit even alone fails once, without consuming the
-// batch; the next message demotes it to compactable history and is answered.
-func TestPostgresDiscussOversizedInputFailsOnceThenNextMessageIsAnswered(t *testing.T) {
+// batch. Demoted to history, it is still more than the summarizer can read in
+// one call, so the next round fails explicitly instead of answering without it.
+func TestPostgresDiscussUnreadableOversizedInputFailsExplicitly(t *testing.T) {
 	for _, size := range []int{70_000, 600_000} {
 		t.Run(strconv.Itoa(size), func(t *testing.T) {
 			f := newBacklogFixture(t)
@@ -322,23 +367,16 @@ func TestPostgresDiscussOversizedInputFailsOnceThenNextMessageIsAnswered(t *test
 				t.Fatalf("oversized newest input: code=%q provider_calls=%d, want one bounded protected_overflow", code, f.modelCalls.Load())
 			}
 			f.appendMessage("next-round", "next-round small message")
-			request := f.answer("next round", "next-round small message")
-			if strings.Contains(request, strings.Repeat("y", 1000)) {
-				t.Fatal("the demoted oversized input reached the provider raw")
+			if code := f.trigger(); code != "context.budget_unsatisfied" || f.modelCalls.Load() != 0 || f.summaries.Load() != 0 {
+				t.Fatalf("next round: code=%q provider_calls=%d summaries=%d, want budget_unsatisfied before any call", code, f.modelCalls.Load(), f.summaries.Load())
 			}
 			var compacted bool
 			if err := f.pool.QueryRow(f.ctx, `SELECT compact_id IS NOT NULL FROM bot_history_messages WHERE session_id=$1 AND source_message_id='oversized'`, f.sessionID).Scan(&compacted); err != nil {
 				t.Fatal(err)
 			}
-			// Within the compaction read budget it is summarized; beyond it the
-			// compaction cannot progress and the run records the omission.
-			if size == 70_000 && !compacted {
-				t.Fatal("demoted oversized input was not summarized")
+			if compacted {
+				t.Fatal("an input the summarizer could not read was marked compacted")
 			}
-			if !compacted && !f.omittedInput()["oversized"] {
-				t.Fatal("an input compaction could not summarize left the provider context without a record")
-			}
-			t.Logf("size=%d compacted=%v summaries=%d", size, compacted, f.summaries.Load())
 		})
 	}
 }
@@ -518,21 +556,15 @@ func TestPostgresDiscussOversizedImageInputFailsOnceThenNextMessageIsAnswered(t 
 	t.Logf("summary_calls=%d provider_calls=%d", f.summaries.Load(), f.modelCalls.Load())
 }
 
-// Answered history goes before the images of unconsumed input: with or
-// without compaction, an older unconsumed message keeps its image when
-// trimming or summarizing what was already answered makes room.
+// Answered history goes before the images of unconsumed input: an older
+// unconsumed message keeps its image when summarizing what was already
+// answered makes room.
 func TestPostgresDiscussImageBacklogYieldsAnsweredHistoryFirst(t *testing.T) {
-	for _, tc := range []struct {
-		compaction bool
-		rounds     int
-	}{{false, 10}, {true, 10}, {true, 4}, {false, 4}} {
-		t.Run(fmt.Sprintf("compaction=%v/rounds=%d", tc.compaction, tc.rounds), func(t *testing.T) {
+	for _, rounds := range []int{10, 4} {
+		t.Run(fmt.Sprintf("rounds=%d", rounds), func(t *testing.T) {
 			f := newBacklogFixture(t)
 			f.enableVision()
-			if _, err := f.pool.Exec(f.ctx, `UPDATE bots SET compaction_enabled=$2 WHERE id=$1`, f.botID, tc.compaction); err != nil {
-				t.Fatal(err)
-			}
-			for i := range tc.rounds {
+			for i := range rounds {
 				id := fmt.Sprintf("old-%d", i)
 				f.appendMessage(id, id+" "+strings.Repeat("h", 2400))
 				f.answer(id, id+" ")

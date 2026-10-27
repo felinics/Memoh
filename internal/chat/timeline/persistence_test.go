@@ -169,7 +169,7 @@ func TestLoadEventsForReplayPassesFrontierAndRestoresChronologicalOrder(t *testi
 	store := NewEventStore(slog.New(slog.DiscardHandler), queries)
 	store.SetReplayArtifactProvider(staticReplayArtifacts{{
 		ID: "artifact", Summary: "covered", CoverageAsOfMs: 15,
-		Sources: []CompactionSource{{ExternalMessageID: "covered-message", CreatedAtMs: 5}},
+		Sources: []CompactionSource{{ExternalMessageID: "covered-message", CreatedAtMs: 5, EventCursor: 7}},
 	}})
 	events, err := store.LoadEventsForReplay(context.Background(), "77777777-7777-7777-7777-777777777777", sessionID)
 	if err != nil {
@@ -182,6 +182,10 @@ func TestLoadEventsForReplayPassesFrontierAndRestoresChronologicalOrder(t *testi
 		t.Fatalf("query calls = %d, want 1", len(queries.replayParams))
 	}
 	var coverage map[string]int64
+	var cursors map[string]int64
+	if err := json.Unmarshal(queries.replayParams[0].CoveredEventCursors, &cursors); err != nil || cursors["covered-message"] != 7 {
+		t.Fatalf("replay lost covered event version: cursors=%v err=%v", cursors, err)
+	}
 	if err := json.Unmarshal(queries.replayParams[0].CoveredExternalMessages, &coverage); err != nil {
 		t.Fatalf("decode coverage: %v", err)
 	}

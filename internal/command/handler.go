@@ -8,13 +8,11 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/acl"
-	"github.com/felinics/memoh/internal/agent/context/compaction"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/i18n"
@@ -77,9 +75,7 @@ type Handler struct {
 	modelsService     *models.Service
 	providersService  *providers.Service
 	searchProvService *searchproviders.Service
-	compactionService *compaction.Service
 	queries           CommandQueries
-	sqlcQueries       dbstore.Queries
 	aclEvaluator      AccessEvaluator
 	skillLoader       SkillLoader
 	containerFS       ContainerFS
@@ -147,12 +143,6 @@ func NewHandler(
 	}
 	h.registry = h.buildRegistry()
 	return h
-}
-
-// SetCompactionService configures the compaction service for the /compact command.
-func (h *Handler) SetCompactionService(s *compaction.Service, q dbstore.Queries) {
-	h.compactionService = s
-	h.sqlcQueries = q
 }
 
 // clearSessionModelPreference re-takes the current session from a web picker

@@ -267,7 +267,6 @@ func provideCommandHandler(
 	aclService *acl.Service,
 	containerdHandler *handlers.ContainerdHandler,
 	provider bridge.Provider,
-	compactionService *compaction.Service,
 ) *command.Handler {
 	cmdHandler := command.NewHandler(
 		log,
@@ -283,7 +282,6 @@ func provideCommandHandler(
 		&commandSkillLoaderAdapter{handler: containerdHandler},
 		&commandContainerFSAdapter{provider: provider},
 	)
-	cmdHandler.SetCompactionService(compactionService, queries)
 	cmdHandler.SetLinkConsumer(channelAccessService)
 	return cmdHandler
 }

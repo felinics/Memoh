@@ -37,9 +37,9 @@ type discussHistoryMeasure struct {
 // responses for timeline composition, measuring the full extent with a
 // metadata-only aggregate first. Older responses beyond the budget stay in
 // the database; compaction artifacts represent them in composition.
-func (r discussHistoryReader) Load(ctx context.Context, sessionID string) ([]timeline.TurnResponseEntry, discussHistoryMeasure) {
+func (r discussHistoryReader) Load(ctx context.Context, sessionID string) ([]timeline.TurnResponseEntry, discussHistoryMeasure, error) {
 	if r.messages == nil {
-		return nil, discussHistoryMeasure{}
+		return nil, discussHistoryMeasure{}, nil
 	}
 	since := time.Unix(0, 0).UTC()
 	measure := discussHistoryMeasure{}
@@ -51,9 +51,8 @@ func (r discussHistoryReader) Load(ctx context.Context, sessionID string) ([]tim
 	}
 	messages, err := r.messages.ListTurnResponseSourcesSinceBySessionWithinBytes(ctx, sessionID, since, r.maxBytes)
 	if err != nil {
-		r.logger.WarnContext(ctx, "load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
-		return nil, measure
+		return nil, measure, err
 	}
 	measure.Loaded = len(messages)
-	return timeline.DecodeTurnResponseEntries(messages), measure
+	return timeline.DecodeTurnResponseEntries(messages), measure, nil
 }

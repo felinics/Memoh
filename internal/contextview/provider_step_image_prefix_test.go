@@ -2,7 +2,6 @@ package contextview
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -14,7 +13,6 @@ import (
 	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
-	"github.com/felinics/memoh/internal/models"
 )
 
 // photoPrefix is a vision turn whose user message carries a JPEG of the given
@@ -25,49 +23,6 @@ func photoPrefix(base64Length int) []sdk.Message {
 		sdk.TextPart{Text: "what's in this photo, and what's the weather there?"},
 		sdk.ImagePart{Image: "data:image/jpeg;base64," + strings.Repeat("A", base64Length), MediaType: "image/jpeg"},
 	}}}
-}
-
-func TestProviderStepReselectionKeepsPhotoInFrozenPrefixWithinEnvelope(t *testing.T) {
-	t.Parallel()
-
-	prefix := photoPrefix(400_000)
-	messages := append([]sdk.Message(nil), prefix...)
-	messages = append(messages,
-		assistantToolCallMessage("call-weather", "lookup", ""),
-		toolResultMessage("call-weather", "lookup", "sunny, 25C"),
-	)
-	system := strings.Repeat("s", 8_000)
-	tools := []sdk.ToolDefinition{{Name: "lookup", Description: "Look something up.", Parameters: toolexec.SchemaFromValue(json.RawMessage(`{"type":"object"}`))}}
-
-	plan, err := ComputeContextBudgetPlan(128_000, models.DefaultOutputReserveTokens, 0, 0)
-	if err != nil {
-		t.Fatalf("ComputeContextBudgetPlan: %v", err)
-	}
-	allowance := plan.Window - plan.OutputReserve
-	prefixCost := contextfrag.ProviderEnvelopeTokens(system, prefix, tools)
-	if prefixCost > allowance/4 {
-		t.Fatalf("photo prefix priced at %d tokens, want a flat media estimate well inside allowance %d", prefixCost, allowance)
-	}
-
-	protect := DefaultRecentProtectTokens
-	result := SelectProviderStepMessages(context.Background(), agentpkg.ContextStepSelectionInput{
-		Scope:                        contextfrag.Scope{BotID: "bot-1"},
-		InitialMessageCount:          len(prefix),
-		Messages:                     messages,
-		BudgetMaxTokens:              allowance - prefixCost,
-		ProviderSystem:               system,
-		ProviderTools:                tools,
-		ProviderInputAllowanceTokens: allowance,
-		RecentProtectTokens:          &protect,
-		KeepRecentToolResults:        2,
-		MinMessages:                  4,
-	})
-	if result.FatalError != nil {
-		t.Fatalf("step reselection failed for a photo prefix that fits the window: %v", result.FatalError)
-	}
-	if result.Messages != nil || result.Dropped != 0 || result.Truncated != 0 {
-		t.Fatalf("step reselection changed a fitting tool loop: %+v", result)
-	}
 }
 
 type envelopeProbeToolProvider struct{ tools []toolexec.Tool }
@@ -134,7 +89,7 @@ func TestAgentToolLoopSurvivesPhotoInFrozenPrefix(t *testing.T) {
 			ledger := contextfrag.NewMutationLedger()
 			lifecycle := contextfrag.NewLifecycleHolder()
 			_, genErr := agent.Generate(context.Background(), agentpkg.RunConfig{
-				Model:                          &sdk.Model{ID: "vision-model", Provider: provider, Type: sdk.ModelTypeChat},
+				Model:                          &sdk.Model{ID: "vision-model", Provider: provider},
 				System:                         "you are helpful",
 				Messages:                       photoPrefix(1_000_000),
 				ContextCurrentUserMessageIndex: &currentIndex,

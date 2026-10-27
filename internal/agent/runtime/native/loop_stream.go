@@ -128,6 +128,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		return
 	}
 	cfg = captureProviderAttemptPrefix(cfg)
+	cfg.contextSwitch = newContextSwitchState(cfg)
 	toolExecutionMetadata := newToolExecutionMetadataRegistry(func(call sdk.ToolCall, metadata map[string]any) {
 		eventGate.emitAgentEvent(StreamEvent{
 			Type:       EventToolCallMetadata,
@@ -558,6 +559,21 @@ func (e *streamEngine) run() {
 			readMedia:     e.readMedia,
 			drainInjected: e.drainInjectedMessages,
 		})
+		if next, ok := e.baseCfg.contextSwitch.redispatch(e.cfg, e.dispatch, stepParams); ok {
+			// A later mid-stream retry dispatches from the request as the
+			// event left it.
+			e.baseCfg.ContextCachePlan = next.ContextCachePlan
+			e.baseCfg.initialProviderMessageCount = next.initialProviderMessageCount
+			e.cfg = next
+			dispatch, err := e.agent.buildGenerateDispatch(e.streamCtx, next, e.sdkTools, e.approvalTools, e.prepareStep)
+			if err != nil {
+				e.endWithFailure(localFailureEvent(err))
+				return
+			}
+			e.reset(dispatch)
+			attemptSteps, attemptStep = nil, 0
+			stepParams = e.advance(e.baseCfg, e.dynamic, stepBoundary{first: true, committed: len(e.steps)})
+		}
 
 		// Dispatch boundary: never invoke the provider on a dead or
 		// budget-failed context, and publish the staged provider-attempt state
@@ -727,7 +743,8 @@ func (e *streamEngine) checkpointSteeredStep(
 		e.aborted = true
 		return true, nil
 	}
-	decorated := decorateCommittedStep(e.dynamic.stepAdditions(stepIndex), snapshot, e.toolExecutionMetadata)
+	additions := e.dynamic.stepAdditions(stepIndex)
+	decorated := decorateCommittedStep(additions, snapshot, e.toolExecutionMetadata)
 	dir, err := e.baseCfg.OnSteer(e.dynamic.withMessageOrigins(e.streamCtx, stepIndex), stepIndex, decorated)
 	if err != nil {
 		// A failed checkpoint cannot resume: the claimed input is not durable
@@ -735,6 +752,7 @@ func (e *streamEngine) checkpointSteeredStep(
 		e.endWithFailure(localFailureEvent(errs.Wrap(err, "checkpoint steered model call", slog.Int("step", attemptStep))))
 		return true, nil
 	}
+	e.baseCfg.contextSwitch.committed(append(additions, steerCheckpointMessages(snapshot.Messages)...), dir.Provenance)
 	// The published step slice carries step output only: terminal read-media
 	// merging and the injected recorder position their own records around it,
 	// so a decorated copy here would duplicate the admitted input.
@@ -1091,12 +1109,14 @@ func (e *streamEngine) commitStep(attemptStep int, sr *step.Record) (StepDirecti
 	stepIndex := e.baseCfg.StepIndexOffset + len(e.steps)
 	var dir StepDirective
 	if e.baseCfg.OnStepCommitted != nil {
-		decorated := decorateCommittedStep(e.dynamic.stepAdditions(stepIndex), sr, e.toolExecutionMetadata)
+		additions := e.dynamic.stepAdditions(stepIndex)
+		decorated := decorateCommittedStep(additions, sr, e.toolExecutionMetadata)
 		var err error
 		dir, err = e.baseCfg.OnStepCommitted(e.dynamic.withMessageOrigins(e.streamCtx, stepIndex), stepIndex, decorated)
 		if err != nil {
 			return StepDirective{}, fmt.Errorf("twilightai: commit step %d: %w", attemptStep, err)
 		}
+		e.baseCfg.contextSwitch.committed(append(additions, sr.Messages...), dir.Provenance)
 	}
 	e.nextDurableStep = stepIndex + 1
 	if e.baseCfg.capabilityChanges != nil && e.baseCfg.capabilityChanges.Swap(false) && sr.Deferred == nil && e.refreshTools != nil {

@@ -3,6 +3,8 @@ package application
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -12,8 +14,10 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/contextview"
 )
 
 type continuationTurnRequestResolverService struct {
@@ -80,6 +84,7 @@ func TestPrepareContinuationRunConfigReplacesStaleContextAndSetsCapabilities(t *
 		historyfrag.ScopeFallback{},
 		contextfrag.Scope{},
 		eventCh,
+		ChatRequest{},
 	)
 	if err != nil {
 		t.Fatalf("prepareContinuationRunConfig() error = %v", err)
@@ -123,6 +128,7 @@ func TestPrepareContinuationRunConfigPropagatesArtifactProjectionFailure(t *test
 		historyfrag.ScopeFallback{},
 		contextfrag.Scope{SessionID: "00000000-0000-0000-0000-00000000f401"},
 		nil,
+		ChatRequest{},
 	)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("prepareContinuationRunConfig() error = %v, want %v", err, sentinel)
@@ -138,5 +144,34 @@ func TestPendingRuntimeDecisionsFailsClosedOnRuntimeLookupFailure(t *testing.T) 
 	got, err := service.PendingRuntimeDecisions(t.Context(), "00000000-0000-0000-0000-000000000001")
 	if !errors.Is(err, sentinel) || got != nil {
 		t.Fatalf("runtime lookup error treated as native: %v %v", got, err)
+	}
+}
+
+func TestContinuationRecoversBudgetKeepingTheResumedTurn(t *testing.T) {
+	s, history, runner, _ := chatRecoveryFixture(t)
+	history.messages = []messagepkg.Message{
+		{ID: "old-answer", BotID: syncCompactBotID, SessionID: syncCompactThreadID, Role: "assistant", Content: newTextContent(strings.Repeat("h", 40000))},
+		{ID: "request-row", BotID: syncCompactBotID, SessionID: syncCompactThreadID, Role: "user", Content: newTextContent("resumed request")},
+	}
+	req := ChatRequest{BotID: syncCompactBotID, ChatID: syncCompactBotID, ThreadID: syncCompactThreadID, PersistedUserMessageID: "request-row"}
+	cfg, err := s.prepareContinuationRunConfig(t.Context(), native.RunConfig{
+		RunID:                  "continuation-run",
+		Model:                  &sdk.Model{ID: "original-model"},
+		Identity:               native.SessionContext{BotID: syncCompactBotID, SessionID: syncCompactThreadID},
+		ContextBudgetMaxTokens: 8000,
+		ContextLifecycle:       contextfrag.NewLifecycleHolder(),
+	}, historyfrag.ScopeFallback{}, contextfrag.Scope{BotID: syncCompactBotID, SessionID: syncCompactThreadID}, nil, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := contextview.ProviderRunConfigApplier(nil)(t.Context(), cfg)
+	if err != nil || len(runner.configs) == 0 {
+		t.Fatalf("over-budget continuation did not compact: error=%v compactions=%d", err, len(runner.configs))
+	}
+	if want := (turn.ContextMessageSource{Kind: "history", ID: "request-row"}); !slices.Contains(runner.configs[0].ProtectedSources, want) {
+		t.Fatalf("resumed turn must stay verbatim and count as kept history: %+v", runner.configs[0].ProtectedSources)
+	}
+	if countRecoveryText(got.Messages, "compacted history") != 1 {
+		t.Fatalf("continuation did not run on the recovered history: %d messages", len(got.Messages))
 	}
 }

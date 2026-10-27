@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   getProvidersByIdModels: vi.fn(),
   invalidateQueries: vi.fn(),
   postProvidersByIdImportModels: vi.fn(),
-  postProvidersFromTemplate: vi.fn(),
+  postProviders: vi.fn(),
   putProvidersById: vi.fn(),
 }))
 
@@ -49,6 +49,7 @@ vi.mock('@pinia/colada', async () => {
       isLoading: ref(false),
     }),
     useQueryCache: () => ({ invalidateQueries: mocks.invalidateQueries }),
+    defineQueryOptions: (options: unknown) => options,
   }
 })
 
@@ -57,7 +58,7 @@ vi.mock('@memohai/sdk', () => ({
   deleteProvidersById: mocks.deleteProvidersById,
   getProvidersByIdModels: mocks.getProvidersByIdModels,
   postProvidersByIdImportModels: mocks.postProvidersByIdImportModels,
-  postProvidersFromTemplate: mocks.postProvidersFromTemplate,
+  postProviders: mocks.postProviders,
   putProvidersById: mocks.putProvidersById,
 }))
 
@@ -90,6 +91,7 @@ vi.mock('@felinic/ui', async () => {
       },
     }),
     SettingsShell: Passthrough,
+    SurfaceCard: (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', [slots.default?.(), slots.media?.(), slots.actions?.()]),
     Switch: Passthrough,
     toast: {
       error: vi.fn(),
@@ -108,14 +110,13 @@ describe('provider deletion cache invalidation', () => {
     document.body.innerHTML = ''
   })
 
-  it('refreshes provider templates after deleting a provider', async () => {
+  it('refreshes the provider list after deleting a provider', async () => {
     const ModelSetting = (await import('./model-setting.vue')).default
     const root = document.createElement('div')
     document.body.append(root)
     const app = createApp(ModelSetting, {
       provider: {
         id: 'provider-1',
-        provider_template_id: 'template-1',
         name: 'Ollama',
         client_type: 'openai-completions',
         enable: true,
@@ -133,7 +134,7 @@ describe('provider deletion cache invalidation', () => {
       path: { id: 'provider-1' },
       throwOnError: true,
     })
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ key: ['provider-templates', 'llm'] })
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ key: ['providers'] })
 
     app.unmount()
     root.remove()

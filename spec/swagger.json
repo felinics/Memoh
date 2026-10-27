@@ -3288,39 +3288,6 @@
                         }
                     }
                 }
-            },
-            "delete": {
-                "description": "Delete all compaction logs for a bot",
-                "tags": [
-                    "compaction"
-                ],
-                "summary": "Delete compaction logs",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
             }
         },
         "/bots/{bot_id}/connectors": {
@@ -9167,51 +9134,6 @@
                 }
             }
         },
-        "/bots/{bot_id}/sessions/{session_id}/compact": {
-            "post": {
-                "description": "Run context compaction synchronously for a session",
-                "tags": [
-                    "compaction"
-                ],
-                "summary": "Trigger immediate context compaction",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Session ID",
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.TriggerCompactResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/sessions/{session_id}/context-lifecycle": {
             "get": {
                 "description": "List run-keyed context lifecycle snapshots for a chat session, newest first, with page-scoped aggregate totals (cache read/write tokens, drop reasons, mutation kinds). Aggregates cover only the returned page; has_more reports older turns. Sessions predating run lifecycle persistence fall back to legacy assistant metadata (legacy_source). Per-fragment selection_decisions are never returned; each turn's selection trace carries their rolled-up counts and token costs",
@@ -14050,6 +13972,60 @@
                 }
             }
         },
+        "/providers/catalog/models": {
+            "get": {
+                "description": "Fetch, validate and normalize models.dev metadata on the server without changing stored models",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "providers"
+                ],
+                "summary": "Preview a public provider model catalog",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "models.dev provider ID",
+                        "name": "source",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Memoh client protocol",
+                        "name": "client_type",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/modelcatalog.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/providers/count": {
             "get": {
                 "description": "Get the total count of providers",
@@ -14370,6 +14346,70 @@
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/providers/{id}/import-catalog-models": {
+            "post": {
+                "description": "Resolve the stored provider's models.dev source and normalize its catalog on the server",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "providers"
+                ],
+                "summary": "Import a provider's public model catalog",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Models to preserve from a preceding manual creation",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/providers.ImportCatalogModelsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/providers.ImportModelsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
@@ -19718,6 +19758,10 @@
                 "channel_identity_id": {
                     "type": "string"
                 },
+                "excluded_target": {
+                    "description": "ExcludedTarget is checked after platform target resolution, before publication.",
+                    "type": "string"
+                },
                 "message": {
                     "$ref": "#/definitions/channel.Message"
                 },
@@ -20322,8 +20366,6 @@
                 "native_image",
                 "skills_catalog",
                 "hook_context",
-                "injected_message",
-                "background_summary",
                 "runtime_context",
                 "memory_recall",
                 "conversation_summary"
@@ -20341,8 +20383,6 @@
                 "KindNativeImage",
                 "KindSkillsCatalog",
                 "KindHookContext",
-                "KindInjectedMessage",
-                "KindBackgroundSummary",
                 "KindRuntimeContext",
                 "KindMemoryRecall",
                 "KindConversationSummary"
@@ -20405,9 +20445,6 @@
                     "$ref": "#/definitions/contextfrag.ManifestCounts"
                 },
                 "final_input_hash": {
-                    "type": "string"
-                },
-                "loop_selection_mode": {
                     "type": "string"
                 },
                 "memory_recall": {
@@ -20559,8 +20596,6 @@
             "enum": [
                 "before_model_call_hook",
                 "background_summary",
-                "mid_task_prune",
-                "loop_step_reselection",
                 "injected_message",
                 "context_view_fallback",
                 "context_budget_failure",
@@ -20571,13 +20606,12 @@
                 "mid_stream_retry",
                 "current_input_omitted",
                 "current_input_images_omitted",
-                "run_abort_observed"
+                "run_abort_observed",
+                "context_switch"
             ],
             "x-enum-varnames": [
                 "MutationBeforeModelCallHook",
                 "MutationBackgroundSummary",
-                "MutationMidTaskPrune",
-                "MutationLoopStepReselection",
                 "MutationInjectedMessage",
                 "MutationContextViewFallback",
                 "MutationContextBudgetFailure",
@@ -20588,7 +20622,8 @@
                 "MutationMidStreamRetry",
                 "MutationCurrentInputOmitted",
                 "MutationCurrentInputImagesOmitted",
-                "MutationRunAbortObserved"
+                "MutationRunAbortObserved",
+                "MutationContextSwitch"
             ]
         },
         "contextfrag.MutationRecord": {
@@ -20736,28 +20771,10 @@
                 "attempt": {
                     "type": "integer"
                 },
-                "drop_reasons": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "integer"
-                    }
-                },
-                "dropped": {
-                    "type": "integer"
-                },
                 "post_prepare_input_hash": {
                     "type": "string"
                 },
-                "reselection_applied": {
-                    "type": "boolean"
-                },
-                "reselection_outcome": {
-                    "type": "string"
-                },
                 "step_index": {
-                    "type": "integer"
-                },
-                "truncated": {
                     "type": "integer"
                 }
             }
@@ -24304,20 +24321,6 @@
                 }
             }
         },
-        "handlers.TriggerCompactResponse": {
-            "type": "object",
-            "properties": {
-                "message_count": {
-                    "type": "integer"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "summary": {
-                    "type": "string"
-                }
-            }
-        },
         "handlers.UILocateMessageResponse": {
             "type": "object",
             "required": [
@@ -25938,6 +25941,63 @@
                 }
             }
         },
+        "modelcatalog.Info": {
+            "type": "object",
+            "properties": {
+                "checked_at": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "stale": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "modelcatalog.Model": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "$ref": "#/definitions/models.ModelConfig"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/models.ModelType"
+                }
+            }
+        },
+        "modelcatalog.Response": {
+            "type": "object",
+            "properties": {
+                "checked_at": {
+                    "type": "string"
+                },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/modelcatalog.Model"
+                    }
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "stale": {
+                    "type": "boolean"
+                }
+            }
+        },
         "models.AddRequest": {
             "type": "object",
             "properties": {
@@ -26014,58 +26074,131 @@
                 }
             }
         },
+        "models.Modality": {
+            "type": "string",
+            "enum": [
+                "text",
+                "image",
+                "audio",
+                "video",
+                "pdf"
+            ],
+            "x-enum-varnames": [
+                "ModalityText",
+                "ModalityImage",
+                "ModalityAudio",
+                "ModalityVideo",
+                "ModalityPDF"
+            ]
+        },
         "models.ModelConfig": {
             "type": "object",
             "properties": {
                 "catalog_available": {
+                    "description": "CatalogAvailable is false when a managed catalog stopped listing the model.",
                     "type": "boolean"
                 },
-                "compatibilities": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
                 "context_window": {
+                    "description": "ContextWindow is the context window in tokens, input and output together.",
                     "type": "integer"
                 },
                 "description": {
                     "type": "string"
                 },
                 "dimensions": {
+                    "description": "Dimensions is the embedding vector size.",
                     "type": "integer"
                 },
                 "max_output_tokens": {
                     "description": "MaxOutputTokens is the most output tokens the model can produce in one\nresponse; nil means unknown. When set, every turn requests an explicit\nlimit within it.",
                     "type": "integer"
                 },
-                "reasoning_default_on": {
-                    "description": "ReasoningDefaultOn reports whether omitting the thinking field leaves the\nmodel thinking. Separate from off-ability: Claude 4.6 can be turned off *and*\ndefaults to off, while Opus 5 can be turned off but defaults to on, so\nomitting the field there keeps thinking running — billed, and invisible to a\nuser who believes they turned it off. nil means unknown.",
+                "modalities": {
+                    "$ref": "#/definitions/models.ModelModalities"
+                },
+                "reasoning": {
+                    "description": "Reasoning is nil when the model does not reason.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.ModelReasoning"
+                        }
+                    ]
+                },
+                "schema_version": {
+                    "description": "SchemaVersion is ModelConfigSchemaVersion on every config this version\nwrites.",
+                    "type": "integer"
+                },
+                "structured_output": {
+                    "description": "StructuredOutput reports support for a JSON schema response format.",
                     "type": "boolean"
                 },
-                "reasoning_dialect": {
-                    "description": "ReasoningDialect declares the wire shape of this model's thinking control,\nwhich cannot be inferred from the tiers it advertises: Gemini 2.5 takes a\ntoken budget while 3.x takes a named level, and the two are mutually\nexclusive on the same request. Declared per model because the alternative is\nsniffing the model id, and an id is not a capability. Empty leaves provider\npolicy in charge; Google's adaptor deliberately sends no thinking control so\npre-dialect rows retain their safe pre-upgrade request shape.",
+                "tool_call": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "models.ModelModalities": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Modality"
+                    }
+                },
+                "output": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Modality"
+                    }
+                }
+            }
+        },
+        "models.ModelReasoning": {
+            "type": "object",
+            "properties": {
+                "budget": {
+                    "description": "Budget is the reasoning token budget range; nil means no budget control.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.ReasoningBudget"
+                        }
+                    ]
+                },
+                "default": {
+                    "description": "Default is what the model does when a request sets no reasoning control.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.ReasoningDefault"
+                        }
+                    ]
+                },
+                "dialect": {
+                    "description": "Dialect is the request shape that carries the controls: tier, budget,\ntoggle, adaptive, or empty when not stated.",
                     "type": "string"
                 },
-                "reasoning_efforts": {
+                "efforts": {
+                    "description": "Efforts lists the effort levels the model accepts, weakest to strongest.\nTurning reasoning off is Off, not an effort.",
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
-                "reasoning_off_support": {
-                    "description": "ReasoningOffSupport declares how the model answers an explicit request to\nstop thinking. Anthropic's per-model table splits models that share a\nthinking mode and an identical tier list, so this cannot be derived — see the\nreasoning package's OffSupport constants.",
+                "off": {
+                    "description": "Off is how the model answers a request to stop reasoning: accepted,\nlow_effort_only, rejected, or empty when not stated.",
                     "type": "string"
                 },
-                "thinking_budget_max": {
-                    "type": "integer"
+                "replay": {
+                    "description": "Replay is how a Chat Completions host reads reasoning back on replayed\nmessages; nil leaves the provider's compatibility mode in charge.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.ReasoningReplay"
+                        }
+                    ]
                 },
-                "thinking_budget_min": {
-                    "description": "ThinkingBudgetMin/Max bound the budget dialect. The range is per model\nfamily, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned\noff, while Flash starts at 0 and can.",
-                    "type": "integer"
-                },
-                "thinking_mode": {
-                    "type": "string"
+                "toggle": {
+                    "description": "Toggle reports a request field that turns reasoning on and off, separate\nfrom any effort level.",
+                    "type": "boolean"
                 }
             }
         },
@@ -26085,6 +26218,42 @@
                 "ModelTypeTranscription",
                 "ModelTypeVideo"
             ]
+        },
+        "models.ReasoningBudget": {
+            "type": "object",
+            "properties": {
+                "max": {
+                    "type": "integer"
+                },
+                "min": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.ReasoningDefault": {
+            "type": "object",
+            "properties": {
+                "budget": {
+                    "type": "integer"
+                },
+                "effort": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "models.ReasoningReplay": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string"
+                },
+                "required": {
+                    "type": "boolean"
+                }
+            }
         },
         "models.TestResponse": {
             "type": "object",
@@ -26238,6 +26407,17 @@
                 }
             }
         },
+        "providers.ImportCatalogModelsRequest": {
+            "type": "object",
+            "properties": {
+                "skip_model_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "providers.ImportModelsRequest": {
             "type": "object",
             "properties": {
@@ -26252,6 +26432,9 @@
         "providers.ImportModelsResponse": {
             "type": "object",
             "properties": {
+                "catalog": {
+                    "$ref": "#/definitions/modelcatalog.Info"
+                },
                 "created": {
                     "type": "integer"
                 },
@@ -26510,6 +26693,10 @@
                 "default_effort": {
                     "description": "DefaultEffort is the tier to use when nothing is stored, and the tier to fall\nback to when a stored value is no longer offered by the model.",
                     "type": "string"
+                },
+                "default_off": {
+                    "description": "DefaultOff reports that the model is declared to start with reasoning off:\na client picking the model, or reconciling a value it no longer offers,\nstarts it off instead of on DefaultEffort. Only set when CanDisable is.",
+                    "type": "boolean"
                 },
                 "efforts": {
                     "description": "Efforts are the selectable active tiers, weakest to strongest as advertised.",
@@ -27186,19 +27373,6 @@
                 "command_ui_language": {
                     "type": "string"
                 },
-                "compaction_enabled": {
-                    "type": "boolean"
-                },
-                "compaction_model_id": {
-                    "type": "string"
-                },
-                "compaction_target_percent": {
-                    "type": "integer",
-                    "x-nullable": true
-                },
-                "compaction_threshold": {
-                    "type": "integer"
-                },
                 "default_bot_agent_id": {
                     "type": "string"
                 },
@@ -27354,7 +27528,7 @@
                     "type": "string"
                 },
                 "chat_model_id": {
-                    "description": "Reference fields below use pointer semantics so autosaving clients can\nclear a selection: nil = keep current, \"\" = clear, value = set. The\nservice mirrors each into a `\u003cfield\u003e_set` SQL flag (same pattern as\nFetchProviderID / CompactionModelID); plain strings would make \"\"\nindistinguishable from \"not sent\".",
+                    "description": "Reference fields below use pointer semantics so autosaving clients can\nclear a selection: nil = keep current, \"\" = clear, value = set. The\nservice mirrors each into a `\u003cfield\u003e_set` SQL flag (same pattern as\nFetchProviderID / MemoryLLMModelID); plain strings would make \"\"\nindistinguishable from \"not sent\".",
                     "type": "string"
                 },
                 "chat_runtime": {
@@ -27362,18 +27536,6 @@
                 },
                 "command_ui_language": {
                     "type": "string"
-                },
-                "compaction_enabled": {
-                    "type": "boolean"
-                },
-                "compaction_model_id": {
-                    "type": "string"
-                },
-                "compaction_target_percent": {
-                    "type": "integer"
-                },
-                "compaction_threshold": {
-                    "type": "integer"
                 },
                 "default_bot_agent_id": {
                     "type": "string"

@@ -42,8 +42,9 @@ func BudgetBytesForTokens(tokens int) int64 {
 }
 
 // ProviderBudgetTokensFromBytes converts bytes for provider-envelope decisions,
-// including selection under a provider budget. Compaction, cache metrics, and
-// other ledger consumers keep the legacy floor-based TokensFromBytes contract.
+// including selection under a provider budget and the summarizer request.
+// Compaction pressure, cache metrics, and other ledger consumers keep the
+// legacy floor-based TokensFromBytes contract.
 func ProviderBudgetTokensFromBytes(n int) int {
 	if n <= 0 {
 		return 0

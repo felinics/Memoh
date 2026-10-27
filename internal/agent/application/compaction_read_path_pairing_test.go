@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 )
@@ -30,7 +32,7 @@ func (f *pairingQueries) ListUncompactedMessagesBySession(context.Context, pgtyp
 	return f.uncompacted, nil
 }
 
-func (f *pairingQueries) MeasureUncompactedMessagesBySession(context.Context, pgtype.UUID) (sqlc.MeasureUncompactedMessagesBySessionRow, error) {
+func (f *pairingQueries) MeasureUncompactedMessagesBySession(context.Context, sqlc.MeasureUncompactedMessagesBySessionParams) (sqlc.MeasureUncompactedMessagesBySessionRow, error) {
 	return sqlc.MeasureUncompactedMessagesBySessionRow{CandidateCount: int64(len(f.uncompacted)), CandidateBytes: 1}, nil
 }
 
@@ -72,6 +74,26 @@ func (f *pairingQueries) CreateCompactionLog(context.Context, sqlc.CreateCompact
 	return sqlc.BotHistoryMessageCompact{ID: f.logID}, nil
 }
 
+func (f *pairingQueries) ListMessagesByCompactIDWithinBytes(ctx context.Context, arg sqlc.ListMessagesByCompactIDWithinBytesParams) ([]sqlc.ListMessagesByCompactIDWithinBytesRow, error) {
+	rows, err := f.ListMessagesByCompactID(ctx, arg.CompactID)
+	bounded := make([]sqlc.ListMessagesByCompactIDWithinBytesRow, len(rows))
+	for i, row := range rows {
+		bounded[i] = sqlc.ListMessagesByCompactIDWithinBytesRow(row)
+	}
+	return bounded, err
+}
+
+func (f *pairingQueries) ListMessagesByCompactID(_ context.Context, compactID pgtype.UUID) ([]sqlc.ListMessagesByCompactIDRow, error) {
+	var rows []sqlc.ListMessagesByCompactIDRow
+	for _, row := range f.uncompacted {
+		if compactID == f.logID && slices.Contains(f.markedIDs, row.ID) {
+			row.CompactID = compactID
+			rows = append(rows, sqlc.ListMessagesByCompactIDRow(row))
+		}
+	}
+	return rows, nil
+}
+
 func (f *pairingQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) (int64, error) {
 	f.markedIDs = append([]pgtype.UUID(nil), arg.MessageIds...)
 	return int64(len(arg.MessageIds)), nil
@@ -104,14 +126,14 @@ func pairingRow(t *testing.T, role, content string) sqlc.ListUncompactedMessages
 	}
 }
 
-// TestSelectorToReadPathPreservesOrderEndToEnd drives the real compaction
-// selector over a history with a pending ask_user island and feeds its
-// actual marked rows into replaceCompactedHistoryRecords. It pins the pair of
-// invariants that live in two packages: the selector marks one contiguous
-// pre-island run under one compact_id, and the read path substitutes it in
-// place — content behind the island (like "mid q") must never fold in front
-// of it.
-func TestSelectorToReadPathPreservesOrderEndToEnd(t *testing.T) {
+// TestSelectorToReadPathFoldsAClosedAskUserCall drives the real compaction
+// selector over a history whose ask_user call the conversation moved on from
+// without an answer, and feeds its actual marked rows into
+// replaceCompactedHistoryRecords. It pins the pair of invariants that live in
+// two packages: the selector folds the closed call with the history around
+// it as one contiguous run, and the read path substitutes the summary in
+// place, ahead of the current input it never covers.
+func TestSelectorToReadPathFoldsAClosedAskUserCall(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
@@ -127,29 +149,28 @@ func TestSelectorToReadPathPreservesOrderEndToEnd(t *testing.T) {
 	}
 	svc := compaction.NewService(slog.New(slog.DiscardHandler), q)
 
-	res, err := svc.RunCompactionSync(context.Background(), compaction.TriggerConfig{
-		BotID:        uuid.NewString(),
-		SessionID:    uuid.NewString(),
-		ModelID:      "stub-model",
-		ClientType:   "openai-completions",
-		APIKey:       "test",
-		BaseURL:      "http://stub.invalid",
-		HTTPClient:   &http.Client{Transport: pairingSummarizer{summary: "condensed old exchange"}},
-		TargetTokens: 200,
+	passes, err := svc.Compact(context.Background(), compaction.TriggerConfig{
+		BotID:               uuid.NewString(),
+		SessionID:           uuid.NewString(),
+		ModelID:             "stub-model",
+		ClientType:          "openai-completions",
+		APIKey:              "test",
+		BaseURL:             "http://stub.invalid",
+		HTTPClient:          &http.Client{Transport: pairingSummarizer{summary: "condensed old exchange"}},
+		ProtectedSources:    []turn.ContextMessageSource{{Kind: "history", ID: uuid.UUID(rows[4].ID.Bytes).String(), Current: true}},
+		SummaryWindowTokens: 128000,
+		HistoryBudgetTokens: 1000,
 	})
-	if err != nil {
-		t.Fatalf("RunCompactionSync: %v", err)
-	}
-	if res.Status != compaction.StatusOK {
-		t.Fatalf("status = %q, want %q", res.Status, compaction.StatusOK)
+	if err != nil || len(passes) != 1 || passes[0].More {
+		t.Fatalf("passes = %+v err = %v, want one pass that folds the history before the current input", passes, err)
 	}
 
 	marked := make(map[pgtype.UUID]bool, len(q.markedIDs))
 	for _, id := range q.markedIDs {
 		marked[id] = true
 	}
-	if len(marked) != 2 || !marked[rows[0].ID] || !marked[rows[1].ID] {
-		t.Fatalf("marked = %v, want exactly the contiguous pre-island run [old q, old a]", q.markedIDs)
+	if len(marked) != 4 || !marked[rows[0].ID] || !marked[rows[1].ID] || !marked[rows[2].ID] || !marked[rows[3].ID] {
+		t.Fatalf("marked = %v, want the contiguous run [old q, old a, ask_user call, mid q]", q.markedIDs)
 	}
 
 	compactID := uuid.UUID(q.logID.Bytes).String()
@@ -168,11 +189,9 @@ func TestSelectorToReadPathPreservesOrderEndToEnd(t *testing.T) {
 		records = append(records, record)
 	}
 
-	got := replaceCompactedHistoryRecords(records, map[string]string{compactID: res.Summary}, contextfrag.Scope{})
+	got := replaceCompactedHistoryRecords(records, map[string]string{compactID: passes[0].Summary}, contextfrag.Scope{})
 	want := []ModelMessage{
-		{Role: "user", Content: newTextContent("<summary>\n" + res.Summary + "\n</summary>")},
-		{Role: "assistant", Content: newTextContent("ask you something")},
-		{Role: "user", Content: newTextContent("mid q")},
+		{Role: "user", Content: newTextContent("<summary>\n" + passes[0].Summary + "\n</summary>")},
 		{Role: "user", Content: newTextContent("current q")},
 	}
 	if gotMessages := historyfrag.ToModelMessages(got); !reflect.DeepEqual(gotMessages, want) {

@@ -22,6 +22,8 @@ type CoveredSource struct {
 	ExternalMessageID      string                 `json:"external_message_id,omitempty"`
 	SourceReplyToMessageID string                 `json:"source_reply_to_message_id,omitempty"`
 	CreatedAtMs            int64                  `json:"created_at_ms,omitempty"`
+	CoverageAsOfMs         *int64                 `json:"coverage_as_of_ms,omitempty"`
+	EventCursor            int64                  `json:"event_cursor,omitempty"`
 }
 
 type Artifact struct {
@@ -57,8 +59,8 @@ func (a Artifact) HistoryRecord(scope contextfrag.Scope) historyfrag.HistoryReco
 	record.BotID = a.BotID
 	record.SessionID = a.SessionID
 	record.SessionIDKnown = true
-	if a.AnchorStartMs > 0 {
-		record.CreatedAt = time.UnixMilli(a.AnchorStartMs).UTC()
+	if a.AnchorEndMs > 0 {
+		record.CreatedAt = time.UnixMilli(a.AnchorEndMs).UTC()
 	}
 	return record
 }
@@ -105,6 +107,7 @@ func artifactMetadataFor(items []CompactionCandidate, ids []pgtype.UUID) (artifa
 			ExternalMessageID:      item.Record.ExternalMessageID,
 			SourceReplyToMessageID: item.Record.SourceReplyToMessageID,
 			CreatedAtMs:            createdAtMs,
+			EventCursor:            item.EventCursor,
 		})
 	}
 	sort.SliceStable(covered, func(i, j int) bool {
@@ -132,7 +135,16 @@ func rollupArtifactMetadata(parents []Artifact, current artifactMetadata) (artif
 		if len(parent.Coverage) == 0 {
 			return artifactMetadata{}, fmt.Errorf("%w: artifact_id=%s", errIncompleteAbsorbedCoverage, parent.ID)
 		}
-		covered = append(covered, parent.Coverage...)
+		for _, source := range parent.Coverage {
+			if source.CoverageAsOfMs == nil {
+				asOf := int64(0)
+				if !parent.StartedAt.IsZero() {
+					asOf = parent.StartedAt.UnixMilli()
+				}
+				source.CoverageAsOfMs = &asOf
+			}
+			covered = append(covered, source)
+		}
 	}
 	covered = append(covered, currentCoverage...)
 	sort.SliceStable(covered, func(i, j int) bool {

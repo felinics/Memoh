@@ -15,8 +15,7 @@ Memoh/
 │   ├── bridge/                 #   In-container gRPC bridge (UDS-based, runs inside bot containers; supervises optional display/browser helpers)
 │   │   └── template/           #     Prompt templates for bridge (TOOLS.md, SOUL.md, IDENTITY.md, etc.)
 │   ├── gen-bridge-mtls/        #   Bridge mTLS certificate generator
-│   ├── mcp/                    #   MCP stdio transport binary
-│   └── synccaps/               #   Build-time sync of provider template capabilities from the LiteLLM registry
+│   └── mcp/                    #   MCP stdio transport binary
 ├── internal/                   # Go backend core code (domain packages)
 │   ├── accounts/               #   User account management (CRUD, password hashing)
 │   ├── acl/                    #   Access control list (source-aware chat trigger ACL)
@@ -74,7 +73,6 @@ Memoh/
 │   ├── boot/                   #   Runtime configuration provider (container backend detection)
 │   ├── bots/                   #   Bot management (CRUD, lifecycle)
 │   ├── botbackup/              #   Bot backup/export/import service
-│   ├── capabilities/           #   Model reasoning capability derivation (LiteLLM registry)
 │   ├── channel/                #   Channel adapter system
 │   │   ├── adapters/           #     Platform adapters: telegram, discord, feishu, qq, dingtalk, weixin, wecom, wechatoa, matrix, misskey, line, slack, local
 │   │   ├── discuss/            #     Discuss-mode driver
@@ -116,7 +114,7 @@ Memoh/
 │   ├── policy/                 #   Access policy resolution (guest access)
 │   ├── providers/              #   LLM provider management (OpenAI, Anthropic, etc.)
 │   ├── prune/                  #   Text pruning utilities (truncation with head/tail)
-│   ├── registry/               #   Provider registry service (YAML provider templates)
+│   ├── registry/               #   Provider registry service (speech, transcription and video YAML templates)
 │   ├── rpc/                    #   Internal server↔channel RPC (shared-secret auth, runtime method fan-out)
 │   ├── schedule/               #   Scheduled task service (cron)
 │   ├── searchproviders/        #   Search engine provider management (Brave, etc.)
@@ -156,7 +154,7 @@ Memoh/
 │       ├── migrations/         #   SQL migration files
 │       └── queries/            #   SQL query files (sqlc input)
 ├── conf/                       # Configuration
-│   ├── providers/              #   Provider YAML templates (openai, anthropic, codex, github-copilot, etc.)
+│   ├── providers/              #   Speech, transcription and video provider YAML templates; LLM providers come from apps/web/src/constants/model-sources.ts and models.dev
 │   ├── app.example.toml        #   Default config template
 │   ├── app.docker.toml         #   Docker deployment config
 │   ├── app.apple.toml          #   macOS (Apple Virtualization) config
@@ -166,7 +164,7 @@ Memoh/
 │   ├── docker-compose.selinux.yml # SELinux overlay compose
 │   └── app.dev.toml            #   Dev config (connects to devenv docker-compose)
 ├── docker/                     # Production Docker (Dockerfiles, entrypoints, nginx.conf, toolkit/)
-├── scripts/                    # Utility scripts (db-up, db-drop, release, install, sync-openrouter-models)
+├── scripts/                    # Utility scripts (db-up, db-drop, release, install)
 ├── docker-compose.yml          # Docker Compose orchestration (production)
 ├── mise.toml                   # mise tasks and tool version definitions
 ├── sqlc.yaml                   # sqlc code generation config

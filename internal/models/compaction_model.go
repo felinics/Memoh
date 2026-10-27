@@ -11,15 +11,14 @@ import (
 	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
-// Compaction model resolution failures. Automatic triggers map them to a
-// silent skip; manual surfaces translate them into user-facing errors.
+// Compaction model resolution failures. A run that must compact reports them
+// as the reason it cannot continue.
 var (
-	ErrCompactionModelNotConfigured     = errors.New("no compaction or chat model configured")
-	ErrCompactionModelNotChat           = errors.New("compaction model is not a chat model")
-	ErrCompactionModelDisabled          = errors.New("compaction model is disabled")
-	ErrCompactionProviderDisabled       = errors.New("compaction model provider is disabled")
-	ErrCompactionOutputLimitUnsupported = errors.New("compaction model provider does not enforce the output limit")
-	ErrCompactionWindowUnknown          = errors.New("compaction model does not declare a context window")
+	ErrCompactionModelNotConfigured = errors.New("no chat model configured for compaction")
+	ErrCompactionModelNotChat       = errors.New("compaction model is not a chat model")
+	ErrCompactionModelDisabled      = errors.New("compaction model is disabled")
+	ErrCompactionProviderDisabled   = errors.New("compaction model provider is disabled")
+	ErrCompactionWindowUnknown      = errors.New("compaction model does not declare a context window")
 )
 
 // CompactionModelResolution is the resolved summarizer identity. Credentials
@@ -34,11 +33,13 @@ type CompactionModelResolution struct {
 
 // ResolveCompactionModel picks the first non-empty candidate model id and
 // validates that it can act as a summarizer: a chat-type, enabled model on an
-// enabled LLM provider that honors output caps and declares a context window
-// (the summary budget derives from it, so an unknown window fails closed).
-// Callers compose the candidate chain: automatic triggers pass the override
-// and the turn's actually-resolved model; manual surfaces prefer the
-// session's latest model before the bot default.
+// enabled LLM provider that declares a context window (the summary budget
+// derives from it, so an unknown window fails closed). A client that ignores
+// max_tokens (Codex) can still summarize: a pass commits a summary only once it
+// fits the room it was asked for.
+// Callers compose the candidate chain: a run passes its actually-resolved
+// model first; the session info surface prefers the session's latest model
+// before the bot default.
 func ResolveCompactionModel(
 	ctx context.Context,
 	modelsService *Service,
@@ -79,9 +80,6 @@ func ResolveCompactionModel(
 	if !IsLLMClientType(clientType) {
 		return CompactionModelResolution{}, fmt.Errorf("%w: %s", ErrCompactionModelNotChat, provider.ClientType)
 	}
-	if !EnforcesMaxOutputTokens(clientType) {
-		return CompactionModelResolution{}, ErrCompactionOutputLimitUnsupported
-	}
 	if model.Config.ContextWindow == nil || *model.Config.ContextWindow <= 0 {
 		return CompactionModelResolution{}, fmt.Errorf("%w: %s", ErrCompactionWindowUnknown, model.ModelID)
 	}
@@ -99,7 +97,6 @@ func IsCompactionModelUnavailable(err error) bool {
 		errors.Is(err, ErrCompactionModelNotChat) ||
 		errors.Is(err, ErrCompactionModelDisabled) ||
 		errors.Is(err, ErrCompactionProviderDisabled) ||
-		errors.Is(err, ErrCompactionOutputLimitUnsupported) ||
 		errors.Is(err, ErrCompactionWindowUnknown)
 }
 

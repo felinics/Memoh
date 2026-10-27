@@ -11,6 +11,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const backfillCompactionArtifactCoverage = `-- name: BackfillCompactionArtifactCoverage :exec
+UPDATE bot_history_message_compacts
+SET coverage = $1,
+    anchor_start_ms = $2,
+    anchor_end_ms = $3
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $4
+  AND status = 'ok'
+  AND superseded_by IS NULL
+  AND coverage = '[]'::jsonb
+`
+
+type BackfillCompactionArtifactCoverageParams struct {
+	Coverage      []byte      `json:"coverage"`
+	AnchorStartMs int64       `json:"anchor_start_ms"`
+	AnchorEndMs   int64       `json:"anchor_end_ms"`
+	ID            pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) BackfillCompactionArtifactCoverage(ctx context.Context, arg BackfillCompactionArtifactCoverageParams) error {
+	_, err := q.db.Exec(ctx, backfillCompactionArtifactCoverage,
+		arg.Coverage,
+		arg.AnchorStartMs,
+		arg.AnchorEndMs,
+		arg.ID,
+	)
+	return err
+}
+
 const completeCompactionLog = `-- name: CompleteCompactionLog :one
 WITH target_compact AS MATERIALIZED (
   SELECT compact.id, compact.session_id, compact.team_id
@@ -389,41 +418,64 @@ func (q *Queries) CreateCompactionLog(ctx context.Context, arg CreateCompactionL
 	return i, err
 }
 
-const deleteCompactionLogsByBot = `-- name: DeleteCompactionLogsByBot :exec
-WITH target_sessions AS MATERIALIZED (
-  SELECT session.id
-  FROM bot_sessions session
-  WHERE session.team_id = public.memoh_current_team_id()
-    AND session.bot_id = $1
-  ORDER BY session.id
-  FOR UPDATE
-),
-invalidated_sessions AS (
-  UPDATE bot_sessions session
-  SET compaction_epoch = session.compaction_epoch + 1
-  FROM target_sessions target
-  WHERE session.team_id = public.memoh_current_team_id()
-    AND session.id = target.id
-  RETURNING session.id
-),
-target_compaction_logs AS MATERIALIZED (
-  SELECT compact.id
-  FROM bot_history_message_compacts compact
-  WHERE compact.team_id = public.memoh_current_team_id()
-    AND compact.bot_id = $1
-    AND (SELECT count(*) FROM target_sessions) >= 0
-  ORDER BY compact.id
-  FOR UPDATE
-)
-DELETE FROM bot_history_message_compacts AS compacts
-USING target_compaction_logs target
-WHERE compacts.team_id = public.memoh_current_team_id()
-  AND compacts.id = target.id
+const getActiveCompactionArtifactWithinBytes = `-- name: GetActiveCompactionArtifactWithinBytes :one
+SELECT compact.id, compact.bot_id, compact.session_id, compact.status, compact.summary, compact.message_count, compact.error_message, compact.usage, compact.model_id, compact.artifact_version, compact.coverage, compact.anchor_start_ms, compact.anchor_end_ms, compact.artifact_level, compact.parent_ids, compact.superseded_by, compact.superseded_at, compact.compaction_epoch, compact.started_at, compact.completed_at, compact.team_id
+FROM bot_history_message_compacts compact
+JOIN bot_sessions owner_session
+  ON owner_session.id = compact.session_id
+ AND owner_session.bot_id = compact.bot_id
+ AND owner_session.team_id = compact.team_id
+ AND owner_session.compaction_epoch = compact.compaction_epoch
+WHERE compact.team_id = public.memoh_current_team_id()
+  AND compact.id = $1
+  AND compact.bot_id = $2
+  AND compact.session_id = $3
+  AND compact.status = 'ok'
+  AND compact.superseded_by IS NULL
+  AND compact.superseded_at IS NULL
+  AND octet_length(row_to_json(compact)::text) <= $4::bigint
 `
 
-func (q *Queries) DeleteCompactionLogsByBot(ctx context.Context, targetBotID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteCompactionLogsByBot, targetBotID)
-	return err
+type GetActiveCompactionArtifactWithinBytesParams struct {
+	ID        pgtype.UUID `json:"id"`
+	BotID     pgtype.UUID `json:"bot_id"`
+	SessionID pgtype.UUID `json:"session_id"`
+	MaxBytes  int64       `json:"max_bytes"`
+}
+
+// In-run compaction reads only an artifact already rendered by its request.
+func (q *Queries) GetActiveCompactionArtifactWithinBytes(ctx context.Context, arg GetActiveCompactionArtifactWithinBytesParams) (BotHistoryMessageCompact, error) {
+	row := q.db.QueryRow(ctx, getActiveCompactionArtifactWithinBytes,
+		arg.ID,
+		arg.BotID,
+		arg.SessionID,
+		arg.MaxBytes,
+	)
+	var i BotHistoryMessageCompact
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.SessionID,
+		&i.Status,
+		&i.Summary,
+		&i.MessageCount,
+		&i.ErrorMessage,
+		&i.Usage,
+		&i.ModelID,
+		&i.ArtifactVersion,
+		&i.Coverage,
+		&i.AnchorStartMs,
+		&i.AnchorEndMs,
+		&i.ArtifactLevel,
+		&i.ParentIds,
+		&i.SupersededBy,
+		&i.SupersededAt,
+		&i.CompactionEpoch,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.TeamID,
+	)
+	return i, err
 }
 
 const getCompactionLogByID = `-- name: GetCompactionLogByID :one
@@ -652,4 +704,28 @@ func (q *Queries) ListCompactionLogsByBot(ctx context.Context, arg ListCompactio
 		return nil, err
 	}
 	return items, nil
+}
+
+const releasePendingCompactionClaimsBySession = `-- name: ReleasePendingCompactionClaimsBySession :exec
+UPDATE bot_history_message_compacts
+SET status = 'error',
+    error_message = 'claimant lost runtime ownership',
+    completed_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1
+  AND session_id = $2
+  AND status = 'pending'
+`
+
+type ReleasePendingCompactionClaimsBySessionParams struct {
+	BotID     pgtype.UUID `json:"bot_id"`
+	SessionID pgtype.UUID `json:"session_id"`
+}
+
+// A new runtime owner releases the compaction claims its predecessors left
+// pending: their writes are fenced out, so those claims can never commit, and
+// the rows they hold are compaction candidates again.
+func (q *Queries) ReleasePendingCompactionClaimsBySession(ctx context.Context, arg ReleasePendingCompactionClaimsBySessionParams) error {
+	_, err := q.db.Exec(ctx, releasePendingCompactionClaimsBySession, arg.BotID, arg.SessionID)
+	return err
 }

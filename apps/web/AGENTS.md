@@ -115,7 +115,6 @@ src/
 │   └── useTerminalCache.ts    #   Terminal output cache
 ├── constants/                 # Constants
 │   ├── client-types.ts        #   LLM client type definitions
-│   ├── compatibilities.ts     #   Feature compatibility flags
 │   └── acl-presets.ts         #   ACL preset configurations
 ├── i18n/locales/              # Translation files (en.json, zh.json)
 ├── layout/
@@ -180,7 +179,7 @@ src/
 │   │       ├── bot-tool-approval.vue  # Tool approval settings tab
 │   │       ├── bot-skills.vue         # Skills tab
 │   │       ├── bot-access.vue         # Access control tab
-│   │       ├── bot-compaction.vue     # Compaction settings tab
+│   │       ├── bot-compaction.vue     # Compaction logs section
 │   │       ├── bot-card.vue           # Bot card component
 │   │       ├── model-select.vue       # Model selection dropdown
 │   │       ├── model-options.vue      # Model options configuration

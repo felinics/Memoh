@@ -750,7 +750,7 @@ func TestSkillProviderUsageGatesUseSkill(t *testing.T) {
 func TestHistoryProviderUsageGatesRegisteredTools(t *testing.T) {
 	t.Parallel()
 
-	provider := NewHistoryProvider(nil, nil, nil, nil)
+	provider := NewHistoryProvider(nil, nil, nil, nil, ToolOutputLimit{})
 	if got := provider.Usage(context.Background(), SessionContext{}, AvailableTools{}); got != "" {
 		t.Fatalf("Usage without history tools = %q, want empty", got)
 	}

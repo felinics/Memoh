@@ -167,6 +167,19 @@ func TestCharacterizeNativeStreamErrorClassification(t *testing.T) {
 			historyCode: "",
 		},
 		{
+			// A compaction the provider refused for the account names that.
+			name:        "compaction out of quota",
+			event:       native.StreamEvent{Type: native.EventError, Cause: fmt.Errorf("prepare context view: %w: %w", contextfrag.ErrBudgetUnsatisfied, charProviderErr(402, sdk.KindQuotaExhausted))},
+			code:        "agent.provider_quota_exhausted",
+			historyCode: "agent.provider_quota_exhausted",
+		},
+		{
+			name:        "compaction the provider was too busy for",
+			event:       native.StreamEvent{Type: native.EventError, Cause: fmt.Errorf("prepare context view: %w: %w", contextfrag.ErrBudgetUnsatisfied, charProviderErr(503, sdk.KindServerError))},
+			code:        "context.budget_unsatisfied",
+			historyCode: "",
+		},
+		{
 			name:        "protected context overflow",
 			event:       native.StreamEvent{Type: native.EventError, Cause: fmt.Errorf("prepare context view: %w: SECRET cost", contextfrag.ErrProtectedContextOverflow)},
 			code:        "context.protected_overflow",

@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"reflect"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,7 +34,6 @@ type Agent struct {
 	logger             *slog.Logger
 	limits             Limits
 	contextViewApplier ContextViewApplier
-	loopReselectMode   LoopReselectMode
 }
 
 const streamCancelDrainGrace = 250 * time.Millisecond
@@ -54,17 +51,7 @@ func New(deps Deps) *Agent {
 		logger:             logger.With(slog.String("service", "agent/runtime/native")),
 		limits:             deps.Limits.Normalize(),
 		contextViewApplier: deps.ContextViewApplier,
-		loopReselectMode:   deps.LoopReselectMode.Normalize(),
 	}
-}
-
-// LoopReselectMode returns the normalized rollout mode for in-loop context
-// reselection. A nil Agent defaults to active.
-func (a *Agent) LoopReselectMode() LoopReselectMode {
-	if a == nil {
-		return LoopReselectActive
-	}
-	return a.loopReselectMode.Normalize()
 }
 
 // captureProviderAttemptPrefix freezes the applier-rendered boundary before
@@ -303,7 +290,6 @@ func prepareProviderAttempt(
 	ctx context.Context,
 	cfg RunConfig,
 	handoff *providerAttemptHandoff,
-	mode LoopReselectMode,
 	systemPrepended bool,
 	prefixCount,
 	stepIndex int,
@@ -316,65 +302,30 @@ func prepareProviderAttempt(
 	prefixCount = clampStableMessageCount(prefixCount, len(params.Messages))
 	dynamicRefs = verifyDynamicRefs(cfg.dynamicInputs, dynamicRefs, params.Messages)
 	snapshot := contextfrag.StepSnapshot{StepIndex: stepIndex}
-	reselector := cfg.ContextStepReselector
-	mode = mode.Normalize()
-	if mode == LoopReselectOff {
-		reselector = nil
-	}
-	inputAllowance := stepReselectionAllowance(cfg)
-	reselectionDetail := ""
-	protectedPruned := 0
-	if reselector != nil && prefixCount < len(params.Messages) {
-		beforeMessages := append([]sdk.Message(nil), params.Messages...)
-		selection := reselector(ctx, ContextStepSelectionInput{
-			Scope: cfg.ContextScope, InitialMessageCount: prefixCount, Messages: params.Messages,
-			BudgetMaxTokens:              remainingStepBudget(inputAllowance, params, prefixCount),
-			ProviderSystem:               params.System,
-			ProviderTools:                params.Tools,
-			ProviderInputAllowanceTokens: inputAllowance,
-			RecentProtectTokens:          cfg.ContextRecentProtectTokens, KeepRecentToolResults: stepReselectKeepRecentToolResults,
-			MinMessages: stepReselectMinMessages,
-		})
+	allowance := providerInputAllowance(cfg)
+	// A step request only grows between compaction events. A request that
+	// still does not fit after compaction ends the run without pruning.
+	if cfg.contextSwitch != nil {
+		switched, err := cfg.contextSwitch.fold(ctx, cfg, params, allowance)
 		switch {
-		case mode == LoopReselectShadow:
-			snapshot.Dropped = selection.Dropped
-			snapshot.Truncated = selection.Truncated
-			snapshot.DropReasons = copyDropReasons(selection.DropReasons)
-			switch {
-			case selection.FatalError != nil:
-				snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeWouldFail
-			case selection.Messages != nil || selection.Dropped > 0 || selection.Truncated > 0:
-				snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeWouldApply
-			default:
-				snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeUnchanged
-			}
-		case selection.FatalError != nil:
-			return failPreparedProviderAttempt(cfg, handoff, params, snapshot, prefixCount, selection.FatalError)
-		case selection.Messages != nil && stepSelectionPreservesPrefix(beforeMessages, selection.Messages, prefixCount):
-			dynamicRefs = remapDynamicRefs(dynamicRefs, beforeMessages, selection.Messages, prefixCount, selection)
-			params.Messages = selection.Messages
-			snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeApplied
-			snapshot.ReselectionApplied = true
-			snapshot.Dropped = selection.Dropped
-			snapshot.Truncated = selection.Truncated
-			snapshot.DropReasons = copyDropReasons(selection.DropReasons)
-			protectedPruned = selection.ProtectedPruned
-			if selection.Dropped > 0 || selection.Truncated > 0 {
-				reselectionDetail = contextStepSelectionDetail(selection)
-			}
-		default:
-			snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeUnchanged
+		case ctx.Err() != nil:
+			handoff.reject()
+			return params
+		case err != nil:
+			return failPreparedProviderAttempt(cfg, handoff, params, snapshot, prefixCount, err)
+		case switched:
+			dynamicRefs = verifyDynamicRefs(cfg.dynamicInputs, cfg.contextSwitch.remap(dynamicRefs), params.Messages)
 		}
 	}
-	if overflow := providerAttemptEnvelopeOverflow(params, inputAllowance); overflow > 0 {
+	if overflow := providerAttemptEnvelopeOverflow(params, allowance); overflow > 0 {
 		return failPreparedProviderAttempt(cfg, handoff, params, snapshot, prefixCount, fmt.Errorf(
 			"%w: input_overflow=%d allowance=%d",
 			contextfrag.ErrBudgetUnsatisfied,
 			overflow,
-			inputAllowance,
+			allowance,
 		))
 	}
-	stagePreparedProviderAttempt(ctx, handoff, snapshot, systemPrepended, reselectionDetail, protectedPruned, dynamicRefs)
+	stagePreparedProviderAttempt(ctx, handoff, snapshot, systemPrepended, dynamicRefs)
 	return params
 }
 
@@ -383,15 +334,13 @@ func stagePreparedProviderAttempt(
 	handoff *providerAttemptHandoff,
 	snapshot contextfrag.StepSnapshot,
 	systemPrepended bool,
-	reselectionDetail string,
-	protectedPruned int,
 	dynamicRefs []dynamicSourceRef,
 ) {
 	if !providerAttemptDispatchAllowed(ctx) {
 		handoff.reject()
 		return
 	}
-	handoff.stage(snapshot, systemPrepended, reselectionDetail, protectedPruned, dynamicRefs)
+	handoff.stage(snapshot, systemPrepended, dynamicRefs)
 }
 
 func providerAttemptEnvelopeOverflow(params *sdk.Request, allowance int) int {
@@ -409,12 +358,6 @@ func failPreparedProviderAttempt(
 	prefixCount int,
 	err error,
 ) *sdk.Request {
-	switch snapshot.ReselectionOutcome {
-	case contextfrag.ReselectionOutcomeWouldApply, contextfrag.ReselectionOutcomeWouldFail:
-	default:
-		snapshot.ReselectionOutcome = contextfrag.ReselectionOutcomeFailed
-	}
-	snapshot.ReselectionApplied = false
 	params.Messages = append([]sdk.Message(nil), params.Messages[:prefixCount]...)
 	handoff.reject()
 	cfg.ContextMutations.AppendStepSnapshot(snapshot)
@@ -424,21 +367,10 @@ func failPreparedProviderAttempt(
 	return params
 }
 
-func copyDropReasons(reasons map[string]int) map[string]int {
-	if len(reasons) == 0 {
-		return nil
-	}
-	out := make(map[string]int, len(reasons))
-	for reason, count := range reasons {
-		out[reason] = count
-	}
-	return out
-}
-
-// stepReselectionAllowance is the input allowance every provider dispatch is
+// providerInputAllowance is the input allowance every provider dispatch is
 // checked against: the window minus the output reserve, whether the plan
 // recorded it or the run assembled its context without a plan.
-func stepReselectionAllowance(cfg RunConfig) int {
+func providerInputAllowance(cfg RunConfig) int {
 	window, reserve := cfg.ContextBudgetMaxTokens, 0
 	if plan := cfg.ContextManifest.BudgetPlan; plan != nil {
 		window, reserve = plan.Window, plan.OutputReserve
@@ -449,41 +381,6 @@ func stepReselectionAllowance(cfg RunConfig) int {
 		return 0
 	}
 	return max(window-reserve, 1)
-}
-
-func remainingStepBudget(maxTokens int, params *sdk.Request, prefixCount int) int {
-	if maxTokens <= 0 || params == nil {
-		return 0
-	}
-	prefixCount = clampStableMessageCount(prefixCount, len(params.Messages))
-	remaining := maxTokens - contextfrag.ProviderEnvelopeTokens(params.System, params.Messages[:prefixCount], params.Tools)
-	if remaining < 1 {
-		return 1
-	}
-	return remaining
-}
-
-func stepSelectionPreservesPrefix(before, after []sdk.Message, count int) bool {
-	if count < 0 || count > len(before) || count > len(after) {
-		return false
-	}
-	return reflect.DeepEqual(before[:count], after[:count])
-}
-
-func contextStepSelectionDetail(selection ContextStepSelectionResult) string {
-	if len(selection.DropReasons) == 0 {
-		return fmt.Sprintf("dropped=%d truncated=%d", selection.Dropped, selection.Truncated)
-	}
-	reasons := make([]string, 0, len(selection.DropReasons))
-	for reason := range selection.DropReasons {
-		reasons = append(reasons, reason)
-	}
-	sort.Strings(reasons)
-	parts := make([]string, 0, len(reasons))
-	for _, reason := range reasons {
-		parts = append(parts, fmt.Sprintf("%s:%d", reason, selection.DropReasons[reason]))
-	}
-	return fmt.Sprintf("dropped=%d truncated=%d reasons=%s", selection.Dropped, selection.Truncated, strings.Join(parts, ","))
 }
 
 func publishContextCachePlan(cfg RunConfig, plan contextfrag.CachePlan) {
@@ -866,11 +763,6 @@ func injectedMessageText(injected InjectMessage) string {
 	}
 	return text
 }
-
-const (
-	stepReselectKeepRecentToolResults = 4
-	stepReselectMinMessages           = 20
-)
 
 func wrapToolsWithLoopGuard(tools []toolexec.Tool, guard *ToolLoopGuard, abortCallIDs *toolAbortRegistry) []toolexec.Tool {
 	wrapped := make([]toolexec.Tool, len(tools))

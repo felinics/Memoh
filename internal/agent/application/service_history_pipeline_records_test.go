@@ -1,7 +1,6 @@
 package application
 
 import (
-	"reflect"
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -74,7 +73,7 @@ func TestHistoryRecordPathPreservesLegacyServiceMessagePipeline(t *testing.T) {
 		SourceChannelIdentityID: "sender-1",
 	})
 	records = replaceCompactedHistoryRecords(records, map[string]string{"compact-ok": "condensed"}, contextfrag.Scope{})
-	got, tokens := trimMessagesByTokens(nil, records, 0)
+	got, _ := historyMessagesFromRecords(records)
 
 	want := []ModelMessage{
 		{Role: "user", Content: newTextContent("<summary>\ncondensed\n</summary>")},
@@ -83,12 +82,7 @@ func TestHistoryRecordPathPreservesLegacyServiceMessagePipeline(t *testing.T) {
 		assistantToolCall,
 		toolResult,
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("history pipeline payload mismatch:\ngot  %#v\nwant %#v", got, want)
-	}
-	if tokens == 0 {
-		t.Fatal("history pipeline should report estimated tokens for retained records")
-	}
+	assertSameJSON(t, got, want)
 
 	repaired := repairToolCallClosures(sanitizeMessages(got), syntheticToolClosureError)
 	assertSameJSON(t, modelMessagesToSDKMessages(nonNilModelMessages(repaired)), []sdk.Message{

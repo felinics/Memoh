@@ -104,6 +104,7 @@ func ServerModule() fx.Option {
 			provideExternalAgentLoginHandler,
 			provideHooksService,
 			provideProvidersService,
+			provideModelCatalog,
 			providertemplates.NewService,
 			fetchproviders.NewService,
 			searchproviders.NewService,

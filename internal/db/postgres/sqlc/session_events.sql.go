@@ -72,6 +72,44 @@ func (q *Queries) DeleteSessionEventsByBot(ctx context.Context, botID pgtype.UUI
 	return err
 }
 
+const listSessionEventCursors = `-- name: ListSessionEventCursors :many
+SELECT id, COALESCE((event_data->>'event_cursor')::bigint, 0)::bigint AS event_cursor
+FROM bot_session_events
+WHERE team_id = public.memoh_current_team_id()
+  AND session_id = $1
+  AND id = ANY($2::uuid[])
+`
+
+type ListSessionEventCursorsParams struct {
+	SessionID pgtype.UUID   `json:"session_id"`
+	Ids       []pgtype.UUID `json:"ids"`
+}
+
+type ListSessionEventCursorsRow struct {
+	ID          pgtype.UUID `json:"id"`
+	EventCursor int64       `json:"event_cursor"`
+}
+
+func (q *Queries) ListSessionEventCursors(ctx context.Context, arg ListSessionEventCursorsParams) ([]ListSessionEventCursorsRow, error) {
+	rows, err := q.db.Query(ctx, listSessionEventCursors, arg.SessionID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSessionEventCursorsRow
+	for rows.Next() {
+		var i ListSessionEventCursorsRow
+		if err := rows.Scan(&i.ID, &i.EventCursor); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionEventsByBot = `-- name: ListSessionEventsByBot :many
 SELECT id, bot_id, session_id, event_kind, event_data, external_message_id, sender_channel_identity_id, received_at_ms, created_at, team_id FROM bot_session_events
 WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
@@ -196,10 +234,13 @@ WITH post_coverage_ids AS MATERIALIZED (
     AND changed.session_id = $1
     AND changed.external_message_id IS NOT NULL
     AND $2::jsonb ? changed.external_message_id
-    AND changed.received_at_ms > COALESCE(
-      ($2::jsonb ->> changed.external_message_id)::BIGINT,
-      0
-    )
+    AND CASE WHEN $3::jsonb ? changed.external_message_id
+      THEN COALESCE((changed.event_data->>'event_cursor')::bigint, 0) = 0
+        OR (changed.event_data->>'event_cursor')::bigint >
+          ($3::jsonb ->> changed.external_message_id)::bigint
+      ELSE changed.received_at_ms > COALESCE(
+        ($2::jsonb ->> changed.external_message_id)::BIGINT, 0)
+    END
 ), candidates AS MATERIALIZED (
   SELECT
     event.id,
@@ -212,20 +253,16 @@ WITH post_coverage_ids AS MATERIALIZED (
   WHERE event.team_id = public.memoh_current_team_id()
     AND event.session_id = $1
     AND (
-      NOT $3::boolean
+      NOT $4::boolean
       OR (event.received_at_ms, event.created_at, event.id) < (
-        $4::BIGINT,
-        $5::TIMESTAMPTZ,
-        $6::UUID
+        $5::BIGINT,
+        $6::TIMESTAMPTZ,
+        $7::UUID
       )
     )
     AND (
       event.external_message_id IS NULL
       OR NOT ($2::jsonb ? event.external_message_id)
-      OR event.received_at_ms > COALESCE(
-        ($2::jsonb ->> event.external_message_id)::BIGINT,
-        0
-      )
       OR changed.external_message_id IS NOT NULL
     )
 ), ranked AS MATERIALIZED (
@@ -238,9 +275,9 @@ WITH post_coverage_ids AS MATERIALIZED (
 ), admitted AS MATERIALIZED (
   SELECT id, received_at_ms, created_at, payload_bytes, cumulative_bytes
   FROM ranked
-  WHERE cumulative_bytes <= $7::BIGINT
+  WHERE cumulative_bytes <= $8::BIGINT
   ORDER BY received_at_ms DESC, created_at DESC, id DESC
-  LIMIT $8
+  LIMIT $9
 )
 SELECT
   event.id,
@@ -263,6 +300,7 @@ ORDER BY event.received_at_ms DESC, event.created_at DESC, event.id DESC
 type ListSessionEventsBySessionPageBeforeWithinBytesParams struct {
 	SessionID               pgtype.UUID        `json:"session_id"`
 	CoveredExternalMessages []byte             `json:"covered_external_messages"`
+	CoveredEventCursors     []byte             `json:"covered_event_cursors"`
 	HasCursor               bool               `json:"has_cursor"`
 	BeforeReceivedAtMs      int64              `json:"before_received_at_ms"`
 	BeforeCreatedAt         pgtype.Timestamptz `json:"before_created_at"`
@@ -294,6 +332,7 @@ func (q *Queries) ListSessionEventsBySessionPageBeforeWithinBytes(ctx context.Co
 	rows, err := q.db.Query(ctx, listSessionEventsBySessionPageBeforeWithinBytes,
 		arg.SessionID,
 		arg.CoveredExternalMessages,
+		arg.CoveredEventCursors,
 		arg.HasCursor,
 		arg.BeforeReceivedAtMs,
 		arg.BeforeCreatedAt,

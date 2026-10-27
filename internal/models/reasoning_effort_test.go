@@ -81,12 +81,10 @@ func TestIsValidReasoningEffortVocabulary(t *testing.T) {
 	}
 }
 
-// Declarations written before off was unified, and provider registries that have
-// not been regenerated, still advertise the legacy spelling. Normalizing on both
-// boundaries of ModelConfig is what keeps those models readable as turn-off
-// capable — dropping the value instead would hide Off from a model that supports
-// it, and would make every consumer that looks for the disable token misread it.
-func TestNormalizeModelConfigRewritesLegacyOff(t *testing.T) {
+// Version 1 rows written before "off" was unified advertise it as "none". The
+// upgrade reads both spellings as a model that can be turned off, so the
+// projection keeps offering Off.
+func TestLegacyOffSpellingUpgradesToOffSupport(t *testing.T) {
 	t.Parallel()
 
 	for _, tt := range []struct {
@@ -97,12 +95,12 @@ func TestNormalizeModelConfigRewritesLegacyOff(t *testing.T) {
 		{
 			name: "legacy spelling becomes the declarable token",
 			in:   []string{ReasoningEffortNone, "low", "medium", "high"},
-			want: []string{ReasoningEffortDisable, "low", "medium", "high"},
+			want: []string{"low", "medium", "high", ReasoningEffortDisable},
 		},
 		{
 			name: "both spellings collapse to one entry",
 			in:   []string{ReasoningEffortNone, ReasoningEffortDisable, "low"},
-			want: []string{ReasoningEffortDisable, "low"},
+			want: []string{"low", ReasoningEffortDisable},
 		},
 		{
 			name: "active tiers are untouched",
@@ -112,17 +110,17 @@ func TestNormalizeModelConfigRewritesLegacyOff(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := normalizeModelConfig(ModelConfig{ReasoningEfforts: tt.in}).ReasoningEfforts
+			got := LegacyModelConfig{ThinkingMode: ThinkingModeToggle, ReasoningEfforts: tt.in}.
+				Upgrade(ConfigContext{Type: ModelTypeChat}).ReasoningEfforts()
 			if !slices.Equal(got, tt.want) {
-				t.Errorf("ReasoningEfforts = %v, want %v", got, tt.want)
+				t.Errorf("ReasoningEfforts() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-// Normalizing before validation is what lets a legacy declaration be stored at all:
-// the vocabulary no longer accepts "none", so a config carrying it would otherwise
-// be rejected on write.
+// An upgraded legacy declaration must pass validation, or the next write of a
+// migrated row would be rejected.
 func TestLegacyOffDeclarationSurvivesValidation(t *testing.T) {
 	t.Parallel()
 
@@ -130,10 +128,11 @@ func TestLegacyOffDeclarationSurvivesValidation(t *testing.T) {
 		ModelID:    "m",
 		ProviderID: "11111111-1111-1111-1111-111111111111",
 		Type:       ModelTypeChat,
-		Config:     normalizeModelConfig(ModelConfig{ReasoningEfforts: []string{ReasoningEffortNone, "high"}}),
+		Config: LegacyModelConfig{ThinkingMode: ThinkingModeToggle, ReasoningEfforts: []string{ReasoningEffortNone, "high"}}.
+			Upgrade(ConfigContext{Type: ModelTypeChat}),
 	}
 	if err := m.Validate(); err != nil {
-		t.Fatalf("Validate() error = %v, want a legacy declaration to normalize and pass", err)
+		t.Fatalf("Validate() error = %v, want a legacy declaration to upgrade and pass", err)
 	}
 }
 
@@ -156,10 +155,9 @@ func TestLegacyGoogleRowIsSupportedWithoutAControl(t *testing.T) {
 	m := Model{
 		ModelID: "gemini-2.5-pro",
 		Type:    ModelTypeChat,
-		Config: ModelConfig{
-			Compatibilities:  []string{CompatReasoning},
-			ReasoningEfforts: []string{ReasoningEffortLow, ReasoningEffortMedium, ReasoningEffortHigh},
-		},
+		Config: ModelConfig{Reasoning: &ModelReasoning{
+			Efforts: []string{ReasoningEffortLow, ReasoningEffortMedium, ReasoningEffortHigh},
+		}},
 	}
 	opts := m.ReasoningOptions(string(ClientTypeGoogleGenerativeAI))
 	if !opts.Supported || opts.CanDisable || len(opts.Efforts) != 0 || opts.DefaultEffort != "" {

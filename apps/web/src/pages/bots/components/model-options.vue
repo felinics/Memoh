@@ -212,7 +212,6 @@ export interface ModelOption {
   groupKey: string
   groupLabel: string
   keywords: string[]
-  compatibilities?: string[]
   contextWindow?: number
   providerId: string
   config?: ModelsGetResponse['config']
@@ -310,7 +309,7 @@ watch(showSearch, (visible) => {
 const options = computed<ModelOption[]>(() =>
   typeFilteredModels.value.map((model) => {
     const providerId = model.provider_id ?? ''
-    const config = model.config as { compatibilities?: string[]; context_window?: number } | undefined
+    const config = model.config as { context_window?: number } | undefined
     return {
       value: model.id || model.model_id || '',
       label: model.name || model.model_id || '',
@@ -319,7 +318,6 @@ const options = computed<ModelOption[]>(() =>
       groupKey: providerId,
       groupLabel: providerMap.value.get(providerId) ?? providerId,
       keywords: [model.model_id ?? '', model.name ?? ''],
-      compatibilities: config?.compatibilities,
       contextWindow: config?.context_window,
       providerId,
       config: model.config,

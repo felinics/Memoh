@@ -15,16 +15,12 @@ const deleteSettingsByBotID = `-- name: DeleteSettingsByBotID :exec
 UPDATE bots
 SET command_ui_language = 'auto',
     reasoning_effort = 'medium',
-    compaction_enabled = true,
-    compaction_threshold = 0,
-    compaction_target_percent = NULL,
     chat_model_id = NULL,
     default_bot_agent_id = NULL,
     chat_runtime = 'model',
     chat_acp_agent_id = NULL,
     chat_acp_project_path = '/data',
     chat_acp_project_mode = 'project',
-    compaction_model_id = NULL,
     memory_llm_model_id = NULL,
     image_model_id = NULL,
     search_provider_id = NULL,
@@ -53,9 +49,6 @@ const getSettingsByBotID = `-- name: GetSettingsByBotID :one
 SELECT
   bots.id AS bot_id,
   bots.reasoning_effort,
-  bots.compaction_enabled,
-  bots.compaction_threshold,
-  bots.compaction_target_percent,
   bots.timezone,
   chat_models.id AS chat_model_id,
   bots.default_bot_agent_id,
@@ -63,7 +56,6 @@ SELECT
   bots.chat_acp_agent_id,
   bots.chat_acp_project_path,
   bots.chat_acp_project_mode,
-  compaction_models.id AS compaction_model_id,
   memory_llm_models.id AS memory_llm_model_id,
   search_providers.id AS search_provider_id,
   fetch_providers.id AS fetch_provider_id,
@@ -82,7 +74,6 @@ SELECT
   bots.command_ui_language
 FROM bots
 LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
-LEFT JOIN models AS compaction_models ON compaction_models.id = bots.compaction_model_id AND compaction_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS memory_llm_models ON memory_llm_models.id = bots.memory_llm_model_id AND memory_llm_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS image_models ON image_models.id = bots.image_model_id AND image_models.team_id = public.memoh_current_team_id()
 LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id AND search_providers.team_id = public.memoh_current_team_id()
@@ -95,35 +86,31 @@ WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $1
 `
 
 type GetSettingsByBotIDRow struct {
-	BotID                   pgtype.UUID `json:"bot_id"`
-	ReasoningEffort         string      `json:"reasoning_effort"`
-	CompactionEnabled       bool        `json:"compaction_enabled"`
-	CompactionThreshold     int32       `json:"compaction_threshold"`
-	CompactionTargetPercent pgtype.Int4 `json:"compaction_target_percent"`
-	Timezone                pgtype.Text `json:"timezone"`
-	ChatModelID             pgtype.UUID `json:"chat_model_id"`
-	DefaultBotAgentID       pgtype.UUID `json:"default_bot_agent_id"`
-	ChatRuntime             string      `json:"chat_runtime"`
-	ChatAcpAgentID          pgtype.Text `json:"chat_acp_agent_id"`
-	ChatAcpProjectPath      string      `json:"chat_acp_project_path"`
-	ChatAcpProjectMode      string      `json:"chat_acp_project_mode"`
-	CompactionModelID       pgtype.UUID `json:"compaction_model_id"`
-	MemoryLlmModelID        pgtype.UUID `json:"memory_llm_model_id"`
-	SearchProviderID        pgtype.UUID `json:"search_provider_id"`
-	FetchProviderID         pgtype.UUID `json:"fetch_provider_id"`
-	MemoryProviderID        pgtype.UUID `json:"memory_provider_id"`
-	ImageModelID            pgtype.UUID `json:"image_model_id"`
-	TtsModelID              pgtype.UUID `json:"tts_model_id"`
-	TranscriptionModelID    pgtype.UUID `json:"transcription_model_id"`
-	VideoModelID            pgtype.UUID `json:"video_model_id"`
-	PersistFullToolResults  bool        `json:"persist_full_tool_results"`
-	ShowToolCallsInIm       bool        `json:"show_tool_calls_in_im"`
-	ToolApprovalConfig      []byte      `json:"tool_approval_config"`
-	DisplayEnabled          bool        `json:"display_enabled"`
-	OverlayProvider         string      `json:"overlay_provider"`
-	OverlayEnabled          bool        `json:"overlay_enabled"`
-	OverlayConfig           []byte      `json:"overlay_config"`
-	CommandUiLanguage       string      `json:"command_ui_language"`
+	BotID                  pgtype.UUID `json:"bot_id"`
+	ReasoningEffort        string      `json:"reasoning_effort"`
+	Timezone               pgtype.Text `json:"timezone"`
+	ChatModelID            pgtype.UUID `json:"chat_model_id"`
+	DefaultBotAgentID      pgtype.UUID `json:"default_bot_agent_id"`
+	ChatRuntime            string      `json:"chat_runtime"`
+	ChatAcpAgentID         pgtype.Text `json:"chat_acp_agent_id"`
+	ChatAcpProjectPath     string      `json:"chat_acp_project_path"`
+	ChatAcpProjectMode     string      `json:"chat_acp_project_mode"`
+	MemoryLlmModelID       pgtype.UUID `json:"memory_llm_model_id"`
+	SearchProviderID       pgtype.UUID `json:"search_provider_id"`
+	FetchProviderID        pgtype.UUID `json:"fetch_provider_id"`
+	MemoryProviderID       pgtype.UUID `json:"memory_provider_id"`
+	ImageModelID           pgtype.UUID `json:"image_model_id"`
+	TtsModelID             pgtype.UUID `json:"tts_model_id"`
+	TranscriptionModelID   pgtype.UUID `json:"transcription_model_id"`
+	VideoModelID           pgtype.UUID `json:"video_model_id"`
+	PersistFullToolResults bool        `json:"persist_full_tool_results"`
+	ShowToolCallsInIm      bool        `json:"show_tool_calls_in_im"`
+	ToolApprovalConfig     []byte      `json:"tool_approval_config"`
+	DisplayEnabled         bool        `json:"display_enabled"`
+	OverlayProvider        string      `json:"overlay_provider"`
+	OverlayEnabled         bool        `json:"overlay_enabled"`
+	OverlayConfig          []byte      `json:"overlay_config"`
+	CommandUiLanguage      string      `json:"command_ui_language"`
 }
 
 func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSettingsByBotIDRow, error) {
@@ -132,9 +119,6 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 	err := row.Scan(
 		&i.BotID,
 		&i.ReasoningEffort,
-		&i.CompactionEnabled,
-		&i.CompactionThreshold,
-		&i.CompactionTargetPercent,
 		&i.Timezone,
 		&i.ChatModelID,
 		&i.DefaultBotAgentID,
@@ -142,7 +126,6 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.ChatAcpAgentID,
 		&i.ChatAcpProjectPath,
 		&i.ChatAcpProjectMode,
-		&i.CompactionModelID,
 		&i.MemoryLlmModelID,
 		&i.SearchProviderID,
 		&i.FetchProviderID,
@@ -167,80 +150,66 @@ const upsertBotSettings = `-- name: UpsertBotSettings :one
 WITH updated AS (
   UPDATE bots
   SET reasoning_effort = $1,
-      compaction_enabled = $2,
-      compaction_threshold = $3,
-      compaction_target_percent = CASE
-        WHEN $4::boolean
-          THEN $5::integer
-        ELSE bots.compaction_target_percent
-      END,
-      timezone = COALESCE($6::text, bots.timezone),
+      timezone = COALESCE($2::text, bots.timezone),
       chat_model_id = CASE
-        WHEN $7::boolean THEN $8::uuid
+        WHEN $3::boolean THEN $4::uuid
         ELSE bots.chat_model_id
       END,
       default_bot_agent_id = CASE
-        WHEN $9::boolean THEN $10::uuid
+        WHEN $5::boolean THEN $6::uuid
         ELSE bots.default_bot_agent_id
       END,
-      chat_runtime = $11,
-      chat_acp_agent_id = $12::text,
-      chat_acp_project_path = $13,
-      chat_acp_project_mode = $14,
-      compaction_model_id = CASE
-        WHEN $15::boolean THEN $16::uuid
-        ELSE bots.compaction_model_id
-      END,
+      chat_runtime = $7,
+      chat_acp_agent_id = $8::text,
+      chat_acp_project_path = $9,
+      chat_acp_project_mode = $10,
       memory_llm_model_id = CASE
-        WHEN $17::boolean THEN $18::uuid
+        WHEN $11::boolean THEN $12::uuid
         ELSE bots.memory_llm_model_id
       END,
       search_provider_id = CASE
-        WHEN $19::boolean THEN $20::uuid
+        WHEN $13::boolean THEN $14::uuid
         ELSE bots.search_provider_id
       END,
       fetch_provider_id = CASE
-        WHEN $21::boolean THEN $22::uuid
+        WHEN $15::boolean THEN $16::uuid
         ELSE bots.fetch_provider_id
       END,
       memory_provider_id = CASE
-        WHEN $23::boolean THEN $24::uuid
+        WHEN $17::boolean THEN $18::uuid
         ELSE bots.memory_provider_id
       END,
       image_model_id = CASE
-        WHEN $25::boolean THEN $26::uuid
+        WHEN $19::boolean THEN $20::uuid
         ELSE bots.image_model_id
       END,
       tts_model_id = CASE
-        WHEN $27::boolean THEN $28::uuid
+        WHEN $21::boolean THEN $22::uuid
         ELSE bots.tts_model_id
       END,
       transcription_model_id = CASE
-        WHEN $29::boolean THEN $30::uuid
+        WHEN $23::boolean THEN $24::uuid
         ELSE bots.transcription_model_id
       END,
       video_model_id = CASE
-        WHEN $31::boolean THEN $32::uuid
+        WHEN $25::boolean THEN $26::uuid
         ELSE bots.video_model_id
       END,
-      persist_full_tool_results = $33,
-      show_tool_calls_in_im = $34,
-      tool_approval_config = $35,
-      display_enabled = $36,
-      overlay_provider = $37,
-      overlay_enabled = $38,
-      overlay_config = $39,
-      command_ui_language = $40,
+      persist_full_tool_results = $27,
+      show_tool_calls_in_im = $28,
+      tool_approval_config = $29,
+      display_enabled = $30,
+      overlay_provider = $31,
+      overlay_enabled = $32,
+      overlay_config = $33,
+      command_ui_language = $34,
       updated_at = now()
-  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $41
-  RETURNING bots.id, bots.reasoning_effort, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.default_bot_agent_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.compaction_model_id, bots.memory_llm_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
+  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $35
+  RETURNING bots.id, bots.reasoning_effort, bots.timezone, bots.chat_model_id, bots.default_bot_agent_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.memory_llm_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
   updated.id AS bot_id,
   updated.reasoning_effort,
-  updated.compaction_enabled,
-  updated.compaction_threshold,
-  updated.compaction_target_percent,
   updated.timezone,
   chat_models.id AS chat_model_id,
   updated.default_bot_agent_id,
@@ -248,7 +217,6 @@ SELECT
   updated.chat_acp_agent_id,
   updated.chat_acp_project_path,
   updated.chat_acp_project_mode,
-  compaction_models.id AS compaction_model_id,
   memory_llm_models.id AS memory_llm_model_id,
   search_providers.id AS search_provider_id,
   fetch_providers.id AS fetch_provider_id,
@@ -267,7 +235,6 @@ SELECT
   updated.command_ui_language
 FROM updated
 LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
-LEFT JOIN models AS compaction_models ON compaction_models.id = updated.compaction_model_id AND compaction_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS memory_llm_models ON memory_llm_models.id = updated.memory_llm_model_id AND memory_llm_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS image_models ON image_models.id = updated.image_model_id AND image_models.team_id = public.memoh_current_team_id()
 LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id AND search_providers.team_id = public.memoh_current_team_id()
@@ -279,70 +246,31 @@ LEFT JOIN models AS video_models ON video_models.id = updated.video_model_id AND
 `
 
 type UpsertBotSettingsParams struct {
-	ReasoningEffort            string      `json:"reasoning_effort"`
-	CompactionEnabled          bool        `json:"compaction_enabled"`
-	CompactionThreshold        int32       `json:"compaction_threshold"`
-	CompactionTargetPercentSet bool        `json:"compaction_target_percent_set"`
-	CompactionTargetPercent    pgtype.Int4 `json:"compaction_target_percent"`
-	Timezone                   pgtype.Text `json:"timezone"`
-	ChatModelIDSet             bool        `json:"chat_model_id_set"`
-	ChatModelID                pgtype.UUID `json:"chat_model_id"`
-	DefaultBotAgentIDSet       bool        `json:"default_bot_agent_id_set"`
-	DefaultBotAgentID          pgtype.UUID `json:"default_bot_agent_id"`
-	ChatRuntime                string      `json:"chat_runtime"`
-	ChatAcpAgentID             pgtype.Text `json:"chat_acp_agent_id"`
-	ChatAcpProjectPath         string      `json:"chat_acp_project_path"`
-	ChatAcpProjectMode         string      `json:"chat_acp_project_mode"`
-	CompactionModelIDSet       bool        `json:"compaction_model_id_set"`
-	CompactionModelID          pgtype.UUID `json:"compaction_model_id"`
-	MemoryLlmModelIDSet        bool        `json:"memory_llm_model_id_set"`
-	MemoryLlmModelID           pgtype.UUID `json:"memory_llm_model_id"`
-	SearchProviderIDSet        bool        `json:"search_provider_id_set"`
-	SearchProviderID           pgtype.UUID `json:"search_provider_id"`
-	FetchProviderIDSet         bool        `json:"fetch_provider_id_set"`
-	FetchProviderID            pgtype.UUID `json:"fetch_provider_id"`
-	MemoryProviderIDSet        bool        `json:"memory_provider_id_set"`
-	MemoryProviderID           pgtype.UUID `json:"memory_provider_id"`
-	ImageModelIDSet            bool        `json:"image_model_id_set"`
-	ImageModelID               pgtype.UUID `json:"image_model_id"`
-	TtsModelIDSet              bool        `json:"tts_model_id_set"`
-	TtsModelID                 pgtype.UUID `json:"tts_model_id"`
-	TranscriptionModelIDSet    bool        `json:"transcription_model_id_set"`
-	TranscriptionModelID       pgtype.UUID `json:"transcription_model_id"`
-	VideoModelIDSet            bool        `json:"video_model_id_set"`
-	VideoModelID               pgtype.UUID `json:"video_model_id"`
-	PersistFullToolResults     bool        `json:"persist_full_tool_results"`
-	ShowToolCallsInIm          bool        `json:"show_tool_calls_in_im"`
-	ToolApprovalConfig         []byte      `json:"tool_approval_config"`
-	DisplayEnabled             bool        `json:"display_enabled"`
-	OverlayProvider            string      `json:"overlay_provider"`
-	OverlayEnabled             bool        `json:"overlay_enabled"`
-	OverlayConfig              []byte      `json:"overlay_config"`
-	CommandUiLanguage          string      `json:"command_ui_language"`
-	ID                         pgtype.UUID `json:"id"`
-}
-
-type UpsertBotSettingsRow struct {
-	BotID                   pgtype.UUID `json:"bot_id"`
 	ReasoningEffort         string      `json:"reasoning_effort"`
-	CompactionEnabled       bool        `json:"compaction_enabled"`
-	CompactionThreshold     int32       `json:"compaction_threshold"`
-	CompactionTargetPercent pgtype.Int4 `json:"compaction_target_percent"`
 	Timezone                pgtype.Text `json:"timezone"`
+	ChatModelIDSet          bool        `json:"chat_model_id_set"`
 	ChatModelID             pgtype.UUID `json:"chat_model_id"`
+	DefaultBotAgentIDSet    bool        `json:"default_bot_agent_id_set"`
 	DefaultBotAgentID       pgtype.UUID `json:"default_bot_agent_id"`
 	ChatRuntime             string      `json:"chat_runtime"`
 	ChatAcpAgentID          pgtype.Text `json:"chat_acp_agent_id"`
 	ChatAcpProjectPath      string      `json:"chat_acp_project_path"`
 	ChatAcpProjectMode      string      `json:"chat_acp_project_mode"`
-	CompactionModelID       pgtype.UUID `json:"compaction_model_id"`
+	MemoryLlmModelIDSet     bool        `json:"memory_llm_model_id_set"`
 	MemoryLlmModelID        pgtype.UUID `json:"memory_llm_model_id"`
+	SearchProviderIDSet     bool        `json:"search_provider_id_set"`
 	SearchProviderID        pgtype.UUID `json:"search_provider_id"`
+	FetchProviderIDSet      bool        `json:"fetch_provider_id_set"`
 	FetchProviderID         pgtype.UUID `json:"fetch_provider_id"`
+	MemoryProviderIDSet     bool        `json:"memory_provider_id_set"`
 	MemoryProviderID        pgtype.UUID `json:"memory_provider_id"`
+	ImageModelIDSet         bool        `json:"image_model_id_set"`
 	ImageModelID            pgtype.UUID `json:"image_model_id"`
+	TtsModelIDSet           bool        `json:"tts_model_id_set"`
 	TtsModelID              pgtype.UUID `json:"tts_model_id"`
+	TranscriptionModelIDSet bool        `json:"transcription_model_id_set"`
 	TranscriptionModelID    pgtype.UUID `json:"transcription_model_id"`
+	VideoModelIDSet         bool        `json:"video_model_id_set"`
 	VideoModelID            pgtype.UUID `json:"video_model_id"`
 	PersistFullToolResults  bool        `json:"persist_full_tool_results"`
 	ShowToolCallsInIm       bool        `json:"show_tool_calls_in_im"`
@@ -352,15 +280,40 @@ type UpsertBotSettingsRow struct {
 	OverlayEnabled          bool        `json:"overlay_enabled"`
 	OverlayConfig           []byte      `json:"overlay_config"`
 	CommandUiLanguage       string      `json:"command_ui_language"`
+	ID                      pgtype.UUID `json:"id"`
+}
+
+type UpsertBotSettingsRow struct {
+	BotID                  pgtype.UUID `json:"bot_id"`
+	ReasoningEffort        string      `json:"reasoning_effort"`
+	Timezone               pgtype.Text `json:"timezone"`
+	ChatModelID            pgtype.UUID `json:"chat_model_id"`
+	DefaultBotAgentID      pgtype.UUID `json:"default_bot_agent_id"`
+	ChatRuntime            string      `json:"chat_runtime"`
+	ChatAcpAgentID         pgtype.Text `json:"chat_acp_agent_id"`
+	ChatAcpProjectPath     string      `json:"chat_acp_project_path"`
+	ChatAcpProjectMode     string      `json:"chat_acp_project_mode"`
+	MemoryLlmModelID       pgtype.UUID `json:"memory_llm_model_id"`
+	SearchProviderID       pgtype.UUID `json:"search_provider_id"`
+	FetchProviderID        pgtype.UUID `json:"fetch_provider_id"`
+	MemoryProviderID       pgtype.UUID `json:"memory_provider_id"`
+	ImageModelID           pgtype.UUID `json:"image_model_id"`
+	TtsModelID             pgtype.UUID `json:"tts_model_id"`
+	TranscriptionModelID   pgtype.UUID `json:"transcription_model_id"`
+	VideoModelID           pgtype.UUID `json:"video_model_id"`
+	PersistFullToolResults bool        `json:"persist_full_tool_results"`
+	ShowToolCallsInIm      bool        `json:"show_tool_calls_in_im"`
+	ToolApprovalConfig     []byte      `json:"tool_approval_config"`
+	DisplayEnabled         bool        `json:"display_enabled"`
+	OverlayProvider        string      `json:"overlay_provider"`
+	OverlayEnabled         bool        `json:"overlay_enabled"`
+	OverlayConfig          []byte      `json:"overlay_config"`
+	CommandUiLanguage      string      `json:"command_ui_language"`
 }
 
 func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsParams) (UpsertBotSettingsRow, error) {
 	row := q.db.QueryRow(ctx, upsertBotSettings,
 		arg.ReasoningEffort,
-		arg.CompactionEnabled,
-		arg.CompactionThreshold,
-		arg.CompactionTargetPercentSet,
-		arg.CompactionTargetPercent,
 		arg.Timezone,
 		arg.ChatModelIDSet,
 		arg.ChatModelID,
@@ -370,8 +323,6 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.ChatAcpAgentID,
 		arg.ChatAcpProjectPath,
 		arg.ChatAcpProjectMode,
-		arg.CompactionModelIDSet,
-		arg.CompactionModelID,
 		arg.MemoryLlmModelIDSet,
 		arg.MemoryLlmModelID,
 		arg.SearchProviderIDSet,
@@ -402,9 +353,6 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 	err := row.Scan(
 		&i.BotID,
 		&i.ReasoningEffort,
-		&i.CompactionEnabled,
-		&i.CompactionThreshold,
-		&i.CompactionTargetPercent,
 		&i.Timezone,
 		&i.ChatModelID,
 		&i.DefaultBotAgentID,
@@ -412,7 +360,6 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.ChatAcpAgentID,
 		&i.ChatAcpProjectPath,
 		&i.ChatAcpProjectMode,
-		&i.CompactionModelID,
 		&i.MemoryLlmModelID,
 		&i.SearchProviderID,
 		&i.FetchProviderID,

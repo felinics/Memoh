@@ -13,6 +13,23 @@ import (
 	"github.com/felinics/memoh/internal/models"
 )
 
+func imageUserMessage(size int, extra ...sdk.MessagePart) sdk.Message {
+	parts := append([]sdk.MessagePart{sdk.ImagePart{
+		Image:     "data:image/png;base64," + strings.Repeat("A", size),
+		MediaType: "image/png",
+	}}, extra...)
+	return sdk.Message{Role: sdk.MessageRoleUser, Content: parts}
+}
+
+func fileUserMessage(size int, extra ...sdk.MessagePart) sdk.Message {
+	parts := append([]sdk.MessagePart{sdk.FilePart{
+		Data:      strings.Repeat("A", size),
+		MediaType: "application/pdf",
+		Filename:  "report.pdf",
+	}}, extra...)
+	return sdk.Message{Role: sdk.MessageRoleUser, Content: parts}
+}
+
 type namedEnvelopeProbeProvider struct {
 	*envelopeProbeProvider
 	name string
@@ -85,7 +102,7 @@ func TestProviderEnvelopeAuthorityMatrix(t *testing.T) {
 				provider := namedEnvelopeProbeProvider{envelopeProbeProvider: probe, name: client.provider}
 				run := func(messages []sdk.Message) (*contextfrag.LifecycleSnapshot, []contextfrag.MutationRecord, error) {
 					cfg := path.config(messages, window)
-					cfg.Model = &sdk.Model{ID: "model", Provider: provider, Type: sdk.ModelTypeChat}
+					cfg.Model = &sdk.Model{ID: "model", Provider: provider}
 					cfg.ReasoningConfig = client.reasoning
 					cfg.Identity = agentpkg.SessionContext{BotID: "bot-1"}
 					cfg.ContextMutations = contextfrag.NewMutationLedger()

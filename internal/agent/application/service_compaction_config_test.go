@@ -18,10 +18,14 @@ import (
 type compactionConfigQueries struct {
 	dbstore.Queries
 	model    sqlc.Model
+	models   map[pgtype.UUID]sqlc.Model
 	provider sqlc.Provider
 }
 
-func (q *compactionConfigQueries) GetModelByID(context.Context, pgtype.UUID) (sqlc.Model, error) {
+func (q *compactionConfigQueries) GetModelByID(_ context.Context, id pgtype.UUID) (sqlc.Model, error) {
+	if model, ok := q.models[id]; ok {
+		return model, nil
+	}
 	return q.model, nil
 }
 
@@ -59,7 +63,7 @@ func TestBuildCompactionConfigLeavesSelectionToController(t *testing.T) {
 			ProviderID: compactionConfigUUID(t, providerUUID),
 			Type:       "chat",
 			Enable:     true,
-			Config:     []byte(`{"context_window":200000}`),
+			Config:     []byte(`{"context_window":200000,"max_output_tokens":32000}`),
 		},
 		provider: sqlc.Provider{
 			ID:         compactionConfigUUID(t, providerUUID),
@@ -78,17 +82,11 @@ func TestBuildCompactionConfigLeavesSelectionToController(t *testing.T) {
 	cfg, err := r.buildCompactionConfig(context.Background(), ChatRequest{
 		BotID:    "00000000-0000-0000-0000-000000000403",
 		ThreadID: "00000000-0000-0000-0000-000000000404",
-	}, settings.Settings{
-		CompactionModelID:       modelUUID,
-		CompactionTargetPercent: intPtr(40),
-	}, 150000, "")
+	}, settings.Settings{ChatModelID: modelUUID}, 150000, "")
 	if err != nil {
 		t.Fatalf("buildCompactionConfig: %v", err)
 	}
 
-	if cfg.Ratio != 0 {
-		t.Fatalf("Ratio = %d, want 0 because automatic compaction is target-driven", cfg.Ratio)
-	}
 	if cfg.TotalInputTokens != 150000 {
 		t.Fatalf("TotalInputTokens = %d, want 150000", cfg.TotalInputTokens)
 	}
@@ -98,115 +96,33 @@ func TestBuildCompactionConfigLeavesSelectionToController(t *testing.T) {
 	if cfg.ModelRecordID == "" {
 		t.Fatal("ModelRecordID must carry the models row UUID for artifact provenance")
 	}
-	if cfg.MaxCompactTokens != 170000 {
-		t.Fatalf("MaxCompactTokens = %d, want 170000 (85%% of the summarizer window)", cfg.MaxCompactTokens)
+	if cfg.MaxOutputTokens != 32000 {
+		t.Fatalf("MaxOutputTokens = %d, want the model's declared output cap", cfg.MaxOutputTokens)
 	}
 }
 
-func TestAsyncCompactionInputTokensPrefersKnownCompactableHistory(t *testing.T) {
+func TestBuildCompactionConfigPrefersTurnModelOverChatModel(t *testing.T) {
 	t.Parallel()
 
-	cases := []struct {
-		name          string
-		resolved      resolvedContext
-		providerInput int
-		want          int
-	}{
-		{
-			name:          "includes summary pressure without provider overhead",
-			resolved:      resolvedContext{compactableTokens: 4000, compactableTokensKnown: true, historyPressureTokens: 8000},
-			providerInput: 12000,
-			want:          8000,
-		},
-		{
-			name:          "summary-only history can recover",
-			resolved:      resolvedContext{compactableTokensKnown: true, historyPressureTokens: 8000},
-			providerInput: 12000,
-			want:          8000,
-		},
-		{
-			name:          "legacy raw projection excludes provider overhead",
-			resolved:      resolvedContext{compactableTokens: 4000, compactableTokensKnown: true},
-			providerInput: 9000,
-			want:          4000,
-		},
-		{
-			name:          "known empty history stays zero",
-			resolved:      resolvedContext{compactableTokensKnown: true},
-			providerInput: 9000,
-			want:          0,
-		},
-		{
-			name:          "pipeline without a raw projection falls back to provider usage",
-			resolved:      resolvedContext{},
-			providerInput: 9000,
-			want:          9000,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := asyncCompactionInputTokens(tc.resolved, tc.providerInput); got != tc.want {
-				t.Fatalf("asyncCompactionInputTokens() = %d, want %d", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestBuildCompactionConfigSkipsProviderWithoutOutputLimit(t *testing.T) {
-	t.Parallel()
-
-	const modelUUID = "00000000-0000-0000-0000-000000000411"
-	const providerUUID = "00000000-0000-0000-0000-000000000412"
-	queries := &compactionConfigQueries{
-		model: sqlc.Model{
-			ID:         compactionConfigUUID(t, modelUUID),
-			ModelID:    "codex-compact-model",
-			ProviderID: compactionConfigUUID(t, providerUUID),
-			Type:       string(models.ModelTypeChat),
-			Enable:     true,
-		},
-		provider: sqlc.Provider{
-			ID:         compactionConfigUUID(t, providerUUID),
-			Name:       "codex-provider",
-			ClientType: string(models.ClientTypeOpenAICodex),
-			Enable:     true,
-		},
-	}
-	service := &Service{
-		logger:        slog.New(slog.DiscardHandler),
-		modelsService: models.NewService(slog.New(slog.DiscardHandler), queries),
-		queries:       queries,
-	}
-
-	cfg, err := service.buildCompactionConfig(context.Background(), ChatRequest{
-		BotID:    "00000000-0000-0000-0000-000000000413",
-		ThreadID: "00000000-0000-0000-0000-000000000414",
-	}, settings.Settings{
-		CompactionModelID:       modelUUID,
-		CompactionTargetPercent: intPtr(20),
-	}, 150000, "")
-	if err != nil {
-		t.Fatalf("buildCompactionConfig() error = %v, want nil", err)
-	}
-	if cfg.ModelID != "" {
-		t.Fatalf("buildCompactionConfig() ModelID = %q, want empty config", cfg.ModelID)
-	}
-}
-
-func TestBuildCompactionConfigUsesTurnModelWhenNoOverride(t *testing.T) {
-	t.Parallel()
-
-	const modelUUID = "00000000-0000-0000-0000-000000000431"
-	const providerUUID = "00000000-0000-0000-0000-000000000432"
-	queries := &compactionConfigQueries{
-		model: sqlc.Model{
-			ID:         compactionConfigUUID(t, modelUUID),
-			ModelID:    "turn-selected-model",
+	const (
+		turnModelUUID = "00000000-0000-0000-0000-000000000431"
+		chatModelUUID = "00000000-0000-0000-0000-000000000435"
+		providerUUID  = "00000000-0000-0000-0000-000000000432"
+	)
+	summarizer := func(id, slug string) sqlc.Model {
+		return sqlc.Model{
+			ID:         compactionConfigUUID(t, id),
+			ModelID:    slug,
 			ProviderID: compactionConfigUUID(t, providerUUID),
 			Type:       "chat",
 			Enable:     true,
 			Config:     []byte(`{"context_window":128000}`),
+		}
+	}
+	queries := &compactionConfigQueries{
+		models: map[pgtype.UUID]sqlc.Model{
+			compactionConfigUUID(t, turnModelUUID): summarizer(turnModelUUID, "turn-selected-model"),
+			compactionConfigUUID(t, chatModelUUID): summarizer(chatModelUUID, "bot-chat-model"),
 		},
 		provider: sqlc.Provider{
 			ID:         compactionConfigUUID(t, providerUUID),
@@ -221,18 +137,33 @@ func TestBuildCompactionConfigUsesTurnModelWhenNoOverride(t *testing.T) {
 		modelsService: models.NewService(slog.New(slog.DiscardHandler), queries),
 		queries:       queries,
 	}
-
-	cfg, err := service.buildCompactionConfig(context.Background(), ChatRequest{
+	req := ChatRequest{
 		BotID:    "00000000-0000-0000-0000-000000000433",
 		ThreadID: "00000000-0000-0000-0000-000000000434",
-	}, settings.Settings{}, 90000, modelUUID)
-	if err != nil {
-		t.Fatalf("buildCompactionConfig: %v", err)
 	}
-	if cfg.ModelRecordID != modelUUID {
-		t.Fatalf("ModelRecordID = %q, want the turn's actually-resolved model %q", cfg.ModelRecordID, modelUUID)
+	botSettings := settings.Settings{ChatModelID: chatModelUUID}
+
+	for _, tc := range []struct {
+		name      string
+		turnModel string
+		wantID    string
+		wantSlug  string
+	}{
+		{name: "turn model wins", turnModel: turnModelUUID, wantID: turnModelUUID, wantSlug: "turn-selected-model"},
+		{name: "chat model without a turn model", wantID: chatModelUUID, wantSlug: "bot-chat-model"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := service.buildCompactionConfig(context.Background(), req, botSettings, 90000, tc.turnModel)
+			if err != nil {
+				t.Fatalf("buildCompactionConfig: %v", err)
+			}
+			if cfg.ModelRecordID != tc.wantID || cfg.ModelID != tc.wantSlug {
+				t.Fatalf("summarizer = %q (%q), want %q (%q)", cfg.ModelRecordID, cfg.ModelID, tc.wantID, tc.wantSlug)
+			}
+		})
 	}
-	if cfg.ModelID != "turn-selected-model" {
-		t.Fatalf("ModelID = %q, want the turn model slug", cfg.ModelID)
-	}
+}
+
+func (*compactionConfigQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
 }

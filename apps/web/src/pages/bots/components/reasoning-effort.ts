@@ -45,9 +45,18 @@ export function selectableEfforts(options?: ReasoningOptions | null): string[] {
   return options.can_disable ? [REASONING_EFFORT_DISABLE, ...tiers] : tiers
 }
 
+// defaultEffortSelection is what to hold for a model when nothing usable is
+// stored, such as when the model is first picked: off when the model is
+// declared to start off, its default tier otherwise. It mirrors
+// reasoning.Options.DefaultSelection in the Go backend.
+export function defaultEffortSelection(options?: ReasoningOptions | null): string {
+  if (options?.default_off && options.can_disable) return REASONING_EFFORT_DISABLE
+  return options?.default_effort ?? ''
+}
+
 // reconcileStoredEffort returns the effort to hold after the model changed. A
 // stored value the model still offers survives; "off" survives when off is still
-// reachable; anything else lands on the model's default tier. It returns '' when
+// reachable; anything else lands on the model's default selection. It returns '' when
 // the model has no thinking concept, meaning the caller should clear the value.
 //
 // This mirrors reasoning.ReconcileStored in the Go backend, which owns the same
@@ -63,12 +72,13 @@ export function reconcileStoredEffort(stored: string, options?: ReasoningOptions
     return stored === REASONING_EFFORT_LEGACY_OFF ? REASONING_EFFORT_DISABLE : stored
   }
   const fallback = options.default_effort ?? ''
+  const initial = defaultEffortSelection(options)
   // Both spellings of off are honoured: rows written before the two tokens were
   // unified still say "none", and they describe the same state.
   if (stored === REASONING_EFFORT_DISABLE || stored === REASONING_EFFORT_LEGACY_OFF) {
     return options.can_disable ? REASONING_EFFORT_DISABLE : fallback
   }
-  return tiers.includes(stored) ? stored : fallback
+  return tiers.includes(stored) ? stored : initial
 }
 
 // A dormant preference is retained for model switches, but must not be shown as

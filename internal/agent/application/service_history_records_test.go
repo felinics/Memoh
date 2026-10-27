@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -171,13 +170,13 @@ func TestReplaceCompactedHistoryRecordsKeepsOriginalGroupWithoutSummary(t *testi
 	}
 }
 
-func TestReplaceCompactedHistoryRecordsKeepsMustKeepIslandOrdering(t *testing.T) {
+func TestReplaceCompactedHistoryRecordsKeepsRawRowsAfterTheSummaryInOrder(t *testing.T) {
 	t.Parallel()
 
-	// The selector now marks only the contiguous run before a must-keep island
-	// (the ask_user exchange) under one compact_id; the island and the run after
-	// it stay raw. The read path must drop the summary in place and preserve
-	// order — "mid q" stays AFTER the ask_user exchange, never folded before it.
+	// A pass marks one contiguous run under one compact_id and leaves the rows
+	// after it raw. The read path must drop the summary in place and preserve
+	// their order — "mid q" stays AFTER the ask_user exchange, never folded
+	// before it.
 	records := []historyfrag.HistoryRecord{
 		historyRecord("row-old", ModelMessage{Role: "user", Content: newTextContent("old q")}, func(r *historyfrag.HistoryRecord) {
 			r.CompactID = "compact-1"
@@ -197,7 +196,7 @@ func TestReplaceCompactedHistoryRecordsKeepsMustKeepIslandOrdering(t *testing.T)
 		{Role: "user", Content: newTextContent("current")},
 	}
 	if gotMessages := historyfrag.ToModelMessages(got); !reflect.DeepEqual(gotMessages, want) {
-		t.Fatalf("must-keep island ordering broken:\ngot  %#v\nwant %#v", gotMessages, want)
+		t.Fatalf("raw rows after the summary reordered:\ngot  %#v\nwant %#v", gotMessages, want)
 	}
 }
 
@@ -268,46 +267,6 @@ func TestHistoryContextFragsForMessagesCarriesActiveSummaryCoverage(t *testing.T
 	}
 	if providerSummaryItems != 1 {
 		t.Fatalf("provider manifest summary items = %d, want 1: %#v", providerSummaryItems, providerCfg.ContextManifest.Items)
-	}
-}
-
-func TestHistoryContextFragsUseRetainedSummaryRecordsAfterTrim(t *testing.T) {
-	t.Parallel()
-
-	firstCovered := []contextfrag.ContextRef{{Namespace: "bot_history_message", ID: "old-covered", Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable}}
-	secondCovered := []contextfrag.ContextRef{{Namespace: "bot_history_message", ID: "new-covered", Schema: contextfrag.SchemaContextRef, Durability: contextfrag.RefDurable}}
-	first := historyfrag.SummaryRecord("compact-old", "same summary", firstCovered, contextfrag.Scope{})
-	second := historyfrag.SummaryRecord("compact-new", "same summary", secondCovered, contextfrag.Scope{})
-	records := []historyfrag.HistoryRecord{
-		first,
-		historyRecord("row-long", ModelMessage{Role: "user", Content: newTextContent(strings.Repeat("x", 400))}, nil),
-		second,
-	}
-
-	messages, retained, _ := trimMessagesAndRecordsByTokens(nil, records, 20)
-	frags := historyContextFragsForMessages(messages, retained)
-
-	if len(frags) != 1 || frags[0].Coverage == nil || len(frags[0].Coverage.CoveredRefs) != 1 {
-		t.Fatalf("summary frag coverage mismatch: %#v", frags)
-	}
-	if got := frags[0].Coverage.CoveredRefs[0].ID; got != "new-covered" {
-		t.Fatalf("summary coverage = %q, want retained summary coverage", got)
-	}
-}
-
-func TestTotalCompactableHistoryTokensExcludesSummaries(t *testing.T) {
-	t.Parallel()
-
-	summary := historyfrag.SummaryRecord("compact-big", strings.Repeat("s", 4000), nil, contextfrag.Scope{})
-	raw := historyRecord("row-1", ModelMessage{Role: "user", Content: newTextContent(strings.Repeat("r", 400))}, nil)
-	records := []historyfrag.HistoryRecord{summary, raw}
-
-	compactable := totalCompactableHistoryTokens(records)
-	if compactable <= 0 {
-		t.Fatal("raw rows must count toward the compactable estimate")
-	}
-	if want := estimateMessageTokens(raw.ModelMessage); compactable != want {
-		t.Fatalf("compactable = %d, want raw-only estimate %d", compactable, want)
 	}
 }
 
@@ -423,27 +382,10 @@ type recordingCompactionLogQueries struct {
 	dbstore.Queries
 	logs      []sqlc.BotHistoryMessageCompact
 	refs      map[pgtype.UUID][]sqlc.ListMessageRefsByCompactIDRow
-	byID      map[pgtype.UUID]sqlc.BotHistoryMessageCompact
 	sessionID pgtype.UUID
 	listCalls int
 	refCalls  []pgtype.UUID
-	getCalls  []pgtype.UUID
 	listErr   error
-}
-
-func (q *recordingCompactionLogQueries) GetCompactionLogByID(_ context.Context, compactID pgtype.UUID) (sqlc.BotHistoryMessageCompact, error) {
-	q.getCalls = append(q.getCalls, compactID)
-	return q.byID[compactID], nil
-}
-
-func (q *recordingCompactionLogQueries) ListCompactionArtifactParentIDsBySuccessor(_ context.Context, arg sqlc.ListCompactionArtifactParentIDsBySuccessorParams) ([]pgtype.UUID, error) {
-	var ids []pgtype.UUID
-	for _, row := range q.byID {
-		if row.Status == "ok" && row.SupersededBy == arg.SuccessorID && row.BotID == arg.BotID && row.SessionID == arg.SessionID {
-			ids = append(ids, row.ID)
-		}
-	}
-	return ids, nil
 }
 
 func (q *recordingCompactionLogQueries) ListCompactionArtifactLineageBySession(_ context.Context, sessionID pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {

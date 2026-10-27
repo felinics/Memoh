@@ -634,55 +634,6 @@ func TestWorkspaceImagePullCandidatesDoesNotMirrorCustomImages(t *testing.T) {
 	}
 }
 
-func TestAgentConfigEffectiveContextLoopReselectMode(t *testing.T) {
-	cases := []struct {
-		name           string
-		value          string
-		wantMode       string
-		wantRecognized bool
-	}{
-		{"empty defaults to active", "", ContextLoopReselectModeActive, true},
-		{"active", "active", ContextLoopReselectModeActive, true},
-		{"shadow", "shadow", ContextLoopReselectModeShadow, true},
-		{"off", "off", ContextLoopReselectModeOff, true},
-		{"case insensitive", "SHADOW", ContextLoopReselectModeShadow, true},
-		{"whitespace", "  off  ", ContextLoopReselectModeOff, true},
-		{"unknown normalizes to active", "garbage", ContextLoopReselectModeActive, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			gotMode, gotRecognized := (AgentConfig{ContextLoopReselect: tc.value}).EffectiveContextLoopReselectMode()
-			if gotMode != tc.wantMode || gotRecognized != tc.wantRecognized {
-				t.Fatalf("EffectiveContextLoopReselectMode() = (%q, %v), want (%q, %v)", gotMode, gotRecognized, tc.wantMode, tc.wantRecognized)
-			}
-		})
-	}
-}
-
-func TestAgentConfigEffectiveSyncCompactionMode(t *testing.T) {
-	cases := []struct {
-		name           string
-		value          string
-		wantMode       string
-		wantRecognized bool
-	}{
-		{"empty defaults to shadow", "", SyncCompactionModeShadow, true},
-		{"active", "active", SyncCompactionModeActive, true},
-		{"shadow", "shadow", SyncCompactionModeShadow, true},
-		{"off", "off", SyncCompactionModeOff, true},
-		{"case insensitive", "ACTIVE", SyncCompactionModeActive, true},
-		{"unknown normalizes to shadow", "garbage", SyncCompactionModeShadow, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			gotMode, gotRecognized := (AgentConfig{SyncCompaction: tc.value}).EffectiveSyncCompactionMode()
-			if gotMode != tc.wantMode || gotRecognized != tc.wantRecognized {
-				t.Fatalf("EffectiveSyncCompactionMode() = (%q, %v), want (%q, %v)", gotMode, gotRecognized, tc.wantMode, tc.wantRecognized)
-			}
-		})
-	}
-}
-
 func TestAgentConfigEffectiveContextAbsoluteMaxTokens(t *testing.T) {
 	if got := (AgentConfig{}).EffectiveContextAbsoluteMaxTokens(); got != contextfrag.DefaultAbsoluteCapTokens {
 		t.Fatalf("unset cap = %d, want default %d", got, contextfrag.DefaultAbsoluteCapTokens)

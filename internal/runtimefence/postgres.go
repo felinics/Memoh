@@ -55,6 +55,10 @@ type pendingUserInputSuperseder interface {
 	SupersedePendingUserInputsBySession(ctx context.Context, arg sqlc.SupersedePendingUserInputsBySessionParams) ([]sqlc.UserInputRequest, error)
 }
 
+type pendingCompactionClaimReleaser interface {
+	ReleasePendingCompactionClaimsBySession(ctx context.Context, arg sqlc.ReleasePendingCompactionClaimsBySessionParams) error
+}
+
 type waitingDecisionRunReclaimer interface {
 	ReclaimWaitingDecisionSessionRun(ctx context.Context, arg sqlc.ReclaimWaitingDecisionSessionRunParams) (sqlc.SessionRun, error)
 }
@@ -239,6 +243,16 @@ func ActivateWithOptions(ctx context.Context, queries dbstore.Queries, fence Fen
 			PreserveIds: preserveUserInputIDs,
 		}); err != nil {
 			return fmt.Errorf("cancel superseded user inputs: %w", err)
+		}
+		claims, ok := txQueries.(pendingCompactionClaimReleaser)
+		if !ok {
+			return errors.New("persistence store does not support releasing compaction claims")
+		}
+		if err := claims.ReleasePendingCompactionClaimsBySession(ctx, sqlc.ReleasePendingCompactionClaimsBySessionParams{
+			BotID:     pgBotID,
+			SessionID: pgSessionID,
+		}); err != nil {
+			return fmt.Errorf("release superseded compaction claims: %w", err)
 		}
 		return nil
 	})

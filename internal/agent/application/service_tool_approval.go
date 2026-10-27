@@ -235,11 +235,15 @@ func (s *Service) continueCommittedToolApprovalResponse(
 
 	ctx = workspace.WithWorkspaceTarget(ctx, target.WorkspaceTargetID)
 	runID := runIDForChatRequest(committed.runID)
+	requesterUserID, err := s.runRequesterUserID(ctx, committed.runID)
+	if err != nil {
+		return err
+	}
 	var toolResult sdk.ToolResultPart
 	var toolUIMetadata map[string]any
 	switch target.Status {
 	case toolapproval.StatusApproved:
-		result, uiMetadata, err := s.executeApprovedTool(ctx, target, committed.input, runID)
+		result, uiMetadata, err := s.executeApprovedTool(ctx, target, committed.input, runID, requesterUserID)
 		if err != nil {
 			return err
 		}
@@ -255,7 +259,7 @@ func (s *Service) continueCommittedToolApprovalResponse(
 	default:
 		return fmt.Errorf("committed tool approval has unexpected status %q", target.Status)
 	}
-	return s.storeToolResultAndContinue(ctx, target, committed.input, toolResult, toolUIMetadata, runID, committed.runHandle, lifecycle, eventCh)
+	return s.storeToolResultAndContinue(ctx, target, committed.input, toolResult, toolUIMetadata, runID, requesterUserID, committed.runHandle, lifecycle, eventCh)
 }
 
 func (s *Service) toolOutputLimit() contextlimit.ToolOutputLimit {
@@ -388,18 +392,10 @@ func emitApprovalAck(ctx context.Context, eventCh chan<- WSStreamEvent) error {
 	return nil
 }
 
-func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Request, input ToolApprovalResponseInput, runID string) (sdk.ToolResultPart, map[string]any, error) {
+func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Request, input ToolApprovalResponseInput, runID, requesterUserID string) (sdk.ToolResultPart, map[string]any, error) {
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	req = withLocalWebReplyTarget(req)
-	resolved, err := s.ResolveRunConfig(ctx,
-		input.BotID,
-		req.SessionID,
-		firstNonEmpty(req.ChannelIdentityID, input.ActorChannelIdentityID),
-		req.SourcePlatform,
-		req.ReplyTarget,
-		req.ConversationType,
-		input.ChatToken,
-	)
+	resolved, err := s.ResolveRunConfig(ctx, approvalRunConfigRequest(req, input, requesterUserID))
 	if err != nil {
 		return sdk.ToolResultPart{}, nil, err
 	}
@@ -436,6 +432,7 @@ func (s *Service) storeToolResultAndContinue(
 	result sdk.ToolResultPart,
 	uiMetadata map[string]any,
 	runID string,
+	requesterUserID string,
 	runHandle sessionruntime.RunHandle,
 	lifecycle *continuationLifecycleResult,
 	eventCh chan<- WSStreamEvent,
@@ -462,6 +459,7 @@ func (s *Service) storeToolResultAndContinue(
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
 		ThreadID:                approval.SessionID,
+		UserID:                  requesterUserID,
 		SourceChannelIdentityID: firstNonEmpty(approval.ChannelIdentityID, input.ActorChannelIdentityID),
 		CurrentChannel:          approval.SourcePlatform,
 		ReplyTarget:             approval.ReplyTarget,
@@ -474,7 +472,7 @@ func (s *Service) storeToolResultAndContinue(
 	if err := s.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeOpts); err != nil {
 		return err
 	}
-	return s.continueToolApprovalSession(ctx, approval, input, runID, runHandle, lifecycle, eventCh)
+	return s.continueToolApprovalSession(ctx, approval, input, runID, requesterUserID, runHandle, lifecycle, eventCh)
 }
 
 func (s *Service) continueToolApprovalSession(
@@ -482,21 +480,14 @@ func (s *Service) continueToolApprovalSession(
 	approval toolapproval.Request,
 	input ToolApprovalResponseInput,
 	runID string,
+	requesterUserID string,
 	runHandle sessionruntime.RunHandle,
 	runtimeLifecycle *continuationLifecycleResult,
 	eventCh chan<- WSStreamEvent,
 ) error {
 	approval = withLocalWebReplyTarget(approval)
 	ctx = workspace.WithWorkspaceTarget(ctx, approval.WorkspaceTargetID)
-	resolved, err := s.ResolveRunConfig(ctx,
-		input.BotID,
-		approval.SessionID,
-		firstNonEmpty(approval.ChannelIdentityID, input.ActorChannelIdentityID),
-		approval.SourcePlatform,
-		approval.ReplyTarget,
-		approval.ConversationType,
-		input.ChatToken,
-	)
+	resolved, err := s.ResolveRunConfig(ctx, approvalRunConfigRequest(approval, input, requesterUserID))
 	if err != nil {
 		return err
 	}
@@ -506,23 +497,14 @@ func (s *Service) continueToolApprovalSession(
 		return err
 	}
 
-	cfg, err := s.prepareContinuationRunConfig(
-		ctx,
-		resolved.RunConfig,
-		historyScopeFallbackFromToolApprovalRequest(approval),
-		compactionSummaryScope(firstNonEmpty(approval.BotID, input.BotID), "", approval.SessionID, approval.ConversationType, "", approval.ReplyTarget),
-		eventCh,
-	)
-	if err != nil {
-		return err
-	}
-
 	req := ChatRequest{
-		RunID:                   cfg.RunID,
+		RunID:                   resolved.RunConfig.RunID,
 		RunHandle:               runHandle,
+		continuationToolCallID:  approval.ToolCallID,
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
 		ThreadID:                approval.SessionID,
+		UserID:                  requesterUserID,
 		SourceChannelIdentityID: firstNonEmpty(approval.ChannelIdentityID, input.ActorChannelIdentityID),
 		CurrentChannel:          approval.SourcePlatform,
 		ReplyTarget:             approval.ReplyTarget,
@@ -532,8 +514,34 @@ func (s *Service) continueToolApprovalSession(
 		WorkspaceTargetID:       approval.WorkspaceTargetID,
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
+	cfg, err := s.prepareContinuationRunConfig(
+		ctx,
+		resolved.RunConfig,
+		historyScopeFallbackFromToolApprovalRequest(approval),
+		compactionSummaryScope(firstNonEmpty(approval.BotID, input.BotID), "", approval.SessionID, approval.ConversationType, "", approval.ReplyTarget),
+		eventCh,
+		req,
+	)
+	if err != nil {
+		return err
+	}
 
 	return s.runNativeDecisionContinuation(ctx, req, cfg, resolved.ModelID, runtimeLifecycle, eventCh)
+}
+
+// approvalRunConfigRequest is the run an approval resumes: the route the
+// approval recorded and the account the run was admitted for.
+func approvalRunConfigRequest(approval toolapproval.Request, input ToolApprovalResponseInput, requesterUserID string) RunConfigRequest {
+	return RunConfigRequest{
+		BotID:             input.BotID,
+		SessionID:         approval.SessionID,
+		UserID:            requesterUserID,
+		ChannelIdentityID: firstNonEmpty(approval.ChannelIdentityID, input.ActorChannelIdentityID),
+		CurrentPlatform:   approval.SourcePlatform,
+		ReplyTarget:       approval.ReplyTarget,
+		ConversationType:  approval.ConversationType,
+		ChatToken:         input.ChatToken,
+	}
 }
 
 func withLocalWebReplyTarget(req toolapproval.Request) toolapproval.Request {

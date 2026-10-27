@@ -8,12 +8,15 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 )
@@ -121,6 +124,16 @@ type fakeQueries struct {
 	completeErrors  []error
 	rollupCompleted sqlc.CompleteCompactionRollupParams
 	rollupCalls     []sqlc.CompleteCompactionRollupParams
+	backfills       []sqlc.BackfillCompactionArtifactCoverageParams
+}
+
+func (*fakeQueries) ListSessionEventCursors(context.Context, sqlc.ListSessionEventCursorsParams) ([]sqlc.ListSessionEventCursorsRow, error) {
+	return nil, nil
+}
+
+func (f *fakeQueries) BackfillCompactionArtifactCoverage(_ context.Context, arg sqlc.BackfillCompactionArtifactCoverageParams) error {
+	f.backfills = append(f.backfills, arg)
+	return nil
 }
 
 func (f *fakeQueries) CreateCompactionLog(_ context.Context, arg sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
@@ -151,7 +164,7 @@ func (f *fakeQueries) ListUncompactedMessagesBySession(_ context.Context, _ pgty
 	return f.uncompacted, nil
 }
 
-func (f *fakeQueries) MeasureUncompactedMessagesBySession(_ context.Context, _ pgtype.UUID) (sqlc.MeasureUncompactedMessagesBySessionRow, error) {
+func (f *fakeQueries) MeasureUncompactedMessagesBySession(_ context.Context, _ sqlc.MeasureUncompactedMessagesBySessionParams) (sqlc.MeasureUncompactedMessagesBySessionRow, error) {
 	var bytes int64
 	for _, row := range f.uncompacted {
 		bytes += int64(len(row.Content) + len(row.Metadata) + len(row.Usage) + len(row.DisplayText.String))
@@ -175,7 +188,7 @@ func boundedRowsForTest(rows []sqlc.ListUncompactedMessagesBySessionRow) []sqlc.
 	converted := make([]sqlc.ListUncompactedMessagesBySessionWithinBytesRow, len(rows))
 	var cumulative int64
 	for i, row := range rows {
-		cumulative += int64(len(row.Content) + len(row.Metadata) + len(row.Usage) + len(row.DisplayText.String))
+		cumulative += payloadBytesForTest(row.Content, row.Metadata, row.Usage, row.DisplayText.String)
 		converted[i] = sqlc.ListUncompactedMessagesBySessionWithinBytesRow{
 			ID: row.ID, BotID: row.BotID, SessionID: row.SessionID,
 			SenderChannelIdentityID: row.SenderChannelIdentityID, SenderUserID: row.SenderUserID,
@@ -191,6 +204,12 @@ func boundedRowsForTest(rows []sqlc.ListUncompactedMessagesBySessionRow) []sqlc.
 	return converted
 }
 
+// payloadBytesForTest measures a row the way the candidate and claimed-row
+// reads do.
+func payloadBytesForTest(content, metadata, usage []byte, displayText string) int64 {
+	return int64(len(content) + len(metadata) + len(usage) + len(displayText))
+}
+
 func (f *fakeQueries) ListMessageAssetsBatch(_ context.Context, _ []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {
 	f.queryCalls = append(f.queryCalls, "assets")
 	return nil, nil
@@ -200,11 +219,41 @@ func (f *fakeQueries) ListCompactionArtifactLineageBySession(_ context.Context, 
 	return f.priorLogs, nil
 }
 
+func (f *fakeQueries) GetActiveCompactionArtifactWithinBytes(_ context.Context, arg sqlc.GetActiveCompactionArtifactWithinBytesParams) (sqlc.BotHistoryMessageCompact, error) {
+	for _, row := range f.priorLogs {
+		encoded, _ := json.Marshal(row)
+		if row.ID == arg.ID && !row.SupersededBy.Valid && int64(len(encoded)) <= arg.MaxBytes {
+			return row, nil
+		}
+	}
+	return sqlc.BotHistoryMessageCompact{}, pgx.ErrNoRows
+}
+
+func (f *fakeQueries) ListMessagesByCompactIDWithinBytes(ctx context.Context, arg sqlc.ListMessagesByCompactIDWithinBytesParams) ([]sqlc.ListMessagesByCompactIDWithinBytesRow, error) {
+	rows, err := f.ListMessagesByCompactID(ctx, arg.CompactID)
+	var bounded []sqlc.ListMessagesByCompactIDWithinBytesRow
+	for _, row := range rows {
+		arg.MaxBytes -= payloadBytesForTest(row.Content, row.Metadata, row.Usage, row.DisplayText.String)
+		if arg.MaxBytes < 0 {
+			break
+		}
+		bounded = append(bounded, sqlc.ListMessagesByCompactIDWithinBytesRow(row))
+	}
+	return bounded, err
+}
+
 func (f *fakeQueries) ListMessagesByCompactID(_ context.Context, compactID pgtype.UUID) ([]sqlc.ListMessagesByCompactIDRow, error) {
 	if err := f.absorbedRowErrs[compactID]; err != nil {
 		return nil, err
 	}
-	return f.absorbedRows[compactID], nil
+	rows := slices.Clone(f.absorbedRows[compactID])
+	for _, row := range f.uncompacted {
+		if f.claims[row.ID] == compactID {
+			row.CompactID = compactID
+			rows = append(rows, sqlc.ListMessagesByCompactIDRow(row))
+		}
+	}
+	return rows, nil
 }
 
 func (f *fakeQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) (int64, error) {
@@ -273,17 +322,58 @@ func newMachineryService(q dbstore.Queries) *Service {
 	return NewService(slog.New(slog.DiscardHandler), q)
 }
 
-func machineryConfig(stub *stubModel, targetTokens int) TriggerConfig {
-	return TriggerConfig{
-		BotID:        uuid.NewString(),
-		SessionID:    uuid.NewString(),
-		ModelID:      "stub-model",
-		ClientType:   "openai-completions",
-		APIKey:       "test",
-		BaseURL:      "http://stub.invalid",
-		HTTPClient:   &http.Client{Transport: stub},
-		TargetTokens: targetTokens,
+const (
+	passNoop     = "noop"
+	passOK       = "ok"
+	passProgress = "progress"
+)
+
+// passResult is the outcome of compactOnce: whether a pass committed and
+// left candidates behind, its summary and the rows it folded.
+type passResult struct {
+	Status       string
+	Summary      string
+	MessageCount int
+}
+
+// compactOnce runs one pass of an event on its own.
+func (s *Service) compactOnce(ctx context.Context, cfg TriggerConfig) (passResult, error) {
+	pass, folded, err := s.doCompaction(ctx, db.ParseUUIDOrEmpty(cfg.BotID), db.ParseUUIDOrEmpty(cfg.SessionID), cfg)
+	if err != nil || !folded {
+		return passResult{Status: passNoop}, err
 	}
+	result := passResult{Status: passOK, Summary: pass.Summary}
+	if pass.More {
+		result.Status = passProgress
+	}
+	for _, source := range pass.Covered {
+		if source.Kind == "history" {
+			result.MessageCount++
+		}
+	}
+	return result, nil
+}
+
+func machineryConfig(stub *stubModel, historyBudgetTokens int) TriggerConfig {
+	return TriggerConfig{
+		BotID:               uuid.NewString(),
+		SessionID:           uuid.NewString(),
+		ModelID:             "stub-model",
+		ClientType:          "openai-completions",
+		APIKey:              "test",
+		BaseURL:             "http://stub.invalid",
+		HTTPClient:          &http.Client{Transport: stub},
+		SummaryWindowTokens: 128000,
+		HistoryBudgetTokens: historyBudgetTokens,
+	}
+}
+
+// currentConfig is machineryConfig for a request whose current input is
+// current.
+func currentConfig(stub *stubModel, historyBudgetTokens int, current sqlc.ListUncompactedMessagesBySessionRow) TriggerConfig {
+	cfg := machineryConfig(stub, historyBudgetTokens)
+	cfg.ProtectedSources = historySources(current)
+	return cfg
 }
 
 func idSet(ids []pgtype.UUID) map[pgtype.UUID]bool {
@@ -316,19 +406,45 @@ func machineryCorpus(t *testing.T) []sqlc.ListUncompactedMessagesBySessionRow {
 
 // --- tests --------------------------------------------------------------------
 
+// A pass that folds only what precedes an input the request keeps shows that
+// input after the summary, where the request keeps it, not as kept in place.
+func TestDoCompactionShowsAKeptInputAfterTheSummaryItFollows(t *testing.T) {
+	rows := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "user", `"old question"`, 100),
+		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", `"KEPT_INPUT"`, 100),
+		mkRow(t, "assistant", `"LATEST_STEP"`, 100),
+	}
+	q := &fakeQueries{uncompacted: rows}
+	stub := &stubModel{summary: "SUMMARY-OK"}
+	cfg := currentConfig(stub, 450, rows[3])
+	cfg.Anchors = historySources(rows[2])
+	if _, err := newMachineryService(q).compactOnce(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	marked := idSet(q.markedIDs)
+	if len(marked) != 2 || !marked[rows[0].ID] || !marked[rows[1].ID] {
+		t.Fatalf("marked %d rows, want the two before the input", len(marked))
+	}
+	_, rendered, _ := strings.Cut(stub.prompt, "<conversation>")
+	conversation, current, _ := strings.Cut(rendered, "<current_request>")
+	if strings.Contains(conversation, "KEPT_INPUT") || !strings.Contains(current, "user: KEPT_INPUT\nassistant: LATEST_STEP") {
+		t.Fatalf("the kept input must read after the summary, before the latest step:\n%s", stub.prompt)
+	}
+}
+
 func TestDoCompactionMarksToolAwareWindowAndRendersCleanPrompt(t *testing.T) {
 	rows := machineryCorpus(t)
 	q := &fakeQueries{uncompacted: rows}
 	stub := &stubModel{summary: "SUMMARY-OK"}
 	svc := newMachineryService(q)
 
-	// 10 msgs x 100 tokens. target 450: the naive cut would land at index 6
-	// (compact 0..5, keep 6..9) — orphaning tool result B at the keep-side head.
-	// The boundary guard must advance to 7, pulling result B in with its call, so
-	// the marked set is exactly 0..6. If adjustForToolBoundary regressed, this
-	// marks only 0..5 and the assertions below fail.
-	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err != nil {
-		t.Fatalf("RunCompactionSync: %v", err)
+	// Everything before the current input (row 7) is folded, with both tool
+	// exchanges kept whole on the folded side.
+	cfg := machineryConfig(stub, 450)
+	cfg.ProtectedSources = historySources(rows[7])
+	if _, err := svc.compactOnce(context.Background(), cfg); err != nil {
+		t.Fatalf("compact: %v", err)
 	}
 
 	if stub.calls != 1 {
@@ -370,34 +486,10 @@ func TestDoCompactionMarksToolAwareWindowAndRendersCleanPrompt(t *testing.T) {
 	}
 }
 
-func TestDoCompactionSkipsWhitespaceOnlyPriorSummaries(t *testing.T) {
-	rows := machineryCorpus(t)
-	stub := &stubModel{summary: "S3"}
-	cfg := machineryConfig(stub, 450)
-	q := &fakeQueries{
-		uncompacted: rows,
-		priorLogs: []sqlc.BotHistoryMessageCompact{{
-			ID:        pgtype.UUID{Bytes: uuid.New(), Valid: true},
-			BotID:     pgtype.UUID{Bytes: uuid.MustParse(cfg.BotID), Valid: true},
-			SessionID: pgtype.UUID{Bytes: uuid.MustParse(cfg.SessionID), Valid: true},
-			Summary:   "  \n\t",
-			Status:    "ok",
-		}},
-	}
-	svc := newMachineryService(q)
-
-	if _, err := svc.RunCompactionSync(context.Background(), cfg); err != nil {
-		t.Fatalf("RunCompactionSync: %v", err)
-	}
-	if strings.Contains(stub.prompt, "The following are summaries of earlier parts") {
-		t.Fatalf("whitespace-only prior summary injected as prior context:\n%s", stub.prompt)
-	}
-}
-
 // TestDoCompactionFailsClosedWhenEntryFloorsExceedBudget drives one
-// unsplittable tool exchange with more minimal entries than MaxCompactTokens
-// can hold: sending it anyway would overflow the summarizer window, so the
-// attempt must fail closed with zero claims and zero provider calls.
+// unsplittable tool exchange larger than the summarizer can read: sending it
+// anyway would overflow the summarizer window, so the attempt must fail
+// closed with zero claims and zero provider calls.
 func TestDoCompactionFailsClosedWhenEntryFloorsExceedBudget(t *testing.T) {
 	const fanout = 40
 	callParts := make([]string, 0, fanout)
@@ -417,11 +509,11 @@ func TestDoCompactionFailsClosedWhenEntryFloorsExceedBudget(t *testing.T) {
 	svc := newMachineryService(q)
 
 	cfg := machineryConfig(stub, 100)
-	cfg.MaxCompactTokens = 40
+	cfg.SummaryWindowTokens = 1000
 
-	_, err := svc.RunCompactionSync(context.Background(), cfg)
+	_, err := svc.compactOnce(context.Background(), cfg)
 	if !errors.Is(err, errCompactionInputOverflow) {
-		t.Fatalf("RunCompactionSync error = %v, want errCompactionInputOverflow", err)
+		t.Fatalf("compact error = %v, want errCompactionInputOverflow", err)
 	}
 	if stub.calls != 0 {
 		t.Fatalf("summarizer calls = %d, want 0: an oversized selection must not reach the provider", stub.calls)
@@ -444,8 +536,10 @@ func TestDoCompactionAllEmptyWindowSkipsModelAndMarking(t *testing.T) {
 	stub := &stubModel{summary: "unused"}
 	svc := newMachineryService(q)
 
-	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 150)); err != nil {
-		t.Fatalf("RunCompactionSync: %v", err)
+	cfg := machineryConfig(stub, 150)
+	cfg.ProtectedSources = historySources(rows[2])
+	if _, err := svc.compactOnce(context.Background(), cfg); err != nil {
+		t.Fatalf("compact: %v", err)
 	}
 	if stub.calls != 0 {
 		t.Fatalf("summarizer should not be called for an all-empty window (calls=%d)", stub.calls)
@@ -468,8 +562,10 @@ func TestDoCompactionCoversToolExchangeWhoseResultRendersEmpty(t *testing.T) {
 	stub := &stubModel{summary: "unused"}
 	svc := newMachineryService(q)
 
-	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 150)); err != nil {
-		t.Fatalf("RunCompactionSync: %v", err)
+	cfg := machineryConfig(stub, 150)
+	cfg.ProtectedSources = historySources(rows[2])
+	if _, err := svc.compactOnce(context.Background(), cfg); err != nil {
+		t.Fatalf("compact: %v", err)
 	}
 	if stub.calls != 1 || len(q.markedIDs) != 2 || q.markedIDs[0] != rows[0].ID || q.markedIDs[1] != rows[1].ID {
 		t.Fatalf("calls=%d marked=%d, want the call and its empty result covered together", stub.calls, len(q.markedIDs))
@@ -491,8 +587,10 @@ func TestDoCompactionCoversEmptyMiddleRowWithItsNeighbours(t *testing.T) {
 	stub := &stubModel{summary: "SUMMARY"}
 	svc := newMachineryService(q)
 
-	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 250)); err != nil {
-		t.Fatalf("RunCompactionSync: %v", err)
+	cfg := machineryConfig(stub, 250)
+	cfg.ProtectedSources = historySources(rows[3])
+	if _, err := svc.compactOnce(context.Background(), cfg); err != nil {
+		t.Fatalf("compact: %v", err)
 	}
 	if len(q.markedIDs) != 3 || q.markedIDs[0] != rows[0].ID || q.markedIDs[1] != rows[1].ID || q.markedIDs[2] != rows[2].ID {
 		t.Fatalf("marked = %d ids, want rows 0-2 as one contiguous run", len(q.markedIDs))
@@ -507,8 +605,8 @@ func TestDoCompactionEmptyHistoryNoOp(t *testing.T) {
 	stub := &stubModel{summary: "unused"}
 	svc := newMachineryService(q)
 
-	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 100)); err != nil {
-		t.Fatalf("RunCompactionSync: %v", err)
+	if _, err := svc.compactOnce(context.Background(), machineryConfig(stub, 100)); err != nil {
+		t.Fatalf("compact: %v", err)
 	}
 	if stub.calls != 0 || len(q.markedIDs) != 0 {
 		t.Fatalf("empty history must be a no-op (calls=%d marked=%d)", stub.calls, len(q.markedIDs))
@@ -561,11 +659,11 @@ func TestDoCompactionRetriesRateLimitedSummarizerCall(t *testing.T) {
 	cfg := machineryConfig(stub, 450)
 	cfg.HTTPClient = &http.Client{Transport: transport}
 
-	res, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg)
+	res, err := newMachineryService(q).compactOnce(context.Background(), cfg)
 	if err != nil {
-		t.Fatalf("RunCompactionSync: %v", err)
+		t.Fatalf("compact: %v", err)
 	}
-	if transport.calls != 2 || res.Status != StatusOK || res.Summary != "SUMMARY-RETRIED" {
+	if transport.calls != 2 || res.Status != passOK || res.Summary != "SUMMARY-RETRIED" {
 		t.Fatalf("result = %+v after %d calls, want the retried summary after 2", res, transport.calls)
 	}
 }
@@ -578,7 +676,7 @@ func TestDoCompactionSummarizerFailureRecordsErrorWithReclaimableClaims(t *testi
 	cfg := machineryConfig(&stubModel{}, 450)
 	cfg.HTTPClient = &http.Client{Transport: &failingModel{}}
 
-	if _, err := svc.RunCompactionSync(context.Background(), cfg); err == nil {
+	if _, err := svc.compactOnce(context.Background(), cfg); err == nil {
 		t.Fatal("summarizer failure must surface an error")
 	}
 	if len(q.markedIDs) == 0 {
@@ -595,7 +693,7 @@ func TestDoCompactionEmptySummaryRecordsErrorWithReclaimableClaims(t *testing.T)
 	stub := &stubModel{summary: "   "}
 	svc := newMachineryService(q)
 
-	if _, err := svc.RunCompactionSync(context.Background(), machineryConfig(stub, 450)); err == nil {
+	if _, err := svc.compactOnce(context.Background(), machineryConfig(stub, 450)); err == nil {
 		t.Fatal("an empty summary must surface an error")
 	}
 	if len(q.markedIDs) == 0 {

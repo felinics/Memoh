@@ -382,6 +382,8 @@ func hasSpatialBudgetDrop(reasons map[int]string) bool {
 	return false
 }
 
+const historyTrimNoticeID = "history.trim_notice"
+
 // TrimNoticeFrag is the synthetic fragment the builder splices in when budget
 // trimming dropped history, mirroring the legacy resolver notice message.
 func TrimNoticeFrag(scope contextfrag.Scope) contextfrag.ContextFrag {
@@ -390,7 +392,7 @@ func TrimNoticeFrag(scope contextfrag.Scope) contextfrag.ContextFrag {
 		Content: []sdk.MessagePart{sdk.TextPart{Text: HistoryTrimNotice}},
 	}
 	return contextfrag.MessageFrag(contextfrag.MessageFragInput{
-		ID:         "history.trim_notice",
+		ID:         historyTrimNoticeID,
 		Message:    msg,
 		Kind:       contextfrag.KindSystemPolicy,
 		Slot:       contextfrag.SlotHistory,
@@ -399,7 +401,7 @@ func TrimNoticeFrag(scope contextfrag.Scope) contextfrag.ContextFrag {
 		Trust:      contextfrag.TrustSystem,
 		Scope:      scope,
 		Source:     "context_select",
-		SourceID:   "history.trim_notice",
+		SourceID:   historyTrimNoticeID,
 		Collector:  "budget_trim",
 	})
 }

@@ -11,9 +11,11 @@ import (
 	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
+	"github.com/google/jsonschema-go/jsonschema"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/step"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/models/modelretry"
 )
@@ -434,4 +436,15 @@ func TestMidStreamRetryRecordsTheFailedAttemptAsAnEvent(t *testing.T) {
 		!strings.Contains(attrs["error"], "model stream: mock: 500") || attrs["error_source"] == "" {
 		t.Fatalf("retry record attrs = %v, want the attempt with the provider failure's attribution", attrs)
 	}
+}
+
+// mockToolLoopTools serves a lookup tool with a sizeable result.
+func mockToolLoopTools() []agenttools.ToolProvider {
+	return []agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
+		Name:       "lookup",
+		Parameters: &jsonschema.Schema{Type: "object"},
+		Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(strings.Repeat("large tool result ", 80)), nil
+		},
+	}}}}
 }

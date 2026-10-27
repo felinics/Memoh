@@ -74,7 +74,7 @@ func TestProviderAndModelTestClassifyServiceErrors(t *testing.T) {
 			if tc.model {
 				register = NewModelsHandler(log, models.NewService(log, tc.q), nil).Register
 			} else {
-				register = NewProvidersHandler(log, providerSvc, nil).Register
+				register = NewProvidersHandler(log, providerSvc, nil, nil).Register
 			}
 			status, _, body := serveHandlerProblem(t, register, func() string {
 				if tc.model {
@@ -90,4 +90,8 @@ func TestProviderAndModelTestClassifyServiceErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (testHandlerQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
 }

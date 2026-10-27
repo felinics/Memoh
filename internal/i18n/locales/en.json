@@ -240,9 +240,6 @@
         },
         "access": {
           "show": "Show current identity, write access, and chat ACL context"
-        },
-        "compact": {
-          "run": "Compact the current session's context immediately"
         }
       }
     },
@@ -390,14 +387,6 @@
       "emptyFile": "(empty file)",
       "truncated": "Showing the first 2000 characters. Use the web UI for the full file."
     },
-    "compact": {
-      "unavailable": "Compaction isn't available right now.",
-      "done": "✅ Context compacted.",
-      "noop": "Nothing to compact right now.",
-      "noModel": "No compaction or chat model is configured for this bot.",
-      "modelUnavailable": "The compaction model is unavailable (disabled, missing context window, or its provider cannot cap output).",
-      "windowTooSmall": "The compaction model's context window is too small to produce a summary. Choose a compaction model with a larger context window."
-    },
     "toolApproval": {
       "unavailable": "⚠️ Approvals aren't available here right now.",
       "parseFailed": "Couldn't read that. Reply to the request with /approve or /reject, or tap a button."
@@ -489,7 +478,6 @@
     "skill": "View bot skills",
     "fs": "Browse workspace files",
     "access": "Inspect identity and permissions",
-    "compact": "Compact conversation context",
     "queue": "Queue input",
     "steer": "Steer the current response"
   },
@@ -632,8 +620,8 @@
       "upstream_unavailable": "Connect-It could not complete the request. Please try again shortly."
     },
     "context": {
-      "budget_unsatisfied": "The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window.",
-      "protected_overflow": "Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window."
+      "budget_unsatisfied": "This request does not fit the model context window, so the run stopped. Try again, shorten the request, start a new conversation, or switch to a model with a larger context window.",
+      "protected_overflow": "Required context exceeds the model context budget. Shorten the request, or switch to a model with a larger context window."
     },
     "context_lifecycle": {
       "access_denied": "You do not have access to context lifecycle diagnostics.",
@@ -729,6 +717,9 @@
       "update_failed": "The profile could not be updated."
     },
     "provider": {
+      "catalog_source_not_found": "This provider has no public model catalog. Import from its endpoint instead.",
+      "catalog_unavailable": "The model catalog is unavailable. Try again later or import from the provider endpoint.",
+      "managed_readonly": "This provider is managed by the platform. Use its managed catalog sync.",
       "name_taken": "A provider with this name already exists.",
       "not_found": "This provider no longer exists. Refresh the list and choose another one."
     },

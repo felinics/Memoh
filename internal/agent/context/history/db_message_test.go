@@ -408,6 +408,7 @@ func TestHistoryRecordsRenderLegacyModelAndSDKMessages(t *testing.T) {
 			t.Fatalf("FromDBMessage %d failed: %v", i, err)
 		}
 		records = append(records, record)
+		expectedModel[i].ContextSource = &turn.ContextMessageSource{Kind: "history", ID: string(rune('a' + i)), ContentHash: MessageContentHash(msg)}
 	}
 
 	if got := ToModelMessages(records); !reflect.DeepEqual(got, expectedModel) {

@@ -9,7 +9,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
-func TestRemainingStepBudgetUsesConservativeProviderEstimator(t *testing.T) {
+func TestProviderAttemptEnvelopeOverflowUsesConservativeProviderEstimator(t *testing.T) {
 	t.Parallel()
 
 	params := &sdk.Request{
@@ -22,12 +22,12 @@ func TestRemainingStepBudgetUsesConservativeProviderEstimator(t *testing.T) {
 	}
 
 	const allowance = 1000
-	if got := remainingStepBudget(allowance, params, len(params.Messages)); got != 936 {
-		t.Fatalf("remainingStepBudget() = %d, want 936 (ceil(101/4)*1.25 + ceil(103/4)*1.25 = 64 reserved)", got)
+	if got := providerAttemptEnvelopeOverflow(params, allowance); got != -936 {
+		t.Fatalf("providerAttemptEnvelopeOverflow() = %d, want -936 (ceil(101/4)*1.25 + ceil(103/4)*1.25 = 64 used)", got)
 	}
 }
 
-func TestStepEnvelopeEstimatesPriceFrozenPrefixImagesFlat(t *testing.T) {
+func TestProviderAttemptEnvelopePricesImagesFlat(t *testing.T) {
 	t.Parallel()
 
 	photo := sdk.Message{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{
@@ -42,9 +42,6 @@ func TestStepEnvelopeEstimatesPriceFrozenPrefixImagesFlat(t *testing.T) {
 	prefixCost := contextfrag.ProviderEnvelopeTokens(params.System, params.Messages[:1], nil)
 	if prefixCost != 1_509 {
 		t.Fatalf("photo prefix cost = %d, want 1509 (flat image + 9 text tokens)", prefixCost)
-	}
-	if got, want := remainingStepBudget(allowance, params, 1), allowance-prefixCost; got != want {
-		t.Fatalf("remainingStepBudget() = %d, want %d", got, want)
 	}
 	if overflow := providerAttemptEnvelopeOverflow(params, allowance); overflow >= 0 {
 		t.Fatalf("providerAttemptEnvelopeOverflow() = %d, want a photo turn to stay inside the allowance", overflow)

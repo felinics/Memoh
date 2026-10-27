@@ -25,6 +25,11 @@ import (
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
+const (
+	listMaxEntries        = 200
+	listCollapseThreshold = 50
+)
+
 // blockedSleepPattern matches standalone `sleep N` where N >= 2.
 // Does not match sleep inside pipelines, subshells, or scripts.
 var blockedSleepPattern = regexp.MustCompile(`^sleep\s+(\d+(?:\.\d+)?)(?:\s*[;&]|$)`)
@@ -1181,9 +1186,7 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 		if err != nil {
 			return nil, err
 		}
-		stdout := pruneToolOutputText(result.Stdout, "tool result (exec stdout)")
-		stderr := pruneToolOutputText(result.Stderr, "tool result (exec stderr)")
-		return map[string]any{"stdout": stdout, "stderr": stderr, "exit_code": result.ExitCode}, nil
+		return map[string]any{"stdout": result.Stdout, "stderr": result.Stderr, "exit_code": result.ExitCode}, nil
 	})
 	if err != nil {
 		return nil, err
@@ -1411,9 +1414,7 @@ func (p *ContainerProvider) execExecWithFlip(
 		if r.Err != nil {
 			return nil, r.Err
 		}
-		stdout := pruneToolOutputText(r.Stdout, "tool result (exec stdout)")
-		stderr := pruneToolOutputText(r.Stderr, "tool result (exec stderr)")
-		return map[string]any{"stdout": stdout, "stderr": stderr, "exit_code": r.ExitCode}, nil
+		return map[string]any{"stdout": r.Stdout, "stderr": r.Stderr, "exit_code": r.ExitCode}, nil
 
 	case <-timer.C:
 		// Foreground waiting ended, possibly early to preserve the hard budget.

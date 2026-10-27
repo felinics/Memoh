@@ -28,24 +28,23 @@ the application with Memoh's normal User-Agent.
 
 ## Catalog and migration
 
-`conf/providers/opencode-go.yaml` contains the models in the
-[Go endpoint table](https://opencode.ai/docs/go/#endpoints) except time-limited
-free models, with context windows and input capabilities from
-[models.dev](https://models.dev/api.json), checked on 2026-09-30. Both Luna models
-expose off/low/medium/high/xhigh/max. Other entries declare their supported native
-tiers, a thinking switch, or a token budget. Qwen 3.7's low/medium/high choices
-use Memoh's existing 5,000/16,000/50,000-token budget allowances, bounded by the
-catalog; they are not native effort tiers. Models without verified controls use
-provider-managed reasoning and show no manual reasoning control in the picker.
-Manual custom providers have
-conservative text/tool/reasoning discovery defaults; the preset supplies richer
-catalog metadata.
+The OpenCode Go entry in the Web provider gallery takes its model list and
+capabilities from the `opencode-go` provider on
+[models.dev](https://models.dev/api.json), fetched by the server. Each model's
+reasoning request shape is read on the protocol Go routes it to: effort levels
+become tiers, a budget alone becomes the budget shape, and a model that offers
+no control reasons on its own and shows no manual reasoning control in the
+picker. Manual custom providers have conservative text/tool/reasoning discovery
+defaults.
 
-Server startup synchronizes the bundled catalog into provider templates. Use
-**Refresh Models** on an existing provider to apply those capabilities to its
-stored models. The live endpoint determines which models are available, while
-the curated catalog supplies the controls missing from its model-list response.
-This integration does not periodically fetch models.dev.
+Creating the provider from the gallery imports the catalog's models disabled.
+**Refresh Models** on an existing provider imports them again: new catalog
+models are added, and existing ones get the catalog's capabilities while their
+enabled state and description stay. The refresh dialog can list the live
+endpoint instead, for models the catalog does not have. A Go provider made in
+the custom form before that form recorded its source is read as this
+subscription when its base URL is the official endpoint or empty, so Refresh
+Models fills its limits from the catalog too.
 
 Migration `0160_opencode_go` extends the provider type constraint. The canonical
 initial schema includes the same type. Rollback refuses to proceed while Go

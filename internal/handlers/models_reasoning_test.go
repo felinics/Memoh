@@ -57,10 +57,7 @@ func TestWithReasoningFillsResolvedOptions(t *testing.T) {
 	t.Parallel()
 
 	list := newReasoningTestHandler().withReasoning(context.Background(), []models.GetResponse{
-		chatModel(models.ModelConfig{
-			ThinkingMode:     models.ThinkingModeToggle,
-			ReasoningEfforts: []string{models.ReasoningEffortDisable, models.ReasoningEffortLow, models.ReasoningEffortHigh},
-		}),
+		chatModel(models.ModelConfig{Reasoning: &models.ModelReasoning{Toggle: true, Efforts: []string{models.ReasoningEffortLow, models.ReasoningEffortHigh}}}),
 	})
 
 	got := list[0].Reasoning
@@ -85,7 +82,7 @@ func TestWithReasoningMarksModelsThatCannotThink(t *testing.T) {
 	t.Parallel()
 
 	list := newReasoningTestHandler().withReasoning(context.Background(), []models.GetResponse{
-		chatModel(models.ModelConfig{ThinkingMode: models.ThinkingModeNone}),
+		chatModel(models.ModelConfig{}),
 	})
 
 	got := list[0].Reasoning
@@ -150,7 +147,7 @@ func TestProviderModelListIncludesResolvedReasoning(t *testing.T) {
 	handler := NewProvidersHandler(
 		slog.Default(),
 		providers.NewService(slog.Default(), queries, ""),
-		models.NewService(slog.Default(), queries),
+		models.NewService(slog.Default(), queries), nil,
 	)
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/providers/"+providerID+"/models", nil)
@@ -185,10 +182,7 @@ func TestReasoningOptionsSerializeAsSnakeCase(t *testing.T) {
 	t.Parallel()
 
 	list := newReasoningTestHandler().withReasoning(context.Background(), []models.GetResponse{
-		chatModel(models.ModelConfig{
-			ThinkingMode:     models.ThinkingModeToggle,
-			ReasoningEfforts: []string{models.ReasoningEffortLow, models.ReasoningEffortHigh},
-		}),
+		chatModel(models.ModelConfig{Reasoning: &models.ModelReasoning{Efforts: []string{models.ReasoningEffortLow, models.ReasoningEffortHigh}}}),
 	})
 
 	encoded, err := json.Marshal(list[0])
@@ -243,8 +237,12 @@ func TestImportedModelConfigCarriesTheWireDeclarations(t *testing.T) {
 
 	// A declared rejection must survive into what a client is offered, or the
 	// picker would show an off switch the wire answers with a 400.
-	m := models.Model{Type: models.ModelTypeChat, Config: cfg}
+	m := models.Model{Type: models.ModelTypeChat, Config: cfg.Upgrade(models.ConfigContext{ModelID: remote.ID, Type: models.ModelTypeChat})}
 	if opts := m.ReasoningOptions("google-generative-ai"); opts.CanDisable {
 		t.Error("a model declaring it rejects an explicit off must not offer one")
 	}
+}
+
+func (*providerModelsReasoningQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
 }

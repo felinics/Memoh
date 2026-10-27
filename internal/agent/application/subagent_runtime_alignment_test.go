@@ -120,7 +120,6 @@ func TestSpawnAbortAlignsManagerLedgerAndLifecycle(t *testing.T) {
 		Model: &sdk.Model{
 			ID:       "abort-alignment-model",
 			Provider: abortAlignmentProvider{},
-			Type:     sdk.ModelTypeChat,
 		},
 		Query:         "abort internally",
 		LoopDetection: tools.SpawnLoopConfig{Enabled: true},
@@ -207,7 +206,7 @@ func TestSpawnProviderFailureNamesTheSessionRun(t *testing.T) {
 	adapter.SetFailureTranslator(service.SubagentFailure)
 	result, runErr := adapter.GenerateWithWatchdog(runCtx, tools.SpawnRunConfig{
 		RunID: admission.RunID,
-		Model: &sdk.Model{ID: "rejecting-model", Provider: rejectingSpawnProvider{}, Type: sdk.ModelTypeChat},
+		Model: &sdk.Model{ID: "rejecting-model", Provider: rejectingSpawnProvider{}},
 		Query: "fail on the provider",
 		Identity: tools.SpawnIdentity{
 			BotID:      lifecycleTestBotID,
@@ -278,7 +277,6 @@ func TestSpawnWatchdogRetryKeepsManagerRunActive(t *testing.T) {
 		Model: &sdk.Model{
 			ID:       "watchdog-attempt-model",
 			Provider: abortAlignmentProvider{},
-			Type:     sdk.ModelTypeChat,
 		},
 		Query: "retry after the watchdog",
 		Identity: tools.SpawnIdentity{
@@ -321,7 +319,6 @@ func TestSpawnWatchdogRetryKeepsManagerRunActive(t *testing.T) {
 		Model: &sdk.Model{
 			ID:       "watchdog-attempt-model",
 			Provider: abortAlignmentProvider{complete: true},
-			Type:     sdk.ModelTypeChat,
 		},
 		Query: "retry after the watchdog",
 		Identity: tools.SpawnIdentity{

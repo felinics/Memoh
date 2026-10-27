@@ -131,8 +131,6 @@ func settingsModelRefHTTPError(err error) error {
 	switch ref.Field {
 	case "chat_model_id":
 		return apperror.FieldInvalid("chat_model_id", err)
-	case "compaction_model_id":
-		return apperror.FieldInvalid("compaction_model_id", err)
 	case "memory_llm_model_id":
 		return apperror.FieldInvalid("memory_llm_model_id", err)
 	case "image_model_id":

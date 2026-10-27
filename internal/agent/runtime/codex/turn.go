@@ -321,9 +321,9 @@ func (t *turnState) handleItemStarted(item *protocol.ThreadItem) {
 		})
 	case item.FileChange != nil:
 		fc := item.FileChange
-		t.rememberTool(fc.ID, "write")
+		t.rememberTool(fc.ID, "apply_patch")
 		t.emit(event.StreamEvent{
-			Type: event.ToolCallStart, ToolCallID: fc.ID, ToolName: "write",
+			Type: event.ToolCallStart, ToolCallID: fc.ID, ToolName: "apply_patch",
 			Input: fileChangeInput(fc),
 		})
 	case item.MCPToolCall != nil:
@@ -379,12 +379,12 @@ func (t *turnState) handleItemCompleted(item *protocol.ThreadItem) {
 		t.mu.Unlock()
 	case item.CommandExecution != nil:
 		cmd := item.CommandExecution
-		result := map[string]any{}
+		result := map[string]any{"stdout": "", "stderr": ""}
 		if cmd.ExitCode != nil {
-			result["exitCode"] = *cmd.ExitCode
+			result["exit_code"] = *cmd.ExitCode
 		}
 		if cmd.AggregatedOutput != nil {
-			result["output"] = *cmd.AggregatedOutput
+			result["stdout"] = *cmd.AggregatedOutput
 		}
 		ev := event.StreamEvent{Type: event.ToolCallEnd, ToolCallID: cmd.ID, ToolName: t.toolName(cmd.ID), Result: result}
 		if cmd.ExitCode != nil && *cmd.ExitCode != 0 {
@@ -481,7 +481,7 @@ func (t *turnState) handleServerRequest(c *conn, req *protocol.Inbound, decoded 
 		if params.GrantRoot != nil {
 			input["grantRoot"] = *params.GrantRoot
 		}
-		result := t.decide(ctx, params.ItemID, "write", input, fileChangeApprovalOptions(params))
+		result := t.decide(ctx, params.ItemID, "apply_patch", input, fileChangeApprovalOptions(params))
 		decision := fileChangeApprovalDecision(result)
 		_ = c.Respond(req.ID, protocol.FileChangeRequestApprovalResponse{Decision: decision})
 	case *protocol.PermissionsRequestApprovalParams:

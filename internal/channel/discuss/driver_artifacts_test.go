@@ -41,10 +41,10 @@ func TestHandleReplyWithTurn_InsertsArtifactSummaryAtCoveredSlot(t *testing.T) {
 		},
 	}
 	artifacts := []timeline.CompactionArtifact{{
-		ID:            "a1",
-		Summary:       "compacted window",
-		AnchorStartMs: 100,
-		Sources:       []timeline.CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 100}},
+		ID:          "a1",
+		Summary:     "compacted window",
+		AnchorEndMs: 100,
+		Sources:     []timeline.CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 100}},
 	}}
 	provider := &fakeArtifactProvider{artifacts: artifacts}
 	svc := &fakeTurnService{}

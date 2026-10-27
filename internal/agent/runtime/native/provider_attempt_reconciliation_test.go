@@ -19,84 +19,6 @@ import (
 	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
-func TestAgentGenerateDroppedReadMediaIsNotRecordedAsProviderInput(t *testing.T) {
-	t.Parallel()
-
-	pdfBytes := []byte("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n%%EOF\n")
-	var providerInputs []sdk.Request
-	modelProvider := &agentReadMediaMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
-		providerInputs = append(providerInputs, cloneGenerateParams(params))
-		if call == 1 {
-			return sdk.ModelResult{
-				FinishReason: sdk.FinishReasonToolCalls,
-				ToolCalls: []sdk.ToolCall{{
-					ToolCallID: "call-pdf",
-					ToolName:   "read",
-					Input:      toolexec.ArgumentsFromValue(map[string]any{"path": "/data/report.pdf"}),
-				}},
-			}, nil
-		}
-		if messagesHaveFilePart(params.Messages) {
-			t.Fatal("second provider call retained the file selected for eviction")
-		}
-		return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
-	}}
-
-	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{
-		agenttools.NewContainerProvider(nil, newAgentReadMediaBridgeProvider(t, map[string][]byte{
-			"report.pdf": pdfBytes,
-		}), nil, "/data"),
-	})
-
-	var committed []step.Record
-	result, err := a.Generate(context.Background(), RunConfig{
-		Model:             &sdk.Model{ID: "mock-model", Provider: modelProvider},
-		Messages:          []sdk.Message{sdk.UserMessage("inspect the document")},
-		SupportsFileInput: true,
-		SupportsToolCall:  true,
-		Identity:          SessionContext{BotID: "bot-1"},
-		ContextMutations:  contextfrag.NewMutationLedger(),
-		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
-			selected := make([]sdk.Message, 0, len(input.Messages))
-			dropped := 0
-			for _, message := range input.Messages {
-				if messagesHaveFilePart([]sdk.Message{message}) {
-					dropped++
-					continue
-				}
-				selected = append(selected, message)
-			}
-			if dropped != 1 {
-				t.Fatalf("file messages selected for eviction = %d, want 1", dropped)
-			}
-			return ContextStepSelectionResult{
-				Messages:    selected,
-				Dropped:     dropped,
-				DropReasons: map[string]int{"native_media": dropped},
-			}
-		},
-		OnStepCommitted: func(_ context.Context, _ int, step *step.Record) (StepDirective, error) {
-			committed = append(committed, *step)
-			return StepDirective{}, nil
-		},
-	})
-	if err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
-	if len(providerInputs) != 2 {
-		t.Fatalf("provider calls = %d, want 2", len(providerInputs))
-	}
-	for i, step := range committed {
-		if messagesHaveFilePart(step.Messages) {
-			t.Fatalf("committed step %d recorded a file the provider did not receive", i)
-		}
-	}
-	if messagesHaveFilePart(result.Messages) {
-		t.Fatal("terminal messages recorded a file the provider did not receive")
-	}
-}
-
 func TestAgentGenerateFailedPreflightKeepsLastDispatchedHashAndFork(t *testing.T) {
 	t.Parallel()
 
@@ -125,31 +47,20 @@ func TestAgentGenerateFailedPreflightKeepsLastDispatchedHashAndFork(t *testing.T
 			return cfg, nil
 		},
 	})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
-		Name:       "lookup",
-		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
-			return toolexec.OutputFromValue(map[string]any{"answer": "ok"}), nil
-		},
-	}}}})
+	a.SetToolProviders([]agenttools.ToolProvider{oversizeLookupProvider()})
 
-	var selectorCalls atomic.Int32
+	plan := contextfrag.ContextBudgetPlan{Window: 2000, OutputReserve: 100}
 	_, err := a.Generate(context.Background(), RunConfig{
 		Model:            &sdk.Model{ID: "mock-model", Provider: modelProvider},
 		Messages:         []sdk.Message{sdk.UserMessage("task")},
 		SupportsToolCall: true,
 		Identity:         SessionContext{BotID: "bot-1"},
 		ContextMutations: ledger,
+		ContextManifest:  contextfrag.Manifest{BudgetPlan: &plan},
 		ForkContext:      fork,
-		ContextStepReselector: func(context.Context, ContextStepSelectionInput) ContextStepSelectionResult {
-			if selectorCalls.Add(1) == 1 {
-				return ContextStepSelectionResult{}
-			}
-			return ContextStepSelectionResult{FatalError: contextfrag.ErrProtectedContextOverflow}
-		},
 	})
-	if !errors.Is(err, contextfrag.ErrProtectedContextOverflow) {
-		t.Fatalf("Generate() error = %v, want %v", err, contextfrag.ErrProtectedContextOverflow)
+	if !errors.Is(err, contextfrag.ErrBudgetUnsatisfied) {
+		t.Fatalf("Generate() error = %v, want %v", err, contextfrag.ErrBudgetUnsatisfied)
 	}
 	wantHash := contextfrag.ProviderPayloadHash(
 		firstProviderInput.System,
@@ -222,7 +133,7 @@ func TestAgentGenerateStepHookRemainsTransientAfterAdmissionReconciliation(t *te
 	}
 }
 
-func TestAgentStreamRetryRevokesReadMediaAdmission(t *testing.T) {
+func TestAgentStreamRetryReadmitsReadMedia(t *testing.T) {
 	pdfBytes := []byte("%PDF-1.4\nretry admission\n%%EOF\n")
 	var providerInputs []sdk.Request
 	modelProvider := &atomicMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
@@ -243,8 +154,8 @@ func TestAgentStreamRetryRevokesReadMediaAdmission(t *testing.T) {
 			}
 			return sdk.ModelResult{}, serverErr()
 		default:
-			if messagesHaveFilePart(params.Messages) {
-				t.Fatal("retry provider attempt retained file selected for eviction")
+			if countFileParts(params.Messages) != 1 {
+				t.Fatal("retry provider attempt did not carry the file the failed attempt admitted, once")
 			}
 			return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
 		}
@@ -257,7 +168,6 @@ func TestAgentStreamRetryRevokesReadMediaAdmission(t *testing.T) {
 		}), nil, "/data"),
 	})
 
-	var selectorCalls atomic.Int32
 	var committed []step.Record
 	var terminal StreamEvent
 	for event := range a.Stream(context.Background(), RunConfig{
@@ -267,22 +177,6 @@ func TestAgentStreamRetryRevokesReadMediaAdmission(t *testing.T) {
 		SupportsToolCall:  true,
 		Identity:          SessionContext{BotID: "bot-1"},
 		ContextMutations:  contextfrag.NewMutationLedger(),
-		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
-			if selectorCalls.Add(1) == 1 {
-				return ContextStepSelectionResult{Messages: input.Messages}
-			}
-			selected := make([]sdk.Message, 0, len(input.Messages))
-			for _, message := range input.Messages {
-				if !messagesHaveFilePart([]sdk.Message{message}) {
-					selected = append(selected, message)
-				}
-			}
-			return ContextStepSelectionResult{
-				Messages:    selected,
-				Dropped:     len(input.Messages) - len(selected),
-				DropReasons: map[string]int{"native_media": len(input.Messages) - len(selected)},
-			}
-		},
 		OnStepCommitted: func(_ context.Context, _ int, step *step.Record) (StepDirective, error) {
 			committed = append(committed, *step)
 			return StepDirective{}, nil
@@ -293,20 +187,22 @@ func TestAgentStreamRetryRevokesReadMediaAdmission(t *testing.T) {
 		}
 	}
 
-	if len(providerInputs) != 3 || selectorCalls.Load() != 2 {
-		t.Fatalf("provider/selector calls = %d/%d, want 3/2", len(providerInputs), selectorCalls.Load())
+	if len(providerInputs) != 3 {
+		t.Fatalf("provider calls = %d, want 3", len(providerInputs))
 	}
-	for i, step := range committed {
-		if messagesHaveFilePart(step.Messages) {
-			t.Fatalf("committed retry step %d retained a file the retry provider did not receive", i)
-		}
+	files := 0
+	for _, step := range committed {
+		files += countFileParts(step.Messages)
+	}
+	if files != 1 {
+		t.Fatalf("committed steps carry %d files, want the retried file once", files)
 	}
 	var terminalMessages []sdk.Message
 	if terminal.Type != EventAgentEnd || json.Unmarshal(terminal.Messages, &terminalMessages) != nil {
 		t.Fatalf("terminal event/messages = %#v / %#v", terminal, terminalMessages)
 	}
-	if messagesHaveFilePart(terminalMessages) {
-		t.Fatal("terminal messages retained a file revoked by retry preflight")
+	if countFileParts(terminalMessages) != 1 {
+		t.Fatal("terminal messages do not carry the retried file once")
 	}
 }
 
@@ -501,6 +397,7 @@ func TestAgentGenerateCanceledPreflightKeepsLastDispatchedHashAndFork(t *testing
 		Name:       "lookup",
 		Parameters: &jsonschema.Schema{Type: "object"},
 		Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+			cancel()
 			return toolexec.OutputFromValue(map[string]any{"answer": "ok"}), nil
 		},
 	}}}})
@@ -513,10 +410,6 @@ func TestAgentGenerateCanceledPreflightKeepsLastDispatchedHashAndFork(t *testing
 		ContextMutations:     ledger,
 		ForkContext:          fork,
 		providerAttemptState: attemptState,
-		ContextStepReselector: func(context.Context, ContextStepSelectionInput) ContextStepSelectionResult {
-			cancel()
-			return ContextStepSelectionResult{}
-		},
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Generate() error = %v, want context canceled", err)

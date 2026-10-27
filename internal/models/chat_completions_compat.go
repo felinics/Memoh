@@ -41,6 +41,18 @@ var officialCompatOrigins = map[string][]string{
 	ChatCompletionsCompatKimi:     {"https://api.moonshot.cn", "https://api.moonshot.ai"},
 }
 
+// openRouterOrigin is OpenRouter's API origin. It is not a compat mode: the
+// requests are plain Chat Completions, only the reasoning replay differs.
+const openRouterOrigin = "https://openrouter.ai"
+
+// isOpenRouterBaseURL reports whether a base URL is OpenRouter's, by exact
+// origin or path prefix, never by substring, as ResolveChatCompletionsCompat
+// matches official origins.
+func isOpenRouterBaseURL(baseURL string) bool {
+	base := strings.TrimRight(strings.ToLower(strings.TrimSpace(baseURL)), "/")
+	return base == openRouterOrigin || strings.HasPrefix(base, openRouterOrigin+"/")
+}
+
 // ResolveChatCompletionsCompat returns the compatibility mode for a provider.
 // An explicit config value always wins, including one that matches no known
 // mode (e.g. "none"), which disables inference. With no explicit value, the

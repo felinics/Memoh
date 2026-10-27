@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -15,36 +15,35 @@ import (
 
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/reasoning"
-	"github.com/felinics/memoh/internal/registry"
 )
 
-// Exercise the shipped catalog, capability projection, resolver and real SDK
-// serialization together: a selectable control must reach the advertised wire.
-func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
-	defs, err := registry.Load(slog.Default(), "../../conf/providers")
+// Fixed examples cover each protocol/control combination through the real SDK,
+// including streaming, without depending on the size of the provider catalog.
+func TestOpenCodeGoReasoningWireFixtures(t *testing.T) {
+	raw, err := os.ReadFile("testdata/opencode-go-reasoning.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var catalog registry.ProviderDefinition
-	for _, def := range defs {
-		if def.ClientType == "opencode-go" {
-			catalog = def
-		}
+	var fixtures []struct {
+		ModelID string          `json:"model_id"`
+		Path    string          `json:"path"`
+		Config  json.RawMessage `json:"config"`
 	}
-	if len(catalog.Models) != 29 {
-		t.Fatalf("catalog models = %d", len(catalog.Models))
+	if err := json.Unmarshal(raw, &fixtures); err != nil {
+		t.Fatal(err)
 	}
-	for _, entry := range catalog.Models {
+	const clientType = "opencode-go"
+	for _, entry := range fixtures {
 		t.Run(entry.ModelID, func(t *testing.T) {
-			raw, err := json.Marshal(entry.Config)
+			raw := entry.Config
+			// Former templates are version 1 configs; read them the way a stored
+			// row is read.
+			config, err := models.DecodeModelConfig(raw, models.ConfigContext{ModelID: entry.ModelID, Type: models.ModelTypeChat})
 			if err != nil {
 				t.Fatal(err)
 			}
-			model := models.Model{ModelID: entry.ModelID}
-			if err := json.Unmarshal(raw, &model.Config); err != nil {
-				t.Fatal(err)
-			}
-			opts := model.ReasoningOptions(catalog.ClientType)
+			model := models.Model{ModelID: entry.ModelID, Config: config}
+			opts := model.ReasoningOptions(clientType)
 			if !opts.Supported {
 				t.Fatal("reasoning capability missing")
 			}
@@ -61,6 +60,9 @@ func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
 						called := false
 						server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 							called = true
+							if r.URL.Path != entry.Path {
+								t.Errorf("path = %s, want %s", r.URL.Path, entry.Path)
+							}
 							var body map[string]any
 							if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 								t.Error(err)
@@ -70,27 +72,17 @@ func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
 							output, _ := body["output_config"].(map[string]any)
 							responseReasoning, _ := body["reasoning"].(map[string]any)
 							wireEffort := body["reasoning_effort"]
-							switch models.ResolveModelClientType(catalog.ClientType, entry.ModelID) {
-							case "openai-responses":
-								if r.URL.Path != "/responses" {
-									t.Errorf("path = %s", r.URL.Path)
-								}
+							switch entry.Path {
+							case "/responses":
 								wireEffort = responseReasoning["effort"]
-							case "anthropic-messages":
-								if r.URL.Path != "/messages" {
-									t.Errorf("path = %s", r.URL.Path)
-								}
+							case "/messages":
 								wireEffort = output["effort"]
-							default:
-								if r.URL.Path != "/chat/completions" {
-									t.Errorf("path = %s", r.URL.Path)
-								}
 							}
 							var wantEffort any
-							if effort != "" && model.Config.ReasoningDialect == reasoning.DialectTier {
+							if effort != "" && model.Config.ReasoningDialect() == reasoning.DialectTier {
 								wantEffort = effort
 								if effort == reasoning.EffortDisable {
-									if model.Config.ReasoningOffSupport == reasoning.OffSupportAccepted {
+									if model.Config.ReasoningOffSupport() == reasoning.OffSupportAccepted {
 										wantEffort = nil
 									} else {
 										wantEffort = "none"
@@ -100,7 +92,7 @@ func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
 							if wireEffort != wantEffort {
 								t.Errorf("wire effort = %v, want %v", wireEffort, wantEffort)
 							}
-							if model.Config.ReasoningOffSupport == reasoning.OffSupportAccepted {
+							if model.Config.ReasoningOffSupport() == reasoning.OffSupportAccepted {
 								wantType := "enabled"
 								if effort == reasoning.EffortDisable {
 									wantType = "disabled"
@@ -109,7 +101,7 @@ func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
 									t.Errorf("thinking = %v, want %s", thinking, wantType)
 								}
 								var wantBudget any
-								if model.Config.ReasoningDialect == reasoning.DialectBudget && effort != reasoning.EffortDisable {
+								if model.Config.ReasoningDialect() == reasoning.DialectBudget && effort != reasoning.EffortDisable {
 									wantBudget = map[string]float64{"low": 5000, "medium": 16000, "high": 50000}[effort]
 								}
 								if thinking["budget_tokens"] != wantBudget {
@@ -122,10 +114,10 @@ func TestOpenCodeGoCatalogReasoningWire(t *testing.T) {
 						}))
 						defer server.Close()
 						cfg := models.SDKModelConfig{
-							ModelID: entry.ModelID, ClientType: catalog.ClientType, BaseURL: server.URL, HTTPClient: server.Client(),
-							ReasoningConfig:  reasoning.ResolveConfig(model.ResolveThinkingMode(), model.Config.ReasoningEfforts, opts, "", effort),
-							ReasoningDialect: model.Config.ReasoningDialect, ReasoningOffSupport: model.Config.ReasoningOffSupport,
-							ThinkingBudgetMin: model.Config.ThinkingBudgetMin, ThinkingBudgetMax: model.Config.ThinkingBudgetMax,
+							ModelID: entry.ModelID, ClientType: clientType, BaseURL: server.URL, HTTPClient: server.Client(),
+							ReasoningConfig:  reasoning.ResolveConfig(model.ResolveThinkingMode(), model.Config.ReasoningEfforts(), opts, "", effort),
+							ReasoningDialect: model.Config.ReasoningDialect(), ReasoningOffSupport: model.Config.ReasoningOffSupport(),
+							ThinkingBudgetMin: model.Config.ThinkingBudgetMin(), ThinkingBudgetMax: model.Config.ThinkingBudgetMax(),
 						}
 						req := sdk.Request{Messages: []sdk.Message{sdk.UserMessage("hi")}}
 						models.ApplyReasoningToRequest(&req, cfg)

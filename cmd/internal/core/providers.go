@@ -85,6 +85,7 @@ import (
 	storefs "github.com/felinics/memoh/internal/memory/storefs"
 	"github.com/felinics/memoh/internal/memory/wikistore"
 	"github.com/felinics/memoh/internal/messaging"
+	"github.com/felinics/memoh/internal/modelcatalog"
 	"github.com/felinics/memoh/internal/models"
 	netctl "github.com/felinics/memoh/internal/network"
 	netoverlay "github.com/felinics/memoh/internal/network/overlay"
@@ -538,7 +539,6 @@ func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hooks
 		Logger:             log,
 		Limits:             agentLimitsFromConfig(cfg.Agent),
 		ContextViewApplier: contextview.ProviderRunConfigApplier(log),
-		LoopReselectMode:   agentLoopReselectModeFromConfig(log, cfg.Agent),
 	})
 }
 
@@ -548,14 +548,6 @@ func agentLimitsFromConfig(cfg config.AgentConfig) native.Limits {
 		cfg.ToolOutputMaxLines,
 		cfg.SystemFilesMaxBytes,
 	)
-}
-
-func agentLoopReselectModeFromConfig(log *slog.Logger, cfg config.AgentConfig) native.LoopReselectMode {
-	mode, recognized := cfg.EffectiveContextLoopReselectMode()
-	if !recognized {
-		log.Warn("unrecognized agent.context_loop_reselect value; defaulting to active", slog.String("value", cfg.ContextLoopReselect))
-	}
-	return native.LoopReselectMode(mode)
 }
 
 func injectToolProviders(a *native.Agent, msgService *message.DBService, hookService *hookspkg.Service, agentService *application.Service, providers []agenttools.ToolProvider) {
@@ -842,11 +834,6 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 		return nil
 	})
 	service.SetContextAbsoluteMaxTokens(cfg.Agent.EffectiveContextAbsoluteMaxTokens())
-	syncCompactionMode, recognized := cfg.Agent.EffectiveSyncCompactionMode()
-	if !recognized {
-		log.Warn("unrecognized agent.sync_compaction value; defaulting to shadow", slog.String("value", cfg.Agent.SyncCompaction))
-	}
-	service.SetSyncCompactionMode(syncCompactionMode)
 	service.SetBotPermissionChecker(&applicationBotPermissionChecker{bots: botService, accounts: accountService})
 	// Every turn entry point goes through admission, so a service without it can
 	// start nothing: this is the thread's single-run guarantee, not an add-on.
@@ -1196,7 +1183,7 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewVideoGenProvider(log, settingsService, videoService, bgManager, manager, config.DefaultDataMount),
 		agenttools.NewFederationProvider(log, connectorSource),
 		agenttools.NewFederationProvider(log, fedSource),
-		agenttools.NewHistoryProvider(log, historySessions, messageService, queries),
+		agenttools.NewHistoryProvider(log, historySessions, messageService, queries, agentLimitsFromConfig(cfg.Agent).ToolOutputLimit()),
 	}
 }
 
@@ -1296,8 +1283,14 @@ func startBackgroundTaskCleanup(lc fx.Lifecycle, mgr *background.Manager) {
 
 // inboundTranscriptionResult moved to the shared Channel module.
 
-func provideProvidersService(log *slog.Logger, queries dbstore.Queries, cfg config.Config) *providers.Service {
-	return providers.NewService(log, queries, defaultProviderOAuthCallbackURL(), cfg.Registry.ProvidersPath())
+func provideProvidersService(log *slog.Logger, queries dbstore.Queries) *providers.Service {
+	return providers.NewService(log, queries, defaultProviderOAuthCallbackURL())
+}
+
+func provideModelCatalog(log *slog.Logger, cfg config.Config) *modelcatalog.Service {
+	return modelcatalog.New(log, modelcatalog.Options{
+		URL: cfg.ModelCatalog.URL, CachePath: cfg.ModelCatalogCachePath(),
+	})
 }
 
 func defaultProviderOAuthCallbackURL() string {

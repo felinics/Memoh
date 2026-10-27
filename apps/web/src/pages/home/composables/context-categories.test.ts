@@ -33,8 +33,6 @@ describe('computeContextComposition', () => {
         frag('memory_recall', 160),
         frag('conversation_summary', 170),
         frag('hook_context', 120),
-        frag('injected_message', 130),
-        frag('background_summary', 140),
         frag('future_kind_not_yet_known' as ContextfragKind, 5),
       ],
     })
@@ -48,9 +46,9 @@ describe('computeContextComposition', () => {
         { id: 'memory', tokens: 160 },
         { id: 'summary', tokens: 170 },
         { id: 'conversation', tokens: 490 },
-        { id: 'other', tokens: 395 },
+        { id: 'other', tokens: 125 },
       ],
-      totalTokens: 1535,
+      totalTokens: 1265,
     })
   })
 

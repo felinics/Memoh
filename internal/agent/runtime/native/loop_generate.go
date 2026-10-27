@@ -91,6 +91,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 		return nil, contextViewErr
 	}
 	cfg = captureProviderAttemptPrefix(cfg)
+	cfg.contextSwitch = newContextSwitchState(cfg)
 	toolExecutionMetadata := newToolExecutionMetadataRegistry(nil)
 	cfg.ToolApprovalHandler = toolExecutionMetadata.wrap(cfg.ToolApprovalHandler)
 
@@ -140,12 +141,14 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 		var dir StepDirective
 		if cfg.OnStepCommitted != nil {
 			stepIndex := sdkStep + cfg.StepIndexOffset
-			decorated := decorateCommittedStep(dynamic.stepAdditions(stepIndex), sr, toolExecutionMetadata)
+			additions := dynamic.stepAdditions(stepIndex)
+			decorated := decorateCommittedStep(additions, sr, toolExecutionMetadata)
 			var err error
 			dir, err = cfg.OnStepCommitted(dynamic.withMessageOrigins(genCtx, stepIndex), stepIndex, decorated)
 			if err != nil {
 				return StepDirective{}, fmt.Errorf("generate: twilightai: commit step %d: %w", sdkStep, err)
 			}
+			cfg.contextSwitch.committed(append(additions, sr.Messages...), dir.Provenance)
 		}
 		if cfg.capabilityChanges.Swap(false) && sr.Deferred == nil {
 			refreshed, err := a.refreshCapabilities(genCtx, ctx, &cfg, collectEmitter, false,
@@ -154,6 +157,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 				return StepDirective{}, fmt.Errorf("generate: refresh capabilities after step %d: %w", sdkStep, err)
 			}
 			thread.pendingRefresh = &refreshed
+			sdkTools, approvalTools = refreshed.wrapped, refreshed.approval
 		}
 		return dir, nil
 	}
@@ -200,6 +204,15 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 			committed: len(allSteps),
 			readMedia: readMediaState,
 		})
+		if next, ok := cfg.contextSwitch.redispatch(cfg, thread.dispatch, stepParams); ok {
+			cfg.ContextCachePlan = next.ContextCachePlan
+			dispatch, err := a.buildGenerateDispatch(genCtx, next, sdkTools, approvalTools, prepareStep)
+			if err != nil {
+				return nil, fmt.Errorf("generate: %w", err)
+			}
+			thread.reset(dispatch)
+			stepParams = thread.advance(cfg, dynamic, stepBoundary{first: true})
+		}
 		if stepErr := failure.err(); stepErr != nil {
 			return nil, stepErr
 		}
@@ -362,19 +375,6 @@ func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkToo
 	handoff := newProviderAttemptHandoff(cfg)
 	sdkTools = canonicalizeProviderToolSchemas(sdkTools)
 	cfg.ContextMutations.SetModelInfo(modelID(cfg.Model), models.ResolveClientType(cfg.Model))
-	loopReselectMode := a.LoopReselectMode()
-	if loopReselectMode == LoopReselectOff {
-		cfg.ContextStepReselector = nil
-	}
-	switch {
-	case cfg.ContextStepReselector == nil:
-		cfg.ContextMutations.SetLoopSelectionMode(contextfrag.LoopSelectionLegacyPrune)
-	case loopReselectMode == LoopReselectShadow:
-		cfg.ContextMutations.SetLoopSelectionMode(contextfrag.LoopSelectionSuffixOnlyShadow)
-	default:
-		cfg.ContextMutations.SetLoopSelectionMode(contextfrag.LoopSelectionSuffixOnly)
-	}
-
 	plan := cfg.ContextCachePlan
 	providerAttemptPrefixCount := len(cfg.Messages)
 	if cfg.initialProviderPrefixSet {
@@ -405,7 +405,7 @@ func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkToo
 	if toolDefErr != nil {
 		return generateDispatch{}, toolDefErr
 	}
-	initialParams := prepareProviderAttempt(ctx, cfg, handoff, loopReselectMode, systemPrepended, initialProviderMessageCount, 0, providerRefs, &sdk.Request{
+	initialParams := prepareProviderAttempt(ctx, cfg, handoff, systemPrepended, initialProviderMessageCount, 0, providerRefs, &sdk.Request{
 		System: system, Messages: messages, Tools: toolDefs,
 	})
 	system = initialParams.System
@@ -465,7 +465,7 @@ func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkToo
 			return nil
 		}
 		defer func() { prepareIndex++ }()
-		return prepareProviderAttempt(ctx, cfg, handoff, loopReselectMode, systemPrepended, initialProviderMessageCount, prepareIndex+1, cfg.dynamicInputs.pendingRefs(), p)
+		return prepareProviderAttempt(ctx, cfg, handoff, systemPrepended, initialProviderMessageCount, prepareIndex+1, cfg.dynamicInputs.pendingRefs(), p)
 	}
 
 	if key := models.PromptCacheKey(cfg.Model, cfg.PromptCacheTTL, cfg.Identity.SessionID); key != "" {

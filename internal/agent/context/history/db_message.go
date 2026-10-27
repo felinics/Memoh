@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
@@ -34,6 +35,7 @@ func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback 
 	rowID := ref.ID
 
 	modelMessage := DecodeStoredModelMessage(log, msg.ID, msg.Role, msg.Content)
+	modelMessage.ContextSource = &turn.ContextMessageSource{Kind: "history", ID: rowID, ContentHash: MessageContentHash(modelMessage)}
 	inputTokens, outputTokens := parseUsage(msg.Usage)
 	// Compaction coverage persisted hashes over the full row metadata, so the
 	// hash still covers lifecycle audits the record itself does not keep.
@@ -74,8 +76,9 @@ func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback 
 		Platform:                strings.TrimSpace(msg.Platform),
 		SourceReplyToMessageID:  strings.TrimSpace(msg.SourceReplyToMessageID),
 
-		CompactID: strings.TrimSpace(msg.CompactID),
-		CreatedAt: msg.CreatedAt,
+		CompactID:  strings.TrimSpace(msg.CompactID),
+		Summarized: msg.Summarized,
+		CreatedAt:  msg.CreatedAt,
 
 		UsageInputTokens:  inputTokens,
 		UsageOutputTokens: outputTokens,

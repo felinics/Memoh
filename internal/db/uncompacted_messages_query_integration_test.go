@@ -194,7 +194,7 @@ VALUES
 		t.Errorf("candidate set size = %d, want %d (an excluded row leaked in)", len(got), len(wantEligible))
 	}
 
-	measure, err := queries.MeasureUncompactedMessagesBySession(ctx, sessionUUID)
+	measure, err := queries.MeasureUncompactedMessagesBySession(ctx, sqlc.MeasureUncompactedMessagesBySessionParams{SessionID: sessionUUID})
 	if err != nil {
 		t.Fatalf("MeasureUncompactedMessagesBySession: %v", err)
 	}
@@ -224,10 +224,10 @@ VALUES
 
 	if _, err := tx.Exec(ctx, `
 INSERT INTO bot_session_events (id, bot_id, session_id, event_kind, event_data, external_message_id, received_at_ms) VALUES
-  ($1, $5, $6, 'message', '{"message_id":"covered","received_at_ms":10}', 'covered', 10),
+  ($1, $5, $6, 'message', '{"message_id":"covered","received_at_ms":10,"event_cursor":1}', 'covered', 10),
   ($2, $5, $6, 'message', '{"message_id":"uncovered","received_at_ms":15}', 'uncovered', 15),
-  ($3, $5, $6, 'edit',    '{"message_id":"covered","received_at_ms":30}', 'covered', 30),
-  ($4, $5, $6, 'message', '{"message_id":"covered-stable","received_at_ms":5}', 'covered-stable', 5)
+  ($3, $5, $6, 'edit',    '{"message_id":"covered","received_at_ms":30,"event_cursor":3}', 'covered', 30),
+  ($4, $5, $6, 'message', '{"message_id":"covered-stable","received_at_ms":5,"event_cursor":2}', 'covered-stable', 5)
 `, uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), botID, sessionID); err != nil {
 		t.Fatalf("insert replay events: %v", err)
 	}
@@ -250,5 +250,15 @@ INSERT INTO bot_session_events (id, bot_id, session_id, event_kind, event_data, 
 		if row.CumulativeBytes > 1<<20 || (i > 0 && row.CumulativeBytes < replayRows[i-1].CumulativeBytes) {
 			t.Fatalf("invalid replay byte accounting: %#v", replayRows)
 		}
+	}
+	// An edit committed before compaction started still exceeds the version
+	// that the request rendered. Replay must load its complete event chain.
+	versioned, err := queries.ListSessionEventsBySessionPageBeforeWithinBytes(ctx, sqlc.ListSessionEventsBySessionPageBeforeWithinBytesParams{
+		SessionID: sessionUUID, MaxBytes: 1 << 20, PageSize: 10,
+		CoveredExternalMessages: []byte(`{"covered":40,"covered-stable":40}`),
+		CoveredEventCursors:     []byte(`{"covered":1,"covered-stable":2}`),
+	})
+	if err != nil || len(versioned) != 3 || versioned[0].ReceivedAtMs != 30 || versioned[2].ReceivedAtMs != 10 {
+		t.Fatalf("versioned replay swallowed an unseen edit: rows=%v err=%v", versioned, err)
 	}
 }

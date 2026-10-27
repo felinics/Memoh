@@ -13,14 +13,12 @@ type TriggerModel struct {
 	ChatCompletionsCompat string
 	PromptCacheTTL        string
 	WindowTokens          int // summarizer model's declared context window
+	MaxOutputTokens       int // summarizer model's declared output cap, zero when unknown
 }
 
-// NewTriggerConfig derives both window budgets from a resolved summarizer:
-// candidate selection is capped at 85% of the window so the prompt keeps
-// headroom for the system prompt and provider framing on top of the summary
-// output reserve.
+// NewTriggerConfig carries a resolved summarizer into the engine.
 func NewTriggerConfig(model TriggerModel) TriggerConfig {
-	cfg := TriggerConfig{
+	return TriggerConfig{
 		ModelID:               model.Slug,
 		ModelRecordID:         model.RecordID,
 		ClientType:            model.ClientType,
@@ -30,9 +28,6 @@ func NewTriggerConfig(model TriggerModel) TriggerConfig {
 		ChatCompletionsCompat: model.ChatCompletionsCompat,
 		PromptCacheTTL:        model.PromptCacheTTL,
 		SummaryWindowTokens:   model.WindowTokens,
+		MaxOutputTokens:       model.MaxOutputTokens,
 	}
-	if model.WindowTokens > 0 {
-		cfg.MaxCompactTokens = model.WindowTokens * 85 / 100
-	}
-	return cfg
 }

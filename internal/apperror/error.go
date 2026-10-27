@@ -37,7 +37,7 @@ const (
 	CodeChannelBindingRequired                   Code = "channel.binding_required"
 	CodeNetworkProviderNotConfigured             Code = "network.provider_not_configured"
 	CodeUserCannotRemoveSelf                     Code = "user.cannot_remove_self"
-	CodeCompactionModelUnavailable               Code = "compaction.model_unavailable"
+	CodeCompactionModelUnavailable               Code = "compaction.model_unavailable" // Deprecated: no longer returned; kept because it was published.
 	CodeSettingsReasoningEffortInvalid           Code = "settings.reasoning_effort_invalid"
 	CodeSettingsReasoningUnavailable             Code = "settings.reasoning_options_unavailable"
 	CodeContextBudgetUnsatisfied                 Code = "context.budget_unsatisfied"
@@ -67,6 +67,9 @@ const (
 	CodeProviderTemplateDomainMismatch           Code = "provider_template.domain_mismatch"
 	CodeProviderTemplateOperationFailed          Code = "provider_template.operation_failed"
 	CodeProviderNameTaken                        Code = "provider.name_taken"
+	CodeProviderCatalogUnavailable               Code = "provider.catalog_unavailable"
+	CodeProviderCatalogSourceNotFound            Code = "provider.catalog_source_not_found"
+	CodeProviderManagedReadonly                  Code = "provider.managed_readonly"
 	CodeProviderTemplateRequestInvalid           Code = "provider_template.request_invalid"
 	CodeSearchProviderTypeConflict               Code = "search_provider.type_conflict"
 	CodeSearchProviderInvalidProvider            Code = "search_provider.invalid_provider"
@@ -579,11 +582,11 @@ var catalog = map[Code]Definition{
 	},
 	CodeContextBudgetUnsatisfied: {
 		HTTPStatus: http.StatusUnprocessableEntity,
-		Detail:     "The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window.",
+		Detail:     "This request does not fit the model context window, so the run stopped. Try again, shorten the request, start a new conversation, or switch to a model with a larger context window.",
 	},
 	CodeContextProtectedOverflow: {
 		HTTPStatus: http.StatusUnprocessableEntity,
-		Detail:     "Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window.",
+		Detail:     "Required context exceeds the model context budget. Shorten the request, or switch to a model with a larger context window.",
 	},
 	CodeMediaReferenceUnavailable: {HTTPStatus: http.StatusUnprocessableEntity, Detail: "This file could not be shared. Ask the agent to recreate or share it again."},
 	CodeWorkspaceUnreachable: {
@@ -699,6 +702,9 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusConflict,
 		Detail:     "This provider name is already taken.",
 	},
+	CodeProviderCatalogUnavailable:    {HTTPStatus: http.StatusServiceUnavailable, Detail: "The model catalog is unavailable. Try again later or import from the provider endpoint."},
+	CodeProviderCatalogSourceNotFound: {HTTPStatus: http.StatusNotFound, Detail: "This provider has no public model catalog. Import from its endpoint instead."},
+	CodeProviderManagedReadonly:       {HTTPStatus: http.StatusForbidden, Detail: "This provider is managed by the platform. Use its managed catalog sync."},
 	CodeProviderTemplateRequestInvalid: {
 		HTTPStatus: http.StatusBadRequest,
 		Detail:     "The provider template request is invalid.",
@@ -1160,13 +1166,12 @@ var catalog = map[Code]Definition{
 		Detail:     "The model provider rate limit was reached. Please wait a moment before sending again.",
 		Fault:      FaultDependency,
 	},
-	// A provider's rejected key or exhausted quota answers 502: a 401 would
-	// sign the Web client out, and RFC 9110 reserves 402.
 	CodeAgentProviderQuotaExhausted: {
-		HTTPStatus: http.StatusBadGateway,
+		HTTPStatus: http.StatusPaymentRequired,
 		Detail:     "The model provider account has no remaining balance or quota.",
 		Fault:      FaultDependency,
 	},
+	// A provider's rejected key answers 502: a 401 would sign the Web client out.
 	CodeAgentProviderAuthFailed: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The model provider rejected the credentials. Check the provider API key.",

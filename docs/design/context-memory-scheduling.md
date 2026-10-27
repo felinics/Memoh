@@ -153,13 +153,13 @@ so compaction persistently triggers later than budget pressure implies.
 
 ### 3.5 Existing configuration surface (for reference)
 
-- Compaction is **per-bot, in Postgres**, not TOML: `compaction_enabled`,
-  `compaction_threshold` (DB default 0 since migration `0123`),
-  `compaction_target_percent`, `compaction_model_id`
-  (`internal/settings/types.go`). Derived thresholds are hardcoded constants
-  (soft 50% / hard 75% / target 40%, `service_compaction.go`).
+- Compaction has no settings. A run compacts only when its request does not
+  fit, with the model the run resolved. The former per-bot
+  `compaction_enabled` / `compaction_threshold` / `compaction_target_percent` /
+  `compaction_model_id` columns, the derived soft/hard/target thresholds, and
+  `[agent] sync_compaction` were removed (CM-CMP-001/003).
 - `[agent]` TOML: `tool_output_max_bytes`, `tool_output_max_lines`,
-  `system_files_max_bytes`, `context_loop_reselect` (`internal/config/config.go`).
+  `system_files_max_bytes` (`internal/config/config.go`).
   There is **no server-side context-size or admission knob today**.
 - `[session_runtime]` TOML: `state_ttl` (default 24 h) is the only retention bound on
   session snapshots, and it never evicts active runs.
@@ -191,24 +191,36 @@ full payloads in order to measure them. Coarse SQL aggregates are an acceptable
 admission source ahead of the per-fragment persisted costs required by CM-REP-002;
 that coarse measurement infrastructure is part of PR 1, not PR 4 (see §7).
 
-### CM-ADM-002: Deterministic over-budget trimming
+### CM-ADM-002: Over-budget context is compacted, never trimmed
 
-When the raw context exceeds the admission budget, the system MUST deterministically
-retain, in priority order: system fragments, the current triggering message(s), the
-active compaction artifact summary, and the most recent history window that fits.
-Older history MUST be dropped with recorded drop reasons (the existing
-`SelectionDecision` / audit-ledger vocabulary).
+When the context a request needs exceeds the admission budget, the system MUST NOT
+drop history, current input, or summaries to make it fit. It compacts once
+(CM-CMP-001) and rechecks:
 
-If even the protected set does not fit, the turn MUST fail closed with a stable,
-user-visible `context_too_large` error code (standard error-code conventions), not an
-unbounded provider call and not a silent partial send.
+- If even the protected set — system fragments and the current triggering input —
+  does not fit, the run MUST fail with the stable `context.protected_overflow` code.
+- If the compaction fails, does not reduce the context, or leaves it still too
+  large, the run MUST fail with the stable `context.budget_unsatisfied` code.
 
-### CM-ADM-003: Degradations must shrink, never grow
+Both failures are bounded: no provider call, no partial send, and the triggering
+input stays unconsumed. Inside a run the same holds for every step request: a tool
+result is bounded once, when the tool returns, and no later request prunes, stubs,
+or drops it. Input that composition cannot carry (Channel admission
+records it as omitted) MUST be compacted by that request, or the run fails; it is
+never silently skipped. Bounded reads (CM-ADM-001) still limit what a request loads,
+but a compaction reads every uncompacted row inside the request's time window, loaded
+or not: rows that slid out of a byte-bounded view while turns failed are folded,
+never skipped. Only history older than both the loaded view and the time window is
+outside that request.
 
-When the compaction-artifact frontier cannot be loaded, the system MUST NOT silently
-recompose the full uncompacted history. It MUST either fail the turn with a stable
-retryable error or degrade **downward** into CM-ADM-002 trimming. This applies to
-`loadArtifacts` (Discuss) and `loadTimelineArtifacts` (pipeline chat) alike.
+### CM-ADM-003: A missing source fails the request
+
+When a source the request needs cannot be loaded — the compaction-artifact frontier
+or the persisted turn history — the system MUST fail the request with a stable
+retryable error and leave its input unconsumed. It MUST NOT silently recompose the
+full uncompacted history, and it MUST NOT continue with a smaller context that leaves
+the missing content out. This applies to Discuss (`loadArtifacts`, the history
+reader) and pipeline chat (`loadTimelineArtifacts`, `loadTurnResponses`) alike.
 
 ### CM-EST-001: Single estimation authority
 
@@ -217,35 +229,83 @@ composition estimates, compaction triggers, and budget enforcement. Two subsyste
 MUST NOT disagree about the size of the same content. Divergent callers
 (`charsPerToken = 2` vs `len/4`) MUST converge on the shared estimator.
 
-### CM-CMP-001: Synchronous pre-turn compaction backstop
+### CM-CMP-001: Synchronous compaction when a request does not fit
 
-On every provider-bound path, when compactable pressure meets the hard threshold, the
-system MUST run compaction synchronously **before** the model call: compact → reload
-artifacts → recompose → re-run CM-ADM-001/002 → then call the provider. The existing
-single-flight / epoch / cooldown semantics of `runCompactionSync` apply.
+On every provider-bound path, when the request does not fit its budget, the run MUST
+compact synchronously before the model call: compact → reload artifacts → rebuild →
+recheck (CM-ADM-001/002) → call the provider. Durable native runs also reach this
+point after a committed tool batch and before the next provider call, where the event
+splices the run's own request instead of rebuilding it. This is a trigger point, not a
+run-scoped candidate boundary: the event can fold the rendered active summary,
+pre-run history, and earlier committed steps of the current run. Compaction is one
+event per pending request:
 
-Compaction success, failure, cooldown, and no-op MUST all still pass through
-CM-ADM-001/002 — compaction is an optimization ahead of the hard boundary, never a
-substitute for it.
+- The event folds everything the request does not keep raw into one rolling summary.
+  It does not stop once the request would fit, and it does not aim at a fixed target,
+  ratio, or watermark.
+- The summarizer is the model the run resolved. Its output limit comes from that
+  model's capability and the room the request leaves, and the stated bound prices the
+  summary wrapper and provider envelope. The prompt states the capacity facts — the
+  content being replaced, what stays verbatim, the room available, the summary's
+  upper bound, and the current goal — and the model decides what to keep and how long
+  the summary is. Below the minimum useful summary room, the event fails before a
+  model call.
+- Content is never truncated before the summarizer reads it. When the history to
+  replace does not fit one summarizer call, the event folds the oldest prefix that
+  fits, in as many passes as reading it takes; each pass absorbs the summary before
+  it and commits exact coverage. A single item the summarizer cannot read fails the
+  event.
+- Afterwards the request is only rechecked, never compacted again to reach a lower
+  mark. A Discuss batch gets one recovery; the recomposed attempt only rechecks.
+- The current request and applied steers stay verbatim as anchors, outside summary
+  coverage. The latest tool/reasoning closure stays raw; a decision continuation
+  protects its deferred call and approved/answered result while allowing earlier
+  completed steps to fold. Anchors do not create separate summary segments.
+- In-run candidates come from the request's source identities and rendered message
+  versions. A pass removes a message only if all of its sources are covered.
+  Uncovered messages remain byte-identical. One placement rule inserts the summary
+  after the last retained message inside the covered span, or at the first removed
+  position if there is no retained message inside it. Record and pipeline replay
+  use the same rule, including the original per-source coverage time after rollup.
+- In-run recovery splices the request in memory. It reads rendered active artifacts
+  and selected rows under a byte cap, without reloading raw history or ancestor
+  summary payloads. A legacy artifact without exact coverage fails explicitly in
+  this path. Claim and commit retain ownership fencing and source-hash checks;
+  cancellation prevents a successful publication.
+- The run identity, step limit, loop guard and committed effects survive recovery.
+  Idle detection pauses during compaction; cancellation and execution budgets still
+  apply. Between events, the provider request only appends.
+- On success the summary is committed and the run continues. Summarizer failure or
+  exhausted retries, an empty, truncated, or invalid summary, a summary that does not
+  reduce, a context that still does not fit, a stale snapshot, or a failed commit all
+  end the run with `context.budget_unsatisfied` (CM-ADM-002), or
+  `context.protected_overflow` when what stays raw alone does not fit, with a
+  structured reason. A failed pass never replaces context or advances coverage;
+  passes before it stay committed. Armed runs never fall back to step dropping or
+  512-byte result placeholders.
+- Web, IM, trigger, follow-up, decision continuations, retry, edit and native
+  Discuss are armed through shared native binding when they have durable
+  ownership. Subagents retain their separate capability boundary: their step
+  requests only grow, and a request that does not fit ends with
+  `context.budget_unsatisfied`. External runtimes own their context.
 
-### CM-CMP-002: Recovery entry point for oversized sessions
+### CM-CMP-002: Oversized sessions recover on their next request
 
-There MUST be a way to compact a specific session without triggering a new turn, so an
-operator can recover a session that has already grown past safe size.
+A session that has grown past its budget MUST recover on its next request through
+CM-CMP-001. No separate operator entry point is kept: the `/compact` command and the
+HTTP compaction endpoint were removed with the compaction policy revision.
 
-### CM-CMP-003: Backstop latency must be measured and gated
+### CM-CMP-003: Compaction must be measured
 
-The synchronous backstop adds a full LLM summarization call to turn latency (seconds
-to minutes), and Discuss group conversations are latency-sensitive. Therefore:
-
-- The backstop MUST fire only at the hard threshold; the soft-threshold path stays
-  asynchronous. In steady state (async compaction keeping up), the synchronous path
-  is a rare last resort, not the common case.
-- Backstop runs MUST be measurable in turn-latency terms (count, duration, p50/p95
-  impact on affected turns) — see CM-OBS-001.
-- Rollout MUST be gatable (per-bot setting or server config), with a shadow mode
-  that logs would-have-fired decisions without blocking, so latency impact can be
-  assessed before enforcement is enabled everywhere.
+A synchronous compaction adds summarizer calls to the latency of the run that needs
+it. It fires only when the request does not fit: there are no soft/hard thresholds,
+background compaction, cooldown, mode switches, or shadow mode. Each compaction MUST
+record its outcome, pass count, and duration under stable log keys
+(`compaction finished` / `compaction failed`; `context compacted` for an in-run
+event, which also records the request tokens before and after and the allowance).
+A failed in-run event returns its cause to the run's result-record boundary, and
+`MutationContextSwitch` keeps the trigger, pass count and failure reason in the
+run's context lifecycle — see CM-OBS-001.
 
 ### CM-RPL-001: Bounded replay
 
@@ -331,7 +391,7 @@ per-delta work by the delta size, not the run size.
 The Server MUST run with `GOMEMLIMIT` set (recommended ≈ 85% of the container limit),
 and the shipped compose/deploy configurations MUST set an explicit memory limit for
 the `server` service. Reaching the soft limit must surface as GC pressure and
-degraded admission (CM-ADM-002), not an OOM kill.
+bounded admission (CM-ADM-001/002), not an OOM kill.
 
 ### CM-OBS-001: Observability
 
@@ -339,17 +399,16 @@ The following MUST be observable (metrics and/or structured logs with stable key
 
 - oversized-admission events (count, estimated size, applied action);
 - context size before/after materialization and the provider's final input tokens;
-- synchronous-compaction backstop runs, outcomes (success/failure/cooldown), and
-  per-run duration / turn-latency impact;
+- synchronous compactions: outcome, pass count, and duration;
 - replay event count and bytes; pipeline-cache evictions;
-- `context_too_large` occurrences.
+- `context.protected_overflow` / `context.budget_unsatisfied` occurrences.
 
 ## 5. Target architecture (design layers)
 
 | Layer | Mechanism | Requirements served |
 |---|---|---|
-| L1 Hard boundary | Metadata-based admission check ahead of `trigger.Build` / pipeline composition / ACP prompt build; deterministic trim; `context_too_large` fail-closed | CM-ADM-001/002/003, CM-EST-001 |
-| L2 Pre-turn compaction | Synchronous hard-threshold backstop on Discuss native, Discuss ACP, and pipeline chat; then re-admission via L1; shadow-first gated rollout | CM-CMP-001/002/003 |
+| L1 Hard boundary | Metadata-based admission check ahead of `trigger.Build` / pipeline composition / ACP prompt build; fail closed with `context.protected_overflow` / `context.budget_unsatisfied`, never trim | CM-ADM-001/002/003, CM-EST-001 |
+| L2 Compaction | One synchronous compaction when a request does not fit, on Discuss native, Discuss ACP, and chat; then recheck via L1 | CM-CMP-001/002/003 |
 | L3 Bounded replay & caches | Frontier-first replay, paginated tail loads, incremental IC, render-on-demand, LRU/TTL/bytes-bounded pipeline cache | CM-RPL-001/002, CM-CCH-001 |
 | L4 Representation convergence | `DiscussContextPlan` (refs + measures before selection; single render after), zero-copy `RawContent`, incremental budget accounting, raw-bytes persistence, copy-on-write snapshots | CM-REP-001/002/003/004 |
 | L5 Process scheduling | `GOMEMLIMIT`, container memory limits, admission/compaction/eviction metrics | CM-PRC-001, CM-OBS-001 |
@@ -408,14 +467,16 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
       bounds — the RC pipeline cache and event replay — are
       CM-CCH-001/CM-RPL-001 and land in PR 3; PR 4's persisted per-fragment
       costs refine the measures.
-- [x] Deterministic over-budget trim (artifact summaries + newest message + recent
+- [x] *(Superseded: over-budget context is now compacted or fails, see the
+      compaction policy revision.)* Deterministic over-budget trim (artifact summaries + newest message + recent
       contiguous window, no orphaned tool responses); `context.protected_overflow`
       stable error when even the protected set does not fit — CM-ADM-002. Both
       admission sites (channel-side compose, agent-side re-admission) delegate to
       the single `turn.AdmitContextEntries` core, which also fails closed when the
       newest entry is itself an orphaned tool response instead of silently
       admitting an empty or summaries-only window.
-- [x] `loadArtifacts` / `loadTimelineArtifacts` failure: degrade into the bounded
+- [x] *(Superseded: a load failure now fails the request.)*
+      `loadArtifacts` / `loadTimelineArtifacts` failure: degrade into the bounded
       admission window with a stable `context_admission_degraded` log; never silent
       unbounded recomposition — CM-ADM-003
 - [x] Unify token estimation — CM-EST-001. The authority is `contextfrag`'s
@@ -434,6 +495,9 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
       pipeline paths — CM-OBS-001
 
 ### PR 2 (P0) — Synchronous pre-turn compaction
+
+> Superseded in part by the compaction policy revision below: the thresholds, the
+> shadow gate, the trim fallback, and the manual entry point are gone.
 
 - [x] Discuss backstop before any model call (native and ACP): raw compactable
       pressure ≥ hard threshold → synchronous compaction → the run ends with
@@ -470,6 +534,40 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
       `discussCompactableTokens` over the composed context (artifact summaries
       excluded) in the unified estimator; only `runCompactionSync`'s
       single-flight/epoch/cooldown semantics are reused — CM-CMP-001, CM-EST-001
+
+### Compaction policy revision — supersedes the PR 1 trim and PR 2 backstop
+
+- [x] Compaction runs only when a request does not fit, synchronously inside the
+      run, once per pending request, then rechecks — CM-CMP-001
+- [x] Summarizer is the run's model; output limit from model capability; the
+      prompt states capacity facts and the model decides the length; no target,
+      ratio, 4096 cap, window fractions, or input truncation — CM-CMP-001
+- [x] Every failure ends the run with `context.budget_unsatisfied` and no trim
+      fallback; Discuss admission no longer drops input — CM-ADM-002
+- [x] A frontier or history load failure fails the request instead of degrading —
+      CM-ADM-003
+- [x] Removed background compaction, soft/hard thresholds, cooldown, shadow/off/
+      active modes, the compaction barrier, `/compact`, the HTTP endpoint, and the
+      four per-bot compaction settings — CM-CMP-002/003
+- [x] Compaction logs outcome, passes, and duration — CM-CMP-003, CM-OBS-001
+- [x] Rows inside the time window stay candidates when a byte-bounded view
+      slides past them — CM-ADM-002
+- [x] In-run compaction for durable native tool loops under the same rule — CM-CMP-001
+- [x] Remove the step selector's in-run pruning, dropping, and rescue, and the
+      `context_loop_reselect` rollout switch: a step request only grows, and a
+      tool result is bounded once when produced, at 32 KiB by default
+      (MEMOH-132, MEMOH-133) — CM-ADM-002
+- [x] In-run compaction for Discuss: a native Discuss run writes each step as it
+      commits, folds against the version of each source Channel rendered, keeps
+      the batch inputs in place, and only its answer, never a step before it,
+      proves the batch consumed — CM-CMP-001
+- [x] In-run compaction for retried and edited turns: the attempt folds the
+      history before its cutoff and its own steps, a retry's input follows the
+      copy its first step writes, and a replaced turn's summary is retired by
+      the compaction epoch that step moves — CM-CMP-001
+- [ ] In-run compaction for subagents, which keep their own committer —
+      CM-CMP-001
+- [ ] Candidate view beyond the 24-hour pipeline window — CM-ADM-002
 
 ### PR 3 (P1) — Bounded replay + pipeline cache eviction
 
@@ -513,9 +611,10 @@ ships before — or atomically with — cache eviction, never eviction first
 
 ### PR 5 (P2) — Acceptance tests & benchmarks
 
-- [ ] Compaction disabled + 5,000 events: no OOM; hard boundary engages
-- [ ] Compaction enabled over threshold: synchronous compaction before recomposition;
-      failure/cooldown/no-model → safe trim
+- [ ] 5,000 events: no OOM; bounded reads and the hard boundary engage
+- [ ] Request over budget: one synchronous compaction before the model call;
+      summarizer failure / no reduction / still too large →
+      `context.budget_unsatisfied` with no provider call
 - [ ] `context_window = 0` or grossly mismatched: absolute cap engages
 - [ ] Post-artifact message edits preserved; concurrent new messages during
       compaction do not skew the frontier
@@ -547,7 +646,7 @@ stores) directly — that would prove internal collaboration, not the invariant.
 
 ### 8.2 Package-level tests
 
-Package tests cover: admission arithmetic and trim determinism, estimator
+Package tests cover: admission arithmetic and fail-closed decisions, estimator
 convergence, frontier-first replay, cache eviction, incremental accounting equality
 with full serialization (shadow comparison), and copy-on-write snapshot semantics.
 They complement but never replace black-box acceptance.
@@ -556,12 +655,19 @@ They complement but never replace black-box acceptance.
 
 | Scenario | Setup | Primary assertion | Requirements |
 |---|---|---|---|
-| oversized cold session | 8k messages, 5k events, no artifacts, compaction off | Turn completes with trimmed context or `context_too_large`; provider request ≤ budget; peak RSS bounded | CM-ADM-001/002, CM-PRC-001 |
+| oversized cold session | 8k messages, 5k events, no artifacts | Bounded reads; the run compacts once and answers, or fails with a stable code; provider request ≤ budget; peak RSS bounded | CM-ADM-001/002, CM-PRC-001 |
 | missing context window | model with `context_window = 0` | Absolute cap enforced; no unbounded provider call | CM-ADM-001 |
-| artifact store outage | frontier load fails on long thread | No silent full recomposition; controlled degrade or retryable error | CM-ADM-003 |
-| pre-turn backstop | compaction on, pressure ≥ hard threshold | Compaction runs before the model call; recomposed context in budget | CM-CMP-001 |
-| backstop latency & rollout | backstop behind gate, shadow vs enforced | Shadow logs decisions without blocking; enforced mode's p50/p95 turn-latency impact measured | CM-CMP-003 |
-| backstop unavailable | compaction fails / cooldown / no model | L1 trim engages; turn still bounded | CM-CMP-001, CM-ADM-002 |
+| source outage | frontier or history load fails on long thread | Request fails with a retryable error; no recomposition, no smaller context; input unconsumed | CM-ADM-003 |
+| compaction | request over budget | One compaction before the model call; rebuilt context in budget; no second compaction for the same request | CM-CMP-001 |
+| summary density | histories of different densities | Summary length follows the content; a valid summary within the stated bound continues without another compaction | CM-CMP-001 |
+| compaction failure | summarizer error / no reduction / still too large / unreadable item | `context.budget_unsatisfied`; no provider call; input unconsumed; a committed summary stays, nothing else changes | CM-CMP-001, CM-ADM-002 |
+| compaction latency | request over budget | Outcome, passes, and duration recorded per compaction | CM-CMP-003 |
+| long tool loop | in-run growth past budget, from web, IM, a queued follow-up, a decision continuation, a schedule fire, a retry, an edit, and Discuss | The run folds eligible sources into one rolling summary and continues; requests between events only grow, every tool result reaches the provider as stored, and each effect runs once; the next turn reads the summary back | CM-CMP-001 |
+| full prefix, first step | history before the run fills the request after one step | The run folds that history at the first boundary and continues | CM-CMP-001 |
+| long tool loop, fold cannot help | summarizer unavailable, or kept rows leave no room for a summary | `context.budget_unsatisfied` (or `context.protected_overflow`); committed steps stay, nothing is replayed; the next turn can recover before dispatch | CM-CMP-001, CM-ADM-002 |
+| replaced compacted turn | retry or edit of a turn that compacted in place | The attempt folds the history before the cutoff into a summary of its own; no summary of the current epoch covers a row of the replaced turn | CM-CMP-001 |
+| Discuss run fails after a fold | a message arrives during the run, then the summarizer stops answering; the worker restarts with no durable cursor | The arrival is not covered by the run's summary; committed steps stay once; after the restart one answer carries the failed input and the arrival | CM-CMP-001, CM-ADM-002 |
+| long tool loop outside the set | subagent | No in-run fold; requests only grow, and the first step request that does not fit ends with `context.budget_unsatisfied` without replaying an effect | CM-CMP-001, CM-ADM-002 |
 | ACP long thread | Discuss ACP, oversized history | Prompt built within budget; no unbounded `Query` | CM-ADM-001 |
 | replay at scale | cold start with 5k events | Paginated loads; frontier skips covered payloads; bounded replay memory | CM-RPL-001/002 |
 | cache pressure | many concurrent sessions | Evictions occur; evicted sessions recover via replay; resident bytes bounded | CM-CCH-001 |

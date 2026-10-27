@@ -432,7 +432,6 @@ func (s *Service) collectDependencies(ctx context.Context, botID string, cfg set
 		cfg.ImageModelID,
 		cfg.TtsModelID,
 		cfg.TranscriptionModelID,
-		cfg.CompactionModelID,
 		cfg.MemoryLLMModelID,
 		cfg.DiscussProbeModelID,
 	})

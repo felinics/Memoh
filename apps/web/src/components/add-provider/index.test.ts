@@ -32,6 +32,7 @@ vi.mock('@pinia/colada', async () => {
   return {
     useMutation: () => ({ mutateAsync: vi.fn(), isLoading: ref(false) }),
     useQueryCache: () => ({ invalidateQueries: vi.fn() }),
+    defineQueryOptions: (options: unknown) => options,
   }
 })
 
@@ -140,6 +141,42 @@ describe('add provider dialog', () => {
     apiKeyInput.dispatchEvent(new Event('input', { bubbles: true }))
     await vi.waitFor(() => {
       expect(submit.disabled).toBe(false)
+    })
+
+    app.unmount()
+    root.remove()
+  })
+
+  it('offers sources in place of the templates they replace and fills a picked one', async () => {
+    const AddProvider = (await import('./index.vue')).default
+    const { MODEL_SOURCES } = await import('@/constants/model-sources')
+    const root = document.createElement('div')
+    document.body.append(root)
+    const app = createApp(AddProvider, {
+      open: true,
+      templates: [
+        { id: 'template-openrouter', key: 'openrouter', domain: 'llm', name: 'OpenRouter Template', driver: 'openai-completions' },
+        { id: 'template-gateway', key: 'internal-gateway', domain: 'llm', name: 'Gateway Template', driver: 'openai-completions' },
+      ],
+      sources: MODEL_SOURCES,
+    })
+    app.config.globalProperties.$t = translate
+    app.mount(root)
+    await flushPromises()
+
+    const presetSelect = root.querySelector('select') as HTMLSelectElement
+    const labels = [...presetSelect.options].map(option => option.textContent)
+    expect(labels).toContain('Gateway Template')
+    expect(labels).toContain('OpenAI Codex')
+    expect(labels).not.toContain('OpenRouter Template')
+    expect(labels).toContain('OpenRouter')
+    // The custom entry, then the subscriptions, as in the gallery, then the rest.
+    expect(labels.slice(1, 4)).toEqual(['OpenAI Codex', 'GitHub Copilot', 'OpenCode Go'])
+    presetSelect.value = 'source:openrouter'
+    presetSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    await flushPromises()
+    await vi.waitFor(() => {
+      expect((root.querySelector('#provider-create-base-url') as HTMLInputElement).value).toBe('https://openrouter.ai/api/v1')
     })
 
     app.unmount()

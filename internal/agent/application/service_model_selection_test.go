@@ -106,9 +106,7 @@ func TestSupportsImageInputForModel(t *testing.T) {
 
 	visionModel := models.GetResponse{
 		Model: models.Model{
-			Config: models.ModelConfig{
-				Compatibilities: []string{models.CompatVision},
-			},
+			Config: models.ModelConfig{Modalities: &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityImage}, Output: []models.Modality{models.ModalityText}}},
 		},
 	}
 	if !supportsImageInputForModel(visionModel) {
@@ -128,47 +126,33 @@ func TestResolveReasoningConfig(t *testing.T) {
 	// toggle via the SupportsReasoning/ResolveThinkingMode bridge.
 	toggleModel := models.GetResponse{
 		Model: models.Model{
-			Config: models.ModelConfig{
-				Compatibilities: []string{models.CompatReasoning},
-			},
+			Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Efforts: []string{reasoning.EffortLow, reasoning.EffortMedium, reasoning.EffortHigh}}},
 		},
 	}
 	// Adaptive-capable model (Claude 4.6+ family): user can turn thinking off,
 	// but when enabled it uses adaptive thinking.
 	adaptiveModel := models.GetResponse{
 		Model: models.Model{
-			Config: models.ModelConfig{
-				ThinkingMode:     models.ThinkingModeAdaptive,
-				ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"},
-			},
+			Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Dialect: reasoning.DialectAdaptive, Efforts: []string{"low", "medium", "high", "xhigh", "max"}}},
 		},
 	}
 	codexModel := models.GetResponse{
 		Model: models.Model{
-			Config: models.ModelConfig{
-				ThinkingMode:     models.ThinkingModeToggle,
-				ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"},
-			},
+			Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Efforts: []string{"low", "medium", "high", "xhigh", "max"}}},
 		},
 	}
 	// Advertises no medium, and lists its tiers strongest-first so a fallback that
 	// simply took the head of the list would pick max.
 	noMediumModel := models.GetResponse{
 		Model: models.Model{
-			Config: models.ModelConfig{
-				ThinkingMode:     models.ThinkingModeToggle,
-				ReasoningEfforts: []string{"max", "high", "low", "none"},
-			},
+			Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Toggle: true, Efforts: []string{"max", "high", "low"}}},
 		},
 	}
 
 	// A model that advertises it can be turned off, alongside its active tiers.
 	disablableModel := models.GetResponse{
 		Model: models.Model{
-			Config: models.ModelConfig{
-				ThinkingMode:     models.ThinkingModeToggle,
-				ReasoningEfforts: []string{models.ReasoningEffortDisable, "minimal", "low", "medium", "high"},
-			},
+			Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Toggle: true, Efforts: []string{"minimal", "low", "medium", "high"}}},
 		},
 	}
 	// Legacy Anthropic (<=4.5): toggle mode advertising only the implicit
@@ -176,10 +160,7 @@ func TestResolveReasoningConfig(t *testing.T) {
 	// the SDK sends thinking{type:"enabled", budget_tokens:N}.
 	legacyAnthropicModel := models.GetResponse{
 		Model: models.Model{
-			Config: models.ModelConfig{
-				ThinkingMode:     models.ThinkingModeToggle,
-				ReasoningEfforts: []string{"low", "medium", "high"},
-			},
+			Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Efforts: []string{"low", "medium", "high"}}},
 		},
 	}
 	// Legacy Anthropic that also declares it can be turned off. Being turn-off
@@ -187,10 +168,7 @@ func TestResolveReasoningConfig(t *testing.T) {
 	// must stay on the budget path.
 	disablableLegacyAnthropicModel := models.GetResponse{
 		Model: models.Model{
-			Config: models.ModelConfig{
-				ThinkingMode:     models.ThinkingModeToggle,
-				ReasoningEfforts: []string{models.ReasoningEffortDisable, "low", "medium", "high"},
-			},
+			Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Toggle: true, Efforts: []string{"low", "medium", "high"}}},
 		},
 	}
 	// Cloud-variant Claude 4.6+: the registry left it toggle (no
@@ -200,21 +178,18 @@ func TestResolveReasoningConfig(t *testing.T) {
 	// the tiers do not get to override it.
 	declaredToggleModel := models.GetResponse{
 		Model: models.Model{
-			Config: models.ModelConfig{
-				ThinkingMode:     models.ThinkingModeToggle,
-				ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"},
-			},
+			Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Efforts: []string{"low", "medium", "high", "xhigh", "max"}}},
 		},
 	}
-	// The same tiers with no declared mode, on an id Anthropic documents as
-	// adaptive-only.
+	// The same tiers stored by version 1 with no declared mode, on an id
+	// Anthropic documents as adaptive-only. The upgrade reads the mode from the id.
 	undeclaredClaudeModel := models.GetResponse{
 		Model: models.Model{
 			ModelID: "claude-opus-4-7",
-			Config: models.ModelConfig{
+			Config: models.LegacyModelConfig{
 				Compatibilities:  []string{models.CompatReasoning},
 				ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"},
-			},
+			}.Upgrade(models.ConfigContext{ModelID: "claude-opus-4-7", Type: models.ModelTypeChat}),
 		},
 	}
 	plainModel := models.GetResponse{}
@@ -675,9 +650,7 @@ func TestValidateSelectedChatModelAllowsToolCallingImageOutputModel(t *testing.T
 		Model: models.Model{
 			Type:   models.ModelTypeChat,
 			Enable: true,
-			Config: models.ModelConfig{
-				Compatibilities: []string{models.CompatToolCall, models.CompatImageOutput},
-			},
+			Config: models.ModelConfig{Modalities: &models.ModelModalities{Input: []models.Modality{models.ModalityText}, Output: []models.Modality{models.ModalityText, models.ModalityImage}}, ToolCall: true},
 		},
 	}
 	if err := validateSelectedChatModel(model, sqlc.Provider{}); err != nil {
@@ -693,9 +666,7 @@ func TestValidateSelectedChatModelAllowsGoogleImageOutputModel(t *testing.T) {
 		Model: models.Model{
 			Type:   models.ModelTypeChat,
 			Enable: true,
-			Config: models.ModelConfig{
-				Compatibilities: []string{models.CompatImageOutput},
-			},
+			Config: models.ModelConfig{Modalities: &models.ModelModalities{Input: []models.Modality{models.ModalityText}, Output: []models.Modality{models.ModalityText, models.ModalityImage}}},
 		},
 	}
 	provider := sqlc.Provider{ClientType: string(models.ClientTypeGoogleGenerativeAI)}
@@ -706,12 +677,14 @@ func TestValidateSelectedChatModelAllowsGoogleImageOutputModel(t *testing.T) {
 
 func TestResolveOpenCodeGoReasoningKeepsProviderPolicy(t *testing.T) {
 	for id, effort := range map[string]string{"gpt-6-luna": "max", "gpt-5.6-luna": "max", "glm-5.3": "max", "qwen3.8-flash": "xhigh"} {
-		model := models.GetResponse{Model: models.Model{ModelID: id, Config: models.ModelConfig{
-			ThinkingMode: reasoning.ModeToggle, ReasoningEfforts: []string{"low", "medium", effort},
-		}}}
+		model := models.GetResponse{Model: models.Model{ModelID: id, Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Efforts: []string{"low", "medium", effort}}}}}
 		cfg := resolveReasoningConfig(model, settings.Settings{}, effort, "", string(models.ClientTypeOpenCodeGo))
 		if cfg == nil || cfg.Effort != effort || cfg.Adaptive {
 			t.Fatalf("%s: %+v", id, cfg)
 		}
 	}
+}
+
+func (*modelSelectionFakeQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
 }

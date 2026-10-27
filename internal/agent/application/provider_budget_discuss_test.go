@@ -24,13 +24,13 @@ import (
 
 type discussBudgetCompactor struct {
 	configs []compaction.TriggerConfig
-	status  string
+	passes  int
 	err     error
 	delay   time.Duration
 	started chan struct{}
 }
 
-func (c *discussBudgetCompactor) RunCompactionSync(ctx context.Context, cfg compaction.TriggerConfig) (compaction.Result, error) {
+func (c *discussBudgetCompactor) Compact(ctx context.Context, cfg compaction.TriggerConfig) ([]compaction.Pass, error) {
 	c.configs = append(c.configs, cfg)
 	if c.started != nil {
 		close(c.started)
@@ -39,10 +39,10 @@ func (c *discussBudgetCompactor) RunCompactionSync(ctx context.Context, cfg comp
 		select {
 		case <-time.After(c.delay):
 		case <-ctx.Done():
-			return compaction.Result{}, context.Cause(ctx)
+			return nil, context.Cause(ctx)
 		}
 	}
-	return compaction.Result{Status: c.status}, c.err
+	return make([]compaction.Pass, c.passes), c.err
 }
 
 func TestDiscussProviderBudgetRecoveryDoesNotConsumeModelIdleTimeout(t *testing.T) {
@@ -115,11 +115,11 @@ func discussBudgetRecoveryFixture(t *testing.T) (*Service, *fakeDiscussService, 
 	}}
 	agent := native.New(native.Deps{Logger: logger, ContextViewApplier: contextview.ProviderRunConfigApplier(logger)})
 	service := newDiscussTestService(&fakeRunner{}, agent, resolver)
-	policyService, _ := newControllerPolicyService(t, nil)
+	policyService, _ := newControllerPolicyService(t)
 	service.settingsService = policyService.settingsService
 	service.modelsService = policyService.modelsService
 	service.queries = policyService.queries
-	compactor := &discussBudgetCompactor{status: compaction.StatusOK}
+	compactor := &discussBudgetCompactor{passes: 1}
 	service.compactionService = compactor
 	cmd := lifecycleDiscussCommand()
 	cmd.DiscussMessages = nil
@@ -143,9 +143,6 @@ func TestDiscussProviderBudgetRecoveryRecomposesBeforeProviderDispatch(t *testin
 		published = append(published, event.Type)
 		return nil
 	}
-	if pressure := discussContextPressure(cmd); pressure >= hardCompactionThreshold(16000) {
-		t.Fatalf("fixture pressure %d must stay below the old window-share backstop", pressure)
-	}
 	handle, err := service.StartTurn(context.Background(), cmd)
 	if err != nil {
 		t.Fatal(err)
@@ -160,8 +157,8 @@ func TestDiscussProviderBudgetRecoveryRecomposesBeforeProviderDispatch(t *testin
 	if len(compactor.configs) != 1 {
 		t.Fatalf("compaction calls = %d, want 1 after actual provider-budget rejection; events=%v", len(compactor.configs), kinds)
 	}
-	if cfg := compactor.configs[0]; cfg.TotalInputTokens != 3740 || cfg.TargetTokens != 399 || !cfg.HardPressure || cfg.SessionID != cmd.ThreadID {
-		t.Fatalf("compaction config = %#v, want total pressure=3740, target=399 from history allowance=998 and hard pressure in the same session", cfg)
+	if cfg := compactor.configs[0]; cfg.TotalInputTokens != 3740 || cfg.HistoryBudgetTokens != 998 || cfg.SessionID != cmd.ThreadID {
+		t.Fatalf("compaction config = %#v, want total pressure=3740 compacted whole into history allowance=998 in the same session", cfg)
 	}
 	if len(kinds) != 2 || kinds[0] != turn.DiscussEventRunResolved || kinds[1] != turn.DiscussEventRecompose {
 		t.Fatalf("transport events = %v, want resolved then recompose", kinds)
@@ -200,16 +197,16 @@ func TestDiscussProviderBudgetRecoveryCompactsOlderBatchBehindFittingSuffix(t *t
 	}
 	cfg := compactor.configs[0]
 	protected := map[string]bool{}
-	for _, source := range cfg.ProtectedSources {
+	for _, source := range cfg.Anchors {
 		protected[source.ID] = true
 	}
-	if !protected["m4"] || !protected["m3"] || protected["m1"] || cfg.HistoryBudgetTokens <= 0 || cfg.HistoryBudgetTokens >= 998 {
-		t.Fatalf("protected=%v history_budget=%d; the newest input and its fitting suffix stay raw, older input is compacted, protected cost is counted once", protected, cfg.HistoryBudgetTokens)
+	if !protected["m4"] || !protected["m3"] || protected["m1"] || len(cfg.ProtectedSources) != 0 || cfg.HistoryBudgetTokens <= 0 || cfg.HistoryBudgetTokens >= 998 {
+		t.Fatalf("anchors=%v protected_tail=%v history_budget=%d; retained inputs stay raw at their own positions and their cost is counted once", protected, cfg.ProtectedSources, cfg.HistoryBudgetTokens)
 	}
 }
 
 func TestDiscussProviderBudgetRecoveryKeepsUnresolvedOverflowFailClosed(t *testing.T) {
-	for _, scenario := range []string{"protected hook", "off", "compaction failure", "compaction noop"} {
+	for _, scenario := range []string{"protected hook", "compaction failure", "compaction noop"} {
 		t.Run(scenario, func(t *testing.T) {
 			service, resolver, provider, compactor, cmd := discussBudgetRecoveryFixture(t)
 			wantCompactions := 0
@@ -220,13 +217,11 @@ func TestDiscussProviderBudgetRecoveryKeepsUnresolvedOverflowFailClosed(t *testi
 					Kind: contextfrag.KindHookContext, Slot: contextfrag.SlotAfterHistoryBeforeCurrent,
 					Budget: contextfrag.BudgetPolicy{Overflow: contextfrag.OverflowKeep},
 				})}
-			case "off":
-				service.SetSyncCompactionMode(scenario)
 			case "compaction failure":
 				compactor.err = errors.New("private summarizer failure")
 				wantCompactions = 1
 			case "compaction noop":
-				compactor.status = compaction.StatusNoop
+				compactor.passes = 0
 				wantCompactions = 1
 			}
 			_, lifecycles := configureDiscussLifecycle(service)
@@ -243,13 +238,17 @@ func TestDiscussProviderBudgetRecoveryKeepsUnresolvedOverflowFailClosed(t *testi
 			for err := range handle.Errs() {
 				failures = append(failures, err)
 			}
-			if len(failures) != 1 || apperror.CodeOf(failures[0]) != apperror.CodeContextProtectedOverflow {
-				t.Fatalf("errors = %v, want original protected overflow", failures)
+			wantCode := apperror.CodeContextProtectedOverflow
+			if wantCompactions > 0 {
+				wantCode = apperror.CodeContextBudgetUnsatisfied
+			}
+			if len(failures) != 1 || apperror.CodeOf(failures[0]) != wantCode {
+				t.Fatalf("errors = %v, want %s", failures, wantCode)
 			}
 			if len(compactor.configs) != wantCompactions || provider.callCount() != 0 || resolver.storeCalls != 0 {
 				t.Fatalf("compaction/provider/history calls = %d/%d/%d, want %d/0/0", len(compactor.configs), provider.callCount(), resolver.storeCalls, wantCompactions)
 			}
-			assertDeferredLifecycleRow(t, lifecycles.creates, handle.RunID(), contextLifecycleStatusFailedBudget, string(apperror.CodeContextProtectedOverflow))
+			assertDeferredLifecycleRow(t, lifecycles.creates, handle.RunID(), contextLifecycleStatusFailedBudget, string(wantCode))
 		})
 	}
 }
@@ -272,8 +271,8 @@ func TestDiscussProviderBudgetRecoveryCompactsOrdinaryHistoryBeforeTrimming(t *t
 	if !recomposed || len(compactor.configs) != 1 || provider.callCount() != 0 || resolver.storeCalls != 0 {
 		t.Fatalf("recompose=%t compaction/provider/history=%d/%d/%d, want recovery before trimmed provider dispatch", recomposed, len(compactor.configs), provider.callCount(), resolver.storeCalls)
 	}
-	if cfg := compactor.configs[0]; cfg.TotalInputTokens != 2500 || cfg.TargetTokens != 399 || !cfg.HardPressure {
-		t.Fatalf("ordinary history recovery config = %#v, want raw=2500 target=399 hard pressure", cfg)
+	if cfg := compactor.configs[0]; cfg.TotalInputTokens != 2500 || cfg.HistoryBudgetTokens != 998 {
+		t.Fatalf("ordinary history recovery config = %#v, want raw=2500 compacted whole into 998", cfg)
 	}
 }
 
@@ -340,7 +339,7 @@ func TestDiscussExhaustedRecoveryStillShedsOlderImages(t *testing.T) {
 		t.Run(fmt.Sprintf("exhausted=%v", exhausted), func(t *testing.T) {
 			service, resolver, provider, compactor, cmd := discussBudgetRecoveryFixture(t)
 			configureDiscussLifecycle(service)
-			compactor.status = compaction.StatusNoop
+			compactor.passes = 0
 			resolver.resolveResult.RunConfig.SupportsImageInput = true
 			service.turnHooks.inlineImages = echoDiscussImages
 			cmd.DiscussMessages = []turn.DiscussMessage{
@@ -377,7 +376,7 @@ func TestDiscussExhaustedRecoveryStillShedsOlderImages(t *testing.T) {
 func TestDiscussFailedCompactionRunsOnceAfterShedding(t *testing.T) {
 	service, resolver, _, compactor, cmd := discussBudgetRecoveryFixture(t)
 	configureDiscussLifecycle(service)
-	compactor.status = compaction.StatusNoop
+	compactor.passes = 0
 	resolver.resolveResult.RunConfig.SupportsImageInput = true
 	service.turnHooks.inlineImages = echoDiscussImages
 	last := len(cmd.DiscussMessages) - 1
@@ -392,5 +391,28 @@ func TestDiscussFailedCompactionRunsOnceAfterShedding(t *testing.T) {
 	drainDiscuss(t, h)
 	if len(compactor.configs) != 1 {
 		t.Fatalf("compactions=%d, want one attempt per run", len(compactor.configs))
+	}
+}
+
+func TestDiscussSummariesOverTheModelBudgetAreCompactedInTheRun(t *testing.T) {
+	service, _, provider, compactor, cmd := discussBudgetRecoveryFixture(t)
+	configureDiscussLifecycle(service)
+	for i := range 20 {
+		cmd.DiscussMessages[i].Content = strings.Repeat("s", 4000)
+	}
+	handle, err := service.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recomposed := false
+	for event := range handle.Events() {
+		recomposed = recomposed || event.Kind == turn.DiscussEventRecompose
+	}
+	var failures []error
+	for err := range handle.Errs() {
+		failures = append(failures, err)
+	}
+	if !recomposed || len(failures) != 0 || len(compactor.configs) != 1 || provider.callCount() != 0 {
+		t.Fatalf("recompose=%v errors=%v compactions=%d provider=%d, want the summaries folded once before dispatch", recomposed, failures, len(compactor.configs), provider.callCount())
 	}
 }

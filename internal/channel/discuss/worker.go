@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/logger"
@@ -14,7 +15,7 @@ import (
 
 const discussIdleTimeout = 10 * time.Minute
 
-const maxDiscussRecoveries = 3
+const maxDiscussRecoveries = 1
 
 // errDiscussRunFailed is the cause reported to the processing indicator for
 // a run that ended in failure; the run's own result record names the error.
@@ -80,9 +81,8 @@ func (d *DiscussDriver) handleReply(ctx context.Context, sess *discussSession, r
 }
 
 // loadArtifacts projects the session's active compaction frontier. A load
-// failure is surfaced to the caller so composition degrades into the bounded
-// admission window instead of silently re-materializing the full raw history
-// (CM-ADM-003).
+// failure fails the trigger: composing without the frontier would either
+// re-materialize the raw history or leave what it covers out (CM-ADM-003).
 func (d *DiscussDriver) loadArtifacts(ctx context.Context, cfg DiscussSessionConfig) ([]timeline.CompactionArtifact, error) {
 	if d.artifacts == nil {
 		return nil, nil
@@ -94,7 +94,11 @@ func (d *DiscussDriver) loadArtifacts(ctx context.Context, cfg DiscussSessionCon
 // workers obtain the current service through turnServiceSnapshot.
 func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSession, rc timeline.RenderedContext, log *slog.Logger, turnSvc turn.Service) {
 	cfg := d.sessionConfigSnapshot(sess)
-	trs, historyMeasure := d.history.Load(ctx, cfg.ThreadID)
+	trs, historyMeasure, err := d.history.Load(ctx, cfg.ThreadID)
+	if err != nil {
+		d.failMissingSource(ctx, cfg, log, "history_load_failed", err)
+		return
+	}
 	if historyMeasure.TotalMessages > int64(historyMeasure.Loaded) {
 		log.InfoContext(ctx, "context_admission",
 			slog.String("path", "discuss_history_load"),
@@ -121,11 +125,10 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 	}
 
 	for recoveries := 0; recoveries <= maxDiscussRecoveries; recoveries++ {
-		artifacts, artifactsErr := d.loadArtifacts(ctx, cfg)
-		if artifactsErr != nil {
-			log.WarnContext(ctx, "context_admission_degraded",
-				slog.String("reason", "artifact_load_failed"),
-				slog.Any("error", artifactsErr))
+		artifacts, err := d.loadArtifacts(ctx, cfg)
+		if err != nil {
+			d.failMissingSource(ctx, cfg, log, "artifact_load_failed", err)
+			return
 		}
 		plan, admission, ok := d.trigger.Build(cfg, rc, trs, sess.lastProcessed, artifacts, timeline.ComposeBudget{MaxTokens: d.admissionMaxTokens()})
 		if !ok {
@@ -145,8 +148,7 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 				slog.Int("selected_tokens", admission.SelectedTokens),
 				slog.Int("budget_tokens", d.admissionMaxTokens()),
 				slog.Int("dropped_entries", admission.DroppedEntries),
-				slog.Int("total_entries", admission.TotalEntries),
-				slog.Bool("degraded_artifacts", artifactsErr != nil))
+				slog.Int("total_entries", admission.TotalEntries))
 		}
 		log.InfoContext(ctx, "triggering discuss turn",
 			slog.Int("messages", plan.messageCount),
@@ -187,6 +189,13 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 		}
 		return
 	}
+}
+
+// failMissingSource ends a trigger whose context cannot be loaded, leaving
+// its input unconsumed for the next trigger.
+func (d *DiscussDriver) failMissingSource(ctx context.Context, cfg DiscussSessionConfig, log *slog.Logger, reason string, err error) {
+	log.ErrorContext(ctx, "context_admission_rejected", slog.String("reason", reason), slog.Any("error", err))
+	d.runner.projector.BroadcastFailure(cfg.BotID, apperror.CodeInternal, nil)
 }
 
 // startProcessing shows the processing indicator for one run, only when the

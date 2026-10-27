@@ -3,6 +3,7 @@ package providers
 import (
 	"time"
 
+	"github.com/felinics/memoh/internal/modelcatalog"
 	"github.com/felinics/memoh/internal/models"
 )
 
@@ -148,19 +149,25 @@ type RemoteModel struct {
 	CapabilitiesKnown   bool   `json:"-"`
 }
 
-// ImportModelsRequest carries caller-supplied capability defaults for chat
-// models whose provider cannot describe them. Templates and trusted discovery
-// remain authoritative.
+// ImportModelsRequest carries explicit defaults for unknown chat models listed
+// by the provider endpoint.
 type ImportModelsRequest struct {
 	DefaultCompatibilities []string `json:"default_compatibilities,omitempty"`
 }
 
+// ImportCatalogModelsRequest selects the stored provider's server-side public
+// catalog. A distinct endpoint prevents older servers treating it as discovery.
+type ImportCatalogModelsRequest struct {
+	SkipModelIDs []string `json:"skip_model_ids,omitempty"`
+}
+
 // ImportModelsResponse represents the response for importing models.
 type ImportModelsResponse struct {
-	Created int      `json:"created"`
-	Updated int      `json:"updated"`
-	Skipped int      `json:"skipped"`
-	Models  []string `json:"models"`
+	Catalog *modelcatalog.Info `json:"catalog,omitempty"`
+	Created int                `json:"created"`
+	Updated int                `json:"updated"`
+	Skipped int                `json:"skipped"`
+	Models  []string           `json:"models"`
 }
 
 // IsManagedModelCatalogClientType reports whether model rows are reconciled

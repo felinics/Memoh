@@ -145,6 +145,14 @@ func (h *externalAgentActivePromptHub) close() {
 	}
 }
 
+// sessionTurnKey names the per-session scope of the ACP prompt hubs. It is
+// deliberately not an admission gate — single-session execution is enforced
+// durably by the session runtime, which is the only thing that can answer for
+// owners in other processes.
+func sessionTurnKey(botID, sessionID string) string {
+	return strings.TrimSpace(botID) + ":" + strings.TrimSpace(sessionID)
+}
+
 func (s *Service) registerExternalAgentActivePrompt(botID, sessionID string) *externalAgentActivePromptHub {
 	botID = strings.TrimSpace(botID)
 	sessionID = strings.TrimSpace(sessionID)

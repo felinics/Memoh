@@ -101,7 +101,7 @@ func TestRemoveMemberRefusesSelf(t *testing.T) {
 }
 
 func TestSettingsModelRefNamesItsField(t *testing.T) {
-	for _, field := range []string{"chat_model_id", "compaction_model_id", "memory_llm_model_id", "image_model_id"} {
+	for _, field := range []string{"chat_model_id", "memory_llm_model_id", "image_model_id"} {
 		t.Run(field, func(t *testing.T) {
 			err := fmt.Errorf("update: %w", &settings.InvalidModelRefError{Field: field, Err: fmt.Errorf("%w: model not found: x", settings.ErrInvalidModelRef)})
 			requireFieldError(t, settingsModelRefHTTPError(err), apperror.CodeRequestFieldInvalid, field)

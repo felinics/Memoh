@@ -102,13 +102,9 @@ import {
   toast,
 } from '@felinic/ui'
 import { CircleX } from 'lucide-vue-next'
-import {
-  getProviders,
-  getProviderTemplates,
-  postProviders,
-  postProvidersByIdImportModels,
-  postProvidersFromTemplate,
-} from '@memohai/sdk'
+import { getProviders, postProviders } from '@memohai/sdk'
+import { findModelSource, modelSourceLogo, providerSourceMetadata, TEMPLATE_SOURCES } from '@/constants/model-sources'
+import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
 import {
   maskApiKey,
   parseProviderConnectPayload,
@@ -121,6 +117,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 const router = useRouter()
 const { t } = useI18n()
 const queryCache = useQueryCache()
+const { importProviderModels, syncProviderModelCatalog } = useProviderModelCatalog()
 
 const payload = ref<ProviderConnectPayload>()
 const errorReason = ref<ProviderConnectError>()
@@ -171,40 +168,34 @@ async function confirm() {
   try {
     const config = { base_url: p.baseUrl, api_key: p.apiKey }
 
-    // A matching registry template supplies the icon and default config;
+    // A matching gallery entry supplies the icon and its models.dev source;
     // anything else lands as a plain custom provider with the given API format.
-    // Payload's `template` is the registry key (e.g. `newapi`); the create API
-    // wants the template's UUID. Templates fix the client type to their driver,
-    // so a template whose driver disagrees with the payload's client_type is no
-    // match at all — honor client_type and fall back to custom creation.
-    let templateId: string | undefined
-    if (p.template) {
-      const { data: templates } = await getProviderTemplates({
-        query: { domain: 'llm' },
-        throwOnError: true,
-      })
-      const wanted = p.template.toLowerCase()
-      const hit = (templates ?? []).find(tpl =>
-        (tpl.key?.toLowerCase() === wanted || tpl.id === p.template)
-        && (tpl.driver ?? 'openai-completions') === p.clientType)
-      templateId = hit?.id
-    }
+    // Payload's `template` is the former template key (e.g. `newapi`) or an
+    // entry id. An entry whose client type disagrees with the payload's is no
+    // match at all — honor client_type and create a custom provider.
+    const wanted = p.template?.toLowerCase()
+    const candidate = wanted ? findModelSource(TEMPLATE_SOURCES[wanted] ?? wanted) : undefined
+    const entry = candidate?.client_type === p.clientType ? candidate : undefined
 
-    const created = templateId
-      ? (await postProvidersFromTemplate({
-          body: { template_id: templateId, domain: 'llm', name: p.name, config },
-          throwOnError: true,
-        })).data
-      : (await postProviders({
-          body: { name: p.name, client_type: p.clientType, config },
-          throwOnError: true,
-        })).data
+    const created = (await postProviders({
+      body: {
+        name: p.name,
+        client_type: p.clientType,
+        config,
+        ...(entry && { metadata: providerSourceMetadata(entry), icon: modelSourceLogo(entry) }),
+      },
+      throwOnError: true,
+    })).data
 
     if (!created?.id) throw new Error('provider creation returned no id')
 
     // Best-effort: the model list can always be refreshed from the detail page.
+    // A gallery entry imports as the gallery does. An unknown endpoint lists its
+    // models as they are, without the protocol's capability guesses, since the
+    // link says nothing about what they can do.
     try {
-      await postProvidersByIdImportModels({ path: { id: created.id }, throwOnError: true })
+      if (entry) await importProviderModels(created)
+      else await syncProviderModelCatalog(created.id)
     } catch {
       toast.error(t('models.importFailed'))
     }
@@ -230,11 +221,7 @@ async function confirm() {
 
     router.replace({
       name: 'providers',
-      query: {
-        provider: created.provider_template_id
-          ? `template:${created.provider_template_id}`
-          : created.id,
-      },
+      query: { provider: created.id },
     })
   } catch (err) {
     toast.error(resolveApiErrorMessage(err, t('providerConnect.createFailed')))

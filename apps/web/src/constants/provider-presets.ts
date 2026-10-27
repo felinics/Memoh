@@ -17,7 +17,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'OpenCode Go',
     clientType: 'opencode-go',
     baseUrl: 'https://opencode.ai/zen/go/v1',
-    icon: 'opencode-go',
     source: 'opencode-go.yaml',
   },
   {
@@ -25,7 +24,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'OpenAI',
     clientType: 'openai-responses',
     baseUrl: 'https://api.openai.com/v1',
-    icon: 'openai',
     source: 'openai.yaml',
   },
   {
@@ -33,7 +31,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'Anthropic',
     clientType: 'anthropic-messages',
     baseUrl: 'https://api.anthropic.com',
-    icon: 'anthropic',
     source: 'anthropic.yaml',
   },
   {
@@ -41,7 +38,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'OpenRouter',
     clientType: 'openai-completions',
     baseUrl: 'https://openrouter.ai/api/v1',
-    icon: 'openrouter',
     source: 'openrouter.yaml',
   },
   {
@@ -50,7 +46,6 @@ export const providerPresets: ProviderPreset[] = [
     registryName: '智谱AI / Z.AI / GLM',
     clientType: 'openai-completions',
     baseUrl: 'https://api.z.ai/api/paas/v4',
-    icon: 'zhipu-color',
     source: 'zai.yaml',
   },
   {
@@ -59,7 +54,6 @@ export const providerPresets: ProviderPreset[] = [
     registryName: '智谱AI / BigModel / GLM',
     clientType: 'openai-completions',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    icon: 'zhipu-color',
     source: 'zhipu.yaml',
   },
   {
@@ -67,7 +61,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'Together AI',
     clientType: 'openai-completions',
     baseUrl: 'https://api.together.xyz/v1',
-    icon: 'together-color',
     source: 'together.yaml',
   },
   {
@@ -75,7 +68,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'Fireworks AI',
     clientType: 'openai-completions',
     baseUrl: 'https://api.fireworks.ai/inference/v1',
-    icon: 'fireworks-color',
     source: 'fireworks.yaml',
   },
   {
@@ -83,7 +75,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'Perplexity',
     clientType: 'openai-completions',
     baseUrl: 'https://api.perplexity.ai',
-    icon: 'perplexity-color',
     source: 'perplexity.yaml',
   },
   {
@@ -91,7 +82,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'Cerebras',
     clientType: 'openai-completions',
     baseUrl: 'https://api.cerebras.ai/v1',
-    icon: 'cerebras-color',
     source: 'cerebras.yaml',
   },
   {
@@ -99,7 +89,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'Cloudflare Workers AI',
     clientType: 'openai-completions',
     baseUrl: 'https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1',
-    icon: 'cloudflare',
     source: 'cloudflare.yaml',
   },
   {
@@ -107,7 +96,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'Azure OpenAI',
     clientType: 'openai-completions',
     baseUrl: 'https://<resource>.openai.azure.com/openai/v1',
-    icon: 'azure-color',
     source: 'azure-openai.yaml',
   },
   {
@@ -116,7 +104,6 @@ export const providerPresets: ProviderPreset[] = [
     registryName: 'Google',
     clientType: 'google-generative-ai',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-    icon: 'gemini-color',
     source: 'google.yaml',
   },
   {
@@ -124,7 +111,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'DeepSeek',
     clientType: 'openai-completions',
     baseUrl: 'https://api.deepseek.com/v1',
-    icon: 'deepseek-color',
     source: 'deepseek.yaml',
   },
   {
@@ -132,7 +118,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'Moonshot',
     clientType: 'openai-completions',
     baseUrl: 'https://api.moonshot.cn/v1',
-    icon: 'moonshot',
     source: 'moonshot.yaml',
   },
   {
@@ -141,7 +126,6 @@ export const providerPresets: ProviderPreset[] = [
     registryName: 'Minimax',
     clientType: 'openai-completions',
     baseUrl: 'https://api.minimaxi.com/v1',
-    icon: 'minimax-color',
     source: 'minimax.yaml',
   },
   {
@@ -150,7 +134,6 @@ export const providerPresets: ProviderPreset[] = [
     registryName: 'xAI (Grok)',
     clientType: 'openai-responses',
     baseUrl: 'https://api.x.ai/v1',
-    icon: 'xai',
     source: 'xai.yaml',
   },
   {
@@ -158,7 +141,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'Groq',
     clientType: 'openai-completions',
     baseUrl: 'https://api.groq.com/openai/v1',
-    icon: 'groq',
     source: 'groq.yaml',
   },
   {
@@ -166,7 +148,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'Mistral',
     clientType: 'openai-completions',
     baseUrl: 'https://api.mistral.ai/v1',
-    icon: 'mistral-color',
     source: 'mistral.yaml',
   },
   {
@@ -174,7 +155,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'Aliyun Bailian',
     clientType: 'openai-completions',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    icon: 'qwen-color',
     source: 'qwen.yaml',
   },
   {
@@ -182,7 +162,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'HuggingFace',
     clientType: 'openai-completions',
     baseUrl: 'https://router.huggingface.co/hf-inference/v1',
-    icon: 'huggingface-color',
     source: 'huggingface.yaml',
   },
   {
@@ -190,7 +169,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'Ollama',
     clientType: 'openai-completions',
     baseUrl: 'http://127.0.0.1:11434/v1',
-    icon: 'ollama',
     source: 'ollama.yaml',
     requiresApiKey: false,
   },
@@ -199,7 +177,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'LM Studio',
     clientType: 'openai-completions',
     baseUrl: 'http://127.0.0.1:1234/v1',
-    icon: 'lmstudio',
     source: 'lmstudio.yaml',
     requiresApiKey: false,
   },
@@ -208,7 +185,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'New API',
     clientType: 'openai-completions',
     baseUrl: 'https://your.new-api-provider.com/v1',
-    icon: 'newapi-color',
     source: 'newapi.yaml',
   },
   {
@@ -216,7 +192,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'OpenAI Codex',
     clientType: 'openai-codex',
     baseUrl: 'https://chatgpt.com/backend-api',
-    icon: 'openai',
     source: 'codex.yaml',
     requiresApiKey: false,
   },
@@ -225,7 +200,6 @@ export const providerPresets: ProviderPreset[] = [
     name: 'GitHub Copilot',
     clientType: 'github-copilot',
     baseUrl: '',
-    icon: 'github-copilot',
     source: 'github-copilot.yaml',
     requiresApiKey: false,
   },

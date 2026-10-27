@@ -145,12 +145,20 @@ func (s *EventStore) loadEvents(ctx context.Context, botID, sessionID string, ar
 
 	coverage := coveredExternalMessages(artifacts)
 	coverageJSON := make(map[string]int64, len(coverage))
+	cursorJSON := make(map[string]int64, len(coverage))
 	for messageID, covered := range coverage {
 		coverageJSON[messageID] = covered.coverageAsOfMs
+		if covered.eventCursor > 0 {
+			cursorJSON[messageID] = covered.eventCursor
+		}
 	}
 	encodedCoverage, err := json.Marshal(coverageJSON)
 	if err != nil {
 		return nil, fmt.Errorf("encode replay compaction frontier: %w", err)
+	}
+	encodedCursors, err := json.Marshal(cursorJSON)
+	if err != nil {
+		return nil, fmt.Errorf("encode replay source versions: %w", err)
 	}
 
 	remaining := int64(defaultReplayMaxBytes)
@@ -158,6 +166,7 @@ func (s *EventStore) loadEvents(ctx context.Context, botID, sessionID string, ar
 	params := sqlc.ListSessionEventsBySessionPageBeforeWithinBytesParams{
 		SessionID:               pgSessionID,
 		CoveredExternalMessages: encodedCoverage,
+		CoveredEventCursors:     encodedCursors,
 		MaxBytes:                remaining,
 		PageSize:                defaultReplayPageSize,
 	}

@@ -66,18 +66,12 @@ func TestSelectChatModelSessionMemoryLevel(t *testing.T) {
 func TestResolveReasoningConfigSessionLevel(t *testing.T) {
 	toggleModel := models.GetResponse{
 		Model: models.Model{
-			Config: models.ModelConfig{
-				ThinkingMode:     models.ThinkingModeToggle,
-				ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"},
-			},
+			Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Efforts: []string{"low", "medium", "high", "xhigh", "max"}}},
 		},
 	}
 	disablableModel := models.GetResponse{
 		Model: models.Model{
-			Config: models.ModelConfig{
-				ThinkingMode:     models.ThinkingModeToggle,
-				ReasoningEfforts: []string{models.ReasoningEffortDisable, "low", "medium", "high"},
-			},
+			Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Toggle: true, Efforts: []string{"low", "medium", "high"}}},
 		},
 	}
 	const clientType = "openai-completions"
@@ -255,7 +249,7 @@ func TestRunReasoningKeepsEffortWithResolvedModel(t *testing.T) {
 		{"omitted model keeps memory", modelA, "", "", "high"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			model := models.GetResponse{ID: tc.resolved, Model: models.Model{Config: models.ModelConfig{ThinkingMode: models.ThinkingModeToggle, ReasoningEfforts: []string{"low", "medium", "high"}}}}
+			model := models.GetResponse{ID: tc.resolved, Model: models.Model{Config: models.ModelConfig{Reasoning: &models.ModelReasoning{Efforts: []string{"low", "medium", "high"}}}}}
 			got := resolveRunReasoningConfig(model, settings.Settings{ChatModelID: modelA, ReasoningEffort: "high"}, baseRunConfigParams{Model: tc.requestedModel, ReasoningEffort: tc.requestedEffort, SessionPrefModelID: modelA, SessionPrefEffort: "high"}, "openai-completions")
 			if got == nil || got.Effort != tc.want {
 				t.Fatalf("reasoning = %+v, want %s", got, tc.want)
