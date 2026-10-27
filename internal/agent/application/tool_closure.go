@@ -76,7 +76,7 @@ func repairToolCallClosures(messages []ModelMessage, reason string) []ModelMessa
 				pending[callID] = pendingToolCall{
 					ID:       callID,
 					ToolName: strings.TrimSpace(call.ToolName),
-					Source:   closureSource(msg.ContextSource),
+					Source:   msg.ContextSource,
 				}
 				pendingOrder = append(pendingOrder, callID)
 			}
@@ -316,18 +316,6 @@ func modelMessageWithParts(original ModelMessage, sdkMsg sdk.Message, parts []sd
 	converted[0].Usage = original.Usage
 	converted[0].ContextSource = original.ContextSource
 	return &converted[0]
-}
-
-// closureSource is the source of a result the read path writes for a call
-// made by a message from source: the same stored message, never a current
-// input.
-func closureSource(source *turn.ContextMessageSource) *turn.ContextMessageSource {
-	if source == nil {
-		return nil
-	}
-	derived := *source
-	derived.Current = false
-	return &derived
 }
 
 func syntheticToolResultMessage(toolCallID, toolName, reason string) ModelMessage {
