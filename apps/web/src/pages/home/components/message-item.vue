@@ -749,6 +749,10 @@ function handleEdit() {
 }
 
 function openEditor(draft: string) {
+  // Edit is picked from the bubble's long-press menu, and the menu unmounts
+  // with the bubble before it reports itself closed — so the open flag would
+  // survive the edit and reopen the menu on the bubble that comes back.
+  bubbleMenuOpen.value = false
   editDraft.value = draft
   isEditingUserMessage.value = true
   void nextTick(() => {
