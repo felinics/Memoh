@@ -72,6 +72,7 @@ export function reduceDesktopUpdateState(
     case 'installing':
       return { ...state, status: 'installing', error: null }
     case 'checking':
+      if (state.status === 'downloaded') return state
       return {
         ...state,
         status: 'checking',
@@ -79,6 +80,7 @@ export function reduceDesktopUpdateState(
         error: null,
       }
     case 'not-available':
+      if (state.status === 'downloaded') return state
       return {
         ...state,
         status: 'up-to-date',
@@ -88,6 +90,7 @@ export function reduceDesktopUpdateState(
         releaseNotes: null,
       }
     case 'available':
+      if (state.status === 'downloaded' && state.latestVersion === event.latestVersion) return state
       return {
         ...state,
         status: 'downloading',

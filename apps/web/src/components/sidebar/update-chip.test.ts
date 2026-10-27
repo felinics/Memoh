@@ -74,6 +74,20 @@ it('keeps a newer update event when the initial snapshot arrives late', async ()
   expect(stop).toHaveBeenCalledOnce()
 })
 
+it('keeps the restart label visible without hover', async () => {
+  mock.arm()
+  mock.setStatus('downloaded')
+  await mount()
+  const button = root.querySelector('button')!
+  expect(button.textContent).toContain('sidebar.updateChip.restart')
+  expect(button.querySelector('.grid')!.className).toContain('grid-cols-[1fr]')
+  expect(button.querySelector('.absolute')).toBeNull()
+
+  mock.setStatus('error')
+  await flush()
+  expect(root.querySelector('button .grid')!.className).toContain('grid-cols-[0fr]')
+})
+
 it('locks restart immediately and renders errors without the brand fill', async () => {
   mock.arm()
   mock.setStatus('downloaded')

@@ -30,7 +30,7 @@ import { maybePromptAppleSiliconBuild } from './arch-check'
 import { DesktopRemoteRuntimeManager } from './remote-runtime'
 import { isTrustedRendererUrl } from './renderer-trust'
 import { normalizeExternalUrl, resolveNavigationGuardAction } from './external-links'
-import { registerDesktopUpdates, installDesktopUpdateOnQuit, recoverDesktopUpdate } from './updates'
+import { registerDesktopUpdates, installDesktopUpdate, installDesktopUpdateOnQuit, recoverDesktopUpdate } from './updates'
 import {
   normalizeBaseUrl,
   normalizeServerInput,
@@ -74,6 +74,7 @@ type TraySettingsItem = {
 let chatWindow: BrowserWindow | null = null
 let menuShortcuts: ReturnType<typeof attachMenuShortcutOwnership> | null = null
 let appTray: Tray | null = null
+let trayUpdateVersion: string | null = null
 let isQuitting = false
 let windowStatesCache: StoredWindowStates | null = null
 let sessionBaseUrlOverride = ''
@@ -407,12 +408,20 @@ function buildTrayMenu(bots: TrayBot[] = []): Electron.Menu {
         click: () => openBotWorkspace(bot.id),
       }))
     : [{ label: 'No Bots', enabled: false }]
+  const updateItems: MenuItemConstructorOptions[] = trayUpdateVersion === null ? [] : [
+    {
+      label: `Restart to update${trayUpdateVersion ? ` to ${trayUpdateVersion}` : ''}`,
+      click: () => { void installDesktopUpdate() },
+    },
+    { type: 'separator' },
+  ]
 
   return Menu.buildFromTemplate([
     {
       label: `Show ${DESKTOP_PRODUCT_NAME}`,
       click: revealChatWindow,
     },
+    ...updateItems,
     { type: 'separator' },
     {
       label: 'Bots',
@@ -798,6 +807,12 @@ app.whenReady().then(async () => {
   })
   registerDesktopUpdates({
     assertTrustedRenderer,
+    onStateChanged: (state) => {
+      const version = state.status === 'downloaded' ? (state.latestVersion ?? '') : null
+      if (version === trayUpdateVersion) return
+      trayUpdateVersion = version
+      setTrayMenu()
+    },
     installFailed: () => {
       isQuitting = false
       quitCleanupFinished = false

@@ -13,17 +13,24 @@ import {
 } from '../shared/updates'
 
 const UPDATE_FEED_BASE_URL = (process.env.MEMOH_DESKTOP_UPDATE_BASE_URL ?? '').trim()
-// The app is tray-resident and can run for weeks without a quit, so a
-// startup-only check would leave the update chip dark indefinitely. Re-check
-// on a slow interval; checkForUpdate() already no-ops while busy/downloaded.
-const PERIODIC_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+// The app is tray-resident and can run for weeks without a quit. Restart always
+// installs the cached download without a last-moment check, so a release newer
+// than the last check is only picked up on the following launch. A check fetches
+// only the small feed manifest, so a short interval keeps that window small cheaply.
+// Failures retry separately so one outage does not disable updates.
+const PERIODIC_CHECK_INTERVAL_MS = 60 * 60 * 1000
+const RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000]
+const DOWNLOAD_STALL_TIMEOUT_MS = 2 * 60_000
 const { autoUpdater } = electronUpdater
+type UpdateCheckResult = NonNullable<Awaited<ReturnType<typeof autoUpdater.checkForUpdates>>>
+type DownloadCancellationToken = NonNullable<UpdateCheckResult['cancellationToken']>
 
 export interface DesktopUpdatesOptions {
   assertTrustedRenderer(event: IpcMainInvokeEvent): void
   prepareToInstall(): Promise<void>
   markQuitting(): void
   installFailed(): void
+  onStateChanged(state: DesktopUpdateState): void
 }
 
 interface SavedUpdates {
@@ -36,7 +43,13 @@ let updateOptions: DesktopUpdatesOptions
 let updateState = createInitialDesktopUpdateState(app.getVersion(), Boolean(UPDATE_FEED_BASE_URL))
 let updaterConfigured = false
 let updaterListenersRegistered = false
-let startupCheckScheduled = false
+let checkTimer: ReturnType<typeof setTimeout> | null = null
+let downloadStallTimer: ReturnType<typeof setTimeout> | null = null
+let downloadCancellationToken: DownloadCancellationToken | null = null
+let downloadCompletionSequence = 0
+let installRecoveryRequired = false
+let consecutiveFailures = 0
+let handledFailure: unknown = null
 
 export function registerDesktopUpdates(options: DesktopUpdatesOptions): void {
   updateOptions = options
@@ -73,30 +86,33 @@ export function registerDesktopUpdates(options: DesktopUpdatesOptions): void {
     persist({ ...saved, autoUpdate: enabled })
     setUpdateState({ type: 'preference', autoUpdate: enabled })
     if (enabled) void checkForUpdate()
+    else cancelScheduledCheck()
     return updateState
   })
   ipcMain.handle('desktop:updates:install', async (event) => {
     options.assertTrustedRenderer(event)
-    return installUpdate(options)
+    return installDesktopUpdate()
   })
 
-  scheduleStartupUpdateCheck()
-  schedulePeriodicUpdateCheck()
+  scheduleCheck(3_000)
 }
 
 function getUpdateState(): DesktopUpdateState {
   return updateState
 }
 
-async function checkForUpdate(): Promise<DesktopUpdateState> {
+async function checkForUpdate(automatic = false): Promise<DesktopUpdateState> {
+  if (automatic && installRecoveryRequired) return updateState
   if (!UPDATE_FEED_BASE_URL) {
     return setUpdateState({
       type: 'unavailable',
       error: 'No update feed URL is configured.',
     })
   }
-  if (['checking', 'downloading', 'downloaded', 'installing'].includes(updateState.status)) return updateState
+  if (['checking', 'downloading', 'installing'].includes(updateState.status)) return updateState
 
+  installRecoveryRequired = false
+  cancelScheduledCheck()
   configureAutoUpdater()
   if (!autoUpdater.isUpdaterActive()) {
     return setUpdateState({
@@ -105,8 +121,10 @@ async function checkForUpdate(): Promise<DesktopUpdateState> {
     })
   }
 
+  handledFailure = null
   setUpdateState({ type: 'checking' })
   try {
+    const completionAtStart = downloadCompletionSequence
     const result = await autoUpdater.checkForUpdates()
     if (!result) {
       return setUpdateState({
@@ -114,8 +132,16 @@ async function checkForUpdate(): Promise<DesktopUpdateState> {
         error: 'Updater is not available for this build.',
       })
     }
-    // Metadata and download have separate promises; consume download rejection too.
-    void result.downloadPromise?.catch(error => setUpdateState({ type: 'error', error }))
+    if (result.downloadPromise) {
+      const token = result.cancellationToken
+      // A cached download may finish before checkForUpdates() resumes. Do not
+      // arm a stall timer for work that has already emitted `update-downloaded`.
+      if (token && downloadCompletionSequence === completionAtStart) armDownloadWatchdog(token)
+      void result.downloadPromise.then(
+        () => clearDownloadWatchdog(token),
+        failDownload,
+      )
+    }
     if (updateState.status === 'checking') {
       setUpdateState(
         result.isUpdateAvailable
@@ -123,10 +149,75 @@ async function checkForUpdate(): Promise<DesktopUpdateState> {
           : { type: 'not-available', latestVersion: result.updateInfo.version },
       )
     }
+    if (!result.isUpdateAvailable) markUpdateSucceeded()
   } catch (error) {
-    setUpdateState({ type: 'error', error })
+    failUpdate(error)
   }
   return updateState
+}
+
+function markUpdateSucceeded(): void {
+  consecutiveFailures = 0
+  handledFailure = null
+  scheduleCheck(PERIODIC_CHECK_INTERVAL_MS)
+}
+
+function failUpdate(error: unknown): void {
+  clearDownloadWatchdog()
+  if (handledFailure === error || (updateState.status === 'error' && checkTimer)) return
+  handledFailure = error
+  // A feed error must not hide an already usable download. New-version download
+  // failures are no longer in `downloaded`, so they remain visible and actionable.
+  if (updateState.status !== 'downloaded') setUpdateState({ type: 'error', error })
+  const delay = RETRY_DELAYS_MS[Math.min(consecutiveFailures, RETRY_DELAYS_MS.length - 1)]
+  consecutiveFailures += 1
+  scheduleCheck(delay)
+}
+
+function failDownload(error: unknown): void {
+  clearDownloadWatchdog()
+  // electron-updater clears its pending cache when a replacement download fails.
+  // Do not carry a stale manifest into the next launch's offline recovery.
+  if (saved.pending) {
+    try {
+      persist({ ...saved, pending: null })
+    } catch (persistError) {
+      failUpdate(persistError)
+      return
+    }
+  }
+  failUpdate(error)
+}
+
+function armDownloadWatchdog(token: DownloadCancellationToken): void {
+  clearDownloadWatchdog()
+  downloadCancellationToken = token
+  downloadStallTimer = setTimeout(() => {
+    const error = new Error('Update download stopped making progress. Retry will follow automatically.')
+    token.cancel()
+    failDownload(error)
+  }, DOWNLOAD_STALL_TIMEOUT_MS)
+}
+
+function clearDownloadWatchdog(token?: DownloadCancellationToken): void {
+  if (token && downloadCancellationToken !== token) return
+  if (downloadStallTimer) clearTimeout(downloadStallTimer)
+  downloadStallTimer = null
+  downloadCancellationToken = null
+}
+
+function scheduleCheck(delay: number): void {
+  cancelScheduledCheck()
+  if (!UPDATE_FEED_BASE_URL || !saved.autoUpdate || updateState.status === 'installing' || installRecoveryRequired) return
+  checkTimer = setTimeout(() => {
+    checkTimer = null
+    void checkForUpdate(true)
+  }, delay)
+}
+
+function cancelScheduledCheck(): void {
+  if (checkTimer) clearTimeout(checkTimer)
+  checkTimer = null
 }
 
 function settingsPath(): string {
@@ -141,12 +232,20 @@ function persist(next: SavedUpdates): void {
 }
 
 function failInstall(error: unknown): void {
+  installRecoveryRequired = true
+  cancelScheduledCheck()
+  clearDownloadWatchdog()
   updateOptions.installFailed()
   setUpdateState({ type: 'error', error })
 }
 
+export async function installDesktopUpdate(): Promise<DesktopUpdateState> {
+  return installUpdate(updateOptions)
+}
+
 async function installUpdate(options: DesktopUpdatesOptions, restart = true): Promise<DesktopUpdateState> {
   if (updateState.status !== 'downloaded') return updateState
+  cancelScheduledCheck()
   setUpdateState({ type: 'installing' }) // Lock before the first await, including IPC double-clicks.
   try {
     persist({ ...saved, attemptedVersion: updateState.latestVersion })
@@ -186,6 +285,8 @@ export async function recoverDesktopUpdate(): Promise<boolean> {
       return false
     }
     if (saved.attemptedVersion === saved.pending.version) {
+      installRecoveryRequired = true
+      cancelScheduledCheck()
       setUpdateState({ type: 'error', error: 'The previous update was not applied. Retry from About.' })
       return false
     }
@@ -216,10 +317,10 @@ export async function recoverDesktopUpdate(): Promise<boolean> {
     }
     // After timeout, recovery may finish downloading but must not restart an
     // already visible session. Its errors are still consumed and exposed.
-    void recovery.catch(error => setUpdateState({ type: 'error', error }))
+    void recovery.catch(failUpdate)
     return getUpdateState().status === 'installing'
   } catch (error) {
-    setUpdateState({ type: 'error', error })
+    failUpdate(error)
     return false
   }
 }
@@ -254,37 +355,26 @@ function configureAutoUpdater(): void {
   autoUpdater.on('update-not-available', info => (
     setUpdateState({ type: 'not-available', latestVersion: updateVersion(info) })
   ))
-  autoUpdater.on('download-progress', progress => (
+  autoUpdater.on('download-progress', progress => {
+    if (downloadCancellationToken) armDownloadWatchdog(downloadCancellationToken)
     setUpdateState({ type: 'download-progress', percent: progressPercent(progress) })
-  ))
+  })
   autoUpdater.on('update-downloaded', info => {
+    downloadCompletionSequence += 1
+    clearDownloadWatchdog()
     try {
       persist({ ...saved, pending: info, attemptedVersion: null })
       setUpdateState({ type: 'downloaded', latestVersion: updateVersion(info), releaseNotes: updateNotes(info) })
+      markUpdateSucceeded()
     } catch (error) {
-      setUpdateState({ type: 'error', error })
+      failDownload(error)
     }
   })
   autoUpdater.on('error', error => {
     if (updateState.status === 'installing') failInstall(error)
-    else setUpdateState({ type: 'error', error })
+    else failUpdate(error)
   })
   updaterListenersRegistered = true
-}
-
-function scheduleStartupUpdateCheck(): void {
-  if (!UPDATE_FEED_BASE_URL || startupCheckScheduled) return
-  startupCheckScheduled = true
-  setTimeout(() => {
-    if (saved.autoUpdate && updateState.status !== 'error') void checkForUpdate()
-  }, 3_000)
-}
-
-function schedulePeriodicUpdateCheck(): void {
-  if (!UPDATE_FEED_BASE_URL) return
-  setInterval(() => {
-    if (saved.autoUpdate && updateState.status !== 'error') void checkForUpdate()
-  }, PERIODIC_CHECK_INTERVAL_MS)
 }
 
 function setUpdateState(event: DesktopUpdateStateEvent): DesktopUpdateState {
@@ -294,6 +384,7 @@ function setUpdateState(event: DesktopUpdateStateEvent): DesktopUpdateState {
       window.webContents.send('desktop:updates:state-changed', updateState)
     }
   }
+  updateOptions.onStateChanged(updateState)
   return updateState
 }
 
