@@ -94,7 +94,7 @@ export const useChatStore = defineStore('chat', () => {
     clearHistoryView, prepareForInitialization, markHistoryEmpty,
     refreshCurrentSession, resyncRuntimeTranscript, loadInitialMessages, fetchSessionWindow,
     loadOlderMessages, findMessageIdByExternalId, locateMessageByExternalId,
-    isSessionStreaming, streamingSessionId, streamingSessionIds, streaming, isChatViewStreaming,
+    isSessionStreaming, streamingSessionId, streamingSessionIds, streaming, isChatViewStreaming, isChatViewStopping,
     workspaceTargetSelectionFor, setWorkspaceTargetSelection,
     initializeWorkspaceTargetSelection, resetWorkspaceTargetSelection,
     releaseHiddenSessionView, bindChatView, setChatViewVisible, unbindChatView,
@@ -115,7 +115,7 @@ export const useChatStore = defineStore('chat', () => {
     transcriptForTurn(assistantTurn)?.finalizeStreamFailure(assistantTurn, botId, targetSessionId, error, keepTurn)
   }
   const {
-    trackAssistantStream, discardAssistantStream,
+    trackAssistantStream, discardAssistantStream, takeStopRequest,
     createdSessionIdForInvocation, forgetCreatedSession, clearStreamHistory,
   } = assistantStreams
 
@@ -570,7 +570,7 @@ export const useChatStore = defineStore('chat', () => {
     finalizeStreamFailure,
     removeTurnFromSession,
     cleanupFailedDeferredSession,
-    discardAssistantStream,
+    discardAssistantStream, takeStopRequest,
     rememberStartupSendFailure,
     draftWorkdirIdFor: botId => workdirsStore.sessionWorkdirIdFor(botId, { externalAgent: false }),
     firstSend,
@@ -585,7 +585,7 @@ export const useChatStore = defineStore('chat', () => {
     focusChatView, promoteDraftChatView, chatTargetFor,
     workspaceTargetSelectionFor, setWorkspaceTargetSelection,
     initializeWorkspaceTargetSelection, resetWorkspaceTargetSelection,
-    chatReadOnlyFor, chatCanForkFor, isChatViewStreaming,
+    chatReadOnlyFor, chatCanForkFor, isChatViewStreaming, isChatViewStopping,
     isChatViewCreatingSession, streaming, streamingSessionId, streamingSessionIds,
     isSessionCompacting, beginSessionCompaction,
     sessions, sessionsCursor, hasMoreSessions, loadingMoreSessions,

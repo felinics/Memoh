@@ -633,7 +633,7 @@
                   v-model="inputText"
                   rows="1"
                   :placeholder="composerPreviewShown ? '' : composerPlaceholder"
-                  :disabled="!currentBotId || activeChatReadOnly || loadingMessages || firstSendAwaiting"
+                  :disabled="!currentBotId || activeChatReadOnly || loadingMessages || firstSendAwaiting || stopPending"
                   class="order-none max-h-52 w-full basis-full field-sizing-content resize-none break-words bg-transparent pl-2 pr-1 pt-2 pb-1.5 text-base leading-[var(--chat-leading)] outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
                   :class="[isWelcome ? 'min-h-12' : 'min-h-10', composerPreviewShown ? 'text-transparent' : 'text-foreground']"
                   @keydown="handleComposerKeydown"
@@ -1500,6 +1500,8 @@ const firstSendEntry = computed(() => chatStore.firstSendFor(paneTarget.value))
 const draftSendStarting = ref(false)
 const firstSendAwaiting = computed(() =>
   draftSendStarting.value || (!!firstSendEntry.value && !firstSendEntry.value.revealed))
+// A stop that waits for the server to end the run; its draft may come back.
+const stopPending = computed(() => chatStore.isChatViewStopping(paneTarget.value))
 // A draft whose first message is in flight is committed to its setup (the
 // folder travels with that message), even before a session id exists.
 const draftSetupEditable = computed(() => !hasRenderedSession.value && !firstSendEntry.value && !draftSendStarting.value)
@@ -3311,6 +3313,7 @@ const composerAction = computed(() => resolveComposerAction({
   hasSkills: skillSlashEnabled.value && requestedSkills.value.length > 0,
   streaming: streaming.value,
   awaitingFirstSend: firstSendAwaiting.value,
+  stopping: stopPending.value,
   queuePending: queueSubmissionGate.pending,
   active: isActive.value,
   hasBot: !!currentBotId.value,
@@ -4093,7 +4096,7 @@ async function handleSend(source: ComposerActionSource = 'submit') {
   if (!skillSlashEnabled.value && requestedSkills.value.length) requestedSkills.value = []
   const action = composerAction.value
   await dispatchComposerAction(action, source, {
-    stop: () => { chatStore.abort(paneTarget.value) },
+    stop: () => { chatStore.abort(paneTarget.value, { awaitOutcome: true }) },
     send: executeComposerSend,
     enqueue: executeComposerEnqueue,
     'local-command': executeLocalComposerCommand,
