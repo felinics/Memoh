@@ -2,12 +2,11 @@
   <!-- Update affordance: a right-anchored circle that grows LEFT into a text
        pill on hover/focus, eating the user block's flex slack (it is min-w-0,
        so no overlap — the pointer can only be in one place at a time).
-       Idle/up-to-date/checking render nothing. A ready update keeps its restart
-       label visible; downloading and error states retain the compact morph.
-       The icon is an absolute overlay that fades out as the label's grid track opens
-       (0fr → 1fr), so the expanded pill is text-only and the whole morph is one grid tween
-       with constant horizontal padding (equal to the circle diameter, so min-width cannot
-       cut the tween short) — no JS expand state. -->
+       Idle/up-to-date/checking render nothing: the only states worth chrome
+       are the ones the user can act on. The icon is an absolute overlay that
+       fades out as the label's grid track opens (0fr → 1fr), so the expanded
+       pill is text-only and the whole morph is one grid tween with constant horizontal padding
+       (equal to the circle diameter, so min-width cannot cut the tween short) — no JS expand state. -->
   <button
     v-if="bridge && status"
     type="button"
@@ -18,15 +17,13 @@
     @click="onClick"
   >
     <span
-      class="grid motion-reduce:transition-none transition-[grid-template-columns] duration-[180ms] ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:grid-cols-[1fr] group-focus-visible:grid-cols-[1fr]"
-      :class="status === 'downloaded' ? 'grid-cols-[1fr]' : 'grid-cols-[0fr]'"
+      class="grid motion-reduce:transition-none transition-[grid-template-columns] duration-[180ms] ease-[cubic-bezier(0.22,1,0.36,1)] grid-cols-[0fr] group-hover:grid-cols-[1fr] group-focus-visible:grid-cols-[1fr]"
     >
       <span class="min-w-0 overflow-hidden">
         <span class="whitespace-nowrap text-label font-medium">{{ label }}</span>
       </span>
     </span>
     <span
-      v-if="status !== 'downloaded'"
       class="pointer-events-none absolute inset-0 flex items-center justify-center transition-opacity duration-[180ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none group-hover:opacity-0 group-focus-visible:opacity-0"
     >
       <TriangleAlert
