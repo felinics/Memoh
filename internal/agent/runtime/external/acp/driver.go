@@ -2,7 +2,7 @@
 // sits at the same level as the other out-of-process external agent runtimes
 // (codex, claude-code) and the application keeps one turn orchestration for
 // all of them. The pool keeps owning everything ACP-specific — warm process
-// handles, runtime storage, publication fencing — while this adapter
+// handles, runtime storage, native session restore — while this adapter
 // owns only the contract translation.
 package acp
 
@@ -28,8 +28,7 @@ const contextURI = "memoh://context/current-turn"
 const metadataAgentIDKey = "acp_agent_id"
 
 // Prompter is the minimal pool surface the driver adapts. *SessionPool
-// satisfies it; pools that also implement CloseSession(string) error get the
-// round-rollback repair.
+// satisfies it.
 type Prompter interface {
 	Prompt(ctx context.Context, input PromptInput) (client.PromptResult, error)
 }
@@ -46,17 +45,6 @@ func NewDriver(pool Prompter) *Driver {
 
 // RuntimeType implements external.Driver.
 func (*Driver) RuntimeType() string { return RuntimeType }
-
-// OnRoundRolledBack implements external.RoundRollbackHandler: a definite
-// round rollback leaves the warm process ahead of canonical history, so the
-// runtime is discarded and the next prompt restarts from the durable head.
-// This is safe exactly here: the failed run still holds the session's single
-// active slot, so no newer turn can own the session yet.
-func (d *Driver) OnRoundRolledBack(_ context.Context, _, threadID string) {
-	if closer, ok := d.pool.(interface{ CloseSession(string) error }); ok {
-		_ = closer.CloseSession(threadID)
-	}
-}
 
 // ResetBotAgent implements external.BotAgentResetter: an instance's warm
 // processes were launched from its previous setup.
@@ -117,6 +105,12 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		Sink:                   sink,
 	})
 	out := DriverPromptResult(result, agentID)
+	// Discuss turns carry their whole context and never restore a session.
+	if result.SessionID != "" && !input.ForceFreshRuntime {
+		if stored, owned := storedNativeSession(input.RuntimeMetadata, input.ThreadID); !owned || stored != result.SessionID {
+			out.RuntimeMetadata = nativeSessionMetadata(result.SessionID, input.ThreadID)
+		}
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			// The port's interrupt contract: a canceled turn returns its
@@ -129,19 +123,15 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	return out, nil
 }
 
-// DriverPromptResult maps a pool result onto the port result: publication
-// request and round provenance. Exported so tests can hold the mapping fixed
-// while exercising the unified flow.
+// DriverPromptResult maps a pool result onto the port result and adds round
+// provenance. Exported so tests can hold the mapping fixed while exercising
+// the unified flow.
 func DriverPromptResult(result client.PromptResult, agentID string) external.PromptResult {
 	out := external.PromptResult{
 		Output:     result.Output,
 		Text:       result.Text,
 		Usage:      result.Usage,
 		StopReason: result.StopReason,
-		// Every completed ACP turn publishes its run ID: no
-		// runtime snapshots are captured, but pool fencing still compares warm
-		// handles against the canonical head watermark.
-		PublishHead: true,
 	}
 	if agentID != "" {
 		out.RoundMetadata = map[string]any{metadataAgentIDKey: agentID}

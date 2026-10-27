@@ -135,6 +135,10 @@ func (p *fakeACPRuntimePool) CloseRuntime(botID, runtimeID string) error {
 	return p.closeErr
 }
 
+func (*fakeACPRuntimePool) BeginSessionHistoryReset(ctx context.Context, _, _ string) (context.Context, func(), error) {
+	return ctx, func() {}, nil
+}
+
 func (q acpRuntimeQueries) GetBotByID(_ context.Context, _ pgtype.UUID) (sqlc.GetBotByIDRow, error) {
 	return q.bot, nil
 }

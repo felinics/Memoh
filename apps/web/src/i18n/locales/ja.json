@@ -1558,7 +1558,10 @@
       "dependencyMissingProgress": "バックグラウンドでインストール中…",
       "dependencyMissingDone": "インストール完了。再送できます。",
       "dependencyMissingFailed": "バックグラウンドのインストールに失敗しました。Bot 設定の「依存関係」から再試行してください。",
-      "dependencyOpen": "依存関係を開く"
+      "dependencyOpen": "依存関係を開く",
+      "resetSession": "新しい Agent セッションを開始",
+      "resetSessionDone": "次のメッセージから新しい Agent セッションが始まります。上の会話は引き継がれません。",
+      "resetSessionFailed": "新しい Agent セッションを開始できませんでした。"
     },
     "sessionFilterAll": "全て",
     "searchSessionPlaceholder": "検索",

@@ -297,6 +297,14 @@
                 >
                   {{ t('bots.agent.openSettings') }}
                 </Button>
+                <Button
+                  v-else-if="canResetAgentSession && node.block.code === SESSION_RESUME_FAILED_CODE"
+                  variant="outline"
+                  size="sm"
+                  @click="emit('resetAgentSession')"
+                >
+                  {{ t('chat.externalAgent.resetSession') }}
+                </Button>
               </CalloutBanner>
 
               <!-- Runtime notice block: a degradation the runtime wants the
@@ -469,7 +477,10 @@ const emit = defineEmits<{
   active: [isActive: boolean, { id: string, top: number,  }]
   editMessage: [messageId: string, text: string, done: (started: boolean) => void]
   forkMessage: [turnId: string]
+  resetAgentSession: []
 }>()
+
+const SESSION_RESUME_FAILED_CODE = 'external_runtime.session_resume_failed'
 
 const props = defineProps<{
   message: ChatMessage
@@ -487,6 +498,7 @@ const props = defineProps<{
   canRetryLatestAssistant?: boolean
   canEditLatestUser?: boolean
   canForkAssistant?: boolean
+  canResetAgentSession?: boolean
   inlineActions?: boolean
   goalRuntime?: string
   isScrolling: boolean

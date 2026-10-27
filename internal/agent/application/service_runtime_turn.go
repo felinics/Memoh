@@ -174,8 +174,7 @@ func runtimeSessionMeta(sess session.Thread) map[string]any {
 // streamRuntimeWS runs one turn on a runtime driver (ACP, codex,
 // claude-code) and streams events to the WS surface. The runtime owns its
 // durable session state (keyed through runtime metadata), Memoh's history is
-// a projection persisted per round. Runtimes may request an observed-round
-// publication for warm-process fencing. webSend is set by the Web chat caller
+// a projection persisted per round. webSend is set by the Web chat caller
 // for a new send, whose every admitted failure is recorded in history.
 func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, req ChatRequest, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}, webSend bool) (RunOutcome, error) {
 	req.RunID = runIDForChatRequest(req.RunID)
@@ -565,10 +564,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 				outcome.setCause(nil)
 				cleanupProjections()
 			case runtimeRoundRolledBack:
-				// A completed-then-stopped turn moved the runtime past the
-				// canonical head; a merely interrupted one did not, so only the
-				// former needs driver-side repair.
-				s.handleRuntimeRoundRollback(ctx, driver, req, runtimeType, result.TurnCompleted)
+				s.logRuntimeRoundDivergence(req, runtimeType)
 				cleanupProjections()
 			case runtimeRoundUnresolved:
 			}
@@ -595,12 +591,10 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		case runtimeRoundRolledBack:
 		}
 		// Definite rollback of a completed turn: the runtime remembers a round
-		// the visible history lost. Drivers with a repair policy (the ACP pool
-		// discards the warm process) take the callback; runtimes whose durable
-		// state is authoritative on their own side keep the session — dropping
-		// it would lose the whole conversation context — and the ghost turn is
-		// logged.
-		s.handleRuntimeRoundRollback(ctx, driver, req, runtimeType, true)
+		// the visible history lost. Its own session stays authoritative —
+		// dropping it would lose the whole conversation context — and the
+		// ghost turn is logged.
+		s.logRuntimeRoundDivergence(req, runtimeType)
 		cleanupProjections()
 		outcome.markDelivered()
 		emit(runtimeFailureEvent(outcome.cause))
@@ -867,21 +861,6 @@ func activeRuntimeRunStatus(status string) bool {
 	}
 }
 
-// handleRuntimeRoundRollback resolves a definite round rollback: a driver
-// that repairs its runtime state (the ACP pool discards the warm process so
-// the next prompt restarts from the durable head) gets the callback for
-// completed turns; every other case keeps the runtime session and logs the
-// ghost turn.
-func (s *Service) handleRuntimeRoundRollback(ctx context.Context, driver external.Driver, req ChatRequest, runtimeType string, turnCompleted bool) {
-	if turnCompleted {
-		if handler, ok := driver.(external.RoundRollbackHandler); ok {
-			handler.OnRoundRolledBack(context.WithoutCancel(ctx), req.BotID, req.ThreadID)
-			return
-		}
-	}
-	s.logRuntimeRoundDivergence(req, runtimeType)
-}
-
 func (s *Service) logRuntimeRoundDivergence(req ChatRequest, runtimeType string) {
 	s.logger.Warn("external runtime remembers a round the visible history lost",
 		slog.String("session_id", req.ThreadID),
@@ -892,9 +871,7 @@ func (s *Service) logRuntimeRoundDivergence(req ChatRequest, runtimeType string)
 
 // persistRuntimeRound stores one external turn as a normal history round.
 // Shared outcome markers and reconciliation keep commit-unknown handling
-// runtime-neutral. Runtimes that request publication advance their
-// observed-round head in the same
-// transaction as the messages. Native conversation state stays with the Agent.
+// runtime-neutral. Native conversation state stays with the Agent.
 func (s *Service) persistRuntimeRound(
 	ctx context.Context,
 	req ChatRequest,
@@ -994,7 +971,7 @@ func (s *Service) persistRuntimeRound(
 	agentTurnID := strings.TrimSpace(result.AgentTurnID)
 	if (len(result.SteerInputIDs) > 0 || result.FinalTurnAnchorOnly) && lastAssistantIndex >= 0 {
 		// Codex forks at whole runtime turns. Steer splits and Goal continuation
-		// collect multiple assistant rows under one publication; only the tail
+		// collect multiple assistant rows under one runtime turn; only the tail
 		// has a runtime anchor matching the complete visible history.
 		metadataByIndex[lastAssistantIndex+metadataOffset]["agent_turn_id"] = agentTurnID
 		agentTurnID = "" // Do not bulk-assign this anchor to earlier assistant rows.
@@ -1003,12 +980,6 @@ func (s *Service) persistRuntimeRound(
 	// Row metadata survives history refresh/fork without entering model input.
 	if firstAssistantIndex >= 0 && len(result.Notices) > 0 {
 		metadataByIndex[firstAssistantIndex+metadataOffset][event.RuntimeNoticesMetadataKey] = result.Notices
-	}
-	// ACP uses the committed run ID to detect stale warm processes. Failed or
-	// interrupted turns keep the previously observed head.
-	var publication *messagepkg.AgentPublication
-	if promptErr == nil && turnCompleted && lastAssistantIndex >= 0 && result.PublishHead {
-		publication = &messagepkg.AgentPublication{RunID: req.RunID}
 	}
 	skipMemory := promptErr != nil || req.UserMessagePersisted || req.ReusePersistedUserMessage || req.SkipMemoryExtraction
 	persisted, err := s.storeRoundWithOptionsResult(ctx, req, round, "", storeRoundOptions{
@@ -1019,7 +990,6 @@ func (s *Service) persistRuntimeRound(
 		ReasoningTiming:                   reasoningTiming,
 		RequireCompletePersist:            true,
 		CleanupRuntimeDecisionProjections: true,
-		AgentPublication:                  publication,
 		// The runtime's turn id lands on the run row in the round transaction;
 		// it anchors turn-level operations such as codex thread/fork.
 		AgentTurnID:      agentTurnID,
@@ -1061,8 +1031,7 @@ func scheduledRuntimeFailure(err error) error {
 
 // runtimeTurnRan reports evidence that the runtime accepted the turn. "Nothing
 // ran" is otherwise only a driver's promise about its error codes, and a wrong
-// code must cost a stored failure round, never the user's message. A publication
-// request is no evidence: ACP reports it on every result.
+// code must cost a stored failure round, never the user's message.
 func runtimeTurnRan(result external.PromptResult) bool {
 	return strings.TrimSpace(result.AgentTurnID) != "" || len(result.Output) > 0
 }

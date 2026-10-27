@@ -56,11 +56,6 @@ CREATE TABLE bot_sessions (
   runtime_metadata JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
-CREATE TABLE agent_session_publications (
-  team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
-  session_id UUID NOT NULL
-);
-
 -- The history clears retire an interrupted run's resume intent.
 CREATE TABLE session_runs (
   run_id UUID PRIMARY KEY,
@@ -133,14 +128,6 @@ CREATE TABLE bot_history_messages (
 	  ('00000000-0000-0000-0000-00000000f101', $2, 'lost', 'session_runtime.interrupted', '{"resume": {}}')
 		`, sessionID, foreignSessionID); err != nil {
 		t.Fatalf("insert interrupted runs: %v", err)
-	}
-	for _, table := range []string{"agent_session_publications"} {
-		if _, err := tx.Exec(ctx,
-			"INSERT INTO "+pgx.Identifier{table}.Sanitize()+" (session_id) VALUES ($1), ($2)",
-			sessionID, foreignSessionID,
-		); err != nil {
-			t.Fatalf("insert %s fixture: %v", table, err)
-		}
 	}
 	if _, err := tx.Exec(ctx, `
 	INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary, message_count)
@@ -281,9 +268,6 @@ VALUES ($1, $2, $3, 'ok', 'cross-owner artifact')
 	assertRowCount(t, ctx, tx, "bot_history_messages", 2)
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 3)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", sessionID, 1)
-	// The session clear must also drop that session's runtime publication while the
-	// foreign session's rows survive.
-	assertRowCount(t, ctx, tx, "agent_session_publications", 1)
 	assertResumeIntents(t, ctx, tx, 1)
 
 	parsedForeignBotID, err := ParseUUID(foreignBotID)
@@ -296,7 +280,6 @@ VALUES ($1, $2, $3, 'ok', 'cross-owner artifact')
 	assertRowCount(t, ctx, tx, "bot_history_messages", 1)
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 2)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", foreignSessionID, 1)
-	assertRowCount(t, ctx, tx, "agent_session_publications", 0)
 	assertResumeIntents(t, ctx, tx, 0)
 
 	parsedRepairSessionID, err := ParseUUID(repairSessionID)

@@ -909,10 +909,11 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The external agent runtime for this session is not available on this server.",
 	},
-	// The request to resume the external agent's own session (a Codex thread)
-	// failed before the agent could accept or refuse it, so a retry may still
-	// resume it. The turn is treated as not run; the user retries or starts a
-	// fresh conversation.
+	// The request to resume the external agent's own session (a Codex or Grok
+	// thread, an ACP session) failed before the agent could accept or refuse
+	// it, so a retry may still resume it. The turn is treated as not run; the
+	// user retries, starts a fresh conversation or, in an ACP chat, gives the
+	// session up.
 	CodeExternalRuntimeSessionResumeFailed: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The session could not be resumed. Try again or start a new conversation.",

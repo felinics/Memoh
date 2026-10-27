@@ -31,6 +31,7 @@ func TestExternalAgentErrorTranslatesRuntimeErrors(t *testing.T) {
 		{"command gone", acpagent.ErrAgentCommandUnavailable, apperror.CodeRuntimeAgentCommandStale},
 		{"image unsupported", acpclient.ErrImagePromptUnsupported, apperror.CodeACPImageInputUnsupported},
 		{"image invalid", acpclient.ErrInvalidPromptImage, apperror.CodeACPAttachmentInvalid},
+		{"session restore failed", acpclient.ErrSessionRestoreFailed, apperror.CodeExternalRuntimeSessionResumeFailed},
 		{"not a container", external.ErrContainerWorkspaceRequired, apperror.CodeExternalAgentContainerWorkspaceRequired},
 		{"dependency missing", &external.DependencyMissingError{DependencyID: "codex"}, apperror.CodeAgentDependencyMissing},
 	} {

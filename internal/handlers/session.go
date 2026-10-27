@@ -16,6 +16,7 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/agent/application"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/external/acp"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
@@ -949,9 +950,14 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 		if targetRuntime == session.RuntimeACPAgent {
 			targetMetadata = session.ApplyACPMetadataDefaults(mergeSessionMetadata(targetMetadata, targetRuntimeMetadata))
 			targetRuntimeMetadata = session.ApplyACPMetadataDefaults(mergeSessionMetadata(targetRuntimeMetadata, targetMetadata))
+			// A copy of the stored session in metadata would be merged back
+			// after the runtime copy is cleared.
+			delete(targetMetadata, acpagent.NativeSessionKey)
 		}
 		agentChanged := strings.TrimSpace(existing.BotAgentID) != targetBotAgentID || sessionAgentConfigChanged(existing, targetMode, targetRuntime, targetMetadata, targetRuntimeMetadata)
 		if agentChanged {
+			// The stored session belongs to the agent and project that wrote it.
+			delete(targetRuntimeMetadata, acpagent.NativeSessionKey)
 			// Advisory pre-check with zero side effects: a doomed request must
 			// not destroy the warm runtime or abort an in-flight turn before
 			// being rejected. The authoritative check re-runs inside the

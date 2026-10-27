@@ -331,13 +331,6 @@ invalidated_sessions AS (
     AND session.id = target.id
   RETURNING session.id
 ),
-deleted_acp_publications AS (
-  DELETE FROM agent_session_publications publication
-  USING invalidated_sessions invalidated
-  WHERE publication.team_id = public.memoh_current_team_id()
-    AND publication.session_id = invalidated.id
-  RETURNING publication.session_id
-),
 retired_runs AS (
   UPDATE session_runs run
   SET input_json = run.input_json - 'resume',
@@ -359,7 +352,6 @@ target_compaction_artifacts AS MATERIALIZED (
   WHERE compact.team_id = public.memoh_current_team_id()
     AND compact.bot_id = $1
     AND (SELECT count(*) FROM invalidated_sessions) >= 0
-    AND (SELECT count(*) FROM deleted_acp_publications) >= 0
   ORDER BY compact.id
   FOR UPDATE
 ),
@@ -421,13 +413,6 @@ invalidated_session AS (
     AND session.id = target.id
   RETURNING session.id
 ),
-deleted_acp_publications AS (
-  DELETE FROM agent_session_publications publication
-  USING invalidated_session invalidated
-  WHERE publication.team_id = public.memoh_current_team_id()
-    AND publication.session_id = invalidated.id
-  RETURNING publication.session_id
-),
 retired_runs AS (
   UPDATE session_runs run
   SET input_json = run.input_json - 'resume',
@@ -449,7 +434,6 @@ target_compaction_artifacts AS MATERIALIZED (
   WHERE compact.team_id = public.memoh_current_team_id()
     AND compact.session_id = $1
     AND (SELECT count(*) FROM invalidated_session) >= 0
-    AND (SELECT count(*) FROM deleted_acp_publications) >= 0
   ORDER BY compact.id
   FOR UPDATE
 ),

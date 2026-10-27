@@ -2638,9 +2638,9 @@ ALTER TABLE public.schedule
     ADD CONSTRAINT schedule_workdir_id_fkey
     FOREIGN KEY (team_id, workdir_id)
     REFERENCES public.bot_workdirs(team_id, id) ON DELETE SET NULL (workdir_id);
--- Last committed round observed by a warm external runtime. Written with the
--- round's messages to invalidate processes that have fallen behind. Native
--- conversation state remains in Agent-owned workspace files.
+-- Unused: ACP warm processes were once fenced by the last committed run here.
+-- They now restore the agent's native session, and nothing reads or writes
+-- this table.
 CREATE TABLE IF NOT EXISTS public.agent_session_publications (
     team_id          UUID        NOT NULL DEFAULT public.memoh_current_team_id()
                                  REFERENCES public.teams(id) ON DELETE RESTRICT,

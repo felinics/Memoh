@@ -110,32 +110,3 @@ func (s *RuntimeStateStore) GuardRuntimeSync(
 		return fn(ctx)
 	})
 }
-
-// Head reads the last committed round. History clear removes the head so a
-// warm process cannot continue from its old in-memory conversation.
-func (s *RuntimeStateStore) Head(ctx context.Context, botID, sessionID string) (agentstate.SessionPublicationHead, bool, error) {
-	pgBotID, pgSessionID, err := parseScope(botID, sessionID)
-	if err != nil {
-		return agentstate.SessionPublicationHead{}, false, err
-	}
-	runID, err := s.queries.GetAgentSessionPublicationHead(ctx, sqlc.GetAgentSessionPublicationHeadParams{BotID: pgBotID, SessionID: pgSessionID})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return agentstate.SessionPublicationHead{}, false, nil
-	}
-	if err != nil {
-		return agentstate.SessionPublicationHead{}, false, fmt.Errorf("load agent session publication head: %w", err)
-	}
-	return agentstate.SessionPublicationHead{RunID: runID.String()}, true, nil
-}
-
-func parseScope(botID, sessionID string) (pgBotID, pgSessionID pgtype.UUID, err error) {
-	pgBotID, err = dbpkg.ParseUUID(strings.TrimSpace(botID))
-	if err != nil {
-		return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("invalid agent runtime bot id: %w", err)
-	}
-	pgSessionID, err = dbpkg.ParseUUID(strings.TrimSpace(sessionID))
-	if err != nil {
-		return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("invalid agent runtime session id: %w", err)
-	}
-	return pgBotID, pgSessionID, nil
-}

@@ -1592,7 +1592,10 @@
       "dependencyMissingProgress": "正在后台安装…",
       "dependencyMissingDone": "安装完成，可以重发消息了。",
       "dependencyMissingFailed": "后台安装失败，请到 Bot 设置的「依赖」中重试。",
-      "dependencyOpen": "查看依赖"
+      "dependencyOpen": "查看依赖",
+      "resetSession": "新开 Agent 会话",
+      "resetSessionDone": "下一条消息会开始新的 Agent 会话，它不会记得上面的对话。",
+      "resetSessionFailed": "无法新开 Agent 会话。"
     },
     "sessionFilterAll": "全部",
     "searchSessionPlaceholder": "搜索",

@@ -11708,6 +11708,54 @@ export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses = {
 
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponse = PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses[keyof PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses];
 
+export type DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/acp-runtime/native-session';
+};
+
+export type DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Conflict
+     */
+    409: ServerProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionError = DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionErrors[keyof DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionErrors];
+
+export type DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningData = {
     /**
      * Reasoning effort selection

@@ -2629,13 +2629,6 @@ invalidated_sessions AS (
     AND session.id = target.id
   RETURNING session.id
 ),
-deleted_acp_publications AS (
-  DELETE FROM agent_session_publications publication
-  USING invalidated_sessions invalidated
-  WHERE publication.team_id = public.memoh_current_team_id()
-    AND publication.session_id = invalidated.id
-  RETURNING publication.session_id
-),
 -- Runs go with the history they belong to. A turn interrupted by a graceful
 -- shutdown loses its resume intent. A run that ended before it was ever
 -- claimed has no fencing token to order against the reset, so it is marked
@@ -2663,7 +2656,6 @@ target_compaction_artifacts AS MATERIALIZED (
   WHERE compact.team_id = public.memoh_current_team_id()
     AND compact.bot_id = sqlc.arg(target_bot_id)
     AND (SELECT count(*) FROM invalidated_sessions) >= 0
-    AND (SELECT count(*) FROM deleted_acp_publications) >= 0
   ORDER BY compact.id
   FOR UPDATE
 ),
@@ -2713,13 +2705,6 @@ invalidated_session AS (
     AND session.id = target.id
   RETURNING session.id
 ),
-deleted_acp_publications AS (
-  DELETE FROM agent_session_publications publication
-  USING invalidated_session invalidated
-  WHERE publication.team_id = public.memoh_current_team_id()
-    AND publication.session_id = invalidated.id
-  RETURNING publication.session_id
-),
 -- Runs go with the history they belong to. A turn interrupted by a graceful
 -- shutdown loses its resume intent. A run that ended before it was ever
 -- claimed has no fencing token to order against the reset, so it is marked
@@ -2747,7 +2732,6 @@ target_compaction_artifacts AS MATERIALIZED (
   WHERE compact.team_id = public.memoh_current_team_id()
     AND compact.session_id = sqlc.arg(target_session_id)
     AND (SELECT count(*) FROM invalidated_session) >= 0
-    AND (SELECT count(*) FROM deleted_acp_publications) >= 0
   ORDER BY compact.id
   FOR UPDATE
 ),

@@ -1580,7 +1580,10 @@
       "dependencyMissingProgress": "Installing in the background…",
       "dependencyMissingDone": "Installed. You can resend now.",
       "dependencyMissingFailed": "Background install failed. Retry from the bot's Dependencies tab.",
-      "dependencyOpen": "Open dependencies"
+      "dependencyOpen": "Open dependencies",
+      "resetSession": "Start a new Agent session",
+      "resetSessionDone": "Your next message starts a new Agent session. It won't remember the conversation above.",
+      "resetSessionFailed": "Couldn't start a new Agent session."
     },
     "sessionFilterAll": "All",
     "searchSessionPlaceholder": "Search",

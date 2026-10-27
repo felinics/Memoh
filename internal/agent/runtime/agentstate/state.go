@@ -1,5 +1,6 @@
-// Package agentstate defines the publication and configuration guards used by
-// process-local external runtimes. Native conversation files belong to the Agent.
+// Package agentstate defines the configuration-epoch and runtime-sync guards
+// used by process-local external runtimes. Native conversation files belong to
+// the Agent.
 package agentstate
 
 import (
@@ -18,25 +19,19 @@ var (
 	ErrRuntimeConfigResetInProgress = errors.New("bot runtime reset is in progress")
 )
 
-// SessionPublicationHead identifies the last committed round observed by a
-// warm runtime. An absent head is represented separately by Head's bool result.
-type SessionPublicationHead struct {
-	RunID string
-}
-
 // RuntimeConfigEpoch is the durable generation of process-affecting bot and
-// session configuration. It is deliberately independent of publication head:
-// credentials and workspace config may change while canonical chat history
-// does not.
+// session configuration. Credentials and workspace config may change while
+// canonical chat history does not, so a warm process compares the epoch it
+// started from to tell whether it is still current.
 type RuntimeConfigEpoch struct {
 	Bot     int64
 	Session int64
 }
 
-// RuntimeStateStore fences warm processes against committed rounds and
-// configuration changes. It does not store or restore native conversation files.
+// RuntimeStateStore fences warm processes against configuration changes and
+// serializes their workspace synchronization against bot-scoped resets. It
+// does not store or restore native conversation files.
 type RuntimeStateStore interface {
 	RuntimeConfigEpoch(ctx context.Context, botID, sessionID string) (RuntimeConfigEpoch, error)
 	GuardRuntimeSync(ctx context.Context, botID string, expectedBotEpoch int64, fn func(context.Context) error) error
-	Head(ctx context.Context, botID, sessionID string) (SessionPublicationHead, bool, error)
 }

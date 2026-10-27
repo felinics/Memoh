@@ -34,7 +34,7 @@ Memoh/
 │   │   │   ├── external/       #       Neutral Driver port between the application layer and external runtimes
 │   │   │   ├── grok/           #       Grok Build direct runtime (external.Driver over the shared ACP client)
 │   │   │   ├── native/         #       Twilight AI native runtime, prompts, streaming, hooks, and guards
-│   │   │   ├── agentstate/     #       External Agent session publication heads and state storage port
+│   │   │   ├── agentstate/     #       Configuration-epoch and runtime-sync guards for external Agent processes
 │   │   │   ├── servertable/    #       Shared agent-process table for direct runtimes (Codex, Grok Build)
 │   │   │   ├── session/        #       Per-thread runtime state and control
 │   │   │   └── toolmount/      #       Memoh tool gateway mounts for direct runtimes

@@ -1310,12 +1310,6 @@ func TestPersistACPRoundUsesDedicatedSessionMetadata(t *testing.T) {
 	if len(messages.roundOptions) == 0 {
 		t.Fatal("round persisted without atomic options")
 	}
-	publication := messages.roundOptions[len(messages.roundOptions)-1].AgentPublication
-	// ACP captures no runtime snapshots: every completed turn publishes an
-	// explicit reset head so warm-handle fencing still tracks history.
-	if publication == nil {
-		t.Fatalf("ACP publication = %#v, want reset head", publication)
-	}
 }
 
 func TestPersistACPRoundStoresACPEventsAsNativeToolMessages(t *testing.T) {
@@ -1391,12 +1385,6 @@ func TestPersistACPRoundStoresACPEventsAsNativeToolMessages(t *testing.T) {
 	}
 	if messages.persisted[3].Metadata["agent_turn_outcome"] != "succeeded" {
 		t.Fatalf("final assistant outcome metadata = %#v", messages.persisted[3].Metadata)
-	}
-	publication := messages.roundOptions[len(messages.roundOptions)-1].AgentPublication
-	// ACP captures no runtime snapshots: every completed turn publishes an
-	// explicit reset head so warm-handle fencing still tracks history.
-	if publication == nil {
-		t.Fatalf("ACP publication = %#v, want reset head", publication)
 	}
 }
 
@@ -1614,9 +1602,6 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 	}
 	if got := messages.persisted[1].Metadata["agent_turn_outcome"]; got != "failed" {
 		t.Fatalf("assistant failure outcome = %#v, want failed", got)
-	}
-	if publication := messages.roundOptions[len(messages.roundOptions)-1].AgentPublication; publication != nil {
-		t.Fatalf("failed turn unexpectedly published head: %#v", publication)
 	}
 	events := drainAgentEvents(t, eventCh)
 	if containsStreamEvent(events, native.EventTextDelta) {
@@ -2189,8 +2174,6 @@ type recordingACPPrompter struct {
 	onPrompt     func()
 	streamEvents []event.StreamEvent
 	afterEvents  func()
-	closed       []string
-	closeErr     error
 }
 
 type storeRoundMemoryProvider struct {
@@ -2254,11 +2237,6 @@ func (p *recordingACPPrompter) Prompt(ctx context.Context, input acpagent.Prompt
 		p.afterEvents()
 	}
 	return p.result, p.err
-}
-
-func (p *recordingACPPrompter) CloseSession(sessionID string) error {
-	p.closed = append(p.closed, sessionID)
-	return p.closeErr
 }
 
 type fakeBotPermissionChecker struct {

@@ -187,16 +187,9 @@ type TurnReplacement struct {
 	SessionMetadata         map[string]any
 }
 
-// AgentPublication advances the runtime's observed-round marker atomically
-// with the round's messages. It contains no native conversation state.
-type AgentPublication struct {
-	RunID string
-}
-
 type RoundPersistenceOptions struct {
 	Replacement                       *TurnReplacement
 	CleanupRuntimeDecisionProjections bool
-	AgentPublication                  *AgentPublication
 	// AgentTurnID records the runtime's own turn id on the round's run in
 	// the same transaction as the messages; empty writes nothing.
 	AgentTurnID string

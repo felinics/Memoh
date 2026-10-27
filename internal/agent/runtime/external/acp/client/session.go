@@ -43,6 +43,10 @@ type StartRequest struct {
 	UnsetEnv    []string
 	Resolved    *ResolvedSessionContext
 	SetupMode   SetupMode
+	// NativeSessionID names a session the agent persisted earlier, to be
+	// restored instead of creating a new one. The started Session carries a
+	// different ID when the agent could not restore it.
+	NativeSessionID string
 	// SessionMode, when set, is pinned via session/set_mode right after the
 	// session is created (see acpprofile.Profile.SessionModeID).
 	SessionMode string
@@ -64,6 +68,8 @@ type StartRequest struct {
 }
 
 type PromptResult struct {
+	// SessionID is the ACP session the prompt was sent to.
+	SessionID  string     `json:"session_id,omitempty"`
 	StopReason string     `json:"stop_reason,omitempty"`
 	Text       string     `json:"text,omitempty"`
 	Usage      *sdk.Usage `json:"usage,omitempty"`
@@ -342,7 +348,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 			)
 		}
 	}
-	sess, err := startSession(ctx, conn, projectPath, mcpServers)
+	sess, err := startSession(ctx, conn, callbacks, initResp.AgentCapabilities, projectPath, mcpServers, req.NativeSessionID, r.logger)
 	if err != nil {
 		callbacks.close()
 		_ = proc.Close()
@@ -405,15 +411,41 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	return clientSession, nil
 }
 
-// startSession creates a fresh ACP session. Every process starts from a
-// clean runtime home; conversation continuity is Memoh's context document,
-// not adapter-native session state.
+// errNativeSessionGone means the agent cannot restore a stored session and a
+// new one may take its place.
+var errNativeSessionGone = errors.New("agent cannot restore the native session")
+
+// ErrSessionRestoreFailed means a running agent did not restore its stored
+// session: it timed out, exited or broke the connection. The session may be
+// intact, so it is kept; only the user can decide to give it up.
+var ErrSessionRestoreFailed = errors.New("ACP agent could not restore its session")
+
+// authRequiredCode is ACP's auth_required JSON-RPC error.
+const authRequiredCode = -32000
+
+// startSession opens the session a process prompts on. The agent keeps its
+// conversations in its own files, so a stored session is restored first and
+// a new one is created only when the agent cannot restore it.
 func startSession(
 	ctx context.Context,
 	conn *clientConnection,
+	callbacks *clientCallbacks,
+	caps acp.AgentCapabilities,
 	projectPath string,
 	mcpServers []acp.McpServer,
+	nativeSessionID string,
+	logger *slog.Logger,
 ) (sessionResponse, error) {
+	if nativeSessionID = strings.TrimSpace(nativeSessionID); nativeSessionID != "" {
+		resp, err := restoreSession(ctx, conn, callbacks, caps, projectPath, mcpServers, acp.SessionId(nativeSessionID))
+		if !errors.Is(err, errNativeSessionGone) {
+			return resp, err
+		}
+		if logger != nil {
+			logger.WarnContext(ctx, "ACP agent cannot restore its session; starting a new one",
+				slog.String("native_session_id", nativeSessionID), slog.Any("error", err))
+		}
+	}
 	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        projectPath,
 		McpServers: mcpServers,
@@ -425,6 +457,83 @@ func startSession(
 		return sessionResponse{}, errs.NewDependency("create ACP session: agent returned an empty session id")
 	}
 	return resp, nil
+}
+
+// restoreSession prefers session/resume, which does not replay the
+// conversation, and falls back to session/load. It returns
+// errNativeSessionGone only when the agent offers neither or refused both.
+func restoreSession(
+	ctx context.Context,
+	conn *clientConnection,
+	callbacks *clientCallbacks,
+	caps acp.AgentCapabilities,
+	projectPath string,
+	mcpServers []acp.McpServer,
+	id acp.SessionId,
+) (sessionResponse, error) {
+	callbacks.setRestoring(true)
+	defer callbacks.setRestoring(false)
+	restore := func(method string) (sessionResponse, error) {
+		openCtx, cancel := context.WithTimeout(ctx, sessionOpenTimeout)
+		defer cancel()
+		var (
+			resp sessionResponse
+			err  error
+		)
+		if method == acp.AgentMethodSessionResume {
+			resp, err = conn.ResumeSession(openCtx, acp.ResumeSessionRequest{SessionId: id, Cwd: projectPath, McpServers: mcpServers})
+		} else {
+			resp, err = conn.LoadSession(openCtx, acp.LoadSessionRequest{SessionId: id, Cwd: projectPath, McpServers: mcpServers})
+		}
+		if err == nil {
+			// Neither response names the session: it keeps the requested ID.
+			resp.SessionId = id
+			return resp, nil
+		}
+		switch answer, answered := agentAnswer(openCtx, conn, err); {
+		case ctx.Err() != nil, answered && answer.Code == authRequiredCode:
+			// A canceled turn says nothing about the session, and a new
+			// session needs the credential too.
+			return sessionResponse{}, fmt.Errorf("restore ACP session: %w", err)
+		case answered:
+			return sessionResponse{}, fmt.Errorf("%w: %s: %w", errNativeSessionGone, method, err)
+		case openCtx.Err() != nil:
+			err = errs.NewDependency("agent did not answer " + method + " in time")
+		}
+		return sessionResponse{}, fmt.Errorf("%w: %s: %w", ErrSessionRestoreFailed, method, err)
+	}
+	err := fmt.Errorf("%w: agent offers neither session/resume nor session/load", errNativeSessionGone)
+	if caps.SessionCapabilities.Resume != nil {
+		var resp sessionResponse
+		if resp, err = restore(acp.AgentMethodSessionResume); !errors.Is(err, errNativeSessionGone) {
+			return resp, err
+		}
+	}
+	if caps.LoadSession {
+		return restore(acp.AgentMethodSessionLoad)
+	}
+	return sessionResponse{}, err
+}
+
+// agentAnswer returns the error the agent answered a restore with. ACP names
+// no error for a missing session, and agents answer -32002, -32602 and -32603
+// alike, so any answer counts. A request that timed out or lost its
+// connection was not answered, though the SDK reports those as internal
+// errors too.
+func agentAnswer(ctx context.Context, conn *clientConnection, err error) (*acp.RequestError, bool) {
+	if ctx.Err() != nil {
+		return nil, false
+	}
+	select {
+	case <-conn.conn.Done():
+		return nil, false
+	default:
+	}
+	var answer *acp.RequestError
+	if !errors.As(err, &answer) {
+		return nil, false
+	}
+	return answer, true
 }
 
 // pinSessionMode forces the agent session into the requested permission mode
@@ -717,6 +826,9 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 		Usage:      usage,
 		Output:     attachUsageToLastAssistant(collected.Output, usage),
 		Meta:       resp.Meta,
+	}
+	if !errors.Is(err, errPromptNotSent) {
+		result.SessionID = string(sessionID)
 	}
 	if err != nil {
 		if proc != nil {

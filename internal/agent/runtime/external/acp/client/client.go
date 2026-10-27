@@ -205,6 +205,10 @@ type clientCallbacks struct {
 	// for pre-response notifications before returning session/new, so the
 	// canonical Session cannot be attached until after those callbacks finish.
 	pendingAvailableCommands map[acp.SessionId][]AvailableCommandInfo
+	// restoring is set while session/resume or session/load is in flight.
+	// Load replays the earlier conversation as session/update, and some
+	// agents replay on resume too; Memoh already holds that history.
+	restoring bool
 	// quirks carries the per-agent title heuristics (profile owns them);
 	// the zero value behaves like the defaults.
 	quirks acpprofile.ToolQuirks
@@ -299,6 +303,12 @@ func (c *clientCallbacks) close() {
 	if c != nil && c.terminals != nil {
 		c.terminals.killAll()
 	}
+}
+
+func (c *clientCallbacks) setRestoring(restoring bool) {
+	c.mu.Lock()
+	c.restoring = restoring
+	c.mu.Unlock()
 }
 
 func (c *clientCallbacks) setPromptState(collector *eventCollector, sink EventSink, toolSession ToolSessionContext, limits ...ToolOutputLimit) {
@@ -1472,15 +1482,23 @@ func (c *clientCallbacks) emitToolApprovalRequest(req toolapproval.Request) bool
 func (c *clientCallbacks) SessionUpdate(_ context.Context, p acp.SessionNotification) error {
 	c.mu.RLock()
 	runtimeSession := c.runtimeSession
+	restoring := c.restoring
 	c.mu.RUnlock()
 	if p.Update.ConfigOptionUpdate != nil && runtimeSession != nil {
 		runtimeSession.replaceConfigOptions(p.SessionId, p.Update.ConfigOptionUpdate.ConfigOptions)
 	}
-	if update := p.Update.CurrentModeUpdate; update != nil {
+	// The restore response carries the current mode; a replayed mode change is
+	// history and would land over the mode pinned after the restore.
+	if update := p.Update.CurrentModeUpdate; update != nil && !restoring {
 		_, _ = c.updateCurrentMode(p.SessionId, update.CurrentModeId)
 	}
 	if update := p.Update.AvailableCommandsUpdate; update != nil {
 		_, _ = c.updateAvailableCommands(p.SessionId, update.AvailableCommands)
+	}
+	// A replayed turn must reach neither the live stream nor the tool mapper,
+	// whose call state would otherwise carry into the next prompt.
+	if restoring {
+		return nil
 	}
 	var events []event.StreamEvent
 	if c.toolMapper != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"sync"
@@ -15,6 +16,10 @@ import (
 )
 
 const promptCancellationDrainTimeout = 3 * time.Second
+
+// errPromptNotSent means the prompt never reached the agent, which therefore
+// may not have persisted the session it was meant for.
+var errPromptNotSent = errors.New("ACP prompt was not sent")
 
 type clientConnection struct {
 	conn    *acp.Connection
@@ -167,9 +172,14 @@ func (c *clientConnection) ResumeSession(ctx context.Context, params acp.ResumeS
 	return resp, peerError(ctx, err)
 }
 
+func (c *clientConnection) LoadSession(ctx context.Context, params acp.LoadSessionRequest) (sessionResponse, error) {
+	resp, err := acp.SendRequest[sessionResponse](c.conn, ctx, acp.AgentMethodSessionLoad, params)
+	return resp, peerError(ctx, err)
+}
+
 func (c *clientConnection) Prompt(ctx context.Context, params acp.PromptRequest) (acp.PromptResponse, error) {
 	if err := ctx.Err(); err != nil {
-		return acp.PromptResponse{}, err
+		return acp.PromptResponse{}, fmt.Errorf("%w: %w", errPromptNotSent, err)
 	}
 
 	// Do not bind the JSON-RPC request lifetime directly to the caller's Stop

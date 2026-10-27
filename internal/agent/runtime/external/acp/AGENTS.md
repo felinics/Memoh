@@ -62,13 +62,26 @@ Build resumes its sessions; see `docs/agent-runtime.md`).
   Never call recursive mkdir on an unvalidated runtime or cache parent.
   Pre-planted symlinks under `/tmp` (runtime and shared-cache tiers) must fail
   the lease with no side effects at the symlink target.
-- Conversation continuity is Memoh's context document. Every pool session
-  starts fresh; each completed turn publishes a publication head
-  (`agent_session_publications`) in the same transaction as the round's
-  messages. The durable head is the single authority: a warm process records
-  the head its native conversation corresponds to and compares it against the
-  durable head before every prompt, so a session advanced elsewhere is
-  restarted instead of silently diverging.
+- Conversation continuity is the agent's own session files. Thread runtime
+  metadata keeps only the native session ID and the thread it belongs to
+  (`acp_native_session`); never copy session contents into the database. A
+  new process restores the session with `session/resume` when the agent
+  offers it, and with `session/load` when it does not or refuses; history
+  replayed while restoring reaches neither the live stream nor the
+  transcript.
+- A session is replaced with a new one only when the agent cannot restore
+  it: it offers neither method, or it refused each one it offers with an
+  error other than `auth_required`. A timeout, cancellation, broken connection or
+  missing credential fails the turn and keeps the stored ID. A replacement
+  tells the user through a `native_history_lost` notice on the next prompt.
+- A restore that times out or breaks the connection is
+  `client.ErrSessionRestoreFailed`. Only the user gives such a session up,
+  through `DELETE .../acp-runtime/native-session`, which removes the stored ID
+  under the history-reset gate and keeps the messages.
+- A stored ID that belongs to another thread (fork, backup restore) and a
+  discuss turn's fresh runtime always start a new session. Clearing history,
+  or changing an empty thread's agent or project, closes the process and
+  removes the stored ID. A prompt that never reached the agent records no ID.
 - Process preparation runs under the bot's runtime-configuration guard
   (`RuntimeSyncGuard`): a stale configuration generation or an in-progress
   reset must not start a new runtime.
@@ -104,8 +117,11 @@ Behavior-level coverage should include:
 - consecutive processes get different runtime roots;
 - startup failure removes its runtime root without changing `/data`;
 - pre-planted symlinks under `/tmp` fail the lease with no side effects;
-- a completed prompt records a publication head under the round's fence;
-- history clear removes the publication head and fences stale processes.
+- a new process restores the stored session, and replayed history stays out
+  of the live stream;
+- each way an agent can fail a restore either replaces the session with a
+  notice or fails the turn and keeps the stored ID;
+- a copied stored ID and a discuss turn start a new session.
 
 Run at minimum:
 

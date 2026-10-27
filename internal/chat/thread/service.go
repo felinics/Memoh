@@ -270,7 +270,6 @@ type sessionDescriptorTransactionQueries interface {
 	LockSessionRuntimeFenceForActivation(context.Context, sqlc.LockSessionRuntimeFenceForActivationParams) (int64, error)
 	NextSessionRuntimeFenceToken(context.Context) (int64, error)
 	ActivateSessionRuntimeFence(context.Context, sqlc.ActivateSessionRuntimeFenceParams) (int64, error)
-	DeleteAgentSessionPublicationsBySession(context.Context, pgtype.UUID) (int64, error)
 }
 
 // Queries is the storage surface owned by the Thread domain. Route lookup and
@@ -881,7 +880,7 @@ func (s *Service) UpdateDescriptorAndMetadataWithOwner(ctx context.Context, sess
 // UpdateEmptyDescriptorAndMetadataWithOwner updates a session runtime identity
 // only while its visible history is still empty. PostgreSQL-backed stores lock
 // the bot and session in the same transaction as the message check, descriptor
-// update, runtime-fence bump, and ACP snapshot invalidation. The lock ordering
+// update, and runtime-fence bump. The lock ordering
 // matches runtime activation, so an already-running turn linearizes before the
 // empty-history check and an old runtime token cannot write after the update.
 func (s *Service) UpdateEmptyDescriptorAndMetadataWithOwner(ctx context.Context, sessionID, typ, sessionMode, runtimeType string, metadata, runtimeMetadata map[string]any, botAgentID *string, runtimeOwnerUserID string) (Thread, error) {
@@ -942,15 +941,12 @@ func (s *Service) UpdateEmptyDescriptorAndMetadataWithOwner(ctx context.Context,
 		if tokenErr != nil {
 			return tokenErr
 		}
-		if _, activateErr := queries.ActivateSessionRuntimeFence(ctx, sqlc.ActivateSessionRuntimeFenceParams{
+		_, activateErr := queries.ActivateSessionRuntimeFence(ctx, sqlc.ActivateSessionRuntimeFenceParams{
 			RuntimeFencingToken: token,
 			SessionID:           pgSessionID,
 			BotID:               pgBotID,
-		}); activateErr != nil {
-			return activateErr
-		}
-		_, deleteErr := queries.DeleteAgentSessionPublicationsBySession(ctx, pgSessionID)
-		return deleteErr
+		})
+		return activateErr
 	})
 	if err != nil {
 		return Thread{}, err
@@ -1107,13 +1103,32 @@ var ErrRuntimeMetadataStale = errors.New("session runtime changed; runtime metad
 // so a concurrent runtime switch turns the merge into ErrRuntimeMetadataStale
 // instead of polluting another runtime's metadata, and on the caller's
 // runtime fencing token so a superseded owner's late write after a cluster
-// ownership handoff cannot clobber the new owner's runtime thread id.
+// ownership handoff cannot clobber the new owner's runtime thread id. Under a
+// history reset, like every reset write, it checks the reset lease in the
+// same transaction.
 func (s *Service) MergeRuntimeMetadata(ctx context.Context, sessionID, runtimeType string, delta map[string]any) (Thread, error) {
 	pgID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return Thread{}, fmt.Errorf("invalid session id: %w", err)
 	}
-	row, err := s.queries.GetSessionByID(ctx, pgID)
+	if _, fenced := runtimefence.ResetFromContext(ctx); !fenced {
+		return mergeRuntimeMetadata(ctx, s.queries, pgID, runtimeType, delta)
+	}
+	queries, ok := s.queries.(dbstore.Queries)
+	if !ok {
+		return Thread{}, runtimefence.ErrTransactionsUnsupported
+	}
+	var updated Thread
+	err = runtimefence.InResetTransaction(ctx, queries, "", sessionID, func(txQueries dbstore.Queries) error {
+		var mergeErr error
+		updated, mergeErr = mergeRuntimeMetadata(ctx, txQueries, pgID, runtimeType, delta)
+		return mergeErr
+	})
+	return updated, err
+}
+
+func mergeRuntimeMetadata(ctx context.Context, queries Queries, pgID pgtype.UUID, runtimeType string, delta map[string]any) (Thread, error) {
+	row, err := queries.GetSessionByID(ctx, pgID)
 	if err != nil {
 		return Thread{}, err
 	}
@@ -1139,7 +1154,7 @@ func (s *Service) MergeRuntimeMetadata(ctx context.Context, sessionID, runtimeTy
 	if fence, ok := runtimefence.FromContext(ctx); ok && fence.Token > 0 {
 		fencingToken = pgtype.Int8{Int64: fence.Token, Valid: true}
 	}
-	updated, err := s.queries.UpdateSessionRuntimeMetadata(ctx, sqlc.UpdateSessionRuntimeMetadataParams{
+	updated, err := queries.UpdateSessionRuntimeMetadata(ctx, sqlc.UpdateSessionRuntimeMetadataParams{
 		ID:              pgID,
 		RuntimeType:     strings.TrimSpace(runtimeType),
 		FencingToken:    fencingToken,

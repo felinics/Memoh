@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -16,7 +17,6 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 	sdk "github.com/felinics/twilight/sdk"
-	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -25,7 +25,6 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/partmeta"
-	"github.com/felinics/memoh/internal/agent/runtime/agentstate"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
@@ -194,35 +193,81 @@ func TestSessionPoolPromptForceFreshRuntimeReplacesBoundRuntime(t *testing.T) {
 	}
 }
 
-func TestSessionPoolRecordsHeadAfterSuccessfulPrompt(t *testing.T) {
-	pool := newFakeScriptPool(t)
-	pool.timeout = time.Hour
-	store := &emptyRuntimeStateStore{}
-	pool.SetRuntimeStateStore(store)
-
-	runID := uuid.NewString()
-	if _, err := pool.Prompt(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-1",
-		RunID:                 runID,
-		AgentID:               acpprofile.AgentACPID,
-		ProjectPath:           "/data/project",
-		Prompt:                "advance the native session",
-		RuntimeOwnerAccountID: "user-1",
-	}); err != nil {
-		t.Fatalf("Prompt() error = %v", err)
+func TestDriverRestoresNativeSession(t *testing.T) {
+	stored := func(id, threadID string) map[string]any {
+		return map[string]any{
+			"acp_agent_id": acpprofile.AgentACPID, "project_path": "/data/project",
+			NativeSessionKey: map[string]any{"id": id, "thread_id": threadID},
+		}
 	}
-	handle := pool.sessionHandle("session-1")
-	if handle == nil {
-		t.Fatal("prompt did not bind a runtime")
-	}
-	handle.state.Lock()
-	nativeHead, nativeHeadFound := handle.nativeHead, handle.nativeHeadFound
-	handle.state.Unlock()
-	// No snapshots are captured: every completed turn records a head so
-	// warm-handle fencing still tracks canonical history per turn.
-	if !nativeHeadFound || nativeHead.RunID != runID {
-		t.Fatalf("native head = %#v found=%v, want head for run", nativeHead, nativeHeadFound)
+	for _, tt := range []struct {
+		name string
+		// resume is the fake agent's answer to session/resume: "1" restores,
+		// a number refuses with that JSON-RPC code.
+		resume      string
+		metadata    map[string]any
+		fresh       bool
+		ensureFirst bool
+		// image is a prompt the agent cannot take, so it is never sent.
+		image   bool
+		calls   string
+		wantErr bool
+		notices int
+		// persisted is the session ID written back, empty for none.
+		persisted string
+	}{
+		{name: "restores the stored session", resume: "1", metadata: stored("saved", "thread-1"), calls: "resume:saved"},
+		{name: "agent lost the session", resume: "-32002", metadata: stored("saved", "thread-1"), calls: "resume:saved new", notices: 1, persisted: "session-pool-fake-session"},
+		{name: "a runtime control started the replacement", resume: "-32002", metadata: stored("saved", "thread-1"), ensureFirst: true, calls: "resume:saved new", notices: 1, persisted: "session-pool-fake-session"},
+		{name: "copied from another thread", resume: "1", metadata: stored("saved", "thread-0"), calls: "new", notices: 1, persisted: "session-pool-fake-session"},
+		{name: "thread without a stored session", resume: "1", metadata: map[string]any{"acp_agent_id": acpprofile.AgentACPID, "project_path": "/data/project"}, calls: "new", persisted: "session-pool-fake-session"},
+		{name: "a prompt the agent never got records no session", resume: "1", metadata: map[string]any{"acp_agent_id": acpprofile.AgentACPID, "project_path": "/data/project"}, image: true, calls: "new", wantErr: true},
+		{name: "discuss starts fresh", resume: "1", metadata: stored("saved", "thread-1"), fresh: true, calls: "new"},
+		{name: "auth failure keeps the stored session", resume: "-32000", metadata: stored("saved", "thread-1"), calls: "resume:saved", wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_RESUME", tt.resume)
+			sessionLog := filepath.Join(t.TempDir(), "sessions")
+			t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_SESSION_LOG", sessionLog)
+			pool := newFakeScriptPool(t)
+			pool.store = fakeSessionGetter{session: SessionDescriptor{BotID: "bot-1", IsACP: true, RuntimeMetadata: tt.metadata}}
+			if tt.ensureFirst {
+				if _, err := pool.Ensure(context.Background(), PromptInput{BotID: "bot-1", SessionID: "thread-1", RuntimeOwnerAccountID: "user-1"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var images []external.Image
+			if tt.image {
+				images = []external.Image{{MimeType: "image/png", Data: []byte("image")}}
+			}
+			notices := 0
+			result, err := NewDriver(pool).Prompt(context.Background(), external.PromptInput{
+				BotID: "bot-1", ThreadID: "thread-1", RunID: "run-1", Prompt: "continue", Images: images,
+				RuntimeOwnerAccountID: "user-1", RuntimeMetadata: tt.metadata, ForceFreshRuntime: tt.fresh,
+				Sink: external.EventSinkFunc(func(ev event.StreamEvent) {
+					if ev.NoticeKind == event.NoticeNativeHistoryLost {
+						notices++
+					}
+				}),
+			})
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Prompt() error = %v, want error %v", err, tt.wantErr)
+			}
+			raw, readErr := os.ReadFile(sessionLog) //nolint:gosec // test-owned temporary file.
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if calls := strings.Join(strings.Fields(string(raw)), " "); calls != tt.calls {
+				t.Fatalf("session calls = %q, want %q", calls, tt.calls)
+			}
+			if notices != tt.notices {
+				t.Fatalf("history-lost notices = %d, want %d", notices, tt.notices)
+			}
+			persisted, _ := storedNativeSession(result.RuntimeMetadata, "thread-1")
+			if persisted != tt.persisted || (tt.persisted == "" && result.RuntimeMetadata != nil) {
+				t.Fatalf("persisted runtime metadata = %#v, want session %q", result.RuntimeMetadata, tt.persisted)
+			}
+		})
 	}
 }
 
@@ -2129,20 +2174,6 @@ func (g fakeSessionGetter) Get(context.Context, string) (SessionDescriptor, erro
 	return g.session, g.err
 }
 
-type emptyRuntimeStateStore struct{}
-
-func (*emptyRuntimeStateStore) RuntimeConfigEpoch(context.Context, string, string) (agentstate.RuntimeConfigEpoch, error) {
-	return agentstate.RuntimeConfigEpoch{}, nil
-}
-
-func (*emptyRuntimeStateStore) GuardRuntimeSync(ctx context.Context, _ string, _ int64, fn func(context.Context) error) error {
-	return fn(ctx)
-}
-
-func (*emptyRuntimeStateStore) Head(context.Context, string, string) (agentstate.SessionPublicationHead, bool, error) {
-	return agentstate.SessionPublicationHead{}, false, nil
-}
-
 type fakeToolApprovalService struct {
 	cancelCtx       context.Context
 	cancelBotID     string
@@ -2468,6 +2499,9 @@ func (*sessionPoolFakeAgent) Logout(context.Context, acp.LogoutRequest) (acp.Log
 
 func (*sessionPoolFakeAgent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
 	capabilities := acp.AgentCapabilities{LoadSession: false}
+	if os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_RESUME") != "" {
+		capabilities.SessionCapabilities.Resume = &acp.SessionResumeCapabilities{}
+	}
 	if os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_IMAGE") == "1" {
 		capabilities.PromptCapabilities.Image = true
 	}
@@ -2488,6 +2522,9 @@ func (*sessionPoolFakeAgent) ListSessions(context.Context, acp.ListSessionsReque
 }
 
 func (a *sessionPoolFakeAgent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+	if err := logPoolSessionCall("new"); err != nil {
+		return acp.NewSessionResponse{}, err
+	}
 	resp := acp.NewSessionResponse{SessionId: acp.SessionId("session-pool-fake-session")}
 	if os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_MODELS") == "1" {
 		a.modelID = "gpt-5.1-codex"
@@ -2527,8 +2564,30 @@ func (a *sessionPoolFakeAgent) Prompt(ctx context.Context, p acp.PromptRequest) 
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 }
 
-func (*sessionPoolFakeAgent) ResumeSession(context.Context, acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
+// ResumeSession answers with MEMOH_ACP_SESSION_POOL_FAKE_AGENT_RESUME: "1"
+// restores the session, a number is the JSON-RPC error code to refuse with.
+func (*sessionPoolFakeAgent) ResumeSession(_ context.Context, p acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
+	if err := logPoolSessionCall("resume:" + string(p.SessionId)); err != nil {
+		return acp.ResumeSessionResponse{}, err
+	}
+	if code, err := strconv.Atoi(os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_RESUME")); err == nil && code != 1 {
+		return acp.ResumeSessionResponse{}, &acp.RequestError{Code: code, Message: "injected resume failure"}
+	}
 	return acp.ResumeSessionResponse{}, nil
+}
+
+func logPoolSessionCall(call string) error {
+	path := os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_SESSION_LOG")
+	if path == "" {
+		return nil
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // test-owned temporary file.
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+	_, err = file.WriteString(call + "\n")
+	return err
 }
 
 func (a *sessionPoolFakeAgent) SetSessionConfigOption(_ context.Context, p acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {

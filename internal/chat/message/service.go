@@ -380,34 +380,6 @@ func (s *DBService) persistRoundInTx(ctx context.Context, inputs []PersistInput,
 					return fmt.Errorf("record runtime turn anchor: %w", anchorErr)
 				}
 			}
-			if options.AgentPublication != nil {
-				pgBotID, parseErr := dbpkg.ParseUUID(botID)
-				if parseErr != nil {
-					return parseErr
-				}
-				pgSessionID, parseErr := dbpkg.ParseUUID(sessionID)
-				if parseErr != nil {
-					return parseErr
-				}
-				pgRunID, parseErr := dbpkg.ParseUUID(strings.TrimSpace(options.AgentPublication.RunID))
-				if parseErr != nil {
-					return fmt.Errorf("runtime publication requires run_id: %w", parseErr)
-				}
-				moved, upsertErr := queries.UpsertAgentSessionPublication(ctx, sqlc.UpsertAgentSessionPublicationParams{
-					SessionID: pgSessionID,
-					BotID:     pgBotID,
-					RunID:     pgRunID,
-				})
-				if upsertErr != nil {
-					return fmt.Errorf("publish runtime session head: %w", upsertErr)
-				}
-				if moved == 0 {
-					// The guarded insert matched no run: the session's fencing
-					// generation moved underneath this round. Publishing nothing
-					// would silently promote a stale native context on restart.
-					return runtimefence.ErrStale
-				}
-			}
 			return nil
 		}
 		var err error
@@ -1580,10 +1552,9 @@ func (s *DBService) DeleteByBot(ctx context.Context, botID string) error {
 	if err != nil {
 		return err
 	}
-	// ClearHistoryByBot also removes the ACP publication heads, version
-	// headers, and line sets in the same statement: cleared history has no
-	// canonical ACP head, and a headless snapshot would be unreachable orphan
-	// storage a fresh runtime must never resurrect.
+	// ClearHistoryByBot also scrubs each session's runtime metadata in the same
+	// statement, so no runtime resumes the cleared conversation from its own
+	// native thread.
 	return runtimefence.InResetTransaction(ctx, s.queries, botID, "", func(queries dbstore.Queries) error {
 		return queries.ClearHistoryByBot(ctx, pgBotID)
 	})
@@ -1618,10 +1589,9 @@ func (s *DBService) DeleteBySession(ctx context.Context, sessionID string) error
 	if err != nil {
 		return err
 	}
-	// ClearHistoryBySession also removes the ACP publication head, version
-	// headers, and line set in the same statement: cleared history has no
-	// canonical ACP head, and a headless snapshot would be unreachable orphan
-	// storage a fresh runtime must never resurrect.
+	// ClearHistoryBySession also scrubs the session's runtime metadata in the
+	// same statement, so no runtime resumes the cleared conversation from its
+	// own native thread.
 	return runtimefence.InResetTransaction(ctx, s.queries, "", sessionID, func(queries dbstore.Queries) error {
 		return queries.ClearHistoryBySession(ctx, pgSessionID)
 	})

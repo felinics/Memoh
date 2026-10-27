@@ -34,7 +34,6 @@ type Queries interface {
 	RetireSupersededInterruptedSessionRuns(context.Context) (int64, error)
 	RetireInterruptedSessionRun(context.Context, pgtype.UUID) (int64, error)
 
-	DeleteAgentSessionPublicationsBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error)
 	CreateAgentAuthorization(context.Context, dbsqlc.CreateAgentAuthorizationParams) (dbsqlc.AgentAuthorization, error)
 	GetAgentAuthorization(context.Context, dbsqlc.GetAgentAuthorizationParams) (dbsqlc.AgentAuthorization, error)
 	UpdateAgentAuthorization(context.Context, dbsqlc.UpdateAgentAuthorizationParams) (dbsqlc.AgentAuthorization, error)
@@ -159,7 +158,6 @@ type Queries interface {
 	CreateUserInputRequest(ctx context.Context, arg dbsqlc.CreateUserInputRequestParams) (dbsqlc.UserInputRequest, error)
 	CreateUser(ctx context.Context, arg dbsqlc.CreateUserParams) (dbsqlc.CreateUserRow, error)
 	DeleteBotACLRuleByID(ctx context.Context, id pgtype.UUID) error
-	UpsertAgentSessionPublication(ctx context.Context, arg dbsqlc.UpsertAgentSessionPublicationParams) (int64, error)
 	DeleteBotByID(ctx context.Context, id pgtype.UUID) error
 	DeleteBotChannelConfig(ctx context.Context, arg dbsqlc.DeleteBotChannelConfigParams) error
 	DeleteBotDependencyInstallation(ctx context.Context, arg dbsqlc.DeleteBotDependencyInstallationParams) (int64, error)
@@ -211,7 +209,6 @@ type Queries interface {
 	FindChatRoute(ctx context.Context, arg dbsqlc.FindChatRouteParams) (dbsqlc.FindChatRouteRow, error)
 	GetAccountByIdentity(ctx context.Context, identity pgtype.Text) (dbsqlc.TeamAccount, error)
 	GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (dbsqlc.TeamAccount, error)
-	GetAgentSessionPublicationHead(ctx context.Context, arg dbsqlc.GetAgentSessionPublicationHeadParams) (pgtype.UUID, error)
 	GetRuntimeConfigEpoch(ctx context.Context, arg dbsqlc.GetRuntimeConfigEpochParams) (dbsqlc.GetRuntimeConfigEpochRow, error)
 	GetBotRuntimeReset(ctx context.Context, botID pgtype.UUID) (dbsqlc.GetBotRuntimeResetRow, error)
 	GetRuntimeRoundOutcome(ctx context.Context, arg dbsqlc.GetRuntimeRoundOutcomeParams) (string, error)

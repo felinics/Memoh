@@ -84,15 +84,6 @@ func (drivers Drivers) ModelCatalog(ctx context.Context, runtimeType string, req
 	return ModelCatalog{}, ErrModelCatalogUnavailable
 }
 
-// RoundRollbackHandler is implemented by drivers that must repair runtime
-// state when a completed turn's round definitively rolled back (the runtime
-// remembers a turn the visible history lost). Drivers whose durable state is
-// authoritative on their own side simply omit it and the divergence is
-// logged.
-type RoundRollbackHandler interface {
-	OnRoundRolledBack(ctx context.Context, botID, threadID string)
-}
-
 // ThreadForker is implemented by runtimes with native conversation forking.
 // ForkThread derives a new runtime-side conversation from the session
 // described by runtimeMetadata, cut after lastTurnID when non-empty (empty
@@ -255,9 +246,6 @@ type PromptResult struct {
 	// TurnCompleted reports whether the runtime finished the turn (as opposed
 	// to an interrupt or failure part-way).
 	TurnCompleted bool
-	// PublishHead asks the application to publish a completed round's run ID
-	// with its messages so warm runtimes can detect another process's progress.
-	PublishHead bool
 	// RoundMetadata carries driver-owned keys merged into the round's
 	// assistant-message metadata (provenance such as the ACP agent id).
 	RoundMetadata map[string]any

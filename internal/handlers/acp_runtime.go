@@ -19,6 +19,7 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 type ACPRuntimeHandler struct {
@@ -45,6 +46,7 @@ type acpRuntimePool interface {
 	SetRuntimeReasoning(ctx context.Context, botID, runtimeID, effort string) (acpagent.RuntimeStatus, error)
 	SetRuntimeMode(ctx context.Context, botID, runtimeID, modeID string) (acpagent.RuntimeStatus, error)
 	CloseRuntime(botID, runtimeID string) error
+	BeginSessionHistoryReset(ctx context.Context, botID, sessionID string) (context.Context, func(), error)
 }
 
 type acpRuntimeCreateRequest struct {
@@ -92,6 +94,7 @@ func (h *ACPRuntimeHandler) Register(e *echo.Echo) {
 	e.PATCH("/bots/:bot_id/sessions/:session_id/acp-runtime/model", h.SetModel)
 	e.PATCH("/bots/:bot_id/sessions/:session_id/acp-runtime/reasoning", h.SetReasoning)
 	e.PATCH("/bots/:bot_id/sessions/:session_id/acp-runtime/mode", h.SetMode)
+	e.DELETE("/bots/:bot_id/sessions/:session_id/acp-runtime/native-session", h.ResetNativeSession)
 }
 
 // CreateRuntime godoc
@@ -314,6 +317,40 @@ func (h *ACPRuntimeHandler) CloseRuntime(c echo.Context) error {
 		if errors.Is(err, acpagent.ErrRuntimeNotFound) {
 			// Close is fire-and-forget on the client; a reaped runtime is fine.
 			return c.NoContent(http.StatusNoContent)
+		}
+		return apperror.Wrap(apperror.CodeACPOperationFailed, err, nil)
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// ResetNativeSession godoc
+// @Summary Start the agent over on a new ACP session
+// @Description Forgets the agent session that keeps failing to restore and keeps the messages. The next message opens a new agent session, which does not remember them.
+// @Tags acp
+// @Param bot_id path string true "Bot ID"
+// @Param session_id path string true "Session ID"
+// @Success 204
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Router /bots/{bot_id}/sessions/{session_id}/acp-runtime/native-session [delete].
+func (h *ACPRuntimeHandler) ResetNativeSession(c echo.Context) error {
+	bot, sessionID, _, err := h.authorizedACPSession(c)
+	if err != nil {
+		return err
+	}
+	// The reset closes the process and holds every start until the stored
+	// session is gone, so no process restores it in between.
+	ctx, release, err := h.pool.BeginSessionHistoryReset(c.Request().Context(), bot.ID, sessionID)
+	if err != nil {
+		return historyResetError(err)
+	}
+	defer release()
+	if _, err := h.sessionService.MergeRuntimeMetadata(ctx, sessionID, session.RuntimeACPAgent, map[string]any{acpagent.NativeSessionKey: nil}); err != nil {
+		if leaseErr := runtimefence.ResetLeaseFailure(ctx, err); leaseErr != nil {
+			return apperror.Wrap(apperror.CodeSessionResetConflict, leaseErr, nil)
 		}
 		return apperror.Wrap(apperror.CodeACPOperationFailed, err, nil)
 	}

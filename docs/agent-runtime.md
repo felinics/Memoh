@@ -93,7 +93,7 @@ Use a stable code, public fallback text, and public string arguments; never put
 private diagnostics in a notice. A round that cannot commit still follows the
 normal persistence failure/rollback contract.
 
-## Native session state of direct runtimes
+## Native session state of external runtimes
 
 Codex, Claude Code and Grok Build keep their own conversation record on the
 bot's data volume: Codex writes rollouts under `CODEX_HOME`
@@ -156,11 +156,30 @@ Forks use Codex's native `thread/fork` on the running app-server; the branch
 records its own rollout path. Threads created before this behaviour still
 resume by their thread id and gain a rollout path after their next turn.
 
+Custom ACP agents run with `HOME=/data` and keep their sessions wherever the
+agent stores them under it. The thread records the agent's session id with the
+thread it belongs to (`acp_native_session`). A new process — after the idle
+reaper, a server restart or a failed turn — reattaches with `session/resume`
+when the agent offers it, and with `session/load` when it does not or refuses;
+history replayed by either is dropped. ACP names no error for a missing session and agents answer with
+different codes, so any error the agent itself returns, except
+`auth_required`, counts as a lost session and is replaced with a
+`native_history_lost` notice. A timeout or a broken connection fails the turn
+with `external_runtime.session_resume_failed` and keeps the stored id, since
+the session may still be intact; the Web chat offers a button on that failure
+to give the session up (`DELETE .../acp-runtime/native-session`), which keeps
+the messages and starts the next turn on a new session. A forked or restored
+thread carries the source thread's id, which it does not own, so it starts a
+new session with the same notice; changing an empty thread's agent or project
+drops the id. Discuss turns always start a new session. A round that fails to
+commit after the agent finished it stays in the agent's session, as with
+Codex.
+
 Migration 0156 removes the obsolete `agent_session_states` and
-`agent_session_state_lines` tables and their saved snapshots.
-`agent_session_publications` retains only the run ID used to fence ACP warm
-processes; it contains no conversation state. Downgrading restores the old table
-structure, not deleted snapshot data.
+`agent_session_state_lines` tables and their saved snapshots. Downgrading
+restores the old table structure, not deleted snapshot data.
+`agent_session_publications` held the run ID that fenced ACP warm processes
+before they restored native sessions; nothing reads or writes it now.
 
 
 ## Account sign-in of direct runtimes

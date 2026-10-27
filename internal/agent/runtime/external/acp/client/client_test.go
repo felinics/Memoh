@@ -3627,6 +3627,9 @@ func (a *fakeACPAgent) ResumeSession(_ context.Context, p acp.ResumeSessionReque
 	if err := captureFakeSessionLifecycle("resume", string(p.SessionId), p.Meta); err != nil {
 		return acp.ResumeSessionResponse{}, err
 	}
+	if err := fakeSessionRestoreError("MEMOH_ACP_FAKE_AGENT_RESUME_ERROR"); err != nil {
+		return acp.ResumeSessionResponse{}, err
+	}
 	return acp.ResumeSessionResponse{ConfigOptions: a.configOptions()}, nil
 }
 
@@ -3635,15 +3638,39 @@ func (a *fakeACPAgent) LoadSession(ctx context.Context, p acp.LoadSessionRequest
 	if err := captureFakeSessionLifecycle("load", string(p.SessionId), p.Meta); err != nil {
 		return acp.LoadSessionResponse{}, err
 	}
+	if err := fakeSessionRestoreError("MEMOH_ACP_FAKE_AGENT_LOAD_ERROR"); err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
 	if os.Getenv("MEMOH_ACP_FAKE_AGENT_REPLAY_HISTORY") == "1" {
-		if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
-			SessionId: p.SessionId,
-			Update:    acp.UpdateAgentMessageText("historical replay"),
-		}); err != nil {
+		for _, update := range []acp.SessionUpdate{
+			acp.UpdateUserMessageText("historical question"),
+			acp.UpdateAgentMessageText("historical replay"),
+			acp.StartToolCall("historical-tool", "historical tool"),
+		} {
+			if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: update}); err != nil {
+				return acp.LoadSessionResponse{}, err
+			}
+		}
+	}
+	if raw := os.Getenv("MEMOH_ACP_FAKE_AGENT_REPLAY_BURST"); raw != "" {
+		if err := replayBurst(p.SessionId, raw); err != nil {
 			return acp.LoadSessionResponse{}, err
 		}
 	}
 	return acp.LoadSessionResponse{ConfigOptions: a.configOptions()}, nil
+}
+
+// fakeSessionRestoreError answers a restore the way the env names: with a
+// JSON-RPC error, or by exiting so the connection breaks.
+func fakeSessionRestoreError(env string) error {
+	switch os.Getenv(env) {
+	case "":
+		return nil
+	case "exit":
+		os.Exit(1)
+	}
+	code := map[string]int{"unsupported": -32601, "missing": -32002, "invalid": -32602, "internal": -32603, "auth": -32000}[os.Getenv(env)]
+	return &acp.RequestError{Code: code, Message: "injected restore failure"}
 }
 
 func (a *fakeACPAgent) prepareFakeSession(cwd string) {

@@ -18,52 +18,6 @@ WHERE bot.team_id = public.memoh_current_team_id()
     OR session.id IS NOT NULL
   );
 
--- name: GetAgentSessionPublicationHead :one
--- Return the last committed round. Warm runtimes check it before every native
--- prompt so another server instance (or a history clear) cannot leave two
--- process-local conversations advancing from different canonical heads.
-SELECT publication.run_id
-FROM agent_session_publications publication
-JOIN bot_sessions session
-  ON session.team_id = publication.team_id
- AND session.id = publication.session_id
-WHERE publication.team_id = public.memoh_current_team_id()
-  AND publication.session_id = sqlc.arg(session_id)
-  AND session.bot_id = sqlc.arg(bot_id)
-  AND session.runtime_type <> 'model'
-  AND session.deleted_at IS NULL;
-
--- name: UpsertAgentSessionPublication :execrows
--- Written in the same transaction as the round's canonical messages. The run
--- join proves the run belongs to this tenant+session and still owns the
--- session's current fencing generation, so a stale runtime cannot move the
--- head.
-WITH target_session AS MATERIALIZED (
-  SELECT session.team_id, session.id, session.runtime_fencing_token
-  FROM bot_sessions session
-  WHERE session.team_id = public.memoh_current_team_id()
-    AND session.id = sqlc.arg(session_id)
-    AND session.bot_id = sqlc.arg(bot_id)
-    AND session.runtime_type <> 'model'
-    AND session.deleted_at IS NULL
-),
-target_run AS MATERIALIZED (
-  SELECT target.team_id, target.id AS session_id, run.run_id
-  FROM target_session target
-  JOIN session_runs run
-    ON run.team_id = target.team_id
-   AND run.session_id = target.id
-   AND run.bot_id = sqlc.arg(bot_id)
-   AND run.run_id = sqlc.arg(run_id)
-   AND run.fencing_token = target.runtime_fencing_token
-)
-INSERT INTO agent_session_publications (team_id, session_id, run_id)
-SELECT target.team_id, target.session_id, target.run_id
-FROM target_run target
-ON CONFLICT (team_id, session_id) DO UPDATE SET
-  run_id = EXCLUDED.run_id,
-  updated_at = now();
-
 -- name: GetRuntimeRoundOutcome :one
 -- Read the terminal runtime outcome for commit-unknown reconciliation after
 -- the caller has first waited on the session write lock.
@@ -123,8 +77,3 @@ WHERE message.team_id = public.memoh_current_team_id()
   AND message.role = 'assistant'
   AND message.runtime_type <> 'model'
   AND message.metadata @> '{"agent_decision_projection": true}'::jsonb;
-
--- name: DeleteAgentSessionPublicationsBySession :execrows
-DELETE FROM agent_session_publications publication
-WHERE publication.team_id = public.memoh_current_team_id()
-  AND publication.session_id = sqlc.arg(session_id);

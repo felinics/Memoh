@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,34 +32,54 @@ func burstExpectedText(kind string, chunks int) string {
 }
 
 // promptBurst writes chunks thought chunks and then chunks message chunks in a
-// single write before answering, the way a backlog reaches Memoh when an
-// Agent replays a session or flushes output it buffered.
+// single write before answering.
 func (*fakeACPAgent) promptBurst(p acp.PromptRequest, raw string) (acp.PromptResponse, error) {
 	chunks, err := strconv.Atoi(raw)
 	if err != nil {
 		return acp.PromptResponse{}, err
 	}
-	var burst []byte
+	var updates []acp.SessionUpdate
 	for _, update := range []struct {
 		kind string
 		of   func(string) acp.SessionUpdate
 	}{{"r", acp.UpdateAgentThoughtText}, {"t", acp.UpdateAgentMessageText}} {
 		for i := 0; i < chunks; i++ {
-			line, err := json.Marshal(map[string]any{
-				"jsonrpc": "2.0",
-				"method":  acp.ClientMethodSessionUpdate,
-				"params":  acp.SessionNotification{SessionId: p.SessionId, Update: update.of(burstChunkText(update.kind, i))},
-			})
-			if err != nil {
-				return acp.PromptResponse{}, err
-			}
-			burst = append(append(burst, line...), '\n')
+			updates = append(updates, update.of(burstChunkText(update.kind, i)))
 		}
 	}
-	if _, err := os.Stdout.Write(burst); err != nil {
+	if err := writeUpdateBurst(p.SessionId, updates); err != nil {
 		return acp.PromptResponse{}, err
 	}
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+}
+
+// replayBurst replays a long session in a single write while session/load is
+// in flight.
+func replayBurst(sessionID acp.SessionId, raw string) error {
+	updates, err := strconv.Atoi(raw)
+	if err != nil {
+		return err
+	}
+	return writeUpdateBurst(sessionID, slices.Repeat([]acp.SessionUpdate{acp.UpdateAgentMessageText("historical replay")}, updates))
+}
+
+// writeUpdateBurst writes the updates in a single write, the way a backlog
+// reaches Memoh when an Agent replays a session or flushes output it buffered.
+func writeUpdateBurst(sessionID acp.SessionId, updates []acp.SessionUpdate) error {
+	var burst []byte
+	for _, update := range updates {
+		line, err := json.Marshal(map[string]any{
+			"jsonrpc": "2.0",
+			"method":  acp.ClientMethodSessionUpdate,
+			"params":  acp.SessionNotification{SessionId: sessionID, Update: update},
+		})
+		if err != nil {
+			return err
+		}
+		burst = append(append(burst, line...), '\n')
+	}
+	_, err := os.Stdout.Write(burst)
+	return err
 }
 
 // slowConsumer stands for a live stream slower than the Agent, such as one

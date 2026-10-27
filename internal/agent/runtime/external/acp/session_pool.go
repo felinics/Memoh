@@ -3,8 +3,8 @@
 // Architecture note: this is an in-memory runtime pool for a single server
 // instance only. A runtime is an OS process identified by a server-generated
 // runtime ID and optionally *bound* to one chat session. Processes never
-// survive a server restart. Agents own their durable files under /data.
-// Publication heads fence warm processes without storing conversation files.
+// survive a server restart. Agents own their durable files under /data, and a
+// new process restores the thread's native session from them.
 package acp
 
 import (
@@ -21,6 +21,7 @@ import (
 
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/agentstate"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
@@ -219,10 +220,10 @@ type runtimeHandle struct {
 	closeStarted         bool
 	closeDone            chan struct{}
 	closeErr             error
-	// nativeHead identifies the committed round this warm process has observed.
-	// A different head or cleared history invalidates the process before reuse.
-	nativeHead      agentstate.SessionPublicationHead
-	nativeHeadFound bool
+	// historyLost records that startup replaced the thread's stored native
+	// session with a new one. The next prompt tells the user; the runtime
+	// control that may have started the process has nowhere to say it.
+	historyLost bool
 }
 
 // PromptInput carries one prompt (or runtime control call) for a chat
@@ -363,7 +364,7 @@ func (p *SessionPool) SetUserInputService(service sessionUserInputService) {
 	}
 }
 
-// SetRuntimeStateStore enables publication fencing and runtime config guards.
+// SetRuntimeStateStore enables runtime config generation checks and guards.
 // It remains optional so embedders and focused pool tests do not need a
 // PostgreSQL dependency.
 func (p *SessionPool) SetRuntimeStateStore(store agentstate.RuntimeStateStore) {
@@ -863,10 +864,9 @@ func (p *SessionPool) Prompt(ctx context.Context, input PromptInput) (client.Pro
 
 	p.reapIdle(time.Now())
 	if input.ForceFreshRuntime {
-		// Discuss turns inject a complete bounded context into a fresh
-		// process; closing the current runtime is all a fresh start needs.
+		// Discuss turns inject a complete bounded context, so they start a
+		// new process on a new native session.
 		_ = p.CloseSession(input.SessionID) //nolint:contextcheck // lifecycle close uses the handle owner context.
-		input.ForceFreshRuntime = false
 	}
 	// A handle can be torn down between resolution and use (reaper, agent
 	// change, a concurrent failed prompt); retry resolution a bounded number
@@ -897,13 +897,12 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 	sess := h.session
 	h.state.Unlock()
 
-	current, err := p.publicationHeadMatches(ctx, h)
+	current, err := p.runtimeConfigCurrent(ctx, h)
 	if err != nil {
 		return client.PromptResult{}, false, err
 	}
 	if !current {
-		// Another server process (or a history reset) moved the canonical head.
-		// The in-memory native conversation can no longer be advanced safely.
+		// The process was started from an older configuration generation.
 		_ = p.teardown(h) //nolint:contextcheck // stale warm generation must be destroyed before retry.
 		return client.PromptResult{}, true, nil
 	}
@@ -949,6 +948,19 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 
 	turn := external.NewTurnStream(input.Sink, input.ToolOutputLimit)
 	defer turn.Finish()
+	// Taken only after the configuration applied: a turn that fails or is
+	// stopped before then leaves the notice to the next turn.
+	h.state.Lock()
+	historyLost := h.historyLost
+	h.historyLost = false
+	h.state.Unlock()
+	if historyLost {
+		turn.EmitStreamEvent(event.StreamEvent{
+			Type:       event.RuntimeNotice,
+			NoticeKind: event.NoticeNativeHistoryLost,
+			Delta:      "The ACP agent could not restore this conversation's session and started a new one. It does not remember the earlier messages shown here.",
+		})
+	}
 	unregisterToolEvents := toolmount.RegisterTurnSink(p.contexts, input.BotID, input.SessionID, input.RunID, turn.EmitStreamEvent)
 	defer unregisterToolEvents()
 
@@ -1031,36 +1043,22 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 		}
 		// Prompt failures usually indicate the ACP process is in a bad state
 		// (transport hang, agent crash); drop the runtime so the next call
-		// starts fresh.
+		// restores the session in a new process.
 		_ = p.teardown(h) //nolint:contextcheck // lifecycle close uses the handle owner context.
 		return result, false, err
-	}
-	// The native conversation has advanced past this run. ACP publishes only
-	// run IDs (no conversation files are captured); the head still moves
-	// per turn so cross-instance warm-handle fencing keeps working. Record
-	// the head this process now corresponds to; the application commits the
-	// matching durable head with the round, and the pre-prompt head
-	// comparison destroys this generation if it never does.
-	if p.stateStore != nil && strings.TrimSpace(h.boundSession) != "" {
-		if runID, parseErr := uuid.Parse(strings.TrimSpace(input.RunID)); parseErr == nil {
-			h.state.Lock()
-			h.nativeHead = agentstate.SessionPublicationHead{RunID: runID.String()}
-			h.nativeHeadFound = true
-			h.state.Unlock()
-		}
 	}
 	return result, false, nil
 }
 
-func (p *SessionPool) publicationHeadMatches(ctx context.Context, h *runtimeHandle) (bool, error) {
+// runtimeConfigCurrent reports whether the process was started from the
+// bot's and the session's current configuration generation.
+func (p *SessionPool) runtimeConfigCurrent(ctx context.Context, h *runtimeHandle) (bool, error) {
 	if p == nil || h == nil {
 		return true, nil
 	}
 	h.state.Lock()
 	sessionID := strings.TrimSpace(h.boundSession)
 	expectedEpoch := h.runtimeConfigEpoch
-	expected := h.nativeHead
-	expectedFound := h.nativeHeadFound
 	h.state.Unlock()
 	actualEpoch, err := p.loadRuntimeConfigEpoch(ctx, h.botID, sessionID)
 	if err != nil {
@@ -1077,28 +1075,7 @@ func (p *SessionPool) publicationHeadMatches(ctx context.Context, h *runtimeHand
 			slog.Int64("actual_session_epoch", actualEpoch.Session))
 		return false, nil
 	}
-	if p.stateStore == nil {
-		return true, nil
-	}
-	if sessionID == "" {
-		return true, nil
-	}
-	actual, actualFound, err := p.stateStore.Head(ctx, h.botID, sessionID)
-	if err != nil {
-		return false, fmt.Errorf("load ACP session publication head: %w", err)
-	}
-	if publicationHeadsEqual(expected, expectedFound, actual, actualFound) {
-		return true, nil
-	}
-	p.logger.InfoContext(ctx, "ACP warm runtime canonical head changed; restarting before prompt",
-		slog.String("bot_id", h.botID),
-		slog.String("session_id", sessionID),
-		slog.String("runtime_id", h.id),
-		slog.Bool("expected_exists", expectedFound),
-		slog.String("expected_run_id", expected.RunID),
-		slog.Bool("actual_exists", actualFound),
-		slog.String("actual_run_id", actual.RunID))
-	return false, nil
+	return true, nil
 }
 
 func (p *SessionPool) loadRuntimeConfigEpoch(ctx context.Context, botID, sessionID string) (agentstate.RuntimeConfigEpoch, error) {
@@ -1110,18 +1087,6 @@ func (p *SessionPool) loadRuntimeConfigEpoch(ctx context.Context, botID, session
 		return agentstate.RuntimeConfigEpoch{}, fmt.Errorf("load ACP runtime config epoch: %w", err)
 	}
 	return epoch, nil
-}
-
-func publicationHeadsEqual(a agentstate.SessionPublicationHead, aFound bool, b agentstate.SessionPublicationHead, bFound bool) bool {
-	if aFound != bFound {
-		return false
-	}
-	if !aFound {
-		return true
-	}
-	aRunID, aErr := uuid.Parse(strings.TrimSpace(a.RunID))
-	bRunID, bErr := uuid.Parse(strings.TrimSpace(b.RunID))
-	return aErr == nil && bErr == nil && aRunID == bRunID
 }
 
 // rememberedACPPair reads the session's persisted ACP (model, effort) pair
@@ -1365,8 +1330,9 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 
 			h.op.Lock()
 			err := p.startRuntime(ctx, h, startOptions{
-				ToolHTTPURL: input.ToolHTTPURL,
-				Sink:        input.Sink,
+				ToolHTTPURL:        input.ToolHTTPURL,
+				Sink:               input.Sink,
+				FreshNativeSession: input.ForceFreshRuntime,
 			})
 			h.op.Unlock()
 			if err != nil {
@@ -1396,14 +1362,14 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 		if matches && !closed {
 			if starting {
 				// A concurrent startRuntime still owns h.op and has not
-				// published nativeHead/epoch yet; comparing the zero values
-				// against the durable head would wrongly tear the starting
-				// runtime down. Callers serialize on h.op, which startRuntime
-				// holds, and re-run the head comparison themselves once the
-				// start completes.
+				// recorded its epoch yet; comparing the zero value against
+				// the durable epoch would wrongly tear the starting runtime
+				// down. Callers serialize on h.op, which startRuntime holds,
+				// and re-run the epoch comparison themselves once the start
+				// completes.
 				return h, nil
 			}
-			current, epochErr := p.publicationHeadMatches(ctx, h)
+			current, epochErr := p.runtimeConfigCurrent(ctx, h)
 			if epochErr != nil {
 				return nil, epochErr
 			}
@@ -1424,6 +1390,8 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 type startOptions struct {
 	ToolHTTPURL string
 	Sink        client.EventSink
+	// FreshNativeSession skips restoring the thread's stored session.
+	FreshNativeSession bool
 }
 
 // startRuntime boots the agent process for a registered handle. Must be
@@ -1510,15 +1478,19 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		UserInput:        p.userInput,
 		RuntimeSyncGuard: runtimeSyncGuard,
 	}
-	var (
-		canonicalHead      agentstate.SessionPublicationHead
-		canonicalHeadFound bool
-	)
 	boundSession := strings.TrimSpace(h.boundSession)
-	if p.stateStore != nil && boundSession != "" {
-		canonicalHead, canonicalHeadFound, err = p.stateStore.Head(startCtx, h.botID, boundSession)
+	// A stored session the thread does not own was copied from another
+	// thread. It is not restored, but the user still learns that the agent
+	// starts over.
+	var storedSessionID string
+	if boundSession != "" && p.store != nil && !opts.FreshNativeSession {
+		desc, err := p.store.Get(startCtx, boundSession)
 		if err != nil {
-			return fail(fmt.Errorf("load ACP session publication head: %w", err))
+			return fail(fmt.Errorf("load ACP native session: %w", err))
+		}
+		var owned bool
+		if storedSessionID, owned = storedNativeSession(desc.RuntimeMetadata, boundSession); owned {
+			startReq.NativeSessionID = storedSessionID
 		}
 	}
 
@@ -1587,8 +1559,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		return errs.New("ACP runtime was closed during startup")
 	}
 	h.session = sess
-	h.nativeHead = canonicalHead
-	h.nativeHeadFound = canonicalHeadFound
+	h.historyLost = storedSessionID != "" && sess.ID() != storedSessionID
 	h.status = stateIdle
 	h.lastActive = time.Now()
 	h.startCancel = nil

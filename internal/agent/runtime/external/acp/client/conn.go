@@ -16,10 +16,11 @@ import (
 	"github.com/felinics/memoh/internal/version"
 )
 
-// sessionOpenTimeout bounds session/new and session/resume. Conn.opening is
-// held until session/new answers, so an agent that never did would keep every
-// other conversation of the process from opening a session; a resume that
-// never answers would hold its own turn for the turn's whole deadline.
+// sessionOpenTimeout bounds session/new and the session/resume or
+// session/load that restores a stored session. Conn.opening is held until
+// session/new answers, so an agent that never did would keep every other
+// conversation of the process from opening a session; a restore that never
+// answers would hold its own turn for the turn's whole deadline.
 const sessionOpenTimeout = 60 * time.Second
 
 // Conn is an initialized ACP connection that hosts any number of sessions on

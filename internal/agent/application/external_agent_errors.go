@@ -59,6 +59,8 @@ func externalAgentCode(err error) apperror.Code {
 		return apperror.CodeACPImageInputUnsupported
 	case errors.Is(err, acpclient.ErrInvalidPromptImage):
 		return apperror.CodeACPAttachmentInvalid
+	case errors.Is(err, acpclient.ErrSessionRestoreFailed):
+		return apperror.CodeExternalRuntimeSessionResumeFailed
 	case errors.Is(err, external.ErrContainerWorkspaceRequired):
 		return apperror.CodeExternalAgentContainerWorkspaceRequired
 	default:

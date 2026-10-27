@@ -142,6 +142,7 @@
                         :can-retry-latest-assistant="isRetryableTurn(msg)"
                         :can-edit-latest-user="isEditableTurn(msg)"
                         :can-fork-assistant="isForkableTurn(msg)"
+                        :can-reset-agent-session="canResetAgentSession(msg)"
                         :inline-actions="isDirectBotAgentRuntime(activeChatTarget.runtimeType)"
                         :goal-runtime="activeChatTarget.runtimeType"
                         :is-scrolling="isScrolling"
@@ -149,6 +150,7 @@
                         @active="onMessageActive"
                         @edit-message="handleEditMessage"
                         @fork-message="handleForkMessage"
+                        @reset-agent-session="handleResetAgentSession(msg.id)"
                       />
                     </div>
 
@@ -1296,7 +1298,7 @@ import { useRuntimeControls } from '@/composables/useRuntimeControls'
 import { useCodexUsage } from '@/composables/useCodexUsage'
 import { codexUsageNotice, codexUsageNoticeKey, codexUsageResetTime, codexUsageWindowLabel } from '@/utils/codex-usage'
 import { useQuery } from '@pinia/colada'
-import { getAcpProfiles, getBotsByBotIdAgents, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
+import { deleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSession, getAcpProfiles, getBotsByBotIdAgents, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
 import type { AcpprofilePublicProfile, BotagentsBotAgent, WorkspaceWorkspaceTarget } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -1638,6 +1640,32 @@ function isRetryableTurn(message: ChatMessage): boolean {
 function isEditableTurn(message: ChatMessage): boolean {
   const turnId = latestEditableUserTurnId.value
   return message.role === 'user' && turnId !== '' && turnId === (message.turnId?.trim() ?? '')
+}
+
+// Only the latest reply offers it: after a later turn, the stored ACP session
+// is no longer the one that failed to restore.
+const agentSessionResetMessageId = ref('')
+function canResetAgentSession(message: ChatMessage): boolean {
+  return activeChatTarget.value.runtimeType === 'acp_agent'
+    && message.id === lastMessageId.value
+    && message.id !== agentSessionResetMessageId.value
+    && !streaming.value && !activeChatReadOnly.value
+}
+
+async function handleResetAgentSession(messageId: string) {
+  const botId = currentBotId.value
+  const sessionId = activeSessionId.value
+  if (!botId || !sessionId) return
+  try {
+    await deleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSession({
+      path: { bot_id: botId, session_id: sessionId },
+      throwOnError: true,
+    })
+    agentSessionResetMessageId.value = messageId
+    toast.success(t('chat.externalAgent.resetSessionDone'))
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('chat.externalAgent.resetSessionFailed')))
+  }
 }
 
 const { data: botSettings, isLoading: botSettingsLoading } = useQuery({

@@ -1385,24 +1385,18 @@ func (q *Queries) SetSessionNextTurnPosition(ctx context.Context, arg SetSession
 }
 
 const softDeleteSession = `-- name: SoftDeleteSession :exec
-WITH invalidated_session AS MATERIALIZED (
-  UPDATE bot_sessions
-  SET deleted_at = now(),
-      updated_at = now(),
-      runtime_config_epoch = runtime_config_epoch + 1,
-      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
-  WHERE team_id = public.memoh_current_team_id()
-    AND id = $1
-    AND deleted_at IS NULL
-  RETURNING id
-)
-DELETE FROM agent_session_publications publication
-USING invalidated_session invalidated
-WHERE publication.team_id = public.memoh_current_team_id()
-  AND publication.session_id = invalidated.id
+UPDATE bot_sessions
+SET deleted_at = now(),
+    updated_at = now(),
+    runtime_config_epoch = runtime_config_epoch + 1,
+    runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $1
+  AND deleted_at IS NULL
 `
 
-// Soft delete does not fire FK cascades; remove the runtime publication head.
+// The epoch and fencing bumps retire warm runtimes and in-flight runs that
+// still hold the deleted session's previous generation.
 func (q *Queries) SoftDeleteSession(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, softDeleteSession, id)
 	return err
@@ -1417,24 +1411,20 @@ WITH target_sessions AS MATERIALIZED (
     AND session.deleted_at IS NULL
   ORDER BY session.id
   FOR UPDATE
-),
-invalidated_sessions AS MATERIALIZED (
-  UPDATE bot_sessions session
-  SET deleted_at = now(),
-      updated_at = now(),
-      runtime_config_epoch = session.runtime_config_epoch + 1,
-      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
-  FROM target_sessions target
-  WHERE session.team_id = public.memoh_current_team_id()
-    AND session.id = target.id
-  RETURNING session.id
 )
-DELETE FROM agent_session_publications publication
-USING invalidated_sessions invalidated
-WHERE publication.team_id = public.memoh_current_team_id()
-  AND publication.session_id = invalidated.id
+UPDATE bot_sessions session
+SET deleted_at = now(),
+    updated_at = now(),
+    runtime_config_epoch = session.runtime_config_epoch + 1,
+    runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
+FROM target_sessions target
+WHERE session.team_id = public.memoh_current_team_id()
+  AND session.id = target.id
 `
 
+// Rows are locked in id order, the same order ClearHistoryByBot uses, so the
+// two bot-wide statements cannot deadlock. The epoch and fencing bumps retire
+// warm runtimes and in-flight runs as in SoftDeleteSession.
 func (q *Queries) SoftDeleteSessionsByBot(ctx context.Context, botID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, softDeleteSessionsByBot, botID)
 	return err

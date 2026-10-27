@@ -13582,6 +13582,48 @@ paths:
       summary: Set ACP session runtime model
       tags:
       - acp
+  /bots/{bot_id}/sessions/{session_id}/acp-runtime/native-session:
+    delete:
+      description: Forgets the agent session that keeps failing to restore and keeps
+        the messages. The next message opens a new agent session, which does not remember
+        them.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Start the agent over on a new ACP session
+      tags:
+      - acp
   /bots/{bot_id}/sessions/{session_id}/acp-runtime/reasoning:
     patch:
       parameters:
