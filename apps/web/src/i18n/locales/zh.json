@@ -1057,7 +1057,7 @@
     "actions": {
       "copy": "复制",
       "edit": "编辑",
-      "editReplaceNote": "保存后会替换之后的回复",
+      "editHint": "保存后会替换这条消息和它之后的回复，对话从这里重新继续。",
       "share": "分享",
       "retry": "重试",
       "fork": "分叉",

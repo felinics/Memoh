@@ -88,24 +88,28 @@
           @keydown.escape.stop="onEditCancelKey"
         />
         <!-- Touch has no hover, so the copy/edit row under the bubble never
-             shows there; a long press on the bubble opens the same actions
-             instead (the ContextMenu opens on a touch hold). Pointer devices
-             keep the native right-click menu and their text selection, so the
-             trigger is off for them. On touch the bubble opts out of text
-             selection and the system callout — otherwise the OS starts a
-             selection on the hold and cancels the press — which is why Copy
-             is in the menu. -->
-        <ContextMenu
+             shows there; a long press on the bubble opens the same actions as
+             a menu anchored under the bubble's end edge, like a native chat
+             app — not at the finger, where it would cover the prompt. The
+             trigger is disabled so a tap does nothing; it only anchors the
+             menu, which useLongPress opens. Pointer devices keep the native
+             right-click menu and their text selection. On touch the bubble
+             opts out of text selection and the system callout — otherwise the
+             OS starts a selection on the hold and cancels the press — which
+             is why Copy is in the menu. -->
+        <DropdownMenu
           v-else-if="isSkillActivationMessage || userBubbleText || message.forward || message.reply"
+          v-model:open="bubbleMenuOpen"
         >
-          <ContextMenuTrigger
+          <DropdownMenuTrigger
             as-child
-            :disabled="!isTouchPointer"
+            disabled
           >
             <div
               :lang="contentLang(userBubbleText || skillActivationNames || skillActivationTitle)"
               class="chat-user-bubble w-fit max-w-full bg-chat-user-bubble px-4 py-3 text-chat-user-bubble-fg whitespace-pre-wrap break-words"
               :class="[userBubbleRadiusClass, isTouchPointer ? 'select-none [-webkit-touch-callout:none]' : '']"
+              v-on="isTouchPointer ? bubbleLongPress : {}"
             >
               <div
                 v-if="isSkillActivationMessage"
@@ -179,21 +183,24 @@
                 :text="userBubbleText"
               />
             </div>
-          </ContextMenuTrigger>
-          <ContextMenuContent>
-            <ContextMenuItem @select="copyUserText">
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            :align="bubbleSelf ? 'end' : 'start'"
+            :side-offset="6"
+          >
+            <DropdownMenuItem @select="copyUserText">
               <Copy />
               {{ t('chat.actions.copy') }}
-            </ContextMenuItem>
-            <ContextMenuItem
+            </DropdownMenuItem>
+            <DropdownMenuItem
               v-if="canEditUserMessage"
               @select="handleEdit"
             >
               <Pencil />
               {{ t('chat.actions.edit') }}
-            </ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <p
           v-if="isGoalMessage"
           class="flex items-center gap-1.5 text-caption text-muted-foreground"
@@ -220,12 +227,8 @@
               v-if="isEditingUserMessage"
               class="flex h-8 items-center justify-end gap-1.5"
             >
-              <!-- Saving reruns the turn, which a bare "Save" does not say.
-                   Spelled out beside the buttons rather than behind a hover
-                   hint, which touch cannot open. -->
-              <span class="mr-1 min-w-0 text-caption text-muted-foreground">
-                {{ t('chat.actions.editReplaceNote') }}
-              </span>
+              <!-- Saving reruns the turn, which a bare "Save" does not say. -->
+              <InfoHint :text="t('chat.actions.editHint')" />
               <Button
                 type="button"
                 variant="ghost"
@@ -468,7 +471,7 @@ if (typeof document !== 'undefined') {
 import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
 import { Copy, Pencil, Sparkles, Target } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
-import { Avatar, AvatarImage, AvatarFallback, Button, CalloutBanner, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Textarea, toast, useClipboard } from '@felinic/ui'
+import { Avatar, AvatarImage, AvatarFallback, Button, CalloutBanner, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, InfoHint, Textarea, toast, useClipboard } from '@felinic/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
 import ToolCallGroup from './tool-call-group.vue'
@@ -498,6 +501,7 @@ import { withLiteralSingleDollars } from '@/utils/markdown-dollar'
 
 import { resolveUrl } from '../composables/useMediaGallery'
 import { useElementVisibility, useMediaQuery } from '@vueuse/core'
+import { useLongPress } from '../composables/useLongPress'
 
 
 enableKatex()
@@ -773,8 +777,10 @@ function onEditCancelKey(event: KeyboardEvent) {
   cancelEdit()
 }
 
-// Long press only exists on touch; see the bubble's ContextMenu.
+// Long press only exists on touch; see the bubble's DropdownMenu.
 const isTouchPointer = useMediaQuery('(hover: none) and (pointer: coarse)')
+const bubbleMenuOpen = ref(false)
+const bubbleLongPress = useLongPress(() => { bubbleMenuOpen.value = true })
 const { copyText } = useClipboard()
 
 async function copyUserText() {

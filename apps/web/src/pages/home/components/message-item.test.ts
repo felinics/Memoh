@@ -28,7 +28,7 @@ vi.mock('./message-actions.vue', () => ({
 }))
 vi.mock('@felinic/ui', () => ({
   Avatar: Stub, AvatarImage: Stub, AvatarFallback: Stub, Button: Stub, CalloutBanner: Stub,
-  ContextMenu: Passthrough, ContextMenuTrigger: Passthrough, ContextMenuContent: Stub, ContextMenuItem: Stub,
+  InfoHint: Stub, DropdownMenu: Passthrough, DropdownMenuTrigger: Passthrough, DropdownMenuContent: Stub, DropdownMenuItem: Stub,
   toast: { success: vi.fn(), error: vi.fn() }, useClipboard: () => ({ copyText: vi.fn() }),
   Textarea: defineComponent({
     inheritAttrs: false,
