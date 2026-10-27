@@ -227,13 +227,8 @@
               v-if="isEditingUserMessage"
               class="flex h-8 items-center justify-end gap-1.5"
             >
-              <!-- Saving reruns the turn, which a bare "Save" does not say.
-                   The extra margin is measured against Cancel's hover chip, not
-                   its text: ghost buttons draw their box only on hover, and at
-                   the row's 6px gap that box landed right against the icon. -->
-              <span class="mr-1.5 inline-flex">
-                <InfoHint :text="t('chat.actions.editHint')" />
-              </span>
+              <!-- Saving reruns the turn, which a bare "Save" does not say. -->
+              <InfoHint :text="t('chat.actions.editHint')" />
               <Button
                 type="button"
                 variant="ghost"
