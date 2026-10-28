@@ -228,7 +228,10 @@
               class="flex h-8 items-center justify-end gap-1.5"
             >
               <!-- Saving reruns the turn, which a bare "Save" does not say. -->
-              <InfoHint :text="t('chat.actions.editHint')" />
+              <InfoHint
+                :text="t('chat.actions.editHint')"
+                align="end"
+              />
               <Button
                 type="button"
                 variant="ghost"
