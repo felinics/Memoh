@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
@@ -490,10 +491,14 @@ func (t DecisionTarget) runtimeOwned() bool {
 // DecisionStore is implemented by the application layer over the PostgreSQL
 // decision tables. RouteDecisionResponse uses ResolveRuntimeDecision for every
 // transport; recovery uses PendingRuntimeDecisions to preserve every decision
-// that parked a run while advancing its fencing token.
+// that parked a run while advancing its fencing token, and ParkedRunMessages to
+// show the run again when the live backend no longer holds its view.
 type DecisionStore interface {
 	ResolveRuntimeDecision(ctx context.Context, commandType, decisionID string) (DecisionTarget, error)
 	PendingRuntimeDecisions(ctx context.Context, runID string) ([]DecisionTarget, error)
+	// ParkedRunMessages rebuilds a parked run's live messages from what it
+	// persisted, its pending decisions shown as answerable cards.
+	ParkedRunMessages(ctx context.Context, run ledger.Run) ([]chatview.UIMessage, error)
 }
 
 // DecisionResponse is one transport-neutral answer. ControlID is minted by the
