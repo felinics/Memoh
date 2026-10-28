@@ -150,4 +150,3 @@ Runs before the first window is created, only when `desktop-updates.json` has a 
 ## Known gaps
 
 - An error from a background check that arrives after the installer hand-off is treated as an installation failure. The feed request timeout makes this unlikely.
-- Startup recovery downloads have no stall watchdog.

@@ -384,8 +384,18 @@ export async function recoverDesktopUpdate(): Promise<boolean> {
     let expired = false
     let timer: ReturnType<typeof setTimeout> | undefined
     const recovery = (async () => {
+      const completionAtStart = downloadCompletionSequence
       const result = await autoUpdater.checkForUpdates()
-      await result?.downloadPromise
+      const token = result?.cancellationToken
+      // The cached package may be gone, which turns recovery into a real download.
+      // Without the stall watchdog a hung download leaves the status at
+      // `downloading` forever and every later check is skipped as "busy".
+      if (result?.downloadPromise && token && downloadCompletionSequence === completionAtStart) armDownloadWatchdog(token)
+      try {
+        await result?.downloadPromise
+      } finally {
+        clearDownloadWatchdog(token)
+      }
       if (!expired && updateState.status === 'downloaded') await installUpdate(updateOptions)
     })()
     try {
