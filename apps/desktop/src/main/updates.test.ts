@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
+import { CancellationToken } from 'builder-util-runtime'
 import type { DesktopUpdateState } from '../shared/updates'
 
 const { MacUpdater } = createRequire(import.meta.url)('electron-updater/out/MacUpdater.js') as typeof import('electron-updater')
@@ -9,6 +10,7 @@ const f = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   events: new Map<string, (...args: unknown[]) => void>(),
   persisted: '',
+  feedRequest: vi.fn(),
   options: {
     assertTrustedRenderer: vi.fn(),
     prepareToInstall: vi.fn(),
@@ -18,7 +20,7 @@ const f = vi.hoisted(() => ({
   },
   updater: {
     on: vi.fn(), setFeedURL: vi.fn(), isUpdaterActive: () => true,
-    checkForUpdates: vi.fn(), quitAndInstall: vi.fn(),
+    checkForUpdates: vi.fn(), downloadUpdate: vi.fn(), quitAndInstall: vi.fn(),
     currentVersion: { compare: vi.fn() },
     autoDownload: false, autoInstallOnAppQuit: true, autoRunAppAfterInstall: true,
   },
@@ -34,7 +36,11 @@ vi.mock('node:fs', () => ({
   renameSync: vi.fn(),
 }))
 vi.mock('electron-updater', () => ({ default: { autoUpdater: f.updater } }))
-vi.mock('electron-updater/out/providers/GenericProvider.js', () => ({ GenericProvider: class {} }))
+vi.mock('electron-updater/out/providers/GenericProvider.js', () => ({
+  GenericProvider: class {
+    httpRequest(...args: unknown[]) { return f.feedRequest(...args) }
+  },
+}))
 
 beforeEach(() => {
   vi.resetModules()
@@ -61,17 +67,20 @@ async function start() {
 }
 function state() { return f.handlers.get('desktop:updates:get-state')!({}) as DesktopUpdateState }
 
+// Mirrors electron-updater: the check only starts a download when autoDownload
+// is on at the moment it resolves; otherwise downloadUpdate() must be called.
 function finishAvailableUpdate(version: string) {
   f.events.get('checking-for-update')!()
   f.events.get('update-available')!({ version })
-  const downloadPromise = Promise.resolve().then(() => {
+  const download = () => Promise.resolve().then(() => {
     f.events.get('update-downloaded')!({ version })
     return []
   })
+  f.updater.downloadUpdate.mockImplementation(download)
   return {
     isUpdateAvailable: true,
     updateInfo: { version },
-    downloadPromise,
+    downloadPromise: f.updater.autoDownload ? download() : null,
     cancellationToken: { cancel: vi.fn() },
   }
 }
@@ -267,14 +276,12 @@ it('keeps a restart locked when an in-flight check settles before handoff', asyn
   await start()
   f.events.get('update-downloaded')!({ version: '2.0.0' })
   let finishCheck!: () => void
-  let failCheck!: (error: Error) => void
-  f.updater.checkForUpdates.mockImplementation(() => new Promise((resolve, reject) => {
+  f.updater.checkForUpdates.mockImplementation(() => new Promise((resolve) => {
     finishCheck = () => {
       f.events.get('checking-for-update')!()
       f.events.get('update-available')!({ version: '2.1.0' })
       resolve({ isUpdateAvailable: true, updateInfo: { version: '2.1.0' }, downloadPromise: null })
     }
-    failCheck = reject
   }))
   await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
   expect(f.updater.checkForUpdates).toHaveBeenCalledOnce()
@@ -301,7 +308,6 @@ it('keeps a restart locked when an in-flight check settles before handoff', asyn
   await install
   expect(f.updater.quitAndInstall).toHaveBeenCalledOnce()
   expect(JSON.parse(f.persisted).attemptedVersion).toBe('2.0.0')
-  void failCheck
 })
 
 it('re-enables background downloads after an installation failure', async () => {
@@ -323,4 +329,54 @@ it('forgets a replaced package as soon as a newer release starts downloading', a
   // restart during this download must not try to recover 2.0.0 on next launch.
   f.events.get('update-available')!({ version: '2.1.0' })
   expect(JSON.parse(f.persisted).pending).toBeNull()
+})
+
+it('gives up on a feed request that never answers so the check can fail and retry', async () => {
+  await start()
+  const config = f.updater.setFeedURL.mock.calls.at(-1)![0]
+  expect(config.provider).toBe('custom')
+  let token!: CancellationToken
+  f.feedRequest.mockImplementation((_url: URL, _headers: unknown, given: CancellationToken) => {
+    token = given
+    return given.createPromise(() => {})
+  })
+  const provider = new config.updateProvider(config, f.updater, {}) as { httpRequest(url: URL, headers?: null, token?: CancellationToken): Promise<string | null> }
+  const outcome = provider.httpRequest(new URL('https://updates.example.test/latest-mac.yml'))
+    .then(() => 'answered', (error: Error) => error.message)
+  await vi.advanceTimersByTimeAsync(29_000)
+  expect(token.cancelled).toBe(false)
+  await vi.advanceTimersByTimeAsync(1_000)
+  expect(token.cancelled).toBe(true)
+  expect(await outcome).toMatch(/timed out/)
+
+  // Downloads pass their own cancellation token and keep their own stall watchdog.
+  const own = new CancellationToken()
+  f.feedRequest.mockResolvedValue('ok')
+  await provider.httpRequest(new URL('https://updates.example.test/a.zip'), null, own)
+  expect(f.feedRequest).toHaveBeenLastCalledWith(expect.any(URL), null, own)
+})
+
+it('does not re-download the ready version when the feed republishes it', async () => {
+  await start()
+  const downloadedOnCheck: boolean[] = []
+  f.updater.checkForUpdates.mockImplementation(async () => {
+    downloadedOnCheck.push(f.updater.autoDownload)
+    return finishAvailableUpdate('1.1.0')
+  })
+  await vi.advanceTimersByTimeAsync(3_000)
+  expect(state().status).toBe('downloaded')
+  expect(f.updater.downloadUpdate).not.toHaveBeenCalled()
+
+  // electron-updater would empty the cached package before a re-download of the
+  // same version; if that download then failed, Restart would point at nothing.
+  await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+  expect(f.updater.checkForUpdates).toHaveBeenCalledTimes(2)
+  expect(downloadedOnCheck).toEqual([true, false])
+  expect(f.updater.downloadUpdate).not.toHaveBeenCalled()
+  expect(state()).toMatchObject({ status: 'downloaded', latestVersion: '1.1.0' })
+  expect(JSON.parse(f.persisted).pending.version).toBe('1.1.0')
+  expect(f.updater.autoDownload).toBe(true)
+
+  await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+  expect(f.updater.checkForUpdates).toHaveBeenCalledTimes(3)
 })

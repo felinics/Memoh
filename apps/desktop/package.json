@@ -37,6 +37,7 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@fontsource-variable/inter": "^5.2.8",
     "@memohai/runtime": "workspace:*",
+    "builder-util-runtime": "9.7.0",
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {

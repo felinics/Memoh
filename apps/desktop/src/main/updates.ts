@@ -1,5 +1,7 @@
 import { readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
+import type { OutgoingHttpHeaders } from 'node:http'
+import { CancellationToken } from 'builder-util-runtime'
 import { GenericProvider } from 'electron-updater/out/providers/GenericProvider.js'
 import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import electronUpdater from 'electron-updater'
@@ -21,6 +23,7 @@ const UPDATE_FEED_BASE_URL = (process.env.MEMOH_DESKTOP_UPDATE_BASE_URL ?? '').t
 const PERIODIC_CHECK_INTERVAL_MS = 60 * 60 * 1000
 const RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000]
 const DOWNLOAD_STALL_TIMEOUT_MS = 2 * 60_000
+const FEED_REQUEST_TIMEOUT_MS = 30_000
 const { autoUpdater } = electronUpdater
 type UpdateCheckResult = NonNullable<Awaited<ReturnType<typeof autoUpdater.checkForUpdates>>>
 type DownloadCancellationToken = NonNullable<UpdateCheckResult['cancellationToken']>
@@ -101,6 +104,40 @@ export function registerDesktopUpdates(options: DesktopUpdatesOptions): void {
   scheduleCheck(3_000)
 }
 
+// builder-util-runtime arms its request timeout on the `socket` event, which
+// Electron's net.request never emits. A feed that accepts the connection but
+// never answers would leave the check pending forever, and electron-updater
+// hands every later check that same pending promise. Abort the manifest request
+// instead so the check fails and the normal retry schedule takes over.
+// Requests that bring their own token (downloads) keep the download watchdog.
+class FeedProvider extends GenericProvider {
+  constructor(_options: unknown, updater: ConstructorParameters<typeof GenericProvider>[1], runtime: ConstructorParameters<typeof GenericProvider>[2]) {
+    super({ provider: 'generic', url: ensureTrailingSlash(UPDATE_FEED_BASE_URL) }, updater, runtime)
+  }
+
+  protected override async httpRequest(url: URL, headers?: OutgoingHttpHeaders | null, cancellationToken?: CancellationToken): Promise<string | null> {
+    if (cancellationToken) return super.httpRequest(url, headers, cancellationToken)
+    const token = new CancellationToken()
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      token.cancel()
+    }, FEED_REQUEST_TIMEOUT_MS)
+    try {
+      return await super.httpRequest(url, headers, token)
+    } catch (error) {
+      if (timedOut) throw new Error(`Update check timed out after ${FEED_REQUEST_TIMEOUT_MS / 1000} seconds.`)
+      throw error
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+}
+
+function useFeed(): void {
+  autoUpdater.setFeedURL({ provider: 'custom', updateProvider: FeedProvider, url: ensureTrailingSlash(UPDATE_FEED_BASE_URL) })
+}
+
 function getUpdateState(): DesktopUpdateState {
   return updateState
 }
@@ -126,10 +163,23 @@ async function checkForUpdate(automatic = false): Promise<DesktopUpdateState> {
   }
 
   handledFailure = null
+  // While a package is ready, recheck without downloading. electron-updater
+  // compares the full manifest, so a same-version republish would otherwise be
+  // re-downloaded, and it empties the cached package first: a failed
+  // re-download would leave Restart pointing at a package that no longer exists.
+  // Only a different version replaces the ready package.
+  const readyVersion = updateState.status === 'downloaded' ? updateState.latestVersion : null
+  if (readyVersion) autoUpdater.autoDownload = false
   setUpdateState({ type: 'checking' })
   try {
     const completionAtStart = downloadCompletionSequence
-    const result = await autoUpdater.checkForUpdates()
+    let result: Awaited<ReturnType<typeof autoUpdater.checkForUpdates>>
+    try {
+      result = await autoUpdater.checkForUpdates()
+    } finally {
+      // An installation started meanwhile keeps downloads off until it fails.
+      if (readyVersion && updateState.status !== 'installing') autoUpdater.autoDownload = true
+    }
     // A restart started while this check was in flight owns the state now.
     // Background downloads are disabled during installation, so there is no
     // download to track and the cached package being installed stays intact.
@@ -140,12 +190,17 @@ async function checkForUpdate(automatic = false): Promise<DesktopUpdateState> {
         error: 'Updater is not available for this build.',
       })
     }
-    if (result.downloadPromise) {
-      const token = result.cancellationToken
+    let download = result.downloadPromise
+    let token = result.cancellationToken
+    if (readyVersion && result.isUpdateAvailable && result.updateInfo.version !== readyVersion) {
+      token = new CancellationToken()
+      download = autoUpdater.downloadUpdate(token)
+    }
+    if (download) {
       // A cached download may finish before checkForUpdates() resumes. Do not
       // arm a stall timer for work that has already emitted `update-downloaded`.
       if (token && downloadCompletionSequence === completionAtStart) armDownloadWatchdog(token)
-      void result.downloadPromise.then(
+      void download.then(
         () => clearDownloadWatchdog(token),
         failDownload,
       )
@@ -157,7 +212,7 @@ async function checkForUpdate(automatic = false): Promise<DesktopUpdateState> {
           : { type: 'not-available', latestVersion: result.updateInfo.version },
       )
     }
-    if (!result.isUpdateAvailable) markUpdateSucceeded()
+    if (!result.isUpdateAvailable || !download) markUpdateSucceeded()
   } catch (error) {
     failUpdate(error)
   }
@@ -322,10 +377,7 @@ export async function recoverDesktopUpdate(): Promise<boolean> {
     }
     if (!saved.autoUpdate) return false
     const manifest = saved.pending
-    class CachedManifestProvider extends GenericProvider {
-      constructor(_options: unknown, updater: ConstructorParameters<typeof GenericProvider>[1], runtime: ConstructorParameters<typeof GenericProvider>[2]) {
-        super({ provider: 'generic', url: ensureTrailingSlash(UPDATE_FEED_BASE_URL) }, updater, runtime)
-      }
+    class CachedManifestProvider extends FeedProvider {
       override async getLatestVersion(): Promise<UpdateInfo> { return manifest }
     }
     autoUpdater.setFeedURL({ provider: 'custom', updateProvider: CachedManifestProvider, url: ensureTrailingSlash(UPDATE_FEED_BASE_URL) })
@@ -343,7 +395,7 @@ export async function recoverDesktopUpdate(): Promise<boolean> {
       ])
     } finally {
       if (timer) clearTimeout(timer)
-      autoUpdater.setFeedURL({ provider: 'generic', url: ensureTrailingSlash(UPDATE_FEED_BASE_URL) })
+      useFeed()
     }
     // After timeout, recovery may finish downloading but must not restart an
     // already visible session. Its errors are still consumed and exposed.
@@ -366,10 +418,7 @@ function configureAutoUpdater(): void {
     autoUpdater.autoInstallOnAppQuit = false
     autoUpdater.forceDevUpdateConfig = !app.isPackaged
     try {
-      autoUpdater.setFeedURL({
-        provider: 'generic',
-        url: ensureTrailingSlash(UPDATE_FEED_BASE_URL),
-      })
+      useFeed()
       updaterConfigured = true
     } catch (error) {
       setUpdateState({ type: 'unavailable', error: formatConfigurationError(error) })
