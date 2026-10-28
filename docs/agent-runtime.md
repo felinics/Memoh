@@ -14,7 +14,7 @@
 - Tools are implemented as `ToolProvider` instances in `internal/agent/tool/`, loaded via setter injection to avoid FX dependency cycles.
 - **Tool usage lives with the tool, never in the static prompt.** Per-tool usage goes in `sdk.Tool.Description`; cross-tool workflow guidance goes in an optional `tools.ToolUsage` `Usage()` method that `assembleTools` injects only when that provider registers tools for the session. Because both are gated with the tool itself, the prompt template never names conditionally-registered tools (guarded by `internal/agent/runtime/native/prompt_test.go`) and can't drift — the cause of the original `speak` / `search_memory` / `schedule` bugs.
 - Prompt templates are embedded from `internal/agent/runtime/native/prompts/`. Partials (reusable fragments) are prefixed with `_` (e.g., `_memory.md`, `_identities.md`). System prompting combines `system_common.md` with mode-specific prompts such as `mode_chat.md` and `mode_discuss.md`.
-- Internal chat state lives under `internal/chat/`: `thread` owns Thread lifecycle/forks, `message` owns persistence, `timeline` owns canonical event projection, and `view` owns API/UI history projection. These packages do not orchestrate Agent execution.
+- Internal chat state lives under `internal/chat/`: `thread` owns Thread lifecycle/forks, `message` owns persistence, `checkpoint` owns history checkpoints, `timeline` owns canonical event projection, and `view` owns API/UI history projection. These packages do not orchestrate Agent execution.
 - The chat timeline (`internal/chat/timeline/`) owns canonical events, projection, rendering, persistence, and context composition. Inbound adaptation lives in `internal/channel/inbound/`, while discuss-mode driving lives in `internal/channel/discuss/`.
 - Browser Use and Computer Use capabilities live in `internal/agent/tool/browser.go` (plus `internal/agent/tool/computer_a11y.go`) and are exposed only when the bot's workspace display is enabled. `browser_action` / `browser_observe` operate the headed workspace Chrome/Chromium instance over CDP, `browser_remote_session` exposes the same CDP endpoint for code-driven Playwright/CDP sessions, and the Computer Use pair (`computer_observe` / `computer_action`) drives the broader GUI desktop: snapshots come from the AT-SPI accessibility tree via the bundled `a11y-cli` Rust helper at `/opt/memoh/toolkit/display/bin/a11y-cli`, and raw RFB pointer/keyboard input remains as a fallback when accessibility cannot reach the target. Both browser and computer screenshots are saved to a workspace path and never auto-attached to the conversation, so the model must explicitly read the path when it wants the image. Prefer Browser Use for web pages; use Computer Use for native dialogs, non-browser apps, or GUI states that CDP cannot reach.
 - Headless Playwright scripts are still ordinary workspace commands, but they are not the same path as the headed workspace browser/display stack. Use the headed Browser Use tools when the user needs to inspect or operate the visible workspace browser.
@@ -32,49 +32,221 @@ and continue the same run. An empty initial history does not disable recovery. A
 folds what its request renders: the history before its cutoff and the steps of
 the attempt its first step selected. A retry renders its input from the request
 it replaces, which that step hides; from then on the copy the step wrote is the
-input the event keeps in place. When the replaced turn had compacted in place,
-the same step moves the session to a new compaction epoch, so the attempt folds
-the history before the cutoff into a summary of its own. Subagent and external
-runtimes have separate ownership and remain outside this capability.
+input the event keeps in place. When the session's history checkpoint depends
+on the replaced turn, the same step moves the session back to the newest
+checkpoint that does not, or the attempt's first compaction does when it needs
+one before that step, so the attempt folds onto the checkpoint the replacement
+keeps. Subagent and external runtimes have separate ownership and remain
+outside this capability.
 
 A native Discuss run writes each step as it commits, under the rows ingress
 already wrote for its input. Each composed message names the inbound message,
-stored reply or summary Channel rendered it from, at the version it rendered;
-the version crosses the internal RPC with the command. The inputs of the batch
+stored reply or summary Channel rendered it from; the name crosses the
+internal RPC with the command. The inputs of the batch
 the run answers are anchors, so a fold reads only what the run's request
 renders: a message that arrives during the run is the next batch's input, not
-part of the summary. The steps before the run's answer mark their rows as such:
+part of the summary, and a row no timeline event renders stays raw for the chat
+view instead of being summarized unread. The steps before the run's answer mark their rows as such:
 they are context for later runs but do not prove the batch consumed, so a worker
 that comes back without a durable cursor still answers the input of a run that
 failed after committing steps. The answer, the completed step that calls no
 tool, is that proof.
 
-`compaction.Service.Compact` executes one event that folds the rendered active
-summary and every eligible source into one rolling summary. A pass folds what one
-summarizer call can read; the event passes again only for what that call could
-not, and each further pass absorbs the summary before it. The current request and
-steers are verbatim anchors, not independent summary segments. The latest
-tool/reasoning closure is protected. At approval or ask_user resume, the deferred
-call/result is the tail; earlier committed work remains eligible. The summarizer
-sees anchors inline but never claims their coverage.
+An armed run compacts with `compaction.Service.Fold`, before any step whose
+request does not fit, the first one included: one event over the request the
+run sends next. Before its first pass the event decides what of the request
+stays verbatim (`retain`), whoever calls it. Runtime context stays and takes
+nothing. Everything else it keeps takes from one verbatim budget: a quarter
+of what the allowance leaves beside the system prompt, the tools and the
+runtime context, at most 32000 tokens; first the messages no context row holds and
+the anchors after the newest call group, the input or steers the next call
+answers, which stay whatever they take; then the other anchors newest first;
+then the newest complete call groups, a call with all its results, up to the
+first that does not fit. Everything else folds, the active checkpoint's
+summaries included. A message takes what a request prices it at or what a
+history load admits it by, its encoded bytes, whichever is more: an inline
+image a request prices flat stays only if the byte-bounded load can still
+hold it, so a history of large screenshots folds rather than stay too large
+to load. The latest step is such a call group, and so is the
+deferred call and answer a decision continuation resumes from: a step within
+the budget stays, a larger one folds in the same pass as what is before it.
+32000 tokens holds three results at the tool output bound, or two beside a
+long input. The instruction asks the summary to stay within another quarter
+of the room, so a fold that keeps no more than the budget and gets such a
+summary leaves about half of it to the steps after it. That half is the
+target, not a guarantee: a pass commits any summary shorter than what it
+replaces, and the summary the next request carries only has to fit the room
+that request has, so a longer one brings the next fold sooner rather than
+failing the run; an in-run event logs the request's size after it against
+its allowance (`context compacted`). What stays whatever it takes, the input
+the next call answers and the messages no row holds, can take more, and a
+Discuss batch is kept by its own rule. The 32000-token bound was calibrated on
+call-group sizes of real agent sessions, and every event logs
+`compaction retention` with the budget, the call groups it kept and the
+latest group's size, to check it against Memoh's own traffic.
+Each pass forks that request up to the newest messages it keeps and asks the
+run's own model for the summary that replaces what folds there. The
+instruction quotes the input the next call answers, and asks the summary to
+end with where the work stands; the tool results it folds are listed by the
+ref `get_messages` reads them back by. The fork keeps the run's system
+prompt, tools, cache key, reasoning and output settings and ends with one
+compaction instruction, so the summarizer reads what it replaces in place and
+the fork shares the run's prompt cache. It asks for the output the run's
+requests ask for, or none where they leave the cap to the provider, and reads
+only what the window holds beside the run's output allowance, as each of
+those requests does: a provider setting sized for that output, such as a
+legacy Anthropic thinking budget, stays valid. It streams outside the run's
+call observer, and a stream that sends nothing for the run's model window is
+cut off; a transient failure is asked once more, and an answer that calls a
+tool once more with a firmer instruction, which the pass priced in, so the
+second request fits with the same output. A fork that does not fit the window
+reads a shorter prefix ending at a tool-group boundary, and the event passes
+again over the request the native runtime spliced, each pass absorbing the
+summary before it. A pass reads a call group whole or not at all, so the
+window's bound is the group's: a group larger than what the window leaves one
+group beside the system prompt, tools, the longest summary, the instruction
+and the least output reaches the summarizer by the head and tail of its larger
+parts, the text, call arguments and results of all its messages, an equal
+share each of what the smaller ones leave. No group is too large to fold; the
+rows keep the whole messages, which `get_messages` reads back, so a folded row
+is one its summary stands for, read whole or in part.
 
-The native runtime applies each committed replacement to its own request snapshot.
-Uncovered messages retain their bytes. A result the read path writes for a deferred
-call whose decision ended without one renders from the call's row, so a fold that
-covers the call removes it too; a splice that leaves a call without its result, or a
-result without its call, fails the event. `turn.PlaceSummary` also governs record and
-pipeline replay: retained entries inside the covered span precede the summary.
-Per-source coverage times and event cursors survive rollup, so refolding a summary
-cannot hide an edit it never read. Stored message hashes survive replay projections;
-RC versions are checked against their persisted event cursors. Restart replay keeps
-the complete event chain for newer edits, including edits received before compaction
-started. Artifact commit additionally verifies the full durable source hash.
+Every message of the request names what it renders: a history row, an inbound
+or self-sent message, or a summary. The run's query names the row that holds
+the run's request, which admission or the run's first step writes; runtime
+context the run rebuilds for every request names nothing and stays where it
+is, and so does a message no context row holds, which no checkpoint can stand
+for. A run's input and steers are anchors, kept as the verbatim budget keeps
+them; the inputs a Discuss run answers are kept newest first while they leave
+a tenth of the room for the summary, and its call groups take what they leave
+of the budget. Older anchors fold, and a folded input records the images it
+carried as omitted. When nothing but summaries is left,
+they are rewritten only if they do not fit the room the next request has, and
+a remainder too small for any summary to replace ends the event once the
+request fits. The context view keeps an armed run's whole history, without
+trimming, and every dispatch checks the allowance.
 
-Rendered artifacts, candidate payloads and claim verification use bounded reads.
-In-run recovery does not load the raw history span or reread ancestor summaries;
-legacy artifacts without exact coverage fail explicitly. Owner fencing, claim
-reclamation and cancellation remain authoritative. Failed passes publish nothing;
-successful earlier passes and tool effects stay committed.
+`compaction.Service.Compact` folds history from rows instead, with the same
+engine: for a chat or continuation load the byte budget truncated, before the
+request is built, and for Discuss input Channel omitted or a batch it could
+not compose. It builds the request from the rows: the active checkpoint's
+items in their order, then the context rows after its position, oldest first
+within a byte bound, each row the message a run's request holds for it, so a
+pass plans and folds it the way it folds a run's. A read takes whole call
+groups, a row and the tool rows after it that carry its calls' results: those
+that end within the bound, and the one that crosses it when what it reads past
+the bound fits 8 MiB. No checkpoint, even one an unfinished event leaves, has
+a call behind its position and a result of it after, and a call larger than
+the bound still folds with its results; a read that leaves nothing to fold
+while rows are left after it, a group larger than any read admits, fails the
+event as an input overflow. The compaction model, whatever provider it runs
+on, is offered no tools: its request writes every message out as text under
+its role, tool calls and tool results included, media named. It is asked for
+as much output as the window leaves, up to its cap, and never less than half
+of what the summary may need; a pass reads less rather than ask for less. The
+summarizer streams through the client the runs stream through. An event folds
+every row the caller does not keep into one rolling summary, reading again
+for what one bounded read left; it keeps what a run's fold keeps, with the
+input, a continuation's steers or a Discuss batch as anchors.
+
+A committed pass hands its caller the request it leaves: the engine orders
+the messages it read once, by `turn.PlaceSummary`, with every message it
+replaces gone and the ones it keeps inside the folded span before the summary,
+the order its checkpoint keeps them in; the native runtime and a request built
+from rows apply that order. Every request renders a summary by
+`turn.SummaryText`: one
+fixed sentence saying it stands for earlier messages no longer shown and that
+the verbatim messages before it and everything after it take precedence, then
+the summary in `<summary>` tags. The engine prices it that way too. A result the read path writes for a deferred call whose decision
+ended without one renders from the call's row, so a fold that covers the call
+removes it too; a splice that leaves a call without its result, or a result
+without its call, fails the event. A pass refuses a request composed on
+another checkpoint: the summaries it rendered must be the ones the active
+checkpoint holds.
+
+A thread's history has no time window. What stands in a request for the
+history before its context is the session's active history checkpoint
+(`bot_sessions.history_checkpoint_id`, `internal/chat/checkpoint`): a position
+in the session's turn order, `(turn_position, turn_message_seq)`, and what
+represents everything up to it: ordered items, rows kept by reference and
+summaries, always at least one summary. A request renders the items in their
+order and then the session's context rows after the position: the visible rows of complete
+turns, other than legacy `passive_sync` rows. Chat and turn-response loads
+read those rows newest first within the byte budget, so a load costs what the
+checkpoint leaves raw, not the thread's length. A chat or continuation load
+the byte budget truncated, the record or the pipeline one, folds the rows it
+left out from rows before the request is built and loads again, rather than
+send a history that silently starts later; it fails if the history still does
+not load whole.
+
+Compaction folds the checkpoint's summaries and the oldest complete foldable
+units after it into one summary and commits a checkpoint on top of the active
+one (`checkpoint.Store.Commit`): its position is the last row it folds, and it
+keeps every context row up to there it does not fold, in history order: the ones
+the pass read before its summary, where the request that read them places it,
+and the ones it never read after it. Kept rows are the anchors a fold keeps, a
+run's inputs and steers newest first, which the summarizer reads but does not
+fold, so a run that folds its own earlier steps leaves `[input, summary, latest
+steps]`; once the run is over the input is an ordinary candidate and the next
+compaction folds it. A pass that cannot read
+everything at once repeats the step, and each further pass folds onto the
+summary the one before wrote: an event whose session moved back between passes
+fails instead of folding the same history again. Only a commit moves the
+position; neither a byte window nor a cutoff does. A fold over a run's request
+reads only what that request renders. A fold from rows reads candidates that end
+where the caller's history does: before the cutoff of an edit or retry, else
+before the turn the request runs as, so a fold never reaches a row admitted
+after the request's own. A commit whose parent is no longer the session's active
+checkpoint fails with `checkpoint.ErrMoved`. A row it keeps that the pass never read is logged and
+counted (`history.checkpoint.unseen_rows_total`).
+
+The rows of a message a checkpoint folded record the message as it was when
+they were written. A message changed after that, edited or deleted, composes
+again after the checkpoint with what its summary never read; Discuss event
+replay keeps its complete event chain.
+
+Every checkpoint names its parent and depends on every row up to its
+position, which its summary may have read. A write that removes rows (hiding,
+replacing or superseding a turn, deleting messages, retiring a run's
+projections) moves the session back, in the same statement, to the newest
+checkpoint on its chain that does not depend on them
+(`memoh_rewind_history_checkpoint`). Nothing else changes the history a
+checkpoint accounts for: a session runs one turn at a time (a run waiting on a
+decision still holds it), a run writes only into its own turn or the latest
+turn, a new turn takes the next position, and a run that lost the session is
+fenced out of every write, deletes included. Rows are only ever added after
+the active checkpoint's position. Adding an asset to a row changes nothing,
+and clearing history drops the session's checkpoints.
+
+An edit or retry renders the history as it stood at its cutoff: the checkpoint
+the replacement keeps (`checkpoint.Store.KeptBeforeTurn`) and the context rows
+after it before the cutoff. A retry after in-run compaction thus refolds from
+the summary before the replaced turn rather than from the start of the thread.
+An edit or retry that must compact before its first step commits rewinds the
+same way first (`RewindHistoryCheckpointBeforeTurn`), so its fold builds on the
+checkpoint the replacement keeps.
+
+Sessions from before checkpoints keep their context: 0170 turned each one's
+active summaries, with the rows in their span they left raw, into its
+checkpoint. A session restored by a bot import brings its history without
+summaries, so its first request that does not fit compacts it.
+
+A fork copies the source's visible history through its turn under the source's
+share lock and carries the newest checkpoint on the source's active chain that
+accounts for no history past the fork point (`checkpoint.CopyToFork`), in the
+transaction that creates the fork. Its summaries are copied with the rows
+they cite named by their copies, so a ref `get_messages` reads a folded tool
+result back by, which reads only the session's own rows, reads the fork's
+copy; its kept rows are named by their copies, and its position mapped to the
+copy's, so a fork's first request does not fold again what the source had
+folded.
+
+Candidate payloads are read within byte bounds. A request reads the active
+checkpoint; an edit or retry, a rewind and a fork walk its chain for the
+checkpoint they keep. A fold over a run's request
+does not load the raw history span or reread ancestor summaries. Owner fencing and
+cancellation remain authoritative. Failed passes publish nothing; successful
+earlier passes and tool effects stay committed.
 
 The caller checks the complete next request once, after the event; one that still
 does not fit fails instead of compacting again. Summary bounds include rendering
@@ -225,9 +397,11 @@ continuations use the same phase-aware application watchdog:
   remain supervised; explicit cancellation and runtime ownership loss still win.
 - Managed subagents have a ten-minute progress watchdog, with no implicit total
   duration. Detachment preserves an explicit ancestor execution deadline.
-- Context budget recovery before and during a native run pauses the model
-  watchdog while its synchronous compaction runs; the model window restarts
-  when recovery returns. Cancellation and execution budgets still apply.
+- A compaction inside a native run, a fold before a step or a Discuss run's
+  budget recovery, pauses the model watchdog while it runs; the model window
+  restarts when it returns. A chat load folded before the request is built
+  runs before the watchdog starts. Cancellation and execution budgets still
+  apply.
 
 Conversation messages only append between compaction events. A tool result is
 bounded once, when the tool returns (`tool_output_max_bytes`, 32 KiB by default, and
