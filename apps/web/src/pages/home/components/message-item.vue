@@ -70,15 +70,15 @@
         <!-- Editing happens in place: the field takes the bubble's exact box
              (padding, radius, content-sized width) and surface, and sets its
              text with the same .chat-user-text rule as the bubble, so the prompt
-             stays where and how it was — only the edge turns into a field, which
-             is why it engages on hover as well as focus, with the edge meant for
-             a brand-tinted surface. Its actions replace the copy/edit row below. -->
+             stays where and how it was. Unfocused it has no edge at all, so it
+             renders like the bubble; focus draws the edge meant for a
+             brand-tinted surface. Its actions replace the copy/edit row below. -->
         <Textarea
           v-if="isEditingUserMessage"
           ref="editTextarea"
           v-model="editDraft"
           :lang="contentLang(editDraft)"
-          engage="hover"
+          rest="bare"
           surface="brand-tint"
           class="chat-user-text chat-user-bubble-edit w-auto max-w-full min-h-0 max-h-80 px-4 py-3"
           :class="userBubbleRadiusClass"
