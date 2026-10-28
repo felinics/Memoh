@@ -69,11 +69,47 @@ LIMIT 1;
 -- Decision cards are temporary stream projections. Delete by their stable
 -- run marker as well as by returned IDs so an insert whose COMMIT ack was lost
 -- cannot survive the final canonical round as a duplicate assistant message.
+-- Deleting context rows rewinds the session, locked before its rows as every
+-- history mutation locks them, to the newest checkpoint that does not depend
+-- on them.
+WITH owner_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = sqlc.arg(session_id)
+    AND session.bot_id = sqlc.arg(bot_id)
+  FOR UPDATE
+), projections AS MATERIALIZED (
+  SELECT message.id, message.turn_position, message.turn_message_seq,
+    (
+      message.turn_visible
+      AND message.turn_id IS NOT NULL
+      AND message.turn_position IS NOT NULL
+      AND message.turn_message_seq IS NOT NULL
+    ) AS in_context
+  FROM bot_history_messages message
+  JOIN owner_session owner ON owner.id = message.session_id
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.bot_id = sqlc.arg(bot_id)
+    AND message.run_id = sqlc.arg(run_id)
+    AND message.role = 'assistant'
+    AND message.runtime_type <> 'model'
+    AND message.metadata @> '{"agent_decision_projection": true}'::jsonb
+  FOR UPDATE OF message
+), rewound AS (
+  SELECT public.memoh_rewind_history_checkpoint(owner.id, removed.turn_position, removed.turn_message_seq) AS done
+  FROM owner_session owner
+  CROSS JOIN (
+    SELECT
+      (array_agg(projection.turn_position ORDER BY projection.turn_position, projection.turn_message_seq))[1]::bigint AS turn_position,
+      (array_agg(projection.turn_message_seq ORDER BY projection.turn_position, projection.turn_message_seq))[1]::bigint AS turn_message_seq
+    FROM projections projection
+    WHERE projection.in_context
+  ) removed
+  WHERE removed.turn_position IS NOT NULL
+)
 DELETE FROM bot_history_messages message
+USING projections
 WHERE message.team_id = public.memoh_current_team_id()
-  AND message.bot_id = sqlc.arg(bot_id)
-  AND message.session_id = sqlc.arg(session_id)
-  AND message.run_id = sqlc.arg(run_id)
-  AND message.role = 'assistant'
-  AND message.runtime_type <> 'model'
-  AND message.metadata @> '{"agent_decision_projection": true}'::jsonb;
+  AND message.id = projections.id
+  AND (SELECT count(*) FROM rewound) >= 0;

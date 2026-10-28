@@ -9,18 +9,12 @@ import (
 
 const NamespaceCompactionLog = "compaction_log"
 
-func SummaryRecord(compactID string, summary string, coveredRefs []contextfrag.ContextRef, scope contextfrag.Scope) HistoryRecord {
-	rec := summaryRecordBase(compactID, summary, scope)
-	rec.Kind = contextfrag.KindConversationSummary
-	rec.Lifecycle = LifecycleActiveSummary
-	coverage := contextfrag.NewSummaryCoverage(rec.Ref, coveredRefs)
-	rec.Coverage = &coverage
-	return rec
-}
-
-func summaryRecordBase(compactID string, summary string, scope contextfrag.Scope) HistoryRecord {
+// SummaryRecord is the record a summary of a history checkpoint renders as.
+// Its coverage names the summary and no rows: what the summary stands for is
+// its checkpoint's to say.
+func SummaryRecord(compactID string, summary string, scope contextfrag.Scope) HistoryRecord {
 	compactID = strings.TrimSpace(compactID)
-	return HistoryRecord{
+	rec := HistoryRecord{
 		Ref: contextfrag.ContextRef{
 			Namespace:  NamespaceCompactionLog,
 			ID:         compactID,
@@ -31,7 +25,7 @@ func summaryRecordBase(compactID string, summary string, scope contextfrag.Scope
 		SourceKind: SourceCompactionLog,
 		ModelMessage: turn.ModelMessage{
 			Role:    "user",
-			Content: turn.NewTextContent("<summary>\n" + summary + "\n</summary>"),
+			Content: turn.NewTextContent(turn.SummaryText(summary)),
 		},
 		Scope: scope,
 		Provenance: contextfrag.Provenance{
@@ -39,6 +33,8 @@ func summaryRecordBase(compactID string, summary string, scope contextfrag.Scope
 			SourceID:  compactID,
 			Collector: CollectorHistoryRecords,
 		},
-		CompactID: compactID,
+		Kind:      contextfrag.KindConversationSummary,
+		Lifecycle: LifecycleActiveSummary,
 	}
+	return rec
 }

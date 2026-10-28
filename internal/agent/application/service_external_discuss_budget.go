@@ -25,7 +25,8 @@ func (s *Service) prepareExternalDiscussContext(ctx context.Context, req ChatReq
 		if !req.discussRecoveryExhausted {
 			recovery := req
 			recovery.discussCurrentSources = admission.ProtectedSources
-			cause = s.compactForBudget(ctx, recovery, max(req.discussContextTokens, admission.EstimatedTokens), admission.RecoveryBudgetTokens, "")
+			// The history renders the protected input beside the summary.
+			cause = s.compactForBudget(ctx, recovery, max(req.discussContextTokens, admission.EstimatedTokens), admission.RecoveryBudgetTokens+admission.ProtectedTokens, "")
 			if err := ctx.Err(); err != nil {
 				return req, err
 			}

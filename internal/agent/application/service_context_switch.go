@@ -5,53 +5,64 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
+
+	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/turn"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/errs"
 )
 
 // switchContext is the compaction event an armed run asks for when the
-// request before a step does not fit: one compaction.Compact over the
-// sources the request renders, whose passes it then splices into the run's
-// own request before measuring it once. The run's input and steers stay
-// where they are, and the latest step with everything after it stays raw
-// outside the history budget.
+// request before a step, the first one included, does not fit: one
+// compaction.Fold over that request, whose passes it splices into the run's
+// own request as they commit, before the run measures it once. The run's
+// input and steers are anchors; the event keeps them and the newest call
+// groups raw as compaction.Fold decides. The summary comes from the run's own
+// model, forked from its request. An edit or retry that folds before its
+// replacement has replaced the turn first moves the session to the checkpoint
+// the replacement keeps.
 func (s *Service) switchContext(req ChatRequest, committer *agentStepCommitter, turnModelID string) func(context.Context, native.ContextSwitch) (string, error) {
 	return func(ctx context.Context, sw native.ContextSwitch) (string, error) {
 		start := time.Now()
-		botSettings, err := s.settingsService.GetBot(ctx, req.BotID)
-		if err != nil {
-			return "", fmt.Errorf("load compaction settings: %w", err)
-		}
-		cfg, err := s.buildCompactionConfig(ctx, req, botSettings, sw.UsageTokens, turnModelID)
-		if err != nil {
-			return "", err
-		}
-		cfg.View = committer.currentSources(sw.View)
-		cfg.Anchors = append(committer.currentSources(sw.Anchors), committer.inputSources()...)
-		for _, source := range sw.Tail {
-			source.Current = true
-			cfg.ProtectedSources = append(cfg.ProtectedSources, source)
-		}
-		cfg.HistoryBudgetTokens = sw.HistoryBudgetTokens
-		cfg.Continuation = sw.Previous
-
-		passes, err := s.compactionService.Compact(ctx, cfg)
+		inputs := committer.inputSources()
 		tokens := sw.UsageTokens
-		for _, pass := range passes {
-			tokens = sw.Fold(native.ContextFold{
-				Artifact: pass.ArtifactID,
-				Summary:  compaction.SummaryMessage(pass.Summary),
-				Covered:  pass.Covered,
-				Absorbed: pass.Absorbed,
-			})
-		}
+		passes, err := s.compactionService.Fold(ctx, compaction.Event{
+			BotID:           req.BotID,
+			SessionID:       req.ThreadID,
+			ModelRecordID:   turnModelID,
+			Request:         sw.Request,
+			Sources:         foldSources(committer, sw.Provenance, inputs),
+			AnchorPolicy:    anchorPolicy(req),
+			Window:          sw.WindowTokens,
+			MaxOutputTokens: sw.OutputTokens,
+			FixedOutput:     true,
+			Allowance:       sw.AllowanceTokens,
+			Pressure:        sw.UsageTokens,
+			ReplacedTurnID:  committer.replacedTurn(),
+			Summarizer:      sw.Summarize,
+			Apply: func(pass compaction.Pass) (sdk.Request, []compaction.Source) {
+				splice := sw.Fold(native.ContextFold{
+					SummaryID: pass.SummaryID,
+					Summary:   compaction.SummaryMessage(pass.Summary),
+					Order:     pass.Order,
+				})
+				tokens = splice.Tokens
+				return splice.Request, foldSources(committer, splice.Provenance, inputs)
+			},
+		})
 		reason := compaction.ReasonOf(err)
 		if err == nil && tokens > sw.AllowanceTokens {
+			// An event that folds nothing found only what the run keeps.
 			reason = compaction.ReasonStillOver
+			if len(passes) == 0 {
+				reason = compaction.ReasonProtectedOverflow
+			}
 			err = fmt.Errorf("%s: request_tokens=%d allowance=%d", reason, tokens, sw.AllowanceTokens)
 		}
 		detail := fmt.Sprintf("trigger=in_run passes=%d request_tokens=%d->%d allowance=%d", len(passes), sw.UsageTokens, tokens, sw.AllowanceTokens)
@@ -75,4 +86,36 @@ func (s *Service) switchContext(req ChatRequest, committer *agentStepCommitter, 
 		}
 		return detail, fmt.Errorf("%w: %w", contextfrag.ErrBudgetUnsatisfied, err)
 	}
+}
+
+// anchorPolicy is how much of its anchors a run's fold keeps: a Discuss run
+// keeps the batch it answers while it leaves the summary room, any other run
+// keeps its input and steers within a cap.
+func anchorPolicy(req ChatRequest) compaction.AnchorPolicy {
+	if req.SessionType == sessionpkg.TypeDiscuss {
+		return compaction.AnchorsFirst
+	}
+	return compaction.AnchorsCapped
+}
+
+// foldSources is what each message of the run's request stands for in a
+// fold: nothing for runtime context, otherwise its sources named by the rows
+// that hold them now, an anchor when it renders the run's input or a steer.
+func foldSources(committer *agentStepCommitter, provenance []*native.MessageProvenance, inputs []turn.ContextMessageSource) []compaction.Source {
+	sources := make([]compaction.Source, len(provenance))
+	for i, p := range provenance {
+		if p == nil || len(p.Sources) == 0 {
+			continue
+		}
+		current := committer.currentSources(p.Sources)
+		sources[i] = compaction.Source{
+			Sources: current,
+			Anchor: p.Anchor || slices.ContainsFunc(current, func(source turn.ContextMessageSource) bool {
+				return slices.ContainsFunc(inputs, func(input turn.ContextMessageSource) bool {
+					return input.Kind == source.Kind && input.ID == source.ID
+				})
+			}),
+		}
+	}
+	return sources
 }

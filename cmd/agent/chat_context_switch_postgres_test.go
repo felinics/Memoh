@@ -29,6 +29,7 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/chat/timeline"
+	dbpkg "github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 	"github.com/felinics/memoh/internal/runtimefence"
@@ -99,8 +100,12 @@ type effectLoop struct {
 	foreignAt           int
 	downAt              int
 	downFrom            int32
-	// resultBytes sizes each effect's result; zero keeps the default.
+	// resultBytes sizes each effect's result; zero keeps the default, a step
+	// the verbatim budget of the loop's windows holds one of beside the input,
+	// not two.
 	resultBytes int
+	// parallel is how many effects one step calls at once; zero is one.
+	parallel int
 	// prose fills each result with words the summarizer reads instead of a
 	// repeated character run it treats as a media blob.
 	prose bool
@@ -113,6 +118,14 @@ type effectLoop struct {
 	arrived  []timeline.RenderedSegment
 	effects  []int
 	requests []string
+	// folds is how many summaries the session had asked for when each
+	// request was sent, and runs the run that sent it; replaced marks the
+	// requests a turn replacement started from, and outOfBand the runs that
+	// a row was written beside without rendering it.
+	folds     []int32
+	runs      []string
+	replaced  map[int]bool
+	outOfBand map[string]bool
 }
 
 type approveExec struct{}
@@ -132,6 +145,7 @@ func newEffectLoop(t *testing.T, entry runEntry) *effectLoop {
 	f := newBacklogFixture(t)
 	s := &effectLoop{f: f}
 	f.stream = s.serve
+	t.Cleanup(func() { s.checkRequests(t) })
 	f.agent.SetToolProviders([]tools.ToolProvider{s})
 	if _, err := f.pool.Exec(f.ctx, `UPDATE models SET config=config || '{"compatibilities":["tool-call"]}'::jsonb WHERE id=$1`, f.chatModel); err != nil {
 		t.Fatal(err)
@@ -159,6 +173,94 @@ func newEffectLoop(t *testing.T, entry runEntry) *effectLoop {
 	return s
 }
 
+// checkRequests holds every request the session sent its model to the
+// contract: its tool calls and results pair in both directions, and between
+// two folds a request extends the one before it, whichever run sent it. A
+// turn replacement starts over from the request before the replaced turn,
+// and a row written beside a run without the run rendering it takes its
+// place in the next run's request.
+func (s *effectLoop) checkRequests(t *testing.T) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, request := range s.requests {
+		if err := pairedToolParts(request); err != nil {
+			t.Errorf("request %d: %v", i+1, err)
+		}
+		if i == 0 || s.folds[i] != s.folds[i-1] || s.replaced[i] ||
+			s.runs[i] != s.runs[i-1] && s.outOfBand[s.runs[i-1]] {
+			continue
+		}
+		before, after := requestMessages(t, s.requests[i-1]), requestMessages(t, request)
+		if at := divergence(before, after); at >= 0 {
+			t.Errorf("request %d rewrote message %d of the request before it with no fold between them:\nbefore: %.300s\nafter:  %.300s", i+1, at, before[at], messageAt(after, at))
+		}
+	}
+}
+
+// activeRun is the run that holds the session's active slot.
+func (s *effectLoop) activeRun() string {
+	var run string
+	_ = s.f.pool.QueryRow(s.f.ctx, `SELECT run_id::text FROM session_runs WHERE session_id=$1 AND state IN ('accepted', 'running', 'waiting_decision', 'finishing') LIMIT 1`, s.f.sessionID).Scan(&run)
+	return run
+}
+
+// pairedToolParts reports a tool call a request leaves without its result,
+// or a result it sends without its call.
+func pairedToolParts(request string) error {
+	var body struct {
+		Messages []struct {
+			Role       string `json:"role"`
+			ToolCallID string `json:"tool_call_id"`
+			ToolCalls  []struct {
+				ID string `json:"id"`
+			} `json:"tool_calls"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(request), &body); err != nil {
+		return err
+	}
+	var open []string
+	for i, message := range body.Messages {
+		if message.Role == "tool" {
+			at := slices.Index(open, message.ToolCallID)
+			if at < 0 {
+				return fmt.Errorf("message %d is a result for %q without its call", i, message.ToolCallID)
+			}
+			open = slices.Delete(open, at, at+1)
+			continue
+		}
+		if len(open) > 0 {
+			return fmt.Errorf("message %d follows calls %v left without results", i, open)
+		}
+		for _, call := range message.ToolCalls {
+			open = append(open, call.ID)
+		}
+	}
+	if len(open) > 0 {
+		return fmt.Errorf("the request ends with calls %v left without results", open)
+	}
+	return nil
+}
+
+// divergence is the first message of before that after does not carry at
+// the same place, or -1 when after extends before.
+func divergence(before, after []string) int {
+	for i, message := range before {
+		if i >= len(after) || after[i] != message {
+			return i
+		}
+	}
+	return -1
+}
+
+func messageAt(messages []string, i int) string {
+	if i < len(messages) {
+		return messages[i]
+	}
+	return "(none)"
+}
+
 // window sets the context window of the model the runs use.
 func (s *effectLoop) window(tokens int) {
 	if _, err := s.f.pool.Exec(s.f.ctx, `UPDATE models SET config=config || jsonb_build_object('context_window', $2::int) WHERE id=$1`, s.f.chatModel, tokens); err != nil {
@@ -176,7 +278,7 @@ func (s *effectLoop) Tools(context.Context, tools.SessionContext) ([]toolexec.To
 		toolexec.Define("numbered_effect", "Record a numbered effect and return its findings.", func(tc *toolexec.ToolExecContext, input effectInput) (sdk.ToolOutput, error) {
 			s.mu.Lock()
 			s.effects = append(s.effects, input.Index)
-			size, foreign, arrive := cmp.Or(s.resultBytes, 4200), input.Index == s.foreignAt, input.Index == s.arriveAt
+			size, foreign, arrive := cmp.Or(s.resultBytes, 2200), input.Index == s.foreignAt, input.Index == s.arriveAt
 			if input.Index == s.downAt {
 				s.downFrom = s.f.summaries.Load()
 				s.f.failStatus.Store(http.StatusServiceUnavailable)
@@ -214,6 +316,12 @@ func (s *effectLoop) Tools(context.Context, tools.SessionContext) ([]toolexec.To
 // never renders.
 func (s *effectLoop) writeForeignRow(ctx context.Context) error {
 	f := s.f
+	s.mu.Lock()
+	if s.outOfBand == nil {
+		s.outOfBand = map[string]bool{}
+	}
+	s.outOfBand[s.runs[len(s.runs)-1]] = true
+	s.mu.Unlock()
 	content, err := historyfrag.MarshalStoredModelMessage(turn.ModelMessage{Role: "assistant", Content: turn.NewTextContent(foreignRow)})
 	if err != nil {
 		return err
@@ -229,32 +337,44 @@ func (s *effectLoop) serve(w http.ResponseWriter, body []byte) {
 	request := string(body)
 	s.mu.Lock()
 	s.requests = append(s.requests, request)
+	s.folds = append(s.folds, s.f.summaries.Load())
+	s.runs = append(s.runs, s.activeRun())
 	reply := fmt.Sprintf("REPLY_%03d", len(s.requests))
-	call, arguments := "", ""
+	var calls []any
+	addCall := func(name, arguments string) {
+		id := fmt.Sprintf("call_%03d", len(s.requests))
+		if len(calls) > 0 {
+			id += fmt.Sprintf("_%d", len(calls))
+		}
+		calls = append(calls, map[string]any{"index": len(calls), "id": id, "type": "function", "function": map[string]any{"name": name, "arguments": arguments}})
+	}
 	if s.marker != "" && strings.Contains(request, s.marker) {
 		switch {
 		case s.pendingDecision && s.calls >= s.decisionAfter:
-			s.pendingDecision, call, arguments = false, "exec", `{"command":"ls"}`
+			s.pendingDecision = false
 			if s.askUser {
-				call, arguments = "ask_user", `{"questions":[{"text":"How should we proceed?","kind":"text"}]}`
+				addCall("ask_user", `{"questions":[{"text":"How should we proceed?","kind":"text"}]}`)
+			} else {
+				addCall("exec", `{"command":"ls"}`)
 			}
 		case s.calls < s.steps:
-			s.calls++
-			call, arguments = "numbered_effect", fmt.Sprintf(`{"index":%d}`, s.calls)
+			for range max(s.parallel, 1) {
+				if s.calls == s.steps {
+					break
+				}
+				s.calls++
+				addCall("numbered_effect", fmt.Sprintf(`{"index":%d}`, s.calls))
+			}
 		}
 	}
-	id := fmt.Sprintf("call_%03d", len(s.requests))
 	hold := s.hold
 	s.mu.Unlock()
 	if hold != nil && strings.Contains(request, busyInput) {
 		<-hold
 	}
 	delta, finish := map[string]any{"role": "assistant", "content": reply}, "stop"
-	if call != "" {
-		delta = map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{
-			"index": 0, "id": id, "type": "function", "function": map[string]any{"name": call, "arguments": arguments},
-		}}}
-		finish = "tool_calls"
+	if len(calls) > 0 {
+		delta, finish = map[string]any{"role": "assistant", "tool_calls": calls}, "tool_calls"
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	for _, choice := range []map[string]any{{"index": 0, "delta": delta, "finish_reason": nil}, {"index": 0, "delta": map[string]any{}, "finish_reason": finish}} {
@@ -488,6 +608,12 @@ func (s *effectLoop) replace(first string, start replaceTurn) string {
 func (s *effectLoop) replaceLatest(start replaceTurn) string {
 	f := s.f
 	f.t.Helper()
+	s.mu.Lock()
+	if s.replaced == nil {
+		s.replaced = map[int]bool{}
+	}
+	s.replaced[len(s.requests)] = true
+	s.mu.Unlock()
 	var targetTurnID string
 	if err := f.pool.QueryRow(f.ctx, `SELECT turn_id FROM bot_history_messages WHERE session_id=$1 AND turn_id IS NOT NULL ORDER BY created_at DESC, id DESC LIMIT 1`, f.sessionID).Scan(&targetTurnID); err != nil {
 		f.t.Fatal(err)
@@ -552,6 +678,7 @@ type inRunScenario struct {
 }
 
 var inRunScenarios = []inRunScenario{
+	{name: "history-full", run: historyFullScenario},
 	{name: "prefix-full", run: prefixFullScenario},
 	{name: "long-loop", run: longLoopScenario},
 	{name: "decision-after-progress", run: decisionAfterProgressScenario},
@@ -575,12 +702,13 @@ func TestPostgresInRunCompactionByEntry(t *testing.T) {
 }
 
 // Replacing a turn that compacted in place leaves its summary behind: the
-// replacement's first step hides the turn and moves the session to a new
-// compaction epoch, so the attempt renders the history before the turn raw
-// and folds it, with its own steps, into a summary of its own. Every effect
-// of the attempt runs once, no summary of the current epoch covers a row of
-// the replaced turn, and the next turn renders the attempt's summary without
-// compacting.
+// replacement's first step hides the turn and moves the session back to the
+// newest checkpoint that does not depend on it, so the attempt renders the
+// history before the turn raw and folds it, with its own steps, into a
+// summary of its own. Every effect of the attempt runs once, the checkpoint
+// the replaced turn left active is not on the chain of the session's active
+// one, which holds one summary, and the next turn renders the attempt's
+// summary without compacting.
 func TestPostgresReplacingACompactedTurnFoldsAgain(t *testing.T) {
 	const steps = 14
 	web := runEntryNamed("web")
@@ -594,13 +722,15 @@ func TestPostgresReplacingACompactedTurnFoldsAgain(t *testing.T) {
 			if code, _ := s.run(web, loopInput, steps); code != "" || f.summaries.Load() == 0 {
 				t.Fatalf("the turn to replace: code=%q summary_calls=%d, want it answered after compacting in place", code, f.summaries.Load())
 			}
-			epoch := func() (epoch int64) {
-				if err := f.pool.QueryRow(f.ctx, `SELECT compaction_epoch FROM bot_sessions WHERE id=$1`, f.sessionID).Scan(&epoch); err != nil {
-					t.Fatal(err)
+			queries := postgresstore.NewQueriesWithPool(f.pool, sqlc.New(f.pool))
+			active := func() sqlc.BotHistoryCheckpoint {
+				row, err := queries.GetActiveHistoryCheckpoint(f.ctx, dbpkg.ParseUUIDOrEmpty(f.sessionID))
+				if err != nil {
+					t.Fatalf("load the active history checkpoint: %v", err)
 				}
-				return epoch
+				return row
 			}
-			before, summaries := epoch(), f.summaries.Load()
+			before, summaries := active().ID, f.summaries.Load()
 			s.mu.Lock()
 			s.marker, s.steps, s.calls, s.effects, s.start = loopInput, steps, 0, nil, len(s.requests)
 			s.mu.Unlock()
@@ -611,16 +741,18 @@ func TestPostgresReplacingACompactedTurnFoldsAgain(t *testing.T) {
 			if code := s.replaceLatest(s.replacement(edit)); code != "" || !slices.Equal(s.effects, want) || f.summaries.Load() == summaries {
 				t.Fatalf("replacement: code=%q effects=%v summary_calls=%d, want every effect once on a summary of its own", code, s.effects, f.summaries.Load()-summaries)
 			}
-			var active, coveredHidden int
-			if err := f.pool.QueryRow(f.ctx, `SELECT count(DISTINCT c.id), count(h.id) FILTER (WHERE NOT h.turn_visible)
-				FROM bot_history_message_compacts c JOIN bot_sessions s ON s.id=c.session_id AND s.compaction_epoch=c.compaction_epoch
-				LEFT JOIN bot_history_messages h ON h.compact_id=c.id
-				WHERE c.session_id=$1 AND c.status='ok' AND c.superseded_by IS NULL`, f.sessionID).Scan(&active, &coveredHidden); err != nil {
+			var descends bool
+			if err := f.pool.QueryRow(f.ctx, `WITH RECURSIVE chain AS (
+				SELECT id, parent_id FROM bot_history_checkpoints WHERE id = $1
+				UNION ALL
+				SELECT parent.id, parent.parent_id FROM bot_history_checkpoints parent JOIN chain ON parent.id = chain.parent_id
+			) SELECT EXISTS (SELECT 1 FROM chain WHERE id = $2)`, active().ID, before).Scan(&descends); err != nil {
 				t.Fatal(err)
 			}
-			if epoch() == before || active != 1 || coveredHidden != 0 {
-				t.Fatalf("epoch moved=%v active summaries=%d covering %d hidden rows, want the replaced turn's summary retired and one summary covering none of it", epoch() != before, active, coveredHidden)
+			if descends || f.activeSummaries() != 1 {
+				t.Fatalf("active checkpoint descends from the replaced turn's=%v summaries=%d, want the replaced turn's summary left behind and one summary of the attempt's own", descends, f.activeSummaries())
 			}
+			assertActiveCheckpointHolds(t, f.ctx, queries, f.sessionID)
 			s.window(16000)
 			summaries = f.summaries.Load()
 			code, requests := s.run(web, "NEXT_ROUND_QUESTION", 0)
@@ -633,18 +765,30 @@ func TestPostgresReplacingACompactedTurnFoldsAgain(t *testing.T) {
 	}
 }
 
-// Even without provider cache usage, a fold asks for its summary
-// at the end of the request the run sent last instead of in a request of its
-// own: the same tools, cache key and messages, then the compaction request.
-func TestPostgresInRunFoldExtendsTheRunRequest(t *testing.T) {
+// A fold asks for its summary by forking the request the run sends next, up
+// to the newest messages it keeps: the first pass of each fold sends the same
+// tools and cache key as the request the run sent last before it, and
+// messages that extend that request, or that it extends, then the compaction
+// request, so the fork reuses the run's prompt cache. A further pass of the
+// same fold reads the request the pass before it spliced. Each result fits
+// what a fork reads of one message, so the fork reads it whole.
+func TestPostgresInRunFoldForksTheRunRequest(t *testing.T) {
 	const steps = 14
 	web := runEntryNamed("web")
 	s := newEffectLoop(t, web)
 	f := s.f
-	s.prose, s.resultBytes = true, 9000
-	var asked []string
-	f.onSummary = func(body []byte) { asked = append(asked, string(body)) }
-	code, requests := s.run(web, loopInput, steps)
+	s.prose, s.resultBytes = true, 6000
+	var asked, parents []string
+	sent := 0
+	f.onSummary = func(body []byte) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if len(s.requests) > sent {
+			sent = len(s.requests)
+			asked, parents = append(asked, string(body)), append(parents, s.requests[sent-1])
+		}
+	}
+	code, _ := s.run(web, loopInput, steps)
 	f.onSummary = nil
 	if code != "" || len(asked) == 0 || len(s.effects) != steps {
 		t.Fatalf("code=%q summary_calls=%d effects=%v, want the run to fold and finish", code, len(asked), s.effects)
@@ -654,37 +798,36 @@ func TestPostgresInRunFoldExtendsTheRunRequest(t *testing.T) {
 		Tools          json.RawMessage   `json:"tools"`
 		PromptCacheKey string            `json:"prompt_cache_key"`
 	}
-	sent := make([]request, len(requests))
-	for i, body := range requests {
-		if err := json.Unmarshal([]byte(body), &sent[i]); err != nil {
-			t.Fatal(err)
-		}
-	}
 	for i, body := range asked {
-		var ask request
+		var ask, parent request
 		if err := json.Unmarshal([]byte(body), &ask); err != nil {
 			t.Fatal(err)
 		}
-		if n := len(ask.Messages); n == 0 || !strings.Contains(string(ask.Messages[n-1]), "[Context compaction]") {
-			t.Fatalf("summary request %d does not end with the compaction request", i+1)
+		if err := json.Unmarshal([]byte(parents[i]), &parent); err != nil {
+			t.Fatal(err)
 		}
-		extends := slices.ContainsFunc(sent, func(r request) bool {
-			return string(r.Tools) == string(ask.Tools) && r.PromptCacheKey == ask.PromptCacheKey &&
-				slices.EqualFunc(r.Messages, ask.Messages[:len(ask.Messages)-1], func(a, b json.RawMessage) bool { return string(a) == string(b) })
-		})
-		if !extends {
-			t.Fatalf("summary request %d does not extend a request the run sent", i+1)
+		if n := len(ask.Messages); n == 0 || !strings.Contains(string(ask.Messages[n-1]), "[Context compaction]") {
+			t.Fatalf("fold %d does not end with the compaction request", i+1)
+		}
+		read := ask.Messages[:len(ask.Messages)-1]
+		shared := min(len(parent.Messages), len(read))
+		if string(parent.Tools) != string(ask.Tools) || parent.PromptCacheKey != ask.PromptCacheKey || shared == 0 ||
+			!slices.EqualFunc(parent.Messages[:shared], read[:shared], func(a, b json.RawMessage) bool { return string(a) == string(b) }) {
+			t.Fatalf("fold %d does not extend, or is not a prefix of, the request the run sent before it", i+1)
 		}
 	}
 }
 
+// A run resumed by a decision whose result its progress has no room left for
+// folds that progress before its first step, and keeps its input and the
+// decision's result, which the verbatim budget holds, raw.
 func decisionAfterProgressScenario(t *testing.T, entry runEntry, s *effectLoop) {
-	s.decisionAfter, s.decisionResultBytes = 2, 9000
+	s.decisionAfter, s.resultBytes, s.decisionResultBytes = 2, 7000, 2200
 	code, requests := s.run(entry, loopInput, 4)
 	if code != "" || !slices.Equal(s.effects, []int{1, 2, 3, 4}) || len(requests) != 6 {
 		t.Fatalf("resume: code=%q effects=%v calls=%d, want all four effects completed once", code, s.effects, len(requests))
 	}
-	if s.f.summaries.Load() == 0 || strings.Count(requests[3], loopInput) != 1 || !strings.Contains(requests[3], "DECISION_RESULT_KEEP"+strings.Repeat("x", 9000)) {
+	if s.f.summaries.Load() == 0 || strings.Count(requests[3], loopInput) != 1 || !strings.Contains(requests[3], "DECISION_RESULT_KEEP"+strings.Repeat("x", s.decisionResultBytes)) {
 		t.Fatal("resumed request must compact earlier progress and retain its input and approved result")
 	}
 }
@@ -746,6 +889,30 @@ func requestMessages(t *testing.T, request string) []string {
 
 // summaryContents is every message of a provider request body that carries
 // the scripted summary, in order.
+// assertForksAskForTheRunsOutput fails unless every fork asks for the output
+// cap the run's own request does, none when the run leaves it to the provider:
+// the provider settings a fork shares with the run hold for that output.
+func assertForksAskForTheRunsOutput(t *testing.T, run string, forks []string) {
+	t.Helper()
+	outputCap := func(body string) (any, bool) {
+		var request map[string]any
+		if err := json.Unmarshal([]byte(body), &request); err != nil {
+			t.Fatal(err)
+		}
+		if value, ok := request["max_tokens"]; ok {
+			return value, true
+		}
+		value, ok := request["max_completion_tokens"]
+		return value, ok
+	}
+	want, wantSet := outputCap(run)
+	for i, body := range forks {
+		if got, set := outputCap(body); set != wantSet || got != want {
+			t.Fatalf("summarizer call %d asks for output cap %v (set=%v), want the run's %v (set=%v)", i+1, got, set, want, wantSet)
+		}
+	}
+}
+
 func summaryContents(t *testing.T, request string) []string {
 	t.Helper()
 	var summaries []string
@@ -781,15 +948,57 @@ func markersInOrder(request string, markers ...string) bool {
 	return true
 }
 
-// When the history a run starts with fills the request, the first step that
-// does not fit folds that history into a summary and the run goes on: the
-// effect runs once, the request keeps every message the fold does not cover
-// exactly as it was sent, with the input and the step's result verbatim, and
-// the next turn replays the same summary without compacting.
-func prefixFullScenario(t *testing.T, entry runEntry, s *effectLoop) {
+// When the history a run starts with does not fit beside its input, the run
+// folds that history before its first step: the first request it sends
+// already carries one summary in place of the earlier turns and the input
+// verbatim, the effect runs once, and the next turn replays the same summary
+// without compacting.
+func historyFullScenario(t *testing.T, entry runEntry, s *effectLoop) {
 	f := s.f
 	for i := range 3 {
-		if code, _ := s.run(entry, fmt.Sprintf("PREFIX_TURN_%d ", i)+strings.Repeat("p", 2000), 0); code != "" {
+		if code, _ := s.run(entry, fmt.Sprintf("HISTORY_TURN_%d ", i)+strings.Repeat("h", 2400), 0); code != "" {
+			t.Fatalf("history turn %d failed with %s", i, code)
+		}
+	}
+	if f.summaries.Load() != 0 {
+		t.Fatalf("the history turns compacted %d times, want them to fit", f.summaries.Load())
+	}
+	// The input is larger than the verbatim budget, and the step's result
+	// does not fit beside it: the fold before the second call folds both.
+	s.resultBytes = 4200
+	input := loopInput + " " + strings.Repeat("i", 10000)
+	code, requests := s.run(entry, input, 1)
+	if code != "" || !slices.Equal(s.effects, []int{1}) || len(requests) == 0 || f.summaries.Load() == 0 {
+		t.Fatalf("code=%q effects=%v summary_calls=%d, want the run answered after one effect and a fold", code, s.effects, f.summaries.Load())
+	}
+	first := requests[0]
+	if summary := summaryContents(t, first); len(summary) != 1 || strings.Contains(first, "HISTORY_TURN_0 ") || strings.Count(first, input) != 1 {
+		t.Fatalf("first request: summaries=%d raw_history=%v inputs=%d, want the history folded before the first step and the input verbatim",
+			len(summary), strings.Contains(first, "HISTORY_TURN_0 "), strings.Count(first, input))
+	}
+	summaries := f.summaries.Load()
+	code, requests = s.run(entry, "NEXT_ROUND_QUESTION", 0)
+	if code != "" || len(requests) == 0 || f.summaries.Load() != summaries || len(summaryContents(t, requests[0])) != 1 {
+		t.Fatalf("next turn: code=%q summary_calls=%d, want the summary replayed without compacting", code, f.summaries.Load()-summaries)
+	}
+}
+
+// When the history a run starts with fills the request, the first step that
+// does not fit folds that history into a summary and the run goes on: every
+// fork asks for the run's own output, the effect runs once, the request keeps
+// every message the fold does not cover exactly as it was sent, with the
+// input and the step's result verbatim, and the next turn replays the same
+// summary without compacting.
+func prefixFullScenario(t *testing.T, entry runEntry, s *effectLoop) {
+	f := s.f
+	// The turns fit the request together; with the step after them they do
+	// not. The ask_user tool takes more of the request.
+	turnBytes := 3800
+	if s.askUser {
+		turnBytes = 3400
+	}
+	for i := range 3 {
+		if code, _ := s.run(entry, fmt.Sprintf("PREFIX_TURN_%d ", i)+strings.Repeat("p", turnBytes), 0); code != "" {
 			t.Fatalf("prefix turn %d failed with %s", i, code)
 		}
 	}
@@ -798,21 +1007,24 @@ func prefixFullScenario(t *testing.T, entry runEntry, s *effectLoop) {
 		s.push(passive)
 	}
 	summaries := f.summaries.Load()
-	s.resultBytes = 12000
-	if s.askUser {
-		s.resultBytes = 9000
-	}
+	// The step fits the verbatim budget; with the history before it, the
+	// request does not fit.
+	s.resultBytes = 2200
+	var forks []string
+	f.onSummary = func(body []byte) { forks = append(forks, string(body)) }
 	code, requests := s.run(entry, loopInput, 1)
+	f.onSummary = nil
 	if code != "" || !slices.Equal(s.effects, []int{1}) || len(requests) != 2+entry.extra {
 		t.Fatalf("code=%q effects=%v provider_calls=%d summary_calls=%d, want the run answered after one effect", code, s.effects, len(requests), f.summaries.Load()-summaries)
 	}
 	before, last := requests[len(requests)-2], requests[len(requests)-1]
 	summary := summaryContents(t, last)
-	if strings.Contains(before, loopSummary) || f.summaries.Load()-summaries != 1 || len(summary) != 1 || strings.Count(last, loopInput) != 1 ||
+	if strings.Contains(before, loopSummary) || len(forks) == 0 || len(summary) != 1 || strings.Count(last, loopInput) != 1 ||
 		!strings.Contains(last, "TOOL_RESULT_001 ") || strings.Contains(last, "PREFIX_TURN_0 ") || strings.Contains(last, "[tool result pruned") {
-		t.Fatalf("summary_calls=%d summaries=%q input=%d result=%v raw_prefix=%v, want the earlier turns folded in one call at the step that did not fit, and the input and result raw",
-			f.summaries.Load()-summaries, summary, strings.Count(last, loopInput), strings.Contains(last, "TOOL_RESULT_001 "), strings.Contains(last, "PREFIX_TURN_0 "))
+		t.Fatalf("summary_calls=%d summaries=%q input=%d result=%v raw_prefix=%v, want the earlier turns folded at the step that did not fit, and the input and result raw",
+			len(forks), summary, strings.Count(last, loopInput), strings.Contains(last, "TOOL_RESULT_001 "), strings.Contains(last, "PREFIX_TURN_0 "))
 	}
+	assertForksAskForTheRunsOutput(t, before, forks)
 	sent := requestMessages(t, before)
 	for _, message := range requestMessages(t, last) {
 		at := slices.Index(sent, message)
@@ -844,7 +1056,8 @@ func prefixFullScenario(t *testing.T, entry runEntry, s *effectLoop) {
 
 // A tool loop that outgrows the model window keeps going on one rolling
 // summary in every entry: each effect runs once, each event folds everything
-// before the latest step in one summarizer call that is told the run's input,
+// before the latest step, in summarizer calls that are told the run's input
+// and ask for the run's own output, as many as the window needs beside it,
 // requests between events only grow, the input and the latest results stay
 // verbatim, a row written into the session by someone else is left alone, and
 // the next turn renders the summary the run sent at the same place without
@@ -899,19 +1112,20 @@ func longLoopScenario(t *testing.T, entry runEntry, s *effectLoop) {
 		}
 		first, previous = kept, messages
 	}
-	if events < 2 || int(f.summaries.Load()-summaries) != events {
-		t.Fatalf("events=%d summary_calls=%d, want the loop to fold at least twice, one summarizer call each", events, f.summaries.Load()-summaries)
+	if events < 2 || int(f.summaries.Load()-summaries) < events {
+		t.Fatalf("events=%d summary_calls=%d, want the loop to fold at least twice, with a summarizer call or more each", events, f.summaries.Load()-summaries)
 	}
 	for i, body := range summarized {
 		if !strings.Contains(body, loopInput) {
 			t.Fatalf("summarizer call %d was not told the run's input", i+1)
 		}
 	}
+	assertForksAskForTheRunsOutput(t, requests[len(requests)-1], summarized)
 	var running, toolRows, foldedRows, foreign int
 	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FILTER (WHERE state <> 'completed') FROM session_runs WHERE session_id=$1`, f.sessionID).Scan(&running); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FILTER (WHERE h.role='tool' AND h.content::text LIKE '%TOOL_RESULT_%'), count(*) FILTER (WHERE h.role='tool' AND h.content::text LIKE '%TOOL_RESULT_%' AND c.status='ok'), count(*) FILTER (WHERE h.content::text LIKE $2 AND h.compact_id IS NULL) FROM bot_history_messages h LEFT JOIN bot_history_message_compacts c ON c.id=h.compact_id WHERE h.session_id=$1`, f.sessionID, "%"+foreignRow+"%").Scan(&toolRows, &foldedRows, &foreign); err != nil {
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FILTER (WHERE h.role='tool' AND h.content::text LIKE '%TOOL_RESULT_%'), count(*) FILTER (WHERE h.role='tool' AND h.content::text LIKE '%TOOL_RESULT_%' AND h.folded), count(*) FILTER (WHERE h.content::text LIKE $2 AND NOT h.folded) FROM (`+historyRowsSQL+`) h`, f.sessionID, "%"+foreignRow+"%").Scan(&toolRows, &foldedRows, &foreign); err != nil {
 		t.Fatal(err)
 	}
 	if running != 0 || toolRows != steps || foldedRows != first-1 || foreign != 1 || f.activeSummaries() != 1 {
@@ -943,16 +1157,19 @@ func longLoopScenario(t *testing.T, entry runEntry, s *effectLoop) {
 	}
 	code, requests = s.run(entry, "SUMMARIZER_DOWN_INPUT", steps)
 	f.onSummary = nil
-	wantAttempts := []bool{false, false}
-	if len(summaryAttempts) > 0 && summaryAttempts[0] {
-		wantAttempts = []bool{true, true, false, false}
+	if code != "context.budget_unsatisfied" || !slices.Equal(summaryAttempts, []bool{true, true}) || len(s.effects) == 0 || len(s.effects) >= steps || !slices.IsSorted(s.effects) || len(slices.Compact(slices.Clone(s.effects))) != len(s.effects) {
+		t.Fatalf("summarizer down: code=%q summary_attempts=%v provider_calls=%d effects=%v, want budget_unsatisfied after the fork request was retried once, with the effects so far run once", code, summaryAttempts, len(requests), s.effects)
 	}
-	if code != "context.budget_unsatisfied" || !slices.Equal(summaryAttempts, wantAttempts) || len(s.effects) == 0 || len(s.effects) >= steps || !slices.IsSorted(s.effects) || len(slices.Compact(slices.Clone(s.effects))) != len(s.effects) {
-		t.Fatalf("summarizer down: code=%q summary_attempts=%v provider_calls=%d effects=%v, want budget_unsatisfied after each attempted summary path was retried once, with the effects so far run once", code, summaryAttempts, len(requests), s.effects)
-	}
+	// A run's lifecycle is written once session_runs took its terminal
+	// transition, which is what an entry that polls the run waits for.
 	var reasons, failedRows int
-	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM context_lifecycles, jsonb_array_elements(snapshot->'mutations') m WHERE session_id=$1 AND m->>'kind'='context_switch' AND m->>'detail' LIKE '%reason=summarizer_failed%'`, f.sessionID).Scan(&reasons); err != nil {
-		t.Fatal(err)
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM context_lifecycles, jsonb_array_elements(snapshot->'mutations') m WHERE session_id=$1 AND m->>'kind'='context_switch' AND m->>'detail' LIKE '%reason=summarizer_failed%'`, f.sessionID).Scan(&reasons); err != nil {
+			t.Fatal(err)
+		}
+		if reasons > 0 || time.Now().After(deadline) {
+			break
+		}
 	}
 	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM bot_history_messages WHERE session_id=$1 AND role='tool' AND content::text LIKE '%TOOL_RESULT_%' AND created_at >= (SELECT max(created_at) FROM bot_history_messages WHERE session_id=$1 AND role='user' AND content::text LIKE '%SUMMARIZER_DOWN_INPUT%')`, f.sessionID).Scan(&failedRows); err != nil {
 		t.Fatal(err)

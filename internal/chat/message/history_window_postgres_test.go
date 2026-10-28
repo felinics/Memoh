@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -14,9 +13,10 @@ import (
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
-// Compare the bounded index walk to the former cumulative-window definition.
-// Timestamps deliberately disagree with turn order, and rows on the same turn
-// share timestamps, so keyset pagination must use the full ordering tuple.
+// Compare the bounded index walk to the cumulative-window definition of the
+// raw history after a checkpoint. Timestamps deliberately disagree with turn
+// order, and rows on the same turn share timestamps, so keyset pagination
+// must use the full ordering tuple.
 func TestPostgresHistoryIndexWalkPreservesAdmission(t *testing.T) {
 	ctx := context.Background()
 	tx := beginPostgresMessageTestTx(t, ctx)
@@ -30,60 +30,52 @@ func TestPostgresHistoryIndexWalkPreservesAdmission(t *testing.T) {
   FROM generate_series(1,80) n`, postgresMessageTestBotID, postgresMessageTestSessionID); err != nil {
 		t.Fatal(err)
 	}
-	for group := range 2 {
-		var id string
-		if err := tx.QueryRow(ctx, `INSERT INTO bot_history_message_compacts(bot_id,session_id,status,summary)
-   VALUES($1,$2,'ok','summary') RETURNING id::text`, postgresMessageTestBotID, postgresMessageTestSessionID).Scan(&id); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tx.Exec(ctx, `UPDATE bot_history_messages SET compact_id=$1 WHERE session_id=$2 AND turn_position%4=$3`, id, postgresMessageTestSessionID, group); err != nil {
-			t.Fatal(err)
-		}
-	}
 	var session pgtype.UUID
 	if err := session.Scan(postgresMessageTestSessionID); err != nil {
 		t.Fatal(err)
 	}
 	q := dbsqlc.New(tx)
-	for _, fold := range []bool{false, true} {
-		for _, since := range []time.Time{time.Unix(0, 0), time.Date(2026, 1, 1, 0, 1, 20, 0, time.UTC)} {
+	type position struct{ turn, seq int64 }
+	for _, after := range []position{{0, 0}, {12, 1}} {
+		for _, before := range []*position{nil, {35, 0}} {
 			for _, budget := range []int64{-1, 0, 1, 100, 500, 10000, 1000000} {
-				t.Run(fmt.Sprintf("fold_%v/%d/%d", fold, since.Unix(), budget), func(t *testing.T) {
-					expected, err := tx.Query(ctx, `SELECT id::text,summarized FROM (
-      SELECT m.id,m.turn_position,m.turn_message_seq,m.created_at,(c.id IS NOT NULL) AS summarized,
-       ROW_NUMBER() OVER (PARTITION BY c.id ORDER BY m.turn_position DESC,m.turn_message_seq DESC,m.created_at DESC,m.id DESC) AS summarized_rank,
-       SUM(CASE WHEN c.id IS NULL THEN octet_length(m.content::text) ELSE 0 END) OVER
+				name := fmt.Sprintf("after_%d_%d/before_%v/%d", after.turn, after.seq, before != nil, budget)
+				t.Run(name, func(t *testing.T) {
+					var beforeTurn, beforeSeq pgtype.Int8
+					if before != nil {
+						beforeTurn = pgtype.Int8{Int64: before.turn, Valid: true}
+						beforeSeq = pgtype.Int8{Int64: before.seq, Valid: true}
+					}
+					expected, err := tx.Query(ctx, `SELECT id::text FROM (
+      SELECT m.id,m.turn_position,m.turn_message_seq,m.created_at,
+       SUM(octet_length(m.content::text)) OVER
         (ORDER BY m.turn_position DESC,m.turn_message_seq DESC,m.created_at DESC,m.id DESC)
-        - CASE WHEN c.id IS NULL THEN octet_length(m.content::text) ELSE 0 END AS preceding_bytes
+        - octet_length(m.content::text) AS preceding_bytes
       FROM bot_visible_history_messages m
-      LEFT JOIN bot_sessions s ON s.id=m.session_id AND s.team_id=public.memoh_current_team_id()
-      LEFT JOIN bot_history_message_compacts c ON $4::boolean AND c.id=m.compact_id
-       AND c.team_id=public.memoh_current_team_id() AND c.bot_id=m.bot_id AND c.session_id=s.id
-       AND c.compaction_epoch=s.compaction_epoch AND c.status='ok' AND NULLIF(BTRIM(c.summary),'') IS NOT NULL
-      WHERE m.team_id=public.memoh_current_team_id() AND m.session_id=$1 AND m.created_at >= $2
+      WHERE m.team_id=public.memoh_current_team_id() AND m.session_id=$1
+       AND (m.turn_position,m.turn_message_seq) > ($2,$3)
+       AND ($4::bigint IS NULL OR (m.turn_position,m.turn_message_seq) < ($4,$5))
        AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode'<>'passive_sync')
-     ) ranked WHERE preceding_bytes<$3 AND (NOT summarized OR summarized_rank=1)
-     ORDER BY turn_position,turn_message_seq,created_at,id`, session, since, budget, fold)
+     ) ranked WHERE preceding_bytes<$6
+     ORDER BY turn_position,turn_message_seq,created_at,id`, session, after.turn, after.seq, beforeTurn, beforeSeq, budget)
 					if err != nil {
 						t.Fatal(err)
 					}
 					var ids []string
-					var folded []bool
 					for expected.Next() {
 						var id string
-						var summary bool
-						if err := expected.Scan(&id, &summary); err != nil {
+						if err := expected.Scan(&id); err != nil {
 							t.Fatal(err)
 						}
 						ids = append(ids, id)
-						folded = append(folded, summary)
 					}
 					if err := expected.Err(); err != nil {
 						t.Fatal(err)
 					}
 					expected.Close()
-					got, err := q.ListActiveMessagesSinceBySessionWithinBytes(ctx, dbsqlc.ListActiveMessagesSinceBySessionWithinBytesParams{
-						SessionID: session, CreatedAt: pgtype.Timestamptz{Time: since, Valid: true}, MaxBytes: budget, FoldSummarized: fold,
+					got, err := q.ListHistoryMessagesAfterWithinBytes(ctx, dbsqlc.ListHistoryMessagesAfterWithinBytesParams{
+						SessionID: session, AfterTurnPosition: after.turn, AfterTurnMessageSeq: after.seq,
+						BeforeTurnPosition: beforeTurn, BeforeTurnMessageSeq: beforeSeq, MaxBytes: budget,
 					})
 					if err != nil {
 						t.Fatal(err)
@@ -92,24 +84,25 @@ func TestPostgresHistoryIndexWalkPreservesAdmission(t *testing.T) {
 						t.Fatalf("record=%d want=%d", len(got), len(ids))
 					}
 					for i, id := range ids {
-						if got[i].ID.String() != id || got[i].Summarized != folded[i] {
+						if got[i].ID.String() != id {
 							t.Fatalf("wrong row at %d", i)
 						}
 					}
-					if !fold {
-						projected, err := q.ListTurnResponseSourcesSinceBySessionWithinBytes(ctx, dbsqlc.ListTurnResponseSourcesSinceBySessionWithinBytesParams{
-							SessionID: session, CreatedAt: pgtype.Timestamptz{Time: since, Valid: true}, MaxBytes: budget,
-						})
-						if err != nil {
-							t.Fatal(err)
-						}
-						if len(projected) != len(ids) {
-							t.Fatalf("TR=%d want=%d", len(projected), len(ids))
-						}
-						for i, id := range ids {
-							if projected[i].ID.String() != id {
-								t.Fatalf("wrong TR row at %d", i)
-							}
+					if before != nil {
+						return
+					}
+					projected, err := q.ListTurnResponseSourcesAfterWithinBytes(ctx, dbsqlc.ListTurnResponseSourcesAfterWithinBytesParams{
+						SessionID: session, AfterTurnPosition: after.turn, AfterTurnMessageSeq: after.seq, MaxBytes: budget,
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if len(projected) != len(ids) {
+						t.Fatalf("TR=%d want=%d", len(projected), len(ids))
+					}
+					for i, id := range ids {
+						if projected[i].ID.String() != id {
+							t.Fatalf("wrong TR row at %d", i)
 						}
 					}
 				})
@@ -154,16 +147,16 @@ func TestPostgresHistoryWindowStopsBeforeOldBacklog(t *testing.T) {
 	for _, projected := range []bool{false, true} {
 		var count int
 		if projected {
-			rows, err := q.ListTurnResponseSourcesSinceBySessionWithinBytes(ctx, dbsqlc.ListTurnResponseSourcesSinceBySessionWithinBytesParams{
-				SessionID: session, CreatedAt: pgtype.Timestamptz{Time: time.Unix(0, 0), Valid: true}, MaxBytes: 32768,
+			rows, err := q.ListTurnResponseSourcesAfterWithinBytes(ctx, dbsqlc.ListTurnResponseSourcesAfterWithinBytesParams{
+				SessionID: session, MaxBytes: 32768,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			count = len(rows)
 		} else {
-			rows, err := q.ListActiveMessagesSinceBySessionWithinBytes(ctx, dbsqlc.ListActiveMessagesSinceBySessionWithinBytesParams{
-				SessionID: session, CreatedAt: pgtype.Timestamptz{Time: time.Unix(0, 0), Valid: true}, MaxBytes: 32768,
+			rows, err := q.ListHistoryMessagesAfterWithinBytes(ctx, dbsqlc.ListHistoryMessagesAfterWithinBytesParams{
+				SessionID: session, MaxBytes: 32768,
 			})
 			if err != nil {
 				t.Fatal(err)

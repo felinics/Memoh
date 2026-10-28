@@ -497,29 +497,6 @@ func TestSerdeRoundTripsContextFragManifestEditAndCoverage(t *testing.T) {
 		}
 	})
 
-	coverage := SummaryCoverage{
-		CoverageID:   "coverage-1",
-		SummaryRef:   ContextRef{Namespace: "summary", ID: "summary-1", Schema: SchemaContextRef, Durability: RefDurable},
-		CoveredRefs:  []ContextRef{frag.Ref},
-		TraceFragIDs: []string{frag.ID},
-		Schema:       SchemaVersion{Name: SchemaSummaryCoverage, Version: CurrentSchemaVersion},
-	}
-	roundTripJSON(t, coverage, func(got SummaryCoverage) {
-		if len(got.CoveredRefs) != 1 || !got.CoveredRefs[0].EqualIdentity(frag.Ref) {
-			t.Fatalf("coverage refs mismatch after roundtrip: %#v", got.CoveredRefs)
-		}
-		if len(got.TraceFragIDs) != 1 || got.TraceFragIDs[0] != frag.ID {
-			t.Fatalf("coverage trace frag IDs mismatch after roundtrip: %#v", got.TraceFragIDs)
-		}
-		raw, err := json.Marshal(got)
-		if err != nil {
-			t.Fatalf("marshal coverage: %v", err)
-		}
-		if json.Valid(raw) && containsJSONField(raw, "covered_frag_ids") {
-			t.Fatalf("coverage JSON should use trace_frag_ids, got %s", raw)
-		}
-	})
-
 	group := ContinuityGroup{
 		ID:               "tool-call-1",
 		Kind:             "tool_call",
@@ -695,13 +672,4 @@ func countManifestWarnings(manifest Manifest, code string) int {
 		}
 	}
 	return total
-}
-
-func containsJSONField(raw []byte, field string) bool {
-	var value map[string]any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return false
-	}
-	_, ok := value[field]
-	return ok
 }

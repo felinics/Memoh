@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -22,8 +21,8 @@ type persistedHistoryMessageService struct {
 	history []messagepkg.Message
 }
 
-func (s *persistedHistoryMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64, bool) ([]messagepkg.Message, error) {
-	return append([]messagepkg.Message(nil), s.history...), nil
+func (s *persistedHistoryMessageService) ListHistoryWithinBytes(context.Context, string, messagepkg.HistoryWindow) (messagepkg.HistoryLoad, error) {
+	return messagepkg.HistoryLoad{Messages: append([]messagepkg.Message(nil), s.history...)}, nil
 }
 
 type chatCompletionsMessage struct {
@@ -199,48 +198,5 @@ func TestChatRendersInterruptedCheckpointTheSameOnEveryLaterTurn(t *testing.T) {
 	}
 	if !bytes.Equal(previous, next) {
 		t.Fatalf("interrupted checkpoint rewritten once superseded:\nbefore %s\nafter  %s", previous, next)
-	}
-}
-
-type foldingHistoryMessageService struct {
-	*recordingMessageService
-	folded, full []messagepkg.Message
-	folds        []bool
-}
-
-func (s *foldingHistoryMessageService) ListActiveSinceBySessionWithinBytes(_ context.Context, _ string, _ time.Time, _ int64, fold bool) ([]messagepkg.Message, error) {
-	s.folds = append(s.folds, fold)
-	if fold {
-		return s.folded, nil
-	}
-	return s.full, nil
-}
-
-// A folded window loads one row per compact group, so a group whose summary
-// does not render in the request would lose the rows the window left out.
-// The history then loads again without folding and renders them raw.
-func TestPrepareHistoryContextReloadsWhenFoldedSummaryDoesNotRender(t *testing.T) {
-	t.Parallel()
-	const compactID = "44444444-4444-4444-8444-444444444444"
-	row := func(id, role, text, compact string, summarized bool) messagepkg.Message {
-		return messagepkg.Message{
-			ID: id, BotID: lifecycleTestBotID, SessionID: lifecycleTestSessionID, Role: role,
-			Content:   json.RawMessage(fmt.Sprintf(`{"role":%q,"content":%q}`, role, text)),
-			CompactID: compact, Summarized: summarized, CreatedAt: time.Unix(1, 0),
-		}
-	}
-	messages := &foldingHistoryMessageService{
-		recordingMessageService: &recordingMessageService{},
-		folded:                  []messagepkg.Message{row("input", "user", "input", "", false), row("step-2", "assistant", "step 2", compactID, true)},
-		full:                    []messagepkg.Message{row("input", "user", "input", "", false), row("step-1", "assistant", "step 1", compactID, false), row("step-2", "assistant", "step 2", compactID, false)},
-	}
-	s := &Service{messageService: messages, queries: &recordingCompactionLogQueries{}}
-	req := ChatRequest{BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID}
-	prepared, err := s.prepareHistoryContext(context.Background(), req, historyScopeFallbackFromChatRequest(req), 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := recordTexts(prepared.records), []string{"input", "step 1", "step 2"}; !slices.Equal(messages.folds, []bool{true, false}) || !slices.Equal(got, want) {
-		t.Fatalf("folds=%v records=%v, want a folded load, then an unfolded one rendering %v", messages.folds, got, want)
 	}
 }

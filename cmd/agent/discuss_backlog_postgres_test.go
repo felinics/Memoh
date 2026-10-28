@@ -45,6 +45,37 @@ import (
 // summaryLimitPattern reads the summary bound the compaction prompt states.
 var summaryLimitPattern = regexp.MustCompile(`must stay under (\d+) tokens`)
 
+// summaryRequest reports whether a provider request asks for a summary: the
+// compaction model's own request, which does not stream, or a fork of the
+// run's request, which ends with the compaction instruction. stream is
+// whether the answer is expected as a stream.
+func summaryRequest(body []byte) (summarizes, stream bool, err error) {
+	var request struct {
+		Stream   bool              `json:"stream"`
+		Messages []json.RawMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &request); err != nil {
+		return false, false, err
+	}
+	n := len(request.Messages)
+	fork := n > 0 && bytes.Contains(request.Messages[n-1], []byte("[Context compaction]"))
+	return !request.Stream || fork, request.Stream, nil
+}
+
+// writeAnswer answers a chat completion request with text that finishes
+// naturally, as a stream when the request asked for one.
+func writeAnswer(w http.ResponseWriter, stream bool, id, text string) {
+	content, _ := json.Marshal(text)
+	if stream {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, `data: {"id":%q,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":%s},"finish_reason":null}]}`+"\n\n"+
+			`data: {"id":%q,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`+"\n\ndata: [DONE]\n\n", id, content, id)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = fmt.Fprintf(w, `{"id":%q,"object":"chat.completion","model":"compact-model","choices":[{"index":0,"message":{"role":"assistant","content":%s},"finish_reason":"stop"}]}`, id, content)
+}
+
 type recordingFailureBroadcaster struct {
 	failures chan string
 }
@@ -109,22 +140,19 @@ func newBacklogFixture(t *testing.T) *backlogFixture {
 			t.Error(err)
 			return
 		}
-		var request struct {
-			Stream bool `json:"stream"`
-		}
-		if err := json.Unmarshal(body, &request); err != nil {
+		summarizes, stream, err := summaryRequest(body)
+		if err != nil {
 			t.Error(err)
 			return
 		}
-		if request.Stream {
+		if !summarizes {
 			f.modelCalls.Add(1)
 			f.lastRequest.Store(string(body))
 			if f.stream != nil {
 				f.stream(w, body)
 				return
 			}
-			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = fmt.Fprint(w, "data: {\"id\":\"reply\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"BACKLOG_OK\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"reply\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+			writeAnswer(w, stream, "reply", "BACKLOG_OK")
 			return
 		}
 		f.summaries.Add(1)
@@ -140,9 +168,7 @@ func newBacklogFixture(t *testing.T) *backlogFixture {
 			limit, _ := strconv.Atoi(string(stated[1]))
 			summary += strings.Repeat(" kept", limit*4/5-len(summary)/5)
 		}
-		content, _ := json.Marshal(summary)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"id":"summary","object":"chat.completion","model":"compact-model","choices":[{"index":0,"message":{"role":"assistant","content":%s},"finish_reason":"stop"}]}`, content)
+		writeAnswer(w, stream, "summary", summary)
 	}))
 	t.Cleanup(server.Close)
 	f.providerURL = server.URL
@@ -200,20 +226,17 @@ func (f *backlogFixture) appendMessageAt(id, text string, created time.Time) {
 	f.rc = append(f.rc, segment)
 }
 
-// deliver writes text as the message ingress stores, received at created,
-// and returns the segment the timeline renders for it. It does not touch the
-// fixture's rendered context, so a tool may call it while a run reads it.
+// deliver writes text as the message ingress stores it: an event received at
+// created, and a history row written now. It returns the segment the
+// timeline renders for it. It does not touch the fixture's rendered context,
+// so a tool may call it while a run reads it.
 func (f *backlogFixture) deliver(ctx context.Context, id, text string, created time.Time) (timeline.RenderedSegment, error) {
 	eventID, event, err := f.cursor.PersistEvent(ctx, f.botID, f.sessionID, timeline.MessageEvent{SessionID: f.sessionID, MessageID: id, ReceivedAtMs: created.UnixMilli(), Content: []timeline.ContentNode{{Type: "text", Text: text}}})
 	if err != nil {
 		return timeline.RenderedSegment{}, err
 	}
 	content, _ := json.Marshal(text)
-	msg, err := f.messages.Persist(ctx, messagepkg.PersistInput{BotID: f.botID, SessionID: f.sessionID, ExternalMessageID: id, EventID: eventID, Role: "user", Content: content, SessionMode: "discuss"})
-	if err != nil {
-		return timeline.RenderedSegment{}, err
-	}
-	if _, err := f.pool.Exec(ctx, `UPDATE bot_history_messages SET created_at=$2 WHERE id=$1`, msg.ID, created); err != nil {
+	if _, err := f.messages.Persist(ctx, messagepkg.PersistInput{BotID: f.botID, SessionID: f.sessionID, ExternalMessageID: id, EventID: eventID, Role: "user", Content: content, SessionMode: "discuss"}); err != nil {
 		return timeline.RenderedSegment{}, err
 	}
 	return timeline.RenderedSegment{MessageID: id, LastEventCursor: event.(timeline.MessageEvent).EventCursor, ReceivedAtMs: created.UnixMilli(), Content: []timeline.RenderedContentPiece{{Type: "text", Text: text}}}, nil
@@ -222,7 +245,8 @@ func (f *backlogFixture) deliver(ctx context.Context, id, text string, created t
 // startDriver starts a Discuss driver that knows only what the cursor store
 // and the history hold.
 func (f *backlogFixture) startDriver() {
-	f.driver = discuss.NewDiscussDriver(discuss.DiscussDriverDeps{Turn: f.service, CursorStore: f.cursor, MessageService: f.messages, Artifacts: compaction.NewTimelineArtifactSource(postgresstore.NewQueriesWithPool(f.pool, sqlc.New(f.pool))), Broadcaster: f.broadcaster, AdmissionMaxTokens: 16000, Logger: slog.Default()})
+	checkpoints := timeline.NewCheckpointSource(slog.Default(), postgresstore.NewQueriesWithPool(f.pool, sqlc.New(f.pool)), f.messages)
+	f.driver = discuss.NewDiscussDriver(discuss.DiscussDriverDeps{Turn: f.service, CursorStore: f.cursor, MessageService: f.messages, Checkpoints: checkpoints, Broadcaster: f.broadcaster, AdmissionMaxTokens: 16000, Logger: slog.Default()})
 	f.t.Cleanup(f.driver.StopAll)
 }
 
@@ -273,13 +297,26 @@ func (f *backlogFixture) appendBacklog(count, size int) {
 	}
 }
 
+// historyRowsSQL lists the history rows of session $1, each with whether
+// the session's active checkpoint folds it: a context row at or before the
+// checkpoint's position that the checkpoint does not keep by reference.
+const historyRowsSQL = `SELECT h.*, COALESCE(h.turn_visible
+	  AND (h.turn_position, h.turn_message_seq) <= (c.turn_position, c.turn_message_seq)
+	  AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(c.items) item WHERE item->>'row' = h.id::text), false) AS folded
+	FROM bot_history_messages h
+	JOIN bot_sessions s ON s.id = h.session_id
+	LEFT JOIN bot_history_checkpoints c ON c.id = s.history_checkpoint_id
+	WHERE h.session_id = $1`
+
 func (f *backlogFixture) backlogRows() (raw, compacted int) {
 	return f.backlogRowsPrefixed("backlog-")
 }
 
+// backlogRowsPrefixed counts the rows of inbound messages named with prefix
+// that the session's active checkpoint leaves raw and that it folds.
 func (f *backlogFixture) backlogRowsPrefixed(prefix string) (raw, compacted int) {
 	f.t.Helper()
-	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FILTER (WHERE c.status IS DISTINCT FROM 'ok'), count(*) FILTER (WHERE c.status = 'ok') FROM bot_history_messages h LEFT JOIN bot_history_message_compacts c ON c.id=h.compact_id WHERE h.session_id=$1 AND h.source_message_id LIKE $2`, f.sessionID, prefix+"%").Scan(&raw, &compacted); err != nil {
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FILTER (WHERE NOT folded), count(*) FILTER (WHERE folded) FROM (`+historyRowsSQL+`) h WHERE h.source_message_id LIKE $2`, f.sessionID, prefix+"%").Scan(&raw, &compacted); err != nil {
 		f.t.Fatal(err)
 	}
 	return raw, compacted
@@ -358,9 +395,9 @@ func TestPostgresDiscussBacklogSummarizerFailureFailsExplicitly(t *testing.T) {
 }
 
 // A newest input that cannot fit even alone fails once, without consuming the
-// batch. Demoted to history, it is still more than the summarizer can read in
-// one call, so the next round fails explicitly instead of answering without it.
-func TestPostgresDiscussUnreadableOversizedInputFailsExplicitly(t *testing.T) {
+// batch. Demoted to history, it is more than the summarizer can read in one
+// call, so the next round folds it by its head and tail and answers.
+func TestPostgresDiscussOversizedInputFoldsByItsHeadAndTail(t *testing.T) {
 	for _, size := range []int{70_000, 600_000} {
 		t.Run(strconv.Itoa(size), func(t *testing.T) {
 			f := newBacklogFixture(t)
@@ -369,15 +406,12 @@ func TestPostgresDiscussUnreadableOversizedInputFailsExplicitly(t *testing.T) {
 				t.Fatalf("oversized newest input: code=%q provider_calls=%d, want one bounded protected_overflow", code, f.modelCalls.Load())
 			}
 			f.appendMessage("next-round", "next-round small message")
-			if code := f.trigger(); code != "context.budget_unsatisfied" || f.modelCalls.Load() != 0 || f.summaries.Load() != 0 {
-				t.Fatalf("next round: code=%q provider_calls=%d summaries=%d, want budget_unsatisfied before any call", code, f.modelCalls.Load(), f.summaries.Load())
+			request := f.answer("next round", "next-round small message")
+			if f.summaries.Load() == 0 || !strings.Contains(request, "Earlier backlog summarized.") || strings.Contains(request, strings.Repeat("y", 1000)) {
+				t.Fatalf("next round: summaries=%d, want the oversized input folded into the summary it renders", f.summaries.Load())
 			}
-			var compacted bool
-			if err := f.pool.QueryRow(f.ctx, `SELECT compact_id IS NOT NULL FROM bot_history_messages WHERE session_id=$1 AND source_message_id='oversized'`, f.sessionID).Scan(&compacted); err != nil {
-				t.Fatal(err)
-			}
-			if compacted {
-				t.Fatal("an input the summarizer could not read was marked compacted")
+			if _, compacted := f.backlogRowsPrefixed("oversized"); compacted != 1 {
+				t.Fatal("the oversized input was not folded")
 			}
 		})
 	}

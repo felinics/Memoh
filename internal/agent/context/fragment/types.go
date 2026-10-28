@@ -70,7 +70,6 @@ const (
 	SchemaContextFrag     = "context_frag"
 	SchemaContextRef      = "context_ref"
 	SchemaContextEdit     = "context_edit"
-	SchemaSummaryCoverage = "summary_coverage"
 	SchemaRenderPolicy    = "render_policy"
 )
 
@@ -322,9 +321,8 @@ type ContextFrag struct {
 	// ConflictKey groups fragments that are alternatives of one another: the
 	// selector keeps only the highest-precedence member (closest scope, then
 	// trust, then latest collected) and drops the rest.
-	ConflictKey string           `json:"conflict_key,omitempty"`
-	Coverage    *SummaryCoverage `json:"coverage,omitempty"`
-	Parts       []Part           `json:"parts,omitempty"`
+	ConflictKey string `json:"conflict_key,omitempty"`
+	Parts       []Part `json:"parts,omitempty"`
 }
 
 // AssembledContext is the compiled view produced from fragments.
@@ -345,7 +343,6 @@ type Manifest struct {
 	SlotPolicies       []SlotRenderPolicy  `json:"slot_policies,omitempty"`
 	RenderedOutputs    []RenderedOutputRef `json:"rendered_outputs,omitempty"`
 	EditTrace          []ContextEditTrace  `json:"edit_trace,omitempty"`
-	CoverageTrace      []SummaryCoverage   `json:"coverage_trace,omitempty"`
 	ContinuityGroups   []ContinuityGroup   `json:"continuity_groups,omitempty"`
 	ValidationWarnings []ValidationWarning `json:"validation_warnings,omitempty"`
 	Counts             ManifestCounts      `json:"counts"`
@@ -540,15 +537,6 @@ type ContextEditTrace struct {
 	Op     ContextEditOp `json:"op,omitempty"`
 	Slot   Slot          `json:"slot,omitempty"`
 	Refs   []ContextRef  `json:"refs,omitempty"`
-}
-
-type SummaryCoverage struct {
-	CoverageID  string       `json:"coverage_id"`
-	SummaryRef  ContextRef   `json:"summary_ref"`
-	CoveredRefs []ContextRef `json:"covered_refs,omitempty"`
-	// TraceFragIDs is debug-only and must not be used as durable coverage identity.
-	TraceFragIDs []string      `json:"trace_frag_ids,omitempty"`
-	Schema       SchemaVersion `json:"schema"`
 }
 
 type ContinuityGroup struct {

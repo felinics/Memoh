@@ -329,6 +329,29 @@ func budgetTrimDropsEnabled(tagged []TaggedFrag, maxTokens, recentProtectTokens 
 	return drops, reasons
 }
 
+// orphanExchangeDrops cuts the droppable tool exchanges missing their other
+// half, which no budget keeps: left in place they are a guaranteed provider
+// 400.
+func orphanExchangeDrops(tagged []TaggedFrag) (map[int]bool, map[int]string) {
+	units := buildBudgetUnits(tagged)
+	var drops map[int]bool
+	var reasons map[int]string
+	for i := range units {
+		unit := &units[i]
+		if !unit.droppable || !unit.orphanToolExchange() {
+			continue
+		}
+		if drops == nil {
+			drops, reasons = make(map[int]bool), make(map[int]string)
+		}
+		for _, idx := range unit.indexes {
+			drops[idx] = true
+			reasons[idx] = budgetDropReasonOrphanExchange
+		}
+	}
+	return drops, reasons
+}
+
 // protectedHistoryTokenCost charges every protected non-system/non-current
 // fragment to the unified history budget. Current requests may intentionally
 // retain the history slot to preserve composed order, so kind is authoritative

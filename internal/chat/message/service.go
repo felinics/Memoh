@@ -1093,38 +1093,114 @@ func (s *DBService) ListSinceBySession(ctx context.Context, sessionID string, si
 	return msgs, nil
 }
 
-// time, admitted newest-first within the content byte budget (CM-ADM-001).
-// ListActiveSinceBySessionWithinBytes returns session messages since a given
-// time, admitted newest-first within the content byte budget (CM-ADM-001).
-func (s *DBService) ListActiveSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64, foldSummarized bool) ([]Message, error) {
+// ListHistoryWithinBytes returns a session's raw history window, admitted
+// newest-first within the content byte budget (CM-ADM-001), and whether the
+// budget left older rows of the window out.
+func (s *DBService) ListHistoryWithinBytes(ctx context.Context, sessionID string, window HistoryWindow) (HistoryLoad, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return HistoryLoad{}, err
+	}
+	params := sqlc.ListHistoryMessagesAfterWithinBytesParams{
+		SessionID:           pgSessionID,
+		AfterTurnPosition:   window.After.Turn,
+		AfterTurnMessageSeq: window.After.Seq,
+		MaxBytes:            window.MaxBytes,
+	}
+	if window.Before != nil {
+		params.BeforeTurnPosition = pgtype.Int8{Int64: window.Before.Turn, Valid: true}
+		params.BeforeTurnMessageSeq = pgtype.Int8{Int64: window.Before.Seq, Valid: true}
+	}
+	rows, err := s.queries.ListHistoryMessagesAfterWithinBytes(ctx, params)
+	if err != nil {
+		return HistoryLoad{}, err
+	}
+	load := HistoryLoad{Messages: make([]Message, 0, len(rows))}
+	for _, row := range rows {
+		load.Truncated = row.Truncated
+		load.Messages = append(load.Messages, toAdmissionMessage(sqlc.ListActiveMessagesSinceBySessionRow{
+			ID:                      row.ID,
+			BotID:                   row.BotID,
+			SessionID:               row.SessionID,
+			SenderChannelIdentityID: row.SenderChannelIdentityID,
+			SenderUserID:            row.SenderUserID,
+			ExternalMessageID:       row.ExternalMessageID,
+			SourceReplyToMessageID:  row.SourceReplyToMessageID,
+			Role:                    row.Role,
+			Content:                 row.Content,
+			Metadata:                row.Metadata,
+			Usage:                   row.Usage,
+			SessionMode:             row.SessionMode,
+			RuntimeType:             row.RuntimeType,
+			EventID:                 row.EventID,
+			DisplayText:             row.DisplayText,
+			CreatedAt:               row.CreatedAt,
+			SenderDisplayName:       row.SenderDisplayName,
+			SenderAvatarUrl:         row.SenderAvatarUrl,
+			Platform:                row.Platform,
+		}))
+	}
+	s.enrichAssets(ctx, load.Messages)
+	return load, nil
+}
+
+// ListHistoryByIDs returns the named context rows of a session in history
+// order, loaded as ListHistoryWithinBytes loads them.
+func (s *DBService) ListHistoryByIDs(ctx context.Context, sessionID string, ids []string) ([]Message, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListActiveMessagesSinceBySessionWithinBytes(ctx, sqlc.ListActiveMessagesSinceBySessionWithinBytesParams{
-		FoldSummarized: foldSummarized,
-		SessionID:      pgSessionID,
-		CreatedAt:      pgtype.Timestamptz{Time: since, Valid: true},
-		MaxBytes:       maxBytes,
-	})
+	pgIDs, err := parseUUIDs(ids)
 	if err != nil {
 		return nil, err
 	}
-	msgs := toMessagesFromActiveSinceBySessionWithinBytes(rows)
+	rows, err := s.queries.ListHistoryMessagesByIDs(ctx, sqlc.ListHistoryMessagesByIDsParams{SessionID: pgSessionID, Ids: pgIDs})
+	if err != nil {
+		return nil, err
+	}
+	msgs := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		msgs = append(msgs, toAdmissionMessage(sqlc.ListActiveMessagesSinceBySessionRow(row)))
+	}
 	s.enrichAssets(ctx, msgs)
 	return msgs, nil
 }
 
-// MeasureActiveBySession aggregates a session's active message count and
-// content bytes on the database side (CM-ADM-001).
-func (s *DBService) MeasureActiveBySession(ctx context.Context, sessionID string, since time.Time) (ActiveMessagesMeasure, error) {
+// HistoryPositionByID reports where a visible message of the session is.
+func (s *DBService) HistoryPositionByID(ctx context.Context, sessionID string, messageID string) (HistoryPosition, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return HistoryPosition{}, err
+	}
+	pgMessageID, err := dbpkg.ParseUUID(messageID)
+	if err != nil {
+		return HistoryPosition{}, err
+	}
+	cursor, err := s.queries.GetVisibleMessageCursorByIDBySession(ctx, sqlc.GetVisibleMessageCursorByIDBySessionParams{
+		SessionID: pgSessionID,
+		MessageID: pgMessageID,
+	})
+	if err != nil {
+		return HistoryPosition{}, err
+	}
+	return HistoryPosition{Turn: cursor.TurnPosition.Int64, Seq: cursor.TurnMessageSeq.Int64}, nil
+}
+
+// MeasureHistory aggregates the message count and content bytes of a
+// session's raw history after a position on the database side (CM-ADM-001).
+func (s *DBService) MeasureHistory(ctx context.Context, sessionID string, after HistoryPosition) (ActiveMessagesMeasure, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return ActiveMessagesMeasure{}, err
 	}
-	row, err := s.queries.MeasureActiveMessagesBySession(ctx, sqlc.MeasureActiveMessagesBySessionParams{
-		SessionID: pgSessionID,
-		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
+	row, err := s.queries.MeasureHistoryMessagesAfter(ctx, sqlc.MeasureHistoryMessagesAfterParams{
+		SessionID:           pgSessionID,
+		AfterTurnPosition:   after.Turn,
+		AfterTurnMessageSeq: after.Seq,
 	})
 	if err != nil {
 		return ActiveMessagesMeasure{}, err
@@ -1132,8 +1208,7 @@ func (s *DBService) MeasureActiveBySession(ctx context.Context, sessionID string
 	return ActiveMessagesMeasure{MessageCount: row.MessageCount, ContentBytes: row.ContentBytes}, nil
 }
 
-// ListActiveSinceBySessionWithinBytes returns session messages since a given
-// time, admitted newest-first within the content byte budget (CM-ADM-001).
+// ListActiveSinceBySession returns session messages since a given time.
 func (s *DBService) ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
@@ -1560,11 +1635,30 @@ func (s *DBService) DeleteByBot(ctx context.Context, botID string) error {
 	})
 }
 
-// DeleteByIDs deletes specific messages by id.
+// DeleteByIDs deletes specific messages by id. A run deletes under its
+// persistence fence, so an owner that lost the session cannot delete rows its
+// successor reads.
 func (s *DBService) DeleteByIDs(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
+	pgIDs, err := parseUUIDs(ids)
+	if err != nil {
+		return err
+	}
+	if len(pgIDs) == 0 {
+		return nil
+	}
+	if _, fenced := runtimefence.FromContext(ctx); fenced {
+		return runtimefence.InTransaction(ctx, s.queries, "", "", func(queries dbstore.Queries) error {
+			return queries.DeleteMessagesByIDs(ctx, pgIDs)
+		})
+	}
+	return s.queries.DeleteMessagesByIDs(ctx, pgIDs)
+}
+
+// parseUUIDs parses message ids, skipping blank ones.
+func parseUUIDs(ids []string) ([]pgtype.UUID, error) {
 	pgIDs := make([]pgtype.UUID, 0, len(ids))
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
@@ -1573,14 +1667,11 @@ func (s *DBService) DeleteByIDs(ctx context.Context, ids []string) error {
 		}
 		pgID, err := dbpkg.ParseUUID(id)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		pgIDs = append(pgIDs, pgID)
 	}
-	if len(pgIDs) == 0 {
-		return nil
-	}
-	return s.queries.DeleteMessagesByIDs(ctx, pgIDs)
+	return pgIDs, nil
 }
 
 // DeleteBySession deletes all messages for a session.
@@ -1834,9 +1925,6 @@ func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySess
 		row.DisplayText,
 		row.CreatedAt,
 	)
-	if row.CompactID.Valid {
-		m.CompactID = row.CompactID.String()
-	}
 	return m
 }
 
@@ -2234,24 +2322,6 @@ func toMessagesFromActiveSinceBySession(rows []sqlc.ListActiveMessagesSinceBySes
 	return messages
 }
 
-func toMessagesFromActiveSinceBySessionWithinBytes(rows []sqlc.ListActiveMessagesSinceBySessionWithinBytesRow) []Message {
-	messages := make([]Message, 0, len(rows))
-	for _, row := range rows {
-		message := toAdmissionMessage(sqlc.ListActiveMessagesSinceBySessionRow{
-			ID: row.ID, BotID: row.BotID, SessionID: row.SessionID,
-			SenderChannelIdentityID: row.SenderChannelIdentityID, SenderUserID: row.SenderUserID,
-			ExternalMessageID: row.ExternalMessageID, SourceReplyToMessageID: row.SourceReplyToMessageID,
-			Role: row.Role, Content: row.Content, Metadata: row.Metadata, Usage: row.Usage,
-			SessionMode: row.SessionMode, RuntimeType: row.RuntimeType, EventID: row.EventID,
-			DisplayText: row.DisplayText, CompactID: row.CompactID, CreatedAt: row.CreatedAt,
-			SenderDisplayName: row.SenderDisplayName, SenderAvatarUrl: row.SenderAvatarUrl, Platform: row.Platform,
-		})
-		message.Summarized = row.Summarized
-		messages = append(messages, message)
-	}
-	return messages
-}
-
 // toAdmissionMessage leaves metadata undecoded for the byte-budgeted loaders:
 // the budget only covers content, and decoding every row up front holds all
 // of their metadata, legacy lifecycle audits included, at once (CM-ADM-001).
@@ -2278,9 +2348,6 @@ func toAdmissionMessage(row sqlc.ListActiveMessagesSinceBySessionRow) Message {
 		row.CreatedAt,
 		nil,
 	)
-	if row.CompactID.Valid {
-		m.CompactID = row.CompactID.String()
-	}
 	return m
 }
 
@@ -2372,9 +2439,6 @@ func toMessageFromVisibleFromBySessionRow(row sqlc.ListVisibleMessagesFromBySess
 		row.CreatedAt,
 	)
 	m.TurnID = uuidString(row.TurnID)
-	if row.CompactID.Valid {
-		m.CompactID = row.CompactID.String()
-	}
 	return m
 }
 

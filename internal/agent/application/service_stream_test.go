@@ -212,15 +212,27 @@ func (*recordingMessageService) ListActiveSinceBySession(context.Context, string
 	return nil, nil
 }
 
-func (*recordingMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64, bool) ([]messagepkg.Message, error) {
+func (*recordingMessageService) ListHistoryWithinBytes(context.Context, string, messagepkg.HistoryWindow) (messagepkg.HistoryLoad, error) {
+	return messagepkg.HistoryLoad{}, nil
+}
+
+func (*recordingMessageService) ListHistoryByIDs(context.Context, string, []string) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
-func (*recordingMessageService) ListTurnResponseSourcesSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
+func (*recordingMessageService) HistoryPositionByID(context.Context, string, string) (messagepkg.HistoryPosition, error) {
+	return messagepkg.HistoryPosition{}, nil
+}
+
+func (*recordingMessageService) ListTurnResponseSourcesWithinBytes(context.Context, string, messagepkg.HistoryPosition, int64) (messagepkg.HistoryLoad, error) {
+	return messagepkg.HistoryLoad{}, nil
+}
+
+func (*recordingMessageService) ListTurnResponseSourcesByIDs(context.Context, string, []string) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
-func (*recordingMessageService) MeasureActiveBySession(context.Context, string, time.Time) (messagepkg.ActiveMessagesMeasure, error) {
+func (*recordingMessageService) MeasureHistory(context.Context, string, messagepkg.HistoryPosition) (messagepkg.ActiveMessagesMeasure, error) {
 	return messagepkg.ActiveMessagesMeasure{}, nil
 }
 

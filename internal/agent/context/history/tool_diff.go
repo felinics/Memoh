@@ -20,10 +20,10 @@ var toolCallDiffContentNeedle = []byte(`"diff"`)
 // ExtractToolCallDiffs lifts UI-only diff payloads out of a stored assistant
 // message's tool-call parts. The runtime annotates ToolCallPart
 // ProviderMetadata with the diff so in-memory conversion can see it, but the
-// same JSON is what lands in the history row's content column — and
-// ListActiveSinceBySessionWithinBytes budgets by octet_length(content). The
-// diff is display sugar, not model context, so persist-time callers move it
-// onto the row's metadata column (message.ToolCallDiffsMetadataKey) instead.
+// same JSON is what lands in the history row's content column — and the
+// history loads budget by octet_length(content). The diff is display sugar,
+// not model context, so persist-time callers move it onto the row's metadata
+// column (message.ToolCallDiffsMetadataKey) instead.
 //
 // Returns the message unchanged and nil diffs for non-assistant rows, rows
 // without extractable diffs, or content the codec does not recognize — the
