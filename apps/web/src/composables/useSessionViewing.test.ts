@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp, defineComponent, effectScope, h, KeepAlive, nextTick, reactive, ref } from 'vue'
 import { isSessionViewed, useSessionViewing } from './useSessionViewing'
 
-const unread = reactive({ entries: {} as Record<string, { attentionAt: string }>, markRead: vi.fn() })
+const unread = reactive({ entries: {} as Record<string, { attentionAt: string, marked?: boolean }>, markRead: vi.fn() })
 vi.mock('@/store/unread', () => ({ useUnreadStore: () => unread }))
 
 afterEach(() => {
@@ -95,5 +95,39 @@ describe('session viewing', () => {
     await nextTick()
     expect(unread.markRead).toHaveBeenCalledWith('s1')
     app.unmount()
+  })
+
+  it('leaves a session the user marked unread while viewing it until it is opened again', async () => {
+    let focused = true
+    vi.spyOn(document, 'hasFocus').mockImplementation(() => focused)
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    const sessionId = ref<string | null>('s1')
+    const scope = effectScope()
+    scope.run(() => useSessionViewing(sessionId, ref(true)))
+    await nextTick()
+
+    unread.entries.s1 = { attentionAt: 'a', marked: true }
+    await nextTick()
+    expect(unread.markRead).not.toHaveBeenCalled()
+
+    focused = false
+    window.dispatchEvent(new Event('blur'))
+    await nextTick()
+    focused = true
+    window.dispatchEvent(new Event('focus'))
+    await nextTick()
+    expect(unread.markRead).not.toHaveBeenCalled()
+
+    sessionId.value = 's2'
+    await nextTick()
+    sessionId.value = 's1'
+    await nextTick()
+    expect(unread.markRead).toHaveBeenCalledWith('s1')
+
+    unread.markRead.mockClear()
+    unread.entries.s1 = { attentionAt: 'b', marked: false }
+    await nextTick()
+    expect(unread.markRead).toHaveBeenCalledWith('s1')
+    scope.stop()
   })
 })

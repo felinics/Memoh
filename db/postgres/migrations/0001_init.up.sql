@@ -564,8 +564,9 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   parent_session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
   created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
   -- When the session last needed its creator's attention (a run finished,
-  -- failed or waits for a decision) and why. Unread is attention_at later than
-  -- the user's session_reads.read_at. Writing these never touches updated_at.
+  -- failed or waits for a decision) and why. Unread is attention_at, or the
+  -- user's session_reads.marked_unread_at, later than their read_at. Writing
+  -- these never touches updated_at.
   attention_at TIMESTAMPTZ,
   attention_kind TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -2193,7 +2194,8 @@ CREATE TABLE IF NOT EXISTS public.session_reads (
                            REFERENCES public.teams(id) ON DELETE RESTRICT,
     user_id    UUID        NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
     session_id UUID        NOT NULL,
-    read_at    TIMESTAMPTZ NOT NULL,
+    read_at    TIMESTAMPTZ,
+    marked_unread_at TIMESTAMPTZ,
     PRIMARY KEY (team_id, user_id, session_id),
     CONSTRAINT session_reads_session_id_fkey
         FOREIGN KEY (team_id, session_id)

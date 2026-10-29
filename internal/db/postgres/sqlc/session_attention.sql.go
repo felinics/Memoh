@@ -13,16 +13,17 @@ import (
 
 const listSessionAttentionForUser = `-- name: ListSessionAttentionForUser :many
 SELECT s.id AS session_id,
-       s.attention_kind,
-       s.attention_at,
-       (r.read_at IS NULL OR s.attention_at > r.read_at)::bool AS unread
+       COALESCE(s.attention_kind, 'marked')::text AS attention_kind,
+       COALESCE(s.attention_at, r.marked_unread_at)::timestamptz AS attention_at,
+       COALESCE(s.attention_at > COALESCE(r.read_at, '-infinity')
+                OR r.marked_unread_at > COALESCE(r.read_at, '-infinity'), false)::bool AS unread
 FROM bot_sessions s
 LEFT JOIN session_reads r
   ON r.team_id = s.team_id AND r.session_id = s.id AND r.user_id = $1
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.id = ANY($2::uuid[])
   AND s.created_by_user_id = $1
-  AND s.attention_at IS NOT NULL
+  AND (s.attention_at IS NOT NULL OR r.marked_unread_at IS NOT NULL)
 `
 
 type ListSessionAttentionForUserParams struct {
@@ -32,13 +33,14 @@ type ListSessionAttentionForUserParams struct {
 
 type ListSessionAttentionForUserRow struct {
 	SessionID     pgtype.UUID        `json:"session_id"`
-	AttentionKind pgtype.Text        `json:"attention_kind"`
+	AttentionKind string             `json:"attention_kind"`
 	AttentionAt   pgtype.Timestamptz `json:"attention_at"`
 	Unread        bool               `json:"unread"`
 }
 
 // Attention and unread state of the given sessions, for the user who created
-// them. Sessions created by someone else, or never marked, are omitted.
+// them. Sessions created by someone else, or never attended nor marked, are
+// omitted.
 func (q *Queries) ListSessionAttentionForUser(ctx context.Context, arg ListSessionAttentionForUserParams) ([]ListSessionAttentionForUserRow, error) {
 	rows, err := q.db.Query(ctx, listSessionAttentionForUser, arg.UserID, arg.SessionIds)
 	if err != nil {
@@ -65,19 +67,25 @@ func (q *Queries) ListSessionAttentionForUser(ctx context.Context, arg ListSessi
 }
 
 const listUnreadSessionsForUser = `-- name: ListUnreadSessionsForUser :many
-SELECT s.id AS session_id, s.bot_id, s.title, s.attention_kind, s.attention_at
+SELECT s.id AS session_id,
+       s.bot_id,
+       s.title,
+       COALESCE(s.attention_kind, 'marked')::text AS attention_kind,
+       COALESCE(s.attention_at, r.marked_unread_at)::timestamptz AS attention_at,
+       GREATEST(s.attention_at, r.marked_unread_at)::timestamptz AS read_through,
+       COALESCE(r.marked_unread_at > COALESCE(r.read_at, '-infinity'), false)::bool AS marked
 FROM bot_sessions s
 LEFT JOIN session_reads r
   ON r.team_id = s.team_id AND r.session_id = s.id AND r.user_id = $1
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.created_by_user_id = $1
   AND s.deleted_at IS NULL
-  AND s.attention_at IS NOT NULL
   AND s.visibility = 'user'
   AND s.type IN ('chat', 'acp_agent')
   AND COALESCE(s.channel_type, '') IN ('', 'local')
-  AND (r.read_at IS NULL OR s.attention_at > r.read_at)
-ORDER BY s.attention_at DESC, s.id DESC
+  AND (s.attention_at > COALESCE(r.read_at, '-infinity')
+       OR r.marked_unread_at > COALESCE(r.read_at, '-infinity'))
+ORDER BY COALESCE(s.attention_at, r.marked_unread_at) DESC, s.id DESC
 LIMIT $2::int
 `
 
@@ -90,10 +98,15 @@ type ListUnreadSessionsForUserRow struct {
 	SessionID     pgtype.UUID        `json:"session_id"`
 	BotID         pgtype.UUID        `json:"bot_id"`
 	Title         string             `json:"title"`
-	AttentionKind pgtype.Text        `json:"attention_kind"`
+	AttentionKind string             `json:"attention_kind"`
 	AttentionAt   pgtype.Timestamptz `json:"attention_at"`
+	ReadThrough   pgtype.Timestamptz `json:"read_through"`
+	Marked        bool               `json:"marked"`
 }
 
+// attention_at is the time shown and sorted by (the session's own attention,
+// or the mark when it never had any); read_through is what reading it must
+// cover so both the attention and a manual mark clear.
 func (q *Queries) ListUnreadSessionsForUser(ctx context.Context, arg ListUnreadSessionsForUserParams) ([]ListUnreadSessionsForUserRow, error) {
 	rows, err := q.db.Query(ctx, listUnreadSessionsForUser, arg.UserID, arg.LimitCount)
 	if err != nil {
@@ -109,6 +122,8 @@ func (q *Queries) ListUnreadSessionsForUser(ctx context.Context, arg ListUnreadS
 			&i.Title,
 			&i.AttentionKind,
 			&i.AttentionAt,
+			&i.ReadThrough,
+			&i.Marked,
 		); err != nil {
 			return nil, err
 		}
@@ -171,7 +186,11 @@ func (q *Queries) MarkSessionAttention(ctx context.Context, arg MarkSessionAtten
 
 const markSessionRead = `-- name: MarkSessionRead :one
 INSERT INTO session_reads (user_id, session_id, read_at)
-VALUES ($1, $2, $3::timestamptz)
+SELECT $1, s.id, $2::timestamptz
+FROM bot_sessions s
+WHERE s.team_id = public.memoh_current_team_id()
+  AND s.id = $3
+  AND s.created_by_user_id = $1
 ON CONFLICT (team_id, user_id, session_id)
 DO UPDATE SET read_at = GREATEST(session_reads.read_at, EXCLUDED.read_at)
 RETURNING read_at
@@ -179,14 +198,93 @@ RETURNING read_at
 
 type MarkSessionReadParams struct {
 	UserID    pgtype.UUID        `json:"user_id"`
-	SessionID pgtype.UUID        `json:"session_id"`
 	Through   pgtype.Timestamptz `json:"through"`
+	SessionID pgtype.UUID        `json:"session_id"`
 }
 
-// Moves a user's read cursor forward; an older through never rewinds it.
+// Moves a user's read cursor forward on a session they created; an older
+// through never rewinds it. No row back means the session is not theirs.
 func (q *Queries) MarkSessionRead(ctx context.Context, arg MarkSessionReadParams) (pgtype.Timestamptz, error) {
-	row := q.db.QueryRow(ctx, markSessionRead, arg.UserID, arg.SessionID, arg.Through)
+	row := q.db.QueryRow(ctx, markSessionRead, arg.UserID, arg.Through, arg.SessionID)
 	var read_at pgtype.Timestamptz
 	err := row.Scan(&read_at)
 	return read_at, err
+}
+
+const markSessionsUnread = `-- name: MarkSessionsUnread :many
+WITH eligible AS (
+  SELECT s.id, s.bot_id, s.title, s.attention_kind, s.attention_at
+  FROM bot_sessions s
+  WHERE s.team_id = public.memoh_current_team_id()
+    AND s.id = ANY($1::uuid[])
+    AND s.created_by_user_id = $2
+    AND s.deleted_at IS NULL
+    AND s.visibility = 'user'
+    AND s.type IN ('chat', 'acp_agent')
+    AND COALESCE(s.channel_type, '') IN ('', 'local')
+), marked AS (
+  INSERT INTO session_reads (user_id, session_id, marked_unread_at)
+  SELECT $2, e.id, $3::timestamptz FROM eligible e
+  ON CONFLICT (team_id, user_id, session_id)
+  DO UPDATE SET marked_unread_at = GREATEST(session_reads.marked_unread_at, EXCLUDED.marked_unread_at)
+  RETURNING session_id, read_at, marked_unread_at
+)
+SELECT e.id AS session_id,
+       e.bot_id,
+       e.title,
+       COALESCE(e.attention_kind, 'marked')::text AS attention_kind,
+       COALESCE(e.attention_at, m.marked_unread_at)::timestamptz AS attention_at,
+       GREATEST(e.attention_at, m.marked_unread_at)::timestamptz AS read_through,
+       (m.marked_unread_at > COALESCE(m.read_at, '-infinity'))::bool AS marked
+FROM eligible e
+JOIN marked m ON m.session_id = e.id
+`
+
+type MarkSessionsUnreadParams struct {
+	SessionIds []pgtype.UUID      `json:"session_ids"`
+	UserID     pgtype.UUID        `json:"user_id"`
+	At         pgtype.Timestamptz `json:"at"`
+}
+
+type MarkSessionsUnreadRow struct {
+	SessionID     pgtype.UUID        `json:"session_id"`
+	BotID         pgtype.UUID        `json:"bot_id"`
+	Title         string             `json:"title"`
+	AttentionKind string             `json:"attention_kind"`
+	AttentionAt   pgtype.Timestamptz `json:"attention_at"`
+	ReadThrough   pgtype.Timestamptz `json:"read_through"`
+	Marked        bool               `json:"marked"`
+}
+
+// The other side of MarkSessionRead: moves the user's unread mark forward on
+// the given sessions they created that can carry unread state at all, and
+// returns them as the unread summary does. Others are skipped silently. A
+// session keeps its own attention kind and time; one that never needed
+// attention shows as "marked" at the moment it was marked.
+func (q *Queries) MarkSessionsUnread(ctx context.Context, arg MarkSessionsUnreadParams) ([]MarkSessionsUnreadRow, error) {
+	rows, err := q.db.Query(ctx, markSessionsUnread, arg.SessionIds, arg.UserID, arg.At)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MarkSessionsUnreadRow
+	for rows.Next() {
+		var i MarkSessionsUnreadRow
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.BotID,
+			&i.Title,
+			&i.AttentionKind,
+			&i.AttentionAt,
+			&i.ReadThrough,
+			&i.Marked,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

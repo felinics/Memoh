@@ -188,7 +188,7 @@ func (f attentionFixture) unread(t *testing.T, user uuid.UUID) []string {
 	}
 	out := make([]string, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, fmt.Sprintf("%s:%s", uuid.UUID(r.SessionID.Bytes).String(), r.AttentionKind.String))
+		out = append(out, fmt.Sprintf("%s:%s", uuid.UUID(r.SessionID.Bytes).String(), r.AttentionKind))
 	}
 	return out
 }
@@ -248,7 +248,73 @@ func TestPostgresUnreadRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list attention: %v", err)
 	}
-	if len(attention) != 1 || uuid.UUID(attention[0].SessionID.Bytes) != id || !attention[0].Unread || attention[0].AttentionKind.String != "failed" {
+	if len(attention) != 1 || uuid.UUID(attention[0].SessionID.Bytes) != id || !attention[0].Unread || attention[0].AttentionKind != "failed" {
 		t.Fatalf("attention for user = %+v, want only %s unread failed", attention, id)
+	}
+}
+
+func (f attentionFixture) markUnread(t *testing.T, user uuid.UUID, at time.Time, ids ...uuid.UUID) []dbsqlc.MarkSessionsUnreadRow {
+	t.Helper()
+	pgIDs := make([]pgtype.UUID, 0, len(ids))
+	for _, id := range ids {
+		pgIDs = append(pgIDs, pgUUID(id))
+	}
+	rows, err := f.q.MarkSessionsUnread(context.Background(), dbsqlc.MarkSessionsUnreadParams{UserID: pgUUID(user), SessionIds: pgIDs, At: pgTime(at)})
+	if err != nil {
+		t.Fatalf("mark unread: %v", err)
+	}
+	return rows
+}
+
+func TestPostgresMarkedUnreadIsTheOtherSideOfRead(t *testing.T) {
+	f := beginAttentionFixture(t)
+	t1 := time.Now().Truncate(time.Microsecond)
+	t2 := t1.Add(time.Second)
+	replied := f.session(t, sessionSpec{creator: &f.userID})
+	quiet := f.session(t, sessionSpec{creator: &f.userID})
+	othersSession := f.session(t, sessionSpec{creator: &f.other})
+	telegram := f.session(t, sessionSpec{creator: &f.userID, channelType: strp("telegram")})
+	if err := f.mark(replied, "failed", t1); err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	f.read(t, f.userID, replied, t1)
+
+	rows := f.markUnread(t, f.userID, t2, replied, quiet, othersSession, telegram)
+	got := map[uuid.UUID]dbsqlc.MarkSessionsUnreadRow{}
+	for _, r := range rows {
+		got[uuid.UUID(r.SessionID.Bytes)] = r
+	}
+	if len(got) != 2 {
+		t.Fatalf("marked %d sessions, want only the caller's eligible two: %+v", len(got), rows)
+	}
+	if r := got[replied]; r.AttentionKind != "failed" || !r.AttentionAt.Time.Equal(t1) || !r.ReadThrough.Time.Equal(t2) || !r.Marked {
+		t.Fatalf("replied session = %+v, want its own kind and time, read through the mark", r)
+	}
+	if r := got[quiet]; r.AttentionKind != "marked" || !r.AttentionAt.Time.Equal(t2) || !r.Marked {
+		t.Fatalf("never-attended session = %+v, want kind marked at the mark time", r)
+	}
+	if list := f.unread(t, f.userID); len(list) != 2 {
+		t.Fatalf("unread after marking = %v, want both marked sessions", list)
+	}
+
+	f.read(t, f.userID, quiet, t1)
+	if list := f.unread(t, f.userID); len(list) != 2 {
+		t.Fatalf("a read through older than the mark cleared it: %v", list)
+	}
+	f.read(t, f.userID, replied, t2)
+	f.read(t, f.userID, quiet, t2)
+	if list := f.unread(t, f.userID); len(list) != 0 {
+		t.Fatalf("unread after reading through the marks = %v, want none", list)
+	}
+
+	attention, err := f.q.ListSessionAttentionForUser(context.Background(), dbsqlc.ListSessionAttentionForUserParams{
+		UserID:     pgUUID(f.userID),
+		SessionIds: []pgtype.UUID{pgUUID(quiet)},
+	})
+	if err != nil {
+		t.Fatalf("list attention: %v", err)
+	}
+	if len(attention) != 1 || attention[0].Unread {
+		t.Fatalf("annotation for a read marked session = %+v, want one read row", attention)
 	}
 }

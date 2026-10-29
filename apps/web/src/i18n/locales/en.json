@@ -4551,7 +4551,8 @@
     "kind": {
       "reply": "Reply ready",
       "failed": "Run failed",
-      "needs_input": "Waiting for your input"
+      "needs_input": "Waiting for your input",
+      "marked": "Marked unread"
     }
   }
 }

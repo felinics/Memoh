@@ -143,10 +143,10 @@ func (h *MessageHandler) Register(e *echo.Echo) {
 	// through the session runtime over the chat WebSocket, which is what lets
 	// every subscriber of a session agree on what it has seen.
 	botGroup.GET("/sessions/events", h.StreamSessionsActivityEvents)
-	botGroup.PUT("/sessions/:session_id/read", h.MarkSessionRead)
 
 	// Unread state addressed to the caller across all bots.
 	e.GET("/users/me/unread", h.ListUnreadSessions)
+	e.PUT("/users/me/read-state", h.SetReadState)
 	e.GET("/users/me/attention/events", h.StreamAttentionEvents)
 }
 

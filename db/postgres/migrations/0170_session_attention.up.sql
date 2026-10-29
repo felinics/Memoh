@@ -1,9 +1,11 @@
 -- 0170_session_attention
 -- Unread state for user-facing sessions. bot_sessions gains the moment a
 -- session last needed its creator's attention (a run finished, failed or is
--- waiting for a decision) and the kind of that attention; session_reads keeps
--- each user's read cursor per session. A session is unread for a user when
--- attention_at is later than that user's read_at.
+-- waiting for a decision) and the kind of that attention. session_reads keeps
+-- each user's two forward-only marks per session: read_at (the user read it)
+-- and marked_unread_at (the user marked it unread). A session is unread when
+-- attention_at or marked_unread_at is later than read_at, so read and unread
+-- are two sides of one state and the latest write wins.
 --
 -- Both columns are born NULL, so existing sessions start read. Writing them
 -- must never touch updated_at: sidebar recency follows messages, not this
@@ -27,7 +29,8 @@ CREATE TABLE IF NOT EXISTS public.session_reads (
                          REFERENCES public.teams(id) ON DELETE RESTRICT,
   user_id    UUID        NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
   session_id UUID        NOT NULL,
-  read_at    TIMESTAMPTZ NOT NULL,
+  read_at    TIMESTAMPTZ,
+  marked_unread_at TIMESTAMPTZ,
   PRIMARY KEY (team_id, user_id, session_id)
 );
 

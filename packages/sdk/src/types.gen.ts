@@ -380,14 +380,34 @@ export type AgentcredentialPublicCredential = {
 export type ApperrorFault = 'client' | 'server' | 'dependency' | 'canceled';
 
 export type AttentionAttention = {
+    /**
+     * At is when the session last needed attention, or when it was marked
+     * unread if it never did; it orders the inbox.
+     */
     attention_at?: string;
     attention_kind?: AttentionKind;
     bot_id?: string;
+    /**
+     * Marked is true when the user marked the session unread themselves; such
+     * a session is not read just because it is already on screen.
+     */
+    marked?: boolean;
+    /**
+     * ReadThrough is the through a client sends to read it: it covers both the
+     * attention and a manual unread mark.
+     */
+    read_through?: string;
     session_id?: string;
     title?: string;
 };
 
-export type AttentionKind = 'reply' | 'failed' | 'needs_input';
+export type AttentionKind = 'reply' | 'failed' | 'needs_input' | 'marked';
+
+export type AttentionReadStateChange = {
+    session_id?: string;
+    through?: string;
+    unread?: boolean;
+};
 
 export type AudioConfigSchema = {
     fields?: Array<AudioFieldSchema>;
@@ -2297,18 +2317,6 @@ export type HandlersMcpStdioResponse = {
     url?: string;
 };
 
-export type HandlersMarkSessionReadRequest = {
-    /**
-     * Through is the attention time the client displayed; the cursor never
-     * moves past what the user actually saw.
-     */
-    through?: string;
-};
-
-export type HandlersMarkSessionReadResponse = {
-    read_at?: string;
-};
-
 export type HandlersModelTokenUsage = {
     input_tokens?: number;
     model_id?: string;
@@ -2389,6 +2397,14 @@ export type HandlersSessionInfoResponse = {
     context_usage?: HandlersContextUsage;
     message_count?: number;
     skills?: Array<string>;
+};
+
+export type HandlersSetReadStateRequest = {
+    items?: Array<AttentionReadStateChange>;
+};
+
+export type HandlersSetReadStateResponse = {
+    items?: Array<AttentionAttention>;
 };
 
 export type HandlersSiteIconResponse = {
@@ -12239,51 +12255,6 @@ export type GetBotsByBotIdSessionsBySessionIdQueueResponses = {
 
 export type GetBotsByBotIdSessionsBySessionIdQueueResponse = GetBotsByBotIdSessionsBySessionIdQueueResponses[keyof GetBotsByBotIdSessionsBySessionIdQueueResponses];
 
-export type PutBotsByBotIdSessionsBySessionIdReadData = {
-    /**
-     * Read cursor
-     */
-    body: HandlersMarkSessionReadRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Session ID
-         */
-        session_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/sessions/{session_id}/read';
-};
-
-export type PutBotsByBotIdSessionsBySessionIdReadErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Not Found
-     */
-    404: ServerProblem;
-};
-
-export type PutBotsByBotIdSessionsBySessionIdReadError = PutBotsByBotIdSessionsBySessionIdReadErrors[keyof PutBotsByBotIdSessionsBySessionIdReadErrors];
-
-export type PutBotsByBotIdSessionsBySessionIdReadResponses = {
-    /**
-     * OK
-     */
-    200: HandlersMarkSessionReadResponse;
-};
-
-export type PutBotsByBotIdSessionsBySessionIdReadResponse = PutBotsByBotIdSessionsBySessionIdReadResponses[keyof PutBotsByBotIdSessionsBySessionIdReadResponses];
-
 export type GetBotsByBotIdSessionsBySessionIdRuntimeControlsData = {
     body?: never;
     path: {
@@ -17891,6 +17862,34 @@ export type PutUsersMePasswordResponses = {
      */
     204: unknown;
 };
+
+export type PutUsersMeReadStateData = {
+    /**
+     * Read state changes
+     */
+    body: HandlersSetReadStateRequest;
+    path?: never;
+    query?: never;
+    url: '/users/me/read-state';
+};
+
+export type PutUsersMeReadStateErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+};
+
+export type PutUsersMeReadStateError = PutUsersMeReadStateErrors[keyof PutUsersMeReadStateErrors];
+
+export type PutUsersMeReadStateResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSetReadStateResponse;
+};
+
+export type PutUsersMeReadStateResponse = PutUsersMeReadStateResponses[keyof PutUsersMeReadStateResponses];
 
 export type GetUsersMeRuntimesData = {
     body?: never;

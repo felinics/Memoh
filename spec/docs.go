@@ -9708,72 +9708,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/sessions/{session_id}/read": {
-            "put": {
-                "description": "Moves the caller's read cursor for a session they created. The\ncursor only moves forward.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "sessions"
-                ],
-                "summary": "Mark a session as read",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Session ID",
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Read cursor",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MarkSessionReadRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MarkSessionReadResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/server.Problem"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/sessions/{session_id}/runtime-controls": {
             "get": {
                 "tags": [
@@ -16498,7 +16432,7 @@ const docTemplate = `{
         },
         "/users/me/attention/events": {
             "get": {
-                "description": "SSE addressed to the caller: session_attention when one of\ntheir sessions needs them, session_read when their read cursor\nmoves. Starts with attention_ready; never carries message bodies.",
+                "description": "SSE addressed to the caller: session_attention when one of\ntheir sessions needs them, session_unread when they mark one\nunread, session_read when their read cursor moves. Starts with attention_ready; never carries message bodies.",
                 "produces": [
                     "text/event-stream"
                 ],
@@ -16770,6 +16704,46 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/me/read-state": {
+            "put": {
+                "description": "Marks each session read (through the attention time the client\ndisplayed) or unread. Read and unread are forward-only marks; the\nlater one wins. Sessions the caller did not create, or that carry no\nunread state, are skipped. Marking unread never notifies.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Set the caller's read state of sessions",
+                "parameters": [
+                    {
+                        "description": "Read state changes",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SetReadStateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SetReadStateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
                         }
@@ -18422,12 +18396,21 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "attention_at": {
+                    "description": "At is when the session last needed attention, or when it was marked\nunread if it never did; it orders the inbox.",
                     "type": "string"
                 },
                 "attention_kind": {
                     "$ref": "#/definitions/attention.Kind"
                 },
                 "bot_id": {
+                    "type": "string"
+                },
+                "marked": {
+                    "description": "Marked is true when the user marked the session unread themselves; such\na session is not read just because it is already on screen.",
+                    "type": "boolean"
+                },
+                "read_through": {
+                    "description": "ReadThrough is the through a client sends to read it: it covers both the\nattention and a manual unread mark.",
                     "type": "string"
                 },
                 "session_id": {
@@ -18443,13 +18426,29 @@ const docTemplate = `{
             "enum": [
                 "reply",
                 "failed",
-                "needs_input"
+                "needs_input",
+                "marked"
             ],
             "x-enum-varnames": [
                 "KindReply",
                 "KindFailed",
-                "KindNeedsInput"
+                "KindNeedsInput",
+                "KindMarked"
             ]
+        },
+        "attention.ReadStateChange": {
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string"
+                },
+                "through": {
+                    "type": "string"
+                },
+                "unread": {
+                    "type": "boolean"
+                }
+            }
         },
         "audio.ConfigSchema": {
             "type": "object",
@@ -23313,23 +23312,6 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.MarkSessionReadRequest": {
-            "type": "object",
-            "properties": {
-                "through": {
-                    "description": "Through is the attention time the client displayed; the cursor never\nmoves past what the user actually saw.",
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.MarkSessionReadResponse": {
-            "type": "object",
-            "properties": {
-                "read_at": {
-                    "type": "string"
-                }
-            }
-        },
         "handlers.ModelTokenUsage": {
             "type": "object",
             "properties": {
@@ -23522,6 +23504,28 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "string"
+                    }
+                }
+            }
+        },
+        "handlers.SetReadStateRequest": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/attention.ReadStateChange"
+                    }
+                }
+            }
+        },
+        "handlers.SetReadStateResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/attention.Attention"
                     }
                 }
             }

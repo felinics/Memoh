@@ -40,15 +40,18 @@ func (q *attentionTestQueries) ListSessionsByBotPaged(context.Context, sqlc.List
 }
 
 type fakeAttentionService struct {
-	readCalls []string
-	readAt    time.Time
-	unread    []attention.Attention
-	annotate  map[string]bool
+	changes  []attention.ReadStateChange
+	changeBy string
+	marked   []attention.Attention
+	err      error
+	unread   []attention.Attention
+	annotate map[string]bool
 }
 
-func (f *fakeAttentionService) MarkRead(_ context.Context, userID, sessionID string, through time.Time) (time.Time, error) {
-	f.readCalls = append(f.readCalls, userID+"/"+sessionID+"@"+through.UTC().Format(time.RFC3339))
-	return f.readAt, nil
+func (f *fakeAttentionService) SetReadState(_ context.Context, userID string, changes []attention.ReadStateChange) ([]attention.Attention, error) {
+	f.changeBy = userID
+	f.changes = changes
+	return f.marked, f.err
 }
 
 func (f *fakeAttentionService) ListUnread(context.Context, string) ([]attention.Attention, error) {
@@ -81,55 +84,61 @@ func attentionTestHandler(creator string) (*MessageHandler, *messageevent.Hub, *
 	queries := attentionTestQueriesFor(creator)
 	h := NewMessageHandler(slog.Default(), nil, session.NewService(nil, queries, hub),
 		bots.NewService(nil, queries), newTestAdminAccountService("member"), hub)
-	svc := &fakeAttentionService{readAt: time.Date(2026, 10, 16, 9, 0, 0, 0, time.UTC)}
+	svc := &fakeAttentionService{}
 	h.SetAttentionService(svc)
 	return h, hub, svc
 }
 
-func markReadRequest(userID, body string) (echo.Context, *httptest.ResponseRecorder) {
-	req := httptest.NewRequest(http.MethodPut, "/bots/"+activityTestBotID+"/sessions/"+activityTestSessionID+"/read", strings.NewReader(body))
+func readStateRequest(userID, body string) (echo.Context, *httptest.ResponseRecorder) {
+	req := httptest.NewRequest(http.MethodPut, "/users/me/read-state", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
-	c := testAuthContext(echo.New(), req, rec, userID)
-	c.SetParamNames("bot_id", "session_id")
-	c.SetParamValues(activityTestBotID, activityTestSessionID)
-	return c, rec
+	return testAuthContext(echo.New(), req, rec, userID), rec
 }
 
-func TestMarkReadStoresThroughForCreator(t *testing.T) {
+func TestSetReadStatePassesBothSidesForTheCaller(t *testing.T) {
 	h, _, svc := attentionTestHandler(attentionOwnerID)
-	c, rec := markReadRequest(attentionOwnerID, `{"through":"2026-10-16T08:59:00Z"}`)
+	svc.marked = []attention.Attention{{BotID: activityTestBotID, SessionID: activityTestSessionID, Kind: attention.KindReply, Marked: true}}
+	c, rec := readStateRequest(attentionOwnerID, `{"items":[`+
+		`{"session_id":"`+activityTestSessionID+`","unread":false,"through":"2026-10-16T08:59:00Z"},`+
+		`{"session_id":"`+activityTestSessionID+`","unread":true}]}`)
 
-	if err := h.MarkSessionRead(c); err != nil {
-		t.Fatalf("MarkSessionRead: %v", err)
+	if err := h.SetReadState(c); err != nil {
+		t.Fatalf("SetReadState: %v", err)
 	}
-	if want := attentionOwnerID + "/" + activityTestSessionID + "@2026-10-16T08:59:00Z"; len(svc.readCalls) != 1 || svc.readCalls[0] != want {
-		t.Fatalf("read calls = %v, want [%s]", svc.readCalls, want)
+	if svc.changeBy != attentionOwnerID || len(svc.changes) != 2 || svc.changes[0].Unread || !svc.changes[1].Unread ||
+		!svc.changes[0].Through.Equal(time.Date(2026, 10, 16, 8, 59, 0, 0, time.UTC)) {
+		t.Fatalf("changes = %+v by %s, want a read then an unread for the caller", svc.changes, svc.changeBy)
 	}
-	if !strings.Contains(rec.Body.String(), `"read_at":"2026-10-16T09:00:00Z"`) {
-		t.Fatalf("response = %s, want read_at", rec.Body.String())
+	var body SetReadStateResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Items) != 1 || body.Items[0].SessionID != activityTestSessionID {
+		t.Fatalf("items = %+v, want the marked session", body.Items)
 	}
 }
 
-func TestMarkReadRejectsNonCreator(t *testing.T) {
-	h, _, svc := attentionTestHandler("cccccccc-cccc-cccc-cccc-cccccccccccc")
-	c, _ := markReadRequest(attentionOwnerID, `{"through":"2026-10-16T08:59:00Z"}`)
+func TestSetReadStateHidesSessionsOnBotsWithoutAccess(t *testing.T) {
+	h, _, svc := attentionTestHandler(attentionOutsiderID)
+	svc.marked = []attention.Attention{{BotID: activityTestBotID, SessionID: activityTestSessionID, Title: "secret", Marked: true}}
+	c, rec := readStateRequest(attentionOutsiderID, `{"items":[{"session_id":"`+activityTestSessionID+`","unread":true}]}`)
+	if err := h.SetReadState(c); err != nil {
+		t.Fatalf("SetReadState: %v", err)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != `{"items":[]}` {
+		t.Fatalf("response = %s, want no items for a bot the caller cannot access", got)
+	}
+}
 
-	err := h.MarkSessionRead(c)
+func TestSetReadStateRequiresThroughToRead(t *testing.T) {
+	h, _, svc := attentionTestHandler(attentionOwnerID)
+	svc.err = attention.ErrThroughRequired
+	c, _ := readStateRequest(attentionOwnerID, `{"items":[{"session_id":"`+activityTestSessionID+`","unread":false}]}`)
+	err := h.SetReadState(c)
 	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-		t.Fatalf("MarkSessionRead err = %v, want 403", err)
-	}
-	if len(svc.readCalls) != 0 {
-		t.Fatalf("read stored for a non-creator: %v", svc.readCalls)
-	}
-}
-
-func TestMarkReadRequiresThrough(t *testing.T) {
-	h, _, _ := attentionTestHandler(attentionOwnerID)
-	c, _ := markReadRequest(attentionOwnerID, `{}`)
-	if err := h.MarkSessionRead(c); err == nil {
-		t.Fatalf("MarkSessionRead without through succeeded")
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
+		t.Fatalf("SetReadState err = %v, want 400", err)
 	}
 }
 
@@ -293,5 +302,16 @@ func TestListSessionsIncludesUnread(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"unread":true`) || !strings.Contains(rec.Body.String(), `"attention_kind":"reply"`) {
 		t.Fatalf("list response = %s, want unread attention", rec.Body.String())
+	}
+}
+
+func TestAttentionStreamForwardsManualUnreadMarks(t *testing.T) {
+	h, hub, _ := attentionTestHandler(attentionOwnerID)
+	frames := streamAttention(t, h, hub, attentionOwnerID, 2, func() {
+		data, _ := json.Marshal(attention.Attention{BotID: activityTestBotID, SessionID: activityTestSessionID, Kind: attention.KindMarked, Marked: true})
+		hub.Publish(messageevent.Event{Type: messageevent.EventTypeSessionUnread, BotID: messageevent.UserTopic(attentionOwnerID), Data: data})
+	})
+	if len(frames) != 2 || frames[1]["type"] != "session_unread" || frames[1]["marked"] != true || frames[1]["attention_kind"] != "marked" {
+		t.Fatalf("frames = %+v, want ready then a session_unread frame", frames)
 	}
 }

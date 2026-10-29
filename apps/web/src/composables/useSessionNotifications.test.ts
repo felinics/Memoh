@@ -21,7 +21,7 @@ vi.mock('./useSessionViewing', () => ({ isSessionViewed: deps.viewed }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: deps.push }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 
-const entry: UnreadEntry = { sessionId: 's1', botId: 'b1', attentionAt: '2026-10-20T08:00:00Z', title: 'Review', kind: 'reply' }
+const entry: UnreadEntry = { sessionId: 's1', botId: 'b1', attentionAt: '2026-10-20T08:00:00Z', readThrough: '2026-10-20T08:00:00Z', marked: false, title: 'Review', kind: 'reply' }
 let scope: EffectScope
 const sent: Array<{ title: string, options: NotificationOptions, onclick: null | (() => void) }> = []
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve() }

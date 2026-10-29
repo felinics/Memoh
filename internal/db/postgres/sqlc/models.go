@@ -805,10 +805,11 @@ type SearchProvider struct {
 }
 
 type SessionRead struct {
-	TeamID    pgtype.UUID        `json:"team_id"`
-	UserID    pgtype.UUID        `json:"user_id"`
-	SessionID pgtype.UUID        `json:"session_id"`
-	ReadAt    pgtype.Timestamptz `json:"read_at"`
+	TeamID         pgtype.UUID        `json:"team_id"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	SessionID      pgtype.UUID        `json:"session_id"`
+	ReadAt         pgtype.Timestamptz `json:"read_at"`
+	MarkedUnreadAt pgtype.Timestamptz `json:"marked_unread_at"`
 }
 
 type SessionRun struct {

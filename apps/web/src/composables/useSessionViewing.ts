@@ -33,11 +33,26 @@ export function useSessionViewing(sessionId: Ref<string | null>, active: Ref<boo
     const id = sessionId.value
     return id && viewing(id) ? id : null
   })
+  /**
+   * The session this pane shows, regardless of window focus. A change here is an "open":
+   * the first moment it is then actually viewed reads even a session the user marked
+   * unread. Marking the session already on screen unread leaves it alone until then,
+   * while new attention arriving on screen is read straight away.
+   */
+  const opened = computed(() => attached.value && active.value ? sessionId.value : null)
+  let openPending: string | null = null
+  watch(opened, (id) => { openPending = id }, { immediate: true, flush: 'sync' })
   watch(() => {
     const id = viewedSession.value
-    return id && unread.entries[id] ? [id, unread.entries[id].attentionAt] as const : null
-  }, (entry) => {
-    if (entry) void unread.markRead(entry[0])
+    if (!id) return null
+    const entry = unread.entries[id]
+    return `${id}|${entry?.attentionAt ?? ''}|${entry?.marked === true}`
+  }, (key) => {
+    if (!key) return
+    const [id, at, marked] = key.split('|') as [string, string, string]
+    const opening = openPending === id
+    if (opening) openPending = null
+    if (at && (marked !== 'true' || opening)) void unread.markRead(id)
   }, { immediate: true })
 
   onScopeDispose(() => {

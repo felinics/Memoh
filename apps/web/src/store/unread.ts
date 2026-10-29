@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
   fetchUnreadSessions,
-  markSessionRead,
+  setReadState,
   streamUserAttentionEvents,
   type AttentionKind,
   type UnreadSessionWire,
@@ -21,6 +21,10 @@ export interface UnreadEntry {
   title: string
   kind: AttentionKind
   attentionAt: string
+  /** The through that reads it: its attention, or the later manual unread mark. */
+  readThrough: string
+  /** Marked unread by the user; only reopening the session reads it. */
+  marked: boolean
 }
 
 
@@ -31,6 +35,8 @@ function fromWire(item: UnreadSessionWire): UnreadEntry {
     title: item.title,
     kind: item.attention_kind,
     attentionAt: item.attention_at,
+    readThrough: item.read_through || item.attention_at,
+    marked: item.marked === true,
   }
 }
 
@@ -91,7 +97,7 @@ export const useUnreadStore = defineStore('unread', () => {
     const through = Math.max(reads.get(sessionId) ?? 0, Date.parse(readAt))
     reads.set(sessionId, through)
     const entry = entries.value[sessionId]
-    if (!entry || through >= Date.parse(entry.attentionAt)) {
+    if (!entry || through >= Date.parse(entry.readThrough)) {
       remove(sessionId)
       pendingChanges?.set(sessionId, null)
     }
@@ -107,10 +113,10 @@ export const useUnreadStore = defineStore('unread', () => {
       if (expected !== generation || version !== snapshotVersion) return
       const next: Record<string, UnreadEntry> = {}
       for (const item of items) {
-        const at = Date.parse(item.attention_at)
-        if ((reads.get(item.session_id) ?? 0) >= at) continue
-        next[item.session_id] = fromWire(item)
-        seen.set(item.session_id, Math.max(seen.get(item.session_id) ?? 0, at))
+        const entry = fromWire(item)
+        if ((reads.get(entry.sessionId) ?? 0) >= Date.parse(entry.readThrough)) continue
+        next[entry.sessionId] = entry
+        seen.set(entry.sessionId, Math.max(seen.get(entry.sessionId) ?? 0, Date.parse(entry.attentionAt)))
       }
       for (const [id, entry] of changes) {
         if (entry) next[id] = entry
@@ -140,6 +146,12 @@ export const useUnreadStore = defineStore('unread', () => {
         arrivals.set(`${entry.sessionId}@${entry.attentionAt}`, arrivedAt)
         put(entry)
         for (const listener of listeners) listener(entry)
+        return
+      }
+      case 'session_unread': {
+        const entry = fromWire(event)
+        if ((reads.get(entry.sessionId) ?? 0) >= Date.parse(entry.readThrough)) return
+        put(entry)
         return
       }
       case 'session_read':
@@ -187,13 +199,13 @@ export const useUnreadStore = defineStore('unread', () => {
   function markRead(sessionId: string): Promise<void> {
     const entry = entries.value[sessionId]
     if (!entry) return Promise.resolve()
-    const key = `${sessionId}@${entry.attentionAt}`
+    const key = `${sessionId}@${entry.readThrough}`
     const pending = reading.get(key)
     if (pending) return pending
     const expected = generation
-    const request = markSessionRead(entry.botId, sessionId, entry.attentionAt)
+    const request = setReadState([{ session_id: sessionId, unread: false, through: entry.readThrough }])
       .then(() => {
-        if (expected === generation) removeIfReadThrough(sessionId, entry.attentionAt)
+        if (expected === generation) removeIfReadThrough(sessionId, entry.readThrough)
       })
       .catch(error => console.error('Failed to mark session read:', error))
       .finally(() => {
@@ -203,11 +215,38 @@ export const useUnreadStore = defineStore('unread', () => {
     return request
   }
 
+  /**
+   * Reads every unread session in one request. The inbox empties at once and comes
+   * back if the request fails; the returned ids feed markUnread for an undo.
+   */
+  async function markAllRead(): Promise<string[]> {
+    const cleared = Object.values(entries.value)
+    if (!cleared.length) return []
+    for (const entry of cleared) remove(entry.sessionId)
+    try {
+      await setReadState(cleared.map(entry => ({ session_id: entry.sessionId, unread: false, through: entry.readThrough })))
+    }
+    catch (error) {
+      for (const entry of cleared) if (!isUnread(entry.sessionId)) put(entry)
+      throw error
+    }
+    for (const entry of cleared) removeIfReadThrough(entry.sessionId, entry.readThrough)
+    return cleared.map(entry => entry.sessionId)
+  }
+
+  /** The other side of markRead. Sessions that cannot carry unread state are skipped. */
+  async function markUnread(sessionIds: string[]) {
+    if (!sessionIds.length) return
+    const expected = generation
+    const items = await setReadState(sessionIds.map(id => ({ session_id: id, unread: true })))
+    if (expected !== generation) return
+    for (const item of items) put(fromWire(item))
+  }
 
   function onAttention(listener: (entry: UnreadEntry) => void) {
     listeners.add(listener)
     return () => listeners.delete(listener)
   }
 
-  return { entries, total, countByBot, inbox, isUnread, kindOf, isFresh, start, stop, reset, markRead, onAttention }
+  return { entries, total, countByBot, inbox, isUnread, kindOf, isFresh, start, stop, reset, markRead, markAllRead, markUnread, onAttention }
 })

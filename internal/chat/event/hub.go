@@ -45,6 +45,10 @@ const (
 	// EventTypeSessionRead is published on a user topic when that user's read
 	// cursor for a session moves, so other tabs and devices clear the dot.
 	EventTypeSessionRead EventType = "session_read"
+	// EventTypeSessionUnread is published on a user topic when that user marks
+	// a session unread. Unlike session_attention it never raises a
+	// notification; it only brings the dot back on other tabs and devices.
+	EventTypeSessionUnread EventType = "session_unread"
 )
 
 // UserTopic is the hub key for events addressed to one user rather than to a

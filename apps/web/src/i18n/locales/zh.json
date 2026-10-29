@@ -4551,7 +4551,8 @@
     "kind": {
       "reply": "已回复",
       "failed": "运行失败",
-      "needs_input": "等待你确认"
+      "needs_input": "等待你确认",
+      "marked": "标记为未读"
     }
   }
 }

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -18,7 +19,7 @@ import (
 
 // attentionService is the unread state the handlers read and move.
 type attentionService interface {
-	MarkRead(ctx context.Context, userID, sessionID string, through time.Time) (time.Time, error)
+	SetReadState(ctx context.Context, userID string, changes []attention.ReadStateChange) ([]attention.Attention, error)
 	ListUnread(ctx context.Context, userID string) ([]attention.Attention, error)
 	Annotate(ctx context.Context, userID string, threads []session.Thread) ([]session.Thread, error)
 }
@@ -33,16 +34,14 @@ func (h *SessionHandler) SetAttentionService(svc attentionService) {
 	h.attention = svc
 }
 
-// MarkSessionReadRequest moves the caller's read cursor.
-type MarkSessionReadRequest struct {
-	// Through is the attention time the client displayed; the cursor never
-	// moves past what the user actually saw.
-	Through time.Time `json:"through"`
+// SetReadStateRequest writes the caller's read state of one or more sessions.
+type SetReadStateRequest struct {
+	Items []attention.ReadStateChange `json:"items"`
 }
 
-// MarkSessionReadResponse is the stored cursor.
-type MarkSessionReadResponse struct {
-	ReadAt time.Time `json:"read_at"`
+// SetReadStateResponse lists the sessions this request left unread.
+type SetReadStateResponse struct {
+	Items []attention.Attention `json:"items"`
 }
 
 // UnreadSessionsResponse lists the caller's unread sessions across bots.
@@ -50,22 +49,20 @@ type UnreadSessionsResponse struct {
 	Items []attention.Attention `json:"items"`
 }
 
-// MarkSessionRead godoc
-// @Summary Mark a session as read
-// @Description Moves the caller's read cursor for a session they created. The
-// @Description cursor only moves forward.
+// SetReadState godoc
+// @Summary Set the caller's read state of sessions
+// @Description Marks each session read (through the attention time the client
+// @Description displayed) or unread. Read and unread are forward-only marks; the
+// @Description later one wins. Sessions the caller did not create, or that carry no
+// @Description unread state, are skipped. Marking unread never notifies.
 // @Tags sessions
 // @Accept json
 // @Produce json
-// @Param bot_id path string true "Bot ID"
-// @Param session_id path string true "Session ID"
-// @Param payload body MarkSessionReadRequest true "Read cursor"
-// @Success 200 {object} MarkSessionReadResponse
+// @Param payload body SetReadStateRequest true "Read state changes"
+// @Success 200 {object} SetReadStateResponse
 // @Failure 400 {object} server.Problem
-// @Failure 403 {object} server.Problem
-// @Failure 404 {object} server.Problem
-// @Router /bots/{bot_id}/sessions/{session_id}/read [put].
-func (h *MessageHandler) MarkSessionRead(c echo.Context) error {
+// @Router /users/me/read-state [put].
+func (h *MessageHandler) SetReadState(c echo.Context) error {
 	if h.attention == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "attention service not configured")
 	}
@@ -73,25 +70,25 @@ func (h *MessageHandler) MarkSessionRead(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	_, _, sess, err := h.authorizeMessageSession(c, userID, c.Param("bot_id"), c.Param("session_id"))
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(sess.CreatedByUserID) != userID {
-		return echo.NewHTTPError(http.StatusForbidden, "only the session creator has a read cursor")
-	}
-	var req MarkSessionReadRequest
+	var req SetReadStateRequest
 	if err := c.Bind(&req); err != nil {
-		return apperror.FieldInvalid("through", err)
+		return apperror.FieldInvalid("items", err)
 	}
-	if req.Through.IsZero() {
-		return apperror.FieldRequired("through")
+	items, err := h.attention.SetReadState(c.Request().Context(), userID, req.Items)
+	if errors.Is(err, attention.ErrThroughRequired) {
+		return echo.NewHTTPError(http.StatusBadRequest, "reading a session requires through")
 	}
-	readAt, err := h.attention.MarkRead(c.Request().Context(), userID, sess.ID, req.Through)
 	if err != nil {
-		return errs.Wrap(err, "mark session read")
+		return errs.Wrap(err, "set read state")
 	}
-	return c.JSON(http.StatusOK, MarkSessionReadResponse{ReadAt: readAt})
+	access := h.botAccessCache(c, userID)
+	visible := make([]attention.Attention, 0, len(items))
+	for _, item := range items {
+		if access(item.BotID) {
+			visible = append(visible, item)
+		}
+	}
+	return c.JSON(http.StatusOK, SetReadStateResponse{Items: visible})
 }
 
 // ListUnreadSessions godoc
@@ -128,8 +125,8 @@ func (h *MessageHandler) ListUnreadSessions(c echo.Context) error {
 // StreamAttentionEvents godoc
 // @Summary Stream the caller's attention events
 // @Description SSE addressed to the caller: session_attention when one of
-// @Description their sessions needs them, session_read when their read cursor
-// @Description moves. Starts with attention_ready; never carries message bodies.
+// @Description their sessions needs them, session_unread when they mark one
+// @Description unread, session_read when their read cursor moves. Starts with attention_ready; never carries message bodies.
 // @Tags sessions
 // @Produce text/event-stream
 // @Success 200 {string} string "SSE stream"
@@ -196,14 +193,15 @@ func (h *MessageHandler) StreamAttentionEvents(c echo.Context) error {
 // event is not for this stream or names a bot the user can no longer access.
 func attentionFrame(event messageevent.Event, access func(botID string) bool) map[string]any {
 	switch event.Type {
-	case messageevent.EventTypeSessionAttention:
+	case messageevent.EventTypeSessionAttention, messageevent.EventTypeSessionUnread:
 		var payload attention.Attention
 		if json.Unmarshal(event.Data, &payload) != nil || !access(payload.BotID) {
 			return nil
 		}
 		return map[string]any{
-			"type": "session_attention", "bot_id": payload.BotID, "session_id": payload.SessionID,
+			"type": string(event.Type), "bot_id": payload.BotID, "session_id": payload.SessionID,
 			"title": payload.Title, "attention_kind": payload.Kind, "attention_at": payload.At,
+			"read_through": payload.ReadThrough, "marked": payload.Marked,
 		}
 	case messageevent.EventTypeSessionRead:
 		var payload attention.Read

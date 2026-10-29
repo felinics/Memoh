@@ -85,6 +85,7 @@ const kindClass: Record<AttentionKind, string> = {
   reply: '',
   failed: 'text-[color:var(--accent-red)]',
   needs_input: 'text-[color:var(--warning-foreground)]',
+  marked: '',
 }
 
 const title = computed(() => props.entry.title || t('chat.untitledSession'))

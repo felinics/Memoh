@@ -4,7 +4,7 @@ import type { UserAttentionEvent } from '@/composables/api/attention-api'
 
 const api = vi.hoisted(() => ({
   fetchUnreadSessions: vi.fn(),
-  markSessionRead: vi.fn(),
+  setReadState: vi.fn(),
   streamUserAttentionEvents: vi.fn(),
 }))
 
@@ -36,7 +36,7 @@ describe('unread store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     api.fetchUnreadSessions.mockReset().mockResolvedValue([])
-    api.markSessionRead.mockReset().mockResolvedValue(undefined)
+    api.setReadState.mockReset().mockResolvedValue([])
     api.streamUserAttentionEvents.mockReset()
   })
 
@@ -72,7 +72,7 @@ describe('unread store', () => {
 
     expect(store.isUnread('s1')).toBe(true)
     expect(store.kindOf('s1')).toBe('reply')
-    expect(live).toHaveBeenCalledWith({ sessionId: 's1', botId: 'bot-a', title: 'Refactor login', kind: 'reply', attentionAt: reply.attention_at })
+    expect(live).toHaveBeenCalledWith({ sessionId: 's1', botId: 'bot-a', title: 'Refactor login', kind: 'reply', attentionAt: reply.attention_at, readThrough: reply.attention_at, marked: false })
   })
 
   it('clears an entry when another tab reads it', async () => {
@@ -122,7 +122,7 @@ describe('unread store', () => {
 
     await store.markRead('s1')
 
-    expect(api.markSessionRead).toHaveBeenCalledWith('bot-a', 's1', reply.attention_at)
+    expect(api.setReadState).toHaveBeenCalledWith([{ session_id: 's1', unread: false, through: reply.attention_at }])
     expect(store.isUnread('s1')).toBe(false)
   })
 
@@ -130,7 +130,7 @@ describe('unread store', () => {
     api.fetchUnreadSessions.mockResolvedValue([reply])
     const stream = captureStream()
     let resolveRead: () => void = () => {}
-    api.markSessionRead.mockImplementation(() => new Promise<void>((resolve) => { resolveRead = resolve }))
+    api.setReadState.mockImplementation(() => new Promise((resolve) => { resolveRead = () => resolve([]) }))
     const store = useUnreadStore()
     store.start()
     await flush()
@@ -219,5 +219,86 @@ describe('unread store', () => {
     finally {
       vi.useRealTimers()
     }
+  })
+
+  it('reads a manually marked session through its mark, not its older attention', async () => {
+    const marked = { ...reply, read_through: '2026-10-16T09:30:00Z', marked: true }
+    api.fetchUnreadSessions.mockResolvedValue([marked])
+    captureStream()
+    const store = useUnreadStore()
+    store.start()
+    await flush()
+
+    expect(store.entries.s1?.marked).toBe(true)
+    await store.markRead('s1')
+
+    expect(api.setReadState).toHaveBeenCalledWith([{ session_id: 's1', unread: false, through: marked.read_through }])
+    expect(store.isUnread('s1')).toBe(false)
+  })
+
+  it('marks sessions unread without notifying', async () => {
+    captureStream()
+    const store = useUnreadStore()
+    const live = vi.fn()
+    store.onAttention(live)
+    store.start()
+    await flush()
+    api.setReadState.mockResolvedValue([{ ...reply, read_through: '2026-10-16T09:30:00Z', marked: true }])
+
+    await store.markUnread(['s1'])
+
+    expect(api.setReadState).toHaveBeenCalledWith([{ session_id: 's1', unread: true }])
+    expect(store.isUnread('s1')).toBe(true)
+    expect(store.entries.s1?.marked).toBe(true)
+    expect(live).not.toHaveBeenCalled()
+  })
+
+  it('shows a session another tab marked unread without notifying', async () => {
+    const stream = captureStream()
+    const store = useUnreadStore()
+    const live = vi.fn()
+    store.onAttention(live)
+    store.start()
+    await flush()
+
+    stream.emit({ type: 'session_unread', ...reply, read_through: '2026-10-16T09:30:00Z', marked: true })
+
+    expect(store.isUnread('s1')).toBe(true)
+    expect(live).not.toHaveBeenCalled()
+    expect(store.isFresh('s1', reply.attention_at)).toBe(false)
+  })
+
+  it('reads everything at once and can bring it back', async () => {
+    const second = { ...reply, session_id: 's2', attention_at: '2026-10-16T09:00:00Z' }
+    api.fetchUnreadSessions.mockResolvedValue([reply, second])
+    captureStream()
+    const store = useUnreadStore()
+    store.start()
+    await flush()
+
+    const cleared = await store.markAllRead()
+
+    expect(cleared.sort()).toEqual(['s1', 's2'])
+    expect(store.total).toBe(0)
+    expect(api.setReadState).toHaveBeenCalledWith(expect.arrayContaining([
+      { session_id: 's1', unread: false, through: reply.attention_at },
+      { session_id: 's2', unread: false, through: second.attention_at },
+    ]))
+
+    api.setReadState.mockResolvedValue([{ ...reply, read_through: '2026-10-16T10:00:00Z', marked: true }, { ...second, read_through: '2026-10-16T10:00:00Z', marked: true }])
+    await store.markUnread(cleared)
+    expect(store.total).toBe(2)
+  })
+
+  it('restores the inbox when reading everything fails', async () => {
+    api.fetchUnreadSessions.mockResolvedValue([reply])
+    captureStream()
+    const store = useUnreadStore()
+    store.start()
+    await flush()
+    api.setReadState.mockRejectedValue(new Error('offline'))
+
+    await expect(store.markAllRead()).rejects.toThrow('offline')
+    expect(store.isUnread('s1')).toBe(true)
   })
 })

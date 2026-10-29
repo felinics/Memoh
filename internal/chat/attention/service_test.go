@@ -21,7 +21,10 @@ type fakeQueries struct {
 	markErr   error
 	markCalls []dbsqlc.MarkSessionAttentionParams
 	readAt    time.Time
+	readErr   error
 	readCalls []dbsqlc.MarkSessionReadParams
+	marked    []dbsqlc.MarkSessionsUnreadRow
+	markedArg []dbsqlc.MarkSessionsUnreadParams
 	unread    []dbsqlc.ListUnreadSessionsForUserRow
 	attention []dbsqlc.ListSessionAttentionForUserRow
 }
@@ -33,7 +36,12 @@ func (f *fakeQueries) MarkSessionAttention(_ context.Context, arg dbsqlc.MarkSes
 
 func (f *fakeQueries) MarkSessionRead(_ context.Context, arg dbsqlc.MarkSessionReadParams) (pgtype.Timestamptz, error) {
 	f.readCalls = append(f.readCalls, arg)
-	return pgtype.Timestamptz{Time: f.readAt, Valid: true}, nil
+	return pgtype.Timestamptz{Time: f.readAt, Valid: true}, f.readErr
+}
+
+func (f *fakeQueries) MarkSessionsUnread(_ context.Context, arg dbsqlc.MarkSessionsUnreadParams) ([]dbsqlc.MarkSessionsUnreadRow, error) {
+	f.markedArg = append(f.markedArg, arg)
+	return f.marked, nil
 }
 
 func (f *fakeQueries) ListUnreadSessionsForUser(context.Context, dbsqlc.ListUnreadSessionsForUserParams) ([]dbsqlc.ListUnreadSessionsForUserRow, error) {
@@ -110,6 +118,7 @@ func TestMarkPublishesToCreatorTopic(t *testing.T) {
 	want := map[string]any{
 		"bot_id": testBot.String(), "session_id": testSession.String(), "title": "Refactor login",
 		"attention_kind": "reply", "attention_at": testNow.Format(time.RFC3339Nano),
+		"read_through": testNow.Format(time.RFC3339Nano), "marked": false,
 	}
 	for k, v := range want {
 		if payload[k] != v {
@@ -139,20 +148,76 @@ func TestMarkReturnsDatabaseErrors(t *testing.T) {
 	}
 }
 
-func TestMarkReadPublishesSessionRead(t *testing.T) {
+func TestSetReadStateReadsAndPublishesSessionRead(t *testing.T) {
 	readAt := testNow.Add(-time.Minute)
 	q := &fakeQueries{readAt: readAt}
 	p := &recordingPublisher{}
 
-	got, err := newTestService(q, p).MarkRead(context.Background(), testUser.String(), testSession.String(), readAt)
-	if err != nil || !got.Equal(readAt) {
-		t.Fatalf("MarkRead = (%v, %v), want (%v, nil)", got, err, readAt)
+	got, err := newTestService(q, p).SetReadState(context.Background(), testUser.String(), []ReadStateChange{
+		{SessionID: testSession.String(), Unread: false, Through: readAt},
+	})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("SetReadState = (%v, %v), want (no unread rows, nil)", got, err)
 	}
-	if !q.readCalls[0].Through.Time.Equal(readAt) {
-		t.Fatalf("through = %v, want %v", q.readCalls[0].Through.Time, readAt)
+	if len(q.readCalls) != 1 || !q.readCalls[0].Through.Time.Equal(readAt) {
+		t.Fatalf("read calls = %+v, want one through %v", q.readCalls, readAt)
 	}
 	if len(p.events) != 1 || p.events[0].Type != event.EventTypeSessionRead || p.events[0].BotID != event.UserTopic(testUser.String()) {
 		t.Fatalf("events = %+v, want one session_read on the user topic", p.events)
+	}
+}
+
+func TestSetReadStateSkipsSessionsTheUserDoesNotOwn(t *testing.T) {
+	q := &fakeQueries{readErr: pgx.ErrNoRows}
+	p := &recordingPublisher{}
+
+	_, err := newTestService(q, p).SetReadState(context.Background(), testUser.String(), []ReadStateChange{
+		{SessionID: testSession.String(), Through: testNow},
+	})
+	if err != nil {
+		t.Fatalf("SetReadState err = %v, want nil for a session the user cannot mark", err)
+	}
+	if len(p.events) != 0 {
+		t.Fatalf("events = %+v, want none", p.events)
+	}
+}
+
+func TestSetReadStateMarksUnreadWithoutNotifying(t *testing.T) {
+	q := &fakeQueries{marked: []dbsqlc.MarkSessionsUnreadRow{{
+		SessionID:     pgtype.UUID{Bytes: testSession, Valid: true},
+		BotID:         pgtype.UUID{Bytes: testBot, Valid: true},
+		Title:         "Refactor login",
+		AttentionKind: "reply",
+		AttentionAt:   pgtype.Timestamptz{Time: testNow.Add(-time.Hour), Valid: true},
+		ReadThrough:   pgtype.Timestamptz{Time: testNow, Valid: true},
+		Marked:        true,
+	}}}
+	p := &recordingPublisher{}
+
+	got, err := newTestService(q, p).SetReadState(context.Background(), testUser.String(), []ReadStateChange{
+		{SessionID: testSession.String(), Unread: true},
+	})
+	if err != nil {
+		t.Fatalf("SetReadState: %v", err)
+	}
+	if len(q.markedArg) != 1 || !q.markedArg[0].At.Time.Equal(testNow) || len(q.markedArg[0].SessionIds) != 1 {
+		t.Fatalf("mark unread args = %+v, want one session at now", q.markedArg)
+	}
+	want := Attention{BotID: testBot.String(), SessionID: testSession.String(), Title: "Refactor login", Kind: KindReply, At: testNow.Add(-time.Hour), ReadThrough: testNow, Marked: true}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("unread rows = %+v, want [%+v]", got, want)
+	}
+	if len(p.events) != 1 || p.events[0].Type != event.EventTypeSessionUnread {
+		t.Fatalf("events = %+v, want one session_unread (never session_attention, which notifies)", p.events)
+	}
+}
+
+func TestSetReadStateRejectsAReadWithoutThrough(t *testing.T) {
+	_, err := newTestService(&fakeQueries{}, &recordingPublisher{}).SetReadState(context.Background(), testUser.String(), []ReadStateChange{
+		{SessionID: testSession.String()},
+	})
+	if err == nil {
+		t.Fatalf("SetReadState accepted a read without through")
 	}
 }
 
@@ -160,7 +225,7 @@ func TestAnnotateSetsUnreadOnlyForReturnedRows(t *testing.T) {
 	other := uuid.New()
 	q := &fakeQueries{attention: []dbsqlc.ListSessionAttentionForUserRow{{
 		SessionID:     pgtype.UUID{Bytes: testSession, Valid: true},
-		AttentionKind: pgtype.Text{String: "needs_input", Valid: true},
+		AttentionKind: "needs_input",
 		AttentionAt:   pgtype.Timestamptz{Time: testNow, Valid: true},
 		Unread:        true,
 	}}}
@@ -183,14 +248,15 @@ func TestListUnreadMapsRows(t *testing.T) {
 		SessionID:     pgtype.UUID{Bytes: testSession, Valid: true},
 		BotID:         pgtype.UUID{Bytes: testBot, Valid: true},
 		Title:         "Refactor login",
-		AttentionKind: pgtype.Text{String: "failed", Valid: true},
+		AttentionKind: "failed",
 		AttentionAt:   pgtype.Timestamptz{Time: testNow, Valid: true},
+		ReadThrough:   pgtype.Timestamptz{Time: testNow, Valid: true},
 	}}}
 	got, err := newTestService(q, &recordingPublisher{}).ListUnread(context.Background(), testUser.String())
 	if err != nil {
 		t.Fatalf("ListUnread: %v", err)
 	}
-	want := Attention{BotID: testBot.String(), SessionID: testSession.String(), Title: "Refactor login", Kind: KindFailed, At: testNow}
+	want := Attention{BotID: testBot.String(), SessionID: testSession.String(), Title: "Refactor login", Kind: KindFailed, At: testNow, ReadThrough: testNow}
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("ListUnread = %+v, want [%+v]", got, want)
 	}

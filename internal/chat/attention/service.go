@@ -1,7 +1,8 @@
 // Package attention records when a user's own session needs them — a run
 // finished, failed or is waiting for a decision — and whether they have seen
-// it since. It owns the eligibility rule (in its SQL), the per-user read
-// cursor, and the per-user events that drive unread dots and notifications.
+// it since. It owns the eligibility rule (in its SQL), each user's read state
+// per session (read and unread are two forward-only marks; the later wins),
+// and the per-user events that drive unread dots and notifications.
 package attention
 
 import (
@@ -28,6 +29,9 @@ const (
 	KindReply      Kind = "reply"
 	KindFailed     Kind = "failed"
 	KindNeedsInput Kind = "needs_input"
+	// KindMarked is a session the user marked unread that never needed
+	// attention on its own.
+	KindMarked Kind = "marked"
 )
 
 // unreadLimit caps the cross-bot unread summary; the inbox shows far fewer.
@@ -48,12 +52,29 @@ func KindForTerminalState(state string) (Kind, bool) {
 // Attention is one session that needs a user, as the unread summary and the
 // session_attention event carry it. It never includes message content.
 type Attention struct {
-	BotID     string    `json:"bot_id"`
-	SessionID string    `json:"session_id"`
-	Title     string    `json:"title"`
-	Kind      Kind      `json:"attention_kind"`
-	At        time.Time `json:"attention_at"`
+	BotID     string `json:"bot_id"`
+	SessionID string `json:"session_id"`
+	Title     string `json:"title"`
+	Kind      Kind   `json:"attention_kind"`
+	// At is when the session last needed attention, or when it was marked
+	// unread if it never did; it orders the inbox.
+	At time.Time `json:"attention_at"`
+	// ReadThrough is the through a client sends to read it: it covers both the
+	// attention and a manual unread mark.
+	ReadThrough time.Time `json:"read_through"`
+	// Marked is true when the user marked the session unread themselves; such
+	// a session is not read just because it is already on screen.
+	Marked bool `json:"marked"`
 } // @name attention.Attention
+
+// ReadStateChange is one session's desired read state. Through is required
+// to read (the attention time the client displayed, so attention that lands
+// meanwhile stays unread); marking unread ignores it.
+type ReadStateChange struct {
+	SessionID string    `json:"session_id"`
+	Unread    bool      `json:"unread"`
+	Through   time.Time `json:"through,omitzero"`
+} // @name attention.ReadStateChange
 
 // Read is the session_read event payload.
 type Read struct {
@@ -65,6 +86,7 @@ type Read struct {
 type Queries interface {
 	MarkSessionAttention(ctx context.Context, arg dbsqlc.MarkSessionAttentionParams) (dbsqlc.MarkSessionAttentionRow, error)
 	MarkSessionRead(ctx context.Context, arg dbsqlc.MarkSessionReadParams) (pgtype.Timestamptz, error)
+	MarkSessionsUnread(ctx context.Context, arg dbsqlc.MarkSessionsUnreadParams) ([]dbsqlc.MarkSessionsUnreadRow, error)
 	ListUnreadSessionsForUser(ctx context.Context, arg dbsqlc.ListUnreadSessionsForUserParams) ([]dbsqlc.ListUnreadSessionsForUserRow, error)
 	ListSessionAttentionForUser(ctx context.Context, arg dbsqlc.ListSessionAttentionForUserParams) ([]dbsqlc.ListSessionAttentionForUserRow, error)
 }
@@ -104,39 +126,82 @@ func (s *Service) Mark(ctx context.Context, sessionID string, kind Kind) (bool, 
 		return false, fmt.Errorf("mark session attention: %w", err)
 	}
 	s.publish(row.CreatedByUserID.String(), event.EventTypeSessionAttention, Attention{
-		BotID:     row.BotID.String(),
-		SessionID: row.ID.String(),
-		Title:     row.Title,
-		Kind:      Kind(row.AttentionKind.String),
-		At:        row.AttentionAt.Time,
+		BotID:       row.BotID.String(),
+		SessionID:   row.ID.String(),
+		Title:       row.Title,
+		Kind:        Kind(row.AttentionKind.String),
+		At:          row.AttentionAt.Time,
+		ReadThrough: row.AttentionAt.Time,
 	})
 	return true, nil
 }
 
-// MarkRead moves userID's read cursor for the session to through, never
-// backwards, and returns the stored cursor. Callers pass the attention time
-// they actually displayed, so attention that arrives while the request is in
-// flight stays unread. The caller must already have checked that userID owns
-// the session.
-func (s *Service) MarkRead(ctx context.Context, userID, sessionID string, through time.Time) (time.Time, error) {
+// ErrThroughRequired rejects a read without the attention time it covers.
+var ErrThroughRequired = errors.New("reading a session requires through")
+
+// SetReadState writes each change as the user's read or unread mark and
+// returns the sessions that are unread afterwards because this call marked
+// them. Sessions the user did not create, or that cannot carry unread state,
+// are skipped; nothing is rejected for them, so a stale client cannot wedge a
+// batch. Reads publish session_read and unread marks publish session_unread,
+// never session_attention, so marking something unread never notifies.
+func (s *Service) SetReadState(ctx context.Context, userID string, changes []ReadStateChange) ([]Attention, error) {
 	uid, err := db.ParseUUID(userID)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("parse user id: %w", err)
+		return nil, fmt.Errorf("parse user id: %w", err)
 	}
-	sid, err := db.ParseUUID(sessionID)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("parse session id: %w", err)
+	unread := make([]pgtype.UUID, 0, len(changes))
+	for _, change := range changes {
+		sid, err := db.ParseUUID(change.SessionID)
+		if err != nil {
+			return nil, fmt.Errorf("parse session id: %w", err)
+		}
+		if change.Unread {
+			unread = append(unread, sid)
+			continue
+		}
+		if change.Through.IsZero() {
+			return nil, ErrThroughRequired
+		}
+		readAt, err := s.queries.MarkSessionRead(ctx, dbsqlc.MarkSessionReadParams{
+			UserID:    uid,
+			SessionID: sid,
+			Through:   pgtype.Timestamptz{Time: change.Through, Valid: true},
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("mark session read: %w", err)
+		}
+		s.publish(userID, event.EventTypeSessionRead, Read{SessionID: sid.String(), ReadAt: readAt.Time})
 	}
-	readAt, err := s.queries.MarkSessionRead(ctx, dbsqlc.MarkSessionReadParams{
-		UserID:    uid,
-		SessionID: sid,
-		Through:   pgtype.Timestamptz{Time: through, Valid: true},
+	if len(unread) == 0 {
+		return []Attention{}, nil
+	}
+	rows, err := s.queries.MarkSessionsUnread(ctx, dbsqlc.MarkSessionsUnreadParams{
+		UserID:     uid,
+		SessionIds: unread,
+		At:         pgtype.Timestamptz{Time: s.now(), Valid: true},
 	})
 	if err != nil {
-		return time.Time{}, fmt.Errorf("mark session read: %w", err)
+		return nil, fmt.Errorf("mark sessions unread: %w", err)
 	}
-	s.publish(userID, event.EventTypeSessionRead, Read{SessionID: sid.String(), ReadAt: readAt.Time})
-	return readAt.Time, nil
+	out := make([]Attention, 0, len(rows))
+	for _, r := range rows {
+		item := Attention{
+			BotID:       r.BotID.String(),
+			SessionID:   r.SessionID.String(),
+			Title:       r.Title,
+			Kind:        Kind(r.AttentionKind),
+			At:          r.AttentionAt.Time,
+			ReadThrough: r.ReadThrough.Time,
+			Marked:      r.Marked,
+		}
+		out = append(out, item)
+		s.publish(userID, event.EventTypeSessionUnread, item)
+	}
+	return out, nil
 }
 
 // ListUnread returns the user's unread sessions across all bots, newest first.
@@ -152,11 +217,13 @@ func (s *Service) ListUnread(ctx context.Context, userID string) ([]Attention, e
 	out := make([]Attention, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, Attention{
-			BotID:     r.BotID.String(),
-			SessionID: r.SessionID.String(),
-			Title:     r.Title,
-			Kind:      Kind(r.AttentionKind.String),
-			At:        r.AttentionAt.Time,
+			BotID:       r.BotID.String(),
+			SessionID:   r.SessionID.String(),
+			Title:       r.Title,
+			Kind:        Kind(r.AttentionKind),
+			At:          r.AttentionAt.Time,
+			ReadThrough: r.ReadThrough.Time,
+			Marked:      r.Marked,
 		})
 	}
 	return out, nil
@@ -188,7 +255,7 @@ func (s *Service) Annotate(ctx context.Context, userID string, threads []thread.
 	for i := range threads {
 		if r, ok := byID[strings.TrimSpace(threads[i].ID)]; ok {
 			at := r.AttentionAt.Time
-			threads[i].AttentionKind = r.AttentionKind.String
+			threads[i].AttentionKind = r.AttentionKind
 			threads[i].AttentionAt = &at
 			threads[i].Unread = r.Unread
 		}
