@@ -2108,6 +2108,18 @@
     }
   },
   "webSearch": {
+    "test": {
+      "title": "测试搜索",
+      "query": "查询词",
+      "queryPlaceholder": "例如：Memoh 文档",
+      "savedConfig": "使用已保存的配置。修改后请先保存再测试。",
+      "saveFirst": "请先保存此服务商再测试。",
+      "queryRequired": "请输入查询词。",
+      "queryTooLong": "查询词不能超过 128 个字符。",
+      "run": "测试搜索",
+      "failed": "搜索测试失败。请检查已保存的配置后重试。",
+      "results": "结果（{count}）"
+    },
     "title": "网页搜索",
     "add": "添加",
     "addSearch": "添加搜索提供方",
@@ -2132,6 +2144,13 @@
     "selectHint": "请选择或新建一个搜索提供方",
     "unsupportedProvider": "该提供方暂未实现配置面板",
     "nativeManaged": "Native 由 Memoh 管理，并始终保持启用。",
+    "testFetchTitle": "抓取测试",
+    "testFetch": "测试抓取",
+    "testUrl": "URL",
+    "testSavedConfig": "使用已保存的配置。修改后需先保存再测试，服务商可能收取费用。",
+    "testSaveFirst": "需先保存提供方配置才能测试。",
+    "testSucceeded": "抓取内容",
+    "testFailed": "抓取测试失败，请检查已保存的配置后重试。",
     "saveSuccess": "搜索提供方配置已保存",
     "deleteSuccess": "搜索提供方配置已删除",
     "deleteFailed": "删除搜索提供方配置失败",
@@ -2159,7 +2178,8 @@
     "fetchProviderNames": {
       "native": "原生抓取",
       "jina": "Jina Reader",
-      "cloudflare_markdown": "Cloudflare Markdown"
+      "cloudflare_markdown": "Cloudflare Markdown",
+      "deepseek": "DeepSeek Fetch"
     }
   },
   "memory": {

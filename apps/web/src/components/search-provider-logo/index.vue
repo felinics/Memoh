@@ -20,6 +20,7 @@ import { Globe } from 'lucide-vue-next'
 import { computed, type Component } from 'vue'
 import {
   Brave,
+  DeepseekColor,
   Bing,
   BingColor,
   Google,
@@ -40,6 +41,7 @@ import {
 
 const searchIcons: Record<string, Component> = {
   brave: Brave,
+  deepseek: DeepseekColor,
   bing: BingColor,
   'bing-mono': Bing,
   google: GoogleColor,

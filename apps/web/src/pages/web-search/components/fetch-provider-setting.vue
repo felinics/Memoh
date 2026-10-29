@@ -89,6 +89,48 @@
             <template v-if="form.values.provider === 'jina'">
               <JinaReaderSettings v-model="configProxy" />
             </template>
+            <template v-else-if="form.values.provider === 'deepseek'">
+              <SettingsRow
+                :label="$t('provider.apiKey')"
+                stack="sm"
+              >
+                <Input
+                  id="deepseek-fetch-api-key"
+                  :model-value="String(configProxy.api_key ?? '')"
+                  type="password"
+                  class="w-full sm:w-80"
+                  :aria-label="$t('provider.apiKey')"
+                  @update:model-value="(value) => configProxy.api_key = value"
+                />
+              </SettingsRow>
+              <SettingsRow
+                :label="$t('common.baseUrl')"
+                stack="sm"
+              >
+                <Input
+                  id="deepseek-fetch-base-url"
+                  :model-value="String(configProxy.base_url ?? '')"
+                  placeholder="https://api.deepseek.com"
+                  class="w-full sm:w-80"
+                  :aria-label="$t('common.baseUrl')"
+                  @update:model-value="(value) => configProxy.base_url = value"
+                />
+              </SettingsRow>
+              <SettingsRow
+                :label="$t('common.timeoutSeconds')"
+                stack="sm"
+              >
+                <NumberField
+                  id="deepseek-fetch-timeout-seconds"
+                  :model-value="Number(configProxy.timeout_seconds ?? 30)"
+                  :min="1"
+                  class="w-full sm:w-40"
+                  :aria-label="$t('common.timeoutSeconds')"
+                  disable-wheel-change
+                  @update:model-value="(value) => configProxy.timeout_seconds = value"
+                />
+              </SettingsRow>
+            </template>
             <template v-else-if="form.values.provider === 'cloudflare_markdown'">
               <CloudflareMarkdownSettings v-model="configProxy" />
             </template>
@@ -115,6 +157,8 @@
           </LoadingButton>
         </template>
       </SettingsSection>
+
+      <FetchProviderTest :provider-id="curProviderId" />
     </div>
   </SettingsShell>
 </template>
@@ -123,12 +167,14 @@
 import ProviderIdentityCard from '@/components/provider-identity-card/index.vue'
 import {
   Input,
+  NumberField,
   Button,
   FormControl,
   FormField,
   Switch,
 } from '@felinic/ui'
 import LoadingButton from '@/components/loading-button/index.vue'
+import FetchProviderTest from './fetch-provider-test.vue'
 import JinaReaderSettings from './jina-reader-settings.vue'
 import CloudflareMarkdownSettings from './cloudflare-markdown-settings.vue'
 import { Trash2 } from 'lucide-vue-next'

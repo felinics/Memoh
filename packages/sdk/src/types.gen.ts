@@ -1645,7 +1645,11 @@ export type FetchprovidersProviderMeta = {
     provider?: string;
 };
 
-export type FetchprovidersProviderName = 'native' | 'jina' | 'cloudflare_markdown';
+export type FetchprovidersProviderName = 'native' | 'jina' | 'deepseek' | 'cloudflare_markdown';
+
+export type FetchprovidersTestRequest = {
+    url: string;
+};
 
 export type FetchprovidersUpdateRequest = {
     config?: {
@@ -4085,6 +4089,11 @@ export type SearchprovidersProviderMeta = {
 };
 
 export type SearchprovidersProviderName = 'brave' | 'bing' | 'google' | 'tavily' | 'sogou' | 'serper' | 'searxng' | 'jina' | 'exa' | 'bocha' | 'duckduckgo' | 'yandex';
+
+export type SearchprovidersTestRequest = {
+    count?: number;
+    query: string;
+};
 
 export type SearchprovidersUpdateRequest = {
     config?: {
@@ -14987,6 +14996,53 @@ export type PutFetchProvidersByIdResponses = {
 
 export type PutFetchProvidersByIdResponse = PutFetchProvidersByIdResponses[keyof PutFetchProvidersByIdResponses];
 
+export type PostFetchProvidersByIdTestData = {
+    /**
+     * URL to fetch
+     */
+    body: FetchprovidersTestRequest;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/fetch-providers/{id}/test';
+};
+
+export type PostFetchProvidersByIdTestErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ServerProblem;
+};
+
+export type PostFetchProvidersByIdTestError = PostFetchProvidersByIdTestErrors[keyof PostFetchProvidersByIdTestErrors];
+
+export type PostFetchProvidersByIdTestResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type PostFetchProvidersByIdTestResponse = PostFetchProvidersByIdTestResponses[keyof PostFetchProvidersByIdTestResponses];
+
 export type GetMemoryConfigData = {
     body?: never;
     path?: never;
@@ -16374,6 +16430,49 @@ export type PutSearchProvidersByIdResponses = {
 };
 
 export type PutSearchProvidersByIdResponse = PutSearchProvidersByIdResponses[keyof PutSearchProvidersByIdResponses];
+
+export type PostSearchProvidersByIdTestData = {
+    /**
+     * Search test query
+     */
+    body: SearchprovidersTestRequest;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/search-providers/{id}/test';
+};
+
+export type PostSearchProvidersByIdTestErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ServerProblem;
+};
+
+export type PostSearchProvidersByIdTestError = PostSearchProvidersByIdTestErrors[keyof PostSearchProvidersByIdTestErrors];
+
+export type PostSearchProvidersByIdTestResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type PostSearchProvidersByIdTestResponse = PostSearchProvidersByIdTestResponses[keyof PostSearchProvidersByIdTestResponses];
 
 export type GetSiteIconData = {
     body?: never;
