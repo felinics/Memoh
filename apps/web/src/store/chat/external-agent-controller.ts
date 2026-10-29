@@ -26,6 +26,7 @@ export function createExternalAgentController(deps: {
   draftCreationKey: (target: ChatViewTarget) => string
   draftSessionCreations: Set<string>
   stopSessionRuntime: (botId: string, sessionId: string) => void
+  releaseSessionRuntime: (botId: string, sessionId: string) => void
   clearHistoryView: () => void
   resetWorkspaceTargetSelection: (target: ChatViewTarget) => void
   upsertSession: (session: SessionSummary) => void
@@ -52,7 +53,7 @@ export function createExternalAgentController(deps: {
     clearTranscriptForDraft: () => {
       const botId = (deps.currentBotId.value ?? '').trim()
       const sessionId = (deps.sessionId.value ?? '').trim()
-      if (botId && sessionId) deps.stopSessionRuntime(botId, sessionId)
+      if (botId && sessionId) deps.releaseSessionRuntime(botId, sessionId)
       deps.clearHistoryView()
     },
   })
