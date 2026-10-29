@@ -12,6 +12,7 @@ const unread = reactive({
 })
 const motion = vi.hoisted(() => ({
   enterRow: vi.fn((_el: Element, done: () => void) => done()),
+  revealRow: vi.fn((_el: Element, done: () => void) => done()),
   leaveRow: vi.fn((_el: Element, done: () => void) => done()),
   flashRow: vi.fn(),
   popDot: vi.fn(),
@@ -101,6 +102,8 @@ describe('needs-you inbox', () => {
     more.click()
     await nextTick()
     expect(root.querySelectorAll('[data-slot="needs-you-row"]')).toHaveLength(7)
+    expect(motion.revealRow).toHaveBeenCalledTimes(2)
+    expect(motion.enterRow).not.toHaveBeenCalled()
     expect(motion.flashRow).not.toHaveBeenCalled()
     expect(motion.popDot).not.toHaveBeenCalled()
     app.unmount()

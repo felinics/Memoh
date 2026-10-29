@@ -42,7 +42,7 @@
             tag="ul"
             name="needs-you-row"
             class="flex flex-col"
-            @enter="enterRow"
+            @enter="enterListRow"
             @leave="leaveRow"
           >
             <li
@@ -64,7 +64,7 @@
             v-if="unread.total > LIMIT"
             class="mt-0.5 w-full justify-start px-1.5"
             :aria-expanded="expanded"
-            @click="expanded = !expanded"
+            @click="toggleExpanded"
           >
             {{ expanded ? t('notifications.showLess') : t('notifications.showAll', { count: unread.total }) }}
           </TextButton>
@@ -75,14 +75,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, useId, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, ref, useId, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useNow } from '@vueuse/core'
 import { BadgeCount, TextButton } from '@felinic/ui'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '@/store/chat-list'
 import { useUnreadStore, type UnreadEntry } from '@/store/unread'
-import { bounce, enterRow, leaveRow } from '@/utils/attention-motion'
+import { bounce, enterRow, leaveRow, revealRow } from '@/utils/attention-motion'
 import { sessionAttentionPath } from '@/utils/session-attention'
 import NeedsYouRow from './needs-you-row.vue'
 
@@ -119,6 +119,20 @@ function ago(at: string) {
   if (ms < 86_400_000) return unit(Math.floor(ms / 3_600_000), 'hour')
   if (ms < 604_800_000) return unit(Math.floor(ms / 86_400_000), 'day')
   return new Date(at).toLocaleDateString(locale.value, { month: 'numeric', day: 'numeric' })
+}
+
+let revealing = false
+
+/** Rows that appear because the user expanded the list open at collapse speed, not as arrivals. */
+function toggleExpanded() {
+  expanded.value = !expanded.value
+  revealing = expanded.value
+  void nextTick(() => { revealing = false })
+}
+
+function enterListRow(el: Element, done: () => void) {
+  if (revealing) revealRow(el, done)
+  else enterRow(el, done)
 }
 
 function openSession(entry: UnreadEntry) {

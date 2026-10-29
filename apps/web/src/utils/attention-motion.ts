@@ -35,7 +35,7 @@ function nextStagger() {
   return delay
 }
 
-/** Vue `@enter` hook: grow from zero height while dropping in. */
+/** Vue `@enter` hook for live arrivals: grow from zero height while dropping in, staggered. */
 export function enterRow(el: Element, done: () => void) {
   if (!canAnimate(el)) return done()
   const height = `${el.offsetHeight}px`
@@ -43,6 +43,20 @@ export function enterRow(el: Element, done: () => void) {
     { height: '0px', opacity: 0, translate: `0 ${DROP}` },
     { height, opacity: 1, translate: '0 0' },
   ], { duration: ENTER_MS, delay: nextStagger(), easing: EASE, fill: 'backwards' })
+  void animation.finished.then(done, done)
+}
+
+/**
+ * Rows the user reveals (expanding the list) open together at the collapse speed, as the
+ * mirror of collapsing. The slower, staggered entrance is reserved for live arrivals.
+ */
+export function revealRow(el: Element, done: () => void) {
+  if (!canAnimate(el)) return done()
+  const height = `${el.offsetHeight}px`
+  const animation = el.animate([
+    { height: '0px', opacity: 0, translate: '0 -0.3125rem' },
+    { height, opacity: 1, translate: '0 0' },
+  ], { duration: LEAVE_MS, easing: EASE, fill: 'backwards' })
   void animation.finished.then(done, done)
 }
 
