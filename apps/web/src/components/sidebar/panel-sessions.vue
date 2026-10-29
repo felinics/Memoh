@@ -71,8 +71,6 @@
     the 24px visual disc via absolute -inset-[3px]; icon center x=28, text x=48.
     -->
 
-    <SessionSelectionBar />
-
     <!-- Folders is a SIBLING section of Recents: folders of workdir-bound
          chats above, the ungrouped timeline below — and both live in ONE
          scrollport owned here. Each section used to scroll itself, which
@@ -89,9 +87,15 @@
       :scroll-hide-delay="300"
     >
       <NeedsYouInbox />
-      <FoldersSection />
-
-      <Recents :scroll-el="listScrollEl" />
+      <!-- Selection covers Folders and Recents only; the Needs you card above has
+           no checkboxes, so the bar opens this group instead of the scrollport.
+           It sticks to the top while the group scrolls, keeping Delete and Cancel
+           in reach, and never rides over the card. -->
+      <div>
+        <SessionSelectionBar />
+        <FoldersSection />
+        <Recents :scroll-el="listScrollEl" />
+      </div>
     </ScrollArea>
   </div>
 </template>
