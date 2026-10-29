@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/chat/attention"
 	messageevent "github.com/felinics/memoh/internal/chat/event"
@@ -135,11 +135,7 @@ func TestSetReadStateRequiresThroughToRead(t *testing.T) {
 	h, _, svc := attentionTestHandler(attentionOwnerID)
 	svc.err = attention.ErrThroughRequired
 	c, _ := readStateRequest(attentionOwnerID, `{"items":[{"session_id":"`+activityTestSessionID+`","unread":false}]}`)
-	err := h.SetReadState(c)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("SetReadState err = %v, want 400", err)
-	}
+	requireFieldError(t, h.SetReadState(c), apperror.CodeRequestFieldRequired, "through")
 }
 
 func TestUnreadListDropsBotsWithoutAccess(t *testing.T) {

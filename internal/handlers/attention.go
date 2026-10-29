@@ -76,7 +76,7 @@ func (h *MessageHandler) SetReadState(c echo.Context) error {
 	}
 	items, err := h.attention.SetReadState(c.Request().Context(), userID, req.Items)
 	if errors.Is(err, attention.ErrThroughRequired) {
-		return echo.NewHTTPError(http.StatusBadRequest, "reading a session requires through")
+		return apperror.FieldRequired("through")
 	}
 	if err != nil {
 		return errs.Wrap(err, "set read state")
