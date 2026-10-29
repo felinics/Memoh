@@ -31,7 +31,7 @@ func TestPrepareHistoryContextStopsWhenTheRequestEnds(t *testing.T) {
 
 	ctx, expire := context.WithCancelCause(t.Context())
 	defer expire(nil)
-	messages := &expiringHistoryMessageService{recordingMessageService: &recordingMessageService{}, rows: goldenHistoryRows(t), expire: expire}
+	messages := &expiringHistoryMessageService{recordingMessageService: &recordingMessageService{}, rows: []messagepkg.Message{persistedHistoryMessage(t, "row-1", "user", "hello")}, expire: expire}
 	svc := &Service{messageService: messages}
 
 	_, err := svc.prepareHistoryContext(ctx, ChatRequest{BotID: "bot-1", ThreadID: "session-1"}, historyfrag.ScopeFallback{}, 100000)
