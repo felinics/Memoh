@@ -46,7 +46,7 @@
               >
                 <BadgeCount
                   :count="unread.total"
-                  variant="destructive"
+                  :variant="countVariant"
                   aria-hidden="true"
                 />
               </span>
@@ -134,7 +134,7 @@ import { useRouter } from 'vue-router'
 import { useChatStore } from '@/store/chat-list'
 import { useUnreadStore, type UnreadEntry } from '@/store/unread'
 import { bounce, enterRow, leaveRow, revealRow } from '@/utils/attention-motion'
-import { sessionAttentionPath } from '@/utils/session-attention'
+import { attentionBadgeVariant, sessionAttentionPath } from '@/utils/session-attention'
 import NeedsYouRow from './needs-you-row.vue'
 
 const LIMIT = 5
@@ -150,6 +150,8 @@ const collapsed = useLocalStorage('memoh-needs-you-collapsed', false)
 const expanded = ref(false)
 const count = useTemplateRef('count')
 const now = useNow({ interval: 30_000 })
+/** The count speaks for every unread session, folded or not, so a failure past the fifth row still turns it red. */
+const countVariant = computed(() => attentionBadgeVariant(unread.inbox.map(entry => entry.kind)))
 const visibleEntries = computed(() => expanded.value ? unread.inbox : unread.inbox.slice(0, LIMIT))
 watch(() => unread.total, (total) => { if (total <= LIMIT) expanded.value = false })
 /** The count bumps when it changes while the card is already showing, not when it appears. */

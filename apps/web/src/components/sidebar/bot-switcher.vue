@@ -125,7 +125,7 @@
           <BadgeCount
             v-if="bot.id && unread.countByBot[bot.id]"
             :count="unread.countByBot[bot.id] ?? 0"
-            variant="destructive"
+            :variant="botCountVariant(bot.id)"
           />
         </div>
       </div>
@@ -188,6 +188,7 @@ import {
 import { Check, ChevronsUpDown, GripVertical, Plus, Settings2 } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat-list'
 import { useUnreadStore } from '@/store/unread'
+import { attentionBadgeVariant, mostUrgentKind } from '@/utils/session-attention'
 import AttentionDot from './attention-dot.vue'
 import { firstAvatarCharacter } from '@/composables/useAvatarInitials'
 import { usePinnedBots } from '@/composables/usePinnedBots'
@@ -199,12 +200,11 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
 const unread = useUnreadStore()
-/** Elsewhere is yellow when any other bot is blocked on the user, red otherwise; the newest arrival drives the pop. */
+/** The dot for other bots speaks for their most urgent unread; the newest arrival drives the pop. */
 const otherBotEntries = computed(() => unread.inbox.filter(entry => entry.botId !== currentBotId.value))
-const otherBotKind = computed(() => {
-  if (!otherBotEntries.value.length) return null
-  return otherBotEntries.value.some(entry => entry.kind === 'needs_input') ? 'needs_input' : 'reply'
-})
+const otherBotKind = computed(() => mostUrgentKind(otherBotEntries.value.map(entry => entry.kind)))
+/** Per-bot count tone in the menu, by that bot's most urgent unread. */
+const botCountVariant = (botId: string) => attentionBadgeVariant(unread.inbox.filter(entry => entry.botId === botId).map(entry => entry.kind))
 const otherBotNewest = computed(() => otherBotEntries.value[0])
 const { sortBots } = usePinnedBots()
 

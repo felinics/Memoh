@@ -1390,16 +1390,20 @@
 }
 
 /* Unread attention (attention-dot.vue, needs-you-*.vue). Kind is carried by
- * data-kind so the color has one home: red for something to read or a failure,
- * yellow for "the agent is blocked on you". Arrival motion is played from JS
+ * data-kind so the color has one home, ranked by urgency: red for a failure,
+ * yellow for "the agent is blocked on you", the scheme's brand for a plain reply
+ * or a manual mark (BadgeCount's destructive / warning / brand tones match). Arrival motion is played from JS
  * (utils/attention-motion.ts) only for attention that just arrived live, so
  * nothing here animates on mount. */
 @layer components {
   [data-slot="attention-dot"] {
-    background-color: var(--accent-red-fill);
+    background-color: var(--brand);
   }
   [data-slot="attention-dot"][data-kind="needs_input"] {
-    background-color: var(--accent-yellow);
+    background-color: var(--warning);
+  }
+  [data-slot="attention-dot"][data-kind="failed"] {
+    background-color: var(--accent-red-fill);
   }
   [data-slot="attention-dot"][data-cutout] {
     box-shadow: 0 0 0 2px var(--sidebar);
@@ -1442,10 +1446,13 @@
     border-radius: inherit;
     pointer-events: none;
     opacity: 0;
-    background-color: color-mix(in oklab, var(--accent-red-fill) 16%, transparent);
+    background-color: color-mix(in oklab, var(--brand) 16%, transparent);
   }
   [data-slot="needs-you-row-flash"][data-kind="needs_input"] {
-    background-color: color-mix(in oklab, var(--accent-yellow) 16%, transparent);
+    background-color: color-mix(in oklab, var(--warning) 16%, transparent);
+  }
+  [data-slot="needs-you-row-flash"][data-kind="failed"] {
+    background-color: color-mix(in oklab, var(--accent-red-fill) 16%, transparent);
   }
 
   /* A row that jumps to the top on a newer attention glides there (FLIP). */

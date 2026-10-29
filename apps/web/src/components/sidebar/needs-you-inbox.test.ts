@@ -32,7 +32,7 @@ vi.mock('@felinic/ui', () => {
     Avatar: tag('span'),
     AvatarImage: tag('img'),
     AvatarFallback: tag('span'),
-    BadgeCount: defineComponent({ props: { count: Number }, setup: props => () => h('span', String(props.count)) }),
+    BadgeCount: defineComponent({ props: { count: Number, variant: String }, setup: props => () => h('span', { 'data-test': 'count', 'data-variant': props.variant }, String(props.count)) }),
     TextButton: tag('button'),
     Button: tag('button'),
     toast,
@@ -96,6 +96,21 @@ describe('needs-you inbox', () => {
     more!.click()
     await nextTick()
     expect(root.querySelectorAll('[data-slot="needs-you-row"]')).toHaveLength(6)
+    app.unmount()
+  })
+
+  it('colors the count by the most urgent unread, including rows past the fold', async () => {
+    unread.inbox = entries(7)
+    unread.total = 7
+    const { root, app } = mount()
+    const count = () => root.querySelector('[data-test="count"]')?.getAttribute('data-variant')
+    expect(count()).toBe('warning')
+    unread.inbox = [...unread.inbox.slice(0, 6), { ...unread.inbox[6]!, kind: 'failed' }]
+    await nextTick()
+    expect(count()).toBe('destructive')
+    unread.inbox = unread.inbox.map(entry => ({ ...entry, kind: 'reply' }))
+    await nextTick()
+    expect(count()).toBe('brand')
     app.unmount()
   })
 
