@@ -128,7 +128,7 @@ func TestNormalizedContextPrefixLengthTracksSanitizedHistory(t *testing.T) {
 		{Role: "user", Content: newTextContent("valid history")},
 		{Role: "user", Content: newTextContent("pinned tail")},
 	}
-	if got := normalizedContextPrefixLength(messages, 2); got != 1 {
+	if got := normalizeContext(messages).prefixLength(2); got != 1 {
 		t.Fatalf("normalized prefix = %d, want 1", got)
 	}
 }

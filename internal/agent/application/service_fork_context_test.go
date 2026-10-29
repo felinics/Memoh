@@ -8,20 +8,8 @@ import (
 
 func TestHistorySourceMessageIDsFollowRetainedDatabaseMessages(t *testing.T) {
 	records := []historyfrag.HistoryRecord{
-		{
-			DBMessageID: "00000000-0000-0000-0000-000000000001",
-			ModelMessage: ModelMessage{
-				Role:    "user",
-				Content: newTextContent("first"),
-			},
-		},
-		{
-			DBMessageID: "00000000-0000-0000-0000-000000000002",
-			ModelMessage: ModelMessage{
-				Role:    "assistant",
-				Content: newTextContent("second"),
-			},
-		},
+		loadedRecord("00000000-0000-0000-0000-000000000001", ModelMessage{Role: "user", Content: newTextContent("first")}),
+		loadedRecord("00000000-0000-0000-0000-000000000002", ModelMessage{Role: "assistant", Content: newTextContent("second")}),
 	}
 	messages := []ModelMessage{
 		{Role: "system", Content: newTextContent("runtime workspace context")},

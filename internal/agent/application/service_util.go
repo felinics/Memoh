@@ -16,19 +16,27 @@ import (
 func sanitizeMessages(messages []ModelMessage) []ModelMessage {
 	cleaned := make([]ModelMessage, 0, len(messages))
 	for _, msg := range messages {
-		msg = normalizeUserMessageContent(msg)
-		if normalized, ok := normalizeImagePartsToDataURL(msg); ok {
-			msg = normalized
+		if msg, ok := sanitizeMessage(msg); ok {
+			cleaned = append(cleaned, msg)
 		}
-		if strings.TrimSpace(msg.Role) == "" {
-			continue
-		}
-		if !msg.HasContent() && strings.TrimSpace(msg.ToolCallID) == "" {
-			continue
-		}
-		cleaned = append(cleaned, msg)
 	}
 	return cleaned
+}
+
+// sanitizeMessage normalizes legacy image content and reports whether the
+// message is worth sending at all.
+func sanitizeMessage(msg ModelMessage) (ModelMessage, bool) {
+	msg = normalizeUserMessageContent(msg)
+	if normalized, ok := normalizeImagePartsToDataURL(msg); ok {
+		msg = normalized
+	}
+	if strings.TrimSpace(msg.Role) == "" {
+		return msg, false
+	}
+	if !msg.HasContent() && strings.TrimSpace(msg.ToolCallID) == "" {
+		return msg, false
+	}
+	return msg, true
 }
 
 func normalizeImagePartsToDataURL(msg ModelMessage) (ModelMessage, bool) {
