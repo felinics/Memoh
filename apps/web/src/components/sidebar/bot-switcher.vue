@@ -41,7 +41,8 @@
           >
             <AttentionDot
               :kind="otherBotKind"
-              :pulse-key="otherBotPulse"
+              :session-id="otherBotNewest?.sessionId"
+              :attention-at="otherBotNewest?.attentionAt"
               cutout
             />
           </span>
@@ -198,13 +199,13 @@ const { t } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId } = storeToRefs(chatStore)
 const unread = useUnreadStore()
-/** Elsewhere is yellow when any other bot is blocked on the user, red otherwise; the newest arrival replays the pulse. */
+/** Elsewhere is yellow when any other bot is blocked on the user, red otherwise; the newest arrival drives the pop. */
 const otherBotEntries = computed(() => unread.inbox.filter(entry => entry.botId !== currentBotId.value))
 const otherBotKind = computed(() => {
   if (!otherBotEntries.value.length) return null
   return otherBotEntries.value.some(entry => entry.kind === 'needs_input') ? 'needs_input' : 'reply'
 })
-const otherBotPulse = computed(() => otherBotEntries.value[0]?.attentionAt)
+const otherBotNewest = computed(() => otherBotEntries.value[0])
 const { sortBots } = usePinnedBots()
 
 // Full-width shape for web / Windows (no traffic lights); mac desktop passes

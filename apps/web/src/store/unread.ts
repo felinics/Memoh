@@ -12,6 +12,9 @@ import { useRetryingStream } from '@/composables/useRetryingStream'
 
 export type { AttentionKind } from '@/composables/api/attention-api'
 
+/** How long after a live arrival a newly rendered mark still plays its arrival motion. */
+const FRESH_ATTENTION_MS = 2000
+
 export interface UnreadEntry {
   sessionId: string
   botId: string
@@ -50,6 +53,7 @@ export const useUnreadStore = defineStore('unread', () => {
   const reads = new Map<string, number>()
   const reading = new Map<string, Promise<void>>()
   let running = false
+  const arrivals = new Map<string, number>()
 
   const total = computed(() => Object.keys(entries.value).length)
   const countByBot = computed(() => {
@@ -131,6 +135,9 @@ export const useUnreadStore = defineStore('unread', () => {
         const at = Date.parse(entry.attentionAt)
         if (at <= Math.max(seen.get(entry.sessionId) ?? 0, reads.get(entry.sessionId) ?? 0)) return
         seen.set(entry.sessionId, at)
+        const arrivedAt = Date.now()
+        for (const [key, time] of arrivals) if (arrivedAt - time >= FRESH_ATTENTION_MS) arrivals.delete(key)
+        arrivals.set(`${entry.sessionId}@${entry.attentionAt}`, arrivedAt)
         put(entry)
         for (const listener of listeners) listener(entry)
         return
@@ -164,6 +171,16 @@ export const useUnreadStore = defineStore('unread', () => {
     seen.clear()
     reads.clear()
     reading.clear()
+    arrivals.clear()
+  }
+
+  /**
+   * Whether this attention arrived live a moment ago. Arrival motion keys off this,
+   * not off mounting, so expanding a list, reloading or switching bots never replays it.
+   */
+  function isFresh(sessionId: string, attentionAt: string) {
+    const arrived = arrivals.get(`${sessionId}@${attentionAt}`)
+    return arrived !== undefined && Date.now() - arrived < FRESH_ATTENTION_MS
   }
 
   /** Coalesce viewers of the same session; a newer attention is read by the next watcher pass. */
@@ -192,5 +209,5 @@ export const useUnreadStore = defineStore('unread', () => {
     return () => listeners.delete(listener)
   }
 
-  return { entries, total, countByBot, inbox, isUnread, kindOf, start, stop, reset, markRead, onAttention }
+  return { entries, total, countByBot, inbox, isUnread, kindOf, isFresh, start, stop, reset, markRead, onAttention }
 })

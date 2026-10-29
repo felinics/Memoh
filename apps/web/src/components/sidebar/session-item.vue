@@ -120,7 +120,8 @@
             >
               <AttentionDot
                 :kind="unread.kindOf(session.id) ?? 'reply'"
-                :pulse-key="unread.entries[session.id]?.attentionAt"
+                :session-id="session.id"
+                :attention-at="unread.entries[session.id]?.attentionAt"
               />
             </div>
 

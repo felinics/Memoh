@@ -1389,14 +1389,14 @@
   }
 }
 
-/* Unread attention (attention-dot.vue, needs-you-inbox.vue). Kind is carried by
+/* Unread attention (attention-dot.vue, needs-you-*.vue). Kind is carried by
  * data-kind so the color has one home: red for something to read or a failure,
- * yellow for "the agent is blocked on you". The dot arrives with a spring pop and
- * ONE expanding halo — enough to be noticed, never a perpetual blink. */
+ * yellow for "the agent is blocked on you". Arrival motion is played from JS
+ * (utils/attention-motion.ts) only for attention that just arrived live, so
+ * nothing here animates on mount. */
 @layer components {
   [data-slot="attention-dot"] {
     background-color: var(--accent-red-fill);
-    animation: attention-dot-pop 0.36s linear(0, 0.42, 0.86, 1.1, 1.13, 1.06, 0.99, 0.98, 1) both;
   }
   [data-slot="attention-dot"][data-kind="needs_input"] {
     background-color: var(--accent-yellow);
@@ -1411,7 +1411,6 @@
     border-radius: inherit;
     background-color: inherit;
     opacity: 0;
-    animation: attention-dot-halo 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.12s both;
   }
 
   /* Inbox card: one raised surface (card fill + hairline), rows inset by 4px so
@@ -1436,52 +1435,26 @@
     outline-offset: -2px;
   }
 
-  /* Card and rows reveal through a 0fr↔1fr grid track, so height, opacity and a
-   * small drop move together on the house spring instead of popping or stacking
-   * a fade before a collapse. */
-  .needs-you-reveal {
-    display: grid;
-    grid-template-rows: 1fr;
-  }
-  .needs-you-reveal > * {
-    min-height: 0;
-    overflow: hidden;
-  }
-  :is(.needs-you-card-enter-active, .needs-you-card-leave-active, .needs-you-row-enter-active, .needs-you-row-leave-active) {
-    transition:
-      grid-template-rows 0.26s cubic-bezier(0.32, 0.72, 0, 1),
-      opacity 0.2s ease,
-      translate 0.26s cubic-bezier(0.32, 0.72, 0, 1);
-  }
-  :is(.needs-you-card-leave-active, .needs-you-row-leave-active) {
-    transition-duration: 0.2s, 0.14s, 0.2s;
-  }
-  :is(.needs-you-card-enter-from, .needs-you-card-leave-to, .needs-you-row-enter-from, .needs-you-row-leave-to) {
-    grid-template-rows: 0fr;
+  /* Arrival tint, faded out once by flashRow(); invisible at rest. */
+  [data-slot="needs-you-row-flash"] {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
     opacity: 0;
-    translate: 0 -0.25rem;
+    background-color: color-mix(in oklab, var(--accent-red-fill) 16%, transparent);
   }
-  .needs-you-row-move {
-    transition: transform 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+  [data-slot="needs-you-row-flash"][data-kind="needs_input"] {
+    background-color: color-mix(in oklab, var(--accent-yellow) 16%, transparent);
   }
 
+  /* A row that jumps to the top on a newer attention glides there (FLIP). */
+  .needs-you-row-move {
+    transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+  }
   @media (prefers-reduced-motion: reduce) {
-    [data-slot="attention-dot"],
-    [data-slot="attention-dot"]::after {
-      animation: none;
-    }
-    :is(.needs-you-card-enter-active, .needs-you-card-leave-active, .needs-you-row-enter-active, .needs-you-row-leave-active, .needs-you-row-move) {
+    .needs-you-row-move {
       transition: none;
     }
   }
-}
-
-@keyframes attention-dot-pop {
-  from { scale: 0.2; }
-  to { scale: 1; }
-}
-
-@keyframes attention-dot-halo {
-  from { opacity: 0.5; scale: 1; }
-  to { opacity: 0; scale: 3; }
 }

@@ -197,4 +197,27 @@ describe('unread store', () => {
     expect(live).toHaveBeenCalledTimes(1)
     expect(store.inbox[0]?.attentionAt).toBe(reply.attention_at)
   })
+
+  it('treats only a just-arrived live attention as fresh', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-10-29T08:00:00Z'))
+      api.fetchUnreadSessions.mockResolvedValue([{ ...reply, session_id: 's0' }])
+      const stream = captureStream()
+      const store = useUnreadStore()
+      store.start()
+      await flush()
+      stream.emit({ type: 'session_attention', ...reply })
+
+      expect(store.isFresh('s0', reply.attention_at)).toBe(false)
+      expect(store.isFresh('s1', reply.attention_at)).toBe(true)
+      expect(store.isFresh('s1', '2026-10-16T07:00:00Z')).toBe(false)
+
+      vi.setSystemTime(new Date('2026-10-29T08:00:05Z'))
+      expect(store.isFresh('s1', reply.attention_at)).toBe(false)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
 })

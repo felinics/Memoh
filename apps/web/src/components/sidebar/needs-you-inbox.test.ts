@@ -4,7 +4,20 @@ import { createApp, defineComponent, h, nextTick, reactive } from 'vue'
 import NeedsYouInbox from './needs-you-inbox.vue'
 
 const push = vi.fn()
-const unread = reactive({ total: 0, inbox: [] as Array<{ sessionId: string, botId: string, title: string, kind: string, attentionAt: string }> })
+const fresh = new Set<string>()
+const unread = reactive({
+  total: 0,
+  inbox: [] as Array<{ sessionId: string, botId: string, title: string, kind: string, attentionAt: string }>,
+  isFresh: (sessionId: string, attentionAt: string) => fresh.has(`${sessionId}@${attentionAt}`),
+})
+const motion = vi.hoisted(() => ({
+  enterRow: vi.fn((_el: Element, done: () => void) => done()),
+  leaveRow: vi.fn((_el: Element, done: () => void) => done()),
+  flashRow: vi.fn(),
+  popDot: vi.fn(),
+  bounce: vi.fn(),
+}))
+vi.mock('@/utils/attention-motion', () => motion)
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string, args?: { count?: number }) => args?.count ? `${key}(${args.count})` : key, locale: { value: 'en' } }),
@@ -43,7 +56,9 @@ function mount() {
 afterEach(() => {
   unread.total = 0
   unread.inbox = []
+  fresh.clear()
   push.mockClear()
+  Object.values(motion).forEach(fn => fn.mockClear())
 })
 
 describe('needs-you inbox', () => {
@@ -75,6 +90,39 @@ describe('needs-you inbox', () => {
     expect(first.querySelector('[data-slot="attention-dot"]')?.getAttribute('data-kind')).toBe('needs_input')
     first.click()
     expect(push).toHaveBeenCalledWith('/bot/b1?session=s0')
+    app.unmount()
+  })
+
+  it('does not replay the arrival highlight when expanding older rows', async () => {
+    unread.inbox = entries(7)
+    unread.total = 7
+    const { root, app } = mount()
+    const more = [...root.querySelectorAll('button')].find(button => button.textContent?.includes('notifications.showAll(7)'))!
+    more.click()
+    await nextTick()
+    expect(root.querySelectorAll('[data-slot="needs-you-row"]')).toHaveLength(7)
+    expect(motion.flashRow).not.toHaveBeenCalled()
+    expect(motion.popDot).not.toHaveBeenCalled()
+    app.unmount()
+  })
+
+  it('highlights a row only when its attention just arrived', async () => {
+    unread.inbox = entries(2)
+    unread.total = 2
+    const { app } = mount()
+    expect(motion.flashRow).not.toHaveBeenCalled()
+
+    const arrived = { sessionId: 'new', botId: 'b1', title: 'New', kind: 'reply', attentionAt: new Date().toISOString() }
+    fresh.add(`new@${arrived.attentionAt}`)
+    unread.inbox = [arrived, ...unread.inbox]
+    unread.total = 3
+    await nextTick()
+    await nextTick()
+
+    expect(motion.flashRow).toHaveBeenCalledTimes(1)
+    const flashed = motion.flashRow.mock.calls[0]![0] as HTMLElement
+    expect(flashed.closest('[data-slot="needs-you-row"]')?.getAttribute('aria-label')).toContain('New')
+    expect(motion.popDot).toHaveBeenCalledTimes(1)
     app.unmount()
   })
 })
