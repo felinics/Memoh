@@ -9,6 +9,7 @@ import (
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 type preparedHistoryContext struct {
@@ -73,6 +74,9 @@ func (s *Service) prepareHistoryWindow(
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
+	if err := interruptedPreparation(ctx, "fold compacted history"); err != nil {
+		return preparedHistoryContext{}, err
+	}
 	loaded = projectInterruptedHistoryReasoning(loaded)
 	messages, records := historyMessagesFromRecords(loaded)
 	return preparedHistoryContext{
@@ -80,6 +84,17 @@ func (s *Service) prepareHistoryWindow(
 		records:        records,
 		pressureTokens: estimateMessagesTokens(loaded),
 	}, nil
+}
+
+// interruptedPreparation reports a request whose context ended while it was
+// being prepared, naming the step it was in. Preparation between database
+// calls is CPU-bound and never sees ctx otherwise, so a turn past its budget
+// would keep assembling a request nobody sends.
+func interruptedPreparation(ctx context.Context, step string) error {
+	if ctx.Err() == nil {
+		return nil
+	}
+	return errs.WrapWithDepth(1, context.Cause(ctx), step)
 }
 
 func historyErrorCode(meta map[string]any) string {

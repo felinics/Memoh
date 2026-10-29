@@ -576,6 +576,9 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		messages = append(messages, reqMessages...)
 	}
 	normalized := normalizeContext(messages)
+	if err := interruptedPreparation(ctx, "normalize context messages"); err != nil {
+		return resolvedContext{}, req, err
+	}
 	forkMessageCount := normalized.prefixLength(forkInputCount)
 	trimmableMessages := normalized.prefixLength(historyMessageCount)
 	currentMessageIndex = normalized.index(currentMessageIndex)
@@ -634,6 +637,9 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	runCfg.InlineAttachments = extractNativeAttachmentParts(mergedAttachments)
 	runCfg.ContextScope = buildContextFragScope(req, displayName, runCfg.Identity)
 	runCfg = runCfg.RefreshContextFrag()
+	if err := interruptedPreparation(ctx, "compile context"); err != nil {
+		return resolvedContext{}, req, err
+	}
 	historyLayout := chatHistoryLayout{forkCount: min(forkMessageCount, runCfg.ContextTrimmableMessages), historyCount: runCfg.ContextTrimmableMessages, pressureTokens: historyPressureTokens, usePipeline: usePipeline}
 	if index := runCfg.ContextCurrentUserMessageIndex; index != nil && *index >= historyLayout.forkCount && *index < historyLayout.historyCount {
 		historyLayout.pressureTokens = max(0, historyLayout.pressureTokens-estimateMessageTokens(messages[*index]))
