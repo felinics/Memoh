@@ -12,7 +12,6 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
-	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
@@ -400,15 +399,14 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 }
 
 // stepProvenance carries the request and queue claim's explicit input IDs.
+// It names rows without a version: the step wrote them and never read them
+// back, and a version hash covers the stored bytes, which PostgreSQL returns
+// re-encoded. A fold that reads them back still checks claim and coverage.
 func stepProvenance(rows []messagepkg.Message, inputs []string) []native.MessageProvenance {
 	provenance := make([]native.MessageProvenance, len(rows))
 	for i, row := range rows {
-		source := turn.ContextMessageSource{Kind: "history", ID: row.ID}
-		if len(row.Content) > 0 {
-			source.ContentHash = historyfrag.MessageContentHash(historyfrag.DecodeStoredModelMessage(nil, row.ID, row.Role, row.Content))
-		}
 		provenance[i] = native.MessageProvenance{
-			Sources: []turn.ContextMessageSource{source},
+			Sources: []turn.ContextMessageSource{{Kind: "history", ID: row.ID}},
 			Anchor:  slices.Contains(inputs, row.ID),
 		}
 	}

@@ -118,13 +118,13 @@ func TestContextProvenanceNamesWhatEachMessageRenders(t *testing.T) {
 		}
 	}
 	if !reflect.DeepEqual(stepProvenance([]messagepkg.Message{
-		{ID: "steer", Role: "user"}, {ID: "feedback", Role: "user", Metadata: map[string]any{messagepkg.MessageSourceMetadataKey: messagepkg.MessageSourceInternalFeedback}}, {ID: "call", Role: "assistant"},
+		{ID: "steer", Role: "user"}, {ID: "feedback", Role: "user", Metadata: map[string]any{messagepkg.MessageSourceMetadataKey: messagepkg.MessageSourceInternalFeedback}}, {ID: "call", Role: "assistant", Content: []byte(`{"role":"assistant","content":"<call>"}`)},
 	}, []string{"steer"}), []native.MessageProvenance{
 		{Sources: []turn.ContextMessageSource{{Kind: "history", ID: "steer"}}, Anchor: true},
 		{Sources: []turn.ContextMessageSource{{Kind: "history", ID: "feedback"}}},
 		{Sources: []turn.ContextMessageSource{{Kind: "history", ID: "call"}}},
 	}) {
-		t.Fatal("a step's steer is kept in place; its runtime feedback and output are not")
+		t.Fatal("a step's steer is kept in place, its runtime feedback and output are not, and none pins a version it never read back")
 	}
 }
 
