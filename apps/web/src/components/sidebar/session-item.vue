@@ -157,6 +157,13 @@
                   <Pencil />
                   {{ t('common.rename') }}
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  v-if="canToggleRead"
+                  @select="toggleRead"
+                >
+                  <component :is="isUnread ? MailOpen : Mail" />
+                  {{ isUnread ? t('notifications.markRead') : t('notifications.markUnread') }}
+                </DropdownMenuItem>
                 <DropdownMenuItem @select="startSelection">
                   <ListChecks />
                   {{ t('chat.selectSessions') }}
@@ -191,6 +198,13 @@
         <Pencil />
         {{ t('common.rename') }}
       </ContextMenuItem>
+      <ContextMenuItem
+        v-if="canToggleRead"
+        @select="toggleRead"
+      >
+        <component :is="isUnread ? MailOpen : Mail" />
+        {{ isUnread ? t('notifications.markRead') : t('notifications.markUnread') }}
+      </ContextMenuItem>
       <ContextMenuItem @select="startSelection">
         <ListChecks />
         {{ t('chat.selectSessions') }}
@@ -209,7 +223,7 @@
 <script setup lang="ts">
 import { externalAgentDisplayName, externalAgentIcon } from '@/utils/external-agent'
 import { computed, inject, ref } from 'vue'
-import { Clock, ListChecks, LoaderCircle, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
+import { Clock, ListChecks, LoaderCircle, Mail, MailOpen, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { OpenInTabIcon } from '@memohai/icon/ui'
 import type { SessionSummary } from '@/composables/api/useChat'
@@ -224,6 +238,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  toast,
 } from '@felinic/ui'
 import { sessionAgentProvider } from '@/utils/bot-agent'
 import { splitScriptRuns } from '@/utils/script-runs'
@@ -231,6 +246,8 @@ import { isAgentRuntimeType, normalizedRuntimeType, normalizedSessionMode, route
 import MarqueeText from './marquee-text.vue'
 import { SessionSelectionKey } from './session-selection'
 import { useUnreadStore } from '@/store/unread'
+import { useUserStore } from '@/store/user'
+import { canHoldUnread } from '@/utils/session-attention'
 import AttentionDot from './attention-dot.vue'
 
 const props = defineProps<{
@@ -248,6 +265,20 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const unread = useUnreadStore()
+const user = useUserStore()
+const isUnread = computed(() => unread.isUnread(props.session.id))
+const canToggleRead = computed(() => canHoldUnread(props.session, user.userInfo.id))
+
+/** Two sides of one switch: reading clears the dot, marking unread brings it back for later. */
+async function toggleRead() {
+  if (isUnread.value) return unread.markRead(props.session.id)
+  try {
+    await unread.markUnread([props.session.id])
+  }
+  catch {
+    toast.error(t('notifications.updateFailed'))
+  }
+}
 
 const injectedSelection = inject(SessionSelectionKey)
 if (!injectedSelection) throw new Error('SessionItem must be used within the sessions panel')

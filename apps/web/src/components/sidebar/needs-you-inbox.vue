@@ -19,55 +19,105 @@
           class="p-1"
           :aria-labelledby="headingId"
         >
-          <header class="flex h-7 items-center gap-1.5 px-1.5">
-            <h2
-              :id="headingId"
-              class="text-xs font-[550] tracking-[-0.02em] text-muted-foreground"
+          <!-- Header follows the sidebar section-header contract (group-header.vue):
+               the whole row folds the list, the chevron is revealed on hover or
+               keyboard focus. The trailing × reads everything, behind a confirm. -->
+          <div class="group/needs-you-header flex h-7 items-center">
+            <div
+              data-slot="needs-you-header"
+              role="button"
+              tabindex="0"
+              class="flex h-full min-w-0 flex-1 cursor-pointer select-none items-center gap-1.5 rounded-md pl-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              :aria-expanded="!collapsed"
+              :aria-controls="listId"
+              @click="collapsed = !collapsed"
+              @keydown.enter.exact.prevent="collapsed = !collapsed"
+              @keydown.space.prevent="collapsed = !collapsed"
             >
-              {{ t('notifications.inbox') }}
-            </h2>
-            <span
-              ref="count"
-              class="inline-flex"
-            >
-              <BadgeCount
-                :count="unread.total"
-                variant="destructive"
+              <h2
+                :id="headingId"
+                class="text-xs font-[550] tracking-[-0.02em] text-muted-foreground transition-colors group-hover/needs-you-header:text-foreground"
+              >
+                {{ t('notifications.inbox') }}
+              </h2>
+              <span
+                ref="count"
+                class="inline-flex"
+              >
+                <BadgeCount
+                  :count="unread.total"
+                  variant="destructive"
+                  aria-hidden="true"
+                />
+              </span>
+              <ChevronRight
+                class="size-3 shrink-0 text-muted-foreground transition-[opacity,rotate] duration-150 can-hover:opacity-0 group-hover/needs-you-header:opacity-100 group-focus-visible/needs-you-header:opacity-100"
+                :class="collapsed ? 'rotate-0' : 'rotate-90'"
                 aria-hidden="true"
               />
-            </span>
-          </header>
+            </div>
+            <ConfirmPopover
+              :message="t('notifications.clearAllConfirm', { count: unread.total })"
+              :confirm-text="t('notifications.clearAll')"
+              :cancel-text="t('common.cancel')"
+              @confirm="clearAll"
+            >
+              <template #trigger>
+                <Button
+                  variant="quiet"
+                  size="icon-sm"
+                  class="opacity-0 transition-opacity duration-150 group-hover/needs-you-header:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100"
+                  :aria-label="t('notifications.clearAll')"
+                >
+                  <X class="size-4" />
+                </Button>
+              </template>
+            </ConfirmPopover>
+          </div>
 
-          <TransitionGroup
-            tag="ul"
-            name="needs-you-row"
-            class="flex flex-col"
-            @enter="enterListRow"
+          <Transition
+            :css="false"
+            @enter="revealRow"
             @leave="leaveRow"
           >
-            <li
-              v-for="entry in visibleEntries"
-              :key="entry.sessionId"
+            <div
+              v-show="!collapsed"
+              :id="listId"
+              data-slot="needs-you-list"
               class="overflow-hidden"
             >
-              <NeedsYouRow
-                :entry="entry"
-                :bot-name="botName(entry.botId)"
-                :avatar-url="botFor(entry.botId)?.avatar_url"
-                :ago="ago(entry.attentionAt)"
-                @open="openSession(entry)"
-              />
-            </li>
-          </TransitionGroup>
+              <TransitionGroup
+                tag="ul"
+                name="needs-you-row"
+                class="flex flex-col"
+                @enter="enterListRow"
+                @leave="leaveRow"
+              >
+                <li
+                  v-for="entry in visibleEntries"
+                  :key="entry.sessionId"
+                  class="overflow-hidden"
+                >
+                  <NeedsYouRow
+                    :entry="entry"
+                    :bot-name="botName(entry.botId)"
+                    :avatar-url="botFor(entry.botId)?.avatar_url"
+                    :ago="ago(entry.attentionAt)"
+                    @open="openSession(entry)"
+                  />
+                </li>
+              </TransitionGroup>
 
-          <TextButton
-            v-if="unread.total > LIMIT"
-            class="mt-0.5 w-full justify-start px-1.5"
-            :aria-expanded="expanded"
-            @click="toggleExpanded"
-          >
-            {{ expanded ? t('notifications.showLess') : t('notifications.showAll', { count: unread.total }) }}
-          </TextButton>
+              <TextButton
+                v-if="unread.total > LIMIT"
+                class="mt-0.5 w-full justify-start px-1.5"
+                :aria-expanded="expanded"
+                @click="toggleExpanded"
+              >
+                {{ expanded ? t('notifications.showLess') : t('notifications.showAll', { count: unread.total }) }}
+              </TextButton>
+            </div>
+          </Transition>
         </section>
       </div>
     </div>
@@ -77,8 +127,9 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useNow } from '@vueuse/core'
-import { BadgeCount, TextButton } from '@felinic/ui'
+import { useLocalStorage, useNow } from '@vueuse/core'
+import { BadgeCount, Button, ConfirmPopover, TextButton, toast } from '@felinic/ui'
+import { ChevronRight, X } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '@/store/chat-list'
 import { useUnreadStore, type UnreadEntry } from '@/store/unread'
@@ -93,6 +144,9 @@ const unread = useUnreadStore()
 const chat = useChatStore()
 const router = useRouter()
 const headingId = useId()
+const listId = useId()
+/** Folded or not is a per-device sidebar preference, like the Recents section. */
+const collapsed = useLocalStorage('memoh-needs-you-collapsed', false)
 const expanded = ref(false)
 const count = useTemplateRef('count')
 const now = useNow({ interval: 30_000 })
@@ -133,6 +187,31 @@ function toggleExpanded() {
 function enterListRow(el: Element, done: () => void) {
   if (revealing) revealRow(el, done)
   else enterRow(el, done)
+}
+
+/**
+ * Reads every unread session at once. The toast's undo marks the same sessions
+ * unread again, which restores their kind and time, so nothing is lost by a misclick.
+ */
+async function clearAll() {
+  let cleared: string[]
+  try {
+    cleared = await unread.markAllRead()
+  }
+  catch {
+    toast.error(t('notifications.updateFailed'))
+    return
+  }
+  if (!cleared.length) return
+  toast(t('notifications.clearedAll', { count: cleared.length }), {
+    action: {
+      label: t('notifications.undo'),
+      onClick: () => {
+        collapsed.value = false
+        unread.markUnread(cleared).catch(() => toast.error(t('notifications.updateFailed')))
+      },
+    },
+  })
 }
 
 function openSession(entry: UnreadEntry) {

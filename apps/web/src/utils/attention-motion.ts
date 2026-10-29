@@ -60,7 +60,11 @@ export function revealRow(el: Element, done: () => void) {
   void animation.finished.then(done, done)
 }
 
-/** Vue `@leave` hook: collapse in place so the rows below close the gap smoothly. */
+/**
+ * Vue `@leave` hook: collapse in place so the rows below close the gap smoothly. The
+ * end state is held only until Vue hides or removes the element, then dropped, so an
+ * element hidden by `v-show` is not stuck at zero height when it is shown again.
+ */
 export function leaveRow(el: Element, done: () => void) {
   if (!canAnimate(el)) return done()
   const height = `${el.offsetHeight}px`
@@ -68,7 +72,11 @@ export function leaveRow(el: Element, done: () => void) {
     { height, opacity: 1, translate: '0 0' },
     { height: '0px', opacity: 0, translate: '0 -0.3125rem' },
   ], { duration: LEAVE_MS, easing: EASE, fill: 'forwards' })
-  void animation.finished.then(done, done)
+  const finish = () => {
+    done()
+    animation.cancel()
+  }
+  void animation.finished.then(finish, finish)
 }
 
 /** One-shot tint on a row whose attention just arrived; the tint color comes from CSS. */

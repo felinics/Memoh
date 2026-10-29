@@ -4539,6 +4539,13 @@
     "cancel": "取消"
   },
   "notifications": {
+    "clearAll": "全部标为已读",
+    "clearAllConfirm": "把 {count} 条都标为已读？",
+    "clearedAll": "已将 {count} 条标为已读",
+    "undo": "撤销",
+    "markUnread": "标记为未读",
+    "markRead": "标记为已读",
+    "updateFailed": "未读状态更新失败",
     "inbox": "需要你",
     "justNow": "刚刚",
     "showAll": "显示全部 ({count})",

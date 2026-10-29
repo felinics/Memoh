@@ -4539,6 +4539,13 @@
     "cancel": "Cancel"
   },
   "notifications": {
+    "clearAll": "Mark all as read",
+    "clearAllConfirm": "Mark all {count} as read?",
+    "clearedAll": "Marked {count} as read",
+    "undo": "Undo",
+    "markUnread": "Mark as unread",
+    "markRead": "Mark as read",
+    "updateFailed": "Couldn’t update unread state",
     "inbox": "Needs you",
     "justNow": "Just now",
     "showAll": "Show all ({count})",

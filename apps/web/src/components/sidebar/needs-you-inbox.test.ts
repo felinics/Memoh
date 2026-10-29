@@ -9,7 +9,10 @@ const unread = reactive({
   total: 0,
   inbox: [] as Array<{ sessionId: string, botId: string, title: string, kind: string, attentionAt: string }>,
   isFresh: (sessionId: string, attentionAt: string) => fresh.has(`${sessionId}@${attentionAt}`),
+  markAllRead: vi.fn(async () => ['s0', 's1']),
+  markUnread: vi.fn(async () => {}),
 })
+const toast = vi.hoisted(() => Object.assign(vi.fn(), { error: vi.fn() }))
 const motion = vi.hoisted(() => ({
   enterRow: vi.fn((_el: Element, done: () => void) => done()),
   revealRow: vi.fn((_el: Element, done: () => void) => done()),
@@ -31,6 +34,16 @@ vi.mock('@felinic/ui', () => {
     AvatarFallback: tag('span'),
     BadgeCount: defineComponent({ props: { count: Number }, setup: props => () => h('span', String(props.count)) }),
     TextButton: tag('button'),
+    Button: tag('button'),
+    toast,
+    ConfirmPopover: defineComponent({
+      props: { message: String, confirmText: String },
+      emits: ['confirm'],
+      setup: (props, { slots, emit }) => () => h('div', [
+        slots.trigger?.(),
+        h('button', { 'data-test': 'confirm', onClick: () => emit('confirm') }, props.confirmText),
+      ]),
+    }),
   }
 })
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
@@ -60,6 +73,10 @@ afterEach(() => {
   fresh.clear()
   push.mockClear()
   Object.values(motion).forEach(fn => fn.mockClear())
+  unread.markAllRead.mockClear()
+  unread.markUnread.mockClear()
+  toast.mockClear()
+  localStorage.clear()
 })
 
 describe('needs-you inbox', () => {
@@ -126,6 +143,42 @@ describe('needs-you inbox', () => {
     const flashed = motion.flashRow.mock.calls[0]![0] as HTMLElement
     expect(flashed.closest('[data-slot="needs-you-row"]')?.getAttribute('aria-label')).toContain('New')
     expect(motion.popDot).toHaveBeenCalledTimes(1)
+    app.unmount()
+  })
+
+  it('folds the list from its header and remembers it', async () => {
+    unread.inbox = entries(2)
+    unread.total = 2
+    const { root, app } = mount()
+    const header = root.querySelector<HTMLElement>('[data-slot="needs-you-header"]')!
+    expect(header.getAttribute('aria-expanded')).toBe('true')
+
+    header.click()
+    await nextTick()
+    expect(header.getAttribute('aria-expanded')).toBe('false')
+    expect(root.querySelector<HTMLElement>('[data-slot="needs-you-list"]')!.style.display).toBe('none')
+    app.unmount()
+
+    const again = mount()
+    expect(again.root.querySelector('[data-slot="needs-you-header"]')!.getAttribute('aria-expanded')).toBe('false')
+    again.app.unmount()
+  })
+
+  it('clears everything after confirming and offers an undo', async () => {
+    unread.inbox = entries(2)
+    unread.total = 2
+    const { root, app } = mount()
+    root.querySelector<HTMLButtonElement>('[data-test="confirm"]')!.click()
+    await nextTick()
+    await Promise.resolve()
+
+    expect(unread.markAllRead).toHaveBeenCalledTimes(1)
+    expect(toast).toHaveBeenCalledTimes(1)
+    const [message, options] = toast.mock.calls[0] as [string, { action: { label: string, onClick: () => void } }]
+    expect(message).toBe('notifications.clearedAll(2)')
+    options.action.onClick()
+    expect(unread.markUnread).toHaveBeenCalledWith(['s0', 's1'])
+    expect(root.querySelector('[data-slot="needs-you-header"]')!.getAttribute('aria-expanded')).toBe('true')
     app.unmount()
   })
 })

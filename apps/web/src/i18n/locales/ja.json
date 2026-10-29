@@ -4535,6 +4535,13 @@
     "cancel": "キャンセル"
   },
   "notifications": {
+    "clearAll": "すべて既読にする",
+    "clearAllConfirm": "{count} 件をすべて既読にしますか？",
+    "clearedAll": "{count} 件を既読にしました",
+    "undo": "元に戻す",
+    "markUnread": "未読にする",
+    "markRead": "既読にする",
+    "updateFailed": "未読状態を更新できませんでした",
     "inbox": "確認が必要",
     "justNow": "たった今",
     "showAll": "すべて表示 ({count})",
