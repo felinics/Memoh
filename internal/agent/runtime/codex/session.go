@@ -29,11 +29,15 @@ func recordThreadMetadata(delta *map[string]any, previous map[string]any, thread
 // resumeThread treats a stale path as a hint. Codex may successfully resume
 // that file's thread even when it differs from the requested id; try the id
 // before deciding that the intended conversation can no longer be resumed.
+// A refusal naming the requested thread as held is the answer: that thread
+// is intact and resumes once its holder exits, and the id lookup could only
+// hide it. A stale path may lead to another, held thread; that is just a
+// refused path.
 func (s *appServer) resumeThread(ctx context.Context, params protocol.ThreadResumeParams) (protocol.ThreadResumeResponse, error) {
 	var response protocol.ThreadResumeResponse
 	err := s.conn.Call(ctx, protocol.MethodThreadResume, params, &response)
 	var refused *protocol.RPCError
-	if params.Path != nil && ((err == nil && response.Thread.ID != params.ThreadID) || errors.As(err, &refused)) {
+	if params.Path != nil && ((err == nil && response.Thread.ID != params.ThreadID) || (errors.As(err, &refused) && !threadHeld(refused, params.ThreadID))) {
 		params.Path = nil
 		response = protocol.ThreadResumeResponse{}
 		err = s.conn.Call(ctx, protocol.MethodThreadResume, params, &response)
