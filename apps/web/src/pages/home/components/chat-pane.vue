@@ -42,6 +42,21 @@
                 <Spinner class="size-3.5" />
               </div>
 
+              <CalloutBanner
+                v-if="activeSessionSummaryFailed"
+                tone="warning"
+                :title="$t('common.loadFailed')"
+              >
+                <Button
+                  variant="outline"
+                  size="sm"
+                  :loading="retryingSessionSummary"
+                  @click="retryActiveSessionSummary"
+                >
+                  {{ $t('common.retry') }}
+                </Button>
+              </CalloutBanner>
+
               <!-- A session with a live run but no messages yet (a subagent
                    that has not produced output) reads as starting, not empty.
                    A first send waiting on welcome already shows its spinner
@@ -1288,7 +1303,7 @@ import {
   Lightbulb,
   Target,
 } from 'lucide-vue-next'
-import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, ConfirmDeleteDialog, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, PanePlaceholder, ScrollArea, Skeleton, Spinner, toast } from '@felinic/ui'
+import { Button, CalloutBanner, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, ConfirmDeleteDialog, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, PanePlaceholder, ScrollArea, Skeleton, Spinner, toast } from '@felinic/ui'
 import { useChatStore, type ExternalAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult } from '@/store/chat-list'
 import { useWorkdirsStore } from '@/store/workdirs'
 import type { BotWorkdir } from '@/composables/api/useWorkdirs'
@@ -1468,10 +1483,28 @@ const activeChatReadOnly = computed(() => chatStore.chatReadOnlyFor(paneTarget.v
 // slips into what turns out to be a schedule or a synced channel. The composer
 // only cares whether it is KNOWN to be read-only: until the summary says so it
 // renders and takes typing, and the send waits for the summary.
-const activeSessionSummaryPending = computed(() =>
+const activeSessionSummaryUnresolved = computed(() =>
   activeChatTarget.value.kind === 'session' && !activeChatTarget.value.session,
 )
-const composerReadOnly = computed(() => activeChatReadOnly.value && !activeSessionSummaryPending.value)
+const activeSessionSummaryFailed = computed(() =>
+  activeSessionSummaryUnresolved.value && chatStore.visibleSessionSummaryFailed(
+    paneTarget.value.botId,
+    paneTarget.value.sessionId ?? '',
+  ),
+)
+const composerReadOnly = computed(() => activeChatReadOnly.value && !activeSessionSummaryUnresolved.value)
+const retryingSessionSummary = ref(false)
+
+async function retryActiveSessionSummary() {
+  const { botId, sessionId } = paneTarget.value
+  if (!botId || !sessionId || retryingSessionSummary.value) return
+  retryingSessionSummary.value = true
+  try {
+    await chatStore.ensureVisibleSessionSummary(botId, sessionId)
+  } finally {
+    retryingSessionSummary.value = false
+  }
+}
 const activeChatCanFork = computed(() => chatStore.chatCanForkFor(paneTarget.value))
 // The composer pair lives on the shared ChatViewEntry: same-session tabs share
 // one pair and repointing this pane swaps in the target view's own pair. Every
@@ -3321,8 +3354,8 @@ const composerAction = computed(() => resolveComposerAction({
   hasBot: !!currentBotId.value,
   hasSession: !!activeSessionId.value,
   readOnly: composerReadOnly.value,
-  // A pending session summary holds the send the same way loading history does.
-  loadingMessages: loadingMessages.value || activeSessionSummaryPending.value,
+  // An unresolved session summary holds the send the same way loading history does.
+  loadingMessages: loadingMessages.value || activeSessionSummaryUnresolved.value,
   configPending: composerAgentConfigPending.value ? 'agent'
     : runtimeModeChanging.value ? 'mode'
       : composerHasNoModel.value && composerModelResolving.value ? 'model'

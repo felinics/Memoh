@@ -152,7 +152,7 @@ export const useChatStore = defineStore('chat', () => {
   })
   const { refreshSessionsList, resetRefreshCoordinator } = refreshCoordinator
   const {
-    ensureSessionSummary, ensureVisibleSessionSummary, loadMoreSessions,
+    ensureSessionSummary, ensureVisibleSessionSummary, visibleSessionSummaryFailed, loadMoreSessions,
     handleActivity: handleBotSessionsActivityEvent,
     scheduleActivityRevisions,
     isSessionCompacting, beginSessionCompaction,
@@ -592,7 +592,7 @@ export const useChatStore = defineStore('chat', () => {
     isSessionCompacting, beginSessionCompaction,
     sessions, sessionsCursor, hasMoreSessions, loadingMoreSessions,
     scheduleActivityRevisions,
-    loadMoreSessions, activeSession, knownSessions, knownSessionSummary,
+    loadMoreSessions, activeSession, knownSessions, knownSessionSummary, ensureVisibleSessionSummary, visibleSessionSummaryFailed,
     workdirSessionsFor, workdirSessionsState,
     ensureWorkdirSessions, loadMoreWorkdirSessions,
     activeChatReadOnly, activeChatCanFork,
