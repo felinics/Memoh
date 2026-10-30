@@ -1,6 +1,6 @@
 <template>
   <div class="flex h-full overflow-hidden">
-    <ChatWorkspace v-if="currentBotId" />
+    <ChatWorkspace v-if="currentBotId && !urlBotPending && !urlBotFailedName" />
     <div
       v-else
       class="flex-1 bg-card"
@@ -11,8 +11,19 @@
       >
         {{ t('bots.notFoundDescription') }}
       </PanePlaceholder>
+      <PanePlaceholder v-else-if="urlBotFailedName">
+        {{ t('bots.loadFailed') }}
+        <template #action>
+          <Button
+            variant="outline"
+            @click="retryBotFromUrl"
+          >
+            {{ t('common.retry') }}
+          </Button>
+        </template>
+      </PanePlaceholder>
       <PanePlaceholder
-        v-else
+        v-else-if="!urlBotPending"
         :title="t('chat.selectBot')"
       >
         {{ t('chat.selectBotHint') }}
@@ -30,12 +41,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getBotsByBotIdAgents, getBotsById } from '@memohai/sdk'
 import { fetchBot } from '@/composables/api/useBot'
-import { PanePlaceholder } from '@felinic/ui'
+import { Button, PanePlaceholder } from '@felinic/ui'
 import { CHAT_ROUTE_NAMES } from '@/constants/chat-routes'
 import { useChatStore } from '@/store/chat-list'
 import { routeConversationLabel } from '@/store/chat-list.utils'
 import { useComposerPrefillStore } from '@/store/composer-prefill'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { useTabScopedStorage } from '@/utils/tab-scoped-storage'
 import { ACP_NO_PROJECT_MODE, createACPNoProjectPath } from '@/utils/acp'
 import { botAgentProvider } from '@/utils/bot-agent'
 import ChatWorkspace from './components/chat-workspace.vue'
@@ -86,11 +98,40 @@ async function resolveBotNameFromId(botId: string): Promise<string | null> {
   }
 }
 
-let suppressUrlSync = false
+let suppressUrlSync = 0
+
+// The URL name of the bot this tab last had open, as `<bot id>\n<name>`,
+// seeded across reloads like the bot id itself. On a cold start the bot list
+// is not loaded yet; this tells without a request whether `/bot/<name>` is the
+// remembered bot (its chat renders at once) or another one.
+const currentBotRoute = useTabScopedStorage<string>('chat-bot-route', '', { seed: true })
+watch([currentBotId, bots], ([botId, list]) => {
+  const id = (botId ?? '').trim()
+  const name = list.find(bot => bot.id === id)?.name?.trim()
+  if (id && name) currentBotRoute.value = `${id}\n${name}`
+}, { immediate: true })
+
+function currentBotUrlName(): string {
+  const id = (currentBotId.value ?? '').trim()
+  const listed = bots.value.find(bot => bot.id === id)?.name?.trim()
+  if (listed) return listed
+  const [rememberedId, rememberedName] = currentBotRoute.value.split('\n')
+  return rememberedId === id ? rememberedName ?? '' : ''
+}
+
+// Set while the URL names a bot other than the selected one and that bot is
+// still being looked up. The selected bot's chat is not shown meanwhile:
+// typing into it would land in the wrong bot's draft, and its composer would
+// be swapped out the moment the lookup returns.
+const urlBotPending = ref(false)
+let urlSyncRun = 0
 
 // The URL's bot identifier when the server has no such bot. While set, the
 // pane shows the not-found state and the URL is left as the user typed it.
 const missingBotName = ref('')
+// A different bot's lookup failed. Keep the selected bot hidden rather than
+// presenting its composer under this URL; the user can retry the lookup.
+const urlBotFailedName = ref('')
 
 // home is now mounted persistently (via main-container, which App.vue keeps
 // alive across chat↔settings) rather than torn down when leaving chat. So these
@@ -101,6 +142,11 @@ const missingBotName = ref('')
 // (home/bot) is current. route.name is the reliable signal (no mount/unmount
 // timing to race).
 const isChatRoute = () => CHAT_ROUTE_NAMES.has(route.name as string)
+
+function retryBotFromUrl() {
+  if (!isChatRoute()) return
+  void syncStoreFromUrl((route.params.botName as string) ?? '')
+}
 
 // Home remains mounted behind settings, so the route gates the browser title.
 // A first send's session is titled like the draft it came from until the
@@ -167,24 +213,51 @@ async function maybeStartExternalAgentSession() {
 
 async function syncStoreFromUrl(rawName: string) {
   const urlName = rawName.trim()
+  const run = ++urlSyncRun
+  const selectedId = (currentBotId.value ?? '').trim()
+  const urlMatchesSelected = !!urlName && !!selectedId
+    && (urlName === selectedId || urlName === currentBotUrlName())
+  // Every await can finish after a newer navigation. Only the run that still
+  // owns this exact chat URL may change the selection or settle the pane.
+  const isCurrent = () => run === urlSyncRun && isChatRoute()
+    && (((route.params.botName as string) ?? '').trim() === urlName)
+  urlBotFailedName.value = ''
+  missingBotName.value = ''
+  urlBotPending.value = !!urlName && !urlMatchesSelected
+  const settleUrlBot = () => { if (run === urlSyncRun) urlBotPending.value = false }
   if (!urlName) {
-    missingBotName.value = ''
     if (!currentBotId.value) {
       await chatStore.initializeWithRecovery()
     }
+    if (!isCurrent()) return
     await maybeStartExternalAgentSession()
+    if (!isCurrent()) return
+    // A bot selected before this page mounted (remembered for the tab, or
+    // restored at sign-in) never reaches the currentBotId watcher below, so
+    // move `/` to that bot's URL here.
+    const selected = (currentBotId.value ?? '').trim()
+    const botName = selected ? await resolveBotNameFromId(selected) : null
+    if (botName && isCurrent() && !((route.params.botName as string) ?? '').trim()
+      && (currentBotId.value ?? '').trim() === selected) {
+      void router.replace({ name: 'bot', params: { botName } })
+    }
     return
   }
   let resolvedId: string | null
   try {
     resolvedId = await resolveBotIdFromName(urlName)
   } catch {
+    if (!isCurrent()) return
+    // A URL already known to name the selected bot needs no server answer to
+    // keep its composer. Only an unresolved, different bot becomes an error.
+    if (!urlMatchesSelected || (currentBotId.value ?? '').trim() !== selectedId) {
+      urlBotFailedName.value = urlName
+    }
+    settleUrlBot()
     return
   }
+  if (!isCurrent()) return
   if (!resolvedId) {
-    // The URL may have moved on while the lookup was in flight; only the
-    // current URL may clear the selection.
-    if (((route.params.botName as string) ?? '').trim() !== urlName) return
     missingBotName.value = urlName
     // Drop the previously selected bot rather than showing its chat under
     // this URL. Clearing the selection resets the chat store, bot list
@@ -193,24 +266,32 @@ async function syncStoreFromUrl(rawName: string) {
       currentBotId.value = null
       await nextTick()
     }
+    settleUrlBot()
     void chatStore.refreshBots()
     return
   }
-  missingBotName.value = ''
   if (resolvedId !== (currentBotId.value ?? '').trim()) {
-    suppressUrlSync = true
+    suppressUrlSync += 1
     try {
-      await chatStore.selectBot(resolvedId)
+      // selectBot switches the selection before it loads the bot, so the
+      // URL's bot can render as soon as the call starts.
+      const switching = chatStore.selectBot(resolvedId)
+      settleUrlBot()
+      await switching
     } finally {
-      suppressUrlSync = false
+      suppressUrlSync -= 1
     }
+  } else {
+    settleUrlBot()
   }
+  if (!isCurrent()) return
   await maybeStartExternalAgentSession()
+  if (!isCurrent()) return
   // Canonicalize the URL to the bot's name slug. This covers entry points that
   // navigate with a UUID (e.g. returning from settings), where currentBotId is
   // unchanged so the watcher below never fires.
   const canonicalName = await resolveBotNameFromId(resolvedId)
-  if (canonicalName && urlName !== canonicalName) {
+  if (canonicalName && isCurrent() && urlName !== canonicalName) {
     void router.replace({ name: 'bot', params: { botName: canonicalName } })
   }
 }

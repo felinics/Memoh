@@ -333,6 +333,18 @@ The shell splits into three layers (`App.vue` is the orchestrator):
 
 Several settings pages use **MasterDetailSidebarLayout** (`components/master-detail-sidebar-layout/`) for left-sidebar + detail-panel patterns (providers, web search, memory, voice).
 
+### Composer-First Entry (required)
+
+People open an agent app, or a past conversation, because they have something to say right now. The composer is the first thing a conversation shows, ahead of everything else on the page — on desktop browsers, phone-width web, and the desktop shell alike.
+
+- **Rendered and typeable on the first frame.** Every way into a conversation (cold start, reload, New Chat, picking a session, switching bots, a deep link) draws the composer and accepts typing on its first frame. Never gate the composer's mount, visibility, or `disabled` state on network or store loading (current user, bots, session list, session summary, history, runtime snapshot, model catalog, WebSocket). Loading belongs to the message area and to the specific control whose data is pending.
+- **Only the send waits.** While prerequisites load, typing, paste, and type-anywhere capture keep working; the send is held (`handleSend`) until they are ready. Data that is still loading reads as loading, never as an error or a missing value (for example, no "select a model" notice before the model preference has loaded).
+- **Exceptions: when the bot itself is unknown.** Two entries wait for one request because nothing local says which bot's conversation to open: the first sign-in of an account on a browser that has never seen it (the bot list), and a link to a bot other than the one this tab remembers (that bot's lookup). They show no other bot's composer meanwhile. Everything after that follows the rules above.
+- **Its place is final from the first frame.** Welcome (centred) vs. docked is decided from local state alone. After the first frame only the user's own action — such as sending the first message of a new chat — moves it. A cold start opens a new chat rather than picking a history for the user; a restored desktop layout keeps its tabs.
+- **Moving never changes what is in it.** Whenever the composer does move, the typed text, caret, attachments, and focus survive, and background work never switches the tab the user is typing in.
+- **Focus follows the user; the keyboard is the user's call.** On desktop, entering a conversation focuses its composer unless another input holds focus; entered from a menu or dialog, it focuses once that overlay has closed. On phones nothing is auto-focused: the composer is rendered and tappable, and opening the keyboard is the user's decision.
+- **Route guards do not wait on the network before the first render.** When a check can be answered from what this browser has already confirmed for the signed-in account, let the navigation through and verify in the background.
+
 ### Dev Component Wall
 
 `pages/dev/components/` is the living reference for `@felinic/ui` atoms and tokens. Reach it at `/dev/components` in dev builds after `localStorage.setItem('memoh:dev-tools', '1')`. Also openable via `Cmd/Ctrl+Shift+D` when dev tools are enabled. Use it to verify visual changes; `mise run lint` runs `scripts/check-ui-contract.mjs` as a mechanical guard.
