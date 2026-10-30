@@ -563,9 +563,17 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   runtime_config_epoch BIGINT NOT NULL DEFAULT 0,
   parent_session_id UUID REFERENCES bot_sessions(id) ON DELETE SET NULL,
   created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  -- When the session last needed its creator's attention (a run finished,
+  -- failed or waits for a decision) and why. Unread is attention_at, or the
+  -- user's session_reads.marked_unread_at, later than their read_at. Writing
+  -- these never touches updated_at.
+  attention_at TIMESTAMPTZ,
+  attention_kind TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at TIMESTAMPTZ,
+  CONSTRAINT bot_sessions_attention_kind_check
+    CHECK (attention_kind IS NULL OR attention_kind IN ('reply', 'failed', 'needs_input')),
   CONSTRAINT bot_sessions_runtime_reset_pair_check CHECK (
     (runtime_reset_token IS NULL) = (runtime_reset_expires_at IS NULL)
   )
@@ -2170,6 +2178,45 @@ CREATE POLICY subagent_configs_team_update ON public.subagent_configs
     USING (team_id = public.memoh_current_team_id())
     WITH CHECK (team_id = public.memoh_current_team_id());
 CREATE POLICY subagent_configs_team_delete ON public.subagent_configs
+    FOR DELETE USING (team_id = public.memoh_current_team_id());
+
+-- ---------------------------------------------------------------------------
+-- Session unread state
+-- ---------------------------------------------------------------------------
+-- Each user's read cursor per session. A session is unread for a user when
+-- bot_sessions.attention_at is later than read_at; read_at only moves forward.
+CREATE INDEX IF NOT EXISTS idx_bot_sessions_attention
+    ON public.bot_sessions (team_id, created_by_user_id, attention_at DESC)
+    WHERE attention_at IS NOT NULL AND deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS public.session_reads (
+    team_id    UUID        NOT NULL DEFAULT public.memoh_current_team_id()
+                           REFERENCES public.teams(id) ON DELETE RESTRICT,
+    user_id    UUID        NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    session_id UUID        NOT NULL,
+    read_at    TIMESTAMPTZ,
+    marked_unread_at TIMESTAMPTZ,
+    PRIMARY KEY (team_id, user_id, session_id),
+    CONSTRAINT session_reads_session_id_fkey
+        FOREIGN KEY (team_id, session_id)
+        REFERENCES public.bot_sessions(team_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_reads_session
+    ON public.session_reads (team_id, session_id);
+
+ALTER TABLE public.session_reads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.session_reads FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY session_reads_team_select ON public.session_reads
+    FOR SELECT USING (team_id = public.memoh_current_team_id());
+CREATE POLICY session_reads_team_insert ON public.session_reads
+    FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY session_reads_team_update ON public.session_reads
+    FOR UPDATE
+    USING (team_id = public.memoh_current_team_id())
+    WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY session_reads_team_delete ON public.session_reads
     FOR DELETE USING (team_id = public.memoh_current_team_id());
 
 -- ---------------------------------------------------------------------------

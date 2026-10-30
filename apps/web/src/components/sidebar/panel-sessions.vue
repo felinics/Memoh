@@ -71,8 +71,6 @@
     the 24px visual disc via absolute -inset-[3px]; icon center x=28, text x=48.
     -->
 
-    <SessionSelectionBar />
-
     <!-- Folders is a SIBLING section of Recents: folders of workdir-bound
          chats above, the ungrouped timeline below — and both live in ONE
          scrollport owned here. Each section used to scroll itself, which
@@ -88,9 +86,16 @@
       class="sidebar-scroll min-h-0 flex-1"
       :scroll-hide-delay="300"
     >
-      <FoldersSection />
-
-      <Recents :scroll-el="listScrollEl" />
+      <NeedsYouInbox />
+      <!-- Selection covers Folders and Recents only; the Needs you card above has
+           no checkboxes, so the bar opens this group instead of the scrollport.
+           It sticks to the top while the group scrolls, keeping Delete and Cancel
+           in reach, and never rides over the card. -->
+      <div>
+        <SessionSelectionBar />
+        <FoldersSection />
+        <Recents :scroll-el="listScrollEl" />
+      </div>
     </ScrollArea>
   </div>
 </template>
@@ -107,6 +112,7 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import SidebarPanelHeader from './panel-header.vue'
 import SidebarNavButton from './nav-button.vue'
 import FoldersSection from './folders-section.vue'
+import NeedsYouInbox from './needs-you-inbox.vue'
 import Recents from './recents.vue'
 import SessionSelectionBar from './session-selection-bar.vue'
 import { createSessionSelection, SessionSelectionKey } from './session-selection'

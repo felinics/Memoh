@@ -1388,3 +1388,80 @@
     }
   }
 }
+
+/* Unread attention (attention-dot.vue, needs-you-*.vue). Kind is carried by
+ * data-kind so the color has one home, ranked by urgency: red for a failure,
+ * yellow for "the agent is blocked on you", the scheme's brand for a plain reply
+ * or a manual mark (BadgeCount's destructive / warning / brand tones match). Arrival motion is played from JS
+ * (utils/attention-motion.ts) only for attention that just arrived live, so
+ * nothing here animates on mount. */
+@layer components {
+  [data-slot="attention-dot"] {
+    background-color: var(--brand);
+  }
+  [data-slot="attention-dot"][data-kind="needs_input"] {
+    background-color: var(--warning);
+  }
+  [data-slot="attention-dot"][data-kind="failed"] {
+    background-color: var(--accent-red-fill);
+  }
+  [data-slot="attention-dot"][data-cutout] {
+    box-shadow: 0 0 0 2px var(--sidebar);
+  }
+  [data-slot="attention-dot"]::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background-color: inherit;
+    opacity: 0;
+  }
+
+  /* Inbox card: one raised surface (card fill + hairline), rows inset by 4px so
+   * the inner 8px row radius stays concentric with the 12px shell. */
+  [data-slot="needs-you-card"] {
+    border: 1px solid var(--border);
+    background-color: var(--card);
+    border-radius: var(--radius-menu-shell);
+  }
+  [data-slot="needs-you-row"] {
+    transition: background-color 0.15s ease;
+  }
+  [data-slot="needs-you-row"]:hover {
+    background-color: var(--overlay-hover-light);
+  }
+  [data-slot="needs-you-row"]:active {
+    background-color: var(--overlay-hover);
+    transition-duration: 0.04s;
+  }
+  [data-slot="needs-you-row"]:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: -2px;
+  }
+
+  /* Arrival tint, faded out once by flashRow(); invisible at rest. */
+  [data-slot="needs-you-row-flash"] {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+    background-color: color-mix(in oklab, var(--brand) 16%, transparent);
+  }
+  [data-slot="needs-you-row-flash"][data-kind="needs_input"] {
+    background-color: color-mix(in oklab, var(--warning) 16%, transparent);
+  }
+  [data-slot="needs-you-row-flash"][data-kind="failed"] {
+    background-color: color-mix(in oklab, var(--accent-red-fill) 16%, transparent);
+  }
+
+  /* A row that jumps to the top on a newer attention glides there (FLIP). */
+  .needs-you-row-move {
+    transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .needs-you-row-move {
+      transition: none;
+    }
+  }
+}

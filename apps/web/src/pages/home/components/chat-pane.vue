@@ -1299,7 +1299,9 @@ import { useQuery } from '@pinia/colada'
 import { getAcpProfiles, getBotsByBotIdAgents, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
 import type { AcpprofilePublicProfile, BotagentsBotAgent, WorkspaceWorkspaceTarget } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { CHAT_ROUTE_NAMES } from '@/constants/chat-routes'
+import { useSessionViewing } from '@/composables/useSessionViewing'
 import FileDropOverlay from '@/components/file-drop-overlay/index.vue'
 import { useFileDropZone } from '@/composables/useFileDropZone'
 import { registerChatFileDropTarget } from '../composables/chat-file-drop-target'
@@ -1387,6 +1389,7 @@ const props = withDefaults(defineProps<{
 const { t, te, locale } = useI18n()
 const runtimeText = (key: string, fallback: string) => te(key) || te(key, 'en') ? t(key) : fallback
 const router = useRouter()
+const route = useRoute()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()
 const { pill: bgTaskPill, scrollToOffscreen, cleanup: cleanupBgTaskBeacons } = provideBgTaskBeacons()
@@ -1441,6 +1444,10 @@ provideConnectorLogos(paneTarget)
 const paneView = computed(() => chatStore.chatView(paneTarget.value))
 const messages = computed(() => paneView.value.transcript.visibleMessages.value)
 const loadingMessages = computed(() => paneView.value.transcript.loadingMessages.value)
+/** Kept-alive panes behind settings, loading transcripts and inactive splits are not readers. */
+const canReadSession = computed(() => isActive.value && isVisible.value
+  && !loadingMessages.value && !loadingChats.value && CHAT_ROUTE_NAMES.has(String(route.name)))
+useSessionViewing(computed(() => props.sessionId ?? null), canReadSession)
 // Delayed skeleton reveal: local/fast loads finish within a few frames, and
 // flashing the placeholder for a frame or two reads as a glitch. Mount it
 // only when loading actually outlives the delay.

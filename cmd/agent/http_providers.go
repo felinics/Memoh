@@ -29,6 +29,7 @@ import (
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/adapters/local"
 	"github.com/felinics/memoh/internal/channel/route"
+	"github.com/felinics/memoh/internal/chat/attention"
 	"github.com/felinics/memoh/internal/chat/event"
 	"github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
@@ -76,7 +77,7 @@ func provideSessionQueueHandler(queries dbstore.Queries, agentService *applicati
 	return handlers.NewSessionQueueHandler(queries, agentService, botService, accountService)
 }
 
-func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sessionService *sessionpkg.Service, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, userInput *userinput.Service, bgManager *background.Manager, acpPool *acpagent.SessionPool, pipeline *timeline.Pipeline, compactionService *compaction.Service, cfg config.Config) *handlers.MessageHandler {
+func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sessionService *sessionpkg.Service, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, userInput *userinput.Service, bgManager *background.Manager, acpPool *acpagent.SessionPool, pipeline *timeline.Pipeline, compactionService *compaction.Service, attentionService *attention.Service, cfg config.Config) *handlers.MessageHandler {
 	h := handlers.NewMessageHandler(log, msgService, sessionService, botService, accountService, hub)
 	h.SetMediaService(mediaService)
 	h.SetToolApprovalService(toolApproval)
@@ -85,13 +86,14 @@ func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sess
 	h.SetRuntimeResetService(acpPool)
 	h.SetProjectionCache(pipeline)
 	h.SetCompactionActivity(compactionService)
+	h.SetAttentionService(attentionService)
 	// This hub is process-local. A cluster cannot promise it observes runtime
 	// admissions and persisted writes performed by another instance.
 	h.SetSessionActivityInvalidationSupported(!cfg.SessionRuntime.Cluster)
 	return h
 }
 
-func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService, workdirService *workdir.Service, botAgentsService *botagents.Service, agentService *application.Service, pipeline *timeline.Pipeline, runs ledger.Store) *handlers.SessionHandler {
+func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService, workdirService *workdir.Service, botAgentsService *botagents.Service, agentService *application.Service, pipeline *timeline.Pipeline, runs ledger.Store, attentionService *attention.Service) *handlers.SessionHandler {
 	handler := handlers.NewSessionHandler(log, sessionService, acpPool, botService, accountService)
 	handler.SetThreadEnricher(routeService)
 	handler.SetWorkdirService(workdirService)
@@ -100,6 +102,7 @@ func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service,
 	handler.SetModelPreferenceService(agentService)
 	handler.SetProjectionCache(pipeline)
 	handler.SetInvocationLookup(runs)
+	handler.SetAttentionService(attentionService)
 	return handler
 }
 
