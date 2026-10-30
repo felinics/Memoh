@@ -45,7 +45,7 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 
 **Bots & Sessions**
 - `bots` — Bot definitions with model references and settings
-- `bot_sessions` — Bot conversation sessions
+- `bot_sessions` — Bot conversation sessions; `history_checkpoint_id` points at the session's active history checkpoint
 - `bot_session_events` — Session event log
 - `bot_channel_configs` — Per-bot channel configurations
 - `bot_channel_routes` — Conversation route mapping (inbound thread → bot history)
@@ -54,7 +54,8 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 **Messages & History**
 - `bot_history_messages` — Unified message history under bot scope
 - `bot_history_message_assets` — Message → content_hash asset links (with name and metadata)
-- `bot_history_message_compacts` — Compacted message summaries
+- `bot_history_message_compacts` — Compaction logs and the summaries they wrote
+- `bot_history_checkpoints` — What stands in a request for a session's history up to a position (`turn_position`, `turn_message_seq`): rows kept by reference and summaries, in order, always at least one summary. Each names its parent; `memoh_rewind_history_checkpoint` moves a session back along that chain when rows its active checkpoint depends on are removed (see `docs/agent-runtime.md`)
 
 **User Input**
 - `user_input_requests` — In-conversation questions posed by the `ask_user` tool, keyed by session and tool_call_id

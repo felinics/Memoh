@@ -83,13 +83,9 @@ type Message struct {
 	SessionMode    string          `json:"session_mode,omitempty"`
 	RuntimeType    string          `json:"runtime_type,omitempty"`
 	Assets         []MessageAsset  `json:"assets,omitempty"`
-	CompactID      string          `json:"compact_id,omitempty"`
 	EventID        string          `json:"event_id,omitempty"`
 	DisplayContent string          `json:"display_content,omitempty"`
 	CreatedAt      time.Time       `json:"created_at"`
-	// Summarized marks a row loaded to place the compaction summary that
-	// replaced it; the window left out the rest of its compact group.
-	Summarized bool `json:"-"`
 }
 
 type HistoryTurn struct {
@@ -159,8 +155,41 @@ type LocateResult struct {
 	TargetID string
 }
 
-// ActiveMessagesMeasure is a database-side aggregate over a session's active
-// messages (CM-ADM-001): counts and raw content bytes, computed without
+// HistoryPosition is a place in a session's history: the position of a
+// turn and the sequence of a message in it. Positions order the history; the
+// zero position precedes every message.
+type HistoryPosition struct {
+	Turn int64
+	Seq  int64
+}
+
+// Before reports whether p comes before other.
+func (p HistoryPosition) Before(other HistoryPosition) bool {
+	return p.Turn < other.Turn || p.Turn == other.Turn && p.Seq < other.Seq
+}
+
+// HistoryWindow selects what a byte-budgeted load of a session's raw
+// history reads: the context rows after a history checkpoint, newest first
+// within MaxBytes.
+type HistoryWindow struct {
+	// After is the position of the checkpoint the raw history follows.
+	After HistoryPosition
+	// Before, when set, cuts the history before a message: an edit or retry
+	// replays what came before the turn it replaces.
+	Before   *HistoryPosition
+	MaxBytes int64
+}
+
+// HistoryLoad is what a byte-budgeted load of a HistoryWindow read.
+type HistoryLoad struct {
+	Messages []Message
+	// Truncated reports that MaxBytes, not the window, ended the load: context
+	// rows of the window remain older than the oldest it read.
+	Truncated bool
+}
+
+// ActiveMessagesMeasure is a database-side aggregate over a session's raw
+// history (CM-ADM-001): counts and raw content bytes, computed without
 // loading any payload into the process.
 type ActiveMessagesMeasure struct {
 	MessageCount int64
@@ -250,22 +279,34 @@ type Service interface {
 	ListBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
 	ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
-	// ListActiveSinceBySessionWithinBytes is the byte-budgeted variant of
-	// ListActiveSinceBySession (CM-ADM-001): rows are admitted newest-first
-	// including the crossing row. Only content is budgeted; metadata arrives
-	// undecoded in RawMetadata for the caller to process one row at a time.
-	// With foldSummarized, rows a usable compaction summary replaced cost
-	// nothing and only the newest of each compact group loads, Summarized.
-	ListActiveSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64, foldSummarized bool) ([]Message, error)
-	// ListTurnResponseSourcesSinceBySessionWithinBytes is the same window as
-	// ListActiveSinceBySessionWithinBytes projected to what turn-response
-	// composition reads: ID, role, content, created_at, and Metadata holding
-	// only AgentStepInterruptedMetadataKey. Nothing else is loaded.
-	ListTurnResponseSourcesSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64) ([]Message, error)
-	// MeasureActiveBySession aggregates message count and content bytes on
-	// the database side (CM-ADM-001): admission sizes a session's history
-	// without shipping any payload into the process.
-	MeasureActiveBySession(ctx context.Context, sessionID string, since time.Time) (ActiveMessagesMeasure, error)
+	// ListHistoryWithinBytes loads a session's raw history over a
+	// HistoryWindow (CM-ADM-001): its context rows are admitted newest-first
+	// until their content byte total crosses window.MaxBytes, and the load
+	// reports whether that left older rows of the window out. Only content is
+	// budgeted, so metadata is returned undecoded in RawMetadata (Metadata
+	// stays nil): callers decode one row at a time instead of holding every
+	// row's decoded metadata, which legacy lifecycle audits can inflate.
+	ListHistoryWithinBytes(ctx context.Context, sessionID string, window HistoryWindow) (HistoryLoad, error)
+	// ListHistoryByIDs loads the named context rows of a session, as
+	// ListHistoryWithinBytes loads them, in history order: the rows a history
+	// checkpoint keeps by reference.
+	ListHistoryByIDs(ctx context.Context, sessionID string, ids []string) ([]Message, error)
+	// HistoryPositionByID reports where a visible message of the session is.
+	HistoryPositionByID(ctx context.Context, sessionID string, messageID string) (HistoryPosition, error)
+	// ListTurnResponseSourcesWithinBytes is the raw history after a position
+	// within maxBytes, as ListHistoryWithinBytes loads it, projected to what
+	// turn-response composition reads: ID, role, content, created_at, and
+	// Metadata holding only the interrupted and Discuss step flags. Nothing
+	// else is loaded.
+	ListTurnResponseSourcesWithinBytes(ctx context.Context, sessionID string, after HistoryPosition, maxBytes int64) (HistoryLoad, error)
+	// ListTurnResponseSourcesByIDs is ListHistoryByIDs projected as
+	// ListTurnResponseSourcesWithinBytes projects its rows, with the
+	// ExternalMessageID of a user row.
+	ListTurnResponseSourcesByIDs(ctx context.Context, sessionID string, ids []string) ([]Message, error)
+	// MeasureHistory aggregates the message count and content bytes of the
+	// raw history after a position on the database side (CM-ADM-001):
+	// admission sizes it without shipping any payload into the process.
+	MeasureHistory(ctx context.Context, sessionID string, after HistoryPosition) (ActiveMessagesMeasure, error)
 	ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error)
 	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]Message, error)
 	ListBeforeMessageBySession(ctx context.Context, sessionID string, beforeMessageID string, limit int32) ([]Message, error)

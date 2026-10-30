@@ -14,9 +14,10 @@ import (
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
-// History that does not fit the model window is summarized before the turn,
-// including history older than 24 hours, into one active summary that the
-// next compaction folds again. A summary as long as the prompt allows is
+// History that does not fit the model window is summarized before the run's
+// first step, however old it is: what the request renders from the oldest row
+// no summary replaces, into one active summary that the next compaction folds
+// again. A summary as long as the prompt allows is
 // answered without another compaction. When the summarizer fails, the turn
 // fails before any provider call and leaves history whole, naming the quota
 // when the provider refused the summarizer for it; once the
@@ -33,7 +34,7 @@ func TestPostgresPreTurnCompaction(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			f.persistHistory("hidden-", 4, 400, time.Now().Add(-48*time.Hour))
+			f.persistHistory("old-", 4, 400, time.Now().Add(-48*time.Hour))
 			for round := range 2 {
 				prefix := fmt.Sprintf("round%d-", round)
 				// The second summary is as long as the prompt allows: it must
@@ -54,8 +55,15 @@ func TestPostgresPreTurnCompaction(t *testing.T) {
 				}
 			}
 			f.longSummary.Store(false)
-			if raw, compacted := f.backlogRowsPrefixed("hidden-"); raw != 0 || compacted != 4 {
-				t.Fatalf("old history: raw=%d compacted=%d, want all four rows summarized", raw, compacted)
+			// Discuss composes inbound messages from the timeline, and a fold
+			// summarizes what its request renders: rows no timeline event
+			// renders stay raw for the chat view, never summarized unread.
+			wantRaw := 0
+			if entry == "discuss" {
+				wantRaw = 4
+			}
+			if raw, compacted := f.backlogRowsPrefixed("old-"); raw != wantRaw || compacted != 4-wantRaw {
+				t.Fatalf("history older than a day: raw=%d compacted=%d, want %d raw", raw, compacted, wantRaw)
 			}
 			f.failSummary.Store(true)
 			f.appendRound(entry, "failed-")
@@ -120,7 +128,7 @@ func TestPostgresPreTurnCompactionFoldsAnAskUserCallItsRunAbandoned(t *testing.T
 		t.Fatalf("code=%q summaries=%d, want the turn answered after a summary", code, f.summaries.Load()-summaries)
 	}
 	var raw int
-	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM bot_history_messages WHERE session_id=$1 AND compact_id IS NULL AND content::text LIKE '%ask_user%'`, f.sessionID).Scan(&raw); err != nil {
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM (`+historyRowsSQL+`) h WHERE NOT h.folded AND h.content::text LIKE '%ask_user%'`, f.sessionID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	if raw != 0 {
@@ -161,10 +169,14 @@ func (f *backlogFixture) appendRound(entry, prefix string) {
 	}
 }
 
+// activeSummaries counts the summaries the session's active checkpoint holds.
 func (f *backlogFixture) activeSummaries() int {
 	f.t.Helper()
 	var count int
-	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM bot_history_message_compacts WHERE session_id=$1 AND status='ok' AND superseded_by IS NULL`, f.sessionID).Scan(&count); err != nil {
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM bot_sessions s
+		JOIN bot_history_checkpoints c ON c.id = s.history_checkpoint_id
+		CROSS JOIN LATERAL jsonb_array_elements(c.items) item
+		WHERE s.id=$1 AND item ? 'summary'`, f.sessionID).Scan(&count); err != nil {
 		f.t.Fatal(err)
 	}
 	return count

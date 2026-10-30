@@ -81,6 +81,7 @@ Memoh/
 │   │   └── identities/         #     Channel identity service
 │   ├── channelaccess/          #   Effective per-bot Manage capability (channel binding + override)
 │   ├── chat/                   #   Chat bounded package
+│   │   ├── checkpoint/         #     History checkpoints: what stands for a session's history before its context
 │   │   ├── event/              #     Persisted chat event hub
 │   │   ├── message/            #     Message persistence
 │   │   ├── thread/             #     Internal Thread lifecycle and forks

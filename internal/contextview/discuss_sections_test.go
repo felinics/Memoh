@@ -22,10 +22,9 @@ func discussSectionsInputFixture() DiscussContextInput {
 		Role:          "assistant",
 		Content:       "assistant turn",
 	}}
-	composed := timeline.ComposeContextWithArtifacts(rc, trs, []timeline.CompactionArtifact{{
-		ID:      "fixture-artifact",
-		Summary: "older summary",
-	}})
+	composed := timeline.ComposeContextWithCheckpoint(rc, trs, timeline.HistoryCheckpoint{
+		Items: []timeline.CheckpointItem{{SummaryID: "fixture-summary", Summary: "older summary"}},
+	})
 	return DiscussContextInput{
 		ComposedMessages: composed.Messages,
 	}

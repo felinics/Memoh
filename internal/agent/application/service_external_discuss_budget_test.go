@@ -24,7 +24,7 @@ import (
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
-type externalDiscussQueries struct{ *recoveryHistoryQueries }
+type externalDiscussQueries struct{ *controllerQueries }
 
 func (*externalDiscussQueries) GetBotByID(_ context.Context, id pgtype.UUID) (sqlc.GetBotByIDRow, error) {
 	return sqlc.GetBotByIDRow{ID: id}, nil
@@ -58,7 +58,7 @@ func TestExternalDiscussAdmissionIncludesRuntimeContext(t *testing.T) {
 	service := &Service{}
 	service.SetContextAbsoluteMaxTokens(1000)
 	messages := externalDiscuss(100)
-	messages[0] = turn.DiscussMessage{Role: "user", Content: "old summary", CompactionArtifactID: "summary"}
+	messages[0] = turn.DiscussMessage{Role: "user", Content: "old summary", CompactionArtifactID: "summary", Pinned: true}
 	sections := buildRuntimeContextSections(runtimeContextRenderInput{})
 	markdown, _, _ := runtimeContextViaContextView(t.Context(), nil, sections, "")
 	got, err := service.prepareExternalDiscussContext(t.Context(), ChatRequest{discussMessages: messages}, markdown, 0)
@@ -141,7 +141,7 @@ func externalResumeService(t *testing.T) (*Service, *recordingACPPrompter, *resu
 	service.SetContextAbsoluteMaxTokens(1000)
 	saved := &resumeSaveQueries{}
 	policy, _ := newControllerPolicyService(t)
-	service.queries = externalResumeQueries{externalDiscussQueries: &externalDiscussQueries{&recoveryHistoryQueries{policy.queries.(*controllerQueries)}}, saved: saved}
+	service.queries = externalResumeQueries{externalDiscussQueries: &externalDiscussQueries{policy.queries.(*controllerQueries)}, saved: saved}
 	service.resumeSecret = "resume-test-secret"
 	ctx := runtimefence.WithContext(t.Context(), runtimefence.Fence{BotID: lifecycleTestBotID, SessionID: lifecycleTestSessionID, Token: 7})
 	return service, pool, saved, ctx
@@ -287,14 +287,14 @@ func TestExternalDiscussFinalAdmissionControlNeverReachesRuntimeOrHistory(t *tes
 	service.SetContextAbsoluteMaxTokens(1000)
 	policy, compactor := newControllerPolicyService(t)
 	service.settingsService, service.modelsService = policy.settingsService, policy.modelsService
-	service.queries = &externalDiscussQueries{recoveryHistoryQueries: &recoveryHistoryQueries{controllerQueries: policy.queries.(*controllerQueries)}}
+	service.queries = &externalDiscussQueries{controllerQueries: policy.queries.(*controllerQueries)}
 	service.compactionService = compactor
 	configureDiscussLifecycle(service)
 	published := 0
 	service.publishTurnEvent = func(context.Context, sessionruntime.RunHandle, native.StreamEvent) error { published++; return nil }
 	cmd := lifecycleDiscussCommand()
 	cmd.DiscussMessages = []turn.DiscussMessage{
-		{Role: "user", Content: strings.Repeat("s", 2000), CompactionArtifactID: "summary"},
+		{Role: "user", Content: strings.Repeat("s", 2000), CompactionArtifactID: "summary", Pinned: true},
 		{Role: "user", Content: strings.Repeat("c", 1400)},
 	}
 	handle, err := service.StartTurn(t.Context(), cmd)
@@ -355,7 +355,7 @@ func TestExternalDiscussFailedRecoveryReportsBudgetUnsatisfied(t *testing.T) {
 	_, err := service.prepareExternalDiscussContext(t.Context(), ChatRequest{
 		BotID: syncCompactBotID, ThreadID: syncCompactThreadID,
 		discussMessages: []turn.DiscussMessage{
-			{Role: "user", Content: strings.Repeat("s", 3000), CompactionArtifactID: "summary"},
+			{Role: "user", Content: strings.Repeat("s", 3000), CompactionArtifactID: "summary", Pinned: true},
 			{Role: "user", Content: strings.Repeat("c", 1400), Source: &turn.ContextMessageSource{Kind: "external", ID: "current", Current: true}},
 		},
 	}, "", 0)

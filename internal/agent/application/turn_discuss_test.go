@@ -120,6 +120,7 @@ type testDiscussService interface {
 
 func newDiscussTestService(streamer testChatStreamer, agent testAgentStreamer, resolver testDiscussService) *Service {
 	service := newTurnTestService(streamer)
+	service.checkpoints = emptyHistoryCheckpoints()
 	if service.logger == nil {
 		service.logger = slog.New(slog.DiscardHandler)
 	}
@@ -944,7 +945,7 @@ func TestDiscussCarriesComposedMessagesThroughTypedFragments(t *testing.T) {
 	cmd.DiscussMessages = []turn.DiscussMessage{
 		{Role: "user", Content: "first user"},
 		{Role: "user", Content: "second user"},
-		{Role: "user", Content: "<summary>covered history</summary>", CompactionArtifactID: "artifact-1"},
+		{Role: "user", Content: "<summary>covered history</summary>", CompactionArtifactID: "artifact-1", Pinned: true},
 		{
 			Role:       "assistant",
 			Content:    "tool call fallback",

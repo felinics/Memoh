@@ -215,11 +215,12 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	if budgetTokens <= 0 {
 		budgetTokens = s.contextAbsoluteMaxTokens()
 	}
-	// Summaries are compacted by the run's budget check like any history; only
-	// input that cannot fit on its own stops the turn here.
+	// What the history checkpoint holds is compacted by the run's budget
+	// check like any history; only input that cannot fit on its own stops the
+	// turn here.
 	unpinned := make([]turn.DiscussMessage, 0, len(cmd.DiscussMessages))
 	for _, message := range cmd.DiscussMessages {
-		if message.CompactionArtifactID == "" {
+		if !message.Pinned {
 			unpinned = append(unpinned, message)
 		}
 	}
@@ -866,6 +867,7 @@ func discussMessagesToTimeline(messages []turn.DiscussMessage) []timeline.Contex
 			Content:              message.Content,
 			RawContent:           message.RawContent,
 			CompactionArtifactID: message.CompactionArtifactID,
+			Pinned:               message.Pinned,
 		}
 	}
 	return result

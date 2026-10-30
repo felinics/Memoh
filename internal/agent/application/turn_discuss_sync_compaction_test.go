@@ -55,7 +55,7 @@ func TestDiscussAdmissionOverflowRunsRecovery(t *testing.T) {
 		BotID: syncCompactBotID, ThreadID: syncCompactThreadID,
 		DiscussContextOverflow: true, DiscussContextTokens: 2000, DiscussCurrentTokens: 500,
 	}, ResolveRunConfigResult{ContextBudgetMaxTokens: 1000}, "recovery")
-	if err != nil || !fired || len(runner.configs) != 1 || runner.configs[0].HistoryBudgetTokens != 500 {
+	if err != nil || !fired || len(runner.configs) != 1 || runner.configs[0].HistoryBudgetTokens != 1000 {
 		t.Fatalf("rejected context did not enter recovery: fired=%v configs=%+v", fired, runner.configs)
 	}
 }
@@ -98,7 +98,7 @@ func TestMaybeSyncCompactDiscussMissingWindowUsesAbsoluteCap(t *testing.T) {
 		DiscussContextOverflow: true, DiscussContextTokens: 2000, DiscussCurrentTokens: 500,
 	}, ResolveRunConfigResult{}, "run-1")
 
-	if err != nil || !fired || len(runner.configs) != 1 || runner.configs[0].HistoryBudgetTokens != 500 {
+	if err != nil || !fired || len(runner.configs) != 1 || runner.configs[0].HistoryBudgetTokens != 1000 {
 		t.Fatalf("a missing model window must fall back to the absolute cap: fired=%v configs=%+v", fired, runner.configs)
 	}
 }

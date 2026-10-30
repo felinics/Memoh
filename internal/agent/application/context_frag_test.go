@@ -138,6 +138,39 @@ func TestPrepareRunConfigDoesNotDoubleCountPipelineInlineImages(t *testing.T) {
 	}
 }
 
+// The query a run materializes renders the row that holds the run's request,
+// and stays where it is when the run compacts; the media a pipeline input
+// gains render with the sources the input already named.
+func TestPrepareRunConfigNamesWhatItsInputRenders(t *testing.T) {
+	t.Parallel()
+
+	image := sdk.ImagePart{Image: "data:image/png;base64,abc", MediaType: "image/png"}
+	earlier := native.MessageProvenance{Message: sdk.UserMessage("earlier"), Sources: []turn.ContextMessageSource{{Kind: "history", ID: "earlier"}}}
+	got := (&Service{}).prepareRunConfig(context.Background(), native.RunConfig{
+		Messages:          []sdk.Message{sdk.UserMessage("earlier")},
+		Query:             "question",
+		InlineImages:      []sdk.ImagePart{image},
+		ContextProvenance: []native.MessageProvenance{earlier},
+	})
+	want := []native.MessageProvenance{earlier, {Message: sdk.UserMessage("question", image), Sources: []turn.ContextMessageSource{requestSource}, Anchor: true}}
+	if !reflect.DeepEqual(got.ContextProvenance, want) || !reflect.DeepEqual(got.Messages[1], want[1].Message) {
+		t.Fatalf("provenance = %+v, want the query to render the run's request", got.ContextProvenance)
+	}
+
+	current := 0
+	input := native.MessageProvenance{Message: sdk.UserMessage("pipeline input"), Sources: []turn.ContextMessageSource{{Kind: "external", ID: "inbound"}}, Anchor: true}
+	got = (&Service{}).prepareRunConfig(context.Background(), native.RunConfig{
+		Messages:                       []sdk.Message{sdk.UserMessage("pipeline input")},
+		InlineImages:                   []sdk.ImagePart{image},
+		ContextCurrentUserMessageIndex: &current,
+		ContextProvenance:              []native.MessageProvenance{input},
+	})
+	input.Message = sdk.UserMessage("pipeline input", image)
+	if !reflect.DeepEqual(got.ContextProvenance, []native.MessageProvenance{input}) || !reflect.DeepEqual(got.Messages[0], input.Message) {
+		t.Fatalf("provenance = %+v, want the input with its media to render what it named", got.ContextProvenance)
+	}
+}
+
 func TestPrepareRunConfigPreservesPipelineFileAttachmentBytes(t *testing.T) {
 	t.Parallel()
 

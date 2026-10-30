@@ -12,7 +12,6 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
-	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
@@ -122,7 +121,7 @@ func (s *Service) bindNativeRun(ctx context.Context, req ChatRequest, rc resolve
 	// no longer fits. A retry or edit folds what its request renders like
 	// any other run: the history before its cutoff, and the steps of the
 	// attempt its first step selected.
-	if committer != nil && s.compactionService != nil && s.settingsService != nil {
+	if committer != nil && s.compactionService != nil {
 		cfg.SwitchContext = s.switchContext(req, committer, cfg.CurrentModelUUID)
 	}
 	return committer
@@ -403,12 +402,8 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 func stepProvenance(rows []messagepkg.Message, inputs []string) []native.MessageProvenance {
 	provenance := make([]native.MessageProvenance, len(rows))
 	for i, row := range rows {
-		source := turn.ContextMessageSource{Kind: "history", ID: row.ID}
-		if len(row.Content) > 0 {
-			source.ContentHash = historyfrag.MessageContentHash(historyfrag.DecodeStoredModelMessage(nil, row.ID, row.Role, row.Content))
-		}
 		provenance[i] = native.MessageProvenance{
-			Sources: []turn.ContextMessageSource{source},
+			Sources: []turn.ContextMessageSource{{Kind: "history", ID: row.ID}},
 			Anchor:  slices.Contains(inputs, row.ID),
 		}
 	}
@@ -431,8 +426,9 @@ func (c *agentStepCommitter) inputSources() []turn.ContextMessageSource {
 }
 
 // currentSources names sources the run rendered by the rows that hold them
-// now: a retry's request by the copy its first step wrote, with the same
-// content.
+// now: the run's request by the row admission persisted or its first step
+// wrote, and a retry's request by the copy its first step wrote, with the
+// same content.
 func (c *agentStepCommitter) currentSources(sources []turn.ContextMessageSource) []turn.ContextMessageSource {
 	out := slices.Clone(sources)
 	if c == nil {
@@ -441,11 +437,29 @@ func (c *agentStepCommitter) currentSources(sources []turn.ContextMessageSource)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for i, source := range out {
-		if c.requestCopy != "" && source.Kind == "history" && source.ID == c.retriedRequest {
+		switch {
+		case source.Kind != "history":
+		case source == requestSource && len(c.inputSourceIDs) > 0:
+			out[i] = turn.ContextMessageSource{Kind: "history", ID: c.inputSourceIDs[0]}
+		case c.requestCopy != "" && source.ID == c.retriedRequest:
 			out[i].ID = c.requestCopy
 		}
 	}
 	return out
+}
+
+// replacedTurn is the turn an edit or retry replaces, until the run's first
+// step replaces it.
+func (c *agentStepCommitter) replacedTurn() string {
+	if c == nil {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.replacementStarted || c.req.TurnReplacement == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.req.TurnReplacement.OldTurnID)
 }
 
 // stampSteerTurn files this step's injected steer input under the turn drawn

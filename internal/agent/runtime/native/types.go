@@ -227,12 +227,17 @@ type RunConfig struct {
 	OnStepInterrupted func(ctx context.Context, stepIndex int, record *step.Record) error
 
 	// SwitchContext arms the run to compact in place: when the request before
-	// a step does not fit, it runs one compaction event and returns the
-	// event's description for the run's audit. ContextProvenance is what the
-	// messages the run starts with render; step commits return the rest.
+	// a step, the first one included, does not fit, it runs one compaction
+	// event and returns the event's description for the run's audit.
+	// ContextProvenance is what the messages the run starts with render; step
+	// commits return the rest.
 	SwitchContext     func(context.Context, ContextSwitch) (string, error)
 	ContextProvenance []MessageProvenance
 	contextSwitch     *contextSwitchState
+	// ModelIdleWindow is the silence the run's watchdog allows a model
+	// request. The watchdog does not watch a compaction event, so each fork
+	// request of one ends after as long a silence; zero is five minutes.
+	ModelIdleWindow time.Duration
 
 	// BackgroundManager provides access to the background task system.
 	// When non-nil, the agent loop refreshes running task summaries at step

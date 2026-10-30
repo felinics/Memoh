@@ -16,6 +16,7 @@ on:
       - "internal/db/team_*_integration_test.go"
       - "internal/db/*postgres_integration_test.go"
       - "internal/chat/message/*postgres_integration_test.go"
+      - "internal/chat/checkpoint/**"
       - "internal/agent/view/*postgres_integration_test.go"
       - "internal/workspacedeps/*integration_test.go"
   pull_request:
@@ -33,6 +34,7 @@ on:
       - "internal/db/team_*_integration_test.go"
       - "internal/db/*postgres_integration_test.go"
       - "internal/chat/message/*postgres_integration_test.go"
+      - "internal/chat/checkpoint/**"
       - "internal/agent/view/*postgres_integration_test.go"
       - "internal/workspacedeps/*integration_test.go"
 
@@ -113,4 +115,4 @@ jobs:
         # web transcript depends on is checked end to end. Nothing else executes
         # them: `go test ./...` runs without a DSN and skips, and the fencing job
         # filters by test name.
-        run: go test -tags=integration -count=1 ./internal/db ./internal/chat/message ./internal/chat/thread ./internal/workspacedeps ./internal/agent/view
+        run: go test -tags=integration -count=1 ./internal/db ./internal/chat/message ./internal/chat/checkpoint ./internal/chat/thread ./internal/workspacedeps ./internal/agent/view

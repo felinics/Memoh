@@ -69,7 +69,7 @@ func TestPostgresInRunFoldTakesAnAbandonedDecisionWithItsCall(t *testing.T) {
 				t.Fatalf("loop: code=%q effects=%v, want every effect run", code, s.effects)
 			}
 			var folded int
-			if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM bot_history_messages h JOIN bot_history_message_compacts c ON c.id=h.compact_id AND c.status='ok' WHERE h.session_id=$1 AND h.role='assistant' AND h.content::text LIKE '%call_001%'`, f.sessionID).Scan(&folded); err != nil {
+			if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM (`+historyRowsSQL+`) h WHERE h.folded AND h.role='assistant' AND h.content::text LIKE '%call_001%'`, f.sessionID).Scan(&folded); err != nil {
 				t.Fatal(err)
 			}
 			if folded != 1 {

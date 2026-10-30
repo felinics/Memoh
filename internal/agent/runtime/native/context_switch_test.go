@@ -101,38 +101,57 @@ func switchDetails(cfg RunConfig) []string {
 	return details
 }
 
-// The event sees what the request renders, keeps the input, the steer and the
-// latest step out of the fold, and the request the run sends next is the one
-// it had with the covered messages replaced by the summary at rule P: every
-// other message is the same message, in its order.
+// The event sees the request the run would send and what each of its
+// messages renders, anchors included, and the request the run sends next is
+// the one it had with the covered messages replaced by the summary at rule
+// P: every other message is the same message, in its order.
 func TestArmedRunFoldsItsOwnRequestInPlace(t *testing.T) {
 	t.Parallel()
 
 	messages, provenance := switchRequest()
 	summary := sdk.UserMessage("<summary>\nnew\n")
+	want := []sdk.Message{messages[2], messages[3], messages[5], summary, messages[8], messages[9], messages[10]}
 	var seen ContextSwitch
+	var spliced ContextSplice
 	cfg, failure := armedRun(t, messages, provenance, []int{2, 3, 5, 8, 9, 10}, func(_ context.Context, sw ContextSwitch) (string, error) {
 		seen = sw
-		if tokens := sw.Fold(ContextFold{Artifact: "A1", Summary: summary, Covered: rowSources("h1", "h2", "c1", "r1"), Absorbed: []string{"A0"}}); tokens > sw.AllowanceTokens {
-			t.Errorf("the spliced request takes %d tokens, over its %d allowance", tokens, sw.AllowanceTokens)
-		}
+		spliced = sw.Fold(foldCovering(sw, "A1", summary, append(rowSources("h1", "h2", "c1", "r1"), summarySource("A0"))...))
 		return "trigger=in_run passes=1", nil
 	})
 	cfg.ContextCachePlan = contextfrag.CachePlan{StablePrefixHash: "compiled", StableMessageCount: 5, StablePrefixTokenEstimate: 4000}
 	params := prepareArmed(cfg, messages)
 
-	want := []sdk.Message{messages[2], messages[3], messages[5], summary, messages[8], messages[9], messages[10]}
 	if *failure != nil || !reflect.DeepEqual(params.Messages, want) {
 		t.Fatalf("failure=%v messages=%d, want the request spliced at rule P with every other message unchanged", *failure, len(params.Messages))
 	}
-	view := append(append([]turn.ContextMessageSource{{Kind: "summary", ID: "A0"}}, rowSources("h1")...), turn.ContextMessageSource{Kind: "external", ID: "rc1"})
-	view = append(view, rowSources("h2", "input", "c1", "r1", "steer", "c2", "r2")...)
-	if !reflect.DeepEqual(seen.View, view) || !reflect.DeepEqual(seen.Anchors, rowSources("input", "steer")) || !reflect.DeepEqual(seen.Tail, rowSources("c2", "r2")) {
-		t.Fatalf("view=%v anchors=%v tail=%v", seen.View, seen.Anchors, seen.Tail)
+	rendered := make([][]turn.ContextMessageSource, len(seen.Provenance))
+	var anchors []int
+	for i, p := range seen.Provenance {
+		if p != nil {
+			rendered[i] = p.Sources
+			if p.Anchor {
+				anchors = append(anchors, i)
+			}
+		}
 	}
-	kept := contextfrag.ProviderEnvelopeTokens("", []sdk.Message{messages[3], messages[5], messages[8], messages[9], messages[10]}, nil)
-	if seen.HistoryBudgetTokens != seen.AllowanceTokens-kept || !reflect.DeepEqual(switchDetails(cfg), []string{"trigger=in_run passes=1"}) {
-		t.Fatalf("history budget=%d (allowance %d, kept %d) details=%q", seen.HistoryBudgetTokens, seen.AllowanceTokens, kept, switchDetails(cfg))
+	sources := [][]turn.ContextMessageSource{
+		{{Kind: "summary", ID: "A0"}},
+		rowSources("h1"),
+		{{Kind: "external", ID: "rc1"}},
+		nil, rowSources("h2"),
+		rowSources("input"), rowSources("c1"), rowSources("r1"), rowSources("steer"), rowSources("c2"), rowSources("r2"),
+	}
+	if !reflect.DeepEqual(seen.Request.Messages, messages) || !reflect.DeepEqual(rendered, sources) || !reflect.DeepEqual(anchors, []int{5, 8}) {
+		t.Fatalf("the event saw %d messages rendering %v and anchors %v", len(seen.Request.Messages), rendered, anchors)
+	}
+	if seen.WindowTokens != cfg.ContextManifest.BudgetPlan.Window || seen.UsageTokens <= seen.AllowanceTokens || seen.Summarize == nil {
+		t.Fatalf("window=%d usage=%d allowance=%d summarize=%v", seen.WindowTokens, seen.UsageTokens, seen.AllowanceTokens, seen.Summarize != nil)
+	}
+	if !reflect.DeepEqual(spliced.Request.Messages, want) || spliced.Tokens > seen.AllowanceTokens || spliced.Provenance[3].Sources[0].ID != "A1" {
+		t.Fatalf("splice = %d messages, %d tokens over a %d allowance", len(spliced.Request.Messages), spliced.Tokens, seen.AllowanceTokens)
+	}
+	if !reflect.DeepEqual(switchDetails(cfg), []string{"trigger=in_run passes=1"}) {
+		t.Fatalf("details=%q", switchDetails(cfg))
 	}
 
 	cfg.Messages = messages
@@ -164,7 +183,6 @@ func TestArmedRunFailsClosedWhenTheEventDoesNotFit(t *testing.T) {
 	}{
 		{name: "summarizer down", err: fmt.Errorf("%w: summarizer_failed", contextfrag.ErrBudgetUnsatisfied), want: contextfrag.ErrBudgetUnsatisfied, detail: "trigger=in_run passes=0 reason=summarizer_failed"},
 		{name: "protected overflow", err: fmt.Errorf("%w: protected_overflow", contextfrag.ErrProtectedContextOverflow), want: contextfrag.ErrProtectedContextOverflow, detail: "trigger=in_run passes=0 reason=protected_overflow"},
-		{name: "still over", fold: rowSources("h1"), want: contextfrag.ErrBudgetUnsatisfied, detail: "trigger=in_run reason=still_over"},
 		{name: "result without its call", fold: rowSources("h1", "h2", "r1"), want: contextfrag.ErrBudgetUnsatisfied, detail: "trigger=in_run reason=postcondition"},
 		{name: "call without its result", fold: rowSources("h1", "h2", "c1"), want: contextfrag.ErrBudgetUnsatisfied, detail: "trigger=in_run reason=postcondition"},
 	} {
@@ -173,7 +191,7 @@ func TestArmedRunFailsClosedWhenTheEventDoesNotFit(t *testing.T) {
 			messages, provenance := switchRequest()
 			cfg, failure := armedRun(t, messages, provenance, []int{2, 3, 5, 8, 9, 10}, func(_ context.Context, sw ContextSwitch) (string, error) {
 				if tc.fold != nil {
-					sw.Fold(ContextFold{Artifact: "A1", Summary: sdk.UserMessage("<summary>\nnew\n"), Covered: tc.fold})
+					sw.Fold(foldCovering(sw, "A1", sdk.UserMessage("<summary>\nnew\n"), tc.fold...))
 					return "", nil
 				}
 				return tc.detail, tc.err
@@ -224,7 +242,7 @@ func TestArmedRunFoldsAClosureWithItsCall(t *testing.T) {
 				ContextMutations: contextfrag.NewMutationLedger(),
 				ContextManifest:  contextfrag.Manifest{BudgetPlan: &contextfrag.ContextBudgetPlan{Window: window}},
 				SwitchContext: func(_ context.Context, sw ContextSwitch) (string, error) {
-					sw.Fold(ContextFold{Artifact: "A1", Summary: summary, Covered: rowSources("h1", "c0", "h2", "c1", "r1"), Absorbed: []string{"A0"}})
+					sw.Fold(foldCovering(sw, "A1", summary, append(rowSources("h1", "c0", "h2", "c1", "r1"), summarySource("A0"))...))
 					return "trigger=in_run passes=1", nil
 				},
 				ContextProvenance: provenance,
@@ -293,7 +311,7 @@ func TestArmedRunContinuesOnItsSplicedRequest(t *testing.T) {
 				},
 				SwitchContext: func(_ context.Context, sw ContextSwitch) (string, error) {
 					events = append(events, sw)
-					sw.Fold(ContextFold{Artifact: "a1", Summary: summary, Covered: rowSources("s0.0", "s0.1", "s1.0", "s1.1")})
+					sw.Fold(foldCovering(sw, "a1", summary, rowSources("s0.0", "s0.1", "s1.0", "s1.1")...))
 					return "trigger=in_run passes=1", nil
 				},
 			}
@@ -306,8 +324,8 @@ func TestArmedRunContinuesOnItsSplicedRequest(t *testing.T) {
 			} else if _, err := a.Generate(context.Background(), cfg); err != nil {
 				t.Fatal(err)
 			}
-			if len(requests) != 5 || len(events) != 1 || !reflect.DeepEqual(events[0].Tail, rowSources("s2.0", "s2.1")) {
-				t.Fatalf("provider calls=%d events=%d, want one event before the fourth call with the third step as its tail", len(requests), len(events))
+			if len(requests) != 5 || len(events) != 1 || !reflect.DeepEqual(events[0].Provenance[5].Sources, rowSources("s2.0")) {
+				t.Fatalf("provider calls=%d events=%d, want one event before the fourth call that knows the third step", len(requests), len(events))
 			}
 			spliced, next := requests[3].Messages, requests[4].Messages
 			call, _ := spliced[min(2, len(spliced)-1)].Content[0].(sdk.ToolCallPart)
@@ -319,4 +337,144 @@ func TestArmedRunContinuesOnItsSplicedRequest(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A run whose first request does not fit folds it before its first dispatch,
+// in both loops: the event sees the request the run would send, its input an
+// anchor, and the run dispatches the spliced request once.
+func TestArmedRunFoldsBeforeItsFirstStep(t *testing.T) {
+	t.Parallel()
+
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", stream), func(t *testing.T) {
+			t.Parallel()
+			var requests []sdk.Request
+			provider := &atomicMockProvider{handler: func(_ int, params sdk.Request) (sdk.ModelResult, error) {
+				requests = append(requests, params)
+				return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+			}}
+			older := sdk.UserMessage("older" + strings.Repeat(" h", 2000))
+			answer := sdk.AssistantMessage("answer" + strings.Repeat(" h", 2000))
+			input := sdk.UserMessage("INPUT")
+			summary := sdk.UserMessage("<summary>\nolder\n")
+			request := turn.ContextMessageSource{Kind: "history", Current: true}
+			current := 2
+			var events []ContextSwitch
+			cfg := RunConfig{
+				Model: &sdk.Model{ID: "mock-model", Provider: provider}, Messages: []sdk.Message{older, answer, input},
+				Identity: SessionContext{BotID: "bot-1", SessionID: "sess-1"}, ContextMutations: contextfrag.NewMutationLedger(),
+				ContextManifest:                contextfrag.Manifest{BudgetPlan: &contextfrag.ContextBudgetPlan{Window: 1200}},
+				ContextCurrentUserMessageIndex: &current,
+				ContextProvenance: []MessageProvenance{
+					{Message: older, Sources: rowSources("older")},
+					{Message: answer, Sources: rowSources("answer")},
+					{Message: input, Sources: []turn.ContextMessageSource{request}, Anchor: true},
+				},
+				SwitchContext: func(_ context.Context, sw ContextSwitch) (string, error) {
+					events = append(events, sw)
+					sw.Fold(foldCovering(sw, "a1", summary, rowSources("older", "answer")...))
+					return "trigger=in_run passes=1", nil
+				},
+			}
+			if stream {
+				for event := range New(Deps{}).Stream(context.Background(), cfg) {
+					if event.Type == EventError {
+						t.Fatalf("stream failed: %v", event.Cause)
+					}
+				}
+			} else if _, err := New(Deps{}).Generate(context.Background(), cfg); err != nil {
+				t.Fatal(err)
+			}
+			if len(events) != 1 || len(requests) != 1 {
+				t.Fatalf("events=%d provider calls=%d, want one event before the only call", len(events), len(requests))
+			}
+			sw := events[0]
+			if sw.Request.Model != "mock-model" || len(sw.Request.Messages) != 3 || !sw.Provenance[2].Anchor {
+				t.Fatalf("event model=%q messages=%d, want the run's whole first request with its input an anchor", sw.Request.Model, len(sw.Request.Messages))
+			}
+			if got := requests[0].Messages; len(got) != 2 || !reflect.DeepEqual(got[0], summary) || !reflect.DeepEqual(got[1], input) {
+				t.Fatalf("first call sent %d messages, want the summary and the input", len(got))
+			}
+		})
+	}
+}
+
+// A pass that covers an input with images, such as an older input of a
+// Discuss batch, records them omitted, as no summary carries an image.
+func TestArmedRunRecordsTheImagesOfAFoldedInput(t *testing.T) {
+	t.Parallel()
+
+	var requests []sdk.Request
+	provider := &atomicMockProvider{handler: func(_ int, params sdk.Request) (sdk.ModelResult, error) {
+		requests = append(requests, params)
+		return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+	}}
+	pictured := sdk.UserMessage("older input"+strings.Repeat(" o", 1000), sdk.ImagePart{Image: "data:image/png;base64,AAAA", MediaType: "image/png"})
+	answered := sdk.AssistantMessage("answered" + strings.Repeat(" a", 1000))
+	newest := sdk.UserMessage("NEWEST")
+	summary := sdk.UserMessage("<summary>\nolder\n")
+	var events []ContextSwitch
+	cfg := RunConfig{
+		Model: &sdk.Model{ID: "mock-model", Provider: provider}, Messages: []sdk.Message{pictured, answered, newest},
+		Identity: SessionContext{BotID: "bot-1", SessionID: "sess-1"}, ContextMutations: contextfrag.NewMutationLedger(),
+		ContextManifest: contextfrag.Manifest{BudgetPlan: &contextfrag.ContextBudgetPlan{Window: 600}},
+		ContextProvenance: []MessageProvenance{
+			{Message: pictured, Sources: []turn.ContextMessageSource{{Kind: "external", ID: "older"}}, Anchor: true},
+			{Message: answered, Sources: rowSources("answered")},
+			{Message: newest, Sources: []turn.ContextMessageSource{{Kind: "external", ID: "newest"}}, Anchor: true},
+		},
+		SwitchContext: func(_ context.Context, sw ContextSwitch) (string, error) {
+			events = append(events, sw)
+			sw.Fold(foldCovering(sw, "a1", summary, append(rowSources("answered"), turn.ContextMessageSource{Kind: "external", ID: "older"})...))
+			return "trigger=in_run passes=1", nil
+		},
+	}
+	if _, err := New(Deps{}).Generate(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || len(events[0].Request.Messages) != 3 {
+		t.Fatalf("events=%d, want one event over the whole request", len(events))
+	}
+	if got := requests[0].Messages; len(got) != 2 || !reflect.DeepEqual(got[0], summary) || !reflect.DeepEqual(got[1], newest) {
+		t.Fatalf("first call sent %d messages, want the summary and the newest input", len(got))
+	}
+	var omitted []string
+	for _, record := range cfg.ContextMutations.Records() {
+		if record.Kind == contextfrag.MutationCurrentInputImagesOmitted {
+			omitted = append(omitted, record.Detail)
+		}
+	}
+	if !reflect.DeepEqual(omitted, []string{"sources=older"}) {
+		t.Fatalf("omitted images = %q, want the folded input's", omitted)
+	}
+}
+
+// foldCovering is the fold an event commits when its summary stands for
+// covered: every message whose sources it all covers goes, and the summary
+// takes its place, as the engine orders a pass.
+func foldCovering(sw ContextSwitch, summaryID string, summary sdk.Message, covered ...turn.ContextMessageSource) ContextFold {
+	set := make(map[turn.ContextMessageSource]bool, len(covered))
+	for _, source := range covered {
+		set[turn.ContextMessageSource{Kind: source.Kind, ID: source.ID}] = true
+	}
+	order := make([]int, len(sw.Request.Messages))
+	for i := range order {
+		order[i] = i
+	}
+	order, _ = turn.PlaceSummary(order, -1, func(i int) bool {
+		if i < 0 || sw.Provenance[i] == nil || len(sw.Provenance[i].Sources) == 0 {
+			return false
+		}
+		for _, source := range sw.Provenance[i].Sources {
+			if !set[turn.ContextMessageSource{Kind: source.Kind, ID: source.ID}] {
+				return false
+			}
+		}
+		return true
+	})
+	return ContextFold{SummaryID: summaryID, Summary: summary, Order: order}
+}
+
+func summarySource(id string) turn.ContextMessageSource {
+	return turn.ContextMessageSource{Kind: "summary", ID: id}
 }

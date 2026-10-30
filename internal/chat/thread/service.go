@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/chat/checkpoint"
 	"github.com/felinics/memoh/internal/chat/event"
 	dbpkg "github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -256,6 +257,10 @@ type CreateSubagentInput struct {
 }
 
 type subagentTransactionalQueries interface {
+	InTx(context.Context, func(dbstore.Queries) error) error
+}
+
+type forkTransactionalQueries interface {
 	InTx(context.Context, func(dbstore.Queries) error) error
 }
 
@@ -677,7 +682,9 @@ func (s *Service) ListSubagentForkContext(ctx context.Context, sessionID string)
 }
 
 // ForkFromAssistantTurn creates a new chat thread containing the source
-// thread's visible linear history through the selected assistant turn.
+// thread's visible linear history through the selected assistant turn, with
+// the history checkpoint that holds for it, so the fork's first request reads
+// what the source read at that turn without compacting it again.
 func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssistantInput) (Thread, error) {
 	pgBotID, err := dbpkg.ParseUUID(input.BotID)
 	if err != nil {
@@ -748,14 +755,40 @@ func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssis
 		}
 	}
 
-	row, err := s.queries.ForkSessionFromAssistantTurn(ctx, sqlc.ForkSessionFromAssistantTurnParams{
-		SessionID:               pgSessionID,
-		BotID:                   pgBotID,
-		TurnID:                  pgTurnID,
-		Title:                   forkTitle,
-		Metadata:                metaBytes,
-		RuntimeMetadataOverride: runtimeMetadataOverrideBytes,
-		CreatedByUserID:         pgCreatedByUserID,
+	txer, ok := s.queries.(forkTransactionalQueries)
+	if !ok {
+		return Thread{}, errors.New("fork thread: transactions unsupported")
+	}
+	var forkID pgtype.UUID
+	err = txer.InTx(ctx, func(queries dbstore.Queries) error {
+		if err := queries.LockSessionForFork(ctx, pgSessionID); err != nil {
+			return err
+		}
+		row, err := queries.ForkSessionFromAssistantTurn(ctx, sqlc.ForkSessionFromAssistantTurnParams{
+			SessionID:               pgSessionID,
+			BotID:                   pgBotID,
+			TurnID:                  pgTurnID,
+			Title:                   forkTitle,
+			Metadata:                metaBytes,
+			RuntimeMetadataOverride: runtimeMetadataOverrideBytes,
+			CreatedByUserID:         pgCreatedByUserID,
+		})
+		if err != nil {
+			return err
+		}
+		forkID = row.ID
+		// The fork's first request holds what the source's requests held at
+		// the fork point, without compacting it again.
+		if err := checkpoint.CopyToFork(ctx, queries, checkpoint.Copy{
+			SourceSessionID:     source.ID,
+			ForkSessionID:       row.ID.String(),
+			SourceMessageIDs:    row.SourceMessageIds,
+			ForkMessageIDs:      row.ForkMessageIds,
+			ThroughTurnPosition: row.ThroughTurnPosition,
+		}); err != nil {
+			return fmt.Errorf("copy history checkpoint: %w", err)
+		}
+		return nil
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -763,7 +796,11 @@ func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssis
 		}
 		return Thread{}, err
 	}
-	thread := toThreadFromForkRow(row)
+	forkRow, err := s.queries.GetSessionByID(ctx, forkID)
+	if err != nil {
+		return Thread{}, err
+	}
+	thread := toThread(forkRow)
 	s.publishThreadCreated(thread)
 	s.runThreadStartHook(context.WithoutCancel(ctx), thread)
 	return thread, nil
@@ -1647,10 +1684,6 @@ func toSubagentConfig(row sqlc.SubagentConfig) SubagentConfig {
 		CreatedAt:    row.CreatedAt.Time,
 		UpdatedAt:    row.UpdatedAt.Time,
 	}
-}
-
-func toThreadFromForkRow(row sqlc.ForkSessionFromAssistantTurnRow) Thread {
-	return toThread(sqlc.BotSession(row))
 }
 
 func validateACPMetadata(meta map[string]any) error {

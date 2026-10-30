@@ -34,8 +34,9 @@ type discussRunOutcome struct {
 	skipped    bool
 	cancelled  bool
 	// recomposeRequested reports that the runtime compacted the thread
-	// synchronously instead of running the model; the worker must reload
-	// artifacts, rebuild the plan, and resubmit without advancing the cursor.
+	// synchronously instead of running the model; the worker must recompose
+	// against the session's new history checkpoint and resubmit without
+	// advancing the cursor.
 	recomposeRequested bool
 }
 

@@ -46,13 +46,14 @@ func TestStreamACPAgentWSPromptBytesMatchQuery(t *testing.T) {
 
 	pool := &recordingACPPrompter{result: acpclient.PromptResult{Text: "ok", StopReason: "end_turn"}}
 	resolver := &Service{
+		checkpoints:    emptyHistoryCheckpoints(),
 		messageService: &recordingMessageService{},
 		acpPool:        pool,
 		botPermissions: allowWorkspaceExecFor("user-1"),
 		sessionService: &fakeBackgroundSessionService{
 			getFn: func(_ context.Context, _ string) (session.Thread, error) {
 				return session.Thread{
-					ID:    "session-1",
+					ID:    lifecycleTestSessionID,
 					BotID: "bot-1",
 					Type:  session.TypeACPAgent,
 					Metadata: map[string]any{
@@ -69,7 +70,7 @@ func TestStreamACPAgentWSPromptBytesMatchQuery(t *testing.T) {
 
 	if _, err := resolver.StreamChatWS(context.Background(), ChatRequest{
 		BotID:    "bot-1",
-		ThreadID: "session-1",
+		ThreadID: lifecycleTestSessionID,
 		Query:    "  inspect the app  ",
 	}, make(chan WSStreamEvent, 8), make(chan struct{})); err != nil {
 		t.Fatalf("StreamChatWS() error = %v", err)
@@ -90,6 +91,7 @@ func newACPLifecycleService(
 ) *Service {
 	t.Helper()
 	return &Service{
+		checkpoints:       emptyHistoryCheckpoints(),
 		messageService:    messages,
 		contextLifecycles: lifecycles,
 		acpPool:           pool,
@@ -296,16 +298,17 @@ func TestStreamChatWSRoutesACPRuntimeSessionToACPPool(t *testing.T) {
 		}),
 	}
 	resolver := &Service{
+		checkpoints:    emptyHistoryCheckpoints(),
 		messageService: messages,
 		acpPool:        pool,
 		botPermissions: allowWorkspaceExecFor("user-1"),
 		sessionService: &fakeBackgroundSessionService{
 			getFn: func(_ context.Context, sessionID string) (session.Thread, error) {
-				if sessionID != "session-1" {
+				if sessionID != lifecycleTestSessionID {
 					t.Fatalf("unexpected session id: %s", sessionID)
 				}
 				return session.Thread{
-					ID:    "session-1",
+					ID:    lifecycleTestSessionID,
 					BotID: "bot-1",
 					Type:  session.TypeACPAgent,
 					Metadata: map[string]any{
@@ -325,7 +328,7 @@ func TestStreamChatWSRoutesACPRuntimeSessionToACPPool(t *testing.T) {
 		context.Background(),
 		ChatRequest{
 			BotID:           "bot-1",
-			ThreadID:        "session-1",
+			ThreadID:        lifecycleTestSessionID,
 			Query:           "inspect the app",
 			Model:           "gpt-5.1-codex",
 			ReasoningEffort: "high",
@@ -350,7 +353,7 @@ func TestStreamChatWSRoutesACPRuntimeSessionToACPPool(t *testing.T) {
 	if pool.calls != 1 {
 		t.Fatalf("ACP pool calls = %d, want 1", pool.calls)
 	}
-	if pool.input.BotID != "bot-1" || pool.input.SessionID != "session-1" || pool.input.AgentID != "codex" || pool.input.ProjectPath != "/data/app" {
+	if pool.input.BotID != "bot-1" || pool.input.SessionID != lifecycleTestSessionID || pool.input.AgentID != "codex" || pool.input.ProjectPath != "/data/app" {
 		t.Fatalf("ACP prompt input = %#v", pool.input)
 	}
 	if pool.input.ModelID != "gpt-5.1-codex" || pool.input.ReasoningEffort != "high" {
@@ -761,6 +764,7 @@ func TestStreamChatWSPersistsACPUserInputProjectionOnceBeforePromptReturns(t *te
 		},
 	}
 	resolver := &Service{
+		checkpoints:    emptyHistoryCheckpoints(),
 		messageService: messages,
 		acpPool:        pool,
 		botPermissions: allowWorkspaceExecFor("user-1"),
@@ -786,7 +790,7 @@ func TestStreamChatWSPersistsACPUserInputProjectionOnceBeforePromptReturns(t *te
 		context.Background(),
 		ChatRequest{
 			BotID:          "bot-1",
-			ThreadID:       "session-1",
+			ThreadID:       lifecycleTestSessionID,
 			RunID:          "run-1",
 			TurnID:         "turn-1",
 			TurnPosition:   &turnPosition,
@@ -927,6 +931,7 @@ func TestStreamChatWSPersistsACPSubmittedUserInputResult(t *testing.T) {
 		streamEvents: streamed,
 	}
 	resolver := &Service{
+		checkpoints:    emptyHistoryCheckpoints(),
 		messageService: messages,
 		acpPool:        pool,
 		botPermissions: allowWorkspaceExecFor("user-1"),
@@ -939,7 +944,7 @@ func TestStreamChatWSPersistsACPSubmittedUserInputResult(t *testing.T) {
 		context.Background(),
 		ChatRequest{
 			BotID:          "bot-1",
-			ThreadID:       "session-1",
+			ThreadID:       lifecycleTestSessionID,
 			Query:          "quiz me",
 			CurrentChannel: "web",
 		},
@@ -1057,6 +1062,7 @@ func TestStreamChatWSPersistsACPApprovalProjectionOnce(t *testing.T) {
 		streamEvents: streamed,
 	}
 	resolver := &Service{
+		checkpoints:    emptyHistoryCheckpoints(),
 		messageService: messages,
 		acpPool:        pool,
 		botPermissions: allowWorkspaceExecFor("user-1"),
@@ -1082,7 +1088,7 @@ func TestStreamChatWSPersistsACPApprovalProjectionOnce(t *testing.T) {
 		context.Background(),
 		ChatRequest{
 			BotID:          "bot-1",
-			ThreadID:       "session-1",
+			ThreadID:       lifecycleTestSessionID,
 			Query:          "write the review",
 			CurrentChannel: "web",
 		},
@@ -1137,6 +1143,7 @@ func TestStreamACPAgentWSRequestsAutoTitle(t *testing.T) {
 		},
 	}
 	resolver := &Service{
+		checkpoints:    emptyHistoryCheckpoints(),
 		messageService: messages,
 		acpPool:        pool,
 		botPermissions: allowWorkspaceExecFor("user-1"),
@@ -1163,7 +1170,7 @@ func TestStreamACPAgentWSRequestsAutoTitle(t *testing.T) {
 		context.Background(),
 		ChatRequest{
 			BotID:    "bot-1",
-			ThreadID: "session-1",
+			ThreadID: lifecycleTestSessionID,
 			Query:    "inspect the app",
 		},
 		make(chan WSStreamEvent, 8),
@@ -1198,6 +1205,7 @@ func TestStreamACPAgentWSPropagatesContextBudgetDefaults(t *testing.T) {
 		result: acpclient.PromptResult{Text: "done", StopReason: "end_turn"},
 	}
 	resolver := &Service{
+		checkpoints:     emptyHistoryCheckpoints(),
 		messageService:  messages,
 		acpPool:         pool,
 		botPermissions:  allowWorkspaceExecForBot(storeRoundBotID, "user-1"),
@@ -1225,7 +1233,7 @@ func TestStreamACPAgentWSPropagatesContextBudgetDefaults(t *testing.T) {
 		context.Background(),
 		ChatRequest{
 			BotID:    storeRoundBotID,
-			ThreadID: "session-1",
+			ThreadID: lifecycleTestSessionID,
 			Query:    "inspect the app",
 		},
 		make(chan WSStreamEvent, 8),
@@ -1250,6 +1258,10 @@ type acpContextBudgetQueries struct {
 
 func (*acpContextBudgetQueries) GetBotByID(context.Context, pgtype.UUID) (sqlc.GetBotByIDRow, error) {
 	return sqlc.GetBotByIDRow{}, errors.New("bot timezone unavailable")
+}
+
+func (*acpContextBudgetQueries) DeleteRuntimeDecisionProjectionsByRun(context.Context, sqlc.DeleteRuntimeDecisionProjectionsByRunParams) (int64, error) {
+	return 0, nil
 }
 
 func (q *acpContextBudgetSettingsQueries) GetSettingsByBotID(_ context.Context, botID pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
@@ -1563,6 +1575,7 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 	registry.Register(storeRoundMemoryProviderID, memory)
 	pool := &recordingACPPrompter{err: errors.New("missing codex-acp")}
 	resolver := &Service{
+		checkpoints:     emptyHistoryCheckpoints(),
 		messageService:  messages,
 		memoryRegistry:  registry,
 		settingsService: settings.NewService(slog.New(slog.DiscardHandler), &storeRoundSettingsQueries{}, nil, nil),
@@ -1591,7 +1604,7 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 		context.Background(),
 		ChatRequest{
 			BotID:    storeRoundBotID,
-			ThreadID: "session-1",
+			ThreadID: lifecycleTestSessionID,
 			Query:    "inspect",
 		},
 		eventCh,
@@ -1646,6 +1659,7 @@ func TestStreamACPAgentWSUserStopKeepsPartialOutputWithoutFailureOrMemory(t *tes
 		err:    context.Canceled,
 	}
 	resolver := &Service{
+		checkpoints:     emptyHistoryCheckpoints(),
 		messageService:  messages,
 		settingsService: settings.NewService(slog.New(slog.DiscardHandler), &storeRoundSettingsQueries{}, nil, nil),
 		acpPool:         pool,
@@ -1669,7 +1683,7 @@ func TestStreamACPAgentWSUserStopKeepsPartialOutputWithoutFailureOrMemory(t *tes
 	cancel()
 	eventCh := make(chan WSStreamEvent, 8)
 	if _, err := resolver.streamACPAgentWS(ctx, ChatRequest{
-		BotID: storeRoundBotID, ThreadID: "session-1", Query: "inspect",
+		BotID: storeRoundBotID, ThreadID: lifecycleTestSessionID, Query: "inspect",
 	}, eventCh, make(chan struct{})); err != nil {
 		t.Fatalf("streamACPAgentWS() error = %v", err)
 	}
@@ -1700,6 +1714,7 @@ func TestStreamACPAgentWSStopRacingCompletionPersistsAsAbort(t *testing.T) {
 		result: withTranscriptOutput(acpclient.PromptResult{}, event.StreamEvent{Type: event.TextDelta, Delta: "done"}),
 	}
 	resolver := &Service{
+		checkpoints:     emptyHistoryCheckpoints(),
 		messageService:  messages,
 		memoryRegistry:  registry,
 		settingsService: settings.NewService(slog.New(slog.DiscardHandler), &storeRoundSettingsQueries{}, nil, nil),
@@ -1729,7 +1744,7 @@ func TestStreamACPAgentWSStopRacingCompletionPersistsAsAbort(t *testing.T) {
 	close(abortCh)
 	eventCh := make(chan WSStreamEvent, 8)
 	if _, err := resolver.streamACPAgentWS(ctx, ChatRequest{
-		BotID: storeRoundBotID, ThreadID: "session-1", Query: "inspect",
+		BotID: storeRoundBotID, ThreadID: lifecycleTestSessionID, Query: "inspect",
 	}, eventCh, abortCh); err != nil {
 		t.Fatalf("streamACPAgentWS() error = %v", err)
 	}
@@ -1805,6 +1820,7 @@ func TestStreamACPAgentWSImageCapabilityErrorCarriesItsCode(t *testing.T) {
 
 	messages := &recordingMessageService{}
 	resolver := &Service{
+		checkpoints:    emptyHistoryCheckpoints(),
 		messageService: messages,
 		acpPool:        &recordingACPPrompter{err: acpclient.ErrImagePromptUnsupported},
 		botPermissions: allowWorkspaceExecFor("user-1"),
@@ -1830,7 +1846,7 @@ func TestStreamACPAgentWSImageCapabilityErrorCarriesItsCode(t *testing.T) {
 		context.Background(),
 		ChatRequest{
 			BotID:    "bot-1",
-			ThreadID: "session-1",
+			ThreadID: lifecycleTestSessionID,
 			Query:    "inspect",
 			Attachments: []ChatAttachment{{
 				Type:   "image",
@@ -1867,6 +1883,7 @@ func TestStreamACPAgentWSSuccessStoresMemory(t *testing.T) {
 		result: withTranscriptOutput(acpclient.PromptResult{}, event.StreamEvent{Type: event.TextDelta, Delta: "done"}),
 	}
 	resolver := &Service{
+		checkpoints:     emptyHistoryCheckpoints(),
 		messageService:  messages,
 		memoryRegistry:  registry,
 		settingsService: settings.NewService(slog.New(slog.DiscardHandler), &storeRoundSettingsQueries{}, nil, nil),
@@ -1894,7 +1911,7 @@ func TestStreamACPAgentWSSuccessStoresMemory(t *testing.T) {
 		context.Background(),
 		ChatRequest{
 			BotID:    storeRoundBotID,
-			ThreadID: "session-1",
+			ThreadID: lifecycleTestSessionID,
 			Query:    "inspect",
 		},
 		make(chan WSStreamEvent, 8),

@@ -125,7 +125,7 @@ func discussBudgetRecoveryFixture(t *testing.T) (*Service, *fakeDiscussService, 
 	cmd.DiscussMessages = nil
 	for i := 0; i < 20; i++ {
 		cmd.DiscussMessages = append(cmd.DiscussMessages, turn.DiscussMessage{
-			Role: "user", Content: strings.Repeat("s", 200), CompactionArtifactID: fmt.Sprintf("summary-%d", i),
+			Role: "user", Content: strings.Repeat("s", 200), CompactionArtifactID: fmt.Sprintf("summary-%d", i), Pinned: true,
 		})
 	}
 	cmd.DiscussMessages = append(cmd.DiscussMessages,
@@ -175,7 +175,10 @@ func TestDiscussProviderBudgetRecoveryRecomposesBeforeProviderDispatch(t *testin
 	}
 }
 
-func TestDiscussProviderBudgetRecoveryCompactsOlderBatchBehindFittingSuffix(t *testing.T) {
+// A Discuss recovery keeps the batch where it is, newest first while it leaves
+// the summary room, and sizes the fold by everything the history renders,
+// the newest input included.
+func TestDiscussProviderBudgetRecoveryKeepsTheBatchByPolicy(t *testing.T) {
 	service, _, provider, compactor, cmd := discussBudgetRecoveryFixture(t)
 	configureDiscussLifecycle(service)
 	cmd.DiscussMessages = cmd.DiscussMessages[:len(cmd.DiscussMessages)-1]
@@ -200,8 +203,8 @@ func TestDiscussProviderBudgetRecoveryCompactsOlderBatchBehindFittingSuffix(t *t
 	for _, source := range cfg.Anchors {
 		protected[source.ID] = true
 	}
-	if !protected["m4"] || !protected["m3"] || protected["m1"] || len(cfg.ProtectedSources) != 0 || cfg.HistoryBudgetTokens <= 0 || cfg.HistoryBudgetTokens >= 998 {
-		t.Fatalf("anchors=%v protected_tail=%v history_budget=%d; retained inputs stay raw at their own positions and their cost is counted once", protected, cfg.ProtectedSources, cfg.HistoryBudgetTokens)
+	if !protected["m4"] || !protected["m3"] || !protected["m1"] || cfg.AnchorPolicy != compaction.AnchorsFirst || cfg.HistoryBudgetTokens <= 998 {
+		t.Fatalf("anchors=%v policy=%v history_budget=%d; the batch stays at its own positions newest first, priced once with the history it renders in", protected, cfg.AnchorPolicy, cfg.HistoryBudgetTokens)
 	}
 }
 
@@ -415,4 +418,8 @@ func TestDiscussSummariesOverTheModelBudgetAreCompactedInTheRun(t *testing.T) {
 	if !recomposed || len(failures) != 0 || len(compactor.configs) != 1 || provider.callCount() != 0 {
 		t.Fatalf("recompose=%v errors=%v compactions=%d provider=%d, want the summaries folded once before dispatch", recomposed, failures, len(compactor.configs), provider.callCount())
 	}
+}
+
+func (*discussBudgetCompactor) Fold(context.Context, compaction.Event) ([]compaction.Pass, error) {
+	return nil, errors.New("pre-turn recovery compacts history")
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 // runtimeSinkStallTimeout bounds how long a live-turn event delivery may wait on
@@ -339,9 +340,20 @@ func (s *Service) cleanupRuntimeDecisionProjectionRows(ctx context.Context, req 
 	if err != nil {
 		return
 	}
-	if _, err := s.queries.DeleteRuntimeDecisionProjectionsByRun(ctx, sqlc.DeleteRuntimeDecisionProjectionsByRunParams{
-		BotID: botID, SessionID: sessionID, RunID: runID,
-	}); err != nil {
+	cleanup := func(queries dbstore.Queries) error {
+		_, err := queries.DeleteRuntimeDecisionProjectionsByRun(ctx, sqlc.DeleteRuntimeDecisionProjectionsByRunParams{
+			BotID: botID, SessionID: sessionID, RunID: runID,
+		})
+		return err
+	}
+	// A run deletes under its persistence fence: an owner that lost the
+	// session cannot delete rows its successor reads.
+	if _, fenced := runtimefence.FromContext(ctx); fenced {
+		err = runtimefence.InTransaction(ctx, s.queries, req.BotID, req.ThreadID, cleanup)
+	} else {
+		err = cleanup(s.queries)
+	}
+	if err != nil {
 		s.logger.WarnContext(ctx, "cleanup External Agent decision projections by run failed",
 			slog.String("session_id", req.ThreadID), slog.String("run_id", req.RunID), slog.Any("error", err))
 	}
