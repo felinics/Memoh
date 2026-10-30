@@ -38,7 +38,7 @@ function tokenUserId(token: string): string {
 }
 
 // Accounts whose completed onboarding this browser keeps; older ones drop off.
-const REMEMBERED_ACCOUNTS = 5
+const REMEMBERED_ACCOUNTS = 10
 
 export const useUserStore = defineStore(
   'user',
@@ -71,12 +71,19 @@ export const useUserStore = defineStore(
     const onboardingRememberedFor = (userId: string) => !!userId && rememberedCompletedUsers().includes(userId)
     const chatExamplesSidebarEntryHidden = ref(false)
 
-    watch(onboardingCompleted, (completed) => {
-      const userId = tokenUserId(localToken.value)
-      if (!completed || !userId || rememberedCompletedUsers()[0] === userId) return
-      onboardingCompletedUsers.value = [userId, ...rememberedCompletedUsers().filter(id => id !== userId)]
+    function rememberCompletedUser(userId: string) {
+      const user = userId.trim()
+      if (!user || rememberedCompletedUsers()[0] === user) return
+      onboardingCompletedUsers.value = [user, ...rememberedCompletedUsers().filter(id => id !== user)]
         .slice(0, REMEMBERED_ACCOUNTS)
-    })
+    }
+
+    // The wizard completes locally; the server-check path below uses its own
+    // verified response id instead. Sync flush keeps this write tied to the
+    // login that completed the wizard rather than a later account switch.
+    watch(onboardingCompleted, (completed) => {
+      if (completed) rememberCompletedUser(tokenUserId(localToken.value))
+    }, { flush: 'sync' })
 
     const chatSelection = useChatSelectionStore()
     watch(() => chatSelection.currentBotId, (botId) => {
@@ -85,6 +92,7 @@ export const useUserStore = defineStore(
 
     let _meChecked = false
     let _pendingFetch: Promise<boolean> | null = null
+    let _authGeneration = 0
 
     async function fetchMe(): Promise<boolean> {
       if (_meChecked) return true
@@ -95,12 +103,17 @@ export const useUserStore = defineStore(
       return await loadMe()
     }
 
-    // Always asks the server; concurrent callers share one request.
+    // Always asks the server; concurrent callers share one request. A response
+    // may write only while the login that started it is still current. Its
+    // cleanup must not clear a newer login's shared request either.
     function loadMe(): Promise<boolean> {
       if (_pendingFetch) return _pendingFetch
-      _pendingFetch = (async (): Promise<boolean> => {
+      const generation = _authGeneration
+      const token = localToken.value
+      const request: Promise<boolean> = (async (): Promise<boolean> => {
         try {
           const { data } = await getUsersMe({ throwOnError: true })
+          if (generation !== _authGeneration || localToken.value !== token) return false
           if (!data) {
             return false
           }
@@ -111,6 +124,7 @@ export const useUserStore = defineStore(
           userInfo.avatarUrl = data.avatar_url ?? ''
           userInfo.timezone = data.timezone || 'UTC'
           const completed = data.metadata?.onboarding_completed === true
+          if (completed && data.id) rememberCompletedUser(data.id)
           onboardingCompleted.value = completed
           if (!completed && data.id && onboardingRememberedFor(data.id)) {
             onboardingCompletedUsers.value = rememberedCompletedUsers().filter(id => id !== data.id)
@@ -119,13 +133,17 @@ export const useUserStore = defineStore(
           _meChecked = true
           return true
         } catch (error) {
-          console.warn('Failed to fetch current user:', error)
+          if (generation === _authGeneration && localToken.value === token) {
+            console.warn('Failed to fetch current user:', error)
+          }
           return false
-        } finally {
-          _pendingFetch = null
         }
       })()
-      return _pendingFetch
+      _pendingFetch = request
+      void request.finally(() => {
+        if (_pendingFetch === request) _pendingFetch = null
+      })
+      return request
     }
 
     const resetUserInfo = () => {
@@ -207,6 +225,7 @@ export const useUserStore = defineStore(
     }
 
     const resetOnboarding = () => {
+      _authGeneration += 1
       onboardingCompleted.value = false
       _meChecked = false
       _pendingFetch = null

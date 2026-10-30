@@ -3,7 +3,7 @@ import { StorageSerializers, useLocalStorage } from '@vueuse/core'
 import { useTabScopedStorage } from '@/utils/tab-scoped-storage'
 
 // Accounts whose last bot this browser keeps; older ones drop off.
-const REMEMBERED_ACCOUNTS = 5
+const REMEMBERED_ACCOUNTS = 10
 
 export const useChatSelectionStore = defineStore('chat-selection', () => {
   // Per-Tab: which bot/session THIS browser tab is focused on. Was localStorage,
