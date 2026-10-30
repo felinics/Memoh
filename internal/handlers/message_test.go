@@ -6,9 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
-	userinput "github.com/felinics/memoh/internal/agent/decision/input"
-	chatview "github.com/felinics/memoh/internal/agent/view"
 	session "github.com/felinics/memoh/internal/chat/thread"
 )
 
@@ -43,81 +40,6 @@ func TestIsUserFacingSessionType(t *testing.T) {
 		if session.IsUserFacingType(typ) {
 			t.Fatalf("expected %q to be filtered out of user-facing surfaces", typ)
 		}
-	}
-}
-
-func TestMergeToolApprovalsUsesCanApproveFunction(t *testing.T) {
-	t.Parallel()
-
-	turns := []chatview.UITurn{
-		{
-			Role: "assistant",
-			Messages: []chatview.UIMessage{
-				{
-					Type:       chatview.UIMessageTool,
-					ToolCallID: "call-1",
-				},
-			},
-		},
-	}
-	approvals := []toolapproval.Request{
-		{
-			ID:         "approval-1",
-			ToolCallID: "call-1",
-			ShortID:    7,
-			Status:     toolapproval.StatusPending,
-		},
-	}
-
-	mergeToolApprovals(turns, approvals, func(req toolapproval.Request) bool {
-		return req.ID == "approval-2"
-	})
-
-	approval := turns[0].Messages[0].Approval
-	if approval == nil {
-		t.Fatal("approval metadata was not merged")
-	}
-	if approval.Status != toolapproval.StatusPending {
-		t.Fatalf("approval status = %q, want pending", approval.Status)
-	}
-	if approval.CanApprove {
-		t.Fatal("mergeToolApprovals ignored injected canApprove function")
-	}
-}
-
-func TestMergeUserInputsRestoresStoredAnswers(t *testing.T) {
-	t.Parallel()
-
-	turns := []chatview.UITurn{{
-		Role: "assistant",
-		Messages: []chatview.UIMessage{{
-			Type:       chatview.UIMessageTool,
-			ToolCallID: "call-ask",
-		}},
-	}}
-	requests := []userinput.Request{{
-		ID:         "input-1",
-		ToolCallID: "call-ask",
-		Status:     userinput.StatusSubmitted,
-		Result: map[string]any{
-			"answers": []any{map[string]any{
-				"question_id": "q1",
-				"question":    "Which plan?",
-				"selected": []any{map[string]any{
-					"id": "q1.o2", "label": "Plan B",
-				}},
-			}},
-		},
-	}}
-
-	mergeUserInputs(turns, requests, nil)
-
-	merged := turns[0].Messages[0].UserInput
-	if merged == nil || len(merged.Answers) != 1 || len(merged.Answers[0].Selected) != 1 {
-		t.Fatalf("stored answers were not merged: %#v", merged)
-	}
-	if merged.Answers[0].Selected[0].Label != "Plan B" || merged.CanRespond {
-		t.Fatalf("merged user input = %#v", merged)
 	}
 }
 

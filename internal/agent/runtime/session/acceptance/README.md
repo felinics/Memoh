@@ -41,6 +41,7 @@ Start one topology, run it, then stop it before switching:
 ```bash
 mise run test:session-runtime:acceptance:env:single
 mise run test:session-runtime:acceptance:single
+mise run test:session-runtime:acceptance:single:destructive
 mise run test:session-runtime:acceptance:env:down
 ```
 
@@ -66,8 +67,8 @@ The compatibility aliases `test:session-runtime:acceptance:env` and
 | `SR-CTL-001` | abort through the non-owner Server returns `control_ack`, cancels the model call and commits `aborted` |
 | `SR-DUR-001` | after `SIGKILL`, input and identity remain in `session_runs` and the run becomes queryable as `lost` |
 | `SR-DUR-002` | replaying a completed invocation does not call the model or add history rows |
-| `SR-DEC-001` | live `ask_user` and tool approval decisions retain one run/turn/fence across WebSocket, HTTP and Turn gRPC; owner restart preserves and resumes the same decision |
-| `SR-CTL-001` decision replay | a decision `control_id` returns the same acknowledgement after the run terminalizes; a stale new control resolves as `applied=false` without a retry code |
+| `SR-DEC-001` | live `ask_user` and tool approval decisions retain one run/turn/fence across WebSocket, HTTP and Turn gRPC; a graceful or SIGKILL owner restart preserves and resumes the same decision on both topologies |
+| `SR-CTL-001` decision replay | a decision `control_id` returns the same acknowledgement after the run terminalizes; a stale new control resolves as `applied=false` with `user_input.expired` |
 | PostgreSQL write budget | several owner-lease renewals leave `session_runs.updated_at`, owner, token and generation unchanged |
 | backend loss | `FLUSHDB` preserves the grace interval and admission gate; old-generation runs become `lost` without replaying partial text; new-generation runs complete |
 
@@ -112,8 +113,8 @@ Useful environment variables:
 
 Crash and backend-loss cases are guarded because they intentionally kill a
 container or erase the configured Redis database. The dedicated
-`acceptance:cluster:destructive` task runs only the owner-restart contract and
-sets the crash guard explicitly. Do not enable either fault against a shared
+`acceptance:cluster:destructive` and `acceptance:single:destructive` tasks run
+only the owner-restart contracts and set the crash guard explicitly. Do not enable either fault against a shared
 development or production environment.
 
 ## Execution and fault boundaries

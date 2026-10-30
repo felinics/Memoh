@@ -430,6 +430,42 @@ func (s *Service) CancelPendingForSession(ctx context.Context, botID, sessionID,
 	return requests, nil
 }
 
+// CancelPendingForRun closes the pending approvals one exact run created. It
+// is used when the run ended without its owner's finish path; session-wide
+// cancellation would also close a newer run's approval.
+func (s *Service) CancelPendingForRun(ctx context.Context, botID, sessionID, runID string, fencingToken int64, reason string) ([]Request, error) {
+	if s == nil || s.queries == nil {
+		return nil, errors.New("tool approval queries not configured")
+	}
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return nil, err
+	}
+	pgSessionID, err := db.ParseUUID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	pgRunID, err := db.ParseUUID(runID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.CancelPendingToolApprovalsByRun(ctx, sqlc.CancelPendingToolApprovalsByRunParams{
+		BotID: pgBotID, SessionID: pgSessionID, RunID: pgRunID,
+		Reason:              strings.TrimSpace(reason),
+		RuntimeFencingToken: pgtype.Int8{Int64: fencingToken, Valid: fencingToken > 0},
+	})
+	if err != nil {
+		return nil, err
+	}
+	requests := make([]Request, 0, len(rows))
+	for _, row := range rows {
+		req := requestFromRow(row)
+		requests = append(requests, req)
+		s.notifyResolved(req)
+	}
+	return requests, nil
+}
+
 func (s *Service) withRuntimeFence(ctx context.Context, botID, sessionID string, fn func(dbstore.Queries) error) error {
 	if _, fenced := runtimefence.FromContext(ctx); !fenced {
 		return fn(s.queries)

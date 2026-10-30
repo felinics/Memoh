@@ -557,8 +557,8 @@ func (m *Manager) SetTerminalReconciler(reconciler func(context.Context) error) 
 	m.mu.Unlock()
 }
 
-// SetLostRunDecisionCanceller installs run-scoped cleanup for decisions parked
-// by a run that the reaper has durably marked lost.
+// SetLostRunDecisionCanceller installs run-scoped cleanup for decisions a run
+// left pending when it became terminal without its owner's finish path.
 func (m *Manager) SetLostRunDecisionCanceller(canceller func(context.Context, string, string, string, int64, string) error) {
 	if m == nil {
 		return
@@ -566,6 +566,34 @@ func (m *Manager) SetLostRunDecisionCanceller(canceller func(context.Context, st
 	m.mu.Lock()
 	m.cancelLostRunDecisions = canceller
 	m.mu.Unlock()
+}
+
+// cancelUnfinalizedDecisions closes the decisions of a run that became
+// terminal outside its owner's finish path. That path closes them through the
+// decision finalizer before its terminal write; the reaper, graceful shutdown
+// and the memory finish handoff end a run without it, and a pending request on
+// a terminal run would stay answerable with nothing left to apply the answer.
+// The terminal row is authoritative and is never rolled back: a failure here
+// is logged, and answering one of those requests repeats the cleanup.
+func (m *Manager) cancelUnfinalizedDecisions(ctx context.Context, terminal TerminalRun) {
+	if m == nil || terminal.RunID == "" || terminal.BotID == "" || terminal.SessionID == "" {
+		return
+	}
+	m.mu.Lock()
+	canceller := m.cancelLostRunDecisions
+	m.mu.Unlock()
+	if canceller == nil {
+		return
+	}
+	reason := terminal.ErrorCode
+	if reason == "" {
+		reason = terminal.State
+	}
+	cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := canceller(cancelCtx, terminal.BotID, terminal.SessionID, terminal.RunID, terminal.FencingToken, reason); err != nil {
+		m.logger.WarnContext(ctx, "cancel unfinalized run decisions failed", slog.String("run_id", terminal.RunID), slog.Any("error", err))
+	}
 }
 
 func (m *Manager) observeTerminalRun(ctx context.Context, run TerminalRun) {
@@ -747,6 +775,7 @@ func (m *Manager) reconcileLocalFinishHandoffs(ctx context.Context) error {
 			continue
 		}
 		m.cleanupFinishedRun(context.WithoutCancel(ctx), handle)
+		m.cancelUnfinalizedDecisions(ctx, terminal)
 		m.observeTerminalRun(ctx, terminal)
 		key := scopedRunControlKey(handle.BotID, handle.SessionID, handle.RunID)
 		m.mu.Lock()
@@ -895,15 +924,20 @@ func (m *Manager) startReaper(ctx context.Context) error {
 	if m.runs == nil || m.liveness == nil {
 		return nil
 	}
-	reaper := NewReaper(m.runs, m.liveness, m.tuning, m.ownerID, m.logger)
+	tune := m.tuning
+	if m.distributed == nil {
+		// A memory generation ends with its process, and a memory backend is
+		// single-instance by configuration, so a stale generation is never an
+		// owner reconnecting through a blip. Waiting out the grace would only
+		// keep parked decisions unanswerable after a restart.
+		tune.backendLossGrace = 0
+	}
+	reaper := NewReaper(m.runs, m.liveness, tune, m.ownerID, m.logger)
 	reaper.SetWaitingDecisionRecoverer(m.recoverWaitingDecision)
 	reaper.SetTerminalLiveReconciler(m.reconcileTerminalLive)
 	reaper.SetTerminalObserver(m.observeTerminalRun)
 	reaper.SetTerminalReconciler(m.reconcileTerminalRuns)
-	m.mu.Lock()
-	cancelLostRunDecisions := m.cancelLostRunDecisions
-	m.mu.Unlock()
-	reaper.SetLostRunDecisionCanceller(cancelLostRunDecisions)
+	reaper.SetUnfinalizedDecisionCanceller(m.cancelUnfinalizedDecisions)
 	if err := reaper.Start(ctx); err != nil {
 		return err
 	}
@@ -1186,17 +1220,9 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 		}
 		return snapshot, true, nil
 	}
-	var claimedSnapshot Snapshot
-	var changed bool
-	if m.distributed != nil {
-		claimedSnapshot, changed, err = m.distributed.StartRun(ctx, key, RunRef{
-			BotID: botID, SessionID: sessionID, RunID: runID, OwnerID: m.ownerID, Generation: runGeneration, FencingToken: start.fencingToken,
-		}, claim)
-	} else if gated, ok := m.backend.(historyResetStartBackend); ok {
-		claimedSnapshot, changed, err = gated.StartRunIfNoHistoryReset(ctx, key, claim)
-	} else {
-		claimedSnapshot, changed, err = m.backend.Update(ctx, key, claim)
-	}
+	claimedSnapshot, changed, err := m.reserveLiveRun(ctx, key, RunRef{
+		BotID: botID, SessionID: sessionID, RunID: runID, OwnerID: m.ownerID, Generation: runGeneration, FencingToken: start.fencingToken,
+	}, claim)
 	if err != nil {
 		if ctrl.abortWasRequested() {
 			reconcileErr := m.reconcileCanceledRunClaim(context.WithoutCancel(ctx), ctrl)
@@ -2530,6 +2556,20 @@ func (m *Manager) releaseActiveAndPublish(ctx context.Context, handle RunHandle,
 		m.logger.WarnContext(ctx, "publish runtime release delta failed; subscribers will reconcile from snapshot", slog.Any("error", err), slog.String("run_id", handle.RunID))
 	}
 	return snapshot, true, nil
+}
+
+// reserveLiveRun claims the session's live slot for a run this manager owns.
+// Admission and parked-decision recovery share it, so a recovered run is
+// reserved exactly as an admitted one: a lease reference on a distributed
+// backend, and behind the history-reset gate on a memory backend.
+func (m *Manager) reserveLiveRun(ctx context.Context, key Key, ref RunRef, claim SnapshotUpdate) (Snapshot, bool, error) {
+	if m.distributed != nil {
+		return m.distributed.StartRun(ctx, key, ref, claim)
+	}
+	if gated, ok := m.backend.(historyResetStartBackend); ok {
+		return gated.StartRunIfNoHistoryReset(ctx, key, claim)
+	}
+	return m.backend.Update(ctx, key, claim)
 }
 
 func (m *Manager) runOwnerMatches(run *CurrentRunView) bool {

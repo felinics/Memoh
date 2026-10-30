@@ -579,6 +579,12 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 		run.TurnID != target.TurnID || run.FencingToken != target.FencingToken {
 		return result, ErrCommandTargetMismatch
 	}
+	if run.State.Terminal() {
+		// The run ended without closing this request: its cleanup failed, or a
+		// server without it ended the run. Close it now so the request stops
+		// offering an answer that nothing will apply.
+		m.cancelUnfinalizedDecisions(ctx, terminalRunFromLedger(run))
+	}
 	if run.State != ledger.StateWaitingDecision {
 		return result, nil
 	}

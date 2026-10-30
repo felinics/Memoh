@@ -45,7 +45,7 @@ func newShutdownDecisionFixture(t *testing.T) shutdownDecisionFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.reserveRecoveredWaitingDecision(t.Context(), run); err != nil {
+	if err := manager.reserveRecoveredWaitingDecision(t.Context(), run, nil); err != nil {
 		t.Fatal(err)
 	}
 	ctrl := manager.localControlForScope(testBotID, testSessionID, runID)

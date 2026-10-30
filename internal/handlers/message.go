@@ -418,7 +418,7 @@ func (h *MessageHandler) toolApprovalCanApproveFn(sess session.Thread) func(tool
 }
 
 func (h *MessageHandler) userInputCanRespondFn(sess session.Thread) func(userinput.Request) bool {
-	// nil keeps mergeUserInputs' native default: a pending row can respond.
+	// nil keeps ApplyUserInputs' native default: a pending row can respond.
 	if h == nil || h.userInput == nil || !session.UsesDecisionWaiter(sess) {
 		return nil
 	}
@@ -459,10 +459,10 @@ func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID s
 	}
 	wg.Wait()
 	if len(approvals) > 0 {
-		mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(sess))
+		chatview.ApplyToolApprovals(items, approvals, h.toolApprovalCanApproveFn(sess))
 	}
 	if len(requests) > 0 {
-		mergeUserInputs(items, requests, h.userInputCanRespondFn(sess))
+		chatview.ApplyUserInputs(items, requests, h.userInputCanRespondFn(sess))
 	}
 }
 
@@ -489,105 +489,6 @@ func toolCallIDsFromUITurns(turns []chatview.UITurn) []string {
 		}
 	}
 	return ids
-}
-
-func mergeToolApprovals(turns []chatview.UITurn, approvals []toolapproval.Request, canApproveFn func(toolapproval.Request) bool) {
-	if len(turns) == 0 || len(approvals) == 0 {
-		return
-	}
-	if canApproveFn == nil {
-		canApproveFn = func(req toolapproval.Request) bool {
-			return toolapproval.CanApprove(req.Status)
-		}
-	}
-	byCallID := make(map[string]toolapproval.Request, len(approvals))
-	for _, approval := range approvals {
-		if callID := strings.TrimSpace(approval.ToolCallID); callID != "" {
-			byCallID[callID] = approval
-		}
-	}
-	for turnIdx := range turns {
-		if turns[turnIdx].Role != "assistant" {
-			continue
-		}
-		for msgIdx := range turns[turnIdx].Messages {
-			msg := &turns[turnIdx].Messages[msgIdx]
-			if msg.Type != chatview.UIMessageTool {
-				continue
-			}
-			approval, ok := byCallID[strings.TrimSpace(msg.ToolCallID)]
-			if !ok {
-				continue
-			}
-			running := false
-			msg.Running = &running
-			msg.Approval = &chatview.UIToolApproval{
-				ApprovalID:       approval.ID,
-				ShortID:          approval.ShortID,
-				Status:           approval.Status,
-				DecisionReason:   approval.DecisionReason,
-				CanApprove:       canApproveFn(approval),
-				Options:          uiToolApprovalOptions(approval.Options),
-				SelectedOptionID: approval.SelectedOptionID,
-			}
-		}
-	}
-}
-
-func uiToolApprovalOptions(options []toolapproval.PermissionOption) []chatview.UIToolApprovalOption {
-	if len(options) == 0 {
-		return nil
-	}
-	converted := make([]chatview.UIToolApprovalOption, 0, len(options))
-	for _, option := range options {
-		converted = append(converted, chatview.UIToolApprovalOption{
-			ID:   option.ID,
-			Name: option.Name,
-			Kind: option.Kind,
-		})
-	}
-	return converted
-}
-
-func mergeUserInputs(turns []chatview.UITurn, requests []userinput.Request, canRespondFn func(userinput.Request) bool) {
-	if len(turns) == 0 || len(requests) == 0 {
-		return
-	}
-	byCallID := make(map[string]userinput.Request, len(requests))
-	for _, req := range requests {
-		if callID := strings.TrimSpace(req.ToolCallID); callID != "" {
-			byCallID[callID] = req
-		}
-	}
-	for turnIdx := range turns {
-		if turns[turnIdx].Role != "assistant" {
-			continue
-		}
-		for msgIdx := range turns[turnIdx].Messages {
-			msg := &turns[turnIdx].Messages[msgIdx]
-			if msg.Type != chatview.UIMessageTool {
-				continue
-			}
-			req, ok := byCallID[strings.TrimSpace(msg.ToolCallID)]
-			if !ok {
-				continue
-			}
-			running := false
-			msg.Running = &running
-			canRespond := req.Status == userinput.StatusPending
-			if canRespondFn != nil {
-				canRespond = canRespondFn(req)
-			}
-			msg.UserInput = &chatview.UIUserInput{
-				UserInputID: req.ID,
-				ShortID:     req.ShortID,
-				Status:      req.Status,
-				Questions:   req.UIPayload.Questions,
-				Answers:     userinput.AnswersFromResult(req.Result),
-				CanRespond:  canRespond,
-			}
-		}
-	}
 }
 
 func parseBeforeParam(s string) (time.Time, bool) {

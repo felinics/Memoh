@@ -149,9 +149,9 @@ func TestSRCTL001DecisionControlIDReplaysAfterTerminal(t *testing.T) {
 		t.Fatalf("send stale decision under fresh control id: %v", err)
 	}
 	staleAck := mustReadControlAck(t, replayer, freshControlID)
-	if staleAck.Applied || eventCode(staleAck) != "" {
+	if staleAck.Applied || eventCode(staleAck) != "user_input.expired" {
 		t.Errorf(
-			"stale decision ack = %#v, want a resolved no-op with applied=false and no retry code",
+			"stale decision ack = %#v, want applied=false with user_input.expired",
 			staleAck,
 		)
 	}
