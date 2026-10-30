@@ -86,6 +86,11 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for custom configuration and production setup
 
 </details>
 
+## One-Click Deploy
+
+<a href="https://repocloud.io/details/Memoh/"><img src="https://d16t0pc4846x52.cloudfront.net/deploylobe.svg" alt="Deploy on RepoCloud" height="42"></a>
+<a href="https://railway.com/deploy/memoh"><img src="https://railway.com/button.svg" alt="Deploy on Railway" height="42"></a>
+
 ## Why Memoh?
 
 - **Every agent gets its own computer**: An isolated workspace with its own filesystem, network, desktop, and browser.
