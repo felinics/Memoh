@@ -8,7 +8,6 @@
          chain (and with it the composer) rises natively. iOS Safari ignores
          the hint — there the lift comes from useVirtualKeyboard instead. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
-    <title>Memoh</title>
     <!-- Theme before the first paint. The settings store sets the dark class and
          the color scheme on <html> only once the app script has run; until then
          the page paints the default light background, a bright flash before a
@@ -29,6 +28,7 @@
         } catch (e) {}
       })()
     </script>
+    <title>Memoh</title>
     <!-- Home-screen install on mobile. Icons are generated from logo.svg by
          `pnpm --filter @memohai/web icons`. The theme-color pair is the initial
          guess from the OS preference (memoh scheme --background); the settings
