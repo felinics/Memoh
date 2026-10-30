@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -165,6 +166,7 @@ func TestArmedRunFailsClosedWhenTheEventDoesNotFit(t *testing.T) {
 		{name: "protected overflow", err: fmt.Errorf("%w: protected_overflow", contextfrag.ErrProtectedContextOverflow), want: contextfrag.ErrProtectedContextOverflow, detail: "trigger=in_run passes=0 reason=protected_overflow"},
 		{name: "still over", fold: rowSources("h1"), want: contextfrag.ErrBudgetUnsatisfied, detail: "trigger=in_run reason=still_over"},
 		{name: "result without its call", fold: rowSources("h1", "h2", "r1"), want: contextfrag.ErrBudgetUnsatisfied, detail: "trigger=in_run reason=postcondition"},
+		{name: "call without its result", fold: rowSources("h1", "h2", "c1"), want: contextfrag.ErrBudgetUnsatisfied, detail: "trigger=in_run reason=postcondition"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -180,6 +182,68 @@ func TestArmedRunFailsClosedWhenTheEventDoesNotFit(t *testing.T) {
 			details := switchDetails(cfg)
 			if !errors.Is(*failure, tc.want) || len(details) != 1 || !strings.HasPrefix(details[0], tc.detail) {
 				t.Fatalf("failure=%v details=%q, want %v recorded as %q", *failure, details, tc.want, tc.detail)
+			}
+		})
+	}
+}
+
+// A call whose run ended before its answer is closed by a result the read
+// path writes from the call's row. A fold that covers the call removes the
+// closure with it; a closure that named no source would stay behind, answer
+// a call the request no longer carries, and fail the event instead of being
+// sent.
+func TestArmedRunFoldsAClosureWithItsCall(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		sources []turn.ContextMessageSource
+		want    error
+	}{
+		{name: "closure renders from the call row", sources: rowSources("c0")},
+		{name: "closure without a source", want: contextfrag.ErrBudgetUnsatisfied},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			messages, provenance := switchRequest()
+			abandoned := sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.ToolCallPart{ToolCallID: "c0", ToolName: "ask_user", Input: toolexec.ArgumentsFromValue(map[string]any{})}}}
+			closure := sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "c0", ToolName: "ask_user", Result: toolexec.OutputFromValue("interrupted"), IsError: true})
+			messages = slices.Insert(messages, 2, abandoned, closure)
+			known := []MessageProvenance{{Message: abandoned, Sources: rowSources("c0")}}
+			if tc.sources != nil {
+				known = append(known, MessageProvenance{Message: closure, Sources: tc.sources})
+			}
+			provenance = slices.Insert(provenance, 2, known...)
+			summary := sdk.UserMessage("<summary>\nnew\n")
+			want := []sdk.Message{messages[4], messages[5], messages[7], summary, messages[10], messages[11], messages[12]}
+			// The window also holds a closure left behind, as an orphan
+			// small enough to send would be.
+			window := contextfrag.ProviderEnvelopeTokens("", append(slices.Clone(want), closure), nil) + 8
+			var failure error
+			cfg := RunConfig{
+				ContextMutations: contextfrag.NewMutationLedger(),
+				ContextManifest:  contextfrag.Manifest{BudgetPlan: &contextfrag.ContextBudgetPlan{Window: window}},
+				SwitchContext: func(_ context.Context, sw ContextSwitch) (string, error) {
+					sw.Fold(ContextFold{Artifact: "A1", Summary: summary, Covered: rowSources("h1", "c0", "h2", "c1", "r1"), Absorbed: []string{"A0"}})
+					return "trigger=in_run passes=1", nil
+				},
+				ContextProvenance: provenance,
+			}
+			cfg.contextSwitch = newContextSwitchState(cfg)
+			cfg.contextSwitch.committed(messages[11:], []MessageProvenance{{Sources: rowSources("c2")}, {Sources: rowSources("r2")}})
+			cfg.contextStepFailure = func(err error) { failure = err }
+			params := prepareProviderAttempt(context.Background(), cfg, newProviderAttemptHandoff(cfg), false, 8, 2, nil,
+				&sdk.Request{Messages: slices.Clone(messages)})
+
+			if tc.want != nil {
+				details := switchDetails(cfg)
+				if !errors.Is(failure, tc.want) || len(details) != 1 || !strings.HasPrefix(details[0], "trigger=in_run reason=postcondition") {
+					t.Fatalf("failure=%v details=%q, want the event to fail on the result it left without its call", failure, details)
+				}
+				return
+			}
+			if failure != nil || !reflect.DeepEqual(params.Messages, want) {
+				t.Fatalf("failure=%v messages=%d, want the call and its closure replaced by the summary and every other message unchanged", failure, len(params.Messages))
 			}
 		})
 	}

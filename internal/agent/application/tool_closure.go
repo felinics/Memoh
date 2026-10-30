@@ -8,6 +8,7 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 const syntheticToolClosureError = "tool execution interrupted before a response was recorded"
@@ -15,6 +16,10 @@ const syntheticToolClosureError = "tool execution interrupted before a response 
 type pendingToolCall struct {
 	ID       string
 	ToolName string
+	// Source is the stored message that made the call. The result that
+	// closes it renders from that message, so a fold that covers the call
+	// removes the closure with it.
+	Source *turn.ContextMessageSource
 }
 
 type projectedToolCallKey struct {
@@ -44,7 +49,9 @@ func repairToolCallClosures(messages []ModelMessage, reason string) []ModelMessa
 			if !ok {
 				continue
 			}
-			repaired = append(repaired, syntheticToolResultMessage(call.ID, call.ToolName, reason))
+			closure := syntheticToolResultMessage(call.ID, call.ToolName, reason)
+			closure.ContextSource = call.Source
+			repaired = append(repaired, closure)
 			delete(pending, callID)
 		}
 		pendingOrder = pendingOrder[:0]
@@ -69,6 +76,7 @@ func repairToolCallClosures(messages []ModelMessage, reason string) []ModelMessa
 				pending[callID] = pendingToolCall{
 					ID:       callID,
 					ToolName: strings.TrimSpace(call.ToolName),
+					Source:   msg.ContextSource,
 				}
 				pendingOrder = append(pendingOrder, callID)
 			}

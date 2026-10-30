@@ -58,7 +58,10 @@ call/result is the tail; earlier committed work remains eligible. The summarizer
 sees anchors inline but never claims their coverage.
 
 The native runtime applies each committed replacement to its own request snapshot.
-Uncovered messages retain their bytes. `turn.PlaceSummary` also governs record and
+Uncovered messages retain their bytes. A result the read path writes for a deferred
+call whose decision ended without one renders from the call's row, so a fold that
+covers the call removes it too; a splice that leaves a call without its result, or a
+result without its call, fails the event. `turn.PlaceSummary` also governs record and
 pipeline replay: retained entries inside the covered span precede the summary.
 Per-source coverage times and event cursors survive rollup, so refolding a summary
 cannot hide an edit it never read. Stored message hashes survive replay projections;
