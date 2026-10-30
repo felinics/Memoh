@@ -33,6 +33,12 @@ export function createSessionActivity(deps: {
   markAllSessionViewsStale?: (botId: string) => void
 }) {
   const visibleSummaryRequests = new Map<string, Promise<SessionSummary | null>>()
+  // Keyed by bot and session, and only read while that summary is unknown.
+  // reset() keeps them: initialize() resets at the start of every bot load,
+  // and a pane's request that already failed before that point would
+  // otherwise lose its retry. Each new request clears its own key first, so
+  // a kept entry never outlives the next attempt; a user-scope change clears
+  // them all (reset({ userScope: true })).
   const visibleSummaryFailures = ref(new Set<string>())
 
   function visibleSummaryKey(botId: string, sessionId: string): string {
@@ -272,12 +278,12 @@ export function createSessionActivity(deps: {
     scheduleActivityRevisions,
     isSessionCompacting,
     beginSessionCompaction,
-    reset: () => {
+    reset: (options: { userScope?: boolean } = {}) => {
+      if (options.userScope) visibleSummaryFailures.value = new Set()
       compactingSessions.value = {}
       scheduleActivityRevisions.value = {}
       manualCompactions.value.clear()
       visibleSummaryRequests.clear()
-      visibleSummaryFailures.value = new Set()
       persistedSessionRefreshes.clear()
       loadMoreRequestVersion += 1
       deps.loadingMoreSessions.value = false

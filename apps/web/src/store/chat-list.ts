@@ -398,7 +398,7 @@ export const useChatStore = defineStore('chat', () => {
     resetBootstrap()
     resetStartupSendFailures()
     resetSessionActions()
-    resetSessionActivity()
+    resetSessionActivity({ userScope: true })
     draftSessionCreations.clear()
     resetCommandEvents()
     resetFsBeacon()

@@ -2897,9 +2897,12 @@ const composerHasNoModel = computed(() =>
 // While the bot's settings or this view's remembered pair are still loading,
 // an empty model is not known to be missing yet: the send waits instead of
 // reporting it, and the picker reads Loading rather than None.
+// A session's remembered model arrives with its summary, so a summary still
+// on its way counts as loading too; a failed one shows its own retry notice.
 const composerModelResolving = computed(() =>
   (!!currentBotId.value && botSettingsStatus.value === 'pending')
-  || paneView.value.pairSync.refreshing.value,
+  || paneView.value.pairSync.refreshing.value
+  || (activeSessionSummaryUnresolved.value && !activeSessionSummaryFailed.value),
 )
 
 const selectedModelLabel = computed(() => {
