@@ -52,9 +52,12 @@ func TestPostgresInRunFoldTakesAnAbandonedDecisionWithItsCall(t *testing.T) {
 			if code := s.chat(asked); code != "" {
 				t.Fatalf("the deciding turn failed with %s", code)
 			}
-			if err := f.service.AbortSessionRuns(f.ctx, f.botID, f.sessionID); err != nil {
+			// The run goes the way a history reset ends it: stopped and waited out.
+			_, release, err := f.manager.BeginSessionHistoryReset(f.ctx, f.botID, f.sessionID)
+			if err != nil {
 				t.Fatal(err)
 			}
+			release()
 			var results int
 			if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM bot_history_messages WHERE session_id=$1 AND role='tool'`, f.sessionID).Scan(&results); err != nil {
 				t.Fatal(err)
