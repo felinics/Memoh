@@ -2847,6 +2847,7 @@
       "chatgptAccountConnectedDescription": "Codex is signed in to ChatGPT in this Agent's workspace.",
       "signedInAs": "Signed in as {account}",
       "checkingSignIn": "Checking sign-in…",
+      "enableToSignIn": "Enable this Agent to check or connect its account.",
       "signInCheckFailed": "Couldn't check the sign-in.",
       "reconnect": "Reconnect",
       "codexDeviceHint": "Open the verification page and enter this one-time code. Only enter it on the OpenAI verification address shown there. Memoh will finish authorization automatically.",

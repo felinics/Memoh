@@ -15,6 +15,7 @@ const props = defineProps<{
   /** Shown instead of the account description, e.g. while the sign-in is being checked. */
   note?: string
   authorizing: boolean
+  disabled?: boolean
   deviceLogin?: { user_code: string, verification_url: string } | null
 }>()
 const emit = defineEmits<{ connect: [], cancel: [] }>()
@@ -46,6 +47,7 @@ onDeactivated(() => { active.value = false })
         size="sm"
         class="shrink-0"
         :loading="authorizing"
+        :disabled="disabled && !devicePending"
         loading-mode="manual"
         @click="devicePending ? emit('cancel') : emit('connect')"
       >

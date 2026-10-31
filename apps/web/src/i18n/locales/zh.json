@@ -2847,6 +2847,7 @@
       "chatgptAccountConnectedDescription": "Codex 已在此 Agent 的工作区里登录 ChatGPT。",
       "signedInAs": "已登录：{account}",
       "checkingSignIn": "正在检查登录状态…",
+      "enableToSignIn": "请先启用此 Agent，再检查或连接账号。",
       "signInCheckFailed": "无法检查登录状态。",
       "reconnect": "重新连接",
       "codexDeviceHint": "打开验证页面并输入这个一次性代码。只在页面显示的 OpenAI 验证地址输入此代码。Memoh 会自动完成授权。",

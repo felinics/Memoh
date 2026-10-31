@@ -112,6 +112,7 @@
         :authorized="credentialConnected"
         :account="runtimeSignIn ? runtimeAccount.data.value?.email : undefined"
         :note="accountNote"
+        :disabled="!agentEnabled"
         :authorizing="authorizing"
         :device-login="deviceLogin"
         @connect="startDeviceLogin"
@@ -208,9 +209,10 @@ const runtime = computed(() => normalizeBotAgentRuntime(props.agent.runtime))
 const isCodex = computed(() => runtime.value === BOT_AGENT_RUNTIME_CODEX)
 const isClaudeCode = computed(() => runtime.value === BOT_AGENT_RUNTIME_CLAUDE_CODE)
 const config = reactive<DirectAgentConfig>({ auth: '', base_url: '', model: '', reasoning_effort: '', permission_mode: '' })
+const agentEnabled = computed(() => props.agent.enabled !== false)
 const defaultControls = useQuery({
   key: () => ['bot-agent-runtime-controls', props.botId, props.agent.id ?? '', props.agent.metadata?.permission_mode ?? ''],
-  enabled: () => !!props.agent.id,
+  enabled: () => agentEnabled.value && !!props.agent.id,
   query: async ({ signal }) => {
     const { data } = await getBotsByBotIdAgentsByIdRuntimeControls({
       path: { bot_id: props.botId, id: props.agent.id! },
@@ -238,7 +240,7 @@ const savingCredential = ref(false)
 const runtimeSignIn = computed(() => isDeviceLoginAuthMode(config.auth))
 const runtimeAccount = useQuery({
   key: () => ['agent-account', props.botId, props.agent.id ?? ''],
-  enabled: () => runtimeSignIn.value && !!props.agent.id,
+  enabled: () => agentEnabled.value && runtimeSignIn.value && !!props.agent.id,
   // Reading it starts Codex, so only opening the page and signing in or out do.
   refetchOnWindowFocus: false,
   refetchOnReconnect: false,
@@ -251,9 +253,10 @@ const runtimeAccount = useQuery({
   },
 })
 const credentialConnected = computed(() => runtimeSignIn.value
-  ? !!runtimeAccount.data.value?.signed_in
+  ? agentEnabled.value && !!runtimeAccount.data.value?.signed_in
   : !!props.agent.agent_credential_id)
 const accountNote = computed(() => {
+  if (!agentEnabled.value) return t('bots.agent.enableToSignIn')
   if (!runtimeSignIn.value || runtimeAccount.data.value) return undefined
   if (runtimeAccount.error.value) return resolveApiErrorMessage(runtimeAccount.error.value, t('bots.agent.signInCheckFailed'))
   return t('bots.agent.checkingSignIn')
@@ -412,7 +415,7 @@ async function pollDeviceLogin(loginId: string) {
 }
 
 async function startDeviceLogin() {
-  if (authorizing.value || !isDirectBotAgentRuntime(runtime.value)) return
+  if (!agentEnabled.value || authorizing.value || !isDirectBotAgentRuntime(runtime.value)) return
   stopPolling()
   authorizing.value = true
   try {

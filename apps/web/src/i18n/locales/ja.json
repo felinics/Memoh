@@ -2845,6 +2845,7 @@
       "chatgptAccountConnectedDescription": "Codex はこの Agent の Workspace で ChatGPT にサインインしています。",
       "signedInAs": "{account} でサインイン中",
       "checkingSignIn": "サインイン状態を確認しています…",
+      "enableToSignIn": "アカウントを確認・接続するには、この Agent を有効にしてください。",
       "signInCheckFailed": "サインイン状態を確認できませんでした。",
       "reconnect": "再接続",
       "codexDeviceHint": "認証ページを開き、このワンタイムコードを入力してください。表示された OpenAI の認証ページ以外には入力しないでください。Memoh が認証を自動で完了します。",
