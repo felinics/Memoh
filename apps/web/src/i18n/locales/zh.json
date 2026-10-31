@@ -1861,6 +1861,7 @@
     }
   },
   "chatExamples": {
+    "dismissError": "关闭错误提示",
     "noBot": "请先创建一个 Bot 再试试。",
     "createBot": "创建 Bot",
     "tryThese": "试试这些",

@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useEventListener, usePreferredReducedMotion } from '@vueuse/core'
 import { X } from 'lucide-vue-next'
-import { Button, TextButton, toast } from '@felinic/ui'
+import { Button, CalloutBanner, TextButton } from '@felinic/ui'
 import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-ui'
 import { useStarterPromptsQuery } from '@/composables/api/useStarterPrompts'
+import { parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { useComposerPrefill } from '@/composables/useComposerPrefill'
 import { COMPOSER_PREVIEW_LANDING_MS, type ComposerPreview } from '../composables/useComposerPreview'
 import StarterPromptList, { type StarterPromptRow } from './starter-prompt-list.vue'
@@ -14,8 +15,8 @@ import StarterPromptList, { type StarterPromptRow } from './starter-prompt-list.
  * The bot's own starter prompts for this user, under the welcome composer.
  * They are always generated, from the bot's name alone when it has nothing
  * else yet; while a set is on its way (the first one, or a refresh) the rows
- * show a skeleton, and when none could be generated the section stays
- * folded away. "Refresh" asks for a different set. Hiding the section is
+ * show a skeleton, and failures keep a retryable notice with its request ID. With no title
+ * model configured the section stays folded away. "Refresh" asks for a different set. Hiding the section is
  * remembered on this device; while hidden, the composer's context row shows
  * the entry that brings it back. Hidden by the welcome column's height tiers
  * (style.css) before anything else yields.
@@ -42,7 +43,7 @@ const { welcomeDismissed } = useChatExamplesUi()
 const { prefillComposer } = useComposerPrefill()
 const reducedMotion = usePreferredReducedMotion()
 
-const { data: starterSet, status: starterStatus, refresh: refreshStarterSet, refreshing } = useStarterPromptsQuery(() => props.botId)
+const { data: starterSet, status: starterStatus, refresh: refreshStarterSet, refreshing, error: starterError } = useStarterPromptsQuery(() => props.botId)
 
 /** The generated rows, or null while a set is on its way (skeleton). */
 const rows = computed<StarterPromptRow[] | null>(() => {
@@ -58,11 +59,19 @@ const rows = computed<StarterPromptRow[] | null>(() => {
 /** Whether the composer is currently showing the preview. */
 const previewShown = computed(() => props.composerReplaceable && preview.value !== null)
 
-const visible = computed(() => !welcomeDismissed.value && (rows.value === null || rows.value.length > 0))
+const visible = computed(() => !welcomeDismissed.value && (rows.value === null || rows.value.length > 0 || !!starterError.value))
+const errorDismissed = ref(false)
+/** Dismissal belongs to one failure on one bot, never to future attempts. */
+watch([() => props.botId, starterError], () => { errorDismissed.value = false })
+const errorMessage = computed(() => starterError.value
+  ? resolveApiErrorMessage(starterError.value, t('chatExamples.refreshFailed'))
+  : '')
+const requestId = computed(() => parseMemohError(starterError.value)?.requestId)
 
 async function refresh() {
+  errorDismissed.value = false
   preview.value = null
-  if (!(await refreshStarterSet())) toast.error(t('chatExamples.refreshFailed'))
+  await refreshStarterSet()
 }
 
 function setPreview(prompt: string | null) {
@@ -141,6 +150,21 @@ async function select(row: StarterPromptRow) {
         </Button>
       </div>
     </div>
+    <CalloutBanner
+      v-if="starterError && !refreshing && !errorDismissed"
+      tone="destructive"
+      size="sm"
+      :description="errorMessage"
+      :dismiss-label="$t('chatExamples.dismissError')"
+      @dismiss="errorDismissed = true"
+    >
+      <template
+        v-if="requestId"
+        #details
+      >
+        {{ $t('common.requestId') }}: {{ requestId }}
+      </template>
+    </CalloutBanner>
     <StarterPromptList
       :rows="rows"
       :enter-hint="composerReplaceable"
