@@ -158,7 +158,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	// live InjectCh messages and read-media carriers.
 	dynamic := newLoopDynamicInputs(cfg.StepIndexOffset)
 	cfg.dynamicInputs = dynamic
-	prepareStep := a.wrapPrepareStepWithModelHook(streamCtx, cfg, nil)
+	prepareStep := a.wrapPrepareStepWithModelHook(streamCtx, cfg)
 	var err error
 	cfg, err = a.applyBeforeModelCallHook(streamCtx, cfg, 0)
 	if err != nil {
@@ -482,7 +482,7 @@ type streamEngine struct {
 	stepThread
 	sdkTools      []toolexec.Tool
 	approvalTools []toolexec.Tool
-	prepareStep   func(*sdk.Request) *sdk.Request
+	prepareStep   prepareStepFunc
 
 	toolExecutionMetadata *toolExecutionMetadataRegistry
 	dynamic               *loopDynamicInputs
@@ -553,32 +553,35 @@ func (e *streamEngine) run() {
 	for {
 		// A retried dispatch's first call skips the boundary drain, exactly
 		// like the initial dispatch's step zero.
-		stepParams := e.advance(e.baseCfg, e.dynamic, stepBoundary{
+		stepParams, prepareErr := e.advance(e.baseCfg, e.dynamic, stepBoundary{
 			first:         attemptStep == 0,
 			committed:     len(e.steps),
 			readMedia:     e.readMedia,
 			drainInjected: e.drainInjectedMessages,
 		})
-		if next, ok := e.baseCfg.contextSwitch.redispatch(e.cfg, e.dispatch, stepParams); ok {
-			// A later mid-stream retry dispatches from the request as the
-			// event left it.
-			e.baseCfg.ContextCachePlan = next.ContextCachePlan
-			e.baseCfg.initialProviderMessageCount = next.initialProviderMessageCount
-			e.cfg = next
-			dispatch, err := e.agent.buildGenerateDispatch(e.streamCtx, next, e.sdkTools, e.approvalTools, e.prepareStep)
-			if err != nil {
-				e.endWithFailure(localFailureEvent(err))
-				return
+		if prepareErr == nil {
+			if next, ok := e.baseCfg.contextSwitch.redispatch(e.cfg, e.dispatch, stepParams); ok {
+				// A later mid-stream retry dispatches from the request as the
+				// event left it.
+				e.baseCfg.ContextCachePlan = next.ContextCachePlan
+				e.baseCfg.initialProviderMessageCount = next.initialProviderMessageCount
+				e.cfg = next
+				dispatch, err := e.agent.buildGenerateDispatch(e.streamCtx, next, e.sdkTools, e.approvalTools, e.prepareStep)
+				if err != nil {
+					e.endWithFailure(localFailureEvent(err))
+					return
+				}
+				e.reset(dispatch)
+				attemptSteps, attemptStep = nil, 0
+				stepParams, prepareErr = e.advance(e.baseCfg, e.dynamic, stepBoundary{first: true, committed: len(e.steps)})
 			}
-			e.reset(dispatch)
-			attemptSteps, attemptStep = nil, 0
-			stepParams = e.advance(e.baseCfg, e.dynamic, stepBoundary{first: true, committed: len(e.steps)})
 		}
 
 		// Dispatch boundary: never invoke the provider on a dead or
-		// budget-failed context, and publish the staged provider-attempt state
-		// exactly once per call. The budget failure surfaces as the public
-		// context error in the segment owner, never as a raw provider error.
+		// budget-failed context, or for a call the prepare chain refused, and
+		// publish the staged provider-attempt state exactly once per call. The
+		// budget failure surfaces as the public context error in the segment
+		// owner, never as a raw provider error.
 		if contextStepBudgetError(e.streamCtx) != nil {
 			e.dispatch.handoff.reject()
 			e.aborted = true
@@ -587,6 +590,11 @@ func (e *streamEngine) run() {
 		if e.streamCtx.Err() != nil {
 			e.dispatch.handoff.reject()
 			e.aborted = true
+			return
+		}
+		if prepareErr != nil {
+			e.dispatch.handoff.reject()
+			e.localFailure(prepareErr)
 			return
 		}
 
@@ -1084,8 +1092,8 @@ func (e *streamEngine) providerFailure(err error) (retry error) {
 }
 
 // localFailure ends the run on a failure of the loop's own work: the
-// provider-attempt handoff, the commit barrier, a capability refresh or the
-// tool batch. It is never retried, since the step's tools may already have
+// prepare chain refusing a call, the provider-attempt handoff, the commit
+// barrier, a capability refresh or the tool batch. It is never retried, since the step's tools may already have
 // run. The context-budget fence applies as in providerFailure.
 func (e *streamEngine) localFailure(err error) {
 	if contextStepBudgetError(e.streamCtx) != nil {

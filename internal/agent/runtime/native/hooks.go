@@ -207,10 +207,7 @@ func (a *Agent) applyBeforeModelCallHook(ctx context.Context, cfg RunConfig, ste
 	req.Turn = modelCallHookPayload(cfg, step, 0)
 	res, err := a.hookService.Run(ctx, req, nil)
 	if err != nil {
-		if errors.Is(err, hooks.ErrDenied) || res.Decision == hooks.DecisionDeny {
-			return cfg, fmt.Errorf("%w: %s", hooks.ErrDenied, firstHookText(res.Reason, err.Error()))
-		}
-		return cfg, fmt.Errorf("before model call hook failed: %w", err)
+		return cfg, beforeModelCallHookError(res, err)
 	}
 	if strings.TrimSpace(res.AppendContext) != "" {
 		cfg = applyBeforeModelCallAppendContext(cfg, res.AppendContext)
@@ -230,33 +227,36 @@ func applyBeforeModelCallAppendContext(cfg RunConfig, appendContext string) RunC
 	return cfg
 }
 
-func (a *Agent) wrapPrepareStepWithModelHook(ctx context.Context, cfg RunConfig, base func(*sdk.Request) *sdk.Request) func(*sdk.Request) *sdk.Request {
+// beforeModelCallHookError is the failure that refuses a model call: an
+// explicit deny (or a failing action configured to block), or a failing
+// action configured to fail. A failing action configured to be ignored never
+// reaches here.
+func beforeModelCallHookError(res hooks.Result, err error) error {
+	if errors.Is(err, hooks.ErrDenied) || res.Decision == hooks.DecisionDeny {
+		return fmt.Errorf("%w: %s", hooks.ErrDenied, firstHookText(res.Reason, err.Error()))
+	}
+	return fmt.Errorf("before model call hook failed: %w", err)
+}
+
+// wrapPrepareStepWithModelHook runs the before-model-call hook ahead of every
+// model call after the first, with the same authority it has over the first
+// (applyBeforeModelCallHook): a refusal ends the run before anything else in
+// the prepare chain runs or the call is dispatched.
+func (a *Agent) wrapPrepareStepWithModelHook(ctx context.Context, cfg RunConfig) prepareStepFunc {
 	if a == nil || a.hookService == nil {
-		return base
+		return nil
 	}
 	step := 1
-	return func(p *sdk.Request) *sdk.Request {
-		if base != nil {
-			if override := base(p); override != nil {
-				p = override
-			}
-		}
+	return func(p *sdk.Request) (*sdk.Request, error) {
 		currentStep := step
 		req := a.baseHookRequest(ctx, cfg, hooks.EventBeforeModelCall)
 		req.Turn = modelCallHookPayload(cfg, currentStep, len(p.Messages))
 		step++
 		res, err := a.hookService.Run(ctx, req, nil)
 		if err != nil {
-			if a.logger != nil {
-				a.logger.WarnContext(ctx, "before model call hook failed",
-					slog.String("bot_id", cfg.Identity.BotID),
-					slog.String("session_id", cfg.Identity.SessionID),
-					slog.Any("error", err),
-				)
-			}
-			return p
+			return nil, beforeModelCallHookError(res, err)
 		}
-		return applyStepHookAppendContext(p, cfg.ContextMutations, currentStep, res.AppendContext)
+		return applyStepHookAppendContext(p, cfg.ContextMutations, currentStep, res.AppendContext), nil
 	}
 }
 
