@@ -45,7 +45,7 @@ func (*BackgroundProvider) Usage(_ context.Context, _ SessionContext, available 
 		parts = append(parts, ref+": wait for a short fixed duration when there is no specific task to observe")
 	}
 	if ref, ok := available.Ref(ToolWaitUntil()); ok {
-		parts = append(parts, ref+": observe a background task until it finishes, stalls, goes quiet (idle), or the wait times out")
+		parts = append(parts, ref+": wait for a background task to finish or need attention; use mode=idle explicitly to observe a server's output silence")
 	}
 	if ref, ok := available.Ref(ToolGetBackgroundStatus()); ok {
 		parts = append(parts, ref+": inspect a background task and read its result")
@@ -56,7 +56,7 @@ func (*BackgroundProvider) Usage(_ context.Context, _ SessionContext, available 
 	if len(parts) == 0 {
 		return ""
 	}
-	parts = append(parts, "After starting long work in the background, call `wait_until(task_id)`: it returns with a `reason` (completed/failed/killed/unknown/stalled/idle/timeout) and the latest `output_tail`. For finite work (installs, builds, tests), re-wait until it completes, then read `result` via `get_background_status(task_id)`. For servers/watchers that never exit, `reason: \"idle\"` with a ready message in `output_tail` means the service is up — proceed instead of waiting for completion.")
+	parts = append(parts, "After starting finite work in the background (installs, builds, tests), call `wait_until(task_id)`: mode=completion is the default and output silence does not end the wait. A `reason: \"timeout\"` ends only this wait; call wait_until again for the same task. Waiting neither cancels the task nor extends its execution deadline. On completion, read `result` via `get_background_status(task_id)`. For servers/watchers that never exit, explicitly use `wait_until(task_id, mode=\"idle\")`: `reason: \"idle\"` means only that output is quiet; verify a ready message in `output_tail` before proceeding. Treat failed/killed/unknown/stalled as outcomes needing attention, not successful completion.")
 	return usageSection("Background Tasks", parts)
 }
 
@@ -70,8 +70,9 @@ type (
 	}
 	waitUntilArgs struct {
 		TaskID      string   `json:"task_id" jsonschema:"Background task ID"`
-		Timeout     *float64 `json:"timeout,omitempty" jsonschema:"Max seconds to wait before returning with reason 'timeout'. Default 120, max 600. The task keeps running; call wait_until again to keep observing."`
-		IdleTimeout *float64 `json:"idle_timeout,omitempty" jsonschema:"Seconds of output silence after which a running command returns with reason 'idle'. Default 20, max 300. Only applies to exec tasks."`
+		Mode        string   `json:"mode,omitempty" jsonschema:"completion (default) waits for a terminal state or attention, regardless of output silence. idle observes output silence for servers/watchers that do not exit."`
+		Timeout     *float64 `json:"timeout,omitempty" jsonschema:"Max seconds for this wait. Default 120, max 600. On reason 'timeout', wait again for the same task. This does not cancel the task or extend its execution deadline."`
+		IdleTimeout *float64 `json:"idle_timeout,omitempty" jsonschema:"Seconds of output silence before reason 'idle'. Default 20, max 300. Only applies to exec tasks with mode=idle; ignored in completion mode."`
 	}
 	taskArgs struct {
 		TaskID string `json:"task_id" jsonschema:"Background task ID"`
@@ -92,10 +93,10 @@ func (p *BackgroundProvider) Tools(_ context.Context, session SessionContext) ([
 			func(ctx *toolexec.ToolExecContext, args waitArgs) (sdk.ToolOutput, error) {
 				return toolexec.OutputPair(p.execWait(ctx.Context, sess, args, ctx.SendProgress))
 			}, toolexec.Range("duration", 0, 300)),
-		toolexec.Define(ToolWaitUntil().String(), "Observe a background task for a bounded time. Returns with a reason: completed/failed/killed, unknown (execution connection lost; refresh dependency state before retrying), stalled (interactive prompt), idle (still running but output quiet for idle_timeout), or timeout — always with the latest output_tail. For servers/watchers that never exit (dev server, watch mode), reason 'idle' plus a ready message in output_tail (e.g. a local URL) means the service is up; do not keep waiting for completion.",
+		toolexec.Define(ToolWaitUntil().String(), "Wait for a background task within a bounded wait budget. Defaults to mode=completion: output silence does not end the wait. Returns reason completed/failed/killed, unknown (execution connection lost), stalled (interactive prompt), or timeout, with the latest output_tail when available. A timeout ends only this wait; the task keeps its original execution deadline and can be waited on again. For servers/watchers that never exit, explicitly select mode=idle to also return when output is quiet for idle_timeout; verify a ready message in output_tail before treating the service as ready.",
 			func(ctx *toolexec.ToolExecContext, args waitUntilArgs) (sdk.ToolOutput, error) {
 				return toolexec.OutputPair(p.execWaitUntil(ctx.Context, sess, args, ctx.SendProgress))
-			}, toolexec.Range("timeout", 1, 600), toolexec.Range("idle_timeout", 1, 300)),
+			}, toolexec.EnumStrings("mode", []string{"completion", "idle"}), toolexec.Range("timeout", 1, 600), toolexec.Range("idle_timeout", 1, 300)),
 		toolexec.Define(ToolGetBackgroundStatus().String(), "Get the status and details of a background task. For completed agent/spawn tasks, read the result field.",
 			func(ctx *toolexec.ToolExecContext, args taskArgs) (sdk.ToolOutput, error) {
 				return toolexec.OutputPair(p.execGetBackgroundStatus(ctx.Context, sess, args))
@@ -168,9 +169,18 @@ func (p *BackgroundProvider) execWaitUntil(ctx context.Context, session SessionC
 	if err != nil {
 		return nil, err
 	}
-	idleThreshold, err := optionalSeconds(args.IdleTimeout, "idle_timeout", background.DefaultIdleThreshold, minIdleTimeout, maxIdleTimeout)
-	if err != nil {
-		return nil, err
+	var idleThreshold time.Duration
+	switch strings.TrimSpace(args.Mode) {
+	case "", "completion":
+		// A quiet finite command is still running. IdleTimeout alone must not
+		// opt old calls back into idle observation.
+	case "idle":
+		idleThreshold, err = optionalSeconds(args.IdleTimeout, "idle_timeout", background.DefaultIdleThreshold, minIdleTimeout, maxIdleTimeout)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, errors.New("mode must be completion or idle")
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

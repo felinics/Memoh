@@ -44,17 +44,25 @@
   "wait_until": {
     "properties": {
       "idle_timeout": {
-        "description": "Seconds of output silence after which a running command returns with reason 'idle'. Default 20, max 300. Only applies to exec tasks.",
+        "description": "Seconds of output silence before reason 'idle'. Default 20, max 300. Only applies to exec tasks with mode=idle; ignored in completion mode.",
         "maximum": 300,
         "minimum": 1,
         "type": "number"
+      },
+      "mode": {
+        "description": "completion (default) waits for a terminal state or attention, regardless of output silence. idle observes output silence for servers/watchers that do not exit.",
+        "enum": [
+          "completion",
+          "idle"
+        ],
+        "type": "string"
       },
       "task_id": {
         "description": "Background task ID",
         "type": "string"
       },
       "timeout": {
-        "description": "Max seconds to wait before returning with reason 'timeout'. Default 120, max 600. The task keeps running; call wait_until again to keep observing.",
+        "description": "Max seconds for this wait. Default 120, max 600. On reason 'timeout', wait again for the same task. This does not cancel the task or extend its execution deadline.",
         "maximum": 600,
         "minimum": 1,
         "type": "number"
