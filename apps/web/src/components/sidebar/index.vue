@@ -74,7 +74,6 @@
               <span class="relative shrink-0">
                 <component
                   :is="view.icon"
-                  :stroke-width="1.75"
                   class="size-[18px] shrink-0"
                 />
                 <!-- Unsaved files live on the Files view, so a count here surfaces them
@@ -111,10 +110,7 @@
         :aria-label="t('chat.searchSessions')"
         @click="searchOpen = true"
       >
-        <Search
-          :stroke-width="2"
-          class="size-[18px]"
-        />
+        <Search class="size-[18px]" />
       </Button>
     </nav>
 

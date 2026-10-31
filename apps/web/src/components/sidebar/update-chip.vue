@@ -28,7 +28,6 @@
     >
       <TriangleAlert
         v-if="status === 'error'"
-        :stroke-width="1.75"
         class="size-3"
       />
       <UpdateIcon
