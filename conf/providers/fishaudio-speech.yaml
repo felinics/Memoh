@@ -1,0 +1,14 @@
+name: Fish Audio Speech
+client_type: fishaudio-speech
+base_url: https://api.fish.audio/v1
+
+models:
+  - model_id: s2.1-pro
+    name: S2.1 Pro
+    type: speech
+  - model_id: s2.1-pro-free
+    name: S2.1 Pro Free
+    type: speech
+  - model_id: drama-3
+    name: Drama 3
+    type: speech

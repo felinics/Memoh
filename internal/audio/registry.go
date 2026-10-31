@@ -23,6 +23,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/audio/adapter/alibabacloud"
+	"github.com/felinics/memoh/internal/audio/adapter/fishaudio"
 	"github.com/felinics/memoh/internal/models"
 )
 
@@ -60,6 +61,7 @@ func isTranscriptionClientType(clientType models.ClientType) bool {
 		models.ClientTypeOpenAITranscription,
 		models.ClientTypeOpenRouterTranscription,
 		models.ClientTypeElevenLabsTranscription,
+		models.ClientTypeFishAudioTranscription,
 		models.ClientTypeDeepgramTranscription,
 		models.ClientTypeAlibabaTranscription,
 		models.ClientTypeGoogleTranscription:
@@ -77,6 +79,8 @@ func speechToTranscriptionClientType(clientType models.ClientType) models.Client
 		return models.ClientTypeOpenRouterTranscription
 	case models.ClientTypeElevenLabsSpeech:
 		return models.ClientTypeElevenLabsTranscription
+	case models.ClientTypeFishAudioSpeech:
+		return models.ClientTypeFishAudioTranscription
 	case models.ClientTypeDeepgramSpeech:
 		return models.ClientTypeDeepgramTranscription
 	case models.ClientTypeGoogleSpeech:
@@ -556,6 +560,7 @@ func defaultProviderDefinitions() []ProviderDefinition {
 			},
 			Order: 40,
 		},
+		fishAudioProviderDefinition(),
 		{
 			ClientType:  models.ClientTypeGoogleSpeech,
 			DisplayName: "Google Speech",
@@ -861,6 +866,66 @@ func defaultProviderDefinitions() []ProviderDefinition {
 			},
 			Order: 90,
 		},
+	}
+}
+
+func fishAudioProviderDefinition() ProviderDefinition {
+	speechSchema := ConfigSchema{Fields: []FieldSchema{
+		stringField("reference_id", "Voice ID", "Optional voice model ID from the Fish Audio Voice Library", false, "", 10),
+		enumField("format", "Format", "Output audio format; defaults to mp3", false, []string{"mp3", "wav", "pcm", "opus"}, 20),
+		numberField("speed", "Speed", "Speech rate, from 0.5 to 2.0", false, 1.0, 30),
+		numberField("volume", "Volume", "Volume adjustment in dB", false, 0, 40),
+		numberField("sample_rate", "Sample Rate", "Optional audio sample rate in Hz; leave empty for the format default", false, nil, 50),
+		stringField("language", "Language", "Optional BCP-47 text normalization language; leave empty for automatic detection", false, "", 60),
+		enumField("normalize", "Normalize Text", "Normalize numbers and dates before synthesis; defaults to true", false, []string{"true", "false"}, 70),
+	}}
+	transcriptionSchema := ConfigSchema{Fields: []FieldSchema{
+		stringField("language", "Language", "Optional lowercase ISO 639-1 language hint, such as zh or en", false, "", 10),
+		enumField("ignore_timestamps", "Skip Timestamps", "Skip word-level timestamps; defaults to true", false, []string{"true", "false"}, 20),
+	}}
+	proSchema := ConfigSchema{Fields: append(transcriptionSchema.Fields,
+		enumField("tag_audio_events", "Audio Event Tags", "Preserve emotion and vocal-event cues; defaults to true", false, []string{"true", "false"}, 30),
+		enumField("diarize", "Speaker Turns", "Return speaker turns when timestamps are requested; defaults to auto", false, []string{"auto", "true", "false"}, 40),
+		numberField("num_speakers", "Number of Speakers", "Optional positive speaker-count hint; do not combine with minimum or maximum", false, nil, 50),
+		numberField("min_speakers", "Minimum Speakers", "Optional positive lower bound on the speaker count", false, nil, 60),
+		numberField("max_speakers", "Maximum Speakers", "Optional positive upper bound on the speaker count", false, nil, 70),
+	)}
+	speechModels := []ModelInfo{
+		{ID: "s2.1-pro", Name: "S2.1 Pro", Description: "Production speech synthesis"},
+		{ID: "s2.1-pro-free", Name: "S2.1 Pro Free", Description: "Free developer-tier speech synthesis"},
+		{ID: "drama-3", Name: "Drama 3", Description: "Speech synthesis with inline performance directions"},
+	}
+	for i := range speechModels {
+		speechModels[i].ConfigSchema = speechSchema
+		speechModels[i].Capabilities = ModelCapabilities{
+			Formats: []string{"mp3", "wav", "pcm", "opus"},
+			Speed:   &ParamConstraint{Min: 0.5, Max: 2.0, Default: 1.0},
+		}
+	}
+	return ProviderDefinition{
+		ClientType:  models.ClientTypeFishAudioSpeech,
+		DisplayName: "Fish Audio Speech",
+		Description: "Fish Audio text-to-speech and speech recognition",
+		ConfigSchema: ConfigSchema{Fields: []FieldSchema{
+			secretField("api_key", "API Key", "Fish Audio API key", true, 10),
+			stringField("base_url", "Base URL", "Override the Fish Audio API base URL", false, fishaudio.DefaultBaseURL, 20),
+		}},
+		DefaultModel:              fishaudio.DefaultSpeechModel,
+		SupportsList:              true,
+		Models:                    speechModels,
+		DefaultTranscriptionModel: fishaudio.DefaultTranscriptionModel,
+		SupportsTranscriptionList: true,
+		TranscriptionModels: []ModelInfo{
+			{ID: "transcribe-1-pro", Name: "Transcribe 1 Pro", Description: "Speech recognition with speaker and emotion cues", ConfigSchema: proSchema},
+			{ID: "transcribe-1", Name: "Transcribe 1", Description: "General short-recording transcription", ConfigSchema: transcriptionSchema},
+		},
+		Factory: func(config map[string]any) (sdk.SpeechProvider, error) {
+			return fishaudio.NewSpeech(configString(config, "api_key"), configString(config, "base_url"))
+		},
+		TranscriptionFactory: func(config map[string]any) (sdk.TranscriptionProvider, error) {
+			return fishaudio.NewTranscription(configString(config, "api_key"), configString(config, "base_url"))
+		},
+		Order: 42,
 	}
 }
 
