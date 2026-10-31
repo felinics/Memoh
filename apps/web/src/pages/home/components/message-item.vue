@@ -67,123 +67,140 @@
           :block="userAttachmentBlock"
           :on-open-media="onOpenMedia"
         />
-        <div
+        <!-- Editing happens in place: the field takes the bubble's exact box
+             (padding, radius, content-sized width) and surface, and sets its
+             text with the same .chat-user-text rule as the bubble, so the prompt
+             stays where and how it was. Unfocused it has no edge at all, so it
+             renders like the bubble; focus draws the edge meant for a
+             brand-tinted surface. Its actions replace the copy/edit row below. -->
+        <Textarea
           v-if="isEditingUserMessage"
-          class="w-[min(100%,42rem)] bg-muted px-4 py-3 text-foreground"
+          ref="editTextarea"
+          v-model="editDraft"
+          :lang="contentLang(editDraft)"
+          rest="bare"
+          surface="brand-tint"
+          class="chat-user-text chat-user-bubble-edit w-auto max-w-full min-h-0 max-h-80 px-4 py-3"
           :class="userBubbleRadiusClass"
-        >
-          <Textarea
-            ref="editTextarea"
-            v-model="editDraft"
-            size="lg"
-            class="max-h-52 min-h-20 resize-none rounded-none border-0 bg-transparent p-0 text-foreground shadow-none placeholder:text-muted-foreground focus-visible:ring-0"
-            :aria-label="t('chat.actions.edit')"
-            @keydown.enter.meta.exact.prevent="submitEdit"
-            @keydown.enter.ctrl.exact.prevent="submitEdit"
-            @keydown.escape.stop.prevent="cancelEdit"
-          />
-          <div class="mt-2 flex justify-end gap-1.5">
-            <Button
-              type="button"
-              variant="outline"
-              size="text"
-              class="px-1"
-              :disabled="editSubmitting"
-              @click="cancelEdit"
-            >
-              {{ t('common.cancel') }}
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              size="text"
-              class="px-1"
-              :loading="editSubmitting"
-              :disabled="!canSubmitEdit"
-              @click="submitEdit"
-            >
-              {{ t('chat.send') }}
-            </Button>
-          </div>
-        </div>
-        <div
+          :aria-label="t('chat.actions.edit')"
+          @keydown.enter.meta.exact="onEditSubmitKey"
+          @keydown.enter.ctrl.exact="onEditSubmitKey"
+          @keydown.escape.stop="onEditCancelKey"
+        />
+        <!-- Touch has no hover, so the copy/edit row under the bubble never
+             shows there; a long press on the bubble opens the same actions as
+             a menu anchored under the bubble's end edge, like a native chat
+             app — not at the finger, where it would cover the prompt. The
+             trigger is disabled so a tap does nothing; it only anchors the
+             menu, which useLongPress opens. Pointer devices keep the native
+             right-click menu and their text selection. On touch the bubble
+             opts out of text selection and the system callout — otherwise the
+             OS starts a selection on the hold and cancels the press — which
+             is why Copy is in the menu. -->
+        <DropdownMenu
           v-else-if="isSkillActivationMessage || userBubbleText || message.forward || message.reply"
-          :lang="contentLang(userBubbleText || skillActivationNames || skillActivationTitle)"
-          class="chat-user-bubble w-fit max-w-full bg-chat-user-bubble px-4 py-3 text-chat-user-bubble-fg whitespace-pre-wrap break-words"
-          :class="userBubbleRadiusClass"
+          v-model:open="bubbleMenuOpen"
         >
-          <div
-            v-if="isSkillActivationMessage"
-            class="flex min-w-0 items-start gap-2"
+          <DropdownMenuTrigger
+            as-child
+            disabled
           >
-            <Sparkles
-              aria-hidden="true"
-              class="mt-0.5 size-3.5 shrink-0"
-            />
-            <div class="min-w-0 space-y-0.5">
-              <p class="text-caption font-medium leading-snug">
-                {{ skillActivationTitle }}
-              </p>
-              <p
-                v-if="skillActivationNames"
-                class="text-body leading-snug break-words"
+            <div
+              :lang="contentLang(userBubbleText || skillActivationNames || skillActivationTitle)"
+              class="chat-user-bubble w-fit max-w-full bg-chat-user-bubble px-4 py-3 text-chat-user-bubble-fg whitespace-pre-wrap break-words"
+              :class="[userBubbleRadiusClass, isTouchPointer ? 'select-none [-webkit-touch-callout:none]' : '']"
+              v-on="isTouchPointer ? bubbleLongPress : {}"
+            >
+              <div
+                v-if="isSkillActivationMessage"
+                class="flex min-w-0 items-start gap-2"
               >
-                {{ skillActivationNames }}
-              </p>
-            </div>
-          </div>
-          <div
-            v-if="message.forward"
-            class="text-[11px] font-medium leading-snug text-muted-foreground"
-            :class="isSkillActivationMessage ? 'mt-2 mb-1' : 'mb-1'"
-          >
-            {{ t('chat.forwardedFrom', { sender: forwardSenderLabel }) }}
-          </div>
-          <button
-            v-if="message.reply"
-            type="button"
-            class="relative mb-1 min-w-0 overflow-hidden rounded-sm py-1 pl-3 pr-2 leading-snug break-normal"
-            :class="[
-              'bg-background/55 dark:bg-background/20',
-              canJumpReply ? 'block w-full text-left cursor-pointer hover:bg-background/70 dark:hover:bg-background/30 focus:outline-none focus:ring-1 focus:ring-primary/40' : 'block w-full text-left cursor-default',
-            ]"
-            :disabled="!canJumpReply"
-            @click.stop="handleReplyClick"
-          >
-            <span
-              class="absolute inset-y-0 left-0 w-[3px]"
-              :class="bubbleSelf ? 'bg-border' : 'bg-primary/70'"
-            />
-            <div class="flex min-w-0 items-start gap-2">
-              <div class="min-w-0 flex-1">
-                <div
-                  class="truncate text-[11px] font-semibold"
-                  :class="bubbleSelf ? 'text-foreground' : 'text-primary'"
-                >
-                  {{ replySenderLabel }}
-                </div>
-                <div
-                  v-if="replyPreviewLabel"
-                  class="mt-0.5 line-clamp-2 text-[11px] whitespace-pre-wrap break-words text-muted-foreground"
-                >
-                  {{ replyPreviewLabel }}
+                <Sparkles
+                  aria-hidden="true"
+                  class="mt-0.5 size-3.5 shrink-0"
+                />
+                <div class="min-w-0 space-y-0.5">
+                  <p class="text-caption font-medium leading-snug">
+                    {{ skillActivationTitle }}
+                  </p>
+                  <p
+                    v-if="skillActivationNames"
+                    class="text-body leading-snug break-words"
+                  >
+                    {{ skillActivationNames }}
+                  </p>
                 </div>
               </div>
-              <img
-                v-if="replyThumbnailSrc"
-                :src="replyThumbnailSrc"
-                :alt="replyPreviewLabel || replySenderLabel"
-                class="size-9 shrink-0 rounded-sm object-cover"
-                loading="lazy"
+              <div
+                v-if="message.forward"
+                class="text-[11px] font-medium leading-snug text-muted-foreground"
+                :class="isSkillActivationMessage ? 'mt-2 mb-1' : 'mb-1'"
               >
+                {{ t('chat.forwardedFrom', { sender: forwardSenderLabel }) }}
+              </div>
+              <button
+                v-if="message.reply"
+                type="button"
+                class="relative mb-1 min-w-0 overflow-hidden rounded-sm py-1 pl-3 pr-2 leading-snug break-normal"
+                :class="[
+                  'bg-background/55 dark:bg-background/20',
+                  canJumpReply ? 'block w-full text-left cursor-pointer hover:bg-background/70 dark:hover:bg-background/30 focus:outline-none focus:ring-1 focus:ring-primary/40' : 'block w-full text-left cursor-default',
+                ]"
+                :disabled="!canJumpReply"
+                @click.stop="handleReplyClick"
+              >
+                <span
+                  class="absolute inset-y-0 left-0 w-[3px]"
+                  :class="bubbleSelf ? 'bg-border' : 'bg-primary/70'"
+                />
+                <div class="flex min-w-0 items-start gap-2">
+                  <div class="min-w-0 flex-1">
+                    <div
+                      class="truncate text-[11px] font-semibold"
+                      :class="bubbleSelf ? 'text-foreground' : 'text-primary'"
+                    >
+                      {{ replySenderLabel }}
+                    </div>
+                    <div
+                      v-if="replyPreviewLabel"
+                      class="mt-0.5 line-clamp-2 text-[11px] whitespace-pre-wrap break-words text-muted-foreground"
+                    >
+                      {{ replyPreviewLabel }}
+                    </div>
+                  </div>
+                  <img
+                    v-if="replyThumbnailSrc"
+                    :src="replyThumbnailSrc"
+                    :alt="replyPreviewLabel || replySenderLabel"
+                    class="size-9 shrink-0 rounded-sm object-cover"
+                    loading="lazy"
+                  >
+                </div>
+              </button>
+              <CollapsibleUserText
+                v-if="userBubbleText"
+                :class="isSkillActivationMessage ? 'mt-2' : ''"
+                :text="userBubbleText"
+              />
             </div>
-          </button>
-          <CollapsibleUserText
-            v-if="userBubbleText"
-            :class="isSkillActivationMessage ? 'mt-2' : ''"
-            :text="userBubbleText"
-          />
-        </div>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            :align="bubbleSelf ? 'end' : 'start'"
+            :side-offset="6"
+          >
+            <DropdownMenuItem @select="copyUserText">
+              <Copy />
+              {{ t('chat.actions.copy') }}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              v-if="canEditUserMessage"
+              @select="handleEdit"
+            >
+              <Pencil />
+              {{ t('chat.actions.edit') }}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <p
           v-if="isGoalMessage"
           class="flex items-center gap-1.5 text-caption text-muted-foreground"
@@ -191,14 +208,59 @@
           <Target class="size-3.5" />
           {{ $t('chat.goal.sentAsGoal') }}
         </p>
-        <MessageActions
-          v-if="!isEditingUserMessage"
-          class="-mt-1"
-          role="user"
-          :copy-text="userCopyText"
-          :align="bubbleSelf ? 'end' : 'start'"
-          :on-edit="canEditUserMessage ? handleEdit : undefined"
-        />
+        <!-- The copy/edit row tucks up close to the bubble (4px) because its
+             glyphs carry no chrome at rest. The edit row swaps into the same h-8
+             slot but holds a filled Send, which crowds the field's focus edge at
+             that distance — so entering edit eases the row down to 12px (house
+             spring) instead of jumping, and its buttons fade in. Cancel is ghost:
+             an outlined button stacks a second edge right under the field's. -->
+        <div
+          class="transition-[margin] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
+          :class="isEditingUserMessage ? 'mt-1' : '-mt-1'"
+        >
+          <Transition
+            mode="out-in"
+            enter-active-class="transition-opacity duration-150 ease-out motion-reduce:transition-none"
+            enter-from-class="opacity-0"
+          >
+            <div
+              v-if="isEditingUserMessage"
+              class="flex h-8 items-center justify-end gap-1.5"
+            >
+              <!-- Saving reruns the turn, which a bare "Save" does not say. -->
+              <InfoHint :text="t('chat.actions.editHint')" />
+              <Button
+                type="button"
+                variant="ghost"
+                tone="muted"
+                size="sm"
+                @click="cancelEdit"
+              >
+                {{ t('common.cancel') }}
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                :disabled="!canSubmitEdit"
+                @click="submitEdit"
+              >
+                {{ t('common.save') }}
+              </Button>
+            </div>
+            <!-- Plain element wrapper: <Transition> can only animate an element
+                 root, and MessageActions' template leads with a comment, which
+                 dev builds keep, so its root is a fragment. -->
+            <div v-else>
+              <MessageActions
+                role="user"
+                :copy-text="userCopyText"
+                :align="bubbleSelf ? 'end' : 'start'"
+                :on-edit="canEditUserMessage ? handleEdit : undefined"
+              />
+            </div>
+          </Transition>
+        </div>
       </div>
 
       <!-- Assistant blocks and the live process preview share one vertical rhythm. -->
@@ -426,9 +488,9 @@ if (typeof document !== 'undefined') {
 
 <script setup lang="ts">
 import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
-import { Sparkles, Target } from 'lucide-vue-next'
+import { Copy, Pencil, Sparkles, Target } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
-import { Avatar, AvatarImage, AvatarFallback, Button, CalloutBanner, Textarea } from '@felinic/ui'
+import { Avatar, AvatarImage, AvatarFallback, Button, CalloutBanner, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, InfoHint, Textarea, toast, useClipboard } from '@felinic/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
 import ToolCallGroup from './tool-call-group.vue'
@@ -458,7 +520,8 @@ import { runtimeGoalObjective } from '@/utils/runtime-slash-commands'
 import { withLiteralSingleDollars } from '@/utils/markdown-dollar'
 
 import { resolveUrl } from '../composables/useMediaGallery'
-import { useElementVisibility } from '@vueuse/core'
+import { useElementVisibility, useMediaQuery } from '@vueuse/core'
+import { useLongPress } from '../composables/useLongPress'
 
 
 enableKatex()
@@ -523,7 +586,10 @@ const isVisible = useElementVisibility(messageEl, {
   threshold: 0.1
 })
 
-watch([isVisible, toRef(props, 'isScrolling')], () => { 
+// The id is a source too: an edit hands this instance a new message under the
+// same render key (chat-pane renderKeyOf), and the scroll anchors must learn
+// the new id as they would from a fresh mount.
+watch([isVisible, toRef(props, 'isScrolling'), () => props.message.id], () => {
   emit('active', isVisible.value, { id: props.message.id, top: ((messageEl.value?.getBoundingClientRect().top ?? 0) - 48) })
 }, {
   immediate: true,
@@ -539,7 +605,6 @@ const { t, te, locale } = useI18n()
 const editTextarea = ref<InstanceType<typeof Textarea> | null>(null)
 const isEditingUserMessage = ref(false)
 const editDraft = ref('')
-const editSubmitting = ref(false)
 
 // Retry, edit and fork all address a round, and a round is named by its turn
 // id — an identity the turn carries from admission onward. The message id is a
@@ -694,13 +759,20 @@ const canForkAssistantMessage = computed(() =>
 const canSubmitEdit = computed(() =>
   props.message.role === 'user'
   && props.canEditLatestUser === true
-  && editDraft.value.trim().length > 0
-  && !editSubmitting.value,
+  && editDraft.value.trim().length > 0,
 )
 
 function handleEdit() {
   if (!canEditUserMessage.value || props.message.role !== 'user') return
-  editDraft.value = cleanCurrentUserText.value
+  openEditor(cleanCurrentUserText.value)
+}
+
+function openEditor(draft: string) {
+  // Edit is picked from the bubble's long-press menu, and the menu unmounts
+  // with the bubble before it reports itself closed — so the open flag would
+  // survive the edit and reopen the menu on the bubble that comes back.
+  bubbleMenuOpen.value = false
+  editDraft.value = draft
   isEditingUserMessage.value = true
   void nextTick(() => {
     const el = editTextarea.value?.$el
@@ -713,28 +785,61 @@ function handleEdit() {
   })
 }
 
+// The edit shortcuts must not fire while an IME is composing: Enter (with or
+// without a modifier) and Escape belong to the IME then — committing or
+// dismissing the candidate — not to the edit. keyCode 229 covers browsers that
+// report the composing keydown without isComposing.
+function isComposingKey(event: KeyboardEvent) {
+  return event.isComposing || event.keyCode === 229
+}
+
+function onEditSubmitKey(event: KeyboardEvent) {
+  if (isComposingKey(event)) return
+  event.preventDefault()
+  submitEdit()
+}
+
+function onEditCancelKey(event: KeyboardEvent) {
+  if (isComposingKey(event)) return
+  event.preventDefault()
+  cancelEdit()
+}
+
+// Long press only exists on touch; see the bubble's DropdownMenu.
+const isTouchPointer = useMediaQuery('(hover: none) and (pointer: coarse)')
+const bubbleMenuOpen = ref(false)
+const bubbleLongPress = useLongPress(() => { bubbleMenuOpen.value = true })
+const { copyText } = useClipboard()
+
+async function copyUserText() {
+  if (await copyText(userCopyText.value)) toast.success(t('common.copied'))
+  else toast.error(t('common.copyFailed'))
+}
+
 function cancelEdit() {
-  if (editSubmitting.value) return
   isEditingUserMessage.value = false
   editDraft.value = ''
 }
 
-async function submitEdit() {
+// The field folds back into the bubble as soon as the edit is dispatched: the
+// chat swaps in the edited prompt in place (chat-pane keeps this component
+// mounted across the swap), and the callback only fires once the whole reply
+// has streamed. An edit that never starts restores the original prompt, so the
+// field reopens with the draft for another try.
+function submitEdit() {
   if (!canSubmitEdit.value || props.message.role !== 'user' || !turnId.value) return
-  editSubmitting.value = true
-  emit('editMessage', turnId.value, editDraft.value.trim(), (started) => {
-    editSubmitting.value = false
-    if (started) {
-      isEditingUserMessage.value = false
-      editDraft.value = ''
-    }
+  const draft = editDraft.value.trim()
+  cancelEdit()
+  emit('editMessage', turnId.value, draft, (started) => {
+    if (!started) openEditor(draft)
   })
 }
 
 // Element-level script tag for BLOCK typography only — leading (CJK packs
 // tighter, so it loosens) and the ~3% Latin size shave. Per-glyph WEIGHT in mixed
 // runs is NOT done here (one font-weight can't split a run); that lives in the
-// .chat-cjk / .chat-latin spans emitted by md-text and the user bubble. A block
+// .chat-cjk / .chat-latin spans emitted by md-text (the user prompt has no spans;
+// see .chat-user-text in style.css). A block
 // is 'zh' if it contains any CJK (its leading should breathe for the CJK lines).
 const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f]/
 function contentLang(content?: string): 'zh' | 'en' {

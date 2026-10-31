@@ -563,6 +563,53 @@
 :is([data-chat-content], .markstream-vue) :is(.heading-4, .heading-5) .chat-latin { font-weight: var(--chat-latin-h4); }
 :is([data-chat-content], .markstream-vue) :is(.heading-4, .heading-5) .chat-cjk { font-weight: var(--chat-cjk-h4); }
 
+/* User prompt text — ONE rule shared by the sent bubble (collapsible-user-text)
+ * and its in-place edit field (message-item.vue), so pressing Edit changes no
+ * glyph. The prompt cannot use the per-script .chat-latin / .chat-cjk spans the
+ * answer uses: a <textarea> has no spans, only one size and one weight for all
+ * of its text. So the Latin compensation lives in the font instead: this face
+ * is the same Inter file, scaled by size-adjust and pinned to the Latin body
+ * weight (a variable font renders clamped to its face's weight range), while
+ * the element requests the CJK body weight for MiSans. Each script lands on
+ * the answer's size and weight; the one value a font cannot carry is
+ * --chat-latin-track, so prompt Latin is set without that hair of tracking.
+ * Descriptors cannot read custom properties: keep 93.75% and 420 in sync with
+ * --chat-latin-size and --chat-latin-body. A custom UI font replaces the face
+ * through --chat-user-text-font (store/settings/typography.ts) — the tuning is
+ * measured for Inter beside MiSans and does not transfer to other families. */
+@font-face {
+  font-family: "Memoh Chat Latin";
+  src: url("../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2-variations");
+  font-weight: 420;
+  font-display: swap;
+  size-adjust: 93.75%;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Memoh Chat Latin";
+  src: url("../node_modules/@fontsource-variable/inter/files/inter-latin-ext-wght-normal.woff2") format("woff2-variations");
+  font-weight: 420;
+  font-display: swap;
+  size-adjust: 93.75%;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* Unlayered so it beats the bubble's @layer components type and the Textarea's
+ * type utilities. */
+[data-chat-content] .chat-user-text {
+  font-family: var(--chat-user-text-font, "Memoh Chat Latin", var(--font-sans));
+  font-size: 1rem;
+  font-weight: var(--chat-cjk-body);
+  line-height: var(--chat-leading);
+  letter-spacing: normal;
+}
+/* The edit field keeps the bubble's surface and ink, so only the field edge
+ * (the Textarea's own contract: engage="hover", surface="brand-tint") says
+ * "editing". */
+[data-chat-content] [data-slot="textarea"].chat-user-bubble-edit {
+  background-color: var(--chat-user-bubble);
+  color: var(--chat-user-bubble-fg);
+}
+
 /* Sidebar session-title runs (session-item.vue) reuse the chat body-tier
  * per-script treatment verbatim — same --chat-*-body weight, same Latin size shave
  * + tracking — so a mixed CJK/Latin title reads identically to body prose. No
@@ -637,9 +684,10 @@
   }
 
   [data-chat-content] .chat-user-bubble {
-    /* Matches the assistant reading body exactly — same size and the same
-     * per-script run weights — so the prompt and its answer read as one voice;
-     * the tinted surface alone marks the turn. */
+    /* Container defaults for the bubble's chrome (forward/reply/skill rows).
+     * The prompt text itself is set by .chat-user-text below the layers, which
+     * matches the answer's size and per-script weights through a font rather
+     * than run spans. */
     font-size: 1rem;
     line-height: var(--chat-leading);
     font-weight: 400;

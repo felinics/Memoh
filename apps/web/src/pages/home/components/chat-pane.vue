@@ -101,7 +101,7 @@
                    (see tryApplyPin in useChatScroll). -->
               <div
                 v-for="(turn, turnIndex) in messageTurns"
-                :key="turn.id"
+                :key="renderKeyOf(turn.id)"
                 :ref="turnIndex === messageTurns.length - 1 ? setLastTurnEl : undefined"
                 :style="turnReserveStyle(turn.id)"
                 data-chat-turn
@@ -112,7 +112,7 @@
                 >
                   <template
                     v-for="(msg, msgIndex) in turn.messages"
-                    :key="msg.id"
+                    :key="renderKeyOf(msg.id)"
                   >
                     <ForkSourceDivider
                       v-if="showForkSourceDividerBefore(turn.start + msgIndex)"
@@ -3887,6 +3887,24 @@ const messageTurns = computed(() => {
 })
 const lastMessageId = computed(() => messages.value[messages.value.length - 1]?.id ?? '')
 
+// Saving an edit swaps the prompt for a new optimistic turn under a new id.
+// Keyed by that id, the whole turn would remount — the edit field could not
+// fold back into its bubble and the turn's height snapped. The replacement
+// borrows the edited prompt's Vue key instead, so the same component settles
+// in place. The alias is for Vue keys only (the store's ids are untouched) and
+// steps aside if the borrowed key is ever on screen again, so it can never
+// produce a duplicate key.
+const editRenderKeys = reactive(new Map<string, string>())
+const visibleMessageIds = computed(() => new Set(messages.value.map(message => message.id)))
+function renderKeyOf(id: string): string {
+  const borrowed = editRenderKeys.get(id)
+  return borrowed && !visibleMessageIds.value.has(borrowed) ? borrowed : id
+}
+watch(() => paneTarget.value.sessionId, () => editRenderKeys.clear())
+function latestUserMessage(): ChatMessage | undefined {
+  return messages.value.findLast(message => message.role === 'user')
+}
+
 const {
   isScrolling,
   highlightedMessageId,
@@ -3896,6 +3914,8 @@ const {
   suppressAutoScrollForPrepend,
   markEscaped,
   pinAfterSend,
+  pinAfterEdit,
+  pinAfterRetry,
   pinAfterSteer,
   pinAfterFollowUp,
   onActivatedRestoreScroll,
@@ -4071,13 +4091,27 @@ async function handleRetryMessage(turnId: string) {
   if (composerConfigPending.value) return
   composerError.value = ''
   const { pair: sendPair, finish: finishPairSend } = composerPair.beginSend()
-  const result = await chatStore.retryLatestAssistant(turnId, {
+  const replyBefore = messages.value.at(-1)?.id
+  const pending = chatStore.retryLatestAssistant(turnId, {
     target: paneTarget.value,
     modelId: sendPair.modelId,
     reasoningEffort: sendPair.reasoningEffort,
     workspaceTargetId: sendWorkspaceTargetId.value,
     onModelPreferenceSettled: () => finishPairSend(false),
   }).finally(() => finishPairSend(false))
+  // The store has already swapped the reply for a placeholder (that part
+  // runs before its first await); pin the prompt like a send before Vue
+  // renders the swap.
+  const prompt = latestUserMessage()
+  const rollbackPin = prompt && messages.value.at(-1)?.id !== replyBefore
+    ? pinAfterRetry(prompt.id)
+    : null
+  const result = await pending.catch((error: unknown) => {
+    rollbackPin?.()
+    throw error
+  })
+  // A failed start restores the old reply; put the view back with it.
+  if (!(result.ok || result.stage === 'stream')) rollbackPin?.()
   finishPairSend(result.ok || result.stage === 'stream')
   await refreshACPComposerConfigAfterSelectionError(result)
   if (!result.ok && result.error) {
@@ -4092,21 +4126,36 @@ async function handleEditMessage(turnId: string, text: string, done?: (started: 
   }
   composerError.value = ''
   const { pair: sendPair, finish: finishPairSend } = composerPair.beginSend()
+  let rollbackPin: (() => void) | null = null
   try {
-    const result = await chatStore.editLatestUser(turnId, text, {
+    const edited = latestUserMessage()
+    const pending = chatStore.editLatestUser(turnId, text, {
       target: paneTarget.value,
       modelId: sendPair.modelId,
       reasoningEffort: sendPair.reasoningEffort,
       workspaceTargetId: sendWorkspaceTargetId.value,
       onModelPreferenceSettled: () => finishPairSend(false),
     })
-    finishPairSend(result.ok || result.stage === 'stream')
+    // The store has already swapped in the optimistic prompt (that part runs
+    // before its first await); hand it the edited prompt's key and pin it
+    // like a send before Vue renders the swap.
+    const replacement = latestUserMessage()
+    if (edited && replacement && replacement.id !== edited.id) {
+      editRenderKeys.set(replacement.id, renderKeyOf(edited.id))
+      rollbackPin = pinAfterEdit(edited.id, replacement.id)
+    }
+    const result = await pending
+    const started = result.ok || result.stage === 'stream'
+    // A failed start restores the edited turn; put the view back with it.
+    if (!started) rollbackPin?.()
+    finishPairSend(started)
     await refreshACPComposerConfigAfterSelectionError(result)
     if (!result.ok && result.error) {
       composerError.value = result.error
     }
-    done?.(result.ok || result.stage === 'stream')
+    done?.(started)
   } catch {
+    rollbackPin?.()
     done?.(false)
   } finally {
     finishPairSend(false)
