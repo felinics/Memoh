@@ -169,27 +169,18 @@ Codex and Grok Build sign their account in inside the Agent's own process,
 through `POST /bots/{bot_id}/agents/{id}/login/device/{authorize,poll,cancel}`
 (`external.DeviceLoginProvider`). The runtime obtains the device code, the
 user opens the URL and confirms it, and the runtime writes its own login file
-in the Agent's home; Memoh then copies the result into the encrypted Agent
-credential store and restarts the Agent's process from it. Codex stores the
-tokens it finds in `auth.json`; Grok Build stores the whole file, since only
-Grok knows its shape and Grok rewrites it when it refreshes. A Grok sign-in
-runs on a Grok process of its own with an empty home under `/tmp`: on a home
-that already holds a login, ACP `authenticate` answers from it without asking
-anyone, and the Agent's current login must stay until the new one is stored.
-Grok hands the device URL out through its `_x.ai/auth/get_url` request while
-`authenticate` waits for the user. A Grok account can therefore not be staged
-before the Bot exists: the Agent is created in `grok_account` mode without a
-credential and signs in from its settings. The staged authorizations
-(`/agent-authorizations`) cover API keys, the ChatGPT device login and the
-Claude browser login only.
+in the Agent's home on the bot's data volume, where it keeps and refreshes
+it. Memoh stores no copy; a finished sign-in restarts the Agent's process so
+the next turn starts from the new login. On a Grok home that already holds a
+login, ACP `authenticate` answers from it without asking anyone, so signing
+in again first removes it. Grok hands the device URL out through its
+`_x.ai/auth/get_url` request while `authenticate` waits for the user.
 
-A Grok sign-in may set the Agent's credential only while nothing has replaced
-it: storing a login replaces the Agent's credential and revokes the one it
-displaces, so a late store would bring back an account the user moved away
-from. Starting a sign-in ends the Agent's earlier ones, approved or not, a
-disconnect or Agent deletion ends them too, and a sign-in that completes
-after the Agent has left `grok_account` mode is refused
-(`agent_credential.incompatible`) instead of stored.
+A ChatGPT or Grok account can therefore not be staged before the Bot exists:
+the Agent is created without a credential and signs in from its settings.
+The staged authorizations (`/agent-authorizations`) cover API keys and the
+Claude browser login only. Starting a sign-in ends the Agent's earlier ones,
+approved or not, and a disconnect or Agent deletion ends them too.
 
 ## Execution timeouts and budgets
 
