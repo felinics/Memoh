@@ -1301,6 +1301,41 @@ describe('chat-list store', () => {
       expect(h.runtimeUnsubscribes).toEqual(['session-live'])
     })
 
+  it('keeps a running session subscribed until it settles when a new draft replaces it', async () => {
+      h.sendUpdates = [runtime.started]
+      api.fetchSessions.mockResolvedValueOnce({
+        items: [{
+          id: 'session-live',
+          bot_id: 'bot-1',
+          title: 'Live',
+          type: 'chat',
+        }],
+        nextCursor: null,
+      })
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      await store.selectSession('session-live')
+      await flushPromises()
+      const sending = store.sendMessage('count to 100')
+      await flushPromises()
+      expect(store.isSessionStreaming('bot-1', 'session-live')).toBe(true)
+
+      h.runtimeUnsubscribes = []
+      store.selectDraft({ explicitSelection: true })
+
+      expect(store.sessionId).toBeNull()
+      // The terminal run state is only delivered through this subscription.
+      expect(h.runtimeUnsubscribes).toEqual([])
+
+      emitRuntime(runtime.completed, 'session-live', wsRunId(0))
+      await sending
+      await flushPromises()
+
+      expect(store.isSessionStreaming('bot-1', 'session-live')).toBe(false)
+      expect(h.runtimeUnsubscribes).toEqual(['session-live'])
+    })
+
   it('keeps a manually staged ACP agent explicit so the default stage cannot reclaim it', async () => {
       const store = useChatStore()
 

@@ -338,6 +338,23 @@ export function createChatViews(deps: ChatViewsDeps) {
     chatViews.prune()
   }
 
+  /**
+   * Releases the runtime of a session the focused composer is leaving, such as
+   * when a new draft replaces it. The session keeps its subscription while it
+   * is still shown or running, so its terminal state still arrives; the
+   * terminal projection releases it later. A session without a view has no
+   * one left to settle it and is stopped unless it is still streaming.
+   */
+  function releaseSessionRuntime(botId: string, sessionId: string) {
+    const view = chatViews.getSession(botId, sessionId)
+    if (view) {
+      releaseHiddenSessionView(view)
+      return
+    }
+    if (isSessionStreaming(botId, sessionId)) return
+    stopSessionRuntime(botId, sessionId)
+  }
+
   function bindChatView(panelId: string, target: ChatViewTarget, visible = true) {
     const change = chatViews.bindPanel(panelId, normalizeTarget(target), visible)
     releaseHiddenSessionView(change.deactivatedSession)
@@ -461,6 +478,7 @@ export function createChatViews(deps: ChatViewsDeps) {
     initializeWorkspaceTargetSelection,
     resetWorkspaceTargetSelection,
     releaseHiddenSessionView,
+    releaseSessionRuntime,
     bindChatView,
     setChatViewVisible,
     unbindChatView: (panelId: string) =>
