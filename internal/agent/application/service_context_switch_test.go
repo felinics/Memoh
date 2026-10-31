@@ -63,6 +63,38 @@ func TestContextProvenanceSurvivesToolResultNormalization(t *testing.T) {
 	}
 }
 
+// A deferred call whose run ended before its answer has no result row, so
+// the read path closes it. The closure renders from the call's row: a fold
+// that covers the call takes the closure with it.
+func TestContextProvenanceNamesTheCallRowForItsClosure(t *testing.T) {
+	t.Parallel()
+
+	stored := func(id, role string, message sdk.Message) historyfrag.HistoryRecord {
+		raw, err := historyfrag.MarshalStoredSDKMessage(message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err := historyfrag.FromDBMessage(messagepkg.Message{ID: id, Role: role, Content: raw}, historyfrag.ScopeFallback{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return record
+	}
+	records := []historyfrag.HistoryRecord{
+		stored("call-row", "assistant", sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.ToolCallPart{
+			ToolCallID: "ask-1", ToolName: "ask_user", Input: toolexec.ArgumentsFromValue(map[string]any{}),
+		}}}),
+		stored("later-row", "user", sdk.UserMessage("later question")),
+	}
+	messages, _, _ := normalizeContextMessages([]ModelMessage{records[0].ModelMessage, records[1].ModelMessage}, nil, nil)
+	got := contextProvenance(messages, records, nil)
+	call := got[0].Sources
+	if len(messages) != 3 || len(got) != 3 || got[1].Message.Role != sdk.MessageRoleTool || !reflect.DeepEqual(got[1].Sources, call) ||
+		call[0].ID != "call-row" || got[1].Anchor || got[2].Sources[0].ID != "later-row" {
+		t.Fatalf("closure provenance = %+v, want the closure named by its call row", got)
+	}
+}
+
 // A continuation renders everything as history: the turn before, the run's
 // request row, its deferred call and the approved result. Each message names
 // the row it was loaded from, a summary its artifact, and a pipeline message
