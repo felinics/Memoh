@@ -54,8 +54,8 @@ func TestRequiredDependencyIsCodex(t *testing.T) {
 
 func TestAppServerCommandQuotesTheLauncher(t *testing.T) {
 	for path, want := range map[string]string{
-		"/data/it's/codex": `'/data/it'\''s/codex' app-server -c features.goals=true`,
-		"  ":               "'/opt/memoh/toolkit/bin/codex' app-server -c features.goals=true",
+		"/data/it's/codex": `'/data/it'\''s/codex' app-server -c features.goals=true -c features.request_permissions_tool=true`,
+		"  ":               "'/opt/memoh/toolkit/bin/codex' app-server -c features.goals=true -c features.request_permissions_tool=true",
 	} {
 		if got := appServerCommand(path); got != want {
 			t.Errorf("appServerCommand(%q) = %q, want %q", path, got, want)

@@ -42,5 +42,5 @@ func appServerCommand(launcher string) string {
 	if launcher == "" {
 		launcher = defaultLauncherPath
 	}
-	return agentproc.ShellQuote(launcher) + " app-server -c features.goals=true"
+	return agentproc.ShellQuote(launcher) + " app-server -c features.goals=true -c features.request_permissions_tool=true"
 }
