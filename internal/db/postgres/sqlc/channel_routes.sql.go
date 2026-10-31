@@ -11,6 +11,42 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const compareAndSetRouteActiveSession = `-- name: CompareAndSetRouteActiveSession :execrows
+WITH destination_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = $1::uuid
+  FOR KEY SHARE
+)
+UPDATE bot_channel_routes route
+SET active_session_id = COALESCE(
+      (SELECT destination_session.id FROM destination_session),
+      $1::uuid
+    ),
+    updated_at = now()
+WHERE route.team_id = public.memoh_current_team_id()
+  AND route.id = $2
+  AND route.active_session_id IS NOT DISTINCT FROM $3::uuid
+`
+
+type CompareAndSetRouteActiveSessionParams struct {
+	ActiveSessionID   pgtype.UUID `json:"active_session_id"`
+	ID                pgtype.UUID `json:"id"`
+	ExpectedSessionID pgtype.UUID `json:"expected_session_id"`
+}
+
+// Moves the pointer only while it still holds expected_session_id (NULL for a
+// route that has none), so concurrent creators of a route's first session agree
+// on one: the update that finds the pointer changed affects no row.
+func (q *Queries) CompareAndSetRouteActiveSession(ctx context.Context, arg CompareAndSetRouteActiveSessionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, compareAndSetRouteActiveSession, arg.ActiveSessionID, arg.ID, arg.ExpectedSessionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const createChatRoute = `-- name: CreateChatRoute :one
 INSERT INTO bot_channel_routes (
   bot_id, channel_type, channel_config_id, external_conversation_id, external_thread_id, conversation_type, default_reply_target, metadata

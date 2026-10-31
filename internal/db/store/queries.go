@@ -452,6 +452,7 @@ type Queries interface {
 	SearchMessages(ctx context.Context, arg dbsqlc.SearchMessagesParams) ([]dbsqlc.SearchMessagesRow, error)
 	SetBotACLDefaultEffect(ctx context.Context, arg dbsqlc.SetBotACLDefaultEffectParams) error
 	SetRouteActiveSession(ctx context.Context, arg dbsqlc.SetRouteActiveSessionParams) error
+	CompareAndSetRouteActiveSession(ctx context.Context, arg dbsqlc.CompareAndSetRouteActiveSessionParams) (int64, error)
 	SetSessionNextTurnPosition(ctx context.Context, arg dbsqlc.SetSessionNextTurnPositionParams) error
 	SoftDeleteSession(ctx context.Context, id pgtype.UUID) error
 	SoftDeleteSessionsByBot(ctx context.Context, botID pgtype.UUID) error

@@ -71,6 +71,49 @@ func TestPostgresRouteSwitchPreservesNullAndMissingDestinationSemantics(t *testi
 	}
 }
 
+func TestPostgresRouteCompareAndSetMovesOnlyFromExpectedSession(t *testing.T) {
+	fixture := setupOrderedSessionFixture(t)
+	ctx := context.Background()
+	routeID := createActiveRoute(t, fixture)
+	queries := dbsqlc.New(fixture.pool)
+	route := mustTestUUID(t, routeID)
+	low, high := mustTestUUID(t, fixture.lowSessionID), mustTestUUID(t, fixture.highSessionID)
+	active := func() pgtype.UUID {
+		t.Helper()
+		var id pgtype.UUID
+		if err := fixture.pool.QueryRow(ctx, `SELECT active_session_id FROM bot_channel_routes WHERE id = $1`, routeID).Scan(&id); err != nil {
+			t.Fatalf("read active session: %v", err)
+		}
+		return id
+	}
+	cas := func(expected, next pgtype.UUID) int64 {
+		t.Helper()
+		rows, err := queries.CompareAndSetRouteActiveSession(ctx, dbsqlc.CompareAndSetRouteActiveSessionParams{
+			ID: route, ExpectedSessionID: expected, ActiveSessionID: next,
+		})
+		if err != nil {
+			t.Fatalf("compare and set active session: %v", err)
+		}
+		return rows
+	}
+
+	if rows := cas(low, high); rows != 1 || active() != high {
+		t.Fatalf("expected low -> high: rows=%d active=%v, want 1 and high", rows, active())
+	}
+	if rows := cas(low, low); rows != 0 || active() != high {
+		t.Fatalf("stale expected low: rows=%d active=%v, want 0 and high kept", rows, active())
+	}
+	if err := queries.SetRouteActiveSession(ctx, dbsqlc.SetRouteActiveSessionParams{ID: route}); err != nil {
+		t.Fatalf("clear active session: %v", err)
+	}
+	if rows := cas(pgtype.UUID{}, low); rows != 1 || active() != low {
+		t.Fatalf("expected none -> low: rows=%d active=%v, want 1 and low", rows, active())
+	}
+	if rows := cas(pgtype.UUID{}, high); rows != 0 || active() != low {
+		t.Fatalf("second creator expecting none: rows=%d active=%v, want 0 and low kept", rows, active())
+	}
+}
+
 func assertDeleteAndRouteSwitchShareLockOrder(
 	t *testing.T,
 	fixture orderedSessionFixture,
