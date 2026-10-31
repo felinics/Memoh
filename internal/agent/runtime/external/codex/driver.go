@@ -22,7 +22,6 @@ import (
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
-	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 // ApprovalService is the decision flow the driver routes approvals through.
@@ -40,8 +39,8 @@ type Driver struct {
 	userInput   UserInputService
 	toolGateway toolmount.Gateway
 	logger      *slog.Logger
-	// launchers picks the codex CLI copy to run per bot. Nil
-	// falls back to the toolkit path.
+	// launchers picks the codex CLI copy to run per bot. Nil falls back to
+	// the toolkit path.
 	launchers external.LauncherResolver
 
 	// procs owns the app-server lifecycle: one per Bot Agent, shared by its
@@ -57,6 +56,7 @@ func NewDriver(
 	approvalSvc ApprovalService,
 	userInput UserInputService,
 	toolGateway toolmount.Gateway,
+	launchers external.LauncherResolver,
 	procs *agentproc.Supervisor,
 	logger *slog.Logger,
 ) *Driver {
@@ -67,6 +67,7 @@ func NewDriver(
 		approval:    approvalSvc,
 		userInput:   userInput,
 		toolGateway: toolGateway,
+		launchers:   launchers,
 		procs:       procs,
 		logger:      logger.With(slog.String("runtime", RuntimeType)),
 	}
@@ -75,25 +76,18 @@ func NewDriver(
 // RuntimeType implements external.Driver.
 func (*Driver) RuntimeType() string { return RuntimeType }
 
-var _ external.DependencyRequirer = (*Driver)(nil)
-
-// RequiredDependency implements external.DependencyRequirer: the codex CLI
-// is a managed workspace dependency. No version is declared; the handshake in
-// startAppServerSession warns when the running CLI drifts from the protocol
-// snapshot.
-func (*Driver) RequiredDependency() string {
-	return dependencyID
+// Capabilities is what Codex declares (external.Caps).
+var Capabilities = external.Caps{
+	Dependency:       dependencyID,
+	Command:          "codex",
+	ForkNeedsRuntime: true,
 }
 
-// SetLauncherResolver installs the workspace dependency resolver. Setter
-// injection keeps the driver constructible without one (tests, the toolkit
-// fallback); assembly wires it right after NewDriver.
-func (d *Driver) SetLauncherResolver(r external.LauncherResolver) {
-	d.launchers = r
-}
+// Caps implements external.Driver.
+func (*Driver) Caps() external.Caps { return Capabilities }
 
-func serverKey(botID, botAgentID string) string {
-	return agentproc.Key(RuntimeType, botID, botAgentID)
+func serverKey(botID, botAgentID string) agentproc.Key {
+	return agentproc.Key{Runtime: RuntimeType, BotID: botID, BotAgentID: botAgentID}
 }
 
 // peekServer returns the Agent's running app-server, if any, without
@@ -214,7 +208,7 @@ func (d *Driver) nativeModels(ctx context.Context, botID, botAgentID string, cfg
 			// turn/start accepts the catalog's concrete `model` value. `id` is
 			// the app-server row identity and is only a fallback for older
 			// catalog responses where both happened to be the same string.
-			modelID := firstNonEmpty(model.Model, model.ID)
+			modelID := external.FirstNonEmpty(model.Model, model.ID)
 			if modelID == "" {
 				continue
 			}
@@ -232,7 +226,7 @@ func (d *Driver) nativeModels(ctx context.Context, botID, botAgentID string, cfg
 			}
 			models = append(models, external.ModelOption{
 				ID:                     modelID,
-				Name:                   firstNonEmpty(model.DisplayName, modelID),
+				Name:                   external.FirstNonEmpty(model.DisplayName, modelID),
 				Description:            model.Description,
 				Default:                model.IsDefault,
 				DefaultReasoningEffort: strings.TrimSpace(model.DefaultReasoningEffort),
@@ -260,10 +254,9 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	}
 	cfg, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID, true)
 	if err != nil {
-		if external.IsFailure(err) {
-			return external.PromptResult{}, err
-		}
-		return external.PromptResult{}, external.Unavailable(err)
+		// A credential failure is already a Failure; reading the Agent's
+		// configuration is Memoh's own and stays private.
+		return external.PromptResult{}, err
 	}
 
 	if input.Command != "" {
@@ -280,14 +273,14 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 
 	srv, releaseServer, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)
 	if err != nil {
-		return external.PromptResult{}, wrapServerError(err)
+		return external.PromptResult{}, err
 	}
 	defer releaseServer()
 	if err := srv.ensureAuth(ctx, cfg); err != nil {
 		if errors.Is(err, ErrAuthRequired) {
 			return external.PromptResult{}, external.Fail(external.FailureAuthRequired, err)
 		}
-		return external.PromptResult{}, external.Unavailable(err)
+		return external.PromptResult{}, external.Upstream(err)
 	}
 
 	continueGoal, err := srv.prepareGoal(ctx, input)
@@ -319,10 +312,10 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		ApprovalsReviewer: &preset.reviewer,
 		SandboxPolicy:     &preset.policy,
 	}
-	if model := firstNonEmpty(input.ModelID, cfg.Model); model != "" {
+	if model := external.FirstNonEmpty(input.ModelID, cfg.Model); model != "" {
 		turnParams.Model = &model
 	}
-	if effort := firstNonEmpty(input.ReasoningEffort, cfg.ReasoningEffort); effort != "" {
+	if effort := external.FirstNonEmpty(input.ReasoningEffort, cfg.ReasoningEffort); effort != "" {
 		turnParams.Effort = &effort
 	}
 	if err := applyCollaborationMode(&turnParams, input, srv.settingsForThread(threadID)); err != nil {
@@ -341,7 +334,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 			// fresh one, and the unidentified turn is confined to a process
 			// with a bounded life instead of sharing one with future turns.
 			if turnID := turn.currentTurnID(); turnID != "" {
-				d.interruptTurn(srv, threadID, turnID)
+				d.interruptTurn(srv, turn, turnID)
 			} else {
 				d.logger.WarnContext(ctx, "codex turn/start cancelled before a turn id arrived; draining app-server",
 					slog.String("thread_id", threadID))
@@ -353,7 +346,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	turn.setTurnID(turnResp.Turn.ID)
 	if continueGoal {
 		if err := srv.activateGoal(ctx, threadID); err != nil {
-			d.interruptTurn(srv, threadID, turn.currentTurnID())
+			d.interruptTurn(srv, turn, turn.currentTurnID())
 			return srv.turnResultAfterError(turn, err)
 		}
 	}
@@ -372,7 +365,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	case <-turn.done:
 	case <-ctx.Done():
 		d.pauseGoalOnExit(ctx, srv, turn)
-		d.interruptTurn(srv, threadID, firstNonEmpty(turn.currentTurnID(), turnResp.Turn.ID))
+		d.interruptTurn(srv, turn, external.FirstNonEmpty(turn.currentTurnID(), turnResp.Turn.ID))
 		select {
 		case <-turn.done:
 		case <-time.After(interruptSettleTimeout):
@@ -428,14 +421,14 @@ func (s *appServer) turnResultAfterError(turn *turnState, err error) (external.P
 
 // ensureThread starts or resumes the session's codex thread.
 func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, input external.PromptInput) (threadID string, err error) {
-	threadID = strings.TrimSpace(metadataString(input.RuntimeMetadata, metadataThreadIDKey))
+	threadID = strings.TrimSpace(external.MetadataString(input.RuntimeMetadata, metadataThreadIDKey))
 	if input.ForceFreshRuntime {
 		// Discuss turns re-inject the full composed context every round;
 		// resuming the stored thread would duplicate it on top of codex's
 		// own saved history.
 		threadID = ""
 	}
-	cwd := strings.TrimSpace(metadataString(input.RuntimeMetadata, "project_path"))
+	cwd := strings.TrimSpace(external.MetadataString(input.RuntimeMetadata, "project_path"))
 	if cwd == "" {
 		cwd = defaultProjectPath
 	}
@@ -462,7 +455,7 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 	}
 	// The rollout path outlives codex's own index of it; the id alone still
 	// works while that index is intact.
-	if rolloutPath := metadataString(input.RuntimeMetadata, metadataRolloutPathKey); rolloutPath != "" {
+	if rolloutPath := external.MetadataString(input.RuntimeMetadata, metadataRolloutPathKey); rolloutPath != "" {
 		params.Path = &rolloutPath
 	}
 	resp, err := srv.resumeThread(ctx, params)
@@ -477,7 +470,7 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 	var refused *protocol.RPCError
 	if err != nil && !errors.As(err, &refused) {
 		// A transport failure says nothing about the thread; a retry may resume it.
-		return "", external.Fail(external.FailureSessionResumeFailed, fmt.Errorf("codex thread/resume: %w", err))
+		return "", external.Upstream(fmt.Errorf("codex thread/resume: %w", err))
 	}
 	if input.Command == "compact" {
 		return "", external.ErrThreadUnavailable
@@ -527,22 +520,42 @@ func (d *Driver) startThread(ctx context.Context, srv *appServer, cfg Config, in
 	return resp.Thread.ID, nil
 }
 
-// interruptTurn asks the app-server to stop the running turn; it runs on a
-// background context because the turn context is already cancelled.
+// interruptTurn asks the app-server to stop the running turn and terminates
+// the processes the turn's commands started; it runs on a background context
+// because the turn context is already cancelled.
+//
+// turn/interrupt only cancels the turn: codex keeps unified-exec processes in
+// a thread-scoped store, so a command that was still running keeps executing —
+// and mutating the workspace — after the turn reports interrupted. Only this
+// turn's processes are terminated; background terminals earlier turns left
+// running (a dev server, a watcher) are not this stop's to end, which is why
+// thread/backgroundTerminals/clean is not used.
 //
 //nolint:contextcheck // the turn context is cancelled; the interrupt must still go out
-func (d *Driver) interruptTurn(srv *appServer, threadID, turnID string) {
+func (d *Driver) interruptTurn(srv *appServer, turn *turnState, turnID string) {
 	if turnID == "" {
 		return
 	}
 	interruptCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	err := srv.conn.Call(interruptCtx, protocol.MethodTurnInterrupt, protocol.TurnInterruptParams{
-		ThreadID: threadID,
+		ThreadID: turn.threadID,
 		TurnID:   turnID,
 	}, nil)
 	if err != nil {
-		d.logger.Warn("codex turn/interrupt failed", slog.String("thread_id", threadID), slog.Any("error", err))
+		d.logger.Warn("codex turn/interrupt failed", slog.String("thread_id", turn.threadID), slog.Any("error", err))
+	}
+	for _, processID := range turn.startedProcesses() {
+		// A process that already exited reports terminated=false; that is
+		// the expected outcome for most commands, not a failure.
+		err := srv.conn.Call(interruptCtx, protocol.MethodThreadBackgroundTerminalsTerminate, protocol.ThreadBackgroundTerminalsTerminateParams{
+			ThreadID:  turn.threadID,
+			ProcessID: processID,
+		}, nil)
+		if err != nil {
+			d.logger.Warn("codex backgroundTerminals/terminate failed", slog.String("thread_id", turn.threadID),
+				slog.String("process_id", processID), slog.Any("error", err))
+		}
 	}
 }
 
@@ -600,13 +613,14 @@ func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*
 		}
 		srv, err := startAppServerSession(context.WithoutCancel(ctx), botID, botAgentID, client, cfg, launcher, d.logger)
 		if err != nil {
-			return nil, "", err
+			// What the app-server said on its way down is the user's to read.
+			return nil, "", external.Upstream(err)
 		}
 		agentproc.ObserveVersion(ctx, d.launchers, botID, dependencyID, srv.codexVersion)
 		srv.workspaceInfo = info
 		srv.toolLookup = d.botGatewayToolLookup(botID)
 		started := launcher
-		started.Version = firstNonEmpty(srv.codexVersion, launcher.Version)
+		started.Version = external.FirstNonEmpty(srv.codexVersion, launcher.Version)
 		return srv, fingerprint(cfg, started), nil
 	}
 	proc, release, err := d.procs.Lease(ctx, serverKey(botID, botAgentID), fingerprint(cfg, launcher), start)
@@ -614,18 +628,6 @@ func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*
 		return nil, nil, err
 	}
 	return proc.(*appServer), release, nil
-}
-
-// wrapServerError shapes an app-server acquisition failure for the caller.
-// A failure the user can act on (a missing workspace dependency, a workspace
-// that is not a container) passes through untouched so the application can
-// give it its own code and args; an external.Failure deliberately hides its cause.
-// Anything else is the generic runtime-unavailable failure.
-func wrapServerError(err error) error {
-	if errors.Is(err, external.ErrDependencyMissing) || errors.Is(err, external.ErrContainerWorkspaceRequired) || external.IsFailure(err) {
-		return err
-	}
-	return external.Unavailable(err)
 }
 
 // emitThreadNotices surfaces runtime-side degradations at the start of a turn.
@@ -645,17 +647,17 @@ func emitThreadNotices(srv *appServer, threadID string, sink external.EventSink)
 // returns the runtime-metadata delta naming the forked thread. The session's
 // runtime metadata supplies the source thread id and working directory.
 func (d *Driver) ForkThread(ctx context.Context, botID, botAgentID string, runtimeMetadata map[string]any, lastTurnID string) (map[string]any, error) {
-	threadID := strings.TrimSpace(metadataString(runtimeMetadata, metadataThreadIDKey))
+	threadID := strings.TrimSpace(external.MetadataString(runtimeMetadata, metadataThreadIDKey))
 	if threadID == "" {
-		return nil, external.Unavailable(errs.New("session has no codex thread to fork"))
+		return nil, external.ErrThreadUnavailable
 	}
 	srv, releaseServer, err := d.acquireServer(ctx, botID, botAgentID)
 	if err != nil {
-		return nil, wrapServerError(err)
+		return nil, err
 	}
 	defer releaseServer()
 	toolsConfig, bindTools := d.prepareThreadTools(ctx, srv, external.PromptInput{BotID: botID, BotAgentID: botAgentID})
-	cwd := strings.TrimSpace(metadataString(runtimeMetadata, "project_path"))
+	cwd := strings.TrimSpace(external.MetadataString(runtimeMetadata, "project_path"))
 	if cwd == "" {
 		cwd = defaultProjectPath
 	}
@@ -668,7 +670,7 @@ func (d *Driver) ForkThread(ctx context.Context, botID, botAgentID string, runti
 		ApprovalPolicy:        &approvalPolicy,
 		Config:                toolsConfig,
 	}
-	if rolloutPath := metadataString(runtimeMetadata, metadataRolloutPathKey); rolloutPath != "" {
+	if rolloutPath := external.MetadataString(runtimeMetadata, metadataRolloutPathKey); rolloutPath != "" {
 		params.Path = &rolloutPath
 	}
 	if trimmed := strings.TrimSpace(lastTurnID); trimmed != "" {
@@ -694,15 +696,6 @@ func (d *Driver) ForkThread(ctx context.Context, botID, botAgentID string, runti
 	var delta map[string]any
 	recordThreadMetadata(&delta, runtimeMetadata, resp.Thread.ID, srv.threadPath(resp.Thread.ID))
 	return delta, nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
 }
 
 var _ external.DeviceLoginProvider = (*Driver)(nil)
@@ -747,50 +740,30 @@ func (d *Driver) StartDeviceLogin(ctx context.Context, botID, botAgentID string)
 func (d *Driver) PollDeviceLogin(_ context.Context, _, botID, botAgentID, loginID string) (external.DeviceLoginStatus, error) {
 	srv := d.peekServer(botID, botAgentID)
 	if srv == nil {
-		return external.DeviceLoginStatus{Status: "unknown"}, nil
+		return external.DeviceLoginStatus{Status: external.DeviceLoginUnknown}, nil
 	}
 	outcome, ok := srv.loginStatus(loginID)
 	switch {
 	case !ok:
-		return external.DeviceLoginStatus{Status: "unknown"}, nil
+		return external.DeviceLoginStatus{Status: external.DeviceLoginUnknown}, nil
 	case !outcome.Done:
-		return external.DeviceLoginStatus{Status: "pending"}, nil
+		return external.DeviceLoginStatus{Status: external.DeviceLoginPending}, nil
 	case outcome.Success:
 		srv.forgetLogin(loginID)
-		return external.DeviceLoginStatus{Status: "success"}, nil
+		return external.DeviceLoginStatus{Status: external.DeviceLoginSuccess}, nil
 	default:
 		srv.forgetLogin(loginID)
 		message := outcome.Error
 		if message == "" {
 			message = "codex login failed"
 		}
-		return external.DeviceLoginStatus{Status: "error", Error: message}, nil
+		return external.DeviceLoginStatus{Status: external.DeviceLoginError, Error: message}, nil
 	}
 }
 
 // PurgeBotAgentAuth signs the Agent's Codex out by deleting its login file.
-// Every app-server of the Agent goes first and none starts until the file is
-// gone: a running one could write a refreshed login back.
 func (d *Driver) PurgeBotAgentAuth(ctx context.Context, botID, botAgentID string) error {
-	unblock, err := d.procs.Drain(ctx, serverKey(botID, botAgentID), func(p agentproc.Process) bool {
-		return p.(*appServer).hasActiveTurns()
-	})
-	if errors.Is(err, agentproc.ErrBusy) {
-		return external.Fail(external.FailureCredentialBusy, nil)
-	}
-	if err != nil {
-		return err
-	}
-	defer unblock()
-	client, err := d.workspaces.MCPClient(ctx, botID)
-	if err != nil {
-		return err
-	}
-	err = client.DeleteFile(ctx, path.Join(codexHome(botAgentID), "auth.json"), false)
-	if errors.Is(err, bridge.ErrNotFound) {
-		return nil
-	}
-	return errs.WrapDependency(err, "")
+	return d.procs.SignOut(ctx, d.workspaces, RuntimeType, botID, botAgentID, path.Join(codexHome(botAgentID), "auth.json"), nil)
 }
 
 // CancelDeviceLogin aborts a pending device-code login.

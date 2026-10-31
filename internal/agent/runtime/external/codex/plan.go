@@ -8,24 +8,12 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 )
 
-var _ external.PlanModeProvider = (*Driver)(nil)
-
 func (*Driver) PlanMode(_ context.Context, input external.PromptInput) (external.ModeState, error) {
-	return codexPlanMode(firstNonEmpty(metadataString(input.RuntimeMetadata, "collaboration_mode"), "default"))
+	return external.PlanModeState(external.FirstNonEmpty(external.MetadataString(input.RuntimeMetadata, "collaboration_mode"), "default"))
 }
 
 func (*Driver) SetPlanMode(_ context.Context, _ external.PromptInput, mode string) (external.ModeState, error) {
-	return codexPlanMode(mode)
-}
-
-func codexPlanMode(mode string) (external.ModeState, error) {
-	if mode != "plan" && mode != "default" {
-		return external.ModeState{}, external.ErrModeUnavailable
-	}
-	return external.ModeState{
-		Supported: true, CurrentModeID: mode,
-		AvailableModes: []external.Mode{{ID: "default", I18nKey: "runtime.planModes.default"}, {ID: "plan", I18nKey: "runtime.planModes.plan"}},
-	}, nil
+	return external.PlanModeState(mode)
 }
 
 // The preset overrides model and effort, so carry the actual thread model
@@ -36,7 +24,7 @@ func codexPlanMode(mode string) (external.ModeState, error) {
 // level on a thread still holding one sends the preset even without a mode
 // switch. Otherwise "endpoint default" would keep running the old level.
 func applyCollaborationMode(params *protocol.TurnStartParams, input external.PromptInput, settings protocol.Settings) error {
-	mode := metadataString(input.RuntimeMetadata, "collaboration_mode")
+	mode := external.MetadataString(input.RuntimeMetadata, "collaboration_mode")
 	if params.Model != nil {
 		settings.Model = *params.Model
 	}
@@ -46,7 +34,7 @@ func applyCollaborationMode(params *protocol.TurnStartParams, input external.Pro
 		}
 		mode = "default"
 	}
-	if _, err := codexPlanMode(mode); err != nil {
+	if _, err := external.PlanModeState(mode); err != nil {
 		return err
 	}
 	settings.ReasoningEffort = params.Effort

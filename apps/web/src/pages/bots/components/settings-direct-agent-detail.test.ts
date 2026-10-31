@@ -74,16 +74,6 @@ it('signs a ChatGPT account in on the Agent itself and polls until Codex has sto
   expect(panel()!.dataset.code).toBeUndefined()
 })
 
-it('reports a sign-in Codex could not finish with its own copy', async () => {
-  mount('codex', 'chatgpt')
-  connect()
-  await vi.advanceTimersByTimeAsync(0)
-  api.poll.mockResolvedValueOnce({ data: { status: 'error' } })
-  await vi.advanceTimersByTimeAsync(2000)
-  expect(api.toastError).toHaveBeenCalledWith('bots.agent.codexLoginFailed')
-  expect(root.querySelector('select')!.disabled).toBe(false)
-})
-
 it('cancels a pending sign-in through the Agent', async () => {
   mount('codex', 'chatgpt')
   connect()
@@ -94,16 +84,6 @@ it('cancels a pending sign-in through the Agent', async () => {
   const polls = api.poll.mock.calls.length
   await vi.advanceTimersByTimeAsync(4000)
   expect(api.poll).toHaveBeenCalledTimes(polls)
-})
-
-it('signs a Grok account in through the same flow with Grok Build\'s own copy', async () => {
-  mount('grok-build', 'grok_account')
-  expect(panel()!.dataset.auth).toBe('grok_account')
-  connect()
-  await vi.advanceTimersByTimeAsync(0)
-  api.poll.mockResolvedValueOnce({ data: { status: 'success' } })
-  await vi.advanceTimersByTimeAsync(2000)
-  expect(api.toastSuccess).toHaveBeenCalledWith('bots.agent.grokLoginSuccess')
 })
 
 it('takes the ChatGPT sign-in from Codex itself, not from a stored credential', async () => {

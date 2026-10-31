@@ -1,4 +1,4 @@
-import { EXTERNAL_AGENT_DEFAULT_PROJECT_MODE, EXTERNAL_AGENT_DEFAULT_PROJECT_PATH } from '@/utils/external-agent'
+import { EXTERNAL_AGENT_DEFAULT_PROJECT_PATH } from '@/utils/external-agent'
 import { isAgentRuntimeType } from '../chat-list.utils'
 import type { Ref } from 'vue'
 import { getBotsByBotIdSettings } from '@memohai/sdk'
@@ -9,7 +9,6 @@ interface ExternalAgentSettings {
   chat_runtime?: string
   chat_acp_agent_id?: string | null
   chat_acp_project_path?: string | null
-  chat_acp_project_mode?: string | null
 }
 
 async function fetchExternalAgentSettings(botId: string): Promise<ExternalAgentSettings | undefined> {
@@ -51,7 +50,6 @@ export function createExternalAgentDefaults(deps: {
       return {
         botAgentId: settings.default_bot_agent_id?.trim() || undefined,
         projectPath: settings.chat_acp_project_path?.trim() || undefined,
-        projectMode: settings.chat_acp_project_mode?.trim() || undefined,
       }
     } catch {
       return {}
@@ -86,8 +84,6 @@ export function createExternalAgentDefaults(deps: {
         agentId,
         projectPath: settings.chat_acp_project_path?.trim()
           || EXTERNAL_AGENT_DEFAULT_PROJECT_PATH,
-        projectMode: settings.chat_acp_project_mode?.trim()
-          || EXTERNAL_AGENT_DEFAULT_PROJECT_MODE,
       }
       deps.rememberDefault(bid, input)
       return input

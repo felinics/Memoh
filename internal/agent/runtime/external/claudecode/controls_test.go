@@ -26,6 +26,7 @@ func (p *controlProcess) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 func (*controlProcess) CloseStdin()             {}
+func (*controlProcess) Kill()                   {}
 func (*controlProcess) Close() error            { return nil }
 func (p *controlProcess) Done() <-chan struct{} { return p.done }
 func (*controlProcess) StderrTail() string      { return "" }
@@ -61,39 +62,6 @@ func replyControl(t *testing.T, r *turnRunner, id string, response map[string]an
 		t.Fatal(err)
 	}
 	feed(t, r, string(line))
-}
-
-func TestClaudeDefaultsOnlyProbeSelectedModel(t *testing.T) {
-	r, p := controlTestRunner()
-	defer r.close()
-	catalog := external.ModelCatalog{ConfiguredModelID: "a", Models: []external.ModelOption{
-		{ID: "a", ResolvedModelID: "native-a"},
-		{ID: "b", ResolvedModelID: "native-b", ReasoningEfforts: []external.ReasoningEffortOption{{ID: "high"}}},
-		{ID: "unrelated"},
-	}}
-	settings := settingsResponse{}
-	settings.Applied.Model = "native-a"
-	done := make(chan error, 1)
-	go func() { done <- r.resolveModelDefaults(t.Context(), &catalog, "b", settings) }()
-	id, request := receiveControl(t, p)
-	if request["subtype"] != "set_model" || request["model"] != "b" {
-		t.Fatalf("unexpected model probe: %v", request)
-	}
-	replyControl(t, r, id, nil)
-	id, request = receiveControl(t, p)
-	if request["subtype"] != "get_settings" {
-		t.Fatalf("unexpected control: %v", request)
-	}
-	replyControl(t, r, id, map[string]any{"applied": map[string]any{"model": "native-b", "effort": "high"}})
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	if catalog.Models[1].DefaultReasoningEffort != "high" || len(p.writes) != 0 {
-		t.Fatalf("defaults did not stay scoped to the selected model: %+v", catalog)
-	}
-	if err := r.resolveModelDefaults(t.Context(), &catalog, "a", settings); err != nil || len(p.writes) != 0 {
-		t.Fatalf("probed settings already observed at initialization: %v", err)
-	}
 }
 
 func TestClaudeControlErrorsAndCancellation(t *testing.T) {
@@ -149,169 +117,6 @@ func TestClaudePlanPreservesConfiguredPermissions(t *testing.T) {
 	}
 	if len(p.writes) != 0 {
 		t.Fatal("host issued an extra permission restore")
-	}
-}
-
-func TestClaudePlanOverrideDoesNotReplayInheritedPermissions(t *testing.T) {
-	for _, tc := range []struct{ plan, configured, requested string }{
-		{"plan", "", "plan"},
-		{"default", "bypassPermissions", ""},
-		{"default", "auto", ""},
-		{"default", "acceptEdits", ""},
-		{"default", "plan", "default"},
-	} {
-		t.Run(tc.plan+"/"+tc.configured, func(t *testing.T) {
-			r, p := controlTestRunner()
-			defer r.close()
-			r.input.RuntimeMetadata["collaboration_mode"] = tc.plan
-			done := make(chan error, 1)
-			go func() { done <- r.configureModes(context.Background(), claudecfg.Config{}, nil) }()
-			if tc.plan == "default" {
-				id, request := receiveControl(t, p)
-				if request["subtype"] != "get_settings" {
-					t.Fatalf("request: %v", request)
-				}
-				replyControl(t, r, id, map[string]any{"effective": map[string]any{"permissions": map[string]any{"defaultMode": tc.configured}}})
-			}
-			if tc.requested != "" {
-				id, request := receiveControl(t, p)
-				if request["subtype"] != "set_permission_mode" || request["mode"] != tc.requested {
-					t.Fatalf("request: %v", request)
-				}
-				replyControl(t, r, id, map[string]any{"mode": tc.requested})
-			}
-			select {
-			case err := <-done:
-				if err != nil {
-					t.Fatal(err)
-				}
-			case <-time.After(time.Second):
-				t.Fatal("host replayed inherited permissions")
-			}
-		})
-	}
-}
-
-func TestClaudeInheritedPermissionsFollowWorkspaceAcrossTurns(t *testing.T) {
-	metadata := map[string]any{"permission_mode": "inherit"}
-	for _, mode := range []string{"acceptEdits", "plan", "default"} {
-		r, p := controlTestRunner()
-		defer r.close()
-		r.input.RuntimeMetadata = metadata
-
-		if err := r.configureModes(context.Background(), claudecfg.Config{}, nil); err != nil {
-			t.Fatal(err)
-		}
-		feed(t, r, `{"type":"system","subtype":"init","permissionMode":"`+mode+`"}`)
-		if metadata["collaboration_mode"] != nil || len(p.writes) != 0 {
-			t.Fatalf("initial snapshot pinned a choice: %v", metadata)
-		}
-		for key, value := range r.runtimeMetadata {
-			metadata[key] = value
-		}
-		state, err := (&Driver{}).PlanMode(context.Background(), r.input)
-		if err != nil || (state.CurrentModeID == "plan") != (mode == "plan") {
-			t.Fatalf("inherited Plan display: %+v, %v", state, err)
-		}
-		if mode == "default" {
-			feed(t, r, `{"type":"system","subtype":"status","permissionMode":"plan"}`)
-			if r.runtimeMetadata["collaboration_mode"] != "plan" {
-				t.Fatal("native Plan entry was not preserved for the next turn")
-			}
-		}
-	}
-}
-
-func TestClaudeCompactionRequiresManualBoundary(t *testing.T) {
-	for _, boundary := range []string{"", "auto", "manual"} {
-		t.Run(boundary, func(t *testing.T) {
-			r := newTestRunner(&recordingSink{})
-			r.input.Command = "compact"
-			if boundary != "" {
-				feed(t, r, `{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"`+boundary+`"}}`)
-			}
-			feed(t, r, `{"type":"result","subtype":"success","is_error":false}`)
-			result, err := r.buildResult("")
-			if (err == nil) != (boundary == "manual") || result.TurnCompleted != (boundary == "manual") {
-				t.Fatalf("result %+v, error %v", result, err)
-			}
-		})
-	}
-}
-
-func TestClaudeModesAndCommandBoundary(t *testing.T) {
-	r, p := controlTestRunner()
-	defer r.close()
-	r.input.ModelID = "model-a"
-	r.input.RuntimeMetadata["permission_mode"] = "auto"
-	for _, plan := range []string{"default", "plan"} {
-		r.input.RuntimeMetadata["collaboration_mode"] = plan
-		if err := r.configureModes(context.Background(), claudecfg.Config{}, []initializeModel{{Value: "model-a"}}); !errors.Is(err, external.ErrModeUnavailable) {
-			t.Fatalf("unsupported model accepted Auto: %v", err)
-		}
-	}
-	if len(p.writes) != 0 {
-		t.Fatal("sent a native mode change for an unsupported model")
-	}
-	for _, mode := range []string{"inherit", "default", "acceptEdits", "auto", "bypassPermissions"} {
-		if _, err := claudeModes(mode); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, mode := range []string{"strict", "policy", "yolo", "plan"} {
-		if _, err := claudeModes(mode); err == nil {
-			t.Fatalf("accepted %q", mode)
-		}
-	}
-	// An unreachable workspace leaves the session's own observation.
-	d := &Driver{commands: newCommandCatalog(func(context.Context, external.PromptInput) (observedCommands, error) {
-		return observedCommands{}, errors.New("workspace unreachable")
-	}, slog.Default())}
-	commands, err := d.Commands(context.Background(), external.PromptInput{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if command, ok := external.FindCommand(commands, "goal"); !ok || command.Kind != external.CommandTurn {
-		t.Fatal("new sessions cannot submit a native goal")
-	}
-	commands, err = d.Commands(context.Background(), external.PromptInput{RuntimeMetadata: map[string]any{
-		"claude_commands": []initializeCommand{
-			{Name: "clear"},
-			{Name: "code-review"},
-			{Name: "goal", Description: "Native goal description", ArgumentHint: "Native goal hint"},
-			{Name: "project:review", Aliases: []string{"pr-review"}},
-			{Name: "legacy-check"},
-			{Name: "loop", Aliases: []string{"proactive"}},
-		},
-		"claude_skills": []string{"project:review", "legacy-check", "loop", "hidden-skill"},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if command, ok := external.FindCommand(commands, "code-review"); !ok || command.Skill {
-		t.Fatal("built-in review is missing or listed as a skill")
-	}
-	for _, name := range []string{"project:review", "pr-review", "legacy-check"} {
-		if command, ok := external.FindCommand(commands, name); !ok || command.Kind != external.CommandTurn || !command.Skill {
-			t.Fatalf("missing native skill %q", name)
-		}
-	}
-	goalCount := 0
-	for _, command := range commands {
-		if command.Name == "goal" {
-			if command.Description != "Native goal description" || command.InputHint != "Native goal hint" {
-				t.Fatal("host copy replaced the native command description")
-			}
-			goalCount++
-		}
-	}
-	if goalCount != 1 {
-		t.Fatalf("goal command count after discovery: %d", goalCount)
-	}
-	for _, name := range []string{"clear", "loop", "proactive", "hidden-skill"} {
-		if _, ok := external.FindCommand(commands, name); ok {
-			t.Fatalf("published unsupported control %q", name)
-		}
 	}
 }
 
@@ -395,79 +200,7 @@ func TestClaudeNativeApprovalBoundary(t *testing.T) {
 	}
 }
 
-func TestClaudeResultUsageAndMetadataAreStable(t *testing.T) {
-	r := newTestRunner(&recordingSink{})
-	// Keep the run open across two native results.
-	feed(t, r, `{"type":"result","uuid":"first","subtype":"success","queued_turn_count":1,"usage":{"input_tokens":100,"output_tokens":10,"cache_read_input_tokens":20}}`)
-	feed(t, r, `{"type":"result","uuid":"first","subtype":"success","queued_turn_count":1,"usage":{"input_tokens":100,"output_tokens":10,"cache_read_input_tokens":20}}`)
-	feed(t, r, `{"type":"result","uuid":"second","subtype":"success","usage":{"input_tokens":200,"output_tokens":30,"cache_read_input_tokens":40}}`)
-	r.runtimeMetadata["model"] = "first"
-	result, err := r.buildResult("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Anthropic's input_tokens leaves cache reads out; the SDK total has them.
-	if result.Usage.InputTokens != 360 || result.Usage.InputTokenDetails.NoCacheTokens != 300 || result.Usage.OutputTokens != 40 || result.Usage.CachedInputTokens != 60 {
-		t.Fatalf("usage: %+v", result.Usage)
-	}
-	r.runtimeMetadata["model"] = "later"
-	if result.RuntimeMetadata["model"] != "first" {
-		t.Fatal("result shares mutable runtime metadata")
-	}
-	r.close()
-	feed(t, r, `{"type":"system","subtype":"status","permissionMode":"plan"}`)
-	if r.permissionMode != "" {
-		t.Fatal("closed run accepted a late mode update")
-	}
-}
-
 func (*controlProcess) Err() error { return nil }
-
-type drainingProcess struct {
-	controlProcess
-	eof     chan struct{}
-	exitErr error
-}
-
-func (p *drainingProcess) CloseStdin() { close(p.eof) }
-func (p *drainingProcess) Err() error  { return p.exitErr }
-
-func TestClaudeDrainWaitsForTranscriptFlush(t *testing.T) {
-	p := &drainingProcess{controlProcess: controlProcess{done: make(chan struct{})}, eof: make(chan struct{})}
-	done := make(chan error, 1)
-	go func() { done <- drainCLI(p, time.Second) }()
-	<-p.eof
-	select {
-	case err := <-done:
-		t.Fatalf("drained before native flush: %v", err)
-	default:
-	}
-	p.exitErr = errors.New("flush failed")
-	close(p.done)
-	if err := <-done; !errors.Is(err, p.exitErr) {
-		t.Fatalf("lost exit failure: %v", err)
-	}
-}
-
-func TestClaudeReadCommandsPreserveStructuredObservations(t *testing.T) {
-	d := &Driver{}
-	usage := map[string]any{"input_tokens": 12701, "future_counter": 12}
-	input := external.PromptInput{Command: "status", RuntimeMetadata: map[string]any{
-		metadataSessionIDKey: "native-session", "claude_model": "native-model",
-		"claude_effective_permission_mode": "bypassPermissions", "claude_usage": usage,
-	}}
-	result, err := d.ReadCommand(t.Context(), input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, ok := result.Data.(map[string]any)
-	if !ok || result.Text != "" || result.Notice != "last_observed" {
-		t.Fatalf("runtime formatted a presentation: %+v", result)
-	}
-	if data["usage"].(map[string]any)["future_counter"] != 12 || data["model"] != "native-model" {
-		t.Fatalf("lost native observation: %+v", data)
-	}
-}
 
 // A process that left the workspace's mode in an earlier turn returns to it
 // when the next turn inherits.

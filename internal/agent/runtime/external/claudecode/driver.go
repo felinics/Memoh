@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -75,7 +74,9 @@ func NewDriver(
 	agents *botagents.Service,
 	credentials *agentcredential.Service,
 	approvalSvc ApprovalService,
+	userInput userinput.FlowService,
 	toolGateway toolmount.Gateway,
+	launchers external.LauncherResolver,
 	procs *agentproc.Supervisor,
 	logger *slog.Logger,
 ) *Driver {
@@ -84,7 +85,9 @@ func NewDriver(
 		agents:      agents,
 		credentials: credentials,
 		approval:    approvalSvc,
+		userInput:   userInput,
 		toolGateway: toolGateway,
+		launchers:   launchers,
 		procs:       procs,
 		logger:      logger.With(slog.String("runtime", RuntimeType)),
 	}
@@ -95,7 +98,15 @@ func NewDriver(
 // RuntimeType implements external.Driver.
 func (*Driver) RuntimeType() string { return RuntimeType }
 
-func (d *Driver) SetUserInputService(service userinput.FlowService) { d.userInput = service }
+// Capabilities is what Claude Code declares (external.Caps).
+var Capabilities = external.Caps{
+	Dependency:       dependencyID,
+	Command:          "claude",
+	ForkNeedsRuntime: true,
+}
+
+// Caps implements external.Driver.
+func (*Driver) Caps() external.Caps { return Capabilities }
 
 func (d *Driver) resolveAgentConfig(ctx context.Context, botID, botAgentID string) (claudecfg.Config, error) {
 	agent, err := d.agents.Get(ctx, botID, botAgentID)
@@ -150,7 +161,7 @@ func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalog
 		if err != nil {
 			d.logger.WarnContext(ctx, "claude model defaults unavailable", slog.Any("error", err))
 		} else {
-			catalog = modelCatalogFromInitialize(firstNonEmpty(cfg.Model, settings.Applied.Model), response)
+			catalog = modelCatalogFromInitialize(external.FirstNonEmpty(cfg.Model, settings.Applied.Model), response)
 			if err := turn.resolveModelDefaults(ctx, &catalog, request.ModelID, settings); err != nil {
 				d.logger.WarnContext(ctx, "claude selected model defaults unavailable", slog.Any("error", err))
 			}
@@ -208,7 +219,7 @@ func (d *Driver) startControlCLI(ctx context.Context, botID, botAgentID, project
 // Resolve only the selected model. Other models already carry initialize's
 // capabilities; switching through them adds no validation information.
 func (t *turnRunner) resolveModelDefaults(ctx context.Context, catalog *external.ModelCatalog, selected string, settings settingsResponse) error {
-	selected = firstNonEmpty(selected, catalog.ConfiguredModelID)
+	selected = external.FirstNonEmpty(selected, catalog.ConfiguredModelID)
 	if selected == "" {
 		return nil
 	}
@@ -227,7 +238,7 @@ func (t *turnRunner) resolveModelDefaults(ctx context.Context, catalog *external
 				return err
 			}
 		}
-		model.ResolvedModelID = firstNonEmpty(settings.Applied.Model, model.ResolvedModelID)
+		model.ResolvedModelID = external.FirstNonEmpty(settings.Applied.Model, model.ResolvedModelID)
 		for _, effort := range model.ReasoningEfforts {
 			if effort.ID == settings.Applied.Effort {
 				model.DefaultReasoningEffort = effort.ID
@@ -286,7 +297,7 @@ func modelCatalogFromInitialize(configuredModel string, response initializeRespo
 		models = append(models, external.ModelOption{
 			ID:                         id,
 			ResolvedModelID:            resolved,
-			Name:                       firstNonEmpty(model.DisplayName, id),
+			Name:                       external.FirstNonEmpty(model.DisplayName, id),
 			Description:                strings.TrimSpace(model.Description),
 			Default:                    isDefault,
 			ReasoningEfforts:           efforts,
@@ -305,12 +316,11 @@ func modelCatalogFromInitialize(configuredModel string, response initializeRespo
 func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (external.PromptResult, error) {
 	cfg, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID)
 	if err != nil {
-		if external.IsFailure(err) {
-			return external.PromptResult{}, err
-		}
-		return external.PromptResult{}, external.Unavailable(err)
+		// A credential failure is already a Failure; reading the Agent's
+		// configuration is Memoh's own and stays private.
+		return external.PromptResult{}, err
 	}
-	storedSessionID := strings.TrimSpace(metadataString(input.RuntimeMetadata, metadataSessionIDKey))
+	storedSessionID := strings.TrimSpace(external.MetadataString(input.RuntimeMetadata, metadataSessionIDKey))
 	if input.ForceFreshRuntime {
 		// Discuss turns re-inject the full composed context every round;
 		// resuming the stored session would duplicate it on top of the
@@ -349,7 +359,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		} else if !slices.ContainsFunc(available, func(command initializeCommand) bool { return command.Name == input.Command }) {
 			skills, err := turn.reloadSkillNames(ctx)
 			if err != nil {
-				return external.PromptResult{}, external.Fail(external.FailureControlFailed, err)
+				return external.PromptResult{}, external.Upstream(err)
 			}
 			available = claudeTurnCommands(capabilities.Commands, skills)
 		}
@@ -362,23 +372,22 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		}
 		input.ContextMarkdown = ""
 	}
-	if err := turn.applySettings(ctx, firstNonEmpty(input.ModelID, cfg.Model), strings.TrimSpace(input.ReasoningEffort)); err != nil {
-		return external.PromptResult{}, external.Fail(external.FailureControlFailed, err)
+	if err := turn.applySettings(ctx, external.FirstNonEmpty(input.ModelID, cfg.Model), strings.TrimSpace(input.ReasoningEffort)); err != nil {
+		return external.PromptResult{}, external.Upstream(err)
 	}
 	if err := turn.configureModes(ctx, cfg, capabilities.Models); err != nil {
-		if errors.Is(err, external.ErrModeUnavailable) {
+		if external.IsFailureKind(err, external.FailureModeUnavailable) {
 			return external.PromptResult{}, external.Fail(external.FailureModeUnavailable, err)
 		}
-		return external.PromptResult{}, external.Fail(external.FailureControlFailed, err)
+		return external.PromptResult{}, external.Upstream(err)
 	}
 
-	line, err := userMessageLine(firstNonEmpty(sess.heldSession(), storedSessionID), buildUserContent(input))
+	line, err := userMessageLine(external.FirstNonEmpty(sess.heldSession(), storedSessionID), buildUserContent(input))
 	if err != nil {
 		return external.PromptResult{}, err
 	}
 	if err := turn.writeLine(line); err != nil {
-		d.procs.MarkBroken(key, sess)
-		return external.PromptResult{}, external.Unavailable(err)
+		return external.PromptResult{}, external.Upstream(err)
 	}
 	stopSteering := turn.startSteering(ctx)
 	defer stopSteering()
@@ -389,12 +398,13 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		turn.interrupt()
 		// Grace window for the CLI to settle the interrupted turn; a wedged
 		// process must not pin this turn (and the session's single active
-		// slot) forever, so it is replaced when the window closes.
+		// slot) forever, so it is ended when the window closes. The process
+		// is this conversation's alone, and its end finishes the turn.
 		grace := time.NewTimer(interruptGraceTimeout)
 		select {
 		case <-turn.done:
 		case <-grace.C:
-			d.procs.MarkBroken(key, sess)
+			sess.end()
 			<-turn.done
 		}
 		grace.Stop()
@@ -415,8 +425,8 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	return result, resultErr
 }
 
-func sessionKey(input external.PromptInput) string {
-	return agentproc.Key(RuntimeType, input.BotID, input.ThreadID)
+func sessionKey(input external.PromptInput) agentproc.Key {
+	return agentproc.Key{Runtime: RuntimeType, BotID: input.BotID, BotAgentID: input.BotAgentID, Scope: input.ThreadID}
 }
 
 // fingerprint names what a CLI process is started from: a change to any of
@@ -447,8 +457,8 @@ func (d *Driver) acquireSession(ctx context.Context, cfg claudecfg.Config, input
 	if err != nil {
 		return nil, nil, err
 	}
-	workDir := strings.TrimSpace(metadataString(input.RuntimeMetadata, "project_path"))
-	allowBypass := firstNonEmpty(metadataString(input.RuntimeMetadata, "permission_mode"), cfg.PermissionMode) == "bypassPermissions"
+	workDir := strings.TrimSpace(external.MetadataString(input.RuntimeMetadata, "project_path"))
+	allowBypass := external.FirstNonEmpty(external.MetadataString(input.RuntimeMetadata, "permission_mode"), cfg.PermissionMode) == "bypassPermissions"
 	key := sessionKey(input)
 	start := func(ctx context.Context) (agentproc.Process, string, error) {
 		client, err := d.workspaces.MCPClient(ctx, input.BotID)
@@ -461,16 +471,14 @@ func (d *Driver) acquireSession(ctx context.Context, cfg claudecfg.Config, input
 			return nil, "", err
 		}
 		started := launcher
-		started.Version = firstNonEmpty(sess.version, launcher.Version)
+		started.Version = external.FirstNonEmpty(sess.version, launcher.Version)
 		return sess, fingerprint(cfg, started, workDir, allowBypass), nil
 	}
 	for range 2 {
 		proc, release, err := d.procs.Lease(ctx, key, fingerprint(cfg, launcher, workDir, allowBypass), start)
 		if err != nil {
-			if external.IsFailure(err) || errors.Is(err, external.ErrDependencyMissing) {
-				return nil, nil, err
-			}
-			return nil, nil, external.Unavailable(err)
+			// A start failure is already shown in the CLI's words.
+			return nil, nil, err
 		}
 		sess := proc.(*cliSession)
 		// A process holding no session yet starts one: the stored one was
@@ -481,7 +489,7 @@ func (d *Driver) acquireSession(ctx context.Context, cfg claudecfg.Config, input
 		release()
 		d.procs.MarkBroken(key, sess)
 	}
-	return nil, nil, external.Unavailable(errs.New("claude process could not be replaced"))
+	return nil, nil, errs.New("claude process could not be replaced")
 }
 
 // startSession starts a CLI process for the conversation, resuming resume
@@ -489,7 +497,7 @@ func (d *Driver) acquireSession(ctx context.Context, cfg claudecfg.Config, input
 func (d *Driver) startSession(ctx context.Context, client *bridge.Client, info bridge.WorkspaceInfo, cfg claudecfg.Config, launcher external.Launcher, input external.PromptInput, resume, workDir string, allowBypass bool) (*cliSession, error) {
 	var sess *cliSession
 	mcpConfig, mount := d.mountSessionTools(ctx, client, info, input, func() *turnRunner { return sess.currentTurn() })
-	model, effort := firstNonEmpty(input.ModelID, cfg.Model), strings.TrimSpace(input.ReasoningEffort)
+	model, effort := external.FirstNonEmpty(input.ModelID, cfg.Model), strings.TrimSpace(input.ReasoningEffort)
 	args := cliArgs(model, effort, resume, mcpConfig, launcher.Version, allowBypass)
 	// The process outlives the turn that started it.
 	proc, err := startCLI(context.WithoutCancel(ctx), client, workDir, args, cliEnv(cfg), launcher.Path)
@@ -497,7 +505,7 @@ func (d *Driver) startSession(ctx context.Context, client *bridge.Client, info b
 		if mount != nil {
 			mount.Stop()
 		}
-		return nil, external.Unavailable(err)
+		return nil, external.Upstream(err)
 	}
 	sess = newCLISession(proc, d.logger)
 	sess.mount, sess.nativeID, sess.model, sess.effort = mount, resume, model, effort
@@ -509,7 +517,7 @@ func (d *Driver) startSession(ctx context.Context, client *bridge.Client, info b
 	}
 	if err != nil {
 		_ = sess.Close()
-		return nil, external.Unavailable(err)
+		return nil, external.Upstream(err)
 	}
 	// The version decides whether a later turn may keep this process; the
 	// handshake that also reports it comes only with a turn.
@@ -656,20 +664,6 @@ func buildUserContent(input external.PromptInput) []map[string]any {
 		})
 	}
 	return content
-}
-
-func metadataString(meta map[string]any, key string) string {
-	value, _ := meta[key].(string)
-	return value
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
 }
 
 func base64Encode(data []byte) string {

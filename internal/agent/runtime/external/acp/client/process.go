@@ -2,22 +2,20 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/felinics/memoh/internal/agent/runtime/external/agentproc"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
-	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/workspace/shellenv"
 )
 
 const (
-	stderrTailLimit = 8 * 1024
 	// defaultContainerPath is the PATH ACP agents start from; the user's shell
 	// configuration extends it (see resolveContainerPath). The managed
 	// dependency shim directory comes first so a managed overlay
@@ -38,43 +36,67 @@ const (
 	WorkspaceBackendContainer WorkspaceBackend = "container"
 )
 
-type SetupMode string
-
-const (
-	SetupModeAPIKey SetupMode = "api_key"
-	SetupModeOAuth  SetupMode = "oauth"
-	SetupModeSelf   SetupMode = "self"
-)
-
-type processOptions struct {
-	BotID            string
-	AgentID          string
-	SetupMode        SetupMode
-	Env              []string
-	UnsetEnv         []string
-	NoTimeout        bool
-	Logger           *slog.Logger
-	RuntimeSyncGuard RuntimeSyncGuard
+// ProcessOptions describes one ACP agent process: who it runs for and the
+// environment it starts from.
+type ProcessOptions struct {
+	BotID    string
+	AgentID  string
+	Env      []string
+	UnsetEnv []string
+	Logger   *slog.Logger
+	// CleanEnv starts the agent on Env alone: an agent whose whole
+	// environment Memoh composes and that keeps its state where Env points
+	// it. Without it the agent inherits the workspace environment minus
+	// UnsetEnv, with HOME at the bot's data and the user's shell PATH.
+	CleanEnv bool
 }
 
-type bridgeProcess struct {
-	stream   *bridge.ExecStream
-	stdin    *io.PipeWriter
-	stdout   *io.PipeReader
-	tail     *stderrTail
-	done     chan struct{}
-	toolEnv  []string
-	unsetEnv []string
-	lease    *runtimeLease
-	logger   *slog.Logger
-
-	closeOnce    sync.Once
-	finalizeOnce sync.Once
-	finalizeDone chan struct{}
-	finalizeErr  error
+// Process is one user-supplied ACP agent running in a bot's workspace.
+type Process struct {
+	*agentproc.Child
+	// ToolEnv and UnsetEnv are the environment the agent's terminals run with.
+	ToolEnv  []string
+	UnsetEnv []string
 }
 
-func startBridgeProcess(ctx context.Context, client *bridge.Client, command string, args []string, workDir string, timeout time.Duration, opts processOptions) (*bridgeProcess, error) {
+// npmCacheDir keeps the npm cache of agents run through npx out of the bot's
+// data, where HOME would put it.
+const npmCacheDir = "/tmp/memoh-acp-cache/npm"
+
+// processEnv is the environment an agent and its terminals run with, and the
+// inherited names it replaces. The PATH probe runs the user's shell
+// configuration, which keys its PATH additions off HOME, so an agent
+// installed from the workspace terminal is found; a failed probe falls back
+// to the default PATH.
+func processEnv(ctx context.Context, client *bridge.Client, opts ProcessOptions) ([]string, []string) {
+	owned := []string{"HOME", "PATH", "NPM_CONFIG_CACHE"}
+	env := withoutEnvKeys(withoutBlockedEnvNames(opts.Env, opts.UnsetEnv), owned...)
+	env = append(env, "HOME="+dataMountPath, "NPM_CONFIG_CACHE="+npmCacheDir)
+	unset := mergeEnvNames(opts.UnsetEnv, owned)
+	containerPath, err := shellenv.ResolvePath(ctx, client, defaultContainerPath, env, unset)
+	if err != nil {
+		if opts.Logger != nil {
+			opts.Logger.WarnContext(ctx, "workspace shell PATH probe failed; ACP agent runs with the default PATH",
+				slog.String("agent_id", opts.AgentID), slog.String("bot_id", opts.BotID), slog.Any("error", err))
+		}
+		containerPath = defaultContainerPath
+	}
+	return append(env, "PATH="+containerPath), unset
+}
+
+func mergeEnvNames(existing, additional []string) []string {
+	out := make([]string, 0, len(existing)+len(additional))
+	for _, value := range slices.Concat(existing, additional) {
+		if value = strings.TrimSpace(value); value != "" && !slices.Contains(out, value) {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+// StartProcess resolves command on the workspace PATH and launches it in
+// workDir.
+func StartProcess(ctx context.Context, client *bridge.Client, command string, args []string, workDir string, opts ProcessOptions) (*Process, error) {
 	if client == nil {
 		return nil, errs.New("workspace bridge client is required")
 	}
@@ -87,126 +109,55 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 			return nil, errs.WrapDependency(err, "prepare ACP cwd")
 		}
 	}
-	timeoutSeconds := int32(timeout.Seconds())
-	if opts.NoTimeout {
-		timeoutSeconds = -1
-	} else if timeoutSeconds <= 0 {
-		timeoutSeconds = int32(DefaultRunTimeout.Seconds())
+	env, unset := opts.Env, opts.UnsetEnv
+	if !opts.CleanEnv {
+		env, unset = processEnv(ctx, client, opts)
 	}
-
-	lease, err := prepareRuntimeLease(ctx, client, opts)
+	resolveOpts := opts
+	resolveOpts.UnsetEnv = unset
+	resolved, err := resolveCommand(ctx, client, command, workDir, env, resolveOpts)
 	if err != nil {
 		return nil, err
 	}
-	env := lease.agentEnv
-	runtimeOpts := opts
-	runtimeOpts.UnsetEnv = lease.unsetEnv
-
-	resolvedCommand, err := resolveCommand(ctx, client, command, workDir, env, runtimeOpts)
-	if err != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		_ = lease.finalize(cleanupCtx)
-		return nil, err
-	}
-
-	shellCommand := buildShellCommand(resolvedCommand, args)
-	execStream, err := client.ExecStreamWithOptions(ctx, shellCommand, workDir, timeoutSeconds, bridge.ExecOptions{
+	// The process outlives the request that happened to start it.
+	child, err := agentproc.SpawnWith(context.WithoutCancel(ctx), client, buildShellCommand(resolved, args), workDir, bridge.ExecOptions{
 		Env:      env,
-		UnsetEnv: runtimeOpts.UnsetEnv,
+		UnsetEnv: unset,
+		CleanEnv: opts.CleanEnv,
 	})
 	if err != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		_ = lease.finalize(cleanupCtx)
-		return nil, errs.WrapDependency(err, "")
+		return nil, errs.WrapDependency(err, "start "+buildShellCommand(command, args))
 	}
-
-	stdinR, stdinW := io.Pipe()
-	stdoutR, stdoutW := io.Pipe()
-	proc := &bridgeProcess{
-		stream:       execStream,
-		stdin:        stdinW,
-		stdout:       stdoutR,
-		tail:         &stderrTail{},
-		done:         make(chan struct{}),
-		toolEnv:      append([]string(nil), lease.toolEnv...),
-		unsetEnv:     append([]string(nil), lease.unsetEnv...),
-		lease:        lease,
-		logger:       opts.Logger,
-		finalizeDone: make(chan struct{}),
-	}
-
-	go func() {
-		defer func() { _ = stdinR.Close() }()
-		buf := make([]byte, 32*1024)
-		for {
-			n, readErr := stdinR.Read(buf)
-			if n > 0 {
-				if sendErr := execStream.SendStdin(buf[:n]); sendErr != nil {
-					_ = stdoutW.CloseWithError(errs.WrapDependency(sendErr, ""))
-					return
-				}
-			}
-			if readErr != nil {
-				return
-			}
-		}
-	}()
-
-	go func() {
-		defer close(proc.done)
-		for {
-			output, recvErr := execStream.Recv()
-			if recvErr != nil {
-				if !errors.Is(recvErr, io.EOF) {
-					_ = stdoutW.CloseWithError(errs.WrapDependency(recvErr, ""))
-				} else {
-					_ = stdoutW.Close()
-				}
-				return
-			}
-			switch output.GetStream() {
-			case pb.ExecOutput_STDOUT:
-				if _, err := stdoutW.Write(output.GetData()); err != nil {
-					_ = stdoutW.CloseWithError(err)
-					return
-				}
-			case pb.ExecOutput_STDERR:
-				proc.tail.append(output.GetData())
-			case pb.ExecOutput_EXIT:
-				_ = stdoutW.Close()
-				return
-			}
-		}
-	}()
-	go func(parent context.Context) {
-		<-proc.done
-		proc.finalizeAfterExit(parent)
-	}(ctx)
-
-	return proc, nil
+	return &Process{Child: child, ToolEnv: env, UnsetEnv: unset}, nil
 }
 
-func normalizeSetupMode(mode SetupMode) SetupMode {
-	switch SetupMode(strings.ToLower(strings.TrimSpace(string(mode)))) {
-	case SetupModeOAuth:
-		return SetupModeOAuth
-	case SetupModeSelf:
-		return SetupModeSelf
-	default:
-		return SetupModeAPIKey
+// handshakeTimeout bounds the ACP initialize exchange on a fresh process.
+const handshakeTimeout = 60 * time.Second
+
+// Launch starts an agent process and completes the ACP handshake on it,
+// offering caps. A failed handshake carries the agent's stderr: an agent that
+// could not start usually said why there.
+func Launch(ctx context.Context, client *bridge.Client, command string, args []string, workDir string, opts ProcessOptions, caps ClientCapabilities) (*Process, *Conn, error) {
+	proc, err := StartProcess(ctx, client, command, args, workDir, opts)
+	if err != nil {
+		return nil, nil, err
 	}
+	handshakeCtx, cancel := context.WithTimeout(ctx, handshakeTimeout)
+	defer cancel()
+	conn, err := ConnectWith(handshakeCtx, proc, opts.Logger, caps)
+	if err != nil {
+		err = withStderr(err, proc.StderrTail)
+		_ = proc.Close()
+		return nil, nil, err
+	}
+	return proc, conn, nil
 }
 
-func resolveCommand(ctx context.Context, client *bridge.Client, command, workDir string, env []string, opts processOptions) (string, error) {
+func resolveCommand(ctx context.Context, client *bridge.Client, command, workDir string, env []string, opts ProcessOptions) (string, error) {
 	command = strings.TrimSpace(command)
 	resolved, lastResult, err := resolveCommandOnce(ctx, client, command, workDir, env, opts)
 	if err != nil || resolved != "" {
-		if resolved != "" || err != nil {
-			return resolved, err
-		}
-		return "", commandNotAvailableError(command, lastResult)
+		return resolved, err
 	}
 
 	deadline := time.Now().Add(commandResolveWindow)
@@ -233,7 +184,7 @@ func resolveCommand(ctx context.Context, client *bridge.Client, command, workDir
 	return "", commandNotAvailableError(command, lastResult)
 }
 
-func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, workDir string, env []string, opts processOptions) (string, *bridge.ExecResult, error) {
+func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, workDir string, env []string, opts ProcessOptions) (string, *bridge.ExecResult, error) {
 	command = strings.TrimSpace(command)
 	if !isPlainCommand(command) {
 		return command, nil, nil
@@ -269,7 +220,7 @@ func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, wor
 	return "", toolkitResult, nil
 }
 
-func checkCommand(ctx context.Context, client *bridge.Client, check, workDir string, env []string, opts processOptions) (*bridge.ExecResult, error) {
+func checkCommand(ctx context.Context, client *bridge.Client, check, workDir string, env []string, opts ProcessOptions) (*bridge.ExecResult, error) {
 	result, err := client.ExecWithOptions(ctx, check, workDir, 10, nil, bridge.ExecOptions{
 		Env:      env,
 		UnsetEnv: opts.UnsetEnv,
@@ -312,58 +263,6 @@ func isPlainCommand(command string) bool {
 		return false
 	}
 	return !strings.ContainsAny(command, " \t\n'\"\\$&;|<>*?()[]{}!`")
-}
-
-func (p *bridgeProcess) Read(b []byte) (int, error) {
-	return p.stdout.Read(b)
-}
-
-func (p *bridgeProcess) Write(b []byte) (int, error) {
-	return p.stdin.Write(b)
-}
-
-func (p *bridgeProcess) Close() error {
-	if p == nil {
-		return nil
-	}
-	p.closeOnce.Do(func() {
-		if p.stdin != nil {
-			_ = p.stdin.Close()
-		}
-		if p.stdout != nil {
-			_ = p.stdout.Close()
-		}
-		if p.stream != nil {
-			_ = p.stream.Close()
-		}
-	})
-	timer := time.NewTimer(2 * time.Second)
-	defer timer.Stop()
-	select {
-	case <-p.done:
-	case <-timer.C:
-		return errs.NewDependency("ACP process did not exit before the cleanup deadline")
-	}
-	<-p.finalizeDone
-	return p.finalizeErr
-}
-
-func (p *bridgeProcess) finalizeAfterExit(parent context.Context) {
-	if p == nil {
-		return
-	}
-	p.finalizeOnce.Do(func() {
-		defer close(p.finalizeDone)
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 15*time.Second)
-		defer cancel()
-		p.finalizeErr = p.lease.finalize(ctx)
-		if p.finalizeErr != nil && p.logger != nil {
-			p.logger.WarnContext(parent, "failed to finalize ACP runtime state",
-				slog.String("agent_id", p.lease.agentID),
-				slog.String("bot_id", p.lease.botID),
-				slog.Any("error", p.finalizeErr))
-		}
-	})
 }
 
 func withoutEnvKeys(env []string, keys ...string) []string {
@@ -428,49 +327,6 @@ func envNameBlocked(name string, keys []string) bool {
 		}
 	}
 	return false
-}
-
-func (p *bridgeProcess) errorWithStderr(err error) error {
-	if err == nil {
-		err = io.EOF
-	}
-	if strings.TrimSpace(p.tail.String()) == "" {
-		select {
-		case <-p.done:
-		case <-time.After(250 * time.Millisecond):
-		}
-	}
-	stderr := strings.TrimSpace(p.tail.String())
-	if stderr == "" {
-		return err
-	}
-	return fmt.Errorf("%w: %s", err, stderr)
-}
-
-type stderrTail struct {
-	mu  sync.Mutex
-	buf string
-}
-
-func (t *stderrTail) append(data []byte) {
-	if t == nil || len(data) == 0 {
-		return
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.buf += string(data)
-	if len(t.buf) > stderrTailLimit {
-		t.buf = t.buf[len(t.buf)-stderrTailLimit:]
-	}
-}
-
-func (t *stderrTail) String() string {
-	if t == nil {
-		return ""
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.buf
 }
 
 func escapeShellArg(value string) string {

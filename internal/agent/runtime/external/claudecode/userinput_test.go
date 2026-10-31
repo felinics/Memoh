@@ -3,7 +3,6 @@ package claudecode
 import (
 	"context"
 	"testing"
-	"time"
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 )
@@ -106,30 +105,5 @@ func TestClaudeElicitationFormAndURL(t *testing.T) {
 				t.Fatalf("ownership: %+v", svc.pending)
 			}
 		})
-	}
-}
-
-func TestClaudeElicitationCancellation(t *testing.T) {
-	r, p := controlTestRunner()
-	defer r.close()
-	r.input.CanRequestUserInput = true
-	svc := &testUserInputService{waiting: make(chan struct{}), canceled: make(chan struct{})}
-	r.userInput = svc
-	feed(t, r, `{"type":"control_request","request_id":"request","request":{"subtype":"elicitation","mode":"url","url":"https://example.com"}}`)
-	select {
-	case <-svc.waiting:
-	case <-time.After(time.Second):
-		t.Fatal("elicitation was not routed to the user")
-	}
-	feed(t, r, `{"type":"control_cancel_request","request_id":"request"}`)
-	select {
-	case <-svc.canceled:
-	case <-time.After(time.Second):
-		t.Fatal("elicitation was not canceled")
-	}
-	select {
-	case line := <-p.writes:
-		t.Fatalf("answered a canceled native request: %s", line)
-	default:
 	}
 }

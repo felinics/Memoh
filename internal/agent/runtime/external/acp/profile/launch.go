@@ -8,36 +8,23 @@ import (
 )
 
 const (
-	genericACPCommandFieldID   = "command"
-	genericACPArgumentsFieldID = "arguments"
+	commandFieldID             = "command"
+	argumentsFieldID           = "arguments"
 	maxGenericACPArguments     = 128
 	maxGenericACPArgumentBytes = 16 * 1024
 )
 
-// ResolveLaunch returns the executable and argv declared by an ACP profile.
-// Profiles may pin a command or source the command and newline-delimited argv
-// from managed bot metadata.
-func ResolveLaunch(profile Profile, setup AgentSetup) (string, []string, error) {
-	policy := profile.Launch
-	if policy.ManagedCommandField == "" {
-		command := strings.TrimSpace(policy.Command)
-		if command == "" {
-			return "", nil, errs.New(fmt.Sprintf("ACP command is required for %s", profile.DisplayName))
-		}
-		return command, nil, nil
-	}
-
-	commandField := NormalizeAgentID(policy.ManagedCommandField)
-	command := strings.TrimSpace(setup.Managed[commandField])
+// ResolveLaunch returns the executable and argv an agent instance configured:
+// its command field and its newline-delimited arguments field.
+func ResolveLaunch(setup AgentSetup) (string, []string, error) {
+	command := strings.TrimSpace(setup.Managed[commandFieldID])
 	if command == "" {
-		return "", nil, errs.New(commandField + " required")
+		return "", nil, errs.New(commandFieldID + " required")
 	}
 	if strings.ContainsAny(command, "\x00\r\n") {
-		return "", nil, errs.New(commandField + " contains an invalid control character")
+		return "", nil, errs.New(commandFieldID + " contains an invalid control character")
 	}
-
-	argumentsField := NormalizeAgentID(policy.ManagedArgumentsField)
-	arguments, err := parseGenericACPArguments(setup.Managed[argumentsField])
+	arguments, err := parseGenericACPArguments(setup.Managed[argumentsFieldID])
 	if err != nil {
 		return "", nil, err
 	}

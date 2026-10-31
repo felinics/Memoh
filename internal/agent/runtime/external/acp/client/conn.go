@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/version"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 // sessionOpenTimeout bounds session/new and the session/resume or
@@ -32,9 +34,10 @@ const sessionOpenTimeout = 60 * time.Second
 // response applied. The sink a prompt is given is called on that loop and
 // must not wait on its consumer: it would hold every other session back.
 //
-// Sessions on a Conn use the agent's own file and shell tools: the client
-// file and terminal capabilities are not advertised, so what the agent wants
-// approved arrives as a session/request_permission.
+// A Conn connected with ClientCapabilities serves the agent's file and
+// terminal calls from the bot's workspace; one connected without them leaves
+// the agent its own file and shell tools, so what it wants approved arrives
+// as a session/request_permission.
 type Conn struct {
 	rpc  *clientConnection
 	caps acp.AgentCapabilities
@@ -75,14 +78,54 @@ type SessionConfig struct {
 	// UserQuestions answers an agent that asks the user through its own
 	// request method instead of ACP elicitation.
 	UserQuestions *UserQuestionCodec
+
+	// Workspace serves the agent's file and terminal calls when the Conn
+	// advertised them; ToolEnv and UnsetEnv shape the terminals' environment.
+	Workspace *bridge.Client
+	ToolEnv   []string
+	UnsetEnv  []string
+	// Stderr returns the agent's recent stderr, added to a failed prompt.
+	Stderr func() string
+	// SessionGone reports whether an error the agent answered a restore with
+	// means it no longer has the session. ACP names no error for that, so by
+	// default any answer but auth_required does; an agent that says so
+	// precisely narrows it, and its other answers keep the stored session.
+	SessionGone func(error) bool
 }
 
-// Connect performs the ACP handshake over a running agent's stdio.
+// ClientCapabilities are what a Conn offers the agent beyond ACP's core.
+type ClientCapabilities struct {
+	// Workspace serves file reads and writes and terminals from the bot's
+	// workspace (SessionConfig.Workspace).
+	Workspace bool
+	// Elicitation puts the agent's form questions to the user.
+	Elicitation bool
+}
+
+// Connect performs the ACP handshake over a running agent's stdio,
+// advertising no client capability.
 func Connect(ctx context.Context, transport io.ReadWriter, logger *slog.Logger) (*Conn, error) {
+	return ConnectWith(ctx, transport, logger, ClientCapabilities{})
+}
+
+// ConnectWith performs the ACP handshake advertising caps.
+func ConnectWith(ctx context.Context, transport io.ReadWriter, logger *slog.Logger, caps ClientCapabilities) (*Conn, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	rpc := newSharedClientConnection(logger, transport, transport)
+	var clientCaps acp.ClientCapabilities
+	if caps.Workspace {
+		clientCaps.Fs = acp.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true}
+		clientCaps.Terminal = true
+	}
+	if caps.Elicitation {
+		clientCaps.Elicitation = &acp.ElicitationCapabilities{Form: &acp.ElicitationFormCapabilities{}}
+	}
 	resp, err := rpc.Initialize(ctx, acp.InitializeRequest{
-		ProtocolVersion: acp.ProtocolVersionNumber,
-		ClientInfo:      &acp.Implementation{Name: "memoh", Version: version.Version},
+		ProtocolVersion:    acp.ProtocolVersionNumber,
+		ClientInfo:         &acp.Implementation{Name: "memoh", Version: version.Version},
+		ClientCapabilities: clientCaps,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialize ACP agent: %w", err)
@@ -137,23 +180,75 @@ func (c *Conn) Done() <-chan struct{} { return c.rpc.conn.Done() }
 func (c *Conn) SupportsHTTPMCP() bool { return c.caps.McpCapabilities.Http }
 
 func (c *Conn) NewSession(ctx context.Context, cfg SessionConfig) (*Session, error) {
-	return c.open(ctx, "", cfg)
+	return c.open(ctx, "", "", cfg)
 }
 
-// ResumeSession reattaches a session the agent persisted. Its earlier turns
-// are not replayed; Memoh already holds the visible history.
-func (c *Conn) ResumeSession(ctx context.Context, sessionID string, cfg SessionConfig) (*Session, error) {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
+// OpenSession restores the stored session when there is one and creates a
+// new one when there is none or the agent cannot restore it; replaced
+// reports the latter. A restore that timed out or broke the connection is
+// ErrSessionRestoreFailed and keeps the stored ID: the session may be intact.
+func (c *Conn) OpenSession(ctx context.Context, storedID string, cfg SessionConfig) (sess *Session, replaced bool, err error) {
+	if storedID = strings.TrimSpace(storedID); storedID != "" {
+		sess, err = c.RestoreSession(ctx, storedID, cfg)
+		if !errors.Is(err, ErrNativeSessionGone) {
+			return sess, false, err
+		}
+		c.rpc.logger.WarnContext(ctx, "ACP agent cannot restore its session; starting a new one",
+			slog.String("native_session_id", storedID), slog.Any("error", err))
+		replaced = true
+	}
+	sess, err = c.NewSession(ctx, cfg)
+	return sess, replaced, err
+}
+
+// RestoreSession reattaches a stored session, preferring session/resume,
+// which does not replay the conversation, and falling back to session/load.
+// It returns ErrNativeSessionGone only when the agent offers neither or said
+// the session is gone (SessionConfig.SessionGone).
+func (c *Conn) RestoreSession(ctx context.Context, storedID string, cfg SessionConfig) (*Session, error) {
+	id := acp.SessionId(strings.TrimSpace(storedID))
+	if id == "" {
 		return nil, errs.New("ACP session id is required")
 	}
-	if c.caps.SessionCapabilities.Resume == nil {
-		return nil, ErrSessionResumeUnsupported
+	gone := cfg.SessionGone
+	if gone == nil {
+		gone = func(error) bool { return true }
 	}
-	return c.open(ctx, acp.SessionId(sessionID), cfg)
+	try := func(method string) (*Session, error) {
+		openCtx, cancel := context.WithTimeout(ctx, sessionOpenTimeout)
+		defer cancel()
+		sess, err := c.open(openCtx, method, id, cfg)
+		if err == nil {
+			return sess, nil
+		}
+		switch answer, answered := agentAnswer(openCtx, c.rpc, err); {
+		case ctx.Err() != nil, answered && answer.Code == authRequiredCode:
+			// A canceled turn says nothing about the session, and a new
+			// session needs the credential too.
+			return nil, fmt.Errorf("restore ACP session: %w", err)
+		case answered && gone(err):
+			return nil, fmt.Errorf("%w: %s: %w", ErrNativeSessionGone, method, err)
+		case answered:
+			return nil, fmt.Errorf("restore ACP session: %w", err)
+		case openCtx.Err() != nil:
+			err = errs.NewDependency("agent did not answer " + method + " in time")
+		}
+		return nil, fmt.Errorf("%w: %s: %w", ErrSessionRestoreFailed, method, err)
+	}
+	err := fmt.Errorf("%w: agent offers neither session/resume nor session/load", ErrNativeSessionGone)
+	if c.caps.SessionCapabilities.Resume != nil {
+		var sess *Session
+		if sess, err = try(acp.AgentMethodSessionResume); !errors.Is(err, ErrNativeSessionGone) {
+			return sess, err
+		}
+	}
+	if c.caps.LoadSession {
+		return try(acp.AgentMethodSessionLoad)
+	}
+	return nil, err
 }
 
-func (c *Conn) open(ctx context.Context, resumeID acp.SessionId, cfg SessionConfig) (*Session, error) {
+func (c *Conn) open(ctx context.Context, method string, resumeID acp.SessionId, cfg SessionConfig) (*Session, error) {
 	if resumeID == "" {
 		select {
 		case c.opening <- struct{}{}:
@@ -177,9 +272,12 @@ func (c *Conn) open(ctx context.Context, resumeID acp.SessionId, cfg SessionConf
 		runtimeOwnsApproval: cfg.RuntimeOwnsApproval,
 		userInput:           cfg.UserInput,
 		userQuestions:       cfg.UserQuestions,
+		client:              cfg.Workspace,
 	}
-	// The zero quirks are the shared defaults.
-	callbacks.toolMapper = newACPToolEventMapper(callbacks.quirks)
+	callbacks.toolMapper = newACPToolEventMapper()
+	if cfg.Workspace != nil {
+		callbacks.terminals = newTerminalManager(lifecycleCtx, cfg.Workspace, cfg.WorkspaceRoot, cfg.ProjectPath, defaultTerminalTimeout, cfg.ToolEnv, cfg.UnsetEnv, events)
+	}
 	mcpServers := cfg.McpServers
 	if mcpServers == nil {
 		mcpServers = []acp.McpServer{}
@@ -191,19 +289,32 @@ func (c *Conn) open(ctx context.Context, resumeID acp.SessionId, cfg SessionConf
 		action = "create"
 	)
 	if resumeID != "" {
-		action = "resume"
+		action = "restore"
 		c.rpc.register(resumeID, callbacks)
+		// Load replays the earlier conversation as session/update, and some
+		// agents replay on resume too; Memoh already holds that history.
+		callbacks.setRestoring(true)
 		openCtx, cancelOpen := context.WithTimeout(ctx, sessionOpenTimeout)
-		resp, err = c.rpc.ResumeSession(openCtx, acp.ResumeSessionRequest{
-			SessionId:  resumeID,
-			Cwd:        cfg.ProjectPath,
-			McpServers: mcpServers,
-			Meta:       cfg.Meta,
-		})
+		if method == acp.AgentMethodSessionLoad {
+			resp, err = c.rpc.LoadSession(openCtx, acp.LoadSessionRequest{
+				SessionId:  resumeID,
+				Cwd:        cfg.ProjectPath,
+				McpServers: mcpServers,
+				Meta:       cfg.Meta,
+			})
+		} else {
+			resp, err = c.rpc.ResumeSession(openCtx, acp.ResumeSessionRequest{
+				SessionId:  resumeID,
+				Cwd:        cfg.ProjectPath,
+				McpServers: mcpServers,
+				Meta:       cfg.Meta,
+			})
+		}
 		if err != nil && ctx.Err() == nil && openCtx.Err() != nil {
-			err = errs.NewDependency("agent did not answer session/resume in time")
+			err = errs.NewDependency("agent did not answer " + method + " in time")
 		}
 		cancelOpen()
+		callbacks.setRestoring(false)
 		resp.SessionId = resumeID
 	} else {
 		c.rpc.setOpening(true)
@@ -228,6 +339,7 @@ func (c *Conn) open(ctx context.Context, resumeID acp.SessionId, cfg SessionConf
 	}
 	if err != nil {
 		c.rpc.unregister(resp.SessionId, callbacks)
+		callbacks.close()
 		cancel()
 		return nil, fmt.Errorf("%s ACP session: %w", action, err)
 	}
@@ -245,9 +357,10 @@ func (c *Conn) open(ctx context.Context, resumeID acp.SessionId, cfg SessionConf
 		lifecycleCtx:          lifecycleCtx,
 		cancel:                cancel,
 		release:               func() { rpc.unregister(sessionID, callbacks) },
+		commandsAdvertised:    make(chan struct{}),
+		stderr:                cfg.Stderr,
 	}
 	session.replaceConfigOptions(sessionID, resp.ConfigOptions)
-	session.installLegacyModels(resp.Models)
 	session.installModes(resp.Modes)
 	callbacks.setSession(session)
 	return session, nil

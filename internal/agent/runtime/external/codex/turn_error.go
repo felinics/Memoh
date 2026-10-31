@@ -79,6 +79,6 @@ func failedTurnError(turnErr *protocol.TurnError) error {
 	if turnErr.CodexErrorInfo != nil && turnErr.CodexErrorInfo.Unit == protocol.CodexErrorInfoUnitUnauthorized {
 		kind = external.FailureAuthRequired
 	}
-	message := firstNonEmpty(turnErrorText(turnErr), "codex turn failed")
+	message := external.FirstNonEmpty(turnErrorText(turnErr), "codex turn failed")
 	return external.Reported(kind, message, summarizeErrorInfo(turnErr.CodexErrorInfo).attrs()...)
 }

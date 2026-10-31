@@ -8,19 +8,16 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
 )
 
-type controlPool interface {
-	RuntimeStatus(sessionID, agentID, projectPath string) RuntimeStatus
-	SetMode(context.Context, PromptInput, string) (RuntimeStatus, error)
-}
-
-func (d *Driver) Commands(_ context.Context, input external.PromptInput) ([]external.Command, error) {
-	pool, ok := d.pool.(controlPool)
-	if !ok {
-		return nil, nil
+// Commands reports what the conversation's session offers, opening it when
+// it has none live: a new conversation, or one whose process closed, still
+// takes the commands its Agent offers.
+func (d *Driver) Commands(ctx context.Context, input external.PromptInput) ([]external.Command, error) {
+	available, err := d.pool.Commands(ctx, controlPrompt(input))
+	if err != nil {
+		return nil, err
 	}
-	status := pool.RuntimeStatus(input.ThreadID, driverMetadataString(input.RuntimeMetadata, metadataAgentIDKey), driverMetadataString(input.RuntimeMetadata, "project_path"))
-	commands := make([]external.Command, 0, len(status.AvailableCommands))
-	for _, command := range status.AvailableCommands {
+	commands := make([]external.Command, 0, len(available))
+	for _, command := range available {
 		commands = append(commands, external.Command{Name: command.Name, Description: command.Description, InputHint: command.InputHint, Kind: external.CommandTurn})
 	}
 	return commands, nil
@@ -32,34 +29,24 @@ func (*Driver) ReadCommand(context.Context, external.PromptInput) (external.Comm
 
 func controlPrompt(input external.PromptInput) PromptInput {
 	return PromptInput{
-		BotID: input.BotID, SessionID: input.ThreadID,
-		AgentID:               driverMetadataString(input.RuntimeMetadata, metadataAgentIDKey),
-		ProjectPath:           driverMetadataString(input.RuntimeMetadata, "project_path"),
+		BotID: input.BotID, BotAgentID: input.BotAgentID, SessionID: input.ThreadID,
+		ProjectPath:           external.MetadataString(input.RuntimeMetadata, "project_path"),
 		RuntimeOwnerAccountID: input.RuntimeOwnerAccountID,
 		ChannelIdentityID:     input.ChannelIdentityID, ToolHTTPURL: input.ToolHTTPURL,
 	}
 }
 
 func (d *Driver) Modes(_ context.Context, input external.PromptInput) (external.ModeState, error) {
-	pool, ok := d.pool.(controlPool)
-	if !ok {
-		return external.ModeState{AvailableModes: []external.Mode{}}, nil
-	}
-	status := pool.RuntimeStatus(input.ThreadID, driverMetadataString(input.RuntimeMetadata, metadataAgentIDKey), driverMetadataString(input.RuntimeMetadata, "project_path"))
-	return runtimeModes(status), nil
+	return runtimeModes(d.pool.RuntimeStatus(controlPrompt(input))), nil
 }
 
 func (d *Driver) SetMode(ctx context.Context, input external.PromptInput, mode string) (external.ModeState, error) {
-	pool, ok := d.pool.(controlPool)
-	if !ok {
-		return external.ModeState{}, external.ErrControlUnsupported
-	}
-	status, err := pool.SetMode(ctx, controlPrompt(input), mode)
+	status, err := d.pool.SetMode(ctx, controlPrompt(input), mode)
 	switch {
 	case errors.Is(err, client.ErrModeSelectionUnsupported):
 		return external.ModeState{}, external.ErrControlUnsupported
 	case errors.Is(err, client.ErrModeUnavailable), errors.Is(err, client.ErrModeIDRequired):
-		return external.ModeState{}, external.ErrModeUnavailable
+		return external.ModeState{}, external.Fail(external.FailureModeUnavailable, nil)
 	case err != nil:
 		return external.ModeState{}, err
 	}

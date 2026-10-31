@@ -926,7 +926,7 @@ func validateChatRuntimeSettings(botMetadata []byte, current Settings, resolveSe
 	if !setup.Enabled {
 		return fmt.Errorf("%w: %q", ErrACPAgentNotEnabled, agentID)
 	}
-	if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
+	if field, missing := acpprofile.MissingRequiredManagedField(profile, setup); missing {
 		return fmt.Errorf("%w: ACP agent %q is missing required field %q", ErrACPAgentNotConfigured, agentID, field.ID)
 	}
 	return nil

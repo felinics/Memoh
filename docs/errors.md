@@ -118,13 +118,27 @@ its fault on every entry point. A stream error without a code is
 `runtime_run_failed`, the code its run records.
 
 One text is not internal: what an external agent (Codex, Claude Code, Grok
-Build, an ACP agent) reported when it failed a turn. It is shown and stored as
-the agent said it, under `external_runtime.reported` with the `message` arg,
-or with `external_runtime.auth_required` when the agent's protocol marks a
-sign-in problem. The user reads it as they would in the agent's own client;
-mapping it onto categories of ours could never cover every agent and only hid
-what happened. `external.Reported` strips the credentials and queries of URLs
-in it and bounds its length.
+Build, an ACP agent) or its process said when it failed — a failed turn, a
+start that failed with its exit status and stderr, a refused resume, a control
+the agent rejected. It is shown and stored as it was said, under
+`external_runtime.reported` with the `message` arg, or with
+`external_runtime.auth_required` when the agent's protocol marks a sign-in
+problem. The user reads it as they would in the agent's own client; mapping it
+onto categories of ours could never cover every agent and only hid what
+happened. `external.Reported` and `external.Upstream` strip the credentials and
+queries of URLs in it and bound its length. A failure inside Memoh on the way
+(reading the Agent's configuration, looking the workspace up) is not the
+agent's and stays internal.
+
+A runtime driver reports a failure as an `external.Failure` of one of three
+sorts: what the agent said (`FailureReported`), a sign-in
+(`FailureAuthRequired`), or one of Memoh's own rules refusing the request
+(`FailureForkLatestOnly`, `FailureGoalRequiresDefaultMode`,
+`FailureModeUnavailable` for a model, effort or mode the agent does not offer,
+`FailureCredential`, `FailureCredentialBusy`, `FailureRuntimeBusy`). An ACP
+session the agent could not restore keeps
+`external_runtime.session_resume_failed`, with the agent's words as the
+`message` arg, because the conversation offers to give that session up.
 
 A warning attached to a result, such as an item a backup import skipped, says
 only what was skipped. Its cause is recorded as an event.
@@ -238,9 +252,8 @@ into categories (`usage_limited`, `rate_limited`, `context_window_exceeded`,
 `overloaded`, `upstream_unreachable`, `request_blocked` under
 `external_runtime.`) are no longer produced and keep their declarations for
 the history written with them. A code
-that some producers raise for this process's own failures, such as
-`external_runtime.unavailable`, declares nothing and is attributed by its
-chain. `workspace.unreachable` is one: the workspace bridge client decodes an
+that some producers raise for this process's own failures declares nothing and
+is attributed by its chain. `workspace.unreachable` is one: the workspace bridge client decodes an
 unreachable workspace runtime with `rpc.Decode`, so its cause is received and
 the fault is `dependency`; a failure to look up the target in this process
 stays `server`. A guard test in

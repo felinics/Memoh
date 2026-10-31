@@ -110,7 +110,6 @@ const (
 	CodeACPAccessForbidden                       Code = "acp.access_forbidden"
 	CodeACPRuntimeNotFound                       Code = "acp.runtime_not_found"
 	CodeACPRuntimeConflict                       Code = "acp.runtime_conflict"
-	CodeACPRuntimeLimitReached                   Code = "acp.runtime_limit_reached"
 	CodeACPOperationFailed                       Code = "acp.operation_failed"
 	CodeACPCommandNotFound                       Code = "acp.command_not_found"
 	CodeExternalAgentTurnReplacementUnsupported  Code = "external_agent.turn_replacement_unsupported"
@@ -301,8 +300,6 @@ const (
 	CodeACPAgentNotFound            Code = "acp_agent_not_found"
 	CodeACPAgentNotEnabled          Code = "acp_agent_not_enabled"
 	CodeACPAgentNotConfigured       Code = "acp_agent_not_configured"
-	CodeCodexOAuthIncomplete        Code = "codex_oauth_incomplete"
-	CodeCodexAuthTokenMissing       Code = "codex_auth_token_missing" //nolint:gosec // Stable public error code.
 	CodeACPAgentAuthInvalid         Code = "acp_agent_auth_invalid"
 	CodeNoWorkspaceExec             Code = "no_workspace_exec"
 	CodeACPRuntimeOwnerMissing      Code = "acp_runtime_owner_missing"
@@ -866,10 +863,6 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusConflict,
 		Detail:     "The Agent runtime is not ready for this operation. Refresh and try again.",
 	},
-	CodeACPRuntimeLimitReached: {
-		HTTPStatus: http.StatusTooManyRequests,
-		Detail:     "Too many Agent runtimes are active. Close one and try again.",
-	},
 	CodeACPOperationFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The Agent runtime operation failed. Please try again.",
@@ -1349,8 +1342,6 @@ var catalog = map[Code]Definition{
 	CodeACPAgentNotFound:         {HTTPStatus: http.StatusBadRequest, Detail: "The selected external agent is unavailable."},
 	CodeACPAgentNotEnabled:       {HTTPStatus: http.StatusForbidden, Detail: "The selected external agent is disabled for this bot."},
 	CodeACPAgentNotConfigured:    {HTTPStatus: http.StatusBadRequest, Detail: "External agent setup is incomplete for this bot."},
-	CodeCodexOAuthIncomplete:     {HTTPStatus: http.StatusConflict, Detail: "Codex ChatGPT sign-in is not complete for this bot workspace."},
-	CodeCodexAuthTokenMissing:    {HTTPStatus: http.StatusConflict, Detail: "Codex authentication is missing or incomplete for this bot workspace."},
 	CodeACPAgentAuthInvalid:      {HTTPStatus: http.StatusConflict, Detail: "External agent authentication is invalid. Update the agent setup and try again."},
 	CodeNoWorkspaceExec:          {HTTPStatus: http.StatusForbidden, Detail: "You do not have permission to run workspace commands for this bot."},
 	CodeACPRuntimeOwnerMissing:   {HTTPStatus: http.StatusConflict, Detail: "This external-agent session has no runtime owner. Start a new session to continue."},

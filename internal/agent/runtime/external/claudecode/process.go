@@ -26,6 +26,7 @@ type cliProcess interface {
 	io.Reader
 	io.Writer
 	CloseStdin()
+	Kill()
 	Done() <-chan struct{}
 	Err() error
 	StderrTail() string

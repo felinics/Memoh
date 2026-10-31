@@ -2,76 +2,55 @@ package acp
 
 import (
 	"context"
-	"errors"
 	"testing"
-	"time"
 
-	"github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
-func warmInstanceRuntime(botAgentID string) *runtimeHandle {
-	return &runtimeHandle{
-		id:                    newRuntimeID(),
-		botID:                 "bot-1",
-		botAgentID:            botAgentID,
-		agentID:               acpprofile.AgentACPID,
-		projectPath:           "/data",
-		runtimeOwnerAccountID: "user-1",
-		session:               &client.Session{},
-		status:                stateIdle,
-		lastActive:            time.Now(),
+type setupByInstance map[string]acpprofile.AgentSetup
+
+func (s setupByInstance) ResolveACPSetup(_ context.Context, _, botAgentID, _ string, _ map[string]any) (acpprofile.AgentSetup, error) {
+	return s[botAgentID], nil
+}
+
+type infoRunner struct{ external.Workspaces }
+
+func (infoRunner) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
+	return bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"}, nil
+}
+
+func instanceSetup(command string) acpprofile.AgentSetup {
+	return acpprofile.AgentSetup{
+		AgentID: acpprofile.AgentACPID, Enabled: true, Mode: "api_key",
+		Managed: map[string]string{"command": command, "api_key": "sk-1"},
 	}
 }
 
-// Every generic instance shares the "acp" profile id, so only the instance id
-// tells a Hermes process from a Grok one.
-func TestWarmRuntimeServesOnlyItsOwnInstance(t *testing.T) {
-	pool := newSessionPool(nil, nil, nil, fakeSessionGetter{session: SessionDescriptor{
-		BotID:      "bot-1",
-		BotAgentID: "agent-grok",
-		IsACP:      true,
-	}})
-	hermes := warmInstanceRuntime("agent-hermes")
-	grok := warmInstanceRuntime("agent-grok")
-	injectRuntime(pool, hermes)
-	injectRuntime(pool, grok)
-
-	err := pool.BindRuntime(context.Background(), "bot-1", hermes.id, "grok-session", acpprofile.AgentACPID, "/data", "user-1")
-	if !errors.Is(err, ErrRuntimeBindRejected) {
-		t.Fatalf("binding another instance's runtime: error = %v, want ErrRuntimeBindRejected", err)
+// Every generic instance shares the "acp" profile id, so only the instance
+// id tells a Hermes process from a Grok one, and an edit to an instance's
+// setup must replace its processes.
+func TestEachInstanceStartsFromItsOwnSetup(t *testing.T) {
+	setups := setupByInstance{"agent-hermes": instanceSetup("hermes"), "agent-grok": instanceSetup("grok")}
+	pool := newSessionPool(nil, infoRunner{}, fakeBotGetter{bot: bots.Bot{ID: "bot-1"}}, newTestSupervisor(t), Deps{Setups: setups})
+	launchFor := func(botAgentID string) Launch {
+		t.Helper()
+		l, err := pool.Launch(context.Background(), PromptInput{
+			BotID: "bot-1", BotAgentID: botAgentID, AgentID: acpprofile.AgentACPID, RuntimeOwnerAccountID: "user-1",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l
 	}
-	if err := pool.BindRuntime(context.Background(), "bot-1", grok.id, "grok-session", acpprofile.AgentACPID, "/data", "user-1"); err != nil {
-		t.Fatalf("binding the session's own instance runtime: error = %v", err)
+	hermes, grok := launchFor("agent-hermes"), launchFor("agent-grok")
+	if hermes.Key == grok.Key || hermes.Fingerprint == grok.Fingerprint {
+		t.Fatalf("instances share a process: %+v / %+v", hermes.Key, grok.Key)
 	}
-}
-
-func TestCloseBotAgentRuntimesLeavesOtherInstancesRunning(t *testing.T) {
-	pool := newSessionPool(nil, nil, nil)
-	hermes := warmInstanceRuntime("agent-hermes")
-	grok := warmInstanceRuntime("agent-grok")
-	unbound := warmInstanceRuntime("")
-	for _, h := range []*runtimeHandle{hermes, grok, unbound} {
-		injectRuntime(pool, h)
-	}
-
-	if err := pool.CloseBotAgentRuntimes("bot-1", "agent-hermes"); err != nil {
-		t.Fatalf("CloseBotAgentRuntimes() error = %v", err)
-	}
-
-	pool.mu.RLock()
-	_, hermesAlive := pool.runtimes[hermes.id]
-	_, grokAlive := pool.runtimes[grok.id]
-	_, unboundAlive := pool.runtimes[unbound.id]
-	pool.mu.RUnlock()
-	if hermesAlive {
-		t.Fatal("the reconfigured instance's runtime must be closed")
-	}
-	if !grokAlive {
-		t.Fatal("another instance's runtime must keep running")
-	}
-	// A provider-only session may be running as the reconfigured instance.
-	if unboundAlive {
-		t.Fatal("a runtime that names no instance must be closed too")
+	setups["agent-hermes"] = instanceSetup("hermes-v2")
+	if launchFor("agent-hermes").Fingerprint == hermes.Fingerprint {
+		t.Fatal("an edited setup keeps the old process")
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/external/codex/protocol"
 )
@@ -12,8 +11,9 @@ import (
 var _ external.Compactor = (*Driver)(nil)
 
 func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (external.CompactionResult, error) {
-	if metadataString(input.RuntimeMetadata, metadataThreadIDKey) == "" {
-		return external.CompactionResult{}, external.ErrThreadUnavailable
+	input, err := external.CompactionTurn(input, metadataThreadIDKey)
+	if err != nil {
+		return external.CompactionResult{}, err
 	}
 	cfg, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID, true)
 	if err != nil {
@@ -27,15 +27,10 @@ func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (exter
 	if err := srv.ensureAuth(ctx, cfg); err != nil {
 		return external.CompactionResult{}, err
 	}
-	input.Command = "compact"
 	threadID, err := d.ensureThread(ctx, srv, cfg, input)
 	if err != nil {
 		return external.CompactionResult{}, err
 	}
-	// Compaction uses the runtime's turn lifecycle, but none of its transcript
-	// events become chat messages. The caller publishes operation state.
-	input.CanRequestUserInput = false
-	input.Sink = external.EventSinkFunc(func(event.StreamEvent) {})
 	var waiter func(string) func()
 	if d.approval != nil {
 		waiter = d.approval.RegisterWaiter
@@ -84,7 +79,7 @@ func (d *Driver) cancelOperation(srv *appServer, input external.PromptInput, tur
 		d.markBroken(input.BotID, input.BotAgentID, srv)
 		return
 	}
-	d.interruptTurn(srv, turn.threadID, id)
+	d.interruptTurn(srv, turn, id)
 	timer := time.NewTimer(interruptSettleTimeout)
 	defer timer.Stop()
 	select {

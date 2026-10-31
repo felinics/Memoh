@@ -28,10 +28,8 @@ type RuntimeConfigEpoch struct {
 	Session int64
 }
 
-// RuntimeStateStore fences warm processes against configuration changes and
-// serializes their workspace synchronization against bot-scoped resets. It
+// RuntimeStateStore fences warm processes against configuration changes. It
 // does not store or restore native conversation files.
 type RuntimeStateStore interface {
 	RuntimeConfigEpoch(ctx context.Context, botID, sessionID string) (RuntimeConfigEpoch, error)
-	GuardRuntimeSync(ctx context.Context, botID string, expectedBotEpoch int64, fn func(context.Context) error) error
 }

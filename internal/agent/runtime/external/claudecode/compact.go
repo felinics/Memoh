@@ -3,7 +3,6 @@ package claudecode
 import (
 	"context"
 
-	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/errs"
 )
@@ -11,15 +10,12 @@ import (
 var _ external.Compactor = (*Driver)(nil)
 
 func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (external.CompactionResult, error) {
-	if metadataString(input.RuntimeMetadata, metadataSessionIDKey) == "" {
-		return external.CompactionResult{}, external.ErrThreadUnavailable
+	input, err := external.CompactionTurn(input, metadataSessionIDKey)
+	if err != nil {
+		return external.CompactionResult{}, err
 	}
 	// Keep the model last observed in this session when the Agent default differs.
-	input.ModelID = firstNonEmpty(input.ModelID, metadataString(input.RuntimeMetadata, "claude_model"))
-	input.Command = "compact"
-	input.CanRequestUserInput = false
-	input.Steering = nil
-	input.Sink = external.EventSinkFunc(func(event.StreamEvent) {})
+	input.ModelID = external.FirstNonEmpty(input.ModelID, external.MetadataString(input.RuntimeMetadata, "claude_model"))
 	result, err := d.Prompt(ctx, input)
 	if err != nil {
 		return external.CompactionResult{}, err

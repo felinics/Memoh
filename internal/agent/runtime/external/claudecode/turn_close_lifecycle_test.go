@@ -87,7 +87,7 @@ func TestClosedApprovalDoesNotParkFinishedRun(t *testing.T) {
 				if ev.Type == event.ToolApprovalRequest {
 					seen <- ev.Status
 				}
-			})}, nil, flow, nil, slog.Default())
+			})}, &testCLIProcess{done: make(chan struct{})}, flow, nil, slog.Default())
 			defer st.close()
 			done := make(chan struct{})
 			go func() { defer close(done); st.decide(st.ctx, "pwd", "exec", map[string]any{"command": "pwd"}) }()
@@ -101,7 +101,7 @@ func TestClosedApprovalDoesNotParkFinishedRun(t *testing.T) {
 			}
 			if terminalDelivered {
 				rejected, _ := flow.Reject(ctx, "", "", "")
-				st.emitApprovalRequest(rejected)
+				st.emit(external.ApprovalCard(rejected))
 				select {
 				case s := <-seen:
 					if s != approval.StatusRejected {

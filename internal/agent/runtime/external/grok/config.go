@@ -1,7 +1,8 @@
 // Package grok implements the direct Grok Build runtime driver. Grok Build
-// speaks ACP natively (`grok agent stdio`), so the wire protocol is the shared
-// ACP client; this package owns what is Grok's own: the launcher, the
-// credential, the state directory, and its permission modes.
+// speaks ACP natively (`grok agent stdio`), so it runs on the ACP core as an
+// extension of its own (acp.Extension); this package owns what is Grok's
+// own: the launcher, the credential, the state directory, its permission
+// modes and its `_x.ai` extension methods.
 //
 // One process serves every conversation of a Bot Agent. Grok writes its
 // sessions under GROK_HOME on the bot's data volume; they are the only copy
@@ -19,6 +20,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/external/grok/grokcfg"
 	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/workspace/vpath"
@@ -107,10 +109,5 @@ func mcpToolCall(rawInput any) (serverName, toolName string, ok bool) {
 }
 
 func permissionMode(metadata map[string]any, cfg Config) string {
-	return firstNonEmpty(metadataString(metadata, "permission_mode"), cfg.PermissionMode, grokcfg.PermissionAsk)
-}
-
-func metadataString(meta map[string]any, key string) string {
-	value, _ := meta[key].(string)
-	return value
+	return external.FirstNonEmpty(external.MetadataString(metadata, "permission_mode"), cfg.PermissionMode, grokcfg.DefaultPermissionMode)
 }

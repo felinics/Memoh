@@ -20,7 +20,7 @@ func (s *durablePairStore) Get(context.Context, string) (SessionDescriptor, erro
 	defer s.mu.Unlock()
 	return SessionDescriptor{
 		BotID: "bot-1", SessionType: sessionmode.ACPAgent, IsACP: true,
-		Metadata:        map[string]any{"acp_agent_id": acpprofile.AgentACPID, "project_path": "/data/project", "runtime_owner_account_id": "user-1"},
+		AgentID: acpprofile.AgentACPID, ProjectPath: "/data/project", RuntimeOwnerAccountID: "user-1",
 		RuntimeMetadata: maps.Clone(s.pair),
 	}, nil
 }
@@ -49,22 +49,20 @@ func TestSessionPoolRestoresPersistedPromptPairAfterRuntimeClose(t *testing.T) {
 	if saved.RuntimeMetadata["acp_model_id"] != input.ModelID || saved.RuntimeMetadata["acp_reasoning_effort"] != "low" {
 		t.Fatalf("saved pair = %v", saved.RuntimeMetadata)
 	}
-	old := pool.sessionHandle("session-1")
-	if err := pool.CloseRuntime("bot-1", old.id); err != nil {
-		t.Fatal(err)
-	}
+	old := liveSession(pool, "session-1")
+	pool.procs.MarkBroken(old.rt.key, old.rt)
 	input.ModelID, input.ReasoningEffort = "", ""
 	if _, err := pool.Ensure(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
-	restored := pool.sessionHandle("session-1")
-	if restored == old {
-		t.Fatal("runtime was not recreated")
+	restored := liveSession(pool, "session-1")
+	if restored == old || restored.rt == old.rt {
+		t.Fatal("the session was not reopened on a new process")
 	}
-	if got := restored.session.ModelState().CurrentModelID; got != "gpt-5.1-codex-high" {
+	if got := restored.sess.ModelState().CurrentModelID; got != "gpt-5.1-codex-high" {
 		t.Fatalf("restored model = %q", got)
 	}
-	if got := restored.session.ReasoningState().CurrentEffort; got != "low" {
+	if got := restored.sess.ReasoningState().CurrentEffort; got != "low" {
 		t.Fatalf("restored effort = %q", got)
 	}
 }

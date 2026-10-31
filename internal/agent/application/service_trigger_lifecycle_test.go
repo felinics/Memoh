@@ -378,6 +378,8 @@ type incompleteScheduleDriver struct {
 
 func (*incompleteScheduleDriver) RuntimeType() string { return "codex" }
 
+func (*incompleteScheduleDriver) Caps() external.Caps { return stubCaps }
+
 func (d *incompleteScheduleDriver) Prompt(_ context.Context, input external.PromptInput) (external.PromptResult, error) {
 	d.input = input
 	return external.PromptResult{Text: "partial", Output: []sdk.Message{sdk.AssistantMessage("partial")}}, nil

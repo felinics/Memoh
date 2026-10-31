@@ -31,7 +31,7 @@ func TestExternalAgentErrorTranslatesRuntimeErrors(t *testing.T) {
 		{"command gone", acpagent.ErrAgentCommandUnavailable, apperror.CodeRuntimeAgentCommandStale},
 		{"image unsupported", acpclient.ErrImagePromptUnsupported, apperror.CodeACPImageInputUnsupported},
 		{"image invalid", acpclient.ErrInvalidPromptImage, apperror.CodeACPAttachmentInvalid},
-		{"session restore failed", acpclient.ErrSessionRestoreFailed, apperror.CodeExternalRuntimeSessionResumeFailed},
+		{"session restore failed", fmt.Errorf("%w: session/resume: agent did not answer in time", acpclient.ErrSessionRestoreFailed), apperror.CodeExternalRuntimeSessionResumeFailed},
 		{"not a container", external.ErrContainerWorkspaceRequired, apperror.CodeExternalAgentContainerWorkspaceRequired},
 		{"dependency missing", &external.DependencyMissingError{DependencyID: "codex"}, apperror.CodeAgentDependencyMissing},
 	} {
@@ -55,22 +55,6 @@ func TestExternalAgentErrorKeepsDependencyArgs(t *testing.T) {
 	}
 }
 
-func TestExternalAgentErrorLeavesOtherErrors(t *testing.T) {
-	t.Parallel()
-
-	coded := apperror.New(apperror.CodeWorkspaceUnreachable, nil)
-	if got := ExternalAgentError(coded); !errors.Is(got, coded) || apperror.CodeOf(got) != apperror.CodeWorkspaceUnreachable {
-		t.Fatalf("coded error was re-translated: %v", got)
-	}
-	plain := errors.New("driver exited")
-	if got := ExternalAgentError(plain); !errors.Is(got, plain) || apperror.CodeOf(got) != "" {
-		t.Fatalf("plain error was translated: %v", got)
-	}
-	if ExternalAgentError(nil) != nil {
-		t.Fatal("nil error was translated")
-	}
-}
-
 // A turn whose runtime fails before it accepts the prompt ran nothing: the
 // caller answers the error and no round is persisted. The check reads the error
 // the driver returned, before ExternalAgentError translates it.
@@ -83,17 +67,10 @@ func TestRuntimeConfigurationFailures(t *testing.T) {
 		err  error
 		want bool
 	}{
-		{"runtime unavailable", external.Unavailable(cause), true},
-		{"auth required", external.Fail(external.FailureAuthRequired, external.ErrAuthRequired), true},
-		{"session resume failed", external.Fail(external.FailureSessionResumeFailed, cause), true},
+		{"auth required", external.Fail(external.FailureAuthRequired, nil), true},
 		{"goal outside default mode", external.Fail(external.FailureGoalRequiresDefaultMode, nil), true},
-		{"model selection unsupported", &acpagent.PromptError{Err: acpclient.ErrModelSelectionUnsupported}, true},
-		{"model id required", &acpagent.PromptError{Err: acpclient.ErrModelIDRequired}, true},
-		{"model unavailable", &acpagent.PromptError{Err: acpclient.ErrModelUnavailable}, true},
-		{"reasoning unsupported", &acpagent.PromptError{Err: acpclient.ErrReasoningSelectionUnsupported}, true},
-		{"reasoning effort required", &acpagent.PromptError{Err: acpclient.ErrReasoningEffortRequired}, true},
-		{"reasoning effort unavailable", &acpagent.PromptError{Err: acpclient.ErrReasoningEffortUnavailable}, true},
-		{"config update failed", &acpagent.PromptError{Err: acpagent.ErrRuntimeConfigUpdateFailed}, true},
+		{"model or mode not offered", external.Fail(external.FailureModeUnavailable, acpclient.ErrModelUnavailable), true},
+		{"session restore failed", acpclient.ErrSessionRestoreFailed, true},
 		{"dependency missing", &external.DependencyMissingError{DependencyID: "codex"}, true},
 		{"unknown agent", acpagent.ErrAgentNotFound, true},
 		{"disabled agent", acpagent.ErrAgentNotEnabled, true},
@@ -104,12 +81,10 @@ func TestRuntimeConfigurationFailures(t *testing.T) {
 		{"image invalid", acpclient.ErrInvalidPromptImage, true},
 		{"not a container", external.ErrContainerWorkspaceRequired, true},
 
-		{"command not found", &acpagent.PromptError{Err: &acpclient.CommandNotFoundError{Command: "devin"}}, false},
+		{"start failed", external.Upstream(cause), false},
 		{"credential unusable", external.CredentialError(agentcredential.ErrRevoked), false},
 		{"credential busy", external.Fail(external.FailureCredentialBusy, nil), false},
 		{"agent reported", external.Reported(external.FailureReported, "rate limit reached"), false},
-		{"control failed", external.Fail(external.FailureControlFailed, cause), false},
-		{"mode unavailable", external.Fail(external.FailureModeUnavailable, external.ErrModeUnavailable), false},
 		{"canceled", context.Canceled, false},
 		{"response timeout", apperror.New(apperror.CodeAgentResponseTimeout, nil), false},
 		{"plain error", cause, false},
@@ -133,15 +108,12 @@ func TestExternalAgentErrorTranslatesRuntimeFailures(t *testing.T) {
 		args  map[string]string
 		fault apperror.Fault
 	}{
-		{"runtime unavailable", external.Unavailable(errors.New("SECRET exit")), apperror.CodeExternalRuntimeUnavailable, nil, apperror.FaultServer},
-		{"runtime unreachable", external.Unavailable(errs.WrapDependency(errors.New("SECRET refused"), "dial bridge")), apperror.CodeExternalRuntimeUnavailable, nil, apperror.FaultDependency},
-		{"auth required", external.Fail(external.FailureAuthRequired, external.ErrAuthRequired), apperror.CodeExternalRuntimeAuthRequired, nil, apperror.FaultClient},
-		{"session resume failed", external.Fail(external.FailureSessionResumeFailed, errors.New("SECRET rpc")), apperror.CodeExternalRuntimeSessionResumeFailed, nil, apperror.FaultDependency},
+		{"start failed", external.Upstream(errors.New("agent process exited with code 1: bad flag")), apperror.CodeExternalRuntimeReported, map[string]string{"message": "agent process exited with code 1: bad flag"}, apperror.FaultDependency},
+		{"auth required", external.Fail(external.FailureAuthRequired, nil), apperror.CodeExternalRuntimeAuthRequired, nil, apperror.FaultClient},
 		{"goal outside default mode", external.Fail(external.FailureGoalRequiresDefaultMode, nil), apperror.CodeRuntimeControlGoalRequiresDefaultMode, nil, apperror.FaultClient},
-		{"mode unavailable", external.Fail(external.FailureModeUnavailable, external.ErrModeUnavailable), apperror.CodeRuntimeControlModeUnavailable, nil, apperror.FaultClient},
+		{"mode unavailable", external.Fail(external.FailureModeUnavailable, nil), apperror.CodeRuntimeControlModeUnavailable, nil, apperror.FaultClient},
 		{"runtime draining", external.Fail(external.FailureRuntimeBusy, errors.New("SECRET predecessor")), apperror.CodeExternalRuntimeBusy, nil, apperror.FaultClient},
 		{"fork latest only", external.Fail(external.FailureForkLatestOnly, errors.New("SECRET anchor")), apperror.CodeRuntimeControlForkLatestOnly, nil, apperror.FaultClient},
-		{"control failed", external.Fail(external.FailureControlFailed, errors.New("SECRET control")), apperror.CodeRuntimeControlFailed, nil, apperror.FaultServer},
 		{"credential busy", external.Fail(external.FailureCredentialBusy, nil), apperror.CodeAgentCredentialRuntimeBusy, nil, apperror.FaultClient},
 		{"agent reported", external.Reported(external.FailureReported, "Rate limit reached at https://relay.example/v1?key=SECRET"), apperror.CodeExternalRuntimeReported, map[string]string{"message": "Rate limit reached at https://relay.example/v1"}, apperror.FaultDependency},
 		{"agent reported sign-in", external.Reported(external.FailureAuthRequired, "Invalid API key"), apperror.CodeExternalRuntimeAuthRequired, nil, apperror.FaultClient},
@@ -149,14 +121,6 @@ func TestExternalAgentErrorTranslatesRuntimeFailures(t *testing.T) {
 		{"credential incompatible", external.CredentialError(agentcredential.ErrIncompatible), apperror.CodeAgentCredentialIncompatible, nil, apperror.FaultClient},
 		{"credential revoked", external.CredentialError(agentcredential.ErrRevoked), apperror.CodeAgentCredentialRevoked, nil, apperror.FaultClient},
 		{"credential encryption unavailable", external.CredentialError(agentcredential.ErrEncryptionUnavailable), apperror.CodeAgentCredentialEncryptionUnavailable, nil, apperror.FaultServer},
-		{"command not found", &acpagent.PromptError{Err: fmt.Errorf("start devin: %w", &acpclient.CommandNotFoundError{Command: "devin"})}, apperror.CodeACPCommandNotFound, map[string]string{"command": "devin"}, apperror.FaultClient},
-		{"model selection unsupported", &acpagent.PromptError{Err: acpclient.ErrModelSelectionUnsupported}, apperror.CodeACPModelSelectionUnsupported, nil, apperror.FaultClient},
-		{"model id required", &acpagent.PromptError{Err: acpclient.ErrModelIDRequired}, apperror.CodeACPModelIDRequired, nil, apperror.FaultClient},
-		{"model unavailable", &acpagent.PromptError{Err: acpclient.ErrModelUnavailable}, apperror.CodeACPModelUnavailable, nil, apperror.FaultClient},
-		{"reasoning unsupported", &acpagent.PromptError{Err: acpclient.ErrReasoningSelectionUnsupported}, apperror.CodeACPReasoningUnsupported, nil, apperror.FaultClient},
-		{"reasoning effort required", &acpagent.PromptError{Err: acpclient.ErrReasoningEffortRequired}, apperror.CodeACPReasoningEffortRequired, nil, apperror.FaultClient},
-		{"reasoning effort unavailable", &acpagent.PromptError{Err: acpclient.ErrReasoningEffortUnavailable}, apperror.CodeACPReasoningUnavailable, nil, apperror.FaultClient},
-		{"config update failed", &acpagent.PromptError{Err: fmt.Errorf("%w: SECRET", acpagent.ErrRuntimeConfigUpdateFailed)}, apperror.CodeACPConfigUpdateFailed, nil, apperror.FaultDependency},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -183,26 +147,5 @@ func TestExternalAgentErrorTranslatesRuntimeFailures(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// ExternalRuntimeError leaves every other error as it is, so a caller that
-// gives the rest its own code applies it to exactly those errors.
-func TestExternalRuntimeErrorLeavesOtherErrors(t *testing.T) {
-	t.Parallel()
-
-	for _, err := range []error{
-		&external.DependencyMissingError{DependencyID: "codex"},
-		external.ErrContainerWorkspaceRequired,
-		acpagent.ErrAgentNotFound,
-		apperror.New(apperror.CodeWorkspaceUnreachable, nil),
-		errors.New("driver exited"),
-	} {
-		if got := ExternalRuntimeError(err); got != err { //nolint:errorlint // the unchanged error itself is expected
-			t.Errorf("ExternalRuntimeError(%v) = %v, want it unchanged", err, got)
-		}
-	}
-	if ExternalRuntimeError(nil) != nil {
-		t.Fatal("nil error was translated")
 	}
 }

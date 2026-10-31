@@ -27,14 +27,11 @@ type clientConnection struct {
 	logger  *slog.Logger
 
 	// ACP lets one connection host several sessions, and every inbound call
-	// names the session it belongs to. sole is the single-session form: it
-	// receives every call whatever ID the agent wrote. Without it, calls are
-	// delivered by session ID. A session emits notifications before
-	// session/new has returned its ID, so while one is opening the updates
-	// for an unregistered ID are held, and it keeps its own once the ID is
-	// known.
+	// names the session it belongs to, so calls are delivered by session ID.
+	// A session emits notifications before session/new has returned its ID,
+	// so while one is opening the updates for an unregistered ID are held,
+	// and it keeps its own once the ID is known.
 	mu       sync.RWMutex
-	sole     *clientCallbacks
 	sessions map[acp.SessionId]*clientCallbacks
 	opening  bool
 	held     []acp.SessionNotification
@@ -56,17 +53,6 @@ func (c *clientConnection) hook(method string) func(json.RawMessage) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.hooks[method]
-}
-
-// newClientConnection serves a connection that hosts exactly one session.
-func newClientConnection(client *clientCallbacks, peerInput io.Writer, peerOutput io.Reader) *clientConnection {
-	c := &clientConnection{sole: client}
-	if client != nil {
-		c.logger = client.logger
-	}
-	c.updates = newUpdateGate(c.logger, peerOutput)
-	c.conn = acp.NewConnection(c.handle, peerInput, c.updates)
-	return c
 }
 
 // newSharedClientConnection serves a connection whose sessions register by ID.
@@ -121,9 +107,6 @@ func (c *clientConnection) opened(ctx context.Context, id acp.SessionId, callbac
 func (c *clientConnection) callbacksFor(id acp.SessionId) *clientCallbacks {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if c.sole != nil {
-		return c.sole
-	}
 	return c.sessions[id]
 }
 
@@ -132,9 +115,6 @@ func (c *clientConnection) callbacksFor(id acp.SessionId) *clientCallbacks {
 func (c *clientConnection) updatesFor(update acp.SessionNotification) *clientCallbacks {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.sole != nil {
-		return c.sole
-	}
 	if callbacks := c.sessions[update.SessionId]; callbacks != nil {
 		return callbacks
 	}
@@ -160,6 +140,14 @@ func peerError(ctx context.Context, err error) error {
 func (c *clientConnection) Initialize(ctx context.Context, params acp.InitializeRequest) (acp.InitializeResponse, error) {
 	resp, err := acp.SendRequest[acp.InitializeResponse](c.conn, ctx, acp.AgentMethodInitialize, params)
 	return resp, peerError(ctx, err)
+}
+
+// sessionResponse is the session/new, resume and load response shape.
+type sessionResponse struct {
+	Meta          map[string]any            `json:"_meta,omitempty"`
+	ConfigOptions []acp.SessionConfigOption `json:"configOptions,omitempty"`
+	Modes         *acp.SessionModeState     `json:"modes,omitempty"`
+	SessionId     acp.SessionId             `json:"sessionId,omitempty"`
 }
 
 func (c *clientConnection) NewSession(ctx context.Context, params acp.NewSessionRequest) (sessionResponse, error) {
@@ -297,11 +285,6 @@ func (c *clientConnection) SetSessionConfigOption(ctx context.Context, params ac
 	return resp, nil
 }
 
-func (c *clientConnection) SetLegacySessionModel(ctx context.Context, params legacySetSessionModelRequest) (legacySetSessionModelResponse, error) {
-	resp, err := acp.SendRequest[legacySetSessionModelResponse](c.conn, ctx, legacyAgentMethodSessionSetModel, params)
-	return resp, peerError(ctx, err)
-}
-
 func (c *clientConnection) handle(ctx context.Context, method string, params json.RawMessage) (any, *acp.RequestError) {
 	if c == nil {
 		return nil, acp.NewInternalError(map[string]any{"error": "ACP client callbacks not configured"})
@@ -309,7 +292,7 @@ func (c *clientConnection) handle(ctx context.Context, method string, params jso
 	if method == acp.ClientMethodSessionUpdate {
 		c.updates.release()
 	}
-	if c.sole == nil && c.sessions == nil {
+	if c.sessions == nil {
 		return nil, acp.NewInternalError(map[string]any{"error": "ACP client callbacks not configured"})
 	}
 	if c.logger != nil && method != acp.ClientMethodSessionUpdate {

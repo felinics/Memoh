@@ -18,11 +18,11 @@ var _ external.GoalProvider = (*Driver)(nil)
 // Codex permits explicit Plan turns but never automatically continues a goal
 // in Plan mode. Goal activation and continuation must share this constraint.
 func goalExecutionAllowed(input external.PromptInput) bool {
-	return metadataString(input.RuntimeMetadata, "collaboration_mode") != "plan"
+	return external.MetadataString(input.RuntimeMetadata, "collaboration_mode") != "plan"
 }
 
 func (s *appServer) goalThreadID(input external.PromptInput) string {
-	if id := metadataString(input.RuntimeMetadata, metadataThreadIDKey); id != "" {
+	if id := external.MetadataString(input.RuntimeMetadata, metadataThreadIDKey); id != "" {
 		return id
 	}
 	// A new Codex thread is published durably when the admitted run finishes.
@@ -41,7 +41,7 @@ func (d *Driver) Goal(ctx context.Context, input external.PromptInput) (*externa
 	if input.ThreadID == "" {
 		return nil, nil
 	}
-	if metadataString(input.RuntimeMetadata, metadataThreadIDKey) == "" && d.peekServer(input.BotID, input.BotAgentID) == nil {
+	if external.MetadataString(input.RuntimeMetadata, metadataThreadIDKey) == "" && d.peekServer(input.BotID, input.BotAgentID) == nil {
 		return nil, nil
 	}
 	srv, release, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)
@@ -197,7 +197,7 @@ func (d *Driver) pauseGoalOnExit(ctx context.Context, srv *appServer, turn *turn
 // the goal paused and completes normally. Missing old thread state still
 // follows the driver's existing reseed path.
 func (s *appServer) prepareGoal(ctx context.Context, input external.PromptInput) (bool, error) {
-	id := metadataString(input.RuntimeMetadata, metadataThreadIDKey)
+	id := external.MetadataString(input.RuntimeMetadata, metadataThreadIDKey)
 	if id == "" || input.ForceFreshRuntime {
 		return false, nil
 	}

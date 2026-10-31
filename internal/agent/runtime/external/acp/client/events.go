@@ -7,9 +7,9 @@ import (
 	"sync"
 
 	acp "github.com/coder/acp-go-sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/event"
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 )
 
 const maxTrackedACPToolStates = 1024
@@ -199,15 +199,21 @@ func limitStreamEvents(events []event.StreamEvent, limit ToolOutputLimit) []even
 	return out
 }
 
-func (c *eventCollector) result() RunResult {
+func (c *eventCollector) result() collectedResult {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	text := strings.TrimSpace(c.text.String())
-	return RunResult{
+	return collectedResult{
 		Text:   text,
 		Output: c.transcript.Messages(text),
 	}
+}
+
+// collectedResult is what a prompt's updates said: its text and transcript.
+type collectedResult struct {
+	Text   string
+	Output []sdk.Message
 }
 
 func contentText(block acp.ContentBlock) string {
@@ -225,7 +231,6 @@ type acpToolEventMapper struct {
 	tools        map[acpToolStateKey]*acpToolState
 	lastPlan     string
 	promptActive bool
-	quirks       acpprofile.ToolQuirks
 	changed      chan struct{}
 	// tombstones holds the tool calls of the most recently cancelled prompt.
 	// ACP dispatches inbound requests on connection-scoped goroutines, so a
@@ -260,10 +265,9 @@ type acpToolState struct {
 	refusal string
 }
 
-func newACPToolEventMapper(quirks acpprofile.ToolQuirks) *acpToolEventMapper {
+func newACPToolEventMapper() *acpToolEventMapper {
 	return &acpToolEventMapper{
 		tools:   map[acpToolStateKey]*acpToolState{},
-		quirks:  quirks,
 		changed: make(chan struct{}),
 	}
 }
@@ -617,7 +621,7 @@ func (m *acpToolEventMapper) ensureTool(sessionID, id string) *acpToolState {
 }
 
 func (m *acpToolEventMapper) eventsForState(state *acpToolState) []event.StreamEvent {
-	name, input, ok := nativeToolFromACPState(state, m.quirks)
+	name, input, ok := nativeToolFromACPState(state)
 	if !ok {
 		return nil
 	}
@@ -654,9 +658,8 @@ func (m *acpToolEventMapper) eventsForState(state *acpToolState) []event.StreamE
 
 // nativeToolFromACPState maps an agent-reported tool call onto a canonical
 // native tool name and input. All agent-wording knowledge (title heuristics)
-// comes from quirks, which profile owns per agent - never inline keyword
-// checks here.
-func nativeToolFromACPState(state *acpToolState, quirks acpprofile.ToolQuirks) (string, map[string]any, bool) {
+// lives in titles.go - never inline keyword checks here.
+func nativeToolFromACPState(state *acpToolState) (string, map[string]any, bool) {
 	if state == nil {
 		return "", nil, false
 	}
@@ -667,7 +670,7 @@ func nativeToolFromACPState(state *acpToolState, quirks acpprofile.ToolQuirks) (
 		// server/tool/arguments) must not be reinterpreted as a shell command
 		// merely because its display title is non-generic.
 		if command == "" && !hasStructuredACPToolInput(state.input) {
-			command = quirks.CommandFromTitle(state.title)
+			command = commandFromTitle(state.title)
 		}
 		if command == "" {
 			return "", nil, false
@@ -688,7 +691,7 @@ func nativeToolFromACPState(state *acpToolState, quirks acpprofile.ToolQuirks) (
 		// it HERE so the streamed tool-event name and the approval name (both
 		// resolve through this function) agree - one action must not surface as
 		// "edit" on the stream while its approval says "write".
-		if ok && name == "edit" && quirks.TitleIndicatesWrite(state.title) {
+		if ok && name == "edit" && titleIndicatesWrite(state.title) {
 			name = "write"
 		}
 		return name, input, ok

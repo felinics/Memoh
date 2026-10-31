@@ -28,10 +28,10 @@ func IdleSession(botID string) mcp.ToolSessionContext {
 func TurnSession(ctx context.Context, input external.PromptInput) mcp.ToolSessionContext {
 	botID := strings.TrimSpace(input.BotID)
 	session := IdleSession(botID)
-	session.ChatID = firstNonEmpty(input.ChatID, botID)
+	session.ChatID = external.FirstNonEmpty(input.ChatID, botID)
 	session.SessionID = strings.TrimSpace(input.ThreadID)
 	session.RunID = strings.TrimSpace(input.RunID)
-	session.SessionType = firstNonEmpty(input.SessionMode, sessionmode.Chat)
+	session.SessionType = external.FirstNonEmpty(input.SessionMode, sessionmode.Chat)
 	session.RouteID = strings.TrimSpace(input.RouteID)
 	session.CurrentPlatform = strings.TrimSpace(input.CurrentPlatform)
 	session.ReplyTarget = strings.TrimSpace(input.ReplyTarget)
@@ -46,13 +46,4 @@ func TurnSession(ctx context.Context, input external.PromptInput) mcp.ToolSessio
 	}
 	session.RunContext = ctx
 	return session
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
 }

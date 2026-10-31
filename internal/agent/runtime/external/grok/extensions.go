@@ -3,14 +3,11 @@ package grok
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"strings"
 	"time"
 
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
-	"github.com/felinics/memoh/internal/agent/runtime/external/toolmount"
 	"github.com/felinics/memoh/internal/errs"
-	"github.com/felinics/memoh/internal/mcp"
 )
 
 // What the driver reads and drives through Grok's own extension methods; the
@@ -28,59 +25,53 @@ type mcpStatus struct {
 	Detail string `json:"detail"`
 }
 
-// subscribe takes the notifications the driver reads from the process.
-func (s *server) subscribe() {
-	s.conn.Subscribe(modelsUpdateMethod, s.updateModels)
-	s.conn.Subscribe(mcpStatusMethod, s.updateToolStatus)
-}
-
-func (s *server) updateModels(params json.RawMessage) {
+func (p *grokProcess) updateModels(params json.RawMessage) {
 	var state map[string]any
 	if json.Unmarshal(params, &state) != nil || state["availableModels"] == nil {
 		return
 	}
-	s.mu.Lock()
-	s.models = state
-	s.mu.Unlock()
+	p.mu.Lock()
+	p.models = state
+	p.mu.Unlock()
 }
 
 // modelState is the catalog as Grok last reported it: pushed since the
 // process started, else read from Grok, else the snapshot initialize
 // carried. The snapshot alone goes stale: Grok learns of new models after
 // it has answered initialize.
-func (s *server) modelState(ctx context.Context) map[string]any {
-	s.mu.Lock()
-	state := s.models
-	s.mu.Unlock()
+func (p *grokProcess) modelState(ctx context.Context) map[string]any {
+	p.mu.Lock()
+	state := p.models
+	p.mu.Unlock()
 	if state != nil {
 		return state
 	}
 	var answer struct {
 		Result map[string]any `json:"result"`
 	}
-	if err := s.conn.Call(ctx, modelsMethod, map[string]any{}, &answer); err == nil && answer.Result["availableModels"] != nil {
+	if err := p.conn.Call(ctx, modelsMethod, map[string]any{}, &answer); err == nil && answer.Result["availableModels"] != nil {
 		// Kept like a pushed update, so one read serves until Grok pushes.
-		s.mu.Lock()
-		if s.models == nil {
-			s.models = answer.Result
+		p.mu.Lock()
+		if p.models == nil {
+			p.models = answer.Result
 		}
-		state = s.models
-		s.mu.Unlock()
+		state = p.models
+		p.mu.Unlock()
 		return state
 	}
-	state, _ = s.conn.AgentMeta()["modelState"].(map[string]any)
+	state, _ = p.conn.AgentMeta()["modelState"].(map[string]any)
 	return state
 }
 
-// forgetToolStatus drops Grok's report on a session that is opened again or
-// let go: the next open is reported afresh.
-func (s *server) forgetToolStatus(sessionID string) {
-	s.mu.Lock()
-	delete(s.toolStatus, sessionID)
-	s.mu.Unlock()
+// forgetToolStatus drops Grok's report on a session that is opened again:
+// the next open is reported afresh.
+func (p *grokProcess) forgetToolStatus(sessionID string) {
+	p.mu.Lock()
+	delete(p.toolStatus, sessionID)
+	p.mu.Unlock()
 }
 
-func (s *server) updateToolStatus(params json.RawMessage) {
+func (p *grokProcess) updateToolStatus(params json.RawMessage) {
 	var report struct {
 		SessionID string `json:"sessionId"`
 		Name      string `json:"name"`
@@ -89,21 +80,21 @@ func (s *server) updateToolStatus(params json.RawMessage) {
 	if json.Unmarshal(params, &report) != nil || !acpclient.IsMemohToolsMCPServerName(report.Name) {
 		return
 	}
-	s.mu.Lock()
-	s.toolStatus[report.SessionID] = report.mcpStatus
-	close(s.statusWake)
-	s.statusWake = make(chan struct{})
-	s.mu.Unlock()
+	p.mu.Lock()
+	p.toolStatus[report.SessionID] = report.mcpStatus
+	close(p.statusWake)
+	p.statusWake = make(chan struct{})
+	p.mu.Unlock()
 }
 
 // gatewayStatus waits for Grok's report on the session's Memoh tool gateway.
-func (s *server) gatewayStatus(ctx context.Context, sessionID string, timeout time.Duration) (mcpStatus, bool) {
+func (p *grokProcess) gatewayStatus(ctx context.Context, sessionID string, timeout time.Duration) (mcpStatus, bool) {
 	deadline := time.After(timeout)
 	for {
-		s.mu.Lock()
-		status, ok := s.toolStatus[sessionID]
-		wake := s.statusWake
-		s.mu.Unlock()
+		p.mu.Lock()
+		status, ok := p.toolStatus[sessionID]
+		wake := p.statusWake
+		p.mu.Unlock()
 		if ok {
 			return status, true
 		}
@@ -117,31 +108,17 @@ func (s *server) gatewayStatus(ctx context.Context, sessionID string, timeout ti
 	}
 }
 
-// serveGateway opens the Memoh tool gateway route for a thread. A route
-// that cannot be served leaves the thread without Memoh tools.
-func (s *server) serveGateway(ctx context.Context, th *thread, gateway toolmount.Gateway, inputURL string) (*toolmount.Mount, bool) {
-	//nolint:contextcheck // the route serves every later turn of the conversation, not only the one that opened it.
-	mount, err := toolmount.Serve(s.mountCtx, s.client, s.workspaceInfo, inputURL, gateway, func() mcp.ToolSessionContext {
-		return s.toolSession(th)
-	})
-	if err != nil {
-		s.logger.WarnContext(ctx, "grok: Memoh tool gateway unavailable", slog.String("bot_id", s.botID), slog.Any("error", err))
-		return nil, false
-	}
-	return mount, true
-}
-
 // compact runs Grok's compaction of the session; the session keeps its id.
-func (s *server) compact(ctx context.Context, sessionID string) error {
-	return s.conn.Call(ctx, compactMethod, map[string]any{"session_id": sessionID}, nil)
+func (p *grokProcess) compact(ctx context.Context, sessionID string) error {
+	return p.conn.Call(ctx, compactMethod, map[string]any{"session_id": sessionID}, nil)
 }
 
 // fork copies the session whole into a new one and returns its id.
-func (s *server) fork(ctx context.Context, sessionID, cwd string) (string, error) {
+func (p *grokProcess) fork(ctx context.Context, sessionID, cwd string) (string, error) {
 	var answer struct {
 		NewSessionID string `json:"newSessionId"`
 	}
-	if err := s.conn.Call(ctx, forkMethod, map[string]any{"sourceSessionId": sessionID, "sourceCwd": cwd, "newCwd": cwd}, &answer); err != nil {
+	if err := p.conn.Call(ctx, forkMethod, map[string]any{"sourceSessionId": sessionID, "sourceCwd": cwd, "newCwd": cwd}, &answer); err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(answer.NewSessionID) == "" {
@@ -159,10 +136,10 @@ type sessionInfo struct {
 	} `json:"context"`
 }
 
-func (s *server) sessionInfo(ctx context.Context, sessionID string) (sessionInfo, error) {
+func (p *grokProcess) sessionInfo(ctx context.Context, sessionID string) (sessionInfo, error) {
 	var answer struct {
 		Result sessionInfo `json:"result"`
 	}
-	err := s.conn.Call(ctx, sessionInfoMethod, map[string]any{"sessionId": sessionID}, &answer)
+	err := p.conn.Call(ctx, sessionInfoMethod, map[string]any{"sessionId": sessionID}, &answer)
 	return answer.Result, err
 }

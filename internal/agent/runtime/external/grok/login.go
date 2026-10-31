@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/agent/runtime/external/acp"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/external/grok/grokcfg"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/errs"
@@ -43,7 +45,7 @@ type signIn struct {
 	id         string
 	botID      string
 	botAgentID string
-	srv        *server
+	conn       *acpclient.Conn
 	release    func()
 	cancel     context.CancelFunc
 	// expiry ends the sign-in at signInTTL; endSignIn stops it.
@@ -64,7 +66,7 @@ func (d *Driver) StartDeviceLogin(ctx context.Context, botID, botAgentID string)
 	defer release()
 	cfg, err := d.agentConfig(ctx, botID, botAgentID)
 	if err != nil {
-		return external.DeviceLoginStart{}, external.Unavailable(err)
+		return external.DeviceLoginStart{}, err
 	}
 	if cfg.Auth != grokcfg.AuthGrokAccount {
 		return external.DeviceLoginStart{}, external.CredentialError(agentcredential.ErrIncompatible)
@@ -73,11 +75,11 @@ func (d *Driver) StartDeviceLogin(ctx context.Context, botID, botAgentID string)
 	if err := d.PurgeBotAgentAuth(ctx, botID, botAgentID); err != nil {
 		return external.DeviceLoginStart{}, err
 	}
-	srv, releaseServer, err := d.acquireServer(ctx, botID, botAgentID)
+	proc, releaseProc, err := d.host.Process(ctx, acp.PromptInput{BotID: botID, BotAgentID: botAgentID})
 	if err != nil {
-		return external.DeviceLoginStart{}, serverFailure(err)
+		return external.DeviceLoginStart{}, err
 	}
-	s := &signIn{id: uuid.NewString(), botID: botID, botAgentID: botAgentID, srv: srv, release: releaseServer, done: make(chan struct{})}
+	s := &signIn{id: uuid.NewString(), botID: botID, botAgentID: botAgentID, conn: proc.Conn(), release: releaseProc, done: make(chan struct{})}
 	start, err := s.begin(ctx)
 	if err != nil {
 		d.endSignIn(s)
@@ -101,19 +103,19 @@ func (d *Driver) PollDeviceLogin(ctx context.Context, _, botID, botAgentID, logi
 	defer release()
 	s := d.signIn(loginID, botAgentID)
 	if s == nil {
-		return external.DeviceLoginStatus{Status: "unknown"}, nil
+		return external.DeviceLoginStatus{Status: external.DeviceLoginUnknown}, nil
 	}
 	select {
 	case <-s.done:
 	default:
-		return external.DeviceLoginStatus{Status: "pending"}, nil
+		return external.DeviceLoginStatus{Status: external.DeviceLoginPending}, nil
 	}
 	d.endSignIn(s)
 	if s.err != nil {
 		d.logger.WarnContext(ctx, "grok sign-in failed", slog.String("bot_id", botID), slog.Any("error", s.err))
-		return external.DeviceLoginStatus{Status: "error", Error: s.err.Error()}, nil
+		return external.DeviceLoginStatus{Status: external.DeviceLoginError, Error: s.err.Error()}, nil
 	}
-	return external.DeviceLoginStatus{Status: "success"}, nil
+	return external.DeviceLoginStatus{Status: external.DeviceLoginSuccess}, nil
 }
 
 // CancelDeviceLogin implements external.DeviceLoginProvider.
@@ -154,8 +156,9 @@ func (d *Driver) endSignIn(s *signIn) {
 		if s.cancel != nil {
 			s.cancel()
 		}
-		d.procs.MarkBroken(serverKey(s.botID, s.botAgentID), s.srv)
 		s.release()
+		// Conversations' processes started from the login state before it.
+		d.procs.Retire(agentProcesses(s.botID, s.botAgentID))
 	})
 }
 
@@ -165,7 +168,7 @@ func (s *signIn) begin(ctx context.Context) (external.DeviceLoginStart, error) {
 	s.cancel = cancel
 	go func() {
 		defer close(s.done)
-		_, s.err = s.srv.conn.Authenticate(authCtx, authMethodID)
+		_, s.err = s.conn.Authenticate(authCtx, authMethodID)
 	}()
 	return s.awaitURL(ctx)
 }
@@ -180,7 +183,7 @@ func (s *signIn) awaitURL(ctx context.Context) (external.DeviceLoginStart, error
 			ExternalProvider bool   `json:"external_provider"`
 			Mode             string `json:"mode"`
 		}
-		if err := s.srv.conn.Call(ctx, signInURLMethod, map[string]any{"methodId": authMethodID}, &answer); err != nil {
+		if err := s.conn.Call(ctx, signInURLMethod, map[string]any{"methodId": authMethodID}, &answer); err != nil {
 			return external.DeviceLoginStart{}, err
 		}
 		if answer.AuthURL != "" {

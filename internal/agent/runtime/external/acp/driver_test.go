@@ -3,6 +3,7 @@ package acp
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -11,34 +12,20 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
 )
 
-func TestNormalizePromptErrorNamesTheMissingCommand(t *testing.T) {
-	cause := fmt.Errorf("start devin acp: %w", &client.CommandNotFoundError{Command: "devin"})
-	err := normalizePromptError(cause)
-	var prompt *PromptError
-	if !errors.As(err, &prompt) {
-		t.Fatalf("normalizePromptError() = %T %v, want *PromptError", err, err)
-	}
-	var missing *client.CommandNotFoundError
-	if !errors.As(prompt.Cause(), &missing) || missing.Command != "devin" {
-		t.Fatalf("normalizePromptError() cause = %v, want the command the user must install", prompt.Cause())
-	}
-	if !errors.Is(prompt.Cause(), cause) {
-		t.Fatalf("normalizePromptError() cause = %v, want private cause", prompt.Cause())
-	}
-	if errors.As(err, &missing) {
-		t.Fatal("PromptError exposed its cause to errors.As")
-	}
-}
-
-func TestNormalizePromptErrorReportsWhatTheAgentSaid(t *testing.T) {
+func TestPromptFailureShowsWhatTheAgentSaid(t *testing.T) {
 	answer := &acp.RequestError{Code: -32603, Message: "Internal error", Data: map[string]any{"message": "model quota exhausted"}}
-	err := normalizePromptError(fmt.Errorf("prompt: %w", answer))
 	var failure *external.Failure
-	if !errors.As(err, &failure) || failure.Kind != external.FailureReported || failure.Message != "model quota exhausted" {
-		t.Fatalf("normalizePromptError() = %v, want the agent's own words", err)
+	if err := promptFailure(fmt.Errorf("prompt: %w", answer)); !errors.As(err, &failure) || failure.Kind != external.FailureReported || failure.Message != "model quota exhausted" {
+		t.Fatalf("promptFailure() = %v, want the agent's own words", err)
 	}
-	plain := errors.New("connection reset")
-	if got := normalizePromptError(plain); !errors.Is(got, plain) || external.IsFailure(got) {
-		t.Fatalf("normalizePromptError() = %v, want an error the agent did not answer unchanged", got)
+	missing := fmt.Errorf("start devin acp: %w", &client.CommandNotFoundError{Command: "devin"})
+	if err := promptFailure(missing); !errors.As(err, &failure) || failure.Kind != external.FailureReported || !strings.Contains(failure.Message, "devin") {
+		t.Fatalf("promptFailure() = %v, want the missing command named", err)
+	}
+	if err := promptFailure(client.ErrModelUnavailable); !external.IsFailureKind(err, external.FailureModeUnavailable) {
+		t.Fatalf("promptFailure() = %v, want a model the agent does not offer refused", err)
+	}
+	if err := promptFailure(ErrAgentNotEnabled); !errors.Is(err, ErrAgentNotEnabled) {
+		t.Fatalf("promptFailure() = %v, want a setup rule kept for its own code", err)
 	}
 }

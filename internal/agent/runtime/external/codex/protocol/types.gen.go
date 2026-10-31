@@ -1502,6 +1502,15 @@ const (
 	ThreadActiveFlagWaitingOnUserInput ThreadActiveFlag = "waitingOnUserInput"
 )
 
+type ThreadBackgroundTerminalsTerminateParams struct {
+	ProcessID string `json:"processId"`
+	ThreadID  string `json:"threadId"`
+}
+
+type ThreadBackgroundTerminalsTerminateResponse struct {
+	Terminated bool `json:"terminated"`
+}
+
 type ThreadClosedNotification struct {
 	ThreadID string `json:"threadId"`
 }

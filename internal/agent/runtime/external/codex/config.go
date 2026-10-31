@@ -59,8 +59,3 @@ var (
 	ErrNotConfigured = codexcfg.ErrNotConfigured
 	ParseAgentConfig = codexcfg.ParseAgentConfig
 )
-
-func metadataString(meta map[string]any, key string) string {
-	value, _ := meta[key].(string)
-	return value
-}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -203,5 +204,35 @@ func (s *Session) replaceAvailableCommands(sessionID acp.SessionId, commands []A
 	s.availableCommands = cloneAvailableCommands(commands)
 	out := cloneAvailableCommands(s.availableCommands)
 	s.mu.Unlock()
+	if s.commandsAdvertised != nil {
+		s.commandsAdvertisedOnce.Do(func() { close(s.commandsAdvertised) })
+	}
 	return out
+}
+
+// commandsAdvertiseTimeout bounds the wait for a newly opened session's
+// commands: an agent that offers none never says so.
+const commandsAdvertiseTimeout = 3 * time.Second
+
+// AwaitCommands returns the commands the session offers, waiting a moment
+// for a newly opened session's first advertisement. A session waits once:
+// past the timeout, what it offers is settled.
+func (s *Session) AwaitCommands(ctx context.Context) []AvailableCommandInfo {
+	if s == nil {
+		return nil
+	}
+	if s.commandsAdvertised != nil {
+		timer := time.NewTimer(commandsAdvertiseTimeout)
+		select {
+		case <-s.commandsAdvertised:
+		case <-timer.C:
+			s.commandsAdvertisedOnce.Do(func() { close(s.commandsAdvertised) })
+		case <-ctx.Done():
+		case <-s.lifecycleCtx.Done():
+		}
+		timer.Stop()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cloneAvailableCommands(s.availableCommands)
 }

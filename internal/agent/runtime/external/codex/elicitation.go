@@ -10,13 +10,13 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/external/codex/protocol"
 )
 
@@ -133,7 +133,7 @@ func (t *turnState) runElicitation(ctx context.Context, params *protocol.McpServ
 		return decline
 	}
 
-	input, mapping, err := userinput.ElicitationFormInput(message, schema)
+	input, mapping, err := userinput.ElicitationFormInput(message, schema, external.CodexFormMarkers)
 	if err != nil {
 		t.logger.WarnContext(ctx, "codex: declining unsupported MCP elicitation form",
 			slog.String("mode", params.Tag), slog.Any("error", err))
@@ -208,45 +208,22 @@ func (t *turnState) runURLElicitation(ctx context.Context, params *protocol.URLM
 	return decline
 }
 
+// runElicitationFlow puts an MCP server's form to the user. The
+// non-interactive case was rejected at runElicitation's entry.
 func (t *turnState) runElicitationFlow(ctx context.Context, input any) (userinput.Request, bool) {
-	expiresAt := time.Now().Add(userinput.DefaultWaitTimeout + time.Minute)
-	flow, err := userinput.RunFlow(ctx, t.userInput, userinput.FlowRequest{
-		Input: userinput.CreatePendingInput{
-			BotID:                        t.input.BotID,
-			SessionID:                    t.input.ThreadID,
-			RouteID:                      t.input.RouteID,
-			ChannelIdentityID:            t.input.ChannelIdentityID,
-			RequestedByChannelIdentityID: t.input.ChannelIdentityID,
-			ToolCallID:                   "codex-elicitation-" + uuid.NewString(),
-			ToolName:                     userinput.ToolNameAskUser,
-			Input:                        input,
-			ProviderMetadata: map[string]any{
-				"source":    userinput.ProviderSourceCodexElicitation,
-				"thread_id": t.threadID,
-				"run_id":    t.input.RunID,
-			},
-			SourcePlatform:   t.input.CurrentPlatform,
-			ReplyTarget:      t.input.ReplyTarget,
-			ConversationType: t.input.ConversationType,
-			ExpiresAt:        &expiresAt,
+	request, err := external.AskUser(ctx, t.userInput, t.input, external.Question{
+		ToolCallID: "codex-elicitation-" + uuid.NewString(),
+		Input:      input,
+		ProviderMetadata: map[string]any{
+			"source":    userinput.ProviderSourceCodexElicitation,
+			"thread_id": t.threadID,
+			"run_id":    t.input.RunID,
 		},
-		ActorChannelIdentityID: t.input.ChannelIdentityID,
-		// The non-interactive case was rejected at runElicitation's entry.
-		Interactive:          true,
-		WaitTimeout:          userinput.DefaultWaitTimeout,
-		Emit:                 t.emitUserInputRequest,
-		NonInteractiveReason: "codex MCP elicitation requested user input without an interactive stream",
-		UndeliveredReason:    "codex MCP elicitation was not delivered to the interactive stream",
-		TimeoutReason:        "codex MCP elicitation timed out",
-		AbortReason:          "codex MCP elicitation aborted",
-	})
+	}, t.emit, t.logger)
 	if err != nil {
-		if ctx.Err() == nil {
-			t.logger.ErrorContext(ctx, "codex MCP elicitation flow failed", slog.String("thread_id", t.threadID), slog.Any("error", err))
-		}
 		return userinput.Request{}, false
 	}
-	return flow.Request, true
+	return request, true
 }
 
 // emitElicitationDeclinedNotice surfaces a declined MCP elicitation in the

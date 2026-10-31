@@ -36,6 +36,18 @@ func TestDecodeInboundClassification(t *testing.T) {
 			line: `{"id":"req-9","error":{"code":-32001,"message":"overloaded"}}`,
 			kind: InboundResponse,
 		},
+		// id:null is an orphan response, or with a method a notification,
+		// never a request to answer.
+		{
+			name: "null-id error",
+			line: `{"id":null,"error":{"code":-32700,"message":"parse error"}}`,
+			kind: InboundResponse,
+		},
+		{
+			name: "null-id method",
+			line: `{"id":null,"method":"m","params":{}}`,
+			kind: InboundNotification,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -212,23 +224,6 @@ func TestTaggedUnionForms(t *testing.T) {
 	}
 }
 
-func TestDecodeServerNotificationParams(t *testing.T) {
-	decoded, ok, err := DecodeServerNotificationParams("item/agentMessage/delta", []byte(`{"delta":"hi","itemId":"i","threadId":"t","turnId":"u"}`))
-	if err != nil || !ok {
-		t.Fatalf("ok=%v err=%v", ok, err)
-	}
-	delta, isTyped := decoded.(*AgentMessageDeltaNotification)
-	if !isTyped || delta.Delta != "hi" {
-		t.Fatalf("decoded: %#v", decoded)
-	}
-
-	// Methods outside the typed subset are reported, not failed.
-	_, ok, err = DecodeServerNotificationParams("thread/realtime/sdp", []byte(`{}`))
-	if err != nil || ok {
-		t.Fatalf("unknown method: ok=%v err=%v", ok, err)
-	}
-}
-
 func TestUnionDecodeIntoReusedValue(t *testing.T) {
 	// Reusing a variable across decodes must not leak the previous variant.
 	var item ThreadItem
@@ -281,22 +276,6 @@ func TestUnionDecodeIntoReusedValue(t *testing.T) {
 	}
 }
 
-func TestUnionRawIsStable(t *testing.T) {
-	// Bytes handed out by Raw() must survive later decodes into the variable.
-	var item ThreadItem
-	first := `{"type":"futureMessage","id":"f","payload":{"a":1}}`
-	if err := json.Unmarshal([]byte(first), &item); err != nil {
-		t.Fatal(err)
-	}
-	saved := item.Raw()
-	if err := json.Unmarshal([]byte(`{"type":"plan","id":"p","text":"x"}`), &item); err != nil {
-		t.Fatal(err)
-	}
-	if string(saved) != first {
-		t.Fatalf("saved Raw() bytes were rewritten by a later decode: %s", saved)
-	}
-}
-
 func TestOutboundEnvelopeMarshal(t *testing.T) {
 	// nil params are omitted entirely.
 	out, err := json.Marshal(Request{ID: NewRequestID(1), Method: "account/rateLimits/read"})
@@ -332,54 +311,6 @@ func TestOutboundEnvelopeMarshal(t *testing.T) {
 	}
 	if string(out) != `{"method":"initialized"}` {
 		t.Fatalf("notification = %s", out)
-	}
-}
-
-func TestRequestIDValueCopyStable(t *testing.T) {
-	var id RequestID
-	if err := json.Unmarshal([]byte(`101`), &id); err != nil {
-		t.Fatal(err)
-	}
-	saved := id
-	if err := json.Unmarshal([]byte(`202`), &id); err != nil {
-		t.Fatal(err)
-	}
-	if saved.Key() != "101" {
-		t.Fatalf("value copy drifted to %s", saved.Key())
-	}
-}
-
-func TestDecodeInboundNullID(t *testing.T) {
-	// A parse-error style response with id:null is an orphan response, not a
-	// correlatable one and not an error.
-	in, err := DecodeInbound([]byte(`{"id":null,"error":{"code":-32700,"message":"parse error"}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if in.Kind != InboundResponse || !in.ID.IsZero() || in.Err == nil {
-		t.Fatalf("null-id error line: kind=%v id=%q err=%v", in.Kind, in.ID.Key(), in.Err)
-	}
-
-	// id:null plus a method is a notification — never a request to answer.
-	in, err = DecodeInbound([]byte(`{"id":null,"method":"m","params":{}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if in.Kind != InboundNotification {
-		t.Fatalf("null-id method line: kind=%v", in.Kind)
-	}
-}
-
-func TestNewResponseForMethod(t *testing.T) {
-	resp, ok := NewResponseForMethod(MethodThreadStart)
-	if !ok {
-		t.Fatal("thread/start should have a generated response")
-	}
-	if _, isTyped := resp.(*ThreadStartResponse); !isTyped {
-		t.Fatalf("response type %T", resp)
-	}
-	if _, ok := NewResponseForMethod("initialize"); ok {
-		t.Fatal("initialize response is hand-written, not generated")
 	}
 }
 

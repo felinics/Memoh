@@ -101,7 +101,7 @@ func TestClosedApprovalDoesNotParkFinishedRun(t *testing.T) {
 			}
 			if terminalDelivered {
 				rejected, _ := flow.Reject(ctx, "", "", "")
-				st.emitApprovalRequest(rejected)
+				st.emit(external.ApprovalCard(rejected))
 				select {
 				case s := <-seen:
 					if s != approval.StatusRejected {

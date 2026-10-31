@@ -51,7 +51,7 @@ func acpAgentSetupError(ctx context.Context, agents *botagents.Service, bot bots
 	if !setup.Enabled {
 		return apperror.New(apperror.CodeACPAgentNotEnabled, nil)
 	}
-	if _, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
+	if _, missing := acpprofile.MissingRequiredManagedField(profile, setup); missing {
 		return apperror.New(apperror.CodeACPAgentNotConfigured, nil)
 	}
 	return nil

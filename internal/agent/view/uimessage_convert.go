@@ -13,7 +13,6 @@ import (
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/markdownmedia"
 	"github.com/felinics/memoh/internal/messageconv"
-	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/textutil"
 )
 
@@ -1768,12 +1767,14 @@ func isBackgroundTerminalStatus(status string) bool {
 	}
 }
 
-// ConvertSessionMessagesToUITurns applies the session's native fork boundary.
-// The durable anchor, rather than the last row in this page, is authoritative
-// so an older history page never offers a fork from its own final reply.
-func ConvertSessionMessagesToUITurns(messages []messagepkg.Message, runtimeType string, metadata map[string]any) []UITurn {
+// ConvertSessionMessagesToUITurns applies the session's native fork boundary:
+// forkAnchorKey names the runtime metadata key of the only turn a fork may
+// start from (external.Caps.ForkAnchorKey), empty when any turn can fork. The
+// durable anchor, rather than the last row in this page, is authoritative so
+// an older history page never offers a fork from its own final reply.
+func ConvertSessionMessagesToUITurns(messages []messagepkg.Message, forkAnchorKey string, metadata map[string]any) []UITurn {
 	turns := ConvertMessagesToUITurns(messages)
-	key := runtimekind.LatestForkAnchorKey(runtimeType)
+	key := forkAnchorKey
 	if key == "" {
 		return turns
 	}

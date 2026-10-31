@@ -18,6 +18,7 @@
 - The chat timeline (`internal/chat/timeline/`) owns canonical events, projection, rendering, persistence, and context composition. Inbound adaptation lives in `internal/channel/inbound/`, while discuss-mode driving lives in `internal/channel/discuss/`.
 - Browser Use and Computer Use capabilities live in `internal/agent/tool/browser.go` (plus `internal/agent/tool/computer_a11y.go`) and are exposed only when the bot's workspace display is enabled. `browser_action` / `browser_observe` operate the headed workspace Chrome/Chromium instance over CDP, `browser_remote_session` exposes the same CDP endpoint for code-driven Playwright/CDP sessions, and the Computer Use pair (`computer_observe` / `computer_action`) drives the broader GUI desktop: snapshots come from the AT-SPI accessibility tree via the bundled `a11y-cli` Rust helper at `/opt/memoh/toolkit/display/bin/a11y-cli`, and raw RFB pointer/keyboard input remains as a fallback when accessibility cannot reach the target. Both browser and computer screenshots are saved to a workspace path and never auto-attached to the conversation, so the model must explicitly read the path when it wants the image. Prefer Browser Use for web pages; use Computer Use for native dialogs, non-browser apps, or GUI states that CDP cannot reach.
 - Headless Playwright scripts are still ordinary workspace commands, but they are not the same path as the headed workspace browser/display stack. Use the headed Browser Use tools when the user needs to inspect or operate the visible workspace browser.
+- External agent runtimes (Codex, Claude Code, Grok Build, generic ACP) are registered in one `external.Registry`, which application, handlers and wiring share. An optional capability (model catalog, fork, compaction, goal, plan mode, commands, modes, device login, account, quota, sign-out) is the interface the driver implements, found with `external.As[T]`; it is never repeated as a flag. A driver's static `external.Caps` holds only what no interface says: its managed dependency and command, whether a fork must go through the runtime and the metadata key of the only turn it may start from, and whether read commands wait for an idle conversation. The shared pieces every driver uses live in `external`: approval decision and card (`DecideApproval`, `ApprovalCard`), questions (`AskUser`, `UserInputCard`), the steering pump (`PumpSteering`), the permission menu (`PermissionModeState`, `SelectedPermissionMode`), plan mode (`PlanModeState`), the compaction turn (`CompactionTurn`) and process sign-out (`agentproc.Supervisor.SignOut`).
 - The compaction service (`internal/agent/context/compaction/`) handles LLM-based conversation summarization.
 - Loop detection (text and tool loops) is built into the agent with configurable thresholds.
 - Tag extraction system processes inline tags in streaming output (attachments, reactions, speech/TTS).
@@ -139,12 +140,11 @@ A fork is `_x.ai/session/fork`, which copies the session whole; the turn's
 prompt id is recorded as the fork anchor and a fork is refused from any turn
 but the latest. Fork preparation and Grok's `status` command take the session's
 turn slot, as a configuration-only run, and return busy while a turn runs.
-After the Agent's process is recycled, a displaced process keeps finishing its
-turns: a conversation opened on the replacement first closes any idle copy of
-its session the old process still holds. When the old or the new process
-uses a Grok account login, the login file is shared, so the replacement waits
-up to 30 seconds for the earlier processes to end and answers
-`external_runtime.busy` if they have not.
+Grok runs on the ACP core (`internal/agent/runtime/external/acp`, see its
+`AGENTS.md`) as an extension of its own: one Grok process serves every
+conversation of the Agent, each on a session of its own, and also its
+sign-in, account and model catalog. A finished sign-in retires the Agent's
+process, so the next turn starts from the new login.
 Grok reports a Memoh tool gateway it could not reach through
 `_x.ai/mcp/server_status`, which the turn surfaces as a tools-unavailable
 notice. Grok's ACP surface has no mid-turn input: a prompt sent while one runs
@@ -158,8 +158,13 @@ resume by their thread id and gain a rollout path after their next turn.
 
 Custom ACP agents run with `HOME=/data` and keep their sessions wherever the
 agent stores them under it. The thread records the agent's session id with the
-thread it belongs to (`acp_native_session`). A new process — after the idle
-reaper, a server restart or a failed turn — reattaches with `session/resume`
+thread it belongs to (`acp_native_session`). ACP lets one connection host
+several concurrent sessions, so an Agent's conversations share its process,
+each on a session of its own; an agent that cannot host concurrent sessions
+is not supported. A conversation moving to a new process has its session
+closed on the old one first, so it is never continued on two at once. A
+new process or session — after closing for idleness, a server restart or a
+failed turn — reattaches with `session/resume`
 when the agent offers it, and with `session/load` when it does not or refuses;
 history replayed by either is dropped. ACP names no error for a missing session and agents answer with
 different codes, so any error the agent itself returns, except
@@ -189,7 +194,7 @@ through `POST /bots/{bot_id}/agents/{id}/login/device/{authorize,poll,cancel}`
 (`external.DeviceLoginProvider`). The runtime obtains the device code, the
 user opens the URL and confirms it, and the runtime writes its own login file
 in the Agent's home on the bot's data volume, where it keeps and refreshes
-it. Memoh stores no copy; a finished sign-in restarts the Agent's process so
+it. Memoh stores no copy; a finished sign-in retires the Agent's process so
 the next turn starts from the new login. On a Grok home that already holds a
 login, ACP `authenticate` answers from it without asking anyone, so signing
 in again first removes it. Grok hands the device URL out through its

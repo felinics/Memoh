@@ -23,6 +23,7 @@ import (
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/contextview"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 type fakeAgentStreamer struct {
@@ -665,7 +666,7 @@ func TestAdmittedDiscussBudgetFailurePersistsFailedBudgetLifecycle(t *testing.T)
 }
 
 func TestDiscussMetadataOnlyRejectionNeverStartsRuntime(t *testing.T) {
-	for _, runtimeType := range []string{sessionpkg.RuntimeModel, sessionpkg.RuntimeACPAgent, sessionpkg.RuntimeCodex} {
+	for _, runtimeType := range []string{sessionpkg.RuntimeModel, sessionpkg.RuntimeACPAgent, string(runtimekind.Codex)} {
 		t.Run(runtimeType, func(t *testing.T) {
 			runner := &fakeRunner{}
 			agent := &fakeAgentStreamer{}

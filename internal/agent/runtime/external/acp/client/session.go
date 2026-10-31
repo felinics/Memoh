@@ -6,66 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
-	"net/http"
-	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 	sdk "github.com/felinics/twilight/sdk"
-	"github.com/google/uuid"
 
-	"github.com/felinics/memoh/internal/agent/event"
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
-	"github.com/felinics/memoh/internal/errs"
-	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/toolcontext"
-	"github.com/felinics/memoh/internal/version"
-	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 type ToolSessionContext = toolcontext.Session
-
-// RuntimeSyncGuard runs one runtime-configuration workspace operation while
-// its caller holds the durable bot generation lock. The client intentionally
-// knows nothing about the persistence implementation behind this callback.
-type RuntimeSyncGuard func(context.Context, func(context.Context) error) error
-
-type StartRequest struct {
-	AgentID     string
-	BotID       string
-	ProjectPath string
-	Command     string
-	Args        []string
-	Env         []string
-	UnsetEnv    []string
-	Resolved    *ResolvedSessionContext
-	SetupMode   SetupMode
-	// NativeSessionID names a session the agent persisted earlier, to be
-	// restored instead of creating a new one. The started Session carries a
-	// different ID when the agent could not restore it.
-	NativeSessionID string
-	// SessionMode, when set, is pinned via session/set_mode right after the
-	// session is created (see acpprofile.Profile.SessionModeID).
-	SessionMode string
-	// ReasoningConfigID is a profile compatibility mapping used only when the
-	// agent omits ACP's thought_level category. DefaultReasoningEffort is the
-	// profile default applied at startup; per-turn choices are applied by the
-	// session pool immediately before Prompt.
-	ReasoningConfigID      string
-	DefaultReasoningEffort string
-	Timeout                time.Duration
-	ToolSession            ToolSessionContext
-	ToolApproval           ToolApprovalService
-	UserInput              UserInputService
-	ToolGateway            *mcp.ToolGatewayService
-	ToolPreflightGateway   *mcp.ToolGatewayService
-	ToolHTTPURL            string
-	ToolHTTPHandler        http.Handler
-	RuntimeSyncGuard       RuntimeSyncGuard
-}
 
 type PromptResult struct {
 	// SessionID is the ACP session the prompt was sent to.
@@ -105,26 +57,29 @@ type PromptOptions struct {
 }
 
 type Session struct {
-	proc                      *bridgeProcess
-	callbacks                 *clientCallbacks
-	conn                      *clientConnection
-	sessionID                 acp.SessionId
-	projectPath               string
-	modelSelector             modelSelector
-	modelState                ModelState
-	reasoningConfigFallbackID string
-	reasoningConfigID         string
-	reasoningState            ReasoningState
-	modeState                 ModeState
-	availableCommands         []AvailableCommandInfo
-	modeRevision              uint64
-	embeddedContext           bool
-	imagePromptSupported      bool
-	closeSessionSupported     bool
-	defaultSink               EventSink
-	lifecycleCtx              context.Context
-	cancel                    context.CancelFunc
-	reverseHTTPStop           func()
+	callbacks         *clientCallbacks
+	conn              *clientConnection
+	sessionID         acp.SessionId
+	projectPath       string
+	modelConfigID     string
+	modelState        ModelState
+	reasoningConfigID string
+	reasoningState    ReasoningState
+	modeState         ModeState
+	availableCommands []AvailableCommandInfo
+	// commandsAdvertised closes when the agent first advertises commands,
+	// which ACP has it do by notification after the session opens.
+	commandsAdvertised     chan struct{}
+	commandsAdvertisedOnce sync.Once
+	modeRevision           uint64
+	embeddedContext        bool
+	imagePromptSupported   bool
+	closeSessionSupported  bool
+	defaultSink            EventSink
+	lifecycleCtx           context.Context
+	cancel                 context.CancelFunc
+	// stderr returns the agent's recent stderr for a failed prompt.
+	stderr func() string
 	// release detaches a session from a shared Conn, whose process it does
 	// not own.
 	release func()
@@ -135,285 +90,16 @@ type Session struct {
 	promptDone   <-chan struct{}
 	promptToken  *struct{}
 	closed       bool
+	// closeDone closes once the first close has finished; closeErr is its
+	// result, which every later or concurrent close returns as well: a
+	// close never turns an unconfirmed one into a confirmed one.
+	closeDone chan struct{}
+	closeErr  error
 }
 
-//nolint:contextcheck // startup failure closes the owned process through its lifecycle API.
-func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventSink) (*Session, error) {
-	if r == nil || r.workspace == nil {
-		return nil, errs.New("ACP workspace provider is not configured")
-	}
-	if strings.TrimSpace(req.BotID) == "" {
-		return nil, errs.New("bot_id is required")
-	}
-	if strings.TrimSpace(req.AgentID) == "" {
-		return nil, errs.New("ACP agent id is required")
-	}
-
-	info, err := r.workspace.WorkspaceInfo(ctx, req.BotID)
-	if err != nil {
-		return nil, fmt.Errorf("resolve workspace: %w", err)
-	}
-	var root string
-	var projectPath string
-	var backend WorkspaceBackend
-	if req.Resolved != nil {
-		root = strings.TrimSpace(req.Resolved.WorkspaceRoot)
-		projectPath = strings.TrimSpace(req.Resolved.ProjectPath)
-		backend = req.Resolved.Backend
-		if root == "" || projectPath == "" {
-			return nil, errs.New("resolved ACP session context is incomplete")
-		}
-	} else {
-		root, projectPath, backend, err = resolveWorkspacePaths(info, req.ProjectPath)
-		if err != nil {
-			return nil, fmt.Errorf("invalid project_path: %w", err)
-		}
-	}
-
-	client, err := r.workspace.MCPClient(ctx, req.BotID)
-	if err != nil {
-		return nil, fmt.Errorf("connect workspace bridge: %w", err)
-	}
-
-	timeout := req.Timeout
-	if timeout <= 0 {
-		timeout = r.timeout
-	}
-	if timeout <= 0 {
-		timeout = DefaultRunTimeout
-	}
-
-	lifecycleCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	startupDone := make(chan struct{})
-	var startupDoneOnce sync.Once
-	finishStartup := func() {
-		startupDoneOnce.Do(func() {
-			close(startupDone)
-		})
-	}
-	defer finishStartup()
-	go func() {
-		select {
-		case <-ctx.Done():
-			cancel()
-		case <-startupDone:
-		}
-	}()
-	command := strings.TrimSpace(req.Command)
-	args := append([]string(nil), req.Args...)
-	if command == "" {
-		command = strings.TrimSpace(r.command)
-		if len(args) == 0 {
-			args = append(args, r.args...)
-		}
-	}
-
-	toolHTTPURL := strings.TrimSpace(req.ToolHTTPURL)
-	toolHTTPHandler := req.ToolHTTPHandler
-	var toolHTTPStop func()
-	if backend == WorkspaceBackendContainer && toolHTTPHandler != nil &&
-		toolHTTPURL != "" &&
-		toolHTTPURL == strings.TrimSpace(info.ToolsHTTPURL) {
-		guardedURL, guardedPath, guardedHandler, err := guardToolHTTPHandler(toolHTTPURL, toolHTTPHandler)
-		if err != nil {
-			cancel()
-			return nil, fmt.Errorf("prepare Memoh tools bridge: %w", err)
-		}
-		toolHTTPURL = guardedURL
-		var stop func()
-		client, stop, err = r.startMemohToolsBridge(lifecycleCtx, req.BotID, client, guardedPath, guardedHandler)
-		if err != nil {
-			if r.logger != nil {
-				r.logger.WarnContext(ctx, "Memoh tools bridge unavailable; starting ACP session without Memoh tools",
-					slog.String("agent_id", req.AgentID),
-					slog.String("bot_id", req.BotID),
-					slog.Any("error", err),
-				)
-			}
-			if sink != nil {
-				sink.EmitStreamEvent(event.StreamEvent{
-					Type:       event.RuntimeNotice,
-					NoticeKind: event.NoticeToolsUnavailable,
-					Delta:      "Memoh tools are unavailable for this session: tool bridge failed to start",
-				})
-			}
-			toolHTTPURL = ""
-		} else {
-			toolHTTPStop = stop
-		}
-	}
-
-	proc, err := startBridgeProcess(lifecycleCtx, client, command, args, projectPath, timeout, processOptions{
-		BotID:            req.BotID,
-		AgentID:          req.AgentID,
-		SetupMode:        req.SetupMode,
-		Env:              req.Env,
-		UnsetEnv:         req.UnsetEnv,
-		NoTimeout:        true,
-		Logger:           r.logger,
-		RuntimeSyncGuard: req.RuntimeSyncGuard,
-	})
-	if err != nil {
-		if toolHTTPStop != nil {
-			toolHTTPStop()
-		}
-		cancel()
-		return nil, fmt.Errorf("start %s: %w", buildShellCommand(command, args), err)
-	}
-
-	toolSession := req.ToolSession
-	if strings.TrimSpace(toolSession.BotID) == "" {
-		toolSession.BotID = req.BotID
-	}
-	if strings.TrimSpace(toolSession.ChatID) == "" {
-		toolSession.ChatID = toolSession.BotID
-	}
-	preflightGateway := req.ToolPreflightGateway
-	if preflightGateway == nil {
-		preflightGateway = req.ToolGateway
-	}
-	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.toolEnv, proc.unsetEnv, req.ToolApproval, preflightGateway, toolSession, acpprofile.QuirksFor(req.AgentID))
-	callbacks.userInput = req.UserInput
-	callbacks.logger = r.logger
-	conn := newClientConnection(callbacks, proc, proc)
-
-	clientCapabilities := acp.ClientCapabilities{
-		Fs: acp.FileSystemCapabilities{
-			ReadTextFile:  true,
-			WriteTextFile: true,
-		},
-		Terminal: true,
-	}
-	if req.UserInput != nil {
-		clientCapabilities.Elicitation = &acp.ElicitationCapabilities{
-			Form: &acp.ElicitationFormCapabilities{},
-		}
-	}
-	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
-		ProtocolVersion:    acp.ProtocolVersionNumber,
-		ClientInfo:         &acp.Implementation{Name: "memoh", Version: version.Version},
-		ClientCapabilities: clientCapabilities,
-	})
-	if err != nil {
-		callbacks.close()
-		_ = proc.Close()
-		if toolHTTPStop != nil {
-			toolHTTPStop()
-		}
-		cancel()
-		return nil, fmt.Errorf("initialize ACP agent: %w", err)
-	}
-	if initResp.ProtocolVersion != acp.ProtocolVersionNumber {
-		callbacks.close()
-		_ = proc.Close()
-		if toolHTTPStop != nil {
-			toolHTTPStop()
-		}
-		cancel()
-		return nil, errs.NewDependency(fmt.Sprintf(
-			"initialize ACP agent: unsupported protocol version %d (client supports %d)",
-			initResp.ProtocolVersion,
-			acp.ProtocolVersionNumber,
-		))
-	}
-
-	mcpServers := []acp.McpServer{}
-	forceHTTPMCPServer := acpprofile.ShouldForceHTTPMCPServer(req.AgentID)
-	if initResp.AgentCapabilities.McpCapabilities.Http || forceHTTPMCPServer {
-		if server := memohToolsHTTPMCPServer(toolHTTPURL, toolSession); server.Http != nil {
-			mcpServers = append(mcpServers, server)
-		}
-	}
-	if r.logger != nil {
-		caps := initResp.AgentCapabilities.McpCapabilities
-		r.logger.InfoContext(ctx, "ACP agent initialized",
-			slog.String("agent_id", req.AgentID),
-			slog.String("bot_id", req.BotID),
-			slog.Bool("mcp_acp", caps.Acp),
-			slog.Bool("mcp_http", caps.Http),
-			slog.Bool("mcp_sse", caps.Sse),
-			slog.Bool("mcp_http_forced", forceHTTPMCPServer && !caps.Http),
-			slog.Bool("memoh_tools_http_configured", toolHTTPURL != ""),
-			slog.String("memoh_tools_http_url", redactedToolHTTPURL(toolHTTPURL)),
-			slog.Int("mcp_servers", len(mcpServers)),
-		)
-		if toolHTTPURL != "" && len(mcpServers) == 0 {
-			r.logger.WarnContext(ctx, "Memoh tools were not exposed to ACP agent because no supported MCP transport was available",
-				slog.String("agent_id", req.AgentID),
-				slog.String("bot_id", req.BotID),
-				slog.Bool("agent_supports_acp_mcp", caps.Acp),
-				slog.Bool("agent_supports_http_mcp", caps.Http),
-				slog.Bool("agent_supports_sse_mcp", caps.Sse),
-				slog.Bool("http_mcp_url_configured", toolHTTPURL != ""),
-			)
-		}
-	}
-	sess, err := startSession(ctx, conn, callbacks, initResp.AgentCapabilities, projectPath, mcpServers, req.NativeSessionID, r.logger)
-	if err != nil {
-		callbacks.close()
-		_ = proc.Close()
-		if toolHTTPStop != nil {
-			toolHTTPStop()
-		}
-		cancel()
-		return nil, err
-	}
-	if err := pinSessionMode(ctx, conn, sess.SessionId, sess.Modes, req.SessionMode, r.logger, req.AgentID); err != nil {
-		callbacks.close()
-		_ = proc.Close()
-		if toolHTTPStop != nil {
-			toolHTTPStop()
-		}
-		cancel()
-		return nil, err
-	}
-	clientSession := &Session{
-		proc:                      proc,
-		callbacks:                 callbacks,
-		conn:                      conn,
-		sessionID:                 sess.SessionId,
-		projectPath:               projectPath,
-		reasoningConfigFallbackID: strings.TrimSpace(req.ReasoningConfigID),
-		embeddedContext:           initResp.AgentCapabilities.PromptCapabilities.EmbeddedContext,
-		imagePromptSupported:      initResp.AgentCapabilities.PromptCapabilities.Image,
-		closeSessionSupported:     initResp.AgentCapabilities.SessionCapabilities.Close != nil,
-		defaultSink:               sink,
-		lifecycleCtx:              lifecycleCtx,
-		cancel:                    cancel,
-		reverseHTTPStop:           toolHTTPStop,
-	}
-	clientSession.replaceConfigOptions(sess.SessionId, sess.ConfigOptions)
-	clientSession.installLegacyModels(sess.Models)
-	clientSession.installModes(sess.Modes)
-	callbacks.setSession(clientSession)
-	if defaultReasoning := strings.TrimSpace(req.DefaultReasoningEffort); defaultReasoning != "" && clientSession.ReasoningState().Supported {
-		if _, err := clientSession.SetReasoningEffort(ctx, defaultReasoning); err != nil {
-			if errors.Is(err, ErrReasoningEffortUnavailable) ||
-				errors.Is(err, ErrReasoningSelectionUnsupported) ||
-				errors.Is(err, ErrReasoningEffortRequired) {
-				if r.logger != nil {
-					r.logger.WarnContext(ctx, "failed to apply default ACP reasoning effort; leaving agent value",
-						slog.String("agent_id", req.AgentID),
-						slog.String("desired_effort", defaultReasoning),
-						slog.Any("error", err))
-				}
-			} else {
-				// A failed mutation may have reached the Agent even though its
-				// authoritative config snapshot never reached Memoh. Do not return a
-				// session whose cached equality checks can no longer be trusted.
-				_ = clientSession.Close()
-				return nil, fmt.Errorf("apply default ACP reasoning effort %q: %w", defaultReasoning, err)
-			}
-		}
-	}
-
-	finishStartup()
-	return clientSession, nil
-}
-
-// errNativeSessionGone means the agent cannot restore a stored session and a
+// ErrNativeSessionGone means the agent cannot restore a stored session and a
 // new one may take its place.
-var errNativeSessionGone = errors.New("agent cannot restore the native session")
+var ErrNativeSessionGone = errors.New("agent cannot restore the native session")
 
 // ErrSessionRestoreFailed means a running agent did not restore its stored
 // session: it timed out, exited or broke the connection. The session may be
@@ -422,98 +108,6 @@ var ErrSessionRestoreFailed = errors.New("ACP agent could not restore its sessio
 
 // authRequiredCode is ACP's auth_required JSON-RPC error.
 const authRequiredCode = -32000
-
-// startSession opens the session a process prompts on. The agent keeps its
-// conversations in its own files, so a stored session is restored first and
-// a new one is created only when the agent cannot restore it.
-func startSession(
-	ctx context.Context,
-	conn *clientConnection,
-	callbacks *clientCallbacks,
-	caps acp.AgentCapabilities,
-	projectPath string,
-	mcpServers []acp.McpServer,
-	nativeSessionID string,
-	logger *slog.Logger,
-) (sessionResponse, error) {
-	if nativeSessionID = strings.TrimSpace(nativeSessionID); nativeSessionID != "" {
-		resp, err := restoreSession(ctx, conn, callbacks, caps, projectPath, mcpServers, acp.SessionId(nativeSessionID))
-		if !errors.Is(err, errNativeSessionGone) {
-			return resp, err
-		}
-		if logger != nil {
-			logger.WarnContext(ctx, "ACP agent cannot restore its session; starting a new one",
-				slog.String("native_session_id", nativeSessionID), slog.Any("error", err))
-		}
-	}
-	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
-		Cwd:        projectPath,
-		McpServers: mcpServers,
-	})
-	if err != nil {
-		return sessionResponse{}, fmt.Errorf("create ACP session: %w", err)
-	}
-	if strings.TrimSpace(string(resp.SessionId)) == "" {
-		return sessionResponse{}, errs.NewDependency("create ACP session: agent returned an empty session id")
-	}
-	return resp, nil
-}
-
-// restoreSession prefers session/resume, which does not replay the
-// conversation, and falls back to session/load. It returns
-// errNativeSessionGone only when the agent offers neither or refused both.
-func restoreSession(
-	ctx context.Context,
-	conn *clientConnection,
-	callbacks *clientCallbacks,
-	caps acp.AgentCapabilities,
-	projectPath string,
-	mcpServers []acp.McpServer,
-	id acp.SessionId,
-) (sessionResponse, error) {
-	callbacks.setRestoring(true)
-	defer callbacks.setRestoring(false)
-	restore := func(method string) (sessionResponse, error) {
-		openCtx, cancel := context.WithTimeout(ctx, sessionOpenTimeout)
-		defer cancel()
-		var (
-			resp sessionResponse
-			err  error
-		)
-		if method == acp.AgentMethodSessionResume {
-			resp, err = conn.ResumeSession(openCtx, acp.ResumeSessionRequest{SessionId: id, Cwd: projectPath, McpServers: mcpServers})
-		} else {
-			resp, err = conn.LoadSession(openCtx, acp.LoadSessionRequest{SessionId: id, Cwd: projectPath, McpServers: mcpServers})
-		}
-		if err == nil {
-			// Neither response names the session: it keeps the requested ID.
-			resp.SessionId = id
-			return resp, nil
-		}
-		switch answer, answered := agentAnswer(openCtx, conn, err); {
-		case ctx.Err() != nil, answered && answer.Code == authRequiredCode:
-			// A canceled turn says nothing about the session, and a new
-			// session needs the credential too.
-			return sessionResponse{}, fmt.Errorf("restore ACP session: %w", err)
-		case answered:
-			return sessionResponse{}, fmt.Errorf("%w: %s: %w", errNativeSessionGone, method, err)
-		case openCtx.Err() != nil:
-			err = errs.NewDependency("agent did not answer " + method + " in time")
-		}
-		return sessionResponse{}, fmt.Errorf("%w: %s: %w", ErrSessionRestoreFailed, method, err)
-	}
-	err := fmt.Errorf("%w: agent offers neither session/resume nor session/load", errNativeSessionGone)
-	if caps.SessionCapabilities.Resume != nil {
-		var resp sessionResponse
-		if resp, err = restore(acp.AgentMethodSessionResume); !errors.Is(err, errNativeSessionGone) {
-			return resp, err
-		}
-	}
-	if caps.LoadSession {
-		return restore(acp.AgentMethodSessionLoad)
-	}
-	return sessionResponse{}, err
-}
 
 // agentAnswer returns the error the agent answered a restore with. ACP names
 // no error for a missing session, and agents answer -32002, -32602 and -32603
@@ -534,157 +128,6 @@ func agentAnswer(ctx context.Context, conn *clientConnection, err error) (*acp.R
 		return nil, false
 	}
 	return answer, true
-}
-
-// pinSessionMode forces the agent session into the requested permission mode
-// so tool approvals flow through ACP regardless of ambient agent-side
-// configuration (e.g. a host ~/.claude/settings.json defaultMode). A desired
-// mode the agent does not advertise aborts startup because the session would
-// otherwise run with unknown permission behavior.
-func pinSessionMode(ctx context.Context, conn *clientConnection, sessionID acp.SessionId, modes *acp.SessionModeState, desired string, logger *slog.Logger, agentID string) error {
-	desired = strings.TrimSpace(desired)
-	if desired == "" {
-		return nil
-	}
-	if modes == nil {
-		return errs.NewDependency(fmt.Sprintf("pin ACP session mode %q: agent did not report session modes", desired))
-	}
-	if string(modes.CurrentModeId) == desired {
-		return nil
-	}
-	available := false
-	for _, mode := range modes.AvailableModes {
-		if string(mode.Id) == desired {
-			available = true
-			break
-		}
-	}
-	if !available {
-		if logger != nil {
-			logger.WarnContext(ctx, "ACP agent does not advertise the pinned session mode",
-				slog.String("agent_id", agentID),
-				slog.String("desired_mode", desired),
-				slog.String("current_mode", string(modes.CurrentModeId)))
-		}
-		return errs.NewDependency(fmt.Sprintf("pin ACP session mode %q: mode is not advertised by agent", desired))
-	}
-	if _, err := conn.SetSessionMode(ctx, acp.SetSessionModeRequest{
-		SessionId: sessionID,
-		ModeId:    acp.SessionModeId(desired),
-	}); err != nil {
-		return fmt.Errorf("pin ACP session mode %q: %w", desired, err)
-	}
-	previousMode := modes.CurrentModeId
-	modes.CurrentModeId = acp.SessionModeId(desired)
-	if logger != nil {
-		logger.InfoContext(ctx, "pinned ACP session mode",
-			slog.String("agent_id", agentID),
-			slog.String("mode", desired),
-			slog.String("previous_mode", string(previousMode)))
-	}
-	return nil
-}
-
-func (r *Runner) startMemohToolsBridge(ctx context.Context, botID string, client *bridge.Client, route string, handler http.Handler) (*bridge.Client, func(), error) {
-	if client == nil {
-		return nil, nil, errs.New("workspace bridge client is required")
-	}
-	current := client
-	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		stop, err := current.ServeReverseHTTPRoute(ctx, route, handler)
-		if err == nil {
-			return current, stop, nil
-		}
-		lastErr = errs.WrapDependency(err, "")
-		if ctx.Err() != nil || !errors.Is(err, bridge.ErrUnavailable) || r == nil || r.workspace == nil || strings.TrimSpace(botID) == "" {
-			return current, nil, lastErr
-		}
-		_ = current.Close()
-		if err := sleepContext(ctx, time.Duration(attempt+1)*150*time.Millisecond); err != nil {
-			return current, nil, err
-		}
-		next, err := r.workspace.MCPClient(ctx, botID)
-		if err != nil {
-			return current, nil, fmt.Errorf("%w; reconnect workspace bridge: %w", lastErr, err)
-		}
-		current = next
-	}
-	return current, nil, lastErr
-}
-
-func sleepContext(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func guardToolHTTPHandler(rawURL string, handler http.Handler) (string, string, http.Handler, error) {
-	if handler == nil {
-		return "", "", nil, errs.New("tool HTTP handler is required")
-	}
-	guardedURL, guardPath, err := guardedToolHTTPURL(rawURL)
-	if err != nil {
-		return "", "", nil, err
-	}
-	return guardedURL, guardPath, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req == nil || req.URL == nil || req.URL.Path != guardPath {
-			http.NotFound(w, req)
-			return
-		}
-		handler.ServeHTTP(w, req)
-	}), nil
-}
-
-func guardedToolHTTPURL(rawURL string) (string, string, error) {
-	u, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
-		return "", "", err
-	}
-	if u.Scheme == "" || u.Host == "" {
-		return "", "", errs.New(fmt.Sprintf("invalid Memoh tools URL %q", rawURL))
-	}
-	basePath := strings.TrimRight(u.Path, "/")
-	if basePath == "" {
-		basePath = "/mcp"
-	}
-	u.Path = basePath + "/" + uuid.NewString()
-	return u.String(), u.Path, nil
-}
-
-func redactedToolHTTPURL(rawURL string) string {
-	u, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return ""
-	}
-	trimmedPath := strings.Trim(u.Path, "/")
-	if trimmedPath != "" {
-		parts := strings.Split(trimmedPath, "/")
-		redacted := false
-		for i, part := range parts {
-			if i > 0 && strings.EqualFold(parts[i-1], "bots") {
-				parts[i] = "redacted"
-				redacted = true
-				continue
-			}
-			if _, err := uuid.Parse(part); err == nil {
-				parts[i] = "redacted"
-				redacted = true
-			}
-		}
-		if !redacted {
-			parts[len(parts)-1] = "redacted"
-		}
-		u.Path = "/" + strings.Join(parts, "/")
-	}
-	u.RawQuery = ""
-	u.Fragment = ""
-	return u.String()
 }
 
 func (s *Session) ID() string {
@@ -769,7 +212,7 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 	conn := s.conn
 	sessionID := s.sessionID
 	callbacks := s.callbacks
-	proc := s.proc
+	stderr := s.stderr
 	defaultSink := s.defaultSink
 	s.mu.Unlock()
 	defer func() {
@@ -810,7 +253,8 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 			callbacks.setPromptState(nil, nil, ToolSessionContext{}, ToolOutputLimit{})
 		}
 	}()
-	if options.RequiredCommand != "" && !s.AdvertisesCommand(options.RequiredCommand) {
+	if options.RequiredCommand != "" && !s.AdvertisesCommand(options.RequiredCommand) &&
+		!slices.ContainsFunc(s.AwaitCommands(promptCtx), func(command AvailableCommandInfo) bool { return command.Name == options.RequiredCommand }) {
 		return PromptResult{}, ErrAgentCommandUnavailable
 	}
 
@@ -831,10 +275,7 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 		result.SessionID = string(sessionID)
 	}
 	if err != nil {
-		if proc != nil {
-			return result, proc.errorWithStderr(fmt.Errorf("send ACP prompt: %w", err))
-		}
-		return result, fmt.Errorf("send ACP prompt: %w", err)
+		return result, withStderr(fmt.Errorf("send ACP prompt: %w", err), stderr)
 	}
 	return result, nil
 }
@@ -1007,34 +448,44 @@ func (s *Session) WaitDecisionCallbacksIdle(timeout time.Duration) bool {
 	return callbacks.waitDecisionCallbacksIdle(timeout)
 }
 
+// Close ends the session: session/close when the agent offers it. It returns
+// ErrSessionCloseUnconfirmed unless the agent confirmed the close, which is
+// the only proof the agent let go of the session before its process ends.
 func (s *Session) Close() error {
 	return s.close(false)
 }
 
-// ForceClose tears down the transport before attempting any protocol-level
-// cleanup. It is reserved for an unconfirmed prompt cancellation, where a
-// blocked JSON-RPC write can otherwise prevent graceful session/close from
-// ever reaching the process close that would unblock it.
+// ForceClose drops the session locally — its context and callbacks — without
+// asking the agent: it is reserved for an unconfirmed prompt cancellation,
+// where a write blocked on the shared connection could keep session/close
+// from ever being sent. The session stays unconfirmed; the process owner
+// retires the process.
 func (s *Session) ForceClose() error {
 	return s.close(true)
 }
 
-func (s *Session) close(force bool) error {
+func (s *Session) close(force bool) (result error) {
 	if s == nil {
 		return nil
 	}
 	s.mu.Lock()
 	if s.closed {
+		done := s.closeDone
 		s.mu.Unlock()
-		return nil
+		<-done
+		return s.closeErr
 	}
 	s.closed = true
+	done := make(chan struct{})
+	s.closeDone = done
+	defer func() {
+		s.closeErr = result
+		close(done)
+	}()
 	conn := s.conn
 	sessionID := s.sessionID
 	callbacks := s.callbacks
-	proc := s.proc
 	cancel := s.cancel
-	reverseHTTPStop := s.reverseHTTPStop
 	closeSessionSupported := s.closeSessionSupported
 	lifecycleCtx := s.lifecycleCtx
 	promptCancel := s.promptCancel
@@ -1067,37 +518,40 @@ func (s *Session) close(force bool) error {
 		if cancel != nil {
 			cancel()
 		}
-		var closeErr error
-		if proc != nil {
-			closeErr = proc.Close()
-		}
 		if callbacks != nil {
 			callbacks.close()
 		}
-		if reverseHTTPStop != nil {
-			reverseHTTPStop()
-		}
-		return closeErr
+		// Nothing asked the agent to let the session go.
+		return ErrSessionCloseUnconfirmed
 	}
+	closeErr := ErrSessionCloseUnconfirmed
 	if closeSessionSupported && conn != nil && sessionID != "" {
 		if lifecycleCtx == nil {
 			lifecycleCtx = context.Background()
 		}
 		ctx, cancelClose := context.WithTimeout(context.WithoutCancel(lifecycleCtx), 2*time.Second)
-		_, _ = conn.CloseSession(ctx, acp.CloseSessionRequest{SessionId: sessionID})
+		if _, err := conn.CloseSession(ctx, acp.CloseSessionRequest{SessionId: sessionID}); err == nil {
+			closeErr = nil
+		}
 		cancelClose()
 	}
 	if callbacks != nil {
 		callbacks.close()
 	}
-	if reverseHTTPStop != nil {
-		reverseHTTPStop()
-	}
 	if cancel != nil {
 		cancel()
 	}
-	if proc != nil {
-		return proc.Close()
+	return closeErr
+}
+
+// withStderr adds the agent's recent stderr to err; an agent that crashed
+// usually said why there.
+func withStderr(err error, stderr func() string) error {
+	if stderr == nil {
+		return err
 	}
-	return nil
+	if tail := strings.TrimSpace(stderr()); tail != "" {
+		return fmt.Errorf("%w: %s", err, tail)
+	}
+	return err
 }

@@ -11,7 +11,6 @@ import (
 	"io"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
@@ -21,58 +20,86 @@ const stderrTailLimit = 8 * 1024
 
 // Child is one long-lived command running through a workspace bridge exec
 // stream and exposed as an io.ReadWriter.
+//
+// Writes never wait on the command: they are queued for one sender, and a
+// command that leaves inputQueue writes unread has stopped taking input and
+// is killed. Done closes as soon as the command can serve no more, on exit or
+// on Kill, so nothing hands it out while it is still being torn down.
 type Child struct {
 	stream *bridge.ExecStream
-	stdin  *io.PipeWriter
+	input  chan []byte
 	stdout *io.PipeReader
-	done   chan struct{}
+	// exited closes when the exec stream ends; done when the command can
+	// serve no more.
+	exited   chan struct{}
+	done     chan struct{}
+	doneOnce sync.Once
 
-	mu      sync.Mutex
-	closed  bool
-	tail    []byte
-	exitErr error
+	mu          sync.Mutex
+	inputClosed bool
+	closed      bool
+	tail        []byte
+	exitErr     error
 }
 
-// Spawn launches command without a bridge-side timeout. Closing the returned
-// process cancels the exec stream and terminates the command.
+const (
+	// inputQueue is how many writes a command may leave unread before it
+	// counts as no longer taking input.
+	inputQueue = 256
+	// stdinFrame bounds one stdin frame on the bridge stream, far below its
+	// message size limit.
+	stdinFrame = 32 * 1024
+)
+
+// ErrNotReading reports a write to a command that stopped taking input; the
+// command is killed.
+var ErrNotReading = errors.New("agent process is not reading its input")
+
+// Spawn launches command on env alone, without a bridge-side timeout.
+// Closing the returned process cancels the exec stream and terminates the
+// command.
 func Spawn(ctx context.Context, client *bridge.Client, command, workDir string, env []string) (*Child, error) {
-	stream, err := client.ExecStreamWithOptions(ctx, command, workDir, -1, bridge.ExecOptions{Env: env, CleanEnv: true})
+	return SpawnWith(ctx, client, command, workDir, bridge.ExecOptions{Env: env, CleanEnv: true})
+}
+
+// SpawnWith is Spawn for a caller that shapes the environment itself: a user
+// supplied agent inherits the workspace environment minus what it must not
+// see.
+func SpawnWith(ctx context.Context, client *bridge.Client, command, workDir string, opts bridge.ExecOptions) (*Child, error) {
+	stream, err := client.ExecStreamWithOptions(ctx, command, workDir, -1, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	stdinR, stdinW := io.Pipe()
 	stdoutR, stdoutW := io.Pipe()
 	proc := &Child{
 		stream: stream,
-		stdin:  stdinW,
+		input:  make(chan []byte, inputQueue),
 		stdout: stdoutR,
+		exited: make(chan struct{}),
 		done:   make(chan struct{}),
 	}
 
 	go func() {
-		defer func() { _ = stdinR.Close() }()
-		buf := make([]byte, 32*1024)
-		for {
-			n, readErr := stdinR.Read(buf)
-			if n > 0 {
-				if sendErr := stream.SendStdin(buf[:n]); sendErr != nil {
+		for data := range proc.input {
+			// A message may outgrow a bridge frame: stdin is a byte stream,
+			// and its frames need not follow the caller's writes.
+			for len(data) > 0 {
+				n := min(len(data), stdinFrame)
+				if sendErr := stream.SendStdin(data[:n]); sendErr != nil {
 					_ = stdoutW.CloseWithError(sendErr)
 					return
 				}
-			}
-			if readErr != nil {
-				if errors.Is(readErr, io.EOF) {
-					_ = stream.CloseSend()
-				}
-				return
+				data = data[n:]
 			}
 		}
+		// Input ended by CloseStdin: the command sees EOF.
+		_ = stream.CloseSend()
 	}()
 
 	go func() {
-		defer func() { _ = stdinW.Close() }()
-		defer close(proc.done)
+		defer proc.markDone()
+		defer close(proc.exited)
 		for {
 			output, recvErr := stream.Recv()
 			if recvErr != nil {
@@ -128,38 +155,83 @@ func (p *Child) StderrTail() string {
 	return strings.TrimSpace(string(p.tail))
 }
 
-func (p *Child) Read(b []byte) (int, error)  { return p.stdout.Read(b) }
-func (p *Child) Write(b []byte) (int, error) { return p.stdin.Write(b) }
+func (p *Child) Read(b []byte) (int, error) { return p.stdout.Read(b) }
 
-// CloseStdin ends input without stopping the process.
-func (p *Child) CloseStdin() { _ = p.stdin.Close() }
+// Write queues b for the command and never waits; a command that stopped
+// taking input is killed.
+func (p *Child) Write(b []byte) (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.inputClosed {
+		return 0, io.ErrClosedPipe
+	}
+	select {
+	case p.input <- append([]byte(nil), b...):
+		return len(b), nil
+	default:
+		p.killLocked()
+		return 0, ErrNotReading
+	}
+}
 
-// Done is closed when the process exits.
+// CloseStdin ends input without stopping the process: the command sees EOF
+// once what was queued is sent.
+func (p *Child) CloseStdin() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.closeInputLocked()
+}
+
+func (p *Child) closeInputLocked() {
+	if !p.inputClosed {
+		p.inputClosed = true
+		close(p.input)
+	}
+}
+
+// Done is closed once the process can serve no more: it exited, or Kill
+// began tearing it down.
 func (p *Child) Done() <-chan struct{} { return p.done }
 
-// Err reports a transport failure or nonzero exit after Done closes.
+func (p *Child) markDone() { p.doneOnce.Do(func() { close(p.done) }) }
+
+// Exited is closed once the exec stream has ended: the command no longer
+// runs.
+func (p *Child) Exited() <-chan struct{} { return p.exited }
+
+// Err reports a transport failure or nonzero exit after the process exits.
 func (p *Child) Err() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.exitErr
 }
 
-// Close terminates the process and waits briefly for the stream to settle.
-func (p *Child) Close() error {
+// Kill takes the process out of service at once and terminates it: Done
+// closes before Kill returns, and the bridge kills the command when its
+// stream is cancelled. Kill never waits on the command.
+func (p *Child) Kill() {
 	p.mu.Lock()
-	if p.closed {
-		p.mu.Unlock()
-		return nil
-	}
-	p.closed = true
-	p.mu.Unlock()
+	defer p.mu.Unlock()
+	p.killLocked()
+}
 
-	_ = p.stdin.Close()
-	_ = p.stream.Close()
-	select {
-	case <-p.done:
-	case <-time.After(5 * time.Second):
+func (p *Child) killLocked() {
+	p.markDone()
+	p.closeInputLocked()
+	if !p.closed {
+		p.closed = true
+		// Output nobody reads any more must not hold the receive loop, or
+		// the stream's end would never be seen.
+		_ = p.stdout.Close()
+		go func() { _ = p.stream.Close() }()
 	}
-	_ = p.stdout.Close()
+}
+
+// Close kills the process and returns once its exec stream has ended: the
+// stream is cancelled locally, so its end does not wait on the command, and
+// the bridge kills the command's process group when its stream ends.
+func (p *Child) Close() error {
+	p.Kill()
+	<-p.exited
 	return nil
 }

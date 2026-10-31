@@ -21,7 +21,7 @@ func (d *Driver) Modes(ctx context.Context, input external.PromptInput) (externa
 	if err != nil {
 		return external.ModeState{}, err
 	}
-	return claudeModes(firstNonEmpty(metadataString(input.RuntimeMetadata, "permission_mode"), metadataString(agent.Metadata, "permission_mode"), "inherit"))
+	return external.PermissionModeState(permissionMenu, external.SelectedPermissionMode(input.RuntimeMetadata, agent.Metadata, claudecfg.DefaultPermissionMode))
 }
 
 func (d *Driver) Commands(ctx context.Context, input external.PromptInput) ([]external.Command, error) {
@@ -123,48 +123,37 @@ func (*Driver) ReadCommand(_ context.Context, input external.PromptInput) (exter
 	default:
 		return external.CommandResult{}, external.ErrCommandUnavailable
 	}
-	if metadataString(input.RuntimeMetadata, metadataSessionIDKey) == "" {
+	if external.MetadataString(input.RuntimeMetadata, metadataSessionIDKey) == "" {
 		return external.CommandResult{}, external.ErrThreadUnavailable
 	}
 	return external.CommandResult{Data: value, Notice: "last_observed"}, nil
 }
 
 func (*Driver) SetMode(_ context.Context, _ external.PromptInput, mode string) (external.ModeState, error) {
-	return claudeModes(mode)
+	return external.PermissionModeState(permissionMenu, mode)
 }
 
-func claudeModes(mode string) (external.ModeState, error) {
-	if mode == "" || !claudecfg.ValidPermissionMode(mode) {
-		return external.ModeState{}, external.ErrModeUnavailable
-	}
-	modes := []external.Mode{
-		{ID: "inherit", I18nKey: "runtime.claudeCode.modes.inherit", Icon: "shield"},
-		{ID: "default", I18nKey: "runtime.claudeCode.modes.default", Icon: "hand"},
-		{ID: "acceptEdits", I18nKey: "runtime.claudeCode.modes.acceptEdits", Icon: "file-pen"},
-		{ID: "auto", I18nKey: "runtime.claudeCode.modes.auto", Icon: "shield-terminal"},
-		{ID: "bypassPermissions", I18nKey: "runtime.claudeCode.modes.bypassPermissions", Icon: "shield-alert", Warning: true},
-	}
-	return external.ModeState{Kind: "permission", ApplyOnNextTurn: true, Supported: true, CurrentModeID: mode, AvailableModes: modes}, nil
+// permissionMenu is Claude Code's permission menu, in claudecfg.PermissionModes
+// order.
+var permissionMenu = []external.Mode{
+	{ID: "inherit", I18nKey: "runtime.claudeCode.modes.inherit", Icon: "shield"},
+	{ID: "default", I18nKey: "runtime.claudeCode.modes.default", Icon: "hand"},
+	{ID: "acceptEdits", I18nKey: "runtime.claudeCode.modes.acceptEdits", Icon: "file-pen"},
+	{ID: "auto", I18nKey: "runtime.claudeCode.modes.auto", Icon: "shield-terminal"},
+	{ID: "bypassPermissions", I18nKey: "runtime.claudeCode.modes.bypassPermissions", Icon: "shield-alert", Warning: true},
 }
 
 func (*Driver) PlanMode(_ context.Context, input external.PromptInput) (external.ModeState, error) {
-	mode := metadataString(input.RuntimeMetadata, "collaboration_mode")
+	mode := external.MetadataString(input.RuntimeMetadata, "collaboration_mode")
 	if mode == "" {
 		mode = "default"
-		if metadataString(input.RuntimeMetadata, "claude_effective_permission_mode") == "plan" {
+		if external.MetadataString(input.RuntimeMetadata, "claude_effective_permission_mode") == "plan" {
 			mode = "plan"
 		}
 	}
-	return claudePlanMode(mode)
+	return external.PlanModeState(mode)
 }
 
 func (*Driver) SetPlanMode(_ context.Context, _ external.PromptInput, mode string) (external.ModeState, error) {
-	return claudePlanMode(mode)
-}
-
-func claudePlanMode(mode string) (external.ModeState, error) {
-	if mode != "default" && mode != "plan" {
-		return external.ModeState{}, external.ErrModeUnavailable
-	}
-	return external.ModeState{Supported: true, CurrentModeID: mode, AvailableModes: []external.Mode{{ID: "default", I18nKey: "runtime.planModes.default"}, {ID: "plan", I18nKey: "runtime.planModes.plan"}}}, nil
+	return external.PlanModeState(mode)
 }

@@ -1,6 +1,7 @@
 package external
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"strings"
@@ -8,53 +9,48 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 )
 
-// FailureKind names a runtime failure the user can act on. The application
-// chooses the public error for each kind.
+// FailureKind names a runtime failure the user can act on. There are three
+// sorts: what the agent or its process said, shown as it said it
+// (FailureReported); a sign-in the agent's protocol marked as such
+// (FailureAuthRequired); and Memoh's own rules refusing a request, which
+// have no upstream words (the rest). The application chooses the public
+// error for each kind.
 type FailureKind int
 
 const (
-	// FailureUnavailable: the runtime could not be started or reached.
-	FailureUnavailable FailureKind = iota + 1
+	// FailureReported: the agent or its process failed and said why; Message
+	// is what it said.
+	FailureReported FailureKind = iota + 1
 	// FailureAuthRequired: the runtime needs its account signed in or its
 	// authentication configured.
 	FailureAuthRequired
-	// FailureSessionResumeFailed: the runtime could not resume the session's
-	// native thread; a later turn may.
-	FailureSessionResumeFailed
 	// FailureGoalRequiresDefaultMode: a goal turn was asked for outside the
 	// runtime's default mode.
 	FailureGoalRequiresDefaultMode
-	// FailureModeUnavailable: the runtime cannot apply the requested mode.
+	// FailureModeUnavailable: the requested mode, model or reasoning effort
+	// is not one the runtime offers.
 	FailureModeUnavailable
-	// FailureControlFailed: a runtime control the turn needed failed.
-	FailureControlFailed
 	// FailureCredential: the Agent's credential cannot be used. Failure.Err
 	// is the agentcredential error that says why.
 	FailureCredential
 	// FailureCredentialBusy: the credential cannot change while a turn runs
 	// on it.
 	FailureCredentialBusy
-	// FailureReported: the agent failed the turn and said why; Message is
-	// what it said.
-	FailureReported
-	// FailureRuntimeBusy: the previous native process must finish before restart.
+	// FailureRuntimeBusy: the conversation's session is still serving a turn.
 	FailureRuntimeBusy
 	// FailureForkLatestOnly: the requested fork anchor is no longer the latest.
 	FailureForkLatestOnly
 )
 
 var failureText = map[FailureKind]string{ //nolint:gosec // G101 matches the credential kinds; these are failure texts.
-	FailureUnavailable:             "external agent runtime is unavailable",
-	FailureAuthRequired:            ErrAuthRequired.Error(),
-	FailureSessionResumeFailed:     "runtime session could not be resumed",
+	FailureReported:                "external agent reported a failure",
+	FailureAuthRequired:            "runtime authentication is required",
 	FailureGoalRequiresDefaultMode: "runtime goal requires the default mode",
-	FailureModeUnavailable:         ErrModeUnavailable.Error(),
-	FailureRuntimeBusy:             "external agent runtime is still in use",
-	FailureForkLatestOnly:          "only the latest turn can be forked",
-	FailureControlFailed:           "runtime control failed",
+	FailureModeUnavailable:         "runtime mode is unavailable",
 	FailureCredential:              "agent credential is unusable",
 	FailureCredentialBusy:          "agent credential is in use by a running turn",
-	FailureReported:                "external agent reported a failure",
+	FailureRuntimeBusy:             "external agent runtime is still in use",
+	FailureForkLatestOnly:          "only the latest turn can be forked",
 }
 
 // Failure is a runtime failure the user can act on. Like a public error it
@@ -79,9 +75,18 @@ func (f *Failure) Error() string {
 // Cause returns the error the runtime failed with.
 func (f *Failure) Cause() error { return f.Err }
 
-// Unavailable reports that the runtime could not start or serve the turn.
-func Unavailable(err error) error {
-	return &Failure{Kind: FailureUnavailable, Err: err}
+// Upstream reports a failure that came from the agent or its process (a
+// start that failed with its exit status and stderr, a refused resume, a
+// control the agent rejected) in the words it failed with. A Failure, a
+// missing workspace dependency, a workspace that is not a container and a
+// cancellation pass through unchanged.
+func Upstream(err error) error {
+	switch {
+	case err == nil, IsFailure(err), errors.Is(err, ErrDependencyMissing), errors.Is(err, ErrContainerWorkspaceRequired),
+		errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return err
+	}
+	return &Failure{Kind: FailureReported, Err: err, Message: PublicMessage(err.Error())}
 }
 
 // Fail reports a failure of kind, caused by err when err is not nil.
@@ -99,15 +104,27 @@ const maxMessageBytes = 2000
 // queries. attrs describe the failure to the result record.
 func Reported(kind FailureKind, message string, attrs ...slog.Attr) error {
 	message = strings.TrimSpace(message)
-	public := errs.RedactURLs(message)
+	return &Failure{Kind: kind, Err: errs.NewDependency(message, attrs...), Message: PublicMessage(message)}
+}
+
+// PublicMessage makes what an agent said fit to show and keep: URLs lose
+// their credentials and queries, and a whole response body is cut short.
+func PublicMessage(message string) string {
+	public := errs.RedactURLs(strings.TrimSpace(message))
 	if len(public) > maxMessageBytes {
 		public = strings.ToValidUTF8(public[:maxMessageBytes], "") + "…"
 	}
-	return &Failure{Kind: kind, Err: errs.NewDependency(message, attrs...), Message: public}
+	return public
 }
 
 // IsFailure reports whether err carries a Failure.
 func IsFailure(err error) bool {
 	var failure *Failure
 	return errors.As(err, &failure)
+}
+
+// IsFailureKind reports whether err carries a Failure of kind.
+func IsFailureKind(err error, kind FailureKind) bool {
+	var failure *Failure
+	return errors.As(err, &failure) && failure.Kind == kind
 }

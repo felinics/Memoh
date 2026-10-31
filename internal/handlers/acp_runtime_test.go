@@ -45,30 +45,15 @@ type fakeACPRuntimePool struct {
 	setReasoningInput  acpagent.PromptInput
 	setReasoningEffort string
 	setReasoningCtxErr error
-	createInput        acpagent.CreateRuntimeInput
+	createInput        acpagent.PromptInput
 	createErr          error
-	statusBotID        string
-	statusRuntimeID    string
-	modelBotID         string
-	modelRuntimeID     string
-	modelID            string
-	reasoningBotID     string
-	reasoningRuntimeID string
-	reasoningEffort    string
-	modeBotID          string
-	modeRuntimeID      string
-	modeID             string
-	modeContextErr     error
-	closedBotID        string
-	closedRuntimeID    string
-	closeErr           error
 }
 
-func (*fakeACPRuntimePool) RuntimeStatus(sessionID, agentID, projectPath string) acpagent.RuntimeStatus {
+func (*fakeACPRuntimePool) RuntimeStatus(input acpagent.PromptInput) acpagent.RuntimeStatus {
 	return acpagent.RuntimeStatus{
-		SessionID:   sessionID,
-		AgentID:     agentID,
-		ProjectPath: projectPath,
+		SessionID:   input.SessionID,
+		AgentID:     input.AgentID,
+		ProjectPath: input.ProjectPath,
 		State:       "idle",
 	}
 }
@@ -96,43 +81,9 @@ func (p *fakeACPRuntimePool) SetMode(_ context.Context, _ acpagent.PromptInput, 
 	return p.status, p.statusErr
 }
 
-func (p *fakeACPRuntimePool) CreateRuntime(_ context.Context, input acpagent.CreateRuntimeInput) (acpagent.RuntimeStatus, error) {
+func (p *fakeACPRuntimePool) AgentOptions(_ context.Context, input acpagent.PromptInput) (acpagent.RuntimeStatus, error) {
 	p.createInput = input
 	return p.status, p.createErr
-}
-
-func (p *fakeACPRuntimePool) RuntimeStatusByID(botID, runtimeID string) (acpagent.RuntimeStatus, error) {
-	p.statusBotID = botID
-	p.statusRuntimeID = runtimeID
-	return p.status, p.statusErr
-}
-
-func (p *fakeACPRuntimePool) SetRuntimeModel(_ context.Context, botID, runtimeID, modelID string) (acpagent.RuntimeStatus, error) {
-	p.modelBotID = botID
-	p.modelRuntimeID = runtimeID
-	p.modelID = modelID
-	return p.status, p.statusErr
-}
-
-func (p *fakeACPRuntimePool) SetRuntimeReasoning(_ context.Context, botID, runtimeID, effort string) (acpagent.RuntimeStatus, error) {
-	p.reasoningBotID = botID
-	p.reasoningRuntimeID = runtimeID
-	p.reasoningEffort = effort
-	return p.status, p.statusErr
-}
-
-func (p *fakeACPRuntimePool) SetRuntimeMode(ctx context.Context, botID, runtimeID, modeID string) (acpagent.RuntimeStatus, error) {
-	p.modeBotID = botID
-	p.modeRuntimeID = runtimeID
-	p.modeID = modeID
-	p.modeContextErr = ctx.Err()
-	return p.status, p.statusErr
-}
-
-func (p *fakeACPRuntimePool) CloseRuntime(botID, runtimeID string) error {
-	p.closedBotID = botID
-	p.closedRuntimeID = runtimeID
-	return p.closeErr
 }
 
 func (*fakeACPRuntimePool) BeginSessionHistoryReset(ctx context.Context, _, _ string) (context.Context, func(), error) {
@@ -179,8 +130,8 @@ func TestACPRuntimeHandlerReturnsIdleStatus(t *testing.T) {
 			}),
 		},
 	}
-	handler := NewACPRuntimeHandler(
-		nil,
+	handler := newACPRuntimeHandler(
+		&fakeACPRuntimePool{},
 		session.NewService(nil, queries, nil),
 		bots.NewService(nil, queries),
 		newTestAdminAccountService("admin"),
@@ -604,7 +555,7 @@ func acpEnabledBotMetadata() map[string]any {
 	}
 }
 
-func TestACPRuntimeHandlerCreateRuntime(t *testing.T) {
+func TestACPRuntimeHandlerGetAgentOptions(t *testing.T) {
 	t.Setenv("MEMOH_ACP_MCP_HTTP_BASE_URL", "http://example.com")
 
 	botID := "11111111-1111-1111-1111-111111111111"
@@ -636,44 +587,37 @@ func TestACPRuntimeHandlerCreateRuntime(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/bots/"+botID+"/acp-runtimes",
-		bytes.NewBufferString(`{"acp_agent_id":"acp"}`),
-	)
+	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/acp-options?acp_agent_id=acp", nil)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	req.Header.Set("Authorization", "Bearer token-3")
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
-	ctx.SetPath("/bots/:bot_id/acp-runtimes")
+	ctx.SetPath("/bots/:bot_id/acp-options")
 	ctx.SetParamNames("bot_id")
 	ctx.SetParamValues(botID)
 
-	if err := handler.CreateRuntime(ctx); err != nil {
-		t.Fatalf("CreateRuntime() error = %v", err)
+	if err := handler.GetAgentOptions(ctx); err != nil {
+		t.Fatalf("GetAgentOptions() error = %v", err)
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
 	}
-	if pool.createInput.BotID != botID || pool.createInput.AgentID != acpprofile.AgentACPID || pool.createInput.ProjectPath != "/data" {
-		t.Fatalf("CreateRuntime input = %#v", pool.createInput)
+	if pool.createInput.BotID != botID || pool.createInput.AgentID != acpprofile.AgentACPID {
+		t.Fatalf("AgentOptions input = %#v", pool.createInput)
 	}
 	if pool.createInput.RuntimeOwnerAccountID != "user-1" {
-		t.Fatalf("CreateRuntime owner = %q, want authenticated user", pool.createInput.RuntimeOwnerAccountID)
-	}
-	if pool.createInput.ToolHTTPURL != "http://example.com/bots/"+botID+"/tools" {
-		t.Fatalf("CreateRuntime tool context = %#v", pool.createInput)
+		t.Fatalf("AgentOptions owner = %q, want authenticated user", pool.createInput.RuntimeOwnerAccountID)
 	}
 	var got map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if got["runtime_id"] != "rt_warm" || got["default_model_id"] != "gpt-5.1-codex" {
-		t.Fatalf("CreateRuntime response = %#v", got)
+		t.Fatalf("AgentOptions response = %#v", got)
 	}
 }
 
-func TestACPRuntimeHandlerCreateRuntimeRejectsDisabledAgent(t *testing.T) {
+func TestACPRuntimeHandlerGetAgentOptionsRejectsDisabledAgent(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	queries := acpRuntimeQueries{
 		bot: testBotRow(botID, map[string]any{}),
@@ -687,29 +631,25 @@ func TestACPRuntimeHandlerCreateRuntimeRejectsDisabledAgent(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/bots/"+botID+"/acp-runtimes",
-		bytes.NewBufferString(`{"acp_agent_id":"acp"}`),
-	)
+	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/acp-options?acp_agent_id=acp", nil)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
-	ctx.SetPath("/bots/:bot_id/acp-runtimes")
+	ctx.SetPath("/bots/:bot_id/acp-options")
 	ctx.SetParamNames("bot_id")
 	ctx.SetParamValues(botID)
 
-	err := handler.CreateRuntime(ctx)
+	err := handler.GetAgentOptions(ctx)
 	problem, ok := server.ProblemFrom(err, "")
 	if !ok || problem.Status != http.StatusForbidden || problem.Code != string(apperror.CodeACPAgentNotEnabled) {
-		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusForbidden, apperror.CodeACPAgentNotEnabled)
+		t.Fatalf("GetAgentOptions() error = %v, want %d %s", err, http.StatusForbidden, apperror.CodeACPAgentNotEnabled)
 	}
 	if pool.createInput.BotID != "" {
 		t.Fatalf("pool should not be called for a disabled agent: %#v", pool.createInput)
 	}
 }
 
-func TestACPRuntimeHandlerCreateRuntimeRejectsUnconfiguredAgent(t *testing.T) {
+func TestACPRuntimeHandlerGetAgentOptionsRejectsUnconfiguredAgent(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	queries := acpRuntimeQueries{
 		bot: testBotRow(botID, map[string]any{
@@ -729,62 +669,25 @@ func TestACPRuntimeHandlerCreateRuntimeRejectsUnconfiguredAgent(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/bots/"+botID+"/acp-runtimes",
-		bytes.NewBufferString(`{"acp_agent_id":"acp"}`),
-	)
+	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/acp-options?acp_agent_id=acp", nil)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
-	ctx.SetPath("/bots/:bot_id/acp-runtimes")
+	ctx.SetPath("/bots/:bot_id/acp-options")
 	ctx.SetParamNames("bot_id")
 	ctx.SetParamValues(botID)
 
-	err := handler.CreateRuntime(ctx)
+	err := handler.GetAgentOptions(ctx)
 	problem, ok := server.ProblemFrom(err, "")
 	if !ok || problem.Status != http.StatusBadRequest || problem.Code != string(apperror.CodeACPAgentNotConfigured) {
-		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusBadRequest, apperror.CodeACPAgentNotConfigured)
+		t.Fatalf("GetAgentOptions() error = %v, want %d %s", err, http.StatusBadRequest, apperror.CodeACPAgentNotConfigured)
 	}
 	if pool.createInput.BotID != "" {
 		t.Fatalf("pool should not be called for an unconfigured agent: %#v", pool.createInput)
 	}
 }
 
-func TestACPRuntimeHandlerCreateRuntimeMapsCapToTooManyRequests(t *testing.T) {
-	botID := "11111111-1111-1111-1111-111111111111"
-	queries := acpRuntimeQueries{
-		bot: testBotRow(botID, acpEnabledBotMetadata()),
-	}
-	pool := &fakeACPRuntimePool{createErr: acpagent.ErrTooManyRuntimes}
-	handler := newACPRuntimeHandler(
-		pool,
-		session.NewService(nil, queries, nil),
-		bots.NewService(nil, queries),
-		newTestAdminAccountService("admin"),
-	)
-
-	e := echo.New()
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/bots/"+botID+"/acp-runtimes",
-		bytes.NewBufferString(`{"acp_agent_id":"acp"}`),
-	)
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	rec := httptest.NewRecorder()
-	ctx := testAuthContext(e, req, rec, "user-1")
-	ctx.SetPath("/bots/:bot_id/acp-runtimes")
-	ctx.SetParamNames("bot_id")
-	ctx.SetParamValues(botID)
-
-	err := handler.CreateRuntime(ctx)
-	problem, ok := server.ProblemFrom(err, "")
-	if !ok || problem.Status != http.StatusTooManyRequests || problem.Code != string(apperror.CodeACPRuntimeLimitReached) {
-		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusTooManyRequests, apperror.CodeACPRuntimeLimitReached)
-	}
-}
-
-func TestACPRuntimeHandlerCreateRuntimeRedactsStartFailure(t *testing.T) {
+func TestACPRuntimeHandlerGetAgentOptionsRedactsStartFailure(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	queries := acpRuntimeQueries{
 		bot: testBotRow(botID, acpEnabledBotMetadata()),
@@ -798,182 +701,24 @@ func TestACPRuntimeHandlerCreateRuntimeRedactsStartFailure(t *testing.T) {
 	)
 
 	e := echo.New()
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/bots/"+botID+"/acp-runtimes",
-		bytes.NewBufferString(`{"acp_agent_id":"acp"}`),
-	)
+	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/acp-options?acp_agent_id=acp", nil)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "user-1")
-	ctx.SetPath("/bots/:bot_id/acp-runtimes")
+	ctx.SetPath("/bots/:bot_id/acp-options")
 	ctx.SetParamNames("bot_id")
 	ctx.SetParamValues(botID)
 
-	err := handler.CreateRuntime(ctx)
+	err := handler.GetAgentOptions(ctx)
 	problem, ok := server.ProblemFrom(err, "")
 	if !ok || problem.Status != http.StatusInternalServerError || problem.Code != string(apperror.CodeACPOperationFailed) {
-		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusInternalServerError, apperror.CodeACPOperationFailed)
+		t.Fatalf("GetAgentOptions() error = %v, want %d %s", err, http.StatusInternalServerError, apperror.CodeACPOperationFailed)
 	}
 	if strings.Contains(problem.Detail, "/Users/alice") || strings.Contains(problem.Detail, "sk-secret") {
 		t.Fatalf("runtime start problem leaked raw error: %q", problem.Detail)
 	}
 	if cause := apperror.CauseOf(err); cause == nil || !strings.Contains(cause.Error(), "sk-secret") {
 		t.Fatalf("runtime start cause = %v, want private diagnostic", cause)
-	}
-}
-
-func TestACPRuntimeHandlerSetRuntimeModelAllowsReset(t *testing.T) {
-	botID := "11111111-1111-1111-1111-111111111111"
-	queries := acpRuntimeQueries{
-		bot: testBotRow(botID, acpEnabledBotMetadata()),
-	}
-	pool := &fakeACPRuntimePool{
-		status: acpagent.RuntimeStatus{
-			RuntimeID:             "rt_warm",
-			AgentID:               acpprofile.AgentACPID,
-			State:                 "idle",
-			RuntimeOwnerAccountID: "user-1",
-		},
-	}
-	handler := newACPRuntimeHandler(
-		pool,
-		session.NewService(nil, queries, nil),
-		bots.NewService(nil, queries),
-		newTestAdminAccountService("admin"),
-	)
-
-	e := echo.New()
-	req := httptest.NewRequest(
-		http.MethodPatch,
-		"/bots/"+botID+"/acp-runtimes/rt_warm/model",
-		bytes.NewBufferString(`{"model_id":""}`),
-	)
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	rec := httptest.NewRecorder()
-	ctx := testAuthContext(e, req, rec, "user-1")
-	ctx.SetPath("/bots/:bot_id/acp-runtimes/:runtime_id/model")
-	ctx.SetParamNames("bot_id", "runtime_id")
-	ctx.SetParamValues(botID, "rt_warm")
-
-	if err := handler.SetRuntimeModel(ctx); err != nil {
-		t.Fatalf("SetRuntimeModel() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if pool.modelBotID != botID || pool.modelRuntimeID != "rt_warm" || pool.modelID != "" {
-		t.Fatalf("SetRuntimeModel call = %q %q %q, want reset request", pool.modelBotID, pool.modelRuntimeID, pool.modelID)
-	}
-}
-
-func TestACPRuntimeHandlerSetRuntimeReasoning(t *testing.T) {
-	botID := "11111111-1111-1111-1111-111111111111"
-	queries := acpRuntimeQueries{bot: testBotRow(botID, acpEnabledBotMetadata())}
-	pool := &fakeACPRuntimePool{status: acpagent.RuntimeStatus{
-		RuntimeID:             "rt_warm",
-		AgentID:               acpprofile.AgentACPID,
-		State:                 "idle",
-		RuntimeOwnerAccountID: "user-1",
-	}}
-	handler := newACPRuntimeHandler(
-		pool,
-		session.NewService(nil, queries, nil),
-		bots.NewService(nil, queries),
-		newTestAdminAccountService("admin"),
-	)
-
-	e := echo.New()
-	req := httptest.NewRequest(
-		http.MethodPatch,
-		"/bots/"+botID+"/acp-runtimes/rt_warm/reasoning",
-		bytes.NewBufferString(`{"reasoning_effort":"low"}`),
-	)
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	rec := httptest.NewRecorder()
-	ctx := testAuthContext(e, req, rec, "user-1")
-	ctx.SetPath("/bots/:bot_id/acp-runtimes/:runtime_id/reasoning")
-	ctx.SetParamNames("bot_id", "runtime_id")
-	ctx.SetParamValues(botID, "rt_warm")
-
-	if err := handler.SetRuntimeReasoning(ctx); err != nil {
-		t.Fatalf("SetRuntimeReasoning() error = %v", err)
-	}
-	if pool.reasoningBotID != botID || pool.reasoningRuntimeID != "rt_warm" || pool.reasoningEffort != "low" {
-		t.Fatalf("SetRuntimeReasoning call = %q %q %q", pool.reasoningBotID, pool.reasoningRuntimeID, pool.reasoningEffort)
-	}
-}
-
-func TestACPRuntimeHandlerSetRuntimeMode(t *testing.T) {
-	botID := "11111111-1111-1111-1111-111111111111"
-	queries := acpRuntimeQueries{bot: testBotRow(botID, acpEnabledBotMetadata())}
-	pool := &fakeACPRuntimePool{status: acpagent.RuntimeStatus{
-		RuntimeID:             "rt_warm",
-		AgentID:               acpprofile.AgentACPID,
-		State:                 "idle",
-		RuntimeOwnerAccountID: "user-1",
-	}}
-	handler := newACPRuntimeHandler(
-		pool,
-		session.NewService(nil, queries, nil),
-		bots.NewService(nil, queries),
-		newTestAdminAccountService("admin"),
-	)
-
-	e := echo.New()
-	req := httptest.NewRequest(
-		http.MethodPatch,
-		"/bots/"+botID+"/acp-runtimes/rt_warm/mode",
-		bytes.NewBufferString(`{"mode_id":"plan"}`),
-	)
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	requestCtx, cancelRequest := context.WithCancel(req.Context())
-	cancelRequest()
-	req = req.WithContext(requestCtx)
-	rec := httptest.NewRecorder()
-	ctx := testAuthContext(e, req, rec, "user-1")
-	ctx.SetPath("/bots/:bot_id/acp-runtimes/:runtime_id/mode")
-	ctx.SetParamNames("bot_id", "runtime_id")
-	ctx.SetParamValues(botID, "rt_warm")
-
-	if err := handler.SetRuntimeMode(ctx); err != nil {
-		t.Fatalf("SetRuntimeMode() error = %v", err)
-	}
-	if pool.modeBotID != botID || pool.modeRuntimeID != "rt_warm" || pool.modeID != "plan" {
-		t.Fatalf("SetRuntimeMode call = %q %q %q", pool.modeBotID, pool.modeRuntimeID, pool.modeID)
-	}
-	if pool.modeContextErr != nil {
-		t.Fatalf("SetRuntimeMode context error = %v, want request cancellation detached", pool.modeContextErr)
-	}
-}
-
-func TestACPRuntimeHandlerRuntimeNotFoundMapsTo404(t *testing.T) {
-	botID := "11111111-1111-1111-1111-111111111111"
-	queries := acpRuntimeQueries{
-		bot: testBotRow(botID, acpEnabledBotMetadata()),
-	}
-	pool := &fakeACPRuntimePool{statusErr: acpagent.ErrRuntimeNotFound}
-	handler := newACPRuntimeHandler(
-		pool,
-		session.NewService(nil, queries, nil),
-		bots.NewService(nil, queries),
-		newTestAdminAccountService("admin"),
-	)
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/acp-runtimes/rt_gone", nil)
-	rec := httptest.NewRecorder()
-	ctx := testAuthContext(e, req, rec, "user-1")
-	ctx.SetPath("/bots/:bot_id/acp-runtimes/:runtime_id")
-	ctx.SetParamNames("bot_id", "runtime_id")
-	ctx.SetParamValues(botID, "rt_gone")
-
-	err := handler.GetRuntimeByID(ctx)
-	if got := apperror.CodeOf(err); got != apperror.CodeACPRuntimeNotFound {
-		t.Fatalf("GetRuntimeByID() code = %q, want %q", got, apperror.CodeACPRuntimeNotFound)
-	}
-	if pool.statusBotID != botID || pool.statusRuntimeID != "rt_gone" {
-		t.Fatalf("RuntimeStatusByID call = %q %q", pool.statusBotID, pool.statusRuntimeID)
 	}
 }
 
@@ -1052,80 +797,6 @@ func TestRuntimePoolSelectionErrorsUseApplicationErrors(t *testing.T) {
 				t.Fatalf("runtimePoolError() code = %q, want %q", got, tt.code)
 			}
 		})
-	}
-}
-
-func TestACPRuntimeHandlerCloseRuntimeToleratesMissingRuntime(t *testing.T) {
-	botID := "11111111-1111-1111-1111-111111111111"
-	queries := acpRuntimeQueries{
-		bot: testBotRow(botID, acpEnabledBotMetadata()),
-	}
-	pool := &fakeACPRuntimePool{
-		status: acpagent.RuntimeStatus{
-			RuntimeID:             "rt_gone",
-			AgentID:               acpprofile.AgentACPID,
-			State:                 "idle",
-			RuntimeOwnerAccountID: "user-1",
-		},
-		closeErr: acpagent.ErrRuntimeNotFound,
-	}
-	handler := newACPRuntimeHandler(
-		pool,
-		session.NewService(nil, queries, nil),
-		bots.NewService(nil, queries),
-		newTestAdminAccountService("admin"),
-	)
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodDelete, "/bots/"+botID+"/acp-runtimes/rt_gone", nil)
-	rec := httptest.NewRecorder()
-	ctx := testAuthContext(e, req, rec, "user-1")
-	ctx.SetPath("/bots/:bot_id/acp-runtimes/:runtime_id")
-	ctx.SetParamNames("bot_id", "runtime_id")
-	ctx.SetParamValues(botID, "rt_gone")
-
-	if err := handler.CloseRuntime(ctx); err != nil {
-		t.Fatalf("CloseRuntime() error = %v", err)
-	}
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
-	}
-	if pool.closedBotID != botID || pool.closedRuntimeID != "rt_gone" {
-		t.Fatalf("CloseRuntime call = %q %q", pool.closedBotID, pool.closedRuntimeID)
-	}
-}
-
-func TestACPRuntimeHandlerCloseRuntimeToleratesReapedRuntimeLookup(t *testing.T) {
-	botID := "11111111-1111-1111-1111-111111111111"
-	queries := acpRuntimeQueries{
-		bot: testBotRow(botID, acpEnabledBotMetadata()),
-	}
-	pool := &fakeACPRuntimePool{
-		statusErr: acpagent.ErrRuntimeNotFound,
-	}
-	handler := newACPRuntimeHandler(
-		pool,
-		session.NewService(nil, queries, nil),
-		bots.NewService(nil, queries),
-		newTestAdminAccountService("admin"),
-	)
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodDelete, "/bots/"+botID+"/acp-runtimes/rt_gone", nil)
-	rec := httptest.NewRecorder()
-	ctx := testAuthContext(e, req, rec, "user-1")
-	ctx.SetPath("/bots/:bot_id/acp-runtimes/:runtime_id")
-	ctx.SetParamNames("bot_id", "runtime_id")
-	ctx.SetParamValues(botID, "rt_gone")
-
-	if err := handler.CloseRuntime(ctx); err != nil {
-		t.Fatalf("CloseRuntime() error = %v", err)
-	}
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
-	}
-	if pool.closedRuntimeID != "" {
-		t.Fatalf("CloseRuntime should not reach the pool, got %q", pool.closedRuntimeID)
 	}
 }
 
@@ -1225,7 +896,7 @@ func (q acpRuntimeInstanceQueries) GetBotAgentByID(context.Context, sqlc.GetBotA
 	return q.agent, nil
 }
 
-func TestACPRuntimeHandlerCreateRuntimeAdmitsOnlyActiveACPInstances(t *testing.T) {
+func TestACPRuntimeHandlerGetAgentOptionsAdmitsOnlyActiveACPInstances(t *testing.T) {
 	t.Setenv("MEMOH_ACP_MCP_HTTP_BASE_URL", "http://example.com")
 
 	const (
@@ -1276,27 +947,23 @@ func TestACPRuntimeHandlerCreateRuntimeAdmitsOnlyActiveACPInstances(t *testing.T
 			handler.SetBotAgents(botagents.NewService(slog.Default(), queries))
 
 			e := echo.New()
-			req := httptest.NewRequest(
-				http.MethodPost,
-				"/bots/"+botID+"/acp-runtimes",
-				bytes.NewBufferString(`{"acp_agent_id":"acp","bot_agent_id":"`+botAgentID+`"}`),
-			)
+			req := httptest.NewRequest(http.MethodGet, "/bots/"+botID+"/acp-options?acp_agent_id=acp&bot_agent_id="+botAgentID, nil)
 			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 			rec := httptest.NewRecorder()
 			ctx := testAuthContext(e, req, rec, "user-1")
-			ctx.SetPath("/bots/:bot_id/acp-runtimes")
+			ctx.SetPath("/bots/:bot_id/acp-options")
 			ctx.SetParamNames("bot_id")
 			ctx.SetParamValues(botID)
 
-			err := handler.CreateRuntime(ctx)
+			err := handler.GetAgentOptions(ctx)
 			if tc.wantCode == "" {
 				if err != nil || pool.createInput.BotAgentID != botAgentID {
-					t.Fatalf("CreateRuntime() error = %v, input = %#v, want the instance's runtime", err, pool.createInput)
+					t.Fatalf("GetAgentOptions() error = %v, input = %#v, want the instance's runtime", err, pool.createInput)
 				}
 				return
 			}
 			if apperror.CodeOf(err) != tc.wantCode {
-				t.Fatalf("CreateRuntime() error = %v, want %s", err, tc.wantCode)
+				t.Fatalf("GetAgentOptions() error = %v, want %s", err, tc.wantCode)
 			}
 			if pool.createInput.BotID != "" {
 				t.Fatalf("pool should not start a runtime for this instance: %#v", pool.createInput)

@@ -57,7 +57,7 @@ func (t *turnRunner) elicit(ctx context.Context, id string, request elicitationR
 		return decline
 	}
 	response, err := t.requestUserInput(ctx, "claude-elicitation-"+id, input, map[string]any{
-		"source": "claude_mcp_elicitation", "request_id": id, "server_name": request.ServerName, "elicitation_id": request.ElicitationID,
+		"source": userinput.ProviderSourceClaudeElicitation, "request_id": id, "server_name": request.ServerName, "elicitation_id": request.ElicitationID,
 	})
 	if err != nil {
 		return canceled

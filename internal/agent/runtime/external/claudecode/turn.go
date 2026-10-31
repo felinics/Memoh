@@ -669,54 +669,12 @@ func renameDisplayInputField(fields map[string]any, from, to string) {
 	}
 }
 
-// decide forwards a native tool question to a user who holds the matching
-// workspace permission. Claude's own permission mode is the first and only
-// policy layer for Claude's native tools; Memoh's allow/ask/deny rules govern
-// Memoh-provided tools, which enforce them in the gateway. This mirrors the
-// Codex runtime, so neither external agent re-runs Memoh policy here.
+// decide forwards a native tool question to the user through the shared
+// decision flow.
 func (t *turnRunner) decide(ctx context.Context, callID, toolName string, input any) approval.FlowResult {
-	if t.approval == nil {
-		return approval.FlowResult{Status: approval.StatusRejected, DecisionReason: "approval service unavailable"}
-	}
-	result, err := approval.RunRuntimeFlow(ctx, t.approval, approval.FlowRequest{
-		Input: approval.CreatePendingInput{
-			BotID:                        t.input.BotID,
-			SessionID:                    t.input.ThreadID,
-			RouteID:                      t.input.RouteID,
-			ChannelIdentityID:            t.input.ChannelIdentityID,
-			RequestedByChannelIdentityID: t.input.ChannelIdentityID,
-			ToolCallID:                   callID,
-			ToolName:                     toolName,
-			ToolInput:                    input,
-		},
-		Interactive:    t.input.CanRequestUserInput,
-		RegisterWaiter: t.waiter,
-		Emit:           t.emitApprovalRequest,
-	})
-	if err != nil {
-		if ctx.Err() != nil {
-			return approval.FlowResult{Status: approval.StatusCancelled, DecisionReason: "the turn ended before a decision arrived"}
-		}
-		t.logger.ErrorContext(ctx, "claude approval flow failed", slog.Any("error", err))
-		return approval.FlowResult{Status: approval.StatusCancelled, DecisionReason: "approval flow failed"}
-	}
-	return result
-}
-
-func (t *turnRunner) emitApprovalRequest(req approval.Request) bool {
-	t.emit(event.StreamEvent{
-		Type:       event.ToolApprovalRequest,
-		ToolCallID: req.ToolCallID,
-		ToolName:   req.ToolName,
-		Input:      req.ToolInput,
-		ApprovalID: req.ID,
-		ShortID:    req.ShortID,
-		Status:     approval.NormalizedStatus(req.Status),
-		Metadata: map[string]any{
-			"approval": approval.RequestMetadata(req),
-		},
-	})
-	return true
+	return external.DecideApproval(ctx, t.approval, t.waiter, t.input, external.ApprovalCall{
+		ToolCallID: callID, ToolName: toolName, Input: input,
+	}, t.emit, t.logger)
 }
 
 // observeExit records how the process teardown failed after the turn settled.

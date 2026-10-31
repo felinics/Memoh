@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/external/codex/protocol"
 )
 
 // recordThreadMetadata publishes a matching id/path pair. An unknown path
 // must clear the previous thread's path when the native session changes.
 func recordThreadMetadata(delta *map[string]any, previous map[string]any, threadID, rolloutPath string) {
-	changed := threadID != metadataString(previous, metadataThreadIDKey)
-	if !changed && (rolloutPath == "" || rolloutPath == metadataString(previous, metadataRolloutPathKey)) {
+	changed := threadID != external.MetadataString(previous, metadataThreadIDKey)
+	if !changed && (rolloutPath == "" || rolloutPath == external.MetadataString(previous, metadataRolloutPathKey)) {
 		return
 	}
 	if *delta == nil {

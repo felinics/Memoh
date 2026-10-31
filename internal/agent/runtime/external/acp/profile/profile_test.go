@@ -1,367 +1,111 @@
 package profile
 
-import "testing"
-
-func TestListIncludesGenericACP(t *testing.T) {
-	profile, ok := Lookup(AgentACPID)
-	if !ok {
-		t.Fatal("generic ACP profile was not registered")
-	}
-	if profile.Launch.ManagedCommandField != "command" || profile.Launch.ManagedArgumentsField != "arguments" {
-		t.Fatalf("generic ACP launch policy = %#v, want managed command and arguments", profile.Launch)
-	}
-	if len(profile.ManagedFields) != 2 || profile.ManagedFields[0].ID != "command" || !profile.ManagedFields[0].Required || profile.ManagedFields[1].ID != "arguments" {
-		t.Fatalf("generic ACP managed fields = %#v", profile.ManagedFields)
-	}
-	if len(profile.SetupModes) != 1 || profile.SetupModes[0] != setupModeAPIKey {
-		t.Fatalf("generic ACP setup modes = %#v", profile.SetupModes)
-	}
-}
+import (
+	"slices"
+	"strings"
+	"testing"
+)
 
 func TestResolveGenericACPLaunch(t *testing.T) {
-	profile, ok := Lookup(AgentACPID)
-	if !ok {
-		t.Fatal("generic ACP profile was not registered")
-	}
-	command, arguments, err := ResolveLaunch(profile, AgentSetup{Managed: map[string]string{
+	command, arguments, err := ResolveLaunch(AgentSetup{Managed: map[string]string{
 		"command":   "  uvx  ",
 		"arguments": "agent-package\r\n--mode\nvalue with spaces\n\n",
 	}})
-	if err != nil {
-		t.Fatalf("ResolveLaunch() error = %v", err)
+	if err != nil || command != "uvx" || !slices.Equal(arguments, []string{"agent-package", "--mode", "value with spaces"}) {
+		t.Fatalf("ResolveLaunch() = %q, %#v, %v", command, arguments, err)
 	}
-	if command != "uvx" {
-		t.Fatalf("ResolveLaunch() command = %q, want uvx", command)
-	}
-	want := []string{"agent-package", "--mode", "value with spaces"}
-	if len(arguments) != len(want) {
-		t.Fatalf("ResolveLaunch() arguments = %#v, want %#v", arguments, want)
-	}
-	for i := range want {
-		if arguments[i] != want[i] {
-			t.Fatalf("ResolveLaunch() arguments[%d] = %q, want %q", i, arguments[i], want[i])
-		}
-	}
-}
-
-func TestResolveGenericACPLaunchRejectsInvalidCommand(t *testing.T) {
-	profile, ok := Lookup(AgentACPID)
-	if !ok {
-		t.Fatal("generic ACP profile was not registered")
-	}
-	if _, _, err := ResolveLaunch(profile, AgentSetup{Managed: map[string]string{"command": "uvx\nagent"}}); err == nil {
-		t.Fatal("ResolveLaunch() error = nil, want invalid command error")
-	}
-}
-
-func TestResolveLaunchUsesProfileManagedPolicyWithoutKnownAgentID(t *testing.T) {
-	custom := Profile{
-		ID:          "custom-agent",
-		DisplayName: "Custom Agent",
-		Launch: LaunchPolicy{
-			ManagedCommandField:   "executable",
-			ManagedArgumentsField: "argv",
-		},
-	}
-	command, arguments, err := ResolveLaunch(custom, AgentSetup{Managed: map[string]string{
-		"executable": "custom-acp",
-		"argv":       "--stdio\n--verbose",
-	}})
-	if err != nil {
-		t.Fatalf("ResolveLaunch() error = %v", err)
-	}
-	if command != "custom-acp" || len(arguments) != 2 || arguments[0] != "--stdio" || arguments[1] != "--verbose" {
-		t.Fatalf("ResolveLaunch() = %q, %#v; want profile-managed launch", command, arguments)
-	}
-}
-
-func TestMetadataAgentEnabled(t *testing.T) {
-	tests := []struct {
-		name     string
-		metadata map[string]any
-		want     bool
-	}{
-		{
-			name: "agent config enabled",
-			metadata: map[string]any{
-				MetadataKeyACP: map[string]any{
-					"agents": map[string]any{
-						"codex": map[string]any{"enabled": true},
-					},
-				},
-			},
-			want: true,
-		},
-		{
-			name: "agent config disabled",
-			metadata: map[string]any{
-				MetadataKeyACP: map[string]any{
-					"agents": map[string]any{
-						"codex": map[string]any{"enabled": false},
-					},
-				},
-			},
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := MetadataAgentEnabled(tt.metadata, "codex"); got != tt.want {
-				t.Fatalf("MetadataAgentEnabled() = %v, want %v", got, tt.want)
-			}
-		})
+	if _, _, err := ResolveLaunch(AgentSetup{Managed: map[string]string{"command": "uvx\nagent"}}); err == nil {
+		t.Fatal("a command spanning lines was accepted")
 	}
 }
 
 func TestParseAgentSetupNormalizesLegacyManagedMode(t *testing.T) {
-	apiKeySetup := ParseAgentSetup(map[string]any{
-		MetadataKeyACP: map[string]any{
-			"agents": map[string]any{
-				"custom-agent": map[string]any{
-					"enabled":    true,
-					"setup_mode": "managed",
-					"managed": map[string]any{
-						"provider": "gemini",
-						"model":    "gemini-3.5-flash",
-						"api_key":  "AIza-test",
-					},
-				},
-			},
-		},
-	}, "custom-agent")
-	if apiKeySetup.Mode != setupModeAPIKey {
-		t.Fatalf("legacy managed mode = %q, want api_key", apiKeySetup.Mode)
+	legacy := func(agentID string, managed map[string]any) map[string]any {
+		return map[string]any{MetadataKeyACP: map[string]any{"agents": map[string]any{
+			agentID: map[string]any{"enabled": true, "setup_mode": "managed", "managed": managed},
+		}}}
 	}
-
-	oauthSetup := ParseAgentSetup(map[string]any{
-		MetadataKeyACP: map[string]any{
-			"agents": map[string]any{
-				"codex": map[string]any{
-					"enabled":    true,
-					"setup_mode": "managed",
-					"managed": map[string]any{
-						"auth_type": "provider_oauth",
-					},
-				},
-			},
-		},
-	}, "codex")
-	if oauthSetup.Mode != setupModeOAuth {
-		t.Fatalf("legacy provider_oauth mode = %q, want oauth", oauthSetup.Mode)
+	if got := ParseAgentSetup(legacy("custom-agent", map[string]any{"api_key": "AIza-test"}), "custom-agent").Mode; got != setupModeAPIKey {
+		t.Fatalf("legacy managed mode = %q, want api_key", got)
+	}
+	if got := ParseAgentSetup(legacy("codex", map[string]any{"auth_type": "provider_oauth"}), "codex").Mode; got != setupModeOAuth {
+		t.Fatalf("legacy provider_oauth mode = %q, want oauth", got)
 	}
 }
 
-func TestMissingRequiredManagedFieldForPreflightRequiresCommand(t *testing.T) {
-	profile, ok := Lookup(AgentACPID)
-	if !ok {
-		t.Fatal("generic ACP profile not registered")
+func TestCheckSetupRequiresTheCommandAndASupportedMode(t *testing.T) {
+	setup := func(mode string, managed map[string]string) AgentSetup {
+		return AgentSetup{AgentID: AgentACPID, Enabled: true, Mode: mode, Managed: managed}
 	}
-	setup := AgentSetup{
-		AgentID: AgentACPID,
-		Enabled: true,
-		Mode:    setupModeAPIKey,
-		ModeSet: true,
-		Managed: map[string]string{},
+	if err := CheckSetup(setup(setupModeAPIKey, map[string]string{})); err == nil || !strings.Contains(err.Error(), "command required") {
+		t.Fatalf("missing command: error = %v", err)
 	}
-	if field, missing := MissingRequiredManagedFieldForPreflight(profile, setup); !missing || field.ID != "command" {
-		t.Fatalf("preflight = %#v, %v; want missing command", field, missing)
+	if err := CheckSetup(setup(setupModeSelf, map[string]string{"command": "my-agent-acp"})); err == nil || !strings.Contains(err.Error(), "setup mode") {
+		t.Fatalf("legacy self mode: error = %v, want unsupported mode", err)
 	}
-	setup.Managed["command"] = "my-agent-acp"
-	if field, missing := MissingRequiredManagedFieldForPreflight(profile, setup); missing {
-		t.Fatalf("preflight with command = %#v, want none", field)
+	unset := map[string]any{MetadataKeyACP: map[string]any{"agents": map[string]any{
+		AgentACPID: map[string]any{"enabled": true, "managed": map[string]any{"command": "my-agent-acp"}},
+	}}}
+	if err := CheckSetup(ParseAgentSetup(unset, AgentACPID)); err != nil {
+		t.Fatalf("setup without a setup_mode: error = %v", err)
 	}
 }
 
-func TestMissingRequiredManagedFieldForPreflightRequiresGenericACPCommand(t *testing.T) {
-	profile, ok := Lookup(AgentACPID)
-	if !ok {
-		t.Fatal("generic ACP profile not registered")
-	}
-	setup := AgentSetup{
-		AgentID: AgentACPID,
-		Enabled: true,
-		Mode:    setupModeAPIKey,
-		ModeSet: false,
-		Managed: map[string]string{},
-	}
-	if field, missing := MissingRequiredManagedFieldForPreflight(profile, setup); !missing || field.ID != "command" {
-		t.Fatalf("generic ACP preflight = %#v, %v; want missing command", field, missing)
-	}
+func managedUpdate(managed map[string]any) map[string]any {
+	return map[string]any{MetadataKeyACP: map[string]any{"agents": map[string]any{
+		"codex": map[string]any{"enabled": true, "managed": managed},
+	}}}
 }
 
-func TestSensitiveMergeAndScrub(t *testing.T) {
-	existing := map[string]any{
-		MetadataKeyACP: map[string]any{
-			"agents": map[string]any{
-				"codex": map[string]any{
-					"enabled": true,
-					"managed": map[string]any{
-						"api_key":  "sk-oldsecret",
-						"base_url": "https://example.test",
-					},
-				},
-			},
-		},
+// A secret omitted or sent back masked keeps the stored one; null clears it;
+// any other value, dotted or not, replaces it. Responses carry it masked.
+func TestMergeSensitiveFields(t *testing.T) {
+	existing := managedUpdate(map[string]any{"api_key": "sk-existing", "base_url": "https://old.example"})
+	for _, tt := range []struct {
+		name    string
+		managed map[string]any
+		want    string
+		cleared bool
+	}{
+		{name: "omitted", managed: map[string]any{"base_url": "https://new.example"}, want: "sk-existing"},
+		{name: "masked", managed: map[string]any{"api_key": "sk-...ting"}, want: "sk-existing"},
+		{name: "null", managed: map[string]any{"api_key": nil}, cleared: true},
+		{name: "new", managed: map[string]any{"api_key": "sk-new"}, want: "sk-new"},
+		{name: "dotted", managed: map[string]any{"api_key": "https://acme.example.com/v1/..."}, want: "https://acme.example.com/v1/..."},
+	} {
+		merged := MergeSensitiveFieldsForUpdate(existing, managedUpdate(tt.managed))
+		got, ok := ParseAgentSetup(merged, "codex").Managed["api_key"]
+		if tt.cleared == ok || (!tt.cleared && got != tt.want) {
+			t.Fatalf("%s: api_key = %q (present %v)", tt.name, got, ok)
+		}
 	}
-	incoming := map[string]any{
-		MetadataKeyACP: map[string]any{
-			"agents": map[string]any{
-				"codex": map[string]any{
-					"enabled": true,
-					"managed": map[string]any{
-						"api_key":  "sk-...cret",
-						"base_url": "https://new.example",
-					},
-				},
-			},
-		},
-	}
-
-	merged := MergeSensitiveFieldsForUpdate(existing, incoming)
-	setup := ParseAgentSetup(merged, "codex")
-	if got := setup.Managed["api_key"]; got != "sk-oldsecret" {
-		t.Fatalf("api_key = %q, want preserved old secret", got)
-	}
-	if got := setup.Managed["base_url"]; got != "https://new.example" {
-		t.Fatalf("base_url = %q, want new value", got)
-	}
-
-	scrubbed := ScrubMetadataForResponse(merged)
-	setup = ParseAgentSetup(scrubbed, "codex")
-	if got := setup.Managed["api_key"]; got == "sk-oldsecret" || got == "" {
-		t.Fatalf("scrubbed api_key = %q, want masked", got)
+	scrubbed := ParseAgentSetup(ScrubMetadataForResponse(existing), "codex").Managed["api_key"]
+	if scrubbed == "sk-existing" || scrubbed == "" {
+		t.Fatalf("response api_key = %q, want masked", scrubbed)
 	}
 }
 
 func TestScrubMetadataForExportDropsManagedSecrets(t *testing.T) {
-	metadata := map[string]any{
-		MetadataKeyACP: map[string]any{
-			"agents": map[string]any{
-				"custom-agent": map[string]any{
-					"enabled":    true,
-					"setup_mode": "api_key",
-					"managed": map[string]any{
-						"provider": "openrouter",
-						"model":    "anthropic/claude-sonnet-4",
-						"api_key":  map[string]any{"value": "custom-secret"},
-					},
-				},
-				"codex": map[string]any{
-					"enabled": true,
-					"managed": map[string]any{
-						"api_key":  "sk-codex",
-						"base_url": "https://codex.example",
-					},
-				},
-			},
-		},
-	}
+	metadata := map[string]any{MetadataKeyACP: map[string]any{"agents": map[string]any{
+		"custom-agent": map[string]any{"enabled": true, "setup_mode": "api_key", "managed": map[string]any{
+			"model": "anthropic/claude-sonnet-4", "api_key": map[string]any{"value": "custom-secret"},
+		}},
+		"codex": map[string]any{"enabled": true, "managed": map[string]any{"api_key": "sk-codex", "base_url": "https://codex.example"}},
+	}}}
 
 	scrubbed, changed := ScrubMetadataForExport(metadata)
-	if !changed {
-		t.Fatal("ScrubMetadataForExport changed = false, want true")
+	custom, codex := ParseAgentSetup(scrubbed, "custom-agent").Managed, ParseAgentSetup(scrubbed, "codex").Managed
+	if _, ok := custom["api_key"]; !changed || ok || custom["model"] != "anthropic/claude-sonnet-4" {
+		t.Fatalf("custom agent managed = %#v (changed %v)", custom, changed)
 	}
-	customSetup := ParseAgentSetup(scrubbed, "custom-agent")
-	if _, ok := customSetup.Managed["api_key"]; ok {
-		t.Fatalf("custom agent api_key was not removed: %#v", customSetup.Managed)
+	if _, ok := codex["api_key"]; ok || codex["base_url"] != "https://codex.example" {
+		t.Fatalf("codex managed = %#v", codex)
 	}
-	if customSetup.Managed["provider"] != "openrouter" || customSetup.Managed["model"] != "anthropic/claude-sonnet-4" {
-		t.Fatalf("custom agent non-secret managed fields = %#v", customSetup.Managed)
-	}
-	codexSetup := ParseAgentSetup(scrubbed, "codex")
-	if _, ok := codexSetup.Managed["api_key"]; ok {
-		t.Fatalf("Codex api_key was not removed: %#v", codexSetup.Managed)
-	}
-	if codexSetup.Managed["base_url"] != "https://codex.example" {
-		t.Fatalf("Codex base_url = %q", codexSetup.Managed["base_url"])
-	}
-
 	acpConfig, _ := metadataRecord(metadata[MetadataKeyACP])
 	agents, _ := metadataRecord(acpConfig["agents"])
 	agentConfig, _ := metadataRecord(agents["custom-agent"])
 	managed, _ := metadataRecord(agentConfig["managed"])
 	if _, ok := managed["api_key"].(map[string]any); !ok {
 		t.Fatalf("original metadata mutated: %#v", managed)
-	}
-}
-
-func TestMergeSensitiveFieldsThreeState(t *testing.T) {
-	existing := map[string]any{
-		MetadataKeyACP: map[string]any{
-			"agents": map[string]any{
-				"codex": map[string]any{
-					"enabled": true,
-					"managed": map[string]any{
-						"api_key":  "sk-existing",
-						"base_url": "https://old.example",
-					},
-				},
-			},
-		},
-	}
-
-	preserve := MergeSensitiveFieldsForUpdate(existing, map[string]any{
-		MetadataKeyACP: map[string]any{
-			"agents": map[string]any{
-				"codex": map[string]any{
-					"enabled": true,
-					"managed": map[string]any{
-						"base_url": "https://new.example",
-					},
-				},
-			},
-		},
-	})
-	if got := ParseAgentSetup(preserve, "codex").Managed["api_key"]; got != "sk-existing" {
-		t.Fatalf("missing api_key update preserved %q, want existing secret", got)
-	}
-
-	cleared := MergeSensitiveFieldsForUpdate(existing, map[string]any{
-		MetadataKeyACP: map[string]any{
-			"agents": map[string]any{
-				"codex": map[string]any{
-					"enabled": true,
-					"managed": map[string]any{
-						"api_key": nil,
-					},
-				},
-			},
-		},
-	})
-	if _, ok := ParseAgentSetup(cleared, "codex").Managed["api_key"]; ok {
-		t.Fatalf("nil api_key update should clear existing secret")
-	}
-
-	overwritten := MergeSensitiveFieldsForUpdate(existing, map[string]any{
-		MetadataKeyACP: map[string]any{
-			"agents": map[string]any{
-				"codex": map[string]any{
-					"enabled": true,
-					"managed": map[string]any{
-						"api_key": "sk-new",
-					},
-				},
-			},
-		},
-	})
-	if got := ParseAgentSetup(overwritten, "codex").Managed["api_key"]; got != "sk-new" {
-		t.Fatalf("new api_key update = %q, want overwrite", got)
-	}
-
-	dottedSecret := MergeSensitiveFieldsForUpdate(existing, map[string]any{
-		MetadataKeyACP: map[string]any{
-			"agents": map[string]any{
-				"codex": map[string]any{
-					"enabled": true,
-					"managed": map[string]any{
-						"api_key": "https://acme.example.com/v1/...",
-					},
-				},
-			},
-		},
-	})
-	if got := ParseAgentSetup(dottedSecret, "codex").Managed["api_key"]; got != "https://acme.example.com/v1/..." {
-		t.Fatalf("dotted api_key update = %q, want literal value", got)
 	}
 }

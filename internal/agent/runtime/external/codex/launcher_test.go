@@ -46,12 +46,6 @@ func newTestAppServer(launcher external.Launcher) *appServer {
 	}
 }
 
-func TestRequiredDependencyIsCodex(t *testing.T) {
-	if depID := (&Driver{}).RequiredDependency(); depID != "codex" {
-		t.Fatalf("RequiredDependency() = %q, want codex", depID)
-	}
-}
-
 func TestAppServerCommandQuotesTheLauncher(t *testing.T) {
 	for path, want := range map[string]string{
 		"/data/it's/codex": `'/data/it'\''s/codex' app-server -c features.goals=true -c features.request_permissions_tool=true`,

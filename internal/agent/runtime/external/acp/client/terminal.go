@@ -109,6 +109,16 @@ func (m *terminalManager) setToolOutputLimit(limit ToolOutputLimit) {
 	m.mu.Unlock()
 }
 
+// terminalCommand is the shell line a terminal runs. An agent that sends a
+// whole command line as Command with no Args ("echo $HOME") means it for the
+// shell; quoting it as one word would look for a program of that name.
+func terminalCommand(command string, args []string) string {
+	if len(args) == 0 {
+		return strings.TrimSpace(command)
+	}
+	return buildShellCommand(command, args)
+}
+
 func (m *terminalManager) CreateTerminal(ctx context.Context, p acp.CreateTerminalRequest, approve terminalApprovalFunc, runtimeScope terminalRuntimeScope) (acp.CreateTerminalResponse, error) {
 	cwd := m.defaultCwd
 	if p.Cwd != nil && strings.TrimSpace(*p.Cwd) != "" {
@@ -118,7 +128,7 @@ func (m *terminalManager) CreateTerminal(ctx context.Context, p acp.CreateTermin
 		}
 		cwd = resolved
 	}
-	command := buildShellCommand(p.Command, p.Args)
+	command := terminalCommand(p.Command, p.Args)
 	if strings.TrimSpace(command) == "" {
 		return acp.CreateTerminalResponse{}, errs.New("terminal command is required")
 	}

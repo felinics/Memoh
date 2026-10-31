@@ -130,7 +130,6 @@
       "reasoning_selection_unsupported": "この外部Agentは推論強度の選択に対応していません。",
       "request_invalid": "Agent ランタイムのリクエストが無効です。内容を確認して、もう一度お試しください。",
       "runtime_conflict": "Agent ランタイムはこの操作を実行できる状態ではありません。更新してからもう一度お試しください。",
-      "runtime_limit_reached": "実行中の Agent ランタイムが多すぎます。1 つ終了してからもう一度お試しください。",
       "runtime_not_found": "この Agent ランタイムは利用できなくなりました。再起動します。"
     },
     "acp_agent_auth_invalid": "外部Agentの認証が無効です。Agent設定を更新してからもう一度お試しください。",
@@ -235,8 +234,6 @@
     "chat": {
       "message_empty": "メッセージを入力するか、ファイルを添付してください。"
     },
-    "codex_auth_token_missing": "このBotワークスペースのCodex認証が不足しているか不完全です。",
-    "codex_oauth_incomplete": "このBotワークスペースではCodexのChatGPTサインインが完了していません。",
     "compaction": {
       "model_unavailable": "圧縮Modelを利用できません。有効でコンテキストウィンドウが宣言されたチャットModelを選択してください。"
     },
@@ -278,7 +275,7 @@
       "rate_limited": "外部 Agent がモデルサービスのレート制限に達しました。しばらく待ってからもう一度送信してください。",
       "reported": "Agent がエラーを報告しました：{message}",
       "request_blocked": "このリクエストはモデルサービスの安全ポリシーによりブロックされました。内容を変更してもう一度送信してください。",
-      "session_resume_failed": "セッションを再開できませんでした。もう一度お試しいただくか、新しい会話を開始してください。",
+      "session_resume_failed": "セッションを再開できませんでした：{message}。もう一度お試しいただくか、新しい会話を開始してください。",
       "unavailable": "External Agent の Runtime を利用できません。Agent の設定と Workspace を確認して、もう一度お試しください。",
       "upstream_unreachable": "外部 Agent がモデルサービスに接続できないか、接続が途中で切断されました。ネットワークと Agent のサービスアドレスを確認して、もう一度お試しください。",
       "usage_limited": "外部 Agent のアカウントの利用枠を使い切りました。上限がリセットされてからもう一度お試しいただくか、アカウントのプランと請求情報をご確認ください。"
@@ -3406,14 +3403,9 @@
       "desktopEnabledDescription": "有効にするVNCDesktop。 Memoh は、Debian/Ubuntu または Alpine Workspaceが見つからない場合、自動的にプロビジョニングします。",
       "toolApproval": "Tool呼び出しの承認",
       "toolApprovalDescription": "安全なパスまたはコマンドのバイパス テンプレートを使用して、機密性の高い書き込み、編集、および実行Toolの呼び出しには人間の承認が必要です。",
-      "acpSetupMode": "設定",
       "acpLaunchSection": "起動設定",
       "acpCommand": "コマンド",
       "acpArguments": "起動引数",
-      "acpSetupApiKey": "APIキー",
-      "acpSetupOAuth": "OAuth",
-      "acpSetupSelf": "自己管理",
-      "acpSelfModeHint": "Workspace ランタイム内ですでに設定されている Agent（既存のログインなど）を使用します。",
       "acpRequiredField": "{agent} には {field} が必要です。",
       "toolApprovalBypass": "バイパス",
       "toolApprovalMustReview": "要検討",

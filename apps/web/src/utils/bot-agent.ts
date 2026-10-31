@@ -177,14 +177,26 @@ export function botAgentIcon(agent: Pick<BotagentsBotAgent, 'runtime' | 'metadat
   return externalAgentIcon(botAgentProvider(agent), color)
 }
 
+export interface AgentSessionSource {
+  bot_agent_id?: string
+  metadata?: Record<string, unknown>
+  runtime_metadata?: Record<string, unknown>
+}
+
+// sessionAgentProvider is the External Agent a session runs. A direct runtime
+// is its own Agent and an ACP session runs its Agent instance's profile, so
+// it is read from that instance. A session from before instances is bound to
+// none and names its profile itself; this is the one place that is read.
 export function sessionAgentProvider(
   runtimeType: unknown,
-  runtimeMetadata: Record<string, unknown> | undefined,
-  metadata: Record<string, unknown> | undefined,
+  session: AgentSessionSource,
+  agents: ReadonlyArray<Pick<BotagentsBotAgent, 'id' | 'runtime' | 'metadata'>> | undefined,
 ): string {
   const runtime = normalizeBotAgentRuntime(runtimeType)
   if (isDirectBotAgentRuntime(runtime)) return runtime
-  return normalizeAgentID(runtimeMetadata?.acp_agent_id ?? metadata?.acp_agent_id)
+  const botAgentId = session.bot_agent_id?.trim()
+  if (botAgentId) return botAgentProvider(agents?.find(agent => agent.id === botAgentId))
+  return normalizeAgentID(session.runtime_metadata?.acp_agent_id ?? session.metadata?.acp_agent_id)
 }
 
 export function botAgentName(agent: Pick<BotagentsBotAgent, 'name' | 'runtime' | 'metadata'> | null | undefined): string {

@@ -133,7 +133,6 @@
       "reasoning_selection_unsupported": "This external agent does not support reasoning effort selection.",
       "request_invalid": "The Agent runtime request is invalid. Check the request and try again.",
       "runtime_conflict": "The Agent runtime is not ready for this operation. Refresh and try again.",
-      "runtime_limit_reached": "Too many Agent runtimes are active. Close one and try again.",
       "runtime_not_found": "That Agent runtime is no longer available. It will be started again."
     },
     "acp_agent_auth_invalid": "External agent authentication is invalid. Update the agent setup and try again.",
@@ -238,8 +237,6 @@
     "chat": {
       "message_empty": "Enter a message or attach a file."
     },
-    "codex_auth_token_missing": "Codex authentication is missing or incomplete for this bot workspace.",
-    "codex_oauth_incomplete": "Codex ChatGPT sign-in is not complete for this bot workspace.",
     "compaction": {
       "model_unavailable": "The compaction model is unavailable. Pick an enabled chat model with a declared context window."
     },
@@ -281,7 +278,7 @@
       "rate_limited": "The external Agent was rate limited by its model service. Please wait a moment before sending again.",
       "reported": "The Agent reported an error: {message}",
       "request_blocked": "The model service's safety policy blocked this request. Change the request and send it again.",
-      "session_resume_failed": "The session could not be resumed. Try again or start a new conversation.",
+      "session_resume_failed": "The session could not be resumed: {message}. Try again or start a new conversation.",
       "unavailable": "The external Agent runtime is unavailable. Check the Agent setup and workspace, then try again.",
       "upstream_unreachable": "The external Agent could not reach its model service, or the connection dropped. Check the network and the Agent's service address, then try again.",
       "usage_limited": "The external Agent's account has no usage left. Try again after the limit resets, or check the account's plan and billing."
@@ -3399,14 +3396,9 @@
       "desktopEnabledDescription": "Give this bot a screen it can see and control, for browsing and desktop apps. You can watch it live and take over anytime.",
       "toolApproval": "Tool Call Approval",
       "toolApprovalDescription": "Require human approval for read, write, and exec operations, with bypass templates for safe paths or commands.",
-      "acpSetupMode": "Setup",
       "acpLaunchSection": "Launch",
       "acpCommand": "Command",
       "acpArguments": "Arguments",
-      "acpSetupApiKey": "API Key",
-      "acpSetupOAuth": "OAuth",
-      "acpSetupSelf": "Self-managed",
-      "acpSelfModeHint": "Uses the Agent you've already configured inside the workspace runtime (e.g. an existing login).",
       "acpStatusNeedsConfig": "Needs setup",
       "acpStatusOff": "Disabled",
       "acpEmptyTitle": "No agents available",

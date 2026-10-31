@@ -38,10 +38,9 @@ type ACPOptionInfo struct {
 
 // ACPRuntimePool is the slice of the ACP session pool the tool needs to
 // discover an agent's models and reasoning efforts. Those live only inside a
-// running agent process, so the deep listing boots a temporary runtime.
+// running agent process: the one the Agent keeps outside any conversation.
 type ACPRuntimePool interface {
-	CreateAgentRuntime(ctx context.Context, botID, agentID, runtimeOwnerAccountID string) (ACPRuntimeSummary, error)
-	CloseAgentRuntime(botID, runtimeID string) error
+	AgentOptions(ctx context.Context, botID, agentID string) (ACPRuntimeSummary, error)
 }
 
 // ACPAgentsProvider exposes the bot's generic ACP agents so the agent can pick
@@ -74,7 +73,7 @@ func (p *ACPAgentsProvider) Tools(_ context.Context, session SessionContext) ([]
 		{
 			Name: ToolListACPAgents().String(),
 			Description: "List generic ACP agents enabled for this bot. Without arguments this returns the agent catalog instantly. " +
-				"Pass agent_id to also fetch that agent's available models and reasoning efforts — this boots a temporary agent runtime and can take many seconds, so only do it when you actually need model/effort ids (e.g. for create_schedule).",
+				"Pass agent_id to also fetch that agent's available models and reasoning efforts — this may start the agent and can take many seconds, so only do it when you actually need model/effort ids (e.g. for create_schedule).",
 			Parameters: toolexec.SchemaFor[listACPAgentsArgs](),
 			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args listACPAgentsArgs) (sdk.ToolOutput, error) {
 				botID := strings.TrimSpace(sess.BotID)
@@ -85,7 +84,7 @@ func (p *ACPAgentsProvider) Tools(_ context.Context, session SessionContext) ([]
 				if agentID == "" {
 					return toolexec.OutputPair(p.listAgents(ctx.Context, botID))
 				}
-				return toolexec.OutputPair(p.describeAgent(ctx.Context, botID, agentID, sess))
+				return toolexec.OutputPair(p.describeAgent(ctx.Context, botID, agentID))
 			}),
 		},
 	}, nil
@@ -114,10 +113,9 @@ func (p *ACPAgentsProvider) listAgents(ctx context.Context, botID string) (any, 
 	}, nil
 }
 
-// describeAgent boots a temporary runtime for the agent (the same path the
-// web pre-session model picker uses), reads its model and reasoning state,
-// and closes the runtime again.
-func (p *ACPAgentsProvider) describeAgent(ctx context.Context, botID, agentID string, sess SessionContext) (any, error) {
+// describeAgent reads the agent's model and reasoning options, the same ones
+// the web picker offers before a conversation exists.
+func (p *ACPAgentsProvider) describeAgent(ctx context.Context, botID, agentID string) (any, error) {
 	if _, known := acpprofile.Lookup(agentID); !known {
 		return nil, fmt.Errorf("unknown ACP agent %q", agentID)
 	}
@@ -128,25 +126,10 @@ func (p *ACPAgentsProvider) describeAgent(ctx context.Context, botID, agentID st
 	if !enabled {
 		return nil, fmt.Errorf("ACP agent %q is not enabled for this bot", agentID)
 	}
-	runtimeOwner := strings.TrimSpace(sess.ChannelIdentityID)
-	if runtimeOwner == "" {
-		runtimeOwner = strings.TrimSpace(sess.UserID)
-	}
-	if runtimeOwner == "" {
-		return nil, errors.New("no runtime owner identity available for this session")
-	}
-	status, err := p.pool.CreateAgentRuntime(ctx, botID, agentID, runtimeOwner)
+	status, err := p.pool.AgentOptions(ctx, botID, agentID)
 	if err != nil {
-		return nil, fmt.Errorf("boot %s runtime: %w", agentID, err)
+		return nil, fmt.Errorf("read %s options: %w", agentID, err)
 	}
-	defer func() {
-		if closeErr := p.pool.CloseAgentRuntime(botID, status.RuntimeID); closeErr != nil {
-			p.logger.WarnContext(ctx, "close temporary ACP runtime failed",
-				slog.String("bot_id", botID),
-				slog.String("runtime_id", status.RuntimeID),
-				slog.Any("error", closeErr))
-		}
-	}()
 
 	models := make([]map[string]any, 0, len(status.Models))
 	for _, m := range status.Models {

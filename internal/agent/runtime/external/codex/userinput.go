@@ -7,11 +7,10 @@ package codex
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
-	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/external/codex/protocol"
 )
 
@@ -54,45 +53,25 @@ func (t *turnState) runUserInputCard(ctx context.Context, params *protocol.ToolR
 	if offset > 0 {
 		toolCallID = fmt.Sprintf("%s:%d", params.ItemID, offset)
 	}
-	flow, err := userinput.RunFlow(ctx, t.userInput, userinput.FlowRequest{
-		Input: userinput.CreatePendingInput{
-			BotID:                        t.input.BotID,
-			SessionID:                    t.input.ThreadID,
-			RouteID:                      t.input.RouteID,
-			ChannelIdentityID:            t.input.ChannelIdentityID,
-			RequestedByChannelIdentityID: t.input.ChannelIdentityID,
-			ToolCallID:                   toolCallID,
-			ToolName:                     userinput.ToolNameAskUser,
-			Input:                        map[string]any{"questions": payloadQuestions},
-			ProviderMetadata: map[string]any{
-				"source":    userinput.ProviderSourceCodexUserInput,
-				"thread_id": params.ThreadID,
-				"turn_id":   params.TurnID,
-				"item_id":   params.ItemID,
-			},
-			SourcePlatform: "",
+	request, err := external.AskUser(ctx, t.userInput, t.input, external.Question{
+		ToolCallID: toolCallID,
+		Input:      map[string]any{"questions": payloadQuestions},
+		ProviderMetadata: map[string]any{
+			"source":    userinput.ProviderSourceCodexUserInput,
+			"thread_id": params.ThreadID,
+			"turn_id":   params.TurnID,
+			"item_id":   params.ItemID,
 		},
-		ActorChannelIdentityID: t.input.ChannelIdentityID,
-		Interactive:            t.input.CanRequestUserInput,
-		WaitTimeout:            userinput.DefaultWaitTimeout,
-		Emit:                   t.emitUserInputRequest,
-		NonInteractiveReason:   "codex requested user input without an interactive stream",
-		UndeliveredReason:      "codex user input request was not delivered to the interactive stream",
-		TimeoutReason:          "codex user input timed out",
-		AbortReason:            "codex user input aborted",
-	})
+	}, t.emit, t.logger)
 	if err != nil {
-		if ctx.Err() == nil {
-			t.logger.ErrorContext(ctx, "codex user input flow failed", slog.String("thread_id", t.threadID), slog.Any("error", err))
-		}
 		return nil, false
 	}
-	if flow.Request.Status != userinput.StatusSubmitted {
+	if request.Status != userinput.StatusSubmitted {
 		return nil, false
 	}
 
 	byQuestion := map[string]userinput.UIAnswer{}
-	for _, answer := range userinput.AnswersFromResult(flow.Request.Result) {
+	for _, answer := range userinput.AnswersFromResult(request.Result) {
 		byQuestion[answer.QuestionID] = answer
 	}
 	out := make(map[string]protocol.ToolRequestUserInputAnswer, len(questions))
@@ -158,22 +137,4 @@ func codexQuestionToAskUser(question protocol.ToolRequestUserInputQuestion) map[
 		out["placeholder"] = strings.TrimSpace(question.Options[0].Label)
 	}
 	return out
-}
-
-func (t *turnState) emitUserInputRequest(req userinput.Request) bool {
-	status := strings.TrimSpace(req.Status)
-	if status == "" {
-		status = userinput.StatusPending
-	}
-	t.emit(event.StreamEvent{
-		Type:        event.UserInputRequest,
-		ToolCallID:  req.ToolCallID,
-		ToolName:    req.ToolName,
-		Input:       req.Input,
-		UserInputID: req.ID,
-		ShortID:     req.ShortID,
-		Status:      status,
-		Metadata:    userinput.DeferredMetadata(req),
-	})
-	return true
 }

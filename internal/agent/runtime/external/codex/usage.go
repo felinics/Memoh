@@ -11,24 +11,6 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 )
 
-// ErrUsageUnavailable: Codex could not read the account's usage limits.
-var ErrUsageUnavailable = errors.New("codex usage unavailable")
-
-var _ external.AccountReader = (*Driver)(nil)
-
-// AccountUsage is the ChatGPT account's Codex usage: one entry per rolling
-// window (the short window first, then the weekly one when the plan has it).
-type AccountUsage struct {
-	LimitReached bool
-	Windows      []UsageWindow
-}
-
-type UsageWindow struct {
-	UsedPercent   int
-	WindowMinutes int
-	ResetsAt      *time.Time
-}
-
 // Account asks the Agent's Codex which ChatGPT account it is signed in to.
 func (d *Driver) Account(ctx context.Context, botID, botAgentID string) (external.Account, error) {
 	srv, release, err := d.chatGPTServer(ctx, botID, botAgentID)
@@ -38,7 +20,7 @@ func (d *Driver) Account(ctx context.Context, botID, botAgentID string) (externa
 	defer release()
 	var response protocol.GetAccountResponse
 	if err := srv.conn.Call(ctx, protocol.MethodAccountRead, protocol.GetAccountParams{}, &response); err != nil {
-		return external.Account{}, external.Unavailable(err)
+		return external.Account{}, external.Upstream(err)
 	}
 	if response.Account == nil || response.Account.Chatgpt == nil {
 		return external.Account{}, nil
@@ -50,18 +32,18 @@ func (d *Driver) Account(ctx context.Context, botID, botAgentID string) (externa
 	return account, nil
 }
 
-// AccountUsage asks the Agent's Codex for its ChatGPT account's usage limits.
-func (d *Driver) AccountUsage(ctx context.Context, botID, botAgentID string) (AccountUsage, error) {
+// Quota asks the Agent's Codex for its ChatGPT account's usage limits.
+func (d *Driver) Quota(ctx context.Context, botID, botAgentID string) (external.Quota, error) {
 	srv, release, err := d.chatGPTServer(ctx, botID, botAgentID)
 	if err != nil {
-		return AccountUsage{}, err
+		return external.Quota{}, err
 	}
 	defer release()
 	var response protocol.GetAccountRateLimitsResponse
 	if err := srv.conn.Call(ctx, protocol.MethodAccountRateLimitsRead, nil, &response); err != nil {
-		return AccountUsage{}, errs.WrapDependency(errors.Join(ErrUsageUnavailable, err), "")
+		return external.Quota{}, errs.WrapDependency(errors.Join(external.ErrQuotaUnavailable, err), "")
 	}
-	return accountUsage(response), nil
+	return accountQuota(response), nil
 }
 
 func (d *Driver) chatGPTServer(ctx context.Context, botID, botAgentID string) (*appServer, func(), error) {
@@ -74,23 +56,23 @@ func (d *Driver) chatGPTServer(ctx context.Context, botID, botAgentID string) (*
 	}
 	srv, release, err := d.acquireServer(ctx, botID, botAgentID)
 	if err != nil {
-		return nil, nil, wrapServerError(err)
+		return nil, nil, err
 	}
 	return srv, release, nil
 }
 
-func accountUsage(response protocol.GetAccountRateLimitsResponse) AccountUsage {
+func accountQuota(response protocol.GetAccountRateLimitsResponse) external.Quota {
 	limits := response.RateLimits
-	usage := AccountUsage{
+	usage := external.Quota{
 		LimitReached: limits.RateLimitReachedType != nil ||
 			(response.OrdinaryUsageAllowed != nil && !*response.OrdinaryUsageAllowed),
-		Windows: []UsageWindow{},
+		Windows: []external.QuotaWindow{},
 	}
 	for _, window := range []*protocol.RateLimitWindow{limits.Primary, limits.Secondary} {
 		if window == nil {
 			continue
 		}
-		entry := UsageWindow{UsedPercent: int(window.UsedPercent)}
+		entry := external.QuotaWindow{UsedPercent: int(window.UsedPercent)}
 		if window.WindowDurationMins != nil {
 			entry.WindowMinutes = int(*window.WindowDurationMins)
 		}

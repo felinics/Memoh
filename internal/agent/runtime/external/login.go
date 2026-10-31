@@ -2,7 +2,6 @@ package external
 
 import (
 	"context"
-	"strings"
 )
 
 // DeviceLoginStart is a device-code sign-in the runtime has begun: the user
@@ -13,10 +12,18 @@ type DeviceLoginStart struct {
 	VerificationURL string
 }
 
+// Device-code sign-in states. Unknown: the login is not tracked, e.g. the
+// agent process restarted.
+const (
+	DeviceLoginPending = "pending"
+	DeviceLoginSuccess = "success"
+	DeviceLoginError   = "error"
+	DeviceLoginUnknown = "unknown"
+)
+
 // DeviceLoginStatus is the poll answer for a pending device-code sign-in.
 type DeviceLoginStatus struct {
-	// Status is pending, success, error, or unknown (the login is not
-	// tracked, e.g. the agent process restarted).
+	// Status is one of the DeviceLogin states.
 	Status string
 	Error  string
 }
@@ -43,29 +50,4 @@ type Account struct {
 // Agent's workspace, so only the runtime can say whether it is signed in.
 type AccountReader interface {
 	Account(ctx context.Context, botID, botAgentID string) (Account, error)
-}
-
-// DeviceLogin returns the runtime's sign-in flow, or false when the runtime
-// has none.
-func (drivers Drivers) DeviceLogin(runtimeType string) (DeviceLoginProvider, bool) {
-	return driverAs[DeviceLoginProvider](drivers, runtimeType)
-}
-
-// AccountReader returns the runtime's account reader, or false when the
-// runtime does not keep its own sign-in.
-func (drivers Drivers) AccountReader(runtimeType string) (AccountReader, bool) {
-	return driverAs[AccountReader](drivers, runtimeType)
-}
-
-func driverAs[T any](drivers Drivers, runtimeType string) (T, bool) {
-	runtimeType = strings.TrimSpace(runtimeType)
-	for _, driver := range drivers {
-		if driver == nil || driver.RuntimeType() != runtimeType {
-			continue
-		}
-		provider, ok := driver.(T)
-		return provider, ok
-	}
-	var zero T
-	return zero, false
 }

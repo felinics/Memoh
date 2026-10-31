@@ -6,7 +6,7 @@ import (
 	"path"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	"github.com/felinics/memoh/internal/agent/runtime/external/agentproc"
+	"github.com/felinics/memoh/internal/agent/runtime/external/acp"
 	"github.com/felinics/memoh/internal/agent/runtime/external/grok/grokcfg"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/errs"
@@ -58,42 +58,27 @@ func deleteLogin(ctx context.Context, client *bridge.Client, botAgentID string) 
 func (d *Driver) Account(ctx context.Context, botID, botAgentID string) (external.Account, error) {
 	cfg, err := d.agentConfig(ctx, botID, botAgentID)
 	if err != nil {
-		return external.Account{}, external.Unavailable(err)
+		return external.Account{}, err
 	}
 	if cfg.Auth != grokcfg.AuthGrokAccount {
 		return external.Account{}, external.CredentialError(agentcredential.ErrIncompatible)
 	}
-	srv, release, err := d.acquireServer(ctx, botID, botAgentID)
+	proc, release, err := d.host.Process(ctx, acp.PromptInput{BotID: botID, BotAgentID: botAgentID})
 	if err != nil {
-		return external.Account{}, serverFailure(err)
+		return external.Account{}, err
 	}
 	defer release()
-	method, _ := srv.conn.AgentMeta()["defaultAuthMethodId"].(string)
+	method, _ := proc.Conn().AgentMeta()["defaultAuthMethodId"].(string)
 	return external.Account{SignedIn: method == cachedTokenAuthMethod}, nil
 }
 
 // PurgeBotAgentAuth implements external.BotAgentAuthPurger: disconnecting
-// removes the login Grok holds in the Agent's home. Every process of the
-// Agent goes first and none starts until the file is gone: a running one
-// could refresh, and so rewrite, the login.
+// removes the login Grok holds in the Agent's home. A sign-in under way would
+// put a login back, so it ends first.
 func (d *Driver) PurgeBotAgentAuth(ctx context.Context, botID, botAgentID string) error {
-	unblock, err := d.procs.Drain(ctx, serverKey(botID, botAgentID), func(p agentproc.Process) bool {
-		return p.(*server).hasActiveTurns()
+	return d.procs.SignOut(ctx, d.workspaces, RuntimeType, botID, botAgentID, authFilePath(botAgentID), func() {
+		d.cancelAgentSignIns(botID, botAgentID)
 	})
-	if errors.Is(err, agentproc.ErrBusy) {
-		return external.Fail(external.FailureCredentialBusy, nil)
-	}
-	if err != nil {
-		return err
-	}
-	defer unblock()
-	// A sign-in under way would put a login back, so it ends here.
-	d.cancelAgentSignIns(botID, botAgentID)
-	client, err := d.workspaces.MCPClient(ctx, botID)
-	if err != nil {
-		return err
-	}
-	return deleteLogin(ctx, client, botAgentID)
 }
 
 // apiKeyFor returns the configuration with the API key an API key Agent

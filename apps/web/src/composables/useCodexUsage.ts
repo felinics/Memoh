@@ -1,6 +1,6 @@
 import type { Ref } from 'vue'
 import { useQuery } from '@pinia/colada'
-import { getBotsByBotIdAgentsByIdCodexUsage } from '@memohai/sdk'
+import { getBotsByBotIdAgentsByIdQuota } from '@memohai/sdk'
 
 // Usage is read from the Agent's Codex, which a read starts when it is not
 // running, so it is never polled: callers read it when it can have changed.
@@ -15,7 +15,7 @@ export function useCodexUsage(options: {
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     query: async ({ signal }) => {
-      const { data } = await getBotsByBotIdAgentsByIdCodexUsage({
+      const { data } = await getBotsByBotIdAgentsByIdQuota({
         path: { bot_id: options.botId.value, id: options.botAgentId.value },
         signal,
         throwOnError: true,

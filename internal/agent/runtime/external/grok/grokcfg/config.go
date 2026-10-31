@@ -4,6 +4,7 @@ package grokcfg
 
 import (
 	"errors"
+	"slices"
 	"strings"
 )
 
@@ -54,14 +55,14 @@ func ParseAgentConfig(metadata map[string]any) (Config, error) {
 	return cfg, nil
 }
 
+// PermissionModes is Grok Build's permission menu.
+var PermissionModes = []string{PermissionAsk, PermissionAuto, PermissionAlwaysApprove}
+
+const DefaultPermissionMode = PermissionAsk
+
 // ValidPermissionMode also accepts an unset value, which means ask.
 func ValidPermissionMode(mode string) bool {
-	switch mode {
-	case "", PermissionAsk, PermissionAuto, PermissionAlwaysApprove:
-		return true
-	default:
-		return false
-	}
+	return mode == "" || slices.Contains(PermissionModes, mode)
 }
 
 func metadataString(meta map[string]any, key string) string {

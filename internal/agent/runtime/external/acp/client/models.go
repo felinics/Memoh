@@ -16,17 +16,18 @@ var (
 	ErrSessionConfigUpdateUnconfirmed = errors.New("ACP agent did not confirm the session configuration update")
 	ErrSessionNotInitialized          = errors.New("ACP session is not initialized")
 	ErrSessionClosed                  = errors.New("ACP session is closed")
-	ErrPromptRequired                 = errors.New("prompt is required")
+	// ErrSessionCloseUnconfirmed reports a session the agent did not confirm
+	// closing: it offers no session/close, or did not answer it. The agent may
+	// still hold the session until its process ends.
+	ErrSessionCloseUnconfirmed = errors.New("ACP agent did not confirm closing the session")
+	ErrPromptRequired          = errors.New("prompt is required")
 	// ErrPromptCancellationUnconfirmed means session/cancel was sent, but the
 	// original session/prompt did not reach a confirmed terminal response (with
 	// its pre-response notification watermark drained) before the grace period.
 	// A runtime in this state must not be reused for another prompt.
 	ErrPromptCancellationUnconfirmed = errors.New("ACP prompt cancellation was not confirmed")
-	// ErrSessionResumeUnsupported means the agent does not advertise
-	// session/resume.
-	ErrSessionResumeUnsupported = errors.New("ACP agent does not support resuming sessions")
-	ErrImagePromptUnsupported   = errors.New("ACP agent does not support image prompts")
-	ErrInvalidPromptImage       = errors.New("invalid ACP prompt image")
+	ErrImagePromptUnsupported        = errors.New("ACP agent does not support image prompts")
+	ErrInvalidPromptImage            = errors.New("invalid ACP prompt image")
 )
 
 type ModelInfo struct {
@@ -93,38 +94,6 @@ func modelsFromSelectOptions(options acp.SessionConfigSelectOptions) []ModelInfo
 	return out
 }
 
-func modelStateFromLegacy(state *legacySessionModelState) ModelState {
-	if state == nil {
-		return ModelState{Supported: false}
-	}
-	out := ModelState{
-		Supported:      true,
-		CurrentModelID: strings.TrimSpace(state.CurrentModelID),
-		Available:      make([]ModelInfo, 0, len(state.AvailableModels)),
-	}
-	seen := make(map[string]struct{}, len(state.AvailableModels))
-	for _, model := range state.AvailableModels {
-		id := strings.TrimSpace(model.ModelID)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		name := strings.TrimSpace(model.Name)
-		if name == "" {
-			name = id
-		}
-		item := ModelInfo{ID: id, Name: name}
-		if model.Description != nil {
-			item.Description = strings.TrimSpace(*model.Description)
-		}
-		out.Available = append(out.Available, item)
-	}
-	return out
-}
-
 func cloneModelState(state ModelState) ModelState {
 	state.Available = append([]ModelInfo(nil), state.Available...)
 	return state
@@ -158,8 +127,8 @@ func (s *Session) SetModel(ctx context.Context, modelID string) (ModelState, err
 		s.mu.Unlock()
 		return state, ErrSessionClosed
 	}
-	selector := s.modelSelector
-	if !s.modelState.Supported || selector == nil {
+	configID := s.modelConfigID
+	if !s.modelState.Supported || configID == "" {
 		state := cloneModelState(s.modelState)
 		s.mu.Unlock()
 		return state, ErrModelSelectionUnsupported
@@ -181,46 +150,30 @@ func (s *Session) SetModel(ctx context.Context, modelID string) (ModelState, err
 		s.mu.Unlock()
 		return state, nil
 	}
+	conn := s.conn
+	sessionID := s.sessionID
 	s.mu.Unlock()
 
-	update, err := selector.selectModel(ctx, modelID)
+	resp, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
+		ValueId: &acp.SetSessionConfigOptionValueId{
+			SessionId: sessionID,
+			ConfigId:  acp.SessionConfigId(configID),
+			Value:     acp.SessionConfigValueId(modelID),
+		},
+	})
 	if err != nil {
 		return s.ModelState(), err
 	}
-	if update.hasConfigOptionsState {
-		_, confirmed := modelStateFromACP(update.configOptions)
-		if !confirmed.Supported || confirmed.CurrentModelID != modelID {
-			return s.ModelState(), fmt.Errorf("%w: model %q", ErrSessionConfigUpdateUnconfirmed, modelID)
-		}
-		// The response is the authoritative full config snapshot. A model switch
-		// may also change the available or selected thought levels.
-		s.replaceConfigOptions(s.sessionID, update.configOptions)
-	} else {
-		// The dedicated model RPC has no state in its response. Update the cached
-		// value only if the session did not switch protocol adapters concurrently.
-		s.mu.Lock()
-		if s.modelSelector == selector {
-			s.modelState.CurrentModelID = strings.TrimSpace(update.currentModelID)
-		}
-		s.mu.Unlock()
+	_, confirmed := modelStateFromACP(resp.ConfigOptions)
+	if !confirmed.Supported || confirmed.CurrentModelID != modelID {
+		return s.ModelState(), fmt.Errorf("%w: model %q", ErrSessionConfigUpdateUnconfirmed, modelID)
 	}
+	// The response is the authoritative full config snapshot. A model switch
+	// may also change the available or selected thought levels.
+	s.replaceConfigOptions(sessionID, resp.ConfigOptions)
 	state := s.ModelState()
 	if state.CurrentModelID != modelID {
 		return state, fmt.Errorf("%w: model %q", ErrSessionConfigUpdateUnconfirmed, modelID)
 	}
 	return state, nil
-}
-
-func (s *Session) installLegacyModels(state *legacySessionModelState) {
-	parsed := modelStateFromLegacy(state)
-	if s == nil || !parsed.Supported {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, standard := s.modelSelector.(*configOptionModelSelector); standard {
-		return
-	}
-	s.modelSelector = &legacyModelSelector{conn: s.conn, sessionID: s.sessionID}
-	s.modelState = parsed
 }

@@ -697,6 +697,37 @@ func (s *Service) ListBySessionToolCalls(ctx context.Context, botID, sessionID s
 	return result, nil
 }
 
+// ListByIDs returns the bot's requests with the given ids, whatever session
+// they belong to. It backs read-only projections of history copied from
+// another session; ids that are not UUIDs are skipped.
+func (s *Service) ListByIDs(ctx context.Context, botID string, ids []string) ([]Request, error) {
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return nil, err
+	}
+	pgIDs := make([]pgtype.UUID, 0, len(ids))
+	for _, id := range normalizeToolCallIDs(ids) {
+		if pgID, err := db.ParseUUID(id); err == nil {
+			pgIDs = append(pgIDs, pgID)
+		}
+	}
+	if len(pgIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := s.queries.ListToolApprovalsByBotIDs(ctx, sqlc.ListToolApprovalsByBotIDsParams{
+		BotID: pgBotID,
+		Ids:   pgIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Request, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, requestFromRow(row))
+	}
+	return result, nil
+}
+
 func (s *Service) listBySession(ctx context.Context, botID, sessionID string, pendingOnly bool) ([]Request, error) {
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {

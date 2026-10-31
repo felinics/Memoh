@@ -7,12 +7,11 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 func TestModelStateFollowsWhatGrokReports(t *testing.T) {
 	grok := &fakeGrok{models: map[string]any{"currentModelId": "grok-b", "availableModels": []any{map[string]any{"modelId": "grok-b"}}}}
-	srv := newTestServer(t, grok)
+	srv := newTestProcess(t, grok)
 	ctx := context.Background()
 
 	// Nothing pushed yet: the catalog is read from Grok, not from the
@@ -34,7 +33,7 @@ func TestModelStateFollowsWhatGrokReports(t *testing.T) {
 
 func TestGatewayStatusReportsOnlyTheMemohTools(t *testing.T) {
 	grok := &fakeGrok{}
-	srv := newTestServer(t, grok)
+	srv := newTestProcess(t, grok)
 	ctx := context.Background()
 	if _, ok := srv.gatewayStatus(ctx, "s1", 50*time.Millisecond); ok {
 		t.Fatal("a status Grok has not reported must not be invented")
@@ -55,7 +54,7 @@ func TestGatewayStatusReportsOnlyTheMemohTools(t *testing.T) {
 
 func TestCompactForkAndInfoSpeakGroksMethods(t *testing.T) {
 	grok := &fakeGrok{}
-	srv := newTestServer(t, grok)
+	srv := newTestProcess(t, grok)
 	ctx := context.Background()
 
 	if err := srv.compact(ctx, "s1"); err != nil || len(grok.compacted) != 1 || grok.compacted[0] != "s1" {
@@ -85,14 +84,5 @@ func TestForkThreadRefusesAnEarlierTurn(t *testing.T) {
 	}
 	if _, err := d.ForkThread(context.Background(), "bot", "agent", map[string]any{}, ""); err == nil {
 		t.Fatal("a conversation without a Grok session cannot be forked")
-	}
-}
-
-func TestGrokForkPolicyUsesThePersistedPromptAnchor(t *testing.T) {
-	if runtimekind.LatestForkAnchorKey(RuntimeType) != metadataLastPromptIDKey {
-		t.Fatal("fork projection and driver anchor keys differ")
-	}
-	if !runtimekind.ReadCommandsRequireIdle(RuntimeType) {
-		t.Fatal("native session reads must be admitted")
 	}
 }

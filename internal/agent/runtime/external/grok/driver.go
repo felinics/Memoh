@@ -3,7 +3,6 @@ package grok
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -11,12 +10,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"time"
 
-	acp "github.com/coder/acp-go-sdk"
-
-	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/agent/runtime/external/acp"
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/external/agentproc"
 	"github.com/felinics/memoh/internal/agent/runtime/external/grok/grokcfg"
@@ -25,90 +21,84 @@ import (
 	"github.com/felinics/memoh/internal/botagents"
 )
 
-// contextURI names the Memoh context document embedded in a prompt.
-const contextURI = "memoh://context/current-turn"
-
-// decisionQuiesceTimeout bounds how long a stopped turn waits for its
-// permission callbacks to unwind before its session is given up.
-const decisionQuiesceTimeout = 3 * time.Second
-
-// Driver runs Grok Build turns over ACP.
+// Driver runs Grok Build turns on the ACP core, as its Extension.
 type Driver struct {
+	host        *acp.Host
 	workspaces  external.Workspaces
 	agents      *botagents.Service
 	credentials *agentcredential.Service
-	approval    acpclient.ToolApprovalService
-	userInput   acpclient.UserInputService
-	toolGateway toolmount.Gateway
 	logger      *slog.Logger
 	// launchers picks the grok CLI copy to run per bot. Nil falls back to the
 	// toolkit path.
 	launchers external.LauncherResolver
-
-	// procs owns the process lifecycle: one per Bot Agent, shared by its
-	// conversations.
-	procs *agentproc.Supervisor
+	procs     *agentproc.Supervisor
 
 	// signIns are the account sign-ins under way, by login id; signInGates
 	// serialize starting, polling, and cancelling them per Agent.
 	signInsMu   sync.Mutex
 	signIns     map[string]*signIn
-	signInGates map[string]chan struct{}
+	signInGates map[agentproc.Key]chan struct{}
 }
+
+var _ acp.Extension = (*Driver)(nil)
 
 func NewDriver(
 	workspaces external.Workspaces,
 	agents *botagents.Service,
 	credentials *agentcredential.Service,
 	approval acpclient.ToolApprovalService,
+	userInput acpclient.UserInputService,
 	toolGateway toolmount.Gateway,
+	launchers external.LauncherResolver,
 	procs *agentproc.Supervisor,
 	logger *slog.Logger,
 ) *Driver {
-	return &Driver{
+	logger = logger.With(slog.String("runtime", RuntimeType))
+	d := &Driver{
 		workspaces:  workspaces,
 		agents:      agents,
 		credentials: credentials,
-		approval:    approval,
-		toolGateway: toolGateway,
+		launchers:   launchers,
 		procs:       procs,
-		logger:      logger.With(slog.String("runtime", RuntimeType)),
+		logger:      logger,
 		signIns:     map[string]*signIn{},
-		signInGates: map[string]chan struct{}{},
+		signInGates: map[agentproc.Key]chan struct{}{},
 	}
+	d.host = acp.NewHost(d, acp.HostDeps{
+		Logger:    logger,
+		Procs:     procs,
+		Gateway:   toolGateway,
+		Approval:  approval,
+		UserInput: userInput,
+	})
+	return d
 }
-
-var (
-	_ external.Driver             = (*Driver)(nil)
-	_ external.DependencyRequirer = (*Driver)(nil)
-)
 
 // RuntimeType implements external.Driver.
 func (*Driver) RuntimeType() string { return RuntimeType }
 
-// RequiredDependency implements external.DependencyRequirer.
-func (*Driver) RequiredDependency() string { return dependencyID }
-
-// SetLauncherResolver installs the workspace dependency resolver. Setter
-// injection keeps the driver constructible without one.
-func (d *Driver) SetLauncherResolver(r external.LauncherResolver) { d.launchers = r }
-
-// SetUserInputService installs the service that puts Grok's questions to the
-// user. Without one, Grok is told every question went unanswered.
-func (d *Driver) SetUserInputService(s acpclient.UserInputService) { d.userInput = s }
-
-func serverKey(botID, botAgentID string) string {
-	return agentproc.Key(RuntimeType, botID, botAgentID)
+// Capabilities is what Grok Build declares (external.Caps).
+var Capabilities = external.Caps{
+	Dependency:              dependencyID,
+	Command:                 "grok",
+	ForkNeedsRuntime:        true,
+	ForkAnchorKey:           metadataLastPromptIDKey,
+	ReadCommandsRequireIdle: true,
 }
 
-// runningServers lists every live process of the Agent: the current one and
-// those retired but still finishing turns.
-func (d *Driver) runningServers(key string) []*server {
-	var servers []*server
-	for _, proc := range d.procs.Processes(key) {
-		servers = append(servers, proc.(*server))
+// Caps implements external.Driver.
+func (*Driver) Caps() external.Caps { return Capabilities }
+
+// serverKey names the Agent's Grok process.
+func serverKey(botID, botAgentID string) agentproc.Key {
+	return agentproc.Key{Runtime: RuntimeType, BotID: botID, BotAgentID: botAgentID}
+}
+
+// agentProcesses matches every process of the Agent.
+func agentProcesses(botID, botAgentID string) func(agentproc.Key) bool {
+	return func(k agentproc.Key) bool {
+		return k.Runtime == RuntimeType && k.BotID == botID && k.BotAgentID == botAgentID
 	}
-	return servers
 }
 
 // agentConfig reads the Agent's configuration without its credential, which
@@ -131,174 +121,171 @@ func fingerprint(cfg Config, launcher external.Launcher) string {
 	}, "\x00")
 }
 
-// acquireServer leases the Agent's process, starting one from the current
-// configuration when there is none or it was started from another. The
-// caller must call the returned release when done.
-func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*server, func(), error) {
+// grokState is Grok's own state of a process the core started.
+func grokState(proc *acp.Process) *grokProcess {
+	state, _ := proc.State().(*grokProcess)
+	return state
+}
+
+// Launch implements acp.Extension. One process serves every conversation of
+// the Agent and its sign-in, account and catalog.
+func (d *Driver) Launch(ctx context.Context, input acp.PromptInput) (acp.Launch, error) {
+	botID, botAgentID := input.BotID, input.BotAgentID
 	info, err := external.ContainerWorkspace(ctx, d.workspaces, botID, RuntimeType)
 	if err != nil {
-		return nil, nil, err
+		return acp.Launch{}, err
 	}
 	cfg, err := d.agentConfig(ctx, botID, botAgentID)
 	if err != nil {
-		return nil, nil, err
+		return acp.Launch{}, err
 	}
 	if cfg, err = d.apiKeyFor(ctx, botID, botAgentID, cfg); err != nil {
-		return nil, nil, err
+		return acp.Launch{}, err
 	}
 	launcher, err := agentproc.ResolveLauncher(ctx, d.launchers, botID, dependencyID, defaultLauncherPath)
 	if err != nil {
-		return nil, nil, err
+		return acp.Launch{}, err
 	}
-	start := func(ctx context.Context) (agentproc.Process, string, error) {
-		client, err := d.workspaces.MCPClient(ctx, botID)
-		if err != nil {
-			return nil, "", fmt.Errorf("workspace bridge for bot %s: %w", botID, err)
-		}
-		if err := prepareHome(ctx, client, botAgentID, cfg); err != nil {
-			return nil, "", err
-		}
-		// The process outlives the request that happened to start it.
-		srv, err := startServer(context.WithoutCancel(ctx), botID, grokHome(botAgentID), client, info, cfg.APIKey, launcher, d.logger)
-		if err != nil {
-			return nil, "", err
-		}
-		version, _ := srv.conn.AgentMeta()["agentVersion"].(string)
-		agentproc.ObserveVersion(ctx, d.launchers, botID, dependencyID, version)
-		started := launcher
-		started.Version = firstNonEmpty(version, launcher.Version)
-		return srv, fingerprint(cfg, started), nil
-	}
-	proc, release, err := d.procs.Lease(ctx, serverKey(botID, botAgentID), fingerprint(cfg, launcher), start)
-	if err != nil {
-		return nil, nil, err
-	}
-	return proc.(*server), release, nil
+	return acp.Launch{
+		Key:         serverKey(botID, botAgentID),
+		Fingerprint: fingerprint(cfg, launcher),
+		Info:        info,
+		Start: func(ctx context.Context) (acp.Started, error) {
+			client, err := d.workspaces.MCPClient(ctx, botID)
+			if err != nil {
+				return acp.Started{}, fmt.Errorf("workspace bridge for bot %s: %w", botID, err)
+			}
+			if err := prepareHome(ctx, client, botAgentID, cfg); err != nil {
+				return acp.Started{}, err
+			}
+			// Grok can also serve through a shared leader process that
+			// outlives its stdio client; sessions and the login file must die
+			// with this process. Memoh composes Grok's whole environment: its
+			// state lives in GROK_HOME.
+			proc, conn, err := acpclient.Launch(ctx, client, launcher.Path, []string{"agent", "--no-leader", "stdio"}, defaultProjectPath,
+				acpclient.ProcessOptions{Env: processEnv(grokHome(botAgentID), cfg.APIKey), CleanEnv: true, Logger: d.logger}, acpclient.ClientCapabilities{})
+			if err != nil {
+				// What Grok said on its way down is the user's to read.
+				return acp.Started{}, external.Upstream(err)
+			}
+			version, _ := conn.AgentMeta()["agentVersion"].(string)
+			if version != pinnedVersion {
+				// Grok's extensions are read as its pinned release defines
+				// them. A drifted binary usually still answers them, so serve
+				// and say so.
+				d.logger.WarnContext(ctx, "grok CLI version differs from the release the driver was checked against",
+					slog.String("bot_id", botID), slog.String("running", version), slog.String("pinned", pinnedVersion))
+			}
+			agentproc.ObserveVersion(ctx, d.launchers, botID, dependencyID, version)
+			started := launcher
+			started.Version = external.FirstNonEmpty(version, launcher.Version)
+			return acp.Started{
+				Proc:        proc,
+				Conn:        conn,
+				Bridge:      client,
+				State:       newGrokProcess(conn),
+				Fingerprint: fingerprint(cfg, started),
+			}, nil
+		},
+	}, nil
 }
 
-// releaseOtherCopies keeps one process per Grok session: a copy of the
-// conversation's session an earlier process of the Agent still holds is closed
-// before srv opens it. Admission keeps two operations off one conversation, so
-// such a copy is idle; one that is not refuses.
-func (d *Driver) releaseOtherCopies(srv *server, input external.PromptInput) error {
-	for _, other := range d.runningServers(serverKey(input.BotID, input.BotAgentID)) {
-		if other == srv {
-			continue
+// Session implements acp.Extension. Grok takes the permission mode only when
+// a session is created or resumed, so a change to it opens the session
+// again. The stored session id is the authority, not the session the process
+// happens to hold: clearing a conversation's history clears the id.
+func (*Driver) Session(_ context.Context, proc *acp.Process, input acp.PromptInput) (acp.SessionSpec, error) {
+	stored := strings.TrimSpace(external.MetadataString(input.RuntimeMetadata, metadataSessionIDKey))
+	mode := input.PermissionMode
+	return acp.SessionSpec{
+		ProjectPath: strings.TrimSpace(input.ProjectPath),
+		Variant:     mode,
+		Stored:      acp.StoredSession{ID: stored, Owned: stored != "", Known: true},
+		Config: func(cfg *acpclient.SessionConfig) {
+			// The session opened again is reported afresh.
+			grokState(proc).forgetToolStatus(stored)
+			cfg.Meta = sessionMeta(mode)
+			cfg.MCPToolCall = mcpToolCall
+			cfg.RuntimeOwnsApproval = true
+			cfg.UserQuestions = userQuestions
+			cfg.SessionGone = sessionGone
+		},
+	}, nil
+}
+
+// Opened implements acp.Extension; a Grok session needs nothing more.
+func (*Driver) Opened(context.Context, *acp.Binding, acp.PromptInput) error { return nil }
+
+// Configure implements acp.Extension: says whether Grok reached Memoh's tools,
+// then moves the session onto the turn's model and effort.
+func (d *Driver) Configure(ctx context.Context, b *acp.Binding, input acp.PromptInput) error {
+	state := grokState(b.Process())
+	// Grok reports a gateway it could not reach within a moment of the
+	// session opening; a report that never comes does not hold the turn.
+	if b.ToolsMounted() && input.Sink != nil {
+		if status, ok := state.gatewayStatus(ctx, b.Session().ID(), gatewayStatusTimeout); ok && status.Status == mcpStatusUnavailable {
+			toolmount.EmitUnavailableNotice(input.Sink, "Grok could not connect to Memoh tools: "+external.FirstNonEmpty(status.Reason, status.Detail, status.Status))
 		}
-		th := other.thread(input.ThreadID)
-		if th == nil {
-			continue
-		}
-		if th.turn.Load() != nil {
-			return external.Fail(external.FailureRuntimeBusy, nil)
-		}
-		other.dropThread(input.ThreadID, th, false)
 	}
-	return nil
+	cfg, err := d.agentConfig(ctx, input.BotID, input.BotAgentID)
+	if err != nil {
+		return err
+	}
+	// A catalog Grok did not report leaves the session's own defaults.
+	catalog, _ := catalogFromState(state.modelState(ctx))
+	return applyTurnConfig(ctx, b.Session(), catalog, external.FirstNonEmpty(input.ModelID, cfg.Model), strings.TrimSpace(input.ReasoningEffort), cfg.ReasoningEffort)
+}
+
+// turnInput is the ACP turn of a Grok turn.
+func (d *Driver) turnInput(ctx context.Context, input external.PromptInput) (acp.PromptInput, error) {
+	cfg, err := d.agentConfig(ctx, input.BotID, input.BotAgentID)
+	if err != nil {
+		return acp.PromptInput{}, err
+	}
+	turn := acp.TurnInput(input)
+	turn.PermissionMode = permissionMode(input.RuntimeMetadata, cfg)
+	return turn, nil
 }
 
 // Prompt implements external.Driver: one turn on the conversation's session.
 func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (external.PromptResult, error) {
-	cfg, err := d.agentConfig(ctx, input.BotID, input.BotAgentID)
+	turn, err := d.turnInput(ctx, input)
 	if err != nil {
-		return external.PromptResult{}, external.Unavailable(err)
-	}
-	srv, release, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)
-	if err != nil {
-		return external.PromptResult{}, serverFailure(err)
-	}
-	defer release()
-	if err := d.releaseOtherCopies(srv, input); err != nil { //nolint:contextcheck // an idle copy closes on the old process's own lifecycle.
 		return external.PromptResult{}, err
 	}
-
-	th, resumeLost, err := srv.openThread(ctx, d.toolGateway, d.approval, d.userInput, input, permissionMode(input.RuntimeMetadata, cfg), true)
-	if err != nil {
-		if ctx.Err() != nil {
-			return external.PromptResult{}, nil
-		}
-		if errors.Is(err, external.ErrThreadUnavailable) {
-			return external.PromptResult{}, err
-		}
-		return external.PromptResult{}, turnFailure(err, external.FailureUnavailable)
+	result, err := d.host.Prompt(ctx, turn)
+	out := external.PromptResult{
+		Output:     result.Output,
+		Text:       result.Text,
+		StopReason: result.StopReason,
+		Usage:      usageFromMeta(result.Meta),
 	}
-	if resumeLost {
-		input.Sink.EmitStreamEvent(event.StreamEvent{
-			Type:       event.RuntimeNotice,
-			NoticeKind: event.NoticeNativeHistoryLost,
-			Delta:      "Grok Build could not resume this conversation's session and started a new one. It does not remember the earlier messages shown here.",
-		})
-	}
-	// Said every turn: silently missing tools is what this notice exists to
-	// prevent. Grok reports a gateway it could not reach within a moment of
-	// the session opening; a report that never comes does not hold the turn.
-	if th.toolless {
-		toolmount.EmitUnavailableNotice(input.Sink, "this conversation's session started without Memoh tools")
-	} else if status, ok := srv.gatewayStatus(ctx, th.session.ID(), gatewayStatusTimeout); ok && status.Status == mcpStatusUnavailable {
-		toolmount.EmitUnavailableNotice(input.Sink, "Grok could not connect to Memoh tools: "+firstNonEmpty(status.Reason, status.Detail, status.Status))
-	}
-	out := external.PromptResult{RuntimeMetadata: map[string]any{metadataSessionIDKey: th.session.ID()}}
-
-	th.turn.Store(&turnContext{ctx: ctx, input: input})
-	defer th.turn.Store(nil)
-	sink := external.NewTurnStream(input.Sink, input.ToolOutputLimit)
-	defer sink.Finish()
-	unregisterToolEvents := toolmount.RegisterTurnSink(d.toolGateway.Contexts, input.BotID, input.ThreadID, input.RunID, sink.EmitStreamEvent)
-	defer unregisterToolEvents()
-
-	// A catalog Grok did not report leaves the session's own defaults.
-	catalog, _ := catalogFromState(srv.modelState(ctx))
-	if err := applyTurnConfig(ctx, th.session, catalog, firstNonEmpty(input.ModelID, cfg.Model), strings.TrimSpace(input.ReasoningEffort), cfg.ReasoningEffort); err != nil {
-		if ctx.Err() != nil {
-			return out, nil
-		}
-		return out, external.Fail(external.FailureControlFailed, err)
-	}
-
-	prompt, resources, options := promptContent(input)
-	result, err := th.session.PromptWithToolContextOptions(ctx, prompt, resources, srv.toolSession(th), options, sink)
-	if errors.Is(err, acpclient.ErrImagePromptUnsupported) && len(options.Images) > 0 && input.CanFallbackImagesToFiles {
-		options.Images = nil
-		result, err = th.session.PromptWithToolContextOptions(ctx, prompt, resources, srv.toolSession(th), options, sink)
-	}
-	// Stop gateway deliveries before the transcript snapshot is taken.
-	unregisterToolEvents()
-	out.Text = result.Text
-	out.StopReason = result.StopReason
-	out.Usage = usageFromMeta(result.Meta)
 	if out.Usage == nil {
 		// A Grok that reports usage only where ACP defines it.
 		out.Usage = result.Usage
 	}
-	// The prompt id is the turn's anchor: a fork is offered from the latest.
-	if promptID, _ := result.Meta["promptId"].(string); promptID != "" {
-		out.AgentTurnID = promptID
-		out.RuntimeMetadata[metadataLastPromptIDKey] = promptID
-	}
-	out.Output = sink.Transcript(result.Text)
-
-	if err != nil {
-		if ctx.Err() != nil {
-			// A stop is not a failure: the partial transcript persists. The
-			// session is reusable only once Grok confirmed the cancellation
-			// and its permission callbacks have unwound; otherwise new work
-			// moves to a fresh process and this one dies with its last turn.
-			if errors.Is(err, acpclient.ErrPromptCancellationUnconfirmed) || !th.session.WaitDecisionCallbacksIdle(decisionQuiesceTimeout) {
-				srv.dropThread(input.ThreadID, th, true) //nolint:contextcheck // teardown must outlive the stopped turn.
-				d.procs.MarkBroken(serverKey(input.BotID, input.BotAgentID), srv)
-			}
-			return out, nil
+	// Discuss turns run on a throwaway session no later turn picks up.
+	if result.SessionID != "" && !input.ForceFreshRuntime {
+		out.RuntimeMetadata = map[string]any{metadataSessionIDKey: result.SessionID}
+		// The prompt id is the turn's anchor: a fork is offered from the
+		// latest.
+		if promptID, _ := result.Meta["promptId"].(string); promptID != "" {
+			out.AgentTurnID = promptID
+			out.RuntimeMetadata[metadataLastPromptIDKey] = promptID
 		}
-		if errors.Is(err, acpclient.ErrImagePromptUnsupported) || errors.Is(err, acpclient.ErrInvalidPromptImage) {
-			// The application names these input errors itself.
-			return out, err
-		}
-		return out, turnFailure(err, 0)
 	}
-	// Grok also ends a turn as cancelled on its own, for one when a
-	// permission it asked for is refused. That turn stopped, it did not finish.
-	out.TurnCompleted = result.StopReason != string(acp.StopReasonCancelled)
-	return out, nil
+	switch {
+	case err == nil:
+		out.TurnCompleted = acp.TurnCompleted(result)
+		return out, nil
+	case ctx.Err() != nil:
+		// A stop is not a failure: the partial transcript persists.
+		return out, nil
+	case errors.Is(err, acpclient.ErrImagePromptUnsupported), errors.Is(err, acpclient.ErrInvalidPromptImage), errors.Is(err, acpclient.ErrPromptRequired):
+		// The application names these input errors itself.
+		return out, err
+	}
+	return out, turnFailure(err)
 }
 
 // applyTurnConfig moves the session onto the turn's model and reasoning
@@ -343,27 +330,4 @@ func applyTurnConfig(ctx context.Context, session *acpclient.Session, catalog []
 		}
 	}
 	return nil
-}
-
-func promptContent(input external.PromptInput) (string, []acpclient.PromptResource, acpclient.PromptOptions) {
-	options := acpclient.PromptOptions{ToolOutputLimit: input.ToolOutputLimit}
-	for _, image := range input.Images {
-		if len(image.Data) == 0 {
-			continue
-		}
-		options.Images = append(options.Images, acpclient.PromptImage{
-			MimeType: image.MimeType,
-			Data:     base64.StdEncoding.EncodeToString(image.Data),
-		})
-	}
-	var resources []acpclient.PromptResource
-	if markdown := strings.TrimSpace(input.ContextMarkdown); markdown != "" {
-		resources = []acpclient.PromptResource{{
-			URI:      firstNonEmpty(input.ContextURI, contextURI),
-			MimeType: "text/markdown",
-			Text:     markdown,
-		}}
-	}
-	options.AllowResourceOnly = len(input.AttachmentReferences) > 0 && len(resources) > 0
-	return input.Prompt, resources, options
 }

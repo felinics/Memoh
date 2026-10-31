@@ -29,21 +29,21 @@ func unavailablePermissionModes(model initializeModel) []string {
 }
 
 func (t *turnRunner) configureModes(ctx context.Context, cfg claudecfg.Config, models []initializeModel) error {
-	mode := firstNonEmpty(metadataString(t.input.RuntimeMetadata, "permission_mode"), cfg.PermissionMode, "inherit")
+	mode := external.FirstNonEmpty(external.MetadataString(t.input.RuntimeMetadata, "permission_mode"), cfg.PermissionMode, "inherit")
 	if !claudecfg.ValidPermissionMode(mode) {
 		return errs.New(fmt.Sprintf("invalid claude permission mode %q", mode))
 	}
-	plan := metadataString(t.input.RuntimeMetadata, "collaboration_mode")
+	plan := external.MetadataString(t.input.RuntimeMetadata, "collaboration_mode")
 	if plan != "" {
-		if _, err := claudePlanMode(plan); err != nil {
+		if _, err := external.PlanModeState(plan); err != nil {
 			return err
 		}
 	}
 	if mode == "auto" {
-		selected := firstNonEmpty(t.input.ModelID, cfg.Model)
+		selected := external.FirstNonEmpty(t.input.ModelID, cfg.Model)
 		for _, model := range models {
 			if (selected == strings.TrimSpace(model.Value) || selected == strings.TrimSpace(model.ResolvedModel)) && !model.SupportsAutoMode {
-				return external.ErrModeUnavailable
+				return external.Fail(external.FailureModeUnavailable, nil)
 			}
 		}
 	}
@@ -117,7 +117,7 @@ func (t *turnRunner) setNativeMode(ctx context.Context, mode string) error {
 	if err != nil {
 		var rejected *controlRejection
 		if errors.As(err, &rejected) {
-			return fmt.Errorf("%w: %w", external.ErrModeUnavailable, err)
+			return fmt.Errorf("%w: %w", external.Fail(external.FailureModeUnavailable, nil), err)
 		}
 		return err
 	}
@@ -128,7 +128,7 @@ func (t *turnRunner) setNativeMode(ctx context.Context, mode string) error {
 		return err
 	}
 	if result.Mode != mode {
-		return fmt.Errorf("%w: claude did not confirm permission mode %q", external.ErrModeUnavailable, mode)
+		return fmt.Errorf("%w: claude did not confirm permission mode %q", external.Fail(external.FailureModeUnavailable, nil), mode)
 	}
 	t.observePermissionMode(mode)
 	return nil

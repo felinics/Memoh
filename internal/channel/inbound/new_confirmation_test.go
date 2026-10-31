@@ -19,6 +19,7 @@ import (
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/slash"
 )
 
@@ -83,8 +84,8 @@ func (unreadableBotAgents) BotAgents(context.Context, string) ([]BotAgent, error
 
 var testBotAgents = fakeBotAgentReader{
 	{ID: testACPBotAgentID, Name: "Custom Agent", Runtime: "acp", ACPAgentID: "custom-agent", Enabled: true},
-	{ID: testCodexBotAgentID, Name: "Codex", Runtime: sessionpkg.RuntimeCodex, Enabled: true},
-	{ID: "aaaaaaaa-0000-0000-0000-000000000003", Name: "Retired", Runtime: sessionpkg.RuntimeCodex},
+	{ID: testCodexBotAgentID, Name: "Codex", Runtime: string(runtimekind.Codex), Enabled: true},
+	{ID: "aaaaaaaa-0000-0000-0000-000000000003", Name: "Retired", Runtime: string(runtimekind.Codex)},
 }
 
 func resolveNewSessionTypeForTest(t *testing.T, text string, msg channel.InboundMessage) (string, error) {
@@ -142,7 +143,7 @@ func TestResolveNewSessionSpecNamesAgent(t *testing.T) {
 		{"/new chat Custom  Agent", dm, sessionpkg.TypeChat, sessionpkg.RuntimeACPAgent, sessionpkg.TypeACPAgent, testACPBotAgentID},
 		{"/new discuss custom agent", group, sessionpkg.TypeDiscuss, sessionpkg.RuntimeACPAgent, sessionpkg.TypeDiscuss, testACPBotAgentID},
 		{"/new custom agent", group, sessionpkg.TypeDiscuss, sessionpkg.RuntimeACPAgent, sessionpkg.TypeDiscuss, testACPBotAgentID},
-		{"/new CODEX", dm, sessionpkg.TypeChat, sessionpkg.RuntimeCodex, sessionpkg.TypeChat, testCodexBotAgentID},
+		{"/new CODEX", dm, sessionpkg.TypeChat, string(runtimekind.Codex), sessionpkg.TypeChat, testCodexBotAgentID},
 	}
 	for _, tc := range cases {
 		t.Run(tc.cmd, func(t *testing.T) {
@@ -178,7 +179,7 @@ func TestResolveNewSessionSpecRejectsUnusableAgent(t *testing.T) {
 // for a name.
 func TestResolveNewSessionSpecTriesWholeNameBeforeModeWord(t *testing.T) {
 	agents := []BotAgent{
-		{ID: testCodexBotAgentID, Name: "Chat GPT", Runtime: sessionpkg.RuntimeCodex, Enabled: true},
+		{ID: testCodexBotAgentID, Name: "Chat GPT", Runtime: string(runtimekind.Codex), Enabled: true},
 		{ID: testACPBotAgentID, Name: "chat", Runtime: "acp", ACPAgentID: "custom-agent", Enabled: true},
 	}
 	group := channel.InboundMessage{Channel: channel.ChannelTypeTelegram, Conversation: channel.Conversation{Type: "group"}}
@@ -400,8 +401,8 @@ func TestHandleNewSessionCommandCreatesACPChatSpec(t *testing.T) {
 	if spec.CreatedByUserID != ownerID {
 		t.Fatalf("created_by_user_id = %q, want authenticated channel identity", spec.CreatedByUserID)
 	}
-	if got := newSessionMetadataString(spec.Metadata, "acp_agent_id"); got != "custom-agent" || spec.BotAgentID != testACPBotAgentID {
-		t.Fatalf("agent = %q bound to %q, want custom-agent bound to the named Agent", got, spec.BotAgentID)
+	if spec.ACPAgentID != "custom-agent" || spec.BotAgentID != testACPBotAgentID {
+		t.Fatalf("agent = %q bound to %q, want custom-agent bound to the named Agent", spec.ACPAgentID, spec.BotAgentID)
 	}
 	if len(sender.sent) != 1 {
 		t.Fatalf("sent replies = %d, want 1", len(sender.sent))
@@ -537,7 +538,6 @@ func TestHandleNewSessionCommandBareNewInheritsDefaultACP(t *testing.T) {
 			Runtime:     sessionpkg.RuntimeACPAgent,
 			ACPAgentID:  "custom-agent",
 			ProjectPath: "/workspace",
-			ProjectMode: sessionpkg.DefaultACPProjectMode,
 		}},
 	}
 	sender := &fakeReplySender{}
@@ -585,7 +585,6 @@ func TestHandleNewSessionCommandExplicitACPInheritsDefaultProject(t *testing.T) 
 			Runtime:     sessionpkg.RuntimeACPAgent,
 			ACPAgentID:  "custom-agent",
 			ProjectPath: "/workspace/default",
-			ProjectMode: sessionpkg.DefaultACPProjectMode,
 		}},
 		botAgents: testBotAgents,
 	}
@@ -693,7 +692,7 @@ func TestThreadErrorTranslatesThreadErrors(t *testing.T) {
 		{sessionpkg.ErrACPAgentNotConfigured, apperror.CodeACPAgentNotConfigured},
 		{sessionpkg.ErrACPUnknownAgent, apperror.CodeACPAgentNotFound},
 		{sessionpkg.ErrACPAgentNotEnabled, apperror.CodeACPAgentNotEnabled},
-		{sessionpkg.ErrACPRuntimeOwnerMissing, apperror.CodeACPRuntimeOwnerMissing},
+		{sessionpkg.ErrRuntimeOwnerMissing, apperror.CodeACPRuntimeOwnerMissing},
 	} {
 		if got := apperror.CodeOf(threadError(tc.err)); got != tc.code {
 			t.Errorf("threadError(%v) code = %q, want %s", tc.err, got, tc.code)
@@ -906,7 +905,7 @@ func TestHandleNewSessionCommandCreatesDirectAgentChatSpec(t *testing.T) {
 			t.Fatalf("handleNewSessionCommand() error = %v", err)
 		}
 		spec := ensurer.lastSpec
-		if spec.Mode != sessionpkg.TypeChat || spec.Runtime != sessionpkg.RuntimeCodex || spec.Type != sessionpkg.TypeChat || spec.BotAgentID != testCodexBotAgentID {
+		if spec.Mode != sessionpkg.TypeChat || spec.Runtime != string(runtimekind.Codex) || spec.Type != sessionpkg.TypeChat || spec.BotAgentID != testCodexBotAgentID {
 			t.Fatalf("spec = %#v, want chat/codex/chat bound to the named Agent", spec)
 		}
 		if got := newSessionMetadataString(spec.Metadata, "project_path"); got != wantProjectPath {

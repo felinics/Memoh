@@ -33,9 +33,7 @@ type ReasoningState struct {
 	Available     []ReasoningEffortInfo `json:"available_efforts,omitempty"`
 } // @name acpclient.ReasoningState
 
-func reasoningStateFromACP(options []acp.SessionConfigOption, fallbackConfigID string) (string, ReasoningState) {
-	var fallback *acp.SessionConfigOptionSelect
-	fallbackConfigID = strings.TrimSpace(fallbackConfigID)
+func reasoningStateFromACP(options []acp.SessionConfigOption) (string, ReasoningState) {
 	for i := range options {
 		option := options[i].Select
 		if option == nil || strings.TrimSpace(string(option.Id)) == "" {
@@ -44,12 +42,6 @@ func reasoningStateFromACP(options []acp.SessionConfigOption, fallbackConfigID s
 		if option.Category != nil && *option.Category == acp.SessionConfigOptionCategoryThoughtLevel {
 			return reasoningStateFromSelect(option)
 		}
-		if fallback == nil && option.Category == nil && fallbackConfigID != "" && strings.TrimSpace(string(option.Id)) == fallbackConfigID {
-			fallback = option
-		}
-	}
-	if fallback != nil {
-		return reasoningStateFromSelect(fallback)
 	}
 	return "", ReasoningState{Supported: false}
 }
@@ -133,21 +125,12 @@ func (s *Session) replaceConfigOptions(sessionID acp.SessionId, options []acp.Se
 		return
 	}
 	modelConfigID, modelState := modelStateFromACP(options)
-	reasoningConfigID, reasoningState := reasoningStateFromACP(options, s.reasoningConfigFallbackID)
+	reasoningConfigID, reasoningState := reasoningStateFromACP(options)
 	s.mu.Lock()
-	if modelConfigID != "" {
-		s.modelSelector = &configOptionModelSelector{
-			conn:      s.conn,
-			sessionID: s.sessionID,
-			configID:  acp.SessionConfigId(modelConfigID),
-		}
-		s.modelState = modelState
-	} else if !isLegacyModelSelector(s.modelSelector) {
-		// Config-option responses are full snapshots. The model capability was
-		// removed unless this session uses the independent legacy model protocol.
-		s.modelSelector = nil
-		s.modelState = ModelState{Supported: false}
-	}
+	// Config-option responses are full snapshots: no model option means the
+	// agent no longer offers model selection.
+	s.modelConfigID = modelConfigID
+	s.modelState = modelState
 	s.reasoningConfigID = reasoningConfigID
 	s.reasoningState = reasoningState
 	s.mu.Unlock()
@@ -194,7 +177,6 @@ func (s *Session) SetReasoningEffort(ctx context.Context, effort string) (Reason
 	conn := s.conn
 	sessionID := s.sessionID
 	configID := s.reasoningConfigID
-	fallbackConfigID := s.reasoningConfigFallbackID
 	s.mu.Unlock()
 
 	resp, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
@@ -207,7 +189,7 @@ func (s *Session) SetReasoningEffort(ctx context.Context, effort string) (Reason
 	if err != nil {
 		return s.ReasoningState(), err
 	}
-	_, confirmed := reasoningStateFromACP(resp.ConfigOptions, fallbackConfigID)
+	_, confirmed := reasoningStateFromACP(resp.ConfigOptions)
 	if !confirmed.Supported || confirmed.CurrentEffort != effort {
 		return s.ReasoningState(), fmt.Errorf("%w: reasoning effort %q", ErrSessionConfigUpdateUnconfirmed, effort)
 	}

@@ -3,7 +3,6 @@ package claudecode
 import (
 	"context"
 
-	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/external/agentproc"
 )
 
@@ -12,18 +11,6 @@ import (
 // manager installs what the user asks for, and turnRunner warns when the
 // handshake reports a CLI that drifted from PinnedCLIVersion.
 const dependencyID = "claude-code"
-
-var _ external.DependencyRequirer = (*Driver)(nil)
-
-// RequiredDependency implements external.DependencyRequirer.
-func (*Driver) RequiredDependency() string { return dependencyID }
-
-// SetLauncherResolver installs the resolver that picks which CLI copy a turn
-// executes. Without one the driver runs the toolkit launcher unconditionally.
-// Call it during assembly, before the driver serves turns.
-func (d *Driver) SetLauncherResolver(resolver external.LauncherResolver) {
-	d.launchers = resolver
-}
 
 // versionObserver returns the handshake callback that feeds the version the
 // CLI reports back to the launcher resolver.

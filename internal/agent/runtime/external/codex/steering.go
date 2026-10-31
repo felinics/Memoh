@@ -18,56 +18,19 @@ type pendingSteer struct {
 	settled  chan error
 }
 
-// A single consumer preserves queue order. It is joined before Prompt returns,
-// so an old consumer cannot deliver an input to a later turn on the same thread.
+// startSteering delivers same-turn input through Codex's turn/steer.
 func startSteering(ctx context.Context, client *conn, turn *turnState) func() {
-	source := turn.input.Steering
-	if source == nil || turn.input.Command != "" {
+	if turn.input.Command != "" {
 		return func() {}
 	}
-	workerCtx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		defer func() { _ = source.Close(ctx) }()
-		if err := source.Enable(workerCtx); err != nil {
-			return
-		}
-		ticker := time.NewTicker(time.Second) // Recover a lost/coalesced cross-owner wake.
-		defer ticker.Stop()
-		for {
-			select {
-			case <-workerCtx.Done():
-				return
-			case <-turn.done:
-				return
-			default:
-			}
-			input, ok, err := source.Next(workerCtx)
-			if err == nil && ok {
-				err = submitSteer(workerCtx, client, turn, input)
-			}
-			if err != nil {
-				if ctx.Err() == nil && (ok || workerCtx.Err() == nil) {
-					turn.logger.WarnContext(ctx, "codex steer was not delivered", slog.Any("error", err))
-					turn.emit(event.StreamEvent{Type: event.RuntimeNotice, NoticeKind: event.NoticeSteerFailed})
-				}
-				return // Never retry an uncertain RPC or silently move it to another turn.
-			}
-			if ok {
-				continue
-			}
-			select {
-			case <-workerCtx.Done():
-				return
-			case <-turn.done:
-				return
-			case <-source.Wake():
-			case <-ticker.C:
-			}
-		}
-	}()
-	return func() { cancel(); <-done }
+	return external.PumpSteering(ctx, turn.input.Steering, turn.done, nil, nil,
+		func(ctx context.Context, input external.SteerInput) error {
+			return submitSteer(ctx, client, turn, input)
+		},
+		func(err error) {
+			turn.logger.WarnContext(ctx, "codex steer was not delivered", slog.Any("error", err))
+			turn.emit(event.StreamEvent{Type: event.RuntimeNotice, NoticeKind: event.NoticeSteerFailed})
+		})
 }
 
 func submitSteer(ctx context.Context, client *conn, turn *turnState, input external.SteerInput) error {

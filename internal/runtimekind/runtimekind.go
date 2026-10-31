@@ -70,11 +70,6 @@ type capabilities struct {
 	// carry the agent-side model id (acp_model_id) instead of a Memoh model
 	// row, and reasoning efforts use the agent's own vocabulary.
 	AgentModel bool
-	// ReadCommandsRequireIdle: reads may open or replace a native session.
-	ReadCommandsRequireIdle bool
-	// LatestForkAnchorKey: only the native anchor stored at this key can fork.
-	// Empty means historical anchors are supported.
-	LatestForkAnchorKey string
 	// SessionModes this runtime can host.
 	SessionModes []string
 }
@@ -110,15 +105,13 @@ var capabilityByKind = map[Kind]capabilities{
 		SessionModes:   []string{ModeChat, ModeDiscuss, ModeSchedule},
 	},
 	GrokBuild: {
-		ReadCommandsRequireIdle: true,
-		LatestForkAnchorKey:     "grok_last_prompt_id",
-		External:                true,
-		Direct:                  true,
-		DisplayName:             "Grok Build",
-		DecisionWaiter:          true,
-		WorkspaceExec:           true,
-		AgentModel:              true,
-		SessionModes:            []string{ModeChat, ModeDiscuss, ModeSchedule},
+		External:       true,
+		Direct:         true,
+		DisplayName:    "Grok Build",
+		DecisionWaiter: true,
+		WorkspaceExec:  true,
+		AgentModel:     true,
+		SessionModes:   []string{ModeChat, ModeDiscuss, ModeSchedule},
 	},
 }
 
@@ -210,16 +203,4 @@ func SupportedSessionModes(raw string) []string {
 		return nil
 	}
 	return caps.SessionModes
-}
-
-// ReadCommandsRequireIdle reports whether even read commands need admission.
-func ReadCommandsRequireIdle(raw string) bool {
-	c, _ := capabilitiesFor(raw)
-	return c.ReadCommandsRequireIdle
-}
-
-// LatestForkAnchorKey names the native metadata anchor required by latest-only forks.
-func LatestForkAnchorKey(raw string) string {
-	c, _ := capabilitiesFor(raw)
-	return c.LatestForkAnchorKey
 }

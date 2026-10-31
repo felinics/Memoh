@@ -74,7 +74,7 @@ type loginOutcome struct {
 
 // ErrAuthRequired identifies a configured Codex runtime that still needs the
 // user to complete account authorization in the Bot's workspace.
-var ErrAuthRequired = external.ErrAuthRequired
+var ErrAuthRequired = external.Fail(external.FailureAuthRequired, nil)
 
 // handshakeTimeout bounds initialize plus auth setup on a fresh process.
 const handshakeTimeout = 60 * time.Second

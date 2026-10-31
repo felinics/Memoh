@@ -51,10 +51,10 @@ func ResolveLauncher(ctx context.Context, resolver external.LauncherResolver, bo
 				OperationInProgress: missing.OperationInProgress || taskID != "",
 			}
 		}
-		return external.Launcher{}, external.Unavailable(fmt.Errorf("resolve %s launcher: %w", depID, err))
+		return external.Launcher{}, fmt.Errorf("resolve %s launcher: %w", depID, err)
 	}
 	if strings.TrimSpace(launcher.Path) == "" {
-		return external.Launcher{}, external.Unavailable(fmt.Errorf("resolve %s launcher: no path", depID))
+		return external.Launcher{}, fmt.Errorf("resolve %s launcher: no path", depID)
 	}
 	return launcher, nil
 }

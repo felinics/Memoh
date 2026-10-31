@@ -4,6 +4,7 @@ package claudecfg
 
 import (
 	"errors"
+	"slices"
 	"strings"
 )
 
@@ -54,14 +55,15 @@ func ParseAgentConfig(metadata map[string]any) (Config, error) {
 	return cfg, nil
 }
 
-// Empty and inherit preserve workspace configuration for existing Agents.
+// PermissionModes is Claude Code's permission menu. inherit, the default,
+// keeps the workspace's own configuration for existing Agents.
+var PermissionModes = []string{"inherit", "default", "acceptEdits", "auto", "bypassPermissions"}
+
+const DefaultPermissionMode = "inherit"
+
+// ValidPermissionMode also accepts an unset value, which means the default.
 func ValidPermissionMode(mode string) bool {
-	switch mode {
-	case "", "inherit", "default", "acceptEdits", "auto", "bypassPermissions":
-		return true
-	default:
-		return false
-	}
+	return mode == "" || slices.Contains(PermissionModes, mode)
 }
 
 func metadataString(meta map[string]any, key string) string {

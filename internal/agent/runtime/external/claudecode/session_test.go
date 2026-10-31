@@ -27,6 +27,7 @@ func newPipeProcess() *pipeProcess {
 }
 
 func (p *pipeProcess) Read(b []byte) (int, error) { return p.out.Read(b) }
+
 func (p *pipeProcess) Write(b []byte) (int, error) {
 	p.writes <- append([]byte(nil), b...)
 	return len(b), nil
@@ -40,6 +41,7 @@ func (p *pipeProcess) CloseStdin() {
 	})
 }
 func (p *pipeProcess) Close() error          { p.CloseStdin(); return nil }
+func (p *pipeProcess) Kill()                 { p.CloseStdin() }
 func (p *pipeProcess) Done() <-chan struct{} { return p.done }
 func (*pipeProcess) Err() error              { return nil }
 func (*pipeProcess) StderrTail() string      { return "" }
@@ -148,5 +150,22 @@ func TestApplySettingsSendsOnlyChanges(t *testing.T) {
 	}
 	if s.model != "model-b" || s.effort != "" {
 		t.Fatalf("applied %q/%q", s.model, s.effort)
+	}
+}
+
+// A control request the CLI leaves unanswered ends it: whether it applied the
+// request is no longer known, and the next turn starts another process.
+func TestAnUnansweredControlRequestEndsTheCLI(t *testing.T) {
+	p := newPipeProcess()
+	s := newCLISession(p, slog.Default())
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := s.callControl(ctx, "set_model", map[string]any{"model": "opus"}); err == nil {
+		t.Fatal("an unanswered control request succeeded")
+	}
+	select {
+	case <-p.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the CLI still runs after leaving a control request unanswered")
 	}
 }

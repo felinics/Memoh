@@ -642,10 +642,10 @@ type historyResetStartBackend interface {
 	StartRunIfNoHistoryReset(ctx context.Context, key Key, update SnapshotUpdate) (Snapshot, bool, error)
 }
 
-// HistoryResetHandler performs owner-local runtime teardown. Returning is the
-// acknowledgement boundary: the ACP pool must not return until Session.Close
-// and the owned process Close operation have completed.
-type HistoryResetHandler func(context.Context, ResetScope) error
+// HistoryResetHandler closes this server's agent processes in a reset's
+// scope, of every runtime, and holds new ones off until the returned release.
+// Returning is the acknowledgement boundary: the processes have exited.
+type HistoryResetHandler func(context.Context, ResetScope) (func(), error)
 
 type startupHealthChecker interface {
 	CheckHealth(ctx context.Context) error

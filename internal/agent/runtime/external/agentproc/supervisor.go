@@ -18,6 +18,9 @@
 //   - A reconcile loop closes idle and dead processes, so nothing depends on
 //     an exit being noticed the moment it happens.
 //   - Close tears every process down at once and refuses later leases.
+//
+// A process generation follows the lifecycle model in AGENTS.md: starting,
+// live, retired, closing, gone, one way, each transition in one function.
 package agentproc
 
 import (
@@ -25,7 +28,6 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 )
@@ -70,47 +72,67 @@ type Supervisor struct {
 	now  func() time.Time
 
 	mu      sync.Mutex
-	slots   map[string]*slot
+	slots   map[Key]*slot
+	blocks  []*block
 	closed  bool
 	stop    chan struct{}
 	stopped chan struct{}
-	closing sync.WaitGroup
 }
 
 type slot struct {
-	key     string
+	key Key
+	// current is the generation leases take, starting or live; gens holds
+	// every generation of the key not yet gone, current included.
 	current *gen
-	retired []*gen
-	// blocked is non-nil while a drain holds the key off; closed on unblock.
-	blocked chan struct{}
+	gens    []*gen
 }
+
+// block is a drain holding the keys it matches off; done closes on unblock.
+type block struct {
+	match func(Key) bool
+	done  chan struct{}
+}
+
+// genState is a generation's place in the lifecycle (AGENTS.md).
+type genState int
+
+const (
+	genStarting genState = iota
+	genLive
+	genRetired
+	genClosing
+	genGone
+)
 
 // gen is one process generation of a key.
 type gen struct {
-	slot *slot
-	proc Process
+	slot  *slot
+	state genState
+	proc  Process
 	// requested is the fingerprint the start was asked for; fingerprint is
 	// the one it reported starting from. A lease naming either matches.
 	requested   string
 	fingerprint string
 	refs        int
 	lastUsed    time.Time
-	ready       chan struct{} // closed when the start has finished
 	err         error
-	closed      bool
+	// ready closes when the start has ended; gone when the generation is
+	// gone: its process closed, or its start ended without one.
+	ready chan struct{}
+	gone  chan struct{}
+	// closeAfterStart asks a generation taken out of service while starting
+	// to close once its start ends.
+	closeAfterStart bool
 }
 
 func (g *gen) matches(fingerprint string) bool {
 	return fingerprint == g.requested || fingerprint == g.fingerprint
 }
 
-func (g *gen) starting() bool {
-	select {
-	case <-g.ready:
-		return false
-	default:
-		return true
-	}
+// serving reports a generation a lease may take: live and its process not
+// out of service on its own.
+func (g *gen) serving() bool {
+	return g.state == genLive && alive(g.proc)
 }
 
 // New returns a Supervisor whose reconcile loop runs until Close.
@@ -130,7 +152,7 @@ func New(opts Options) *Supervisor {
 	s := &Supervisor{
 		opts:    opts,
 		now:     time.Now,
-		slots:   map[string]*slot{},
+		slots:   map[Key]*slot{},
 		stop:    make(chan struct{}),
 		stopped: make(chan struct{}),
 	}
@@ -140,23 +162,23 @@ func New(opts Options) *Supervisor {
 
 // Lease returns the key's live process started from fingerprint, starting
 // one when there is none, and a release the caller must call when done.
-func (s *Supervisor) Lease(ctx context.Context, key, fingerprint string, start Starter) (Process, func(), error) {
+func (s *Supervisor) Lease(ctx context.Context, key Key, fingerprint string, start Starter) (Process, func(), error) {
 	for {
 		s.mu.Lock()
 		if s.closed {
 			s.mu.Unlock()
 			return nil, nil, ErrClosed
 		}
-		sl := s.slotLocked(key)
-		if wait := sl.blocked; wait != nil {
+		if b := s.blockedLocked(key); b != nil {
 			s.mu.Unlock()
-			if err := waitFor(ctx, wait); err != nil {
+			if err := waitFor(ctx, b.done); err != nil {
 				return nil, nil, err
 			}
 			continue
 		}
+		sl := s.slotLocked(key)
 		g := sl.current
-		if g != nil && g.starting() {
+		if g != nil && g.state == genStarting {
 			s.mu.Unlock()
 			if err := waitFor(ctx, g.ready); err != nil {
 				return nil, nil, err
@@ -166,7 +188,7 @@ func (s *Supervisor) Lease(ctx context.Context, key, fingerprint string, start S
 			}
 			continue
 		}
-		if g != nil && (!alive(g.proc) || !g.matches(fingerprint)) {
+		if g != nil && (!g.serving() || !g.matches(fingerprint)) {
 			s.retireLocked(g)
 			g = nil
 		}
@@ -175,8 +197,9 @@ func (s *Supervisor) Lease(ctx context.Context, key, fingerprint string, start S
 			s.mu.Unlock()
 			return g.proc, s.releaseFunc(g), nil
 		}
-		g = &gen{slot: sl, requested: fingerprint, fingerprint: fingerprint, refs: 1, ready: make(chan struct{})}
+		g = &gen{slot: sl, state: genStarting, requested: fingerprint, fingerprint: fingerprint, refs: 1, ready: make(chan struct{}), gone: make(chan struct{})}
 		sl.current = g
+		sl.gens = append(sl.gens, g)
 		s.mu.Unlock()
 
 		// The start outlives the caller's cancellation: others may be waiting.
@@ -185,63 +208,56 @@ func (s *Supervisor) Lease(ctx context.Context, key, fingerprint string, start S
 		cancel()
 
 		s.mu.Lock()
-		g.proc, g.err, g.lastUsed = proc, err, s.now()
-		if started != "" {
-			g.fingerprint = started
-		}
-		close(g.ready)
+		served := s.startedLocked(g, proc, started, err)
+		s.mu.Unlock()
 		if err != nil {
-			g.refs = 0
-			if sl.current == g {
-				sl.current = nil
-			}
-			s.mu.Unlock()
 			return nil, nil, err
 		}
-		if s.closed || sl.current != g {
-			// Retired or shut down while it started: it serves nobody.
-			g.refs = 0
-			s.closeLocked(g)
-			s.mu.Unlock()
+		if !served {
 			continue
 		}
-		s.mu.Unlock()
 		return proc, s.releaseFunc(g), nil
 	}
 }
 
+// startedLocked ends g's start: it goes live and serves the lease that
+// started it, or, retired or shut down meanwhile, closes and serves nobody.
+func (s *Supervisor) startedLocked(g *gen, proc Process, started string, err error) bool {
+	g.proc, g.err, g.lastUsed = proc, err, s.now()
+	if started != "" {
+		g.fingerprint = started
+	}
+	close(g.ready)
+	if err != nil {
+		g.refs = 0
+		if g.slot.current == g {
+			g.slot.current = nil
+		}
+		s.goneLocked(g)
+		return false
+	}
+	g.state = genLive
+	if s.closed || g.closeAfterStart || g.slot.current != g {
+		g.refs = 0
+		s.closeLocked(g)
+		return false
+	}
+	return true
+}
+
 // Peek returns the key's current live process without leasing or starting
 // one; callers may only read state the process already holds.
-func (s *Supervisor) Peek(key string) Process {
+func (s *Supervisor) Peek(key Key) Process {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if sl := s.slots[key]; sl != nil && sl.current != nil && !sl.current.starting() && alive(sl.current.proc) {
+	if sl := s.slots[key]; sl != nil && sl.current != nil && sl.current.serving() {
 		return sl.current.proc
 	}
 	return nil
 }
 
-// Processes returns every live process of the key: the current one and those
-// retired but still leased. Callers may only read or close their own state on
-// them (hand a session from an older process to a newer one).
-func (s *Supervisor) Processes(key string) []Process {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sl := s.slots[key]
-	if sl == nil {
-		return nil
-	}
-	var procs []Process
-	for _, g := range append(slices.Clone(sl.retired), sl.current) {
-		if g != nil && !g.starting() && alive(g.proc) {
-			procs = append(procs, g.proc)
-		}
-	}
-	return procs
-}
-
 // MarkBroken retires proc if it is still the key's current process.
-func (s *Supervisor) MarkBroken(key string, proc Process) {
+func (s *Supervisor) MarkBroken(key Key, proc Process) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if sl := s.slots[key]; sl != nil && sl.current != nil && sl.current.proc == proc {
@@ -249,23 +265,19 @@ func (s *Supervisor) MarkBroken(key string, proc Process) {
 	}
 }
 
-// Key names the process a runtime keeps for a bot and a scope: a Bot Agent
-// for runtimes that share one process between conversations, a session for
-// those that run one per conversation.
-func Key(runtime, botID, scope string) string {
-	return runtime + "\x00" + botID + "\x00" + scope
+// Key names one process a runtime keeps for a Bot Agent. Scope is empty for
+// runtimes that share one process between the Agent's conversations and the
+// session ID for those that run one per conversation.
+type Key struct {
+	Runtime    string
+	BotID      string
+	BotAgentID string
+	Scope      string
 }
 
-// RetireBot retires every process of the bot, whatever its runtime.
-func (s *Supervisor) RetireBot(botID string) {
-	s.RetireWhere(func(key string) bool {
-		parts := strings.SplitN(key, "\x00", 3)
-		return len(parts) == 3 && parts[1] == botID
-	})
-}
-
-// RetireWhere retires the current process of every matching key.
-func (s *Supervisor) RetireWhere(match func(key string) bool) {
+// Retire retires the current process of every matching key; a leased one
+// closes when its last lease is released.
+func (s *Supervisor) Retire(match func(Key) bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for key, sl := range s.slots {
@@ -275,49 +287,50 @@ func (s *Supervisor) RetireWhere(match func(key string) bool) {
 	}
 }
 
-// Drain closes every process of the key and holds new starts off until the
-// returned unblock is called, so the caller can change what the next process
-// starts from (delete a login file). It refuses with ErrBusy when busy
-// reports a process of the key at work, and returns once they have exited.
-func (s *Supervisor) Drain(ctx context.Context, key string, busy func(Process) bool) (func(), error) {
+// Drain closes every process of the matching keys and holds new starts on
+// them off until the returned unblock is called, so the caller can change
+// what the next process starts from (delete a login file, clear a
+// conversation). It refuses with ErrBusy when busy reports one of them at
+// work, or another drain holds a matching key, and returns once they have
+// exited. A nil busy closes processes at work too.
+func (s *Supervisor) Drain(ctx context.Context, match func(Key) bool, busy func(Process) bool) (func(), error) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return nil, ErrClosed
 	}
-	sl := s.slotLocked(key)
-	gens := append([]*gen{}, sl.retired...)
-	if sl.current != nil {
-		gens = append(gens, sl.current)
+	var gens []*gen
+	for key, sl := range s.slots {
+		if match(key) {
+			gens = append(gens, sl.gens...)
+		}
 	}
-	for _, g := range gens {
-		if sl.blocked != nil || (!g.starting() && busy != nil && busy(g.proc)) {
+	for key := range s.slots {
+		if match(key) && s.blockedLocked(key) != nil {
 			s.mu.Unlock()
 			return nil, ErrBusy
 		}
 	}
-	blocked := make(chan struct{})
-	sl.blocked = blocked
 	for _, g := range gens {
-		if g.starting() {
-			s.retireLocked(g)
-		} else {
-			s.closeLocked(g)
+		if busy != nil && g.state != genStarting && g.state != genClosing && busy(g.proc) {
+			s.mu.Unlock()
+			return nil, ErrBusy
 		}
+	}
+	b := &block{match: match, done: make(chan struct{})}
+	s.blocks = append(s.blocks, b)
+	for _, g := range gens {
+		s.closeLocked(g)
 	}
 	s.mu.Unlock()
 	unblock := sync.OnceFunc(func() {
 		s.mu.Lock()
-		sl.blocked = nil
+		s.blocks = slices.DeleteFunc(s.blocks, func(other *block) bool { return other == b })
 		s.mu.Unlock()
-		close(blocked)
+		close(b.done)
 	})
 	for _, g := range gens {
-		err := waitFor(ctx, g.ready)
-		if err == nil && g.proc != nil {
-			err = waitFor(ctx, g.proc.Done())
-		}
-		if err != nil {
+		if err := waitFor(ctx, g.gone); err != nil {
 			unblock()
 			return nil, err
 		}
@@ -325,28 +338,60 @@ func (s *Supervisor) Drain(ctx context.Context, key string, busy func(Process) b
 	return unblock, nil
 }
 
+// DrainConversations closes every process of the bot whose scope is
+// conversation, or every process of the bot, of any runtime, when
+// conversation is empty, and holds new ones off until the returned unblock.
+// A process an Agent shares between its conversations stays for a single
+// conversation: the conversation's state lives in what the reset clears, not
+// in the process. It waits out another drain of the same processes.
+func (s *Supervisor) DrainConversations(ctx context.Context, botID, conversation string) (func(), error) {
+	match := func(k Key) bool {
+		return k.BotID == botID && (conversation == "" || k.Scope == conversation)
+	}
+	for {
+		unblock, err := s.Drain(ctx, match, nil)
+		if !errors.Is(err, ErrBusy) {
+			return unblock, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+// blockedLocked returns the drain holding key off, if any.
+func (s *Supervisor) blockedLocked(key Key) *block {
+	for _, b := range s.blocks {
+		if b.match(key) {
+			return b
+		}
+	}
+	return nil
+}
+
 // Close tears every process down at once and refuses later leases. It waits
-// for the processes to close until ctx ends.
+// until every generation is gone, one still starting included, or ctx ends.
 func (s *Supervisor) Close(ctx context.Context) {
 	s.mu.Lock()
+	var gens []*gen
 	if !s.closed {
 		s.closed = true
 		close(s.stop)
-		for _, sl := range s.slots {
-			for _, g := range append(slices.Clone(sl.retired), sl.current) {
-				if g != nil && !g.starting() {
-					s.closeLocked(g)
-				}
-			}
+	}
+	for _, sl := range s.slots {
+		for _, g := range slices.Clone(sl.gens) {
+			s.closeLocked(g)
+			gens = append(gens, g)
 		}
 	}
 	s.mu.Unlock()
-	done := make(chan struct{})
-	go func() {
-		s.closing.Wait()
-		close(done)
-	}()
-	_ = waitFor(ctx, done)
+	for _, g := range gens {
+		if waitFor(ctx, g.gone) != nil {
+			break
+		}
+	}
 	<-s.stopped
 }
 
@@ -356,7 +401,7 @@ func (s *Supervisor) releaseFunc(g *gen) func() {
 		defer s.mu.Unlock()
 		g.refs--
 		g.lastUsed = s.now()
-		if g.refs == 0 && g.slot.current != g {
+		if g.refs == 0 && g.state == genRetired {
 			s.closeLocked(g)
 		}
 	})
@@ -382,19 +427,17 @@ func (s *Supervisor) reconcile() {
 	var idle []*gen
 	s.mu.Lock()
 	for key, sl := range s.slots {
-		for _, g := range slices.Clone(sl.retired) {
-			if g.refs == 0 || !alive(g.proc) {
+		for _, g := range slices.Clone(sl.gens) {
+			switch {
+			case g.state == genRetired && (g.refs == 0 || !alive(g.proc)):
 				s.closeLocked(g)
-			}
-		}
-		if g := sl.current; g != nil && !g.starting() {
-			if !alive(g.proc) {
+			case g.state == genLive && !alive(g.proc):
 				s.closeLocked(g)
-			} else if s.idleLocked(g) {
+			case g.state == genLive && g == sl.current && s.idleLocked(g):
 				idle = append(idle, g)
 			}
 		}
-		if sl.current == nil && len(sl.retired) == 0 && sl.blocked == nil {
+		if len(sl.gens) == 0 {
 			delete(s.slots, key)
 		}
 	}
@@ -404,8 +447,8 @@ func (s *Supervisor) reconcile() {
 			continue
 		}
 		s.mu.Lock()
-		if g.slot.current == g && s.idleLocked(g) {
-			s.opts.Logger.Info("closing idle agent process", slog.String("key", g.slot.key))
+		if g.state == genLive && g.slot.current == g && s.idleLocked(g) {
+			s.opts.Logger.Info("closing idle agent process", slog.String("runtime", g.slot.key.Runtime), slog.String("bot_id", g.slot.key.BotID), slog.String("bot_agent_id", g.slot.key.BotAgentID), slog.String("scope", g.slot.key.Scope))
 			s.closeLocked(g)
 		}
 		s.mu.Unlock()
@@ -416,7 +459,7 @@ func (s *Supervisor) idleLocked(g *gen) bool {
 	return g.refs == 0 && s.now().Sub(g.lastUsed) >= s.opts.IdleTTL
 }
 
-func (s *Supervisor) slotLocked(key string) *slot {
+func (s *Supervisor) slotLocked(key Key) *slot {
 	sl := s.slots[key]
 	if sl == nil {
 		sl = &slot{key: key}
@@ -425,42 +468,54 @@ func (s *Supervisor) slotLocked(key string) *slot {
 	return sl
 }
 
-// retireLocked takes g out of service: no new leases, closed once unleased.
-// A generation still starting closes when its start sees it is not current.
+// retireLocked takes g out of service: live with leases, it is retired and
+// closes once its last lease is released; unleased, it closes now; still
+// starting, it closes once its start ends.
 func (s *Supervisor) retireLocked(g *gen) {
-	sl := g.slot
-	if sl.current == g {
-		sl.current = nil
+	if g.slot.current == g {
+		g.slot.current = nil
 	}
-	if g.starting() {
-		return
-	}
-	if g.refs == 0 {
-		s.closeLocked(g)
-		return
-	}
-	if !slices.Contains(sl.retired, g) {
-		sl.retired = append(sl.retired, g)
+	switch g.state {
+	case genStarting:
+		g.closeAfterStart = true
+	case genLive:
+		if g.refs == 0 {
+			s.closeLocked(g)
+		} else {
+			g.state = genRetired
+		}
 	}
 }
 
-// closeLocked drops g from its slot and closes its process in the background.
+// closeLocked tears g down: its process closes in the background, and g is
+// gone once the close has returned. One still starting closes once its
+// start ends.
 func (s *Supervisor) closeLocked(g *gen) {
-	sl := g.slot
-	if sl.current == g {
-		sl.current = nil
+	if g.slot.current == g {
+		g.slot.current = nil
 	}
-	sl.retired = slices.DeleteFunc(sl.retired, func(other *gen) bool { return other == g })
-	if g.closed || g.proc == nil {
+	switch g.state {
+	case genStarting:
+		g.closeAfterStart = true
+		return
+	case genClosing, genGone:
 		return
 	}
-	g.closed = true
+	g.state = genClosing
 	proc := g.proc
-	s.closing.Add(1)
 	go func() {
-		defer s.closing.Done()
 		_ = proc.Close()
+		s.mu.Lock()
+		s.goneLocked(g)
+		s.mu.Unlock()
 	}()
+}
+
+// goneLocked ends g: nothing of it is left to wait for.
+func (*Supervisor) goneLocked(g *gen) {
+	g.state = genGone
+	g.slot.gens = slices.DeleteFunc(g.slot.gens, func(other *gen) bool { return other == g })
+	close(g.gone)
 }
 
 func alive(proc Process) bool {

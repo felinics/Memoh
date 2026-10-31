@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-/* eslint-disable vue/one-component-per-file */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick } from 'vue'
 import type { Slots } from 'vue'
@@ -168,21 +167,6 @@ vi.mock('./components/agent-type-pill.vue', async () => {
     }),
   }
 })
-vi.mock('./components/acp-setup-panel.vue', async () => {
-  const { defineComponent, h } = await import('vue')
-  return {
-    default: defineComponent({
-      setup(_props, { expose }) {
-        expose({
-          selection: () => ({ agentId: 'claude-code', setupMode: 'oauth', managed: {} }),
-          missingRequiredField: () => null,
-        })
-        return () => h('div')
-      },
-    }),
-  }
-})
-
 describe('bot create page', () => {
   beforeEach(() => {
     mocks.acpProfiles = []

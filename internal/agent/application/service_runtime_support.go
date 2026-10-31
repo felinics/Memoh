@@ -14,8 +14,6 @@ import (
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	acpagent "github.com/felinics/memoh/internal/agent/runtime/external/acp"
-	acpclient "github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/apperror"
 	attachmentpkg "github.com/felinics/memoh/internal/attachment"
@@ -33,10 +31,6 @@ import (
 // prompt's runtime slot behind it — cannot stall indefinitely.
 const runtimeSinkStallTimeout = 30 * time.Second
 
-type acpPrompter interface {
-	Prompt(ctx context.Context, input acpagent.PromptInput) (acpclient.PromptResult, error)
-}
-
 type runtimePreparedAttachments struct {
 	Images                   []external.Image
 	Context                  []ChatAttachment
@@ -50,11 +44,6 @@ type RuntimeSessionExecutionInfo struct {
 	RuntimeOwnerAccountID string
 }
 
-func (s *Service) SetACPSessionPool(pool acpPrompter) {
-	s.acpPool = pool
-	s.SetExternalRuntimes(acpagent.NewDriver(pool))
-}
-
 func (s *Service) RuntimeSessionExecutionInfo(ctx context.Context, sessionID string) (RuntimeSessionExecutionInfo, error) {
 	if s == nil || s.sessionService == nil || strings.TrimSpace(sessionID) == "" {
 		return RuntimeSessionExecutionInfo{}, nil
@@ -63,11 +52,10 @@ func (s *Service) RuntimeSessionExecutionInfo(ctx context.Context, sessionID str
 	if err != nil {
 		return RuntimeSessionExecutionInfo{}, err
 	}
-	// Direct external runtimes execute in the workspace exactly like ACP
-	// agents; the WS execution gate must cover both, or a
-	// session reached by other means (a fork, a shared session) executes
-	// with only the inherited runtime owner ever checked.
-	if !session.IsACPRuntime(sess) && !session.IsDirectRuntime(sess) {
+	// Every external agent executes in the workspace; the WS execution gate
+	// must cover all of them, or a session reached by other means (a fork, a
+	// shared session) executes with only the inherited runtime owner checked.
+	if !session.IsExternalRuntime(sess) {
 		return RuntimeSessionExecutionInfo{}, nil
 	}
 	runtimeMeta := runtimeSessionMeta(sess)

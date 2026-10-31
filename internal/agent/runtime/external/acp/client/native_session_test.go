@@ -11,29 +11,9 @@ import (
 	"testing"
 	"time"
 
-	acp "github.com/coder/acp-go-sdk"
-
 	"github.com/felinics/memoh/internal/agent/event"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 )
-
-func TestRestoreLeavesReplayedModeChangeOut(t *testing.T) {
-	callbacks := &clientCallbacks{}
-	callbacks.setRestoring(true)
-	if err := callbacks.SessionUpdate(context.Background(), acp.SessionNotification{
-		SessionId: "saved",
-		Update:    acp.SessionUpdate{CurrentModeUpdate: &acp.SessionCurrentModeUpdate{CurrentModeId: "plan"}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	callbacks.setRestoring(false)
-	sess := &Session{sessionID: "saved"}
-	sess.installModes(&acp.SessionModeState{CurrentModeId: "default", AvailableModes: []acp.SessionMode{{Id: "default"}, {Id: "plan"}}})
-	callbacks.setSession(sess)
-	if mode := sess.ModeState().CurrentModeID; mode != "default" {
-		t.Fatalf("mode = %q, want the mode the restore answered with", mode)
-	}
-}
 
 func TestRunnerRestoresNativeSession(t *testing.T) {
 	for _, tt := range []struct {

@@ -256,7 +256,7 @@ func (s *NativeToolSource) callAskUser(ctx context.Context, session mcp.ToolSess
 			ToolName:                     ToolAskUser().String(),
 			Input:                        arguments,
 			ProviderMetadata: map[string]any{
-				"source":     userinput.ProviderSourceACPMCP,
+				"source":     userinput.ProviderSourceMemohTool,
 				"runtime_id": session.RuntimeID,
 				"run_id":     session.RunID,
 			},

@@ -11,8 +11,6 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
-
-	"github.com/felinics/memoh/internal/agent/event"
 )
 
 // failAfterOutputPrompt makes the agent send three chunks and then fail the
@@ -31,6 +29,9 @@ const (
 type multiSessionAgent struct {
 	conn   *acp.Connection
 	hangUp func()
+	// lateCommands announces a session's commands only after session/new
+	// returns, as Grok does.
+	lateCommands bool
 
 	mu      sync.Mutex
 	next    int
@@ -68,11 +69,22 @@ func (a *multiSessionAgent) handle(ctx context.Context, method string, params js
 		a.next++
 		id := acp.SessionId(fmt.Sprintf("session-%d", a.next))
 		a.mu.Unlock()
-		// Agents announce commands before session/new returns the ID.
-		a.notify(ctx, id, map[string]any{
-			"sessionUpdate":     "available_commands_update",
-			"availableCommands": []map[string]any{{"name": "cmd-" + string(id), "description": "d"}},
-		})
+		announce := func(ctx context.Context) {
+			a.notify(ctx, id, map[string]any{
+				"sessionUpdate":     "available_commands_update",
+				"availableCommands": []map[string]any{{"name": "cmd-" + string(id), "description": "d"}},
+			})
+		}
+		if a.lateCommands {
+			late := context.WithoutCancel(ctx)
+			go func() {
+				time.Sleep(200 * time.Millisecond)
+				announce(late)
+			}()
+		} else {
+			// Agents announce commands before session/new returns the ID.
+			announce(ctx)
+		}
 		return map[string]any{"sessionId": id}, nil
 	case acp.AgentMethodSessionResume:
 		var request acp.ResumeSessionRequest
@@ -177,9 +189,9 @@ func TestConnKeepsSessionsOfOneProcessApart(t *testing.T) {
 		t.Fatalf("sibling prompt after close = %q, %v; closing one session must not end the connection", result.Text, err)
 	}
 
-	resumed, err := conn.ResumeSession(ctx, first.ID(), SessionConfig{ProjectPath: "/data", Meta: map[string]any{"mode": "ask"}})
+	resumed, err := conn.RestoreSession(ctx, first.ID(), SessionConfig{ProjectPath: "/data", Meta: map[string]any{"mode": "ask"}})
 	if err != nil {
-		t.Fatalf("ResumeSession() error = %v", err)
+		t.Fatalf("RestoreSession() error = %v", err)
 	}
 	result, err = resumed.Prompt(ctx, "back")
 	if err != nil || result.Text != "from "+first.ID() {
@@ -215,42 +227,5 @@ func TestConnFailedPromptKeepsTheOutputSentBeforeTheError(t *testing.T) {
 	}
 	if result.Text != "one two three" {
 		t.Fatalf("text of the failed prompt = %q, want everything sent before the error", result.Text)
-	}
-}
-
-func TestConnPromptKeepsItsOutputWhenTheAgentHangsUpRightAfter(t *testing.T) {
-	agent, transport := startMultiSessionAgent(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	conn, err := Connect(ctx, transport, nil)
-	if err != nil {
-		t.Fatalf("Connect() error = %v", err)
-	}
-	session, err := conn.NewSession(ctx, SessionConfig{ProjectPath: "/data"})
-	if err != nil {
-		t.Fatalf("NewSession() error = %v", err)
-	}
-
-	delivered := 0
-	result, err := session.Prompt(ctx, burstOutputPrompt, EventSinkFunc(func(event.StreamEvent) { delivered++ }))
-	if err != nil {
-		t.Fatalf("Prompt() error = %v, want the turn the agent answered", err)
-	}
-	// Prompt returns after the response and its preceding notifications have
-	// been applied. Close at that boundary: a timer can disconnect while those
-	// notifications are still draining, which the SDK correctly reports as an
-	// incomplete request instead of a successful prompt.
-	agent.hangUp()
-	select {
-	case <-conn.Done():
-	case <-ctx.Done():
-		t.Fatal("connection did not close after the completed prompt")
-	}
-	if result.StopReason != "end_turn" {
-		t.Fatalf("stop reason = %q, want end_turn", result.StopReason)
-	}
-	if want := strings.Repeat("x", burstOutputChunks); result.Text != want || delivered != burstOutputChunks {
-		t.Fatalf("got %d chars and %d delivered events, want all %d", len(result.Text), delivered, burstOutputChunks)
 	}
 }

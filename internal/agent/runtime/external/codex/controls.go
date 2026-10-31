@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/agent/runtime/external/codex/codexcfg"
 	"github.com/felinics/memoh/internal/agent/runtime/external/codex/protocol"
 	"github.com/felinics/memoh/internal/errs"
 )
@@ -25,32 +26,25 @@ func (*Driver) Commands(_ context.Context, _ external.PromptInput) ([]external.C
 	}, nil
 }
 
+// permissionMenu is Codex's permission menu, in codexcfg.PermissionModes order.
+var permissionMenu = []external.Mode{
+	{ID: "strict", I18nKey: "runtime.codex.modes.strict", Icon: "hand"},
+	{ID: "policy", I18nKey: "runtime.codex.modes.policy", Icon: "shield-terminal"},
+	{ID: "yolo", I18nKey: "runtime.codex.modes.yolo", Icon: "shield-alert", Warning: true},
+}
+
 func (d *Driver) Modes(ctx context.Context, input external.PromptInput) (external.ModeState, error) {
 	agent, err := d.agents.Get(ctx, input.BotID, input.BotAgentID)
 	if err != nil {
 		return external.ModeState{}, err
 	}
-	mode := firstNonEmpty(metadataString(input.RuntimeMetadata, "permission_mode"), metadataString(agent.Metadata, "permission_mode"), "strict")
-	return codexModes(mode)
-}
-
-func codexModes(current string) (external.ModeState, error) {
-	switch current {
-	case "strict", "policy", "yolo":
-	default:
-		return external.ModeState{}, external.ErrModeUnavailable
-	}
-	return external.ModeState{Kind: "permission", ApplyOnNextTurn: true, Supported: true, CurrentModeID: current, AvailableModes: []external.Mode{
-		{ID: "strict", I18nKey: "runtime.codex.modes.strict", Icon: "hand"},
-		{ID: "policy", I18nKey: "runtime.codex.modes.policy", Icon: "shield-terminal"},
-		{ID: "yolo", I18nKey: "runtime.codex.modes.yolo", Icon: "shield-alert", Warning: true},
-	}}, nil
+	return external.PermissionModeState(permissionMenu, external.SelectedPermissionMode(input.RuntimeMetadata, agent.Metadata, codexcfg.DefaultPermissionMode))
 }
 
 // The application persists the choice under the thread admission guard. Each
 // new turn supplies it explicitly, including when the Codex thread is warm.
 func (*Driver) SetMode(_ context.Context, _ external.PromptInput, mode string) (external.ModeState, error) {
-	return codexModes(mode)
+	return external.PermissionModeState(permissionMenu, mode)
 }
 
 type permissionPreset struct {
@@ -61,8 +55,8 @@ type permissionPreset struct {
 }
 
 func permissions(cfg Config, input external.PromptInput) (permissionPreset, error) {
-	mode := firstNonEmpty(metadataString(input.RuntimeMetadata, "permission_mode"), cfg.PermissionMode, "strict")
-	if _, err := codexModes(mode); err != nil {
+	mode := external.FirstNonEmpty(external.MetadataString(input.RuntimeMetadata, "permission_mode"), cfg.PermissionMode, codexcfg.DefaultPermissionMode)
+	if _, err := external.PermissionModeState(permissionMenu, mode); err != nil {
 		return permissionPreset{}, err
 	}
 	p := permissionPreset{
@@ -110,7 +104,7 @@ func (d *Driver) ReadCommand(ctx context.Context, input external.PromptInput) (e
 	entries := []any{}
 	switch input.Command {
 	case "skills":
-		cwd := firstNonEmpty(metadataString(input.RuntimeMetadata, "project_path"), defaultProjectPath)
+		cwd := external.FirstNonEmpty(external.MetadataString(input.RuntimeMetadata, "project_path"), defaultProjectPath)
 		var response protocol.SkillsListResponse
 		if err := srv.conn.Call(ctx, protocol.MethodSkillsList, protocol.SkillsListParams{Cwds: []string{cwd}}, &response); err != nil {
 			return external.CommandResult{}, err
@@ -122,7 +116,7 @@ func (d *Driver) ReadCommand(ctx context.Context, input external.PromptInput) (e
 		}
 	case "mcp":
 		params := protocol.ListMcpServerStatusParams{}
-		if id := metadataString(input.RuntimeMetadata, metadataThreadIDKey); id != "" {
+		if id := external.MetadataString(input.RuntimeMetadata, metadataThreadIDKey); id != "" {
 			params.ThreadID = &id
 		}
 		seen := map[string]bool{}
@@ -148,7 +142,7 @@ func (d *Driver) ReadCommand(ctx context.Context, input external.PromptInput) (e
 }
 
 func (d *Driver) cachedStatus(input external.PromptInput) map[string]any {
-	threadID := metadataString(input.RuntimeMetadata, metadataThreadIDKey)
+	threadID := external.MetadataString(input.RuntimeMetadata, metadataThreadIDKey)
 	var state any
 	tokens := input.RuntimeMetadata["codex_thread_total_tokens"]
 	window := input.RuntimeMetadata["codex_context_window"]

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/agent/runtime/external/acp"
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/external/grok/grokcfg"
 	"github.com/felinics/memoh/internal/errs"
@@ -32,18 +33,17 @@ func (*Driver) SetMode(_ context.Context, _ external.PromptInput, mode string) (
 	return modeState(mode)
 }
 
+// permissionMenu is Grok's permission menu, in grokcfg.PermissionModes order.
+// Grok reads the mode when a session opens, so a change lands with the next
+// turn's reopen.
+var permissionMenu = []external.Mode{
+	{ID: grokcfg.PermissionAsk, I18nKey: "runtime.grokBuild.modes.ask", Icon: "hand"},
+	{ID: grokcfg.PermissionAuto, I18nKey: "runtime.grokBuild.modes.auto", Icon: "shield-terminal"},
+	{ID: grokcfg.PermissionAlwaysApprove, I18nKey: "runtime.grokBuild.modes.alwaysApprove", Icon: "shield-alert", Warning: true},
+}
+
 func modeState(mode string) (external.ModeState, error) {
-	if mode == "" || !grokcfg.ValidPermissionMode(mode) {
-		return external.ModeState{}, external.ErrModeUnavailable
-	}
-	modes := []external.Mode{
-		{ID: grokcfg.PermissionAsk, I18nKey: "runtime.grokBuild.modes.ask", Icon: "hand"},
-		{ID: grokcfg.PermissionAuto, I18nKey: "runtime.grokBuild.modes.auto", Icon: "shield-terminal"},
-		{ID: grokcfg.PermissionAlwaysApprove, I18nKey: "runtime.grokBuild.modes.alwaysApprove", Icon: "shield-alert", Warning: true},
-	}
-	// Grok reads the mode when a session opens, so a change lands with the
-	// next turn's reopen.
-	return external.ModeState{Kind: "permission", ApplyOnNextTurn: true, Supported: true, CurrentModeID: mode, AvailableModes: modes}, nil
+	return external.PermissionModeState(permissionMenu, mode)
 }
 
 const (
@@ -67,17 +67,17 @@ func (d *Driver) ReadCommand(ctx context.Context, input external.PromptInput) (e
 	if input.Command != statusCommand {
 		return external.CommandResult{}, external.ErrCommandUnavailable
 	}
-	srv, th, release, err := d.openForControl(ctx, input)
+	b, release, err := d.openForControl(ctx, input)
 	if err != nil {
 		return external.CommandResult{}, err
 	}
 	defer release()
-	info, err := srv.sessionInfo(ctx, th.session.ID())
+	info, err := grokState(b.Process()).sessionInfo(ctx, b.Session().ID())
 	if err != nil {
-		return external.CommandResult{}, turnFailure(err, external.FailureControlFailed)
+		return external.CommandResult{}, turnFailure(err)
 	}
 	return external.CommandResult{Data: map[string]any{
-		"session_id":     th.session.ID(),
+		"session_id":     b.Session().ID(),
 		"model":          info.Model,
 		"tokens":         info.Context.Used,
 		"context_window": info.Context.Total,
@@ -86,81 +86,71 @@ func (d *Driver) ReadCommand(ctx context.Context, input external.PromptInput) (e
 
 // Compact runs Grok's own compaction on the conversation's session.
 func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (external.CompactionResult, error) {
-	srv, th, release, err := d.openForControl(ctx, input)
+	b, release, err := d.openForControl(ctx, input)
 	if err != nil {
 		return external.CompactionResult{}, err
 	}
 	defer release()
-	if err := srv.compact(ctx, th.session.ID()); err != nil {
+	if err := grokState(b.Process()).compact(ctx, b.Session().ID()); err != nil {
 		if ctx.Err() != nil {
 			return external.CompactionResult{}, ctx.Err()
 		}
-		return external.CompactionResult{}, turnFailure(err, external.FailureControlFailed)
+		return external.CompactionResult{}, turnFailure(err)
 	}
-	return external.CompactionResult{RuntimeMetadata: map[string]any{metadataSessionIDKey: th.session.ID()}}, nil
+	return external.CompactionResult{RuntimeMetadata: map[string]any{metadataSessionIDKey: b.Session().ID()}}, nil
 }
 
-// openForControl opens the conversation's own session for a control. A
-// session Grok no longer has is not replaced: a control run on a fresh
-// session would report success for a conversation it never touched.
-func (d *Driver) openForControl(ctx context.Context, input external.PromptInput) (*server, *thread, func(), error) {
-	if metadataString(input.RuntimeMetadata, metadataSessionIDKey) == "" {
-		return nil, nil, nil, external.ErrThreadUnavailable
-	}
-	cfg, err := d.agentConfig(ctx, input.BotID, input.BotAgentID)
+// openForControl opens the conversation's own session for a control and
+// holds it until the returned release. A session Grok no longer has is not
+// replaced: a control run on a fresh session would report success for a
+// conversation it never touched.
+func (d *Driver) openForControl(ctx context.Context, input external.PromptInput) (*acp.Binding, func(), error) {
+	turn, err := d.turnInput(ctx, input)
 	if err != nil {
-		return nil, nil, nil, external.Unavailable(err)
+		return nil, nil, err
 	}
-	srv, release, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)
+	b, release, err := d.host.AcquireExisting(ctx, turn)
 	if err != nil {
-		return nil, nil, nil, serverFailure(err)
-	}
-	if err := d.releaseOtherCopies(srv, input); err != nil { //nolint:contextcheck // an idle copy closes on the old process's own lifecycle.
-		release()
-		return nil, nil, nil, err
-	}
-	th, _, err := srv.openThread(ctx, d.toolGateway, d.approval, d.userInput, input, permissionMode(input.RuntimeMetadata, cfg), false)
-	if err != nil {
-		release()
 		switch {
 		case ctx.Err() != nil:
-			return nil, nil, nil, ctx.Err()
+			return nil, nil, ctx.Err()
 		case errors.Is(err, external.ErrThreadUnavailable):
-			return nil, nil, nil, err
+			return nil, nil, err
 		default:
-			return nil, nil, nil, turnFailure(err, external.FailureUnavailable)
+			return nil, nil, resumeFailure(ctx, err)
 		}
 	}
-	return srv, th, release, nil
+	unhold := b.Hold()
+	return b, func() { unhold(); release() }, nil
 }
 
 // ForkThread implements external.ThreadForker. Grok copies a session whole,
 // so a fork is possible only from the conversation's latest turn: cut any
 // earlier, the copy would carry turns the forked conversation does not show.
 func (d *Driver) ForkThread(ctx context.Context, botID, botAgentID string, runtimeMetadata map[string]any, lastTurnID string) (map[string]any, error) {
-	sessionID := strings.TrimSpace(metadataString(runtimeMetadata, metadataSessionIDKey))
+	sessionID := strings.TrimSpace(external.MetadataString(runtimeMetadata, metadataSessionIDKey))
 	if sessionID == "" {
-		return nil, external.Unavailable(errs.New("conversation has no grok session to fork"))
+		return nil, external.ErrThreadUnavailable
 	}
-	lastPromptID := metadataString(runtimeMetadata, metadataLastPromptIDKey)
+	lastPromptID := external.MetadataString(runtimeMetadata, metadataLastPromptIDKey)
 	if anchor := strings.TrimSpace(lastTurnID); anchor != "" && anchor != lastPromptID {
 		return nil, external.Fail(external.FailureForkLatestOnly, errs.New("grok forks a conversation only from its latest turn"))
 	}
-	srv, release, err := d.acquireServer(ctx, botID, botAgentID)
+	proc, release, err := d.host.Process(ctx, acp.PromptInput{BotID: botID, BotAgentID: botAgentID})
 	if err != nil {
-		return nil, serverFailure(err)
+		return nil, err
 	}
 	defer release()
 	resolved, err := acpclient.ResolveSessionContext(acpclient.SessionContextInput{
-		Backend:     srv.workspaceInfo.Backend,
-		ProjectPath: metadataString(runtimeMetadata, "project_path"),
+		Backend:     proc.Info().Backend,
+		ProjectPath: external.MetadataString(runtimeMetadata, "project_path"),
 	})
 	if err != nil {
 		return nil, err
 	}
-	forked, err := srv.fork(ctx, sessionID, resolved.ProjectPath)
+	forked, err := grokState(proc).fork(ctx, sessionID, resolved.ProjectPath)
 	if err != nil {
-		return nil, turnFailure(err, external.FailureControlFailed)
+		return nil, turnFailure(err)
 	}
 	return map[string]any{metadataSessionIDKey: forked, metadataLastPromptIDKey: lastPromptID}, nil
 }
@@ -172,14 +162,14 @@ func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalog
 	if err != nil {
 		return external.ModelCatalog{}, err
 	}
-	srv, release, err := d.acquireServer(ctx, request.BotID, request.BotAgentID)
+	proc, release, err := d.host.Process(ctx, acp.PromptInput{BotID: request.BotID, BotAgentID: request.BotAgentID})
 	if err != nil {
-		return external.ModelCatalog{}, serverFailure(err)
+		return external.ModelCatalog{}, err
 	}
 	defer release()
-	models, err := catalogFromState(srv.modelState(ctx))
+	models, err := catalogFromState(grokState(proc).modelState(ctx))
 	if err != nil {
-		return external.ModelCatalog{}, external.Unavailable(err)
+		return external.ModelCatalog{}, external.Upstream(err)
 	}
 	configured := cfg.Model == ""
 	for i := range models {
@@ -232,7 +222,7 @@ func catalogFromState(state map[string]any) ([]external.ModelOption, error) {
 		}
 		models = append(models, external.ModelOption{
 			ID:                     model.ModelID,
-			Name:                   firstNonEmpty(model.Name, model.ModelID),
+			Name:                   external.FirstNonEmpty(model.Name, model.ModelID),
 			Description:            model.Description,
 			Default:                model.ModelID == parsed.CurrentModelID,
 			DefaultReasoningEffort: model.Meta.ReasoningEffort,

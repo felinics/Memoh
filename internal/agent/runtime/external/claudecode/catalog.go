@@ -64,7 +64,7 @@ func newCommandCatalog(probe func(context.Context, external.PromptInput) (observ
 func commandCatalogInputKey(ctx context.Context, input external.PromptInput) commandCatalogKey {
 	return commandCatalogKey{
 		target: bridge.WorkspaceTargetFromContext(ctx), botID: input.BotID, botAgentID: input.BotAgentID,
-		projectPath: firstNonEmpty(strings.TrimSpace(metadataString(input.RuntimeMetadata, "project_path")), defaultProjectPath),
+		projectPath: external.FirstNonEmpty(strings.TrimSpace(external.MetadataString(input.RuntimeMetadata, "project_path")), defaultProjectPath),
 	}
 }
 
@@ -120,7 +120,7 @@ func (c *commandCatalog) entry(key commandCatalogKey) commandCatalogEntry {
 // discoverCommands asks a CLI that is never given a prompt: initialize lists
 // the invocable commands and reload_skills tells which of them are skills.
 func (d *Driver) discoverCommands(ctx context.Context, input external.PromptInput) (observedCommands, error) {
-	_, turn, stop, err := d.startControlCLI(ctx, input.BotID, input.BotAgentID, metadataString(input.RuntimeMetadata, "project_path"))
+	_, turn, stop, err := d.startControlCLI(ctx, input.BotID, input.BotAgentID, external.MetadataString(input.RuntimeMetadata, "project_path"))
 	if err != nil {
 		return observedCommands{}, err
 	}

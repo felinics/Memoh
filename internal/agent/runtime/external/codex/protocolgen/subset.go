@@ -28,6 +28,7 @@ var clientMethods = []clientMethod{
 	{Method: "thread/goal/get", Response: "ThreadGoalGetResponse"},
 	{Method: "thread/goal/clear", Response: "ThreadGoalClearResponse"},
 	{Method: "thread/compact/start", Response: "ThreadCompactStartResponse"},
+	{Method: "thread/backgroundTerminals/terminate", Response: "ThreadBackgroundTerminalsTerminateResponse"},
 	{Method: "review/start", Response: "ReviewStartResponse"},
 	{Method: "skills/list", Response: "SkillsListResponse"},
 	{Method: "mcpServerStatus/list", Response: "ListMcpServerStatusResponse"},

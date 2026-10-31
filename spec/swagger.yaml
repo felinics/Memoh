@@ -2816,26 +2816,26 @@ definitions:
     required:
     - signed_in
     type: object
-  externalagent.CodexUsageResponse:
+  externalagent.AgentQuotaResponse:
     properties:
       limit_reached:
         type: boolean
       windows:
         items:
-          $ref: '#/definitions/externalagent.CodexUsageWindow'
+          $ref: '#/definitions/externalagent.AgentQuotaWindow'
         type: array
     required:
     - limit_reached
     - windows
     type: object
-  externalagent.CodexUsageWindow:
+  externalagent.AgentQuotaWindow:
     properties:
       resets_at:
         type: string
       used_percent:
         type: integer
       window_minutes:
-        description: WindowMinutes is 0 when the backend does not report the window
+        description: WindowMinutes is 0 when the runtime does not report the window
           length.
         type: integer
     required:
@@ -5228,18 +5228,6 @@ definitions:
       updated_at:
         type: string
     type: object
-  handlers.acpRuntimeCreateRequest:
-    properties:
-      acp_agent_id:
-        type: string
-      bot_agent_id:
-        description: |-
-          BotAgentID names the Agent instance whose setup launches the runtime;
-          only a session bound to the same instance can later adopt it.
-        type: string
-      project_path:
-        type: string
-    type: object
   handlers.acpRuntimeModeRequest:
     properties:
       mode_id:
@@ -5291,12 +5279,6 @@ definitions:
     type: object
   handlers.createSessionRequest:
     properties:
-      acp_runtime_id:
-        description: |-
-          ACPRuntimeID optionally binds a warm pre-session runtime (created via
-          POST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a
-          transient in-memory handle reference, never persisted in metadata.
-        type: string
       bot_agent_id:
         type: string
       channel_type:
@@ -8242,154 +8224,35 @@ paths:
       summary: Update ACL rule
       tags:
       - bots
-  /bots/{bot_id}/acp-runtimes:
-    post:
-      description: Starts an agent runtime before any session exists. The runtime
-        ID is server generated; bind it to a session at creation time via acp_runtime_id.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Runtime spec
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.acpRuntimeCreateRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/acpagent.RuntimeStatus'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "429":
-          description: Too Many Requests
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Create an unbound ACP runtime (pre-session model picker)
-      tags:
-      - acp
-  /bots/{bot_id}/acp-runtimes/{runtime_id}:
-    delete:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Runtime ID
-        in: path
-        name: runtime_id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Close an ACP runtime
-      tags:
-      - acp
+  /bots/{bot_id}/acp-options:
     get:
+      description: Reports the models, reasoning efforts, modes and commands the agent
+        offers before a conversation exists. Choices travel in the new session's runtime_metadata
+        (acp_model_id, acp_reasoning_effort, permission_mode).
       parameters:
       - description: Bot ID
         in: path
         name: bot_id
         required: true
         type: string
-      - description: Runtime ID
-        in: path
-        name: runtime_id
+      - description: ACP agent ID
+        in: query
+        name: acp_agent_id
         required: true
         type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/acpagent.RuntimeStatus'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Get ACP runtime state by runtime ID
-      tags:
-      - acp
-  /bots/{bot_id}/acp-runtimes/{runtime_id}/mode:
-    patch:
-      description: Sends the selected agent-declared mode ID unchanged to session/set_mode
-        before the first chat message binds this runtime to a Session.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
+      - description: Agent instance ID
+        in: query
+        name: bot_agent_id
         type: string
-      - description: Runtime ID
-        in: path
-        name: runtime_id
-        required: true
+      - description: Project the conversation will run in; /data when omitted
+        in: query
+        name: project_path
         type: string
-      - description: Mode selection
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.acpRuntimeModeRequest'
+      - description: Model whose reasoning efforts to report; the agent's current
+          model when omitted
+        in: query
+        name: model_id
+        type: string
       responses:
         "200":
           description: OK
@@ -8419,110 +8282,7 @@ paths:
           description: Bad Gateway
           schema:
             $ref: '#/definitions/server.Problem'
-      summary: Set an unbound ACP runtime's mode
-      tags:
-      - acp
-  /bots/{bot_id}/acp-runtimes/{runtime_id}/model:
-    patch:
-      description: An empty model_id resets the runtime to the agent default model.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Runtime ID
-        in: path
-        name: runtime_id
-        required: true
-        type: string
-      - description: Model selection
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.acpRuntimeModelRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/acpagent.RuntimeStatus'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Set (or reset) an ACP runtime's model
-      tags:
-      - acp
-  /bots/{bot_id}/acp-runtimes/{runtime_id}/reasoning:
-    patch:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Runtime ID
-        in: path
-        name: runtime_id
-        required: true
-        type: string
-      - description: Reasoning effort selection
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.acpRuntimeReasoningRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/acpagent.RuntimeStatus'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Set an ACP runtime's reasoning effort
+      summary: Get what a new ACP conversation could choose
       tags:
       - acp
   /bots/{bot_id}/agents:
@@ -8739,48 +8499,6 @@ paths:
           schema:
             $ref: '#/definitions/server.Problem'
       summary: Get the account a direct runtime Agent is signed in to
-      tags:
-      - external-agents
-  /bots/{bot_id}/agents/{id}/codex/usage:
-    get:
-      description: Available to anyone who can chat with the Bot, so the composer
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Bot Agent ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/externalagent.CodexUsageResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "422":
-          description: Unprocessable Entity
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Get the Codex usage limits of the Agent's ChatGPT account
       tags:
       - external-agents
   /bots/{bot_id}/agents/{id}/credential:
@@ -9091,6 +8809,46 @@ paths:
       summary: List models available to a bot Agent
       tags:
       - bot-agents
+  /bots/{bot_id}/agents/{id}/quota:
+    get:
+      description: For runtimes whose account reports its usage (Codex with a ChatGPT
+        account). Available to anyone who can chat with the Bot, so the composer can
+        warn before a turn runs into the limit.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Bot Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/externalagent.AgentQuotaResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Get the usage limits of the Agent's account
+      tags:
+      - external-agents
   /bots/{bot_id}/agents/{id}/runtime-controls:
     get:
       parameters:

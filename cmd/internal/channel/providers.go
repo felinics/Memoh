@@ -492,7 +492,6 @@ func (r *settingsDefaultChatRuntime) DefaultChatRuntime(ctx context.Context, bot
 		Runtime:     s.ChatRuntime,
 		ACPAgentID:  s.ChatACPAgentID,
 		ProjectPath: s.ChatACPProjectPath,
-		ProjectMode: s.ChatACPProjectMode,
 	}, nil
 }
 

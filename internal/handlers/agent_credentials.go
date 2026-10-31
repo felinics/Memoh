@@ -24,10 +24,10 @@ type AgentCredentialHandler struct {
 	agents         *botagents.Service
 	botService     *bots.Service
 	accountService *accounts.Service
-	runtimes       external.Drivers
+	runtimes       *external.Registry
 }
 
-func NewAgentCredentialHandler(service *agentcredential.Service, agents *botagents.Service, botService *bots.Service, accountService *accounts.Service, runtimes external.Drivers) *AgentCredentialHandler {
+func NewAgentCredentialHandler(service *agentcredential.Service, agents *botagents.Service, botService *bots.Service, accountService *accounts.Service, runtimes *external.Registry) *AgentCredentialHandler {
 	return &AgentCredentialHandler{service: service, agents: agents, botService: botService, accountService: accountService, runtimes: runtimes}
 }
 
@@ -127,7 +127,7 @@ func (h *AgentCredentialHandler) Delete(c echo.Context) error {
 	if err != nil {
 		return mapAgentCredentialError(agentcredential.ErrNotFound)
 	}
-	if err := application.ExternalRuntimeError(h.runtimes.PurgeBotAgentAuth(c.Request().Context(), agent.Runtime, botID, botAgentID)); err != nil {
+	if err := application.ExternalRuntimeError(purgeBotAgentAuth(c.Request().Context(), h.runtimes, agent.Runtime, botID, botAgentID)); err != nil {
 		if apperror.CodeOf(err) != "" {
 			return err
 		}

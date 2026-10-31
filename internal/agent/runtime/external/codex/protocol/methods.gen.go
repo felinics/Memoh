@@ -12,27 +12,28 @@ const PinnedCodexVersion = "0.154.0"
 
 // Client request methods (Memoh → app-server).
 const (
-	MethodInitialize            = "initialize"
-	MethodThreadStart           = "thread/start"
-	MethodThreadResume          = "thread/resume"
-	MethodThreadSettingsUpdate  = "thread/settings/update"
-	MethodThreadFork            = "thread/fork"
-	MethodThreadGoalSet         = "thread/goal/set"
-	MethodThreadGoalGet         = "thread/goal/get"
-	MethodThreadGoalClear       = "thread/goal/clear"
-	MethodThreadCompactStart    = "thread/compact/start"
-	MethodReviewStart           = "review/start"
-	MethodSkillsList            = "skills/list"
-	MethodMCPServerStatusList   = "mcpServerStatus/list"
-	MethodTurnStart             = "turn/start"
-	MethodTurnSteer             = "turn/steer"
-	MethodTurnInterrupt         = "turn/interrupt"
-	MethodModelList             = "model/list"
-	MethodAccountRead           = "account/read"
-	MethodAccountRateLimitsRead = "account/rateLimits/read"
-	MethodAccountLoginStart     = "account/login/start"
-	MethodAccountLoginCancel    = "account/login/cancel"
-	MethodAccountLogout         = "account/logout"
+	MethodInitialize                         = "initialize"
+	MethodThreadStart                        = "thread/start"
+	MethodThreadResume                       = "thread/resume"
+	MethodThreadSettingsUpdate               = "thread/settings/update"
+	MethodThreadFork                         = "thread/fork"
+	MethodThreadGoalSet                      = "thread/goal/set"
+	MethodThreadGoalGet                      = "thread/goal/get"
+	MethodThreadGoalClear                    = "thread/goal/clear"
+	MethodThreadCompactStart                 = "thread/compact/start"
+	MethodThreadBackgroundTerminalsTerminate = "thread/backgroundTerminals/terminate"
+	MethodReviewStart                        = "review/start"
+	MethodSkillsList                         = "skills/list"
+	MethodMCPServerStatusList                = "mcpServerStatus/list"
+	MethodTurnStart                          = "turn/start"
+	MethodTurnSteer                          = "turn/steer"
+	MethodTurnInterrupt                      = "turn/interrupt"
+	MethodModelList                          = "model/list"
+	MethodAccountRead                        = "account/read"
+	MethodAccountRateLimitsRead              = "account/rateLimits/read"
+	MethodAccountLoginStart                  = "account/login/start"
+	MethodAccountLoginCancel                 = "account/login/cancel"
+	MethodAccountLogout                      = "account/logout"
 )
 
 // Server request methods (app-server → Memoh, expect a response).
@@ -96,6 +97,8 @@ func NewResponseForMethod(method string) (resp any, ok bool) {
 		return new(ThreadGoalClearResponse), true
 	case "thread/compact/start":
 		return new(ThreadCompactStartResponse), true
+	case "thread/backgroundTerminals/terminate":
+		return new(ThreadBackgroundTerminalsTerminateResponse), true
 	case "review/start":
 		return new(ReviewStartResponse), true
 	case "skills/list":

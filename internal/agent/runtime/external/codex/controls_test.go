@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -38,7 +37,7 @@ func TestPermissionPresetsAndThreadOverride(t *testing.T) {
 			}
 		}
 	}
-	if _, err := permissions(Config{}, external.PromptInput{RuntimeMetadata: map[string]any{"permission_mode": "unknown"}}); !errors.Is(err, external.ErrModeUnavailable) {
+	if _, err := permissions(Config{}, external.PromptInput{RuntimeMetadata: map[string]any{"permission_mode": "unknown"}}); !external.IsFailureKind(err, external.FailureModeUnavailable) {
 		t.Fatalf("unknown mode: %v", err)
 	}
 }

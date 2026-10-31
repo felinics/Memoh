@@ -10,6 +10,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/external/acp/client"
 	"github.com/felinics/memoh/internal/errs"
 )
 
@@ -62,31 +63,29 @@ func TestTurnFailureReportsWhatGrokSaid(t *testing.T) {
 	}
 	for _, tc := range cases {
 		var failure *external.Failure
-		if got := turnFailure(tc.err, 0); !errors.As(got, &failure) || failure.Kind != tc.kind || failure.Message != tc.message {
+		if got := turnFailure(tc.err); !errors.As(got, &failure) || failure.Kind != tc.kind || failure.Message != tc.message {
 			t.Errorf("%s: turnFailure() = %+v, want kind %d with %q", tc.name, failure, tc.kind, tc.message)
 		}
 	}
+	// An error Grok did not answer is reported in the words it failed with.
 	plain := errors.New("connection reset")
-	if got := turnFailure(plain, 0); !errors.Is(got, plain) || external.IsFailure(got) {
-		t.Errorf("an error Grok did not answer must pass through unchanged, got %v", got)
-	}
 	var failure *external.Failure
-	if got := turnFailure(plain, external.FailureUnavailable); !errors.As(got, &failure) || failure.Kind != external.FailureUnavailable {
-		t.Errorf("fallback kind not applied: %v", got)
+	if got := turnFailure(plain); !errors.As(got, &failure) || failure.Kind != external.FailureReported || failure.Message != "connection reset" {
+		t.Errorf("turnFailure(%v) = %v, want it reported verbatim", plain, got)
 	}
 }
 
-func TestResumeFailureReplacesOnlyASessionGrokNoLongerHas(t *testing.T) {
+func TestOnlyAMissingSessionFileMeansGrokLostTheSession(t *testing.T) {
 	ctx := context.Background()
 	answer := func(code int, data any) error {
 		return fmt.Errorf("resume ACP session: %w", errs.WrapDependency(&acp.RequestError{Code: code, Message: "Internal error", Data: data}, ""))
 	}
 	// What Grok 1.0.40 answers for a session id it has no file for.
 	gone := answer(-32603, map[string]any{"code": "FS_NOT_FOUND"})
-	if err := resumeFailure(ctx, gone, true); err != nil {
-		t.Errorf("a session Grok no longer has must be replaceable, got %v", err)
+	if !sessionGone(gone) {
+		t.Error("a session Grok has no file for must count as gone")
 	}
-	if err := resumeFailure(ctx, gone, false); !errors.Is(err, external.ErrThreadUnavailable) {
+	if err := resumeFailure(ctx, fmt.Errorf("%w: %w", acpclient.ErrNativeSessionGone, gone)); !errors.Is(err, external.ErrThreadUnavailable) {
 		t.Errorf("a control on a lost session = %v, want ErrThreadUnavailable", err)
 	}
 	// The same error code without that reason is how a broken connection and
@@ -95,17 +94,20 @@ func TestResumeFailureReplacesOnlyASessionGrokNoLongerHas(t *testing.T) {
 		err  error
 		want external.FailureKind
 	}{
-		"another internal error": {answer(-32603, map[string]any{"error": "EOF"}), external.FailureSessionResumeFailed},
+		"another internal error": {answer(-32603, map[string]any{"error": "EOF"}), external.FailureReported},
 		"no credential":          {answer(authRequiredCode, nil), external.FailureAuthRequired},
 	} {
+		if sessionGone(tc.err) {
+			t.Errorf("%s: counted as a lost session", name)
+		}
 		var failure *external.Failure
-		if err := resumeFailure(ctx, tc.err, true); !errors.As(err, &failure) || failure.Kind != tc.want {
+		if err := resumeFailure(ctx, tc.err); !errors.As(err, &failure) || failure.Kind != tc.want {
 			t.Errorf("%s: resumeFailure() = %v, want kind %d and the stored session kept", name, err, tc.want)
 		}
 	}
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
-	if err := resumeFailure(cancelled, gone, true); !errors.Is(err, context.Canceled) {
+	if err := resumeFailure(cancelled, gone); !errors.Is(err, context.Canceled) {
 		t.Errorf("a stopped turn = %v, want its cancellation", err)
 	}
 }

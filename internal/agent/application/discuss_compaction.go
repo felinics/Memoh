@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/felinics/memoh/internal/agent/turn"
-	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 func discussContextPressure(cmd turn.StartTurnCommand) int {
@@ -32,7 +32,7 @@ func (s *Service) maybeSyncCompactDiscuss(ctx context.Context, cmd turn.StartTur
 		protected = cmd.DiscussCurrentSources[n-1:]
 	}
 	budget -= cmd.DiscussCurrentTokens
-	if resolved.RuntimeType == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(resolved.RuntimeType) {
+	if runtimekind.IsExternal(resolved.RuntimeType) {
 		budget -= turn.EstimateTokensFromBytes(len(discussAgentPromptPrefix) + len(discussAgentPromptSuffix) + len("[assistant]\n\n\n") + turn.ContextBytesPerToken - 1)
 	}
 	if budget <= 0 {

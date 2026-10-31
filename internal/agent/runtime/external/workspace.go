@@ -21,7 +21,7 @@ type Workspaces interface {
 func ContainerWorkspace(ctx context.Context, workspaces Workspaces, botID, runtime string) (bridge.WorkspaceInfo, error) {
 	info, err := workspaces.WorkspaceInfo(ctx, botID)
 	if err != nil {
-		return bridge.WorkspaceInfo{}, Unavailable(err)
+		return bridge.WorkspaceInfo{}, err
 	}
 	if err := RequireContainerWorkspace(info, runtime); err != nil {
 		return bridge.WorkspaceInfo{}, err

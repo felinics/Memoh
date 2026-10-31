@@ -15,18 +15,16 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
-	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/uuid"
 
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/runtimefence"
-	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/toolcontext"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -52,11 +50,6 @@ const (
 	approvalGrantTTL = 10 * time.Minute
 )
 
-type Workspace interface {
-	bridge.Provider
-	bridge.WorkspaceInfoProvider
-}
-
 type ToolApprovalService interface {
 	EvaluatePolicy(ctx context.Context, input toolapproval.CreatePendingInput) (toolapproval.Evaluation, error)
 	CreatePending(ctx context.Context, input toolapproval.CreatePendingInput) (toolapproval.Request, error)
@@ -69,113 +62,6 @@ type ToolApprovalService interface {
 
 type UserInputService interface {
 	userinput.FlowService
-}
-
-type Runner struct {
-	logger    *slog.Logger
-	workspace Workspace
-	command   string
-	args      []string
-	timeout   time.Duration
-}
-
-type RunRequest struct {
-	AgentID     string
-	BotID       string
-	Task        string
-	ProjectPath string
-	Command     string
-	Args        []string
-	Env         []string
-	SetupMode   SetupMode
-	Timeout     time.Duration
-}
-
-type RunResult struct {
-	SessionID   string `json:"session_id,omitempty"`
-	ProjectPath string `json:"project_path,omitempty"`
-	Text        string `json:"text,omitempty"`
-	StopReason  string `json:"stop_reason,omitempty"`
-	// Output is the in-process transcript used for persistence.
-	Output []sdk.Message `json:"-"`
-}
-
-func NewRunner(log *slog.Logger, workspace Workspace) *Runner {
-	if log == nil {
-		log = slog.Default()
-	}
-	return &Runner{
-		logger:    log.With(slog.String("component", "acpclient"), slog.String("runtime", string(runtimekind.ACPAgent))),
-		workspace: workspace,
-		timeout:   DefaultRunTimeout,
-	}
-}
-
-func (r *Runner) WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error) {
-	if r == nil || r.workspace == nil {
-		return bridge.WorkspaceInfo{}, errs.New("ACP workspace provider is not configured")
-	}
-	return r.workspace.WorkspaceInfo(ctx, botID)
-}
-
-func (r *Runner) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
-	if r == nil || r.workspace == nil {
-		return nil, errs.New("ACP workspace provider is not configured")
-	}
-	return r.workspace.MCPClient(ctx, botID)
-}
-
-// Run is a convenience wrapper that performs a single-shot ACP exchange:
-// start a session, send one prompt, then close. Production code that needs a
-// persistent session should use StartSession + (*Session).Prompt directly.
-//
-// (*Session).Close uses its own short-lived background context so cleanup
-// always runs even if the caller's ctx was cancelled; that disconnect trips
-// contextcheck, so we silence it here.
-//
-//nolint:contextcheck // lifecycle close intentionally uses background ctx.
-func (r *Runner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
-	if strings.TrimSpace(req.Task) == "" {
-		return RunResult{}, errs.New("task is required")
-	}
-
-	timeout := req.Timeout
-	if timeout <= 0 {
-		timeout = r.timeout
-	}
-	if timeout <= 0 {
-		timeout = DefaultRunTimeout
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	sess, err := r.StartSession(runCtx, StartRequest{
-		AgentID:     req.AgentID,
-		BotID:       req.BotID,
-		ProjectPath: req.ProjectPath,
-		Command:     req.Command,
-		Args:        req.Args,
-		Env:         req.Env,
-		SetupMode:   req.SetupMode,
-		Timeout:     timeout,
-	}, nil)
-	if err != nil {
-		return RunResult{}, err
-	}
-	defer func() { _ = sess.Close() }()
-
-	prompt, err := sess.Prompt(runCtx, req.Task)
-	result := RunResult{
-		SessionID:   sess.ID(),
-		ProjectPath: sess.ProjectPath(),
-		Text:        prompt.Text,
-		StopReason:  prompt.StopReason,
-		Output:      prompt.Output,
-	}
-	if err != nil {
-		return result, err
-	}
-	return result, nil
 }
 
 type clientCallbacks struct {
@@ -209,9 +95,6 @@ type clientCallbacks struct {
 	// Load replays the earlier conversation as session/update, and some
 	// agents replay on resume too; Memoh already holds that history.
 	restoring bool
-	// quirks carries the per-agent title heuristics (profile owns them);
-	// the zero value behaves like the defaults.
-	quirks acpprofile.ToolQuirks
 	// mcpToolCall decodes the MCP server and tool from a permission request's
 	// raw input when the agent encodes them its own way.
 	mcpToolCall func(rawInput any) (serverName, toolName string, ok bool)
@@ -279,7 +162,7 @@ func (g *decisionInflight) waitIdle(timeout time.Duration) bool {
 	}
 }
 
-func newClientCallbacks(ctx context.Context, client *bridge.Client, root, cwd string, timeout time.Duration, sink EventSink, env []string, unsetEnv []string, approval ToolApprovalService, toolGateway *mcp.ToolGatewayService, toolSession ToolSessionContext, quirks acpprofile.ToolQuirks) *clientCallbacks {
+func newClientCallbacks(ctx context.Context, client *bridge.Client, root, cwd string, timeout time.Duration, sink EventSink, env []string, unsetEnv []string, approval ToolApprovalService, toolGateway *mcp.ToolGatewayService, toolSession ToolSessionContext) *clientCallbacks {
 	timeoutSeconds := int32(timeout.Seconds())
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = defaultTerminalTimeout
@@ -293,9 +176,8 @@ func newClientCallbacks(ctx context.Context, client *bridge.Client, root, cwd st
 		baseSession: toolSession,
 		sink:        sink,
 		events:      events,
-		toolMapper:  newACPToolEventMapper(quirks),
+		toolMapper:  newACPToolEventMapper(),
 		terminals:   newTerminalManager(ctx, client, root, cwd, timeoutSeconds, env, unsetEnv, events),
-		quirks:      quirks,
 	}
 }
 
@@ -372,8 +254,8 @@ func (c *clientCallbacks) setSession(session *Session) {
 		if commands, ok := c.pendingAvailableCommands[session.sessionID]; ok {
 			session.replaceAvailableCommands(session.sessionID, commands)
 		}
-		// One client connection owns one canonical Session. Notifications for
-		// any other ID are stale or invalid and must not survive attachment.
+		// These callbacks serve one session. Notifications held for any other
+		// ID are stale or invalid and must not survive attachment.
 		c.pendingCurrentModes = nil
 		c.pendingAvailableCommands = nil
 	}
@@ -738,7 +620,7 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 				slog.String("shape", preflight.shape))
 		}
 	}
-	toolCallID, toolName, input, native := permissionNativeToolState(state, c.quirks)
+	toolCallID, toolName, input, native := permissionNativeToolState(state)
 	if !native {
 		if isThinkPermissionState(state) && !forceReview {
 			// Pure thought carries no side effect worth gating.
@@ -1050,7 +932,7 @@ func (c *clientCallbacks) currentToolSession() ToolSessionContext {
 	return toolcontext.Merge(base, prompt)
 }
 
-func permissionNativeToolState(state *acpToolState, quirks acpprofile.ToolQuirks) (toolCallID, toolName string, input map[string]any, ok bool) {
+func permissionNativeToolState(state *acpToolState) (toolCallID, toolName string, input map[string]any, ok bool) {
 	if state == nil {
 		return "", "", nil, false
 	}
@@ -1061,7 +943,7 @@ func permissionNativeToolState(state *acpToolState, quirks acpprofile.ToolQuirks
 	// nativeToolFromACPState now applies the edit->write title reclassification
 	// itself, so the approval name here always matches the streamed tool-event
 	// name for the same call.
-	toolName, input, ok = nativeToolFromACPState(state, quirks)
+	toolName, input, ok = nativeToolFromACPState(state)
 	if !ok {
 		return "", "", nil, false
 	}
@@ -1461,19 +1343,8 @@ func (c *clientCallbacks) emitToolApprovalRequest(req toolapproval.Request) bool
 	if c == nil || c.events == nil {
 		return false
 	}
-	ev := event.StreamEvent{
-		Type:       event.ToolApprovalRequest,
-		ToolCallID: req.ToolCallID,
-		ToolName:   req.ToolName,
-		Input:      req.ToolInput,
-		ApprovalID: req.ID,
-		ShortID:    req.ShortID,
-		Status:     toolapproval.NormalizedStatus(req.Status),
-		Metadata: map[string]any{
-			"approval": toolapproval.RequestMetadata(req),
-		},
-	}
-	if !strings.EqualFold(toolapproval.NormalizedStatus(req.Status), toolapproval.StatusPending) {
+	ev := external.ApprovalCard(req)
+	if !strings.EqualFold(ev.Status, toolapproval.StatusPending) {
 		return c.events.emitTerminalDecision(ev)
 	}
 	return c.events.emit(ev)

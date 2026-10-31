@@ -13,6 +13,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/external/acp"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
@@ -294,7 +295,7 @@ func TestStreamChatWSResultRejectsTurnReplacementForACP(t *testing.T) {
 		sessionService: acpRuntimeSessionServiceForTest("user-1"),
 		logger:         slog.New(slog.DiscardHandler),
 	}
-	resolver.SetACPSessionPool(&recordingACPPrompter{})
+	resolver.SetRuntimeRegistry(testRuntimes(t, acpagent.NewDriver(&recordingACPPrompter{})))
 	preflightCalled := false
 	postPersistCalled := false
 

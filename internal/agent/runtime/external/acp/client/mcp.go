@@ -27,31 +27,24 @@ const (
 	memohHeaderSupportsImageInput = mcpgw.ToolHeaderSupportsImageInput
 )
 
-func memohToolsHTTPMCPServer(rawURL string, session mcpgw.ToolSessionContext) acp.McpServer {
+// MemohToolsHTTPMCPServer names the Memoh tool gateway at rawURL, with the
+// session's identity in headers for an endpoint that resolves it from them.
+// It carries the identifier form of the name: an agent that qualifies tool
+// names by server (`server__tool`) drops every tool of a server whose name is
+// not an identifier. Permission preflight recognizes both forms. An empty URL
+// yields the zero server.
+func MemohToolsHTTPMCPServer(rawURL string, session mcpgw.ToolSessionContext) acp.McpServer {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
 		return acp.McpServer{}
 	}
 	return acp.McpServer{
 		Http: &acp.McpServerHttpInline{
-			Name:    memohToolsMCPServerName,
+			Name:    memohToolsMCPServerSlug,
 			Url:     rawURL,
 			Headers: memohToolsHTTPHeaders(session),
 		},
 	}
-}
-
-// MemohToolsMCPServer names the Memoh tool gateway for a session whose route
-// resolves the caller's identity itself, so no identity headers travel with
-// it. It carries the identifier form of the name: an agent that qualifies
-// tool names by server (`server__tool`) drops every tool of a server whose
-// name is not an identifier. Permission preflight recognizes both forms.
-func MemohToolsMCPServer(url string) acp.McpServer {
-	return acp.McpServer{Http: &acp.McpServerHttpInline{
-		Name:    memohToolsMCPServerSlug,
-		Url:     strings.TrimSpace(url),
-		Headers: []acp.HttpHeader{},
-	}}
 }
 
 func memohToolsHTTPHeaders(session mcpgw.ToolSessionContext) []acp.HttpHeader {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -58,6 +59,9 @@ type turnState struct {
 	turn          *protocol.Turn
 	turnErr       *protocol.TurnError
 	toolNames     map[string]string // item id → emitted tool name
+	// processIDs are the unified-exec processes this turn's commands started.
+	// turn/interrupt only ends the turn; a stop terminates these explicitly.
+	processIDs []string
 	// inflight tracks decision goroutines by server-request id so a
 	// serverRequest/resolved notification can withdraw them.
 	inflight map[string]context.CancelFunc
@@ -136,6 +140,24 @@ func (t *turnState) setTurnID(turnID string) {
 		t.turnID = turnID
 	}
 	t.mu.Unlock()
+}
+
+func (t *turnState) rememberProcess(processID *string) {
+	if processID == nil || strings.TrimSpace(*processID) == "" {
+		return
+	}
+	id := strings.TrimSpace(*processID)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !slices.Contains(t.processIDs, id) {
+		t.processIDs = append(t.processIDs, id)
+	}
+}
+
+func (t *turnState) startedProcesses() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return slices.Clone(t.processIDs)
 }
 
 func (t *turnState) currentTurnID() string {
@@ -280,6 +302,7 @@ func (t *turnState) handleItemStarted(item *protocol.ThreadItem) {
 	case item.CommandExecution != nil:
 		cmd := item.CommandExecution
 		t.rememberTool(cmd.ID, "exec")
+		t.rememberProcess(cmd.ProcessID)
 		t.emit(event.StreamEvent{
 			Type: event.ToolCallStart, ToolCallID: cmd.ID, ToolName: "exec",
 			Input: map[string]any{"command": cmd.Command, "cwd": cmd.Cwd},
@@ -600,52 +623,11 @@ func fileChangeApprovalDecision(result approval.FlowResult) protocol.FileChangeA
 	return protocol.FileChangeApprovalDecisionCancel
 }
 
-// decide runs one approval through policy and, when needed, the interactive
-// decision flow. Failures fail closed (cancelled).
+// decide runs one approval through the shared decision flow.
 func (t *turnState) decide(ctx context.Context, callID, toolName string, input map[string]any, options []approval.PermissionOption) approval.FlowResult {
-	if t.approval == nil {
-		return approval.FlowResult{Status: approval.StatusRejected, DecisionReason: "approval service unavailable"}
-	}
-	result, err := approval.RunRuntimeFlow(ctx, t.approval, approval.FlowRequest{
-		Input: approval.CreatePendingInput{
-			BotID:                        t.input.BotID,
-			SessionID:                    t.input.ThreadID,
-			RouteID:                      t.input.RouteID,
-			ChannelIdentityID:            t.input.ChannelIdentityID,
-			RequestedByChannelIdentityID: t.input.ChannelIdentityID,
-			ToolCallID:                   callID,
-			ToolName:                     toolName,
-			ToolInput:                    input,
-			Options:                      options,
-		},
-		Interactive:    t.input.CanRequestUserInput,
-		RegisterWaiter: t.waiter,
-		Emit:           t.emitApprovalRequest,
-	})
-	if err != nil {
-		if ctx.Err() != nil {
-			return approval.FlowResult{Status: approval.StatusCancelled, DecisionReason: "the turn ended before a decision arrived"}
-		}
-		t.logger.ErrorContext(ctx, "codex approval flow failed", slog.String("thread_id", t.threadID), slog.Any("error", err))
-		return approval.FlowResult{Status: approval.StatusCancelled, DecisionReason: "approval flow failed"}
-	}
-	return result
-}
-
-func (t *turnState) emitApprovalRequest(req approval.Request) bool {
-	t.emit(event.StreamEvent{
-		Type:       event.ToolApprovalRequest,
-		ToolCallID: req.ToolCallID,
-		ToolName:   req.ToolName,
-		Input:      req.ToolInput,
-		ApprovalID: req.ID,
-		ShortID:    req.ShortID,
-		Status:     approval.NormalizedStatus(req.Status),
-		Metadata: map[string]any{
-			"approval": approval.RequestMetadata(req),
-		},
-	})
-	return true
+	return external.DecideApproval(ctx, t.approval, t.waiter, t.input, external.ApprovalCall{
+		ToolCallID: callID, ToolName: toolName, Input: input, Options: options,
+	}, t.emit, t.logger)
 }
 
 // result assembles the durable outcome after the turn settled.

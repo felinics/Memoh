@@ -14,6 +14,9 @@ type fakeProc struct {
 	once   sync.Once
 	closes atomic.Int32
 	busy   atomic.Bool
+	// teardown, when set, holds Close after the process is out of service,
+	// as a real one releases what it held only once it has exited.
+	teardown chan struct{}
 }
 
 func newFakeProc() *fakeProc { return &fakeProc{done: make(chan struct{})} }
@@ -23,6 +26,9 @@ func (p *fakeProc) Busy() bool            { return p.busy.Load() }
 func (p *fakeProc) Close() error {
 	p.closes.Add(1)
 	p.exit()
+	if p.teardown != nil {
+		<-p.teardown
+	}
 	return nil
 }
 func (p *fakeProc) exit() { p.once.Do(func() { close(p.done) }) }
@@ -46,12 +52,6 @@ type starter struct {
 
 	mu    sync.Mutex
 	procs []*fakeProc
-}
-
-func (st *starter) started(i int) *fakeProc {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	return st.procs[i]
 }
 
 func (st *starter) start(ctx context.Context) (Process, string, error) {
@@ -82,7 +82,7 @@ func newTestSupervisor(t *testing.T) *Supervisor {
 
 func lease(t *testing.T, s *Supervisor, fingerprint string, st *starter) (*fakeProc, func()) {
 	t.Helper()
-	proc, release, err := s.Lease(t.Context(), "k", fingerprint, st.start)
+	proc, release, err := s.Lease(t.Context(), testKey, fingerprint, st.start)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,14 +117,19 @@ func TestConcurrentFirstLeasesStartOnceAndShareTheError(t *testing.T) {
 	s := newTestSupervisor(t)
 	st := &starter{gate: make(chan struct{}), err: errors.New("cli missing")}
 	var wg sync.WaitGroup
+	var entered atomic.Int32
 	errs := make(chan error, 5)
 	for range 5 {
 		wg.Go(func() {
-			_, _, err := s.Lease(t.Context(), "k", "fp", st.start)
+			entered.Add(1)
+			_, _, err := s.Lease(t.Context(), testKey, "fp", st.start)
 			errs <- err
 		})
 	}
-	eventually(t, func() bool { return st.starts.Load() == 1 })
+	// A lease that arrives after the start failed rightly starts again, so
+	// every lease must be waiting on the start before it ends.
+	eventually(t, func() bool { return st.starts.Load() == 1 && entered.Load() == 5 })
+	time.Sleep(50 * time.Millisecond)
 	close(st.gate)
 	wg.Wait()
 	close(errs)
@@ -156,22 +161,6 @@ func TestANewFingerprintRetiresTheProcessOnlyAfterItsLeases(t *testing.T) {
 	}
 }
 
-func TestAStartReportingWhatItLearnedMatchesBothFingerprints(t *testing.T) {
-	// Before the start the CLI version is unknown; the handshake reports it.
-	// Leases asked before and after the start share the process.
-	s := newTestSupervisor(t)
-	st := &starter{reports: "cli 1.2"}
-	first, r1 := lease(t, s, "cli ?", st)
-	before, r2 := lease(t, s, "cli ?", st)
-	after, r3 := lease(t, s, "cli 1.2", st)
-	r1()
-	r2()
-	r3()
-	if before != first || after != first || st.starts.Load() != 1 {
-		t.Fatalf("starts = %d; want one process for both fingerprints", st.starts.Load())
-	}
-}
-
 func TestAnExitedProcessIsReplacedOnTheNextLease(t *testing.T) {
 	s := newTestSupervisor(t)
 	st := &starter{}
@@ -189,13 +178,13 @@ func TestMarkBrokenRetiresOnlyThatProcess(t *testing.T) {
 	s := newTestSupervisor(t)
 	st := &starter{}
 	wedged, release := lease(t, s, "fp", st)
-	s.MarkBroken("k", newFakeProc()) // a stale handle changes nothing
+	s.MarkBroken(testKey, newFakeProc()) // a stale handle changes nothing
 	if again, r := lease(t, s, "fp", st); again != wedged {
 		t.Fatal("a stale MarkBroken retired the current process")
 	} else {
 		r()
 	}
-	s.MarkBroken("k", wedged)
+	s.MarkBroken(testKey, wedged)
 	next, r := lease(t, s, "fp", st)
 	r()
 	if next == wedged || wedged.isClosed() {
@@ -234,17 +223,17 @@ func TestDrainRefusesWorkClosesEverythingAndHoldsStartsOff(t *testing.T) {
 	proc, release := lease(t, s, "fp", st)
 	release()
 	proc.busy.Store(true)
-	if _, err := s.Drain(t.Context(), "k", func(p Process) bool { return p.(*fakeProc).Busy() }); !errors.Is(err, ErrBusy) {
+	if _, err := s.Drain(t.Context(), isTestKey, func(p Process) bool { return p.(*fakeProc).Busy() }); !errors.Is(err, ErrBusy) {
 		t.Fatalf("drain over a busy process: %v", err)
 	}
 	proc.busy.Store(false)
-	unblock, err := s.Drain(t.Context(), "k", func(p Process) bool { return p.(*fakeProc).Busy() })
+	unblock, err := s.Drain(t.Context(), isTestKey, func(p Process) bool { return p.(*fakeProc).Busy() })
 	if err != nil || !proc.isClosed() {
 		t.Fatalf("drain = %v, closed = %v", err, proc.isClosed())
 	}
 	leased := make(chan struct{})
 	go func() {
-		_, r, _ := s.Lease(context.Background(), "k", "fp", st.start)
+		_, r, _ := s.Lease(context.Background(), testKey, "fp", st.start)
 		r()
 		close(leased)
 	}()
@@ -268,27 +257,45 @@ func TestCloseTearsDownEveryGenerationAndRefusesLeases(t *testing.T) {
 	}
 	releaseOld()
 	releaseCurrent()
-	if _, _, err := s.Lease(t.Context(), "k", "v2", st.start); !errors.Is(err, ErrClosed) {
+	if _, _, err := s.Lease(t.Context(), testKey, "v2", st.start); !errors.Is(err, ErrClosed) {
 		t.Fatalf("lease after close: %v", err)
 	}
 }
 
-func TestAStartRetiredMidwayIsClosed(t *testing.T) {
+var testKey = Key{Runtime: "rt", BotID: "bot", BotAgentID: "agent"}
+
+func isTestKey(k Key) bool { return k == testKey }
+
+func TestDrainConversationsClosesOneConversationOrTheWholeBot(t *testing.T) {
 	s := newTestSupervisor(t)
-	st := &starter{gate: make(chan struct{})}
-	got := make(chan Process)
-	go func() {
-		proc, release, _ := s.Lease(context.Background(), "k", "fp", st.start)
+	start := func(key Key) *fakeProc {
+		t.Helper()
+		proc, release, err := s.Lease(t.Context(), key, "fp", (&starter{}).start)
+		if err != nil {
+			t.Fatal(err)
+		}
 		release()
-		got <- proc
-	}()
-	eventually(t, func() bool { return st.starts.Load() == 1 })
-	s.RetireWhere(func(string) bool { return true })
-	close(st.gate)
-	proc := (<-got).(*fakeProc)
-	first := st.started(0)
-	if st.starts.Load() != 2 || proc == first {
-		t.Fatalf("starts = %d; the retired start served", st.starts.Load())
+		return proc.(*fakeProc)
 	}
-	eventually(t, first.isClosed)
+	shared := start(Key{Runtime: "codex", BotID: "bot", BotAgentID: "a"})
+	first := start(Key{Runtime: "acp", BotID: "bot", BotAgentID: "a", Scope: "s1"})
+	second := start(Key{Runtime: "claude", BotID: "bot", BotAgentID: "b", Scope: "s2"})
+	other := start(Key{Runtime: "acp", BotID: "other", BotAgentID: "a", Scope: "s1"})
+
+	unblock, err := s.DrainConversations(t.Context(), "bot", "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unblock()
+	if !first.isClosed() || shared.isClosed() || second.isClosed() || other.isClosed() {
+		t.Fatal("a conversation drain reached past its conversation")
+	}
+	unblock, err = s.DrainConversations(t.Context(), "bot", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unblock()
+	if !shared.isClosed() || !second.isClosed() || other.isClosed() {
+		t.Fatal("a bot drain must close every runtime's processes of that bot, and only them")
+	}
 }

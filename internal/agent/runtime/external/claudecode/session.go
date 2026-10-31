@@ -30,8 +30,7 @@ type cliSession struct {
 	proc   cliProcess
 	logger *slog.Logger
 
-	writeMu sync.Mutex
-	nextID  atomic.Uint64
+	nextID atomic.Uint64
 
 	mu      sync.Mutex
 	pending map[string]chan controlResult
@@ -64,8 +63,9 @@ func newCLISession(proc cliProcess, logger *slog.Logger) *cliSession {
 	}
 }
 
-// Done reports the process can serve no more turns: its output ended.
-func (s *cliSession) Done() <-chan struct{} { return s.readDone }
+// Done reports the process can serve no more turns: it exited, its output
+// ended, or it was ended for no longer answering.
+func (s *cliSession) Done() <-chan struct{} { return s.proc.Done() }
 
 // Busy keeps the process while a turn is attached.
 func (s *cliSession) Busy() bool {
@@ -114,12 +114,17 @@ func (s *cliSession) heldSession() string {
 	return s.nativeID
 }
 
+// writeLine sends a line to the CLI; it never waits on the CLI (see
+// agentproc.Child.Write).
 func (s *cliSession) writeLine(line []byte) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
 	_, err := s.proc.Write(append(line, '\n'))
 	return errs.WrapDependency(err, "")
 }
+
+// end kills a CLI that stopped answering: what it last applied or holds is
+// no longer known. It is out of service at once, so the next turn starts
+// another process.
+func (s *cliSession) end() { s.proc.Kill() }
 
 // callControl bounds every handshake and removes abandoned waiters. Wire
 // errors remain private diagnostics and are mapped at the application
@@ -148,6 +153,9 @@ func (s *cliSession) callControl(ctx context.Context, subtype string, extra map[
 	case result := <-ch:
 		return result.response, result.err
 	case <-ctx.Done():
+		// The CLI may still apply the request, or answer it, after nothing
+		// waits for the answer.
+		s.end()
 		return nil, ctx.Err()
 	case <-s.readDone:
 		return nil, s.processError(subtype)
@@ -189,6 +197,9 @@ func (s *cliSession) resolveControl(msg *inboundMessage) {
 // each message to the attached turn.
 func (s *cliSession) readLoop() {
 	defer close(s.readDone)
+	// Output ends with the process; whatever ended it, nothing is left to
+	// serve.
+	defer s.proc.Kill()
 	scanner := bufio.NewScanner(s.proc)
 	scanner.Buffer(make([]byte, 64*1024), maxLineBytes)
 	for scanner.Scan() {

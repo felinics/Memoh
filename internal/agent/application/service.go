@@ -50,6 +50,7 @@ import (
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
 	"github.com/felinics/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/settings"
 	"github.com/felinics/memoh/internal/workspace"
 )
@@ -118,8 +119,7 @@ type Service struct {
 	settingsService         *settings.Service
 	accountService          *accounts.Service
 	sessionService          SessionService
-	acpPool                 acpPrompter
-	externalDrivers         map[string]external.Driver
+	runtimes                *external.Registry
 	compactionService       compactionRunner
 	eventPublisher          messageevent.Publisher
 	skillLoader             SkillLoader
@@ -1219,15 +1219,7 @@ func (s *Service) resolveRunConfigSessionDescriptor(ctx context.Context, session
 	if typ == "" {
 		typ = sessionpkg.TypeChat
 	}
-	runtimeType := strings.TrimSpace(sess.RuntimeType)
-	if runtimeType == "" {
-		if sessionpkg.IsACPRuntime(sess) {
-			runtimeType = sessionpkg.RuntimeACPAgent
-		} else {
-			runtimeType = sessionpkg.RuntimeModel
-		}
-	}
-	return typ, runtimeType
+	return typ, sessionpkg.RuntimeTypeOf(sess)
 }
 
 func (s *Service) resolveRunConfigSessionType(ctx context.Context, sessionID string) string {
@@ -1274,7 +1266,7 @@ func (s *Service) ResolveRunConfig(ctx context.Context, req RunConfigRequest) (R
 	}
 
 	sessionType, runtimeType := s.resolveRunConfigSessionDescriptor(ctx, sessionID)
-	if runtimeType == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(runtimeType) {
+	if runtimekind.IsExternal(runtimeType) {
 		// Agent runtimes (ACP and the direct external agents) resolve their
 		// own model and prompt; only the identity travels in the run config.
 		cfg := native.RunConfig{

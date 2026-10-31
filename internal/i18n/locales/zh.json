@@ -498,7 +498,6 @@
       "reasoning_selection_unsupported": "这个外部 Agent 不支持选择推理强度。",
       "request_invalid": "Agent 运行实例请求无效，请检查后重试。",
       "runtime_conflict": "Agent 运行实例尚未准备好执行此操作，请刷新后重试。",
-      "runtime_limit_reached": "当前运行的 Agent 实例过多，请关闭一个后重试。",
       "runtime_not_found": "这个 Agent 运行实例已失效，将重新启动。"
     },
     "acp_agent_auth_invalid": "外部 Agent 认证无效。请更新 Agent 配置后重试。",
@@ -603,8 +602,6 @@
     "chat": {
       "message_empty": "请输入消息或添加附件。"
     },
-    "codex_auth_token_missing": "该 Bot 工作区的 Codex 认证缺失或不完整。",
-    "codex_oauth_incomplete": "该 Bot 工作区尚未完成 Codex ChatGPT 登录。",
     "compaction": {
       "model_unavailable": "压缩模型不可用。请选择一个已启用、且声明了上下文窗口的对话模型。"
     },
@@ -646,7 +643,7 @@
       "rate_limited": "外部 Agent 已达到模型服务的速率上限，请稍后再发送。",
       "reported": "Agent 报错：{message}",
       "request_blocked": "这次请求被模型服务的安全策略拦截，请调整内容后再发送。",
-      "session_resume_failed": "会话无法恢复，请重试或新开会话。",
+      "session_resume_failed": "会话无法恢复：{message}。请重试或新开会话。",
       "unavailable": "外部 Agent 运行时暂不可用。请检查 Agent 配置和工作区后重试。",
       "upstream_unreachable": "外部 Agent 无法连接到模型服务，或连接中途断开。请检查网络和 Agent 的服务地址后重试。",
       "usage_limited": "外部 Agent 账号的使用额度已用完。请等额度重置后再试，或检查该账号的套餐与账单。"

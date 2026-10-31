@@ -19,67 +19,22 @@ type pendingSteer struct {
 	settled  chan error
 }
 
+// startSteering delivers same-turn input once the CLI reported it takes it.
 func (t *turnRunner) startSteering(ctx context.Context) func() {
-	source := t.input.Steering
-	if source == nil || t.input.Command != "" {
+	if t.input.Command != "" {
 		return func() {}
 	}
-	workerCtx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		defer func() { _ = source.Close(ctx) }()
-		select {
-		case <-t.ready:
-		case <-t.done:
-			return
-		case <-workerCtx.Done():
-			return
-		}
-		t.mu.Lock()
-		supported := t.steerSupported
-		t.mu.Unlock()
-		if !supported {
-			return
-		}
-		if err := source.Enable(workerCtx); err != nil {
-			return
-		}
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-workerCtx.Done():
-				return
-			case <-t.done:
-				return
-			default:
-			}
-			input, ok, err := source.Next(workerCtx)
-			if err == nil && ok {
-				err = t.submitSteer(workerCtx, input)
-			}
-			if err != nil {
-				if ctx.Err() == nil && (ok || workerCtx.Err() == nil) {
-					t.logger.WarnContext(ctx, "claude steer was not delivered", slog.Any("error", err))
-					t.emit(event.StreamEvent{Type: event.RuntimeNotice, NoticeKind: event.NoticeSteerFailed})
-				}
-				return
-			}
-			if ok {
-				continue
-			}
-			select {
-			case <-workerCtx.Done():
-				return
-			case <-t.done:
-				return
-			case <-source.Wake():
-			case <-ticker.C:
-			}
-		}
-	}()
-	return func() { cancel(); <-done }
+	return external.PumpSteering(ctx, t.input.Steering, t.done, t.ready,
+		func() bool {
+			t.mu.Lock()
+			defer t.mu.Unlock()
+			return t.steerSupported
+		},
+		t.submitSteer,
+		func(err error) {
+			t.logger.WarnContext(ctx, "claude steer was not delivered", slog.Any("error", err))
+			t.emit(event.StreamEvent{Type: event.RuntimeNotice, NoticeKind: event.NoticeSteerFailed})
+		})
 }
 
 func (t *turnRunner) submitSteer(ctx context.Context, input external.SteerInput) error {

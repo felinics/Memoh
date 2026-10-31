@@ -23,7 +23,7 @@ func TestRuntimeControlErrorTranslatesDriverSentinels(t *testing.T) {
 		want apperror.Code
 	}{
 		{external.ErrControlUnsupported, apperror.CodeRuntimeControlUnsupported},
-		{fmt.Errorf("read: %w", external.ErrAuthRequired), apperror.CodeExternalRuntimeAuthRequired},
+		{fmt.Errorf("read: %w", external.Fail(external.FailureAuthRequired, nil)), apperror.CodeExternalRuntimeAuthRequired},
 		{turn.ErrSessionBusy, apperror.CodeSessionBusy},
 		{sessionruntime.ErrSessionBusy, apperror.CodeRuntimeControlFailed},
 		{echo.NewHTTPError(http.StatusBadGateway, "upstream"), apperror.CodeRuntimeControlFailed},

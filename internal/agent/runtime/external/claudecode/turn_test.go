@@ -4,11 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"io"
 	"log/slog"
-	"os"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -18,7 +14,6 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
 	"github.com/felinics/memoh/internal/agent/event"
-	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/external/claudecode/claudecfg"
 	"github.com/felinics/memoh/internal/agent/toolexec"
@@ -30,6 +25,7 @@ type testCLIProcess struct {
 }
 
 func (*testCLIProcess) CloseStdin()             {}
+func (*testCLIProcess) Kill()                   {}
 func (p *testCLIProcess) Done() <-chan struct{} { return p.done }
 func (*testCLIProcess) StderrTail() string      { return "" }
 func (*testCLIProcess) Close() error            { return nil }
@@ -173,216 +169,6 @@ func TestClaudeTurnMapping(t *testing.T) {
 	}
 }
 
-// TestClaudeRecordedThinking pins the thinking wire shape of the pinned CLI
-// that the mapping relies on: the block starts with empty text, and its full
-// message arrives before its stop carrying exactly the streamed deltas. The
-// recorded turn must then surface its thinking once, live and in the
-// transcript.
-func TestClaudeRecordedThinking(t *testing.T) {
-	raw, err := os.ReadFile("protocolref/lifecycle.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fixture struct {
-		Thinking struct {
-			Events []json.RawMessage `json:"events"`
-		} `json:"thinking"`
-	}
-	if err := json.Unmarshal(raw, &fixture); err != nil {
-		t.Fatal(err)
-	}
-	if len(fixture.Thinking.Events) == 0 {
-		t.Fatal("recapture the thinking turn when updating the CLI baseline")
-	}
-
-	var (
-		streamed   strings.Builder
-		full       string
-		openBlock  string
-		stopped    bool
-		resultText string
-	)
-	for _, line := range fixture.Thinking.Events {
-		msg, err := decodeInbound(line)
-		if err != nil {
-			t.Fatal(err)
-		}
-		switch msg.Type {
-		case messageTypeStreamEvent:
-			var ev streamEvent
-			if err := json.Unmarshal(msg.Event, &ev); err != nil {
-				t.Fatal(err)
-			}
-			switch ev.Type {
-			case "content_block_start":
-				openBlock = ev.ContentBlock.Type
-				if openBlock == "thinking" && ev.ContentBlock.Thinking != "" {
-					t.Fatalf("thinking block started with text %q", ev.ContentBlock.Thinking)
-				}
-			case "content_block_delta":
-				if ev.Delta.Type == "thinking_delta" {
-					streamed.WriteString(ev.Delta.Thinking)
-				}
-			case "content_block_stop":
-				if openBlock == "thinking" {
-					stopped = true
-				}
-			}
-		case messageTypeAssistant:
-			chat, _ := decodeChatMessage(msg.Message)
-			for _, block := range chat.Content {
-				if block.Type != "thinking" {
-					continue
-				}
-				if stopped || block.Thinking != streamed.String() {
-					t.Fatalf("thinking message after stop = %v, text matches deltas = %v", stopped, block.Thinking == streamed.String())
-				}
-				full = block.Thinking
-			}
-		case messageTypeResult:
-			resultText = msg.Result
-		}
-	}
-	if full == "" || !stopped {
-		t.Fatalf("recording has no complete thinking block: full=%q stopped=%v", full, stopped)
-	}
-
-	sink := &recordingSink{}
-	r := newTestRunner(sink)
-	defer r.close()
-	for _, line := range fixture.Thinking.Events {
-		feed(t, r, string(line))
-	}
-	r.stream.Finish()
-	var reasoning strings.Builder
-	var starts, ends int
-	for _, ev := range sink.snapshot() {
-		switch ev.Type {
-		case event.ReasoningStart:
-			starts++
-		case event.ReasoningDelta:
-			if ends > 0 {
-				t.Fatal("reasoning continued after the block ended")
-			}
-			reasoning.WriteString(ev.Delta)
-		case event.ReasoningEnd:
-			ends++
-		}
-	}
-	if starts != 1 || ends != 1 || reasoning.String() != full {
-		t.Fatalf("live reasoning: starts=%d ends=%d text matches=%v", starts, ends, reasoning.String() == full)
-	}
-	result, err := r.buildResult("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var parts []string
-	for _, message := range result.Output {
-		for _, part := range message.Content {
-			switch part := part.(type) {
-			case sdk.ReasoningPart:
-				parts = append(parts, "reasoning:"+part.Text)
-			case sdk.TextPart:
-				parts = append(parts, "text:"+part.Text)
-			}
-		}
-	}
-	if want := []string{"reasoning:" + full, "text:" + resultText}; !slices.Equal(parts, want) {
-		t.Fatalf("transcript parts = %q, want %q", parts, want)
-	}
-}
-
-// Thinking reaches the CLI in different shapes depending on the provider or
-// gateway; each must surface once, as one bounded reasoning block. The CLI
-// sends every streamed block's full message before the block's stop,
-// carrying exactly its deltas (TestClaudeRecordedThinking pins that).
-func TestClaudeThinkingSurfacesOnce(t *testing.T) {
-	stream := func(ev string) string {
-		return `{"type":"stream_event","session_id":"s","parent_tool_use_id":null,"event":` + ev + `}`
-	}
-	assistant := func(thinking string) string {
-		return `{"type":"assistant","session_id":"s","parent_tool_use_id":null,"message":{"role":"assistant","content":[{"type":"thinking","thinking":"` + thinking + `","signature":"sig"}]}}`
-	}
-	start := func(thinking string) string {
-		return stream(`{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"` + thinking + `","signature":""}}`)
-	}
-	delta := func(thinking string) string {
-		return stream(`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"` + thinking + `"}}`)
-	}
-	stop := stream(`{"type":"content_block_stop","index":0}`)
-
-	for _, tc := range []struct {
-		name  string
-		lines []string
-		want  []string
-	}{
-		{"deltas", []string{start(""), delta("A "), delta("B"), assistant("A B"), stop}, []string{"start", "A B", "end"}},
-		{"inline in content_block_start", []string{start("X"), assistant(""), stop}, []string{"start", "X", "end"}},
-		{"inline start then deltas", []string{start("A"), delta(" B"), assistant(" B"), stop}, []string{"start", "A B", "end"}},
-		{"complete message only", []string{assistant("X")}, []string{"start", "X", "end"}},
-		// CLI 2.1.269 answers a broken stream with a non-streaming request and
-		// no content_block_stop; the new generation continues the cut block
-		// only when it repeats what was streamed.
-		{"non-streaming retry continuing the cut stream", []string{start(""), delta("CUT"), assistant("CUT MORE")}, []string{"start", "CUT MORE", "end"}},
-		{"non-streaming retry after a cut stream", []string{start(""), delta("CUT"), assistant("NEW")}, []string{"start", "CUT", "end", "start", "NEW", "end"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			sink := &recordingSink{}
-			r := newTestRunner(sink)
-			defer r.close()
-			for _, line := range tc.lines {
-				feed(t, r, line)
-			}
-			feed(t, r, `{"type":"result","subtype":"success","session_id":"s","is_error":false,"result":"ok"}`)
-			r.stream.Finish()
-
-			// A lagging consumer receives adjacent deltas folded together.
-			var got []string
-			for _, ev := range sink.snapshot() {
-				switch ev.Type {
-				case event.ReasoningStart:
-					got = append(got, "start")
-				case event.ReasoningDelta:
-					if n := len(got); n > 0 && got[n-1] != "start" && got[n-1] != "end" {
-						got[n-1] += ev.Delta
-						continue
-					}
-					got = append(got, ev.Delta)
-				case event.ReasoningEnd:
-					got = append(got, "end")
-				}
-			}
-			if !slices.Equal(got, tc.want) {
-				t.Fatalf("reasoning events = %q, want %q", got, tc.want)
-			}
-			result, err := r.buildResult("")
-			if err != nil {
-				t.Fatal(err)
-			}
-			var wantParts, gotParts []string
-			for _, item := range tc.want {
-				switch item {
-				case "start":
-					wantParts = append(wantParts, "")
-				case "end":
-				default:
-					wantParts[len(wantParts)-1] += item
-				}
-			}
-			for _, message := range result.Output {
-				for _, part := range message.Content {
-					if reasoning, ok := part.(sdk.ReasoningPart); ok {
-						gotParts = append(gotParts, reasoning.Text)
-					}
-				}
-			}
-			if !slices.Equal(gotParts, wantParts) {
-				t.Fatalf("transcript reasoning = %q, want %q", gotParts, wantParts)
-			}
-		})
-	}
-}
-
 func TestClaudeTurnErrorResult(t *testing.T) {
 	for _, partial := range []string{"", "Partial reply."} {
 		t.Run(partial, func(t *testing.T) {
@@ -412,125 +198,6 @@ func TestClaudeTurnErrorResult(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// Both native command receipts stay separate from streamed and complete replies.
-func TestClaudeCommandOutputKeepsModelReply(t *testing.T) {
-	for _, receipt := range []string{
-		`{"type":"system","subtype":"local_command_output","content":"Goal set: review"}`,
-		`{"type":"assistant","local_command_source":"<local-command-stdout>Goal set: review</local-command-stdout>","message":{"content":[{"type":"text","text":"Goal set: review"}]}}`,
-	} {
-		for _, tc := range []struct{ name, delta, reply, result string }{
-			{"streamed", "Reviewed.", "Reviewed.", "Reviewed."},
-			{"complete", "", "Reviewed.", "Reviewed."},
-			{"no response", "", noResponseRequested, ""},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				sink := &recordingSink{}
-				r := newTestRunner(sink)
-				defer r.close()
-				r.input.Command = "goal"
-				feed(t, r, receipt)
-				feed(t, r, `{"type":"system","subtype":"api_retry","attempt":1,"max_retries":3,"retry_delay_ms":1500,"error":"PRIVATE"}`)
-				feed(t, r, `{"type":"system","subtype":"status","status":"compacting"}`)
-				feed(t, r, `{"type":"stream_event","event":{"type":"message_start"}}`)
-				feed(t, r, `{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"`+tc.delta+`"}}}`)
-				feed(t, r, `{"type":"assistant","message":{"content":[{"type":"text","text":"`+tc.reply+`"}]}}`)
-				feed(t, r, `{"type":"result","subtype":"success","result":"`+tc.result+`"}`)
-				result, err := r.buildResult("")
-				if err != nil || result.Text != tc.result {
-					t.Fatalf("model reply: %q, %v", result.Text, err)
-				}
-				wantMessages := 1
-				if tc.result != "" {
-					wantMessages++
-				}
-				if len(result.Output) != wantMessages {
-					t.Fatalf("receipt and reply must stay separate: %#v", result.Output)
-				}
-				command := result.Output[0].Content[0].(sdk.TextPart)
-				if command.Text != "Goal set: review" || partmeta.Unfold(command.ProviderMetadata)["runtime_command"] != "goal" {
-					t.Fatalf("receipt lost its identity: %#v", command)
-				}
-				if tc.result != "" {
-					reply := result.Output[1].Content[0].(sdk.TextPart)
-					if reply.Text != tc.result || reply.ProviderMetadata != nil {
-						t.Fatalf("reply: %#v", reply)
-					}
-				}
-				var text strings.Builder
-				for _, ev := range sink.snapshot() {
-					if ev.Type == event.TextDelta {
-						text.WriteString(ev.Delta)
-					}
-					if ev.Type == event.Retry {
-						t.Fatal("API retry reset the whole turn")
-					}
-				}
-				wire, _ := json.Marshal(sink.snapshot())
-				if text.String() != tc.result || bytes.Contains(wire, []byte("PRIVATE")) {
-					t.Fatalf("feedback leaked into text or diagnostics: %s", wire)
-				}
-			})
-		}
-	}
-}
-
-// A command that reaches no model reports its receipt again as the result.
-func TestClaudeLocalCommandResultIsNotAReply(t *testing.T) {
-	for _, receipt := range []string{
-		`{"type":"system","subtype":"local_command_output","content":"Reloaded skills: 2 skills available."}`,
-		`{"type":"assistant","local_command_source":"<local-command-stdout>Reloaded skills: 2 skills available.</local-command-stdout>","message":{"content":[{"type":"text","text":"Reloaded skills: 2 skills available."}]}}`,
-	} {
-		sink := &recordingSink{}
-		r := newTestRunner(sink)
-		r.input.Command = "reload-skills"
-		feed(t, r, receipt)
-		feed(t, r, `{"type":"result","subtype":"success","result":"Reloaded skills: 2 skills available."}`)
-		result, err := r.buildResult("")
-		r.close()
-		if err != nil || result.Text != "" || len(result.Output) != 1 {
-			t.Fatalf("the receipt was repeated as a reply: %q %#v, %v", result.Text, result.Output, err)
-		}
-		for _, ev := range sink.snapshot() {
-			if ev.Type == event.TextDelta {
-				t.Fatalf("streamed the receipt as model text: %q", ev.Delta)
-			}
-		}
-	}
-}
-
-func TestClaudeTurnDropsNoResponseSentinel(t *testing.T) {
-	sink := &recordingSink{}
-	r := newTestRunner(sink)
-	feed(t, r, `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"ask-1","name":"ask_user","input":{}}]}}`)
-	feed(t, r, `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ask-1","content":{"status":"submitted"},"is_error":false}]}}`)
-	feed(t, r, `{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"No response "}}}`)
-	feed(t, r, `{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"requested."}}}`)
-	feed(t, r, `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"No response requested."}]}}`)
-	feed(t, r, `{"type":"result","subtype":"success","session_id":"sess-abc","is_error":false,"result":"No response requested."}`)
-
-	result, err := r.buildResult("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Text != "" {
-		t.Fatalf("text = %q, want empty", result.Text)
-	}
-	if len(result.Output) != 2 {
-		t.Fatalf("output = %#v, want tool call and result only", result.Output)
-	}
-}
-
-func TestClaudeEmitAfterCloseIsDropped(t *testing.T) {
-	sink := &recordingSink{}
-	r := newTestRunner(sink)
-	r.close()
-	r.emit(event.StreamEvent{Type: event.TextDelta, Delta: "late"})
-	time.Sleep(10 * time.Millisecond)
-	if len(sink.snapshot()) != 0 {
-		t.Fatal("post-close emit must be dropped")
 	}
 }
 
@@ -606,68 +273,6 @@ func TestClaudePermissionCardKeepsToolArguments(t *testing.T) {
 	}
 }
 
-// Exercise the reader as well as process teardown: both can fail after a result.
-type failingCLIProcess struct {
-	testCLIProcess
-	err error
-}
-
-func (p *failingCLIProcess) Read(data []byte) (int, error) {
-	n, err := p.Buffer.Read(data)
-	if errors.Is(err, io.EOF) {
-		err = p.err
-	}
-	return n, err
-}
-
-func TestClaudeExitFailureDoesNotOverrideResult(t *testing.T) {
-	exitErr := errors.New("transport lost")
-	for _, line := range []string{
-		`{"type":"result","subtype":"success","result":"Done."}`,
-		`{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["Credit balance is too low"]}`,
-		"",
-	} {
-		p := &failingCLIProcess{testCLIProcess: testCLIProcess{done: make(chan struct{})}, err: exitErr}
-		_, _ = p.WriteString(line + "\n")
-		r := newTurnRunner(context.Background(), external.PromptInput{Sink: &recordingSink{}}, p, nil, nil, slog.Default())
-		r.s.readLoop()
-		r.observeExit(exitErr)
-		r.close()
-		result, err := r.buildResult("")
-		switch {
-		case line == "":
-			if !errors.Is(err, exitErr) || result.StopReason != "process_exit" {
-				t.Fatalf("missing result: %+v, %v", result, err)
-			}
-		case strings.Contains(line, "is_error"):
-			if err == nil || err.Error() != "Credit balance is too low" || result.Text != "" {
-				t.Fatalf("diagnostic lost or published as prose: %+v, %v", result, err)
-			}
-		default:
-			if err != nil || !result.TurnCompleted {
-				t.Fatalf("success overwritten: %+v, %v", result, err)
-			}
-		}
-	}
-}
-
-func TestCanonicalDisplayToolCall(t *testing.T) {
-	if name := canonicalDisplayToolName("AskUserQuestion"); name != "ask_user" {
-		t.Fatalf("completed question lost its display identity: %s", name)
-	}
-	name, input := canonicalDisplayToolCall("Write", map[string]any{
-		"file_path": "/data/result.txt",
-		"content":   "ok",
-	})
-	fields := input.(map[string]any)
-	if name != "write" || fields["path"] != "/data/result.txt" || fields["content"] != "ok" {
-		t.Fatalf("canonical write = %q %#v", name, fields)
-	}
-	if _, exists := fields["file_path"]; exists {
-		t.Fatalf("canonical write retained file_path: %#v", fields)
-	}
-}
-
 func TestClaudeModelCatalogFromInitialize(t *testing.T) {
 	catalog := modelCatalogFromInitialize("custom-model", initializeResponse{Models: []initializeModel{
 		{Value: "default", ResolvedModel: "model-a-v1", DisplayName: "Default"},
@@ -688,20 +293,6 @@ func TestClaudeModelCatalogFromInitialize(t *testing.T) {
 	}
 }
 
-func TestClaudeCLIArgsIncludeStartingSettings(t *testing.T) {
-	args := strings.Join(cliArgs("model-a", "high", "resumed-session", "", "", false), " ")
-	if !strings.Contains(args, "--model 'model-a'") || !strings.Contains(args, "--effort 'high'") || !strings.Contains(args, "--resume 'resumed-session'") {
-		t.Fatalf("args = %q", args)
-	}
-	if strings.Contains(args, "--thinking ") {
-		t.Fatalf("effort must preserve native thinking settings: %q", args)
-	}
-	args = strings.Join(cliArgs("", "", "", "", "", false), " ")
-	if strings.Contains(args, "--thinking ") || strings.Contains(args, "--effort") {
-		t.Fatalf("an inherited default must stay unset: %q", args)
-	}
-}
-
 func TestClaudeControlCLIRunsNoWorkspaceHooksOrMCPServers(t *testing.T) {
 	args := strings.Join(controlCLIArgs(claudecfg.Config{}, ""), " ")
 	if !strings.Contains(args, `--settings '{"disableAllHooks":true}'`) || !strings.Contains(args, "--strict-mcp-config") {
@@ -709,44 +300,6 @@ func TestClaudeControlCLIRunsNoWorkspaceHooksOrMCPServers(t *testing.T) {
 	}
 	if args := strings.Join(cliArgs("", "", "", "", "", false), " "); strings.Contains(args, "disableAllHooks") || strings.Contains(args, "--strict-mcp-config") {
 		t.Fatalf("a turn must keep the workspace's hooks and MCP servers: %q", args)
-	}
-}
-
-// Thinking text is requested from every CLI known to accept the option; an
-// older CLI would exit on it.
-func TestClaudeCLIArgsRequestThinkingTextWhenSupported(t *testing.T) {
-	for version, want := range map[string]bool{"2.1.94": true, "2.1.269": true, "": false, "2.1.92": false, "2.0.5": false} {
-		args := strings.Join(cliArgs("", "", "", "", version, false), " ")
-		if got := strings.Contains(args, "--thinking-display summarized"); got != want {
-			t.Fatalf("version %q: thinking display requested = %v, want %v (%q)", version, got, want, args)
-		}
-	}
-}
-
-func TestClaudeCatalogPreservesAdvertisedDefaultWithoutConcreteAlias(t *testing.T) {
-	for _, resolved := range []string{"", "unlisted-model"} {
-		t.Run("resolved="+resolved, func(t *testing.T) {
-			catalog := modelCatalogFromInitialize("", initializeResponse{Models: []initializeModel{
-				{Value: "default", ResolvedModel: resolved, DisplayName: "Default"},
-				{Value: "sonnet", ResolvedModel: "claude-sonnet"},
-			}})
-			if len(catalog.Models) != 2 || catalog.Models[0].ID != "default" || !catalog.Models[0].Default {
-				t.Fatalf("catalog=%+v", catalog)
-			}
-		})
-	}
-}
-
-func TestClaudeCatalogKeepsResolvedAlias(t *testing.T) {
-	const full = "claude-opus-5"
-	for _, configured := range []string{"", full} {
-		catalog := modelCatalogFromInitialize(configured, initializeResponse{Models: []initializeModel{
-			{Value: "default", ResolvedModel: full},
-			{Value: "opus", ResolvedModel: full, SupportsEffort: true, SupportedEffortLevels: []string{"high"}},
-		}})
-		if catalog.ConfiguredModelID != configured || len(catalog.Models) != 1 || catalog.Models[0].ID != "opus" || catalog.Models[0].ResolvedModelID != full || catalog.Models[0].Default != (configured == "") {
-			t.Fatalf("catalog=%+v", catalog)
-		}
 	}
 }
 

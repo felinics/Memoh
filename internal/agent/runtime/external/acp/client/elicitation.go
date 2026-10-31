@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
-	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/toolcontext"
 )
@@ -25,6 +25,12 @@ type createElicitationRequest struct {
 	Mode            string         `json:"mode"`
 	Message         string         `json:"message"`
 	RequestedSchema map[string]any `json:"requestedSchema"`
+}
+
+// form converts the requested schema into an ask_user card. codex-acp runs as
+// a generic ACP agent and marks its forms the way Codex does.
+func (r *createElicitationRequest) form() (map[string]any, userinput.ElicitationFormMapping, error) {
+	return userinput.ElicitationFormInput(r.Message, r.RequestedSchema, external.CodexFormMarkers)
 }
 
 func (r *createElicitationRequest) Validate() error {
@@ -61,7 +67,7 @@ func (c *clientCallbacks) CreateElicitation(ctx context.Context, request createE
 		return acp.NewUnstableCreateElicitationResponseCancel(), nil
 	}
 
-	input, mapping, err := userinput.ElicitationFormInput(request.Message, request.RequestedSchema)
+	input, mapping, err := request.form()
 	if err != nil {
 		return acp.UnstableCreateElicitationResponse{}, acp.NewInvalidParams(map[string]any{"error": err.Error()})
 	}
@@ -152,21 +158,8 @@ func (c *clientCallbacks) emitElicitationUserInput(req userinput.Request) bool {
 	if c == nil || c.events == nil {
 		return false
 	}
-	status := strings.TrimSpace(req.Status)
-	if status == "" {
-		status = userinput.StatusPending
-	}
-	ev := event.StreamEvent{
-		Type:        event.UserInputRequest,
-		ToolCallID:  req.ToolCallID,
-		ToolName:    req.ToolName,
-		Input:       req.Input,
-		UserInputID: req.ID,
-		ShortID:     req.ShortID,
-		Status:      status,
-		Metadata:    userinput.DeferredMetadata(req),
-	}
-	if !strings.EqualFold(status, userinput.StatusPending) {
+	ev := external.UserInputCard(req)
+	if !strings.EqualFold(ev.Status, userinput.StatusPending) {
 		return c.events.emitTerminalDecision(ev)
 	}
 	return c.events.emit(ev)

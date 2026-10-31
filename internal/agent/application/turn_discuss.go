@@ -21,6 +21,7 @@ import (
 	"github.com/felinics/memoh/internal/contextview"
 	"github.com/felinics/memoh/internal/messageconv"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 // turnRuntimeHooks are test seams for the transport-facing turn lifecycle.
@@ -170,7 +171,7 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		return
 	}
 
-	external := resolved.RuntimeType == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(resolved.RuntimeType)
+	external := runtimekind.IsExternal(resolved.RuntimeType)
 	if external && !cmd.DiscussAddressed {
 		if h.emit(turn.DiscussEventSkipped, nil) {
 			h.contentLightTerminal = true

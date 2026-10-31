@@ -13,7 +13,6 @@ acp.reasoning_effort_unavailable	400
 acp.reasoning_selection_unsupported	400
 acp.request_invalid	400
 acp.runtime_conflict	409
-acp.runtime_limit_reached	429
 acp.runtime_not_found	404
 acp_agent_auth_invalid	409
 acp_agent_not_configured	400
@@ -91,8 +90,6 @@ channel.verification_failed	502
 channel.webhook_endpoint_invalid	400
 channel_route.not_found	404
 chat.message_empty	400
-codex_auth_token_missing	409
-codex_oauth_incomplete	409
 compaction.model_unavailable	400
 connector.conflict	409
 connector.not_configured	503

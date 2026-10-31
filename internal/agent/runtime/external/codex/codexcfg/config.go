@@ -4,6 +4,7 @@ package codexcfg
 
 import (
 	"errors"
+	"slices"
 	"strings"
 )
 
@@ -52,12 +53,13 @@ func metadataString(meta map[string]any, key string) string {
 	return value
 }
 
+// PermissionModes is Codex's permission menu; DefaultPermissionMode applies
+// when neither the conversation nor the Agent chose one.
+var PermissionModes = []string{"strict", "policy", "yolo"}
+
+const DefaultPermissionMode = "strict"
+
 // ValidPermissionMode also accepts an unset value, which means the default.
 func ValidPermissionMode(mode string) bool {
-	switch mode {
-	case "", "strict", "policy", "yolo":
-		return true
-	default:
-		return false
-	}
+	return mode == "" || slices.Contains(PermissionModes, mode)
 }

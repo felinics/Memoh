@@ -15,7 +15,6 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
@@ -23,23 +22,15 @@ import (
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/schedule"
 )
 
-// SetExternalRuntimes registers out-of-process runtime drivers (codex,
-// claude-code, the ACP pool's adapter). Sessions whose runtime type has no
-// registered driver fail with a stable "runtime unavailable" error instead of
+// SetRuntimeRegistry installs the external runtimes. A session whose runtime
+// has no driver fails with a stable "runtime unavailable" error instead of
 // silently degrading to the built-in model runtime.
-func (s *Service) SetExternalRuntimes(drivers ...external.Driver) {
-	if s.externalDrivers == nil {
-		s.externalDrivers = map[string]external.Driver{}
-	}
-	for _, driver := range drivers {
-		if driver == nil {
-			continue
-		}
-		s.externalDrivers[strings.TrimSpace(driver.RuntimeType())] = driver
-	}
+func (s *Service) SetRuntimeRegistry(runtimes *external.Registry) {
+	s.runtimes = runtimes
 }
 
 type runtimeDispatchKind int
@@ -68,16 +59,11 @@ func (s *Service) resolveRuntimeDispatch(ctx context.Context, req ChatRequest) (
 	if err := validateSessionBot(req.BotID, req.ThreadID, sess.BotID); err != nil {
 		return runtimeDispatch{}, err
 	}
-	runtimeType := ""
-	switch {
-	case session.IsACPRuntime(sess):
-		runtimeType = session.RuntimeACPAgent
-	case session.IsDirectRuntime(sess):
-		runtimeType = strings.TrimSpace(sess.RuntimeType)
-	default:
+	runtimeType := session.RuntimeTypeOf(sess)
+	if !runtimekind.IsExternal(runtimeType) {
 		return runtimeDispatch{kind: dispatchNative}, nil
 	}
-	driver, ok := s.externalDrivers[runtimeType]
+	driver, ok := s.runtimes.Driver(runtimeType)
 	if !ok {
 		return runtimeDispatch{}, apperror.New(apperror.CodeExternalRuntimeUnavailable, map[string]string{"runtime": runtimeType})
 	}
@@ -219,7 +205,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
 	req.Query = strings.TrimSpace(req.Query)
-	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, contextReq, runtimeContextAgentID(runtimeType, runtimeMeta), projectPath)
+	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, contextReq, s.runtimeContextAgentID(ctx, runtimeType, sess), projectPath)
 	contextMarkdown, contextURI, contextManifest := runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
 	contextLifecycle := contextfrag.NewLifecycleHolder()
 	if contextManifest != nil {
@@ -556,7 +542,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		cancelPending()
 		abortedReq := req
 		abortedReq.SkipMemoryExtraction = true
-		if persistErr := s.persistRuntimeRound(context.WithoutCancel(ctx), abortedReq, runtimeType, projectPath, result, nil, result.TurnCompleted, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); persistErr != nil {
+		if persistErr := s.persistRuntimeRound(context.WithoutCancel(ctx), abortedReq, runtimeType, projectPath, result, nil, false, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); persistErr != nil {
 			outcome.setCause(persistErr)
 			s.logger.ErrorContext(ctx, "external abort persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
 			switch s.resolveRuntimeRoundPersistFailure(ctx, req, persistErr, cleanupProjectionsIn) {
@@ -652,7 +638,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		MaxCalls:    payload.MaxCalls,
 		Command:     payload.Command,
 	})
-	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, req, runtimeContextAgentID(runtimeType, runtimeMeta), projectPath)
+	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, req, s.runtimeContextAgentID(ctx, runtimeType, sess), projectPath)
 	contextMarkdown, contextURI, contextManifest := runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
 	contextLifecycle := contextfrag.NewLifecycleHolder()
 	if contextManifest != nil {
@@ -795,72 +781,6 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 	}, nil
 }
 
-// abortSettleWait bounds how long AbortSessionRuns waits for the aborted run
-// to reach a terminal state. It must outlast the drivers' own interrupt
-// grace windows (codex settle + recycle, claude interrupt grace) so a
-// successful return means the runtime has actually stopped.
-const abortSettleWait = 30 * time.Second
-
-// AbortSessionRuns interrupts the session's active run, if any, and waits —
-// bounded — until it actually stops. Deleting or resetting a session on a
-// direct external runtime must not leave its turn executing (and mutating
-// the workspace) behind the deletion; cancel alone only signals the driver,
-// so callers that destroy the session next need the settle, not the signal.
-// A run that cannot settle inside the window fails the call rather than
-// letting the caller proceed over a still-running turn.
-func (s *Service) AbortSessionRuns(ctx context.Context, botID, sessionID string) error {
-	if s == nil || s.decisionRuntime == nil {
-		return nil
-	}
-	snapshot, err := s.decisionRuntime.Snapshot(ctx, botID, sessionID)
-	if err != nil {
-		return err
-	}
-	run := snapshot.CurrentRunView
-	if run == nil || strings.TrimSpace(run.RunID) == "" {
-		return nil
-	}
-	runID := run.RunID
-	if _, err = s.decisionRuntime.Abort(ctx, botID, sessionID, runID); err != nil {
-		return err
-	}
-	deadline := time.Now().Add(abortSettleWait)
-	for {
-		snapshot, err := s.decisionRuntime.Snapshot(ctx, botID, sessionID)
-		if err != nil {
-			return err
-		}
-		current := snapshot.CurrentRunView
-		// The ledger going terminal is not enough: a waiting_decision run is
-		// stamped aborted the moment its cancel is dispatched, while the
-		// driver's interrupt handshake is still tearing the turn down. The
-		// active-prompt registration lives exactly as long as the driver
-		// call, so wait for both.
-		if (current == nil || current.RunID != runID || !activeRuntimeRunStatus(current.Status)) &&
-			!s.hasExternalAgentActivePrompt(botID, sessionID) {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("aborted run %s did not stop within %s", runID, abortSettleWait)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(200 * time.Millisecond):
-		}
-	}
-}
-
-func activeRuntimeRunStatus(status string) bool {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case sessionruntime.RunStatusAdmitting, sessionruntime.RunStatusRunning,
-		sessionruntime.RunStatusWaitingDecision, sessionruntime.RunStatusAborting:
-		return true
-	default:
-		return false
-	}
-}
-
 func (s *Service) logRuntimeRoundDivergence(req ChatRequest, runtimeType string) {
 	s.logger.Warn("external runtime remembers a round the visible history lost",
 		slog.String("session_id", req.ThreadID),
@@ -887,9 +807,6 @@ func (s *Service) persistRuntimeRound(
 		"runtime_type": runtimeType,
 		"project_path": projectPath,
 		"stop_reason":  result.StopReason,
-	}
-	for key, value := range result.RoundMetadata {
-		meta[key] = value
 	}
 	if promptErr != nil {
 		// The failure is recorded by its code and catalog args, which the

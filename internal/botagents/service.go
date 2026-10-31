@@ -541,7 +541,7 @@ func ValidateConfigurationWithStore(agent BotAgent, botMetadata map[string]any, 
 			return ErrInvalidMetadata
 		}
 		setup := acpprofile.ParseInstanceSetup(botMetadata, agent.Metadata, descriptor.Provider)
-		if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
+		if field, missing := acpprofile.MissingRequiredManagedField(profile, setup); missing {
 			return &ConfigurationError{Field: field.ID}
 		}
 		return nil
