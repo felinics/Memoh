@@ -124,6 +124,9 @@ func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.S
 	// row once converted so at most one row's metadata is decoded at a time.
 	result := make([]historyfrag.HistoryRecord, 0, len(msgs))
 	for i := range msgs {
+		if err := interruptedPreparation(ctx, "decode history rows"); err != nil {
+			return nil, err
+		}
 		record, err := historyfrag.FromDBMessageWithLogger(s.logger, msgs[i], fallback)
 		if err != nil {
 			return nil, err

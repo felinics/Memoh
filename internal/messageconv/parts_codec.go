@@ -111,11 +111,19 @@ func rewriteParts(content json.RawMessage, rewrite func(part map[string]json.Raw
 	if err := json.Unmarshal(trimmed, &parts); err != nil {
 		return content
 	}
-	out := make([]json.RawMessage, 0, len(parts))
-	for _, raw := range parts {
+	// Each rewritten part is already compact, so the array is joined rather
+	// than encoded again; a part kept as it was is compacted on its own.
+	out := bytes.NewBuffer(make([]byte, 0, len(trimmed)))
+	out.WriteByte('[')
+	for i, raw := range parts {
+		if i > 0 {
+			out.WriteByte(',')
+		}
 		var part map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &part); err != nil || part == nil {
-			out = append(out, raw)
+			if err := json.Compact(out, raw); err != nil {
+				return content
+			}
 			continue
 		}
 		var partType string
@@ -123,16 +131,15 @@ func rewriteParts(content json.RawMessage, rewrite func(part map[string]json.Raw
 		rewrite(part, partType)
 		encoded, err := marshalJSON(part)
 		if err != nil {
-			out = append(out, raw)
+			if err := json.Compact(out, raw); err != nil {
+				return content
+			}
 			continue
 		}
-		out = append(out, encoded)
+		out.Write(encoded)
 	}
-	encoded, err := marshalJSON(out)
-	if err != nil {
-		return content
-	}
-	return encoded
+	out.WriteByte(']')
+	return out.Bytes()
 }
 
 // storedArguments is the arguments as the row has always held them: the
