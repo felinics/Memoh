@@ -50,6 +50,9 @@ const (
 	// telegramGetFileRetries is how many more times getFile is tried after
 	// Telegram answers 429.
 	telegramGetFileRetries = 2
+	// telegramGetFileMaxRetryWait is the longest retry_after getFile waits out.
+	// The wait holds a download slot, so a longer one fails the attachment.
+	telegramGetFileMaxRetryWait = 5 * time.Second
 )
 
 type telegramMediaGroupBuffer struct {
@@ -82,6 +85,8 @@ type TelegramAdapter struct {
 	userInputAuthorize func(context.Context, channel.ChannelConfig, channel.InboundMessage) (bool, error)
 
 	// fileSlots holds each channel config's telegramFileConcurrency slots.
+	// They outlive a connection, so downloads still running across a
+	// reconnect count against the same cap.
 	fileSlotsMu sync.Mutex
 	fileSlots   map[string]*semaphore.Weighted
 }
@@ -224,7 +229,7 @@ func (a *TelegramAdapter) fileURL(bot *tele.Bot, filePath string) string {
 }
 
 // getFileWithRetry calls getFile, waiting out Telegram's retry_after when it
-// answers 429.
+// answers 429 and asks for no more than telegramGetFileMaxRetryWait.
 func getFileWithRetry(ctx context.Context, bot *tele.Bot, fileID string) (tele.File, error) {
 	for attempt := 0; ; attempt++ {
 		file, err := bot.FileByID(fileID)
@@ -232,6 +237,9 @@ func getFileWithRetry(ctx context.Context, bot *tele.Bot, fileID string) (tele.F
 			return file, err
 		}
 		wait := getTelegramRetryAfter(err)
+		if wait > telegramGetFileMaxRetryWait {
+			return file, err
+		}
 		if wait <= 0 {
 			wait = time.Second
 		}
@@ -266,15 +274,6 @@ func (a *TelegramAdapter) acquireFileSlot(ctx context.Context, configID string) 
 		}
 	}
 	return func() { slots.Release(1) }, nil
-}
-
-// dropFileSlots forgets the download slots of a channel config whose
-// connection stopped. Downloads still running give their slot back to the
-// slots they took it from.
-func (a *TelegramAdapter) dropFileSlots(configID string) {
-	a.fileSlotsMu.Lock()
-	delete(a.fileSlots, configID)
-	a.fileSlotsMu.Unlock()
 }
 
 func formatTelegramFileURL(endpoint, token, filePath string) string {
@@ -592,7 +591,6 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 		bot.Stop()
 		cancel()
 		flushAllMediaGroups()
-		a.dropFileSlots(cfg.ID)
 		return nil
 	}
 	return channel.NewConnection(cfg, stop), nil

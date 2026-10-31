@@ -413,6 +413,26 @@ func TestTelegramResolveAttachmentRetriesGetFileOnTooManyRequests(t *testing.T) 
 	}
 }
 
+func TestTelegramResolveAttachmentFailsOnLongRetryAfter(t *testing.T) {
+	const botToken = "123456:flood-long"
+	var calls atomic.Int32
+	adapter := newTelegramFileTestAdapter(t, botToken, func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"ok":false,"error_code":429,"description":"Too Many Requests: retry after 60","parameters":{"retry_after":60}}`)
+	})
+	cfg := channel.ChannelConfig{ID: "config", Credentials: map[string]any{"bot_token": botToken}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := adapter.ResolveAttachment(ctx, cfg, channel.Attachment{PlatformKey: "f"}); err == nil || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ResolveAttachment = %v, want the 429 returned without waiting out retry_after", err)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("getFile calls = %d, want 1", n)
+	}
+}
+
 func TestTelegramResolveAttachmentHoldsSlotUntilBodyIsDone(t *testing.T) {
 	const botToken = "123456:hold"
 	adapter := newTelegramFileTestAdapter(t, botToken, func(w http.ResponseWriter, _ *http.Request) {
@@ -449,25 +469,6 @@ func TestTelegramResolveAttachmentHoldsSlotUntilBodyIsDone(t *testing.T) {
 	}
 	if !adapter.fileSlots["config"].TryAcquire(telegramFileConcurrency) {
 		t.Fatal("some slots are still held after every body was closed")
-	}
-}
-
-func TestDropFileSlotsForgetsTheConfig(t *testing.T) {
-	adapter := NewTelegramAdapter(nil)
-	release, err := adapter.acquireFileSlot(context.Background(), "config")
-	if err != nil {
-		t.Fatal(err)
-	}
-	adapter.dropFileSlots("config")
-	if _, ok := adapter.fileSlots["config"]; ok {
-		t.Fatal("a stopped config's slots are still kept")
-	}
-	release() // a download that outlived its connection
-	if _, err := adapter.acquireFileSlot(context.Background(), "config"); err != nil {
-		t.Fatal(err)
-	}
-	if !adapter.fileSlots["config"].TryAcquire(telegramFileConcurrency - 1) {
-		t.Fatal("a reconnected config started with slots already held")
 	}
 }
 
