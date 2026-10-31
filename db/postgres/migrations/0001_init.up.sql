@@ -2843,6 +2843,8 @@ CREATE TABLE IF NOT EXISTS public.bot_dependency_installations (
     status              TEXT        NOT NULL,
     installed_version   TEXT        NOT NULL DEFAULT '',
     latest_version      TEXT        NOT NULL DEFAULT '',
+    update_available    BOOLEAN     NOT NULL DEFAULT false,
+    update_checked_version TEXT     NOT NULL DEFAULT '',
     last_checked_at     TIMESTAMPTZ,
     last_error          TEXT        NOT NULL DEFAULT '',
     last_error_code     TEXT        NOT NULL DEFAULT '',

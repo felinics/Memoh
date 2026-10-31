@@ -372,6 +372,8 @@ func TestParseDiscoveryOutputIncompleteWithoutEndMarker(t *testing.T) {
 
 func TestExtractVersion(t *testing.T) {
 	cases := map[string]string{
+		"LibreOffice 25.2.3.2":           "25.2.3.2",
+		"bundle 0.0.0+abcdef":            "0.0.0+abcdef",
 		"v22.1.0":                        "22.1.0",
 		"Python 3.12.1":                  "3.12.1",
 		"codex-cli 0.151.0":              "0.151.0",
@@ -403,14 +405,14 @@ func TestDiscoveryManagedEntrypointDoesNotDependOnJSONFieldOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	obs := f.discover(t, "tool-a")["tool-a"]
-	if obs.Source != SourceManaged || obs.Command != primary || obs.Version != "2.3.4" {
+	if obs.Source != SourceManaged || obs.Command != primary || obs.Version != "2.0.0" {
 		t.Fatalf("current JSON entrypoint was not validated/probed: %+v", obs)
 	}
 }
 
 func TestVersionProbeTimeoutKeepsPresenceAndOtherCandidates(t *testing.T) {
 	obs := Observed{Present: true, Command: "/managed", Version: "1.0.0", Candidates: []Candidate{
-		{Source: SourceManaged, Path: "/managed", Version: "1.0.0"},
+		{Source: SourceToolkit, Path: "/managed", Version: "1.0.0"},
 		{Source: SourcePath, Path: "/working"},
 	}}
 	probeCandidateVersions(context.Background(), &obs, map[string]versionProbeResult{}, func(_ context.Context, command string) (string, error) {
@@ -421,5 +423,26 @@ func TestVersionProbeTimeoutKeepsPresenceAndOtherCandidates(t *testing.T) {
 	})
 	if !obs.Present || obs.Version != "1.0.0" || obs.Candidates[1].Version != "2.0.0" || !strings.Contains(obs.Err, "deadline exceeded") {
 		t.Fatalf("one timed-out probe discarded usable installations: %+v", obs)
+	}
+}
+
+func TestDiscoverPreservesRecipeVersion(t *testing.T) {
+	for _, version := range []string{"1.90.0", "0.0.0+abcdef", "4_25.2.3-2", "2.9.0-0"} {
+		t.Run(version, func(t *testing.T) {
+			f := newDiscoveryFixture(t)
+			f.writeState(t, "tool-a", State{DependencyID: "tool-a", Version: version, Entrypoints: map[string]string{"tool-a": filepath.Join(f.bin, "tool-a")}})
+			obs := f.discover(t, "tool-a")["tool-a"]
+			if obs.Version != version || obs.Candidates[0].Version != version {
+				t.Fatalf("recipe version overwritten by executable: %+v", obs)
+			}
+		})
+	}
+}
+
+func TestDiscoverProbesManagedCopyWithoutRecordedVersion(t *testing.T) {
+	f := newDiscoveryFixture(t)
+	f.writeState(t, "tool-a", State{DependencyID: "tool-a", Entrypoints: map[string]string{"tool-a": filepath.Join(f.bin, "tool-a")}})
+	if obs := f.discover(t, "tool-a")["tool-a"]; obs.Version != "9.9.9" {
+		t.Fatalf("missing fallback probe: %+v", obs)
 	}
 }

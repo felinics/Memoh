@@ -242,24 +242,26 @@ type BotChannelRoute struct {
 }
 
 type BotDependencyInstallation struct {
-	ID                 pgtype.UUID        `json:"id"`
-	TeamID             pgtype.UUID        `json:"team_id"`
-	BotID              pgtype.UUID        `json:"bot_id"`
-	DependencyID       string             `json:"dependency_id"`
-	Source             string             `json:"source"`
-	Status             string             `json:"status"`
-	InstalledVersion   string             `json:"installed_version"`
-	LatestVersion      string             `json:"latest_version"`
-	LastCheckedAt      pgtype.Timestamptz `json:"last_checked_at"`
-	LastError          string             `json:"last_error"`
-	LastErrorCode      string             `json:"last_error_code"`
-	ManifestDigest     string             `json:"manifest_digest"`
-	SourceUrl          string             `json:"source_url"`
-	RegistryID         string             `json:"registry_id"`
-	DefinitionRevision string             `json:"definition_revision"`
-	OperationID        string             `json:"operation_id"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ID                   pgtype.UUID        `json:"id"`
+	TeamID               pgtype.UUID        `json:"team_id"`
+	BotID                pgtype.UUID        `json:"bot_id"`
+	DependencyID         string             `json:"dependency_id"`
+	Source               string             `json:"source"`
+	Status               string             `json:"status"`
+	InstalledVersion     string             `json:"installed_version"`
+	LatestVersion        string             `json:"latest_version"`
+	UpdateAvailable      bool               `json:"update_available"`
+	UpdateCheckedVersion string             `json:"update_checked_version"`
+	LastCheckedAt        pgtype.Timestamptz `json:"last_checked_at"`
+	LastError            string             `json:"last_error"`
+	LastErrorCode        string             `json:"last_error_code"`
+	ManifestDigest       string             `json:"manifest_digest"`
+	SourceUrl            string             `json:"source_url"`
+	RegistryID           string             `json:"registry_id"`
+	DefinitionRevision   string             `json:"definition_revision"`
+	OperationID          string             `json:"operation_id"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 }
 
 type BotHistoryMessage struct {
