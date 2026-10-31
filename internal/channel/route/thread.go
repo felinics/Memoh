@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -85,14 +84,9 @@ func (c *ThreadCoordinator) CreateNew(ctx context.Context, input session.CreateI
 	return thread, nil
 }
 
-const (
-	// createSessionTimeout bounds the creation that joined callers share; it
-	// runs detached from the context of the caller that started it.
-	createSessionTimeout = 30 * time.Second
-	// createSessionAttempts bounds how often a creator reads the route again
-	// after another writer moved the pointer first.
-	createSessionAttempts = 3
-)
+// createSessionAttempts bounds how often a creator reads the route again after
+// another writer moved the pointer first.
+const createSessionAttempts = 3
 
 var errRouteKeptChanging = errors.New("route active session kept changing")
 
@@ -105,10 +99,9 @@ var errRouteKeptChanging = errors.New("route active session kept changing")
 func (c *ThreadCoordinator) CreateIfAbsent(ctx context.Context, input session.CreateInput) (session.Thread, error) {
 	result := c.creating.DoChan(strings.TrimSpace(input.RouteID), func() (any, error) {
 		// Detached, because the callers joined here share it: one of them
-		// giving up must not fail it for the rest.
-		shared, cancel := context.WithTimeout(context.WithoutCancel(ctx), createSessionTimeout)
-		defer cancel()
-		return c.createIfAbsent(shared, input)
+		// giving up must not fail it for the rest. Not bounded either: Create
+		// runs the SessionStart hook, which can take long on a cold workspace.
+		return c.createIfAbsent(context.WithoutCancel(ctx), input)
 	})
 	select {
 	case <-ctx.Done():
@@ -161,8 +154,18 @@ func (c *ThreadCoordinator) createIfAbsent(ctx context.Context, input session.Cr
 		}
 		set, err := c.routes.CompareAndSetActiveThread(ctx, input.RouteID, expected, created.ID)
 		if err != nil {
+			err = fmt.Errorf("select new session on route: %w", err)
+			// The write may have committed before its reply was lost.
+			route, readErr := c.routes.GetByID(ctx, input.RouteID)
+			if readErr != nil {
+				// Keep the Thread: deleting it might delete the selected one.
+				return session.Thread{}, err
+			}
+			if strings.TrimSpace(route.ActiveThreadID) == created.ID {
+				return created, nil
+			}
 			discard()
-			return session.Thread{}, fmt.Errorf("select new session on route: %w", err)
+			return session.Thread{}, err
 		}
 		if set {
 			return created, nil

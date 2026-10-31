@@ -205,6 +205,7 @@ type raceStore struct {
 	activeID string
 	movedTo  string // when set, another process selects it right after the first route read
 	failGet  string // when set, reading this thread fails with a transient error
+	lostAck  bool   // when set, the conditional write commits and then reports an error
 	threads  map[string]session.Thread
 	created  int
 	deleted  []string
@@ -232,6 +233,9 @@ func (s *raceStore) CompareAndSetActiveThread(_ context.Context, _, expected, th
 		return false, nil
 	}
 	s.activeID = threadID
+	if s.lostAck {
+		return false, errors.New("connection reset")
+	}
 	return true, nil
 }
 
@@ -333,6 +337,14 @@ func TestThreadCoordinatorCreateIfAbsentKeepsSelectionWhenItCannotBeRead(t *test
 	}
 	if store.created != 0 || store.activeID != "thread-live" {
 		t.Fatalf("created %d, route points at %q; want the selection left alone", store.created, store.activeID)
+	}
+}
+
+func TestThreadCoordinatorCreateIfAbsentKeepsThreadWhoseSelectionReplyWasLost(t *testing.T) {
+	store := &raceStore{lostAck: true, threads: map[string]session.Thread{}}
+	got, err := NewThreadCoordinator(nil, store, store).CreateIfAbsent(context.Background(), session.CreateInput{RouteID: "route-1"})
+	if err != nil || got.ID != "thread-1" || len(store.deleted) != 0 {
+		t.Fatalf("CreateIfAbsent = %q, %v, deleted %v; want the selected thread returned and kept", got.ID, err, store.deleted)
 	}
 }
 
