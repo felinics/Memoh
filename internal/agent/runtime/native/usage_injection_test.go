@@ -258,7 +258,7 @@ func TestAssembleToolsPassesReasoningInputsToToolSession(t *testing.T) {
 
 	var seen tools.SessionContext
 	a := newTestAgent(&usageTestProvider{emitTool: true, sessionSeen: &seen})
-	_, _, _, _, err := a.assembleTools(context.Background(), RunConfig{
+	_, err := a.assembleTools(context.Background(), RunConfig{
 		ReasoningStoredEffort:    "high",
 		ReasoningRequestedEffort: "disable",
 	}, nil, false)
@@ -320,10 +320,11 @@ func TestAssembleToolsInjectsUsageWhenProviderEmitsTools(t *testing.T) {
 	t.Parallel()
 	a := newTestAgent(&usageTestProvider{emitTool: true, usage: usageMarker})
 
-	gotTools, usage, _, toolDefs, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	assembled, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
+	gotTools, usage, toolDefs := assembled.tools, assembled.usage, assembled.defs
 	if len(gotTools) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(gotTools))
 	}
@@ -343,7 +344,7 @@ func TestAssembleToolsPassesContextBudgetToSession(t *testing.T) {
 	var captured tools.SessionContext
 	a := newTestAgent(&usageTestProvider{emitTool: true, sessionSeen: &captured})
 
-	if _, _, _, _, err := a.assembleTools(context.Background(), RunConfig{
+	if _, err := a.assembleTools(context.Background(), RunConfig{
 		ContextBudgetMaxTokens: 128000,
 	}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true); err != nil {
 		t.Fatalf("assembleTools error: %v", err)
@@ -358,10 +359,11 @@ func TestAssembleToolsOmitsUsageWhenProviderEmitsNoTools(t *testing.T) {
 	t.Parallel()
 	a := newTestAgent(&usageTestProvider{emitTool: false, usage: usageMarker})
 
-	gotTools, usage, _, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	assembled, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
+	gotTools, usage := assembled.tools, assembled.usage
 	if len(gotTools) != 0 {
 		t.Fatalf("expected 0 tools, got %d", len(gotTools))
 	}
@@ -377,10 +379,11 @@ func TestAssembleToolsUsesProviderAccountingLabel(t *testing.T) {
 		{label: " ", want: "native"},
 	} {
 		a := newTestAgent(labeledTestProvider{label: tc.label})
-		_, _, _, toolDefs, err := a.assembleTools(context.Background(), RunConfig{}, nil, false)
+		assembled, err := a.assembleTools(context.Background(), RunConfig{}, nil, false)
 		if err != nil {
 			t.Fatalf("assembleTools error: %v", err)
 		}
+		toolDefs := assembled.defs
 		if len(toolDefs) != 1 || toolDefs[0].Provider != tc.want || toolDefs[0].Name != "remote_tool" {
 			t.Fatalf("tool definitions = %#v, want %s remote_tool", toolDefs, tc.want)
 		}
@@ -391,12 +394,13 @@ func TestAssembleToolsDoesNotExposeAskUserWithoutCapability(t *testing.T) {
 	t.Parallel()
 	a := newTestAgent(&tools.AskUserProvider{})
 
-	gotTools, usage, _, _, err := a.assembleTools(context.Background(), RunConfig{
+	assembled, err := a.assembleTools(context.Background(), RunConfig{
 		SessionType: sessionmode.Chat,
 	}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
+	gotTools, usage := assembled.tools, assembled.usage
 	if len(gotTools) != 0 {
 		t.Fatalf("expected ask_user to be omitted without user input capability, got %d tools", len(gotTools))
 	}
@@ -404,13 +408,14 @@ func TestAssembleToolsDoesNotExposeAskUserWithoutCapability(t *testing.T) {
 		t.Fatalf("expected no ask_user usage without user input capability, got %q", usage)
 	}
 
-	gotTools, usage, _, _, err = a.assembleTools(context.Background(), RunConfig{
+	assembled, err = a.assembleTools(context.Background(), RunConfig{
 		SessionType:         sessionmode.Chat,
 		CanRequestUserInput: true,
 	}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools with capability error: %v", err)
 	}
+	gotTools, usage = assembled.tools, assembled.usage
 	if len(gotTools) != 1 || gotTools[0].Name != tools.ToolAskUser().String() {
 		t.Fatalf("expected ask_user when capability is present, got %#v", gotTools)
 	}
@@ -423,10 +428,11 @@ func TestAssembleToolsIgnoresProvidersWithoutUsage(t *testing.T) {
 	t.Parallel()
 	a := newTestAgent(plainTestProvider{})
 
-	gotTools, usage, _, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	assembled, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
+	gotTools, usage := assembled.tools, assembled.usage
 	if len(gotTools) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(gotTools))
 	}
@@ -451,10 +457,11 @@ func TestAssembleToolsGatesUsagePerProvider(t *testing.T) {
 		plainTestProvider{},
 	)
 
-	gotTools, usage, _, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	assembled, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
+	gotTools, usage := assembled.tools, assembled.usage
 	if len(gotTools) != 2 {
 		t.Fatalf("expected 2 tools (active usage provider + plain provider), got %d", len(gotTools))
 	}
@@ -477,7 +484,7 @@ func TestAssembleToolsKeepsFirstDuplicateToolAndItsUsage(t *testing.T) {
 		&usageTestProvider{emitTool: true, usage: secondUsage},
 	)
 
-	gotTools, usage, _, toolDefs, err := a.assembleTools(
+	assembled, err := a.assembleTools(
 		context.Background(),
 		RunConfig{},
 		tools.StreamEmitter(func(tools.ToolStreamEvent) {}),
@@ -486,6 +493,7 @@ func TestAssembleToolsKeepsFirstDuplicateToolAndItsUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
+	gotTools, usage, toolDefs := assembled.tools, assembled.usage, assembled.defs
 	if len(gotTools) != 1 || gotTools[0].Name != "fake_tool" {
 		t.Fatalf("expected only the first duplicate tool, got %#v", gotTools)
 	}
@@ -516,10 +524,11 @@ func TestAssembleToolsPassesCompleteAvailableToolSetToUsage(t *testing.T) {
 		plainTestProvider{},
 	)
 
-	gotTools, usage, _, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	assembled, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
+	gotTools, usage := assembled.tools, assembled.usage
 	if len(gotTools) != 2 {
 		t.Fatalf("expected 2 tools, got %d", len(gotTools))
 	}

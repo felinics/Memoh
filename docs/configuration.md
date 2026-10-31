@@ -22,6 +22,7 @@ The main configuration file is `config.toml` (copied from `conf/app.example.toml
 - `[registry]` — Provider registry (`providers_dir` pointing to `conf/providers/`; speech, transcription and video templates only)
 - `[model_catalog]` — Server-owned public model metadata (`url` and `cache_path`); see [Model catalog](model-catalog.md) for cache and Cloud compatibility behavior
 - `[supermarket]` — Supermarket integration (base_url)
+- `[agent]` — Agent runtime limits (`tool_output_max_bytes`, `tool_output_max_lines`, `system_files_max_bytes`, `context_absolute_max_tokens`) and `on_demand_tools`: `auto` (default) keeps rarely used tool groups (schedules, browser/desktop, MCP and App management) out of each request until the model loads them with `tool_describe` and runs them with `tool_call`; `off` sends every tool definition with every request
 
 Provider YAML templates in `conf/providers/` define preset configurations for speech, transcription and video providers only. LLM providers come from the hand-written gallery in `apps/web/src/constants/model-sources.ts`; the server fetches, validates, converts and caches their [models.dev](https://models.dev) catalogs. Importing from the provider's own `/models` endpoint remains a separate action. Cloud managed providers retain their authenticated platform catalog.
 

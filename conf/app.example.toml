@@ -78,6 +78,12 @@ system_files_max_bytes = 32768
 # no configured context window the cap alone bounds the context. Raise it for
 # models with windows above the default; it can never be disabled.
 # context_absolute_max_tokens = 200000
+# Rarely used tool groups (schedules, browser/desktop, MCP and App management)
+# stay out of each request until the model loads them with tool_describe and
+# runs them with tool_call, which keeps the cached request prefix unchanged.
+# "auto" (default) enables this when it shrinks the request; "off" sends every
+# tool definition with every request.
+# on_demand_tools = "auto"
 
 [session_runtime]
 # Stores live run snapshots for WebSocket attach/reconnect. memory is best for

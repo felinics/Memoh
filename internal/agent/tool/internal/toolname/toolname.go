@@ -2,6 +2,7 @@ package toolname
 
 import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/toolbridge"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 )
 
@@ -80,11 +81,15 @@ func ToolGenerateVideo() Name   { return newName("generate_video") }
 func ToolTranscribeAudio() Name { return newName("transcribe_audio") }
 func ToolAskUser() Name         { return newName(userinput.ToolNameAskUser) }
 
+func ToolDescribe() Name { return newName(toolbridge.DescribeToolName) }
+func ToolCall() Name     { return newName(toolbridge.CallToolName) }
+
 func ToolMCPManage() Name { return newName("mcp_manage") }
 func ToolAppSearch() Name { return newName("app_search") }
 func ToolAppManage() Name { return newName("app_manage") }
 
 var all = []Name{
+	ToolDescribe(), ToolCall(),
 	ToolMCPManage(), ToolAppSearch(), ToolAppManage(),
 	ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolExec(), ToolApplyPatch(), ToolListExecutionLocations(), ToolListBackground(), ToolGetBackgroundStatus(), ToolKillBackground(), ToolWait(), ToolWaitUntil(),
 	ToolSend(), ToolReact(), ToolSpeak(),
