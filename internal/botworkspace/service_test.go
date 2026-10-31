@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1014,7 +1015,7 @@ func TestClaimNeverExceedsFreeConcurrency(t *testing.T) {
 	backend := &fakeBackend{}
 	clk := &clock{t: time.Date(2026, 9, 18, 0, 0, 0, 0, time.UTC)}
 	repo := newMemRepo(clk.now)
-	svc := New(repo, backend, nil, Options{Owner: "test", Concurrency: 2, Batch: 10})
+	svc := New(repo, backend, nil, Options{Owner: "test", Concurrency: 2})
 	svc.now = clk.now
 	svc.rnd = func() float64 { return 0.5 }
 	ctx := context.Background()
@@ -1082,10 +1083,11 @@ func TestFreedSlotStartsTheRowThatWaitedForIt(t *testing.T) {
 	awaitObserved(t, repo, second, ObservedRunning)
 }
 
-func TestRowReleasedUntouchedDoesNotSpinTheLoop(t *testing.T) {
+func TestClaimDecidesWhenAFailedRowIsDue(t *testing.T) {
 	clk := &clock{t: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}
 	// The database clock runs ahead of the process clock: the failed row is
-	// due to the claim while Decide still sees its backoff running.
+	// due to the claim while the process clock still sees its backoff
+	// running. The claim decides; the retry runs once and the loop settles.
 	repo := newMemRepo(func() time.Time { return clk.now().Add(5 * time.Second) })
 	repo.rows[bot] = &Workspace{
 		BotID: bot, Desired: DesiredPresent, DesiredGeneration: 1,
@@ -1103,7 +1105,10 @@ func TestRowReleasedUntouchedDoesNotSpinTheLoop(t *testing.T) {
 	svc.Kick()
 	time.Sleep(300 * time.Millisecond)
 	if n := repo.claimCount(); n > 2 {
-		t.Fatalf("a row released untouched kept the loop claiming: %d claims", n)
+		t.Fatalf("a row due to the database clock kept the loop claiming: %d claims", n)
+	}
+	if w := repo.get(bot); w.Observed != ObservedRunning || w.LeaseOwner != "" {
+		t.Fatalf("the claimed retry did not run: %+v", w)
 	}
 }
 
@@ -1189,6 +1194,9 @@ func TestPassWhoseLastWriteFailedDoesNotSpinTheLoop(t *testing.T) {
 			if n := repo.claimCount(); n > 2 {
 				t.Fatalf("a pass that recorded nothing kept the loop claiming: %d claims", n)
 			}
+			if w := repo.get(bot); w.LeaseOwner != "" {
+				t.Fatalf("the pass left its lease behind: %+v", w)
+			}
 		})
 	}
 }
@@ -1226,6 +1234,69 @@ func TestCatchUpLostToARemovalReleasesTheRowAndWakesTheLoop(t *testing.T) {
 
 	svc.Kick()
 	awaitObserved(t, repo, bot, ObservedAbsent)
+}
+
+// statusHook runs fn once, on the first status write after the provisioning
+// recorded a running workspace and gave its lease back: the moment its pass
+// is done with the row but still holds the slot.
+type statusHook struct {
+	repo  *memRepo
+	fired atomic.Bool
+	fn    func()
+}
+
+func (h *statusHook) SetBotStatusFromWorkspace(context.Context, string, string) error {
+	if w := h.repo.get(bot); w.Observed == ObservedRunning && w.LeaseOwner == "" && h.fired.CompareAndSwap(false, true) {
+		h.fn()
+	}
+	return nil
+}
+
+func TestRemovalRightAfterProvisioningIsNotLeftLeased(t *testing.T) {
+	// The removal arrives after the provisioning recorded the workspace as
+	// running and before its pass gives up the slot. The removal's wake claims
+	// the row, finds it still running here and skips it, keeping the lease it
+	// took. The finishing pass must give that lease back, or the removal
+	// waits for it to expire. The clock never advances here, so it would wait
+	// forever.
+	clk := &clock{t: time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)}
+	repo := newMemRepo(clk.now)
+	svc := New(repo, &fakeBackend{}, nil, Options{Owner: "test", Interval: time.Hour})
+	svc.now = clk.now
+	svc.rnd = func() float64 { return 0.5 }
+	// Keep the drift scan, which writes status as well, out of the way.
+	svc.lastDrift = clk.now()
+	ctx := context.Background()
+	svc.SetBotStatusWriter(&statusHook{repo: repo, fn: func() {
+		if _, err := svc.RequestAbsent(ctx, bot, false); err != nil {
+			t.Error(err)
+			return
+		}
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			if w := repo.get(bot); w.Desired == DesiredAbsent && w.LeaseOwner != "" {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Error("the removal was not claimed while the pass held the slot")
+	}})
+	if err := svc.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer stopService(t, svc)
+
+	if _, err := svc.EnsurePresent(ctx, bot, ""); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if w := repo.get(bot); w.Desired == DesiredAbsent && w.Observed == ObservedAbsent && w.ObservedGeneration >= w.DesiredGeneration {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("the removal never started; the row was left leased: %+v", repo.get(bot))
 }
 
 // busyProvisioningThenRemoval provisions a bot, keeps the only provisioning

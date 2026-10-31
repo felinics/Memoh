@@ -13,8 +13,6 @@ const (
 	ActionProvision
 	// ActionTeardown removes the workspace.
 	ActionTeardown
-	// ActionWait means the row is not due (backoff still running).
-	ActionWait
 )
 
 func (a Action) String() string {
@@ -23,17 +21,18 @@ func (a Action) String() string {
 		return "provision"
 	case ActionTeardown:
 		return "teardown"
-	case ActionWait:
-		return "wait"
 	default:
 		return "none"
 	}
 }
 
-// Decide compares intent with observation. It looks only at the present state,
-// never at history, so an interrupted pass (lease expired mid-provisioning)
-// simply continues from what the backend reports.
-func Decide(w Workspace, now time.Time) Action {
+// Decide compares intent with observation for a claimed row. It looks only at
+// the present state, never at history, so an interrupted pass (lease expired
+// mid-provisioning) simply continues from what the backend reports. Whether
+// the row is due, a failed attempt's backoff included, the claim has already
+// decided on the database's clock; checking it again here on the process clock
+// would only disagree when the two clocks drift apart.
+func Decide(w Workspace) Action {
 	switch w.Desired {
 	case DesiredAbsent:
 		// "absent" is also the column default, so it only counts as an answer
@@ -43,19 +42,11 @@ func Decide(w Workspace, now time.Time) Action {
 		if w.Observed == ObservedAbsent && w.ObservedGeneration >= w.DesiredGeneration {
 			return ActionNone
 		}
-		if w.Observed == ObservedFailed && w.NextAttemptAt.After(now) {
-			return ActionWait
-		}
 		return ActionTeardown
 	default:
 		switch w.Observed {
 		case ObservedRunning, ObservedStopped:
 			return ActionNone
-		case ObservedFailed:
-			if w.NextAttemptAt.After(now) {
-				return ActionWait
-			}
-			return ActionProvision
 		default:
 			return ActionProvision
 		}
