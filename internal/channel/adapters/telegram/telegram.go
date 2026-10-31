@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
 	tele "gopkg.in/telebot.v4"
 
@@ -39,6 +41,18 @@ const (
 	telegramUpdateDedupeTTL         = 10 * time.Minute
 	defaultTelegramFileEndpoint     = "https://api.telegram.org/file/bot%s/%s"
 	telegramLongPollTimeout         = 30 * time.Second
+	// telegramFileConcurrency caps the attachment downloads one bot has in
+	// flight, from getFile until the body is read. A backlog dispatches its
+	// updates together, and each resolves its files on its own goroutine.
+	// Against the real Bot API, 90 distinct photos took 18s at 4, 10s at 8 and
+	// 9s at 16; at 64 downloads began to fail.
+	telegramFileConcurrency = 8
+	// telegramGetFileRetries is how many more times getFile is tried after
+	// Telegram answers 429.
+	telegramGetFileRetries = 2
+	// telegramGetFileMaxRetryWait is the longest retry_after getFile waits out.
+	// The wait holds a download slot, so a longer one fails the attachment.
+	telegramGetFileMaxRetryWait = 5 * time.Second
 )
 
 type telegramMediaGroupBuffer struct {
@@ -73,6 +87,12 @@ type TelegramAdapter struct {
 	askUserPrompts     *askUserTextPromptStore
 	userInput          askUserInteractionService
 	userInputAuthorize func(context.Context, channel.ChannelConfig, channel.InboundMessage) (bool, error)
+
+	// fileSlots holds each channel config's telegramFileConcurrency slots.
+	// They outlive a connection, so downloads still running across a
+	// reconnect count against the same cap.
+	fileSlotsMu sync.Mutex
+	fileSlots   map[string]*semaphore.Weighted
 }
 
 // askUserInteractionService is the slice of *userinput.Service the adapter
@@ -221,13 +241,65 @@ func (a *TelegramAdapter) getFileDirectURL(bot *tele.Bot, fileID string) (string
 	if err != nil {
 		return "", err
 	}
+	return a.fileURL(bot, file.FilePath), nil
+}
+
+func (a *TelegramAdapter) fileURL(bot *tele.Bot, filePath string) string {
 	a.mu.RLock()
 	endpoint := a.fileEndpoints[bot]
 	a.mu.RUnlock()
 	if endpoint == "" {
 		endpoint = defaultTelegramFileEndpoint
 	}
-	return formatTelegramFileURL(endpoint, bot.Token, file.FilePath), nil
+	return formatTelegramFileURL(endpoint, bot.Token, filePath)
+}
+
+// getFileWithRetry calls getFile, waiting out Telegram's retry_after when it
+// answers 429 and asks for no more than telegramGetFileMaxRetryWait.
+func getFileWithRetry(ctx context.Context, bot *tele.Bot, fileID string) (tele.File, error) {
+	for attempt := 0; ; attempt++ {
+		file, err := bot.FileByID(fileID)
+		if err == nil || !isTelegramTooManyRequests(err) || attempt == telegramGetFileRetries {
+			return file, err
+		}
+		wait := getTelegramRetryAfter(err)
+		if wait > telegramGetFileMaxRetryWait {
+			return file, err
+		}
+		if wait <= 0 {
+			wait = time.Second
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return tele.File{}, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+// acquireFileSlot waits for one of the bot's telegramFileConcurrency slots and
+// returns the function that gives it back.
+func (a *TelegramAdapter) acquireFileSlot(ctx context.Context, configID string) (func(), error) {
+	a.fileSlotsMu.Lock()
+	slots, ok := a.fileSlots[configID]
+	if !ok {
+		if a.fileSlots == nil {
+			a.fileSlots = make(map[string]*semaphore.Weighted)
+		}
+		slots = semaphore.NewWeighted(telegramFileConcurrency)
+		a.fileSlots[configID] = slots
+	}
+	a.fileSlotsMu.Unlock()
+	// A free slot is taken even when ctx is already done, so the call fails
+	// the way it would without the cap. Acquire alone would refuse it.
+	if !slots.TryAcquire(1) {
+		if err := slots.Acquire(ctx, 1); err != nil {
+			return nil, err
+		}
+	}
+	return func() { slots.Release(1) }, nil
 }
 
 func formatTelegramFileURL(endpoint, token, filePath string) string {
@@ -595,7 +667,7 @@ func (a *TelegramAdapter) buildTelegramInboundMessage(bot *tele.Bot, cfg channel
 	if text == "" && caption != "" {
 		text = caption
 	}
-	attachments := a.collectTelegramAttachments(bot, raw)
+	attachments := a.collectTelegramAttachments(raw)
 	return a.toInboundTelegramMessage(bot, cfg, raw, text, attachments, map[string]any{
 		"update_id": update.ID,
 	})
@@ -1090,7 +1162,7 @@ func (a *TelegramAdapter) buildTelegramMediaGroupInboundMessage(
 			text = candidate
 			anchor = msg
 		}
-		attachments = append(attachments, a.collectTelegramAttachments(bot, msg)...)
+		attachments = append(attachments, a.collectTelegramAttachments(msg)...)
 		if !isMentioned {
 			isMentioned = isTelegramBotMentioned(msg, botUsername)
 		}
@@ -1168,7 +1240,7 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 	}
 	replyRef := buildTelegramReplyRef(raw, chatID)
 	if replyRef != nil {
-		replyRef.Attachments = a.collectTelegramAttachments(bot, raw.ReplyTo)
+		replyRef.Attachments = a.collectTelegramAttachments(raw.ReplyTo)
 		replyRef.AttachmentsKnown = true
 	}
 	forwardRef := buildTelegramForwardRef(raw)
@@ -2227,47 +2299,47 @@ func isTelegramUsernameByte(value byte) bool {
 	return value >= 'a' && value <= 'z' || value >= '0' && value <= '9' || value == '_'
 }
 
-func (a *TelegramAdapter) collectTelegramAttachments(bot *tele.Bot, msg *tele.Message) []channel.Attachment {
+func (a *TelegramAdapter) collectTelegramAttachments(msg *tele.Message) []channel.Attachment {
 	if msg == nil {
 		return nil
 	}
 	attachments := make([]channel.Attachment, 0, 1)
 	if msg.Photo != nil {
-		att := a.buildTelegramAttachment(bot, channel.AttachmentImage, msg.Photo.FileID, "", "", msg.Photo.FileSize)
+		att := a.buildTelegramAttachment(channel.AttachmentImage, msg.Photo.FileID, "", "", msg.Photo.FileSize)
 		att.Width = msg.Photo.Width
 		att.Height = msg.Photo.Height
 		attachments = append(attachments, att)
 	}
 	if msg.Document != nil {
-		att := a.buildTelegramAttachment(bot, channel.AttachmentFile, msg.Document.FileID, msg.Document.FileName, msg.Document.MIME, msg.Document.FileSize)
+		att := a.buildTelegramAttachment(channel.AttachmentFile, msg.Document.FileID, msg.Document.FileName, msg.Document.MIME, msg.Document.FileSize)
 		attachments = append(attachments, att)
 	}
 	if msg.Audio != nil {
-		att := a.buildTelegramAttachment(bot, channel.AttachmentAudio, msg.Audio.FileID, msg.Audio.FileName, msg.Audio.MIME, msg.Audio.FileSize)
+		att := a.buildTelegramAttachment(channel.AttachmentAudio, msg.Audio.FileID, msg.Audio.FileName, msg.Audio.MIME, msg.Audio.FileSize)
 		att.DurationMs = int64(msg.Audio.Duration) * 1000
 		attachments = append(attachments, att)
 	}
 	if msg.Voice != nil {
-		att := a.buildTelegramAttachment(bot, channel.AttachmentVoice, msg.Voice.FileID, "", msg.Voice.MIME, msg.Voice.FileSize)
+		att := a.buildTelegramAttachment(channel.AttachmentVoice, msg.Voice.FileID, "", msg.Voice.MIME, msg.Voice.FileSize)
 		att.DurationMs = int64(msg.Voice.Duration) * 1000
 		attachments = append(attachments, att)
 	}
 	if msg.Video != nil {
-		att := a.buildTelegramAttachment(bot, channel.AttachmentVideo, msg.Video.FileID, msg.Video.FileName, msg.Video.MIME, msg.Video.FileSize)
+		att := a.buildTelegramAttachment(channel.AttachmentVideo, msg.Video.FileID, msg.Video.FileName, msg.Video.MIME, msg.Video.FileSize)
 		att.Width = msg.Video.Width
 		att.Height = msg.Video.Height
 		att.DurationMs = int64(msg.Video.Duration) * 1000
 		attachments = append(attachments, att)
 	}
 	if msg.Animation != nil {
-		att := a.buildTelegramAttachment(bot, channel.AttachmentGIF, msg.Animation.FileID, msg.Animation.FileName, msg.Animation.MIME, msg.Animation.FileSize)
+		att := a.buildTelegramAttachment(channel.AttachmentGIF, msg.Animation.FileID, msg.Animation.FileName, msg.Animation.MIME, msg.Animation.FileSize)
 		att.Width = msg.Animation.Width
 		att.Height = msg.Animation.Height
 		att.DurationMs = int64(msg.Animation.Duration) * 1000
 		attachments = append(attachments, att)
 	}
 	if msg.Sticker != nil {
-		attachments = append(attachments, a.buildTelegramStickerAttachment(bot, msg.Sticker))
+		attachments = append(attachments, a.buildTelegramStickerAttachment(msg.Sticker))
 	}
 	caption := strings.TrimSpace(msg.Caption)
 	if caption != "" {
@@ -2292,7 +2364,7 @@ func (a *TelegramAdapter) collectTelegramAttachments(bot *tele.Bot, msg *tele.Me
 // The sticker emoji rides along in the name: it is Telegram's own description
 // of what the sticker means, and it is the only signal left when neither the
 // animation nor a thumbnail can be shown.
-func (a *TelegramAdapter) buildTelegramStickerAttachment(bot *tele.Bot, sticker *tele.Sticker) channel.Attachment {
+func (a *TelegramAdapter) buildTelegramStickerAttachment(sticker *tele.Sticker) channel.Attachment {
 	fileID, mime := sticker.FileID, "image/webp"
 	width, height, size := sticker.Width, sticker.Height, sticker.FileSize
 	usedThumbnail := false
@@ -2314,7 +2386,7 @@ func (a *TelegramAdapter) buildTelegramStickerAttachment(bot *tele.Bot, sticker 
 			}
 		}
 	}
-	att := a.buildTelegramAttachment(bot, channel.AttachmentImage, fileID, telegramStickerName(sticker), mime, size)
+	att := a.buildTelegramAttachment(channel.AttachmentImage, fileID, telegramStickerName(sticker), mime, size)
 	att.Width = width
 	att.Height = height
 	if usedThumbnail {
@@ -2332,21 +2404,13 @@ func telegramStickerName(sticker *tele.Sticker) string {
 	return "sticker"
 }
 
-func (a *TelegramAdapter) buildTelegramAttachment(bot *tele.Bot, attType channel.AttachmentType, fileID, name, mime string, size int64) channel.Attachment {
-	url := ""
-	if bot != nil && strings.TrimSpace(fileID) != "" {
-		value, err := a.getFileDirectURL(bot, fileID)
-		if err != nil {
-			if a.logger != nil {
-				a.logger.Warn("resolve file url failed", slog.Any("error", err))
-			}
-		} else {
-			url = value
-		}
-	}
+// buildTelegramAttachment records the file by its id only. The download URL
+// costs a getFile round trip, and the poller builds attachments one update at
+// a time, so resolving it here held up every update behind it; ingest resolves
+// the id through ResolveAttachment when it needs the bytes.
+func (*TelegramAdapter) buildTelegramAttachment(attType channel.AttachmentType, fileID, name, mime string, size int64) channel.Attachment {
 	att := channel.Attachment{
 		Type:           attType,
-		URL:            strings.TrimSpace(url),
 		PlatformKey:    strings.TrimSpace(fileID),
 		SourcePlatform: Type.String(),
 		Name:           strings.TrimSpace(name),
@@ -2361,7 +2425,9 @@ func (a *TelegramAdapter) buildTelegramAttachment(bot *tele.Bot, attType channel
 }
 
 // ResolveAttachment resolves a Telegram attachment reference to a byte stream.
-// It supports platform_key-based references and URL fallback.
+// It supports platform_key-based references and URL fallback. The returned
+// Reader holds one of the bot's download slots until it is read to the end or
+// closed, so the caller must do one of the two.
 func (a *TelegramAdapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, attachment channel.Attachment) (channel.AttachmentPayload, error) {
 	fileID := strings.TrimSpace(attachment.PlatformKey)
 	if fileID == "" && strings.TrimSpace(attachment.URL) == "" {
@@ -2375,11 +2441,30 @@ func (a *TelegramAdapter) ResolveAttachment(ctx context.Context, cfg channel.Cha
 	if err != nil {
 		return channel.AttachmentPayload{}, err
 	}
+	// The slot is held until the caller has read or closed the body.
+	release, err := a.acquireFileSlot(ctx, cfg.ID)
+	if err != nil {
+		return channel.AttachmentPayload{}, err
+	}
+	releaseOnce := sync.OnceFunc(release)
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			releaseOnce()
+		}
+	}()
+	name := strings.TrimSpace(attachment.Name)
 	downloadURL := strings.TrimSpace(attachment.URL)
 	if downloadURL == "" {
-		downloadURL, err = a.getFileDirectURL(bot, fileID)
+		file, err := getFileWithRetry(ctx, bot, fileID)
 		if err != nil {
 			return channel.AttachmentPayload{}, fmt.Errorf("resolve telegram file url: %w", err)
+		}
+		downloadURL = a.fileURL(bot, file.FilePath)
+		if name == "" && file.FilePath != "" {
+			// Photos and voice notes carry no file name; Telegram's file path
+			// ends in one, such as photos/file_12.jpg.
+			name = path.Base(file.FilePath)
 		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
@@ -2417,12 +2502,34 @@ func (a *TelegramAdapter) ResolveAttachment(ctx context.Context, cfg channel.Cha
 	if size <= 0 && resp.ContentLength > 0 {
 		size = resp.ContentLength
 	}
+	handedOff = true
 	return channel.AttachmentPayload{
-		Reader: resp.Body,
+		Reader: &slotReleasingBody{ReadCloser: resp.Body, release: releaseOnce},
 		Mime:   mime,
-		Name:   strings.TrimSpace(attachment.Name),
+		Name:   name,
 		Size:   size,
 	}, nil
+}
+
+// slotReleasingBody returns the download slot once the body is read to the
+// end or closed, whichever comes first.
+type slotReleasingBody struct {
+	io.ReadCloser
+	release func()
+}
+
+func (b *slotReleasingBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil {
+		b.release()
+	}
+	return n, err
+}
+
+func (b *slotReleasingBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.release()
+	return err
 }
 
 // withoutFileURLPath removes the path and query from the URL that net/http
