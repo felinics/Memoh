@@ -15,6 +15,7 @@ import {
 import type { ChatViewEntry } from './view-registry'
 import type { FirstSendTracker } from './first-send'
 import type { createTranscriptController } from './transcript'
+import { settleStoppedSend } from './stop-outcome'
 import type {
   ChatAssistantTurn,
   ChatMessage,
@@ -155,6 +156,8 @@ export interface ChatSendDeps {
     composerScope: string,
   ) => Promise<void>
   discardAssistantStream: (invocationId: string) => void
+  // Whether the send's stop waited for the server to end the run.
+  takeStopRequest: (invocationId: string) => boolean
   rememberStartupSendFailure: (failure: Omit<StartupSendFailure, 'id'>) => void
   // The workdir a native draft is bound to; sent with its first message.
   draftWorkdirIdFor: (botId: string) => string
@@ -275,6 +278,11 @@ export function createChatSend(deps: ChatSendDeps) {
       return refused(message, composerScope)
     }
 
+    const settleStop = (botId: string, targetSessionId: string, firstSend: boolean) => settleStoppedSend(deps, {
+      botId, targetSessionId, firstSend, viewTarget, assistantTurn, userTurn,
+      composerScope, text, attachments, requestedSkills, options,
+    })
+
     // A draft's first message creates its session in-band: the server creates
     // the session for a message without session_id and names it with
     // session_created before run_accepted. The turns are held until
@@ -371,6 +379,7 @@ export function createChatSend(deps: ChatSendDeps) {
       })) throw new StreamFailureError('WebSocket is not connected', 'startup')
       if (inband) stopConfirmationWatch = deps.watchFirstSendConfirmation(sendInvocationId)
       await completion
+      const revealedFirstSend = firstSendStarted && deps.firstSend.isRevealed(sendInvocationId)
       if (firstSendStarted) deps.firstSend.finish(sendInvocationId)
       const createdSessionId = deps.createdSessionIdForInvocation(sendInvocationId)
       const fallbackActiveSessionId = !options.target
@@ -379,12 +388,18 @@ export function createChatSend(deps: ChatSendDeps) {
         : ''
       const refreshSessionId = sendSessionId || createdSessionId || fallbackActiveSessionId
       deps.forgetCreatedSession(sendInvocationId)
+      // The run can also end without the stop, e.g. it completed first.
+      if (deps.takeStopRequest(sendInvocationId)) {
+        const settled = await settleStop(botId, sendSessionId || createdSessionId, revealedFirstSend)
+        if (settled) return settled
+      }
       if (refreshSessionId) await deps.refreshCurrentSession(botId, refreshSessionId)
 
       return { ok: true, messageSent: true }
     } catch (error) {
       const failure = error instanceof Error ? error : new Error('Unknown error')
       const isAbort = failure.name === 'AbortError'
+      const stopWaited = sendInvocationId ? deps.takeStopRequest(sendInvocationId) : false
       const isCommandError = failure instanceof CommandStreamError
       const reason = resolveApiErrorMessage(error, failure.message || deps.sendFailedMessage())
       const errorCode = parseMemohError(error)?.code
@@ -432,6 +447,12 @@ export function createChatSend(deps: ChatSendDeps) {
         options.onTurnAppendAborted?.()
       }
 
+      // After the user's stop the run may also end as a failure (the stop
+      // interrupted it); the history decides either way.
+      if (stopWaited && !held) {
+        const settled = await settleStop(botId, targetSessionId, revealedFirstSend)
+        if (settled) return settled
+      }
       if (isAbort && !held) return { ok: false, stage: 'stream', error: reason, errorCode }
       if (stage === 'startup') {
         const currentBotId = (deps.currentBotId.value ?? '').trim()

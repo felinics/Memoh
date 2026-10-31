@@ -7,6 +7,8 @@ export interface ComposerActionInput {
   hasSkills: boolean
   streaming: boolean
   awaitingFirstSend: boolean
+  // A stop is waiting for the server to end the run.
+  stopping: boolean
   queuePending: boolean
   active: boolean
   hasBot: boolean
@@ -56,7 +58,7 @@ export function resolveComposerAction(input: ComposerActionInput): ComposerActio
   const runtimeCommand = input.runtimeCommands.find(command => command.name === selector)
   const goal = input.goalDraft && !text.startsWith('/')
   let intent: Intent
-  if (input.awaitingFirstSend) intent = { kind: 'waiting' }
+  if (input.awaitingFirstSend || input.stopping) intent = { kind: 'waiting' }
   else if (!hasContent) intent = { kind: input.streaming ? 'stop' : 'idle' }
   else if (input.localCommand) intent = { kind: 'local-command', id: input.localCommand, text }
   else if (runtimeCommand && runtimeCommand.kind !== 'turn') intent = { kind: 'runtime-command', command: runtimeCommand }
