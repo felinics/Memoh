@@ -782,7 +782,11 @@ func (s *Service) resolveDiscussRunConfig(ctx context.Context, req RunConfigRequ
 	if s.turnHooks != nil && s.turnHooks.resolveRunConfig != nil {
 		return s.turnHooks.resolveRunConfig(ctx, req)
 	}
-	return s.ResolveRunConfig(ctx, req)
+	resolved, err := s.ResolveRunConfig(ctx, req)
+	if err == nil {
+		resolved.RunConfig = s.prepareRunConfig(ctx, resolved.RunConfig)
+	}
+	return resolved, err
 }
 
 func (s *Service) inlineDiscussImages(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) [][]sdk.ImagePart {

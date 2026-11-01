@@ -91,7 +91,7 @@ func TestPrepareHistoryContextDecodesUndecodedAdmissionMetadata(t *testing.T) {
 		logger: slog.New(slog.DiscardHandler),
 	}
 
-	prepared, err := svc.prepareHistoryContext(context.Background(), ChatRequest{BotID: "bot-1", ThreadID: lifecycleTestSessionID}, historyfrag.ScopeFallback{}, 100000)
+	prepared, err := prepareHistoryFor(context.Background(), svc, ChatRequest{BotID: "bot-1", ThreadID: lifecycleTestSessionID}, 100000)
 	if err != nil {
 		t.Fatalf("prepareHistoryContext failed: %v", err)
 	}

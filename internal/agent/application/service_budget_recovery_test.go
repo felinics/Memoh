@@ -338,7 +338,7 @@ func TestLoadChatHistoryFoldsATruncatedLoad(t *testing.T) {
 			if tc.run != nil {
 				runner.run = func() ([]compaction.Pass, error) { return tc.run(history) }
 			}
-			got, err := s.loadChatHistory(t.Context(), req, false, 8000, "")
+			got, err := s.loadChatHistory(t.Context(), req, chatHistoryScope(req), false, 8000, "")
 			if fails := apperror.CodeOf(err) == apperror.CodeContextBudgetUnsatisfied; fails != tc.fails || !tc.fails && err != nil || history.loads != tc.loads {
 				t.Fatalf("err=%v loads=%d, want failure=%v after %d loads", err, history.loads, tc.fails, tc.loads)
 			}

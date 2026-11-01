@@ -91,18 +91,6 @@ func (s *Service) prepareContinuationRunConfig(
 	eventCh chan<- WSStreamEvent,
 	req ChatRequest,
 ) (native.RunConfig, error) {
-	read := func() ([]ModelMessage, []historyfrag.HistoryRecord, bool, error) {
-		loaded, truncated, err := s.loadHistoryRecords(ctx, fallback, summaryScope, 0, historyCut{})
-		if err != nil {
-			return nil, nil, false, err
-		}
-		messages, retained := historyMessagesFromRecords(projectInterruptedHistoryReasoning(pruneHistoryForGateway(loaded)))
-		return messages, retained, truncated, nil
-	}
-	messages, retained, truncated, err := read()
-	if err != nil {
-		return native.RunConfig{}, err
-	}
 	req.inputInHistory = true
 	if req.continuationToolCallID != "" && req.RunHandle.RunID != "" {
 		ids, err := s.queries.ListRunHistoryTurnRequestMessageIDs(ctx, sqlc.ListRunHistoryTurnRequestMessageIDsParams{
@@ -115,24 +103,11 @@ func (s *Service) prepareContinuationRunConfig(
 			req.continuationAnchors = append(req.continuationAnchors, turn.ContextMessageSource{Kind: "history", ID: id.String()})
 		}
 	}
-	if truncated {
-		// A load the byte budget truncated would start later than its
-		// checkpoint's position: the rows it left out fold from rows first,
-		// and the history loads again.
-		pressure := 0
-		for _, message := range messages {
-			pressure += estimateMessageTokens(message)
-		}
-		if err := s.compactForBudget(ctx, req, pressure, base.ContextBudgetMaxTokens, base.CurrentModelUUID); err != nil {
-			return native.RunConfig{}, truncatedLoadFailure(err)
-		}
-		if messages, retained, truncated, err = read(); err == nil && truncated {
-			err = truncatedLoadFailure(errors.New("compacted history still exceeds the load budget"))
-		}
-		if err != nil {
-			return native.RunConfig{}, err
-		}
+	history, err := s.loadChatHistory(ctx, req, historyScope{fallback: fallback, summary: summaryScope}, false, base.ContextBudgetMaxTokens, base.CurrentModelUUID)
+	if err != nil {
+		return native.RunConfig{}, err
 	}
+	messages, retained := history.messages, history.records
 	messages = sanitizeMessages(messages)
 	historyEstimates := make([]int, len(messages))
 	for i := range messages {
