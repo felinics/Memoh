@@ -391,7 +391,7 @@ func hideTestTurn(turn int) func(*testing.T, context.Context, pgx.Tx, historyFix
 
 // What the active checkpoint stands for reaches no read path: the history
 // load reads the rows after its position and the rows it keeps by reference,
-// the turn responses and the measure read what comes after it, compaction
+// the turn responses read what comes after it, compaction
 // reads those rows as its candidates, and the Discuss event replay leaves out
 // the messages it folds. Clearing the history drops the session's
 // checkpoints.
@@ -435,7 +435,6 @@ func TestPostgresHistoryCheckpointBoundsEveryReadPath(t *testing.T) {
 	rowIDs := func(rows ...Message) []string { return ids(rows) }
 	type readPaths struct {
 		history, responses, candidates, replay []string
-		measured                               int64
 		kept                                   map[string]bool
 	}
 	read := func(after HistoryPosition, keptRows []string) readPaths {
@@ -455,11 +454,6 @@ func TestPostgresHistoryCheckpointBoundsEveryReadPath(t *testing.T) {
 			t.Fatal(err)
 		}
 		got.responses = ids(responses.Messages)
-		measure, err := svc.MeasureHistory(ctx, postgresMessageTestSessionID, after)
-		if err != nil {
-			t.Fatal(err)
-		}
-		got.measured = measure.MessageCount
 		pgKept := make([]pgtype.UUID, 0, len(keptRows))
 		for _, id := range keptRows {
 			pgKept = append(pgKept, mustTestUUID(t, id))
@@ -512,8 +506,8 @@ func TestPostgresHistoryCheckpointBoundsEveryReadPath(t *testing.T) {
 		all = append(all, f.users[i], f.answers[i])
 	}
 	without := read(HistoryPosition{}, nil)
-	if !slices.Equal(without.history, ids(all)) || !slices.Equal(without.responses, ids(all)) || without.measured != 12 || !slices.Equal(without.candidates, ids(all)) {
-		t.Fatalf("without a checkpoint: history=%d responses=%d measured=%d candidates=%d, want all 12 rows each", len(without.history), len(without.responses), without.measured, len(without.candidates))
+	if !slices.Equal(without.history, ids(all)) || !slices.Equal(without.responses, ids(all)) || !slices.Equal(without.candidates, ids(all)) {
+		t.Fatalf("without a checkpoint: history=%d responses=%d candidates=%d, want all 12 rows each", len(without.history), len(without.responses), len(without.candidates))
 	}
 	if len(without.replay) != 6 {
 		t.Fatalf("replay without a checkpoint = %v, want every event", without.replay)
@@ -527,8 +521,8 @@ func TestPostgresHistoryCheckpointBoundsEveryReadPath(t *testing.T) {
 	if want := rowIDs(f.users[2], f.users[4], f.answers[4], f.users[5], f.answers[5]); !slices.Equal(got.history, want) || !slices.Equal(got.candidates, want) {
 		t.Fatalf("history = %v, candidates = %v, want the kept input and turns 5 and 6: %v", got.history, got.candidates, want)
 	}
-	if want := rowIDs(f.users[4], f.answers[4], f.users[5], f.answers[5]); !slices.Equal(got.responses, want) || got.measured != 4 {
-		t.Fatalf("responses = %v, measured = %d, want the 4 rows of turns 5 and 6", got.responses, got.measured)
+	if want := rowIDs(f.users[4], f.answers[4], f.users[5], f.answers[5]); !slices.Equal(got.responses, want) {
+		t.Fatalf("responses = %v, want the 4 rows of turns 5 and 6", got.responses)
 	}
 	if want := []string{"inbound-3", "inbound-6", "orphan-early", "orphan-late"}; !slices.Equal(got.replay, want) {
 		t.Fatalf("replay = %v, want %v", got.replay, want)

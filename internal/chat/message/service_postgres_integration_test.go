@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -15,116 +14,6 @@ import (
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 )
-
-func TestPostgresReplaceTurnRetryHidesSupersededAssistant(t *testing.T) {
-	ctx := context.Background()
-	tx := beginPostgresMessageTestTx(t, ctx)
-	setupPostgresMessageTestFixtures(t, ctx, tx)
-
-	svc := NewService(nil, postgresstore.NewQueries(dbsqlc.New(tx)))
-	user, err := svc.Persist(ctx, PersistInput{
-		BotID:     postgresMessageTestBotID,
-		SessionID: postgresMessageTestSessionID,
-		Role:      "user",
-		Content:   []byte(`{"role":"user","content":"hello"}`),
-	})
-	if err != nil {
-		t.Fatalf("persist user: %v", err)
-	}
-	assistant, err := svc.Persist(ctx, PersistInput{
-		BotID:     postgresMessageTestBotID,
-		SessionID: postgresMessageTestSessionID,
-		Role:      "assistant",
-		Content:   []byte(`{"role":"assistant","content":"old"}`),
-	})
-	if err != nil {
-		t.Fatalf("persist assistant: %v", err)
-	}
-	oldTurn, err := svc.GetVisibleTurnByMessage(ctx, postgresMessageTestSessionID, assistant.ID)
-	if err != nil {
-		t.Fatalf("get old turn: %v", err)
-	}
-	replacement, err := svc.Persist(ctx, PersistInput{
-		BotID:           postgresMessageTestBotID,
-		SessionID:       postgresMessageTestSessionID,
-		Role:            "assistant",
-		Content:         []byte(`{"role":"assistant","content":"new"}`),
-		SkipHistoryTurn: true,
-	})
-	if err != nil {
-		t.Fatalf("persist replacement assistant: %v", err)
-	}
-	replacementTurnID, replacementTurnPosition := postgresReplacementIdentity(oldTurn)
-	if _, err := svc.ReplaceTurn(ctx, postgresMessageTestSessionID, oldTurn.ID, replacementTurnID, replacementTurnPosition, user.ID, replacement.ID, "retry"); err != nil {
-		t.Fatalf("replace turn: %v", err)
-	}
-
-	assertPostgresVisibleMessageIDs(t, ctx, svc, user.ID, replacement.ID)
-	assertPostgresMessageVisibility(t, ctx, tx, assistant.ID, false, true)
-}
-
-func TestPostgresReplaceTurnEditHidesSupersededTurn(t *testing.T) {
-	ctx := context.Background()
-	tx := beginPostgresMessageTestTx(t, ctx)
-	setupPostgresMessageTestFixtures(t, ctx, tx)
-
-	svc := NewService(nil, postgresstore.NewQueries(dbsqlc.New(tx)))
-	oldUser, err := svc.Persist(ctx, PersistInput{
-		BotID:     postgresMessageTestBotID,
-		SessionID: postgresMessageTestSessionID,
-		Role:      "user",
-		Content:   []byte(`{"role":"user","content":"old prompt"}`),
-	})
-	if err != nil {
-		t.Fatalf("persist old user: %v", err)
-	}
-	oldAssistant, err := svc.Persist(ctx, PersistInput{
-		BotID:     postgresMessageTestBotID,
-		SessionID: postgresMessageTestSessionID,
-		Role:      "assistant",
-		Content:   []byte(`{"role":"assistant","content":"old answer"}`),
-	})
-	if err != nil {
-		t.Fatalf("persist old assistant: %v", err)
-	}
-	oldTurn, err := svc.GetVisibleTurnByMessage(ctx, postgresMessageTestSessionID, oldAssistant.ID)
-	if err != nil {
-		t.Fatalf("get old turn: %v", err)
-	}
-	newUser, err := svc.Persist(ctx, PersistInput{
-		BotID:           postgresMessageTestBotID,
-		SessionID:       postgresMessageTestSessionID,
-		Role:            "user",
-		Content:         []byte(`{"role":"user","content":"new prompt"}`),
-		SkipHistoryTurn: true,
-	})
-	if err != nil {
-		t.Fatalf("persist new user: %v", err)
-	}
-	newAssistant, err := svc.Persist(ctx, PersistInput{
-		BotID:           postgresMessageTestBotID,
-		SessionID:       postgresMessageTestSessionID,
-		Role:            "assistant",
-		Content:         []byte(`{"role":"assistant","content":"new answer"}`),
-		SkipHistoryTurn: true,
-	})
-	if err != nil {
-		t.Fatalf("persist new assistant: %v", err)
-	}
-	replacementTurnID, replacementTurnPosition := postgresReplacementIdentity(oldTurn)
-	if _, err := svc.ReplaceTurn(ctx, postgresMessageTestSessionID, oldTurn.ID, replacementTurnID, replacementTurnPosition, newUser.ID, newAssistant.ID, "edit"); err != nil {
-		t.Fatalf("replace turn: %v", err)
-	}
-
-	assertPostgresVisibleMessageIDs(t, ctx, svc, newUser.ID, newAssistant.ID)
-	assertPostgresMessageVisibility(t, ctx, tx, oldUser.ID, false, true)
-	assertPostgresMessageVisibility(t, ctx, tx, oldAssistant.ID, false, true)
-}
-
-func postgresReplacementIdentity(oldTurn HistoryTurn) (string, *int64) {
-	position := oldTurn.Position + 1
-	return uuid.NewString(), &position
-}
 
 func TestPostgresRepairSupersededMessageVisibilityMigration(t *testing.T) {
 	ctx := context.Background()
@@ -252,26 +141,6 @@ func mustTestUUID(t *testing.T, value string) pgtype.UUID {
 		t.Fatalf("parse UUID %q: %v", value, err)
 	}
 	return parsed
-}
-
-func assertPostgresVisibleMessageIDs(t *testing.T, ctx context.Context, svc *DBService, want ...string) {
-	t.Helper()
-	messages, err := svc.ListBySession(ctx, postgresMessageTestSessionID)
-	if err != nil {
-		t.Fatalf("list session messages: %v", err)
-	}
-	got := make([]string, 0, len(messages))
-	for _, msg := range messages {
-		got = append(got, msg.ID)
-	}
-	if len(got) != len(want) {
-		t.Fatalf("visible message ids = %#v, want %#v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("visible message ids = %#v, want %#v", got, want)
-		}
-	}
 }
 
 func assertPostgresMessageVisibility(t *testing.T, ctx context.Context, tx pgx.Tx, messageID string, wantVisible bool, wantSuperseded bool) {

@@ -11,16 +11,10 @@ import (
 )
 
 type lightweightHistoryStub struct {
-	messages     []messagepkg.Message
-	sessionID    string
-	maxBytes     int64
-	measureAfter []messagepkg.HistoryPosition
-	after        []messagepkg.HistoryPosition
-}
-
-func (s *lightweightHistoryStub) MeasureHistory(_ context.Context, _ string, after messagepkg.HistoryPosition) (messagepkg.ActiveMessagesMeasure, error) {
-	s.measureAfter = append(s.measureAfter, after)
-	return messagepkg.ActiveMessagesMeasure{MessageCount: 100, ContentBytes: 10000}, nil
+	messages  []messagepkg.Message
+	sessionID string
+	maxBytes  int64
+	after     []messagepkg.HistoryPosition
 }
 
 func (s *lightweightHistoryStub) ListTurnResponseSourcesWithinBytes(_ context.Context, sessionID string, after messagepkg.HistoryPosition, maxBytes int64) (messagepkg.HistoryLoad, error) {
@@ -43,8 +37,8 @@ func TestLightweightHistoryLoadsAfterTheCheckpoint(t *testing.T) {
 			if _, _, err := reader.Load(context.Background(), "session", after); err != nil {
 				t.Fatal(err)
 			}
-			if len(source.after) != 1 || source.after[0] != after || len(source.measureAfter) != 1 || source.measureAfter[0] != after {
-				t.Fatalf("history read after %v, measured after %v; want %+v", source.after, source.measureAfter, after)
+			if len(source.after) != 1 || source.after[0] != after {
+				t.Fatalf("history read after %v, want %+v", source.after, after)
 			}
 		})
 	}
@@ -65,15 +59,12 @@ func TestLightweightHistoryPreservesInterruptedReasoning(t *testing.T) {
 				})
 			}
 			reader := discussHistoryReader{messages: source, maxBytes: 4000000, logger: slog.New(slog.DiscardHandler)}
-			entries, measure, err := reader.Load(context.Background(), "session", messagepkg.HistoryPosition{})
+			entries, _, err := reader.Load(context.Background(), "session", messagepkg.HistoryPosition{})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if source.sessionID != "session" || source.maxBytes != 4000000 {
 				t.Fatal("history request lost session/budget")
-			}
-			if measure.TotalMessages != 100 || measure.TotalBytes != 10000 || measure.Loaded != len(source.messages) {
-				t.Fatalf("incorrect history measure: %+v", measure)
 			}
 			var text strings.Builder
 			for _, entry := range entries {

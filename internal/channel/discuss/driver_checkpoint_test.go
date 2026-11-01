@@ -123,7 +123,7 @@ func TestBuildMentionGatesOnWatermarkNotFolding(t *testing.T) {
 	}
 	held := foldingCheckpoint("m1", "folds the pending mention")
 
-	pending, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, held, timeline.ComposeBudget{})
+	pending, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, discussHistory{checkpoint: held}, timeline.DiscussCursorPosition{}, timeline.ComposeBudget{})
 	if !ok {
 		t.Fatal("expected a composed plan")
 	}
@@ -131,7 +131,7 @@ func TestBuildMentionGatesOnWatermarkNotFolding(t *testing.T) {
 		t.Fatal("a mention the watermark has not consumed must wake the session even when the checkpoint folds it")
 	}
 
-	consumed, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{SourceCursor: 150}, held, timeline.ComposeBudget{})
+	consumed, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, discussHistory{checkpoint: held}, timeline.DiscussCursorPosition{SourceCursor: 150}, timeline.ComposeBudget{})
 	if !ok {
 		t.Fatal("expected a composed plan past the mention")
 	}
@@ -159,7 +159,7 @@ func TestBuildKeepsFoldedImageRefsOutsideTheComposedMessages(t *testing.T) {
 		},
 	}
 
-	plan, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, foldingCheckpoint("m1", "folds the image message"), timeline.ComposeBudget{})
+	plan, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, discussHistory{checkpoint: foldingCheckpoint("m1", "folds the image message")}, timeline.DiscussCursorPosition{}, timeline.ComposeBudget{})
 	if !ok {
 		t.Fatal("expected a composed plan")
 	}
@@ -172,7 +172,7 @@ func TestBuildKeepsFoldedImageRefsOutsideTheComposedMessages(t *testing.T) {
 		}
 	}
 
-	planLive, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, timeline.HistoryCheckpoint{}, timeline.ComposeBudget{})
+	planLive, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, discussHistory{checkpoint: timeline.HistoryCheckpoint{}}, timeline.DiscussCursorPosition{}, timeline.ComposeBudget{})
 	if !ok {
 		t.Fatal("expected a composed plan without a checkpoint")
 	}

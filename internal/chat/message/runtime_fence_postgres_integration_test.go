@@ -155,18 +155,6 @@ func TestPostgresRuntimeFenceRejectsStaleRoundAndReplacement(t *testing.T) {
 	if !errors.Is(err, runtimefence.ErrStale) {
 		t.Fatalf("stale PersistRound error = %v, want ErrStale", err)
 	}
-	if _, err := service.ReplaceTurn(
-		owner1,
-		sessionID.String(),
-		oldTurn.ID,
-		successfulReplacement.ReplacementTurnID,
-		successfulReplacement.ReplacementTurnPosition,
-		persisted[0].ID,
-		replacement[1].ID,
-		"retry",
-	); !errors.Is(err, runtimefence.ErrStale) {
-		t.Fatalf("stale ReplaceTurn error = %v, want ErrStale", err)
-	}
 
 	visible, err := service.ListBySession(ctx, sessionID.String())
 	if err != nil {

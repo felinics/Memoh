@@ -193,14 +193,6 @@ type HistoryLoad struct {
 	Truncated bool
 }
 
-// ActiveMessagesMeasure is a database-side aggregate over a session's raw
-// history (CM-ADM-001): counts and raw content bytes, computed without
-// loading any payload into the process.
-type ActiveMessagesMeasure struct {
-	MessageCount int64
-	ContentBytes int64
-}
-
 // Writer defines write behavior needed by the inbound router.
 type Writer interface {
 	Persist(ctx context.Context, input PersistInput) (Message, error)
@@ -270,13 +262,9 @@ type AgentStepPersister interface {
 // Service defines message read/write behavior.
 type Service interface {
 	Writer
-	List(ctx context.Context, botID string) ([]Message, error)
-	ListSince(ctx context.Context, botID string, since time.Time) ([]Message, error)
 	ListLatest(ctx context.Context, botID string, limit int32) ([]Message, error)
-	ListBefore(ctx context.Context, botID string, before time.Time, limit int32) ([]Message, error)
 	ListBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
-	ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
 	// ListHistoryWithinBytes loads a session's raw history over a
 	// HistoryWindow (CM-ADM-001): its context rows are admitted newest-first
 	// until their content byte total crosses window.MaxBytes, and the load
@@ -301,10 +289,6 @@ type Service interface {
 	// ListTurnResponseSourcesWithinBytes projects its rows, with the
 	// ExternalMessageID of a user row.
 	ListTurnResponseSourcesByIDs(ctx context.Context, sessionID string, ids []string) ([]Message, error)
-	// MeasureHistory aggregates the message count and content bytes of the
-	// raw history after a position on the database side (CM-ADM-001):
-	// admission sizes it without shipping any payload into the process.
-	MeasureHistory(ctx context.Context, sessionID string, after HistoryPosition) (ActiveMessagesMeasure, error)
 	ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error)
 	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]Message, error)
 	ListBeforeMessageBySession(ctx context.Context, sessionID string, beforeMessageID string, limit int32) ([]Message, error)
@@ -313,7 +297,6 @@ type Service interface {
 	ListVisibleFromBySession(ctx context.Context, sessionID string, messageID string) ([]Message, error)
 	GetVisibleTurnByMessage(ctx context.Context, sessionID string, messageID string) (HistoryTurn, error)
 	GetLatestVisibleTurnBySession(ctx context.Context, sessionID string) (HistoryTurn, error)
-	ReplaceTurn(ctx context.Context, sessionID string, oldTurnID string, replacementTurnID string, replacementTurnPosition *int64, requestMessageID string, assistantMessageID string, reason string) (HistoryTurn, error)
 	DeleteByIDs(ctx context.Context, ids []string) error
 	DeleteByBot(ctx context.Context, botID string) error
 	DeleteBySession(ctx context.Context, sessionID string) error

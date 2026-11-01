@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/chat/checkpoint"
@@ -44,10 +43,6 @@ func (s *memoryQueryMessageService) HistoryPositionByID(_ context.Context, _ str
 		}
 	}
 	return messagepkg.HistoryPosition{}, errors.New("message not found")
-}
-
-func (s *memoryQueryMessageService) ListActiveSinceBySession(context.Context, string, time.Time) ([]messagepkg.Message, error) {
-	return append([]messagepkg.Message(nil), s.messages...), nil
 }
 
 func (s *memoryQueryMessageService) ListHistoryWithinBytes(_ context.Context, _ string, window messagepkg.HistoryWindow) (messagepkg.HistoryLoad, error) {
