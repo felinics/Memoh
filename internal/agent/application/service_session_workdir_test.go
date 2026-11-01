@@ -31,6 +31,10 @@ func (s sessionWorkdirSessionService) MergeRuntimeMetadata(context.Context, stri
 	return s.thread, nil
 }
 
+func (sessionWorkdirSessionService) ExternalIdentity(ctx context.Context, sess sessionpkg.Thread) (sessionpkg.ExternalIdentity, error) {
+	return (*sessionpkg.Service)(nil).ExternalIdentity(ctx, sess)
+}
+
 type fakeSessionWorkdirResolver struct {
 	resolved workdir.Resolved
 	err      error

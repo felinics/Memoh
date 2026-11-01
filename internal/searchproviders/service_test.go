@@ -62,6 +62,27 @@ func TestMapSearchProviderWriteError(t *testing.T) {
 	}
 }
 
+func TestDefaultProvidersMatchMeta(t *testing.T) {
+	t.Parallel()
+
+	defaults := map[string]bool{}
+	for _, dp := range defaultProviders {
+		defaults[string(dp.Name)] = true
+	}
+	metas := (&Service{}).ListMeta(t.Context())
+	if len(metas) != len(defaults) {
+		t.Fatalf("%d metas, %d default providers", len(metas), len(defaults))
+	}
+	for _, meta := range metas {
+		if !defaults[meta.Provider] || !isValidProviderName(ProviderName(meta.Provider)) {
+			t.Errorf("meta %q: default=%t, valid=%t", meta.Provider, defaults[meta.Provider], isValidProviderName(ProviderName(meta.Provider)))
+		}
+	}
+	if !defaults[string(ProviderDeepSeek)] {
+		t.Fatal("DeepSeek is not a default provider")
+	}
+}
+
 // Draft configs are seeded from non-secret field examples, so a header
 // example would be saved and sent as a real placeholder credential.
 func TestSearXNGHeadersHaveNoDraftExample(t *testing.T) {

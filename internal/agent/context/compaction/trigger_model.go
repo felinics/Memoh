@@ -5,13 +5,12 @@ package compaction
 // surfaces, the engine only receives this completed contract.
 type TriggerModel struct {
 	Slug                  string // runtime model slug sent to the provider
-	RecordID              string // models.id row UUID recorded as artifact/log provenance
+	RecordID              string // models.id row UUID recorded as the log's provenance
 	ClientType            string
 	APIKey                string //nolint:gosec // runtime credential, not a hardcoded secret
 	CodexAccountID        string
 	BaseURL               string
 	ChatCompletionsCompat string
-	PromptCacheTTL        string
 	WindowTokens          int // summarizer model's declared context window
 	MaxOutputTokens       int // summarizer model's declared output cap, zero when unknown
 }
@@ -26,7 +25,6 @@ func NewTriggerConfig(model TriggerModel) TriggerConfig {
 		CodexAccountID:        model.CodexAccountID,
 		BaseURL:               model.BaseURL,
 		ChatCompletionsCompat: model.ChatCompletionsCompat,
-		PromptCacheTTL:        model.PromptCacheTTL,
 		SummaryWindowTokens:   model.WindowTokens,
 		MaxOutputTokens:       model.MaxOutputTokens,
 	}

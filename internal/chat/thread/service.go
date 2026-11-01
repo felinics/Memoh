@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/chat/checkpoint"
 	"github.com/felinics/memoh/internal/chat/event"
 	dbpkg "github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -82,22 +83,19 @@ const (
 	TypeACPAgent          = "acp_agent"
 	RuntimeModel          = string(runtimekind.Model)
 	RuntimeACPAgent       = string(runtimekind.ACPAgent)
-	RuntimeCodex          = string(runtimekind.Codex)
-	RuntimeClaudeCode     = string(runtimekind.ClaudeCode)
-	DefaultACPProjectMode = "project"
 	DefaultACPProjectPath = "/data"
 )
 
-// IsDirectRuntimeType reports whether a runtime type is one of the direct
-// external agent runtimes, outside the ACP compatibility pool.
-func IsDirectRuntimeType(runtimeType string) bool {
-	return runtimekind.IsDirect(runtimeType)
+// RuntimeTypeOf is the runtime a session runs on. Legacy rows (type
+// acp_agent with no runtime type) are mapped here, the one place that does.
+func RuntimeTypeOf(thread Thread) string {
+	return normalizeRuntimeType(thread.RuntimeType, thread.Type)
 }
 
-// IsDirectRuntime reports whether a session runs on a direct external agent
-// runtime.
-func IsDirectRuntime(thread Thread) bool {
-	return IsDirectRuntimeType(normalizeRuntimeType(thread.RuntimeType, thread.Type))
+// IsExternalRuntime reports whether a session runs on an external agent
+// (an ACP agent or a direct runtime) rather than Memoh's own model loop.
+func IsExternalRuntime(thread Thread) bool {
+	return runtimekind.IsExternal(RuntimeTypeOf(thread))
 }
 
 // UsesDecisionWaiter reports whether tool-approval and user-input decisions
@@ -130,21 +128,15 @@ func AllSessionTypes() []string {
 }
 
 var (
-	ErrACPAgentIDRequired     = errors.New("acp_agent_id is required for acp_agent sessions")
-	ErrACPProjectPathMissing  = errors.New("project_path is required for acp_agent sessions")
-	ErrACPUnknownAgent        = errors.New("unknown ACP agent")
-	ErrACPAgentNotEnabled     = errors.New("ACP agent is not enabled for this bot")
-	ErrACPAgentNotConfigured  = errors.New("ACP agent is not configured for this bot")
-	ErrACPRuntimeOwnerMissing = errors.New("runtime_owner_account_id is required for acp_agent sessions")
-	ErrACPProjectModeInvalid  = errors.New("unknown ACP project mode")
-	// ErrExternalRuntimeOwnerMissing mirrors the ACP owner requirement for
-	// direct external runtimes: turns execute with workspace authority, so a
-	// session without an owner has nobody to authorize them against.
-	ErrExternalRuntimeOwnerMissing = errors.New("runtime_owner_account_id is required for external runtime sessions")
-	ErrForkSourceNotFound          = errors.New("fork source session not found")
-	ErrForkSourceNotReply          = errors.New("fork source must be a visible assistant reply")
-	ErrForkSourceNotChat           = errors.New("fork source must be a chat session")
-	ErrSessionHasMessages          = errors.New("session has visible messages")
+	ErrACPAgentIDRequired    = errors.New("acp_agent_id is required for acp_agent sessions")
+	ErrACPAgentNotEnabled    = errors.New("ACP agent is not enabled for this bot")
+	ErrACPUnknownAgent       = errors.New("unknown ACP agent")
+	ErrACPAgentNotConfigured = errors.New("ACP agent is not configured for this bot")
+	ErrRuntimeOwnerMissing   = errors.New("runtime_owner_account_id is required for external agent sessions")
+	ErrForkSourceNotFound    = errors.New("fork source session not found")
+	ErrForkSourceNotReply    = errors.New("fork source must be a visible assistant reply")
+	ErrForkSourceNotChat     = errors.New("fork source must be a chat session")
+	ErrSessionHasMessages    = errors.New("session has visible messages")
 )
 
 func IsKnownType(typ string) bool {
@@ -259,6 +251,10 @@ type subagentTransactionalQueries interface {
 	InTx(context.Context, func(dbstore.Queries) error) error
 }
 
+type forkTransactionalQueries interface {
+	InTx(context.Context, func(dbstore.Queries) error) error
+}
+
 type sessionDescriptorTransactionalQueries interface {
 	InTx(context.Context, func(dbstore.Queries) error) error
 	SupportsTransactions() bool
@@ -270,7 +266,6 @@ type sessionDescriptorTransactionQueries interface {
 	LockSessionRuntimeFenceForActivation(context.Context, sqlc.LockSessionRuntimeFenceForActivationParams) (int64, error)
 	NextSessionRuntimeFenceToken(context.Context) (int64, error)
 	ActivateSessionRuntimeFence(context.Context, sqlc.ActivateSessionRuntimeFenceParams) (int64, error)
-	DeleteAgentSessionPublicationsBySession(context.Context, pgtype.UUID) (int64, error)
 }
 
 // Queries is the storage surface owned by the Thread domain. Route lookup and
@@ -310,6 +305,10 @@ type ForkFromAssistantInput struct {
 	// runtime forks must pass it carrying the driver's freshly forked session
 	// keys; without it the two Memoh sessions would share one runtime session.
 	RuntimeMetadataOverride map[string]any
+	// RuntimeForkRequired marks a source whose runtime keeps its native
+	// session in runtime metadata with no owner: a copy without the runtime's
+	// own fork would share that session, so the fork is refused.
+	RuntimeForkRequired bool
 	// TurnID names the round the fork inherits through. A turn is the identity
 	// a client holds while the round is still live, and the cut is turn-level
 	// anyway, so the fork point is named by turn rather than by stored message.
@@ -345,6 +344,12 @@ type ACPSetupValidation struct {
 // adapter resolves which Agent instance's setup applies: botAgentID when the
 // thread is bound to one, otherwise the instance the provider falls back to.
 type ACPSetupValidator interface {
+	// InstanceACPAgent is the ACP agent profile a Bot Agent instance runs.
+	InstanceACPAgent(ctx context.Context, botID, botAgentID string) (string, error)
+	// ACPInstanceFor is the instance a session that names only an ACP agent
+	// profile runs as: the bot's oldest active instance of it. Empty when the
+	// bot has none, as bots configured before instances do.
+	ACPInstanceFor(ctx context.Context, botID, agentID string) (string, error)
 	KnownACPAgent(agentID string) bool
 	ValidateACPSetup(ctx context.Context, botID, botAgentID, agentID string, botMetadata map[string]any) (ACPSetupValidation, error)
 }
@@ -434,37 +439,14 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Thread, error)
 	sessionType = desc.LegacyType
 	meta = desc.Metadata
 	runtimeMeta := desc.RuntimeMetadata
-	if desc.RuntimeType == RuntimeACPAgent {
-		meta = ApplyACPMetadataDefaults(meta)
-		runtimeMeta = ApplyACPMetadataDefaults(runtimeMeta)
-		meta = setACPRuntimeOwner(meta, runtimeOwnerUserID)
-		runtimeMeta = setACPRuntimeOwner(runtimeMeta, runtimeOwnerUserID)
-		meta = mergeACPMetadata(meta, runtimeMeta)
-		runtimeMeta = mergeACPMetadata(runtimeMeta, meta)
-		// A workdir binding owns the working directory: its resolved path
-		// wins over any request-supplied project_path, and the metadata
-		// keeps it as a creation-time snapshot.
-		if strings.TrimSpace(input.WorkdirID) != "" && strings.TrimSpace(input.WorkdirPath) != "" {
-			meta = overrideACPProjectPath(meta, input.WorkdirPath)
-			runtimeMeta = overrideACPProjectPath(runtimeMeta, input.WorkdirPath)
-		}
-		if err := validateACPMetadata(meta); err != nil {
+	if runtimekind.IsExternal(desc.RuntimeType) {
+		var botAgentID string
+		meta, runtimeMeta, botAgentID, err = s.shapeExternalMetadata(ctx, s.queries, desc.RuntimeType, pgBotID, input.BotAgentID, meta, runtimeMeta, runtimeOwnerUserID, input.WorkdirPath)
+		if err != nil {
 			return Thread{}, err
 		}
-		if err := s.validateACPCreatePolicy(ctx, pgBotID, input.BotAgentID, meta); err != nil {
-			return Thread{}, err
-		}
-	} else if IsDirectRuntimeType(desc.RuntimeType) {
-		meta = ApplyExternalMetadataDefaults(meta)
-		runtimeMeta = ApplyExternalMetadataDefaults(runtimeMeta)
-		meta = setACPRuntimeOwner(meta, runtimeOwnerUserID)
-		runtimeMeta = setACPRuntimeOwner(runtimeMeta, runtimeOwnerUserID)
-		if strings.TrimSpace(input.WorkdirID) != "" && strings.TrimSpace(input.WorkdirPath) != "" {
-			meta = overrideACPProjectPath(meta, input.WorkdirPath)
-			runtimeMeta = overrideACPProjectPath(runtimeMeta, input.WorkdirPath)
-		}
-		if err := validateExternalMetadata(meta); err != nil {
-			return Thread{}, err
+		if pgBotAgentID, err = parseOptionalUUID(botAgentID); err != nil {
+			return Thread{}, fmt.Errorf("invalid bot agent id: %w", err)
 		}
 	}
 	metaBytes, err := json.Marshal(meta)
@@ -677,7 +659,9 @@ func (s *Service) ListSubagentForkContext(ctx context.Context, sessionID string)
 }
 
 // ForkFromAssistantTurn creates a new chat thread containing the source
-// thread's visible linear history through the selected assistant turn.
+// thread's visible linear history through the selected assistant turn, with
+// the history checkpoint that holds for it, so the fork's first request reads
+// what the source read at that turn without compacting it again.
 func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssistantInput) (Thread, error) {
 	pgBotID, err := dbpkg.ParseUUID(input.BotID)
 	if err != nil {
@@ -713,7 +697,7 @@ func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssis
 	// External runtime sessions must fork their runtime-side session too; a
 	// caller that has not prepared one (no override) would leave two Memoh
 	// sessions sharing a single runtime session.
-	if IsDirectRuntime(source) && input.RuntimeMetadataOverride == nil {
+	if input.RuntimeForkRequired && input.RuntimeMetadataOverride == nil {
 		return Thread{}, ErrForkSourceNotChat
 	}
 
@@ -748,14 +732,47 @@ func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssis
 		}
 	}
 
-	row, err := s.queries.ForkSessionFromAssistantTurn(ctx, sqlc.ForkSessionFromAssistantTurnParams{
-		SessionID:               pgSessionID,
-		BotID:                   pgBotID,
-		TurnID:                  pgTurnID,
-		Title:                   forkTitle,
-		Metadata:                metaBytes,
-		RuntimeMetadataOverride: runtimeMetadataOverrideBytes,
-		CreatedByUserID:         pgCreatedByUserID,
+	txer, ok := s.queries.(forkTransactionalQueries)
+	if !ok {
+		return Thread{}, errors.New("fork thread: transactions unsupported")
+	}
+	var forkID pgtype.UUID
+	err = txer.InTx(ctx, func(queries dbstore.Queries) error {
+		// The bot before the source, as every session write locks them:
+		// deleting the bot locks it before its sessions, so a fork that held
+		// the source first would wait on the bot while the delete waits on
+		// the source.
+		if err := runtimefence.LockBotForSessionWrite(ctx, queries, input.BotID); err != nil {
+			return err
+		}
+		if err := queries.LockSessionForFork(ctx, pgSessionID); err != nil {
+			return err
+		}
+		row, err := queries.ForkSessionFromAssistantTurn(ctx, sqlc.ForkSessionFromAssistantTurnParams{
+			SessionID:               pgSessionID,
+			BotID:                   pgBotID,
+			TurnID:                  pgTurnID,
+			Title:                   forkTitle,
+			Metadata:                metaBytes,
+			RuntimeMetadataOverride: runtimeMetadataOverrideBytes,
+			CreatedByUserID:         pgCreatedByUserID,
+		})
+		if err != nil {
+			return err
+		}
+		forkID = row.ID
+		// The fork's first request holds what the source's requests held at
+		// the fork point, without compacting it again.
+		if err := checkpoint.CopyToFork(ctx, queries, checkpoint.Copy{
+			SourceSessionID:     source.ID,
+			ForkSessionID:       row.ID.String(),
+			SourceMessageIDs:    row.SourceMessageIds,
+			ForkMessageIDs:      row.ForkMessageIds,
+			ThroughTurnPosition: row.ThroughTurnPosition,
+		}); err != nil {
+			return fmt.Errorf("copy history checkpoint: %w", err)
+		}
+		return nil
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -763,7 +780,11 @@ func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssis
 		}
 		return Thread{}, err
 	}
-	thread := toThreadFromForkRow(row)
+	forkRow, err := s.queries.GetSessionByID(ctx, forkID)
+	if err != nil {
+		return Thread{}, err
+	}
+	thread := toThread(forkRow)
 	s.publishThreadCreated(thread)
 	s.runThreadStartHook(context.WithoutCancel(ctx), thread)
 	return thread, nil
@@ -881,7 +902,7 @@ func (s *Service) UpdateDescriptorAndMetadataWithOwner(ctx context.Context, sess
 // UpdateEmptyDescriptorAndMetadataWithOwner updates a session runtime identity
 // only while its visible history is still empty. PostgreSQL-backed stores lock
 // the bot and session in the same transaction as the message check, descriptor
-// update, runtime-fence bump, and ACP snapshot invalidation. The lock ordering
+// update, and runtime-fence bump. The lock ordering
 // matches runtime activation, so an already-running turn linearizes before the
 // empty-history check and an old runtime token cannot write after the update.
 func (s *Service) UpdateEmptyDescriptorAndMetadataWithOwner(ctx context.Context, sessionID, typ, sessionMode, runtimeType string, metadata, runtimeMetadata map[string]any, botAgentID *string, runtimeOwnerUserID string) (Thread, error) {
@@ -942,15 +963,12 @@ func (s *Service) UpdateEmptyDescriptorAndMetadataWithOwner(ctx context.Context,
 		if tokenErr != nil {
 			return tokenErr
 		}
-		if _, activateErr := queries.ActivateSessionRuntimeFence(ctx, sqlc.ActivateSessionRuntimeFenceParams{
+		_, activateErr := queries.ActivateSessionRuntimeFence(ctx, sqlc.ActivateSessionRuntimeFenceParams{
 			RuntimeFencingToken: token,
 			SessionID:           pgSessionID,
 			BotID:               pgBotID,
-		}); activateErr != nil {
-			return activateErr
-		}
-		_, deleteErr := queries.DeleteAgentSessionPublicationsBySession(ctx, pgSessionID)
-		return deleteErr
+		})
+		return activateErr
 	})
 	if err != nil {
 		return Thread{}, err
@@ -990,7 +1008,7 @@ func (s *Service) updateDescriptorAndMetadata(ctx context.Context, queries Queri
 	}
 	existingRuntimeMeta := parseJSONMap(existing.RuntimeMetadata)
 	existingMeta := parseJSONMap(existing.Metadata)
-	if existingRuntime := normalizeRuntimeType(existing.RuntimeType, existing.Type); existingRuntime == RuntimeACPAgent || IsDirectRuntimeType(existingRuntime) {
+	if runtimekind.IsExternal(normalizeRuntimeType(existing.RuntimeType, existing.Type)) {
 		existingRuntimeOwnerUserID := metadataString(existingRuntimeMeta, "runtime_owner_account_id")
 		if existingRuntimeOwnerUserID == "" {
 			existingRuntimeOwnerUserID = metadataString(existingMeta, "runtime_owner_account_id")
@@ -1009,31 +1027,17 @@ func (s *Service) updateDescriptorAndMetadata(ctx context.Context, queries Queri
 	sessionType = desc.LegacyType
 	metadata = desc.Metadata
 	runtimeMeta := desc.RuntimeMetadata
-	if desc.RuntimeType != RuntimeACPAgent && !IsDirectRuntimeType(desc.RuntimeType) {
+	if runtimekind.IsExternal(desc.RuntimeType) {
+		var boundAgentID string
+		metadata, runtimeMeta, boundAgentID, err = s.shapeExternalMetadata(ctx, queries, desc.RuntimeType, existing.BotID, pgBotAgentID.String(), metadata, runtimeMeta, runtimeOwnerUserID, "")
+		if err != nil {
+			return Thread{}, err
+		}
+		if pgBotAgentID, err = parseOptionalUUID(boundAgentID); err != nil {
+			return Thread{}, fmt.Errorf("invalid bot agent id: %w", err)
+		}
+	} else {
 		runtimeMeta = map[string]any{}
-	}
-	switch {
-	case desc.RuntimeType == RuntimeACPAgent:
-		metadata = ApplyACPMetadataDefaults(metadata)
-		runtimeMeta = ApplyACPMetadataDefaults(runtimeMeta)
-		metadata = setACPRuntimeOwner(metadata, runtimeOwnerUserID)
-		runtimeMeta = setACPRuntimeOwner(runtimeMeta, runtimeOwnerUserID)
-		metadata = mergeACPMetadata(metadata, runtimeMeta)
-		runtimeMeta = mergeACPMetadata(runtimeMeta, metadata)
-		if err := validateACPMetadata(metadata); err != nil {
-			return Thread{}, err
-		}
-		if err := s.validateACPCreatePolicyWithQueries(ctx, queries, existing.BotID, pgBotAgentID.String(), metadata); err != nil {
-			return Thread{}, err
-		}
-	case IsDirectRuntimeType(desc.RuntimeType):
-		metadata = ApplyExternalMetadataDefaults(metadata)
-		runtimeMeta = ApplyExternalMetadataDefaults(runtimeMeta)
-		metadata = setACPRuntimeOwner(metadata, runtimeOwnerUserID)
-		runtimeMeta = setACPRuntimeOwner(runtimeMeta, runtimeOwnerUserID)
-		if err := validateExternalMetadata(metadata); err != nil {
-			return Thread{}, err
-		}
 	}
 	metaBytes, err := json.Marshal(metadata)
 	if err != nil {
@@ -1107,13 +1111,32 @@ var ErrRuntimeMetadataStale = errors.New("session runtime changed; runtime metad
 // so a concurrent runtime switch turns the merge into ErrRuntimeMetadataStale
 // instead of polluting another runtime's metadata, and on the caller's
 // runtime fencing token so a superseded owner's late write after a cluster
-// ownership handoff cannot clobber the new owner's runtime thread id.
+// ownership handoff cannot clobber the new owner's runtime thread id. Under a
+// history reset, like every reset write, it checks the reset lease in the
+// same transaction.
 func (s *Service) MergeRuntimeMetadata(ctx context.Context, sessionID, runtimeType string, delta map[string]any) (Thread, error) {
 	pgID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return Thread{}, fmt.Errorf("invalid session id: %w", err)
 	}
-	row, err := s.queries.GetSessionByID(ctx, pgID)
+	if _, fenced := runtimefence.ResetFromContext(ctx); !fenced {
+		return mergeRuntimeMetadata(ctx, s.queries, pgID, runtimeType, delta)
+	}
+	queries, ok := s.queries.(dbstore.Queries)
+	if !ok {
+		return Thread{}, runtimefence.ErrTransactionsUnsupported
+	}
+	var updated Thread
+	err = runtimefence.InResetTransaction(ctx, queries, "", sessionID, func(txQueries dbstore.Queries) error {
+		var mergeErr error
+		updated, mergeErr = mergeRuntimeMetadata(ctx, txQueries, pgID, runtimeType, delta)
+		return mergeErr
+	})
+	return updated, err
+}
+
+func mergeRuntimeMetadata(ctx context.Context, queries Queries, pgID pgtype.UUID, runtimeType string, delta map[string]any) (Thread, error) {
+	row, err := queries.GetSessionByID(ctx, pgID)
 	if err != nil {
 		return Thread{}, err
 	}
@@ -1139,7 +1162,7 @@ func (s *Service) MergeRuntimeMetadata(ctx context.Context, sessionID, runtimeTy
 	if fence, ok := runtimefence.FromContext(ctx); ok && fence.Token > 0 {
 		fencingToken = pgtype.Int8{Int64: fence.Token, Valid: true}
 	}
-	updated, err := s.queries.UpdateSessionRuntimeMetadata(ctx, sqlc.UpdateSessionRuntimeMetadataParams{
+	updated, err := queries.UpdateSessionRuntimeMetadata(ctx, sqlc.UpdateSessionRuntimeMetadataParams{
 		ID:              pgID,
 		RuntimeType:     strings.TrimSpace(runtimeType),
 		FencingToken:    fencingToken,
@@ -1649,38 +1672,8 @@ func toSubagentConfig(row sqlc.SubagentConfig) SubagentConfig {
 	}
 }
 
-func toThreadFromForkRow(row sqlc.ForkSessionFromAssistantTurnRow) Thread {
-	return toThread(sqlc.BotSession(row))
-}
-
-func validateACPMetadata(meta map[string]any) error {
-	if strings.TrimSpace(metadataString(meta, "acp_agent_id")) == "" {
-		return ErrACPAgentIDRequired
-	}
-	if strings.TrimSpace(metadataString(meta, "project_path")) == "" {
-		return ErrACPProjectPathMissing
-	}
-	if strings.TrimSpace(metadataString(meta, "runtime_owner_account_id")) == "" {
-		return ErrACPRuntimeOwnerMissing
-	}
-	switch strings.TrimSpace(metadataString(meta, "acp_project_mode")) {
-	case "", DefaultACPProjectMode, "none":
-	default:
-		return fmt.Errorf("%w %q", ErrACPProjectModeInvalid, metadataString(meta, "acp_project_mode"))
-	}
-	return nil
-}
-
-func validateExternalMetadata(meta map[string]any) error {
-	if strings.TrimSpace(metadataString(meta, "runtime_owner_account_id")) == "" {
-		return ErrExternalRuntimeOwnerMissing
-	}
-	return nil
-}
-
-// ApplyExternalMetadataDefaults fills omitted working-directory metadata for
-// direct external runtime sessions. Unlike ACP there is no project mode: the
-// runtime always works inside the bot workspace.
+// ApplyExternalMetadataDefaults fills an external agent session's project
+// with the default, the workspace root.
 func ApplyExternalMetadataDefaults(meta map[string]any) map[string]any {
 	out := nonNilMap(meta)
 	if strings.TrimSpace(metadataString(out, "project_path")) == "" {
@@ -1689,33 +1682,68 @@ func ApplyExternalMetadataDefaults(meta map[string]any) map[string]any {
 	return out
 }
 
-// ApplyACPMetadataDefaults fills omitted ACP session project fields.
-func ApplyACPMetadataDefaults(meta map[string]any) map[string]any {
-	out := make(map[string]any, len(meta)+2)
-	for key, value := range meta {
-		out[key] = value
-	}
-	if strings.TrimSpace(metadataString(out, "project_path")) == "" {
-		out["project_path"] = DefaultACPProjectPath
-	}
-	if strings.TrimSpace(metadataString(out, "acp_project_mode")) == "" {
-		out["acp_project_mode"] = DefaultACPProjectMode
-	}
-	return out
+// legacyACPKeys are what an ACP session wrote before Bot Agent instances: its
+// agent profile and a project mode nothing reads. New sessions name neither;
+// the instance is the profile and project_path alone is the project.
+var legacyACPKeys = []string{legacyACPAgentIDKey, "acp_project_mode"}
+
+const legacyACPAgentIDKey = "acp_agent_id"
+
+// ExternalIdentity is what an external agent session is: the Bot Agent it
+// runs as, the agent profile that instance runs (ACP only), its project and
+// the account its turns run as.
+type ExternalIdentity struct {
+	BotAgentID            string
+	ACPAgentID            string
+	ProjectPath           string
+	RuntimeOwnerAccountID string
 }
 
-// overrideACPProjectPath forces the ACP working directory onto a workdir's
-// resolved path. Unlike ApplyACPMetadataDefaults this is not a fallback:
-// a workdir binding owns the directory, so a request-supplied project_path
-// never wins over it.
-func overrideACPProjectPath(meta map[string]any, workdirPath string) map[string]any {
-	out := make(map[string]any, len(meta)+2)
-	for key, value := range meta {
-		out[key] = value
+// ExternalIdentityOf reads the identity a session stores itself: everything
+// but its ACP agent profile, which ExternalIdentity resolves.
+func ExternalIdentityOf(thread Thread) ExternalIdentity {
+	return ExternalIdentity{
+		BotAgentID:            strings.TrimSpace(thread.BotAgentID),
+		ProjectPath:           storedIdentityValue(thread, "project_path"),
+		RuntimeOwnerAccountID: storedIdentityValue(thread, "runtime_owner_account_id"),
 	}
-	out["project_path"] = strings.TrimSpace(workdirPath)
-	out["acp_project_mode"] = DefaultACPProjectMode
-	return out
+}
+
+// ExternalIdentity is the one read of a session's external identity. An ACP
+// session's agent profile is its Bot Agent instance's; a session from before
+// instances has none and keeps the profile it named.
+func (s *Service) ExternalIdentity(ctx context.Context, thread Thread) (ExternalIdentity, error) {
+	identity := ExternalIdentityOf(thread)
+	if RuntimeTypeOf(thread) != RuntimeACPAgent {
+		return identity, nil
+	}
+	if identity.BotAgentID == "" {
+		identity.ACPAgentID = storedIdentityValue(thread, legacyACPAgentIDKey)
+		return identity, nil
+	}
+	if s == nil || s.acpSetupValidator == nil {
+		return ExternalIdentity{}, fmt.Errorf("%w: ACP setup validator unavailable", ErrACPAgentNotConfigured)
+	}
+	agentID, err := s.acpSetupValidator.InstanceACPAgent(ctx, thread.BotID, identity.BotAgentID)
+	if err != nil {
+		return ExternalIdentity{}, err
+	}
+	identity.ACPAgentID = agentID
+	return identity, nil
+}
+
+// storedIdentityValue reads one identity key, runtime metadata first.
+func storedIdentityValue(thread Thread, key string) string {
+	return strings.TrimSpace(firstNonEmptyString(metadataString(thread.RuntimeMetadata, key), metadataString(thread.Metadata, key)))
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 type descriptor struct {
@@ -1786,10 +1814,6 @@ func normalizeDescriptor(legacyType, sessionMode, runtimeType string, metadata, 
 		RuntimeType:     runtimeType,
 		Metadata:        nonNilMap(metadata),
 		RuntimeMetadata: nonNilMap(runtimeMetadata),
-	}
-	if runtimeType == RuntimeACPAgent {
-		out.RuntimeMetadata = mergeACPMetadata(out.RuntimeMetadata, out.Metadata)
-		out.Metadata = mergeACPMetadata(out.Metadata, out.RuntimeMetadata)
 	}
 	return out, nil
 }
@@ -1874,27 +1898,6 @@ func normalizeRuntimeType(runtimeType, legacyType string) string {
 	return derived
 }
 
-func mergeACPMetadata(base, overlay map[string]any) map[string]any {
-	out := nonNilMap(base)
-	for _, key := range []string{"acp_agent_id", "project_path", "acp_project_mode", "runtime_owner_account_id"} {
-		if value, ok := overlay[key]; ok {
-			out[key] = value
-		}
-	}
-	return out
-}
-
-func setACPRuntimeOwner(metadata map[string]any, ownerUserID string) map[string]any {
-	out := nonNilMap(metadata)
-	ownerUserID = strings.TrimSpace(ownerUserID)
-	if ownerUserID == "" {
-		delete(out, "runtime_owner_account_id")
-		return out
-	}
-	out["runtime_owner_account_id"] = ownerUserID
-	return out
-}
-
 func nonNilMap(in map[string]any) map[string]any {
 	if in == nil {
 		return map[string]any{}
@@ -1906,20 +1909,93 @@ func nonNilMap(in map[string]any) map[string]any {
 	return out
 }
 
-// validateACPCreatePolicy checks the setup the thread would launch with.
-// botAgentID is the bound Agent instance; a thread that names only the
-// provider additionally needs the legacy enabled flag.
-func (s *Service) validateACPCreatePolicy(ctx context.Context, botID pgtype.UUID, botAgentID string, meta map[string]any) error {
-	return s.validateACPCreatePolicyWithQueries(ctx, s.queries, botID, botAgentID, meta)
+// externalIdentityKeys are the identity an external agent session stores:
+// its project and the account its turns run as. Both metadata maps carry
+// them.
+var externalIdentityKeys = []string{"project_path", "runtime_owner_account_id"}
+
+// shapeExternalMetadata gives an external agent session its identity and
+// returns the Bot Agent it runs as. An ACP session that names only its agent
+// profile is bound to the bot's instance of it, which then carries the
+// profile. A bot with no instance (configured before instances) gets the
+// session it always got: bound to none, naming its profile itself. A workdir
+// binding owns the project: its path wins over any request-supplied one.
+func (s *Service) shapeExternalMetadata(ctx context.Context, queries Queries, runtimeType string, botID pgtype.UUID, botAgentID string, meta, runtimeMeta map[string]any, owner, workdirPath string) (map[string]any, map[string]any, string, error) {
+	meta, runtimeMeta = nonNilMap(meta), nonNilMap(runtimeMeta)
+	botAgentID = strings.TrimSpace(botAgentID)
+	acp := runtimeType == RuntimeACPAgent
+	var agentID string
+	if acp {
+		var err error
+		if botAgentID, agentID, err = s.bindACPInstance(ctx, botID.String(), botAgentID, meta, runtimeMeta); err != nil {
+			return nil, nil, "", err
+		}
+	}
+	for _, m := range []map[string]any{meta, runtimeMeta} {
+		for _, key := range legacyACPKeys {
+			delete(m, key)
+		}
+		if acp && botAgentID == "" {
+			m[legacyACPAgentIDKey] = agentID
+		}
+		if workdirPath = strings.TrimSpace(workdirPath); workdirPath != "" {
+			m["project_path"] = workdirPath
+		}
+		if owner = strings.TrimSpace(owner); owner != "" {
+			m["runtime_owner_account_id"] = owner
+		} else {
+			delete(m, "runtime_owner_account_id")
+		}
+	}
+	// What the request names in metadata wins over its runtime metadata.
+	for _, key := range externalIdentityKeys {
+		if value, ok := meta[key]; ok {
+			runtimeMeta[key] = value
+		} else if value, ok := runtimeMeta[key]; ok {
+			meta[key] = value
+		}
+	}
+	meta, runtimeMeta = ApplyExternalMetadataDefaults(meta), ApplyExternalMetadataDefaults(runtimeMeta)
+	if ExternalIdentityOf(Thread{Metadata: meta, RuntimeMetadata: runtimeMeta}).RuntimeOwnerAccountID == "" {
+		return nil, nil, "", ErrRuntimeOwnerMissing
+	}
+	if acp {
+		if err := s.validateACPCreatePolicyWithQueries(ctx, queries, botID, botAgentID, agentID); err != nil {
+			return nil, nil, "", err
+		}
+	}
+	return meta, runtimeMeta, botAgentID, nil
 }
 
-func (s *Service) validateACPCreatePolicyWithQueries(ctx context.Context, queries Queries, botID pgtype.UUID, botAgentID string, meta map[string]any) error {
-	agentID := metadataString(meta, "acp_agent_id")
-	botAgentID = strings.TrimSpace(botAgentID)
-	requireLegacyEnabled := botAgentID == ""
+// bindACPInstance resolves the instance an ACP session runs as, empty when
+// the bot has none, and the agent profile it runs. A request bound to no
+// instance names a profile, as callers from before instances do.
+func (s *Service) bindACPInstance(ctx context.Context, botID, botAgentID string, meta, runtimeMeta map[string]any) (string, string, error) {
 	if s.acpSetupValidator == nil {
-		return fmt.Errorf("%w: ACP setup validator unavailable", ErrACPAgentNotConfigured)
+		return "", "", fmt.Errorf("%w: ACP setup validator unavailable", ErrACPAgentNotConfigured)
 	}
+	if botAgentID == "" {
+		agentID := firstNonEmptyString(metadataString(meta, legacyACPAgentIDKey), metadataString(runtimeMeta, legacyACPAgentIDKey))
+		if agentID == "" {
+			return "", "", ErrACPAgentIDRequired
+		}
+		if !s.acpSetupValidator.KnownACPAgent(agentID) {
+			return "", "", fmt.Errorf("%w: %s", ErrACPUnknownAgent, agentID)
+		}
+		instanceID, err := s.acpSetupValidator.ACPInstanceFor(ctx, botID, agentID)
+		if err != nil || instanceID == "" {
+			return "", agentID, err
+		}
+		botAgentID = instanceID
+	}
+	agentID, err := s.acpSetupValidator.InstanceACPAgent(ctx, botID, botAgentID)
+	if err != nil {
+		return "", "", err
+	}
+	return botAgentID, agentID, nil
+}
+
+func (s *Service) validateACPCreatePolicyWithQueries(ctx context.Context, queries Queries, botID pgtype.UUID, botAgentID, agentID string) error {
 	if !s.acpSetupValidator.KnownACPAgent(agentID) {
 		return fmt.Errorf("%w: %s", ErrACPUnknownAgent, agentID)
 	}
@@ -1931,7 +2007,8 @@ func (s *Service) validateACPCreatePolicyWithQueries(ctx context.Context, querie
 	if err != nil {
 		return err
 	}
-	if requireLegacyEnabled && !validation.Enabled {
+	// Without an instance the bot's own profile slot must enable the agent.
+	if botAgentID == "" && !validation.Enabled {
 		return fmt.Errorf("%w: %s", ErrACPAgentNotEnabled, agentID)
 	}
 	if validation.MissingManagedFieldID != "" {

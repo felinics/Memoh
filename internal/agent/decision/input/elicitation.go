@@ -31,7 +31,17 @@ type ElicitationFormMapping struct {
 	fields []elicitationField
 }
 
-func ElicitationFormInput(message string, schema map[string]any) (map[string]any, ElicitationFormMapping, error) {
+// ElicitationExtension reads what an agent marks in a property's _meta its
+// own way; the standard and Memoh's own markers need none.
+type ElicitationExtension struct {
+	// CustomAnswer reports the question a property is the free-text answer
+	// of.
+	CustomAnswer func(meta map[string]any) (questionID string, ok bool, err error)
+	// Secret reports a property the user would have to type a secret into.
+	Secret func(meta map[string]any) bool
+}
+
+func ElicitationFormInput(message string, schema map[string]any, extensions ...ElicitationExtension) (map[string]any, ElicitationFormMapping, error) {
 	if err := requireOnlySchemaKeywords(schema, "requestedSchema", "type", "properties", "required", "title", "description", "$schema"); err != nil {
 		return nil, ElicitationFormMapping{}, err
 	}
@@ -67,14 +77,14 @@ func ElicitationFormInput(message string, schema map[string]any) (map[string]any
 		if err != nil {
 			return nil, ElicitationFormMapping{}, err
 		}
-		if schemaPropertyIsSecret(property) {
+		if schemaPropertyIsSecret(property, extensions) {
 			return nil, ElicitationFormMapping{}, fmt.Errorf("property %q is secret input, which this form surface cannot safely render", propertyID)
 		}
 		if err := validateElicitationPropertyKeywords(propertyID, propertyType, property); err != nil {
 			return nil, ElicitationFormMapping{}, err
 		}
 		propertyTypes[propertyID] = propertyType
-		target, custom, exclusive, err := customAnswerTarget(property)
+		target, custom, exclusive, err := customAnswerTarget(property, extensions)
 		if err != nil {
 			return nil, ElicitationFormMapping{}, fmt.Errorf("property %q: %w", propertyID, err)
 		}
@@ -318,7 +328,7 @@ func requireOnlySchemaKeywords(schema map[string]any, path string, allowed ...st
 	return fmt.Errorf("%s contains unsupported schema keyword %q", path, unsupported[0])
 }
 
-func customAnswerTarget(property map[string]any) (string, bool, bool, error) {
+func customAnswerTarget(property map[string]any, extensions []ElicitationExtension) (string, bool, bool, error) {
 	meta, ok := property["_meta"].(map[string]any)
 	if !ok {
 		return "", false, false, nil
@@ -335,23 +345,21 @@ func customAnswerTarget(property map[string]any) (string, bool, bool, error) {
 		target, err := requiredSchemaString(config, "questionId", "custom-answer metadata")
 		return target, true, true, err
 	}
-	codex, ok := meta["codex"].(map[string]any)
-	if !ok {
-		return "", false, false, nil
+	for _, extension := range extensions {
+		if extension.CustomAnswer == nil {
+			continue
+		}
+		if target, ok, err := extension.CustomAnswer(meta); ok || err != nil {
+			return target, ok, false, err
+		}
 	}
-	other, exists := codex["isOtherAnswer"]
-	if !exists {
-		return "", false, false, nil
-	}
-	isOther, ok := other.(bool)
-	if !ok {
-		return "", false, false, errors.New("codex isOtherAnswer metadata must be a boolean")
-	}
-	if !isOther {
-		return "", false, false, nil
-	}
-	target, err := requiredSchemaString(codex, "questionId", "codex custom-answer metadata")
-	return target, true, false, err
+	return "", false, false, nil
+}
+
+// RequiredMetaString reads a required non-empty string from an agent's _meta
+// marker, for an ElicitationExtension.
+func RequiredMetaString(meta map[string]any, key, path string) (string, error) {
+	return requiredSchemaString(meta, key, path)
 }
 
 func elicitationRequiredProperties(schema, properties map[string]any) (map[string]bool, error) {
@@ -377,14 +385,17 @@ func elicitationRequiredProperties(schema, properties map[string]any) (map[strin
 	return required, nil
 }
 
-func schemaPropertyIsSecret(property map[string]any) bool {
+func schemaPropertyIsSecret(property map[string]any, extensions []ElicitationExtension) bool {
 	if format, _ := property["format"].(string); strings.EqualFold(strings.TrimSpace(format), "password") {
 		return true
 	}
 	meta, _ := property["_meta"].(map[string]any)
-	codex, _ := meta["codex"].(map[string]any)
-	secret, _ := codex["isSecret"].(bool)
-	return secret
+	for _, extension := range extensions {
+		if extension.Secret != nil && extension.Secret(meta) {
+			return true
+		}
+	}
+	return false
 }
 
 func elicitationChoices(schema map[string]any, path string) ([]elicitationChoice, bool, error) {

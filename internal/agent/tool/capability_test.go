@@ -106,6 +106,10 @@ func (*capabilityTestApproval) Reject(context.Context, string, string, string) (
 	return approval.Request{ID: "approval", Status: approval.StatusRejected}, nil
 }
 
+func (*capabilityTestApproval) Cancel(context.Context, string, string) (approval.Request, error) {
+	return approval.Request{ID: "approval", Status: approval.StatusCancelled}, nil
+}
+
 func capabilityFixture(t *testing.T) (*CapabilityProvider, *capabilityTestConnections, *capabilityTestApproval, SessionContext) {
 	t.Helper()
 	connections := &capabilityTestConnections{conn: mcp.Connection{ID: "connection", BotID: "bot", Name: "Test", Type: "http", Active: true, Config: map[string]any{"url": "https://example.test/mcp", "headers": map[string]any{"Authorization": "SECRET"}}}}

@@ -57,6 +57,7 @@ import type { SessionSession } from '@memohai/sdk'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import { useWorkdirsStore } from '@/store/workdirs'
+import { useBotAgentsQuery } from '@/composables/api/useBotAgents'
 import { normalizedSessionMode } from '@/store/chat-list.utils'
 import SessionKindIcon from './session-kind-icon.vue'
 import {
@@ -121,8 +122,10 @@ const listedSessions = computed(() => {
   return sessions.value.filter(session => modes.includes(normalizedSessionMode(session)))
 })
 
+const { data: botAgentData } = useBotAgentsQuery(computed(() => props.botId))
+
 const options = computed<SearchableSelectOption[]>(() =>
-  buildSessionOptions(listedSessions.value, workdirsStore.workdirsFor(props.botId), labels.value),
+  buildSessionOptions(listedSessions.value, workdirsStore.workdirsFor(props.botId), labels.value, botAgentData.value?.items),
 )
 
 function markOf(option: SearchableSelectOption): SessionMark {
@@ -134,7 +137,7 @@ const selectedSession = computed(() =>
 )
 
 const selectedMark = computed(() =>
-  selectedSession.value ? sessionMark(selectedSession.value, labels.value) : null,
+  selectedSession.value ? sessionMark(selectedSession.value, labels.value, botAgentData.value?.items) : null,
 )
 
 // Until the list lands, a hydrated id has no title to show; the raw uuid the

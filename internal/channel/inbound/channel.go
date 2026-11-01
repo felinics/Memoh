@@ -24,6 +24,7 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/attachment"
 	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/discuss"
@@ -132,7 +133,6 @@ type DefaultChatRuntimeSettings struct {
 	Runtime     string
 	ACPAgentID  string
 	ProjectPath string
-	ProjectMode string
 }
 
 type DefaultChatRuntimeReader interface {
@@ -197,6 +197,10 @@ type NewSessionSpec struct {
 	Title                 string
 	CreatedByUserID       string
 	RuntimeOwnerAccountID string
+	// ACPAgentID is the ACP agent profile the session will run, read before it
+	// exists to check its setup and name it. The thread records the
+	// profile itself, from the Agent instance.
+	ACPAgentID string
 }
 
 // ChannelInboundProcessor routes channel inbound messages to the chat gateway.
@@ -852,7 +856,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		ownerPrincipal := strings.TrimSpace(sessionRuntimeOwner)
 		var err error
 		if ownerPrincipal == "" {
-			err = sessionpkg.ErrACPRuntimeOwnerMissing
+			err = sessionpkg.ErrRuntimeOwnerMissing
 		} else {
 			err = p.requireWorkspaceExecForPrincipal(ctx, identity.BotID, ownerPrincipal)
 		}
@@ -4091,14 +4095,13 @@ func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.Inbou
 	}
 	spec.BotAgentID = agent.ID
 	spec.AgentName = agent.Name
-	if sessionpkg.IsDirectRuntimeType(agent.Runtime) {
-		spec.Runtime = agent.Runtime
-		return spec, nil
-	}
-	spec.Runtime = sessionpkg.RuntimeACPAgent
-	spec.Metadata = sessionpkg.ApplyACPMetadataDefaults(map[string]any{"acp_agent_id": agent.ACPAgentID})
-	if mode == sessionpkg.TypeChat {
-		spec.Type = sessionpkg.TypeACPAgent
+	// The thread takes the Agent's profile from the instance.
+	spec.Runtime = botagents.SessionRuntime(agent.Runtime)
+	if spec.Runtime == sessionpkg.RuntimeACPAgent {
+		spec.ACPAgentID = agent.ACPAgentID
+		if mode == sessionpkg.TypeChat {
+			spec.Type = sessionpkg.TypeACPAgent
+		}
 	}
 	return spec, nil
 }
@@ -4277,7 +4280,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		return p.replyFailure(ctx, sender, msg, identity, errs.Wrap(err, "resolve route for /new command"), startFailed)
 	}
 
-	if spec.Runtime == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(spec.Runtime) {
+	if runtimekind.IsExternal(spec.Runtime) {
 		spec.RuntimeOwnerAccountID = externalRuntimeOwnerPrincipal(identity, spec.RuntimeOwnerAccountID)
 	}
 	if strings.TrimSpace(spec.CreatedByUserID) == "" {
@@ -4474,20 +4477,17 @@ func newSessionHarnessName(spec NewSessionSpec, agentName string, profiles turn.
 	if name := strings.TrimSpace(agentName); name != "" {
 		return name
 	}
-	switch {
-	case spec.Runtime == sessionpkg.RuntimeACPAgent:
-		agentID := acpNewSessionAgentID(spec)
-		if profile := resolveACPProfile(profiles, agentID); profile.Known && strings.TrimSpace(profile.DisplayName) != "" {
-			return strings.TrimSpace(profile.DisplayName)
-		}
-		if agentID != "" {
-			return agentID
-		}
-		return "ACP"
-	case sessionpkg.IsDirectRuntimeType(spec.Runtime):
+	if spec.Runtime != sessionpkg.RuntimeACPAgent {
 		return runtimekind.DisplayName(spec.Runtime)
 	}
-	return ""
+	agentID := acpNewSessionAgentID(spec)
+	if profile := resolveACPProfile(profiles, agentID); profile.Known && strings.TrimSpace(profile.DisplayName) != "" {
+		return strings.TrimSpace(profile.DisplayName)
+	}
+	if agentID != "" {
+		return agentID
+	}
+	return "ACP"
 }
 
 // newSessionAgentName is the Name of the Agent a /new session runs on. /new
@@ -4552,16 +4552,14 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 		return NewSessionSpec{}, err
 	}
 	defaultRuntime := strings.TrimSpace(defaults.Runtime)
-	directDefault := runtimekind.IsDirect(defaultRuntime)
-	if !directDefault && defaultRuntime != sessionpkg.RuntimeACPAgent {
+	if !runtimekind.IsExternal(defaultRuntime) {
 		return spec, nil
 	}
+	botAgentID := strings.TrimSpace(defaults.BotAgentID)
+	// A default bound to an Agent instance is that instance; one from before
+	// instances names its ACP agent alone.
 	agentID := normalizeACPAgentID(defaults.ACPAgentID)
-	if directDefault {
-		// A direct default is fully described by its runtime.
-		agentID = defaultRuntime
-	}
-	if agentID == "" {
+	if botAgentID == "" && defaultRuntime == sessionpkg.RuntimeACPAgent && agentID == "" {
 		return NewSessionSpec{}, apperror.New(apperror.CodeACPAgentNotConfigured, nil)
 	}
 	if p.permissionChecker == nil {
@@ -4570,43 +4568,35 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 	if err := p.requireWorkspaceExecForExternalAgent(ctx, identity); err != nil {
 		return NewSessionSpec{}, err
 	}
-	projectPath := strings.TrimSpace(defaults.ProjectPath)
-	if projectPath == "" {
-		projectPath = sessionpkg.DefaultACPProjectPath
-	}
-
-	// Direct external agents have no ACP profile to resolve; only real ACP
-	// providers go through the profile registry.
-	if directDefault {
-		spec.Runtime = defaultRuntime
-		spec.Type = sessionpkg.TypeChat
-		spec.BotAgentID = strings.TrimSpace(defaults.BotAgentID)
-		spec.RuntimeOwnerAccountID = externalRuntimeOwnerPrincipal(identity, "")
-		spec.Metadata = map[string]any{
-			"project_path": projectPath,
-		}
+	spec.Runtime = defaultRuntime
+	spec.Type = sessionpkg.TypeChat
+	spec.BotAgentID = botAgentID
+	spec.RuntimeOwnerAccountID = externalRuntimeOwnerPrincipal(identity, "")
+	spec.Metadata = map[string]any{"project_path": firstNonEmptyTrimmed(defaults.ProjectPath, sessionpkg.DefaultACPProjectPath)}
+	if defaultRuntime != sessionpkg.RuntimeACPAgent {
 		return spec, nil
 	}
-
-	profile := resolveACPProfile(p.acpProfiles, agentID)
-	if !profile.Known {
-		return NewSessionSpec{}, apperror.New(apperror.CodeACPAgentNotFound, nil)
-	}
-	agentID = profile.ID
-	projectMode := strings.TrimSpace(defaults.ProjectMode)
-	if projectMode == "" {
-		projectMode = sessionpkg.DefaultACPProjectMode
-	}
-	spec.Runtime = sessionpkg.RuntimeACPAgent
 	spec.Type = sessionpkg.TypeACPAgent
-	spec.BotAgentID = strings.TrimSpace(defaults.BotAgentID)
-	spec.RuntimeOwnerAccountID = externalRuntimeOwnerPrincipal(identity, "")
-	spec.Metadata = sessionpkg.ApplyACPMetadataDefaults(map[string]any{
-		"acp_agent_id":     agentID,
-		"project_path":     projectPath,
-		"acp_project_mode": projectMode,
-	})
+	spec.ACPAgentID = agentID
+	if botAgentID == "" {
+		// Without an instance the request names the profile, and the thread
+		// binds the session to the bot's instance of it.
+		profile := resolveACPProfile(p.acpProfiles, agentID)
+		if !profile.Known {
+			return NewSessionSpec{}, apperror.New(apperror.CodeACPAgentNotFound, nil)
+		}
+		spec.Metadata["acp_agent_id"] = profile.ID
+	}
 	return spec, nil
+}
+
+func firstNonEmptyTrimmed(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // applyDefaultProjectToNamedAgent gives a named Agent the project the bot's
@@ -4628,9 +4618,6 @@ func (p *ChannelInboundProcessor) applyDefaultProjectToNamedAgent(ctx context.Co
 	if projectPath := strings.TrimSpace(defaults.ProjectPath); projectPath != "" {
 		spec.Metadata["project_path"] = projectPath
 	}
-	if projectMode := strings.TrimSpace(defaults.ProjectMode); projectMode != "" && spec.Runtime == sessionpkg.RuntimeACPAgent {
-		spec.Metadata["acp_project_mode"] = projectMode
-	}
 	return spec, nil
 }
 
@@ -4648,15 +4635,10 @@ func metadataString(metadata map[string]any, key string) string {
 	}
 }
 
+// validateACPNewSessionSpec refuses a /new ACP session before the user
+// confirms it: its project, its agent profile and the setup it would launch
+// with.
 func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context, identity InboundIdentity, spec NewSessionSpec) error {
-	agentID := acpNewSessionAgentID(spec)
-	if agentID == "" {
-		return apperror.New(apperror.CodeACPAgentNotConfigured, nil)
-	}
-	profile := resolveACPProfile(p.acpProfiles, agentID)
-	if !profile.Known {
-		return apperror.New(apperror.CodeACPAgentNotFound, nil)
-	}
 	projectPath := strings.TrimSpace(metadataString(spec.Metadata, "project_path"))
 	if projectPath == "" {
 		projectPath = sessionpkg.DefaultACPProjectPath
@@ -4664,16 +4646,13 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 	if !strings.HasPrefix(projectPath, "/") {
 		return apperror.New(apperror.CodeACPProjectPathInvalid, nil)
 	}
-	projectMode := strings.TrimSpace(metadataString(spec.Metadata, "acp_project_mode"))
-	if projectMode == "" {
-		projectMode = sessionpkg.DefaultACPProjectMode
+	agentID := acpNewSessionAgentID(spec)
+	if agentID == "" {
+		return apperror.New(apperror.CodeACPAgentNotConfigured, nil)
 	}
-	switch projectMode {
-	case sessionpkg.DefaultACPProjectMode:
-	case "none":
-		return apperror.New(apperror.CodeACPProjectModeInvalid, nil)
-	default:
-		return apperror.New(apperror.CodeACPProjectModeInvalid, nil)
+	profile := resolveACPProfile(p.acpProfiles, agentID)
+	if !profile.Known {
+		return apperror.New(apperror.CodeACPAgentNotFound, nil)
 	}
 	if p == nil || p.acpAgentSetup == nil {
 		return nil
@@ -4721,7 +4700,7 @@ func requireExternalRuntimeActor(identity InboundIdentity, runtimeOwnerAccountID
 	actorUserID := strings.TrimSpace(identity.UserID)
 	runtimeOwnerAccountID = strings.TrimSpace(runtimeOwnerAccountID)
 	if runtimeOwnerAccountID == "" {
-		return sessionpkg.ErrACPRuntimeOwnerMissing
+		return sessionpkg.ErrRuntimeOwnerMissing
 	}
 	if actorUserID == "" {
 		return externalAgentExecDenied("account_user_unbound")
@@ -4836,7 +4815,7 @@ func threadError(err error) error {
 		code = apperror.CodeACPAgentNotFound
 	case errors.Is(err, sessionpkg.ErrACPAgentNotEnabled):
 		code = apperror.CodeACPAgentNotEnabled
-	case errors.Is(err, sessionpkg.ErrACPRuntimeOwnerMissing):
+	case errors.Is(err, sessionpkg.ErrRuntimeOwnerMissing):
 		code = apperror.CodeACPRuntimeOwnerMissing
 	default:
 		return err
@@ -4848,7 +4827,7 @@ func acpNewSessionAgentID(spec NewSessionSpec) string {
 	if spec.Runtime != sessionpkg.RuntimeACPAgent {
 		return ""
 	}
-	return normalizeACPAgentID(newSessionMetadataString(spec.Metadata, "acp_agent_id"))
+	return normalizeACPAgentID(firstNonEmptyTrimmed(spec.ACPAgentID, newSessionMetadataString(spec.Metadata, "acp_agent_id")))
 }
 
 func normalizeACPAgentID(agentID string) string {

@@ -8,8 +8,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/external/acp"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
@@ -23,7 +23,7 @@ func TestRuntimeControlErrorTranslatesDriverSentinels(t *testing.T) {
 		want apperror.Code
 	}{
 		{external.ErrControlUnsupported, apperror.CodeRuntimeControlUnsupported},
-		{fmt.Errorf("read: %w", external.ErrAuthRequired), apperror.CodeExternalRuntimeAuthRequired},
+		{fmt.Errorf("read: %w", external.Fail(external.FailureAuthRequired, nil)), apperror.CodeExternalRuntimeAuthRequired},
 		{turn.ErrSessionBusy, apperror.CodeSessionBusy},
 		{sessionruntime.ErrSessionBusy, apperror.CodeRuntimeControlFailed},
 		{echo.NewHTTPError(http.StatusBadGateway, "upstream"), apperror.CodeRuntimeControlFailed},

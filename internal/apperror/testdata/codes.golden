@@ -13,7 +13,6 @@ acp.reasoning_effort_unavailable	400
 acp.reasoning_selection_unsupported	400
 acp.request_invalid	400
 acp.runtime_conflict	409
-acp.runtime_limit_reached	429
 acp.runtime_not_found	404
 acp_agent_auth_invalid	409
 acp_agent_not_configured	400
@@ -54,7 +53,6 @@ agent_credential.reauthorization_required	409
 agent_credential.request_invalid	400
 agent_credential.revoked	409
 agent_credential.runtime_busy	409
-agent_credential.usage_auth_expired	409
 agent_credential.usage_unavailable	502
 agent_dependency_missing	409
 app.busy	409
@@ -92,8 +90,6 @@ channel.verification_failed	502
 channel.webhook_endpoint_invalid	400
 channel_route.not_found	404
 chat.message_empty	400
-codex_auth_token_missing	409
-codex_oauth_incomplete	409
 compaction.model_unavailable	400
 connector.conflict	409
 connector.not_configured	503
@@ -120,6 +116,7 @@ external_runtime.busy	409
 external_runtime.context_window_exceeded	422
 external_runtime.overloaded	503
 external_runtime.rate_limited	429
+external_runtime.reported	502
 external_runtime.request_blocked	422
 external_runtime.session_resume_failed	502
 external_runtime.unavailable	503

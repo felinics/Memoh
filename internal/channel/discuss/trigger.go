@@ -16,13 +16,14 @@ type discussTurnPlan struct {
 	estimatedTokens int
 }
 
-// Build composes the durable timeline and persisted turn responses into the
+// Build composes the durable timeline and the persisted turn responses after
+// the session's history checkpoint, under what the checkpoint holds, into the
 // pure StartTurn command consumed by Agent. The admission budget is applied
 // before materialization (CM-ADM-001); a ProtectedOverflow admission returns
 // ok=false so the caller fails closed instead of running the turn.
-func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.RenderedContext, trs []timeline.TurnResponseEntry, after timeline.DiscussCursorPosition, artifacts []timeline.CompactionArtifact, budget timeline.ComposeBudget) (discussTurnPlan, timeline.ComposeAdmission, bool) {
+func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.RenderedContext, trs []timeline.TurnResponseEntry, after timeline.DiscussCursorPosition, checkpoint timeline.HistoryCheckpoint, budget timeline.ComposeBudget) (discussTurnPlan, timeline.ComposeAdmission, bool) {
 	budget.After = &after
-	composed, admission := timeline.ComposeContextWithArtifactsBudgeted(rc, trs, artifacts, budget)
+	composed, admission := timeline.ComposeContextWithCheckpointBudgeted(rc, trs, checkpoint, budget)
 	if composed == nil && !admission.ProtectedOverflow {
 		return discussTurnPlan{}, admission, false
 	}
@@ -46,6 +47,7 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			Content:              message.Content,
 			RawContent:           message.RawContent,
 			CompactionArtifactID: message.CompactionArtifactID,
+			Pinned:               message.Pinned,
 		})
 	}
 	return discussTurnPlan{

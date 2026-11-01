@@ -222,7 +222,6 @@ import { SettingsIcon as Settings } from '@memohai/icon/ui'
 import {
   deleteBotsByBotIdAgentsById,
   getAcpProfiles,
-  getBotsByBotIdAgents,
   patchBotsByBotIdAgentsById,
   type AcpprofilePublicProfile,
   type BotagentsBotAgent,
@@ -234,6 +233,7 @@ import AddBotAgentDialog from './add-bot-agent-dialog.vue'
 import DependencyEnableFlow from './dependency-enable-flow.vue'
 import { agentDependencyRequirement } from './dependency-enable-flow'
 import { externalAgentModelsQueryKey } from '@/composables/useAgentModelCatalog'
+import { botAgentsQueryKey, useBotAgentsQuery } from '@/composables/api/useBotAgents'
 import { useViewSwap } from '@/composables/useViewSwap'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
@@ -297,17 +297,7 @@ const { data: profileData } = useQuery({
 })
 const profiles = computed<AcpprofilePublicProfile[]>(() => profileData.value?.items ?? [])
 
-const { data: agentData, isLoading: agentsLoading } = useQuery({
-  key: () => ['bot-agents', botIdRef.value],
-  query: async () => {
-    const { data } = await getBotsByBotIdAgents({
-      path: { bot_id: botIdRef.value },
-      throwOnError: true,
-    })
-    return data
-  },
-  enabled: () => !!botIdRef.value,
-})
+const { data: agentData, isLoading: agentsLoading } = useBotAgentsQuery(botIdRef)
 const agents = computed<BotagentsBotAgent[]>(() => agentData.value?.items ?? [])
 
 // `openAgent=<id>` lands on one Agent's detail, as the create flow does for
@@ -349,7 +339,7 @@ const { mutateAsync: updateAgent } = useMutation({
     return data
   },
   onSettled: () => {
-    void queryCache.invalidateQueries({ key: ['bot-agents', props.botId] })
+    void queryCache.invalidateQueries({ key: botAgentsQueryKey(props.botId) })
     void queryCache.invalidateQueries({ key: ['bot-settings', props.botId] })
   },
 })
@@ -465,7 +455,7 @@ async function confirmDelete() {
     toast.error(resolveApiErrorMessage(error, t('bots.agent.deleteFailed')))
   } finally {
     deleting.value = false
-    void queryCache.invalidateQueries({ key: ['bot-agents', props.botId] })
+    void queryCache.invalidateQueries({ key: botAgentsQueryKey(props.botId) })
     void queryCache.invalidateQueries({ key: ['bot-settings', props.botId] })
   }
 }

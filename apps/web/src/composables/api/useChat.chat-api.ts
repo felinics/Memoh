@@ -1,18 +1,13 @@
 import { randomUUID } from '@/utils/uuid'
 import {
+  getBotsByBotIdAcpOptions,
   getBots,
-  getBotsByBotIdAcpRuntimesByRuntimeId,
-  deleteBotsByBotIdAcpRuntimesByRuntimeId,
   getBotsByBotIdSessions,
   getBotsByBotIdSessionsBySessionId,
-  postBotsByBotIdAcpRuntimes,
   postBotsByBotIdSessions,
   postBotsByBotIdSessionsBySessionIdFork,
   postBotsByBotIdSessionsBySessionIdAcpRuntime,
   deleteBotsByBotIdSessionsBySessionId,
-  patchBotsByBotIdAcpRuntimesByRuntimeIdModel,
-  patchBotsByBotIdAcpRuntimesByRuntimeIdMode,
-  patchBotsByBotIdAcpRuntimesByRuntimeIdReasoning,
   patchBotsByBotIdSessionsBySessionId,
   getBotsByBotIdSessionsModelPreferenceSeed,
   patchBotsByBotIdSessionsBySessionIdAcpRuntimeMode,
@@ -45,8 +40,6 @@ export interface CreateSessionOptions {
   runtimeType?: string
   metadata?: Record<string, unknown>
   runtimeMetadata?: Record<string, unknown>
-  /** Warm pre-session ACP runtime to bind at creation time. */
-  acpRuntimeId?: string
   /**
    * Bot workdir to bind the session to. Immutable after creation: the
    * workdir pins the session's workspace target and working directory.
@@ -62,12 +55,16 @@ export interface CreateSessionOptions {
   preferredReasoningEffort?: string
 }
 
-export interface CreateACPRuntimeOptions {
+export interface ACPAgentOptionsQuery {
   agentId: string
-  // The Agent instance whose setup launches the runtime; only a session bound
-  // to the same instance adopts it.
+  // The Agent instance whose setup the options come from.
   botAgentId?: string
+  // The project the conversation will run in: an agent offers commands and
+  // settings by its working directory.
   projectPath?: string
+  // The model whose reasoning efforts to report; the agent's current one
+  // when omitted.
+  modelId?: string
 }
 
 /**
@@ -243,7 +240,6 @@ export async function createSession(botId: string, options?: string | CreateSess
         runtime_type: options?.runtimeType,
         metadata: options?.metadata,
         runtime_metadata: options?.runtimeMetadata,
-        acp_runtime_id: options?.acpRuntimeId?.trim() || undefined,
         workdir_id: options?.workdirId?.trim() || undefined,
         preferred_chat_model_id: options?.preferredChatModelId?.trim() || undefined,
         preferred_reasoning_effort: options?.preferredReasoningEffort?.trim() || undefined,
@@ -320,31 +316,6 @@ export async function fetchModelPreferenceSeed(botId: string): Promise<ModelPref
   return data as ModelPreferenceSeed
 }
 
-export interface UpdateSessionAgentOptions {
-  botAgentId?: string
-  type?: string
-  sessionMode?: string
-  runtimeType?: string
-  metadata?: Record<string, unknown>
-  runtimeMetadata?: Record<string, unknown>
-}
-
-export async function updateSessionAgent(botId: string, sessionId: string, options: UpdateSessionAgentOptions): Promise<SessionSummary> {
-  const { data } = await patchBotsByBotIdSessionsBySessionId({
-    path: { bot_id: botId.trim(), session_id: sessionId.trim() },
-    body: {
-      bot_agent_id: options.botAgentId,
-      type: options.type,
-      session_mode: options.sessionMode,
-      runtime_type: options.runtimeType,
-      metadata: options.metadata,
-      runtime_metadata: options.runtimeMetadata,
-    },
-    throwOnError: true,
-  })
-  return data as SessionSummary
-}
-
 export async function ensureACPRuntime(botId: string, sessionId: string): Promise<AcpagentRuntimeStatus> {
   const { data } = await postBotsByBotIdSessionsBySessionIdAcpRuntime({
     path: { bot_id: botId.trim(), session_id: sessionId.trim() },
@@ -380,60 +351,20 @@ export async function setACPRuntimeReasoning(botId: string, sessionId: string, e
   return data as AcpagentRuntimeStatus
 }
 
-export async function createACPRuntime(botId: string, options: CreateACPRuntimeOptions): Promise<AcpagentRuntimeStatus> {
-  const { data } = await postBotsByBotIdAcpRuntimes({
+// fetchACPAgentOptions reads what a new conversation with the agent could
+// choose: models, reasoning efforts, modes and commands.
+export async function fetchACPAgentOptions(botId: string, options: ACPAgentOptionsQuery): Promise<AcpagentRuntimeStatus> {
+  const { data } = await getBotsByBotIdAcpOptions({
     path: { bot_id: botId.trim() },
-    body: {
+    query: {
       acp_agent_id: options.agentId.trim(),
       bot_agent_id: options.botAgentId?.trim() || undefined,
-      project_path: options.projectPath?.trim(),
+      project_path: options.projectPath?.trim() || undefined,
+      model_id: options.modelId?.trim() || undefined,
     },
     throwOnError: true,
   })
   return data as AcpagentRuntimeStatus
-}
-
-export async function fetchACPRuntimeByID(botId: string, runtimeId: string): Promise<AcpagentRuntimeStatus> {
-  const { data } = await getBotsByBotIdAcpRuntimesByRuntimeId({
-    path: { bot_id: botId.trim(), runtime_id: runtimeId.trim() },
-    throwOnError: true,
-  })
-  return data as AcpagentRuntimeStatus
-}
-
-export async function setACPRuntimeModelByID(botId: string, runtimeId: string, modelId: string): Promise<AcpagentRuntimeStatus> {
-  const { data } = await patchBotsByBotIdAcpRuntimesByRuntimeIdModel({
-    path: { bot_id: botId.trim(), runtime_id: runtimeId.trim() },
-    // An empty model_id resets the runtime to the agent default model.
-    body: { model_id: modelId.trim() },
-    throwOnError: true,
-  })
-  return data as AcpagentRuntimeStatus
-}
-
-export async function setACPRuntimeModeByID(botId: string, runtimeId: string, modeId: string): Promise<AcpagentRuntimeStatus> {
-  const { data } = await patchBotsByBotIdAcpRuntimesByRuntimeIdMode({
-    path: { bot_id: botId.trim(), runtime_id: runtimeId.trim() },
-    body: { mode_id: modeId },
-    throwOnError: true,
-  })
-  return data as AcpagentRuntimeStatus
-}
-
-export async function setACPRuntimeReasoningByID(botId: string, runtimeId: string, effort: string): Promise<AcpagentRuntimeStatus> {
-  const { data } = await patchBotsByBotIdAcpRuntimesByRuntimeIdReasoning({
-    path: { bot_id: botId.trim(), runtime_id: runtimeId.trim() },
-    body: { reasoning_effort: effort.trim() },
-    throwOnError: true,
-  })
-  return data as AcpagentRuntimeStatus
-}
-
-export async function closeACPRuntime(botId: string, runtimeId: string): Promise<void> {
-  await deleteBotsByBotIdAcpRuntimesByRuntimeId({
-    path: { bot_id: botId.trim(), runtime_id: runtimeId.trim() },
-    throwOnError: true,
-  })
 }
 
 export async function deleteSession(botId: string, sessionId: string): Promise<void> {

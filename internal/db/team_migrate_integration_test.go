@@ -329,7 +329,12 @@ func TestSingletonTeamSeededAfterMigrate(t *testing.T) {
 	}
 }
 
-func TestMigrationsDoNotRequireClusterRolePrivileges(t *testing.T) {
+// limitedOwnerDSN hands the test's isolated database to a new role without
+// SUPERUSER, CREATEROLE or BYPASSRLS, the least a migration role may have,
+// and returns a DSN that connects as it. Unlike a superuser, such an owner is
+// subject to FORCE row level security.
+func limitedOwnerDSN(t *testing.T) string {
+	t.Helper()
 	ctx := context.Background()
 	adminDSN := teamMigrationDSN(t)
 	adminCfg, err := pgconn.ParseConfig(adminDSN)
@@ -356,7 +361,7 @@ func TestMigrationsDoNotRequireClusterRolePrivileges(t *testing.T) {
 		admin.Close()
 	})
 
-	limitedDSN := db.DSN(config.PostgresConfig{
+	return db.DSN(config.PostgresConfig{
 		Host:     adminCfg.Host,
 		Port:     int(adminCfg.Port),
 		User:     role,
@@ -364,6 +369,10 @@ func TestMigrationsDoNotRequireClusterRolePrivileges(t *testing.T) {
 		Database: adminCfg.Database,
 		SSLMode:  "disable",
 	})
+}
+
+func TestMigrationsDoNotRequireClusterRolePrivileges(t *testing.T) {
+	limitedDSN := limitedOwnerDSN(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	if err := db.RunMigrate(logger, pgConfigFromDSN(t, limitedDSN), postgresMigrationsFS(t), "up", nil); err != nil {
 		t.Fatalf("migrate as database owner without CREATEROLE/BYPASSRLS: %v", err)

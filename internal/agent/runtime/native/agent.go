@@ -302,7 +302,10 @@ func prepareProviderAttempt(
 	prefixCount = clampStableMessageCount(prefixCount, len(params.Messages))
 	dynamicRefs = verifyDynamicRefs(cfg.dynamicInputs, dynamicRefs, params.Messages)
 	snapshot := contextfrag.StepSnapshot{StepIndex: stepIndex}
-	allowance := providerInputAllowance(cfg)
+	// The allowance is what the provider counts; an armed run measures the
+	// request by its estimate, calibrated by what the provider counted for
+	// the run's or the session's latest step.
+	allowance := cfg.contextSwitch.calibrated(providerInputAllowance(cfg))
 	// A step request only grows between compaction events. A request that
 	// still does not fit after compaction ends the run without pruning.
 	if cfg.contextSwitch != nil {
@@ -325,6 +328,7 @@ func prepareProviderAttempt(
 			allowance,
 		))
 	}
+	cfg.contextSwitch.staged(params)
 	stagePreparedProviderAttempt(ctx, handoff, snapshot, systemPrepended, dynamicRefs)
 	return params
 }
@@ -367,16 +371,25 @@ func failPreparedProviderAttempt(
 	return params
 }
 
+// providerWindow is the context window every provider dispatch of the run
+// is sized for and the output it reserves, whether the plan recorded them or
+// the run assembled its context without a plan.
+func providerWindow(cfg RunConfig) (window, reserve int) {
+	window = cfg.ContextBudgetMaxTokens
+	if plan := cfg.ContextManifest.BudgetPlan; plan != nil {
+		return plan.Window, plan.OutputReserve
+	}
+	if window > 0 {
+		reserve = cfg.GenerationLimits().MaxOutputTokens
+	}
+	return window, reserve
+}
+
 // providerInputAllowance is the input allowance every provider dispatch is
 // checked against: the window minus the output reserve, whether the plan
 // recorded it or the run assembled its context without a plan.
 func providerInputAllowance(cfg RunConfig) int {
-	window, reserve := cfg.ContextBudgetMaxTokens, 0
-	if plan := cfg.ContextManifest.BudgetPlan; plan != nil {
-		window, reserve = plan.Window, plan.OutputReserve
-	} else if window > 0 {
-		reserve = cfg.GenerationLimits().MaxOutputTokens
-	}
+	window, reserve := providerWindow(cfg)
 	if window <= 0 {
 		return 0
 	}

@@ -40,12 +40,8 @@ func runtimeControlCode(err error) apperror.Code {
 		return apperror.CodeRuntimeControlUnsupported
 	case errors.Is(err, external.ErrCommandUnavailable):
 		return apperror.CodeRuntimeControlCommandUnavailable
-	case errors.Is(err, external.ErrModeUnavailable):
-		return apperror.CodeRuntimeControlModeUnavailable
 	case errors.Is(err, external.ErrThreadUnavailable):
 		return apperror.CodeRuntimeControlThreadUnavailable
-	case errors.Is(err, external.ErrAuthRequired):
-		return apperror.CodeExternalRuntimeAuthRequired
 	default:
 		return apperror.CodeRuntimeControlFailed
 	}

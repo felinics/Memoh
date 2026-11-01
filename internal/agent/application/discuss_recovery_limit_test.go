@@ -40,7 +40,7 @@ func TestExternalDiscussExhaustedRecoveryOnlyAttemptsAdmission(t *testing.T) {
 	_, err := service.prepareExternalDiscussContext(t.Context(), ChatRequest{
 		BotID: syncCompactBotID, ThreadID: syncCompactThreadID, discussRecoveryExhausted: true,
 		discussMessages: []turn.DiscussMessage{
-			{Role: "assistant", Content: strings.Repeat("s", 8000), CompactionArtifactID: "summary"},
+			{Role: "assistant", Content: strings.Repeat("s", 8000), CompactionArtifactID: "summary", Pinned: true},
 			{Role: "user", Content: "current"},
 		},
 	}, "", 0)

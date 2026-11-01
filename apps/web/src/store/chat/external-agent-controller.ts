@@ -35,8 +35,8 @@ export function createExternalAgentController(deps: {
   removeSessionView: (botId: string, sessionId: string) => void
   removeSessionFromList: (sessionId: string) => void
   ensureBot: () => Promise<string | null>
-  knownSession: (sessionId: string) => SessionSummary | null | undefined
   draftWorkdirIdFor: (botId: string, opts: { externalAgent: boolean }) => string
+  draftFolderPathFor: (botId: string) => string
 }) {
   const runtimeRegistry = createACPRuntimeRegistry({
     currentBotId: deps.currentBotId,
@@ -47,7 +47,6 @@ export function createExternalAgentController(deps: {
     sessionId: deps.sessionId,
     draftIntent: deps.draftIntent,
     explicitSessionSelection: deps.explicitSessionSelection,
-    runtimeRegistry,
     bumpSelectSessionRequest: deps.bumpSelectSessionRequest,
     clearTranscriptForDraft: () => {
       const botId = (deps.currentBotId.value ?? '').trim()
@@ -55,6 +54,7 @@ export function createExternalAgentController(deps: {
       if (botId && sessionId) deps.stopSessionRuntime(botId, sessionId)
       deps.clearHistoryView()
     },
+    draftFolderPathFor: deps.draftFolderPathFor,
   })
 
   const draftViewCommandVersions = new Map<string, number>()
@@ -78,12 +78,8 @@ export function createExternalAgentController(deps: {
 
   const orchestration = createExternalAgentOrchestration({
     staging,
-    runtimeRegistry,
     normalizeTarget: deps.normalizeTarget,
     invalidateDraftCommand: invalidateDraftViewCommand,
-    forgetDraftCommand: target => {
-      draftViewCommandVersions.delete(deps.draftCreationKey(target))
-    },
     resetWorkspaceTargetSelection: deps.resetWorkspaceTargetSelection,
   })
   const defaults = createExternalAgentDefaults({
@@ -104,7 +100,6 @@ export function createExternalAgentController(deps: {
     explicitSessionSelection: deps.explicitSessionSelection,
     focusedViewId: deps.focusedViewId,
     userScopeGeneration: deps.userScopeGeneration,
-    normalizeTarget: deps.normalizeTarget,
     targetDraftForExternalAgent: orchestration.targetDraftForExternalAgent,
     pendingExternalAgentStateFor: orchestration.pendingExternalAgentStateFor,
     isFocusedTarget: deps.isFocusedTarget,
@@ -113,7 +108,6 @@ export function createExternalAgentController(deps: {
     promoteDraftView: deps.promoteDraftView,
     clearRuntimeStatus: runtimeRegistry.clearACPRuntimeStatus,
     forgetDraftStage: orchestration.forgetDraftExternalAgentStage,
-    discardDraftStage: orchestration.discardDraftExternalAgentStage,
     rememberDraftStage: orchestration.rememberDraftExternalAgentStage,
     activateDraftStage: orchestration.activateDraftExternalAgentStage,
     markSessionDeleted: deps.markSessionDeleted,
@@ -121,7 +115,6 @@ export function createExternalAgentController(deps: {
     removeSessionView: deps.removeSessionView,
     removeSessionFromList: deps.removeSessionFromList,
     ensureBot: deps.ensureBot,
-    knownSessionSummary: deps.knownSession,
     isDraftCreationActive: target =>
       deps.draftSessionCreations.has(deps.draftCreationKey(target)),
     beginDraftCreation: target => {
@@ -145,12 +138,10 @@ export function createExternalAgentController(deps: {
   let draftViewRequestSeq = 0
 
   function normalizedInput(input: ExternalAgentSessionInput): ExternalAgentSessionInput {
-    const metadata = externalAgentDraftMetadata(input)
     return {
       ...input,
-      agentId: String(metadata.acp_agent_id ?? ''),
-      projectPath: String(metadata.project_path ?? ''),
-      projectMode: String(metadata.acp_project_mode ?? ''),
+      agentId: input.agentId.trim(),
+      projectPath: String(externalAgentDraftMetadata(input).project_path ?? ''),
     }
   }
 
@@ -174,12 +165,11 @@ export function createExternalAgentController(deps: {
       return
     }
     deps.chatView(target).transcript.clearHistoryView()
-    orchestration.discardDraftExternalAgentStage(target)
+    orchestration.forgetDraftExternalAgentStage(target)
     if (request.input) {
       orchestration.rememberDraftExternalAgentStage(target, {
         botId: request.botId,
         input: normalizedInput(request.input),
-        runtimeId: '',
       })
     }
   }

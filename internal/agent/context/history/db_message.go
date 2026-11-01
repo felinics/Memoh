@@ -35,10 +35,10 @@ func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback 
 	rowID := ref.ID
 
 	modelMessage := DecodeStoredModelMessage(log, msg.ID, msg.Role, msg.Content)
-	modelMessage.ContextSource = &turn.ContextMessageSource{Kind: "history", ID: rowID, ContentHash: MessageContentHash(modelMessage)}
+	modelMessage.ContextSource = &turn.ContextMessageSource{Kind: "history", ID: rowID}
 	inputTokens, outputTokens := parseUsage(msg.Usage)
-	// Compaction coverage persisted hashes over the full row metadata, so the
-	// hash still covers lifecycle audits the record itself does not keep.
+	// The ref hashes the full stored row, metadata included, so it also
+	// changes with lifecycle audits the record itself does not keep.
 	metadata := dbMessageMetadata(msg)
 	ref.HashAlgo = contextfrag.HashAlgoSHA256
 	ref.HashScope = contextfrag.HashScopeSourcePayload
@@ -67,7 +67,6 @@ func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback 
 		ExternalMessageID: strings.TrimSpace(msg.ExternalMessageID),
 		EventID:           strings.TrimSpace(msg.EventID),
 		SessionID:         strings.TrimSpace(msg.SessionID),
-		SessionIDKnown:    true,
 		BotID:             strings.TrimSpace(msg.BotID),
 
 		SenderChannelIdentityID: strings.TrimSpace(msg.SenderChannelIdentityID),
@@ -76,9 +75,7 @@ func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback 
 		Platform:                strings.TrimSpace(msg.Platform),
 		SourceReplyToMessageID:  strings.TrimSpace(msg.SourceReplyToMessageID),
 
-		CompactID:  strings.TrimSpace(msg.CompactID),
-		Summarized: msg.Summarized,
-		CreatedAt:  msg.CreatedAt,
+		CreatedAt: msg.CreatedAt,
 
 		UsageInputTokens:  inputTokens,
 		UsageOutputTokens: outputTokens,

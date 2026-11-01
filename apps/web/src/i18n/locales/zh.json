@@ -133,7 +133,6 @@
       "reasoning_selection_unsupported": "这个外部 Agent 不支持选择推理强度。",
       "request_invalid": "Agent 运行实例请求无效，请检查后重试。",
       "runtime_conflict": "Agent 运行实例尚未准备好执行此操作，请刷新后重试。",
-      "runtime_limit_reached": "当前运行的 Agent 实例过多，请关闭一个后重试。",
       "runtime_not_found": "这个 Agent 运行实例已失效，将重新启动。"
     },
     "acp_agent_auth_invalid": "外部 Agent 认证无效。请更新 Agent 配置后重试。",
@@ -180,7 +179,6 @@
       "request_invalid": "请检查 Agent 账号信息后重试。",
       "revoked": "这个 Agent 账号已断开，请重新连接或选择其他账号。",
       "runtime_busy": "请等待当前回复结束后再切换 Agent 账号。",
-      "usage_auth_expired": "账户登录已过期，下次对话后会自动续期；如果仍无法查看额度，请重新连接账户。",
       "usage_unavailable": "暂时无法获取额度，请稍后再试。"
     },
     "agent_dependency_missing": "{dep_id} 尚未安装在此工作区。请在 Bot 的「依赖」中安装，或等待正在进行的安装完成，然后重新发送消息。",
@@ -239,8 +237,6 @@
     "chat": {
       "message_empty": "请输入消息或添加附件。"
     },
-    "codex_auth_token_missing": "该 Bot 工作区的 Codex 认证缺失或不完整。",
-    "codex_oauth_incomplete": "该 Bot 工作区尚未完成 Codex ChatGPT 登录。",
     "compaction": {
       "model_unavailable": "压缩模型不可用。请选择一个已启用、且声明了上下文窗口的对话模型。"
     },
@@ -280,8 +276,9 @@
       "context_window_exceeded": "这个会话已超出模型的上下文长度上限。请压缩上下文，或新开一个会话。",
       "overloaded": "外部 Agent 的模型服务暂时不可用或过载。请稍后重试，或换一个模型。",
       "rate_limited": "外部 Agent 已达到模型服务的速率上限，请稍后再发送。",
+      "reported": "Agent 报错：{message}",
       "request_blocked": "这次请求被模型服务的安全策略拦截，请调整内容后再发送。",
-      "session_resume_failed": "会话无法恢复，请重试或新开会话。",
+      "session_resume_failed": "会话无法恢复：{message}。请重试或新开会话。",
       "unavailable": "外部 Agent 运行时暂不可用。请检查 Agent 配置和工作区后重试。",
       "upstream_unreachable": "外部 Agent 无法连接到模型服务，或连接中途断开。请检查网络和 Agent 的服务地址后重试。",
       "usage_limited": "外部 Agent 账号的使用额度已用完。请等额度重置后再试，或检查该账号的套餐与账单。"
@@ -1592,7 +1589,10 @@
       "dependencyMissingProgress": "正在后台安装…",
       "dependencyMissingDone": "安装完成，可以重发消息了。",
       "dependencyMissingFailed": "后台安装失败，请到 Bot 设置的「依赖」中重试。",
-      "dependencyOpen": "查看依赖"
+      "dependencyOpen": "查看依赖",
+      "resetSession": "新开 Agent 会话",
+      "resetSessionDone": "下一条消息会开始新的 Agent 会话，它不会记得上面的对话。",
+      "resetSessionFailed": "无法新开 Agent 会话。"
     },
     "sessionFilterAll": "全部",
     "searchSessionPlaceholder": "搜索",
@@ -2154,7 +2154,8 @@
       "exa": "Exa",
       "bocha": "博查",
       "duckduckgo": "DuckDuckGo",
-      "yandex": "Yandex"
+      "yandex": "Yandex",
+      "deepseek": "DeepSeek"
     },
     "fetchProviderNames": {
       "native": "原生抓取",
@@ -2842,16 +2843,20 @@
       "defaultModelDescription": "可选。留空时由外部 Agent 选择默认模型；对话中仍可临时切换。",
       "defaultModelPlaceholder": "使用运行时默认模型",
       "account": "账号",
-      "chatgptAccountDescription": "Memoh 会加密保存此 Agent 的 ChatGPT 凭据，并仅在运行时提供给 Codex。",
-      "chatgptAccountConnectedDescription": "此 Agent 的 ChatGPT 凭据已加密保存。",
+      "chatgptAccountDescription": "Codex 在此 Agent 的工作区里登录 ChatGPT，并自己保存登录状态。",
+      "chatgptAccountConnectedDescription": "Codex 已在此 Agent 的工作区里登录 ChatGPT。",
+      "signedInAs": "已登录：{account}",
+      "checkingSignIn": "正在检查登录状态…",
+      "enableToSignIn": "请先启用此 Agent，再检查或连接账号。",
+      "signInCheckFailed": "无法检查登录状态。",
       "reconnect": "重新连接",
       "codexDeviceHint": "打开验证页面并输入这个一次性代码。只在页面显示的 OpenAI 验证地址输入此代码。Memoh 会自动完成授权。",
       "codexLoginSuccess": "Codex 已连接 ChatGPT 账号",
       "codexLoginFailed": "Codex 账号授权失败，请重试",
       "authGrokAccountDescription": "使用 Grok 账号登录 Grok Build。",
       "grokAccount": "Grok 账号",
-      "grokAccountDescription": "Memoh 会加密保存此 Agent 的 Grok 凭据，并仅在运行时提供给 Grok Build。",
-      "grokAccountConnectedDescription": "此 Agent 的 Grok 凭据已加密保存。",
+      "grokAccountDescription": "Grok 在此 Agent 的工作区里登录，并自己保存登录状态。",
+      "grokAccountConnectedDescription": "Grok 已在此 Agent 的工作区里登录。",
       "grokDeviceHint": "打开验证页面并确认这个一次性代码。只在页面显示的 accounts.x.ai 地址上确认。Memoh 会自动完成授权。",
       "grokLoginSuccess": "Grok Build 已连接 Grok 账号",
       "grokLoginFailed": "Grok 账号登录失败，请重试",
@@ -3392,14 +3397,9 @@
       "desktopEnabledDescription": "为这个 Bot 提供一块可以看到、可以操作的屏幕，用于浏览网页和使用桌面应用。你可以实时观看，并随时接管。",
       "toolApproval": "工具调用审核",
       "toolApprovalDescription": "拦截并人工审核 read、write、exec 三类操作。你可以配置免审核的白名单路径或命令。",
-      "acpSetupMode": "配置方式",
       "acpLaunchSection": "启动配置",
       "acpCommand": "命令入口",
       "acpArguments": "启动参数",
-      "acpSetupApiKey": "API Key",
-      "acpSetupOAuth": "OAuth",
-      "acpSetupSelf": "自行配置",
-      "acpSelfModeHint": "该模式直接使用工作区运行环境里你已配置好的 Agent（例如已登录的凭据）。",
       "acpStatusNeedsConfig": "需要配置",
       "acpStatusOff": "已关闭",
       "acpEmptyTitle": "暂无可用 Agent",

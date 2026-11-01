@@ -42,9 +42,7 @@ func ToFrag(record HistoryRecord) contextfrag.ContextFrag {
 		Collector:  provenance.Collector,
 		Index:      provenance.Index,
 	})
-	frag = contextfrag.WithContextRef(frag, record.Ref)
-	frag.Coverage = record.Coverage
-	return frag
+	return contextfrag.WithContextRef(frag, record.Ref)
 }
 
 func ToModelMessages(records []HistoryRecord) []turn.ModelMessage {
