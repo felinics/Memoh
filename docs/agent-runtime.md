@@ -487,10 +487,28 @@ A provider call is retried when the SDK classifies its `*sdk.APIError` as
 `rate_limited` or `server_error`, when the stream was cut off
 (`sdk.ErrStreamIncomplete`, `io.ErrUnexpectedEOF`, or a stream that closed
 before its finish-step part), or when the chain holds a `net.Error`.
-Cancellation and expired deadlines are never retried, and every other `Kind` is
-final. Error text is never read. A `Retry-After` or `retry-after-ms` header on
+Cancellation and expired deadlines are never retried. Other failures do not
+enter this transient retry policy. A `Retry-After` or `retry-after-ms` header on
 the provider's answer sets the wait when it is at most one minute; otherwise the
 backoff does.
+
+An explicit provider context-window rejection is not a transient failure. The
+runtime recognizes it from token-window error codes and narrowly defined
+provider compatibility messages on `sdk.APIError`, including stream errors; a
+generic 400, request-byte limit, output cap or rate limit is not one. A
+rejection that reports the counted input and the limit says how far over the
+request was. Where the window is shared with the completion, the input's limit
+is the window less the completion the request asked for; a count that mixes
+input and completion without splitting them is not read as the input's.
+
+A summary request the provider rejects this way is retried with a smaller
+input, at most three times per pass. Each rejection tightens the input budget
+of that exact fork: when the provider reports its counts, by the limit over
+the counted input, less 5% for tokenizer uncertainty, otherwise by a quarter.
+The engine replans at complete tool groups, reduces retained content and uses
+its existing multi-pass/group-read rules. The run's output settings and
+original history remain intact. An unchanged request is never sent again as
+an overflow recovery.
 
 A retried attempt is recorded once, as a WARN event for `agent.model_call`, and
 the stream reports it as a `retry` event carrying the attempt counters, the wait
