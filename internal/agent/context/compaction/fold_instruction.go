@@ -101,30 +101,48 @@ func writeBlock(sb *strings.Builder, tag string, lines []string) {
 
 // foldedResultRefs names each tool result the pass folds, in order, with the
 // ref get_messages reads it back by: its row and its part in the message the
-// row replays as, which is the message the request carries.
+// row replays as. get_messages replays the row as stored, so a ref holds only
+// for a message that is its row: not a result the read path rendered from the
+// row of its call (a closure, or a decision's outcome), which holds no result,
+// nor a part of a row the read path split across messages, whose parts no
+// longer sit where the row has them.
 func foldedResultRefs(ev Event, p *foldPlan) []string {
-	var refs []string
-	for i := range p.end {
-		if p.keep[i] {
-			continue
-		}
-		row := ""
-		for _, source := range ev.Sources[i].Sources {
-			if source.Kind == "history" {
-				row = source.ID
-				break
-			}
-		}
+	rendered, called := map[string]int{}, map[string]string{}
+	for i, message := range ev.Request.Messages {
+		row := historyRow(ev.Sources[i])
 		if row == "" {
 			continue
 		}
+		rendered[row]++
+		for _, content := range message.Content {
+			if call, ok := content.(sdk.ToolCallPart); ok {
+				called[call.ToolCallID] = row
+			}
+		}
+	}
+	var refs []string
+	for i := range p.end {
+		row := historyRow(ev.Sources[i])
+		if p.keep[i] || row == "" || rendered[row] > 1 {
+			continue
+		}
 		for part, content := range ev.Request.Messages[i].Content {
-			if result, ok := content.(sdk.ToolResultPart); ok {
+			if result, ok := content.(sdk.ToolResultPart); ok && called[result.ToolCallID] != row {
 				refs = append(refs, result.ToolName+" "+result.ToolCallID+" ref="+row+":"+strconv.Itoa(part))
 			}
 		}
 	}
 	return refs
+}
+
+// historyRow is the row a message renders, or "" for one that renders none.
+func historyRow(source Source) string {
+	for _, s := range source.Sources {
+		if s.Kind == "history" {
+			return s.ID
+		}
+	}
+	return ""
 }
 
 // messageText is the text a message shows, its parts joined.

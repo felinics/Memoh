@@ -677,6 +677,35 @@ func TestFoldFoldsALatestStepLargerThanTheBudget(t *testing.T) {
 	}
 }
 
+// A folded result is cited by the ref get_messages reads it back by only
+// when its message is its row as stored: a closure the read path rendered
+// from its call's row and the parts of a tool row the read path split across
+// messages are folded without one.
+func TestFoldedResultRefsCiteOnlyRowsAsStored(t *testing.T) {
+	t.Parallel()
+	s := newFoldSession(t)
+	callRow, resultRow, closedRow, splitCallRow, splitRow := s.row(), s.row(), s.row(), s.row(), s.row()
+	twoCalls := sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
+		sdk.ToolCallPart{ToolCallID: "call_3", ToolName: "read"}, sdk.ToolCallPart{ToolCallID: "call_4", ToolName: "read"},
+	}}
+	ev := Event{
+		Request: sdk.Request{Messages: []sdk.Message{
+			callMessage("call_1"), resultMessage("call_1", "stored"),
+			callMessage("call_2"), resultMessage("call_2", "interrupted"),
+			twoCalls, resultMessage("call_3", "moved"), resultMessage("call_4", "left"),
+		}},
+		Sources: []Source{
+			historySource(callRow), historySource(resultRow),
+			historySource(closedRow), historySource(closedRow),
+			historySource(splitCallRow), historySource(splitRow), historySource(splitRow),
+		},
+	}
+	refs := foldedResultRefs(ev, &foldPlan{end: len(ev.Request.Messages), keep: map[int]bool{}})
+	if want := []string{"read call_1 ref=" + resultRow.ID + ":0"}; !slices.Equal(refs, want) {
+		t.Fatalf("refs = %v, want %v", refs, want)
+	}
+}
+
 // Anchors and call groups share one verbatim budget, anchors first: an input
 // that takes nearly all of it stays where it is, and the latest step, small
 // as it is, folds with the earlier work.

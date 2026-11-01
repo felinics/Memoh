@@ -88,7 +88,9 @@ Each pass forks that request up to the newest messages it keeps and asks the
 run's own model for the summary that replaces what folds there. The
 instruction quotes the input the next call answers, and asks the summary to
 end with where the work stands; the tool results it folds are listed by the
-ref `get_messages` reads them back by. The fork keeps the run's system
+ref `get_messages` reads them back by, which holds only for a message that is
+its row as stored: a result the read path rendered from its call's row, or a
+part of a row it split across messages, is folded without one. The fork keeps the run's system
 prompt, tools, cache key, reasoning and output settings and ends with one
 compaction instruction, so the summarizer reads what it replaces in place and
 the fork shares the run's prompt cache. It asks for the output the run's
