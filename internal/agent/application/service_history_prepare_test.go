@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
@@ -21,9 +20,9 @@ type expiringHistoryMessageService struct {
 
 var errTestBudgetExpired = errors.New("test execution budget expired")
 
-func (s *expiringHistoryMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64, bool) ([]messagepkg.Message, error) {
+func (s *expiringHistoryMessageService) ListHistoryWithinBytes(context.Context, string, messagepkg.HistoryWindow) (messagepkg.HistoryLoad, error) {
 	s.expire(errTestBudgetExpired)
-	return append([]messagepkg.Message(nil), s.rows...), nil
+	return messagepkg.HistoryLoad{Messages: append([]messagepkg.Message(nil), s.rows...)}, nil
 }
 
 func TestPrepareHistoryContextStopsWhenTheRequestEnds(t *testing.T) {
@@ -32,9 +31,9 @@ func TestPrepareHistoryContextStopsWhenTheRequestEnds(t *testing.T) {
 	ctx, expire := context.WithCancelCause(t.Context())
 	defer expire(nil)
 	messages := &expiringHistoryMessageService{recordingMessageService: &recordingMessageService{}, rows: []messagepkg.Message{persistedHistoryMessage(t, "row-1", "user", "hello")}, expire: expire}
-	svc := &Service{messageService: messages}
+	svc := &Service{messageService: messages, checkpoints: emptyHistoryCheckpoints()}
 
-	_, err := svc.prepareHistoryContext(ctx, ChatRequest{BotID: "bot-1", ThreadID: "session-1"}, historyfrag.ScopeFallback{}, 100000)
+	_, err := svc.prepareHistoryContext(ctx, ChatRequest{BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID}, historyfrag.ScopeFallback{}, 100000)
 	if !errors.Is(err, errTestBudgetExpired) || !strings.HasPrefix(err.Error(), "decode history rows: ") {
 		t.Fatalf("error = %v, want the request's cause named after the step it interrupted", err)
 	}

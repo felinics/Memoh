@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,13 +14,15 @@ import (
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 )
 
-func TestContextProvenanceKeepsStoredVersionThroughReasoningProjection(t *testing.T) {
+func TestContextProvenanceKeepsTheStoredRowThroughReasoningProjection(t *testing.T) {
 	raw, err := historyfrag.MarshalStoredSDKMessage(sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.ReasoningPart{Text: "unfinished reasoning"}}})
 	if err != nil {
 		t.Fatal(err)
@@ -30,21 +33,8 @@ func TestContextProvenanceKeepsStoredVersionThroughReasoningProjection(t *testin
 	}
 	records := projectInterruptedHistoryReasoning([]historyfrag.HistoryRecord{record})
 	got := contextProvenance([]ModelMessage{records[0].ModelMessage}, modelMessagesToSDKMessages([]ModelMessage{records[0].ModelMessage}), records, nil)
-	if len(got) != 1 || got[0].Sources[0].ContentHash != historyfrag.MessageContentHash(record.ModelMessage) || records[0].ModelMessage.TextContent() == record.ModelMessage.TextContent() {
+	if len(got) != 1 || got[0].Sources[0] != (turn.ContextMessageSource{Kind: "history", ID: "checkpoint"}) || records[0].ModelMessage.TextContent() == record.ModelMessage.TextContent() {
 		t.Fatalf("projected checkpoint lost stored identity: %+v", got)
-	}
-}
-
-func TestBudgetRecoveryRetainsContinuationAnchors(t *testing.T) {
-	records := []historyfrag.HistoryRecord{
-		loadedRecord("root", ModelMessage{Role: "user", Content: turn.NewTextContent("root request")}),
-		loadedRecord("steer", ModelMessage{Role: "user", Content: turn.NewTextContent("later steer")}),
-	}
-	messages := []ModelMessage{records[0].ModelMessage, records[1].ModelMessage}
-	req := ChatRequest{PersistedUserMessageID: "steer", inputInHistory: true, continuationAnchors: []turn.ContextMessageSource{{Kind: "history", ID: "root"}, {Kind: "history", ID: "steer"}}}
-	got, err := (chatHistoryLayout{historyCount: 2}).replaceHistory(t.Context(), native.RunConfig{Messages: modelMessagesToSDKMessages(messages)}, req, messages, records)
-	if err != nil || len(got.ContextProvenance) != 2 || !got.ContextProvenance[0].Anchor || !got.ContextProvenance[1].Anchor {
-		t.Fatalf("continued inputs lost after recovery: %+v err=%v", got.ContextProvenance, err)
 	}
 }
 
@@ -58,8 +48,100 @@ func TestContextProvenanceSurvivesToolResultNormalization(t *testing.T) {
 	records := []historyfrag.HistoryRecord{loadedRecord("call-row", call), loadedRecord("result-row", result)}
 	normalized := normalizeContext([]ModelMessage{records[0].ModelMessage, records[1].ModelMessage})
 	got := contextProvenance(normalized.models(), normalized.sent(), records, nil)
-	if len(got) != 2 || len(got[1].Sources) != 1 || got[1].Sources[0].ID != "result-row" || got[1].Sources[0].ContentHash == "" {
+	if len(got) != 2 || len(got[1].Sources) != 1 || got[1].Sources[0].ID != "result-row" {
 		t.Fatalf("normalized tool exchange lost its result source: %+v", got)
+	}
+}
+
+// A deferred call whose run ended before its answer has no result row, so
+// the read path closes it. The closure renders from the call's row: a fold
+// that covers the call takes the closure with it.
+func TestContextProvenanceNamesTheCallRowForItsClosure(t *testing.T) {
+	t.Parallel()
+
+	stored := func(id, role string, message sdk.Message) historyfrag.HistoryRecord {
+		raw, err := historyfrag.MarshalStoredSDKMessage(message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err := historyfrag.FromDBMessage(messagepkg.Message{ID: id, Role: role, Content: raw}, historyfrag.ScopeFallback{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return record
+	}
+	records := []historyfrag.HistoryRecord{
+		stored("call-row", "assistant", sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.ToolCallPart{
+			ToolCallID: "ask-1", ToolName: "ask_user", Input: toolexec.ArgumentsFromValue(map[string]any{}),
+		}}}),
+		stored("later-row", "user", sdk.UserMessage("later question")),
+	}
+	normalized := normalizeContext([]ModelMessage{records[0].ModelMessage, records[1].ModelMessage})
+	messages := normalized.models()
+	got := contextProvenance(messages, normalized.sent(), records, nil)
+	call := got[0].Sources
+	if len(messages) != 3 || len(got) != 3 || got[1].Message.Role != sdk.MessageRoleTool || !reflect.DeepEqual(got[1].Sources, call) ||
+		call[0].ID != "call-row" || got[1].Anchor || got[2].Sources[0].ID != "later-row" {
+		t.Fatalf("closure provenance = %+v, want the closure named by its call row", got)
+	}
+}
+
+// A decision whose run ended keeps its outcome on the call and has no result
+// row, so the read path renders the result from the decision. That result
+// renders from the call's row as a closure does, and a result moved from its
+// own row behind the call keeps that row: a fold takes each with what it
+// renders from.
+func TestContextProvenanceKeepsTheSourceOfAMovedDecisionResult(t *testing.T) {
+	t.Parallel()
+
+	stored := func(id, role string, message sdk.Message) historyfrag.HistoryRecord {
+		raw, err := historyfrag.MarshalStoredSDKMessage(message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err := historyfrag.FromDBMessage(messagepkg.Message{ID: id, Role: role, Content: raw}, historyfrag.ScopeFallback{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return record
+	}
+	decided := func(id string) sdk.MessagePart {
+		return sdk.ToolCallPart{
+			ToolCallID: id, ToolName: "ask_user", Input: toolexec.ArgumentsFromValue(map[string]any{}),
+			ProviderMetadata: partmeta.Set(nil, partmeta.KeyUserInput, map[string]any{"status": "canceled"}),
+		}
+	}
+	records := []historyfrag.HistoryRecord{
+		stored("call-row", "assistant", sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{decided("ask-1"), decided("ask-2")}}),
+		stored("narration-row", "assistant", sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
+			sdk.TextPart{Text: "flushed late"},
+			sdk.ToolCallPart{ToolCallID: "other", ToolName: "exec", Input: toolexec.ArgumentsFromValue(map[string]any{})},
+		}}),
+		stored("result-row", "tool", sdk.ToolMessage(
+			sdk.ToolResultPart{ToolCallID: "ask-2", ToolName: "ask_user", Result: toolexec.OutputFromValue(map[string]any{"answer": "b"})},
+			sdk.ToolResultPart{ToolCallID: "other", ToolName: "exec", Result: toolexec.OutputFromValue("kept")},
+		)),
+	}
+	input := make([]ModelMessage, 0, len(records))
+	for _, record := range records {
+		input = append(input, record.ModelMessage)
+	}
+	normalized := normalizeContext(input)
+	messages := normalized.models()
+	got := contextProvenance(messages, normalized.sent(), records, nil)
+	if len(got) != len(messages) {
+		t.Fatalf("provenance = %+v, want every message named", got)
+	}
+	sources := map[string]string{}
+	for _, p := range got {
+		for _, part := range p.Message.Content {
+			if result, ok := part.(sdk.ToolResultPart); ok {
+				sources[result.ToolCallID] = p.Sources[0].ID
+			}
+		}
+	}
+	if sources["ask-1"] != "call-row" || sources["ask-2"] != "result-row" || sources["other"] != "result-row" {
+		t.Fatalf("result sources = %v, want the decision's result from its call row and the moved result from its own row", sources)
 	}
 }
 
@@ -95,7 +177,7 @@ func TestContextProvenanceNamesWhatEachMessageRenders(t *testing.T) {
 	}
 	req := ChatRequest{PersistedUserMessageID: "request", inputInHistory: true}
 
-	got := contextProvenance(messages, modelMessagesToSDKMessages(messages), records, compactionProtectedSources(req))
+	got := contextProvenance(messages, modelMessagesToSDKMessages(messages), records, compactionInputs(req))
 	want := []struct {
 		kind, id string
 		anchor   bool
@@ -119,32 +201,45 @@ func TestContextProvenanceNamesWhatEachMessageRenders(t *testing.T) {
 		}
 	}
 	if !reflect.DeepEqual(stepProvenance([]messagepkg.Message{
-		{ID: "steer", Role: "user"}, {ID: "feedback", Role: "user", Metadata: map[string]any{messagepkg.MessageSourceMetadataKey: messagepkg.MessageSourceInternalFeedback}}, {ID: "call", Role: "assistant", Content: []byte(`{"role":"assistant","content":"<call>"}`)},
+		{ID: "steer", Role: "user"}, {ID: "feedback", Role: "user", Metadata: map[string]any{messagepkg.MessageSourceMetadataKey: messagepkg.MessageSourceInternalFeedback}}, {ID: "call", Role: "assistant"},
 	}, []string{"steer"}), []native.MessageProvenance{
 		{Sources: []turn.ContextMessageSource{{Kind: "history", ID: "steer"}}, Anchor: true},
 		{Sources: []turn.ContextMessageSource{{Kind: "history", ID: "feedback"}}},
 		{Sources: []turn.ContextMessageSource{{Kind: "history", ID: "call"}}},
 	}) {
-		t.Fatal("a step's steer is kept in place, its runtime feedback and output are not, and none pins a version it never read back")
+		t.Fatal("a step's steer is kept in place; its runtime feedback and output are not")
 	}
 }
 
 type switchRunner struct {
-	cfg    compaction.TriggerConfig
+	event  compaction.Event
 	passes []compaction.Pass
 	err    error
 }
 
-func (r *switchRunner) Compact(_ context.Context, cfg compaction.TriggerConfig) ([]compaction.Pass, error) {
-	r.cfg = cfg
-	return r.passes, r.err
+func (*switchRunner) Compact(context.Context, compaction.TriggerConfig) ([]compaction.Pass, error) {
+	return nil, errors.New("an armed run folds its request")
 }
 
-// The event an armed run asks for reads the sources its request renders, not
-// a window of the session, keeps the run's input and steers in place and its
-// latest step outside the history budget, and splices every pass it commits
-// into the request, which must then fit. A failed event names its reason.
-func TestSwitchContextFoldsTheRequestView(t *testing.T) {
+// Fold commits its passes the way the engine does: each is spliced into the
+// caller's request as it commits.
+func (r *switchRunner) Fold(_ context.Context, ev compaction.Event) ([]compaction.Pass, error) {
+	r.event = ev
+	if r.err != nil {
+		return nil, r.err
+	}
+	for _, pass := range r.passes {
+		ev.Request, ev.Sources = ev.Apply(pass)
+	}
+	return r.passes, nil
+}
+
+// The event an armed run asks for forks the request the run holds: its
+// sources as the rows hold them, the run's input and steers anchors, and the
+// run's own model as summarizer. Every
+// pass it commits is spliced into the request, which must then fit. A failed
+// event names its reason.
+func TestSwitchContextFoldsTheRunsRequest(t *testing.T) {
 	t.Parallel()
 
 	rows := func(ids ...string) []turn.ContextMessageSource {
@@ -155,18 +250,23 @@ func TestSwitchContextFoldsTheRequestView(t *testing.T) {
 		return sources
 	}
 	passes := []compaction.Pass{
-		{ArtifactID: "a1", Summary: "first", Covered: rows("old-user")},
-		{ArtifactID: "a2", Summary: "second", Covered: rows("old-user", "call"), Absorbed: []string{"a1"}},
+		{SummaryID: "a1", Summary: "first", Order: []int{-1, 1, 2, 3, 4, 5}, More: true},
+		{SummaryID: "a2", Summary: "second", Order: []int{1, -1, 3, 4, 5}},
+	}
+	provenance := []*native.MessageProvenance{
+		{Sources: rows("old-user")}, {Sources: rows("request"), Anchor: true}, {Sources: rows("call")}, nil, {Sources: rows("steer")}, {Sources: rows("latest")},
 	}
 	for _, tc := range []struct {
 		name   string
 		saved  int // tokens each spliced pass takes off the request
+		none   bool
 		err    error
 		want   error
 		reason string
 	}{
 		{name: "fits", saved: 500},
 		{name: "still over", saved: 100, reason: "still_over", want: contextfrag.ErrBudgetUnsatisfied},
+		{name: "nothing folds", none: true, reason: "protected_overflow", want: contextfrag.ErrProtectedContextOverflow},
 		{name: "summarizer down", err: &compaction.EventError{Reason: compaction.ReasonSummarizerFailed, Err: errors.New("503")}, reason: "summarizer_failed", want: contextfrag.ErrBudgetUnsatisfied},
 		{name: "protected overflow", err: &compaction.EventError{Reason: compaction.ReasonProtectedOverflow, Err: errors.New("tail")}, reason: "protected_overflow", want: contextfrag.ErrProtectedContextOverflow},
 	} {
@@ -174,32 +274,45 @@ func TestSwitchContextFoldsTheRequestView(t *testing.T) {
 			t.Parallel()
 			service, _ := newControllerPolicyService(t)
 			runner := &switchRunner{passes: passes, err: tc.err}
-			if tc.err != nil {
+			if tc.none {
 				runner.passes = nil
 			}
 			service.compactionService = runner
-			committer := &agentStepCommitter{inputSourceIDs: []string{"input"}}
+			committer := &agentStepCommitter{inputSourceIDs: []string{"steer"}}
 			var folds []native.ContextFold
+			request := sdk.Request{Model: "run-model", Messages: make([]sdk.Message, len(provenance))}
+			summarized := false
 			sw := native.ContextSwitch{
-				View: rows("old-user", "request", "call", "steer", "latest"), Anchors: rows("request", "steer"), Tail: rows("latest"),
-				HistoryBudgetTokens: 900, UsageTokens: 3000, AllowanceTokens: 2000,
-				Fold: func(fold native.ContextFold) int {
+				Request: request, Provenance: provenance,
+				UsageTokens: 3000, AllowanceTokens: 2000, WindowTokens: 4000, OutputTokens: 1000,
+				Summarize: func(context.Context, sdk.Request) (sdk.ModelResult, error) {
+					summarized = true
+					return sdk.ModelResult{}, nil
+				},
+				Fold: func(fold native.ContextFold) native.ContextSplice {
 					folds = append(folds, fold)
-					return 3000 - tc.saved*len(folds)
+					return native.ContextSplice{Request: request, Provenance: provenance, Tokens: 3000 - tc.saved*len(folds)}
 				},
 			}
 			req := ChatRequest{BotID: syncCompactBotID, ChatID: syncCompactBotID, ThreadID: syncCompactThreadID, RunID: "run"}
 
-			detail, err := service.switchContext(req, committer, "")(t.Context(), sw)
-			cfg := runner.cfg
-			tail := turn.ContextMessageSource{Kind: "history", ID: "latest", Current: true}
-			if !reflect.DeepEqual(cfg.View, sw.View) || !reflect.DeepEqual(cfg.Anchors, rows("request", "steer", "input")) || !cfg.CandidatesFrom.IsZero() ||
-				!reflect.DeepEqual(cfg.ProtectedSources, []turn.ContextMessageSource{tail}) || cfg.HistoryBudgetTokens != 900 {
-				t.Fatalf("event config view=%v anchors=%v from=%v protected=%v budget=%d", cfg.View, cfg.Anchors, cfg.CandidatesFrom, cfg.ProtectedSources, cfg.HistoryBudgetTokens)
+			detail, err := service.switchContext(req, committer, "model-row")(t.Context(), sw)
+			ev := runner.event
+			anchors := []bool{false, true, false, false, true, false}
+			for i, source := range ev.Sources {
+				if source.Anchor != anchors[i] || (provenance[i] == nil) != (len(source.Sources) == 0) {
+					t.Fatalf("source %d = %+v, want anchor=%v and runtime context only where the run rebuilds it", i, source, anchors[i])
+				}
+			}
+			if ev.Window != 4000 || ev.MaxOutputTokens != 1000 || !ev.FixedOutput || ev.Allowance != 2000 || ev.ModelRecordID != "model-row" || ev.Request.Model != "run-model" {
+				t.Fatalf("event = %+v, want the run's request, window, fixed output and allowance", ev)
+			}
+			if _, _ = ev.Summarizer(t.Context(), sdk.Request{}); !summarized {
+				t.Fatal("the event does not ask the run's own model")
 			}
 			if tc.want == nil {
-				if err != nil || len(folds) != 2 || folds[1].Artifact != "a2" || !reflect.DeepEqual(folds[1].Summary, compaction.SummaryMessage("second")) ||
-					!reflect.DeepEqual(folds[1].Absorbed, []string{"a1"}) || detail != "trigger=in_run passes=2 request_tokens=3000->2000 allowance=2000" {
+				if err != nil || len(folds) != 2 || folds[1].SummaryID != "a2" || !reflect.DeepEqual(folds[1].Summary, compaction.SummaryMessage("second")) ||
+					!slices.Equal(folds[1].Order, passes[1].Order) || detail != "trigger=in_run passes=2 request_tokens=3000->2000 allowance=2000" {
 					t.Fatalf("err=%v folds=%+v detail=%q, want both passes spliced into a request that fits", err, folds, detail)
 				}
 				return
@@ -212,31 +325,113 @@ func TestSwitchContextFoldsTheRequestView(t *testing.T) {
 }
 
 // A retry renders its input from the request it replaces, which its first
-// step hides; the event reads and keeps in place the copy that step wrote,
-// with the same content.
+// step hides; the event folds onto and keeps in place the copy that step
+// wrote, with the same content.
 func TestSwitchContextReadsARetriedRequestFromItsCopy(t *testing.T) {
 	t.Parallel()
 
 	service, _ := newControllerPolicyService(t)
-	runner := &switchRunner{passes: []compaction.Pass{{ArtifactID: "a1", Summary: "s"}}}
+	runner := &switchRunner{passes: []compaction.Pass{{SummaryID: "a1", Summary: "s"}}}
 	service.compactionService = runner
 	committer := &agentStepCommitter{inputSourceIDs: []string{"copy"}, retriedRequest: "request", requestCopy: "copy"}
-	request := turn.ContextMessageSource{Kind: "history", ID: "request", ContentHash: "h"}
+	request := turn.ContextMessageSource{Kind: "history", ID: "request"}
 	older := turn.ContextMessageSource{Kind: "history", ID: "older"}
+	provenance := []*native.MessageProvenance{{Sources: []turn.ContextMessageSource{older}}, {Sources: []turn.ContextMessageSource{request}, Anchor: true}, {Sources: []turn.ContextMessageSource{{Kind: "history", ID: "latest"}}}}
 	sw := native.ContextSwitch{
-		View: []turn.ContextMessageSource{older, request}, Anchors: []turn.ContextMessageSource{request},
-		Tail: []turn.ContextMessageSource{{Kind: "history", ID: "latest"}}, HistoryBudgetTokens: 900, UsageTokens: 3000, AllowanceTokens: 2000,
-		Fold: func(native.ContextFold) int { return 1000 },
+		Request: sdk.Request{Messages: make([]sdk.Message, 3)}, Provenance: provenance, UsageTokens: 3000, AllowanceTokens: 2000,
+		Fold: func(native.ContextFold) native.ContextSplice { return native.ContextSplice{Tokens: 1000} },
 	}
 	req := ChatRequest{BotID: syncCompactBotID, ChatID: syncCompactBotID, ThreadID: syncCompactThreadID, RunID: "run"}
 	if _, err := service.switchContext(req, committer, "")(t.Context(), sw); err != nil {
 		t.Fatal(err)
 	}
-	copied := turn.ContextMessageSource{Kind: "history", ID: "copy", ContentHash: "h"}
-	if !reflect.DeepEqual(runner.cfg.View, []turn.ContextMessageSource{older, copied}) ||
-		!reflect.DeepEqual(runner.cfg.Anchors, []turn.ContextMessageSource{copied, {Kind: "history", ID: "copy"}}) ||
-		!reflect.DeepEqual(sw.View, []turn.ContextMessageSource{older, request}) {
-		t.Fatalf("view=%v anchors=%v run view=%v, want the copy read and kept in place of the hidden request", runner.cfg.View, runner.cfg.Anchors, sw.View)
+	copied := turn.ContextMessageSource{Kind: "history", ID: "copy"}
+	sources := runner.event.Sources
+	if !reflect.DeepEqual(sources[0].Sources, []turn.ContextMessageSource{older}) || !reflect.DeepEqual(sources[1].Sources, []turn.ContextMessageSource{copied}) || !sources[1].Anchor ||
+		!reflect.DeepEqual(provenance[1].Sources, []turn.ContextMessageSource{request}) {
+		t.Fatalf("sources=%+v run provenance=%+v, want the copy folded and kept in place of the hidden request", sources, provenance[1])
+	}
+}
+
+// The run's query renders the row that holds its request: the event names
+// that row once the run's first step wrote it, so a fold reads the request
+// and keeps it in place before the summary it commits.
+func TestSwitchContextNamesTheRunsRequestByItsRow(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		inputs []string
+		want   turn.ContextMessageSource
+	}{
+		{name: "written", inputs: []string{"request-row", "steer-row"}, want: turn.ContextMessageSource{Kind: "history", ID: "request-row"}},
+		{name: "not written yet", want: requestSource},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			service, _ := newControllerPolicyService(t)
+			runner := &switchRunner{passes: []compaction.Pass{{SummaryID: "a1", Summary: "s"}}}
+			service.compactionService = runner
+			committer := &agentStepCommitter{inputSourceIDs: tc.inputs}
+			provenance := []*native.MessageProvenance{
+				{Sources: []turn.ContextMessageSource{{Kind: "history", ID: "older"}}},
+				{Sources: []turn.ContextMessageSource{requestSource}, Anchor: true},
+				{Sources: []turn.ContextMessageSource{{Kind: "history", ID: "latest"}}},
+			}
+			sw := native.ContextSwitch{
+				Request: sdk.Request{Messages: make([]sdk.Message, 3)}, Provenance: provenance, UsageTokens: 3000, AllowanceTokens: 2000,
+				Fold: func(native.ContextFold) native.ContextSplice { return native.ContextSplice{Tokens: 1000} },
+			}
+			req := ChatRequest{BotID: syncCompactBotID, ChatID: syncCompactBotID, ThreadID: syncCompactThreadID, RunID: "run"}
+			if _, err := service.switchContext(req, committer, "")(t.Context(), sw); err != nil {
+				t.Fatal(err)
+			}
+			if source := runner.event.Sources[1]; !source.Anchor || !reflect.DeepEqual(source.Sources, []turn.ContextMessageSource{tc.want}) {
+				t.Fatalf("request source = %+v, want %+v kept in place", source, tc.want)
+			}
+		})
+	}
+}
+
+// A Discuss run keeps the batch it answers while it leaves the summary room;
+// any other run keeps its input and steers within a cap. An edit or retry
+// that folds before its first step replaces the turn names that turn, so the
+// event moves the session to the checkpoint the replacement keeps first.
+func TestSwitchContextChoosesWhatAFoldKeeps(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		req      ChatRequest
+		started  bool
+		anchors  compaction.AnchorPolicy
+		replaced string
+	}{
+		{name: "chat", anchors: compaction.AnchorsCapped},
+		{name: "discuss", req: ChatRequest{SessionType: sessionpkg.TypeDiscuss}, anchors: compaction.AnchorsFirst},
+		{name: "retry before its first step", req: ChatRequest{TurnReplacement: &messagepkg.TurnReplacement{OldTurnID: "old-turn"}}, anchors: compaction.AnchorsCapped, replaced: "old-turn"},
+		{name: "retry after its first step", req: ChatRequest{TurnReplacement: &messagepkg.TurnReplacement{OldTurnID: "old-turn"}}, started: true, anchors: compaction.AnchorsCapped},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			service, _ := newControllerPolicyService(t)
+			runner := &switchRunner{passes: []compaction.Pass{{SummaryID: "a1", Summary: "s"}}}
+			service.compactionService = runner
+			req := tc.req
+			req.BotID, req.ChatID, req.ThreadID, req.RunID = syncCompactBotID, syncCompactBotID, syncCompactThreadID, "run"
+			committer := &agentStepCommitter{req: req, replacementStarted: tc.started}
+			sw := native.ContextSwitch{
+				Request: sdk.Request{Messages: make([]sdk.Message, 1)}, Provenance: []*native.MessageProvenance{{Sources: []turn.ContextMessageSource{{Kind: "history", ID: "row"}}}},
+				UsageTokens: 3000, AllowanceTokens: 2000,
+				Fold: func(native.ContextFold) native.ContextSplice { return native.ContextSplice{Tokens: 1000} },
+			}
+			if _, err := service.switchContext(req, committer, "")(t.Context(), sw); err != nil {
+				t.Fatal(err)
+			}
+			if ev := runner.event; ev.AnchorPolicy != tc.anchors || ev.ReplacedTurnID != tc.replaced {
+				t.Fatalf("anchors=%v replaced=%q, want %v and %q", ev.AnchorPolicy, ev.ReplacedTurnID, tc.anchors, tc.replaced)
+			}
+		})
 	}
 }
 

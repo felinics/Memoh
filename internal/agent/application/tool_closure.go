@@ -9,7 +9,7 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/toolexec"
-	turnpkg "github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 const syntheticToolClosureError = "tool execution interrupted before a response was recorded"
@@ -17,11 +17,23 @@ const syntheticToolClosureError = "tool execution interrupted before a response 
 type pendingToolCall struct {
 	ID       string
 	ToolName string
+	// Source is the stored message that made the call. The result that
+	// closes it renders from that message, so a fold that covers the call
+	// removes the closure with it.
+	Source *turn.ContextMessageSource
 }
 
 type projectedToolCallKey struct {
 	segment int
 	callID  string
+}
+
+// projectedToolResult is a decision's result and the stored message it
+// renders from: the tool message that carries it, or, for a result read
+// from the decision, the message that made the call.
+type projectedToolResult struct {
+	result sdk.ToolResultPart
+	source *turn.ContextMessageSource
 }
 
 // repairToolCallClosures closes every tool call left without a result and
@@ -59,7 +71,9 @@ func repairContextToolCalls(messages []contextMessage, reason string) []contextM
 			if !ok {
 				continue
 			}
-			repaired = append(repaired, newContextMessage(syntheticToolResultMessage(call.ID, call.ToolName, reason)))
+			closure := syntheticToolResultMessage(call.ID, call.ToolName, reason)
+			closure.ContextSource = call.Source
+			repaired = append(repaired, newContextMessage(closure))
 			delete(pending, callID)
 		}
 		pendingOrder = pendingOrder[:0]
@@ -84,6 +98,7 @@ func repairContextToolCalls(messages []contextMessage, reason string) []contextM
 				pending[callID] = pendingToolCall{
 					ID:       callID,
 					ToolName: strings.TrimSpace(call.ToolName),
+					Source:   msg.model.ContextSource,
 				}
 				pendingOrder = append(pendingOrder, callID)
 			}
@@ -199,21 +214,16 @@ func filterToolMessageToPendingCalls(msg contextMessage, pending map[string]pend
 	return &out
 }
 
-// projectedResult is the result a decision projection takes, and the stored
-// message it came from when it is the tool's real result.
-type projectedResult struct {
-	part   sdk.ToolResultPart
-	source *turnpkg.ContextMessageSource
-}
-
 // normalizeDecisionProjectionResults repairs the one ordering exception made
 // by External Agent decision persistence. The projection is stored while the turn is
 // waiting, before earlier narration is flushed; move its real result directly
 // behind the projection and drop duplicate legacy projection rows. IDs are
-// scoped to one user turn so adapter-local counters can safely restart.
+// scoped to one user turn so adapter-local counters can safely restart. A
+// moved result keeps the source it renders from, so a fold that covers it
+// removes it, and one read from the decision goes with its call.
 func normalizeDecisionProjectionResults(messages []contextMessage) []contextMessage {
 	projected := map[projectedToolCallKey]struct{}{}
-	results := map[projectedToolCallKey]projectedResult{}
+	results := map[projectedToolCallKey]projectedToolResult{}
 	segment := 0
 	for _, msg := range messages {
 		switch strings.ToLower(strings.TrimSpace(msg.model.Role)) {
@@ -224,7 +234,7 @@ func normalizeDecisionProjectionResults(messages []contextMessage) []contextMess
 					projected[key] = struct{}{}
 					if _, exists := results[key]; !exists {
 						if result, ok := resolvedDecisionResult(call); ok {
-							results[key] = projectedResult{part: result}
+							results[key] = projectedToolResult{result: result, source: msg.model.ContextSource}
 						}
 					}
 				}
@@ -233,7 +243,7 @@ func normalizeDecisionProjectionResults(messages []contextMessage) []contextMess
 			for _, result := range toolResultParts(msg.sent) {
 				key := projectedToolCallKey{segment, strings.TrimSpace(result.ToolCallID)}
 				if _, ok := projected[key]; ok {
-					results[key] = projectedResult{part: result, source: msg.model.ContextSource}
+					results[key] = projectedToolResult{result: result, source: msg.model.ContextSource}
 				}
 			}
 		default:
@@ -249,7 +259,7 @@ func normalizeDecisionProjectionResults(messages []contextMessage) []contextMess
 	segment = 0
 	for _, msg := range messages {
 		parts := make([]sdk.MessagePart, 0, len(msg.sent.Content))
-		var pulled []projectedResult
+		var pulled []projectedToolResult
 		switch strings.ToLower(strings.TrimSpace(msg.model.Role)) {
 		case "assistant":
 			for _, part := range msg.sent.Content {
@@ -289,31 +299,38 @@ func normalizeDecisionProjectionResults(messages []contextMessage) []contextMess
 		if normalized := contextMessageWithParts(msg, parts); normalized != nil {
 			out = append(out, *normalized)
 		}
-		if len(pulled) > 0 {
-			out = append(out, pulledResultMessages(pulled)...)
-		}
+		out = append(out, pulledToolResultMessages(pulled)...)
 	}
 	return out
 }
 
-// pulledResultMessages renders moved results as one tool message. It renders
-// the stored result it moved, so it keeps that result's source.
-func pulledResultMessages(pulled []projectedResult) []contextMessage {
-	parts := make([]sdk.ToolResultPart, 0, len(pulled))
-	var source *turnpkg.ContextMessageSource
-	for _, result := range pulled {
-		parts = append(parts, result.part)
-		if source == nil {
-			source = result.source
+// pulledToolResultMessages renders moved results in order, one tool message
+// for each run of results from the same source.
+func pulledToolResultMessages(pulled []projectedToolResult) []contextMessage {
+	var out []contextMessage
+	for start := 0; start < len(pulled); {
+		end := start + 1
+		for end < len(pulled) && sameContextSource(pulled[end].source, pulled[start].source) {
+			end++
 		}
-	}
-	converted := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(parts...)})
-	out := make([]contextMessage, 0, len(converted))
-	for _, message := range converted {
-		message.ContextSource = source
-		out = append(out, newContextMessage(message))
+		parts := make([]sdk.ToolResultPart, 0, end-start)
+		for _, p := range pulled[start:end] {
+			parts = append(parts, p.result)
+		}
+		for _, message := range sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(parts...)}) {
+			message.ContextSource = pulled[start].source
+			out = append(out, newContextMessage(message))
+		}
+		start = end
 	}
 	return out
+}
+
+func sameContextSource(a, b *turn.ContextMessageSource) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 func isDecisionProjection(call sdk.ToolCallPart) bool {

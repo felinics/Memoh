@@ -556,7 +556,9 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   title TEXT NOT NULL DEFAULT '',
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   next_turn_position BIGINT NOT NULL DEFAULT 1,
-  compaction_epoch BIGINT NOT NULL DEFAULT 0,
+  -- The session's active history checkpoint (bot_history_checkpoints); NULL
+  -- for a session whose whole history is context.
+  history_checkpoint_id UUID,
   runtime_fencing_token BIGINT NOT NULL DEFAULT 0 CHECK (runtime_fencing_token >= 0),
   runtime_reset_token UUID,
   runtime_reset_expires_at TIMESTAMPTZ,
@@ -622,7 +624,6 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'schedule', 'subagent')),
   runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent', 'codex', 'claude-code', 'grok-build')),
   model_id UUID REFERENCES models(id) ON DELETE SET NULL,
-  compact_id UUID,
   event_id UUID REFERENCES bot_session_events(id) ON DELETE SET NULL,
   display_text TEXT,
   turn_id UUID,
@@ -636,7 +637,6 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_bot_created ON bot_history_messages(bot_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_bot_history_messages_compact ON bot_history_messages(compact_id);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session
   ON bot_history_messages(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_bot_history_messages_session_role_created
@@ -686,7 +686,6 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
-  m.compact_id,
   m.session_mode,
   m.runtime_type,
   m.model_id,
@@ -994,23 +993,10 @@ CREATE TABLE IF NOT EXISTS bot_history_message_compacts (
   error_message TEXT NOT NULL DEFAULT '',
   usage JSONB,
   model_id UUID REFERENCES models(id) ON DELETE SET NULL,
-  artifact_version INTEGER NOT NULL DEFAULT 1,
-  coverage JSONB NOT NULL DEFAULT '[]'::jsonb,
-  anchor_start_ms BIGINT NOT NULL DEFAULT 0,
-  anchor_end_ms BIGINT NOT NULL DEFAULT 0,
-  artifact_level INTEGER NOT NULL DEFAULT 0,
-  parent_ids UUID[] NOT NULL DEFAULT '{}'::uuid[],
-  superseded_by UUID REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL,
-  superseded_at TIMESTAMPTZ,
-  compaction_epoch BIGINT NOT NULL DEFAULT 0,
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   completed_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_compacts_bot_session ON bot_history_message_compacts(bot_id, session_id, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_compacts_owner_epoch ON bot_history_message_compacts(bot_id, session_id, compaction_epoch, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_compacts_active_session ON bot_history_message_compacts(session_id, anchor_start_ms, started_at) WHERE status = 'ok' AND superseded_at IS NULL;
-
-ALTER TABLE bot_history_messages ADD CONSTRAINT fk_compact_id FOREIGN KEY (compact_id) REFERENCES bot_history_message_compacts(id) ON DELETE SET NULL;
 
 -- schedule_logs: structured execution records for scheduled tasks.
 CREATE TABLE IF NOT EXISTS schedule_logs (
@@ -1748,7 +1734,6 @@ SELECT
   m.content,
   m.metadata,
   m.usage,
-  m.compact_id,
   m.session_mode,
   m.runtime_type,
   m.model_id,
@@ -2289,6 +2274,172 @@ CREATE INDEX IF NOT EXISTS idx_bot_history_messages_run
     ON public.bot_history_messages (team_id, run_id)
     WHERE run_id IS NOT NULL;
 
+
+-- ---------------------------------------------------------------------------
+-- History checkpoints
+-- ---------------------------------------------------------------------------
+-- A checkpoint is a position in a session's turn order and what stands for
+-- the session's history up to it: ordered items, each a row kept by
+-- reference or a summary. A request's context is the items and every context
+-- row after the position. Each checkpoint builds on its parent; bot_sessions
+-- points at the active one.
+CREATE TABLE IF NOT EXISTS public.bot_history_checkpoints (
+    id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    team_id          UUID        NOT NULL DEFAULT public.memoh_current_team_id()
+                                 REFERENCES public.teams(id) ON DELETE RESTRICT,
+    session_id       UUID        NOT NULL,
+    parent_id        UUID,
+    turn_position    BIGINT      NOT NULL,
+    turn_message_seq BIGINT      NOT NULL,
+    items            JSONB       NOT NULL DEFAULT '[]'::jsonb,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    CONSTRAINT memoh_team_key_c3970c8700e1 UNIQUE (team_id, id),
+    CONSTRAINT bot_history_checkpoints_position_check CHECK (turn_position >= 0 AND turn_message_seq >= 0),
+    CONSTRAINT bot_history_checkpoints_items_check CHECK (pg_catalog.jsonb_typeof(items) = 'array'),
+    CONSTRAINT bot_history_checkpoints_summary_check CHECK (pg_catalog.jsonb_path_exists(items, '$[*].summary')),
+    CONSTRAINT bot_history_checkpoints_session_id_fkey
+        FOREIGN KEY (team_id, session_id)
+        REFERENCES public.bot_sessions(team_id, id) ON DELETE CASCADE,
+    CONSTRAINT bot_history_checkpoints_parent_id_fkey
+        FOREIGN KEY (team_id, parent_id)
+        REFERENCES public.bot_history_checkpoints(team_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_history_checkpoints_session
+    ON public.bot_history_checkpoints (team_id, session_id);
+CREATE INDEX IF NOT EXISTS idx_bot_history_checkpoints_parent
+    ON public.bot_history_checkpoints (team_id, parent_id)
+    WHERE parent_id IS NOT NULL;
+
+ALTER TABLE public.bot_history_checkpoints ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_history_checkpoints FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS bot_history_checkpoints_team_select ON public.bot_history_checkpoints;
+CREATE POLICY bot_history_checkpoints_team_select ON public.bot_history_checkpoints
+    FOR SELECT USING (team_id = public.memoh_current_team_id());
+DROP POLICY IF EXISTS bot_history_checkpoints_team_insert ON public.bot_history_checkpoints;
+CREATE POLICY bot_history_checkpoints_team_insert ON public.bot_history_checkpoints
+    FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
+DROP POLICY IF EXISTS bot_history_checkpoints_team_update ON public.bot_history_checkpoints;
+CREATE POLICY bot_history_checkpoints_team_update ON public.bot_history_checkpoints
+    FOR UPDATE
+    USING (team_id = public.memoh_current_team_id())
+    WITH CHECK (team_id = public.memoh_current_team_id());
+DROP POLICY IF EXISTS bot_history_checkpoints_team_delete ON public.bot_history_checkpoints;
+CREATE POLICY bot_history_checkpoints_team_delete ON public.bot_history_checkpoints
+    FOR DELETE USING (team_id = public.memoh_current_team_id());
+
+ALTER TABLE public.bot_sessions
+  ADD CONSTRAINT bot_sessions_history_checkpoint_id_fkey
+  FOREIGN KEY (team_id, history_checkpoint_id)
+  REFERENCES public.bot_history_checkpoints(team_id, id)
+  ON DELETE SET NULL (history_checkpoint_id);
+
+-- memoh_history_checkpoint_kept is the newest checkpoint on a session's active
+-- chain that still holds once rows from a position on were removed (deleted,
+-- hidden or replaced). Its summary may have read any row up to its position,
+-- so a checkpoint holds only when it is before the position. NULL when no
+-- checkpoint holds.
+CREATE OR REPLACE FUNCTION public.memoh_history_checkpoint_kept(
+  p_session_id uuid,
+  p_turn_position bigint,
+  p_turn_message_seq bigint
+)
+RETURNS uuid
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = pg_catalog, pg_temp
+AS $$
+  WITH RECURSIVE chain AS (
+    SELECT checkpoint.id, checkpoint.parent_id, checkpoint.turn_position, checkpoint.turn_message_seq,
+      0 AS depth
+    FROM public.bot_sessions session
+    JOIN public.bot_history_checkpoints checkpoint
+      ON checkpoint.team_id = session.team_id
+     AND checkpoint.id = session.history_checkpoint_id
+    WHERE session.team_id = public.memoh_current_team_id()
+      AND session.id = p_session_id
+    UNION ALL
+    SELECT parent.id, parent.parent_id, parent.turn_position, parent.turn_message_seq,
+      chain.depth + 1
+    FROM chain
+    JOIN public.bot_history_checkpoints parent
+      ON parent.team_id = public.memoh_current_team_id()
+     AND parent.id = chain.parent_id
+  )
+  SELECT chain.id
+  FROM chain
+  WHERE (chain.turn_position, chain.turn_message_seq) < (p_turn_position, p_turn_message_seq)
+  ORDER BY chain.depth
+  LIMIT 1
+$$;
+
+-- memoh_rewind_history_checkpoint makes the newest checkpoint that still
+-- holds once rows of the session from a position on were removed, as
+-- memoh_history_checkpoint_kept reads the removal, the session's active one,
+-- and reports whether that moved it. The checkpoints it moves back past
+-- account for a removed row, so none holds again, and nothing else names
+-- them: a fork copies its own. It deletes them. The caller holds the session
+-- row lock.
+CREATE OR REPLACE FUNCTION public.memoh_rewind_history_checkpoint(
+  p_session_id uuid,
+  p_turn_position bigint,
+  p_turn_message_seq bigint
+)
+RETURNS boolean
+LANGUAGE plpgsql
+VOLATILE
+SECURITY INVOKER
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+  active uuid;
+  kept uuid;
+BEGIN
+  SELECT session.history_checkpoint_id
+    INTO active
+  FROM public.bot_sessions session
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = p_session_id;
+  IF active IS NULL THEN
+    RETURN false;
+  END IF;
+  kept := public.memoh_history_checkpoint_kept(p_session_id, p_turn_position, p_turn_message_seq);
+  IF kept IS NOT DISTINCT FROM active THEN
+    RETURN false;
+  END IF;
+  UPDATE public.bot_sessions session
+  SET history_checkpoint_id = kept
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = p_session_id;
+  -- The first checkpoint after the kept one on the chain; deleting it
+  -- deletes the rest through parent_id.
+  DELETE FROM public.bot_history_checkpoints checkpoint
+  WHERE checkpoint.team_id = public.memoh_current_team_id()
+    AND checkpoint.id = (
+      WITH RECURSIVE chain AS (
+        SELECT moved.id, moved.parent_id
+        FROM public.bot_history_checkpoints moved
+        WHERE moved.team_id = public.memoh_current_team_id()
+          AND moved.id = active
+        UNION ALL
+        SELECT parent.id, parent.parent_id
+        FROM chain
+        JOIN public.bot_history_checkpoints parent
+          ON parent.team_id = public.memoh_current_team_id()
+         AND parent.id = chain.parent_id
+        WHERE chain.parent_id IS DISTINCT FROM kept
+      )
+      SELECT chain.id
+      FROM chain
+      WHERE chain.parent_id IS NOT DISTINCT FROM kept
+      LIMIT 1
+    );
+  RETURN true;
+END;
+$$;
+
 -- Bot-scoped Connect-It bindings. Provider credentials and short-lived MCP
 -- session tokens remain in Connect-It; Memoh stores only the durable
 -- connection reference and whether the bot currently exposes it. A co-hosted
@@ -2638,9 +2789,9 @@ ALTER TABLE public.schedule
     ADD CONSTRAINT schedule_workdir_id_fkey
     FOREIGN KEY (team_id, workdir_id)
     REFERENCES public.bot_workdirs(team_id, id) ON DELETE SET NULL (workdir_id);
--- Last committed round observed by a warm external runtime. Written with the
--- round's messages to invalidate processes that have fallen behind. Native
--- conversation state remains in Agent-owned workspace files.
+-- Unused: ACP warm processes were once fenced by the last committed run here.
+-- They now restore the agent's native session, and nothing reads or writes
+-- this table.
 CREATE TABLE IF NOT EXISTS public.agent_session_publications (
     team_id          UUID        NOT NULL DEFAULT public.memoh_current_team_id()
                                  REFERENCES public.teams(id) ON DELETE RESTRICT,

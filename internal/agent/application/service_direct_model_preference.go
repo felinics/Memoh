@@ -22,7 +22,7 @@ var ErrDirectModelUnavailable = errors.New("direct runtime model unavailable")
 // their preference in a separate column so the native foreign key remains
 // meaningful and runtime-owned conversation metadata is not read/modified.
 func (s *Service) reconcileDirectModelPreference(ctx context.Context, botID, botAgentID, runtimeType, projectPath, modelID, effort string) (string, string, error) {
-	provider, ok := s.externalDrivers[runtimeType].(external.ModelCatalogProvider)
+	provider, ok := external.As[external.ModelCatalogProvider](s.runtimes, runtimeType)
 	if !ok {
 		return "", "", external.ErrModelCatalogUnavailable
 	}
@@ -71,7 +71,7 @@ func reconcileDirectPair(catalog external.ModelCatalog, modelID, effort string) 
 }
 
 func (s *Service) applyDirectModelPreference(ctx context.Context, req ChatRequest, sess session.Thread) (ChatRequest, error) {
-	if !session.IsDirectRuntime(sess) || req.SessionType == sessionmode.Schedule {
+	if _, catalog := external.As[external.ModelCatalogProvider](s.runtimes, session.RuntimeTypeOf(sess)); !catalog || req.SessionType == sessionmode.Schedule {
 		return req, nil
 	}
 	carries := strings.TrimSpace(req.Model) != "" || strings.TrimSpace(req.ReasoningEffort) != ""

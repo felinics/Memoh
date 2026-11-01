@@ -56,9 +56,11 @@ func (f *fakeChannelIdentityService) ListUserIDsByChannelIdentity(_ context.Cont
 type fakePolicyService struct {
 	ownerUserID string
 	err         error
+	calls       int
 }
 
 func (f *fakePolicyService) BotOwnerUserID(_ context.Context, _ string) (string, error) {
+	f.calls++
 	if f.err != nil {
 		return "", f.err
 	}
@@ -382,6 +384,37 @@ func TestIdentityResolverNonOwnerGroupMessagePassesToACL(t *testing.T) {
 	}
 	if state.Decision != nil {
 		t.Fatal("non-owner group message should pass identity resolution (ACL decides later)")
+	}
+}
+
+func TestIdentityResolverDoesNotLookUpOwnerForLinkedSender(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{
+		channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-linked"},
+		linkedUserIDs:   map[string][]string{"channelIdentity-linked": {"user-1"}},
+	}
+	policySvc := &fakePolicyService{ownerUserID: "user-owner"}
+	resolver := NewIdentityResolver(slog.Default(), nil, channelIdentitySvc, policySvc, "")
+
+	msg := channel.InboundMessage{
+		BotID:   "bot-1",
+		Channel: channel.ChannelType("telegram"),
+		Message: channel.Message{Text: "hello"},
+		Sender:  channel.Identity{SubjectID: "ext-linked-1"},
+		Conversation: channel.Conversation{
+			ID:   "group-1",
+			Type: "group",
+		},
+	}
+
+	state, err := resolver.Resolve(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1"}, msg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state.Identity.UserID != "user-1" {
+		t.Fatalf("UserID = %q, want the linked account user-1", state.Identity.UserID)
+	}
+	if policySvc.calls != 0 {
+		t.Fatalf("identity resolution looked up the bot owner %d times, want 0", policySvc.calls)
 	}
 }
 

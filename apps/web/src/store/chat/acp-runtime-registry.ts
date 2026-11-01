@@ -7,13 +7,6 @@ import {
   setACPRuntimeReasoning as requestSetACPRuntimeReasoning,
 } from '@/composables/api/useChat'
 
-export interface ACPRuntimeStatusRegistry {
-  acpRuntimeStatuses: Ref<Record<string, AcpagentRuntimeStatus | undefined>>
-  acpRuntimeKey: (botId: string, sessionId: string) => string
-  setACPRuntimeStatus: (botId: string, sessionId: string, runtime: AcpagentRuntimeStatus | undefined) => void
-  clearACPRuntimeStatus: (botId: string, sessionId: string) => void
-}
-
 export interface ACPRuntimeRegistryTransport {
   ensureACPRuntime: typeof requestEnsureACPRuntime
   setACPRuntimeMode: typeof requestSetACPRuntimeMode

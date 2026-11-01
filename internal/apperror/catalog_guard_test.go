@@ -340,6 +340,7 @@ var declaredFaults = map[Code]Fault{
 	CodeACPConfigUpdateFailed:              FaultDependency,
 	CodeConnectorOAuthClientNotConfigured:  FaultDependency,
 	CodeExternalRuntimeRateLimited:         FaultDependency,
+	CodeExternalRuntimeReported:            FaultDependency,
 	CodeExternalRuntimeOverloaded:          FaultDependency,
 	CodeExternalRuntimeUpstreamUnreachable: FaultDependency,
 	CodeWorkspaceImageRegistryUnavailable:  FaultDependency,

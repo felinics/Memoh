@@ -6,7 +6,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SCHEMA_DIR="${PROJECT_ROOT}/internal/agent/runtime/codex/protocolgen/schema"
+SCHEMA_DIR="${PROJECT_ROOT}/internal/agent/runtime/external/codex/protocolgen/schema"
 
 if ! command -v codex >/dev/null 2>&1; then
   echo "codex CLI not found on PATH" >&2

@@ -245,10 +245,10 @@ func TestAgentRuntimeDoesNotDependOnChat(t *testing.T) {
 
 func TestDirectExternalRuntimesDoNotDependOnACP(t *testing.T) {
 	root := repoRoot(t)
-	for _, dir := range []string{"internal/agent/runtime/codex", "internal/agent/runtime/claudecode"} {
+	for _, dir := range []string{"internal/agent/runtime/external/codex", "internal/agent/runtime/external/claudecode"} {
 		for _, file := range goFiles(t, root, dir) {
 			for _, imp := range imports(t, root, file) {
-				if isPackageOrChild(imp, modulePrefix+"internal/agent/runtime/acp") {
+				if isPackageOrChild(imp, modulePrefix+"internal/agent/runtime/external/acp") {
 					t.Errorf("%s imports %s: direct External Agent runtimes must not depend on ACP", file, imp)
 				}
 			}
@@ -256,17 +256,17 @@ func TestDirectExternalRuntimesDoNotDependOnACP(t *testing.T) {
 	}
 }
 
-// TestACPNativeDirectRuntimesUseOnlyTheACPClient covers built-in agents whose
-// own wire protocol is ACP. They share the protocol client, but the pool and
-// the profile registry serve user-supplied agents only: a built-in agent that
-// reached them would be configured by agent id inside the generic runtime.
-func TestACPNativeDirectRuntimesUseOnlyTheACPClient(t *testing.T) {
+// TestACPNativeDirectRuntimesStayOffTheProfileRegistry covers built-in agents
+// whose own wire protocol is ACP. They run on the ACP core as extensions of
+// it, but the profile registry serves user-supplied agents only: a built-in
+// agent that reached it would be configured by agent id as a custom one.
+func TestACPNativeDirectRuntimesStayOffTheProfileRegistry(t *testing.T) {
 	root := repoRoot(t)
-	client := modulePrefix + "internal/agent/runtime/acp/client"
-	for _, file := range allGoFiles(t, root, "internal/agent/runtime/grok") {
+	profiles := modulePrefix + "internal/agent/runtime/external/acp/profile"
+	for _, file := range allGoFiles(t, root, "internal/agent/runtime/external/grok") {
 		for _, imp := range imports(t, root, file) {
-			if isPackageOrChild(imp, modulePrefix+"internal/agent/runtime/acp") && imp != client {
-				t.Errorf("%s imports %s: an ACP-native direct runtime may use only the ACP client", file, imp)
+			if isPackageOrChild(imp, profiles) {
+				t.Errorf("%s imports %s: an ACP-native direct runtime is an extension of the ACP core, not a profile", file, imp)
 			}
 		}
 	}

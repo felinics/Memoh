@@ -130,7 +130,6 @@
       "reasoning_selection_unsupported": "この外部Agentは推論強度の選択に対応していません。",
       "request_invalid": "Agent ランタイムのリクエストが無効です。内容を確認して、もう一度お試しください。",
       "runtime_conflict": "Agent ランタイムはこの操作を実行できる状態ではありません。更新してからもう一度お試しください。",
-      "runtime_limit_reached": "実行中の Agent ランタイムが多すぎます。1 つ終了してからもう一度お試しください。",
       "runtime_not_found": "この Agent ランタイムは利用できなくなりました。再起動します。"
     },
     "acp_agent_auth_invalid": "外部Agentの認証が無効です。Agent設定を更新してからもう一度お試しください。",
@@ -177,7 +176,6 @@
       "request_invalid": "Agent アカウントの情報を確認して、もう一度お試しください。",
       "revoked": "この Agent アカウントは切断されています。再接続するか、別のアカウントを選択してください。",
       "runtime_busy": "現在の応答が完了してから Agent アカウントを切り替えてください。",
-      "usage_auth_expired": "アカウントのサインインが期限切れです。次の会話のあとに自動で更新されます。それでも利用上限を表示できない場合は、アカウントを再接続してください。",
       "usage_unavailable": "利用上限を取得できませんでした。しばらくしてからもう一度お試しください。"
     },
     "agent_dependency_missing": "{dep_id} はこの Workspace にインストールされていません。Bot の「依存関係」からインストールするか、実行中のインストールの完了を待ってから、メッセージを再送してください。",
@@ -236,8 +234,6 @@
     "chat": {
       "message_empty": "メッセージを入力するか、ファイルを添付してください。"
     },
-    "codex_auth_token_missing": "このBotワークスペースのCodex認証が不足しているか不完全です。",
-    "codex_oauth_incomplete": "このBotワークスペースではCodexのChatGPTサインインが完了していません。",
     "compaction": {
       "model_unavailable": "圧縮Modelを利用できません。有効でコンテキストウィンドウが宣言されたチャットModelを選択してください。"
     },
@@ -277,8 +273,9 @@
       "context_window_exceeded": "この会話はモデルのコンテキストウィンドウを超えました。コンテキストを圧縮するか、新しい会話を開始してください。",
       "overloaded": "外部 Agent のモデルサービスが一時的に利用できないか、過負荷になっています。しばらくしてからもう一度お試しいただくか、別のモデルに切り替えてください。",
       "rate_limited": "外部 Agent がモデルサービスのレート制限に達しました。しばらく待ってからもう一度送信してください。",
+      "reported": "Agent がエラーを報告しました：{message}",
       "request_blocked": "このリクエストはモデルサービスの安全ポリシーによりブロックされました。内容を変更してもう一度送信してください。",
-      "session_resume_failed": "セッションを再開できませんでした。もう一度お試しいただくか、新しい会話を開始してください。",
+      "session_resume_failed": "セッションを再開できませんでした：{message}。もう一度お試しいただくか、新しい会話を開始してください。",
       "unavailable": "External Agent の Runtime を利用できません。Agent の設定と Workspace を確認して、もう一度お試しください。",
       "upstream_unreachable": "外部 Agent がモデルサービスに接続できないか、接続が途中で切断されました。ネットワークと Agent のサービスアドレスを確認して、もう一度お試しください。",
       "usage_limited": "外部 Agent のアカウントの利用枠を使い切りました。上限がリセットされてからもう一度お試しいただくか、アカウントのプランと請求情報をご確認ください。"
@@ -1558,7 +1555,10 @@
       "dependencyMissingProgress": "バックグラウンドでインストール中…",
       "dependencyMissingDone": "インストール完了。再送できます。",
       "dependencyMissingFailed": "バックグラウンドのインストールに失敗しました。Bot 設定の「依存関係」から再試行してください。",
-      "dependencyOpen": "依存関係を開く"
+      "dependencyOpen": "依存関係を開く",
+      "resetSession": "新しい Agent セッションを開始",
+      "resetSessionDone": "次のメッセージから新しい Agent セッションが始まります。上の会話は引き継がれません。",
+      "resetSessionFailed": "新しい Agent セッションを開始できませんでした。"
     },
     "sessionFilterAll": "全て",
     "searchSessionPlaceholder": "検索",
@@ -2123,7 +2123,8 @@
       "exa": "エクサ",
       "bocha": "ボチャ",
       "duckduckgo": "DuckDuckGo",
-      "yandex": "ヤンデックス"
+      "yandex": "ヤンデックス",
+      "deepseek": "DeepSeek"
     },
     "fetchProviderNames": {
       "native": "ネイティブ取得",
@@ -2840,16 +2841,20 @@
       "defaultModelDescription": "任意項目です。空欄の場合は External Agent のデフォルトを使用し、会話中に一時的に変更できます。",
       "defaultModelPlaceholder": "Runtime のデフォルトを使用",
       "account": "アカウント",
-      "chatgptAccountDescription": "Memoh はこの Agent の ChatGPT 認証情報を暗号化して保存し、Runtime でのみ Codex に渡します。",
-      "chatgptAccountConnectedDescription": "この Agent の ChatGPT 認証情報は暗号化して保存されています。",
+      "chatgptAccountDescription": "Codex がこの Agent の Workspace で ChatGPT にサインインし、サインイン状態を自分で保持します。",
+      "chatgptAccountConnectedDescription": "Codex はこの Agent の Workspace で ChatGPT にサインインしています。",
+      "signedInAs": "{account} でサインイン中",
+      "checkingSignIn": "サインイン状態を確認しています…",
+      "enableToSignIn": "アカウントを確認・接続するには、この Agent を有効にしてください。",
+      "signInCheckFailed": "サインイン状態を確認できませんでした。",
       "reconnect": "再接続",
       "codexDeviceHint": "認証ページを開き、このワンタイムコードを入力してください。表示された OpenAI の認証ページ以外には入力しないでください。Memoh が認証を自動で完了します。",
       "codexLoginSuccess": "Codex を ChatGPT アカウントに接続しました",
       "codexLoginFailed": "Codex アカウントを認証できませんでした。もう一度お試しください。",
       "authGrokAccountDescription": "Grok アカウントで Grok Build にサインインします。",
       "grokAccount": "Grok アカウント",
-      "grokAccountDescription": "Memoh はこの Agent の Grok 認証情報を暗号化して保存し、Runtime でのみ Grok Build に渡します。",
-      "grokAccountConnectedDescription": "この Agent の Grok 認証情報は暗号化して保存されています。",
+      "grokAccountDescription": "Grok がこの Agent の Workspace でサインインし、サインイン状態を自分で保持します。",
+      "grokAccountConnectedDescription": "Grok はこの Agent の Workspace でサインインしています。",
       "grokDeviceHint": "認証ページを開き、このワンタイムコードを確認してください。表示された accounts.x.ai のページ以外では確認しないでください。Memoh が認証を自動で完了します。",
       "grokLoginSuccess": "Grok Build を Grok アカウントに接続しました",
       "grokLoginFailed": "Grok アカウントにサインインできませんでした。もう一度お試しください。",
@@ -3399,14 +3404,9 @@
       "desktopEnabledDescription": "有効にするVNCDesktop。 Memoh は、Debian/Ubuntu または Alpine Workspaceが見つからない場合、自動的にプロビジョニングします。",
       "toolApproval": "Tool呼び出しの承認",
       "toolApprovalDescription": "安全なパスまたはコマンドのバイパス テンプレートを使用して、機密性の高い書き込み、編集、および実行Toolの呼び出しには人間の承認が必要です。",
-      "acpSetupMode": "設定",
       "acpLaunchSection": "起動設定",
       "acpCommand": "コマンド",
       "acpArguments": "起動引数",
-      "acpSetupApiKey": "APIキー",
-      "acpSetupOAuth": "OAuth",
-      "acpSetupSelf": "自己管理",
-      "acpSelfModeHint": "Workspace ランタイム内ですでに設定されている Agent（既存のログインなど）を使用します。",
       "acpRequiredField": "{agent} には {field} が必要です。",
       "toolApprovalBypass": "バイパス",
       "toolApprovalMustReview": "要検討",

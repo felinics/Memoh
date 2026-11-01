@@ -18,7 +18,7 @@ import { providerConfigDefaults } from '@/utils/provider-template'
 
 const { t } = useI18n()
 
-const SEARCH_PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily', 'sogou', 'serper', 'searxng', 'jina', 'exa', 'bocha', 'duckduckgo', 'yandex'] as const
+const SEARCH_PROVIDER_TYPES = ['brave', 'bing', 'google', 'tavily', 'sogou', 'serper', 'searxng', 'jina', 'exa', 'bocha', 'duckduckgo', 'yandex', 'deepseek'] as const
 const FETCH_PROVIDER_TYPES = ['native', 'jina', 'cloudflare_markdown'] as const
 
 const { data: providerData, isLoading: providersLoading } = useQuery({

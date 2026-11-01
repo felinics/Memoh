@@ -5,21 +5,21 @@ import (
 	"net/http"
 	"time"
 
-	sdk "github.com/felinics/twilight/sdk"
-
 	"github.com/felinics/memoh/internal/agent/turn"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 // Pass is one committed pass of a compaction event: the summary it wrote and
-// what that summary replaces.
+// the request it leaves.
 type Pass struct {
-	ArtifactID string
-	Summary    string
-	// Covered names each row the summary folds, by history ID and, when the
-	// row has one, by external ID. Absorbed names the earlier summaries it
-	// folds.
-	Covered  []turn.ContextMessageSource
-	Absorbed []string
+	SummaryID string
+	Summary   string
+	// Order is the request after the pass, by the messages of the request it
+	// read: the index of each that stays, or -1 for the summary, which takes
+	// the place turn.PlaceSummary gives it; cut is where the newest messages
+	// the event keeps start in it.
+	Order []int
+	cut   int
 	// More reports candidates left that the pass could not read; the event
 	// folds them in a later pass.
 	More bool
@@ -49,6 +49,11 @@ type EventError struct {
 func (e *EventError) Error() string { return string(e.Reason) + ": " + e.Err.Error() }
 
 func (e *EventError) Unwrap() error { return e.Err }
+
+// failed names the reason a pass ends the event with.
+func failed(reason Reason, err error) error {
+	return &EventError{Reason: reason, Err: err}
+}
 
 // ReasonOf is the reason err reports, or empty when it reports none.
 func ReasonOf(err error) Reason {
@@ -85,7 +90,7 @@ type TriggerConfig struct {
 	BotID                 string
 	SessionID             string
 	ModelID               string // runtime model slug sent to the provider
-	ModelRecordID         string // models.id row UUID recorded as artifact/log provenance
+	ModelRecordID         string // models.id row UUID recorded as the log's provenance
 	ClientType            string
 	APIKey                string //nolint:gosec // runtime credential, not a hardcoded secret
 	CodexAccountID        string
@@ -99,32 +104,28 @@ type TriggerConfig struct {
 	// declared window and output cap; they size the summarizer call.
 	SummaryWindowTokens int
 	MaxOutputTokens     int
-	// CandidatesFrom is where the caller's history begins and
-	// CandidatesBefore the cutoff an edit or retry replays history before.
-	// Rows outside are not part of that request. Zero leaves that side open.
-	CandidatesFrom   time.Time
-	CandidatesBefore time.Time
-	// ProtectedSources stay raw, with everything after them. Current ones are
-	// the caller's current input, budgeted outside HistoryBudgetTokens; the
-	// rest are history it keeps.
-	ProtectedSources []turn.ContextMessageSource
-	// View, when set, is what the caller's request renders: only these
-	// history rows and inbound messages are candidates, whatever else the
-	// session holds. Anchors stay raw where they are without ending what a
-	// pass may fold; the summarizer reads them in place.
-	View    []turn.ContextMessageSource
-	Anchors []turn.ContextMessageSource
-	// CurrentRequest is the caller's current input, shown to the summarizer
-	// when no protected source is a history row yet.
+	// CandidatesBefore, when set, is where the caller's history ends: the
+	// cutoff an edit or retry replays history before, or the turn the request
+	// runs as. Rows from it on are not folded.
+	CandidatesBefore *messagepkg.HistoryPosition
+	// ReplacedTurnID is the turn an edit or retry replaces. The replacement
+	// rewinds the session to the checkpoint that does not depend on that
+	// turn when its first step commits; an event the request needs earlier
+	// rewinds first, so it folds onto the checkpoint the replacement keeps.
+	ReplacedTurnID string
+	// Anchors are kept verbatim where they are, as AnchorPolicy keeps them: a
+	// run's input and steers, or the inputs a Discuss run answers.
+	Anchors      []turn.ContextMessageSource
+	AnchorPolicy AnchorPolicy
+	// CurrentRequest is the caller's current input, which the summarizer
+	// reads to judge what the work needs.
 	CurrentRequest string
-	// HistoryBudgetTokens is the room the caller's request has for the
-	// summary and the protected history it keeps raw. Anchors and current
-	// sources are not in it: the caller prices what it renders for them.
+	// HistoryBudgetTokens is the room the caller's request has for what the
+	// history renders: the summary and the rows it keeps raw.
 	HistoryBudgetTokens int
-	PromptCacheTTL      string
-	// Continuation, when set, is the request the caller sent last. A pass
-	// that folds everything foldable may ask for its summary by extending
-	// that request, which the provider may still hold in its prompt cache,
-	// instead of sending the summarizer's own.
-	Continuation *sdk.Request
+}
+
+// hookScope is what the compaction hooks are told about cfg's event.
+func (cfg TriggerConfig) hookScope() hookScope {
+	return hookScope{BotID: cfg.BotID, SessionID: cfg.SessionID, ModelID: cfg.ModelID, InputTokens: cfg.TotalInputTokens, BudgetTokens: cfg.HistoryBudgetTokens}
 }

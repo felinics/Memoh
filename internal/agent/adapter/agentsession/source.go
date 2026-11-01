@@ -5,7 +5,7 @@ package agentsession
 import (
 	"context"
 
-	acp "github.com/felinics/memoh/internal/agent/runtime/acp"
+	acp "github.com/felinics/memoh/internal/agent/runtime/external/acp"
 	"github.com/felinics/memoh/internal/chat/thread"
 )
 
@@ -15,6 +15,7 @@ type Source struct {
 
 type threadGetter interface {
 	Get(ctx context.Context, sessionID string) (thread.Thread, error)
+	ExternalIdentity(ctx context.Context, item thread.Thread) (thread.ExternalIdentity, error)
 	MergeRuntimeMetadata(ctx context.Context, sessionID, runtimeType string, delta map[string]any) (thread.Thread, error)
 }
 
@@ -27,13 +28,19 @@ func (s *Source) Get(ctx context.Context, sessionID string) (acp.SessionDescript
 	if err != nil {
 		return acp.SessionDescriptor{}, err
 	}
+	identity, err := s.threads.ExternalIdentity(ctx, item)
+	if err != nil {
+		return acp.SessionDescriptor{}, err
+	}
 	return acp.SessionDescriptor{
-		BotID:           item.BotID,
-		BotAgentID:      item.BotAgentID,
-		SessionType:     item.Type,
-		Metadata:        item.Metadata,
-		RuntimeMetadata: item.RuntimeMetadata,
-		IsACP:           thread.IsACPRuntime(item),
+		BotID:                 item.BotID,
+		BotAgentID:            item.BotAgentID,
+		SessionType:           item.Type,
+		AgentID:               identity.ACPAgentID,
+		ProjectPath:           identity.ProjectPath,
+		RuntimeOwnerAccountID: identity.RuntimeOwnerAccountID,
+		RuntimeMetadata:       item.RuntimeMetadata,
+		IsACP:                 thread.IsACPRuntime(item),
 	}, nil
 }
 

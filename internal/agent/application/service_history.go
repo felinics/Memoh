@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/chat/checkpoint"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
@@ -106,35 +106,97 @@ func currentWorkspaceTransitionMessage(history []historyfrag.HistoryRecord, curr
 	return &message
 }
 
-// loadHistoryRecords loads session history by budget, not age. Raw rows are
-// read newest-first through the visible-history index; a folded load skips
-// summarized payloads and returns one placement row per usable compact group.
-// Without a session there is no history; never widen the lookup to the bot.
-// Final request admission still enforces token limits.
-func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.ScopeFallback, sessionID string, contextTokenBudget int, fold bool) ([]historyfrag.HistoryRecord, error) {
-	sessionID = strings.TrimSpace(sessionID)
+// loadHistoryRecords loads the thread's history under its history
+// checkpoint: what it holds in its order, its summaries and the rows it keeps
+// raw, and the rows after its position. What a load reads follows what is
+// unsummarized, never the thread's length or age. The rows after the
+// checkpoint are byte-budgeted on the database side (CM-ADM-001): admitted
+// newest-first within contextTokenBudget (the absolute cap when the budget
+// is unset). It reports
+// whether the budget left older rows after the checkpoint out: they stay
+// compaction candidates, and a request that renders the load compacts them
+// rather than send a history that silently starts later. An edit or retry
+// renders the checkpoint its replacement keeps and the history before its
+// cutoff. A request without a thread has no history.
+func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.ScopeFallback, scope contextfrag.Scope, contextTokenBudget int, cut historyCut) ([]historyfrag.HistoryRecord, bool, error) {
+	sessionID := strings.TrimSpace(scope.SessionID)
 	if s.messageService == nil || sessionID == "" {
-		return nil, nil
+		return nil, false, nil
 	}
-	msgs, err := s.messageService.ListActiveSinceBySessionWithinBytes(ctx, sessionID, time.Unix(0, 0), s.historyLoadMaxBytes(contextTokenBudget), fold)
+	held, err := s.historyCheckpoint(ctx, sessionID, cut)
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	kept := make(map[string]messagepkg.Message)
+	if rows := held.RowIDs(); len(rows) > 0 {
+		msgs, err := s.messageService.ListHistoryByIDs(ctx, sessionID, rows)
+		if err != nil {
+			return nil, false, fmt.Errorf("load history checkpoint rows: %w", err)
+		}
+		for _, msg := range msgs {
+			kept[msg.ID] = msg
+		}
+	}
+	load, err := s.messageService.ListHistoryWithinBytes(ctx, sessionID, messagepkg.HistoryWindow{
+		After:    held.Position,
+		Before:   cut.before,
+		MaxBytes: s.historyLoadMaxBytes(contextTokenBudget),
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	msgs := load.Messages
+	result := make([]historyfrag.HistoryRecord, 0, len(held.Items)+len(msgs))
+	for _, item := range held.Items {
+		if item.SummaryID != "" {
+			result = append(result, historyfrag.SummaryRecord(item.SummaryID, item.Summary, scope))
+			continue
+		}
+		if err := interruptedPreparation(ctx, "decode history rows"); err != nil {
+			return nil, false, err
+		}
+		msg, ok := kept[item.RowID]
+		if !ok {
+			return nil, false, fmt.Errorf("history checkpoint %s keeps row %s, which is not a context row", held.ID, item.RowID)
+		}
+		record, err := historyfrag.FromDBMessageWithLogger(s.logger, msg, fallback)
+		if err != nil {
+			return nil, false, err
+		}
+		result = append(result, record)
 	}
 	// The budget covers content only; metadata arrives undecoded. Release each
 	// row once converted so at most one row's metadata is decoded at a time.
-	result := make([]historyfrag.HistoryRecord, 0, len(msgs))
 	for i := range msgs {
 		if err := interruptedPreparation(ctx, "decode history rows"); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		record, err := historyfrag.FromDBMessageWithLogger(s.logger, msgs[i], fallback)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		msgs[i] = messagepkg.Message{}
 		result = append(result, record)
 	}
-	return result, nil
+	return result, load.Truncated, nil
+}
+
+// historyCheckpoint is the checkpoint a request renders: the session's
+// active one, or the one an edit or retry's replacement keeps.
+func (s *Service) historyCheckpoint(ctx context.Context, sessionID string, cut historyCut) (checkpoint.Checkpoint, error) {
+	var (
+		held checkpoint.Checkpoint
+		err  error
+	)
+	if cut.replacedTurnID != "" {
+		held, err = s.checkpoints.KeptBeforeTurn(ctx, sessionID, cut.replacedTurnID)
+	} else {
+		held, err = s.checkpoints.Active(ctx, sessionID)
+	}
+	if err != nil {
+		return checkpoint.Checkpoint{}, fmt.Errorf("load history checkpoint: %w", err)
+	}
+	return held, nil
 }
 
 func historyScopeFallbackFromChatRequest(req ChatRequest) historyfrag.ScopeFallback {
@@ -165,11 +227,8 @@ func (s *Service) ensureRequiredHistoryMessage(ctx context.Context, messages []h
 	if messageID == "" || s.messageService == nil || strings.TrimSpace(req.ThreadID) == "" {
 		return messages, nil
 	}
-	for i, item := range messages {
-		if strings.TrimSpace(item.DBMessageID) == messageID {
-			messages[i].Required = true
-			return messages, nil
-		}
+	if containsHistoryRecord(messages, messageID) {
+		return messages, nil
 	}
 	window, err := s.messageService.ListVisibleFromBySession(ctx, req.ThreadID, messageID)
 	if err != nil {
@@ -188,11 +247,6 @@ func (s *Service) ensureRequiredHistoryMessage(ctx context.Context, messages []h
 	required = filterMessagesBeforeID(required, req.HistoryCutoffBeforeMessageID)
 	if !containsHistoryRecord(required, messageID) {
 		return nil, errors.New("required history message is not visible")
-	}
-	for i := range required {
-		if strings.TrimSpace(required[i].DBMessageID) == messageID {
-			required[i].Required = true
-		}
 	}
 	return mergeRequiredHistoryWindow(messages, required), nil
 }

@@ -1,12 +1,8 @@
 package historyfrag
 
 import (
-	"crypto/sha256"
-	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"strings"
 
@@ -75,37 +71,6 @@ func DecodeStoredModelMessage(log *slog.Logger, messageID, role string, raw json
 // remain unaware of durable compatibility shapes.
 func StoredModelMessageToSDKMessage(message turn.ModelMessage) sdk.Message {
 	return restoreLegacyFields(message, messageconv.ModelMessageToSDKMessage(message))
-}
-
-// MessageContentHash identifies a stored message version independently of
-// usage accounting: it covers the fields a row stores for the model, as
-// stored, so it costs one pass over the bytes rather than a conversion.
-// Hash only a row read back from storage: PostgreSQL returns jsonb
-// re-encoded, so the bytes a writer sent name no stored version.
-// Capture it before replay projections; durable artifact coverage
-// additionally validates the full source payload at commit.
-func MessageContentHash(message turn.ModelMessage) string {
-	hash := sha256.New()
-	writeHashField(hash, []byte(message.Role))
-	writeHashField(hash, message.Content)
-	writeHashField(hash, []byte(message.ToolCallID))
-	writeHashField(hash, []byte(message.Name))
-	if len(message.ToolCalls) > 0 {
-		calls, err := json.Marshal(message.ToolCalls)
-		if err != nil {
-			return ""
-		}
-		writeHashField(hash, calls)
-	}
-	return hex.EncodeToString(hash.Sum(nil))
-}
-
-// writeHashField writes one length-prefixed field, so adjacent fields
-// cannot run into each other.
-func writeHashField(hash io.Writer, field []byte) {
-	var length [binary.MaxVarintLen64]byte
-	_, _ = hash.Write(length[:binary.PutUvarint(length[:], uint64(len(field)))])
-	_, _ = hash.Write(field)
 }
 
 func StoredModelMessagesToSDKMessages(messages []turn.ModelMessage) []sdk.Message {

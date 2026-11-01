@@ -17,6 +17,7 @@ const (
 	ProviderBocha      ProviderName = "bocha"
 	ProviderDuckDuckGo ProviderName = "duckduckgo"
 	ProviderYandex     ProviderName = "yandex"
+	ProviderDeepSeek   ProviderName = "deepseek"
 )
 
 type ProviderConfigSchema struct {
