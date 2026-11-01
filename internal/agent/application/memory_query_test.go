@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/chat/checkpoint"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
@@ -85,11 +84,11 @@ func TestMemoryQueryBuilderCombinesRecentUserMessages(t *testing.T) {
 	t.Parallel()
 
 	builder := memoryQueryBuilder{MaxRecentMessages: 2, MaxBytes: 2000, MaxLines: 20, MaxMessageRunes: 200}
-	query := builder.Build(ChatRequest{Query: "What should I pack?"}, []historyfrag.HistoryRecord{
-		{ModelMessage: ModelMessage{Role: "user", Content: newTextContent("I am visiting Berlin next week")}},
-		{ModelMessage: ModelMessage{Role: "assistant", Content: newTextContent("Sounds fun.")}},
-		{ModelMessage: ModelMessage{Role: "user", Content: newTextContent("I prefer tea over coffee")}},
-		{ModelMessage: ModelMessage{Role: "user", Content: newTextContent("What should I pack?")}},
+	query := builder.Build(ChatRequest{Query: "What should I pack?"}, []ModelMessage{
+		{Role: "user", Content: newTextContent("I am visiting Berlin next week")},
+		{Role: "assistant", Content: newTextContent("Sounds fun.")},
+		{Role: "user", Content: newTextContent("I prefer tea over coffee")},
+		{Role: "user", Content: newTextContent("What should I pack?")},
 	})
 
 	if query.Source != "current_query_with_history" {
@@ -112,8 +111,8 @@ func TestMemoryQueryBuilderTruncates(t *testing.T) {
 	t.Parallel()
 
 	builder := memoryQueryBuilder{MaxRecentMessages: 1, MaxBytes: 120, MaxLines: 6, MaxMessageRunes: 500}
-	query := builder.Build(ChatRequest{Query: strings.Repeat("current ", 30)}, []historyfrag.HistoryRecord{
-		{ModelMessage: ModelMessage{Role: "user", Content: newTextContent(strings.Repeat("history ", 30))}},
+	query := builder.Build(ChatRequest{Query: strings.Repeat("current ", 30)}, []ModelMessage{
+		{Role: "user", Content: newTextContent(strings.Repeat("history ", 30))},
 	})
 
 	if !query.Truncated {
@@ -127,8 +126,8 @@ func TestMemoryQueryBuilderTruncates(t *testing.T) {
 func TestMemoryQueryBuilderSkipsEmptyVisibleQuery(t *testing.T) {
 	t.Parallel()
 
-	query := defaultMemoryQueryBuilder().Build(ChatRequest{Query: "   "}, []historyfrag.HistoryRecord{
-		{ModelMessage: ModelMessage{Role: "user", Content: newTextContent("history")}},
+	query := defaultMemoryQueryBuilder().Build(ChatRequest{Query: "   "}, []ModelMessage{
+		{Role: "user", Content: newTextContent("history")},
 	})
 	if query.Query != "" {
 		t.Fatalf("expected empty query, got %+v", query)

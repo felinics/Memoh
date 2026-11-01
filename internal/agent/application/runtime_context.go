@@ -74,10 +74,7 @@ func (s *Service) buildRuntimeContextSections(ctx context.Context, req ChatReque
 			platformIdentitiesSection = buildPlatformIdentitiesSection(identities)
 		}
 	}
-	memoryContext := memoryContextLoad{}
-	if s != nil {
-		memoryContext = s.loadMemoryContext(ctx, req)
-	}
+	memoryContext := s.loadMemoryContext(ctx, req, func() memoryQuery { return s.buildMemoryQuery(ctx, req) })
 
 	sections := buildRuntimeContextSections(runtimeContextRenderInput{
 		Timezone:                  timezoneName,

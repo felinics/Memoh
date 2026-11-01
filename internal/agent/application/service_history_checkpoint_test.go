@@ -217,7 +217,7 @@ func TestPrepareHistoryContextRendersTheCheckpointAReplacementKeeps(t *testing.T
 		TurnReplacement: &messagepkg.TurnReplacement{OldTurnID: checkpointTestTurnID},
 	}
 
-	cut, err := svc.prepareHistoryContext(t.Context(), edit, historyfrag.ScopeFallback{}, 100000)
+	cut, err := prepareHistoryFor(t.Context(), svc, edit, 100000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestPrepareHistoryContextRendersTheCheckpointAReplacementKeeps(t *testing.T
 		t.Fatalf("edited history window = %+v, want after the kept checkpoint and before the request", window)
 	}
 
-	live, err := svc.prepareHistoryContext(t.Context(), ChatRequest{BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID}, historyfrag.ScopeFallback{}, 100000)
+	live, err := prepareHistoryFor(t.Context(), svc, ChatRequest{BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID}, 100000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestPrepareHistoryContextFailsWithoutItsCheckpoint(t *testing.T) {
 	messages := &memoryQueryMessageService{messages: []messagepkg.Message{persistedHistoryMessage(t, "question", "user", "question")}}
 	loadErr := errors.New("checkpoint unavailable")
 	svc := checkpointTestService(messages, &historyCheckpointQueries{activeErr: loadErr})
-	if _, err := svc.prepareHistoryContext(t.Context(), ChatRequest{BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID}, historyfrag.ScopeFallback{}, 1000); !errors.Is(err, loadErr) {
+	if _, err := prepareHistoryFor(t.Context(), svc, ChatRequest{BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID}, 1000); !errors.Is(err, loadErr) {
 		t.Fatalf("history error = %v, want checkpoint load failure", err)
 	}
 	if len(messages.windows) != 0 {

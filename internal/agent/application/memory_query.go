@@ -40,38 +40,68 @@ func defaultMemoryQueryBuilder() memoryQueryBuilder {
 	}
 }
 
+// memoryQueryHistoryTokens bounds the history a memory query reads when no
+// prepared history exists to reuse: it only renders a few recent user
+// messages.
+const memoryQueryHistoryTokens = 4096
+
+// buildMemoryQuery reads the recent history itself, for runs that prepare
+// none (external runtimes keep their own transcript). A native turn builds
+// its query from the history it loaded instead (memoryQueryFromRecords).
 func (s *Service) buildMemoryQuery(ctx context.Context, req ChatRequest) memoryQuery {
-	builder := defaultMemoryQueryBuilder()
-	query := strings.TrimSpace(req.Query)
-	if query == "" {
+	if strings.TrimSpace(req.Query) == "" {
 		return memoryQuery{}
-	}
-	if s == nil || s.messageService == nil {
-		return builder.Build(req, nil)
 	}
 	cut, err := s.loadHistoryCut(ctx, req)
 	var loaded []historyfrag.HistoryRecord
 	if err == nil {
 		scope := compactionSummaryScope(req.BotID, req.ChatID, req.ThreadID, req.ConversationType, req.ConversationName, req.ReplyTarget)
-		loaded, _, err = s.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), scope, 0, cut)
+		loaded, _, err = s.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), scope, memoryQueryHistoryTokens, cut)
 	}
 	if err != nil {
-		if s.logger != nil {
-			s.logger.WarnContext(ctx, "memory query history load failed",
-				slog.String("bot_id", req.BotID),
-				slog.String("chat_id", req.ChatID),
-				slog.String("session_id", req.ThreadID),
-				slog.Any("error", err),
-			)
-		}
-		return builder.Build(req, nil)
+		s.logger.WarnContext(ctx, "memory query history load failed",
+			slog.String("bot_id", req.BotID),
+			slog.String("chat_id", req.ChatID),
+			slog.String("session_id", req.ThreadID),
+			slog.Any("error", err),
+		)
 	}
-	loaded = pruneHistoryForGateway(loaded)
-	loaded = dedupePersistedCurrentUserMessage(loaded, req)
-	return builder.Build(req, loaded)
+	return memoryQueryFromRecords(req, loaded)
 }
 
-func (b memoryQueryBuilder) Build(req ChatRequest, history []historyfrag.HistoryRecord) memoryQuery {
+// memoryQueryFromRecords builds the query from loaded records without
+// touching them: only a copy of their user messages is deduplicated.
+func memoryQueryFromRecords(req ChatRequest, records []historyfrag.HistoryRecord) memoryQuery {
+	if strings.TrimSpace(req.Query) == "" {
+		return memoryQuery{}
+	}
+	users := make([]historyfrag.HistoryRecord, 0, len(records))
+	for _, record := range records {
+		if strings.EqualFold(strings.TrimSpace(record.ModelMessage.Role), "user") {
+			users = append(users, record)
+		}
+	}
+	users = dedupePersistedCurrentUserMessage(users, req)
+	messages := make([]ModelMessage, len(users))
+	for i := range users {
+		messages[i] = users[i].ModelMessage
+	}
+	return defaultMemoryQueryBuilder().Build(req, messages)
+}
+
+// memoryQueryFromMessages builds the query from composed messages, leaving
+// out the current input they already render.
+func memoryQueryFromMessages(req ChatRequest, messages []ModelMessage) memoryQuery {
+	recent := make([]ModelMessage, 0, len(messages))
+	for _, message := range messages {
+		if message.ContextSource == nil || !message.ContextSource.Current {
+			recent = append(recent, message)
+		}
+	}
+	return defaultMemoryQueryBuilder().Build(req, recent)
+}
+
+func (b memoryQueryBuilder) Build(req ChatRequest, history []ModelMessage) memoryQuery {
 	current := strings.TrimSpace(req.Query)
 	if current == "" {
 		return memoryQuery{}
@@ -100,7 +130,7 @@ func (b memoryQueryBuilder) Build(req ChatRequest, history []historyfrag.History
 	}
 }
 
-func (b memoryQueryBuilder) recentUserMessages(current string, history []historyfrag.HistoryRecord) []string {
+func (b memoryQueryBuilder) recentUserMessages(current string, history []ModelMessage) []string {
 	if len(history) == 0 || b.MaxRecentMessages <= 0 {
 		return nil
 	}
@@ -108,7 +138,7 @@ func (b memoryQueryBuilder) recentUserMessages(current string, history []history
 	seen := map[string]bool{currentKey: true}
 	reversed := make([]string, 0, b.MaxRecentMessages)
 	for i := len(history) - 1; i >= 0 && len(reversed) < b.MaxRecentMessages; i-- {
-		msg := history[i].ModelMessage
+		msg := history[i]
 		if !strings.EqualFold(strings.TrimSpace(msg.Role), "user") {
 			continue
 		}

@@ -500,16 +500,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		runCfg.Identity.IsSubagent = true
 	}
 	runCfg.RunID = runIDForChatRequest(req.RunID)
-	memoryContext := s.loadMemoryContext(ctx, req)
-	if memoryContext.Trace != nil && runCfg.ContextLifecycle != nil {
-		runCfg.ContextLifecycle.SetMemoryRecall(*memoryContext.Trace)
-	}
-	memoryMsg := memoryContext.Message
-	reqMessages := pruneMessagesForGateway(nonNilModelMessages(req.Messages))
-	if memoryMsg != nil {
-		pruned, _ := pruneMessageForGateway(*memoryMsg)
-		memoryMsg = &pruned
-	}
+	reqMessages := pruneMessagesForGateway(req.Messages)
 
 	// When the DCP pipeline has data for this session, build context from
 	// the rendered event stream (RC) + bot turn responses (TR) instead of
@@ -528,7 +519,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	contextTokenBudget := s.effectiveContextTokenBudget(chatModel)
 	runCfg.ContextBudgetMaxTokens = contextTokenBudget
 
-	history, loadErr := s.loadChatHistory(ctx, req, usePipeline, contextTokenBudget, chatModel.ID)
+	history, loadErr := s.loadChatHistory(ctx, req, chatHistoryScope(req), usePipeline, contextTokenBudget, chatModel.ID)
 	if loadErr != nil {
 		s.logger.ErrorContext(ctx, "resolve: load history failed",
 			slog.String("bot_id", req.BotID),
@@ -536,6 +527,13 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		)
 		return resolvedContext{}, req, loadErr
 	}
+	// Memory recall reuses the history just loaded; its message is appended
+	// after that history, never inserted into it.
+	memoryContext := s.loadMemoryContext(ctx, req, func() memoryQuery { return history.memoryQuery })
+	if memoryContext.Trace != nil {
+		runCfg.ContextLifecycle.SetMemoryRecall(*memoryContext.Trace)
+	}
+	memoryMsg := memoryContext.Message
 	messages, historyRecords := history.messages, history.records
 	var currentMessageIndex *int
 	if usePipeline {
@@ -579,9 +577,6 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	mergedAttachments := s.routeAndMergeAttachments(ctx, chatModel, req)
 
 	tz := runCfg.Identity.TimezoneLocation
-	if tz == nil {
-		tz = time.UTC
-	}
 	headerInput := turnpkg.UserMessageHeaderInput{
 		MessageID:         strings.TrimSpace(req.ExternalMessageID),
 		ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
@@ -1240,9 +1235,11 @@ type RunConfigRequest struct {
 	ChatToken         string //nolint:gosec // session credential material, not a hardcoded secret
 }
 
-// ResolveRunConfig builds a complete RunConfig (model, system prompt, tools,
-// identity) for a bot+session without loading messages or requiring a query.
-// The caller is responsible for filling RunConfig.Messages.
+// ResolveRunConfig builds the RunConfig (model, tools, identity, budget) of
+// a bot+session without loading messages or requiring a query. The caller
+// fills RunConfig.Messages and then builds the system prompt with
+// prepareRunConfig, whose hooks see those messages. Executing an approved
+// tool needs neither.
 // It serves runs that do not start from a ChatRequest: resumed decisions and
 // Discuss turns.
 func (s *Service) ResolveRunConfig(ctx context.Context, req RunConfigRequest) (ResolveRunConfigResult, error) {
@@ -1299,7 +1296,6 @@ func (s *Service) ResolveRunConfig(ctx context.Context, req RunConfigRequest) (R
 
 	contextBudget := s.effectiveContextTokenBudget(chatModel)
 	cfg.ContextBudgetMaxTokens = contextBudget
-	cfg = s.prepareRunConfig(ctx, cfg)
 	return ResolveRunConfigResult{
 		RunConfig:              cfg,
 		ModelID:                chatModel.ID,
