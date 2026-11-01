@@ -36,6 +36,7 @@ import {
   Searxng,
   Sogou,
   Serper,
+  DeepseekColor,
 } from '@memohai/icon'
 
 const searchIcons: Record<string, Component> = {
@@ -57,6 +58,7 @@ const searchIcons: Record<string, Component> = {
   searxng: Searxng,
   sogou: Sogou,
   serper: Serper,
+  deepseek: DeepseekColor,
 }
 
 const props = withDefaults(defineProps<{

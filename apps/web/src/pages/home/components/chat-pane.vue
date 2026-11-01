@@ -42,6 +42,21 @@
                 <Spinner class="size-3.5" />
               </div>
 
+              <CalloutBanner
+                v-if="activeSessionSummaryFailed"
+                tone="warning"
+                :title="$t('common.loadFailed')"
+              >
+                <Button
+                  variant="outline"
+                  size="sm"
+                  :loading="retryingSessionSummary"
+                  @click="retryActiveSessionSummary"
+                >
+                  {{ $t('common.retry') }}
+                </Button>
+              </CalloutBanner>
+
               <!-- A session with a live run but no messages yet (a subagent
                    that has not produced output) reads as starting, not empty.
                    A first send waiting on welcome already shows its spinner
@@ -58,7 +73,7 @@
                    A fresh, writable chat instead gets the centered welcome
                    composer below, never a stray line in a blank pane. -->
               <div
-                v-else-if="messages.length === 0 && !loadingChats && !loadingMessages && activeChatReadOnly"
+                v-else-if="messages.length === 0 && !loadingChats && !loadingMessages && composerReadOnly"
                 class="flex items-center justify-center min-h-75"
               >
                 <p class="text-muted-foreground text-xs">
@@ -142,6 +157,7 @@
                         :can-retry-latest-assistant="isRetryableTurn(msg)"
                         :can-edit-latest-user="isEditableTurn(msg)"
                         :can-fork-assistant="isForkableTurn(msg)"
+                        :can-reset-agent-session="canResetAgentSession(msg)"
                         :inline-actions="isDirectBotAgentRuntime(activeChatTarget.runtimeType)"
                         :goal-runtime="activeChatTarget.runtimeType"
                         :is-scrolling="isScrolling"
@@ -149,6 +165,7 @@
                         @active="onMessageActive"
                         @edit-message="handleEditMessage"
                         @fork-message="handleForkMessage"
+                        @reset-agent-session="handleResetAgentSession(msg.id)"
                       />
                     </div>
 
@@ -222,13 +239,12 @@
            so its inner padding is the ONLY horizontal inset — matching the message
            column edge-for-edge at every width. -->
       <div
-        v-if="!activeChatReadOnly"
+        v-if="!composerReadOnly"
         class="pointer-events-none absolute z-(--z-panel)"
         :class="[
           isWelcome
             ? 'inset-0 flex flex-col items-center justify-start'
             : 'inset-x-0 bottom-0 pt-2',
-          { invisible: composerPlacementPending },
         ]"
       >
         <!-- Opaque backdrop, bottom-anchored, rising only to the box's widest point
@@ -627,13 +643,16 @@
                   >{{ formattedVoiceSeconds }}</span>
                   <span class="sr-only">{{ voiceInputState === 'transcribing' ? $t('chat.voiceInput.transcribing') : $t('chat.voiceInput.barLabel') }}</span>
                 </div>
+                <!-- Loading history never locks the textarea: the user can type
+                     the moment the pane appears, and handleSend holds the send
+                     until the history has loaded. -->
                 <textarea
                   v-else
                   ref="textareaEl"
                   v-model="inputText"
                   rows="1"
                   :placeholder="composerPreviewShown ? '' : composerPlaceholder"
-                  :disabled="!currentBotId || activeChatReadOnly || loadingMessages || firstSendAwaiting"
+                  :disabled="!currentBotId || composerReadOnly || firstSendAwaiting"
                   class="order-none max-h-52 w-full basis-full field-sizing-content resize-none break-words bg-transparent pl-2 pr-1 pt-2 pb-1.5 text-base leading-[var(--chat-leading)] outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
                   :class="[isWelcome ? 'min-h-12' : 'min-h-10', composerPreviewShown ? 'text-transparent' : 'text-foreground']"
                   @keydown="handleComposerKeydown"
@@ -1268,7 +1287,7 @@
 import { Memoh as MemohIcon, MemohColor } from '@memohai/icon'
 import { AddIcon, UploadIcon } from '@memohai/icon/ui'
 
-import { EXTERNAL_AGENT_DEFAULT_PROJECT_MODE, EXTERNAL_AGENT_DEFAULT_PROJECT_PATH, normalizeAgentID } from '@/utils/external-agent'
+import { EXTERNAL_AGENT_DEFAULT_PROJECT_PATH, normalizeAgentID } from '@/utils/external-agent'
 import { ref, reactive, shallowReactive, computed, onBeforeUnmount, useTemplateRef, watch, onWatcherCleanup, nextTick, onActivated, onDeactivated } from 'vue'
 import {
   ImagePlus,
@@ -1285,7 +1304,7 @@ import {
   Lightbulb,
   Target,
 } from 'lucide-vue-next'
-import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, ConfirmDeleteDialog, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, PanePlaceholder, ScrollArea, Skeleton, Spinner, toast } from '@felinic/ui'
+import { Button, CalloutBanner, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, ConfirmDeleteDialog, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, PanePlaceholder, ScrollArea, Skeleton, Spinner, toast } from '@felinic/ui'
 import { useChatStore, type ExternalAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult } from '@/store/chat-list'
 import { useWorkdirsStore } from '@/store/workdirs'
 import type { BotWorkdir } from '@/composables/api/useWorkdirs'
@@ -1296,7 +1315,7 @@ import { useRuntimeControls } from '@/composables/useRuntimeControls'
 import { useCodexUsage } from '@/composables/useCodexUsage'
 import { codexUsageNotice, codexUsageNoticeKey, codexUsageResetTime, codexUsageWindowLabel } from '@/utils/codex-usage'
 import { useQuery } from '@pinia/colada'
-import { getAcpProfiles, getBotsByBotIdAgents, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
+import { deleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSession, getAcpProfiles, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
 import type { AcpprofilePublicProfile, BotagentsBotAgent, WorkspaceWorkspaceTarget } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -1357,7 +1376,8 @@ import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { useAgentModelCatalog } from '@/composables/useAgentModelCatalog'
 import { isACPAgentConfigured } from '@/utils/acp'
-import { BOT_AGENT_RUNTIME_ACP, BOT_AGENT_RUNTIME_CODEX, botAgentIcon, botAgentName, botAgentProvider, isDirectBotAgentConfigured, isDirectBotAgentRuntime, normalizeBotAgentRuntime } from '@/utils/bot-agent'
+import { BOT_AGENT_RUNTIME_ACP, BOT_AGENT_RUNTIME_CODEX, botAgentIcon, botAgentName, botAgentProvider, isDirectBotAgentConfigured, isDirectBotAgentRuntime, normalizeBotAgentRuntime, sessionAgentProvider } from '@/utils/bot-agent'
+import { useBotAgentsQuery } from '@/composables/api/useBotAgents'
 import { UserFacingError, isApiErrorCode, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
 import { workspaceTargetAvailable } from '@/utils/workspace-target'
@@ -1467,6 +1487,33 @@ const creatingSession = computed(() => chatStore.isChatViewCreatingSession(paneT
 const activeChatTarget = computed(() => chatStore.chatTargetFor(paneTarget.value))
 const activeSession = computed(() => activeChatTarget.value.session)
 const activeChatReadOnly = computed(() => chatStore.chatReadOnlyFor(paneTarget.value))
+// The store treats a session whose summary has not loaded yet (a restored tab,
+// a deep link, before the session list arrives) as read-only, so no write
+// slips into what turns out to be a schedule or a synced channel. The composer
+// only cares whether it is KNOWN to be read-only: until the summary says so it
+// renders and takes typing, and the send waits for the summary.
+const activeSessionSummaryUnresolved = computed(() =>
+  activeChatTarget.value.kind === 'session' && !activeChatTarget.value.session,
+)
+const activeSessionSummaryFailed = computed(() =>
+  activeSessionSummaryUnresolved.value && chatStore.visibleSessionSummaryFailed(
+    paneTarget.value.botId,
+    paneTarget.value.sessionId ?? '',
+  ),
+)
+const composerReadOnly = computed(() => activeChatReadOnly.value && !activeSessionSummaryUnresolved.value)
+const retryingSessionSummary = ref(false)
+
+async function retryActiveSessionSummary() {
+  const { botId, sessionId } = paneTarget.value
+  if (!botId || !sessionId || retryingSessionSummary.value) return
+  retryingSessionSummary.value = true
+  try {
+    await chatStore.ensureVisibleSessionSummary(botId, sessionId)
+  } finally {
+    retryingSessionSummary.value = false
+  }
+}
 const activeChatCanFork = computed(() => chatStore.chatCanForkFor(paneTarget.value))
 // The composer pair lives on the shared ChatViewEntry: same-session tabs share
 // one pair and repointing this pane swaps in the target view's own pair. Every
@@ -1516,22 +1563,15 @@ const draftSetupEditable = computed(() => !hasRenderedSession.value && !firstSen
 // entirely, so they never reach this state. A first send stays on welcome
 // until the server confirms it; from then on the pane is a chat even before
 // a turn has rendered (a skill activation appends none of its own).
+// Decided from the pane alone, never from the session list: a draft stays a
+// draft (only an explicit selection fills it, and that happens before the
+// first render), so the composer is drawn in its final place on the first
+// frame instead of waiting for the list or moving once it arrives.
 const isWelcome = computed(() => {
-  if (!currentBotId.value || activeChatReadOnly.value || loadingChats.value) return false
+  if (!currentBotId.value || activeChatReadOnly.value) return false
   if (firstSendEntry.value?.revealed) return false
   return !hasRenderedSession.value && messages.value.length === 0
 })
-
-// During boot, "a draft that stays a draft" and "a draft about to be
-// repointed to the most recent session" are indistinguishable until
-// fetchSessions returns (bootstrap auto-picks at the END of the load).
-// isWelcome waits out that window via !loadingChats — but rendering the
-// docked posture meanwhile made a hard refresh of the welcome page flash
-// bottom → center. While placement is undecidable, hide the composer
-// instead: `invisible` keeps layout and the dock measurements alive,
-// where v-if would unmount them. A session panel carries its sessionId
-// from the first frame, so this gate never engages on session routes.
-const composerPlacementPending = computed(() => loadingChats.value && !hasRenderedSession.value)
 const composerPlacementEl = useTemplateRef<HTMLElement>('composerPlacementEl')
 // Only a first send moves the composer, out of welcome when the server
 // confirms it, together with the turns appearing. Any other flip is
@@ -1647,7 +1687,33 @@ function isEditableTurn(message: ChatMessage): boolean {
   return message.role === 'user' && turnId !== '' && turnId === (message.turnId?.trim() ?? '')
 }
 
-const { data: botSettings, isLoading: botSettingsLoading } = useQuery({
+// Only the latest reply offers it: after a later turn, the stored ACP session
+// is no longer the one that failed to restore.
+const agentSessionResetMessageId = ref('')
+function canResetAgentSession(message: ChatMessage): boolean {
+  return activeChatTarget.value.runtimeType === 'acp_agent'
+    && message.id === lastMessageId.value
+    && message.id !== agentSessionResetMessageId.value
+    && !streaming.value && !activeChatReadOnly.value
+}
+
+async function handleResetAgentSession(messageId: string) {
+  const botId = currentBotId.value
+  const sessionId = activeSessionId.value
+  if (!botId || !sessionId) return
+  try {
+    await deleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSession({
+      path: { bot_id: botId, session_id: sessionId },
+      throwOnError: true,
+    })
+    agentSessionResetMessageId.value = messageId
+    toast.success(t('chat.externalAgent.resetSessionDone'))
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('chat.externalAgent.resetSessionFailed')))
+  }
+}
+
+const { data: botSettings, isLoading: botSettingsLoading, status: botSettingsStatus } = useQuery({
   key: () => ['bot-settings', currentBotId.value],
   query: async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1668,17 +1734,7 @@ const { data: acpProfileData, isLoading: acpProfilesLoading } = useQuery({
   },
 })
 
-const { data: botAgentData, isLoading: botAgentsLoading } = useQuery({
-  key: () => ['bot-agents', currentBotId.value],
-  query: async () => {
-    const { data } = await getBotsByBotIdAgents({
-      path: { bot_id: currentBotId.value! },
-      throwOnError: true,
-    })
-    return data
-  },
-  enabled: () => !!currentBotId.value,
-})
+const { data: botAgentData, isLoading: botAgentsLoading } = useBotAgentsQuery(currentBotId)
 
 const currentBot = computed(() => bots.value.find(bot => bot.id === currentBotId.value) ?? null)
 const canWorkspaceRead = computed(() => (
@@ -1969,7 +2025,13 @@ const activeUsesDirectRuntime = computed(() => activeDirectRuntime.value !== '')
 // a reading built from that would understate the real window; they get no
 // entry until a runtime reports its own current context usage.
 const showSessionInfoRing = computed(() => !isWelcome.value && !!activeSession.value && !activeUsesExternalAgentComposer.value)
-const activeACPAgentId = computed(() => normalizeAgentID(activeSessionMetadata.value.acp_agent_id))
+// A session runs its Agent instance's profile; a draft names the one it
+// stages.
+const activeACPAgentId = computed(() => {
+  const target = activeChatTarget.value
+  if (target.session) return sessionAgentProvider(target.runtimeType, target.session, botAgents.value)
+  return normalizeAgentID(chatStore.pendingExternalAgentStateFor(paneTarget.value)?.input.agentId)
+})
 const composerAgent = computed(() => {
   if (!activeUsesExternalAgentComposer.value) return null
   return botAgents.value.find(agent => agent.id === activeBotAgentID.value) ?? {
@@ -1982,14 +2044,12 @@ const composerAgentName = computed(() => composerAgent.value
   ? botAgentName(composerAgent.value)
   : t('chat.agentMemoh'))
 const activeACPProjectPath = computed(() => String(activeSessionMetadata.value.project_path ?? '').trim())
-const activeACPProjectMode = computed(() => String(activeSessionMetadata.value.acp_project_mode ?? '').trim())
 const acpOperationScope = computed(() => JSON.stringify([
   paneTarget.value.botId,
   paneTarget.value.sessionId,
   paneTarget.value.viewId,
   activeACPAgentId.value,
   activeACPProjectPath.value,
-  activeACPProjectMode.value,
 ]))
 const acpConfigChanging = computed(() => acpConfigChangeScope.value === acpOperationScope.value)
 function messageMatchesForkSource(message: ChatMessage): boolean {
@@ -2181,15 +2241,20 @@ const runtimeControls = useRuntimeControls({
 const codexUsageAgentId = computed(() => {
   if (activeDirectRuntime.value !== BOT_AGENT_RUNTIME_CODEX) return ''
   const agent = botAgents.value.find(item => item.id === activeBotAgentID.value)
-  return agent?.metadata?.auth === 'chatgpt' && agent.agent_credential_id ? agent.id ?? '' : ''
+  return agent?.metadata?.auth === 'chatgpt' ? agent.id ?? '' : ''
 })
+// Reading usage starts Codex when it is not running, so it is read only once a
+// turn of this Agent has ended here, while Codex is still up.
+const codexUsageTurnAgentId = ref('')
 const codexUsage = useCodexUsage({
   botId: computed(() => currentBotId.value ?? ''),
   botAgentId: codexUsageAgentId,
-  enabled: () => isVisible.value,
+  enabled: () => isVisible.value && codexUsageTurnAgentId.value === codexUsageAgentId.value,
 })
 watch(streaming, (now, was) => {
-  if (was && !now && codexUsageAgentId.value && isVisible.value) void codexUsage.refetch()
+  if (!was || now || !codexUsageAgentId.value || !isVisible.value) return
+  if (codexUsageTurnAgentId.value === codexUsageAgentId.value) void codexUsage.refetch()
+  else codexUsageTurnAgentId.value = codexUsageAgentId.value
 })
 // Dismissal holds until the window resets: a new reset time is a new key.
 const dismissedCodexUsageNotices = useLocalStorage<Record<string, string>>('memoh:codex-usage-dismissed', {})
@@ -2784,7 +2849,6 @@ type DefaultExternalAgentSettings = {
   chat_runtime?: string
   chat_acp_agent_id?: string
   chat_acp_project_path?: string
-  chat_acp_project_mode?: string
 }
 
 type DefaultExternalAgentAvailability = {
@@ -2840,7 +2904,6 @@ const defaultExternalAgentAvailability = computed<DefaultExternalAgentAvailabili
       runtime: normalizeBotAgentRuntime(agent.runtime) || BOT_AGENT_RUNTIME_ACP,
       agentId,
       projectPath: settings.chat_acp_project_path?.trim() || EXTERNAL_AGENT_DEFAULT_PROJECT_PATH,
-      projectMode: settings.chat_acp_project_mode?.trim() || EXTERNAL_AGENT_DEFAULT_PROJECT_MODE,
     },
     messageKey: '',
     loading: false,
@@ -2870,6 +2933,16 @@ const activeModelSupportsReasoning = computed(() => activeModelReasoning.value?.
 const composerHasNoModel = computed(() =>
   hasNoComposerModel(activeUsesExternalAgentComposer.value, overrideModelId.value),
 )
+// While the bot's settings or this view's remembered pair are still loading,
+// an empty model is not known to be missing yet: the send waits instead of
+// reporting it, and the picker reads Loading rather than None.
+// A session's remembered model arrives with its summary, so a summary still
+// on its way counts as loading too; a failed one shows its own retry notice.
+const composerModelResolving = computed(() =>
+  (!!currentBotId.value && botSettingsStatus.value === 'pending')
+  || paneView.value.pairSync.refreshing.value
+  || (activeSessionSummaryUnresolved.value && !activeSessionSummaryFailed.value),
+)
 
 const selectedModelLabel = computed(() => {
   const current = composerModels.value.find(model => model.id === composerModelId.value)
@@ -2881,7 +2954,8 @@ const selectedModelLabel = computed(() => {
   if (activeDirectRuntime.value === BOT_AGENT_RUNTIME_CODEX) {
     return composerModelsLoading.value ? t('common.loading') : t('chat.modelOverride')
   }
-  return composerHasNoModel.value ? t('common.none') : composerDefaultModelLabel.value
+  if (composerHasNoModel.value) return composerModelResolving.value ? t('common.loading') : t('common.none')
+  return composerDefaultModelLabel.value
 })
 
 const nativeDisplayedEffort = computed(() => displayedEffort(overrideReasoningEffort.value, activeModelReasoning.value))
@@ -2934,7 +3008,6 @@ const pairRuntimeIdentity = computed(() => JSON.stringify([
   activeBotAgentID.value,
   activeACPAgentId.value,
   activeACPProjectPath.value,
-  activeACPProjectMode.value,
 ]))
 // Registered before the ACP config watchers below so a reset lands before
 // reconcile re-seeds from the new runtime's own state.
@@ -3289,7 +3362,7 @@ const {
 const queueSubmissionGate = shallowReactive(new SessionQueueSubmissionGate())
 const composerQueueCommand = computed(() => parseSessionQueueCommand(inputText.value, composerRuntimeCommands.value))
 const composerPlaceholder = computed(() => {
-  if (activeChatReadOnly.value) return t('chat.readonlyHint')
+  if (composerReadOnly.value) return t('chat.readonlyHint')
   if (!streaming.value) return t(goalDraftEnabled.value ? 'chat.goal.placeholder' : planModeEnabled.value ? 'chat.planMode.placeholder' : 'chat.inputPlaceholder')
   return t('chat.inputPlaceholder')
 })
@@ -3322,9 +3395,13 @@ const composerAction = computed(() => resolveComposerAction({
   active: isActive.value,
   hasBot: !!currentBotId.value,
   hasSession: !!activeSessionId.value,
-  readOnly: activeChatReadOnly.value,
-  loadingMessages: loadingMessages.value,
-  configPending: composerAgentConfigPending.value ? 'agent' : runtimeModeChanging.value ? 'mode' : false,
+  readOnly: composerReadOnly.value,
+  // An unresolved session summary holds the send the same way loading history does.
+  loadingMessages: loadingMessages.value || activeSessionSummaryUnresolved.value,
+  configPending: composerAgentConfigPending.value ? 'agent'
+    : runtimeModeChanging.value ? 'mode'
+      : composerHasNoModel.value && composerModelResolving.value ? 'model'
+        : false,
   hasNoModel: composerHasNoModel.value,
   modeUnavailable: !!runtimeModeUnavailableReason.value,
   modeChangeDisabled: runtimeModeDisabled.value,
@@ -3406,9 +3483,11 @@ useComposerKeyboardFocus({
   textarea: textareaEl,
   enabled: () => isActive.value && isVisible.value,
   available: () => (router.currentRoute.value.name === 'home' || router.currentRoute.value.name === 'bot')
-    && !!currentBotId.value && !activeChatReadOnly.value
+    && !!currentBotId.value && !composerReadOnly.value
     && voiceInputState.value === 'idle',
-  ready: () => !loadingMessages.value && !composerPlacementPending.value,
+  // Nothing holds the composer back while history loads; a disabled
+  // textarea (first send in flight) is retried when it re-enables.
+  ready: () => true,
   owner: () => `${paneTarget.value.botId}:${paneTarget.value.viewId}:${paneTarget.value.sessionId ?? ''}`,
   request: () => workspaceTabs.pendingChatInputFocus?.panelId === props.tabId
     && workspaceTabs.pendingChatInputFocus.botId === paneTarget.value.botId
@@ -3743,7 +3822,7 @@ const replaceDraftConfirm = useAsyncConfirm()
 const { lastPrefilled } = useComposerPrefillConsumer({
   botId: () => paneTarget.value.botId,
   active: () => isActive.value,
-  writable: () => !activeChatReadOnly.value,
+  writable: () => !composerReadOnly.value,
   ready: () => !loadingChats.value,
   currentText: () => inputText.value,
   // Focus the composer first: the dialog returns focus to whatever held it

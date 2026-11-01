@@ -237,7 +237,7 @@ RLS 策略与现有表一致。
 - `internal/workspacedeps/service.go`：暴露“是否被镜像提供”与“按 dep 列出安装状态”的查询，供包级服务复用；删除独立 install 与 remove 的 handler 绑定，但保留服务方法。
 - `internal/connectors/service.go`：新增按 type 查找 bot 上 active connection 的方法。
 - `internal/handlers/apps.go` 新增，`supermarket.go`、`supermarket_skills.go`、`workspace_dependencies.go`、`connectors.go`、`containerd.go` 调整路由。
-- `internal/agent/runtime/codex`、`claudecode` 的依赖启用路径改为规范包。
+- `internal/agent/runtime/external/codex`、`claudecode` 的依赖启用路径改为规范包。
 - `cmd/internal/core/module.go`、`providers.go` 注册新服务。
 - `docs/design/workspace-dependencies.md` 补一节说明与 app 的关系。
 

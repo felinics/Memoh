@@ -355,3 +355,11 @@ WHERE team_id = public.memoh_current_team_id()
   AND session_id = sqlc.arg(session_id)
   AND tool_call_id = ANY(sqlc.arg(tool_call_ids)::text[])
 ORDER BY created_at ASC, short_id ASC;
+
+-- name: ListUserInputsByBotIDs :many
+SELECT *
+FROM user_input_requests
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id)
+  AND id = ANY(sqlc.arg(ids)::uuid[])
+ORDER BY created_at ASC, short_id ASC;

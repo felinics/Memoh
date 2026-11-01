@@ -262,6 +262,17 @@ type BotDependencyInstallation struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
+type BotHistoryCheckpoint struct {
+	ID             pgtype.UUID        `json:"id"`
+	TeamID         pgtype.UUID        `json:"team_id"`
+	SessionID      pgtype.UUID        `json:"session_id"`
+	ParentID       pgtype.UUID        `json:"parent_id"`
+	TurnPosition   int64              `json:"turn_position"`
+	TurnMessageSeq int64              `json:"turn_message_seq"`
+	Items          []byte             `json:"items"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type BotHistoryMessage struct {
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
@@ -277,7 +288,6 @@ type BotHistoryMessage struct {
 	SessionMode             string             `json:"session_mode"`
 	RuntimeType             string             `json:"runtime_type"`
 	ModelID                 pgtype.UUID        `json:"model_id"`
-	CompactID               pgtype.UUID        `json:"compact_id"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	TurnID                  pgtype.UUID        `json:"turn_id"`
@@ -308,27 +318,18 @@ type BotHistoryMessageAsset struct {
 }
 
 type BotHistoryMessageCompact struct {
-	ID              pgtype.UUID        `json:"id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	SessionID       pgtype.UUID        `json:"session_id"`
-	Status          string             `json:"status"`
-	Summary         string             `json:"summary"`
-	MessageCount    int32              `json:"message_count"`
-	ErrorMessage    string             `json:"error_message"`
-	Usage           []byte             `json:"usage"`
-	ModelID         pgtype.UUID        `json:"model_id"`
-	ArtifactVersion int32              `json:"artifact_version"`
-	Coverage        []byte             `json:"coverage"`
-	AnchorStartMs   int64              `json:"anchor_start_ms"`
-	AnchorEndMs     int64              `json:"anchor_end_ms"`
-	ArtifactLevel   int32              `json:"artifact_level"`
-	ParentIds       []pgtype.UUID      `json:"parent_ids"`
-	SupersededBy    pgtype.UUID        `json:"superseded_by"`
-	SupersededAt    pgtype.Timestamptz `json:"superseded_at"`
-	CompactionEpoch int64              `json:"compaction_epoch"`
-	StartedAt       pgtype.Timestamptz `json:"started_at"`
-	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
-	TeamID          pgtype.UUID        `json:"team_id"`
+	ID           pgtype.UUID        `json:"id"`
+	BotID        pgtype.UUID        `json:"bot_id"`
+	SessionID    pgtype.UUID        `json:"session_id"`
+	Status       string             `json:"status"`
+	Summary      string             `json:"summary"`
+	MessageCount int32              `json:"message_count"`
+	ErrorMessage string             `json:"error_message"`
+	Usage        []byte             `json:"usage"`
+	ModelID      pgtype.UUID        `json:"model_id"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 }
 
 type BotMemoryUsage struct {
@@ -369,7 +370,7 @@ type BotSession struct {
 	Title                    string             `json:"title"`
 	Metadata                 []byte             `json:"metadata"`
 	NextTurnPosition         int64              `json:"next_turn_position"`
-	CompactionEpoch          int64              `json:"compaction_epoch"`
+	HistoryCheckpointID      pgtype.UUID        `json:"history_checkpoint_id"`
 	RuntimeFencingToken      int64              `json:"runtime_fencing_token"`
 	RuntimeResetToken        pgtype.UUID        `json:"runtime_reset_token"`
 	RuntimeResetExpiresAt    pgtype.Timestamptz `json:"runtime_reset_expires_at"`
@@ -448,7 +449,6 @@ type BotVisibleHistoryMessage struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
-	CompactID               pgtype.UUID        `json:"compact_id"`
 	SessionMode             string             `json:"session_mode"`
 	RuntimeType             string             `json:"runtime_type"`
 	ModelID                 pgtype.UUID        `json:"model_id"`

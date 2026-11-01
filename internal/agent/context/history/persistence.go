@@ -76,8 +76,9 @@ func StoredModelMessageToSDKMessage(message turn.ModelMessage) sdk.Message {
 }
 
 // MessageContentHash identifies a stored message version independently of
-// encoding and usage accounting. Capture it before replay projections; durable
-// artifact coverage additionally validates the full source payload at commit.
+// encoding and usage accounting. Capture it before replay projections: it is
+// the key a rendered message is matched back to the record it was loaded
+// from by.
 func MessageContentHash(message turn.ModelMessage) string {
 	sent := StoredModelMessageToSDKMessage(message)
 	sent.Usage = nil

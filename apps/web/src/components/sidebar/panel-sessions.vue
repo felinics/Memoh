@@ -116,6 +116,8 @@ import NeedsYouInbox from './needs-you-inbox.vue'
 import Recents from './recents.vue'
 import SessionSelectionBar from './session-selection-bar.vue'
 import { createSessionSelection, SessionSelectionKey } from './session-selection'
+import { SessionBotAgentsKey } from './session-bot-agents'
+import { useBotAgentsQuery } from '@/composables/api/useBotAgents'
 import '@/styles/sidebar-scroll.css'
 
 const { t } = useI18n()
@@ -143,6 +145,8 @@ const currentBot = computed(() =>
 // One selection for both Folders and Recents, so a batch can span them.
 const selection = createSessionSelection()
 provide(SessionSelectionKey, selection)
+const { data: botAgentData } = useBotAgentsQuery(currentBotId)
+provide(SessionBotAgentsKey, computed(() => botAgentData.value?.items))
 // Session ids are scoped to a bot; a selection never carries across.
 watch(currentBotId, () => selection.clear())
 // A session deleted any other way (its own menu, a failed send's cleanup)

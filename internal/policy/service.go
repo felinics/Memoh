@@ -48,7 +48,9 @@ func (s *Service) BotOwnerUserID(ctx context.Context, botID string) (string, err
 	if s == nil || s.bots == nil {
 		return "", errors.New("policy service not configured")
 	}
-	bot, err := s.bots.Get(ctx, strings.TrimSpace(botID))
+	// Every inbound channel message asks for the owner, so read the bare row:
+	// the runtime check summary Get attaches is not part of the answer.
+	bot, err := s.bots.GetForAccess(ctx, strings.TrimSpace(botID))
 	if err != nil {
 		return "", err
 	}

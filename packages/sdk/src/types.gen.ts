@@ -346,11 +346,8 @@ export type AgentcredentialAuthorization = {
     authorization_url?: string;
     expires_at: string;
     id: string;
-    interval_seconds?: number;
     runtime: string;
     status: 'pending' | 'ready' | 'claimed';
-    user_code?: string;
-    verification_url?: string;
 };
 
 export type AgentcredentialAuthorizationRequest = {
@@ -1606,16 +1603,21 @@ export type ExternalReasoningEffortOption = {
     name?: string;
 };
 
-export type ExternalagentCodexUsageResponse = {
-    limit_reached: boolean;
-    windows: Array<ExternalagentCodexUsageWindow>;
+export type ExternalagentAgentAccountResponse = {
+    email?: string;
+    signed_in: boolean;
 };
 
-export type ExternalagentCodexUsageWindow = {
+export type ExternalagentAgentQuotaResponse = {
+    limit_reached: boolean;
+    windows: Array<ExternalagentAgentQuotaWindow>;
+};
+
+export type ExternalagentAgentQuotaWindow = {
     resets_at?: string;
     used_percent: number;
     /**
-     * WindowMinutes is 0 when the backend does not report the window length.
+     * WindowMinutes is 0 when the runtime does not report the window length.
      */
     window_minutes: number;
 };
@@ -3003,16 +3005,6 @@ export type HandlersWorkspaceRemovalResponse = {
     updated_at?: string;
 };
 
-export type HandlersAcpRuntimeCreateRequest = {
-    acp_agent_id?: string;
-    /**
-     * BotAgentID names the Agent instance whose setup launches the runtime;
-     * only a session bound to the same instance can later adopt it.
-     */
-    bot_agent_id?: string;
-    project_path?: string;
-};
-
 export type HandlersAcpRuntimeModeRequest = {
     mode_id: string;
 };
@@ -3049,12 +3041,6 @@ export type HandlersBrowserSessionKeepAliveResponse = {
 };
 
 export type HandlersCreateSessionRequest = {
-    /**
-     * ACPRuntimeID optionally binds a warm pre-session runtime (created via
-     * POST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a
-     * transient in-memory handle reference, never persisted in metadata.
-     */
-    acp_runtime_id?: string;
     bot_agent_id?: string;
     channel_type?: string;
     metadata?: {
@@ -4126,7 +4112,7 @@ export type SearchprovidersProviderMeta = {
     provider?: string;
 };
 
-export type SearchprovidersProviderName = 'brave' | 'bing' | 'google' | 'tavily' | 'sogou' | 'serper' | 'searxng' | 'jina' | 'exa' | 'bocha' | 'duckduckgo' | 'yandex';
+export type SearchprovidersProviderName = 'brave' | 'bing' | 'google' | 'tavily' | 'sogou' | 'serper' | 'searxng' | 'jina' | 'exa' | 'bocha' | 'duckduckgo' | 'yandex' | 'deepseek';
 
 export type SearchprovidersUpdateRequest = {
     config?: {
@@ -4775,44 +4761,6 @@ export type PostAgentAuthorizationsByIdExchangeResponses = {
 };
 
 export type PostAgentAuthorizationsByIdExchangeResponse = PostAgentAuthorizationsByIdExchangeResponses[keyof PostAgentAuthorizationsByIdExchangeResponses];
-
-export type PostAgentAuthorizationsByIdPollData = {
-    body?: never;
-    path: {
-        /**
-         * Authorization ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/agent-authorizations/{id}/poll';
-};
-
-export type PostAgentAuthorizationsByIdPollErrors = {
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Gone
-     */
-    410: ServerProblem;
-    /**
-     * Service Unavailable
-     */
-    503: ServerProblem;
-};
-
-export type PostAgentAuthorizationsByIdPollError = PostAgentAuthorizationsByIdPollErrors[keyof PostAgentAuthorizationsByIdPollErrors];
-
-export type PostAgentAuthorizationsByIdPollResponses = {
-    /**
-     * OK
-     */
-    200: AgentcredentialAuthorization;
-};
-
-export type PostAgentAuthorizationsByIdPollResponse = PostAgentAuthorizationsByIdPollResponses[keyof PostAgentAuthorizationsByIdPollResponses];
 
 export type PostAuthLoginData = {
     /**
@@ -5515,177 +5463,36 @@ export type PutBotsByBotIdAclRulesByRuleIdResponses = {
 
 export type PutBotsByBotIdAclRulesByRuleIdResponse = PutBotsByBotIdAclRulesByRuleIdResponses[keyof PutBotsByBotIdAclRulesByRuleIdResponses];
 
-export type PostBotsByBotIdAcpRuntimesData = {
-    /**
-     * Runtime spec
-     */
-    body: HandlersAcpRuntimeCreateRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes';
-};
-
-export type PostBotsByBotIdAcpRuntimesErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Not Found
-     */
-    404: ServerProblem;
-    /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
-     * Too Many Requests
-     */
-    429: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-};
-
-export type PostBotsByBotIdAcpRuntimesError = PostBotsByBotIdAcpRuntimesErrors[keyof PostBotsByBotIdAcpRuntimesErrors];
-
-export type PostBotsByBotIdAcpRuntimesResponses = {
-    /**
-     * OK
-     */
-    200: AcpagentRuntimeStatus;
-};
-
-export type PostBotsByBotIdAcpRuntimesResponse = PostBotsByBotIdAcpRuntimesResponses[keyof PostBotsByBotIdAcpRuntimesResponses];
-
-export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdData = {
+export type GetBotsByBotIdAcpOptionsData = {
     body?: never;
     path: {
         /**
          * Bot ID
          */
         bot_id: string;
-        /**
-         * Runtime ID
-         */
-        runtime_id: string;
     };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}';
-};
-
-export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Not Found
-     */
-    404: ServerProblem;
-    /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-};
-
-export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdError = DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors[keyof DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors];
-
-export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
-export type GetBotsByBotIdAcpRuntimesByRuntimeIdData = {
-    body?: never;
-    path: {
+    query: {
         /**
-         * Bot ID
+         * ACP agent ID
          */
-        bot_id: string;
+        acp_agent_id: string;
         /**
-         * Runtime ID
+         * Agent instance ID
          */
-        runtime_id: string;
+        bot_agent_id?: string;
+        /**
+         * Project the conversation will run in; /data when omitted
+         */
+        project_path?: string;
+        /**
+         * Model whose reasoning efforts to report; the agent's current model when omitted
+         */
+        model_id?: string;
     };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}';
+    url: '/bots/{bot_id}/acp-options';
 };
 
-export type GetBotsByBotIdAcpRuntimesByRuntimeIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Not Found
-     */
-    404: ServerProblem;
-    /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-};
-
-export type GetBotsByBotIdAcpRuntimesByRuntimeIdError = GetBotsByBotIdAcpRuntimesByRuntimeIdErrors[keyof GetBotsByBotIdAcpRuntimesByRuntimeIdErrors];
-
-export type GetBotsByBotIdAcpRuntimesByRuntimeIdResponses = {
-    /**
-     * OK
-     */
-    200: AcpagentRuntimeStatus;
-};
-
-export type GetBotsByBotIdAcpRuntimesByRuntimeIdResponse = GetBotsByBotIdAcpRuntimesByRuntimeIdResponses[keyof GetBotsByBotIdAcpRuntimesByRuntimeIdResponses];
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeData = {
-    /**
-     * Mode selection
-     */
-    body: HandlersAcpRuntimeModeRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Runtime ID
-         */
-        runtime_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}/mode';
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors = {
+export type GetBotsByBotIdAcpOptionsErrors = {
     /**
      * Bad Request
      */
@@ -5712,130 +5519,16 @@ export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors = {
     502: ServerProblem;
 };
 
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeError = PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors];
+export type GetBotsByBotIdAcpOptionsError = GetBotsByBotIdAcpOptionsErrors[keyof GetBotsByBotIdAcpOptionsErrors];
 
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeResponses = {
+export type GetBotsByBotIdAcpOptionsResponses = {
     /**
      * OK
      */
     200: AcpagentRuntimeStatus;
 };
 
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeResponse = PatchBotsByBotIdAcpRuntimesByRuntimeIdModeResponses[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModeResponses];
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelData = {
-    /**
-     * Model selection
-     */
-    body: HandlersAcpRuntimeModelRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Runtime ID
-         */
-        runtime_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}/model';
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Not Found
-     */
-    404: ServerProblem;
-    /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-    /**
-     * Bad Gateway
-     */
-    502: ServerProblem;
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelError = PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors];
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponses = {
-    /**
-     * OK
-     */
-    200: AcpagentRuntimeStatus;
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponse = PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponses[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponses];
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningData = {
-    /**
-     * Reasoning effort selection
-     */
-    body: HandlersAcpRuntimeReasoningRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Runtime ID
-         */
-        runtime_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}/reasoning';
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Not Found
-     */
-    404: ServerProblem;
-    /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-    /**
-     * Bad Gateway
-     */
-    502: ServerProblem;
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningError = PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors];
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses = {
-    /**
-     * OK
-     */
-    200: AcpagentRuntimeStatus;
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponse = PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses];
+export type GetBotsByBotIdAcpOptionsResponse = GetBotsByBotIdAcpOptionsResponses[keyof GetBotsByBotIdAcpOptionsResponses];
 
 export type GetBotsByBotIdAgentsData = {
     body?: never;
@@ -6035,7 +5728,7 @@ export type PatchBotsByBotIdAgentsByIdResponses = {
 
 export type PatchBotsByBotIdAgentsByIdResponse = PatchBotsByBotIdAgentsByIdResponses[keyof PatchBotsByBotIdAgentsByIdResponses];
 
-export type GetBotsByBotIdAgentsByIdCodexUsageData = {
+export type GetBotsByBotIdAgentsByIdAccountData = {
     body?: never;
     path: {
         /**
@@ -6048,10 +5741,10 @@ export type GetBotsByBotIdAgentsByIdCodexUsageData = {
         id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/agents/{id}/codex/usage';
+    url: '/bots/{bot_id}/agents/{id}/account';
 };
 
-export type GetBotsByBotIdAgentsByIdCodexUsageErrors = {
+export type GetBotsByBotIdAgentsByIdAccountErrors = {
     /**
      * Forbidden
      */
@@ -6061,29 +5754,25 @@ export type GetBotsByBotIdAgentsByIdCodexUsageErrors = {
      */
     404: ServerProblem;
     /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
      * Unprocessable Entity
      */
     422: ServerProblem;
     /**
-     * Bad Gateway
+     * Service Unavailable
      */
-    502: ServerProblem;
+    503: ServerProblem;
 };
 
-export type GetBotsByBotIdAgentsByIdCodexUsageError = GetBotsByBotIdAgentsByIdCodexUsageErrors[keyof GetBotsByBotIdAgentsByIdCodexUsageErrors];
+export type GetBotsByBotIdAgentsByIdAccountError = GetBotsByBotIdAgentsByIdAccountErrors[keyof GetBotsByBotIdAgentsByIdAccountErrors];
 
-export type GetBotsByBotIdAgentsByIdCodexUsageResponses = {
+export type GetBotsByBotIdAgentsByIdAccountResponses = {
     /**
      * OK
      */
-    200: ExternalagentCodexUsageResponse;
+    200: ExternalagentAgentAccountResponse;
 };
 
-export type GetBotsByBotIdAgentsByIdCodexUsageResponse = GetBotsByBotIdAgentsByIdCodexUsageResponses[keyof GetBotsByBotIdAgentsByIdCodexUsageResponses];
+export type GetBotsByBotIdAgentsByIdAccountResponse = GetBotsByBotIdAgentsByIdAccountResponses[keyof GetBotsByBotIdAgentsByIdAccountResponses];
 
 export type DeleteBotsByBotIdAgentsByIdCredentialData = {
     body?: never;
@@ -6441,6 +6130,52 @@ export type GetBotsByBotIdAgentsByIdModelsResponses = {
 };
 
 export type GetBotsByBotIdAgentsByIdModelsResponse = GetBotsByBotIdAgentsByIdModelsResponses[keyof GetBotsByBotIdAgentsByIdModelsResponses];
+
+export type GetBotsByBotIdAgentsByIdQuotaData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}/quota';
+};
+
+export type GetBotsByBotIdAgentsByIdQuotaErrors = {
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ServerProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ServerProblem;
+};
+
+export type GetBotsByBotIdAgentsByIdQuotaError = GetBotsByBotIdAgentsByIdQuotaErrors[keyof GetBotsByBotIdAgentsByIdQuotaErrors];
+
+export type GetBotsByBotIdAgentsByIdQuotaResponses = {
+    /**
+     * OK
+     */
+    200: ExternalagentAgentQuotaResponse;
+};
+
+export type GetBotsByBotIdAgentsByIdQuotaResponse = GetBotsByBotIdAgentsByIdQuotaResponses[keyof GetBotsByBotIdAgentsByIdQuotaResponses];
 
 export type GetBotsByBotIdAgentsByIdRuntimeControlsData = {
     body?: never;
@@ -11746,6 +11481,54 @@ export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses = {
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponse = PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses[keyof PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses];
+
+export type DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/acp-runtime/native-session';
+};
+
+export type DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Conflict
+     */
+    409: ServerProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionError = DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionErrors[keyof DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionErrors];
+
+export type DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
 
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningData = {
     /**

@@ -20,7 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/acl"
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botbackup/secure"
 	"github.com/felinics/memoh/internal/bots"
@@ -494,20 +494,20 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 			return ImportResult{}, err
 		}
 	}
-	var releaseACPRuntimeReset func()
-	if shouldGateOverwriteACPRuntimes(opts) && s.acpRuntimes == nil {
+	var releaseRuntimeReset func()
+	if shouldGateOverwriteRuntimes(opts) && s.runtimeResets == nil {
 		return ImportResult{}, ErrHistoryResetUnavailable
 	}
-	if shouldGateOverwriteACPRuntimes(opts) {
+	if shouldGateOverwriteRuntimes(opts) {
 		target := strings.TrimSpace(opts.TargetBotID)
-		ctx, releaseACPRuntimeReset, err = s.acpRuntimes.BeginBotHistoryReset(ctx, target)
+		ctx, releaseRuntimeReset, err = s.runtimeResets.BeginBotHistoryReset(ctx, target)
 		if err != nil {
 			return ImportResult{}, errors.Join(
 				ErrHistoryResetUnavailable,
-				fmt.Errorf("begin ACP runtime reset for overwrite import: %w", err),
+				fmt.Errorf("begin runtime reset for overwrite import: %w", err),
 			)
 		}
-		defer releaseACPRuntimeReset()
+		defer releaseRuntimeReset()
 	}
 	targetBotID, created, err := s.restoreBot(ctx, actorUserID, profile, opts)
 	if err != nil {
@@ -538,7 +538,7 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 	// mutate database or workspace state. This short committed transaction is
 	// intentionally before applyRestore: a process crash during an external
 	// workspace transfer must not roll the epoch invalidation back.
-	if _, fenced := runtimefence.ResetFromContext(ctx); releaseACPRuntimeReset != nil && fenced {
+	if _, fenced := runtimefence.ResetFromContext(ctx); releaseRuntimeReset != nil && fenced {
 		botUUID, parseErr := db.ParseUUID(targetBotID)
 		if parseErr != nil {
 			return ImportResult{}, parseErr
@@ -899,7 +899,7 @@ func (s *Service) restoreBot(ctx context.Context, actorUserID string, profile bo
 	return created.ID, true, nil
 }
 
-func shouldGateOverwriteACPRuntimes(opts ImportOptions) bool {
+func shouldGateOverwriteRuntimes(opts ImportOptions) bool {
 	if normalizeImportMode(opts.Mode) != ImportModeOverwrite {
 		return false
 	}

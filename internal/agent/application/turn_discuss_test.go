@@ -23,6 +23,7 @@ import (
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/contextview"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 type fakeAgentStreamer struct {
@@ -120,6 +121,7 @@ type testDiscussService interface {
 
 func newDiscussTestService(streamer testChatStreamer, agent testAgentStreamer, resolver testDiscussService) *Service {
 	service := newTurnTestService(streamer)
+	service.checkpoints = emptyHistoryCheckpoints()
 	if service.logger == nil {
 		service.logger = slog.New(slog.DiscardHandler)
 	}
@@ -665,7 +667,7 @@ func TestAdmittedDiscussBudgetFailurePersistsFailedBudgetLifecycle(t *testing.T)
 }
 
 func TestDiscussMetadataOnlyRejectionNeverStartsRuntime(t *testing.T) {
-	for _, runtimeType := range []string{sessionpkg.RuntimeModel, sessionpkg.RuntimeACPAgent, sessionpkg.RuntimeCodex} {
+	for _, runtimeType := range []string{sessionpkg.RuntimeModel, sessionpkg.RuntimeACPAgent, string(runtimekind.Codex)} {
 		t.Run(runtimeType, func(t *testing.T) {
 			runner := &fakeRunner{}
 			agent := &fakeAgentStreamer{}
@@ -944,7 +946,7 @@ func TestDiscussCarriesComposedMessagesThroughTypedFragments(t *testing.T) {
 	cmd.DiscussMessages = []turn.DiscussMessage{
 		{Role: "user", Content: "first user"},
 		{Role: "user", Content: "second user"},
-		{Role: "user", Content: "<summary>covered history</summary>", CompactionArtifactID: "artifact-1"},
+		{Role: "user", Content: "<summary>covered history</summary>", CompactionArtifactID: "artifact-1", Pinned: true},
 		{
 			Role:       "assistant",
 			Content:    "tool call fallback",

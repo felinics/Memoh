@@ -16,6 +16,7 @@ type fakeFlowService struct {
 	waitErr      error
 	waitBlocks   bool
 	rejectCalls  []string
+	cancelCalls  []string
 	rejectResult Request
 	rejectErr    error
 	getResult    Request
@@ -61,6 +62,19 @@ func (f *fakeFlowService) Reject(_ context.Context, approvalID, _, reason string
 		rejected.DecisionReason = reason
 	}
 	return rejected, nil
+}
+
+func (f *fakeFlowService) Cancel(_ context.Context, approvalID, reason string) (Request, error) {
+	f.cancelCalls = append(f.cancelCalls, approvalID+":"+reason)
+	if f.rejectErr != nil {
+		return Request{}, f.rejectErr
+	}
+	cancelled := f.rejectResult
+	cancelled.Status = StatusCancelled
+	if cancelled.DecisionReason == "" {
+		cancelled.DecisionReason = reason
+	}
+	return cancelled, nil
 }
 
 func (f *fakeFlowService) Get(context.Context, string) (Request, error) {
@@ -369,8 +383,8 @@ func TestRunFlowCallerCancellationPropagates(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("RunFlow() err = %v, want context.Canceled", err)
 	}
-	if len(svc.rejectCalls) != 1 || svc.rejectCalls[0] != "approval-1:tool approval aborted" {
-		t.Fatalf("reject calls = %v, want aborted cleanup", svc.rejectCalls)
+	if len(svc.rejectCalls) != 0 || len(svc.cancelCalls) != 1 || svc.cancelCalls[0] != "approval-1:tool approval aborted" {
+		t.Fatalf("reject calls = %v, cancel calls = %v, want the abort cancelled", svc.rejectCalls, svc.cancelCalls)
 	}
 }
 

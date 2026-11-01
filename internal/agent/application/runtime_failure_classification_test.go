@@ -269,39 +269,6 @@ func TestStreamRuntimeFailureKeepsPartialOutputUnchanged(t *testing.T) {
 	}
 }
 
-// A failed scheduled round is stored the same way: the output the runtime
-// produced, or an empty assistant row, carrying the failure code.
-func TestScheduledRuntimeFailureRoundHasNoFailureText(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		output   []sdk.Message
-		wantText string
-	}{
-		{name: "no output"},
-		{name: "partial output", output: []sdk.Message{sdk.AssistantMessage("partial answer")}, wantText: "partial answer"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			messages := &recordingMessageService{}
-			service := newACPLifecycleService(t, &recordingACPPrompter{}, messages, &recordingContextLifecycleStore{})
-			driver := noticeTestDriver{kind: "codex", prompt: func(context.Context, external.PromptInput) (external.PromptResult, error) {
-				return external.PromptResult{Output: tc.output}, apperror.New(apperror.CodeACPRuntimeBusy, nil)
-			}}
-			if _, err := service.triggerScheduleRuntime(context.Background(), lifecycleTestBotID, schedule.TriggerPayload{
-				SessionID: lifecycleTestSessionID, Command: "inspect", OwnerUserID: "user-1",
-			}, "", lifecycleTestRunID, driver); apperror.CodeOf(err) != apperror.CodeACPRuntimeBusy {
-				t.Fatalf("schedule error = %v, want %s", err, apperror.CodeACPRuntimeBusy)
-			}
-			last := messages.persisted[len(messages.persisted)-1]
-			if last.Role != "assistant" || persistedText(t, last.Content) != tc.wantText {
-				t.Fatalf("last persisted = %s %q, want assistant %q", last.Role, persistedText(t, last.Content), tc.wantText)
-			}
-			if got, _ := last.Metadata["error_code"].(string); got != string(apperror.CodeACPRuntimeBusy) {
-				t.Fatalf("error_code = %#v, want %s", last.Metadata["error_code"], apperror.CodeACPRuntimeBusy)
-			}
-		})
-	}
-}
-
 // The schedule log stores the text of the error a fire returns, and the API
 // serves it. A scheduled External Agent failure therefore reads as its code
 // alone, while the agent's own words stay behind it for the result record.
@@ -318,33 +285,6 @@ func TestScheduledRuntimeFailureTextIsItsCode(t *testing.T) {
 	}
 	if text := errs.Text(err); !strings.Contains(text, "SECRET") {
 		t.Fatalf("result record text = %q, want it to keep the agent's words", text)
-	}
-}
-
-// An IM turn that fails on configuration before anything ran leaves no round:
-// the user's message is removed and the failure goes to the caller.
-func TestStreamRuntimeChunksConfigurationFailureLeavesNoRound(t *testing.T) {
-	messages := &recordingMessageService{}
-	service := newACPLifecycleService(t, &recordingACPPrompter{}, messages, &recordingContextLifecycleStore{})
-	driver := noticeTestDriver{kind: "codex", prompt: func(context.Context, external.PromptInput) (external.PromptResult, error) {
-		return external.PromptResult{}, &external.DependencyMissingError{DependencyID: "codex"}
-	}}
-	chunkCh := make(chan StreamChunk, 64)
-	var failed error
-	service.streamRuntimeChunks(context.Background(), driver, ChatRequest{
-		BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID, RunID: lifecycleTestRunID, Query: "inspect",
-	}, chunkCh, func(err error) { failed = err })
-	close(chunkCh)
-	if apperror.CodeOf(failed) != apperror.CodeAgentDependencyMissing {
-		t.Fatalf("failure = %v, want %s", failed, apperror.CodeAgentDependencyMissing)
-	}
-	if len(messages.persisted) != 1 || messages.persisted[0].Role != "user" || len(messages.deleted) != 1 {
-		t.Fatalf("persisted = %+v deleted = %v, want only the user message, then removed", messages.persisted, messages.deleted)
-	}
-	for _, ev := range drainStreamChunks(t, chunkCh) {
-		if ev.Type == native.EventError {
-			t.Fatalf("stream carried a failure frame %q, want the failure returned", ev.Code)
-		}
 	}
 }
 
@@ -373,7 +313,7 @@ func TestStreamRuntimeOutcomeWithoutDeliveredFailure(t *testing.T) {
 		err    error
 	}{
 		{name: "completed", result: external.PromptResult{Output: []sdk.Message{sdk.AssistantMessage("done")}, TurnCompleted: true}},
-		{name: "configuration failure", err: external.Unavailable(errors.New("bridge down"))},
+		{name: "configuration failure", err: external.Fail(external.FailureAuthRequired, errors.New("bridge down"))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			service := newACPLifecycleService(t, &recordingACPPrompter{}, &recordingMessageService{}, &recordingContextLifecycleStore{})

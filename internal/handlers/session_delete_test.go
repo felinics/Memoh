@@ -59,21 +59,14 @@ func (q *sessionDeleteQueries) SoftDeleteSession(ctx context.Context, id pgtype.
 	return nil
 }
 
-type recordingACPSessionCloser struct {
-	closed []string
-	active map[string]bool
+type recordingRuntimeResets struct {
 	// events shares the ordered call log with sessionDeleteQueries.
 	events     *[]string
 	resetBots  []string
 	resetScope []string
 }
 
-func (c *recordingACPSessionCloser) CloseSession(sessionID string) error {
-	c.closed = append(c.closed, sessionID)
-	return nil
-}
-
-func (c *recordingACPSessionCloser) BeginSessionHistoryReset(ctx context.Context, botID, sessionID string) (context.Context, func(), error) {
+func (c *recordingRuntimeResets) BeginSessionHistoryReset(ctx context.Context, botID, sessionID string) (context.Context, func(), error) {
 	if c.events != nil {
 		*c.events = append(*c.events, "begin")
 	}
@@ -85,14 +78,6 @@ func (c *recordingACPSessionCloser) BeginSessionHistoryReset(ctx context.Context
 		}
 	}
 	return context.WithValue(ctx, sessionDeleteResetCtxKey{}, true), release, nil
-}
-
-func (*recordingACPSessionCloser) BindRuntime(context.Context, string, string, string, string, string, string) error {
-	return nil
-}
-
-func (c *recordingACPSessionCloser) IsSessionActive(sessionID string) bool {
-	return c.active != nil && c.active[sessionID]
 }
 
 func TestDeleteACPAgentSessionSoftDeletesInsideResetLease(t *testing.T) {
@@ -110,7 +95,7 @@ func TestDeleteACPAgentSessionSoftDeletesInsideResetLease(t *testing.T) {
 		},
 		events: &events,
 	}
-	closer := &recordingACPSessionCloser{events: &events}
+	closer := &recordingRuntimeResets{events: &events}
 	handler := NewSessionHandler(
 		slog.Default(),
 		session.NewService(nil, queries, nil),
@@ -127,9 +112,6 @@ func TestDeleteACPAgentSessionSoftDeletesInsideResetLease(t *testing.T) {
 	}
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
-	}
-	if len(closer.closed) != 0 {
-		t.Fatalf("DeleteSession bypassed reset gate through CloseSession: %#v", closer.closed)
 	}
 	if !queries.softDeleteCalled || queries.softDeleteID != testUUID(sessionID) {
 		t.Fatalf("soft delete = %v id=%v, want session %s", queries.softDeleteCalled, queries.softDeleteID, sessionID)
@@ -150,7 +132,8 @@ func TestDeleteACPAgentSessionSoftDeletesInsideResetLease(t *testing.T) {
 	}
 }
 
-func TestDeleteChatSessionDoesNotCloseACPRuntime(t *testing.T) {
+// Every session, whatever runs it, is deleted through the one history reset.
+func TestDeleteChatSessionGoesThroughTheSameReset(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	sessionID := "33333333-3333-3333-3333-333333333333"
 	queries := &sessionDeleteQueries{
@@ -163,7 +146,7 @@ func TestDeleteChatSessionDoesNotCloseACPRuntime(t *testing.T) {
 			Metadata: testJSON(map[string]any{}),
 		},
 	}
-	closer := &recordingACPSessionCloser{}
+	closer := &recordingRuntimeResets{}
 	handler := NewSessionHandler(
 		slog.Default(),
 		session.NewService(nil, queries, nil),
@@ -175,11 +158,8 @@ func TestDeleteChatSessionDoesNotCloseACPRuntime(t *testing.T) {
 	if _, err := callDeleteSession(handler, botID, sessionID); err != nil {
 		t.Fatalf("DeleteSession() error = %v", err)
 	}
-	if len(closer.closed) != 0 {
-		t.Fatalf("chat session closed ACP runtime: %#v", closer.closed)
-	}
-	if len(closer.resetBots) != 0 {
-		t.Fatalf("chat session acquired an ACP reset lease: %#v", closer.resetBots)
+	if len(closer.resetScope) != 1 || closer.resetScope[0] != sessionID {
+		t.Fatalf("chat session reset scopes = %#v, want its own", closer.resetScope)
 	}
 	if !queries.softDeleteCalled {
 		t.Fatal("chat session was not soft-deleted")

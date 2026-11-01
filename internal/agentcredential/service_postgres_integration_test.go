@@ -88,40 +88,6 @@ func TestAttachResolveDetachLifecycle(t *testing.T) {
 	}
 }
 
-func TestUpdateSecretCASConflict(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	pool := openCredentialPostgres(t, ctx)
-	svc := newCredentialService(t, pool)
-	userID, botID, codexAgent, _ := createCredentialFixture(t, ctx, pool)
-
-	created, err := svc.AttachToBotAgent(ctx, userID, botID, codexAgent, CreateRequest{
-		Provider: ProviderOpenAI, AuthKind: AuthKindOpenAIAPIKey,
-		Secret: map[string]string{"api_key": "sk-rotate"},
-	})
-	if err != nil {
-		t.Fatalf("attach: %v", err)
-	}
-	updated, err := svc.UpdateSecretCAS(ctx, created.ID, created.CredentialVersion, map[string]string{"api_key": "sk-rotated"}, nil, nil)
-	if err != nil {
-		t.Fatalf("CAS update: %v", err)
-	}
-	if updated.CredentialVersion != created.CredentialVersion+1 {
-		t.Fatalf("version = %d, want %d", updated.CredentialVersion, created.CredentialVersion+1)
-	}
-	// A stale writer loses.
-	if _, err := svc.UpdateSecretCAS(ctx, created.ID, created.CredentialVersion, map[string]string{"api_key": "sk-stale"}, nil, nil); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("stale CAS error = %v, want ErrNotFound", err)
-	}
-	resolved, err := svc.ResolveForBotAgent(ctx, botID, codexAgent)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if resolved.Secret["api_key"] != "sk-rotated" {
-		t.Fatalf("secret = %q, want rotated value", resolved.Secret["api_key"])
-	}
-}
-
 func newCredentialService(t *testing.T, pool *pgxpool.Pool) *Service {
 	t.Helper()
 	cfg := config.Config{}

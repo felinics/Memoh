@@ -912,7 +912,7 @@ func (m *Manager) applyRoutedCommand(ctx context.Context, cmd Command) error {
 		return nil
 	}
 	if strings.TrimSpace(cmd.Type) == CommandHistoryReset {
-		return m.applyHistoryResetCommand(commandCtx, cmd, ctrl)
+		return m.applyHistoryResetCommand(ctx, commandCtx, cmd, ctrl)
 	}
 	if !cmd.DecisionResolved {
 		return ErrCommandTargetNotActive

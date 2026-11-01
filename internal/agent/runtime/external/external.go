@@ -14,7 +14,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
 
@@ -22,25 +21,8 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 )
 
-// Driver runs turns for one external agent runtime type.
-type Driver interface {
-	// RuntimeType is the thread runtime type this driver serves (e.g. "codex").
-	RuntimeType() string
-	// Prompt runs one turn. Stream events flow through input.Sink while the
-	// turn runs; the returned result carries the transcript for persistence.
-	// A context cancellation is an interrupt: the driver must stop the turn
-	// and still return the partial transcript it has.
-	Prompt(ctx context.Context, input PromptInput) (PromptResult, error)
-}
-
-type BotResetter interface {
-	ResetBot(botID string)
-}
-
-type BotAgentResetter interface {
-	ResetBotAgent(botID, botAgentID string)
-}
-
+// BotAgentAuthPurger signs an Agent's runtime out: it removes the login the
+// runtime keeps of its own.
 type BotAgentAuthPurger interface {
 	PurgeBotAgentAuth(ctx context.Context, botID, botAgentID string) error
 }
@@ -61,65 +43,6 @@ type ModelCatalogProvider interface {
 }
 
 var ErrModelCatalogUnavailable = errors.New("external agent model catalog unavailable")
-
-type Drivers []Driver
-
-func (drivers Drivers) ResetBot(botID string) {
-	for _, driver := range drivers {
-		if resetter, ok := driver.(BotResetter); ok {
-			resetter.ResetBot(botID)
-		}
-	}
-}
-
-func (drivers Drivers) ResetBotAgent(runtimeType, botID, botAgentID string) {
-	for _, driver := range drivers {
-		if driver == nil || driver.RuntimeType() != strings.TrimSpace(runtimeType) {
-			continue
-		}
-		if resetter, ok := driver.(BotAgentResetter); ok {
-			resetter.ResetBotAgent(botID, botAgentID)
-		}
-		return
-	}
-}
-
-func (drivers Drivers) PurgeBotAgentAuth(ctx context.Context, runtimeType, botID, botAgentID string) error {
-	for _, driver := range drivers {
-		if driver == nil || driver.RuntimeType() != strings.TrimSpace(runtimeType) {
-			continue
-		}
-		if purger, ok := driver.(BotAgentAuthPurger); ok {
-			return purger.PurgeBotAgentAuth(ctx, botID, botAgentID)
-		}
-		return nil
-	}
-	return nil
-}
-
-func (drivers Drivers) ModelCatalog(ctx context.Context, runtimeType string, request ModelCatalogRequest) (ModelCatalog, error) {
-	runtimeType = strings.TrimSpace(runtimeType)
-	for _, driver := range drivers {
-		if driver == nil || driver.RuntimeType() != runtimeType {
-			continue
-		}
-		provider, ok := driver.(ModelCatalogProvider)
-		if !ok {
-			return ModelCatalog{}, ErrModelCatalogUnavailable
-		}
-		return provider.ModelCatalog(ctx, request)
-	}
-	return ModelCatalog{}, ErrModelCatalogUnavailable
-}
-
-// RoundRollbackHandler is implemented by drivers that must repair runtime
-// state when a completed turn's round definitively rolled back (the runtime
-// remembers a turn the visible history lost). Drivers whose durable state is
-// authoritative on their own side simply omit it and the divergence is
-// logged.
-type RoundRollbackHandler interface {
-	OnRoundRolledBack(ctx context.Context, botID, threadID string)
-}
 
 // ThreadForker is implemented by runtimes with native conversation forking.
 // ForkThread derives a new runtime-side conversation from the session
@@ -283,49 +206,10 @@ type PromptResult struct {
 	// TurnCompleted reports whether the runtime finished the turn (as opposed
 	// to an interrupt or failure part-way).
 	TurnCompleted bool
-	// PublishHead asks the application to publish a completed round's run ID
-	// with its messages so warm runtimes can detect another process's progress.
-	PublishHead bool
-	// RoundMetadata carries driver-owned keys merged into the round's
-	// assistant-message metadata (provenance such as the ACP agent id).
-	RoundMetadata map[string]any
 	// RuntimeMetadata carries driver-owned metadata updates to merge back
 	// into the session's runtime metadata (e.g. a newly created thread id).
 	// Nil means no changes.
 	RuntimeMetadata map[string]any
-}
-
-// DependencyRequirer is implemented by drivers whose CLI is provisioned as a
-// managed workspace dependency. The CLI version is not part of
-// the declaration: the dependency manager installs whatever version the user
-// asks for (latest by default), and the runtime's own handshake warns when
-// the copy it talks to drifts from its protocol snapshot.
-type DependencyRequirer interface {
-	RequiredDependency() (depID string)
-}
-
-// DependencyRequirement is a driver's declared workspace dependency.
-type DependencyRequirement struct {
-	DependencyID string
-}
-
-// RequiredDependencies maps runtime type to the dependency each driver
-// declares. Drivers without a declaration (the generic ACP runtime) are
-// omitted.
-func (drivers Drivers) RequiredDependencies() map[string]DependencyRequirement {
-	out := map[string]DependencyRequirement{}
-	for _, driver := range drivers {
-		requirer, ok := driver.(DependencyRequirer)
-		if !ok {
-			continue
-		}
-		depID := strings.TrimSpace(requirer.RequiredDependency())
-		if depID == "" {
-			continue
-		}
-		out[strings.TrimSpace(driver.RuntimeType())] = DependencyRequirement{DependencyID: depID}
-	}
-	return out
 }
 
 // LauncherSource says which copy of a CLI a Launcher points at.

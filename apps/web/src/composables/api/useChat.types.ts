@@ -466,6 +466,9 @@ export interface RuntimeRunOperation {
 }
 
 export interface RuntimeCurrentRunView {
+  // A shutdown continuation answers this historical turn; run/turn_id still
+  // identify its execution and remain the target of runtime commands.
+  resume_turn?: UIAssistantTurn
   configuration_only?: boolean
   run_id: string
   turn_id: string

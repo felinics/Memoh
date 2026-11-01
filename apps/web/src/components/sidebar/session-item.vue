@@ -249,6 +249,7 @@ import { useUnreadStore } from '@/store/unread'
 import { useUserStore } from '@/store/user'
 import { canHoldUnread } from '@/utils/session-attention'
 import AttentionDot from './attention-dot.vue'
+import { SessionBotAgentsKey } from './session-bot-agents'
 
 const props = defineProps<{
   session: SessionSummary
@@ -328,10 +329,11 @@ const isIMSession = computed(() => {
   return ct !== '' && !WEB_CHANNELS.has(ct)
 })
 
+const botAgents = inject(SessionBotAgentsKey)
 const agentProvider = computed(() => sessionAgentProvider(
   normalizedRuntimeType(props.session),
-  props.session.runtime_metadata,
-  props.session.metadata,
+  props.session,
+  botAgents?.value,
 ))
 const isAgentSession = computed(() => isAgentRuntimeType(normalizedRuntimeType(props.session)))
 const isScheduleSession = computed(() => normalizedSessionMode(props.session) === 'schedule')

@@ -524,6 +524,32 @@ func TestServeReverseHTTPForwardsRequests(t *testing.T) {
 	}
 }
 
+// An agent may connect to a route the moment it is handed one, before the
+// broker has registered the route's stream; the request waits for it.
+func TestReverseHTTPRequestWaitsForItsRoute(t *testing.T) {
+	broker := bridgesvc.NewReverseHTTPBroker()
+	client := newTestClient(t, bridgesvc.New(bridgesvc.Options{ReverseHTTP: broker}))
+
+	got := make(chan string, 1)
+	go func() { got <- reverseHTTPTestRequest(t, broker, "/mcp/late") }()
+	time.Sleep(50 * time.Millisecond)
+	stop, err := client.ServeReverseHTTPRoute(t.Context(), "/mcp/late", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("late"))
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	select {
+	case body := <-got:
+		if body != "late" {
+			t.Fatalf("response = %q, want the route's handler", body)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("request did not reach the route registered after it")
+	}
+}
+
 func TestServeReverseHTTPRoutesConcurrentStreams(t *testing.T) {
 	broker := bridgesvc.NewReverseHTTPBroker()
 	client := newTestClient(t, bridgesvc.New(bridgesvc.Options{ReverseHTTP: broker}))

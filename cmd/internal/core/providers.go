@@ -35,15 +35,15 @@ import (
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	agentpayload "github.com/felinics/memoh/internal/agent/event/payload"
-	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
-	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
-	claudecoderuntime "github.com/felinics/memoh/internal/agent/runtime/claudecode"
-	codexruntime "github.com/felinics/memoh/internal/agent/runtime/codex"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	grokruntime "github.com/felinics/memoh/internal/agent/runtime/grok"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/external/acp"
+	"github.com/felinics/memoh/internal/agent/runtime/external/agentproc"
+	claudecoderuntime "github.com/felinics/memoh/internal/agent/runtime/external/claudecode"
+	codexruntime "github.com/felinics/memoh/internal/agent/runtime/external/codex"
+	grokruntime "github.com/felinics/memoh/internal/agent/runtime/external/grok"
+	"github.com/felinics/memoh/internal/agent/runtime/external/toolmount"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
-	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/agentcredential"
@@ -505,11 +505,10 @@ func (a *sessionCreatorAdapter) CreateScheduleSession(ctx context.Context, spec 
 	}
 	if strings.TrimSpace(spec.ACPAgentID) != "" {
 		input.RuntimeType = sessionpkg.RuntimeACPAgent
-		// The thread service derives the ACP runtime owner from
-		// CreatedByUserID and applies project-path defaults; the workdir
-		// override below wins when a workdir is bound.
+		// A schedule bound to no instance names its ACP agent; the thread
+		// binds the session to the bot's instance of it, derives the runtime
+		// owner from CreatedByUserID and applies project defaults.
 		input.Metadata = map[string]any{"acp_agent_id": spec.ACPAgentID}
-		input.RuntimeMetadata = map[string]any{"acp_agent_id": spec.ACPAgentID}
 	}
 	if strings.TrimSpace(spec.WorkdirID) != "" {
 		if a.workdirs == nil {
@@ -655,165 +654,118 @@ func startBotWorkspaceReconciler(lc fx.Lifecycle, workspaces *botworkspace.Servi
 	})
 }
 
-func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.Runner {
-	return acpclient.NewRunner(log, manager)
-}
-
-func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler, sessionRuntime *sessionruntime.Manager, botAgents *botagents.Service) *acpagent.SessionPool {
-	pool := acpagent.NewSessionPool(log, runner, botService, agentsessionadapter.NewSource(sessionService))
-	pool.SetAgentSetupResolver(botAgents)
-	pool.SetSessionRuntime(sessionRuntime)
-	pool.SetRuntimeStateStore(agentsessionadapter.NewRuntimeStateStore(queries))
-	pool.SetToolGateway(toolGateway)
-	pool.SetToolSessionContextStore(toolContexts)
-	pool.SetToolApprovalService(toolApproval)
-	pool.SetUserInputService(userInput)
-	containerdHandler.SetACPRuntimeResolver(pool)
-	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			pool.StartReaper(ctx)
-			return nil
-		},
-		OnStop: func(context.Context) error {
-			pool.CloseAll() //nolint:contextcheck // ACP shutdown must close subprocesses even after lifecycle ctx cancellation.
-			return nil
-		},
+func provideACPSessionPool(log *slog.Logger, manager *workspace.Manager, botService *bots.Service, procs *agentproc.Supervisor, sessionService *sessionpkg.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler, sessionRuntime *sessionruntime.Manager, botAgents *botagents.Service) *acpagent.SessionPool {
+	pool := acpagent.NewSessionPool(log, manager, botService, procs, acpagent.Deps{
+		Sessions:       agentsessionadapter.NewSource(sessionService),
+		Setups:         botAgents,
+		StateStore:     agentsessionadapter.NewRuntimeStateStore(queries),
+		SessionRuntime: sessionRuntime,
+		Tools:          toolGateway,
+		ToolContexts:   toolContexts,
+		Approval:       toolApproval,
+		UserInput:      userInput,
 	})
+	containerdHandler.SetACPRuntimeResolver(pool)
 	return pool
 }
 
-func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *codexruntime.Driver {
-	driver := codexruntime.NewDriver(
-		workspaceManager,
-		botAgents,
-		credentials,
-		toolApproval,
-		userInput,
-		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log},
-		log,
-	)
-	// The dependency service sits upstream of the drivers in the FX graph
-	// (workspace manager, store, catalog, background manager), so it can be
-	// handed over here; the setter only keeps the driver constructible
-	// without a resolver (tests, toolkit fallback).
-	driver.SetLauncherResolver(workspaceDeps)
+// provideAgentProcesses owns every long-lived external agent process; shutdown
+// closes them all at once. A history reset, of any runtime, closes the
+// processes in its scope once its runs have stopped.
+func provideAgentProcesses(lc fx.Lifecycle, log *slog.Logger, sessionRuntime *sessionruntime.Manager) *agentproc.Supervisor {
+	procs := agentproc.New(agentproc.Options{Logger: log.With(slog.String("component", "agent_processes"))})
+	sessionRuntime.SetHistoryResetHandler(func(ctx context.Context, scope sessionruntime.ResetScope) (func(), error) {
+		return procs.DrainConversations(ctx, scope.BotID, scope.SessionID)
+	})
 	lc.Append(fx.Hook{
-		OnStop: func(context.Context) error {
-			driver.CloseAll()
+		OnStop: func(ctx context.Context) error {
+			procs.Close(ctx)
 			return nil
 		},
 	})
-	return driver
+	return procs
 }
 
-func provideClaudeCodeDriver(log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *claudecoderuntime.Driver {
-	driver := claudecoderuntime.NewDriver(
-		workspaceManager,
-		botAgents,
-		credentials,
-		toolApproval,
-		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log},
-		log,
-	)
-	driver.SetLauncherResolver(workspaceDeps)
-	driver.SetUserInputService(userInput)
-	return driver
+func provideCodexDriver(log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service, procs *agentproc.Supervisor) *codexruntime.Driver {
+	return codexruntime.NewDriver(workspaceManager, botAgents, credentials, toolApproval, userInput,
+		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log}, workspaceDeps, procs, log)
 }
 
-func provideGrokDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *grokruntime.Driver {
-	driver := grokruntime.NewDriver(
-		workspaceManager,
-		botAgents,
-		credentials,
-		toolApproval,
-		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log},
-		log,
-	)
-	driver.SetLauncherResolver(workspaceDeps)
-	driver.SetUserInputService(userInput)
-	lc.Append(fx.Hook{
-		OnStop: func(context.Context) error {
-			driver.CloseAll() //nolint:contextcheck // shutdown must close every process and keep its login, whatever the lifecycle ctx.
-			return nil
-		},
-	})
-	return driver
+func provideClaudeCodeDriver(log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service, procs *agentproc.Supervisor) *claudecoderuntime.Driver {
+	return claudecoderuntime.NewDriver(workspaceManager, botAgents, credentials, toolApproval, userInput,
+		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log}, workspaceDeps, procs, log)
 }
 
-// directRuntimeLaunchers names the CLI command each direct runtime executes,
-// keyed by runtime type. validateDriverDependencies requires it to be the
-// primary command (provides[0]) of the dependency the driver declares: the
-// launcher resolver hands drivers the path of provides[0], so any other
-// arrangement would launch the wrong binary. A new direct runtime that
-// declares a dependency must be added here, or the Server refuses to start.
-var directRuntimeLaunchers = map[string]string{
-	codexruntime.RuntimeType:      "codex",
-	claudecoderuntime.RuntimeType: "claude",
-	grokruntime.RuntimeType:       "grok",
+func provideGrokDriver(log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service, procs *agentproc.Supervisor) *grokruntime.Driver {
+	return grokruntime.NewDriver(workspaceManager, botAgents, credentials, toolApproval, userInput,
+		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log}, workspaceDeps, procs, log)
 }
 
-// Built-in runtimes bind official dependency IDs to their launcher command.
-// The recipe itself is downloaded and validated by RemoteCatalog.
-var directRuntimeDependencies = workspacedeps.BuiltinLauncherCommands()
+// runtimeLauncherCommands binds each managed dependency an external runtime
+// declares to the command it executes. Workspace dependency discovery is
+// upstream of the drivers, so it reads their static declarations.
+func runtimeLauncherCommands() map[string]string {
+	out := map[string]string{}
+	for _, caps := range []external.Caps{codexruntime.Capabilities, claudecoderuntime.Capabilities, grokruntime.Capabilities} {
+		if caps.Dependency != "" {
+			out[caps.Dependency] = caps.Command
+		}
+	}
+	return out
+}
 
-func provideDirectAgentDrivers(codex *codexruntime.Driver, claude *claudecoderuntime.Driver, grok *grokruntime.Driver) (external.Drivers, error) {
-	drivers := external.Drivers{codex, claude, grok}
-	discovery, err := depcatalog.Discovery(directRuntimeDependencies)
+// provideRuntimeRegistry registers every external runtime. The Server refuses
+// to start when a driver's declaration disagrees with its implementation, or
+// a declared dependency's primary command is not the runtime's launcher.
+func provideRuntimeRegistry(acpPool *acpagent.SessionPool, codex *codexruntime.Driver, claude *claudecoderuntime.Driver, grok *grokruntime.Driver) (*external.Registry, error) {
+	registry, err := external.NewRegistry(acpagent.NewDriver(acpPool), codex, claude, grok)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateDriverDependencies(drivers, discovery); err != nil {
+	discovery, err := depcatalog.Discovery(runtimeLauncherCommands())
+	if err != nil {
 		return nil, err
 	}
-	return drivers, nil
+	if err := validateDriverDependencies(registry, discovery); err != nil {
+		return nil, err
+	}
+	return registry, nil
 }
 
-// validateDriverDependencies checks every driver that declares a workspace
-// dependency (external.DependencyRequirer): the dependency is in the catalog
-// and its primary command is the runtime's launcher. All violations are
-// reported together.
-func validateDriverDependencies(drivers external.Drivers, cat *depcatalog.Catalog) error {
+// validateDriverDependencies checks every runtime that declares a workspace
+// dependency: the dependency is in the catalog and its primary command is the
+// runtime's launcher, which the resolver hands drivers the path of. All
+// violations are reported together.
+func validateDriverDependencies(registry *external.Registry, cat *depcatalog.Catalog) error {
 	if cat == nil {
 		return errors.New("validate direct agent dependencies: catalog is nil")
 	}
-	requirements := drivers.RequiredDependencies()
-	runtimes := make([]string, 0, len(requirements))
-	for runtimeType := range requirements {
-		runtimes = append(runtimes, runtimeType)
-	}
-	sort.Strings(runtimes)
-
 	var errs []error
-	for _, runtimeType := range runtimes {
-		req := requirements[runtimeType]
-		fail := func(format string, args ...any) {
-			errs = append(errs, fmt.Errorf("direct runtime %q requires workspace dependency %q: %s", runtimeType, req.DependencyID, fmt.Sprintf(format, args...)))
+	for _, driver := range registry.All() {
+		caps := driver.Caps()
+		if caps.Dependency == "" {
+			continue
 		}
-		dep, ok := cat.Get(req.DependencyID)
+		fail := func(format string, args ...any) {
+			errs = append(errs, fmt.Errorf("runtime %q requires workspace dependency %q: %s", driver.RuntimeType(), caps.Dependency, fmt.Sprintf(format, args...)))
+		}
+		dep, ok := cat.Get(caps.Dependency)
 		if !ok {
 			fail("not in the catalog")
 			continue
 		}
-		command, known := directRuntimeLaunchers[runtimeType]
-		switch {
-		case !known:
-			fail("no launcher command registered in directRuntimeLaunchers")
-		case len(dep.Provides) == 0 || dep.Provides[0] != command:
-			fail("primary command %v (provides[0]) is not the runtime launcher %q", dep.Provides, command)
+		if len(dep.Provides) == 0 || dep.Provides[0] != caps.Command {
+			fail("primary command %v (provides[0]) is not the runtime launcher %q", dep.Provides, caps.Command)
 		}
 	}
 	return errors.Join(errs...)
 }
 
-func provideExternalAgentCodexHandler(log *slog.Logger, driver *codexruntime.Driver, botAgents *botagents.Service, botService *bots.Service, accountService *accounts.Service) *handlers.ExternalAgentCodexHandler {
-	return handlers.NewExternalAgentCodexHandler(log, driver, botAgents, botService, accountService)
+func provideExternalAgentLoginHandler(log *slog.Logger, runtimes *external.Registry, botAgents *botagents.Service, botService *bots.Service, accountService *accounts.Service) *handlers.ExternalAgentLoginHandler {
+	return handlers.NewExternalAgentLoginHandler(log, runtimes, botAgents, botService, accountService)
 }
 
-func provideExternalAgentLoginHandler(log *slog.Logger, drivers external.Drivers, botAgents *botagents.Service, botService *bots.Service, accountService *accounts.Service) *handlers.ExternalAgentLoginHandler {
-	return handlers.NewExternalAgentLoginHandler(log, drivers, botAgents, botService, accountService)
-}
-
-func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, directAgents external.Drivers, hookService *hookspkg.Service, sessionRuntime *sessionruntime.Manager, workdirService *workdir.Service, attentionService *attention.Service, cfg config.Config) *application.Service {
+func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, runtimes *external.Registry, hookService *hookspkg.Service, sessionRuntime *sessionruntime.Manager, workdirService *workdir.Service, attentionService *attention.Service, cfg config.Config) *application.Service {
 	service := application.NewService(log, modelsService, queries, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
 	service.SetResumeSecret(rc.JwtSecret)
 	service.SetResumeReadiness(func(ctx context.Context, botID, targetID string) error {
@@ -868,8 +820,7 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 	service.SetToolApprovalService(toolApproval)
 	service.SetUserInputService(userInput)
 	service.SetAttentionMarker(attentionService)
-	service.SetACPSessionPool(acpPool)
-	service.SetExternalRuntimes(directAgents...)
+	service.SetRuntimeRegistry(runtimes)
 	return service
 }
 
@@ -961,7 +912,7 @@ func provideWorkspaceDependencyCatalog(cfg config.Config, queries dbstore.Querie
 	if err != nil {
 		return nil, err
 	}
-	provider.SetRequiredCommands(directRuntimeDependencies)
+	provider.SetRequiredCommands(runtimeLauncherCommands())
 	provider.Configure(cfg.WorkspaceDependencies.CatalogRefreshInterval(), cfg.WorkspaceDependencies.Offline)
 	return provider, nil
 }
@@ -973,6 +924,8 @@ func provideWorkspaceDependencyService(log *slog.Logger, manager *workspace.Mana
 		Provider:  provider,
 		Logger:    log,
 		Cache:     workspacedeps.NewCache(cfg.WorkspaceDependencies.DiscoveryCacheTTL()),
+
+		LauncherCommands: runtimeLauncherCommands(),
 		ScriptEnv: func(context.Context) []string {
 			keys := make([]string, 0, len(cfg.WorkspaceDependencies.ScriptEnv))
 			for key := range cfg.WorkspaceDependencies.ScriptEnv {
@@ -1031,7 +984,7 @@ func startWorkspaceDependencyMaintenance(lc fx.Lifecycle, log *slog.Logger, serv
 	})
 }
 
-func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool, workdirStore dbstore.BotWorkdirStore) *botbackup.Service {
+func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, sessionRuntime *sessionruntime.Manager, workdirStore dbstore.BotWorkdirStore, sessionService *sessionpkg.Service) *botbackup.Service {
 	return botbackup.New(botbackup.Params{
 		Logger:          log,
 		DB:              conn,
@@ -1047,8 +1000,9 @@ func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbsto
 		SearchProviders: searchProviderService,
 		FetchProviders:  fetchProviderService,
 		Workspace:       manager,
-		ACPRuntimes:     acpPool,
+		RuntimeResets:   sessionRuntime,
 		Workdirs:        workdirStore,
+		Sessions:        sessionService,
 	})
 }
 
@@ -1197,12 +1151,8 @@ type acpRuntimePoolAdapter struct {
 	pool *acpagent.SessionPool
 }
 
-func (a *acpRuntimePoolAdapter) CreateAgentRuntime(ctx context.Context, botID, agentID, runtimeOwnerAccountID string) (agenttools.ACPRuntimeSummary, error) {
-	status, err := a.pool.CreateRuntime(ctx, acpagent.CreateRuntimeInput{
-		BotID:                 botID,
-		AgentID:               agentID,
-		RuntimeOwnerAccountID: runtimeOwnerAccountID,
-	})
+func (a *acpRuntimePoolAdapter) AgentOptions(ctx context.Context, botID, agentID string) (agenttools.ACPRuntimeSummary, error) {
+	status, err := a.pool.AgentOptions(ctx, acpagent.PromptInput{BotID: botID, AgentID: agentID})
 	if err != nil {
 		return agenttools.ACPRuntimeSummary{}, err
 	}
@@ -1223,10 +1173,6 @@ func (a *acpRuntimePoolAdapter) CreateAgentRuntime(ctx context.Context, botID, a
 		}
 	}
 	return summary, nil
-}
-
-func (a *acpRuntimePoolAdapter) CloseAgentRuntime(botID, runtimeID string) error {
-	return a.pool.CloseRuntime(botID, runtimeID)
 }
 
 func provideMediaStorage(provider bridge.Provider, cfg config.Config) storagepkg.Provider {
