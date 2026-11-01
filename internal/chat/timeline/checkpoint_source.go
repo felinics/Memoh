@@ -31,20 +31,6 @@ type HistoryCheckpoint struct {
 type CheckpointMessage struct {
 	// Kept reports whether the checkpoint leaves one of its rows raw.
 	Kept bool
-	// EventCursor is the cursor of the event its rows were written from, 0
-	// when unknown. A summary reads rows, so it knows the message as of that
-	// event.
-	EventCursor int64
-}
-
-// changedSince reports whether the segment carries a change to the message
-// after its rows were written: events past the one they were written from
-// or, when that is unknown, an edit.
-func (m CheckpointMessage) changedSince(segment RenderedSegment) bool {
-	if m.EventCursor > 0 {
-		return segment.LastEventCursor > m.EventCursor
-	}
-	return segment.EditedAtMs > 0
 }
 
 // CheckpointItem is one item of a HistoryCheckpoint: a summary or a row it
@@ -61,12 +47,11 @@ type CheckpointItem struct {
 
 // composes reports whether a segment the checkpoint does not hold composes
 // after it: one whose message has no context rows, or one whose rows the
-// checkpoint leaves raw, or one whose rows a summary folded when the message
-// changed since. A summary never read such a change, so the segment carries
-// it.
+// checkpoint leaves raw. A summary stands for a message it folded as its rows
+// recorded it, so an edit or delete after the fold does not bring it back.
 func (c HistoryCheckpoint) composes(segment RenderedSegment) bool {
 	message, ok := c.Messages[strings.TrimSpace(segment.MessageID)]
-	return !ok || message.Kept || message.changedSince(segment)
+	return !ok || message.Kept
 }
 
 // CheckpointRows reads the rows a history checkpoint keeps by reference.
@@ -151,7 +136,7 @@ func (s *CheckpointSource) Load(ctx context.Context, sessionID string, rc Render
 	}
 	projection.Messages = make(map[string]CheckpointMessage, len(classified))
 	for _, row := range classified {
-		projection.Messages[row.ExternalMessageID] = CheckpointMessage{Kept: row.Kept, EventCursor: row.EventCursor}
+		projection.Messages[row.ExternalMessageID] = CheckpointMessage{Kept: row.Kept}
 	}
 	return projection, nil
 }

@@ -336,6 +336,8 @@ Session replay MUST NOT require loading all events unbounded:
   single unbounded query (`ListSessionEventsBySession`,
   `ListHistoryMessagesAfterWithinBytes`, `ListHistoryTurnsByBot`).
 - Replay MUST operate under an explicit resident-bytes bound.
+- The database work of a page MUST scale with the events it reads, not with the
+  session's history: nothing a page computes may span the whole session.
 
 ### CM-RPL-002: Incremental projection
 

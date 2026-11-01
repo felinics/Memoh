@@ -129,39 +129,19 @@ func TestComposeContextWithCheckpointComposesWhatItLeavesRaw(t *testing.T) {
 	}
 }
 
-// A summary read the rows of a message as they were written. A folded
-// message changed after that, edited or deleted, composes after the head
-// with what the summary never read; one that did not change stays folded.
-func TestComposeContextWithCheckpointComposesAFoldedMessageThatChangedSince(t *testing.T) {
-	changed := func(id string, atMs, cursor int64, text string) RenderedSegment {
-		segment := textSegment(id, atMs, text)
-		segment.LastEventCursor = cursor
-		return segment
-	}
-	edited := textSegment("m-edited-unversioned", 2400, "edited without cursor")
+// A summary stands for a message it folded as its rows recorded it: an edit
+// after the fold leaves the message folded.
+func TestComposeContextWithCheckpointKeepsAnEditedMessageFolded(t *testing.T) {
+	edited := textSegment("m-edited", 2000, "edited after the fold")
 	edited.EditedAtMs = 5000
-	rc := RenderedContext{
-		changed("m-unchanged", 2000, 4, "unchanged"),
-		edited,
-		changed("m-edited", 2500, 8, "edited later"),
-		textSegment("m-new", 3000, "new input"),
-	}
+	edited.LastEventCursor = 8
+	rc := RenderedContext{edited, textSegment("m-new", 3000, "new input")}
 	held := HistoryCheckpoint{
-		Items: []CheckpointItem{{SummaryID: "s1", Summary: "folded"}},
-		Messages: map[string]CheckpointMessage{
-			"m-unchanged":          {EventCursor: 4},
-			"m-edited-unversioned": {},
-			"m-edited":             {EventCursor: 5},
-			"m-new":                {Kept: true, EventCursor: 7},
-		},
+		Items:    []CheckpointItem{{SummaryID: "s1", Summary: "folded"}},
+		Messages: map[string]CheckpointMessage{"m-edited": {}, "m-new": {Kept: true}},
 	}
 	composed := ComposeContextWithCheckpoint(rc, nil, held)
-	want := []string{
-		"user:" + turn.SummaryText("folded"),
-		"user:edited without cursor",
-		"user:edited later",
-		"user:new input",
-	}
+	want := []string{"user:" + turn.SummaryText("folded"), "user:new input"}
 	if composed == nil || !reflect.DeepEqual(messageTexts(composed.Messages), want) {
 		t.Fatalf("composed %q, want %q", messageTexts(composed.Messages), want)
 	}

@@ -219,9 +219,10 @@ checkpoint fails with `checkpoint.ErrMoved`. A row it keeps that the pass never 
 counted (`history.checkpoint.unseen_rows_total`).
 
 The rows of a message a checkpoint folded record the message as it was when
-they were written. A message changed after that, edited or deleted, composes
-again after the checkpoint with what its summary never read; Discuss event
-replay keeps its complete event chain.
+they were written, and its summary stands for it as such: a message edited or
+deleted after the fold stays folded, and Discuss event replay leaves its events
+out. Replay decides that per event against the rows of its own message, so a
+page costs the events it reads, not the session's history.
 
 Every checkpoint names its parent and depends on every row up to its
 position, which its summary may have read. A write that removes rows (hiding,
