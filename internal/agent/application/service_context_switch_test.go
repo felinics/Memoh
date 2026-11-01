@@ -13,6 +13,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/agent/turn"
@@ -60,6 +61,96 @@ func TestContextProvenanceSurvivesToolResultNormalization(t *testing.T) {
 	got := contextProvenance(messages, records, nil)
 	if len(got) != 2 || len(got[1].Sources) != 1 || got[1].Sources[0].ID != "result-row" || got[1].Sources[0].ContentHash == "" {
 		t.Fatalf("normalized tool exchange lost its result source: %+v", got)
+	}
+}
+
+// A deferred call whose run ended before its answer has no result row, so
+// the read path closes it. The closure renders from the call's row: a fold
+// that covers the call takes the closure with it.
+func TestContextProvenanceNamesTheCallRowForItsClosure(t *testing.T) {
+	t.Parallel()
+
+	stored := func(id, role string, message sdk.Message) historyfrag.HistoryRecord {
+		raw, err := historyfrag.MarshalStoredSDKMessage(message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err := historyfrag.FromDBMessage(messagepkg.Message{ID: id, Role: role, Content: raw}, historyfrag.ScopeFallback{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return record
+	}
+	records := []historyfrag.HistoryRecord{
+		stored("call-row", "assistant", sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.ToolCallPart{
+			ToolCallID: "ask-1", ToolName: "ask_user", Input: toolexec.ArgumentsFromValue(map[string]any{}),
+		}}}),
+		stored("later-row", "user", sdk.UserMessage("later question")),
+	}
+	messages, _, _ := normalizeContextMessages([]ModelMessage{records[0].ModelMessage, records[1].ModelMessage}, nil, nil)
+	got := contextProvenance(messages, records, nil)
+	call := got[0].Sources
+	if len(messages) != 3 || len(got) != 3 || got[1].Message.Role != sdk.MessageRoleTool || !reflect.DeepEqual(got[1].Sources, call) ||
+		call[0].ID != "call-row" || got[1].Anchor || got[2].Sources[0].ID != "later-row" {
+		t.Fatalf("closure provenance = %+v, want the closure named by its call row", got)
+	}
+}
+
+// A decision whose run ended keeps its outcome on the call and has no result
+// row, so the read path renders the result from the decision. That result
+// renders from the call's row as a closure does, and a result moved from its
+// own row behind the call keeps that row: a fold takes each with what it
+// renders from.
+func TestContextProvenanceKeepsTheSourceOfAMovedDecisionResult(t *testing.T) {
+	t.Parallel()
+
+	stored := func(id, role string, message sdk.Message) historyfrag.HistoryRecord {
+		raw, err := historyfrag.MarshalStoredSDKMessage(message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err := historyfrag.FromDBMessage(messagepkg.Message{ID: id, Role: role, Content: raw}, historyfrag.ScopeFallback{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return record
+	}
+	decided := func(id string) sdk.MessagePart {
+		return sdk.ToolCallPart{
+			ToolCallID: id, ToolName: "ask_user", Input: toolexec.ArgumentsFromValue(map[string]any{}),
+			ProviderMetadata: partmeta.Set(nil, partmeta.KeyUserInput, map[string]any{"status": "canceled"}),
+		}
+	}
+	records := []historyfrag.HistoryRecord{
+		stored("call-row", "assistant", sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{decided("ask-1"), decided("ask-2")}}),
+		stored("narration-row", "assistant", sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
+			sdk.TextPart{Text: "flushed late"},
+			sdk.ToolCallPart{ToolCallID: "other", ToolName: "exec", Input: toolexec.ArgumentsFromValue(map[string]any{})},
+		}}),
+		stored("result-row", "tool", sdk.ToolMessage(
+			sdk.ToolResultPart{ToolCallID: "ask-2", ToolName: "ask_user", Result: toolexec.OutputFromValue(map[string]any{"answer": "b"})},
+			sdk.ToolResultPart{ToolCallID: "other", ToolName: "exec", Result: toolexec.OutputFromValue("kept")},
+		)),
+	}
+	input := make([]ModelMessage, 0, len(records))
+	for _, record := range records {
+		input = append(input, record.ModelMessage)
+	}
+	messages, _, _ := normalizeContextMessages(input, nil, nil)
+	got := contextProvenance(messages, records, nil)
+	if len(got) != len(messages) {
+		t.Fatalf("provenance = %+v, want every message named", got)
+	}
+	sources := map[string]string{}
+	for _, p := range got {
+		for _, part := range p.Message.Content {
+			if result, ok := part.(sdk.ToolResultPart); ok {
+				sources[result.ToolCallID] = p.Sources[0].ID
+			}
+		}
+	}
+	if sources["ask-1"] != "call-row" || sources["ask-2"] != "result-row" || sources["other"] != "result-row" {
+		t.Fatalf("result sources = %v, want the decision's result from its call row and the moved result from its own row", sources)
 	}
 }
 

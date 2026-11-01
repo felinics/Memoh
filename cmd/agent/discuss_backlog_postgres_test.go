@@ -165,6 +165,8 @@ func newBacklogFixture(t *testing.T) *backlogFixture {
 	f.base = time.Now().Add(time.Minute).Truncate(time.Millisecond)
 	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{OwnerID: uuid.NewString(), Ledger: ledger.NewPostgres(sqlc.New(f.pool), f.pool), Fence: runtimefence.NewActivator(queries)})
 	t.Cleanup(func() { _ = manager.Close() })
+	// A reset closes the agent processes in its scope; the fixture runs none.
+	manager.SetHistoryResetHandler(func(context.Context, sessionruntime.ResetScope) (func(), error) { return func() {}, nil })
 	f.manager = manager
 	f.agent = native.New(native.Deps{Logger: logger, ContextViewApplier: contextview.ProviderRunConfigApplier(logger)})
 	accountStore, err := postgresstore.New(f.pool)
