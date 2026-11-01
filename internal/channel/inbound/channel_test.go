@@ -350,6 +350,10 @@ type fakeSessionEnsurer struct {
 	lastRouteID   string
 	lastSpec      NewSessionSpec
 	createCalls   int
+	ifAbsentCalls int
+	// joinedSession, when set, is what CreateSessionIfAbsent returns: a
+	// session another message of the route created first.
+	joinedSession SessionResult
 }
 
 type fakeQueueCommandHandler struct {
@@ -367,14 +371,6 @@ func (f *fakeQueueCommandHandler) EnqueueSteer(_ context.Context, input QueueCom
 func (f *fakeQueueCommandHandler) EnqueueFollowUp(_ context.Context, input QueueCommandInput) error {
 	f.followUpInputs = append(f.followUpInputs, input)
 	return f.followUpErr
-}
-
-func (f *fakeSessionEnsurer) EnsureActiveSession(_ context.Context, _, routeID, _ string) (SessionResult, error) {
-	f.lastRouteID = routeID
-	if f.activeErr != nil {
-		return SessionResult{}, f.activeErr
-	}
-	return f.activeSession, nil
 }
 
 func (f *fakeSessionEnsurer) GetActiveSession(_ context.Context, routeID string) (SessionResult, error) {
@@ -402,6 +398,15 @@ func (f *fakeSessionEnsurer) CreateNewSession(_ context.Context, _, routeID, _ s
 		}, nil
 	}
 	return f.activeSession, nil
+}
+
+func (f *fakeSessionEnsurer) CreateSessionIfAbsent(ctx context.Context, botID, routeID, channelType string, spec NewSessionSpec) (SessionResult, error) {
+	f.ifAbsentCalls++
+	if f.joinedSession.ID != "" {
+		f.lastRouteID = routeID
+		return f.joinedSession, nil
+	}
+	return f.CreateNewSession(ctx, botID, routeID, channelType, spec)
 }
 
 type fakeRequestedSkillResolver struct {
@@ -1360,6 +1365,9 @@ func TestChannelInboundProcessorAutoCreatesDefaultACPSession(t *testing.T) {
 	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if ensurer.ifAbsentCalls != 1 {
+		t.Fatalf("CreateSessionIfAbsent calls = %d, want the first message to create through it", ensurer.ifAbsentCalls)
+	}
 	if ensurer.lastSpec.Runtime != sessionpkg.RuntimeACPAgent || ensurer.lastSpec.Type != sessionpkg.TypeACPAgent {
 		t.Fatalf("created spec = %#v, want ACP runtime session", ensurer.lastSpec)
 	}
@@ -2130,6 +2138,44 @@ func TestChannelInboundProcessorDirectSkillStartsStream(t *testing.T) {
 	}
 	if len(sender.sent) != 0 {
 		t.Fatalf("skill slash stream should not send slash error reply, got %+v", sender.sent)
+	}
+}
+
+func TestChannelInboundProcessorDirectSkillRejectsJoinedUnsupportedSession(t *testing.T) {
+	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-skill-joined"}}
+	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-skill-joined", RouteID: "route-skill-joined"}}
+	gateway := &fakeChatGateway{}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	// The route had no session when this message looked, and another message
+	// created a discuss session before it.
+	ensurer := &fakeSessionEnsurer{
+		activeErr:     errors.New("no active session"),
+		joinedSession: SessionResult{ID: "session-joined", Type: sessionpkg.TypeDiscuss, Runtime: sessionpkg.RuntimeModel},
+	}
+	processor.SetSessionEnsurer(ensurer)
+	processor.SetRequestedSkillResolver(&fakeRequestedSkillResolver{items: []skillset.ResolvedSkill{{Name: "alpha", Content: "alpha skill content", SourceKind: "managed", Identity: "managed|alpha|managed|opaque-alpha"}}})
+	sender := &fakeReplySender{}
+	msg := channel.InboundMessage{
+		BotID:        "bot-1",
+		Channel:      channel.ChannelType("telegram"),
+		Message:      channel.Message{ID: "msg-1", Text: "/alpha hello"},
+		ReplyTarget:  "telegram:user-1",
+		Sender:       channel.Identity{SubjectID: "user-1"},
+		Conversation: channel.Conversation{ID: "user-1", Type: channel.ConversationTypePrivate},
+	}
+
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{TeamID: "team-test", ID: "cfg-1", BotID: "bot-1", ChannelType: channel.ChannelType("telegram")}, msg, sender); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ensurer.ifAbsentCalls != 1 {
+		t.Fatalf("CreateSessionIfAbsent calls = %d, want 1", ensurer.ifAbsentCalls)
+	}
+	if gateway.gotReq.Query != "" {
+		t.Fatalf("a turn started in the joined discuss session with query %q", gateway.gotReq.Query)
+	}
+	if len(sender.sent) != 1 {
+		t.Fatalf("sent %d replies, want one unsupported-skill reply", len(sender.sent))
 	}
 }
 

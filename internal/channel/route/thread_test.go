@@ -3,7 +3,11 @@ package route
 import (
 	"context"
 	"errors"
+	"fmt"
+	"runtime"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -29,6 +33,11 @@ func (s *coordinatorRouteStore) SetActiveThread(_ context.Context, _ string, thr
 	return s.activeErr
 }
 
+func (s *coordinatorRouteStore) CompareAndSetActiveThread(_ context.Context, _, _, threadID string) (bool, error) {
+	s.activeID = threadID
+	return s.activeErr == nil, s.activeErr
+}
+
 type coordinatorThreadStore struct {
 	thread      session.Thread
 	getID       string
@@ -45,6 +54,8 @@ func (s *coordinatorThreadStore) Create(_ context.Context, input session.CreateI
 	s.createInput = input
 	return s.thread, s.createErr
 }
+
+func (*coordinatorThreadStore) SoftDelete(context.Context, string) error { return nil }
 
 func TestThreadCoordinatorGetActiveReadsRouteThenThread(t *testing.T) {
 	routes := &coordinatorRouteStore{route: Route{ActiveThreadID: "thread-1"}}
@@ -185,4 +196,182 @@ func TestEnrichThreadsSkipsProjectionQueryWithoutRouteIDs(t *testing.T) {
 	if len(got) != len(threads) || got[0].ID != "thread-1" || got[1].ID != "thread-2" {
 		t.Fatalf("EnrichThreads() = %#v", got)
 	}
+}
+
+// raceStore is one route and its threads as the database holds them, shared by
+// every caller; it serves as both the route and the thread store.
+type raceStore struct {
+	mu       sync.Mutex
+	activeID string
+	movedTo  string // when set, another process selects it right after the first route read
+	failGet  string // when set, reading this thread fails with a transient error
+	lostAck  bool   // when set, the conditional write commits and then reports an error
+	threads  map[string]session.Thread
+	created  int
+	deleted  []string
+	entered  chan struct{} // when set, closed as the first Create starts
+	gate     chan struct{} // when set, Create waits for it to close
+	once     sync.Once
+}
+
+func (s *raceStore) GetByID(context.Context, string) (Route, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	route := Route{ActiveThreadID: s.activeID}
+	if s.movedTo != "" {
+		s.activeID, s.movedTo = s.movedTo, ""
+	}
+	return route, nil
+}
+
+func (*raceStore) SetActiveThread(context.Context, string, string) error { return nil }
+
+func (s *raceStore) CompareAndSetActiveThread(_ context.Context, _, expected, threadID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.activeID != expected {
+		return false, nil
+	}
+	s.activeID = threadID
+	if s.lostAck {
+		return false, errors.New("connection reset")
+	}
+	return true, nil
+}
+
+func (s *raceStore) Get(_ context.Context, id string) (session.Thread, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id == s.failGet {
+		return session.Thread{}, errors.New("connection reset")
+	}
+	if thread, ok := s.threads[id]; ok {
+		return thread, nil
+	}
+	return session.Thread{}, pgx.ErrNoRows
+}
+
+func (s *raceStore) Create(context.Context, session.CreateInput) (session.Thread, error) {
+	if s.gate != nil {
+		s.once.Do(func() { close(s.entered) })
+		<-s.gate
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.created++
+	thread := session.Thread{ID: fmt.Sprintf("thread-%d", s.created)}
+	s.threads[thread.ID] = thread
+	return thread, nil
+}
+
+func (s *raceStore) SoftDelete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleted = append(s.deleted, id)
+	return nil
+}
+
+func TestThreadCoordinatorCreateIfAbsentGivesConcurrentCallersOneThread(t *testing.T) {
+	store := &raceStore{threads: map[string]session.Thread{}, entered: make(chan struct{}), gate: make(chan struct{})}
+	coordinator := NewThreadCoordinator(nil, store, store)
+	call := func() {
+		thread, err := coordinator.CreateIfAbsent(context.Background(), session.CreateInput{RouteID: "route-1"})
+		if err != nil || thread.ID != "thread-1" {
+			t.Errorf("CreateIfAbsent = %q, %v; want every caller on thread-1", thread.ID, err)
+		}
+	}
+	// The first caller holds its creation open while 19 more arrive.
+	var arrived, done sync.WaitGroup
+	done.Add(20)
+	go func() { defer done.Done(); call() }()
+	<-store.entered
+	arrived.Add(19)
+	for i := 0; i < 19; i++ {
+		go func() { defer done.Done(); arrived.Done(); call() }()
+	}
+	arrived.Wait()
+	// The arrivals were counted just before their calls; yielding lets them
+	// reach the shared creation. A caller scheduled after the gate opens finds
+	// the selected thread and still returns thread-1, so this can only weaken
+	// how surely the test catches a missing join, never fail a correct one.
+	for range 100 {
+		runtime.Gosched()
+	}
+	close(store.gate)
+	done.Wait()
+	if store.created != 1 || store.activeID != "thread-1" {
+		t.Fatalf("created %d threads, route points at %q; want one thread selected", store.created, store.activeID)
+	}
+}
+
+func TestThreadCoordinatorCreateIfAbsentYieldsToAnotherProcess(t *testing.T) {
+	// The route points at a deleted thread, so this caller creates one; another
+	// process selects its own thread before this caller writes.
+	store := &raceStore{activeID: "thread-deleted", movedTo: "thread-other", threads: map[string]session.Thread{"thread-other": {ID: "thread-other"}}}
+	got, err := NewThreadCoordinator(nil, store, store).CreateIfAbsent(context.Background(), session.CreateInput{RouteID: "route-1"})
+	if err != nil || got.ID != "thread-other" || store.activeID != "thread-other" {
+		t.Fatalf("CreateIfAbsent = %q, %v, route points at %q; want the other process's thread kept", got.ID, err, store.activeID)
+	}
+	if len(store.deleted) != 1 || store.deleted[0] != "thread-1" {
+		t.Fatalf("deleted %v, want the thread this caller created", store.deleted)
+	}
+}
+
+func TestThreadCoordinatorCreateIfAbsentRetriesWhenTheWinnerVanished(t *testing.T) {
+	// Another process selects a thread right after this caller's read, and that
+	// thread is gone by the time this caller reads the route again.
+	store := &raceStore{movedTo: "thread-gone", threads: map[string]session.Thread{}}
+	got, err := NewThreadCoordinator(nil, store, store).CreateIfAbsent(context.Background(), session.CreateInput{RouteID: "route-1"})
+	if err != nil || got.ID != "thread-1" || store.activeID != "thread-1" {
+		t.Fatalf("CreateIfAbsent = %q, %v, route points at %q; want this caller's thread selected", got.ID, err, store.activeID)
+	}
+	if store.created != 1 || len(store.deleted) != 0 {
+		t.Fatalf("created %d, deleted %v; want one thread and nothing discarded", store.created, store.deleted)
+	}
+}
+
+func TestThreadCoordinatorCreateIfAbsentKeepsSelectionWhenItCannotBeRead(t *testing.T) {
+	store := &raceStore{activeID: "thread-live", failGet: "thread-live", threads: map[string]session.Thread{}}
+	if _, err := NewThreadCoordinator(nil, store, store).CreateIfAbsent(context.Background(), session.CreateInput{RouteID: "route-1"}); err == nil {
+		t.Fatal("CreateIfAbsent succeeded although the selected thread could not be read")
+	}
+	if store.created != 0 || store.activeID != "thread-live" {
+		t.Fatalf("created %d, route points at %q; want the selection left alone", store.created, store.activeID)
+	}
+}
+
+func TestThreadCoordinatorCreateIfAbsentKeepsThreadWhoseSelectionReplyWasLost(t *testing.T) {
+	store := &raceStore{lostAck: true, threads: map[string]session.Thread{}}
+	got, err := NewThreadCoordinator(nil, store, store).CreateIfAbsent(context.Background(), session.CreateInput{RouteID: "route-1"})
+	if err != nil || got.ID != "thread-1" || len(store.deleted) != 0 {
+		t.Fatalf("CreateIfAbsent = %q, %v, deleted %v; want the selected thread returned and kept", got.ID, err, store.deleted)
+	}
+}
+
+func TestThreadCoordinatorCreateIfAbsentReturnsWhenTheCallerGivesUp(t *testing.T) {
+	store := &raceStore{threads: map[string]session.Thread{}, entered: make(chan struct{}), gate: make(chan struct{})}
+	coordinator := NewThreadCoordinator(nil, store, store)
+	done := make(chan struct{})
+	go func() { // holds the shared creation open
+		defer close(done)
+		_, _ = coordinator.CreateIfAbsent(context.Background(), session.CreateInput{RouteID: "route-1"})
+	}()
+	<-store.entered
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	gaveUp := make(chan error, 1)
+	go func() {
+		_, err := coordinator.CreateIfAbsent(ctx, session.CreateInput{RouteID: "route-1"})
+		gaveUp <- err
+	}()
+	select {
+	case err := <-gaveUp:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("CreateIfAbsent with a cancelled context = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("CreateIfAbsent kept waiting for the shared creation after its caller gave up")
+	}
+	close(store.gate)
+	<-done
 }

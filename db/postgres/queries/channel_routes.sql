@@ -120,6 +120,27 @@ SET active_session_id = COALESCE(
 WHERE route.team_id = public.memoh_current_team_id()
   AND route.id = sqlc.arg(id);
 
+-- name: CompareAndSetRouteActiveSession :execrows
+-- Moves the pointer only while it still holds expected_session_id (NULL for a
+-- route that has none), so concurrent creators of a route's first session agree
+-- on one: the update that finds the pointer changed affects no row.
+WITH destination_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = sqlc.narg(active_session_id)::uuid
+  FOR KEY SHARE
+)
+UPDATE bot_channel_routes route
+SET active_session_id = COALESCE(
+      (SELECT destination_session.id FROM destination_session),
+      sqlc.narg(active_session_id)::uuid
+    ),
+    updated_at = now()
+WHERE route.team_id = public.memoh_current_team_id()
+  AND route.id = sqlc.arg(id)
+  AND route.active_session_id IS NOT DISTINCT FROM sqlc.narg(expected_session_id)::uuid;
+
 -- name: DeleteChatRoute :exec
 WITH route_sessions AS MATERIALIZED (
   SELECT session.id
