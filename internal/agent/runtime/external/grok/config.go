@@ -39,7 +39,7 @@ const (
 
 	// pinnedVersion is the Grok Build release whose extensions below were
 	// checked; a process of another version is logged at start.
-	pinnedVersion = "1.0.62"
+	pinnedVersion = "1.0.70"
 
 	// homeRoot is per Agent so one Agent's credential never meets a login
 	// another Agent or a workspace terminal left behind: Grok prefers a
@@ -53,7 +53,7 @@ const (
 	defaultProjectPath  = vpath.DataMount
 )
 
-// Grok's own ACP extension methods, with the shapes Grok 1.0.62 answers.
+// Grok's own ACP extension methods, with the shapes Grok 1.0.70 answers.
 const (
 	// {session_id} compacts the session; nothing is returned.
 	compactMethod = "_x.ai/compact_conversation"
