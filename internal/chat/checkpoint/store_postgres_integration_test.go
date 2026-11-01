@@ -332,6 +332,76 @@ func TestPostgresKeptBeforeTurnIsWhatAReplacementKeeps(t *testing.T) {
 	}
 }
 
+// A rewind deletes the checkpoints it moves back past: each accounts for a
+// removed row, so none holds again. A fold that read one of them as the
+// active checkpoint finds the history moved, and another session's chain is
+// left alone.
+func TestPostgresRewindDeletesTheCheckpointsItMovesBackPast(t *testing.T) {
+	f := newHistoryFixture(t)
+	u1, a1 := f.row(f.session, 1, 1), f.row(f.session, 1, 2)
+	u2, a2 := f.row(f.session, 2, 1), f.row(f.session, 2, 2)
+	u3, a3 := f.row(f.session, 3, 1), f.row(f.session, 3, 2)
+	first := f.mustFold(Checkpoint{}, "first", u1, a1)
+	second := f.mustFold(first, "second", u2, a2)
+	third := f.mustFold(second, "third", u3, a3)
+
+	main := f.session
+	f.session = f.newSession()
+	other := f.mustFold(Checkpoint{}, "other", f.row(f.session, 1, 1))
+	f.session = main
+
+	checkpoints := func(session string) []string {
+		t.Helper()
+		rows, err := f.pool.Query(f.ctx, `SELECT id::text FROM bot_history_checkpoints WHERE session_id = $1 ORDER BY created_at`, session)
+		if err != nil {
+			t.Fatalf("list checkpoints: %v", err)
+		}
+		defer rows.Close()
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				t.Fatalf("scan checkpoint: %v", err)
+			}
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	rewindBefore := func(position int64) {
+		t.Helper()
+		if err := f.queries.InTx(f.ctx, func(q dbstore.Queries) error {
+			_, err := q.RewindHistoryCheckpointBeforeTurn(f.ctx, dbsqlc.RewindHistoryCheckpointBeforeTurnParams{
+				SessionID: dbpkg.ParseUUIDOrEmpty(f.session),
+				BotID:     dbpkg.ParseUUIDOrEmpty(f.botID),
+				TurnID:    dbpkg.ParseUUIDOrEmpty(f.turns[fmt.Sprintf("%s/%d", f.session, position)]),
+			})
+			return err
+		}); err != nil {
+			t.Fatalf("rewind before turn %d: %v", position, err)
+		}
+	}
+
+	rewindBefore(2)
+	if got := checkpoints(f.session); f.pointer(f.session) != first.ID || !slices.Equal(got, []string{first.ID}) {
+		t.Fatalf("after rewinding past %s and %s: active=%q checkpoints=%v, want only %q", second.ID, third.ID, f.pointer(f.session), got, first.ID)
+	}
+	if _, err := f.fold(third, "onto a deleted parent", u2); !errors.Is(err, ErrMoved) {
+		t.Fatalf("fold onto a checkpoint the rewind deleted = %v, want ErrMoved", err)
+	}
+	if got := f.pointer(f.session); got != first.ID {
+		t.Fatalf("active after the refused fold = %q, want %q", got, first.ID)
+	}
+
+	rewindBefore(1)
+	if got := checkpoints(f.session); f.pointer(f.session) != "" || len(got) != 0 {
+		t.Fatalf("after rewinding past every checkpoint: active=%q checkpoints=%v, want none", f.pointer(f.session), got)
+	}
+	var others int
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM bot_history_checkpoints WHERE id = $1`, other.ID).Scan(&others); err != nil || others != 1 {
+		t.Fatalf("another session's checkpoint: count=%d err=%v, want it kept", others, err)
+	}
+}
+
 // A fork carries the newest checkpoint of its source's chain that accounts
 // for no history past the copy: its summaries become the fork's own, its rows
 // are named by their copies, and it sits at the copy's place for its

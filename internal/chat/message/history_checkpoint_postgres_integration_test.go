@@ -141,8 +141,8 @@ func setupRewindFixture(t *testing.T, ctx context.Context, tx pgx.Tx) rewindFixt
 // latest turn moves the session from the rolling summary back to the earlier
 // one, which ends before the turn, and a change to the earlier turn leaves no
 // checkpoint at all. Linking an asset to a row changes no context row and
-// moves nothing. The checkpoints and their summaries stay either way; only
-// the session's pointer moves.
+// moves nothing. The summaries stay either way; the checkpoints the session
+// moves back past go, since each depends on a row the change removed.
 func TestPostgresHistoryMutationsRewindTheHistoryCheckpoint(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -254,8 +254,10 @@ func TestPostgresHistoryMutationsRewindTheHistoryCheckpoint(t *testing.T) {
 			`, postgresMessageTestSessionID).Scan(&checkpoints, &summaries); err != nil {
 				t.Fatal(err)
 			}
-			if checkpoints != 2 || summaries != 2 {
-				t.Fatalf("checkpoints = %d, summaries = %d, want both of each kept", checkpoints, summaries)
+			// The session's checkpoint and its ancestors remain.
+			remaining := map[string]int{f.rollingCheckpoint: 2, f.earlierCheckpoint: 1, "": 0}[tc.want(f)]
+			if checkpoints != remaining || summaries != 2 {
+				t.Fatalf("checkpoints = %d, summaries = %d, want %d checkpoints and both summaries kept", checkpoints, summaries, remaining)
 			}
 		})
 	}

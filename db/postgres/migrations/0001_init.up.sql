@@ -2378,7 +2378,10 @@ $$;
 -- memoh_rewind_history_checkpoint makes the newest checkpoint that still
 -- holds once rows of the session from a position on were removed, as
 -- memoh_history_checkpoint_kept reads the removal, the session's active one,
--- and reports whether that moved it. The caller holds the session row lock.
+-- and reports whether that moved it. The checkpoints it moves back past
+-- account for a removed row, so none holds again, and nothing else names
+-- them: a fork copies its own. It deletes them. The caller holds the session
+-- row lock.
 CREATE OR REPLACE FUNCTION public.memoh_rewind_history_checkpoint(
   p_session_id uuid,
   p_turn_position bigint,
@@ -2410,6 +2413,29 @@ BEGIN
   SET history_checkpoint_id = kept
   WHERE session.team_id = public.memoh_current_team_id()
     AND session.id = p_session_id;
+  -- The first checkpoint after the kept one on the chain; deleting it
+  -- deletes the rest through parent_id.
+  DELETE FROM public.bot_history_checkpoints checkpoint
+  WHERE checkpoint.team_id = public.memoh_current_team_id()
+    AND checkpoint.id = (
+      WITH RECURSIVE chain AS (
+        SELECT moved.id, moved.parent_id
+        FROM public.bot_history_checkpoints moved
+        WHERE moved.team_id = public.memoh_current_team_id()
+          AND moved.id = active
+        UNION ALL
+        SELECT parent.id, parent.parent_id
+        FROM chain
+        JOIN public.bot_history_checkpoints parent
+          ON parent.team_id = public.memoh_current_team_id()
+         AND parent.id = chain.parent_id
+        WHERE chain.parent_id IS DISTINCT FROM kept
+      )
+      SELECT chain.id
+      FROM chain
+      WHERE chain.parent_id IS NOT DISTINCT FROM kept
+      LIMIT 1
+    );
   RETURN true;
 END;
 $$;

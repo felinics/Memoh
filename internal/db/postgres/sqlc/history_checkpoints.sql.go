@@ -126,6 +126,8 @@ SELECT session.id, $1::uuid,
 FROM bot_sessions session
 WHERE session.team_id = public.memoh_current_team_id()
   AND session.id = $5
+  AND session.history_checkpoint_id IS NOT DISTINCT FROM $1::uuid
+FOR UPDATE OF session
 RETURNING id, team_id, session_id, parent_id, turn_position, turn_message_seq, items, created_at
 `
 
@@ -137,6 +139,10 @@ type CreateHistoryCheckpointParams struct {
 	SessionID      pgtype.UUID `json:"session_id"`
 }
 
+// Writes a checkpoint after parent only while parent is the session's active
+// one, locking the session as the rewind that would move it does: a rewind
+// deletes the checkpoints it moves back past, parent among them. No row when
+// the session moved on.
 func (q *Queries) CreateHistoryCheckpoint(ctx context.Context, arg CreateHistoryCheckpointParams) (BotHistoryCheckpoint, error) {
 	row := q.db.QueryRow(ctx, createHistoryCheckpoint,
 		arg.ParentID,

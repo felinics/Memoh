@@ -41,6 +41,10 @@ WHERE m.team_id = public.memoh_current_team_id()
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
 
 -- name: CreateHistoryCheckpoint :one
+-- Writes a checkpoint after parent only while parent is the session's active
+-- one, locking the session as the rewind that would move it does: a rewind
+-- deletes the checkpoints it moves back past, parent among them. No row when
+-- the session moved on.
 INSERT INTO bot_history_checkpoints (
   session_id, parent_id, turn_position, turn_message_seq, items
 )
@@ -50,6 +54,8 @@ SELECT session.id, sqlc.narg(parent_id)::uuid,
 FROM bot_sessions session
 WHERE session.team_id = public.memoh_current_team_id()
   AND session.id = sqlc.arg(session_id)
+  AND session.history_checkpoint_id IS NOT DISTINCT FROM sqlc.narg(parent_id)::uuid
+FOR UPDATE OF session
 RETURNING *;
 
 -- name: SetHistoryCheckpoint :execrows

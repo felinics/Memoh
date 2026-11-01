@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
@@ -133,6 +134,9 @@ func create(ctx context.Context, q dbstore.Queries, sessionID pgtype.UUID, paren
 		SessionID:      sessionID,
 	}
 	row, err := q.CreateHistoryCheckpoint(ctx, params)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Checkpoint{}, fmt.Errorf("%w: session %s", ErrMoved, sessionID.String())
+	}
 	if err != nil {
 		return Checkpoint{}, fmt.Errorf("create history checkpoint: %w", err)
 	}

@@ -210,7 +210,10 @@ position, which its summary may have read. A write that removes rows (hiding,
 replacing or superseding a turn, deleting messages, retiring a run's
 projections) moves the session back, in the same statement, to the newest
 checkpoint on its chain that does not depend on them
-(`memoh_rewind_history_checkpoint`). Nothing else changes the history a
+(`memoh_rewind_history_checkpoint`), and deletes the checkpoints it moved back
+past: they depend on a removed row, so none holds again, and a fork copies its
+own. A fold that read one of them as the active checkpoint finds the history
+moved when it commits. Nothing else changes the history a
 checkpoint accounts for: a session runs one turn at a time (a run waiting on a
 decision still holds it), a run writes only into its own turn or the latest
 turn, a new turn takes the next position, and a run that lost the session is
