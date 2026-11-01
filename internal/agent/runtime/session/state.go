@@ -260,6 +260,7 @@ func normalizeRunAdmission(admission RunAdmissionView) (RunAdmissionView, error)
 	}
 	return RunAdmissionView{
 		RequestUserTurn: requestUserTurn,
+		ResumeTurn:      admission.ResumeTurn,
 		Operation:       operation,
 	}, nil
 }

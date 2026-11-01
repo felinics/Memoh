@@ -1233,6 +1233,16 @@ WHERE request.team_id = public.memoh_current_team_id()
 ORDER BY request.turn_position DESC
 LIMIT 1;
 
+-- name: RunWroteHistoryMessages :one
+-- Distinguish an input never persisted from history whose request was removed.
+SELECT EXISTS (
+  SELECT 1
+  FROM bot_history_messages m
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.session_id = sqlc.arg(session_id)
+    AND (m.run_id = sqlc.arg(run_id) OR m.turn_id = sqlc.arg(root_turn_id))
+)::boolean;
+
 -- name: ReplaceHistoryTurn :one
 WITH owner_session AS MATERIALIZED (
   SELECT session.id

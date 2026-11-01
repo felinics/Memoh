@@ -263,10 +263,14 @@ func (s Snapshot) cursor() Cursor {
 }
 
 type CurrentRunView struct {
+	// ResumeTurn is the original response turn and its committed prefix. The run
+	// keeps its own admission identity for ownership and decision commands.
+	ResumeTurn *chatview.UITurn `json:"resume_turn,omitempty"`
 	// ConfigurationOnly holds the session lock but does not generate a reply.
 	ConfigurationOnly bool   `json:"configuration_only,omitempty"`
 	RunID             string `json:"run_id" validate:"required" format:"uuid"`
-	// TurnID is the durable turn this run writes into, allocated at admission.
+	// TurnID is this run's durable admission slot. A shutdown continuation
+	// answers ResumeTurn instead, while commands still target this admission.
 	// It is part of the observable view because SR-OBS-003 requires every
 	// subscriber to agree on the run's turn, and a subscriber that only learns
 	// the run id cannot line the run up against persisted history.
@@ -347,6 +351,7 @@ type SteerTurnView struct {
 // a durable history row; ordinary sends still persist user + assistant
 // together when the run reaches a terminal result.
 type RunAdmissionView struct {
+	ResumeTurn      *chatview.UITurn
 	RequestUserTurn *chatview.UITurn
 	Operation       *RunOperationView
 }

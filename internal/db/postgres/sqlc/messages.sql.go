@@ -5419,6 +5419,30 @@ func (q *Queries) ReplaceHistoryTurn(ctx context.Context, arg ReplaceHistoryTurn
 	return i, err
 }
 
+const runWroteHistoryMessages = `-- name: RunWroteHistoryMessages :one
+SELECT EXISTS (
+  SELECT 1
+  FROM bot_history_messages m
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.session_id = $1
+    AND (m.run_id = $2 OR m.turn_id = $3)
+)::boolean
+`
+
+type RunWroteHistoryMessagesParams struct {
+	SessionID  pgtype.UUID `json:"session_id"`
+	RunID      pgtype.UUID `json:"run_id"`
+	RootTurnID pgtype.UUID `json:"root_turn_id"`
+}
+
+// Distinguish an input never persisted from history whose request was removed.
+func (q *Queries) RunWroteHistoryMessages(ctx context.Context, arg RunWroteHistoryMessagesParams) (bool, error) {
+	row := q.db.QueryRow(ctx, runWroteHistoryMessages, arg.SessionID, arg.RunID, arg.RootTurnID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const searchMessages = `-- name: SearchMessages :many
 SELECT
   m.id,

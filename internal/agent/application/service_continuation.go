@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
@@ -56,7 +58,29 @@ func (s *Service) continuationTurnRequestMessageID(ctx context.Context, sessionI
 	// An applied steer opens a later turn within this run. Its next tool
 	// result and resumed model output belong there, even though admission's
 	// run handle still names the original request turn.
-	return resolver.GetRunTurnRequestMessageID(ctx, sessionID, strings.TrimSpace(runHandle.RunID), turnID)
+	runID := strings.TrimSpace(runHandle.RunID)
+	id, err := resolver.GetRunTurnRequestMessageID(ctx, sessionID, runID, turnID)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return id, err
+	}
+	// A continuation that has applied no new input carries its request in its
+	// own intent. Validate that the request is still visible in this session.
+	if s.queries == nil {
+		return "", err
+	}
+	row, loadErr := s.queries.GetSessionRun(ctx, db.ParseUUIDOrEmpty(runID))
+	if loadErr != nil {
+		return "", loadErr
+	}
+	admitted, decodeErr := decodeRunAdmission(row.InputJson)
+	if decodeErr != nil {
+		return "", decodeErr
+	}
+	if admitted.Resume == nil || strings.TrimSpace(admitted.Resume.RequestMessageID) == "" {
+		return "", err
+	}
+	request, requestErr := s.recordedResumeRequest(ctx, sessionID, admitted.Resume.RequestMessageID)
+	return request.messageID, requestErr
 }
 
 func (s *Service) prepareContinuationRunConfig(

@@ -458,6 +458,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	req = s.applySubagentThreadDefaults(ctx, req, sessionPrefModelID != "")
 
 	runCfg, chatModel, provider, err := s.buildBaseRunConfig(ctx, baseRunConfigParams{
+		ShutdownResume:     req.ShutdownResume,
 		BotID:              req.BotID,
 		ChatID:             req.ChatID,
 		SessionID:          req.ThreadID,
@@ -755,6 +756,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 // baseRunConfigParams holds parameters for buildBaseRunConfig that differ
 // between chat and discuss callers.
 type baseRunConfigParams struct {
+	ShutdownResume    bool
 	BotID             string
 	ChatID            string
 	SessionID         string
@@ -913,7 +915,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		ctx = workspace.WithWorkspaceTarget(ctx, bound.TargetID)
 	}
 	if s.workspaceTargets != nil {
-		if target, targetErr := s.workspaceTargets.ResolveWorkspaceTarget(ctx, p.BotID, ""); targetErr == nil {
+		if target, targetErr := s.resolveStartupWorkspace(ctx, p.BotID, "", p.ShutdownResume); targetErr == nil {
 			cfg.Identity.WorkspaceTargetID = strings.TrimSpace(target.TargetID)
 			cfg.Identity.WorkspaceTargetKind = strings.TrimSpace(target.Kind)
 			cfg.Identity.WorkspaceTargetName = strings.TrimSpace(target.Name)
