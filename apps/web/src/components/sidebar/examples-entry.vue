@@ -47,14 +47,12 @@ async function hideEntry() {
       >
         <AvatarFallback>
           <Lightbulb
-            :stroke-width="1.75"
             class="size-3.5"
           />
         </AvatarFallback>
       </Avatar>
       <Lightbulb
         v-else
-        :stroke-width="1.75"
         class="size-[18px]"
       />
       <span class="min-w-0 flex-1 truncate text-left">{{ t('chatExamples.sidebarEntry') }}</span>
