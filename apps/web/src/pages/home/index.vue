@@ -44,6 +44,7 @@ import { fetchBot } from '@/composables/api/useBot'
 import { Button, PanePlaceholder } from '@felinic/ui'
 import { CHAT_ROUTE_NAMES } from '@/constants/chat-routes'
 import { useChatStore } from '@/store/chat-list'
+import { useUnreadStore } from '@/store/unread'
 import { routeConversationLabel } from '@/store/chat-list.utils'
 import { useComposerPrefillStore } from '@/store/composer-prefill'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
@@ -57,6 +58,7 @@ const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 const chatStore = useChatStore()
+const unread = useUnreadStore()
 const workspaceTabs = useWorkspaceTabsStore()
 const { currentBotId, bots, activeSession } = storeToRefs(chatStore)
 const composerPrefill = useComposerPrefillStore()
@@ -152,10 +154,11 @@ function retryBotFromUrl() {
 // A first send's session is titled like the draft it came from until the
 // server confirms the send (see isSessionTentative).
 useTitle(() => {
+  const appTitle = unread.total ? `(${unread.total}) Memoh` : 'Memoh'
   const session = activeSession.value
-  if (!isChatRoute() || !currentBotId.value || !session || chatStore.isSessionTentative(session.id)) return 'Memoh'
+  if (!isChatRoute() || !currentBotId.value || !session || chatStore.isSessionTentative(session.id)) return appTitle
   const title = (session.title ?? '').trim() || routeConversationLabel(session) || t('chat.untitledSession')
-  return `Memoh · ${title}`
+  return `${appTitle} · ${title}`
 }, { restoreOnUnmount: () => 'Memoh' })
 
 // One-shot guard so concurrent syncStoreFromUrl() calls can't both start a
@@ -291,7 +294,7 @@ async function syncStoreFromUrl(rawName: string) {
   // unchanged so the watcher below never fires.
   const canonicalName = await resolveBotNameFromId(resolvedId)
   if (canonicalName && isCurrent() && urlName !== canonicalName) {
-    void router.replace({ name: 'bot', params: { botName: canonicalName } })
+    void router.replace({ name: 'bot', params: { botName: canonicalName }, query: route.query })
   }
 }
 
@@ -335,7 +338,24 @@ watch(currentBotId, async (newBotId) => {
   void router.replace({
     name: 'bot',
     params: { botName },
+    query: route.query,
   })
 })
+
+/** Resolve notification links only after the destination bot's dock and sessions are ready. */
+watch(
+  () => [route.name, route.params.botName, route.query.session, currentBotId.value, chatStore.loadingChats, workspaceTabs.api] as const,
+  async ([name, botName, sessionId, botId, loading, dock]) => {
+    if (!CHAT_ROUTE_NAMES.has(String(name)) || typeof sessionId !== 'string' || !sessionId.trim() || !dock || loading || !botId) return
+    const bot = bots.value.find(item => item.id === botId)
+    if (botName !== botId && botName !== bot?.name) return
+    workspaceTabs.openSessionChat({ sessionId })
+    workspaceTabs.closeMobileNav()
+    const query = { ...route.query }
+    delete query.session
+    await router.replace({ query })
+  },
+  { flush: 'post' },
+)
 
 </script>

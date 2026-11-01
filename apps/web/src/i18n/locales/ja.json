@@ -4533,5 +4533,29 @@
   "elicitation": {
     "done": "完了",
     "cancel": "キャンセル"
+  },
+  "notifications": {
+    "clearAll": "すべて既読にする",
+    "clearAllConfirm": "{count} 件をすべて既読にしますか？",
+    "clearedAll": "{count} 件を既読にしました",
+    "undo": "元に戻す",
+    "markUnread": "未読にする",
+    "markRead": "既読にする",
+    "updateFailed": "未読状態を更新できませんでした",
+    "inbox": "確認が必要",
+    "justNow": "たった今",
+    "showAll": "すべて表示 ({count})",
+    "showLess": "折りたたむ",
+    "otherBots": "他の Bot に未読のセッションがあります",
+    "settingsTitle": "システム通知",
+    "settingsDescription": "返信の完了、実行の失敗、確認が必要なときに通知します。",
+    "denied": "通知がブロックされています。ブラウザの設定で許可してから有効にしてください。",
+    "unsupported": "このブラウザはシステム通知に対応していません。未読マークは引き続き表示されます。",
+    "kind": {
+      "reply": "返信が届きました",
+      "failed": "実行に失敗しました",
+      "needs_input": "確認を待っています",
+      "marked": "未読にしました"
+    }
   }
 }

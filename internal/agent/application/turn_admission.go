@@ -72,6 +72,7 @@ func (s *Service) SetSessionRuntime(manager *sessionruntime.Manager) {
 	manager.SetDecisionFinalizer(s.finalizeRuntimeDecisions)
 	manager.SetTerminalObserver(func(ctx context.Context, terminal sessionruntime.TerminalRun) {
 		s.logRunResult(ctx, terminal)
+		s.markTerminalAttention(ctx, terminal)
 		s.reconcileTerminalContextLifecycle(ctx, terminal)
 		// Steers die with their run; follow-ups outlive it. Close the steer
 		// queue before the follow-up starter so a continuation run never sees
@@ -80,6 +81,7 @@ func (s *Service) SetSessionRuntime(manager *sessionruntime.Manager) {
 		s.startFollowUpAfterTerminal(ctx, terminal)
 	})
 	manager.SetTerminalReconciler(s.reconcileTerminalContextLifecycles)
+	manager.SetWaitingDecisionObserver(s.markWaitingAttention)
 }
 
 func drainDeferredTurn(handle turn.RunHandle) {
