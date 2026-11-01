@@ -191,7 +191,7 @@ type historyWindowPlan struct {
 
 func (p historyWindowPlan) visitedRows() (float64, bool) {
 	var rows float64
-	indexed := strings.Contains(p.Index, "visible_session_order")
+	indexed := strings.Contains(p.Index, "context_order")
 	if p.Relation == "bot_history_messages" {
 		rows = p.Rows * p.Loops
 	}

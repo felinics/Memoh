@@ -3256,3 +3256,17 @@ CREATE POLICY bot_memory_usage_team_update ON public.bot_memory_usage
   WITH CHECK (team_id = public.memoh_current_team_id());
 CREATE POLICY bot_memory_usage_team_delete ON public.bot_memory_usage
   FOR DELETE USING (team_id = public.memoh_current_team_id());
+
+-- ---------------------------------------------------------------------------
+-- History context order
+-- ---------------------------------------------------------------------------
+-- A session's context rows (visible, placed in a turn, not a legacy
+-- passive_sync row) in turn order, for the byte-budgeted history reads; the
+-- predicate is the context-row filter they spell out.
+CREATE INDEX IF NOT EXISTS idx_bot_history_messages_context_order
+  ON public.bot_history_messages (team_id, session_id, turn_position, turn_message_seq, created_at, id)
+  WHERE turn_visible = true
+    AND turn_id IS NOT NULL
+    AND turn_position IS NOT NULL
+    AND turn_message_seq IS NOT NULL
+    AND (metadata->>'trigger_mode' IS NULL OR metadata->>'trigger_mode' <> 'passive_sync');

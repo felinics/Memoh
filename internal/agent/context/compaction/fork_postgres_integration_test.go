@@ -264,16 +264,17 @@ func (f *forkFixture) raw(sessionID string) int64 {
 	for _, id := range active.RowIDs() {
 		kept = append(kept, mustForkUUID(f.t, id))
 	}
-	count, err := f.queries.CountHistoryCheckpointCandidates(f.ctx, dbsqlc.CountHistoryCheckpointCandidatesParams{
+	rows, err := f.queries.ListHistoryCheckpointCandidatesWithinBytes(f.ctx, dbsqlc.ListHistoryCheckpointCandidatesWithinBytesParams{
 		SessionID:           mustForkUUID(f.t, sessionID),
 		AfterTurnPosition:   active.Position.Turn,
 		AfterTurnMessageSeq: active.Position.Seq,
 		KeptIds:             kept,
+		MaxBytes:            1 << 40,
 	})
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	return count
+	return int64(len(rows))
 }
 
 // assertCopied checks that a fork's checkpoint is its own copy of a source
