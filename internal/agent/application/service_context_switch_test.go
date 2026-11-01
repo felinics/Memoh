@@ -32,7 +32,7 @@ func TestContextProvenanceKeepsTheStoredRowThroughReasoningProjection(t *testing
 		t.Fatal(err)
 	}
 	records := projectInterruptedHistoryReasoning([]historyfrag.HistoryRecord{record})
-	got := contextProvenance([]ModelMessage{records[0].ModelMessage}, records, nil)
+	got := contextProvenance([]ModelMessage{records[0].ModelMessage}, modelMessagesToSDKMessages([]ModelMessage{records[0].ModelMessage}), records, nil)
 	if len(got) != 1 || got[0].Sources[0] != (turn.ContextMessageSource{Kind: "history", ID: "checkpoint"}) || records[0].ModelMessage.TextContent() == record.ModelMessage.TextContent() {
 		t.Fatalf("projected checkpoint lost stored identity: %+v", got)
 	}
@@ -45,12 +45,9 @@ func TestContextProvenanceSurvivesToolResultNormalization(t *testing.T) {
 		ToolCallID: "call-1", ToolName: "exec", Input: toolexec.ArgumentsFromValue(map[string]any{}),
 	}}}})[0]
 	result := ModelMessage{Role: "tool", ToolCallID: "call-1", Name: "exec", Content: json.RawMessage(`{"ok":true}`)}
-	records := []historyfrag.HistoryRecord{
-		{DBMessageID: "call-row", ModelMessage: call},
-		{DBMessageID: "result-row", ModelMessage: result},
-	}
-	messages, _, _ := normalizeContextMessages([]ModelMessage{call, result}, nil, nil)
-	got := contextProvenance(messages, records, nil)
+	records := []historyfrag.HistoryRecord{loadedRecord("call-row", call), loadedRecord("result-row", result)}
+	normalized := normalizeContext([]ModelMessage{records[0].ModelMessage, records[1].ModelMessage})
+	got := contextProvenance(normalized.models(), normalized.sent(), records, nil)
 	if len(got) != 2 || len(got[1].Sources) != 1 || got[1].Sources[0].ID != "result-row" {
 		t.Fatalf("normalized tool exchange lost its result source: %+v", got)
 	}
@@ -79,8 +76,9 @@ func TestContextProvenanceNamesTheCallRowForItsClosure(t *testing.T) {
 		}}}),
 		stored("later-row", "user", sdk.UserMessage("later question")),
 	}
-	messages, _, _ := normalizeContextMessages([]ModelMessage{records[0].ModelMessage, records[1].ModelMessage}, nil, nil)
-	got := contextProvenance(messages, records, nil)
+	normalized := normalizeContext([]ModelMessage{records[0].ModelMessage, records[1].ModelMessage})
+	messages := normalized.models()
+	got := contextProvenance(messages, normalized.sent(), records, nil)
 	call := got[0].Sources
 	if len(messages) != 3 || len(got) != 3 || got[1].Message.Role != sdk.MessageRoleTool || !reflect.DeepEqual(got[1].Sources, call) ||
 		call[0].ID != "call-row" || got[1].Anchor || got[2].Sources[0].ID != "later-row" {
@@ -128,8 +126,9 @@ func TestContextProvenanceKeepsTheSourceOfAMovedDecisionResult(t *testing.T) {
 	for _, record := range records {
 		input = append(input, record.ModelMessage)
 	}
-	messages, _, _ := normalizeContextMessages(input, nil, nil)
-	got := contextProvenance(messages, records, nil)
+	normalized := normalizeContext(input)
+	messages := normalized.models()
+	got := contextProvenance(messages, normalized.sent(), records, nil)
 	if len(got) != len(messages) {
 		t.Fatalf("provenance = %+v, want every message named", got)
 	}
@@ -173,11 +172,12 @@ func TestContextProvenanceNamesWhatEachMessageRenders(t *testing.T) {
 	messages = append(messages, pipeline, live)
 	records := []historyfrag.HistoryRecord{{ModelMessage: messages[0], SourceKind: historyfrag.SourceCompactionLog, Ref: contextfrag.ContextRef{ID: "artifact-0"}}}
 	for i, id := range []string{"old-user", "old-assistant", "request", "call", "result"} {
-		records = append(records, historyfrag.HistoryRecord{ModelMessage: messages[i+1], DBMessageID: id})
+		records = append(records, loadedRecord(id, messages[i+1]))
+		messages[i+1] = records[i+1].ModelMessage
 	}
 	req := ChatRequest{PersistedUserMessageID: "request", inputInHistory: true}
 
-	got := contextProvenance(messages, records, compactionInputs(req))
+	got := contextProvenance(messages, modelMessagesToSDKMessages(messages), records, compactionInputs(req))
 	want := []struct {
 		kind, id string
 		anchor   bool
@@ -433,4 +433,11 @@ func TestSwitchContextChoosesWhatAFoldKeeps(t *testing.T) {
 			}
 		})
 	}
+}
+
+// loadedRecord is a history record as FromDBMessage loads it: its message
+// names the row it renders.
+func loadedRecord(id string, message ModelMessage) historyfrag.HistoryRecord {
+	message.ContextSource = &turn.ContextMessageSource{Kind: "history", ID: id}
+	return historyfrag.HistoryRecord{DBMessageID: id, ModelMessage: message}
 }

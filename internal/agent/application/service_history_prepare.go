@@ -11,6 +11,7 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 type preparedHistoryContext struct {
@@ -91,6 +92,17 @@ func (s *Service) prepareHistoryContext(
 		pressureTokens: estimateMessagesTokens(loaded),
 		truncated:      truncated,
 	}, nil
+}
+
+// interruptedPreparation reports a request whose context ended while it was
+// being prepared, naming the step it was in. Preparation between database
+// calls is CPU-bound and never sees ctx otherwise, so a turn past its budget
+// would keep assembling a request nobody sends.
+func interruptedPreparation(ctx context.Context, step string) error {
+	if ctx.Err() == nil {
+		return nil
+	}
+	return errs.WrapWithDepth(1, context.Cause(ctx), step)
 }
 
 func historyErrorCode(meta map[string]any) string {

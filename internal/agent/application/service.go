@@ -561,12 +561,14 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	if !usePipeline && !req.ReusePersistedUserMessage {
 		messages = append(messages, reqMessages...)
 	}
-	trimmableMessages := normalizedContextPrefixLength(messages, historyMessageCount)
-	messages, currentMessageIndex, memoryMessageIndex = normalizeContextMessages(
-		messages,
-		currentMessageIndex,
-		memoryMessageIndex,
-	)
+	normalized := normalizeContext(messages)
+	if err := interruptedPreparation(ctx, "normalize context messages"); err != nil {
+		return resolvedContext{}, req, err
+	}
+	trimmableMessages := normalized.prefixLength(historyMessageCount)
+	currentMessageIndex = normalized.index(currentMessageIndex)
+	memoryMessageIndex = normalized.index(memoryMessageIndex)
+	messages = normalized.models()
 	runCfg.ContextHistoryTokenEstimates = make([]int, len(messages))
 	for index := range messages {
 		runCfg.ContextHistoryTokenEstimates[index] = estimateMessageTokens(messages[index])
@@ -601,10 +603,9 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		headerifiedModelQuery = turnpkg.FormatUserHeader(headerInput, modelQuery)
 	}
 	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
-	forkMessages := nonNilModelMessages(messages)
-	runCfg.ForkContextSourceMessageIDs = historySourceMessageIDsForMessages(forkMessages, historyRecords)
-	runCfg.ContextProvenance = contextProvenance(forkMessages, historyRecords, compactionInputs(req))
-	runCfg.Messages = modelMessagesToSDKMessages(forkMessages)
+	runCfg.Messages = normalized.sent()
+	runCfg.ForkContextSourceMessageIDs = historySourceMessageIDsForMessages(messages, historyRecords)
+	runCfg.ContextProvenance = contextProvenance(messages, runCfg.Messages, historyRecords, compactionInputs(req))
 	runCfg.ContextMemoryMessageIndex = memoryMessageIndex
 	if usePipeline {
 		runCfg.ContextCurrentUserMessageIndex = currentMessageIndex
@@ -621,6 +622,9 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	runCfg.InlineAttachments = extractNativeAttachmentParts(mergedAttachments)
 	runCfg.ContextScope = buildContextFragScope(req, displayName, runCfg.Identity)
 	runCfg = runCfg.RefreshContextFrag()
+	if err := interruptedPreparation(ctx, "compile context"); err != nil {
+		return resolvedContext{}, req, err
+	}
 
 	var injectedRecords *[]InjectedMessageRecord
 	if req.InjectCh != nil {
@@ -1450,14 +1454,6 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 	return cfg.RefreshContextFrag()
 }
 
-func normalizeContextMessages(messages []ModelMessage, currentIndex, memoryIndex *int) ([]ModelMessage, *int, *int) {
-	cleaned := sanitizeMessages(messages)
-	cleaned = repairToolCallClosures(cleaned, syntheticToolClosureError)
-	return cleaned,
-		remapContextMessageIndex(messages, currentIndex),
-		remapContextMessageIndex(messages, memoryIndex)
-}
-
 func prependContextMessages(prefix, messages []ModelMessage, trackedIndex *int) ([]ModelMessage, *int) {
 	if len(prefix) == 0 {
 		return messages, trackedIndex
@@ -1470,28 +1466,6 @@ func prependContextMessages(prefix, messages []ModelMessage, trackedIndex *int) 
 		}
 	}
 	return append(prefix, messages...), trackedIndex
-}
-
-func normalizedContextPrefixLength(messages []ModelMessage, rawPrefixLength int) int {
-	if rawPrefixLength <= 0 || len(messages) == 0 {
-		return 0
-	}
-	rawPrefixLength = min(rawPrefixLength, len(messages))
-	prefix := sanitizeMessages(messages[:rawPrefixLength])
-	prefix = repairToolCallClosures(prefix, syntheticToolClosureError)
-	return len(prefix)
-}
-
-func remapContextMessageIndex(messages []ModelMessage, index *int) *int {
-	if index == nil || *index < 0 || *index >= len(messages) || !strings.EqualFold(strings.TrimSpace(messages[*index].Role), "user") {
-		return nil
-	}
-	prefix := sanitizeMessages(messages[:*index+1])
-	prefix = repairToolCallClosures(prefix, syntheticToolClosureError)
-	if len(prefix) == 0 || !strings.EqualFold(strings.TrimSpace(prefix[len(prefix)-1].Role), "user") {
-		return nil
-	}
-	return intPointer(len(prefix) - 1)
 }
 
 func latestModelUserMessageIndex(messages []ModelMessage) *int {
