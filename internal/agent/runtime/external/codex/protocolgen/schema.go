@@ -1,29 +1,25 @@
 // Package protocolgen generates the Go types for the codex app-server v2
-// protocol from the vendored JSON Schema snapshot under schema/.
+// protocol from the JSON Schema a codex CLI exports (`codex app-server
+// generate-json-schema --experimental`).
 //
-// The snapshot is produced by the pinned codex CLI (`codex app-server
-// generate-json-schema --experimental`). Generic JSON-Schema code
-// generators cannot represent the serde union encodings this protocol uses,
-// so this package implements a small purpose-built generator that handles
-// exactly the schema shapes present in the snapshot and fails loudly on
-// anything else.
+// Generic JSON-Schema code generators cannot represent the serde union
+// encodings this protocol uses, so this package implements a small
+// purpose-built generator that handles exactly the schema shapes codex exports
+// and fails loudly on anything else.
 package protocolgen
 
 import (
 	"bytes"
-	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"sort"
 	"strings"
 )
 
-//go:embed schema/*.json
-var schemaFS embed.FS
-
-// Schema models the subset of JSON Schema draft-07 that the codex snapshot
-// actually uses. Loading fails if a document contains anything outside it.
+// Schema models the subset of JSON Schema draft-07 that codex actually exports.
+// Loading fails if a document contains anything outside it.
 // The boolean schema form (`true` = anything) is represented by Any.
 type Schema struct {
 	// Any marks the boolean schema `true`, which accepts any value.
@@ -119,8 +115,36 @@ func (s *Schema) nonNullTypes() (types []string, nullable bool) {
 	return types, nullable
 }
 
+// structProperties adds the fields of an object's `anyOf` alternatives to its
+// own: the wire carries one of them, flat on the object. They are not in the
+// object's Required, so they generate as optional fields.
+func (s *Schema) structProperties() (map[string]*Schema, error) {
+	if len(s.OneOf) > 0 || len(s.AllOf) > 0 {
+		return nil, errors.New("oneOf or allOf on an object is not supported")
+	}
+	if len(s.AnyOf) == 0 {
+		return s.Properties, nil
+	}
+	merged := make(map[string]*Schema, len(s.Properties))
+	for name, prop := range s.Properties {
+		merged[name] = prop
+	}
+	for _, alternative := range s.AnyOf {
+		if len(alternative.Properties) == 0 {
+			return nil, errors.New("anyOf alternative without properties is not supported")
+		}
+		for name, prop := range alternative.Properties {
+			if _, exists := merged[name]; exists {
+				return nil, fmt.Errorf("anyOf alternatives repeat property %q", name)
+			}
+			merged[name] = prop
+		}
+	}
+	return merged, nil
+}
+
 // singleAllOfRef unwraps the `allOf: [{$ref}]` + description pattern, the only
-// allOf form present in the snapshot.
+// allOf form codex exports.
 func (s *Schema) singleAllOfRef() (string, bool) {
 	if len(s.AllOf) == 1 && s.AllOf[0].Ref != "" {
 		return refName(s.AllOf[0].Ref), true
@@ -159,7 +183,7 @@ type corpus struct {
 	serverNotification map[string]*Schema
 }
 
-// standalone response documents vendored as separate files: file name (minus
+// standalone response documents exported as separate files: file name (minus
 // .json) is the type name.
 var standaloneDocs = []string{
 	"CommandExecutionRequestApprovalResponse",
@@ -170,10 +194,10 @@ var standaloneDocs = []string{
 	"ChatgptAuthTokensRefreshResponse",
 }
 
-func loadCorpus() (*corpus, error) {
+func loadCorpus(schemas fs.FS) (*corpus, error) {
 	c := &corpus{defs: map[string]*Schema{}}
 
-	bundle, err := loadDoc("schema/codex_app_server_protocol.v2.schemas.json")
+	bundle, err := loadDoc(schemas, "codex_app_server_protocol.v2.schemas.json")
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +205,7 @@ func loadCorpus() (*corpus, error) {
 		return nil, err
 	}
 
-	serverReq, err := loadDoc("schema/ServerRequest.json")
+	serverReq, err := loadDoc(schemas, "ServerRequest.json")
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +214,7 @@ func loadCorpus() (*corpus, error) {
 	}
 
 	for _, name := range standaloneDocs {
-		doc, err := loadDoc("schema/" + name + ".json")
+		doc, err := loadDoc(schemas, name+".json")
 		if err != nil {
 			return nil, err
 		}
@@ -222,8 +246,8 @@ func loadCorpus() (*corpus, error) {
 	return c, nil
 }
 
-func loadDoc(path string) (*Schema, error) {
-	raw, err := schemaFS.ReadFile(path)
+func loadDoc(schemas fs.FS, path string) (*Schema, error) {
+	raw, err := fs.ReadFile(schemas, path)
 	if err != nil {
 		return nil, err
 	}

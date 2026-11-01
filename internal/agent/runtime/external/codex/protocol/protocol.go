@@ -2,8 +2,8 @@
 // app-server: JSON-RPC 2.0 semantics over newline-delimited JSON on stdio,
 // with the `jsonrpc` version field omitted, as the app-server does.
 //
-// The typed protocol surface (*.gen.go) is generated from the vendored JSON
-// Schema snapshot by cmd/gen-codex-protocol; this file holds the
+// The typed protocol surface (*.gen.go) is generated from the JSON Schema the
+// codex CLI exports by cmd/gen-codex-protocol; this file holds the
 // version-independent core: envelopes, request ids, inbound classification,
 // and the union runtime helpers the generated code relies on.
 //

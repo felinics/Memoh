@@ -173,11 +173,15 @@ func (g *generator) emitStruct(b *strings.Builder, name string, s *Schema, skipP
 	for _, r := range s.Required {
 		required[r] = true
 	}
+	properties, err := s.structProperties()
+	if err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
 	writeDoc(b, s.Description, "")
 	fmt.Fprintf(b, "type %s struct {\n", name)
 
-	props := make([]string, 0, len(s.Properties))
-	for propName := range s.Properties {
+	props := make([]string, 0, len(properties))
+	for propName := range properties {
 		if skipProps[propName] {
 			continue
 		}
@@ -200,7 +204,7 @@ func (g *generator) emitStruct(b *strings.Builder, name string, s *Schema, skipP
 	}
 	var requiredCollections []collectionField
 	for _, propName := range props {
-		prop := s.Properties[propName]
+		prop := properties[propName]
 		expr, omitempty, err := g.fieldExpr(prop, name, propName, required[propName])
 		if err != nil {
 			return err

@@ -6,9 +6,7 @@ import vue from 'eslint-plugin-vue'
 export default [
   ...tseslint.configs.recommended,
   ...vue.configs['flat/recommended'],
-  // internal/**/protocolref holds vendored protocol reference snapshots
-  // (pinned verbatim; a freshness test diffs them against upstream).
-  { ignores: ['**/node_modules/**', '**/dist/**', '**/out/**', '**/cache/**', '**/target/**', '**/.toolkit/**', 'packages/sdk/src/**', 'internal/**/protocolref/**'] },
+  { ignores: ['**/node_modules/**', '**/dist/**', '**/out/**', '**/cache/**', '**/target/**', '**/.toolkit/**', 'packages/sdk/src/**'] },
   {
     files: ['packages/**/*.{js,jsx,ts,tsx}', 'apps/**/*.{js,jsx,ts,tsx}'],
     languageOptions: {
