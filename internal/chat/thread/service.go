@@ -738,6 +738,13 @@ func (s *Service) ForkFromAssistantTurn(ctx context.Context, input ForkFromAssis
 	}
 	var forkID pgtype.UUID
 	err = txer.InTx(ctx, func(queries dbstore.Queries) error {
+		// The bot before the source, as every session write locks them:
+		// deleting the bot locks it before its sessions, so a fork that held
+		// the source first would wait on the bot while the delete waits on
+		// the source.
+		if err := runtimefence.LockBotForSessionWrite(ctx, queries, input.BotID); err != nil {
+			return err
+		}
 		if err := queries.LockSessionForFork(ctx, pgSessionID); err != nil {
 			return err
 		}
