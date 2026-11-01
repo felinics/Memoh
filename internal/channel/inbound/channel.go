@@ -901,8 +901,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// Discuss mode: dispatch to the discuss driver and return.
 	// The discuss driver autonomously decides whether to call the LLM.
 	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && latestRC != nil && slashDecision.AgentCommand == "" {
-		chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
-		sessionToken := p.issueSessionBearerToken(ctx, identity, runtimeSession, sessionRuntimeOwner, chatToken)
 		statusInfo := channel.ProcessingStatusInfo{
 			BotID:             identity.BotID,
 			ChatID:            activeChatID,
@@ -922,10 +920,12 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			CurrentPlatform:   msg.Channel.String(),
 			ConversationType:  strings.TrimSpace(msg.Conversation.Type),
 			ConversationName:  strings.TrimSpace(msg.Conversation.Name),
-			SessionToken:      sessionToken,
-			ChatToken:         chatToken,
-			ToolHTTPURL:       acpMCPToolsURLFromEnv(identity.BotID),
-			StartProcessing:   p.discussProcessingStarter(cfg, msg, identity, statusInfo),
+			Credentials: func(ctx context.Context) (string, string) {
+				chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
+				return p.issueSessionBearerToken(ctx, identity, runtimeSession, sessionRuntimeOwner, chatToken), chatToken
+			},
+			ToolHTTPURL:     acpMCPToolsURLFromEnv(identity.BotID),
+			StartProcessing: p.discussProcessingStarter(cfg, msg, identity, statusInfo),
 		})
 		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID)
 		return nil

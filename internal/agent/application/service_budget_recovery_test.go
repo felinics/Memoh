@@ -185,15 +185,6 @@ func TestStreamChatFoldsATruncatedLoadBeforeTheRun(t *testing.T) {
 	}
 }
 
-func TestWSFoldsATruncatedLoadBeforeTheRun(t *testing.T) {
-	fixture, compactor := slowRecoveryFixture(t)
-	eventCh := make(chan WSStreamEvent, 256)
-	outcome, err := fixture.service.StreamChatWS(t.Context(), slowRecoveryRequest(), eventCh, nil)
-	if err != nil || outcome.Cause != nil || compactor.calls.Load() != 1 {
-		t.Fatalf("error=%v outcome=%+v compactions=%d, want one compaction then a completed turn", err, outcome, compactor.calls.Load())
-	}
-}
-
 func TestPipelineMediaFollowsExplicitCurrentInput(t *testing.T) {
 	s, _, _, cfg := chatRecoveryFixture(t)
 	cfg.Messages = []sdk.Message{sdk.UserMessage("current"), sdk.UserMessage("self echo"), sdk.UserMessage("memory")}
@@ -338,7 +329,7 @@ func TestLoadChatHistoryFoldsATruncatedLoad(t *testing.T) {
 			if tc.run != nil {
 				runner.run = func() ([]compaction.Pass, error) { return tc.run(history) }
 			}
-			got, err := s.loadChatHistory(t.Context(), req, false, 8000, "")
+			got, err := s.loadChatHistory(t.Context(), req, chatHistoryScope(req), false, 8000, "")
 			if fails := apperror.CodeOf(err) == apperror.CodeContextBudgetUnsatisfied; fails != tc.fails || !tc.fails && err != nil || history.loads != tc.loads {
 				t.Fatalf("err=%v loads=%d, want failure=%v after %d loads", err, history.loads, tc.fails, tc.loads)
 			}

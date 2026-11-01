@@ -2,6 +2,7 @@ package contextview
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -160,17 +161,22 @@ func discussContextConfig(config any) (DiscussContextConfig, error) {
 }
 
 func discussContextMessageToSDK(message timeline.ContextMessage) sdk.Message {
-	if len(message.RawContent) > 0 {
-		// RawContent is the stored content shape; the codec types it for the
-		// SDK instead of decoding it as SDK JSON.
-		if msg := messageconv.ModelMessageToSDKMessage(turn.ModelMessage{Role: message.Role, Content: message.RawContent}); msg.Role != "" && len(msg.Content) > 0 {
+	return DiscussMessageToSDK(message.Role, message.Content, message.RawContent)
+}
+
+// DiscussMessageToSDK converts one composed Discuss message. RawContent is
+// the stored content shape; the codec types it for the SDK instead of
+// decoding it as SDK JSON. Text content renders as the role's message.
+func DiscussMessageToSDK(role, content string, raw json.RawMessage) sdk.Message {
+	if len(raw) > 0 {
+		if msg := messageconv.ModelMessageToSDKMessage(turn.ModelMessage{Role: role, Content: raw}); msg.Role != "" && len(msg.Content) > 0 {
 			return msg
 		}
 	}
-	if message.Role == "assistant" {
-		return sdk.AssistantMessage(message.Content)
+	if role == "assistant" {
+		return sdk.AssistantMessage(content)
 	}
-	return sdk.UserMessage(message.Content)
+	return sdk.UserMessage(content)
 }
 
 func trustForDiscussRole(role string) contextfrag.TrustLevel {

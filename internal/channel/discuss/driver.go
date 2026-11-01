@@ -46,14 +46,20 @@ type DiscussSessionConfig struct {
 	CurrentPlatform   string
 	ConversationType  string
 	ConversationName  string
-	SessionToken      string //nolint:gosec // session credential material
-	ChatToken         string //nolint:gosec // scoped chat routing token
-	ToolHTTPURL       string
+	// Credentials mints the session and chat tokens a turn dispatches with.
+	// The tokens are short-lived, so the worker mints them when it starts
+	// the turn, after the history it loaded and the queue it waited in.
+	Credentials CredentialsFunc
+	ToolHTTPURL string
 	// StartProcessing shows the platform processing indicator ("typing")
 	// for one addressed run; nil when the channel has none. It is bound to
 	// the inbound message that last woke the session.
 	StartProcessing StartProcessingFunc
 }
+
+// CredentialsFunc returns the session bearer and chat tokens for one turn,
+// issued for the inbound message that last woke the session.
+type CredentialsFunc func(ctx context.Context) (sessionToken, chatToken string)
 
 // StartProcessingFunc starts the processing indicator and returns the
 // function that ends it: a nil cause reports completion, a non-nil cause a
@@ -77,13 +83,10 @@ type DiscussDriver struct {
 	logger             *slog.Logger
 }
 
-// admissionMaxTokens resolves the effective admission cap; construction
-// without an explicit cap still gets the shared default, never unbounded.
+// admissionMaxTokens is the admission cap; NewDiscussDriver defaults it, so
+// it is never unbounded.
 func (d *DiscussDriver) admissionMaxTokens() int {
-	if d.admissionCapTokens > 0 {
-		return d.admissionCapTokens
-	}
-	return turn.DefaultContextCapTokens
+	return d.admissionCapTokens
 }
 
 type discussSession struct {
