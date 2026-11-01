@@ -99,16 +99,15 @@ func (d *DiscussDriver) loadHistory(ctx context.Context, cfg DiscussSessionConfi
 			return discussHistory{}, err
 		}
 	}
-	trs, measure, err := d.history.Load(ctx, cfg.ThreadID, history.checkpoint.Position)
+	trs, truncated, err := d.history.Load(ctx, cfg.ThreadID, history.checkpoint.Position)
 	if err != nil {
 		return discussHistory{}, err
 	}
-	if measure.TotalMessages > int64(measure.Loaded) {
+	if truncated {
 		log.InfoContext(ctx, "context_admission",
 			slog.String("path", "discuss_history_load"),
-			slog.Int64("history_total_messages", measure.TotalMessages),
-			slog.Int64("history_total_bytes", measure.TotalBytes),
-			slog.Int("history_loaded_messages", measure.Loaded),
+			slog.Bool("truncated", true),
+			slog.Int("history_loaded_messages", len(trs)),
 			slog.Int("budget_tokens", d.admissionMaxTokens()))
 	}
 	history.trs = trs
@@ -150,7 +149,7 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 				return
 			}
 		}
-		plan, admission, ok := d.trigger.Build(cfg, rc, history.trs, sess.lastProcessed, history.checkpoint, timeline.ComposeBudget{MaxTokens: d.admissionMaxTokens()})
+		plan, admission, ok := d.trigger.Build(cfg, rc, history, sess.lastProcessed, timeline.ComposeBudget{MaxTokens: d.admissionMaxTokens()})
 		if !ok {
 			if admission.ProtectedOverflow {
 				log.ErrorContext(ctx, "context_admission_rejected",

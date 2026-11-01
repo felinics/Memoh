@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	dbpkg "github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 )
@@ -59,36 +58,33 @@ func TestPostgresTurnResponseSourcesProjectMetadataAndPreserveWindow(t *testing.
 			t.Fatal(err)
 		}
 	}
-	pgSessionID, err := dbpkg.ParseUUID(postgresMessageTestSessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, after := range []HistoryPosition{{}, {Turn: 2, Seq: 1}} {
 		for _, budget := range []int64{0, 1, 100, 1 << 20} {
 			t.Run(fmt.Sprintf("after_%d/budget_%d", after.Turn, budget), func(t *testing.T) {
-				window, err := queries.ListHistoryMessagesAfterWithinBytes(ctx, dbsqlc.ListHistoryMessagesAfterWithinBytesParams{
-					SessionID: pgSessionID, AfterTurnPosition: after.Turn, AfterTurnMessageSeq: after.Seq, MaxBytes: budget,
-				})
+				// Full-row admission walks the same window and hands metadata
+				// over undecoded, for history records to decode row by row.
+				fullLoad, err := svc.ListHistoryWithinBytes(ctx, postgresMessageTestSessionID, HistoryWindow{After: after, MaxBytes: budget})
 				if err != nil {
 					t.Fatal(err)
 				}
+				window := fullLoad.Messages
 				load, err := svc.ListTurnResponseSourcesWithinBytes(ctx, postgresMessageTestSessionID, after, budget)
 				if err != nil {
 					t.Fatal(err)
 				}
 				got := load.Messages
-				if len(got) != len(window) {
-					t.Fatalf("window length=%d, want %d", len(got), len(window))
-				}
-				if want := len(window) > 0 && window[0].Truncated; load.Truncated != want {
-					t.Fatalf("truncated=%v, want %v as the history window reports it", load.Truncated, want)
+				if len(got) != len(window) || load.Truncated != fullLoad.Truncated {
+					t.Fatalf("window length=%d truncated=%v, want %d, %v", len(got), load.Truncated, len(window), fullLoad.Truncated)
 				}
 				for i, m := range got {
-					if m.ID != window[i].ID.String() || m.Role != window[i].Role || !bytes.Equal(m.Content, window[i].Content) || !m.CreatedAt.Equal(window[i].CreatedAt.Time) {
+					if m.ID != window[i].ID || m.Role != window[i].Role || !bytes.Equal(m.Content, window[i].Content) || !m.CreatedAt.Equal(window[i].CreatedAt) {
 						t.Fatalf("history ordering/content changed at row %d", i)
 					}
 					var metadata map[string]any
-					if err := json.Unmarshal(window[i].Metadata, &metadata); err != nil {
+					if window[i].Metadata != nil {
+						t.Fatalf("full row %d decoded its metadata", i)
+					}
+					if err := json.Unmarshal(window[i].RawMetadata, &metadata); err != nil {
 						t.Fatal(err)
 					}
 					if m.Metadata[AgentStepInterruptedMetadataKey] != (metadata[AgentStepInterruptedMetadataKey] == true) {
@@ -116,21 +112,6 @@ func TestPostgresTurnResponseSourcesProjectMetadataAndPreserveWindow(t *testing.
 				if after == (HistoryPosition{}) && budget == 1<<20 && len(got) != len(flags) {
 					t.Fatalf("loaded %d rows, want %d active rows", len(got), len(flags))
 				}
-				// Full-row admission keeps the same window but hands metadata
-				// over undecoded, for history records to decode row by row.
-				fullLoad, err := svc.ListHistoryWithinBytes(ctx, postgresMessageTestSessionID, HistoryWindow{After: after, MaxBytes: budget})
-				if err != nil {
-					t.Fatal(err)
-				}
-				full := fullLoad.Messages
-				if len(full) != len(window) {
-					t.Fatalf("full window length=%d, want %d", len(full), len(window))
-				}
-				for i, m := range full {
-					if m.ID != window[i].ID.String() || m.Metadata != nil || !bytes.Equal(m.RawMetadata, window[i].Metadata) {
-						t.Fatalf("full row %d decoded or lost its metadata", i)
-					}
-				}
 			})
 		}
 	}
@@ -151,7 +132,7 @@ func TestPostgresTurnResponseSourcesProjectMetadataAndPreserveWindow(t *testing.
 // before an edit's cutoff, admitted newest first by content bytes: the row
 // that crosses the budget still loads, older ones do not, and the load reports
 // that it left them out. Passive and hidden rows spend nothing and never load,
-// by position or by ID, and the measure counts what the window could read.
+// by position or by ID.
 func TestPostgresHistoryWindowReadsTheContextRowsAfterACheckpoint(t *testing.T) {
 	ctx := context.Background()
 	tx := beginPostgresMessageTestTx(t, ctx)
@@ -227,12 +208,5 @@ func TestPostgresHistoryWindowReadsTheContextRowsAfterACheckpoint(t *testing.T) 
 	}
 	if _, err := svc.HistoryPositionByID(ctx, postgresMessageTestSessionID, ids["hidden"]); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("position of a hidden row: err=%v, want no rows", err)
-	}
-	measure, err := svc.MeasureHistory(ctx, postgresMessageTestSessionID, after)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if measure.MessageCount != 6 || measure.ContentBytes != 6*rowBytes {
-		t.Fatalf("measure = %+v, want the 6 rows after the checkpoint at %d bytes each", measure, rowBytes)
 	}
 }

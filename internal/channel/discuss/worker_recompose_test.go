@@ -164,7 +164,7 @@ func (s *failingCheckpointSource) Load(context.Context, string, timeline.Rendere
 	return timeline.HistoryCheckpoint{}, nil
 }
 
-type failingHistoryReader struct{ lightweightHistoryStub }
+type failingHistoryReader struct{}
 
 func (failingHistoryReader) ListTurnResponseSourcesWithinBytes(context.Context, string, messagepkg.HistoryPosition, int64) (messagepkg.HistoryLoad, error) {
 	return messagepkg.HistoryLoad{}, errors.New("history unavailable")
