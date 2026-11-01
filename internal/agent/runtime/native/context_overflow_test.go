@@ -346,7 +346,7 @@ func TestStreamLengthFinishDoesNotReplayNonTextOutput(t *testing.T) {
 }
 
 func TestStreamContextOverflowOnlyRecoversBeforeOutput(t *testing.T) {
-	for _, output := range []string{"none", "before error", "after error"} {
+	for _, output := range []string{"none", "before error", "after error", "source before error", "source after error"} {
 		t.Run(output, func(t *testing.T) {
 			calls, folds := 0, 0
 			provider := agentStreamTestProvider(func(_ context.Context, _ sdk.Request) (<-chan sdk.StreamPart, error) {
@@ -356,9 +356,15 @@ func TestStreamContextOverflowOnlyRecoversBeforeOutput(t *testing.T) {
 					if output == "before error" {
 						parts = append(parts, &sdk.TextDeltaPart{ID: "text", Text: "partial answer"})
 					}
+					if output == "source before error" {
+						parts = append(parts, &sdk.StreamSourcePart{})
+					}
 					parts = append(parts, &sdk.ErrorPart{Error: &sdk.APIError{Code: "context_length_exceeded"}})
 					if output == "after error" {
 						parts = append(parts, &sdk.TextDeltaPart{ID: "text", Text: "buffered answer"})
+					}
+					if output == "source after error" {
+						parts = append(parts, &sdk.StreamSourcePart{})
 					}
 					return closedAgentTestStream(parts...), nil
 				}

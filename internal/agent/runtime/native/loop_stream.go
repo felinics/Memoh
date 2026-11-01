@@ -964,7 +964,7 @@ partLoop:
 				break
 			}
 			if _, overflow := modelretry.ContextOverflow(p.Error); overflow &&
-				(stepText != "" || !stepReasoning.empty() || e.interruptedStep.toolActivity || sawFile || sawFinishStep) {
+				(stepText != "" || !stepReasoning.empty() || e.interruptedStep.toolActivity || sawFile || sawSource || sawFinishStep) {
 				// A rejection after visible/provider-owned work is not proof
 				// that replay is safe. Preserve the interrupted frontier.
 				e.endWithFailure(StreamEvent{Type: EventError, Cause: &modelCallFailure{err: errs.WrapDependency(p.Error, "model stream", slog.Int("step", attemptStep))}})
@@ -998,7 +998,8 @@ partLoop:
 		drainStreamUntilClosed(provParts, streamCancelDrainGrace, func(part sdk.StreamPart) {
 			e.interruptedStep.observe(part)
 			_, file := part.(*sdk.StreamFilePart)
-			lateOutput = lateOutput || file || e.interruptedStep.finished || e.interruptedStep.text.Len() > 0 ||
+			_, source := part.(*sdk.StreamSourcePart)
+			lateOutput = lateOutput || file || source || e.interruptedStep.finished || e.interruptedStep.text.Len() > 0 ||
 				!e.interruptedStep.reasoningBlocks.empty() || e.interruptedStep.toolActivity
 		})
 		if _, overflow := modelretry.ContextOverflow(retry); overflow && lateOutput {
