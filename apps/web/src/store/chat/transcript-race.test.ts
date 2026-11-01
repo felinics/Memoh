@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
-import type { RuntimeCurrentRunView, UIMessage, UITurn } from '@/composables/api/useChat.types'
+import type { RuntimeCurrentRunView, UIAssistantTurn, UIMessage, UITurn } from '@/composables/api/useChat.types'
 import { createBackgroundTaskTracker } from './background-tasks'
 import { createTranscriptController } from './transcript'
 import { projectRuntimeTranscript, type RuntimeTranscriptSlice } from './runtime-projection'
@@ -13,7 +13,7 @@ function rawUser(id: string, text = 'hello', timestamp = '2026-01-01T00:00:00.00
   return { id, turn_id: `turn-${id}`, role: 'user', text, timestamp, platform: 'local' }
 }
 
-function rawAssistant(id: string, messages: UIMessage[] = [], timestamp = '2026-01-01T00:00:01.000Z'): UITurn {
+function rawAssistant(id: string, messages: UIMessage[] = [], timestamp = '2026-01-01T00:00:01.000Z'): UIAssistantTurn {
   return { id, turn_id: `turn-${id}`, role: 'assistant', messages, timestamp }
 }
 
