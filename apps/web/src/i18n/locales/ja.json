@@ -1830,6 +1830,7 @@
     }
   },
   "chatExamples": {
+    "dismissError": "エラーを閉じる",
     "noBot": "試すには、まず Bot を作成してください。",
     "createBot": "Bot を作成",
     "tryThese": "こんなことを試せます",

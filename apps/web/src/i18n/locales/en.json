@@ -1861,6 +1861,7 @@
     }
   },
   "chatExamples": {
+    "dismissError": "Dismiss error",
     "noBot": "Create a bot first to try this.",
     "createBot": "Create bot",
     "tryThese": "Try one of these",
