@@ -13,14 +13,18 @@ import (
 )
 
 // Rows that reference the bot take FOR KEY SHARE on it in their foreign key
-// check. The admission lock must leave that lock grantable: an insert waiting
-// on admission while admission waits on a session row the insert already
-// key-share locked is a deadlock.
+// check. The locks an admission holds must leave that lock grantable: an insert
+// waiting on admission while admission waits on a session row the insert
+// already key-share locked is a deadlock.
 func TestPostgresAdmissionLockLeavesForeignKeyChecksGrantable(t *testing.T) {
 	ctx := context.Background()
 	pool := openLedgerResetPostgres(t, ctx)
 	botID, sessionID := createLedgerResetFixture(t, ctx, pool)
 	pgBotID, err := dbpkg.ParseUUID(botID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,8 +34,20 @@ func TestPostgresAdmissionLockLeavesForeignKeyChecksGrantable(t *testing.T) {
 		t.Fatalf("begin admission: %v", err)
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	if _, err := dbsqlc.New(tx).LockBotForSessionRunClaim(ctx, pgBotID); err != nil {
+	q := dbsqlc.New(tx)
+	if _, err := q.LockBotForSessionRunClaim(ctx, pgBotID); err != nil {
 		t.Fatalf("lock admission bot: %v", err)
+	}
+	if _, err := q.AdmitLockedSessionRun(ctx, dbsqlc.AdmitLockedSessionRunParams{
+		RunID:            pgtype.UUID{Bytes: uuid.New(), Valid: true},
+		BotID:            pgBotID,
+		InvocationID:     uuid.NewString(),
+		TurnID:           pgtype.UUID{Bytes: uuid.New(), Valid: true},
+		InputJson:        []byte(`{}`),
+		InputFingerprint: "fingerprint",
+		SessionID:        pgSessionID,
+	}); err != nil {
+		t.Fatalf("admit run: %v", err)
 	}
 
 	insertCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
