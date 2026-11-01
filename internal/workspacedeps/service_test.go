@@ -304,6 +304,12 @@ func (f *fakeStore) UpdateObserved(_ context.Context, key InstallationKey, upd O
 	if upd.LatestVersion != nil {
 		rec.LatestVersion = *upd.LatestVersion
 	}
+	if upd.UpdateAvailable != nil {
+		rec.UpdateAvailable = *upd.UpdateAvailable
+	}
+	if upd.UpdateCheckedVersion != nil {
+		rec.UpdateCheckedVersion = *upd.UpdateCheckedVersion
+	}
 	if upd.LastCheckedAt != nil {
 		at := *upd.LastCheckedAt
 		rec.LastCheckedAt = &at
@@ -756,7 +762,7 @@ func TestListLeavesInProgressAndFailedRecordsAlone(t *testing.T) {
 func TestListImageBaselineAndOverlay(t *testing.T) {
 	f := newServiceFixture(t)
 	f.present("agent-x", SourceToolkit, "1.9.0", nil)
-	f.store.seed(Installation{BotID: testBot, DependencyID: "tool-y", Source: InstallationSourceManaged, Status: StatusInstalled, InstalledVersion: "1.0.0", LatestVersion: "1.2.0"})
+	f.store.seed(Installation{BotID: testBot, DependencyID: "tool-y", Source: InstallationSourceManaged, Status: StatusInstalled, InstalledVersion: "1.0.0", LatestVersion: "1.2.0", UpdateAvailable: true, UpdateCheckedVersion: "1.0.0"})
 	managedTool := Candidate{Source: SourceManaged, Path: filepath.Join(f.home("tool-y"), "current", "bin", "tool-y"), Version: "1.0.0"}
 	imageTool := Candidate{Source: SourceToolkit, Path: "/opt/memoh/toolkit/bin/tool-y", Version: "0.9.0"}
 	f.presentCandidates("tool-y", &State{Version: "1.0.0", PreviousVersion: "0.9.5"}, managedTool, imageTool)
@@ -2162,5 +2168,33 @@ func TestListFollowsLauncherCandidate(t *testing.T) {
 	}
 	if item := pre.Items[0]; !item.Satisfied || item.InstalledVersion != "1.8.0" {
 		t.Errorf("preflight item = %+v", item)
+	}
+}
+
+func TestUpdateVerdictIsAuthoritativeAndVersionBound(t *testing.T) {
+	f := newServiceFixture(t)
+	key := seedInstalled(f, testBot, "tool-y", "2.9.0")
+	f.present("tool-y", SourceManaged, "2.9.0", &State{Version: "2.9.0"})
+	for _, check := range []updateCheck{
+		{Latest: "2.9.0-0", UpdateAvailable: false},
+		{Latest: "2.8.0", UpdateAvailable: false},
+		{Latest: "2.10.0", UpdateAvailable: true},
+		{Latest: "2.10.0", UpdateAvailable: false},
+	} {
+		if err := f.svc.recordCheck(f.ctx(), key, "2.9.0", check, nil); err != nil {
+			t.Fatal(err)
+		}
+		rec, _ := f.store.get(key)
+		if rec.UpdateAvailable != check.UpdateAvailable || rec.UpdateCheckedVersion != "2.9.0" {
+			t.Fatalf("verdict not stored: %+v", rec)
+		}
+		obs := Observed{Present: true, Candidates: []Candidate{{Source: SourceManaged, Path: "/managed/tool-y", Version: "2.9.0"}}}
+		if entry := buildEntry(Entry{}, catalog.Dependency{}, &rec, obs); entry.UpdateAvailable != check.UpdateAvailable {
+			t.Fatalf("verdict recomputed: %+v", entry)
+		}
+		obs.Candidates[0].Version = "2.11.0"
+		if entry := buildEntry(Entry{}, catalog.Dependency{}, &rec, obs); entry.UpdateAvailable {
+			t.Fatalf("stale verdict reused: %+v", entry)
+		}
 	}
 }

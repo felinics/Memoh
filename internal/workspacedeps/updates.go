@@ -116,7 +116,7 @@ func (w *UpdateWorker) loop(ctx context.Context, done chan struct{}) {
 }
 
 // checkGroup is one upstream query shared by every record with the same
-// dependency and platform.
+// dependency, installed version, and platform.
 type checkGroup struct {
 	dep      groupKey
 	client   *bridge.Client
@@ -126,15 +126,16 @@ type checkGroup struct {
 }
 
 type groupKey struct {
-	depID string
-	os    string
-	arch  string
-	libc  string
+	version string
+	depID   string
+	os      string
+	arch    string
+	libc    string
 }
 
 // RunOnce performs one round: installed, unpinned dependencies with a
 // check_update script on running native workspaces are grouped by
-// (dependency, platform), each group runs check_update once, and the result
+// (dependency, installed version, platform), each group runs check_update once, and the result
 // fans out to every member. It returns how many upstream checks ran.
 func (w *UpdateWorker) RunOnce(ctx context.Context) (int, error) {
 	ctx, _, catalogErr := w.service.prepareCatalog(ctx, true, false)
@@ -167,8 +168,8 @@ func (w *UpdateWorker) RunOnce(ctx context.Context) (int, error) {
 				continue
 			}
 			current, getErr := s.store.Get(ctx, recKey)
-			if getErr == nil && current.Status == StatusInstalled {
-				if err := s.recordCheck(ctx, recKey, check, checkErr); err != nil {
+			if getErr == nil && current.Status == StatusInstalled && current.InstalledVersion == source.InstalledVersion {
+				if err := s.recordCheck(ctx, recKey, source.InstalledVersion, check, checkErr); err != nil {
 					errs = append(errs, err)
 				}
 			} else if getErr != nil && !errors.Is(getErr, ErrInstallationNotFound) {
@@ -219,7 +220,7 @@ func (w *UpdateWorker) groupRecords(ctx context.Context, records []Installation)
 		if !target.running {
 			continue
 		}
-		key := groupKey{depID: dep.ID, os: target.platform.OS, arch: target.platform.Arch, libc: target.platform.Libc}
+		key := groupKey{version: rec.InstalledVersion, depID: dep.ID, os: target.platform.OS, arch: target.platform.Arch, libc: target.platform.Libc}
 		group, exists := groups[key]
 		if !exists {
 			group = &checkGroup{dep: key, client: target.client, dataRoot: target.dataRoot, platform: target.platform}
