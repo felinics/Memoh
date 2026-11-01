@@ -104,6 +104,13 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
+// Entering a bot opens a new chat; nothing selects a Session for the user.
+// Tests that need a Session in view open it the way the user does.
+async function openSession(store: ReturnType<typeof useChatStore>, botId: string, sessionId: string) {
+  await store.selectBot(botId)
+  await store.selectSession(sessionId)
+}
+
 function applyLatestDraftRequest(store: ReturnType<typeof useChatStore>) {
   const request = store.draftViewRequested
   if (!request) throw new Error('Expected a Draft view request')
@@ -1490,7 +1497,7 @@ describe('chat-list store', () => {
       }])
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-1')
 
       const tool = store.messages[0]?.role === 'assistant'
         ? store.messages[0].messages[0]
@@ -1556,7 +1563,7 @@ describe('chat-list store', () => {
       ])
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-1')
 
       expect(store.messages).toHaveLength(3)
       expect(store.messages[0]).toMatchObject({
@@ -1746,7 +1753,7 @@ describe('chat-list store', () => {
         }])
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-schedule')
       expect(store.sessionId).toBe('session-schedule')
       expect(store.messages).toEqual([])
 
@@ -1819,7 +1826,7 @@ describe('chat-list store', () => {
         ], nextCursor: null })
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-old')
       expect(store.sessionId).toBe('session-old')
 
       h.sessionsActivityHandler?.({
@@ -1885,7 +1892,7 @@ describe('chat-list store', () => {
       ])
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-1')
       await flushPromises()
       const retry = store.retryLatestAssistant('turn-fx-0-1', { workspaceTargetId: 'computer-b' })
       await flushPromises()
@@ -1985,7 +1992,7 @@ describe('chat-list store', () => {
       ])
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'fork-session')
       await flushPromises()
       const retry = store.retryLatestAssistant('turn-fx-1-2')
       await flushPromises()
@@ -2077,7 +2084,7 @@ describe('chat-list store', () => {
       ])
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'fork-session')
       await flushPromises()
       const retry = store.retryLatestAssistant('turn-fx-2-1')
       await flushPromises()
@@ -2169,7 +2176,7 @@ describe('chat-list store', () => {
       ])
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'fork-session')
       await flushPromises()
       const edit = store.editLatestUser('turn-fx-3-2', 'edited second')
       await flushPromises()
@@ -2247,7 +2254,7 @@ describe('chat-list store', () => {
       ])
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-1')
       await flushPromises()
       const result = await store.retryLatestAssistant('turn-fx-4-1')
 
@@ -2284,7 +2291,7 @@ describe('chat-list store', () => {
       ])
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-1')
       await flushPromises()
 
       const onSettled = vi.fn()
@@ -2355,7 +2362,7 @@ describe('chat-list store', () => {
       ])
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-1')
       await flushPromises()
 
       const onSettled = vi.fn()
@@ -2437,7 +2444,7 @@ describe('chat-list store', () => {
       })
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-a')
       await flushPromises()
       const retry = store.retryLatestAssistant('turn-fx-5-1')
       await flushPromises()
@@ -2488,7 +2495,7 @@ describe('chat-list store', () => {
       ])
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-1')
       await flushPromises()
       const edit = store.editLatestUser('turn-fx-6-1', 'new prompt', { workspaceTargetId: 'computer-a' })
       await flushPromises()
@@ -2565,7 +2572,7 @@ describe('chat-list store', () => {
       ])
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-1')
       await flushPromises()
       const result = await store.editLatestUser('turn-fx-7-1', 'new prompt')
 
@@ -2624,7 +2631,7 @@ describe('chat-list store', () => {
       })
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-a')
       await flushPromises()
       const edit = store.editLatestUser('turn-fx-8-1', 'new prompt')
       await flushPromises()
@@ -2689,7 +2696,7 @@ describe('chat-list store', () => {
       ])
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-1')
       await flushPromises()
       const result = await store.editLatestUser('turn-fx-8-3', 'new prompt')
 
@@ -2781,7 +2788,7 @@ describe('chat-list store', () => {
       })
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'source-session')
       await flushPromises()
       const ok = await store.forkTurn('turn-fx-9-1', { title: 'Custom fork name' })
       await applyLatestForkRequest(store)
@@ -2864,7 +2871,7 @@ describe('chat-list store', () => {
       })
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'source-session')
       await flushPromises()
       const ok = await store.forkTurn('turn-fx-10-1')
       await applyLatestForkRequest(store)
@@ -2923,7 +2930,7 @@ describe('chat-list store', () => {
       }))
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'source-session')
       await flushPromises()
       const targetA = { botId: 'bot-1', sessionId: 'source-session', viewId: 'chat:a' }
       const targetB = { botId: 'bot-1', sessionId: 'other-session', viewId: 'chat:b' }
@@ -2988,7 +2995,7 @@ describe('chat-list store', () => {
       }>()
       api.forkSessionFromTurn.mockReturnValueOnce(response.promise)
       const store = useChatStore()
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'source-session')
       await flushPromises()
 
       const fork = store.forkTurn('turn-fx-12-1')
@@ -3967,7 +3974,7 @@ describe('chat-list store', () => {
       })
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-a')
       const sending = store.sendMessage('first')
       await flushPromises()
       const runId = wsRunId(0)
@@ -4008,7 +4015,7 @@ describe('chat-list store', () => {
         .mockReturnValueOnce(freshSessionA.promise)
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-a')
       await flushPromises()
       await store.selectSession('session-b')
       await flushPromises()
@@ -4056,7 +4063,7 @@ describe('chat-list store', () => {
         .mockReturnValueOnce(freshSessionA.promise)
       const store = useChatStore()
 
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-a')
       await flushPromises()
       await store.selectSession('session-b')
       await flushPromises()
@@ -4180,7 +4187,7 @@ describe('chat-list store', () => {
         resolveFetchSession = resolve
       }))
       const store = useChatStore()
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-visible')
       await flushPromises()
 
       const selection = store.selectSession('session-hidden')
@@ -4421,7 +4428,7 @@ describe('chat-list store', () => {
       }))
       api.fetchMessagesUI.mockResolvedValueOnce(shortPage)
       const store = useChatStore()
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-1')
       await flushPromises()
       await flushPromises()
       expect(store.messages.length).toBe(5)
@@ -4448,7 +4455,7 @@ describe('chat-list store', () => {
       }))
       api.fetchMessagesUI.mockResolvedValueOnce(initialPage)
       const store = useChatStore()
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-1')
       await flushPromises()
       await flushPromises()
       expect(store.hasMoreOlder).toBe(true)
@@ -4471,7 +4478,7 @@ describe('chat-list store', () => {
         nextCursor: null,
       })
       const store = useChatStore()
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-1')
       await flushPromises()
 
       api.deleteSession.mockResolvedValueOnce(undefined)
@@ -4497,7 +4504,7 @@ describe('chat-list store', () => {
         nextCursor: null,
       })
       const store = useChatStore()
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-1')
       await flushPromises()
       expect(store.sessionId).toBe('session-1')
 
@@ -4547,7 +4554,7 @@ describe('chat-list store', () => {
         nextCursor: null,
       })
       const store = useChatStore()
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-1')
       await flushPromises()
 
       const sending = store.sendMessage('stream in A')
@@ -4579,7 +4586,7 @@ describe('chat-list store', () => {
         nextCursor: null,
       })
       const store = useChatStore()
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-1')
       await flushPromises()
 
       expect(store.sessionId).toBe('session-1')
@@ -4601,7 +4608,7 @@ describe('chat-list store', () => {
         nextCursor: null,
       })
       const store = useChatStore()
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'schedule-1')
       await flushPromises()
 
       expect(store.sessionId).toBe('schedule-1')
@@ -4626,7 +4633,7 @@ describe('chat-list store', () => {
         nextCursor: null,
       })
       const store = useChatStore()
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'shared-session')
       await flushPromises()
 
       let resolveDelete: () => void = () => {}
@@ -4658,7 +4665,7 @@ describe('chat-list store', () => {
           timestamp: '2026-06-20T00:00:01.000Z',
         },
       ])
-      await store.selectBot('bot-2')
+      await openSession(store, 'bot-2', 'shared-session')
       await flushPromises()
       h.sendUpdates = [runtime.started]
       const botTwoSend = store.sendMessage('keep bot two streaming')
@@ -4972,7 +4979,7 @@ describe('chat-list store', () => {
         runtime_metadata: { acp_agent_id: 'codex' },
       })
       const store = useChatStore()
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-a')
       await flushPromises()
       const targetA = { botId: 'bot-1', sessionId: 'session-a', viewId: 'chat:a' }
       const targetB = { botId: 'bot-1', sessionId: 'session-b', viewId: 'chat:b' }
@@ -5371,7 +5378,7 @@ describe('chat-list store', () => {
         nextCursor: null,
       })
       const store = useChatStore()
-      await store.selectBot('bot-1')
+      await openSession(store, 'bot-1', 'session-1')
       await flushPromises()
 
       h.sendUpdates = richActiveRunStoreScript()

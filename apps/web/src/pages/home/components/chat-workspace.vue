@@ -116,6 +116,25 @@ function handleResize(entry?: ResizeObserverEntry) {
   applyLayoutSize(size)
 }
 
+// The first-entry shell scales in from 1.15 to 1 (pages/main-section).
+// dockview places panels rendered 'always' from page bounding boxes, which
+// include that scale, and re-measures them only when a size changes; a
+// transform changes none. A dock mounted mid-animation (the chat opens at once
+// after sign-in) would keep those panels 1.15x wide and offset until the next
+// resize, so re-measure once an ancestor's transform transition ends.
+const TRANSFORM_PROPERTIES = new Set(['scale', 'transform', 'translate'])
+
+function relayoutAfterAncestorTransform(event: TransitionEvent) {
+  if (!TRANSFORM_PROPERTIES.has(event.propertyName)) return
+  const el = rootEl.value
+  const target = event.target
+  if (!el || !(target instanceof Element) || target === el || !target.contains(el)) return
+  const size = readLayoutSize()
+  if (!size || !api.value) return
+  lastLayoutSize = size
+  api.value.layout(size.width, size.height, true)
+}
+
 // Panel components are looked up by name when panels are added or restored
 // from a serialized layout. dockview-vue types frameworks components as
 // DefineComponent<T> (single generic), which script-setup SFC types do not
@@ -211,9 +230,11 @@ onMounted(() => {
     handleResize(entry)
   })
   if (rootEl.value) resizeObserver.observe(rootEl.value)
+  document.addEventListener('transitionend', relayoutAfterAncestorTransform)
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('transitionend', relayoutAfterAncestorTransform)
   resizeObserver?.disconnect()
   resizeObserver = null
   store.releaseApi()
