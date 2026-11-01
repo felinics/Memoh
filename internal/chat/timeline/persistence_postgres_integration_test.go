@@ -20,9 +20,9 @@ import (
 )
 
 // Replay and classification read the session's checkpoint the same way: a
-// message whose rows it folds leaves replay unless it changed after its
-// rows were written, a message whose rows it leaves raw replays whole, and
-// chatter without rows replays.
+// message whose rows it folds leaves replay, edited after the fold or not, a
+// message whose rows it leaves raw replays whole, and chatter without rows
+// replays.
 func TestPostgresReplayAndClassificationFollowTheCheckpoint(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
 	if dsn == "" {
@@ -58,13 +58,13 @@ func TestPostgresReplayAndClassificationFollowTheCheckpoint(t *testing.T) {
 	queries := postgresstore.NewQueriesWithPool(pool, dbsqlc.New(pool))
 	events := NewEventStore(nil, queries)
 	received := time.Now().Add(-time.Hour).UnixMilli()
-	persist := func(event CanonicalEvent) (string, int64) {
+	persist := func(event CanonicalEvent) string {
 		t.Helper()
-		id, stamped, err := events.PersistEvent(ctx, botID, sessionID, event)
+		id, _, err := events.PersistEvent(ctx, botID, sessionID, event)
 		if err != nil || id == "" {
 			t.Fatalf("persist %T: id %q, %v", event, id, err)
 		}
-		return id, eventCursorOf(stamped)
+		return id
 	}
 	message := func(id string, atMs int64) MessageEvent {
 		return MessageEvent{SessionID: sessionID, MessageID: id, ReceivedAtMs: atMs, Content: []ContentNode{{Type: "text", Text: id}}}
@@ -82,10 +82,8 @@ func TestPostgresReplayAndClassificationFollowTheCheckpoint(t *testing.T) {
 		rows[messageID] = checkpoint.Row{ID: id, Position: messagepkg.HistoryPosition{Turn: turn, Seq: 1}}
 	}
 
-	cursors := make(map[string]int64)
 	for i, id := range []string{"m1", "m2", "m3", "m4"} {
-		eventID, cursor := persist(message(id, received+int64(i)*1000))
-		cursors[id] = cursor
+		eventID := persist(message(id, received+int64(i)*1000))
 		if id != "m4" {
 			row(id, eventID, int64(i+1))
 		}
@@ -118,7 +116,7 @@ func TestPostgresReplayAndClassificationFollowTheCheckpoint(t *testing.T) {
 		}
 		return got
 	}
-	if got, want := replayed(), []string{"message:m2", "message:m3", "message:m4", "edit:m2"}; !reflect.DeepEqual(got, want) {
+	if got, want := replayed(), []string{"message:m3", "message:m4"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("replay = %v, want %v", got, want)
 	}
 
@@ -128,11 +126,7 @@ func TestPostgresReplayAndClassificationFollowTheCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load checkpoint: %v", err)
 	}
-	want := map[string]CheckpointMessage{
-		"m1": {EventCursor: cursors["m1"]},
-		"m2": {EventCursor: cursors["m2"]},
-		"m3": {Kept: true, EventCursor: cursors["m3"]},
-	}
+	want := map[string]CheckpointMessage{"m1": {}, "m2": {}, "m3": {Kept: true}}
 	if !reflect.DeepEqual(held.Messages, want) {
 		t.Fatalf("classified = %+v, want %+v", held.Messages, want)
 	}
