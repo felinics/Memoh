@@ -22,11 +22,15 @@ const maxCapabilityRefreshes = 32
 // never counts against the model's output budget), output limits, the
 // bot-defined hooks, limits again for hook output, and the loop guard. The
 // approval set is the pre-hook view: the approval handler must see the tool
-// the hooks will run, not the hook wrapper.
+// the hooks will run, not the hook wrapper. On-demand tools go through the
+// same chain; bridge then keeps them for tool_call, so a bridged call runs
+// the tool's hooks and limits under its own name, and drops them from the
+// returned set the request carries.
 func (a *Agent) wrapExecutableTools(
 	hookCtx context.Context,
 	cfg RunConfig,
 	sdkTools []toolexec.Tool,
+	bridge *tools.ToolBridge,
 	meta *toolExecutionMetadataRegistry,
 	guard *ToolLoopGuard,
 	abortCallIDs *toolAbortRegistry,
@@ -40,7 +44,7 @@ func (a *Agent) wrapExecutableTools(
 	if guard != nil {
 		sdkTools = wrapToolsWithLoopGuard(sdkTools, guard, abortCallIDs)
 	}
-	return sdkTools, approval
+	return bridge.Bind(sdkTools), approval
 }
 
 // refreshedTools is a re-assembled tool set ready for the loop's next model
@@ -82,7 +86,7 @@ func (a *Agent) refreshCapabilities(
 		return refreshedTools{}, errors.New("too many capability refreshes in one turn")
 	}
 	cfg.capabilityRefreshCount++
-	sdkTools, usage, usageFrags, defs, err := a.assembleTools(ctx, *cfg, emitter, liveToolStream)
+	assembled, err := a.assembleTools(ctx, *cfg, emitter, liveToolStream)
 	if err != nil {
 		return refreshedTools{}, fmt.Errorf("assemble tools: %w", err)
 	}
@@ -91,14 +95,14 @@ func (a *Agent) refreshCapabilities(
 	}
 	cfg.ContextToolUsage = ""
 	cfg.ContextToolUsageFrags = nil
-	cfg.ContextToolDefs = defs
-	if usage != "" {
-		cfg.System = appendToolUsageToSystem(cfg.System, usage)
-		cfg.ContextToolUsage = usage
-		cfg.ContextToolUsageFrags = usageFrags
+	cfg.ContextToolDefs = assembled.defs
+	if assembled.usage != "" {
+		cfg.System = appendToolUsageToSystem(cfg.System, assembled.usage)
+		cfg.ContextToolUsage = assembled.usage
+		cfg.ContextToolUsageFrags = assembled.usageFrags
 	}
-	sdkTools = decorateReadMediaToolsWithState(cfg.Model, sdkTools, readMedia)
-	exec, approval := a.wrapExecutableTools(hookCtx, *cfg, sdkTools, meta, guard, abortCallIDs)
+	sdkTools := decorateReadMediaToolsWithState(cfg.Model, assembled.tools, readMedia)
+	exec, approval := a.wrapExecutableTools(hookCtx, *cfg, sdkTools, assembled.bridge, meta, guard, abortCallIDs)
 	wrapped := exec
 	exec = canonicalizeProviderToolSchemas(exec)
 	// The definitions carry the same prompt-cache marking the dispatch put on

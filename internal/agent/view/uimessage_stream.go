@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	agentevent "github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/toolbridge"
 )
 
 type uiTextStreamState struct {
@@ -50,6 +51,11 @@ func NewUIMessageStreamConverter() *UIMessageStreamConverter {
 
 // HandleEvent updates converter state and returns zero or one complete UI messages.
 func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIMessage {
+	// A tool_call runs an on-demand tool; the block shows that tool, the
+	// same way the persisted history renders it.
+	if name, input, ok := toolbridge.Unwrap(event.ToolName, event.Input); ok {
+		event.ToolName, event.Input = name, input
+	}
 	switch strings.ToLower(strings.TrimSpace(event.Type)) {
 	case "retry":
 		// A retried attempt regenerates its output from scratch, so the terminal

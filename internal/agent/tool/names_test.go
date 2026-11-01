@@ -540,6 +540,8 @@ func internalToolValues(t *testing.T) map[string]string {
 		"memprovider.ToolUpdateMemory": "update_memory",
 		"memprovider.ToolDeleteMemory": "delete_memory",
 		"userinput.ToolNameAskUser":    "ask_user",
+		"toolbridge.DescribeToolName":  "tool_describe",
+		"toolbridge.CallToolName":      "tool_call",
 	}
 	for _, decl := range parsed.Decls {
 		fn, ok := decl.(*ast.FuncDecl)

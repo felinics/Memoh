@@ -34,6 +34,7 @@ type Agent struct {
 	logger             *slog.Logger
 	limits             Limits
 	contextViewApplier ContextViewApplier
+	onDemandTools      string
 }
 
 const streamCancelDrainGrace = 250 * time.Millisecond
@@ -51,7 +52,14 @@ func New(deps Deps) *Agent {
 		logger:             logger.With(slog.String("service", "agent/runtime/native")),
 		limits:             deps.Limits.Normalize(),
 		contextViewApplier: deps.ContextViewApplier,
+		onDemandTools:      NormalizeOnDemandTools(deps.OnDemandTools),
 	}
+}
+
+// onDemandToolsEnabled reports whether rarely used tool groups load on demand
+// through tool_describe / tool_call instead of riding every request.
+func (a *Agent) onDemandToolsEnabled() bool {
+	return a != nil && a.onDemandTools != OnDemandToolsOff
 }
 
 // captureProviderAttemptPrefix freezes the applier-rendered boundary before
@@ -168,14 +176,15 @@ func (a *Agent) ExecuteTool(ctx context.Context, cfg RunConfig, call sdk.ToolCal
 // alongside the model-facing result, so callers can persist them on
 // harness-side channels (row metadata) instead of leaking them to the model.
 func (a *Agent) ExecuteToolWithUIMetadata(ctx context.Context, cfg RunConfig, call sdk.ToolCall) (sdk.ToolResultPart, map[string]any, error) {
-	sdkTools, _, _, _, err := a.assembleTools(ctx, cfg, nil, false)
+	assembled, err := a.assembleTools(ctx, cfg, nil, false)
 	if err != nil {
 		return sdk.ToolResultPart{}, nil, fmt.Errorf("assemble tools: %w", err)
 	}
-	sdkTools, _ = decorateReadMediaTools(cfg.Model, sdkTools)
+	sdkTools, _ := decorateReadMediaTools(cfg.Model, assembled.tools)
 	uiMetadata := newToolExecutionMetadataRegistry(nil)
 	sdkTools = uiMetadata.wrapToolUIOutput(sdkTools)
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, a.Limits().ToolOutputLimit())
+	sdkTools = assembled.bridge.Bind(sdkTools)
 	for i := range sdkTools {
 		tool := sdkTools[i]
 		if tool.Name != call.ToolName {
@@ -442,6 +451,20 @@ func aggregateStepUsage(steps []step.Record) sdk.Usage {
 	return total
 }
 
+// assembledTools is one session's tool set. tools holds every executable
+// tool, on-demand ones included, so the execution chain wraps them alike;
+// bridge (nil when nothing loads on demand) keeps the on-demand ones out of
+// the request once that chain is built. usage is the guidance the system
+// prompt carries, usageFrags its fragments, and defs the definitions the
+// request carries.
+type assembledTools struct {
+	tools      []toolexec.Tool
+	usage      string
+	usageFrags []contextfrag.ContextFrag
+	defs       []contextfrag.ToolDefAccounting
+	bridge     *tools.ToolBridge
+}
+
 // assembleTools collects tools from all registered ToolProviders, along with
 // the group-level usage guidance contributed by providers that also implement
 // tools.ToolUsage. Usage guidance is gathered only from providers that actually
@@ -449,14 +472,18 @@ func aggregateStepUsage(steps []step.Record) sdk.Usage {
 // (see tools.ToolUsage). emitter is injected into the session context so that
 // tools targeting the current conversation can push side-effect events
 // (attachments, reactions, speech) directly into the agent stream.
+//
+// Rarely used tool groups load on demand (see tools.ToolBridge): their
+// definitions leave the request, and the guidance of a provider whose tools
+// all load on demand moves with them into tool_describe's result.
 func (a *Agent) assembleTools(
 	ctx context.Context,
 	cfg RunConfig,
 	emitter tools.StreamEmitter,
 	liveStream bool,
-) ([]toolexec.Tool, string, []contextfrag.ContextFrag, []contextfrag.ToolDefAccounting, error) {
+) (assembledTools, error) {
 	if len(a.toolProviders) == 0 {
-		return nil, "", nil, nil, nil
+		return assembledTools{}, nil
 	}
 	skillsMap := make(map[string]tools.SkillDetail, len(cfg.Skills))
 	for _, s := range cfg.Skills {
@@ -509,6 +536,7 @@ func (a *Agent) assembleTools(
 	type usageRegistration struct {
 		provider   tools.ToolUsage
 		capability string
+		toolNames  []string
 	}
 	var usageRegistrations []usageRegistration
 	seenToolNames := make(map[string]struct{})
@@ -553,19 +581,46 @@ func (a *Agent) assembleTools(
 		// contributed tools this session, so guidance and registration share
 		// one gating decision and cannot drift apart.
 		if usageProvider, ok := provider.(tools.ToolUsage); ok {
+			names := make([]string, 0, len(providerTools))
+			for _, tool := range providerTools {
+				names = append(names, tool.Name)
+			}
 			usageRegistrations = append(usageRegistrations, usageRegistration{
 				provider:   usageProvider,
 				capability: firstToolName(providerTools),
+				toolNames:  names,
 			})
 		}
 	}
 	if cfg.ToolApprovalHandler != nil || a.hookService != nil {
 		allTools = markApprovalTools(allTools)
 	}
+	var bridge *tools.ToolBridge
+	if a.onDemandToolsEnabled() {
+		bridge = tools.PlanToolBridge(allTools)
+	}
+	if bridge != nil {
+		bridgeTools := bridge.Tools()
+		allTools = append(allTools, bridgeTools...)
+		wireDefs := make([]contextfrag.ToolDefAccounting, 0, len(toolDefs)+len(bridgeTools))
+		for _, def := range toolDefs {
+			if !bridge.Defers(def.Name) {
+				wireDefs = append(wireDefs, def)
+			}
+		}
+		for _, tool := range bridgeTools {
+			wireDefs = append(wireDefs, contextfrag.ToolDefAccountingFor("native", tool))
+		}
+		toolDefs = wireDefs
+	}
 	availableTools := tools.NewAvailableTools(allTools)
 	var usageSections []toolUsageSection
 	for _, registration := range usageRegistrations {
 		if text := strings.TrimSpace(registration.provider.Usage(ctx, session, availableTools)); text != "" {
+			if bridge.DefersAll(registration.toolNames) {
+				bridge.AddUsage(registration.toolNames[0], text)
+				continue
+			}
 			usageSections = append(usageSections, toolUsageSection{
 				capability: registration.capability,
 				text:       text,
@@ -594,8 +649,14 @@ func (a *Agent) assembleTools(
 		}
 		usage = "## Tool usage\n\n" + strings.Join(texts, "\n\n")
 	}
-	//nolint:contextcheck // Each tool call reads its own context from its ToolExecContext, not from this assembly.
-	return wrapToolTracing(allTools), usage, structuredToolUsage(usageSections, cfg.ContextScope), toolDefs, nil
+	return assembledTools{
+		//nolint:contextcheck // Each tool call reads its own context from its ToolExecContext, not from this assembly.
+		tools:      wrapToolTracing(allTools),
+		usage:      usage,
+		usageFrags: structuredToolUsage(usageSections, cfg.ContextScope),
+		defs:       toolDefs,
+		bridge:     bridge,
+	}, nil
 }
 
 func appendToolUsageToSystem(system, toolUsage string) string {

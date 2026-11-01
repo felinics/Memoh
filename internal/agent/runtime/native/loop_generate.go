@@ -64,23 +64,21 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 	}
 
 	var sdkTools []toolexec.Tool
+	var toolBridge *tools.ToolBridge
 	cfg.ContextToolDefsResolved = true
 	if cfg.SupportsToolCall {
-		var toolUsage string
-		var toolUsageFrags []contextfrag.ContextFrag
-		var toolDefs []contextfrag.ToolDefAccounting
-		var err error
-		sdkTools, toolUsage, toolUsageFrags, toolDefs, err = a.assembleTools(genCtx, cfg, collectEmitter, false)
+		assembled, err := a.assembleTools(genCtx, cfg, collectEmitter, false)
 		if err != nil {
 			return nil, fmt.Errorf("assemble tools: %w", err)
 		}
-		cfg.ContextToolDefs = toolDefs
-		if toolUsage != "" {
+		sdkTools, toolBridge = assembled.tools, assembled.bridge
+		cfg.ContextToolDefs = assembled.defs
+		if assembled.usage != "" {
 			// Must run before dispatch assembly so prompt caching and
 			// background task summaries see the usage-augmented text.
-			cfg.System = appendToolUsageToSystem(cfg.System, toolUsage)
-			cfg.ContextToolUsage = toolUsage
-			cfg.ContextToolUsageFrags = toolUsageFrags
+			cfg.System = appendToolUsageToSystem(cfg.System, assembled.usage)
+			cfg.ContextToolUsage = assembled.usage
+			cfg.ContextToolUsageFrags = assembled.usageFrags
 		}
 	}
 	sdkTools, readMediaState := decorateReadMediaTools(cfg.Model, sdkTools)
@@ -105,7 +103,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 
 	// The execution chain over the assembled tools; a capability refresh
 	// rebuilds the same chain over the re-assembled set.
-	sdkTools, approvalTools := a.wrapExecutableTools(ctx, cfg, sdkTools, toolExecutionMetadata, toolLoopGuard, toolLoopAbortCallIDs)
+	sdkTools, approvalTools := a.wrapExecutableTools(ctx, cfg, sdkTools, toolBridge, toolExecutionMetadata, toolLoopGuard, toolLoopAbortCallIDs)
 
 	// The loop owns the dynamic input messages it appends at step boundaries
 	// (read-media carriers here; the stream loop adds live injections).
