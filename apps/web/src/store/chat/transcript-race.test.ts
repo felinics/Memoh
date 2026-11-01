@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
-import type { UIMessage, UITurn } from '@/composables/api/useChat.types'
+import type { RuntimeCurrentRunView, UIMessage, UITurn } from '@/composables/api/useChat.types'
 import { createBackgroundTaskTracker } from './background-tasks'
 import { createTranscriptController } from './transcript'
-import type { RuntimeTranscriptSlice } from './runtime-projection'
+import { projectRuntimeTranscript, type RuntimeTranscriptSlice } from './runtime-projection'
 
 vi.mock('@/store/user', () => ({
   useUserStore: () => ({ userInfo: { id: 'user-1' } }),
@@ -225,4 +225,29 @@ describe('chat transcript projection identity', () => {
     expect(transcript.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
     expect(transcript.messages.every(turn => turn.turnId === 'turn-1')).toBe(true)
   })
+})
+
+// A continuation has a new execution ID, but answers the original history turn.
+it('merges resumed output and errors into the original turn without losing its prefix', () => {
+  for (const status of ['completed', 'errored'] as const) {
+    const { transcript } = makeTranscript()
+    const prefix: UIMessage[] = [{ id: 0, type: 'text', content: 'before restart' }]
+    const history = { ...rawAssistant('saved-answer', prefix), turn_id: 'original-turn', turn_position: 2 }
+    transcript.appendToView(...transcript.normalizeTurns([history]))
+    const run: RuntimeCurrentRunView = {
+      run_id: 'resumed-run', turn_id: 'new-admission-turn', turn_position: 3,
+      generation: 'new-owner', status: 'running', started_at: history.timestamp, updated_at: history.timestamp,
+      resume_turn: history, messages: [{ id: 0, type: 'text', content: 'continued' }],
+    }
+    transcript.applyRuntimeTranscript(projectRuntimeTranscript(run))
+    transcript.applyRuntimeTranscript(projectRuntimeTranscript({
+      ...run, status, ...(status === 'errored' ? { error_code: 'workspace.unreachable' } : {}),
+    }))
+    expect(transcript.messages).toHaveLength(1)
+    expect(transcript.messages[0]).toMatchObject({ turnId: 'original-turn', turnPosition: 2, messages: [
+      { id: 0, type: 'text', content: 'before restart' },
+      { id: 1, type: 'text', content: 'continued' },
+      ...(status === 'errored' ? [{ id: 2, type: 'error', code: 'workspace.unreachable' }] : []),
+    ] })
+  }
 })

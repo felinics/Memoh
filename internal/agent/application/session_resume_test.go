@@ -260,3 +260,17 @@ func TestResumeScanRetiresIntentsThatCannotContinue(t *testing.T) {
 		t.Fatalf("admission=%+v, want only the resumable run", inputs)
 	}
 }
+
+func TestResumeWorkspaceRetryStopsOnCancellationAndDoesNotRetryNormalTurns(t *testing.T) {
+	target := &resumeUnavailableWorkspace{}
+	s := &Service{workspaceTargets: target}
+	if _, err := s.resolveStartupWorkspace(t.Context(), "bot", "native", false); err == nil || target.calls != 1 {
+		t.Fatalf("normal turn: calls=%d err=%v", target.calls, err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	target.calls = 0
+	if _, err := s.resolveStartupWorkspace(ctx, "bot", "native", true); !errors.Is(err, context.DeadlineExceeded) || target.calls != 1 {
+		t.Fatalf("resume deadline: calls=%d err=%v", target.calls, err)
+	}
+}

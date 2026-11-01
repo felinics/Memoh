@@ -2542,6 +2542,46 @@ func (q *Queries) GetRunHistoryTurnRequestMessageID(ctx context.Context, arg Get
 	return id, err
 }
 
+const getRunsHistoryRequestMessageID = `-- name: GetRunsHistoryRequestMessageID :one
+SELECT request.id
+FROM bot_history_messages request
+WHERE request.team_id = public.memoh_current_team_id()
+  AND request.session_id = $1
+  AND request.role = 'user' AND request.turn_message_seq = 1
+  AND request.turn_visible = true
+  AND (
+    request.run_id = ANY($2::uuid[])
+    OR request.turn_id = ANY($3::uuid[])
+    OR request.turn_id IN (
+      SELECT joined.turn_id
+      FROM bot_history_messages joined
+      WHERE joined.team_id = public.memoh_current_team_id()
+        AND joined.session_id = $1
+        AND joined.run_id = ANY($2::uuid[])
+        AND joined.turn_id IS NOT NULL
+    )
+  )
+ORDER BY request.turn_position DESC
+LIMIT 1
+`
+
+type GetRunsHistoryRequestMessageIDParams struct {
+	SessionID pgtype.UUID   `json:"session_id"`
+	RunIds    []pgtype.UUID `json:"run_ids"`
+	TurnIds   []pgtype.UUID `json:"turn_ids"`
+}
+
+// Resolve the latest visible input applied by any of these runs: a request or
+// steer they wrote, the request of a turn they were admitted with, or the
+// request of a turn their rows joined, which covers a request written before
+// its run was admitted.
+func (q *Queries) GetRunsHistoryRequestMessageID(ctx context.Context, arg GetRunsHistoryRequestMessageIDParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getRunsHistoryRequestMessageID, arg.SessionID, arg.RunIds, arg.TurnIds)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getTurnAgentTurnID = `-- name: GetTurnAgentTurnID :one
 SELECT COALESCE(message.metadata->>'agent_turn_id', '')::text AS agent_turn_id
 FROM bot_history_messages message
@@ -5417,6 +5457,32 @@ func (q *Queries) ReplaceHistoryTurn(ctx context.Context, arg ReplaceHistoryTurn
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const runsWroteHistoryMessages = `-- name: RunsWroteHistoryMessages :one
+SELECT EXISTS (
+  SELECT 1
+  FROM bot_history_messages m
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.session_id = $1
+    AND (m.run_id = ANY($2::uuid[]) OR m.turn_id = ANY($3::uuid[]))
+)::boolean
+`
+
+type RunsWroteHistoryMessagesParams struct {
+	SessionID pgtype.UUID   `json:"session_id"`
+	RunIds    []pgtype.UUID `json:"run_ids"`
+	TurnIds   []pgtype.UUID `json:"turn_ids"`
+}
+
+// Whether any of these runs or turns left a history row, visible or not. A
+// shutdown continuation whose interrupted runs left none writes the request
+// they never persisted; one that left rows without a visible request does not.
+func (q *Queries) RunsWroteHistoryMessages(ctx context.Context, arg RunsWroteHistoryMessagesParams) (bool, error) {
+	row := q.db.QueryRow(ctx, runsWroteHistoryMessages, arg.SessionID, arg.RunIds, arg.TurnIds)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const searchMessages = `-- name: SearchMessages :many

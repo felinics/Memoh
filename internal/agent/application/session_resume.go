@@ -44,6 +44,7 @@ type resumeContext struct {
 	TokenClaims       map[string]string `json:"token_claims,omitempty"`
 	ChatClaims        map[string]string `json:"chat_claims,omitempty"`
 	DeadlineAt        *time.Time        `json:"deadline_at,omitempty"`
+	RequestMessageID  string            `json:"request_message_id,omitempty"`
 	// Version 2 carries an External Discuss batch instead of a query: the
 	// resume admits it again behind its instructions.
 	DiscussMessages       []turn.DiscussMessage       `json:"discuss_messages,omitempty"`
@@ -90,6 +91,9 @@ func (s *Service) recordRunResumeContext(ctx context.Context, req ChatRequest) e
 		CurrentChannel: req.CurrentChannel, ReplyTarget: req.ReplyTarget,
 		ConversationType: req.ConversationType, Model: req.Model, ReasoningEffort: req.ReasoningEffort,
 		WorkspaceTargetID: req.WorkspaceTargetID, SessionType: req.SessionType, ToolHTTPURL: req.ToolHTTPURL,
+	}
+	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
+		data.RequestMessageID = strings.TrimSpace(req.PersistedUserMessageID)
 	}
 	var err error
 	if data.TokenClaims, err = s.resumeClaims(req.Token); err != nil {
@@ -370,6 +374,14 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 	if err != nil {
 		return nil, err
 	}
+	request, err := s.interruptedRunRequest(ctx, row, data)
+	if err != nil {
+		return nil, err
+	}
+	resumeTurn, err := s.resumedHistoryTurn(ctx, row.SessionID.String(), request.messageID)
+	if err != nil {
+		return nil, err
+	}
 	if s.resumeReady != nil {
 		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		err := s.resumeReady(probeCtx, row.BotID.String(), data.WorkspaceTargetID)
@@ -401,7 +413,9 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		cancel()
 		return nil, err
 	}
-	runCtx, admission, _, err := s.admitTriggeredRun(runBase, data.SessionType, row.BotID.String(), row.SessionID.String(), "resume:"+row.RunID.String(), payload, nil, row.RunID.String())
+	runCtx, admission, _, err := s.admitTriggeredRun(runBase, data.SessionType, row.BotID.String(), row.SessionID.String(), "resume:"+row.RunID.String(), payload, func(sessionruntime.RunHandle) *sessionruntime.RunAdmissionView {
+		return &sessionruntime.RunAdmissionView{ResumeTurn: resumeTurn}
+	}, row.RunID.String())
 	if err != nil {
 		cancel()
 		if errors.Is(err, ledger.ErrResumeSuperseded) || errors.Is(err, sessionruntime.ErrInvocationConflict) {
@@ -429,7 +443,7 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		req.discussPromptPrefix = resumeInstruction
 		req.Query = resumeInstruction + discussAgentFullContextPrompt(data.DiscussMessages) + req.discussPromptSuffix
 	}
-	chunks, errs := s.streamTurnChat(runCtx, req)
+	chunks, errs := s.streamResumedTurn(runCtx, req, data, request)
 	h := &runHandle{
 		id: admission.RunID, ctx: runCtx, cancel: cancel, events: make(chan turn.Event, 16), errs: make(chan error, 1), inject: make(chan turn.InjectMessage),
 		finishRun:         s.turnRunFinisher(runCtx, admission, data.SessionType),

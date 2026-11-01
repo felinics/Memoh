@@ -625,8 +625,14 @@ Uncommitted streaming tokens can be lost. Background command handles from the ol
 process are not reattached; workspace output and external job receipts must be
 checked. Subagent sessions can continue, but old in-memory parent waiters are gone.
 SIGKILL, OOM, host failure and a shutdown unable to write PostgreSQL cannot reliably
-record a marker and therefore retain the existing `lost` behavior. Once a resumed
-run is admitted, ordinary failures are reported rather than automatically replayed.
+record a marker and therefore retain the existing `lost` behavior. A continuation resolves the original request through its run lineage, so image
+feedback and subsequent output remain in that request's history turn. The runtime
+view carries that turn and its committed prefix separately from the new run's
+admission identity; Web extends the prefix rather than showing a second reply.
+Once admitted, a continuation retries temporary workspace unavailability during
+initial target/config preparation for up to 30 seconds per stage, within the
+original context deadline. Model and tool execution are not replayed by this
+startup retry. Other failures are reported normally.
 
 The server has a 30-second graceful shutdown budget. Compose allows 45 seconds,
 and the entrypoint waits for Server exit before terminating embedded containerd.

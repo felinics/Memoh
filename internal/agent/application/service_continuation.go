@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/db"
-	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 type continuationTurnRequestMessageResolver interface {
@@ -56,7 +57,21 @@ func (s *Service) continuationTurnRequestMessageID(ctx context.Context, sessionI
 	// An applied steer opens a later turn within this run. Its next tool
 	// result and resumed model output belong there, even though admission's
 	// run handle still names the original request turn.
-	return resolver.GetRunTurnRequestMessageID(ctx, sessionID, strings.TrimSpace(runHandle.RunID), turnID)
+	runID := strings.TrimSpace(runHandle.RunID)
+	id, err := resolver.GetRunTurnRequestMessageID(ctx, sessionID, runID, turnID)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return id, err
+	}
+	// A shutdown continuation applies no input of its own until a steer: it
+	// answers the request of the run it resumes.
+	continued, continuedErr := s.continuedRequestMessageID(ctx, sessionID, runID)
+	if continuedErr != nil {
+		return "", continuedErr
+	}
+	if continued == "" {
+		return "", err
+	}
+	return continued, nil
 }
 
 func (s *Service) prepareContinuationRunConfig(
@@ -81,14 +96,13 @@ func (s *Service) prepareContinuationRunConfig(
 	}
 	req.inputInHistory = true
 	if req.continuationToolCallID != "" && req.RunHandle.RunID != "" {
-		ids, err := s.queries.ListRunHistoryTurnRequestMessageIDs(ctx, sqlc.ListRunHistoryTurnRequestMessageIDsParams{
-			SessionID: db.ParseUUIDOrEmpty(req.ThreadID), RunID: db.ParseUUIDOrEmpty(req.RunHandle.RunID), RootTurnID: db.ParseUUIDOrEmpty(req.RunHandle.TurnID),
-		})
+		// A continuation keeps the requests of the runs it resumes.
+		ids, err := s.runLineageRequestMessageIDs(ctx, req.ThreadID, req.RunHandle)
 		if err != nil {
 			return native.RunConfig{}, err
 		}
 		for _, id := range ids {
-			req.continuationAnchors = append(req.continuationAnchors, turn.ContextMessageSource{Kind: "history", ID: id.String()})
+			req.continuationAnchors = append(req.continuationAnchors, turn.ContextMessageSource{Kind: "history", ID: id})
 		}
 	}
 	if truncated {
