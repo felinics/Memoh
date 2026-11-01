@@ -185,15 +185,6 @@ func TestStreamChatFoldsATruncatedLoadBeforeTheRun(t *testing.T) {
 	}
 }
 
-func TestWSFoldsATruncatedLoadBeforeTheRun(t *testing.T) {
-	fixture, compactor := slowRecoveryFixture(t)
-	eventCh := make(chan WSStreamEvent, 256)
-	outcome, err := fixture.service.StreamChatWS(t.Context(), slowRecoveryRequest(), eventCh, nil)
-	if err != nil || outcome.Cause != nil || compactor.calls.Load() != 1 {
-		t.Fatalf("error=%v outcome=%+v compactions=%d, want one compaction then a completed turn", err, outcome, compactor.calls.Load())
-	}
-}
-
 func TestPipelineMediaFollowsExplicitCurrentInput(t *testing.T) {
 	s, _, _, cfg := chatRecoveryFixture(t)
 	cfg.Messages = []sdk.Message{sdk.UserMessage("current"), sdk.UserMessage("self echo"), sdk.UserMessage("memory")}

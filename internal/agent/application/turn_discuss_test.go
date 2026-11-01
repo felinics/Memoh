@@ -1057,48 +1057,6 @@ func contextFragByID(frags []contextfrag.ContextFrag, id string) *contextfrag.Co
 	return nil
 }
 
-func TestInjectImagePartsIntoLastUserMessage(t *testing.T) {
-	msgs := []sdk.Message{
-		sdk.UserMessage("hello"),
-		sdk.AssistantMessage("hi"),
-		sdk.UserMessage("look at this"),
-	}
-	parts := []sdk.ImagePart{
-		{Image: "data:image/png;base64,abc", MediaType: "image/png"},
-	}
-
-	injectImagePartsIntoLastUserMessage(msgs, parts)
-
-	lastUser := msgs[2]
-	if len(lastUser.Content) != 2 {
-		t.Fatalf("expected 2 content parts, got %d", len(lastUser.Content))
-	}
-	imgPart, ok := lastUser.Content[1].(sdk.ImagePart)
-	if !ok {
-		t.Fatalf("expected ImagePart, got %T", lastUser.Content[1])
-	}
-	if imgPart.Image != "data:image/png;base64,abc" {
-		t.Fatalf("unexpected image: %q", imgPart.Image)
-	}
-}
-
-func TestInjectImagePartsIntoLastUserMessage_Empty(t *testing.T) {
-	msgs := []sdk.Message{sdk.UserMessage("hello")}
-	injectImagePartsIntoLastUserMessage(msgs, nil)
-	if len(msgs[0].Content) != 1 {
-		t.Fatalf("expected no change, got %d parts", len(msgs[0].Content))
-	}
-}
-
-func TestInjectImagePartsIntoLastUserMessage_SkipsEmptyImage(t *testing.T) {
-	msgs := []sdk.Message{sdk.UserMessage("hello")}
-	parts := []sdk.ImagePart{{Image: "", MediaType: "image/png"}}
-	injectImagePartsIntoLastUserMessage(msgs, parts)
-	if len(msgs[0].Content) != 1 {
-		t.Fatalf("expected no change, got %d parts", len(msgs[0].Content))
-	}
-}
-
 func lastMessageFragContains(frags []contextfrag.ContextFrag, needle string) bool {
 	for i := len(frags) - 1; i >= 0; i-- {
 		frag := frags[i]

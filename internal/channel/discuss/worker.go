@@ -61,9 +61,6 @@ func (d *DiscussDriver) runSession(ctx context.Context, sess *discussSession) {
 			}
 		}
 
-		if len(latestRC) == 0 {
-			continue
-		}
 		if !timeline.HasUncoveredExternalEvent(latestRC, sess.lastProcessed) {
 			continue
 		}

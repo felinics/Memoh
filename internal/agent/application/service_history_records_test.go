@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -13,7 +12,6 @@ import (
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
-	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/contextview"
 	"github.com/felinics/memoh/internal/db"
 )
@@ -156,44 +154,6 @@ func TestResumeHistoryFallbackDoesNotUseBotIDAsChatID(t *testing.T) {
 	}
 	if approvalFallback.ConversationType != "direct" || approvalFallback.ReplyTarget != "target-2" {
 		t.Fatalf("approval fallback lost topology: %#v", approvalFallback)
-	}
-}
-
-func dbHistoryRow(t *testing.T, id string, role string, content json.RawMessage, mutate func(*messagepkg.Message)) messagepkg.Message {
-	t.Helper()
-	msg := messagepkg.Message{
-		ID:      id,
-		BotID:   "bot-1",
-		Role:    role,
-		Content: content,
-	}
-	if mutate != nil {
-		mutate(&msg)
-	}
-	return msg
-}
-
-func mustRawJSON(t *testing.T, value any) json.RawMessage {
-	t.Helper()
-	raw, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("marshal %T: %v", value, err)
-	}
-	return raw
-}
-
-func assertSameJSON(t *testing.T, got any, want any) {
-	t.Helper()
-	gotRaw, err := json.Marshal(got)
-	if err != nil {
-		t.Fatalf("marshal got: %v", err)
-	}
-	wantRaw, err := json.Marshal(want)
-	if err != nil {
-		t.Fatalf("marshal want: %v", err)
-	}
-	if string(gotRaw) != string(wantRaw) {
-		t.Fatalf("json mismatch:\ngot  %s\nwant %s", gotRaw, wantRaw)
 	}
 }
 
