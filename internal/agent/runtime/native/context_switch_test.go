@@ -478,3 +478,127 @@ func foldCovering(sw ContextSwitch, summaryID string, summary sdk.Message, cover
 func summarySource(id string) turn.ContextMessageSource {
 	return turn.ContextMessageSource{Kind: "summary", ID: id}
 }
+
+// A provider that counts more tokens than the estimate prices calibrates the
+// run: once a step reports its input, the run measures its next request as
+// the provider counts it and folds a request whose estimate alone would fit.
+// Each committed step carries what the estimate priced its request at, and a
+// provider that counts what the estimate prices folds nothing.
+func TestArmedRunCalibratesItsEstimateByTheProviderCount(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		density int
+		events  int
+	}{
+		{name: "as estimated", density: 1, events: 0},
+		{name: "twice the estimate", density: 2, events: 1},
+	} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%v", tc.name, stream), func(t *testing.T) {
+				t.Parallel()
+				var estimates []int
+				provider := &atomicMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
+					estimate := contextfrag.ProviderEnvelopeTokens(params.System, params.Messages, params.Tools)
+					usage := sdk.Usage{InputTokens: tc.density * estimate}
+					if call <= 2 {
+						return sdk.ModelResult{FinishReason: sdk.FinishReasonToolCalls, Usage: usage, ToolCalls: []sdk.ToolCall{{
+							ToolCallID: fmt.Sprintf("c%d", call), ToolName: "effect", Input: toolexec.ArgumentsFromValue(map[string]any{"n": call}),
+						}}}, nil
+					}
+					return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop, Usage: usage}, nil
+				}}
+				a := New(Deps{})
+				a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
+					Name: "effect", Parameters: &jsonschema.Schema{Type: "object"},
+					Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+						return toolexec.OutputFromValue(strings.Repeat(" r", 2000)), nil
+					},
+				}}}})
+				input := sdk.UserMessage("INPUT")
+				summary := sdk.UserMessage("<summary>\nsteps\n")
+				var events []ContextSwitch
+				cfg := RunConfig{
+					Model: &sdk.Model{ID: "mock-model", Provider: provider}, Messages: []sdk.Message{input}, SupportsToolCall: true,
+					Identity: SessionContext{BotID: "bot-1", SessionID: "sess-1"}, ContextMutations: contextfrag.NewMutationLedger(),
+					ContextManifest:   contextfrag.Manifest{BudgetPlan: &contextfrag.ContextBudgetPlan{Window: 5000}},
+					ContextProvenance: []MessageProvenance{{Message: input, Sources: rowSources("input"), Anchor: true}},
+					OnStepCommitted: func(_ context.Context, index int, record *step.Record) (StepDirective, error) {
+						estimates = append(estimates, record.InputEstimateTokens)
+						provenance := make([]MessageProvenance, len(record.Messages))
+						for i := range provenance {
+							provenance[i].Sources = rowSources(fmt.Sprintf("s%d.%d", index, i))
+						}
+						return StepDirective{Provenance: provenance}, nil
+					},
+					SwitchContext: func(_ context.Context, sw ContextSwitch) (string, error) {
+						events = append(events, sw)
+						sw.Fold(foldCovering(sw, "a1", summary, rowSources("s0.0", "s0.1")...))
+						return "trigger=in_run passes=1", nil
+					},
+				}
+				if stream {
+					for event := range a.Stream(context.Background(), cfg) {
+						if event.Type == EventError {
+							t.Fatalf("stream failed: %v", event.Cause)
+						}
+					}
+				} else if _, err := a.Generate(context.Background(), cfg); err != nil {
+					t.Fatal(err)
+				}
+				if len(events) != tc.events {
+					t.Fatalf("events = %d, want %d", len(events), tc.events)
+				}
+				if tc.events > 0 {
+					sw := events[0]
+					if sw.UsageTokens > 5000 || sw.UsageTokens <= sw.AllowanceTokens || sw.AllowanceTokens != 2500 || sw.WindowTokens != 2500 || sw.Density != 2 {
+						t.Fatalf("event usage=%d allowance=%d window=%d density=%v, want an estimate under the window folded against the window the provider counts", sw.UsageTokens, sw.AllowanceTokens, sw.WindowTokens, sw.Density)
+					}
+				}
+				if len(estimates) != 3 || slices.Contains(estimates, 0) {
+					t.Fatalf("committed estimates = %v, want one for each step", estimates)
+				}
+			})
+		}
+	}
+}
+
+// A run starts from the calibration the session's latest step left, so its
+// first request is measured as the provider counts the session's content:
+// one whose estimate fits the window folds before it is sent once the
+// session's content counts twice its estimate.
+func TestArmedRunStartsFromTheSessionsCalibration(t *testing.T) {
+	t.Parallel()
+
+	messages, provenance := switchRequest()
+	window := contextfrag.ProviderEnvelopeTokens("", messages, nil) + 100
+	for _, tc := range []struct {
+		density float64
+		events  int
+	}{{density: 0, events: 0}, {density: 2, events: 1}, {density: 100, events: 1}} {
+		var events []ContextSwitch
+		cfg := RunConfig{
+			ContextMutations:  contextfrag.NewMutationLedger(),
+			ContextManifest:   contextfrag.Manifest{BudgetPlan: &contextfrag.ContextBudgetPlan{Window: window}},
+			ContextProvenance: provenance,
+			ContextDensity:    tc.density,
+			SwitchContext: func(_ context.Context, sw ContextSwitch) (string, error) {
+				events = append(events, sw)
+				return "", errors.New("stop at the event")
+			},
+		}
+		cfg.contextSwitch = newContextSwitchState(cfg)
+		cfg.contextStepFailure = func(error) {}
+		prepareArmed(cfg, messages)
+		if len(events) != tc.events {
+			t.Fatalf("density %v: events = %d, want %d", tc.density, len(events), tc.events)
+		}
+		if tc.events > 0 {
+			want := boundedContextDensity(tc.density)
+			if sw := events[0]; sw.Density != want || sw.AllowanceTokens != int(float64(window)/want) {
+				t.Fatalf("density %v: event density=%v allowance=%d, want %v and %d", tc.density, sw.Density, sw.AllowanceTokens, want, int(float64(window)/want))
+			}
+		}
+	}
+}

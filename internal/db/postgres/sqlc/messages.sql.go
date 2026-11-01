@@ -2137,6 +2137,49 @@ func (q *Queries) GetHistoryTurnByID(ctx context.Context, arg GetHistoryTurnByID
 	return i, err
 }
 
+const getLatestInputEstimateSample = `-- name: GetLatestInputEstimateSample :one
+WITH latest_steps AS MATERIALIZED (
+  SELECT m.usage, m.metadata, m.created_at, m.id,
+    m.model_id IS NOT DISTINCT FROM $1::uuid AS same_model
+  FROM bot_history_messages m
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.session_id = $2
+    AND m.role = 'assistant'
+  ORDER BY m.created_at DESC, m.id DESC
+  LIMIT 20
+)
+SELECT
+  (step.usage->>'inputTokens')::bigint AS input_tokens,
+  (step.metadata->>'input_estimate_tokens')::bigint AS estimate_tokens
+FROM latest_steps step
+WHERE step.same_model
+  AND jsonb_typeof(step.metadata->'input_estimate_tokens') = 'number'
+  AND jsonb_typeof(step.usage->'inputTokens') = 'number'
+ORDER BY step.created_at DESC, step.id DESC
+LIMIT 1
+`
+
+type GetLatestInputEstimateSampleParams struct {
+	ModelID   pgtype.UUID `json:"model_id"`
+	SessionID pgtype.UUID `json:"session_id"`
+}
+
+type GetLatestInputEstimateSampleRow struct {
+	InputTokens    int64 `json:"input_tokens"`
+	EstimateTokens int64 `json:"estimate_tokens"`
+}
+
+// The input tokens the provider counted for the latest native step of the
+// session on a model, beside what the run's estimate priced that step's
+// request at. Only the session's latest assistant rows are looked at: a
+// calibration older than them describes content the session moved past.
+func (q *Queries) GetLatestInputEstimateSample(ctx context.Context, arg GetLatestInputEstimateSampleParams) (GetLatestInputEstimateSampleRow, error) {
+	row := q.db.QueryRow(ctx, getLatestInputEstimateSample, arg.ModelID, arg.SessionID)
+	var i GetLatestInputEstimateSampleRow
+	err := row.Scan(&i.InputTokens, &i.EstimateTokens)
+	return i, err
+}
+
 const getLatestVisibleHistoryTurnBySession = `-- name: GetLatestVisibleHistoryTurnBySession :one
 WITH target AS (
   SELECT m.turn_id, m.session_id, m.turn_position

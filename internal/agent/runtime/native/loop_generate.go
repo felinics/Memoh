@@ -138,6 +138,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 	var thread stepThread
 	thread.reset(dispatch)
 	commitStep := func(sdkStep int, sr *step.Record) (StepDirective, error) {
+		if sr != nil {
+			sr.InputEstimateTokens = cfg.contextSwitch.observe(sr.Result.Usage)
+		}
 		var dir StepDirective
 		if cfg.OnStepCommitted != nil {
 			stepIndex := sdkStep + cfg.StepIndexOffset

@@ -25,6 +25,11 @@ const (
 	// not inside content — keeps them out of the history byte budget, which
 	// measures octet_length(content) only.
 	ToolCallDiffsMetadataKey = "diffs"
+	// InputEstimateMetadataKey holds, on the assistant row of a native step,
+	// what the run's estimate priced the step's request at. Beside the input
+	// tokens the provider counted for it (usage.inputTokens) it calibrates
+	// the estimate of the session's later runs on the same model.
+	InputEstimateMetadataKey = "input_estimate_tokens"
 )
 
 // LatestInterruptedCheckpoint returns the last assistant entry only when it is

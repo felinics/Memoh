@@ -129,6 +129,21 @@ a remainder too small for any summary to replace ends the event once the
 request fits. The context view keeps an armed run's whole history, without
 trimming, and every dispatch checks the allowance.
 
+The allowance is what the provider counts, and a run measures its request by
+an estimate that prices bytes at a fixed rate; content a provider's tokenizer
+counts more densely, such as structured JSON, would pass the estimate while
+the provider counts it over the window. An armed run therefore calibrates the
+estimate by the provider: each step it sends records what the estimate priced
+the request at, and once the provider reports the input tokens it counted, the
+run measures its next requests by the ratio of the two (at least 1, at most
+4), comparing them and every window an event reads within in the estimate's
+units. The step's assistant row keeps the estimate in its metadata
+(`input_estimate_tokens`) beside the provider's `usage.inputTokens`, so the
+session's next run on the same model starts from the latest such step among
+its newest assistant rows (`GetLatestInputEstimateSample`) and measures its
+first request the same way. An in-run event that measured by a ratio above 1
+logs it as `density`.
+
 `compaction.Service.Compact` folds history from rows instead, with the same
 engine: for a chat or continuation load the byte budget truncated, before the
 request is built, and for Discuss input Channel omitted or a batch it could

@@ -72,6 +72,12 @@ func (s *Service) switchContext(req ChatRequest, committer *agentStepCommitter, 
 			slog.Int("request_tokens_before", sw.UsageTokens), slog.Int("request_tokens_after", tokens),
 			slog.Int("allowance_tokens", sw.AllowanceTokens), slog.Duration("duration", time.Since(start)),
 		}
+		// The token counts are the estimate's; the provider counts density
+		// tokens for each.
+		if sw.Density > 1 {
+			detail += fmt.Sprintf(" density=%.2f", sw.Density)
+			attrs = append(attrs, slog.Float64("density", sw.Density))
+		}
 		if err == nil {
 			s.logger.LogAttrs(ctx, slog.LevelInfo, "context compacted", attrs...)
 			return detail, nil

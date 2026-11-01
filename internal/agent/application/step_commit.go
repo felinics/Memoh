@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	sdk "github.com/felinics/twilight/sdk"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
@@ -22,6 +23,8 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -123,8 +126,43 @@ func (s *Service) bindNativeRun(ctx context.Context, req ChatRequest, rc resolve
 	// attempt its first step selected.
 	if committer != nil && s.compactionService != nil {
 		cfg.SwitchContext = s.switchContext(req, committer, cfg.CurrentModelUUID)
+		cfg.ContextDensity = s.contextDensity(ctx, req.ThreadID, cfg.CurrentModelUUID)
 	}
 	return committer
+}
+
+type inputEstimateSampleReader interface {
+	GetLatestInputEstimateSample(context.Context, sqlc.GetLatestInputEstimateSampleParams) (sqlc.GetLatestInputEstimateSampleRow, error)
+}
+
+// contextDensity is the calibration the session's latest native step on the
+// model left: the input tokens the provider counted for its request over what
+// the run's estimate priced it at. A run starts from it, so its first request
+// is measured as the provider counts the session's content, not only its
+// later ones; zero when the session has no such step.
+func (s *Service) contextDensity(ctx context.Context, sessionID, modelID string) float64 {
+	reader, ok := s.queries.(inputEstimateSampleReader)
+	if !ok {
+		return 0
+	}
+	session, err := db.ParseUUID(sessionID)
+	if err != nil {
+		return 0
+	}
+	sample, err := reader.GetLatestInputEstimateSample(ctx, sqlc.GetLatestInputEstimateSampleParams{
+		SessionID: session,
+		ModelID:   db.ParseUUIDOrEmpty(modelID),
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			s.logger.WarnContext(ctx, "read context density sample failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		}
+		return 0
+	}
+	if sample.InputTokens <= 0 || sample.EstimateTokens <= 0 {
+		return 0
+	}
+	return float64(sample.InputTokens) / float64(sample.EstimateTokens)
 }
 
 func (c *agentStepCommitter) bindContinuation(cfg *native.RunConfig) {
@@ -292,6 +330,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 			inputs[i].Metadata = metadata
 		}
 	}
+	stampInputEstimate(inputs, record.InputEstimateTokens)
 	steerIndex := c.stampSteerTurn(inputs)
 	agentStep := messagepkg.AgentStep{RunID: c.req.RunID, Messages: inputs, Interrupted: interrupted}
 	if !c.replacementStarted && len(inputs) > 0 {
@@ -646,4 +685,23 @@ func stepPersistenceContext(ctx, owner context.Context) (context.Context, error)
 		return nil, sessionruntime.ErrRunOwnershipLost
 	}
 	return context.WithoutCancel(ctx), nil
+}
+
+// stampInputEstimate records what the run's estimate priced a step's request
+// at on the assistant row that carries the provider's usage for it.
+func stampInputEstimate(inputs []messagepkg.PersistInput, estimate int) {
+	if estimate <= 0 {
+		return
+	}
+	for i := range inputs {
+		if !strings.EqualFold(strings.TrimSpace(inputs[i].Role), "assistant") || len(inputs[i].Usage) == 0 {
+			continue
+		}
+		metadata := maps.Clone(inputs[i].Metadata)
+		if metadata == nil {
+			metadata = make(map[string]any, 1)
+		}
+		metadata[messagepkg.InputEstimateMetadataKey] = estimate
+		inputs[i].Metadata = metadata
+	}
 }

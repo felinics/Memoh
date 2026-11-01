@@ -2799,3 +2799,28 @@ WHERE request.team_id = public.memoh_current_team_id()
   AND request.role = 'user' AND request.turn_message_seq = 1
   AND request.turn_visible = true
 ORDER BY request.turn_position ASC;
+
+-- name: GetLatestInputEstimateSample :one
+-- The input tokens the provider counted for the latest native step of the
+-- session on a model, beside what the run's estimate priced that step's
+-- request at. Only the session's latest assistant rows are looked at: a
+-- calibration older than them describes content the session moved past.
+WITH latest_steps AS MATERIALIZED (
+  SELECT m.usage, m.metadata, m.created_at, m.id,
+    m.model_id IS NOT DISTINCT FROM sqlc.narg(model_id)::uuid AS same_model
+  FROM bot_history_messages m
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.session_id = sqlc.arg(session_id)
+    AND m.role = 'assistant'
+  ORDER BY m.created_at DESC, m.id DESC
+  LIMIT 20
+)
+SELECT
+  (step.usage->>'inputTokens')::bigint AS input_tokens,
+  (step.metadata->>'input_estimate_tokens')::bigint AS estimate_tokens
+FROM latest_steps step
+WHERE step.same_model
+  AND jsonb_typeof(step.metadata->'input_estimate_tokens') = 'number'
+  AND jsonb_typeof(step.usage->'inputTokens') = 'number'
+ORDER BY step.created_at DESC, step.id DESC
+LIMIT 1;

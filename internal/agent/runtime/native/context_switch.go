@@ -31,7 +31,9 @@ type MessageProvenance struct {
 // settings the request carries, so a fork reads only what WindowTokens holds
 // beside OutputTokens, the run's output allowance, as every request of the
 // run does. Fold applies a pass the event committed to the request and
-// reports the request as it then is.
+// reports the request as it then is. UsageTokens, AllowanceTokens and
+// WindowTokens are in the units the run's estimate prices: the provider
+// counts Density tokens for each of them.
 type ContextSwitch struct {
 	Request         sdk.Request
 	Provenance      []*MessageProvenance
@@ -39,6 +41,7 @@ type ContextSwitch struct {
 	AllowanceTokens int
 	WindowTokens    int
 	OutputTokens    int
+	Density         float64
 	Summarize       func(context.Context, sdk.Request) (sdk.ModelResult, error)
 	Fold            func(ContextFold) ContextSplice
 }
@@ -62,21 +65,70 @@ type ContextFold struct {
 // contextSwitchState follows an armed run's request across its dispatches:
 // the provenance of what it renders and, from a splice until the re-dispatch
 // that follows it, where each message of the spliced request was before (-1
-// for a summary).
+// for a summary). It also calibrates the run's estimate against the provider:
+// density is how many tokens the provider counts for each token the estimate
+// prices, from the latest step that reported its input (dispatched is what
+// the estimate priced the request a step sent at), and starts from the
+// session's last such step (RunConfig.ContextDensity).
 type contextSwitchState struct {
-	known []MessageProvenance
-	moved []int
+	known      []MessageProvenance
+	moved      []int
+	density    float64
+	dispatched int
 }
+
+// maxContextDensity bounds a calibration: a provider count far beyond any
+// tokenizer's (a cumulative or misreported usage) must not fold every request
+// to nothing.
+const maxContextDensity = 4.0
 
 func newContextSwitchState(cfg RunConfig) *contextSwitchState {
 	if cfg.SwitchContext == nil {
 		return nil
 	}
-	s := &contextSwitchState{}
+	s := &contextSwitchState{density: boundedContextDensity(cfg.ContextDensity)}
 	for _, provenance := range cfg.ContextProvenance {
 		s.know(provenance)
 	}
 	return s
+}
+
+// boundedContextDensity is a density a calibration may apply: never below 1,
+// where the estimate already holds, nor above maxContextDensity.
+func boundedContextDensity(density float64) float64 {
+	if !(density > 1) {
+		return 1
+	}
+	return min(density, maxContextDensity)
+}
+
+// calibrated is a provider token count in the units the estimate prices: a
+// request the estimate prices at calibrated(n) is one the provider counts at
+// about n.
+func (s *contextSwitchState) calibrated(tokens int) int {
+	if s == nil || s.density <= 1 || tokens <= 0 {
+		return tokens
+	}
+	return max(int(float64(tokens)/s.density), 1)
+}
+
+// staged records what the estimate prices the request a step sends at.
+func (s *contextSwitchState) staged(params *sdk.Request) {
+	if s == nil || params == nil {
+		return
+	}
+	s.dispatched = contextfrag.ProviderEnvelopeTokens(params.System, params.Messages, params.Tools)
+}
+
+// observe calibrates the estimate by the input tokens the provider counted
+// for the request the step sent, and reports what the estimate priced that
+// request at; zero when either is unknown.
+func (s *contextSwitchState) observe(usage sdk.Usage) int {
+	if s == nil || s.dispatched <= 0 || usage.InputTokens <= 0 {
+		return 0
+	}
+	s.density = boundedContextDensity(float64(usage.InputTokens) / float64(s.dispatched))
+	return s.dispatched
 }
 
 func (s *contextSwitchState) know(provenance MessageProvenance) {
@@ -116,11 +168,12 @@ func (s *contextSwitchState) align(messages []sdk.Message) []*MessageProvenance 
 	return out
 }
 
-// fold runs one compaction event when params does not fit allowance, and
-// splices each pass it commits into params; the event decides what stays
-// verbatim. Every message no pass covers stays as it was. It reports whether
-// params changed; an event that leaves the request over its allowance fails
-// as the event says.
+// fold runs one compaction event when params does not fit allowance, which
+// is calibrated, and splices each pass it commits into params; the event
+// decides what stays verbatim. Every message no pass covers stays as it was.
+// It reports whether params changed; an event that leaves the request over
+// its allowance fails as the event says. The event works in the estimate's
+// units, so the window a fork reads within is calibrated too.
 func (s *contextSwitchState) fold(ctx context.Context, cfg RunConfig, params *sdk.Request, allowance int) (bool, error) {
 	if s == nil || allowance <= 0 {
 		return false, nil
@@ -131,6 +184,7 @@ func (s *contextSwitchState) fold(ctx context.Context, cfg RunConfig, params *sd
 	}
 	provenance := s.align(params.Messages)
 	window, reserve := providerWindow(cfg)
+	window = s.calibrated(window)
 	splice := requestSplice{messages: params.Messages, provenance: provenance, from: make([]int, len(params.Messages))}
 	for i := range splice.from {
 		splice.from[i] = i
@@ -143,6 +197,7 @@ func (s *contextSwitchState) fold(ctx context.Context, cfg RunConfig, params *sd
 		AllowanceTokens: allowance,
 		WindowTokens:    window,
 		OutputTokens:    reserve,
+		Density:         s.density,
 		Summarize:       forkSummarizer(cfg.Model, cfg.ModelIdleWindow),
 		Fold: func(fold ContextFold) ContextSplice {
 			splice.apply(fold)

@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/felinics/memoh/internal/agent/application"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
@@ -126,6 +127,18 @@ type effectLoop struct {
 	runs      []string
 	replaced  map[int]bool
 	outOfBand map[string]bool
+	// density makes the provider count density tokens for each token the
+	// run's estimate prices a request's bytes at, and report them as the
+	// request's prompt tokens; zero reports no usage. counted holds what it
+	// counts for each request either way.
+	density float64
+	counted []int
+}
+
+// providerCount is what a provider that counts density tokens for each token
+// the estimate prices a byte at counts for a request of body bytes.
+func providerCount(body []byte, density float64) int {
+	return int(float64(contextfrag.ProviderBudgetTokensFromBytes(len(body))) * density)
 }
 
 type approveExec struct{}
@@ -336,6 +349,9 @@ func (s *effectLoop) writeForeignRow(ctx context.Context) error {
 func (s *effectLoop) serve(w http.ResponseWriter, body []byte) {
 	request := string(body)
 	s.mu.Lock()
+	density := cmp.Or(s.density, 2)
+	s.counted = append(s.counted, providerCount(body, density))
+	report := s.density > 0
 	s.requests = append(s.requests, request)
 	s.folds = append(s.folds, s.f.summaries.Load())
 	s.runs = append(s.runs, s.activeRun())
@@ -379,6 +395,12 @@ func (s *effectLoop) serve(w http.ResponseWriter, body []byte) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	for _, choice := range []map[string]any{{"index": 0, "delta": delta, "finish_reason": nil}, {"index": 0, "delta": map[string]any{}, "finish_reason": finish}} {
 		chunk, _ := json.Marshal(map[string]any{"id": "loop", "object": "chat.completion.chunk", "choices": []any{choice}})
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", chunk)
+	}
+	if report {
+		prompt := providerCount(body, density)
+		usage := map[string]any{"prompt_tokens": prompt, "completion_tokens": 1, "total_tokens": prompt + 1}
+		chunk, _ := json.Marshal(map[string]any{"id": "loop", "object": "chat.completion.chunk", "choices": []any{}, "usage": usage})
 		_, _ = fmt.Fprintf(w, "data: %s\n\n", chunk)
 	}
 	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
@@ -698,6 +720,84 @@ func TestPostgresInRunCompactionByEntry(t *testing.T) {
 				scenario.run(t, entry, newEffectLoop(t, entry))
 			})
 		}
+	}
+}
+
+// A provider that counts more tokens than the run's estimate prices sees no
+// request over its window: each step's reported input calibrates the run,
+// which folds a request the provider would count over the window though its
+// estimate fits, and the session's later runs start from the calibration the
+// last step left on its row. Without the report the same run folds nothing
+// and sends requests the provider counts over the window.
+func TestPostgresInRunFoldMeasuresRequestsAsTheProviderCounts(t *testing.T) {
+	const steps, window = 8, 16000
+	const nextInput = "NEXT_TURN_INPUT_KEEP"
+	web := runEntryNamed("web")
+	// counts is what the provider counted for each request carrying marker,
+	// and before whether the session had folded before the first of them.
+	counts := func(s *effectLoop, marker string, from int32) (counted []int, before bool) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for i, request := range s.requests {
+			if strings.Contains(request, marker) {
+				if counted == nil {
+					before = s.folds[i] > from
+				}
+				counted = append(counted, s.counted[i])
+			}
+		}
+		return counted, before
+	}
+	run := func(t *testing.T, density float64) (*effectLoop, []int, int32, bool) {
+		t.Helper()
+		s := newEffectLoop(t, web)
+		s.window(window)
+		s.density = density
+		code, _ := s.run(web, loopInput, steps)
+		want := make([]int, steps)
+		for i := range want {
+			want[i] = i + 1
+		}
+		if code != "" || !slices.Equal(s.effects, want) {
+			t.Fatalf("code=%q effects=%v, want every effect once in order", code, s.effects)
+		}
+		counted, _ := counts(s, loopInput, 0)
+		folds := s.f.summaries.Load()
+		// The next turn's input fits beside the history by the estimate, not
+		// as the provider counts the session's content.
+		if code, _ := s.run(web, nextInput+strings.Repeat(" detail", 900), 0); code != "" {
+			t.Fatalf("next turn failed with %s", code)
+		}
+		next, foldedFirst := counts(s, nextInput, folds)
+		t.Logf("density %v: next turn counted %v, folded before its first request: %v", density, next, foldedFirst)
+		return s, counted, folds, foldedFirst
+	}
+
+	_, unreported, folds, foldedFirst := run(t, 0)
+	if folds != 0 || foldedFirst || slices.Max(unreported) <= window {
+		t.Fatalf("without a report: folds=%d next turn folded first=%v counted=%v, want no fold and a request counted over the %d-token window", folds, foldedFirst, unreported, window)
+	}
+
+	s, counted, folds, foldedFirst := run(t, 2)
+	t.Logf("provider counts without a report: %v; with one: %v (%d fold passes)", unreported, counted, folds)
+	if folds == 0 || slices.Max(counted) > window {
+		t.Fatalf("with a report: folds=%d counted=%v, want a fold and every request counted within the %d-token window", folds, counted, window)
+	}
+	if !foldedFirst {
+		t.Fatal("the next turn sent its first request unfolded, want it measured by the calibration the last step left")
+	}
+	var rows int
+	if err := s.f.pool.QueryRow(s.f.ctx, `SELECT count(*) FROM bot_history_messages WHERE session_id=$1 AND role='assistant' AND jsonb_typeof(metadata->'input_estimate_tokens')='number' AND jsonb_typeof(usage->'inputTokens')='number'`, s.f.sessionID).Scan(&rows); err != nil || rows == 0 {
+		t.Fatalf("assistant rows with an estimate beside their usage: %d err=%v, want the run's steps", rows, err)
+	}
+	sample, err := sqlc.New(s.f.pool).GetLatestInputEstimateSample(s.f.ctx, sqlc.GetLatestInputEstimateSampleParams{
+		SessionID: dbpkg.ParseUUIDOrEmpty(s.f.sessionID), ModelID: dbpkg.ParseUUIDOrEmpty(s.f.chatModel),
+	})
+	if err != nil {
+		t.Fatalf("read the session's calibration: %v", err)
+	}
+	if density := float64(sample.InputTokens) / float64(sample.EstimateTokens); density < 1.5 || density > 4 {
+		t.Fatalf("calibration = %d/%d = %.2f, want the provider's denser count", sample.InputTokens, sample.EstimateTokens, density)
 	}
 }
 

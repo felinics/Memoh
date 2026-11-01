@@ -302,7 +302,10 @@ func prepareProviderAttempt(
 	prefixCount = clampStableMessageCount(prefixCount, len(params.Messages))
 	dynamicRefs = verifyDynamicRefs(cfg.dynamicInputs, dynamicRefs, params.Messages)
 	snapshot := contextfrag.StepSnapshot{StepIndex: stepIndex}
-	allowance := providerInputAllowance(cfg)
+	// The allowance is what the provider counts; an armed run measures the
+	// request by its estimate, calibrated by what the provider counted for
+	// the run's or the session's latest step.
+	allowance := cfg.contextSwitch.calibrated(providerInputAllowance(cfg))
 	// A step request only grows between compaction events. A request that
 	// still does not fit after compaction ends the run without pruning.
 	if cfg.contextSwitch != nil {
@@ -325,6 +328,7 @@ func prepareProviderAttempt(
 			allowance,
 		))
 	}
+	cfg.contextSwitch.staged(params)
 	stagePreparedProviderAttempt(ctx, handoff, snapshot, systemPrepended, dynamicRefs)
 	return params
 }

@@ -143,6 +143,11 @@ type RunConfig struct {
 	ContextToolDefs                []contextfrag.ToolDefAccounting
 	ContextToolDefsResolved        bool
 	ContextBudgetMaxTokens         int
+	// ContextDensity is how many tokens the provider counted for each token
+	// the estimate priced in the session's latest step on this model, which
+	// an armed run calibrates its estimate by until its own first step
+	// reports; zero or below 1 calibrates nothing.
+	ContextDensity float64
 	// ModelMaxOutputTokens is the model's configured output cap; zero means unknown.
 	ModelMaxOutputTokens         int
 	RecoverContextBudget         func(context.Context, RunConfig) (RunConfig, bool, error)
