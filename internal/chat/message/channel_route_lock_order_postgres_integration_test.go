@@ -16,7 +16,15 @@ func TestPostgresBotDeleteAndRouteSwitchShareLockOrder(t *testing.T) {
 	botID := mustTestUUID(t, fixture.botID)
 	assertDeleteAndRouteSwitchShareLockOrder(t, fixture, func(ctx context.Context, queries *dbsqlc.Queries) error {
 		return queries.DeleteBotByID(ctx, botID)
-	})
+	}, setRouteSession)
+}
+
+func TestPostgresBotDeleteAndRouteCompareAndSetShareLockOrder(t *testing.T) {
+	fixture := setupOrderedSessionFixture(t)
+	botID := mustTestUUID(t, fixture.botID)
+	assertDeleteAndRouteSwitchShareLockOrder(t, fixture, func(ctx context.Context, queries *dbsqlc.Queries) error {
+		return queries.DeleteBotByID(ctx, botID)
+	}, compareAndSetRouteSession)
 }
 
 func TestPostgresBotRuntimeClearAndRouteSwitchShareLockOrder(t *testing.T) {
@@ -24,7 +32,7 @@ func TestPostgresBotRuntimeClearAndRouteSwitchShareLockOrder(t *testing.T) {
 	botID := mustTestUUID(t, fixture.botID)
 	assertDeleteAndRouteSwitchShareLockOrder(t, fixture, func(ctx context.Context, queries *dbsqlc.Queries) error {
 		return queries.ClearBotRuntimeData(ctx, botID)
-	})
+	}, setRouteSession)
 }
 
 func TestPostgresBotDeleteAndRouteDeleteShareLockOrder(t *testing.T) {
@@ -114,10 +122,25 @@ func TestPostgresRouteCompareAndSetMovesOnlyFromExpectedSession(t *testing.T) {
 	}
 }
 
+// routeSwitch moves a route from session from to session to.
+type routeSwitch func(ctx context.Context, queries *dbsqlc.Queries, route, from, to pgtype.UUID) error
+
+func setRouteSession(ctx context.Context, queries *dbsqlc.Queries, route, _, to pgtype.UUID) error {
+	return queries.SetRouteActiveSession(ctx, dbsqlc.SetRouteActiveSessionParams{ActiveSessionID: to, ID: route})
+}
+
+func compareAndSetRouteSession(ctx context.Context, queries *dbsqlc.Queries, route, from, to pgtype.UUID) error {
+	_, err := queries.CompareAndSetRouteActiveSession(ctx, dbsqlc.CompareAndSetRouteActiveSessionParams{
+		ActiveSessionID: to, ID: route, ExpectedSessionID: from,
+	})
+	return err
+}
+
 func assertDeleteAndRouteSwitchShareLockOrder(
 	t *testing.T,
 	fixture orderedSessionFixture,
 	deleteBot func(context.Context, *dbsqlc.Queries) error,
+	switchRoute routeSwitch,
 ) {
 	t.Helper()
 	ctx := context.Background()
@@ -154,13 +177,11 @@ func assertDeleteAndRouteSwitchShareLockOrder(
 		}
 	}()
 	switchPID := postgresBackendPID(t, switchTx)
-	switchParams := dbsqlc.SetRouteActiveSessionParams{
-		ActiveSessionID: mustTestUUID(t, fixture.highSessionID),
-		ID:              mustTestUUID(t, routeID),
-	}
+	route := mustTestUUID(t, routeID)
+	from, to := mustTestUUID(t, fixture.lowSessionID), mustTestUUID(t, fixture.highSessionID)
 	switched := make(chan error, 1)
 	go func() {
-		switched <- dbsqlc.New(switchTx).SetRouteActiveSession(ctx, switchParams)
+		switched <- switchRoute(ctx, dbsqlc.New(switchTx), route, from, to)
 	}()
 	waitForPostgresLock(t, fixture.pool, switchPID)
 
