@@ -111,7 +111,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 	// (read-media carriers here; the stream loop adds live injections).
 	dynamic := newLoopDynamicInputs(cfg.StepIndexOffset)
 	cfg.dynamicInputs = dynamic
-	prepareStep := a.wrapPrepareStepWithModelHook(genCtx, cfg, nil)
+	prepareStep := a.wrapPrepareStepWithModelHook(genCtx, cfg)
 	cfg, err := a.applyBeforeModelCallHook(genCtx, cfg, 0)
 	if err != nil {
 		return nil, err
@@ -202,31 +202,38 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 	// same budget the streaming loop keeps.
 	retries := 0
 	for sdkStep := 0; ; sdkStep++ {
-		stepParams := thread.advance(cfg, dynamic, stepBoundary{
+		stepParams, prepareErr := thread.advance(cfg, dynamic, stepBoundary{
 			first:     sdkStep == 0,
 			committed: len(allSteps),
 			readMedia: readMediaState,
 		})
-		if next, ok := cfg.contextSwitch.redispatch(cfg, thread.dispatch, stepParams); ok {
-			cfg.ContextCachePlan = next.ContextCachePlan
-			dispatch, err := a.buildGenerateDispatch(genCtx, next, sdkTools, approvalTools, prepareStep)
-			if err != nil {
-				return nil, fmt.Errorf("generate: %w", err)
+		if prepareErr == nil {
+			if next, ok := cfg.contextSwitch.redispatch(cfg, thread.dispatch, stepParams); ok {
+				cfg.ContextCachePlan = next.ContextCachePlan
+				dispatch, err := a.buildGenerateDispatch(genCtx, next, sdkTools, approvalTools, prepareStep)
+				if err != nil {
+					return nil, fmt.Errorf("generate: %w", err)
+				}
+				thread.reset(dispatch)
+				stepParams, prepareErr = thread.advance(cfg, dynamic, stepBoundary{first: true})
 			}
-			thread.reset(dispatch)
-			stepParams = thread.advance(cfg, dynamic, stepBoundary{first: true})
 		}
 		if stepErr := failure.err(); stepErr != nil {
 			return nil, stepErr
 		}
-		// Dispatch boundary: never invoke the provider on a dead context, and
-		// publish the staged provider-attempt state exactly once per call.
+		// Dispatch boundary: never invoke the provider on a dead context or
+		// for a call the prepare chain refused, and publish the staged
+		// provider-attempt state exactly once per call.
 		if ctxErr := genCtx.Err(); ctxErr != nil {
 			thread.dispatch.handoff.reject()
 			if loopErr := detectGenerateLoopAbort(genCtx, ctxErr); loopErr != nil {
 				return nil, loopErr
 			}
 			return nil, fmt.Errorf("generate: %w", ctxErr)
+		}
+		if prepareErr != nil {
+			thread.dispatch.handoff.reject()
+			return nil, prepareErr
 		}
 		if err := thread.dispatch.handoff.publish(stepParams); err != nil {
 			return nil, fmt.Errorf("generate: %w", err)
@@ -357,7 +364,7 @@ func (a *Agent) generateStep(ctx context.Context, cfg RunConfig, params sdk.Requ
 type generateDispatch struct {
 	params      sdk.Request
 	execTools   []toolexec.Tool
-	prepareStep func(*sdk.Request) *sdk.Request
+	prepareStep prepareStepFunc
 	handoff     *providerAttemptHandoff
 	approve     func(context.Context, sdk.ToolCall) (toolexec.ToolApprovalResult, error)
 	// initialMessageCount is the compiled provider prefix length (including a
@@ -374,7 +381,7 @@ type generateDispatch struct {
 // prepare-step composition, yielding the concrete sdk.Request and the composed
 // step-prepare function. The executable tool set stays local to the loop; the
 // request carries only the provider-bound definitions.
-func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkTools []toolexec.Tool, approvalTools []toolexec.Tool, prepareStep func(*sdk.Request) *sdk.Request) (generateDispatch, error) {
+func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkTools []toolexec.Tool, approvalTools []toolexec.Tool, prepareStep prepareStepFunc) (generateDispatch, error) {
 	handoff := newProviderAttemptHandoff(cfg)
 	sdkTools = canonicalizeProviderToolSchemas(sdkTools)
 	cfg.ContextMutations.SetModelInfo(modelID(cfg.Model), models.ResolveClientType(cfg.Model))
@@ -438,13 +445,17 @@ func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkToo
 	params = *prepareProviderAttempt(ctx, cfg, handoff, systemPrepended, initialProviderMessageCount, 0, providerRefs, &params)
 	if cfg.BackgroundManager != nil {
 		basePrepare := prepareStep
-		prepareStep = func(p *sdk.Request) *sdk.Request {
+		prepareStep = func(p *sdk.Request) (*sdk.Request, error) {
 			if p == nil {
-				return nil
+				return nil, nil
 			}
 			p.Messages = removeBackgroundSummaryMessages(p.Messages, initialProviderMessageCount)
 			if basePrepare != nil {
-				if override := basePrepare(p); override != nil {
+				override, err := basePrepare(p)
+				if err != nil {
+					return nil, err
+				}
+				if override != nil {
 					p = override
 				}
 			}
@@ -452,7 +463,7 @@ func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkToo
 				cfg.ContextMutations.Record(contextfrag.MutationBackgroundSummary, fmt.Sprintf("bytes=%d", len(summary)))
 				p.Messages = append(p.Messages, backgroundSummaryMessage(summary))
 			}
-			return p
+			return p, nil
 		}
 	}
 
@@ -463,17 +474,21 @@ func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkToo
 
 	prepareIndex := 0
 	basePrepare := prepareStep
-	stepPrepare := func(p *sdk.Request) *sdk.Request {
+	stepPrepare := func(p *sdk.Request) (*sdk.Request, error) {
 		if basePrepare != nil {
-			if override := basePrepare(p); override != nil {
+			override, err := basePrepare(p)
+			if err != nil {
+				return nil, err
+			}
+			if override != nil {
 				p = override
 			}
 		}
 		if p == nil {
-			return nil
+			return nil, nil
 		}
 		defer func() { prepareIndex++ }()
-		return prepareProviderAttempt(ctx, cfg, handoff, systemPrepended, initialProviderMessageCount, prepareIndex+1, cfg.dynamicInputs.pendingRefs(), p)
+		return prepareProviderAttempt(ctx, cfg, handoff, systemPrepended, initialProviderMessageCount, prepareIndex+1, cfg.dynamicInputs.pendingRefs(), p), nil
 	}
 
 	return generateDispatch{
