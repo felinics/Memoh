@@ -88,9 +88,11 @@ type StreamEmitter func(ToolStreamEvent)
 //
 // Storing costs one provider-neutral copy of the message and part headers: the
 // payloads (text, tool argument and output bytes) are shared with the request,
-// which treats them as immutable values. Store replaces the held slices and
-// never writes into them, so a reader may keep using what it loaded. Readers
-// receive an independent copy, paid only when a forked subagent asks for it.
+// which treats them as immutable values. A step, a retry or an in-run fold
+// replaces messages and parts; none writes into a payload. Store replaces the
+// held slices and never writes into them, so a reader may keep using what it
+// loaded. Readers receive an independent copy, paid only when a forked
+// subagent asks for it.
 type MessageSnapshot struct {
 	mu               sync.RWMutex
 	messages         []sdk.Message
@@ -105,24 +107,10 @@ func NewMessageSnapshot(messages []sdk.Message) *MessageSnapshot {
 // backing each message. Runtime-only messages use an empty source ID. Later
 // Store calls preserve IDs only for unchanged messages that remain in order.
 func NewMessageSnapshotWithSources(messages []sdk.Message, sourceMessageIDs []string) *MessageSnapshot {
-	s := &MessageSnapshot{}
-	s.StoreWithSources(messages, sourceMessageIDs)
-	return s
-}
-
-// StoreWithSources replaces the history basis before provider dispatch.
-// Later provider steps use Store to retain only unchanged sources.
-func (s *MessageSnapshot) StoreWithSources(messages []sdk.Message, sourceMessageIDs []string) {
-	if s == nil {
-		return
-	}
 	clean := providerNeutralMessages(messages)
 	sources := make([]string, len(clean))
 	copy(sources, sourceMessageIDs)
-	s.mu.Lock()
-	s.messages = clean
-	s.sourceMessageIDs = sources
-	s.mu.Unlock()
+	return &MessageSnapshot{messages: clean, sourceMessageIDs: sources}
 }
 
 // Store records the messages of the provider attempt about to be dispatched.

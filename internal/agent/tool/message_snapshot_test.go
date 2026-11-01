@@ -165,17 +165,6 @@ func TestMessageSnapshotSourcesFollowProviderNeutralJSON(t *testing.T) {
 			}
 		})
 	}
-
-	t.Run("reseed then store", func(t *testing.T) {
-		snapshot := NewMessageSnapshotWithSources(seed, seedSources)
-		reseed := []sdk.Message{summary, answer, ok}
-		reseedSources := []string{"", "m-answer", "m-ok-2"}
-		snapshot.StoreWithSources(reseed, reseedSources)
-		assertSnapshotEntries(t, snapshot, reseed, reseedSources, "reseed")
-		attempt := []sdk.Message{summary, answer, ok, call}
-		snapshot.Store(attempt)
-		assertSnapshotEntries(t, snapshot, attempt, specSnapshotSources(t, reseed, reseedSources, attempt), "after reseed")
-	})
 }
 
 // TestMessageSnapshotSourcesMatchSpecOnRandomEdits drives random sequences of
