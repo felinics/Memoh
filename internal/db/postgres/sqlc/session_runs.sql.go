@@ -219,7 +219,9 @@ WITH target_session AS MATERIALIZED (
     AND bot.status <> 'deleting'
     AND (bot.runtime_reset_expires_at IS NULL OR bot.runtime_reset_expires_at <= clock_timestamp())
     AND (session.runtime_reset_expires_at IS NULL OR session.runtime_reset_expires_at <= clock_timestamp())
-  FOR UPDATE OF session
+  -- NO KEY UPDATE: rows that reference the session take FOR KEY SHARE on it
+  -- in their foreign key check, and FOR UPDATE would block them.
+  FOR NO KEY UPDATE OF session
 )
 UPDATE session_runs run
 SET owner_id = $1,
@@ -891,12 +893,16 @@ SELECT id
 FROM bots
 WHERE team_id = public.memoh_current_team_id()
   AND id = $1
-FOR UPDATE
+FOR NO KEY UPDATE
 `
 
 // Claim uses a real transaction and a fresh statement after this parent lock.
-// Reset acquisition takes the same lock, so neither can cross the other's
-// committed gate using a statement snapshot captured while waiting.
+// Reset acquisition locks the same row FOR UPDATE, which conflicts with this
+// lock, so neither can cross the other's committed gate using a statement
+// snapshot captured while waiting. NO KEY UPDATE rather than UPDATE: rows that
+// reference the bot take FOR KEY SHARE on it in their foreign key check, which
+// FOR UPDATE blocks. Such an insert may already hold the session row that
+// admission or claim locks next, and the two then deadlocked.
 func (q *Queries) LockBotForSessionRunClaim(ctx context.Context, botID pgtype.UUID) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, lockBotForSessionRunClaim, botID)
 	var id pgtype.UUID
