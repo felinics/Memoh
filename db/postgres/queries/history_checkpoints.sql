@@ -214,11 +214,13 @@ WHERE m.team_id = public.memoh_current_team_id()
 -- rows are never measured, however much history the checkpoint leaves raw.
 -- truncated reports that the budget, not the window, ended the walk: context
 -- rows of the window remain older than the oldest it admitted. Callers load
--- the projection they need by id.
+-- the projection they need by id. Each step selects keys only and measures
+-- the content of the row it took, so a plan that sorts a step instead of
+-- walking the index sorts keys, never decodes every row it passes.
 WITH RECURSIVE history_window AS (
   (
     SELECT m.id, m.turn_position, m.turn_message_seq, m.created_at,
-      octet_length(m.content::text)::bigint AS total_bytes
+      (SELECT octet_length(c.content::text) FROM bot_history_messages c WHERE c.id = m.id)::bigint AS total_bytes
     FROM bot_history_messages m
     WHERE m.team_id = public.memoh_current_team_id()
       AND m.session_id = sqlc.arg(session_id)
@@ -236,11 +238,10 @@ WITH RECURSIVE history_window AS (
   )
   UNION ALL
   SELECT older.id, older.turn_position, older.turn_message_seq, older.created_at,
-    previous.total_bytes + older.content_bytes AS total_bytes
+    previous.total_bytes + (SELECT octet_length(c.content::text) FROM bot_history_messages c WHERE c.id = older.id)::bigint AS total_bytes
   FROM history_window previous
   CROSS JOIN LATERAL (
-    SELECT m.id, m.turn_position, m.turn_message_seq, m.created_at,
-      octet_length(m.content::text)::bigint AS content_bytes
+    SELECT m.id, m.turn_position, m.turn_message_seq, m.created_at
     FROM bot_history_messages m
     WHERE m.team_id = public.memoh_current_team_id()
       AND m.session_id = sqlc.arg(session_id)
