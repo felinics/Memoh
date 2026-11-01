@@ -433,6 +433,25 @@ func TestTelegramResolveAttachmentFailsOnLongRetryAfter(t *testing.T) {
 	}
 }
 
+func TestTelegramResolveAttachmentSkipsGetFileAfterCancel(t *testing.T) {
+	const botToken = "123456:stopped"
+	var calls atomic.Int32
+	adapter := newTelegramFileTestAdapter(t, botToken, func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_, _ = io.WriteString(w, telegramTestFileResult)
+	})
+	cfg := channel.ChannelConfig{ID: "config", Credentials: map[string]any{"bot_token": botToken}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := adapter.ResolveAttachment(ctx, cfg, channel.Attachment{PlatformKey: "f"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ResolveAttachment with a cancelled context = %v, want context.Canceled", err)
+	}
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("getFile calls = %d, want 0", n)
+	}
+}
+
 func TestTelegramResolveAttachmentHoldsSlotUntilBodyIsDone(t *testing.T) {
 	const botToken = "123456:hold"
 	adapter := newTelegramFileTestAdapter(t, botToken, func(w http.ResponseWriter, _ *http.Request) {

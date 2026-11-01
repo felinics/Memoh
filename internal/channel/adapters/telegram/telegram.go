@@ -42,8 +42,9 @@ const (
 	defaultTelegramFileEndpoint     = "https://api.telegram.org/file/bot%s/%s"
 	telegramLongPollTimeout         = 30 * time.Second
 	// telegramFileConcurrency caps the attachment downloads one bot has in
-	// flight, from getFile until the body is read. A backlog dispatches its
-	// updates together, and each resolves its files on its own goroutine.
+	// flight, from getFile until the body is read. Ingest streams the body into
+	// media storage, so a slow store holds a slot longer. A backlog dispatches
+	// its updates together, and each resolves its files on its own goroutine.
 	// Against the real Bot API, 90 distinct photos took 18s at 4, 10s at 8 and
 	// 9s at 16; at 64 downloads began to fail.
 	telegramFileConcurrency = 8
@@ -232,6 +233,11 @@ func (a *TelegramAdapter) fileURL(bot *tele.Bot, filePath string) string {
 // answers 429 and asks for no more than telegramGetFileMaxRetryWait.
 func getFileWithRetry(ctx context.Context, bot *tele.Bot, fileID string) (tele.File, error) {
 	for attempt := 0; ; attempt++ {
+		// FileByID takes no context; a stopped connection must not keep
+		// calling it for its backlog.
+		if err := ctx.Err(); err != nil {
+			return tele.File{}, err
+		}
 		file, err := bot.FileByID(fileID)
 		if err == nil || !isTelegramTooManyRequests(err) || attempt == telegramGetFileRetries {
 			return file, err
