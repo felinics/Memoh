@@ -19,7 +19,6 @@ import (
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/contextview"
-	"github.com/felinics/memoh/internal/messageconv"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/runtimekind"
 )
@@ -844,21 +843,7 @@ func (s *Service) storeDiscussRound(
 func discussMessagesToSDK(messages []turn.DiscussMessage) []sdk.Message {
 	result := make([]sdk.Message, 0, len(messages))
 	for _, m := range messages {
-		if len(m.RawContent) > 0 {
-			// RawContent is the stored content shape (arguments object, output
-			// value, nested annotations); the codec types it for the SDK.
-			msg := messageconv.ModelMessageToSDKMessage(turn.ModelMessage{Role: m.Role, Content: m.RawContent})
-			if msg.Role != "" && len(msg.Content) > 0 {
-				result = append(result, msg)
-				continue
-			}
-		}
-		switch m.Role {
-		case "assistant":
-			result = append(result, sdk.AssistantMessage(m.Content))
-		default:
-			result = append(result, sdk.UserMessage(m.Content))
-		}
+		result = append(result, contextview.DiscussMessageToSDK(m.Role, m.Content, m.RawContent))
 	}
 	return result
 }
@@ -876,27 +861,4 @@ func discussMessagesToTimeline(messages []turn.DiscussMessage) []timeline.Contex
 		}
 	}
 	return result
-}
-
-// injectImagePartsIntoLastUserMessage appends ImageParts to the last user
-// message in msgs so the model receives inline vision input.
-func injectImagePartsIntoLastUserMessage(msgs []sdk.Message, parts []sdk.ImagePart) {
-	if len(parts) == 0 {
-		return
-	}
-	extra := make([]sdk.MessagePart, 0, len(parts))
-	for _, p := range parts {
-		if strings.TrimSpace(p.Image) != "" {
-			extra = append(extra, p)
-		}
-	}
-	if len(extra) == 0 {
-		return
-	}
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == sdk.MessageRoleUser {
-			msgs[i].Content = append(msgs[i].Content, extra...)
-			return
-		}
-	}
 }

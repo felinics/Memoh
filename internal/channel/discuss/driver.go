@@ -83,13 +83,10 @@ type DiscussDriver struct {
 	logger             *slog.Logger
 }
 
-// admissionMaxTokens resolves the effective admission cap; construction
-// without an explicit cap still gets the shared default, never unbounded.
+// admissionMaxTokens is the admission cap; NewDiscussDriver defaults it, so
+// it is never unbounded.
 func (d *DiscussDriver) admissionMaxTokens() int {
-	if d.admissionCapTokens > 0 {
-		return d.admissionCapTokens
-	}
-	return turn.DefaultContextCapTokens
+	return d.admissionCapTokens
 }
 
 type discussSession struct {

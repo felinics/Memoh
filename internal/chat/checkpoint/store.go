@@ -92,9 +92,12 @@ func resolve(ctx context.Context, q dbstore.Queries, row sqlc.BotHistoryCheckpoi
 		}
 		pgIDs = append(pgIDs, pgID)
 	}
-	rows, err := q.ListHistoryCheckpointSummaries(ctx, sqlc.ListHistoryCheckpointSummariesParams{SessionID: row.SessionID, Ids: pgIDs})
-	if err != nil {
-		return Checkpoint{}, fmt.Errorf("load history checkpoint summaries: %w", err)
+	var rows []sqlc.ListHistoryCheckpointSummariesRow
+	if len(pgIDs) > 0 {
+		var err error
+		if rows, err = q.ListHistoryCheckpointSummaries(ctx, sqlc.ListHistoryCheckpointSummariesParams{SessionID: row.SessionID, Ids: pgIDs}); err != nil {
+			return Checkpoint{}, fmt.Errorf("load history checkpoint summaries: %w", err)
+		}
 	}
 	texts := make(map[string]string, len(rows))
 	for _, summary := range rows {
