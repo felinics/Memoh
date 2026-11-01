@@ -175,6 +175,9 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 			slog.Int("estimated_tokens", plan.estimatedTokens))
 
 		plan.command.DiscussRecoveryExhausted = recoveries == maxDiscussRecoveries
+		if cfg.Credentials != nil {
+			plan.command.SessionToken, plan.command.ChatToken = cfg.Credentials(ctx)
+		}
 		finishProcessing := startProcessing(ctx, cfg, plan.command.DiscussAddressed)
 		outcome, started := d.runner.Run(ctx, turnSvc, plan.command, log)
 		finishProcessing(processingCause(outcome, started))

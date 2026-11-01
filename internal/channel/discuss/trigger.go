@@ -63,8 +63,6 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			ReplyTarget:             cfg.ReplyTarget,
 			ConversationType:        cfg.ConversationType,
 			ConversationName:        cfg.ConversationName,
-			SessionToken:            cfg.SessionToken,
-			ChatToken:               cfg.ChatToken,
 			ToolHTTPURL:             cfg.ToolHTTPURL,
 			DiscussMessages:         msgs,
 			DiscussCurrentSources:   currentSources,
