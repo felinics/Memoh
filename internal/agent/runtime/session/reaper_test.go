@@ -487,3 +487,44 @@ func TestReaperTransitionsAreIdempotentAcrossLeaders(t *testing.T) {
 		t.Fatalf("terminal writes = %d, want 1; the repeat must not apply", len(writes))
 	}
 }
+
+// A parked run found by the generation sweep is offered to recovery first;
+// only a run recovery declines is recorded lost.
+func TestReaperOffersStaleGenerationParkedRunsToRecovery(t *testing.T) {
+	t.Parallel()
+	runs := newFakeLedger()
+	runs.InsertClaimed("run-parked", "session-parked", 1, "generation-old")
+	runs.InsertClaimed("run-parked-declined", "session-parked-declined", 2, "generation-old")
+	runs.InsertClaimed("run-running", "session-running", 3, "generation-old")
+	for _, runID := range []string{"run-parked", "run-parked-declined"} {
+		if _, applied, err := runs.SetWaitingDecision(context.Background(), runID, runs.Runs[runID].FencingToken); err != nil || !applied {
+			t.Fatalf("park %s: applied=%v err=%v", runID, applied, err)
+		}
+	}
+	live := newFakeLiveness("generation-new")
+	reaper := newTestReaper(t, runs, live)
+	var offered []LeaseCandidate
+	reaper.SetWaitingDecisionRecoverer(func(_ context.Context, candidate LeaseCandidate) (bool, error) {
+		offered = append(offered, candidate)
+		return candidate.RunID == "run-parked", nil
+	})
+
+	reaper.tick(context.Background())
+
+	if len(offered) != 2 {
+		t.Fatalf("recovery offers = %+v, want both parked runs and nothing else", offered)
+	}
+	for _, candidate := range offered {
+		if candidate.Key.SessionID == "" || candidate.FencingToken != runs.Runs[candidate.RunID].FencingToken {
+			t.Fatalf("recovery offer = %+v, want the run's session and token", candidate)
+		}
+	}
+	if got := runs.State("run-parked"); got != ledger.StateWaitingDecision {
+		t.Fatalf("recovered run = %q, want waiting_decision", got)
+	}
+	for _, runID := range []string{"run-parked-declined", "run-running"} {
+		if got := runs.State(runID); got != ledger.StateLost {
+			t.Fatalf("%s = %q, want lost", runID, got)
+		}
+	}
+}

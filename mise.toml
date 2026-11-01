@@ -187,6 +187,18 @@ go test \
   ./internal/agent/runtime/session/acceptance
 """
 
+[tasks."test:session-runtime:acceptance:single:destructive"]
+description = "Run the isolated decision-restart acceptance against one memory-backend Server"
+env = { MEMOH_SESSION_RUNTIME_ACCEPTANCE = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_REQUIRED = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_MODE = "single", MEMOH_SESSION_RUNTIME_ACCEPTANCE_CRASH = "1" }
+run = """
+go test \
+  -tags=integration \
+  -count=1 \
+  -timeout=5m \
+  -run '^TestSRDEC001DecisionPersistsRunAndTurnAcrossRestart$' \
+  ./internal/agent/runtime/session/acceptance
+"""
+
 [tasks."test:session-runtime:acceptance:cluster"]
 description = "Run the black-box Session Runtime suite against two Servers and isolated Valkey"
 env = { MEMOH_SESSION_RUNTIME_ACCEPTANCE = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_REQUIRED = "1", MEMOH_SESSION_RUNTIME_ACCEPTANCE_MODE = "cluster", MEMOH_SESSION_RUNTIME_ACCEPTANCE_BACKEND_LOSS = "1" }

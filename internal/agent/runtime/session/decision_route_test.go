@@ -99,6 +99,8 @@ type fakeDecisionStore struct {
 	// extraTargets joins target in PendingRuntimeDecisions for multi-decision
 	// recovery cases.
 	extraTargets []DecisionTarget
+	// parked is what ParkedRunMessages rebuilds from persisted history.
+	parked []chatview.UIMessage
 }
 
 func (f *fakeDecisionStore) ResolveRuntimeDecision(context.Context, string, string) (DecisionTarget, error) {
@@ -111,6 +113,12 @@ func (f *fakeDecisionStore) PendingRuntimeDecisions(context.Context, string) ([]
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]DecisionTarget{f.target}, f.extraTargets...), nil
+}
+
+func (f *fakeDecisionStore) ParkedRunMessages(context.Context, ledger.Run) ([]chatview.UIMessage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.parked, nil
 }
 
 func (f *fakeDecisionStore) setStatus(status string) {
