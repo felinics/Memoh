@@ -199,11 +199,15 @@ const bots = computed<BotsBot[]>(() =>
 const currentBot = computed(() =>
   bots.value.find((bot) => bot.id === currentBotId.value) ?? null,
 )
-const currentLabel = computed(() =>
-  currentBot.value
-    ? currentBot.value.display_name || currentBot.value.id || ''
-    : t('chat.selectBot'),
+// A bot can be selected before the list arrives (restored at sign-in), so a
+// selection the list cannot name yet reads as loading, not as "Select a Bot".
+const currentBotPending = computed(() =>
+  !currentBot.value && !!currentBotId.value && isLoading.value,
 )
+const currentLabel = computed(() => {
+  if (currentBot.value) return currentBot.value.display_name || currentBot.value.id || ''
+  return currentBotPending.value ? t('common.loading') : t('chat.selectBot')
+})
 
 function initialsOf(bot: BotsBot): string {
   const name = (bot.display_name || bot.id || '').trim()
@@ -217,9 +221,10 @@ function initialsOf(bot: BotsBot): string {
   return initials || 'B'
 }
 
-const avatarFallback = computed(() =>
-  currentBot.value ? initialsOf(currentBot.value) : 'B',
-)
+const avatarFallback = computed(() => {
+  if (currentBot.value) return initialsOf(currentBot.value)
+  return currentBotPending.value ? '' : 'B'
+})
 
 function handleSelect(bot: BotsBot) {
   if (bot.status === 'error') return
