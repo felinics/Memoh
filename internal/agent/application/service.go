@@ -788,7 +788,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
 	}
 	botInfo, loopDetectionEnabled := s.loadBotRuntimeInfo(ctx, p.BotID)
-	userTimezoneName, userClockLocation := s.resolveTimezone(ctx, p.BotID, p.UserID)
+	timezoneName, clockLocation := s.resolveTimezone(ctx, p.BotID)
 
 	chatID := p.ChatID
 	if chatID == "" {
@@ -884,8 +884,8 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 			CurrentPlatform:   p.CurrentPlatform,
 			ReplyTarget:       strings.TrimSpace(p.ReplyTarget),
 			ConversationType:  strings.TrimSpace(p.ConversationType),
-			Timezone:          userTimezoneName,
-			TimezoneLocation:  userClockLocation,
+			Timezone:          timezoneName,
+			TimezoneLocation:  clockLocation,
 			SessionToken:      p.SessionToken,
 		},
 		Bot:               botInfo,
@@ -1225,8 +1225,9 @@ type RunConfigRequest struct {
 	BotID     string
 	SessionID string
 	// UserID is the account the run acts for. It scopes user settings such as
-	// the timezone in the system prompt, so a resumed run must pass the user
-	// its run was admitted for, not whoever resumed it.
+	// model credentials, so a resumed run must pass the user its run was
+	// admitted for, not whoever resumed it. The timezone is the bot's and does
+	// not depend on it.
 	UserID            string
 	ChannelIdentityID string
 	CurrentPlatform   string

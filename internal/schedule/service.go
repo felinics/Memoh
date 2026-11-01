@@ -865,50 +865,11 @@ func toUUID(id string) pgtype.UUID {
 	return pgID
 }
 
-// resolveBotLocation uses the same timezone priority as agent turns:
-// bot timezone, bot owner timezone, then the system default.
+// resolveBotLocation returns the bot's effective timezone, the same one agent
+// turns state in the system context, so a pattern fires when the agent meant.
 func (s *Service) resolveBotLocation(ctx context.Context, botID pgtype.UUID) *time.Location {
-	if s.queries == nil || !botID.Valid {
-		return s.defaultLocation
-	}
-	row, err := s.queries.GetBotByID(ctx, botID)
-	if err != nil {
-		return s.defaultLocation
-	}
-	if row.Timezone.Valid {
-		tz := strings.TrimSpace(row.Timezone.String)
-		if tz != "" {
-			loc, _, loadErr := memtimezone.Resolve(tz)
-			if loadErr == nil {
-				return loc
-			}
-			s.logger.WarnContext(ctx, "invalid bot timezone for schedule",
-				slog.String("bot_id", botID.String()),
-				slog.String("timezone", tz),
-				slog.Any("error", loadErr),
-			)
-		}
-	}
-
-	if row.OwnerUserID.Valid {
-		owner, ownerErr := s.queries.GetUserByID(ctx, row.OwnerUserID)
-		if ownerErr == nil {
-			tz := strings.TrimSpace(owner.Timezone)
-			if tz != "" {
-				loc, _, loadErr := memtimezone.Resolve(tz)
-				if loadErr == nil {
-					return loc
-				}
-				s.logger.WarnContext(ctx, "invalid bot owner timezone for schedule",
-					slog.String("bot_id", botID.String()),
-					slog.String("user_id", row.OwnerUserID.String()),
-					slog.String("timezone", tz),
-					slog.Any("error", loadErr),
-				)
-			}
-		}
-	}
-	return s.defaultLocation
+	loc, _ := memtimezone.ResolveBot(ctx, s.queries, botID, s.defaultLocation, s.logger)
+	return loc
 }
 
 // locationSchedule wraps a cron.Schedule to evaluate Next() in a specific
