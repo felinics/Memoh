@@ -167,6 +167,13 @@ func (ic *idleCancel) DidFire() bool {
 	return ic.fired
 }
 
+// modelWindow is the silence the watchdog allows a model request.
+func (ic *idleCancel) modelWindow() time.Duration {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	return ic.currentTimeout()
+}
+
 func (ic *idleCancel) currentTimeout() time.Duration {
 	if ic.maxTimeout > 0 && ic.baseTimeout > ic.maxTimeout {
 		return ic.maxTimeout

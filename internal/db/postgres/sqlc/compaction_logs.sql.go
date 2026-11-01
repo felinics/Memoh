@@ -11,320 +11,42 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const backfillCompactionArtifactCoverage = `-- name: BackfillCompactionArtifactCoverage :exec
-UPDATE bot_history_message_compacts
-SET coverage = $1,
-    anchor_start_ms = $2,
-    anchor_end_ms = $3
-WHERE team_id = public.memoh_current_team_id()
-  AND id = $4
-  AND status = 'ok'
-  AND superseded_by IS NULL
-  AND coverage = '[]'::jsonb
-`
-
-type BackfillCompactionArtifactCoverageParams struct {
-	Coverage      []byte      `json:"coverage"`
-	AnchorStartMs int64       `json:"anchor_start_ms"`
-	AnchorEndMs   int64       `json:"anchor_end_ms"`
-	ID            pgtype.UUID `json:"id"`
-}
-
-func (q *Queries) BackfillCompactionArtifactCoverage(ctx context.Context, arg BackfillCompactionArtifactCoverageParams) error {
-	_, err := q.db.Exec(ctx, backfillCompactionArtifactCoverage,
-		arg.Coverage,
-		arg.AnchorStartMs,
-		arg.AnchorEndMs,
-		arg.ID,
-	)
-	return err
-}
-
 const completeCompactionLog = `-- name: CompleteCompactionLog :one
-WITH target_compact AS MATERIALIZED (
-  SELECT compact.id, compact.session_id, compact.team_id
-  FROM bot_history_message_compacts compact
-  WHERE compact.team_id = public.memoh_current_team_id()
-    AND compact.id = $1
-    AND compact.status = 'pending'
-),
-owner_session AS MATERIALIZED (
-  SELECT session.id, session.bot_id, session.compaction_epoch, session.team_id
-  FROM bot_sessions session
-  JOIN target_compact compact
-    ON compact.session_id = session.id
-   AND compact.team_id = session.team_id
-  WHERE session.team_id = public.memoh_current_team_id()
-  FOR UPDATE OF session
-),
-locked_compact AS MATERIALIZED (
-  SELECT compact.id, compact.team_id
-  FROM bot_history_message_compacts compact
-  JOIN target_compact target
-    ON target.id = compact.id
-   AND target.team_id = compact.team_id
-  LEFT JOIN owner_session owner
-    ON owner.id = target.session_id
-   AND owner.team_id = target.team_id
-  WHERE compact.team_id = public.memoh_current_team_id()
-    AND (target.session_id IS NULL OR owner.id IS NOT NULL)
-  FOR UPDATE OF compact
-)
-UPDATE bot_history_message_compacts compact
-SET status = $2,
-    summary = $3,
-    message_count = $4,
-    error_message = $5,
-    usage = $6,
-    model_id = $7,
-    coverage = $8,
-    anchor_start_ms = $9,
-    anchor_end_ms = $10,
-    completed_at = now()
-FROM locked_compact locked
-WHERE compact.team_id = public.memoh_current_team_id()
-  AND compact.team_id = locked.team_id
-  AND compact.id = locked.id
-  AND compact.status = 'pending'
-  AND (
-    $2 <> 'ok'
-    OR (
-      (
-        compact.session_id IS NULL
-        OR EXISTS (
-          SELECT 1
-          FROM owner_session owner
-          WHERE owner.team_id = compact.team_id
-            AND owner.id = compact.session_id
-            AND owner.bot_id = compact.bot_id
-            AND owner.compaction_epoch = compact.compaction_epoch
-        )
-      )
-      AND (
-        SELECT count(*)
-        FROM bot_history_messages source_message
-        WHERE source_message.team_id = compact.team_id
-          AND source_message.compact_id = compact.id
-      ) = $4
-    )
-  )
-RETURNING compact.id, compact.bot_id, compact.session_id, compact.status, compact.summary,
-          compact.message_count, compact.error_message, compact.usage, compact.model_id,
-          compact.artifact_version, compact.coverage, compact.anchor_start_ms, compact.anchor_end_ms,
-          compact.artifact_level, compact.parent_ids, compact.superseded_by, compact.superseded_at,
-          compact.compaction_epoch, compact.started_at, compact.completed_at, compact.team_id
-`
-
-type CompleteCompactionLogParams struct {
-	ID            pgtype.UUID `json:"id"`
-	Status        string      `json:"status"`
-	Summary       string      `json:"summary"`
-	MessageCount  int32       `json:"message_count"`
-	ErrorMessage  string      `json:"error_message"`
-	Usage         []byte      `json:"usage"`
-	ModelID       pgtype.UUID `json:"model_id"`
-	Coverage      []byte      `json:"coverage"`
-	AnchorStartMs int64       `json:"anchor_start_ms"`
-	AnchorEndMs   int64       `json:"anchor_end_ms"`
-}
-
-func (q *Queries) CompleteCompactionLog(ctx context.Context, arg CompleteCompactionLogParams) (BotHistoryMessageCompact, error) {
-	row := q.db.QueryRow(ctx, completeCompactionLog,
-		arg.ID,
-		arg.Status,
-		arg.Summary,
-		arg.MessageCount,
-		arg.ErrorMessage,
-		arg.Usage,
-		arg.ModelID,
-		arg.Coverage,
-		arg.AnchorStartMs,
-		arg.AnchorEndMs,
-	)
-	var i BotHistoryMessageCompact
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.SessionID,
-		&i.Status,
-		&i.Summary,
-		&i.MessageCount,
-		&i.ErrorMessage,
-		&i.Usage,
-		&i.ModelID,
-		&i.ArtifactVersion,
-		&i.Coverage,
-		&i.AnchorStartMs,
-		&i.AnchorEndMs,
-		&i.ArtifactLevel,
-		&i.ParentIds,
-		&i.SupersededBy,
-		&i.SupersededAt,
-		&i.CompactionEpoch,
-		&i.StartedAt,
-		&i.CompletedAt,
-		&i.TeamID,
-	)
-	return i, err
-}
-
-const completeCompactionRollup = `-- name: CompleteCompactionRollup :one
-WITH target_compact AS MATERIALIZED (
-  SELECT compact.id, compact.session_id, compact.team_id
-  FROM bot_history_message_compacts compact
-  WHERE compact.team_id = public.memoh_current_team_id()
-    AND compact.id = $12
-    AND compact.status = 'pending'
-),
-owner_session AS MATERIALIZED (
-  SELECT session.id, session.bot_id, session.compaction_epoch, session.team_id
-  FROM bot_sessions session
-  JOIN target_compact compact
-    ON compact.session_id = session.id
-   AND compact.team_id = session.team_id
-  WHERE session.team_id = public.memoh_current_team_id()
-  FOR UPDATE OF session
-),
-locked_compact AS MATERIALIZED (
-  SELECT compact.id, compact.bot_id, compact.session_id, compact.compaction_epoch, compact.team_id
-  FROM bot_history_message_compacts compact
-  JOIN target_compact target
-    ON target.id = compact.id
-   AND target.team_id = compact.team_id
-  LEFT JOIN owner_session owner
-    ON owner.id = target.session_id
-   AND owner.team_id = target.team_id
-  WHERE compact.team_id = public.memoh_current_team_id()
-    AND (target.session_id IS NULL OR owner.id IS NOT NULL)
-    AND compact.status = 'pending'
-  FOR UPDATE OF compact
-),
-locked_parents AS MATERIALIZED (
-  SELECT parent.id, parent.team_id
-  FROM bot_history_message_compacts parent
-  JOIN locked_compact target
-    ON target.team_id = parent.team_id
-  JOIN owner_session owner
-    ON owner.team_id = target.team_id
-   AND owner.id = target.session_id
-   AND owner.bot_id = target.bot_id
-   AND owner.compaction_epoch = target.compaction_epoch
-  WHERE parent.team_id = public.memoh_current_team_id()
-    AND $1::text = 'ok'
-    AND parent.id = ANY($11::uuid[])
-    AND parent.bot_id = target.bot_id
-    AND parent.session_id = target.session_id
-    AND parent.compaction_epoch = owner.compaction_epoch
-    AND parent.status = 'ok'
-    AND parent.superseded_by IS NULL
-  ORDER BY parent.id
-  FOR UPDATE OF parent
-),
-eligible_completion AS MATERIALIZED (
-  SELECT target.id, target.bot_id, target.session_id, target.compaction_epoch, target.team_id
-  FROM locked_compact target
-  WHERE $1::text <> 'ok'
-     OR (
-       EXISTS (
-         SELECT 1
-         FROM owner_session owner
-         WHERE owner.team_id = target.team_id
-           AND owner.id = target.session_id
-           AND owner.bot_id = target.bot_id
-           AND owner.compaction_epoch = target.compaction_epoch
-       )
-       AND (
-         SELECT count(*)
-         FROM bot_history_messages source_message
-         WHERE source_message.team_id = target.team_id
-           AND source_message.compact_id = target.id
-       ) = $3
-       AND (
-         SELECT count(*)
-         FROM locked_parents
-       ) = CARDINALITY($11::uuid[])
-     )
-),
-superseded_parents AS (
-  UPDATE bot_history_message_compacts parent
-  SET superseded_by = target.id,
-      superseded_at = now()
-  FROM locked_parents locked
-  JOIN eligible_completion target
-    ON target.team_id = locked.team_id
-  WHERE $1::text = 'ok'
-    AND parent.team_id = public.memoh_current_team_id()
-    AND parent.team_id = locked.team_id
-    AND parent.id = locked.id
-    AND parent.bot_id = target.bot_id
-    AND parent.session_id = target.session_id
-    AND parent.compaction_epoch = target.compaction_epoch
-    AND parent.status = 'ok'
-    AND parent.superseded_by IS NULL
-  RETURNING parent.id
-),
-superseded_parent_count AS MATERIALIZED (
-  SELECT count(*) AS value
-  FROM superseded_parents
-)
-UPDATE bot_history_message_compacts compact
+UPDATE bot_history_message_compacts
 SET status = $1,
     summary = $2,
     message_count = $3,
     error_message = $4,
     usage = $5,
     model_id = $6,
-    coverage = $7,
-    anchor_start_ms = $8,
-    anchor_end_ms = $9,
-    artifact_level = $10,
-    parent_ids = $11::uuid[],
     completed_at = now()
-FROM eligible_completion eligible
-CROSS JOIN superseded_parent_count parent_count
-WHERE compact.team_id = public.memoh_current_team_id()
-  AND compact.team_id = eligible.team_id
-  AND compact.id = eligible.id
-  AND compact.status = 'pending'
-  AND (
-    $1::text <> 'ok'
-    OR parent_count.value = CARDINALITY($11::uuid[])
-  )
-RETURNING compact.id, compact.bot_id, compact.session_id, compact.status, compact.summary,
-          compact.message_count, compact.error_message, compact.usage, compact.model_id,
-          compact.artifact_version, compact.coverage, compact.anchor_start_ms, compact.anchor_end_ms,
-          compact.artifact_level, compact.parent_ids, compact.superseded_by, compact.superseded_at,
-          compact.compaction_epoch, compact.started_at, compact.completed_at, compact.team_id
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $7
+  AND status = 'pending'
+RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, team_id
 `
 
-type CompleteCompactionRollupParams struct {
-	Status        string        `json:"status"`
-	Summary       string        `json:"summary"`
-	MessageCount  int32         `json:"message_count"`
-	ErrorMessage  string        `json:"error_message"`
-	Usage         []byte        `json:"usage"`
-	ModelID       pgtype.UUID   `json:"model_id"`
-	Coverage      []byte        `json:"coverage"`
-	AnchorStartMs int64         `json:"anchor_start_ms"`
-	AnchorEndMs   int64         `json:"anchor_end_ms"`
-	Level         int32         `json:"level"`
-	Parents       []pgtype.UUID `json:"parents"`
-	ID            pgtype.UUID   `json:"id"`
+type CompleteCompactionLogParams struct {
+	Status       string      `json:"status"`
+	Summary      string      `json:"summary"`
+	MessageCount int32       `json:"message_count"`
+	ErrorMessage string      `json:"error_message"`
+	Usage        []byte      `json:"usage"`
+	ModelID      pgtype.UUID `json:"model_id"`
+	ID           pgtype.UUID `json:"id"`
 }
 
-func (q *Queries) CompleteCompactionRollup(ctx context.Context, arg CompleteCompactionRollupParams) (BotHistoryMessageCompact, error) {
-	row := q.db.QueryRow(ctx, completeCompactionRollup,
+// Settles a pending pass. A pass that commits does it in the transaction that
+// makes its checkpoint the session's active one; no row comes back for a log
+// that is no longer pending.
+func (q *Queries) CompleteCompactionLog(ctx context.Context, arg CompleteCompactionLogParams) (BotHistoryMessageCompact, error) {
+	row := q.db.QueryRow(ctx, completeCompactionLog,
 		arg.Status,
 		arg.Summary,
 		arg.MessageCount,
 		arg.ErrorMessage,
 		arg.Usage,
 		arg.ModelID,
-		arg.Coverage,
-		arg.AnchorStartMs,
-		arg.AnchorEndMs,
-		arg.Level,
-		arg.Parents,
 		arg.ID,
 	)
 	var i BotHistoryMessageCompact
@@ -338,20 +60,45 @@ func (q *Queries) CompleteCompactionRollup(ctx context.Context, arg CompleteComp
 		&i.ErrorMessage,
 		&i.Usage,
 		&i.ModelID,
-		&i.ArtifactVersion,
-		&i.Coverage,
-		&i.AnchorStartMs,
-		&i.AnchorEndMs,
-		&i.ArtifactLevel,
-		&i.ParentIds,
-		&i.SupersededBy,
-		&i.SupersededAt,
-		&i.CompactionEpoch,
 		&i.StartedAt,
 		&i.CompletedAt,
 		&i.TeamID,
 	)
 	return i, err
+}
+
+const copyCompactionSummary = `-- name: CopyCompactionSummary :one
+INSERT INTO bot_history_message_compacts (
+  bot_id, session_id, team_id, status, summary, message_count, model_id, started_at, completed_at
+)
+SELECT fork.bot_id, fork.id, fork.team_id, 'ok', $1::text, source.message_count,
+  source.model_id, source.started_at, source.completed_at
+FROM bot_history_message_compacts source
+JOIN bot_sessions fork
+  ON fork.team_id = public.memoh_current_team_id()
+ AND fork.id = $2
+ AND fork.bot_id = source.bot_id
+WHERE source.team_id = public.memoh_current_team_id()
+  AND source.id = $3
+  AND source.status = 'ok'
+RETURNING id
+`
+
+type CopyCompactionSummaryParams struct {
+	Summary         string      `json:"summary"`
+	SessionID       pgtype.UUID `json:"session_id"`
+	SourceCompactID pgtype.UUID `json:"source_compact_id"`
+}
+
+// A fork carries a summary of its source as its own: the text the copy gives
+// it, which names the fork's rows where the source's named the source's, the
+// same model, count and timing, and no usage, so the summarizer call that
+// wrote it is counted once.
+func (q *Queries) CopyCompactionSummary(ctx context.Context, arg CopyCompactionSummaryParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, copyCompactionSummary, arg.Summary, arg.SessionID, arg.SourceCompactID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const countCompactionLogsByBot = `-- name: CountCompactionLogsByBot :one
@@ -366,91 +113,24 @@ func (q *Queries) CountCompactionLogsByBot(ctx context.Context, botID pgtype.UUI
 }
 
 const createCompactionLog = `-- name: CreateCompactionLog :one
-WITH owner_session AS MATERIALIZED (
-  SELECT session.id, session.bot_id, session.compaction_epoch, session.team_id
-  FROM bot_sessions session
-  WHERE session.team_id = public.memoh_current_team_id()
-    AND session.id = $2
-    AND session.bot_id = $1
-    AND session.compaction_epoch = $3
-  FOR UPDATE
-)
-INSERT INTO bot_history_message_compacts (bot_id, session_id, compaction_epoch, team_id)
-SELECT $1, owner_session.id, owner_session.compaction_epoch, owner_session.team_id
-FROM owner_session
-RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
-          artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
-          superseded_by, superseded_at, compaction_epoch, started_at, completed_at, team_id
+INSERT INTO bot_history_message_compacts (bot_id, session_id, team_id)
+SELECT session.bot_id, session.id, session.team_id
+FROM bot_sessions session
+WHERE session.team_id = public.memoh_current_team_id()
+  AND session.id = $1
+  AND session.bot_id = $2
+RETURNING id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, team_id
 `
 
 type CreateCompactionLogParams struct {
-	BotID         pgtype.UUID `json:"bot_id"`
-	SessionID     pgtype.UUID `json:"session_id"`
-	ExpectedEpoch int64       `json:"expected_epoch"`
-}
-
-func (q *Queries) CreateCompactionLog(ctx context.Context, arg CreateCompactionLogParams) (BotHistoryMessageCompact, error) {
-	row := q.db.QueryRow(ctx, createCompactionLog, arg.BotID, arg.SessionID, arg.ExpectedEpoch)
-	var i BotHistoryMessageCompact
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.SessionID,
-		&i.Status,
-		&i.Summary,
-		&i.MessageCount,
-		&i.ErrorMessage,
-		&i.Usage,
-		&i.ModelID,
-		&i.ArtifactVersion,
-		&i.Coverage,
-		&i.AnchorStartMs,
-		&i.AnchorEndMs,
-		&i.ArtifactLevel,
-		&i.ParentIds,
-		&i.SupersededBy,
-		&i.SupersededAt,
-		&i.CompactionEpoch,
-		&i.StartedAt,
-		&i.CompletedAt,
-		&i.TeamID,
-	)
-	return i, err
-}
-
-const getActiveCompactionArtifactWithinBytes = `-- name: GetActiveCompactionArtifactWithinBytes :one
-SELECT compact.id, compact.bot_id, compact.session_id, compact.status, compact.summary, compact.message_count, compact.error_message, compact.usage, compact.model_id, compact.artifact_version, compact.coverage, compact.anchor_start_ms, compact.anchor_end_ms, compact.artifact_level, compact.parent_ids, compact.superseded_by, compact.superseded_at, compact.compaction_epoch, compact.started_at, compact.completed_at, compact.team_id
-FROM bot_history_message_compacts compact
-JOIN bot_sessions owner_session
-  ON owner_session.id = compact.session_id
- AND owner_session.bot_id = compact.bot_id
- AND owner_session.team_id = compact.team_id
- AND owner_session.compaction_epoch = compact.compaction_epoch
-WHERE compact.team_id = public.memoh_current_team_id()
-  AND compact.id = $1
-  AND compact.bot_id = $2
-  AND compact.session_id = $3
-  AND compact.status = 'ok'
-  AND compact.superseded_by IS NULL
-  AND compact.superseded_at IS NULL
-  AND octet_length(row_to_json(compact)::text) <= $4::bigint
-`
-
-type GetActiveCompactionArtifactWithinBytesParams struct {
-	ID        pgtype.UUID `json:"id"`
-	BotID     pgtype.UUID `json:"bot_id"`
 	SessionID pgtype.UUID `json:"session_id"`
-	MaxBytes  int64       `json:"max_bytes"`
+	BotID     pgtype.UUID `json:"bot_id"`
 }
 
-// In-run compaction reads only an artifact already rendered by its request.
-func (q *Queries) GetActiveCompactionArtifactWithinBytes(ctx context.Context, arg GetActiveCompactionArtifactWithinBytesParams) (BotHistoryMessageCompact, error) {
-	row := q.db.QueryRow(ctx, getActiveCompactionArtifactWithinBytes,
-		arg.ID,
-		arg.BotID,
-		arg.SessionID,
-		arg.MaxBytes,
-	)
+// A compaction event records each pass here before its summarizer call. The
+// log is pending until the pass commits its summary or fails.
+func (q *Queries) CreateCompactionLog(ctx context.Context, arg CreateCompactionLogParams) (BotHistoryMessageCompact, error) {
+	row := q.db.QueryRow(ctx, createCompactionLog, arg.SessionID, arg.BotID)
 	var i BotHistoryMessageCompact
 	err := row.Scan(
 		&i.ID,
@@ -462,196 +142,15 @@ func (q *Queries) GetActiveCompactionArtifactWithinBytes(ctx context.Context, ar
 		&i.ErrorMessage,
 		&i.Usage,
 		&i.ModelID,
-		&i.ArtifactVersion,
-		&i.Coverage,
-		&i.AnchorStartMs,
-		&i.AnchorEndMs,
-		&i.ArtifactLevel,
-		&i.ParentIds,
-		&i.SupersededBy,
-		&i.SupersededAt,
-		&i.CompactionEpoch,
 		&i.StartedAt,
 		&i.CompletedAt,
 		&i.TeamID,
 	)
 	return i, err
-}
-
-const getCompactionLogByID = `-- name: GetCompactionLogByID :one
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
-       artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
-       superseded_by, superseded_at, compaction_epoch, started_at, completed_at, team_id
-FROM bot_history_message_compacts compact
-WHERE compact.team_id = public.memoh_current_team_id()
-  AND compact.id = $1
-  AND (
-    compact.session_id IS NULL
-    OR EXISTS (
-      SELECT 1
-      FROM bot_sessions owner_session
-      WHERE owner_session.team_id = compact.team_id
-        AND owner_session.id = compact.session_id
-        AND owner_session.bot_id = compact.bot_id
-        AND owner_session.compaction_epoch = compact.compaction_epoch
-    )
-  )
-`
-
-func (q *Queries) GetCompactionLogByID(ctx context.Context, id pgtype.UUID) (BotHistoryMessageCompact, error) {
-	row := q.db.QueryRow(ctx, getCompactionLogByID, id)
-	var i BotHistoryMessageCompact
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.SessionID,
-		&i.Status,
-		&i.Summary,
-		&i.MessageCount,
-		&i.ErrorMessage,
-		&i.Usage,
-		&i.ModelID,
-		&i.ArtifactVersion,
-		&i.Coverage,
-		&i.AnchorStartMs,
-		&i.AnchorEndMs,
-		&i.ArtifactLevel,
-		&i.ParentIds,
-		&i.SupersededBy,
-		&i.SupersededAt,
-		&i.CompactionEpoch,
-		&i.StartedAt,
-		&i.CompletedAt,
-		&i.TeamID,
-	)
-	return i, err
-}
-
-const listCompactionArtifactLineageBySession = `-- name: ListCompactionArtifactLineageBySession :many
-SELECT c.id, c.bot_id, c.session_id, c.status, c.summary, c.message_count, c.error_message, c.usage, c.model_id,
-       c.artifact_version, c.coverage, c.anchor_start_ms, c.anchor_end_ms, c.artifact_level, c.parent_ids,
-       c.superseded_by, c.superseded_at, c.compaction_epoch, c.started_at, c.completed_at, c.team_id
-FROM bot_history_message_compacts c
-JOIN bot_sessions owner_session
-  ON owner_session.id = $1
- AND owner_session.bot_id = c.bot_id
- AND owner_session.team_id = c.team_id
-WHERE c.team_id = public.memoh_current_team_id()
-  AND c.session_id = owner_session.id
-  AND c.compaction_epoch = owner_session.compaction_epoch
-  AND (
-    c.status = 'ok'
-    OR EXISTS (
-      SELECT 1
-      FROM bot_history_message_compacts parent
-      WHERE parent.team_id = c.team_id
-        AND parent.bot_id = owner_session.bot_id
-        AND parent.session_id = owner_session.id
-        AND parent.compaction_epoch = owner_session.compaction_epoch
-        AND parent.status = 'ok'
-        AND parent.superseded_by = c.id
-    )
-  )
-ORDER BY c.anchor_start_ms ASC, c.started_at ASC, c.id ASC
-`
-
-func (q *Queries) ListCompactionArtifactLineageBySession(ctx context.Context, id pgtype.UUID) ([]BotHistoryMessageCompact, error) {
-	rows, err := q.db.Query(ctx, listCompactionArtifactLineageBySession, id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BotHistoryMessageCompact
-	for rows.Next() {
-		var i BotHistoryMessageCompact
-		if err := rows.Scan(
-			&i.ID,
-			&i.BotID,
-			&i.SessionID,
-			&i.Status,
-			&i.Summary,
-			&i.MessageCount,
-			&i.ErrorMessage,
-			&i.Usage,
-			&i.ModelID,
-			&i.ArtifactVersion,
-			&i.Coverage,
-			&i.AnchorStartMs,
-			&i.AnchorEndMs,
-			&i.ArtifactLevel,
-			&i.ParentIds,
-			&i.SupersededBy,
-			&i.SupersededAt,
-			&i.CompactionEpoch,
-			&i.StartedAt,
-			&i.CompletedAt,
-			&i.TeamID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listCompactionArtifactParentIDsBySuccessor = `-- name: ListCompactionArtifactParentIDsBySuccessor :many
-SELECT parent.id
-FROM bot_history_message_compacts parent
-JOIN bot_sessions owner_session
-  ON owner_session.id = $1::uuid
- AND owner_session.bot_id = $2
- AND owner_session.team_id = parent.team_id
-WHERE parent.team_id = public.memoh_current_team_id()
-  AND parent.superseded_by = $3
-  AND parent.bot_id = owner_session.bot_id
-  AND parent.session_id = owner_session.id
-  AND parent.compaction_epoch = owner_session.compaction_epoch
-  AND parent.status = 'ok'
-  AND EXISTS (
-    SELECT 1
-    FROM bot_history_message_compacts successor
-    WHERE successor.team_id = parent.team_id
-      AND successor.id = parent.superseded_by
-      AND successor.bot_id = owner_session.bot_id
-      AND successor.session_id = owner_session.id
-      AND successor.compaction_epoch = owner_session.compaction_epoch
-  )
-ORDER BY parent.id ASC
-`
-
-type ListCompactionArtifactParentIDsBySuccessorParams struct {
-	SessionID   pgtype.UUID `json:"session_id"`
-	BotID       pgtype.UUID `json:"bot_id"`
-	SuccessorID pgtype.UUID `json:"successor_id"`
-}
-
-func (q *Queries) ListCompactionArtifactParentIDsBySuccessor(ctx context.Context, arg ListCompactionArtifactParentIDsBySuccessorParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listCompactionArtifactParentIDsBySuccessor, arg.SessionID, arg.BotID, arg.SuccessorID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []pgtype.UUID
-	for rows.Next() {
-		var id pgtype.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const listCompactionLogsByBot = `-- name: ListCompactionLogsByBot :many
-SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
-       artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
-       superseded_by, superseded_at, compaction_epoch, started_at, completed_at, team_id
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id, started_at, completed_at, team_id
 FROM bot_history_message_compacts
 WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 ORDER BY started_at DESC
@@ -683,15 +182,6 @@ func (q *Queries) ListCompactionLogsByBot(ctx context.Context, arg ListCompactio
 			&i.ErrorMessage,
 			&i.Usage,
 			&i.ModelID,
-			&i.ArtifactVersion,
-			&i.Coverage,
-			&i.AnchorStartMs,
-			&i.AnchorEndMs,
-			&i.ArtifactLevel,
-			&i.ParentIds,
-			&i.SupersededBy,
-			&i.SupersededAt,
-			&i.CompactionEpoch,
 			&i.StartedAt,
 			&i.CompletedAt,
 			&i.TeamID,
@@ -706,7 +196,7 @@ func (q *Queries) ListCompactionLogsByBot(ctx context.Context, arg ListCompactio
 	return items, nil
 }
 
-const releasePendingCompactionClaimsBySession = `-- name: ReleasePendingCompactionClaimsBySession :exec
+const releasePendingCompactionLogsBySession = `-- name: ReleasePendingCompactionLogsBySession :exec
 UPDATE bot_history_message_compacts
 SET status = 'error',
     error_message = 'claimant lost runtime ownership',
@@ -717,15 +207,14 @@ WHERE team_id = public.memoh_current_team_id()
   AND status = 'pending'
 `
 
-type ReleasePendingCompactionClaimsBySessionParams struct {
+type ReleasePendingCompactionLogsBySessionParams struct {
 	BotID     pgtype.UUID `json:"bot_id"`
 	SessionID pgtype.UUID `json:"session_id"`
 }
 
-// A new runtime owner releases the compaction claims its predecessors left
-// pending: their writes are fenced out, so those claims can never commit, and
-// the rows they hold are compaction candidates again.
-func (q *Queries) ReleasePendingCompactionClaimsBySession(ctx context.Context, arg ReleasePendingCompactionClaimsBySessionParams) error {
-	_, err := q.db.Exec(ctx, releasePendingCompactionClaimsBySession, arg.BotID, arg.SessionID)
+// A new runtime owner settles the passes its predecessors left pending: their
+// writes are fenced out, so those passes can never commit.
+func (q *Queries) ReleasePendingCompactionLogsBySession(ctx context.Context, arg ReleasePendingCompactionLogsBySessionParams) error {
+	_, err := q.db.Exec(ctx, releasePendingCompactionLogsBySession, arg.BotID, arg.SessionID)
 	return err
 }

@@ -138,6 +138,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 	var thread stepThread
 	thread.reset(dispatch)
 	commitStep := func(sdkStep int, sr *step.Record) (StepDirective, error) {
+		if sr != nil {
+			sr.InputEstimateTokens = cfg.contextSwitch.observe(sr.Result.Usage)
+		}
 		var dir StepDirective
 		if cfg.OnStepCommitted != nil {
 			stepIndex := sdkStep + cfg.StepIndexOffset
@@ -405,12 +408,34 @@ func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkToo
 	if toolDefErr != nil {
 		return generateDispatch{}, toolDefErr
 	}
-	initialParams := prepareProviderAttempt(ctx, cfg, handoff, systemPrepended, initialProviderMessageCount, 0, providerRefs, &sdk.Request{
-		System: system, Messages: messages, Tools: toolDefs,
+	// The provider-scoped model ID is bound here so every dispatch through the
+	// single-call seam carries a complete request; sdk.Model.Generate/Stream
+	// re-verifies it against the bound model. The first attempt is prepared
+	// on the complete request: a compaction event before the run's first step
+	// forks it as it would be sent.
+	modelIdentifier := ""
+	if cfg.Model != nil {
+		modelIdentifier = cfg.Model.ID
+	}
+	params := sdk.Request{
+		Model:    modelIdentifier,
+		System:   system,
+		Messages: messages,
+		Tools:    toolDefs,
+	}
+	if limits := cfg.GenerationLimits(); limits.Requested {
+		maxTokens := limits.MaxOutputTokens
+		params.MaxTokens = &maxTokens
+	}
+	if key := models.PromptCacheKey(cfg.Model, cfg.PromptCacheTTL, cfg.Identity.SessionID); key != "" {
+		params.PromptCacheKey = &key
+	}
+	models.ApplyReasoningToRequest(&params, models.SDKModelConfig{
+		ClientType:            models.ResolveClientType(cfg.Model),
+		ChatCompletionsCompat: cfg.ChatCompletionsCompat,
+		ReasoningConfig:       cfg.ReasoningConfig,
 	})
-	system = initialParams.System
-	messages = initialParams.Messages
-	toolDefs = initialParams.Tools
+	params = *prepareProviderAttempt(ctx, cfg, handoff, systemPrepended, initialProviderMessageCount, 0, providerRefs, &params)
 	if cfg.BackgroundManager != nil {
 		basePrepare := prepareStep
 		prepareStep = func(p *sdk.Request) *sdk.Request {
@@ -431,23 +456,6 @@ func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkToo
 		}
 	}
 
-	// The provider-scoped model ID is bound here so every dispatch through the
-	// single-call seam carries a complete request; sdk.Model.Generate/Stream
-	// re-verifies it against the bound model.
-	modelIdentifier := ""
-	if cfg.Model != nil {
-		modelIdentifier = cfg.Model.ID
-	}
-	params := sdk.Request{
-		Model:    modelIdentifier,
-		System:   system,
-		Messages: messages,
-		Tools:    toolDefs,
-	}
-	if limits := cfg.GenerationLimits(); limits.Requested {
-		maxTokens := limits.MaxOutputTokens
-		params.MaxTokens = &maxTokens
-	}
 	approvalHandler := cfg.ToolApprovalHandler
 	if a != nil && a.hookService != nil {
 		approvalHandler = a.wrapApprovalHandlerWithHooks(cfg, approvalTools, approvalHandler)
@@ -468,14 +476,6 @@ func (a *Agent) buildGenerateDispatch(ctx context.Context, cfg RunConfig, sdkToo
 		return prepareProviderAttempt(ctx, cfg, handoff, systemPrepended, initialProviderMessageCount, prepareIndex+1, cfg.dynamicInputs.pendingRefs(), p)
 	}
 
-	if key := models.PromptCacheKey(cfg.Model, cfg.PromptCacheTTL, cfg.Identity.SessionID); key != "" {
-		params.PromptCacheKey = &key
-	}
-	models.ApplyReasoningToRequest(&params, models.SDKModelConfig{
-		ClientType:            models.ResolveClientType(cfg.Model),
-		ChatCompletionsCompat: cfg.ChatCompletionsCompat,
-		ReasoningConfig:       cfg.ReasoningConfig,
-	})
 	return generateDispatch{
 		params:              params,
 		execTools:           executableTools,

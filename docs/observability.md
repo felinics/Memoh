@@ -192,6 +192,10 @@ as `host:port/database`. Only the pool statistics come from `otelpgx`; query
 spans still come from `telemetry.PgxTracer`, which never records query
 arguments.
 
+`history.checkpoint.unseen_rows_total` counts rows a committed checkpoint keeps
+by reference that its pass never read: rows that joined its span while the
+summary was written, or that the request's view left out.
+
 Installing a meter provider also turns on the RPC metrics that `otelgrpc`
 records on every gRPC connection in the table above, and the HTTP client
 metrics of libraries instrumented with OpenTelemetry, the Docker client among

@@ -15,12 +15,6 @@ type DiscussCursorStore interface {
 	UpsertDiscussCursor(ctx context.Context, sessionID, scopeKey, routeID, source string, position timeline.DiscussCursorPosition) error
 }
 
-// DiscussArtifactProvider projects the session's active compaction artifacts
-// for timeline composition. Implemented agent-side and injected at assembly.
-type DiscussArtifactProvider interface {
-	ActiveCompactionArtifacts(ctx context.Context, botID, sessionID string) ([]timeline.CompactionArtifact, error)
-}
-
 // DiscussStreamBroadcaster publishes stream events to local UI subscribers.
 // Implemented by local.RouteHub.
 type DiscussStreamBroadcaster interface {
@@ -32,7 +26,7 @@ type DiscussDriverDeps struct {
 	Turn           turn.Service
 	MessageService HistoryReader
 	CursorStore    DiscussCursorStore
-	Artifacts      DiscussArtifactProvider
+	Checkpoints    DiscussCheckpointSource
 	Broadcaster    DiscussStreamBroadcaster
 	Logger         *slog.Logger
 	// AdmissionMaxTokens is the server-wide context admission cap applied
@@ -78,7 +72,7 @@ type DiscussDriver struct {
 	cursor             discussCursorTracker
 	trigger            discussTriggerBuilder
 	runner             discussTurnRunner
-	artifacts          DiscussArtifactProvider
+	checkpoints        DiscussCheckpointSource
 	admissionCapTokens int
 	logger             *slog.Logger
 }
@@ -122,7 +116,7 @@ func NewDiscussDriver(deps DiscussDriverDeps) *DiscussDriver {
 		},
 		cursor:             discussCursorTracker{store: deps.CursorStore},
 		runner:             discussTurnRunner{projector: projector},
-		artifacts:          deps.Artifacts,
+		checkpoints:        deps.Checkpoints,
 		admissionCapTokens: capTokens,
 		logger:             logger,
 	}

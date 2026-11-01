@@ -25,6 +25,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agent/turn"
 	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/chat/checkpoint"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
@@ -243,6 +244,7 @@ func newWSStepHistoryService(t *testing.T, mode wsStepHistoryModel, queries dbst
 	service := fixture.service
 	messages := messagepkg.NewService(service.logger, queries)
 	service.messageService = messages
+	service.checkpoints = checkpoint.NewStore(service.logger, queries)
 	service.streamHTTPClient = &http.Client{Transport: &wsStepHistoryTransport{base: service.streamHTTPClient.Transport, mode: mode}}
 	if mode == wsStepHistoryContextBudget {
 		service.agent = native.New(native.Deps{

@@ -1,22 +1,25 @@
 package compaction
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/chat/checkpoint"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 )
@@ -26,38 +29,37 @@ import (
 type stubModel struct {
 	summary      string
 	finishReason string // defaults to "stop"
-	calls        int
-	prompt       string // decoded text of the captured request messages
-	maxTokens    int    // captured max_tokens of the last request
-	reasoning    int    // output tokens spent on reasoning before the summary text
+	// statuses answer the next calls in turn with an HTTP failure; zero
+	// answers normally.
+	statuses []int
+	calls    int
+	prompt   string // decoded text of the captured request messages
 }
 
 func (s *stubModel) RoundTrip(req *http.Request) (*http.Response, error) {
 	s.calls++
+	if len(s.statuses) > 0 {
+		status := s.statuses[0]
+		s.statuses = s.statuses[1:]
+		if status != 0 {
+			return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"stub failure"}}`)), Header: http.Header{"Content-Type": []string{"application/json"}}}, nil
+		}
+	}
 	if req.Body != nil {
 		body, _ := io.ReadAll(req.Body)
 		s.prompt = decodePromptMessages(body)
-		var limits struct {
-			MaxTokens           int `json:"max_tokens"`
-			MaxCompletionTokens int `json:"max_completion_tokens"`
-		}
-		_ = json.Unmarshal(body, &limits)
-		s.maxTokens = max(limits.MaxTokens, limits.MaxCompletionTokens)
 	}
 	finishReason := s.finishReason
 	if finishReason == "" {
 		finishReason = "stop"
 	}
-	if s.reasoning > 0 && (s.maxTokens-s.reasoning)*4 < len(s.summary) {
-		finishReason = "length"
-	}
-	resp := `{"id":"stub","object":"chat.completion","created":0,"model":"stub",` +
-		`"choices":[{"index":0,"message":{"role":"assistant","content":` + jsonStr(s.summary) + `},"finish_reason":` + jsonStr(finishReason) + `}],` +
-		`"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120}}`
+	// The summarizer streams its answer.
+	resp := `data: {"id":"stub","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":` + jsonStr(s.summary) + `},"finish_reason":null}]}` + "\n\n" +
+		`data: {"id":"stub","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":` + jsonStr(finishReason) + `}],"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120}}` + "\n\ndata: [DONE]\n\n"
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader(resp)),
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 	}, nil
 }
 
@@ -95,63 +97,83 @@ func decodePromptMessages(body []byte) string {
 	return sb.String()
 }
 
+// fakeQueries is one session's history, compaction logs and history
+// checkpoints in memory, read and written as the SQL the compaction engine
+// and the checkpoint store run reads and writes them. What InTx writes rolls
+// back when its callback fails.
 type fakeQueries struct {
-	dbstore.Queries  // embedded interface; unimplemented methods would panic if called
-	uncompacted      []sqlc.ListUncompactedMessagesBySessionRow
-	priorLogs        []sqlc.BotHistoryMessageCompact
-	absorbedRows     map[pgtype.UUID][]sqlc.ListMessagesByCompactIDRow
-	absorbedRowErrs  map[pgtype.UUID]error
-	completeErr      error
-	rollupErr        error
-	listPanic        bool
-	listStarted      chan struct{}
-	listRelease      <-chan struct{}
-	onComplete       func()
-	markedRowCount   *int64
-	createdLogID     pgtype.UUID
-	claims           map[pgtype.UUID]pgtype.UUID
-	logStatuses      map[pgtype.UUID]string
-	parentSuccessors map[pgtype.UUID]pgtype.UUID
+	dbstore.Queries // embedded interface; unimplemented methods would panic if called
 
-	created         bool
-	createArg       sqlc.CreateCompactionLogParams
-	createErr       error
-	markedIDs       []pgtype.UUID
-	markArg         sqlc.MarkMessagesCompactedParams
-	queryCalls      []string
-	completed       sqlc.CompleteCompactionLogParams
-	completeCalls   []sqlc.CompleteCompactionLogParams
-	completeErrors  []error
-	rollupCompleted sqlc.CompleteCompactionRollupParams
-	rollupCalls     []sqlc.CompleteCompactionRollupParams
-	backfills       []sqlc.BackfillCompactionArtifactCoverageParams
+	// history is the session's context rows in history order. A row without
+	// a turn position takes the next one when the fake first reads it.
+	history     []candidateRow
+	logs        map[pgtype.UUID]sqlc.BotHistoryMessageCompact
+	checkpoints map[pgtype.UUID]sqlc.BotHistoryCheckpoint
+	active      pgtype.UUID
+	// folded names the rows the newest checkpoint folds, in history order.
+	folded []pgtype.UUID
+
+	listPanic   bool
+	listStarted chan struct{}
+	listRelease <-chan struct{}
+	onComplete  func()
+	// rewinds records each rewind before a replaced turn asked for.
+	rewinds   []sqlc.RewindHistoryCheckpointBeforeTurnParams
+	completed sqlc.CompleteCompactionLogParams
 }
 
-func (*fakeQueries) ListSessionEventCursors(context.Context, sqlc.ListSessionEventCursorsParams) ([]sqlc.ListSessionEventCursorsRow, error) {
-	return nil, nil
-}
+func (*fakeQueries) SupportsTransactions() bool { return true }
 
-func (f *fakeQueries) BackfillCompactionArtifactCoverage(_ context.Context, arg sqlc.BackfillCompactionArtifactCoverageParams) error {
-	f.backfills = append(f.backfills, arg)
+func (f *fakeQueries) InTx(_ context.Context, fn func(dbstore.Queries) error) error {
+	logs, checkpoints, active, folded := maps.Clone(f.logs), maps.Clone(f.checkpoints), f.active, f.folded
+	if err := fn(f); err != nil {
+		f.logs, f.checkpoints, f.active, f.folded = logs, checkpoints, active, folded
+		return err
+	}
 	return nil
 }
 
-func (f *fakeQueries) CreateCompactionLog(_ context.Context, arg sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
-	f.created = true
-	f.createArg = arg
-	if f.createErr != nil {
-		return sqlc.BotHistoryMessageCompact{}, f.createErr
-	}
-	logID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
-	f.createdLogID = logID
-	if f.logStatuses == nil {
-		f.logStatuses = make(map[pgtype.UUID]string)
-	}
-	f.logStatuses[logID] = "pending"
-	return sqlc.BotHistoryMessageCompact{ID: logID}, nil
+func (*fakeQueries) LockBotForSessionWrite(_ context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	return id, nil
 }
 
-func (f *fakeQueries) ListUncompactedMessagesBySession(_ context.Context, _ pgtype.UUID) ([]sqlc.ListUncompactedMessagesBySessionRow, error) {
+func (f *fakeQueries) RewindHistoryCheckpointBeforeTurn(_ context.Context, arg sqlc.RewindHistoryCheckpointBeforeTurnParams) (bool, error) {
+	f.rewinds = append(f.rewinds, arg)
+	return false, nil
+}
+
+func (f *fakeQueries) CreateCompactionLog(_ context.Context, arg sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
+	log := sqlc.BotHistoryMessageCompact{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}, BotID: arg.BotID, SessionID: arg.SessionID, Status: "pending"}
+	f.putLog(log)
+	return log, nil
+}
+
+func (f *fakeQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
+	if f.onComplete != nil {
+		f.onComplete()
+	}
+	f.completed = arg
+	log := f.logs[arg.ID]
+	log.Status, log.Summary, log.MessageCount, log.ErrorMessage, log.ModelID = arg.Status, arg.Summary, arg.MessageCount, arg.ErrorMessage, arg.ModelID
+	f.putLog(log)
+	return log, nil
+}
+
+func (f *fakeQueries) CountHistoryCheckpointCandidates(_ context.Context, arg sqlc.CountHistoryCheckpointCandidatesParams) (int64, error) {
+	return int64(len(f.candidates(arg.AfterTurnPosition, arg.AfterTurnMessageSeq, arg.KeptIds, arg.BeforeTurnPosition, arg.BeforeTurnMessageSeq))), nil
+}
+
+func (f *fakeQueries) ListHistoryRowsBySources(_ context.Context, arg sqlc.ListHistoryRowsBySourcesParams) ([]sqlc.ListHistoryRowsBySourcesRow, error) {
+	var rows []sqlc.ListHistoryRowsBySourcesRow
+	for _, row := range f.ordered() {
+		if slices.Contains(arg.Ids, row.ID) || row.ExternalMessageID.Valid && slices.Contains(arg.ExternalMessageIds, row.ExternalMessageID.String) {
+			rows = append(rows, sqlc.ListHistoryRowsBySourcesRow{ID: row.ID, SourceMessageID: row.ExternalMessageID, TurnPosition: row.TurnPosition, TurnMessageSeq: row.TurnMessageSeq})
+		}
+	}
+	return rows, nil
+}
+
+func (f *fakeQueries) ListHistoryCheckpointCandidatesWithinBytes(_ context.Context, arg sqlc.ListHistoryCheckpointCandidatesWithinBytesParams) ([]candidateRow, error) {
 	if f.listPanic {
 		panic("boom: injected query panic")
 	}
@@ -161,197 +183,214 @@ func (f *fakeQueries) ListUncompactedMessagesBySession(_ context.Context, _ pgty
 	if f.listRelease != nil {
 		<-f.listRelease
 	}
-	return f.uncompacted, nil
-}
-
-func (f *fakeQueries) MeasureUncompactedMessagesBySession(_ context.Context, _ sqlc.MeasureUncompactedMessagesBySessionParams) (sqlc.MeasureUncompactedMessagesBySessionRow, error) {
-	var bytes int64
-	for _, row := range f.uncompacted {
-		bytes += int64(len(row.Content) + len(row.Metadata) + len(row.Usage) + len(row.DisplayText.String))
-	}
-	count := int64(len(f.uncompacted))
-	if count == 0 && f.listStarted != nil {
-		count = 1
-	}
-	return sqlc.MeasureUncompactedMessagesBySessionRow{CandidateCount: count, CandidateBytes: bytes}, nil
-}
-
-func (f *fakeQueries) ListUncompactedMessagesBySessionWithinBytes(ctx context.Context, _ sqlc.ListUncompactedMessagesBySessionWithinBytesParams) ([]sqlc.ListUncompactedMessagesBySessionWithinBytesRow, error) {
-	legacy, err := f.ListUncompactedMessagesBySession(ctx, pgtype.UUID{})
-	if err != nil {
-		return nil, err
-	}
-	return boundedRowsForTest(legacy), nil
-}
-
-func boundedRowsForTest(rows []sqlc.ListUncompactedMessagesBySessionRow) []sqlc.ListUncompactedMessagesBySessionWithinBytesRow {
-	converted := make([]sqlc.ListUncompactedMessagesBySessionWithinBytesRow, len(rows))
-	var cumulative int64
-	for i, row := range rows {
-		cumulative += payloadBytesForTest(row.Content, row.Metadata, row.Usage, row.DisplayText.String)
-		converted[i] = sqlc.ListUncompactedMessagesBySessionWithinBytesRow{
-			ID: row.ID, BotID: row.BotID, SessionID: row.SessionID,
-			SenderChannelIdentityID: row.SenderChannelIdentityID, SenderUserID: row.SenderUserID,
-			ExternalMessageID: row.ExternalMessageID, SourceReplyToMessageID: row.SourceReplyToMessageID,
-			Role: row.Role, Content: row.Content, Metadata: row.Metadata, Usage: row.Usage,
-			EventID: row.EventID, DisplayText: row.DisplayText, CompactID: row.CompactID, CreatedAt: row.CreatedAt,
-			SenderDisplayName: row.SenderDisplayName, SenderAvatarUrl: row.SenderAvatarUrl,
-			Platform: row.Platform, CompactionEpoch: row.CompactionEpoch,
-			ConversationType: row.ConversationType, ConversationName: row.ConversationName, ReplyTarget: row.ReplyTarget,
-			CandidateCount: int64(len(rows)), CandidateBytes: cumulative, CumulativeBytes: cumulative,
+	candidates := f.candidates(arg.AfterTurnPosition, arg.AfterTurnMessageSeq, arg.KeptIds, arg.BeforeTurnPosition, arg.BeforeTurnMessageSeq)
+	// A read takes whole call groups, a row other than a tool's and the tool
+	// rows after it: every group that ends within the budget, and the group
+	// that crosses it when what it reads past the budget fits a row.
+	group, ends := make([]int, len(candidates)), map[int]int64{}
+	open, total := 0, int64(0)
+	for i, row := range candidates {
+		if row.Role != "tool" {
+			open++
 		}
+		group[i], total = open, total+payloadBytesForTest(row)
+		ends[open] = total
 	}
-	return converted
-}
-
-// payloadBytesForTest measures a row the way the candidate and claimed-row
-// reads do.
-func payloadBytesForTest(content, metadata, usage []byte, displayText string) int64 {
-	return int64(len(content) + len(metadata) + len(usage) + len(displayText))
-}
-
-func (f *fakeQueries) ListMessageAssetsBatch(_ context.Context, _ []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {
-	f.queryCalls = append(f.queryCalls, "assets")
-	return nil, nil
-}
-
-func (f *fakeQueries) ListCompactionArtifactLineageBySession(_ context.Context, _ pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
-	return f.priorLogs, nil
-}
-
-func (f *fakeQueries) GetActiveCompactionArtifactWithinBytes(_ context.Context, arg sqlc.GetActiveCompactionArtifactWithinBytesParams) (sqlc.BotHistoryMessageCompact, error) {
-	for _, row := range f.priorLogs {
-		encoded, _ := json.Marshal(row)
-		if row.ID == arg.ID && !row.SupersededBy.Valid && int64(len(encoded)) <= arg.MaxBytes {
-			return row, nil
-		}
-	}
-	return sqlc.BotHistoryMessageCompact{}, pgx.ErrNoRows
-}
-
-func (f *fakeQueries) ListMessagesByCompactIDWithinBytes(ctx context.Context, arg sqlc.ListMessagesByCompactIDWithinBytesParams) ([]sqlc.ListMessagesByCompactIDWithinBytesRow, error) {
-	rows, err := f.ListMessagesByCompactID(ctx, arg.CompactID)
-	var bounded []sqlc.ListMessagesByCompactIDWithinBytesRow
-	for _, row := range rows {
-		arg.MaxBytes -= payloadBytesForTest(row.Content, row.Metadata, row.Usage, row.DisplayText.String)
-		if arg.MaxBytes < 0 {
+	crossing := -1
+	for i := range candidates {
+		if ends[group[i]] > arg.MaxBytes {
+			crossing = group[i]
 			break
 		}
-		bounded = append(bounded, sqlc.ListMessagesByCompactIDWithinBytesRow(row))
 	}
-	return bounded, err
+	admitted := make([]candidateRow, 0, len(candidates))
+	for i, row := range candidates {
+		if end := ends[group[i]]; end > arg.MaxBytes && (group[i] != crossing || end-arg.MaxBytes > arg.MaxRowBytes) {
+			break
+		}
+		row.CandidateCount = int64(len(candidates))
+		admitted = append(admitted, row)
+	}
+	return admitted, nil
 }
 
-func (f *fakeQueries) ListMessagesByCompactID(_ context.Context, compactID pgtype.UUID) ([]sqlc.ListMessagesByCompactIDRow, error) {
-	if err := f.absorbedRowErrs[compactID]; err != nil {
-		return nil, err
+// candidates are the rows a pass reads: the ones the checkpoint it folds
+// onto keeps and the ones after its position, before the cutoff.
+func (f *fakeQueries) candidates(afterTurn, afterSeq int64, keptIDs []pgtype.UUID, beforeTurn, beforeSeq pgtype.Int8) []candidateRow {
+	after := messagepkg.HistoryPosition{Turn: afterTurn, Seq: afterSeq}
+	var rows []candidateRow
+	for _, row := range f.ordered() {
+		position := rowPosition(row)
+		if !after.Before(position) && !slices.Contains(keptIDs, row.ID) {
+			continue
+		}
+		if beforeTurn.Valid && !position.Before(messagepkg.HistoryPosition{Turn: beforeTurn.Int64, Seq: beforeSeq.Int64}) {
+			continue
+		}
+		rows = append(rows, row)
 	}
-	rows := slices.Clone(f.absorbedRows[compactID])
-	for _, row := range f.uncompacted {
-		if f.claims[row.ID] == compactID {
-			row.CompactID = compactID
-			rows = append(rows, sqlc.ListMessagesByCompactIDRow(row))
+	return rows
+}
+
+// payloadBytesForTest measures a row the way the candidate reads do.
+func payloadBytesForTest(row candidateRow) int64 {
+	return int64(len(row.Content))
+}
+
+// ordered is the session's context rows in history order, every one placed.
+func (f *fakeQueries) ordered() []candidateRow {
+	var last int64
+	for _, row := range f.history {
+		if row.TurnPosition.Valid {
+			last = max(last, row.TurnPosition.Int64)
+		}
+	}
+	for i := range f.history {
+		if !f.history[i].TurnPosition.Valid {
+			last++
+			f.history[i].TurnPosition = pgtype.Int8{Int64: last, Valid: true}
+			f.history[i].TurnMessageSeq = pgtype.Int8{Int64: 1, Valid: true}
+		}
+	}
+	rows := slices.Clone(f.history)
+	slices.SortStableFunc(rows, func(a, b candidateRow) int {
+		return cmp.Or(cmp.Compare(a.TurnPosition.Int64, b.TurnPosition.Int64), cmp.Compare(a.TurnMessageSeq.Int64, b.TurnMessageSeq.Int64))
+	})
+	return rows
+}
+
+func (f *fakeQueries) GetActiveHistoryCheckpoint(ctx context.Context, _ pgtype.UUID) (sqlc.BotHistoryCheckpoint, error) {
+	return f.GetHistoryCheckpoint(ctx, f.active)
+}
+
+func (f *fakeQueries) GetHistoryCheckpoint(_ context.Context, id pgtype.UUID) (sqlc.BotHistoryCheckpoint, error) {
+	row, ok := f.checkpoints[id]
+	if !ok {
+		return sqlc.BotHistoryCheckpoint{}, pgx.ErrNoRows
+	}
+	return row, nil
+}
+
+func (f *fakeQueries) ListHistoryCheckpointSummaries(_ context.Context, arg sqlc.ListHistoryCheckpointSummariesParams) ([]sqlc.ListHistoryCheckpointSummariesRow, error) {
+	var rows []sqlc.ListHistoryCheckpointSummariesRow
+	for _, id := range arg.Ids {
+		if log, ok := f.logs[id]; ok && log.Status == "ok" {
+			rows = append(rows, sqlc.ListHistoryCheckpointSummariesRow{ID: id, Summary: log.Summary})
 		}
 	}
 	return rows, nil
 }
 
-func (f *fakeQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) (int64, error) {
-	f.queryCalls = append(f.queryCalls, "mark")
-	f.markedIDs = append([]pgtype.UUID(nil), arg.MessageIds...)
-	f.markArg = arg
-	f.markArg.MessageIds = append([]pgtype.UUID(nil), arg.MessageIds...)
-	f.markArg.ExpectedCompactIds = append([]pgtype.UUID(nil), arg.ExpectedCompactIds...)
-	if f.claims == nil {
-		f.claims = make(map[pgtype.UUID]pgtype.UUID)
-	}
-	for _, id := range arg.MessageIds {
-		f.claims[id] = arg.CompactID
-	}
-	if f.markedRowCount != nil {
-		return *f.markedRowCount, nil
-	}
-	return int64(len(arg.MessageIds)), nil
-}
-
-func (f *fakeQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
-	f.completeCalls = append(f.completeCalls, arg)
-	if f.onComplete != nil {
-		f.onComplete()
-	}
-	if len(f.completeErrors) > 0 {
-		err := f.completeErrors[0]
-		f.completeErrors = f.completeErrors[1:]
-		if err != nil {
-			return sqlc.BotHistoryMessageCompact{}, err
+func (f *fakeQueries) ListHistoryCheckpointSpanRows(_ context.Context, arg sqlc.ListHistoryCheckpointSpanRowsParams) ([]sqlc.ListHistoryCheckpointSpanRowsRow, error) {
+	after := messagepkg.HistoryPosition{Turn: arg.AfterTurnPosition, Seq: arg.AfterTurnMessageSeq}
+	through := messagepkg.HistoryPosition{Turn: arg.ThroughTurnPosition, Seq: arg.ThroughTurnMessageSeq}
+	var rows []sqlc.ListHistoryCheckpointSpanRowsRow
+	for _, row := range f.ordered() {
+		if position := rowPosition(row); after.Before(position) && !through.Before(position) || slices.Contains(arg.Ids, row.ID) {
+			rows = append(rows, sqlc.ListHistoryCheckpointSpanRowsRow{ID: row.ID, TurnPosition: row.TurnPosition, TurnMessageSeq: row.TurnMessageSeq})
 		}
 	}
-	if f.completeErr != nil {
-		return sqlc.BotHistoryMessageCompact{}, f.completeErr
-	}
-	f.completed = arg
-	if f.logStatuses == nil {
-		f.logStatuses = make(map[pgtype.UUID]string)
-	}
-	f.logStatuses[arg.ID] = arg.Status
-	return sqlc.BotHistoryMessageCompact{ID: arg.ID, Status: arg.Status, Summary: arg.Summary}, nil
+	return rows, nil
 }
 
-func (f *fakeQueries) CompleteCompactionRollup(_ context.Context, arg sqlc.CompleteCompactionRollupParams) (sqlc.BotHistoryMessageCompact, error) {
-	f.rollupCalls = append(f.rollupCalls, arg)
-	if f.rollupErr != nil {
-		return sqlc.BotHistoryMessageCompact{}, f.rollupErr
+func (f *fakeQueries) CreateHistoryCheckpoint(_ context.Context, arg sqlc.CreateHistoryCheckpointParams) (sqlc.BotHistoryCheckpoint, error) {
+	row := sqlc.BotHistoryCheckpoint{
+		ID:             pgtype.UUID{Bytes: uuid.New(), Valid: true},
+		SessionID:      arg.SessionID,
+		ParentID:       arg.ParentID,
+		TurnPosition:   arg.TurnPosition,
+		TurnMessageSeq: arg.TurnMessageSeq,
+		Items:          arg.Items,
+		CreatedAt:      pgtype.Timestamptz{Time: time.Now(), Valid: true},
 	}
-	f.rollupCompleted = arg
-	if f.logStatuses == nil {
-		f.logStatuses = make(map[pgtype.UUID]string)
+	f.putCheckpoint(row)
+	// What the checkpoint folds: the rows after its parent's position through
+	// its own, and the rows its parent keeps, that it does not keep itself.
+	parent := f.checkpoints[row.ParentID]
+	after := messagepkg.HistoryPosition{Turn: parent.TurnPosition, Seq: parent.TurnMessageSeq}
+	through := messagepkg.HistoryPosition{Turn: row.TurnPosition, Seq: row.TurnMessageSeq}
+	parentItems, items := decodeItemsForTest(parent.Items), decodeItemsForTest(row.Items)
+	f.folded = nil
+	for _, h := range f.ordered() {
+		id, position := formatUUID(h.ID), rowPosition(h)
+		inSpan := after.Before(position) && !through.Before(position) || slices.Contains(parentItems, checkpoint.Item{RowID: id})
+		if inSpan && !slices.Contains(items, checkpoint.Item{RowID: id}) {
+			f.folded = append(f.folded, h.ID)
+		}
 	}
-	f.logStatuses[arg.ID] = arg.Status
-	if f.parentSuccessors == nil {
-		f.parentSuccessors = make(map[pgtype.UUID]pgtype.UUID)
+	return row, nil
+}
+
+func (f *fakeQueries) SetHistoryCheckpoint(_ context.Context, arg sqlc.SetHistoryCheckpointParams) (int64, error) {
+	if f.active != arg.ExpectedCheckpointID {
+		return 0, nil
 	}
-	for _, parentID := range arg.Parents {
-		f.parentSuccessors[parentID] = arg.ID
+	f.active = arg.CheckpointID
+	return 1, nil
+}
+
+func (f *fakeQueries) putLog(log sqlc.BotHistoryMessageCompact) {
+	if f.logs == nil {
+		f.logs = make(map[pgtype.UUID]sqlc.BotHistoryMessageCompact)
 	}
-	return sqlc.BotHistoryMessageCompact{ID: arg.ID, Status: arg.Status, Summary: arg.Summary}, nil
+	f.logs[log.ID] = log
+}
+
+func (f *fakeQueries) putCheckpoint(row sqlc.BotHistoryCheckpoint) {
+	if f.checkpoints == nil {
+		f.checkpoints = make(map[pgtype.UUID]sqlc.BotHistoryCheckpoint)
+	}
+	f.checkpoints[row.ID] = row
+}
+
+// hold makes a checkpoint after the active one that holds the summaries, in
+// order, at the start of the history the session lists, and makes it the
+// session's active one.
+func (f *fakeQueries) hold(summaries ...string) sqlc.BotHistoryCheckpoint {
+	items := make([]checkpoint.Item, 0, len(summaries))
+	for _, summary := range summaries {
+		log := sqlc.BotHistoryMessageCompact{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}, Status: "ok", Summary: summary}
+		f.putLog(log)
+		items = append(items, checkpoint.Item{SummaryID: formatUUID(log.ID)})
+	}
+	encoded, _ := json.Marshal(items)
+	row := sqlc.BotHistoryCheckpoint{
+		ID:        pgtype.UUID{Bytes: uuid.New(), Valid: true},
+		ParentID:  f.active,
+		Items:     encoded,
+		CreatedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	}
+	f.putCheckpoint(row)
+	f.active = row.ID
+	return row
+}
+
+// held is what the session's active checkpoint holds.
+func (f *fakeQueries) held() []checkpoint.Item {
+	return decodeItemsForTest(f.checkpoints[f.active].Items)
+}
+
+func decodeItemsForTest(raw []byte) []checkpoint.Item {
+	var items []checkpoint.Item
+	_ = json.Unmarshal(raw, &items)
+	return items
+}
+
+// summaryIDs names the summaries a checkpoint holds, in order.
+func summaryIDs(row sqlc.BotHistoryCheckpoint) []string {
+	var ids []string
+	for _, item := range decodeItemsForTest(row.Items) {
+		if item.SummaryID != "" {
+			ids = append(ids, item.SummaryID)
+		}
+	}
+	return ids
 }
 
 // --- harness ------------------------------------------------------------------
 
 func newMachineryService(q dbstore.Queries) *Service {
 	return NewService(slog.New(slog.DiscardHandler), q)
-}
-
-const (
-	passNoop     = "noop"
-	passOK       = "ok"
-	passProgress = "progress"
-)
-
-// passResult is the outcome of compactOnce: whether a pass committed and
-// left candidates behind, its summary and the rows it folded.
-type passResult struct {
-	Status       string
-	Summary      string
-	MessageCount int
-}
-
-// compactOnce runs one pass of an event on its own.
-func (s *Service) compactOnce(ctx context.Context, cfg TriggerConfig) (passResult, error) {
-	pass, folded, err := s.doCompaction(ctx, db.ParseUUIDOrEmpty(cfg.BotID), db.ParseUUIDOrEmpty(cfg.SessionID), cfg)
-	if err != nil || !folded {
-		return passResult{Status: passNoop}, err
-	}
-	result := passResult{Status: passOK, Summary: pass.Summary}
-	if pass.More {
-		result.Status = passProgress
-	}
-	for _, source := range pass.Covered {
-		if source.Kind == "history" {
-			result.MessageCount++
-		}
-	}
-	return result, nil
 }
 
 func machineryConfig(stub *stubModel, historyBudgetTokens int) TriggerConfig {
@@ -369,337 +408,45 @@ func machineryConfig(stub *stubModel, historyBudgetTokens int) TriggerConfig {
 }
 
 // currentConfig is machineryConfig for a request whose current input is
-// current.
-func currentConfig(stub *stubModel, historyBudgetTokens int, current sqlc.ListUncompactedMessagesBySessionRow) TriggerConfig {
+// current, an anchor.
+func currentConfig(stub *stubModel, historyBudgetTokens int, current candidateRow) TriggerConfig {
 	cfg := machineryConfig(stub, historyBudgetTokens)
-	cfg.ProtectedSources = historySources(current)
+	cfg.Anchors = historySources(current)
 	return cfg
 }
 
-func idSet(ids []pgtype.UUID) map[pgtype.UUID]bool {
-	m := make(map[pgtype.UUID]bool, len(ids))
-	for _, id := range ids {
-		m[id] = true
+func historySources(rows ...candidateRow) []turn.ContextMessageSource {
+	sources := make([]turn.ContextMessageSource, 0, len(rows))
+	for _, row := range rows {
+		sources = append(sources, turn.ContextMessageSource{Kind: "history", ID: row.ID.String()})
 	}
-	return m
+	return sources
 }
 
 // machineryCorpus returns a deterministic session whose oldest portion contains
 // two tool exchanges (one base64-image result, one structured stdout result),
-// plus recent text turns. Indices are returned for precise assertions.
-func machineryCorpus(t *testing.T) []sqlc.ListUncompactedMessagesBySessionRow {
+// plus recent text turns. Rows 3
+// and 9 take more than the verbatim budget a 4000-token history leaves, so a
+// fold that reads up to either keeps none of the rows before it raw.
+func machineryCorpus(t *testing.T) []candidateRow {
 	t.Helper()
 	b64 := strings.Repeat("QUJD", 100) // 400 base64 chars
-	return []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `[{"type":"text","text":"deploy please"}]`, 100),                                                                                          // 0
-		mkRow(t, "assistant", `[{"type":"text","text":"on it"},{"type":"tool-call","toolCallId":"A","toolName":"screenshot","input":{}}]`, 100),                    // 1 call A
-		mkRow(t, "tool", `[{"type":"tool-result","toolCallId":"A","toolName":"screenshot","result":{"mime":"image/png","data":"`+b64+`"}}]`, 100),                  // 2 result A (base64)
-		mkRow(t, "assistant", `[{"type":"text","text":"captured the screen"}]`, 100),                                                                               // 3
-		mkRow(t, "user", `[{"type":"text","text":"now build"}]`, 100),                                                                                              // 4
-		mkRow(t, "assistant", `[{"type":"text","text":"running"},{"type":"tool-call","toolCallId":"B","toolName":"exec_command","input":{"cmd":"make"}}]`, 100),    // 5 call B
-		mkRow(t, "tool", `[{"type":"tool-result","toolCallId":"B","toolName":"exec_command","result":{"exit_code":0,"stdout":"build ok done","stderr":""}}]`, 100), // 6 result B (structured)
-		mkRow(t, "assistant", `[{"type":"text","text":"build finished"}]`, 100),                                                                                    // 7
-		mkRow(t, "user", `[{"type":"text","text":"recent question"}]`, 100),                                                                                        // 8
-		mkRow(t, "assistant", `[{"type":"text","text":"recent answer"}]`, 100),                                                                                     // 9
+	long := strings.Repeat(" in detail", 500)
+	return []candidateRow{
+		mkRow(t, "user", `[{"type":"text","text":"deploy please`+strings.Repeat(", with the usual checks", 20)+`"}]`),                                         // 0
+		mkRow(t, "assistant", `[{"type":"text","text":"on it"},{"type":"tool-call","toolCallId":"A","toolName":"screenshot","input":{}}]`),                    // 1 call A
+		mkRow(t, "tool", `[{"type":"tool-result","toolCallId":"A","toolName":"screenshot","result":{"mime":"image/png","data":"`+b64+`"}}]`),                  // 2 result A (base64)
+		mkRow(t, "assistant", `[{"type":"text","text":"captured the screen`+long+`"}]`),                                                                       // 3
+		mkRow(t, "user", `[{"type":"text","text":"now build"}]`),                                                                                              // 4
+		mkRow(t, "assistant", `[{"type":"text","text":"running"},{"type":"tool-call","toolCallId":"B","toolName":"exec_command","input":{"cmd":"make"}}]`),    // 5 call B
+		mkRow(t, "tool", `[{"type":"tool-result","toolCallId":"B","toolName":"exec_command","result":{"exit_code":0,"stdout":"build ok done","stderr":""}}]`), // 6 result B (structured)
+		mkRow(t, "assistant", `[{"type":"text","text":"build finished"}]`),                                                                                    // 7
+		mkRow(t, "user", `[{"type":"text","text":"recent question"}]`),                                                                                        // 8
+		mkRow(t, "assistant", `[{"type":"text","text":"recent answer`+long+`"}]`),                                                                             // 9
 	}
 }
 
-// --- tests --------------------------------------------------------------------
-
-// A pass that folds only what precedes an input the request keeps shows that
-// input after the summary, where the request keeps it, not as kept in place.
-func TestDoCompactionShowsAKeptInputAfterTheSummaryItFollows(t *testing.T) {
-	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"old question"`, 100),
-		mkRow(t, "assistant", `"old answer"`, 100),
-		mkRow(t, "user", `"KEPT_INPUT"`, 100),
-		mkRow(t, "assistant", `"LATEST_STEP"`, 100),
-	}
-	q := &fakeQueries{uncompacted: rows}
-	stub := &stubModel{summary: "SUMMARY-OK"}
-	cfg := currentConfig(stub, 450, rows[3])
-	cfg.Anchors = historySources(rows[2])
-	if _, err := newMachineryService(q).compactOnce(context.Background(), cfg); err != nil {
-		t.Fatal(err)
-	}
-	marked := idSet(q.markedIDs)
-	if len(marked) != 2 || !marked[rows[0].ID] || !marked[rows[1].ID] {
-		t.Fatalf("marked %d rows, want the two before the input", len(marked))
-	}
-	_, rendered, _ := strings.Cut(stub.prompt, "<conversation>")
-	conversation, current, _ := strings.Cut(rendered, "<current_request>")
-	if strings.Contains(conversation, "KEPT_INPUT") || !strings.Contains(current, "user: KEPT_INPUT\nassistant: LATEST_STEP") {
-		t.Fatalf("the kept input must read after the summary, before the latest step:\n%s", stub.prompt)
-	}
-}
-
-func TestDoCompactionMarksToolAwareWindowAndRendersCleanPrompt(t *testing.T) {
-	rows := machineryCorpus(t)
-	q := &fakeQueries{uncompacted: rows}
-	stub := &stubModel{summary: "SUMMARY-OK"}
-	svc := newMachineryService(q)
-
-	// Everything before the current input (row 7) is folded, with both tool
-	// exchanges kept whole on the folded side.
-	cfg := machineryConfig(stub, 450)
-	cfg.ProtectedSources = historySources(rows[7])
-	if _, err := svc.compactOnce(context.Background(), cfg); err != nil {
-		t.Fatalf("compact: %v", err)
-	}
-
-	if stub.calls != 1 {
-		t.Fatalf("summarizer called %d times, want 1", stub.calls)
-	}
-	if len(q.markedIDs) != 7 {
-		t.Fatalf("marked %d messages, want 7 (0..6, tool exchange kept whole)", len(q.markedIDs))
-	}
-	marked := idSet(q.markedIDs)
-	for i := 0; i <= 6; i++ {
-		if !marked[rows[i].ID] {
-			t.Fatalf("row %d should be marked compacted", i)
-		}
-	}
-	for i := 7; i <= 9; i++ {
-		if marked[rows[i].ID] {
-			t.Fatalf("row %d (recent) should NOT be marked", i)
-		}
-	}
-	if !marked[rows[6].ID] {
-		t.Fatalf("tool result B must be pulled into the compact set with its call")
-	}
-	if q.completed.Status != "ok" || q.completed.Summary != "SUMMARY-OK" || q.completed.MessageCount != 7 {
-		t.Fatalf("complete log = status=%q summary=%q count=%d", q.completed.Status, q.completed.Summary, q.completed.MessageCount)
-	}
-
-	// The summarizer prompt must carry clean rendered outcomes, no media, no noise.
-	if !strings.Contains(stub.prompt, "build ok done") {
-		t.Fatalf("structured tool outcome missing from prompt:\n%s", stub.prompt)
-	}
-	if !strings.Contains(stub.prompt, `"cmd":"make"`) {
-		t.Fatalf("tool call arguments missing from prompt:\n%s", stub.prompt)
-	}
-	if !strings.Contains(stub.prompt, "[media]") || strings.Contains(stub.prompt, "QUJDQUJDQUJD") {
-		t.Fatalf("base64 image result not scrubbed in prompt")
-	}
-	if strings.Contains(stub.prompt, `{"type":"text"`) || strings.Contains(stub.prompt, `"toolCallId"`) {
-		t.Fatalf("raw JSON-envelope noise leaked into prompt:\n%s", stub.prompt)
-	}
-}
-
-// TestDoCompactionFailsClosedWhenEntryFloorsExceedBudget drives one
-// unsplittable tool exchange larger than the summarizer can read: sending it
-// anyway would overflow the summarizer window, so the attempt must fail
-// closed with zero claims and zero provider calls.
-func TestDoCompactionFailsClosedWhenEntryFloorsExceedBudget(t *testing.T) {
-	const fanout = 40
-	callParts := make([]string, 0, fanout)
-	for i := 0; i < fanout; i++ {
-		callParts = append(callParts, fmt.Sprintf(`{"type":"tool-call","toolCallId":"c%d","toolName":"probe","input":{}}`, i))
-	}
-	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "assistant", "["+strings.Join(callParts, ",")+"]", 100),
-	}
-	for i := 0; i < fanout; i++ {
-		rows = append(rows, mkRow(t, "tool", fmt.Sprintf(`[{"type":"tool-result","toolCallId":"c%d","toolName":"probe","output":{"type":"text","value":"ok"}}]`, i), 100))
-	}
-	rows = append(rows, mkRow(t, "user", `[{"type":"text","text":"recent question"}]`, 100))
-
-	q := &fakeQueries{uncompacted: rows}
-	stub := &stubModel{summary: "SUMMARY-OK"}
-	svc := newMachineryService(q)
-
-	cfg := machineryConfig(stub, 100)
-	cfg.SummaryWindowTokens = 1000
-
-	_, err := svc.compactOnce(context.Background(), cfg)
-	if !errors.Is(err, errCompactionInputOverflow) {
-		t.Fatalf("compact error = %v, want errCompactionInputOverflow", err)
-	}
-	if stub.calls != 0 {
-		t.Fatalf("summarizer calls = %d, want 0: an oversized selection must not reach the provider", stub.calls)
-	}
-	if q.created {
-		t.Fatal("attempt row was created: fail closed before claiming sources")
-	}
-	if len(q.markedIDs) != 0 {
-		t.Fatalf("marked rows = %v, want none", q.markedIDs)
-	}
-}
-
-func TestDoCompactionAllEmptyWindowSkipsModelAndMarking(t *testing.T) {
-	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "assistant", `[{"type":"reasoning","text":"thinking a"}]`, 100),
-		mkRow(t, "assistant", `[{"type":"reasoning","text":"thinking b"}]`, 100),
-		mkRow(t, "assistant", `[{"type":"text","text":"recent kept"}]`, 100),
-	}
-	q := &fakeQueries{uncompacted: rows}
-	stub := &stubModel{summary: "unused"}
-	svc := newMachineryService(q)
-
-	cfg := machineryConfig(stub, 150)
-	cfg.ProtectedSources = historySources(rows[2])
-	if _, err := svc.compactOnce(context.Background(), cfg); err != nil {
-		t.Fatalf("compact: %v", err)
-	}
-	if stub.calls != 0 {
-		t.Fatalf("summarizer should not be called for an all-empty window (calls=%d)", stub.calls)
-	}
-	if len(q.markedIDs) != 0 {
-		t.Fatalf("nothing should be marked for an all-empty window (marked=%d)", len(q.markedIDs))
-	}
-	if q.created {
-		t.Fatal("a no-op compaction must not create a log row")
-	}
-}
-
-func TestDoCompactionCoversToolExchangeWhoseResultRendersEmpty(t *testing.T) {
-	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		toolCallRow(t, 100),
-		mkRow(t, "tool", `[]`, 100),
-		mkRow(t, "assistant", `[{"type":"text","text":"recent kept"}]`, 100),
-	}
-	q := &fakeQueries{uncompacted: rows}
-	stub := &stubModel{summary: "unused"}
-	svc := newMachineryService(q)
-
-	cfg := machineryConfig(stub, 150)
-	cfg.ProtectedSources = historySources(rows[2])
-	if _, err := svc.compactOnce(context.Background(), cfg); err != nil {
-		t.Fatalf("compact: %v", err)
-	}
-	if stub.calls != 1 || len(q.markedIDs) != 2 || q.markedIDs[0] != rows[0].ID || q.markedIDs[1] != rows[1].ID {
-		t.Fatalf("calls=%d marked=%d, want the call and its empty result covered together", stub.calls, len(q.markedIDs))
-	}
-}
-
-func TestDoCompactionCoversEmptyMiddleRowWithItsNeighbours(t *testing.T) {
-	// Window: an empty-rendering reasoning row sits between two rendered rows.
-	// All three are marked under one compact_id, so the range stays contiguous
-	// and the read path replaces it in place.
-	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `[{"type":"text","text":"old question about a long-running project with plenty of detail to summarize"}]`, 100), // 0
-		mkRow(t, "assistant", `[{"type":"reasoning","text":"thinking"}]`, 100),                                                           // 1 renders empty
-		mkRow(t, "assistant", `[{"type":"text","text":"old answer covering the whole project state in enough words to compress"}]`, 100), // 2
-		mkRow(t, "user", `[{"type":"text","text":"recent question"}]`, 100),                                                              // 3 kept
-		mkRow(t, "assistant", `[{"type":"text","text":"recent answer"}]`, 100),                                                           // 4 kept
-	}
-	q := &fakeQueries{uncompacted: rows}
-	stub := &stubModel{summary: "SUMMARY"}
-	svc := newMachineryService(q)
-
-	cfg := machineryConfig(stub, 250)
-	cfg.ProtectedSources = historySources(rows[3])
-	if _, err := svc.compactOnce(context.Background(), cfg); err != nil {
-		t.Fatalf("compact: %v", err)
-	}
-	if len(q.markedIDs) != 3 || q.markedIDs[0] != rows[0].ID || q.markedIDs[1] != rows[1].ID || q.markedIDs[2] != rows[2].ID {
-		t.Fatalf("marked = %d ids, want rows 0-2 as one contiguous run", len(q.markedIDs))
-	}
-	if q.completed.Status != "ok" || q.completed.MessageCount != 3 {
-		t.Fatalf("complete log = status=%q count=%d, want ok/3", q.completed.Status, q.completed.MessageCount)
-	}
-}
-
-func TestDoCompactionEmptyHistoryNoOp(t *testing.T) {
-	q := &fakeQueries{}
-	stub := &stubModel{summary: "unused"}
-	svc := newMachineryService(q)
-
-	if _, err := svc.compactOnce(context.Background(), machineryConfig(stub, 100)); err != nil {
-		t.Fatalf("compact: %v", err)
-	}
-	if stub.calls != 0 || len(q.markedIDs) != 0 {
-		t.Fatalf("empty history must be a no-op (calls=%d marked=%d)", stub.calls, len(q.markedIDs))
-	}
-	if q.created {
-		t.Fatal("empty history must not create a log row")
-	}
-}
-
-// failingModel refuses every request with an answer the summarizer does not
-// retry, so each compaction attempt makes exactly one call.
-type failingModel struct{ calls int }
-
-func (f *failingModel) RoundTrip(*http.Request) (*http.Response, error) {
-	f.calls++
-	return &http.Response{
-		StatusCode: http.StatusBadRequest,
-		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"boom"}}`)),
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-	}, nil
-}
-
-// rateLimitedOnce answers the first request with a rate limit and passes the
-// rest to the stub.
-type rateLimitedOnce struct {
-	stub  *stubModel
-	calls int
-}
-
-func (r *rateLimitedOnce) RoundTrip(req *http.Request) (*http.Response, error) {
-	r.calls++
-	if r.calls == 1 {
-		return &http.Response{
-			StatusCode: http.StatusTooManyRequests,
-			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"slow down","type":"rate_limit_error"}}`)),
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-		}, nil
-	}
-	return r.stub.RoundTrip(req)
-}
-
-// A summarizer call the provider rate-limits is made again, and the pass
-// completes with the retried call's summary.
-func TestDoCompactionRetriesRateLimitedSummarizerCall(t *testing.T) {
-	t.Parallel()
-
-	q := &fakeQueries{uncompacted: machineryCorpus(t)}
-	stub := &stubModel{summary: "SUMMARY-RETRIED"}
-	transport := &rateLimitedOnce{stub: stub}
-	cfg := machineryConfig(stub, 450)
-	cfg.HTTPClient = &http.Client{Transport: transport}
-
-	res, err := newMachineryService(q).compactOnce(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("compact: %v", err)
-	}
-	if transport.calls != 2 || res.Status != passOK || res.Summary != "SUMMARY-RETRIED" {
-		t.Fatalf("result = %+v after %d calls, want the retried summary after 2", res, transport.calls)
-	}
-}
-
-func TestDoCompactionSummarizerFailureRecordsErrorWithReclaimableClaims(t *testing.T) {
-	rows := machineryCorpus(t)
-	q := &fakeQueries{uncompacted: rows}
-	svc := newMachineryService(q)
-
-	cfg := machineryConfig(&stubModel{}, 450)
-	cfg.HTTPClient = &http.Client{Transport: &failingModel{}}
-
-	if _, err := svc.compactOnce(context.Background(), cfg); err == nil {
-		t.Fatal("summarizer failure must surface an error")
-	}
-	if len(q.markedIDs) == 0 {
-		t.Fatal("a real attempt must claim its selected sources before summarization")
-	}
-	if !q.created || q.completed.Status != "error" {
-		t.Fatalf("a failed attempt must leave an error log row (created=%v status=%q)", q.created, q.completed.Status)
-	}
-}
-
-func TestDoCompactionEmptySummaryRecordsErrorWithReclaimableClaims(t *testing.T) {
-	rows := machineryCorpus(t)
-	q := &fakeQueries{uncompacted: rows}
-	stub := &stubModel{summary: "   "}
-	svc := newMachineryService(q)
-
-	if _, err := svc.compactOnce(context.Background(), machineryConfig(stub, 450)); err == nil {
-		t.Fatal("an empty summary must surface an error")
-	}
-	if len(q.markedIDs) == 0 {
-		t.Fatal("a real attempt must claim its selected sources before summarization")
-	}
-	if !q.created || q.completed.Status != "error" {
-		t.Fatalf("an empty summary must leave an error log row (created=%v status=%q)", q.created, q.completed.Status)
-	}
+// rowPosition is where a row stands in the session's history.
+func rowPosition(row candidateRow) messagepkg.HistoryPosition {
+	return messagepkg.HistoryPosition{Turn: row.TurnPosition.Int64, Seq: row.TurnMessageSeq.Int64}
 }

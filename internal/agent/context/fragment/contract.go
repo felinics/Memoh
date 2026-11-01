@@ -105,15 +105,6 @@ func ValidateSchemaVersions(versions []SchemaVersion) error {
 	return nil
 }
 
-func NewSummaryCoverage(summaryRef ContextRef, coveredRefs []ContextRef) SummaryCoverage {
-	return SummaryCoverage{
-		CoverageID:  "coverage:" + summaryRef.StableKey(),
-		SummaryRef:  summaryRef,
-		CoveredRefs: coveredRefs,
-		Schema:      SchemaVersion{Name: SchemaSummaryCoverage, Version: CurrentSchemaVersion},
-	}
-}
-
 func (edit ContextEdit) Targets(ref ContextRef) bool {
 	for _, got := range edit.Refs {
 		if got.EqualIdentity(ref) {
@@ -243,7 +234,6 @@ func DefaultSchemaVersions() []SchemaVersion {
 		{Name: SchemaContextFrag, Version: CurrentSchemaVersion},
 		{Name: SchemaContextRef, Version: CurrentSchemaVersion},
 		{Name: SchemaContextEdit, Version: CurrentSchemaVersion},
-		{Name: SchemaSummaryCoverage, Version: CurrentSchemaVersion},
 		{Name: SchemaRenderPolicy, Version: CurrentSchemaVersion},
 	}
 }
@@ -277,7 +267,7 @@ func normalizeRefDurability(durability RefDurability) RefDurability {
 
 func knownSchemaName(name string) bool {
 	switch name {
-	case SchemaContextManifest, SchemaContextFrag, SchemaContextRef, SchemaContextEdit, SchemaSummaryCoverage, SchemaRenderPolicy:
+	case SchemaContextManifest, SchemaContextFrag, SchemaContextRef, SchemaContextEdit, SchemaRenderPolicy:
 		return true
 	default:
 		return false

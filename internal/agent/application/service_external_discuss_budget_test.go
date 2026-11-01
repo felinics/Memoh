@@ -22,7 +22,7 @@ import (
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
-type externalDiscussQueries struct{ *recoveryHistoryQueries }
+type externalDiscussQueries struct{ *controllerQueries }
 
 func (*externalDiscussQueries) GetBotByID(_ context.Context, id pgtype.UUID) (sqlc.GetBotByIDRow, error) {
 	return sqlc.GetBotByIDRow{ID: id}, nil
@@ -56,7 +56,7 @@ func TestExternalDiscussAdmissionIncludesRuntimeContext(t *testing.T) {
 	service := &Service{}
 	service.SetContextAbsoluteMaxTokens(1000)
 	messages := externalDiscuss(100)
-	messages[0] = turn.DiscussMessage{Role: "user", Content: "old summary", CompactionArtifactID: "summary"}
+	messages[0] = turn.DiscussMessage{Role: "user", Content: "old summary", CompactionArtifactID: "summary", Pinned: true}
 	sections := buildRuntimeContextSections(runtimeContextRenderInput{})
 	markdown, _, _ := runtimeContextViaContextView(t.Context(), nil, sections, "")
 	got, err := service.prepareExternalDiscussContext(t.Context(), ChatRequest{discussMessages: messages}, markdown, 0)
@@ -139,7 +139,7 @@ func externalResumeService(t *testing.T) (*Service, *recordingACPPrompter, *resu
 	service.SetContextAbsoluteMaxTokens(1000)
 	saved := &resumeSaveQueries{}
 	policy, _ := newControllerPolicyService(t)
-	service.queries = externalResumeQueries{externalDiscussQueries: &externalDiscussQueries{&recoveryHistoryQueries{policy.queries.(*controllerQueries)}}, saved: saved}
+	service.queries = externalResumeQueries{externalDiscussQueries: &externalDiscussQueries{policy.queries.(*controllerQueries)}, saved: saved}
 	service.resumeSecret = "resume-test-secret"
 	ctx := runtimefence.WithContext(t.Context(), runtimefence.Fence{BotID: lifecycleTestBotID, SessionID: lifecycleTestSessionID, Token: 7})
 	return service, pool, saved, ctx
