@@ -3,6 +3,7 @@ package compaction
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -534,6 +535,40 @@ func TestCutGroupCutsUntilNoPartCanBeShorter(t *testing.T) {
 	}
 	if _, ok := cutGroup(group, cutAt(256)-1); ok {
 		t.Fatal("a cap below the shortest cut was met")
+	}
+}
+
+// A cut keeps a group's reasoning as the request carries it: a provider that
+// signs reasoning takes a tool loop back only with its reasoning unchanged.
+// The reasoning is priced before the parts a cut shortens, and a group whose
+// reasoning alone is over the cap does not fit.
+func TestCutGroupKeepsReasoningWhole(t *testing.T) {
+	t.Parallel()
+	thought := sdk.ReasoningPart{ID: "rs_1", Text: "THOUGHT " + strings.Repeat("why ", 400), Format: "anthropic", Model: "claude-sonnet-5", ProviderMetadata: sdk.ProviderMetadata{"anthropic": {"signature": "sig"}}}
+	group := []sdk.Message{
+		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
+			thought,
+			sdk.ToolCallPart{ToolCallID: "call_1", ToolName: "read", Input: sdk.ParseToolArguments(`{}`)},
+		}},
+		{Role: sdk.MessageRoleTool, Content: []sdk.MessagePart{
+			sdk.ToolResultPart{ToolCallID: "call_1", ToolName: "read", Result: sdk.TextOutput("RESULT_HEAD " + strings.Repeat("r", 200000))},
+		}},
+	}
+	reasoningTokens := forkTokens(sdk.Request{Messages: []sdk.Message{{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{thought}}}})
+	capTokens := reasoningTokens + 2000
+
+	read, ok := cutGroup(group, capTokens)
+	if tokens := forkTokens(sdk.Request{Messages: read}); !ok || tokens > capTokens {
+		t.Fatalf("cut=%v to %d tokens, want the group cut within %d", ok, tokens, capTokens)
+	}
+	if got, ok := read[0].Content[0].(sdk.ReasoningPart); !ok || !reflect.DeepEqual(got, thought) {
+		t.Fatalf("the cut changed the reasoning: %#v", read[0].Content[0])
+	}
+	if result := read[1].Content[0].(sdk.ToolResultPart); !strings.Contains(result.Result.String(), "RESULT_HEAD") || len(result.Result.String()) >= 200000 {
+		t.Fatalf("the result was not cut to its head and tail: %d bytes", len(result.Result.String()))
+	}
+	if _, ok := cutGroup(group, reasoningTokens); ok {
+		t.Fatal("a group whose reasoning alone fills the cap was cut to fit")
 	}
 }
 

@@ -77,21 +77,38 @@ func forkGroupCap(ev Event) int {
 // messages, the arguments of the calls they make and the results they carry
 // keep their head and tail, and the media they carry are named instead of
 // sent. Every such part of the group shares one byte budget (partShare), so a
-// message of many parts takes more of it than a message of few. Roles, calls
-// and results stay, so the fork pairs them the way the request does. The cut
-// is measured the way the fork is priced, so content that grows when it is
-// encoded keeps less of itself until the group fits, or until no part can be
-// cut shorter, when it reports false.
+// message of many parts takes more of it than a message of few. Roles, calls,
+// results and reasoning stay, so the fork pairs them the way the request does
+// and a provider that requires a tool loop's reasoning back gets it; the
+// reasoning, which a cut cannot shorten, is priced out of the budget first.
+// The cut is measured the way the fork is priced, so content that grows when
+// it is encoded keeps less of itself until the group fits, or until no part
+// can be cut shorter, when it reports false.
 func cutGroup(group []sdk.Message, capTokens int) ([]sdk.Message, bool) {
 	var sizes []int
+	var reasoning []sdk.Message
 	for _, message := range group {
+		kept := sdk.Message{Role: message.Role}
 		for _, part := range message.Content {
 			if size, ok := partBytes(part); ok {
 				sizes = append(sizes, size)
 			}
+			if _, ok := part.(sdk.ReasoningPart); ok {
+				kept.Content = append(kept.Content, part)
+			}
+		}
+		if len(kept.Content) > 0 {
+			reasoning = append(reasoning, kept)
 		}
 	}
-	budget := int(contextfrag.ProviderBudgetBytesForTokens(capTokens))
+	room := capTokens
+	if len(reasoning) > 0 {
+		room -= forkTokens(sdk.Request{Messages: reasoning})
+	}
+	if room <= 0 {
+		return nil, false
+	}
+	budget := int(contextfrag.ProviderBudgetBytesForTokens(room))
 	for shortest := math.MaxInt; ; {
 		// A quarter of the budget is left for the parts' envelopes and the
 		// markers the cut adds.
@@ -141,8 +158,9 @@ func partShare(sizes []int, budget int) int {
 }
 
 // cutParts keeps each part of message within limit: its text, the arguments
-// of its calls and its results keep their head and tail, its reasoning is
-// left out, and the media of a message other than a tool's are named.
+// of its calls and its results keep their head and tail, its reasoning stays
+// whole, as a provider that signs it accepts it only unchanged, and the media
+// of a message other than a tool's are named.
 func cutParts(message sdk.Message, limit contextlimit.ToolOutputLimit) sdk.Message {
 	cut := message
 	cut.Content = make([]sdk.MessagePart, 0, len(message.Content))
@@ -157,9 +175,6 @@ func cutParts(message sdk.Message, limit contextlimit.ToolOutputLimit) sdk.Messa
 		case sdk.ToolCallPart:
 			p.Input = cutArguments(p.Input, limit)
 			cut.Content = append(cut.Content, p)
-		case sdk.ReasoningPart:
-			// A summary stands for what was said and done, not how it was
-			// reasoned.
 		case sdk.ImagePart, sdk.FilePart:
 			if message.Role != sdk.MessageRoleTool {
 				cut.Content = append(cut.Content, sdk.TextPart{Text: "[media]"})

@@ -107,7 +107,8 @@ window's bound is the group's: a group larger than what the window leaves one
 group beside the system prompt, tools, the longest summary, the instruction
 and the least output reaches the summarizer by the head and tail of its larger
 parts, the text, call arguments and results of all its messages, an equal
-share each of what the smaller ones leave. No group is too large to fold; the
+share each of what the smaller ones leave; its reasoning stays whole, as a
+provider that signs reasoning takes a tool loop back only with it unchanged. No group is too large to fold; the
 rows keep the whole messages, which `get_messages` reads back, so a folded row
 is one its summary stands for, read whole or in part.
 
