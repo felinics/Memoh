@@ -2,15 +2,11 @@ package application
 
 import (
 	"context"
-	"errors"
-	"log/slog"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	"github.com/felinics/memoh/internal/agentcredential"
-	"github.com/felinics/memoh/internal/apperror"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -19,9 +15,16 @@ import (
 
 type preferenceCatalogDriver struct {
 	external.Driver
+	runtime      string
 	catalog      external.ModelCatalog
 	calls        *int
 	projectPaths *[]string
+}
+
+func (d preferenceCatalogDriver) RuntimeType() string { return d.runtime }
+
+func (preferenceCatalogDriver) Caps() external.Caps {
+	return external.Caps{}
 }
 
 func (d preferenceCatalogDriver) ModelCatalog(_ context.Context, request external.ModelCatalogRequest) (external.ModelCatalog, error) {
@@ -35,13 +38,13 @@ func (d preferenceCatalogDriver) ModelCatalog(_ context.Context, request externa
 }
 
 func TestDirectModelPreferenceSurvivesServiceRestart(t *testing.T) {
-	for _, runtimeType := range []string{session.RuntimeCodex, session.RuntimeClaudeCode, string(runtimekind.GrokBuild)} {
+	for _, runtimeType := range []string{string(runtimekind.Codex), string(runtimekind.ClaudeCode), string(runtimekind.GrokBuild)} {
 		t.Run(runtimeType, func(t *testing.T) {
 			const sid = "00000000-0000-0000-0000-000000000610"
 			catalog := external.ModelCatalog{ConfiguredModelID: "default", ConfiguredReasoningEffort: "medium", Models: []external.ModelOption{{ID: "chosen", DefaultReasoningEffort: "medium", ReasoningEfforts: []external.ReasoningEffortOption{{ID: "medium"}, {ID: "high"}}}}}
 			fake := &modelSelectionFakeQueries{}
 			svc := newModelSelectionService(t, fake)
-			svc.externalDrivers = map[string]external.Driver{runtimeType: preferenceCatalogDriver{catalog: catalog}}
+			svc.runtimes = testRuntimes(t, preferenceCatalogDriver{runtime: runtimeType, catalog: catalog})
 			sess := session.Thread{ID: sid, BotID: "bot", RuntimeType: runtimeType}
 			req, err := svc.applyDirectModelPreference(context.Background(), ChatRequest{BotID: "bot", Model: "chosen", ReasoningEffort: "high"}, sess)
 			if err != nil {
@@ -61,6 +64,7 @@ func TestDirectModelPreferenceSurvivesServiceRestart(t *testing.T) {
 			sess.PreferredExternalModelID = stored.PreferredExternalModelID.String
 			sess.PreferredReasoningEffort = stored.PreferredReasoningEffort.String
 			fresh := newModelSelectionService(t, &modelSelectionFakeQueries{})
+			fresh.runtimes = testRuntimes(t, preferenceCatalogDriver{runtime: runtimeType, catalog: catalog})
 			resumed, err := fresh.applyDirectModelPreference(context.Background(), ChatRequest{BotID: "bot"}, sess)
 			if err != nil || resumed.Model != "chosen" || resumed.ReasoningEffort != "high" {
 				t.Fatalf("resume=%+v err=%v", resumed, err)
@@ -73,10 +77,10 @@ func TestDirectDefaultSelectionReplacesSavedModel(t *testing.T) {
 	for _, tc := range []struct {
 		name, runtime, configured, selected string
 	}{
-		{"Claude configured default", session.RuntimeClaudeCode, "B", "B"},
-		{"Codex configured default", session.RuntimeCodex, "B", "B"},
-		{"Codex advertised default", session.RuntimeCodex, "", "B"},
-		{"Claude opaque default", session.RuntimeClaudeCode, "", "default"},
+		{"Claude configured default", string(runtimekind.ClaudeCode), "B", "B"},
+		{"Codex configured default", string(runtimekind.Codex), "B", "B"},
+		{"Codex advertised default", string(runtimekind.Codex), "", "B"},
+		{"Claude opaque default", string(runtimekind.ClaudeCode), "", "default"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const sid = "00000000-0000-0000-0000-000000000612"
@@ -92,7 +96,7 @@ func TestDirectDefaultSelectionReplacesSavedModel(t *testing.T) {
 			}}
 			svc := newModelSelectionService(t, fake)
 			var projectPaths []string
-			svc.externalDrivers = map[string]external.Driver{tc.runtime: preferenceCatalogDriver{catalog: catalog, projectPaths: &projectPaths}}
+			svc.runtimes = testRuntimes(t, preferenceCatalogDriver{runtime: tc.runtime, catalog: catalog, projectPaths: &projectPaths})
 			// The picker resolves Default to an explicit ID before either the
 			// PATCH or a send. Both entry points must replace the saved A/high.
 			model, effort := tc.selected, "medium"
@@ -119,6 +123,7 @@ func TestDirectDefaultSelectionReplacesSavedModel(t *testing.T) {
 			sess.PreferredExternalModelID = stored.PreferredExternalModelID.String
 			sess.PreferredReasoningEffort = stored.PreferredReasoningEffort.String
 			fresh := newModelSelectionService(t, &modelSelectionFakeQueries{})
+			fresh.runtimes = testRuntimes(t, preferenceCatalogDriver{runtime: tc.runtime, catalog: catalog})
 			resumed, err := fresh.applyDirectModelPreference(context.Background(), ChatRequest{BotID: "bot"}, sess)
 			if err != nil || resumed.Model != model || resumed.ReasoningEffort != effort {
 				t.Fatalf("resume=%+v err=%v", resumed, err)
@@ -158,8 +163,8 @@ func TestDirectModelPreferencePreservesClaudeResolvedModel(t *testing.T) {
 		t.Run("model="+requested, func(t *testing.T) {
 			fake := &modelSelectionFakeQueries{}
 			svc := newModelSelectionService(t, fake)
-			svc.externalDrivers = map[string]external.Driver{session.RuntimeClaudeCode: preferenceCatalogDriver{catalog: catalog}}
-			sess := session.Thread{ID: "00000000-0000-0000-0000-000000000610", BotID: "bot", RuntimeType: session.RuntimeClaudeCode}
+			svc.runtimes = testRuntimes(t, preferenceCatalogDriver{runtime: string(runtimekind.ClaudeCode), catalog: catalog})
+			sess := session.Thread{ID: "00000000-0000-0000-0000-000000000610", BotID: "bot", RuntimeType: string(runtimekind.ClaudeCode)}
 			req, err := svc.applyDirectModelPreference(context.Background(), ChatRequest{BotID: "bot", Model: requested, ReasoningEffort: "high"}, sess)
 			want := requested
 			if want == "" {
@@ -175,93 +180,5 @@ func TestDirectModelPreferencePreservesClaudeResolvedModel(t *testing.T) {
 	}
 	if _, _, err := reconcileDirectPair(catalog, "unknown", "high"); err == nil {
 		t.Fatal("accepted an unadvertised model")
-	}
-}
-
-// A remembered pair repeated on every send must not re-run catalog discovery
-// (Claude Code spawns a CLI for it), but each carried send still advances the
-// revision so a stale picker PATCH cannot overwrite it.
-func TestDirectModelPreferenceRepeatedPairSkipsCatalog(t *testing.T) {
-	catalog := external.ModelCatalog{Models: []external.ModelOption{{ID: "A", DefaultReasoningEffort: "medium", ReasoningEfforts: []external.ReasoningEffortOption{{ID: "medium"}, {ID: "high"}}}}}
-	calls := 0
-	fake := &modelSelectionFakeQueries{}
-	svc := newModelSelectionService(t, fake)
-	svc.externalDrivers = map[string]external.Driver{session.RuntimeCodex: preferenceCatalogDriver{catalog: catalog, calls: &calls}}
-	sess := session.Thread{ID: "00000000-0000-0000-0000-000000000610", BotID: "bot", RuntimeType: session.RuntimeCodex, PreferredExternalModelID: "A", PreferredReasoningEffort: "high"}
-
-	req, err := svc.applyDirectModelPreference(context.Background(), ChatRequest{BotID: "bot", Model: "A", ReasoningEffort: "high"}, sess)
-	if err != nil || req.Model != "A" || req.ReasoningEffort != "high" {
-		t.Fatalf("request=%+v err=%v", req, err)
-	}
-	if calls != 0 {
-		t.Fatalf("unchanged pair re-ran catalog discovery %d time(s)", calls)
-	}
-	if len(fake.updatedPrefs) != 1 {
-		t.Fatalf("revision must still advance on a carried send: %+v", fake.updatedPrefs)
-	}
-
-	// A changed component goes back through the catalog.
-	req, err = svc.applyDirectModelPreference(context.Background(), ChatRequest{BotID: "bot", Model: "A", ReasoningEffort: "medium"}, sess)
-	if err != nil || req.ReasoningEffort != "medium" {
-		t.Fatalf("request=%+v err=%v", req, err)
-	}
-	if calls != 1 {
-		t.Fatalf("changed pair skipped catalog discovery (calls=%d)", calls)
-	}
-}
-
-// A failed write-back must not break the turn (#879): same best-effort
-// contract as the native writeBackSessionModelPreference. The request pair
-// still applies to the in-flight turn; the next send retries the persist.
-func TestDirectModelPreferenceWriteFailureDoesNotBreakTurn(t *testing.T) {
-	catalog := external.ModelCatalog{ConfiguredModelID: "A", ConfiguredReasoningEffort: "medium", Models: []external.ModelOption{{ID: "A", DefaultReasoningEffort: "medium", ReasoningEfforts: []external.ReasoningEffortOption{{ID: "medium"}, {ID: "high"}}}}}
-	fake := &modelSelectionFakeQueries{updatePrefErr: errors.New("db down")}
-	svc := newModelSelectionService(t, fake)
-	svc.logger = slog.New(slog.DiscardHandler)
-	svc.externalDrivers = map[string]external.Driver{session.RuntimeClaudeCode: preferenceCatalogDriver{catalog: catalog}}
-	sess := session.Thread{ID: "00000000-0000-0000-0000-000000000611", BotID: "bot", RuntimeType: session.RuntimeClaudeCode, PreferredExternalModelID: "previous", PreferredReasoningEffort: "medium"}
-	req, err := svc.applyDirectModelPreference(context.Background(), ChatRequest{BotID: "bot", Model: "A", ReasoningEffort: "high"}, sess)
-	if err != nil {
-		t.Fatalf("write-back failure broke the turn: %v", err)
-	}
-	if req.Model != "A" || req.ReasoningEffort != "high" {
-		t.Fatalf("request=%+v", req)
-	}
-}
-
-type failingCatalogDriver struct {
-	external.Driver
-	err error
-}
-
-func (d failingCatalogDriver) ModelCatalog(context.Context, external.ModelCatalogRequest) (external.ModelCatalog, error) {
-	return external.ModelCatalog{}, d.err
-}
-
-// A runtime failure while reading the model catalog reaches the caller with
-// its public code; other errors are left for the caller to answer.
-func TestDirectModelPreferenceAnswersCatalogFailures(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		err  error
-		code apperror.Code
-	}{
-		{"auth required", external.Fail(external.FailureAuthRequired, external.ErrAuthRequired), apperror.CodeExternalRuntimeAuthRequired},
-		{"credential revoked", external.CredentialError(agentcredential.ErrRevoked), apperror.CodeAgentCredentialRevoked},
-		{"runtime unavailable", external.Unavailable(errors.New("bridge refused")), apperror.CodeExternalRuntimeUnavailable},
-		{"missing dependency", &external.DependencyMissingError{DependencyID: "codex"}, ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			svc := newModelSelectionService(t, &modelSelectionFakeQueries{})
-			svc.externalDrivers = map[string]external.Driver{session.RuntimeCodex: failingCatalogDriver{err: tc.err}}
-			sess := session.Thread{ID: "00000000-0000-0000-0000-000000000613", BotID: "bot", RuntimeType: session.RuntimeCodex}
-			_, err := svc.applyDirectModelPreference(context.Background(), ChatRequest{BotID: "bot", Model: "chosen"}, sess)
-			if got := apperror.CodeOf(err); got != tc.code {
-				t.Fatalf("code = %q, want %q: %v", got, tc.code, err)
-			}
-			if !errors.Is(apperror.CauseOf(err), tc.err) && !errors.Is(err, tc.err) {
-				t.Fatalf("error lost the runtime failure: %v", err)
-			}
-		})
 	}
 }

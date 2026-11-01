@@ -12,6 +12,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	native "github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func recoveryBudgetFixture() native.RunConfig {
@@ -183,5 +184,27 @@ func TestProviderBudgetRecoveryHonorsCancellation(t *testing.T) {
 	}
 	if _, err := ProviderRunConfigApplier(nil)(ctx, cfg); !errors.Is(err, context.Canceled) {
 		t.Fatalf("recovery cancellation = %v", err)
+	}
+}
+
+// An armed run keeps its whole history over the budget, with no trim notice
+// and no failure: it folds what does not fit before it dispatches. A tool
+// exchange missing its other half is still cut.
+func TestProviderArmedRunKeepsItsHistory(t *testing.T) {
+	cfg := recoveryBudgetFixture()
+	cfg.ContextSourceFrags[1].Budget.Overflow = contextfrag.OverflowDrop
+	orphan := stableHistoryMessageFrag("orphan", sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "gone", ToolName: "exec", Result: toolexec.OutputFromValue("lost")}))
+	cfg.ContextSourceFrags = append(cfg.ContextSourceFrags[:2], orphan, cfg.ContextSourceFrags[2])
+	cfg.SwitchContext = func(context.Context, native.ContextSwitch) (string, error) { return "", nil }
+	got, err := ProviderRunConfigApplier(nil)(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("an armed run over its budget failed before folding: %v", err)
+	}
+	want := []sdk.Message{sdk.AssistantMessage(strings.Repeat("h", 8000)), sdk.UserMessage("continue")}
+	if !reflect.DeepEqual(got.Messages, want) {
+		t.Fatalf("messages = %+v, want the whole history without the orphan result and no trim notice", got.Messages)
+	}
+	if plan := got.ContextManifest.BudgetPlan; plan == nil || plan.HistoryBudget != 998 {
+		t.Fatalf("budget plan = %+v, want the plan the fold sizes against", plan)
 	}
 }

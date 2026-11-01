@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, ref, type App } from 'vue'
-const api = vi.hoisted(() => ({ create: vi.fn(), get: vi.fn(), poll: vi.fn(), exchange: vi.fn(), cancel: vi.fn() }))
+const api = vi.hoisted(() => ({ create: vi.fn(), get: vi.fn(), exchange: vi.fn(), cancel: vi.fn() }))
 vi.mock('@memohai/sdk', () => ({ postAgentAuthorizations: api.create, getAgentAuthorizationsById: api.get,
-  postAgentAuthorizationsByIdPoll: api.poll, postAgentAuthorizationsByIdExchange: api.exchange, deleteAgentAuthorizationsById: api.cancel }))
+  postAgentAuthorizationsByIdExchange: api.exchange, deleteAgentAuthorizationsById: api.cancel }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 import { useAgentAuthorization } from './useAgentAuthorization'
 import type { DirectBotAgentRuntime } from '@/utils/bot-agent'
@@ -11,31 +11,28 @@ let app: App
 let state: ReturnType<typeof useAgentAuthorization>
 const runtime = ref<DirectBotAgentRuntime>('codex')
 const key = 'authorization-test'
-function session(status = 'pending') {
-  return { id: 'session', runtime: 'codex', auth_kind: 'openai_codex_oauth', status,
-    expires_at: new Date(Date.now() + 60_000).toISOString(), interval_seconds: 5,
-    ...(status === 'pending' && { user_code: '123456', verification_url: 'https://auth.openai.com/codex/device' }) }
+function session(status = 'ready') {
+  return { id: 'session', runtime: 'codex', auth_kind: 'openai_api_key', status,
+    expires_at: new Date(Date.now() + 60_000).toISOString() }
 }
 function mount() {
   app = createApp({ setup() { state = useAgentAuthorization(() => runtime.value, key); return () => h('div') } })
   app.mount(document.createElement('div'))
 }
-beforeEach(() => { vi.useFakeTimers(); vi.resetAllMocks(); sessionStorage.clear(); runtime.value = 'codex'; api.cancel.mockResolvedValue({}); api.create.mockResolvedValue({ data: session() }); api.poll.mockResolvedValue({ data: session('ready') }) })
+beforeEach(() => { vi.useFakeTimers(); vi.resetAllMocks(); sessionStorage.clear(); runtime.value = 'codex'; api.cancel.mockResolvedValue({}); api.create.mockResolvedValue({ data: session() }) })
 afterEach(() => { app?.unmount(); vi.useRealTimers() })
-it('does not authorize on selection; polls at the provider interval and only persists an opaque reference', async () => {
+it('does not authorize on selection; only persists an opaque reference and expires it', async () => {
   mount(); expect(api.create).not.toHaveBeenCalled()
-  await state.start('openai_codex_oauth')
-  expect(state.ready.value).toBe(false)
+  await state.start('openai_api_key', 'SECRET-key')
+  expect(state.ready.value).toBe(true)
   expect(JSON.parse(sessionStorage.getItem(key)!)).toEqual({ id: 'session', runtime: 'codex' })
-  await vi.advanceTimersByTimeAsync(4999); expect(api.poll).not.toHaveBeenCalled()
-  await vi.advanceTimersByTimeAsync(1); expect(state.ready.value).toBe(true)
   await vi.advanceTimersByTimeAsync(60_000); expect(state.ready.value).toBe(false)
   expect(api.cancel).toHaveBeenCalled()
 })
-it('discards a delayed device-code response after switching Agent', async () => {
+it('discards a delayed response after switching Agent', async () => {
   let finish!: (value: unknown) => void
   api.create.mockReturnValue(new Promise(resolve => { finish = resolve }))
-  mount(); const pending = state.start('openai_codex_oauth')
+  mount(); const pending = state.start('openai_api_key', 'SECRET-key')
   runtime.value = 'claude-code'; await nextTick()
   finish({ data: session() }); await pending
   expect(state.session.value).toBeNull()
@@ -62,7 +59,7 @@ it('clears staged secrets on navigation and never saves an API key in browser st
 
 it('resumes expiry and cleanup when Bot creation fails before leaving onboarding', async () => {
   api.create.mockResolvedValue({ data: session('ready') })
-  mount(); await state.start('openai_codex_oauth')
+  mount(); await state.start('openai_api_key', 'SECRET-key')
   state.handoff(); state.resume()
   expect(sessionStorage.getItem(key)).toContain('session')
   await vi.advanceTimersByTimeAsync(60_000)
@@ -72,12 +69,11 @@ it('resumes expiry and cleanup when Bot creation fails before leaving onboarding
 
 it('waits for the Claude code without polling, permits retry, and stores no code or token', async () => {
   runtime.value = 'claude-code'
-  const pending = { ...session(), runtime: 'claude-code', auth_kind: 'claude_code_oauth', authorization_url: 'https://claude.ai/oauth/authorize?state=test' }
+  const pending = { ...session('pending'), runtime: 'claude-code', auth_kind: 'claude_code_oauth', authorization_url: 'https://claude.ai/oauth/authorize?state=test' }
   api.create.mockResolvedValue({ data: pending })
   api.exchange.mockRejectedValueOnce(new Error('invalid code')).mockResolvedValue({ data: { ...pending, status: 'ready', authorization_url: undefined } })
   mount(); await state.start('claude_code_oauth')
   await vi.advanceTimersByTimeAsync(10_000)
-  expect(api.poll).not.toHaveBeenCalled()
   await state.exchange('bad-code')
   expect(state.pending.value).toBe(true)
   expect(state.error.value).toBeTruthy()
@@ -89,7 +85,7 @@ it('waits for the Claude code without polling, permits retry, and stores no code
 
 it('ignores a late code exchange after cancellation and expires pending Claude sessions', async () => {
   runtime.value = 'claude-code'
-  const pending = { ...session(), runtime: 'claude-code', auth_kind: 'claude_code_oauth', authorization_url: 'https://claude.ai/oauth/authorize' }
+  const pending = { ...session('pending'), runtime: 'claude-code', auth_kind: 'claude_code_oauth', authorization_url: 'https://claude.ai/oauth/authorize' }
   api.create.mockResolvedValue({ data: pending })
   let finish!: (value: unknown) => void
   api.exchange.mockReturnValue(new Promise(resolve => { finish = resolve }))

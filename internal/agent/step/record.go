@@ -38,4 +38,8 @@ type Record struct {
 	// completing; the tool calls stay unexecuted and the step carries no tool
 	// messages.
 	Deferred *toolexec.ToolApprovalResult
+	// InputEstimateTokens is what the run's estimate priced the request this
+	// step sent at, beside the input tokens the provider counted for it in
+	// Result.Usage; zero when the run kept no estimate.
+	InputEstimateTokens int
 }

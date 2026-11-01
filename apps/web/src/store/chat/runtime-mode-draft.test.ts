@@ -1,6 +1,5 @@
 import { ref } from 'vue'
 import { expect, it, vi } from 'vitest'
-import { createACPRuntimeRegistry } from './acp-runtime-registry'
 import { createExternalAgentStaging } from './external-agent-staging'
 import { createExternalAgentOrchestration } from './external-agent-orchestration'
 import { externalAgentSessionMetadata } from './external-agent-sessions'
@@ -9,18 +8,17 @@ import type { ChatViewTarget } from './types'
 function setup() {
   const currentBotId = ref<string | null>('bot-1')
   const sessionId = ref<string | null>(null)
-  const runtimeRegistry = createACPRuntimeRegistry({ currentBotId, sessionId })
   const staging = createExternalAgentStaging({
-    currentBotId, sessionId, runtimeRegistry,
+    currentBotId, sessionId,
     draftIntent: ref(true), explicitSessionSelection: ref(true),
-    bumpSelectSessionRequest: vi.fn(), clearTranscriptForDraft: vi.fn(),
+    bumpSelectSessionRequest: vi.fn(), clearTranscriptForDraft: vi.fn(), draftFolderPathFor: () => '',
   })
   const first: ChatViewTarget = { botId: 'bot-1', sessionId: null, viewId: 'first' }
   const second = { ...first, viewId: 'second' }
   const drafts = createExternalAgentOrchestration({
-    staging, runtimeRegistry,
+    staging,
     normalizeTarget: target => ({ ...first, ...target }),
-    invalidateDraftCommand: vi.fn(), forgetDraftCommand: vi.fn(), resetWorkspaceTargetSelection: vi.fn(),
+    invalidateDraftCommand: vi.fn(), resetWorkspaceTargetSelection: vi.fn(),
   })
   const input = { agentId: 'codex', botAgentId: 'agent-1', runtime: 'codex' as const }
   drafts.stageNewExternalAgentSession(input, first)

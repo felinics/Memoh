@@ -3,8 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
-	"time"
 
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
@@ -20,11 +20,11 @@ func TestPostgresDiscussAnswerProvesItsBatchConsumed(t *testing.T) {
 	if code, _ := s.run(entry, loopInput, steps); code != "" || f.summaries.Load() == 0 || len(s.effects) != steps {
 		t.Fatalf("code=%q summaries=%d effects=%v, want the run to fold and answer", code, f.summaries.Load(), s.effects)
 	}
-	sources, err := f.messages.ListTurnResponseSourcesSinceBySessionWithinBytes(f.ctx, f.sessionID, time.Unix(0, 0).UTC(), 1<<24)
+	sources, err := f.messages.ListTurnResponseSourcesWithinBytes(f.ctx, f.sessionID, messagepkg.HistoryPosition{}, 1<<24)
 	if err != nil {
 		t.Fatal(err)
 	}
-	responses := timeline.DecodeTurnResponseEntries(sources)
+	responses := timeline.DecodeTurnResponseEntries(sources.Messages)
 	var anchor int64
 	var answers int
 	for _, response := range responses {
@@ -61,7 +61,7 @@ func TestPostgresDiscussRunFailingAfterAFoldLeavesLaterInputUnconsumed(t *testin
 	}
 	var arrivedCovered bool
 	var toolRows, unmarked int
-	if err := f.pool.QueryRow(f.ctx, `SELECT compact_id IS NOT NULL FROM bot_history_messages WHERE session_id=$1 AND source_message_id=$2`, f.sessionID, s.arrived[0].MessageID).Scan(&arrivedCovered); err != nil {
+	if err := f.pool.QueryRow(f.ctx, `SELECT folded FROM (`+historyRowsSQL+`) h WHERE h.source_message_id=$2`, f.sessionID, s.arrived[0].MessageID).Scan(&arrivedCovered); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FILTER (WHERE role='tool' AND content::text LIKE '%TOOL_RESULT_%'), count(*) FILTER (WHERE metadata->>'discuss_step' IS DISTINCT FROM 'true') FROM bot_history_messages WHERE session_id=$1 AND role IN ('assistant','tool')`, f.sessionID).Scan(&toolRows, &unmarked); err != nil {

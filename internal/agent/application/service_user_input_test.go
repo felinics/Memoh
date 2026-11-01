@@ -547,9 +547,9 @@ func TestRespondUserInputOnlyAcksACPRequests(t *testing.T) {
 	t.Parallel()
 
 	resolved := chatResolvedRequest()
-	resolved.ProviderMetadata = map[string]any{"source": userinput.ProviderSourceACPMCP}
+	resolved.ProviderMetadata = map[string]any{"source": userinput.ProviderSourceMemohTool}
 	fake := &fakeUserInputService{
-		target:        userinput.Request{ID: "input-1", Status: userinput.StatusPending, ProviderMetadata: map[string]any{"source": userinput.ProviderSourceACPMCP}},
+		target:        userinput.Request{ID: "input-1", Status: userinput.StatusPending, ProviderMetadata: map[string]any{"source": userinput.ProviderSourceMemohTool}},
 		resolved:      resolved,
 		canRespond:    true,
 		canRespondSet: true,
@@ -589,7 +589,7 @@ func TestRespondUserInputAcksAlreadyDecidedACPRequest(t *testing.T) {
 		target: userinput.Request{
 			ID:               "input-1",
 			Status:           userinput.StatusPending,
-			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceACPMCP},
+			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceMemohTool},
 		},
 		submitErr:     userinput.ErrAlreadyDecided,
 		canRespond:    true,
@@ -626,12 +626,12 @@ func TestRespondUserInputACPRequestSubmitsWithLiveWaiter(t *testing.T) {
 	t.Parallel()
 
 	resolved := chatResolvedRequest()
-	resolved.ProviderMetadata = map[string]any{"source": userinput.ProviderSourceACPMCP}
+	resolved.ProviderMetadata = map[string]any{"source": userinput.ProviderSourceMemohTool}
 	fake := &fakeUserInputService{
 		target: userinput.Request{
 			ID:               "input-1",
 			Status:           userinput.StatusPending,
-			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceACPMCP},
+			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceMemohTool},
 		},
 		resolved:      resolved,
 		canRespond:    true,
@@ -671,7 +671,7 @@ func TestRespondUserInputACPRequestReattachesActivePrompt(t *testing.T) {
 	t.Parallel()
 
 	resolved := chatResolvedRequest()
-	resolved.ProviderMetadata = map[string]any{"source": userinput.ProviderSourceACPMCP}
+	resolved.ProviderMetadata = map[string]any{"source": userinput.ProviderSourceMemohTool}
 	submitted := make(chan struct{})
 	fake := &fakeUserInputService{
 		target: userinput.Request{
@@ -679,7 +679,7 @@ func TestRespondUserInputACPRequestReattachesActivePrompt(t *testing.T) {
 			SessionID:        "session-1",
 			ToolCallID:       "call-1",
 			Status:           userinput.StatusPending,
-			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceACPMCP},
+			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceMemohTool},
 		},
 		resolved:      resolved,
 		submitHook:    func() { close(submitted) },
@@ -760,13 +760,13 @@ func TestRespondUserInputACPRequestCanSuppressActivePromptReattach(t *testing.T)
 	t.Parallel()
 
 	resolved := chatResolvedRequest()
-	resolved.ProviderMetadata = map[string]any{"source": userinput.ProviderSourceACPMCP}
+	resolved.ProviderMetadata = map[string]any{"source": userinput.ProviderSourceMemohTool}
 	fake := &fakeUserInputService{
 		target: userinput.Request{
 			ID:               "input-1",
 			SessionID:        "session-1",
 			Status:           userinput.StatusPending,
-			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceACPMCP},
+			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceMemohTool},
 		},
 		resolved:      resolved,
 		canRespond:    true,
@@ -809,12 +809,12 @@ func TestRespondUserInputACPRequestWithoutWaiterCancelsInsteadOfSubmitting(t *te
 	t.Parallel()
 
 	resolved := chatResolvedRequest()
-	resolved.ProviderMetadata = map[string]any{"source": userinput.ProviderSourceACPMCP}
+	resolved.ProviderMetadata = map[string]any{"source": userinput.ProviderSourceMemohTool}
 	fake := &fakeUserInputService{
 		target: userinput.Request{
 			ID:               "input-1",
 			Status:           userinput.StatusPending,
-			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceACPMCP},
+			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceMemohTool},
 		},
 		resolved: resolved,
 		// The blocked waiter is gone (process restart, prompt settled).

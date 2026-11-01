@@ -778,7 +778,7 @@ func TestNativeToolSourceAskUserWaitsForInputAndPublishesRequest(t *testing.T) {
 	if userInput.created[0].ToolCallID != "mcp-http-call-1" || userInput.created[0].ToolName != ToolAskUser().String() {
 		t.Fatalf("created input = %#v", userInput.created)
 	}
-	if userInput.created[0].ProviderMetadata["source"] != userinput.ProviderSourceACPMCP || userInput.created[0].ProviderMetadata["runtime_id"] != "runtime-1" {
+	if userInput.created[0].ProviderMetadata["source"] != userinput.ProviderSourceMemohTool || userInput.created[0].ProviderMetadata["runtime_id"] != "runtime-1" {
 		t.Fatalf("provider metadata = %#v", userInput.created[0].ProviderMetadata)
 	}
 	// The pending question must travel over the tool event channel with the
@@ -1139,6 +1139,7 @@ type nativeSourceApproval struct {
 	waitErrs  []error // popped per WaitForDecision call; nil entry -> return decision
 	rejectErr error
 	rejected  []string
+	cancelled []string
 	waitCalls int
 	waiters   int
 }
@@ -1281,6 +1282,11 @@ func (a *nativeSourceApproval) Reject(_ context.Context, approvalID, _, reason s
 		Status:         toolapproval.StatusRejected,
 		DecisionReason: reason,
 	}, nil
+}
+
+func (a *nativeSourceApproval) Cancel(_ context.Context, approvalID, reason string) (toolapproval.Request, error) {
+	a.cancelled = append(a.cancelled, reason)
+	return toolapproval.Request{ID: approvalID, Status: toolapproval.StatusCancelled, DecisionReason: reason}, nil
 }
 
 func (a *nativeSourceApproval) Get(_ context.Context, approvalID string) (toolapproval.Request, error) {

@@ -388,6 +388,33 @@ func decisionResponseIdentity(ctx context.Context) (pgtype.Text, pgtype.Text) {
 		pgtype.Text{String: identity.PayloadHash, Valid: true}
 }
 
+// Cancel closes a pending request nobody will decide any more: the turn that
+// asked for it stopped, or the runtime withdrew the request.
+func (s *Service) Cancel(ctx context.Context, approvalID, reason string) (Request, error) {
+	id, err := db.ParseUUID(approvalID)
+	if err != nil {
+		return Request{}, err
+	}
+	var row sqlc.ToolApprovalRequest
+	err = s.withRuntimeFence(ctx, "", "", func(queries dbstore.Queries) error {
+		if err := validateToolApprovalFence(ctx, queries, id); err != nil {
+			return err
+		}
+		var cancelErr error
+		row, cancelErr = queries.CancelToolApprovalRequest(ctx, sqlc.CancelToolApprovalRequestParams{
+			ID:                  id,
+			Reason:              strings.TrimSpace(reason),
+			RuntimeFencingToken: runtimeFencingToken(ctx),
+		})
+		return cancelErr
+	})
+	req, err := s.resolveAndNotify(ctx, approvalID, row, err)
+	if err == nil {
+		_ = s.runApprovalHook(ctx, hooks.EventApprovalResolved, CreatePendingInput{}, req, false)
+	}
+	return req, err
+}
+
 // CancelPendingForSession closes pending approvals that belonged to an ended
 // turn and wakes any in-process waiters.
 func (s *Service) CancelPendingForSession(ctx context.Context, botID, sessionID, reason string) ([]Request, error) {
@@ -659,6 +686,37 @@ func (s *Service) ListBySessionToolCalls(ctx context.Context, botID, sessionID s
 		BotID:       pgBotID,
 		SessionID:   pgSessionID,
 		ToolCallIds: toolCallIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Request, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, requestFromRow(row))
+	}
+	return result, nil
+}
+
+// ListByIDs returns the bot's requests with the given ids, whatever session
+// they belong to. It backs read-only projections of history copied from
+// another session; ids that are not UUIDs are skipped.
+func (s *Service) ListByIDs(ctx context.Context, botID string, ids []string) ([]Request, error) {
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return nil, err
+	}
+	pgIDs := make([]pgtype.UUID, 0, len(ids))
+	for _, id := range normalizeToolCallIDs(ids) {
+		if pgID, err := db.ParseUUID(id); err == nil {
+			pgIDs = append(pgIDs, pgID)
+		}
+	}
+	if len(pgIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := s.queries.ListToolApprovalsByBotIDs(ctx, sqlc.ListToolApprovalsByBotIDsParams{
+		BotID: pgBotID,
+		Ids:   pgIDs,
 	})
 	if err != nil {
 		return nil, err

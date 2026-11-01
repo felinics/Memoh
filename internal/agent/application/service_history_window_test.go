@@ -2,43 +2,33 @@ package application
 
 import (
 	"context"
-	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
-	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
-// Apply the actual time predicate in the fake: these tests fail when a caller
-// reintroduces an age cutoff, rather than merely asserting an argument value.
-type ageFilteredHistory struct {
+// The raw history after the session's checkpoint, whatever its age: a
+// session without one has all of it.
+type idleSessionHistory struct {
 	recordingMessageService
-	rows   []messagepkg.Message
-	budget int64
-	since  time.Time
+	rows      []messagepkg.Message
+	truncated bool
+	after     messagepkg.HistoryPosition
+	budget    int64
 }
 
-func (h *ageFilteredHistory) selectSince(since time.Time, budget int64) []messagepkg.Message {
-	h.since, h.budget = since, budget
-	var rows []messagepkg.Message
-	for _, row := range h.rows {
-		if !row.CreatedAt.Before(since) {
-			rows = append(rows, row)
-		}
-	}
-	return rows
+func (h *idleSessionHistory) ListHistoryWithinBytes(_ context.Context, _ string, window messagepkg.HistoryWindow) (messagepkg.HistoryLoad, error) {
+	h.after, h.budget = window.After, window.MaxBytes
+	return messagepkg.HistoryLoad{Messages: append([]messagepkg.Message(nil), h.rows...), Truncated: h.truncated}, nil
 }
 
-func (h *ageFilteredHistory) ListActiveSinceBySessionWithinBytes(_ context.Context, _ string, since time.Time, budget int64, _ bool) ([]messagepkg.Message, error) {
-	return h.selectSince(since, budget), nil
-}
-
-func (h *ageFilteredHistory) ListTurnResponseSourcesSinceBySessionWithinBytes(_ context.Context, _ string, since time.Time, budget int64) ([]messagepkg.Message, error) {
-	return h.selectSince(since, budget), nil
+func (h *idleSessionHistory) ListTurnResponseSourcesWithinBytes(_ context.Context, _ string, after messagepkg.HistoryPosition, budget int64) (messagepkg.HistoryLoad, error) {
+	h.after, h.budget = after, budget
+	return messagepkg.HistoryLoad{Messages: append([]messagepkg.Message(nil), h.rows...)}, nil
 }
 
 func TestSessionHistorySurvivesIdleDays(t *testing.T) {
@@ -46,9 +36,9 @@ func TestSessionHistorySurvivesIdleDays(t *testing.T) {
 	user := persistedHistoryMessage(t, "old-user", "user", "project codeword BLUE_WHALE")
 	answer := persistedHistoryMessage(t, "old-answer", "assistant", "confirmed BLUE_WHALE")
 	user.CreatedAt, answer.CreatedAt = old, old.Add(time.Second)
-	source := &ageFilteredHistory{rows: []messagepkg.Message{user, answer}}
-	svc := &Service{messageService: source, logger: slog.New(slog.DiscardHandler)}
-	req := ChatRequest{BotID: "bot", ThreadID: "thread", Query: "what was the codeword?"}
+	source := &idleSessionHistory{rows: []messagepkg.Message{user, answer}}
+	svc := checkpointTestService(source, &historyCheckpointQueries{})
+	req := ChatRequest{BotID: "bot", ThreadID: lifecycleTestSessionID, Query: "what was the codeword?"}
 	prepared, err := svc.prepareHistoryContext(context.Background(), req, historyfrag.ScopeFallback{}, 1000)
 	if err != nil {
 		t.Fatal(err)
@@ -56,10 +46,10 @@ func TestSessionHistorySurvivesIdleDays(t *testing.T) {
 	if len(prepared.messages) != 2 || !strings.Contains(prepared.messages[0].TextContent(), "BLUE_WHALE") {
 		t.Fatalf("idle session lost raw history: %#v", prepared.messages)
 	}
-	if source.budget != svc.historyLoadMaxBytes(1000) {
-		t.Fatal("record path lost its byte budget")
+	if source.after != (messagepkg.HistoryPosition{}) || source.budget != svc.historyLoadMaxBytes(1000) {
+		t.Fatalf("record path read after %+v within %d bytes, want the whole history within its byte budget", source.after, source.budget)
 	}
-	trs, err := svc.loadTurnResponses(context.Background(), req.ThreadID, 1000)
+	trs, _, err := svc.loadTurnResponses(context.Background(), req.ThreadID, messagepkg.HistoryPosition{}, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,28 +65,19 @@ func TestSessionHistorySurvivesIdleDays(t *testing.T) {
 	}
 }
 
-// Embedded nil interfaces deliberately panic on any storage read. Missing
-// identity must not cause a bot-wide read or infer a session from source rows.
-func TestMissingSessionNeverLoadsHistoryOrSummaries(t *testing.T) {
+// Embedded nil interfaces deliberately panic on any storage read. A request
+// without a session has no history, and never widens the read to the bot.
+func TestMissingSessionNeverLoadsHistory(t *testing.T) {
 	for _, sessionID := range []string{"", "  "} {
-		svc := &Service{messageService: &struct{ messagepkg.Service }{}, queries: &struct{ dbstore.Queries }{}}
+		svc := checkpointTestService(&struct{ messagepkg.Service }{}, &struct{ dbstore.Queries }{})
 		ctx := context.Background()
 		prepared, err := svc.prepareHistoryContext(ctx, ChatRequest{BotID: "bot", ThreadID: sessionID}, historyfrag.ScopeFallback{ChatID: "bot"}, 1000)
 		if err != nil || len(prepared.records) != 0 || len(prepared.messages) != 0 {
 			t.Fatalf("history=%+v err=%v", prepared, err)
 		}
-		records := []historyfrag.HistoryRecord{{SessionID: "other-session", CompactID: "summary"}}
-		got, err := svc.replaceCompactedMessages(ctx, sessionID, contextfrag.Scope{BotID: "bot", SessionID: "other-session"}, records, compactionArtifactBoundary{})
-		if err != nil || len(got) != 0 {
-			t.Fatalf("inferred history=%v err=%v", got, err)
-		}
-		trs, err := svc.loadTurnResponses(ctx, sessionID, 1000)
+		trs, _, err := svc.loadTurnResponses(ctx, sessionID, messagepkg.HistoryPosition{}, 1000)
 		if err != nil || len(trs) != 0 {
 			t.Fatalf("TR=%v err=%v", trs, err)
-		}
-		artifacts, err := svc.loadTimelineArtifacts(ctx, "bot", sessionID)
-		if err != nil || len(artifacts) != 0 {
-			t.Fatalf("artifacts=%v err=%v", artifacts, err)
 		}
 		query := svc.buildMemoryQuery(ctx, ChatRequest{BotID: "bot", ThreadID: sessionID, Query: "current question"})
 		if query.Query != "current question" || query.RecentMessages != 0 {
@@ -105,8 +86,9 @@ func TestMissingSessionNeverLoadsHistoryOrSummaries(t *testing.T) {
 	}
 }
 
-// Failed assistant rows can be the retry cutoff. Resolve that boundary before
-// filtering empty error rows, or a valid retry silently loses its prior history.
+// A failed turn's empty assistant row can be the retry cutoff. The cut is
+// placed at that row before the load, so the cleanup that drops empty error
+// rows afterwards can neither lose the prior history nor let later rows in.
 func TestRetryEmptyFailureKeepsPriorHistoryAndExcludesLaterRows(t *testing.T) {
 	old := time.Now().Add(-72 * time.Hour)
 	prior := persistedHistoryMessage(t, "prior", "user", "retain PRIOR_CODEWORD")
@@ -121,8 +103,8 @@ func TestRetryEmptyFailureKeepsPriorHistoryAndExcludesLaterRows(t *testing.T) {
 	cutoff.Metadata = map[string]any{messagepkg.HistoryErrorCodeMetadataKey: "context.budget_unsatisfied"}
 	later := persistedHistoryMessage(t, "later", "user", "exclude FUTURE_CODEWORD")
 	later.CreatedAt = time.Now()
-	svc := &Service{messageService: &ageFilteredHistory{rows: []messagepkg.Message{prior, earlierFailure, request, cutoff, later}}, logger: slog.New(slog.DiscardHandler)}
-	prepared, err := svc.prepareHistoryContext(t.Context(), ChatRequest{BotID: "bot", ThreadID: "thread", HistoryCutoffBeforeMessageID: cutoff.ID}, historyfrag.ScopeFallback{}, 10000)
+	svc := checkpointTestService(&memoryQueryMessageService{messages: []messagepkg.Message{prior, earlierFailure, request, cutoff, later}}, &historyCheckpointQueries{})
+	prepared, err := svc.prepareHistoryContext(t.Context(), ChatRequest{BotID: "bot", ThreadID: lifecycleTestSessionID, HistoryCutoffBeforeMessageID: cutoff.ID}, historyfrag.ScopeFallback{}, 10000)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,11 +2,11 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
-	sdk "github.com/felinics/twilight/sdk"
+	"github.com/jackc/pgx/v5"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
@@ -58,7 +58,29 @@ func (s *Service) continuationTurnRequestMessageID(ctx context.Context, sessionI
 	// An applied steer opens a later turn within this run. Its next tool
 	// result and resumed model output belong there, even though admission's
 	// run handle still names the original request turn.
-	return resolver.GetRunTurnRequestMessageID(ctx, sessionID, strings.TrimSpace(runHandle.RunID), turnID)
+	runID := strings.TrimSpace(runHandle.RunID)
+	id, err := resolver.GetRunTurnRequestMessageID(ctx, sessionID, runID, turnID)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return id, err
+	}
+	// A continuation that has applied no new input carries its request in its
+	// own intent. Validate that the request is still visible in this session.
+	if s.queries == nil {
+		return "", err
+	}
+	row, loadErr := s.queries.GetSessionRun(ctx, db.ParseUUIDOrEmpty(runID))
+	if loadErr != nil {
+		return "", loadErr
+	}
+	admitted, decodeErr := decodeRunAdmission(row.InputJson)
+	if decodeErr != nil {
+		return "", decodeErr
+	}
+	if admitted.Resume == nil || strings.TrimSpace(admitted.Resume.RequestMessageID) == "" {
+		return "", err
+	}
+	request, requestErr := s.recordedResumeRequest(ctx, sessionID, admitted.Resume.RequestMessageID)
+	return request.messageID, requestErr
 }
 
 func (s *Service) prepareContinuationRunConfig(
@@ -69,32 +91,20 @@ func (s *Service) prepareContinuationRunConfig(
 	eventCh chan<- WSStreamEvent,
 	req ChatRequest,
 ) (native.RunConfig, error) {
-	loaded, err := s.loadHistoryRecords(ctx, fallback, summaryScope.SessionID, 0, false)
+	read := func() ([]ModelMessage, []historyfrag.HistoryRecord, bool, error) {
+		loaded, truncated, err := s.loadHistoryRecords(ctx, fallback, summaryScope, 0, historyCut{})
+		if err != nil {
+			return nil, nil, false, err
+		}
+		messages, retained := historyMessagesFromRecords(projectInterruptedHistoryReasoning(pruneHistoryForGateway(loaded)))
+		return messages, retained, truncated, nil
+	}
+	messages, retained, truncated, err := read()
 	if err != nil {
 		return native.RunConfig{}, err
 	}
-	loaded = pruneHistoryForGateway(loaded)
 	req.inputInHistory = true
-	loaded, err = s.replaceCompactedMessages(ctx, summaryScope.SessionID, summaryScope, loaded, compactionArtifactBoundary{})
-	if err != nil {
-		return native.RunConfig{}, err
-	}
-	loaded = projectInterruptedHistoryReasoning(loaded)
-	messages, retained := historyMessagesFromRecords(loaded)
 	if req.continuationToolCallID != "" && req.RunHandle.RunID != "" {
-		start := slices.IndexFunc(retained, func(record historyfrag.HistoryRecord) bool {
-			return slices.ContainsFunc(extractAssistantToolCallParts(record.ModelMessage), func(call sdk.ToolCallPart) bool {
-				return call.ToolCallID == req.continuationToolCallID
-			})
-		})
-		if start < 0 {
-			return native.RunConfig{}, fmt.Errorf("%w: deferred call missing from continuation", contextfrag.ErrBudgetUnsatisfied)
-		}
-		for _, record := range retained[start:] {
-			if record.DBMessageID != "" {
-				req.continuationTail = append(req.continuationTail, turn.ContextMessageSource{Kind: "history", ID: record.DBMessageID})
-			}
-		}
 		ids, err := s.queries.ListRunHistoryTurnRequestMessageIDs(ctx, sqlc.ListRunHistoryTurnRequestMessageIDsParams{
 			SessionID: db.ParseUUIDOrEmpty(req.ThreadID), RunID: db.ParseUUIDOrEmpty(req.RunHandle.RunID), RootTurnID: db.ParseUUIDOrEmpty(req.RunHandle.TurnID),
 		})
@@ -105,31 +115,48 @@ func (s *Service) prepareContinuationRunConfig(
 			req.continuationAnchors = append(req.continuationAnchors, turn.ContextMessageSource{Kind: "history", ID: id.String()})
 		}
 	}
+	if truncated {
+		// A load the byte budget truncated would start later than its
+		// checkpoint's position: the rows it left out fold from rows first,
+		// and the history loads again.
+		pressure := 0
+		for _, message := range messages {
+			pressure += estimateMessageTokens(message)
+		}
+		if err := s.compactForBudget(ctx, req, pressure, base.ContextBudgetMaxTokens, base.CurrentModelUUID); err != nil {
+			return native.RunConfig{}, truncatedLoadFailure(err)
+		}
+		if messages, retained, truncated, err = read(); err == nil && truncated {
+			err = truncatedLoadFailure(errors.New("compacted history still exceeds the load budget"))
+		}
+		if err != nil {
+			return native.RunConfig{}, err
+		}
+	}
 	messages = sanitizeMessages(messages)
 	historyEstimates := make([]int, len(messages))
-	pressure := 0
 	for i := range messages {
 		historyEstimates[i] = estimateMessageTokens(messages[i])
-		pressure += historyEstimates[i]
 	}
 	base.ContextHistoryTokenEstimates = historyEstimates
 	base.ContextTrimmableMessages = len(messages)
 
 	base.ContextFrags = historyContextFragsForMessages(messages, retained)
-	base.ContextProvenance = contextProvenance(messages, retained, append(compactionProtectedSources(req), req.continuationAnchors...))
 	// Close any tool call left open by an interrupted turn before the transcript
 	// reaches providers that enforce strict assistant-tool adjacency. A process
 	// restart can orphan a deferred ask_user / tool-approval call while a later
 	// request still completes normally; repairing here (not in ContextFrags)
 	// keeps the fragments faithful to history while the outgoing messages stay
 	// provider-valid. Applies to every continuation path that resumes after a
-	// deferred tool call.
-	base.Messages = modelMessagesToSDKMessages(repairToolCallClosures(nonNilModelMessages(messages), syntheticToolClosureError))
+	// deferred tool call. Provenance names the outgoing messages, closures
+	// included, so a fold removes each closure with its call.
+	outgoing := repairToolCallClosures(nonNilModelMessages(messages), syntheticToolClosureError)
+	base.ContextProvenance = contextProvenance(outgoing, retained, append(compactionInputs(req), req.continuationAnchors...))
+	base.Messages = modelMessagesToSDKMessages(outgoing)
 	base.ContextCurrentUserMessageIndex = nil
 	base.ContextMemoryMessageIndex = nil
 	base.Query = ""
 	base.LiveToolStream = eventCh != nil
 	base.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)
-	base.RecoverContextBudget = s.chatBudgetRecovery(req, chatHistoryLayout{historyCount: len(messages), pressureTokens: pressure})
 	return s.prepareRunConfig(ctx, base), nil
 }

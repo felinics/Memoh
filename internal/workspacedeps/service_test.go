@@ -447,6 +447,8 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 		Logger:    slog.New(slog.DiscardHandler),
 		Now:       now,
 		ScriptEnv: func(context.Context) []string { return f.env },
+
+		LauncherCommands: map[string]string{"codex": "codex", "claude-code": "claude", "grok": "grok"},
 	})
 	f.svc.probe = func(context.Context, *bridge.Client) (Platform, error) { return f.platform, nil }
 	f.svc.discover = func(_ context.Context, _ *bridge.Client, _ *catalog.Catalog, _ string, ids []string, _ Platform) (map[string]Observed, error) {

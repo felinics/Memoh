@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { normalizeAgentID } from '@/utils/external-agent'
-/* eslint-disable vue/no-mutating-props -- Parents pass a reactive managed map; field edits mutate in place like settings-acp-detail. */
-// Shared managed-field stack for ACP setup (create + settings). Parents own
-// setup_mode; this component only renders the schema-driven fields.
+/* eslint-disable vue/no-mutating-props -- The parent passes a reactive managed map; field edits mutate it in place. */
+// Managed-field stack of an ACP agent's settings, rendered from its profile.
 import { useI18n } from 'vue-i18n'
 import {
   FieldStack,
@@ -20,38 +19,21 @@ import {
   acpManagedPlaceholder,
 } from '@/utils/acp/setup-fields'
 
-const props = withDefaults(defineProps<{
+const props = defineProps<{
   profile: AcpprofilePublicProfile
   managed: Record<string, string>
   fields: AcpprofileManagedField[]
-  fieldGap?: 'card' | 'bare'
-  /** Settings inputs get stable names and emit fieldCommit on native change. */
-  settingsMode?: boolean
-}>(), {
-  fieldGap: 'card',
-  settingsMode: false,
-})
+}>()
 
 const emit = defineEmits<{
-  fieldChange: []
   fieldCommit: []
 }>()
 
 const { t } = useI18n()
 
-function setManagedField(fieldID: string | undefined, value: string) {
-  const id = normalizeAgentID(fieldID)
-  if (!id) return
-  props.managed[id] = value
-  emit('fieldChange')
-}
-
 function handleFieldInput(field: AcpprofileManagedField, value: string) {
-  setManagedField(field.id, value)
-}
-
-function handleFieldCommit() {
-  emit('fieldCommit')
+  const id = normalizeAgentID(field.id)
+  if (id) props.managed[id] = value
 }
 </script>
 
@@ -62,12 +44,12 @@ function handleFieldCommit() {
       :key="field.id"
       :label="acpManagedFieldLabel(profile, field, t)"
       :help="acpManagedFieldHelp(profile, field)"
-      :gap="fieldGap"
+      gap="card"
     >
       <Textarea
         v-if="field.type === 'textarea'"
         :model-value="managed[field.id || ''] || ''"
-        :name="settingsMode ? acpManagedFieldName(profile, field) : undefined"
+        :name="acpManagedFieldName(profile, field)"
         rows="4"
         autocomplete="off"
         autocapitalize="off"
@@ -75,20 +57,20 @@ function handleFieldCommit() {
         spellcheck="false"
         :placeholder="acpManagedPlaceholder(profile, field)"
         @update:model-value="(val) => handleFieldInput(field, String(val ?? ''))"
-        @change="handleFieldCommit"
+        @change="emit('fieldCommit')"
       />
       <Input
         v-else
         :model-value="managed[field.id || ''] || ''"
         :type="acpInputType(field.type)"
-        :name="settingsMode ? acpManagedFieldName(profile, field) : undefined"
-        :autocomplete="settingsMode ? acpManagedFieldAutocomplete(field) : 'off'"
+        :name="acpManagedFieldName(profile, field)"
+        :autocomplete="acpManagedFieldAutocomplete(field)"
         autocapitalize="off"
         autocorrect="off"
         spellcheck="false"
         :placeholder="acpManagedPlaceholder(profile, field)"
         @update:model-value="(val) => handleFieldInput(field, String(val ?? ''))"
-        @change="handleFieldCommit"
+        @change="emit('fieldCommit')"
       />
     </FieldStack>
   </FormStack>

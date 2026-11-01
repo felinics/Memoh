@@ -1,6 +1,6 @@
 // Command gen-codex-protocol regenerates the Go types for the codex
 // app-server v2 protocol from the vendored JSON Schema snapshot in
-// internal/agent/runtime/codex/protocolgen/schema.
+// internal/agent/runtime/external/codex/protocolgen/schema.
 package main
 
 import (
@@ -11,11 +11,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/felinics/memoh/internal/agent/runtime/codex/protocolgen"
+	"github.com/felinics/memoh/internal/agent/runtime/external/codex/protocolgen"
 )
 
 func main() {
-	out := flag.String("out", "internal/agent/runtime/codex/protocol", "output directory for generated files")
+	out := flag.String("out", "internal/agent/runtime/external/codex/protocol", "output directory for generated files")
 	flag.Parse()
 
 	files, err := protocolgen.Generate()

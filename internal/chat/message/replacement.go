@@ -189,3 +189,26 @@ func (s *DBService) GetRunTurnRequestMessageID(ctx context.Context, sessionID, r
 	})
 	return id.String(), err
 }
+
+// RunWroteHistory includes hidden rows so a removed request is not restored.
+func (s *DBService) RunWroteHistory(ctx context.Context, sessionID, runID, rootTurnID string) (bool, error) {
+	reader, ok := s.queries.(interface {
+		RunWroteHistoryMessages(context.Context, sqlc.RunWroteHistoryMessagesParams) (bool, error)
+	})
+	if !ok {
+		return false, errors.New("message store does not support run history lookup")
+	}
+	session, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return false, err
+	}
+	run, err := dbpkg.ParseUUID(runID)
+	if err != nil {
+		return false, err
+	}
+	turn, err := dbpkg.ParseUUID(rootTurnID)
+	if err != nil {
+		return false, err
+	}
+	return reader.RunWroteHistoryMessages(ctx, sqlc.RunWroteHistoryMessagesParams{SessionID: session, RunID: run, RootTurnID: turn})
+}

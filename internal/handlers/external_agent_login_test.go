@@ -27,6 +27,10 @@ type loginTestDriver struct {
 
 func (loginTestDriver) RuntimeType() string { return botagents.RuntimeCodex }
 
+func (loginTestDriver) Caps() external.Caps {
+	return external.Caps{}
+}
+
 func (loginTestDriver) Prompt(context.Context, external.PromptInput) (external.PromptResult, error) {
 	return external.PromptResult{}, errors.New("not a turn")
 }
@@ -52,7 +56,7 @@ func newLoginTestHandler(driver external.Driver) *ExternalAgentLoginHandler {
 		bot:  testBotRow(botAgentsTestBotID, nil),
 		rows: []sqlc.BotAgent{botAgentRow(botAgentsTestCodexID, botagents.RuntimeCodex, true)},
 	}
-	return NewExternalAgentLoginHandler(slog.Default(), external.Drivers{driver},
+	return NewExternalAgentLoginHandler(slog.Default(), testRuntimeRegistry(driver),
 		botagents.NewService(nil, queries), bots.NewService(nil, queries), newTestAdminAccountService("admin"))
 }
 
@@ -86,8 +90,8 @@ func TestDeviceAuthorizeAnswersRuntimeFailures(t *testing.T) {
 		status int
 	}{
 		{"credential incompatible", external.CredentialError(agentcredential.ErrIncompatible), apperror.CodeAgentCredentialIncompatible, http.StatusUnprocessableEntity},
-		{"auth required", external.Fail(external.FailureAuthRequired, external.ErrAuthRequired), apperror.CodeExternalRuntimeAuthRequired, http.StatusConflict},
-		{"runtime unavailable", external.Unavailable(errors.New("bridge refused")), apperror.CodeExternalRuntimeUnavailable, http.StatusServiceUnavailable},
+		{"auth required", external.Fail(external.FailureAuthRequired, nil), apperror.CodeExternalRuntimeAuthRequired, http.StatusConflict},
+		{"agent failed", external.Upstream(errors.New("bridge refused")), apperror.CodeExternalRuntimeReported, http.StatusBadGateway},
 		{"plain error", errors.New("login/account/start: stream closed"), apperror.CodeExternalRuntimeUnavailable, http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -111,7 +115,7 @@ func TestDevicePollAnswersCompletionFailures(t *testing.T) {
 	}{
 		{"credential revoked", external.CredentialError(agentcredential.ErrRevoked), apperror.CodeAgentCredentialRevoked, http.StatusConflict},
 		{"encryption unavailable", external.CredentialError(agentcredential.ErrEncryptionUnavailable), apperror.CodeAgentCredentialEncryptionUnavailable, http.StatusServiceUnavailable},
-		{"runtime unavailable", external.Unavailable(errors.New("bridge refused")), apperror.CodeExternalRuntimeUnavailable, http.StatusServiceUnavailable},
+		{"agent failed", external.Upstream(errors.New("bridge refused")), apperror.CodeExternalRuntimeReported, http.StatusBadGateway},
 		{"missing dependency", &external.DependencyMissingError{DependencyID: "codex"}, apperror.CodeAgentCredentialMaterializationFailed, http.StatusInternalServerError},
 		{"plain error", errors.New("read auth.json: no such file"), apperror.CodeAgentCredentialMaterializationFailed, http.StatusInternalServerError},
 	} {
@@ -131,7 +135,7 @@ func TestDeviceLoginRefusesARuntimeWithoutOne(t *testing.T) {
 		bot:  testBotRow(botAgentsTestBotID, nil),
 		rows: []sqlc.BotAgent{botAgentRow(botAgentsTestCodexID, botagents.RuntimeClaudeCode, true)},
 	}
-	handler := NewExternalAgentLoginHandler(slog.Default(), external.Drivers{loginTestDriver{}},
+	handler := NewExternalAgentLoginHandler(slog.Default(), testRuntimeRegistry(loginTestDriver{}),
 		botagents.NewService(nil, queries), bots.NewService(nil, queries), newTestAdminAccountService("admin"))
 	err := handler.AuthorizeDevice(deviceLoginRequest(t, "authorize", ""))
 	if got := apperror.CodeOf(err); got != apperror.CodeBotAgentNotFound {

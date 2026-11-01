@@ -22,7 +22,6 @@ type ChatRequest struct {
 	inputInHistory         bool
 	continuationToolCallID string
 	continuationAnchors    []turn.ContextMessageSource
-	continuationTail       []turn.ContextMessageSource
 	// discussPromptPrefix and discussPromptSuffix wrap the admitted discuss
 	// prompt; a shutdown resume puts its instructions there.
 	discussPromptPrefix string

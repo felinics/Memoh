@@ -127,6 +127,8 @@ func (*WebProvider) callSearch(ctx context.Context, providerName string, configJ
 		return callDuckDuckGoSearch(ctx, configJSON, query, count)
 	case string(searchproviders.ProviderYandex):
 		return callYandexSearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderDeepSeek):
+		return callDeepSeekSearch(ctx, configJSON, query, count)
 	default:
 		return nil, errors.New("unsupported search provider")
 	}
@@ -701,6 +703,45 @@ func callYandexSearch(ctx context.Context, configJSON []byte, query string, coun
 	results, err := parseYandexXML(xmlData)
 	if err != nil {
 		return nil, errors.New("failed to parse Yandex XML response")
+	}
+	return map[string]any{"query": query, "results": results}, nil
+}
+
+func callDeepSeekSearch(ctx context.Context, configJSON []byte, query string, count int) (any, error) {
+	cfg := parseSearchConfig(configJSON)
+	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://api.deepseek.com/v1/tools/search")
+	apiKey := stringValue(cfg["api_key"])
+	if apiKey == "" {
+		return nil, errors.New("deepseek API key is required")
+	}
+	payload, _ := json.Marshal(map[string]any{"query": query, "count": count})
+	timeout := parseSearchTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, errors.New("invalid search provider base_url")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := client.Do(req) //nolint:gosec
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, buildSearchHTTPError(resp.StatusCode, body)
+	}
+	var raw struct {
+		Results []struct{ Title, URL, Snippet, Summary string } `json:"results"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, errors.New("invalid search response")
+	}
+	results := make([]map[string]any, 0, len(raw.Results))
+	for _, item := range raw.Results {
+		results = append(results, map[string]any{"title": item.Title, "url": item.URL, "description": firstNonEmpty(item.Summary, item.Snippet)})
 	}
 	return map[string]any{"query": query, "results": results}, nil
 }

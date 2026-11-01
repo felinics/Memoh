@@ -15,8 +15,7 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/acl"
-	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
@@ -834,39 +833,11 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 }
 
 func validateACPManagedConfig(metadata map[string]any) error {
-	for _, item := range acpprofile.List() {
-		profile, ok := acpprofile.Lookup(item.ID)
-		if !ok {
-			continue
-		}
-		setup := acpprofile.ParseAgentSetup(metadata, profile.ID)
-		if !setup.Enabled {
-			continue
-		}
-		mode := acpclient.SetupMode(setup.Mode)
-		if !acpProfileSupportsSetupMode(profile, mode) {
-			return fmt.Errorf("%s does not support setup mode %q", profile.DisplayName, mode)
-		}
-		if mode == acpclient.SetupModeSelf {
-			continue
-		}
-		if err := acpclient.ValidateManagedACPConfig(profile, setup, mode); err != nil {
-			return err
-		}
+	setup := acpprofile.ParseAgentSetup(metadata, acpprofile.AgentACPID)
+	if !setup.Enabled {
+		return nil
 	}
-	return nil
-}
-
-func acpProfileSupportsSetupMode(profile acpprofile.Profile, mode acpclient.SetupMode) bool {
-	if len(profile.SetupModes) == 0 {
-		return true
-	}
-	for _, supported := range profile.SetupModes {
-		if strings.EqualFold(strings.TrimSpace(supported), string(mode)) {
-			return true
-		}
-	}
-	return false
+	return acpprofile.CheckSetup(setup)
 }
 
 func acpRuntimeMetadataChanged(existing, pending map[string]any) bool {

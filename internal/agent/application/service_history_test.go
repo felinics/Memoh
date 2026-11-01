@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
 
@@ -67,9 +66,6 @@ func TestEnsureRequiredHistoryMessageMergesVisibleWindowInOrder(t *testing.T) {
 	}
 	if gotIDs := historyRecordIDs(got); !equalStrings(gotIDs, []string{"prior", "user-1", "assistant-tool-1", "tool-1"}) {
 		t.Fatalf("message ids = %v, want prior + ordered required window", gotIDs)
-	}
-	if !got[1].Required {
-		t.Fatalf("required message was not marked")
 	}
 }
 
@@ -133,18 +129,28 @@ func TestNormalizedContextPrefixLengthTracksSanitizedHistory(t *testing.T) {
 	}
 }
 
-func TestLoadCompactionArtifactBoundaryFetchesCutoffOutsideLoadedWindow(t *testing.T) {
+func TestLoadHistoryCutResolvesTheCutoffMessage(t *testing.T) {
 	t.Parallel()
 
-	cutoff := persistedHistoryMessage(t, "old-cutoff", "assistant", "old answer")
-	cutoff.CreatedAt = time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
-	resolver := &Service{messageService: &requiredHistoryMessageService{
-		byID: map[string]messagepkg.Message{cutoff.ID: cutoff},
-	}}
+	resolver := &Service{messageService: &memoryQueryMessageService{messages: []messagepkg.Message{
+		persistedHistoryMessage(t, "old-request", "user", "old request"),
+		persistedHistoryMessage(t, "old-cutoff", "assistant", "old answer"),
+	}}}
+	retry := ChatRequest{
+		ThreadID: "session-1", HistoryCutoffBeforeMessageID: "old-cutoff",
+		TurnReplacement: &messagepkg.TurnReplacement{OldTurnID: "replaced-turn"},
+	}
 
-	boundary := resolver.loadCompactionArtifactBoundary(context.Background(), nil, "session-1", cutoff.ID)
-	if !boundary.hasCutoff || boundary.cutoffMs != cutoff.CreatedAt.UnixMilli() {
-		t.Fatalf("boundary = %+v, want cutoff at %d", boundary, cutoff.CreatedAt.UnixMilli())
+	cut, err := resolver.loadHistoryCut(context.Background(), retry)
+	if err != nil || cut.before == nil || *cut.before != historyTestPosition(1) || cut.replacedTurnID != "replaced-turn" {
+		t.Fatalf("cut = %+v err = %v, want before %+v of the replaced turn", cut, err, historyTestPosition(1))
+	}
+	if cut, err := resolver.loadHistoryCut(context.Background(), ChatRequest{ThreadID: "session-1"}); err != nil || cut != (historyCut{}) {
+		t.Fatalf("cut = %+v err = %v, want none without a cutoff", cut, err)
+	}
+	retry.HistoryCutoffBeforeMessageID = "missing"
+	if _, err := resolver.loadHistoryCut(context.Background(), retry); err == nil {
+		t.Fatal("a cutoff that does not resolve loaded no error")
 	}
 }
 

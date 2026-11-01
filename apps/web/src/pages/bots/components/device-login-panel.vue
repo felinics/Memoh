@@ -5,26 +5,29 @@ import { Button, DeviceCodePanel, Dialog, DialogBody, DialogFooter, DialogHeader
 import { KeyRound } from 'lucide-vue-next'
 import { AGENT_AUTH_MODE_COPY, DEVICE_LOGINS, type DeviceLoginAuthMode } from '@/utils/bot-agent'
 
-// The account row and device-code dialog of a staged sign-in. The caller
+// The account row and device-code dialog of an Agent's sign-in. The caller
 // drives the authorization; the default slot adds row actions.
 const props = defineProps<{
   auth: DeviceLoginAuthMode
   authorized: boolean
-  /** Signing in an Agent that already exists: it can sign in again to replace its account. */
-  existing?: boolean
+  /** The account the Agent is signed in to, when its runtime reports one. */
+  account?: string
+  /** Shown instead of the account description, e.g. while the sign-in is being checked. */
+  note?: string
   authorizing: boolean
+  disabled?: boolean
   deviceLogin?: { user_code: string, verification_url: string } | null
-  expiresAt?: string
-  error?: string
 }>()
 const emit = defineEmits<{ connect: [], cancel: [] }>()
 const { t } = useI18n()
 const login = computed(() => DEVICE_LOGINS[props.auth])
 const label = computed(() => t(AGENT_AUTH_MODE_COPY[props.auth].label))
 const devicePending = computed(() => !!props.deviceLogin)
-const description = computed(() => props.authorized
-  ? login.value.connectedDescription
-  : props.existing ? login.value.agentDescription : AGENT_AUTH_MODE_COPY[props.auth].description)
+const description = computed(() => {
+  if (props.note) return props.note
+  if (!props.authorized) return t(login.value.agentDescription)
+  return props.account ? t('bots.agent.signedInAs', { account: props.account }) : t(login.value.connectedDescription)
+})
 // KeepAlive does not take a teleported dialog away with its deactivated host,
 // and a sign-in that outlives the deactivation would leave it over the next page.
 const active = ref(true)
@@ -35,16 +38,16 @@ onDeactivated(() => { active.value = false })
 <template>
   <SettingsRow
     :label="label"
-    :description="t(description)"
+    :description="description"
   >
     <div class="flex gap-2">
       <Button
-        v-if="!authorized || existing"
         type="button"
         variant="outline"
         size="sm"
         class="shrink-0"
         :loading="authorizing"
+        :disabled="disabled && !devicePending"
         loading-mode="manual"
         @click="devicePending ? emit('cancel') : emit('connect')"
       >
@@ -84,7 +87,6 @@ onDeactivated(() => { active.value = false })
           v-if="deviceLogin"
           :code="deviceLogin.user_code"
           :verification-uri="deviceLogin.verification_url"
-          :expires-at="expiresAt"
           :hint="t(login.hint)"
           :retry-loading="authorizing"
           :copy-and-open-label="t('deviceCode.copyAndOpen')"
@@ -106,11 +108,4 @@ onDeactivated(() => { active.value = false })
       </DialogFooter>
     </DialogPanel>
   </Dialog>
-  <p
-    v-if="error"
-    role="alert"
-    class="px-4 text-sm text-destructive"
-  >
-    {{ error }}
-  </p>
 </template>

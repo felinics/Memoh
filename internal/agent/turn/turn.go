@@ -136,24 +136,25 @@ type StartTurnCommand struct {
 }
 
 // ContextMessageSource names the stored message a context message renders.
-// ContentHash and EventCursor name the version rendered, so a compaction that
-// reads the source back refuses one that changed since; Channel composes
-// Discuss context in another process, so they cross the wire with it.
+// Channel composes Discuss context in another process, so it crosses the wire
+// with it.
 type ContextMessageSource struct {
-	Kind        string `json:"kind"`
-	ID          string `json:"id,omitempty"`
-	Current     bool   `json:"current,omitempty"`
-	ContentHash string `json:"content_hash,omitempty"`
-	EventCursor int64  `json:"event_cursor,omitempty"`
+	Kind    string `json:"kind"`
+	ID      string `json:"id,omitempty"`
+	Current bool   `json:"current,omitempty"`
 }
 
 // DiscussMessage is one composed context message for a discuss turn.
+// CompactionArtifactID names the summary a message renders. Pinned marks
+// what admission keeps whatever the budget: what the session's history
+// checkpoint holds.
 type DiscussMessage struct {
 	Source               *ContextMessageSource `json:"source,omitempty"`
 	Role                 string                `json:"role"`
 	Content              string                `json:"content"`
 	RawContent           json.RawMessage       `json:"raw_content,omitempty"`
 	CompactionArtifactID string                `json:"compaction_artifact_id,omitempty"`
+	Pinned               bool                  `json:"pinned,omitempty"`
 }
 
 // DiscussImageRef references an image attachment to inline as vision input.
@@ -176,8 +177,8 @@ const (
 	DiscussEventSkipped = "discuss_skipped"
 	// DiscussEventRecompose signals the runtime compacted the thread
 	// synchronously before calling the model; the run ends after this event
-	// and the driver must recompose against the refreshed artifact frontier
-	// and resubmit (CM-CMP-001). The cursor must not advance.
+	// and the driver must recompose against the session's new history
+	// checkpoint and resubmit (CM-CMP-001). The cursor must not advance.
 	DiscussEventRecompose = "discuss_recompose"
 )
 

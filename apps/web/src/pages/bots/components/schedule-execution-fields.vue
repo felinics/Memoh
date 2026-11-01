@@ -155,13 +155,12 @@ import {
   SettingsRow,
 } from '@felinic/ui'
 import {
-  deleteBotsByBotIdAcpRuntimesByRuntimeId,
   getAcpProfiles,
   getBotsByBotIdAgents,
   getBotsByBotIdSettings,
   getModels,
   getProviders,
-  postBotsByBotIdAcpRuntimes,
+  getBotsByBotIdAcpOptions,
 } from '@memohai/sdk'
 import type {
   AcpclientModelInfo,
@@ -173,7 +172,7 @@ import type {
   SessionSession,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { botAgentName, botAgentProvider, isDirectBotAgentRuntime, normalizeBotAgentRuntime, type DirectBotAgentRuntime } from '@/utils/bot-agent'
+import { botAgentName, botAgentProvider, isDirectBotAgentRuntime, normalizeBotAgentRuntime, sessionAgentProvider, type DirectBotAgentRuntime } from '@/utils/bot-agent'
 import { isAgentRuntimeType, normalizedRuntimeType } from '@/store/chat-list.utils'
 import { useWorkdirsStore } from '@/store/workdirs'
 import SessionSelect from '@/components/session-select/index.vue'
@@ -268,10 +267,8 @@ const selectedSessionIsExternalAgent = computed(() =>
 )
 
 const selectedSessionAgentID = computed(() => {
-  if (!selectedSessionIsACP.value) return ''
-  return normalizeAgentID(
-    selectedSession.value?.runtime_metadata?.acp_agent_id ?? selectedSession.value?.metadata?.acp_agent_id,
-  )
+  if (!selectedSessionIsACP.value || !selectedSession.value) return ''
+  return sessionAgentProvider(normalizedRuntimeType(selectedSession.value), selectedSession.value, botAgents.value)
 })
 
 const selectedSessionSummary = computed(() => {
@@ -522,8 +519,8 @@ watch([acpReasoningOptions, acpAgentInPlay] as const, ([options, inPlay]) => {
     : (options[0]?.value ?? '')
 }, { immediate: true })
 
-// loadACPCatalog boots a temporary pre-session runtime — the only place an
-// ACP agent's model and effort lists exist — reads them, and closes it.
+// loadACPCatalog reads the agent's model and effort lists from its own
+// process, the only place they exist.
 async function loadACPCatalog(agentID: string) {
   if (!agentID || !props.botId) return
   const botAgentID = activeBotAgentID.value
@@ -532,9 +529,9 @@ async function loadACPCatalog(agentID: string) {
   acpCatalogError.value = null
   acpCatalog.value = null
   try {
-    const { data } = await postBotsByBotIdAcpRuntimes({
+    const { data } = await getBotsByBotIdAcpOptions({
       path: { bot_id: props.botId },
-      body: { acp_agent_id: agentID },
+      query: { acp_agent_id: agentID, bot_agent_id: botAgentID || undefined },
       throwOnError: true,
     })
     acpCatalog.value = {
@@ -543,11 +540,6 @@ async function loadACPCatalog(agentID: string) {
       models: data.models?.available_models ?? [],
       efforts: data.reasoning?.available_efforts ?? [],
       currentEffort: data.reasoning?.current_effort ?? '',
-    }
-    if (data.runtime_id) {
-      void deleteBotsByBotIdAcpRuntimesByRuntimeId({
-        path: { bot_id: props.botId, runtime_id: data.runtime_id },
-      })
     }
   } catch (error) {
     acpCatalogError.value = resolveApiErrorMessage(error, t('bots.schedule.execution.agentModelsFailed'))
