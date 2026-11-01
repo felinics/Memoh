@@ -14,6 +14,7 @@ import (
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 type continuationTurnRequestMessageResolver interface {
@@ -62,16 +63,24 @@ func (s *Service) continuationTurnRequestMessageID(ctx context.Context, sessionI
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return id, err
 	}
-	// A shutdown continuation applies no input of its own until a steer: it
-	// answers the request of the run it resumes.
-	continued, continuedErr := s.continuedRequestMessageID(ctx, sessionID, runID)
-	if continuedErr != nil {
-		return "", continuedErr
-	}
-	if continued == "" {
+	// A continuation that has applied no new input carries its request in its
+	// own intent. Validate that the request is still visible in this session.
+	if s.queries == nil {
 		return "", err
 	}
-	return continued, nil
+	row, loadErr := s.queries.GetSessionRun(ctx, db.ParseUUIDOrEmpty(runID))
+	if loadErr != nil {
+		return "", loadErr
+	}
+	admitted, decodeErr := decodeRunAdmission(row.InputJson)
+	if decodeErr != nil {
+		return "", decodeErr
+	}
+	if admitted.Resume == nil || strings.TrimSpace(admitted.Resume.RequestMessageID) == "" {
+		return "", err
+	}
+	request, requestErr := s.recordedResumeRequest(ctx, sessionID, admitted.Resume.RequestMessageID)
+	return request.messageID, requestErr
 }
 
 func (s *Service) prepareContinuationRunConfig(
@@ -96,13 +105,14 @@ func (s *Service) prepareContinuationRunConfig(
 	}
 	req.inputInHistory = true
 	if req.continuationToolCallID != "" && req.RunHandle.RunID != "" {
-		// A continuation keeps the requests of the runs it resumes.
-		ids, err := s.runLineageRequestMessageIDs(ctx, req.ThreadID, req.RunHandle)
+		ids, err := s.queries.ListRunHistoryTurnRequestMessageIDs(ctx, sqlc.ListRunHistoryTurnRequestMessageIDsParams{
+			SessionID: db.ParseUUIDOrEmpty(req.ThreadID), RunID: db.ParseUUIDOrEmpty(req.RunHandle.RunID), RootTurnID: db.ParseUUIDOrEmpty(req.RunHandle.TurnID),
+		})
 		if err != nil {
 			return native.RunConfig{}, err
 		}
 		for _, id := range ids {
-			req.continuationAnchors = append(req.continuationAnchors, turn.ContextMessageSource{Kind: "history", ID: id})
+			req.continuationAnchors = append(req.continuationAnchors, turn.ContextMessageSource{Kind: "history", ID: id.String()})
 		}
 	}
 	if truncated {

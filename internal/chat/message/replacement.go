@@ -190,61 +190,25 @@ func (s *DBService) GetRunTurnRequestMessageID(ctx context.Context, sessionID, r
 	return id.String(), err
 }
 
-type runHistoryQueries interface {
-	GetRunsHistoryRequestMessageID(context.Context, sqlc.GetRunsHistoryRequestMessageIDParams) (pgtype.UUID, error)
-	RunsWroteHistoryMessages(context.Context, sqlc.RunsWroteHistoryMessagesParams) (bool, error)
-}
-
-// runHistoryScope parses a session and the runs and turns looked up in it.
-func (s *DBService) runHistoryScope(sessionID string, runIDs, turnIDs []string) (runHistoryQueries, pgtype.UUID, []pgtype.UUID, []pgtype.UUID, error) {
-	reader, ok := s.queries.(runHistoryQueries)
+// RunWroteHistory includes hidden rows so a removed request is not restored.
+func (s *DBService) RunWroteHistory(ctx context.Context, sessionID, runID, rootTurnID string) (bool, error) {
+	reader, ok := s.queries.(interface {
+		RunWroteHistoryMessages(context.Context, sqlc.RunWroteHistoryMessagesParams) (bool, error)
+	})
 	if !ok {
-		return nil, pgtype.UUID{}, nil, nil, errors.New("message store does not support run history lookup")
+		return false, errors.New("message store does not support run history lookup")
 	}
-	pgSessionID, err := dbpkg.ParseUUID(sessionID)
-	if err != nil {
-		return nil, pgtype.UUID{}, nil, nil, err
-	}
-	parse := func(ids []string) ([]pgtype.UUID, error) {
-		parsed := make([]pgtype.UUID, 0, len(ids))
-		for _, id := range ids {
-			value, err := dbpkg.ParseUUID(id)
-			if err != nil {
-				return nil, err
-			}
-			parsed = append(parsed, value)
-		}
-		return parsed, nil
-	}
-	runs, err := parse(runIDs)
-	if err != nil {
-		return nil, pgtype.UUID{}, nil, nil, err
-	}
-	turns, err := parse(turnIDs)
-	if err != nil {
-		return nil, pgtype.UUID{}, nil, nil, err
-	}
-	return reader, pgSessionID, runs, turns, nil
-}
-
-// GetRunsRequestMessageID resolves the latest visible input the runs applied:
-// a request or steer they wrote, the request of a turn they were admitted
-// with, or that of a turn their rows joined.
-func (s *DBService) GetRunsRequestMessageID(ctx context.Context, sessionID string, runIDs, turnIDs []string) (string, error) {
-	reader, pgSessionID, runs, turns, err := s.runHistoryScope(sessionID, runIDs, turnIDs)
-	if err != nil {
-		return "", err
-	}
-	id, err := reader.GetRunsHistoryRequestMessageID(ctx, sqlc.GetRunsHistoryRequestMessageIDParams{SessionID: pgSessionID, RunIds: runs, TurnIds: turns})
-	return id.String(), err
-}
-
-// RunsWroteHistory reports whether any of the runs or turns left a history
-// row in the session, whether or not that row is still visible.
-func (s *DBService) RunsWroteHistory(ctx context.Context, sessionID string, runIDs, turnIDs []string) (bool, error) {
-	reader, pgSessionID, runs, turns, err := s.runHistoryScope(sessionID, runIDs, turnIDs)
+	session, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return false, err
 	}
-	return reader.RunsWroteHistoryMessages(ctx, sqlc.RunsWroteHistoryMessagesParams{SessionID: pgSessionID, RunIds: runs, TurnIds: turns})
+	run, err := dbpkg.ParseUUID(runID)
+	if err != nil {
+		return false, err
+	}
+	turn, err := dbpkg.ParseUUID(rootTurnID)
+	if err != nil {
+		return false, err
+	}
+	return reader.RunWroteHistoryMessages(ctx, sqlc.RunWroteHistoryMessagesParams{SessionID: session, RunID: run, RootTurnID: turn})
 }

@@ -8,8 +8,10 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -79,6 +81,25 @@ func TestPostgresShutdownResumeReadsImageAfterWorkspaceRecovery(t *testing.T) {
 	if view == nil || view.ResumeTurn == nil || view.ResumeTurn.TurnID != originalTurn || view.TurnID == originalTurn || len(view.ResumeTurn.Messages) == 0 {
 		t.Fatalf("resume projection: %+v", view)
 	}
+	// A subsequent shutdown and a decision continuation use this run's intent,
+	// even though it wrote output but no request of its own.
+	row, err := next.service.queries.GetSessionRun(t.Context(), db.ParseUUIDOrEmpty(resumed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := decodeRunAdmission(row.InputJson)
+	if err != nil || admitted.Resume == nil || admitted.Resume.RequestMessageID == "" {
+		t.Fatalf("saved request: %+v, %v", admitted.Resume, err)
+	}
+	request, err := next.service.interruptedRunRequest(t.Context(), row, admitted.Resume)
+	if err != nil || request.restore || request.messageID != admitted.Resume.RequestMessageID {
+		t.Fatalf("next shutdown request: %+v, %v", request, err)
+	}
+	decisionRequest, err := next.service.continuationTurnRequestMessageID(t.Context(), h.sessionID, sessionruntime.RunHandle{RunID: resumed, TurnID: row.TurnID.String()})
+	if err != nil || decisionRequest != request.messageID {
+		t.Fatalf("decision request: %q, %v", decisionRequest, err)
+	}
+
 	if target.calls < 4 {
 		t.Fatalf("setup was not retried: %d calls", target.calls)
 	}

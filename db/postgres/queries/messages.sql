@@ -1233,42 +1233,14 @@ WHERE request.team_id = public.memoh_current_team_id()
 ORDER BY request.turn_position DESC
 LIMIT 1;
 
--- name: GetRunsHistoryRequestMessageID :one
--- Resolve the latest visible input applied by any of these runs: a request or
--- steer they wrote, the request of a turn they were admitted with, or the
--- request of a turn their rows joined, which covers a request written before
--- its run was admitted.
-SELECT request.id
-FROM bot_history_messages request
-WHERE request.team_id = public.memoh_current_team_id()
-  AND request.session_id = sqlc.arg(session_id)
-  AND request.role = 'user' AND request.turn_message_seq = 1
-  AND request.turn_visible = true
-  AND (
-    request.run_id = ANY(sqlc.arg(run_ids)::uuid[])
-    OR request.turn_id = ANY(sqlc.arg(turn_ids)::uuid[])
-    OR request.turn_id IN (
-      SELECT joined.turn_id
-      FROM bot_history_messages joined
-      WHERE joined.team_id = public.memoh_current_team_id()
-        AND joined.session_id = sqlc.arg(session_id)
-        AND joined.run_id = ANY(sqlc.arg(run_ids)::uuid[])
-        AND joined.turn_id IS NOT NULL
-    )
-  )
-ORDER BY request.turn_position DESC
-LIMIT 1;
-
--- name: RunsWroteHistoryMessages :one
--- Whether any of these runs or turns left a history row, visible or not. A
--- shutdown continuation whose interrupted runs left none writes the request
--- they never persisted; one that left rows without a visible request does not.
+-- name: RunWroteHistoryMessages :one
+-- Distinguish an input never persisted from history whose request was removed.
 SELECT EXISTS (
   SELECT 1
   FROM bot_history_messages m
   WHERE m.team_id = public.memoh_current_team_id()
     AND m.session_id = sqlc.arg(session_id)
-    AND (m.run_id = ANY(sqlc.arg(run_ids)::uuid[]) OR m.turn_id = ANY(sqlc.arg(turn_ids)::uuid[]))
+    AND (m.run_id = sqlc.arg(run_id) OR m.turn_id = sqlc.arg(root_turn_id))
 )::boolean;
 
 -- name: ReplaceHistoryTurn :one

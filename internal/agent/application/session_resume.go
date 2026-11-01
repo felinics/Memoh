@@ -408,6 +408,7 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		oldCancel := cancel
 		cancel = func() { cancelDeadline(); oldCancel() }
 	}
+	data.RequestMessageID = request.messageID
 	payload, err := json.Marshal(map[string]any{"kind": "resume", "interrupted_run_id": row.RunID.String(), "resume": data})
 	if err != nil {
 		cancel()
