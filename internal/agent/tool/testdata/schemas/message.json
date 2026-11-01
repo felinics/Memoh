@@ -34,106 +34,6 @@
   "send": {
     "additionalProperties": false,
     "properties": {
-      "attachments": {
-        "description": "File paths, URLs, data URLs, or attachment objects to attach.",
-        "items": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "additionalProperties": false,
-              "anyOf": [
-                {
-                  "required": [
-                    "path"
-                  ]
-                },
-                {
-                  "required": [
-                    "url"
-                  ]
-                },
-                {
-                  "required": [
-                    "base64"
-                  ]
-                },
-                {
-                  "required": [
-                    "content_hash"
-                  ]
-                },
-                {
-                  "required": [
-                    "platform_key"
-                  ]
-                }
-              ],
-              "properties": {
-                "base64": {
-                  "type": "string"
-                },
-                "caption": {
-                  "type": "string"
-                },
-                "content_hash": {
-                  "type": "string"
-                },
-                "duration_ms": {
-                  "type": "integer"
-                },
-                "height": {
-                  "type": "integer"
-                },
-                "metadata": {
-                  "type": "object"
-                },
-                "mime": {
-                  "type": "string"
-                },
-                "name": {
-                  "type": "string"
-                },
-                "path": {
-                  "type": "string"
-                },
-                "platform_key": {
-                  "type": "string"
-                },
-                "size": {
-                  "type": "integer"
-                },
-                "source_platform": {
-                  "type": "string"
-                },
-                "thumbnail_url": {
-                  "type": "string"
-                },
-                "type": {
-                  "enum": [
-                    "image",
-                    "audio",
-                    "video",
-                    "voice",
-                    "file",
-                    "gif"
-                  ],
-                  "type": "string"
-                },
-                "url": {
-                  "type": "string"
-                },
-                "width": {
-                  "type": "integer"
-                }
-              },
-              "type": "object"
-            }
-          ]
-        },
-        "type": "array"
-      },
       "bot_id": {
         "description": "Bot ID, optional and defaults to current bot",
         "type": "string"
@@ -165,106 +65,6 @@
                 "url"
               ],
               "type": "object"
-            },
-            "type": "array"
-          },
-          "attachments": {
-            "description": "File paths, URLs, data URLs, or attachment objects to attach.",
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "additionalProperties": false,
-                  "anyOf": [
-                    {
-                      "required": [
-                        "path"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "url"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "base64"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "content_hash"
-                      ]
-                    },
-                    {
-                      "required": [
-                        "platform_key"
-                      ]
-                    }
-                  ],
-                  "properties": {
-                    "base64": {
-                      "type": "string"
-                    },
-                    "caption": {
-                      "type": "string"
-                    },
-                    "content_hash": {
-                      "type": "string"
-                    },
-                    "duration_ms": {
-                      "type": "integer"
-                    },
-                    "height": {
-                      "type": "integer"
-                    },
-                    "metadata": {
-                      "type": "object"
-                    },
-                    "mime": {
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "path": {
-                      "type": "string"
-                    },
-                    "platform_key": {
-                      "type": "string"
-                    },
-                    "size": {
-                      "type": "integer"
-                    },
-                    "source_platform": {
-                      "type": "string"
-                    },
-                    "thumbnail_url": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "enum": [
-                        "image",
-                        "audio",
-                        "video",
-                        "voice",
-                        "file",
-                        "gif"
-                      ],
-                      "type": "string"
-                    },
-                    "url": {
-                      "type": "string"
-                    },
-                    "width": {
-                      "type": "integer"
-                    }
-                  },
-                  "type": "object"
-                }
-              ]
             },
             "type": "array"
           },
@@ -359,7 +159,7 @@
         "type": "object"
       },
       "platform": {
-        "description": "Channel platform name. Defaults to current session platform.",
+        "description": "Channel platform name. Required in this session.",
         "type": "string"
       },
       "reply_to": {
@@ -367,7 +167,7 @@
         "type": "string"
       },
       "target": {
-        "description": "Channel target (chat/group/thread ID). Optional only for current-conversation attachments; specify it for another channel/person.",
+        "description": "Channel target (chat/group/thread ID). Required in this session.",
         "type": "string"
       },
       "text": {
@@ -375,6 +175,10 @@
         "type": "string"
       }
     },
+    "required": [
+      "platform",
+      "target"
+    ],
     "type": "object"
   }
 }

@@ -240,9 +240,6 @@
         },
         "access": {
           "show": "Show current identity, write access, and chat ACL context"
-        },
-        "compact": {
-          "run": "Compact the current session's context immediately"
         }
       }
     },
@@ -390,14 +387,6 @@
       "emptyFile": "(empty file)",
       "truncated": "Showing the first 2000 characters. Use the web UI for the full file."
     },
-    "compact": {
-      "unavailable": "Compaction isn't available right now.",
-      "done": "✅ Context compacted.",
-      "noop": "Nothing to compact right now.",
-      "noModel": "No compaction or chat model is configured for this bot.",
-      "modelUnavailable": "The compaction model is unavailable (disabled, missing context window, or its provider cannot cap output).",
-      "windowTooSmall": "The compaction model's context window is too small to produce a summary. Choose a compaction model with a larger context window."
-    },
     "toolApproval": {
       "unavailable": "⚠️ Approvals aren't available here right now.",
       "parseFailed": "Couldn't read that. Reply to the request with /approve or /reject, or tap a button."
@@ -489,7 +478,6 @@
     "skill": "View bot skills",
     "fs": "Browse workspace files",
     "access": "Inspect identity and permissions",
-    "compact": "Compact conversation context",
     "queue": "Queue input",
     "steer": "Steer the current response"
   },
@@ -510,7 +498,6 @@
       "reasoning_selection_unsupported": "This external agent does not support reasoning effort selection.",
       "request_invalid": "The Agent runtime request is invalid. Check the request and try again.",
       "runtime_conflict": "The Agent runtime is not ready for this operation. Refresh and try again.",
-      "runtime_limit_reached": "Too many Agent runtimes are active. Close one and try again.",
       "runtime_not_found": "That Agent runtime is no longer available. It will be started again."
     },
     "acp_agent_auth_invalid": "External agent authentication is invalid. Update the agent setup and try again.",
@@ -557,7 +544,6 @@
       "request_invalid": "Check the Agent account details and try again.",
       "revoked": "This Agent account has been disconnected. Connect it again or choose another account.",
       "runtime_busy": "Wait for the current response to finish before switching Agent accounts.",
-      "usage_auth_expired": "The account sign-in has expired. It renews after the next conversation; if usage still can't load, connect the account again.",
       "usage_unavailable": "Couldn't load usage limits right now. Try again later."
     },
     "agent_dependency_missing": "{dep_id} is not installed in this workspace. Install it from the bot's dependencies, or wait for the running installation to finish, then send the message again.",
@@ -616,8 +602,6 @@
     "chat": {
       "message_empty": "Enter a message or attach a file."
     },
-    "codex_auth_token_missing": "Codex authentication is missing or incomplete for this bot workspace.",
-    "codex_oauth_incomplete": "Codex ChatGPT sign-in is not complete for this bot workspace.",
     "compaction": {
       "model_unavailable": "The compaction model is unavailable. Pick an enabled chat model with a declared context window."
     },
@@ -632,8 +616,8 @@
       "upstream_unavailable": "Connect-It could not complete the request. Please try again shortly."
     },
     "context": {
-      "budget_unsatisfied": "The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window.",
-      "protected_overflow": "Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window."
+      "budget_unsatisfied": "This request does not fit the model context window, so the run stopped. Try again, shorten the request, start a new conversation, or switch to a model with a larger context window.",
+      "protected_overflow": "Required context exceeds the model context budget. Shorten the request, or switch to a model with a larger context window."
     },
     "context_lifecycle": {
       "access_denied": "You do not have access to context lifecycle diagnostics.",
@@ -652,13 +636,14 @@
       "turn_replacement_unsupported": "Retry and edit are unavailable for external agent sessions. Send a new message instead."
     },
     "external_runtime": {
-      "auth_required": "Codex is not connected, or its sign-in has expired. Open Agent settings to connect ChatGPT or configure an API key.",
+      "auth_required": "This Agent is not signed in, or its credential was rejected. Open Agent settings to sign in again or update the API key.",
       "busy": "This Agent is finishing an earlier operation. Try again when it has finished.",
       "context_window_exceeded": "This conversation no longer fits in the model's context window. Compact the context or start a new conversation.",
       "overloaded": "The external Agent's model service is unavailable or overloaded right now. Try again in a moment, or switch to another model.",
       "rate_limited": "The external Agent was rate limited by its model service. Please wait a moment before sending again.",
+      "reported": "The Agent reported an error: {message}",
       "request_blocked": "The model service's safety policy blocked this request. Change the request and send it again.",
-      "session_resume_failed": "The session could not be resumed. Try again or start a new conversation.",
+      "session_resume_failed": "The session could not be resumed: {message}. Try again or start a new conversation.",
       "unavailable": "The external Agent runtime is unavailable. Check the Agent setup and workspace, then try again.",
       "upstream_unreachable": "The external Agent could not reach its model service, or the connection dropped. Check the network and the Agent's service address, then try again.",
       "usage_limited": "The external Agent's account has no usage left. Try again after the limit resets, or check the account's plan and billing."
@@ -702,7 +687,8 @@
       "oauth_not_discovered": "Run OAuth discovery for this connection first."
     },
     "media": {
-      "asset_not_found": "This file no longer exists. Upload it again if you still need it."
+      "asset_not_found": "This file no longer exists. Upload it again if you still need it.",
+      "reference_unavailable": "This file could not be shared. Ask the agent to recreate or share it again."
     },
     "memory": {
       "compact_unsupported": "The selected memory provider does not support memory compaction. Choose a provider that supports it in the bot's memory settings."
@@ -728,6 +714,9 @@
       "update_failed": "The profile could not be updated."
     },
     "provider": {
+      "catalog_source_not_found": "This provider has no public model catalog. Import from its endpoint instead.",
+      "catalog_unavailable": "The model catalog is unavailable. Try again later or import from the provider endpoint.",
+      "managed_readonly": "This provider is managed by the platform. Use its managed catalog sync.",
       "name_taken": "A provider with this name already exists.",
       "not_found": "This provider no longer exists. Refresh the list and choose another one."
     },

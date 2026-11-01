@@ -36,7 +36,7 @@ func TestNonVisionModelDoesNotPrepareImages(t *testing.T) {
 	}}
 
 	merged := s.routeAndMergeAttachments(context.Background(),
-		models.GetResponse{Model: models.Model{Config: models.ModelConfig{Compatibilities: []string{}}}}, req)
+		models.GetResponse{Model: models.Model{Config: models.ModelConfig{}}}, req)
 	if opens != 0 {
 		t.Fatalf("asset opened %d time(s) for a model that cannot use images", opens)
 	}
@@ -53,9 +53,7 @@ func TestNonVisionModelDoesNotPrepareImages(t *testing.T) {
 
 	// The same request on a vision model still renders.
 	merged = s.routeAndMergeAttachments(context.Background(),
-		models.GetResponse{Model: models.Model{Config: models.ModelConfig{
-			Compatibilities: []string{models.CompatVision},
-		}}}, req)
+		models.GetResponse{Model: models.Model{Config: models.ModelConfig{Modalities: &models.ModelModalities{Input: []models.Modality{models.ModalityText, models.ModalityImage}, Output: []models.Modality{models.ModalityText}}}}}, req)
 	if opens == 0 {
 		t.Fatal("a vision model must still get the rendered frames")
 	}

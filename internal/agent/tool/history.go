@@ -4,14 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
@@ -37,21 +43,25 @@ type HistoryMessageReader interface {
 
 // HistoryProvider exposes list_sessions, get_messages, and search_messages tools.
 type HistoryProvider struct {
-	sessions SessionLister
-	messages HistoryMessageReader
-	queries  dbstore.Queries
-	logger   *slog.Logger
+	sessions    SessionLister
+	messages    HistoryMessageReader
+	queries     dbstore.Queries
+	outputLimit ToolOutputLimit
+	logger      *slog.Logger
 }
 
-func NewHistoryProvider(log *slog.Logger, sessions SessionLister, messages HistoryMessageReader, queries dbstore.Queries) *HistoryProvider {
+// NewHistoryProvider takes the tool output limit the runtime wraps every tool
+// in, so a page of a stored tool result is cut to fit it rather than elided.
+func NewHistoryProvider(log *slog.Logger, sessions SessionLister, messages HistoryMessageReader, queries dbstore.Queries, outputLimit ToolOutputLimit) *HistoryProvider {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &HistoryProvider{
-		sessions: sessions,
-		messages: messages,
-		queries:  queries,
-		logger:   log.With(slog.String("tool", "history")),
+		sessions:    sessions,
+		messages:    messages,
+		queries:     queries,
+		outputLimit: outputLimit,
+		logger:      log.With(slog.String("tool", "history")),
 	}
 }
 
@@ -63,7 +73,7 @@ func (*HistoryProvider) Usage(_ context.Context, _ SessionContext, available Ava
 		parts = append(parts, ref+": List accessible chat sessions with their bound contact/route info. Filter by `type` (chat/schedule) or `platform`.")
 	}
 	if ref, ok := available.Ref(ToolGetMessages()); ok {
-		parts = append(parts, ref+": Get recent messages from the current or selected session, or resolve one exact `message_id`.")
+		parts = append(parts, ref+": Get recent messages from the current or selected session, resolve one exact `message_id`, or page through an earlier tool result a summary cites by `ref`.")
 		if listSessionsRef != "" {
 			parts = append(parts, "Use session IDs from "+listSessionsRef+" as `session_id` for "+ref+" when reading a specific conversation.")
 		}
@@ -96,8 +106,8 @@ func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]toole
 		s := sess
 		tools = append(tools, toolexec.Tool{
 			Name:        ToolGetMessages().String(),
-			Description: "Get recent messages from a chat session, or resolve one exact message ID. Defaults to the current session. Results are returned oldest-first.",
-			Parameters:  toolexec.SchemaFor[getMessagesArgs](),
+			Description: "Get recent messages from a chat session, or resolve one exact message ID. Defaults to the current session. Results are returned oldest-first. When a summary cites an earlier tool result as ref=<message id>:<part index> and you need its original output, pass that ref: the stored result text of the current session comes back in pages with total_bytes; call again with offset set to next_offset until next_offset is absent.",
+			Parameters:  toolexec.SchemaFor[getMessagesArgs](toolexec.Minimum("offset", 0), toolexec.Minimum("max_bytes", 1)),
 			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args getMessagesArgs) (sdk.ToolOutput, error) {
 				return toolexec.OutputPair(p.execGetMessages(ctx.Context, s, args))
 			}),
@@ -197,6 +207,12 @@ func (p *HistoryProvider) execGetMessages(ctx context.Context, sess SessionConte
 	if botID == "" {
 		return nil, errors.New("bot_id is required")
 	}
+	if strings.TrimSpace(args.Ref) != "" {
+		return p.execGetToolResult(ctx, sess, args)
+	}
+	if args.Offset != nil || args.MaxBytes != nil {
+		return nil, errors.New("offset and max_bytes page a tool result and require ref")
+	}
 
 	limit := int32(30)
 	if args.Limit != nil && *args.Limit > 0 {
@@ -269,6 +285,128 @@ func (p *HistoryProvider) execGetMessages(ctx context.Context, sess SessionConte
 		out["before"] = sess.FormatTime(before)
 	}
 	return out, nil
+}
+
+// execGetToolResult pages through the text a provider receives when history
+// replays one stored tool result: the text output itself, or its canonical
+// JSON document. A ref names the row and the part's position in the replayed
+// message, and resolves only inside the current session.
+func (p *HistoryProvider) execGetToolResult(ctx context.Context, sess SessionContext, args getMessagesArgs) (any, error) {
+	if strings.TrimSpace(args.MessageID) != "" || strings.TrimSpace(args.Before) != "" || args.Limit != nil {
+		return nil, errors.New("ref cannot be combined with message_id, before, or limit; page with offset and max_bytes")
+	}
+	sessionID := strings.TrimSpace(sess.SessionID)
+	if sessionID == "" {
+		return nil, errors.New("ref reads the current session, and there is none")
+	}
+	if requested := strings.TrimSpace(args.SessionID); requested != "" && requested != sessionID {
+		return nil, errors.New("ref reads only the current session; omit session_id")
+	}
+	messageID, partIndex, err := parseToolResultRef(args.Ref)
+	if err != nil {
+		return nil, err
+	}
+	offset := 0
+	if args.Offset != nil {
+		offset = *args.Offset
+	}
+	if offset < 0 {
+		return nil, errors.New("offset must be >= 0")
+	}
+	if args.MaxBytes != nil && *args.MaxBytes < 1 {
+		return nil, errors.New("max_bytes must be >= 1")
+	}
+
+	msg, err := p.messages.GetByIDBySession(ctx, sessionID, messageID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("message %s is not in the current session; ref reads only the current session", messageID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	replayed := historyfrag.StoredModelMessageToSDKMessage(historyfrag.DecodeStoredModelMessage(p.logger, msg.ID, msg.Role, msg.Content))
+	if partIndex >= len(replayed.Content) {
+		return nil, fmt.Errorf("message %s has no part %d", messageID, partIndex)
+	}
+	result, ok := replayed.Content[partIndex].(sdk.ToolResultPart)
+	if !ok {
+		return nil, fmt.Errorf("part %d of message %s is a %s part, not a tool result", partIndex, messageID, replayed.Content[partIndex].PartType())
+	}
+	text := result.Result.String()
+	if offset > len(text) {
+		return nil, fmt.Errorf("offset %d is past the end of the result (total_bytes %d)", offset, len(text))
+	}
+	return p.toolResultPage(msg.ID+":"+strconv.Itoa(partIndex), result, text, offset, args.MaxBytes), nil
+}
+
+func parseToolResultRef(raw string) (string, int, error) {
+	messageID, part, found := strings.Cut(strings.TrimPrefix(strings.TrimSpace(raw), "ref="), ":")
+	index, indexErr := strconv.ParseUint(part, 10, 31)
+	if _, idErr := dbpkg.ParseUUID(messageID); !found || indexErr != nil || idErr != nil {
+		return "", 0, fmt.Errorf("ref must be <message id>:<part index> as a summary cites it, got %q", raw)
+	}
+	return messageID, int(index), nil
+}
+
+// toolResultPage returns the longest page from offset that the runtime's
+// output limit leaves unchanged, so its content is exactly
+// text[offset:next_offset]. Pages begin and end on rune boundaries, and while
+// text remains a page holds at least one rune, even past max_bytes.
+func (p *HistoryProvider) toolResultPage(ref string, result sdk.ToolResultPart, text string, offset int, maxBytes *int) map[string]any {
+	limit := contextlimit.NormalizedLimit(p.outputLimit)
+	start := offset
+	for start > 0 && start < len(text) && !utf8.RuneStart(text[start]) {
+		start--
+	}
+	budget := limit.MaxBytes
+	if maxBytes != nil {
+		budget = min(budget, *maxBytes)
+	}
+	end := len(text)
+	if budget < end-start {
+		end = start + budget
+	}
+	newlines := 0
+	for i := start; i < end; i++ {
+		if text[i] != '\n' {
+			continue
+		}
+		if newlines++; newlines == limit.MaxLines {
+			end = i
+			break
+		}
+	}
+	minEnd := start
+	if start < len(text) {
+		_, size := utf8.DecodeRuneInString(text[start:])
+		minEnd = start + size
+	}
+	runeEnd := func(end int) int {
+		end = max(end, minEnd)
+		for end > minEnd && end < len(text) && !utf8.RuneStart(text[end]) {
+			end--
+		}
+		return end
+	}
+	page := func(end int) map[string]any {
+		out := map[string]any{"ok": true, "ref": ref, "tool_name": result.ToolName, "offset": start, "total_bytes": len(text), "content": text[start:end]}
+		if result.IsError {
+			out["is_error"] = true
+		}
+		if end < len(text) {
+			out["next_offset"] = end
+		}
+		return out
+	}
+	fits := func(end int) bool { return len(contextlimit.MarshalString(page(end))) <= limit.MaxBytes }
+	end = runeEnd(end)
+	if !fits(end) {
+		// Every shorter page carries next_offset, so its encoded size grows
+		// with its end and the longest one that fits can be bisected.
+		n := sort.Search(end-minEnd, func(n int) bool { return !fits(runeEnd(minEnd + n)) })
+		end = runeEnd(minEnd + n - 1)
+	}
+	return page(end)
 }
 
 func (p *HistoryProvider) ensureSessionVisible(ctx context.Context, sess SessionContext, sessionID string) error {
@@ -644,7 +782,10 @@ type listSessionsArgs struct {
 type getMessagesArgs struct {
 	Before    string `json:"before,omitempty" jsonschema:"ISO 8601 timestamp cursor. When provided, returns messages created before this time."`
 	Limit     *int   `json:"limit,omitempty" jsonschema:"Maximum number of messages to return. Default 30, max 100."`
+	MaxBytes  *int   `json:"max_bytes,omitempty" jsonschema:"With ref: the most bytes of the result to return in this page. Default: as many as one tool result holds."`
 	MessageID string `json:"message_id,omitempty" jsonschema:"Exact persisted message ID to resolve, such as a message_id returned in search_memory source_refs."`
+	Offset    *int   `json:"offset,omitempty" jsonschema:"With ref: byte offset in the result to start from; pass the previous page's next_offset. Default 0."`
+	Ref       string `json:"ref,omitempty" jsonschema:"Tool result reference <message id>:<part index>, as cited by a summary (ref=...). Reads that earlier tool result's original text from the current session, one page at a time."`
 	SessionID string `json:"session_id,omitempty" jsonschema:"Session ID to read. Defaults to the current session when omitted."`
 }
 

@@ -3,15 +3,12 @@ package db
 import (
 	"context"
 	"os"
-	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 func TestCompactionArtifactMigrationPostgresPath(t *testing.T) {
@@ -44,32 +41,10 @@ func TestCompactionArtifactMigrationPostgresPath(t *testing.T) {
 	}
 	bindTeamQueryFixture(t, ctx, tx)
 	if _, err := tx.Exec(ctx, `
-CREATE SEQUENCE session_runtime_fencing_token_seq AS BIGINT NO CYCLE;
-
 CREATE TABLE bot_sessions (
   id UUID PRIMARY KEY,
   bot_id UUID NOT NULL,
-  team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
-  runtime_fencing_token BIGINT NOT NULL DEFAULT 0,
-  -- ClearHistoryBySession/ByBot scrub runtime continuity anchors alongside
-  -- the epoch bump; the fixture carries the column those queries touch.
-  runtime_metadata JSONB NOT NULL DEFAULT '{}'::jsonb
-);
-
-CREATE TABLE agent_session_publications (
-  team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
-  session_id UUID NOT NULL
-);
-
--- The history clears retire an interrupted run's resume intent.
-CREATE TABLE session_runs (
-  run_id UUID PRIMARY KEY,
-  team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
-  session_id UUID NOT NULL,
-  state TEXT NOT NULL,
-  error_code TEXT,
-  fencing_token BIGINT NOT NULL DEFAULT 0,
-  input_json JSONB NOT NULL
+  team_id UUID NOT NULL DEFAULT public.memoh_current_team_id()
 );
 
 CREATE TABLE bot_history_message_compacts (
@@ -106,43 +81,17 @@ CREATE TABLE bot_history_messages (
 	legacyID := "00000000-0000-0000-0000-00000000c001"
 	repairArtifactID := "00000000-0000-0000-0000-00000000c101"
 	clearedArtifactID := "00000000-0000-0000-0000-00000000c201"
-	activeID := "00000000-0000-0000-0000-00000000d001"
-	parentOneID := "00000000-0000-0000-0000-00000000d002"
-	parentTwoID := "00000000-0000-0000-0000-00000000d003"
-	unlinkedID := "00000000-0000-0000-0000-00000000d004"
-	foreignArtifactID := "00000000-0000-0000-0000-00000000d101"
-	crossOwnerArtifactID := "00000000-0000-0000-0000-00000000d102"
-	logOnlyArtifactID := "00000000-0000-0000-0000-00000000d201"
 	botID := "00000000-0000-0000-0000-00000000b001"
 	repairBotID := "00000000-0000-0000-0000-00000000b002"
 	clearedBotID := "00000000-0000-0000-0000-00000000b003"
-	foreignBotID := "00000000-0000-0000-0000-00000000b101"
-	logOnlyBotID := "00000000-0000-0000-0000-00000000b201"
 	sessionID := "00000000-0000-0000-0000-00000000e001"
 	repairSessionID := "00000000-0000-0000-0000-00000000e002"
 	clearedSessionID := "00000000-0000-0000-0000-00000000e003"
-	foreignSessionID := "00000000-0000-0000-0000-00000000e101"
 	if _, err := tx.Exec(ctx, `
 	INSERT INTO bot_sessions (id, bot_id)
-	VALUES ($1, $2), ($3, $4), ($5, $6), ($7, $8)
-		`, sessionID, botID, foreignSessionID, foreignBotID, repairSessionID, repairBotID, clearedSessionID, clearedBotID); err != nil {
+	VALUES ($1, $2), ($3, $4), ($5, $6)
+		`, sessionID, botID, repairSessionID, repairBotID, clearedSessionID, clearedBotID); err != nil {
 		t.Fatalf("insert sessions: %v", err)
-	}
-	if _, err := tx.Exec(ctx, `
-	INSERT INTO session_runs (run_id, session_id, state, error_code, input_json)
-	VALUES
-	  ('00000000-0000-0000-0000-00000000f001', $1, 'lost', 'session_runtime.interrupted', '{"resume": {}}'),
-	  ('00000000-0000-0000-0000-00000000f101', $2, 'lost', 'session_runtime.interrupted', '{"resume": {}}')
-		`, sessionID, foreignSessionID); err != nil {
-		t.Fatalf("insert interrupted runs: %v", err)
-	}
-	for _, table := range []string{"agent_session_publications"} {
-		if _, err := tx.Exec(ctx,
-			"INSERT INTO "+pgx.Identifier{table}.Sanitize()+" (session_id) VALUES ($1), ($2)",
-			sessionID, foreignSessionID,
-		); err != nil {
-			t.Fatalf("insert %s fixture: %v", table, err)
-		}
 	}
 	if _, err := tx.Exec(ctx, `
 	INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary, message_count)
@@ -196,18 +145,6 @@ INSERT INTO bot_history_messages (
 	assertCompactionEpoch(t, ctx, tx, "bot_history_message_compacts", repairArtifactID, 0)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", clearedSessionID, 1)
 	assertCompactionEpoch(t, ctx, tx, "bot_history_message_compacts", clearedArtifactID, 0)
-	parsedClearedSessionID, err := ParseUUID(clearedSessionID)
-	if err != nil {
-		t.Fatalf("parse cleared session id: %v", err)
-	}
-	clearedLineage, err := sqlc.New(tx).ListCompactionArtifactLineageBySession(ctx, parsedClearedSessionID)
-	if err != nil {
-		t.Fatalf("query cleared session lineage: %v", err)
-	}
-	if len(clearedLineage) != 0 {
-		t.Fatalf("cleared session retained active lineage: %#v", clearedLineage)
-	}
-
 	var (
 		legacyVersion  int32
 		legacyCoverage string
@@ -230,116 +167,6 @@ WHERE id = $1
 		t.Fatalf("legacy artifact defaults = (%d, %q, %d, %d, %d, %d, %v), want (1, \"[]\", 0, 0, 0, 0, true)",
 			legacyVersion, legacyCoverage, legacyStartMs, legacyEndMs, legacyLevel, legacyParents, legacyUnmarked)
 	}
-
-	if _, err := tx.Exec(ctx, `
-INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary, parent_ids)
-VALUES ($1, $2, $3, 'ok', 'active', ARRAY[$4, $5]::uuid[])
-`, activeID, botID, sessionID, parentOneID, parentTwoID); err != nil {
-		t.Fatalf("insert active artifact: %v", err)
-	}
-	if _, err := tx.Exec(ctx, `
-INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary, superseded_by, superseded_at)
-VALUES
-  ($2, $4, $5, 'ok', 'parent one', $1, now()),
-  ($3, $4, $5, 'ok', 'parent two', $1, now())
-`, activeID, parentOneID, parentTwoID, botID, sessionID); err != nil {
-		t.Fatalf("insert parent artifacts: %v", err)
-	}
-	if _, err := tx.Exec(ctx, `
-INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary)
-VALUES ($1, $2, $3, 'ok', 'unlinked')
-`, unlinkedID, botID, sessionID); err != nil {
-		t.Fatalf("insert unlinked artifact: %v", err)
-	}
-	if _, err := tx.Exec(ctx, `
-INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary)
-VALUES ($1, $2, $3, 'ok', 'foreign artifact')
-	`, foreignArtifactID, foreignBotID, foreignSessionID); err != nil {
-		t.Fatalf("insert foreign artifact: %v", err)
-	}
-	if _, err := tx.Exec(ctx, `
-INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary)
-VALUES ($1, $2, $3, 'ok', 'cross-owner artifact')
-	`, crossOwnerArtifactID, foreignBotID, sessionID); err != nil {
-		t.Fatalf("insert cross-owner artifact: %v", err)
-	}
-	if _, err := tx.Exec(ctx, `
-INSERT INTO bot_history_message_compacts (id, bot_id, status, summary)
-VALUES ($1, $2, 'ok', 'log-only artifact')
-	`, logOnlyArtifactID, logOnlyBotID); err != nil {
-		t.Fatalf("insert log-only artifact: %v", err)
-	}
-	if _, err := tx.Exec(ctx, `
-	INSERT INTO bot_history_messages (id, bot_id, session_id, compact_id)
-	VALUES ('00000000-0000-0000-0000-00000000a101', $1, $2, $3)
-		`, foreignBotID, foreignSessionID, foreignArtifactID); err != nil {
-		t.Fatalf("insert compacted messages: %v", err)
-	}
-
-	queries := sqlc.New(tx)
-	assertGeneratedLineageQueries(t, ctx, queries, botID, sessionID, []string{parentOneID, parentTwoID}, activeID)
-
-	parsedSessionID, err := ParseUUID(sessionID)
-	if err != nil {
-		t.Fatalf("parse session id: %v", err)
-	}
-	if err := queries.ClearHistoryBySession(ctx, parsedSessionID); err != nil {
-		t.Fatalf("delete session history through generated query: %v", err)
-	}
-	assertRowCount(t, ctx, tx, "bot_history_messages", 2)
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 4)
-	assertCompactionEpoch(t, ctx, tx, "bot_sessions", sessionID, 1)
-	// The session clear must also drop that session's runtime publication while the
-	// foreign session's rows survive.
-	assertRowCount(t, ctx, tx, "agent_session_publications", 1)
-	assertResumeIntents(t, ctx, tx, 1)
-
-	parsedForeignBotID, err := ParseUUID(foreignBotID)
-	if err != nil {
-		t.Fatalf("parse foreign bot id: %v", err)
-	}
-	if err := queries.ClearHistoryByBot(ctx, parsedForeignBotID); err != nil {
-		t.Fatalf("delete bot history through generated query: %v", err)
-	}
-	assertRowCount(t, ctx, tx, "bot_history_messages", 1)
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 3)
-	assertCompactionEpoch(t, ctx, tx, "bot_sessions", foreignSessionID, 1)
-	assertRowCount(t, ctx, tx, "agent_session_publications", 0)
-	assertResumeIntents(t, ctx, tx, 0)
-
-	parsedRepairSessionID, err := ParseUUID(repairSessionID)
-	if err != nil {
-		t.Fatalf("parse repair session id: %v", err)
-	}
-	if err := queries.ClearHistoryBySession(ctx, parsedRepairSessionID); err != nil {
-		t.Fatalf("delete repaired session history through generated query: %v", err)
-	}
-	assertRowCount(t, ctx, tx, "bot_history_messages", 0)
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 2)
-	assertCompactionEpoch(t, ctx, tx, "bot_sessions", repairSessionID, 2)
-	if err := queries.ClearHistoryBySession(ctx, parsedClearedSessionID); err != nil {
-		t.Fatalf("delete cleared session history through generated query: %v", err)
-	}
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 1)
-	assertCompactionEpoch(t, ctx, tx, "bot_sessions", clearedSessionID, 2)
-
-	parsedBotID, err := ParseUUID(botID)
-	if err != nil {
-		t.Fatalf("parse bot id: %v", err)
-	}
-	if err := queries.DeleteCompactionLogsByBot(ctx, parsedBotID); err != nil {
-		t.Fatalf("fence in-flight compaction before deleting logs: %v", err)
-	}
-	assertCompactionEpoch(t, ctx, tx, "bot_sessions", sessionID, 2)
-
-	parsedLogOnlyBotID, err := ParseUUID(logOnlyBotID)
-	if err != nil {
-		t.Fatalf("parse log-only bot id: %v", err)
-	}
-	if err := queries.DeleteCompactionLogsByBot(ctx, parsedLogOnlyBotID); err != nil {
-		t.Fatalf("delete artifacts through generated query: %v", err)
-	}
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 0)
 
 	down0109 := readEmbeddedMigration(t, "postgres/migrations/0109_compaction_epoch.down.sql")
 	if _, err := tx.Exec(ctx, down0109); err != nil {
@@ -371,54 +198,7 @@ WHERE table_schema = $1
 	if artifactColumns != 0 {
 		t.Fatalf("0108 down migration left %d artifact columns behind", artifactColumns)
 	}
-	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 0)
-}
-
-func assertGeneratedLineageQueries(t *testing.T, ctx context.Context, queries *sqlc.Queries, botID, sessionID string, parentIDs []string, activeID string) {
-	t.Helper()
-	parsedBotID, err := ParseUUID(botID)
-	if err != nil {
-		t.Fatalf("parse bot id: %v", err)
-	}
-	parsedSessionID, err := ParseUUID(sessionID)
-	if err != nil {
-		t.Fatalf("parse session id: %v", err)
-	}
-	parsedActiveID, err := ParseUUID(activeID)
-	if err != nil {
-		t.Fatalf("parse active id: %v", err)
-	}
-	rows, err := queries.ListCompactionArtifactLineageBySession(ctx, parsedSessionID)
-	if err != nil {
-		t.Fatalf("query session lineage: %v", err)
-	}
-	seen := make(map[string]struct{}, len(rows))
-	for _, row := range rows {
-		if row.BotID != parsedBotID {
-			t.Fatalf("session lineage query crossed bot ownership: row=%s bot=%s want=%s", row.ID, row.BotID, parsedBotID)
-		}
-		seen[row.ID.String()] = struct{}{}
-	}
-	for _, id := range append(parentIDs, activeID) {
-		if _, ok := seen[id]; !ok {
-			t.Fatalf("session lineage query omitted %s: %#v", id, seen)
-		}
-	}
-	parents, err := queries.ListCompactionArtifactParentIDsBySuccessor(ctx, sqlc.ListCompactionArtifactParentIDsBySuccessorParams{
-		SuccessorID: parsedActiveID,
-		BotID:       parsedBotID,
-		SessionID:   parsedSessionID,
-	})
-	if err != nil {
-		t.Fatalf("query reverse lineage edges: %v", err)
-	}
-	gotParents := make([]string, 0, len(parents))
-	for _, parent := range parents {
-		gotParents = append(gotParents, parent.String())
-	}
-	if !reflect.DeepEqual(gotParents, parentIDs) {
-		t.Fatalf("reverse lineage parents = %#v, want %#v", gotParents, parentIDs)
-	}
+	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 3)
 }
 
 func assertForeignKeyDeleteAction(t *testing.T, ctx context.Context, tx pgx.Tx, table, constraint, want string) {
@@ -476,17 +256,6 @@ SELECT EXISTS (
 	}
 	if got != want {
 		t.Fatalf("%s.%s existence = %v, want %v", table, column, got, want)
-	}
-}
-
-func assertResumeIntents(t *testing.T, ctx context.Context, tx pgx.Tx, want int) {
-	t.Helper()
-	var got int
-	if err := tx.QueryRow(ctx, "SELECT count(*) FROM session_runs WHERE input_json ? 'resume'").Scan(&got); err != nil {
-		t.Fatalf("count resume intents: %v", err)
-	}
-	if got != want {
-		t.Fatalf("resume intents = %d, want %d", got, want)
 	}
 }
 

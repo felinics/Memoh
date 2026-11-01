@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/markdownmedia"
 	"github.com/felinics/memoh/internal/rpc"
 )
 
@@ -79,5 +80,11 @@ func TestDeliveryErrorKeepsChannelSentinels(t *testing.T) {
 	}
 	if deliveryError(nil) != nil {
 		t.Fatal("deliveryError(nil) is not nil")
+	}
+}
+
+func TestPartialPublicationSurvivesSplitTransport(t *testing.T) {
+	if !errors.Is(restoreChannelError(overWire(t, deliveryError(markdownmedia.ErrPartialDelivery))), markdownmedia.ErrPartialDelivery) {
+		t.Fatal("partial publication status lost")
 	}
 }

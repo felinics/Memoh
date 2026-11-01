@@ -694,7 +694,7 @@ func TestResolveTelegramSender_SenderChat(t *testing.T) {
 func TestTelegramRecipient_NumericChatID(t *testing.T) {
 	t.Parallel()
 
-	r, chatID, err := telegramRecipient("12345")
+	r, chatID, _, err := telegramRecipient("12345")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -709,7 +709,7 @@ func TestTelegramRecipient_NumericChatID(t *testing.T) {
 func TestTelegramRecipient_ChannelUsername(t *testing.T) {
 	t.Parallel()
 
-	r, chatID, err := telegramRecipient("@channel")
+	r, chatID, _, err := telegramRecipient("@channel")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -724,7 +724,7 @@ func TestTelegramRecipient_ChannelUsername(t *testing.T) {
 func TestTelegramRecipient_Invalid(t *testing.T) {
 	t.Parallel()
 
-	_, _, err := telegramRecipient("invalid")
+	_, _, _, err := telegramRecipient("invalid")
 	if err == nil {
 		t.Fatal("expected error for invalid target")
 	}

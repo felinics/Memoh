@@ -64,7 +64,7 @@ func sendTelegramRichMessageReturnMessage(
 	if err := validateTelegramActions(actions); err != nil {
 		return 0, 0, err
 	}
-	parsedChatID, channelUsername, parseErr := parseTelegramTarget(target)
+	parsedChatID, channelUsername, threadID, parseErr := parseTelegramTarget(target)
 	if parseErr != nil {
 		return 0, 0, parseErr
 	}
@@ -73,6 +73,9 @@ func sendTelegramRichMessageReturnMessage(
 		payload["chat_id"] = channelUsername
 	} else {
 		payload["chat_id"] = strconv.FormatInt(parsedChatID, 10)
+	}
+	if threadID > 0 {
+		payload["message_thread_id"] = threadID
 	}
 	if replyTo > 0 {
 		payload["reply_parameters"] = map[string]any{"message_id": replyTo}

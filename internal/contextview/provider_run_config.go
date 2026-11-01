@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -174,7 +175,6 @@ func preserveExplicitHistoryMetadata(collected []contextfrag.ContextFrag, cfg ag
 		if candidate, ok := overrides[index]; ok && frag.ID == messageFragmentID(index) {
 			frag.Kind = contextfrag.KindConversationSummary
 			frag.Ref = candidate.Ref
-			frag.Coverage = candidate.Coverage
 			frag.Provenance.Source = candidate.Provenance.Source
 			frag.Provenance.SourceID = candidate.Provenance.SourceID
 			frag.Provenance.Collector = candidate.Provenance.Collector
@@ -189,7 +189,7 @@ func messageFragmentID(index int) string {
 }
 
 func hasExplicitHistoryMetadata(frag contextfrag.ContextFrag) bool {
-	return frag.Kind == contextfrag.KindConversationSummary && frag.Coverage != nil && frag.Ref.Durability == contextfrag.RefDurable
+	return frag.Kind == contextfrag.KindConversationSummary && frag.Ref.Durability == contextfrag.RefDurable
 }
 
 func singleSDKMessage(frag contextfrag.ContextFrag) (sdk.Message, bool) {
@@ -367,6 +367,9 @@ func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg
 		return providerViewFallback(logger, fallbackCfg, ledger, budgetPlan, "budget_plan_error", "context budget plan failed", budgetErr), nil
 	}
 
+	// An armed run keeps its whole history and folds what does not fit before
+	// it dispatches; every dispatch checks the allowance.
+	armed := cfg.SwitchContext != nil
 	registry := NewMapCollectorRegistry(StaticCollector{CollectorName: sourceFragsCollectorName, Frags: frags})
 	builder := NewBuilder(registry, selector, StablePrefixPlacer{}, NewMapRendererRegistry(&SDKMessagesRenderer{}))
 	view, err := builder.Build(ctx, BuildInput{
@@ -377,11 +380,15 @@ func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg
 			MaxTokens:           cfg.ContextBudgetMaxTokens,
 			Plan:                budgetPlan,
 			RecentProtectTokens: resolveRecentProtectTokens(cfg.ContextRecentProtectTokens),
+			KeepHistory:         armed,
 		},
 		DynamicMutators: cfg.ContextDynamicMutators,
 	})
-	if (recoveryAttempts == 0 || (budgetPlan != nil && providerHistoryCost(cfg.ContextSourceFrags) > budgetPlan.HistoryBudget)) && budgetErr == nil && (err == nil || errors.Is(err, contextfrag.ErrProtectedContextOverflow)) &&
-		recoveryAttempts < 3 && cfg.RecoverContextBudget != nil && budgetPlan != nil && budgetPlan.HistoryBudget > 0 &&
+	compacted := recoveryAttempts > 0
+	// One compaction per request: what it leaves is only rechecked, never
+	// compacted again to reach a lower mark.
+	if recoveryAttempts == 0 && budgetErr == nil && (err == nil || errors.Is(err, contextfrag.ErrProtectedContextOverflow)) &&
+		cfg.RecoverContextBudget != nil && budgetPlan != nil && budgetPlan.HistoryBudget > 0 &&
 		budgetPlan.ActualSystemCost <= budgetPlan.SystemBudget && ctx.Err() == nil {
 		recovery := cfg
 		recovery.ContextManifest.BudgetPlan = budgetPlan
@@ -398,10 +405,24 @@ func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg
 		if recovered && recoveryErr == nil && !reflect.DeepEqual(recovery.ContextSourceFrags, cfg.ContextSourceFrags) {
 			return applyProviderRunConfigAttempt(ctx, logger, recovery, recoveryAttempts+1)
 		}
+		compacted = compacted || recovered || errors.Is(recoveryErr, contextfrag.ErrBudgetUnsatisfied)
+		if errors.Is(recoveryErr, contextfrag.ErrBudgetUnsatisfied) {
+			err = recoveryErr
+		}
+	}
+	if compacted && errors.Is(err, contextfrag.ErrProtectedContextOverflow) {
+		err = fmt.Errorf("%w: compaction did not make the context fit: %s", contextfrag.ErrBudgetUnsatisfied, err.Error())
 	}
 	if budgetErr != nil {
 		recordContextBudgetFailure(ledger, budgetErr)
 		return providerBudgetAuditConfig(cfg, view, ledger, budgetPlan), budgetErr
+	}
+	if err == nil && cfg.RecoverContextBudget != nil && (slices.ContainsFunc(view.Selected, func(frag contextfrag.ContextFrag) bool {
+		return frag.ID == historyTrimNoticeID
+	}) || slices.ContainsFunc(view.Manifest.SelectionDecisions, func(decision contextfrag.SelectionDecision) bool {
+		return decision.Reason == summaryBudgetEditReason
+	})) {
+		err = contextfrag.ErrBudgetUnsatisfied
 	}
 	if err != nil {
 		if isContextBudgetError(err) {
@@ -414,7 +435,7 @@ func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg
 	if !ok {
 		return providerViewFallback(logger, fallbackCfg, ledger, budgetPlan, "unexpected_payload", "context view rendered unexpected payload", nil), nil
 	}
-	if err := validateProviderRenderedEnvelope(payload, cfg.ContextToolDefs, budgetPlan); err != nil {
+	if err := validateProviderRenderedEnvelope(payload, cfg.ContextToolDefs, budgetPlan); err != nil && !armed {
 		recordContextBudgetFailure(ledger, err)
 		return providerBudgetAuditConfig(cfg, view, ledger, budgetPlan), err
 	}
@@ -450,7 +471,6 @@ func applyProviderRunConfigAttempt(ctx context.Context, logger *slog.Logger, cfg
 	cfg.ContextManifest = manifest
 	cfg.ContextCachePlan = plan
 	cfg.ContextMutations = ledger
-	cfg.ContextStepReselector = SelectProviderStepMessages
 	if cfg.ContextLifecycle != nil {
 		cfg.ContextLifecycle.SetManifest(manifest)
 	}
@@ -523,8 +543,7 @@ func providerBudgetAuditConfig(
 
 // providerViewFallback assembles the legacy payload when the context view
 // cannot. It is an assembly path, not a budget-disabled path: the budget plan
-// and step reselection stay in force so every dispatch still meets the final
-// envelope check.
+// stays in force so every dispatch still meets the final envelope check.
 func providerViewFallback(
 	logger *slog.Logger,
 	cfg agentpkg.RunConfig,
@@ -556,7 +575,6 @@ func providerViewFallback(
 	cfg.ContextManifest = manifest
 	cfg.ContextCachePlan = plan
 	cfg.ContextMutations = ledger
-	cfg.ContextStepReselector = SelectProviderStepMessages
 	if cfg.ContextLifecycle != nil {
 		cfg.ContextLifecycle.SetManifest(manifest)
 	}
@@ -931,14 +949,4 @@ func warnMissingContextWindow(ctx context.Context, logger *slog.Logger, cfg agen
 		slog.String("session_id", cfg.ContextScope.SessionID),
 		slog.String("model_id", cfg.CurrentModelID),
 	)
-}
-
-func providerHistoryCost(frags []contextfrag.ContextFrag) int {
-	cost := 0
-	for _, frag := range frags {
-		if frag.Slot != contextfrag.SlotSystem && frag.Slot != contextfrag.SlotCurrentUser && frag.Kind != contextfrag.KindCurrentUserMessage {
-			cost += contextfrag.ResolveProviderBudgetFragTokens(frag)
-		}
-	}
-	return cost
 }

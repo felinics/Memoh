@@ -241,32 +241,29 @@ func TestAgentGenerateStopsOnTerminalTextLoopAbort(t *testing.T) {
 	}
 }
 
-func TestAgentGenerateRunsStepReselectorBeforeNextProviderCall(t *testing.T) {
+// A step request only grows: every later request extends the one before it
+// byte for byte, so the results the run already sent stay whole however many
+// steps it takes.
+func TestAgentGenerateStepRequestsOnlyAppend(t *testing.T) {
 	t.Parallel()
 
-	ledger := contextfrag.NewMutationLedger()
-	var secondCallMessages []sdk.Message
+	const steps = 24
+	result := strings.Repeat("tool-result ", 256)
+	var requests [][]sdk.Message
 	modelProvider := &atomicMockProvider{
 		handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
-			switch call {
-			case 1:
-				return sdk.ModelResult{
-					FinishReason: sdk.FinishReasonToolCalls,
-					ToolCalls: []sdk.ToolCall{{
-						ToolCallID: "call-1",
-						ToolName:   "lookup",
-						Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "one"}),
-					}},
-				}, nil
-			case 2:
-				secondCallMessages = append([]sdk.Message(nil), params.Messages...)
-				return sdk.ModelResult{
-					Text:         "ok",
-					FinishReason: sdk.FinishReasonStop,
-				}, nil
-			default:
-				return sdk.ModelResult{}, errors.New("unexpected provider call")
+			requests = append(requests, append([]sdk.Message(nil), params.Messages...))
+			if call > steps {
+				return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 			}
+			return sdk.ModelResult{
+				FinishReason: sdk.FinishReasonToolCalls,
+				ToolCalls: []sdk.ToolCall{{
+					ToolCallID: fmt.Sprintf("call-%d", call),
+					ToolName:   "lookup",
+					Input:      toolexec.ArgumentsFromValue(map[string]any{"q": call}),
+				}},
+			}, nil
 		},
 	}
 
@@ -277,259 +274,56 @@ func TestAgentGenerateRunsStepReselectorBeforeNextProviderCall(t *testing.T) {
 				Name:       "lookup",
 				Parameters: &jsonschema.Schema{Type: "object"},
 				Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
-					return toolexec.OutputFromValue(map[string]any{"answer": strings.Repeat("tool-result ", 64)}), nil
+					return toolexec.OutputFromValue(result), nil
 				},
 			}},
 		},
 	})
-
-	var reselectorCalls atomic.Int32
-	recentProtect := 4096
-	_, err := a.Generate(context.Background(), RunConfig{
-		Model:                      &sdk.Model{ID: "mock-model", Provider: modelProvider},
-		Messages:                   []sdk.Message{sdk.UserMessage("start")},
-		SupportsToolCall:           true,
-		Identity:                   SessionContext{BotID: "bot-1"},
-		ContextMutations:           ledger,
-		ContextRecentProtectTokens: &recentProtect,
-		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
-			reselectorCalls.Add(1)
-			if input.InitialMessageCount != 1 {
-				t.Fatalf("InitialMessageCount = %d, want 1", input.InitialMessageCount)
-			}
-			if len(input.Messages) != 3 {
-				t.Fatalf("selector input messages = %d, want 3", len(input.Messages))
-			}
-			// The resolved recent-protect window travels with the step
-			// reselection input.
-			if input.RecentProtectTokens == nil || *input.RecentProtectTokens != recentProtect {
-				t.Fatalf("RecentProtectTokens = %v, want %d", input.RecentProtectTokens, recentProtect)
-			}
-			return ContextStepSelectionResult{
-				Messages:    append([]sdk.Message(nil), input.Messages[:input.InitialMessageCount]...),
-				Dropped:     len(input.Messages) - input.InitialMessageCount,
-				DropReasons: map[string]int{"test": len(input.Messages) - input.InitialMessageCount},
-			}
-		},
-	})
-	if err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
-	if reselectorCalls.Load() != 1 {
-		t.Fatalf("step reselector calls = %d, want 1", reselectorCalls.Load())
-	}
-	if len(secondCallMessages) != 1 {
-		t.Fatalf("second provider call messages = %d, want 1", len(secondCallMessages))
-	}
-	if secondCallMessages[0].Role != sdk.MessageRoleUser {
-		t.Fatalf("second provider call first role = %q, want user", secondCallMessages[0].Role)
-	}
-	records := ledger.Records()
-	if len(records) != 1 || records[0].Kind != contextfrag.MutationLoopStepReselection {
-		t.Fatalf("mutation records = %#v, want one loop_step_reselection", records)
-	}
-	if got := ledger.FinalInputHash(); got == "" {
-		t.Fatal("final input hash was not updated after step reselection")
-	}
-}
-
-func TestAgentGenerateRecordsMidTaskPruneForProtectedRescue(t *testing.T) {
-	t.Parallel()
 
 	ledger := contextfrag.NewMutationLedger()
-	modelProvider := &atomicMockProvider{
-		handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
-			if call == 1 {
-				return sdk.ModelResult{
-					FinishReason: sdk.FinishReasonToolCalls,
-					ToolCalls: []sdk.ToolCall{{
-						ToolCallID: "call-1",
-						ToolName:   "lookup",
-						Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "one"}),
-					}},
-				}, nil
-			}
-			return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
-		},
-	}
-
-	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{
-		staticToolProvider{
-			tools: []toolexec.Tool{{
-				Name:       "lookup",
-				Parameters: &jsonschema.Schema{Type: "object"},
-				Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
-					return toolexec.OutputFromValue(map[string]any{"answer": strings.Repeat("tool-result ", 64)}), nil
-				},
-			}},
-		},
-	})
-
+	plan := contextfrag.ContextBudgetPlan{Window: 200_000, OutputReserve: 1000}
 	_, err := a.Generate(context.Background(), RunConfig{
 		Model:            &sdk.Model{ID: "mock-model", Provider: modelProvider},
 		Messages:         []sdk.Message{sdk.UserMessage("start")},
 		SupportsToolCall: true,
 		Identity:         SessionContext{BotID: "bot-1"},
 		ContextMutations: ledger,
-		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
-			return ContextStepSelectionResult{
-				Messages:        append([]sdk.Message(nil), input.Messages...),
-				Truncated:       1,
-				ProtectedPruned: 1,
-			}
-		},
+		ContextManifest:  contextfrag.Manifest{BudgetPlan: &plan},
 	})
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
-	var pruneDetail string
-	for _, record := range ledger.Records() {
-		if record.Kind == contextfrag.MutationMidTaskPrune {
-			pruneDetail = record.Detail
+	if len(requests) != steps+1 {
+		t.Fatalf("provider calls = %d, want %d", len(requests), steps+1)
+	}
+	for i := 1; i < len(requests); i++ {
+		prev, next := requests[i-1], requests[i]
+		if len(next) != len(prev)+2 || !providerMessagesEqual(prev, next[:len(prev)]) {
+			t.Fatalf("request %d does not extend request %d by one step", i, i-1)
 		}
 	}
-	if pruneDetail != "truncated=1" {
-		t.Fatalf("mutation records = %#v, want mid_task_prune with truncated=1", ledger.Records())
+	last := requests[len(requests)-1]
+	for _, msg := range last {
+		for _, part := range msg.Content {
+			if tr, ok := part.(sdk.ToolResultPart); ok && toolexec.OutputValue(tr.Result) != result {
+				t.Fatalf("tool result %s = %q, want the result as produced", tr.ToolCallID, tr.Result.String())
+			}
+		}
+	}
+	if records := ledger.Records(); len(records) != 0 {
+		t.Fatalf("mutation records = %#v, want none", records)
 	}
 }
 
-func TestAgentGeneratePassesRemainingBudgetToStepReselector(t *testing.T) {
-	t.Parallel()
-	const budget = 1_000
-
-	modelProvider := &atomicMockProvider{
-		handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
-			if call == 1 {
-				return sdk.ModelResult{
-					FinishReason: sdk.FinishReasonToolCalls,
-					ToolCalls: []sdk.ToolCall{{
-						ToolCallID: "call-budget",
-						ToolName:   "lookup",
-						Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "one"}),
-					}},
-				}, nil
-			}
-			return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
-		},
-	}
-
-	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{
-		staticToolProvider{tools: []toolexec.Tool{{
-			Name:       "lookup",
-			Parameters: &jsonschema.Schema{Type: "object"},
-			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
-				return toolexec.OutputFromValue(map[string]any{"answer": "ok"}), nil
-			},
-		}}},
-	})
-
-	var seenBudget int
-	_, err := a.Generate(context.Background(), RunConfig{
-		Model:                  &sdk.Model{ID: "mock-model", Provider: modelProvider},
-		Messages:               []sdk.Message{sdk.UserMessage(strings.Repeat("prefix ", 80))},
-		SupportsToolCall:       true,
-		Identity:               SessionContext{BotID: "bot-1"},
-		ContextMutations:       contextfrag.NewMutationLedger(),
-		ContextBudgetMaxTokens: budget,
-		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
-			seenBudget = input.BudgetMaxTokens
-			return ContextStepSelectionResult{}
-		},
-	})
-	if err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
-	if seenBudget <= 0 || seenBudget >= budget {
-		t.Fatalf("step budget = %d, want remaining budget below full run budget", seenBudget)
-	}
-}
-
-func TestAgentGenerateActivePlanStepBudgetSubtractsFixedEnvelopeOnce(t *testing.T) {
-	t.Parallel()
-
-	lookupTool := toolexec.Tool{
-		Name:       "lookup",
-		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
-			return toolexec.OutputFromValue(map[string]any{"answer": "ok"}), nil
-		},
-	}
-	toolCost := contextfrag.ToolDefAccountingFor("native", lookupTool).TokenEstimate
-	plan := contextfrag.ContextBudgetPlan{
-		Window:        2048,
-		OutputReserve: toolCost + 200,
-	}
-
-	var firstParams sdk.Request
-	modelProvider := &atomicMockProvider{
-		handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
-			if call == 1 {
-				firstParams = cloneGenerateParams(params)
-				return sdk.ModelResult{
-					FinishReason: sdk.FinishReasonToolCalls,
-					ToolCalls: []sdk.ToolCall{{
-						ToolCallID: "call-budget-plan",
-						ToolName:   "lookup",
-						Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "one"}),
-					}},
-				}, nil
-			}
-			return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
-		},
-	}
-
-	a := New(Deps{ContextViewApplier: func(_ context.Context, cfg RunConfig) (RunConfig, error) {
-		return cfg, nil
-	}})
-	a.SetToolProviders([]agenttools.ToolProvider{
-		staticToolProvider{tools: []toolexec.Tool{lookupTool}},
-	})
-
-	var seenBudget int
-	var expectedBudget int
-	_, err := a.Generate(context.Background(), RunConfig{
-		Model:                  &sdk.Model{ID: "mock-model", Provider: modelProvider},
-		System:                 "fixed system prefix",
-		Messages:               []sdk.Message{sdk.UserMessage(strings.Repeat("prefix ", 20))},
-		SupportsToolCall:       true,
-		Identity:               SessionContext{BotID: "bot-1"},
-		ContextMutations:       contextfrag.NewMutationLedger(),
-		ContextBudgetMaxTokens: plan.Window,
-		ContextManifest:        contextfrag.Manifest{BudgetPlan: &plan},
-		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
-			allowance := plan.Window - plan.OutputReserve
-			expectedBudget = remainingStepBudget(allowance, &firstParams, input.InitialMessageCount)
-			seenBudget = input.BudgetMaxTokens
-			if input.ProviderSystem != firstParams.System || len(input.ProviderTools) != len(firstParams.Tools) {
-				t.Fatalf("step provider envelope = system %q tools %d, want system %q tools %d", input.ProviderSystem, len(input.ProviderTools), firstParams.System, len(firstParams.Tools))
-			}
-			if input.ProviderInputAllowanceTokens != allowance {
-				t.Fatalf("step provider allowance = %d, want %d", input.ProviderInputAllowanceTokens, allowance)
-			}
-			return ContextStepSelectionResult{}
-		},
-	})
-	if err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
-	if seenBudget != expectedBudget {
-		t.Fatalf("step budget = %d, want %d from window-output reserve minus the actual fixed prefix/tools once", seenBudget, expectedBudget)
-	}
-	legacyDoubleCounted := remainingStepBudget(plan.Window-toolCost, &firstParams, len(firstParams.Messages))
-	if expectedBudget == legacyDoubleCounted {
-		t.Fatalf("test setup does not distinguish active plan allowance %d from legacy double-counted allowance %d", expectedBudget, legacyDoubleCounted)
-	}
-}
-
-func TestAgentGenerateFailsClosedOnProtectedStepOverflow(t *testing.T) {
+// A run that cannot compact in place ends when a step request no longer
+// fits: nothing it already sent is dropped or rewritten to make room.
+func TestAgentGenerateFailsClosedWhenStepRequestOutgrowsTheWindow(t *testing.T) {
 	t.Parallel()
 
 	modelProvider := &atomicMockProvider{
 		handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
 			if call != 1 {
-				return sdk.ModelResult{}, fmt.Errorf("unexpected provider call %d after protected overflow", call)
+				return sdk.ModelResult{}, fmt.Errorf("unexpected provider call %d after the request outgrew the window", call)
 			}
 			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
@@ -545,28 +339,19 @@ func TestAgentGenerateFailsClosedOnProtectedStepOverflow(t *testing.T) {
 	a := New(Deps{ContextViewApplier: func(_ context.Context, cfg RunConfig) (RunConfig, error) {
 		return cfg, nil
 	}})
-	a.SetToolProviders([]agenttools.ToolProvider{
-		staticToolProvider{tools: []toolexec.Tool{{
-			Name:       "lookup",
-			Parameters: &jsonschema.Schema{Type: "object"},
-			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
-				return toolexec.OutputFromValue(map[string]any{"answer": "ok"}), nil
-			},
-		}}},
-	})
+	a.SetToolProviders([]agenttools.ToolProvider{oversizeLookupProvider()})
 
+	plan := contextfrag.ContextBudgetPlan{Window: 2000, OutputReserve: 100}
 	_, err := a.Generate(context.Background(), RunConfig{
 		Model:            &sdk.Model{ID: "mock-model", Provider: modelProvider},
 		Messages:         []sdk.Message{sdk.UserMessage("task")},
 		SupportsToolCall: true,
 		Identity:         SessionContext{BotID: "bot-1"},
 		ContextMutations: ledger,
-		ContextStepReselector: func(context.Context, ContextStepSelectionInput) ContextStepSelectionResult {
-			return ContextStepSelectionResult{FatalError: contextfrag.ErrProtectedContextOverflow}
-		},
+		ContextManifest:  contextfrag.Manifest{BudgetPlan: &plan},
 	})
-	if !errors.Is(err, contextfrag.ErrProtectedContextOverflow) {
-		t.Fatalf("Generate() error = %v, want %v", err, contextfrag.ErrProtectedContextOverflow)
+	if !errors.Is(err, contextfrag.ErrBudgetUnsatisfied) {
+		t.Fatalf("Generate() error = %v, want %v", err, contextfrag.ErrBudgetUnsatisfied)
 	}
 	if got := modelProvider.calls.Load(); got != 1 {
 		t.Fatalf("provider calls = %d, want 1", got)
@@ -581,18 +366,30 @@ func TestAgentGenerateFailsClosedOnProtectedStepOverflow(t *testing.T) {
 	records := ledger.Records()
 	if len(records) != 1 ||
 		records[0].Kind != contextfrag.MutationContextBudgetFailure ||
-		records[0].Detail != "protected_context_overflow" {
-		t.Fatalf("budget failure mutations = %#v, want one protected-overflow record", records)
+		records[0].Detail != "budget_unsatisfied" {
+		t.Fatalf("budget failure mutations = %#v, want one budget_unsatisfied record", records)
 	}
 }
 
-func TestAgentStreamFailsClosedOnProtectedStepOverflow(t *testing.T) {
+// oversizeLookupProvider serves a lookup tool whose result alone outgrows a
+// 2000-token window.
+func oversizeLookupProvider() agenttools.ToolProvider {
+	return staticToolProvider{tools: []toolexec.Tool{{
+		Name:       "lookup",
+		Parameters: &jsonschema.Schema{Type: "object"},
+		Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(strings.Repeat("r", 20_000)), nil
+		},
+	}}}
+}
+
+func TestAgentStreamFailsClosedWhenStepRequestOutgrowsTheWindow(t *testing.T) {
 	t.Parallel()
 
 	modelProvider := &atomicMockProvider{
 		handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
 			if call != 1 {
-				return sdk.ModelResult{}, fmt.Errorf("unexpected provider call %d after protected overflow", call)
+				return sdk.ModelResult{}, fmt.Errorf("unexpected provider call %d after the request outgrew the window", call)
 			}
 			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
@@ -607,16 +404,9 @@ func TestAgentStreamFailsClosedOnProtectedStepOverflow(t *testing.T) {
 	a := New(Deps{ContextViewApplier: func(_ context.Context, cfg RunConfig) (RunConfig, error) {
 		return cfg, nil
 	}})
-	a.SetToolProviders([]agenttools.ToolProvider{
-		staticToolProvider{tools: []toolexec.Tool{{
-			Name:       "lookup",
-			Parameters: &jsonschema.Schema{Type: "object"},
-			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
-				return toolexec.OutputFromValue(map[string]any{"answer": "ok"}), nil
-			},
-		}}},
-	})
+	a.SetToolProviders([]agenttools.ToolProvider{oversizeLookupProvider()})
 
+	plan := contextfrag.ContextBudgetPlan{Window: 2000, OutputReserve: 100}
 	var errorEvents []StreamEvent
 	for event := range a.Stream(context.Background(), RunConfig{
 		Model:            &sdk.Model{ID: "mock-model", Provider: modelProvider},
@@ -624,9 +414,7 @@ func TestAgentStreamFailsClosedOnProtectedStepOverflow(t *testing.T) {
 		SupportsToolCall: true,
 		Identity:         SessionContext{BotID: "bot-1"},
 		ContextMutations: contextfrag.NewMutationLedger(),
-		ContextStepReselector: func(context.Context, ContextStepSelectionInput) ContextStepSelectionResult {
-			return ContextStepSelectionResult{FatalError: contextfrag.ErrProtectedContextOverflow}
-		},
+		ContextManifest:  contextfrag.Manifest{BudgetPlan: &plan},
 	}) {
 		if event.Type == EventError {
 			errorEvents = append(errorEvents, event)
@@ -639,8 +427,8 @@ func TestAgentStreamFailsClosedOnProtectedStepOverflow(t *testing.T) {
 	if len(errorEvents) != 1 {
 		t.Fatalf("error events = %#v, want exactly one", errorEvents)
 	}
-	if !errors.Is(errorEvents[0].Cause, contextfrag.ErrProtectedContextOverflow) || errorEvents[0].Code != "" || errorEvents[0].Error != "" {
-		t.Fatalf("error event = %#v, want only the protected-context sentinel as its cause", errorEvents[0])
+	if !errors.Is(errorEvents[0].Cause, contextfrag.ErrBudgetUnsatisfied) || errorEvents[0].Code != "" || errorEvents[0].Error != "" {
+		t.Fatalf("error event = %#v, want only the budget sentinel as its cause", errorEvents[0])
 	}
 }
 

@@ -38,8 +38,7 @@ const (
 
 type directLifecycleQueries struct {
 	modelSelectionFakeQueries
-	modelID           pgtype.UUID
-	compactionEnabled bool
+	modelID pgtype.UUID
 }
 
 func (q *directLifecycleQueries) GetSettingsByBotID(
@@ -47,10 +46,9 @@ func (q *directLifecycleQueries) GetSettingsByBotID(
 	botID pgtype.UUID,
 ) (sqlc.GetSettingsByBotIDRow, error) {
 	return sqlc.GetSettingsByBotIDRow{
-		BotID:             botID,
-		ReasoningEffort:   "medium",
-		ChatModelID:       q.modelID,
-		CompactionEnabled: q.compactionEnabled,
+		BotID:           botID,
+		ReasoningEffort: "medium",
+		ChatModelID:     q.modelID,
 	}, nil
 }
 
@@ -59,13 +57,6 @@ func (*directLifecycleQueries) GetBotByID(
 	pgtype.UUID,
 ) (sqlc.GetBotByIDRow, error) {
 	return sqlc.GetBotByIDRow{}, pgx.ErrNoRows
-}
-
-func (*directLifecycleQueries) ListCompactionArtifactLineageBySession(
-	context.Context,
-	pgtype.UUID,
-) ([]sqlc.BotHistoryMessageCompact, error) {
-	return nil, nil
 }
 
 type directLifecycleFixture struct {
@@ -299,6 +290,7 @@ func newDirectLifecycleFixture(t *testing.T, mode directLifecycleModelMode) dire
 	runtime := &lifecycleTurnAdmitter{admission: lifecycleTestAdmission()}
 	service := &Service{
 		agent:                  native.New(native.Deps{Logger: logger}),
+		checkpoints:            emptyHistoryCheckpoints(),
 		modelsService:          models.NewService(logger, queries),
 		queries:                queries,
 		contextLifecycles:      lifecycles,

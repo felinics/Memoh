@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/acl"
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -167,7 +167,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
-	current := normalizeBotSetting("", aclDefaultEffect, botRow.ReasoningEffort, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionTargetPercent)
+	current := normalizeBotSetting("", aclDefaultEffect, botRow.ReasoningEffort)
 	// A read error here must abort: falling through would leave `current` at the
 	// model defaults and silently overwrite a saved chat_runtime=acp_agent (and
 	// its agent id) on the next save. ErrNoRows is impossible because the bot
@@ -199,17 +199,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if effect := strings.TrimSpace(req.AclDefaultEffect); effect != "" {
 		current.AclDefaultEffect = effect
 	}
-	if req.CompactionEnabled != nil {
-		current.CompactionEnabled = *req.CompactionEnabled
-	}
-	if req.CompactionThreshold != nil && *req.CompactionThreshold >= 0 {
-		current.CompactionThreshold = *req.CompactionThreshold
-	}
-	compactionTargetPercent, compactionTargetPercentSet := applyCompactionTargetPercentOverride(
-		current.CompactionTargetPercent,
-		req.CompactionTargetPercent,
-	)
-	current.CompactionTargetPercent = compactionTargetPercent
 	if req.PersistFullToolResults != nil {
 		current.PersistFullToolResults = *req.PersistFullToolResults
 	}
@@ -318,17 +307,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	}
 	if err := s.applyReasoningPolicy(ctx, &current, req); err != nil {
 		return Settings{}, err
-	}
-	compactionModelUUID := pgtype.UUID{}
-	compactionModelIDSet := req.CompactionModelID != nil
-	if req.CompactionModelID != nil {
-		if value := strings.TrimSpace(*req.CompactionModelID); value != "" {
-			modelID, err := s.resolveModelUUID(ctx, "compaction_model_id", value)
-			if err != nil {
-				return Settings{}, err
-			}
-			compactionModelUUID = modelID
-		}
 	}
 	memoryLLMModelUUID := pgtype.UUID{}
 	memoryLLMModelIDSet := req.MemoryLLMModelID != nil
@@ -468,47 +446,41 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		return Settings{}, rollbackNetworkChange(fmt.Errorf("marshal network config: %w", err))
 	}
 	upsertParams := sqlc.UpsertBotSettingsParams{
-		ID:                         pgID,
-		Timezone:                   timezoneValue,
-		CommandUiLanguage:          current.CommandUILanguage,
-		ReasoningEffort:            current.ReasoningEffort,
-		CompactionEnabled:          current.CompactionEnabled,
-		CompactionThreshold:        int32(current.CompactionThreshold), //nolint:gosec // bounded by non-negative setter above
-		CompactionTargetPercentSet: compactionTargetPercentSet,
-		CompactionTargetPercent:    nullableCompactionTargetPercent(current.CompactionTargetPercent),
-		ChatModelID:                chatModelUUID,
-		ChatModelIDSet:             chatModelIDSet,
-		DefaultBotAgentID:          db.ParseUUIDOrEmpty(current.DefaultBotAgentID),
-		DefaultBotAgentIDSet:       defaultBotAgentIDSet,
-		ChatRuntime:                current.ChatRuntime,
-		ChatAcpAgentID:             nullableText(current.ChatACPAgentID),
-		ChatAcpProjectPath:         current.ChatACPProjectPath,
-		ChatAcpProjectMode:         current.ChatACPProjectMode,
-		CompactionModelIDSet:       compactionModelIDSet,
-		CompactionModelID:          compactionModelUUID,
-		MemoryLlmModelIDSet:        memoryLLMModelIDSet,
-		MemoryLlmModelID:           memoryLLMModelUUID,
-		ImageModelID:               imageModelUUID,
-		ImageModelIDSet:            imageModelIDSet,
-		SearchProviderID:           searchProviderUUID,
-		SearchProviderIDSet:        searchProviderIDSet,
-		FetchProviderIDSet:         fetchProviderIDSet,
-		FetchProviderID:            fetchProviderUUID,
-		MemoryProviderID:           memoryProviderUUID,
-		MemoryProviderIDSet:        memoryProviderIDSet,
-		TtsModelID:                 ttsModelUUID,
-		TtsModelIDSet:              ttsModelIDSet,
-		TranscriptionModelID:       transcriptionModelUUID,
-		TranscriptionModelIDSet:    transcriptionModelIDSet,
-		VideoModelID:               videoModelUUID,
-		VideoModelIDSet:            videoModelIDSet,
-		PersistFullToolResults:     current.PersistFullToolResults,
-		ShowToolCallsInIm:          current.ShowToolCallsInIM,
-		ToolApprovalConfig:         toolApprovalConfig,
-		DisplayEnabled:             current.DisplayEnabled,
-		OverlayProvider:            normalizedNetwork.OverlayProvider,
-		OverlayEnabled:             normalizedNetwork.OverlayEnabled,
-		OverlayConfig:              overlayConfigJSON,
+		ID:                      pgID,
+		Timezone:                timezoneValue,
+		CommandUiLanguage:       current.CommandUILanguage,
+		ReasoningEffort:         current.ReasoningEffort,
+		ChatModelID:             chatModelUUID,
+		ChatModelIDSet:          chatModelIDSet,
+		DefaultBotAgentID:       db.ParseUUIDOrEmpty(current.DefaultBotAgentID),
+		DefaultBotAgentIDSet:    defaultBotAgentIDSet,
+		ChatRuntime:             current.ChatRuntime,
+		ChatAcpAgentID:          nullableText(current.ChatACPAgentID),
+		ChatAcpProjectPath:      current.ChatACPProjectPath,
+		ChatAcpProjectMode:      current.ChatACPProjectMode,
+		MemoryLlmModelIDSet:     memoryLLMModelIDSet,
+		MemoryLlmModelID:        memoryLLMModelUUID,
+		ImageModelID:            imageModelUUID,
+		ImageModelIDSet:         imageModelIDSet,
+		SearchProviderID:        searchProviderUUID,
+		SearchProviderIDSet:     searchProviderIDSet,
+		FetchProviderIDSet:      fetchProviderIDSet,
+		FetchProviderID:         fetchProviderUUID,
+		MemoryProviderID:        memoryProviderUUID,
+		MemoryProviderIDSet:     memoryProviderIDSet,
+		TtsModelID:              ttsModelUUID,
+		TtsModelIDSet:           ttsModelIDSet,
+		TranscriptionModelID:    transcriptionModelUUID,
+		TranscriptionModelIDSet: transcriptionModelIDSet,
+		VideoModelID:            videoModelUUID,
+		VideoModelIDSet:         videoModelIDSet,
+		PersistFullToolResults:  current.PersistFullToolResults,
+		ShowToolCallsInIm:       current.ShowToolCallsInIM,
+		ToolApprovalConfig:      toolApprovalConfig,
+		DisplayEnabled:          current.DisplayEnabled,
+		OverlayProvider:         normalizedNetwork.OverlayProvider,
+		OverlayEnabled:          normalizedNetwork.OverlayEnabled,
+		OverlayConfig:           overlayConfigJSON,
 	}
 	updated, err := s.upsertBotSettings(ctx, upsertParams)
 	if err != nil {
@@ -582,18 +554,15 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	return nil
 }
 
-func normalizeBotSetting(commandUILanguage string, aclDefaultEffect string, reasoningEffort string, compactionEnabled bool, compactionThreshold int32, compactionTargetPercent pgtype.Int4) Settings {
+func normalizeBotSetting(commandUILanguage string, aclDefaultEffect string, reasoningEffort string) Settings {
 	settings := Settings{
-		CommandUILanguage:       strings.TrimSpace(commandUILanguage),
-		AclDefaultEffect:        strings.TrimSpace(aclDefaultEffect),
-		ReasoningEffort:         strings.TrimSpace(reasoningEffort),
-		CompactionEnabled:       compactionEnabled,
-		CompactionThreshold:     int(compactionThreshold),
-		CompactionTargetPercent: normalizeCompactionTargetPercent(compactionTargetPercent),
-		ToolApprovalConfig:      DefaultToolApprovalConfig(),
-		ChatRuntime:             ChatRuntimeModel,
-		ChatACPProjectPath:      DefaultACPProjectPath,
-		ChatACPProjectMode:      DefaultACPProjectMode,
+		CommandUILanguage:  strings.TrimSpace(commandUILanguage),
+		AclDefaultEffect:   strings.TrimSpace(aclDefaultEffect),
+		ReasoningEffort:    strings.TrimSpace(reasoningEffort),
+		ToolApprovalConfig: DefaultToolApprovalConfig(),
+		ChatRuntime:        ChatRuntimeModel,
+		ChatACPProjectPath: DefaultACPProjectPath,
+		ChatACPProjectMode: DefaultACPProjectMode,
 	}
 	if settings.CommandUILanguage == "" {
 		settings.CommandUILanguage = DefaultCommandUILanguage
@@ -604,39 +573,8 @@ func normalizeBotSetting(commandUILanguage string, aclDefaultEffect string, reas
 	if !hasReasoningEffortValue(settings.ReasoningEffort) {
 		settings.ReasoningEffort = DefaultReasoningEffort
 	}
-	if settings.CompactionThreshold < 0 {
-		settings.CompactionThreshold = 0
-	}
 	settings.OverlayConfig = map[string]any{}
 	return settings
-}
-
-func normalizeCompactionTargetPercent(value pgtype.Int4) *int {
-	if !value.Valid {
-		return nil
-	}
-	return normalizeCompactionTargetPercentValue(int(value.Int32))
-}
-
-func normalizeCompactionTargetPercentValue(value int) *int {
-	if value < 1 || value > 99 {
-		return nil
-	}
-	return &value
-}
-
-func applyCompactionTargetPercentOverride(current, requested *int) (*int, bool) {
-	if requested == nil {
-		return current, false
-	}
-	return normalizeCompactionTargetPercentValue(*requested), true
-}
-
-func nullableCompactionTargetPercent(value *int) pgtype.Int4 {
-	if value == nil {
-		return pgtype.Int4{}
-	}
-	return pgtype.Int4{Int32: int32(*value), Valid: true} //nolint:gosec // normalized to 1-99
 }
 
 // isValidReasoningEffort accepts the full effort tier range. Effort is now a
@@ -713,9 +651,6 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 	return normalizeBotSettingsFields(
 		row.CommandUiLanguage,
 		row.ReasoningEffort,
-		row.CompactionEnabled,
-		row.CompactionThreshold,
-		row.CompactionTargetPercent,
 		row.Timezone,
 		row.ChatModelID,
 		row.DefaultBotAgentID,
@@ -723,7 +658,6 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.ChatAcpAgentID,
 		row.ChatAcpProjectPath,
 		row.ChatAcpProjectMode,
-		row.CompactionModelID,
 		row.MemoryLlmModelID,
 		row.ImageModelID,
 		row.SearchProviderID,
@@ -746,9 +680,6 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 	return normalizeBotSettingsFields(
 		row.CommandUiLanguage,
 		row.ReasoningEffort,
-		row.CompactionEnabled,
-		row.CompactionThreshold,
-		row.CompactionTargetPercent,
 		row.Timezone,
 		row.ChatModelID,
 		row.DefaultBotAgentID,
@@ -756,7 +687,6 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.ChatAcpAgentID,
 		row.ChatAcpProjectPath,
 		row.ChatAcpProjectMode,
-		row.CompactionModelID,
 		row.MemoryLlmModelID,
 		row.ImageModelID,
 		row.SearchProviderID,
@@ -778,9 +708,6 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 func normalizeBotSettingsFields(
 	commandUILanguage string,
 	reasoningEffort string,
-	compactionEnabled bool,
-	compactionThreshold int32,
-	compactionTargetPercent pgtype.Int4,
 	timezone pgtype.Text,
 	chatModelID pgtype.UUID,
 	defaultBotAgentID pgtype.UUID,
@@ -788,7 +715,6 @@ func normalizeBotSettingsFields(
 	chatACPAgentID pgtype.Text,
 	chatACPProjectPath string,
 	chatACPProjectMode string,
-	compactionModelID pgtype.UUID,
 	memoryLLMModelID pgtype.UUID,
 	imageModelID pgtype.UUID,
 	searchProviderID pgtype.UUID,
@@ -805,7 +731,7 @@ func normalizeBotSettingsFields(
 	overlayEnabled bool,
 	overlayConfig []byte,
 ) Settings {
-	settings := normalizeBotSetting(commandUILanguage, "", reasoningEffort, compactionEnabled, compactionThreshold, compactionTargetPercent)
+	settings := normalizeBotSetting(commandUILanguage, "", reasoningEffort)
 	if timezone.Valid {
 		settings.Timezone = timezone.String
 	}
@@ -836,9 +762,6 @@ func normalizeBotSettingsFields(
 	settings.ChatACPProjectMode = normalizeACPProjectMode(chatACPProjectMode)
 	if settings.ChatACPProjectMode == "" {
 		settings.ChatACPProjectMode = DefaultACPProjectMode
-	}
-	if compactionModelID.Valid {
-		settings.CompactionModelID = uuid.UUID(compactionModelID.Bytes).String()
 	}
 	if memoryLLMModelID.Valid {
 		settings.MemoryLLMModelID = uuid.UUID(memoryLLMModelID.Bytes).String()
@@ -1003,7 +926,7 @@ func validateChatRuntimeSettings(botMetadata []byte, current Settings, resolveSe
 	if !setup.Enabled {
 		return fmt.Errorf("%w: %q", ErrACPAgentNotEnabled, agentID)
 	}
-	if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
+	if field, missing := acpprofile.MissingRequiredManagedField(profile, setup); missing {
 		return fmt.Errorf("%w: ACP agent %q is missing required field %q", ErrACPAgentNotConfigured, agentID, field.ID)
 	}
 	return nil

@@ -1,7 +1,7 @@
 {
   "name": "@memohai/desktop",
   "productName": "Memoh",
-  "version": "0.22.0",
+  "version": "1.0.0-beta.1",
   "type": "module",
   "description": "Memoh Electron desktop application (self-managed bootstrap reusing @memohai/web components)",
   "author": "Memoh",
@@ -29,7 +29,7 @@
     "typecheck:node": "pnpm run prepare:runtime && tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
-    "test:release": "vitest run src/shared/updates.test.ts src/main/external-links.test.ts && node --test scripts/build-env.test.mjs scripts/notarize-dmg.test.mjs",
+    "test:release": "vitest run src/shared/updates.test.ts src/main/updates.test.ts src/main/external-links.test.ts && node --test scripts/build-env.test.mjs scripts/notarize-dmg.test.mjs",
     "icons": "node scripts/build-icons.mjs"
   },
   "dependencies": {
@@ -37,6 +37,7 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@fontsource-variable/inter": "^5.2.8",
     "@memohai/runtime": "workspace:*",
+    "builder-util-runtime": "9.7.0",
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {

@@ -231,7 +231,9 @@ func TestResolveRunConfigSkipsModelResolutionForACPRuntime(t *testing.T) {
 		},
 	}
 
-	got, err := resolver.ResolveRunConfig(context.Background(), "bot-1", "session-1", "user-1", "telegram", "", "group", "")
+	got, err := resolver.ResolveRunConfig(context.Background(), RunConfigRequest{
+		BotID: "bot-1", SessionID: "session-1", ChannelIdentityID: "user-1", CurrentPlatform: "telegram", ConversationType: "group",
+	})
 	if err != nil {
 		t.Fatalf("ResolveRunConfig() error = %v", err)
 	}

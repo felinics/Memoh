@@ -11,7 +11,6 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
-	"github.com/felinics/memoh/internal/agent/application"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
@@ -200,7 +199,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 
 	var compactionInfo *CompactionInfo
 	if hasSettings && runtimeType == session.RuntimeModel {
-		info := contextCompactionInfo(h.autoCompactionArmed(ctx, botSettings, sessionID), botSettings.CompactionThreshold, budgetPlan)
+		info := contextCompactionInfo(h.autoCompactionArmed(ctx, botSettings, sessionID), budgetPlan)
 		compactionInfo = &info
 	}
 
@@ -253,15 +252,15 @@ func (h *SessionInfoHandler) loadBotSettings(ctx context.Context, botID string) 
 	return botSettings, true
 }
 
-// contextCompactionInfo mirrors the turn-time compaction levels for display.
+// contextCompactionInfo marks the input allowance a turn compacts beyond.
 // Only the persisted plan window is the budget the turn actually ran against;
 // the turn path caps the raw model window, so guessing from it would diverge.
-func contextCompactionInfo(enabled bool, threshold int, plan *contextfrag.ContextBudgetPlan) CompactionInfo {
+func contextCompactionInfo(enabled bool, plan *contextfrag.ContextBudgetPlan) CompactionInfo {
 	info := CompactionInfo{Enabled: enabled}
 	if plan == nil || plan.Window <= 0 {
 		return info
 	}
-	info.AutoTokens = int64(application.AutoCompactionThreshold(threshold, plan.Window))
+	info.AutoTokens = int64(plan.Window - plan.OutputReserve)
 	return info
 }
 
@@ -282,21 +281,15 @@ func budgetPlanApplies(snapshot contextfrag.LifecycleSnapshot, resolvedModel str
 	return strings.EqualFold(snapshot.Model, resolvedModel)
 }
 
-// autoCompactionArmed mirrors the trigger's preconditions: the setting is on
-// and a summarizer resolves through the same candidate chain the manual
-// trigger uses, otherwise the mark would label a level that never fires.
+// autoCompactionArmed mirrors the trigger's precondition: a summarizer resolves
+// from the session's latest model or the bot chat model, otherwise the mark
+// would label a level that never fires.
 func (h *SessionInfoHandler) autoCompactionArmed(ctx context.Context, botSettings settings.Settings, sessionID string) bool {
-	if !botSettings.CompactionEnabled {
-		return false
-	}
 	if h.modelsService == nil {
 		return true
 	}
-	sessionModelID := ""
-	if strings.TrimSpace(botSettings.CompactionModelID) == "" {
-		sessionModelID = models.LatestSessionModelID(ctx, h.queries, sessionID)
-	}
-	_, err := models.ResolveCompactionModel(ctx, h.modelsService, h.queries, botSettings.CompactionModelID, sessionModelID, botSettings.ChatModelID)
+	sessionModelID := models.LatestSessionModelID(ctx, h.queries, sessionID)
+	_, err := models.ResolveCompactionModel(ctx, h.modelsService, h.queries, sessionModelID, botSettings.ChatModelID)
 	return !models.IsCompactionModelUnavailable(err)
 }
 

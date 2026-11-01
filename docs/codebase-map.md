@@ -15,8 +15,7 @@ Memoh/
 │   ├── bridge/                 #   In-container gRPC bridge (UDS-based, runs inside bot containers; supervises optional display/browser helpers)
 │   │   └── template/           #     Prompt templates for bridge (TOOLS.md, SOUL.md, IDENTITY.md, etc.)
 │   ├── gen-bridge-mtls/        #   Bridge mTLS certificate generator
-│   ├── mcp/                    #   MCP stdio transport binary
-│   └── synccaps/               #   Build-time sync of provider template capabilities from the LiteLLM registry
+│   └── mcp/                    #   MCP stdio transport binary
 ├── internal/                   # Go backend core code (domain packages)
 │   ├── accounts/               #   User account management (CRUD, password hashing)
 │   ├── acl/                    #   Access control list (source-aware chat trigger ACL)
@@ -29,16 +28,16 @@ Memoh/
 │   │   ├── decision/           #     User input, tool approval, and stable user-facing feedback
 │   │   ├── event/              #     Agent events and transport payload vocabulary
 │   │   ├── runtime/            #     Runtime implementations
-│   │   │   ├── acp/            #       ACP pool, client process manager, and the generic custom-agent profile
-│   │   │   ├── claudecode/     #       Claude Code direct runtime (external.Driver)
-│   │   │   ├── codex/          #       Codex direct runtime (external.Driver)
-│   │   │   ├── external/       #       Neutral Driver port between the application layer and external runtimes
-│   │   │   ├── grok/           #       Grok Build direct runtime (external.Driver over the shared ACP client)
+│   │   │   ├── agentstate/     #       Configuration-epoch and runtime-sync guards for external Agent processes
+│   │   │   ├── external/       #       Neutral Driver port between the application layer and external runtimes, and what they share
+│   │   │   │   ├── acp/        #         ACP core (Host: processes, sessions, turns) and its custom-agent extension, the ACP client, and the generic profile
+│   │   │   │   ├── agentproc/  #         Process supervisor every external Agent process runs under
+│   │   │   │   ├── claudecode/ #         Claude Code direct runtime (external.Driver)
+│   │   │   │   ├── codex/      #         Codex direct runtime (external.Driver)
+│   │   │   │   ├── grok/       #         Grok Build direct runtime (external.Driver, an extension of the ACP core)
+│   │   │   │   └── toolmount/  #         Memoh tool gateway mounts for external runtimes
 │   │   │   ├── native/         #       Twilight AI native runtime, prompts, streaming, hooks, and guards
-│   │   │   ├── agentstate/     #       External Agent session publication heads and state storage port
-│   │   │   ├── servertable/    #       Shared agent-process table for direct runtimes (Codex, Grok Build)
-│   │   │   ├── session/        #       Per-thread runtime state and control
-│   │   │   └── toolmount/      #       Memoh tool gateway mounts for direct runtimes
+│   │   │   └── session/        #       Per-thread runtime state and control
 │   │   ├── sessionmode/        #     Session mode resolution
 │   │   ├── partmeta/           #     Memoh annotations (approval, user input, execution location) on sdk.ProviderMetadata, plus the stored-shape fold/unfold
 │   │   ├── step/               #     Runtime-neutral step record (model result, tool results, messages, deferred approval)
@@ -74,7 +73,6 @@ Memoh/
 │   ├── boot/                   #   Runtime configuration provider (container backend detection)
 │   ├── bots/                   #   Bot management (CRUD, lifecycle)
 │   ├── botbackup/              #   Bot backup/export/import service
-│   ├── capabilities/           #   Model reasoning capability derivation (LiteLLM registry)
 │   ├── channel/                #   Channel adapter system
 │   │   ├── adapters/           #     Platform adapters: telegram, discord, feishu, qq, dingtalk, weixin, wecom, wechatoa, matrix, misskey, line, slack, local
 │   │   ├── discuss/            #     Discuss-mode driver
@@ -83,6 +81,7 @@ Memoh/
 │   │   └── identities/         #     Channel identity service
 │   ├── channelaccess/          #   Effective per-bot Manage capability (channel binding + override)
 │   ├── chat/                   #   Chat bounded package
+│   │   ├── checkpoint/         #     History checkpoints: what stands for a session's history before its context
 │   │   ├── event/              #     Persisted chat event hub
 │   │   ├── message/            #     Message persistence
 │   │   ├── thread/             #     Internal Thread lifecycle and forks
@@ -116,7 +115,7 @@ Memoh/
 │   ├── policy/                 #   Access policy resolution (guest access)
 │   ├── providers/              #   LLM provider management (OpenAI, Anthropic, etc.)
 │   ├── prune/                  #   Text pruning utilities (truncation with head/tail)
-│   ├── registry/               #   Provider registry service (YAML provider templates)
+│   ├── registry/               #   Provider registry service (speech, transcription and video YAML templates)
 │   ├── rpc/                    #   Internal server↔channel RPC (shared-secret auth, runtime method fan-out)
 │   ├── schedule/               #   Scheduled task service (cron)
 │   ├── searchproviders/        #   Search engine provider management (Brave, etc.)
@@ -156,7 +155,7 @@ Memoh/
 │       ├── migrations/         #   SQL migration files
 │       └── queries/            #   SQL query files (sqlc input)
 ├── conf/                       # Configuration
-│   ├── providers/              #   Provider YAML templates (openai, anthropic, codex, github-copilot, etc.)
+│   ├── providers/              #   Speech, transcription and video provider YAML templates; LLM providers come from apps/web/src/constants/model-sources.ts and models.dev
 │   ├── app.example.toml        #   Default config template
 │   ├── app.docker.toml         #   Docker deployment config
 │   ├── app.apple.toml          #   macOS (Apple Virtualization) config
@@ -166,7 +165,7 @@ Memoh/
 │   ├── docker-compose.selinux.yml # SELinux overlay compose
 │   └── app.dev.toml            #   Dev config (connects to devenv docker-compose)
 ├── docker/                     # Production Docker (Dockerfiles, entrypoints, nginx.conf, toolkit/)
-├── scripts/                    # Utility scripts (db-up, db-drop, release, install, sync-openrouter-models)
+├── scripts/                    # Utility scripts (db-up, db-drop, release, install)
 ├── docker-compose.yml          # Docker Compose orchestration (production)
 ├── mise.toml                   # mise tasks and tool version definitions
 ├── sqlc.yaml                   # sqlc code generation config
@@ -200,7 +199,7 @@ Memoh/
 
 The codebase has grown beyond the original agent/channel/container core. When working near these areas, read the local `AGENTS.md` and treat the corresponding `internal/` package as the source of truth; do not guess tool or schema details.
 
-- **External coding-agent runtimes (`internal/agent/runtime/external/`, `codex/`, `claudecode/`, `grok/`)** — the neutral `external.Driver` port plus the direct Codex, Claude Code and Grok Build runtimes (pinned protocol assets, device-code/OAuth login, native thread resume/fork, Memoh tool gateway mounts via `toolmount/`). **ACP (`internal/agent/runtime/acp/`)** is the generic channel for custom user-supplied ACP agents (single generic profile with a managed launch command), folded into the same driver port. The errors users can act on are package errors that `internal/agent/application` translates into catalog codes (`ExternalAgentError`).
+- **External coding-agent runtimes (`internal/agent/runtime/external/`, `codex/`, `claudecode/`, `grok/`)** — the neutral `external.Driver` port plus the direct Codex, Claude Code and Grok Build runtimes (pinned protocol assets, device-code/OAuth login, native thread resume/fork, Memoh tool gateway mounts via `toolmount/`). **ACP (`internal/agent/runtime/external/acp/`)** is the ACP core every ACP-speaking agent runs on — one process per Agent, a session per conversation — with two extensions: custom user-supplied agents (single generic profile with a managed launch command) and Grok Build. The errors users can act on are package errors that `internal/agent/application` translates into catalog codes (`ExternalAgentError`).
 - **Workspace dependencies (`internal/workspacedeps/`)** — per-bot installation of agent CLIs and other managed dependencies into `/data`. The permission invariants (read-only launcher resolution, Manage-authorized install confirmation, no remote runtime support) are normative rules — see `AGENTS.md` → Container / Workspace Management. The Server/image upgrade boundary is documented in `docs/workspace-dependencies-upgrade.md`.
 - **Apps (`internal/apps/`, `internal/supermarket/`)** — Supermarket App discovery and installation state. Installed Apps expand into immutable Registry Skills in the selected workspace target.
 - **User input / `ask_user` (`internal/agent/decision/input/`)** — lets the in-process agent ask the user a question mid-conversation and wait for an answer.

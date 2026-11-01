@@ -79,7 +79,7 @@ func TestGenerateReservesExactlyTheMaxTokensItSends(t *testing.T) {
 			currentIndex := 0
 			lifecycle := contextfrag.NewLifecycleHolder()
 			_, err := agent.Generate(context.Background(), agentpkg.RunConfig{
-				Model:                          &sdk.Model{ID: "model", Provider: tc.provider(probe), Type: sdk.ModelTypeChat},
+				Model:                          &sdk.Model{ID: "model", Provider: tc.provider(probe)},
 				ReasoningConfig:                tc.reasoning,
 				System:                         "you are helpful",
 				Messages:                       []sdk.Message{sdk.UserMessage("hello")},

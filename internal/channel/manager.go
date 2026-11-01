@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/felinics/memoh/internal/markdownmedia"
 )
 
 // ConfigLister lists channel configs for periodic refresh. Used by connection lifecycle.
@@ -271,6 +273,15 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 	if err != nil {
 		return err
 	}
+	if req.ExcludedTarget != "" {
+		excluded, err := m.resolveOutboundTarget(ctx, channelType, config, req.ExcludedTarget)
+		if err != nil {
+			return err
+		}
+		if excluded == target {
+			return errors.New("send to the current conversation is not allowed in chat mode; reply directly")
+		}
+	}
 	if req.Message.IsEmpty() {
 		return errors.New("message is required")
 	}
@@ -288,6 +299,11 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 	}
 	if err := m.sendAllWithConfig(ctx, sender, config, outbound, policy); err != nil {
 		return err
+	}
+	for _, binding := range markdownmedia.Bindings(req.Message.Metadata) {
+		if binding.ErrorCode != "" || (hasCaps && !caps.Attachments) {
+			return markdownmedia.ErrPartialDelivery
+		}
 	}
 	return nil
 }

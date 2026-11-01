@@ -11,74 +11,68 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const deleteAgentSessionPublicationsBySession = `-- name: DeleteAgentSessionPublicationsBySession :execrows
-DELETE FROM agent_session_publications publication
-WHERE publication.team_id = public.memoh_current_team_id()
-  AND publication.session_id = $1
-`
-
-func (q *Queries) DeleteAgentSessionPublicationsBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteAgentSessionPublicationsBySession, sessionID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const deleteRuntimeDecisionProjectionsByRun = `-- name: DeleteRuntimeDecisionProjectionsByRun :execrows
+WITH owner_session AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = $1
+    AND session.bot_id = $2
+  FOR UPDATE
+), projections AS MATERIALIZED (
+  SELECT message.id, message.turn_position, message.turn_message_seq,
+    (
+      message.turn_visible
+      AND message.turn_id IS NOT NULL
+      AND message.turn_position IS NOT NULL
+      AND message.turn_message_seq IS NOT NULL
+    ) AS in_context
+  FROM bot_history_messages message
+  JOIN owner_session owner ON owner.id = message.session_id
+  WHERE message.team_id = public.memoh_current_team_id()
+    AND message.bot_id = $2
+    AND message.run_id = $3
+    AND message.role = 'assistant'
+    AND message.runtime_type <> 'model'
+    AND message.metadata @> '{"agent_decision_projection": true}'::jsonb
+  FOR UPDATE OF message
+), rewound AS (
+  SELECT public.memoh_rewind_history_checkpoint(owner.id, removed.turn_position, removed.turn_message_seq) AS done
+  FROM owner_session owner
+  CROSS JOIN (
+    SELECT
+      (array_agg(projection.turn_position ORDER BY projection.turn_position, projection.turn_message_seq))[1]::bigint AS turn_position,
+      (array_agg(projection.turn_message_seq ORDER BY projection.turn_position, projection.turn_message_seq))[1]::bigint AS turn_message_seq
+    FROM projections projection
+    WHERE projection.in_context
+  ) removed
+  WHERE removed.turn_position IS NOT NULL
+)
 DELETE FROM bot_history_messages message
+USING projections
 WHERE message.team_id = public.memoh_current_team_id()
-  AND message.bot_id = $1
-  AND message.session_id = $2
-  AND message.run_id = $3
-  AND message.role = 'assistant'
-  AND message.runtime_type <> 'model'
-  AND message.metadata @> '{"agent_decision_projection": true}'::jsonb
+  AND message.id = projections.id
+  AND (SELECT count(*) FROM rewound) >= 0
 `
 
 type DeleteRuntimeDecisionProjectionsByRunParams struct {
-	BotID     pgtype.UUID `json:"bot_id"`
 	SessionID pgtype.UUID `json:"session_id"`
+	BotID     pgtype.UUID `json:"bot_id"`
 	RunID     pgtype.UUID `json:"run_id"`
 }
 
 // Decision cards are temporary stream projections. Delete by their stable
 // run marker as well as by returned IDs so an insert whose COMMIT ack was lost
 // cannot survive the final canonical round as a duplicate assistant message.
+// Deleting context rows rewinds the session, locked before its rows as every
+// history mutation locks them, to the newest checkpoint that does not depend
+// on them.
 func (q *Queries) DeleteRuntimeDecisionProjectionsByRun(ctx context.Context, arg DeleteRuntimeDecisionProjectionsByRunParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteRuntimeDecisionProjectionsByRun, arg.BotID, arg.SessionID, arg.RunID)
+	result, err := q.db.Exec(ctx, deleteRuntimeDecisionProjectionsByRun, arg.SessionID, arg.BotID, arg.RunID)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const getAgentSessionPublicationHead = `-- name: GetAgentSessionPublicationHead :one
-SELECT publication.run_id
-FROM agent_session_publications publication
-JOIN bot_sessions session
-  ON session.team_id = publication.team_id
- AND session.id = publication.session_id
-WHERE publication.team_id = public.memoh_current_team_id()
-  AND publication.session_id = $1
-  AND session.bot_id = $2
-  AND session.runtime_type <> 'model'
-  AND session.deleted_at IS NULL
-`
-
-type GetAgentSessionPublicationHeadParams struct {
-	SessionID pgtype.UUID `json:"session_id"`
-	BotID     pgtype.UUID `json:"bot_id"`
-}
-
-// Return the last committed round. Warm runtimes check it before every native
-// prompt so another server instance (or a history clear) cannot leave two
-// process-local conversations advancing from different canonical heads.
-func (q *Queries) GetAgentSessionPublicationHead(ctx context.Context, arg GetAgentSessionPublicationHeadParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, getAgentSessionPublicationHead, arg.SessionID, arg.BotID)
-	var run_id pgtype.UUID
-	err := row.Scan(&run_id)
-	return run_id, err
 }
 
 const getRuntimeConfigEpoch = `-- name: GetRuntimeConfigEpoch :one
@@ -198,50 +192,4 @@ func (q *Queries) GetRuntimeRoundOutcome(ctx context.Context, arg GetRuntimeRoun
 	var outcome string
 	err := row.Scan(&outcome)
 	return outcome, err
-}
-
-const upsertAgentSessionPublication = `-- name: UpsertAgentSessionPublication :execrows
-WITH target_session AS MATERIALIZED (
-  SELECT session.team_id, session.id, session.runtime_fencing_token
-  FROM bot_sessions session
-  WHERE session.team_id = public.memoh_current_team_id()
-    AND session.id = $1
-    AND session.bot_id = $2
-    AND session.runtime_type <> 'model'
-    AND session.deleted_at IS NULL
-),
-target_run AS MATERIALIZED (
-  SELECT target.team_id, target.id AS session_id, run.run_id
-  FROM target_session target
-  JOIN session_runs run
-    ON run.team_id = target.team_id
-   AND run.session_id = target.id
-   AND run.bot_id = $2
-   AND run.run_id = $3
-   AND run.fencing_token = target.runtime_fencing_token
-)
-INSERT INTO agent_session_publications (team_id, session_id, run_id)
-SELECT target.team_id, target.session_id, target.run_id
-FROM target_run target
-ON CONFLICT (team_id, session_id) DO UPDATE SET
-  run_id = EXCLUDED.run_id,
-  updated_at = now()
-`
-
-type UpsertAgentSessionPublicationParams struct {
-	SessionID pgtype.UUID `json:"session_id"`
-	BotID     pgtype.UUID `json:"bot_id"`
-	RunID     pgtype.UUID `json:"run_id"`
-}
-
-// Written in the same transaction as the round's canonical messages. The run
-// join proves the run belongs to this tenant+session and still owns the
-// session's current fencing generation, so a stale runtime cannot move the
-// head.
-func (q *Queries) UpsertAgentSessionPublication(ctx context.Context, arg UpsertAgentSessionPublicationParams) (int64, error) {
-	result, err := q.db.Exec(ctx, upsertAgentSessionPublication, arg.SessionID, arg.BotID, arg.RunID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }

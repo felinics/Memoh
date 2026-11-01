@@ -58,14 +58,28 @@ func (*FragmentSelector) Select(frags []contextfrag.ContextFrag, profile IntentP
 			systemBudgetDropped,
 		)
 	}
+	tagged := tagFragments(frags, profile)
+	if budget.KeepHistory {
+		drops, dropReasons := orphanExchangeDrops(tagged)
+		result := selectionResultFromTaggedReasons(tagged, keptIndexes(tagged, drops), dropReasons)
+		return finalizeSelection(
+			result,
+			profile,
+			gated,
+			superseded,
+			fragBudgetDropped,
+			fragBudgetEdits,
+			fragBudgetWarnings,
+			systemBudgetDropped,
+		)
+	}
 	if budget.Plan != nil {
 		budget.MaxTokens = budget.Plan.HistoryBudget
 	}
 
-	tagged := tagFragments(frags, profile)
 	historyBudget := budget.MaxTokens
 	trimDrops := budgetTrimDrops
-	hardBudget := budget.Plan != nil || budget.EnforceProtectedBudget
+	hardBudget := budget.Plan != nil
 	if hardBudget {
 		for i := range tagged {
 			tagged[i].Tokens = contextfrag.ResolveProviderBudgetFragTokens(tagged[i].Frag)

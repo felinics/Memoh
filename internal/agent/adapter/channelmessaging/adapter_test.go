@@ -2,9 +2,12 @@ package channelmessaging
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/channeltest"
+	"github.com/felinics/memoh/internal/markdownmedia"
 	"github.com/felinics/memoh/internal/messaging"
 )
 
@@ -55,5 +58,34 @@ func TestAdapterPreservesStructuredMessage(t *testing.T) {
 	}
 	if runtime.send.Message.Reply == nil || runtime.send.Message.Reply.MessageID != "message-1" {
 		t.Fatalf("reply not preserved: %#v", runtime.send.Message.Reply)
+	}
+}
+
+// The Channel process may not reach the bot workspace (split mode), so the
+// agent server archives referenced files before the message crosses the wire.
+func TestAdapterArchivesMarkdownMediaBeforeChannelTransport(t *testing.T) {
+	t.Parallel()
+
+	store := channeltest.NewMemoryAttachmentStore()
+	store.SeedContainerFile("bot-1", "/data/report.txt", []byte("report bytes"), "text/plain", "report.txt")
+	runtime := &fakeRuntime{}
+	adapter := New(runtime, fakeResolver{}, store)
+	if err := adapter.Send(context.Background(), "bot-1", "telegram", messaging.SendRequest{
+		Target:  "chat-1",
+		Message: messaging.Message{Format: messaging.MessageFormatMarkdown, Text: "see [report](/data/report.txt)"},
+	}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	wire, err := json.Marshal(runtime.send)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var received channel.SendRequest
+	if err := json.Unmarshal(wire, &received); err != nil {
+		t.Fatal(err)
+	}
+	bindings := markdownmedia.Bindings(received.Message.Metadata)
+	if len(bindings) != 1 || bindings[0].ErrorCode != "" || bindings[0].Asset.ContentHash == "" {
+		t.Fatalf("bindings=%+v", bindings)
 	}
 }

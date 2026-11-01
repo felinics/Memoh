@@ -11,8 +11,8 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/markdownmedia"
 	"github.com/felinics/memoh/internal/messageconv"
-	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/textutil"
 )
 
@@ -24,6 +24,7 @@ var (
 	uiMessageCollapsedNewlinesRe = regexp.MustCompile(`\n{3,}`)
 	uiTaskNotificationRe         = regexp.MustCompile(`(?s)<task-notification>\s*(.*?)\s*</task-notification>`)
 	uiMetadataParseKeys          = [][]byte{
+		[]byte(`"markdown_media"`),
 		[]byte(`"runtime_notices"`),
 		[]byte(`"agent_turn_id"`),
 		[]byte(`"message_source"`),
@@ -344,6 +345,25 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				}
 			}
 			text := extractPersistedMessageText(raw, &modelMessage)
+			// Web and Desktop show archived images; linked files stay workspace
+			// links that open in place, as the reply wrote them.
+			bindings := imageBindings(markdownmedia.Bindings(raw.Metadata))
+			if len(bindings) > 0 {
+				// Binding offsets belong to the publication source, before tag
+				// removal or whitespace normalization changes its byte positions.
+				text, _ = raw.Metadata["markdown_media_source"].(string)
+				if text == "" {
+					text = modelMessage.textContent()
+				}
+			}
+			text = markdownmedia.Render(text, bindings, func(b markdownmedia.Binding, label string) string {
+				target := markdownmedia.AssetURL(b)
+				if b.ErrorCode != "" {
+					target = "memoh-media-error:" + b.ErrorCode
+				}
+				return "![" + label + "](" + target + ")"
+			})
+			text = strings.TrimSpace(stripPersistedAgentTags(text))
 			reasonings := extractPersistedReasoning(&modelMessage)
 			attachments := uiAttachmentsFromMessageAssets(raw)
 			commands := extractCommandOutputs(&modelMessage)
@@ -1191,6 +1211,9 @@ func uiAttachmentsFromMessageAssets(raw messagepkg.Message) []UIAttachment {
 
 	attachments := make([]UIAttachment, 0, len(raw.Assets))
 	for _, asset := range raw.Assets {
+		if asset.Role == "markdown" {
+			continue
+		}
 		attachments = append(attachments, UIAttachment{
 			ID:          strings.TrimSpace(asset.ContentHash),
 			Type:        normalizeUIAttachmentType("", asset.Mime),
@@ -1744,12 +1767,14 @@ func isBackgroundTerminalStatus(status string) bool {
 	}
 }
 
-// ConvertSessionMessagesToUITurns applies the session's native fork boundary.
-// The durable anchor, rather than the last row in this page, is authoritative
-// so an older history page never offers a fork from its own final reply.
-func ConvertSessionMessagesToUITurns(messages []messagepkg.Message, runtimeType string, metadata map[string]any) []UITurn {
+// ConvertSessionMessagesToUITurns applies the session's native fork boundary:
+// forkAnchorKey names the runtime metadata key of the only turn a fork may
+// start from (external.Caps.ForkAnchorKey), empty when any turn can fork. The
+// durable anchor, rather than the last row in this page, is authoritative so
+// an older history page never offers a fork from its own final reply.
+func ConvertSessionMessagesToUITurns(messages []messagepkg.Message, forkAnchorKey string, metadata map[string]any) []UITurn {
 	turns := ConvertMessagesToUITurns(messages)
-	key := runtimekind.LatestForkAnchorKey(runtimeType)
+	key := forkAnchorKey
 	if key == "" {
 		return turns
 	}
@@ -1770,4 +1795,14 @@ func ConvertSessionMessagesToUITurns(messages []messagepkg.Message, runtimeType 
 		turns[i].RuntimeForkable = turns[i].RuntimeForkable && allowed[turns[i].TurnID]
 	}
 	return turns
+}
+
+func imageBindings(bindings []markdownmedia.Binding) []markdownmedia.Binding {
+	images := bindings[:0:0]
+	for _, b := range bindings {
+		if b.Image {
+			images = append(images, b)
+		}
+	}
+	return images
 }

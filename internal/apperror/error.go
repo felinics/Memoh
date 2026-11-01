@@ -37,11 +37,12 @@ const (
 	CodeChannelBindingRequired                   Code = "channel.binding_required"
 	CodeNetworkProviderNotConfigured             Code = "network.provider_not_configured"
 	CodeUserCannotRemoveSelf                     Code = "user.cannot_remove_self"
-	CodeCompactionModelUnavailable               Code = "compaction.model_unavailable"
+	CodeCompactionModelUnavailable               Code = "compaction.model_unavailable" // Deprecated: no longer returned; kept because it was published.
 	CodeSettingsReasoningEffortInvalid           Code = "settings.reasoning_effort_invalid"
 	CodeSettingsReasoningUnavailable             Code = "settings.reasoning_options_unavailable"
 	CodeContextBudgetUnsatisfied                 Code = "context.budget_unsatisfied"
 	CodeContextProtectedOverflow                 Code = "context.protected_overflow"
+	CodeMediaReferenceUnavailable                Code = "media.reference_unavailable"
 	CodeWorkspaceUnreachable                     Code = "workspace.unreachable"
 	CodeWorkspaceTemplateBootstrapFailed         Code = "workspace.template_bootstrap_failed"
 	CodeWorkspaceDisplayClipboardFailed          Code = "workspace.display_clipboard_failed"
@@ -66,6 +67,9 @@ const (
 	CodeProviderTemplateDomainMismatch           Code = "provider_template.domain_mismatch"
 	CodeProviderTemplateOperationFailed          Code = "provider_template.operation_failed"
 	CodeProviderNameTaken                        Code = "provider.name_taken"
+	CodeProviderCatalogUnavailable               Code = "provider.catalog_unavailable"
+	CodeProviderCatalogSourceNotFound            Code = "provider.catalog_source_not_found"
+	CodeProviderManagedReadonly                  Code = "provider.managed_readonly"
 	CodeProviderTemplateRequestInvalid           Code = "provider_template.request_invalid"
 	CodeSearchProviderTypeConflict               Code = "search_provider.type_conflict"
 	CodeSearchProviderInvalidProvider            Code = "search_provider.invalid_provider"
@@ -106,7 +110,6 @@ const (
 	CodeACPAccessForbidden                       Code = "acp.access_forbidden"
 	CodeACPRuntimeNotFound                       Code = "acp.runtime_not_found"
 	CodeACPRuntimeConflict                       Code = "acp.runtime_conflict"
-	CodeACPRuntimeLimitReached                   Code = "acp.runtime_limit_reached"
 	CodeACPOperationFailed                       Code = "acp.operation_failed"
 	CodeACPCommandNotFound                       Code = "acp.command_not_found"
 	CodeExternalAgentTurnReplacementUnsupported  Code = "external_agent.turn_replacement_unsupported"
@@ -147,6 +150,7 @@ const (
 	CodeExternalRuntimeOverloaded                Code = "external_runtime.overloaded"
 	CodeExternalRuntimeUpstreamUnreachable       Code = "external_runtime.upstream_unreachable"
 	CodeExternalRuntimeRequestBlocked            Code = "external_runtime.request_blocked"
+	CodeExternalRuntimeReported                  Code = "external_runtime.reported"
 	CodeToolApprovalForbidden                    Code = "tool_approval.forbidden"
 	CodeToolApprovalNotFound                     Code = "tool_approval.not_found"
 	CodeToolApprovalExpired                      Code = "tool_approval.expired"
@@ -223,7 +227,6 @@ const (
 	CodeAgentCredentialEncryptionUnavailable   Code = "agent_credential.encryption_unavailable"   //nolint:gosec // Stable public error code.
 	CodeAgentCredentialRuntimeBusy             Code = "agent_credential.runtime_busy"             //nolint:gosec // Stable public error code.
 	CodeAgentCredentialMaterializationFailed   Code = "agent_credential.materialization_failed"   //nolint:gosec // Stable public error code.
-	CodeAgentCredentialUsageAuthExpired        Code = "agent_credential.usage_auth_expired"       //nolint:gosec // Stable public error code.
 	CodeAgentCredentialUsageUnavailable        Code = "agent_credential.usage_unavailable"        //nolint:gosec // Stable public error code.
 
 	// Boundary codes for failures that carry no public error of their own:
@@ -297,8 +300,6 @@ const (
 	CodeACPAgentNotFound            Code = "acp_agent_not_found"
 	CodeACPAgentNotEnabled          Code = "acp_agent_not_enabled"
 	CodeACPAgentNotConfigured       Code = "acp_agent_not_configured"
-	CodeCodexOAuthIncomplete        Code = "codex_oauth_incomplete"
-	CodeCodexAuthTokenMissing       Code = "codex_auth_token_missing" //nolint:gosec // Stable public error code.
 	CodeACPAgentAuthInvalid         Code = "acp_agent_auth_invalid"
 	CodeNoWorkspaceExec             Code = "no_workspace_exec"
 	CodeACPRuntimeOwnerMissing      Code = "acp_runtime_owner_missing"
@@ -487,10 +488,6 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The Agent credential could not be prepared for this runtime.",
 	},
-	CodeAgentCredentialUsageAuthExpired: {
-		HTTPStatus: http.StatusConflict,
-		Detail:     "The account sign-in has expired. It renews after the next conversation; if usage still cannot load, connect the account again.",
-	},
 	CodeAgentCredentialUsageUnavailable: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "Usage limits could not be loaded right now. Try again later.",
@@ -578,12 +575,13 @@ var catalog = map[Code]Definition{
 	},
 	CodeContextBudgetUnsatisfied: {
 		HTTPStatus: http.StatusUnprocessableEntity,
-		Detail:     "The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window.",
+		Detail:     "This request does not fit the model context window, so the run stopped. Try again, shorten the request, start a new conversation, or switch to a model with a larger context window.",
 	},
 	CodeContextProtectedOverflow: {
 		HTTPStatus: http.StatusUnprocessableEntity,
-		Detail:     "Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window.",
+		Detail:     "Required context exceeds the model context budget. Shorten the request, or switch to a model with a larger context window.",
 	},
+	CodeMediaReferenceUnavailable: {HTTPStatus: http.StatusUnprocessableEntity, Detail: "This file could not be shared. Ask the agent to recreate or share it again."},
 	CodeWorkspaceUnreachable: {
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The workspace could not be reached.",
@@ -697,6 +695,9 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusConflict,
 		Detail:     "This provider name is already taken.",
 	},
+	CodeProviderCatalogUnavailable:    {HTTPStatus: http.StatusServiceUnavailable, Detail: "The model catalog is unavailable. Try again later or import from the provider endpoint."},
+	CodeProviderCatalogSourceNotFound: {HTTPStatus: http.StatusNotFound, Detail: "This provider has no public model catalog. Import from its endpoint instead."},
+	CodeProviderManagedReadonly:       {HTTPStatus: http.StatusForbidden, Detail: "This provider is managed by the platform. Use its managed catalog sync."},
 	CodeProviderTemplateRequestInvalid: {
 		HTTPStatus: http.StatusBadRequest,
 		Detail:     "The provider template request is invalid.",
@@ -862,10 +863,6 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusConflict,
 		Detail:     "The Agent runtime is not ready for this operation. Refresh and try again.",
 	},
-	CodeACPRuntimeLimitReached: {
-		HTTPStatus: http.StatusTooManyRequests,
-		Detail:     "Too many Agent runtimes are active. Close one and try again.",
-	},
 	CodeACPOperationFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The Agent runtime operation failed. Please try again.",
@@ -905,15 +902,32 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The external agent runtime for this session is not available on this server.",
 	},
-	// The request to resume the external agent's own session (a Codex thread)
-	// failed before the agent could accept or refuse it, so a retry may still
-	// resume it. The turn is treated as not run; the user retries or starts a
-	// fresh conversation.
+	// The request to resume the external agent's own session (a Codex or Grok
+	// thread, an ACP session) failed before the agent could accept or refuse
+	// it, so a retry may still resume it. The turn is treated as not run; the
+	// user retries, starts a fresh conversation or, in an ACP chat, gives the
+	// session up.
 	CodeExternalRuntimeSessionResumeFailed: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The session could not be resumed. Try again or start a new conversation.",
 		Fault:      FaultDependency,
 	},
+	// The external agent failed the turn and said why. Its own words are the
+	// copy, as the user would read them in the agent's own client; mapping
+	// them onto categories of ours could never cover every agent and only
+	// hid what happened. They are redacted of URLs and bounded before they
+	// become the argument.
+	CodeExternalRuntimeReported: {
+		HTTPStatus:  http.StatusBadGateway,
+		Detail:      "The external agent reported an error.",
+		AllowedArgs: []string{"message"},
+		Fault:       FaultDependency,
+	},
+	// The usage_limited, rate_limited, context_window_exceeded, overloaded,
+	// upstream_unreachable and request_blocked codes are no longer produced:
+	// the agent's own message is shown instead. They stay registered for the
+	// runs and history written with them.
+	//
 	// The external agent's own account has no usage left: a plan allowance
 	// that resets, a billing quota that does not, or a plan that does not
 	// include the agent. The agent reports them as one condition, so the copy
@@ -1158,13 +1172,12 @@ var catalog = map[Code]Definition{
 		Detail:     "The model provider rate limit was reached. Please wait a moment before sending again.",
 		Fault:      FaultDependency,
 	},
-	// A provider's rejected key or exhausted quota answers 502: a 401 would
-	// sign the Web client out, and RFC 9110 reserves 402.
 	CodeAgentProviderQuotaExhausted: {
-		HTTPStatus: http.StatusBadGateway,
+		HTTPStatus: http.StatusPaymentRequired,
 		Detail:     "The model provider account has no remaining balance or quota.",
 		Fault:      FaultDependency,
 	},
+	// A provider's rejected key answers 502: a 401 would sign the Web client out.
 	CodeAgentProviderAuthFailed: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The model provider rejected the credentials. Check the provider API key.",
@@ -1329,8 +1342,6 @@ var catalog = map[Code]Definition{
 	CodeACPAgentNotFound:         {HTTPStatus: http.StatusBadRequest, Detail: "The selected external agent is unavailable."},
 	CodeACPAgentNotEnabled:       {HTTPStatus: http.StatusForbidden, Detail: "The selected external agent is disabled for this bot."},
 	CodeACPAgentNotConfigured:    {HTTPStatus: http.StatusBadRequest, Detail: "External agent setup is incomplete for this bot."},
-	CodeCodexOAuthIncomplete:     {HTTPStatus: http.StatusConflict, Detail: "Codex ChatGPT sign-in is not complete for this bot workspace."},
-	CodeCodexAuthTokenMissing:    {HTTPStatus: http.StatusConflict, Detail: "Codex authentication is missing or incomplete for this bot workspace."},
 	CodeACPAgentAuthInvalid:      {HTTPStatus: http.StatusConflict, Detail: "External agent authentication is invalid. Update the agent setup and try again."},
 	CodeNoWorkspaceExec:          {HTTPStatus: http.StatusForbidden, Detail: "You do not have permission to run workspace commands for this bot."},
 	CodeACPRuntimeOwnerMissing:   {HTTPStatus: http.StatusConflict, Detail: "This external-agent session has no runtime owner. Start a new session to continue."},

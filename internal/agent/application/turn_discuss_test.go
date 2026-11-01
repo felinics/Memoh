@@ -23,19 +23,30 @@ import (
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/contextview"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 type fakeAgentStreamer struct {
 	lastConfig *native.RunConfig
 }
 
-type silentDiscussAgentStreamer struct{}
+// silentDiscussAgentStreamer waits to be cancelled, then aborts stopAfter
+// later, as a tool that ignores cancellation would. With partial it first
+// emits one text delta.
+type silentDiscussAgentStreamer struct {
+	partial   bool
+	stopAfter time.Duration
+}
 
-func (*silentDiscussAgentStreamer) Stream(ctx context.Context, _ native.RunConfig) <-chan native.StreamEvent {
-	ch := make(chan native.StreamEvent, 1)
+func (f *silentDiscussAgentStreamer) Stream(ctx context.Context, _ native.RunConfig) <-chan native.StreamEvent {
+	ch := make(chan native.StreamEvent, 2)
 	go func() {
 		defer close(ch)
+		if f.partial {
+			ch <- native.StreamEvent{Type: native.EventTextDelta, Delta: "partial"}
+		}
 		<-ctx.Done()
+		time.Sleep(f.stopAfter)
 		ch <- native.StreamEvent{Type: native.EventAgentAbort, Messages: json.RawMessage(`[]`)}
 	}()
 	return ch
@@ -77,7 +88,7 @@ type fakeDiscussService struct {
 	storeFn        func() error
 }
 
-func (f *fakeDiscussService) ResolveRunConfig(_ context.Context, _, _, _, _, _, _, _ string) (ResolveRunConfigResult, error) {
+func (f *fakeDiscussService) ResolveRunConfig(context.Context, RunConfigRequest) (ResolveRunConfigResult, error) {
 	return f.resolveResult, nil
 }
 
@@ -103,13 +114,14 @@ type testAgentStreamer interface {
 }
 
 type testDiscussService interface {
-	ResolveRunConfig(context.Context, string, string, string, string, string, string, string) (ResolveRunConfigResult, error)
+	ResolveRunConfig(context.Context, RunConfigRequest) (ResolveRunConfigResult, error)
 	InlineImageAttachments(context.Context, string, []timeline.ImageAttachmentRef) [][]sdk.ImagePart
 	StoreRound(context.Context, string, string, string, string, string, []sdk.Message, string, *contextfrag.LifecycleHolder) error
 }
 
 func newDiscussTestService(streamer testChatStreamer, agent testAgentStreamer, resolver testDiscussService) *Service {
 	service := newTurnTestService(streamer)
+	service.checkpoints = emptyHistoryCheckpoints()
 	if service.logger == nil {
 		service.logger = slog.New(slog.DiscardHandler)
 	}
@@ -124,9 +136,9 @@ func configureDiscussLifecycle(service *Service) (*lifecycleTurnAdmitter, *recor
 	runtime := &lifecycleTurnAdmitter{admission: lifecycleTestAdmission()}
 	store := &recordingContextLifecycleStore{}
 	resolve := service.turnHooks.resolveRunConfig
-	service.turnHooks.resolveRunConfig = func(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error) {
-		resolved, err := resolve(ctx, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken)
-		resolved.RunConfig.Identity = native.SessionContext{BotID: botID, SessionID: sessionID}
+	service.turnHooks.resolveRunConfig = func(ctx context.Context, req RunConfigRequest) (ResolveRunConfigResult, error) {
+		resolved, err := resolve(ctx, req)
+		resolved.RunConfig.Identity = native.SessionContext{BotID: req.BotID, SessionID: req.SessionID}
 		return resolved, err
 	}
 	service.sessionRuntime = runtime
@@ -238,7 +250,7 @@ func TestDiscussInlinesImages(t *testing.T) {
 // Each image rides on the message it arrived with, and a message admission
 // leaves out takes its images with it instead of piling them onto the
 // protected current input.
-func TestDiscussInlinesImagesOnTheirAdmittedMessages(t *testing.T) {
+func TestDiscussInlinesImagesOnTheirMessages(t *testing.T) {
 	var requested []string
 	agent := &fakeAgentStreamer{}
 	resolver := &fakeDiscussService{
@@ -259,12 +271,10 @@ func TestDiscussInlinesImagesOnTheirAdmittedMessages(t *testing.T) {
 	a := newDiscussTestService(&fakeRunner{}, agent, resolver)
 	cmd := discussCommand()
 	cmd.DiscussMessages = []turn.DiscussMessage{
-		{Role: "user", Content: strings.Repeat("o", 4400), Source: &turn.ContextMessageSource{Kind: "external", ID: "omitted", Current: true}},
 		{Role: "user", Content: "older", Source: &turn.ContextMessageSource{Kind: "external", ID: "older", Current: true}},
 		{Role: "user", Content: "newest", Source: &turn.ContextMessageSource{Kind: "external", ID: "newest", Current: true}},
 	}
 	cmd.DiscussImageRefs = []turn.DiscussImageRef{
-		{ContentHash: "omitted-image", MessageID: "omitted"},
 		{ContentHash: "older-image", MessageID: "older"},
 		{ContentHash: "newest-image", MessageID: "newest"},
 		{ContentHash: "unattributed-image"},
@@ -277,7 +287,7 @@ func TestDiscussInlinesImagesOnTheirAdmittedMessages(t *testing.T) {
 	drainDiscuss(t, h)
 
 	if strings.Join(requested, ",") != "unattributed-image,newest-image,older-image" {
-		t.Fatalf("loaded images %v, want only those of admitted messages, newest first", requested)
+		t.Fatalf("loaded images %v, want those of the batch, newest first", requested)
 	}
 	images := map[string][]string{}
 	for _, message := range agent.lastConfig.Messages {
@@ -290,13 +300,6 @@ func TestDiscussInlinesImagesOnTheirAdmittedMessages(t *testing.T) {
 	}
 	if len(images) != 2 || strings.Join(images["older"], ",") != "older-image" || strings.Join(images["newest"], ",") != "newest-image,unattributed-image" {
 		t.Fatalf("images by message = %v, want each on its own message and the unattributed one on the current input", images)
-	}
-	recorded := false
-	for _, record := range agent.lastConfig.ContextMutations.Records() {
-		recorded = recorded || record.Kind == contextfrag.MutationCurrentInputImagesOmitted && record.Detail == "sources=omitted"
-	}
-	if !recorded {
-		t.Fatalf("mutations = %+v, want the left-out message's image recorded", agent.lastConfig.ContextMutations.Records())
 	}
 }
 
@@ -555,6 +558,44 @@ func TestAdmittedDiscussSilencePublishesStableTimeoutFailure(t *testing.T) {
 	}
 }
 
+// A run whose events can no longer be published ends on that failure, once,
+// even when the engine outlasts the idle timeout while it stops.
+func TestAdmittedDiscussPublishFailureOutlastingIdleTimeoutIsNotATimeout(t *testing.T) {
+	resolver := &fakeDiscussService{resolveResult: ResolveRunConfigResult{ModelID: "model-1"}}
+	service := newDiscussTestService(&fakeRunner{}, &silentDiscussAgentStreamer{partial: true, stopAfter: 100 * time.Millisecond}, resolver)
+	service.streamIdleTimeout = 10 * time.Millisecond
+	runtime, _ := configureDiscussLifecycle(service)
+	var published []native.StreamEventType
+	service.publishTurnEvent = func(_ context.Context, _ sessionruntime.RunHandle, event native.StreamEvent) error {
+		published = append(published, event.Type)
+		if event.Type == native.EventTextDelta {
+			return errors.New("consumer gone")
+		}
+		return nil
+	}
+
+	handle, err := service.StartTurn(context.Background(), lifecycleDiscussCommand())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range handle.Events() {
+	}
+	var handleErrs []error
+	for err := range handle.Errs() {
+		handleErrs = append(handleErrs, err)
+	}
+
+	if len(handleErrs) != 1 || apperror.CodeOf(handleErrs[0]) == apperror.CodeAgentResponseTimeout {
+		t.Fatalf("handle errors = %v, want the publish failure once", handleErrs)
+	}
+	if len(published) != 1 {
+		t.Fatalf("published = %v, want nothing after the failed publish", published)
+	}
+	if len(runtime.finishes) != 1 || runtime.finishes[0].message == string(apperror.CodeAgentResponseTimeout) {
+		t.Fatalf("runtime finishes = %#v, want one finish that is not a timeout", runtime.finishes)
+	}
+}
+
 func TestAdmittedDiscussBudgetFailurePersistsFailedBudgetLifecycle(t *testing.T) {
 	const admittedRunID = "00000000-0000-4000-8000-000000000919"
 	logger := slog.New(slog.DiscardHandler)
@@ -565,7 +606,6 @@ func TestAdmittedDiscussBudgetFailurePersistsFailedBudgetLifecycle(t *testing.T)
 			RunConfig: native.RunConfig{
 				Model: &sdk.Model{
 					ID:       "discuss-budget-model",
-					Type:     sdk.ModelTypeChat,
 					Provider: provider,
 				},
 				System:           "required discuss policy",
@@ -627,7 +667,7 @@ func TestAdmittedDiscussBudgetFailurePersistsFailedBudgetLifecycle(t *testing.T)
 }
 
 func TestDiscussMetadataOnlyRejectionNeverStartsRuntime(t *testing.T) {
-	for _, runtimeType := range []string{sessionpkg.RuntimeModel, sessionpkg.RuntimeACPAgent, sessionpkg.RuntimeCodex} {
+	for _, runtimeType := range []string{sessionpkg.RuntimeModel, sessionpkg.RuntimeACPAgent, string(runtimekind.Codex)} {
 		t.Run(runtimeType, func(t *testing.T) {
 			runner := &fakeRunner{}
 			agent := &fakeAgentStreamer{}
@@ -646,7 +686,7 @@ func TestDiscussMetadataOnlyRejectionNeverStartsRuntime(t *testing.T) {
 			}
 			var failures int
 			for err := range handle.Errs() {
-				if apperror.CodeOf(err) != apperror.CodeContextProtectedOverflow {
+				if apperror.CodeOf(err) != apperror.CodeContextBudgetUnsatisfied {
 					t.Fatalf("unexpected error: %v", err)
 				}
 				failures++
@@ -906,7 +946,7 @@ func TestDiscussCarriesComposedMessagesThroughTypedFragments(t *testing.T) {
 	cmd.DiscussMessages = []turn.DiscussMessage{
 		{Role: "user", Content: "first user"},
 		{Role: "user", Content: "second user"},
-		{Role: "user", Content: "<summary>covered history</summary>", CompactionArtifactID: "artifact-1"},
+		{Role: "user", Content: "<summary>covered history</summary>", CompactionArtifactID: "artifact-1", Pinned: true},
 		{
 			Role:       "assistant",
 			Content:    "tool call fallback",

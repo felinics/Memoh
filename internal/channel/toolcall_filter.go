@@ -3,6 +3,8 @@ package channel
 import (
 	"context"
 	"strings"
+
+	"github.com/felinics/memoh/internal/markdownmedia"
 )
 
 // toolCallDroppingStream hides ordinary tool calls from the wrapped primary
@@ -77,6 +79,14 @@ func (s *toolCallDroppingStream) closeSegment() {
 // already delivered as a closed segment.
 func (s *toolCallDroppingStream) isCommittedFinal(final *StreamFinalizePayload) bool {
 	if final == nil || len(final.Message.Attachments) > 0 || len(final.Message.Actions) > 0 {
+		return false
+	}
+	// A final that publishes media also delivers what the outbound stream
+	// withheld; that stream drops the repeated text itself.
+	if _, ok := final.Message.Metadata[markdownmedia.MetadataKey]; ok {
+		return false
+	}
+	if _, ok := final.Message.Metadata[markdownmedia.EarlierMetadataKey]; ok {
 		return false
 	}
 	text := strings.TrimSpace(final.Message.PlainText())

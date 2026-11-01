@@ -1107,6 +1107,21 @@ describe('workspace layout store', () => {
     expect(dock.getPanel('terminal:3')).toBeTruthy()
   })
 
+it('restarts terminal numbering once every terminal is closed', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openTerminal()
+    store.openTerminal()
+    store.closeTab('terminal:1')
+    store.closeTab('terminal:2')
+    store.openTerminal()
+
+    expect(dock.getPanel('terminal:1')?.title).toBe('Terminal 1')
+    expect(dock.getPanel('terminal:3')).toBeUndefined()
+  })
+
   it('repairs legacy terminal titles when restoring a layout', async () => {
     localStorage.setItem('workspace-layout', JSON.stringify({
       'bot-1': {

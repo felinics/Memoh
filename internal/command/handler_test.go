@@ -677,7 +677,7 @@ func TestGlobalHelpKeepsTelegramGroupCommandsCompact(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(nil)
 	help := h.registry.GlobalHelp(i18n.New("en"), "snowluocat_bot")
-	for _, commandName := range []string{"help", "start", "new", "link", "compact"} {
+	for _, commandName := range []string{"help", "start", "new", "link"} {
 		want := "/" + commandName
 		if !strings.Contains(help, "- "+want+" —") {
 			t.Errorf("compact global help missing list row for %q:\n%s", want, help)

@@ -16,6 +16,8 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/agent/application"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/external/acp"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
@@ -32,8 +34,8 @@ import (
 type SessionHandler struct {
 	sessionService  *session.Service
 	threadEnricher  threadEnricher
-	acpRuntimes     acpSessionRuntimeService
 	runtimeResets   sessionResetService
+	runtimes        *external.Registry
 	workdirs        sessionWorkdirService
 	agentRuntimes   sessionAgentRuntimeService
 	runtimeControls turn.RuntimeControlService
@@ -50,11 +52,10 @@ type sessionProjectionCache interface {
 	DropSession(sessionID string)
 }
 
-// sessionAgentRuntimeService owns external-runtime fork preparation and active
-// run shutdown; satisfied by the agent application service.
+// sessionAgentRuntimeService owns external-runtime fork preparation;
+// satisfied by the agent application service.
 type sessionAgentRuntimeService interface {
 	PrepareExternalFork(ctx context.Context, botID, sessionID, turnID string) (map[string]any, error)
-	AbortSessionRuns(ctx context.Context, botID, sessionID string) error
 }
 
 // modelPreferenceService is the picker-pair write path (issue #879),
@@ -65,6 +66,12 @@ type modelPreferenceService interface {
 }
 
 // SetModelPreferenceService installs the agent-side preference write path.
+// SetRuntimeRegistry installs the external runtimes, whose declarations say
+// how their conversations fork and pick models.
+func (h *SessionHandler) SetRuntimeRegistry(runtimes *external.Registry) {
+	h.runtimes = runtimes
+}
+
 func (h *SessionHandler) SetModelPreferenceService(svc modelPreferenceService) {
 	h.modelPrefs = svc
 }
@@ -74,24 +81,9 @@ type sessionWorkdirService interface {
 	RequireActive(ctx context.Context, botID, workdirID string) (workdir.Workdir, error)
 }
 
-// acpSessionRuntimeService owns the ACP-specific runtime lifecycle: closing a
-// warm agent process and binding a session to a runtime.
-type acpSessionRuntimeService interface {
-	CloseSession(sessionID string) error
-	BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error
-}
-
-// sessionResetService is the runtime-agnostic history reset boundary. It is a
-// separate interface so generic reset call sites never depend on ACP naming.
+// sessionResetService is the runtime-agnostic history reset boundary.
 type sessionResetService interface {
 	BeginSessionHistoryReset(ctx context.Context, botID, sessionID string) (resetCtx context.Context, release func(), err error)
-}
-
-// sessionRuntimeServices is the single dependency the ACP pool satisfies; the
-// handler splits it into the two narrow roles above at construction.
-type sessionRuntimeServices interface {
-	acpSessionRuntimeService
-	sessionResetService
 }
 
 type threadEnricher interface {
@@ -99,7 +91,7 @@ type threadEnricher interface {
 }
 
 // NewSessionHandler creates a SessionHandler.
-func NewSessionHandler(log *slog.Logger, sessionService *session.Service, runtimes sessionRuntimeServices, botService *bots.Service, accountService *accounts.Service) *SessionHandler {
+func NewSessionHandler(log *slog.Logger, sessionService *session.Service, runtimes sessionResetService, botService *bots.Service, accountService *accounts.Service) *SessionHandler {
 	handler := &SessionHandler{
 		sessionService: sessionService,
 		botService:     botService,
@@ -107,7 +99,6 @@ func NewSessionHandler(log *slog.Logger, sessionService *session.Service, runtim
 		logger:         log.With(slog.String("handler", "session")),
 	}
 	if runtimes != nil {
-		handler.acpRuntimes = runtimes
 		handler.runtimeResets = runtimes
 	}
 	return handler
@@ -169,10 +160,6 @@ type createSessionRequest struct {
 	ChannelType     string         `json:"channel_type,omitempty"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
 	RuntimeMetadata map[string]any `json:"runtime_metadata,omitempty"`
-	// ACPRuntimeID optionally binds a warm pre-session runtime (created via
-	// POST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a
-	// transient in-memory handle reference, never persisted in metadata.
-	ACPRuntimeID string `json:"acp_runtime_id,omitempty"`
 	// WorkdirID immutably binds the new session to a bot workdir. The
 	// workdir decides the session's workspace target and working directory
 	// for its whole life; there is no way to change or clear it later.
@@ -244,7 +231,6 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	}
 	botAgentID := strings.TrimSpace(req.BotAgentID)
 	var botAgent botagents.BotAgent
-	var botAgentDescriptor botagents.Descriptor
 	if botAgentID != "" {
 		if h.botAgents == nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "bot agent service not configured")
@@ -264,7 +250,6 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent runtime")
 		}
 		botAgent = agent
-		botAgentDescriptor = descriptor
 		// The persisted BotAgent descriptor is authoritative for the runtime:
 		// ACP rows keep their provider identity in metadata, direct runtimes
 		// map straight to their session runtime type.
@@ -288,25 +273,10 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 			}
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to validate bot Agent")
 		}
-		if botAgentDescriptor.Runtime == botagents.RuntimeACP {
-			req.Metadata = mergeSessionMetadata(req.Metadata, map[string]any{"acp_agent_id": botAgentDescriptor.Provider})
-			req.RuntimeMetadata = mergeSessionMetadata(req.RuntimeMetadata, map[string]any{"acp_agent_id": botAgentDescriptor.Provider})
-		}
 	}
 	boundWorkdir, err := resolveSessionWorkdirBinding(c.Request().Context(), h.workdirs, bot.ID, req.WorkdirID, targetRuntimeType)
 	if err != nil {
 		return err
-	}
-	if targetRuntimeType == session.RuntimeACPAgent {
-		req.Metadata = session.ApplyACPMetadataDefaults(mergeSessionMetadata(req.Metadata, req.RuntimeMetadata))
-		req.RuntimeMetadata = session.ApplyACPMetadataDefaults(mergeSessionMetadata(req.RuntimeMetadata, req.Metadata))
-		if botAgentID == "" {
-			if err := h.validateACPCreate(c.Request().Context(), bot, req.Metadata); err != nil {
-				return err
-			}
-		} else if sessionMetadataString(req.Metadata, "project_path") == "" {
-			return apperror.FieldRequired("metadata.project_path")
-		}
 	}
 	createInput := session.CreateInput{
 		BotID:           bot.ID,
@@ -350,27 +320,6 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	sess, err := h.sessionService.Create(c.Request().Context(), createInput)
 	if err != nil {
 		return sessionServiceError(err)
-	}
-	// Best-effort bind of a warm pre-session runtime: the session lives in
-	// the database and the runtime in memory, so this is sequenced (bind only
-	// after a successful create), not transactional. A failed bind keeps the
-	// session — the first prompt simply cold starts a runtime.
-	if runtimeID := strings.TrimSpace(req.ACPRuntimeID); runtimeID != "" && session.IsACPRuntime(sess) && h.acpRuntimes != nil {
-		if bindErr := h.acpRuntimes.BindRuntime(
-			c.Request().Context(),
-			bot.ID,
-			runtimeID,
-			sess.ID,
-			sessionMetadataString(sess.Metadata, "acp_agent_id"),
-			sessionMetadataString(sess.Metadata, "project_path"),
-			sessionMetadataString(sess.Metadata, "runtime_owner_account_id"),
-		); bindErr != nil {
-			h.logger.WarnContext(c.Request().Context(), "failed to bind ACP runtime to new session; first prompt will cold start",
-				slog.String("session_id", sess.ID),
-				slog.String("runtime_id", runtimeID),
-				slog.Any("error", bindErr),
-			)
-		}
 	}
 	return c.JSON(http.StatusCreated, sess)
 }
@@ -428,7 +377,8 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 	// External runtimes fork their own conversation first; the returned
 	// runtime metadata binds the Memoh fork to the runtime-side fork.
 	var runtimeMetadataOverride map[string]any
-	agentRuntimeSource := session.IsACPRuntime(source) || session.IsDirectRuntime(source)
+	agentRuntimeSource := session.IsExternalRuntime(source)
+	sourceCaps, _ := h.runtimes.Caps(session.RuntimeTypeOf(source))
 	if agentRuntimeSource {
 		// Forking an agent-runtime session creates a new workspace execution
 		// surface; read access to the source is not enough.
@@ -436,7 +386,7 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 			return apperror.New(apperror.CodeNoWorkspaceExec, nil)
 		}
 	}
-	if session.IsDirectRuntime(source) {
+	if sourceCaps.ForkNeedsRuntime {
 		if h.agentRuntimes == nil {
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "agent runtime service unavailable")
 		}
@@ -478,6 +428,7 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 		Title:                   strings.TrimSpace(req.Title),
 		CreatedByUserID:         channelIdentityID,
 		RuntimeMetadataOverride: runtimeMetadataOverride,
+		RuntimeForkRequired:     sourceCaps.ForkNeedsRuntime,
 	})
 	if err != nil {
 		return sessionForkError(err)
@@ -883,7 +834,6 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			}
 		}
 		var targetAgent botagents.BotAgent
-		var targetAgentDescriptor botagents.Descriptor
 		if targetBotAgentID != "" {
 			if h.botAgents == nil {
 				return echo.NewHTTPError(http.StatusInternalServerError, "bot agent service not configured")
@@ -907,7 +857,6 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 				}
 				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent runtime")
 			}
-			targetAgentDescriptor = descriptor
 			// The persisted BotAgent descriptor is authoritative for the runtime.
 			targetRuntime = botagents.SessionRuntime(descriptor.Runtime)
 		} else if botAgentSelectionExplicit {
@@ -941,17 +890,16 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 				}
 				return echo.NewHTTPError(http.StatusInternalServerError, "failed to validate bot Agent")
 			}
-			if targetAgentDescriptor.Runtime == botagents.RuntimeACP {
-				targetMetadata = mergeSessionMetadata(targetMetadata, map[string]any{"acp_agent_id": targetAgentDescriptor.Provider})
-				targetRuntimeMetadata = mergeSessionMetadata(targetRuntimeMetadata, map[string]any{"acp_agent_id": targetAgentDescriptor.Provider})
-			}
 		}
 		if targetRuntime == session.RuntimeACPAgent {
-			targetMetadata = session.ApplyACPMetadataDefaults(mergeSessionMetadata(targetMetadata, targetRuntimeMetadata))
-			targetRuntimeMetadata = session.ApplyACPMetadataDefaults(mergeSessionMetadata(targetRuntimeMetadata, targetMetadata))
+			// A copy of the stored session in metadata would be merged back
+			// after the runtime copy is cleared.
+			delete(targetMetadata, acpagent.NativeSessionKey)
 		}
 		agentChanged := strings.TrimSpace(existing.BotAgentID) != targetBotAgentID || sessionAgentConfigChanged(existing, targetMode, targetRuntime, targetMetadata, targetRuntimeMetadata)
 		if agentChanged {
+			// The stored session belongs to the agent and project that wrote it.
+			delete(targetRuntimeMetadata, acpagent.NativeSessionKey)
 			// Advisory pre-check with zero side effects: a doomed request must
 			// not destroy the warm runtime or abort an in-flight turn before
 			// being rejected. The authoritative check re-runs inside the
@@ -973,20 +921,10 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			defer releaseRuntimeReset()
 			c.SetRequest(c.Request().WithContext(resetCtx))
 		}
-		switch {
-		case targetRuntime == session.RuntimeACPAgent:
-			if targetBotAgentID == "" {
-				if err := h.validateACPCreate(c.Request().Context(), bot, targetMetadata); err != nil {
-					return err
-				}
-			}
-		case session.IsDirectRuntimeType(targetRuntime):
-			// Driver-owned keys (the codex thread id) live in runtime
-			// metadata; wiping them silently discards the runtime-side
-			// conversation, so an external target keeps both maps.
-			targetMetadata = session.ApplyExternalMetadataDefaults(targetMetadata)
-			targetRuntimeMetadata = session.ApplyExternalMetadataDefaults(targetRuntimeMetadata)
-		case session.IsACPRuntime(existing) || session.IsDirectRuntime(existing) || req.Type != nil || req.RuntimeType != nil || req.RuntimeMetadata != nil:
+		// Driver-owned keys (the codex thread id) live in runtime metadata;
+		// wiping them silently discards the runtime-side conversation, so an
+		// external target keeps both maps.
+		if !runtimekind.IsExternal(targetRuntime) && (session.IsExternalRuntime(existing) || req.Type != nil || req.RuntimeType != nil || req.RuntimeMetadata != nil) {
 			targetMetadata = stripACPMetadata(targetMetadata)
 			targetRuntimeMetadata = map[string]any{}
 		}
@@ -1021,11 +959,11 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			if errors.Is(prefErr, application.ErrModelPreferenceConflict) {
 				return apperror.New(apperror.CodeSessionModelPreferenceConflict, nil)
 			}
-			if session.IsDirectRuntime(result) {
+			if _, catalog := external.As[external.ModelCatalogProvider](h.runtimes, session.RuntimeTypeOf(result)); catalog {
 				if errors.Is(prefErr, application.ErrDirectModelUnavailable) {
-					return apperror.New(apperror.CodeACPModelUnavailable, nil)
+					return apperror.New(apperror.CodeRuntimeControlModeUnavailable, nil)
 				}
-				return apperror.Wrap(apperror.CodeACPOperationFailed, prefErr, nil)
+				return application.RuntimeControlError(prefErr)
 			}
 			return modelPreferenceError(prefErr, "patch session model preference")
 		}
@@ -1083,42 +1021,26 @@ func (h *SessionHandler) DeleteSession(c echo.Context) error {
 	if !bots.HasPermission(perms, requiredPermissionForSessionRuntime(existingMode, existingRuntime)) {
 		return echo.NewHTTPError(http.StatusForbidden, "bot access denied")
 	}
-	var releaseRuntimeReset func()
-	if session.IsACPRuntime(existing) && h.runtimeResets == nil {
+	// Every runtime goes through the one reset: the session's runs stop, its
+	// agent process closes, and none starts again until the tombstone lands.
+	if h.runtimeResets == nil {
 		return apperror.Wrap(
 			apperror.CodeSessionResetUnavailable,
 			errors.New("runtime reset is not configured"),
 			nil,
 		)
 	}
-	if session.IsACPRuntime(existing) {
-		var resetCtx context.Context
-		resetCtx, releaseRuntimeReset, err = h.runtimeResets.BeginSessionHistoryReset(c.Request().Context(), botID, sessionID)
-		if err != nil {
-			return historyResetError(err)
-		}
-		defer releaseRuntimeReset()
-		c.SetRequest(c.Request().WithContext(resetCtx))
+	resetCtx, releaseRuntimeReset, err := h.runtimeResets.BeginSessionHistoryReset(c.Request().Context(), botID, sessionID)
+	if err != nil {
+		return historyResetError(err)
 	}
-	if session.IsDirectRuntime(existing) && h.agentRuntimes == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "agent runtime service unavailable")
-	}
+	defer releaseRuntimeReset()
+	c.SetRequest(c.Request().WithContext(resetCtx))
 	if err := h.sessionService.SoftDelete(c.Request().Context(), sessionID); err != nil {
 		if leaseErr := runtimefence.ResetLeaseFailure(c.Request().Context(), err); leaseErr != nil {
 			return apperror.Wrap(apperror.CodeSessionResetConflict, leaseErr, nil)
 		}
 		return errs.Wrap(err, "reset session")
-	}
-	if session.IsDirectRuntime(existing) {
-		// A direct-runtime session being deleted must not leave its active
-		// turn executing against the workspace. Soft-delete FIRST: every new
-		// turn admission starts with a session lookup, so the tombstone is
-		// the admission barrier — then abort whatever is already in flight
-		// (including anything admitted before the tombstone landed) and wait
-		// for the driver call to actually finish.
-		if err := h.agentRuntimes.AbortSessionRuns(c.Request().Context(), botID, sessionID); err != nil {
-			return apperror.Wrap(apperror.CodeSessionAbortFailed, err, nil)
-		}
 	}
 	if h.projectionCache != nil {
 		h.projectionCache.DropSession(sessionID)
@@ -1279,26 +1201,10 @@ func resolveSessionWorkdirBinding(ctx context.Context, workdirs sessionWorkdirSe
 	if err != nil {
 		return nil, workdirHTTPError(err)
 	}
-	if (runtimeType == session.RuntimeACPAgent || session.IsDirectRuntimeType(runtimeType)) && bound.TargetKind == workdir.TargetKindRemote {
+	if runtimekind.IsExternal(runtimeType) && bound.TargetKind == workdir.TargetKindRemote {
 		return nil, apperror.New(apperror.CodeWorkdirRemoteUnsupportedForAgent, nil)
 	}
 	return &bound, nil
-}
-
-// validateACPCreate checks a session that names only the ACP provider, with
-// no Agent instance bound.
-func (h *SessionHandler) validateACPCreate(ctx context.Context, bot bots.Bot, metadata map[string]any) error {
-	agentID := sessionMetadataString(metadata, "acp_agent_id")
-	if agentID == "" {
-		return apperror.FieldRequired("metadata.acp_agent_id")
-	}
-	if sessionMetadataString(metadata, "project_path") == "" {
-		return apperror.FieldRequired("metadata.project_path")
-	}
-	if err := acpAgentSetupError(ctx, h.botAgents, bot, "", agentID); err != nil {
-		return err
-	}
-	return nil
 }
 
 // descriptorFieldError answers an unusable session descriptor with the request
@@ -1333,19 +1239,14 @@ func modelPreferenceError(err error, op string) error {
 
 func sessionServiceError(err error) error {
 	switch {
-	case errors.Is(err, session.ErrACPAgentIDRequired),
-		errors.Is(err, session.ErrACPProjectPathMissing):
+	case errors.Is(err, session.ErrACPAgentIDRequired), errors.Is(err, session.ErrACPAgentNotConfigured):
 		return apperror.Wrap(apperror.CodeACPAgentNotConfigured, err, nil)
 	case errors.Is(err, session.ErrACPUnknownAgent):
 		return apperror.Wrap(apperror.CodeACPAgentNotFound, err, nil)
-	case errors.Is(err, session.ErrACPRuntimeOwnerMissing):
-		return apperror.New(apperror.CodeACPRuntimeOwnerMissing, nil)
-	case errors.Is(err, session.ErrACPAgentNotConfigured):
-		return apperror.Wrap(apperror.CodeACPAgentNotConfigured, err, nil)
 	case errors.Is(err, session.ErrACPAgentNotEnabled):
 		return apperror.Wrap(apperror.CodeACPAgentNotEnabled, err, nil)
-	case errors.Is(err, session.ErrACPProjectModeInvalid):
-		return apperror.Wrap(apperror.CodeACPProjectModeInvalid, err, nil)
+	case errors.Is(err, session.ErrRuntimeOwnerMissing):
+		return apperror.New(apperror.CodeACPRuntimeOwnerMissing, nil)
 	default:
 		return errs.Wrap(err, "map session service error")
 	}
@@ -1384,22 +1285,14 @@ func sessionAgentConfigChanged(existing session.Thread, targetMode, targetRuntim
 	if existingMode != strings.TrimSpace(targetMode) || existingRuntime != strings.TrimSpace(targetRuntime) {
 		return true
 	}
-	trimmedRuntime := strings.TrimSpace(targetRuntime)
-	if trimmedRuntime != session.RuntimeACPAgent && !session.IsDirectRuntimeType(trimmedRuntime) {
+	if !runtimekind.IsExternal(targetRuntime) {
 		return false
 	}
-	existingMetadata := mergeSessionMetadata(existing.Metadata, existing.RuntimeMetadata)
-	targetMetadata = mergeSessionMetadata(targetMetadata, targetRuntimeMetadata)
-	keys := []string{"acp_agent_id", "project_path", "acp_project_mode"}
-	if session.IsDirectRuntimeType(trimmedRuntime) {
-		keys = []string{"project_path"}
-	}
-	for _, key := range keys {
-		if sessionMetadataString(existingMetadata, key) != sessionMetadataString(targetMetadata, key) {
-			return true
-		}
-	}
-	return false
+	// The ACP agent profile is the Bot Agent instance's, compared by the
+	// caller.
+	before := session.ExternalIdentityOf(existing)
+	after := session.ExternalIdentityOf(session.Thread{Metadata: session.ApplyExternalMetadataDefaults(targetMetadata), RuntimeMetadata: session.ApplyExternalMetadataDefaults(targetRuntimeMetadata)})
+	return before.ProjectPath != after.ProjectPath
 }
 
 func stripACPMetadata(metadata map[string]any) map[string]any {
@@ -1412,26 +1305,10 @@ func stripACPMetadata(metadata map[string]any) map[string]any {
 	return out
 }
 
-func mergeSessionMetadata(base, overlay map[string]any) map[string]any {
-	out := cloneSessionMetadata(base)
-	for key, value := range overlay {
-		out[key] = value
-	}
-	return out
-}
-
 func cloneSessionMetadata(metadata map[string]any) map[string]any {
 	out := make(map[string]any, len(metadata))
 	for key, value := range metadata {
 		out[key] = value
 	}
 	return out
-}
-
-func sessionMetadataString(metadata map[string]any, key string) string {
-	if metadata == nil {
-		return ""
-	}
-	value, _ := metadata[key].(string)
-	return strings.TrimSpace(value)
 }

@@ -299,67 +299,6 @@ func verifyDynamicRefs(dynamic *loopDynamicInputs, refs []dynamicSourceRef, mess
 	return out
 }
 
-// remapDynamicRefs maps dynamic refs through one applied step reselection.
-// A selection with a verified source-index vector relocates each surviving
-// ref; an unchanged selection keeps them; any unverifiable change fails
-// closed and drops every ref, so a message the published payload cannot be
-// proven to carry is never treated as durable.
-func remapDynamicRefs(refs []dynamicSourceRef, before, after []sdk.Message, prefixCount int, selection ContextStepSelectionResult) []dynamicSourceRef {
-	if len(refs) == 0 {
-		return nil
-	}
-	if selection.MessageSourceIndexesKnown {
-		if !validSelectionSourceIndexes(before, after, prefixCount, selection.MessageSourceIndexes) {
-			return nil
-		}
-		bySource := make(map[int]int, len(selection.MessageSourceIndexes))
-		for i, sourceIndex := range selection.MessageSourceIndexes {
-			if sourceIndex >= 0 {
-				bySource[sourceIndex] = i
-			}
-		}
-		out := make([]dynamicSourceRef, 0, len(refs))
-		for _, ref := range refs {
-			if index, ok := bySource[ref.index]; ok {
-				out = append(out, dynamicSourceRef{recordID: ref.recordID, index: index})
-			}
-		}
-		return out
-	}
-	if providerMessagesEqual(before, after) {
-		return refs
-	}
-	return nil
-}
-
-// validSelectionSourceIndexes verifies a reselector-reported source-index
-// vector: aligned with the output, prefix identity preserved, sources
-// strictly increasing, and every claimed origin content-equal to its output.
-func validSelectionSourceIndexes(before, after []sdk.Message, prefixCount int, sourceIndexes []int) bool {
-	if len(sourceIndexes) != len(after) {
-		return false
-	}
-	lastSource := -1
-	for i, sourceIndex := range sourceIndexes {
-		if sourceIndex < -1 || sourceIndex >= len(before) {
-			return false
-		}
-		if i < prefixCount && sourceIndex != i {
-			return false
-		}
-		if sourceIndex >= 0 {
-			if sourceIndex <= lastSource {
-				return false
-			}
-			if !providerMessagesEqual(before[sourceIndex:sourceIndex+1], after[i:i+1]) {
-				return false
-			}
-			lastSource = sourceIndex
-		}
-	}
-	return true
-}
-
 func providerMessagesEqual(left, right []sdk.Message) bool {
 	leftComparable := cloneProviderMessages(left)
 	rightComparable := cloneProviderMessages(right)

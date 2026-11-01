@@ -109,6 +109,9 @@ importers:
       '@memohai/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      builder-util-runtime:
+        specifier: 9.7.0
+        version: 9.7.0
       electron-updater:
         specifier: ^6.8.9
         version: 6.8.9

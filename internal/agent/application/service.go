@@ -13,6 +13,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,7 +29,6 @@ import (
 	"github.com/felinics/memoh/internal/agent/background"
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
@@ -38,6 +38,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	turnpkg "github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/chat/checkpoint"
 	messageevent "github.com/felinics/memoh/internal/chat/event"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
@@ -50,12 +51,9 @@ import (
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
 	"github.com/felinics/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/settings"
 	"github.com/felinics/memoh/internal/workspace"
-)
-
-const (
-	defaultMaxContextMinutes = 24 * 60
 )
 
 // SkillEntry represents a skill loaded from the container.
@@ -102,7 +100,8 @@ type workspaceTargetResolver interface {
 }
 
 type compactionRunner interface {
-	RunCompactionSync(context.Context, compaction.TriggerConfig) (compaction.Result, error)
+	Compact(context.Context, compaction.TriggerConfig) ([]compaction.Pass, error)
+	Fold(context.Context, compaction.Event) ([]compaction.Pass, error)
 }
 
 // Service orchestrates chat with the internal agent.
@@ -116,14 +115,15 @@ type Service struct {
 	agent                   *native.Agent
 	modelsService           *models.Service
 	queries                 dbstore.Queries
+	checkpoints             *checkpoint.Store
+	pipelineCheckpoints     *timeline.CheckpointSource
 	memoryRegistry          *memprovider.Registry
 	memoryOverviewActivity  sessionActivity
 	messageService          messagepkg.Service
 	settingsService         *settings.Service
 	accountService          *accounts.Service
 	sessionService          SessionService
-	acpPool                 acpPrompter
-	externalDrivers         map[string]external.Driver
+	runtimes                *external.Registry
 	compactionService       compactionRunner
 	eventPublisher          messageevent.Publisher
 	skillLoader             SkillLoader
@@ -136,7 +136,6 @@ type Service struct {
 	pipeline                *timeline.Pipeline
 	streamHTTPClient        *http.Client
 	nonStreamingHTTPClient  *http.Client
-	compactionHTTPClient    *http.Client
 	streamIdleTimeout       time.Duration
 	streamIdleTimeoutMax    time.Duration
 	bgManager               *background.Manager
@@ -150,12 +149,9 @@ type Service struct {
 	// continueUserInputFn overrides the application resume after a user input
 	// response; nil means storeUserInputResultAndContinue. Test seam.
 	continueUserInputFn               func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
-	sessionCompactionMu               sync.Mutex
-	sessionCompactions                map[string]*sessionCompactionGate
 	timeout                           time.Duration
 	memorySearchTimeout               time.Duration
 	contextAbsoluteCapTokens          int
-	syncCompactionMode                string
 	clockLocation                     *time.Location
 	logger                            *slog.Logger
 	allowedTeam                       string
@@ -214,33 +210,24 @@ func NewService(
 		Transport: nonStreamingTransport,
 		Timeout:   10 * time.Minute,
 	}
-	// The summarizer sends one large cold prompt whose first byte routinely
-	// takes 60-93s upstream; the interactive 30s header deadline would kill
-	// every automatic pass while manual /compact (SDK default client) works.
-	compactionTransport := streamTransport.Clone()
-	compactionTransport.ResponseHeaderTimeout = 3 * time.Minute
-	compactionHTTPClient := &http.Client{
-		Transport: compactionTransport,
-		Timeout:   10 * time.Minute,
-	}
 
-	service := &Service{
+	return &Service{
 		agent:                  a,
 		modelsService:          modelsService,
 		queries:                queries,
+		checkpoints:            checkpoint.NewStore(log, queries),
+		pipelineCheckpoints:    timeline.NewCheckpointSource(log, queries, messageService),
 		contextLifecycles:      queries,
 		messageService:         messageService,
 		settingsService:        settingsService,
 		accountService:         accountService,
 		streamHTTPClient:       streamHTTPClient,
 		nonStreamingHTTPClient: nonStreamingHTTPClient,
-		compactionHTTPClient:   compactionHTTPClient,
 		timeout:                timeout,
 		memorySearchTimeout:    defaultMemorySearchTimeout,
 		clockLocation:          clockLocation,
 		logger:                 log.With(slog.String("service", "agent/application")),
 	}
-	return service
 }
 
 // SetContextAbsoluteMaxTokens sets the server-wide context admission cap
@@ -271,32 +258,6 @@ func (s *Service) effectiveContextTokenBudget(chatModel models.GetResponse) int 
 		return capTokens
 	}
 	return min(budget, capTokens)
-}
-
-// Pre-turn synchronous compaction backstop rollout modes (CM-CMP-003). The
-// wire values match config.SyncCompactionMode*; the application keeps its own
-// constants so the domain layer does not import the config package.
-const (
-	syncCompactionModeActive = "active"
-	syncCompactionModeShadow = "shadow"
-	syncCompactionModeOff    = "off"
-)
-
-// SetSyncCompactionMode sets the rollout mode for the pre-turn synchronous
-// compaction backstop on the discuss and pipeline-chat paths.
-func (s *Service) SetSyncCompactionMode(mode string) {
-	s.syncCompactionMode = mode
-}
-
-// effectiveSyncCompactionMode normalizes the configured mode; anything
-// unrecognized (including unset) observes in shadow rather than enforcing.
-func (s *Service) effectiveSyncCompactionMode() string {
-	switch s.syncCompactionMode {
-	case syncCompactionModeActive, syncCompactionModeOff:
-		return s.syncCompactionMode
-	default:
-		return syncCompactionModeShadow
-	}
 }
 
 // SetMemoryRegistry sets the provider registry for memory operations.
@@ -413,11 +374,6 @@ type resolvedContext struct {
 	query                       string // headerified persistable query
 	userMessageAlreadyInContext bool
 	injectedRecords             *[]InjectedMessageRecord
-	estimatedTokens             int // estimated input token count for compaction
-	compactableTokens           int // raw history eligible for compaction
-	compactableTokensKnown      bool
-	historyPressureTokens       int
-	contextTokenBudget          int // token budget used to clamp compaction triggers
 }
 
 func runIDForChatRequest(admittedRunID string) string {
@@ -430,6 +386,11 @@ func runIDForChatRequest(admittedRunID string) string {
 func contextBudgetFromChatModel(chatModel models.GetResponse) int {
 	return chatModel.Config.ContextBudgetMaxTokens()
 }
+
+// requestSource is what the run's materialized query renders: the row that
+// holds the run's request, which admission persisted or the run's first step
+// writes. The step committer names that row.
+var requestSource = turnpkg.ContextMessageSource{Kind: "history", Current: true}
 
 func markRequiredHistoryMessageCurrent(cfg *native.RunConfig, requiredMessageID string) {
 	if cfg == nil {
@@ -497,6 +458,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	req = s.applySubagentThreadDefaults(ctx, req, sessionPrefModelID != "")
 
 	runCfg, chatModel, provider, err := s.buildBaseRunConfig(ctx, baseRunConfigParams{
+		ShutdownResume:     req.ShutdownResume,
 		BotID:              req.BotID,
 		ChatID:             req.ChatID,
 		SessionID:          req.ThreadID,
@@ -565,106 +527,26 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	contextTokenBudget := s.effectiveContextTokenBudget(chatModel)
 	runCfg.ContextBudgetMaxTokens = contextTokenBudget
 
-	var messages []ModelMessage
-	var historyRecords []historyfrag.HistoryRecord
-	var estimatedTokens int
-	var compactableTokens int
-	var historyPressureTokens int
-	var compactableTokensKnown bool
+	history, loadErr := s.loadChatHistory(ctx, req, usePipeline, contextTokenBudget, chatModel.ID)
+	if loadErr != nil {
+		s.logger.ErrorContext(ctx, "resolve: load history failed",
+			slog.String("bot_id", req.BotID),
+			slog.Any("error", loadErr),
+		)
+		return resolvedContext{}, req, loadErr
+	}
+	messages, historyRecords := history.messages, history.records
 	var currentMessageIndex *int
 	if usePipeline {
-		messages, compactableTokens, historyPressureTokens = s.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
-		compactableTokensKnown = true
-		// Pre-turn synchronous compaction backstop (CM-CMP-001), gated per
-		// CM-CMP-003. Mirrors the legacy path below: only a pass that
-		// actually produced a summary triggers recomposition; a noop keeps
-		// this turn's (already trimmed) context untouched.
-		if mode := s.effectiveSyncCompactionMode(); mode != syncCompactionModeOff && syncCompactionShouldRun(historyPressureTokens, contextTokenBudget) {
-			threshold := hardCompactionThreshold(contextTokenBudget)
-			if mode == syncCompactionModeShadow {
-				s.logger.InfoContext(ctx, "sync_compaction_backstop",
-					slog.String("path", "pipeline_chat"),
-					slog.String("mode", "shadow"),
-					slog.Bool("would_fire", true),
-					slog.String("bot_id", req.BotID),
-					slog.String("session_id", req.ThreadID),
-					slog.Int("pressure_tokens", compactableTokens),
-					slog.Int("threshold_tokens", threshold))
-			} else {
-				start := time.Now()
-				res := s.runCompactionSync(ctx, req, historyPressureTokens, contextTokenBudget, chatModel.ID)
-				s.logger.InfoContext(ctx, "sync_compaction_backstop",
-					slog.String("path", "pipeline_chat"),
-					slog.String("mode", "active"),
-					slog.String("status", res.Status),
-					slog.Int64("duration_ms", time.Since(start).Milliseconds()),
-					slog.String("bot_id", req.BotID),
-					slog.String("session_id", req.ThreadID),
-					slog.Int("pressure_tokens", compactableTokens),
-					slog.Int("threshold_tokens", threshold))
-				if res.Status == compaction.StatusOK {
-					messages, compactableTokens, historyPressureTokens = s.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
-				}
-			}
-		}
 		currentMessageIndex = latestModelUserMessageIndex(messages)
-	} else {
-		historyFallback := historyScopeFallbackFromChatRequest(req)
-		prepared, loadErr := s.prepareHistoryContext(ctx, req, historyFallback, contextTokenBudget)
-		if loadErr != nil {
-			s.logger.ErrorContext(ctx, "resolve: prepare history context failed",
-				slog.String("bot_id", req.BotID),
-				slog.String("stage", "initial"),
-				slog.Any("error", loadErr),
-			)
-			return resolvedContext{}, req, loadErr
-		}
-		messages = prepared.messages
-		historyRecords = prepared.records
-		estimatedTokens = prepared.estimatedTokens
-		compactableTokens = prepared.compactableTokens
-		historyPressureTokens = prepared.pressureTokens
-		compactableTokensKnown = true
-		if syncCompactionShouldRun(historyPressureTokens, contextTokenBudget) {
-			compactionThreshold := hardCompactionThreshold(contextTokenBudget)
-			s.logger.WarnContext(ctx, "resolve: context reached compaction threshold, running synchronous compaction",
-				slog.String("bot_id", req.BotID),
-				slog.Int("estimated_tokens", estimatedTokens),
-				slog.Int("compactable_tokens", compactableTokens),
-				slog.Int("context_token_budget", contextTokenBudget),
-				slog.Int("compaction_threshold", compactionThreshold),
-			)
-			// Reload and post-process only when this run actually produced a
-			// summary. A noop (cooldown, in-flight, nothing markable) keeps
-			// this turn's context untouched — possibly still above the
-			// threshold — and the next turn re-evaluates.
-			if res := s.runCompactionSync(ctx, req, historyPressureTokens, contextTokenBudget, chatModel.ID); res.Status == compaction.StatusOK {
-				prepared, loadErr = s.prepareHistoryContext(ctx, req, historyFallback, contextTokenBudget)
-				if loadErr != nil {
-					s.logger.ErrorContext(ctx, "resolve: prepare history context failed",
-						slog.String("bot_id", req.BotID),
-						slog.String("stage", "post_compaction"),
-						slog.Any("error", loadErr),
-					)
-					return resolvedContext{}, req, loadErr
-				}
-				messages = prepared.messages
-				historyRecords = prepared.records
-				estimatedTokens = prepared.estimatedTokens
-				compactableTokens = prepared.compactableTokens
-				historyPressureTokens = prepared.pressureTokens
-			}
-		}
 	}
-	forkMessageCount := 0
 	if forkContext := s.subagentForkContextModelMessages(ctx, req); len(forkContext) > 0 {
 		// The inherited parent snapshot precedes the thread's own transcript,
 		// exactly as parent-driven subagent tasks assemble it.
 		messages, currentMessageIndex = prependContextMessages(forkContext, messages, currentMessageIndex)
-		forkMessageCount = normalizedContextPrefixLength(messages, len(forkContext))
 	}
 	historyMessageCount := len(messages)
-	if notice := s.currentWorkspaceContextMessage(ctx, req); notice != nil {
+	if notice := currentWorkspaceTransitionMessage(historyRecords, req.WorkspaceTarget); notice != nil {
 		messages = append(messages, *notice)
 	}
 	var memoryMessageIndex *int
@@ -720,6 +602,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
 	forkMessages := nonNilModelMessages(messages)
 	runCfg.ForkContextSourceMessageIDs = historySourceMessageIDsForMessages(forkMessages, historyRecords)
+	runCfg.ContextProvenance = contextProvenance(forkMessages, historyRecords, compactionInputs(req))
 	runCfg.Messages = modelMessagesToSDKMessages(forkMessages)
 	runCfg.ContextMemoryMessageIndex = memoryMessageIndex
 	if usePipeline {
@@ -737,11 +620,6 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	runCfg.InlineAttachments = extractNativeAttachmentParts(mergedAttachments)
 	runCfg.ContextScope = buildContextFragScope(req, displayName, runCfg.Identity)
 	runCfg = runCfg.RefreshContextFrag()
-	historyLayout := chatHistoryLayout{forkCount: min(forkMessageCount, runCfg.ContextTrimmableMessages), historyCount: runCfg.ContextTrimmableMessages, pressureTokens: historyPressureTokens, usePipeline: usePipeline}
-	if index := runCfg.ContextCurrentUserMessageIndex; index != nil && *index >= historyLayout.forkCount && *index < historyLayout.historyCount {
-		historyLayout.pressureTokens = max(0, historyLayout.pressureTokens-estimateMessageTokens(messages[*index]))
-	}
-	runCfg.RecoverContextBudget = s.chatBudgetRecovery(req, historyLayout)
 
 	var injectedRecords *[]InjectedMessageRecord
 	if req.InjectCh != nil {
@@ -783,11 +661,6 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		query:                       headerifiedQuery,
 		userMessageAlreadyInContext: usePipeline,
 		injectedRecords:             injectedRecords,
-		estimatedTokens:             estimatedTokens,
-		compactableTokens:           compactableTokens,
-		historyPressureTokens:       historyPressureTokens,
-		compactableTokensKnown:      compactableTokensKnown,
-		contextTokenBudget:          contextTokenBudget,
 	}, req, nil
 }
 
@@ -836,11 +709,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 	s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
 	cfg := rc.runConfig
-	stepCommitter := s.newAgentStepCommitter(ctx, req, rc)
-	if stepCommitter != nil {
-		cfg.OnStepCommitted = stepCommitter.commit
-		stepCommitter.bindContinuation(&cfg)
-	}
+	stepCommitter := s.bindNativeRun(ctx, req, rc, &cfg, nil)
 	cfg = s.prepareRunConfig(ctx, cfg)
 	terminal := s.contextLifecycleTerminal(ctx, cfg)
 	var lifecycleCause error
@@ -850,7 +719,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 	lifecycleCause = err
 	if err != nil {
 		if stepCommitter != nil {
-			_ = stepCommitter.finish(ctx, rc.estimatedTokens)
+			_ = stepCommitter.finish(ctx)
 		}
 		return ChatResponse{}, err
 	}
@@ -858,11 +727,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 	outputMessages := sdkMessagesWithOrigins(result.Messages, result.InternalFeedbackIndexes)
 	storeReq := req
 	if stepCommitter != nil {
-		inputTokens := 0
-		if result.Usage != nil {
-			inputTokens = result.Usage.InputTokens
-		}
-		if err := stepCommitter.finish(ctx, inputTokens); err != nil {
+		if err := stepCommitter.finish(ctx); err != nil {
 			lifecycleCause = err
 			return ChatResponse{}, err
 		}
@@ -879,9 +744,6 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 			lifecycleCause = err
 			return ChatResponse{}, err
 		}
-		if result.Usage != nil {
-			s.maybeCompact(context.WithoutCancel(ctx), req, rc, result.Usage.InputTokens)
-		}
 	}
 
 	return ChatResponse{
@@ -894,6 +756,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 // baseRunConfigParams holds parameters for buildBaseRunConfig that differ
 // between chat and discuss callers.
 type baseRunConfigParams struct {
+	ShutdownResume    bool
 	BotID             string
 	ChatID            string
 	SessionID         string
@@ -970,11 +833,11 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		ChatCompletionsCompat: chatCompletionsCompat,
 		HTTPClient:            modelHTTPClient,
 		ReasoningConfig:       reasoningConfig,
-		ReasoningDialect:      chatModel.Config.ReasoningDialect,
-		ReasoningOffSupport:   chatModel.Config.ReasoningOffSupport,
-		ReasoningDefaultOn:    chatModel.Config.ReasoningDefaultOn,
-		ThinkingBudgetMin:     chatModel.Config.ThinkingBudgetMin,
-		ThinkingBudgetMax:     chatModel.Config.ThinkingBudgetMax,
+		ReasoningDialect:      chatModel.Config.ReasoningDialect(),
+		ReasoningOffSupport:   chatModel.Config.ReasoningOffSupport(),
+		ReasoningReplay:       chatModel.Config.ReasoningReplay(),
+		ThinkingBudgetMin:     chatModel.Config.ThinkingBudgetMin(),
+		ThinkingBudgetMax:     chatModel.Config.ThinkingBudgetMax(),
 		ContextWindow:         contextBudgetFromChatModel(chatModel),
 		MaxOutputTokens:       chatModel.Config.MaxOutputTokensLimit(),
 	})
@@ -1052,7 +915,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		ctx = workspace.WithWorkspaceTarget(ctx, bound.TargetID)
 	}
 	if s.workspaceTargets != nil {
-		if target, targetErr := s.workspaceTargets.ResolveWorkspaceTarget(ctx, p.BotID, ""); targetErr == nil {
+		if target, targetErr := s.resolveStartupWorkspace(ctx, p.BotID, "", p.ShutdownResume); targetErr == nil {
 			cfg.Identity.WorkspaceTargetID = strings.TrimSpace(target.TargetID)
 			cfg.Identity.WorkspaceTargetKind = strings.TrimSpace(target.Kind)
 			cfg.Identity.WorkspaceTargetName = strings.TrimSpace(target.Name)
@@ -1116,7 +979,7 @@ func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.S
 	}
 	return reasoning.ResolveConfig(
 		chatModel.ResolveThinkingMode(),
-		chatModel.Config.ReasoningEfforts,
+		chatModel.Config.ReasoningEfforts(),
 		chatModel.ReasoningOptions(clientType),
 		stored,
 		requestedEffort,
@@ -1337,15 +1200,7 @@ func (s *Service) resolveRunConfigSessionDescriptor(ctx context.Context, session
 	if typ == "" {
 		typ = sessionpkg.TypeChat
 	}
-	runtimeType := strings.TrimSpace(sess.RuntimeType)
-	if runtimeType == "" {
-		if sessionpkg.IsACPRuntime(sess) {
-			runtimeType = sessionpkg.RuntimeACPAgent
-		} else {
-			runtimeType = sessionpkg.RuntimeModel
-		}
-	}
-	return typ, runtimeType
+	return typ, sessionpkg.RuntimeTypeOf(sess)
 }
 
 func (s *Service) resolveRunConfigSessionType(ctx context.Context, sessionID string) string {
@@ -1364,17 +1219,35 @@ func buildModelSelectionRequest(p baseRunConfigParams, chatID string) ChatReques
 	}
 }
 
+// RunConfigRequest names the run a config is resolved for: the account it
+// acts for and where its output goes.
+type RunConfigRequest struct {
+	BotID     string
+	SessionID string
+	// UserID is the account the run acts for. It scopes user settings such as
+	// the timezone in the system prompt, so a resumed run must pass the user
+	// its run was admitted for, not whoever resumed it.
+	UserID            string
+	ChannelIdentityID string
+	CurrentPlatform   string
+	ReplyTarget       string
+	ConversationType  string
+	ChatToken         string //nolint:gosec // session credential material, not a hardcoded secret
+}
+
 // ResolveRunConfig builds a complete RunConfig (model, system prompt, tools,
 // identity) for a bot+session without loading messages or requiring a query.
 // The caller is responsible for filling RunConfig.Messages.
-// Used by discuss turns to reuse the service's model, tools, and prompt pipeline.
-func (s *Service) ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error) {
+// It serves runs that do not start from a ChatRequest: resumed decisions and
+// Discuss turns.
+func (s *Service) ResolveRunConfig(ctx context.Context, req RunConfigRequest) (ResolveRunConfigResult, error) {
+	botID, sessionID := req.BotID, req.SessionID
 	if strings.TrimSpace(botID) == "" {
 		return ResolveRunConfigResult{}, errors.New("bot id is required")
 	}
 
 	sessionType, runtimeType := s.resolveRunConfigSessionDescriptor(ctx, sessionID)
-	if runtimeType == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(runtimeType) {
+	if runtimekind.IsExternal(runtimeType) {
 		// Agent runtimes (ACP and the direct external agents) resolve their
 		// own model and prompt; only the identity travels in the run config.
 		cfg := native.RunConfig{
@@ -1383,11 +1256,11 @@ func (s *Service) ResolveRunConfig(ctx context.Context, botID, sessionID, channe
 				BotID:             botID,
 				ChatID:            botID,
 				SessionID:         sessionID,
-				ChannelIdentityID: strings.TrimSpace(channelIdentityID),
-				CurrentPlatform:   currentPlatform,
-				ReplyTarget:       strings.TrimSpace(replyTarget),
-				ConversationType:  strings.TrimSpace(conversationType),
-				SessionToken:      chatToken,
+				ChannelIdentityID: strings.TrimSpace(req.ChannelIdentityID),
+				CurrentPlatform:   req.CurrentPlatform,
+				ReplyTarget:       strings.TrimSpace(req.ReplyTarget),
+				ConversationType:  strings.TrimSpace(req.ConversationType),
+				SessionToken:      req.ChatToken,
 			},
 		}
 		return ResolveRunConfigResult{
@@ -1405,11 +1278,12 @@ func (s *Service) ResolveRunConfig(ctx context.Context, botID, sessionID, channe
 	cfg, chatModel, _, err := s.buildBaseRunConfig(ctx, baseRunConfigParams{
 		BotID:              botID,
 		SessionID:          sessionID,
-		ChannelIdentityID:  channelIdentityID,
-		CurrentPlatform:    currentPlatform,
-		ReplyTarget:        replyTarget,
-		ConversationType:   conversationType,
-		SessionToken:       chatToken,
+		UserID:             strings.TrimSpace(req.UserID),
+		ChannelIdentityID:  req.ChannelIdentityID,
+		CurrentPlatform:    req.CurrentPlatform,
+		ReplyTarget:        req.ReplyTarget,
+		ConversationType:   req.ConversationType,
+		SessionToken:       req.ChatToken,
 		SessionType:        sessionType,
 		SessionPrefModelID: sessionPrefModelID,
 		SessionPrefEffort:  sessionPrefEffort,
@@ -1514,6 +1388,11 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		index := len(cfg.Messages) - 1
 		cfg.ContextCurrentUserMessageIndex = &index
 		cfg.ContextQueryMaterialized = true
+		cfg.ContextProvenance = append(cfg.ContextProvenance, native.MessageProvenance{
+			Message: cfg.Messages[index],
+			Sources: []turnpkg.ContextMessageSource{requestSource},
+			Anchor:  true,
+		})
 	} else if len(cfg.InlineImages) > 0 || len(cfg.InlineAttachments) > 0 {
 		// Pipeline path: the user query is already embedded in the RC messages,
 		// but media parts are not rendered by the pipeline renderer. Inject the
@@ -1533,9 +1412,17 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 			)
 			if currentIndex != nil {
 				i := *currentIndex
+				rendered := cfg.Messages[i]
 				cfg.Messages[i].Content = append(cfg.Messages[i].Content, imageParts...)
 				if i < len(cfg.ForkContextSourceMessageIDs) {
 					cfg.ForkContextSourceMessageIDs[i] = ""
+				}
+				// The input renders the same sources with its media.
+				for j := range cfg.ContextProvenance {
+					if reflect.DeepEqual(cfg.ContextProvenance[j].Message, rendered) {
+						cfg.ContextProvenance[j].Message = cfg.Messages[i]
+						break
+					}
 				}
 			} else {
 				cfg.Messages = append(cfg.Messages, sdk.UserMessage("", imageParts...))

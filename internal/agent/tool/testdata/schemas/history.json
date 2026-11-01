@@ -9,8 +9,22 @@
         "description": "Maximum number of messages to return. Default 30, max 100.",
         "type": "integer"
       },
+      "max_bytes": {
+        "description": "With ref: the most bytes of the result to return in this page. Default: as many as one tool result holds.",
+        "minimum": 1,
+        "type": "integer"
+      },
       "message_id": {
         "description": "Exact persisted message ID to resolve, such as a message_id returned in search_memory source_refs.",
+        "type": "string"
+      },
+      "offset": {
+        "description": "With ref: byte offset in the result to start from; pass the previous page's next_offset. Default 0.",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "ref": {
+        "description": "Tool result reference <message id>:<part index>, as cited by a summary (ref=...). Reads that earlier tool result's original text from the current session, one page at a time.",
         "type": "string"
       },
       "session_id": {

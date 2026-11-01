@@ -48,7 +48,7 @@ import { routeConversationLabel } from '@/store/chat-list.utils'
 import { useComposerPrefillStore } from '@/store/composer-prefill'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useTabScopedStorage } from '@/utils/tab-scoped-storage'
-import { ACP_NO_PROJECT_MODE, createACPNoProjectPath } from '@/utils/acp'
+import { createACPNoProjectPath } from '@/utils/acp'
 import { botAgentProvider } from '@/utils/bot-agent'
 import ChatWorkspace from './components/chat-workspace.vue'
 import { useComposerPrefillResolver } from './composables/useComposerPrefillResolver'
@@ -192,7 +192,6 @@ async function maybeStartExternalAgentSession() {
       const { session } = await chatStore.createExternalAgentSession({
         botAgentId: botAgent.id,
         agentId,
-        projectMode: ACP_NO_PROJECT_MODE,
         projectPath: createACPNoProjectPath(),
       })
       // Creation is async. If the user moved to another tab meanwhile, leave the

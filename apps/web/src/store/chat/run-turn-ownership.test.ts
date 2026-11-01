@@ -194,6 +194,48 @@ describe('a terminal run view is not a source of new turns', () => {
     ])
   })
 
+  it.each(['history first', 'runtime first'])('keeps published media when replaying a completed run (%s)', (order) => {
+    const { transcript } = makeTranscript(null)
+    const published = '![chart](/bots/bot-1/media/archived-hash)\n![missing](memoh-media-error:media.reference_unavailable)'
+    const history: UITurn[] = [
+      settledTurn('m1', 'turn-1', 1, 'user', '2026-07-20T08:00:00.000Z'),
+      {
+        id: 'm2',
+        turn_id: 'turn-1',
+        turn_position: 1,
+        role: 'assistant',
+        timestamp: '2026-07-20T08:00:01.000Z',
+        messages: [{ id: 0, type: 'text', content: published }],
+      },
+    ]
+    const replay = projectRuntimeTranscript({
+      ...completed(),
+      messages: [{ id: 0, type: 'text', content: '![chart](/data/chart.png)\n![missing](/data/missing.png)' }],
+    })
+    if (order === 'runtime first') transcript.applyRuntimeTranscript(replay)
+    transcript.replaceMessages(history, 'session-1')
+    transcript.applyRuntimeTranscript(replay)
+    // Re-entering the cached session can replay the same terminal snapshot again.
+    transcript.applyRuntimeTranscript(replay)
+
+    const assistant = transcript.messages.find(turn => turn.role === 'assistant')
+    expect(assistant?.role === 'assistant' && assistant.messages).toEqual([
+      expect.objectContaining({ content: published }),
+    ])
+
+    // An active replacement must still be able to stream and then finish.
+    for (const status of ['running', 'completed'] as const) {
+      transcript.applyRuntimeTranscript(projectRuntimeTranscript({
+        ...completed(),
+        status,
+        messages: [{ id: 0, type: 'text', content: status }],
+      }))
+      expect(assistant?.role === 'assistant' && assistant.messages).toEqual([
+        expect.objectContaining({ content: status }),
+      ])
+    }
+  })
+
   it('still reconciles a finished run onto the turn already on screen', () => {
     const { transcript } = makeTranscript(null)
     transcript.replaceMessages([

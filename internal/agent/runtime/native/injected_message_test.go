@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/jsonschema-go/jsonschema"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
-	"github.com/felinics/memoh/internal/agent/step"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 )
@@ -83,83 +81,8 @@ func TestAgentStreamRecordsInjectedMessageMutation(t *testing.T) {
 	}
 }
 
-func TestAgentStreamDroppedInjectedMessageIsNotRecorded(t *testing.T) {
-	t.Parallel()
-
-	const marker = "drop this injected message"
-	injectCh := make(chan InjectMessage, 1)
-	injectCh <- InjectMessage{Text: marker}
-
-	var secondCall sdk.Request
-	provider := &atomicMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
-		if call == 1 {
-			return sdk.ModelResult{
-				FinishReason: sdk.FinishReasonToolCalls,
-				ToolCalls:    []sdk.ToolCall{{ToolCallID: "drop-inject", ToolName: "lookup"}},
-			}, nil
-		}
-		secondCall = cloneGenerateParams(params)
-		return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
-	}}
-	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
-		Name:       "lookup",
-		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
-			return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
-		},
-	}}}})
-
-	type recordedInjection struct {
-		text        string
-		insertAfter int
-	}
-	var recorded []recordedInjection
-	var committed []step.Record
-	for range a.Stream(context.Background(), RunConfig{
-		Model:            &sdk.Model{ID: "mock-model", Provider: provider},
-		Messages:         []sdk.Message{sdk.UserMessage("start")},
-		SupportsToolCall: true,
-		InjectCh:         injectCh,
-		Identity:         SessionContext{BotID: "bot-1"},
-		ContextMutations: contextfrag.NewMutationLedger(),
-		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
-			selected := make([]sdk.Message, 0, len(input.Messages))
-			dropped := 0
-			for _, message := range input.Messages {
-				if providerAttemptContainsText([]sdk.Message{message}, marker) {
-					dropped++
-					continue
-				}
-				selected = append(selected, message)
-			}
-			return ContextStepSelectionResult{Messages: selected, Dropped: dropped}
-		},
-		InjectedRecorder: func(text string, insertAfter int) {
-			recorded = append(recorded, recordedInjection{text: text, insertAfter: insertAfter})
-		},
-		OnStepCommitted: func(_ context.Context, _ int, step *step.Record) (StepDirective, error) {
-			committed = append(committed, *step)
-			return StepDirective{}, nil
-		},
-	}) {
-	}
-
-	if providerAttemptContainsText(secondCall.Messages, marker) {
-		t.Fatalf("second provider call retained dropped injection: %#v", secondCall.Messages)
-	}
-	if len(recorded) != 0 {
-		t.Fatalf("recorded injections = %#v, want dropped injection revoked", recorded)
-	}
-	for i, step := range committed {
-		if providerAttemptContainsText(step.Messages, marker) {
-			t.Fatalf("committed step %d retained dropped injection: %#v", i, step.Messages)
-		}
-	}
-}
-
-func TestAgentStreamRetryRevokesInjectedMessageRecord(t *testing.T) {
-	const marker = "retry-revoked injection"
+func TestAgentStreamRetryRecordsInjectedMessageOnce(t *testing.T) {
+	const marker = "retried injection"
 	injectCh := make(chan InjectMessage, 1)
 	injectCh <- InjectMessage{Text: marker}
 
@@ -176,8 +99,8 @@ func TestAgentStreamRetryRevokesInjectedMessageRecord(t *testing.T) {
 			}
 			return sdk.ModelResult{}, serverErr()
 		default:
-			if providerAttemptContainsText(params.Messages, marker) {
-				t.Fatal("retry provider attempt retained revoked injection")
+			if !providerAttemptContainsText(params.Messages, marker) {
+				t.Fatal("retry provider attempt lost the injection the failed attempt carried")
 			}
 			return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
 		}
@@ -191,7 +114,6 @@ func TestAgentStreamRetryRevokesInjectedMessageRecord(t *testing.T) {
 		},
 	}}}})
 
-	var selectorCalls atomic.Int32
 	type recordedInjection struct {
 		text        string
 		insertAfter int
@@ -205,21 +127,6 @@ func TestAgentStreamRetryRevokesInjectedMessageRecord(t *testing.T) {
 		InjectCh:         injectCh,
 		Identity:         SessionContext{BotID: "bot-1"},
 		ContextMutations: contextfrag.NewMutationLedger(),
-		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
-			if selectorCalls.Add(1) == 1 {
-				return ContextStepSelectionResult{Messages: input.Messages}
-			}
-			selected := make([]sdk.Message, 0, len(input.Messages))
-			for _, message := range input.Messages {
-				if !providerAttemptContainsText([]sdk.Message{message}, marker) {
-					selected = append(selected, message)
-				}
-			}
-			return ContextStepSelectionResult{
-				Messages: selected,
-				Dropped:  len(input.Messages) - len(selected),
-			}
-		},
 		InjectedRecorder: func(text string, insertAfter int) {
 			recorded = append(recorded, recordedInjection{text: text, insertAfter: insertAfter})
 		},
@@ -229,14 +136,14 @@ func TestAgentStreamRetryRevokesInjectedMessageRecord(t *testing.T) {
 		}
 	}
 
-	if provider.calls.Load() != 3 || selectorCalls.Load() != 2 {
-		t.Fatalf("provider/selector calls = %d/%d, want 3/2", provider.calls.Load(), selectorCalls.Load())
+	if provider.calls.Load() != 3 {
+		t.Fatalf("provider calls = %d, want 3", provider.calls.Load())
 	}
 	if terminal.Type != EventAgentEnd {
 		t.Fatalf("terminal event = %q, want %q", terminal.Type, EventAgentEnd)
 	}
-	if len(recorded) != 0 {
-		t.Fatalf("recorded injections = %#v, want retry-revoked injection omitted", recorded)
+	if len(recorded) != 1 || recorded[0].text != marker {
+		t.Fatalf("recorded injections = %#v, want the retried injection recorded once", recorded)
 	}
 }
 
@@ -245,7 +152,7 @@ func TestAgentStreamFailedPreflightDoesNotRecordInjectedMessage(t *testing.T) {
 
 	const marker = "rejected injected message"
 	injectCh := make(chan InjectMessage, 1)
-	injectCh <- InjectMessage{Text: marker}
+	injectCh <- InjectMessage{Text: marker + " " + strings.Repeat("x", 20_000)}
 
 	provider := &atomicMockProvider{handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
 		if call != 1 {
@@ -265,6 +172,7 @@ func TestAgentStreamFailedPreflightDoesNotRecordInjectedMessage(t *testing.T) {
 		},
 	}}}})
 
+	plan := contextfrag.ContextBudgetPlan{Window: 2000, OutputReserve: 100}
 	var recorded []string
 	var terminal StreamEvent
 	for event := range a.Stream(context.Background(), RunConfig{
@@ -274,12 +182,7 @@ func TestAgentStreamFailedPreflightDoesNotRecordInjectedMessage(t *testing.T) {
 		InjectCh:         injectCh,
 		Identity:         SessionContext{BotID: "bot-1"},
 		ContextMutations: contextfrag.NewMutationLedger(),
-		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
-			if !providerAttemptContainsText(input.Messages, marker) {
-				t.Fatal("failed-preflight selector did not receive the injection")
-			}
-			return ContextStepSelectionResult{FatalError: contextfrag.ErrProtectedContextOverflow}
-		},
+		ContextManifest:  contextfrag.Manifest{BudgetPlan: &plan},
 		InjectedRecorder: func(text string, _ int) {
 			recorded = append(recorded, text)
 		},
@@ -425,82 +328,5 @@ func TestAgentStreamRecordsLaterInjectionAtOutputBoundary(t *testing.T) {
 	}
 	if recorded[1] != (recordedInjection{text: secondMarker, insertAfter: 4}) {
 		t.Fatalf("second injection = %#v, want boundary after two tool pairs", recorded[1])
-	}
-}
-
-func TestAgentStreamRecordsOnlyAdmittedDuplicateInjection(t *testing.T) {
-	t.Parallel()
-
-	const marker = "partially admitted duplicate injection"
-	injectCh := make(chan InjectMessage, 2)
-	injectCh <- InjectMessage{Text: marker}
-	injectCh <- InjectMessage{Text: marker}
-
-	provider := &atomicMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
-		if call == 1 {
-			return sdk.ModelResult{
-				FinishReason: sdk.FinishReasonToolCalls,
-				ToolCalls:    []sdk.ToolCall{{ToolCallID: "partial-duplicate", ToolName: "lookup"}},
-			}, nil
-		}
-		if got := countRound8MessageText(params.Messages, marker); got != 1 {
-			t.Fatalf("provider duplicate count = %d, want 1", got)
-		}
-		return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
-	}}
-	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
-		Name:       "lookup",
-		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
-			return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
-		},
-	}}}})
-
-	type recordedInjection struct {
-		text        string
-		insertAfter int
-	}
-	var recorded []recordedInjection
-	for range a.Stream(context.Background(), RunConfig{
-		Model:            &sdk.Model{ID: "mock-model", Provider: provider},
-		Messages:         []sdk.Message{sdk.UserMessage("start")},
-		SupportsToolCall: true,
-		InjectCh:         injectCh,
-		Identity:         SessionContext{BotID: "bot-1"},
-		ContextMutations: contextfrag.NewMutationLedger(),
-		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
-			selected := append([]sdk.Message(nil), input.Messages...)
-			for i := len(selected) - 1; i >= input.InitialMessageCount; i-- {
-				if providerAttemptContainsText([]sdk.Message{selected[i]}, marker) {
-					selected = append(selected[:i], selected[i+1:]...)
-					sourceIndexes := make([]int, 0, len(selected))
-					for sourceIndex := range input.Messages {
-						if sourceIndex != i {
-							sourceIndexes = append(sourceIndexes, sourceIndex)
-						}
-					}
-					return ContextStepSelectionResult{
-						Messages:                  selected,
-						MessageSourceIndexes:      sourceIndexes,
-						MessageSourceIndexesKnown: true,
-						Dropped:                   1,
-					}
-				}
-			}
-			t.Fatal("selector did not find duplicate injection")
-			return ContextStepSelectionResult{}
-		},
-		InjectedRecorder: func(text string, insertAfter int) {
-			recorded = append(recorded, recordedInjection{text: text, insertAfter: insertAfter})
-		},
-	}) {
-	}
-
-	if len(recorded) != 1 || recorded[0].text != marker {
-		t.Fatalf("recorded injections = %#v, want exactly one admitted duplicate", recorded)
-	}
-	if recorded[0].insertAfter != 2 {
-		t.Fatalf("recorded insertion boundary = %d, want after first tool pair", recorded[0].insertAfter)
 	}
 }

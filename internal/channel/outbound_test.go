@@ -1710,7 +1710,11 @@ func (r *reopenableStream) reopen(_ context.Context) (PreparedOutboundStream, er
 
 func newDeltaSplitTestStream(t *testing.T, chunkLimit int, streamCount int) (*managerOutboundStream, *reopenableStream, *[]OutboundMessage) {
 	t.Helper()
-	channelType := ChannelType("telegram")
+	return newDeltaSplitTestStreamFor(t, ChannelType("telegram"), chunkLimit, streamCount)
+}
+
+func newDeltaSplitTestStreamFor(t *testing.T, channelType ChannelType, chunkLimit int, streamCount int) (*managerOutboundStream, *reopenableStream, *[]OutboundMessage) {
+	t.Helper()
 	registry := NewRegistry()
 	adapter := &streamValidationAdapter{
 		channelType:    channelType,
@@ -2614,6 +2618,20 @@ func TestCoerceFormatForCaps_PreservesPlainEverywhere(t *testing.T) {
 				t.Fatalf("plain must stay plain on %s, got %q", name, coerced.Format)
 			}
 		})
+	}
+}
+
+func TestManagerRejectsCurrentConversationAfterAliasResolution(t *testing.T) {
+	typ := ChannelType("target-resolving-guard")
+	adapter := &targetResolvingAdapter{channelType: typ}
+	registry := NewRegistry()
+	if err := registry.Register(adapter); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(nil, registry, &fakeConfigStore{effectiveConfig: ChannelConfig{BotID: "bot-1", ChannelType: typ}}, nil)
+	err := manager.Send(context.Background(), "bot-1", typ, SendRequest{Target: "alias", ExcludedTarget: "channel-target", Message: Message{Text: "must not publish"}})
+	if err == nil || len(adapter.sent) != 0 {
+		t.Fatalf("err=%v sent=%v", err, adapter.sent)
 	}
 }
 

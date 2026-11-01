@@ -29,8 +29,6 @@ const KIND_CATEGORY: Record<ContextfragKind, ContextCategoryId> = {
   native_image: 'conversation',
   runtime_context: 'conversation',
   hook_context: 'other',
-  injected_message: 'other',
-  background_summary: 'other',
 }
 
 function categoryForKind(kind: ContextfragKind | undefined): ContextCategoryId {

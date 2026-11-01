@@ -111,6 +111,7 @@
     "restore": "恢复连接",
     "existingDescription": "在「{name}」上运行命令，沿用原凭证恢复后台连接。电脑记录和 Bot 权限会保留。",
     "commandLabel": "连接命令",
+    "platformLabel": "操作系统",
     "commandDescription": "在要连接的电脑上安装 Node.js 20+，然后在终端运行下方命令。",
     "waiting": "等待电脑连接…",
     "finish": "完成"
@@ -132,7 +133,6 @@
       "reasoning_selection_unsupported": "这个外部 Agent 不支持选择推理强度。",
       "request_invalid": "Agent 运行实例请求无效，请检查后重试。",
       "runtime_conflict": "Agent 运行实例尚未准备好执行此操作，请刷新后重试。",
-      "runtime_limit_reached": "当前运行的 Agent 实例过多，请关闭一个后重试。",
       "runtime_not_found": "这个 Agent 运行实例已失效，将重新启动。"
     },
     "acp_agent_auth_invalid": "外部 Agent 认证无效。请更新 Agent 配置后重试。",
@@ -179,7 +179,6 @@
       "request_invalid": "请检查 Agent 账号信息后重试。",
       "revoked": "这个 Agent 账号已断开，请重新连接或选择其他账号。",
       "runtime_busy": "请等待当前回复结束后再切换 Agent 账号。",
-      "usage_auth_expired": "账户登录已过期，下次对话后会自动续期；如果仍无法查看额度，请重新连接账户。",
       "usage_unavailable": "暂时无法获取额度，请稍后再试。"
     },
     "agent_dependency_missing": "{dep_id} 尚未安装在此工作区。请在 Bot 的「依赖」中安装，或等待正在进行的安装完成，然后重新发送消息。",
@@ -238,8 +237,6 @@
     "chat": {
       "message_empty": "请输入消息或添加附件。"
     },
-    "codex_auth_token_missing": "该 Bot 工作区的 Codex 认证缺失或不完整。",
-    "codex_oauth_incomplete": "该 Bot 工作区尚未完成 Codex ChatGPT 登录。",
     "compaction": {
       "model_unavailable": "压缩模型不可用。请选择一个已启用、且声明了上下文窗口的对话模型。"
     },
@@ -254,8 +251,8 @@
       "upstream_unavailable": "Connect-It 暂时无法完成请求，请稍后重试。"
     },
     "context": {
-      "budget_unsatisfied": "模型上下文窗口不足，无法处理当前请求。可尝试缩短请求，或改用上下文窗口更大的模型。",
-      "protected_overflow": "必要的上下文内容超出了模型上下文预算。可尝试改用上下文窗口更大的模型。"
+      "budget_unsatisfied": "当前请求放不进模型上下文窗口，本次运行已停止。可重试、缩短请求、开始新对话，或改用上下文窗口更大的模型。",
+      "protected_overflow": "必要的上下文内容超出了模型上下文预算。请缩短请求，或改用上下文窗口更大的模型。"
     },
     "context_lifecycle": {
       "access_denied": "你没有权限查看上下文生命周期诊断信息。",
@@ -279,8 +276,9 @@
       "context_window_exceeded": "这个会话已超出模型的上下文长度上限。请压缩上下文，或新开一个会话。",
       "overloaded": "外部 Agent 的模型服务暂时不可用或过载。请稍后重试，或换一个模型。",
       "rate_limited": "外部 Agent 已达到模型服务的速率上限，请稍后再发送。",
+      "reported": "Agent 报错：{message}",
       "request_blocked": "这次请求被模型服务的安全策略拦截，请调整内容后再发送。",
-      "session_resume_failed": "会话无法恢复，请重试或新开会话。",
+      "session_resume_failed": "会话无法恢复：{message}。请重试或新开会话。",
       "unavailable": "外部 Agent 运行时暂不可用。请检查 Agent 配置和工作区后重试。",
       "upstream_unreachable": "外部 Agent 无法连接到模型服务，或连接中途断开。请检查网络和 Agent 的服务地址后重试。",
       "usage_limited": "外部 Agent 账号的使用额度已用完。请等额度重置后再试，或检查该账号的套餐与账单。"
@@ -324,7 +322,8 @@
       "oauth_not_discovered": "请先对该连接执行 OAuth 发现。"
     },
     "media": {
-      "asset_not_found": "这个文件已不存在，如仍需要请重新上传。"
+      "asset_not_found": "这个文件已不存在，如仍需要请重新上传。",
+      "reference_unavailable": "文件未能分享，请让 Agent 重新生成或再次分享。"
     },
     "memory": {
       "compact_unsupported": "当前记忆提供方不支持记忆压缩，请在 Bot 的记忆设置中换用支持压缩的提供方。"
@@ -350,6 +349,9 @@
       "update_failed": "个人资料更新失败。"
     },
     "provider": {
+      "catalog_source_not_found": "此服务商没有公共模型目录，请从服务商接口导入。",
+      "catalog_unavailable": "模型目录暂不可用，请稍后重试，或选择从服务商接口导入。",
+      "managed_readonly": "此服务商由平台管理，请使用内置模型同步。",
       "name_taken": "已存在同名提供方。",
       "not_found": "这个服务商已不存在，请刷新列表后重新选择。"
     },
@@ -1587,7 +1589,10 @@
       "dependencyMissingProgress": "正在后台安装…",
       "dependencyMissingDone": "安装完成，可以重发消息了。",
       "dependencyMissingFailed": "后台安装失败，请到 Bot 设置的「依赖」中重试。",
-      "dependencyOpen": "查看依赖"
+      "dependencyOpen": "查看依赖",
+      "resetSession": "新开 Agent 会话",
+      "resetSessionDone": "下一条消息会开始新的 Agent 会话，它不会记得上面的对话。",
+      "resetSessionFailed": "无法新开 Agent 会话。"
     },
     "sessionFilterAll": "全部",
     "searchSessionPlaceholder": "搜索",
@@ -1902,6 +1907,12 @@
     "emptyDescription": "手动添加，或从该服务商导入完整列表。",
     "managedEmptyDescription": "请先完成授权，再刷新托管模型目录。",
     "draftEmptyDescription": "手动添加，或填写 API 密钥后从该服务商导入完整列表。",
+    "sourcePreviewLoading": "正在从 models.dev 读取模型列表…",
+    "sourcePreviewFailed": "无法访问 models.dev",
+    "sourcePreviewFailedDescription": "暂时无法预览该服务商的模型。",
+    "importFromCatalog": "从 models.dev 目录导入",
+    "importFromEndpoint": "从服务商接口拉取",
+    "importFromCatalogHint": "新增目录中缺少的模型并设为停用。已有模型的上下文、最大输出与推理档位按目录更新；已开启的能力不会被移除，推理预算、默认值与回传字段在仍适用时保留。启用状态保持不变，描述为空时用目录描述补上。",
     "clientType": "客户端类型",
     "clientTypePlaceholder": "选择客户端类型",
     "typeRequired": "请选择类型",
@@ -1915,14 +1926,50 @@
     "dimensions": "向量维度",
     "dimensionsPlaceholder": "留空将自动检测",
     "dimensionsMin": "向量维度需大于 0",
-    "compatibilities": "兼容性",
-    "compatibility": {
-      "vision": "视觉",
-      "file-input": "文件输入(PDF)",
-      "tool-call": "工具调用",
-      "image-output": "图片生成",
+    "inputModalities": "输入",
+    "outputModalities": "输出",
+    "modality": {
+      "text": "文本",
+      "image": "图片",
+      "audio": "音频",
+      "video": "视频",
+      "pdf": "PDF"
+    },
+    "capabilities": "能力",
+    "capability": {
+      "toolCall": "工具调用",
+      "structuredOutput": "结构化输出",
       "reasoning": "推理"
     },
+    "reasoningToggle": "可以开关推理",
+    "reasoningUncontrollableHint": "不选强度也不可开关时，模型始终推理，对话中不显示推理选项。",
+    "reasoningDialect": "请求形式",
+    "reasoningDialectAuto": "自动",
+    "reasoningDialectOption": {
+      "tier": "强度档位",
+      "budget": "Token 预算",
+      "toggle": "仅开关",
+      "adaptive": "自适应"
+    },
+    "reasoningMore": "更多推理设置",
+    "reasoningLess": "收起推理设置",
+    "notStated": "未声明",
+    "reasoningOff": "关闭推理请求",
+    "reasoningOffOption": {
+      "accepted": "接受",
+      "low_effort_only": "高强度及以下接受",
+      "rejected": "拒绝"
+    },
+    "reasoningDefault": "默认推理",
+    "reasoningDefaultHint": "默认推理与默认强度在首次选择该模型时使用，之后以对话或 Bot 的设置为准。",
+    "reasoningDefaultEffort": "默认强度",
+    "reasoningBudget": "推理预算范围",
+    "reasoningBudgetMin": "最小 Token",
+    "reasoningBudgetMax": "最大 Token",
+    "reasoningReplay": "推理回传字段",
+    "reasoningReplayHint": "适用于需要在工具调用时回传先前推理内容的 Chat Completions 接口。",
+    "reasoningReplayProvider": "跟随提供商",
+    "reasoningReplayRequired": "每次工具调用都回传",
     "contextWindow": "上下文窗口",
     "contextWindowPlaceholder": "例如 128000",
     "reasoningEfforts": "支持的推理强度",
@@ -1944,21 +1991,31 @@
     "importFailed": "导入模型失败",
     "refreshModels": "刷新模型",
     "refreshSuccess": "模型目录已刷新：新增 {created} 个，更新 {updated} 个",
+    "reasoningBudgetMaxMin": "预算上限必须大于 0",
+    "reasoningBudgetRange": "预算下限不能大于上限",
     "refreshFailed": "刷新模型目录失败",
     "refreshConfirmHint": "获取此账号当前可用的最新模型，并从模型选择器中移除已不可用的模型。",
     "importConfirmHint": "获取并导入该服务商当前可用的模型。",
-    "showingCount": "显示 {count} / {total}"
+    "showingCount": "显示 {count} / {total}",
+    "catalogStale": "模型目录暂时无法更新，已使用缓存的模型信息。"
   },
   "provider": {
     "add": "添加服务商",
     "addBtn": "添加",
+    "gallery": {
+      "configured": "已配置",
+      "subscriptions": "订阅",
+      "others": "其他 LLM 服务商"
+    },
     "searchPlaceholder": "搜索服务商…",
     "preset": "预设",
     "presetPlaceholder": "选择预设或自定义服务商",
     "presetSearchPlaceholder": "搜索预设…",
     "presetNoResults": "没有匹配的预设",
+    "searchNoResults": "没有匹配的服务商",
     "presetGroupCustom": "自定义",
     "presetGroupBuiltIn": "预设",
+    "presetGroupSubscriptions": "订阅",
     "customProvider": "自定义服务商",
     "apiKey": "API 密钥",
     "apiKeyPlaceholder": "输入 API 密钥",
@@ -2097,7 +2154,8 @@
       "exa": "Exa",
       "bocha": "博查",
       "duckduckgo": "DuckDuckGo",
-      "yandex": "Yandex"
+      "yandex": "Yandex",
+      "deepseek": "DeepSeek"
     },
     "fetchProviderNames": {
       "native": "原生抓取",
@@ -2532,7 +2590,6 @@
       }
     },
     "editBot": "编辑 Bot",
-    "deleteConfirm": "确定要删除这个 Bot 吗？",
     "renameSuccess": "Bot 名称已更新",
     "renameFailed": "更新 Bot 名称失败",
     "deleteSuccess": "Bot 已删除",
@@ -2786,16 +2843,20 @@
       "defaultModelDescription": "可选。留空时由外部 Agent 选择默认模型；对话中仍可临时切换。",
       "defaultModelPlaceholder": "使用运行时默认模型",
       "account": "账号",
-      "chatgptAccountDescription": "Memoh 会加密保存此 Agent 的 ChatGPT 凭据，并仅在运行时提供给 Codex。",
-      "chatgptAccountConnectedDescription": "此 Agent 的 ChatGPT 凭据已加密保存。",
+      "chatgptAccountDescription": "Codex 在此 Agent 的工作区里登录 ChatGPT，并自己保存登录状态。",
+      "chatgptAccountConnectedDescription": "Codex 已在此 Agent 的工作区里登录 ChatGPT。",
+      "signedInAs": "已登录：{account}",
+      "checkingSignIn": "正在检查登录状态…",
+      "enableToSignIn": "请先启用此 Agent，再检查或连接账号。",
+      "signInCheckFailed": "无法检查登录状态。",
       "reconnect": "重新连接",
       "codexDeviceHint": "打开验证页面并输入这个一次性代码。只在页面显示的 OpenAI 验证地址输入此代码。Memoh 会自动完成授权。",
       "codexLoginSuccess": "Codex 已连接 ChatGPT 账号",
       "codexLoginFailed": "Codex 账号授权失败，请重试",
       "authGrokAccountDescription": "使用 Grok 账号登录 Grok Build。",
       "grokAccount": "Grok 账号",
-      "grokAccountDescription": "Memoh 会加密保存此 Agent 的 Grok 凭据，并仅在运行时提供给 Grok Build。",
-      "grokAccountConnectedDescription": "此 Agent 的 Grok 凭据已加密保存。",
+      "grokAccountDescription": "Grok 在此 Agent 的工作区里登录，并自己保存登录状态。",
+      "grokAccountConnectedDescription": "Grok 已在此 Agent 的工作区里登录。",
       "grokDeviceHint": "打开验证页面并确认这个一次性代码。只在页面显示的 accounts.x.ai 地址上确认。Memoh 会自动完成授权。",
       "grokLoginSuccess": "Grok Build 已连接 Grok 账号",
       "grokLoginFailed": "Grok 账号登录失败，请重试",
@@ -3328,15 +3389,6 @@
       "videoModel": "视频生成模型",
       "videoModelPlaceholder": "选择视频模型（可选）",
       "language": "语言",
-      "compactionEnabled": "启用上下文压缩",
-      "compactionDescription": "当对话上下文过长时，自动对旧消息进行摘要以节省 Token。",
-      "compactionThreshold": "压缩阈值",
-      "compactionThresholdDescription": "输入 Token 数；0 表示在模型上下文窗口达到 50% 时自动压缩。",
-      "compactionTargetPercent": "压缩后保留的上下文（%）",
-      "compactionTargetPercentDescription": "压缩后保留的模型上下文窗口比例。留空时使用 40%。",
-      "compactionModel": "压缩模型",
-      "compactionModelDescription": "选择用于摘要的模型，未设置时默认使用聊天模型。",
-      "compactionModelPlaceholder": "使用聊天模型（默认）",
       "showToolCallsInIM": "在 IM 中显示工具调用",
       "showToolCallsInIMDescription": "在聊天中以单条消息实时更新工具的执行状态。默认关闭。",
       "displayEnabled": "启用工作区显示器",
@@ -3345,14 +3397,9 @@
       "desktopEnabledDescription": "为这个 Bot 提供一块可以看到、可以操作的屏幕，用于浏览网页和使用桌面应用。你可以实时观看，并随时接管。",
       "toolApproval": "工具调用审核",
       "toolApprovalDescription": "拦截并人工审核 read、write、exec 三类操作。你可以配置免审核的白名单路径或命令。",
-      "acpSetupMode": "配置方式",
       "acpLaunchSection": "启动配置",
       "acpCommand": "命令入口",
       "acpArguments": "启动参数",
-      "acpSetupApiKey": "API Key",
-      "acpSetupOAuth": "OAuth",
-      "acpSetupSelf": "自行配置",
-      "acpSelfModeHint": "该模式直接使用工作区运行环境里你已配置好的 Agent（例如已登录的凭据）。",
       "acpStatusNeedsConfig": "需要配置",
       "acpStatusOff": "已关闭",
       "acpEmptyTitle": "暂无可用 Agent",
@@ -3423,6 +3470,7 @@
       "dangerZone": "危险操作",
       "deleteBotDescription": "此操作不可逆。删除后 Bot 将无法恢复。",
       "deleteBot": "删除 Bot",
+      "deleteBotConfirmLabel": "请在下方输入“{name}”以确认",
       "agentCredentialSecret": "API Key",
       "agentCredentialSecretPlaceholder": "输入 API Key",
       "agentCredentialSave": "保存",
@@ -3779,13 +3827,7 @@
       "loadFailed": "加载压缩记录失败",
       "empty": "暂无压缩记录",
       "emptyHint": "机器人压缩会话历史后，这里会出现记录。",
-      "logsDisabledTitle": "压缩已关闭",
-      "logsDisabledHint": "开启压缩后开始记录日志。",
       "filterEmpty": "没有匹配当前状态筛选条件的记录。",
-      "clearLogs": "清空记录",
-      "clearConfirm": "确定要清空所有压缩记录吗？此操作不可撤销。",
-      "clearSuccess": "压缩记录已清空",
-      "clearFailed": "清空压缩记录失败",
       "status": "状态",
       "time": "时间",
       "duration": "耗时",

@@ -98,7 +98,6 @@ type LifecycleSnapshot struct {
 	FinalInputHash            string              `json:"final_input_hash,omitempty"`
 	Model                     string              `json:"model,omitempty"`
 	ClientType                string              `json:"client_type,omitempty"`
-	LoopSelectionMode         string              `json:"loop_selection_mode,omitempty"`
 	Steps                     []StepSnapshot      `json:"steps,omitempty"`
 	MemoryRecall              *MemoryRecallTrace  `json:"memory_recall,omitempty"`
 }
@@ -194,7 +193,6 @@ func (h *LifecycleHolder) Snapshot() (LifecycleSnapshot, bool) {
 		snapshot.CacheUsage = ledger.CacheUsageRecords()
 		snapshot.CacheReadTokens, snapshot.CacheWriteTokens = cacheUsageTotals(snapshot.CacheUsage)
 		snapshot.Model, snapshot.ClientType = ledger.ModelInfo()
-		snapshot.LoopSelectionMode = ledger.LoopSelectionMode()
 		snapshot.Steps = ledger.StepSnapshots()
 	}
 	return snapshot, true
@@ -229,7 +227,6 @@ func BuildLifecycleSnapshot(manifest Manifest) LifecycleSnapshot {
 		snapshot.CacheUsage = manifest.Mutations.CacheUsageRecords()
 		snapshot.CacheReadTokens, snapshot.CacheWriteTokens = cacheUsageTotals(snapshot.CacheUsage)
 		snapshot.Model, snapshot.ClientType = manifest.Mutations.ModelInfo()
-		snapshot.LoopSelectionMode = manifest.Mutations.LoopSelectionMode()
 		snapshot.Steps = manifest.Mutations.StepSnapshots()
 	}
 	return snapshot
@@ -311,7 +308,7 @@ func cloneLifecycleSnapshot(snapshot LifecycleSnapshot) LifecycleSnapshot {
 	snapshot.Selection = cloneSelectionTrace(snapshot.Selection)
 	snapshot.Mutations = append([]MutationRecord(nil), snapshot.Mutations...)
 	snapshot.CacheUsage = append([]CacheUsageRecord(nil), snapshot.CacheUsage...)
-	snapshot.Steps = cloneStepSnapshots(snapshot.Steps)
+	snapshot.Steps = append([]StepSnapshot(nil), snapshot.Steps...)
 	snapshot.MemoryRecall = cloneMemoryRecallTrace(snapshot.MemoryRecall)
 	if snapshot.CacheComparison != nil {
 		comparison := *snapshot.CacheComparison
@@ -359,17 +356,6 @@ func cacheUsageTotals(records []CacheUsageRecord) (readTokens, writeTokens int) 
 		writeTokens += record.CacheWriteTokens
 	}
 	return readTokens, writeTokens
-}
-
-func cloneStepSnapshots(steps []StepSnapshot) []StepSnapshot {
-	if len(steps) == 0 {
-		return nil
-	}
-	out := make([]StepSnapshot, len(steps))
-	for i, step := range steps {
-		out[i] = cloneStepSnapshot(step)
-	}
-	return out
 }
 
 func cloneSelectionTrace(selection SelectionTrace) SelectionTrace {

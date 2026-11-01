@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/chat/checkpoint"
 	dbpkg "github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -19,9 +20,9 @@ import (
 
 // EventStore persists and loads CanonicalEvents from the database.
 type EventStore struct {
-	queries         dbstore.Queries
-	logger          *slog.Logger
-	replayArtifacts ReplayArtifactProvider
+	queries     dbstore.Queries
+	checkpoints *checkpoint.Store
+	logger      *slog.Logger
 }
 
 const (
@@ -29,27 +30,16 @@ const (
 	defaultReplayPageSize = 256
 )
 
-// ReplayArtifactProvider supplies the durable compaction frontier before a
-// replay query loads event payloads.
-type ReplayArtifactProvider interface {
-	ActiveCompactionArtifacts(ctx context.Context, botID, sessionID string) ([]CompactionArtifact, error)
-}
-
 // NewEventStore creates an EventStore.
 func NewEventStore(log *slog.Logger, queries dbstore.Queries) *EventStore {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &EventStore{
-		queries: queries,
-		logger:  log.With(slog.String("service", "chat/timeline_event_store")),
+		queries:     queries,
+		checkpoints: checkpoint.NewStore(log, queries),
+		logger:      log.With(slog.String("service", "chat/timeline_event_store")),
 	}
-}
-
-// SetReplayArtifactProvider enables frontier-aware replay. It is setter-
-// injected because the concrete provider belongs to agent compaction.
-func (s *EventStore) SetReplayArtifactProvider(provider ReplayArtifactProvider) {
-	s.replayArtifacts = provider
 }
 
 // PersistEvent writes a CanonicalEvent to the bot_session_events table with a
@@ -117,49 +107,30 @@ func (s *EventStore) PersistEvent(ctx context.Context, botID, sessionID string, 
 	return "", original, nil
 }
 
-// LoadEvents is the compatibility surface for callers without a bot identity.
-// It is still keyset/byte bounded, but cannot apply a compaction frontier.
-func (s *EventStore) LoadEvents(ctx context.Context, sessionID string) ([]CanonicalEvent, error) {
-	return s.loadEvents(ctx, "", sessionID, nil)
-}
-
-// LoadEventsForReplay applies the active compaction frontier in SQL and loads
-// the newest event tail within a hard byte budget.
+// LoadEventsForReplay loads the newest event tail of a session within a
+// hard byte budget, leaving out in SQL what the session's history checkpoint
+// stands for: the events of every inbound message whose context rows it
+// folds.
 func (s *EventStore) LoadEventsForReplay(ctx context.Context, botID, sessionID string) ([]CanonicalEvent, error) {
-	var artifacts []CompactionArtifact
-	if s.replayArtifacts != nil {
-		var err error
-		artifacts, err = s.replayArtifacts.ActiveCompactionArtifacts(ctx, botID, sessionID)
-		if err != nil {
-			return nil, fmt.Errorf("load replay compaction frontier: %w", err)
-		}
-	}
-	return s.loadEvents(ctx, botID, sessionID, artifacts)
-}
-
-func (s *EventStore) loadEvents(ctx context.Context, botID, sessionID string, artifacts []CompactionArtifact) ([]CanonicalEvent, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid session id: %w", err)
 	}
-
-	coverage := coveredExternalMessages(artifacts)
-	coverageJSON := make(map[string]int64, len(coverage))
-	for messageID, covered := range coverage {
-		coverageJSON[messageID] = covered.coverageAsOfMs
-	}
-	encodedCoverage, err := json.Marshal(coverageJSON)
+	active, err := s.checkpoints.Active(ctx, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("encode replay compaction frontier: %w", err)
+		return nil, fmt.Errorf("load replay history checkpoint: %w", err)
 	}
+	keptIDs := active.RowUUIDs()
 
 	remaining := int64(defaultReplayMaxBytes)
 	rows := make([]sqlc.ListSessionEventsBySessionPageBeforeWithinBytesRow, 0, defaultReplayPageSize)
 	params := sqlc.ListSessionEventsBySessionPageBeforeWithinBytesParams{
-		SessionID:               pgSessionID,
-		CoveredExternalMessages: encodedCoverage,
-		MaxBytes:                remaining,
-		PageSize:                defaultReplayPageSize,
+		SessionID:           pgSessionID,
+		AfterTurnPosition:   active.Position.Turn,
+		AfterTurnMessageSeq: active.Position.Seq,
+		KeptIds:             keptIDs,
+		MaxBytes:            remaining,
+		PageSize:            defaultReplayPageSize,
 	}
 	for remaining > 0 {
 		page, queryErr := s.queries.ListSessionEventsBySessionPageBeforeWithinBytes(ctx, params)
@@ -206,7 +177,7 @@ func (s *EventStore) loadEvents(ctx context.Context, botID, sessionID string, ar
 		slog.Int("event_count", len(events)),
 		slog.Int64("event_bytes", loadedBytes),
 		slog.Int64("persisted_event_count", totalEvents),
-		slog.Int("covered_external_messages", len(coverageJSON)),
+		slog.String("history_checkpoint_id", active.ID),
 		slog.Int64("replay_max_bytes", defaultReplayMaxBytes))
 
 	return events, nil

@@ -267,3 +267,7 @@ func TestTestEmbeddingModelReachability(t *testing.T) {
 		})
 	}
 }
+
+func (probeTestQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
+}

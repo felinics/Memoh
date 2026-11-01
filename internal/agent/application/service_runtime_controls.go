@@ -16,7 +16,6 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/runtimefence"
-	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/workspace"
 )
 
@@ -66,7 +65,8 @@ func (s *Service) runtimeControlTarget(ctx context.Context, request RuntimeContr
 			return sess, nil, external.PromptInput{}, approval.ErrForbidden
 		}
 	}
-	return sess, s.externalDrivers[sess.RuntimeType], runtimeControlInput(sess, request), nil
+	driver, _ := s.runtimes.Driver(session.RuntimeTypeOf(sess))
+	return sess, driver, runtimeControlInput(sess, request), nil
 }
 
 func runtimeControlInput(sess session.Thread, request RuntimeControlRequest) external.PromptInput {
@@ -83,6 +83,11 @@ func runtimeControlInput(sess session.Thread, request RuntimeControlRequest) ext
 func (s *Service) RuntimeControls(ctx context.Context, request RuntimeControlRequest) (out external.Controls, resultErr error) {
 	defer func() { resultErr = publicRuntimeControlError(resultErr) }()
 	_, driver, input, err := s.runtimeControlTarget(ctx, request)
+	if err != nil {
+		return external.Controls{}, err
+	}
+	// Command discovery runs a CLI in the workspace the session's turns use.
+	ctx, err = s.runtimeControlContext(ctx, request)
 	if err != nil {
 		return external.Controls{}, err
 	}
@@ -105,7 +110,11 @@ func (s *Service) RuntimeCommands(ctx context.Context, request RuntimeControlReq
 	if !allowed {
 		return nil, approval.ErrForbidden
 	}
-	if provider, ok := s.externalDrivers[sess.RuntimeType].(external.CommandProvider); ok {
+	if provider, ok := external.As[external.CommandProvider](s.runtimes, session.RuntimeTypeOf(sess)); ok {
+		ctx, err = s.runtimeControlContext(ctx, request)
+		if err != nil {
+			return nil, err
+		}
 		return provider.Commands(ctx, runtimeControlInput(sess, request))
 	}
 	return []external.Command{}, nil
@@ -117,7 +126,7 @@ func (s *Service) RuntimeGoal(ctx context.Context, request RuntimeControlRequest
 	if err != nil {
 		return nil, err
 	}
-	provider, ok := driver.(external.GoalProvider)
+	provider, ok := external.As[external.GoalProvider](s.runtimes, runtimeTypeOf(driver))
 	if !ok {
 		return nil, external.ErrControlUnsupported
 	}
@@ -130,12 +139,12 @@ func (s *Service) SetRuntimeMode(ctx context.Context, request RuntimeControlRequ
 	if err != nil {
 		return out, err
 	}
-	if _, _, _, err := runtimeModeAccessors(driver, request.ModeKind); err != nil {
+	if _, _, _, err := runtimeModeAccessors(s.runtimes, driver, request.ModeKind); err != nil {
 		return out, err
 	}
 
 	err = s.runRuntimeControl(ctx, request, true, func(ctx context.Context, sess session.Thread, driver external.Driver, input external.PromptInput) error {
-		read, set, metadataKey, err := runtimeModeAccessors(driver, request.ModeKind)
+		read, set, metadataKey, err := runtimeModeAccessors(s.runtimes, driver, request.ModeKind)
 		if err != nil {
 			return err
 		}
@@ -153,7 +162,7 @@ func (s *Service) SetRuntimeMode(ctx context.Context, request RuntimeControlRequ
 		// An unsupported snapshot may only mean the runtime is cold (ACP
 		// reads its live session); let the driver's own set decide then.
 		if modes.Supported && !valid {
-			return external.ErrModeUnavailable
+			return external.Fail(external.FailureModeUnavailable, nil)
 		}
 		out, err = set(ctx, input, request.ModeID)
 		if err != nil {
@@ -170,14 +179,14 @@ type (
 	setRuntimeMode  func(context.Context, external.PromptInput, string) (external.ModeState, error)
 )
 
-func runtimeModeAccessors(driver external.Driver, kind string) (readRuntimeMode, setRuntimeMode, string, error) {
+func runtimeModeAccessors(runtimes *external.Registry, driver external.Driver, kind string) (readRuntimeMode, setRuntimeMode, string, error) {
 	switch kind {
 	case "", "permission":
-		if provider, ok := driver.(external.ModeProvider); ok {
+		if provider, ok := external.As[external.ModeProvider](runtimes, runtimeTypeOf(driver)); ok {
 			return provider.Modes, provider.SetMode, "permission_mode", nil
 		}
 	case "plan":
-		if provider, ok := driver.(external.PlanModeProvider); ok {
+		if provider, ok := external.As[external.PlanModeProvider](runtimes, runtimeTypeOf(driver)); ok {
 			return provider.PlanMode, provider.SetPlanMode, "collaboration_mode", nil
 		}
 	default:
@@ -194,11 +203,15 @@ func (s *Service) ExecuteRuntimeCommand(ctx context.Context, request RuntimeCont
 	if err != nil {
 		return turn.RuntimeCommandResult{}, err
 	}
-	provider, ok := driver.(external.CommandProvider)
+	provider, ok := external.As[external.CommandProvider](s.runtimes, runtimeTypeOf(driver))
 	if !ok {
 		return turn.RuntimeCommandResult{}, external.ErrCommandUnavailable
 	}
-	commands, err := provider.Commands(ctx, input)
+	controlCtx, err := s.runtimeControlContext(ctx, request)
+	if err != nil {
+		return turn.RuntimeCommandResult{}, err
+	}
+	commands, err := provider.Commands(controlCtx, input)
 	if err != nil {
 		return turn.RuntimeCommandResult{}, err
 	}
@@ -206,11 +219,7 @@ func (s *Service) ExecuteRuntimeCommand(ctx context.Context, request RuntimeCont
 	if !ok {
 		return turn.RuntimeCommandResult{}, external.ErrCommandUnavailable
 	}
-	if command.Kind == external.CommandRead && !runtimekind.ReadCommandsRequireIdle(driver.RuntimeType()) {
-		controlCtx, err := s.runtimeControlContext(ctx, request)
-		if err != nil {
-			return turn.RuntimeCommandResult{}, err
-		}
+	if command.Kind == external.CommandRead && !driver.Caps().ReadCommandsRequireIdle {
 		return provider.ReadCommand(controlCtx, input)
 	}
 	if command.Kind != external.CommandOperation && command.Kind != external.CommandRead {
@@ -219,7 +228,7 @@ func (s *Service) ExecuteRuntimeCommand(ctx context.Context, request RuntimeCont
 	// A read only holds the slot so it cannot meet a turn on the native
 	// session; it is no assistant turn, and must not be shown as one.
 	err = s.runRuntimeControl(ctx, request, command.Kind == external.CommandRead, func(ctx context.Context, sess session.Thread, driver external.Driver, input external.PromptInput) error {
-		provider, ok := driver.(external.CommandProvider)
+		provider, ok := external.As[external.CommandProvider](s.runtimes, runtimeTypeOf(driver))
 		if !ok {
 			return external.ErrCommandUnavailable
 		}
@@ -235,7 +244,7 @@ func (s *Service) ExecuteRuntimeCommand(ctx context.Context, request RuntimeCont
 			result, err = provider.ReadCommand(ctx, input)
 			return err
 		}
-		compactor, ok := driver.(external.Compactor)
+		compactor, ok := external.As[external.Compactor](s.runtimes, runtimeTypeOf(driver))
 		if !ok {
 			return external.ErrControlUnsupported
 		}
@@ -349,7 +358,7 @@ func (s *Service) ControlRuntimeGoal(ctx context.Context, request RuntimeControl
 	if err != nil {
 		return err
 	}
-	provider, ok := driver.(external.GoalProvider)
+	provider, ok := external.As[external.GoalProvider](s.runtimes, runtimeTypeOf(driver))
 	if !ok {
 		return external.ErrControlUnsupported
 	}
@@ -358,4 +367,13 @@ func (s *Service) ControlRuntimeGoal(ctx context.Context, request RuntimeControl
 		return err
 	}
 	return provider.ControlGoal(ctx, input, action)
+}
+
+// runtimeTypeOf is the runtime a control target resolved to; empty for a
+// session no external runtime serves.
+func runtimeTypeOf(driver external.Driver) string {
+	if driver == nil {
+		return ""
+	}
+	return driver.RuntimeType()
 }

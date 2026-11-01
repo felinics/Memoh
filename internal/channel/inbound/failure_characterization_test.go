@@ -177,7 +177,7 @@ func TestCharacterizeIMContinuationNotAccepted(t *testing.T) {
 	sink := &fakeReplySender{}
 	msg := channel.InboundMessage{Channel: channel.ChannelType("telegram"), ReplyTarget: "chat"}
 	cause := errors.New("SECRET transport failure")
-	err := processor.streamContinuationCommand(context.Background(), msg, sink, InboundIdentity{BotID: "bot"},
+	err := processor.streamContinuationCommand(context.Background(), msg, sink, InboundIdentity{BotID: "bot"}, "",
 		func(context.Context, chan<- json.RawMessage) error { return cause })
 	if !errors.Is(err, cause) {
 		t.Fatalf("error = %v, want the transport cause", err)

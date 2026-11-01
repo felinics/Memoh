@@ -49,7 +49,9 @@ when the status would attribute the code wrongly (see
 - The status tells the client what to do about its own request. 401 is only
   for a missing or invalid Memoh session, because the Web app signs out on a
   401. A code for a dependency's failure answers 5xx, or 429 when the client
-  should back off.
+  should back off. `agent.provider_quota_exhausted` answers 402 because the
+  provider account needs balance or quota rather than a retry; its fault
+  remains `dependency`.
 - `internal/apperror/testdata/codes.golden` records the status each code was
   published with and only grows. It is sorted by code, and so are the keys
   under `errors` in the locale files; the guard test checks both, so codes
@@ -114,6 +116,29 @@ an agent run records its failure in `session_runs.error_code` and in the
 alone. An error without a public error is answered with the generic code for
 its fault on every entry point. A stream error without a code is
 `runtime_run_failed`, the code its run records.
+
+One text is not internal: what an external agent (Codex, Claude Code, Grok
+Build, an ACP agent) or its process said when it failed — a failed turn, a
+start that failed with its exit status and stderr, a refused resume, a control
+the agent rejected. It is shown and stored as it was said, under
+`external_runtime.reported` with the `message` arg, or with
+`external_runtime.auth_required` when the agent's protocol marks a sign-in
+problem. The user reads it as they would in the agent's own client; mapping it
+onto categories of ours could never cover every agent and only hid what
+happened. `external.Reported` and `external.Upstream` strip the credentials and
+queries of URLs in it and bound its length. A failure inside Memoh on the way
+(reading the Agent's configuration, looking the workspace up) is not the
+agent's and stays internal.
+
+A runtime driver reports a failure as an `external.Failure` of one of three
+sorts: what the agent said (`FailureReported`), a sign-in
+(`FailureAuthRequired`), or one of Memoh's own rules refusing the request
+(`FailureForkLatestOnly`, `FailureGoalRequiresDefaultMode`,
+`FailureModeUnavailable` for a model, effort or mode the agent does not offer,
+`FailureCredential`, `FailureCredentialBusy`, `FailureRuntimeBusy`). An ACP
+session the agent could not restore keeps
+`external_runtime.session_resume_failed`, with the agent's words as the
+`message` arg, because the conversation offers to give that session up.
 
 A warning attached to a result, such as an item a backup import skipped, says
 only what was skipped. Its cause is recorded as an event.
@@ -220,14 +245,15 @@ that reports a provider's answer declares `dependency`, including a rejected
 key, an exhausted quota and a rate limit (429); a content
 moderation refusal would be the one `client` code. The codes an external
 agent runtime reports about its own failure declare `dependency` for the same
-reason. The ones where nothing failed and the user has to change something
-answer 4xx and stay `client`: an account that is not signed in
-(`external_runtime.auth_required`), a conversation that no longer fits the
-context window (`external_runtime.context_window_exceeded`) and a request the
-model service's policy refused (`external_runtime.request_blocked`). A code
-that some producers raise for this process's own failures, such as
-`external_runtime.unavailable`, declares nothing and is attributed by its
-chain. `workspace.unreachable` is one: the workspace bridge client decodes an
+reason, `external_runtime.reported` among them. An account that is not signed
+in (`external_runtime.auth_required`) answers 4xx and stays `client`: nothing
+failed, and the user has to sign in. The codes that split an agent's failure
+into categories (`usage_limited`, `rate_limited`, `context_window_exceeded`,
+`overloaded`, `upstream_unreachable`, `request_blocked` under
+`external_runtime.`) are no longer produced and keep their declarations for
+the history written with them. A code
+that some producers raise for this process's own failures declares nothing and
+is attributed by its chain. `workspace.unreachable` is one: the workspace bridge client decodes an
 unreachable workspace runtime with `rpc.Decode`, so its cause is received and
 the fault is `dependency`; a failure to look up the target in this process
 stays `server`. A guard test in
@@ -238,7 +264,7 @@ stays `server`. A guard test in
 | --- | --- |
 | `agent.provider_auth_failed`, `agent.provider_permission_denied`, `agent.provider_quota_exhausted`, `agent.provider_rate_limited`, `agent.provider_overloaded`, `agent.provider_request_rejected`, `agent.provider_unreachable` | `dependency` |
 | `agent.response_interrupted`, `agent.response_timeout` | `dependency` |
-| `runtime_prompt_failed`, `external_runtime.session_resume_failed`, `external_runtime.usage_limited`, `external_runtime.rate_limited`, `external_runtime.overloaded`, `external_runtime.upstream_unreachable`, `acp.config_update_failed` | `dependency` |
+| `runtime_prompt_failed`, `external_runtime.reported`, `external_runtime.session_resume_failed`, `external_runtime.usage_limited`, `external_runtime.rate_limited`, `external_runtime.overloaded`, `external_runtime.upstream_unreachable`, `acp.config_update_failed` | `dependency` |
 | `connector.oauth_client_not_configured` | `dependency` |
 
 ## Attribution across an RPC

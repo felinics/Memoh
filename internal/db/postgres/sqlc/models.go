@@ -82,52 +82,48 @@ type AgentSessionPublication struct {
 }
 
 type Bot struct {
-	ID                      pgtype.UUID        `json:"id"`
-	OwnerUserID             pgtype.UUID        `json:"owner_user_id"`
-	Name                    string             `json:"name"`
-	DisplayName             pgtype.Text        `json:"display_name"`
-	AvatarUrl               pgtype.Text        `json:"avatar_url"`
-	Timezone                pgtype.Text        `json:"timezone"`
-	IsActive                bool               `json:"is_active"`
-	Status                  string             `json:"status"`
-	CreateRequestKey        pgtype.Text        `json:"create_request_key"`
-	Language                string             `json:"language"`
-	CommandUiLanguage       string             `json:"command_ui_language"`
-	ReasoningEffort         string             `json:"reasoning_effort"`
-	ChatModelID             pgtype.UUID        `json:"chat_model_id"`
-	ChatRuntime             string             `json:"chat_runtime"`
-	ChatAcpAgentID          pgtype.Text        `json:"chat_acp_agent_id"`
-	ChatAcpProjectPath      string             `json:"chat_acp_project_path"`
-	ChatAcpProjectMode      string             `json:"chat_acp_project_mode"`
-	SearchProviderID        pgtype.UUID        `json:"search_provider_id"`
-	FetchProviderID         pgtype.UUID        `json:"fetch_provider_id"`
-	MemoryProviderID        pgtype.UUID        `json:"memory_provider_id"`
-	CompactionEnabled       bool               `json:"compaction_enabled"`
-	CompactionThreshold     int32              `json:"compaction_threshold"`
-	CompactionTargetPercent pgtype.Int4        `json:"compaction_target_percent"`
-	CompactionModelID       pgtype.UUID        `json:"compaction_model_id"`
-	MemoryLlmModelID        pgtype.UUID        `json:"memory_llm_model_id"`
-	ImageModelID            pgtype.UUID        `json:"image_model_id"`
-	DiscussProbeModelID     pgtype.UUID        `json:"discuss_probe_model_id"`
-	TtsModelID              pgtype.UUID        `json:"tts_model_id"`
-	TranscriptionModelID    pgtype.UUID        `json:"transcription_model_id"`
-	VideoModelID            pgtype.UUID        `json:"video_model_id"`
-	PersistFullToolResults  bool               `json:"persist_full_tool_results"`
-	ShowToolCallsInIm       bool               `json:"show_tool_calls_in_im"`
-	ToolApprovalConfig      []byte             `json:"tool_approval_config"`
-	DisplayEnabled          bool               `json:"display_enabled"`
-	OverlayProvider         string             `json:"overlay_provider"`
-	OverlayEnabled          bool               `json:"overlay_enabled"`
-	OverlayConfig           []byte             `json:"overlay_config"`
-	Metadata                []byte             `json:"metadata"`
-	RuntimeResetToken       pgtype.UUID        `json:"runtime_reset_token"`
-	RuntimeResetExpiresAt   pgtype.Timestamptz `json:"runtime_reset_expires_at"`
-	RuntimeConfigEpoch      int64              `json:"runtime_config_epoch"`
-	CreatedAt               pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
-	AclDefaultEffect        string             `json:"acl_default_effect"`
-	TeamID                  pgtype.UUID        `json:"team_id"`
-	DefaultBotAgentID       pgtype.UUID        `json:"default_bot_agent_id"`
+	ID                     pgtype.UUID        `json:"id"`
+	OwnerUserID            pgtype.UUID        `json:"owner_user_id"`
+	Name                   string             `json:"name"`
+	DisplayName            pgtype.Text        `json:"display_name"`
+	AvatarUrl              pgtype.Text        `json:"avatar_url"`
+	Timezone               pgtype.Text        `json:"timezone"`
+	IsActive               bool               `json:"is_active"`
+	Status                 string             `json:"status"`
+	CreateRequestKey       pgtype.Text        `json:"create_request_key"`
+	Language               string             `json:"language"`
+	CommandUiLanguage      string             `json:"command_ui_language"`
+	ReasoningEffort        string             `json:"reasoning_effort"`
+	ChatModelID            pgtype.UUID        `json:"chat_model_id"`
+	ChatRuntime            string             `json:"chat_runtime"`
+	ChatAcpAgentID         pgtype.Text        `json:"chat_acp_agent_id"`
+	ChatAcpProjectPath     string             `json:"chat_acp_project_path"`
+	ChatAcpProjectMode     string             `json:"chat_acp_project_mode"`
+	SearchProviderID       pgtype.UUID        `json:"search_provider_id"`
+	FetchProviderID        pgtype.UUID        `json:"fetch_provider_id"`
+	MemoryProviderID       pgtype.UUID        `json:"memory_provider_id"`
+	MemoryLlmModelID       pgtype.UUID        `json:"memory_llm_model_id"`
+	ImageModelID           pgtype.UUID        `json:"image_model_id"`
+	DiscussProbeModelID    pgtype.UUID        `json:"discuss_probe_model_id"`
+	TtsModelID             pgtype.UUID        `json:"tts_model_id"`
+	TranscriptionModelID   pgtype.UUID        `json:"transcription_model_id"`
+	VideoModelID           pgtype.UUID        `json:"video_model_id"`
+	PersistFullToolResults bool               `json:"persist_full_tool_results"`
+	ShowToolCallsInIm      bool               `json:"show_tool_calls_in_im"`
+	ToolApprovalConfig     []byte             `json:"tool_approval_config"`
+	DisplayEnabled         bool               `json:"display_enabled"`
+	OverlayProvider        string             `json:"overlay_provider"`
+	OverlayEnabled         bool               `json:"overlay_enabled"`
+	OverlayConfig          []byte             `json:"overlay_config"`
+	Metadata               []byte             `json:"metadata"`
+	RuntimeResetToken      pgtype.UUID        `json:"runtime_reset_token"`
+	RuntimeResetExpiresAt  pgtype.Timestamptz `json:"runtime_reset_expires_at"`
+	RuntimeConfigEpoch     int64              `json:"runtime_config_epoch"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	AclDefaultEffect       string             `json:"acl_default_effect"`
+	TeamID                 pgtype.UUID        `json:"team_id"`
+	DefaultBotAgentID      pgtype.UUID        `json:"default_bot_agent_id"`
 }
 
 type BotAclRule struct {
@@ -266,6 +262,17 @@ type BotDependencyInstallation struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
+type BotHistoryCheckpoint struct {
+	ID             pgtype.UUID        `json:"id"`
+	TeamID         pgtype.UUID        `json:"team_id"`
+	SessionID      pgtype.UUID        `json:"session_id"`
+	ParentID       pgtype.UUID        `json:"parent_id"`
+	TurnPosition   int64              `json:"turn_position"`
+	TurnMessageSeq int64              `json:"turn_message_seq"`
+	Items          []byte             `json:"items"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type BotHistoryMessage struct {
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
@@ -281,7 +288,6 @@ type BotHistoryMessage struct {
 	SessionMode             string             `json:"session_mode"`
 	RuntimeType             string             `json:"runtime_type"`
 	ModelID                 pgtype.UUID        `json:"model_id"`
-	CompactID               pgtype.UUID        `json:"compact_id"`
 	EventID                 pgtype.UUID        `json:"event_id"`
 	DisplayText             pgtype.Text        `json:"display_text"`
 	TurnID                  pgtype.UUID        `json:"turn_id"`
@@ -312,27 +318,18 @@ type BotHistoryMessageAsset struct {
 }
 
 type BotHistoryMessageCompact struct {
-	ID              pgtype.UUID        `json:"id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	SessionID       pgtype.UUID        `json:"session_id"`
-	Status          string             `json:"status"`
-	Summary         string             `json:"summary"`
-	MessageCount    int32              `json:"message_count"`
-	ErrorMessage    string             `json:"error_message"`
-	Usage           []byte             `json:"usage"`
-	ModelID         pgtype.UUID        `json:"model_id"`
-	ArtifactVersion int32              `json:"artifact_version"`
-	Coverage        []byte             `json:"coverage"`
-	AnchorStartMs   int64              `json:"anchor_start_ms"`
-	AnchorEndMs     int64              `json:"anchor_end_ms"`
-	ArtifactLevel   int32              `json:"artifact_level"`
-	ParentIds       []pgtype.UUID      `json:"parent_ids"`
-	SupersededBy    pgtype.UUID        `json:"superseded_by"`
-	SupersededAt    pgtype.Timestamptz `json:"superseded_at"`
-	CompactionEpoch int64              `json:"compaction_epoch"`
-	StartedAt       pgtype.Timestamptz `json:"started_at"`
-	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
-	TeamID          pgtype.UUID        `json:"team_id"`
+	ID           pgtype.UUID        `json:"id"`
+	BotID        pgtype.UUID        `json:"bot_id"`
+	SessionID    pgtype.UUID        `json:"session_id"`
+	Status       string             `json:"status"`
+	Summary      string             `json:"summary"`
+	MessageCount int32              `json:"message_count"`
+	ErrorMessage string             `json:"error_message"`
+	Usage        []byte             `json:"usage"`
+	ModelID      pgtype.UUID        `json:"model_id"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
+	TeamID       pgtype.UUID        `json:"team_id"`
 }
 
 type BotMemoryUsage struct {
@@ -373,7 +370,7 @@ type BotSession struct {
 	Title                    string             `json:"title"`
 	Metadata                 []byte             `json:"metadata"`
 	NextTurnPosition         int64              `json:"next_turn_position"`
-	CompactionEpoch          int64              `json:"compaction_epoch"`
+	HistoryCheckpointID      pgtype.UUID        `json:"history_checkpoint_id"`
 	RuntimeFencingToken      int64              `json:"runtime_fencing_token"`
 	RuntimeResetToken        pgtype.UUID        `json:"runtime_reset_token"`
 	RuntimeResetExpiresAt    pgtype.Timestamptz `json:"runtime_reset_expires_at"`
@@ -450,7 +447,6 @@ type BotVisibleHistoryMessage struct {
 	Content                 []byte             `json:"content"`
 	Metadata                []byte             `json:"metadata"`
 	Usage                   []byte             `json:"usage"`
-	CompactID               pgtype.UUID        `json:"compact_id"`
 	SessionMode             string             `json:"session_mode"`
 	RuntimeType             string             `json:"runtime_type"`
 	ModelID                 pgtype.UUID        `json:"model_id"`

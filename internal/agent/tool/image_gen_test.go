@@ -14,6 +14,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/models"
 )
 
@@ -408,8 +409,14 @@ func TestImageGenProviderUsageGatesRegisteredTools(t *testing.T) {
 
 	got := provider.Usage(context.Background(), background, availableToolsForTest(ToolGenerateImage(), ToolSend()))
 	assertUsageItemsAreBulleted(t, got)
-	if !strings.Contains(got, "`generate_image`") || !strings.Contains(got, "`send`") || !strings.Contains(got, "attachments") {
-		t.Fatalf("Usage without live stream should tell the model to share images via send attachments, got:\n%s", got)
+	if !strings.Contains(got, "`generate_image`") || !strings.Contains(got, "`send`") || !strings.Contains(got, "![description](<returned path>)") || strings.Contains(got, "attachments") {
+		t.Fatalf("Usage without live stream should tell the model to share images via a Markdown reference in send, got:\n%s", got)
+	}
+
+	chat := SessionContext{SessionType: sessionmode.Chat}
+	got = provider.Usage(context.Background(), chat, availableToolsForTest(ToolGenerateImage(), ToolSend()))
+	if !strings.Contains(got, "in your reply") || strings.Contains(got, "`send`") {
+		t.Fatalf("Chat without live stream should show the image in the reply, not through send, got:\n%s", got)
 	}
 
 	live := liveShortcutSession(func(ToolStreamEvent) {})

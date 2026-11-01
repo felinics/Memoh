@@ -889,7 +889,8 @@ func (*FeishuAdapter) ResolveAttachment(ctx context.Context, cfg channel.Channel
 		FileKey(platformKey).
 		Type(resourceType).
 		Build()
-	resp, err := client.Im.MessageResource.Get(ctx, req)
+	// File content may itself be JSON; it must not be parsed as an API error body.
+	resp, err := client.Im.MessageResource.Get(ctx, req, larkcore.WithFileDownload())
 	if err != nil {
 		return channel.AttachmentPayload{}, fmt.Errorf("download feishu resource: %w", err)
 	}

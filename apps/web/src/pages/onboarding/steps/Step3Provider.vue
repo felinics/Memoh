@@ -17,6 +17,7 @@ import { ArrowLeft, Plus } from 'lucide-vue-next'
 import { FieldStack, FormStack } from '@felinic/ui'
 import { useOnboarding } from '@/composables/useOnboarding'
 import ProviderIcon from '@/components/provider-icon/index.vue'
+import { isMonochromeLogo, modelSourceLogoForKey } from '@/constants/model-sources'
 import CreateModel from '@/components/create-model/index.vue'
 import ModelItem from '@/pages/providers/components/model-item.vue'
 import ChoiceTile from '../components/choice-tile.vue'
@@ -181,8 +182,9 @@ onMounted(() => {
           >
             <template #icon>
               <ProviderIcon
-                v-if="preset.icon"
-                :icon="preset.icon"
+                v-if="modelSourceLogoForKey(preset.id)"
+                :icon="modelSourceLogoForKey(preset.id)!"
+                :monochrome="isMonochromeLogo(modelSourceLogoForKey(preset.id))"
                 size="22"
               />
             </template>
@@ -221,8 +223,9 @@ onMounted(() => {
             <ArrowLeft class="size-4" />
           </button>
           <ProviderIcon
-            v-if="selectedPreset?.icon"
-            :icon="selectedPreset.icon"
+            v-if="selectedPreset && modelSourceLogoForKey(selectedPreset.id)"
+            :icon="modelSourceLogoForKey(selectedPreset.id)!"
+            :monochrome="isMonochromeLogo(modelSourceLogoForKey(selectedPreset.id))"
             size="28"
           />
           <h2 class="text-2xl font-semibold">

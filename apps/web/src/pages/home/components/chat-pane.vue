@@ -157,6 +157,7 @@
                         :can-retry-latest-assistant="isRetryableTurn(msg)"
                         :can-edit-latest-user="isEditableTurn(msg)"
                         :can-fork-assistant="isForkableTurn(msg)"
+                        :can-reset-agent-session="canResetAgentSession(msg)"
                         :inline-actions="isDirectBotAgentRuntime(activeChatTarget.runtimeType)"
                         :goal-runtime="activeChatTarget.runtimeType"
                         :is-scrolling="isScrolling"
@@ -164,6 +165,7 @@
                         @active="onMessageActive"
                         @edit-message="handleEditMessage"
                         @fork-message="handleForkMessage"
+                        @reset-agent-session="handleResetAgentSession(msg.id)"
                       />
                     </div>
 
@@ -244,7 +246,6 @@
             ? 'inset-0 flex flex-col items-center justify-start'
             : 'inset-x-0 bottom-0 pt-2',
         ]"
-        :style="composerLiftPx > 0 ? { bottom: `${composerLiftPx}px` } : undefined"
       >
         <!-- Opaque backdrop, bottom-anchored, rising only to the box's widest point
              (its vertical centre). The box is solid and sits above the messages, so
@@ -399,33 +400,33 @@
                         </span>
                       </CommandItem>
                     </CommandGroup>
-                    <CommandSeparator
-                      v-if="visibleSlashQuickActions.length && (visibleRuntimeAgentCommands.length || visibleSlashSkills.length)"
-                    />
-                    <CommandGroup
-                      v-if="visibleRuntimeAgentCommands.length"
-                      :heading="$t('chat.slash.agentCommands')"
+                    <template
+                      v-for="(group, index) in runtimeCommandGroups"
+                      :key="group.id"
                     >
-                      <CommandItem
-                        v-for="command in visibleRuntimeAgentCommands"
-                        :key="command.name"
-                        :value="`/${command.name}`"
-                        @select="selectRuntimeCommand(command)"
-                      >
-                        <span class="min-w-0 flex-1">
-                          <span class="block truncate text-control">/{{ command.name }}</span>
-                          <span
-                            v-if="command.description"
-                            class="block truncate text-caption text-muted-foreground"
-                          >{{ command.description }}</span>
-                          <span
-                            v-if="command.input_hint"
-                            class="block truncate text-caption text-muted-foreground"
-                          >{{ $t('chat.slash.agentCommandInputHint', { hint: command.input_hint }) }}</span>
-                        </span>
-                      </CommandItem>
-                    </CommandGroup>
-                    <CommandSeparator v-if="visibleRuntimeAgentCommands.length && visibleSlashSkills.length" />
+                      <CommandSeparator v-if="index > 0 || visibleSlashQuickActions.length" />
+                      <CommandGroup :heading="group.heading">
+                        <CommandItem
+                          v-for="command in group.commands"
+                          :key="command.name"
+                          :value="`/${command.name}`"
+                          @select="selectRuntimeCommand(command)"
+                        >
+                          <span class="min-w-0 flex-1">
+                            <span class="block truncate text-control">/{{ command.name }}</span>
+                            <span
+                              v-if="command.description"
+                              class="block truncate text-caption text-muted-foreground"
+                            >{{ command.description }}</span>
+                            <span
+                              v-if="command.input_hint"
+                              class="block truncate text-caption text-muted-foreground"
+                            >{{ $t('chat.slash.agentCommandInputHint', { hint: command.input_hint }) }}</span>
+                          </span>
+                        </CommandItem>
+                      </CommandGroup>
+                    </template>
+                    <CommandSeparator v-if="visibleSlashSkills.length && (visibleSlashQuickActions.length || runtimeCommandGroups.length)" />
                     <CommandGroup
                       v-if="visibleSlashSkills.length"
                       :heading="$t('chat.slash.skills')"
@@ -1286,7 +1287,7 @@
 import { Memoh as MemohIcon, MemohColor } from '@memohai/icon'
 import { AddIcon, UploadIcon } from '@memohai/icon/ui'
 
-import { EXTERNAL_AGENT_DEFAULT_PROJECT_MODE, EXTERNAL_AGENT_DEFAULT_PROJECT_PATH, normalizeAgentID } from '@/utils/external-agent'
+import { EXTERNAL_AGENT_DEFAULT_PROJECT_PATH, normalizeAgentID } from '@/utils/external-agent'
 import { ref, reactive, shallowReactive, computed, onBeforeUnmount, useTemplateRef, watch, onWatcherCleanup, nextTick, onActivated, onDeactivated } from 'vue'
 import {
   ImagePlus,
@@ -1314,7 +1315,7 @@ import { useRuntimeControls } from '@/composables/useRuntimeControls'
 import { useCodexUsage } from '@/composables/useCodexUsage'
 import { codexUsageNotice, codexUsageNoticeKey, codexUsageResetTime, codexUsageWindowLabel } from '@/utils/codex-usage'
 import { useQuery } from '@pinia/colada'
-import { getAcpProfiles, getBotsByBotIdAgents, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
+import { deleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSession, getAcpProfiles, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
 import type { AcpprofilePublicProfile, BotagentsBotAgent, WorkspaceWorkspaceTarget } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -1347,7 +1348,7 @@ import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import ComposerModelMenu from './composer-model-menu.vue'
-import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, displayedEffort, reconcileStoredEffort } from '@/pages/bots/components/reasoning-effort'
+import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, defaultEffortSelection, displayedEffort, reconcileStoredEffort } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
@@ -1372,12 +1373,13 @@ import { captureChatPaneSendContext, clearComposerPairDraft, composerRestoreForS
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { useAgentModelCatalog } from '@/composables/useAgentModelCatalog'
-import { useVirtualKeyboard } from '@/composables/useVirtualKeyboard'
 import { isACPAgentConfigured } from '@/utils/acp'
-import { BOT_AGENT_RUNTIME_ACP, BOT_AGENT_RUNTIME_CODEX, botAgentIcon, botAgentName, botAgentProvider, isDirectBotAgentConfigured, isDirectBotAgentRuntime, normalizeBotAgentRuntime } from '@/utils/bot-agent'
+import { BOT_AGENT_RUNTIME_ACP, BOT_AGENT_RUNTIME_CODEX, botAgentIcon, botAgentName, botAgentProvider, isDirectBotAgentConfigured, isDirectBotAgentRuntime, normalizeBotAgentRuntime, sessionAgentProvider } from '@/utils/bot-agent'
+import { useBotAgentsQuery } from '@/composables/api/useBotAgents'
 import { UserFacingError, isApiErrorCode, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
 import { workspaceTargetAvailable } from '@/utils/workspace-target'
+import { modelAccepts } from '@/utils/model-capabilities'
 import { findLatestPendingChatDecision } from './chat-pending-decision'
 import {
   runtimeCommandComposerText,
@@ -1678,6 +1680,32 @@ function isEditableTurn(message: ChatMessage): boolean {
   return message.role === 'user' && turnId !== '' && turnId === (message.turnId?.trim() ?? '')
 }
 
+// Only the latest reply offers it: after a later turn, the stored ACP session
+// is no longer the one that failed to restore.
+const agentSessionResetMessageId = ref('')
+function canResetAgentSession(message: ChatMessage): boolean {
+  return activeChatTarget.value.runtimeType === 'acp_agent'
+    && message.id === lastMessageId.value
+    && message.id !== agentSessionResetMessageId.value
+    && !streaming.value && !activeChatReadOnly.value
+}
+
+async function handleResetAgentSession(messageId: string) {
+  const botId = currentBotId.value
+  const sessionId = activeSessionId.value
+  if (!botId || !sessionId) return
+  try {
+    await deleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSession({
+      path: { bot_id: botId, session_id: sessionId },
+      throwOnError: true,
+    })
+    agentSessionResetMessageId.value = messageId
+    toast.success(t('chat.externalAgent.resetSessionDone'))
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('chat.externalAgent.resetSessionFailed')))
+  }
+}
+
 const { data: botSettings, isLoading: botSettingsLoading, status: botSettingsStatus } = useQuery({
   key: () => ['bot-settings', currentBotId.value],
   query: async () => {
@@ -1699,17 +1727,7 @@ const { data: acpProfileData, isLoading: acpProfilesLoading } = useQuery({
   },
 })
 
-const { data: botAgentData, isLoading: botAgentsLoading } = useQuery({
-  key: () => ['bot-agents', currentBotId.value],
-  query: async () => {
-    const { data } = await getBotsByBotIdAgents({
-      path: { bot_id: currentBotId.value! },
-      throwOnError: true,
-    })
-    return data
-  },
-  enabled: () => !!currentBotId.value,
-})
+const { data: botAgentData, isLoading: botAgentsLoading } = useBotAgentsQuery(currentBotId)
 
 const currentBot = computed(() => bots.value.find(bot => bot.id === currentBotId.value) ?? null)
 const canWorkspaceRead = computed(() => (
@@ -2000,7 +2018,13 @@ const activeUsesDirectRuntime = computed(() => activeDirectRuntime.value !== '')
 // a reading built from that would understate the real window; they get no
 // entry until a runtime reports its own current context usage.
 const showSessionInfoRing = computed(() => !isWelcome.value && !!activeSession.value && !activeUsesExternalAgentComposer.value)
-const activeACPAgentId = computed(() => normalizeAgentID(activeSessionMetadata.value.acp_agent_id))
+// A session runs its Agent instance's profile; a draft names the one it
+// stages.
+const activeACPAgentId = computed(() => {
+  const target = activeChatTarget.value
+  if (target.session) return sessionAgentProvider(target.runtimeType, target.session, botAgents.value)
+  return normalizeAgentID(chatStore.pendingExternalAgentStateFor(paneTarget.value)?.input.agentId)
+})
 const composerAgent = computed(() => {
   if (!activeUsesExternalAgentComposer.value) return null
   return botAgents.value.find(agent => agent.id === activeBotAgentID.value) ?? {
@@ -2013,14 +2037,12 @@ const composerAgentName = computed(() => composerAgent.value
   ? botAgentName(composerAgent.value)
   : t('chat.agentMemoh'))
 const activeACPProjectPath = computed(() => String(activeSessionMetadata.value.project_path ?? '').trim())
-const activeACPProjectMode = computed(() => String(activeSessionMetadata.value.acp_project_mode ?? '').trim())
 const acpOperationScope = computed(() => JSON.stringify([
   paneTarget.value.botId,
   paneTarget.value.sessionId,
   paneTarget.value.viewId,
   activeACPAgentId.value,
   activeACPProjectPath.value,
-  activeACPProjectMode.value,
 ]))
 const acpConfigChanging = computed(() => acpConfigChangeScope.value === acpOperationScope.value)
 function messageMatchesForkSource(message: ChatMessage): boolean {
@@ -2206,20 +2228,26 @@ const runtimeControls = useRuntimeControls({
   sessionId: computed(() => paneTarget.value.sessionId),
   visible: computed(() => isVisible.value && activeUsesExternalAgentComposer.value),
   draftAgentId: computed(() => activeIsPendingExternalAgent.value && !activeUsesACPRuntime.value ? activeBotAgentID.value : ''),
+  draftWorkdirId: computed(() => activeIsPendingExternalAgent.value && !activeUsesACPRuntime.value ? runtimeProject.value?.id ?? '' : ''),
 })
 // Only a ChatGPT sign-in has usage windows; an API-key Codex Agent is billed per token.
 const codexUsageAgentId = computed(() => {
   if (activeDirectRuntime.value !== BOT_AGENT_RUNTIME_CODEX) return ''
   const agent = botAgents.value.find(item => item.id === activeBotAgentID.value)
-  return agent?.metadata?.auth === 'chatgpt' && agent.agent_credential_id ? agent.id ?? '' : ''
+  return agent?.metadata?.auth === 'chatgpt' ? agent.id ?? '' : ''
 })
+// Reading usage starts Codex when it is not running, so it is read only once a
+// turn of this Agent has ended here, while Codex is still up.
+const codexUsageTurnAgentId = ref('')
 const codexUsage = useCodexUsage({
   botId: computed(() => currentBotId.value ?? ''),
   botAgentId: codexUsageAgentId,
-  enabled: () => isVisible.value,
+  enabled: () => isVisible.value && codexUsageTurnAgentId.value === codexUsageAgentId.value,
 })
 watch(streaming, (now, was) => {
-  if (was && !now && codexUsageAgentId.value && isVisible.value) void codexUsage.refetch()
+  if (!was || now || !codexUsageAgentId.value || !isVisible.value) return
+  if (codexUsageTurnAgentId.value === codexUsageAgentId.value) void codexUsage.refetch()
+  else codexUsageTurnAgentId.value = codexUsageAgentId.value
 })
 // Dismissal holds until the window resets: a new reset time is a new key.
 const dismissedCodexUsageNotices = useLocalStorage<Record<string, string>>('memoh:codex-usage-dismissed', {})
@@ -2249,9 +2277,11 @@ function dismissCodexUsageNotice() {
 }
 const rawRuntimeControlSnapshot = computed(() => activeIsPendingExternalAgent.value && activeUsesACPRuntime.value ? pendingRuntimeControls.value : runtimeControls.controls.value)
 const runtimeControlSnapshot = computed(() => localizeRuntimeControls(rawRuntimeControlSnapshot.value, runtimeText))
-const composerRuntimeCommands = computed(() =>
-  activeIsPendingExternalAgent.value && !activeUsesACPRuntime.value ? [] : runtimeControlSnapshot.value?.commands ?? [],
-)
+// A draft creates its session on send; read and operation commands need one first.
+const composerRuntimeCommands = computed(() => {
+  const commands = runtimeControlSnapshot.value?.commands ?? []
+  return activeIsPendingExternalAgent.value && !activeUsesACPRuntime.value ? commands.filter(command => command.kind === 'turn') : commands
+})
 const runtimeModes = computed(() => runtimeControlSnapshot.value?.modes?.available_modes ?? [])
 const runtimeModeLabel = computed(() => t(runtimeControlSnapshot.value?.modes?.kind === 'permission' ? 'chat.permissionMode' : 'chat.sessionMode'))
 const currentRuntimeModeId = computed(() =>
@@ -2326,6 +2356,10 @@ const runtimeModeDisabled = computed(() => activeChatReadOnly.value || streaming
 const visibleRuntimeAgentCommands = computed(() =>
   visibleRuntimeCommands(composerRuntimeCommands.value, slashQuery.value).filter(command => command.name !== 'goal' || !goalCommandAvailable.value),
 )
+const runtimeCommandGroups = computed(() => [
+  { id: 'commands', heading: t('chat.slash.agentCommands'), commands: visibleRuntimeAgentCommands.value.filter(command => !command.skill) },
+  { id: 'skills', heading: t('chat.slash.skills'), commands: visibleRuntimeAgentCommands.value.filter(command => command.skill) },
+].filter(group => group.commands.length))
 const slashPanelHasResults = computed(() =>
   visibleSlashQuickActions.value.length > 0
   || visibleRuntimeAgentCommands.value.length > 0
@@ -2748,7 +2782,7 @@ watch(() => pendingFiles.value.length, (len, prevLen) => {
   const model = activeModel.value
   if (!model) return
   const added = pendingFiles.value.slice(prevLen ?? 0)
-  if (!model.config?.compatibilities?.includes('file-input')) {
+  if (!modelAccepts(model.config, 'pdf')) {
     if (added.some(isPdfFile)) {
       toast.warning(t('chat.pdfUnsupportedByModel'))
     }
@@ -2808,7 +2842,6 @@ type DefaultExternalAgentSettings = {
   chat_runtime?: string
   chat_acp_agent_id?: string
   chat_acp_project_path?: string
-  chat_acp_project_mode?: string
 }
 
 type DefaultExternalAgentAvailability = {
@@ -2864,7 +2897,6 @@ const defaultExternalAgentAvailability = computed<DefaultExternalAgentAvailabili
       runtime: normalizeBotAgentRuntime(agent.runtime) || BOT_AGENT_RUNTIME_ACP,
       agentId,
       projectPath: settings.chat_acp_project_path?.trim() || EXTERNAL_AGENT_DEFAULT_PROJECT_PATH,
-      projectMode: settings.chat_acp_project_mode?.trim() || EXTERNAL_AGENT_DEFAULT_PROJECT_MODE,
     },
     messageKey: '',
     loading: false,
@@ -2969,7 +3001,6 @@ const pairRuntimeIdentity = computed(() => JSON.stringify([
   activeBotAgentID.value,
   activeACPAgentId.value,
   activeACPProjectPath.value,
-  activeACPProjectMode.value,
 ]))
 // Registered before the ACP config watchers below so a reset lands before
 // reconcile re-seeds from the new runtime's own state.
@@ -3189,12 +3220,13 @@ function selectMemohAgent() {
 
 function onModelSelected() {
   // Switching models replaces the WHOLE pair (spec v2 P6′): the effort lands
-  // on the new model's default tier and is never carried across models.
+  // on the new model's default selection, which honours the model's declared
+  // default effort and default off, and is never carried across models.
   if (!activeModelSupportsReasoning.value) {
     overrideReasoningEffort.value = REASONING_EFFORT_DISABLE
     return
   }
-  overrideReasoningEffort.value = activeModelReasoning.value?.default_effort?.trim() ?? ''
+  overrideReasoningEffort.value = defaultEffortSelection(activeModelReasoning.value).trim()
 }
 
 async function onComposerModelValueSelected(value: string) {
@@ -3821,18 +3853,10 @@ const composerPreviewBox = useComposerPreviewBox(textareaEl, () => composerPrevi
 const dockEl = useTemplateRef<InstanceType<typeof ComposerDock>>('dockEl')
 const { height: dockHeight } = useElementSize(() => dockEl.value?.$el ?? null)
 const dockMaskHeight = computed(() => dockEl.value?.maskHeight ?? `${COMPOSER_MASK_BELOW_PX}px`)
-
-// Virtual-keyboard lift (iOS Safari; Android lifts via the resized layout
-// viewport instead — see useVirtualKeyboard). The whole dock container rises
-// by the keyboard height, and the message column's bottom padding grows by
-// the same amount so follow-mode keeps the last message clear of the lifted
-// composer. While the model picker is open its search field may itself hold
-// focus: lifting then would yank the trigger out from under the popover and
-// fight iOS's own scroll-to-caret, so the lift is suppressed until the picker
-// closes (the plus menu has no focusable input and never hits this).
-const virtualKeyboardHeight = useVirtualKeyboard()
-const composerLiftPx = computed(() => (modelPopoverOpen.value ? 0 : virtualKeyboardHeight.value))
-const messagesBottomPad = computed(() => `${dockHeight.value + COMPOSER_MASK_BELOW_PX + 24 + composerLiftPx.value}px`)
+// No software-keyboard term: the browser itself moves the app out from under
+// the keyboard (Android resizes the page, iOS pans it), so the dock stays at
+// the pane's bottom and this padding only has to clear the dock.
+const messagesBottomPad = computed(() => `${dockHeight.value + COMPOSER_MASK_BELOW_PX + 24}px`)
 
 // The textarea belongs to the pane, so when the dock hands the input slot
 // back after ask_user is resolved or canceled, it emits and we focus here.

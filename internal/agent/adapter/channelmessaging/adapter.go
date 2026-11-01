@@ -29,10 +29,17 @@ func New(runtime runtime, resolver resolver, assets channel.OutboundAttachmentSt
 }
 
 func (a *Adapter) Send(ctx context.Context, botID string, platform messaging.Platform, req messaging.SendRequest) error {
+	msg := toChannelMessage(req.Message)
+	if a.assets != nil {
+		// Archive referenced media here: in split mode the Channel process
+		// cannot reach the bot workspace and only reads archived assets.
+		msg = channel.ResolveMarkdownMessage(ctx, a.assets, botID, channel.ChannelType(platform), msg)
+	}
 	return a.runtime.Send(ctx, botID, channel.ChannelType(platform), channel.SendRequest{
 		Target:            req.Target,
+		ExcludedTarget:    req.ExcludedTarget,
 		ChannelIdentityID: req.ChannelIdentityID,
-		Message:           toChannelMessage(req.Message),
+		Message:           msg,
 	})
 }
 

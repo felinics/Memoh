@@ -1,6 +1,7 @@
 package media
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path"
 	"strings"
@@ -373,4 +375,38 @@ func spoolAndHashWithLimit(reader io.Reader, maxBytes int64) (contentHash string
 		return "", 0, nil, fmt.Errorf("seek temp file: %w", seekErr)
 	}
 	return hex.EncodeToString(hasher.Sum(nil)), written, tmp, nil
+}
+
+// IngestWorkspaceFile archives a file below /data that a model referenced in
+// Markdown. It reads the file the same way the workspace file manager does.
+func (s *Service) IngestWorkspaceFile(ctx context.Context, botID, containerPath string) (Asset, error) {
+	if s.provider == nil {
+		return Asset{}, ErrProviderUnavailable
+	}
+	clean := path.Clean(containerPath)
+	if !strings.HasPrefix(clean, "/data/") {
+		return Asset{}, errors.New("workspace file must be below /data")
+	}
+	opener, ok := s.provider.(storage.ContainerFileOpener)
+	if !ok {
+		return Asset{}, storage.ErrContainerFileNotSupported
+	}
+	file, err := opener.OpenContainerFile(ctx, botID, clean)
+	if err != nil {
+		return Asset{}, fmt.Errorf("open workspace file: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+	ext := path.Ext(clean)
+	mime := mimeFromExtension(ext)
+	// The stored type decides how the asset is served later. An image is
+	// stored as the image its bytes are, and an extension claiming an image
+	// for other bytes must not make them servable as one.
+	body := bufio.NewReaderSize(file, 512)
+	prefix, _ := body.Peek(512)
+	if detected := http.DetectContentType(prefix); strings.HasPrefix(detected, "image/") {
+		mime, ext = detected, ""
+	} else if strings.HasPrefix(mime, "image/") {
+		mime, ext = "application/octet-stream", ""
+	}
+	return s.Ingest(ctx, IngestInput{BotID: botID, Mime: mime, Reader: body, OriginalExt: ext})
 }

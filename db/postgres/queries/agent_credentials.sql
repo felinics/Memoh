@@ -14,21 +14,6 @@ RETURNING *;
 SELECT * FROM agent_credentials
 WHERE id = $1 AND team_id = public.memoh_current_team_id();
 
--- name: UpdateAgentCredentialPayloadCAS :one
-UPDATE agent_credentials
-SET encrypted_payload = $1,
-    encryption_nonce = $2,
-    key_version = $3,
-    account_metadata = $4,
-    expires_at = $5,
-    credential_version = credential_version + 1,
-    updated_at = now()
-WHERE id = $6
-  AND team_id = public.memoh_current_team_id()
-  AND credential_version = sqlc.arg(expected_version)
-  AND revoked_at IS NULL
-RETURNING *;
-
 -- name: RevokeAgentCredentialByID :one
 UPDATE agent_credentials
 SET revoked_at = now(),

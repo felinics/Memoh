@@ -42,7 +42,6 @@ func TestFromDBMessageBuildsDurableRecordScopeAndFrag(t *testing.T) {
 			Name:        "image.png",
 			Metadata:    map[string]any{"width": float64(640)},
 		}},
-		CompactID:      "compact-1",
 		EventID:        "evt-1",
 		DisplayContent: "hello",
 		CreatedAt:      time.Date(2026, 6, 24, 3, 0, 0, 0, time.UTC),
@@ -73,8 +72,7 @@ func TestFromDBMessageBuildsDurableRecordScopeAndFrag(t *testing.T) {
 		record.SenderUserID != "user-1" ||
 		record.SenderDisplayName != "Alice" ||
 		record.Platform != "telegram" ||
-		record.SourceReplyToMessageID != "msg-0" ||
-		record.CompactID != "compact-1" {
+		record.SourceReplyToMessageID != "msg-0" {
 		t.Fatalf("record lost DB provenance: %#v", record)
 	}
 	if reply, _ := record.Metadata["reply"].(map[string]any); reply["sender"] != "Bob" {
@@ -323,30 +321,6 @@ func TestFromDBMessageContentHashUsesPersistedAssetIdentityFields(t *testing.T) 
 	}
 }
 
-func TestFromDBMessageContentHashIgnoresCompactionMarker(t *testing.T) {
-	t.Parallel()
-
-	msg := messagepkg.Message{
-		ID:      "row-1",
-		BotID:   "bot-1",
-		Role:    "user",
-		Content: persistedModelMessage(t, turn.ModelMessage{Role: "user", Content: turn.NewTextContent("hello")}),
-	}
-	uncompacted, err := FromDBMessage(msg, ScopeFallback{})
-	if err != nil {
-		t.Fatalf("uncompacted FromDBMessage failed: %v", err)
-	}
-	msg.CompactID = "compact-1"
-	compacted, err := FromDBMessage(msg, ScopeFallback{})
-	if err != nil {
-		t.Fatalf("compacted FromDBMessage failed: %v", err)
-	}
-
-	if ToFrag(uncompacted).Ref.ContentHash != ToFrag(compacted).Ref.ContentHash {
-		t.Fatalf("compaction marker changed source hash: uncompacted=%#v compacted=%#v", ToFrag(uncompacted).Ref, ToFrag(compacted).Ref)
-	}
-}
-
 func TestFromDBMessageHashesLifecycleAuditWithoutKeepingIt(t *testing.T) {
 	t.Parallel()
 
@@ -366,16 +340,16 @@ func TestFromDBMessageHashesLifecycleAuditWithoutKeepingIt(t *testing.T) {
 	undecoded := base
 	undecoded.RawMetadata = raw
 
-	// Computed before lifecycle audits were dropped from records. Compaction
-	// coverage persisted hashes like this one, so they must never change.
-	const persistedHash = "f521a80e2e022e592dc032da9d3849533b88cea65f18a546edb74db4bfd6c029"
+	// Computed before lifecycle audits were dropped from records: a record
+	// hashes as it did when it kept them.
+	const wantHash = "f521a80e2e022e592dc032da9d3849533b88cea65f18a546edb74db4bfd6c029"
 	for name, msg := range map[string]messagepkg.Message{"decoded": withDecoded, "undecoded": undecoded} {
 		record, err := FromDBMessage(msg, ScopeFallback{})
 		if err != nil {
 			t.Fatalf("%s: FromDBMessage failed: %v", name, err)
 		}
-		if record.Ref.ContentHash != persistedHash || DBMessageSourceHash(msg).Value != persistedHash {
-			t.Fatalf("%s: source hash = %s, want %s", name, record.Ref.ContentHash, persistedHash)
+		if record.Ref.ContentHash != wantHash || DBMessageSourceHash(msg).Value != wantHash {
+			t.Fatalf("%s: source hash = %s, want %s", name, record.Ref.ContentHash, wantHash)
 		}
 		if _, ok := record.Metadata[contextfrag.MetadataContextLifecycleKey]; ok {
 			t.Fatalf("%s: record kept the lifecycle audit", name)
@@ -408,6 +382,7 @@ func TestHistoryRecordsRenderLegacyModelAndSDKMessages(t *testing.T) {
 			t.Fatalf("FromDBMessage %d failed: %v", i, err)
 		}
 		records = append(records, record)
+		expectedModel[i].ContextSource = &turn.ContextMessageSource{Kind: "history", ID: string(rune('a' + i))}
 	}
 
 	if got := ToModelMessages(records); !reflect.DeepEqual(got, expectedModel) {

@@ -24,6 +24,7 @@ type noticeTestDriver struct {
 }
 
 func (d noticeTestDriver) RuntimeType() string { return d.kind }
+func (noticeTestDriver) Caps() external.Caps   { return stubCaps }
 func (d noticeTestDriver) Prompt(ctx context.Context, input external.PromptInput) (external.PromptResult, error) {
 	return d.prompt(ctx, input)
 }
@@ -47,10 +48,10 @@ func TestRuntimeNoticesSurviveTerminalAndHistory(t *testing.T) {
 					input.Sink.EmitStreamEvent(notice)
 					if outcome == "stopped_during_setup" {
 						cancel()
-						return external.PromptResult{}, external.Unavailable(context.Canceled)
+						return external.PromptResult{}, external.Upstream(context.Canceled)
 					}
 					if outcome == "configuration_failure" {
-						return external.PromptResult{}, external.Unavailable(errors.New("SECRET bridge down"))
+						return external.PromptResult{}, external.Fail(external.FailureAuthRequired, errors.New("SECRET bridge down"))
 					}
 					result := external.PromptResult{Output: []sdk.Message{sdk.AssistantMessage("first"), sdk.AssistantMessage("last")}, TurnCompleted: outcome == "completed"}
 					if outcome == "failed" {
@@ -147,26 +148,5 @@ func TestPublicRuntimeNoticeGivesEachKindItsCode(t *testing.T) {
 				t.Fatalf("notice = %+v, want code %s with the runtime's text", got, code)
 			}
 		})
-	}
-}
-
-// A failed steer carries no text of its own; it takes the catalog detail.
-func TestPublicRuntimeNoticeFillsSteerFailedDetail(t *testing.T) {
-	got := publicRuntimeNotice(event.StreamEvent{Type: event.RuntimeNotice, NoticeKind: event.NoticeSteerFailed})
-	want := "The additional instruction could not be delivered. Send it again after this turn finishes."
-	if got.Code != string(apperror.CodeRuntimeControlSteerFailed) || got.Delta != want {
-		t.Fatalf("notice = %+v, want %q", got, want)
-	}
-}
-
-func TestPublicRuntimeNoticeLeavesOtherEvents(t *testing.T) {
-	for _, ev := range []event.StreamEvent{
-		{Type: event.TextDelta, Delta: "hello"},
-		{Type: event.RuntimeNotice, Code: "tools_unavailable", Delta: "already public"},
-		{Type: event.RuntimeNotice, NoticeKind: "unknown_kind", Delta: "text"},
-	} {
-		if got := publicRuntimeNotice(ev); got.Code != ev.Code || got.Delta != ev.Delta || got.NoticeKind != ev.NoticeKind {
-			t.Fatalf("publicRuntimeNotice(%+v) = %+v, want it unchanged", ev, got)
-		}
 	}
 }

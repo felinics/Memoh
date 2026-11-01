@@ -2,10 +2,12 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,167 +17,204 @@ import (
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/chat/checkpoint"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
+// pairingQueries serves a compaction pass over a session's rows and then the
+// session's history checkpoints as the pass left them.
 type pairingQueries struct {
-	dbstore.Queries
-	uncompacted []sqlc.ListUncompactedMessagesBySessionRow
-	logID       pgtype.UUID
-	markedIDs   []pgtype.UUID
+	*historyCheckpointQueries
+	rows  []sqlc.ListHistoryCheckpointCandidatesWithinBytesRow
+	logID pgtype.UUID
 }
 
-func (f *pairingQueries) ListUncompactedMessagesBySession(context.Context, pgtype.UUID) ([]sqlc.ListUncompactedMessagesBySessionRow, error) {
-	return f.uncompacted, nil
+func pairingPosition(row sqlc.ListHistoryCheckpointCandidatesWithinBytesRow) messagepkg.HistoryPosition {
+	return messagepkg.HistoryPosition{Turn: row.TurnPosition.Int64, Seq: row.TurnMessageSeq.Int64}
 }
 
-func (f *pairingQueries) MeasureUncompactedMessagesBySession(context.Context, pgtype.UUID) (sqlc.MeasureUncompactedMessagesBySessionRow, error) {
-	return sqlc.MeasureUncompactedMessagesBySessionRow{CandidateCount: int64(len(f.uncompacted)), CandidateBytes: 1}, nil
-}
-
-func (f *pairingQueries) ListUncompactedMessagesBySessionWithinBytes(context.Context, sqlc.ListUncompactedMessagesBySessionWithinBytesParams) ([]sqlc.ListUncompactedMessagesBySessionWithinBytesRow, error) {
-	return compactionRowsForPairing(f.uncompacted), nil
-}
-
-func compactionRowsForPairing(rows []sqlc.ListUncompactedMessagesBySessionRow) []sqlc.ListUncompactedMessagesBySessionWithinBytesRow {
-	converted := make([]sqlc.ListUncompactedMessagesBySessionWithinBytesRow, len(rows))
-	for i, row := range rows {
-		converted[i] = sqlc.ListUncompactedMessagesBySessionWithinBytesRow{
-			ID: row.ID, BotID: row.BotID, SessionID: row.SessionID,
-			SenderChannelIdentityID: row.SenderChannelIdentityID, SenderUserID: row.SenderUserID,
-			ExternalMessageID: row.ExternalMessageID, SourceReplyToMessageID: row.SourceReplyToMessageID,
-			Role: row.Role, Content: row.Content, Metadata: row.Metadata, Usage: row.Usage,
-			EventID: row.EventID, DisplayText: row.DisplayText, CompactID: row.CompactID, CreatedAt: row.CreatedAt,
-			SenderDisplayName: row.SenderDisplayName, SenderAvatarUrl: row.SenderAvatarUrl,
-			Platform: row.Platform, CompactionEpoch: row.CompactionEpoch,
-			ConversationType: row.ConversationType, ConversationName: row.ConversationName, ReplyTarget: row.ReplyTarget,
-			CandidateCount: int64(len(rows)), CandidateBytes: 1, CumulativeBytes: 1,
+func (f *pairingQueries) candidates(after messagepkg.HistoryPosition) []sqlc.ListHistoryCheckpointCandidatesWithinBytesRow {
+	var rows []sqlc.ListHistoryCheckpointCandidatesWithinBytesRow
+	for _, row := range f.rows {
+		if after.Before(pairingPosition(row)) {
+			rows = append(rows, row)
 		}
 	}
-	return converted
+	return rows
 }
 
-func (*pairingQueries) ListCompactionLogsBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
-	return nil, nil
+func (f *pairingQueries) CountHistoryCheckpointCandidates(_ context.Context, arg sqlc.CountHistoryCheckpointCandidatesParams) (int64, error) {
+	return int64(len(f.candidates(messagepkg.HistoryPosition{Turn: arg.AfterTurnPosition, Seq: arg.AfterTurnMessageSeq}))), nil
 }
 
-func (*pairingQueries) ListCompactionArtifactLineageBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
-	return nil, nil
+func (f *pairingQueries) ListHistoryCheckpointCandidatesWithinBytes(_ context.Context, arg sqlc.ListHistoryCheckpointCandidatesWithinBytesParams) ([]sqlc.ListHistoryCheckpointCandidatesWithinBytesRow, error) {
+	rows := f.candidates(messagepkg.HistoryPosition{Turn: arg.AfterTurnPosition, Seq: arg.AfterTurnMessageSeq})
+	for i := range rows {
+		rows[i].CandidateCount = int64(len(rows))
+	}
+	return rows, nil
 }
 
-func (*pairingQueries) ListMessageAssetsBatch(context.Context, []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {
-	return nil, nil
+func (f *pairingQueries) ListHistoryRowsBySources(_ context.Context, arg sqlc.ListHistoryRowsBySourcesParams) ([]sqlc.ListHistoryRowsBySourcesRow, error) {
+	var rows []sqlc.ListHistoryRowsBySourcesRow
+	for _, row := range f.rows {
+		if slices.Contains(arg.Ids, row.ID) {
+			rows = append(rows, sqlc.ListHistoryRowsBySourcesRow{ID: row.ID, TurnPosition: row.TurnPosition, TurnMessageSeq: row.TurnMessageSeq})
+		}
+	}
+	return rows, nil
 }
 
 func (f *pairingQueries) CreateCompactionLog(context.Context, sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
 	return sqlc.BotHistoryMessageCompact{ID: f.logID}, nil
 }
 
-func (f *pairingQueries) MarkMessagesCompacted(_ context.Context, arg sqlc.MarkMessagesCompactedParams) (int64, error) {
-	f.markedIDs = append([]pgtype.UUID(nil), arg.MessageIds...)
-	return int64(len(arg.MessageIds)), nil
+func (f *pairingQueries) ListHistoryCheckpointSpanRows(_ context.Context, arg sqlc.ListHistoryCheckpointSpanRowsParams) ([]sqlc.ListHistoryCheckpointSpanRowsRow, error) {
+	after := messagepkg.HistoryPosition{Turn: arg.AfterTurnPosition, Seq: arg.AfterTurnMessageSeq}
+	through := messagepkg.HistoryPosition{Turn: arg.ThroughTurnPosition, Seq: arg.ThroughTurnMessageSeq}
+	var span []sqlc.ListHistoryCheckpointSpanRowsRow
+	for _, row := range f.rows {
+		at := pairingPosition(row)
+		if after.Before(at) && !through.Before(at) || slices.Contains(arg.Ids, row.ID) {
+			span = append(span, sqlc.ListHistoryCheckpointSpanRowsRow{ID: row.ID, TurnPosition: row.TurnPosition, TurnMessageSeq: row.TurnMessageSeq})
+		}
+	}
+	return span, nil
 }
 
-func (*pairingQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
+func (f *pairingQueries) CreateHistoryCheckpoint(_ context.Context, arg sqlc.CreateHistoryCheckpointParams) (sqlc.BotHistoryCheckpoint, error) {
+	row := sqlc.BotHistoryCheckpoint{
+		ID:             pgtype.UUID{Bytes: uuid.New(), Valid: true},
+		SessionID:      arg.SessionID,
+		ParentID:       arg.ParentID,
+		TurnPosition:   arg.TurnPosition,
+		TurnMessageSeq: arg.TurnMessageSeq,
+		Items:          arg.Items,
+	}
+	f.add(row)
+	return row, nil
+}
+
+func (f *pairingQueries) SetHistoryCheckpoint(_ context.Context, arg sqlc.SetHistoryCheckpointParams) (int64, error) {
+	if arg.ExpectedCheckpointID != f.active {
+		return 0, nil
+	}
+	f.active = arg.CheckpointID
+	return 1, nil
+}
+
+func (f *pairingQueries) CompleteCompactionLog(_ context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
+	if arg.Status == "ok" {
+		f.summaries[arg.ID] = arg.Summary
+	}
 	return sqlc.BotHistoryMessageCompact{ID: arg.ID, Status: arg.Status, Summary: arg.Summary}, nil
 }
 
 type pairingSummarizer struct{ summary string }
 
 func (s pairingSummarizer) RoundTrip(*http.Request) (*http.Response, error) {
-	body := `{"id":"stub","object":"chat.completion","created":0,"model":"stub",` +
-		`"choices":[{"index":0,"message":{"role":"assistant","content":"` + s.summary + `"},"finish_reason":"stop"}],` +
-		`"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`
+	body := `data: {"id":"stub","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"` + s.summary + `"},"finish_reason":null}]}` + "\n\n" +
+		`data: {"id":"stub","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader(body)),
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 	}, nil
 }
 
-func pairingRow(t *testing.T, role, content string) sqlc.ListUncompactedMessagesBySessionRow {
-	t.Helper()
-	return sqlc.ListUncompactedMessagesBySessionRow{
-		ID:      pgtype.UUID{Bytes: uuid.New(), Valid: true},
-		Role:    role,
-		Content: []byte(content),
-		Usage:   []byte(`{"outputTokens":100}`),
+// pairingRow is the i-th row of the session, filed where the history read
+// files it (historyTestPosition).
+func pairingRow(i int, role, content string) sqlc.ListHistoryCheckpointCandidatesWithinBytesRow {
+	position := historyTestPosition(i)
+	return sqlc.ListHistoryCheckpointCandidatesWithinBytesRow{
+		ID:             pgtype.UUID{Bytes: uuid.New(), Valid: true},
+		Role:           role,
+		Content:        []byte(content),
+		TurnPosition:   pgtype.Int8{Int64: position.Turn, Valid: true},
+		TurnMessageSeq: pgtype.Int8{Int64: position.Seq, Valid: true},
 	}
 }
 
-// TestSelectorToReadPathPreservesOrderEndToEnd drives the real compaction
-// selector over a history with a pending ask_user island and feeds its
-// actual marked rows into replaceCompactedHistoryRecords. It pins the pair of
-// invariants that live in two packages: the selector marks one contiguous
-// pre-island run under one compact_id, and the read path substitutes it in
-// place — content behind the island (like "mid q") must never fold in front
-// of it.
-func TestSelectorToReadPathPreservesOrderEndToEnd(t *testing.T) {
+// TestSelectorToReadPathFoldsAClosedAskUserCall drives a compaction from rows
+// over a history whose ask_user call the conversation moved on from without
+// an answer, commits its checkpoint, and reads the history back through it.
+// It pins the pair of invariants that live in different packages: the fold
+// takes the closed call with the history around it as one contiguous run,
+// and the read path renders the summary in that run's place, ahead of the
+// current input it never covers.
+func TestSelectorToReadPathFoldsAClosedAskUserCall(t *testing.T) {
 	t.Parallel()
 
-	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		pairingRow(t, "user", `"old q with plenty of extra descriptive words so the raw exchange clearly outweighs its summary"`),
-		pairingRow(t, "assistant", `"old a walking through the answer in enough detail that compaction genuinely shrinks it"`),
-		pairingRow(t, "assistant", `[{"type":"tool-call","toolCallId":"ask-1","toolName":"ask_user","input":{"questions":[]}}]`),
-		pairingRow(t, "user", `"mid q"`),
-		pairingRow(t, "user", `"current q"`),
+	rows := []sqlc.ListHistoryCheckpointCandidatesWithinBytesRow{
+		pairingRow(0, "user", `"old q with plenty of extra descriptive words`+strings.Repeat(" so the raw exchange clearly outweighs its summary", 4)+`"`),
+		pairingRow(1, "assistant", `"old a walking through the answer`+strings.Repeat(" in enough detail that compaction genuinely shrinks it", 4)+`"`),
+		pairingRow(2, "assistant", `[{"type":"tool-call","toolCallId":"ask-1","toolName":"ask_user","input":{"questions":[]}}]`),
+		pairingRow(3, "user", `"mid q`+strings.Repeat(" with the context the history around it needs", 60)+`"`),
+		pairingRow(4, "user", `"current q"`),
 	}
 	q := &pairingQueries{
-		uncompacted: rows,
-		logID:       pgtype.UUID{Bytes: uuid.New(), Valid: true},
+		historyCheckpointQueries: &historyCheckpointQueries{summaries: map[pgtype.UUID]string{}},
+		rows:                     rows,
+		logID:                    pgtype.UUID{Bytes: uuid.New(), Valid: true},
 	}
-	svc := compaction.NewService(slog.New(slog.DiscardHandler), q)
+	logger := slog.New(slog.DiscardHandler)
+	sessionID := uuid.NewString()
 
-	res, err := svc.RunCompactionSync(context.Background(), compaction.TriggerConfig{
-		BotID:        uuid.NewString(),
-		SessionID:    uuid.NewString(),
-		ModelID:      "stub-model",
-		ClientType:   "openai-completions",
-		APIKey:       "test",
-		BaseURL:      "http://stub.invalid",
-		HTTPClient:   &http.Client{Transport: pairingSummarizer{summary: "condensed old exchange"}},
-		TargetTokens: 200,
+	passes, err := compaction.NewService(logger, q).Compact(context.Background(), compaction.TriggerConfig{
+		BotID:               uuid.NewString(),
+		SessionID:           sessionID,
+		ModelID:             "stub-model",
+		ClientType:          "openai-completions",
+		APIKey:              "test",
+		BaseURL:             "http://stub.invalid",
+		HTTPClient:          &http.Client{Transport: pairingSummarizer{summary: "condensed old exchange"}},
+		Anchors:             []turn.ContextMessageSource{{Kind: "history", ID: uuid.UUID(rows[4].ID.Bytes).String(), Current: true}},
+		SummaryWindowTokens: 128000,
+		HistoryBudgetTokens: 1000,
 	})
-	if err != nil {
-		t.Fatalf("RunCompactionSync: %v", err)
-	}
-	if res.Status != compaction.StatusOK {
-		t.Fatalf("status = %q, want %q", res.Status, compaction.StatusOK)
+	if err != nil || len(passes) != 1 || passes[0].More {
+		t.Fatalf("passes = %+v err = %v, want one pass that folds the history before the current input", passes, err)
 	}
 
-	marked := make(map[pgtype.UUID]bool, len(q.markedIDs))
-	for _, id := range q.markedIDs {
-		marked[id] = true
+	committed := q.checkpoints[q.active]
+	var items []checkpoint.Item
+	if err := json.Unmarshal(committed.Items, &items); err != nil {
+		t.Fatal(err)
 	}
-	if len(marked) != 2 || !marked[rows[0].ID] || !marked[rows[1].ID] {
-		t.Fatalf("marked = %v, want exactly the contiguous pre-island run [old q, old a]", q.markedIDs)
-	}
-
 	compactID := uuid.UUID(q.logID.Bytes).String()
-	texts := []string{`old q`, `old a`, `ask you something`, `mid q`, `current q`}
-	roles := []string{"user", "assistant", "assistant", "user", "user"}
-	records := make([]historyfrag.HistoryRecord, 0, len(rows))
-	for i, row := range rows {
-		id := uuid.UUID(row.ID.Bytes).String()
-		record := historyRecord(id, ModelMessage{
-			Role:    roles[i],
-			Content: newTextContent(texts[i]),
-		}, nil)
-		if marked[row.ID] {
-			record.CompactID = compactID
-		}
-		records = append(records, record)
+	if position := (messagepkg.HistoryPosition{Turn: committed.TurnPosition, Seq: committed.TurnMessageSeq}); position != pairingPosition(rows[3]) ||
+		!reflect.DeepEqual(items, []checkpoint.Item{{SummaryID: compactID}}) {
+		t.Fatalf("checkpoint at %+v holds %+v, want the summary of the contiguous run [old q, old a, ask_user call, mid q]", position, items)
 	}
 
-	got := replaceCompactedHistoryRecords(records, map[string]string{compactID: res.Summary}, contextfrag.Scope{})
-	want := []ModelMessage{
-		{Role: "user", Content: newTextContent("<summary>\n" + res.Summary + "\n</summary>")},
-		{Role: "assistant", Content: newTextContent("ask you something")},
-		{Role: "user", Content: newTextContent("mid q")},
-		{Role: "user", Content: newTextContent("current q")},
+	messages := make([]messagepkg.Message, 0, len(rows))
+	for _, row := range rows {
+		messages = append(messages, messagepkg.Message{ID: uuid.UUID(row.ID.Bytes).String(), SessionID: sessionID, Role: row.Role, Content: row.Content})
 	}
-	if gotMessages := historyfrag.ToModelMessages(got); !reflect.DeepEqual(gotMessages, want) {
-		t.Fatalf("selector output broke read-path ordering:\ngot  %#v\nwant %#v", gotMessages, want)
+	svc := &Service{
+		messageService: &memoryQueryMessageService{messages: messages},
+		checkpoints:    checkpoint.NewStore(logger, q),
+		logger:         logger,
 	}
+	got, _, err := svc.loadHistoryRecords(context.Background(), historyfrag.ScopeFallback{}, contextfrag.Scope{SessionID: sessionID}, 0, historyCut{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{compactID, messages[4].ID}
+	if gotIDs := recordSequenceIDs(got); !reflect.DeepEqual(gotIDs, want) {
+		t.Fatalf("selector output broke read-path ordering:\ngot  %v\nwant %v", gotIDs, want)
+	}
+	if text := got[0].ModelMessage.TextContent(); text != turn.SummaryText(passes[0].Summary) {
+		t.Fatalf("summary renders as %q", text)
+	}
+}
+
+func recordSequenceIDs(records []historyfrag.HistoryRecord) []string {
+	ids := make([]string, 0, len(records))
+	for _, record := range records {
+		ids = append(ids, record.Ref.ID)
+	}
+	return ids
 }

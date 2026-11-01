@@ -120,7 +120,7 @@ func TestBotBackupErrorSplitsUserAndInternalFailures(t *testing.T) {
 
 func TestImportModelsRejectsInvalidDefaultCompatibilities(t *testing.T) {
 	t.Parallel()
-	h := NewProvidersHandler(slog.New(slog.DiscardHandler), providers.NewService(nil, testHandlerQueries{}, ""), nil)
+	h := NewProvidersHandler(slog.New(slog.DiscardHandler), providers.NewService(nil, testHandlerQueries{}, ""), nil, nil)
 	ctx := fieldErrorContext(http.MethodPost, `{"default_compatibilities":["bogus"]}`, "u", map[string]string{"id": "00000000-0000-0000-0000-000000000001"})
 	requireFieldError(t, h.ImportModels(ctx), apperror.CodeRequestFieldInvalid, "default_compatibilities")
 }

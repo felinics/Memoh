@@ -33,7 +33,7 @@ var schemaGoldenTools = map[string]func(t *testing.T) []toolexec.Tool{
 	"acp_agents": providerTools(&ACPAgentsProvider{pool: goldenACPPool{}, queries: (*pgstore.Queries)(nil)}),
 	"workdir":    providerTools(NewWorkdirProvider(nil, goldenWorkdirLister{})),
 	"history": providerTools(
-		NewHistoryProvider(nil, fakeHistorySessionLister{}, &fakeHistoryMessageReader{}, (*pgstore.Queries)(nil)),
+		NewHistoryProvider(nil, fakeHistorySessionLister{}, &fakeHistoryMessageReader{}, (*pgstore.Queries)(nil), ToolOutputLimit{}),
 	),
 	"schedule": providerTools(NewScheduleProvider(nil, nativeSourceTestScheduler{})),
 	"subagent": func(t *testing.T) []toolexec.Tool {
@@ -103,10 +103,9 @@ func (goldenWorkdirLister) List(context.Context, string, bool) ([]workdir.Workdi
 
 type goldenACPPool struct{}
 
-func (goldenACPPool) CreateAgentRuntime(context.Context, string, string, string) (ACPRuntimeSummary, error) {
+func (goldenACPPool) AgentOptions(context.Context, string, string) (ACPRuntimeSummary, error) {
 	return ACPRuntimeSummary{}, nil
 }
-func (goldenACPPool) CloseAgentRuntime(string, string) error { return nil }
 
 func TestToolSchemasMatchGolden(t *testing.T) {
 	t.Parallel()

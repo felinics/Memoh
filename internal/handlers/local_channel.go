@@ -1766,7 +1766,6 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, wr
 	eventCh := make(chan application.WSStreamEvent, 64)
 	injectCh := make(chan turn.InjectMessage, 16)
 	forwarded := make(chan struct{})
-	releaseCompaction := h.agentService.DeferSessionCompaction(botID, ref.SessionID, ref.RunID)
 	go func() {
 		defer streamCancel()
 		delivered, err := func() (application.RunOutcome, error) {
@@ -1809,7 +1808,6 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, wr
 
 	go func() {
 		defer close(forwarded)
-		defer releaseCompaction()
 		h.forwardWSStreamEvents(streamCtx, baseCtx, writer, botID, ref, admission.Handle, eventCh)
 	}()
 	return ref, true

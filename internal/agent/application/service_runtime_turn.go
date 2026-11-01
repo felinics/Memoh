@@ -15,7 +15,6 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
@@ -23,23 +22,15 @@ import (
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/schedule"
 )
 
-// SetExternalRuntimes registers out-of-process runtime drivers (codex,
-// claude-code, the ACP pool's adapter). Sessions whose runtime type has no
-// registered driver fail with a stable "runtime unavailable" error instead of
+// SetRuntimeRegistry installs the external runtimes. A session whose runtime
+// has no driver fails with a stable "runtime unavailable" error instead of
 // silently degrading to the built-in model runtime.
-func (s *Service) SetExternalRuntimes(drivers ...external.Driver) {
-	if s.externalDrivers == nil {
-		s.externalDrivers = map[string]external.Driver{}
-	}
-	for _, driver := range drivers {
-		if driver == nil {
-			continue
-		}
-		s.externalDrivers[strings.TrimSpace(driver.RuntimeType())] = driver
-	}
+func (s *Service) SetRuntimeRegistry(runtimes *external.Registry) {
+	s.runtimes = runtimes
 }
 
 type runtimeDispatchKind int
@@ -68,16 +59,11 @@ func (s *Service) resolveRuntimeDispatch(ctx context.Context, req ChatRequest) (
 	if err := validateSessionBot(req.BotID, req.ThreadID, sess.BotID); err != nil {
 		return runtimeDispatch{}, err
 	}
-	runtimeType := ""
-	switch {
-	case session.IsACPRuntime(sess):
-		runtimeType = session.RuntimeACPAgent
-	case session.IsDirectRuntime(sess):
-		runtimeType = strings.TrimSpace(sess.RuntimeType)
-	default:
+	runtimeType := session.RuntimeTypeOf(sess)
+	if !runtimekind.IsExternal(runtimeType) {
 		return runtimeDispatch{kind: dispatchNative}, nil
 	}
-	driver, ok := s.externalDrivers[runtimeType]
+	driver, ok := s.runtimes.Driver(runtimeType)
 	if !ok {
 		return runtimeDispatch{}, apperror.New(apperror.CodeExternalRuntimeUnavailable, map[string]string{"runtime": runtimeType})
 	}
@@ -174,8 +160,7 @@ func runtimeSessionMeta(sess session.Thread) map[string]any {
 // streamRuntimeWS runs one turn on a runtime driver (ACP, codex,
 // claude-code) and streams events to the WS surface. The runtime owns its
 // durable session state (keyed through runtime metadata), Memoh's history is
-// a projection persisted per round. Runtimes may request an observed-round
-// publication for warm-process fencing. webSend is set by the Web chat caller
+// a projection persisted per round. webSend is set by the Web chat caller
 // for a new send, whose every admitted failure is recorded in history.
 func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, req ChatRequest, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}, webSend bool) (RunOutcome, error) {
 	req.RunID = runIDForChatRequest(req.RunID)
@@ -220,7 +205,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
 	req.Query = strings.TrimSpace(req.Query)
-	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, contextReq, runtimeContextAgentID(runtimeType, runtimeMeta), projectPath)
+	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, contextReq, s.runtimeContextAgentID(ctx, runtimeType, sess), projectPath)
 	contextMarkdown, contextURI, contextManifest := runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
 	contextLifecycle := contextfrag.NewLifecycleHolder()
 	if contextManifest != nil {
@@ -557,7 +542,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		cancelPending()
 		abortedReq := req
 		abortedReq.SkipMemoryExtraction = true
-		if persistErr := s.persistRuntimeRound(context.WithoutCancel(ctx), abortedReq, runtimeType, projectPath, result, nil, result.TurnCompleted, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); persistErr != nil {
+		if persistErr := s.persistRuntimeRound(context.WithoutCancel(ctx), abortedReq, runtimeType, projectPath, result, nil, false, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); persistErr != nil {
 			outcome.setCause(persistErr)
 			s.logger.ErrorContext(ctx, "external abort persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
 			switch s.resolveRuntimeRoundPersistFailure(ctx, req, persistErr, cleanupProjectionsIn) {
@@ -565,10 +550,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 				outcome.setCause(nil)
 				cleanupProjections()
 			case runtimeRoundRolledBack:
-				// A completed-then-stopped turn moved the runtime past the
-				// canonical head; a merely interrupted one did not, so only the
-				// former needs driver-side repair.
-				s.handleRuntimeRoundRollback(ctx, driver, req, runtimeType, result.TurnCompleted)
+				s.logRuntimeRoundDivergence(req, runtimeType)
 				cleanupProjections()
 			case runtimeRoundUnresolved:
 			}
@@ -595,12 +577,10 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		case runtimeRoundRolledBack:
 		}
 		// Definite rollback of a completed turn: the runtime remembers a round
-		// the visible history lost. Drivers with a repair policy (the ACP pool
-		// discards the warm process) take the callback; runtimes whose durable
-		// state is authoritative on their own side keep the session — dropping
-		// it would lose the whole conversation context — and the ghost turn is
-		// logged.
-		s.handleRuntimeRoundRollback(ctx, driver, req, runtimeType, true)
+		// the visible history lost. Its own session stays authoritative —
+		// dropping it would lose the whole conversation context — and the
+		// ghost turn is logged.
+		s.logRuntimeRoundDivergence(req, runtimeType)
 		cleanupProjections()
 		outcome.markDelivered()
 		emit(runtimeFailureEvent(outcome.cause))
@@ -658,7 +638,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		MaxCalls:    payload.MaxCalls,
 		Command:     payload.Command,
 	})
-	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, req, runtimeContextAgentID(runtimeType, runtimeMeta), projectPath)
+	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, req, s.runtimeContextAgentID(ctx, runtimeType, sess), projectPath)
 	contextMarkdown, contextURI, contextManifest := runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
 	contextLifecycle := contextfrag.NewLifecycleHolder()
 	if contextManifest != nil {
@@ -801,87 +781,6 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 	}, nil
 }
 
-// abortSettleWait bounds how long AbortSessionRuns waits for the aborted run
-// to reach a terminal state. It must outlast the drivers' own interrupt
-// grace windows (codex settle + recycle, claude interrupt grace) so a
-// successful return means the runtime has actually stopped.
-const abortSettleWait = 30 * time.Second
-
-// AbortSessionRuns interrupts the session's active run, if any, and waits —
-// bounded — until it actually stops. Deleting or resetting a session on a
-// direct external runtime must not leave its turn executing (and mutating
-// the workspace) behind the deletion; cancel alone only signals the driver,
-// so callers that destroy the session next need the settle, not the signal.
-// A run that cannot settle inside the window fails the call rather than
-// letting the caller proceed over a still-running turn.
-func (s *Service) AbortSessionRuns(ctx context.Context, botID, sessionID string) error {
-	if s == nil || s.decisionRuntime == nil {
-		return nil
-	}
-	snapshot, err := s.decisionRuntime.Snapshot(ctx, botID, sessionID)
-	if err != nil {
-		return err
-	}
-	run := snapshot.CurrentRunView
-	if run == nil || strings.TrimSpace(run.RunID) == "" {
-		return nil
-	}
-	runID := run.RunID
-	if _, err = s.decisionRuntime.Abort(ctx, botID, sessionID, runID); err != nil {
-		return err
-	}
-	deadline := time.Now().Add(abortSettleWait)
-	for {
-		snapshot, err := s.decisionRuntime.Snapshot(ctx, botID, sessionID)
-		if err != nil {
-			return err
-		}
-		current := snapshot.CurrentRunView
-		// The ledger going terminal is not enough: a waiting_decision run is
-		// stamped aborted the moment its cancel is dispatched, while the
-		// driver's interrupt handshake is still tearing the turn down. The
-		// active-prompt registration lives exactly as long as the driver
-		// call, so wait for both.
-		if (current == nil || current.RunID != runID || !activeRuntimeRunStatus(current.Status)) &&
-			!s.hasExternalAgentActivePrompt(botID, sessionID) {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("aborted run %s did not stop within %s", runID, abortSettleWait)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(200 * time.Millisecond):
-		}
-	}
-}
-
-func activeRuntimeRunStatus(status string) bool {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case sessionruntime.RunStatusAdmitting, sessionruntime.RunStatusRunning,
-		sessionruntime.RunStatusWaitingDecision, sessionruntime.RunStatusAborting:
-		return true
-	default:
-		return false
-	}
-}
-
-// handleRuntimeRoundRollback resolves a definite round rollback: a driver
-// that repairs its runtime state (the ACP pool discards the warm process so
-// the next prompt restarts from the durable head) gets the callback for
-// completed turns; every other case keeps the runtime session and logs the
-// ghost turn.
-func (s *Service) handleRuntimeRoundRollback(ctx context.Context, driver external.Driver, req ChatRequest, runtimeType string, turnCompleted bool) {
-	if turnCompleted {
-		if handler, ok := driver.(external.RoundRollbackHandler); ok {
-			handler.OnRoundRolledBack(context.WithoutCancel(ctx), req.BotID, req.ThreadID)
-			return
-		}
-	}
-	s.logRuntimeRoundDivergence(req, runtimeType)
-}
-
 func (s *Service) logRuntimeRoundDivergence(req ChatRequest, runtimeType string) {
 	s.logger.Warn("external runtime remembers a round the visible history lost",
 		slog.String("session_id", req.ThreadID),
@@ -892,9 +791,7 @@ func (s *Service) logRuntimeRoundDivergence(req ChatRequest, runtimeType string)
 
 // persistRuntimeRound stores one external turn as a normal history round.
 // Shared outcome markers and reconciliation keep commit-unknown handling
-// runtime-neutral. Runtimes that request publication advance their
-// observed-round head in the same
-// transaction as the messages. Native conversation state stays with the Agent.
+// runtime-neutral. Native conversation state stays with the Agent.
 func (s *Service) persistRuntimeRound(
 	ctx context.Context,
 	req ChatRequest,
@@ -911,12 +808,10 @@ func (s *Service) persistRuntimeRound(
 		"project_path": projectPath,
 		"stop_reason":  result.StopReason,
 	}
-	for key, value := range result.RoundMetadata {
-		meta[key] = value
-	}
 	if promptErr != nil {
 		// The failure is recorded by its code and catalog args, which the
-		// history view renders. The cause's text stays out of history.
+		// history view renders. The cause's text stays out of history; what an
+		// agent reported in its own words is one of the args.
 		meta["agent_turn_outcome"] = "failed"
 		meta[messagepkg.HistoryErrorCodeMetadataKey] = string(classifyRuntimeFailure(promptErr))
 		if args := runtimeFailureArgs(promptErr); len(args) > 0 {
@@ -993,7 +888,7 @@ func (s *Service) persistRuntimeRound(
 	agentTurnID := strings.TrimSpace(result.AgentTurnID)
 	if (len(result.SteerInputIDs) > 0 || result.FinalTurnAnchorOnly) && lastAssistantIndex >= 0 {
 		// Codex forks at whole runtime turns. Steer splits and Goal continuation
-		// collect multiple assistant rows under one publication; only the tail
+		// collect multiple assistant rows under one runtime turn; only the tail
 		// has a runtime anchor matching the complete visible history.
 		metadataByIndex[lastAssistantIndex+metadataOffset]["agent_turn_id"] = agentTurnID
 		agentTurnID = "" // Do not bulk-assign this anchor to earlier assistant rows.
@@ -1002,12 +897,6 @@ func (s *Service) persistRuntimeRound(
 	// Row metadata survives history refresh/fork without entering model input.
 	if firstAssistantIndex >= 0 && len(result.Notices) > 0 {
 		metadataByIndex[firstAssistantIndex+metadataOffset][event.RuntimeNoticesMetadataKey] = result.Notices
-	}
-	// ACP uses the committed run ID to detect stale warm processes. Failed or
-	// interrupted turns keep the previously observed head.
-	var publication *messagepkg.AgentPublication
-	if promptErr == nil && turnCompleted && lastAssistantIndex >= 0 && result.PublishHead {
-		publication = &messagepkg.AgentPublication{RunID: req.RunID}
 	}
 	skipMemory := promptErr != nil || req.UserMessagePersisted || req.ReusePersistedUserMessage || req.SkipMemoryExtraction
 	persisted, err := s.storeRoundWithOptionsResult(ctx, req, round, "", storeRoundOptions{
@@ -1018,7 +907,6 @@ func (s *Service) persistRuntimeRound(
 		ReasoningTiming:                   reasoningTiming,
 		RequireCompletePersist:            true,
 		CleanupRuntimeDecisionProjections: true,
-		AgentPublication:                  publication,
 		// The runtime's turn id lands on the run row in the round transaction;
 		// it anchors turn-level operations such as codex thread/fork.
 		AgentTurnID:      agentTurnID,
@@ -1060,8 +948,7 @@ func scheduledRuntimeFailure(err error) error {
 
 // runtimeTurnRan reports evidence that the runtime accepted the turn. "Nothing
 // ran" is otherwise only a driver's promise about its error codes, and a wrong
-// code must cost a stored failure round, never the user's message. A publication
-// request is no evidence: ACP reports it on every result.
+// code must cost a stored failure round, never the user's message.
 func runtimeTurnRan(result external.PromptResult) bool {
 	return strings.TrimSpace(result.AgentTurnID) != "" || len(result.Output) > 0
 }

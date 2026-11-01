@@ -145,6 +145,14 @@ func (h *externalAgentActivePromptHub) close() {
 	}
 }
 
+// sessionTurnKey names the per-session scope of the ACP prompt hubs. It is
+// deliberately not an admission gate — single-session execution is enforced
+// durably by the session runtime, which is the only thing that can answer for
+// owners in other processes.
+func sessionTurnKey(botID, sessionID string) string {
+	return strings.TrimSpace(botID) + ":" + strings.TrimSpace(sessionID)
+}
+
 func (s *Service) registerExternalAgentActivePrompt(botID, sessionID string) *externalAgentActivePromptHub {
 	botID = strings.TrimSpace(botID)
 	sessionID = strings.TrimSpace(sessionID)
@@ -155,15 +163,6 @@ func (s *Service) registerExternalAgentActivePrompt(botID, sessionID string) *ex
 		previous.(*externalAgentActivePromptHub).close()
 	}
 	return hub
-}
-
-// hasExternalAgentActivePrompt reports whether a runtime driver call is currently
-// executing for the session; the registration brackets the driver Prompt
-// exactly, so this is the "driver actually stopped" signal deletion waits on.
-func (s *Service) hasExternalAgentActivePrompt(botID, sessionID string) bool {
-	key := sessionTurnKey(strings.TrimSpace(botID), strings.TrimSpace(sessionID))
-	_, ok := s.externalAgentPromptHubs.Load(key)
-	return ok
 }
 
 func (s *Service) unregisterExternalAgentActivePrompt(botID, sessionID string, hub *externalAgentActivePromptHub) {

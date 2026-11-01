@@ -37,9 +37,9 @@ type SDKModelConfig struct {
 	// ReasoningOffSupport declares whether this model accepts an explicit
 	// thinking{type:"disabled"}. See anthropicAcceptsExplicitOff.
 	ReasoningOffSupport string
-	// ReasoningDefaultOn reports whether omitting the thinking field leaves the
-	// model thinking. nil means unknown.
-	ReasoningDefaultOn *bool
+	// ReasoningReplay is the model's declared replay for Chat Completions hosts.
+	// It overrides the replay the compatibility mode implies; nil keeps it.
+	ReasoningReplay *ReasoningReplay
 	// ContextWindow is the configured context window the turn budgets against;
 	// legacy Anthropic thinking budgets are fitted to it. Zero means unknown.
 	ContextWindow int
@@ -76,6 +76,7 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 			opts = append(opts, openaicompletions.WithBaseURL(cfg.BaseURL))
 		}
 		opts = appendChatCompletionsCompat(opts, chatCompletionsCompat)
+		opts = appendReasoningReplay(opts, hostReasoningReplay(chatCompletionsCompat, cfg.BaseURL), cfg.ReasoningReplay)
 		p := openaicompletions.New(opts...)
 		return p.ChatModel(cfg.ModelID)
 
@@ -125,8 +126,8 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		//     field. Omission means "off" only up to 4.8; from Opus 5 and Sonnet 5
 		//     on, thinking is the default and an omitted field leaves it running —
 		//     billed, counted against max_tokens, and invisible to a user who
-		//     believes they turned it off. Sending the explicit shape is only safe
-		//     where the model accepts it, which the catalog declares.
+		//     believes they turned it off. The explicit shape is sent wherever the
+		//     catalog declares the model accepts it; on 4.x it equals omission.
 		if rc := cfg.ReasoningConfig; rc != nil {
 			switch {
 			case rc.Active && rc.Adaptive:
@@ -138,7 +139,7 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 					Type:         "enabled",
 					BudgetTokens: AnthropicThinkingBudget(rc.Effort, cfg.ContextWindow, cfg.MaxOutputTokens),
 				}))
-			case rc.Disabled && anthropicNeedsExplicitOff(cfg.ReasoningOffSupport, cfg.ReasoningDefaultOn):
+			case rc.Disabled && anthropicAcceptsExplicitOff(cfg.ReasoningOffSupport):
 				opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
 					Type: "disabled",
 				}))
@@ -170,8 +171,55 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 			opts = append(opts, openaicompletions.WithBaseURL(cfg.BaseURL))
 		}
 		opts = appendChatCompletionsCompat(opts, chatCompletionsCompat)
+		opts = appendReasoningReplay(opts, hostReasoningReplay(chatCompletionsCompat, cfg.BaseURL), cfg.ReasoningReplay)
 		p := openaicompletions.New(opts...)
 		return p.ChatModel(cfg.ModelID)
+	}
+}
+
+// appendReasoningReplay applies the replay the host needs with the model's
+// declaration on top, so the model's declaration wins, except that a host that
+// requires the replay keeps requiring it on that field: DeepSeek and Kimi
+// reject a thinking-mode tool call replayed without its reasoning, so a model
+// that only names the field must not switch that off.
+func appendReasoningReplay(opts []openaicompletions.Option, host *sdk.ReasoningReplay, model *ReasoningReplay) []openaicompletions.Option {
+	replay := host
+	if model != nil {
+		declared := sdk.ReasoningReplay{Field: sdk.ReasoningReplayField(model.Field), Required: model.Required}
+		if host != nil && host.Required && replayField(declared.Field) == replayField(host.Field) {
+			declared.Required = true
+		}
+		replay = &declared
+	}
+	if replay == nil {
+		return opts
+	}
+	return append(opts, openaicompletions.WithReasoningReplay(*replay))
+}
+
+// replayField reads an unset replay field as the one it means.
+func replayField(field sdk.ReasoningReplayField) sdk.ReasoningReplayField {
+	if field == "" {
+		return sdk.ReasoningReplayContent
+	}
+	return field
+}
+
+// hostReasoningReplay is the replay a Chat Completions host needs before any
+// model declaration. Since twilight v0.8 an unconfigured provider replays only
+// reasoning_content and drops reasoning_details, so a host that reads the
+// details back has to be named: DeepSeek and Kimi reject a thinking-mode tool
+// call replayed without reasoning_content; MiniMax and OpenRouter read their
+// reasoning back from reasoning_details, which on OpenRouter carries the signed
+// thinking Gemini and Claude need with tool calls.
+func hostReasoningReplay(compat, baseURL string) *sdk.ReasoningReplay {
+	switch {
+	case isDeepSeekChatCompletionsCompat(compat), isKimiChatCompletionsCompat(compat):
+		return &sdk.ReasoningReplay{Required: true}
+	case isMiniMaxChatCompletionsCompat(compat), isOpenRouterBaseURL(baseURL):
+		return &sdk.ReasoningReplay{Field: sdk.ReasoningReplayDetails}
+	default:
+		return nil
 	}
 }
 
@@ -179,6 +227,8 @@ func appendChatCompletionsCompat(
 	opts []openaicompletions.Option,
 	compat string,
 ) []openaicompletions.Option {
+	// The compat options no longer imply how reasoning is replayed; the replay
+	// each vendor needs is set by appendReasoningReplay.
 	switch {
 	case isDeepSeekChatCompletionsCompat(compat):
 		return append(opts, openaicompletions.WithDeepSeekChatCompletionsCompat())
@@ -273,6 +323,14 @@ func openAIEffortParam(rc *ReasoningConfig) (string, bool) {
 		effort := rc.Effort
 		if effort == "" {
 			effort = ReasoningEffortMedium
+		}
+		if effort == reasoning.EffortEnabled {
+			// A switch without tiers resolves to the enabled token, which has no
+			// OpenAI spelling: the enum holds tiers and, from gpt-5.1 on, "none".
+			// Leaving the field out lets the provider's default stand, which for
+			// such a model is thinking on; the token itself is rejected by every
+			// OpenAI-shaped endpoint.
+			return "", false
 		}
 		return effort, true
 	case rc.Disabled:
@@ -444,31 +502,17 @@ func googleBudgetFor(rc *ReasoningConfig, minBudget, maxBudget *int, offSupport 
 
 func boolPtr(v bool) *bool { return &v }
 
-// anthropicNeedsExplicitOff reports whether a disabled call must say so on the
-// wire rather than express it by omitting the thinking field.
-//
-// Two independent facts decide this, which is why they are two fields. Whether the
-// model *accepts* thinking{type:"disabled"} — Fable 5 and Mythos 5 answer with a
-// 400 — and whether omission would have worked anyway. Omitting reads as off only
-// through Opus 4.8; Opus 5 and Sonnet 5 think by default, so an omitted field
-// leaves thinking running, billed as output tokens and counted against max_tokens,
-// while the user believes it is off.
-//
-// Sending the explicit shape where omission already means off is harmless but
-// noisy, so it is reserved for models that need it: accepted *and* on by default.
-// An undeclared model keeps the omission behaviour, which is correct for every
-// generation we currently ship.
-func anthropicNeedsExplicitOff(offSupport string, defaultOn *bool) bool {
-	if !reasoning.DefaultOn(defaultOn) {
-		return false
-	}
+// anthropicAcceptsExplicitOff reports whether thinking{type:"disabled"} may be
+// sent: the catalog declares the model accepts it, at any effort or at high and
+// below. A model that rejects it (Fable 5, Mythos 5) cannot be turned off, and
+// an undeclared model keeps the omission behaviour, which is off on every
+// generation up to 4.8 and avoids sending a shape a third-party
+// Anthropic-compatible endpoint may not accept.
+func anthropicAcceptsExplicitOff(offSupport string) bool {
 	switch offSupport {
 	case reasoning.OffSupportAccepted, reasoning.OffSupportLowEffortOnly:
 		return true
 	default:
-		// Thinks by default and rejects an explicit disable: off is unreachable on
-		// this model. OptionsFor keeps the control out of the picker, so arriving
-		// here means a stale stored setting rather than a user choice.
 		return false
 	}
 }

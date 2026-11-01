@@ -22,13 +22,13 @@ func TestMutationLedgerRecordsInOrder(t *testing.T) {
 
 	ledger := NewMutationLedger()
 	ledger.Record(MutationBackgroundSummary, "bytes=10")
-	ledger.Record(MutationMidTaskPrune, "pruned=3")
+	ledger.Record(MutationContextSwitch, "mode=fold")
 	ledger.SetFinalInputHash("hash-1")
 
 	records := ledger.Records()
 	if len(records) != 2 ||
 		records[0].Kind != MutationBackgroundSummary ||
-		records[1].Kind != MutationMidTaskPrune {
+		records[1].Kind != MutationContextSwitch {
 		t.Fatalf("records = %#v", records)
 	}
 	if ledger.FinalInputHash() != "hash-1" {
@@ -104,26 +104,6 @@ func TestMutationLedgerAppendStepSnapshotStampsCurrentAttempt(t *testing.T) {
 	}
 }
 
-func TestMutationLedgerStepSnapshotsOwnDropReasons(t *testing.T) {
-	t.Parallel()
-
-	dropReasons := map[string]int{"budget": 1}
-	ledger := NewMutationLedger()
-	ledger.AppendStepSnapshot(StepSnapshot{StepIndex: 0, DropReasons: dropReasons})
-
-	dropReasons["budget"] = 2
-	first := ledger.StepSnapshots()
-	if first[0].DropReasons["budget"] != 1 {
-		t.Fatalf("stored drop reasons = %#v, want defensive copy of appended snapshot", first[0].DropReasons)
-	}
-
-	first[0].DropReasons["budget"] = 3
-	second := ledger.StepSnapshots()
-	if second[0].DropReasons["budget"] != 1 {
-		t.Fatalf("stored drop reasons = %#v after returned snapshot mutation", second[0].DropReasons)
-	}
-}
-
 func TestMutationLedgerAdvanceAttemptStampsCacheUsageRecords(t *testing.T) {
 	t.Parallel()
 
@@ -152,29 +132,6 @@ func TestMutationLedgerModelInfo(t *testing.T) {
 	}
 }
 
-func TestMutationLedgerLoopSelectionMode(t *testing.T) {
-	t.Parallel()
-
-	ledger := NewMutationLedger()
-	ledger.SetLoopSelectionMode(LoopSelectionSuffixOnly)
-	if got := ledger.LoopSelectionMode(); got != LoopSelectionSuffixOnly {
-		t.Fatalf("LoopSelectionMode() = %q, want %q", got, LoopSelectionSuffixOnly)
-	}
-}
-
-func TestMutationLedgerLoopSelectionModeSuffixOnlyShadow(t *testing.T) {
-	t.Parallel()
-
-	ledger := NewMutationLedger()
-	ledger.SetLoopSelectionMode(LoopSelectionSuffixOnlyShadow)
-	if got := ledger.LoopSelectionMode(); got != LoopSelectionSuffixOnlyShadow {
-		t.Fatalf("LoopSelectionMode() = %q, want %q", got, LoopSelectionSuffixOnlyShadow)
-	}
-	if LoopSelectionSuffixOnlyShadow != "suffix_only_shadow" {
-		t.Fatalf("LoopSelectionSuffixOnlyShadow = %q, want suffix_only_shadow", LoopSelectionSuffixOnlyShadow)
-	}
-}
-
 func TestMutationLedgerStepAttemptModelNilSafe(t *testing.T) {
 	t.Parallel()
 
@@ -183,15 +140,11 @@ func TestMutationLedgerStepAttemptModelNilSafe(t *testing.T) {
 	ledger.AdvanceAttempt()
 	ledger.RecordCacheUsage(CacheUsageRecord{StepIndex: 0})
 	ledger.SetModelInfo("m", "c")
-	ledger.SetLoopSelectionMode(LoopSelectionLegacyPrune)
 	if ledger.StepSnapshots() != nil || ledger.CacheUsageRecords() != nil {
 		t.Fatal("nil ledger step/cache records must be nil")
 	}
 	if model, clientType := ledger.ModelInfo(); model != "" || clientType != "" {
 		t.Fatalf("nil ledger ModelInfo() = (%q, %q), want empty", model, clientType)
-	}
-	if got := ledger.LoopSelectionMode(); got != "" {
-		t.Fatalf("nil ledger LoopSelectionMode() = %q, want empty", got)
 	}
 }
 
@@ -199,31 +152,23 @@ func TestMutationLedgerMarshalJSONIncludesAttemptAudit(t *testing.T) {
 	t.Parallel()
 
 	ledger := NewMutationLedger()
-	ledger.Record(MutationMidTaskPrune, "truncated=2")
+	ledger.Record(MutationContextSwitch, "mode=fold trigger=in_run step=3")
 	ledger.SetFinalInputHash("final-hash")
 	ledger.SetModelInfo("claude-x", "anthropic-messages")
-	ledger.SetLoopSelectionMode(LoopSelectionSuffixOnly)
-	ledger.AppendStepSnapshot(StepSnapshot{
-		StepIndex:            0,
-		PostPrepareInputHash: "step-hash-0",
-		ReselectionOutcome:   ReselectionOutcomeApplied,
-		ReselectionApplied:   true,
-		Dropped:              3,
-		DropReasons:          map[string]int{"budget": 3},
-	})
+	ledger.AppendStepSnapshot(StepSnapshot{StepIndex: 0, PostPrepareInputHash: "step-hash-0"})
 	ledger.RecordCacheUsage(CacheUsageRecord{StepIndex: 0, CacheReadTokens: 11})
 	ledger.AdvanceAttempt()
-	ledger.AppendStepSnapshot(StepSnapshot{StepIndex: 1, PostPrepareInputHash: "step-hash-1", Truncated: 2})
+	ledger.AppendStepSnapshot(StepSnapshot{StepIndex: 1, PostPrepareInputHash: "step-hash-1"})
 
 	raw, err := json.Marshal(ledger)
 	if err != nil {
 		t.Fatalf("marshal ledger: %v", err)
 	}
 	for _, want := range []string{
-		"mid_task_prune", "truncated=2", "final-hash",
-		`"model":"claude-x"`, `"client_type":"anthropic-messages"`, `"loop_selection_mode":"suffix_only"`,
-		`"step_index":0`, "step-hash-0", `"reselection_outcome":"applied"`, `"reselection_applied":true`, `"dropped":3`, `"budget":3`, `"cache_read_tokens":11`,
-		`"step_index":1`, "step-hash-1", `"attempt":1`, `"truncated":2`,
+		"context_switch", "mode=fold trigger=in_run step=3", "final-hash",
+		`"model":"claude-x"`, `"client_type":"anthropic-messages"`,
+		`"step_index":0`, "step-hash-0", `"cache_read_tokens":11`,
+		`"step_index":1`, "step-hash-1", `"attempt":1`,
 	} {
 		if !strings.Contains(string(raw), want) {
 			t.Fatalf("ledger JSON missing %q:\n%s", want, raw)

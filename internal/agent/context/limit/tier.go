@@ -32,19 +32,6 @@ func (t Tier) LimitString(s, label string) string {
 }
 
 var (
-	// PruneTier matches internal/agent/tools' pre-unification tool-output
-	// pruning (exec stdout/stderr, etc.): the same head/tail split contextlimit
-	// itself already defaults to.
-	PruneTier = Tier{
-		MaxBytes:  textprune.DefaultMaxBytes,
-		MaxLines:  textprune.DefaultMaxLines,
-		HeadBytes: toolOutputHeadBytes,
-		TailBytes: toolOutputTailBytes,
-		HeadLines: toolOutputHeadLines,
-		TailLines: toolOutputTailLines,
-		Marker:    textprune.DefaultMarker,
-	}
-
 	// GatewayResultTier matches internal/conversation/flow's gateway prune for
 	// tool-result content.
 	GatewayResultTier = Tier{

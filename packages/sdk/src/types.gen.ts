@@ -346,11 +346,8 @@ export type AgentcredentialAuthorization = {
     authorization_url?: string;
     expires_at: string;
     id: string;
-    interval_seconds?: number;
     runtime: string;
     status: 'pending' | 'ready' | 'claimed';
-    user_code?: string;
-    verification_url?: string;
 };
 
 export type AgentcredentialAuthorizationRequest = {
@@ -942,6 +939,10 @@ export type ChannelReplyRef = {
 
 export type ChannelSendRequest = {
     channel_identity_id?: string;
+    /**
+     * ExcludedTarget is checked after platform target resolution, before publication.
+     */
+    excluded_target?: string;
     message?: ChannelMessage;
     target?: string;
 };
@@ -1198,7 +1199,7 @@ export type ContextfragContextRef = {
     version?: number;
 };
 
-export type ContextfragKind = 'system_prompt' | 'system_policy' | 'bot_identity' | 'workspace_instruction' | 'platform_identity' | 'tool_usage' | 'conversation_event' | 'current_user_message' | 'attachment_ref' | 'native_image' | 'skills_catalog' | 'hook_context' | 'injected_message' | 'background_summary' | 'runtime_context' | 'memory_recall' | 'conversation_summary';
+export type ContextfragKind = 'system_prompt' | 'system_policy' | 'bot_identity' | 'workspace_instruction' | 'platform_identity' | 'tool_usage' | 'conversation_event' | 'current_user_message' | 'attachment_ref' | 'native_image' | 'skills_catalog' | 'hook_context' | 'runtime_context' | 'memory_recall' | 'conversation_summary';
 
 export type ContextfragKindBreakdown = {
     fragments?: number;
@@ -1219,7 +1220,6 @@ export type ContextfragLifecycleSnapshot = {
     client_type?: string;
     counts?: ContextfragManifestCounts;
     final_input_hash?: string;
-    loop_selection_mode?: string;
     memory_recall?: ContextfragMemoryRecallTrace;
     model?: string;
     mutations?: Array<ContextfragMutationRecord>;
@@ -1267,7 +1267,7 @@ export type ContextfragMemoryRecallTrace = {
     retrieval_mode?: string;
 };
 
-export type ContextfragMutationKind = 'before_model_call_hook' | 'background_summary' | 'mid_task_prune' | 'loop_step_reselection' | 'injected_message' | 'context_view_fallback' | 'context_budget_failure' | 'context_budget_disabled' | 'capability_gate' | 'read_media' | 'renderer_prune' | 'mid_stream_retry' | 'current_input_omitted' | 'current_input_images_omitted' | 'run_abort_observed';
+export type ContextfragMutationKind = 'before_model_call_hook' | 'background_summary' | 'injected_message' | 'context_view_fallback' | 'context_budget_failure' | 'context_budget_disabled' | 'capability_gate' | 'read_media' | 'renderer_prune' | 'mid_stream_retry' | 'current_input_omitted' | 'current_input_images_omitted' | 'run_abort_observed' | 'context_switch';
 
 export type ContextfragMutationRecord = {
     detail?: string;
@@ -1315,15 +1315,8 @@ export type ContextfragSlot = 'system' | 'before_history' | 'history' | 'after_h
 
 export type ContextfragStepSnapshot = {
     attempt?: number;
-    drop_reasons?: {
-        [key: string]: number;
-    };
-    dropped?: number;
     post_prepare_input_hash?: string;
-    reselection_applied?: boolean;
-    reselection_outcome?: string;
     step_index?: number;
-    truncated?: number;
 };
 
 export type ContextfragToolDefAccounting = {
@@ -1580,16 +1573,21 @@ export type ExternalReasoningEffortOption = {
     name?: string;
 };
 
-export type ExternalagentCodexUsageResponse = {
-    limit_reached: boolean;
-    windows: Array<ExternalagentCodexUsageWindow>;
+export type ExternalagentAgentAccountResponse = {
+    email?: string;
+    signed_in: boolean;
 };
 
-export type ExternalagentCodexUsageWindow = {
+export type ExternalagentAgentQuotaResponse = {
+    limit_reached: boolean;
+    windows: Array<ExternalagentAgentQuotaWindow>;
+};
+
+export type ExternalagentAgentQuotaWindow = {
     resets_at?: string;
     used_percent: number;
     /**
-     * WindowMinutes is 0 when the backend does not report the window length.
+     * WindowMinutes is 0 when the runtime does not report the window length.
      */
     window_minutes: number;
 };
@@ -2699,12 +2697,6 @@ export type HandlersToolDefBucket = {
     tools?: number;
 };
 
-export type HandlersTriggerCompactResponse = {
-    message_count?: number;
-    status?: string;
-    summary?: string;
-};
-
 export type HandlersUiLocateMessageResponse = {
     items: Array<ConversationUiTurn>;
     target_external_message_id: string;
@@ -2971,16 +2963,6 @@ export type HandlersWorkspaceRemovalResponse = {
     updated_at?: string;
 };
 
-export type HandlersAcpRuntimeCreateRequest = {
-    acp_agent_id?: string;
-    /**
-     * BotAgentID names the Agent instance whose setup launches the runtime;
-     * only a session bound to the same instance can later adopt it.
-     */
-    bot_agent_id?: string;
-    project_path?: string;
-};
-
 export type HandlersAcpRuntimeModeRequest = {
     mode_id: string;
 };
@@ -3017,12 +2999,6 @@ export type HandlersBrowserSessionKeepAliveResponse = {
 };
 
 export type HandlersCreateSessionRequest = {
-    /**
-     * ACPRuntimeID optionally binds a warm pre-session runtime (created via
-     * POST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a
-     * transient in-memory handle reference, never persisted in metadata.
-     */
-    acp_runtime_id?: string;
     bot_agent_id?: string;
     channel_type?: string;
     metadata?: {
@@ -3443,6 +3419,28 @@ export type McpUpsertRequest = {
     url?: string;
 };
 
+export type ModelcatalogInfo = {
+    checked_at?: string;
+    revision?: string;
+    source?: string;
+    stale?: boolean;
+};
+
+export type ModelcatalogModel = {
+    config?: ModelsModelConfig;
+    model_id?: string;
+    name?: string;
+    type?: ModelsModelType;
+};
+
+export type ModelcatalogResponse = {
+    checked_at?: string;
+    models?: Array<ModelcatalogModel>;
+    revision?: string;
+    source?: string;
+    stale?: boolean;
+};
+
 export type ModelsAddRequest = {
     config?: ModelsModelConfig;
     enable?: boolean;
@@ -3478,11 +3476,21 @@ export type ModelsGetResponse = {
     type?: ModelsModelType;
 };
 
+export type ModelsModality = 'text' | 'image' | 'audio' | 'video' | 'pdf';
+
 export type ModelsModelConfig = {
+    /**
+     * CatalogAvailable is false when a managed catalog stopped listing the model.
+     */
     catalog_available?: boolean;
-    compatibilities?: Array<string>;
+    /**
+     * ContextWindow is the context window in tokens, input and output together.
+     */
     context_window?: number;
     description?: string;
+    /**
+     * Dimensions is the embedding vector size.
+     */
     dimensions?: number;
     /**
      * MaxOutputTokens is the most output tokens the model can produce in one
@@ -3490,43 +3498,81 @@ export type ModelsModelConfig = {
      * limit within it.
      */
     max_output_tokens?: number;
+    modalities?: ModelsModelModalities;
     /**
-     * ReasoningDefaultOn reports whether omitting the thinking field leaves the
-     * model thinking. Separate from off-ability: Claude 4.6 can be turned off *and*
-     * defaults to off, while Opus 5 can be turned off but defaults to on, so
-     * omitting the field there keeps thinking running — billed, and invisible to a
-     * user who believes they turned it off. nil means unknown.
+     * Reasoning is nil when the model does not reason.
      */
-    reasoning_default_on?: boolean;
+    reasoning?: ModelsModelReasoning;
     /**
-     * ReasoningDialect declares the wire shape of this model's thinking control,
-     * which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
-     * token budget while 3.x takes a named level, and the two are mutually
-     * exclusive on the same request. Declared per model because the alternative is
-     * sniffing the model id, and an id is not a capability. Empty leaves provider
-     * policy in charge; Google's adaptor deliberately sends no thinking control so
-     * pre-dialect rows retain their safe pre-upgrade request shape.
+     * SchemaVersion is ModelConfigSchemaVersion on every config this version
+     * writes.
      */
-    reasoning_dialect?: string;
-    reasoning_efforts?: Array<string>;
+    schema_version?: number;
     /**
-     * ReasoningOffSupport declares how the model answers an explicit request to
-     * stop thinking. Anthropic's per-model table splits models that share a
-     * thinking mode and an identical tier list, so this cannot be derived — see the
-     * reasoning package's OffSupport constants.
+     * StructuredOutput reports support for a JSON schema response format.
      */
-    reasoning_off_support?: string;
-    thinking_budget_max?: number;
+    structured_output?: boolean;
+    tool_call?: boolean;
+};
+
+export type ModelsModelModalities = {
+    input?: Array<ModelsModality>;
+    output?: Array<ModelsModality>;
+};
+
+export type ModelsModelReasoning = {
     /**
-     * ThinkingBudgetMin/Max bound the budget dialect. The range is per model
-     * family, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned
-     * off, while Flash starts at 0 and can.
+     * Budget is the reasoning token budget range; nil means no budget control.
      */
-    thinking_budget_min?: number;
-    thinking_mode?: string;
+    budget?: ModelsReasoningBudget;
+    /**
+     * Default is what the model does when a request sets no reasoning control.
+     */
+    default?: ModelsReasoningDefault;
+    /**
+     * Dialect is the request shape that carries the controls: tier, budget,
+     * toggle, adaptive, or empty when not stated.
+     */
+    dialect?: string;
+    /**
+     * Efforts lists the effort levels the model accepts, weakest to strongest.
+     * Turning reasoning off is Off, not an effort.
+     */
+    efforts?: Array<string>;
+    /**
+     * Off is how the model answers a request to stop reasoning: accepted,
+     * low_effort_only, rejected, or empty when not stated.
+     */
+    off?: string;
+    /**
+     * Replay is how a Chat Completions host reads reasoning back on replayed
+     * messages; nil leaves the provider's compatibility mode in charge.
+     */
+    replay?: ModelsReasoningReplay;
+    /**
+     * Toggle reports a request field that turns reasoning on and off, separate
+     * from any effort level.
+     */
+    toggle?: boolean;
 };
 
 export type ModelsModelType = 'chat' | 'embedding' | 'speech' | 'transcription' | 'video';
+
+export type ModelsReasoningBudget = {
+    max?: number;
+    min?: number;
+};
+
+export type ModelsReasoningDefault = {
+    budget?: number;
+    effort?: string;
+    enabled?: boolean;
+};
+
+export type ModelsReasoningReplay = {
+    field?: string;
+    required?: boolean;
+};
 
 export type ModelsTestResponse = {
     /**
@@ -3595,11 +3641,16 @@ export type ProvidersGetResponse = {
     updated_at?: string;
 };
 
+export type ProvidersImportCatalogModelsRequest = {
+    skip_model_ids?: Array<string>;
+};
+
 export type ProvidersImportModelsRequest = {
     default_compatibilities?: Array<string>;
 };
 
 export type ProvidersImportModelsResponse = {
+    catalog?: ModelcatalogInfo;
     created?: number;
     models?: Array<string>;
     skipped?: number;
@@ -3715,6 +3766,12 @@ export type ReasoningOptions = {
      * back to when a stored value is no longer offered by the model.
      */
     default_effort?: string;
+    /**
+     * DefaultOff reports that the model is declared to start with reasoning off:
+     * a client picking the model, or reconciling a value it no longer offers,
+     * starts it off instead of on DefaultEffort. Only set when CanDisable is.
+     */
+    default_off?: boolean;
     /**
      * Efforts are the selectable active tiers, weakest to strongest as advertised.
      */
@@ -4013,7 +4070,7 @@ export type SearchprovidersProviderMeta = {
     provider?: string;
 };
 
-export type SearchprovidersProviderName = 'brave' | 'bing' | 'google' | 'tavily' | 'sogou' | 'serper' | 'searxng' | 'jina' | 'exa' | 'bocha' | 'duckduckgo' | 'yandex';
+export type SearchprovidersProviderName = 'brave' | 'bing' | 'google' | 'tavily' | 'sogou' | 'serper' | 'searxng' | 'jina' | 'exa' | 'bocha' | 'duckduckgo' | 'yandex' | 'deepseek';
 
 export type SearchprovidersUpdateRequest = {
     config?: {
@@ -4090,10 +4147,6 @@ export type SettingsSettings = {
     chat_model_id?: string;
     chat_runtime?: string;
     command_ui_language?: string;
-    compaction_enabled?: boolean;
-    compaction_model_id?: string;
-    compaction_target_percent?: number | null;
-    compaction_threshold?: number;
     default_bot_agent_id?: string;
     discuss_probe_model_id?: string;
     display_enabled?: boolean;
@@ -4161,16 +4214,12 @@ export type SettingsUpsertRequest = {
      * Reference fields below use pointer semantics so autosaving clients can
      * clear a selection: nil = keep current, "" = clear, value = set. The
      * service mirrors each into a `<field>_set` SQL flag (same pattern as
-     * FetchProviderID / CompactionModelID); plain strings would make ""
+     * FetchProviderID / MemoryLLMModelID); plain strings would make ""
      * indistinguishable from "not sent".
      */
     chat_model_id?: string;
     chat_runtime?: string;
     command_ui_language?: string;
-    compaction_enabled?: boolean;
-    compaction_model_id?: string;
-    compaction_target_percent?: number;
-    compaction_threshold?: number;
     default_bot_agent_id?: string;
     discuss_probe_model_id?: string;
     display_enabled?: boolean;
@@ -4216,6 +4265,10 @@ export type TurnRuntimeCommand = {
     kind?: TurnRuntimeCommandKind;
     name?: string;
     running_text?: string;
+    /**
+     * Skill marks a prompt skill, which clients list apart from the runtime's own commands.
+     */
+    skill?: boolean;
 };
 
 export type TurnRuntimeCommandKind = 'turn' | 'read' | 'operation';
@@ -4659,44 +4712,6 @@ export type PostAgentAuthorizationsByIdExchangeResponses = {
 };
 
 export type PostAgentAuthorizationsByIdExchangeResponse = PostAgentAuthorizationsByIdExchangeResponses[keyof PostAgentAuthorizationsByIdExchangeResponses];
-
-export type PostAgentAuthorizationsByIdPollData = {
-    body?: never;
-    path: {
-        /**
-         * Authorization ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/agent-authorizations/{id}/poll';
-};
-
-export type PostAgentAuthorizationsByIdPollErrors = {
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Gone
-     */
-    410: ServerProblem;
-    /**
-     * Service Unavailable
-     */
-    503: ServerProblem;
-};
-
-export type PostAgentAuthorizationsByIdPollError = PostAgentAuthorizationsByIdPollErrors[keyof PostAgentAuthorizationsByIdPollErrors];
-
-export type PostAgentAuthorizationsByIdPollResponses = {
-    /**
-     * OK
-     */
-    200: AgentcredentialAuthorization;
-};
-
-export type PostAgentAuthorizationsByIdPollResponse = PostAgentAuthorizationsByIdPollResponses[keyof PostAgentAuthorizationsByIdPollResponses];
 
 export type PostAuthLoginData = {
     /**
@@ -5399,177 +5414,36 @@ export type PutBotsByBotIdAclRulesByRuleIdResponses = {
 
 export type PutBotsByBotIdAclRulesByRuleIdResponse = PutBotsByBotIdAclRulesByRuleIdResponses[keyof PutBotsByBotIdAclRulesByRuleIdResponses];
 
-export type PostBotsByBotIdAcpRuntimesData = {
-    /**
-     * Runtime spec
-     */
-    body: HandlersAcpRuntimeCreateRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes';
-};
-
-export type PostBotsByBotIdAcpRuntimesErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Not Found
-     */
-    404: ServerProblem;
-    /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
-     * Too Many Requests
-     */
-    429: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-};
-
-export type PostBotsByBotIdAcpRuntimesError = PostBotsByBotIdAcpRuntimesErrors[keyof PostBotsByBotIdAcpRuntimesErrors];
-
-export type PostBotsByBotIdAcpRuntimesResponses = {
-    /**
-     * OK
-     */
-    200: AcpagentRuntimeStatus;
-};
-
-export type PostBotsByBotIdAcpRuntimesResponse = PostBotsByBotIdAcpRuntimesResponses[keyof PostBotsByBotIdAcpRuntimesResponses];
-
-export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdData = {
+export type GetBotsByBotIdAcpOptionsData = {
     body?: never;
     path: {
         /**
          * Bot ID
          */
         bot_id: string;
-        /**
-         * Runtime ID
-         */
-        runtime_id: string;
     };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}';
-};
-
-export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Not Found
-     */
-    404: ServerProblem;
-    /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-};
-
-export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdError = DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors[keyof DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors];
-
-export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
-export type GetBotsByBotIdAcpRuntimesByRuntimeIdData = {
-    body?: never;
-    path: {
+    query: {
         /**
-         * Bot ID
+         * ACP agent ID
          */
-        bot_id: string;
+        acp_agent_id: string;
         /**
-         * Runtime ID
+         * Agent instance ID
          */
-        runtime_id: string;
+        bot_agent_id?: string;
+        /**
+         * Project the conversation will run in; /data when omitted
+         */
+        project_path?: string;
+        /**
+         * Model whose reasoning efforts to report; the agent's current model when omitted
+         */
+        model_id?: string;
     };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}';
+    url: '/bots/{bot_id}/acp-options';
 };
 
-export type GetBotsByBotIdAcpRuntimesByRuntimeIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Not Found
-     */
-    404: ServerProblem;
-    /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-};
-
-export type GetBotsByBotIdAcpRuntimesByRuntimeIdError = GetBotsByBotIdAcpRuntimesByRuntimeIdErrors[keyof GetBotsByBotIdAcpRuntimesByRuntimeIdErrors];
-
-export type GetBotsByBotIdAcpRuntimesByRuntimeIdResponses = {
-    /**
-     * OK
-     */
-    200: AcpagentRuntimeStatus;
-};
-
-export type GetBotsByBotIdAcpRuntimesByRuntimeIdResponse = GetBotsByBotIdAcpRuntimesByRuntimeIdResponses[keyof GetBotsByBotIdAcpRuntimesByRuntimeIdResponses];
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeData = {
-    /**
-     * Mode selection
-     */
-    body: HandlersAcpRuntimeModeRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Runtime ID
-         */
-        runtime_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}/mode';
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors = {
+export type GetBotsByBotIdAcpOptionsErrors = {
     /**
      * Bad Request
      */
@@ -5596,130 +5470,16 @@ export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors = {
     502: ServerProblem;
 };
 
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeError = PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors];
+export type GetBotsByBotIdAcpOptionsError = GetBotsByBotIdAcpOptionsErrors[keyof GetBotsByBotIdAcpOptionsErrors];
 
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeResponses = {
+export type GetBotsByBotIdAcpOptionsResponses = {
     /**
      * OK
      */
     200: AcpagentRuntimeStatus;
 };
 
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeResponse = PatchBotsByBotIdAcpRuntimesByRuntimeIdModeResponses[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModeResponses];
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelData = {
-    /**
-     * Model selection
-     */
-    body: HandlersAcpRuntimeModelRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Runtime ID
-         */
-        runtime_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}/model';
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Not Found
-     */
-    404: ServerProblem;
-    /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-    /**
-     * Bad Gateway
-     */
-    502: ServerProblem;
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelError = PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors];
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponses = {
-    /**
-     * OK
-     */
-    200: AcpagentRuntimeStatus;
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponse = PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponses[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModelResponses];
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningData = {
-    /**
-     * Reasoning effort selection
-     */
-    body: HandlersAcpRuntimeReasoningRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Runtime ID
-         */
-        runtime_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}/reasoning';
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Not Found
-     */
-    404: ServerProblem;
-    /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-    /**
-     * Bad Gateway
-     */
-    502: ServerProblem;
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningError = PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors];
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses = {
-    /**
-     * OK
-     */
-    200: AcpagentRuntimeStatus;
-};
-
-export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponse = PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses];
+export type GetBotsByBotIdAcpOptionsResponse = GetBotsByBotIdAcpOptionsResponses[keyof GetBotsByBotIdAcpOptionsResponses];
 
 export type GetBotsByBotIdAgentsData = {
     body?: never;
@@ -5919,7 +5679,7 @@ export type PatchBotsByBotIdAgentsByIdResponses = {
 
 export type PatchBotsByBotIdAgentsByIdResponse = PatchBotsByBotIdAgentsByIdResponses[keyof PatchBotsByBotIdAgentsByIdResponses];
 
-export type GetBotsByBotIdAgentsByIdCodexUsageData = {
+export type GetBotsByBotIdAgentsByIdAccountData = {
     body?: never;
     path: {
         /**
@@ -5932,10 +5692,10 @@ export type GetBotsByBotIdAgentsByIdCodexUsageData = {
         id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/agents/{id}/codex/usage';
+    url: '/bots/{bot_id}/agents/{id}/account';
 };
 
-export type GetBotsByBotIdAgentsByIdCodexUsageErrors = {
+export type GetBotsByBotIdAgentsByIdAccountErrors = {
     /**
      * Forbidden
      */
@@ -5945,29 +5705,25 @@ export type GetBotsByBotIdAgentsByIdCodexUsageErrors = {
      */
     404: ServerProblem;
     /**
-     * Conflict
-     */
-    409: ServerProblem;
-    /**
      * Unprocessable Entity
      */
     422: ServerProblem;
     /**
-     * Bad Gateway
+     * Service Unavailable
      */
-    502: ServerProblem;
+    503: ServerProblem;
 };
 
-export type GetBotsByBotIdAgentsByIdCodexUsageError = GetBotsByBotIdAgentsByIdCodexUsageErrors[keyof GetBotsByBotIdAgentsByIdCodexUsageErrors];
+export type GetBotsByBotIdAgentsByIdAccountError = GetBotsByBotIdAgentsByIdAccountErrors[keyof GetBotsByBotIdAgentsByIdAccountErrors];
 
-export type GetBotsByBotIdAgentsByIdCodexUsageResponses = {
+export type GetBotsByBotIdAgentsByIdAccountResponses = {
     /**
      * OK
      */
-    200: ExternalagentCodexUsageResponse;
+    200: ExternalagentAgentAccountResponse;
 };
 
-export type GetBotsByBotIdAgentsByIdCodexUsageResponse = GetBotsByBotIdAgentsByIdCodexUsageResponses[keyof GetBotsByBotIdAgentsByIdCodexUsageResponses];
+export type GetBotsByBotIdAgentsByIdAccountResponse = GetBotsByBotIdAgentsByIdAccountResponses[keyof GetBotsByBotIdAgentsByIdAccountResponses];
 
 export type DeleteBotsByBotIdAgentsByIdCredentialData = {
     body?: never;
@@ -6326,6 +6082,52 @@ export type GetBotsByBotIdAgentsByIdModelsResponses = {
 
 export type GetBotsByBotIdAgentsByIdModelsResponse = GetBotsByBotIdAgentsByIdModelsResponses[keyof GetBotsByBotIdAgentsByIdModelsResponses];
 
+export type GetBotsByBotIdAgentsByIdQuotaData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}/quota';
+};
+
+export type GetBotsByBotIdAgentsByIdQuotaErrors = {
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ServerProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ServerProblem;
+};
+
+export type GetBotsByBotIdAgentsByIdQuotaError = GetBotsByBotIdAgentsByIdQuotaErrors[keyof GetBotsByBotIdAgentsByIdQuotaErrors];
+
+export type GetBotsByBotIdAgentsByIdQuotaResponses = {
+    /**
+     * OK
+     */
+    200: ExternalagentAgentQuotaResponse;
+};
+
+export type GetBotsByBotIdAgentsByIdQuotaResponse = GetBotsByBotIdAgentsByIdQuotaResponses[keyof GetBotsByBotIdAgentsByIdQuotaResponses];
+
 export type GetBotsByBotIdAgentsByIdRuntimeControlsData = {
     body?: never;
     path: {
@@ -6338,7 +6140,12 @@ export type GetBotsByBotIdAgentsByIdRuntimeControlsData = {
          */
         id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Folder a draft would run in, which decides its project commands
+         */
+        workdir_id?: string;
+    };
     url: '/bots/{bot_id}/agents/{id}/runtime-controls';
 };
 
@@ -7010,38 +6817,6 @@ export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors = {
 export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdError = DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors[keyof DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors];
 
 export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
-export type DeleteBotsByBotIdCompactionLogsData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/compaction/logs';
-};
-
-export type DeleteBotsByBotIdCompactionLogsErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-};
-
-export type DeleteBotsByBotIdCompactionLogsError = DeleteBotsByBotIdCompactionLogsErrors[keyof DeleteBotsByBotIdCompactionLogsErrors];
-
-export type DeleteBotsByBotIdCompactionLogsResponses = {
     /**
      * No Content
      */
@@ -11658,6 +11433,54 @@ export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses = {
 
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponse = PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses[keyof PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelResponses];
 
+export type DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/acp-runtime/native-session';
+};
+
+export type DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Conflict
+     */
+    409: ServerProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionError = DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionErrors[keyof DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionErrors];
+
+export type DeleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSessionResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningData = {
     /**
      * Reasoning effort selection
@@ -11714,44 +11537,6 @@ export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningResponses = {
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningResponse = PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningResponses[keyof PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningResponses];
-
-export type PostBotsByBotIdSessionsBySessionIdCompactData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Session ID
-         */
-        session_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/sessions/{session_id}/compact';
-};
-
-export type PostBotsByBotIdSessionsBySessionIdCompactErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-};
-
-export type PostBotsByBotIdSessionsBySessionIdCompactError = PostBotsByBotIdSessionsBySessionIdCompactErrors[keyof PostBotsByBotIdSessionsBySessionIdCompactErrors];
-
-export type PostBotsByBotIdSessionsBySessionIdCompactResponses = {
-    /**
-     * OK
-     */
-    200: HandlersTriggerCompactResponse;
-};
-
-export type PostBotsByBotIdSessionsBySessionIdCompactResponse = PostBotsByBotIdSessionsBySessionIdCompactResponses[keyof PostBotsByBotIdSessionsBySessionIdCompactResponses];
 
 export type GetBotsByBotIdSessionsBySessionIdContextLifecycleData = {
     body?: never;
@@ -15597,6 +15382,48 @@ export type PostProvidersResponses = {
 
 export type PostProvidersResponse = PostProvidersResponses[keyof PostProvidersResponses];
 
+export type GetProvidersCatalogModelsData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * models.dev provider ID
+         */
+        source: string;
+        /**
+         * Memoh client protocol
+         */
+        client_type: string;
+    };
+    url: '/providers/catalog/models';
+};
+
+export type GetProvidersCatalogModelsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ServerProblem;
+};
+
+export type GetProvidersCatalogModelsError = GetProvidersCatalogModelsErrors[keyof GetProvidersCatalogModelsErrors];
+
+export type GetProvidersCatalogModelsResponses = {
+    /**
+     * OK
+     */
+    200: ModelcatalogResponse;
+};
+
+export type GetProvidersCatalogModelsResponse = GetProvidersCatalogModelsResponses[keyof GetProvidersCatalogModelsResponses];
+
 export type GetProvidersCountData = {
     body?: never;
     path?: never;
@@ -15848,6 +15675,51 @@ export type PutProvidersByIdResponses = {
 };
 
 export type PutProvidersByIdResponse = PutProvidersByIdResponses[keyof PutProvidersByIdResponses];
+
+export type PostProvidersByIdImportCatalogModelsData = {
+    /**
+     * Models to preserve from a preceding manual creation
+     */
+    body?: ProvidersImportCatalogModelsRequest;
+    path: {
+        /**
+         * Provider ID (UUID)
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/providers/{id}/import-catalog-models';
+};
+
+export type PostProvidersByIdImportCatalogModelsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+    /**
+     * Forbidden
+     */
+    403: ServerProblem;
+    /**
+     * Not Found
+     */
+    404: ServerProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ServerProblem;
+};
+
+export type PostProvidersByIdImportCatalogModelsError = PostProvidersByIdImportCatalogModelsErrors[keyof PostProvidersByIdImportCatalogModelsErrors];
+
+export type PostProvidersByIdImportCatalogModelsResponses = {
+    /**
+     * OK
+     */
+    200: ProvidersImportModelsResponse;
+};
+
+export type PostProvidersByIdImportCatalogModelsResponse = PostProvidersByIdImportCatalogModelsResponses[keyof PostProvidersByIdImportCatalogModelsResponses];
 
 export type PostProvidersByIdImportModelsData = {
     /**

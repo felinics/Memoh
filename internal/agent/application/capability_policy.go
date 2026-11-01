@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	attachmentpkg "github.com/felinics/memoh/internal/attachment"
@@ -64,30 +65,25 @@ const (
 // all. It is the same vision bit the router applies, read before any image is
 // prepared rather than after.
 func modelAcceptsImages(model models.GetResponse) bool {
-	for _, compatibility := range model.Config.Compatibilities {
-		if compatibility == models.CompatVision {
-			return true
-		}
-	}
-	return false
+	return model.Config.Accepts(models.ModalityImage)
 }
 
-// routeAttachmentsByCapability splits attachments based on model compatibilities.
-// Images route natively with CompatVision, PDFs with CompatFileInput, and small
+// modelInputModalities returns what the model accepts as input.
+func modelInputModalities(model models.GetResponse) []models.Modality {
+	if model.Config.Modalities == nil {
+		return nil
+	}
+	return model.Config.Modalities.Input
+}
+
+// routeAttachmentsByCapability splits attachments based on the model's input
+// modalities. Images route natively with image input, PDFs with PDF input, and small
 // plain-text files unconditionally; everything else goes through fallback. The
 // native set is then trimmed to the per-request media budget, demoting the
 // largest attachments first so one oversized file cannot sink the whole turn.
-func routeAttachmentsByCapability(compatibilities []string, attachments []gatewayAttachment) capabilityRouteResult {
-	hasVision := false
-	hasFileInput := false
-	for _, c := range compatibilities {
-		switch c {
-		case models.CompatVision:
-			hasVision = true
-		case models.CompatFileInput:
-			hasFileInput = true
-		}
-	}
+func routeAttachmentsByCapability(inputs []models.Modality, attachments []gatewayAttachment) capabilityRouteResult {
+	hasVision := slices.Contains(inputs, models.ModalityImage)
+	hasFileInput := slices.Contains(inputs, models.ModalityPDF)
 
 	result := capabilityRouteResult{
 		Native:   make([]gatewayAttachment, 0, len(attachments)),

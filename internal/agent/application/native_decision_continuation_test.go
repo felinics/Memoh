@@ -27,7 +27,7 @@ func TestNativeDecisionContinuationNamesTheProviderFailure(t *testing.T) {
 		messageService: &recordingMessageService{},
 	}
 	cfg := native.RunConfig{
-		Model:    &sdk.Model{ID: "continuation-model", Provider: rejectingSpawnProvider{}, Type: sdk.ModelTypeChat},
+		Model:    &sdk.Model{ID: "continuation-model", Provider: rejectingSpawnProvider{}},
 		Messages: []sdk.Message{sdk.UserMessage("continue after the decision")},
 		Identity: native.SessionContext{BotID: lifecycleTestBotID, SessionID: lifecycleTestSessionID},
 	}

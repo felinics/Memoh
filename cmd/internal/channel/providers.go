@@ -22,7 +22,6 @@ import (
 	acpprofileadapter "github.com/felinics/memoh/internal/agent/adapter/acpprofile"
 	"github.com/felinics/memoh/internal/agent/adapter/channelqueue"
 	"github.com/felinics/memoh/internal/agent/application"
-	"github.com/felinics/memoh/internal/agent/context/compaction"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
 	audiopkg "github.com/felinics/memoh/internal/audio"
@@ -75,16 +74,14 @@ func providePipeline(log *slog.Logger) *timeline.Pipeline {
 }
 
 func provideEventStore(log *slog.Logger, queries dbstore.Queries) *timeline.EventStore {
-	store := timeline.NewEventStore(log, queries)
-	store.SetReplayArtifactProvider(compaction.NewTimelineArtifactSource(queries))
-	return store
+	return timeline.NewEventStore(log, queries)
 }
 
 func provideDiscussDriver(log *slog.Logger, eventStore *timeline.EventStore, msgService *message.DBService, queries dbstore.Queries, cfg config.Config) *discuss.DiscussDriver {
 	return discuss.NewDiscussDriver(discuss.DiscussDriverDeps{
 		MessageService:     msgService,
 		CursorStore:        eventStore,
-		Artifacts:          compaction.NewTimelineArtifactSource(queries),
+		Checkpoints:        timeline.NewCheckpointSource(log, queries, msgService),
 		Logger:             log,
 		AdmissionMaxTokens: cfg.Agent.EffectiveContextAbsoluteMaxTokens(),
 	})
@@ -267,7 +264,6 @@ func provideCommandHandler(
 	aclService *acl.Service,
 	containerdHandler *handlers.ContainerdHandler,
 	provider bridge.Provider,
-	compactionService *compaction.Service,
 ) *command.Handler {
 	cmdHandler := command.NewHandler(
 		log,
@@ -283,7 +279,6 @@ func provideCommandHandler(
 		&commandSkillLoaderAdapter{handler: containerdHandler},
 		&commandContainerFSAdapter{provider: provider},
 	)
-	cmdHandler.SetCompactionService(compactionService, queries)
 	cmdHandler.SetLinkConsumer(channelAccessService)
 	return cmdHandler
 }
@@ -494,7 +489,6 @@ func (r *settingsDefaultChatRuntime) DefaultChatRuntime(ctx context.Context, bot
 		Runtime:     s.ChatRuntime,
 		ACPAgentID:  s.ChatACPAgentID,
 		ProjectPath: s.ChatACPProjectPath,
-		ProjectMode: s.ChatACPProjectMode,
 	}, nil
 }
 

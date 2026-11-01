@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -15,6 +17,9 @@ import (
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/runtimekind"
+	"github.com/felinics/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 type BotAgentsHandler struct {
@@ -22,10 +27,15 @@ type BotAgentsHandler struct {
 	botService     *bots.Service
 	accountService *accounts.Service
 	logger         *slog.Logger
-	runtimes       external.Drivers
+	runtimes       *external.Registry
+	workdirs       botAgentWorkdirService
 }
 
-func NewBotAgentsHandler(log *slog.Logger, service *botagents.Service, botService *bots.Service, accountService *accounts.Service, runtimes external.Drivers) *BotAgentsHandler {
+type botAgentWorkdirService interface {
+	RequireActive(ctx context.Context, botID, workdirID string) (workdir.Workdir, error)
+}
+
+func NewBotAgentsHandler(log *slog.Logger, service *botagents.Service, botService *bots.Service, accountService *accounts.Service, runtimes *external.Registry) *BotAgentsHandler {
 	return &BotAgentsHandler{
 		service:        service,
 		botService:     botService,
@@ -34,6 +44,8 @@ func NewBotAgentsHandler(log *slog.Logger, service *botagents.Service, botServic
 		runtimes:       runtimes,
 	}
 }
+
+func (h *BotAgentsHandler) SetWorkdirService(service botAgentWorkdirService) { h.workdirs = service }
 
 func (h *BotAgentsHandler) Register(e *echo.Echo) {
 	group := e.Group("/bots/:bot_id/agents")
@@ -67,7 +79,11 @@ func (h *BotAgentsHandler) ListModels(c echo.Context) error {
 	if err != nil {
 		return h.publicError("list models", err)
 	}
-	catalog, err := h.runtimes.ModelCatalog(c.Request().Context(), agent.Runtime, external.ModelCatalogRequest{
+	provider, ok := external.As[external.ModelCatalogProvider](h.runtimes, agent.Runtime)
+	if !ok {
+		return h.publicError("list models", external.ErrModelCatalogUnavailable)
+	}
+	catalog, err := provider.ModelCatalog(c.Request().Context(), external.ModelCatalogRequest{
 		BotID: botID, BotAgentID: agent.ID, ProjectPath: strings.TrimSpace(c.QueryParam("project_path")),
 		ModelID: strings.TrimSpace(c.QueryParam("model_id")), ResolveDefaults: true,
 	})
@@ -188,9 +204,6 @@ func (h *BotAgentsHandler) Update(c echo.Context) error {
 	if err != nil {
 		return h.publicError("update", err)
 	}
-	if req.Metadata != nil {
-		h.runtimes.ResetBotAgent(botagents.SessionRuntime(agent.Runtime), bot.ID, agent.ID)
-	}
 	return c.JSON(http.StatusOK, h.present(agent, bot))
 }
 
@@ -212,7 +225,7 @@ func (h *BotAgentsHandler) Delete(c echo.Context) error {
 	}
 	botAgentID := strings.TrimSpace(c.Param("id"))
 	err = h.service.Delete(c.Request().Context(), botID, botAgentID, func(agent botagents.BotAgent) error {
-		purgeErr := application.ExternalRuntimeError(h.runtimes.PurgeBotAgentAuth(c.Request().Context(), agent.Runtime, botID, botAgentID))
+		purgeErr := application.ExternalRuntimeError(purgeBotAgentAuth(c.Request().Context(), h.runtimes, agent.Runtime, botID, botAgentID))
 		if purgeErr != nil && apperror.CodeOf(purgeErr) == "" {
 			return apperror.Wrap(apperror.CodeAgentCredentialMaterializationFailed, purgeErr, nil)
 		}
@@ -291,16 +304,32 @@ func botAgentHTTPError(err error) error {
 // leave it nil. An ACP instance that predates per-instance setups gets the
 // setup it currently launches with.
 func (h *BotAgentsHandler) present(agent botagents.BotAgent, bot bots.Bot) botagents.BotAgent {
-	agent.Dependency = dependencyFor(h.runtimes.RequiredDependencies(), agent.Runtime)
+	if caps, ok := h.runtimes.Caps(agent.Runtime); ok && caps.Dependency != "" {
+		agent.Dependency = &botagents.DependencyRequirement{DependencyID: caps.Dependency}
+	}
 	return botagents.WithACPSetup(agent, bot.Metadata)
 }
 
-func dependencyFor(requirements map[string]external.DependencyRequirement, runtime string) *botagents.DependencyRequirement {
-	requirement, ok := requirements[strings.TrimSpace(runtime)]
-	if !ok {
-		return nil
+// draftWorkdirContext pins the workspace target and path a draft's first turn
+// in the requested folder would run with, so the CLI that lists its commands
+// sees the same project.
+func (h *BotAgentsHandler) draftWorkdirContext(c echo.Context, botID, runtime string) (context.Context, string, error) {
+	ctx := c.Request().Context()
+	workdirID := strings.TrimSpace(c.QueryParam("workdir_id"))
+	if workdirID == "" {
+		return ctx, "", nil
 	}
-	return &botagents.DependencyRequirement{DependencyID: requirement.DependencyID}
+	if h.workdirs == nil {
+		return ctx, "", echo.NewHTTPError(http.StatusInternalServerError, "workdir service not configured")
+	}
+	bound, err := h.workdirs.RequireActive(ctx, botID, workdirID)
+	if err != nil {
+		return ctx, "", workdirHTTPError(err)
+	}
+	if runtimekind.IsExternal(runtime) && bound.TargetKind == workdir.TargetKindRemote {
+		return ctx, "", apperror.New(apperror.CodeWorkdirRemoteUnsupportedForAgent, nil)
+	}
+	return workspace.WithWorkspaceTarget(ctx, bound.WorkspaceTargetID), bound.Path, nil
 }
 
 // RuntimeControls godoc
@@ -308,6 +337,7 @@ func dependencyFor(requirements map[string]external.DependencyRequirement, runti
 // @Tags bot-agents
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Agent ID"
+// @Param workdir_id query string false "Folder a draft would run in, which decides its project commands"
 // @Success 200 {object} external.Controls
 // @Failure 403 {object} server.Problem
 // @Failure 404 {object} server.Problem
@@ -322,14 +352,17 @@ func (h *BotAgentsHandler) RuntimeControls(c echo.Context) error {
 	if err != nil {
 		return h.publicError("runtime controls", err)
 	}
-	var driver external.Driver
-	for _, candidate := range h.runtimes {
-		if candidate != nil && candidate.RuntimeType() == agent.Runtime {
-			driver = candidate
-			break
-		}
+	driver, _ := h.runtimes.Driver(agent.Runtime)
+	ctx, projectPath, err := h.draftWorkdirContext(c, botID, agent.Runtime)
+	if err != nil {
+		return err
 	}
-	controls, err := external.ReadControls(c.Request().Context(), driver, external.PromptInput{BotID: botID, BotAgentID: agent.ID, RuntimeMetadata: agent.Metadata})
+	metadata := map[string]any{}
+	maps.Copy(metadata, agent.Metadata)
+	if projectPath != "" {
+		metadata["project_path"] = projectPath
+	}
+	controls, err := external.ReadControls(ctx, driver, external.PromptInput{BotID: botID, BotAgentID: agent.ID, RuntimeMetadata: metadata})
 	if err != nil {
 		return runtimeControlError(err)
 	}

@@ -203,158 +203,32 @@ func TestExecSendDiscussExplicitTargetReportsTargetDelivery(t *testing.T) {
 	}
 }
 
-func TestExecSendCurrentConversationWithoutEmitterUsesChannelAdapter(t *testing.T) {
-	t.Parallel()
+func TestChatSendRejectsCurrentConversationAndLegacyAttachments(t *testing.T) {
+	for name, args := range map[string]map[string]any{
+		"same target":        {"platform": "telegram", "target": "chat-1", "text": "![image](/data/image.png)"},
+		"missing target":     {"text": "hello"},
+		"old attachments":    {"platform": "telegram", "target": "chat-2", "attachments": []any{"/data/image.png"}},
+		"nested attachments": {"platform": "telegram", "target": "chat-2", "message": map[string]any{"attachments": []any{"/data/image.png"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			sender := &recordingSender{}
+			provider := NewMessageProvider(nil, sender, usageTestReactor{}, usageTestResolver{}, messageTestAssetResolver{})
+			_, err := provider.execSend(context.Background(), SessionContext{BotID: "bot_1", SessionType: sessionmode.Chat, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}, "call", args)
+			if err == nil || sender.called != 0 {
+				t.Fatalf("error=%v sends=%d", err, sender.called)
+			}
+		})
+	}
+}
 
+func TestChatSendOtherConversationPreservesMarkdown(t *testing.T) {
 	sender := &recordingSender{}
 	provider := NewMessageProvider(nil, sender, usageTestReactor{}, usageTestResolver{}, messageTestAssetResolver{})
-	result, err := provider.execSend(context.Background(), SessionContext{
-		BotID:           "bot_1",
-		SessionType:     sessionmode.Chat,
-		CurrentPlatform: "telegram",
-		ReplyTarget:     "chat-1",
-	}, "call-test", map[string]any{
-		"attachments": []any{"screenshot.png"},
-	})
-	if err != nil {
-		t.Fatalf("execSend returned error: %v", err)
+	text := "result: ![image](/data/image.png)"
+	_, err := provider.execSend(context.Background(), SessionContext{BotID: "bot_1", SessionType: sessionmode.Chat, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}, "call", map[string]any{"platform": "telegram", "target": "chat-2", "text": text})
+	if err != nil || sender.called != 1 || sender.req.Message.Text != text {
+		t.Fatalf("error=%v request=%+v", err, sender.req)
 	}
-	if sender.called != 1 {
-		t.Fatalf("expected sender called once, got %d", sender.called)
-	}
-	if sender.req.Target != "chat-1" {
-		t.Fatalf("unexpected target: %q", sender.req.Target)
-	}
-	if got := sender.req.Message.Attachments[0].ContentHash; got != "hash_1" {
-		t.Fatalf("expected resolved attachment content hash, got %q", got)
-	}
-	if got := sender.req.Message.Attachments[0].ContentHash; got != "hash_1" {
-		t.Fatalf("expected resolved attachment content hash, got %q", got)
-	}
-	resp, ok := result.(map[string]any)
-	if !ok || resp["ok"] != true || resp["delivered"] != "current_conversation" {
-		t.Fatalf("unexpected result: %#v", result)
-	}
-}
-
-func TestExecSendCurrentConversationCollectingEmitterUsesChannelAdapter(t *testing.T) {
-	t.Parallel()
-
-	sender := &recordingSender{}
-	provider := NewMessageProvider(nil, sender, usageTestReactor{}, usageTestResolver{}, messageTestAssetResolver{})
-	var emitted bool
-	result, err := provider.execSend(context.Background(), SessionContext{
-		BotID:           "bot_1",
-		SessionType:     sessionmode.Chat,
-		CurrentPlatform: "telegram",
-		ReplyTarget:     "chat-1",
-		Emitter: func(ToolStreamEvent) {
-			emitted = true
-		},
-	}, "call-test", map[string]any{
-		"attachments": []any{"screenshot.png"},
-	})
-	if err != nil {
-		t.Fatalf("execSend returned error: %v", err)
-	}
-	if emitted {
-		t.Fatal("non-live collecting emitter should not be used for current-conversation send")
-	}
-	if sender.called != 1 {
-		t.Fatalf("expected sender called once, got %d", sender.called)
-	}
-	if got := sender.req.Message.Attachments[0].ContentHash; got != "hash_1" {
-		t.Fatalf("expected resolved attachment content hash, got %q", got)
-	}
-	resp, ok := result.(map[string]any)
-	if !ok || resp["ok"] != true || resp["delivered"] != "current_conversation" {
-		t.Fatalf("unexpected result: %#v", result)
-	}
-}
-
-func TestExecSendCurrentConversationLiveStreamUsesEmitter(t *testing.T) {
-	t.Parallel()
-
-	sender := &recordingSender{}
-	provider := NewMessageProvider(nil, sender, usageTestReactor{}, usageTestResolver{}, messageTestAssetResolver{})
-	var emitted int
-	result, err := provider.execSend(context.Background(), SessionContext{
-		BotID:           "bot_1",
-		SessionType:     sessionmode.Chat,
-		CurrentPlatform: "telegram",
-		ReplyTarget:     "chat-1",
-		LiveStream:      true,
-		Emitter: func(ToolStreamEvent) {
-			emitted++
-		},
-	}, "call-test", map[string]any{
-		"attachments": []any{"screenshot.png"},
-	})
-	if err != nil {
-		t.Fatalf("execSend returned error: %v", err)
-	}
-	if emitted != 1 {
-		t.Fatalf("expected live stream emitter called once, got %d", emitted)
-	}
-	if sender.called != 0 {
-		t.Fatalf("expected sender not called for live stream shortcut, got %d", sender.called)
-	}
-	resp, ok := result.(map[string]any)
-	if !ok || resp["ok"] != true || resp["delivered"] != "current_conversation" {
-		t.Fatalf("unexpected result: %#v", result)
-	}
-}
-
-func TestExecSendCurrentConversationLiveStreamAttachmentWithTextEmitsAndFlagsText(t *testing.T) {
-	t.Parallel()
-
-	sender := &recordingSender{}
-	provider := NewMessageProvider(nil, sender, usageTestReactor{}, usageTestResolver{}, messageTestAssetResolver{})
-	var emitted int
-	result, err := provider.execSend(context.Background(), SessionContext{
-		BotID:           "bot_1",
-		SessionType:     sessionmode.Chat,
-		CurrentPlatform: "telegram",
-		ReplyTarget:     "chat-1",
-		LiveStream:      true,
-		Emitter: func(ToolStreamEvent) {
-			emitted++
-		},
-	}, "call-test", map[string]any{
-		"text":        "这是当前 blog 的页面截图。",
-		"attachments": []any{"screenshot.png"},
-	})
-	if err != nil {
-		t.Fatalf("execSend returned error: %v", err)
-	}
-	if emitted != 1 {
-		t.Fatalf("expected live stream emitter called once, got %d", emitted)
-	}
-	if sender.called != 0 {
-		t.Fatalf("expected sender not called for live stream shortcut, got %d", sender.called)
-	}
-	resp, ok := result.(map[string]any)
-	if !ok || resp["ok"] != true || resp["delivered"] != "current_conversation" {
-		t.Fatalf("unexpected result: %#v", result)
-	}
-	if resp["text_delivered"] != false {
-		t.Fatalf("expected text_delivered=false in result, got %#v", result)
-	}
-	note, _ := resp["note"].(string)
-	if !strings.Contains(note, "assistant reply") {
-		t.Fatalf("expected note guiding assistant reply, got %#v", result)
-	}
-}
-
-type recordingReactor struct {
-	called int
-	req    messaging.ReactRequest
-}
-
-func (r *recordingReactor) React(_ context.Context, _ string, _ messaging.Platform, req messaging.ReactRequest) error {
-	r.called++
-	r.req = req
-	return nil
 }
 
 func TestExecReactSameConversationCollectingEmitterUsesReactor(t *testing.T) {
@@ -427,4 +301,15 @@ func TestExecReactSameConversationLiveStreamUsesEmitter(t *testing.T) {
 	if !ok || resp["ok"] != true || resp["target"] != "chat-1" {
 		t.Fatalf("unexpected result: %#v", result)
 	}
+}
+
+type recordingReactor struct {
+	called int
+	req    messaging.ReactRequest
+}
+
+func (r *recordingReactor) React(_ context.Context, _ string, _ messaging.Platform, req messaging.ReactRequest) error {
+	r.called++
+	r.req = req
+	return nil
 }

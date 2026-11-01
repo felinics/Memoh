@@ -1,0 +1,189 @@
+[
+  {
+    "model_id": "gpt-6-luna",
+    "path": "/responses",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "file-input",
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 1050000,
+      "reasoning_dialect": "tier",
+      "reasoning_efforts": [
+        "disable",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "thinking_mode": "toggle"
+    }
+  },
+  {
+    "model_id": "muse-spark-1.3-contributor",
+    "path": "/responses",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "file-input",
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 1048576,
+      "reasoning_dialect": "tier",
+      "reasoning_efforts": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "thinking_mode": "toggle"
+    }
+  },
+  {
+    "model_id": "minimax-m3",
+    "path": "/messages",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 1000000,
+      "reasoning_dialect": "toggle",
+      "reasoning_efforts": [
+        "disable",
+        "enabled"
+      ],
+      "reasoning_off_support": "accepted",
+      "thinking_mode": "toggle"
+    }
+  },
+  {
+    "model_id": "minimax-m2.7",
+    "path": "/messages",
+    "config": {
+      "compatibilities": [
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 204800,
+      "thinking_mode": "always"
+    }
+  },
+  {
+    "model_id": "qwen3.8-max",
+    "path": "/messages",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 1000000,
+      "reasoning_dialect": "tier",
+      "reasoning_efforts": [
+        "disable",
+        "low",
+        "medium",
+        "xhigh"
+      ],
+      "reasoning_off_support": "accepted",
+      "thinking_mode": "toggle"
+    }
+  },
+  {
+    "model_id": "qwen3.7-plus",
+    "path": "/messages",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 1000000,
+      "reasoning_dialect": "budget",
+      "reasoning_efforts": [
+        "disable",
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning_off_support": "accepted",
+      "thinking_budget_max": 262144,
+      "thinking_mode": "toggle"
+    }
+  },
+  {
+    "model_id": "longcat-2.0",
+    "path": "/chat/completions",
+    "config": {
+      "compatibilities": [
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 1000000,
+      "reasoning_dialect": "toggle",
+      "reasoning_efforts": [
+        "disable",
+        "enabled"
+      ],
+      "reasoning_off_support": "accepted",
+      "thinking_mode": "toggle"
+    }
+  },
+  {
+    "model_id": "deepseek-v4-flash-vision-exp",
+    "path": "/chat/completions",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 1000000,
+      "reasoning_dialect": "tier",
+      "reasoning_efforts": [
+        "disable",
+        "low",
+        "high",
+        "max"
+      ],
+      "reasoning_off_support": "accepted",
+      "thinking_mode": "toggle"
+    }
+  },
+  {
+    "model_id": "hy4-preview",
+    "path": "/chat/completions",
+    "config": {
+      "compatibilities": [
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 1024000,
+      "reasoning_dialect": "tier",
+      "reasoning_efforts": [
+        "disable",
+        "high"
+      ],
+      "thinking_mode": "toggle"
+    }
+  },
+  {
+    "model_id": "glm-5.1",
+    "path": "/chat/completions",
+    "config": {
+      "compatibilities": [
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 202752,
+      "thinking_mode": "always"
+    }
+  }
+]

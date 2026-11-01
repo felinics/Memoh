@@ -436,7 +436,7 @@ func TestAggregateContextLifecycle(t *testing.T) {
 			Selection:        contextfrag.SelectionTrace{DropReasons: map[string]int{"can_drop": 3}},
 			Mutations: []contextfrag.MutationRecord{
 				{Kind: contextfrag.MutationBeforeModelCallHook},
-				{Kind: contextfrag.MutationMidTaskPrune},
+				{Kind: contextfrag.MutationContextSwitch},
 			},
 		}},
 		{Snapshot: contextfrag.LifecycleSnapshot{
@@ -459,7 +459,7 @@ func TestAggregateContextLifecycle(t *testing.T) {
 	if agg.DropReasons["can_drop"] != 4 || agg.DropReasons["trust_gate:external_in_system_slot"] != 1 {
 		t.Fatalf("drop reasons = %#v", agg.DropReasons)
 	}
-	if agg.MutationKinds["before_model_call_hook"] != 1 || agg.MutationKinds["mid_task_prune"] != 1 {
+	if agg.MutationKinds["before_model_call_hook"] != 1 || agg.MutationKinds["context_switch"] != 1 {
 		t.Fatalf("mutation kinds = %#v", agg.MutationKinds)
 	}
 }

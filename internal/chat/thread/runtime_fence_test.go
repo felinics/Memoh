@@ -71,6 +71,26 @@ func TestSessionUpdateMapsMissingFenceToStale(t *testing.T) {
 	}
 }
 
+func TestRuntimeMetadataMergeAfterLostResetLeaseDoesNotWrite(t *testing.T) {
+	t.Parallel()
+
+	const (
+		botID     = "11111111-1111-1111-1111-111111111111"
+		sessionID = "22222222-2222-2222-2222-222222222222"
+	)
+	// The fake reads and writes nothing: a merge that skipped the lease
+	// check would panic on its first query.
+	service := NewService(nil, &runtimeFenceSessionQueries{}, nil)
+	ctx, cancel := context.WithCancelCause(runtimefence.WithResetContext(context.Background(), runtimefence.ResetFence{
+		Scope: "session", BotID: botID, SessionID: sessionID, Token: "reset-token",
+	}))
+	cancel(runtimefence.ErrResetLeaseLost)
+
+	if _, err := service.MergeRuntimeMetadata(ctx, sessionID, RuntimeACPAgent, map[string]any{"acp_native_session": nil}); !errors.Is(err, runtimefence.ErrResetLeaseLost) {
+		t.Fatalf("MergeRuntimeMetadata() error = %v, want ErrResetLeaseLost", err)
+	}
+}
+
 func runtimeFenceSessionRow(sessionID, botID pgtype.UUID) dbsqlc.BotSession {
 	return dbsqlc.BotSession{
 		ID:              sessionID,

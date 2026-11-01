@@ -2,60 +2,94 @@ package application
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 type preparedHistoryContext struct {
-	messages          []ModelMessage
-	records           []historyfrag.HistoryRecord
-	estimatedTokens   int
-	compactableTokens int
-	pressureTokens    int
+	messages       []ModelMessage
+	records        []historyfrag.HistoryRecord
+	pressureTokens int
+	// truncated reports that the load's byte budget left rows after the
+	// checkpoint out.
+	truncated bool
 }
 
+// loadChatHistory loads the history a chat request renders, composed from
+// the pipeline or read from the session's rows. A load the byte budget
+// truncated would render a history that starts later than its checkpoint's
+// position, so the rows it left out are folded from rows first
+// (compactForBudget) and the history loads again; one still truncated after
+// that fails the request.
+func (s *Service) loadChatHistory(ctx context.Context, req ChatRequest, usePipeline bool, contextTokenBudget int, modelID string) (preparedHistoryContext, error) {
+	load := func() (preparedHistoryContext, error) {
+		if usePipeline {
+			messages, pressure, truncated, err := s.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
+			return preparedHistoryContext{messages: messages, pressureTokens: pressure, truncated: truncated}, err
+		}
+		return s.prepareHistoryContext(ctx, req, historyScopeFallbackFromChatRequest(req), contextTokenBudget)
+	}
+	history, err := load()
+	if err != nil || !history.truncated {
+		return history, err
+	}
+	if err := s.compactForBudget(ctx, req, history.pressureTokens, contextTokenBudget, modelID); err != nil {
+		return preparedHistoryContext{}, truncatedLoadFailure(err)
+	}
+	if history, err = load(); err == nil && history.truncated {
+		err = truncatedLoadFailure(errors.New("compacted history still exceeds the load budget"))
+	}
+	return history, err
+}
+
+// truncatedLoadFailure is the failure of a request whose truncated history
+// could not be folded before it runs: the budget's, unless the compaction
+// failed on the provider's account (budgetFailureCode).
+func truncatedLoadFailure(cause error) error {
+	return apperror.Wrap(budgetFailureCode(cause), fmt.Errorf("%w: %w", contextfrag.ErrBudgetUnsatisfied, cause), nil)
+}
+
+// prepareHistoryContext loads the history a request renders: the history
+// under the session's checkpoint, with what it must keep raw and without
+// what never replays. An edit or retry renders the history as it stood at
+// its cutoff, under the checkpoint its replacement keeps.
 func (s *Service) prepareHistoryContext(
 	ctx context.Context,
 	req ChatRequest,
 	fallback historyfrag.ScopeFallback,
 	contextTokenBudget int,
 ) (preparedHistoryContext, error) {
-	loaded, err := s.loadHistoryRecords(ctx, fallback, req.ThreadID, defaultMaxContextMinutes, contextTokenBudget)
+	cut, err := s.loadHistoryCut(ctx, req)
+	if err != nil {
+		return preparedHistoryContext{}, err
+	}
+	scope := compactionSummaryScope(req.BotID, req.ChatID, req.ThreadID, req.ConversationType, req.ConversationName, req.ReplyTarget)
+	loaded, truncated, err := s.loadHistoryRecords(ctx, fallback, scope, contextTokenBudget, cut)
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
 	loaded = pruneHistoryForGateway(loaded)
 	loaded = dropPreflightFailureTurns(loaded)
 	loaded = dropEmptyHistoryFailures(loaded)
-	boundary := s.loadCompactionArtifactBoundary(ctx, loaded, req.ThreadID, req.HistoryCutoffBeforeMessageID)
-	loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
 	loaded = dedupePersistedCurrentUserMessage(loaded, req)
 	loaded, err = s.ensureRequiredHistoryMessage(ctx, loaded, req)
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
-	loaded, err = s.replaceCompactedMessages(
-		ctx,
-		req.ThreadID,
-		compactionSummaryScope(req.BotID, req.ChatID, req.ThreadID, req.ConversationType, req.ConversationName, req.ReplyTarget),
-		loaded,
-		boundary,
-	)
-	if err != nil {
-		return preparedHistoryContext{}, err
-	}
 	loaded = projectInterruptedHistoryReasoning(loaded)
-	compactableTokens := totalCompactableHistoryTokens(loaded)
-	messages, records, estimatedTokens := trimMessagesAndRecordsByTokens(s.logger, loaded, contextTokenBudget)
+	messages, records := historyMessagesFromRecords(loaded)
 	return preparedHistoryContext{
-		messages:          messages,
-		records:           records,
-		estimatedTokens:   estimatedTokens,
-		compactableTokens: compactableTokens,
-		pressureTokens:    estimateMessagesTokens(loaded),
+		messages:       messages,
+		records:        records,
+		pressureTokens: estimateMessagesTokens(loaded),
+		truncated:      truncated,
 	}, nil
 }
 

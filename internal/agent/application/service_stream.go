@@ -182,7 +182,8 @@ func agentStreamFailure(event native.StreamEvent) error {
 
 // nativeFailureCode names the failure a native run ended with. A context the
 // budget cannot fit is named before anything else, since only compacting or
-// another model helps. A provider that named why it refused the request is
+// another model helps, unless the compaction failed on the provider's account
+// (budgetFailureCode). A provider that named why it refused the request is
 // reported with that reason: an exhausted balance and a rejected key both need
 // the user to go change something, and "the model response was interrupted,
 // please try again" sends them back into a call that cannot succeed. A model
@@ -193,7 +194,7 @@ func nativeFailureCode(cause error) apperror.Code {
 	case errors.Is(cause, contextfrag.ErrProtectedContextOverflow):
 		return apperror.CodeContextProtectedOverflow
 	case errors.Is(cause, contextfrag.ErrBudgetUnsatisfied):
-		return apperror.CodeContextBudgetUnsatisfied
+		return budgetFailureCode(cause)
 	}
 	if code := providerFailureCode(cause, native.IsModelCallFailure(cause)); code != "" {
 		return code
@@ -368,11 +369,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		cfg.LiveToolStream = true
 		cfg.CanRequestUserInput = s.canDeliverUserInputStream()
 		reasoningTiming := newReasoningTimingTracker(nil)
-		stepCommitter := s.newAgentStepCommitter(streamCtx, streamReq, rc)
-		configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
-		if stepCommitter != nil {
-			stepCommitter.bindContinuation(&cfg)
-		}
+		stepCommitter := s.bindNativeRun(streamCtx, streamReq, rc, &cfg, reasoningTiming)
 		cfg = s.prepareRunConfig(streamCtx, cfg)
 		terminal := s.contextLifecycleTerminal(streamCtx, cfg)
 		outcome := newOutcomeRecorder(streamCtx)
@@ -450,7 +447,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 					hasSnapshot = true
 					outcome.observeSnapshot(snap)
 					if !stored && !runOwnershipLost(streamCtx) && stepCommitter != nil {
-						if storeErr := stepCommitter.finish(streamCtx, extractInputTokensFromUsage(snap.usage)); storeErr != nil {
+						if storeErr := stepCommitter.finish(streamCtx); storeErr != nil {
 							terminalPersistErr = runtimeHistoryError(storeErr)
 							outcome.recordCause(terminalPersistErr)
 							s.logger.ErrorContext(ctx, "stream step finalization failed", slog.Any("error", storeErr))
@@ -476,7 +473,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 				case !hasVisibleOutput:
 					stored = true
 				case stepCommitter != nil:
-					if storeErr := stepCommitter.finish(streamCtx, rc.estimatedTokens); storeErr != nil {
+					if storeErr := stepCommitter.finish(streamCtx); storeErr != nil {
 						terminalPersistErr = runtimeHistoryError(storeErr)
 					} else {
 						stored = true
@@ -515,7 +512,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		// snapshot are treated as unsent so the Web UI can restore the draft
 		// without polluting history.
 		if !stored && stepCommitter != nil && !runOwnershipLost(streamCtx) {
-			if storeErr := stepCommitter.finish(streamCtx, rc.estimatedTokens); storeErr != nil {
+			if storeErr := stepCommitter.finish(streamCtx); storeErr != nil {
 				outcome.recordCause(storeErr)
 				s.logger.ErrorContext(ctx, "stream step finalization failed", slog.Any("error", storeErr))
 			}
@@ -710,11 +707,7 @@ func (s *Service) streamChatWSResultWithHooks(
 	cfg.LiveToolStream = true
 	cfg.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)
 	reasoningTiming := newReasoningTimingTracker(nil)
-	stepCommitter := s.newAgentStepCommitter(streamCtx, req, rc)
-	configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
-	if stepCommitter != nil {
-		stepCommitter.bindContinuation(&cfg)
-	}
+	stepCommitter := s.bindNativeRun(streamCtx, req, rc, &cfg, reasoningTiming)
 	cfg = s.prepareRunConfig(streamCtx, cfg)
 	terminal := s.contextLifecycleTerminal(streamCtx, cfg)
 	outcome := newOutcomeRecorder(streamCtx)
@@ -796,7 +789,7 @@ func (s *Service) streamChatWSResultWithHooks(
 				hasSnapshot = true
 				outcome.observeSnapshot(snap)
 				if !stored && !runOwnershipLost(ctx) && stepCommitter != nil {
-					if storeErr := stepCommitter.finish(ctx, extractInputTokensFromUsage(snap.usage)); storeErr != nil {
+					if storeErr := stepCommitter.finish(ctx); storeErr != nil {
 						outcome.recordCause(storeErr)
 						s.logger.ErrorContext(ctx, "ws step finalization failed", slog.Any("error", storeErr))
 					} else {
@@ -840,7 +833,7 @@ func (s *Service) streamChatWSResultWithHooks(
 		if !failureRecorded {
 			failureRows = s.recordStepRunFailure(ctx, stepCommitter, uncommittedText.String(), wsFailureCode(req, outcome))
 		}
-		if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens); storeErr != nil {
+		if storeErr := stepCommitter.finish(ctx); storeErr != nil {
 			outcome.recordCause(storeErr)
 			s.logger.ErrorContext(ctx, "ws step finalization failed", slog.Any("error", storeErr))
 		} else {
@@ -983,10 +976,6 @@ func (s *Service) persistTerminalSnapshotResult(ctx context.Context, req ChatReq
 		}
 	}
 
-	if inputTokens := extractInputTokensFromUsage(snap.usage); inputTokens > 0 {
-		s.maybeCompact(context.WithoutCancel(ctx), req, rc, inputTokens)
-	}
-
 	return persisted, nil
 }
 
@@ -1045,12 +1034,6 @@ func (s *Service) persistPartialResult(
 				slog.Int("partial_messages", len(partialMessages)),
 				slog.Bool("idle_timeout", wasIdleTimeout),
 			)
-			// Trigger compaction on the failure path so that oversized
-			// contexts don't deadlock (where the LLM can never succeed and
-			// therefore compaction never fires).
-			if rc.estimatedTokens > 0 {
-				s.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
-			}
 			return persisted
 		}
 		s.logger.ErrorContext(ctx, "failed to persist partial agent messages",
@@ -1076,10 +1059,6 @@ func (s *Service) persistPartialResult(
 		slog.Bool("idle_timeout", wasIdleTimeout),
 		slog.Bool("visible_output", hasVisibleOutput),
 	)
-
-	if rc.estimatedTokens > 0 {
-		s.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
-	}
 	return nil
 }
 
@@ -1157,17 +1136,4 @@ func interleaveInjectedMessages(round []ModelMessage, injections []InjectedMessa
 		})
 	}
 	return result
-}
-
-func extractInputTokensFromUsage(raw json.RawMessage) int {
-	if len(raw) == 0 {
-		return 0
-	}
-	var u struct {
-		InputTokens int `json:"inputTokens"`
-	}
-	if json.Unmarshal(raw, &u) != nil {
-		return 0
-	}
-	return u.InputTokens
 }

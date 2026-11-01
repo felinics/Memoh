@@ -3,6 +3,7 @@ package contextview
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	native "github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func recoveryBudgetFixture() native.RunConfig {
@@ -76,17 +78,35 @@ func TestProviderBudgetRecoveryCanCompactBeforeHistoryIsDropped(t *testing.T) {
 }
 
 func TestProviderBudgetRecoveryCannotBypassAdmission(t *testing.T) {
-	for _, recovered := range []bool{false, true} {
-		t.Run(map[bool]string{false: "no compaction", true: "still oversized"}[recovered], func(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		recovered bool
+		summary   string
+		err       error
+		want      error
+	}{
+		{name: "declined", want: contextfrag.ErrProtectedContextOverflow},
+		{name: "still oversized", recovered: true, want: contextfrag.ErrBudgetUnsatisfied},
+		{name: "summary longer than the history budget", recovered: true, summary: strings.Repeat("s", 6000), want: contextfrag.ErrBudgetUnsatisfied},
+		{name: "compaction failed", err: fmt.Errorf("%w: summarizer down", contextfrag.ErrBudgetUnsatisfied), want: contextfrag.ErrBudgetUnsatisfied},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			cfg := recoveryBudgetFixture()
 			calls := 0
 			cfg.RecoverContextBudget = func(_ context.Context, cfg native.RunConfig) (native.RunConfig, bool, error) {
 				calls++
-				return cfg, recovered, nil
+				if tc.summary != "" {
+					cfg.ContextSourceFrags = append([]contextfrag.ContextFrag(nil), cfg.ContextSourceFrags...)
+					cfg.ContextSourceFrags[1] = contextfrag.TextFrag(contextfrag.TextFragInput{
+						ID: "summary", Kind: contextfrag.KindConversationSummary, Role: sdk.MessageRoleUser,
+						Slot: contextfrag.SlotHistory, Text: tc.summary, Trust: contextfrag.TrustExternal,
+					})
+				}
+				return cfg, tc.recovered, tc.err
 			}
 			got, err := ProviderRunConfigApplier(nil)(context.Background(), cfg)
-			if !errors.Is(err, contextfrag.ErrProtectedContextOverflow) || calls != 1 {
-				t.Fatalf("recovery calls=%d error=%v", calls, err)
+			if !errors.Is(err, tc.want) || calls != 1 || (errors.Is(tc.want, contextfrag.ErrBudgetUnsatisfied) && errors.Is(err, contextfrag.ErrProtectedContextOverflow)) {
+				t.Fatalf("recovery calls=%d error=%v, want %v", calls, err, tc.want)
 			}
 			found := false
 			for _, mutation := range got.ContextMutations.Records() {
@@ -164,5 +184,27 @@ func TestProviderBudgetRecoveryHonorsCancellation(t *testing.T) {
 	}
 	if _, err := ProviderRunConfigApplier(nil)(ctx, cfg); !errors.Is(err, context.Canceled) {
 		t.Fatalf("recovery cancellation = %v", err)
+	}
+}
+
+// An armed run keeps its whole history over the budget, with no trim notice
+// and no failure: it folds what does not fit before it dispatches. A tool
+// exchange missing its other half is still cut.
+func TestProviderArmedRunKeepsItsHistory(t *testing.T) {
+	cfg := recoveryBudgetFixture()
+	cfg.ContextSourceFrags[1].Budget.Overflow = contextfrag.OverflowDrop
+	orphan := stableHistoryMessageFrag("orphan", sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "gone", ToolName: "exec", Result: toolexec.OutputFromValue("lost")}))
+	cfg.ContextSourceFrags = append(cfg.ContextSourceFrags[:2], orphan, cfg.ContextSourceFrags[2])
+	cfg.SwitchContext = func(context.Context, native.ContextSwitch) (string, error) { return "", nil }
+	got, err := ProviderRunConfigApplier(nil)(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("an armed run over its budget failed before folding: %v", err)
+	}
+	want := []sdk.Message{sdk.AssistantMessage(strings.Repeat("h", 8000)), sdk.UserMessage("continue")}
+	if !reflect.DeepEqual(got.Messages, want) {
+		t.Fatalf("messages = %+v, want the whole history without the orphan result and no trim notice", got.Messages)
+	}
+	if plan := got.ContextManifest.BudgetPlan; plan == nil || plan.HistoryBudget != 998 {
+		t.Fatalf("budget plan = %+v, want the plan the fold sizes against", plan)
 	}
 }

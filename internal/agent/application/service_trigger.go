@@ -1,6 +1,7 @@
 package application
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,11 +18,15 @@ import (
 	"github.com/felinics/memoh/internal/schedule"
 )
 
-// attachCurrentTurnPrompt routes a trigger's rich prompt through Query so the
-// context view classifies it as the live current request rather than history.
-func attachCurrentTurnPrompt(cfg native.RunConfig, prompt string) native.RunConfig {
+// attachCurrentTurnPrompt makes a trigger's rich prompt the run's input: the
+// context view classifies it as the live current request rather than history,
+// and the turn stores it as sent, so every later request renders the input
+// the way this run sent it. The turn still displays the trigger's own text.
+func attachCurrentTurnPrompt(req ChatRequest, cfg native.RunConfig, prompt string) (ChatRequest, native.RunConfig) {
+	req.RawQuery = cmp.Or(req.RawQuery, req.Query)
+	req.Query = prompt
 	cfg.Query = prompt
-	return cfg
+	return req, cfg
 }
 
 // TriggerSchedule executes a scheduled command via the internal agent.
@@ -132,7 +137,7 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		MaxCalls:    payload.MaxCalls,
 		Command:     payload.Command,
 	})
-	cfg = attachCurrentTurnPrompt(cfg, schedulePrompt)
+	req, cfg = attachCurrentTurnPrompt(req, cfg, schedulePrompt)
 	cfg = s.prepareRunConfig(ctx, cfg)
 	terminal := s.contextLifecycleTerminal(ctx, cfg)
 	var lifecycleCause error
@@ -143,8 +148,7 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 	// the run is visible while it executes. The previous Generate-based path
 	// emitted nothing until storeRound wrote the whole round at the end.
 	reasoningTiming := newReasoningTimingTracker(nil)
-	stepCommitter := s.newAgentStepCommitter(ctx, req, rc)
-	configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
+	stepCommitter := s.bindNativeRun(ctx, req, rc, &cfg, reasoningTiming)
 
 	result, streamErr := s.runTriggeredNativeStream(ctx, cfg, req, rc, admission.Handle, stepCommitter, reasoningTiming)
 	lifecycleCause = streamErr
@@ -286,7 +290,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 			hasSnapshot = true
 			if !stored && !runOwnershipLost(ctx) {
 				if stepCommitter != nil {
-					if storeErr := stepCommitter.finish(ctx, extractInputTokensFromUsage(snap.usage)); storeErr != nil {
+					if storeErr := stepCommitter.finish(ctx); storeErr != nil {
 						terminalPersistErr = runtimeHistoryError(storeErr)
 						if streamErr == nil {
 							streamErr = terminalPersistErr
@@ -315,7 +319,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 				// row to persist; the admitted user message is already durable.
 				stored = true
 			case stepCommitter != nil:
-				if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens); storeErr != nil {
+				if storeErr := stepCommitter.finish(ctx); storeErr != nil {
 					terminalPersistErr = runtimeHistoryError(storeErr)
 				} else {
 					stored = true
@@ -348,7 +352,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 	// behavior change from the Generate era, which persisted nothing on
 	// failure — the partial record is the more honest one.
 	if !stored && stepCommitter != nil && !runOwnershipLost(ctx) {
-		if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens); storeErr != nil {
+		if storeErr := stepCommitter.finish(ctx); storeErr != nil {
 			if streamErr == nil {
 				streamErr = storeErr
 			}

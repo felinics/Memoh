@@ -34,8 +34,6 @@ export interface ChatBootstrapDeps {
   startBotSessionsActivityStream: (botId: string) => void
   startSessionRuntime: (botId: string, sessionId: string) => void
   releasePreviousSession: (botId: string, sessionId: string) => void
-  abort: () => void
-  abortAllAssistantStreams: () => void
   clearFsForBotSwitch: () => void
   clearRememberedSessions: () => void
   resetToEmptyComposer: (options: {
@@ -206,11 +204,15 @@ export function createChatBootstrap(deps: ChatBootstrapDeps) {
     deps.startSessionRuntime(botId, sessionId)
   }
 
+  /**
+   * Switching bots only changes what is on screen. A running turn of the bot
+   * being left is not stopped: the server keeps it going after its socket
+   * closes, and its local stream stays pending until the user returns to the
+   * session, where the runtime snapshot resumes or settles it.
+   */
   async function selectBot(targetBotId: string) {
     if (deps.currentBotId.value === targetBotId) return
     deps.bumpSelectSessionRequest()
-    deps.abort()
-    deps.abortAllAssistantStreams()
     deps.clearPendingExternalAgentSession()
     deps.clearFsForBotSwitch()
     deps.resetSessionActivity()

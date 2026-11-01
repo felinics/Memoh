@@ -228,10 +228,9 @@ type statusRestatement struct {
 // restatedStatuses are the published codes whose HTTP status was changed. A
 // status is changed only when no client depends on it.
 var restatedStatuses = map[Code]statusRestatement{
-	// No HTTP route returned either code; WebSocket and IM frames carry no
+	// No HTTP route returned this code; WebSocket and IM frames carry no
 	// status, and the RPC envelope is decoded by code.
-	CodeAgentProviderAuthFailed:     {from: http.StatusUnauthorized, to: http.StatusBadGateway},
-	CodeAgentProviderQuotaExhausted: {from: http.StatusPaymentRequired, to: http.StatusBadGateway},
+	CodeAgentProviderAuthFailed: {from: http.StatusUnauthorized, to: http.StatusBadGateway},
 }
 
 // codes.golden is the record of the public contract, sorted by code: a code
@@ -341,6 +340,7 @@ var declaredFaults = map[Code]Fault{
 	CodeACPConfigUpdateFailed:              FaultDependency,
 	CodeConnectorOAuthClientNotConfigured:  FaultDependency,
 	CodeExternalRuntimeRateLimited:         FaultDependency,
+	CodeExternalRuntimeReported:            FaultDependency,
 	CodeExternalRuntimeOverloaded:          FaultDependency,
 	CodeExternalRuntimeUpstreamUnreachable: FaultDependency,
 	CodeWorkspaceImageRegistryUnavailable:  FaultDependency,
@@ -390,8 +390,11 @@ func TestCatalogDeclaredFaults(t *testing.T) {
 				t.Errorf("catalog entry %q declares fault %q; add it to declaredFaults", code, definition.Fault)
 			}
 		}
-		if definition.Fault == FaultDependency && definition.HTTPStatus < http.StatusInternalServerError && definition.HTTPStatus != http.StatusTooManyRequests {
-			t.Errorf("dependency code %q answers %d; a dependency's failure answers 5xx, or 429 when the client should back off", code, definition.HTTPStatus)
+		// Exhausted provider balance needs payment or quota, not a retry, but
+		// remains a dependency fault even though it answers 402.
+		quotaPaymentRequired := code == CodeAgentProviderQuotaExhausted && definition.HTTPStatus == http.StatusPaymentRequired
+		if definition.Fault == FaultDependency && definition.HTTPStatus < http.StatusInternalServerError && definition.HTTPStatus != http.StatusTooManyRequests && !quotaPaymentRequired {
+			t.Errorf("dependency code %q answers %d; a dependency's failure answers 5xx, 429 for backoff, or 402 for exhausted provider quota", code, definition.HTTPStatus)
 		}
 		for _, prefix := range providerCodePrefixes {
 			if strings.HasPrefix(string(code), prefix) && definition.Fault != FaultDependency {

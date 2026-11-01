@@ -16,6 +16,7 @@ func (s *Service) bindQueueContinuation(
 	req *ChatRequest,
 	cfg *native.RunConfig,
 	rc resolvedContext,
+	timing *reasoningTimingTracker,
 ) (*agentStepCommitter, error) {
 	if s == nil || req == nil || cfg == nil || s.sessionManager == nil ||
 		req.RunHandle.RunID == "" || req.RunHandle.OwnerID == "" || req.RunHandle.FencingToken <= 0 {
@@ -30,10 +31,9 @@ func (s *Service) bindQueueContinuation(
 	cfg.StepIndexOffset = stepIndex
 
 	req.QueueSteerEnabled = true
-	committer := s.newAgentStepCommitter(ctx, *req, rc)
+	committer := s.bindNativeRun(ctx, *req, rc, cfg, timing)
 	if committer == nil {
 		return nil, errors.New("live queue step committer is unavailable for decision continuation")
 	}
-	committer.bindContinuation(cfg)
 	return committer, nil
 }

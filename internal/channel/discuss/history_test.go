@@ -11,19 +11,43 @@ import (
 )
 
 type lightweightHistoryStub struct {
-	messages  []messagepkg.Message
-	sessionID string
-	maxBytes  int64
+	messages     []messagepkg.Message
+	sessionID    string
+	maxBytes     int64
+	measureAfter []messagepkg.HistoryPosition
+	after        []messagepkg.HistoryPosition
 }
 
-func (*lightweightHistoryStub) MeasureActiveBySession(context.Context, string, time.Time) (messagepkg.ActiveMessagesMeasure, error) {
+func (s *lightweightHistoryStub) MeasureHistory(_ context.Context, _ string, after messagepkg.HistoryPosition) (messagepkg.ActiveMessagesMeasure, error) {
+	s.measureAfter = append(s.measureAfter, after)
 	return messagepkg.ActiveMessagesMeasure{MessageCount: 100, ContentBytes: 10000}, nil
 }
 
-func (s *lightweightHistoryStub) ListTurnResponseSourcesSinceBySessionWithinBytes(_ context.Context, sessionID string, _ time.Time, maxBytes int64) ([]messagepkg.Message, error) {
+func (s *lightweightHistoryStub) ListTurnResponseSourcesWithinBytes(_ context.Context, sessionID string, after messagepkg.HistoryPosition, maxBytes int64) (messagepkg.HistoryLoad, error) {
 	s.sessionID = sessionID
+	s.after = append(s.after, after)
 	s.maxBytes = maxBytes
-	return s.messages, nil
+	return messagepkg.HistoryLoad{Messages: s.messages}, nil
+}
+
+// A session's turn responses reach Discuss from after its history checkpoint
+// on; a session without one is read from the start.
+func TestLightweightHistoryLoadsAfterTheCheckpoint(t *testing.T) {
+	for name, after := range map[string]messagepkg.HistoryPosition{
+		"checkpoint":    {Turn: 12, Seq: 3},
+		"no checkpoint": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			source := &lightweightHistoryStub{}
+			reader := discussHistoryReader{messages: source, maxBytes: 4000, logger: slog.New(slog.DiscardHandler)}
+			if _, _, err := reader.Load(context.Background(), "session", after); err != nil {
+				t.Fatal(err)
+			}
+			if len(source.after) != 1 || source.after[0] != after || len(source.measureAfter) != 1 || source.measureAfter[0] != after {
+				t.Fatalf("history read after %v, measured after %v; want %+v", source.after, source.measureAfter, after)
+			}
+		})
+	}
 }
 
 func TestLightweightHistoryPreservesInterruptedReasoning(t *testing.T) {
@@ -41,7 +65,10 @@ func TestLightweightHistoryPreservesInterruptedReasoning(t *testing.T) {
 				})
 			}
 			reader := discussHistoryReader{messages: source, maxBytes: 4000000, logger: slog.New(slog.DiscardHandler)}
-			entries, measure := reader.Load(context.Background(), "session")
+			entries, measure, err := reader.Load(context.Background(), "session", messagepkg.HistoryPosition{})
+			if err != nil {
+				t.Fatal(err)
+			}
 			if source.sessionID != "session" || source.maxBytes != 4000000 {
 				t.Fatal("history request lost session/budget")
 			}

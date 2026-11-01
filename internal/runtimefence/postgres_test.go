@@ -40,6 +40,7 @@ type activationTestQueries struct {
 	preservedApproval    sqlc.ToolApprovalRequest
 	preservedInput       sqlc.UserInputRequest
 	parentLockCalled     bool
+	logsReleased         sqlc.ReleasePendingCompactionLogsBySessionParams
 }
 
 func (*activationTestQueries) SupportsTransactions() bool { return true }
@@ -75,6 +76,11 @@ func (q *activationTestQueries) SupersedePendingUserInputsBySession(_ context.Co
 	q.userInputCancel = arg
 	q.userInputCanceled = true
 	return nil, nil
+}
+
+func (q *activationTestQueries) ReleasePendingCompactionLogsBySession(_ context.Context, arg sqlc.ReleasePendingCompactionLogsBySessionParams) error {
+	q.logsReleased = arg
+	return nil
 }
 
 func (q *activationTestQueries) ClaimToolApprovalRequestForRuntime(_ context.Context, arg sqlc.ClaimToolApprovalRequestForRuntimeParams) (sqlc.ToolApprovalRequest, error) {
@@ -203,6 +209,9 @@ func TestActivateWithOptionsPreservesOnlyTheSelectedDecisionKind(t *testing.T) {
 			}
 			if !queries.toolApprovalCanceled || !queries.userInputCanceled {
 				t.Fatal("activation did not run both superseded-decision cleanup queries")
+			}
+			if queries.logsReleased.SessionID.String() != testSessionID || queries.logsReleased.BotID.String() != testBotID {
+				t.Fatalf("released compaction logs of %+v, want the activated session's", queries.logsReleased)
 			}
 			if (len(queries.toolApprovalCancel.PreserveIds) > 0) != tt.wantToolPreserved {
 				t.Fatalf("tool approval preserve ids = %v, want preserved=%v", queries.toolApprovalCancel.PreserveIds, tt.wantToolPreserved)

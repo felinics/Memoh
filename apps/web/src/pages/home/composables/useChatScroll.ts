@@ -183,7 +183,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
   let cancelSmoothScroll: (() => void) | null = null
   let cancelTurnEntrance: (() => void) | null = null
   let mutationObserver: MutationObserver | null = null
-  let contentResizeObserver: ResizeObserver | null = null
+  let sizeObserver: ResizeObserver | null = null
   let pinAttemptId = 0
   let appliedPinAttemptId = 0
 
@@ -917,12 +917,18 @@ export function useChatScroll(options: UseChatScrollOptions) {
     if (el) attach(el)
   }, { immediate: true })
 
-  watch(contentEl, (el) => {
-    contentResizeObserver?.disconnect()
-    contentResizeObserver = null
-    if (!el || typeof ResizeObserver === 'undefined') return
-    contentResizeObserver = new ResizeObserver(onContentChanged)
-    contentResizeObserver.observe(el)
+  // Size heartbeat for both ends of the geometry: the content growing without
+  // a DOM mutation (async reflow — Shiki, images, collapses), and the viewport
+  // itself resizing — the software keyboard opening shrinks the whole app
+  // frame, and a following view must keep the latest line above the composer
+  // instead of leaving it where the old, taller viewport ended.
+  watch([contentEl, scrollEl], ([content, viewport]) => {
+    sizeObserver?.disconnect()
+    sizeObserver = null
+    if ((!content && !viewport) || typeof ResizeObserver === 'undefined') return
+    sizeObserver = new ResizeObserver(onContentChanged)
+    if (content) sizeObserver.observe(content)
+    if (viewport) sizeObserver.observe(viewport)
   }, { immediate: true })
 
   // Prepend of older history is a deliberate move away from the bottom, so it
@@ -941,8 +947,8 @@ export function useChatScroll(options: UseChatScrollOptions) {
     cancelSmoothScroll?.()
     if (atBottomRefreshRaf) cancelAnimationFrame(atBottomRefreshRaf)
     if (highlightTimer) clearTimeout(highlightTimer)
-    contentResizeObserver?.disconnect()
-    contentResizeObserver = null
+    sizeObserver?.disconnect()
+    sizeObserver = null
     detach(scrollEl.value)
   })
 

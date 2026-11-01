@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/markdownmedia"
 	"github.com/felinics/memoh/internal/rpc"
 	runtimeRpc "github.com/felinics/memoh/internal/rpc/runtime"
 	"github.com/felinics/memoh/internal/webhooktunnel"
@@ -31,6 +32,7 @@ const (
 	reasonWebhookUnsupported = "channel.webhook_unsupported"
 	reasonSendTargetRequired = "channel.send_target_required"
 	reasonBindingRequired    = "channel.binding_required"
+	reasonPartialDelivery    = "media.partial_delivery"
 )
 
 type Client struct{ rpc *runtimeRpc.Client }
@@ -97,6 +99,7 @@ func (c *Client) Status() webhooktunnel.Status {
 // reasons is the wire table of the channel sentinels, read by the server
 // encoding and the client decoding. Entries are matched in order.
 var reasons = rpc.Reasons{
+	{Err: markdownmedia.ErrPartialDelivery, Reason: reasonPartialDelivery, Code: codes.FailedPrecondition, Message: "media partially delivered"},
 	{Err: channel.ErrChannelConfigNotFound, Reason: reasonConfigNotFound, Code: codes.NotFound, Message: "channel config not found"},
 	{Err: channel.ErrChannelDiscoveryFailed, Reason: reasonDiscoveryFailed, Code: codes.FailedPrecondition, Message: "channel discovery failed"},
 	{Err: channel.ErrEnableChannelFailed, Reason: reasonEnableFailed, Code: codes.FailedPrecondition, Message: "channel enable failed"},

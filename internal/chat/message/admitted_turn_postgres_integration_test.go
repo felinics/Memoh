@@ -2,12 +2,15 @@ package message
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	"github.com/felinics/memoh/internal/markdownmedia"
+	"github.com/felinics/memoh/internal/media"
 )
 
 // Admission allocates turn_id and turn_position before any message exists
@@ -231,4 +234,45 @@ func readNextTurnPosition(t *testing.T, ctx context.Context, tx pgx.Tx) int64 {
 		t.Fatalf("read next_turn_position: %v", err)
 	}
 	return position
+}
+
+// A round whose final reply publishes media carries message assets, which the
+// single-statement write cannot store. It must still be written as one
+// transaction, under the admitted turn, with the archived asset attached.
+func TestPostgresToolTailRoundWithMarkdownMediaStaysAtomic(t *testing.T) {
+	ctx := context.Background()
+	tx := beginPostgresMessageTestTx(t, ctx)
+	setupPostgresMessageTestFixtures(t, ctx, tx)
+
+	svc := NewService(nil, postgresstore.NewQueries(dbsqlc.New(tx)))
+	svc.SetMarkdownMediaResolver(func(_ context.Context, botID, text string, _ markdownmedia.Options) []markdownmedia.Binding {
+		return []markdownmedia.Binding{{Reference: markdownmedia.Parse(text)[0], Asset: media.Asset{BotID: botID, ContentHash: strings.Repeat("ab", 32), Mime: "image/png", StorageKey: "ab/" + strings.Repeat("ab", 32) + ".png"}}}
+	})
+
+	admittedTurnID := "5e8b2d14-9c3f-4a7e-b1d6-0f2a4c6e8b19"
+	admittedRunID := "7a1c9e35-2b4d-4f6a-8e0c-3d5b7f9a1c24"
+	position := readNextTurnPosition(t, ctx, tx)
+	round := []PersistInput{
+		{Role: "user", Content: []byte(`{"role":"user","content":"chart"}`), RunID: admittedRunID, TurnID: admittedTurnID, TurnPosition: &position},
+		{Role: "assistant", Content: []byte(`{"role":"assistant","content":"calling"}`), RunID: admittedRunID},
+		{Role: "tool", Content: []byte(`{"role":"tool","content":"result"}`), RunID: admittedRunID},
+		{Role: "assistant", Content: []byte(`{"role":"assistant","content":"![chart](/data/chart.png)"}`), RunID: admittedRunID, SessionMode: "chat"},
+	}
+	for i := range round {
+		round[i].BotID = postgresMessageTestBotID
+		round[i].SessionID = postgresMessageTestSessionID
+	}
+
+	persisted, handled, err := svc.PersistToolTailRound(ctx, round)
+	if err != nil || !handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+	if len(persisted) != len(round) || len(persisted[3].Assets) != 1 || persisted[3].Assets[0].Role != "markdown" {
+		t.Fatalf("persisted=%+v", persisted)
+	}
+	for i, msg := range persisted {
+		if turnID, _, _ := readMessageTurn(t, ctx, tx, msg.ID); turnID != admittedTurnID {
+			t.Errorf("round[%d] turn_id = %q, want the admitted %q", i, turnID, admittedTurnID)
+		}
+	}
 }

@@ -180,7 +180,7 @@ func normalizeTarget(raw string) string {
 	if strings.HasPrefix(value, "@") {
 		return value
 	}
-	if isTelegramChatID(value) {
+	if chat, _ := splitTelegramTopicTarget(value); isTelegramChatID(chat) {
 		return value
 	}
 	return "@" + value

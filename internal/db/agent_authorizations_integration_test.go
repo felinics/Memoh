@@ -45,7 +45,7 @@ func TestAgentAuthorizationClaimAndExpiry(t *testing.T) {
 	if bytes.Contains(ciphertext, []byte("SECRET")) {
 		t.Fatal("plaintext credential stored")
 	}
-	if _, err := svc.Get(ctx, "10000000-0000-4000-8000-000000000099", session.ID, false); !errors.Is(err, agentcredential.ErrAuthorizationExpired) {
+	if _, err := svc.Get(ctx, "10000000-0000-4000-8000-000000000099", session.ID); !errors.Is(err, agentcredential.ErrAuthorizationExpired) {
 		t.Fatalf("other owner read: %v", err)
 	}
 	// Competing claims serialize on the session row: exactly one target wins.

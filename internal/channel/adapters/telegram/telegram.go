@@ -58,9 +58,13 @@ type TelegramAdapter struct {
 	bots          map[string]*tele.Bot // keyed by effective bot config
 	fileEndpoints map[*tele.Bot]string // bot instance → file endpoint format string
 	assets        assetOpener
-	streamLimiter *rate.Limiter // global rate limiter for all streaming API calls
-	seenUpdatesMu sync.Mutex
-	seenUpdates   map[string]time.Time
+	// streamLimiters paces streaming API calls per channel config. Telegram
+	// applies its aggregate rate limit to each bot, so streams of one bot share
+	// a limiter and streams of different bots never wait on each other.
+	streamLimitersMu sync.Mutex
+	streamLimiters   map[string]*rate.Limiter
+	seenUpdatesMu    sync.Mutex
+	seenUpdates      map[string]time.Time
 
 	// ask_user durable-state integration: ops are applied to the persistent
 	// interaction via the userinput service; only the force-reply prompt
@@ -115,16 +119,38 @@ func NewTelegramAdapter(log *slog.Logger) *TelegramAdapter {
 		logger:        log.With(slog.String("adapter", "telegram")),
 		bots:          make(map[string]*tele.Bot),
 		fileEndpoints: make(map[*tele.Bot]string),
-		streamLimiter: rate.NewLimiter(rate.Every(time.Second), 3), // 1 req/s sustained, burst of 3
 		seenUpdates:   make(map[string]time.Time),
 	}
 }
 
-// waitStreamLimit waits for the global stream rate limiter to allow one request.
-// All streams from the same adapter share this limiter to coordinate and avoid
-// aggregate Telegram API rate limits across concurrent conversations.
-func (a *TelegramAdapter) waitStreamLimit(ctx context.Context) error {
-	return a.streamLimiter.Wait(ctx)
+// waitStreamLimit waits until the bot of configID may make one more streaming
+// API call: 1 request/s sustained, burst of 3, shared by that bot's streams.
+func (a *TelegramAdapter) waitStreamLimit(ctx context.Context, configID string) error {
+	return a.streamLimiter(configID).Wait(ctx)
+}
+
+func (a *TelegramAdapter) streamLimiter(configID string) *rate.Limiter {
+	a.streamLimitersMu.Lock()
+	defer a.streamLimitersMu.Unlock()
+	limiter, ok := a.streamLimiters[configID]
+	if !ok {
+		if a.streamLimiters == nil {
+			a.streamLimiters = make(map[string]*rate.Limiter)
+		}
+		limiter = rate.NewLimiter(rate.Every(time.Second), 3)
+		a.streamLimiters[configID] = limiter
+	}
+	return limiter
+}
+
+// dropStreamLimiter forgets the limiter of a channel config whose connection
+// stopped, so the map does not keep every config this process ever served.
+// A stream still running keeps the limiter it already holds; one opened after
+// a reconnect gets a fresh limiter.
+func (a *TelegramAdapter) dropStreamLimiter(configID string) {
+	a.streamLimitersMu.Lock()
+	delete(a.streamLimiters, configID)
+	a.streamLimitersMu.Unlock()
 }
 
 // SetAssetOpener injects the media asset reader for storage-first file delivery.
@@ -283,9 +309,10 @@ func (*TelegramAdapter) Descriptor() channel.Descriptor {
 			},
 		},
 		TargetSpec: channel.TargetSpec{
-			Format: "chat_id | @username",
+			Format: "chat_id[/topic_id] | @username",
 			Hints: []channel.TargetHint{
 				{Label: "Chat ID", Example: "123456789"},
+				{Label: "Topic", Example: "-1001234567890/45"},
 				{Label: "Username", Example: "@alice"},
 			},
 		},
@@ -515,6 +542,7 @@ func (a *TelegramAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig
 			// connection: by the time stop runs, that one is usually done.
 			a.logger.InfoContext(stopCtx, "stop", slog.String("config_id", cfg.ID))
 		}
+		a.dropStreamLimiter(cfg.ID)
 		bot.Stop()
 		cancel()
 		flushAllMediaGroups()
@@ -797,7 +825,7 @@ func (a *TelegramAdapter) handleAskUserWizardCallback(ctx context.Context, cfg c
 	// Free-text input is opt-in. Auto-prompting on page entry adds another
 	// message and reply preview before the user has chosen to answer.
 	if needText {
-		a.promptAskUserText(ctx, bot, loc, req, parsed.QIndex, chatID, msgID)
+		a.promptAskUserText(ctx, bot, loc, req, parsed.QIndex, chatID, telegramMessageThreadID(cb.Message), msgID)
 	}
 	return true
 }
@@ -824,7 +852,7 @@ func interactionOpFromCallback(cb askUserCallback) (op userinput.InteractionOp, 
 
 // promptAskUserText sends a force-reply prompt for the question at qIndex and
 // binds the sent message to the request so the next reply routes back here.
-func (a *TelegramAdapter) promptAskUserText(ctx context.Context, bot *tele.Bot, loc *i18n.Localizer, req userinput.Request, qIndex int, cardChatID int64, cardMsgID int) {
+func (a *TelegramAdapter) promptAskUserText(ctx context.Context, bot *tele.Bot, loc *i18n.Localizer, req userinput.Request, qIndex int, cardChatID int64, cardThreadID int, cardMsgID int) {
 	if bot == nil || cardChatID == 0 || qIndex < 0 || qIndex >= len(req.UIPayload.Questions) {
 		return
 	}
@@ -837,6 +865,7 @@ func (a *TelegramAdapter) promptAskUserText(ctx context.Context, bot *tele.Bot, 
 	}
 	opts := &tele.SendOptions{
 		ReplyMarkup: &tele.ReplyMarkup{ForceReply: true, Selective: true},
+		ThreadID:    cardThreadID,
 	}
 	if cardMsgID > 0 {
 		opts.ReplyTo = &tele.Message{ID: cardMsgID, Chat: &tele.Chat{ID: cardChatID}}
@@ -868,10 +897,11 @@ func (a *TelegramAdapter) tryHandleAskUserTextReply(ctx context.Context, cfg cha
 	if a.userInput == nil {
 		return false
 	}
+	topic := &tele.SendOptions{ThreadID: telegramMessageThreadID(raw)}
 	if !a.authorizeAskUser(ctx, cfg, update, prompt.RequestID) {
 		a.askUserPromptStore().put(raw.Chat.ID, raw.ReplyTo.ID, prompt)
 		if bot != nil {
-			_, _ = bot.Send(tele.ChatID(raw.Chat.ID), loc.T("cmd.userInput.forbidden"))
+			_, _ = bot.Send(tele.ChatID(raw.Chat.ID), loc.T("cmd.userInput.forbidden"), topic)
 		}
 		return true
 	}
@@ -896,7 +926,7 @@ func (a *TelegramAdapter) tryHandleAskUserTextReply(ctx context.Context, cfg cha
 			if err != nil {
 				key = "cmd.userInput.unavailable"
 			}
-			_, _ = bot.Send(tele.ChatID(raw.Chat.ID), loc.T(key))
+			_, _ = bot.Send(tele.ChatID(raw.Chat.ID), loc.T(key), topic)
 		}
 		return true
 	}
@@ -904,7 +934,7 @@ func (a *TelegramAdapter) tryHandleAskUserTextReply(ctx context.Context, cfg cha
 		// Rebind so the user can just reply again to the same prompt.
 		a.askUserPromptStore().put(raw.Chat.ID, raw.ReplyTo.ID, prompt)
 		if bot != nil {
-			_, _ = bot.Send(tele.ChatID(raw.Chat.ID), askUserRejectToast(loc, result.Reject))
+			_, _ = bot.Send(tele.ChatID(raw.Chat.ID), askUserRejectToast(loc, result.Reject), topic)
 		}
 		return true
 	}
@@ -1065,9 +1095,7 @@ func (a *TelegramAdapter) buildTelegramMediaGroupInboundMessage(
 			isMentioned = isTelegramBotMentioned(msg, botUsername)
 		}
 		if !isReplyToBot {
-			isReplyToBot = msg.ReplyTo != nil &&
-				msg.ReplyTo.Sender != nil &&
-				msg.ReplyTo.Sender.ID == botID
+			isReplyToBot = isTelegramReplyToBot(msg, botID)
 		}
 	}
 	metadata := map[string]any{
@@ -1133,6 +1161,11 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 		chatType = normalizeTelegramConversationType(chatTypeRaw)
 		chatName = strings.TrimSpace(raw.Chat.Title)
 	}
+	threadID := telegramMessageThreadID(raw)
+	conversationThreadID := ""
+	if threadID > 0 {
+		conversationThreadID = strconv.Itoa(threadID)
+	}
 	replyRef := buildTelegramReplyRef(raw, chatID)
 	if replyRef != nil {
 		replyRef.Attachments = a.collectTelegramAttachments(bot, raw.ReplyTo)
@@ -1145,9 +1178,7 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 		botUsername = bot.Me.Username
 		botID = bot.Me.ID
 	}
-	isReplyToBot := raw.ReplyTo != nil &&
-		raw.ReplyTo.Sender != nil &&
-		raw.ReplyTo.Sender.ID == botID
+	isReplyToBot := isTelegramReplyToBot(raw, botID)
 	isMentioned := isTelegramBotMentioned(raw, botUsername)
 	meta := map[string]any{
 		"is_mentioned":    isMentioned,
@@ -1178,16 +1209,17 @@ func (a *TelegramAdapter) toInboundTelegramMessage(
 			Reply:       replyRef,
 			Forward:     forwardRef,
 		},
-		ReplyTarget: chatID,
+		ReplyTarget: telegramTopicTarget(chatID, threadID),
 		Sender: channel.Identity{
 			SubjectID:   subjectID,
 			DisplayName: displayName,
 			Attributes:  attrs,
 		},
 		Conversation: channel.Conversation{
-			ID:   chatID,
-			Type: chatType,
-			Name: chatName,
+			ID:       chatID,
+			Type:     chatType,
+			Name:     chatName,
+			ThreadID: conversationThreadID,
 		},
 		ReceivedAt: time.Unix(raw.Unixtime, 0).UTC(),
 		Source:     "telegram",
@@ -1329,7 +1361,7 @@ func (a *TelegramAdapter) Update(ctx context.Context, cfg channel.ChannelConfig,
 	if err != nil {
 		return err
 	}
-	chatID, channelUsername, err := parseTelegramTarget(strings.TrimSpace(target))
+	chatID, channelUsername, _, err := parseTelegramTarget(strings.TrimSpace(target))
 	if err != nil {
 		return err
 	}
@@ -1364,7 +1396,7 @@ func (a *TelegramAdapter) Unsend(ctx context.Context, cfg channel.ChannelConfig,
 	if err != nil {
 		return err
 	}
-	chatID, channelUsername, err := parseTelegramTarget(strings.TrimSpace(target))
+	chatID, channelUsername, _, err := parseTelegramTarget(strings.TrimSpace(target))
 	if err != nil {
 		return err
 	}
@@ -1400,11 +1432,13 @@ func (a *TelegramAdapter) OpenStream(ctx context.Context, cfg channel.ChannelCon
 	}
 	isPrivateChat := false
 	var chatID int64
+	var threadID int
 	if opts.Metadata != nil {
 		if ct, ok := opts.Metadata["conversation_type"].(string); ok && ct == "private" {
-			if parsed, err := strconv.ParseInt(target, 10, 64); err == nil {
+			if parsed, channelUsername, parsedThreadID, err := parseTelegramTarget(target); err == nil && channelUsername == "" {
 				isPrivateChat = true
 				chatID = parsed
+				threadID = parsedThreadID
 			}
 		}
 	}
@@ -1416,6 +1450,7 @@ func (a *TelegramAdapter) OpenStream(ctx context.Context, cfg channel.ChannelCon
 		parseMode:     "",
 		isPrivateChat: isPrivateChat,
 		streamChatID:  chatID,
+		streamThread:  threadID,
 		draftID:       1,
 	}, nil
 }
@@ -1500,15 +1535,15 @@ func normalizeTelegramConversationType(chatType string) string {
 // telegramRecipient converts a target string into a tele.Recipient. For
 // numeric chat IDs it returns tele.ChatID; for @channel_username it returns
 // a custom Recipient because tele.Chat.Recipient() returns the (unset) ID.
-func telegramRecipient(target string) (tele.Recipient, int64, error) {
-	chatID, channelUsername, err := parseTelegramTarget(target)
+func telegramRecipient(target string) (tele.Recipient, int64, int, error) {
+	chatID, channelUsername, threadID, err := parseTelegramTarget(target)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	if channelUsername != "" {
-		return telegramChannelRecipient(channelUsername), 0, nil
+		return telegramChannelRecipient(channelUsername), 0, threadID, nil
 	}
-	return tele.ChatID(chatID), chatID, nil
+	return tele.ChatID(chatID), chatID, threadID, nil
 }
 
 func sendTelegramText(bot *tele.Bot, target string, text string, replyTo int, parseMode string) error {
@@ -1524,11 +1559,11 @@ func sendTelegramTextReturnMessage(bot *tele.Bot, target string, text string, re
 	if sendTextForTest != nil {
 		return sendTextForTest(bot, target, text, replyTo, parseMode)
 	}
-	recipient, parsedChatID, parseErr := telegramRecipient(target)
+	recipient, parsedChatID, threadID, parseErr := telegramRecipient(target)
 	if parseErr != nil {
 		return 0, 0, parseErr
 	}
-	opts := &tele.SendOptions{ParseMode: parseMode}
+	opts := &tele.SendOptions{ParseMode: parseMode, ThreadID: threadID}
 	if replyTo > 0 {
 		opts.ReplyTo = &tele.Message{ID: replyTo}
 	}
@@ -1578,7 +1613,7 @@ func sendTelegramTextChunkListWithActions(bot *tele.Bot, target string, chunks [
 }
 
 func sendTelegramTextWithActionsReturnMessage(bot *tele.Bot, target string, text string, replyTo int, parseMode string, actions []channel.Action) (chatID int64, messageID int, err error) {
-	recipient, parsedChatID, parseErr := telegramRecipient(target)
+	recipient, parsedChatID, threadID, parseErr := telegramRecipient(target)
 	if parseErr != nil {
 		return 0, 0, parseErr
 	}
@@ -1586,7 +1621,7 @@ func sendTelegramTextWithActionsReturnMessage(bot *tele.Bot, target string, text
 	if err != nil {
 		return 0, 0, err
 	}
-	opts := &tele.SendOptions{ParseMode: parseMode}
+	opts := &tele.SendOptions{ParseMode: parseMode, ThreadID: threadID}
 	if replyTo > 0 {
 		opts.ReplyTo = &tele.Message{ID: replyTo}
 	}
@@ -1775,7 +1810,7 @@ var sendDraftForTest func(bot *tele.Bot, chatID int64, draftID int, text string,
 
 // sendTelegramDraft calls the sendMessageDraft Bot API method to stream a
 // partial message to a private chat while it is being generated.
-func sendTelegramDraft(bot *tele.Bot, chatID int64, draftID int, text string, parseMode string) error {
+func sendTelegramDraft(bot *tele.Bot, chatID int64, threadID int, draftID int, text string, parseMode string) error {
 	text = truncateTelegramText(sanitizeTelegramText(text))
 	if strings.TrimSpace(text) == "" {
 		return nil
@@ -1783,7 +1818,7 @@ func sendTelegramDraft(bot *tele.Bot, chatID int64, draftID int, text string, pa
 	if sendDraftForTest != nil {
 		return sendDraftForTest(bot, chatID, draftID, text, parseMode)
 	}
-	opts := &tele.SendOptions{ParseMode: parseMode}
+	opts := &tele.SendOptions{ParseMode: parseMode, ThreadID: threadID}
 	return bot.SendDraft(tele.ChatID(chatID), draftID, text, opts)
 }
 
@@ -1898,11 +1933,12 @@ func sendTelegramAttachmentImpl(ctx context.Context, bot *tele.Bot, target strin
 	if err != nil {
 		return err
 	}
-	recipient, _, recipErr := telegramRecipient(target)
+	recipient, _, threadID, recipErr := telegramRecipient(target)
 	if recipErr != nil {
 		return recipErr
 	}
 	opts := telegramAttachmentSendOptions(parseMode, replyTo, actions)
+	opts.ThreadID = threadID
 	name := strings.TrimSpace(att.Name)
 	if name == "" {
 		name = fileNameFromMime(att.Mime, string(att.Logical.Type))
@@ -2001,10 +2037,10 @@ func fileNameFromMime(mime, fallbackType string) string {
 }
 
 func buildTelegramReplyRef(msg *tele.Message, chatID string) *channel.ReplyRef {
-	if msg == nil || msg.ReplyTo == nil {
+	replyTo := telegramExplicitReply(msg)
+	if replyTo == nil {
 		return nil
 	}
-	replyTo := msg.ReplyTo
 	ref := &channel.ReplyRef{
 		MessageID: strconv.Itoa(replyTo.ID),
 		Target:    strings.TrimSpace(chatID),
@@ -2082,18 +2118,64 @@ func buildTelegramForwardRef(msg *tele.Message) *channel.ForwardRef {
 	return ref
 }
 
-// parseTelegramTarget resolves a target string into a numeric chat ID and an
-// optional channel username. Exactly one of chatID or channelUsername will be
-// set; callers can use this to construct any message config type.
-func parseTelegramTarget(target string) (chatID int64, channelUsername string, err error) {
+// parseTelegramTarget resolves a target string into a numeric chat ID or a
+// channel username, plus the topic encoded as a "/topic_id" suffix. Exactly
+// one of chatID or channelUsername will be set.
+func parseTelegramTarget(target string) (chatID int64, channelUsername string, threadID int, err error) {
+	target, threadID = splitTelegramTopicTarget(target)
 	if strings.HasPrefix(target, "@") {
-		return 0, target, nil
+		return 0, target, threadID, nil
 	}
 	chatID, err = strconv.ParseInt(target, 10, 64)
 	if err != nil {
-		return 0, "", errors.New("telegram target must be @username or chat_id")
+		return 0, "", 0, errors.New("telegram target must be @username or chat_id, optionally followed by /topic_id")
 	}
-	return chatID, "", nil
+	return chatID, "", threadID, nil
+}
+
+func telegramTopicTarget(chat string, threadID int) string {
+	if threadID <= 0 {
+		return chat
+	}
+	return chat + "/" + strconv.Itoa(threadID)
+}
+
+func splitTelegramTopicTarget(target string) (string, int) {
+	chat, topic, ok := strings.Cut(target, "/")
+	if !ok {
+		return target, 0
+	}
+	threadID, err := strconv.Atoi(topic)
+	if err != nil || threadID <= 0 {
+		return target, 0
+	}
+	return chat, threadID
+}
+
+// telegramMessageThreadID ignores message_thread_id outside topics: General
+// messages omit it, but reply chains in ordinary supergroups carry it too.
+func telegramMessageThreadID(msg *tele.Message) int {
+	if msg == nil || !msg.TopicMessage {
+		return 0
+	}
+	return msg.ThreadID
+}
+
+// telegramExplicitReply drops the reply Telegram attaches to every topic
+// message that is not an explicit reply; it points at the topic's root.
+func telegramExplicitReply(msg *tele.Message) *tele.Message {
+	if msg == nil || msg.ReplyTo == nil {
+		return nil
+	}
+	if threadID := telegramMessageThreadID(msg); threadID > 0 && msg.ReplyTo.ID == threadID {
+		return nil
+	}
+	return msg.ReplyTo
+}
+
+func isTelegramReplyToBot(msg *tele.Message, botID int64) bool {
+	replyTo := telegramExplicitReply(msg)
+	return replyTo != nil && replyTo.Sender != nil && replyTo.Sender.ID == botID
 }
 
 func isTelegramBotMentioned(msg *tele.Message, botUsername string) bool {
@@ -2484,12 +2566,15 @@ func (*TelegramAdapter) ProcessingFailed(_ context.Context, _ channel.ChannelCon
 	return nil
 }
 
-func sendTelegramTyping(bot *tele.Bot, chatID string) error {
-	chatIDInt, err := strconv.ParseInt(chatID, 10, 64)
+func sendTelegramTyping(bot *tele.Bot, target string) error {
+	recipient, _, threadID, err := telegramRecipient(target)
 	if err != nil {
 		return err
 	}
-	return bot.Notify(tele.ChatID(chatIDInt), tele.Typing)
+	if threadID > 0 {
+		return bot.Notify(recipient, tele.Typing, threadID)
+	}
+	return bot.Notify(recipient, tele.Typing)
 }
 
 func setTelegramReaction(bot *tele.Bot, chatID, messageID, emoji string) error {
@@ -2522,7 +2607,8 @@ func (a *TelegramAdapter) React(ctx context.Context, cfg channel.ChannelConfig, 
 	if err != nil {
 		return err
 	}
-	return setTelegramReaction(bot, target, messageID, emoji)
+	chat, _ := splitTelegramTopicTarget(target)
+	return setTelegramReaction(bot, chat, messageID, emoji)
 }
 
 // Unreact removes the bot's reaction from a message (implements channel.Reactor).
@@ -2536,7 +2622,8 @@ func (a *TelegramAdapter) Unreact(ctx context.Context, cfg channel.ChannelConfig
 	if err != nil {
 		return err
 	}
-	return clearTelegramReaction(bot, target, messageID)
+	chat, _ := splitTelegramTopicTarget(target)
+	return clearTelegramReaction(bot, chat, messageID)
 }
 
 func (a *TelegramAdapter) authorizeAskUser(ctx context.Context, cfg channel.ChannelConfig, update *tele.Update, requestID string) bool {

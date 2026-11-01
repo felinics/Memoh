@@ -104,11 +104,6 @@ func isMustKeepFrag(frag contextfrag.ContextFrag, profile IntentProfile) bool {
 
 func latestUserIndex(tagged []TaggedFrag) int {
 	for i := len(tagged) - 1; i >= 0; i-- {
-		// Background summaries are per-step status notices, not conversation
-		// turns: they must not anchor the recent-protection window.
-		if tagged[i].Frag.Kind == contextfrag.KindBackgroundSummary {
-			continue
-		}
 		if isRole(tagged[i].Frag.Role, sdk.MessageRoleUser) {
 			return i
 		}

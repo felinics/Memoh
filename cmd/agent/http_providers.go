@@ -16,8 +16,8 @@ import (
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
-	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/external/acp"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agentcredential"
@@ -76,13 +76,14 @@ func provideSessionQueueHandler(queries dbstore.Queries, agentService *applicati
 	return handlers.NewSessionQueueHandler(queries, agentService, botService, accountService)
 }
 
-func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sessionService *sessionpkg.Service, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, userInput *userinput.Service, bgManager *background.Manager, acpPool *acpagent.SessionPool, pipeline *timeline.Pipeline, compactionService *compaction.Service, cfg config.Config) *handlers.MessageHandler {
+func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sessionService *sessionpkg.Service, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, userInput *userinput.Service, bgManager *background.Manager, sessionRuntime *sessionruntime.Manager, runtimes *external.Registry, pipeline *timeline.Pipeline, compactionService *compaction.Service, cfg config.Config) *handlers.MessageHandler {
 	h := handlers.NewMessageHandler(log, msgService, sessionService, botService, accountService, hub)
 	h.SetMediaService(mediaService)
 	h.SetToolApprovalService(toolApproval)
 	h.SetUserInputService(userInput)
 	h.SetBackgroundManager(bgManager)
-	h.SetRuntimeResetService(acpPool)
+	h.SetRuntimeResetService(sessionRuntime)
+	h.SetRuntimeRegistry(runtimes)
 	h.SetProjectionCache(pipeline)
 	h.SetCompactionActivity(compactionService)
 	// This hub is process-local. A cluster cannot promise it observes runtime
@@ -91,55 +92,37 @@ func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sess
 	return h
 }
 
-func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService, workdirService *workdir.Service, botAgentsService *botagents.Service, agentService *application.Service, pipeline *timeline.Pipeline, runs ledger.Store) *handlers.SessionHandler {
-	handler := handlers.NewSessionHandler(log, sessionService, acpPool, botService, accountService)
+func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, sessionRuntime *sessionruntime.Manager, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService, workdirService *workdir.Service, botAgentsService *botagents.Service, agentService *application.Service, pipeline *timeline.Pipeline, runs ledger.Store, runtimes *external.Registry) *handlers.SessionHandler {
+	handler := handlers.NewSessionHandler(log, sessionService, sessionRuntime, botService, accountService)
 	handler.SetThreadEnricher(routeService)
 	handler.SetWorkdirService(workdirService)
 	handler.SetBotAgents(botAgentsService)
 	handler.SetAgentRuntimeService(agentService)
 	handler.SetModelPreferenceService(agentService)
+	handler.SetRuntimeRegistry(runtimes)
 	handler.SetProjectionCache(pipeline)
 	handler.SetInvocationLookup(runs)
 	return handler
 }
 
-func provideACPRuntimeHandler(pool *acpagent.SessionPool, sessionService *sessionpkg.Service, botService *bots.Service, accountService *accounts.Service, botAgentsService *botagents.Service) *handlers.ACPRuntimeHandler {
+func provideACPRuntimeHandler(pool *acpagent.SessionPool, sessionService *sessionpkg.Service, botService *bots.Service, accountService *accounts.Service, botAgentsService *botagents.Service, sessionRuntime *sessionruntime.Manager) *handlers.ACPRuntimeHandler {
 	handler := handlers.NewACPRuntimeHandler(pool, sessionService, botService, accountService)
 	handler.SetBotAgents(botAgentsService)
+	handler.SetRuntimeResetService(sessionRuntime)
 	return handler
 }
 
-func provideBotAgentsHandler(log *slog.Logger, service *botagents.Service, botService *bots.Service, accountService *accounts.Service, runtimes external.Drivers) *handlers.BotAgentsHandler {
-	return handlers.NewBotAgentsHandler(log, service, botService, accountService, runtimes)
+func provideBotAgentsHandler(log *slog.Logger, service *botagents.Service, botService *bots.Service, accountService *accounts.Service, runtimes *external.Registry, workdirService *workdir.Service) *handlers.BotAgentsHandler {
+	handler := handlers.NewBotAgentsHandler(log, service, botService, accountService, runtimes)
+	handler.SetWorkdirService(workdirService)
+	return handler
 }
 
-func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaces *botworkspace.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool, agentDrivers external.Drivers, credentialService *agentcredential.Service) *handlers.UsersHandler {
+func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaces *botworkspace.Service, manager *workspace.Manager, sessionRuntime *sessionruntime.Manager, credentialService *agentcredential.Service) *handlers.UsersHandler {
 	handler := handlers.NewUsersHandler(log, accountService, botService, routeService, channelStore, channelRuntime, registry, workspaces)
 	handler.SetWorkspaceStatus(manager)
-	handler.SetRuntimeResetService(botRuntimeResets{pool: acpPool, agents: agentDrivers})
+	handler.SetRuntimeResetService(sessionRuntime)
 	handler.SetCredentialService(credentialService)
-	return handler
-}
-
-type botRuntimeResets struct {
-	pool   *acpagent.SessionPool
-	agents external.Drivers
-}
-
-func (r botRuntimeResets) BeginBotHistoryReset(ctx context.Context, botID string) (context.Context, func(), error) {
-	resetCtx, release, err := r.pool.BeginBotHistoryReset(ctx, botID)
-	if err != nil {
-		return nil, nil, err
-	}
-	r.agents.ResetBot(botID)
-	return resetCtx, func() {
-		release()
-		// A catalog request can start a process during the metadata write.
-		r.agents.ResetBot(botID)
-	}, nil
-}
-
-func provideExternalAgentCodexServerHandler(handler *handlers.ExternalAgentCodexHandler) *handlers.ExternalAgentCodexHandler {
 	return handler
 }
 

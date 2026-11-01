@@ -10,9 +10,9 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	native "github.com/felinics/memoh/internal/agent/runtime/native"
+	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/contextview"
 	"github.com/felinics/memoh/internal/prune"
-	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 const runtimeContextURI = "memoh://context/current-turn"
@@ -118,11 +118,10 @@ func (s *Service) runtimeContextBudgetDefault(ctx context.Context, botID string)
 	return contextBudgetFromChatModel(chatModel)
 }
 
-func runtimeContextAgentID(runtimeType string, metadata map[string]any) string {
-	if strings.TrimSpace(runtimeType) == string(runtimekind.ACPAgent) {
-		return firstNonEmpty(metadataString(metadata, "acp_agent_id"), runtimeType)
-	}
-	return strings.TrimSpace(runtimeType)
+// runtimeContextAgentID names the agent in the runtime context: an ACP
+// session's agent profile, otherwise the runtime.
+func (s *Service) runtimeContextAgentID(ctx context.Context, runtimeType string, sess session.Thread) string {
+	return firstNonEmpty(s.sessionACPAgentID(ctx, sess), strings.TrimSpace(runtimeType))
 }
 
 func buildRuntimeContextSections(input runtimeContextRenderInput) []contextview.RuntimeSection {

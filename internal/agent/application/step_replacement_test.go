@@ -132,7 +132,7 @@ func testRetryStepMemoryUsesClonedRequest(t *testing.T, steered bool) {
 	if _, err := committer.commit(ctx, nextStep, &step.Record{Messages: []sdk.Message{sdk.AssistantMessage("new answer")}}); err != nil {
 		t.Fatalf("commit replacement: %v", err)
 	}
-	if err := committer.finish(ctx, 0); err != nil {
+	if err := committer.finish(ctx); err != nil {
 		t.Fatalf("finish replacement: %v", err)
 	}
 	select {

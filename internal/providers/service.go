@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,33 +21,26 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/providertemplates"
-	"github.com/felinics/memoh/internal/registry"
 )
 
 // Service handles provider operations.
 type Service struct {
-	queries      dbstore.Queries
-	logger       *slog.Logger
-	httpClient   *http.Client
-	callbackURL  string
-	templatesDir string
+	queries     dbstore.Queries
+	logger      *slog.Logger
+	httpClient  *http.Client
+	callbackURL string
 }
 
 // NewService creates a new provider service.
-func NewService(log *slog.Logger, queries dbstore.Queries, callbackURL string, templatesDir ...string) *Service {
+func NewService(log *slog.Logger, queries dbstore.Queries, callbackURL string) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	var dir string
-	if len(templatesDir) > 0 {
-		dir = templatesDir[0]
-	}
 	return &Service{
-		queries:      queries,
-		logger:       log.With(slog.String("service", "providers")),
-		httpClient:   &http.Client{Timeout: providerOAuthHTTPTimeout},
-		callbackURL:  callbackURL,
-		templatesDir: dir,
+		queries:     queries,
+		logger:      log.With(slog.String("service", "providers")),
+		httpClient:  &http.Client{Timeout: providerOAuthHTTPTimeout},
+		callbackURL: callbackURL,
 	}
 }
 
@@ -382,97 +376,55 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 	return s.fetchRemoteModelsViaSDK(ctx, provider)
 }
 
-// fetchTemplateModels returns the curated template/catalog entries for a
-// provider, when one is associated. The list describes CAPABILITIES of known
-// models, never which models this endpoint actually serves: callers must treat
-// it as lookup-by-ID metadata, not as the model list (an empty template like
-// New API must not short-circuit the remote /models call).
-func (s *Service) fetchTemplateModels(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, bool) {
-	if provider.ProviderTemplateID.Valid {
-		models, err := s.queries.ListProviderTemplateModels(ctx, provider.ProviderTemplateID)
-		if err == nil {
-			return remoteModelsFromCatalog(models), true
-		}
-		if s.logger != nil {
-			s.logger.WarnContext(ctx, "failed to load provider template model catalog", slog.Any("error", err))
-		}
-	}
-	source := metadataSectionSource(providerMetadata(provider.Metadata), "preset")
-	if source == "" {
-		return nil, false
-	}
-	source = strings.ToLower(strings.TrimSpace(source))
-	if strings.TrimSpace(s.templatesDir) == "" {
-		return nil, false
-	}
+// listedModel is one entry of an endpoint's model listing.
+type listedModel struct {
+	ID          string
+	DisplayName string
+	Type        string
+}
 
-	defs, err := registry.Load(s.logger, s.templatesDir)
+// embeddingModelID matches an id in which "embed" starts a word (text-embedding-3,
+// nomic-embed-text, embeddinggemma-300m, but not an id that merely contains it),
+// or that starts a part with an embedding family whose names do not say so:
+// bge-m3, gte-Qwen2, e5-mistral, multilingual-e5, m3e-base, voyage-3,
+// jina-clip-v2. A reranker of those families is not an embedding model.
+var (
+	embeddingModelID = regexp.MustCompile(`(?i)(?:^|[^a-z])embed|(?:^|[/_.:-])(?:bge|gte|e5|m3e|voyage|jina-clip)(?:[-_.:]|$)`)
+	rerankerModelID  = regexp.MustCompile(`(?i)rerank`)
+)
+
+// looksLikeEmbeddingModel reports whether a model id names an embedding model.
+func looksLikeEmbeddingModel(modelID string) bool {
+	return embeddingModelID.MatchString(modelID) && !rerankerModelID.MatchString(modelID)
+}
+
+// listGoogleEmbeddingModels lists the embedding models of a Google provider
+// that listed does not already hold. Google lists them through a second request
+// to the same endpoint, so it runs on its own time, and it is best effort: the
+// chat models have already been listed, so a failure here is logged and keeps
+// them. A model serving both methods is listed by both requests and kept once.
+func (s *Service) listGoogleEmbeddingModels(ctx context.Context, baseURL, apiKey string, listed []listedModel) []listedModel {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	embeddingModels, err := models.ListGoogleEmbeddingModels(ctx, baseURL, apiKey, probeTimeout, nil)
 	if err != nil {
-		if s.logger != nil {
-			s.logger.WarnContext(ctx, "failed to load provider template models", slog.String("template_source", source), slog.Any("error", err))
+		logger := s.logger
+		if logger == nil {
+			logger = slog.Default()
 		}
-		return nil, false
+		logger.WarnContext(ctx, "skip google embedding models because listing failed", slog.Any("error", err))
+		return nil
 	}
-	for _, def := range defs {
-		if strings.EqualFold(def.Source, source) {
-			return remoteModelsFromTemplate(def), true
+	seen := make(map[string]struct{}, len(listed))
+	for _, m := range listed {
+		seen[m.ID] = struct{}{}
+	}
+	out := make([]listedModel, 0, len(embeddingModels))
+	for _, m := range embeddingModels {
+		if _, dup := seen[m.ID]; dup {
+			continue
 		}
-	}
-	return nil, false
-}
-
-func remoteModelsFromCatalog(items []sqlc.TemplateProviderTemplateModel) []RemoteModel {
-	out := make([]RemoteModel, 0, len(items))
-	for _, model := range items {
-		cfg := providerConfig(model.Config)
-		out = append(out, RemoteModel{
-			ID:                  model.ModelID,
-			Name:                model.Name,
-			Description:         configStringPtr(cfg, "description"),
-			Type:                model.Type,
-			Compatibilities:     configStringSlice(cfg, "compatibilities"),
-			ReasoningEfforts:    configStringSlice(cfg, "reasoning_efforts"),
-			ThinkingMode:        configString(cfg, "thinking_mode"),
-			ReasoningDialect:    configString(cfg, "reasoning_dialect"),
-			ReasoningOffSupport: configString(cfg, "reasoning_off_support"),
-			ReasoningDefaultOn:  configBoolPtr(cfg, "reasoning_default_on"),
-			ThinkingBudgetMin:   configNonNegativeIntPtr(cfg, "thinking_budget_min"),
-			ThinkingBudgetMax:   configIntPtr(cfg, "thinking_budget_max"),
-			ContextWindow:       configIntPtr(cfg, "context_window"),
-			MaxOutputTokens:     configIntPtr(cfg, "max_output_tokens"),
-			Dimensions:          configIntPtr(cfg, "dimensions"),
-			CapabilitiesKnown:   true,
-		})
-	}
-	return out
-}
-
-func remoteModelsFromTemplate(def registry.ProviderDefinition) []RemoteModel {
-	out := make([]RemoteModel, 0, len(def.Models))
-	for _, model := range def.Models {
-		modelType := strings.TrimSpace(model.Type)
-		if modelType == "" {
-			modelType = string(models.ModelTypeChat)
-		}
-		cfg := model.Config
-		out = append(out, RemoteModel{
-			ID:                  model.ModelID,
-			Name:                model.Name,
-			Description:         configStringPtr(cfg, "description"),
-			Type:                modelType,
-			Compatibilities:     configStringSlice(cfg, "compatibilities"),
-			ReasoningEfforts:    configStringSlice(cfg, "reasoning_efforts"),
-			ThinkingMode:        configString(cfg, "thinking_mode"),
-			ReasoningDialect:    configString(cfg, "reasoning_dialect"),
-			ReasoningOffSupport: configString(cfg, "reasoning_off_support"),
-			ReasoningDefaultOn:  configBoolPtr(cfg, "reasoning_default_on"),
-			ThinkingBudgetMin:   configNonNegativeIntPtr(cfg, "thinking_budget_min"),
-			ThinkingBudgetMax:   configIntPtr(cfg, "thinking_budget_max"),
-			ContextWindow:       configIntPtr(cfg, "context_window"),
-			MaxOutputTokens:     configIntPtr(cfg, "max_output_tokens"),
-			Dimensions:          configIntPtr(cfg, "dimensions"),
-			CapabilitiesKnown:   true,
-		})
+		out = append(out, listedModel{ID: m.ID, DisplayName: m.DisplayName, Type: string(models.ModelTypeEmbedding)})
 	}
 	return out
 }
@@ -493,100 +445,51 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 
 	sdkProvider := models.NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
 
-	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	parent := ctx
+	ctx, cancel := context.WithTimeout(parent, probeTimeout)
 	defer cancel()
 
 	sdkModels, err := sdkProvider.ListModels(ctx)
 	if err != nil {
 		return nil, errs.WrapDependency(err, "list models")
 	}
-
-	// Best-effort capability lookup: template/catalog entries keyed by model ID
-	// enrich the models the endpoint actually serves; they never add, remove,
-	// or substitute entries (a gateway like New API decides its own list).
-	templatesByID := make(map[string]RemoteModel)
-	if templateModels, ok := s.fetchTemplateModels(ctx, provider); ok {
-		for _, model := range templateModels {
-			templatesByID[model.ID] = model
-		}
+	listed := make([]listedModel, 0, len(sdkModels))
+	for _, m := range sdkModels {
+		listed = append(listed, listedModel{ID: m.ID, DisplayName: m.DisplayName, Type: string(models.ModelTypeChat)})
+	}
+	if clientType == models.ClientTypeGoogleGenerativeAI {
+		listed = append(listed, s.listGoogleEmbeddingModels(parent, baseURL, creds.APIKey, listed)...)
 	}
 
 	liveMaxOutput := fetchMaxOutputTokens(ctx, clientType, baseURL, creds.APIKey)
 
-	remoteModels := make([]RemoteModel, 0, len(sdkModels))
-	for _, m := range sdkModels {
-		template, found := templatesByID[m.ID]
-		modelType := m.Type
-		if found {
-			switch template.Type {
-			case string(sdk.ModelTypeChat), string(sdk.ModelTypeEmbedding):
-				// List endpoints often lack real per-model types (the OpenAI
-				// protocol has none, so completions/responses hardcode chat);
-				// the curated template type wins for a known model ID, e.g.
-				// text-embedding-* must survive as embedding with dimensions.
-				modelType = sdk.ModelType(template.Type)
-			}
-		}
-		if modelType == "" {
-			modelType = sdk.ModelTypeChat
-		}
-		if modelType != sdk.ModelTypeChat && modelType != sdk.ModelTypeEmbedding {
-			continue
+	remoteModels := make([]RemoteModel, 0, len(listed))
+	for _, m := range listed {
+		modelType := models.ModelType(m.Type)
+		// The OpenAI protocol has no model types, so completions and responses
+		// endpoints list embedding models as chat; their ids say what they are.
+		if modelType == models.ModelTypeChat && looksLikeEmbeddingModel(m.ID) {
+			modelType = models.ModelTypeEmbedding
 		}
 		name := m.DisplayName
 		if name == "" {
 			name = m.ID
 		}
-		var dimensions *int
-		if modelType == sdk.ModelTypeEmbedding {
-			switch {
-			case found && template.Dimensions != nil:
-				// The template already curates this model's dimensions; a live
-				// probe would spend tokens and can spuriously fail on gateways
-				// whose key lacks embedding permission.
-				dimensions = template.Dimensions
-			default:
-				dim, err := models.InferEmbeddingDimensions(ctx, string(clientType), baseURL, creds.APIKey, m.ID, probeTimeout, nil)
-				if err != nil {
-					logger := s.logger
-					if logger == nil {
-						logger = slog.Default()
-					}
-					logger.WarnContext(ctx, "skip embedding model import because dimensions probe failed", slog.String("model_id", m.ID), slog.Any("error", err))
-					continue
-				}
-				dimensions = &dim
-			}
-		}
+		// An embedding model's vector size is not listed. The model service
+		// probes it when the model is created, on its own time, so a slow or
+		// refused probe skips that one model instead of spending this list's
+		// budget or dropping the model before anyone sees it.
 		remote := RemoteModel{
-			ID:         m.ID,
-			Name:       name,
-			Type:       string(modelType),
-			Dimensions: dimensions,
+			ID:   m.ID,
+			Name: name,
+			Type: string(modelType),
 		}
-		if found {
-			// The live endpoint keeps deciding the list; curated fields fill in.
-			if template.Name != "" {
-				remote.Name = template.Name
-			}
-			remote.Description = template.Description
-			remote.Compatibilities = template.Compatibilities
-			remote.ReasoningEfforts = template.ReasoningEfforts
-			remote.ThinkingMode = template.ThinkingMode
-			remote.ReasoningDialect = template.ReasoningDialect
-			remote.ReasoningOffSupport = template.ReasoningOffSupport
-			remote.ReasoningDefaultOn = template.ReasoningDefaultOn
-			remote.ThinkingBudgetMin = template.ThinkingBudgetMin
-			remote.ThinkingBudgetMax = template.ThinkingBudgetMax
-			remote.ContextWindow = template.ContextWindow
-			remote.MaxOutputTokens = template.MaxOutputTokens
-			remote.CapabilitiesKnown = true
-		} else if clientType == models.ClientTypeOpenCodeGo {
+		if clientType == models.ClientTypeOpenCodeGo && modelType == models.ModelTypeChat {
 			remote.Compatibilities = []string{models.CompatToolCall, models.CompatReasoning}
 			remote.ThinkingMode = models.ThinkingModeAlways
 			remote.CapabilitiesKnown = true
 		}
-		// An explicit value from the endpoint is fresher than the template's.
+		// The endpoint may report an output limit of its own.
 		if limit, ok := liveMaxOutput[m.ID]; ok {
 			remote.MaxOutputTokens = &limit
 		}
@@ -649,6 +552,7 @@ func (s *Service) toGetResponse(provider sqlc.Provider) GetResponse {
 	}
 
 	cfg := providerConfig(provider.Config)
+	metadata = withLegacyGoSource(provider.ClientType, cfg, metadata)
 	maskedCfg := maskConfigSecrets(provider.ClientType, cfg)
 
 	var icon string
@@ -700,84 +604,6 @@ func configString(cfg map[string]any, key string) string {
 	}
 	v, _ := cfg[key].(string)
 	return v
-}
-
-func configStringSlice(cfg map[string]any, key string) []string {
-	if cfg == nil {
-		return nil
-	}
-	switch value := cfg[key].(type) {
-	case []string:
-		return append([]string(nil), value...)
-	case []any:
-		out := make([]string, 0, len(value))
-		for _, item := range value {
-			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func configStringPtr(cfg map[string]any, key string) *string {
-	if cfg == nil {
-		return nil
-	}
-	value, ok := cfg[key].(string)
-	if !ok {
-		return nil
-	}
-	value = strings.TrimSpace(value)
-	return &value
-}
-
-func configIntPtr(cfg map[string]any, key string) *int {
-	if cfg == nil {
-		return nil
-	}
-	switch value := cfg[key].(type) {
-	case int:
-		if value > 0 {
-			return &value
-		}
-	case int64:
-		if value > 0 {
-			out := int(value)
-			return &out
-		}
-	case float64:
-		if value > 0 {
-			out := int(value)
-			return &out
-		}
-	}
-	return nil
-}
-
-func configNonNegativeIntPtr(cfg map[string]any, key string) *int {
-	if cfg == nil {
-		return nil
-	}
-	switch value := cfg[key].(type) {
-	case int:
-		if value >= 0 {
-			return &value
-		}
-	case int64:
-		if value >= 0 {
-			out := int(value)
-			return &out
-		}
-	case float64:
-		if value >= 0 {
-			out := int(value)
-			return &out
-		}
-	}
-	return nil
 }
 
 // ProviderConfigString is a public helper for extracting a string from the config JSONB.
@@ -906,17 +732,4 @@ func metadataSectionSource(metadata map[string]any, section string) string {
 		return ""
 	}
 	return strings.TrimSpace(stringValue(nested, metadataSourceKey))
-}
-
-// configBoolPtr reads an optional boolean, distinguishing "absent" from "false".
-// reasoning_default_on needs that distinction: unknown means the adaptor keeps its
-// conservative behaviour, while an explicit false is a fact about the model.
-func configBoolPtr(cfg map[string]any, key string) *bool {
-	if cfg == nil {
-		return nil
-	}
-	if value, ok := cfg[key].(bool); ok {
-		return &value
-	}
-	return nil
 }

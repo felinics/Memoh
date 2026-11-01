@@ -11,11 +11,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	claudecoderuntime "github.com/felinics/memoh/internal/agent/runtime/claudecode"
-	codexruntime "github.com/felinics/memoh/internal/agent/runtime/codex"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	grokruntime "github.com/felinics/memoh/internal/agent/runtime/grok"
-	"github.com/felinics/memoh/internal/agent/runtime/native"
+	claudecoderuntime "github.com/felinics/memoh/internal/agent/runtime/external/claudecode"
+	codexruntime "github.com/felinics/memoh/internal/agent/runtime/external/codex"
+	grokruntime "github.com/felinics/memoh/internal/agent/runtime/external/grok"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -58,30 +57,6 @@ func TestAgentLimitsFromConfigUsesCustomValues(t *testing.T) {
 		got.ToolOutputMaxLines != 56 ||
 		got.SystemFilesMaxBytes != 7890 {
 		t.Fatalf("agent limits = %#v", got)
-	}
-}
-
-func TestAgentLoopReselectModeFromConfigDefaultsToActiveWhenUnrecognized(t *testing.T) {
-	got := agentLoopReselectModeFromConfig(slog.Default(), config.AgentConfig{ContextLoopReselect: "bogus"})
-	if got != native.LoopReselectActive {
-		t.Fatalf("mode = %q, want active", got)
-	}
-}
-
-func TestAgentLoopReselectModeFromConfigHonorsShadow(t *testing.T) {
-	got := agentLoopReselectModeFromConfig(slog.Default(), config.AgentConfig{ContextLoopReselect: "shadow"})
-	if got != native.LoopReselectShadow {
-		t.Fatalf("mode = %q, want shadow", got)
-	}
-}
-
-func TestProvideAgentWiresLoopReselectMode(t *testing.T) {
-	agent := provideAgent(slog.Default(), nil, nil, config.Config{Agent: config.AgentConfig{ContextLoopReselect: "off"}})
-	if agent == nil {
-		t.Fatal("expected a non-nil agent")
-	}
-	if got := agent.LoopReselectMode(); got != native.LoopReselectOff {
-		t.Fatalf("LoopReselectMode() = %q, want off", got)
 	}
 }
 
@@ -208,20 +183,27 @@ func mustTestUUID(s string) pgtype.UUID {
 type dependencyDriverStub struct {
 	runtimeType string
 	depID       string
+	command     string
 }
 
 func (d dependencyDriverStub) RuntimeType() string { return d.runtimeType }
+
+func (d dependencyDriverStub) Caps() external.Caps {
+	return external.Caps{Dependency: d.depID, Command: d.command}
+}
 
 func (dependencyDriverStub) Prompt(context.Context, external.PromptInput) (external.PromptResult, error) {
 	return external.PromptResult{}, nil
 }
 
-func (d dependencyDriverStub) RequiredDependency() string { return d.depID }
-
 // plainDriverStub declares no dependency, like the generic ACP runtime.
 type plainDriverStub struct{}
 
 func (plainDriverStub) RuntimeType() string { return "acp" }
+
+func (plainDriverStub) Caps() external.Caps {
+	return external.Caps{}
+}
 
 func (plainDriverStub) Prompt(context.Context, external.PromptInput) (external.PromptResult, error) {
 	return external.PromptResult{}, nil
@@ -283,33 +265,34 @@ func TestValidateDriverDependencies(t *testing.T) {
 	}
 
 	t.Run("real declarations pass", func(t *testing.T) {
-		drivers := external.Drivers{
-			dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "codex"},
-			dependencyDriverStub{runtimeType: claudecoderuntime.RuntimeType, depID: "claude-code"},
+		drivers := mustRegistry(t,
+			dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "codex", command: "codex"},
+			dependencyDriverStub{runtimeType: claudecoderuntime.RuntimeType, depID: "claude-code", command: "claude"},
 			plainDriverStub{},
-		}
+		)
 		if err := validateDriverDependencies(drivers, embedded); err != nil {
 			t.Fatalf("validateDriverDependencies() error = %v", err)
 		}
-		// The assembly path with the real drivers' declarations (methods on a
-		// nil receiver, no constructor needed) is what FX runs at start-up.
-		assembled, err := provideDirectAgentDrivers((*codexruntime.Driver)(nil), (*claudecoderuntime.Driver)(nil), (*grokruntime.Driver)(nil))
+		// The assembly path with the real drivers' declarations is what FX
+		// runs at start-up; a driver whose declaration and implementation
+		// disagree refuses the start.
+		assembled, err := provideRuntimeRegistry(nil, &codexruntime.Driver{}, &claudecoderuntime.Driver{}, &grokruntime.Driver{})
 		if err != nil {
-			t.Fatalf("provideDirectAgentDrivers() error = %v", err)
+			t.Fatalf("provideRuntimeRegistry() error = %v", err)
 		}
-		if len(assembled) != 3 {
-			t.Fatalf("provideDirectAgentDrivers() = %d drivers, want 3", len(assembled))
+		if len(assembled.All()) != 4 {
+			t.Fatalf("provideRuntimeRegistry() = %d drivers, want 4", len(assembled.All()))
 		}
 	})
 
 	t.Run("drivers without a declaration are ignored", func(t *testing.T) {
-		if err := validateDriverDependencies(external.Drivers{plainDriverStub{}}, embedded); err != nil {
+		if err := validateDriverDependencies(mustRegistry(t, plainDriverStub{}), embedded); err != nil {
 			t.Fatalf("validateDriverDependencies() error = %v", err)
 		}
 	})
 
 	t.Run("nil catalog", func(t *testing.T) {
-		if err := validateDriverDependencies(external.Drivers{plainDriverStub{}}, nil); err == nil {
+		if err := validateDriverDependencies(mustRegistry(t, plainDriverStub{}), nil); err == nil {
 			t.Fatal("validateDriverDependencies(nil catalog) = nil, want error")
 		}
 	})
@@ -323,39 +306,33 @@ func TestValidateDriverDependencies(t *testing.T) {
 		{
 			name:     "dependency not in the catalog",
 			provides: "codex",
-			driver:   dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "openai-codex"},
+			driver:   dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "openai-codex", command: "codex"},
 			want:     `workspace dependency "openai-codex": not in the catalog`,
 		},
 		{
 			name:     "primary command is not the launcher",
 			provides: "codex-cli, codex",
-			driver:   dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "codex"},
+			driver:   dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "codex", command: "codex"},
 			want:     `primary command [codex-cli codex] (provides[0]) is not the runtime launcher "codex"`,
 		},
 		{
 			name:     "dependency provides a different command",
 			provides: "codex",
-			driver:   dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "tool-z"},
+			driver:   dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "tool-z", command: "codex"},
 			want:     `primary command [tool-z] (provides[0]) is not the runtime launcher "codex"`,
-		},
-		{
-			name:     "runtime without a registered launcher command",
-			provides: "codex",
-			driver:   dependencyDriverStub{runtimeType: "gemini", depID: "codex"},
-			want:     "no launcher command registered",
 		},
 	}
 	for _, tt := range failures {
 		t.Run(tt.name, func(t *testing.T) {
 			cat := driverTestCatalog(t, tt.provides)
-			err := validateDriverDependencies(external.Drivers{tt.driver}, cat)
+			err := validateDriverDependencies(mustRegistry(t, tt.driver), cat)
 			if err == nil {
 				t.Fatal("validateDriverDependencies() = nil, want error")
 			}
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("validateDriverDependencies() error = %q, want it to contain %q", err, tt.want)
 			}
-			if !strings.Contains(err.Error(), `direct runtime "`+tt.driver.runtimeType+`"`) {
+			if !strings.Contains(err.Error(), `runtime "`+tt.driver.runtimeType+`"`) {
 				t.Fatalf("validateDriverDependencies() error = %q, want the runtime type named", err)
 			}
 		})
@@ -363,10 +340,10 @@ func TestValidateDriverDependencies(t *testing.T) {
 
 	t.Run("all violations reported together", func(t *testing.T) {
 		cat := driverTestCatalog(t, "codex-cli")
-		err := validateDriverDependencies(external.Drivers{
-			dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "codex"},
-			dependencyDriverStub{runtimeType: claudecoderuntime.RuntimeType, depID: "claude-code"},
-		}, cat)
+		err := validateDriverDependencies(mustRegistry(t,
+			dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "codex", command: "codex"},
+			dependencyDriverStub{runtimeType: claudecoderuntime.RuntimeType, depID: "claude-code", command: "claude"},
+		), cat)
 		if err == nil {
 			t.Fatal("validateDriverDependencies() = nil, want error")
 		}
@@ -376,4 +353,17 @@ func TestValidateDriverDependencies(t *testing.T) {
 			}
 		}
 	})
+}
+
+func (*lazyLLMTestQueries) UpgradeModelConfig(context.Context, sqlc.UpgradeModelConfigParams) (int64, error) {
+	return 0, nil
+}
+
+func mustRegistry(t *testing.T, drivers ...external.Driver) *external.Registry {
+	t.Helper()
+	registry, err := external.NewRegistry(drivers...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return registry
 }

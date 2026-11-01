@@ -21,8 +21,8 @@ type persistedHistoryMessageService struct {
 	history []messagepkg.Message
 }
 
-func (s *persistedHistoryMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
-	return append([]messagepkg.Message(nil), s.history...), nil
+func (s *persistedHistoryMessageService) ListHistoryWithinBytes(context.Context, string, messagepkg.HistoryWindow) (messagepkg.HistoryLoad, error) {
+	return messagepkg.HistoryLoad{Messages: append([]messagepkg.Message(nil), s.history...)}, nil
 }
 
 type chatCompletionsMessage struct {

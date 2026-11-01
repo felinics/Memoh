@@ -2,9 +2,11 @@ package application
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/felinics/memoh/internal/agent/context/compaction"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
@@ -13,17 +15,16 @@ func TestDiscussComposedInputSurvivesEchoThroughProviderAdmission(t *testing.T) 
 	for _, size := range []int{1600, 10000, 80000} {
 		t.Run(strings.Repeat("x", size/10000+1), func(t *testing.T) {
 			service, resolver, _, _, cmd := discussBudgetRecoveryFixture(t)
-			service.SetSyncCompactionMode("off")
 			configureDiscussLifecycle(service)
 			provider := &triggerLifecycleProvider{}
 			resolver.resolveResult.RunConfig.Model.Provider = provider
 			input := strings.Repeat("u", size)
 			rc := timeline.RenderedContext{
-				{MessageID: "old", ReceivedAtMs: 1, Content: []timeline.RenderedContentPiece{{Type: "text", Text: strings.Repeat("h", 20000)}}},
+				{MessageID: "old", ReceivedAtMs: 1, Content: []timeline.RenderedContentPiece{{Type: "text", Text: strings.Repeat("h", 1200)}}},
 				{MessageID: "current", ReceivedAtMs: 2, Content: []timeline.RenderedContentPiece{{Type: "text", Text: input}}},
 				{MessageID: "echo", ReceivedAtMs: 3, IsSelfSent: true, Content: []timeline.RenderedContentPiece{{Type: "text", Text: "self echo"}}},
 			}
-			composed := timeline.ComposeContext(rc, nil)
+			composed := timeline.ComposeContextWithCheckpoint(rc, nil, timeline.HistoryCheckpoint{})
 			wire, err := json.Marshal(composed.Messages)
 			if err != nil {
 				t.Fatal(err)
@@ -73,15 +74,18 @@ func TestDiscussAdmissionKeepsNewestFittingSuffixOfCurrentBatch(t *testing.T) {
 	}
 }
 
+// A Discuss recovery Channel asks for without materialized messages still
+// names the batch it answers: the fold keeps it newest first while it leaves
+// the summary room, priced with the rest of the history.
 func TestDiscussRecoveryCarriesCurrentSourcesEvenWithoutMaterializedMessages(t *testing.T) {
-	service, runner := newControllerPolicyService(t, nil)
+	service, runner := newControllerPolicyService(t)
 	sources := []turn.ContextMessageSource{{Kind: "external", ID: "a", Current: true}, {Kind: "external", ID: "b", Current: true}}
 	cmd := turn.StartTurnCommand{BotID: syncCompactBotID, ThreadID: syncCompactThreadID, DiscussContextOverflow: true, DiscussContextTokens: 2000, DiscussCurrentTokens: 100, DiscussCurrentSources: sources}
-	if !service.maybeSyncCompactDiscuss(t.Context(), cmd, ResolveRunConfigResult{ContextBudgetMaxTokens: 1000}, "recovery") || len(runner.configs) != 1 {
-		t.Fatal("recovery did not run")
+	if recomposed, err := service.maybeSyncCompactDiscuss(t.Context(), cmd, ResolveRunConfigResult{ContextBudgetMaxTokens: 1000}, "recovery"); !recomposed || err != nil || len(runner.configs) != 1 {
+		t.Fatalf("recovery did not run: %v", err)
 	}
 	cfg := runner.configs[0]
-	if len(cfg.ProtectedSources) != 1 || cfg.ProtectedSources[0].ID != "b" || cfg.HistoryBudgetTokens != 900 {
-		t.Fatalf("Channel overflow must protect only the newest input and compact older input: %+v", cfg)
+	if !reflect.DeepEqual(cfg.Anchors, sources) || cfg.AnchorPolicy != compaction.AnchorsFirst || cfg.HistoryBudgetTokens != 1000 {
+		t.Fatalf("Channel overflow must keep the batch newest first and compact what does not fit beside it: %+v", cfg)
 	}
 }

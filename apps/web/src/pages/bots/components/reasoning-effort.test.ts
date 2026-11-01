@@ -4,6 +4,7 @@ import {
   REASONING_EFFORT_DISABLE,
   REASONING_EFFORT_LEGACY_OFF,
   reconcileStoredEffort,
+  defaultEffortSelection,
   displayedEffort,
   selectableEfforts,
 } from './reasoning-effort'
@@ -50,6 +51,21 @@ describe('selectableEfforts', () => {
   })
 })
 
+describe('defaultEffortSelection', () => {
+  it('starts on the model default tier', () => {
+    expect(defaultEffortSelection(options({ default_effort: 'high' }))).toBe('high')
+  })
+
+  it('starts off when the model is declared to start off and can be turned off', () => {
+    expect(defaultEffortSelection(options({ default_off: true }))).toBe(REASONING_EFFORT_DISABLE)
+    expect(defaultEffortSelection(options({ default_off: true, can_disable: false }))).toBe(DEFAULT_TIER)
+  })
+
+  it('has nothing to start on without options', () => {
+    expect(defaultEffortSelection(undefined)).toBe('')
+  })
+})
+
 describe('reconcileStoredEffort', () => {
   it('keeps a tier the model still offers', () => {
     expect(reconcileStoredEffort('high', options())).toBe('high')
@@ -57,6 +73,12 @@ describe('reconcileStoredEffort', () => {
 
   it('lands a stranded tier on the model default', () => {
     expect(reconcileStoredEffort('xhigh', options())).toBe(DEFAULT_TIER)
+  })
+
+  it('lands an unset or stranded value off on a model declared to start off', () => {
+    expect(reconcileStoredEffort('', options({ default_off: true }))).toBe(REASONING_EFFORT_DISABLE)
+    expect(reconcileStoredEffort('xhigh', options({ default_off: true }))).toBe(REASONING_EFFORT_DISABLE)
+    expect(reconcileStoredEffort('high', options({ default_off: true }))).toBe('high')
   })
 
   it('keeps off when off is still reachable', () => {

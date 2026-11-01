@@ -9,7 +9,7 @@ import (
 )
 
 func TestPostgresHistoryAppendAndAssetLinkShareSessionLockOrder(t *testing.T) {
-	fixture := setupCommittedCompactionFixture(t)
+	fixture := setupCommittedTurnFixture(t)
 	ctx := context.Background()
 
 	assetTx, err := fixture.pool.Begin(ctx)

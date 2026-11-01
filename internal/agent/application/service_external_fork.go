@@ -10,7 +10,6 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/turn"
-	"github.com/felinics/memoh/internal/apperror"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -53,15 +52,7 @@ func (s *Service) prepareExternalFork(ctx context.Context, botID, sessionID, tur
 	if err := validateSessionBot(botID, sessionID, sess.BotID); err != nil {
 		return nil, err
 	}
-	if !session.IsDirectRuntime(sess) {
-		return nil, fmt.Errorf("session %s is not on an external runtime", sessionID)
-	}
-	runtimeType := strings.TrimSpace(sess.RuntimeType)
-	driver, ok := s.externalDrivers[runtimeType]
-	if !ok {
-		return nil, apperror.New(apperror.CodeExternalRuntimeUnavailable, map[string]string{"runtime": runtimeType})
-	}
-	forker, ok := driver.(external.ThreadForker)
+	forker, ok := external.As[external.ThreadForker](s.runtimes, session.RuntimeTypeOf(sess))
 	if !ok {
 		return nil, ErrExternalForkUnsupported
 	}

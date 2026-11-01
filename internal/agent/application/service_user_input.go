@@ -207,7 +207,11 @@ func (s *Service) continueCommittedUserInputResponse(
 	if s.continueUserInputFn != nil {
 		return s.continueUserInputFn(ctx, resolved, committed.input, toolResult, eventCh)
 	}
-	return s.storeUserInputResultAndContinue(ctx, resolved, committed.input, toolResult, runID, committed.runHandle, lifecycle, eventCh)
+	requesterUserID, err := s.runRequesterUserID(ctx, committed.runID)
+	if err != nil {
+		return err
+	}
+	return s.storeUserInputResultAndContinue(ctx, resolved, committed.input, toolResult, runID, requesterUserID, committed.runHandle, lifecycle, eventCh)
 }
 
 // isExternalAgentUserInputSession classifies a request by its session's runtime, the
@@ -347,6 +351,7 @@ func (s *Service) storeUserInputResultAndContinue(
 	input UserInputResponseInput,
 	result sdk.ToolResultPart,
 	runID string,
+	requesterUserID string,
 	runHandle sessionruntime.RunHandle,
 	lifecycle *continuationLifecycleResult,
 	eventCh chan<- WSStreamEvent,
@@ -367,6 +372,7 @@ func (s *Service) storeUserInputResultAndContinue(
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
 		ThreadID:                req.SessionID,
+		UserID:                  requesterUserID,
 		SourceChannelIdentityID: firstNonEmpty(req.ChannelIdentityID, input.ActorChannelIdentityID),
 		CurrentChannel:          req.SourcePlatform,
 		ReplyTarget:             req.ReplyTarget,
@@ -383,7 +389,7 @@ func (s *Service) storeUserInputResultAndContinue(
 	if err := s.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
 		return err
 	}
-	return s.continueUserInputSession(ctx, req, input, runID, runHandle, lifecycle, eventCh)
+	return s.continueUserInputSession(ctx, req, input, runID, requesterUserID, runHandle, lifecycle, eventCh)
 }
 
 func (s *Service) continueUserInputSession(
@@ -391,21 +397,23 @@ func (s *Service) continueUserInputSession(
 	req userinput.Request,
 	input UserInputResponseInput,
 	runID string,
+	requesterUserID string,
 	runHandle sessionruntime.RunHandle,
 	runtimeLifecycle *continuationLifecycleResult,
 	eventCh chan<- WSStreamEvent,
 ) error {
 	req = withLocalWebUserInputReplyTarget(req)
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
-	resolved, err := s.ResolveRunConfig(ctx,
-		input.BotID,
-		req.SessionID,
-		firstNonEmpty(req.ChannelIdentityID, input.ActorChannelIdentityID),
-		req.SourcePlatform,
-		req.ReplyTarget,
-		req.ConversationType,
-		input.ChatToken,
-	)
+	resolved, err := s.ResolveRunConfig(ctx, RunConfigRequest{
+		BotID:             input.BotID,
+		SessionID:         req.SessionID,
+		UserID:            requesterUserID,
+		ChannelIdentityID: firstNonEmpty(req.ChannelIdentityID, input.ActorChannelIdentityID),
+		CurrentPlatform:   req.SourcePlatform,
+		ReplyTarget:       req.ReplyTarget,
+		ConversationType:  req.ConversationType,
+		ChatToken:         input.ChatToken,
+	})
 	if err != nil {
 		return err
 	}
@@ -415,23 +423,14 @@ func (s *Service) continueUserInputSession(
 		return err
 	}
 
-	cfg, err := s.prepareContinuationRunConfig(
-		ctx,
-		resolved.RunConfig,
-		historyScopeFallbackFromUserInputRequest(req),
-		compactionSummaryScope(firstNonEmpty(req.BotID, input.BotID), "", req.SessionID, req.ConversationType, "", req.ReplyTarget),
-		eventCh,
-	)
-	if err != nil {
-		return err
-	}
-
 	chatReq := ChatRequest{
-		RunID:                   cfg.RunID,
+		RunID:                   resolved.RunConfig.RunID,
 		RunHandle:               runHandle,
+		continuationToolCallID:  req.ToolCallID,
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
 		ThreadID:                req.SessionID,
+		UserID:                  requesterUserID,
 		SourceChannelIdentityID: firstNonEmpty(req.ChannelIdentityID, input.ActorChannelIdentityID),
 		CurrentChannel:          req.SourcePlatform,
 		ReplyTarget:             req.ReplyTarget,
@@ -444,6 +443,17 @@ func (s *Service) continueUserInputSession(
 		SkipMemoryExtraction: true,
 		WorkspaceTargetID:    req.WorkspaceTargetID,
 		WorkspaceTarget:      workspaceTargetFromRunConfig(resolved.RunConfig),
+	}
+	cfg, err := s.prepareContinuationRunConfig(
+		ctx,
+		resolved.RunConfig,
+		historyScopeFallbackFromUserInputRequest(req),
+		compactionSummaryScope(firstNonEmpty(req.BotID, input.BotID), "", req.SessionID, req.ConversationType, "", req.ReplyTarget),
+		eventCh,
+		chatReq,
+	)
+	if err != nil {
+		return err
 	}
 
 	return s.runNativeDecisionContinuation(ctx, chatReq, cfg, resolved.ModelID, runtimeLifecycle, eventCh)

@@ -54,14 +54,21 @@ WHERE team_id = public.memoh_current_team_id() AND bot_id = sqlc.arg(bot_id);
 -- expired, or is a failed provisioning whose backoff elapsed. A failed removal
 -- is not due: it waits for a new intent. SKIP LOCKED keeps concurrent Server
 -- instances from claiming the same row; an expired lease lets another instance
--- take over a crashed pass.
+-- take over a crashed pass. A desired state, when given, limits the pass to
+-- the rows that want it: removals can have slots of their own.
+--
+-- The due rows are picked by an array subquery, which PostgreSQL runs once.
+-- Written as bot_id IN (subquery), the planner may pick a nested loop semi
+-- join that runs the subquery again for every row it scans; each run skips
+-- the rows this statement already locked and returns the next ones, so the
+-- claim takes more rows than the limit, more than the free slots.
 UPDATE bot_workspaces
 SET
   lease_owner = sqlc.arg(lease_owner),
   lease_until = now() + make_interval(secs => sqlc.arg(lease_seconds)::double precision),
   version     = version + 1,
   updated_at  = now()
-WHERE bot_id IN (
+WHERE bot_id = ANY(ARRAY(
   SELECT bot_id FROM bot_workspaces
   WHERE team_id = public.memoh_current_team_id()
     AND next_attempt_at <= now()
@@ -72,10 +79,11 @@ WHERE bot_id IN (
       OR (desired_state = 'present' AND observed_state IN ('absent', 'failed'))
       OR (desired_state = 'absent' AND observed_state NOT IN ('absent', 'failed'))
     )
+    AND (sqlc.narg(desired_state)::text IS NULL OR desired_state = sqlc.narg(desired_state)::text)
   ORDER BY next_attempt_at
   LIMIT sqlc.arg(lim)::int
   FOR UPDATE SKIP LOCKED
-)
+))
 RETURNING *;
 
 -- name: ClaimBotWorkspace :one

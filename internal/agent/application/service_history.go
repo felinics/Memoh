@@ -5,17 +5,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
-	"time"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/chat/checkpoint"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
+// injectWorkspaceTransitionRecords marks every switch of Computer between
+// consecutive located records. The first located record in the window gets
+// no marker: the turn's default Computer is stated by the tool usage, and a
+// marker derived from where the window happens to start would render a row
+// differently from the request that first sent it.
 func injectWorkspaceTransitionRecords(records []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
 	if len(records) == 0 {
 		return records
@@ -23,12 +27,13 @@ func injectWorkspaceTransitionRecords(records []historyfrag.HistoryRecord) []his
 	result := make([]historyfrag.HistoryRecord, 0, len(records)+2)
 	var previous *WorkspaceTarget
 	for _, record := range records {
-		if current := workspaceTargetFromMetadata(record.Metadata); current != nil && !sameWorkspaceTarget(previous, current) {
-			text := renderWorkspaceTransition(previous, current)
-			result = append(result, historyfrag.HistoryRecord{
-				ModelMessage: ModelMessage{Role: "system", Content: newTextContent(text)},
-				Synthetic:    true,
-			})
+		if current := workspaceTargetFromMetadata(record.Metadata); current != nil {
+			if text := renderWorkspaceTransition(previous, current); text != "" {
+				result = append(result, historyfrag.HistoryRecord{
+					ModelMessage: ModelMessage{Role: "system", Content: newTextContent(text)},
+					Synthetic:    true,
+				})
+			}
 			previous = current
 		}
 		result = append(result, record)
@@ -37,19 +42,8 @@ func injectWorkspaceTransitionRecords(records []historyfrag.HistoryRecord) []his
 }
 
 func renderWorkspaceTransition(previous, current *WorkspaceTarget) string {
-	if current == nil || strings.TrimSpace(current.TargetID) == "" {
+	if previous == nil || current == nil || sameWorkspaceTarget(previous, current) {
 		return ""
-	}
-	if previous != nil && sameWorkspaceTarget(previous, current) {
-		return ""
-	}
-	if previous == nil {
-		return fmt.Sprintf(
-			"[Execution location] The default Computer is %q (target_id=%q, kind=%q). Workspace tools that omit target_id run there.",
-			current.Name,
-			current.TargetID,
-			current.Kind,
-		)
 	}
 	return fmt.Sprintf(
 		"[Execution location changed] The default Computer changed from %q (target_id=%q, kind=%q) to %q (target_id=%q, kind=%q). Earlier file and command results belong to their recorded Computer. Files, processes, and working-directory state do not transfer between Computers; inspect the new Computer before continuing.",
@@ -92,18 +86,17 @@ func workspaceTargetFromMetadata(metadata map[string]any) *WorkspaceTarget {
 	return target
 }
 
-func (s *Service) currentWorkspaceContextMessage(ctx context.Context, req ChatRequest) *ModelMessage {
-	current := req.WorkspaceTarget
+// currentWorkspaceTransitionMessage marks a switch of Computer at the current
+// request, against the last located record of the history it is sent with —
+// the record a later replay compares the request row with, so the marker this
+// request sends is the one the next turn replays.
+func currentWorkspaceTransitionMessage(history []historyfrag.HistoryRecord, current *WorkspaceTarget) *ModelMessage {
 	if current == nil || strings.TrimSpace(current.TargetID) == "" {
 		return nil
 	}
 	var previous *WorkspaceTarget
-	if s != nil && s.sessionService != nil && strings.TrimSpace(req.ThreadID) != "" {
-		if sess, err := s.sessionService.Get(ctx, req.ThreadID); err == nil {
-			if raw, ok := sess.Metadata["workspace_target"].(map[string]any); ok {
-				previous = workspaceTargetFromMetadata(map[string]any{"execution_location": raw})
-			}
-		}
+	for i := len(history) - 1; i >= 0 && previous == nil; i-- {
+		previous = workspaceTargetFromMetadata(history[i].Metadata)
 	}
 	text := renderWorkspaceTransition(previous, current)
 	if text == "" {
@@ -113,38 +106,91 @@ func (s *Service) currentWorkspaceContextMessage(ctx context.Context, req ChatRe
 	return &message
 }
 
-// loadHistoryRecords loads the recent history window. The load is
-// byte-budgeted on the database side (CM-ADM-001): rows are admitted
+// loadHistoryRecords loads the thread's history under its history
+// checkpoint: what it holds in its order, its summaries and the rows it keeps
+// raw, and the rows after its position. What a load reads follows what is
+// unsummarized, never the thread's length or age. The rows after the
+// checkpoint are byte-budgeted on the database side (CM-ADM-001): admitted
 // newest-first within contextTokenBudget (the absolute cap when the budget
-// is unset), so the time window alone never bounds process memory.
-func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.ScopeFallback, sessionID string, maxContextMinutes, contextTokenBudget int) ([]historyfrag.HistoryRecord, error) {
-	if s.messageService == nil {
-		return nil, nil
+// is unset). It reports
+// whether the budget left older rows after the checkpoint out: they stay
+// compaction candidates, and a request that renders the load compacts them
+// rather than send a history that silently starts later. An edit or retry
+// renders the checkpoint its replacement keeps and the history before its
+// cutoff. A request without a thread has no history.
+func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.ScopeFallback, scope contextfrag.Scope, contextTokenBudget int, cut historyCut) ([]historyfrag.HistoryRecord, bool, error) {
+	sessionID := strings.TrimSpace(scope.SessionID)
+	if s.messageService == nil || sessionID == "" {
+		return nil, false, nil
 	}
-	since := time.Now().UTC().Add(-time.Duration(maxContextMinutes) * time.Minute)
-	maxBytes := s.historyLoadMaxBytes(contextTokenBudget)
-	var msgs []messagepkg.Message
-	var err error
-	if strings.TrimSpace(sessionID) != "" {
-		msgs, err = s.messageService.ListActiveSinceBySessionWithinBytes(ctx, sessionID, since, maxBytes)
-	} else {
-		msgs, err = s.messageService.ListActiveSinceWithinBytes(ctx, fallback.ChatID, since, maxBytes)
-	}
+	held, err := s.historyCheckpoint(ctx, sessionID, cut)
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	kept := make(map[string]messagepkg.Message)
+	if rows := held.RowIDs(); len(rows) > 0 {
+		msgs, err := s.messageService.ListHistoryByIDs(ctx, sessionID, rows)
+		if err != nil {
+			return nil, false, fmt.Errorf("load history checkpoint rows: %w", err)
+		}
+		for _, msg := range msgs {
+			kept[msg.ID] = msg
+		}
+	}
+	load, err := s.messageService.ListHistoryWithinBytes(ctx, sessionID, messagepkg.HistoryWindow{
+		After:    held.Position,
+		Before:   cut.before,
+		MaxBytes: s.historyLoadMaxBytes(contextTokenBudget),
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	msgs := load.Messages
+	result := make([]historyfrag.HistoryRecord, 0, len(held.Items)+len(msgs))
+	for _, item := range held.Items {
+		if item.SummaryID != "" {
+			result = append(result, historyfrag.SummaryRecord(item.SummaryID, item.Summary, scope))
+			continue
+		}
+		msg, ok := kept[item.RowID]
+		if !ok {
+			return nil, false, fmt.Errorf("history checkpoint %s keeps row %s, which is not a context row", held.ID, item.RowID)
+		}
+		record, err := historyfrag.FromDBMessageWithLogger(s.logger, msg, fallback)
+		if err != nil {
+			return nil, false, err
+		}
+		result = append(result, record)
 	}
 	// The budget covers content only; metadata arrives undecoded. Release each
 	// row once converted so at most one row's metadata is decoded at a time.
-	result := make([]historyfrag.HistoryRecord, 0, len(msgs))
 	for i := range msgs {
 		record, err := historyfrag.FromDBMessageWithLogger(s.logger, msgs[i], fallback)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		msgs[i] = messagepkg.Message{}
 		result = append(result, record)
 	}
-	return result, nil
+	return result, load.Truncated, nil
+}
+
+// historyCheckpoint is the checkpoint a request renders: the session's
+// active one, or the one an edit or retry's replacement keeps.
+func (s *Service) historyCheckpoint(ctx context.Context, sessionID string, cut historyCut) (checkpoint.Checkpoint, error) {
+	var (
+		held checkpoint.Checkpoint
+		err  error
+	)
+	if cut.replacedTurnID != "" {
+		held, err = s.checkpoints.KeptBeforeTurn(ctx, sessionID, cut.replacedTurnID)
+	} else {
+		held, err = s.checkpoints.Active(ctx, sessionID)
+	}
+	if err != nil {
+		return checkpoint.Checkpoint{}, fmt.Errorf("load history checkpoint: %w", err)
+	}
+	return held, nil
 }
 
 func historyScopeFallbackFromChatRequest(req ChatRequest) historyfrag.ScopeFallback {
@@ -175,11 +221,8 @@ func (s *Service) ensureRequiredHistoryMessage(ctx context.Context, messages []h
 	if messageID == "" || s.messageService == nil || strings.TrimSpace(req.ThreadID) == "" {
 		return messages, nil
 	}
-	for i, item := range messages {
-		if strings.TrimSpace(item.DBMessageID) == messageID {
-			messages[i].Required = true
-			return messages, nil
-		}
+	if containsHistoryRecord(messages, messageID) {
+		return messages, nil
 	}
 	window, err := s.messageService.ListVisibleFromBySession(ctx, req.ThreadID, messageID)
 	if err != nil {
@@ -198,11 +241,6 @@ func (s *Service) ensureRequiredHistoryMessage(ctx context.Context, messages []h
 	required = filterMessagesBeforeID(required, req.HistoryCutoffBeforeMessageID)
 	if !containsHistoryRecord(required, messageID) {
 		return nil, errors.New("required history message is not visible")
-	}
-	for i := range required {
-		if strings.TrimSpace(required[i].DBMessageID) == messageID {
-			required[i].Required = true
-		}
 	}
 	return mergeRequiredHistoryWindow(messages, required), nil
 }
@@ -332,182 +370,15 @@ func replayedPartBytes(content json.RawMessage) int {
 	return total
 }
 
-func trimMessagesByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord, maxTokens int) ([]ModelMessage, int) {
-	trimmed, _, totalTokens := trimMessagesAndRecordsByTokens(log, messages, maxTokens)
-	return trimmed, totalTokens
-}
-
-// totalCompactableHistoryTokens estimates the tokens held by raw history rows
-// only. Active summaries are excluded: compaction can never shrink them, so
-// counting them toward the compaction trigger would re-fire it on every
-// request once accumulated summaries alone cross the threshold.
-func totalCompactableHistoryTokens(records []historyfrag.HistoryRecord) int {
-	total := 0
-	for _, record := range records {
-		if record.Kind == contextfrag.KindConversationSummary || record.Lifecycle == historyfrag.LifecycleActiveSummary {
-			continue
-		}
-		total += estimateMessageTokens(record.ModelMessage)
-	}
-	return total
-}
-
-func trimMessagesAndRecordsByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord, maxTokens int) ([]ModelMessage, []historyfrag.HistoryRecord, int) {
-	if maxTokens == 0 || len(messages) == 0 {
-		return finalizeTrimmedHistory(messages, false, 0)
-	}
-
-	// Scan from newest to oldest, accumulating per-message estimated context
-	// token costs. Each message's cost represents the tokens it occupies in the
-	// context window (not the output tokens it generated). We use a character-
-	// based estimate for all messages since this measures context window impact.
-	scannedTokens := 0
-	cutoff := 0
-	for i := len(messages) - 1; i >= 0; i-- {
-		scannedTokens += estimateMessageTokens(messages[i].ModelMessage)
-		if scannedTokens > maxTokens {
-			cutoff = i + 1
-			break
-		}
-	}
-
-	// Keep provider-valid message order: a "tool" message must follow a
-	// preceding assistant tool call. When history is head-trimmed, a leading
-	// tool message may become orphaned and cause provider 400 errors.
-	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].ModelMessage.Role), "tool") {
-		cutoff++
-	}
-	cutoff, totalTokens := fitRequiredMessagesWithinBudget(messages, cutoff, maxTokens)
-
-	if cutoff > 0 && log != nil {
-		log.Info("trimMessagesByTokens: context trimmed",
-			slog.Int("total_messages", len(messages)),
-			slog.Int("estimated_tokens", totalTokens),
-			slog.Int("max_tokens", maxTokens),
-			slog.Int("cutoff_index", cutoff),
-			slog.Int("kept_messages", len(messages)-cutoff),
-		)
-	}
-
-	requiredPrefix := requiredMessagesBeforeCutoff(messages, cutoff)
-	retained := make([]historyfrag.HistoryRecord, 0, len(messages)-cutoff+len(requiredPrefix))
-	retained = append(retained, requiredPrefix...)
-	retained = append(retained, messages[cutoff:]...)
-	return finalizeTrimmedHistory(retained, cutoff > 0, maxTokens)
-}
-
-// historyTrimNotice tells the LLM that earlier context was trimmed so it can
-// use tools (memory, search) to look up past information if needed.
-func historyTrimNotice() ModelMessage {
-	return ModelMessage{
-		Role: "system",
-		Content: newTextContent(
-			"[System Notice] Earlier conversation history has been trimmed to fit the context window. " +
-				"If you need information from earlier in the conversation, use the available tools " +
-				"(such as memory_read or web search) to retrieve it.",
-		),
-	}
-}
-
-// finalizeTrimmedHistory derives workspace-transition markers from the
-// records that survived trimming and charges markers and the truncation
-// notice against the same hard budget, dropping the oldest droppable
-// survivors until everything fits. Deriving from survivors means every kept
-// workspace run is governed by its marker no matter where the cut fell —
-// including messages pulled back as Required. When only protected records
-// remain, the terminal ladder keeps the budget a hard bound: the notice is
-// omitted first (meta text loses to content), then the oldest active
-// summaries are evicted; Required records are the only sanctioned overflow.
-func finalizeTrimmedHistory(retained []historyfrag.HistoryRecord, trimmed bool, maxTokens int) ([]ModelMessage, []historyfrag.HistoryRecord, int) {
-	noticeDropped := false
-	for {
-		annotated := injectWorkspaceTransitionRecords(retained)
-		withNotice := trimmed && !noticeDropped
-		totalTokens := estimateMessagesTokens(annotated)
-		if withNotice {
-			totalTokens += estimateMessageTokens(historyTrimNotice())
-		}
-		if maxTokens <= 0 || totalTokens <= maxTokens {
-			return emitTrimmedHistory(annotated, withNotice, totalTokens)
-		}
-		// Active summaries are shielded from this first rung: evicting the
-		// compressed carrier of already-trimmed history before plain rows
-		// would be self-defeating, and summaries stay small by the engine's
-		// ineffective-summary gate.
-		if dropIndex := trimDropIndex(retained, false); dropIndex >= 0 {
-			retained = dropRetainedRecord(retained, dropIndex)
-			trimmed = true
-			continue
-		}
-		if withNotice {
-			noticeDropped = true
-			continue
-		}
-		if dropIndex := trimDropIndex(retained, true); dropIndex >= 0 {
-			retained = dropRetainedRecord(retained, dropIndex)
-			trimmed = true
-			continue
-		}
-		return emitTrimmedHistory(annotated, withNotice, totalTokens)
-	}
-}
-
-func trimDropIndex(retained []historyfrag.HistoryRecord, allowActiveSummaries bool) int {
-	for index, record := range retained {
-		if record.Required {
-			continue
-		}
-		if !allowActiveSummaries && record.Lifecycle == historyfrag.LifecycleActiveSummary {
-			continue
-		}
-		return index
-	}
-	return -1
-}
-
-func dropRetainedRecord(retained []historyfrag.HistoryRecord, dropIndex int) []historyfrag.HistoryRecord {
-	retained = append(retained[:dropIndex], retained[dropIndex+1:]...)
-	// Dropping a call can orphan its tool results; drop those too.
-	for dropIndex < len(retained) &&
-		!retained[dropIndex].Required &&
-		strings.EqualFold(strings.TrimSpace(retained[dropIndex].ModelMessage.Role), "tool") {
-		retained = append(retained[:dropIndex], retained[dropIndex+1:]...)
-	}
-	return retained
-}
-
-func emitTrimmedHistory(annotated []historyfrag.HistoryRecord, withNotice bool, totalTokens int) ([]ModelMessage, []historyfrag.HistoryRecord, int) {
-	result := make([]ModelMessage, 0, len(annotated)+1)
-	if withNotice {
-		result = append(result, historyTrimNotice())
-	}
+// historyMessagesFromRecords derives workspace-transition markers from the
+// records and projects them to model messages.
+func historyMessagesFromRecords(records []historyfrag.HistoryRecord) ([]ModelMessage, []historyfrag.HistoryRecord) {
+	annotated := injectWorkspaceTransitionRecords(records)
+	messages := make([]ModelMessage, 0, len(annotated))
 	for _, record := range annotated {
-		result = append(result, record.ModelMessage)
+		messages = append(messages, record.ModelMessage)
 	}
-	return result, annotated, totalTokens
-}
-
-func fitRequiredMessagesWithinBudget(messages []historyfrag.HistoryRecord, cutoff int, maxTokens int) (int, int) {
-	if maxTokens <= 0 || len(messages) == 0 {
-		return cutoff, estimateMessagesTokens(messages)
-	}
-	if cutoff < 0 {
-		cutoff = 0
-	}
-	if cutoff > len(messages) {
-		cutoff = len(messages)
-	}
-	for {
-		requiredPrefix := requiredMessagesBeforeCutoff(messages, cutoff)
-		totalTokens := estimateMessagesTokens(requiredPrefix) + estimateMessagesTokens(messages[cutoff:])
-		if totalTokens <= maxTokens || cutoff >= len(messages) {
-			return cutoff, totalTokens
-		}
-		cutoff++
-		for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].ModelMessage.Role), "tool") {
-			cutoff++
-		}
-	}
+	return messages, annotated
 }
 
 func estimateMessagesTokens(messages []historyfrag.HistoryRecord) int {
@@ -516,20 +387,4 @@ func estimateMessagesTokens(messages []historyfrag.HistoryRecord) int {
 		total += estimateMessageTokens(m.ModelMessage)
 	}
 	return total
-}
-
-func requiredMessagesBeforeCutoff(messages []historyfrag.HistoryRecord, cutoff int) []historyfrag.HistoryRecord {
-	if cutoff <= 0 {
-		return nil
-	}
-	if cutoff > len(messages) {
-		cutoff = len(messages)
-	}
-	var required []historyfrag.HistoryRecord
-	for _, m := range messages[:cutoff] {
-		if m.Required {
-			required = append(required, m)
-		}
-	}
-	return required
 }

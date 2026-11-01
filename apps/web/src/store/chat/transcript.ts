@@ -526,7 +526,7 @@ export function createTranscriptController({
       return incomingKeys.has(`${turn.role}\u0000${turn.turnId ?? ''}`)
     })
     // Every turn still on screen survives; the window decides the rest.
-    const resolved = admissibleRuntimeTurns(messages, slice, reconcileRuntimeTurns(existing, incoming))
+    const resolved = admissibleRuntimeTurns(messages, slice, reconcileRuntimeTurns(existing, incoming, slice))
     if (resolved.length === 0) return true
 
     const operationAnchor = slice.operation?.replace_from_message_id?.trim() ?? ''

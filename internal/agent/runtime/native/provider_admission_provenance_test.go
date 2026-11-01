@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"reflect"
 	"testing"
 	"time"
 
@@ -16,105 +15,6 @@ import (
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 )
-
-func TestAgentStreamRecordsLaterDuplicateInjectionRetainedByReselection(t *testing.T) {
-	t.Parallel()
-
-	const marker = "duplicate injection across provider steps"
-	injectCh := make(chan InjectMessage, 1)
-	injectCh <- InjectMessage{Text: marker}
-
-	provider := &atomicMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
-		switch call {
-		case 1:
-			return sdk.ModelResult{
-				FinishReason: sdk.FinishReasonToolCalls,
-				ToolCalls:    []sdk.ToolCall{{ToolCallID: "duplicate-step-one", ToolName: "lookup"}},
-			}, nil
-		case 2:
-			if got := countRound8MessageText(params.Messages, marker); got != 1 {
-				t.Fatalf("second provider duplicate count = %d, want 1", got)
-			}
-			injectCh <- InjectMessage{Text: marker}
-			return sdk.ModelResult{
-				FinishReason: sdk.FinishReasonToolCalls,
-				ToolCalls:    []sdk.ToolCall{{ToolCallID: "duplicate-step-two", ToolName: "lookup"}},
-			}, nil
-		default:
-			if got := countRound8MessageText(params.Messages, marker); got != 1 {
-				t.Fatalf("third provider duplicate count = %d, want latest copy only", got)
-			}
-			return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
-		}
-	}}
-	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
-		Name:       "lookup",
-		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
-			return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
-		},
-	}}}})
-
-	type recordedInjection struct {
-		text        string
-		insertAfter int
-	}
-	var recorded []recordedInjection
-	var selectorCalls int
-	for range a.Stream(context.Background(), RunConfig{
-		Model:            &sdk.Model{ID: "mock-model", Provider: provider},
-		Messages:         []sdk.Message{sdk.UserMessage("start")},
-		SupportsToolCall: true,
-		InjectCh:         injectCh,
-		Identity:         SessionContext{BotID: "bot-1"},
-		ContextMutations: contextfrag.NewMutationLedger(),
-		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
-			selectorCalls++
-			if selectorCalls == 1 {
-				return ContextStepSelectionResult{}
-			}
-			latest := -1
-			for i := len(input.Messages) - 1; i >= input.InitialMessageCount; i-- {
-				if providerAttemptContainsText([]sdk.Message{input.Messages[i]}, marker) {
-					latest = i
-					break
-				}
-			}
-			if latest < 0 {
-				t.Fatal("selector did not find the latest duplicate injection")
-			}
-			selected := append([]sdk.Message(nil), input.Messages[:input.InitialMessageCount]...)
-			selected = append(selected,
-				sdk.Message{Role: sdk.MessageRoleSystem, Content: []sdk.MessagePart{sdk.TextPart{Text: "history trimmed"}}},
-				input.Messages[latest],
-			)
-			sourceIndexes := make([]int, 0, input.InitialMessageCount+2)
-			for i := 0; i < input.InitialMessageCount; i++ {
-				sourceIndexes = append(sourceIndexes, i)
-			}
-			sourceIndexes = append(sourceIndexes, -1, latest)
-			return ContextStepSelectionResult{
-				Messages:                  selected,
-				MessageSourceIndexes:      sourceIndexes,
-				MessageSourceIndexesKnown: true,
-				Dropped:                   len(input.Messages) - input.InitialMessageCount - 1,
-			}
-		},
-		InjectedRecorder: func(text string, insertAfter int) {
-			recorded = append(recorded, recordedInjection{text: text, insertAfter: insertAfter})
-		},
-	}) {
-	}
-
-	want := []recordedInjection{
-		{text: marker, insertAfter: 2},
-		{text: marker, insertAfter: 4},
-	}
-	if !reflect.DeepEqual(recorded, want) {
-		t.Fatalf("recorded injections = %#v, want %#v", recorded, want)
-	}
-}
 
 func TestAgentStreamProviderStartFailureDoesNotPersistInjectedMessage(t *testing.T) {
 	t.Parallel()
@@ -182,12 +82,14 @@ func TestAgentStreamProviderStartFailureDoesNotPersistInjectedMessage(t *testing
 	}
 }
 
-func TestAgentStreamRetryPreflightFailureDoesNotPersistUncommittedInjection(t *testing.T) {
+func TestAgentStreamCanceledRetryDoesNotPersistUncommittedInjection(t *testing.T) {
 	t.Parallel()
 
-	const marker = "injection observed before retry preflight failure"
+	const marker = "injection observed before the retry was canceled"
 	injectCh := make(chan InjectMessage, 1)
 	injectCh <- InjectMessage{Text: marker}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	provider := &atomicMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 		switch call {
@@ -200,9 +102,10 @@ func TestAgentStreamRetryPreflightFailureDoesNotPersistUncommittedInjection(t *t
 			if !providerAttemptContainsText(params.Messages, marker) {
 				t.Fatal("failed dispatched attempt did not receive the injected message")
 			}
+			cancel()
 			return sdk.ModelResult{}, serverErr()
 		default:
-			t.Fatalf("provider call %d crossed the failed retry preflight", call)
+			t.Fatalf("provider call %d crossed the canceled retry", call)
 			return sdk.ModelResult{}, nil
 		}
 	}}
@@ -215,30 +118,22 @@ func TestAgentStreamRetryPreflightFailureDoesNotPersistUncommittedInjection(t *t
 		},
 	}}}})
 
-	var selectorCalls int
 	var recorded []string
-	for range a.Stream(context.Background(), RunConfig{
+	for range a.Stream(ctx, RunConfig{
 		Model:            &sdk.Model{ID: "mock-model", Provider: provider},
 		Messages:         []sdk.Message{sdk.UserMessage("start")},
 		SupportsToolCall: true,
 		InjectCh:         injectCh,
 		Identity:         SessionContext{BotID: "bot-1"},
 		ContextMutations: contextfrag.NewMutationLedger(),
-		ContextStepReselector: func(_ context.Context, _ ContextStepSelectionInput) ContextStepSelectionResult {
-			selectorCalls++
-			if selectorCalls == 1 {
-				return ContextStepSelectionResult{}
-			}
-			return ContextStepSelectionResult{FatalError: contextfrag.ErrProtectedContextOverflow}
-		},
 		InjectedRecorder: func(text string, _ int) {
 			recorded = append(recorded, text)
 		},
 	}) {
 	}
 
-	if provider.calls.Load() != 2 || selectorCalls != 2 {
-		t.Fatalf("provider/selector calls = %d/%d, want 2/2", provider.calls.Load(), selectorCalls)
+	if provider.calls.Load() != 2 {
+		t.Fatalf("provider calls = %d, want 2", provider.calls.Load())
 	}
 	if len(recorded) != 0 {
 		t.Fatalf("recorded injections = %#v, want no message without a completed step", recorded)
@@ -347,77 +242,5 @@ streamClosed:
 	}
 	if len(recorded) != 0 {
 		t.Fatalf("recorded injections = %#v, want interrupted checkpoint ownership", recorded)
-	}
-}
-
-func TestRemapDynamicRefsRequiresVerifiableOrigins(t *testing.T) {
-	t.Parallel()
-
-	before := []sdk.Message{
-		sdk.UserMessage("fixed prefix"),
-		sdk.AssistantMessage("first suffix"),
-		sdk.UserMessage("second suffix"),
-	}
-	cachedAll := cloneProviderMessages(before)
-	part := cachedAll[1].Content[0].(sdk.TextPart)
-	part.CacheControl = &sdk.CacheControl{Type: "ephemeral"}
-	cachedAll[1].Content[0] = part
-	cachedPrefix := cachedAll[:2]
-	refs := []dynamicSourceRef{{recordID: 7, index: 1}}
-
-	tests := []struct {
-		name      string
-		after     []sdk.Message
-		selection ContextStepSelectionResult
-		want      []dynamicSourceRef
-	}{
-		{
-			// A change the selection cannot attribute fails closed: no ref
-			// survives, even when its content is still present.
-			name:  "unknown changed normalized prefix",
-			after: cachedPrefix,
-			want:  nil,
-		},
-		{
-			name:  "unknown changed subsequence",
-			after: []sdk.Message{before[0], before[2]},
-			want:  nil,
-		},
-		{
-			// A cache-control-only rewrite is normalized away: unchanged
-			// payload keeps the refs at their positions.
-			name:  "unknown normalized unchanged",
-			after: cachedAll,
-			want:  refs,
-		},
-		{
-			name:  "known normalized cache rewrite",
-			after: cachedPrefix,
-			selection: ContextStepSelectionResult{
-				MessageSourceIndexes:      []int{0, 1},
-				MessageSourceIndexesKnown: true,
-			},
-			want: []dynamicSourceRef{{recordID: 7, index: 1}},
-		},
-		{
-			// A vector claiming an origin whose content does not match the
-			// output invalidates the whole mapping and fails closed.
-			name:  "known source content mismatch",
-			after: []sdk.Message{before[0], before[2]},
-			selection: ContextStepSelectionResult{
-				MessageSourceIndexes:      []int{0, 1},
-				MessageSourceIndexesKnown: true,
-			},
-			want: nil,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := remapDynamicRefs(refs, before, tt.after, 1, tt.selection)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("remapped refs = %#v, want %#v", got, tt.want)
-			}
-		})
 	}
 }

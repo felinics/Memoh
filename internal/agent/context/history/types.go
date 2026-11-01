@@ -52,7 +52,6 @@ type HistoryRecord struct {
 	ExternalMessageID string
 	EventID           string
 	SessionID         string
-	SessionIDKnown    bool
 	BotID             string
 
 	SenderChannelIdentityID string
@@ -61,17 +60,10 @@ type HistoryRecord struct {
 	Platform                string
 	SourceReplyToMessageID  string
 
-	CompactID string
 	CreatedAt time.Time
 
 	UsageInputTokens  *int
 	UsageOutputTokens *int
-
-	// Required marks a record that must survive trimming/compaction because it
-	// is pinned by a retry/edit request's required-history constraint.
-	Required bool
-
-	Coverage *contextfrag.SummaryCoverage
 }
 
 type MediaRef struct {

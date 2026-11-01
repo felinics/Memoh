@@ -15,6 +15,13 @@
           </DialogDescription>
         </DialogHeader>
 
+        <SegmentedControl
+          v-model="platform"
+          :items="platformItems"
+          :aria-label="t('computerConnect.platformLabel')"
+          class="w-full sm:w-fit"
+        />
+
         <SettingsSection bordered>
           <SettingsRow
             :label="t('computerConnect.replaceAction')"
@@ -96,6 +103,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  SegmentedControl,
+  type SegmentedItem,
   SettingsRow,
   SettingsSection,
   Switch,
@@ -103,7 +112,11 @@ import {
 } from '@felinic/ui'
 import { sdkApiBaseUrl } from '@/lib/api-client'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { buildRuntimeConnectCommand } from '@/pages/runtimes/command'
+import {
+  buildRuntimeConnectCommand,
+  detectRuntimeHostPlatform,
+  type RuntimeHostPlatform,
+} from '@/pages/runtimes/command'
 import ComputerAccessList from './computer-access-list.vue'
 import { useAccountRuntimes, useComputerAccessActions } from './use-computer-access'
 
@@ -121,9 +134,15 @@ const { t } = useI18n()
 
 const step = ref<'command' | 'access'>('command')
 const replaceBinding = ref(false)
+const platform = ref<RuntimeHostPlatform>(detectRuntimeHostPlatform())
+const platformItems: SegmentedItem<RuntimeHostPlatform>[] = [
+  { value: 'windows', label: 'Windows' },
+  { value: 'macos', label: 'macOS' },
+  { value: 'linux', label: 'Linux' },
+]
 const runtimeId = computed(() => props.credential?.id ?? '')
 const command = computed(() => buildRuntimeConnectCommand(
-  sdkApiBaseUrl(), props.credential, replaceBinding.value ? 'replace' : 'connect',
+  sdkApiBaseUrl(), props.credential, replaceBinding.value ? 'replace' : 'connect', platform.value,
 ))
 
 const { runtimes, refetch: refetchRuntimes } = useAccountRuntimes()

@@ -19,6 +19,7 @@ import (
 	dbpkg "github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/markdownmedia"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/runtimekind"
@@ -27,9 +28,10 @@ import (
 
 // DBService persists and reads bot history messages.
 type DBService struct {
-	queries   dbstore.Queries
-	logger    *slog.Logger
-	publisher event.Publisher
+	resolveMarkdownMedia markdownmedia.Resolver
+	queries              dbstore.Queries
+	logger               *slog.Logger
+	publisher            event.Publisher
 }
 
 type historyTurnWriter interface {
@@ -91,6 +93,7 @@ func NewService(log *slog.Logger, queries dbstore.Queries, publishers ...event.P
 
 // Persist writes a single message to bot_history_messages.
 func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, error) {
+	input = s.prepareMarkdownMedia(ctx, input)
 	const maxTurnSequenceRetries = 3
 	var lastErr error
 	for attempt := 0; attempt < maxTurnSequenceRetries; attempt++ {
@@ -165,6 +168,18 @@ func isTurnSequenceUniqueViolation(err error) bool {
 func (s *DBService) PersistToolTailRound(ctx context.Context, inputs []PersistInput) ([]Message, bool, error) {
 	if s == nil || s.queries == nil || !isToolTailRoundShape(inputs) {
 		return nil, false, nil
+	}
+	for _, input := range inputs {
+		if input.Role == "assistant" && len(markdownmedia.Parse(markdownSource(input))) > 0 {
+			// Published media adds message assets, which the single-statement
+			// write does not carry; keep the round atomic in a transaction.
+			prepared := append([]PersistInput(nil), inputs...)
+			for i := range prepared {
+				prepared[i] = s.prepareMarkdownMedia(ctx, prepared[i])
+			}
+			_, fenced := runtimefence.FromContext(ctx)
+			return s.persistRoundInTx(ctx, prepared, RoundPersistenceOptions{}, fenced, strings.TrimSpace(inputs[0].BotID), strings.TrimSpace(inputs[0].SessionID))
+		}
 	}
 	writer, ok := s.queries.(toolTailRoundWriter)
 	if !ok || !writer.SupportsAtomicDirectHistoryTurnWrites() {
@@ -293,6 +308,17 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 		}
 	}
 
+	inputs = append([]PersistInput(nil), inputs...)
+	for i := range inputs {
+		inputs[i] = s.prepareMarkdownMedia(ctx, inputs[i])
+	}
+
+	return s.persistRoundInTx(ctx, inputs, options, fenced, botID, sessionID)
+}
+
+// persistRoundInTx writes prepared round inputs in one transaction, retrying
+// turn sequence conflicts.
+func (s *DBService) persistRoundInTx(ctx context.Context, inputs []PersistInput, options RoundPersistenceOptions, fenced bool, botID, sessionID string) ([]Message, bool, error) {
 	const maxTurnSequenceRetries = 3
 	var lastErr error
 	for attempt := 0; attempt < maxTurnSequenceRetries; attempt++ {
@@ -352,34 +378,6 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 					RunID:       pgRunID,
 				}); anchorErr != nil {
 					return fmt.Errorf("record runtime turn anchor: %w", anchorErr)
-				}
-			}
-			if options.AgentPublication != nil {
-				pgBotID, parseErr := dbpkg.ParseUUID(botID)
-				if parseErr != nil {
-					return parseErr
-				}
-				pgSessionID, parseErr := dbpkg.ParseUUID(sessionID)
-				if parseErr != nil {
-					return parseErr
-				}
-				pgRunID, parseErr := dbpkg.ParseUUID(strings.TrimSpace(options.AgentPublication.RunID))
-				if parseErr != nil {
-					return fmt.Errorf("runtime publication requires run_id: %w", parseErr)
-				}
-				moved, upsertErr := queries.UpsertAgentSessionPublication(ctx, sqlc.UpsertAgentSessionPublicationParams{
-					SessionID: pgSessionID,
-					BotID:     pgBotID,
-					RunID:     pgRunID,
-				})
-				if upsertErr != nil {
-					return fmt.Errorf("publish runtime session head: %w", upsertErr)
-				}
-				if moved == 0 {
-					// The guarded insert matched no run: the session's fencing
-					// generation moved underneath this round. Publishing nothing
-					// would silently promote a stale native context on restart.
-					return runtimefence.ErrStale
 				}
 			}
 			return nil
@@ -1023,24 +1021,6 @@ func (s *DBService) ListSince(ctx context.Context, botID string, since time.Time
 	return msgs, nil
 }
 
-// ListActiveSince returns bot messages since a given time, excluding passive_sync messages.
-func (s *DBService) ListActiveSince(ctx context.Context, botID string, since time.Time) ([]Message, error) {
-	pgBotID, err := dbpkg.ParseUUID(botID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.queries.ListActiveMessagesSince(ctx, sqlc.ListActiveMessagesSinceParams{
-		BotID:     pgBotID,
-		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
-	})
-	if err != nil {
-		return nil, err
-	}
-	msgs := toMessagesFromActiveSince(rows)
-	s.enrichAssets(ctx, msgs)
-	return msgs, nil
-}
-
 // ListLatest returns the latest N bot messages (newest first in DB; caller may reverse for ASC).
 func (s *DBService) ListLatest(ctx context.Context, botID string, limit int32) ([]Message, error) {
 	pgBotID, err := dbpkg.ParseUUID(botID)
@@ -1113,56 +1093,114 @@ func (s *DBService) ListSinceBySession(ctx context.Context, sessionID string, si
 	return msgs, nil
 }
 
-// ListActiveSinceWithinBytes returns bot messages since a given time,
-// admitted newest-first within the content byte budget (CM-ADM-001).
-func (s *DBService) ListActiveSinceWithinBytes(ctx context.Context, botID string, since time.Time, maxBytes int64) ([]Message, error) {
-	pgBotID, err := dbpkg.ParseUUID(botID)
+// ListHistoryWithinBytes returns a session's raw history window, admitted
+// newest-first within the content byte budget (CM-ADM-001), and whether the
+// budget left older rows of the window out.
+func (s *DBService) ListHistoryWithinBytes(ctx context.Context, sessionID string, window HistoryWindow) (HistoryLoad, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
-		return nil, err
+		return HistoryLoad{}, err
 	}
-	rows, err := s.queries.ListActiveMessagesSinceWithinBytes(ctx, sqlc.ListActiveMessagesSinceWithinBytesParams{
-		BotID:     pgBotID,
-		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
-		MaxBytes:  maxBytes,
-	})
+	params := sqlc.ListHistoryMessagesAfterWithinBytesParams{
+		SessionID:           pgSessionID,
+		AfterTurnPosition:   window.After.Turn,
+		AfterTurnMessageSeq: window.After.Seq,
+		MaxBytes:            window.MaxBytes,
+	}
+	if window.Before != nil {
+		params.BeforeTurnPosition = pgtype.Int8{Int64: window.Before.Turn, Valid: true}
+		params.BeforeTurnMessageSeq = pgtype.Int8{Int64: window.Before.Seq, Valid: true}
+	}
+	rows, err := s.queries.ListHistoryMessagesAfterWithinBytes(ctx, params)
 	if err != nil {
-		return nil, err
+		return HistoryLoad{}, err
 	}
-	msgs := toMessagesFromActiveSinceWithinBytes(rows)
-	s.enrichAssets(ctx, msgs)
-	return msgs, nil
+	load := HistoryLoad{Messages: make([]Message, 0, len(rows))}
+	for _, row := range rows {
+		load.Truncated = row.Truncated
+		load.Messages = append(load.Messages, toAdmissionMessage(sqlc.ListActiveMessagesSinceBySessionRow{
+			ID:                      row.ID,
+			BotID:                   row.BotID,
+			SessionID:               row.SessionID,
+			SenderChannelIdentityID: row.SenderChannelIdentityID,
+			SenderUserID:            row.SenderUserID,
+			ExternalMessageID:       row.ExternalMessageID,
+			SourceReplyToMessageID:  row.SourceReplyToMessageID,
+			Role:                    row.Role,
+			Content:                 row.Content,
+			Metadata:                row.Metadata,
+			Usage:                   row.Usage,
+			SessionMode:             row.SessionMode,
+			RuntimeType:             row.RuntimeType,
+			EventID:                 row.EventID,
+			DisplayText:             row.DisplayText,
+			CreatedAt:               row.CreatedAt,
+			SenderDisplayName:       row.SenderDisplayName,
+			SenderAvatarUrl:         row.SenderAvatarUrl,
+			Platform:                row.Platform,
+		}))
+	}
+	s.enrichAssets(ctx, load.Messages)
+	return load, nil
 }
 
-// ListActiveSinceBySessionWithinBytes returns session messages since a given
-// time, admitted newest-first within the content byte budget (CM-ADM-001).
-func (s *DBService) ListActiveSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64) ([]Message, error) {
+// ListHistoryByIDs returns the named context rows of a session in history
+// order, loaded as ListHistoryWithinBytes loads them.
+func (s *DBService) ListHistoryByIDs(ctx context.Context, sessionID string, ids []string) ([]Message, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListActiveMessagesSinceBySessionWithinBytes(ctx, sqlc.ListActiveMessagesSinceBySessionWithinBytesParams{
-		SessionID: pgSessionID,
-		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
-		MaxBytes:  maxBytes,
-	})
+	pgIDs, err := parseUUIDs(ids)
 	if err != nil {
 		return nil, err
 	}
-	msgs := toMessagesFromActiveSinceBySessionWithinBytes(rows)
+	rows, err := s.queries.ListHistoryMessagesByIDs(ctx, sqlc.ListHistoryMessagesByIDsParams{SessionID: pgSessionID, Ids: pgIDs})
+	if err != nil {
+		return nil, err
+	}
+	msgs := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		msgs = append(msgs, toAdmissionMessage(sqlc.ListActiveMessagesSinceBySessionRow(row)))
+	}
 	s.enrichAssets(ctx, msgs)
 	return msgs, nil
 }
 
-// MeasureActiveBySession aggregates a session's active message count and
-// content bytes on the database side (CM-ADM-001).
-func (s *DBService) MeasureActiveBySession(ctx context.Context, sessionID string, since time.Time) (ActiveMessagesMeasure, error) {
+// HistoryPositionByID reports where a visible message of the session is.
+func (s *DBService) HistoryPositionByID(ctx context.Context, sessionID string, messageID string) (HistoryPosition, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return HistoryPosition{}, err
+	}
+	pgMessageID, err := dbpkg.ParseUUID(messageID)
+	if err != nil {
+		return HistoryPosition{}, err
+	}
+	cursor, err := s.queries.GetVisibleMessageCursorByIDBySession(ctx, sqlc.GetVisibleMessageCursorByIDBySessionParams{
+		SessionID: pgSessionID,
+		MessageID: pgMessageID,
+	})
+	if err != nil {
+		return HistoryPosition{}, err
+	}
+	return HistoryPosition{Turn: cursor.TurnPosition.Int64, Seq: cursor.TurnMessageSeq.Int64}, nil
+}
+
+// MeasureHistory aggregates the message count and content bytes of a
+// session's raw history after a position on the database side (CM-ADM-001).
+func (s *DBService) MeasureHistory(ctx context.Context, sessionID string, after HistoryPosition) (ActiveMessagesMeasure, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return ActiveMessagesMeasure{}, err
 	}
-	row, err := s.queries.MeasureActiveMessagesBySession(ctx, sqlc.MeasureActiveMessagesBySessionParams{
-		SessionID: pgSessionID,
-		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
+	row, err := s.queries.MeasureHistoryMessagesAfter(ctx, sqlc.MeasureHistoryMessagesAfterParams{
+		SessionID:           pgSessionID,
+		AfterTurnPosition:   after.Turn,
+		AfterTurnMessageSeq: after.Seq,
 	})
 	if err != nil {
 		return ActiveMessagesMeasure{}, err
@@ -1170,7 +1208,7 @@ func (s *DBService) MeasureActiveBySession(ctx context.Context, sessionID string
 	return ActiveMessagesMeasure{MessageCount: row.MessageCount, ContentBytes: row.ContentBytes}, nil
 }
 
-// ListActiveSinceBySession returns session messages since a given time, excluding passive_sync messages.
+// ListActiveSinceBySession returns session messages since a given time.
 func (s *DBService) ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
@@ -1589,20 +1627,38 @@ func (s *DBService) DeleteByBot(ctx context.Context, botID string) error {
 	if err != nil {
 		return err
 	}
-	// ClearHistoryByBot also removes the ACP publication heads, version
-	// headers, and line sets in the same statement: cleared history has no
-	// canonical ACP head, and a headless snapshot would be unreachable orphan
-	// storage a fresh runtime must never resurrect.
+	// ClearHistoryByBot also scrubs each session's runtime metadata in the same
+	// statement, so no runtime resumes the cleared conversation from its own
+	// native thread.
 	return runtimefence.InResetTransaction(ctx, s.queries, botID, "", func(queries dbstore.Queries) error {
 		return queries.ClearHistoryByBot(ctx, pgBotID)
 	})
 }
 
-// DeleteByIDs deletes specific messages by id.
+// DeleteByIDs deletes specific messages by id. A run deletes under its
+// persistence fence, so an owner that lost the session cannot delete rows its
+// successor reads.
 func (s *DBService) DeleteByIDs(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
+	pgIDs, err := parseUUIDs(ids)
+	if err != nil {
+		return err
+	}
+	if len(pgIDs) == 0 {
+		return nil
+	}
+	if _, fenced := runtimefence.FromContext(ctx); fenced {
+		return runtimefence.InTransaction(ctx, s.queries, "", "", func(queries dbstore.Queries) error {
+			return queries.DeleteMessagesByIDs(ctx, pgIDs)
+		})
+	}
+	return s.queries.DeleteMessagesByIDs(ctx, pgIDs)
+}
+
+// parseUUIDs parses message ids, skipping blank ones.
+func parseUUIDs(ids []string) ([]pgtype.UUID, error) {
 	pgIDs := make([]pgtype.UUID, 0, len(ids))
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
@@ -1611,14 +1667,11 @@ func (s *DBService) DeleteByIDs(ctx context.Context, ids []string) error {
 		}
 		pgID, err := dbpkg.ParseUUID(id)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		pgIDs = append(pgIDs, pgID)
 	}
-	if len(pgIDs) == 0 {
-		return nil
-	}
-	return s.queries.DeleteMessagesByIDs(ctx, pgIDs)
+	return pgIDs, nil
 }
 
 // DeleteBySession deletes all messages for a session.
@@ -1627,10 +1680,9 @@ func (s *DBService) DeleteBySession(ctx context.Context, sessionID string) error
 	if err != nil {
 		return err
 	}
-	// ClearHistoryBySession also removes the ACP publication head, version
-	// headers, and line set in the same statement: cleared history has no
-	// canonical ACP head, and a headless snapshot would be unreachable orphan
-	// storage a fresh runtime must never resurrect.
+	// ClearHistoryBySession also scrubs the session's runtime metadata in the
+	// same statement, so no runtime resumes the cleared conversation from its
+	// own native thread.
 	return runtimefence.InResetTransaction(ctx, s.queries, "", sessionID, func(queries dbstore.Queries) error {
 		return queries.ClearHistoryBySession(ctx, pgSessionID)
 	})
@@ -1851,34 +1903,6 @@ func toMessageFromSinceBySessionRow(row sqlc.ListMessagesSinceBySessionRow) Mess
 	)
 }
 
-func toMessageFromActiveSinceRow(row sqlc.ListActiveMessagesSinceRow) Message {
-	m := toMessageFields(
-		row.ID,
-		row.BotID,
-		row.SessionID,
-		row.SenderChannelIdentityID,
-		row.SenderUserID,
-		row.SenderDisplayName,
-		row.SenderAvatarUrl,
-		row.Platform,
-		row.ExternalMessageID,
-		row.SourceReplyToMessageID,
-		row.Role,
-		row.Content,
-		row.Metadata,
-		row.Usage,
-		row.SessionMode,
-		row.RuntimeType,
-		row.EventID,
-		row.DisplayText,
-		row.CreatedAt,
-	)
-	if row.CompactID.Valid {
-		m.CompactID = row.CompactID.String()
-	}
-	return m
-}
-
 func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySessionRow) Message {
 	m := toMessageFields(
 		row.ID,
@@ -1901,9 +1925,6 @@ func toMessageFromActiveSinceBySessionRow(row sqlc.ListActiveMessagesSinceBySess
 		row.DisplayText,
 		row.CreatedAt,
 	)
-	if row.CompactID.Valid {
-		m.CompactID = row.CompactID.String()
-	}
 	return m
 }
 
@@ -2293,34 +2314,10 @@ func toMessagesFromSinceBySession(rows []sqlc.ListMessagesSinceBySessionRow) []M
 	return messages
 }
 
-func toMessagesFromActiveSince(rows []sqlc.ListActiveMessagesSinceRow) []Message {
-	messages := make([]Message, 0, len(rows))
-	for _, row := range rows {
-		messages = append(messages, toMessageFromActiveSinceRow(row))
-	}
-	return messages
-}
-
 func toMessagesFromActiveSinceBySession(rows []sqlc.ListActiveMessagesSinceBySessionRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
 		messages = append(messages, toMessageFromActiveSinceBySessionRow(row))
-	}
-	return messages
-}
-
-func toMessagesFromActiveSinceWithinBytes(rows []sqlc.ListActiveMessagesSinceWithinBytesRow) []Message {
-	messages := make([]Message, 0, len(rows))
-	for _, row := range rows {
-		messages = append(messages, toAdmissionMessage(sqlc.ListActiveMessagesSinceBySessionRow(row)))
-	}
-	return messages
-}
-
-func toMessagesFromActiveSinceBySessionWithinBytes(rows []sqlc.ListActiveMessagesSinceBySessionWithinBytesRow) []Message {
-	messages := make([]Message, 0, len(rows))
-	for _, row := range rows {
-		messages = append(messages, toAdmissionMessage(sqlc.ListActiveMessagesSinceBySessionRow(row)))
 	}
 	return messages
 }
@@ -2351,9 +2348,6 @@ func toAdmissionMessage(row sqlc.ListActiveMessagesSinceBySessionRow) Message {
 		row.CreatedAt,
 		nil,
 	)
-	if row.CompactID.Valid {
-		m.CompactID = row.CompactID.String()
-	}
 	return m
 }
 
@@ -2445,9 +2439,6 @@ func toMessageFromVisibleFromBySessionRow(row sqlc.ListVisibleMessagesFromBySess
 		row.CreatedAt,
 	)
 	m.TurnID = uuidString(row.TurnID)
-	if row.CompactID.Valid {
-		m.CompactID = row.CompactID.String()
-	}
 	return m
 }
 

@@ -280,10 +280,6 @@ func (*fakeAgentMessageService) ListSince(context.Context, string, time.Time) ([
 	return nil, nil
 }
 
-func (*fakeAgentMessageService) ListActiveSince(context.Context, string, time.Time) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
 func (*fakeAgentMessageService) ListLatest(context.Context, string, int32) ([]messagepkg.Message, error) {
 	return nil, nil
 }
@@ -300,19 +296,27 @@ func (*fakeAgentMessageService) ListActiveSinceBySession(context.Context, string
 	return nil, nil
 }
 
-func (*fakeAgentMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
+func (*fakeAgentMessageService) ListHistoryWithinBytes(context.Context, string, messagepkg.HistoryWindow) (messagepkg.HistoryLoad, error) {
+	return messagepkg.HistoryLoad{}, nil
+}
+
+func (*fakeAgentMessageService) ListHistoryByIDs(context.Context, string, []string) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
-func (*fakeAgentMessageService) ListActiveSinceWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
+func (*fakeAgentMessageService) HistoryPositionByID(context.Context, string, string) (messagepkg.HistoryPosition, error) {
+	return messagepkg.HistoryPosition{}, nil
+}
+
+func (*fakeAgentMessageService) ListTurnResponseSourcesWithinBytes(context.Context, string, messagepkg.HistoryPosition, int64) (messagepkg.HistoryLoad, error) {
+	return messagepkg.HistoryLoad{}, nil
+}
+
+func (*fakeAgentMessageService) ListTurnResponseSourcesByIDs(context.Context, string, []string) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
-func (*fakeAgentMessageService) ListTurnResponseSourcesSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*fakeAgentMessageService) MeasureActiveBySession(context.Context, string, time.Time) (messagepkg.ActiveMessagesMeasure, error) {
+func (*fakeAgentMessageService) MeasureHistory(context.Context, string, messagepkg.HistoryPosition) (messagepkg.ActiveMessagesMeasure, error) {
 	return messagepkg.ActiveMessagesMeasure{}, nil
 }
 

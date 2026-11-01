@@ -18,6 +18,7 @@ import (
 	openaiimages "github.com/felinics/twilight/provider/openai/images"
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -127,13 +128,16 @@ func (*ImageGenProvider) Usage(_ context.Context, session SessionContext, availa
 	}
 	sendRef, hasSend := available.Ref(ToolSend())
 	var items []string
-	if session.CanUseLocalMessagingShortcut() {
+	switch {
+	case session.CanUseLocalMessagingShortcut():
 		items = append(items, genRef+" already shows the generated image to the user in the current conversation; do not send it there again.")
 		if hasSend {
-			items = append(items, "To share a generated image with another channel or person, call "+sendRef+" with the returned path in `attachments`.")
+			items = append(items, "To share a generated image with another channel or person, call "+sendRef+" and reference it in the text as `![description](<returned path>)`.")
 		}
-	} else if hasSend {
-		items = append(items, genRef+" only saves the image to the workspace; the user never sees it automatically. Share it by calling "+sendRef+" with the returned path in `attachments`.")
+	case session.SessionType == sessionmode.Chat:
+		items = append(items, genRef+" only saves the image to the workspace. Show it by writing `![description](<returned path>)` in your reply.")
+	case hasSend:
+		items = append(items, genRef+" only saves the image to the workspace; the user never sees it automatically. Share it by calling "+sendRef+" and referencing it in the text as `![description](<returned path>)`.")
 	}
 	return usageSection("Image generation", items)
 }

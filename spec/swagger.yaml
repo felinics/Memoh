@@ -558,8 +558,6 @@ definitions:
         type: string
       id:
         type: string
-      interval_seconds:
-        type: integer
       runtime:
         type: string
       status:
@@ -567,10 +565,6 @@ definitions:
         - pending
         - ready
         - claimed
-        type: string
-      user_code:
-        type: string
-      verification_url:
         type: string
     required:
     - auth_kind
@@ -1653,6 +1647,10 @@ definitions:
     properties:
       channel_identity_id:
         type: string
+      excluded_target:
+        description: ExcludedTarget is checked after platform target resolution, before
+          publication.
+        type: string
       message:
         $ref: '#/definitions/channel.Message'
       target:
@@ -2065,8 +2063,6 @@ definitions:
     - native_image
     - skills_catalog
     - hook_context
-    - injected_message
-    - background_summary
     - runtime_context
     - memory_recall
     - conversation_summary
@@ -2084,8 +2080,6 @@ definitions:
     - KindNativeImage
     - KindSkillsCatalog
     - KindHookContext
-    - KindInjectedMessage
-    - KindBackgroundSummary
     - KindRuntimeContext
     - KindMemoryRecall
     - KindConversationSummary
@@ -2127,8 +2121,6 @@ definitions:
       counts:
         $ref: '#/definitions/contextfrag.ManifestCounts'
       final_input_hash:
-        type: string
-      loop_selection_mode:
         type: string
       memory_recall:
         $ref: '#/definitions/contextfrag.MemoryRecallTrace'
@@ -2229,8 +2221,6 @@ definitions:
     enum:
     - before_model_call_hook
     - background_summary
-    - mid_task_prune
-    - loop_step_reselection
     - injected_message
     - context_view_fallback
     - context_budget_failure
@@ -2242,12 +2232,11 @@ definitions:
     - current_input_omitted
     - current_input_images_omitted
     - run_abort_observed
+    - context_switch
     type: string
     x-enum-varnames:
     - MutationBeforeModelCallHook
     - MutationBackgroundSummary
-    - MutationMidTaskPrune
-    - MutationLoopStepReselection
     - MutationInjectedMessage
     - MutationContextViewFallback
     - MutationContextBudgetFailure
@@ -2259,6 +2248,7 @@ definitions:
     - MutationCurrentInputOmitted
     - MutationCurrentInputImagesOmitted
     - MutationRunAbortObserved
+    - MutationContextSwitch
   contextfrag.MutationRecord:
     properties:
       detail:
@@ -2365,21 +2355,9 @@ definitions:
     properties:
       attempt:
         type: integer
-      drop_reasons:
-        additionalProperties:
-          type: integer
-        type: object
-      dropped:
-        type: integer
       post_prepare_input_hash:
         type: string
-      reselection_applied:
-        type: boolean
-      reselection_outcome:
-        type: string
       step_index:
-        type: integer
-      truncated:
         type: integer
     type: object
   contextfrag.ToolDefAccounting:
@@ -2829,26 +2807,35 @@ definitions:
       name:
         type: string
     type: object
-  externalagent.CodexUsageResponse:
+  externalagent.AgentAccountResponse:
+    properties:
+      email:
+        type: string
+      signed_in:
+        type: boolean
+    required:
+    - signed_in
+    type: object
+  externalagent.AgentQuotaResponse:
     properties:
       limit_reached:
         type: boolean
       windows:
         items:
-          $ref: '#/definitions/externalagent.CodexUsageWindow'
+          $ref: '#/definitions/externalagent.AgentQuotaWindow'
         type: array
     required:
     - limit_reached
     - windows
     type: object
-  externalagent.CodexUsageWindow:
+  externalagent.AgentQuotaWindow:
     properties:
       resets_at:
         type: string
       used_percent:
         type: integer
       window_minutes:
-        description: WindowMinutes is 0 when the backend does not report the window
+        description: WindowMinutes is 0 when the runtime does not report the window
           length.
         type: integer
     required:
@@ -4824,15 +4811,6 @@ definitions:
       tools:
         type: integer
     type: object
-  handlers.TriggerCompactResponse:
-    properties:
-      message_count:
-        type: integer
-      status:
-        type: string
-      summary:
-        type: string
-    type: object
   handlers.UILocateMessageResponse:
     properties:
       items:
@@ -5250,18 +5228,6 @@ definitions:
       updated_at:
         type: string
     type: object
-  handlers.acpRuntimeCreateRequest:
-    properties:
-      acp_agent_id:
-        type: string
-      bot_agent_id:
-        description: |-
-          BotAgentID names the Agent instance whose setup launches the runtime;
-          only a session bound to the same instance can later adopt it.
-        type: string
-      project_path:
-        type: string
-    type: object
   handlers.acpRuntimeModeRequest:
     properties:
       mode_id:
@@ -5313,12 +5279,6 @@ definitions:
     type: object
   handlers.createSessionRequest:
     properties:
-      acp_runtime_id:
-        description: |-
-          ACPRuntimeID optionally binds a warm pre-session runtime (created via
-          POST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a
-          transient in-memory handle reference, never persisted in metadata.
-        type: string
       bot_agent_id:
         type: string
       channel_type:
@@ -5984,6 +5944,43 @@ definitions:
       url:
         type: string
     type: object
+  modelcatalog.Info:
+    properties:
+      checked_at:
+        type: string
+      revision:
+        type: string
+      source:
+        type: string
+      stale:
+        type: boolean
+    type: object
+  modelcatalog.Model:
+    properties:
+      config:
+        $ref: '#/definitions/models.ModelConfig'
+      model_id:
+        type: string
+      name:
+        type: string
+      type:
+        $ref: '#/definitions/models.ModelType'
+    type: object
+  modelcatalog.Response:
+    properties:
+      checked_at:
+        type: string
+      models:
+        items:
+          $ref: '#/definitions/modelcatalog.Model'
+        type: array
+      revision:
+        type: string
+      source:
+        type: string
+      stale:
+        type: boolean
+    type: object
   models.AddRequest:
     properties:
       config:
@@ -6036,19 +6033,34 @@ definitions:
       type:
         $ref: '#/definitions/models.ModelType'
     type: object
+  models.Modality:
+    enum:
+    - text
+    - image
+    - audio
+    - video
+    - pdf
+    type: string
+    x-enum-varnames:
+    - ModalityText
+    - ModalityImage
+    - ModalityAudio
+    - ModalityVideo
+    - ModalityPDF
   models.ModelConfig:
     properties:
       catalog_available:
+        description: CatalogAvailable is false when a managed catalog stopped listing
+          the model.
         type: boolean
-      compatibilities:
-        items:
-          type: string
-        type: array
       context_window:
+        description: ContextWindow is the context window in tokens, input and output
+          together.
         type: integer
       description:
         type: string
       dimensions:
+        description: Dimensions is the embedding vector size.
         type: integer
       max_output_tokens:
         description: |-
@@ -6056,45 +6068,74 @@ definitions:
           response; nil means unknown. When set, every turn requests an explicit
           limit within it.
         type: integer
-      reasoning_default_on:
+      modalities:
+        $ref: '#/definitions/models.ModelModalities'
+      reasoning:
+        allOf:
+        - $ref: '#/definitions/models.ModelReasoning'
+        description: Reasoning is nil when the model does not reason.
+      schema_version:
         description: |-
-          ReasoningDefaultOn reports whether omitting the thinking field leaves the
-          model thinking. Separate from off-ability: Claude 4.6 can be turned off *and*
-          defaults to off, while Opus 5 can be turned off but defaults to on, so
-          omitting the field there keeps thinking running — billed, and invisible to a
-          user who believes they turned it off. nil means unknown.
+          SchemaVersion is ModelConfigSchemaVersion on every config this version
+          writes.
+        type: integer
+      structured_output:
+        description: StructuredOutput reports support for a JSON schema response format.
         type: boolean
-      reasoning_dialect:
+      tool_call:
+        type: boolean
+    type: object
+  models.ModelModalities:
+    properties:
+      input:
+        items:
+          $ref: '#/definitions/models.Modality'
+        type: array
+      output:
+        items:
+          $ref: '#/definitions/models.Modality'
+        type: array
+    type: object
+  models.ModelReasoning:
+    properties:
+      budget:
+        allOf:
+        - $ref: '#/definitions/models.ReasoningBudget'
+        description: Budget is the reasoning token budget range; nil means no budget
+          control.
+      default:
+        allOf:
+        - $ref: '#/definitions/models.ReasoningDefault'
+        description: Default is what the model does when a request sets no reasoning
+          control.
+      dialect:
         description: |-
-          ReasoningDialect declares the wire shape of this model's thinking control,
-          which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
-          token budget while 3.x takes a named level, and the two are mutually
-          exclusive on the same request. Declared per model because the alternative is
-          sniffing the model id, and an id is not a capability. Empty leaves provider
-          policy in charge; Google's adaptor deliberately sends no thinking control so
-          pre-dialect rows retain their safe pre-upgrade request shape.
+          Dialect is the request shape that carries the controls: tier, budget,
+          toggle, adaptive, or empty when not stated.
         type: string
-      reasoning_efforts:
+      efforts:
+        description: |-
+          Efforts lists the effort levels the model accepts, weakest to strongest.
+          Turning reasoning off is Off, not an effort.
         items:
           type: string
         type: array
-      reasoning_off_support:
+      "off":
         description: |-
-          ReasoningOffSupport declares how the model answers an explicit request to
-          stop thinking. Anthropic's per-model table splits models that share a
-          thinking mode and an identical tier list, so this cannot be derived — see the
-          reasoning package's OffSupport constants.
+          Off is how the model answers a request to stop reasoning: accepted,
+          low_effort_only, rejected, or empty when not stated.
         type: string
-      thinking_budget_max:
-        type: integer
-      thinking_budget_min:
+      replay:
+        allOf:
+        - $ref: '#/definitions/models.ReasoningReplay'
         description: |-
-          ThinkingBudgetMin/Max bound the budget dialect. The range is per model
-          family, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned
-          off, while Flash starts at 0 and can.
-        type: integer
-      thinking_mode:
-        type: string
+          Replay is how a Chat Completions host reads reasoning back on replayed
+          messages; nil leaves the provider's compatibility mode in charge.
+      toggle:
+        description: |-
+          Toggle reports a request field that turns reasoning on and off, separate
+          from any effort level.
+        type: boolean
     type: object
   models.ModelType:
     enum:
@@ -6110,6 +6151,29 @@ definitions:
     - ModelTypeSpeech
     - ModelTypeTranscription
     - ModelTypeVideo
+  models.ReasoningBudget:
+    properties:
+      max:
+        type: integer
+      min:
+        type: integer
+    type: object
+  models.ReasoningDefault:
+    properties:
+      budget:
+        type: integer
+      effort:
+        type: string
+      enabled:
+        type: boolean
+    type: object
+  models.ReasoningReplay:
+    properties:
+      field:
+        type: string
+      required:
+        type: boolean
+    type: object
   models.TestResponse:
     properties:
       code:
@@ -6216,6 +6280,13 @@ definitions:
       updated_at:
         type: string
     type: object
+  providers.ImportCatalogModelsRequest:
+    properties:
+      skip_model_ids:
+        items:
+          type: string
+        type: array
+    type: object
   providers.ImportModelsRequest:
     properties:
       default_compatibilities:
@@ -6225,6 +6296,8 @@ definitions:
     type: object
   providers.ImportModelsResponse:
     properties:
+      catalog:
+        $ref: '#/definitions/modelcatalog.Info'
       created:
         type: integer
       models:
@@ -6405,6 +6478,12 @@ definitions:
           DefaultEffort is the tier to use when nothing is stored, and the tier to fall
           back to when a stored value is no longer offered by the model.
         type: string
+      default_off:
+        description: |-
+          DefaultOff reports that the model is declared to start with reasoning off:
+          a client picking the model, or reconciling a value it no longer offers,
+          starts it off instead of on DefaultEffort. Only set when CanDisable is.
+        type: boolean
       efforts:
         description: Efforts are the selectable active tiers, weakest to strongest
           as advertised.
@@ -6776,6 +6855,7 @@ definitions:
     - bocha
     - duckduckgo
     - yandex
+    - deepseek
     type: string
     x-enum-varnames:
     - ProviderBrave
@@ -6790,6 +6870,7 @@ definitions:
     - ProviderBocha
     - ProviderDuckDuckGo
     - ProviderYandex
+    - ProviderDeepSeek
   searchproviders.UpdateRequest:
     properties:
       config:
@@ -6925,15 +7006,6 @@ definitions:
         type: string
       command_ui_language:
         type: string
-      compaction_enabled:
-        type: boolean
-      compaction_model_id:
-        type: string
-      compaction_target_percent:
-        type: integer
-        x-nullable: true
-      compaction_threshold:
-        type: integer
       default_bot_agent_id:
         type: string
       discuss_probe_model_id:
@@ -7049,21 +7121,13 @@ definitions:
           Reference fields below use pointer semantics so autosaving clients can
           clear a selection: nil = keep current, "" = clear, value = set. The
           service mirrors each into a `<field>_set` SQL flag (same pattern as
-          FetchProviderID / CompactionModelID); plain strings would make ""
+          FetchProviderID / MemoryLLMModelID); plain strings would make ""
           indistinguishable from "not sent".
         type: string
       chat_runtime:
         type: string
       command_ui_language:
         type: string
-      compaction_enabled:
-        type: boolean
-      compaction_model_id:
-        type: string
-      compaction_target_percent:
-        type: integer
-      compaction_threshold:
-        type: integer
       default_bot_agent_id:
         type: string
       discuss_probe_model_id:
@@ -7137,6 +7201,10 @@ definitions:
         type: string
       running_text:
         type: string
+      skill:
+        description: Skill marks a prompt skill, which clients list apart from the
+          runtime's own commands.
+        type: boolean
     type: object
   turn.RuntimeCommandKind:
     enum:
@@ -7597,11 +7665,11 @@ paths:
     post:
       consumes:
       - application/json
-      description: 'Starts Codex device authorization or Claude browser authorization,
-        or encrypts a supplied API key or Claude OAuth token. A Grok account cannot
-        be staged: it signs in on the Agent itself. No Bot or workspace is created.
-        Ready means the credential has been staged; API keys and manually supplied
-        tokens are not probed against the provider.'
+      description: 'Starts Claude browser authorization, or encrypts a supplied API
+        key or Claude OAuth token. A ChatGPT or Grok account cannot be staged: it
+        signs in on the Agent itself. No Bot or workspace is created. Ready means
+        the credential has been staged; API keys and manually supplied tokens are
+        not probed against the provider.'
       parameters:
       - description: Authorization request
         in: body
@@ -7734,34 +7802,6 @@ paths:
             $ref: '#/definitions/server.Problem'
       summary: Complete Claude browser authorization with the returned authorization
         code
-      tags:
-      - agent-authorizations
-  /agent-authorizations/{id}/poll:
-    post:
-      parameters:
-      - description: Authorization ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/agentcredential.Authorization'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "410":
-          description: Gone
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "503":
-          description: Service Unavailable
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Poll a pending Agent device authorization
       tags:
       - agent-authorizations
   /auth/login:
@@ -8184,154 +8224,35 @@ paths:
       summary: Update ACL rule
       tags:
       - bots
-  /bots/{bot_id}/acp-runtimes:
-    post:
-      description: Starts an agent runtime before any session exists. The runtime
-        ID is server generated; bind it to a session at creation time via acp_runtime_id.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Runtime spec
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.acpRuntimeCreateRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/acpagent.RuntimeStatus'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "429":
-          description: Too Many Requests
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Create an unbound ACP runtime (pre-session model picker)
-      tags:
-      - acp
-  /bots/{bot_id}/acp-runtimes/{runtime_id}:
-    delete:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Runtime ID
-        in: path
-        name: runtime_id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Close an ACP runtime
-      tags:
-      - acp
+  /bots/{bot_id}/acp-options:
     get:
+      description: Reports the models, reasoning efforts, modes and commands the agent
+        offers before a conversation exists. Choices travel in the new session's runtime_metadata
+        (acp_model_id, acp_reasoning_effort, permission_mode).
       parameters:
       - description: Bot ID
         in: path
         name: bot_id
         required: true
         type: string
-      - description: Runtime ID
-        in: path
-        name: runtime_id
+      - description: ACP agent ID
+        in: query
+        name: acp_agent_id
         required: true
         type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/acpagent.RuntimeStatus'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Get ACP runtime state by runtime ID
-      tags:
-      - acp
-  /bots/{bot_id}/acp-runtimes/{runtime_id}/mode:
-    patch:
-      description: Sends the selected agent-declared mode ID unchanged to session/set_mode
-        before the first chat message binds this runtime to a Session.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
+      - description: Agent instance ID
+        in: query
+        name: bot_agent_id
         type: string
-      - description: Runtime ID
-        in: path
-        name: runtime_id
-        required: true
+      - description: Project the conversation will run in; /data when omitted
+        in: query
+        name: project_path
         type: string
-      - description: Mode selection
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.acpRuntimeModeRequest'
+      - description: Model whose reasoning efforts to report; the agent's current
+          model when omitted
+        in: query
+        name: model_id
+        type: string
       responses:
         "200":
           description: OK
@@ -8361,110 +8282,7 @@ paths:
           description: Bad Gateway
           schema:
             $ref: '#/definitions/server.Problem'
-      summary: Set an unbound ACP runtime's mode
-      tags:
-      - acp
-  /bots/{bot_id}/acp-runtimes/{runtime_id}/model:
-    patch:
-      description: An empty model_id resets the runtime to the agent default model.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Runtime ID
-        in: path
-        name: runtime_id
-        required: true
-        type: string
-      - description: Model selection
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.acpRuntimeModelRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/acpagent.RuntimeStatus'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Set (or reset) an ACP runtime's model
-      tags:
-      - acp
-  /bots/{bot_id}/acp-runtimes/{runtime_id}/reasoning:
-    patch:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Runtime ID
-        in: path
-        name: runtime_id
-        required: true
-        type: string
-      - description: Reasoning effort selection
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.acpRuntimeReasoningRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/acpagent.RuntimeStatus'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Set an ACP runtime's reasoning effort
+      summary: Get what a new ACP conversation could choose
       tags:
       - acp
   /bots/{bot_id}/agents:
@@ -8643,9 +8461,11 @@ paths:
       summary: Update a bot Agent
       tags:
       - bot-agents
-  /bots/{bot_id}/agents/{id}/codex/usage:
+  /bots/{bot_id}/agents/{id}/account:
     get:
-      description: Available to anyone who can chat with the Bot, so the composer
+      description: For runtimes that keep their own sign-in in the Agent's workspace
+        (Codex with a ChatGPT account, Grok Build with a Grok account). The runtime
+        is asked directly, and started when it is not running.
       parameters:
       - description: Bot ID
         in: path
@@ -8661,7 +8481,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/externalagent.CodexUsageResponse'
+            $ref: '#/definitions/externalagent.AgentAccountResponse'
         "403":
           description: Forbidden
           schema:
@@ -8670,19 +8490,15 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/server.Problem'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/server.Problem'
         "422":
           description: Unprocessable Entity
           schema:
             $ref: '#/definitions/server.Problem'
-        "502":
-          description: Bad Gateway
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/server.Problem'
-      summary: Get the Codex usage limits of the Agent's ChatGPT account
+      summary: Get the account a direct runtime Agent is signed in to
       tags:
       - external-agents
   /bots/{bot_id}/agents/{id}/credential:
@@ -8913,7 +8729,7 @@ paths:
       - external-agents
   /bots/{bot_id}/agents/{id}/login/device/poll:
     post:
-      description: A successful sign-in has already been stored as the Agent's credential
+      description: A successful sign-in has already been kept by the Agent's runtime
         when this answers success.
       parameters:
       - description: Bot ID
@@ -8993,6 +8809,46 @@ paths:
       summary: List models available to a bot Agent
       tags:
       - bot-agents
+  /bots/{bot_id}/agents/{id}/quota:
+    get:
+      description: For runtimes whose account reports its usage (Codex with a ChatGPT
+        account). Available to anyone who can chat with the Bot, so the composer can
+        warn before a turn runs into the limit.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Bot Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/externalagent.AgentQuotaResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Get the usage limits of the Agent's account
+      tags:
+      - external-agents
   /bots/{bot_id}/agents/{id}/runtime-controls:
     get:
       parameters:
@@ -9005,6 +8861,10 @@ paths:
         in: path
         name: id
         required: true
+        type: string
+      - description: Folder a draft would run in, which decides its project commands
+        in: query
+        name: workdir_id
         type: string
       responses:
         "200":
@@ -9614,28 +9474,6 @@ paths:
       tags:
       - bots
   /bots/{bot_id}/compaction/logs:
-    delete:
-      description: Delete all compaction logs for a bot
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Delete compaction logs
-      tags:
-      - compaction
     get:
       description: List compaction logs for a bot
       parameters:
@@ -13502,6 +13340,48 @@ paths:
       summary: Set ACP session runtime model
       tags:
       - acp
+  /bots/{bot_id}/sessions/{session_id}/acp-runtime/native-session:
+    delete:
+      description: Forgets the agent session that keeps failing to restore and keeps
+        the messages. The next message opens a new agent session, which does not remember
+        them.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Start the agent over on a new ACP session
+      tags:
+      - acp
   /bots/{bot_id}/sessions/{session_id}/acp-runtime/reasoning:
     patch:
       parameters:
@@ -13553,36 +13433,6 @@ paths:
       summary: Set ACP session runtime reasoning effort
       tags:
       - acp
-  /bots/{bot_id}/sessions/{session_id}/compact:
-    post:
-      description: Run context compaction synchronously for a session
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Session ID
-        in: path
-        name: session_id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.TriggerCompactResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/server.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/server.Problem'
-      summary: Trigger immediate context compaction
-      tags:
-      - compaction
   /bots/{bot_id}/sessions/{session_id}/context-lifecycle:
     get:
       description: List run-keyed context lifecycle snapshots for a chat session,
@@ -17141,6 +16991,49 @@ paths:
       summary: Update provider
       tags:
       - providers
+  /providers/{id}/import-catalog-models:
+    post:
+      consumes:
+      - application/json
+      description: Resolve the stored provider's models.dev source and normalize its
+        catalog on the server
+      parameters:
+      - description: Provider ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Models to preserve from a preceding manual creation
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/providers.ImportCatalogModelsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/providers.ImportModelsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Import a provider's public model catalog
+      tags:
+      - providers
   /providers/{id}/import-models:
     post:
       consumes:
@@ -17340,6 +17233,43 @@ paths:
           schema:
             $ref: '#/definitions/server.Problem'
       summary: Test provider connectivity
+      tags:
+      - providers
+  /providers/catalog/models:
+    get:
+      description: Fetch, validate and normalize models.dev metadata on the server
+        without changing stored models
+      parameters:
+      - description: models.dev provider ID
+        in: query
+        name: source
+        required: true
+        type: string
+      - description: Memoh client protocol
+        in: query
+        name: client_type
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/modelcatalog.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/server.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/server.Problem'
+      summary: Preview a public provider model catalog
       tags:
       - providers
   /providers/count:

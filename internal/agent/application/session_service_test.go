@@ -37,3 +37,7 @@ func (f *fakeBackgroundSessionService) MergeRuntimeMetadata(ctx context.Context,
 	}
 	return f.mergeRuntimeMetadataFn(ctx, sessionID, runtimeType, delta)
 }
+
+func (*fakeBackgroundSessionService) ExternalIdentity(ctx context.Context, sess session.Thread) (session.ExternalIdentity, error) {
+	return (*session.Service)(nil).ExternalIdentity(ctx, sess)
+}

@@ -2,14 +2,9 @@ package application
 
 import (
 	"context"
-	"log/slog"
-	"strings"
-	"time"
 
-	"github.com/felinics/memoh/internal/agent/context/compaction"
 	"github.com/felinics/memoh/internal/agent/turn"
-	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
-	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 func discussContextPressure(cmd turn.StartTurnCommand) int {
@@ -20,103 +15,31 @@ func discussContextPressure(cmd turn.StartTurnCommand) int {
 	return max(total, cmd.DiscussContextTokens)
 }
 
-func (s *Service) scheduleDiscussCompaction(ctx context.Context, cmd turn.StartTurnCommand, modelID string) {
-	if pressure := discussContextPressure(cmd); pressure > 0 && s.compactionService != nil && s.settingsService != nil {
-		s.maybeCompactDiscuss(context.WithoutCancel(ctx), cmd.BotID, cmd.ThreadID, modelID, pressure)
+// maybeSyncCompactDiscuss compacts before the turn when Channel could not fit
+// even the newest input beside the summaries and sent no messages to run: the
+// batch stays, newest first while it leaves the summary room, and the rest is
+// summarized. It reports whether the turn must be recomposed and why the
+// compaction failed. Any other batch runs whole; the run folds what does not
+// fit before its first step.
+func (s *Service) maybeSyncCompactDiscuss(ctx context.Context, cmd turn.StartTurnCommand, resolved ResolveRunConfigResult, runID string) (bool, error) {
+	if !cmd.DiscussContextOverflow || cmd.DiscussRecoveryExhausted || ctx.Err() != nil {
+		return false, nil
 	}
-}
-
-func (s *Service) maybeSyncCompactDiscuss(ctx context.Context, cmd turn.StartTurnCommand, resolved ResolveRunConfigResult, runID string) bool {
-	mode := s.effectiveSyncCompactionMode()
-	if ctx.Err() != nil || mode == syncCompactionModeOff || s.compactionService == nil || s.settingsService == nil {
-		return false
-	}
-	pressure := discussContextPressure(cmd)
 	budget := resolved.ContextBudgetMaxTokens
 	if budget <= 0 {
 		budget = s.contextAbsoluteMaxTokens()
 	}
-	_, admission := admitDiscussMessages(cmd.DiscussMessages, budget)
-	if resolved.RuntimeType == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(resolved.RuntimeType) {
-		_, admission = admitDiscussAgentMessages(cmd.DiscussMessages, budget)
+	if runtimekind.IsExternal(resolved.RuntimeType) {
+		budget -= turn.EstimateTokensFromBytes(len(discussAgentPromptPrefix) + len(discussAgentPromptSuffix) + len("[assistant]\n\n\n") + turn.ContextBytesPerToken - 1)
 	}
-	// Older unconsumed input that no longer fits must be compacted before
-	// admission drops it, so its omission requires recovery in any mode.
-	rejected := cmd.DiscussContextOverflow || admission.ProtectedOverflow ||
-		len(cmd.DiscussOmittedSources) > 0 || len(admission.OmittedSources) > 0
-	protected := admission.ProtectedSources
-	if !rejected && !syncCompactionShouldRun(pressure, budget) {
-		return false
+	// A newest input that does not fit by itself fails the turn: summarizing
+	// the rest makes no room for it.
+	if budget-cmd.DiscussCurrentTokens <= 0 {
+		return false, nil
 	}
-	threshold := hardCompactionThreshold(budget)
-	if mode == syncCompactionModeShadow && !rejected {
-		s.logger.InfoContext(ctx, "sync_compaction_backstop",
-			slog.String("path", "discuss"),
-			slog.String("mode", "shadow"),
-			slog.Bool("would_fire", true),
-			slog.String("bot_id", cmd.BotID),
-			slog.String("session_id", cmd.ThreadID),
-			slog.Int("pressure_tokens", pressure),
-			slog.Int("threshold_tokens", threshold))
-		return false
+	req := ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: runID, discussCurrentSources: cmd.DiscussCurrentSources}
+	if err := s.compactForBudget(ctx, req, discussContextPressure(cmd), budget, resolved.ModelID); err != nil {
+		return false, err
 	}
-	if rejected {
-		if cmd.DiscussContextOverflow {
-			// Channel rejected even the newest input beside the summaries, so
-			// that newest input is the whole protected set.
-			protected = nil
-			if n := len(cmd.DiscussCurrentSources); n > 0 {
-				protected = cmd.DiscussCurrentSources[n-1:]
-			}
-			budget = max(0, budget-cmd.DiscussCurrentTokens)
-			if resolved.RuntimeType == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(resolved.RuntimeType) {
-				budget -= turn.EstimateTokensFromBytes(len(discussAgentPromptPrefix) + len(discussAgentPromptSuffix) + len("[assistant]\n\n\n") + turn.ContextBytesPerToken - 1)
-			}
-		} else {
-			budget = admission.RecoveryBudgetTokens
-		}
-		if budget <= 0 {
-			return false
-		}
-	}
-	start := time.Now()
-	req := ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: runID, discussCurrentSources: protected}
-	var res compaction.Result
-	if rejected {
-		res = s.runBudgetCompactionSync(ctx, req, pressure, budget, resolved.ModelID)
-	} else {
-		res = s.runCompactionSync(ctx, req, pressure, budget, resolved.ModelID)
-	}
-
-	s.logger.InfoContext(ctx, "sync_compaction_backstop",
-		slog.String("path", "discuss"),
-		slog.String("mode", "active"),
-		slog.String("status", res.Status),
-		slog.Int64("duration_ms", time.Since(start).Milliseconds()),
-		slog.String("bot_id", cmd.BotID),
-		slog.String("session_id", cmd.ThreadID),
-		slog.Int("pressure_tokens", pressure),
-		slog.Int("threshold_tokens", threshold))
-	return res.Status == compaction.StatusOK || (rejected && res.Status == compaction.StatusProgress)
-}
-
-// maybeCompactDiscuss re-evaluates compaction pressure after a native discuss
-// turn with the same trigger policy as the chat path.
-func (s *Service) maybeCompactDiscuss(ctx context.Context, botID, threadID, modelID string, compactable int) {
-	// The absolute cap keeps compaction triggers alive even when the model
-	// has no configured context window; a zero budget would disable them.
-	budget := s.contextAbsoluteMaxTokens()
-	var turnModel models.GetResponse
-	if s.modelsService != nil && strings.TrimSpace(modelID) != "" {
-		if model, err := s.modelsService.GetByID(ctx, modelID); err == nil {
-			turnModel = model
-			budget = s.effectiveContextTokenBudget(model)
-		}
-	}
-	s.maybeCompact(ctx, ChatRequest{BotID: botID, ThreadID: threadID}, resolvedContext{
-		model:                  turnModel,
-		compactableTokens:      compactable,
-		compactableTokensKnown: true,
-		contextTokenBudget:     budget,
-	}, compactable)
+	return true, nil
 }

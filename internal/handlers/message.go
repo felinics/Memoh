@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/background"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/apperror"
@@ -37,6 +39,7 @@ type MessageHandler struct {
 	messageService                messagepkg.Service
 	sessionService                *session.Service
 	runtimeResets                 messageRuntimeResetService
+	runtimes                      *external.Registry
 	messageEvents                 messageevent.Subscriber
 	messagePublisher              messageevent.Publisher
 	activityInvalidationSupported bool
@@ -56,10 +59,10 @@ type messageProjectionCache interface {
 	DropAll()
 }
 
-// runtimeResetService is intentionally a narrow handler-owned port. Clearing the
-// canonical timeline must also discard any process-local ACP conversation;
-// otherwise the next turn would silently repopulate history from the old
-// native session even though the UI was cleared.
+// messageRuntimeResetService is the history reset every runtime shares.
+// Clearing the timeline must also stop the runs and close the agent
+// processes in scope; otherwise the next turn would carry on from the old
+// native conversation even though the UI was cleared.
 type messageRuntimeResetService interface {
 	BeginSessionHistoryReset(ctx context.Context, botID, sessionID string) (resetCtx context.Context, release func(), err error)
 	BeginBotHistoryReset(ctx context.Context, botID string) (resetCtx context.Context, release func(), err error)
@@ -122,6 +125,17 @@ func (h *MessageHandler) SetUserInputService(svc *userinput.Service) {
 
 func (h *MessageHandler) SetBackgroundManager(mgr *background.Manager) {
 	h.bgManager = mgr
+}
+
+// SetRuntimeRegistry installs the external runtimes, whose declarations say
+// which turns can be forked.
+func (h *MessageHandler) SetRuntimeRegistry(runtimes *external.Registry) {
+	h.runtimes = runtimes
+}
+
+func (h *MessageHandler) forkAnchorKey(runtimeType string) string {
+	caps, _ := h.runtimes.Caps(runtimeType)
+	return caps.ForkAnchorKey
 }
 
 func (h *MessageHandler) SetRuntimeResetService(resets messageRuntimeResetService) {
@@ -245,7 +259,7 @@ func (h *MessageHandler) ListMessages(c echo.Context) error {
 	if len(messages) > 0 {
 		messages = h.extendToUITurnHead(c.Request().Context(), sessionID, messages, limit)
 	}
-	items := chatview.ConvertSessionMessagesToUITurns(messages, sess.RuntimeType, sess.RuntimeMetadata)
+	items := chatview.ConvertSessionMessagesToUITurns(messages, h.forkAnchorKey(sess.RuntimeType), sess.RuntimeMetadata)
 	h.decorateUITurns(c.Request().Context(), botID, sessionID, sess, items)
 	return c.JSON(http.StatusOK, UIMessageListResponse{Items: items})
 }
@@ -340,7 +354,7 @@ func (h *MessageHandler) LocateMessage(c echo.Context) error {
 		return errs.Wrap(err, "get message")
 	}
 
-	items := chatview.ConvertSessionMessagesToUITurns(located.Messages, sess.RuntimeType, sess.RuntimeMetadata)
+	items := chatview.ConvertSessionMessagesToUITurns(located.Messages, h.forkAnchorKey(sess.RuntimeType), sess.RuntimeMetadata)
 	h.decorateUITurns(c.Request().Context(), botID, sessionID, sess, items)
 	return c.JSON(http.StatusOK, UILocateMessageResponse{
 		Items:                   items,
@@ -435,15 +449,19 @@ func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID s
 	if len(toolCallIDs) == 0 {
 		return
 	}
+	// The ledger rows of this session are the only authority on whether a
+	// decision can still be answered. A lookup that failed leaves the stored
+	// snapshots as they are rather than revoking them on a transient error.
 	var wg sync.WaitGroup
 	var approvals []toolapproval.Request
 	var requests []userinput.Request
+	approvalsLoaded, requestsLoaded := false, false
 	if h.toolApproval != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			if rows, err := h.toolApproval.ListBySessionToolCalls(ctx, botID, sessionID, toolCallIDs); err == nil {
-				approvals = rows
+				approvals, approvalsLoaded = rows, true
 			}
 		}()
 	}
@@ -452,16 +470,100 @@ func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID s
 		go func() {
 			defer wg.Done()
 			if rows, err := h.userInput.ListBySessionToolCalls(ctx, botID, sessionID, toolCallIDs); err == nil {
-				requests = rows
+				requests, requestsLoaded = rows, true
 			}
 		}()
 	}
 	wg.Wait()
-	if len(approvals) > 0 {
+	if approvalsLoaded {
 		mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(sess))
+		// What is left read-only is history copied from another session (a
+		// fork); show the outcome its own session recorded.
+		if ids := readOnlyApprovalIDs(items); len(ids) > 0 {
+			if rows, err := h.toolApproval.ListByIDs(ctx, botID, ids); err == nil {
+				applyReadOnlyApprovals(items, rows)
+			}
+		}
 	}
-	if len(requests) > 0 {
+	if requestsLoaded {
 		mergeUserInputs(items, requests, h.userInputCanRespondFn(sess))
+		if ids := readOnlyUserInputIDs(items); len(ids) > 0 {
+			if rows, err := h.userInput.ListByIDs(ctx, botID, ids); err == nil {
+				applyReadOnlyUserInputs(items, rows)
+			}
+		}
+	}
+}
+
+// readOnlyApprovalIDs lists the approval snapshots still marked pending after
+// the merge yet not answerable here; only their status can still be stale.
+func readOnlyApprovalIDs(turns []chatview.UITurn) []string {
+	var ids []string
+	forEachToolMessage(turns, func(msg *chatview.UIMessage) {
+		if a := msg.Approval; a != nil && !a.CanApprove && a.Status == toolapproval.StatusPending {
+			ids = append(ids, a.ApprovalID)
+		}
+	})
+	return ids
+}
+
+func applyReadOnlyApprovals(turns []chatview.UITurn, rows []toolapproval.Request) {
+	byID := make(map[string]toolapproval.Request, len(rows))
+	for _, row := range rows {
+		byID[row.ID] = row
+	}
+	forEachToolMessage(turns, func(msg *chatview.UIMessage) {
+		if msg.Approval == nil || msg.Approval.CanApprove {
+			return
+		}
+		row, ok := byID[msg.Approval.ApprovalID]
+		if !ok {
+			return
+		}
+		msg.Approval.Status = row.Status
+		msg.Approval.DecisionReason = row.DecisionReason
+		msg.Approval.SelectedOptionID = row.SelectedOptionID
+	})
+}
+
+func readOnlyUserInputIDs(turns []chatview.UITurn) []string {
+	var ids []string
+	forEachToolMessage(turns, func(msg *chatview.UIMessage) {
+		if in := msg.UserInput; in != nil && !in.CanRespond && in.Status == userinput.StatusPending {
+			ids = append(ids, in.UserInputID)
+		}
+	})
+	return ids
+}
+
+func applyReadOnlyUserInputs(turns []chatview.UITurn, rows []userinput.Request) {
+	byID := make(map[string]userinput.Request, len(rows))
+	for _, row := range rows {
+		byID[row.ID] = row
+	}
+	forEachToolMessage(turns, func(msg *chatview.UIMessage) {
+		if msg.UserInput == nil || msg.UserInput.CanRespond {
+			return
+		}
+		row, ok := byID[msg.UserInput.UserInputID]
+		if !ok {
+			return
+		}
+		msg.UserInput.Status = row.Status
+		msg.UserInput.Answers = userinput.AnswersFromResult(row.Result)
+	})
+}
+
+func forEachToolMessage(turns []chatview.UITurn, fn func(*chatview.UIMessage)) {
+	for turnIdx := range turns {
+		if turns[turnIdx].Role != "assistant" {
+			continue
+		}
+		for msgIdx := range turns[turnIdx].Messages {
+			if msg := &turns[turnIdx].Messages[msgIdx]; msg.Type == chatview.UIMessageTool {
+				fn(msg)
+			}
+		}
 	}
 }
 
@@ -490,8 +592,12 @@ func toolCallIDsFromUITurns(turns []chatview.UITurn) []string {
 	return ids
 }
 
+// mergeToolApprovals overlays this session's approval rows onto the tool
+// messages. A stored approval snapshot with no row in this session is
+// read-only: the request belongs to another session's run (a fork copies the
+// history, not the ledger), so no answer given here could ever reach it.
 func mergeToolApprovals(turns []chatview.UITurn, approvals []toolapproval.Request, canApproveFn func(toolapproval.Request) bool) {
-	if len(turns) == 0 || len(approvals) == 0 {
+	if len(turns) == 0 {
 		return
 	}
 	if canApproveFn == nil {
@@ -516,6 +622,9 @@ func mergeToolApprovals(turns []chatview.UITurn, approvals []toolapproval.Reques
 			}
 			approval, ok := byCallID[strings.TrimSpace(msg.ToolCallID)]
 			if !ok {
+				if msg.Approval != nil {
+					msg.Approval.CanApprove = false
+				}
 				continue
 			}
 			running := false
@@ -548,8 +657,10 @@ func uiToolApprovalOptions(options []toolapproval.PermissionOption) []chatview.U
 	return converted
 }
 
+// mergeUserInputs overlays this session's user-input rows onto the tool
+// messages; like approvals, a snapshot with no row here is read-only.
 func mergeUserInputs(turns []chatview.UITurn, requests []userinput.Request, canRespondFn func(userinput.Request) bool) {
-	if len(turns) == 0 || len(requests) == 0 {
+	if len(turns) == 0 {
 		return
 	}
 	byCallID := make(map[string]userinput.Request, len(requests))
@@ -569,6 +680,9 @@ func mergeUserInputs(turns []chatview.UITurn, requests []userinput.Request, canR
 			}
 			req, ok := byCallID[strings.TrimSpace(msg.ToolCallID)]
 			if !ok {
+				if msg.UserInput != nil {
+					msg.UserInput.CanRespond = false
+				}
 				continue
 			}
 			running := false
@@ -826,6 +940,20 @@ func (h *MessageHandler) authorizeMessageSession(c echo.Context, channelIdentity
 	return bot, perms, sess, nil
 }
 
+// inlineSafeMedia lists the types a browser may display inline from the API
+// origin without running content: raster images, audio, video, PDF and text.
+func inlineSafeMedia(contentType string) bool {
+	base, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	switch base {
+	case "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp", "application/pdf", "text/plain":
+		return true
+	}
+	return strings.HasPrefix(base, "audio/") || strings.HasPrefix(base, "video/")
+}
+
 // ServeMedia streams a media asset by bot_id + content_hash with read-access authorization.
 func (h *MessageHandler) ServeMedia(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -860,6 +988,12 @@ func (h *MessageHandler) ServeMedia(c echo.Context) error {
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
+	if !inlineSafeMedia(contentType) {
+		// Assets include model-referenced files and remote content. Active
+		// types such as HTML or SVG must never render on the app origin.
+		c.Response().Header().Set("Content-Disposition", "attachment")
+	}
+	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
 	c.Response().Header().Set("Content-Type", contentType)
 	c.Response().Header().Set("Cache-Control", "private, max-age=86400")
 	c.Response().WriteHeader(http.StatusOK)

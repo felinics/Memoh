@@ -27,6 +27,8 @@ type RuntimeCommand struct {
 	Kind          RuntimeCommandKind `json:"kind"`
 	RunningText   string             `json:"running_text,omitempty"`
 	CompletedText string             `json:"completed_text,omitempty"`
+	// Skill marks a prompt skill, which clients list apart from the runtime's own commands.
+	Skill bool `json:"skill,omitempty"`
 }
 
 type RuntimeMode struct {

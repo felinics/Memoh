@@ -14,19 +14,24 @@ export function useRuntimeControls(options: {
   botId: Ref<string | null | undefined>
   sessionId: Ref<string | null | undefined>
   draftAgentId?: Ref<string>
+  // The draft's folder decides which project skills its commands include.
+  draftWorkdirId?: Ref<string>
   visible: Ref<boolean>
 }) {
   const visibility = useDocumentVisibility()
-  const scope = computed(() => `${options.botId.value ?? ''}:${options.sessionId.value || options.draftAgentId?.value || ''}`)
+  const draftScope = () => `${options.draftAgentId?.value ?? ''}:${options.draftWorkdirId?.value ?? ''}`
+  const scope = computed(() => `${options.botId.value ?? ''}:${options.sessionId.value || draftScope()}`)
   const enabled = () => !!options.botId.value && !!(options.sessionId.value || options.draftAgentId?.value) && options.visible.value && visibility.value === 'visible'
   const query = useQuery({
-    key: () => ['runtime-controls', options.botId.value ?? '', options.sessionId.value ?? '', options.draftAgentId?.value ?? ''],
+    key: () => ['runtime-controls', options.botId.value ?? '', options.sessionId.value ?? '', options.draftAgentId?.value ?? '', options.draftWorkdirId?.value ?? ''],
     enabled,
     query: async ({ signal }) => {
       const target = scope.value
       if (!options.sessionId.value) {
+        const workdirId = options.draftWorkdirId?.value
         const { data } = await getBotsByBotIdAgentsByIdRuntimeControls({
           path: { bot_id: options.botId.value!, id: options.draftAgentId!.value },
+          query: workdirId ? { workdir_id: workdirId } : undefined,
           signal, throwOnError: true,
         })
         return { target, controls: data }

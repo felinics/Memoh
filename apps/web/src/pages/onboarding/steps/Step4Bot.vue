@@ -28,6 +28,7 @@ import { useUserStore } from '@/store/user'
 import { readCreatedBotSession } from '@/pages/bots/created-bot-session'
 import { safeLocalGet } from '@/utils/safe-storage'
 import { apiErrorStatus } from '@/utils/api-error'
+import { withoutLegacyKeys } from '@/components/create-model/model-config'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { defaultAclPreset } from '@/constants/acl-presets'
 import { randomCatName } from '@/constants/bot-name-presets'
@@ -216,7 +217,7 @@ async function handleSubmit() {
           name: selectedModel.name,
           provider_id: selectedModel.provider_id,
           type: selectedModel.type,
-          config: selectedModel.config,
+          config: withoutLegacyKeys(selectedModel.config),
           enable: true,
         },
         throwOnError: true,

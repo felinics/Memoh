@@ -16,15 +16,21 @@ type TurnResponseEntry struct {
 	Content         string          `json:"content"`
 	RawContent      json.RawMessage `json:"raw_content,omitempty"`
 	SourceMessageID string          `json:"source_message_id,omitempty"`
+	// DiscussStep reports a row a Discuss run wrote before its answer:
+	// context, not proof the run consumed its input.
+	DiscussStep bool `json:"-"`
 }
 
 // ContextMessage is a unified message for LLM context, produced by MergeContext.
+// Pinned marks what composition keeps whatever the budget: what the
+// session's checkpoint holds.
 type ContextMessage struct {
 	Source               *turn.ContextMessageSource `json:"source,omitempty"`
 	Role                 string                     `json:"role"`
 	Content              string                     `json:"content"`
 	RawContent           json.RawMessage            `json:"raw_content,omitempty"`
 	CompactionArtifactID string                     `json:"compaction_artifact_id,omitempty"`
+	Pinned               bool                       `json:"pinned,omitempty"`
 }
 
 // ComposeContextResult holds the output of ComposeContext.
@@ -33,135 +39,62 @@ type ComposeContextResult struct {
 	EstimatedTokens int
 }
 
-// CompactionSource identifies one durable history source covered by an active
-// compaction artifact. ExternalMessageID projects that source onto the rendered
-// stream; HistoryMessageID projects it onto persisted turn responses.
-type CompactionSource struct {
-	HistoryMessageID  string `json:"history_message_id,omitempty"`
-	ExternalMessageID string `json:"external_message_id,omitempty"`
-	CreatedAtMs       int64  `json:"created_at_ms,omitempty"`
-}
-
-// CompactionArtifact is the timeline-facing projection of one active compaction
-// artifact. Callers preserve frontier order; composition keeps each artifact
-// separate so later restacks can supersede only the ranges they actually cover.
-type CompactionArtifact struct {
-	ID             string             `json:"id"`
-	Summary        string             `json:"summary"`
-	AnchorStartMs  int64              `json:"anchor_start_ms,omitempty"`
-	CoverageAsOfMs int64              `json:"coverage_as_of_ms,omitempty"`
-	Sources        []CompactionSource `json:"sources,omitempty"`
-}
-
-// ActiveRenderedContext removes only segments covered by usable artifacts.
-func ActiveRenderedContext(rc RenderedContext, artifacts []CompactionArtifact) RenderedContext {
-	return filterCoveredRenderedContext(rc, coveredExternalMessages(artifacts))
-}
-
-const earliestMergeTime int64 = -1 << 63
-
 type mergeEntry struct {
 	source *turn.ContextMessageSource
-	kind   string // "summary_before_rc", "rc", "summary", or "tr"
+	kind   string // "rc", "summary", or "tr"
 	time   int64
 	step   int
+	// pinned entries open the history in a fixed order: what the checkpoint
+	// holds.
+	pinned bool
 	// For RC entries
 	rcContent []RenderedContentPiece
 	// For summary entries
-	summaryContent    string
-	summaryArtifactID string
+	summaryContent string
+	summaryID      string
 	// For TR entries
 	trRole       string
 	trContent    string
 	trRawContent json.RawMessage
 }
 
-// MergeContext interleaves RC segments and TR entries by timestamp.
-// RC entries use receivedAtMs; TR entries use requestedAtMs.
-// Tiebreaker: RC before TR on equal timestamp.
-// Each RC entry remains a separate user message so selection preserves its source boundary.
-func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage {
-	entries := make([]mergeEntry, 0, len(rc)+len(trs))
-	entries = appendRenderedContextEntries(entries, rc)
-	entries = appendTurnResponseEntries(entries, trs)
-	return mergeEntries(entries)
-}
-
 func appendRenderedContextEntries(entries []mergeEntry, rc RenderedContext) []mergeEntry {
 	for i, seg := range rc {
-		entries = append(entries, mergeEntry{
-			kind:      "rc",
-			time:      seg.ReceivedAtMs,
-			step:      2 * i,
-			rcContent: seg.Content,
-			source:    renderedMessageSource(seg),
-		})
+		entries = append(entries, renderedContextEntry(seg, 2*i))
 	}
 	return entries
 }
 
-// appendActiveRenderedContextEntries appends uncovered segments keyed by their
-// position in the full rendered context, so slot summaries and surviving
-// segments share one index space.
-func appendActiveRenderedContextEntries(
-	entries []mergeEntry,
-	rc RenderedContext,
-	coveredMessages map[string]externalMessageCoverage,
-) []mergeEntry {
-	for i, segment := range rc {
-		coverage, covered := coveredMessages[strings.TrimSpace(segment.MessageID)]
-		if covered && renderedSegmentCovered(segment, coverage) {
-			continue
-		}
-		entries = append(entries, mergeEntry{
-			kind:      "rc",
-			time:      segment.ReceivedAtMs,
-			step:      2 * i,
-			rcContent: segment.Content,
-			source:    renderedMessageSource(segment),
-		})
+func renderedContextEntry(seg RenderedSegment, step int) mergeEntry {
+	return mergeEntry{
+		kind:      "rc",
+		time:      seg.ReceivedAtMs,
+		step:      step,
+		rcContent: seg.Content,
+		source:    renderedMessageSource(seg),
 	}
-	return entries
 }
 
 func appendTurnResponseEntries(entries []mergeEntry, trs []TurnResponseEntry) []mergeEntry {
 	for i, tr := range trs {
-		entries = append(entries, mergeEntry{
-			kind:         "tr",
-			time:         tr.RequestedAtMs,
-			step:         2 * i,
-			trRole:       tr.Role,
-			source:       &turn.ContextMessageSource{Kind: "history", ID: tr.SourceMessageID},
-			trContent:    tr.Content,
-			trRawContent: tr.RawContent,
-		})
+		entries = append(entries, turnResponseEntry(tr, 2*i))
 	}
 	return entries
 }
 
-// appendActiveTurnResponseEntries appends uncovered responses keyed by their
-// position in the full response list, so slot summaries and surviving
-// responses share one index space.
-func appendActiveTurnResponseEntries(entries []mergeEntry, trs []TurnResponseEntry, coveredIDs map[string]struct{}) []mergeEntry {
-	for i, tr := range trs {
-		if _, covered := coveredIDs[strings.TrimSpace(tr.SourceMessageID)]; covered {
-			continue
-		}
-		entries = append(entries, mergeEntry{
-			kind:         "tr",
-			time:         tr.RequestedAtMs,
-			step:         2 * i,
-			trRole:       tr.Role,
-			source:       &turn.ContextMessageSource{Kind: "history", ID: tr.SourceMessageID},
-			trContent:    tr.Content,
-			trRawContent: tr.RawContent,
-		})
+func turnResponseEntry(tr TurnResponseEntry, step int) mergeEntry {
+	return mergeEntry{
+		kind:         "tr",
+		time:         tr.RequestedAtMs,
+		step:         step,
+		trRole:       tr.Role,
+		source:       &turn.ContextMessageSource{Kind: "history", ID: tr.SourceMessageID},
+		trContent:    tr.Content,
+		trRawContent: tr.RawContent,
 	}
-	return entries
 }
 
 func mergeEntries(entries []mergeEntry) []ContextMessage {
-	sortMergeEntries(entries)
 	markCurrentEntries(entries, nil, nil)
 	return materializeMergeEntries(entries)
 }
@@ -181,14 +114,12 @@ func sortMergeEntries(entries []mergeEntry) {
 
 func mergeKindOrder(kind string) int {
 	switch kind {
-	case "rc", "summary_slot", "summary_before_rc":
+	case "rc":
+		return 0
+	case "tr":
 		return 1
-	case "summary":
-		return 2
-	case "tr", "summary_tr_slot":
-		return 3
 	default:
-		return 4
+		return 2
 	}
 }
 
@@ -208,13 +139,14 @@ func materializeMergeEntries(entries []mergeEntry) []ContextMessage {
 				}
 			}
 			if pendingText.Len() > 0 {
-				messages = append(messages, ContextMessage{Role: "user", Content: pendingText.String(), Source: entry.source})
+				messages = append(messages, ContextMessage{Role: "user", Content: pendingText.String(), Source: entry.source, Pinned: entry.pinned})
 			}
-		case "summary", "summary_slot", "summary_before_rc", "summary_tr_slot":
+		case "summary":
 			messages = append(messages, ContextMessage{
 				Role:                 "user",
 				Content:              entry.summaryContent,
-				CompactionArtifactID: entry.summaryArtifactID,
+				CompactionArtifactID: entry.summaryID,
+				Pinned:               true,
 			})
 		case "tr":
 			messages = append(messages, ContextMessage{
@@ -222,6 +154,7 @@ func materializeMergeEntries(entries []mergeEntry) []ContextMessage {
 				Source:     entry.source,
 				Content:    entry.trContent,
 				RawContent: entry.trRawContent,
+				Pinned:     entry.pinned,
 			})
 		}
 	}
@@ -229,15 +162,11 @@ func materializeMergeEntries(entries []mergeEntry) []ContextMessage {
 	return messages
 }
 
-// ComposeContext merges un-compacted RC and TR streams.
-func ComposeContext(rc RenderedContext, trs []TurnResponseEntry) *ComposeContextResult {
-	return ComposeContextWithArtifacts(rc, trs, nil)
-}
-
-// ComposeContextWithArtifacts replaces covered RC/TR sources with each active
-// artifact at the covered rendered slot when available, or its durable anchor.
-func ComposeContextWithArtifacts(rc RenderedContext, trs []TurnResponseEntry, artifacts []CompactionArtifact) *ComposeContextResult {
-	allMessages := mergeEntries(composeMergeEntries(rc, trs, artifacts))
+// ComposeContextWithCheckpoint composes a session's history under its
+// checkpoint: what the checkpoint holds in its order, and then, by time, the
+// segments it leaves raw and trs, the turn responses after its position.
+func ComposeContextWithCheckpoint(rc RenderedContext, trs []TurnResponseEntry, checkpoint HistoryCheckpoint) *ComposeContextResult {
+	allMessages := mergeEntries(composeMergeEntries(rc, trs, checkpoint))
 	if len(allMessages) == 0 {
 		return nil
 	}
@@ -248,28 +177,57 @@ func ComposeContextWithArtifacts(rc RenderedContext, trs []TurnResponseEntry, ar
 	}
 }
 
-// composeMergeEntries builds the unsorted merge-entry list for composition.
+// composeMergeEntries builds the ordered merge-entry list for composition.
 // Entries hold references into rc/trs plus small summary strings; nothing
 // large is materialized here, so admission can measure before it selects.
-func composeMergeEntries(rc RenderedContext, trs []TurnResponseEntry, artifacts []CompactionArtifact) []mergeEntry {
-	coveredMessages := coveredExternalMessages(artifacts)
-	coveredResponseIDs := coveredHistoryMessageIDs(artifacts)
-	entries := make([]mergeEntry, 0, len(rc)+len(trs)+len(artifacts))
-	entries = appendActiveRenderedContextEntries(entries, rc, coveredMessages)
-	for i, artifact := range artifacts {
-		if !artifact.usable() {
+// A segment the checkpoint folds without a change since does not compose
+// (HistoryCheckpoint.composes); a row the checkpoint keeps renders at its
+// place among what it holds, its segment for an inbound message, and nowhere
+// else.
+func composeMergeEntries(rc RenderedContext, trs []TurnResponseEntry, checkpoint HistoryCheckpoint) []mergeEntry {
+	held := make(map[string]int)
+	for i, item := range checkpoint.Items {
+		if item.MessageID != "" {
+			held[item.MessageID] = i
+		}
+	}
+	segments := make([]*RenderedSegment, len(checkpoint.Items))
+	rest := make(RenderedContext, 0, len(rc))
+	for i := range rc {
+		id := strings.TrimSpace(rc[i].MessageID)
+		if index, ok := held[id]; ok {
+			segments[index] = &rc[i]
 			continue
 		}
-		summaryAtMs, kind, step := artifactSummaryPlacement(artifact, rc, coveredMessages, trs, i)
-		entries = append(entries, mergeEntry{
-			kind:              kind,
-			time:              summaryAtMs,
-			step:              step,
-			summaryContent:    "<summary>\n" + strings.TrimSpace(artifact.Summary) + "\n</summary>",
-			summaryArtifactID: artifact.ID,
-		})
+		if !checkpoint.composes(rc[i]) {
+			continue
+		}
+		rest = append(rest, rc[i])
 	}
-	entries = appendActiveTurnResponseEntries(entries, trs, coveredResponseIDs)
+	entries := make([]mergeEntry, 0, len(checkpoint.Items)+len(rest)+len(trs))
+	for i, item := range checkpoint.Items {
+		var entry mergeEntry
+		switch {
+		case item.SummaryID != "":
+			entry = mergeEntry{
+				kind:           "summary",
+				summaryContent: turn.SummaryText(item.Summary),
+				summaryID:      item.SummaryID,
+			}
+		case item.Response != nil:
+			entry = turnResponseEntry(*item.Response, i)
+		case segments[i] != nil:
+			entry = renderedContextEntry(*segments[i], i)
+		default:
+			continue
+		}
+		entry.pinned = true
+		entries = append(entries, entry)
+	}
+	pinned := len(entries)
+	entries = appendRenderedContextEntries(entries, rest)
+	entries = appendTurnResponseEntries(entries, trs)
+	sortMergeEntries(entries[pinned:])
 	return entries
 }
 
@@ -295,29 +253,28 @@ type ComposeAdmission struct {
 	// TotalEntries and DroppedEntries count merge entries, not messages.
 	TotalEntries   int
 	DroppedEntries int
-	// ProtectedOverflow is set when the protected set alone (artifact
-	// summaries plus the newest entry) exceeds the budget; the caller must
+	// ProtectedOverflow is set when the protected set alone (the pinned
+	// entries plus the newest entry) exceeds the budget; the caller must
 	// fail closed instead of materializing (CM-ADM-002).
 	ProtectedOverflow bool
 }
 
-// ComposeContextWithArtifactsBudgeted composes like
-// ComposeContextWithArtifacts but makes the admission decision on entry
-// metadata before materializing anything. Over budget it keeps every artifact
-// summary plus the newest contiguous window that fits, dropping older raw
+// ComposeContextWithCheckpointBudgeted composes like
+// ComposeContextWithCheckpoint but makes the admission decision on entry
+// metadata before materializing anything. Over budget it keeps every pinned
+// entry plus the newest contiguous window that fits, dropping older raw
 // entries deterministically. When even the protected set does not fit it
 // returns a nil result with ProtectedOverflow set.
-func ComposeContextWithArtifactsBudgeted(
+func ComposeContextWithCheckpointBudgeted(
 	rc RenderedContext,
 	trs []TurnResponseEntry,
-	artifacts []CompactionArtifact,
+	checkpoint HistoryCheckpoint,
 	budget ComposeBudget,
 ) (*ComposeContextResult, ComposeAdmission) {
-	entries := composeMergeEntries(rc, trs, artifacts)
+	entries := composeMergeEntries(rc, trs, checkpoint)
 	if len(entries) == 0 {
 		return nil, ComposeAdmission{}
 	}
-	sortMergeEntries(entries)
 	markCurrentEntries(entries, rc, budget.After)
 
 	admitted := make([]turn.AdmissionEntry, len(entries))
@@ -325,7 +282,7 @@ func ComposeContextWithArtifactsBudgeted(
 		admitted[i] = turn.AdmissionEntry{
 			Cost:   mergeEntryTokens(entries[i]),
 			Source: entries[i].source,
-			Pinned: isSummaryMergeKind(entries[i].kind),
+			Pinned: entries[i].pinned,
 			ToolResponse: entries[i].kind == "tr" &&
 				strings.EqualFold(strings.TrimSpace(entries[i].trRole), "tool"),
 		}
@@ -367,15 +324,6 @@ func ComposeContextWithArtifactsBudgeted(
 	return &ComposeContextResult{Messages: messages, EstimatedTokens: decision.SelectedTokens}, admission
 }
 
-func isSummaryMergeKind(kind string) bool {
-	switch kind {
-	case "summary", "summary_slot", "summary_before_rc", "summary_tr_slot":
-		return true
-	default:
-		return false
-	}
-}
-
 // mergeEntryTokens estimates one entry's cost from lengths alone, without
 // materializing the entry.
 func mergeEntryTokens(entry mergeEntry) int {
@@ -399,124 +347,6 @@ func mergeEntryTokens(entry mergeEntry) int {
 	default:
 		return turn.EstimateTokensFromBytes(len(entry.summaryContent))
 	}
-}
-
-func artifactSummaryPlacement(
-	artifact CompactionArtifact,
-	rc RenderedContext,
-	coveredMessages map[string]externalMessageCoverage,
-	trs []TurnResponseEntry,
-	artifactIndex int,
-) (int64, string, int) {
-	for _, source := range artifact.Sources {
-		if source.CreatedAtMs <= 0 {
-			continue
-		}
-		id := strings.TrimSpace(source.ExternalMessageID)
-		if id == "" {
-			break
-		}
-		coverage, covered := coveredMessages[id]
-		if !covered {
-			break
-		}
-		for i, segment := range rc {
-			if strings.TrimSpace(segment.MessageID) == id {
-				if renderedSegmentCovered(segment, coverage) {
-					return segment.ReceivedAtMs, "summary_slot", 2 * i
-				}
-				return segment.ReceivedAtMs, "summary_before_rc", 2*i - 1
-			}
-		}
-		break
-	}
-	for _, source := range artifact.Sources {
-		id := strings.TrimSpace(source.HistoryMessageID)
-		if id == "" {
-			continue
-		}
-		for i, tr := range trs {
-			if strings.TrimSpace(tr.SourceMessageID) == id {
-				return tr.RequestedAtMs, "summary_tr_slot", 2 * i
-			}
-		}
-	}
-	if artifact.AnchorStartMs <= 0 {
-		return earliestMergeTime, "summary", artifactIndex
-	}
-	return artifact.AnchorStartMs, "summary", artifactIndex
-}
-
-func filterCoveredRenderedContext(
-	rc RenderedContext,
-	coveredMessages map[string]externalMessageCoverage,
-) RenderedContext {
-	if len(coveredMessages) == 0 {
-		return rc
-	}
-	filtered := make(RenderedContext, 0, len(rc))
-	for _, segment := range rc {
-		coverage, covered := coveredMessages[strings.TrimSpace(segment.MessageID)]
-		if covered && renderedSegmentCovered(segment, coverage) {
-			continue
-		}
-		filtered = append(filtered, segment)
-	}
-	return filtered
-}
-
-func coveredHistoryMessageIDs(artifacts []CompactionArtifact) map[string]struct{} {
-	covered := make(map[string]struct{})
-	for _, artifact := range artifacts {
-		if !artifact.usable() {
-			continue
-		}
-		for _, source := range artifact.Sources {
-			if id := strings.TrimSpace(source.HistoryMessageID); id != "" {
-				covered[id] = struct{}{}
-			}
-		}
-	}
-	return covered
-}
-
-type externalMessageCoverage struct {
-	coverageAsOfMs int64
-}
-
-func coveredExternalMessages(artifacts []CompactionArtifact) map[string]externalMessageCoverage {
-	covered := make(map[string]externalMessageCoverage)
-	for _, artifact := range artifacts {
-		if !artifact.usable() {
-			continue
-		}
-		for _, source := range artifact.Sources {
-			id := strings.TrimSpace(source.ExternalMessageID)
-			if id == "" || source.CreatedAtMs <= 0 {
-				continue
-			}
-			coverage := covered[id]
-			if artifact.CoverageAsOfMs > coverage.coverageAsOfMs {
-				coverage.coverageAsOfMs = artifact.CoverageAsOfMs
-			}
-			covered[id] = coverage
-		}
-	}
-	return covered
-}
-
-// renderedSegmentCovered reports whether coverage may replace the segment. A
-// segment edited after the artifact completed carries content the summary has
-// never seen and must stay visible.
-func renderedSegmentCovered(segment RenderedSegment, coverage externalMessageCoverage) bool {
-	if segment.EditedAtMs <= 0 {
-		return true
-	}
-	return coverage.coverageAsOfMs > 0 && segment.EditedAtMs <= coverage.coverageAsOfMs
-}
-
-func (artifact CompactionArtifact) usable() bool {
-	return strings.TrimSpace(artifact.ID) != "" && strings.TrimSpace(artifact.Summary) != ""
 }
 
 func estimateMessagesTokens(messages []ContextMessage) int {

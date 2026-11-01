@@ -122,6 +122,7 @@ function isErrorBlock(block: ContentBlock): block is ErrorBlock {
 export function reconcileRuntimeTurns(
   existing: RuntimeChatTurn[],
   incoming: RuntimeChatTurn[],
+  slice: RuntimeTranscriptSlice,
 ): RuntimeChatTurn[] {
   const used = new Set<RuntimeChatTurn>()
   const resolved = incoming.map((next) => {
@@ -132,10 +133,17 @@ export function reconcileRuntimeTurns(
     )
     if (!current) return next
     used.add(current)
+    // History includes publication results (archived media and failed references)
+    // that the completed runtime snapshot's original model text does not carry.
+    // A replacement operation still owns its tail until fresh history arrives.
+    if (slice.status === 'completed' && !slice.operation
+      && current.role === 'assistant' && current.settled && current.messages.length > 0) {
+      return current
+    }
     if (current.role === 'assistant' && next.role === 'assistant') inheritErrorDetails(next, current)
     const renderId = current.id
     const settledPosition = current.turnPosition ?? next.turnPosition
-    Object.assign(current, next, { id: renderId, turnPosition: settledPosition })
+    Object.assign(current, next, { id: renderId, turnPosition: settledPosition, settled: false })
     return current
   })
   if (!incoming.some(turn => turn.role === 'assistant')) {

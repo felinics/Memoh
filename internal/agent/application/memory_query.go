@@ -49,7 +49,12 @@ func (s *Service) buildMemoryQuery(ctx context.Context, req ChatRequest) memoryQ
 	if s == nil || s.messageService == nil {
 		return builder.Build(req, nil)
 	}
-	loaded, err := s.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), req.ThreadID, defaultMaxContextMinutes, 0)
+	cut, err := s.loadHistoryCut(ctx, req)
+	var loaded []historyfrag.HistoryRecord
+	if err == nil {
+		scope := compactionSummaryScope(req.BotID, req.ChatID, req.ThreadID, req.ConversationType, req.ConversationName, req.ReplyTarget)
+		loaded, _, err = s.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), scope, 0, cut)
+	}
 	if err != nil {
 		if s.logger != nil {
 			s.logger.WarnContext(ctx, "memory query history load failed",
@@ -62,15 +67,6 @@ func (s *Service) buildMemoryQuery(ctx context.Context, req ChatRequest) memoryQ
 		return builder.Build(req, nil)
 	}
 	loaded = pruneHistoryForGateway(loaded)
-	artifactBoundary := s.loadCompactionArtifactBoundary(ctx, loaded, req.ThreadID, req.HistoryCutoffBeforeMessageID)
-	loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
-	loaded, err = s.replaceCompactedMessages(ctx, req.ThreadID, compactionSummaryScope(req.BotID, req.ChatID, req.ThreadID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded, artifactBoundary)
-	if err != nil {
-		if s.logger != nil {
-			s.logger.WarnContext(ctx, "memory query compaction frontier load failed", slog.String("session_id", req.ThreadID), slog.Any("error", err))
-		}
-		return builder.Build(req, nil)
-	}
 	loaded = dedupePersistedCurrentUserMessage(loaded, req)
 	return builder.Build(req, loaded)
 }

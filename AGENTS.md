@@ -65,7 +65,7 @@ Infrastructure dependencies:
 
 Top-level layout — see `docs/codebase-map.md` for the full annotated tree, container/workspace internals, the desktop bootstrap, and recent major subsystems:
 
-- `cmd/` — Go entry points (`agent`, `channel`, `bridge`, `mcp`, `synccaps`, …)
+- `cmd/` — Go entry points (`agent`, `channel`, `bridge`, `mcp`, …)
 - `internal/` — Go backend domain packages (`agent`, `channel`, `chat`, `workspace`, …)
 - `apps/` — `web` (Vue 3 management UI) and `desktop` (Electron native client)
 - `packages/` — shared TypeScript libraries (`ui`, `sdk`, `icons`, `config`)
@@ -130,6 +130,20 @@ Memoh is a commercial project split across two repositories: this OSS repo and a
 - Automation maintains type, `size:`, and `change:` labels. `.github/labels.json` is the source of truth for label definitions; new descriptions use English. Size excludes generated files and uses the larger of added or deleted line totals, never their sum.
 - Automatic approval applies only to external PR workflow runs, not code review, merging, or publishing. Agents updating this guide must not remove or weaken these rules.
 
+### Uploading PR Screenshots
+
+- **Always upload screenshots with GitHub CLI `--attach`. Never manually upload them through the GitHub website, and never add or commit screenshot files to the repository to host PR evidence.** Keep captures outside the checkout and attach them directly to the relevant PR.
+- Use a current official `gh` release that supports `--attach`. If the installed version does not expose it in `gh pr edit --help`, update GitHub CLI; do not fall back to browser uploads or repository files.
+- To supplement an existing PR without replacing its body, run:
+
+  ```bash
+  gh pr edit <pr-number> --repo <owner/repo> \
+    --attach '/absolute/path/screenshot.jpg#What this screenshot demonstrates'
+  ```
+
+- Repeat `--attach` for multiple images. When updating the description with `--body-file`, preserve its existing content and required template sections. Markdown references to the attached local files are rewritten to GitHub attachment URLs. A PR comment can use the same upload flow with `gh pr comment <pr-number> --body-file <file> --attach <image>`.
+- After uploading, read the PR body or comment back with `gh`, confirm every image uses a GitHub attachment URL rather than a local path, and verify that the attachments load. Explain what each screenshot demonstrates and keep Agent verification separate from Human QA.
+
 ### Pull Request QA Status
 
 The `Human QA` section contains only one status checkbox, `- [ ] Human QA passed`, without an additional warning line:
@@ -166,7 +180,7 @@ The `Human QA` section contains only one status checkbox, `- [ ] Human QA passed
 - `sdk.ProviderMetadata` is `namespace → name → string`. Memoh-owned annotations on tool-call parts (pending approval, user-input request, execution location) live in the `memoh` namespace through `internal/agent/partmeta`; `internal/messageconv` folds them back into the nested objects `bot_history_messages` has always stored, so the row format did not change with the SDK types.
 - **Tool usage lives with the tool, never in the static prompt.** Per-tool usage goes in `toolexec.Tool.Description`; cross-tool workflow guidance goes in an optional `tools.ToolUsage` `Usage()` method that `assembleTools` injects only when that provider registers tools for the session. `internal/agent/runtime/native/prompt_test.go` guards this.
 - Prompt templates are embedded from `internal/agent/runtime/native/prompts/`. Partials are prefixed with `_`; system prompting combines `system_common.md` with mode-specific prompts such as `mode_chat.md` and `mode_discuss.md`.
-- `internal/chat/` owns internal chat state (`thread`, `message`, `timeline`, `view`) and does not orchestrate Agent execution. Inbound adaptation lives in `internal/channel/inbound/`; discuss-mode driving in `internal/channel/discuss/`.
+- `internal/chat/` owns internal chat state (`thread`, `message`, `checkpoint`, `timeline`, `view`) and does not orchestrate Agent execution. Inbound adaptation lives in `internal/channel/inbound/`; discuss-mode driving in `internal/channel/discuss/`.
 - Browser Use tools (`browser_action` / `browser_observe` / `browser_remote_session`) drive the headed workspace Chrome over CDP; Computer Use (`computer_observe` / `computer_action`) drives the GUI desktop via AT-SPI + RFB. Screenshots are saved to a workspace path and must be explicitly read. Prefer Browser Use for web pages; Computer Use for native dialogs and non-browser GUI states.
 - Runtime internals (Twilight `Stream()`/`Generate()`, compaction, loop detection, tag extraction, full Browser/Computer Use details): `docs/agent-runtime.md`.
 

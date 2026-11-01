@@ -1,0 +1,268 @@
+[
+  {
+    "name": "empty config",
+    "model_id": "container",
+    "client_type": "openai-completions",
+    "config": {}
+  },
+  {
+    "name": "modalities without reasoning",
+    "model_id": "claude-3-haiku-20240307",
+    "client_type": "anthropic-messages",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "file-input",
+        "tool-call"
+      ],
+      "context_window": 200000
+    }
+  },
+  {
+    "name": "declared toggle",
+    "model_id": "claude-opus-4-5-20251101",
+    "client_type": "anthropic-messages",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "file-input",
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 200000,
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "thinking_mode": "toggle"
+    }
+  },
+  {
+    "name": "declared adaptive",
+    "model_id": "claude-opus-4-6",
+    "client_type": "anthropic-messages",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "file-input",
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 1000000,
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "max"
+      ],
+      "reasoning_off_support": "accepted",
+      "thinking_mode": "adaptive"
+    }
+  },
+  {
+    "name": "inferred Claude adaptive",
+    "model_id": "claude-opus-4.6-1m",
+    "client_type": "github-copilot",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 1000000,
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
+    }
+  },
+  {
+    "name": "inferred non-Claude toggle",
+    "model_id": "gpt-5.2-codex",
+    "client_type": "github-copilot",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 400000,
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ]
+    }
+  },
+  {
+    "name": "minimal effort and disable",
+    "model_id": "gpt-5.1",
+    "client_type": "openai-completions",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "file-input",
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 272000,
+      "reasoning_efforts": [
+        "minimal",
+        "disable",
+        "low",
+        "medium",
+        "high"
+      ],
+      "thinking_mode": "toggle"
+    }
+  },
+  {
+    "name": "always-on image output",
+    "model_id": "gemini-3-pro-image",
+    "client_type": "google-generative-ai",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "file-input",
+        "reasoning",
+        "image-output"
+      ],
+      "context_window": 163840,
+      "thinking_mode": "always"
+    }
+  },
+  {
+    "name": "tier rejects disable",
+    "model_id": "gemini-3.1-flash-image",
+    "client_type": "google-generative-ai",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "file-input",
+        "reasoning",
+        "image-output"
+      ],
+      "context_window": 163840,
+      "reasoning_dialect": "tier",
+      "reasoning_efforts": [
+        "minimal",
+        "high"
+      ],
+      "reasoning_off_support": "rejected",
+      "thinking_mode": "toggle"
+    }
+  },
+  {
+    "name": "budget rejects disable",
+    "model_id": "gemini-2.5-pro",
+    "client_type": "google-generative-ai",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "file-input",
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 1114112,
+      "reasoning_dialect": "budget",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning_off_support": "rejected",
+      "thinking_budget_max": 32768,
+      "thinking_budget_min": 128,
+      "thinking_mode": "toggle"
+    }
+  },
+  {
+    "name": "budget permits zero and disable",
+    "model_id": "gemini-2.5-flash",
+    "client_type": "google-generative-ai",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "file-input",
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 1114112,
+      "reasoning_dialect": "budget",
+      "reasoning_efforts": [
+        "disable",
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning_off_support": "accepted",
+      "thinking_budget_max": 24576,
+      "thinking_budget_min": 0,
+      "thinking_mode": "toggle"
+    }
+  },
+  {
+    "name": "budget with implicit disable",
+    "model_id": "gemini-2.5-flash-lite",
+    "client_type": "google-generative-ai",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "file-input",
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 1114112,
+      "reasoning_dialect": "budget",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning_off_support": "accepted",
+      "thinking_budget_max": 24576,
+      "thinking_budget_min": 512,
+      "thinking_mode": "toggle"
+    }
+  },
+  {
+    "name": "inferred older Claude with default efforts",
+    "model_id": "claude-sonnet-4",
+    "client_type": "github-copilot",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 216000
+    }
+  },
+  {
+    "name": "stored description",
+    "model_id": "gpt-5.4",
+    "client_type": "openai-responses",
+    "config": {
+      "compatibilities": [
+        "vision",
+        "file-input",
+        "tool-call",
+        "reasoning"
+      ],
+      "context_window": 1050000,
+      "description": "General-purpose OpenAI model with vision, tool calling, and configurable reasoning.",
+      "reasoning_efforts": [
+        "minimal",
+        "disable",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "thinking_mode": "toggle"
+    }
+  }
+]

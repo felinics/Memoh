@@ -38,6 +38,7 @@ type telegramOutboundStream struct {
 	mu            sync.Mutex
 	buf           strings.Builder
 	streamChatID  int64
+	streamThread  int
 	streamMsgID   int
 	lastEdited    string
 	lastEditedAt  time.Time
@@ -131,7 +132,7 @@ func (s *telegramOutboundStream) editStreamMessage(ctx context.Context, text str
 	if time.Since(lastEditedAt) < telegramStreamEditThrottle {
 		return nil
 	}
-	if err := s.adapter.waitStreamLimit(ctx); err != nil {
+	if err := s.adapter.waitStreamLimit(ctx, s.cfg.ID); err != nil {
 		return err
 	}
 	bot, _, err := s.getBotAndReply(ctx)
@@ -186,7 +187,7 @@ func (s *telegramOutboundStream) editStreamMessageFinal(ctx context.Context, tex
 	}
 	var lastEditErr error
 	for attempt := range telegramFinalEditMaxRetries {
-		if err := s.adapter.waitStreamLimit(ctx); err != nil {
+		if err := s.adapter.waitStreamLimit(ctx, s.cfg.ID); err != nil {
 			return err
 		}
 		editErr := error(nil)
@@ -244,7 +245,7 @@ func (s *telegramOutboundStream) sendDraft(ctx context.Context, text string) err
 		return nil
 	}
 
-	if err := s.adapter.waitStreamLimit(ctx); err != nil {
+	if err := s.adapter.waitStreamLimit(ctx, s.cfg.ID); err != nil {
 		return err
 	}
 	bot, err := s.getBot(ctx)
@@ -252,7 +253,7 @@ func (s *telegramOutboundStream) sendDraft(ctx context.Context, text string) err
 		return err
 	}
 
-	draftErr := sendTelegramDraft(bot, s.streamChatID, s.draftID, text, s.parseMode)
+	draftErr := sendTelegramDraft(bot, s.streamChatID, s.streamThread, s.draftID, text, s.parseMode)
 	if draftErr != nil {
 		if isTelegramTooManyRequests(draftErr) {
 			d := getTelegramRetryAfter(draftErr)
@@ -279,7 +280,7 @@ func (s *telegramOutboundStream) sendPermanentMessage(ctx context.Context, text 
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
-	if err := s.adapter.waitStreamLimit(ctx); err != nil {
+	if err := s.adapter.waitStreamLimit(ctx, s.cfg.ID); err != nil {
 		return err
 	}
 	bot, replyTo, err := s.getBotAndReply(ctx)
@@ -489,7 +490,7 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 	// waiting is a start state for ask_user and must post a new message.
 	if isTelegramToolCallEndStatus(p.Status) && callID != "" {
 		if existing, ok := s.lookupToolCallMessage(callID); ok {
-			if err := s.adapter.waitStreamLimit(ctx); err != nil {
+			if err := s.adapter.waitStreamLimit(ctx, s.cfg.ID); err != nil {
 				return err
 			}
 			bot, err := s.getBot(ctx)
@@ -525,7 +526,7 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 			s.forgetToolCallMessage(callID)
 		}
 	}
-	if err := s.adapter.waitStreamLimit(ctx); err != nil {
+	if err := s.adapter.waitStreamLimit(ctx, s.cfg.ID); err != nil {
 		return err
 	}
 	bot, replyTo, err := s.getBotAndReply(ctx)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,9 +22,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/felinics/memoh/internal/acl"
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -46,7 +48,9 @@ type WorkspaceData interface {
 	CountData(ctx context.Context, botID string) (int, error)
 }
 
-type ACPRuntimeCloser interface {
+// RuntimeResetter resets a bot's runtime state: its runs stop and its agent
+// processes close, and none starts until the release.
+type RuntimeResetter interface {
 	BeginBotHistoryReset(ctx context.Context, botID string) (resetCtx context.Context, release func(), err error)
 }
 
@@ -65,8 +69,9 @@ type Service struct {
 	searchProviders *searchpkg.Service
 	fetchProviders  *fetchpkg.Service
 	workspace       WorkspaceData
-	acpRuntimes     ACPRuntimeCloser
+	runtimeResets   RuntimeResetter
 	workdirs        dbstore.BotWorkdirStore
+	sessions        *sessionpkg.Service
 }
 
 const agentCredentialsWarning = "External Agent credentials were excluded from bot/profile.json; re-enter them after import" // #nosec G101 -- user-facing warning text, not a credential.
@@ -92,8 +97,9 @@ type Params struct {
 	SearchProviders *searchpkg.Service
 	FetchProviders  *fetchpkg.Service
 	Workspace       WorkspaceData
-	ACPRuntimes     ACPRuntimeCloser
+	RuntimeResets   RuntimeResetter
 	Workdirs        dbstore.BotWorkdirStore
+	Sessions        *sessionpkg.Service
 }
 
 func New(params Params) *Service {
@@ -116,8 +122,9 @@ func New(params Params) *Service {
 		searchProviders: params.SearchProviders,
 		fetchProviders:  params.FetchProviders,
 		workspace:       params.Workspace,
-		acpRuntimes:     params.ACPRuntimes,
+		runtimeResets:   params.RuntimeResets,
 		workdirs:        params.Workdirs,
+		sessions:        params.Sessions,
 	}
 }
 
@@ -432,7 +439,6 @@ func (s *Service) collectDependencies(ctx context.Context, botID string, cfg set
 		cfg.ImageModelID,
 		cfg.TtsModelID,
 		cfg.TranscriptionModelID,
-		cfg.CompactionModelID,
 		cfg.MemoryLLMModelID,
 		cfg.DiscussProbeModelID,
 	})
@@ -502,7 +508,7 @@ func (s *Service) collectHistory(ctx context.Context, botID string, includeAsset
 	var warnings []string
 	var history backupHistory
 	if sessions, err := s.queries.ListSessionsByBot(ctx, pgBotID); err == nil {
-		history.Sessions = sessions
+		history.Sessions = s.portableSessions(ctx, sessions)
 	} else {
 		warnings = append(warnings, "sessions export failed")
 		s.recordSkipped(ctx, exportOperation, botID, "sessions", err)
@@ -703,4 +709,36 @@ func normalizeZipPath(path string) (string, error) {
 		return "", fmt.Errorf("unsafe backup path: %s", path)
 	}
 	return clean, nil
+}
+
+// portableSessions names each ACP session's agent profile in the archived
+// row. An archive carries no Agent instances, so a restored ACP session runs
+// the way sessions from before instances do: by the profile it names. One
+// whose profile cannot be read is archived as it is.
+func (s *Service) portableSessions(ctx context.Context, sessions []dbsqlc.ListSessionsByBotRow) []dbsqlc.ListSessionsByBotRow {
+	if s.sessions == nil {
+		return sessions
+	}
+	for i, item := range sessions {
+		if !item.BotAgentID.Valid || sessionpkg.RuntimeTypeOf(sessionpkg.Thread{Type: item.Type, RuntimeType: item.RuntimeType}) != sessionpkg.RuntimeACPAgent {
+			continue
+		}
+		sess, err := s.sessions.Get(ctx, item.ID.String())
+		if err != nil {
+			continue
+		}
+		identity, err := s.sessions.ExternalIdentity(ctx, sess)
+		if err != nil || identity.ACPAgentID == "" {
+			continue
+		}
+		var meta map[string]any
+		if err := json.Unmarshal(defaultJSONMap(item.Metadata), &meta); err != nil || meta == nil {
+			meta = map[string]any{}
+		}
+		meta["acp_agent_id"] = identity.ACPAgentID
+		if raw, err := json.Marshal(meta); err == nil {
+			sessions[i].Metadata = raw
+		}
+	}
+	return sessions
 }

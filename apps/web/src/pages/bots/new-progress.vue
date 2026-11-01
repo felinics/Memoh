@@ -77,7 +77,7 @@ import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import { readCreatedBotSession, writeCreatedBotSession } from './created-bot-session'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { readOnboardingBotResult, writeOnboardingBotResult } from '@/pages/onboarding/session'
-import { DEVICE_LOGINS, isDeviceLoginAuthMode, isDirectBotAgentRuntime } from '@/utils/bot-agent'
+import { isDeviceLoginAuthMode, isDirectBotAgentRuntime } from '@/utils/bot-agent'
 import BotCreateTerminal from './components/bot-create-terminal.vue'
 
 const props = defineProps<{ onboarding?: boolean }>()
@@ -144,7 +144,7 @@ async function goToBot() {
   // on the Agent's settings rather than on a chat that cannot run.
   const agent = createdAgent.value
   const auth = String(agent?.metadata?.auth ?? '')
-  const signInFirst = !!agent?.id && isDeviceLoginAuthMode(auth) && !DEVICE_LOGINS[auth].staged && !agent.agent_credential_id
+  const signInFirst = !!agent?.id && isDeviceLoginAuthMode(auth)
   if (setupError.value) {
     toast.error(setupError.value)
   } else if (signInFirst) {

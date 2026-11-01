@@ -62,11 +62,13 @@ func discussCursorScope(cfg DiscussSessionConfig) string {
 }
 
 // anchorFromTRs returns the latest persisted turn request timestamp used to
-// avoid replaying old external context after a worker restart.
+// avoid replaying old external context after a worker restart. Only a run's
+// answer proves its batch consumed; a row the run wrote before it proves
+// nothing, since the run may have failed after it.
 func anchorFromTRs(trs []timeline.TurnResponseEntry) int64 {
 	var latest int64
 	for _, response := range trs {
-		if response.RequestedAtMs > latest {
+		if !response.DiscussStep && response.RequestedAtMs > latest {
 			latest = response.RequestedAtMs
 		}
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 type stubReasoningOptionsResolver struct {
@@ -219,8 +220,6 @@ func (q *reasoningPolicyQueries) GetSettingsByBotID(context.Context, pgtype.UUID
 		ChatAcpProjectPath:     DefaultACPProjectPath,
 		ChatAcpProjectMode:     DefaultACPProjectMode,
 		ToolApprovalConfig:     []byte(`{}`),
-		CompactionThreshold:    0,
-		CompactionEnabled:      false,
 		PersistFullToolResults: false,
 	}, nil
 }
@@ -246,20 +245,18 @@ func (q *reasoningPolicyQueries) UpsertBotSettings(_ context.Context, arg sqlc.U
 		memoryProvider = arg.MemoryProviderID
 	}
 	return sqlc.UpsertBotSettingsRow{
-		BotID:               q.botID,
-		CommandUiLanguage:   arg.CommandUiLanguage,
-		ReasoningEffort:     arg.ReasoningEffort,
-		CompactionEnabled:   arg.CompactionEnabled,
-		CompactionThreshold: arg.CompactionThreshold,
-		ChatModelID:         modelID,
-		DefaultBotAgentID:   defaultAgentID,
-		MemoryProviderID:    memoryProvider,
-		ChatRuntime:         arg.ChatRuntime,
-		ChatAcpAgentID:      arg.ChatAcpAgentID,
-		ChatAcpProjectPath:  arg.ChatAcpProjectPath,
-		ChatAcpProjectMode:  arg.ChatAcpProjectMode,
-		ToolApprovalConfig:  arg.ToolApprovalConfig,
-		OverlayConfig:       arg.OverlayConfig,
+		BotID:              q.botID,
+		CommandUiLanguage:  arg.CommandUiLanguage,
+		ReasoningEffort:    arg.ReasoningEffort,
+		ChatModelID:        modelID,
+		DefaultBotAgentID:  defaultAgentID,
+		MemoryProviderID:   memoryProvider,
+		ChatRuntime:        arg.ChatRuntime,
+		ChatAcpAgentID:     arg.ChatAcpAgentID,
+		ChatAcpProjectPath: arg.ChatAcpProjectPath,
+		ChatAcpProjectMode: arg.ChatAcpProjectMode,
+		ToolApprovalConfig: arg.ToolApprovalConfig,
+		OverlayConfig:      arg.OverlayConfig,
 	}, nil
 }
 
@@ -536,10 +533,8 @@ func TestNormalizeBotSettingsReadRow_ShowToolCallsInIMDefault(t *testing.T) {
 	t.Parallel()
 
 	row := sqlc.GetSettingsByBotIDRow{
-		ReasoningEffort:     "medium",
-		CompactionEnabled:   false,
-		CompactionThreshold: 0,
-		ShowToolCallsInIm:   false,
+		ReasoningEffort:   "medium",
+		ShowToolCallsInIm: false,
 	}
 	got := normalizeBotSettingsReadRow(row)
 	if got.ShowToolCallsInIM {
@@ -608,8 +603,8 @@ func TestNormalizeBotSettingsReadRow_ChatRuntimeFields(t *testing.T) {
 		ChatRuntime:     ChatRuntimeACPAgent,
 		ChatAcpAgentID:  pgtype.Text{String: "Codex", Valid: true},
 	})
-	if borrowed.ChatRuntime != ChatRuntimeCodex || borrowed.ChatACPAgentID != "" {
-		t.Fatalf("borrowed shape projected as (%q, %q), want (%q, \"\")", borrowed.ChatRuntime, borrowed.ChatACPAgentID, ChatRuntimeCodex)
+	if borrowed.ChatRuntime != string(runtimekind.Codex) || borrowed.ChatACPAgentID != "" {
+		t.Fatalf("borrowed shape projected as (%q, %q), want (%q, \"\")", borrowed.ChatRuntime, borrowed.ChatACPAgentID, string(runtimekind.Codex))
 	}
 
 	def := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
@@ -712,71 +707,6 @@ func TestUpsertRequestClearableFields_JSONSemantics(t *testing.T) {
 	}
 }
 
-func TestNormalizeCompactionTargetPercent(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name  string
-		value pgtype.Int4
-		want  *int
-	}{
-		{name: "null uses controller default"},
-		{name: "minimum is valid", value: pgtype.Int4{Int32: 1, Valid: true}, want: settingsIntPointer(1)},
-		{name: "default override stays explicit", value: pgtype.Int4{Int32: 40, Valid: true}, want: settingsIntPointer(40)},
-		{name: "maximum is valid", value: pgtype.Int4{Int32: 99, Valid: true}, want: settingsIntPointer(99)},
-		{name: "zero normalizes to null", value: pgtype.Int4{Valid: true}},
-		{name: "one hundred normalizes to null", value: pgtype.Int4{Int32: 100, Valid: true}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			got := normalizeCompactionTargetPercent(tc.value)
-			if !equalOptionalInt(got, tc.want) {
-				t.Fatalf("normalizeCompactionTargetPercent(%v) = %v, want %v", tc.value, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestApplyCompactionTargetPercentOverride(t *testing.T) {
-	t.Parallel()
-
-	current := settingsIntPointer(55)
-	got, set := applyCompactionTargetPercentOverride(current, nil)
-	if set || !equalOptionalInt(got, current) {
-		t.Fatalf("omitted override = (%v, %t), want preserved %v and set=false", got, set, current)
-	}
-
-	got, set = applyCompactionTargetPercentOverride(current, settingsIntPointer(30))
-	if !set || !equalOptionalInt(got, settingsIntPointer(30)) {
-		t.Fatalf("valid override = (%v, %t), want 30 and set=true", got, set)
-	}
-
-	got, set = applyCompactionTargetPercentOverride(current, settingsIntPointer(0))
-	if !set || got != nil {
-		t.Fatalf("clear sentinel = (%v, %t), want nil and set=true", got, set)
-	}
-
-	if got := nullableCompactionTargetPercent(settingsIntPointer(30)); !got.Valid || got.Int32 != 30 {
-		t.Fatalf("nullableCompactionTargetPercent(30) = %v, want valid 30", got)
-	}
-	if got := nullableCompactionTargetPercent(nil); got.Valid {
-		t.Fatalf("nullableCompactionTargetPercent(nil) = %v, want null", got)
-	}
-}
-
-func settingsIntPointer(value int) *int {
-	return &value
-}
-
-func equalOptionalInt(left, right *int) bool {
-	if left == nil || right == nil {
-		return left == nil && right == nil
-	}
-	return *left == *right
-}
-
 func TestReasoningEffortAllowsFullModelLadder(t *testing.T) {
 	t.Parallel()
 
@@ -784,7 +714,7 @@ func TestReasoningEffortAllowsFullModelLadder(t *testing.T) {
 		if !hasReasoningEffortValue(effort) {
 			t.Fatalf("hasReasoningEffortValue(%q) = false, want true", effort)
 		}
-		got := normalizeBotSetting("auto", "allow", effort, false, 0, pgtype.Int4{})
+		got := normalizeBotSetting("auto", "allow", effort)
 		if got.ReasoningEffort != effort {
 			t.Fatalf("normalizeBotSetting effort = %q, want %q", got.ReasoningEffort, effort)
 		}

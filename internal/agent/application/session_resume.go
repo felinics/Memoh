@@ -44,10 +44,25 @@ type resumeContext struct {
 	TokenClaims       map[string]string `json:"token_claims,omitempty"`
 	ChatClaims        map[string]string `json:"chat_claims,omitempty"`
 	DeadlineAt        *time.Time        `json:"deadline_at,omitempty"`
+	RequestMessageID  string            `json:"request_message_id,omitempty"`
 	// Version 2 carries an External Discuss batch instead of a query: the
 	// resume admits it again behind its instructions.
 	DiscussMessages       []turn.DiscussMessage       `json:"discuss_messages,omitempty"`
 	DiscussOmittedSources []turn.ContextMessageSource `json:"discuss_omitted_sources,omitempty"`
+}
+
+// runAdmission is the server-authored part of a run's stored admission input:
+// the execution intent recorded when the run started and the decisions it
+// accepted since.
+type runAdmission struct {
+	Resume                *resumeContext                             `json:"resume"`
+	DecisionContinuations map[string]decision.ContinuationCheckpoint `json:"decision_continuations"`
+}
+
+func decodeRunAdmission(raw []byte) (runAdmission, error) {
+	var admitted runAdmission
+	err := json.Unmarshal(raw, &admitted)
+	return admitted, err
 }
 
 // errResumeUnrecoverable marks an interrupted intent that no later scan can
@@ -76,6 +91,9 @@ func (s *Service) recordRunResumeContext(ctx context.Context, req ChatRequest) e
 		CurrentChannel: req.CurrentChannel, ReplyTarget: req.ReplyTarget,
 		ConversationType: req.ConversationType, Model: req.Model, ReasoningEffort: req.ReasoningEffort,
 		WorkspaceTargetID: req.WorkspaceTargetID, SessionType: req.SessionType, ToolHTTPURL: req.ToolHTTPURL,
+	}
+	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
+		data.RequestMessageID = strings.TrimSpace(req.PersistedUserMessageID)
 	}
 	var err error
 	if data.TokenClaims, err = s.resumeClaims(req.Token); err != nil {
@@ -341,11 +359,8 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 	if row.TeamID.String() != s.sessionResumeScopes().CurrentScope(ctx) {
 		return nil, errResumeScopeMismatch
 	}
-	var input struct {
-		Resume                *resumeContext                             `json:"resume"`
-		DecisionContinuations map[string]decision.ContinuationCheckpoint `json:"decision_continuations"`
-	}
-	if err := json.Unmarshal(row.InputJson, &input); err != nil {
+	input, err := decodeRunAdmission(row.InputJson)
+	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errResumeUnrecoverable, err)
 	}
 	data := input.Resume
@@ -356,6 +371,14 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		return nil, fmt.Errorf("%w: execution budget expired", errResumeUnrecoverable)
 	}
 	decisionContext, err := s.interruptedDecisionContext(ctx, row, input.DecisionContinuations)
+	if err != nil {
+		return nil, err
+	}
+	request, err := s.interruptedRunRequest(ctx, row, data)
+	if err != nil {
+		return nil, err
+	}
+	resumeTurn, err := s.resumedHistoryTurn(ctx, row.SessionID.String(), request.messageID)
 	if err != nil {
 		return nil, err
 	}
@@ -385,12 +408,15 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		oldCancel := cancel
 		cancel = func() { cancelDeadline(); oldCancel() }
 	}
+	data.RequestMessageID = request.messageID
 	payload, err := json.Marshal(map[string]any{"kind": "resume", "interrupted_run_id": row.RunID.String(), "resume": data})
 	if err != nil {
 		cancel()
 		return nil, err
 	}
-	runCtx, admission, _, err := s.admitTriggeredRun(runBase, data.SessionType, row.BotID.String(), row.SessionID.String(), "resume:"+row.RunID.String(), payload, nil, row.RunID.String())
+	runCtx, admission, _, err := s.admitTriggeredRun(runBase, data.SessionType, row.BotID.String(), row.SessionID.String(), "resume:"+row.RunID.String(), payload, func(sessionruntime.RunHandle) *sessionruntime.RunAdmissionView {
+		return &sessionruntime.RunAdmissionView{ResumeTurn: resumeTurn}
+	}, row.RunID.String())
 	if err != nil {
 		cancel()
 		if errors.Is(err, ledger.ErrResumeSuperseded) || errors.Is(err, sessionruntime.ErrInvocationConflict) {
@@ -418,7 +444,7 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		req.discussPromptPrefix = resumeInstruction
 		req.Query = resumeInstruction + discussAgentFullContextPrompt(data.DiscussMessages) + req.discussPromptSuffix
 	}
-	chunks, errs := s.streamTurnChat(runCtx, req)
+	chunks, errs := s.streamResumedTurn(runCtx, req, data, request)
 	h := &runHandle{
 		id: admission.RunID, ctx: runCtx, cancel: cancel, events: make(chan turn.Event, 16), errs: make(chan error, 1), inject: make(chan turn.InjectMessage),
 		finishRun:         s.turnRunFinisher(runCtx, admission, data.SessionType),

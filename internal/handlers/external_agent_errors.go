@@ -6,7 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
@@ -51,7 +51,7 @@ func acpAgentSetupError(ctx context.Context, agents *botagents.Service, bot bots
 	if !setup.Enabled {
 		return apperror.New(apperror.CodeACPAgentNotEnabled, nil)
 	}
-	if _, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
+	if _, missing := acpprofile.MissingRequiredManagedField(profile, setup); missing {
 		return apperror.New(apperror.CodeACPAgentNotConfigured, nil)
 	}
 	return nil

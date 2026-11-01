@@ -1473,7 +1473,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         return
       }
     }
-    const next = state.terminalCounter + 1
+    const next = nextTabNumber('terminal', state.terminalCounter)
     patchBotLayout(bid, { terminalCounter: next })
     const id = `terminal:${next}`
     focusOrAdd({
@@ -1500,6 +1500,15 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     addBrowserPanel(DEFAULT_BROWSER_ADDRESS, undefined, groupId)
   }
 
+  // Tab numbers restart at 1 once no tab of that kind is open (#1341), so a fresh
+  // terminal reads "Terminal 1" instead of a lifetime count. While any tab of the
+  // kind is open the counter keeps climbing, so open ids never collide; a closed
+  // terminal's cached snapshot is dropped on close, so reusing its id is safe.
+  function nextTabNumber(prefix: 'terminal' | 'browser', counter: number): number {
+    const anyOpen = api.value?.panels.some(panel => panel.id.startsWith(`${prefix}:`)) ?? false
+    return anyOpen ? counter + 1 : 1
+  }
+
   // Create a fresh browser panel at `address`. Shared by the manual "+ New
   // Browser" entry (always-new, default localized "Browser N" title) and the
   // link-click path (after a dedup miss, titled with the address). Returns false
@@ -1508,7 +1517,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const bid = (currentBotId.value ?? '').trim()
     const state = ensureBotLayout(bid)
     if (!state || !api.value) return false
-    const next = state.browserCounter + 1
+    const next = nextTabNumber('browser', state.browserCounter)
     patchBotLayout(bid, { browserCounter: next })
     focusOrAdd({
       id: `browser:${next}`,
@@ -1634,7 +1643,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         const bid = (currentBotId.value ?? '').trim()
         const state = ensureBotLayout(bid)
         if (!state) return
-        const next = state.terminalCounter + 1
+        const next = nextTabNumber('terminal', state.terminalCounter)
         patchBotLayout(bid, { terminalCounter: next })
         const id = `terminal:${next}`
         dock.addPanel({
@@ -1664,7 +1673,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         const bid = (currentBotId.value ?? '').trim()
         const state = ensureBotLayout(bid)
         if (!state) return
-        const next = state.browserCounter + 1
+        const next = nextTabNumber('browser', state.browserCounter)
         patchBotLayout(bid, { browserCounter: next })
         dock.addPanel({
           id: `browser:${next}`,

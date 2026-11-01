@@ -66,30 +66,21 @@ func TestContextCompactionInfoDerivation(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name      string
-		enabled   bool
-		threshold int
-		plan      *contextfrag.ContextBudgetPlan
-		want      CompactionInfo
+		name    string
+		enabled bool
+		plan    *contextfrag.ContextBudgetPlan
+		want    CompactionInfo
 	}{
 		{
-			name:    "marks derive from the persisted plan window",
+			name:    "the mark is the input allowance of the persisted plan",
 			enabled: true,
-			plan:    &contextfrag.ContextBudgetPlan{Window: 200000},
-			want:    CompactionInfo{Enabled: true, AutoTokens: 100000},
+			plan:    &contextfrag.ContextBudgetPlan{Window: 200000, OutputReserve: 8000},
+			want:    CompactionInfo{Enabled: true, AutoTokens: 192000},
 		},
 		{
-			name:      "configured threshold moves only the auto mark",
-			enabled:   true,
-			threshold: 90000,
-			plan:      &contextfrag.ContextBudgetPlan{Window: 200000},
-			want:      CompactionInfo{Enabled: true, AutoTokens: 90000},
-		},
-		{
-			name:      "disabled compaction still reports the mark",
-			threshold: 90000,
-			plan:      &contextfrag.ContextBudgetPlan{Window: 200000},
-			want:      CompactionInfo{AutoTokens: 90000},
+			name: "an unresolvable summarizer still reports the mark",
+			plan: &contextfrag.ContextBudgetPlan{Window: 200000, OutputReserve: 8000},
+			want: CompactionInfo{AutoTokens: 192000},
 		},
 		{
 			name:    "plan without a window leaves the mark unset",
@@ -107,7 +98,7 @@ func TestContextCompactionInfoDerivation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := contextCompactionInfo(tc.enabled, tc.threshold, tc.plan); got != tc.want {
+			if got := contextCompactionInfo(tc.enabled, tc.plan); got != tc.want {
 				t.Fatalf("contextCompactionInfo() = %+v, want %+v", got, tc.want)
 			}
 		})
@@ -171,9 +162,8 @@ func TestGetSessionInfoOmitsCompactionForACPRuntime(t *testing.T) {
 			}),
 		}},
 		settingsRow: sqlc.GetSettingsByBotIDRow{
-			BotID:             testUUID(lifecycleTestBotID),
-			ReasoningEffort:   "medium",
-			CompactionEnabled: true,
+			BotID:           testUUID(lifecycleTestBotID),
+			ReasoningEffort: "medium",
 		},
 	}
 	logger := slog.New(slog.DiscardHandler)
@@ -288,10 +278,8 @@ func TestGetSessionInfoReportsBudgetPlanAndCompactionMarks(t *testing.T) {
 			}),
 		}},
 		settingsRow: sqlc.GetSettingsByBotIDRow{
-			BotID:               testUUID(lifecycleTestBotID),
-			ReasoningEffort:     "medium",
-			CompactionEnabled:   true,
-			CompactionThreshold: 90000,
+			BotID:           testUUID(lifecycleTestBotID),
+			ReasoningEffort: "medium",
 		},
 	}
 	logger := slog.New(slog.DiscardHandler)
@@ -327,8 +315,8 @@ func TestGetSessionInfoReportsBudgetPlanAndCompactionMarks(t *testing.T) {
 		t.Fatalf("budget plan = %+v, want the persisted plan", plan)
 	}
 	compaction := response.ContextUsage.Compaction
-	if compaction == nil || !compaction.Enabled || compaction.AutoTokens != 90000 {
-		t.Fatalf("compaction = %+v, want the enabled mark at 90000", compaction)
+	if compaction == nil || !compaction.Enabled || compaction.AutoTokens != 192000 {
+		t.Fatalf("compaction = %+v, want the enabled mark at the input allowance 192000", compaction)
 	}
 	if queries.settingsCalls != 1 {
 		t.Fatalf("settings loads = %d, want exactly one per request", queries.settingsCalls)
@@ -365,9 +353,8 @@ func TestGetSessionInfoFallsBackToLegacyLifecycleMetadata(t *testing.T) {
 			CreatedAt: pgtype.Timestamptz{Valid: true},
 		}},
 		settingsRow: sqlc.GetSettingsByBotIDRow{
-			BotID:             testUUID(lifecycleTestBotID),
-			ReasoningEffort:   "medium",
-			CompactionEnabled: true,
+			BotID:           testUUID(lifecycleTestBotID),
+			ReasoningEffort: "medium",
 		},
 	}
 	logger := slog.New(slog.DiscardHandler)
@@ -398,7 +385,7 @@ func TestGetSessionInfoFallsBackToLegacyLifecycleMetadata(t *testing.T) {
 	if len(response.ContextUsage.Breakdown) != 1 || response.ContextUsage.BudgetPlan == nil || response.ContextUsage.BudgetPlan.Window != 100000 {
 		t.Fatalf("context usage = %+v, want the legacy metadata snapshot", response.ContextUsage)
 	}
-	if response.ContextUsage.Compaction == nil || response.ContextUsage.Compaction.AutoTokens != 50000 {
+	if response.ContextUsage.Compaction == nil || response.ContextUsage.Compaction.AutoTokens != 96000 {
 		t.Fatalf("compaction = %+v, want the mark derived from the legacy plan", response.ContextUsage.Compaction)
 	}
 }

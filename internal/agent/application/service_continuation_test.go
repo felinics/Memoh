@@ -3,6 +3,8 @@ package application
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -12,6 +14,8 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/chat/checkpoint"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 )
@@ -80,6 +84,7 @@ func TestPrepareContinuationRunConfigReplacesStaleContextAndSetsCapabilities(t *
 		historyfrag.ScopeFallback{},
 		contextfrag.Scope{},
 		eventCh,
+		ChatRequest{},
 	)
 	if err != nil {
 		t.Fatalf("prepareContinuationRunConfig() error = %v", err)
@@ -112,17 +117,61 @@ func TestPrepareContinuationRunConfigReplacesStaleContextAndSetsCapabilities(t *
 	}
 }
 
-func TestPrepareContinuationRunConfigPropagatesArtifactProjectionFailure(t *testing.T) {
+// A continuation resumes on the history as a request renders it: what the
+// checkpoint holds, and the rows after it.
+func TestPrepareContinuationRunConfigRendersTheCheckpoint(t *testing.T) {
 	t.Parallel()
 
-	sentinel := errors.New("artifact projection unavailable")
-	resolver := &Service{queries: &recordingCompactionLogQueries{listErr: sentinel}}
+	queries := &historyCheckpointQueries{}
+	queries.activate(historyCheckpointRow(t, checkpointTestID, historyTestPosition(1),
+		checkpoint.Item{SummaryID: queries.summary(t, checkpointTestSummaryID, "earlier work")}))
+	resolver := checkpointTestService(&memoryQueryMessageService{messages: []messagepkg.Message{
+		persistedHistoryMessage(t, "earlier", "user", "earlier"),
+		persistedHistoryMessage(t, "folded", "assistant", "folded"),
+		persistedHistoryMessage(t, "request-row", "user", "resumed request"),
+	}}, queries)
+
+	got, err := resolver.prepareContinuationRunConfig(
+		context.Background(),
+		native.RunConfig{},
+		historyfrag.ScopeFallback{},
+		contextfrag.Scope{SessionID: lifecycleTestSessionID},
+		nil,
+		ChatRequest{ThreadID: lifecycleTestSessionID},
+	)
+	if err != nil {
+		t.Fatalf("prepareContinuationRunConfig() error = %v", err)
+	}
+	var texts []string
+	for _, message := range got.Messages {
+		texts = append(texts, messageContentTextForTest(message))
+	}
+	if want := []string{turn.SummaryText("earlier work"), "resumed request"}; !slices.Equal(texts, want) {
+		t.Fatalf("continuation messages = %q, want %q", texts, want)
+	}
+	var summaries []int
+	for _, frag := range got.ContextFrags {
+		if frag.Kind == contextfrag.KindConversationSummary {
+			summaries = append(summaries, frag.Provenance.Index)
+		}
+	}
+	if !slices.Equal(summaries, []int{0}) {
+		t.Fatalf("summary frags at messages %v, want the summary at message 0", summaries)
+	}
+}
+
+func TestPrepareContinuationRunConfigPropagatesCheckpointFailure(t *testing.T) {
+	t.Parallel()
+
+	sentinel := errors.New("history checkpoint unavailable")
+	resolver := checkpointTestService(&memoryQueryMessageService{}, &historyCheckpointQueries{activeErr: sentinel})
 	got, err := resolver.prepareContinuationRunConfig(
 		context.Background(),
 		native.RunConfig{Query: "must not survive"},
 		historyfrag.ScopeFallback{},
 		contextfrag.Scope{SessionID: "00000000-0000-0000-0000-00000000f401"},
 		nil,
+		ChatRequest{},
 	)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("prepareContinuationRunConfig() error = %v, want %v", err, sentinel)
@@ -138,5 +187,36 @@ func TestPendingRuntimeDecisionsFailsClosedOnRuntimeLookupFailure(t *testing.T) 
 	got, err := service.PendingRuntimeDecisions(t.Context(), "00000000-0000-0000-0000-000000000001")
 	if !errors.Is(err, sentinel) || got != nil {
 		t.Fatalf("runtime lookup error treated as native: %v %v", got, err)
+	}
+}
+
+// A continuation whose load the byte budget truncated folds the rows it left
+// out before it runs, keeping the input it resumes as an anchor.
+func TestContinuationFoldsATruncatedLoadKeepingTheResumedInput(t *testing.T) {
+	s, history, runner, _ := chatRecoveryFixture(t)
+	history.truncated = true
+	history.messages = []messagepkg.Message{
+		{ID: "old-answer", BotID: syncCompactBotID, SessionID: syncCompactThreadID, Role: "assistant", Content: newTextContent(strings.Repeat("h", 40000))},
+		{ID: "request-row", BotID: syncCompactBotID, SessionID: syncCompactThreadID, Role: "user", Content: newTextContent("resumed request")},
+	}
+	req := ChatRequest{BotID: syncCompactBotID, ChatID: syncCompactBotID, ThreadID: syncCompactThreadID, PersistedUserMessageID: "request-row"}
+	cfg, err := s.prepareContinuationRunConfig(t.Context(), native.RunConfig{
+		RunID:                  "continuation-run",
+		Model:                  &sdk.Model{ID: "original-model"},
+		Identity:               native.SessionContext{BotID: syncCompactBotID, SessionID: syncCompactThreadID},
+		ContextBudgetMaxTokens: 8000,
+		ContextLifecycle:       contextfrag.NewLifecycleHolder(),
+	}, historyfrag.ScopeFallback{}, contextfrag.Scope{BotID: syncCompactBotID, SessionID: syncCompactThreadID}, nil, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.configs) != 1 || history.loads != 2 {
+		t.Fatalf("truncated continuation compactions=%d loads=%d, want one compaction and a second load", len(runner.configs), history.loads)
+	}
+	if want := (turn.ContextMessageSource{Kind: "history", ID: "request-row"}); !slices.Contains(runner.configs[0].Anchors, want) {
+		t.Fatalf("the resumed input must be an anchor: %+v", runner.configs[0].Anchors)
+	}
+	if countRecoveryText(cfg.Messages, "compacted history") != 1 {
+		t.Fatalf("continuation did not run on the compacted history: %d messages", len(cfg.Messages))
 	}
 }

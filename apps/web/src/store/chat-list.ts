@@ -312,8 +312,8 @@ export const useChatStore = defineStore('chat', () => {
     },
     removeSessionFromList,
     ensureBot,
-    knownSession: knownSessionSummary,
     draftWorkdirIdFor: (botId, opts) => workdirsStore.sessionWorkdirIdFor(botId, opts),
+    draftFolderPathFor: botId => (workdirsStore.sessionWorkdirIdFor(botId, { externalAgent: true }) && workdirsStore.workingWorkdirFor(botId)?.path) || '',
   })
   const {
     acpRuntimeStatuses, acpRuntimePending, acpRuntimeKey, clearACPRuntimeStatus, ensureACPRuntime,
@@ -322,7 +322,7 @@ export const useChatStore = defineStore('chat', () => {
   } = externalAgents.runtimeRegistry
   const { cacheDefaultExternalAgentSession, clearPendingExternalAgentSession } = externalAgents.staging
   const {
-    pendingExternalAgentSessionInput, pendingACPRuntimeId, pendingExternalAgentSessionMetadata,
+    pendingExternalAgentSessionInput, pendingExternalAgentSessionMetadata,
     pendingACPRuntimeStatus, pendingACPRuntimeEnsuring, pendingExternalAgentStateFor,
     pendingExternalAgentMatchesInput,
     stageExternalAgentSession, stageDefaultExternalAgentSession, resetToEmptyComposer,
@@ -335,8 +335,7 @@ export const useChatStore = defineStore('chat', () => {
     stageFromSettings: stageDefaultExternalAgentFromSettings,
   } = externalAgents.defaults
   const {
-    createExternalAgentSession, updateCurrentSessionAgent,
-    updateCurrentSessionToMemoh, ensureChatViewSession,
+    createExternalAgentSession, ensureChatViewSession,
   } = externalAgents.sessions
   const {
     draftViewRequested, applyDraftViewRequest, requestDraftView,
@@ -446,8 +445,6 @@ export const useChatStore = defineStore('chat', () => {
     releasePreviousSession: (botId, targetSessionId) => {
       releaseHiddenSessionView(chatViews.getSession(botId, targetSessionId) ?? null)
     },
-    abort,
-    abortAllAssistantStreams,
     clearFsForBotSwitch,
     // Folder rows resolve through the remembered-session map, so dropping it
     // must drop the folders' paging state too, or a folder reads as empty.
@@ -597,7 +594,7 @@ export const useChatStore = defineStore('chat', () => {
     ensureWorkdirSessions, loadMoreWorkdirSessions,
     activeChatReadOnly, activeChatCanFork,
     acpRuntimeStatuses, acpRuntimePending, pendingExternalAgentSessionInput,
-    pendingExternalAgentSessionMetadata, pendingACPRuntimeId, pendingACPRuntimeStatus,
+    pendingExternalAgentSessionMetadata, pendingACPRuntimeStatus,
     pendingACPRuntimeEnsuring, pendingExternalAgentStateFor,
     pendingExternalAgentMatchesInput,
     sessionId, hasExplicitSessionSelection, currentBotId, bots,
@@ -618,7 +615,7 @@ export const useChatStore = defineStore('chat', () => {
     stageExternalAgentSession, stageDefaultExternalAgentSession, cacheDefaultExternalAgentSession,
     resetToEmptyComposer, ensurePendingACPRuntime,
     setPendingACPModel, setPendingACPMode, setPendingRuntimeMode, setPendingACPReasoning, clearPendingExternalAgentSession,
-    createExternalAgentSession, updateCurrentSessionAgent, updateCurrentSessionToMemoh,
+    createExternalAgentSession,
     acpRuntimeKey, ensureACPRuntime, setACPRuntimeMode, setACPRuntimeModel, setACPRuntimeReasoning,
     removeSession, removeSessions, renameSession, forkTurn,
     sendMessage, retryLatestAssistant, editLatestUser,

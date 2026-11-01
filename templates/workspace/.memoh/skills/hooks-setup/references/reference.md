@@ -219,7 +219,7 @@ Approval events:
 
 Compaction and subagent events:
 
-- `PreCompact`: before compaction; `turn.input_tokens`, `turn.target_tokens`, `turn.ratio`, `turn.model_id`.
+- `PreCompact`: before compaction; `turn.input_tokens`, `turn.history_budget_tokens`, `turn.model_id`.
 - `PostCompact`: after compaction; same fields plus optional `turn.error`.
 - `SubagentStart`: before a subagent task; `extra.agent_id`, `extra.agent_session_id`, `extra.task_id`, `extra.message`.
 - `SubagentStop`: after a subagent task; same fields plus optional `extra.status`, `extra.error`, `extra.text_bytes`.

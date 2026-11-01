@@ -85,7 +85,8 @@ const exitLabel = computed(() => {
 
 const stdout = computed(() => {
   const r = resolveResult()
-  return (r?.stdout as string) ?? ''
+  return typeof r?.stdout === 'string' ? r.stdout
+    : typeof r?.output === 'string' ? r.output : ''
 })
 
 const stderr = computed(() => {
@@ -126,14 +127,16 @@ const errorText = computed(() => {
     .join('\n')
 })
 
-// Fallback for tools whose output lands in the MCP-style content[].text array
-// (rather than structuredContent.stdout). Only used when nothing else matched
-// so we never silently show "no output" when output is actually present.
+// Older external runtimes stored plain text or MCP content blocks.
 const fallbackText = computed(() => {
   if (stdout.value || stderr.value || errorText.value) return ''
-  const result = props.block.result as Record<string, unknown> | null
-  if (!result || !Array.isArray(result.content)) return ''
-  return (result.content as Array<Record<string, unknown>>)
+  const raw = props.block.result
+  if (typeof raw === 'string') return raw
+  const result = raw as Record<string, unknown> | null
+  if (typeof result?.content === 'string') return result.content
+  const content = Array.isArray(raw) ? raw : result?.content
+  if (!Array.isArray(content)) return ''
+  return (content as Array<Record<string, unknown>>)
     .filter(c => c.type === 'text')
     .map(c => c.text as string)
     .filter(Boolean)

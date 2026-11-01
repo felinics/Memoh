@@ -5,10 +5,21 @@ export interface RuntimeCommandCredential {
 
 export type RuntimeConnectMode = 'connect' | 'replace'
 
+export type RuntimeHostPlatform = 'windows' | 'macos' | 'linux'
+
+// The dialog usually runs on the computer being connected, so the browser's OS
+// is the best first guess; the user can still switch.
+export function detectRuntimeHostPlatform(userAgent = globalThis.navigator?.userAgent ?? ''): RuntimeHostPlatform {
+  if (/Windows/i.test(userAgent)) return 'windows'
+  if (/Linux/i.test(userAgent) && !/Android/i.test(userAgent)) return 'linux'
+  return 'macos'
+}
+
 export function buildRuntimeConnectCommand(
   serverUrl: string,
   credential: RuntimeCommandCredential | null | undefined,
   mode: RuntimeConnectMode = 'connect',
+  platform: RuntimeHostPlatform = 'macos',
 ): string {
   const key = credential?.key?.trim()
   if (!key) return ''
@@ -32,12 +43,16 @@ export function buildRuntimeConnectCommand(
     args.push('--replace')
   }
   // Stop on failure so a rejected enrollment cannot start a different saved connection.
-  return [
+  const chain = [
     'npm install -g @memohai/runtime@latest',
     args.join(' '),
     'memoh-runtime service install',
     'memoh-runtime service start',
   ].join(' && ')
+  // Windows PowerShell 5.1 has no `&&`, and its default execution policy blocks
+  // the .ps1 shims npm installs. Running the chain in cmd works the same from
+  // cmd, Windows PowerShell and PowerShell 7.
+  return platform === 'windows' ? `cmd /c "${chain}"` : chain
 }
 
 function isInsecureLocalhost(serverUrl: string): boolean {

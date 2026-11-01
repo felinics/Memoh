@@ -46,7 +46,7 @@ func TestGenerateAppliesContextViewBeforeProviderOptions(t *testing.T) {
 	a.SetToolProviders([]tools.ToolProvider{&usageTestProvider{emitTool: true, usage: usageMarker}})
 
 	if _, err := a.Generate(context.Background(), RunConfig{
-		Model:  &sdk.Model{ID: "view-model", Provider: modelProvider, Type: sdk.ModelTypeChat},
+		Model:  &sdk.Model{ID: "view-model", Provider: modelProvider},
 		System: "legacy system", Messages: []sdk.Message{sdk.UserMessage("legacy message")}, SupportsToolCall: true,
 	}); err != nil {
 		t.Fatalf("Generate error: %v", err)
@@ -90,7 +90,7 @@ func TestGenerateFinalInputHashTracksLastProviderStep(t *testing.T) {
 	}}}})
 
 	if _, err := a.Generate(context.Background(), RunConfig{
-		Model:    &sdk.Model{ID: "hash-model", Provider: modelProvider, Type: sdk.ModelTypeChat},
+		Model:    &sdk.Model{ID: "hash-model", Provider: modelProvider},
 		Messages: []sdk.Message{sdk.UserMessage("run the tool")}, SupportsToolCall: true,
 	}); err != nil {
 		t.Fatalf("Generate error: %v", err)
@@ -114,7 +114,7 @@ func TestStreamAppliesContextViewOnce(t *testing.T) {
 	}})
 
 	for range a.Stream(context.Background(), RunConfig{
-		Model:  &sdk.Model{ID: "view-stream-model", Provider: modelProvider, Type: sdk.ModelTypeChat},
+		Model:  &sdk.Model{ID: "view-stream-model", Provider: modelProvider},
 		System: "legacy stream system", Messages: []sdk.Message{sdk.UserMessage("legacy stream message")},
 	}) {
 	}
@@ -222,7 +222,7 @@ func TestStreamContextViewFailureLeavesTheRecordToTheBoundary(t *testing.T) {
 	a := New(Deps{Logger: slog.New(handler), ContextViewApplier: budgetErrorApplier(errors.New("private collector failure"))})
 	errorEvents := 0
 	for event := range a.Stream(context.Background(), RunConfig{
-		Model: &sdk.Model{ID: "context-view-log", Provider: &preflightCountingProvider{}, Type: sdk.ModelTypeChat},
+		Model: &sdk.Model{ID: "context-view-log", Provider: &preflightCountingProvider{}},
 	}) {
 		if event.Type == EventError {
 			errorEvents++
@@ -260,7 +260,7 @@ func TestGenerateContextBudgetErrorStopsBeforeProvider(t *testing.T) {
 	provider := &preflightCountingProvider{}
 	wantErr := fmt.Errorf("%w: private cost", contextfrag.ErrProtectedContextOverflow)
 	result, err := New(Deps{ContextViewApplier: budgetErrorApplier(wantErr)}).Generate(context.Background(), RunConfig{
-		Model: &sdk.Model{ID: "budget-generate", Provider: provider, Type: sdk.ModelTypeChat},
+		Model: &sdk.Model{ID: "budget-generate", Provider: provider},
 	})
 	if result != nil || !errors.Is(err, wantErr) || !errors.Is(err, contextfrag.ErrProtectedContextOverflow) {
 		t.Fatalf("result/error = %#v/%v", result, err)
@@ -277,7 +277,7 @@ func TestStreamContextBudgetErrorCarriesItsSentinelAndStopsBeforeProvider(t *tes
 	wantErr := fmt.Errorf("%w: window=31 private", contextfrag.ErrBudgetUnsatisfied)
 	var events []StreamEvent
 	for event := range New(Deps{ContextViewApplier: budgetErrorApplier(wantErr)}).Stream(context.Background(), RunConfig{
-		Model: &sdk.Model{ID: "budget-stream", Provider: provider, Type: sdk.ModelTypeChat},
+		Model: &sdk.Model{ID: "budget-stream", Provider: provider},
 	}) {
 		if event.Type == EventError {
 			events = append(events, event)

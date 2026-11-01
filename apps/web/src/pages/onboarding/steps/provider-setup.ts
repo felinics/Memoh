@@ -1,14 +1,11 @@
-import type { ModelsGetResponse, ProvidertemplatesGetResponse } from '@memohai/sdk'
+import type { ModelsGetResponse } from '@memohai/sdk'
 import type { ProviderPreset } from '@/constants/provider-presets'
+import { findModelSource, TEMPLATE_SOURCES, type ModelSource } from '@/constants/model-sources'
 
-export function findProviderTemplate(
-  templates: ProvidertemplatesGetResponse[],
-  preset: ProviderPreset,
-): ProvidertemplatesGetResponse | undefined {
-  return templates.find(template =>
-    template.domain === 'llm'
-    && template.key === preset.id,
-  )
+// The gallery entry an onboarding preset stands for. Presets are keyed like the
+// former provider templates.
+export function findPresetEntry(preset: ProviderPreset): ModelSource | undefined {
+  return findModelSource(TEMPLATE_SOURCES[preset.id] ?? preset.id)
 }
 
 export function mergeOnboardingModels(

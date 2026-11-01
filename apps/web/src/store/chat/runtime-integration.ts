@@ -537,15 +537,21 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
         commitInitialHistory,
       )
     } finally {
-      for (const stream of deps.assistantStreams.assistantStreamsForSession(
-        normalizedBotId,
-        normalizedSessionId,
-      )) {
-        deps.reattachTurnToSession(
-          normalizedBotId,
-          normalizedSessionId,
-          stream.assistantTurn,
-        )
+      const streams = deps.assistantStreams.assistantStreamsForSession(normalizedBotId, normalizedSessionId)
+      for (const stream of streams) {
+        deps.reattachTurnToSession(normalizedBotId, normalizedSessionId, stream.assistantTurn)
+      }
+      // A send keeps its turn object while the session is not watched, for
+      // example while another bot is shown, so that turn stops where its
+      // stream lost the socket. It replaces the fresh history turn above;
+      // merging the runtime's current transcript into it again brings it up
+      // to date even when no further frame arrives, as when the run is now
+      // waiting for the user.
+      const transcript = streams.length > 0
+        ? deps.realtime.runtimeProjection(normalizedSessionId)?.transcript
+        : undefined
+      if (transcript) {
+        deps.chatViews.getSession(normalizedBotId, normalizedSessionId)?.transcript.applyRuntimeTranscript(transcript)
       }
     }
   }

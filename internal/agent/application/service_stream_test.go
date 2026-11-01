@@ -13,6 +13,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/external/acp"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
@@ -191,10 +192,6 @@ func (*recordingMessageService) ListSince(context.Context, string, time.Time) ([
 	return nil, nil
 }
 
-func (*recordingMessageService) ListActiveSince(context.Context, string, time.Time) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
 func (*recordingMessageService) ListLatest(context.Context, string, int32) ([]messagepkg.Message, error) {
 	return nil, nil
 }
@@ -215,19 +212,27 @@ func (*recordingMessageService) ListActiveSinceBySession(context.Context, string
 	return nil, nil
 }
 
-func (*recordingMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
+func (*recordingMessageService) ListHistoryWithinBytes(context.Context, string, messagepkg.HistoryWindow) (messagepkg.HistoryLoad, error) {
+	return messagepkg.HistoryLoad{}, nil
+}
+
+func (*recordingMessageService) ListHistoryByIDs(context.Context, string, []string) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
-func (*recordingMessageService) ListActiveSinceWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
+func (*recordingMessageService) HistoryPositionByID(context.Context, string, string) (messagepkg.HistoryPosition, error) {
+	return messagepkg.HistoryPosition{}, nil
+}
+
+func (*recordingMessageService) ListTurnResponseSourcesWithinBytes(context.Context, string, messagepkg.HistoryPosition, int64) (messagepkg.HistoryLoad, error) {
+	return messagepkg.HistoryLoad{}, nil
+}
+
+func (*recordingMessageService) ListTurnResponseSourcesByIDs(context.Context, string, []string) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
-func (*recordingMessageService) ListTurnResponseSourcesSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) MeasureActiveBySession(context.Context, string, time.Time) (messagepkg.ActiveMessagesMeasure, error) {
+func (*recordingMessageService) MeasureHistory(context.Context, string, messagepkg.HistoryPosition) (messagepkg.ActiveMessagesMeasure, error) {
 	return messagepkg.ActiveMessagesMeasure{}, nil
 }
 
@@ -302,7 +307,7 @@ func TestStreamChatWSResultRejectsTurnReplacementForACP(t *testing.T) {
 		sessionService: acpRuntimeSessionServiceForTest("user-1"),
 		logger:         slog.New(slog.DiscardHandler),
 	}
-	resolver.SetACPSessionPool(&recordingACPPrompter{})
+	resolver.SetRuntimeRegistry(testRuntimes(t, acpagent.NewDriver(&recordingACPPrompter{})))
 	preflightCalled := false
 	postPersistCalled := false
 

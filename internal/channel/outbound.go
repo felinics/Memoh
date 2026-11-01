@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/i18n"
 )
 
 // ChunkerMode selects the text chunking strategy.
@@ -206,6 +207,10 @@ func buildOutboundMessages(msg OutboundMessage, policy OutboundPolicy) ([]Outbou
 }
 
 func buildOutboundMessagesWithCaps(msg OutboundMessage, policy OutboundPolicy, caps ChannelCapabilities, hasCaps bool) ([]OutboundMessage, error) {
+	if parts, expanded := expandMarkdownMessage(msg); expanded {
+		return buildExpandedMarkdownMessages(parts, policy, caps, hasCaps)
+	}
+
 	if msg.Message.IsEmpty() {
 		return nil, errors.New("message is required")
 	}
@@ -298,6 +303,36 @@ func buildOutboundMessagesWithCaps(msg OutboundMessage, policy OutboundPolicy, c
 		return append(textMessages, attachmentMessages...), nil
 	}
 	return append(attachmentMessages, textMessages...), nil
+}
+
+func buildExpandedMarkdownMessages(parts []OutboundMessage, policy OutboundPolicy, caps ChannelCapabilities, hasCaps bool) ([]OutboundMessage, error) {
+	var result []OutboundMessage
+	for _, part := range parts {
+		if part.Message.IsEmpty() {
+			continue
+		}
+		if hasCaps && len(part.Message.Attachments) > 0 {
+			if !caps.Attachments {
+				locale, _ := part.Message.Metadata["locale"].(string)
+				part.Message.Text = i18n.New(locale).T("errors.media.reference_unavailable")
+				part.Message.Attachments = nil
+			} else if !caps.Media {
+				for i := range part.Message.Attachments {
+					part.Message.Attachments[i].Type = AttachmentFile
+					if part.Message.Attachments[i].Metadata == nil {
+						part.Message.Attachments[i].Metadata = map[string]any{}
+					}
+					part.Message.Attachments[i].Metadata["send_as_file"] = true
+				}
+			}
+		}
+		chunks, err := buildOutboundMessagesWithCaps(part, policy, caps, hasCaps)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, chunks...)
+	}
+	return result, nil
 }
 
 func coerceOversizedRichPartsForChunking(msg Message, policy OutboundPolicy, caps ChannelCapabilities) Message {
@@ -776,15 +811,42 @@ type managerOutboundStream struct {
 	deltaRunes  int
 	deltaText   strings.Builder
 	splitCount  int
+	// Markdown media publication state; see markdown_stream.go.
+	segmentText          strings.Builder
+	heldText             strings.Builder
+	adapterText          strings.Builder
+	holdingMedia         bool
+	scanFrom             int
+	segmentSplits        int
+	segments             []streamSegment
+	markdownFinalSource  string
+	markdownFinalParts   []OutboundMessage
+	markdownFinalAdapter int
+	markdownFinalNext    int
 }
 
-func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) error {
+func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) (err error) {
+	defer func() {
+		if event.Type == StreamEventFinal && err == nil {
+			s.segmentText.Reset()
+			s.heldText.Reset()
+			s.adapterText.Reset()
+			s.holdingMedia = false
+			s.segments = nil
+			s.scanFrom = 0
+			s.segmentSplits = s.splitCount
+		}
+	}()
 	if s.manager == nil || s.stream == nil {
 		return errors.New("stream is not configured")
 	}
 	if err := validateStreamEvent(s.manager.registry, s.channelType, event); err != nil {
 		return err
 	}
+	if handled, err := s.pushMarkdown(ctx, &event); handled || err != nil {
+		return err
+	}
+
 	if event.Type == StreamEventError && strings.TrimSpace(event.Error) == "" {
 		return nil
 	}

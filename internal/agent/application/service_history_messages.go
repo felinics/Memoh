@@ -3,46 +3,56 @@ package application
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
+	"fmt"
 	"strings"
-	"time"
 
-	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/turn"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 // buildMessagesFromPipeline assembles chat context from the DCP pipeline's
 // RenderedContext (RC) merged with assistant/tool turns (TR) from
 // bot_history_messages. This gives chat mode the same event-driven context
-// that discuss mode uses, replacing the legacy loadMessages path. The second
-// return value is the raw (compactable) token pressure measured before
-// trimming; the third also includes active summaries.
-func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest, contextTokenBudget int) ([]ModelMessage, int, int) {
+// that discuss mode uses, replacing the legacy loadMessages path. Both
+// streams compose under the session's history checkpoint: what it holds,
+// then what came after it. It also returns the token pressure of what
+// composes, and whether the byte budget left turn responses after the
+// checkpoint out. A history or checkpoint load failure fails the request
+// (CM-ADM-003).
+func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest, contextTokenBudget int) ([]ModelMessage, int, bool, error) {
 	sessionID := strings.TrimSpace(req.ThreadID)
 	if s.pipeline == nil || sessionID == "" {
-		return nil, 0, 0
+		return nil, 0, false, nil
 	}
 	rc := s.pipeline.GetRC(sessionID)
 	if len(rc) == 0 {
-		return nil, 0, 0
+		return nil, 0, false, nil
 	}
 
-	trs := s.loadTurnResponses(ctx, sessionID, contextTokenBudget)
-	artifacts := s.loadTimelineArtifacts(ctx, req.BotID, sessionID)
+	held, err := s.pipelineCheckpoints.Load(ctx, sessionID, rc)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	trs, truncated, err := s.loadTurnResponses(ctx, sessionID, held.Position, contextTokenBudget)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("load turn history: %w", err)
+	}
 
-	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts)
+	composed := timeline.ComposeContextWithCheckpoint(rc, trs, held)
 	if composed == nil {
-		return nil, 0, 0
+		return nil, 0, truncated, nil
 	}
 
 	messages := make([]ModelMessage, 0, len(composed.Messages))
-	pinned := make([]bool, 0, len(composed.Messages))
-	compactable, pressure := 0, 0
+	pressure := 0
 	for _, m := range composed.Messages {
 		if m.Source != nil && req.ExternalMessageID != "" {
 			m.Source.Current = m.Source.Kind == "external" && m.Source.ID == req.ExternalMessageID
+		}
+		if m.CompactionArtifactID != "" {
+			m.Source = &turn.ContextMessageSource{Kind: "summary", ID: m.CompactionArtifactID}
 		}
 		contentJSON := m.RawContent
 		if len(contentJSON) == 0 {
@@ -57,92 +67,29 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 			ContextSource: m.Source,
 			Content:       contentJSON,
 		})
-		isPinned := m.CompactionArtifactID != ""
-		pinned = append(pinned, isPinned)
-		cost := estimateMessageTokens(messages[len(messages)-1])
-		pressure += cost
-		if !isPinned {
-			compactable += cost
-		}
+		pressure += estimateMessageTokens(messages[len(messages)-1])
 	}
 
-	// Apply context token budget trimming to pipeline path as well.
-	if contextTokenBudget > 0 && len(messages) > 0 {
-		messages = trimPipelineMessagesByTokens(s.logger, messages, pinned, contextTokenBudget)
-	}
-
-	return messages, compactable, pressure
+	return messages, pressure, truncated, nil
 }
 
-// loadTimelineArtifacts projects the session's active compaction frontier for
-// timeline composition. A load failure degrades into the bounded admission
-// window — the pipeline trim below still caps the recomposed raw history —
-// and is surfaced with a stable key instead of passing silently (CM-ADM-003).
-func (s *Service) loadTimelineArtifacts(ctx context.Context, botID, sessionID string) []timeline.CompactionArtifact {
-	if s.queries == nil {
-		return nil
+// loadTurnResponses loads the assistant/tool messages of the thread's
+// history after its checkpoint's position, for use as the TR stream in
+// pipeline-based context assembly; the checkpoint stands for the older ones.
+// The load is byte-budgeted on the database side (CM-ADM-001): rows are
+// admitted newest-first within the context budget and projected to content,
+// so a long history, or legacy lifecycle metadata on its rows, can never
+// materialize more than the budget's worth of payload. It reports whether
+// the budget left rows after the checkpoint out.
+func (s *Service) loadTurnResponses(ctx context.Context, sessionID string, after messagepkg.HistoryPosition, contextTokenBudget int) ([]timeline.TurnResponseEntry, bool, error) {
+	if s.messageService == nil || strings.TrimSpace(sessionID) == "" {
+		return nil, false, nil
 	}
-	artifacts, err := compaction.NewTimelineArtifactSource(s.queries).ActiveCompactionArtifacts(ctx, botID, sessionID)
+	load, err := s.messageService.ListTurnResponseSourcesWithinBytes(ctx, sessionID, after, s.historyLoadMaxBytes(contextTokenBudget))
 	if err != nil {
-		s.logger.WarnContext(ctx, "context_admission_degraded",
-			slog.String("path", "pipeline_chat"),
-			slog.String("reason", "artifact_load_failed"),
-			slog.String("session_id", sessionID),
-			slog.Any("error", err))
-		return nil
+		return nil, false, err
 	}
-	return artifacts
-}
-
-// trimPipelineMessagesByTokens trims pipeline-assembled messages to fit within
-// the context token budget using character-based estimation. Pinned messages
-// (compaction summaries) survive the dropped prefix.
-func trimPipelineMessagesByTokens(log *slog.Logger, messages []ModelMessage, pinned []bool, maxTokens int) []ModelMessage {
-	entries := make([]turn.AdmissionEntry, len(messages))
-	for i, message := range messages {
-		entries[i] = turn.AdmissionEntry{Source: message.ContextSource, Cost: estimateMessageTokens(message), Pinned: i < len(pinned) && pinned[i], ToolResponse: strings.EqualFold(strings.TrimSpace(message.Role), "tool")}
-	}
-	decision := turn.AdmitContextEntries(entries, maxTokens)
-	if decision.ProtectedOverflow || decision.DroppedEntries == 0 {
-		// Keep irreducible input intact for the final provider admission.
-		return messages
-	}
-	kept := make([]ModelMessage, 0, len(messages)-decision.DroppedEntries)
-	for i, message := range messages {
-		if decision.Selected[i] {
-			kept = append(kept, message)
-		}
-	}
-
-	if log != nil {
-		log.Info("trimPipelineMessagesByTokens: context trimmed",
-			slog.Int("total_messages", len(messages)),
-			slog.Int("estimated_tokens", decision.EstimatedTokens),
-			slog.Int("max_tokens", maxTokens),
-			slog.Int("kept_messages", len(kept)),
-		)
-	}
-
-	return kept
-}
-
-// loadTurnResponses loads recent assistant/tool messages from bot_history_messages
-// for use as the TR stream in pipeline-based context assembly. The load is
-// byte-budgeted on the database side (CM-ADM-001): rows are admitted
-// newest-first within the context budget and projected to content, so a
-// dense 24-hour window, or legacy lifecycle metadata on its rows, can never
-// materialize more than the budget's worth of payload.
-func (s *Service) loadTurnResponses(ctx context.Context, sessionID string, contextTokenBudget int) []timeline.TurnResponseEntry {
-	if s.messageService == nil {
-		return nil
-	}
-	since := time.Now().UTC().Add(-24 * time.Hour)
-	msgs, err := s.messageService.ListTurnResponseSourcesSinceBySessionWithinBytes(ctx, sessionID, since, s.historyLoadMaxBytes(contextTokenBudget))
-	if err != nil {
-		s.logger.WarnContext(ctx, "load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
-		return nil
-	}
-	return timeline.DecodeTurnResponseEntries(msgs)
+	return timeline.DecodeTurnResponseEntries(load.Messages), load.Truncated, nil
 }
 
 // historyLoadMaxBytes converts a token budget into the byte budget used for

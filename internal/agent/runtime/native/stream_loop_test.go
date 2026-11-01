@@ -16,65 +16,6 @@ import (
 	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
-func TestAgentGenerateRejectsNonPrefixPreservingStepSelectionWithoutMutationRecord(t *testing.T) {
-	t.Parallel()
-
-	ledger := contextfrag.NewMutationLedger()
-	var secondCallMessages []sdk.Message
-	modelProvider := &atomicMockProvider{
-		handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
-			if call == 1 {
-				return sdk.ModelResult{
-					FinishReason: sdk.FinishReasonToolCalls,
-					ToolCalls: []sdk.ToolCall{{
-						ToolCallID: "call-guard",
-						ToolName:   "lookup",
-						Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "one"}),
-					}},
-				}, nil
-			}
-			secondCallMessages = append([]sdk.Message(nil), params.Messages...)
-			return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
-		},
-	}
-
-	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{
-		staticToolProvider{tools: []toolexec.Tool{{
-			Name:       "lookup",
-			Parameters: &jsonschema.Schema{Type: "object"},
-			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
-				return toolexec.OutputFromValue(map[string]any{"answer": "ok"}), nil
-			},
-		}}},
-	})
-
-	_, err := a.Generate(context.Background(), RunConfig{
-		Model:            &sdk.Model{ID: "mock-model", Provider: modelProvider},
-		Messages:         []sdk.Message{sdk.UserMessage("start")},
-		SupportsToolCall: true,
-		Identity:         SessionContext{BotID: "bot-1"},
-		ContextMutations: ledger,
-		ContextStepReselector: func(context.Context, ContextStepSelectionInput) ContextStepSelectionResult {
-			return ContextStepSelectionResult{
-				Messages: []sdk.Message{
-					sdk.UserMessage("modified prefix"),
-				},
-				Dropped: 2,
-			}
-		},
-	})
-	if err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
-	if len(secondCallMessages) == 0 || textOfMessage(secondCallMessages[0]) != "start" {
-		t.Fatalf("second provider call prefix = %#v, want original prefix", secondCallMessages)
-	}
-	if hasMutationKind(ledger.Records(), contextfrag.MutationLoopStepReselection) {
-		t.Fatalf("mutation records = %#v, want no loop_step_reselection when prefix guard rejects selection", ledger.Records())
-	}
-}
-
 func TestAgentStreamStopsOnToolLoopAbort(t *testing.T) {
 	t.Parallel()
 
