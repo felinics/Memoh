@@ -19,6 +19,18 @@ type providerAttemptState struct {
 	stored      bool
 }
 
+// publishedRefs names dynamic inputs in the last dispatched request. After
+// a provider rejection the handoff has already consumed its staged refs;
+// an overflow splice must remap these published positions instead.
+func (s *providerAttemptState) publishedRefs() []dynamicSourceRef {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneDynamicSourceRefs(s.dynamicRefs)
+}
+
 func (s *providerAttemptState) store(
 	params *sdk.Request,
 	stepIndex int,

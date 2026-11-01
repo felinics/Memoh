@@ -501,6 +501,29 @@ request was. Where the window is shared with the completion, the input's limit
 is the window less the completion the request asked for; a count that mixes
 input and completion without splitting them is not read as the input's.
 
+Before an attempt the provider rejected this way has produced output or
+executed tools, an armed run folds the rejected request to a tighter allowance
+with its existing durable fold. When the provider reports its counts, the
+allowance scales the request by the limit over the counted input, less 5% for
+tokenizer uncertainty, and the count calibrates the run like a reported usage,
+so the steps after it are admitted as the provider counts them; without counts
+the request shrinks by a quarter. Only committed passes that bring the request
+within that allowance permit rebuilding the dispatch and retrying the same
+step. Recovery is bounded to two attempts per unfinished step, independently
+of transient retries; completed steps are retained. An unreducible request,
+failed commit, cancellation or exhausted recovery stops with the existing
+context-budget error and leaves committed checkpoints intact.
+
+A provider can also exhaust the window with a `length` finish instead of an
+API error. When the reported input exceeds the run's input allowance and the
+attempt produced no output tokens, reasoning, text, tool input, files or
+sources, the runtime takes the same bounded fold-and-retry transition before
+committing the step, with that allowance standing for the limit. It does not
+report an empty answer as completed work. Like any attempt that does not
+commit, its usage is not part of the run's usage, and the step-end marker is
+reserved for the completed retry so queued inputs anchor after its output. Ordinary output truncation, missing usage and
+intentional empty `stop` replies do not enter this recovery path.
+
 A summary request the provider rejects this way is retried with a smaller
 input, at most three times per pass. Each rejection tightens the input budget
 of that exact fork: when the provider reports its counts, by the limit over
