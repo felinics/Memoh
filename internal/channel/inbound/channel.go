@@ -3052,11 +3052,14 @@ func isLocalChannelType(ct channel.ChannelType) bool {
 // into the pipeline. Called lazily on first access per session after cold
 // start or eviction. Concurrent callers for one session share one replay; a
 // caller that arrives after it finished finds the session loaded and leaves
-// it alone, since replaying again would drop the events pushed since.
+// it alone, since replaying again would drop the events pushed since. The
+// shared replay runs without the starting caller's cancellation: the others
+// waiting on it would otherwise go on without the history it was loading.
 func (p *ChannelInboundProcessor) replayPipelineSession(ctx context.Context, botID, sessionID string) {
 	if p.eventStore == nil || p.pipeline == nil {
 		return
 	}
+	ctx = context.WithoutCancel(ctx)
 	_, _, _ = p.replays.Do(sessionID, func() (any, error) {
 		if p.pipeline.HasSession(sessionID) {
 			return nil, nil

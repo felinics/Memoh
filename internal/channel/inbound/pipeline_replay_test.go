@@ -20,7 +20,8 @@ import (
 const replayTestSessionID = "66666666-6666-6666-6666-666666666666"
 
 // replayQueries is a session with no persisted events. Each replay counts
-// itself at its first query and waits there until release is closed.
+// itself at its first query and waits there until release is closed or its
+// context ends.
 type replayQueries struct {
 	dbstore.Queries
 	started atomic.Int32
@@ -28,9 +29,13 @@ type replayQueries struct {
 	err     error
 }
 
-func (q *replayQueries) GetActiveHistoryCheckpoint(context.Context, pgtype.UUID) (sqlc.BotHistoryCheckpoint, error) {
+func (q *replayQueries) GetActiveHistoryCheckpoint(ctx context.Context, _ pgtype.UUID) (sqlc.BotHistoryCheckpoint, error) {
 	q.started.Add(1)
-	<-q.release
+	select {
+	case <-q.release:
+	case <-ctx.Done():
+		return sqlc.BotHistoryCheckpoint{}, ctx.Err()
+	}
 	if q.err != nil {
 		return sqlc.BotHistoryCheckpoint{}, q.err
 	}
@@ -80,6 +85,31 @@ func TestReplayPipelineSessionLoadsAColdSessionOnce(t *testing.T) {
 		}
 		if got := queries.started.Load(); got != 1 || !pipeline.HasSession(replayTestSessionID) {
 			t.Fatalf("after the replay: replays = %d, loaded = %v; want 1, true", got, pipeline.HasSession(replayTestSessionID))
+		}
+	})
+}
+
+// The replay serves every message waiting on it, so the message that started
+// it giving up does not cost the others the session's history.
+func TestReplayPipelineSessionOutlivesTheCallerThatStartedIt(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		queries := &replayQueries{release: make(chan struct{})}
+		processor, pipeline := newReplayProcessor(queries)
+
+		first, cancel := context.WithCancel(context.Background())
+		var wg sync.WaitGroup
+		wg.Go(func() { processor.replayPipelineSession(first, "bot-1", replayTestSessionID) })
+		synctest.Wait()
+		wg.Go(func() { processor.replayPipelineSession(context.Background(), "bot-1", replayTestSessionID) })
+		synctest.Wait()
+		cancel()
+		synctest.Wait()
+		close(queries.release)
+		wg.Wait()
+
+		if got := queries.started.Load(); got != 1 || !pipeline.HasSession(replayTestSessionID) {
+			t.Fatalf("replays = %d, loaded = %v; want 1, true", got, pipeline.HasSession(replayTestSessionID))
 		}
 	})
 }
