@@ -3,7 +3,7 @@
     <PageShell
       v-if="view === 'list'"
       variant="tab"
-      :title="t('bots.tabs.agents')"
+      :title="t('bots.agent.title')"
     >
       <template #actions>
         <Button @click="addOpen = true">
@@ -137,7 +137,7 @@
     <DetailPane
       v-else
       width="narrow"
-      :back-label="t('bots.tabs.agents')"
+      :back-label="t('bots.agent.title')"
       @back="closeDetail"
     >
       <SettingsShell width="narrow">
