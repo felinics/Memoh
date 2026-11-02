@@ -4,7 +4,7 @@
 // channel), with no ACP adapter and no Node sidecar in between.
 //
 // The wire contract is checked against @anthropic-ai/claude-agent-sdk
-// 0.3.269 and CLI 2.1.269 (see protocolref/VERSION.json). Only the protocol
+// 0.3.316 and CLI 2.1.316. Only the protocol
 // surface used by this driver is modeled; optional fields and unconsumed
 // events do not require version-specific adapters. Unsupported inbound
 // control requests receive an error response.
@@ -25,10 +25,10 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 )
 
-// PinnedCLIVersion is the CLI version verified by the protocol fixtures.
+// PinnedCLIVersion is the CLI version this driver was last run against.
 // A different installed version logs a warning. The workspace dependency
 // manager owns CLI installation; changing this baseline does not install it.
-const PinnedCLIVersion = "2.1.269"
+const PinnedCLIVersion = "2.1.316"
 
 const noResponseRequested = "No response requested."
 

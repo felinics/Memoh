@@ -8,6 +8,7 @@ import {
 import type { ServerConnectResult, ServerConnectionResult } from '../shared/server-connection'
 import type { DesktopRuntimeConfig, DesktopRuntimeState } from '../shared/remote-runtime'
 import type { DesktopUpdateInfo, DesktopUpdateState } from '../shared/updates'
+import type { AttentionNotification } from '../shared/attention'
 
 // Renderer query-cache invalidation payload. Mirrors the subset of
 // Pinia Colada's `UseQueryEntryFilter` that survives structured-clone
@@ -27,6 +28,8 @@ export interface RendererInvalidatePayload {
 // node-privileged main process.
 const api = {
   desktop: {
+    notify: (payload: AttentionNotification): Promise<void> => ipcRenderer.invoke('desktop:notify', payload),
+    setBadgeCount: (count: number): Promise<void> => ipcRenderer.invoke('desktop:set-badge-count', count),
     loadRemoteIcon: (url: string): Promise<string> => ipcRenderer.invoke('desktop:load-remote-icon', url),
     getServerStatus: (): Promise<{
       baseUrl: string

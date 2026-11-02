@@ -691,11 +691,20 @@ func TestSRDUR002TerminalReplayDoesNotDuplicateTurnOrOutput(t *testing.T) {
 	}
 }
 
+// TestSRDEC001DecisionPersistsRunAndTurnAcrossRestart restarts the Server that
+// owns a parked question, by graceful shutdown and by SIGKILL, on either
+// topology. A single memory-backend Server has no peer and no lease index: the
+// restarted process itself must take the question over.
 func TestSRDEC001DecisionPersistsRunAndTurnAcrossRestart(t *testing.T) {
 	if !envBool(crashEnv) {
 		t.Skipf("set %s=1 to run the destructive decision-restart scenario", crashEnv)
 	}
-	fixture := requireFixture(t, true)
+	t.Run("graceful", func(t *testing.T) { testDecisionSurvivesOwnerRestart(t, true) })
+	t.Run("crash", func(t *testing.T) { testDecisionSurvivesOwnerRestart(t, false) })
+}
+
+func testDecisionSurvivesOwnerRestart(t *testing.T, graceful bool) {
+	fixture := requireFixture(t, false)
 	prepareFakeModel(t)
 
 	sessionID := mustCreateSession(t, fixture, "decision-restart")
@@ -711,9 +720,9 @@ func TestSRDEC001DecisionPersistsRunAndTurnAcrossRestart(t *testing.T) {
 	})
 	decision := mustPendingUserInput(t, run)
 
-	if err := killAndRestartPrimary(env); err != nil {
+	if err := restartPrimary(env, graceful); err != nil {
 		_ = primary.Close()
-		t.Fatalf("kill and restart owner with pending decision: %v", err)
+		t.Fatalf("restart owner with pending decision (graceful=%t): %v", graceful, err)
 	}
 	_ = primary.Close()
 
@@ -1159,14 +1168,23 @@ func firstDecisionAnswer(payload json.RawMessage) ([]map[string]any, error) {
 }
 
 func killAndRestartPrimary(env acceptanceEnvironment) error {
+	return restartPrimary(env, false)
+}
+
+// restartPrimary stops the primary Server, with SIGTERM and its graceful
+// shutdown or with SIGKILL, starts it again and waits until it is healthy.
+func restartPrimary(env acceptanceEnvironment, graceful bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
 	// The container name comes from an explicit opt-in acceptance variable and
 	// is passed as one argv element rather than through a shell.
-	kill := exec.CommandContext(ctx, "docker", "kill", "--signal=KILL", env.primaryContainer) //nolint:gosec
-	if output, err := kill.CombinedOutput(); err != nil {
-		return fmt.Errorf("docker kill: %w: %s", err, output)
+	stop := exec.CommandContext(ctx, "docker", "kill", "--signal=KILL", env.primaryContainer) //nolint:gosec
+	if graceful {
+		stop = exec.CommandContext(ctx, "docker", "stop", "--time=60", env.primaryContainer) //nolint:gosec
+	}
+	if output, err := stop.CombinedOutput(); err != nil {
+		return fmt.Errorf("docker stop (graceful=%t): %w: %s", graceful, err, output)
 	}
 	start := exec.CommandContext(ctx, "docker", "start", env.primaryContainer) //nolint:gosec
 	if output, err := start.CombinedOutput(); err != nil {

@@ -376,6 +376,36 @@ export type AgentcredentialPublicCredential = {
 
 export type ApperrorFault = 'client' | 'server' | 'dependency' | 'canceled';
 
+export type AttentionAttention = {
+    /**
+     * At is when the session last needed attention, or when it was marked
+     * unread if it never did; it orders the inbox.
+     */
+    attention_at?: string;
+    attention_kind?: AttentionKind;
+    bot_id?: string;
+    /**
+     * Marked is true when the user marked the session unread themselves; such
+     * a session is not read just because it is already on screen.
+     */
+    marked?: boolean;
+    /**
+     * ReadThrough is the through a client sends to read it: it covers both the
+     * attention and a manual unread mark.
+     */
+    read_through?: string;
+    session_id?: string;
+    title?: string;
+};
+
+export type AttentionKind = 'reply' | 'failed' | 'needs_input' | 'marked';
+
+export type AttentionReadStateChange = {
+    session_id?: string;
+    through?: string;
+    unread?: boolean;
+};
+
 export type AudioConfigSchema = {
     fields?: Array<AudioFieldSchema>;
 };
@@ -2371,6 +2401,14 @@ export type HandlersSessionInfoResponse = {
     skills?: Array<string>;
 };
 
+export type HandlersSetReadStateRequest = {
+    items?: Array<AttentionReadStateChange>;
+};
+
+export type HandlersSetReadStateResponse = {
+    items?: Array<AttentionAttention>;
+};
+
 export type HandlersSiteIconResponse = {
     dark?: string;
     dark_mask?: string;
@@ -2705,6 +2743,10 @@ export type HandlersUiLocateMessageResponse = {
 
 export type HandlersUiMessageListResponse = {
     items: Array<ConversationUiTurn>;
+};
+
+export type HandlersUnreadSessionsResponse = {
+    items?: Array<AttentionAttention>;
 };
 
 export type HandlersUpdateContainerMetricsRequest = {
@@ -4095,6 +4137,12 @@ export type ServerProblem = {
 };
 
 export type SessionSession = {
+    attention_at?: string;
+    /**
+     * AttentionKind and Unread describe the requesting user's unread state.
+     * They are filled by the attention service for list responses only.
+     */
+    attention_kind?: string;
     bot_agent_id?: string;
     bot_id?: string;
     channel_type?: string;
@@ -4125,6 +4173,7 @@ export type SessionSession = {
     session_mode?: string;
     title?: string;
     type?: string;
+    unread?: boolean;
     updated_at?: string;
     workdir_id?: string;
 };
@@ -17349,6 +17398,31 @@ export type PutUsersMeResponses = {
 
 export type PutUsersMeResponse = PutUsersMeResponses[keyof PutUsersMeResponses];
 
+export type GetUsersMeAttentionEventsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/users/me/attention/events';
+};
+
+export type GetUsersMeAttentionEventsErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type GetUsersMeAttentionEventsError = GetUsersMeAttentionEventsErrors[keyof GetUsersMeAttentionEventsErrors];
+
+export type GetUsersMeAttentionEventsResponses = {
+    /**
+     * SSE stream
+     */
+    200: string;
+};
+
+export type GetUsersMeAttentionEventsResponse = GetUsersMeAttentionEventsResponses[keyof GetUsersMeAttentionEventsResponses];
+
 export type GetUsersMeChannelIdentitiesData = {
     body?: never;
     path?: never;
@@ -17572,6 +17646,34 @@ export type PutUsersMePasswordResponses = {
     204: unknown;
 };
 
+export type PutUsersMeReadStateData = {
+    /**
+     * Read state changes
+     */
+    body: HandlersSetReadStateRequest;
+    path?: never;
+    query?: never;
+    url: '/users/me/read-state';
+};
+
+export type PutUsersMeReadStateErrors = {
+    /**
+     * Bad Request
+     */
+    400: ServerProblem;
+};
+
+export type PutUsersMeReadStateError = PutUsersMeReadStateErrors[keyof PutUsersMeReadStateErrors];
+
+export type PutUsersMeReadStateResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSetReadStateResponse;
+};
+
+export type PutUsersMeReadStateResponse = PutUsersMeReadStateResponses[keyof PutUsersMeReadStateResponses];
+
 export type GetUsersMeRuntimesData = {
     body?: never;
     path?: never;
@@ -17668,6 +17770,31 @@ export type DeleteUsersMeRuntimesByIdResponses = {
      */
     204: unknown;
 };
+
+export type GetUsersMeUnreadData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/users/me/unread';
+};
+
+export type GetUsersMeUnreadErrors = {
+    /**
+     * Internal Server Error
+     */
+    500: ServerProblem;
+};
+
+export type GetUsersMeUnreadError = GetUsersMeUnreadErrors[keyof GetUsersMeUnreadErrors];
+
+export type GetUsersMeUnreadResponses = {
+    /**
+     * OK
+     */
+    200: HandlersUnreadSessionsResponse;
+};
+
+export type GetUsersMeUnreadResponse = GetUsersMeUnreadResponses[keyof GetUsersMeUnreadResponses];
 
 export type DeleteUsersByIdData = {
     body?: never;

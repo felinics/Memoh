@@ -144,6 +144,11 @@ inject local auto-login tokens.
 and `DesktopUpdatesKey` bridges so reused web components can adapt to Electron
 without importing Electron or receiving Node privileges.
 
+The reused chat follows the Composer-First Entry rule in `apps/web/AGENTS.md`.
+The desktop chat router (`src/renderer/src/chat/router.ts`) keeps its own
+guard, so it is bound by the same rule: no network wait before the first chat
+render.
+
 ## Commands
 
 ```bash
