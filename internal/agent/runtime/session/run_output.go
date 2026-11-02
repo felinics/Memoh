@@ -3,11 +3,14 @@ package sessionruntime
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
 	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // A run's append-only output — text and reasoning deltas and tool progress —
@@ -40,8 +43,10 @@ type runOutput struct {
 	// transition already committed its output recognises itself as stale.
 	window    uint64
 	lastFlush time.Duration
-	// err is what an asynchronous flush ran into, reported by the run's next
-	// append. Ownership loss stays: every later write would fail the same way.
+	// err is what an asynchronous flush ran into while its output is still
+	// uncommitted, reported by the run's next append. A later flush that
+	// commits the held output clears it. Ownership loss stays: every later
+	// write would fail the same way.
 	err error
 }
 
@@ -165,9 +170,16 @@ func (m *Manager) flushRunOutputLater(ctx context.Context, ctrl *runControl, win
 		return
 	}
 	out.err = err
-	if !errors.Is(err, ErrRunOwnershipLost) {
-		m.scheduleRunOutputFlush(ctx, ctrl, runOutputFlushMaxInterval)
+	if errors.Is(err, ErrRunOwnershipLost) {
+		return
 	}
+	// The write is retried with the output still held; a retry that commits
+	// it leaves nothing for the run to hear, so the failure is recorded here.
+	handle := ctrl.handle()
+	event := errlog.Event(ctx, "session_runtime.run_output", errs.WrapDependency(err, "commit run output",
+		slog.String("session_id", handle.SessionID), slog.String("run_id", handle.RunID)), errlog.Options{})
+	m.logger.LogAttrs(ctx, event.Level, "commit run output failed", event.Attrs()...)
+	m.scheduleRunOutputFlush(ctx, ctrl, runOutputFlushMaxInterval)
 }
 
 // flushRunOutputLocked commits the run's held appends as one transition. The
@@ -212,7 +224,10 @@ func (m *Manager) flushRunOutputLocked(ctx context.Context, ctrl *runControl) er
 		return delta
 	})
 	out.lastFlush = time.Since(started)
-	if err != nil && !errors.Is(err, ErrRunOwnershipLost) {
+	switch {
+	case err == nil:
+		out.err = nil
+	case !errors.Is(err, ErrRunOwnershipLost):
 		out.pending = batch
 	}
 	return err

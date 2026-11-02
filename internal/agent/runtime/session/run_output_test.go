@@ -1,8 +1,12 @@
 package sessionruntime
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -176,6 +180,54 @@ func TestRunOutputKeepsHeldOutputAcrossAFailedWrite(t *testing.T) {
 		t.Fatalf("snapshot: %v", err)
 	}
 	assertRuntimeBlock(t, snapshot.CurrentRunView.Messages, chatview.UIMessageText, "", "kept lost? no")
+}
+
+// lockedBuffer collects log output written from timer goroutines.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// A failed window write whose retry commits the output costs the run nothing,
+// so the run hears nothing of it; the failure is still on record.
+func TestRunOutputRecordsAFailedWriteItsRetryCommitted(t *testing.T) {
+	t.Parallel()
+
+	backend := &failNextUpdateBackend{MemoryBackend: NewMemoryBackend()}
+	logs := &lockedBuffer{}
+	manager := testRuntimeManagerWithOptions(t, backend, Options{
+		OwnerID: "owner-output-recovered", StateTTL: time.Hour, OwnerLeaseTTL: 2 * time.Second,
+		Logger: slog.New(slog.NewTextHandler(logs, nil)),
+	})
+	handle, sub, baseline := startOutputTestRun(t, manager, "session-output-recovered")
+	ctx := context.Background()
+	backend.failNext.Store(true)
+	if _, err := manager.HandleAgentEvent(ctx, handle, native.StreamEvent{Type: native.EventTextDelta, Delta: "kept"}); err != nil {
+		t.Fatalf("handle text: %v", err)
+	}
+	committed := waitRuntimeEvent(t, sub.C, func(event Event) bool { return event.Type == EventRuntimeDelta })
+	if committed.Seq != baseline.Seq+1 || len(committed.Delta.MessageAppends) != 1 || committed.Delta.MessageAppends[0].Content != "kept" {
+		t.Fatalf("retried output = seq %d %#v, want the held append at %d", committed.Seq, committed.Delta.MessageAppends, baseline.Seq+1)
+	}
+
+	if _, err := manager.HandleAgentEvent(ctx, handle, native.StreamEvent{Type: native.EventTextDelta, Delta: " going"}); err != nil {
+		t.Fatalf("append after the retry committed: %v", err)
+	}
+	if got := strings.Count(logs.String(), "commit run output failed"); got != 1 {
+		t.Fatalf("failure records = %d, want 1\n%s", got, logs.String())
+	}
 }
 
 type loadCountingBackend struct {
