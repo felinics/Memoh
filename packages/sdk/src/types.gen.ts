@@ -394,11 +394,16 @@ export type AttentionAttention = {
      * attention and a manual unread mark.
      */
     read_through?: string;
+    /**
+     * ScheduleID names the schedule whose run created the session, so a
+     * client can show one schedule's unread runs as one entry.
+     */
+    schedule_id?: string;
     session_id?: string;
     title?: string;
 };
 
-export type AttentionKind = 'reply' | 'failed' | 'needs_input' | 'marked';
+export type AttentionKind = 'reply' | 'failed' | 'needs_input' | 'update' | 'marked';
 
 export type AttentionReadStateChange = {
     session_id?: string;
@@ -3847,6 +3852,10 @@ export type ScheduleCreateRequest = {
      */
     bot_agent_id?: string;
     command?: string;
+    /**
+     * ContactViaChannels defaults to true.
+     */
+    contact_via_channels?: boolean;
     description?: string;
     enabled?: boolean;
     max_calls?: ScheduleNullableInt;
@@ -3859,6 +3868,10 @@ export type ScheduleCreateRequest = {
      */
     model_id?: string;
     name?: string;
+    /**
+     * NotifyPolicy defaults to important.
+     */
+    notify_policy?: 'important' | 'every_run';
     pattern?: string;
     /**
      * ReasoningEffort overrides the reasoning effort for this schedule.
@@ -4012,6 +4025,11 @@ export type ScheduleSchedule = {
     bot_agent_id?: string;
     bot_id?: string;
     command?: string;
+    /**
+     * ContactViaChannels leaves the bot free to reach the owner on its social
+     * platforms when a run has something for them.
+     */
+    contact_via_channels?: boolean;
     created_at?: string;
     current_calls?: number;
     description?: string;
@@ -4027,6 +4045,11 @@ export type ScheduleSchedule = {
      */
     model_id?: string;
     name?: string;
+    /**
+     * NotifyPolicy is when a run tells the owner in Memoh: important (only
+     * when the run asks to, fails or waits for a decision) or every_run.
+     */
+    notify_policy?: 'important' | 'every_run';
     pattern?: string;
     /**
      * ReasoningEffort overrides the reasoning effort for this schedule.
@@ -4056,6 +4079,7 @@ export type ScheduleSchedule = {
 
 export type ScheduleUpdateRequest = {
     command?: string;
+    contact_via_channels?: boolean;
     description?: string;
     enabled?: boolean;
     /**
@@ -4068,6 +4092,10 @@ export type ScheduleUpdateRequest = {
     execution?: ScheduleExecutionConfig;
     max_calls?: ScheduleNullableInt;
     name?: string;
+    /**
+     * NotifyPolicy and ContactViaChannels keep their stored value when absent.
+     */
+    notify_policy?: 'important' | 'every_run';
     pattern?: string;
 };
 
