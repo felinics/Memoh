@@ -1,4 +1,7 @@
 <template>
+  <!-- Safe-area padding sits on each page (the chat column, the navigation
+       page), not on this frame: the strips under the status bar and the home
+       indicator then carry the colour of whichever page is in front. -->
   <div
     class="h-dvh w-screen overflow-hidden transition-[opacity,scale] duration-[450ms] ease-out"
     :class="entering ? 'scale-[1.15] opacity-0' : 'scale-100 opacity-100'"
@@ -15,18 +18,28 @@
          shows TWO anchors — a region's, or the composer's pane — never a third
          window-centred one. -->
     <div
-      class="flex h-full min-h-0 overflow-hidden"
+      class="relative flex h-full min-h-0 overflow-hidden"
       v-on="baseDropHandlers"
     >
       <SideBar
         v-if="!isMobile"
         :mac-traffic-reserve="macTrafficReserve"
       />
-      <div class="flex min-w-0 min-h-0 flex-1 flex-col">
+      <div
+        ref="mainColumn"
+        class="safe-area-frame flex min-w-0 min-h-0 flex-1 flex-col"
+      >
         <MobileTopBar v-if="isMobile" />
         <MainContainer />
       </div>
-      <MobileNavSheet v-if="isMobile" />
+      <!-- Two hosts for the same mobile navigation (see mobile-nav-mode.ts).
+           The pager drives mainColumn's position itself, so the chat column
+           stays in place in the tree whichever host is active. -->
+      <MobileNavSheet v-if="isMobile && mobileNavMode === 'sheet'" />
+      <MobileNavPager
+        v-if="isMobile && mobileNavMode === 'pager'"
+        :main-page="mainColumn"
+      />
       <!-- The one usage-example gallery; the sidebar entry and the welcome
            suggestions' "See all" open it through useChatExamplesUi. -->
       <ChatExampleGalleryDialog
@@ -44,7 +57,7 @@
 </template>
 
 <script setup lang="ts">
-import { inject, onScopeDispose, ref, onMounted } from 'vue'
+import { defineAsyncComponent, inject, onScopeDispose, ref, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
 import { useMacTrafficReserve } from '@/composables/useMacTrafficReserve'
@@ -52,6 +65,7 @@ import SideBar from '@/components/sidebar/index.vue'
 import MainContainer from '@/components/main-container/index.vue'
 import MobileTopBar from './components/mobile-top-bar.vue'
 import MobileNavSheet from './components/mobile-nav-sheet.vue'
+import { mobileNavMode } from './mobile-nav-mode'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 import { safeSessionGet, safeSessionRemove } from '@/utils/safe-storage'
 import { KEYBOARD_REGISTRY, useKeyboardCommand } from '@/composables/useKeyboardCommand'
@@ -68,6 +82,10 @@ import { useFileDropZone } from '@/composables/useFileDropZone'
 import { getChatFileDropTarget } from '@/pages/home/composables/chat-file-drop-target'
 
 const { t } = useI18n()
+
+// Loaded only when the pager form is chosen; production stays on the sheet.
+const MobileNavPager = defineAsyncComponent(() => import('./components/mobile-nav-pager.vue'))
+const mainColumn = ref<HTMLElement | null>(null)
 
 // Base layer of the page's drop model: EVERYWHERE defaults to the focused chat
 // pane's composer. It answers only where no region zone claimed the drag —
