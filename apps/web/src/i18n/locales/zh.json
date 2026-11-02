@@ -4537,5 +4537,29 @@
   "elicitation": {
     "done": "已完成",
     "cancel": "取消"
+  },
+  "notifications": {
+    "clearAll": "全部标为已读",
+    "clearAllConfirm": "把 {count} 条都标为已读？",
+    "clearedAll": "已将 {count} 条标为已读",
+    "undo": "撤销",
+    "markUnread": "标记为未读",
+    "markRead": "标记为已读",
+    "updateFailed": "未读状态更新失败",
+    "inbox": "需要你",
+    "justNow": "刚刚",
+    "showAll": "显示全部 ({count})",
+    "showLess": "收起",
+    "otherBots": "其他 Bot 有未读会话",
+    "settingsTitle": "系统通知",
+    "settingsDescription": "收到回复、运行失败或需要你确认时提醒。",
+    "denied": "通知已被浏览器阻止。请在浏览器设置中允许通知后开启。",
+    "unsupported": "此浏览器不支持系统通知，未读红点仍然可用。",
+    "kind": {
+      "reply": "已回复",
+      "failed": "运行失败",
+      "needs_input": "等待你确认",
+      "marked": "标记为未读"
+    }
   }
 }

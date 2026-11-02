@@ -251,7 +251,11 @@ func TestNormalizeContextMessagesRemapsCurrentAndMemory(t *testing.T) {
 
 	want := sanitizeMessages(messages)
 	want = repairToolCallClosures(want, syntheticToolClosureError)
-	got, gotCurrent, gotMemory := normalizeContextMessages(messages, &currentIndex, &memoryIndex)
+	normalized := normalizeContext(messages)
+	got, gotCurrent, gotMemory := normalized.models(), normalized.index(&currentIndex), normalized.index(&memoryIndex)
+	if sent := normalized.sent(); !reflect.DeepEqual(sent, modelMessagesToSDKMessages(got)) {
+		t.Fatalf("provider messages differ from converting the normalized ones: %#v", sent)
+	}
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("normalized messages changed: got %#v want %#v", got, want)

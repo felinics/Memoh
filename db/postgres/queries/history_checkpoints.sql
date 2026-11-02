@@ -350,24 +350,23 @@ SELECT (
   )
 )::boolean AS has_candidates;
 
--- name: ListHistoryMessagesAfterWithinBytes :many
+-- name: ListHistoryWindow :many
 -- The raw history after a checkpoint (CM-ADM-001): the context rows after its
 -- position, before the cutoff position when set, admitted newest-first until
 -- their running content byte total crosses max_bytes (the crossing row is
--- kept, so the newest row always loads) and returned in ascending order. The
--- walk follows the context-order index one row a step and stops at the
--- budget, so older rows are never measured, however much history the
--- checkpoint leaves raw. truncated reports that the budget, not the window, ended the walk:
--- context rows of the window remain older than the oldest it admitted. Only
--- content is budgeted: full rows, metadata included, still load, so callers
--- that need content alone use ListTurnResponseSourcesAfterWithinBytes.
+-- kept, so the newest row always loads), as ids in ascending order. The walk
+-- follows the context-order index one row per step and stops at the budget, so older
+-- rows are never measured, however much history the checkpoint leaves raw.
+-- truncated reports that the budget, not the window, ended the walk: context
+-- rows of the window remain older than the oldest it admitted. Callers load
+-- the projection they need by id. Each step selects keys only and measures
+-- the content of the row it took, so a plan that sorts a step instead of
+-- walking the index sorts keys, never decodes every row it passes.
 WITH RECURSIVE history_window AS (
-  -- Measured outside its LIMIT, so whatever plan finds the newest row
-  -- measures that row alone.
   SELECT newest.session_id, newest.id, newest.turn_position, newest.turn_message_seq, newest.created_at,
-    octet_length(newest.content::text)::bigint AS total_bytes
+    (SELECT octet_length(c.content::text) FROM bot_history_messages c WHERE c.id = newest.id)::bigint AS total_bytes
   FROM (
-    SELECT m.session_id, m.id, m.turn_position, m.turn_message_seq, m.created_at, m.content
+    SELECT m.session_id, m.id, m.turn_position, m.turn_message_seq, m.created_at
     FROM bot_history_messages m
     WHERE m.team_id = public.memoh_current_team_id()
       AND m.session_id = sqlc.arg(session_id)
@@ -385,16 +384,12 @@ WITH RECURSIVE history_window AS (
   ) newest
   UNION ALL
   SELECT older.session_id, older.id, older.turn_position, older.turn_message_seq, older.created_at,
-    previous.total_bytes + octet_length(older.content::text)::bigint AS total_bytes
+    previous.total_bytes + (SELECT octet_length(c.content::text) FROM bot_history_messages c WHERE c.id = older.id)::bigint AS total_bytes
   FROM history_window previous
   CROSS JOIN LATERAL (
-    -- The context row before the previous one in the context-order index,
-    -- of whichever session: bounded by the previous row's own values rather
-    -- than by the session, the step is planned as the next entry of a range
-    -- and never as a scan and sort of a session the statistics may put at
-    -- one row. The walk ends at a row of another session or of the
-    -- checkpoint's span.
-    SELECT m.session_id, m.id, m.turn_position, m.turn_message_seq, m.created_at, m.content
+    -- Step to the previous context index entry without a session equality
+    -- estimate. Stop outside the step at another session or the checkpoint.
+    SELECT m.session_id, m.id, m.turn_position, m.turn_message_seq, m.created_at
     FROM bot_history_messages m
     WHERE m.team_id = public.memoh_current_team_id()
       AND m.turn_visible = true
@@ -432,36 +427,9 @@ WITH RECURSIVE history_window AS (
       AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
   ) AS truncated
 )
-SELECT
-  m.id,
-  m.bot_id,
-  m.session_id,
-  m.sender_channel_identity_id,
-  m.sender_account_user_id AS sender_user_id,
-  m.source_message_id AS external_message_id,
-  m.source_reply_to_message_id,
-  m.role,
-  m.content,
-  m.metadata,
-  m.usage,
-  m.session_mode,
-  m.runtime_type,
-  m.event_id,
-  m.display_text,
-  m.created_at,
-  ci.display_name AS sender_display_name,
-  ci.avatar_url AS sender_avatar_url,
-  s.channel_type AS platform,
-  budget_cut.truncated
+SELECT admitted.id, budget_cut.truncated
 FROM history_window admitted
--- By id alone: the walk read these rows from the session, and a session
--- predicate here would let a plan reach the payloads through the session's
--- rows rather than the admitted ones.
-JOIN bot_history_messages m ON m.id = admitted.id
-  AND m.team_id = public.memoh_current_team_id()
 CROSS JOIN budget_cut
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
 ORDER BY admitted.turn_position ASC, admitted.turn_message_seq ASC, admitted.created_at ASC, admitted.id ASC;
 
 -- name: ListHistoryRowsBySources :many
@@ -508,107 +476,6 @@ WHERE m.team_id = public.memoh_current_team_id()
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
 
--- name: MeasureHistoryMessagesAfter :one
--- Metadata-only context admission measure (CM-ADM-001) of the raw history
--- after a checkpoint: counts and content bytes aggregate on the database
--- side, so admission can size it without shipping any payload.
-SELECT
-  COUNT(*)::BIGINT AS message_count,
-  COALESCE(SUM(octet_length(m.content::text)), 0)::BIGINT AS content_bytes
-FROM bot_visible_history_messages m
-WHERE m.team_id = public.memoh_current_team_id()
-  AND m.session_id = sqlc.arg(session_id)
-  AND (m.turn_position, m.turn_message_seq) > (sqlc.arg(after_turn_position)::bigint, sqlc.arg(after_turn_message_seq)::bigint)
-  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync');
-
--- name: ListTurnResponseSourcesAfterWithinBytes :many
--- Turn-response (TR) composition, in Discuss and in pipeline chat, only needs
--- content, the interrupted-checkpoint flag and the Discuss step flag. Never
--- return full metadata: legacy context_lifecycle snapshots can dwarf the
--- content budget. Walk as ListHistoryMessagesAfterWithinBytes walks,
--- including its crossing row, turn order and truncated.
-WITH RECURSIVE history_window AS (
-  -- Measured outside its LIMIT, so whatever plan finds the newest row
-  -- measures that row alone.
-  SELECT newest.session_id, newest.id, newest.turn_position, newest.turn_message_seq, newest.created_at,
-    octet_length(newest.content::text)::bigint AS total_bytes
-  FROM (
-    SELECT m.session_id, m.id, m.turn_position, m.turn_message_seq, m.created_at, m.content
-    FROM bot_history_messages m
-    WHERE m.team_id = public.memoh_current_team_id()
-      AND m.session_id = sqlc.arg(session_id)
-      AND m.turn_visible = true
-      AND m.turn_id IS NOT NULL
-      AND m.turn_position IS NOT NULL
-      AND m.turn_message_seq IS NOT NULL
-      AND (m.turn_position, m.turn_message_seq) > (sqlc.arg(after_turn_position)::bigint, sqlc.arg(after_turn_message_seq)::bigint)
-      AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
-      AND sqlc.arg(max_bytes)::bigint > 0
-    ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
-    LIMIT 1
-  ) newest
-  UNION ALL
-  SELECT older.session_id, older.id, older.turn_position, older.turn_message_seq, older.created_at,
-    previous.total_bytes + octet_length(older.content::text)::bigint AS total_bytes
-  FROM history_window previous
-  CROSS JOIN LATERAL (
-    -- The context row before the previous one in the context-order index,
-    -- of whichever session: bounded by the previous row's own values rather
-    -- than by the session, the step is planned as the next entry of a range
-    -- and never as a scan and sort of a session the statistics may put at
-    -- one row. The walk ends at a row of another session or of the
-    -- checkpoint's span.
-    SELECT m.session_id, m.id, m.turn_position, m.turn_message_seq, m.created_at, m.content
-    FROM bot_history_messages m
-    WHERE m.team_id = public.memoh_current_team_id()
-      AND m.turn_visible = true
-      AND m.turn_id IS NOT NULL
-      AND m.turn_position IS NOT NULL
-      AND m.turn_message_seq IS NOT NULL
-      AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
-      AND (m.session_id, m.turn_position, m.turn_message_seq, m.created_at, m.id)
-        < (previous.session_id, previous.turn_position, previous.turn_message_seq, previous.created_at, previous.id)
-    ORDER BY m.session_id DESC, m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
-    LIMIT 1
-  ) older
-  WHERE previous.total_bytes < sqlc.arg(max_bytes)::bigint
-    AND older.session_id = sqlc.arg(session_id)
-    AND (older.turn_position, older.turn_message_seq) > (sqlc.arg(after_turn_position)::bigint, sqlc.arg(after_turn_message_seq)::bigint)
-), oldest AS (
-  SELECT admitted.turn_position, admitted.turn_message_seq, admitted.created_at, admitted.id
-  FROM history_window admitted
-  ORDER BY admitted.turn_position ASC, admitted.turn_message_seq ASC, admitted.created_at ASC, admitted.id ASC
-  LIMIT 1
-), budget_cut AS (
-  SELECT EXISTS (
-    SELECT 1
-    FROM oldest
-    JOIN bot_history_messages m
-      ON m.team_id = public.memoh_current_team_id()
-     AND m.session_id = sqlc.arg(session_id)
-     AND (m.turn_position, m.turn_message_seq, m.created_at, m.id)
-       < (oldest.turn_position, oldest.turn_message_seq, oldest.created_at, oldest.id)
-    WHERE m.turn_visible = true
-      AND m.turn_id IS NOT NULL
-      AND m.turn_position IS NOT NULL
-      AND m.turn_message_seq IS NOT NULL
-      AND (m.turn_position, m.turn_message_seq) > (sqlc.arg(after_turn_position)::bigint, sqlc.arg(after_turn_message_seq)::bigint)
-      AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
-  ) AS truncated
-)
-SELECT m.id, m.role, m.content, m.created_at,
-  COALESCE(m.metadata->'agent_step_interrupted' = 'true'::jsonb, false)::boolean AS interrupted,
-  COALESCE(m.metadata->'discuss_step' = 'true'::jsonb, false)::boolean AS discuss_step,
-  budget_cut.truncated
-FROM history_window admitted
--- By id alone: the walk read these rows from the session, and a session
--- predicate here would let a plan reach the payloads through the session's
--- rows rather than the admitted ones.
-JOIN bot_history_messages m ON m.id = admitted.id
-  AND m.team_id = public.memoh_current_team_id()
-CROSS JOIN budget_cut
-ORDER BY admitted.turn_position ASC, admitted.turn_message_seq ASC, admitted.created_at ASC, admitted.id ASC;
-
 -- name: ListTurnResponseSourcesByIDs :many
 -- The turn-response projection of the rows a checkpoint keeps by reference,
 -- with the inbound message a user row records: timeline composition renders
@@ -631,21 +498,15 @@ ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 -- name: ClassifyHistoryCheckpointMessages :many
 -- How a checkpoint stands for each inbound message that has context rows:
 -- kept when one of its rows is after the checkpoint's position or is a row
--- the checkpoint keeps by reference, folded otherwise. event_cursor is the
--- cursor of the event its rows were written from, 0 when unknown: a summary
--- reads rows, so it knows the message as of that event. A message without
+-- the checkpoint keeps by reference, folded otherwise. A message without
 -- context rows returns nothing.
 SELECT
   m.source_message_id::text AS external_message_id,
   bool_or(
     (m.turn_position, m.turn_message_seq) > (sqlc.arg(after_turn_position)::bigint, sqlc.arg(after_turn_message_seq)::bigint)
     OR m.id = ANY(sqlc.arg(kept_ids)::uuid[])
-  )::boolean AS kept,
-  COALESCE(MAX((event.event_data->>'event_cursor')::bigint), 0)::bigint AS event_cursor
+  )::boolean AS kept
 FROM bot_visible_history_messages m
-LEFT JOIN bot_session_events event
-  ON event.team_id = public.memoh_current_team_id()
- AND event.id = m.event_id
 WHERE m.team_id = public.memoh_current_team_id()
   AND m.session_id = sqlc.arg(session_id)
   AND m.source_message_id = ANY(sqlc.arg(external_message_ids)::text[])

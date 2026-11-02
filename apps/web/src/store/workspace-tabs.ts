@@ -3,6 +3,7 @@ import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { useTabScopedStorage } from '@/utils/tab-scoped-storage'
 import { useIsMobile } from '@/composables/useIsMobile'
+import { focusIsInTextInput } from '@/lib/keyboard-context'
 import type { DockviewApi, DockviewGroupPanel, SerializedDockview } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
 import { routeConversationLabel } from '@/store/chat-list.utils'
@@ -93,6 +94,14 @@ function panelComponentOf(id: string): WorkspacePanelComponent | null {
   return null
 }
 
+// Menus and dialogs a conversation can be entered from; how long (in frames,
+// about two seconds) to wait for one to give focus back before the entry gives
+// up on moving the caret; and how long, once one has unmounted, to wait for the
+// focus it returns to its trigger to land.
+const ENTRY_OVERLAY = '[role="menu"], [role="menubar"], [role="dialog"], [role="alertdialog"], [role="listbox"]'
+const ENTRY_OVERLAY_MAX_FRAMES = 120
+const ENTRY_FOCUS_RETURN_MAX_FRAMES = 6
+
 export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   const selection = useChatSelectionStore()
   const { currentBotId } = storeToRefs(selection)
@@ -164,11 +173,6 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   let dockHoldsMobileStack = false
   let apiDisposables: Array<{ dispose(): void }> = []
   let draftChatQueued = false
-  // initialize() may auto-pick the latest conversation without a user click.
-  // That pick may fill the draft only when the dock restored empty (the draft
-  // is then the store's own fallback); a restored workspace is the user's, so
-  // the pick is dropped instead.
-  let autoPickMayFillDraft = false
   const deletedSessionIdsByBot = new Map<string, Set<string>>()
   const chatActivationExplicitOverrides = new Map<string, boolean>()
 
@@ -451,12 +455,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     }
     if (repairedEmptyTitles && !dockEmptyAfterRestore) persistLayout()
     // Non-empty restore is authoritative for this tab's panels. Empty restore
-    // still needs the draft fallback, and may accept initialize()'s auto-pick
-    // (filling that draft).
-    autoPickMayFillDraft = dockEmptyAfterRestore
+    // still needs the draft fallback.
     if (dockEmptyAfterRestore) ensureDraftChatPanel()
     syncDraftChatExplicitSelection()
     alignSelectionWithDock()
+    focusChatInputAfterEntry()
   }
 
   function domListener<K extends keyof DocumentEventMap>(
@@ -608,7 +611,6 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     loadedBotId = null
     panelDragging.value = false
     draftChatQueued = false
-    autoPickMayFillDraft = false
   }
 
   // ---- panel operations ----------------------------------------------------
@@ -619,6 +621,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   function requestChatInputFocus() {
     if (!activePanelId.value || panelComponentOf(activePanelId.value) !== 'chat') activateChatPanel()
+    requestActiveChatInputFocus()
+  }
+
+  function requestActiveChatInputFocus() {
     const panel = api.value?.activePanel
     if (!activePanelIsChat.value || !panel || !currentBotId.value) return
     pendingChatInputFocus.value = {
@@ -626,6 +632,58 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       botId: currentBotId.value,
       sessionId: panel.params?.sessionId ?? null,
     }
+  }
+
+  // Desktop: entering a conversation — cold start, a bot switch, New Chat, a
+  // session opened from the sidebar, a menu or search — leaves the caret in its
+  // composer. Requested a tick later, once the activation and selection changes
+  // it rides on (which drop pending requests) have settled. It never takes
+  // focus from another input, never switches away from a non-chat tab, and
+  // never runs on phones, where focusing would raise a keyboard the user did
+  // not ask for.
+  let entryFocusRun = 0
+  function focusChatInputAfterEntry() {
+    if (isMobile.value) return
+    const run = ++entryFocusRun
+    void nextTick(() => {
+      if (isMobile.value || run !== entryFocusRun) return
+      // Entered from a menu or dialog: it still holds focus and hands it back
+      // to its trigger as it closes, which would undo an earlier request.
+      // Wait until focus has left it.
+      const overlay = document.activeElement?.closest<HTMLElement>(ENTRY_OVERLAY)
+      if (overlay) {
+        afterOverlayReleasesFocus(overlay, run)
+        return
+      }
+      if (focusIsInTextInput()) return
+      requestActiveChatInputFocus()
+    })
+  }
+
+  function afterOverlayReleasesFocus(
+    overlay: HTMLElement,
+    run: number,
+    framesLeft = ENTRY_OVERLAY_MAX_FRAMES,
+    returnFramesLeft = ENTRY_FOCUS_RETURN_MAX_FRAMES,
+  ) {
+    requestAnimationFrame(() => {
+      if (run !== entryFocusRun || isMobile.value) return
+      const active = document.activeElement
+      if (overlay.isConnected && active && overlay.contains(active)) {
+        if (framesLeft > 0) afterOverlayReleasesFocus(overlay, run, framesLeft - 1, returnFramesLeft)
+        return
+      }
+      // Unmounted while it held focus: focus fell to the page, and the
+      // overlay's focus scope gives it back to the trigger in a task queued
+      // after unmounting (reka-ui FocusScope). A request made before that
+      // lands would be undone by it.
+      if (!overlay.isConnected && (!active || active === document.body) && returnFramesLeft > 0) {
+        afterOverlayReleasesFocus(overlay, run, framesLeft, returnFramesLeft - 1)
+        return
+      }
+      if (focusIsInTextInput()) return
+      requestActiveChatInputFocus()
+    })
   }
 
   function focusAdjacentTab(direction: -1 | 1): boolean {
@@ -814,6 +872,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const title = opts.title?.trim() || chatTitleFallbackFor(sid)
     const explicitSelection = opts.explicitSelection !== false
     const activate = opts.activate !== false
+    if (activate) focusChatInputAfterEntry()
     const existing = opts.groupLocal && opts.groupId
       ? dock.getGroup(opts.groupId)?.panels.find(
           panel => panelComponentOf(panel.id) === 'chat' && panelSessionId(panel) === sid,
@@ -907,6 +966,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     // the sidebar, so refuse to (re)open a session being deleted for this bot.
     if (isDeletedSessionForCurrentBot(sid)) return
     const title = opts.title?.trim() || chatTitleFallbackFor(sid)
+    focusChatInputAfterEntry()
     const existing = chatPanelForSession(sid)
     if (existing) {
       existing.api.setTitle(title)
@@ -976,6 +1036,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!dock) return
     const bid = (currentBotId.value ?? '').trim()
     if (!bid) return
+    focusChatInputAfterEntry()
     const draftCandidates = opts?.groupId
       ? dock.getGroup(opts.groupId)?.panels ?? []
       : dock.panels
@@ -1082,14 +1143,16 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       selectChatSession(activeSid, false)
       return
     }
-    // The focused tab is a draft. It may take a selected session that has no
-    // tab yet — filling it changes the draft's content, not which tab has
-    // focus. An auto-pick fills only the store's own empty-dock draft.
+    // The focused tab is a draft. It may take an explicitly selected session
+    // that has no tab yet — filling it changes the draft's content, not which
+    // tab has focus. A non-explicit selection never fills it: the draft's
+    // composer is already on screen, and swapping in a history afterwards
+    // would move it under the user.
     if (
       sid
+      && explicitSelection
       && !isDeletedSessionForCurrentBot(sid)
       && !chatPanelForSession(sid)
-      && (explicitSelection || autoPickMayFillDraft)
     ) {
       active.api.updateParameters({ sessionId: sid, explicitSelection })
       active.api.setTitle(chatTitleFallbackFor(sid))
@@ -1177,17 +1240,14 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       const latestDock = api.value
       if (!latestDock || suppressPersist || latestDock.panels.length > 0) return
       if (!(currentBotId.value ?? '').trim()) return
-      // Only an EXPLICIT selection may refill as that session. initialize()'s
-      // auto-pick leaves a non-explicit sessionId even when we refused to open
-      // its tab over a File/Preview restore; honoring it here would surface a
-      // random Untitled Session the moment the user closes the last file tab.
-      // Live tabs that already selected a session explicitly keep that refill,
-      // and so does a cold start that restored nothing once initialize() is done.
+      // Only an EXPLICIT selection may refill as that session. A non-explicit
+      // sessionId is layout bookkeeping (or a stale leftover); honoring it here
+      // would surface a random Untitled Session the moment the user closes the
+      // last file tab. Live tabs that already selected a session explicitly
+      // keep that refill.
       const sid = (chatStore.sessionId ?? '').trim()
       const explicitSelection = chatStore.hasExplicitSessionSelection === true
-      const acceptAutoPick = autoPickMayFillDraft && !chatStore.loadingChats
-      if (acceptAutoPick) autoPickMayFillDraft = false
-      if (sid && (explicitSelection || acceptAutoPick) && !isDeletedSessionForCurrentBot(sid)) {
+      if (sid && explicitSelection && !isDeletedSessionForCurrentBot(sid)) {
         openSessionChat({
           sessionId: sid,
           explicitSelection,
@@ -2126,9 +2186,6 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   watch(() => chatStore.loadingChats, (loading) => {
     if (loading) return
     alignSelectionWithDock()
-    // An empty dock has not drawn its draft yet; ensureDraftChatPanel takes
-    // the pick when it does.
-    if (api.value?.activePanel) autoPickMayFillDraft = false
   })
 
   return {

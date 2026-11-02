@@ -78,16 +78,16 @@ func classify(name string, s *Schema) (*classified, error) {
 
 	switch {
 	case len(s.OneOf) > 0:
-		return classifyOneOf(c, s)
+		return classifyUnion(c, s.OneOf)
 	case len(s.AnyOf) > 0:
+		for _, v := range s.AnyOf {
+			if v.Ref == "" {
+				return classifyUnion(c, s.AnyOf)
+			}
+		}
 		// Untagged unions carry no discriminator, so decoding into a typed
 		// wrapper would require structural trial; keep them raw and let the
 		// consumer decode into the candidate types on demand.
-		for _, v := range s.AnyOf {
-			if v.Ref == "" {
-				return nil, fmt.Errorf("definition %q: anyOf variant without $ref is not supported", name)
-			}
-		}
 		c.kind = kindOpaqueUnion
 		return c, nil
 	case len(s.AllOf) > 0:
@@ -123,14 +123,17 @@ func classify(name string, s *Schema) (*classified, error) {
 	return nil, fmt.Errorf("definition %q: unsupported type %q", name, types[0])
 }
 
-func classifyOneOf(c *classified, s *Schema) (*classified, error) {
+func classifyUnion(c *classified, variants []*Schema) (*classified, error) {
 	var unitValues []string
 	var objectVariants []mixedVariant
 	var taggedVariants []*Schema
 
-	for _, v := range s.OneOf {
+	for _, v := range variants {
 		types, _ := v.nonNullTypes()
 		switch {
+		case len(types) == 2 && types[0] == "string" && types[1] == "object" && len(v.Properties) == 0 && len(v.Enum) == 0:
+			// serde's catch-all for variants this CLI does not know yet;
+			// generated unions keep those in Raw() without a variant of their own.
 		case len(types) == 1 && types[0] == "string" && len(v.Enum) > 0:
 			values, err := v.enumStrings()
 			if err != nil {
@@ -143,12 +146,12 @@ func classifyOneOf(c *classified, s *Schema) (*classified, error) {
 		case len(types) == 1 && types[0] == "object":
 			taggedVariants = append(taggedVariants, v)
 		default:
-			return nil, fmt.Errorf("definition %q: oneOf variant with unsupported shape", c.name)
+			return nil, fmt.Errorf("definition %q: union variant with unsupported shape", c.name)
 		}
 	}
 
 	switch {
-	case len(taggedVariants) == len(s.OneOf):
+	case len(taggedVariants) == len(variants):
 		return classifyTagged(c, taggedVariants)
 	case len(taggedVariants) == 0 && len(objectVariants) == 0:
 		// Enum split across variants for per-value descriptions.
@@ -161,7 +164,7 @@ func classifyOneOf(c *classified, s *Schema) (*classified, error) {
 		c.objectVariants = objectVariants
 		return c, nil
 	}
-	return nil, fmt.Errorf("definition %q: oneOf mixes tagged and other variant shapes", c.name)
+	return nil, fmt.Errorf("definition %q: union mixes tagged and other variant shapes", c.name)
 }
 
 func classifyTagged(c *classified, variants []*Schema) (*classified, error) {

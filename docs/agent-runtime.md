@@ -219,9 +219,10 @@ checkpoint fails with `checkpoint.ErrMoved`. A row it keeps that the pass never 
 counted (`history.checkpoint.unseen_rows_total`).
 
 The rows of a message a checkpoint folded record the message as it was when
-they were written. A message changed after that, edited or deleted, composes
-again after the checkpoint with what its summary never read; Discuss event
-replay keeps its complete event chain.
+they were written, and its summary stands for it as such: a message edited or
+deleted after the fold stays folded, and Discuss event replay leaves its events
+out. Replay decides that per event against the rows of its own message, so a
+page costs the events it reads, not the session's history.
 
 Every checkpoint names its parent and depends on every row up to its
 position, which its summary may have read. A write that removes rows (hiding,
@@ -336,7 +337,7 @@ such as Grok rejecting its sign-in, as that failure. Nothing here can make a
 thread permanently unusable.
 
 Grok Build drives the rest of its session through Grok's own ACP extension
-methods, read as Grok 1.0.62 defines them (`internal/agent/runtime/external/grok/config.go`
+methods, read as Grok 1.0.70 defines them (`internal/agent/runtime/external/grok/config.go`
 lists them; a process of another version is logged at start): compaction is
 `_x.ai/compact_conversation` on the open session, the `status` command reads
 `_x.ai/session/info` for the model and context use, and the model catalog
@@ -540,13 +541,23 @@ Server shutdown closes admission and records `session_runtime.interrupted` on
 running session runs before canceling producers or stopping HTTP, RPC, schedules,
 external runtimes and workspaces. The existing `lost` terminal state carries this
 specific reason; no schema migration is needed. Completed finish proposals and
-explicit user aborts retain their authoritative outcomes. With a distributed live backend, native parked decisions remain
-`waiting_decision`. After the producer has
+explicit user aborts retain their authoritative outcomes. Native parked decisions
+remain `waiting_decision` on either live backend. After the producer has
 committed its assistant tool call, shutdown advances the run, session and every
 pending decision to a new persistence fence in one transaction, then revokes
-local execution. It leaves the old Redis lease index in place as the recovery
-pointer. Once the lease expires, the existing reaper reserves a fresh owner;
-failed reservations retain that pointer for retry. No answer is synthesized.
+local execution. What it leaves behind is the recovery pointer. On Redis it is
+the old lease index: once the lease expires, the existing reaper reserves a
+fresh owner, and failed reservations retain that pointer for retry. On the
+memory backend it is the live generation stamped on the run: the next process's
+generation sweep finds the run, reclaims its fence and reserves it, without the
+`backend_loss_grace` wait, because a memory generation ends with its process and
+the backend is single-instance. A process that dies without a graceful shutdown
+leaves the same pointers, so the same recovery applies. A run the generation
+sweep found, on either backend, has no pointer left once its fence is reclaimed,
+so a reservation that fails afterwards ends the run as `lost`. The successor
+shows the run as it was: a view the live backend kept is reused, otherwise the
+run's persisted steps and decision cards are rebuilt from history, and the new
+owner's stream continues from those blocks. No answer is synthesized.
 Decision commands cannot begin after shutdown closes admission. A previously
 accepted native answer moves its run to `running` in the same fenced PostgreSQL
 transaction as the decision response. `input_json.decision_continuations` records
@@ -568,6 +579,17 @@ Transient database/runtime-classification failures retain the recovery pointer
 instead of canceling decisions. This does not guarantee recovery of a producer
 whose tool-call persistence failed or exceeded the shutdown budget.
 
+A run's owner closes the run's pending decisions in its finish path. A run that
+ends any other way (the reaper, graceful shutdown, the memory finish handoff, an
+unreservable recovery) has its pending ask_user requests and tool approvals
+canceled with it, scoped to that run and fence. A request must never stay
+answerable on a run that cannot apply the answer. If that cleanup fails, answering
+the request finds the terminal run and closes it then. A WebSocket answer to a
+decision that no longer accepts one is acknowledged with `applied: false` and
+`user_input.expired` or `tool_approval.expired`, the error the other transports
+return; the Web client drops its optimistic answer and shows the request as
+expired until the transcript reloads its authoritative state.
+
 The continuation keeps its original durable turn and request message ID. A
 response retry uses the existing control-ID deduplication contract; tests cover
 shutdown, a fresh manager's lease recovery, the answer and duplicate submission.
@@ -586,7 +608,9 @@ by that executable. Drain those waits before upgrading, or use a separately
 approved recovery procedure with authoritative pending decisions, no newer turn,
 and tenant-scoped checks. Do not revive historical `lost` rows automatically.
 Rolling back reintroduces the old shutdown behavior on the next exit; drain
-pending native waits before rollback. No schema migration is required.
+pending native waits before rollback. Migration 0170 cancels the requests that
+were already left pending on ended runs, including those an older executable
+leaves on its last shutdown; it changes no schema.
 
 Local browser verification used the documented development stack with Redis,
 a synthetic model and one active Server. The original decision remained visible

@@ -1,5 +1,6 @@
 <template>
-  <!-- Action bar for session multi-select, directly above the list it acts on.
+  <!-- Action bar for session multi-select, directly above the lists it acts on
+       (Folders and Recents), sticky inside their group in the shared scrollport.
        Selection starts from a row's menu (session-item.vue), never from a
        standing button, so this row only exists while something is checked.
        It is the same group-label row as the panel's other headers
@@ -8,7 +9,7 @@
     v-if="selection.active.value"
     :label="t('chat.selectedSessions', { count: selection.selectedIds.value.size })"
     :label-class="labelClass"
-    class="px-2 pb-0.5 pt-1"
+    class="sticky top-0 z-(--z-sticky) bg-sidebar px-2 pt-1 pb-1"
   >
     <TextButton
       class="text-xs"

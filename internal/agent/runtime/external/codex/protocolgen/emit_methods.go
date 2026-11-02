@@ -7,13 +7,8 @@ import (
 
 // emitMethods renders method constants and the typed dispatch tables that tie
 // wire method names to generated params/response types.
-func (g *generator) emitMethods(b *strings.Builder) error {
-	version, err := snapshotVersion()
-	if err != nil {
-		return err
-	}
-	b.WriteString("// PinnedCodexVersion is the codex CLI version the vendored schema snapshot\n")
-	b.WriteString("// (and therefore these generated types) corresponds to.\n")
+func (g *generator) emitMethods(b *strings.Builder, version string) error {
+	b.WriteString("// PinnedCodexVersion is the codex CLI version these generated types came from.\n")
 	fmt.Fprintf(b, "const PinnedCodexVersion = %q\n\n", version)
 
 	b.WriteString("// Client request methods (Memoh → app-server).\nconst (\n")

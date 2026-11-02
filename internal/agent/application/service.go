@@ -141,6 +141,7 @@ type Service struct {
 	bgManager               *background.Manager
 	toolApproval            *toolapproval.Service
 	userInput               userInputService
+	attention               attentionMarker
 	hookService             *hooks.Service
 	memoryContextMu         sync.Mutex
 	memoryContextCache      *memprovider.MemoryContextCache
@@ -499,16 +500,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		runCfg.Identity.IsSubagent = true
 	}
 	runCfg.RunID = runIDForChatRequest(req.RunID)
-	memoryContext := s.loadMemoryContext(ctx, req)
-	if memoryContext.Trace != nil && runCfg.ContextLifecycle != nil {
-		runCfg.ContextLifecycle.SetMemoryRecall(*memoryContext.Trace)
-	}
-	memoryMsg := memoryContext.Message
-	reqMessages := pruneMessagesForGateway(nonNilModelMessages(req.Messages))
-	if memoryMsg != nil {
-		pruned, _ := pruneMessageForGateway(*memoryMsg)
-		memoryMsg = &pruned
-	}
+	reqMessages := pruneMessagesForGateway(req.Messages)
 
 	// When the DCP pipeline has data for this session, build context from
 	// the rendered event stream (RC) + bot turn responses (TR) instead of
@@ -527,7 +519,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	contextTokenBudget := s.effectiveContextTokenBudget(chatModel)
 	runCfg.ContextBudgetMaxTokens = contextTokenBudget
 
-	history, loadErr := s.loadChatHistory(ctx, req, usePipeline, contextTokenBudget, chatModel.ID)
+	history, loadErr := s.loadChatHistory(ctx, req, chatHistoryScope(req), usePipeline, contextTokenBudget, chatModel.ID)
 	if loadErr != nil {
 		s.logger.ErrorContext(ctx, "resolve: load history failed",
 			slog.String("bot_id", req.BotID),
@@ -535,6 +527,13 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		)
 		return resolvedContext{}, req, loadErr
 	}
+	// Memory recall reuses the history just loaded; its message is appended
+	// after that history, never inserted into it.
+	memoryContext := s.loadMemoryContext(ctx, req, func() memoryQuery { return history.memoryQuery })
+	if memoryContext.Trace != nil {
+		runCfg.ContextLifecycle.SetMemoryRecall(*memoryContext.Trace)
+	}
+	memoryMsg := memoryContext.Message
 	messages, historyRecords := history.messages, history.records
 	var currentMessageIndex *int
 	if usePipeline {
@@ -560,12 +559,14 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	if !usePipeline && !req.ReusePersistedUserMessage {
 		messages = append(messages, reqMessages...)
 	}
-	trimmableMessages := normalizedContextPrefixLength(messages, historyMessageCount)
-	messages, currentMessageIndex, memoryMessageIndex = normalizeContextMessages(
-		messages,
-		currentMessageIndex,
-		memoryMessageIndex,
-	)
+	normalized := normalizeContext(messages)
+	if err := interruptedPreparation(ctx, "normalize context messages"); err != nil {
+		return resolvedContext{}, req, err
+	}
+	trimmableMessages := normalized.prefixLength(historyMessageCount)
+	currentMessageIndex = normalized.index(currentMessageIndex)
+	memoryMessageIndex = normalized.index(memoryMessageIndex)
+	messages = normalized.models()
 	runCfg.ContextHistoryTokenEstimates = make([]int, len(messages))
 	for index := range messages {
 		runCfg.ContextHistoryTokenEstimates[index] = estimateMessageTokens(messages[index])
@@ -576,9 +577,6 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	mergedAttachments := s.routeAndMergeAttachments(ctx, chatModel, req)
 
 	tz := runCfg.Identity.TimezoneLocation
-	if tz == nil {
-		tz = time.UTC
-	}
 	headerInput := turnpkg.UserMessageHeaderInput{
 		MessageID:         strings.TrimSpace(req.ExternalMessageID),
 		ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
@@ -600,10 +598,9 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		headerifiedModelQuery = turnpkg.FormatUserHeader(headerInput, modelQuery)
 	}
 	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
-	forkMessages := nonNilModelMessages(messages)
-	runCfg.ForkContextSourceMessageIDs = historySourceMessageIDsForMessages(forkMessages, historyRecords)
-	runCfg.ContextProvenance = contextProvenance(forkMessages, historyRecords, compactionInputs(req))
-	runCfg.Messages = modelMessagesToSDKMessages(forkMessages)
+	runCfg.Messages = normalized.sent()
+	runCfg.ForkContextSourceMessageIDs = historySourceMessageIDsForMessages(messages, historyRecords)
+	runCfg.ContextProvenance = contextProvenance(messages, runCfg.Messages, historyRecords, compactionInputs(req))
 	runCfg.ContextMemoryMessageIndex = memoryMessageIndex
 	if usePipeline {
 		runCfg.ContextCurrentUserMessageIndex = currentMessageIndex
@@ -620,6 +617,9 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	runCfg.InlineAttachments = extractNativeAttachmentParts(mergedAttachments)
 	runCfg.ContextScope = buildContextFragScope(req, displayName, runCfg.Identity)
 	runCfg = runCfg.RefreshContextFrag()
+	if err := interruptedPreparation(ctx, "compile context"); err != nil {
+		return resolvedContext{}, req, err
+	}
 
 	var injectedRecords *[]InjectedMessageRecord
 	if req.InjectCh != nil {
@@ -1235,9 +1235,11 @@ type RunConfigRequest struct {
 	ChatToken         string //nolint:gosec // session credential material, not a hardcoded secret
 }
 
-// ResolveRunConfig builds a complete RunConfig (model, system prompt, tools,
-// identity) for a bot+session without loading messages or requiring a query.
-// The caller is responsible for filling RunConfig.Messages.
+// ResolveRunConfig builds the RunConfig (model, tools, identity, budget) of
+// a bot+session without loading messages or requiring a query. The caller
+// fills RunConfig.Messages and then builds the system prompt with
+// prepareRunConfig, whose hooks see those messages. Executing an approved
+// tool needs neither.
 // It serves runs that do not start from a ChatRequest: resumed decisions and
 // Discuss turns.
 func (s *Service) ResolveRunConfig(ctx context.Context, req RunConfigRequest) (ResolveRunConfigResult, error) {
@@ -1294,7 +1296,6 @@ func (s *Service) ResolveRunConfig(ctx context.Context, req RunConfigRequest) (R
 
 	contextBudget := s.effectiveContextTokenBudget(chatModel)
 	cfg.ContextBudgetMaxTokens = contextBudget
-	cfg = s.prepareRunConfig(ctx, cfg)
 	return ResolveRunConfigResult{
 		RunConfig:              cfg,
 		ModelID:                chatModel.ID,
@@ -1449,14 +1450,6 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 	return cfg.RefreshContextFrag()
 }
 
-func normalizeContextMessages(messages []ModelMessage, currentIndex, memoryIndex *int) ([]ModelMessage, *int, *int) {
-	cleaned := sanitizeMessages(messages)
-	cleaned = repairToolCallClosures(cleaned, syntheticToolClosureError)
-	return cleaned,
-		remapContextMessageIndex(messages, currentIndex),
-		remapContextMessageIndex(messages, memoryIndex)
-}
-
 func prependContextMessages(prefix, messages []ModelMessage, trackedIndex *int) ([]ModelMessage, *int) {
 	if len(prefix) == 0 {
 		return messages, trackedIndex
@@ -1469,28 +1462,6 @@ func prependContextMessages(prefix, messages []ModelMessage, trackedIndex *int) 
 		}
 	}
 	return append(prefix, messages...), trackedIndex
-}
-
-func normalizedContextPrefixLength(messages []ModelMessage, rawPrefixLength int) int {
-	if rawPrefixLength <= 0 || len(messages) == 0 {
-		return 0
-	}
-	rawPrefixLength = min(rawPrefixLength, len(messages))
-	prefix := sanitizeMessages(messages[:rawPrefixLength])
-	prefix = repairToolCallClosures(prefix, syntheticToolClosureError)
-	return len(prefix)
-}
-
-func remapContextMessageIndex(messages []ModelMessage, index *int) *int {
-	if index == nil || *index < 0 || *index >= len(messages) || !strings.EqualFold(strings.TrimSpace(messages[*index].Role), "user") {
-		return nil
-	}
-	prefix := sanitizeMessages(messages[:*index+1])
-	prefix = repairToolCallClosures(prefix, syntheticToolClosureError)
-	if len(prefix) == 0 || !strings.EqualFold(strings.TrimSpace(prefix[len(prefix)-1].Role), "user") {
-		return nil
-	}
-	return intPointer(len(prefix) - 1)
 }
 
 func latestModelUserMessageIndex(messages []ModelMessage) *int {

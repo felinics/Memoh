@@ -141,14 +141,11 @@ func TestAgentFailureStreamEventExposesOnlyStablePublicContract(t *testing.T) {
 }
 
 type recordingMessageService struct {
-	persisted               []messagepkg.PersistInput
-	persistErr              error
-	roundPersistErr         error
-	roundOptions            []messagepkg.RoundPersistenceOptions
-	replaced                int
-	replacementTurnID       string
-	replacementTurnPosition *int64
-	deleted                 [][]string
+	persisted       []messagepkg.PersistInput
+	persistErr      error
+	roundPersistErr error
+	roundOptions    []messagepkg.RoundPersistenceOptions
+	deleted         [][]string
 }
 
 func (s *recordingMessageService) Persist(_ context.Context, input messagepkg.PersistInput) (messagepkg.Message, error) {
@@ -184,19 +181,7 @@ func (s *recordingMessageService) PersistRound(_ context.Context, inputs []messa
 	return persisted, true, nil
 }
 
-func (*recordingMessageService) List(context.Context, string) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) ListSince(context.Context, string, time.Time) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
 func (*recordingMessageService) ListLatest(context.Context, string, int32) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) ListBefore(context.Context, string, time.Time, int32) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
@@ -205,10 +190,6 @@ func (*recordingMessageService) ListBySession(context.Context, string) ([]messag
 }
 
 func (*recordingMessageService) ListSinceBySession(context.Context, string, time.Time) ([]messagepkg.Message, error) {
-	return nil, nil
-}
-
-func (*recordingMessageService) ListActiveSinceBySession(context.Context, string, time.Time) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
@@ -230,10 +211,6 @@ func (*recordingMessageService) ListTurnResponseSourcesWithinBytes(context.Conte
 
 func (*recordingMessageService) ListTurnResponseSourcesByIDs(context.Context, string, []string) ([]messagepkg.Message, error) {
 	return nil, nil
-}
-
-func (*recordingMessageService) MeasureHistory(context.Context, string, messagepkg.HistoryPosition) (messagepkg.ActiveMessagesMeasure, error) {
-	return messagepkg.ActiveMessagesMeasure{}, nil
 }
 
 func (*recordingMessageService) ListLatestBySession(context.Context, string, int32) ([]messagepkg.Message, error) {
@@ -273,13 +250,6 @@ func (*recordingMessageService) GetVisibleTurnByMessage(context.Context, string,
 }
 
 func (*recordingMessageService) GetLatestVisibleTurnBySession(context.Context, string) (messagepkg.HistoryTurn, error) {
-	return messagepkg.HistoryTurn{}, nil
-}
-
-func (s *recordingMessageService) ReplaceTurn(_ context.Context, _, _, replacementTurnID string, replacementTurnPosition *int64, _, _, _ string) (messagepkg.HistoryTurn, error) {
-	s.replaced++
-	s.replacementTurnID = replacementTurnID
-	s.replacementTurnPosition = replacementTurnPosition
 	return messagepkg.HistoryTurn{}, nil
 }
 

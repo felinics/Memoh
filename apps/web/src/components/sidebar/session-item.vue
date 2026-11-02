@@ -23,7 +23,8 @@
         class="group relative flex items-center min-h-[2.125rem] w-full rounded-[9px] px-[11px] text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         :data-ui-selected="isActive ? '' : undefined"
         :data-menu-open="menuOpen || undefined"
-        :data-streaming="streaming || undefined"
+        :data-streaming="streaming || unread.isUnread(session.id) || undefined"
+        :data-unread="unread.isUnread(session.id) || undefined"
         :data-selecting="selecting || undefined"
         :title="hoverTitle"
         @click="activate"
@@ -110,6 +111,19 @@
                 :aria-label="t('chat.sessionStreaming')"
               />
             </div>
+            <div
+              v-else-if="unread.isUnread(session.id)"
+              data-slot="sidebar-session-spinner"
+              class="flex h-6 w-6 items-center justify-center transition-opacity duration-150"
+              role="img"
+              :aria-label="t(`notifications.kind.${unread.kindOf(session.id)}`)"
+            >
+              <AttentionDot
+                :kind="unread.kindOf(session.id) ?? 'reply'"
+                :session-id="session.id"
+                :attention-at="unread.entries[session.id]?.attentionAt"
+              />
+            </div>
 
             <DropdownMenu
               v-if="!selecting"
@@ -142,6 +156,13 @@
                 >
                   <Pencil />
                   {{ t('common.rename') }}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  v-if="canToggleRead"
+                  @select="toggleRead"
+                >
+                  <component :is="isUnread ? MailOpen : Mail" />
+                  {{ isUnread ? t('notifications.markRead') : t('notifications.markUnread') }}
                 </DropdownMenuItem>
                 <DropdownMenuItem @select="startSelection">
                   <ListChecks />
@@ -177,6 +198,13 @@
         <Pencil />
         {{ t('common.rename') }}
       </ContextMenuItem>
+      <ContextMenuItem
+        v-if="canToggleRead"
+        @select="toggleRead"
+      >
+        <component :is="isUnread ? MailOpen : Mail" />
+        {{ isUnread ? t('notifications.markRead') : t('notifications.markUnread') }}
+      </ContextMenuItem>
       <ContextMenuItem @select="startSelection">
         <ListChecks />
         {{ t('chat.selectSessions') }}
@@ -195,7 +223,7 @@
 <script setup lang="ts">
 import { externalAgentDisplayName, externalAgentIcon } from '@/utils/external-agent'
 import { computed, inject, ref } from 'vue'
-import { Clock, ListChecks, LoaderCircle, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
+import { Clock, ListChecks, LoaderCircle, Mail, MailOpen, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { OpenInTabIcon } from '@memohai/icon/ui'
 import type { SessionSummary } from '@/composables/api/useChat'
@@ -210,12 +238,17 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  toast,
 } from '@felinic/ui'
 import { sessionAgentProvider } from '@/utils/bot-agent'
 import { splitScriptRuns } from '@/utils/script-runs'
 import { isAgentRuntimeType, normalizedRuntimeType, normalizedSessionMode, routeConversationLabel } from '@/store/chat-list.utils'
 import MarqueeText from './marquee-text.vue'
 import { SessionSelectionKey } from './session-selection'
+import { useUnreadStore } from '@/store/unread'
+import { useUserStore } from '@/store/user'
+import { canHoldUnread } from '@/utils/session-attention'
+import AttentionDot from './attention-dot.vue'
 import { SessionBotAgentsKey } from './session-bot-agents'
 
 const props = defineProps<{
@@ -232,6 +265,21 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const unread = useUnreadStore()
+const user = useUserStore()
+const isUnread = computed(() => unread.isUnread(props.session.id))
+const canToggleRead = computed(() => canHoldUnread(props.session, user.userInfo.id))
+
+/** Two sides of one switch: reading clears the dot, marking unread brings it back for later. */
+async function toggleRead() {
+  if (isUnread.value) return unread.markRead(props.session.id)
+  try {
+    await unread.markUnread([props.session.id])
+  }
+  catch {
+    toast.error(t('notifications.updateFailed'))
+  }
+}
 
 const injectedSelection = inject(SessionSelectionKey)
 if (!injectedSelection) throw new Error('SessionItem must be used within the sessions panel')
@@ -306,3 +354,9 @@ const hoverTitle = computed(() => {
   return handle ? `${title} — @${handle.replace(/^@/, '')}` : title
 })
 </script>
+
+<style scoped>
+[data-unread] :is(.sidebar-cjk, .sidebar-latin) {
+  font-weight: 600;
+}
+</style>

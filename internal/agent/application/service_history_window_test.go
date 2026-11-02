@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 )
@@ -39,7 +38,7 @@ func TestSessionHistorySurvivesIdleDays(t *testing.T) {
 	source := &idleSessionHistory{rows: []messagepkg.Message{user, answer}}
 	svc := checkpointTestService(source, &historyCheckpointQueries{})
 	req := ChatRequest{BotID: "bot", ThreadID: lifecycleTestSessionID, Query: "what was the codeword?"}
-	prepared, err := svc.prepareHistoryContext(context.Background(), req, historyfrag.ScopeFallback{}, 1000)
+	prepared, err := prepareHistoryFor(context.Background(), svc, req, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +70,7 @@ func TestMissingSessionNeverLoadsHistory(t *testing.T) {
 	for _, sessionID := range []string{"", "  "} {
 		svc := checkpointTestService(&struct{ messagepkg.Service }{}, &struct{ dbstore.Queries }{})
 		ctx := context.Background()
-		prepared, err := svc.prepareHistoryContext(ctx, ChatRequest{BotID: "bot", ThreadID: sessionID}, historyfrag.ScopeFallback{ChatID: "bot"}, 1000)
+		prepared, err := prepareHistoryFor(ctx, svc, ChatRequest{BotID: "bot", ThreadID: sessionID}, 1000)
 		if err != nil || len(prepared.records) != 0 || len(prepared.messages) != 0 {
 			t.Fatalf("history=%+v err=%v", prepared, err)
 		}
@@ -104,7 +103,7 @@ func TestRetryEmptyFailureKeepsPriorHistoryAndExcludesLaterRows(t *testing.T) {
 	later := persistedHistoryMessage(t, "later", "user", "exclude FUTURE_CODEWORD")
 	later.CreatedAt = time.Now()
 	svc := checkpointTestService(&memoryQueryMessageService{messages: []messagepkg.Message{prior, earlierFailure, request, cutoff, later}}, &historyCheckpointQueries{})
-	prepared, err := svc.prepareHistoryContext(t.Context(), ChatRequest{BotID: "bot", ThreadID: lifecycleTestSessionID, HistoryCutoffBeforeMessageID: cutoff.ID}, historyfrag.ScopeFallback{}, 10000)
+	prepared, err := prepareHistoryFor(t.Context(), svc, ChatRequest{BotID: "bot", ThreadID: lifecycleTestSessionID, HistoryCutoffBeforeMessageID: cutoff.ID}, 10000)
 	if err != nil {
 		t.Fatal(err)
 	}

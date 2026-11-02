@@ -15,7 +15,8 @@ type LeaseCandidate struct {
 	RunID        string
 	FencingToken int64
 	// ExpiresAt is the deadline recorded in the index, sampled on the backend's
-	// clock rather than the reaper's.
+	// clock rather than the reaper's. It is zero for a parked run the generation
+	// sweep offers to recovery, which has no index entry behind it.
 	ExpiresAt time.Time
 }
 

@@ -10,31 +10,23 @@ import (
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
-// ListTurnResponseSourcesWithinBytes projects only the fields used by
-// timeline turn-response composition. In particular, legacy lifecycle audits
-// must stay in the database, rather than being transferred and decoded
-// alongside a small content window. Display fields and asset enrichment are
-// not needed on this path.
+// ListTurnResponseSourcesWithinBytes walks the raw history window as
+// ListHistoryWithinBytes does and projects only the fields used by timeline
+// turn-response composition. In particular, legacy lifecycle audits must
+// stay in the database, rather than being transferred and decoded alongside
+// a small content window. Display fields and asset enrichment are not needed
+// on this path.
 func (s *DBService) ListTurnResponseSourcesWithinBytes(ctx context.Context, sessionID string, after HistoryPosition, maxBytes int64) (HistoryLoad, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return HistoryLoad{}, err
 	}
-	rows, err := s.queries.ListTurnResponseSourcesAfterWithinBytes(ctx, sqlc.ListTurnResponseSourcesAfterWithinBytesParams{
-		SessionID:           pgSessionID,
-		AfterTurnPosition:   after.Turn,
-		AfterTurnMessageSeq: after.Seq,
-		MaxBytes:            maxBytes,
-	})
-	if err != nil {
+	ids, truncated, err := s.historyWindow(ctx, pgSessionID, HistoryWindow{After: after, MaxBytes: maxBytes})
+	if err != nil || len(ids) == 0 {
 		return HistoryLoad{}, err
 	}
-	load := HistoryLoad{Messages: make([]Message, 0, len(rows))}
-	for _, row := range rows {
-		load.Messages = append(load.Messages, turnResponseSource(row.ID, row.Role, row.Content, row.CreatedAt, row.Interrupted, row.DiscussStep))
-		load.Truncated = row.Truncated
-	}
-	return load, nil
+	msgs, err := s.listTurnResponseSourcesByIDs(ctx, pgSessionID, ids)
+	return HistoryLoad{Messages: msgs, Truncated: truncated}, err
 }
 
 // ListTurnResponseSourcesByIDs projects the named context rows of a session
@@ -52,7 +44,11 @@ func (s *DBService) ListTurnResponseSourcesByIDs(ctx context.Context, sessionID 
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListTurnResponseSourcesByIDs(ctx, sqlc.ListTurnResponseSourcesByIDsParams{SessionID: pgSessionID, Ids: pgIDs})
+	return s.listTurnResponseSourcesByIDs(ctx, pgSessionID, pgIDs)
+}
+
+func (s *DBService) listTurnResponseSourcesByIDs(ctx context.Context, sessionID pgtype.UUID, ids []pgtype.UUID) ([]Message, error) {
+	rows, err := s.queries.ListTurnResponseSourcesByIDs(ctx, sqlc.ListTurnResponseSourcesByIDsParams{SessionID: sessionID, Ids: ids})
 	if err != nil {
 		return nil, err
 	}

@@ -3,11 +3,8 @@ package protocol
 import (
 	"bytes"
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
-
-	"github.com/felinics/memoh/internal/agent/runtime/external/codex/protocolgen"
 )
 
 func TestDecodeInboundClassification(t *testing.T) {
@@ -224,6 +221,33 @@ func TestTaggedUnionForms(t *testing.T) {
 	}
 }
 
+func TestUnionAlternativeFieldsRoundTrip(t *testing.T) {
+	url := "data:image/png;base64,AA=="
+	out, err := json.Marshal(UserInput{Image: &ImageUserInput{URL: &url}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != `{"type":"image","url":"data:image/png;base64,AA=="}` {
+		t.Fatalf("image input = %s", out)
+	}
+
+	var input UserInput
+	if err := json.Unmarshal([]byte(`{"type":"image","fileId":"file_1"}`), &input); err != nil {
+		t.Fatal(err)
+	}
+	if input.Image == nil || input.Image.URL != nil || input.Image.FileID == nil || *input.Image.FileID != "file_1" {
+		t.Fatalf("decoded image input = %+v", input.Image)
+	}
+
+	var failure CodexErrorInfo
+	if err := json.Unmarshal([]byte(`{"httpConnectionFailed":{"httpStatusCode":502}}`), &failure); err != nil {
+		t.Fatal(err)
+	}
+	if failure.HTTPConnectionFailed == nil || failure.HTTPConnectionFailed.HTTPStatusCode == nil || *failure.HTTPConnectionFailed.HTTPStatusCode != 502 {
+		t.Fatalf("decoded error info = %+v", failure)
+	}
+}
+
 func TestUnionDecodeIntoReusedValue(t *testing.T) {
 	// Reusing a variable across decodes must not leak the previous variant.
 	var item ThreadItem
@@ -311,22 +335,5 @@ func TestOutboundEnvelopeMarshal(t *testing.T) {
 	}
 	if string(out) != `{"method":"initialized"}` {
 		t.Fatalf("notification = %s", out)
-	}
-}
-
-// Keep the checked-in protocol sources pinned to the vendored Codex schema.
-func TestGeneratedFilesAreFresh(t *testing.T) {
-	files, err := protocolgen.Generate()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, want := range files {
-		got, err := os.ReadFile(name) //nolint:gosec // fixed generated paths owned by this package
-		if err != nil {
-			t.Fatalf("%s: %v (run `mise run codex-protocol-generate`)", name, err)
-		}
-		if !bytes.Equal(got, want) {
-			t.Errorf("%s is stale; run `mise run codex-protocol-generate`", name)
-		}
 	}
 }

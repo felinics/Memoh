@@ -34,6 +34,7 @@ import (
 type SessionHandler struct {
 	sessionService  *session.Service
 	threadEnricher  threadEnricher
+	attention       attentionService
 	runtimeResets   sessionResetService
 	runtimes        *external.Registry
 	workdirs        sessionWorkdirService
@@ -579,6 +580,12 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 		sessions, err = h.threadEnricher.EnrichThreads(c.Request().Context(), bot.ID, sessions)
 		if err != nil {
 			return errs.Wrap(err, "enrich sessions")
+		}
+	}
+	if h.attention != nil {
+		sessions, err = h.attention.Annotate(c.Request().Context(), channelIdentityID, sessions)
+		if err != nil {
+			return errs.Wrap(err, "annotate session attention")
 		}
 	}
 

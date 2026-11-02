@@ -336,6 +336,8 @@ Session replay MUST NOT require loading all events unbounded:
   single unbounded query (`ListSessionEventsBySession`,
   `ListHistoryMessagesAfterWithinBytes`, `ListHistoryTurnsByBot`).
 - Replay MUST operate under an explicit resident-bytes bound.
+- The database work of a page MUST scale with the events it reads, not with the
+  session's history: nothing a page computes may span the whole session.
 
 ### CM-RPL-002: Incremental projection
 
@@ -469,17 +471,17 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
       (default 200k, never disabled), and `Service.effectiveContextTokenBudget`
       clamping every provider-bound budget.
 - [x] Metadata-only admission measures and byte-budgeted history loads —
-      CM-ADM-001, CM-REP-002. Landed as `MeasureHistoryMessagesAfter`
-      (SQL-side `COUNT(*)` + `SUM(octet_length(content::text))`) plus the
-      `…WithinBytes` query variants that admit rows newest-first on the
-      database side until the budget's byte equivalent is spent. Every
+      CM-ADM-001, CM-REP-002. Landed as `ListHistoryWindow`, which admits
+      row ids newest-first on the database side until the budget's byte
+      equivalent is spent (each step measures only the row it takes) and
+      reports whether the budget cut the window. Every
       DB-backed history load that feeds composition is bounded by the budget:
       the discuss TR load (previously unbounded since the Unix epoch), the
       pipeline-chat TR load, and the legacy `loadHistoryRecords` (both
       session- and bot-scoped). Total history size never bounds process
       memory; the budget does. The budget covers content only, so metadata
       is handled separately: both TR loads project content and the
-      interrupted flag (`ListTurnResponseSourcesAfterWithinBytes`),
+      interrupted flag by id (`ListTurnResponseSourcesByIDs`),
       and `loadHistoryRecords` receives metadata undecoded and decodes one
       row at a time. Remaining resident-state
       bounds — the RC pipeline cache and event replay — are
@@ -617,7 +619,7 @@ ships before — or atomically with — cache eviction, never eviction first
       deletes — CM-RPL-002
 - [x] `ListSessionEventsBySession` pagination/keyset; replay excludes what the
       history checkpoint stands for before loading payloads — CM-RPL-001
-- [x] `ListHistoryMessagesAfterWithinBytes` / `ListHistoryTurnsByBot`: LIMIT or
+- [x] `ListHistoryWindow` / `ListHistoryTurnsByBot`: LIMIT or
       token-budgeted incremental loading — CM-RPL-001
 - [x] Metrics: replay event count/bytes, cache eviction counters — CM-OBS-001
 

@@ -1,4 +1,4 @@
--- 0172_history_message_context_order
+-- 0173_history_message_context_order
 -- Index a session's context rows (visible, placed in a turn, not a legacy
 -- passive_sync row) in turn order, for the byte-budgeted history reads
 -- (history load, turn responses, compaction candidates). Its predicate is the

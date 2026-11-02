@@ -56,13 +56,15 @@ func (s *Service) resolveMemoryProviderWithID(ctx context.Context, botID string)
 	return providerID, p
 }
 
-func (s *Service) loadMemoryContext(ctx context.Context, req ChatRequest) memoryContextLoad {
-	builtQuery := s.buildMemoryQuery(ctx, req)
-	if strings.TrimSpace(builtQuery.Query) == "" {
-		return memoryContextLoad{}
-	}
+// loadMemoryContext recalls memory for a request. The query is only built
+// once a memory provider is known to exist.
+func (s *Service) loadMemoryContext(ctx context.Context, req ChatRequest, buildQuery func() memoryQuery) memoryContextLoad {
 	providerID, p := s.resolveMemoryProviderWithID(ctx, req.BotID)
 	if p == nil {
+		return memoryContextLoad{}
+	}
+	builtQuery := buildQuery()
+	if strings.TrimSpace(builtQuery.Query) == "" {
 		return memoryContextLoad{}
 	}
 	cacheKey := s.memoryContextCacheKey(ctx, req, providerID, p, builtQuery.Query)

@@ -19,6 +19,8 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
@@ -623,4 +625,77 @@ func runtimeDecisionTerminal(ctx context.Context, cause error) RunOutcome {
 		return RunOutcome{Status: sessionruntime.RunStatusErrored, Cause: cause}
 	}
 	return RunOutcome{}
+}
+
+// ParkedRunMessages rebuilds the assistant messages a parked run persisted, from
+// its request turn on, with each decision card as the history page shows it. A
+// recovered run is shown from them when the live backend kept no view of it.
+// Every turn after the request belongs to the run: it is the session's active
+// run, and the turns a steer opens inside it carry its later steps.
+func (s *Service) ParkedRunMessages(ctx context.Context, run ledger.Run) ([]chatview.UIMessage, error) {
+	if s == nil || s.messageService == nil || s.sessionService == nil {
+		return nil, nil
+	}
+	resolver, ok := s.messageService.(interface {
+		GetVisibleHistoryTurnRequestMessageIDByTurn(context.Context, string, string) (string, error)
+	})
+	if !ok {
+		return nil, nil
+	}
+	requestID, err := resolver.GetVisibleHistoryTurnRequestMessageIDByTurn(ctx, run.SessionID, run.TurnID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("resolve parked run request: %w", err)
+	}
+	if strings.TrimSpace(requestID) == "" {
+		return nil, nil
+	}
+	rows, err := s.messageService.ListVisibleFromBySession(ctx, run.SessionID, requestID)
+	if err != nil {
+		return nil, fmt.Errorf("list parked run messages: %w", err)
+	}
+	sess, err := s.sessionService.Get(ctx, run.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("read parked run session: %w", err)
+	}
+	turns := chatview.ConvertSessionMessagesToUITurns(rows, sess.RuntimeType, sess.RuntimeMetadata)
+	var toolCallIDs []string
+	for _, turn := range turns {
+		for _, message := range turn.Messages {
+			if message.Type == chatview.UIMessageTool && strings.TrimSpace(message.ToolCallID) != "" {
+				toolCallIDs = append(toolCallIDs, strings.TrimSpace(message.ToolCallID))
+			}
+		}
+	}
+	if len(toolCallIDs) > 0 {
+		if s.toolApproval != nil {
+			approvals, err := s.toolApproval.ListBySessionToolCalls(ctx, run.BotID, run.SessionID, toolCallIDs)
+			if err != nil {
+				return nil, fmt.Errorf("list parked run approvals: %w", err)
+			}
+			chatview.ApplyToolApprovals(turns, approvals, nil)
+		}
+		if lister, ok := s.userInput.(interface {
+			ListBySessionToolCalls(context.Context, string, string, []string) ([]userinput.Request, error)
+		}); ok {
+			requests, err := lister.ListBySessionToolCalls(ctx, run.BotID, run.SessionID, toolCallIDs)
+			if err != nil {
+				return nil, fmt.Errorf("list parked run questions: %w", err)
+			}
+			chatview.ApplyUserInputs(turns, requests, nil)
+		}
+	}
+	var messages []chatview.UIMessage
+	for _, turn := range turns {
+		if turn.Role != "assistant" {
+			continue
+		}
+		for _, message := range turn.Messages {
+			message.ID = len(messages)
+			messages = append(messages, message)
+		}
+	}
+	return messages, nil
 }

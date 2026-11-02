@@ -21,6 +21,17 @@ func TestPostgresHistoryIndexWalkPreservesAdmission(t *testing.T) {
 	ctx := context.Background()
 	tx := beginPostgresMessageTestTx(t, ctx)
 	setupPostgresMessageTestFixtures(t, ctx, tx)
+	// The index walk can reach a neighboring session; it must stop there.
+	if _, err := tx.Exec(ctx, `WITH neighbors AS (
+      INSERT INTO bot_sessions (id, bot_id, channel_type) VALUES
+        ('00000000-0000-0000-0000-000000074100', $1, 'local'),
+        ('00000000-0000-0000-0000-000000074104', $1, 'local') RETURNING id
+    ) INSERT INTO bot_history_messages
+      (id,bot_id,session_id,role,content,turn_id,turn_position,turn_message_seq,turn_visible)
+      SELECT gen_random_uuid(),$1,id,'user','{"content":"other session"}'::jsonb,
+        gen_random_uuid(),1,0,true FROM neighbors`, postgresMessageTestBotID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO bot_history_messages
   (id,bot_id,session_id,role,content,metadata,created_at,turn_id,turn_position,turn_message_seq,turn_visible)
   SELECT gen_random_uuid(),$1,$2,'assistant',
@@ -46,8 +57,9 @@ func TestPostgresHistoryIndexWalkPreservesAdmission(t *testing.T) {
 						beforeTurn = pgtype.Int8{Int64: before.turn, Valid: true}
 						beforeSeq = pgtype.Int8{Int64: before.seq, Valid: true}
 					}
-					expected, err := tx.Query(ctx, `SELECT id::text FROM (
+					expected, err := tx.Query(ctx, `SELECT id::text, total_rows FROM (
       SELECT m.id,m.turn_position,m.turn_message_seq,m.created_at,
+       COUNT(*) OVER () AS total_rows,
        SUM(octet_length(m.content::text)) OVER
         (ORDER BY m.turn_position DESC,m.turn_message_seq DESC,m.created_at DESC,m.id DESC)
         - octet_length(m.content::text) AS preceding_bytes
@@ -62,9 +74,10 @@ func TestPostgresHistoryIndexWalkPreservesAdmission(t *testing.T) {
 						t.Fatal(err)
 					}
 					var ids []string
+					var totalRows int64
 					for expected.Next() {
 						var id string
-						if err := expected.Scan(&id); err != nil {
+						if err := expected.Scan(&id, &totalRows); err != nil {
 							t.Fatal(err)
 						}
 						ids = append(ids, id)
@@ -73,7 +86,7 @@ func TestPostgresHistoryIndexWalkPreservesAdmission(t *testing.T) {
 						t.Fatal(err)
 					}
 					expected.Close()
-					got, err := q.ListHistoryMessagesAfterWithinBytes(ctx, dbsqlc.ListHistoryMessagesAfterWithinBytesParams{
+					got, err := q.ListHistoryWindow(ctx, dbsqlc.ListHistoryWindowParams{
 						SessionID: session, AfterTurnPosition: after.turn, AfterTurnMessageSeq: after.seq,
 						BeforeTurnPosition: beforeTurn, BeforeTurnMessageSeq: beforeSeq, MaxBytes: budget,
 					})
@@ -81,28 +94,14 @@ func TestPostgresHistoryIndexWalkPreservesAdmission(t *testing.T) {
 						t.Fatal(err)
 					}
 					if len(got) != len(ids) {
-						t.Fatalf("record=%d want=%d", len(got), len(ids))
+						t.Fatalf("window=%d want=%d", len(got), len(ids))
 					}
 					for i, id := range ids {
 						if got[i].ID.String() != id {
 							t.Fatalf("wrong row at %d", i)
 						}
-					}
-					if before != nil {
-						return
-					}
-					projected, err := q.ListTurnResponseSourcesAfterWithinBytes(ctx, dbsqlc.ListTurnResponseSourcesAfterWithinBytesParams{
-						SessionID: session, AfterTurnPosition: after.turn, AfterTurnMessageSeq: after.seq, MaxBytes: budget,
-					})
-					if err != nil {
-						t.Fatal(err)
-					}
-					if len(projected) != len(ids) {
-						t.Fatalf("TR=%d want=%d", len(projected), len(ids))
-					}
-					for i, id := range ids {
-						if projected[i].ID.String() != id {
-							t.Fatalf("wrong TR row at %d", i)
+						if got[i].Truncated != (int64(len(ids)) < totalRows) {
+							t.Fatalf("truncated=%v for %d of %d rows", got[i].Truncated, len(ids), totalRows)
 						}
 					}
 				})
@@ -144,40 +143,24 @@ func TestPostgresHistoryWindowStopsBeforeOldBacklog(t *testing.T) {
 	if err := session.Scan(postgresMessageTestSessionID); err != nil {
 		t.Fatal(err)
 	}
-	for _, projected := range []bool{false, true} {
-		var count int
-		if projected {
-			rows, err := q.ListTurnResponseSourcesAfterWithinBytes(ctx, dbsqlc.ListTurnResponseSourcesAfterWithinBytesParams{
-				SessionID: session, MaxBytes: 32768,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			count = len(rows)
-		} else {
-			rows, err := q.ListHistoryMessagesAfterWithinBytes(ctx, dbsqlc.ListHistoryMessagesAfterWithinBytesParams{
-				SessionID: session, MaxBytes: 32768,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			count = len(rows)
-		}
-		if count != 32 {
-			t.Fatalf("admitted %d rows, want 32 including crossing row", count)
-		}
-		var raw []byte
-		if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE, FORMAT JSON) "+recorder.query, recorder.args...).Scan(&raw); err != nil {
-			t.Fatal(err)
-		}
-		var plans []struct{ Plan historyWindowPlan }
-		if err := json.Unmarshal(raw, &plans); err != nil {
-			t.Fatal(err)
-		}
-		visited, indexed := plans[0].Plan.visitedRows()
-		if !indexed || visited > float64(count*2+2) {
-			t.Fatalf("projected=%v: visited %.0f history rows for %d admitted, index=%v; plan=%s", projected, visited, count, indexed, raw)
-		}
+	rows, err := q.ListHistoryWindow(ctx, dbsqlc.ListHistoryWindowParams{SessionID: session, MaxBytes: 32768})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 32 {
+		t.Fatalf("admitted %d rows, want 32 including crossing row", len(rows))
+	}
+	var raw []byte
+	if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE, FORMAT JSON) "+recorder.query, recorder.args...).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var plans []struct{ Plan historyWindowPlan }
+	if err := json.Unmarshal(raw, &plans); err != nil {
+		t.Fatal(err)
+	}
+	visited, indexed := plans[0].Plan.visitedRows()
+	if !indexed || visited > float64(len(rows)*2+2) {
+		t.Fatalf("visited %.0f history rows for %d admitted, index=%v; plan=%s", visited, len(rows), indexed, raw)
 	}
 }
 
