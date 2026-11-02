@@ -7,8 +7,13 @@
        sticky top-0 is not a layout change (every host column is non-scrolling,
        so it renders exactly like a static bar): it makes iOS Home Screen web
        apps treat the bar as a fixed top edge and extend its color under the
-       status bar instead of drawing the system scroll-edge fade over it. -->
-  <header class="sticky top-0 flex h-11 shrink-0 items-center border-b border-border bg-background px-1.5">
+       status bar instead of drawing the system scroll-edge fade over it.
+       data-mobile-bar lets the dev-only mobile direction comparison
+       (pages/dev/mobile-directions) restyle every mobile bar in one place. -->
+  <header
+    data-mobile-bar
+    class="sticky top-0 flex h-11 shrink-0 items-center border-b border-border bg-background px-1.5"
+  >
     <slot name="left" />
     <slot />
     <slot name="right" />

@@ -96,3 +96,15 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
       .catch((error: unknown) => console.warn('service worker registration failed', error))
   })
 }
+
+// Dev-only mobile visual direction comparison (pages/dev/mobile-directions).
+// The dynamic import sits behind import.meta.env.DEV, so production builds drop
+// the module entirely, unless built with VITE_MOBILE_DIRECTIONS=1 for testing
+// the directions as an installed app (service worker, standalone display).
+// The query string is captured here, synchronously: by the time the import
+// resolves the router may already have replaced the URL and dropped the
+// `?direction=` style parameters.
+if (import.meta.env.DEV || import.meta.env.VITE_MOBILE_DIRECTIONS === '1') {
+  const search = location.search
+  void import('./pages/dev/mobile-directions').then(module => module.installMobileDirections(search))
+}

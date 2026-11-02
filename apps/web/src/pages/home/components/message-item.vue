@@ -108,6 +108,7 @@
         </div>
         <div
           v-else-if="isSkillActivationMessage || userBubbleText || message.forward || message.reply"
+          ref="userBubble"
           :lang="contentLang(userBubbleText || skillActivationNames || skillActivationTitle)"
           class="chat-user-bubble w-fit max-w-full bg-chat-user-bubble px-4 py-3 text-chat-user-bubble-fg whitespace-pre-wrap break-words"
           :class="userBubbleRadiusClass"
@@ -425,7 +426,7 @@ if (typeof document !== 'undefined') {
 </script>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, toRef, useTemplateRef, watch } from 'vue'
 import { Sparkles, Target } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback, Button, CalloutBanner, Textarea } from '@felinic/ui'
@@ -434,6 +435,7 @@ import { useSettingsStore } from '@/store/settings'
 import ToolCallGroup from './tool-call-group.vue'
 import ChatAnswersCard from './chat-answers-card.vue'
 import { finalizeReasoning, markReasoningSeen } from './reasoning-timing'
+import { playBubbleAppear } from '../bubble-motion'
 import AttachmentBlock from './attachment-block.vue'
 import CollapsibleUserText from './collapsible-user-text.vue'
 import MessageActions from './message-actions.vue'
@@ -817,6 +819,15 @@ const userAttachmentBlock = computed<AttachmentBlockType | null>(() => {
 // just under the card's corner so the fold is clearly tighter without going razor
 // sharp. The folded corner follows the bubble's alignment side — top-right for own
 // messages, top-left for left-aligned (channel) messages.
+// A bubble mounted while its turn is still optimistic is one the user just
+// sent; history, pagination and session switches mount confirmed turns.
+const userBubble = useTemplateRef<HTMLElement>('userBubble')
+onMounted(() => {
+  if (props.message.role === 'user' && props.message.__optimistic === true && userBubble.value) {
+    playBubbleAppear(userBubble.value)
+  }
+})
+
 const userBubbleRadiusClass = computed(() => {
   if (!userAttachmentBlock.value) return 'rounded-2xl'
   return bubbleSelf.value

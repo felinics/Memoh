@@ -1,0 +1,531 @@
+/* Dev-only mobile visual directions (see state.ts). Loaded only by dev builds,
+ * and every rule is scoped to the mobile shell width, so the desktop workbench
+ * and production are untouched.
+ *
+ * A direction is a preset of two independent attributes on <html>:
+ *   data-mobile-palette  — colors and surfaces: the same tokens the app already
+ *                          consumes (background, card, foreground, border, brand,
+ *                          the chat surfaces) get a new value, so every page
+ *                          follows without knowing about directions.
+ *   data-mobile-platform — geometry and platform conventions: bar and button
+ *                          size, grouped settings shape, composer shape, system
+ *                          font. Restyled through existing hooks (data-slot /
+ *                          data-* / owner classes) since no token carries them.
+ * so a brand palette can sit on either platform's skeleton (Mono on iOS).
+ *
+ * Light blocks are written `:root[…]:not(.dark)` and dark blocks
+ * `:root.dark[…]` so both outrank the color-scheme blocks
+ * (`:root[data-color-scheme]`, `.dark[data-color-scheme]`) and a light value
+ * can never leak into dark.
+ *
+ * Direction-private values are prefixed --mdir-.
+ *
+ * Sources:
+ *   mono     — neutral black/white/gray, segmented setting groups; values taken
+ *              from the native-app reference studied for this comparison.
+ *   ios      — iOS 27 (iPhone 18 Pro simulator), measured from Settings and
+ *              Messages in both appearances: grouped background, cell fill,
+ *              16pt inset, 26pt group corners, 52pt rows, separators (inset to
+ *              the label on the left and 16pt on the right), the composer
+ *              field and the sent bubble. Bar buttons are deliberately NOT
+ *              iOS's Liquid Glass (a web page cannot render it): they are the
+ *              flat 44pt disc with a 1px stroke from the reference chat app. The
+ *              system blue is the HIG value since iOS 26 (#0088FF / #0091FF);
+ *              label colors are UIKit's, which the measurements match.
+ *   material — Material 3 baseline color scheme (purple seed, close to the
+ *              Memoh brand hue) and M3 component geometry. */
+
+@media (width < 48rem) {
+  /* ── Shared: press-feel layers (press-feel.ts) ─────────────────────────── */
+  :root {
+    --mdir-cell-highlight: #d1d1d6;
+  }
+  :root.dark {
+    --mdir-cell-highlight: #3a3a3c;
+  }
+
+  /* border-radius is set per press from the target (press-feel.ts). */
+  [data-press-layer] {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  [data-press-ripple] {
+    position: absolute;
+    border-radius: 9999px;
+    background-color: currentColor;
+    opacity: 0;
+  }
+  /* Under the row content, like a table cell's selected background. Ordered
+     only against the row's own children: press-feel.ts isolates the row for
+     the duration of the press. ui-allow-z */
+  [data-press-layer][data-press-highlight] {
+    z-index: -1;
+    opacity: 0;
+    background-color: var(--mdir-cell-highlight);
+  }
+
+  /* A platform feel replaces the library's press chrome rather than stacking
+     on it: no press-scale, no pressed fill on ghost buttons or session rows.
+     Session rows also lose their :hover fill here — it is not gated on
+     (hover: hover), so on touch it stays painted after the finger lifts. */
+  :root[data-mobile-feel] [data-button]:active::before {
+    scale: 1 1;
+  }
+  :root[data-mobile-feel] [data-button][data-variant="ghost"]:active:not([data-state="open"], [aria-expanded="true"])::before {
+    background-color: transparent;
+  }
+  :root[data-mobile-feel] [data-slot="sidebar-session-row"]:not([data-ui-selected], [data-menu-open="true"]):is(:hover, :active) {
+    background-color: transparent;
+  }
+
+  /* ── Mono ──────────────────────────────────────────────────────────────── */
+  :root[data-mobile-palette="mono"]:not(.dark) {
+    --background: #fcfcfc;
+    --background-chrome: #fcfcfc;
+    --foreground: #000000;
+    --card: #fcfcfc;
+    --section-card: #fcfcfc;
+    --card-foreground: #000000;
+    --popover: #fcfcfc;
+    --popover-foreground: #000000;
+    --muted: #f2f2f2;
+    --secondary: #f2f2f2;
+    --accent: #f2f2f2;
+    --muted-foreground: #636363;
+    --border: #0000000f;
+    --sidebar: #f2f2f2;
+    --sidebar-foreground: #000000;
+    --brand: #000000;
+    --brand-hover: #333333;
+    --brand-foreground: #fcfcfc;
+    --btn-primary: #000000;
+    --btn-primary-hover: #333333;
+    --btn-primary-active: #5c5c5c;
+    --surface-editor: #fcfcfc;
+    --surface-chrome: #f2f2f2;
+    --surface-composer: #f2f2f2;
+    --chat-user-bubble: #f3f3f1;
+    --chat-user-bubble-fg: #000000;
+    --mdir-page-low: #f2f2f2;
+    --mdir-chrome-fill: #f2f2f2;
+    --mdir-composer-edge: #0000000f;
+    --mdir-separator: #0000001a;
+  }
+  :root.dark[data-mobile-palette="mono"] {
+    --background: #111113;
+    --background-chrome: #111113;
+    --foreground: #fcfcfc;
+    --card: #242424;
+    --section-card: #242424;
+    --card-foreground: #fcfcfc;
+    --popover: #242424;
+    --popover-foreground: #fcfcfc;
+    --muted: #242424;
+    --secondary: #242424;
+    --accent: #242424;
+    --muted-foreground: #9e9e9e;
+    --border: #fcfcfc14;
+    --sidebar: #181818;
+    --sidebar-foreground: #fcfcfc;
+    --brand: #d9d9d9;
+    --brand-hover: #c4c4c4;
+    --brand-foreground: #111113;
+    --btn-primary: #d9d9d9;
+    --btn-primary-hover: #c4c4c4;
+    --btn-primary-active: #afafaf;
+    --surface-editor: #111113;
+    --surface-chrome: #181818;
+    --surface-composer: #202020;
+    --chat-user-bubble: #242628;
+    --chat-user-bubble-fg: #fcfcfc;
+    --mdir-page-low: #181818;
+    --mdir-chrome-fill: #1a1a1c;
+    --mdir-composer-edge: #262628;
+    --mdir-separator: #ffffff1a;
+  }
+
+  /* ── iOS ───────────────────────────────────────────────────────────────── */
+  :root[data-mobile-palette="ios"]:not(.dark) {
+    --background: #ffffff;
+    --background-chrome: #ffffff;
+    --foreground: #000000;
+    --card: #ffffff;
+    --section-card: #ffffff;
+    --card-foreground: #000000;
+    --popover: #ffffff;
+    --popover-foreground: #000000;
+    --muted: #f2f2f7;
+    --secondary: #f2f2f7;
+    --accent: #f2f2f7;
+    --muted-foreground: #3c3c4399;
+    --border: #3c3c431f;
+    --sidebar: #f2f2f7;
+    --sidebar-foreground: #000000;
+    --brand: #0088ff;
+    --brand-hover: #0077e0;
+    --brand-foreground: #ffffff;
+    --btn-primary: #0088ff;
+    --btn-primary-hover: #0077e0;
+    --btn-primary-active: #0066c2;
+    --accent-blue-fill: #0088ff;
+    --surface-editor: #ffffff;
+    --surface-chrome: #f2f2f7;
+    --surface-composer: #ffffff;
+    --chat-user-bubble: #45b6fc;
+    --chat-user-bubble-fg: #ffffff;
+    --mdir-page-low: #f2f2f7;
+    --mdir-composer-edge: #00000017;
+    --mdir-on-tint: #ffffff;
+    --mdir-separator: var(--border);
+  }
+  :root.dark[data-mobile-palette="ios"] {
+    --background: #000000;
+    --background-chrome: #000000;
+    --foreground: #ffffff;
+    --card: #1c1c1e;
+    --section-card: #1c1c1e;
+    --card-foreground: #ffffff;
+    --popover: #1c1c1e;
+    --popover-foreground: #ffffff;
+    --muted: #2c2c2e;
+    --secondary: #2c2c2e;
+    --accent: #2c2c2e;
+    --muted-foreground: #ebebf599;
+    --border: #54545880;
+    --sidebar: #000000;
+    --sidebar-foreground: #ffffff;
+    --brand: #0091ff;
+    --brand-hover: #33a3ff;
+    --brand-foreground: #ffffff;
+    --btn-primary: #0091ff;
+    --btn-primary-hover: #33a3ff;
+    --btn-primary-active: #007fe0;
+    --accent-blue-fill: #0091ff;
+    --surface-editor: #000000;
+    --surface-chrome: #000000;
+    --surface-composer: #202020;
+    --chat-user-bubble: #3299ff;
+    --chat-user-bubble-fg: #ffffff;
+    --mdir-page-low: #000000;
+    --mdir-composer-edge: #ffffff24;
+    --mdir-on-tint: #ffffff;
+    --mdir-separator: var(--border);
+  }
+
+  /* ── Material 3 ────────────────────────────────────────────────────────── */
+  :root[data-mobile-palette="material"][data-mobile-platform="material"] {
+    --font-sans: Roboto, "Google Sans", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+  }
+  :root[data-mobile-palette="material"]:not(.dark) {
+    --background: #fef7ff;
+    --background-chrome: #fef7ff;
+    --foreground: #1d1b20;
+    --card: #ffffff;
+    --section-card: #ffffff;
+    --card-foreground: #1d1b20;
+    --popover: #f3edf7;
+    --popover-foreground: #1d1b20;
+    --muted: #e6e0e9;
+    --secondary: #e8def8;
+    --accent: #e6e0e9;
+    --muted-foreground: #49454f;
+    --border: #cac4d0;
+    --sidebar: #f7f2fa;
+    --sidebar-foreground: #1d1b20;
+    --brand: #6750a4;
+    --brand-hover: #7563b0;
+    --brand-foreground: #ffffff;
+    --btn-primary: #6750a4;
+    --btn-primary-hover: #7563b0;
+    --btn-primary-active: #8676ba;
+    --accent-blue-fill: #6750a4;
+    --surface-editor: #fef7ff;
+    --surface-chrome: #f7f2fa;
+    --surface-composer: #ece6f0;
+    --chat-user-bubble: #eaddff;
+    --chat-user-bubble-fg: #4f378b;
+    --mdir-page-low: #f3edf7;
+    --mdir-chrome-fill: transparent;
+    --mdir-composer-edge: transparent;
+  }
+  :root.dark[data-mobile-palette="material"] {
+    --background: #141218;
+    --background-chrome: #141218;
+    --foreground: #e6e0e9;
+    --card: #211f26;
+    --section-card: #211f26;
+    --card-foreground: #e6e0e9;
+    --popover: #211f26;
+    --popover-foreground: #e6e0e9;
+    --muted: #36343b;
+    --secondary: #4a4458;
+    --accent: #36343b;
+    --muted-foreground: #cac4d0;
+    --border: #49454f;
+    --sidebar: #1d1b20;
+    --sidebar-foreground: #e6e0e9;
+    --brand: #d0bcff;
+    --brand-hover: #d9c8ff;
+    --brand-foreground: #381e72;
+    --btn-primary: #d0bcff;
+    --btn-primary-hover: #d9c8ff;
+    --btn-primary-active: #e0d2ff;
+    --accent-blue-fill: #d0bcff;
+    --surface-editor: #141218;
+    --surface-chrome: #1d1b20;
+    --surface-composer: #2b2930;
+    --chat-user-bubble: #4f378b;
+    --chat-user-bubble-fg: #eaddff;
+    --mdir-page-low: #141218;
+    --mdir-chrome-fill: transparent;
+    --mdir-composer-edge: transparent;
+  }
+
+  /* ── Geometry shared by every non-baseline direction ───────────────────── */
+
+  /* Bars are seamless: separation comes from the page surface, not a
+     hairline. */
+  :root[data-mobile-platform] [data-mobile-bar] {
+    border-bottom-color: transparent;
+  }
+
+  /* Settings pages sit on the low page surface so their cards read as
+     raised groups (the grouped-list arrangement every direction shares).
+     Re-pointing the page tokens inside the settings shell carries the content
+     page, the list overlay and their bars together. The settings root is
+     included: its safe-area padding is what fills the strip under the status
+     bar, which would otherwise keep the regular page color. */
+  :root[data-mobile-platform] :is([data-settings-content-shell], [data-desktop-window-layer]:has([data-settings-content-shell])) {
+    --background: var(--mdir-page-low);
+    --sidebar: var(--mdir-page-low);
+    background-color: var(--background);
+  }
+
+  /* Grouped cards separate from the low page surface by fill alone, so the
+     light-mode structural edge is dropped. */
+  :root[data-mobile-platform] [data-settings-content-shell] :is([data-settings-section-card], [data-slot="action-card"], [data-slot="surface-card"]) {
+    border-color: transparent;
+  }
+
+  /* The mobile settings list (the desktop settings sidebar hosted full-width)
+     becomes grouped cards: each sidebar menu is one group. */
+  :root[data-mobile-platform] [data-settings-content-shell] [data-sidebar="menu"] {
+    gap: 0;
+    overflow: hidden;
+  }
+  :root[data-mobile-platform] [data-settings-content-shell] [data-settings-nav-item] {
+    height: 3.25rem;
+    padding-inline: 1rem;
+    border-radius: 0;
+    background-color: var(--card);
+  }
+
+  /* The composer keeps its direction's own edge in every state: none of the
+     directions steps the edge up on focus. */
+  :root[data-mobile-platform] [data-slot="input-group"].chat-composer-edge:not(:has([aria-invalid="true"])) {
+    --field-edge: var(--mdir-composer-edge);
+  }
+
+  :root[data-mobile-palette="ios"] [data-button][data-variant="primary"] {
+    color: var(--mdir-on-tint);
+  }
+
+  /* ── Bubble shape: part of the palette (brand), not the platform ───────── */
+  :root[data-mobile-palette="mono"] .chat-user-bubble {
+    border-radius: 1.5rem 1.5rem 0.5rem 1.5rem;
+  }
+  /* A one-line iMessage bubble is a capsule (~38pt tall). */
+  :root[data-mobile-palette="ios"] .chat-user-bubble {
+    border-radius: 1.25rem;
+  }
+  :root[data-mobile-palette="material"] .chat-user-bubble {
+    border-radius: 1.25rem;
+  }
+
+  /* ── iOS platform ──────────────────────────────────────────────────────── */
+  :root[data-mobile-platform="ios"] {
+    --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
+  }
+  /* Bar buttons are 44pt discs, 16pt from the screen edge. The navigation
+     page's header is a bar of its own. */
+  :root[data-mobile-platform="ios"] :is([data-mobile-bar], [data-mobile-nav-header]) {
+    height: 3.25rem;
+    padding-inline: 1rem;
+  }
+  :root[data-mobile-platform="ios"] :is([data-mobile-bar], [data-mobile-nav-header]) > :is([data-button], div.size-9) {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+  /* Flat disc with a 1px stroke (the reference chat app's header buttons):
+     white / #2C2C2E with a faint ink stroke, no blur, no shadow. */
+  :root[data-mobile-platform="ios"]:not(.dark) {
+    --mdir-bar-button-fill: #ffffff;
+    --mdir-bar-button-stroke: #14141416;
+  }
+  :root.dark[data-mobile-platform="ios"] {
+    --mdir-bar-button-fill: #2c2c2e;
+    --mdir-bar-button-stroke: #fcfcfc26;
+  }
+  :root[data-mobile-platform="ios"] :is([data-mobile-bar], [data-mobile-nav-header]) > [data-button] {
+    background-color: var(--mdir-bar-button-fill);
+    box-shadow: inset 0 0 0 1px var(--mdir-bar-button-stroke);
+    color: var(--foreground);
+  }
+  /* SF Symbols' chevrons are drawn heavier than the library's 1.75 stroke. */
+  :root[data-mobile-platform="ios"] :is([data-mobile-bar], [data-mobile-nav-header]) > [data-button] svg {
+    width: 1.375rem;
+    height: 1.375rem;
+    stroke-width: 2.25;
+  }
+  /* In the two-page navigation the list is the page to the left, so the
+     chat bar's list button is iOS's back chevron rather than a menu glyph.
+     The glyph is replaced by a mask; the library icon's own paths are
+     hidden. */
+  :root[data-mobile-platform="ios"] [data-mobile-main-page] [data-mobile-bar] svg.lucide-menu-icon {
+    background-color: currentColor;
+    mask: var(--mdir-chevron) center / contain no-repeat;
+    --mdir-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m15 18-6-6 6-6'/%3E%3C/svg%3E");
+  }
+  :root[data-mobile-platform="ios"] [data-mobile-main-page] [data-mobile-bar] svg.lucide-menu-icon > * {
+    display: none;
+  }
+  :root[data-mobile-platform="ios"] [data-mobile-bar] > div:not([data-button], .size-9) {
+    font-size: 1.0625rem;
+    font-weight: 600;
+  }
+  /* Inset grouped lists: 26pt continuous corners, so a one-row group is a
+     capsule. */
+  :root[data-mobile-platform="ios"] [data-settings-section-card],
+  :root[data-mobile-platform="ios"] [data-settings-content-shell] [data-sidebar="menu"] {
+    border-radius: 1.625rem;
+  }
+  /* Inset cell separators, as measured in iOS 27 Settings: they start where
+     the label starts (row padding + icon + gap, 40px in these rows) and stop
+     16pt short of the group's right edge. Drawn by ::after so it paints above
+     the row button's own card fill. */
+  :root[data-mobile-platform="ios"] [data-settings-content-shell] [data-sidebar="menu-item"] + [data-sidebar="menu-item"]::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 1rem;
+    left: 2.5rem;
+    height: 1px;
+    background-color: var(--mdir-separator);
+  }
+  /* A highlighted cell hides the separators on both of its edges. */
+  :root[data-mobile-platform="ios"] [data-settings-content-shell] [data-sidebar="menu-item"]:has([data-press-highlight])::after,
+  :root[data-mobile-platform="ios"] [data-settings-content-shell] [data-sidebar="menu-item"]:has([data-press-highlight]) + [data-sidebar="menu-item"]::after {
+    opacity: 0;
+  }
+  :root[data-mobile-platform="ios"] .chat-composer-edge:not(.chat-composer-member) {
+    border-radius: 1.375rem;
+  }
+  /* Touch metrics: grouped settings rows are 52pt (measured) with 17pt
+     labels (UIKit body). */
+  :root[data-mobile-platform="ios"] [data-settings-content-shell] [data-settings-nav-item] {
+    font-size: 1.0625rem;
+  }
+
+  /* ── Material platform ─────────────────────────────────────────────────── */
+  /* Native type weights. The desktop type system is tuned light for a dense
+     pointer UI: body 360, medium 450, semibold 520, compressed further for a
+     Chinese UI (medium 370), and the bundled CJK font is capped at 450. On an
+     Android phone next to native apps that reads thin and washed out, since
+     native text sits at 400 / 500 / 600 / 700 in the system font. On this
+     platform the semantic weights go back to those values and CJK falls back
+     to the system font instead of the bundled, capped one. Arbitrary-value
+     weights (font-[450] and friends) are not remapped here. */
+  :root[data-mobile-platform="material"] {
+    --font-sans: "Inter Variable", "Inter", system-ui, "Noto Sans SC", sans-serif;
+  }
+  :root[data-mobile-platform="material"] body,
+  :root[data-mobile-platform="material"] .font-normal {
+    font-weight: 400;
+  }
+  :root[data-mobile-platform="material"] .font-medium {
+    font-weight: 500;
+  }
+  :root[data-mobile-platform="material"] .font-semibold {
+    font-weight: 600;
+  }
+  :root[data-mobile-platform="material"] .font-bold {
+    font-weight: 700;
+  }
+
+  :root[data-mobile-platform="material"] [data-mobile-bar] {
+    height: 4rem;
+  }
+  :root[data-mobile-platform="material"] [data-mobile-bar] > :is([data-button], div.size-9) {
+    width: 3rem;
+    height: 3rem;
+  }
+  :root[data-mobile-platform="material"] .chat-composer-edge:not(.chat-composer-member) {
+    border-radius: 1.75rem;
+  }
+  /* Mono on this skeleton: filled circle bar buttons. */
+  :root[data-mobile-palette="mono"][data-mobile-platform="material"] [data-mobile-bar] {
+    padding-inline: 0.75rem;
+  }
+  :root[data-mobile-palette="mono"][data-mobile-platform="material"] [data-mobile-bar] > [data-button] {
+    background-color: var(--mdir-chrome-fill);
+    color: var(--foreground);
+  }
+  :root[data-mobile-palette="mono"][data-mobile-platform="material"] [data-mobile-bar] [data-button] svg {
+    width: 1.375rem;
+    height: 1.375rem;
+  }
+  /* M3 top app bar: plain icon buttons in the variant color, 22sp title. */
+  :root[data-mobile-palette="material"][data-mobile-platform="material"] [data-mobile-bar] {
+    padding-inline: 0.25rem;
+  }
+  :root[data-mobile-palette="material"][data-mobile-platform="material"] [data-mobile-bar] > [data-button] {
+    color: var(--muted-foreground);
+  }
+  :root[data-mobile-palette="material"][data-mobile-platform="material"] [data-mobile-bar] [data-button] svg {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+  :root[data-mobile-palette="material"][data-mobile-platform="material"] [data-mobile-bar] > div:not([data-button], .size-9) {
+    font-size: 1.375rem;
+    font-weight: 400;
+  }
+
+  /* Segmented setting groups: each row becomes its own tile, 2px apart,
+     large outer corners on the group, small inner corners between rows, no
+     divider lines. The footer's inset hairline is dropped for the same
+     reason. */
+  :root[data-mobile-platform="material"] [data-settings-section-card] {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-width: 0;
+    border-radius: 1.25rem;
+    background-color: transparent;
+  }
+  :root[data-mobile-palette="material"] [data-settings-section-card] {
+    border-radius: 1.5rem;
+  }
+  :root[data-mobile-platform="material"] [data-settings-section-card] > * {
+    margin-inline: 0;
+    padding-inline: 1rem;
+    border-bottom-width: 0;
+    border-radius: 0.25rem;
+    background-color: var(--section-card);
+  }
+  :root[data-mobile-platform="material"] [data-settings-section-card] > [aria-hidden="true"] {
+    display: none;
+  }
+  :root[data-mobile-platform="material"] [data-settings-content-shell] [data-sidebar="menu"] {
+    gap: 2px;
+    border-radius: 1.25rem;
+  }
+  :root[data-mobile-palette="material"] [data-settings-content-shell] [data-sidebar="menu"] {
+    border-radius: 1.5rem;
+  }
+  :root[data-mobile-platform="material"] [data-settings-content-shell] [data-settings-nav-item] {
+    height: 3.5rem;
+    border-radius: 0.25rem;
+  }
+}

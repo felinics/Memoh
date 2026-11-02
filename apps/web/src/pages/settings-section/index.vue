@@ -3,7 +3,7 @@
        this root in desktop-shell.css: SidebarInset still paints the content pane,
        while the sidebar exposes the native material behind the renderer. -->
   <div
-    class="flex h-dvh flex-col overflow-hidden bg-background"
+    class="safe-area-frame flex h-dvh flex-col overflow-hidden bg-background"
     data-desktop-window-layer
   >
     <div class="min-h-0 flex-1">
@@ -86,13 +86,12 @@
                      "list as route-less shell state" made the two diverge and
                      every seam (phantom page on system back, deep link buried
                      under the list, history loops) was that one divergence.
-                     The overlay slides in from the LEFT: reaching the list is
-                     always a "back" in the stack. -->
+                     Moving between the list and a page is a stack push/pop
+                     driven by a spring (see "List ⇄ page motion" below). -->
                 <Transition
-                  enter-active-class="transition-all duration-[90ms] ease-out"
-                  enter-from-class="opacity-0 -translate-x-2.5"
-                  leave-active-class="transition-all duration-[40ms] ease-in"
-                  leave-to-class="opacity-0 -translate-x-2.5"
+                  :css="false"
+                  @enter="onListEnter"
+                  @leave="onListLeave"
                 >
                   <div
                     v-if="isMobile && isListView"
@@ -120,6 +119,7 @@
 
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue'
+import { CompositorSpring, PAGE_SPRING } from '@/lib/compositor-spring'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { SidebarInset } from '@felinic/ui'
 import MainLayout from '@/layout/main-layout/index.vue'
@@ -186,6 +186,95 @@ function onContentBack(): void {
     return
   }
   void router.replace('/settings').catch(() => {})
+}
+
+// ── List ⇄ page motion (mobile) ─────────────────────────────────────────────
+// Opening a page from the list is a stack push: the page slides in from the
+// right over the list while the list drifts left by a fraction of the width.
+// The list stays rendered for the whole push, so the pressed row's feedback
+// (ripple / highlight) plays out on it instead of vanishing with the list the
+// moment the route changes.
+//
+// Going back cannot slide the page out the other way: bare /settings has no
+// child route, so the page's content is already gone when the list returns.
+// The list therefore slides back in from the left over the shell.
+//
+// One spring value p runs from 0 (list in front) to 1 (page in front).
+const LIST_PARALLAX = 0.3
+// Button-driven page moves start at 400 px/s, like the two-page navigation.
+const TAP_VELOCITY_PX = 400
+
+type StackMove = 'push' | 'pop'
+
+let listEl: HTMLElement | null = null
+let stackMove: StackMove = 'push'
+let stackWidth = 0
+
+function contentLayers(shell: HTMLElement | null): HTMLElement[] {
+  if (!shell) return []
+  return [...shell.querySelectorAll<HTMLElement>(':scope > [data-settings-content-bar], :scope > [data-settings-content-scroll]')]
+}
+
+const stackSpring = new CompositorSpring(0, () => {
+  if (stackMove === 'pop') {
+    return [{ el: listEl, prop: 'transform', format: p => `translate3d(${(-stackWidth * p).toFixed(2)}px, 0, 0)` }]
+  }
+  return [
+    { el: listEl, prop: 'transform', format: p => `translate3d(${(-LIST_PARALLAX * stackWidth * p).toFixed(2)}px, 0, 0)` },
+    ...contentLayers(listEl?.parentElement ?? null).map(el => ({
+      el,
+      prop: 'transform' as const,
+      format: (p: number) => `translate3d(${(stackWidth * (1 - p)).toFixed(2)}px, 0, 0)`,
+    })),
+  ]
+})
+
+// During a push the list sits under the page (the shell isolates so that a
+// negative z-index still paints above the shell's own background), and the
+// page carries an opaque background so the list does not show through.
+function setPushing(el: HTMLElement, pushing: boolean): void {
+  const shell = el.parentElement
+  if (!shell) return
+  shell.style.isolation = pushing ? 'isolate' : ''
+  el.style.zIndex = pushing ? '-1' : ''
+  for (const layer of contentLayers(shell)) {
+    layer.style.backgroundColor = pushing ? 'var(--background)' : ''
+    layer.style.transform = ''
+  }
+}
+
+function runStack(el: Element, move: StackMove, done: () => void): void {
+  if (!(el instanceof HTMLElement) || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    done()
+    return
+  }
+  // A move that interrupts the other one starts from where it had reached.
+  const interrupted = listEl !== null
+  stackSpring.sampleMidAirIfRunning()
+  if (listEl) setPushing(listEl, false)
+  listEl = el
+  stackMove = move
+  stackWidth = el.parentElement?.clientWidth ?? el.clientWidth
+  setPushing(el, move === 'push')
+  const target = move === 'push' ? 1 : 0
+  if (!interrupted) stackSpring.setImmediate(1 - target)
+  stackSpring.springTo(target, (move === 'push' ? 1 : -1) * TAP_VELOCITY_PX / Math.max(1, stackWidth), {
+    ...PAGE_SPRING,
+    onRest: () => {
+      setPushing(el, false)
+      el.style.transform = ''
+      listEl = null
+      done()
+    },
+  })
+}
+
+function onListLeave(el: Element, done: () => void): void {
+  runStack(el, 'push', done)
+}
+
+function onListEnter(el: Element, done: () => void): void {
+  runStack(el, 'pop', done)
 }
 
 // Page transition: slide-in from the right on open, faster slide-out on leave.
