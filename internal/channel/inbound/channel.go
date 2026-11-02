@@ -18,6 +18,8 @@ import (
 	"time"
 	"unicode"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/felinics/memoh/internal/acl"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
@@ -240,6 +242,10 @@ type ChannelInboundProcessor struct {
 	// currently running agent stream. Used by /stop to abort generation
 	// on external channels (Telegram, Discord, etc.).
 	activeStreams sync.Map
+
+	// replays joins concurrent first accesses of one session into a single
+	// replay, so a busy chat whose session is cold loads its history once.
+	replays singleflight.Group
 }
 
 // NewChannelInboundProcessor creates a processor with channel identity-based resolution.
@@ -3043,24 +3049,33 @@ func isLocalChannelType(ct channel.ChannelType) bool {
 }
 
 // replayPipelineSession loads persisted events from the DB and replays them
-// into the pipeline. Called lazily on first access per session after cold start.
+// into the pipeline. Called lazily on first access per session after cold
+// start or eviction. Concurrent callers for one session share one replay; a
+// caller that arrives after it finished finds the session loaded and leaves
+// it alone, since replaying again would drop the events pushed since.
 func (p *ChannelInboundProcessor) replayPipelineSession(ctx context.Context, botID, sessionID string) {
 	if p.eventStore == nil || p.pipeline == nil {
 		return
 	}
-	events, err := p.eventStore.LoadEventsForReplay(ctx, botID, sessionID)
-	if err != nil {
-		if p.logger != nil {
-			p.logger.WarnContext(ctx, "pipeline replay failed", slog.String("session_id", sessionID), slog.Any("error", err))
+	_, _, _ = p.replays.Do(sessionID, func() (any, error) {
+		if p.pipeline.HasSession(sessionID) {
+			return nil, nil
 		}
-		return
-	}
-	if len(events) > 0 {
+		events, err := p.eventStore.LoadEventsForReplay(ctx, botID, sessionID)
+		if err != nil {
+			if p.logger != nil {
+				p.logger.WarnContext(ctx, "pipeline replay failed", slog.String("session_id", sessionID), slog.Any("error", err))
+			}
+			return nil, nil
+		}
+		// A successful empty replay is warm too; otherwise callers arriving
+		// after this flight would keep loading the same empty history.
 		p.pipeline.ReplaySession(sessionID, events)
 		if p.logger != nil {
 			p.logger.InfoContext(ctx, "pipeline session replayed", slog.String("session_id", sessionID), slog.Int("events", len(events)))
 		}
-	}
+		return nil, nil
+	})
 }
 
 // broadcastInboundMessage notifies the observer about the user's inbound
