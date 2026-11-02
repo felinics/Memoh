@@ -442,7 +442,6 @@ func sessionFromMCP(session mcp.ToolSessionContext) SessionContext {
 		SessionID:                session.SessionID,
 		SessionType:              session.SessionType,
 		ChannelIdentityID:        session.ChannelIdentityID,
-		SessionToken:             session.SessionToken,
 		CurrentPlatform:          session.CurrentPlatform,
 		ReplyTarget:              session.ReplyTarget,
 		ConversationType:         session.ConversationType,

@@ -34,7 +34,6 @@ import (
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/apperror"
 	attachmentpkg "github.com/felinics/memoh/internal/attachment"
-	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/adapters/local"
@@ -83,8 +82,6 @@ type LocalChannelHandler struct {
 	wsSkillTurnsMu      sync.Mutex
 	wsSkillTurns        *wsRequestedSkillTurnRegistry
 	logger              *slog.Logger
-	jwtSecret           string
-	tokenTTL            time.Duration
 	// wsHeartbeat is the chat socket's ping, read and write timing. The
 	// zero value means defaultWSHeartbeat; tests set shorter intervals.
 	wsHeartbeat wsHeartbeat
@@ -148,12 +145,6 @@ func (h *LocalChannelHandler) SetCommandHandler(handler *command.Handler) {
 
 func (h *LocalChannelHandler) SetRuntimeSkillResolver(resolver runtimeSkillResolver) {
 	h.skillResolver = resolver
-}
-
-// SetAuthTokenConfig configures runtime token minting for external-agent local WS streams.
-func (h *LocalChannelHandler) SetAuthTokenConfig(jwtSecret string, ttl time.Duration) {
-	h.jwtSecret = strings.TrimSpace(jwtSecret)
-	h.tokenTTL = ttl
 }
 
 // SetMediaService sets the media service for WebSocket attachment ingestion.
@@ -1167,21 +1158,6 @@ func (w *wsWriter) Close() {
 	<-w.done
 }
 
-func (h *LocalChannelHandler) issueRuntimeOwnerBearerToken(runtimeOwnerAccountID, fallbackBearerToken string) string {
-	runtimeOwnerAccountID = strings.TrimSpace(runtimeOwnerAccountID)
-	if h == nil || strings.TrimSpace(h.jwtSecret) == "" || runtimeOwnerAccountID == "" || h.tokenTTL <= 0 {
-		return fallbackBearerToken
-	}
-	signed, _, err := auth.GenerateToken(runtimeOwnerAccountID, h.jwtSecret, h.tokenTTL)
-	if err != nil {
-		if h.logger != nil {
-			h.logger.Warn("issue external-agent runtime token failed", slog.Any("error", err))
-		}
-		return fallbackBearerToken
-	}
-	return "Bearer " + signed
-}
-
 // resolveWSTargetTurnID settles which round a replacement names. A turn id is
 // the contract; a message id is the pre-turn spelling and is resolved to its
 // round here, at the transport boundary, so nothing downstream has to know two
@@ -1881,8 +1857,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	keepalive := heartbeat.start(conn)
 	defer keepalive.Stop()
 
-	bearerToken := "Bearer " + auth.RawTokenFromContext(c)
-
 	writer := newWSWriter(conn, heartbeat.writeTimeout)
 	defer writer.Close()
 
@@ -2344,9 +2318,11 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				releaseActiveWSTurnNow()
 				continue
 			}
-			streamToken := bearerToken
-			if runtimeInfo.RequiresWorkspaceExec {
-				streamToken = h.issueRuntimeOwnerBearerToken(runtimeInfo.RuntimeOwnerAccountID, bearerToken)
+			// The run acts for the signed-in user, or for the runtime owner of
+			// a session that executes in a workspace.
+			streamActor := channelIdentityID
+			if runtimeInfo.RequiresWorkspaceExec && strings.TrimSpace(runtimeInfo.RuntimeOwnerAccountID) != "" {
+				streamActor = strings.TrimSpace(runtimeInfo.RuntimeOwnerAccountID)
 			}
 			var ingestedActivationAttachments []turn.Attachment
 			userMessagePersisted := false
@@ -2443,8 +2419,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						SkillActivation:         skillActivation,
 						UserMessagePersisted:    userMessagePersisted,
 						PersistedUserMessageID:  persistedUserMessageID,
-						Token:                   streamToken,
-						ChatToken:               bearerToken,
+						ActorAccountID:          streamActor,
 						CurrentChannel:          h.channelType.String(),
 						ReplyTarget:             botID,
 						Channels:                []string{h.channelType.String()},
@@ -2521,7 +2496,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				TargetTurnID:           targetTurnID,
 				ActorChannelIdentityID: channelIdentityID,
 				ActorUserID:            channelIdentityID,
-				ChatToken:              bearerToken,
 				Model:                  strings.TrimSpace(msg.ModelID),
 				ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
 				WorkspaceTargetID:      workspaceTargetID,
@@ -2613,7 +2587,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				Text:                   text,
 				ActorChannelIdentityID: channelIdentityID,
 				ActorUserID:            channelIdentityID,
-				ChatToken:              bearerToken,
 				Model:                  strings.TrimSpace(msg.ModelID),
 				ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
 				WorkspaceTargetID:      workspaceTargetID,

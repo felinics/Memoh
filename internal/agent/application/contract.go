@@ -47,14 +47,16 @@ type ChatRequest struct {
 	// the id the client was handed at run_accepted, instead of the history layer
 	// minting a second one (SR-TURN-001). Empty means no admission decided the
 	// turn — channel inbound and schedules — and history allocates it.
-	TurnID                    string                `json:"-"`
-	TurnPosition              *int64                `json:"-"`
-	Token                     string                `json:"-"`
+	TurnID       string `json:"-"`
+	TurnPosition *int64 `json:"-"`
+	// ActorAccountID is the account whose authority the run uses
+	// (turn.StartTurnCommand.ActorAccountID). The run records it so a resume
+	// can authorize the account again.
+	ActorAccountID            string                `json:"-"`
 	UserID                    string                `json:"-"`
 	SourceChannelIdentityID   string                `json:"-"`
 	DisplayName               string                `json:"-"`
 	RouteID                   string                `json:"-"`
-	ChatToken                 string                `json:"-"`
 	ExternalMessageID         string                `json:"-"`
 	ReplyTarget               string                `json:"-"`
 	ConversationType          string                `json:"-"`

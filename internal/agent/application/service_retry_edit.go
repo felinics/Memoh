@@ -26,7 +26,6 @@ type RetryLatestMessageInput struct {
 	TargetTurnID           string
 	ActorChannelIdentityID string
 	ActorUserID            string
-	ChatToken              string
 	Model                  string
 	ReasoningEffort        string
 	WorkspaceTargetID      string
@@ -53,7 +52,6 @@ type EditLatestMessageInput struct {
 	Attachments            []ChatAttachment
 	ActorChannelIdentityID string
 	ActorUserID            string
-	ChatToken              string
 	Model                  string
 	ReasoningEffort        string
 	WorkspaceTargetID      string
@@ -101,8 +99,7 @@ func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMes
 		ConversationType:             turnpkg.ConversationTypePrivate,
 		Query:                        visibleMessageText(requestMessage),
 		RawQuery:                     visibleMessageText(requestMessage),
-		Token:                        strings.TrimSpace(input.ChatToken),
-		ChatToken:                    strings.TrimSpace(input.ChatToken),
+		ActorAccountID:               strings.TrimSpace(input.ActorUserID),
 		CurrentChannel:               "local",
 		ReplyTarget:                  strings.TrimSpace(input.BotID),
 		Channels:                     []string{"local"},
@@ -151,8 +148,7 @@ func (s *Service) EditLatestMessageWS(ctx context.Context, input EditLatestMessa
 		ConversationType:             turnpkg.ConversationTypePrivate,
 		Query:                        text,
 		RawQuery:                     text,
-		Token:                        strings.TrimSpace(input.ChatToken),
-		ChatToken:                    strings.TrimSpace(input.ChatToken),
+		ActorAccountID:               strings.TrimSpace(input.ActorUserID),
 		CurrentChannel:               "local",
 		ReplyTarget:                  strings.TrimSpace(input.BotID),
 		Channels:                     []string{"local"},

@@ -351,7 +351,6 @@ func TestRunnerStartGenericACPSessionInjectsHTTPToolServer(t *testing.T) {
 			RunID:             "run-1",
 			SessionType:       "acp_agent",
 			ChannelIdentityID: "user-1",
-			SessionToken:      "token-1",
 			ConversationType:  "private",
 		},
 	}, nil)

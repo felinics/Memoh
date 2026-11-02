@@ -517,7 +517,6 @@ func (b *Binding) toolContext() mcp.ToolSessionContext {
 	overlay(&ctx.SessionType, b.active.SessionType)
 	overlay(&ctx.RouteID, b.active.RouteID)
 	overlay(&ctx.ChannelIdentityID, b.active.ChannelIdentityID)
-	overlay(&ctx.SessionToken, b.active.SessionToken)
 	overlay(&ctx.CurrentPlatform, b.active.CurrentPlatform)
 	overlay(&ctx.ReplyTarget, b.active.ReplyTarget)
 	overlay(&ctx.ConversationType, b.active.ConversationType)

@@ -140,7 +140,6 @@ func externalResumeService(t *testing.T) (*Service, *recordingACPPrompter, *resu
 	saved := &resumeSaveQueries{}
 	policy, _ := newControllerPolicyService(t)
 	service.queries = externalResumeQueries{externalDiscussQueries: &externalDiscussQueries{policy.queries.(*controllerQueries)}, saved: saved}
-	service.resumeSecret = "resume-test-secret"
 	ctx := runtimefence.WithContext(t.Context(), runtimefence.Fence{BotID: lifecycleTestBotID, SessionID: lifecycleTestSessionID, Token: 7})
 	return service, pool, saved, ctx
 }

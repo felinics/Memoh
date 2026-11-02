@@ -150,8 +150,6 @@ type PromptInput struct {
 	RuntimeOwnerAccountID string
 	// ChannelIdentityID identifies the acting user for tool attribution.
 	ChannelIdentityID string
-	// SessionToken authenticates runtime-side calls back into Memoh.
-	SessionToken string //nolint:gosec // session credential material, not a hardcoded secret
 	// ToolHTTPURL is the Memoh tool gateway (HTTP MCP) base URL, empty when
 	// the gateway is unavailable.
 	ToolHTTPURL string

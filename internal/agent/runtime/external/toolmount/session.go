@@ -37,7 +37,6 @@ func TurnSession(ctx context.Context, input external.PromptInput) mcp.ToolSessio
 	session.ReplyTarget = strings.TrimSpace(input.ReplyTarget)
 	session.ConversationType = strings.TrimSpace(input.ConversationType)
 	session.ChannelIdentityID = strings.TrimSpace(input.ChannelIdentityID)
-	session.SessionToken = strings.TrimSpace(input.SessionToken)
 	session.CanRequestUserInput = input.CanRequestUserInput
 	session.RuntimeActive = true
 	session.ContextBudgetMaxTokens = input.ContextBudgetMaxTokens

@@ -58,12 +58,15 @@ type StartTurnCommand struct {
 	TeamID  string // required; the service fails closed when empty
 	Mode    Mode
 
-	BotID                   string
-	ChatID                  string
-	ThreadID                string
-	RouteID                 string
-	Token                   string
-	ChatToken               string
+	BotID    string
+	ChatID   string
+	ThreadID string
+	RouteID  string
+	// ActorAccountID is the account whose authority the run uses: the bot
+	// owner, or the runtime owner of an external-runtime session, for a
+	// channel turn; the signed-in user for a Web turn. The caller has
+	// authenticated it; the run records it to authorize a later resume.
+	ActorAccountID          string
 	UserID                  string
 	SourceChannelIdentityID string
 	DisplayName             string
@@ -109,8 +112,7 @@ type StartTurnCommand struct {
 	UserMessagePersisted bool
 
 	// Discuss-mode extras.
-	SessionToken string //nolint:gosec // session credential material; crosses only the authenticated internal RPC in split deployments
-	ToolHTTPURL  string
+	ToolHTTPURL string
 
 	// DiscussMessages is the composed conversation context for a discuss
 	// turn (Mode == ModeDiscuss), already rendered by the caller's
@@ -203,7 +205,6 @@ type ToolApprovalResponse struct {
 	// Web client. Empty retains the legacy binary approve/reject behavior.
 	OptionID                   string
 	Reason                     string
-	ChatToken                  string
 	SuppressActivePromptAttach bool
 }
 
@@ -223,7 +224,6 @@ type UserInputResponse struct {
 	TextAnswer                 string
 	Canceled                   bool
 	Reason                     string
-	ChatToken                  string
 	SuppressActivePromptAttach bool
 }
 

@@ -29,7 +29,6 @@ type Session struct {
 	SessionType       string
 	RouteID           string
 	ChannelIdentityID string
-	SessionToken      string `json:"-"`
 	CurrentPlatform   string
 	ReplyTarget       string
 	ConversationType  string
@@ -146,9 +145,6 @@ func Merge(base, latest Session) Session {
 	}
 	if value := strings.TrimSpace(latest.ChannelIdentityID); value != "" {
 		merged.ChannelIdentityID = value
-	}
-	if value := strings.TrimSpace(latest.SessionToken); value != "" {
-		merged.SessionToken = value
 	}
 	if value := strings.TrimSpace(latest.CurrentPlatform); value != "" {
 		merged.CurrentPlatform = value

@@ -925,9 +925,9 @@ func TestResolveRuntimeToolContextFailsClosed(t *testing.T) {
 	r := &Process{host: pool.Host, key: agentproc.Key{Runtime: RuntimeType, BotID: "bot-1"}}
 	b := &Binding{rt: r, conversation: "session-1", id: "rt_1", toolToken: "token"}
 	pool.register(b)
-	b.active = &client.ToolSessionContext{RunID: "run-1", SessionToken: "session-token", ContextBudgetMaxTokens: 1000}
+	b.active = &client.ToolSessionContext{RunID: "run-1", ContextBudgetMaxTokens: 1000}
 	got, ok := pool.ResolveRuntimeToolContext("bot-1", "rt_1", "token")
-	if !ok || !got.RuntimeActive || got.RunID != "run-1" || got.SessionToken != "session-token" || got.SessionID != "session-1" || got.ContextBudgetMaxTokens != 1000 {
+	if !ok || !got.RuntimeActive || got.RunID != "run-1" || got.SessionID != "session-1" || got.ContextBudgetMaxTokens != 1000 {
 		t.Fatalf("tool context = %#v, %v", got, ok)
 	}
 	for _, probe := range [][3]string{{"bot-2", "rt_1", "token"}, {"bot-1", "rt_1", "wrong"}, {"bot-1", "rt_2", "token"}} {

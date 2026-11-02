@@ -14294,61 +14294,6 @@ export type PostBotsByIdChannelByPlatformSendResponses = {
 
 export type PostBotsByIdChannelByPlatformSendResponse = PostBotsByIdChannelByPlatformSendResponses[keyof PostBotsByIdChannelByPlatformSendResponses];
 
-export type PostBotsByIdChannelByPlatformSendChatData = {
-    /**
-     * Send payload
-     */
-    body: ChannelSendRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        id: string;
-        /**
-         * Channel platform
-         */
-        platform: string;
-    };
-    query?: never;
-    url: '/bots/{id}/channel/{platform}/send_chat';
-};
-
-export type PostBotsByIdChannelByPlatformSendChatErrors = {
-    /**
-     * Bad Request
-     */
-    400: ServerProblem;
-    /**
-     * Unauthorized
-     */
-    401: ServerProblem;
-    /**
-     * Forbidden
-     */
-    403: ServerProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ServerProblem;
-    /**
-     * Service Unavailable
-     */
-    503: ServerProblem;
-};
-
-export type PostBotsByIdChannelByPlatformSendChatError = PostBotsByIdChannelByPlatformSendChatErrors[keyof PostBotsByIdChannelByPlatformSendChatErrors];
-
-export type PostBotsByIdChannelByPlatformSendChatResponses = {
-    /**
-     * OK
-     */
-    200: {
-        [key: string]: string;
-    };
-};
-
-export type PostBotsByIdChannelByPlatformSendChatResponse = PostBotsByIdChannelByPlatformSendChatResponses[keyof PostBotsByIdChannelByPlatformSendChatResponses];
-
 export type PatchBotsByIdChannelByPlatformStatusData = {
     /**
      * Channel status payload

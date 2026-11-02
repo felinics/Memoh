@@ -21,7 +21,7 @@ import (
 // is a code or the refusal a package returned.
 func TestSlashErrorRepliesWithTheCatalogCopy(t *testing.T) {
 	t.Parallel()
-	processor := NewChannelInboundProcessor(nil, nil, nil, nil, nil, nil, nil, "", 0)
+	processor := NewChannelInboundProcessor(nil, nil, nil, nil, nil, nil, nil)
 	msg := channel.InboundMessage{Channel: channel.ChannelType("telegram"), ReplyTarget: "chat"}
 	en := i18n.New("en")
 	for _, tc := range []struct {
@@ -65,7 +65,7 @@ func TestQueueCommandAdmissionFailureReplyAndRecord(t *testing.T) {
 			var logs bytes.Buffer
 			channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
 			chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "bot-1", RouteID: "route-1"}}
-			processor := NewChannelInboundProcessor(slog.New(slog.NewJSONHandler(&logs, nil)), nil, chatSvc, chatSvc, &fakeChatGateway{}, channelIdentitySvc, &fakePolicyService{}, "", 0)
+			processor := NewChannelInboundProcessor(slog.New(slog.NewJSONHandler(&logs, nil)), nil, chatSvc, chatSvc, &fakeChatGateway{}, channelIdentitySvc, &fakePolicyService{})
 			processor.SetACLService(&fakeChatACL{allowed: true})
 			processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1"}})
 			processor.SetQueueCommandHandler(&fakeQueueCommandHandler{steerErr: tc.err})

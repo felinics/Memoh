@@ -767,7 +767,6 @@ func provideExternalAgentLoginHandler(log *slog.Logger, runtimes *external.Regis
 
 func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, runtimes *external.Registry, hookService *hookspkg.Service, sessionRuntime *sessionruntime.Manager, workdirService *workdir.Service, attentionService *attention.Service, cfg config.Config) *application.Service {
 	service := application.NewService(log, modelsService, queries, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
-	service.SetResumeSecret(rc.JwtSecret)
 	service.SetResumeReadiness(func(ctx context.Context, botID, targetID string) error {
 		client, err := workspaceManager.NativeMCPClient(ctx, botID)
 		if err != nil {

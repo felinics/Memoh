@@ -92,7 +92,6 @@ func TestHandleReplyWithTurn_ACPAdvancesCursorOnCleanTerminal(t *testing.T) {
 			Content:      []timeline.RenderedContentPiece{{Type: "text", Text: `<message id="1">please inspect the app</message>`}},
 		},
 	}
-	minted := 0
 	svc := &fakeTurnService{runtimeType: sessionpkg.RuntimeACPAgent}
 	driver := NewDiscussDriver(DiscussDriverDeps{})
 	sess := &discussSession{
@@ -104,11 +103,8 @@ func TestHandleReplyWithTurn_ACPAdvancesCursorOnCleanTerminal(t *testing.T) {
 			CurrentPlatform:   "telegram",
 			ReplyTarget:       "chat-1",
 			ConversationType:  "group",
-			Credentials: func(context.Context) (string, string) {
-				minted++
-				return "Bearer owner-token", "chat-token"
-			},
-			ToolHTTPURL: "http://example.test/bots/bot-1/tools",
+			ActorAccountID:    "bot-owner",
+			ToolHTTPURL:       "http://example.test/bots/bot-1/tools",
 		},
 	}
 
@@ -118,8 +114,8 @@ func TestHandleReplyWithTurn_ACPAdvancesCursorOnCleanTerminal(t *testing.T) {
 		t.Fatalf("StartTurn calls = %d, want 1", svc.calls)
 	}
 	cmd := svc.lastCmd
-	if minted != 1 || cmd.SessionToken != "Bearer owner-token" || cmd.ChatToken != "chat-token" || cmd.ToolHTTPURL != "http://example.test/bots/bot-1/tools" {
-		t.Fatalf("credentials minted %d times at dispatch, command %+v", minted, cmd)
+	if cmd.ActorAccountID != "bot-owner" || cmd.ToolHTTPURL != "http://example.test/bots/bot-1/tools" {
+		t.Fatalf("actor or tools URL not passed: %+v", cmd)
 	}
 	if cmd.RouteID != "route-1" || cmd.SourceChannelIdentityID != "acct-1" {
 		t.Fatalf("routing not passed: %+v", cmd)

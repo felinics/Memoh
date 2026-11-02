@@ -191,7 +191,7 @@ func (p *recordingPublisher) Publish(event messageevent.Event) {
 
 type fakeTriggerer struct{ err error }
 
-func (f fakeTriggerer) TriggerSchedule(context.Context, string, TriggerPayload, string) (TriggerResult, error) {
+func (f fakeTriggerer) TriggerSchedule(context.Context, string, TriggerPayload) (TriggerResult, error) {
 	if f.err != nil {
 		return TriggerResult{}, f.err
 	}
@@ -231,7 +231,6 @@ func TestRunSchedulePublishesWhenTheRunStartsAndEnds(t *testing.T) {
 				triggerer:      fakeTriggerer{err: tc.trigger},
 				sessionCreator: fakeSessionCreator{err: tc.session},
 				events:         publisher,
-				jwtSecret:      "secret",
 				logger:         slog.Default(),
 			}
 			err := svc.runSchedule(t.Context(), toSchedule(runTestSchedule()))

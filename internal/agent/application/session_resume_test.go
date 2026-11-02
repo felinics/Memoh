@@ -10,12 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/agent/turn"
-	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -36,33 +34,23 @@ func (q *resumeSaveQueries) SaveSessionRunResumeContext(_ context.Context, arg s
 	return 1, nil
 }
 
-func TestResumeContextPreservesDeadlineAndScopesWithoutCredentials(t *testing.T) {
-	secret := "resume-test-secret"
-	bearer, _, err := auth.GenerateToken("account", secret, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	scoped, _, err := auth.GenerateChatToken(auth.ChatToken{BotID: "bot", ChatID: "chat", UserID: "sender", RouteID: "route"}, secret, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+// A run records who it acted for and its deadline, never a credential, and a
+// resume does not rewrite the intent it continues.
+func TestResumeContextRecordsTheActorAndDeadline(t *testing.T) {
 	q := &resumeSaveQueries{}
-	svc := &Service{queries: q, resumeSecret: secret}
+	svc := &Service{queries: q}
 	deadline := time.Now().Add(time.Minute)
 	ctx, cancel := context.WithDeadline(runtimefence.WithContext(t.Context(), runtimefence.Fence{BotID: "bot", SessionID: "session", Token: 7}), deadline)
 	defer cancel()
-	req := ChatRequest{RunID: uuid.NewString(), UserID: "sender", ChatID: "chat", Token: "Bearer " + bearer, ChatToken: "Bearer " + scoped, Query: "do the work"}
+	req := ChatRequest{RunID: uuid.NewString(), UserID: "sender", ChatID: "chat", ActorAccountID: "account", Query: "do the work"}
 	if err := svc.recordRunResumeContext(ctx, req); err != nil {
 		t.Fatal(err)
-	}
-	if strings.Contains(string(q.saved.ResumeContext), bearer) || strings.Contains(string(q.saved.ResumeContext), scoped) || strings.Contains(string(q.saved.ResumeContext), secret) {
-		t.Fatal("credential persisted")
 	}
 	var saved resumeContext
 	if err := json.Unmarshal(q.saved.ResumeContext, &saved); err != nil {
 		t.Fatal(err)
 	}
-	if saved.DeadlineAt == nil || !saved.DeadlineAt.Equal(deadline) || saved.ChatClaims["route_id"] != "route" || saved.TokenClaims["user_id"] != "account" {
+	if saved.DeadlineAt == nil || !saved.DeadlineAt.Equal(deadline) || saved.ActorAccountID != "account" || saved.TokenClaims != nil || saved.ChatClaims != nil {
 		t.Fatalf("saved context=%+v", saved)
 	}
 	req.ShutdownResume = true
@@ -82,7 +70,7 @@ func TestDiscussAdmissionResumeContextIsRetired(t *testing.T) {
 	runner := &fakeRunner{chunks: []string{`{"type":"agent_end"}`}}
 	s, admitter := newAdmittedTurnTestService(runner)
 	s.SetAllowedTeam("00000000-0000-0000-0000-000000000001")
-	s.queries, s.resumeSecret = q, "resume-test-secret"
+	s.queries = q
 	ctx := runtimefence.WithContext(t.Context(), runtimefence.Fence{BotID: "bot", SessionID: "session", Token: 7})
 	req := chatRequestFromCommand(turn.StartTurnCommand{Mode: turn.ModeDiscuss, BotID: "bot", ChatID: "chat", ThreadID: "session", DiscussMessages: []turn.DiscussMessage{{Role: "user", Content: "hi"}}})
 	req.RunID, req.SessionType = uuid.NewString(), "discuss"
@@ -99,32 +87,22 @@ func TestDiscussAdmissionResumeContextIsRetired(t *testing.T) {
 	}
 }
 
-func TestResumeRejectsInvalidCredentialAndForeignBotScope(t *testing.T) {
-	s := &Service{resumeSecret: "resume-secret"}
-	token, _, err := auth.GenerateToken("account", "other-secret", time.Hour)
-	if err != nil {
-		t.Fatal(err)
+// A resume authorizes the account the run acted for again; a context an
+// earlier release recorded names it by the claims of the bearer it carried.
+func TestResumeAuthorizesTheRunActorAgain(t *testing.T) {
+	s := &Service{}
+	if err := s.authorizeResume(t.Context(), "bot", resumeContext{ChatClaims: map[string]string{"typ": "chat_route", "bot_id": "other", "chat_id": "chat"}}); !errors.Is(err, errResumeUnrecoverable) {
+		t.Fatalf("foreign chat scope = %v, want an unrecoverable intent", err)
 	}
-	if _, err := s.resumeClaims(token); err == nil {
-		t.Fatal("accepted invalid signature")
+	if err := s.authorizeResume(t.Context(), "bot", resumeContext{ActorAccountID: "account"}); err == nil {
+		t.Fatal("authorized an account without checking it")
 	}
-	if _, err := s.renewResumeCredential(t.Context(), "bot", map[string]string{"typ": "chat_route", "bot_id": "other", "chat_id": "chat"}); !errors.Is(err, errResumeUnrecoverable) {
-		t.Fatalf("cross-bot credential = %v, want an unrecoverable intent", err)
+	legacy := resumeContext{TokenClaims: map[string]string{"sub": "account"}, ChatClaims: map[string]string{"typ": "chat_route", "user_id": "sender"}}
+	if got := legacy.actorAccountID(); got != "account" {
+		t.Fatalf("legacy actor = %q, want the bearer account", got)
 	}
-	if _, err := s.renewResumeCredential(t.Context(), "bot", map[string]string{"sub": "account"}); err == nil {
-		t.Fatal("renewed account without reauthorization")
-	}
-	token, err = s.renewResumeCredential(t.Context(), "bot", map[string]string{"typ": "chat_route", "bot_id": "bot", "chat_id": "chat", "route_id": "route", "user_id": "sender"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	parsed, err := jwt.Parse(strings.TrimPrefix(token, "Bearer "), func(_ *jwt.Token) (any, error) { return []byte(s.resumeSecret), nil }, jwt.WithValidMethods([]string{"HS256"}))
-	if err != nil || !parsed.Valid {
-		t.Fatal("renewed token invalid")
-	}
-	claims := parsed.Claims.(jwt.MapClaims)
-	if claims["route_id"] != "route" || claims["typ"] != "chat_route" {
-		t.Fatal("scope widened")
+	if got := (resumeContext{ActorAccountID: "owner", TokenClaims: map[string]string{"sub": "account"}}).actorAccountID(); got != "owner" {
+		t.Fatalf("actor = %q, want the recorded account", got)
 	}
 }
 

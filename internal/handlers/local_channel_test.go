@@ -380,38 +380,6 @@ func TestWSWriterIgnoresLateSendsAfterClose(t *testing.T) {
 	}
 }
 
-func TestLocalChannelHandlerIssueRuntimeOwnerBearerToken(t *testing.T) {
-	t.Parallel()
-
-	const secret = "local-ws-runtime-secret" //nolint:gosec // G101 false positive: test fixture, not a real credential.
-	handler := &LocalChannelHandler{logger: slog.Default()}
-	handler.SetAuthTokenConfig(secret, time.Hour)
-
-	got := handler.issueRuntimeOwnerBearerToken("runtime-owner", "Bearer caller-token")
-	raw := strings.TrimSpace(strings.TrimPrefix(got, "Bearer "))
-	parsed, err := jwt.Parse(raw, func(token *jwt.Token) (interface{}, error) {
-		if token.Method != jwt.SigningMethodHS256 {
-			t.Fatalf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return []byte(secret), nil
-	})
-	if err != nil || !parsed.Valid {
-		t.Fatalf("parse runtime token: token valid=%v err=%v", parsed != nil && parsed.Valid, err)
-	}
-	claims, ok := parsed.Claims.(jwt.MapClaims)
-	if !ok {
-		t.Fatalf("claims type = %T, want jwt.MapClaims", parsed.Claims)
-	}
-	if gotSub := claims["sub"]; gotSub != "runtime-owner" {
-		t.Fatalf("runtime token subject = %v, want runtime-owner", gotSub)
-	}
-
-	handler.SetAuthTokenConfig("", time.Hour)
-	if fallback := handler.issueRuntimeOwnerBearerToken("runtime-owner", "Bearer caller-token"); fallback != "Bearer caller-token" {
-		t.Fatalf("fallback token = %q, want original bearer", fallback)
-	}
-}
-
 func TestWSRequestedSkillTurnRegistryReserve(t *testing.T) {
 	t.Parallel()
 

@@ -38,7 +38,6 @@ type ToolApprovalResponseInput struct {
 	// empty means the plain binary decision.
 	OptionID                   string
 	Reason                     string
-	ChatToken                  string
 	SuppressActivePromptAttach bool
 }
 
@@ -460,6 +459,7 @@ func (s *Service) storeToolResultAndContinue(
 		ChatID:                  input.BotID,
 		ThreadID:                approval.SessionID,
 		UserID:                  requesterUserID,
+		ActorAccountID:          requesterUserID,
 		SourceChannelIdentityID: firstNonEmpty(approval.ChannelIdentityID, input.ActorChannelIdentityID),
 		CurrentChannel:          approval.SourcePlatform,
 		ReplyTarget:             approval.ReplyTarget,
@@ -505,6 +505,7 @@ func (s *Service) continueToolApprovalSession(
 		ChatID:                  input.BotID,
 		ThreadID:                approval.SessionID,
 		UserID:                  requesterUserID,
+		ActorAccountID:          requesterUserID,
 		SourceChannelIdentityID: firstNonEmpty(approval.ChannelIdentityID, input.ActorChannelIdentityID),
 		CurrentChannel:          approval.SourcePlatform,
 		ReplyTarget:             approval.ReplyTarget,
@@ -536,11 +537,11 @@ func approvalRunConfigRequest(approval toolapproval.Request, input ToolApprovalR
 		BotID:             input.BotID,
 		SessionID:         approval.SessionID,
 		UserID:            requesterUserID,
+		ActorAccountID:    requesterUserID,
 		ChannelIdentityID: firstNonEmpty(approval.ChannelIdentityID, input.ActorChannelIdentityID),
 		CurrentPlatform:   approval.SourcePlatform,
 		ReplyTarget:       approval.ReplyTarget,
 		ConversationType:  approval.ConversationType,
-		ChatToken:         input.ChatToken,
 	}
 }
 

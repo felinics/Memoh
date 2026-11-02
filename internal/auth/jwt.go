@@ -49,9 +49,6 @@ func JWTMiddleware(secret string, skipper middleware.Skipper, validators ...User
 			if skipper != nil && skipper(c) {
 				return next(c)
 			}
-			if isChatRouteToken(c) {
-				return next(c)
-			}
 			userID, err := UserIDFromContext(c)
 			if err != nil {
 				return err
@@ -63,15 +60,6 @@ func JWTMiddleware(secret string, skipper middleware.Skipper, validators ...User
 		}
 		return jwtMiddleware(validatedNext)
 	}
-}
-
-func isChatRouteToken(c echo.Context) bool {
-	token, ok := c.Get("user").(*jwt.Token)
-	if !ok || token == nil || !token.Valid {
-		return false
-	}
-	claims, ok := token.Claims.(jwt.MapClaims)
-	return ok && claimString(claims, claimType) == chatTokenType
 }
 
 // UserIDFromContext extracts the user id from JWT claims.
@@ -130,82 +118,6 @@ func GenerateToken(userID, secret string, expiresIn time.Duration) (string, time
 		return "", time.Time{}, err
 	}
 	return signed, expiresAt, nil
-}
-
-// ChatToken holds the claims for a chat-based JWT used for route-based reply.
-type ChatToken struct {
-	BotID             string
-	ChatID            string
-	RouteID           string
-	UserID            string
-	ChannelIdentityID string
-}
-
-// GenerateChatToken creates a signed JWT for chat route reply.
-func GenerateChatToken(info ChatToken, secret string, expiresIn time.Duration) (string, time.Time, error) {
-	if strings.TrimSpace(info.BotID) == "" {
-		return "", time.Time{}, errors.New("bot id is required")
-	}
-	if strings.TrimSpace(info.ChatID) == "" {
-		return "", time.Time{}, errors.New("chat id is required")
-	}
-	if strings.TrimSpace(info.UserID) == "" {
-		info.UserID = strings.TrimSpace(info.ChannelIdentityID)
-	}
-	if strings.TrimSpace(info.UserID) == "" {
-		return "", time.Time{}, errors.New("user id is required")
-	}
-	if strings.TrimSpace(secret) == "" {
-		return "", time.Time{}, errors.New("jwt secret is required")
-	}
-	if expiresIn <= 0 {
-		return "", time.Time{}, errors.New("jwt expires in must be positive")
-	}
-
-	now := time.Now().UTC()
-	expiresAt := now.Add(expiresIn)
-	claims := jwt.MapClaims{
-		claimType:              chatTokenType,
-		claimBotID:             info.BotID,
-		claimChatID:            info.ChatID,
-		claimRouteID:           info.RouteID,
-		claimUserID:            info.UserID,
-		claimChannelIdentityID: info.ChannelIdentityID,
-		"iat":                  now.Unix(),
-		"exp":                  expiresAt.Unix(),
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := token.SignedString([]byte(secret))
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	return signed, expiresAt, nil
-}
-
-// ChatTokenFromContext extracts the chat token claims from context.
-func ChatTokenFromContext(c echo.Context) (ChatToken, error) {
-	token, ok := c.Get("user").(*jwt.Token)
-	if !ok || token == nil || !token.Valid {
-		return ChatToken{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
-	}
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return ChatToken{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid token claims")
-	}
-	if claimString(claims, claimType) != chatTokenType {
-		return ChatToken{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid chat token")
-	}
-	info := ChatToken{
-		BotID:             claimString(claims, claimBotID),
-		ChatID:            claimString(claims, claimChatID),
-		RouteID:           claimString(claims, claimRouteID),
-		UserID:            claimString(claims, claimUserID),
-		ChannelIdentityID: claimString(claims, claimChannelIdentityID),
-	}
-	if strings.TrimSpace(info.UserID) == "" {
-		info.UserID = strings.TrimSpace(info.ChannelIdentityID)
-	}
-	return info, nil
 }
 
 // RefreshTokenFromContext extracts the current token from context and issues a new one

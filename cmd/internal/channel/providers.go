@@ -203,7 +203,6 @@ func provideChannelRouter(
 	pipeline *timeline.Pipeline,
 	eventStore *timeline.EventStore,
 	discussDriver *discuss.DiscussDriver,
-	cfg config.Config,
 	cmdHandler inbound.CommandHandler,
 	queueHandler inbound.QueueCommandHandler,
 	skillResolver inbound.RequestedSkillResolver,
@@ -221,7 +220,7 @@ func provideChannelRouter(
 	qqAdapter.SetRouteResolver(routeService)
 
 	threadCoordinator := route.NewThreadCoordinator(log, routeService, sessionService)
-	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, turnService, identityService, policyService, cfg.Auth.JWTSecret, 5*time.Minute)
+	processor := inbound.NewChannelInboundProcessor(log, registry, routeService, msgService, turnService, identityService, policyService)
 	processor.SetSessionEnsurer(&sessionEnsurerAdapter{coordinator: threadCoordinator})
 	processor.SetPipeline(pipeline, eventStore, discussDriver)
 	discussDriver.SetTurnService(turnService)

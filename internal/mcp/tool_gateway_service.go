@@ -201,7 +201,6 @@ func toolRegistryCacheKey(session ToolSessionContext) string {
 		strings.TrimSpace(session.CurrentPlatform),
 		strings.TrimSpace(session.ReplyTarget),
 		strings.TrimSpace(session.ConversationType),
-		hashCacheKeySecret(session.SessionToken),
 	}
 	if session.PublicRequest {
 		parts = append(parts, "public-request")

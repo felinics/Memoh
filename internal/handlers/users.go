@@ -18,7 +18,6 @@ import (
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/external/acp/profile"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/apperror"
-	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/botworkspace"
 	"github.com/felinics/memoh/internal/channel"
@@ -118,7 +117,6 @@ func (h *UsersHandler) Register(e *echo.Echo) {
 	botGroup.POST("/:id/channel/:platform/webhook-endpoint", h.SetBotChannelWebhookEndpoint)
 	botGroup.DELETE("/:id/channel/:platform", h.DeleteBotChannelConfig)
 	botGroup.POST("/:id/channel/:platform/send", h.SendBotMessage)
-	botGroup.POST("/:id/channel/:platform/send_chat", h.SendBotMessageSession)
 }
 
 // GetMe godoc
@@ -1254,66 +1252,6 @@ func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 	req.Message = channel.WithoutMarkdownMedia(req.Message)
 	if err := h.channelRuntime.Send(c.Request().Context(), botID, channelType, req); err != nil {
 		return sendChannelMessageHTTPError(err, true)
-	}
-	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// SendBotMessageSession godoc
-// @Summary Send message via bot channel session token
-// @Description Send a message using a session-scoped token (reply only)
-// @Tags bots
-// @Param id path string true "Bot ID"
-// @Param platform path string true "Channel platform"
-// @Param payload body channel.SendRequest true "Send payload"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} server.Problem
-// @Failure 401 {object} server.Problem
-// @Failure 403 {object} server.Problem
-// @Failure 500 {object} server.Problem
-// @Failure 503 {object} server.Problem
-// @Router /bots/{id}/channel/{platform}/send_chat [post].
-func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
-	chatToken, err := auth.ChatTokenFromContext(c)
-	if err != nil {
-		return err
-	}
-	botID, err := httpx.RequiredParam(c, "id")
-	if err != nil {
-		return err
-	}
-	if chatToken.BotID != botID {
-		return echo.NewHTTPError(http.StatusForbidden, "token bot mismatch")
-	}
-	if h.channelRuntime == nil || h.routeService == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "services not configured")
-	}
-	route, err := h.routeService.GetByID(c.Request().Context(), chatToken.RouteID)
-	if err != nil {
-		if accountNotFound(err) {
-			return apperror.Wrap(apperror.CodeChannelRouteNotFound, err, nil)
-		}
-		return errs.Wrap(err, "get chat route")
-	}
-	if strings.TrimSpace(route.ReplyTarget) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("reply target missing in route"))
-	}
-	channelType, err := h.registry.ParseChannelType(route.Platform)
-	if err != nil {
-		return errs.Wrap(err, "route platform")
-	}
-
-	var req channel.SendRequest
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-	if req.Message.IsEmpty() {
-		return apperror.FieldRequired("message")
-	}
-	if err := h.channelRuntime.Send(c.Request().Context(), botID, channelType, channel.SendRequest{
-		Target:  route.ReplyTarget,
-		Message: channel.WithoutMarkdownMedia(req.Message),
-	}); err != nil {
-		return sendChannelMessageHTTPError(err, false)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }

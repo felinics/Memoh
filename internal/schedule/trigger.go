@@ -38,5 +38,5 @@ type TriggerResult struct {
 
 // Triggerer triggers schedule execution for chat-related jobs.
 type Triggerer interface {
-	TriggerSchedule(ctx context.Context, botID string, payload TriggerPayload, token string) (TriggerResult, error)
+	TriggerSchedule(ctx context.Context, botID string, payload TriggerPayload) (TriggerResult, error)
 }
