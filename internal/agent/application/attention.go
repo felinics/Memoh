@@ -31,7 +31,35 @@ func (s *Service) markTerminalAttention(ctx context.Context, terminal sessionrun
 	if !ok {
 		return
 	}
+	if kind == attention.KindReply && s.quietCompletion(ctx, terminal.RunID) {
+		return
+	}
 	s.markAttention(ctx, terminal.SessionID, kind)
+}
+
+// quietCompletionReader tells a scheduled run that completed without asking
+// for attention apart from a reply the owner should see.
+type quietCompletionReader interface {
+	QuietCompletion(ctx context.Context, runID string) (bool, error)
+}
+
+// quietCompletion reports whether a completed run raises no reply because a
+// schedule fired it and only notify_user, failures and decisions reach its
+// owner. When that cannot be read the run raises its reply as before.
+func (s *Service) quietCompletion(ctx context.Context, runID string) bool {
+	reader, ok := s.attention.(quietCompletionReader)
+	if !ok || runID == "" {
+		return false
+	}
+	quiet, err := reader.QuietCompletion(ctx, runID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.WarnContext(ctx, "read schedule notify policy failed",
+				slog.String("run_id", runID), slog.Any("error", err))
+		}
+		return false
+	}
+	return quiet
 }
 
 func (s *Service) markWaitingAttention(ctx context.Context, _, sessionID string) {

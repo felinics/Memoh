@@ -212,6 +212,7 @@ func TestBuiltInToolsHaveUsageGuidanceOrExplicitExemption(t *testing.T) {
 		ToolListACPAgents():   "self-describing two-tier listing tool; schedule Usage references it",
 		ToolGenerateVideo():   "self-describing media generation tool",
 		ToolTranscribeAudio(): "self-describing media transcription tool",
+		ToolNotifyUser():      "self-describing parameterless tool, registered only in a schedule run that tells its owner on request",
 	}
 
 	for _, name := range BuiltInToolNames() {

@@ -10,7 +10,9 @@ import (
 	"testing"
 
 	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/chat/attention"
 	pgstore "github.com/felinics/memoh/internal/db/postgres/store"
 	"github.com/felinics/memoh/internal/messaging"
 	"github.com/felinics/memoh/internal/searchproviders"
@@ -52,6 +54,15 @@ var schemaGoldenTools = map[string]func(t *testing.T) []toolexec.Tool{
 	"image_gen":  func(*testing.T) []toolexec.Tool { return (&ImageGenProvider{}).imageTools(goldenSession, "") },
 	"video_gen":  func(*testing.T) []toolexec.Tool { return (&VideoGenProvider{}).videoTools(goldenSession) },
 	"browser":    func(*testing.T) []toolexec.Tool { return (&BrowserProvider{}).browserTools(goldenSession) },
+	"notify": func(t *testing.T) []toolexec.Tool {
+		session := goldenSession
+		session.SessionType = sessionmode.Schedule
+		tools, err := NewNotifyProvider(nil, goldenNotifier{}).Tools(context.Background(), session)
+		if err != nil {
+			t.Fatalf("tools: %v", err)
+		}
+		return tools
+	},
 }
 
 func providerTools(provider ToolProvider) func(t *testing.T) []toolexec.Tool {
@@ -87,6 +98,16 @@ var goldenSession = SessionContext{
 	CurrentPlatform: "telegram", ReplyTarget: "chat-1", ConversationType: "private",
 	CanRequestUserInput: true, CanListUserInput: true, SupportsImageInput: true,
 	Skills: map[string]SkillDetail{"pdf": {Description: "pdf skill", Path: "/data/.agents/skills/pdf"}},
+}
+
+type goldenNotifier struct{}
+
+func (goldenNotifier) ActiveScheduleFire(context.Context, string) (attention.ScheduleFire, bool, error) {
+	return attention.ScheduleFire{NotifyPolicy: attention.NotifyImportant}, true, nil
+}
+
+func (goldenNotifier) Mark(context.Context, string, attention.Kind) (bool, error) {
+	return true, nil
 }
 
 type goldenContactReader struct{}

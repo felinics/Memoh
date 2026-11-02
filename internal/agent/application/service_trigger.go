@@ -130,12 +130,13 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 	cfg.ContextScope.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
 
 	schedulePrompt := native.GenerateSchedulePrompt(native.Schedule{
-		ID:          payload.ID,
-		Name:        payload.Name,
-		Description: payload.Description,
-		Pattern:     payload.Pattern,
-		MaxCalls:    payload.MaxCalls,
-		Command:     payload.Command,
+		ID:               payload.ID,
+		Name:             payload.Name,
+		Description:      payload.Description,
+		Pattern:          payload.Pattern,
+		MaxCalls:         payload.MaxCalls,
+		Command:          payload.Command,
+		NoChannelContact: payload.NoChannelContact,
 	})
 	req, cfg = attachCurrentTurnPrompt(req, cfg, schedulePrompt)
 	cfg = s.prepareRunConfig(ctx, cfg)

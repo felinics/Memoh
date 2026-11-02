@@ -5,4 +5,4 @@ cron: {{pattern}}
 max_calls: {{maxCalls}}
 
 Command:
-{{command}}
+{{command}}{{channelNote}}

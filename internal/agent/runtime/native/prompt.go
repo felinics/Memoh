@@ -146,7 +146,17 @@ func GenerateSchedulePrompt(s Schedule) string {
 		"maxCalls":    maxCallsStr,
 		"pattern":     s.Pattern,
 		"command":     s.Command,
+		"channelNote": scheduleChannelNote(s),
 	})
+}
+
+// scheduleChannelNote is empty unless the owner turned off being reached on
+// social platforms, so a schedule with the default reads exactly as before.
+func scheduleChannelNote(s Schedule) string {
+	if !s.NoChannelContact {
+		return ""
+	}
+	return "\n\nNo need to notify the user through social platforms for this task; they follow it in Memoh."
 }
 
 func buildSkillsSection(skills []SkillEntry) string {

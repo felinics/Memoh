@@ -27,6 +27,10 @@ type fakeQueries struct {
 	markedArg []dbsqlc.MarkSessionsUnreadParams
 	unread    []dbsqlc.ListUnreadSessionsForUserRow
 	attention []dbsqlc.ListSessionAttentionForUserRow
+	fire      dbsqlc.GetActiveScheduleFireForSessionRow
+	fireErr   error
+	policy    dbsqlc.GetScheduleNotifyPolicyForRunRow
+	policyErr error
 }
 
 func (f *fakeQueries) MarkSessionAttention(_ context.Context, arg dbsqlc.MarkSessionAttentionParams) (dbsqlc.MarkSessionAttentionRow, error) {
@@ -50,6 +54,14 @@ func (f *fakeQueries) ListUnreadSessionsForUser(context.Context, dbsqlc.ListUnre
 
 func (f *fakeQueries) ListSessionAttentionForUser(context.Context, dbsqlc.ListSessionAttentionForUserParams) ([]dbsqlc.ListSessionAttentionForUserRow, error) {
 	return f.attention, nil
+}
+
+func (f *fakeQueries) GetActiveScheduleFireForSession(context.Context, pgtype.UUID) (dbsqlc.GetActiveScheduleFireForSessionRow, error) {
+	return f.fire, f.fireErr
+}
+
+func (f *fakeQueries) GetScheduleNotifyPolicyForRun(context.Context, pgtype.UUID) (dbsqlc.GetScheduleNotifyPolicyForRunRow, error) {
+	return f.policy, f.policyErr
 }
 
 type recordingPublisher struct{ events []event.Event }

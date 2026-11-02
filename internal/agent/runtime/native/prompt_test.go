@@ -359,3 +359,17 @@ func allPromptSessionTypes() []string {
 		sessionmode.Subagent,
 	}
 }
+
+func TestSchedulePromptChannelNote(t *testing.T) {
+	base := Schedule{Name: "News", Description: "AI news", Pattern: "0 9 * * *", Command: "Summarize AI news"}
+	on := GenerateSchedulePrompt(base)
+	if strings.Contains(on, "social platforms") || !strings.HasSuffix(on, "Summarize AI news") {
+		t.Fatalf("a schedule with channel contact on must read as before:\n%s", on)
+	}
+	off := base
+	off.NoChannelContact = true
+	got := GenerateSchedulePrompt(off)
+	if !strings.HasPrefix(got, on) || !strings.Contains(got, "No need to notify the user through social platforms") {
+		t.Fatalf("a schedule with channel contact off must add the note after the command:\n%s", got)
+	}
+}

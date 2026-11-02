@@ -66,6 +66,7 @@ func ToolGetSchedule() Name    { return newName("get_schedule") }
 func ToolCreateSchedule() Name { return newName("create_schedule") }
 func ToolUpdateSchedule() Name { return newName("update_schedule") }
 func ToolDeleteSchedule() Name { return newName("delete_schedule") }
+func ToolNotifyUser() Name     { return newName("notify_user") }
 
 func ToolBrowserAction() Name        { return newName("browser_action") }
 func ToolBrowserObserve() Name       { return newName("browser_observe") }
@@ -90,7 +91,7 @@ var all = []Name{
 	ToolSend(), ToolReact(), ToolSpeak(),
 	ToolGetContacts(), ToolListSessions(), ToolGetMessages(), ToolSearchMessages(), ToolSearchMemory(), ToolCreateMemory(), ToolUpdateMemory(), ToolDeleteMemory(), ToolListSkills(), ToolUseSkill(), ToolSpawnAgent(), ToolSendMessage(), ToolListAgents(), ToolListModels(),
 	ToolListWorkdirs(), ToolListACPAgents(),
-	ToolListSchedule(), ToolGetSchedule(), ToolCreateSchedule(), ToolUpdateSchedule(), ToolDeleteSchedule(),
+	ToolListSchedule(), ToolGetSchedule(), ToolCreateSchedule(), ToolUpdateSchedule(), ToolDeleteSchedule(), ToolNotifyUser(),
 	ToolBrowserAction(), ToolBrowserObserve(), ToolComputerObserve(), ToolComputerAction(), ToolBrowserRemoteSession(),
 	ToolWebSearch(), ToolWebFetch(), ToolGenerateImage(), ToolGenerateVideo(), ToolTranscribeAudio(), ToolAskUser(),
 }

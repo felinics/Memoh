@@ -53,6 +53,7 @@ func ToolGetSchedule() ToolName    { return toolname.ToolGetSchedule() }
 func ToolCreateSchedule() ToolName { return toolname.ToolCreateSchedule() }
 func ToolUpdateSchedule() ToolName { return toolname.ToolUpdateSchedule() }
 func ToolDeleteSchedule() ToolName { return toolname.ToolDeleteSchedule() }
+func ToolNotifyUser() ToolName     { return toolname.ToolNotifyUser() }
 
 func ToolBrowserAction() ToolName        { return toolname.ToolBrowserAction() }
 func ToolBrowserObserve() ToolName       { return toolname.ToolBrowserObserve() }
