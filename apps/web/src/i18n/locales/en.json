@@ -797,13 +797,9 @@
       "colorSchemeDescription": "Select a palette for brand, status, and UI elements.",
       "typography": "Typography",
       "uiFontFamily": "UI Font Family",
-      "uiFontFamilyDescription": "Overrides the default interface font",
       "uiFontSize": "UI Font Size",
-      "uiFontSizeDescription": "Scales interface text and controls",
       "codeFontFamily": "Code Font Family",
-      "codeFontFamilyDescription": "Overrides the default code font",
       "codeFontSize": "Code Font Size",
-      "codeFontSizeDescription": "Applies to code editors, code blocks, and the terminal",
       "syntaxHighlighting": "Syntax Highlighting",
       "shikiThemeLight": "Light theme",
       "shikiThemeLightDescription": "Applied to code blocks and editors in light mode",
@@ -826,16 +822,13 @@
         "amber": "Golden highlights with clear status indicators"
       },
       "codeHighlight": "Code highlight",
-      "codeHighlightDescription": "Themes applied to code blocks and editors.",
       "diagrams": "Diagrams",
       "mermaidTheme": "Mermaid Theme",
-      "mermaidThemeDescription": "Applies to rendered Mermaid diagrams.",
       "advanced": "Advanced",
-      "advancedEntryTitle": "Code & diagrams"
+      "mermaidThemeAuto": "Follow appearance"
     },
     "keyboard": {
       "title": "Keyboard Shortcuts",
-      "intro": "Click Edit on a row, then press the new key combination. Cmd/Ctrl + W, Q, T, N stay reserved for the browser and OS. Workspace defaults use ⌘⌥ on macOS, matched by the key positions of a US keyboard, and Alt+Shift on Windows and Linux. If Alt+Shift switches your keyboard layout, assign other keys here.",
       "resetAll": "Reset all",
       "scopes": {
         "workspace": "Workspace",
@@ -862,80 +855,61 @@
       },
       "commands": {
         "newChatSession": {
-          "label": "New session",
-          "description": "Open or focus a new chat in the current group."
+          "label": "New session"
         },
         "focusChatInput": {
-          "label": "Focus chat input",
-          "description": "Activate chat and focus its message input."
+          "label": "Focus chat input"
         },
         "showSessions": {
-          "label": "Show Chat",
-          "description": "Open the Chat sidebar with your sessions."
+          "label": "Show Chat"
         },
         "showFiles": {
-          "label": "Show Files",
-          "description": "Open the Files sidebar."
+          "label": "Show Files"
         },
         "showSchedule": {
-          "label": "Show Schedule",
-          "description": "Open the Schedule sidebar."
+          "label": "Show Schedule"
         },
         "showSupermarket": {
-          "label": "Show Supermarket",
-          "description": "Open the Supermarket sidebar."
+          "label": "Show Supermarket"
         },
         "nextWorkspaceTab": {
-          "label": "Next tab",
-          "description": "Focus the next tab in the current group."
+          "label": "Next tab"
         },
         "previousWorkspaceTab": {
-          "label": "Previous tab",
-          "description": "Focus the previous tab in the current group."
+          "label": "Previous tab"
         },
         "splitWorkspaceRight": {
-          "label": "Split right",
-          "description": "Split the current panel to the right."
+          "label": "Split right"
         },
         "splitWorkspaceBelow": {
-          "label": "Split below",
-          "description": "Split the current panel below."
+          "label": "Split below"
         },
         "newTerminal": {
-          "label": "New terminal",
-          "description": "Open a terminal in the current group."
+          "label": "New terminal"
         },
         "newBrowser": {
-          "label": "New browser",
-          "description": "Open a workspace browser in the current group."
+          "label": "New browser"
         },
         "closeCurrentWorkspaceTab": {
-          "label": "Close current workspace tab",
-          "description": "Close the active tab in the workspace pane (falls back to the OS close behavior)."
+          "label": "Close current workspace tab"
         },
         "saveActiveFile": {
-          "label": "Save active file",
-          "description": "Save the file open in the workspace's editor."
+          "label": "Save active file"
         },
         "toggleSidebar": {
-          "label": "Toggle sidebar",
-          "description": "Show or hide the main sidebar."
+          "label": "Toggle sidebar"
         },
         "openSettings": {
-          "label": "Open Settings",
-          "description": "Jump to the Settings area from anywhere."
+          "label": "Open Settings"
         },
         "closeMediaLightbox": {
-          "label": "Close media lightbox",
-          "description": "Dismiss the media preview overlay."
+          "label": "Close media lightbox"
         },
         "mediaLightboxPrev": {
-          "label": "Previous media",
-          "description": "Show the previous item while the lightbox is open."
+          "label": "Previous media"
         },
         "mediaLightboxNext": {
-          "label": "Next media",
-          "description": "Show the next item while the lightbox is open."
+          "label": "Next media"
         }
       }
     },
@@ -2495,7 +2469,8 @@
         "fileMustReview": "/etc/**\n.env*",
         "execBypass": "ls\npwd\ngit status",
         "execMustReview": "rm -rf *\nsudo *"
-      }
+      },
+      "enableTitle": "Require approval for tool calls"
     },
     "hooks": {
       "title": "Hooks",
@@ -2513,9 +2488,7 @@
       "invalidJson": "The hooks file has a syntax error. Check commas, quotes and brackets.",
       "testPayloadInvalid": "The payload is not valid JSON.",
       "rules": "Rules",
-      "rulesDescription": "Enabled rules over total rules.",
       "actions": "Actions",
-      "actionsDescription": "Commands and tool calls configured by matching hooks.",
       "eventsSection": "Events",
       "editorSection": "Config",
       "jsonConfig": "hooks.json",
@@ -2531,7 +2504,8 @@
       "saveSuccess": "Hooks saved",
       "saveFailed": "Failed to save hooks",
       "testSuccess": "Hook test completed",
-      "testFailed": "Hook test failed"
+      "testFailed": "Hook test failed",
+      "entryTitle": "Event hooks"
     },
     "title": "Bots",
     "searchPlaceholder": "Search bots…",
@@ -2610,7 +2584,6 @@
     "avatarUrl": "Avatar URL",
     "avatarUrlPlaceholder": "Enter avatar image URL",
     "timezone": "Timezone",
-    "timezoneHint": "Scheduled tasks use this timezone to determine when to run.",
     "timezonePlaceholder": "e.g. America/New_York",
     "timezoneInherited": "Inherited from user/system",
     "aclPreset": "IM App Policy",
@@ -3058,8 +3031,7 @@
       "unknownComputer": "Unavailable computer",
       "noComputers": "No computers available",
       "manageComputers": "Manage computers",
-      "connectManage": "Connect or disconnect computers",
-      "connectManageDescription": "Manage every computer on the Computers page."
+      "connectManage": "Connect or disconnect computers"
     },
     "desktop": {
       "title": "Desktop Environment",
@@ -3365,7 +3337,6 @@
         "multimedia": "Multimedia"
       },
       "chatModel": "Default chat model",
-      "chatModelDescription": "Used by Memoh Agent in new channel conversations, such as Telegram. Choosing a model in a web conversation does not change this default.",
       "chatModelPlaceholder": "Select model",
       "defaultAgent": "Default Agent",
       "defaultAgentDescription": "Used for new local chats. Existing conversations keep their current Agent.",
@@ -3390,7 +3361,6 @@
       "videoModelPlaceholder": "Select video model (optional)",
       "language": "Language",
       "showToolCallsInIM": "Show Tool Calls in IM",
-      "showToolCallsInIMDescription": "Show live tool execution status (running / complete / failed) directly in the chat. Disabled by default.",
       "displayEnabled": "Enable Workspace Display",
       "displayEnabledDescription": "Launch Xvnc in the workspace. Restart the workspace for this to take effect.",
       "desktopEnabled": "Desktop",
@@ -4551,15 +4521,16 @@
     "showAll": "Show all ({count})",
     "showLess": "Show less",
     "otherBots": "Unread sessions in other bots",
-    "settingsTitle": "System notifications",
-    "settingsDescription": "Notify me when a reply is ready, a run fails, or a decision needs my attention.",
+    "settingsTitle": "Desktop notifications",
+    "settingsDescription": "Notify me when a session I'm not viewing receives a reply, fails, or needs my attention.",
     "denied": "Notifications are blocked. Allow them in your browser settings, then turn this on.",
-    "unsupported": "System notifications are not supported in this browser. Unread indicators remain available.",
+    "unsupported": "Browser notifications are not supported in this browser. Unread indicators remain available.",
     "kind": {
       "reply": "Reply ready",
       "failed": "Run failed",
       "needs_input": "Waiting for your input",
       "marked": "Marked unread"
-    }
+    },
+    "browserSettingsTitle": "Browser notifications"
   }
 }

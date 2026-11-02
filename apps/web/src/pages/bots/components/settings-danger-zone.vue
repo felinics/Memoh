@@ -6,7 +6,7 @@
            would drop. -->
       <template #content>
         <div class="truncate text-sm font-medium text-destructive">
-          {{ $t('bots.settings.dangerZone') }}
+          {{ $t('bots.settings.deleteBot') }}
         </div>
         <p class="mt-0.5 text-xs text-muted-foreground">
           {{ $t('bots.settings.deleteBotDescription') }}
@@ -19,7 +19,7 @@
         :loading="deleteLoading"
         @click="dialogOpen = true"
       >
-        {{ $t('bots.settings.deleteBot') }}
+        {{ $t('common.delete') }}
       </Button>
     </SettingsRow>
   </SettingsSection>

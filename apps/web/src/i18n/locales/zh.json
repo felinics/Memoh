@@ -793,13 +793,9 @@
       "colorSchemeDescription": "为品牌、状态和 UI 元素选择一套调色盘。",
       "typography": "字体与字号",
       "uiFontFamily": "界面字体",
-      "uiFontFamilyDescription": "替换默认界面字体",
       "uiFontSize": "界面字号",
-      "uiFontSizeDescription": "缩放界面文字和控件",
       "codeFontFamily": "代码字体",
-      "codeFontFamilyDescription": "替换默认代码字体",
       "codeFontSize": "代码字号",
-      "codeFontSizeDescription": "应用于代码编辑器、代码块与终端",
       "syntaxHighlighting": "语法高亮",
       "shikiThemeLight": "浅色主题",
       "shikiThemeLightDescription": "浅色模式下用于代码块与编辑器",
@@ -822,16 +818,13 @@
         "amber": "明亮的琥珀色，清晰的状态指示"
       },
       "codeHighlight": "代码高亮",
-      "codeHighlightDescription": "应用于代码块与编辑器的配色方案。",
       "diagrams": "图表",
       "mermaidTheme": "Mermaid 主题",
-      "mermaidThemeDescription": "应用于已渲染的 Mermaid 图表。",
       "advanced": "高级",
-      "advancedEntryTitle": "代码与图表"
+      "mermaidThemeAuto": "跟随外观"
     },
     "keyboard": {
       "title": "快捷键",
-      "intro": "点击任意一行右侧的「编辑」，然后按下新的组合键。Cmd/Ctrl + W、Q、T、N 为浏览器和系统保留，不可绑定。工作区默认快捷键在 macOS 上使用 ⌘⌥，按美式键盘的按键位置识别；在 Windows 和 Linux 上使用 Alt+Shift。如果你用 Alt+Shift 切换输入法，请在这里改用其他组合。",
       "resetAll": "全部重置",
       "scopes": {
         "workspace": "工作区",
@@ -858,80 +851,61 @@
       },
       "commands": {
         "newChatSession": {
-          "label": "新建会话",
-          "description": "在当前分组打开或聚焦一个新会话。"
+          "label": "新建会话"
         },
         "focusChatInput": {
-          "label": "聚焦聊天输入",
-          "description": "切换到聊天面板并聚焦消息输入框。"
+          "label": "聚焦聊天输入"
         },
         "showSessions": {
-          "label": "显示对话",
-          "description": "打开对话侧栏和会话列表。"
+          "label": "显示对话"
         },
         "showFiles": {
-          "label": "显示文件",
-          "description": "打开工作区文件侧栏。"
+          "label": "显示文件"
         },
         "showSchedule": {
-          "label": "显示日程",
-          "description": "打开日程侧栏。"
+          "label": "显示日程"
         },
         "showSupermarket": {
-          "label": "显示市场",
-          "description": "打开市场侧栏。"
+          "label": "显示市场"
         },
         "nextWorkspaceTab": {
-          "label": "下一个标签",
-          "description": "聚焦当前分组的下一个标签。"
+          "label": "下一个标签"
         },
         "previousWorkspaceTab": {
-          "label": "上一个标签",
-          "description": "聚焦当前分组的上一个标签。"
+          "label": "上一个标签"
         },
         "splitWorkspaceRight": {
-          "label": "向右分屏",
-          "description": "在当前面板右侧创建分屏。"
+          "label": "向右分屏"
         },
         "splitWorkspaceBelow": {
-          "label": "向下分屏",
-          "description": "在当前面板下方创建分屏。"
+          "label": "向下分屏"
         },
         "newTerminal": {
-          "label": "新建终端",
-          "description": "在当前分组打开终端。"
+          "label": "新建终端"
         },
         "newBrowser": {
-          "label": "新建浏览器",
-          "description": "在当前分组打开工作区浏览器。"
+          "label": "新建浏览器"
         },
         "closeCurrentWorkspaceTab": {
-          "label": "关闭当前工作区标签页",
-          "description": "关闭工作区面板内激活的标签页（退回到系统的关闭行为）。"
+          "label": "关闭当前工作区标签页"
         },
         "saveActiveFile": {
-          "label": "保存当前文件",
-          "description": "保存工作区编辑器中打开的文件。"
+          "label": "保存当前文件"
         },
         "toggleSidebar": {
-          "label": "切换侧边栏",
-          "description": "显示或隐藏主侧边栏。"
+          "label": "切换侧边栏"
         },
         "openSettings": {
-          "label": "打开设置",
-          "description": "在任何位置跳转到设置页。"
+          "label": "打开设置"
         },
         "closeMediaLightbox": {
-          "label": "关闭媒体灯箱",
-          "description": "关闭媒体预览覆盖层。"
+          "label": "关闭媒体灯箱"
         },
         "mediaLightboxPrev": {
-          "label": "上一张媒体",
-          "description": "灯箱打开时切换到上一项。"
+          "label": "上一张媒体"
         },
         "mediaLightboxNext": {
-          "label": "下一张媒体",
-          "description": "灯箱打开时切换到下一项。"
+          "label": "下一张媒体"
         }
       }
     },
@@ -2495,7 +2469,8 @@
         "fileMustReview": "/etc/**\n.env*",
         "execBypass": "ls\npwd\ngit status",
         "execMustReview": "rm -rf *\nsudo *"
-      }
+      },
+      "enableTitle": "启用工具调用审核"
     },
     "hooks": {
       "title": "Hooks",
@@ -2513,9 +2488,7 @@
       "invalidJson": "hooks 文件存在语法错误，请检查逗号、引号和括号。",
       "testPayloadInvalid": "载荷不是有效的 JSON。",
       "rules": "规则",
-      "rulesDescription": "启用规则数 / 全部规则数。",
       "actions": "动作",
-      "actionsDescription": "匹配 hooks 后会运行的命令和工具调用。",
       "eventsSection": "事件",
       "editorSection": "配置",
       "jsonConfig": "hooks.json",
@@ -2531,7 +2504,8 @@
       "saveSuccess": "Hooks 已保存",
       "saveFailed": "保存 hooks 失败",
       "testSuccess": "Hook 测试完成",
-      "testFailed": "Hook 测试失败"
+      "testFailed": "Hook 测试失败",
+      "entryTitle": "事件触发器"
     },
     "title": "Bots",
     "searchPlaceholder": "搜索 Bot…",
@@ -2610,7 +2584,6 @@
     "avatarUrl": "头像链接",
     "avatarUrlPlaceholder": "输入头像图片地址",
     "timezone": "时区",
-    "timezoneHint": "定时任务按此时区计算执行时间。",
     "timezonePlaceholder": "例如 Asia/Shanghai",
     "timezoneInherited": "继承用户或系统时区",
     "aclPreset": "IM 应用策略",
@@ -3058,8 +3031,7 @@
       "unknownComputer": "不可用的电脑",
       "noComputers": "暂无可授权的电脑",
       "manageComputers": "管理电脑",
-      "connectManage": "连接或断开电脑",
-      "connectManageDescription": "在「电脑」页面管理所有电脑。"
+      "connectManage": "连接或断开电脑"
     },
     "desktop": {
       "title": "桌面环境",
@@ -3365,7 +3337,6 @@
         "multimedia": "多媒体"
       },
       "chatModel": "默认对话模型",
-      "chatModelDescription": "供 Memoh Agent 在 Telegram 等渠道的新对话中使用。在网页对话中选择模型不会修改此默认值。",
       "chatModelPlaceholder": "选择模型",
       "defaultAgent": "默认 Agent",
       "defaultAgentDescription": "仅用于新建本地聊天，已有会话继续使用原来的 Agent。",
@@ -3390,7 +3361,6 @@
       "videoModelPlaceholder": "选择视频模型（可选）",
       "language": "语言",
       "showToolCallsInIM": "在 IM 中显示工具调用",
-      "showToolCallsInIMDescription": "在聊天中以单条消息实时更新工具的执行状态。默认关闭。",
       "displayEnabled": "启用工作区显示器",
       "displayEnabledDescription": "在工作区中启动 Xvnc 服务。保存并重启工作区后生效。",
       "desktopEnabled": "桌面",
@@ -4551,15 +4521,16 @@
     "showAll": "显示全部 ({count})",
     "showLess": "收起",
     "otherBots": "其他 Bot 有未读会话",
-    "settingsTitle": "系统通知",
-    "settingsDescription": "收到回复、运行失败或需要你确认时提醒。",
+    "settingsTitle": "桌面通知",
+    "settingsDescription": "你没在查看的会话收到回复、运行失败或需要确认时提醒",
     "denied": "通知已被浏览器阻止。请在浏览器设置中允许通知后开启。",
-    "unsupported": "此浏览器不支持系统通知，未读红点仍然可用。",
+    "unsupported": "当前浏览器不支持网页通知，未读红点仍然可用",
     "kind": {
       "reply": "已回复",
       "failed": "运行失败",
       "needs_input": "等待你确认",
       "marked": "标记为未读"
-    }
+    },
+    "browserSettingsTitle": "浏览器通知"
   }
 }

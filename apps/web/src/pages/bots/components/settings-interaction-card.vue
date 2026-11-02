@@ -63,7 +63,6 @@
 
     <SettingsRow
       :label="$t('bots.settings.chatModel')"
-      :description="$t('bots.settings.chatModelDescription')"
       stack="sm"
     >
       <div class="w-full sm:w-56">
@@ -81,7 +80,6 @@
 
     <SettingsRow
       :label="$t('bots.settings.showToolCallsInIM')"
-      :description="$t('bots.settings.showToolCallsInIMDescription')"
     >
       <Switch
         :model-value="form.show_tool_calls_in_im"
