@@ -73,7 +73,10 @@ SELECT s.id AS session_id,
        COALESCE(s.attention_kind, 'marked')::text AS attention_kind,
        COALESCE(s.attention_at, r.marked_unread_at)::timestamptz AS attention_at,
        GREATEST(s.attention_at, r.marked_unread_at)::timestamptz AS read_through,
-       COALESCE(r.marked_unread_at > COALESCE(r.read_at, '-infinity'), false)::bool AS marked
+       COALESCE(r.marked_unread_at > COALESCE(r.read_at, '-infinity'), false)::bool AS marked,
+       (SELECT l.schedule_id FROM schedule_logs l
+        WHERE s.type = 'schedule' AND l.team_id = s.team_id AND l.session_id = s.id
+        LIMIT 1) AS schedule_id
 FROM bot_sessions s
 LEFT JOIN session_reads r
   ON r.team_id = s.team_id AND r.session_id = s.id AND r.user_id = $1
@@ -81,7 +84,7 @@ WHERE s.team_id = public.memoh_current_team_id()
   AND s.created_by_user_id = $1
   AND s.deleted_at IS NULL
   AND s.visibility = 'user'
-  AND s.type IN ('chat', 'acp_agent')
+  AND s.type IN ('chat', 'acp_agent', 'schedule')
   AND COALESCE(s.channel_type, '') IN ('', 'local')
   AND (s.attention_at > COALESCE(r.read_at, '-infinity')
        OR r.marked_unread_at > COALESCE(r.read_at, '-infinity'))
@@ -102,6 +105,7 @@ type ListUnreadSessionsForUserRow struct {
 	AttentionAt   pgtype.Timestamptz `json:"attention_at"`
 	ReadThrough   pgtype.Timestamptz `json:"read_through"`
 	Marked        bool               `json:"marked"`
+	ScheduleID    pgtype.UUID        `json:"schedule_id"`
 }
 
 // attention_at is the time shown and sorted by (the session's own attention,
@@ -124,6 +128,7 @@ func (q *Queries) ListUnreadSessionsForUser(ctx context.Context, arg ListUnreadS
 			&i.AttentionAt,
 			&i.ReadThrough,
 			&i.Marked,
+			&i.ScheduleID,
 		); err != nil {
 			return nil, err
 		}
@@ -143,11 +148,14 @@ WHERE s.team_id = public.memoh_current_team_id()
   AND s.id = $3
   AND s.deleted_at IS NULL
   AND s.visibility = 'user'
-  AND s.type IN ('chat', 'acp_agent')
+  AND s.type IN ('chat', 'acp_agent', 'schedule')
   AND COALESCE(s.channel_type, '') IN ('', 'local')
   AND s.created_by_user_id IS NOT NULL
   AND (s.attention_at IS NULL OR s.attention_at < $1::timestamptz)
-RETURNING s.id, s.bot_id, s.created_by_user_id, s.title, s.attention_kind, s.attention_at
+RETURNING s.id, s.bot_id, s.created_by_user_id, s.title, s.attention_kind, s.attention_at,
+  (SELECT l.schedule_id FROM schedule_logs l
+   WHERE s.type = 'schedule' AND l.team_id = s.team_id AND l.session_id = s.id
+   LIMIT 1) AS schedule_id
 `
 
 type MarkSessionAttentionParams struct {
@@ -163,10 +171,12 @@ type MarkSessionAttentionRow struct {
 	Title           string             `json:"title"`
 	AttentionKind   pgtype.Text        `json:"attention_kind"`
 	AttentionAt     pgtype.Timestamptz `json:"attention_at"`
+	ScheduleID      pgtype.UUID        `json:"schedule_id"`
 }
 
 // Records that a session needs its creator's attention. The WHERE clause is
-// the whole eligibility rule (user-visible web chat sessions with a creator)
+// the whole eligibility rule (user-visible web chat and schedule run sessions
+// with a creator)
 // plus a forward-only guard, so replays of the same run never re-notify: no
 // row back means the session is ineligible or already marked at least as late.
 // updated_at is deliberately left alone.
@@ -180,6 +190,7 @@ func (q *Queries) MarkSessionAttention(ctx context.Context, arg MarkSessionAtten
 		&i.Title,
 		&i.AttentionKind,
 		&i.AttentionAt,
+		&i.ScheduleID,
 	)
 	return i, err
 }
@@ -213,14 +224,14 @@ func (q *Queries) MarkSessionRead(ctx context.Context, arg MarkSessionReadParams
 
 const markSessionsUnread = `-- name: MarkSessionsUnread :many
 WITH eligible AS (
-  SELECT s.id, s.bot_id, s.title, s.attention_kind, s.attention_at
+  SELECT s.id, s.bot_id, s.team_id, s.type, s.title, s.attention_kind, s.attention_at
   FROM bot_sessions s
   WHERE s.team_id = public.memoh_current_team_id()
     AND s.id = ANY($1::uuid[])
     AND s.created_by_user_id = $2
     AND s.deleted_at IS NULL
     AND s.visibility = 'user'
-    AND s.type IN ('chat', 'acp_agent')
+    AND s.type IN ('chat', 'acp_agent', 'schedule')
     AND COALESCE(s.channel_type, '') IN ('', 'local')
 ), marked AS (
   INSERT INTO session_reads (user_id, session_id, marked_unread_at)
@@ -235,7 +246,10 @@ SELECT e.id AS session_id,
        COALESCE(e.attention_kind, 'marked')::text AS attention_kind,
        COALESCE(e.attention_at, m.marked_unread_at)::timestamptz AS attention_at,
        GREATEST(e.attention_at, m.marked_unread_at)::timestamptz AS read_through,
-       (m.marked_unread_at > COALESCE(m.read_at, '-infinity'))::bool AS marked
+       (m.marked_unread_at > COALESCE(m.read_at, '-infinity'))::bool AS marked,
+       (SELECT l.schedule_id FROM schedule_logs l
+        WHERE e.type = 'schedule' AND l.team_id = e.team_id AND l.session_id = e.id
+        LIMIT 1) AS schedule_id
 FROM eligible e
 JOIN marked m ON m.session_id = e.id
 `
@@ -254,6 +268,7 @@ type MarkSessionsUnreadRow struct {
 	AttentionAt   pgtype.Timestamptz `json:"attention_at"`
 	ReadThrough   pgtype.Timestamptz `json:"read_through"`
 	Marked        bool               `json:"marked"`
+	ScheduleID    pgtype.UUID        `json:"schedule_id"`
 }
 
 // The other side of MarkSessionRead: moves the user's unread mark forward on
@@ -278,6 +293,7 @@ func (q *Queries) MarkSessionsUnread(ctx context.Context, arg MarkSessionsUnread
 			&i.AttentionAt,
 			&i.ReadThrough,
 			&i.Marked,
+			&i.ScheduleID,
 		); err != nil {
 			return nil, err
 		}

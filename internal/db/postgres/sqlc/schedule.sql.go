@@ -14,7 +14,8 @@ import (
 const createSchedule = `-- name: CreateSchedule :one
 INSERT INTO schedule (
   name, description, pattern, max_calls, enabled, command, bot_id,
-  run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, max_run_seconds
+  run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, max_run_seconds,
+  notify_policy, contact_via_channels
 )
 VALUES (
   $1, $2, $3, $4, $5, $6, $7,
@@ -27,29 +28,33 @@ VALUES (
   $14::text,
   $15::text,
   $16::uuid,
- COALESCE(NULLIF($17::integer, 0), 3600)
+ COALESCE(NULLIF($17::integer, 0), 3600),
+  $18::text,
+  $19::bool
 )
-RETURNING max_run_seconds, id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
+RETURNING max_run_seconds, notify_policy, contact_via_channels, id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
 `
 
 type CreateScheduleParams struct {
-	Name            string      `json:"name"`
-	Description     string      `json:"description"`
-	Pattern         string      `json:"pattern"`
-	MaxCalls        pgtype.Int4 `json:"max_calls"`
-	Enabled         bool        `json:"enabled"`
-	Command         string      `json:"command"`
-	BotID           pgtype.UUID `json:"bot_id"`
-	RunTarget       string      `json:"run_target"`
-	TargetSessionID pgtype.UUID `json:"target_session_id"`
-	RuntimeType     pgtype.Text `json:"runtime_type"`
-	BotAgentID      pgtype.UUID `json:"bot_agent_id"`
-	AcpAgentID      pgtype.Text `json:"acp_agent_id"`
-	ModelID         pgtype.UUID `json:"model_id"`
-	AcpModelID      pgtype.Text `json:"acp_model_id"`
-	ReasoningEffort pgtype.Text `json:"reasoning_effort"`
-	WorkdirID       pgtype.UUID `json:"workdir_id"`
-	MaxRunSeconds   int32       `json:"max_run_seconds"`
+	Name               string      `json:"name"`
+	Description        string      `json:"description"`
+	Pattern            string      `json:"pattern"`
+	MaxCalls           pgtype.Int4 `json:"max_calls"`
+	Enabled            bool        `json:"enabled"`
+	Command            string      `json:"command"`
+	BotID              pgtype.UUID `json:"bot_id"`
+	RunTarget          string      `json:"run_target"`
+	TargetSessionID    pgtype.UUID `json:"target_session_id"`
+	RuntimeType        pgtype.Text `json:"runtime_type"`
+	BotAgentID         pgtype.UUID `json:"bot_agent_id"`
+	AcpAgentID         pgtype.Text `json:"acp_agent_id"`
+	ModelID            pgtype.UUID `json:"model_id"`
+	AcpModelID         pgtype.Text `json:"acp_model_id"`
+	ReasoningEffort    pgtype.Text `json:"reasoning_effort"`
+	WorkdirID          pgtype.UUID `json:"workdir_id"`
+	MaxRunSeconds      int32       `json:"max_run_seconds"`
+	NotifyPolicy       string      `json:"notify_policy"`
+	ContactViaChannels bool        `json:"contact_via_channels"`
 }
 
 func (q *Queries) CreateSchedule(ctx context.Context, arg CreateScheduleParams) (Schedule, error) {
@@ -71,10 +76,14 @@ func (q *Queries) CreateSchedule(ctx context.Context, arg CreateScheduleParams) 
 		arg.ReasoningEffort,
 		arg.WorkdirID,
 		arg.MaxRunSeconds,
+		arg.NotifyPolicy,
+		arg.ContactViaChannels,
 	)
 	var i Schedule
 	err := row.Scan(
 		&i.MaxRunSeconds,
+		&i.NotifyPolicy,
+		&i.ContactViaChannels,
 		&i.ID,
 		&i.Name,
 		&i.Description,
@@ -115,7 +124,7 @@ UPDATE schedule
 SET enabled = false,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $1
-RETURNING max_run_seconds, id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
+RETURNING max_run_seconds, notify_policy, contact_via_channels, id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
 `
 
 func (q *Queries) DisableSchedule(ctx context.Context, id pgtype.UUID) (Schedule, error) {
@@ -123,6 +132,8 @@ func (q *Queries) DisableSchedule(ctx context.Context, id pgtype.UUID) (Schedule
 	var i Schedule
 	err := row.Scan(
 		&i.MaxRunSeconds,
+		&i.NotifyPolicy,
+		&i.ContactViaChannels,
 		&i.ID,
 		&i.Name,
 		&i.Description,
@@ -148,8 +159,55 @@ func (q *Queries) DisableSchedule(ctx context.Context, id pgtype.UUID) (Schedule
 	return i, err
 }
 
+const getActiveScheduleFireForSession = `-- name: GetActiveScheduleFireForSession :one
+SELECT l.id AS log_id,
+       l.started_at,
+       l.schedule_id,
+       sc.notify_policy,
+       sc.contact_via_channels,
+       s.attention_kind,
+       s.attention_at
+FROM schedule_logs l
+JOIN schedule sc ON sc.team_id = l.team_id AND sc.id = l.schedule_id
+JOIN bot_sessions s ON s.team_id = l.team_id AND s.id = l.session_id
+WHERE l.team_id = public.memoh_current_team_id()
+  AND l.session_id = $1
+  AND l.completed_at IS NULL
+ORDER BY l.started_at DESC
+LIMIT 1
+`
+
+type GetActiveScheduleFireForSessionRow struct {
+	LogID              pgtype.UUID        `json:"log_id"`
+	StartedAt          pgtype.Timestamptz `json:"started_at"`
+	ScheduleID         pgtype.UUID        `json:"schedule_id"`
+	NotifyPolicy       string             `json:"notify_policy"`
+	ContactViaChannels bool               `json:"contact_via_channels"`
+	AttentionKind      pgtype.Text        `json:"attention_kind"`
+	AttentionAt        pgtype.Timestamptz `json:"attention_at"`
+}
+
+// The fire of a schedule that is running in a session right now, with the
+// schedule's notification settings and the session's latest attention: the
+// notify_user tool registers only for a fire whose schedule asks for it, and
+// raises attention once per fire.
+func (q *Queries) GetActiveScheduleFireForSession(ctx context.Context, sessionID pgtype.UUID) (GetActiveScheduleFireForSessionRow, error) {
+	row := q.db.QueryRow(ctx, getActiveScheduleFireForSession, sessionID)
+	var i GetActiveScheduleFireForSessionRow
+	err := row.Scan(
+		&i.LogID,
+		&i.StartedAt,
+		&i.ScheduleID,
+		&i.NotifyPolicy,
+		&i.ContactViaChannels,
+		&i.AttentionKind,
+		&i.AttentionAt,
+	)
+	return i, err
+}
+
 const getScheduleByID = `-- name: GetScheduleByID :one
-SELECT max_run_seconds, id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
+SELECT max_run_seconds, notify_policy, contact_via_channels, id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
 FROM schedule
 WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
@@ -159,6 +217,8 @@ func (q *Queries) GetScheduleByID(ctx context.Context, id pgtype.UUID) (Schedule
 	var i Schedule
 	err := row.Scan(
 		&i.MaxRunSeconds,
+		&i.NotifyPolicy,
+		&i.ContactViaChannels,
 		&i.ID,
 		&i.Name,
 		&i.Description,
@@ -181,6 +241,32 @@ func (q *Queries) GetScheduleByID(ctx context.Context, id pgtype.UUID) (Schedule
 		&i.WorkdirID,
 		&i.TeamID,
 	)
+	return i, err
+}
+
+const getScheduleNotifyPolicyForRun = `-- name: GetScheduleNotifyPolicyForRun :one
+SELECT (COALESCE(r.input_json->>'kind', '') = 'schedule')::bool AS scheduled,
+       COALESCE(sc.notify_policy, 'important')::text AS notify_policy
+FROM session_runs r
+LEFT JOIN schedule sc
+  ON sc.team_id = r.team_id AND sc.id::text = r.input_json->>'schedule_id'
+WHERE r.team_id = public.memoh_current_team_id()
+  AND r.run_id = $1
+`
+
+type GetScheduleNotifyPolicyForRunRow struct {
+	Scheduled    bool   `json:"scheduled"`
+	NotifyPolicy string `json:"notify_policy"`
+}
+
+// Whether a run was fired by a schedule, and that schedule's notify_policy. A
+// run's input is its submission, which a schedule trigger writes as
+// {"kind": "schedule", "schedule_id": ...}; any other run reads as not
+// scheduled. A schedule deleted since reads as the default policy.
+func (q *Queries) GetScheduleNotifyPolicyForRun(ctx context.Context, runID pgtype.UUID) (GetScheduleNotifyPolicyForRunRow, error) {
+	row := q.db.QueryRow(ctx, getScheduleNotifyPolicyForRun, runID)
+	var i GetScheduleNotifyPolicyForRunRow
+	err := row.Scan(&i.Scheduled, &i.NotifyPolicy)
 	return i, err
 }
 
@@ -193,7 +279,7 @@ SET current_calls = current_calls + 1,
     END,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $1
-RETURNING max_run_seconds, id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
+RETURNING max_run_seconds, notify_policy, contact_via_channels, id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
 `
 
 func (q *Queries) IncrementScheduleCalls(ctx context.Context, id pgtype.UUID) (Schedule, error) {
@@ -201,6 +287,8 @@ func (q *Queries) IncrementScheduleCalls(ctx context.Context, id pgtype.UUID) (S
 	var i Schedule
 	err := row.Scan(
 		&i.MaxRunSeconds,
+		&i.NotifyPolicy,
+		&i.ContactViaChannels,
 		&i.ID,
 		&i.Name,
 		&i.Description,
@@ -227,7 +315,7 @@ func (q *Queries) IncrementScheduleCalls(ctx context.Context, id pgtype.UUID) (S
 }
 
 const listEnabledSchedules = `-- name: ListEnabledSchedules :many
-SELECT max_run_seconds, id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
+SELECT max_run_seconds, notify_policy, contact_via_channels, id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
 FROM schedule
 WHERE team_id = public.memoh_current_team_id() AND enabled = true
 ORDER BY created_at DESC
@@ -244,6 +332,8 @@ func (q *Queries) ListEnabledSchedules(ctx context.Context) ([]Schedule, error) 
 		var i Schedule
 		if err := rows.Scan(
 			&i.MaxRunSeconds,
+			&i.NotifyPolicy,
+			&i.ContactViaChannels,
 			&i.ID,
 			&i.Name,
 			&i.Description,
@@ -277,7 +367,7 @@ func (q *Queries) ListEnabledSchedules(ctx context.Context) ([]Schedule, error) 
 }
 
 const listSchedulesByBot = `-- name: ListSchedulesByBot :many
-SELECT max_run_seconds, id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
+SELECT max_run_seconds, notify_policy, contact_via_channels, id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
 FROM schedule
 WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 ORDER BY created_at DESC
@@ -294,6 +384,8 @@ func (q *Queries) ListSchedulesByBot(ctx context.Context, botID pgtype.UUID) ([]
 		var i Schedule
 		if err := rows.Scan(
 			&i.MaxRunSeconds,
+			&i.NotifyPolicy,
+			&i.ContactViaChannels,
 			&i.ID,
 			&i.Name,
 			&i.Description,
@@ -344,29 +436,33 @@ SET name = $2,
     reasoning_effort = $15::text,
     workdir_id = $16::uuid,
     max_run_seconds = COALESCE(NULLIF($17::integer, 0), 3600),
+    notify_policy = $18::text,
+    contact_via_channels = $19::bool,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $1
-RETURNING max_run_seconds, id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
+RETURNING max_run_seconds, notify_policy, contact_via_channels, id, name, description, pattern, max_calls, current_calls, created_at, updated_at, enabled, command, bot_id, run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, team_id
 `
 
 type UpdateScheduleParams struct {
-	ID              pgtype.UUID `json:"id"`
-	Name            string      `json:"name"`
-	Description     string      `json:"description"`
-	Pattern         string      `json:"pattern"`
-	MaxCalls        pgtype.Int4 `json:"max_calls"`
-	Enabled         bool        `json:"enabled"`
-	Command         string      `json:"command"`
-	RunTarget       string      `json:"run_target"`
-	TargetSessionID pgtype.UUID `json:"target_session_id"`
-	RuntimeType     pgtype.Text `json:"runtime_type"`
-	BotAgentID      pgtype.UUID `json:"bot_agent_id"`
-	AcpAgentID      pgtype.Text `json:"acp_agent_id"`
-	ModelID         pgtype.UUID `json:"model_id"`
-	AcpModelID      pgtype.Text `json:"acp_model_id"`
-	ReasoningEffort pgtype.Text `json:"reasoning_effort"`
-	WorkdirID       pgtype.UUID `json:"workdir_id"`
-	MaxRunSeconds   int32       `json:"max_run_seconds"`
+	ID                 pgtype.UUID `json:"id"`
+	Name               string      `json:"name"`
+	Description        string      `json:"description"`
+	Pattern            string      `json:"pattern"`
+	MaxCalls           pgtype.Int4 `json:"max_calls"`
+	Enabled            bool        `json:"enabled"`
+	Command            string      `json:"command"`
+	RunTarget          string      `json:"run_target"`
+	TargetSessionID    pgtype.UUID `json:"target_session_id"`
+	RuntimeType        pgtype.Text `json:"runtime_type"`
+	BotAgentID         pgtype.UUID `json:"bot_agent_id"`
+	AcpAgentID         pgtype.Text `json:"acp_agent_id"`
+	ModelID            pgtype.UUID `json:"model_id"`
+	AcpModelID         pgtype.Text `json:"acp_model_id"`
+	ReasoningEffort    pgtype.Text `json:"reasoning_effort"`
+	WorkdirID          pgtype.UUID `json:"workdir_id"`
+	MaxRunSeconds      int32       `json:"max_run_seconds"`
+	NotifyPolicy       string      `json:"notify_policy"`
+	ContactViaChannels bool        `json:"contact_via_channels"`
 }
 
 func (q *Queries) UpdateSchedule(ctx context.Context, arg UpdateScheduleParams) (Schedule, error) {
@@ -388,10 +484,14 @@ func (q *Queries) UpdateSchedule(ctx context.Context, arg UpdateScheduleParams) 
 		arg.ReasoningEffort,
 		arg.WorkdirID,
 		arg.MaxRunSeconds,
+		arg.NotifyPolicy,
+		arg.ContactViaChannels,
 	)
 	var i Schedule
 	err := row.Scan(
 		&i.MaxRunSeconds,
+		&i.NotifyPolicy,
+		&i.ContactViaChannels,
 		&i.ID,
 		&i.Name,
 		&i.Description,

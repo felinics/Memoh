@@ -162,28 +162,38 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
+	notifyPolicy, err := normalizeNotifyPolicy(req.NotifyPolicy)
+	if err != nil {
+		return Schedule{}, err
+	}
+	contactViaChannels := true
+	if req.ContactViaChannels != nil {
+		contactViaChannels = *req.ContactViaChannels
+	}
 	exec, err := s.normalizeExecution(ctx, botID, req.ExecutionConfig)
 	if err != nil {
 		return Schedule{}, err
 	}
 	row, err := s.queries.CreateSchedule(ctx, sqlc.CreateScheduleParams{
-		Name:            req.Name,
-		Description:     req.Description,
-		Pattern:         req.Pattern,
-		MaxCalls:        maxCalls,
-		Enabled:         enabled,
-		Command:         req.Command,
-		BotID:           pgBotID,
-		RunTarget:       exec.RunTarget,
-		TargetSessionID: db.ParseUUIDOrEmpty(exec.TargetSessionID),
-		RuntimeType:     optionalText(exec.RuntimeType),
-		BotAgentID:      db.ParseUUIDOrEmpty(exec.BotAgentID),
-		AcpAgentID:      optionalText(exec.ACPAgentID),
-		ModelID:         db.ParseUUIDOrEmpty(exec.ModelID),
-		AcpModelID:      optionalText(exec.ACPModelID),
-		ReasoningEffort: optionalText(exec.ReasoningEffort),
-		WorkdirID:       db.ParseUUIDOrEmpty(exec.WorkdirID),
-		MaxRunSeconds:   int32(exec.MaxRunSeconds), //nolint:gosec // G115: normalized to 300..86400, or read from an int32 column.
+		Name:               req.Name,
+		Description:        req.Description,
+		Pattern:            req.Pattern,
+		MaxCalls:           maxCalls,
+		Enabled:            enabled,
+		Command:            req.Command,
+		BotID:              pgBotID,
+		RunTarget:          exec.RunTarget,
+		TargetSessionID:    db.ParseUUIDOrEmpty(exec.TargetSessionID),
+		RuntimeType:        optionalText(exec.RuntimeType),
+		BotAgentID:         db.ParseUUIDOrEmpty(exec.BotAgentID),
+		AcpAgentID:         optionalText(exec.ACPAgentID),
+		ModelID:            db.ParseUUIDOrEmpty(exec.ModelID),
+		AcpModelID:         optionalText(exec.ACPModelID),
+		ReasoningEffort:    optionalText(exec.ReasoningEffort),
+		WorkdirID:          db.ParseUUIDOrEmpty(exec.WorkdirID),
+		MaxRunSeconds:      int32(exec.MaxRunSeconds), //nolint:gosec // G115: normalized to 300..86400, or read from an int32 column.
+		NotifyPolicy:       notifyPolicy,
+		ContactViaChannels: contactViaChannels,
 	})
 	if err != nil {
 		return Schedule{}, err
@@ -271,6 +281,16 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
+	notifyPolicy := existing.NotifyPolicy
+	if req.NotifyPolicy != nil {
+		if notifyPolicy, err = normalizeNotifyPolicy(*req.NotifyPolicy); err != nil {
+			return Schedule{}, err
+		}
+	}
+	contactViaChannels := existing.ContactViaChannels
+	if req.ContactViaChannels != nil {
+		contactViaChannels = *req.ContactViaChannels
+	}
 	// Validate only when the caller sends a new execution block. The stored
 	// block is deliberately not re-validated on unrelated updates: its
 	// references may have gone stale (deleted target session, archived
@@ -286,23 +306,25 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 		exec = normalized
 	}
 	updated, err := s.queries.UpdateSchedule(ctx, sqlc.UpdateScheduleParams{
-		ID:              pgID,
-		Name:            name,
-		Description:     description,
-		Pattern:         pattern,
-		MaxCalls:        maxCalls,
-		Enabled:         enabled,
-		Command:         command,
-		RunTarget:       exec.RunTarget,
-		TargetSessionID: db.ParseUUIDOrEmpty(exec.TargetSessionID),
-		RuntimeType:     optionalText(exec.RuntimeType),
-		BotAgentID:      db.ParseUUIDOrEmpty(exec.BotAgentID),
-		AcpAgentID:      optionalText(exec.ACPAgentID),
-		ModelID:         db.ParseUUIDOrEmpty(exec.ModelID),
-		AcpModelID:      optionalText(exec.ACPModelID),
-		ReasoningEffort: optionalText(exec.ReasoningEffort),
-		WorkdirID:       db.ParseUUIDOrEmpty(exec.WorkdirID),
-		MaxRunSeconds:   int32(exec.MaxRunSeconds), //nolint:gosec // G115: normalized to 300..86400, or read from an int32 column.
+		ID:                 pgID,
+		Name:               name,
+		Description:        description,
+		Pattern:            pattern,
+		MaxCalls:           maxCalls,
+		Enabled:            enabled,
+		Command:            command,
+		RunTarget:          exec.RunTarget,
+		TargetSessionID:    db.ParseUUIDOrEmpty(exec.TargetSessionID),
+		RuntimeType:        optionalText(exec.RuntimeType),
+		BotAgentID:         db.ParseUUIDOrEmpty(exec.BotAgentID),
+		AcpAgentID:         optionalText(exec.ACPAgentID),
+		ModelID:            db.ParseUUIDOrEmpty(exec.ModelID),
+		AcpModelID:         optionalText(exec.ACPModelID),
+		ReasoningEffort:    optionalText(exec.ReasoningEffort),
+		WorkdirID:          db.ParseUUIDOrEmpty(exec.WorkdirID),
+		MaxRunSeconds:      int32(exec.MaxRunSeconds), //nolint:gosec // G115: normalized to 300..86400, or read from an int32 column.
+		NotifyPolicy:       notifyPolicy,
+		ContactViaChannels: contactViaChannels,
 	})
 	if err != nil {
 		return Schedule{}, err
@@ -409,18 +431,19 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 	}
 
 	result, triggerErr := s.triggerer.TriggerSchedule(ctx, sched.BotID, TriggerPayload{
-		ID:              sched.ID,
-		FireID:          logRow.ID.String(),
-		Name:            sched.Name,
-		Description:     sched.Description,
-		Pattern:         sched.Pattern,
-		MaxCalls:        sched.MaxCalls,
-		Command:         sched.Command,
-		OwnerUserID:     ownerUserID,
-		SessionID:       sessionID,
-		ModelID:         sched.ModelID,
-		RuntimeModelID:  sched.ACPModelID,
-		ReasoningEffort: sched.ReasoningEffort,
+		ID:               sched.ID,
+		FireID:           logRow.ID.String(),
+		Name:             sched.Name,
+		Description:      sched.Description,
+		Pattern:          sched.Pattern,
+		MaxCalls:         sched.MaxCalls,
+		Command:          sched.Command,
+		OwnerUserID:      ownerUserID,
+		SessionID:        sessionID,
+		NoChannelContact: !sched.ContactViaChannels,
+		ModelID:          sched.ModelID,
+		RuntimeModelID:   sched.ACPModelID,
+		ReasoningEffort:  sched.ReasoningEffort,
 	})
 	triggerErr = withExecutionTimeout(ctx, triggerErr)
 	if triggerErr != nil {
@@ -776,15 +799,17 @@ func (s *Service) removeJob(id string) {
 
 func toSchedule(row sqlc.Schedule) Schedule {
 	item := Schedule{
-		ID:              row.ID.String(),
-		Name:            row.Name,
-		Description:     row.Description,
-		Pattern:         row.Pattern,
-		CurrentCalls:    int(row.CurrentCalls),
-		Enabled:         row.Enabled,
-		Command:         row.Command,
-		BotID:           row.BotID.String(),
-		ExecutionConfig: executionFromRow(row),
+		ID:                 row.ID.String(),
+		Name:               row.Name,
+		Description:        row.Description,
+		Pattern:            row.Pattern,
+		CurrentCalls:       int(row.CurrentCalls),
+		Enabled:            row.Enabled,
+		Command:            row.Command,
+		BotID:              row.BotID.String(),
+		NotifyPolicy:       row.NotifyPolicy,
+		ContactViaChannels: row.ContactViaChannels,
+		ExecutionConfig:    executionFromRow(row),
 	}
 	if row.MaxCalls.Valid {
 		maxCalls := int(row.MaxCalls.Int32)
@@ -797,6 +822,17 @@ func toSchedule(row sqlc.Schedule) Schedule {
 		item.UpdatedAt = row.UpdatedAt.Time
 	}
 	return item
+}
+
+// normalizeNotifyPolicy reads an empty policy as the default.
+func normalizeNotifyPolicy(policy string) (string, error) {
+	switch strings.TrimSpace(policy) {
+	case "", NotifyImportant:
+		return NotifyImportant, nil
+	case NotifyEveryRun:
+		return NotifyEveryRun, nil
+	}
+	return "", invalidFieldf("notify_policy", "notify_policy must be %q or %q", NotifyImportant, NotifyEveryRun)
 }
 
 func executionFromRow(row sqlc.Schedule) ExecutionConfig {

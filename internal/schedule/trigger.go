@@ -20,6 +20,9 @@ type TriggerPayload struct {
 	Command     string
 	OwnerUserID string
 	SessionID   string
+	// NoChannelContact tells the run it need not reach the owner on social
+	// platforms: the schedule's contact_via_channels is off.
+	NoChannelContact bool
 	// ModelID / RuntimeModelID / ReasoningEffort are the schedule's per-run
 	// overrides. Which runtime executes the run is decided by the session
 	// itself (its runtime_type and metadata), never by the payload.
