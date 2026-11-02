@@ -44,18 +44,27 @@ type redisHistoryResetRecord struct {
 	ExpiresAtMS int64  `json:"expires_at_ms"`
 }
 
-// renewRedisLeaseScript moves a run's lease and nothing else. The lease is the
-// run ref key's expiry: Redis deletes the ref at the deadline, so every
-// ownership check that requires the ref also requires a live lease. The script
-// checks the ref's identity, not the session snapshot, so renewal neither reads
-// nor rewrites the snapshot and never contends with the owner's own output
-// writes. The lease index score is the deadline the reaper condemns a run by,
-// so it moves in the same atomic step as the key's expiry; a renewal that
-// updated one and not the other would either lose the run or condemn a live
-// owner.
+// renewRedisLeaseScript moves a run's lease. The lease is the run ref key's
+// expiry: Redis deletes the ref at the deadline, so every ownership check that
+// requires the ref also requires a live lease. The script checks the ref's
+// identity, not the session snapshot, so renewal neither reads nor rewrites the
+// snapshot and does not contend with the owner's own output writes. The lease
+// index score is the deadline the reaper condemns a run by, so it moves in the
+// same atomic step as the key's expiry; a renewal that updated one and not the
+// other would either lose the run or condemn a live owner.
+//
+// An active run lives until it terminalizes, however long it goes without
+// writing its state (an inline decision waits on a user). Renewal is then what
+// keeps the snapshot and its cursor from expiring under it; it extends them only
+// once half the state TTL has passed, so a run touches them at most once per
+// half TTL.
 var renewRedisLeaseScript = redis.NewScript(`
 local current_ref = redis.call('GET', KEYS[1])
 if not current_ref then
+  return 0
+end
+local state_ttl = redis.call('PTTL', KEYS[3])
+if state_ttl == -2 then
   return 0
 end
 local ok_ref, ref = pcall(cjson.decode, current_ref)
@@ -73,6 +82,11 @@ if not expires_at_ms or expires_at_ms <= now_ms then
   return 0
 end
 redis.call('PEXPIREAT', KEYS[1], expires_at_ms)
+local keep_ms = tonumber(ARGV[7])
+if state_ttl >= 0 and state_ttl < keep_ms / 2 then
+  redis.call('PEXPIRE', KEYS[3], keep_ms)
+  redis.call('PEXPIRE', KEYS[4], keep_ms)
+end
 local token = tonumber(ref.fencing_token)
 if token and token > 0 then
   redis.call('ZADD', KEYS[2], expires_at_ms, ARGV[1] .. '|' .. ARGV[2] .. '|' .. ARGV[3] .. '|' .. string.format('%d', math.floor(token)))
@@ -742,8 +756,10 @@ func (b *RedisBackend) RenewLease(ctx context.Context, key Key, runID, ownerID, 
 	if renewedAt.IsZero() || !renewedAt.Before(expiresAt) {
 		return ErrRunOwnershipLost
 	}
-	renewed, err := renewRedisLeaseScript.Run(ctx, b.client, []string{b.runKey(key, runID), b.leaseIndexKey()},
+	renewed, err := renewRedisLeaseScript.Run(ctx, b.client,
+		[]string{b.runKey(key, runID), b.leaseIndexKey(), b.stateKey(key), b.cursorKey(key)},
 		strings.TrimSpace(key.BotID), strings.TrimSpace(key.SessionID), runID, ownerID, generation, expiresAt.UnixMilli(),
+		b.stateTTL.Milliseconds(),
 	).Int64()
 	if err != nil {
 		return err

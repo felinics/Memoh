@@ -234,6 +234,54 @@ func runRedisLeaseIndexContract(t *testing.T, redisURL string) {
 		}
 	})
 
+	t.Run("renewal keeps a quiet run's snapshot past the state ttl", func(t *testing.T) {
+		// A run can stay active without writing its state for longer than the
+		// state TTL, an inline decision waiting on a user for one. Renewal is
+		// then the only thing that proves the run alive, so it must keep the
+		// snapshot as long as it keeps the lease.
+		short, err := NewRedisBackend(ctx, RedisOptions{
+			URL: redisURL, KeyPrefix: uniqueRuntimeBackendPrefix("lease-quiet"), StateTTL: time.Second,
+		})
+		if err != nil {
+			t.Fatalf("redis backend: %v", err)
+		}
+		t.Cleanup(func() { _ = short.Close() })
+		ref := RunRef{
+			BotID: testBotID, SessionID: "session-lease-quiet", RunID: "run-lease-quiet",
+			OwnerID: "owner-lease-quiet", Generation: "gen-quiet", FencingToken: 16,
+		}
+		key := Key{BotID: ref.BotID, SessionID: ref.SessionID}
+		reserveRuntimeRun(ctx, t, short, ref, time.Now().Add(time.Minute))
+		for range 10 {
+			time.Sleep(200 * time.Millisecond)
+			renewedAt, err := short.Now(ctx)
+			if err != nil {
+				t.Fatalf("backend time: %v", err)
+			}
+			if err := short.RenewLease(ctx, key, ref.RunID, ref.OwnerID, ref.Generation, renewedAt, renewedAt.Add(time.Minute)); err != nil {
+				t.Fatalf("renew quiet lease: %v", err)
+			}
+		}
+		if snapshot, ok, err := short.Load(ctx, key); err != nil || !ok || snapshot.CurrentRunView == nil {
+			t.Fatalf("snapshot after renewals past the state ttl = %#v, ok:%v err:%v", snapshot.CurrentRunView, ok, err)
+		}
+		if _, ok, err := short.LoadCursor(ctx, key); err != nil || !ok {
+			t.Fatalf("cursor after renewals past the state ttl = ok:%v err:%v", ok, err)
+		}
+
+		// Without its snapshot the run has nothing left to own.
+		if err := short.client.Del(ctx, short.stateKey(key)).Err(); err != nil {
+			t.Fatalf("drop snapshot: %v", err)
+		}
+		renewedAt, err := short.Now(ctx)
+		if err != nil {
+			t.Fatalf("backend time: %v", err)
+		}
+		if err := short.RenewLease(ctx, key, ref.RunID, ref.OwnerID, ref.Generation, renewedAt, renewedAt.Add(time.Minute)); !errors.Is(err, ErrRunOwnershipLost) {
+			t.Fatalf("renew without a snapshot = %v, want ErrRunOwnershipLost", err)
+		}
+	})
+
 	t.Run("finishing remains renewable until durable finalization", func(t *testing.T) {
 		ref := RunRef{
 			BotID: testBotID, SessionID: "session-lease-finishing", RunID: "run-lease-finishing",
