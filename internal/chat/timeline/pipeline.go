@@ -97,6 +97,29 @@ func (p *Pipeline) PushEvent(sessionID string, event CanonicalEvent) RenderedCon
 		state.lru = p.lru.PushFront(sessionID)
 		p.sessions[sessionID] = state
 	}
+	return p.pushLocked(state, event, now)
+}
+
+// PushResidentEvent applies one event to a resident session as PushEvent does.
+// A session that is not resident stays that way: the event renders on its own,
+// so the session's next access still finds it cold and loads its history.
+// This is for a session whose history failed to load, which a projection must
+// not make resident with that history missing.
+func (p *Pipeline) PushResidentEvent(sessionID string, event CanonicalEvent) RenderedContext {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	now := p.options.Now()
+	p.evictExpired(now)
+	if state := p.sessions[sessionID]; state != nil {
+		return p.pushLocked(state, event, now)
+	}
+	ic := NewEmptyIC(sessionID)
+	reduceInPlace(&ic, event)
+	return Render(ic, p.renderParams)
+}
+
+func (p *Pipeline) pushLocked(state *pipelineSession, event CanonicalEvent, now time.Time) RenderedContext {
 	p.touch(state, now)
 	existingDirty := dirtyUnique(dirtyIndexes(state.ic, event))
 	var oldDirtyNodeBytes int64

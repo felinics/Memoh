@@ -50,6 +50,14 @@ func (*replayQueries) CountSessionEvents(context.Context, pgtype.UUID) (int64, e
 	return 0, nil
 }
 
+func (*replayQueries) NextSessionEventCursor(context.Context) (int64, error) {
+	return 1, nil
+}
+
+func (*replayQueries) CreateSessionEvent(context.Context, sqlc.CreateSessionEventParams) (pgtype.UUID, error) {
+	return pgtype.UUID{Bytes: [16]byte{1}, Valid: true}, nil
+}
+
 func newReplayProcessor(queries *replayQueries) (*ChannelInboundProcessor, *timeline.Pipeline) {
 	pipeline := timeline.NewPipeline(timeline.RenderParams{})
 	processor := &ChannelInboundProcessor{}
@@ -114,22 +122,29 @@ func TestReplayPipelineSessionOutlivesTheCallerThatStartedIt(t *testing.T) {
 	})
 }
 
-// A failed replay leaves the session cold, so the next message tries again;
-// so does a session evicted after it loaded.
-func TestReplayPipelineSessionRetriesAnUnloadedSession(t *testing.T) {
+// A message whose session failed to load still gets its context rendered, but
+// the session stays cold, so the next message retries the replay instead of
+// building on a session resident without its history; so does a session
+// evicted after it loaded.
+func TestProjectInboundEventRetriesASessionThatFailedToLoad(t *testing.T) {
 	t.Parallel()
 	queries := &replayQueries{release: make(chan struct{}), err: errors.New("database unavailable")}
 	close(queries.release)
 	processor, pipeline := newReplayProcessor(queries)
+	project := func() timeline.RenderedContext {
+		event := inboundTestEvent()
+		event.SessionID = replayTestSessionID
+		_, rc := processor.projectInboundEvent(context.Background(), "bot-1", replayTestSessionID, event)
+		return rc
+	}
 
-	processor.replayPipelineSession(context.Background(), "bot-1", replayTestSessionID)
-	if pipeline.HasSession(replayTestSessionID) {
-		t.Fatal("failed replay loaded the session")
+	if rc := project(); len(rc) == 0 || pipeline.HasSession(replayTestSessionID) {
+		t.Fatalf("after a failed replay: rendered %d, loaded %v; want the message rendered, session cold", len(rc), pipeline.HasSession(replayTestSessionID))
 	}
 	queries.err = nil
-	processor.replayPipelineSession(context.Background(), "bot-1", replayTestSessionID)
+	project()
 	pipeline.DropSession(replayTestSessionID)
-	processor.replayPipelineSession(context.Background(), "bot-1", replayTestSessionID)
+	project()
 
 	if got := queries.started.Load(); got != 3 || !pipeline.HasSession(replayTestSessionID) {
 		t.Fatalf("replays = %d, loaded = %v; want 3, true", got, pipeline.HasSession(replayTestSessionID))

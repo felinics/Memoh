@@ -13,14 +13,14 @@ type sessionEventPersister interface {
 	PersistEvent(ctx context.Context, botID, sessionID string, event timeline.CanonicalEvent) (string, timeline.CanonicalEvent, error)
 }
 
-// persistAndProjectEvent projects the persisted form of the event, not the
-// adapted input: the store stamps the durable event cursor that discuss
+// persistAndProjectEvent projects the persisted form of the event through
+// project, not the adapted input: the store stamps the durable event cursor that discuss
 // consumption gates on, so projecting the pre-persist value would silently
 // degrade every segment to source-time gating.
 func persistAndProjectEvent(
 	ctx context.Context,
 	store sessionEventPersister,
-	pipeline *timeline.Pipeline,
+	project func(sessionID string, event timeline.CanonicalEvent) timeline.RenderedContext,
 	log *slog.Logger,
 	botID string,
 	sessionID string,
@@ -38,5 +38,5 @@ func persistAndProjectEvent(
 			eventID = id
 		}
 	}
-	return eventID, pipeline.PushEvent(sessionID, event)
+	return eventID, project(sessionID, event)
 }
