@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"go.uber.org/fx"
 
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/chat/attention"
 	"github.com/felinics/memoh/internal/chat/event"
 	"github.com/felinics/memoh/internal/config"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
@@ -56,4 +58,10 @@ func provideSessionRuntimeManager(lc fx.Lifecycle, log *slog.Logger, cfg config.
 		},
 	})
 	return manager, nil
+}
+
+// provideAttentionService records which sessions need their creator and
+// publishes that on the user's hub topic.
+func provideAttentionService(postgresStore *postgresstore.Store, hub *event.Hub) *attention.Service {
+	return attention.NewService(postgresStore.SQLC(), hub, time.Now)
 }

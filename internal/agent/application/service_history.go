@@ -152,6 +152,9 @@ func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.S
 			result = append(result, historyfrag.SummaryRecord(item.SummaryID, item.Summary, scope))
 			continue
 		}
+		if err := interruptedPreparation(ctx, "decode history rows"); err != nil {
+			return nil, false, err
+		}
 		msg, ok := kept[item.RowID]
 		if !ok {
 			return nil, false, fmt.Errorf("history checkpoint %s keeps row %s, which is not a context row", held.ID, item.RowID)
@@ -165,6 +168,9 @@ func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.S
 	// The budget covers content only; metadata arrives undecoded. Release each
 	// row once converted so at most one row's metadata is decoded at a time.
 	for i := range msgs {
+		if err := interruptedPreparation(ctx, "decode history rows"); err != nil {
+			return nil, false, err
+		}
 		record, err := historyfrag.FromDBMessageWithLogger(s.logger, msgs[i], fallback)
 		if err != nil {
 			return nil, false, err

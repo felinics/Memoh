@@ -150,9 +150,9 @@ func (s *Service) prepareContinuationRunConfig(
 	// provider-valid. Applies to every continuation path that resumes after a
 	// deferred tool call. Provenance names the outgoing messages, closures
 	// included, so a fold removes each closure with its call.
-	outgoing := repairToolCallClosures(nonNilModelMessages(messages), syntheticToolClosureError)
-	base.ContextProvenance = contextProvenance(outgoing, retained, append(compactionInputs(req), req.continuationAnchors...))
-	base.Messages = modelMessagesToSDKMessages(outgoing)
+	outgoing := repairContextToolCalls(newContextMessages(messages), syntheticToolClosureError)
+	base.Messages = contextSentMessages(outgoing)
+	base.ContextProvenance = contextProvenance(contextModelMessages(outgoing), base.Messages, retained, append(compactionInputs(req), req.continuationAnchors...))
 	base.ContextCurrentUserMessageIndex = nil
 	base.ContextMemoryMessageIndex = nil
 	base.Query = ""

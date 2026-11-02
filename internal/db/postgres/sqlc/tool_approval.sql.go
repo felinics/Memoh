@@ -84,6 +84,89 @@ func (q *Queries) ApproveToolApprovalRequest(ctx context.Context, arg ApproveToo
 	return i, err
 }
 
+const cancelPendingToolApprovalsByRun = `-- name: CancelPendingToolApprovalsByRun :many
+UPDATE tool_approval_requests
+SET status = 'cancelled',
+    decision_reason = $1,
+    decided_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $2
+  AND session_id = $3
+  AND run_id = $4
+  AND status = 'pending'
+  AND runtime_fencing_token IS NOT DISTINCT FROM $5::bigint
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+`
+
+type CancelPendingToolApprovalsByRunParams struct {
+	Reason              string      `json:"reason"`
+	BotID               pgtype.UUID `json:"bot_id"`
+	SessionID           pgtype.UUID `json:"session_id"`
+	RunID               pgtype.UUID `json:"run_id"`
+	RuntimeFencingToken pgtype.Int8 `json:"runtime_fencing_token"`
+}
+
+// A run that ended without its owner's finish path only invalidates the
+// approvals it created. Session-wide cancellation would also close a newer
+// run's approval.
+func (q *Queries) CancelPendingToolApprovalsByRun(ctx context.Context, arg CancelPendingToolApprovalsByRunParams) ([]ToolApprovalRequest, error) {
+	rows, err := q.db.Query(ctx, cancelPendingToolApprovalsByRun,
+		arg.Reason,
+		arg.BotID,
+		arg.SessionID,
+		arg.RunID,
+		arg.RuntimeFencingToken,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ToolApprovalRequest
+	for rows.Next() {
+		var i ToolApprovalRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.RouteID,
+			&i.ChannelIdentityID,
+			&i.WorkspaceTargetID,
+			&i.ToolCallID,
+			&i.ToolName,
+			&i.Operation,
+			&i.ToolInput,
+			&i.Options,
+			&i.SelectedOptionID,
+			&i.ShortID,
+			&i.Status,
+			&i.RuntimeFencingToken,
+			&i.ResponseControlID,
+			&i.ResponsePayloadHash,
+			&i.DecisionReason,
+			&i.RequestedByChannelIdentityID,
+			&i.DecidedByChannelIdentityID,
+			&i.RequestedMessageID,
+			&i.PromptMessageID,
+			&i.PromptExternalMessageID,
+			&i.SourcePlatform,
+			&i.ReplyTarget,
+			&i.ConversationType,
+			&i.CreatedAt,
+			&i.DecidedAt,
+			&i.TeamID,
+			&i.RunID,
+			&i.TurnID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const cancelPendingToolApprovalsBySession = `-- name: CancelPendingToolApprovalsBySession :many
 UPDATE tool_approval_requests
 SET status = 'cancelled',

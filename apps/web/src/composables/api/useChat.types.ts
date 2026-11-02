@@ -19,6 +19,7 @@ export interface SessionSummary {
   workdir_id?: string
   created_at?: string
   updated_at?: string
+  created_by_user_id?: string
   route_metadata?: Record<string, unknown>
   route_conversation_type?: string
   /** Session's persisted (model, effort) pair (issue #879); empty = no memory. */

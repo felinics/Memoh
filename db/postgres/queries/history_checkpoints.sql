@@ -466,21 +466,15 @@ ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 -- name: ClassifyHistoryCheckpointMessages :many
 -- How a checkpoint stands for each inbound message that has context rows:
 -- kept when one of its rows is after the checkpoint's position or is a row
--- the checkpoint keeps by reference, folded otherwise. event_cursor is the
--- cursor of the event its rows were written from, 0 when unknown: a summary
--- reads rows, so it knows the message as of that event. A message without
+-- the checkpoint keeps by reference, folded otherwise. A message without
 -- context rows returns nothing.
 SELECT
   m.source_message_id::text AS external_message_id,
   bool_or(
     (m.turn_position, m.turn_message_seq) > (sqlc.arg(after_turn_position)::bigint, sqlc.arg(after_turn_message_seq)::bigint)
     OR m.id = ANY(sqlc.arg(kept_ids)::uuid[])
-  )::boolean AS kept,
-  COALESCE(MAX((event.event_data->>'event_cursor')::bigint), 0)::bigint AS event_cursor
+  )::boolean AS kept
 FROM bot_visible_history_messages m
-LEFT JOIN bot_session_events event
-  ON event.team_id = public.memoh_current_team_id()
- AND event.id = m.event_id
 WHERE m.team_id = public.memoh_current_team_id()
   AND m.session_id = sqlc.arg(session_id)
   AND m.source_message_id = ANY(sqlc.arg(external_message_ids)::text[])

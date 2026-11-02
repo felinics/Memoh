@@ -304,7 +304,7 @@ Chat routes register **null stub components** in the router. The real UI (`MainS
 
 - All routes except `/login` and `/oauth/*` require `localStorage.getItem('token')`.
 - Logged-in users accessing `/login` are redirected to `/`.
-- Incomplete onboarding redirects authenticated users to `/onboarding` (`router-guards/onboarding.ts`).
+- Incomplete onboarding redirects authenticated users to `/onboarding` (`router-guards/onboarding.ts`). A completion this browser has already seen is remembered per account (`store/user.ts`), so a returning user's first render — on a cold start or right after signing in — does not wait on `/users/me`; the server check then runs in the background and redirects only if it reports onboarding incomplete. The bot an account last had open is remembered the same way (`store/chat-selection.ts`), so signing back in opens it without waiting for the bot list.
 - Routes with `meta.adminOnly` (e.g. `/settings/people`) require `user.role === 'admin'`.
 - Chunk load errors (dynamic import failures) trigger an automatic page reload.
 - `/dev/*` is registered only in dev builds and requires `localStorage.setItem('memoh:dev-tools', '1')`.
@@ -332,6 +332,18 @@ The shell splits into three layers (`App.vue` is the orchestrator):
    - **SessionInfoRing** — Session info display in the composer.
 
 Several settings pages use **MasterDetailSidebarLayout** (`components/master-detail-sidebar-layout/`) for left-sidebar + detail-panel patterns (providers, web search, memory, voice).
+
+### Composer-First Entry (required)
+
+People open an agent app, or a past conversation, because they have something to say right now. The composer is the first thing a conversation shows, ahead of everything else on the page — on desktop browsers, phone-width web, and the desktop shell alike.
+
+- **Rendered and typeable on the first frame.** Every way into a conversation (cold start, reload, New Chat, picking a session, switching bots, a deep link) draws the composer and accepts typing on its first frame. Never gate the composer's mount, visibility, or `disabled` state on network or store loading (current user, bots, session list, session summary, history, runtime snapshot, model catalog, WebSocket). Loading belongs to the message area and to the specific control whose data is pending.
+- **Only the send waits.** While prerequisites load, typing, paste, and type-anywhere capture keep working; the send is held (`handleSend`) until they are ready. Data that is still loading reads as loading, never as an error or a missing value (for example, no "select a model" notice before the model preference has loaded).
+- **Exceptions: when the bot itself is unknown.** Two entries wait for one request because nothing local says which bot's conversation to open: the first sign-in of an account on a browser that has never seen it (the bot list), and a link to a bot other than the one this tab remembers (that bot's lookup). They show no other bot's composer meanwhile. Everything after that follows the rules above.
+- **Its place is final from the first frame.** Welcome (centred) vs. docked is decided from local state alone. After the first frame only the user's own action — such as sending the first message of a new chat — moves it. A cold start opens a new chat rather than picking a history for the user; a restored desktop layout keeps its tabs.
+- **Moving never changes what is in it.** Whenever the composer does move, the typed text, caret, attachments, and focus survive, and background work never switches the tab the user is typing in.
+- **Focus follows the user; the keyboard is the user's call.** On desktop, entering a conversation focuses its composer unless another input holds focus; entered from a menu or dialog, it focuses once that overlay has closed. On phones nothing is auto-focused: the composer is rendered and tappable, and opening the keyboard is the user's decision.
+- **Route guards do not wait on the network before the first render.** When a check can be answered from what this browser has already confirmed for the signed-in account, let the navigation through and verify in the background.
 
 ### Dev Component Wall
 

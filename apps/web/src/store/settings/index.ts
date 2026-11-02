@@ -47,6 +47,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const defaultUiFontFamily = computed(() => DEFAULT_UI_FONT_FAMILY)
   const defaultCodeFontFamily = computed(() => DEFAULT_CODE_FONT_FAMILY)
   const language = useStorage<Locale>('language', 'en')
+  // `theme` and `color-scheme` are also read by an inline script in
+  // index.html (web and desktop renderer) before the app loads, so the first
+  // frame already has the right background. Keep the keys and stored values
+  // in step with it.
   const theme = useStorage<ThemePreference>('theme', 'system')
   const colorScheme = useStorage<ColorSchemeId>('color-scheme', 'memoh')
   const uiFontFamily = useStorage<string>('ui-font-family', '')

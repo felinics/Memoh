@@ -2,6 +2,17 @@
   <PageShell :title="t('settings.appearance.title')">
     <div class="space-y-8">
       <SettingsSection :title="t('settings.appearance.interface')">
+        <SettingsRow
+          :label="t('notifications.settingsTitle')"
+          :description="notificationDescription"
+        >
+          <Switch
+            :model-value="notifications.active"
+            :disabled="!notifications.supported || notifications.pending"
+            :aria-label="t('notifications.settingsTitle')"
+            @update:model-value="notifications.setEnabled"
+          />
+        </SettingsRow>
         <SettingsRow :label="t('settings.language')">
           <Select
             :model-value="language"
@@ -373,6 +384,7 @@ import { Monitor, Moon, SlidersHorizontal, Sun } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useNotificationSettings } from '@/store/notification-settings'
 import MarkdownRender, { enableMermaid, setCustomComponents } from 'markstream-vue'
 import { PageShell, SettingsRow, SettingsSection, SectionGroup } from '@felinic/ui'
 import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-ui'
@@ -414,6 +426,12 @@ const MERMAID_PREVIEW_PROPS = {
 } as const
 
 const { t } = useI18n()
+const notifications = useNotificationSettings()
+const notificationDescription = computed(() => {
+  if (!notifications.supported) return t('notifications.unsupported')
+  if (!notifications.desktop && notifications.permission === 'denied') return t('notifications.denied')
+  return t('notifications.settingsDescription')
+})
 const settingsStore = useSettingsStore()
 const { language, theme, colorScheme, uiFontFamily, codeFontFamily, uiFontSizePx, codeFontSizePx, shikiThemeLight, shikiThemeDark, mermaidTheme, defaultUiFontFamily, defaultCodeFontFamily, isDark } = storeToRefs(settingsStore)
 const { setLanguage, setTheme, setColorScheme, setUiFontFamily, setCodeFontFamily, setUiFontSizePx, setCodeFontSizePx, setShikiTheme, setMermaidTheme } = settingsStore

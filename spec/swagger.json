@@ -16153,6 +16153,32 @@
                 }
             }
         },
+        "/users/me/attention/events": {
+            "get": {
+                "description": "SSE addressed to the caller: session_attention when one of\ntheir sessions needs them, session_unread when they mark one\nunread, session_read when their read cursor moves. Starts with attention_ready; never carries message bodies.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Stream the caller's attention events",
+                "responses": {
+                    "200": {
+                        "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/users/me/channel-identities": {
             "get": {
                 "description": "List the IM channel identities bound to the current user's account",
@@ -16408,6 +16434,46 @@
                 }
             }
         },
+        "/users/me/read-state": {
+            "put": {
+                "description": "Marks each session read (through the attention time the client\ndisplayed) or unread. Read and unread are forward-only marks; the\nlater one wins. Sessions the caller did not create, or that carry no\nunread state, are skipped. Marking unread never notifies.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Set the caller's read state of sessions",
+                "parameters": [
+                    {
+                        "description": "Read state changes",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SetReadStateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SetReadStateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/users/me/runtimes": {
             "get": {
                 "produces": [
@@ -16515,6 +16581,32 @@
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/server.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/server.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/users/me/unread": {
+            "get": {
+                "description": "Sessions the caller created that need their attention, across\nevery bot they can still access, newest first. No message bodies.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "List the caller's unread sessions",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.UnreadSessionsResponse"
                         }
                     },
                     "500": {
@@ -18013,6 +18105,64 @@
                 "FaultDependency",
                 "FaultCanceled"
             ]
+        },
+        "attention.Attention": {
+            "type": "object",
+            "properties": {
+                "attention_at": {
+                    "description": "At is when the session last needed attention, or when it was marked\nunread if it never did; it orders the inbox.",
+                    "type": "string"
+                },
+                "attention_kind": {
+                    "$ref": "#/definitions/attention.Kind"
+                },
+                "bot_id": {
+                    "type": "string"
+                },
+                "marked": {
+                    "description": "Marked is true when the user marked the session unread themselves; such\na session is not read just because it is already on screen.",
+                    "type": "boolean"
+                },
+                "read_through": {
+                    "description": "ReadThrough is the through a client sends to read it: it covers both the\nattention and a manual unread mark.",
+                    "type": "string"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "attention.Kind": {
+            "type": "string",
+            "enum": [
+                "reply",
+                "failed",
+                "needs_input",
+                "marked"
+            ],
+            "x-enum-varnames": [
+                "KindReply",
+                "KindFailed",
+                "KindNeedsInput",
+                "KindMarked"
+            ]
+        },
+        "attention.ReadStateChange": {
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string"
+                },
+                "through": {
+                    "type": "string"
+                },
+                "unread": {
+                    "type": "boolean"
+                }
+            }
         },
         "audio.ConfigSchema": {
             "type": "object",
@@ -23086,6 +23236,28 @@
                 }
             }
         },
+        "handlers.SetReadStateRequest": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/attention.ReadStateChange"
+                    }
+                }
+            }
+        },
+        "handlers.SetReadStateResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/attention.Attention"
+                    }
+                }
+            }
+        },
         "handlers.SiteIconResponse": {
             "type": "object",
             "properties": {
@@ -24091,6 +24263,17 @@
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/conversation.UITurn"
+                    }
+                }
+            }
+        },
+        "handlers.UnreadSessionsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/attention.Attention"
                     }
                 }
             }
@@ -26962,6 +27145,13 @@
         "session.Session": {
             "type": "object",
             "properties": {
+                "attention_at": {
+                    "type": "string"
+                },
+                "attention_kind": {
+                    "description": "AttentionKind and Unread describe the requesting user's unread state.\nThey are filled by the attention service for list responses only.",
+                    "type": "string"
+                },
                 "bot_agent_id": {
                     "type": "string"
                 },
@@ -27025,6 +27215,9 @@
                 },
                 "type": {
                     "type": "string"
+                },
+                "unread": {
+                    "type": "boolean"
                 },
                 "updated_at": {
                     "type": "string"

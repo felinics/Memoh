@@ -167,10 +167,11 @@ func (m *Manager) releaseAllLocalRuns(ctx context.Context) error {
 // releaseLocalRunOnShutdown records the durable handoff or terminal decision
 // before the live owner route disappears. A run that crossed the finishing
 // boundary keeps its stored proposal. Running work with a saved resume context
-// gets an interrupt marker; native parked decisions retain their waiting state.
-// Other active work follows the existing lost path.
-// If PostgreSQL is temporarily unavailable, the live lease is deliberately
-// retained so a peer reaper can make the same decision after it expires.
+// gets an interrupt marker; native parked decisions retain their waiting state
+// on either backend. Other active work follows the existing lost path, which
+// also closes the decisions the run leaves pending.
+// If PostgreSQL is temporarily unavailable, the run is deliberately left
+// active so a reaper can make the same decision once this owner is gone.
 func (m *Manager) releaseLocalRunOnShutdown(ctx context.Context, ctrl *runControl) error {
 	if ctrl == nil {
 		return nil
@@ -203,7 +204,7 @@ func (m *Manager) releaseLocalRunOnShutdown(ctx context.Context, ctrl *runContro
 				}
 			}
 		}
-		if run.State == ledger.StateWaitingDecision && run.AbortRequestedAt.IsZero() && m.distributed != nil {
+		if run.State == ledger.StateWaitingDecision && run.AbortRequestedAt.IsZero() {
 			preserved, err := m.handoffWaitingDecisionOnShutdown(ctx, ctrl, run)
 			if err != nil || preserved {
 				return err
@@ -218,6 +219,7 @@ func (m *Manager) releaseLocalRunOnShutdown(ctx context.Context, ctrl *runContro
 			// run's result record here.
 			terminal.Cause = errs.New("runtime owner shut down")
 			requestRunControlStop(ctrl)
+			m.cancelUnfinalizedDecisions(ctx, terminal)
 			m.reconcileAndObserveTerminalRun(ctx, terminal)
 		}
 		return err
@@ -227,9 +229,12 @@ func (m *Manager) releaseLocalRunOnShutdown(ctx context.Context, ctrl *runContro
 }
 
 // handoffWaitingDecisionOnShutdown revokes durable write authority without
-// finishing a parked run. Leave the old Redis lease AND its index untouched:
-// after expiry the normal reaper uses that index to recover the new DB fence.
-// In particular, a database or Redis outage must not erase the retry pointer.
+// finishing a parked run. The successor finds the run through what this owner
+// leaves behind. On Redis, leave the old lease AND its index untouched: after
+// expiry the normal reaper uses that index to recover the new DB fence, and a
+// database or Redis outage must not erase that retry pointer. On a memory
+// backend the run keeps this process's generation, which the next process's
+// generation sweep recognizes as gone.
 func (m *Manager) handoffWaitingDecisionOnShutdown(ctx context.Context, ctrl *runControl, run ledger.Run) (bool, error) {
 	if run.FencingToken != ctrl.fencingToken {
 		return false, ErrRunOwnershipLost
@@ -239,7 +244,9 @@ func (m *Manager) handoffWaitingDecisionOnShutdown(ctx context.Context, ctrl *ru
 	m.mu.Unlock()
 	reclaimer, ok := m.fence.(DecisionFenceActivator)
 	if decisions == nil || !ok {
-		return false, errors.New("waiting-decision shutdown recovery is not configured")
+		// Nothing could reclaim the run after this process, so it ends like
+		// other active work rather than waiting for a successor that cannot come.
+		return false, nil
 	}
 	preserved, err := pendingRecoverableDecisions(ctx, decisions, run)
 	if err != nil || len(preserved) == 0 {
