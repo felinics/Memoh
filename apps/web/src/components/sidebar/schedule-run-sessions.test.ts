@@ -8,6 +8,7 @@ import ScheduleRunSessions from './schedule-run-sessions.vue'
 const mocks = vi.hoisted(() => ({
   fetchRuns: vi.fn(),
   openSessionChat: vi.fn(),
+  unreadKinds: {} as Record<string, string>,
 }))
 
 vi.mock('@/composables/api/useScheduleRuns', () => ({
@@ -15,6 +16,13 @@ vi.mock('@/composables/api/useScheduleRuns', () => ({
 }))
 vi.mock('@/store/chat-list', () => ({
   useChatStore: () => reactive({ sessionId: ref('session-2') }),
+}))
+vi.mock('@/store/unread', () => ({
+  useUnreadStore: () => ({
+    entries: {},
+    kindOf: (sessionId: string) => mocks.unreadKinds[sessionId] ?? null,
+    isFresh: () => false,
+  }),
 }))
 vi.mock('@/store/workspace-tabs', () => ({
   useWorkspaceTabsStore: () => ({ openSessionChat: mocks.openSessionChat }),
@@ -156,4 +164,17 @@ it('says so when the schedule has never run', async () => {
   await mount()
 
   expect(root.textContent).toContain(en.bots.schedule.sessions.empty)
+})
+
+it('marks a run whose session is unread with its kind and a bold title', async () => {
+  mocks.unreadKinds = { 'session-1': 'update' }
+  mocks.fetchRuns.mockResolvedValue({ items: [run(1), run(2)], nextCursor: null })
+  await mount()
+
+  const [unreadRow, readRow] = rows()
+  expect(unreadRow!.querySelector('[data-slot="attention-dot"]')?.getAttribute('data-kind')).toBe('update')
+  expect(unreadRow!.querySelector('.font-semibold')).not.toBeNull()
+  expect(readRow!.querySelector('[data-slot="attention-dot"]')).toBeNull()
+  expect(readRow!.querySelector('.font-semibold')).toBeNull()
+  mocks.unreadKinds = {}
 })

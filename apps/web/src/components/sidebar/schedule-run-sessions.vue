@@ -16,7 +16,10 @@
     >
       <span
         class="min-w-0 flex-1 truncate text-label"
-        :class="run.session_id ? 'text-foreground' : 'text-muted-foreground'"
+        :class="[
+          run.session_id ? 'text-foreground' : 'text-muted-foreground',
+          unreadKind(run) ? 'font-semibold' : '',
+        ]"
       >
         {{ run.title?.trim() || scheduleName }}
       </span>
@@ -25,6 +28,12 @@
           v-if="isRunning(run)"
           class="size-3"
           :aria-label="t('chat.sessionStreaming')"
+        />
+        <AttentionDot
+          v-else-if="unreadKind(run)"
+          :kind="unreadKind(run)!"
+          :session-id="run.session_id"
+          :attention-at="unread.entries[run.session_id ?? '']?.attentionAt"
         />
         <CircleAlert
           v-else-if="run.status === 'error'"
@@ -79,6 +88,8 @@ import { useI18n } from 'vue-i18n'
 import { CircleAlert } from 'lucide-vue-next'
 import { Spinner, TextButton } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
+import { useUnreadStore } from '@/store/unread'
+import AttentionDot from './attention-dot.vue'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { fetchScheduleRunSessions, type ScheduleRunSession } from '@/composables/api/useScheduleRuns'
 import { formatCalendarTime } from '@/utils/date-time'
@@ -96,6 +107,12 @@ const { t, locale } = useI18n()
 const chatStore = useChatStore()
 const { sessionId } = storeToRefs(chatStore)
 const workspaceTabs = useWorkspaceTabsStore()
+const unread = useUnreadStore()
+
+/** The run's session is unread: it marks the row the way a Recents row is marked. */
+function unreadKind(run: ScheduleRunSession) {
+  return run.session_id ? unread.kindOf(run.session_id) : null
+}
 
 /** Runs a card shows before it asks; one schedule must not bury the cards below it. */
 const PAGE_SIZE = 4

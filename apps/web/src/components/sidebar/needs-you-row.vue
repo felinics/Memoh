@@ -10,7 +10,7 @@
     <span
       ref="flash"
       data-slot="needs-you-row-flash"
-      :data-kind="entry.kind"
+      :data-kind="kind"
       aria-hidden="true"
     />
     <Avatar class="size-5 shrink-0 ring-1 ring-border">
@@ -40,13 +40,26 @@
         <span aria-hidden="true">·</span>
         <span
           class="shrink-0"
-          :class="kindClass[entry.kind]"
-        >{{ t(`notifications.kind.${entry.kind}`) }}</span>
+          :class="kindClass[kind]"
+        >{{ t(`notifications.kind.${kind}`) }}</span>
       </span>
     </span>
     <span class="flex size-6 shrink-0 items-center justify-center">
+      <!-- A schedule's unread runs share this row; their number takes the dot's place. -->
+      <span
+        v-if="count > 1"
+        ref="badge"
+        class="inline-flex"
+      >
+        <BadgeCount
+          :count="count"
+          :variant="attentionBadgeVariant([kind])"
+          aria-hidden="true"
+        />
+      </span>
       <AttentionDot
-        :kind="entry.kind"
+        v-else
+        :kind="kind"
         :session-id="entry.sessionId"
         :attention-at="entry.attentionAt"
       />
@@ -57,23 +70,29 @@
 <script setup lang="ts">
 import { computed, onMounted, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Avatar, AvatarFallback, AvatarImage } from '@felinic/ui'
+import { Avatar, AvatarFallback, AvatarImage, BadgeCount } from '@felinic/ui'
 import type { AttentionKind } from '@/composables/api/attention-api'
 import { firstAvatarCharacter } from '@/composables/useAvatarInitials'
 import { useUnreadStore, type UnreadEntry } from '@/store/unread'
-import { flashRow } from '@/utils/attention-motion'
+import { bounce, flashRow } from '@/utils/attention-motion'
+import { attentionBadgeVariant } from '@/utils/session-attention'
 import AttentionDot from './attention-dot.vue'
 
 /**
  * One "Needs you" row. The kind tint flashes once only when this attention just
  * arrived live; rows revealed later (expanding the list, reloading) never replay it.
  */
-const props = defineProps<{
+const props = withDefaults(defineProps<{
+  /** The newest session of the row; one schedule's unread runs share a row. */
   entry: UnreadEntry
   botName: string
   avatarUrl?: string
   ago: string
-}>()
+  /** Unread sessions the row stands for. */
+  count?: number
+  /** The most urgent kind among them; the entry's own kind by default. */
+  urgentKind?: AttentionKind
+}>(), { count: 1, urgentKind: undefined })
 const emit = defineEmits<{ open: [] }>()
 
 const { t } = useI18n()
@@ -82,14 +101,22 @@ const flash = useTemplateRef('flash')
 
 /** The kind label carries the state in words; color only reinforces it. */
 const kindClass: Record<AttentionKind, string> = {
+  update: '',
   reply: '',
   failed: 'text-[color:var(--accent-red)]',
   needs_input: 'text-[color:var(--warning-foreground)]',
   marked: '',
 }
 
+const kind = computed(() => props.urgentKind ?? props.entry.kind)
 const title = computed(() => props.entry.title || t('chat.untitledSession'))
-const label = computed(() => `${title.value}, ${props.botName}, ${t(`notifications.kind.${props.entry.kind}`)}`)
+const label = computed(() => [
+  title.value,
+  props.botName,
+  t(`notifications.kind.${kind.value}`),
+  ...(props.count > 1 ? [t('notifications.unreadRuns', { count: props.count })] : []),
+].join(', '))
+const badge = useTemplateRef('badge')
 
 function flashIfFresh() {
   if (flash.value && unread.isFresh(props.entry.sessionId, props.entry.attentionAt)) flashRow(flash.value)
@@ -97,4 +124,8 @@ function flashIfFresh() {
 
 onMounted(flashIfFresh)
 watch(() => props.entry.attentionAt, flashIfFresh)
+/** A new run joining the row bumps its number, the way the inbox count does. */
+watch(() => props.count, (count, previous) => {
+  if (count > previous && badge.value) bounce(badge.value)
+})
 </script>

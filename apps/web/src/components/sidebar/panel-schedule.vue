@@ -81,6 +81,8 @@
               :expanded="expandedScheduleId === item.id"
               :pinned-session="!!pinnedSessionId(item)"
               :running="isPinnedSessionRunning(item)"
+              :unread-count="unreadOf(item).length"
+              :unread-kinds="unreadOf(item)"
               @open="handleOpen(item)"
               @edit="handleOpenTask(item)"
               @delete="deleteTarget = item"
@@ -127,6 +129,7 @@ import { getBotsByBotIdSchedule, deleteBotsByBotIdScheduleById, putBotsByBotIdSc
 import type { ScheduleSchedule } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { useUnreadStore, type AttentionKind } from '@/store/unread'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
 import { scheduleDeleteConfirmKey } from '@/utils/schedule-delete'
@@ -143,6 +146,7 @@ const { t, locale } = useI18n()
 const chatStore = useChatStore()
 const { currentBotId, scheduleActivityRevisions } = storeToRefs(chatStore)
 const workspaceTabs = useWorkspaceTabsStore()
+const unread = useUnreadStore()
 const { sidebarView } = storeToRefs(workspaceTabs)
 
 const isLoading = ref(false)
@@ -329,6 +333,19 @@ function handleOpenTask(item: ScheduleSchedule) {
 function pinnedSessionId(item: ScheduleSchedule): string {
   if (item.run_target !== 'existing_session') return ''
   return item.target_session_id?.trim() ?? ''
+}
+
+/**
+ * Unread kinds of a schedule's sessions: the runs it created, or the one
+ * conversation a pinned schedule runs in.
+ */
+function unreadOf(item: ScheduleSchedule): AttentionKind[] {
+  const pinned = pinnedSessionId(item)
+  if (pinned) {
+    const kind = unread.kindOf(pinned)
+    return kind ? [kind] : []
+  }
+  return (unread.bySchedule[item.id ?? ''] ?? []).map(entry => entry.kind)
 }
 
 function isPinnedSessionRunning(item: ScheduleSchedule): boolean {

@@ -1303,6 +1303,7 @@
       "update_schedule_disable": "停用计划",
       "update_schedule_execution": "替换计划执行配置",
       "delete_schedule": "删除计划",
+      "notify_user": "已提醒你",
       "speak": "朗读",
       "transcribe_audio": "转录音频",
       "generate_image": "生成图像",
@@ -3936,6 +3937,17 @@
         "failed": "这次运行失败了",
         "notStarted": "这次运行没能开始，没有对应的对话",
         "empty": "还没有运行过"
+      },
+      "notify": {
+        "title": "提醒",
+        "inApp": "在 Memoh 中提醒我",
+        "important": "仅在需要我关注时",
+        "everyRun": "每次运行都提醒",
+        "importantHelp": "由 Bot 判断这次运行是否值得告诉你。运行失败或需要你确认时总会提醒。",
+        "everyRunHelp": "每次运行结束都会提醒你。",
+        "contact": "有更新时，通过已配置的平台主动联系我",
+        "noPlatforms": "这个 Bot 还没有接入平台",
+        "configurePlatforms": "配置平台"
       }
     },
     "history": {
@@ -4534,8 +4546,10 @@
       "reply": "已回复",
       "failed": "运行失败",
       "needs_input": "等待你确认",
+      "update": "有更新",
       "marked": "标记为未读"
     },
-    "browserSettingsTitle": "浏览器通知"
+    "browserSettingsTitle": "浏览器通知",
+    "unreadRuns": "{count} 条未读"
   }
 }

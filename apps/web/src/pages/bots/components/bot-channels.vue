@@ -156,19 +156,14 @@ import {
   Empty, EmptyTitle, EmptyDescription, EmptyContent,
 } from '@felinic/ui'
 import { useQuery } from '@pinia/colada'
-import { getChannels, getBotsByIdChannelByPlatform, getBotsByBotIdSettings } from '@memohai/sdk'
-import type { HandlersChannelMeta, ChannelChannelConfig } from '@memohai/sdk'
+import { getBotsByBotIdSettings } from '@memohai/sdk'
+import type { HandlersChannelMeta } from '@memohai/sdk'
 import { BackendCard, PageShell, SwapTransition } from '@felinic/ui'
 import ChannelSettingsPanel from './channel-settings-panel.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
+import { useBotChannels, type BotChannelItem } from '@/composables/api/useBotChannels'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
-
-export interface BotChannelItem {
-  meta: HandlersChannelMeta
-  config: ChannelChannelConfig | null
-  configured: boolean
-}
 
 const props = defineProps<{ botId: string }>()
 const { t } = useI18n()
@@ -202,26 +197,7 @@ function openModelSettings() {
   void router.push({ query: { ...route.query, tab: 'general', section: 'interaction' } })
 }
 
-const { data: channels, isLoading, refetch } = useQuery({
-  key: () => ['bot-channels', botIdRef.value],
-  query: async (): Promise<BotChannelItem[]> => {
-    const { data: metas } = await getChannels({ throwOnError: true })
-    if (!metas) return []
-    const configurableTypes = metas.filter((m) => !m.configless)
-    const results = await Promise.all(
-      configurableTypes.map(async (meta) => {
-        try {
-          const { data: config } = await getBotsByIdChannelByPlatform({ path: { id: botIdRef.value, platform: meta.type ?? '' }, throwOnError: true })
-          return { meta, config: config ?? null, configured: true } as BotChannelItem
-        } catch {
-          return { meta, config: null, configured: false } as BotChannelItem
-        }
-      })
-    )
-    return results
-  },
-  enabled: () => !!botIdRef.value,
-})
+const { data: channels, isLoading, refetch } = useBotChannels(botIdRef)
 
 const selectedType = ref<string | null>(null)
 

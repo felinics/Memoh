@@ -1272,6 +1272,7 @@
       "update_schedule_disable": "スケジュールを無効化",
       "update_schedule_execution": "スケジュールの実行設定を置き換え",
       "delete_schedule": "スケジュールの削除",
+      "notify_user": "通知しました",
       "speak": "話す",
       "transcribe_audio": "転写する",
       "generate_image": "画像の生成",
@@ -3932,6 +3933,17 @@
         "failed": "この実行は失敗しました",
         "notStarted": "この実行は開始できなかったため、会話がありません",
         "empty": "まだ実行されていません"
+      },
+      "notify": {
+        "title": "通知",
+        "inApp": "Memoh で通知",
+        "important": "注目が必要なときだけ",
+        "everyRun": "実行のたびに",
+        "importantHelp": "実行を知らせるべきかは Bot が判断します。失敗や確認待ちは必ず通知します。",
+        "everyRunHelp": "実行が終わるたびに通知します。",
+        "contact": "更新があれば、設定済みのプラットフォームで連絡する",
+        "noPlatforms": "この Bot はまだプラットフォームに接続していません",
+        "configurePlatforms": "プラットフォームを設定"
       }
     },
     "history": {
@@ -4530,8 +4542,10 @@
       "reply": "返信が届きました",
       "failed": "実行に失敗しました",
       "needs_input": "確認を待っています",
+      "update": "更新あり",
       "marked": "未読にしました"
     },
-    "browserSettingsTitle": "ブラウザ通知"
+    "browserSettingsTitle": "ブラウザ通知",
+    "unreadRuns": "未読 {count} 件"
   }
 }

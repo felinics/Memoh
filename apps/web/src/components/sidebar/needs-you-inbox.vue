@@ -94,27 +94,29 @@
                 @leave="leaveRow"
               >
                 <li
-                  v-for="entry in visibleEntries"
-                  :key="entry.sessionId"
+                  v-for="group in visibleGroups"
+                  :key="group.key"
                   class="overflow-hidden"
                 >
                   <NeedsYouRow
-                    :entry="entry"
-                    :bot-name="botName(entry.botId)"
-                    :avatar-url="botFor(entry.botId)?.avatar_url"
-                    :ago="ago(entry.attentionAt)"
-                    @open="openSession(entry)"
+                    :entry="group.latest"
+                    :count="group.entries.length"
+                    :urgent-kind="mostUrgentKind(group.entries.map(entry => entry.kind)) ?? undefined"
+                    :bot-name="botName(group.latest.botId)"
+                    :avatar-url="botFor(group.latest.botId)?.avatar_url"
+                    :ago="ago(group.latest.attentionAt)"
+                    @open="openSession(group.latest)"
                   />
                 </li>
               </TransitionGroup>
 
               <TextButton
-                v-if="unread.total > LIMIT"
+                v-if="unread.inboxGroups.length > LIMIT"
                 class="mt-0.5 w-full justify-start px-1.5"
                 :aria-expanded="expanded"
                 @click="toggleExpanded"
               >
-                {{ expanded ? t('notifications.showLess') : t('notifications.showAll', { count: unread.total }) }}
+                {{ expanded ? t('notifications.showLess') : t('notifications.showAll', { count: unread.inboxGroups.length }) }}
               </TextButton>
             </div>
           </Transition>
@@ -134,7 +136,7 @@ import { useRouter } from 'vue-router'
 import { useChatStore } from '@/store/chat-list'
 import { useUnreadStore, type UnreadEntry } from '@/store/unread'
 import { bounce, enterRow, leaveRow, revealRow } from '@/utils/attention-motion'
-import { attentionBadgeVariant, sessionAttentionPath } from '@/utils/session-attention'
+import { attentionBadgeVariant, mostUrgentKind, sessionAttentionPath } from '@/utils/session-attention'
 import NeedsYouRow from './needs-you-row.vue'
 
 const LIMIT = 5
@@ -152,8 +154,9 @@ const count = useTemplateRef('count')
 const now = useNow({ interval: 30_000 })
 /** The count speaks for every unread session, folded or not, so a failure past the fifth row still turns it red. */
 const countVariant = computed(() => attentionBadgeVariant(unread.inbox.map(entry => entry.kind)))
-const visibleEntries = computed(() => expanded.value ? unread.inbox : unread.inbox.slice(0, LIMIT))
-watch(() => unread.total, (total) => { if (total <= LIMIT) expanded.value = false })
+/** Rows, not sessions: a schedule's unread runs share one row, so the limit counts rows. */
+const visibleGroups = computed(() => expanded.value ? unread.inboxGroups : unread.inboxGroups.slice(0, LIMIT))
+watch(() => unread.inboxGroups.length, (rows) => { if (rows <= LIMIT) expanded.value = false })
 /** The count bumps when it changes while the card is already showing, not when it appears. */
 watch(() => unread.total, (total, previous) => {
   if (total && previous && count.value) bounce(count.value)

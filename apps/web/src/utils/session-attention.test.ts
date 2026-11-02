@@ -9,10 +9,15 @@ describe('canHoldUnread', () => {
     expect(canHoldUnread({ type: 'acp_agent', channel_type: 'local', created_by_user_id: me }, me)).toBe(true)
   })
 
+  it('accepts the user\'s own schedule runs', () => {
+    expect(canHoldUnread({ type: 'schedule', created_by_user_id: me }, me)).toBe(true)
+  })
+
   it('rejects what the server would skip', () => {
     expect(canHoldUnread({ type: 'chat', created_by_user_id: 'u2' }, me)).toBe(false)
     expect(canHoldUnread({ type: 'chat' }, me)).toBe(false)
-    expect(canHoldUnread({ type: 'schedule', created_by_user_id: me }, me)).toBe(false)
+    expect(canHoldUnread({ type: 'discuss', created_by_user_id: me }, me)).toBe(false)
+    expect(canHoldUnread({ type: 'subagent', created_by_user_id: me }, me)).toBe(false)
     expect(canHoldUnread({ type: 'chat', channel_type: 'telegram', created_by_user_id: me }, me)).toBe(false)
     expect(canHoldUnread({ type: 'chat', created_by_user_id: me }, '')).toBe(false)
   })

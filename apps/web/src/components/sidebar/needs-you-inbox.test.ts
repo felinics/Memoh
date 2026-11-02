@@ -5,9 +5,26 @@ import NeedsYouInbox from './needs-you-inbox.vue'
 
 const push = vi.fn()
 const fresh = new Set<string>()
+type Entry = { sessionId: string, botId: string, title: string, kind: string, attentionAt: string, scheduleId?: string }
 const unread = reactive({
   total: 0,
-  inbox: [] as Array<{ sessionId: string, botId: string, title: string, kind: string, attentionAt: string }>,
+  inbox: [] as Entry[],
+  /** The store's folding: one row per session, or per schedule for its run sessions. */
+  get inboxGroups() {
+    const groups: Array<{ key: string, latest: Entry, entries: Entry[] }> = []
+    const bySchedule = new Map<string, { key: string, latest: Entry, entries: Entry[] }>()
+    for (const entry of this.inbox) {
+      const existing = entry.scheduleId ? bySchedule.get(entry.scheduleId) : undefined
+      if (existing) {
+        existing.entries.push(entry)
+        continue
+      }
+      const group = { key: entry.scheduleId ? `schedule:${entry.scheduleId}` : entry.sessionId, latest: entry, entries: [entry] }
+      if (entry.scheduleId) bySchedule.set(entry.scheduleId, group)
+      groups.push(group)
+    }
+    return groups
+  },
   isFresh: (sessionId: string, attentionAt: string) => fresh.has(`${sessionId}@${attentionAt}`),
   markAllRead: vi.fn(async () => ['s0', 's1']),
   markUnread: vi.fn(async () => {}),
@@ -122,6 +139,26 @@ describe('needs-you inbox', () => {
     expect(first.getAttribute('aria-label')).toBe('Session 0, Kitty, notifications.kind.needs_input')
     expect(first.querySelector('[data-slot="attention-dot"]')?.getAttribute('data-kind')).toBe('needs_input')
     first.click()
+    expect(push).toHaveBeenCalledWith('/bot/b1?session=s0')
+    app.unmount()
+  })
+
+  it('folds one schedule\'s unread runs into a row that counts them', () => {
+    const [first, second, third] = entries(3)
+    unread.inbox = [
+      { ...first!, title: 'Daily news', kind: 'update', scheduleId: 'sch1' },
+      { ...second!, scheduleId: undefined },
+      { ...third!, title: 'Daily news', kind: 'failed', scheduleId: 'sch1' },
+    ]
+    unread.total = 3
+    const { root, app } = mount()
+    const rows = root.querySelectorAll<HTMLButtonElement>('[data-slot="needs-you-row"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]!.getAttribute('aria-label')).toBe('Daily news, Kitty, notifications.kind.failed, notifications.unreadRuns(2)')
+    expect(rows[0]!.querySelector('[data-test="count"]')?.textContent).toBe('2')
+    expect(rows[0]!.querySelector('[data-test="count"]')?.getAttribute('data-variant')).toBe('destructive')
+    expect(rows[0]!.querySelector('[data-slot="attention-dot"]')).toBeNull()
+    rows[0]!.click()
     expect(push).toHaveBeenCalledWith('/bot/b1?session=s0')
     app.unmount()
   })
