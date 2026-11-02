@@ -1,12 +1,13 @@
 // Command gen-codex-protocol regenerates the Go types for the codex
-// app-server v2 protocol from the vendored JSON Schema snapshot in
-// internal/agent/runtime/external/codex/protocolgen/schema.
+// app-server v2 protocol from the JSON Schema the local codex CLI exports.
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -18,7 +19,7 @@ func main() {
 	out := flag.String("out", "internal/agent/runtime/external/codex/protocol", "output directory for generated files")
 	flag.Parse()
 
-	files, err := protocolgen.Generate()
+	files, err := generate(context.Background())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gen-codex-protocol:", err)
 		os.Exit(1)
@@ -63,4 +64,28 @@ func main() {
 			fmt.Println("removed stale", path)
 		}
 	}
+}
+
+func generate(ctx context.Context) (map[string][]byte, error) {
+	versionOutput, err := exec.CommandContext(ctx, "codex", "--version").Output()
+	if err != nil {
+		return nil, fmt.Errorf("codex --version: %w", err)
+	}
+	fields := strings.Fields(string(versionOutput))
+	if len(fields) != 2 {
+		return nil, fmt.Errorf("unexpected codex --version output %q", versionOutput)
+	}
+
+	dir, err := os.MkdirTemp("", "codex-schema-")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	export := exec.CommandContext(ctx, "codex", "app-server", "generate-json-schema", "--experimental", "--out", dir) //nolint:gosec // dir comes from MkdirTemp
+	export.Stderr = os.Stderr
+	if err := export.Run(); err != nil {
+		return nil, fmt.Errorf("export schema: %w", err)
+	}
+	return protocolgen.Generate(os.DirFS(dir), fields[1])
 }

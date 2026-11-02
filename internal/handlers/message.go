@@ -43,6 +43,7 @@ type MessageHandler struct {
 	messageEvents                 messageevent.Subscriber
 	messagePublisher              messageevent.Publisher
 	activityInvalidationSupported bool
+	attention                     attentionService
 	mediaService                  *media.Service
 	botService                    *bots.Service
 	accountService                *accounts.Service
@@ -155,6 +156,11 @@ func (h *MessageHandler) Register(e *echo.Echo) {
 	// through the session runtime over the chat WebSocket, which is what lets
 	// every subscriber of a session agree on what it has seen.
 	botGroup.GET("/sessions/events", h.StreamSessionsActivityEvents)
+
+	// Unread state addressed to the caller across all bots.
+	e.GET("/users/me/unread", h.ListUnreadSessions)
+	e.PUT("/users/me/read-state", h.SetReadState)
+	e.GET("/users/me/attention/events", h.StreamAttentionEvents)
 }
 
 // --- Messages ---

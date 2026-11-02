@@ -17,12 +17,8 @@ SELECT
   bool_or(
     (m.turn_position, m.turn_message_seq) > ($1::bigint, $2::bigint)
     OR m.id = ANY($3::uuid[])
-  )::boolean AS kept,
-  COALESCE(MAX((event.event_data->>'event_cursor')::bigint), 0)::bigint AS event_cursor
+  )::boolean AS kept
 FROM bot_visible_history_messages m
-LEFT JOIN bot_session_events event
-  ON event.team_id = public.memoh_current_team_id()
- AND event.id = m.event_id
 WHERE m.team_id = public.memoh_current_team_id()
   AND m.session_id = $4
   AND m.source_message_id = ANY($5::text[])
@@ -41,14 +37,11 @@ type ClassifyHistoryCheckpointMessagesParams struct {
 type ClassifyHistoryCheckpointMessagesRow struct {
 	ExternalMessageID string `json:"external_message_id"`
 	Kept              bool   `json:"kept"`
-	EventCursor       int64  `json:"event_cursor"`
 }
 
 // How a checkpoint stands for each inbound message that has context rows:
 // kept when one of its rows is after the checkpoint's position or is a row
-// the checkpoint keeps by reference, folded otherwise. event_cursor is the
-// cursor of the event its rows were written from, 0 when unknown: a summary
-// reads rows, so it knows the message as of that event. A message without
+// the checkpoint keeps by reference, folded otherwise. A message without
 // context rows returns nothing.
 func (q *Queries) ClassifyHistoryCheckpointMessages(ctx context.Context, arg ClassifyHistoryCheckpointMessagesParams) ([]ClassifyHistoryCheckpointMessagesRow, error) {
 	rows, err := q.db.Query(ctx, classifyHistoryCheckpointMessages,
@@ -65,7 +58,7 @@ func (q *Queries) ClassifyHistoryCheckpointMessages(ctx context.Context, arg Cla
 	var items []ClassifyHistoryCheckpointMessagesRow
 	for rows.Next() {
 		var i ClassifyHistoryCheckpointMessagesRow
-		if err := rows.Scan(&i.ExternalMessageID, &i.Kept, &i.EventCursor); err != nil {
+		if err := rows.Scan(&i.ExternalMessageID, &i.Kept); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

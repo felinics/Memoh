@@ -38,7 +38,24 @@ const (
 	// EventTypeScheduleChanged invalidates a bot's schedule-list snapshot after
 	// a task is created, updated, deleted, or advances its run counters.
 	EventTypeScheduleChanged EventType = "schedule_changed"
+	// EventTypeSessionAttention is published on a user topic when one of that
+	// user's sessions starts needing attention (a run finished, failed or waits
+	// for a decision). It never carries message content.
+	EventTypeSessionAttention EventType = "session_attention"
+	// EventTypeSessionRead is published on a user topic when that user's read
+	// cursor for a session moves, so other tabs and devices clear the dot.
+	EventTypeSessionRead EventType = "session_read"
+	// EventTypeSessionUnread is published on a user topic when that user marks
+	// a session unread. Unlike session_attention it never raises a
+	// notification; it only brings the dot back on other tabs and devices.
+	EventTypeSessionUnread EventType = "session_unread"
 )
+
+// UserTopic is the hub key for events addressed to one user rather than to a
+// bot. The prefix keeps it disjoint from bot IDs, which are bare UUIDs.
+func UserTopic(userID string) string {
+	return "user:" + strings.TrimSpace(userID)
+}
 
 // SessionInvalidation contains only an address. An empty SessionID invalidates
 // all cached sessions of the bot, without exposing any private session ids.
@@ -121,7 +138,9 @@ type subscriberState struct {
 	sub *Subscription
 }
 
-// Hub is an in-process pub/sub dispatcher for bot-scoped message events.
+// Hub is an in-process pub/sub dispatcher. Events are keyed by Event.BotID,
+// which is a topic: a bot ID for bot-scoped events, or UserTopic for events
+// addressed to one user.
 type Hub struct {
 	mu      sync.RWMutex
 	streams map[string]map[string]*subscriberState

@@ -45,7 +45,7 @@ var clientMethods = []clientMethod{
 
 // serverRequestMethod is a request the app-server sends to Memoh and waits on
 // (approvals, elicitation, auth refresh). Responses are standalone documents
-// vendored next to the bundle.
+// exported next to the bundle.
 type serverRequestMethod struct {
 	Method   string
 	Response string

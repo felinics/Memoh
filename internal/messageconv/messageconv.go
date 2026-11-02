@@ -73,27 +73,40 @@ func SDKMessagesJSONToModelMessages(raw json.RawMessage) ([]turn.ModelMessage, e
 }
 
 func ModelMessageToSDKMessage(mm turn.ModelMessage) sdk.Message {
-	var s string
-	if err := json.Unmarshal(mm.Content, &s); err == nil {
-		return sdk.Message{
-			Role:    sdk.MessageRole(mm.Role),
-			Content: []sdk.MessagePart{sdk.TextPart{Text: s}},
+	// Decoding a parts array as a string fails only after scanning all of
+	// it, so only content that can be a string is tried as one.
+	if trimmed := bytes.TrimSpace(mm.Content); len(trimmed) == 0 || (trimmed[0] != '[' && trimmed[0] != '{') {
+		var s string
+		if err := json.Unmarshal(mm.Content, &s); err == nil {
+			return sdk.Message{
+				Role:    sdk.MessageRole(mm.Role),
+				Content: []sdk.MessagePart{sdk.TextPart{Text: s}},
+			}
 		}
 	}
 
-	envelope, _ := marshalJSON(struct {
-		Role    string          `json:"role"`
-		Content json.RawMessage `json:"content"`
-	}{
-		Role:    mm.Role,
-		Content: sdkPartsFromStored(mm.Content),
-	})
 	var msg sdk.Message
-	if err := json.Unmarshal(envelope, &msg); err == nil {
+	if err := json.Unmarshal(sdkEnvelope(mm.Role, sdkPartsFromStored(mm.Content)), &msg); err == nil {
 		return msg
 	}
 
 	return sdk.Message{Role: sdk.MessageRole(mm.Role)}
+}
+
+// sdkEnvelope is the {"role","content"} document sdk.Message decodes. It is
+// read once and dropped, so content goes in as it is rather than compacted;
+// content that is not valid JSON makes the whole document fail to decode.
+func sdkEnvelope(role string, content json.RawMessage) []byte {
+	encodedRole, _ := marshalJSON(role)
+	if len(bytes.TrimSpace(content)) == 0 {
+		content = json.RawMessage("null")
+	}
+	envelope := make([]byte, 0, len(content)+len(encodedRole)+24)
+	envelope = append(envelope, `{"role":`...)
+	envelope = append(envelope, encodedRole...)
+	envelope = append(envelope, `,"content":`...)
+	envelope = append(envelope, content...)
+	return append(envelope, '}')
 }
 
 func ModelMessagesToSDKMessages(msgs []turn.ModelMessage) []sdk.Message {

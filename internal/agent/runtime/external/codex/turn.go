@@ -700,7 +700,7 @@ func buildTurnInput(input external.PromptInput) []protocol.UserInput {
 			mime = "image/png"
 		}
 		url := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(img.Data)
-		items = append(items, protocol.UserInput{Image: &protocol.ImageUserInput{URL: url}})
+		items = append(items, protocol.UserInput{Image: &protocol.ImageUserInput{URL: &url}})
 	}
 	return items
 }

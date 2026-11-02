@@ -445,7 +445,10 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 		return threadID, nil
 	}
 	toolsConfig, bindTools := d.prepareThreadTools(ctx, srv, input)
+	// Memoh keeps its own history; loading a thread never reads Codex's turns.
+	excludeTurns := true
 	params := protocol.ThreadResumeParams{
+		ExcludeTurns:      &excludeTurns,
 		ThreadID:          threadID,
 		Cwd:               &cwd,
 		ApprovalPolicy:    &preset.approval,
@@ -663,8 +666,10 @@ func (d *Driver) ForkThread(ctx context.Context, botID, botAgentID string, runti
 	}
 	approvalPolicy := protocol.AskForApproval{Unit: protocol.AskForApprovalUnitOnRequest}
 	deferGoal := true
+	excludeTurns := true
 	params := protocol.ThreadForkParams{
 		DeferGoalContinuation: &deferGoal,
+		ExcludeTurns:          &excludeTurns,
 		ThreadID:              threadID,
 		Cwd:                   &cwd,
 		ApprovalPolicy:        &approvalPolicy,
