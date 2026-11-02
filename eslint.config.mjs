@@ -29,6 +29,13 @@ export default [
     },
   },
   {
+    // Static scripts served as-is (the service worker) belong to no tsconfig.
+    files: ['apps/web/public/**/*.js'],
+    languageOptions: {
+      parserOptions: { projectService: false },
+    },
+  },
+  {
     files: ['apps/web/src/store/**/*.ts'],
     ignores: [
       'apps/web/src/store/workspace-tabs.ts',

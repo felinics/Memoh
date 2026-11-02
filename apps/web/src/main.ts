@@ -84,3 +84,15 @@ if (forceDesktopShell) {
 // Mount only after the snapshot is hydrated so the first render already has
 // the last-known values (storage is sync, so this resolves in a microtask).
 void whenQueryCacheRestored().then(() => app.mount('#app'))
+
+// Installed-app support (public/sw.js): keeps the app shell openable offline.
+// Production builds only, so the dev server's unbundled modules are never
+// cached. Browsers register service workers only in a secure context (https
+// or localhost); elsewhere this is a no-op.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL })
+      .catch((error: unknown) => console.warn('service worker registration failed', error))
+  })
+}

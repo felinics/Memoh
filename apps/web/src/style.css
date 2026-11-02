@@ -1369,6 +1369,14 @@
  * swap-back/*) now live in the @felinic/ui style.css; the SwapTransition
  * owner moved into the component library. Do not re-add them here. */
 
+/* Full-screen frames under viewport-fit=cover (index.html): the frame's own
+   background runs under the status bar, notch and home indicator, while its
+   content stays inside the safe area. The insets are 0 wherever the browser
+   does not overlap the page, so desktop is unaffected. */
+@utility safe-area-frame {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
 /* Provider forms share compact, divider-free rows while their controls stack.
    Scope this to configuration cards so model lists keep their row separators. */
 @utility provider-configuration {
@@ -1386,5 +1394,18 @@
     & .border-t {
       border-top-width: 0;
     }
+  }
+}
+
+/* iOS Safari zooms the whole page into any focused field whose text is
+   smaller than 16px, and does not zoom back out. On touch phones, text
+   fields therefore never go below 1rem. Left unlayered on purpose so it
+   wins over the text-size utilities set on individual inputs. */
+@media (pointer: coarse) and (width < 48rem) {
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]),
+  textarea,
+  select,
+  [contenteditable="true"] {
+    font-size: max(1rem, 1em);
   }
 }

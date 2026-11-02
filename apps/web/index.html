@@ -7,8 +7,11 @@
          viewport itself when the software keyboard opens, so the h-dvh app
          frames (and with them the composer) end at the keyboard natively. iOS
          Safari ignores the hint and pans the page up instead. Both are left
-         to the browser: the app adds no keyboard offset of its own. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
+         to the browser: the app adds no keyboard offset of its own.
+         viewport-fit=cover: the page runs under the status bar, the notch and
+         the home indicator, as an installed app does; the full-screen frames
+         keep their content clear of them with the safe-area-frame utility. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <!-- Theme before the first paint. The settings store sets the dark class and
          the color scheme on <html> only once the app script has run; until then
          the page paints the default light background, a bright flash before a

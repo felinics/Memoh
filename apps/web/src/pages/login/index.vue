@@ -1,12 +1,13 @@
 <template>
-  <!-- 几何居中 + 光学上移(与 SaaS 登录同语言);无 OAuth / 多步,仅 username + password。 -->
+  <!-- 几何居中 + 光学上移(与 SaaS 登录同语言);无 OAuth / 多步,仅 username + password。
+       外层 padding 留给安全区(safe-area-frame),两侧 1.5rem 留白由表单宽度给出。 -->
   <main
-    class="relative flex h-screen w-screen flex-col items-center justify-center overflow-hidden bg-background p-6"
+    class="safe-area-frame relative flex h-dvh w-screen flex-col items-center justify-center overflow-hidden bg-background"
   >
     <DotMatrixBg class="pointer-events-none absolute inset-0" />
 
     <section
-      class="login-scope relative flex w-full max-w-[22rem] -translate-y-8 flex-col items-center gap-6 transition-[opacity,transform] ease-out motion-reduce:transition-none"
+      class="login-scope relative flex w-[calc(100%-3rem)] max-w-[22rem] -translate-y-8 flex-col items-center gap-6 transition-[opacity,transform] ease-out motion-reduce:transition-none"
       :class="[
         exiting
           ? 'scale-[0.88] opacity-0 duration-[175ms] motion-reduce:scale-100 motion-reduce:opacity-100'
