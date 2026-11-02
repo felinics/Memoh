@@ -74,11 +74,11 @@ func (s *Service) synthesize(ctx context.Context, cfg TriggerConfig) (synthesis,
 	}
 	syn := synthesis{request: sdk.Request{System: synthesisSystemPrompt}}
 	if len(rows) > 0 {
-		syn.truncated = rows[0].CandidateCount > int64(len(rows))
+		syn.truncated = rows[0].Truncated
 	} else {
-		// A read that takes nothing reports no count; rows may be left that
-		// it could not take.
-		left, err := s.queries.CountHistoryCheckpointCandidates(ctx, sqlc.CountHistoryCheckpointCandidatesParams{
+		// A read that takes nothing has no row to report on; rows may be left
+		// that it could not take.
+		left, err := s.queries.HasHistoryCheckpointCandidates(ctx, sqlc.HasHistoryCheckpointCandidatesParams{
 			SessionID:            sessionUUID,
 			AfterTurnPosition:    parent.Position.Turn,
 			AfterTurnMessageSeq:  parent.Position.Seq,
@@ -89,7 +89,7 @@ func (s *Service) synthesize(ctx context.Context, cfg TriggerConfig) (synthesis,
 		if err != nil {
 			return synthesis{}, err
 		}
-		syn.truncated = left > 0
+		syn.truncated = left
 	}
 	add := func(message sdk.Message, sources []turn.ContextMessageSource) {
 		syn.request.Messages = append(syn.request.Messages, message)

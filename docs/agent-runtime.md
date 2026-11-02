@@ -263,7 +263,16 @@ copy; its kept rows are named by their copies, and its position mapped to the
 copy's, so a fork's first request does not fold again what the source had
 folded.
 
-Candidate payloads are read within byte bounds. A request reads the active
+Candidate payloads are read within byte bounds. A fold from rows walks its
+candidates oldest first and stops at the end of the call group that crosses
+its bound, so catching up on a long backlog a pass at a time reads each row
+once. Every bounded history read steps through the context-order index
+`idx_bot_history_messages_context_order` one row at a time and measures a row
+(`octet_length(content::text)`) only once it has taken it, so no read detoasts
+a row past its budget. Each step is bounded by the previous row's values, not
+by the session, so a session the planner's statistics put at one row is still
+walked through the index rather than scanned and sorted at every step. A
+request reads the active
 checkpoint; an edit or retry, a rewind and a fork walk its chain for the
 checkpoint they keep. A fold over a run's request
 does not load the raw history span or reread ancestor summaries. Owner fencing and

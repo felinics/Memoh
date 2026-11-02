@@ -159,8 +159,8 @@ func (f *fakeQueries) CompleteCompactionLog(_ context.Context, arg sqlc.Complete
 	return log, nil
 }
 
-func (f *fakeQueries) CountHistoryCheckpointCandidates(_ context.Context, arg sqlc.CountHistoryCheckpointCandidatesParams) (int64, error) {
-	return int64(len(f.candidates(arg.AfterTurnPosition, arg.AfterTurnMessageSeq, arg.KeptIds, arg.BeforeTurnPosition, arg.BeforeTurnMessageSeq))), nil
+func (f *fakeQueries) HasHistoryCheckpointCandidates(_ context.Context, arg sqlc.HasHistoryCheckpointCandidatesParams) (bool, error) {
+	return len(f.candidates(arg.AfterTurnPosition, arg.AfterTurnMessageSeq, arg.KeptIds, arg.BeforeTurnPosition, arg.BeforeTurnMessageSeq)) > 0, nil
 }
 
 func (f *fakeQueries) ListHistoryRowsBySources(_ context.Context, arg sqlc.ListHistoryRowsBySourcesParams) ([]sqlc.ListHistoryRowsBySourcesRow, error) {
@@ -208,8 +208,10 @@ func (f *fakeQueries) ListHistoryCheckpointCandidatesWithinBytes(_ context.Conte
 		if end := ends[group[i]]; end > arg.MaxBytes && (group[i] != crossing || end-arg.MaxBytes > arg.MaxRowBytes) {
 			break
 		}
-		row.CandidateCount = int64(len(candidates))
 		admitted = append(admitted, row)
+	}
+	for i := range admitted {
+		admitted[i].Truncated = len(admitted) < len(candidates)
 	}
 	return admitted, nil
 }

@@ -45,16 +45,12 @@ func (f *pairingQueries) candidates(after messagepkg.HistoryPosition) []sqlc.Lis
 	return rows
 }
 
-func (f *pairingQueries) CountHistoryCheckpointCandidates(_ context.Context, arg sqlc.CountHistoryCheckpointCandidatesParams) (int64, error) {
-	return int64(len(f.candidates(messagepkg.HistoryPosition{Turn: arg.AfterTurnPosition, Seq: arg.AfterTurnMessageSeq}))), nil
+func (f *pairingQueries) HasHistoryCheckpointCandidates(_ context.Context, arg sqlc.HasHistoryCheckpointCandidatesParams) (bool, error) {
+	return len(f.candidates(messagepkg.HistoryPosition{Turn: arg.AfterTurnPosition, Seq: arg.AfterTurnMessageSeq})) > 0, nil
 }
 
 func (f *pairingQueries) ListHistoryCheckpointCandidatesWithinBytes(_ context.Context, arg sqlc.ListHistoryCheckpointCandidatesWithinBytesParams) ([]sqlc.ListHistoryCheckpointCandidatesWithinBytesRow, error) {
-	rows := f.candidates(messagepkg.HistoryPosition{Turn: arg.AfterTurnPosition, Seq: arg.AfterTurnMessageSeq})
-	for i := range rows {
-		rows[i].CandidateCount = int64(len(rows))
-	}
-	return rows, nil
+	return f.candidates(messagepkg.HistoryPosition{Turn: arg.AfterTurnPosition, Seq: arg.AfterTurnMessageSeq}), nil
 }
 
 func (f *pairingQueries) ListHistoryRowsBySources(_ context.Context, arg sqlc.ListHistoryRowsBySourcesParams) ([]sqlc.ListHistoryRowsBySourcesRow, error) {

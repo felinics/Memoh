@@ -98,15 +98,20 @@ func TestHistoryCheckpointCandidateQueries(t *testing.T) {
 		t.Fatalf("candidates = %v, want %v", got, want)
 	}
 
-	count, err := queries.CountHistoryCheckpointCandidates(ctx, sqlc.CountHistoryCheckpointCandidatesParams{
+	left, err := queries.HasHistoryCheckpointCandidates(ctx, sqlc.HasHistoryCheckpointCandidatesParams{
 		SessionID: session, AfterTurnPosition: 1, AfterTurnMessageSeq: 2, KeptIds: []pgtype.UUID{kept},
 		BeforeTurnPosition: beforeTurn, BeforeTurnMessageSeq: beforeSeq,
 	})
 	if err != nil {
-		t.Fatalf("count candidates: %v", err)
+		t.Fatalf("look for candidates: %v", err)
 	}
-	if count != 4 {
-		t.Fatalf("count = %d, want the four candidates", count)
+	if !left {
+		t.Fatal("no candidates reported, want the four")
+	}
+	if left, err = queries.HasHistoryCheckpointCandidates(ctx, sqlc.HasHistoryCheckpointCandidatesParams{
+		SessionID: session, AfterTurnPosition: 4, AfterTurnMessageSeq: 2,
+	}); err != nil || left {
+		t.Fatalf("candidates after the last row = %v (%v), want none", left, err)
 	}
 	var largest int64
 	if err := pool.QueryRow(ctx, `SELECT max(octet_length(content::text)) FROM bot_history_messages WHERE id = ANY($1)`, []pgtype.UUID{kept, second, third, external}).Scan(&largest); err != nil {
@@ -119,8 +124,11 @@ func TestHistoryCheckpointCandidateQueries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bounded read: %v", err)
 	}
-	if len(rows) != 1 || rows[0].ID != kept || rows[0].CandidateCount != 4 {
-		t.Fatalf("bounded read = %+v, want the oldest candidate and the count of all", rows)
+	if len(rows) != 1 || rows[0].ID != kept || !rows[0].Truncated {
+		t.Fatalf("bounded read = %+v, want the oldest candidate, truncated", rows)
+	}
+	if rows, err := queries.ListHistoryCheckpointCandidatesWithinBytes(ctx, all); err != nil || len(rows) == 0 || rows[0].Truncated {
+		t.Fatalf("a read that takes every candidate = %+v (%v), want it untruncated", rows, err)
 	}
 	bounded.MaxBytes = 1
 	if got := read(bounded); len(got) != 0 {

@@ -464,14 +464,14 @@ func TestPostgresHistoryCheckpointBoundsEveryReadPath(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		counted, err := q.CountHistoryCheckpointCandidates(ctx, dbsqlc.CountHistoryCheckpointCandidatesParams{
+		left, err := q.HasHistoryCheckpointCandidates(ctx, dbsqlc.HasHistoryCheckpointCandidatesParams{
 			SessionID: sessionID, AfterTurnPosition: after.Turn, AfterTurnMessageSeq: after.Seq, KeptIds: pgKept,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if int64(len(candidates)) != counted {
-			t.Fatalf("listed %d candidates, counted %d", len(candidates), counted)
+		if left != (len(candidates) > 0) || len(candidates) > 0 && candidates[0].Truncated {
+			t.Fatalf("listed %d candidates (truncated: %v), candidates left: %v", len(candidates), len(candidates) > 0 && candidates[0].Truncated, left)
 		}
 		for _, candidate := range candidates {
 			got.candidates = append(got.candidates, candidate.ID.String())

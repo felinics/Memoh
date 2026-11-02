@@ -21,6 +21,17 @@ func TestPostgresHistoryIndexWalkPreservesAdmission(t *testing.T) {
 	ctx := context.Background()
 	tx := beginPostgresMessageTestTx(t, ctx)
 	setupPostgresMessageTestFixtures(t, ctx, tx)
+	// The index walk can reach a neighboring session; it must stop there.
+	if _, err := tx.Exec(ctx, `WITH neighbors AS (
+      INSERT INTO bot_sessions (id, bot_id, channel_type) VALUES
+        ('00000000-0000-0000-0000-000000074100', $1, 'local'),
+        ('00000000-0000-0000-0000-000000074104', $1, 'local') RETURNING id
+    ) INSERT INTO bot_history_messages
+      (id,bot_id,session_id,role,content,turn_id,turn_position,turn_message_seq,turn_visible)
+      SELECT gen_random_uuid(),$1,id,'user','{"content":"other session"}'::jsonb,
+        gen_random_uuid(),1,0,true FROM neighbors`, postgresMessageTestBotID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO bot_history_messages
   (id,bot_id,session_id,role,content,metadata,created_at,turn_id,turn_position,turn_message_seq,turn_visible)
   SELECT gen_random_uuid(),$1,$2,'assistant',
@@ -46,8 +57,9 @@ func TestPostgresHistoryIndexWalkPreservesAdmission(t *testing.T) {
 						beforeTurn = pgtype.Int8{Int64: before.turn, Valid: true}
 						beforeSeq = pgtype.Int8{Int64: before.seq, Valid: true}
 					}
-					expected, err := tx.Query(ctx, `SELECT id::text FROM (
+					expected, err := tx.Query(ctx, `SELECT id::text, total_rows FROM (
       SELECT m.id,m.turn_position,m.turn_message_seq,m.created_at,
+       COUNT(*) OVER () AS total_rows,
        SUM(octet_length(m.content::text)) OVER
         (ORDER BY m.turn_position DESC,m.turn_message_seq DESC,m.created_at DESC,m.id DESC)
         - octet_length(m.content::text) AS preceding_bytes
@@ -62,9 +74,10 @@ func TestPostgresHistoryIndexWalkPreservesAdmission(t *testing.T) {
 						t.Fatal(err)
 					}
 					var ids []string
+					var totalRows int64
 					for expected.Next() {
 						var id string
-						if err := expected.Scan(&id); err != nil {
+						if err := expected.Scan(&id, &totalRows); err != nil {
 							t.Fatal(err)
 						}
 						ids = append(ids, id)
@@ -86,6 +99,9 @@ func TestPostgresHistoryIndexWalkPreservesAdmission(t *testing.T) {
 					for i, id := range ids {
 						if got[i].ID.String() != id {
 							t.Fatalf("wrong row at %d", i)
+						}
+						if got[i].Truncated != (int64(len(ids)) < totalRows) {
+							t.Fatalf("truncated=%v for %d of %d rows", got[i].Truncated, len(ids), totalRows)
 						}
 					}
 				})
@@ -158,7 +174,7 @@ type historyWindowPlan struct {
 
 func (p historyWindowPlan) visitedRows() (float64, bool) {
 	var rows float64
-	indexed := strings.Contains(p.Index, "visible_session_order")
+	indexed := strings.Contains(p.Index, "context_order")
 	if p.Relation == "bot_history_messages" {
 		rows = p.Rows * p.Loops
 	}
