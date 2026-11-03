@@ -603,8 +603,8 @@
   letter-spacing: normal;
 }
 /* The edit field keeps the bubble's surface and ink, so only the field edge
- * (the Textarea's own contract: engage="hover", surface="brand-tint") says
- * "editing". */
+ * says "editing": none at rest (rest="bare"), the brand-tint edge on focus
+ * (surface="brand-tint") — the Textarea's own contract. */
 [data-chat-content] [data-slot="textarea"].chat-user-bubble-edit {
   background-color: var(--chat-user-bubble);
   color: var(--chat-user-bubble-fg);

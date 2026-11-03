@@ -354,6 +354,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     const container = turnContainerOf(oldTurnId)
     const holdPx = container?.offsetHeight ?? 0
     const rollback = armPin(anchorId)
+    const attemptId = pinAttemptId
     // armPin reads a null anchor as "the current prompt"; a retry has no
     // newer prompt to wait for.
     pinAnchorId = anchorId
@@ -375,7 +376,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
     }
     turnReserves.value = next
     return () => {
-      restartHoldPx = null
+      // A stale rollback (superseded pin, switched session) is a no-op in
+      // armPin; it must not drop a newer restart's hold either.
+      if (attemptId === pinAttemptId) restartHoldPx = null
       rollback()
     }
   }
@@ -683,6 +686,11 @@ export function useChatScroll(options: UseChatScrollOptions) {
     // session's rows.
     pinPending = false
     pinAnchorId = null
+    restartHoldPx = null
+    // A send, edit or retry still in flight in the previous session keeps its
+    // rollback; bumping the attempt voids it, so a late failure there cannot
+    // restore the old session's scroll state onto this one.
+    pinAttemptId++
     // The old session's reserves are meaningless against the new session's
     // turns — clear the map so nothing re-projects onto foreign ids.
     pinnedTurnId = null

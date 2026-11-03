@@ -567,8 +567,11 @@ const isVisible = useElementVisibility(messageEl, {
 
 // The id is a source too: an edit hands this instance a new message under the
 // same render key (chat-pane renderKeyOf), and the scroll anchors must learn
-// the new id as they would from a fresh mount.
-watch([isVisible, toRef(props, 'isScrolling'), () => props.message.id], () => {
+// the new id as they would from a fresh mount — and forget the old one, which
+// no longer has an element: restoring to it would find nothing and give up.
+watch([isVisible, toRef(props, 'isScrolling'), () => props.message.id], (_, previous) => {
+  const previousId = previous?.[2]
+  if (previousId && previousId !== props.message.id) emit('active', false, { id: previousId, top: 0 })
   emit('active', isVisible.value, { id: props.message.id, top: ((messageEl.value?.getBoundingClientRect().top ?? 0) - 48) })
 }, {
   immediate: true,
