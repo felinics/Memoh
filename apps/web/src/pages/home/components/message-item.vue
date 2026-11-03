@@ -525,6 +525,7 @@ import { withLiteralSingleDollars } from '@/utils/markdown-dollar'
 import { resolveUrl } from '../composables/useMediaGallery'
 import { useElementVisibility, useMediaQuery } from '@vueuse/core'
 import { useLongPress } from '../composables/useLongPress'
+import { injectUserEditDraft } from '../composables/useUserEditDraft'
 
 
 enableKatex()
@@ -541,7 +542,7 @@ const codeBlockTheme = computed(() => ({
 const messageEl = useTemplateRef('messageItem')
 const emit = defineEmits<{
   active: [isActive: boolean, { id: string, top: number,  }]
-  editMessage: [messageId: string, text: string, done: (started: boolean) => void]
+  editMessage: [turnId: string, text: string]
   forkMessage: [turnId: string]
   resetAgentSession: []
 }>()
@@ -817,6 +818,27 @@ const bubbleMenuOpen = ref(false)
 const bubbleLongPress = useLongPress(() => { bubbleMenuOpen.value = true })
 const { copyText } = useClipboard()
 
+// The open editor and its draft are mirrored into the chat pane's slot so they
+// survive a remount (see useUserEditDraft). A fresh instance whose turn holds
+// the slot reopens the editor; so does this one when the pane hands the draft
+// back after a save that never started.
+const editSlot = injectUserEditDraft()
+watch(() => editSlot?.value, (entry) => {
+  if (!entry || isEditingUserMessage.value || props.message.role !== 'user') return
+  if (!turnId.value || entry.turnId !== turnId.value) return
+  openEditor(entry.draft)
+}, { immediate: true })
+watch([isEditingUserMessage, editDraft], ([editing, draft]) => {
+  if (!editSlot || !turnId.value) return
+  const entry = editSlot.value
+  if (editing) {
+    if (entry?.turnId === turnId.value) entry.draft = draft
+    else editSlot.value = { turnId: turnId.value, draft }
+  } else if (entry?.turnId === turnId.value) {
+    editSlot.value = null
+  }
+})
+
 async function copyUserText() {
   if (await copyText(userCopyText.value)) toast.success(t('common.copied'))
   else toast.error(t('common.copyFailed'))
@@ -829,16 +851,14 @@ function cancelEdit() {
 
 // The field folds back into the bubble as soon as the edit is dispatched: the
 // chat swaps in the edited prompt in place (chat-pane keeps this component
-// mounted across the swap), and the callback only fires once the whole reply
-// has streamed. An edit that never starts restores the original prompt, so the
-// field reopens with the draft for another try.
+// mounted across the swap). An edit that never starts restores the original
+// prompt, and chat-pane hands the draft back through the edit slot, so the
+// field reopens with it for another try.
 function submitEdit() {
   if (!canSubmitEdit.value || props.message.role !== 'user' || !turnId.value) return
   const draft = editDraft.value.trim()
   cancelEdit()
-  emit('editMessage', turnId.value, draft, (started) => {
-    if (!started) openEditor(draft)
-  })
+  emit('editMessage', turnId.value, draft)
 }
 
 // Element-level script tag for BLOCK typography only — leading (CJK packs
